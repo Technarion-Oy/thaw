@@ -772,7 +772,7 @@ Thaw can expose the active Snowflake connection to external AI clients (Claude D
   ```
 - **Toolbar indicator** — a "MCP: N active" pill appears in the toolbar while sessions are running; clicking it opens the MCP Sessions panel.
 - Gated behind the **MCP Server** feature flag (admin-lockable; **View → Enabled Features → MCP Server**). The flag is enforced in the backend (`StartMCPSession`) using the effective flags, so an IT-admin lock cannot be bypassed via the native menu.
-- **Security note** — the SSE endpoint has **no authentication token**. Any local process that can reach `localhost:<port>` can call the read-only metadata tools and read schema metadata for the connected account. The transport binds only to loopback and validates the `Host` header (mitigating browser-based DNS-rebinding), but does not restrict other local processes on the same machine. Sessions are read-only (metadata browsing) and should be stopped when not in use.
+- **Security** — the listener binds only the loopback interface and rejects requests with a non-loopback `Host` header or a cross-origin `Origin` header, defending against DNS-rebinding attacks from a malicious web page. There is **no authentication token**, so any other local process on the same machine that can reach `localhost:<port>` can still call the read-only metadata tools and read schema metadata for the connected account. Sessions are read-only (metadata browsing) and should be stopped when not in use.
 
 ---
 

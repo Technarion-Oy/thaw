@@ -463,7 +463,13 @@ export default function QueryPage() {
 
   const handleDisconnect = () => {
     const anyRunning = useQueryStore.getState().tabs.some((t) => t.isRunning);
-    const doDisconnect = async () => { await Disconnect(); disconnect(); };
+    const doDisconnect = async () => {
+      await Disconnect(); // backend tears down all MCP sessions (StopAll)
+      disconnect();
+      // Disconnect stops every MCP session server-side; refresh the store so
+      // the toolbar indicator and sessions modal don't show stale "Running".
+      window.dispatchEvent(new Event("thaw:mcp-changed"));
+    };
     if (anyRunning) {
       Modal.confirm({
         title: "Disconnect while query is running?",

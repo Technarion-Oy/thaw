@@ -598,7 +598,7 @@ Open **Tools → Schema Migration…** in the menu bar to deploy local `.sql` DD
 - **Metadata Only execution mode** — read-only schema-browsing tools: `get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`
 - **Copy Config** — one click copies the client config block `{ "mcpServers": { "thaw-<label>": { "url": "http://localhost:<port>/sse" } } }`
 - A toolbar **MCP: N active** indicator opens the panel; toggleable via **View → Enabled Features → MCP Server** (admin-lockable)
-- **Security note** — the SSE endpoint has **no authentication token**. Any local process that can reach `localhost:<port>` can call the read-only metadata tools and read schema metadata for the connected account. The transport binds only to loopback and validates the `Host` header (mitigating browser DNS-rebinding), but does not restrict other local processes. Stop sessions when not in use
+- **Security** — the listener binds only loopback and rejects non-loopback `Host` and cross-origin `Origin` headers (DNS-rebinding defense against malicious web pages). There is **no authentication token**, so any other local process on the same machine that can reach `localhost:<port>` can still call the read-only metadata tools; stop sessions when not in use
 
 ### UI
 - **Drag-and-drop panel layout** — every sidebar panel (Export DDL, File Browser, Git, Object Browser, Administration) has a drag handle at its top edge; drag panels between the left and right sidebars or reorder them within a sidebar; layout is persisted across sessions

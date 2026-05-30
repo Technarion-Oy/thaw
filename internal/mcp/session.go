@@ -34,6 +34,7 @@ type session struct {
 
 	client *snowflake.Client
 	server *mcpsdk.Server
+	ln     net.Listener
 	http   *http.Server
 
 	mu      sync.Mutex
@@ -41,13 +42,15 @@ type session struct {
 }
 
 // newSession constructs a session; it is not started until start() is called.
-func newSession(label, connLabel, mode string, port int, client *snowflake.Client) *session {
+// ln is the already-bound loopback listener the HTTP server will serve on.
+func newSession(label, connLabel, mode string, port int, client *snowflake.Client, ln net.Listener) *session {
 	return &session{
 		label:     label,
 		connLabel: connLabel,
 		mode:      mode,
 		port:      port,
 		client:    client,
+		ln:        ln,
 	}
 }
 
@@ -62,14 +65,10 @@ func (s *session) start() error {
 	}
 
 	s.server = buildServer(s.client, s.mode)
-	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return s.server }, nil)
+	sse := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return s.server }, nil)
+	handler := loopbackGuard(sse)
 
 	addr := fmt.Sprintf("127.0.0.1:%d", s.port)
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return fmt.Errorf("mcp: failed to bind %s: %w", addr, err)
-	}
-
 	s.http = &http.Server{
 		Addr:              addr,
 		Handler:           handler,
@@ -80,7 +79,7 @@ func (s *session) start() error {
 		// ErrServerClosed is the normal result of a graceful Shutdown; any
 		// other error means the server died unexpectedly, so flag it as not
 		// running and log it (the UI otherwise keeps showing "Running").
-		if err := s.http.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := s.http.Serve(s.ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			s.mu.Lock()
 			s.running = false
 			s.mu.Unlock()

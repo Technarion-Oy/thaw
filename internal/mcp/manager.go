@@ -68,13 +68,15 @@ func (m *Manager) Start(label, connLabel, mode string, port int, client *snowfla
 		return SessionInfo{}, fmt.Errorf("mcp: a session named %q is already running", label)
 	}
 
-	assigned, err := m.allocatePortLocked(port)
+	ln, err := m.allocatePortLocked(port)
 	if err != nil {
 		return SessionInfo{}, err
 	}
+	assigned := ln.Addr().(*net.TCPAddr).Port
 
-	s := newSession(label, connLabel, mode, assigned, client)
+	s := newSession(label, connLabel, mode, assigned, client, ln)
 	if err := s.start(); err != nil {
+		_ = ln.Close()
 		return SessionInfo{}, err
 	}
 	m.sessions[label] = s
@@ -125,11 +127,13 @@ func (m *Manager) StopAll() {
 	}
 }
 
-// allocatePortLocked returns a usable port. Must be called with m.mu held.
-// If preferred is non-zero it is validated and returned; otherwise ports are
-// tried sequentially from basePort. A port is usable if it is not already
-// claimed by a session and can be bound on the loopback interface.
-func (m *Manager) allocatePortLocked(preferred int) (int, error) {
+// allocatePortLocked binds and returns a held loopback listener. Must be
+// called with m.mu held. If preferred is non-zero that exact port is bound;
+// otherwise ports are tried sequentially from basePort. Returning the *held*
+// listener (rather than a port number) closes the TOCTOU window where another
+// process could claim the port between the availability check and the real
+// bind in session.start.
+func (m *Manager) allocatePortLocked(preferred int) (net.Listener, error) {
 	inUse := func(p int) bool {
 		for _, s := range m.sessions {
 			if s.port == p {
@@ -141,29 +145,29 @@ func (m *Manager) allocatePortLocked(preferred int) (int, error) {
 
 	if preferred != 0 {
 		if inUse(preferred) {
-			return 0, fmt.Errorf("mcp: port %d is already in use by another session", preferred)
+			return nil, fmt.Errorf("mcp: port %d is already in use by another session", preferred)
 		}
-		if !portFree(preferred) {
-			return 0, fmt.Errorf("mcp: port %d is not available", preferred)
+		ln, err := listenLoopback(preferred)
+		if err != nil {
+			return nil, fmt.Errorf("mcp: port %d is not available", preferred)
 		}
-		return preferred, nil
+		return ln, nil
 	}
 
 	for p := basePort; p < basePort+1000; p++ {
-		if inUse(p) || !portFree(p) {
+		if inUse(p) {
 			continue
 		}
-		return p, nil
+		ln, err := listenLoopback(p)
+		if err != nil {
+			continue
+		}
+		return ln, nil
 	}
-	return 0, fmt.Errorf("mcp: no free port available in range %d-%d", basePort, basePort+1000)
+	return nil, fmt.Errorf("mcp: no free port available in range %d-%d", basePort, basePort+1000)
 }
 
-// portFree reports whether a TCP port can be bound on the loopback interface.
-func portFree(port int) bool {
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
-	if err != nil {
-		return false
-	}
-	_ = ln.Close()
-	return true
+// listenLoopback binds a TCP listener on the loopback interface at port.
+func listenLoopback(port int) (net.Listener, error) {
+	return net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 }

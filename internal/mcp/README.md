@@ -13,7 +13,8 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | File | Purpose |
 |---|---|
 | `manager.go` | `Manager` (multi-session registry), `SessionInfo` type, port allocation, `Start`/`Stop`/`List`/`StopAll` |
-| `session.go` | Per-session `http.Server` + SSE lifecycle (`start`/`stop`/`info`); owns and closes its `*snowflake.Client` |
+| `session.go` | Per-session `http.Server` + SSE lifecycle (`start`/`stop`/`info`); serves on the held loopback listener and owns/closes its `*snowflake.Client` |
+| `security.go` | `loopbackGuard` middleware — rejects non-loopback `Host` and cross-origin `Origin` headers (DNS-rebinding defense) |
 | `server.go` | `buildServer(client, mode)` — constructs the MCP server and registers tools |
 | `tools.go` | Tool input structs + `registerTools`; `jsonResult`/`textResult` content helpers |
 | `mcp_test.go` | SSE round-trip test (external client lists tools) + port-allocation test |
@@ -49,7 +50,9 @@ A session's SSE endpoint is `http://localhost:<port>/sse`; `GetMCPSessionConfig`
 
 ## Security
 
-The SSE endpoint has **no authentication token** — any local process that can reach `localhost:<port>` (default range from `9100`) can call the read-only metadata tools and read schema metadata for the connected account. The Go MCP SDK's SSE handler binds only to the loopback interface and validates the `Host` header against loopback, which mitigates DNS-rebinding attacks from a browser, but it does **not** prevent other local processes on the same machine from connecting. Sessions are read-only (metadata browsing only) and must be started explicitly; stop them when not in use.
+The listener binds only the loopback interface (`127.0.0.1`) and the `loopbackGuard` middleware (`security.go`) rejects any request whose `Host` header is not loopback or whose `Origin` header is cross-origin — this defends against DNS-rebinding attacks where a malicious web page the user has open targets `http://localhost:<port>/sse`.
+
+The endpoint has **no authentication token**, however, so any *local process* on the same machine that can reach `localhost:<port>` (default range from `9100`) can still call the read-only metadata tools and read schema metadata for the connected account. Sessions are read-only (metadata browsing only) and must be started explicitly; stop them when not in use. A per-session bearer token is a candidate hardening step for a later milestone.
 
 ## Gotchas
 
