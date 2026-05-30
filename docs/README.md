@@ -4,6 +4,20 @@ API and module documentation for the Thaw Snowflake desktop application.
 
 ---
 
+## Start here
+
+| Guide | Purpose |
+|-------|---------|
+| [Architecture](concepts/architecture.md) | Wails IPC bridge, package map, frontend layout, data flow |
+| [Onboarding](concepts/onboarding.md) | From clone to first change |
+| [Patterns](concepts/patterns.md) | Thin delegators, IPC methods, feature flags, stores, the SQL editor |
+| [Gotchas](concepts/gotchas.md) | Non-obvious traps to know before debugging |
+| [Testing](concepts/testing.md) | Unit, race, frontend, and integration tests |
+
+For workflow rules (branching, commits, PRs, docs) see [`CONTRIBUTING.md`](../CONTRIBUTING.md). For per-module detail, read the `README.md` inside each `internal/<pkg>/` and `frontend/src/<dir>/` folder. The sections below are the **generated** API reference (do not hand-edit).
+
+---
+
 ## Backend (Go)
 
 | Package | Description |

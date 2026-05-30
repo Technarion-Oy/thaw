@@ -2,6 +2,14 @@
 
 Thaw is a native desktop Snowflake manager built with **Wails v2** (Go backend + React/TypeScript frontend).
 
+## Documentation map
+
+Read the relevant doc before working in an area:
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — branching, commits, PRs, the docs-with-code rule, build/test/lint commands.
+- [`docs/concepts/`](docs/concepts/) — [architecture](docs/concepts/architecture.md), [onboarding](docs/concepts/onboarding.md), [patterns](docs/concepts/patterns.md), [gotchas](docs/concepts/gotchas.md), [testing](docs/concepts/testing.md).
+- `internal/<pkg>/README.md` and `frontend/src/<dir>/README.md` — per-module reference for every backend package and frontend folder.
+- [`FEATURES.md`](FEATURES.md) — full feature catalogue.
+
 ## Codebase Navigation & Architecture
 
 Before proposing new features, refactoring, or writing new files, you MUST consult the codebase semantic map.

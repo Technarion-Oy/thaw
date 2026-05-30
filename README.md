@@ -6,6 +6,22 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 
 ---
 
+## Documentation
+
+This README is the front door. Deeper documentation is organized as follows:
+
+| Where | What |
+|-------|------|
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to branch, commit, open PRs, and write code & docs |
+| [`docs/concepts/`](docs/concepts/) | High-level guides: [architecture](docs/concepts/architecture.md), [onboarding](docs/concepts/onboarding.md), [patterns](docs/concepts/patterns.md), [gotchas](docs/concepts/gotchas.md), [testing](docs/concepts/testing.md) |
+| `internal/<pkg>/README.md` | Per-package reference for every backend domain (e.g. [`internal/snowflake`](internal/snowflake/README.md), [`internal/app`](internal/app/README.md)) |
+| `frontend/src/<dir>/README.md` | Per-folder reference for every frontend area (e.g. [`editor`](frontend/src/components/editor/README.md), [`store`](frontend/src/store/README.md)) |
+| [`FEATURES.md`](FEATURES.md) | The complete feature catalogue |
+| [`docs/`](docs/README.md) (`make docs`) | Generated API reference (TypeDoc + gomarkdoc), browsable via docsify |
+| [`CLAUDE.md`](CLAUDE.md) / [`GEMINI.md`](GEMINI.md) | LLM-agent guides |
+
+---
+
 ## Features
 
 ### Snowflake connectivity
@@ -1125,12 +1141,14 @@ Workflow: `.github/workflows/gosec.yml`
 
 ## Development workflow
 
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full workflow (branching, commits, PRs, the docs-with-code rule, and quality gates) and [`docs/concepts/patterns.md`](docs/concepts/patterns.md) for engineering patterns. The essentials:
+
 - **Backend changes** — edit any `.go` file; `wails dev` recompiles automatically.
 - **Frontend changes** — edit files under `frontend/src/`; Vite HMR updates the UI instantly.
 - **Adding a new backend method** — add the method (on `*App`) to the `internal/app/<domain>.go` file matching its domain, then run `wails generate module` to regenerate the JS bindings in `frontend/wailsjs/`.
-- **Adding a new Go package** — place it under `internal/` and import it from the relevant `internal/app/<domain>.go` file.
-- **Adding a native menu item** — extend `buildMenu` in `main.go`; emit a Wails event from the callback and listen with `EventsOn` in the relevant frontend component.
-- **GoDoc coverage** — every exported identifier and every significant unexported function carries a GoDoc comment; run `go doc ./...` or hover in any LSP-enabled editor to browse them.
+- **Adding a new Go package** — place it under `internal/`, give it a `README.md`, and import it from the relevant `internal/app/<domain>.go` file.
+- **Adding a native menu item** — extend `buildMenu` in `internal/app/menu.go`; emit a Wails event from the callback and listen with `EventsOn` in the relevant frontend component.
+- **GoDoc coverage** — every exported identifier carries a GoDoc comment; run `go doc ./...` or hover in any LSP-enabled editor to browse them.
 
 ---
 
