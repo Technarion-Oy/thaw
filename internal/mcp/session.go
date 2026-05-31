@@ -31,6 +31,7 @@ type session struct {
 	connLabel string
 	mode      string
 	port      int
+	token     string
 
 	client *snowflake.Client
 	server *mcpsdk.Server
@@ -44,12 +45,14 @@ type session struct {
 
 // newSession constructs a session; it is not started until start() is called.
 // ln is the already-bound loopback listener the HTTP server will serve on;
-// mgr is the owning Manager, used to self-remove if the server dies.
-func newSession(mgr *Manager, label, connLabel, mode string, port int, client *snowflake.Client, ln net.Listener) *session {
+// mgr is the owning Manager, used to self-remove if the server dies. token is
+// the per-session secret required to open the SSE GET (see tokenGuard).
+func newSession(mgr *Manager, label, connLabel, mode, token string, port int, client *snowflake.Client, ln net.Listener) *session {
 	return &session{
 		label:     label,
 		connLabel: connLabel,
 		mode:      mode,
+		token:     token,
 		port:      port,
 		client:    client,
 		ln:        ln,
@@ -69,7 +72,9 @@ func (s *session) start() error {
 
 	s.server = buildServer(s.client, s.mode)
 	sse := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return s.server }, nil)
-	handler := loopbackGuard(sse)
+	// loopbackGuard (DNS-rebinding defense) runs first, then tokenGuard
+	// authenticates the session-creating GET against the per-session token.
+	handler := loopbackGuard(tokenGuard(s.token, sse))
 
 	addr := fmt.Sprintf("127.0.0.1:%d", s.port)
 	s.http = &http.Server{

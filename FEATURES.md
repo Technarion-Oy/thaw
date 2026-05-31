@@ -766,13 +766,13 @@ Thaw can expose the active Snowflake connection to external AI clients (Claude D
 - **Multi-session** — open **View → MCP Sessions…** to start one or more independent servers. Each session is bound to its own dedicated Snowflake connection (inheriting the current connect parameters) and listens on its own localhost port, auto-assigned from `9100` (a port can be overridden). Because each session opens a *separate* Snowflake connection, interactive authenticators (e.g. `externalbrowser`) may re-prompt when a session starts, and every running session consumes one additional Snowflake session.
 - **Lifecycle** — sessions start and stop only on explicit user action; all sessions stop cleanly when the app quits. There is no auto-start on launch. Sessions are **not persisted** — they exist only for the lifetime of the running app and are not restored on the next launch.
 - **Execution mode** — the foundation milestone ships **Metadata Only**, exposing read-only schema-browsing tools: `get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, and `get_table_foreign_keys`.
-- **Copy Config** — each running session offers a one-click copy of the client configuration block:
+- **Copy Config** — each running session offers a one-click copy of the client configuration block. The embedded URL carries the session's auth token, so the copied block is a **secret** — treat it like a password:
   ```json
-  { "mcpServers": { "thaw-<label>": { "url": "http://localhost:<port>/sse" } } }
+  { "mcpServers": { "thaw-<label>": { "url": "http://localhost:<port>/sse?token=<token>" } } }
   ```
 - **Toolbar indicator** — a "MCP: N active" pill appears in the toolbar while sessions are running; clicking it opens the MCP Sessions panel.
 - Gated behind the **MCP Server** feature flag (admin-lockable; **View → Enabled Features → MCP Server**). The flag is enforced in the backend (`StartMCPSession`) using the effective flags, so an IT-admin lock cannot be bypassed via the native menu.
-- **Security** — the listener binds only the loopback interface and rejects requests with a non-loopback `Host` header or a cross-origin `Origin` header, defending against DNS-rebinding attacks from a malicious web page. There is **no authentication token**, so any other local process on the same machine that can reach `localhost:<port>` can still call the read-only metadata tools and read schema metadata for the connected account. Sessions are read-only (metadata browsing) and should be stopped when not in use.
+- **Security** — the listener binds only the loopback interface and rejects requests with a non-loopback `Host` header or a cross-origin `Origin` header, defending against DNS-rebinding attacks from a malicious web page. Each session additionally has a **per-session auth token** (crypto-random) required to open the SSE connection, presented as an `Authorization: Bearer` header or a `?token=…` query parameter — so another local process cannot read schema metadata without the token from the copied config. The token defends against non-admin local users only; a local administrator can bypass it (process memory, loopback capture). Sessions are read-only (metadata browsing) and should be stopped when not in use.
 
 ---
 

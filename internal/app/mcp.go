@@ -81,23 +81,24 @@ func (a *App) ListMCPSessions() []mcp.SessionInfo {
 }
 
 // GetMCPSessionConfig returns the MCP client configuration JSON block for the
-// named running session, suitable for pasting into an external MCP client.
+// named running session, suitable for pasting into an external MCP client. The
+// embedded URL carries the session's per-session auth token, so the returned
+// block is a secret — it must be treated like a credential.
 func (a *App) GetMCPSessionConfig(label string) (string, error) {
-	for _, s := range a.mcpManager.List() {
-		if s.Label == label {
-			cfg := map[string]any{
-				"mcpServers": map[string]any{
-					"thaw-" + s.Label: map[string]any{
-						"url": s.URL,
-					},
-				},
-			}
-			b, err := json.MarshalIndent(cfg, "", "  ")
-			if err != nil {
-				return "", err
-			}
-			return string(b), nil
-		}
+	url, ok := a.mcpManager.AuthenticatedURL(label)
+	if !ok {
+		return "", fmt.Errorf("mcp: no session named %q", label)
 	}
-	return "", fmt.Errorf("mcp: no session named %q", label)
+	cfg := map[string]any{
+		"mcpServers": map[string]any{
+			"thaw-" + label: map[string]any{
+				"url": url,
+			},
+		},
+	}
+	b, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }

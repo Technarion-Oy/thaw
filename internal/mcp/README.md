@@ -14,7 +14,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 |---|---|
 | `manager.go` | `Manager` (multi-session registry), `SessionInfo` type, port allocation, `Start`/`Stop`/`List`/`StopAll` |
 | `session.go` | Per-session `http.Server` + SSE lifecycle (`start`/`stop`/`info`); serves on the held loopback listener and owns/closes its `*snowflake.Client`. If the serve goroutine exits unexpectedly it closes the client and self-removes from the `Manager` (`removeIfPresent`) so no dead row or leaked connection lingers |
-| `security.go` | `loopbackGuard` middleware — rejects non-loopback `Host` and cross-origin `Origin` headers (DNS-rebinding defense) |
+| `security.go` | `loopbackGuard` middleware (rejects non-loopback `Host`/cross-origin `Origin` — DNS-rebinding defense), `tokenGuard` middleware (per-session token auth on the SSE GET), and `newSessionToken` (crypto-random token) |
 | `server.go` | `buildServer(client, mode)` — constructs the MCP server and registers tools |
 | `tools.go` | Tool input structs + `registerTools`; `jsonResult`/`textResult` content helpers |
 | `mcp_test.go` | SSE round-trip test (external client lists tools) + port-allocation test |
@@ -48,7 +48,7 @@ The `*App` delegators in `internal/app/mcp.go` (`StartMCPSession`, `StopMCPSessi
 
 Each session opens its **own** `snowflake.NewClient` (a separate Snowflake session, independent of the UI tab sessions). With interactive authenticators (e.g. `externalbrowser`) starting a session may therefore trigger a fresh auth prompt, and every running session consumes one additional Snowflake session.
 
-A session's SSE endpoint is `http://localhost:<port>/sse`; `GetMCPSessionConfig` formats the standard client config block `{"mcpServers": {"thaw-<label>": {"url": "..."}}}`.
+A session's SSE endpoint is `http://localhost:<port>/sse`; `GetMCPSessionConfig` formats the standard client config block `{"mcpServers": {"thaw-<label>": {"url": "..."}}}`, where the URL carries the per-session token (`?token=…`). `SessionInfo.URL` is the token-free endpoint (for display); the token is surfaced only through `Manager.AuthenticatedURL` (used by `GetMCPSessionConfig`) so it is not broadcast in every `List()` snapshot.
 
 On teardown (`stop`/`StopAll`, fired by `Disconnect` and app `shutdown`), `http.Shutdown` runs with a 5s deadline and the client is then closed unconditionally. SSE connections are long-lived/hijacked and are not awaited by `Shutdown`, so a tool call in flight at teardown can hit a closed client and error out — this is expected on teardown.
 
@@ -56,7 +56,9 @@ On teardown (`stop`/`StopAll`, fired by `Disconnect` and app `shutdown`), `http.
 
 The listener binds only the loopback interface (`127.0.0.1`) and the `loopbackGuard` middleware (`security.go`) rejects any request whose `Host` header is not loopback or whose `Origin` header is cross-origin — this defends against DNS-rebinding attacks where a malicious web page the user has open targets `http://localhost:<port>/sse`.
 
-The endpoint has **no authentication token**, however, so any *local process* on the same machine that can reach `localhost:<port>` (default range from `9100`) can still call the read-only metadata tools and read schema metadata for the connected account. Sessions are read-only (metadata browsing only) and must be started explicitly; stop them when not in use. Adding a per-session token to close this local-process gap is tracked in [#350](https://github.com/Technarion-Oy/thaw/issues/350).
+Each session also has a **per-session auth token** (`tokenGuard`, `security.go`). The token (32 crypto-random bytes, base64url) is required to open the session-creating SSE `GET`, presented either as `Authorization: Bearer <token>` or a `?token=…` query parameter. The follow-up message `POST`s are **not** separately token-checked: the go-sdk builds the message endpoint via `req.URL.Parse("?sessionid=…")`, which replaces the query string and so drops the token, but the `sessionid` it issues is crypto-random and delivered only over the authenticated `GET` stream — a process that cannot pass the `GET` token never learns a valid `sessionid`, so it can neither open a session nor post into one. This closes the local-process gap from [#350](https://github.com/Technarion-Oy/thaw/issues/350).
+
+The token defends against other **non-admin** local processes/users only. A local administrator (or `SYSTEM`) can read the app's process memory, read files regardless of ACL, and capture loopback traffic, so they are outside the boundary this token can enforce. Sessions are read-only (metadata browsing only), must be started explicitly, and should be stopped when not in use; the copied client configuration embeds the token and must be treated as a secret.
 
 ## Gotchas
 

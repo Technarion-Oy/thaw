@@ -74,7 +74,13 @@ func (m *Manager) Start(label, connLabel, mode string, port int, client *snowfla
 	}
 	assigned := ln.Addr().(*net.TCPAddr).Port
 
-	s := newSession(m, label, connLabel, mode, assigned, client, ln)
+	token, err := newSessionToken()
+	if err != nil {
+		_ = ln.Close()
+		return SessionInfo{}, fmt.Errorf("mcp: failed to generate session token: %w", err)
+	}
+
+	s := newSession(m, label, connLabel, mode, token, assigned, client, ln)
 	if err := s.start(); err != nil {
 		_ = ln.Close()
 		return SessionInfo{}, err
@@ -121,6 +127,23 @@ func (m *Manager) List() []SessionInfo {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Label < out[j].Label })
 	return out
+}
+
+// AuthenticatedURL returns the SSE endpoint URL for the named session with its
+// per-session token embedded as a query parameter, suitable for handing to an
+// MCP client. The bare SessionInfo.URL is token-free (for display); the token
+// is surfaced only here so it is not broadcast in every List() snapshot. The
+// token is immutable after the session is created, so reading it under m.mu
+// (without s.mu) is safe.
+func (m *Manager) AuthenticatedURL(label string) (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.sessions[label]
+	if !ok {
+		return "", false
+	}
+	return fmt.Sprintf("http://localhost:%d/sse?token=%s", s.port, s.token), true
 }
 
 // StopAll stops every session. It is called on application shutdown and on

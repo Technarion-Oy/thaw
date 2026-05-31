@@ -144,12 +144,14 @@ export default function MCPSessionsModal({ onClose }: Props) {
         />
       )}
 
-      {/* Residual security risk — the SSE endpoint has no auth token, so any
-          local process can read schema metadata while a session runs. */}
+      {/* The SSE endpoint is protected by a per-session token, so the copied
+          client configuration is a secret. A local administrator can still
+          bypass this (process memory, loopback capture), so stop sessions when
+          you're done. */}
       <Alert
         type="warning"
         showIcon
-        message="A running session exposes your connection's schema metadata over an unauthenticated localhost port. Any local process on this machine can read it. Stop sessions when you're done."
+        message="A running session exposes your connection's schema metadata to any MCP client holding this session's token. The copied configuration contains that token — treat it like a password and don't share it. Stop sessions when you're done."
         style={{ marginBottom: 12 }}
       />
 
@@ -241,7 +243,9 @@ export default function MCPSessionsModal({ onClose }: Props) {
                   {s.connectionLabel} · port {s.port} · {s.executionMode}
                 </div>
                 <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                  <Text code copyable style={{ fontSize: 11 }}>{s.url}</Text>
+                  {/* Token-free endpoint, shown for reference only. Use "Copy
+                      client configuration" to get the URL with the auth token. */}
+                  <Text code style={{ fontSize: 11 }}>{s.url}</Text>
                 </div>
               </div>
               <Space>
