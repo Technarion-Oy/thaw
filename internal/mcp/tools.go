@@ -60,19 +60,19 @@ type ddlInput struct {
 // reaching the GET_DDL kind parameter, even though single-quote escaping in
 // GetObjectDDL provides defense-in-depth.
 var allowedDDLKinds = map[string]bool{
-	"TABLE":          true,
-	"VIEW":           true,
-	"FUNCTION":       true,
-	"PROCEDURE":      true,
-	"STREAM":         true,
-	"TASK":           true,
-	"PIPE":           true,
-	"SEQUENCE":       true,
-	"FILE_FORMAT":    true,
-	"STAGE":          true,
-	"SCHEMA":         true,
-	"DATABASE":       true,
-	"MASKING_POLICY": true,
+	"TABLE":             true,
+	"VIEW":              true,
+	"FUNCTION":          true,
+	"PROCEDURE":         true,
+	"STREAM":            true,
+	"TASK":              true,
+	"PIPE":              true,
+	"SEQUENCE":          true,
+	"FILE_FORMAT":       true,
+	"STAGE":             true,
+	"SCHEMA":            true,
+	"DATABASE":          true,
+	"MASKING_POLICY":    true,
 	"ROW_ACCESS_POLICY": true,
 }
 

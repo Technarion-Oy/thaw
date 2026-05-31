@@ -28,6 +28,13 @@ const (
 	ExecutionModeMetadata = "metadata"
 )
 
+// validModes is the set of accepted execution modes. Start rejects any
+// mode not in this set so a session cannot report a capability it does
+// not actually enforce.
+var validModes = map[string]bool{
+	ExecutionModeMetadata: true,
+}
+
 // SessionInfo is the serializable view of a session exposed to the frontend.
 // Sessions are removed from the Manager map on stop/unexpected failure, so
 // List() only ever returns running sessions — there is no "Stopped" state.
@@ -60,6 +67,9 @@ func (m *Manager) Start(label, connLabel, mode string, port int, client *snowfla
 	}
 	if mode == "" {
 		mode = ExecutionModeMetadata
+	}
+	if !validModes[mode] {
+		return SessionInfo{}, fmt.Errorf("mcp: unsupported execution mode %q", mode)
 	}
 
 	m.mu.Lock()
