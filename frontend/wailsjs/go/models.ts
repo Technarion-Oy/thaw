@@ -1220,7 +1220,6 @@ export namespace mcp {
 	    label: string;
 	    port: number;
 	    executionMode: string;
-	    running: boolean;
 	    url: string;
 	    connectionLabel: string;
 	
@@ -1233,7 +1232,6 @@ export namespace mcp {
 	        this.label = source["label"];
 	        this.port = source["port"];
 	        this.executionMode = source["executionMode"];
-	        this.running = source["running"];
 	        this.url = source["url"];
 	        this.connectionLabel = source["connectionLabel"];
 	    }

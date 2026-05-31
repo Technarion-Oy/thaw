@@ -12,7 +12,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 
 | File | Purpose |
 |---|---|
-| `manager.go` | `Manager` (multi-session registry), `SessionInfo` type, port allocation, `Start`/`Stop`/`List`/`StopAll` |
+| `manager.go` | `Manager` (multi-session registry), `SessionInfo` type (no `Running` field — sessions are removed from the map on stop, so `List()` only returns running sessions), port allocation, `Start`/`Stop`/`List`/`StopAll` |
 | `session.go` | Per-session `http.Server` + SSE lifecycle (`start`/`stop`/`info`); serves on the held loopback listener and owns/closes its `*snowflake.Client`. If the serve goroutine exits unexpectedly it closes the client and self-removes from the `Manager` (`removeIfPresent`) so no dead row or leaked connection lingers |
 | `security.go` | `loopbackGuard` middleware (rejects non-loopback `Host`/cross-origin `Origin` — DNS-rebinding defense), `tokenGuard` middleware (per-session token auth on the SSE GET), and `newSessionToken` (crypto-random token) |
 | `server.go` | `buildServer(client, mode)` — constructs the MCP server and registers tools |
@@ -40,7 +40,7 @@ Ports auto-assign sequentially from `basePort` (`9100`) up to `basePort+1000`. `
 
 ### Tools (registered in `tools.go`)
 
-`get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`. Each delegates to the session's `*snowflake.Client` and returns its payload as indented-JSON text content (`get_ddl` returns raw text).
+`get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`. Each delegates to the session's `*snowflake.Client` and returns its payload as indented-JSON text content (`get_ddl` returns raw text). The `get_ddl` tool validates the `kind` parameter against `allowedDDLKinds` before forwarding to `GetObjectDDL`.
 
 ## Patterns & integration
 
@@ -48,7 +48,7 @@ The `*App` delegators in `internal/app/mcp.go` (`StartMCPSession`, `StopMCPSessi
 
 Each session opens its **own** `snowflake.NewClient` (a separate Snowflake session, independent of the UI tab sessions). With interactive authenticators (e.g. `externalbrowser`) starting a session may therefore trigger a fresh auth prompt, and every running session consumes one additional Snowflake session.
 
-A session's SSE endpoint is `http://localhost:<port>/sse`; `GetMCPSessionConfig` formats the standard client config block `{"mcpServers": {"thaw-<label>": {"url": "..."}}}`, where the URL carries the per-session token (`?token=…`). `SessionInfo.URL` is the token-free endpoint (for display); the token is surfaced only through `Manager.AuthenticatedURL` (used by `GetMCPSessionConfig`) so it is not broadcast in every `List()` snapshot.
+A session's SSE endpoint is `http://127.0.0.1:<port>/sse`; `GetMCPSessionConfig` formats the standard client config block `{"mcpServers": {"thaw-<label>": {"url": "..."}}}`, where the URL carries the per-session token (`?token=…`). `SessionInfo.URL` is the token-free endpoint (for display); the token is surfaced only through `Manager.AuthenticatedURL` (used by `GetMCPSessionConfig`) so it is not broadcast in every `List()` snapshot. Both URLs use `127.0.0.1` (not `localhost`) to match the listener's bind address.
 
 On teardown (`stop`/`StopAll`, fired by `Disconnect` and app `shutdown`), `http.Shutdown` runs with a 5s deadline and the client is then closed unconditionally. SSE connections are long-lived/hijacked and are not awaited by `Shutdown`, so a tool call in flight at teardown can hit a closed client and error out — this is expected on teardown.
 

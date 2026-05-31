@@ -28,7 +28,9 @@ export default function MCPIndicator() {
     return () => window.removeEventListener("thaw:mcp-changed", onChange);
   }, [refresh]);
 
-  const active = sessions.filter((s) => s.running).length;
+  // Sessions in the list are always running — stopped sessions are removed
+  // from the Manager map before List() returns.
+  const active = sessions.length;
   if (!enabled || active === 0) return null;
 
   return (

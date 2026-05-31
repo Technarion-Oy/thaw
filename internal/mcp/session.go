@@ -99,6 +99,9 @@ func (s *session) start() error {
 		}
 	}()
 
+	// Set running under the same s.mu lock that the goroutine's stop() call
+	// contends for, so stop() blocks until this flag is set. This guarantees
+	// stop() always observes running == true if the goroutine races here.
 	s.running = true
 	return nil
 }
@@ -144,8 +147,7 @@ func (s *session) info() SessionInfo {
 		Label:           s.label,
 		Port:            s.port,
 		ExecutionMode:   s.mode,
-		Running:         s.running,
-		URL:             fmt.Sprintf("http://localhost:%d/sse", s.port),
+		URL:             fmt.Sprintf("http://127.0.0.1:%d/sse", s.port),
 		ConnectionLabel: s.connLabel,
 	}
 }

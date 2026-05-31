@@ -224,6 +224,21 @@ func TestAuthenticatedSSERoundTrip(t *testing.T) {
 	}
 }
 
+// TestAllowedDDLKinds verifies the kind whitelist accepts standard Snowflake
+// object kinds and rejects unknown/malicious strings.
+func TestAllowedDDLKinds(t *testing.T) {
+	for _, kind := range []string{"TABLE", "VIEW", "FUNCTION", "PROCEDURE", "STAGE"} {
+		if !allowedDDLKinds[kind] {
+			t.Errorf("expected %q to be allowed", kind)
+		}
+	}
+	for _, kind := range []string{"", "EVIL", "TABLE'; DROP", "table"} {
+		if allowedDDLKinds[kind] {
+			t.Errorf("expected %q to be rejected", kind)
+		}
+	}
+}
+
 // TestJSONResultShaping verifies the tool result helpers wrap payloads as a
 // single text-content block carrying the indented-JSON encoding. The tool
 // handlers all funnel their output through jsonResult/textResult, so this

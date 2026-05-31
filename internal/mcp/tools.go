@@ -13,6 +13,8 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -51,6 +53,27 @@ type ddlInput struct {
 	Kind      string `json:"kind" jsonschema:"the object kind, e.g. TABLE, VIEW, FUNCTION"`
 	Name      string `json:"name" jsonschema:"the object name"`
 	Arguments string `json:"arguments,omitempty" jsonschema:"argument signature for overloaded routines, if any"`
+}
+
+// allowedDDLKinds is the whitelist of Snowflake object kinds accepted by the
+// get_ddl tool. Restricting to known kinds prevents untrusted input from
+// reaching the GET_DDL kind parameter, even though single-quote escaping in
+// GetObjectDDL provides defense-in-depth.
+var allowedDDLKinds = map[string]bool{
+	"TABLE":          true,
+	"VIEW":           true,
+	"FUNCTION":       true,
+	"PROCEDURE":      true,
+	"STREAM":         true,
+	"TASK":           true,
+	"PIPE":           true,
+	"SEQUENCE":       true,
+	"FILE_FORMAT":    true,
+	"STAGE":          true,
+	"SCHEMA":         true,
+	"DATABASE":       true,
+	"MASKING_POLICY": true,
+	"ROW_ACCESS_POLICY": true,
 }
 
 // registerTools wires the proof-of-life schema-browsing tools onto srv. All
@@ -120,6 +143,9 @@ func registerTools(srv *mcpsdk.Server, client *snowflake.Client) {
 		Name:        "get_ddl",
 		Description: "Return the CREATE DDL for an object.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in ddlInput) (*mcpsdk.CallToolResult, any, error) {
+		if !allowedDDLKinds[strings.ToUpper(in.Kind)] {
+			return nil, nil, fmt.Errorf("unsupported object kind %q", in.Kind)
+		}
 		ddl, err := client.GetObjectDDL(ctx, in.Database, in.Schema, in.Kind, in.Name, in.Arguments)
 		if err != nil {
 			return nil, nil, err

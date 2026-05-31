@@ -292,7 +292,7 @@ func DefaultFeatureFlags() FeatureFlags {
 		CrossTabSearch:             true,
 		FileWatcher:                true,
 		ColumnManagement:           true,
-		MCPServer:                  true,
+		MCPServer:                  false,
 	}
 }
 
@@ -357,7 +357,9 @@ func MigrateFlags(f FeatureFlags) FeatureFlags {
 	setIfZero(&f.DbtProjectBrowser, defaults.DbtProjectBrowser)
 	// Version 11 → 12: ColumnManagement added; defaults to true.
 	setIfZero(&f.ColumnManagement, defaults.ColumnManagement)
-	// Version 12 → 13: MCPServer added; defaults to true.
+	// Version 12 → 13: MCPServer added; defaults to false (opt-in).
+	// setIfZero is a no-op here because the default is false (the zero
+	// value), but kept for consistency with the migration pattern.
 	setIfZero(&f.MCPServer, defaults.MCPServer)
 	f.Version = flagsVersion
 	return f

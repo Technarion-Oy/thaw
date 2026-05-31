@@ -29,11 +29,12 @@ const (
 )
 
 // SessionInfo is the serializable view of a session exposed to the frontend.
+// Sessions are removed from the Manager map on stop/unexpected failure, so
+// List() only ever returns running sessions — there is no "Stopped" state.
 type SessionInfo struct {
 	Label           string `json:"label"`
 	Port            int    `json:"port"`
 	ExecutionMode   string `json:"executionMode"`
-	Running         bool   `json:"running"`
 	URL             string `json:"url"`
 	ConnectionLabel string `json:"connectionLabel"`
 }
@@ -143,7 +144,7 @@ func (m *Manager) AuthenticatedURL(label string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	return fmt.Sprintf("http://localhost:%d/sse?token=%s", s.port, s.token), true
+	return fmt.Sprintf("http://127.0.0.1:%d/sse?token=%s", s.port, s.token), true
 }
 
 // StopAll stops every session. It is called on application shutdown and on

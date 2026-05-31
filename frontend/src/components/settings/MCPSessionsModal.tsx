@@ -235,9 +235,7 @@ export default function MCPSessionsModal({ onClose }: Props) {
               <div style={{ minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <Text strong style={{ fontSize: 13 }}>{s.label}</Text>
-                  <Tag color={s.running ? "green" : "default"}>
-                    {s.running ? "Running" : "Stopped"}
-                  </Tag>
+                  <Tag color="green">Running</Tag>
                 </div>
                 <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
                   {s.connectionLabel} · port {s.port} · {s.executionMode}
