@@ -1,10 +1,10 @@
 # internal/mcp
 
-> Read-only Model Context Protocol (MCP) servers that expose the active Snowflake connection to external AI clients over a local SSE/HTTP transport.
+> Model Context Protocol (MCP) servers that expose the active Snowflake connection to external AI clients over a local SSE/HTTP transport, with configurable execution modes and an EXPLAIN precompilation safety gate.
 
 ## Responsibility
 
-Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Client`, on `localhost`. A `Manager` owns the set of running sessions; each session runs an `http.Server` serving the Go MCP SDK's SSE handler and registers schema-browsing and SQL diagnostics tools. Sessions are started and stopped only on explicit user action (View → MCP Sessions); none start automatically.
+Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Client`, on `localhost`. A `Manager` owns the set of running sessions; each session runs an `http.Server` serving the Go MCP SDK's SSE handler and registers schema-browsing, SQL diagnostics, and (optionally) SQL execution tools. Sessions are started and stopped only on explicit user action (View → MCP Sessions); none start automatically.
 
 `internal/mcp` must **not** import `internal/app` — the dependency is one-way (`App` holds a `*mcp.Manager`). All Snowflake access goes through the `*snowflake.Client` handed to each session, mirroring the isolated per-tab session pattern.
 
@@ -12,13 +12,16 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 
 | File | Purpose |
 |---|---|
-| `manager.go` | `Manager` (multi-session registry), `SessionInfo` type (no `Running` field — sessions are removed from the map on stop, so `List()` only returns running sessions), port allocation, `Start`/`Stop`/`List`/`StopAll` |
+| `manager.go` | `Manager` (multi-session registry), `SessionInfo`/`SessionConfig` types, execution mode constants, port allocation, `Start`/`Stop`/`List`/`StopAll` |
 | `session.go` | Per-session `http.Server` + SSE lifecycle (`start`/`stop`/`info`); serves on the held loopback listener and owns/closes its `*snowflake.Client`. If the serve goroutine exits unexpectedly it closes the client and self-removes from the `Manager` (`removeIfPresent`) so no dead row or leaked connection lingers |
 | `security.go` | `loopbackGuard` middleware (rejects non-loopback `Host`/cross-origin `Origin` — DNS-rebinding defense), `tokenGuard` middleware (per-session token auth on the SSE GET), and `newSessionToken` (crypto-random token) |
-| `server.go` | `buildServer(client, mode)` — constructs the MCP server and registers tools |
+| `server.go` | `buildServer(client, mode, cfg)` — constructs the MCP server and registers tools based on execution mode |
 | `tools.go` | Tool input structs + `registerTools` (schema-browsing tools); `jsonResult`/`textResult` content helpers |
 | `diag_tools.go` | `registerDiagTools` — SQL diagnostics & validation tools (`validate_sql`, `suggest_join_conditions`, `format_sql`, `get_snowflake_keywords`); type-conversion helpers for sqleditor ↔ snowflake types |
-| `mcp_test.go` | SSE round-trip test (external client lists tools), port-allocation test, diagnostics tool tests |
+| `gate.go` | EXPLAIN precompilation gate: `queryRunner` interface, `CheckGate` (3-layer validation), `readOnlyOps` allow-list, `extractOperations`, `isUSEStatement` |
+| `sql_tools.go` | `registerSQLTools` — SQL execution tool (`execute_snowflake_sql`) and trusted context-switching tools (`use_role`, `use_warehouse`, `use_database`, `use_schema`); only registered in `readonly`/`explain_only` modes |
+| `gate_test.go` | Unit tests for the EXPLAIN gate with `fakeQueryRunner` |
+| `mcp_test.go` | SSE round-trip test (external client lists tools), port-allocation test, diagnostics tool tests, mode-gating tests |
 | `doc.go` | Package doc + `thaw:domain: MCP Server` annotation |
 
 ## Key types & functions
@@ -28,33 +31,60 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | Function | Behaviour |
 |---|---|
 | `NewManager()` | Empty registry. Safe for concurrent use. |
-| `Start(label, connLabel, mode, port, client)` | Starts a session under a unique `label`; `port == 0` auto-assigns from `9100`. Takes ownership of `client`. |
+| `Start(label, connLabel, mode, port, client, cfg)` | Starts a session under a unique `label`; `port == 0` auto-assigns from `9100`. Takes ownership of `client`. Applies `SessionConfig` (role/warehouse pinning, secondary roles). |
 | `Stop(label)` | Stops and removes the named session, closing its connection. |
 | `List()` | Snapshot of all sessions (`[]SessionInfo`) sorted by label. |
 | `StopAll()` | Stops every session; called on app `shutdown` and `Disconnect`. |
 
 Ports auto-assign sequentially from `basePort` (`9100`) up to `basePort+1000`. `allocatePortLocked` binds and returns the *held* `net.Listener` that `session.start` serves on, so the port is never released between the availability check and the real bind (no TOCTOU). An explicit duplicate or unavailable port is rejected.
 
-### Execution mode
+### Execution modes
 
-`ExecutionModeMetadata` (`"metadata"`) is the only supported mode in the foundation milestone — sessions are read-only metadata browsers.
+| Mode | Constant | SQL tools | Behaviour |
+|---|---|---|---|
+| **Metadata Only** | `ExecutionModeMetadata` (`"metadata"`) | No | Schema browsing and diagnostics only. No SQL execution. |
+| **Read-Only SQL** | `ExecutionModeReadonly` (`"readonly"`) | Yes | SQL execution via `execute_snowflake_sql`. Every statement passes through the EXPLAIN precompilation gate. Only read-only operations are allowed. |
+| **Explain Only** | `ExecutionModeExplainOnly` (`"explain_only"`) | Yes | Same gate validation as readonly, but returns only the EXPLAIN plan metadata — the statement is never actually executed. |
+
+### Session configuration
+
+`SessionConfig` controls optional per-session settings applied at startup:
+
+| Field | Effect |
+|---|---|
+| `Role` / `PinnedRole` | Runs `USE ROLE <role>` at session start. When `PinnedRole` is true, the `use_role` tool is not registered, preventing the AI client from switching roles. |
+| `Warehouse` / `PinnedWarehouse` | Runs `USE WAREHOUSE <warehouse>` at session start. When `PinnedWarehouse` is true, the `use_warehouse` tool is not registered. |
+| `SecondaryRoles` | When set to `"none"`, runs `USE SECONDARY ROLES NONE` at session start to restrict the session to only its primary role's grants. |
+
+### EXPLAIN precompilation gate
+
+The gate (`gate.go`) is a defense-in-depth layer that validates every SQL statement before execution. It uses a three-layer approach:
+
+1. **Single-statement check**: `SplitStatements(sql)` must return exactly 1 statement. Multi-statement SQL is rejected.
+2. **USE statement check**: `isUSEStatement(sql)` rejects `USE ROLE/WAREHOUSE/DATABASE/SCHEMA` and `USE SECONDARY ROLES` — context-switching is exposed only through dedicated trusted tools.
+3. **EXPLAIN USING TABULAR**: The statement is sent to Snowflake's `EXPLAIN USING TABULAR` to obtain the execution plan. Every operation in the plan must be in the `readOnlyOps` allow-list (default-deny). Operations like `Insert`, `Update`, `Delete`, `Merge`, `CreateTable`, etc. are not in the list and are rejected.
+
+**Caveats**: The gate is not a substitute for a scoped read-only Snowflake role. It fails safe by over-rejecting (any unknown future operation is denied). The real security boundary is the Snowflake role's grants — the EXPLAIN gate provides an additional defense layer.
 
 ### Tools
 
-The server exposes 11 tools in two groups:
+The server exposes 11 tools in metadata mode and up to 16 tools in readonly/explain_only modes:
 
-**Schema-browsing tools** (registered in `tools.go`): `get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`. Each delegates to the session's `*snowflake.Client` and returns its payload as indented-JSON text content (`get_ddl` returns raw text). The `get_ddl` tool validates the `kind` parameter against `allowedDDLKinds` before forwarding to `GetObjectDDL`.
+**Schema-browsing tools** (always registered, `tools.go`): `get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`.
 
-**SQL diagnostics tools** (registered in `diag_tools.go`): `validate_sql`, `suggest_join_conditions`, `format_sql`, `get_snowflake_keywords`. These expose Thaw's `internal/sqleditor` diagnostics engine so external AI clients can iteratively refine SQL against real schema before delivering it to a tab or notebook. The MCP path runs the same validators as the editor but may produce different markers because it fetches fresh metadata from Snowflake on each call (vs. the frontend's warm object-store cache) and uses `sqleditor.ResolveTableRefs` for ref resolution (vs. the frontend's per-ref store lookup with typo-dropping).
+**SQL diagnostics tools** (always registered, `diag_tools.go`): `validate_sql`, `suggest_join_conditions`, `format_sql`, `get_snowflake_keywords`.
 
-| Tool | Purpose |
-|---|---|
-| `validate_sql` | Full diagnostics pipeline — Phase 1 (syntax, patterns, datatypes) always runs; Phase 2 (table existence, semantics, bare column refs) runs best-effort when a Snowflake connection is available. Returns `[]DiagMarker`. |
-| `suggest_join_conditions` | FK/PK heuristic + type-compatible same-name columns for JOIN ON/USING between two tables. Requires a Snowflake connection. |
-| `format_sql` | Token-level keyword/identifier/function casing via `sqleditor.ApplyCasing`. No connection needed. |
-| `get_snowflake_keywords` | Sorted list of Snowflake reserved keywords. No connection needed. |
+**SQL execution tools** (readonly/explain_only only, `sql_tools.go`):
 
-**Diagnostics vs. EXPLAIN gate**: These tools serve the *editor/notebook delivery path* — the AI writes SQL, validates it, then places it in front of the human for review. This is distinct from the EXPLAIN precompilation gate (#352), which validates SQL immediately before execution.
+| Tool | Purpose | Pinning |
+|---|---|---|
+| `execute_snowflake_sql` | Execute a single read-only SQL statement through the EXPLAIN gate | Always registered |
+| `use_role` | Switch the active Snowflake role | Omitted when `PinnedRole` |
+| `use_warehouse` | Switch the active Snowflake warehouse | Omitted when `PinnedWarehouse` |
+| `use_database` | Switch the active Snowflake database | Always registered |
+| `use_schema` | Switch the active Snowflake schema | Always registered |
+
+**Diagnostics vs. EXPLAIN gate**: The diagnostics tools serve the *editor/notebook delivery path* — the AI writes SQL, validates it, then places it in front of the human for review. The EXPLAIN gate validates SQL immediately before execution in the `execute_snowflake_sql` tool.
 
 ## Patterns & integration
 
@@ -72,7 +102,7 @@ The listener binds only the loopback interface (`127.0.0.1`) and the `loopbackGu
 
 Each session also has a **per-session auth token** (`tokenGuard`, `security.go`). The token (32 crypto-random bytes, base64url) is required to open the session-creating SSE `GET`, presented either as `Authorization: Bearer <token>` or a `?token=…` query parameter. The follow-up message `POST`s are **not** separately token-checked: the go-sdk builds the message endpoint via `req.URL.Parse("?sessionid=…")`, which replaces the query string and so drops the token, but the `sessionid` it issues is crypto-random and delivered only over the authenticated `GET` stream — a process that cannot pass the `GET` token never learns a valid `sessionid`, so it can neither open a session nor post into one. This closes the local-process gap from [#350](https://github.com/Technarion-Oy/thaw/issues/350).
 
-The token defends against other **non-admin** local processes/users only. A local administrator (or `SYSTEM`) can read the app's process memory, read files regardless of ACL, and capture loopback traffic, so they are outside the boundary this token can enforce. Sessions are read-only (metadata browsing only), must be started explicitly, and should be stopped when not in use; the copied client configuration embeds the token and must be treated as a secret.
+The token defends against other **non-admin** local processes/users only. A local administrator (or `SYSTEM`) can read the app's process memory, read files regardless of ACL, and capture loopback traffic, so they are outside the boundary this token can enforce. For SQL execution modes, the EXPLAIN precompilation gate provides defense-in-depth, but the real security boundary is the Snowflake role's grants — always use a scoped read-only role for sessions that can execute SQL. Sessions must be started explicitly and should be stopped when not in use; the copied client configuration embeds the token and must be treated as a secret.
 
 ## Gotchas
 

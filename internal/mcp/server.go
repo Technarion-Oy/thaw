@@ -17,11 +17,11 @@ import (
 	"thaw/internal/version"
 )
 
-// buildServer constructs an MCP server exposing the proof-of-life
-// schema-browsing tools backed by the supplied Snowflake client. The mode
-// parameter is reserved for future execution gating; the foundation milestone
-// only registers read-only metadata tools.
-func buildServer(client *snowflake.Client, mode string) *mcpsdk.Server {
+// buildServer constructs an MCP server and registers tools based on the
+// execution mode. Schema-browsing and diagnostics tools are always registered.
+// SQL execution tools (execute_snowflake_sql + context-switching) are only
+// registered in readonly and explain_only modes.
+func buildServer(client *snowflake.Client, mode string, cfg SessionConfig) *mcpsdk.Server {
 	srv := mcpsdk.NewServer(&mcpsdk.Implementation{
 		Name:    "thaw",
 		Version: version.Version,
@@ -29,5 +29,9 @@ func buildServer(client *snowflake.Client, mode string) *mcpsdk.Server {
 
 	registerTools(srv, client)
 	registerDiagTools(srv, client)
+
+	if mode == ExecutionModeReadonly || mode == ExecutionModeExplainOnly {
+		registerSQLTools(srv, client, mode, cfg)
+	}
 	return srv
 }

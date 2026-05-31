@@ -111,6 +111,34 @@ Loading state lives in the shared `loadingGitNodes` Set (namespaced keys). `buil
 
 `internal/mcp/` hosts read-only MCP servers (official Go MCP SDK) exposing the active connection to external AI clients over SSE/HTTP on `localhost`. `Manager` owns multiple labeled `session`s (ports auto-assign from 9100); each session runs its own dedicated `*snowflake.Client`. Sessions are user-started only and stopped via `StopAll()` in both `App.shutdown()` and `App.Disconnect()`. **`internal/mcp` must not import `internal/app`** (cycle). Gated behind `mcpServer`. Two middlewares wrap the SSE handler (`security.go`): `loopbackGuard` (DNS-rebinding defense) and `tokenGuard` (per-session crypto-random token required on the session-creating `GET`, via `Authorization: Bearer` or `?token=`; message `POST`s are authorized by the SDK's `sessionid`). The token is surfaced only via `Manager.AuthenticatedURL` (used by `GetMCPSessionConfig`), never in `SessionInfo`.
 
+## EXPLAIN precompilation gate
+
+The MCP server's `execute_snowflake_sql` tool uses a three-layer gate (`internal/mcp/gate.go`) to validate every SQL statement before execution:
+
+1. **Single-statement check** — `SplitStatements(sql)` must return exactly 1 statement. Multi-statement SQL is rejected before any Snowflake round-trip.
+2. **USE statement check** — `isUSEStatement(sql)` rejects `USE ROLE/WAREHOUSE/DATABASE/SCHEMA` and `USE SECONDARY ROLES`. Context-switching is exposed only through dedicated trusted tools (`use_role`, `use_warehouse`, etc.) that can be individually omitted via session pinning.
+3. **EXPLAIN plan validation** — `EXPLAIN USING TABULAR <stmt>` is sent to Snowflake. Every operation in the returned plan must be in the `readOnlyOps` allow-list (default-deny). Any unknown operation (including future Snowflake additions) is rejected.
+
+The gate returns a `GateVerdict` struct with `Allowed`, `Operations`, `Rejected`, and `Reason` fields, providing structured feedback to the AI client on why a statement was rejected.
+
+**Key design decisions**: The gate accepts a `queryRunner` interface (not `*snowflake.Client` directly) so unit tests can use a fake implementation with canned results. The `readOnlyOps` map is intentionally conservative — it is better to over-reject than to let a mutation through. The gate is defense-in-depth; the real security boundary is the Snowflake role's grants.
+
+## Mode-gated tool registration
+
+The MCP server uses mode-gated registration (`internal/mcp/server.go`) to control which tools are exposed based on the session's execution mode:
+
+```go
+func buildServer(client, mode, cfg) *mcpsdk.Server {
+    registerTools(srv, client)           // always: schema browsing
+    registerDiagTools(srv, client)       // always: diagnostics
+    if mode == "readonly" || mode == "explain_only" {
+        registerSQLTools(srv, client, mode, cfg)  // gated: SQL execution
+    }
+}
+```
+
+Within `registerSQLTools`, individual context-switching tools are further gated by `SessionConfig` pinning — `use_role` is omitted when `PinnedRole` is true, `use_warehouse` when `PinnedWarehouse` is true. This ensures the AI client cannot switch to a different role or warehouse when the session is pinned.
+
 ## Code snippets cascading menu
 
 Implemented via Monaco's internal `MenuRegistry` + `CommandsRegistry` (a one-time module IIFE), not per-editor patching. Snippets respect `editorPrefsRef` at insertion time (`applyPrefsToSnippet`). Definitions live in `snowflakeSnippets.ts`; `SNIPPET_CATEGORIES` drives the submenu. **Do not use `instanceof SubmenuAction` from an external import** — use `MenuRegistry` and let Monaco build the action internally.

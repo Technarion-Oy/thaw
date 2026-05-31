@@ -1222,6 +1222,8 @@ export namespace mcp {
 	    executionMode: string;
 	    url: string;
 	    connectionLabel: string;
+	    pinnedRole?: string;
+	    pinnedWarehouse?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new SessionInfo(source);
@@ -1234,6 +1236,8 @@ export namespace mcp {
 	        this.executionMode = source["executionMode"];
 	        this.url = source["url"];
 	        this.connectionLabel = source["connectionLabel"];
+	        this.pinnedRole = source["pinnedRole"];
+	        this.pinnedWarehouse = source["pinnedWarehouse"];
 	    }
 	}
 

@@ -40,10 +40,11 @@ interface Props {
   onClose: () => void;
 }
 
-// Execution modes. Only metadata browsing is supported in the foundation
-// milestone; the value must match internal/mcp.ExecutionModeMetadata.
+// Execution modes. Values must match internal/mcp.ExecutionMode* constants.
 const EXECUTION_MODES = [
   { value: "metadata", label: "Metadata Only" },
+  { value: "readonly", label: "Read-Only SQL" },
+  { value: "explain_only", label: "Explain Only" },
 ];
 
 export default function MCPSessionsModal({ onClose }: Props) {
@@ -59,8 +60,13 @@ export default function MCPSessionsModal({ onClose }: Props) {
   const [label, setLabel] = useState("");
   const [mode, setMode] = useState("metadata");
   const [port, setPort] = useState<number | null>(null);
+  const [role, setRole] = useState("");
+  const [warehouse, setWarehouse] = useState("");
+  const [secondaryRoles, setSecondaryRoles] = useState("");
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const showSessionConfig = mode !== "metadata";
 
   useEffect(() => {
     void refresh();
@@ -75,11 +81,21 @@ export default function MCPSessionsModal({ onClose }: Props) {
     setStarting(true);
     setError(null);
     try {
-      await StartMCPSession(trimmed, mode, port ?? 0);
+      await StartMCPSession(
+        trimmed,
+        mode,
+        port ?? 0,
+        role.trim(),
+        warehouse.trim(),
+        secondaryRoles.trim(),
+      );
       await refresh();
       window.dispatchEvent(new Event("thaw:mcp-changed"));
       setLabel("");
       setPort(null);
+      setRole("");
+      setWarehouse("");
+      setSecondaryRoles("");
       message.success(`MCP session "${trimmed}" started`);
     } catch (e: unknown) {
       setError(String(e));
@@ -109,6 +125,11 @@ export default function MCPSessionsModal({ onClose }: Props) {
     }
   }
 
+  const securityMessage =
+    mode === "metadata"
+      ? "A running session exposes your connection's schema metadata to any MCP client holding this session's token. The copied configuration contains that token \u2014 treat it like a password and don't share it. Stop sessions when you're done."
+      : "A running session with SQL execution enabled exposes your connection to any MCP client holding this session's token. All statements pass through the EXPLAIN precompilation gate (read-only operations only). The copied configuration contains the token \u2014 treat it like a password. Use a scoped read-only role for defense in depth. Stop sessions when you're done.";
+
   return (
     <Modal
       open
@@ -122,7 +143,7 @@ export default function MCPSessionsModal({ onClose }: Props) {
         <Alert
           type="warning"
           showIcon
-          message="MCP Server is disabled. Enable it under View → Enabled Features… (an IT administrator may have locked this)."
+          message="MCP Server is disabled. Enable it under View \u2192 Enabled Features\u2026 (an IT administrator may have locked this)."
           style={{ marginBottom: 12 }}
         />
       )}
@@ -144,14 +165,10 @@ export default function MCPSessionsModal({ onClose }: Props) {
         />
       )}
 
-      {/* The SSE endpoint is protected by a per-session token, so the copied
-          client configuration is a secret. A local administrator can still
-          bypass this (process memory, loopback capture), so stop sessions when
-          you're done. */}
       <Alert
         type="warning"
         showIcon
-        message="A running session exposes your connection's schema metadata to any MCP client holding this session's token. The copied configuration contains that token — treat it like a password and don't share it. Stop sessions when you're done."
+        message={securityMessage}
         style={{ marginBottom: 12 }}
       />
 
@@ -209,6 +226,63 @@ export default function MCPSessionsModal({ onClose }: Props) {
             Start Session
           </Button>
         </Space>
+
+        {/* ── Session configuration (non-metadata modes) ── */}
+        {showSessionConfig && (
+          <Space wrap style={{ width: "100%", marginTop: 12 }}>
+            <Form.Item
+              label={
+                <Tooltip title="Pin the session to this role. Leave blank to allow the AI client to switch roles.">
+                  <Text style={{ fontSize: 12 }}>Role</Text>
+                </Tooltip>
+              }
+              style={{ marginBottom: 0 }}
+            >
+              <Input
+                placeholder="e.g. ANALYST_RO"
+                value={role}
+                onChange={(e) => setRole(e.target.value)}
+                style={{ width: 150 }}
+                disabled={!canStart}
+              />
+            </Form.Item>
+            <Form.Item
+              label={
+                <Tooltip title="Pin the session to this warehouse. Leave blank to allow the AI client to switch warehouses.">
+                  <Text style={{ fontSize: 12 }}>Warehouse</Text>
+                </Tooltip>
+              }
+              style={{ marginBottom: 0 }}
+            >
+              <Input
+                placeholder="e.g. COMPUTE_WH"
+                value={warehouse}
+                onChange={(e) => setWarehouse(e.target.value)}
+                style={{ width: 150 }}
+                disabled={!canStart}
+              />
+            </Form.Item>
+            <Form.Item
+              label={
+                <Tooltip title='Set to "none" to disable secondary roles for this session.'>
+                  <Text style={{ fontSize: 12 }}>Secondary roles</Text>
+                </Tooltip>
+              }
+              style={{ marginBottom: 0 }}
+            >
+              <Select
+                value={secondaryRoles}
+                onChange={setSecondaryRoles}
+                options={[
+                  { value: "", label: "Default" },
+                  { value: "none", label: "None" },
+                ]}
+                style={{ width: 100 }}
+                disabled={!canStart}
+              />
+            </Form.Item>
+          </Space>
+        )}
       </Form>
 
       {/* ── Running sessions ── */}
@@ -239,10 +313,10 @@ export default function MCPSessionsModal({ onClose }: Props) {
                 </div>
                 <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
                   {s.connectionLabel} · port {s.port} · {s.executionMode}
+                  {s.pinnedRole ? ` · role: ${s.pinnedRole}` : ""}
+                  {s.pinnedWarehouse ? ` · wh: ${s.pinnedWarehouse}` : ""}
                 </div>
                 <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                  {/* Token-free endpoint, shown for reference only. Use "Copy
-                      client configuration" to get the URL with the auth token. */}
                   <Text code style={{ fontSize: 11 }}>{s.url}</Text>
                 </div>
               </div>

@@ -32,6 +32,7 @@ type session struct {
 	mode      string
 	port      int
 	token     string
+	cfg       SessionConfig
 
 	client *snowflake.Client
 	server *mcpsdk.Server
@@ -47,7 +48,7 @@ type session struct {
 // ln is the already-bound loopback listener the HTTP server will serve on;
 // mgr is the owning Manager, used to self-remove if the server dies. token is
 // the per-session secret required to open the SSE GET (see tokenGuard).
-func newSession(mgr *Manager, label, connLabel, mode, token string, port int, client *snowflake.Client, ln net.Listener) *session {
+func newSession(mgr *Manager, label, connLabel, mode, token string, port int, client *snowflake.Client, ln net.Listener, cfg SessionConfig) *session {
 	return &session{
 		label:     label,
 		connLabel: connLabel,
@@ -57,6 +58,7 @@ func newSession(mgr *Manager, label, connLabel, mode, token string, port int, cl
 		client:    client,
 		ln:        ln,
 		mgr:       mgr,
+		cfg:       cfg,
 	}
 }
 
@@ -70,7 +72,7 @@ func (s *session) start() error {
 		return fmt.Errorf("mcp: session %q already running", s.label)
 	}
 
-	s.server = buildServer(s.client, s.mode)
+	s.server = buildServer(s.client, s.mode, s.cfg)
 	sse := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return s.server }, nil)
 	// loopbackGuard (DNS-rebinding defense) runs first, then tokenGuard
 	// authenticates the session-creating GET against the per-session token.
@@ -143,11 +145,18 @@ func (s *session) stop() error {
 func (s *session) info() SessionInfo {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return SessionInfo{
+	info := SessionInfo{
 		Label:           s.label,
 		Port:            s.port,
 		ExecutionMode:   s.mode,
 		URL:             fmt.Sprintf("http://127.0.0.1:%d/sse", s.port),
 		ConnectionLabel: s.connLabel,
 	}
+	if s.cfg.PinnedRole && s.cfg.Role != "" {
+		info.PinnedRole = s.cfg.Role
+	}
+	if s.cfg.PinnedWarehouse && s.cfg.Warehouse != "" {
+		info.PinnedWarehouse = s.cfg.Warehouse
+	}
+	return info
 }
