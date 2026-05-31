@@ -92,7 +92,8 @@ func (a *App) GetMCPSessionConfig(label string) (string, error) {
 	cfg := map[string]any{
 		"mcpServers": map[string]any{
 			"thaw-" + label: map[string]any{
-				"url": url,
+				"type": "sse",
+				"url":  url,
 			},
 		},
 	}
