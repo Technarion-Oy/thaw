@@ -48,7 +48,7 @@ jobs:
           SNOWFLAKE_TEST_SCHEMA: ${{ secrets.SNOWFLAKE_TEST_SCHEMA }}
         run: |
           set -o pipefail
-          go test -v -tags integration -race -count=1 -timeout 10m ./internal/integration/... 2>&1 | go-junit-report -set-exit-code > report.xml
+          go test -v -tags integration -race -count=1 -timeout 10m ./internal/integration/... 2>&1 | tee /dev/stderr | go-junit-report -set-exit-code > report.xml
 
       - name: Publish test results
         uses: EnricoMi/publish-unit-test-result-action@v2
