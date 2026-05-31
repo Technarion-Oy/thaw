@@ -50,6 +50,10 @@ func registerDiagTools(srv *mcpsdk.Server, client *snowflake.Client) {
 		Description: "Run the full SQL diagnostics pipeline and return structured markers (errors and warnings) matching the editor. Phase 1 (syntax, patterns, datatypes) always runs. Phase 2 (schema-aware table existence, semantics, bare column refs) runs best-effort when a Snowflake connection is available.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in validateSqlInput) (*mcpsdk.CallToolResult, any, error) {
 		markers := validateSQL(ctx, client, in.SQL)
+		// Ensure non-nil so JSON serializes as [] not null.
+		if markers == nil {
+			markers = []sqleditor.DiagMarker{}
+		}
 		return jsonResult(markers), nil, nil
 	})
 
@@ -64,6 +68,10 @@ func registerDiagTools(srv *mcpsdk.Server, client *snowflake.Client) {
 		if err != nil {
 			return nil, nil, err
 		}
+		// Ensure non-nil so JSON serializes as [] not null.
+		if conditions == nil {
+			conditions = []sqleditor.JoinCondition{}
+		}
 		return jsonResult(conditions), nil, nil
 	})
 
@@ -71,6 +79,15 @@ func registerDiagTools(srv *mcpsdk.Server, client *snowflake.Client) {
 		Name:        "format_sql",
 		Description: "Apply keyword, identifier, and function casing to SQL text. Valid case values: UPPER, lower, Title. Omit or pass empty string to preserve original casing for that token type.",
 	}, func(_ context.Context, _ *mcpsdk.CallToolRequest, in formatSqlInput) (*mcpsdk.CallToolResult, any, error) {
+		if err := validateCaseParam("keyword_case", in.KeywordCase); err != nil {
+			return nil, nil, err
+		}
+		if err := validateCaseParam("identifier_case", in.IdentifierCase); err != nil {
+			return nil, nil, err
+		}
+		if err := validateCaseParam("function_case", in.FunctionCase); err != nil {
+			return nil, nil, err
+		}
 		formatted := sqleditor.ApplyCasing(in.SQL, in.KeywordCase, in.IdentifierCase, in.FunctionCase)
 		return textResult(formatted), nil, nil
 	})
@@ -81,6 +98,22 @@ func registerDiagTools(srv *mcpsdk.Server, client *snowflake.Client) {
 	}, func(_ context.Context, _ *mcpsdk.CallToolRequest, _ emptyInput) (*mcpsdk.CallToolResult, any, error) {
 		return jsonResult(snowflake.ReservedKeywords()), nil, nil
 	})
+}
+
+// validCaseValues is the set of accepted casing values for format_sql.
+var validCaseValues = map[string]bool{
+	"":      true, // preserve
+	"UPPER": true,
+	"lower": true,
+	"Title": true,
+}
+
+// validateCaseParam rejects unknown case values with a descriptive error.
+func validateCaseParam(param, value string) error {
+	if !validCaseValues[value] {
+		return fmt.Errorf("invalid %s value %q: must be UPPER, lower, Title, or empty", param, value)
+	}
+	return nil
 }
 
 // validateSQL orchestrates the full diagnostics pipeline. Phase 1 (pure

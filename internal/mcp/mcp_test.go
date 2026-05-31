@@ -264,6 +264,66 @@ func TestValidateSqlPureMarkers(t *testing.T) {
 	}
 }
 
+// TestValidateSqlEmptyArrayNotNull verifies that clean SQL returns JSON "[]"
+// (not "null") through the tool handler, so external clients don't need to
+// special-case nil slices.
+func TestValidateSqlEmptyArrayNotNull(t *testing.T) {
+	srv := buildServer(nil, ExecutionModeMetadata)
+	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
+	httpSrv := httptest.NewServer(handler)
+	defer httpSrv.Close()
+
+	ctx := context.Background()
+	c := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test", Version: "v1"}, nil)
+	cs, err := c.Connect(ctx, &mcpsdk.SSEClientTransport{Endpoint: httpSrv.URL}, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = cs.Close() }()
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "validate_sql",
+		Arguments: validateSqlInput{SQL: "SELECT 1"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	text := extractText(t, res)
+	if strings.TrimSpace(text) != "[]" {
+		t.Errorf("expected empty array [], got: %s", text)
+	}
+}
+
+// TestFormatSqlInvalidCase verifies that invalid case values are rejected.
+func TestFormatSqlInvalidCase(t *testing.T) {
+	srv := buildServer(nil, ExecutionModeMetadata)
+	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
+	httpSrv := httptest.NewServer(handler)
+	defer httpSrv.Close()
+
+	ctx := context.Background()
+	c := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test", Version: "v1"}, nil)
+	cs, err := c.Connect(ctx, &mcpsdk.SSEClientTransport{Endpoint: httpSrv.URL}, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = cs.Close() }()
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "format_sql",
+		Arguments: formatSqlInput{
+			SQL:         "SELECT 1",
+			KeywordCase: "INVALID",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Errorf("expected IsError=true for invalid case value, got false")
+	}
+}
+
 // TestFormatSqlTool calls ApplyCasing through the format_sql path and verifies
 // keyword casing is applied.
 func TestFormatSqlTool(t *testing.T) {
@@ -397,10 +457,10 @@ func TestSuggestJoinConditionsNilClient(t *testing.T) {
 		Name:      "suggest_join_conditions",
 		Arguments: joinSuggestInput{TableA: "orders", TableB: "customers"},
 	})
-	// The SDK should surface tool errors via IsError, not a Go error.
+	// Per MCP spec, tool-level errors are surfaced as IsError=true on the
+	// result, not as a Go error from CallTool.
 	if err != nil {
-		// Acceptable: some SDK versions propagate as Go error.
-		return
+		t.Fatalf("CallTool returned Go error (expected IsError on result): %v", err)
 	}
 	if !res.IsError {
 		t.Errorf("expected IsError=true for nil client, got false")
