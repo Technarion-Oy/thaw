@@ -17,20 +17,25 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sort"
+	"strings"
 	"testing"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// expectedTools is the proof-of-life tool set the foundation server exposes.
+// expectedTools is the full tool set the server exposes (alphabetically sorted).
 var expectedTools = []string{
 	"describe_table",
+	"format_sql",
 	"get_ddl",
 	"get_session_context",
+	"get_snowflake_keywords",
 	"get_table_foreign_keys",
 	"list_databases",
 	"list_objects",
 	"list_schemas",
+	"suggest_join_conditions",
+	"validate_sql",
 }
 
 // TestServerExposesToolsOverSSE verifies that an external MCP client can
@@ -237,6 +242,119 @@ func TestAllowedDDLKinds(t *testing.T) {
 			t.Errorf("expected %q to be rejected", kind)
 		}
 	}
+}
+
+// TestValidateSqlPureMarkers calls validate_sql with a nil client and SQL that
+// has syntax errors, verifying that pure (phase-1) markers are returned even
+// without a live Snowflake connection.
+func TestValidateSqlPureMarkers(t *testing.T) {
+	// Unmatched parenthesis produces a syntax error marker.
+	markers := validateSQL(context.Background(), nil, "SELECT (1")
+	if len(markers) == 0 {
+		t.Fatal("expected at least one diagnostic marker for unmatched paren, got 0")
+	}
+	// All markers from the pure phase should have Severity 8 (Error) or 4 (Warning).
+	for i, m := range markers {
+		if m.Severity != 8 && m.Severity != 4 {
+			t.Errorf("marker[%d].Severity = %d, want 8 or 4", i, m.Severity)
+		}
+	}
+}
+
+// TestFormatSqlTool calls ApplyCasing through the format_sql path and verifies
+// keyword casing is applied.
+func TestFormatSqlTool(t *testing.T) {
+	cases := []struct {
+		name     string
+		sql      string
+		kwCase   string
+		idCase   string
+		fnCase   string
+		contains string
+	}{
+		{"uppercase keywords", "select 1", "UPPER", "", "", "SELECT"},
+		{"lowercase keywords", "SELECT 1", "lower", "", "", "select"},
+		{"preserve empty", "SELECT 1", "", "", "", "SELECT"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := buildServer(nil, ExecutionModeMetadata)
+			handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
+			httpSrv := httptest.NewServer(handler)
+			defer httpSrv.Close()
+
+			ctx := context.Background()
+			c := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test", Version: "v1"}, nil)
+			cs, err := c.Connect(ctx, &mcpsdk.SSEClientTransport{Endpoint: httpSrv.URL}, nil)
+			if err != nil {
+				t.Fatalf("connect: %v", err)
+			}
+			defer func() { _ = cs.Close() }()
+
+			res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+				Name: "format_sql",
+				Arguments: formatSqlInput{
+					SQL:            tc.sql,
+					KeywordCase:    tc.kwCase,
+					IdentifierCase: tc.idCase,
+					FunctionCase:   tc.fnCase,
+				},
+			})
+			if err != nil {
+				t.Fatalf("CallTool: %v", err)
+			}
+			text := extractText(t, res)
+			if !strings.Contains(text, tc.contains) {
+				t.Errorf("result %q does not contain %q", text, tc.contains)
+			}
+		})
+	}
+}
+
+// TestGetSnowflakeKeywordsTool verifies the keyword list is non-empty.
+func TestGetSnowflakeKeywordsTool(t *testing.T) {
+	srv := buildServer(nil, ExecutionModeMetadata)
+	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
+	httpSrv := httptest.NewServer(handler)
+	defer httpSrv.Close()
+
+	ctx := context.Background()
+	c := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test", Version: "v1"}, nil)
+	cs, err := c.Connect(ctx, &mcpsdk.SSEClientTransport{Endpoint: httpSrv.URL}, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = cs.Close() }()
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "get_snowflake_keywords",
+		Arguments: emptyInput{},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+
+	text := extractText(t, res)
+	var keywords []string
+	if err := json.Unmarshal([]byte(text), &keywords); err != nil {
+		t.Fatalf("payload is not valid JSON array: %v", err)
+	}
+	if len(keywords) < 10 {
+		t.Errorf("expected at least 10 keywords, got %d", len(keywords))
+	}
+}
+
+// extractText extracts the text from a single-content CallToolResult.
+func extractText(t *testing.T, res *mcpsdk.CallToolResult) string {
+	t.Helper()
+	if len(res.Content) != 1 {
+		t.Fatalf("content blocks = %d, want 1", len(res.Content))
+	}
+	tc, ok := res.Content[0].(*mcpsdk.TextContent)
+	if !ok {
+		t.Fatalf("content[0] is %T, want *mcpsdk.TextContent", res.Content[0])
+	}
+	return tc.Text
 }
 
 // TestJSONResultShaping verifies the tool result helpers wrap payloads as a
