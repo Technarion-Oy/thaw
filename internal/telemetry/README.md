@@ -47,5 +47,5 @@ No PII, SQL query content, credentials, or account-specific identifiers are ever
 
 ## Gotchas
 
-- `sendRemote` is intentionally a dead-code stub (`//nolint:unused,deadcode`). Do not remove it — it is the integration point for when a remote backend is chosen.
+- `sendRemote` is intentionally a dead-code stub (`//nolint:unused`). Do not remove it — it is the integration point for when a remote backend is chosen.
 - `Track` is safe to call before `Init` (nil receiver guard), so call sites do not need to check whether telemetry has been initialised.

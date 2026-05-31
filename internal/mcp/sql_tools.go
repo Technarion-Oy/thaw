@@ -90,6 +90,9 @@ func registerSQLTools(srv *mcpsdk.Server, client *snowflake.Client, mode string,
 			Name:        "use_role",
 			Description: "Switch the active Snowflake role for this session.",
 		}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in useRoleInput) (*mcpsdk.CallToolResult, any, error) {
+			if in.Role == "" {
+				return nil, nil, fmt.Errorf("role name is required")
+			}
 			if err := client.UseRole(ctx, in.Role); err != nil {
 				return nil, nil, err
 			}
@@ -102,6 +105,9 @@ func registerSQLTools(srv *mcpsdk.Server, client *snowflake.Client, mode string,
 			Name:        "use_warehouse",
 			Description: "Switch the active Snowflake warehouse for this session.",
 		}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in useWarehouseInput) (*mcpsdk.CallToolResult, any, error) {
+			if in.Warehouse == "" {
+				return nil, nil, fmt.Errorf("warehouse name is required")
+			}
 			if err := client.UseWarehouse(ctx, in.Warehouse); err != nil {
 				return nil, nil, err
 			}
@@ -113,6 +119,9 @@ func registerSQLTools(srv *mcpsdk.Server, client *snowflake.Client, mode string,
 		Name:        "use_database",
 		Description: "Switch the active Snowflake database for this session.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in useDatabaseInput) (*mcpsdk.CallToolResult, any, error) {
+		if in.Database == "" {
+			return nil, nil, fmt.Errorf("database name is required")
+		}
 		if err := client.UseDatabase(ctx, in.Database); err != nil {
 			return nil, nil, err
 		}
@@ -123,6 +132,9 @@ func registerSQLTools(srv *mcpsdk.Server, client *snowflake.Client, mode string,
 		Name:        "use_schema",
 		Description: "Switch the active Snowflake schema for this session.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in useSchemaInput) (*mcpsdk.CallToolResult, any, error) {
+		if in.Schema == "" {
+			return nil, nil, fmt.Errorf("schema name is required")
+		}
 		if err := client.UseSchema(ctx, in.Schema); err != nil {
 			return nil, nil, err
 		}

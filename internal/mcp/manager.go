@@ -78,7 +78,7 @@ func NewManager() *Manager {
 // auto-assigned starting at basePort. The session takes ownership of client
 // and closes it when stopped. cfg controls optional role/warehouse pinning
 // applied at session startup. The context is used for the initial session
-// setup (USE ROLE, USE WAREHOUSE, etc.) and can be cancelled by the caller.
+// setup (USE ROLE, USE WAREHOUSE, etc.) and can be canceled by the caller.
 func (m *Manager) Start(ctx context.Context, label, connLabel, mode string, port int, client *snowflake.Client, cfg SessionConfig) (SessionInfo, error) {
 	if label == "" {
 		return SessionInfo{}, fmt.Errorf("mcp: session label is required")
@@ -90,20 +90,29 @@ func (m *Manager) Start(ctx context.Context, label, connLabel, mode string, port
 		return SessionInfo{}, fmt.Errorf("mcp: unsupported execution mode %q", mode)
 	}
 
-	// Apply session configuration before registering the session.
-	if cfg.Role != "" {
-		if err := client.UseRole(ctx, cfg.Role); err != nil {
-			return SessionInfo{}, fmt.Errorf("mcp: failed to set role: %w", err)
-		}
+	// Validate secondaryRoles early — only "" and "none" are accepted.
+	if cfg.SecondaryRoles != "" && cfg.SecondaryRoles != "none" {
+		return SessionInfo{}, fmt.Errorf("mcp: unsupported secondaryRoles value %q (must be \"\" or \"none\")", cfg.SecondaryRoles)
 	}
-	if cfg.Warehouse != "" {
-		if err := client.UseWarehouse(ctx, cfg.Warehouse); err != nil {
-			return SessionInfo{}, fmt.Errorf("mcp: failed to set warehouse: %w", err)
+
+	// Apply session configuration for non-metadata modes. In metadata mode
+	// no SQL tools are registered, so role/warehouse pinning is a no-op —
+	// skip the Snowflake round-trips to avoid confusion.
+	if mode != ExecutionModeMetadata {
+		if cfg.Role != "" {
+			if err := client.UseRole(ctx, cfg.Role); err != nil {
+				return SessionInfo{}, fmt.Errorf("mcp: failed to set role: %w", err)
+			}
 		}
-	}
-	if cfg.SecondaryRoles == "none" {
-		if _, err := client.QuerySingle(ctx, "USE SECONDARY ROLES NONE"); err != nil {
-			return SessionInfo{}, fmt.Errorf("mcp: failed to disable secondary roles: %w", err)
+		if cfg.Warehouse != "" {
+			if err := client.UseWarehouse(ctx, cfg.Warehouse); err != nil {
+				return SessionInfo{}, fmt.Errorf("mcp: failed to set warehouse: %w", err)
+			}
+		}
+		if cfg.SecondaryRoles == "none" {
+			if _, err := client.QuerySingle(ctx, "USE SECONDARY ROLES NONE"); err != nil {
+				return SessionInfo{}, fmt.Errorf("mcp: failed to disable secondary roles: %w", err)
+			}
 		}
 	}
 
