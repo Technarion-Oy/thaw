@@ -243,6 +243,7 @@ export namespace config {
 	    crossTabSearch: boolean;
 	    fileWatcher: boolean;
 	    columnManagement: boolean;
+	    mcpServer: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new FeatureFlags(source);
@@ -287,6 +288,7 @@ export namespace config {
 	        this.crossTabSearch = source["crossTabSearch"];
 	        this.fileWatcher = source["fileWatcher"];
 	        this.columnManagement = source["columnManagement"];
+	        this.mcpServer = source["mcpServer"];
 	    }
 	}
 	export class GitConfig {
@@ -1207,6 +1209,31 @@ export namespace keypair {
 	        this.privateKeyPath = source["privateKeyPath"];
 	        this.publicKeyPath = source["publicKeyPath"];
 	        this.publicKey = source["publicKey"];
+	    }
+	}
+
+}
+
+export namespace mcp {
+	
+	export class SessionInfo {
+	    label: string;
+	    port: number;
+	    executionMode: string;
+	    url: string;
+	    connectionLabel: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SessionInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.label = source["label"];
+	        this.port = source["port"];
+	        this.executionMode = source["executionMode"];
+	        this.url = source["url"];
+	        this.connectionLabel = source["connectionLabel"];
 	    }
 	}
 

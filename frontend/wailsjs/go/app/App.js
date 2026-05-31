@@ -518,6 +518,10 @@ export function GetLocalFilePreview(arg1, arg2) {
   return window['go']['app']['App']['GetLocalFilePreview'](arg1, arg2);
 }
 
+export function GetMCPSessionConfig(arg1) {
+  return window['go']['app']['App']['GetMCPSessionConfig'](arg1);
+}
+
 export function GetNotebookCompletions(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['GetNotebookCompletions'](arg1, arg2, arg3, arg4);
 }
@@ -910,6 +914,10 @@ export function ListIntegrations(arg1) {
   return window['go']['app']['App']['ListIntegrations'](arg1);
 }
 
+export function ListMCPSessions() {
+  return window['go']['app']['App']['ListMCPSessions']();
+}
+
 export function ListNotificationIntegrations() {
   return window['go']['app']['App']['ListNotificationIntegrations']();
 }
@@ -1202,6 +1210,10 @@ export function StartFileWatcher(arg1) {
   return window['go']['app']['App']['StartFileWatcher'](arg1);
 }
 
+export function StartMCPSession(arg1, arg2, arg3) {
+  return window['go']['app']['App']['StartMCPSession'](arg1, arg2, arg3);
+}
+
 export function StartNotebookSession(arg1) {
   return window['go']['app']['App']['StartNotebookSession'](arg1);
 }
@@ -1220,6 +1232,10 @@ export function StopDapProxy() {
 
 export function StopFileWatcher() {
   return window['go']['app']['App']['StopFileWatcher']();
+}
+
+export function StopMCPSession(arg1) {
+  return window['go']['app']['App']['StopMCPSession'](arg1);
 }
 
 export function StopNotebookSession(arg1) {

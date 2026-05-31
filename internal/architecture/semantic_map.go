@@ -142,6 +142,18 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/store/gitStore.ts"
       ],
       "description": "Git repository operations, Snowflake Git repository objects, and schema export versioning."
+    },
+    {
+      "name": "MCP Server",
+      "backend_paths": [
+        "internal/mcp/"
+      ],
+      "frontend_paths": [
+        "frontend/src/components/settings/MCPSessionsModal.tsx",
+        "frontend/src/components/toolbar/MCPIndicator.tsx",
+        "frontend/src/store/mcpStore.ts"
+      ],
+      "description": "Model Context Protocol servers exposing the Snowflake connection to external AI clients over localhost."
     }
   ]
 }`

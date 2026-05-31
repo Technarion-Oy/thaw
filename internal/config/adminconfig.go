@@ -38,7 +38,8 @@ import (
 //	  "performanceDiagnostics":   { "explainSql": false },
 //	  "connection":               { "snowflakeCLIProfileManager": false },
 //	  "fileBrowser":              { "fileWatcher": false },
-//	  "schemaManagement":         { "columnManagement": false }
+//	  "schemaManagement":         { "columnManagement": false },
+//	  "integrations":             { "mcpServer": false }
 //	}
 
 // ptrbool is a small helper so JSON null / absent ≠ false.
@@ -111,6 +112,11 @@ type adminSchemaManagement struct {
 	ColumnManagement ptrBool `json:"columnManagement,omitempty"`
 }
 
+// adminIntegrations is the "integrations" category.
+type adminIntegrations struct {
+	MCPServer ptrBool `json:"mcpServer,omitempty"`
+}
+
 // adminConfigJSON is the full schema for the admin features.json file.
 type adminConfigJSON struct {
 	DataExportImport         adminDataExportImport `json:"dataExportImport"`
@@ -123,6 +129,7 @@ type adminConfigJSON struct {
 	ResultsGrid              adminResultsGrid      `json:"resultsGrid"`
 	FileBrowser              adminFileBrowser      `json:"fileBrowser"`
 	SchemaManagement         adminSchemaManagement `json:"schemaManagement"`
+	Integrations             adminIntegrations     `json:"integrations"`
 }
 
 // ─── System config file path ───────────────────────────────────────────────────
@@ -243,6 +250,9 @@ func mergeAdminOverrides(user FeatureFlags, cfg adminConfigJSON) (effective Feat
 
 	// Schema Management
 	apply(&effective.ColumnManagement, &locked.ColumnManagement, cfg.SchemaManagement.ColumnManagement)
+
+	// Integrations
+	apply(&effective.MCPServer, &locked.MCPServer, cfg.Integrations.MCPServer)
 
 	return effective, locked
 }

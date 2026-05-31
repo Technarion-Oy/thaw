@@ -23,6 +23,7 @@ import (
 	"thaw/internal/filesystem"
 	"thaw/internal/fnmeta"
 	"thaw/internal/logger"
+	"thaw/internal/mcp"
 	"thaw/internal/migration"
 	"thaw/internal/session"
 	"thaw/internal/snowflake"
@@ -68,6 +69,9 @@ type App struct {
 	migrationSvc *migration.Service
 	snowparkSvc  *snowpark.Service
 
+	// MCP server manager (multi-session, started/stopped on user action).
+	mcpManager *mcp.Manager
+
 	// Per-tab isolated Snowflake sessions.
 	tabSessions sync.Map // string (tabId) → *tabSession
 
@@ -107,6 +111,7 @@ type App struct {
 func NewApp() *App {
 	return &App{
 		gitCommitFilters: make(map[string]string),
+		mcpManager:       mcp.NewManager(),
 	}
 }
 
@@ -377,6 +382,11 @@ func (a *App) shutdown(_ context.Context) {
 	// Stop file system watcher.
 	a.StopFileWatcher()
 
+	// Stop all MCP sessions so their HTTP listeners and connections are freed.
+	if a.mcpManager != nil {
+		a.mcpManager.StopAll()
+	}
+
 	// Stop any running terminal process cleanly before the app exits.
 	a.StopShell() //nolint:errcheck
 
@@ -478,6 +488,12 @@ func (a *App) CancelExport() {
 
 // Disconnect closes the active Snowflake connection and all per-tab sessions.
 func (a *App) Disconnect() error {
+	// Stop all MCP sessions — they hold their own clients bound to this
+	// connection and must not outlive it.
+	if a.mcpManager != nil {
+		a.mcpManager.StopAll()
+	}
+
 	// Close all tab sessions first.
 	var tabIds []string
 	a.tabSessions.Range(func(key, _ any) bool {

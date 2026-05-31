@@ -26,6 +26,7 @@ Persistence is handled per-store via Zustand's `persist` middleware.
 | `notebookPrefsStore.ts` | Snowpark notebook preferences (`syntaxMode`). Loaded from backend via `GetNotebookPrefs`. |
 | `featureFlagsStore.ts` | Feature flag values and admin-locked flags. Optimistic defaults (all enabled) until `load()` fetches from backend. Reloaded after the user saves flags in the modal. |
 | `insertMappingStore.ts` | Transient state for the Insert Mapping feature: target table, source tables, and modal-open flag. No persistence. |
+| `mcpStore.ts` | Snapshot of running MCP sessions (`SessionInfo[]`). `refresh()` calls `ListMCPSessions` IPC; the Toolbar `MCPIndicator` and `MCPSessionsModal` subscribe. No persistence. |
 
 ## Patterns & integration
 

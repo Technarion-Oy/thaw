@@ -27,6 +27,7 @@ import {warehouse} from '../models';
 import {gitrepo} from '../models';
 import {backup} from '../models';
 import {filesystem} from '../models';
+import {mcp} from '../models';
 import {sfconfig} from '../models';
 
 export function AddBackup(arg1:string,arg2:string,arg3:string):Promise<void>;
@@ -287,6 +288,8 @@ export function GetKernelPythonVersion(arg1:string):Promise<string>;
 
 export function GetLocalFilePreview(arg1:string,arg2:fileformat.FileFormatConfig):Promise<fileformat.PreviewResult>;
 
+export function GetMCPSessionConfig(arg1:string):Promise<string>;
+
 export function GetNotebookCompletions(arg1:string,arg2:string,arg3:number,arg4:number):Promise<Array<snowpark.NotebookCompletion>>;
 
 export function GetNotebookHover(arg1:string,arg2:string,arg3:number,arg4:number):Promise<string>;
@@ -483,6 +486,8 @@ export function ListGitTags(arg1:string,arg2:string,arg3:string):Promise<Array<s
 
 export function ListIntegrations(arg1:string):Promise<Array<snowflake.IntegrationRow>>;
 
+export function ListMCPSessions():Promise<Array<mcp.SessionInfo>>;
+
 export function ListNotificationIntegrations():Promise<Array<string>>;
 
 export function ListObjects(arg1:string,arg2:string):Promise<Array<snowflake.SnowflakeObject>>;
@@ -629,6 +634,8 @@ export function StartDapProxy():Promise<void>;
 
 export function StartFileWatcher(arg1:string):Promise<void>;
 
+export function StartMCPSession(arg1:string,arg2:string,arg3:number):Promise<mcp.SessionInfo>;
+
 export function StartNotebookSession(arg1:string):Promise<void>;
 
 export function StartQuery(arg1:string,arg2:string):Promise<string>;
@@ -638,6 +645,8 @@ export function StartShell(arg1:string,arg2:string):Promise<void>;
 export function StopDapProxy():Promise<void>;
 
 export function StopFileWatcher():Promise<void>;
+
+export function StopMCPSession(arg1:string):Promise<void>;
 
 export function StopNotebookSession(arg1:string):Promise<void>;
 

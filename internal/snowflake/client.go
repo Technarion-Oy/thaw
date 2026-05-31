@@ -2227,8 +2227,7 @@ func (c *Client) ListExportableDatabases(ctx context.Context) ([]string, error) 
 
 // ListSchemas returns schemas inside a database.
 func (c *Client) ListSchemas(ctx context.Context, database string) ([]string, error) {
-	escaped := strings.ReplaceAll(database, `"`, `""`)
-	return c.queryStringSlice(ctx, fmt.Sprintf(`SHOW SCHEMAS IN DATABASE %s`, escaped), 1)
+	return c.queryStringSlice(ctx, fmt.Sprintf(`SHOW SCHEMAS IN DATABASE %s`, QuoteIdent(database)), 1)
 }
 
 // extractArgTypes parses the "arguments" column returned by SHOW PROCEDURES /
@@ -3209,6 +3208,12 @@ func (c *Client) GetObjectDDL(ctx context.Context, database, schema, kind, name,
 	// empty for zero-arg procedures) appended so Snowflake can resolve the
 	// overload.  Omitting the parentheses entirely causes GET_DDL to return
 	// "Object does not exist" even when the procedure exists.
+	//
+	// Safety: arguments is interpolated into qualified, which is then
+	// single-quote-escaped below before embedding in the GET_DDL string
+	// literal. Any single quotes in arguments are doubled, preventing
+	// breakout from the SQL string context. If this code is refactored,
+	// ensure arguments still passes through the same single-quote escaping.
 	upperKind := strings.ToUpper(kind)
 	if upperKind == "PROCEDURE" || upperKind == "FUNCTION" {
 		qualified += fmt.Sprintf("(%s)", arguments)

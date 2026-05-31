@@ -591,6 +591,15 @@ Open **Tools → Schema Migration…** in the menu bar to deploy local `.sql` DD
 - Git credentials are **never saved to disk** — tokens are held in memory only for the duration of the operation
 - OS junk files (`.DS_Store`, `Thumbs.db`, `desktop.ini`) are automatically excluded and added to `.gitignore`
 
+### MCP server
+- **Model Context Protocol** — expose the active Snowflake connection to external AI clients (Claude Desktop, Cursor, etc.) over a localhost SSE/HTTP transport, built on the official Go MCP SDK (`github.com/modelcontextprotocol/go-sdk`)
+- **Multi-session** — open **View → MCP Sessions…** to start one or more independent servers; each session binds its own dedicated Snowflake connection and listens on its own localhost port, auto-assigned from `9100` (overridable per session). Because each session opens a separate Snowflake connection, interactive authenticators (e.g. `externalbrowser`) may prompt again on start, and each running session consumes one additional Snowflake session
+- **Lifecycle** — sessions start/stop only on explicit user action and all stop cleanly on app quit; no auto-start. Sessions are **not persisted**: they live only for the lifetime of the running app and are not restored on the next launch
+- **Metadata Only execution mode** — read-only schema-browsing tools: `get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`
+- **Copy Config** — one click copies the client config block `{ "mcpServers": { "thaw-<label>": { "url": "http://localhost:<port>/sse" } } }`
+- A toolbar **MCP: N active** indicator opens the panel; toggleable via **View → Enabled Features → MCP Server** (admin-lockable)
+- **Security** — the listener binds only loopback and rejects non-loopback `Host` and cross-origin `Origin` headers (DNS-rebinding defense against malicious web pages). There is **no authentication token**, so any other local process on the same machine that can reach `localhost:<port>` can still call the read-only metadata tools; stop sessions when not in use
+
 ### UI
 - **Drag-and-drop panel layout** — every sidebar panel (Export DDL, File Browser, Git, Object Browser, Administration) has a drag handle at its top edge; drag panels between the left and right sidebars or reorder them within a sidebar; layout is persisted across sessions
 - **Reset Layout** — restore default panel positions and split ratio from the **Customize Layout…** dialog
@@ -598,7 +607,7 @@ Open **Tools → Schema Migration…** in the menu bar to deploy local `.sql` DD
 - **Resizable editor/results split** — drag the horizontal divider between the SQL editor and the results pane; ratio is persisted across sessions
 - **Object browser height** — the Objects panel is collapsible (click the label or the ▶/▼ chevron) and vertically resizable (drag the handle below the tree, 80 – 800 px); the Administration panel fills the remaining space
 - **Theming** — light, dark, and system-default themes; switch via **View → Appearance** in the native menu bar; preference is persisted across sessions
-- Native application menu bar with **File** (open / save / new tab), **View → Appearance** (System / Light / Dark), **AI → Configure AI…**, **Tools** (**Code Snippets…**, **Export Path Format…**, **Schema Migration…**, **Create dbt Project…**), **Snowpark** (**Check Environment…**, **Setup Environment…**, **New Notebook…**, **Open Notebook…**), and **Help** (**Function Catalog…**, **Keyboard Shortcuts…**) menus
+- Native application menu bar with **File** (open / save / new tab), **View → Appearance** (System / Light / Dark), **View** (**Enabled Features…**, **MCP Sessions…**, **Advanced → Session Management…**), **AI → Configure AI…**, **Tools** (**Code Snippets…**, **Export Path Format…**, **Schema Migration…**, **Create dbt Project…**), **Snowpark** (**Check Environment…**, **Setup Environment…**, **New Notebook…**, **Open Notebook…**), and **Help** (**Function Catalog…**, **Keyboard Shortcuts…**) menus
 - Object browser scrolls horizontally when object names are wider than the sidebar
 - Right-click context menu is always clamped inside the viewport — never overflows the screen edges
 - Closing the app while a query is running shows a confirmation dialog; if confirmed, the query is cancelled in Snowflake before exit
@@ -750,6 +759,7 @@ thaw/
 │   ├── snowgitrepo/               # Snowflake Git repository integration: CREATE/ALTER GIT REPOSITORY SQL builder
 │   ├── dbtproject/                # Snowflake-native DBT PROJECT objects: CREATE/ALTER/EXECUTE SQL builders
 │   ├── column/                    # Table column DDL builders: ADD/DROP/RENAME COLUMN, ALTER COLUMN (NOT NULL, type, comment)
+│   ├── mcp/                        # MCP servers (Go MCP SDK): multi-session manager, SSE/HTTP transport, schema-browsing tools
 │   ├── snowpark/                   # Snowpark/Jupyter support (Service pattern with NewService)
 │   ├── stage/                     # Stage creation SQL builder (internal/external, encryption, directory tables)
 │   ├── sysinfo/                   # Host system info (MemoryGB via sysctl)
@@ -766,12 +776,13 @@ thaw/
     │   ├── App.tsx                # Root component, Ant Design dark theme
     │   ├── main.tsx               # React entry point; suppresses WebView context menu
     │   ├── styles/global.css      # Global styles incl. Monaco occurrence-highlight class
-    │   ├── store/                   # Zustand stores (13 stores)
+    │   ├── store/                   # Zustand stores (14 stores)
     │   │   ├── connectionStore.ts  # Connection state
     │   │   ├── diffStore.ts        # Text comparison pending item + fetch state
     │   │   ├── featureFlagsStore.ts # Feature flags (loaded on startup, reloaded after modal save)
     │   │   ├── gitStore.ts         # Git / export directory state
     │   │   ├── insertMappingStore.ts # Insert Mapping source/target selection state
+    │   │   ├── mcpStore.ts         # Running MCP session list (refreshed from backend)
     │   │   ├── notebookPrefsStore.ts # Notebook preferences (persisted)
     │   │   ├── objectStore.ts      # Object browser state
     │   │   ├── panelLayoutStore.ts # Sidebar panel order, widths, editor split (persisted)
@@ -806,13 +817,13 @@ thaw/
     │       ├── procedure/            # Call Procedure / Call Function modals
     │       ├── results/              # ResultGrid, GridSearch, StatusBar, QuickChartModal, ColumnFilterDropdown, ConditionalFormattingModal, DataTypeFormatModal, ExplainModal, QueryProfileModal
     │       ├── secret/               # Secret management: create, modify (OAUTH2, PASSWORD, etc.)
-    │       ├── settings/             # AI settings, Feature Flags toggle, Layout settings
+    │       ├── settings/             # AI settings, Feature Flags toggle, Layout settings, MCP Sessions panel
     │       ├── shared/               # Shared UI utilities (ObjectNameCaseControl)
     │       ├── snippets/             # Code Snippets browser (Tools menu)
     │       ├── snowpark/             # Snowpark setup wizard, environment check, pip registries
     │       ├── task/                 # Task management: create, execute, properties, graph DAG, schedule editor
     │       ├── terminal/             # Embedded xterm.js terminal panel
-    │       └── toolbar/              # Unified toolbar: Toolbar shell
+    │       └── toolbar/              # Unified toolbar: Toolbar shell + MCP session indicator
     └── wailsjs/                   # Auto-generated Go→JS bridge (do not edit)
 ```
 

@@ -14,6 +14,7 @@ tab-specific handlers and optional extension slots.
 | File | Purpose |
 |------|---------|
 | `Toolbar.tsx` | The unified toolbar component. Renders: Run/Cancel execution buttons, New SQL / New Notebook / Save icon buttons, session selectors (role, warehouse, database, schema dropdowns), connection info (username tag, account/region, Open Snowsight link, Disconnect button). Exposes `contextSlot` and `primaryAction` extension points. |
+| `MCPIndicator.tsx` | Compact "MCP: N active" tag rendered in the toolbar's left group when one or more MCP sessions are running and the `mcpServer` flag is enabled. Subscribes to `mcpStore`; refreshes on the `thaw:mcp-changed` event; clicking dispatches `thaw:open-mcp-sessions` to open the MCP Sessions modal. Renders nothing when no sessions are active. |
 
 ## Patterns & integration
 

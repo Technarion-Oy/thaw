@@ -180,8 +180,8 @@ func DefaultNotebookPrefs() NotebookPrefs {
 //
 // Version tracks the schema revision so new flags introduced after an initial
 // save can be filled with their defaults rather than the zero value (false).
-// Current version: 12 (added ColumnManagement).
-const flagsVersion = 12
+// Current version: 13 (added MCPServer).
+const flagsVersion = 13
 
 type FeatureFlags struct {
 	Initialized bool `json:"initialized"`
@@ -247,6 +247,9 @@ type FeatureFlags struct {
 
 	// Schema Management
 	ColumnManagement bool `json:"columnManagement"` // Add/alter/drop columns from the sidebar tree
+
+	// Integrations
+	MCPServer bool `json:"mcpServer"` // Model Context Protocol server for external AI clients
 }
 
 // DefaultFeatureFlags returns a FeatureFlags with every feature enabled.
@@ -289,6 +292,7 @@ func DefaultFeatureFlags() FeatureFlags {
 		CrossTabSearch:             true,
 		FileWatcher:                true,
 		ColumnManagement:           true,
+		MCPServer:                  false,
 	}
 }
 
@@ -353,6 +357,10 @@ func MigrateFlags(f FeatureFlags) FeatureFlags {
 	setIfZero(&f.DbtProjectBrowser, defaults.DbtProjectBrowser)
 	// Version 11 → 12: ColumnManagement added; defaults to true.
 	setIfZero(&f.ColumnManagement, defaults.ColumnManagement)
+	// Version 12 → 13: MCPServer added; defaults to false (opt-in).
+	// setIfZero is a no-op here because the default is false (the zero
+	// value), but kept for consistency with the migration pattern.
+	setIfZero(&f.MCPServer, defaults.MCPServer)
 	f.Version = flagsVersion
 	return f
 }

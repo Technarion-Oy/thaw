@@ -21,6 +21,7 @@ import EditorPreferencesModal from "./components/editor/EditorPreferencesModal";
 import FeatureFlagsModal from "./components/settings/FeatureFlagsModal";
 import NotebookPrefsModal from "./components/notebook/NotebookPrefsModal";
 import SessionManagementModal from "./components/settings/SessionManagementModal";
+import MCPSessionsModal from "./components/settings/MCPSessionsModal";
 import { IsConnected } from "../wailsjs/go/app/App";
 import { ClipboardGetText, ClipboardSetText, EventsOn } from "../wailsjs/runtime/runtime";
 import { useThemeStore, type ThemePreference } from "./store/themeStore";
@@ -45,6 +46,7 @@ export default function App() {
   const [featureFlagsOpen, setFeatureFlagsOpen]         = useState(false);
   const [notebookPrefsOpen, setNotebookPrefsOpen]       = useState(false);
   const [sessionMgmtOpen, setSessionMgmtOpen]           = useState(false);
+  const [mcpSessionsOpen, setMcpSessionsOpen]           = useState(false);
   const diffError    = useDiffStore((s) => s.error);
   const clearDiffError = useDiffStore((s) => s.clearError);
 
@@ -148,6 +150,14 @@ export default function App() {
   useEffect(() => {
     const off = EventsOn("menu:session-management", () => setSessionMgmtOpen(true));
     return () => off();
+  }, []);
+
+  // Listen for "MCP Sessions…" menu event and the in-app toolbar indicator.
+  useEffect(() => {
+    const off = EventsOn("menu:mcp-sessions", () => setMcpSessionsOpen(true));
+    const open = () => setMcpSessionsOpen(true);
+    window.addEventListener("thaw:open-mcp-sessions", open);
+    return () => { off(); window.removeEventListener("thaw:open-mcp-sessions", open); };
   }, []);
 
   // Open the connect modal on cold startup when not yet connected.
@@ -370,6 +380,9 @@ export default function App() {
         )}
         {sessionMgmtOpen && (
           <SessionManagementModal onClose={() => setSessionMgmtOpen(false)} />
+        )}
+        {mcpSessionsOpen && (
+          <MCPSessionsModal onClose={() => setMcpSessionsOpen(false)} />
         )}
       </AntApp>
     </ConfigProvider>

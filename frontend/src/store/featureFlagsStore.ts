@@ -12,7 +12,8 @@ import { create } from "zustand";
 import { GetAdminLockedFlags, GetFeatureFlags } from "../../wailsjs/go/app/App";
 import type { config } from "../../wailsjs/go/models";
 
-// Optimistic defaults: every feature enabled until the backend responds.
+// Optimistic defaults: every feature enabled until the backend responds,
+// except opt-in features whose backend default is false (e.g. mcpServer).
 const allEnabled: config.FeatureFlags = {
   initialized: true,
   version: 1,
@@ -51,6 +52,7 @@ const allEnabled: config.FeatureFlags = {
   crossTabSearch: true,
   fileWatcher: true,
   columnManagement: true,
+  mcpServer: false,
 };
 
 // allLocked default: nothing is admin-locked.
@@ -92,6 +94,7 @@ const nothingLocked: config.FeatureFlags = {
   crossTabSearch: false,
   fileWatcher: false,
   columnManagement: false,
+  mcpServer: false,
 };
 
 interface FeatureFlagsState {

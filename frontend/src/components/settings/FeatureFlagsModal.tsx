@@ -449,6 +449,18 @@ export default function FeatureFlagsModal({ onClose }: Props) {
           />
         </Category>
 
+        {/* ── Integrations ── */}
+        <Category title="Integrations">
+          <FlagRow
+            label="MCP Server"
+            description="Expose the active Snowflake connection to external AI clients over a local Model Context Protocol server (View → MCP Sessions)."
+            checked={flags.mcpServer}
+            locked={locked.mcpServer}
+            onChange={(v) => set("mcpServer", v)}
+            preview
+          />
+        </Category>
+
       </div>
     </Modal>
   );

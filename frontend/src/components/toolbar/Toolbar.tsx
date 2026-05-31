@@ -23,6 +23,7 @@ import {
 } from "@ant-design/icons";
 import { useConnectionStore } from "../../store/connectionStore";
 import { useSessionStore } from "../../store/sessionStore";
+import MCPIndicator from "./MCPIndicator";
 
 const { Text } = Typography;
 
@@ -207,6 +208,9 @@ export default function Toolbar({
             {contextSlot}
           </>
         )}
+
+        {/* MCP running-session indicator (self-contained; hidden when none) */}
+        <MCPIndicator />
       </div>
 
       {/* ── Right: connect button or session context ── */}
