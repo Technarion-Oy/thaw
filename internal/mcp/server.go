@@ -28,5 +28,6 @@ func buildServer(client *snowflake.Client, mode string) *mcpsdk.Server {
 	}, nil)
 
 	registerTools(srv, client)
+	registerDiagTools(srv, client)
 	return srv
 }

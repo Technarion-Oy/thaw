@@ -17,20 +17,28 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sort"
+	"strings"
 	"testing"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"thaw/internal/snowflake"
+	"thaw/internal/sqleditor"
 )
 
-// expectedTools is the proof-of-life tool set the foundation server exposes.
+// expectedTools is the full tool set the server exposes (alphabetically sorted).
 var expectedTools = []string{
 	"describe_table",
+	"format_sql",
 	"get_ddl",
 	"get_session_context",
+	"get_snowflake_keywords",
 	"get_table_foreign_keys",
 	"list_databases",
 	"list_objects",
 	"list_schemas",
+	"suggest_join_conditions",
+	"validate_sql",
 }
 
 // TestServerExposesToolsOverSSE verifies that an external MCP client can
@@ -237,6 +245,364 @@ func TestAllowedDDLKinds(t *testing.T) {
 			t.Errorf("expected %q to be rejected", kind)
 		}
 	}
+}
+
+// TestValidateSqlPureMarkers calls validate_sql with a nil client and SQL that
+// has syntax errors, verifying that pure (phase-1) markers are returned even
+// without a live Snowflake connection.
+func TestValidateSqlPureMarkers(t *testing.T) {
+	// Unmatched parenthesis produces a syntax error marker.
+	markers := validateSQL(context.Background(), nil, "SELECT (1")
+	if len(markers) == 0 {
+		t.Fatal("expected at least one diagnostic marker for unmatched paren, got 0")
+	}
+	// All markers from the pure phase should have Severity 8 (Error) or 4 (Warning).
+	for i, m := range markers {
+		if m.Severity != 8 && m.Severity != 4 {
+			t.Errorf("marker[%d].Severity = %d, want 8 or 4", i, m.Severity)
+		}
+	}
+}
+
+// TestValidateSqlEmptyArrayNotNull verifies that clean SQL returns JSON "[]"
+// (not "null") through the tool handler, so external clients don't need to
+// special-case nil slices.
+func TestValidateSqlEmptyArrayNotNull(t *testing.T) {
+	srv := buildServer(nil, ExecutionModeMetadata)
+	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
+	httpSrv := httptest.NewServer(handler)
+	defer httpSrv.Close()
+
+	ctx := context.Background()
+	c := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test", Version: "v1"}, nil)
+	cs, err := c.Connect(ctx, &mcpsdk.SSEClientTransport{Endpoint: httpSrv.URL}, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = cs.Close() }()
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "validate_sql",
+		Arguments: validateSqlInput{SQL: "SELECT 1"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	text := extractText(t, res)
+	if strings.TrimSpace(text) != "[]" {
+		t.Errorf("expected empty array [], got: %s", text)
+	}
+}
+
+// TestFormatSqlInvalidCase verifies that invalid case values are rejected.
+func TestFormatSqlInvalidCase(t *testing.T) {
+	srv := buildServer(nil, ExecutionModeMetadata)
+	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
+	httpSrv := httptest.NewServer(handler)
+	defer httpSrv.Close()
+
+	ctx := context.Background()
+	c := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test", Version: "v1"}, nil)
+	cs, err := c.Connect(ctx, &mcpsdk.SSEClientTransport{Endpoint: httpSrv.URL}, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = cs.Close() }()
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "format_sql",
+		Arguments: formatSqlInput{
+			SQL:         "SELECT 1",
+			KeywordCase: "INVALID",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Errorf("expected IsError=true for invalid case value, got false")
+	}
+}
+
+// TestFormatSqlTool calls ApplyCasing through the format_sql path and verifies
+// keyword casing is applied.
+func TestFormatSqlTool(t *testing.T) {
+	cases := []struct {
+		name     string
+		sql      string
+		kwCase   string
+		idCase   string
+		fnCase   string
+		contains string
+	}{
+		{"uppercase keywords", "select 1", "UPPER", "", "", "SELECT"},
+		{"lowercase keywords", "SELECT 1", "lower", "", "", "select"},
+		{"preserve empty", "SELECT 1", "", "", "", "SELECT"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := buildServer(nil, ExecutionModeMetadata)
+			handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
+			httpSrv := httptest.NewServer(handler)
+			defer httpSrv.Close()
+
+			ctx := context.Background()
+			c := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test", Version: "v1"}, nil)
+			cs, err := c.Connect(ctx, &mcpsdk.SSEClientTransport{Endpoint: httpSrv.URL}, nil)
+			if err != nil {
+				t.Fatalf("connect: %v", err)
+			}
+			defer func() { _ = cs.Close() }()
+
+			res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+				Name: "format_sql",
+				Arguments: formatSqlInput{
+					SQL:            tc.sql,
+					KeywordCase:    tc.kwCase,
+					IdentifierCase: tc.idCase,
+					FunctionCase:   tc.fnCase,
+				},
+			})
+			if err != nil {
+				t.Fatalf("CallTool: %v", err)
+			}
+			text := extractText(t, res)
+			if !strings.Contains(text, tc.contains) {
+				t.Errorf("result %q does not contain %q", text, tc.contains)
+			}
+		})
+	}
+}
+
+// TestGetSnowflakeKeywordsTool verifies the keyword list is non-empty.
+func TestGetSnowflakeKeywordsTool(t *testing.T) {
+	srv := buildServer(nil, ExecutionModeMetadata)
+	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
+	httpSrv := httptest.NewServer(handler)
+	defer httpSrv.Close()
+
+	ctx := context.Background()
+	c := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test", Version: "v1"}, nil)
+	cs, err := c.Connect(ctx, &mcpsdk.SSEClientTransport{Endpoint: httpSrv.URL}, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = cs.Close() }()
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "get_snowflake_keywords",
+		Arguments: emptyInput{},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+
+	text := extractText(t, res)
+	var keywords []string
+	if err := json.Unmarshal([]byte(text), &keywords); err != nil {
+		t.Fatalf("payload is not valid JSON array: %v", err)
+	}
+	if len(keywords) < 10 {
+		t.Errorf("expected at least 10 keywords, got %d", len(keywords))
+	}
+}
+
+// TestValidateSqlToolSSE exercises validate_sql through the full SSE transport
+// with a nil client (phase-1 only), verifying the handler returns valid JSON.
+func TestValidateSqlToolSSE(t *testing.T) {
+	srv := buildServer(nil, ExecutionModeMetadata)
+	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
+	httpSrv := httptest.NewServer(handler)
+	defer httpSrv.Close()
+
+	ctx := context.Background()
+	c := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test", Version: "v1"}, nil)
+	cs, err := c.Connect(ctx, &mcpsdk.SSEClientTransport{Endpoint: httpSrv.URL}, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = cs.Close() }()
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "validate_sql",
+		Arguments: validateSqlInput{SQL: "SELECT (1"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	text := extractText(t, res)
+	// Result should be a JSON array of markers.
+	if !strings.HasPrefix(strings.TrimSpace(text), "[") {
+		t.Errorf("expected JSON array, got: %.80s", text)
+	}
+}
+
+// TestSuggestJoinConditionsNilClient verifies the nil-client error is returned
+// through the SSE transport.
+func TestSuggestJoinConditionsNilClient(t *testing.T) {
+	srv := buildServer(nil, ExecutionModeMetadata)
+	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
+	httpSrv := httptest.NewServer(handler)
+	defer httpSrv.Close()
+
+	ctx := context.Background()
+	c := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test", Version: "v1"}, nil)
+	cs, err := c.Connect(ctx, &mcpsdk.SSEClientTransport{Endpoint: httpSrv.URL}, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = cs.Close() }()
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "suggest_join_conditions",
+		Arguments: joinSuggestInput{TableA: "orders", TableB: "customers"},
+	})
+	// Per MCP spec, tool-level errors are surfaced as IsError=true on the
+	// result, not as a Go error from CallTool.
+	if err != nil {
+		t.Fatalf("CallTool returned Go error (expected IsError on result): %v", err)
+	}
+	if !res.IsError {
+		t.Errorf("expected IsError=true for nil client, got false")
+	}
+}
+
+// TestParseTableParts verifies the quote-aware qualified name parser.
+// Unquoted identifiers are uppercased (Snowflake canonical casing);
+// quoted identifiers preserve their original case.
+func TestParseTableParts(t *testing.T) {
+	cases := []struct {
+		input                         string
+		wantDB, wantSchema, wantTable string
+	}{
+		// Simple unquoted cases — uppercased.
+		{"orders", "", "", "ORDERS"},
+		{"public.orders", "", "PUBLIC", "ORDERS"},
+		{"mydb.public.orders", "MYDB", "PUBLIC", "ORDERS"},
+		// Quoted identifiers with dots — preserve case.
+		{`"my.db".public.orders`, "my.db", "PUBLIC", "ORDERS"},
+		{`mydb."my.schema".orders`, "MYDB", "my.schema", "ORDERS"},
+		{`mydb.public."my.table"`, "MYDB", "PUBLIC", "my.table"},
+		{`"a.b"."c.d"."e.f"`, "a.b", "c.d", "e.f"},
+		// Escaped quotes inside quoted identifier.
+		{`"say""hi".public.t`, `say"hi`, "PUBLIC", "T"},
+		// Two-part with quote.
+		{`"my.schema".orders`, "", "my.schema", "ORDERS"},
+		// Mixed case unquoted — folded to upper.
+		{"MyDb.MySchema.MyTable", "MYDB", "MYSCHEMA", "MYTABLE"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.input, func(t *testing.T) {
+			got := parseTableParts(tc.input)
+			if got.db != tc.wantDB || got.schema != tc.wantSchema || got.table != tc.wantTable {
+				t.Errorf("parseTableParts(%q) = {%q, %q, %q}, want {%q, %q, %q}",
+					tc.input, got.db, got.schema, got.table, tc.wantDB, tc.wantSchema, tc.wantTable)
+			}
+		})
+	}
+}
+
+// TestQualifyTableRef verifies session defaults are filled in for missing parts
+// and that unquoted identifiers are uppercased.
+func TestQualifyTableRef(t *testing.T) {
+	got := qualifyTableRef("orders", "MYDB", "PUBLIC")
+	if got.db != "MYDB" || got.schema != "PUBLIC" || got.table != "ORDERS" {
+		t.Errorf("qualifyTableRef(orders) = %+v, want {MYDB PUBLIC ORDERS}", got)
+	}
+	got = qualifyTableRef("other_schema.orders", "MYDB", "PUBLIC")
+	if got.db != "MYDB" || got.schema != "OTHER_SCHEMA" || got.table != "ORDERS" {
+		t.Errorf("qualifyTableRef(other_schema.orders) = %+v", got)
+	}
+	got = qualifyTableRef("otherdb.other_schema.orders", "MYDB", "PUBLIC")
+	if got.db != "OTHERDB" || got.schema != "OTHER_SCHEMA" || got.table != "ORDERS" {
+		t.Errorf("qualifyTableRef(otherdb.other_schema.orders) = %+v", got)
+	}
+	// Quoted identifiers preserve case.
+	got = qualifyTableRef(`"myTable"`, "MYDB", "PUBLIC")
+	if got.db != "MYDB" || got.schema != "PUBLIC" || got.table != "myTable" {
+		t.Errorf("qualifyTableRef(quoted) = %+v, want {MYDB PUBLIC myTable}", got)
+	}
+}
+
+// TestSfObjsToStoreObjects verifies the snowflake→sqleditor object conversion.
+func TestSfObjsToStoreObjects(t *testing.T) {
+	objs := []snowflake.SnowflakeObject{
+		{Name: "USERS", Kind: "TABLE"},
+		{Name: "V_USERS", Kind: "VIEW"},
+	}
+	got := sfObjsToStoreObjects("MYDB", "PUBLIC", objs)
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if got[0].DB != "MYDB" || got[0].Schema != "PUBLIC" || got[0].Name != "USERS" || got[0].Kind != "TABLE" {
+		t.Errorf("got[0] = %+v", got[0])
+	}
+	if got[1].Name != "V_USERS" || got[1].Kind != "VIEW" {
+		t.Errorf("got[1] = %+v", got[1])
+	}
+}
+
+// TestSfColsToColInfo verifies column info conversion.
+func TestSfColsToColInfo(t *testing.T) {
+	cols := []snowflake.ColumnInfo{
+		{Name: "ID", DataType: "NUMBER(38,0)", Nullable: false, IsPrimaryKey: true},
+		{Name: "NAME", DataType: "VARCHAR(256)", Nullable: true},
+	}
+	got := sfColsToColInfo(cols)
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if got[0].Name != "ID" || got[0].DataType != "NUMBER(38,0)" {
+		t.Errorf("got[0] = %+v", got[0])
+	}
+	if got[1].Name != "NAME" || got[1].DataType != "VARCHAR(256)" {
+		t.Errorf("got[1] = %+v", got[1])
+	}
+}
+
+// TestSfFKsToFKEntries verifies foreign key conversion.
+func TestSfFKsToFKEntries(t *testing.T) {
+	fks := []snowflake.TableForeignKey{
+		{
+			PKDatabase: "DB", PKSchema: "PUBLIC", PKTable: "PARENT", PKColumn: "ID",
+			FKDatabase: "DB", FKSchema: "PUBLIC", FKTable: "CHILD", FKColumn: "PARENT_ID",
+			ConstraintName: "FK_CHILD_PARENT", KeySequence: 1,
+		},
+	}
+	got := sfFKsToFKEntries(fks)
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1", len(got))
+	}
+	if got[0].PKTable != "PARENT" || got[0].FKColumn != "PARENT_ID" || got[0].ConstraintName != "FK_CHILD_PARENT" {
+		t.Errorf("got[0] = %+v", got[0])
+	}
+}
+
+// TestStoreObjsToResolvedRefs verifies store object → resolved ref conversion.
+func TestStoreObjsToResolvedRefs(t *testing.T) {
+	objs := []sqleditor.StoreObject{
+		{DB: "DB1", Schema: "S1", Name: "T1", Kind: "TABLE"},
+	}
+	got := storeObjsToResolvedRefs(objs)
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1", len(got))
+	}
+	if got[0].DB != "DB1" || got[0].Schema != "S1" || got[0].Name != "T1" {
+		t.Errorf("got[0] = %+v", got[0])
+	}
+}
+
+// extractText extracts the text from a single-content CallToolResult.
+func extractText(t *testing.T, res *mcpsdk.CallToolResult) string {
+	t.Helper()
+	if len(res.Content) != 1 {
+		t.Fatalf("content blocks = %d, want 1", len(res.Content))
+	}
+	tc, ok := res.Content[0].(*mcpsdk.TextContent)
+	if !ok {
+		t.Fatalf("content[0] is %T, want *mcpsdk.TextContent", res.Content[0])
+	}
+	return tc.Text
 }
 
 // TestJSONResultShaping verifies the tool result helpers wrap payloads as a

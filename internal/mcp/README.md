@@ -4,7 +4,7 @@
 
 ## Responsibility
 
-Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Client`, on `localhost`. A `Manager` owns the set of running sessions; each session runs an `http.Server` serving the Go MCP SDK's SSE handler and registers a fixed set of read-only schema-browsing tools. Sessions are started and stopped only on explicit user action (View → MCP Sessions); none start automatically.
+Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Client`, on `localhost`. A `Manager` owns the set of running sessions; each session runs an `http.Server` serving the Go MCP SDK's SSE handler and registers schema-browsing and SQL diagnostics tools. Sessions are started and stopped only on explicit user action (View → MCP Sessions); none start automatically.
 
 `internal/mcp` must **not** import `internal/app` — the dependency is one-way (`App` holds a `*mcp.Manager`). All Snowflake access goes through the `*snowflake.Client` handed to each session, mirroring the isolated per-tab session pattern.
 
@@ -16,8 +16,9 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `session.go` | Per-session `http.Server` + SSE lifecycle (`start`/`stop`/`info`); serves on the held loopback listener and owns/closes its `*snowflake.Client`. If the serve goroutine exits unexpectedly it closes the client and self-removes from the `Manager` (`removeIfPresent`) so no dead row or leaked connection lingers |
 | `security.go` | `loopbackGuard` middleware (rejects non-loopback `Host`/cross-origin `Origin` — DNS-rebinding defense), `tokenGuard` middleware (per-session token auth on the SSE GET), and `newSessionToken` (crypto-random token) |
 | `server.go` | `buildServer(client, mode)` — constructs the MCP server and registers tools |
-| `tools.go` | Tool input structs + `registerTools`; `jsonResult`/`textResult` content helpers |
-| `mcp_test.go` | SSE round-trip test (external client lists tools) + port-allocation test |
+| `tools.go` | Tool input structs + `registerTools` (schema-browsing tools); `jsonResult`/`textResult` content helpers |
+| `diag_tools.go` | `registerDiagTools` — SQL diagnostics & validation tools (`validate_sql`, `suggest_join_conditions`, `format_sql`, `get_snowflake_keywords`); type-conversion helpers for sqleditor ↔ snowflake types |
+| `mcp_test.go` | SSE round-trip test (external client lists tools), port-allocation test, diagnostics tool tests |
 | `doc.go` | Package doc + `thaw:domain: MCP Server` annotation |
 
 ## Key types & functions
@@ -38,9 +39,22 @@ Ports auto-assign sequentially from `basePort` (`9100`) up to `basePort+1000`. `
 
 `ExecutionModeMetadata` (`"metadata"`) is the only supported mode in the foundation milestone — sessions are read-only metadata browsers.
 
-### Tools (registered in `tools.go`)
+### Tools
 
-`get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`. Each delegates to the session's `*snowflake.Client` and returns its payload as indented-JSON text content (`get_ddl` returns raw text). The `get_ddl` tool validates the `kind` parameter against `allowedDDLKinds` before forwarding to `GetObjectDDL`.
+The server exposes 11 tools in two groups:
+
+**Schema-browsing tools** (registered in `tools.go`): `get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`. Each delegates to the session's `*snowflake.Client` and returns its payload as indented-JSON text content (`get_ddl` returns raw text). The `get_ddl` tool validates the `kind` parameter against `allowedDDLKinds` before forwarding to `GetObjectDDL`.
+
+**SQL diagnostics tools** (registered in `diag_tools.go`): `validate_sql`, `suggest_join_conditions`, `format_sql`, `get_snowflake_keywords`. These expose Thaw's `internal/sqleditor` diagnostics engine so external AI clients can iteratively refine SQL against real schema before delivering it to a tab or notebook. The MCP path runs the same validators as the editor but may produce different markers because it fetches fresh metadata from Snowflake on each call (vs. the frontend's warm object-store cache) and uses `sqleditor.ResolveTableRefs` for ref resolution (vs. the frontend's per-ref store lookup with typo-dropping).
+
+| Tool | Purpose |
+|---|---|
+| `validate_sql` | Full diagnostics pipeline — Phase 1 (syntax, patterns, datatypes) always runs; Phase 2 (table existence, semantics, bare column refs) runs best-effort when a Snowflake connection is available. Returns `[]DiagMarker`. |
+| `suggest_join_conditions` | FK/PK heuristic + type-compatible same-name columns for JOIN ON/USING between two tables. Requires a Snowflake connection. |
+| `format_sql` | Token-level keyword/identifier/function casing via `sqleditor.ApplyCasing`. No connection needed. |
+| `get_snowflake_keywords` | Sorted list of Snowflake reserved keywords. No connection needed. |
+
+**Diagnostics vs. EXPLAIN gate**: These tools serve the *editor/notebook delivery path* — the AI writes SQL, validates it, then places it in front of the human for review. This is distinct from the EXPLAIN precompilation gate (#352), which validates SQL immediately before execution.
 
 ## Patterns & integration
 
