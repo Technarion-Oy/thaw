@@ -614,6 +614,10 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       const diagMarkers: DiagMarker[] = [];
 
       try {
+        // NOTE: This diagnostics pipeline is mirrored server-side in
+        // internal/mcp/diag_tools.go (validateSQL). Changes to validation
+        // ordering or request assembly should be reflected there too (#336).
+
         // ADD || [] to prevent spreading null from Go's nil slices!
         const syntaxErrors = await AnalyzeSqlSyntax(diagSql);
         if (model.getVersionId() !== diagVersion) return;

@@ -21,6 +21,9 @@ import (
 	"testing"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"thaw/internal/snowflake"
+	"thaw/internal/sqleditor"
 )
 
 // expectedTools is the full tool set the server exposes (alphabetically sorted).
@@ -341,6 +344,121 @@ func TestGetSnowflakeKeywordsTool(t *testing.T) {
 	}
 	if len(keywords) < 10 {
 		t.Errorf("expected at least 10 keywords, got %d", len(keywords))
+	}
+}
+
+// TestParseTableParts verifies the quote-aware qualified name parser.
+func TestParseTableParts(t *testing.T) {
+	cases := []struct {
+		input                string
+		wantDB, wantSchema, wantTable string
+	}{
+		// Simple cases.
+		{"orders", "", "", "orders"},
+		{"public.orders", "", "public", "orders"},
+		{"mydb.public.orders", "mydb", "public", "orders"},
+		// Quoted identifiers with dots.
+		{`"my.db".public.orders`, "my.db", "public", "orders"},
+		{`mydb."my.schema".orders`, "mydb", "my.schema", "orders"},
+		{`mydb.public."my.table"`, "mydb", "public", "my.table"},
+		{`"a.b"."c.d"."e.f"`, "a.b", "c.d", "e.f"},
+		// Escaped quotes inside quoted identifier.
+		{`"say""hi".public.t`, `say"hi`, "public", "t"},
+		// Two-part with quote.
+		{`"my.schema".orders`, "", "my.schema", "orders"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.input, func(t *testing.T) {
+			got := parseTableParts(tc.input)
+			if got.db != tc.wantDB || got.schema != tc.wantSchema || got.table != tc.wantTable {
+				t.Errorf("parseTableParts(%q) = {%q, %q, %q}, want {%q, %q, %q}",
+					tc.input, got.db, got.schema, got.table, tc.wantDB, tc.wantSchema, tc.wantTable)
+			}
+		})
+	}
+}
+
+// TestQualifyTableRef verifies session defaults are filled in for missing parts.
+func TestQualifyTableRef(t *testing.T) {
+	got := qualifyTableRef("orders", "MYDB", "PUBLIC")
+	if got.db != "MYDB" || got.schema != "PUBLIC" || got.table != "orders" {
+		t.Errorf("qualifyTableRef(orders) = %+v, want {MYDB PUBLIC orders}", got)
+	}
+	got = qualifyTableRef("other_schema.orders", "MYDB", "PUBLIC")
+	if got.db != "MYDB" || got.schema != "other_schema" || got.table != "orders" {
+		t.Errorf("qualifyTableRef(other_schema.orders) = %+v", got)
+	}
+	got = qualifyTableRef("otherdb.other_schema.orders", "MYDB", "PUBLIC")
+	if got.db != "otherdb" || got.schema != "other_schema" || got.table != "orders" {
+		t.Errorf("qualifyTableRef(otherdb.other_schema.orders) = %+v", got)
+	}
+}
+
+// TestSfObjsToStoreObjects verifies the snowflake→sqleditor object conversion.
+func TestSfObjsToStoreObjects(t *testing.T) {
+	objs := []snowflake.SnowflakeObject{
+		{Name: "USERS", Kind: "TABLE"},
+		{Name: "V_USERS", Kind: "VIEW"},
+	}
+	got := sfObjsToStoreObjects("MYDB", "PUBLIC", objs)
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if got[0].DB != "MYDB" || got[0].Schema != "PUBLIC" || got[0].Name != "USERS" || got[0].Kind != "TABLE" {
+		t.Errorf("got[0] = %+v", got[0])
+	}
+	if got[1].Name != "V_USERS" || got[1].Kind != "VIEW" {
+		t.Errorf("got[1] = %+v", got[1])
+	}
+}
+
+// TestSfColsToColInfo verifies column info conversion.
+func TestSfColsToColInfo(t *testing.T) {
+	cols := []snowflake.ColumnInfo{
+		{Name: "ID", DataType: "NUMBER(38,0)", Nullable: false, IsPrimaryKey: true},
+		{Name: "NAME", DataType: "VARCHAR(256)", Nullable: true},
+	}
+	got := sfColsToColInfo(cols)
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if got[0].Name != "ID" || got[0].DataType != "NUMBER(38,0)" {
+		t.Errorf("got[0] = %+v", got[0])
+	}
+	if got[1].Name != "NAME" || got[1].DataType != "VARCHAR(256)" {
+		t.Errorf("got[1] = %+v", got[1])
+	}
+}
+
+// TestSfFKsToFKEntries verifies foreign key conversion.
+func TestSfFKsToFKEntries(t *testing.T) {
+	fks := []snowflake.TableForeignKey{
+		{
+			PKDatabase: "DB", PKSchema: "PUBLIC", PKTable: "PARENT", PKColumn: "ID",
+			FKDatabase: "DB", FKSchema: "PUBLIC", FKTable: "CHILD", FKColumn: "PARENT_ID",
+			ConstraintName: "FK_CHILD_PARENT", KeySequence: 1,
+		},
+	}
+	got := sfFKsToFKEntries(fks)
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1", len(got))
+	}
+	if got[0].PKTable != "PARENT" || got[0].FKColumn != "PARENT_ID" || got[0].ConstraintName != "FK_CHILD_PARENT" {
+		t.Errorf("got[0] = %+v", got[0])
+	}
+}
+
+// TestStoreObjsToResolvedRefs verifies store object → resolved ref conversion.
+func TestStoreObjsToResolvedRefs(t *testing.T) {
+	objs := []sqleditor.StoreObject{
+		{DB: "DB1", Schema: "S1", Name: "T1", Kind: "TABLE"},
+	}
+	got := storeObjsToResolvedRefs(objs)
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1", len(got))
+	}
+	if got[0].DB != "DB1" || got[0].Schema != "S1" || got[0].Name != "T1" {
+		t.Errorf("got[0] = %+v", got[0])
 	}
 }
 

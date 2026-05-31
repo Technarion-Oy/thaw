@@ -17,6 +17,7 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"thaw/internal/logger"
 	"thaw/internal/snowflake"
 	"thaw/internal/sqleditor"
 )
@@ -86,6 +87,11 @@ func registerDiagTools(srv *mcpsdk.Server, client *snowflake.Client) {
 // validations) always runs. Phase 2 (schema-aware) runs best-effort when a
 // Snowflake client is available; if any phase-2 step fails, only phase-1
 // markers are returned.
+//
+// NOTE: This pipeline mirrors the frontend orchestration in
+// frontend/src/components/editor/SqlEditor.tsx (runDiagnostics, ~L601).
+// Changes to the validation ordering or request assembly should be reflected
+// in both locations until a shared orchestrator is extracted (see #336).
 func validateSQL(ctx context.Context, client *snowflake.Client, sql string) []sqleditor.DiagMarker {
 	// Phase 1 — pure validations (no network).
 	syntaxMarkers := sqleditor.ValidateSyntax(sql)
@@ -102,6 +108,7 @@ func validateSQL(ctx context.Context, client *snowflake.Client, sql string) []sq
 
 	phase2, err := validateSQLSchemaAware(ctx, client, sql, stmtRanges)
 	if err != nil {
+		logger.L.Debug("mcp validate_sql phase-2 skipped", "err", err)
 		return phase1
 	}
 
@@ -142,10 +149,7 @@ func validateSQLSchemaAware(ctx context.Context, client *snowflake.Client, sql s
 	})
 
 	// Gather column info for resolved tables.
-	colEntries, err := gatherColumnEntries(ctx, client, resolvedRefs)
-	if err != nil {
-		return nil, err
-	}
+	colEntries := fetchColumnEntries(ctx, client, resolvedRefs)
 
 	semanticMarkers := sqleditor.ValidateSemantics(sql, resolvedRefs, colEntries)
 
@@ -203,7 +207,8 @@ func gatherMetadata(ctx context.Context, client *snowflake.Client, refs []sqledi
 		// List schemas for each database.
 		schemas, err := client.ListSchemas(ctx, ds.db)
 		if err != nil {
-			continue // best-effort
+			logger.L.Debug("mcp validate_sql: ListSchemas skipped", "db", ds.db, "err", err)
+			continue
 		}
 		for _, s := range schemas {
 			knownSchemas = append(knownSchemas, sqleditor.SchemaEntry{
@@ -215,7 +220,8 @@ func gatherMetadata(ctx context.Context, client *snowflake.Client, refs []sqledi
 		// List objects in the specific schema.
 		objs, err := client.ListObjects(ctx, ds.db, ds.schema)
 		if err != nil {
-			continue // best-effort
+			logger.L.Debug("mcp validate_sql: ListObjects skipped", "db", ds.db, "schema", ds.schema, "err", err)
+			continue
 		}
 		storeObjects = append(storeObjects, sfObjsToStoreObjects(ds.db, ds.schema, objs)...)
 	}
@@ -228,8 +234,9 @@ func gatherMetadata(ctx context.Context, client *snowflake.Client, refs []sqledi
 	return storeObjects, knownDatabases, knownSchemas, nil
 }
 
-// gatherColumnEntries fetches column info for each unique resolved table.
-func gatherColumnEntries(ctx context.Context, client *snowflake.Client, refs []sqleditor.ResolvedRef) ([]sqleditor.ColEntry, error) {
+// fetchColumnEntries fetches column info for each unique resolved table.
+// Errors for individual tables are logged and skipped (best-effort).
+func fetchColumnEntries(ctx context.Context, client *snowflake.Client, refs []sqleditor.ResolvedRef) []sqleditor.ColEntry {
 	type tableKey struct{ db, schema, name string }
 	seen := make(map[tableKey]bool)
 	var entries []sqleditor.ColEntry
@@ -247,7 +254,8 @@ func gatherColumnEntries(ctx context.Context, client *snowflake.Client, refs []s
 
 		cols, err := client.GetTableColumnsWithTypes(ctx, ref.DB, ref.Schema, ref.Name)
 		if err != nil {
-			continue // best-effort: skip tables we can't describe
+			logger.L.Debug("mcp: GetTableColumnsWithTypes skipped", "table", ref.DB+"."+ref.Schema+"."+ref.Name, "err", err)
+			continue
 		}
 		entries = append(entries, sqleditor.ColEntry{
 			DB:     ref.DB,
@@ -257,7 +265,7 @@ func gatherColumnEntries(ctx context.Context, client *snowflake.Client, refs []s
 		})
 	}
 
-	return entries, nil
+	return entries
 }
 
 // suggestJoinConditions computes JOIN ON suggestions for two tables.
@@ -275,19 +283,10 @@ func suggestJoinConditions(ctx context.Context, client *snowflake.Client, tableA
 		{DB: refB.db, Schema: refB.schema, Name: refB.table},
 	}
 
-	// Gather column info.
-	var colEntries []sqleditor.ColEntry
-	for _, ref := range resolvedRefs {
-		cols, err := client.GetTableColumnsWithTypes(ctx, ref.DB, ref.Schema, ref.Name)
-		if err != nil {
-			return nil, fmt.Errorf("describe %s.%s.%s: %w", ref.DB, ref.Schema, ref.Name, err)
-		}
-		colEntries = append(colEntries, sqleditor.ColEntry{
-			DB:     ref.DB,
-			Schema: ref.Schema,
-			Name:   ref.Name,
-			Cols:   sfColsToColInfo(cols),
-		})
+	// Gather column info via shared helper.
+	colEntries := fetchColumnEntries(ctx, client, resolvedRefs)
+	if len(colEntries) < 2 {
+		return nil, fmt.Errorf("could not describe both tables")
 	}
 
 	// Gather foreign key info.
@@ -297,6 +296,7 @@ func suggestJoinConditions(ctx context.Context, client *snowflake.Client, tableA
 		if err != nil {
 			// FKs are best-effort — the suggestion engine can still use
 			// type-compatible same-name columns without FK data.
+			logger.L.Debug("mcp suggest_join_conditions: GetTableForeignKeys skipped", "table", ref.DB+"."+ref.Schema+"."+ref.Name, "err", err)
 			fkEntries = append(fkEntries, sqleditor.TableFKEntry{
 				DB: ref.DB, Schema: ref.Schema, Name: ref.Name,
 			})
@@ -382,17 +382,47 @@ type qualifiedParts struct {
 	db, schema, table string
 }
 
-// parseTableParts splits a dot-separated qualified name into db, schema, table.
+// parseTableParts splits a qualified name into db, schema, table, respecting
+// double-quoted identifiers that may contain dots (e.g. `db."my.schema".table`).
 func parseTableParts(name string) qualifiedParts {
-	parts := strings.Split(name, ".")
+	parts := splitQualifiedName(name)
 	switch len(parts) {
 	case 3:
 		return qualifiedParts{db: parts[0], schema: parts[1], table: parts[2]}
 	case 2:
 		return qualifiedParts{schema: parts[0], table: parts[1]}
 	default:
-		return qualifiedParts{table: name}
+		return qualifiedParts{table: parts[0]}
 	}
+}
+
+// splitQualifiedName splits a potentially quoted identifier chain on dots,
+// respecting double-quoted segments. Quotes are stripped from the returned parts.
+func splitQualifiedName(name string) []string {
+	var parts []string
+	var current strings.Builder
+	inQuotes := false
+
+	for i := 0; i < len(name); i++ {
+		ch := name[i]
+		switch {
+		case ch == '"':
+			if inQuotes && i+1 < len(name) && name[i+1] == '"' {
+				// Escaped quote inside quoted identifier ("").
+				current.WriteByte('"')
+				i++
+			} else {
+				inQuotes = !inQuotes
+			}
+		case ch == '.' && !inQuotes:
+			parts = append(parts, current.String())
+			current.Reset()
+		default:
+			current.WriteByte(ch)
+		}
+	}
+	parts = append(parts, current.String())
+	return parts
 }
 
 // qualifyTableRef parses a table name and fills in missing db/schema from
