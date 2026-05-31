@@ -37,7 +37,7 @@ func TestExplainGateSelectAllowed(t *testing.T) {
 		t.Error("expected at least one operation in allowed plan")
 	}
 	for _, op := range v.Operations {
-		if !isAllowedOp(op) {
+		if !mcp.IsReadOnlyOp(op) {
 			t.Errorf("operation %q is not in readOnlyOps allow-list", op)
 		}
 	}
@@ -132,20 +132,4 @@ func TestExplainGateDeleteRejected(t *testing.T) {
 	if v.Allowed {
 		t.Fatalf("expected rejection for DELETE, got allowed (ops: %v)", v.Operations)
 	}
-}
-
-// isAllowedOp checks if an operation name is in the exported readOnlyOps.
-// Since the map is not exported, we maintain a local copy for verification.
-func isAllowedOp(op string) bool {
-	allowed := map[string]bool{
-		"Result": true, "Filter": true, "TableScan": true, "Join": true,
-		"JoinFilter": true, "Aggregate": true, "GroupingSets": true,
-		"Sort": true, "SortWithLimit": true, "Limit": true,
-		"UnionAll": true, "WithClause": true, "WithReference": true,
-		"Subquery": true, "ExternalFunction": true, "InMemoryTableScan": true,
-		"ValuesClause": true, "Generator": true, "Flatten": true,
-		"ExternalScan": true, "WindowFunction": true, "Projection": true,
-		"CartesianJoin": true, "SetOperation": true, "GlobalStats": true,
-	}
-	return allowed[op]
 }

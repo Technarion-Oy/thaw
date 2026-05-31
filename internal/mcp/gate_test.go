@@ -31,9 +31,9 @@ func (f *fakeQueryRunner) QuerySingle(_ context.Context, _ string) (*snowflake.Q
 // explainResult builds a QueryResult that mimics EXPLAIN USING TABULAR output
 // with the given operation names.
 func explainResult(ops ...string) *snowflake.QueryResult {
-	rows := make([][]interface{}, len(ops))
+	rows := make([][]any, len(ops))
 	for i, op := range ops {
-		rows[i] = []interface{}{"step", op, float64(i)}
+		rows[i] = []any{"step", op, float64(i)}
 	}
 	return &snowflake.QueryResult{
 		Columns: []string{"step", "operation", "id"},
@@ -84,9 +84,16 @@ func TestIsUSEStatement(t *testing.T) {
 		{"USE SCHEMA PUBLIC", true},
 		{"USE SECONDARY ROLES NONE", true},
 		{"  USE ROLE FOO  ", true},
+		// Leading comments should be stripped.
+		{"/* bypass */ USE ROLE SYSADMIN", true},
+		{"-- comment\nUSE ROLE SYSADMIN", true},
+		{"/* a */ /* b */ USE ROLE X", true},
+		{"-- line1\n-- line2\nUSE DATABASE DB", true},
+		// Non-USE statements.
 		{"SELECT 1", false},
 		{"CREATE TABLE t (id INT)", false},
 		{"USELESS_FUNC()", false},
+		{"/* USE ROLE X */ SELECT 1", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.sql, func(t *testing.T) {
@@ -104,10 +111,10 @@ func TestReadOnlyOpsDefaultDeny(t *testing.T) {
 	allowed := []string{
 		"Result", "Filter", "TableScan", "Join", "JoinFilter",
 		"Aggregate", "Sort", "SortWithLimit", "Limit", "UnionAll",
-		"WithClause", "WithReference", "Subquery", "ExternalFunction",
+		"WithClause", "WithReference", "Subquery",
 		"InMemoryTableScan", "ValuesClause", "Generator", "Flatten",
 		"ExternalScan", "WindowFunction", "Projection", "CartesianJoin",
-		"SetOperation", "GroupingSets",
+		"SetOperation", "GroupingSets", "GlobalStats",
 	}
 	for _, op := range allowed {
 		if !readOnlyOps[op] {
@@ -117,6 +124,7 @@ func TestReadOnlyOpsDefaultDeny(t *testing.T) {
 	denied := []string{
 		"Insert", "Update", "Delete", "Merge", "CreateTable",
 		"CreateView", "DropTable", "AlterTable", "Copy", "Put",
+		"ExternalFunction",
 	}
 	for _, op := range denied {
 		if readOnlyOps[op] {
@@ -187,6 +195,17 @@ func TestCheckGateRejectUSE(t *testing.T) {
 	}
 }
 
+func TestCheckGateRejectUSEWithComments(t *testing.T) {
+	runner := &fakeQueryRunner{result: explainResult("Result")}
+	v, err := CheckGate(context.Background(), runner, "/* bypass */ USE ROLE SYSADMIN")
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if v.Allowed {
+		t.Fatal("expected rejection for USE statement with leading comment")
+	}
+}
+
 func TestCheckGateEmptySQL(t *testing.T) {
 	runner := &fakeQueryRunner{result: explainResult("Result")}
 	v, err := CheckGate(context.Background(), runner, "")
@@ -218,6 +237,17 @@ func TestCheckGateUnknownOp(t *testing.T) {
 	}
 }
 
+func TestCheckGateRejectExternalFunction(t *testing.T) {
+	runner := &fakeQueryRunner{result: explainResult("Result", "ExternalFunction")}
+	v, err := CheckGate(context.Background(), runner, "SELECT exfil_func(CURRENT_USER())")
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if v.Allowed {
+		t.Fatal("expected rejection for ExternalFunction (can invoke arbitrary HTTP endpoints)")
+	}
+}
+
 func TestCheckGateExplainError(t *testing.T) {
 	runner := &fakeQueryRunner{err: fmt.Errorf("snowflake: compilation error")}
 	_, err := CheckGate(context.Background(), runner, "SELECT INVALID SYNTAX")
@@ -231,7 +261,7 @@ func TestCheckGateExplainError(t *testing.T) {
 func TestExtractOperationsMissingColumn(t *testing.T) {
 	result := &snowflake.QueryResult{
 		Columns: []string{"step", "id"},
-		Rows:    [][]interface{}{{"step1", float64(0)}},
+		Rows:    [][]any{{"step1", float64(0)}},
 	}
 	_, err := extractOperations(result)
 	if err == nil {
@@ -254,5 +284,33 @@ func TestExtractOperationsDedup(t *testing.T) {
 		if i >= len(ops) || ops[i] != w {
 			t.Errorf("ops[%d] = %q, want %q", i, ops[i], w)
 		}
+	}
+}
+
+// ── stripLeadingComments ────────────────────────────────────────────────────
+
+func TestStripLeadingComments(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"no comment", "SELECT 1", "SELECT 1"},
+		{"line comment", "-- comment\nSELECT 1", "SELECT 1"},
+		{"block comment", "/* comment */ SELECT 1", "SELECT 1"},
+		{"multiple line comments", "-- a\n-- b\nSELECT 1", "SELECT 1"},
+		{"nested block comments", "/* a */ /* b */ SELECT 1", "SELECT 1"},
+		{"mixed", "-- line\n/* block */ SELECT 1", "SELECT 1"},
+		{"only comment", "-- just a comment", ""},
+		{"unclosed block", "/* unclosed", ""},
+		{"comment then USE", "/* x */ USE ROLE FOO", "USE ROLE FOO"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := stripLeadingComments(tc.in)
+			if got != tc.want {
+				t.Errorf("stripLeadingComments(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
 	}
 }

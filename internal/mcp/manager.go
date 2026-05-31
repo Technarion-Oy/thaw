@@ -77,8 +77,9 @@ func NewManager() *Manager {
 // label must be unique among running sessions. If port is 0 a free port is
 // auto-assigned starting at basePort. The session takes ownership of client
 // and closes it when stopped. cfg controls optional role/warehouse pinning
-// applied at session startup.
-func (m *Manager) Start(label, connLabel, mode string, port int, client *snowflake.Client, cfg SessionConfig) (SessionInfo, error) {
+// applied at session startup. The context is used for the initial session
+// setup (USE ROLE, USE WAREHOUSE, etc.) and can be cancelled by the caller.
+func (m *Manager) Start(ctx context.Context, label, connLabel, mode string, port int, client *snowflake.Client, cfg SessionConfig) (SessionInfo, error) {
 	if label == "" {
 		return SessionInfo{}, fmt.Errorf("mcp: session label is required")
 	}
@@ -90,7 +91,6 @@ func (m *Manager) Start(label, connLabel, mode string, port int, client *snowfla
 	}
 
 	// Apply session configuration before registering the session.
-	ctx := context.Background()
 	if cfg.Role != "" {
 		if err := client.UseRole(ctx, cfg.Role); err != nil {
 			return SessionInfo{}, fmt.Errorf("mcp: failed to set role: %w", err)

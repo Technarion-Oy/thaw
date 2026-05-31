@@ -19,6 +19,12 @@ import (
 	"thaw/internal/snowflake"
 )
 
+// maxMCPResultRows is the maximum number of rows returned from the MCP
+// execute_snowflake_sql tool. This is much lower than the 50k cap in
+// QuerySingle because MCP responses are serialized as JSON text content and
+// sent over SSE — large payloads can exhaust memory or overwhelm the client.
+const maxMCPResultRows = 1000
+
 // Tool input types for SQL execution tools.
 
 type executeSQLInput struct {
@@ -68,6 +74,10 @@ func registerSQLTools(srv *mcpsdk.Server, client *snowflake.Client, mode string,
 		result, err := client.QuerySingle(ctx, in.SQL)
 		if err != nil {
 			return nil, nil, err
+		}
+		if len(result.Rows) > maxMCPResultRows {
+			result.Rows = result.Rows[:maxMCPResultRows]
+			result.Truncated = true
 		}
 		return jsonResult(result), nil, nil
 	})

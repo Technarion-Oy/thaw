@@ -65,7 +65,7 @@ func (a *App) StartMCPSession(label, mode string, port int, role, warehouse, sec
 	}
 
 	connLabel := fmt.Sprintf("%s / %s", params.Account, params.User)
-	info, err := a.mcpManager.Start(label, connLabel, mode, port, client, cfg)
+	info, err := a.mcpManager.Start(a.ctx, label, connLabel, mode, port, client, cfg)
 	if err != nil {
 		_ = client.Close()
 		return mcp.SessionInfo{}, err

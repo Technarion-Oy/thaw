@@ -37,6 +37,11 @@ type GateVerdict struct {
 // operation not in this set causes the gate to reject the statement. The set
 // is intentionally conservative — it is better to over-reject than to let a
 // mutation through.
+//
+// ExternalFunction is intentionally excluded: Snowflake external functions
+// invoke arbitrary HTTP endpoints, so an LLM could exfiltrate data or trigger
+// side effects on external services. Queries using external functions are
+// rejected by the gate.
 var readOnlyOps = map[string]bool{
 	"Result":            true,
 	"Filter":            true,
@@ -52,7 +57,6 @@ var readOnlyOps = map[string]bool{
 	"WithClause":        true,
 	"WithReference":     true,
 	"Subquery":          true,
-	"ExternalFunction":  true,
 	"InMemoryTableScan": true,
 	"ValuesClause":      true,
 	"Generator":         true,
@@ -65,13 +69,49 @@ var readOnlyOps = map[string]bool{
 	"GlobalStats":       true,
 }
 
-// isUSEStatement returns true if sql is a USE ROLE/WAREHOUSE/DATABASE/SCHEMA
-// or USE SECONDARY ROLES statement. These are rejected by the gate because
-// they can change session context — context-switching is exposed through
-// dedicated trusted tools instead.
+// IsReadOnlyOp reports whether op is in the EXPLAIN gate's allow-list.
+// Exported for use in integration tests to avoid duplicating the map.
+func IsReadOnlyOp(op string) bool {
+	return readOnlyOps[op]
+}
+
+// isUSEStatement returns true if sql (after stripping leading SQL comments)
+// starts with "USE ". This is a best-effort early-rejection layer that
+// improves traceability — if a USE statement slips past (e.g. via an
+// unexpected comment syntax), layer 3 (EXPLAIN USING TABULAR) will still
+// catch it because Snowflake's EXPLAIN on a USE statement either errors or
+// produces non-read-only operations.
 func isUSEStatement(sql string) bool {
-	upper := strings.ToUpper(strings.TrimSpace(sql))
+	stripped := stripLeadingComments(sql)
+	upper := strings.ToUpper(strings.TrimSpace(stripped))
 	return strings.HasPrefix(upper, "USE ")
+}
+
+// stripLeadingComments removes leading line comments (--) and block comments
+// (/* */) from sql, returning the remainder. It does not handle nested block
+// comments (Snowflake doesn't support them either).
+func stripLeadingComments(sql string) string {
+	s := strings.TrimSpace(sql)
+	for len(s) > 0 {
+		if strings.HasPrefix(s, "--") {
+			// Line comment: skip to end of line.
+			if idx := strings.IndexByte(s, '\n'); idx >= 0 {
+				s = strings.TrimSpace(s[idx+1:])
+			} else {
+				return "" // entire input is a line comment
+			}
+		} else if strings.HasPrefix(s, "/*") {
+			// Block comment: skip to closing */.
+			if idx := strings.Index(s, "*/"); idx >= 0 {
+				s = strings.TrimSpace(s[idx+2:])
+			} else {
+				return "" // unclosed block comment
+			}
+		} else {
+			break
+		}
+	}
+	return s
 }
 
 // CheckGate runs the three-layer EXPLAIN precompilation gate:
@@ -91,9 +131,10 @@ func CheckGate(ctx context.Context, runner queryRunner, sql string) (GateVerdict
 			Reason: fmt.Sprintf("multi-statement SQL not allowed (%d statements)", len(stmts)),
 		}, nil
 	}
-	stmt := strings.TrimSpace(stmts[0])
+	stmt := stmts[0]
 
-	// Layer 2: reject USE statements.
+	// Layer 2: reject USE statements (best-effort early check; layer 3 is
+	// the authoritative backstop — see isUSEStatement doc).
 	if isUSEStatement(stmt) {
 		return GateVerdict{
 			Reason: "USE statements are not allowed; use the dedicated context-switching tools",
