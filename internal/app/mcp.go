@@ -96,7 +96,7 @@ func (a *App) GetMCPSessionConfig(label string) (string, error) {
 			},
 		},
 	}
-	b, err := json.MarshalIndent(cfg, "", "  ")
+	b, err := json.Marshal(cfg)
 	if err != nil {
 		return "", err
 	}
