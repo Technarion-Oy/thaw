@@ -2105,8 +2105,7 @@ func (c *Client) GetWarehouseDDL(ctx context.Context, name string) (string, erro
 
 // UseRole switches the active role for the current session.
 func (c *Client) UseRole(ctx context.Context, role string) error {
-	escaped := strings.ReplaceAll(role, `"`, `""`)
-	if _, err := c.db.ExecContext(ctx, fmt.Sprintf(`USE ROLE %s`, escaped)); err != nil {
+	if _, err := c.db.ExecContext(ctx, fmt.Sprintf(`USE ROLE %s`, QuoteIdent(role))); err != nil {
 		return err
 	}
 	c.connector.mu.Lock()
@@ -2121,8 +2120,7 @@ func (c *Client) UseRole(ctx context.Context, role string) error {
 
 // UseWarehouse switches the active warehouse for the current session.
 func (c *Client) UseWarehouse(ctx context.Context, warehouse string) error {
-	escaped := strings.ReplaceAll(warehouse, `"`, `""`)
-	if _, err := c.db.ExecContext(ctx, fmt.Sprintf(`USE WAREHOUSE %s`, escaped)); err != nil {
+	if _, err := c.db.ExecContext(ctx, fmt.Sprintf(`USE WAREHOUSE %s`, QuoteIdent(warehouse))); err != nil {
 		return err
 	}
 	c.connector.mu.Lock()
@@ -2138,8 +2136,7 @@ func (c *Client) UseWarehouse(ctx context.Context, warehouse string) error {
 // UseDatabase switches the active database for the current session.
 // Switching the database also resets the active schema.
 func (c *Client) UseDatabase(ctx context.Context, database string) error {
-	escaped := strings.ReplaceAll(database, `"`, `""`)
-	if _, err := c.db.ExecContext(ctx, fmt.Sprintf(`USE DATABASE %s`, escaped)); err != nil {
+	if _, err := c.db.ExecContext(ctx, fmt.Sprintf(`USE DATABASE %s`, QuoteIdent(database))); err != nil {
 		return err
 	}
 	c.connector.mu.Lock()
@@ -2160,13 +2157,11 @@ func (c *Client) UseSchema(ctx context.Context, schema string) error {
 	db := c.connector.db
 	c.connector.mu.RUnlock()
 
-	escapedSc := strings.ReplaceAll(schema, `"`, `""`)
 	var query string
 	if db != "" {
-		escapedDb := strings.ReplaceAll(db, `"`, `""`)
-		query = fmt.Sprintf(`USE SCHEMA %s.%s`, escapedDb, escapedSc)
+		query = fmt.Sprintf(`USE SCHEMA %s.%s`, QuoteIdent(db), QuoteIdent(schema))
 	} else {
-		query = fmt.Sprintf(`USE SCHEMA %s`, escapedSc)
+		query = fmt.Sprintf(`USE SCHEMA %s`, QuoteIdent(schema))
 	}
 
 	if _, err := c.db.ExecContext(ctx, query); err != nil {

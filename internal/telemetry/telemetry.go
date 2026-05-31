@@ -170,7 +170,7 @@ func newSessionID() string {
 // sendRemote is the placeholder for delivering an event to a remote backend.
 // Implement this function when an analytics service is chosen.
 //
-//nolint:unused,deadcode
+//nolint:unused
 func sendRemote(_ Event, _ Props) {
 	// TODO: implement remote event delivery.
 }

@@ -634,7 +634,7 @@ export function StartDapProxy():Promise<void>;
 
 export function StartFileWatcher(arg1:string):Promise<void>;
 
-export function StartMCPSession(arg1:string,arg2:string,arg3:number):Promise<mcp.SessionInfo>;
+export function StartMCPSession(arg1:string,arg2:string,arg3:number,arg4:string,arg5:string,arg6:string):Promise<mcp.SessionInfo>;
 
 export function StartNotebookSession(arg1:string):Promise<void>;
 

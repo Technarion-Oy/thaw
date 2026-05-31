@@ -1210,8 +1210,8 @@ export function StartFileWatcher(arg1) {
   return window['go']['app']['App']['StartFileWatcher'](arg1);
 }
 
-export function StartMCPSession(arg1, arg2, arg3) {
-  return window['go']['app']['App']['StartMCPSession'](arg1, arg2, arg3);
+export function StartMCPSession(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['app']['App']['StartMCPSession'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
 export function StartNotebookSession(arg1) {

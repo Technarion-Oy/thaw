@@ -31,8 +31,9 @@ func (a *App) mcpEnabled() bool {
 // current connect params) and starts an MCP server bound to it. The label
 // must be unique among running sessions; if port is 0 a free port is
 // auto-assigned starting at 9100. Sessions never auto-start and are not
-// persisted across restarts.
-func (a *App) StartMCPSession(label, mode string, port int) (mcp.SessionInfo, error) {
+// persisted across restarts. The role, warehouse, and secondaryRoles
+// parameters configure optional session pinning for non-metadata modes.
+func (a *App) StartMCPSession(label, mode string, port int, role, warehouse, secondaryRoles string) (mcp.SessionInfo, error) {
 	if !a.mcpEnabled() {
 		return mcp.SessionInfo{}, fmt.Errorf("MCP Server is disabled. Enable it under View → Enabled Features…")
 	}
@@ -55,8 +56,16 @@ func (a *App) StartMCPSession(label, mode string, port int) (mcp.SessionInfo, er
 		return mcp.SessionInfo{}, fmt.Errorf("mcp: failed to open connection: %w", err)
 	}
 
+	cfg := mcp.SessionConfig{
+		PinnedRole:      role != "",
+		PinnedWarehouse: warehouse != "",
+		Role:            role,
+		Warehouse:       warehouse,
+		SecondaryRoles:  secondaryRoles,
+	}
+
 	connLabel := fmt.Sprintf("%s / %s", params.Account, params.User)
-	info, err := a.mcpManager.Start(label, connLabel, mode, port, client)
+	info, err := a.mcpManager.Start(a.ctx, label, connLabel, mode, port, client, cfg)
 	if err != nil {
 		_ = client.Close()
 		return mcp.SessionInfo{}, err

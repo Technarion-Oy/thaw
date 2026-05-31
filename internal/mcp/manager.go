@@ -11,6 +11,7 @@
 package mcp
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"sort"
@@ -23,16 +24,29 @@ import (
 const basePort = 9100
 
 // ExecutionMode values control how much a session is permitted to do.
-// Only metadata browsing is supported in the foundation milestone.
 const (
-	ExecutionModeMetadata = "metadata"
+	ExecutionModeMetadata    = "metadata"
+	ExecutionModeReadonly    = "readonly"
+	ExecutionModeExplainOnly = "explain_only"
 )
 
 // validModes is the set of accepted execution modes. Start rejects any
 // mode not in this set so a session cannot report a capability it does
 // not actually enforce.
 var validModes = map[string]bool{
-	ExecutionModeMetadata: true,
+	ExecutionModeMetadata:    true,
+	ExecutionModeReadonly:    true,
+	ExecutionModeExplainOnly: true,
+}
+
+// SessionConfig holds optional per-session configuration applied at startup.
+// It controls role/warehouse pinning and secondary-role restrictions.
+type SessionConfig struct {
+	PinnedRole      bool   `json:"pinnedRole"`
+	PinnedWarehouse bool   `json:"pinnedWarehouse"`
+	Role            string `json:"role,omitempty"`
+	Warehouse       string `json:"warehouse,omitempty"`
+	SecondaryRoles  string `json:"secondaryRoles,omitempty"`
 }
 
 // SessionInfo is the serializable view of a session exposed to the frontend.
@@ -44,6 +58,8 @@ type SessionInfo struct {
 	ExecutionMode   string `json:"executionMode"`
 	URL             string `json:"url"`
 	ConnectionLabel string `json:"connectionLabel"`
+	PinnedRole      string `json:"pinnedRole,omitempty"`
+	PinnedWarehouse string `json:"pinnedWarehouse,omitempty"`
 }
 
 // Manager owns the set of running MCP sessions. It is safe for concurrent use.
@@ -60,8 +76,10 @@ func NewManager() *Manager {
 // Start creates and starts a new session bound to the supplied client. The
 // label must be unique among running sessions. If port is 0 a free port is
 // auto-assigned starting at basePort. The session takes ownership of client
-// and closes it when stopped.
-func (m *Manager) Start(label, connLabel, mode string, port int, client *snowflake.Client) (SessionInfo, error) {
+// and closes it when stopped. cfg controls optional role/warehouse pinning
+// applied at session startup. The context is used for the initial session
+// setup (USE ROLE, USE WAREHOUSE, etc.) and can be canceled by the caller.
+func (m *Manager) Start(ctx context.Context, label, connLabel, mode string, port int, client *snowflake.Client, cfg SessionConfig) (SessionInfo, error) {
 	if label == "" {
 		return SessionInfo{}, fmt.Errorf("mcp: session label is required")
 	}
@@ -70,6 +88,32 @@ func (m *Manager) Start(label, connLabel, mode string, port int, client *snowfla
 	}
 	if !validModes[mode] {
 		return SessionInfo{}, fmt.Errorf("mcp: unsupported execution mode %q", mode)
+	}
+
+	// Validate secondaryRoles early — only "" and "none" are accepted.
+	if cfg.SecondaryRoles != "" && cfg.SecondaryRoles != "none" {
+		return SessionInfo{}, fmt.Errorf("mcp: unsupported secondaryRoles value %q (must be \"\" or \"none\")", cfg.SecondaryRoles)
+	}
+
+	// Apply session configuration for non-metadata modes. In metadata mode
+	// no SQL tools are registered, so role/warehouse pinning is a no-op —
+	// skip the Snowflake round-trips to avoid confusion.
+	if mode != ExecutionModeMetadata {
+		if cfg.Role != "" {
+			if err := client.UseRole(ctx, cfg.Role); err != nil {
+				return SessionInfo{}, fmt.Errorf("mcp: failed to set role: %w", err)
+			}
+		}
+		if cfg.Warehouse != "" {
+			if err := client.UseWarehouse(ctx, cfg.Warehouse); err != nil {
+				return SessionInfo{}, fmt.Errorf("mcp: failed to set warehouse: %w", err)
+			}
+		}
+		if cfg.SecondaryRoles == "none" {
+			if _, err := client.QuerySingle(ctx, "USE SECONDARY ROLES NONE"); err != nil {
+				return SessionInfo{}, fmt.Errorf("mcp: failed to disable secondary roles: %w", err)
+			}
+		}
 	}
 
 	m.mu.Lock()
@@ -91,7 +135,7 @@ func (m *Manager) Start(label, connLabel, mode string, port int, client *snowfla
 		return SessionInfo{}, fmt.Errorf("mcp: failed to generate session token: %w", err)
 	}
 
-	s := newSession(m, label, connLabel, mode, token, assigned, client, ln)
+	s := newSession(m, label, connLabel, mode, token, assigned, client, ln, cfg)
 	if err := s.start(); err != nil {
 		_ = ln.Close()
 		return SessionInfo{}, err
