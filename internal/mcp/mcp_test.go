@@ -232,7 +232,7 @@ func TestAllowedDDLKinds(t *testing.T) {
 			t.Errorf("expected %q to be allowed", kind)
 		}
 	}
-	for _, kind := range []string{"", "EVIL", "TABLE'; DROP", "table"} {
+	for _, kind := range []string{"", "EVIL", "TABLE'; DROP", "table", "DATABASE", "SCHEMA"} {
 		if allowedDDLKinds[kind] {
 			t.Errorf("expected %q to be rejected", kind)
 		}

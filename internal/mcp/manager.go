@@ -143,9 +143,9 @@ func (m *Manager) List() []SessionInfo {
 // AuthenticatedURL returns the SSE endpoint URL for the named session with its
 // per-session token embedded as a query parameter, suitable for handing to an
 // MCP client. The bare SessionInfo.URL is token-free (for display); the token
-// is surfaced only here so it is not broadcast in every List() snapshot. The
-// token is immutable after the session is created, so reading it under m.mu
-// (without s.mu) is safe.
+// is surfaced only here so it is not broadcast in every List() snapshot. Both
+// port and token are immutable after the session is created, so reading them
+// under m.mu (without s.mu) is safe.
 func (m *Manager) AuthenticatedURL(label string) (string, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

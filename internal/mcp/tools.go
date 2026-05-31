@@ -59,6 +59,10 @@ type ddlInput struct {
 // get_ddl tool. Restricting to known kinds prevents untrusted input from
 // reaching the GET_DDL kind parameter, even though single-quote escaping in
 // GetObjectDDL provides defense-in-depth.
+//
+// DATABASE and SCHEMA are intentionally excluded: GetObjectDDL always builds
+// a three-part qualified name (db.schema.name), which is invalid for these
+// container-level objects and causes a "does not exist" error in Snowflake.
 var allowedDDLKinds = map[string]bool{
 	"TABLE":             true,
 	"VIEW":              true,
@@ -70,8 +74,6 @@ var allowedDDLKinds = map[string]bool{
 	"SEQUENCE":          true,
 	"FILE_FORMAT":       true,
 	"STAGE":             true,
-	"SCHEMA":            true,
-	"DATABASE":          true,
 	"MASKING_POLICY":    true,
 	"ROW_ACCESS_POLICY": true,
 }
