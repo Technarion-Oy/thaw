@@ -347,25 +347,89 @@ func TestGetSnowflakeKeywordsTool(t *testing.T) {
 	}
 }
 
+// TestValidateSqlToolSSE exercises validate_sql through the full SSE transport
+// with a nil client (phase-1 only), verifying the handler returns valid JSON.
+func TestValidateSqlToolSSE(t *testing.T) {
+	srv := buildServer(nil, ExecutionModeMetadata)
+	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
+	httpSrv := httptest.NewServer(handler)
+	defer httpSrv.Close()
+
+	ctx := context.Background()
+	c := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test", Version: "v1"}, nil)
+	cs, err := c.Connect(ctx, &mcpsdk.SSEClientTransport{Endpoint: httpSrv.URL}, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = cs.Close() }()
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "validate_sql",
+		Arguments: validateSqlInput{SQL: "SELECT (1"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	text := extractText(t, res)
+	// Result should be a JSON array of markers.
+	if !strings.HasPrefix(strings.TrimSpace(text), "[") {
+		t.Errorf("expected JSON array, got: %.80s", text)
+	}
+}
+
+// TestSuggestJoinConditionsNilClient verifies the nil-client error is returned
+// through the SSE transport.
+func TestSuggestJoinConditionsNilClient(t *testing.T) {
+	srv := buildServer(nil, ExecutionModeMetadata)
+	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
+	httpSrv := httptest.NewServer(handler)
+	defer httpSrv.Close()
+
+	ctx := context.Background()
+	c := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test", Version: "v1"}, nil)
+	cs, err := c.Connect(ctx, &mcpsdk.SSEClientTransport{Endpoint: httpSrv.URL}, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = cs.Close() }()
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "suggest_join_conditions",
+		Arguments: joinSuggestInput{TableA: "orders", TableB: "customers"},
+	})
+	// The SDK should surface tool errors via IsError, not a Go error.
+	if err != nil {
+		// Acceptable: some SDK versions propagate as Go error.
+		return
+	}
+	if !res.IsError {
+		t.Errorf("expected IsError=true for nil client, got false")
+	}
+}
+
 // TestParseTableParts verifies the quote-aware qualified name parser.
+// Unquoted identifiers are uppercased (Snowflake canonical casing);
+// quoted identifiers preserve their original case.
 func TestParseTableParts(t *testing.T) {
 	cases := []struct {
-		input                string
+		input                         string
 		wantDB, wantSchema, wantTable string
 	}{
-		// Simple cases.
-		{"orders", "", "", "orders"},
-		{"public.orders", "", "public", "orders"},
-		{"mydb.public.orders", "mydb", "public", "orders"},
-		// Quoted identifiers with dots.
-		{`"my.db".public.orders`, "my.db", "public", "orders"},
-		{`mydb."my.schema".orders`, "mydb", "my.schema", "orders"},
-		{`mydb.public."my.table"`, "mydb", "public", "my.table"},
+		// Simple unquoted cases — uppercased.
+		{"orders", "", "", "ORDERS"},
+		{"public.orders", "", "PUBLIC", "ORDERS"},
+		{"mydb.public.orders", "MYDB", "PUBLIC", "ORDERS"},
+		// Quoted identifiers with dots — preserve case.
+		{`"my.db".public.orders`, "my.db", "PUBLIC", "ORDERS"},
+		{`mydb."my.schema".orders`, "MYDB", "my.schema", "ORDERS"},
+		{`mydb.public."my.table"`, "MYDB", "PUBLIC", "my.table"},
 		{`"a.b"."c.d"."e.f"`, "a.b", "c.d", "e.f"},
 		// Escaped quotes inside quoted identifier.
-		{`"say""hi".public.t`, `say"hi`, "public", "t"},
+		{`"say""hi".public.t`, `say"hi`, "PUBLIC", "T"},
 		// Two-part with quote.
-		{`"my.schema".orders`, "", "my.schema", "orders"},
+		{`"my.schema".orders`, "", "my.schema", "ORDERS"},
+		// Mixed case unquoted — folded to upper.
+		{"MyDb.MySchema.MyTable", "MYDB", "MYSCHEMA", "MYTABLE"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.input, func(t *testing.T) {
@@ -378,19 +442,25 @@ func TestParseTableParts(t *testing.T) {
 	}
 }
 
-// TestQualifyTableRef verifies session defaults are filled in for missing parts.
+// TestQualifyTableRef verifies session defaults are filled in for missing parts
+// and that unquoted identifiers are uppercased.
 func TestQualifyTableRef(t *testing.T) {
 	got := qualifyTableRef("orders", "MYDB", "PUBLIC")
-	if got.db != "MYDB" || got.schema != "PUBLIC" || got.table != "orders" {
-		t.Errorf("qualifyTableRef(orders) = %+v, want {MYDB PUBLIC orders}", got)
+	if got.db != "MYDB" || got.schema != "PUBLIC" || got.table != "ORDERS" {
+		t.Errorf("qualifyTableRef(orders) = %+v, want {MYDB PUBLIC ORDERS}", got)
 	}
 	got = qualifyTableRef("other_schema.orders", "MYDB", "PUBLIC")
-	if got.db != "MYDB" || got.schema != "other_schema" || got.table != "orders" {
+	if got.db != "MYDB" || got.schema != "OTHER_SCHEMA" || got.table != "ORDERS" {
 		t.Errorf("qualifyTableRef(other_schema.orders) = %+v", got)
 	}
 	got = qualifyTableRef("otherdb.other_schema.orders", "MYDB", "PUBLIC")
-	if got.db != "otherdb" || got.schema != "other_schema" || got.table != "orders" {
+	if got.db != "OTHERDB" || got.schema != "OTHER_SCHEMA" || got.table != "ORDERS" {
 		t.Errorf("qualifyTableRef(otherdb.other_schema.orders) = %+v", got)
+	}
+	// Quoted identifiers preserve case.
+	got = qualifyTableRef(`"myTable"`, "MYDB", "PUBLIC")
+	if got.db != "MYDB" || got.schema != "PUBLIC" || got.table != "myTable" {
+		t.Errorf("qualifyTableRef(quoted) = %+v, want {MYDB PUBLIC myTable}", got)
 	}
 }
 

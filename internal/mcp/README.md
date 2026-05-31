@@ -45,7 +45,7 @@ The server exposes 11 tools in two groups:
 
 **Schema-browsing tools** (registered in `tools.go`): `get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`. Each delegates to the session's `*snowflake.Client` and returns its payload as indented-JSON text content (`get_ddl` returns raw text). The `get_ddl` tool validates the `kind` parameter against `allowedDDLKinds` before forwarding to `GetObjectDDL`.
 
-**SQL diagnostics tools** (registered in `diag_tools.go`): `validate_sql`, `suggest_join_conditions`, `format_sql`, `get_snowflake_keywords`. These expose Thaw's `internal/sqleditor` diagnostics engine so external AI clients can iteratively refine SQL against real schema before delivering it to a tab or notebook — the same markers the user sees in Monaco.
+**SQL diagnostics tools** (registered in `diag_tools.go`): `validate_sql`, `suggest_join_conditions`, `format_sql`, `get_snowflake_keywords`. These expose Thaw's `internal/sqleditor` diagnostics engine so external AI clients can iteratively refine SQL against real schema before delivering it to a tab or notebook. The MCP path runs the same validators as the editor but may produce different markers because it fetches fresh metadata from Snowflake on each call (vs. the frontend's warm object-store cache) and uses `sqleditor.ResolveTableRefs` for ref resolution (vs. the frontend's per-ref store lookup with typo-dropping).
 
 | Tool | Purpose |
 |---|---|

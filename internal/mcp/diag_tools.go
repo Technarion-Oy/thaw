@@ -130,6 +130,11 @@ func validateSQLSchemaAware(ctx context.Context, client *snowflake.Client, sql s
 
 	refs := sqleditor.ParseJoinTables(sql)
 
+	// Short-circuit: if the SQL references no tables, skip metadata gathering.
+	if len(refs) == 0 {
+		return nil, nil
+	}
+
 	// Gather metadata for referenced databases/schemas.
 	storeObjects, knownDatabases, knownSchemas, err := gatherMetadata(ctx, client, refs, sessionCtx)
 	if err != nil {
@@ -203,18 +208,25 @@ func gatherMetadata(ctx context.Context, client *snowflake.Client, refs []sqledi
 		dbSet[strings.ToUpper(db)] = true
 	}
 
+	// Dedupe ListSchemas calls by database (multiple schemas in the same db
+	// should not re-list the db's schemas).
+	schemasListed := make(map[string]bool)
+
 	for ds := range seen {
-		// List schemas for each database.
-		schemas, err := client.ListSchemas(ctx, ds.db)
-		if err != nil {
-			logger.L.Debug("mcp validate_sql: ListSchemas skipped", "db", ds.db, "err", err)
-			continue
-		}
-		for _, s := range schemas {
-			knownSchemas = append(knownSchemas, sqleditor.SchemaEntry{
-				DB:   ds.db,
-				Name: s,
-			})
+		// List schemas once per database.
+		if !schemasListed[ds.db] {
+			schemasListed[ds.db] = true
+			schemas, err := client.ListSchemas(ctx, ds.db)
+			if err != nil {
+				logger.L.Debug("mcp validate_sql: ListSchemas skipped", "db", ds.db, "err", err)
+			} else {
+				for _, s := range schemas {
+					knownSchemas = append(knownSchemas, sqleditor.SchemaEntry{
+						DB:   ds.db,
+						Name: s,
+					})
+				}
+			}
 		}
 
 		// List objects in the specific schema.
@@ -269,6 +281,8 @@ func fetchColumnEntries(ctx context.Context, client *snowflake.Client, refs []sq
 }
 
 // suggestJoinConditions computes JOIN ON suggestions for two tables.
+// Self-joins (table_a == table_b) are supported — column entries are built
+// per-ref without deduplication so ComputeJoinOnConditions sees both sides.
 func suggestJoinConditions(ctx context.Context, client *snowflake.Client, tableA, tableB string) ([]sqleditor.JoinCondition, error) {
 	sc, err := client.GetSessionContext(ctx)
 	if err != nil {
@@ -283,10 +297,19 @@ func suggestJoinConditions(ctx context.Context, client *snowflake.Client, tableA
 		{DB: refB.db, Schema: refB.schema, Name: refB.table},
 	}
 
-	// Gather column info via shared helper.
-	colEntries := fetchColumnEntries(ctx, client, resolvedRefs)
-	if len(colEntries) < 2 {
-		return nil, fmt.Errorf("could not describe both tables")
+	// Build column entries per-ref (no deduplication — self-joins need both).
+	var colEntries []sqleditor.ColEntry
+	for _, ref := range resolvedRefs {
+		cols, err := client.GetTableColumnsWithTypes(ctx, ref.DB, ref.Schema, ref.Name)
+		if err != nil {
+			return nil, fmt.Errorf("describe %s.%s.%s: %w", ref.DB, ref.Schema, ref.Name, err)
+		}
+		colEntries = append(colEntries, sqleditor.ColEntry{
+			DB:     ref.DB,
+			Schema: ref.Schema,
+			Name:   ref.Name,
+			Cols:   sfColsToColInfo(cols),
+		})
 	}
 
 	// Gather foreign key info.
@@ -384,8 +407,16 @@ type qualifiedParts struct {
 
 // parseTableParts splits a qualified name into db, schema, table, respecting
 // double-quoted identifiers that may contain dots (e.g. `db."my.schema".table`).
+// Unquoted identifiers are uppercased to match Snowflake's canonical casing;
+// quoted identifiers preserve their original case.
 func parseTableParts(name string) qualifiedParts {
-	parts := splitQualifiedName(name)
+	parts, quoted := splitQualifiedNameWithQuoteInfo(name)
+	// Snowflake folds unquoted identifiers to uppercase.
+	for i, p := range parts {
+		if !quoted[i] {
+			parts[i] = strings.ToUpper(p)
+		}
+	}
 	switch len(parts) {
 	case 3:
 		return qualifiedParts{db: parts[0], schema: parts[1], table: parts[2]}
@@ -396,12 +427,15 @@ func parseTableParts(name string) qualifiedParts {
 	}
 }
 
-// splitQualifiedName splits a potentially quoted identifier chain on dots,
-// respecting double-quoted segments. Quotes are stripped from the returned parts.
-func splitQualifiedName(name string) []string {
+// splitQualifiedNameWithQuoteInfo splits a potentially quoted identifier chain
+// on dots, respecting double-quoted segments. Quotes are stripped from the
+// returned parts. The second return value indicates whether each part was quoted.
+func splitQualifiedNameWithQuoteInfo(name string) ([]string, []bool) {
 	var parts []string
+	var quoted []bool
 	var current strings.Builder
 	inQuotes := false
+	partWasQuoted := false
 
 	for i := 0; i < len(name); i++ {
 		ch := name[i]
@@ -413,16 +447,22 @@ func splitQualifiedName(name string) []string {
 				i++
 			} else {
 				inQuotes = !inQuotes
+				if inQuotes {
+					partWasQuoted = true
+				}
 			}
 		case ch == '.' && !inQuotes:
 			parts = append(parts, current.String())
+			quoted = append(quoted, partWasQuoted)
 			current.Reset()
+			partWasQuoted = false
 		default:
 			current.WriteByte(ch)
 		}
 	}
 	parts = append(parts, current.String())
-	return parts
+	quoted = append(quoted, partWasQuoted)
+	return parts, quoted
 }
 
 // qualifyTableRef parses a table name and fills in missing db/schema from
