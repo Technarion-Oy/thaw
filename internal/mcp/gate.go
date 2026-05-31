@@ -62,6 +62,7 @@ var readOnlyOps = map[string]bool{
 	"Projection":        true,
 	"CartesianJoin":     true,
 	"SetOperation":      true,
+	"GlobalStats":       true,
 }
 
 // isUSEStatement returns true if sql is a USE ROLE/WAREHOUSE/DATABASE/SCHEMA

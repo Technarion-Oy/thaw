@@ -50,7 +50,7 @@ func TestExplainGateComplexSelectAllowed(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	v, err := mcp.CheckGate(ctx, client, "SELECT * FROM TABLE(GENERATOR(ROWCOUNT=>10))")
+	v, err := mcp.CheckGate(ctx, client, "SELECT SEQ4() FROM TABLE(GENERATOR(ROWCOUNT=>10))")
 	if err != nil {
 		t.Fatalf("CheckGate error: %v", err)
 	}
@@ -145,7 +145,7 @@ func isAllowedOp(op string) bool {
 		"Subquery": true, "ExternalFunction": true, "InMemoryTableScan": true,
 		"ValuesClause": true, "Generator": true, "Flatten": true,
 		"ExternalScan": true, "WindowFunction": true, "Projection": true,
-		"CartesianJoin": true, "SetOperation": true,
+		"CartesianJoin": true, "SetOperation": true, "GlobalStats": true,
 	}
 	return allowed[op]
 }
