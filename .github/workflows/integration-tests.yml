@@ -19,7 +19,7 @@ jobs:
       - name: Install base tools
         run: |
           apt-get update
-          apt-get install -y git curl wget
+          apt-get install -y git curl wget gcc bash
 
       - uses: actions/checkout@v4
 
@@ -35,6 +35,7 @@ jobs:
         run: go install github.com/jstemmer/go-junit-report/v2@latest
 
       - name: Run integration tests
+        shell: bash
         env:
           SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
           SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
@@ -45,7 +46,9 @@ jobs:
           # for migration integration tests (defaults to CURRENT_DATABASE()/PUBLIC).
           SNOWFLAKE_TEST_DATABASE: ${{ secrets.SNOWFLAKE_TEST_DATABASE }}
           SNOWFLAKE_TEST_SCHEMA: ${{ secrets.SNOWFLAKE_TEST_SCHEMA }}
-        run: go test -v -tags integration -race -count=1 -timeout 10m ./internal/integration/... 2>&1 | go-junit-report -set-exit-code > report.xml
+        run: |
+          set -o pipefail
+          go test -v -tags integration -race -count=1 -timeout 10m ./internal/integration/... 2>&1 | go-junit-report -set-exit-code > report.xml
 
       - name: Publish test results
         uses: EnricoMi/publish-unit-test-result-action@v2
