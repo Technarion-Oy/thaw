@@ -75,67 +75,6 @@ func IsReadOnlyOp(op string) bool {
 	return readOnlyOps[op]
 }
 
-// blockedKeywords is the set of SQL leading keywords that are rejected
-// outright before the EXPLAIN gate. These are DDL/DML/session-control
-// statements that must never be executed through the MCP SQL tool.
-var blockedKeywords = map[string]bool{
-	"INSERT": true, "UPDATE": true, "DELETE": true, "DROP": true,
-	"CREATE": true, "ALTER": true, "TRUNCATE": true, "GRANT": true,
-	"REVOKE": true, "CALL": true, "MERGE": true, "COPY": true,
-	"PUT": true, "GET": true, "SET": true, "UNSET": true,
-	"BEGIN": true, "COMMIT": true, "ROLLBACK": true, "EXECUTE": true,
-	"REMOVE": true, "UNDROP": true,
-}
-
-// metadataKeywords is the set of SQL leading keywords for metadata/introspection
-// statements. These are executed directly (bypassing the EXPLAIN gate) because
-// Snowflake's EXPLAIN USING TABULAR does not support them — e.g.
-// "EXPLAIN USING TABULAR SHOW TABLES" errors. They only return metadata and
-// are safe in both readonly and explain_only modes.
-var metadataKeywords = map[string]bool{
-	"SHOW": true, "DESCRIBE": true, "DESC": true,
-	"EXPLAIN": true, "LIST": true,
-}
-
-// allowedQueryKeywords is the set of SQL leading keywords that are passed
-// through the EXPLAIN precompilation gate for read-only verification.
-var allowedQueryKeywords = map[string]bool{
-	"SELECT": true, "WITH": true,
-}
-
-// classifyStatement strips leading SQL comments from sql and returns the
-// uppercase first keyword. Returns "" for empty/comment-only input.
-func classifyStatement(sql string) string {
-	stripped := stripLeadingComments(sql)
-	if stripped == "" {
-		return ""
-	}
-	// Extract the first word (delimited by space, tab, newline, or parenthesis).
-	upper := strings.ToUpper(stripped)
-	for i, ch := range upper {
-		if ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '(' {
-			return upper[:i]
-		}
-	}
-	return upper
-}
-
-// isBlockedKeyword reports whether kw is a blocked DDL/DML keyword.
-func isBlockedKeyword(kw string) bool {
-	return blockedKeywords[kw]
-}
-
-// isMetadataKeyword reports whether kw is a metadata/introspection keyword.
-func isMetadataKeyword(kw string) bool {
-	return metadataKeywords[kw]
-}
-
-// isAllowedQueryKeyword reports whether kw is an allowed query keyword
-// (SELECT/WITH) that should pass through the EXPLAIN gate.
-func isAllowedQueryKeyword(kw string) bool {
-	return allowedQueryKeywords[kw]
-}
-
 // isUSEStatement returns true if sql (after stripping leading SQL comments)
 // starts with "USE ". This is a best-effort early-rejection layer that
 // improves traceability — if a USE statement slips past (e.g. via an

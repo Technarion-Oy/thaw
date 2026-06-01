@@ -18,10 +18,10 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `server.go` | `buildServer(client, mode, cfg)` — constructs the MCP server and registers tools based on execution mode |
 | `tools.go` | Tool input structs + `registerTools` (schema-browsing tools); `jsonResult`/`textResult` content helpers |
 | `diag_tools.go` | `registerDiagTools` — SQL diagnostics & validation tools (`validate_sql`, `suggest_join_conditions`, `format_sql`, `get_snowflake_keywords`); type-conversion helpers for sqleditor ↔ snowflake types |
-| `gate.go` | EXPLAIN precompilation gate: `queryRunner` interface, `CheckGate` (3-layer validation), `readOnlyOps` allow-list, `extractOperations`, `isUSEStatement`; statement classification: `classifyStatement`, `blockedKeywords`/`metadataKeywords`/`allowedQueryKeywords` maps, `checkExplainPlan` |
-| `sql_tools.go` | `registerSQLTools` — SQL execution tool (`execute_snowflake_sql`) with 8-step pipeline (`executeSQLPipeline`), LIMIT injection (`injectLimit`), and trusted context-switching tools (`use_role`, `use_warehouse`, `use_database`, `use_schema`); only registered in `readonly`/`explain_only` modes |
-| `gate_test.go` | Unit tests for the EXPLAIN gate, statement classification, and keyword maps |
-| `sql_tools_test.go` | Unit tests for `injectLimit` and the full `executeSQLPipeline` (blocked keywords, metadata passthrough, LIMIT injection, default-deny, etc.) |
+| `gate.go` | EXPLAIN precompilation gate: `queryRunner` interface, `CheckGate` (3-layer validation), `checkExplainPlan`, `readOnlyOps` allow-list, `extractOperations`, `isUSEStatement` |
+| `sql_tools.go` | `registerSQLTools` — SQL execution tool (`execute_snowflake_sql`) with EXPLAIN-gated pipeline (`executeSQLPipeline`), LIMIT injection (`injectLimit`), and trusted context-switching tools (`use_role`, `use_warehouse`, `use_database`, `use_schema`); only registered in `readonly`/`explain_only` modes |
+| `gate_test.go` | Unit tests for the EXPLAIN gate and `checkExplainPlan` |
+| `sql_tools_test.go` | Unit tests for `injectLimit` and the full `executeSQLPipeline` (EXPLAIN error rejection, LIMIT injection, row cap, CTE+DELETE detection, etc.) |
 | `mcp_test.go` | SSE round-trip test (external client lists tools), port-allocation test, diagnostics tool tests, mode-gating tests |
 | `doc.go` | Package doc + `thaw:domain: MCP Server` annotation |
 
@@ -59,20 +59,20 @@ Ports auto-assign sequentially from `basePort` (`9100`) up to `basePort+1000`. `
 
 ### SQL execution pipeline
 
-The `execute_snowflake_sql` tool runs every statement through an 8-step pipeline (`executeSQLPipeline` in `sql_tools.go`, classification helpers in `gate.go`):
+**Principle: no raw SQL reaches Snowflake without passing through EXPLAIN USING TABULAR first.** Snowflake's own query planner determines whether a statement is read-only — not fragile keyword heuristics. The pipeline (`executeSQLPipeline` in `sql_tools.go`) runs every statement through these steps:
 
 1. **Empty/whitespace check** — reject blank input.
 2. **Single-statement check** — `SplitStatements(sql)` must return exactly 1 statement. Multi-statement SQL is rejected.
-3. **Classify leading keyword** — `classifyStatement(sql)` strips leading SQL comments and returns the uppercase first word.
-4. **Blocked keyword** — DDL/DML keywords (`INSERT`, `UPDATE`, `DELETE`, `DROP`, `CREATE`, `ALTER`, `TRUNCATE`, `GRANT`, `REVOKE`, `CALL`, `MERGE`, `COPY`, `PUT`, `GET`, `SET`, `UNSET`, `BEGIN`, `COMMIT`, `ROLLBACK`, `EXECUTE`, `REMOVE`, `UNDROP`) are rejected immediately without hitting Snowflake.
-5. **USE statement** — rejected; context-switching is exposed only through dedicated trusted tools (`use_role`, etc.).
-6. **Metadata keyword** (`SHOW`, `DESCRIBE`, `DESC`, `EXPLAIN`, `LIST`) — executed directly (bypasses the EXPLAIN gate, because `EXPLAIN USING TABULAR SHOW TABLES` errors in Snowflake). These only return metadata and are safe in both `readonly` and `explain_only` modes. The `maxMCPResultRows` (1000) cap is applied.
-7. **SELECT / WITH** — passed through `checkExplainPlan` (EXPLAIN USING TABULAR + `readOnlyOps` allow-list). In `explain_only` mode the verdict is returned without executing. In `readonly` mode the query is wrapped with `injectLimit` (`SELECT * FROM (<query>) AS _mcp_limit LIMIT 100`) to prevent full-table scans, then executed and capped at `maxMCPResultRows`.
-8. **Unknown keyword** — default-deny. Any unrecognized statement type is rejected, so new Snowflake statement types are blocked until explicitly allowed.
+3. **USE statement check** — `isUSEStatement(sql)` rejects USE statements with a descriptive error (use the dedicated context-switching tools instead). This is a best-effort early check; the EXPLAIN gate is the authoritative backstop.
+4. **EXPLAIN USING TABULAR gate** — the statement is sent to Snowflake's `EXPLAIN USING TABULAR`. If EXPLAIN itself errors (e.g. on `SHOW`, `DESCRIBE`, `LIST`, DDL, or any unsupported statement type), the statement is rejected as "not supported". If the plan contains non-read-only operations, the statement is rejected. This catches cases like `WITH target AS (...) DELETE FROM t` where a keyword classifier would be fooled by the leading `WITH`.
+5. **explain_only mode** — return the gate verdict (plan metadata) without executing.
+6. **readonly mode** — wrap the query with `injectLimit` (`SELECT * FROM (<query>) AS _mcp_limit LIMIT 100`) to prevent full-table scans, execute, and cap at `maxMCPResultRows` (1000).
 
-**`CheckGate` backwards-compatibility**: The original `CheckGate` function is preserved unchanged (it still runs layers 1–3 of the old gate). The pipeline calls the extracted `checkExplainPlan` directly for step 7.
+Metadata needs (listing databases, describing tables, etc.) are served by the dedicated schema-browsing tools (`list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`) which use safe Go methods internally — not raw SQL passthrough.
 
-**Caveats**: The pipeline is not a substitute for a scoped read-only Snowflake role. It fails safe by over-rejecting (any unknown future operation or keyword is denied). The real security boundary is the Snowflake role's grants — the pipeline provides an additional defense layer.
+**`CheckGate` backwards-compatibility**: The original `CheckGate` function is preserved unchanged (it still runs layers 1–3). The pipeline calls the extracted `checkExplainPlan` directly for step 4.
+
+**Caveats**: The pipeline is not a substitute for a scoped read-only Snowflake role. It fails safe by over-rejecting (any statement EXPLAIN can't handle or any unknown operation is denied). The real security boundary is the Snowflake role's grants — the pipeline provides an additional defense layer.
 
 ### Tools
 

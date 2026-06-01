@@ -69,19 +69,23 @@ func injectLimit(sql string, limit int) string {
 	return fmt.Sprintf("SELECT * FROM (%s) AS _mcp_limit LIMIT %d", trimmed, limit)
 }
 
-// executeSQLPipeline implements the 8-step SQL execution pipeline for the MCP
+// executeSQLPipeline implements the SQL execution pipeline for the MCP
 // execute_snowflake_sql tool. It is extracted from the tool handler for
 // testability.
+//
+// Principle: no raw SQL reaches Snowflake without passing through EXPLAIN
+// USING TABULAR first. The EXPLAIN gate is the authoritative safety layer —
+// Snowflake's own query planner determines whether the statement is read-only,
+// not fragile keyword heuristics.
 //
 // Pipeline steps:
 //  1. Empty/whitespace check
 //  2. Single-statement check (SplitStatements)
-//  3. Classify leading keyword (classifyStatement)
-//  4. Blocked keyword → reject with descriptive error
-//  5. USE statement → reject (use dedicated tools)
-//  6. Metadata keyword (SHOW/DESCRIBE/DESC/EXPLAIN/LIST) → execute directly, apply row cap
-//  7. SELECT/WITH → checkExplainPlan → if explain_only: return verdict; if readonly: inject LIMIT, execute, apply cap
-//  8. Unknown keyword → default-deny
+//  3. USE statement rejection (best-effort early check; EXPLAIN is the backstop)
+//  4. EXPLAIN USING TABULAR gate (checkExplainPlan) — if EXPLAIN itself errors,
+//     the statement is not supported and is rejected
+//  5. If explain_only mode: return the verdict without executing
+//  6. If readonly mode: inject LIMIT, execute, apply row cap
 func executeSQLPipeline(ctx context.Context, runner queryRunner, sql string, mode string) (*mcpsdk.CallToolResult, error) {
 	// Step 1: Empty/whitespace check.
 	trimmed := strings.TrimSpace(sql)
@@ -98,69 +102,44 @@ func executeSQLPipeline(ctx context.Context, runner queryRunner, sql string, mod
 	}
 	stmt := stmts[0]
 
-	// Step 3: Classify leading keyword.
-	kw := classifyStatement(stmt)
-
-	// Step 4: Blocked keyword → reject.
-	if isBlockedKeyword(kw) {
-		return jsonResult(GateVerdict{
-			Reason: fmt.Sprintf("statement type %s is not allowed", kw),
-		}), nil
-	}
-
-	// Step 5: USE statement → reject.
-	if kw == "USE" {
+	// Step 3: USE statement → reject (best-effort traceability; EXPLAIN
+	// would also catch this, but the error message is clearer here).
+	if isUSEStatement(stmt) {
 		return jsonResult(GateVerdict{
 			Reason: "USE statements are not allowed; use the dedicated context-switching tools",
 		}), nil
 	}
 
-	// Step 6: Metadata keyword → execute directly (EXPLAIN USING TABULAR
-	// does not work on these statements).
-	if isMetadataKeyword(kw) {
-		result, err := runner.QuerySingle(ctx, stmt)
-		if err != nil {
-			return nil, err
-		}
-		if len(result.Rows) > maxMCPResultRows {
-			result.Rows = result.Rows[:maxMCPResultRows]
-			result.Truncated = true
-		}
-		return jsonResult(result), nil
+	// Step 4: EXPLAIN USING TABULAR gate. If EXPLAIN errors (e.g. on SHOW,
+	// DESCRIBE, LIST, or any unsupported statement type), the statement is
+	// rejected — no raw SQL bypasses the gate. Metadata needs are served by
+	// the dedicated schema-browsing tools (list_databases, describe_table, etc.).
+	verdict, err := checkExplainPlan(ctx, runner, stmt)
+	if err != nil {
+		return jsonResult(GateVerdict{
+			Reason: fmt.Sprintf("statement not supported: %s", err),
+		}), nil
+	}
+	if !verdict.Allowed {
+		return jsonResult(verdict), nil
 	}
 
-	// Step 7: SELECT/WITH → EXPLAIN gate → execute.
-	if isAllowedQueryKeyword(kw) {
-		verdict, err := checkExplainPlan(ctx, runner, stmt)
-		if err != nil {
-			return nil, fmt.Errorf("EXPLAIN gate error: %w", err)
-		}
-		if !verdict.Allowed {
-			return jsonResult(verdict), nil
-		}
-
-		// explain_only mode: return the verdict without executing.
-		if mode == ExecutionModeExplainOnly {
-			return jsonResult(verdict), nil
-		}
-
-		// readonly mode: inject LIMIT and execute.
-		limited := injectLimit(stmt, maxMCPQueryLimit)
-		result, err := runner.QuerySingle(ctx, limited)
-		if err != nil {
-			return nil, err
-		}
-		if len(result.Rows) > maxMCPResultRows {
-			result.Rows = result.Rows[:maxMCPResultRows]
-			result.Truncated = true
-		}
-		return jsonResult(result), nil
+	// Step 5: explain_only mode — return the verdict without executing.
+	if mode == ExecutionModeExplainOnly {
+		return jsonResult(verdict), nil
 	}
 
-	// Step 8: Unknown keyword → default-deny.
-	return jsonResult(GateVerdict{
-		Reason: fmt.Sprintf("statement type %s is not recognized; only SELECT, WITH, SHOW, DESCRIBE, DESC, EXPLAIN, and LIST are allowed", kw),
-	}), nil
+	// Step 6: readonly mode — inject LIMIT and execute.
+	limited := injectLimit(stmt, maxMCPQueryLimit)
+	result, err := runner.QuerySingle(ctx, limited)
+	if err != nil {
+		return nil, err
+	}
+	if len(result.Rows) > maxMCPResultRows {
+		result.Rows = result.Rows[:maxMCPResultRows]
+		result.Truncated = true
+	}
+	return jsonResult(result), nil
 }
 
 // registerSQLTools wires the SQL execution and context-switching tools onto
@@ -170,11 +149,12 @@ func executeSQLPipeline(ctx context.Context, runner queryRunner, sql string, mod
 func registerSQLTools(srv *mcpsdk.Server, client *snowflake.Client, mode string, cfg SessionConfig) {
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
 		Name: "execute_snowflake_sql",
-		Description: "Execute a single SQL statement against the Snowflake session. " +
-			"Supports read-only queries (SELECT, WITH) validated through the EXPLAIN precompilation gate, " +
-			"and metadata statements (SHOW, DESCRIBE, DESC, EXPLAIN, LIST) executed directly. " +
-			"DDL/DML statements (INSERT, UPDATE, DELETE, CREATE, DROP, etc.) are rejected. " +
-			"In readonly mode, SELECT/WITH queries are automatically limited to 100 rows. " +
+		Description: "Execute a single read-only SQL statement against the Snowflake session. " +
+			"Every statement passes through EXPLAIN USING TABULAR before execution — only " +
+			"statements whose query plan contains exclusively read-only operations are allowed. " +
+			"DDL, DML, and statements that EXPLAIN does not support (SHOW, DESCRIBE, LIST, etc.) " +
+			"are rejected; use the dedicated schema-browsing tools for metadata. " +
+			"In readonly mode, queries are automatically limited to 100 rows. " +
 			"Multi-statement SQL and USE statements are rejected.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in executeSQLInput) (*mcpsdk.CallToolResult, any, error) {
 		result, err := executeSQLPipeline(ctx, client, in.SQL, mode)

@@ -13,6 +13,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -138,33 +139,6 @@ func TestPipelineMultiStatement(t *testing.T) {
 	}
 }
 
-func TestPipelineBlockedKeyword(t *testing.T) {
-	blocked := []string{
-		"INSERT INTO t VALUES (1)",
-		"DELETE FROM t",
-		"DROP TABLE t",
-		"CREATE TABLE t (id INT)",
-		"TRUNCATE TABLE t",
-		"GRANT SELECT ON t TO r",
-	}
-	for _, sql := range blocked {
-		t.Run(sql, func(t *testing.T) {
-			runner := &capturingQueryRunner{}
-			result, err := executeSQLPipeline(context.Background(), runner, sql, ExecutionModeReadonly)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			text := extractTextFromResult(result)
-			if !strings.Contains(text, "not allowed") {
-				t.Errorf("expected 'not allowed' in result, got: %s", text)
-			}
-			if len(runner.queries) != 0 {
-				t.Errorf("expected no queries for blocked keyword, got %d", len(runner.queries))
-			}
-		})
-	}
-}
-
 func TestPipelineUSERejection(t *testing.T) {
 	runner := &capturingQueryRunner{}
 	result, err := executeSQLPipeline(context.Background(), runner, "USE ROLE SYSADMIN", ExecutionModeReadonly)
@@ -175,73 +149,57 @@ func TestPipelineUSERejection(t *testing.T) {
 	if !strings.Contains(text, "USE statements are not allowed") {
 		t.Errorf("expected USE rejection in result, got: %s", text)
 	}
+	if len(runner.queries) != 0 {
+		t.Errorf("expected no queries, got %d", len(runner.queries))
+	}
 }
 
-func TestPipelineMetadataPassthrough(t *testing.T) {
-	metadataResult := &snowflake.QueryResult{
-		Columns: []string{"name"},
-		Rows:    [][]any{{"TABLE_A"}, {"TABLE_B"}},
-	}
+func TestPipelineExplainErrorRejectsStatement(t *testing.T) {
+	// Statements that EXPLAIN doesn't support (SHOW, DESCRIBE, LIST, DDL,
+	// etc.) cause EXPLAIN to error. The pipeline must reject them rather
+	// than letting raw SQL through.
 	cases := []struct {
-		sql  string
-		mode string
+		sql    string
+		errMsg string
 	}{
-		{"SHOW TABLES", ExecutionModeReadonly},
-		{"DESCRIBE TABLE t", ExecutionModeReadonly},
-		{"DESC TABLE t", ExecutionModeReadonly},
-		{"EXPLAIN SELECT 1", ExecutionModeReadonly},
-		{"LIST @mystage", ExecutionModeReadonly},
-		// Metadata also works in explain_only mode.
-		{"SHOW TABLES", ExecutionModeExplainOnly},
-		{"DESCRIBE TABLE t", ExecutionModeExplainOnly},
+		{"SHOW TABLES", "snowflake: EXPLAIN does not support SHOW"},
+		{"DESCRIBE TABLE t", "snowflake: EXPLAIN does not support DESCRIBE"},
+		{"LIST @mystage", "snowflake: EXPLAIN does not support LIST"},
+		{"DROP TABLE t", "snowflake: compilation error"},
+		{"INSERT INTO t VALUES (1)", "snowflake: compilation error"},
 	}
 	for _, tc := range cases {
-		t.Run(tc.sql+"_"+tc.mode, func(t *testing.T) {
-			runner := &capturingQueryRunner{result: metadataResult}
-			result, err := executeSQLPipeline(context.Background(), runner, tc.sql, tc.mode)
+		t.Run(tc.sql, func(t *testing.T) {
+			runner := &capturingQueryRunner{err: fmt.Errorf("%s", tc.errMsg)}
+			result, err := executeSQLPipeline(context.Background(), runner, tc.sql, ExecutionModeReadonly)
 			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			// The runner should have received the original SQL (not EXPLAIN-wrapped).
-			if len(runner.queries) != 1 {
-				t.Fatalf("expected 1 query, got %d", len(runner.queries))
-			}
-			if strings.HasPrefix(runner.queries[0], "EXPLAIN USING TABULAR") {
-				t.Errorf("metadata queries should NOT be EXPLAIN-wrapped, got: %s", runner.queries[0])
+				t.Fatalf("pipeline should not return error, got: %v", err)
 			}
 			text := extractTextFromResult(result)
-			if !strings.Contains(text, "TABLE_A") {
-				t.Errorf("expected metadata result, got: %s", text)
+			if !strings.Contains(text, "not supported") {
+				t.Errorf("expected 'not supported' rejection, got: %s", text)
+			}
+			// Should have attempted EXPLAIN only.
+			if len(runner.queries) != 1 {
+				t.Fatalf("expected 1 query (EXPLAIN attempt), got %d", len(runner.queries))
+			}
+			if !strings.HasPrefix(runner.queries[0], "EXPLAIN USING TABULAR") {
+				t.Errorf("query should be EXPLAIN-wrapped, got: %s", runner.queries[0])
 			}
 		})
 	}
 }
 
-func TestPipelineMetadataRowCap(t *testing.T) {
-	// Build a result with more rows than maxMCPResultRows.
-	rows := make([][]any, maxMCPResultRows+100)
-	for i := range rows {
-		rows[i] = []any{"row"}
-	}
-	runner := &capturingQueryRunner{result: &snowflake.QueryResult{
-		Columns: []string{"name"},
-		Rows:    rows,
-	}}
-	result, err := executeSQLPipeline(context.Background(), runner, "SHOW TABLES", ExecutionModeReadonly)
+func TestPipelineExplainRejectsNonReadOnly(t *testing.T) {
+	// DML that EXPLAIN *does* support — the plan reveals non-read-only ops.
+	runner := &capturingQueryRunner{result: explainResult("Insert", "TableScan")}
+	result, err := executeSQLPipeline(context.Background(), runner, "INSERT INTO t SELECT * FROM s", ExecutionModeReadonly)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	text := extractTextFromResult(result)
-	// Parse the JSON to check truncation.
-	var qr snowflake.QueryResult
-	if err := json.Unmarshal([]byte(text), &qr); err != nil {
-		t.Fatalf("failed to unmarshal result: %v", err)
-	}
-	if len(qr.Rows) != maxMCPResultRows {
-		t.Errorf("expected %d rows, got %d", maxMCPResultRows, len(qr.Rows))
-	}
-	if !qr.Truncated {
-		t.Error("expected Truncated flag to be set")
+	if !strings.Contains(text, "non-read-only") {
+		t.Errorf("expected non-read-only rejection, got: %s", text)
 	}
 }
 
@@ -274,9 +232,6 @@ func TestPipelineReadonlyLimitInjection(t *testing.T) {
 		Rows:    [][]any{{float64(1)}, {float64(2)}},
 	}
 
-	// The capturing runner returns explainResult for the first call (EXPLAIN)
-	// and queryResult for the second call (the actual query). We use a
-	// sequencing runner for this.
 	runner := &sequencingQueryRunner{
 		results: []*snowflake.QueryResult{
 			explainResult("Result", "TableScan"),
@@ -308,39 +263,32 @@ func TestPipelineReadonlyLimitInjection(t *testing.T) {
 	}
 }
 
-func TestPipelineDefaultDeny(t *testing.T) {
-	unknowns := []string{
-		"WHATEVER 1",
-		"FOOBAR table t",
-		"LATERAL something",
+func TestPipelineReadonlyRowCap(t *testing.T) {
+	// Build a query result with more rows than maxMCPResultRows.
+	rows := make([][]any, maxMCPResultRows+100)
+	for i := range rows {
+		rows[i] = []any{float64(i)}
 	}
-	for _, sql := range unknowns {
-		t.Run(sql, func(t *testing.T) {
-			runner := &capturingQueryRunner{}
-			result, err := executeSQLPipeline(context.Background(), runner, sql, ExecutionModeReadonly)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			text := extractTextFromResult(result)
-			if !strings.Contains(text, "not recognized") {
-				t.Errorf("expected 'not recognized' in result, got: %s", text)
-			}
-			if len(runner.queries) != 0 {
-				t.Errorf("expected no queries for unknown keyword, got %d", len(runner.queries))
-			}
-		})
+	runner := &sequencingQueryRunner{
+		results: []*snowflake.QueryResult{
+			explainResult("Result", "TableScan"),
+			{Columns: []string{"id"}, Rows: rows},
+		},
 	}
-}
-
-func TestPipelineBlockedWithComments(t *testing.T) {
-	runner := &capturingQueryRunner{}
-	result, err := executeSQLPipeline(context.Background(), runner, "/* bypass */ DROP TABLE t", ExecutionModeReadonly)
+	result, err := executeSQLPipeline(context.Background(), runner, "SELECT * FROM big_table", ExecutionModeReadonly)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	text := extractTextFromResult(result)
-	if !strings.Contains(text, "not allowed") {
-		t.Errorf("expected rejection even with comments, got: %s", text)
+	var qr snowflake.QueryResult
+	if err := json.Unmarshal([]byte(text), &qr); err != nil {
+		t.Fatalf("failed to unmarshal result: %v", err)
+	}
+	if len(qr.Rows) != maxMCPResultRows {
+		t.Errorf("expected %d rows, got %d", maxMCPResultRows, len(qr.Rows))
+	}
+	if !qr.Truncated {
+		t.Error("expected Truncated flag to be set")
 	}
 }
 
@@ -362,6 +310,21 @@ func TestPipelineCTE(t *testing.T) {
 	text := extractTextFromResult(result)
 	if text == "" {
 		t.Error("expected non-empty result")
+	}
+}
+
+func TestPipelineCTEWithDelete(t *testing.T) {
+	// WITH ... DELETE is a destructive statement that starts with WITH.
+	// Keyword classification would wrongly treat this as a read query.
+	// The EXPLAIN gate must catch it via the Delete operation in the plan.
+	runner := &capturingQueryRunner{result: explainResult("WithClause", "Delete", "TableScan")}
+	result, err := executeSQLPipeline(context.Background(), runner, "WITH target AS (SELECT id FROM t) DELETE FROM t WHERE id IN (SELECT id FROM target)", ExecutionModeReadonly)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	text := extractTextFromResult(result)
+	if !strings.Contains(text, "non-read-only") {
+		t.Errorf("expected non-read-only rejection for WITH...DELETE, got: %s", text)
 	}
 }
 
