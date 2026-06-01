@@ -31,6 +31,11 @@ type GateVerdict struct {
 	Operations []string `json:"operations"`
 	Rejected   []string `json:"rejected,omitempty"`
 	Reason     string   `json:"reason,omitempty"`
+	// Statement is the cleaned single statement extracted by CheckGate. It
+	// is set when CheckGate does not return an error (i.e. both allowed and
+	// rejected verdicts carry it) and is not serialized to JSON. This avoids
+	// callers having to re-parse the SQL to obtain the statement for execution.
+	Statement string `json:"-"`
 }
 
 // readOnlyOps is the default-allow set of EXPLAIN plan operations. Any
@@ -142,14 +147,35 @@ func CheckGate(ctx context.Context, runner queryRunner, sql string) (GateVerdict
 	}
 
 	// Layer 3: EXPLAIN USING TABULAR.
+	verdict, err := checkExplainPlan(ctx, runner, stmt)
+	if err != nil {
+		return verdict, fmt.Errorf("EXPLAIN gate: %w", err)
+	}
+	verdict.Statement = stmt
+	return verdict, nil
+}
+
+// checkExplainPlan sends stmt through Snowflake's EXPLAIN USING TABULAR and
+// verifies all operations in the plan are in the readOnlyOps allow-list.
+// Extracted from CheckGate for internal decomposition; CheckGate delegates
+// the EXPLAIN step to this function.
+//
+// When err is non-nil, the returned GateVerdict is a zero value and must not
+// be inspected (Allowed will be false, but this is incidental, not a
+// meaningful rejection).
+func checkExplainPlan(ctx context.Context, runner queryRunner, stmt string) (GateVerdict, error) {
 	result, err := runner.QuerySingle(ctx, "EXPLAIN USING TABULAR "+stmt)
 	if err != nil {
-		return GateVerdict{}, fmt.Errorf("EXPLAIN gate: %w", err)
+		return GateVerdict{}, err
 	}
 
 	ops, err := extractOperations(result)
 	if err != nil {
 		return GateVerdict{}, err
+	}
+
+	if len(ops) == 0 {
+		return GateVerdict{Reason: "EXPLAIN returned no operations"}, nil
 	}
 
 	var rejected []string

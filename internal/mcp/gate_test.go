@@ -149,6 +149,37 @@ func TestCheckGateAllowed(t *testing.T) {
 	}
 }
 
+func TestCheckGateStatementField(t *testing.T) {
+	runner := &fakeQueryRunner{result: explainResult("Result", "TableScan")}
+	v, err := CheckGate(context.Background(), runner, "  SELECT 1 ;  ")
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if !v.Allowed {
+		t.Fatalf("expected allowed, got rejected: %s", v.Reason)
+	}
+	// SplitStatements cleans the input: trims whitespace and trailing semicolon.
+	if v.Statement != "SELECT 1" {
+		t.Errorf("Statement = %q, want %q", v.Statement, "SELECT 1")
+	}
+}
+
+func TestCheckGateStatementFieldOnRejection(t *testing.T) {
+	// Statement is set even when the verdict is rejected (non-read-only ops),
+	// as long as CheckGate doesn't return an error.
+	runner := &fakeQueryRunner{result: explainResult("Insert", "TableScan")}
+	v, err := CheckGate(context.Background(), runner, "INSERT INTO t VALUES (1)")
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if v.Allowed {
+		t.Fatal("expected rejection")
+	}
+	if v.Statement != "INSERT INTO t VALUES (1)" {
+		t.Errorf("Statement = %q, want the cleaned statement", v.Statement)
+	}
+}
+
 func TestCheckGateRejectDML(t *testing.T) {
 	runner := &fakeQueryRunner{result: explainResult("Insert", "TableScan")}
 	v, err := CheckGate(context.Background(), runner, "INSERT INTO t VALUES (1)")
@@ -284,6 +315,62 @@ func TestExtractOperationsDedup(t *testing.T) {
 		if i >= len(ops) || ops[i] != w {
 			t.Errorf("ops[%d] = %q, want %q", i, ops[i], w)
 		}
+	}
+}
+
+// ── checkExplainPlan ────────────────────────────────────────────────────────
+
+func TestCheckExplainPlanAllowed(t *testing.T) {
+	runner := &fakeQueryRunner{result: explainResult("Result", "TableScan")}
+	v, err := checkExplainPlan(context.Background(), runner, "SELECT 1")
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if !v.Allowed {
+		t.Fatalf("expected allowed, got rejected: %s", v.Reason)
+	}
+}
+
+func TestCheckExplainPlanEmptyOps(t *testing.T) {
+	// An EXPLAIN result with zero operations should be rejected (default-deny).
+	runner := &fakeQueryRunner{result: explainResult()}
+	v, err := checkExplainPlan(context.Background(), runner, "SELECT 1")
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if v.Allowed {
+		t.Fatal("expected rejection for empty operations")
+	}
+	if v.Reason == "" {
+		t.Error("expected non-empty reason")
+	}
+}
+
+func TestCheckExplainPlanRejected(t *testing.T) {
+	runner := &fakeQueryRunner{result: explainResult("Insert", "TableScan")}
+	v, err := checkExplainPlan(context.Background(), runner, "INSERT INTO t VALUES (1)")
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if v.Allowed {
+		t.Fatal("expected rejection")
+	}
+	found := false
+	for _, r := range v.Rejected {
+		if r == "Insert" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("Rejected = %v, want Insert in list", v.Rejected)
+	}
+}
+
+func TestCheckExplainPlanError(t *testing.T) {
+	runner := &fakeQueryRunner{err: fmt.Errorf("snowflake: compilation error")}
+	_, err := checkExplainPlan(context.Background(), runner, "SELECT BAD SYNTAX")
+	if err == nil {
+		t.Fatal("expected error propagation from EXPLAIN failure")
 	}
 }
 
