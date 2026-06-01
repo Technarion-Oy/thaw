@@ -70,51 +70,19 @@ func injectLimit(sql string, limit int) string {
 }
 
 // executeSQLPipeline implements the SQL execution pipeline for the MCP
-// execute_snowflake_sql tool. It is extracted from the tool handler for
-// testability.
-//
-// Principle: no raw SQL reaches Snowflake without passing through EXPLAIN
-// USING TABULAR first. The EXPLAIN gate is the authoritative safety layer —
-// Snowflake's own query planner determines whether the statement is read-only,
-// not fragile keyword heuristics.
-//
-// Pipeline steps:
-//  1. Empty/whitespace check
-//  2. Single-statement check (SplitStatements)
-//  3. USE statement rejection (best-effort early check; EXPLAIN is the backstop)
-//  4. EXPLAIN USING TABULAR gate (checkExplainPlan) — if EXPLAIN itself errors,
-//     the statement is not supported and is rejected
-//  5. If explain_only mode: return the verdict without executing
-//  6. If readonly mode: inject LIMIT, execute, apply row cap
+// execute_snowflake_sql tool. It delegates validation to [CheckGate]
+// (empty check, single-statement, USE rejection, EXPLAIN USING TABULAR),
+// then adds mode-specific behavior: explain_only returns the gate verdict;
+// readonly injects a LIMIT wrapper and executes. If [CheckGate] returns an
+// error (e.g. EXPLAIN doesn't support the statement type), the pipeline
+// treats it as a rejection rather than a Go-level error.
 func executeSQLPipeline(ctx context.Context, runner queryRunner, sql string, mode string) (*mcpsdk.CallToolResult, error) {
-	// Step 1: Empty/whitespace check.
-	trimmed := strings.TrimSpace(sql)
-	if trimmed == "" {
-		return jsonResult(GateVerdict{Reason: "empty SQL"}), nil
-	}
-
-	// Step 2: Single-statement check.
-	stmts := snowflake.SplitStatements(trimmed)
-	if len(stmts) != 1 {
-		return jsonResult(GateVerdict{
-			Reason: fmt.Sprintf("multi-statement SQL not allowed (%d statements)", len(stmts)),
-		}), nil
-	}
-	stmt := stmts[0]
-
-	// Step 3: USE statement → reject (best-effort traceability; EXPLAIN
-	// would also catch this, but the error message is clearer here).
-	if isUSEStatement(stmt) {
-		return jsonResult(GateVerdict{
-			Reason: "USE statements are not allowed; use the dedicated context-switching tools",
-		}), nil
-	}
-
-	// Step 4: EXPLAIN USING TABULAR gate. If EXPLAIN errors (e.g. on SHOW,
-	// DESCRIBE, LIST, or any unsupported statement type), the statement is
-	// rejected — no raw SQL bypasses the gate. Metadata needs are served by
-	// the dedicated schema-browsing tools (list_databases, describe_table, etc.).
-	verdict, err := checkExplainPlan(ctx, runner, stmt)
+	// Run the EXPLAIN precompilation gate (empty check, single-statement,
+	// USE rejection, EXPLAIN USING TABULAR). If EXPLAIN errors (e.g. on
+	// SHOW, DESCRIBE, LIST, DDL), the statement is rejected as "not
+	// supported" — metadata needs are served by the dedicated schema-browsing
+	// tools, not raw SQL passthrough.
+	verdict, err := CheckGate(ctx, runner, sql)
 	if err != nil {
 		return jsonResult(GateVerdict{
 			Reason: fmt.Sprintf("statement not supported: %s", err),
@@ -124,12 +92,13 @@ func executeSQLPipeline(ctx context.Context, runner queryRunner, sql string, mod
 		return jsonResult(verdict), nil
 	}
 
-	// Step 5: explain_only mode — return the verdict without executing.
+	// explain_only mode — return the verdict without executing.
 	if mode == ExecutionModeExplainOnly {
 		return jsonResult(verdict), nil
 	}
 
-	// Step 6: readonly mode — inject LIMIT and execute.
+	// readonly mode — inject LIMIT and execute.
+	stmt := snowflake.SplitStatements(strings.TrimSpace(sql))[0]
 	limited := injectLimit(stmt, maxMCPQueryLimit)
 	result, err := runner.QuerySingle(ctx, limited)
 	if err != nil {
