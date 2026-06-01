@@ -170,6 +170,10 @@ func checkExplainPlan(ctx context.Context, runner queryRunner, stmt string) (Gat
 		return GateVerdict{}, err
 	}
 
+	if len(ops) == 0 {
+		return GateVerdict{Reason: "EXPLAIN returned no operations"}, nil
+	}
+
 	var rejected []string
 	for _, op := range ops {
 		if !readOnlyOps[op] {

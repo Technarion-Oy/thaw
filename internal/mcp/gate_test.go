@@ -300,6 +300,21 @@ func TestCheckExplainPlanAllowed(t *testing.T) {
 	}
 }
 
+func TestCheckExplainPlanEmptyOps(t *testing.T) {
+	// An EXPLAIN result with zero operations should be rejected (default-deny).
+	runner := &fakeQueryRunner{result: explainResult()}
+	v, err := checkExplainPlan(context.Background(), runner, "SELECT 1")
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if v.Allowed {
+		t.Fatal("expected rejection for empty operations")
+	}
+	if v.Reason == "" {
+		t.Error("expected non-empty reason")
+	}
+}
+
 func TestCheckExplainPlanRejected(t *testing.T) {
 	runner := &fakeQueryRunner{result: explainResult("Insert", "TableScan")}
 	v, err := checkExplainPlan(context.Background(), runner, "INSERT INTO t VALUES (1)")
