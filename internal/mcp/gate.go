@@ -157,11 +157,12 @@ func CheckGate(ctx context.Context, runner queryRunner, sql string) (GateVerdict
 
 // checkExplainPlan sends stmt through Snowflake's EXPLAIN USING TABULAR and
 // verifies all operations in the plan are in the readOnlyOps allow-list.
-// Extracted from CheckGate for reuse in the SQL execution pipeline.
+// Extracted from CheckGate for internal decomposition; CheckGate delegates
+// the EXPLAIN step to this function.
 func checkExplainPlan(ctx context.Context, runner queryRunner, stmt string) (GateVerdict, error) {
 	result, err := runner.QuerySingle(ctx, "EXPLAIN USING TABULAR "+stmt)
 	if err != nil {
-		return GateVerdict{}, fmt.Errorf("EXPLAIN gate: %w", err)
+		return GateVerdict{}, err
 	}
 
 	ops, err := extractOperations(result)

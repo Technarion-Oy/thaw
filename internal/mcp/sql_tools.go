@@ -69,7 +69,7 @@ type useSchemaInput struct {
 // result ordering.
 func injectLimit(sql string, limit int) string {
 	trimmed := strings.TrimSpace(sql)
-	trimmed = strings.TrimRight(trimmed, ";")
+	trimmed = strings.TrimSuffix(trimmed, ";")
 	trimmed = strings.TrimSpace(trimmed)
 	return fmt.Sprintf("SELECT * FROM (%s) AS _mcp_limit LIMIT %d", trimmed, limit)
 }
