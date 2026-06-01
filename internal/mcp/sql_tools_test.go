@@ -161,9 +161,11 @@ func TestPipelineUSERejection(t *testing.T) {
 }
 
 func TestPipelineExplainErrorRejectsStatement(t *testing.T) {
-	// Statements that EXPLAIN doesn't support (SHOW, DESCRIBE, LIST, DDL,
-	// etc.) cause EXPLAIN to error. The pipeline must reject them rather
-	// than letting raw SQL through.
+	// Statements that EXPLAIN doesn't support cause EXPLAIN to error. The
+	// pipeline must reject them rather than letting raw SQL through. Only
+	// statement types that genuinely fail EXPLAIN are listed here — DML like
+	// INSERT/DROP succeed in EXPLAIN (returning a plan with non-read-only
+	// ops) and are covered by TestPipelineExplainRejectsNonReadOnly.
 	cases := []struct {
 		sql    string
 		errMsg string
@@ -171,8 +173,6 @@ func TestPipelineExplainErrorRejectsStatement(t *testing.T) {
 		{"SHOW TABLES", "snowflake: EXPLAIN does not support SHOW"},
 		{"DESCRIBE TABLE t", "snowflake: EXPLAIN does not support DESCRIBE"},
 		{"LIST @mystage", "snowflake: EXPLAIN does not support LIST"},
-		{"DROP TABLE t", "snowflake: compilation error"},
-		{"INSERT INTO t VALUES (1)", "snowflake: compilation error"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.sql, func(t *testing.T) {

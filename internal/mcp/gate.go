@@ -32,9 +32,9 @@ type GateVerdict struct {
 	Rejected   []string `json:"rejected,omitempty"`
 	Reason     string   `json:"reason,omitempty"`
 	// Statement is the cleaned single statement extracted by CheckGate. It
-	// is set only when Allowed is true and is not serialized to JSON. This
-	// avoids callers having to re-parse the SQL to obtain the statement for
-	// execution.
+	// is set when CheckGate does not return an error (i.e. both allowed and
+	// rejected verdicts carry it) and is not serialized to JSON. This avoids
+	// callers having to re-parse the SQL to obtain the statement for execution.
 	Statement string `json:"-"`
 }
 

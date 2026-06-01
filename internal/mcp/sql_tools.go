@@ -102,7 +102,10 @@ func executeSQLPipeline(ctx context.Context, runner queryRunner, sql string, mod
 		return jsonResult(verdict), nil
 	}
 
-	// readonly mode — inject LIMIT and execute.
+	// readonly mode — inject LIMIT and execute. The mode guard below is a
+	// safety net: registerSQLTools only calls this for readonly/explain_only,
+	// but we reject explicitly in case the function is called from a new
+	// context in the future.
 	if mode != ExecutionModeReadonly {
 		return jsonResult(GateVerdict{
 			Reason: fmt.Sprintf("unsupported execution mode: %s", mode),
