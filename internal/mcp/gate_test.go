@@ -287,6 +287,141 @@ func TestExtractOperationsDedup(t *testing.T) {
 	}
 }
 
+// ── classifyStatement ───────────────────────────────────────────────────────
+
+func TestClassifyStatement(t *testing.T) {
+	cases := []struct {
+		sql  string
+		want string
+	}{
+		{"SELECT 1", "SELECT"},
+		{"select 1", "SELECT"},
+		{"  SELECT 1  ", "SELECT"},
+		{"WITH cte AS (SELECT 1) SELECT * FROM cte", "WITH"},
+		{"SHOW TABLES", "SHOW"},
+		{"DESCRIBE TABLE t", "DESCRIBE"},
+		{"DESC TABLE t", "DESC"},
+		{"EXPLAIN SELECT 1", "EXPLAIN"},
+		{"LIST @mystage", "LIST"},
+		{"INSERT INTO t VALUES (1)", "INSERT"},
+		{"DROP TABLE t", "DROP"},
+		{"CREATE TABLE t (id INT)", "CREATE"},
+		{"USE ROLE SYSADMIN", "USE"},
+		// Leading comments stripped.
+		{"-- comment\nSELECT 1", "SELECT"},
+		{"/* block */ SELECT 1", "SELECT"},
+		{"-- a\n/* b */ SHOW TABLES", "SHOW"},
+		// Parenthesis as delimiter.
+		{"SELECT(1)", "SELECT"},
+		// Empty / comment-only.
+		{"", ""},
+		{"  ", ""},
+		{"-- just a comment", ""},
+		{"/* unclosed", ""},
+		// Single keyword, no space.
+		{"ROLLBACK", "ROLLBACK"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.sql, func(t *testing.T) {
+			got := classifyStatement(tc.sql)
+			if got != tc.want {
+				t.Errorf("classifyStatement(%q) = %q, want %q", tc.sql, got, tc.want)
+			}
+		})
+	}
+}
+
+// ── keyword classification maps ─────────────────────────────────────────────
+
+func TestBlockedKeywords(t *testing.T) {
+	expected := []string{
+		"INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER",
+		"TRUNCATE", "GRANT", "REVOKE", "CALL", "MERGE", "COPY",
+		"PUT", "GET", "SET", "UNSET", "BEGIN", "COMMIT", "ROLLBACK",
+		"EXECUTE", "REMOVE", "UNDROP",
+	}
+	for _, kw := range expected {
+		if !isBlockedKeyword(kw) {
+			t.Errorf("expected %q to be blocked", kw)
+		}
+	}
+	// Non-blocked keywords.
+	for _, kw := range []string{"SELECT", "WITH", "SHOW", "DESCRIBE", "USE", ""} {
+		if isBlockedKeyword(kw) {
+			t.Errorf("expected %q to NOT be blocked", kw)
+		}
+	}
+}
+
+func TestMetadataKeywords(t *testing.T) {
+	expected := []string{"SHOW", "DESCRIBE", "DESC", "EXPLAIN", "LIST"}
+	for _, kw := range expected {
+		if !isMetadataKeyword(kw) {
+			t.Errorf("expected %q to be metadata", kw)
+		}
+	}
+	for _, kw := range []string{"SELECT", "INSERT", "USE", ""} {
+		if isMetadataKeyword(kw) {
+			t.Errorf("expected %q to NOT be metadata", kw)
+		}
+	}
+}
+
+func TestAllowedQueryKeywords(t *testing.T) {
+	expected := []string{"SELECT", "WITH"}
+	for _, kw := range expected {
+		if !isAllowedQueryKeyword(kw) {
+			t.Errorf("expected %q to be allowed query", kw)
+		}
+	}
+	for _, kw := range []string{"SHOW", "INSERT", "USE", ""} {
+		if isAllowedQueryKeyword(kw) {
+			t.Errorf("expected %q to NOT be allowed query", kw)
+		}
+	}
+}
+
+// ── checkExplainPlan ────────────────────────────────────────────────────────
+
+func TestCheckExplainPlanAllowed(t *testing.T) {
+	runner := &fakeQueryRunner{result: explainResult("Result", "TableScan")}
+	v, err := checkExplainPlan(context.Background(), runner, "SELECT 1")
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if !v.Allowed {
+		t.Fatalf("expected allowed, got rejected: %s", v.Reason)
+	}
+}
+
+func TestCheckExplainPlanRejected(t *testing.T) {
+	runner := &fakeQueryRunner{result: explainResult("Insert", "TableScan")}
+	v, err := checkExplainPlan(context.Background(), runner, "INSERT INTO t VALUES (1)")
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if v.Allowed {
+		t.Fatal("expected rejection")
+	}
+	found := false
+	for _, r := range v.Rejected {
+		if r == "Insert" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("Rejected = %v, want Insert in list", v.Rejected)
+	}
+}
+
+func TestCheckExplainPlanError(t *testing.T) {
+	runner := &fakeQueryRunner{err: fmt.Errorf("snowflake: compilation error")}
+	_, err := checkExplainPlan(context.Background(), runner, "SELECT BAD SYNTAX")
+	if err == nil {
+		t.Fatal("expected error propagation from EXPLAIN failure")
+	}
+}
+
 // ── stripLeadingComments ────────────────────────────────────────────────────
 
 func TestStripLeadingComments(t *testing.T) {
