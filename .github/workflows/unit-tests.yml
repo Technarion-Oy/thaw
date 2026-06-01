@@ -27,7 +27,7 @@ jobs:
       - name: Install base tools
         run: |
           apt-get update
-          apt-get install -y git curl wget
+          apt-get install -y git curl wget python3
 
       - uses: actions/checkout@v4
 
