@@ -64,13 +64,23 @@ type SessionInfo struct {
 
 // Manager owns the set of running MCP sessions. It is safe for concurrent use.
 type Manager struct {
-	mu       sync.Mutex
-	sessions map[string]*session
+	mu        sync.Mutex
+	sessions  map[string]*session
+	editorCtx *EditorContextStore
 }
 
-// NewManager returns an empty Manager.
+// NewManager returns an empty Manager with an initialized EditorContextStore.
 func NewManager() *Manager {
-	return &Manager{sessions: make(map[string]*session)}
+	return &Manager{
+		sessions:  make(map[string]*session),
+		editorCtx: NewEditorContextStore(),
+	}
+}
+
+// EditorContext returns the shared editor context store. MCP tool handlers
+// read from this store; the frontend pushes state into it via App IPC methods.
+func (m *Manager) EditorContext() *EditorContextStore {
+	return m.editorCtx
 }
 
 // Start creates and starts a new session bound to the supplied client. The
@@ -135,7 +145,7 @@ func (m *Manager) Start(ctx context.Context, label, connLabel, mode string, port
 		return SessionInfo{}, fmt.Errorf("mcp: failed to generate session token: %w", err)
 	}
 
-	s := newSession(m, label, connLabel, mode, token, assigned, client, ln, cfg)
+	s := newSession(m, label, connLabel, mode, token, assigned, client, ln, cfg, m.editorCtx)
 	if err := s.start(); err != nil {
 		_ = ln.Close()
 		return SessionInfo{}, err

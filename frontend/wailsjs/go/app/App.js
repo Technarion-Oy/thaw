@@ -1058,6 +1058,10 @@ export function ReadNotebook(arg1) {
   return window['go']['app']['App']['ReadNotebook'](arg1);
 }
 
+export function RemoveEditorTab(arg1) {
+  return window['go']['app']['App']['RemoveEditorTab'](arg1);
+}
+
 export function RemoveStageFiles(arg1, arg2) {
   return window['go']['app']['App']['RemoveStageFiles'](arg1, arg2);
 }
@@ -1264,6 +1268,18 @@ export function TestAIModel(arg1, arg2, arg3, arg4, arg5) {
 
 export function UninstallEnvPackage(arg1) {
   return window['go']['app']['App']['UninstallEnvPackage'](arg1);
+}
+
+export function UpdateEditorContext(arg1, arg2) {
+  return window['go']['app']['App']['UpdateEditorContext'](arg1, arg2);
+}
+
+export function UpdateEditorTabSQL(arg1, arg2) {
+  return window['go']['app']['App']['UpdateEditorTabSQL'](arg1, arg2);
+}
+
+export function UpdateQueryResult(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['app']['App']['UpdateQueryResult'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
 export function UploadFileToStage(arg1, arg2, arg3, arg4, arg5, arg6) {

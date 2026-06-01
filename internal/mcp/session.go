@@ -34,11 +34,12 @@ type session struct {
 	token     string
 	cfg       SessionConfig
 
-	client *snowflake.Client
-	server *mcpsdk.Server
-	ln     net.Listener
-	http   *http.Server
-	mgr    *Manager
+	client    *snowflake.Client
+	editorCtx *EditorContextStore
+	server    *mcpsdk.Server
+	ln        net.Listener
+	http      *http.Server
+	mgr       *Manager
 
 	mu      sync.Mutex
 	running bool
@@ -48,7 +49,7 @@ type session struct {
 // ln is the already-bound loopback listener the HTTP server will serve on;
 // mgr is the owning Manager, used to self-remove if the server dies. token is
 // the per-session secret required to open the SSE GET (see tokenGuard).
-func newSession(mgr *Manager, label, connLabel, mode, token string, port int, client *snowflake.Client, ln net.Listener, cfg SessionConfig) *session {
+func newSession(mgr *Manager, label, connLabel, mode, token string, port int, client *snowflake.Client, ln net.Listener, cfg SessionConfig, editorCtx *EditorContextStore) *session {
 	return &session{
 		label:     label,
 		connLabel: connLabel,
@@ -56,6 +57,7 @@ func newSession(mgr *Manager, label, connLabel, mode, token string, port int, cl
 		token:     token,
 		port:      port,
 		client:    client,
+		editorCtx: editorCtx,
 		ln:        ln,
 		mgr:       mgr,
 		cfg:       cfg,
@@ -72,7 +74,7 @@ func (s *session) start() error {
 		return fmt.Errorf("mcp: session %q already running", s.label)
 	}
 
-	s.server = buildServer(s.client, s.mode, s.cfg)
+	s.server = buildServer(s.client, s.mode, s.cfg, s.editorCtx)
 	sse := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return s.server }, nil)
 	// loopbackGuard (DNS-rebinding defense) runs first, then tokenGuard
 	// authenticates the session-creating GET against the per-session token.
