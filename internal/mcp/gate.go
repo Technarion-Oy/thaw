@@ -149,7 +149,7 @@ func CheckGate(ctx context.Context, runner queryRunner, sql string) (GateVerdict
 	// Layer 3: EXPLAIN USING TABULAR.
 	verdict, err := checkExplainPlan(ctx, runner, stmt)
 	if err != nil {
-		return verdict, err
+		return verdict, fmt.Errorf("EXPLAIN gate: %w", err)
 	}
 	verdict.Statement = stmt
 	return verdict, nil
@@ -159,6 +159,10 @@ func CheckGate(ctx context.Context, runner queryRunner, sql string) (GateVerdict
 // verifies all operations in the plan are in the readOnlyOps allow-list.
 // Extracted from CheckGate for internal decomposition; CheckGate delegates
 // the EXPLAIN step to this function.
+//
+// When err is non-nil, the returned GateVerdict is a zero value and must not
+// be inspected (Allowed will be false, but this is incidental, not a
+// meaningful rejection).
 func checkExplainPlan(ctx context.Context, runner queryRunner, stmt string) (GateVerdict, error) {
 	result, err := runner.QuerySingle(ctx, "EXPLAIN USING TABULAR "+stmt)
 	if err != nil {

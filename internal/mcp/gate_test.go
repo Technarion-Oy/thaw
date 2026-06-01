@@ -149,6 +149,37 @@ func TestCheckGateAllowed(t *testing.T) {
 	}
 }
 
+func TestCheckGateStatementField(t *testing.T) {
+	runner := &fakeQueryRunner{result: explainResult("Result", "TableScan")}
+	v, err := CheckGate(context.Background(), runner, "  SELECT 1 ;  ")
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if !v.Allowed {
+		t.Fatalf("expected allowed, got rejected: %s", v.Reason)
+	}
+	// SplitStatements cleans the input: trims whitespace and trailing semicolon.
+	if v.Statement != "SELECT 1" {
+		t.Errorf("Statement = %q, want %q", v.Statement, "SELECT 1")
+	}
+}
+
+func TestCheckGateStatementFieldOnRejection(t *testing.T) {
+	// Statement is set even when the verdict is rejected (non-read-only ops),
+	// as long as CheckGate doesn't return an error.
+	runner := &fakeQueryRunner{result: explainResult("Insert", "TableScan")}
+	v, err := CheckGate(context.Background(), runner, "INSERT INTO t VALUES (1)")
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if v.Allowed {
+		t.Fatal("expected rejection")
+	}
+	if v.Statement != "INSERT INTO t VALUES (1)" {
+		t.Errorf("Statement = %q, want the cleaned statement", v.Statement)
+	}
+}
+
 func TestCheckGateRejectDML(t *testing.T) {
 	runner := &fakeQueryRunner{result: explainResult("Insert", "TableScan")}
 	v, err := CheckGate(context.Background(), runner, "INSERT INTO t VALUES (1)")
