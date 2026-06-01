@@ -329,6 +329,10 @@ func TestPipelineUnsupportedMode(t *testing.T) {
 	if !strings.Contains(text, "unsupported execution mode") {
 		t.Errorf("expected unsupported mode rejection, got: %s", text)
 	}
+	// Should have called EXPLAIN (gate passed) but not executed the query.
+	if len(runner.queries) != 1 {
+		t.Fatalf("expected 1 query (EXPLAIN only), got %d", len(runner.queries))
+	}
 }
 
 func TestPipelineQueryExecutionFailure(t *testing.T) {

@@ -141,6 +141,9 @@ func registerSQLTools(srv *mcpsdk.Server, client *snowflake.Client, mode string,
 			"result ordering is not guaranteed (ORDER BY may not be preserved). " +
 			"Multi-statement SQL and USE statements are rejected.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in executeSQLInput) (*mcpsdk.CallToolResult, any, error) {
+		// executeSQLPipeline converts all failures to structured GateVerdict
+		// results (err is always nil in practice). The error branch is
+		// retained for defensive safety.
 		result, err := executeSQLPipeline(ctx, client, in.SQL, mode)
 		if err != nil {
 			return nil, nil, err
