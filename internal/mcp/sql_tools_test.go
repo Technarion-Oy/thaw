@@ -331,6 +331,30 @@ func TestPipelineUnsupportedMode(t *testing.T) {
 	}
 }
 
+func TestPipelineQueryExecutionFailure(t *testing.T) {
+	// EXPLAIN passes but the actual query fails (e.g. table dropped between
+	// EXPLAIN and execution, permissions revoked, etc.). The pipeline should
+	// return a structured rejection, not a raw Go error.
+	runner := &sequencingQueryRunner{
+		results: []*snowflake.QueryResult{
+			explainResult("Result", "TableScan"),
+			nil,
+		},
+		errors: []error{
+			nil,
+			fmt.Errorf("snowflake: table T does not exist"),
+		},
+	}
+	result, err := executeSQLPipeline(context.Background(), runner, "SELECT * FROM t", ExecutionModeReadonly)
+	if err != nil {
+		t.Fatalf("pipeline should not return Go error, got: %v", err)
+	}
+	text := extractTextFromResult(result)
+	if !strings.Contains(text, "query execution failed") {
+		t.Errorf("expected structured execution failure, got: %s", text)
+	}
+}
+
 func TestPipelineCTEWithDelete(t *testing.T) {
 	// WITH ... DELETE is a destructive statement that starts with WITH.
 	// Keyword classification would wrongly treat this as a read query.
@@ -358,6 +382,9 @@ func (s *sequencingQueryRunner) QuerySingle(_ context.Context, query string) (*s
 	s.queries = append(s.queries, query)
 	i := s.idx
 	s.idx++
+	if i >= len(s.results) && i >= len(s.errors) {
+		panic(fmt.Sprintf("sequencingQueryRunner: no result/error for call %d (have %d results, %d errors)", i, len(s.results), len(s.errors)))
+	}
 	var result *snowflake.QueryResult
 	var err error
 	if i < len(s.results) {

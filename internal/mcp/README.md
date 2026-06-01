@@ -70,7 +70,7 @@ Ports auto-assign sequentially from `basePort` (`9100`) up to `basePort+1000`. `
 
 Metadata needs (listing databases, describing tables, etc.) are served by the dedicated schema-browsing tools (`list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`) which use safe Go methods internally — not raw SQL passthrough.
 
-**`CheckGate` backwards-compatibility**: The original `CheckGate` function is preserved unchanged (it still runs layers 1–3). The pipeline calls the extracted `checkExplainPlan` directly for step 4.
+**`CheckGate` backwards-compatibility**: The original `CheckGate` function is preserved unchanged (it still runs layers 1–3 plus EXPLAIN). The pipeline delegates to `CheckGate`, which internally calls the extracted `checkExplainPlan`.
 
 **Caveats**: The pipeline is not a substitute for a scoped read-only Snowflake role. It fails safe by over-rejecting (any statement EXPLAIN can't handle or any unknown operation is denied). The real security boundary is the Snowflake role's grants — the pipeline provides an additional defense layer.
 

@@ -114,7 +114,9 @@ func executeSQLPipeline(ctx context.Context, runner queryRunner, sql string, mod
 	limited := injectLimit(verdict.Statement, maxMCPQueryLimit)
 	result, err := runner.QuerySingle(ctx, limited)
 	if err != nil {
-		return nil, err
+		return jsonResult(GateVerdict{
+			Reason: fmt.Sprintf("query execution failed: %s", err),
+		}), nil
 	}
 	if len(result.Rows) > maxMCPResultRows {
 		result.Rows = result.Rows[:maxMCPResultRows]
