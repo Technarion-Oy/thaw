@@ -207,6 +207,10 @@ func TestPipelineExplainRejectsNonReadOnly(t *testing.T) {
 	if !strings.Contains(text, "non-read-only") {
 		t.Errorf("expected non-read-only rejection, got: %s", text)
 	}
+	// Should have called EXPLAIN only — not proceeded to execution.
+	if len(runner.queries) != 1 {
+		t.Fatalf("expected 1 query (EXPLAIN only), got %d", len(runner.queries))
+	}
 }
 
 func TestPipelineExplainOnlyVerdict(t *testing.T) {
@@ -386,7 +390,7 @@ func (s *sequencingQueryRunner) QuerySingle(_ context.Context, query string) (*s
 	s.queries = append(s.queries, query)
 	i := s.idx
 	s.idx++
-	if i >= len(s.results) && i >= len(s.errors) {
+	if i >= max(len(s.results), len(s.errors)) {
 		panic(fmt.Sprintf("sequencingQueryRunner: no result/error for call %d (have %d results, %d errors)", i, len(s.results), len(s.errors)))
 	}
 	var result *snowflake.QueryResult

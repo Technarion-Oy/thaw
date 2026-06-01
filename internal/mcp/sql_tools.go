@@ -12,6 +12,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -89,8 +90,14 @@ func executeSQLPipeline(ctx context.Context, runner queryRunner, sql string, mod
 	// tools, not raw SQL passthrough.
 	verdict, err := CheckGate(ctx, runner, sql)
 	if err != nil {
+		// Unwrap the "EXPLAIN gate:" prefix that CheckGate adds (preserved
+		// for direct CheckGate callers) to avoid a triple-prefix message.
+		inner := errors.Unwrap(err)
+		if inner == nil {
+			inner = err
+		}
 		return jsonResult(GateVerdict{
-			Reason: fmt.Sprintf("statement not supported: %s", err),
+			Reason: fmt.Sprintf("statement not supported: %s", inner),
 		}), nil
 	}
 	if !verdict.Allowed {
