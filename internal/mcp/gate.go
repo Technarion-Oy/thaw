@@ -31,6 +31,11 @@ type GateVerdict struct {
 	Operations []string `json:"operations"`
 	Rejected   []string `json:"rejected,omitempty"`
 	Reason     string   `json:"reason,omitempty"`
+	// Statement is the cleaned single statement extracted by CheckGate. It
+	// is set only when Allowed is true and is not serialized to JSON. This
+	// avoids callers having to re-parse the SQL to obtain the statement for
+	// execution.
+	Statement string `json:"-"`
 }
 
 // readOnlyOps is the default-allow set of EXPLAIN plan operations. Any
@@ -142,7 +147,12 @@ func CheckGate(ctx context.Context, runner queryRunner, sql string) (GateVerdict
 	}
 
 	// Layer 3: EXPLAIN USING TABULAR.
-	return checkExplainPlan(ctx, runner, stmt)
+	verdict, err := checkExplainPlan(ctx, runner, stmt)
+	if err != nil {
+		return verdict, err
+	}
+	verdict.Statement = stmt
+	return verdict, nil
 }
 
 // checkExplainPlan sends stmt through Snowflake's EXPLAIN USING TABULAR and

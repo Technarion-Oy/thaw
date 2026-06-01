@@ -96,6 +96,12 @@ func TestInjectLimit(t *testing.T) {
 			100,
 			"SELECT * FROM (SELECT 1) AS _mcp_limit LIMIT 100",
 		},
+		{
+			"order by not propagated to outer query",
+			"SELECT * FROM t ORDER BY created_at DESC",
+			100,
+			"SELECT * FROM (SELECT * FROM t ORDER BY created_at DESC) AS _mcp_limit LIMIT 100",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -310,6 +316,18 @@ func TestPipelineCTE(t *testing.T) {
 	text := extractTextFromResult(result)
 	if text == "" {
 		t.Error("expected non-empty result")
+	}
+}
+
+func TestPipelineUnsupportedMode(t *testing.T) {
+	runner := &capturingQueryRunner{result: explainResult("Result", "TableScan")}
+	result, err := executeSQLPipeline(context.Background(), runner, "SELECT 1", "metadata")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	text := extractTextFromResult(result)
+	if !strings.Contains(text, "unsupported execution mode") {
+		t.Errorf("expected unsupported mode rejection, got: %s", text)
 	}
 }
 

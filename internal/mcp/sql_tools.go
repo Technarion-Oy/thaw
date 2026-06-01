@@ -62,6 +62,11 @@ type useSchemaInput struct {
 //
 // Snowflake's optimizer flattens trivial subqueries, so this does not add
 // meaningful overhead.
+//
+// Note: ORDER BY in the inner query is not guaranteed to be preserved by the
+// outer SELECT — standard SQL does not require subquery ordering to propagate.
+// Snowflake often preserves it in practice, but clients should not rely on
+// result ordering.
 func injectLimit(sql string, limit int) string {
 	trimmed := strings.TrimSpace(sql)
 	trimmed = strings.TrimRight(trimmed, ";")
@@ -98,8 +103,12 @@ func executeSQLPipeline(ctx context.Context, runner queryRunner, sql string, mod
 	}
 
 	// readonly mode — inject LIMIT and execute.
-	stmt := snowflake.SplitStatements(strings.TrimSpace(sql))[0]
-	limited := injectLimit(stmt, maxMCPQueryLimit)
+	if mode != ExecutionModeReadonly {
+		return jsonResult(GateVerdict{
+			Reason: fmt.Sprintf("unsupported execution mode: %s", mode),
+		}), nil
+	}
+	limited := injectLimit(verdict.Statement, maxMCPQueryLimit)
 	result, err := runner.QuerySingle(ctx, limited)
 	if err != nil {
 		return nil, err
@@ -123,7 +132,8 @@ func registerSQLTools(srv *mcpsdk.Server, client *snowflake.Client, mode string,
 			"statements whose query plan contains exclusively read-only operations are allowed. " +
 			"DDL, DML, and statements that EXPLAIN does not support (SHOW, DESCRIBE, LIST, etc.) " +
 			"are rejected; use the dedicated schema-browsing tools for metadata. " +
-			"In readonly mode, queries are automatically limited to 100 rows. " +
+			"In readonly mode, queries are automatically limited to 100 rows; " +
+			"result ordering is not guaranteed (ORDER BY may not be preserved). " +
 			"Multi-statement SQL and USE statements are rejected.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in executeSQLInput) (*mcpsdk.CallToolResult, any, error) {
 		result, err := executeSQLPipeline(ctx, client, in.SQL, mode)
