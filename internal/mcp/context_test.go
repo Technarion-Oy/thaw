@@ -96,6 +96,26 @@ func TestEditorContextStore_QueryResultSummaryByTabID(t *testing.T) {
 	}
 }
 
+func TestEditorContextStore_ClearTabResult(t *testing.T) {
+	s := NewEditorContextStore()
+	s.SetActiveTab("tab1", "SELECT 1")
+	s.SetTabResult("tab1", &ResultSummary{RowCount: 10, QueryID: "qid-1"})
+
+	s.ClearTabResult("tab1")
+
+	// Result should be nil, but SQL should remain.
+	if got := s.QueryResultSummary("tab1"); got != nil {
+		t.Errorf("expected nil result after clear, got %+v", got)
+	}
+	sql, ok := s.ActiveEditorSQL()
+	if !ok || sql != "SELECT 1" {
+		t.Errorf("expected SQL to be preserved, got %q ok=%v", sql, ok)
+	}
+
+	// Clearing a non-existent tab should not panic.
+	s.ClearTabResult("no-such-tab")
+}
+
 func TestEditorContextStore_RemoveTab(t *testing.T) {
 	s := NewEditorContextStore()
 	s.SetActiveTab("tab1", "SELECT 1")
@@ -139,6 +159,7 @@ func TestEditorContextStore_ConcurrentAccess(t *testing.T) {
 			s.SetActiveTab(tabID, sql)
 			s.SetTabSQL(tabID, sql+"_updated")
 			s.SetTabResult(tabID, &ResultSummary{RowCount: n})
+			s.ClearTabResult(tabID)
 			s.ActiveEditorSQL()
 			s.QueryResultSummary("")
 			s.QueryResultSummary(tabID)

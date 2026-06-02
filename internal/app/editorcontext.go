@@ -37,6 +37,14 @@ func (a *App) UpdateQueryResult(tabID string, columns []string, rowCount int, tr
 	})
 }
 
+// ClearQueryResult removes the result summary for a tab without
+// affecting its SQL content. Called by the frontend when a new query
+// starts executing, so that MCP clients don't see stale results from
+// a previous execution.
+func (a *App) ClearQueryResult(tabID string) {
+	a.mcpManager.EditorContext().ClearTabResult(tabID)
+}
+
 // RemoveEditorTab removes all editor context state for a tab. Called by
 // the frontend when a tab is closed.
 func (a *App) RemoveEditorTab(tabID string) {

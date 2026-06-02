@@ -16,6 +16,7 @@ import {
   UpdateEditorContext,
   UpdateEditorTabSQL,
   UpdateQueryResult,
+  ClearQueryResult,
   RemoveEditorTab,
 } from "../../wailsjs/go/app/App";
 
@@ -81,6 +82,10 @@ export function useEditorContextSync(): void {
             sampleRows,
             result.queryID ?? "",
           ).catch(() => {});
+        } else {
+          // Result cleared (new query started) — tell the backend so
+          // MCP clients don't see stale results from a previous run.
+          ClearQueryResult(state.activeTabId).catch(() => {});
         }
       }
 

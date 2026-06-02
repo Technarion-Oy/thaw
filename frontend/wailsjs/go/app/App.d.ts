@@ -132,6 +132,8 @@ export function ClearObjectCache():Promise<void>;
 
 export function ClearObjectCacheForDatabase(arg1:string):Promise<void>;
 
+export function ClearQueryResult(arg1:string):Promise<void>;
+
 export function CloneChildTask(arg1:string,arg2:string,arg3:string,arg4:string,arg5:boolean,arg6:Array<string>):Promise<void>;
 
 export function CloneProfile(arg1:string,arg2:string):Promise<void>;

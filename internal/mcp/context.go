@@ -96,6 +96,17 @@ func (s *EditorContextStore) SetTabResult(tabID string, result *ResultSummary) {
 	s.getOrCreateLocked(tabID).result = result
 }
 
+// ClearTabResult removes the result summary for a tab, leaving SQL
+// intact. Called when a new query starts executing so that MCP clients
+// don't see stale results from a previous execution.
+func (s *EditorContextStore) ClearTabResult(tabID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if tc := s.tabs[tabID]; tc != nil {
+		tc.result = nil
+	}
+}
+
 // RemoveTab removes all state for a tab. Called on tab close.
 func (s *EditorContextStore) RemoveTab(tabID string) {
 	s.mu.Lock()
@@ -122,9 +133,12 @@ func (s *EditorContextStore) ActiveEditorSQL() (string, bool) {
 	return tc.sql, true
 }
 
-// QueryResultSummary returns the latest result summary for a tab. If
-// tabID is empty, the active tab is used. Returns nil when no result
-// is available.
+// QueryResultSummary returns a shallow copy of the latest result
+// summary for a tab. If tabID is empty, the active tab is used.
+// Returns nil when no result is available.
+//
+// A copy is returned so that callers cannot hold a reference into the
+// store's internal state after the read lock is released.
 func (s *EditorContextStore) QueryResultSummary(tabID string) *ResultSummary {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -135,8 +149,9 @@ func (s *EditorContextStore) QueryResultSummary(tabID string) *ResultSummary {
 		return nil
 	}
 	tc := s.tabs[tabID]
-	if tc == nil {
+	if tc == nil || tc.result == nil {
 		return nil
 	}
-	return tc.result
+	cp := *tc.result
+	return &cp
 }

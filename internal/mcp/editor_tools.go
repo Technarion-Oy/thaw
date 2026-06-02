@@ -12,7 +12,7 @@ package mcp
 
 import (
 	"context"
-	"fmt"
+	"log"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -103,9 +103,13 @@ func registerEditorTools(srv *mcpsdk.Server, client *snowflake.Client, mode stri
 			false, // exclude client-generated statements
 		)
 		if err != nil {
+			// Log the full error for debugging but return a generic
+			// message to MCP clients to avoid leaking Snowflake
+			// connection details, role names, or warehouse names.
+			log.Printf("get_query_history: %v", err)
 			return &mcpsdk.CallToolResult{
 				Content: []mcpsdk.Content{&mcpsdk.TextContent{
-					Text: fmt.Sprintf("failed to fetch query history: %v", err),
+					Text: "failed to fetch query history",
 				}},
 				IsError: true,
 			}, nil, nil

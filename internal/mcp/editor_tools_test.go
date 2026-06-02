@@ -158,6 +158,48 @@ func TestGetQueryResultsSummaryReturnsData(t *testing.T) {
 	}
 }
 
+// TestGetQueryResultsSummaryExplicitTabID verifies the tool returns results
+// for a non-active tab when an explicit tabId is provided.
+func TestGetQueryResultsSummaryExplicitTabID(t *testing.T) {
+	store := NewEditorContextStore()
+	store.SetActiveTab("tab1", "SELECT 1")
+	store.SetTabResult("tab2", &ResultSummary{
+		TabID:      "tab2",
+		Columns:    []string{"COL_A"},
+		RowCount:   42,
+		SampleRows: [][]any{{"hello"}},
+		QueryID:    "qid-tab2",
+	})
+	srv := buildServer(nil, ExecutionModeReadonly, SessionConfig{}, store)
+
+	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
+	httpSrv := httptest.NewServer(handler)
+	defer httpSrv.Close()
+
+	ctx := context.Background()
+	c := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test", Version: "v1"}, nil)
+	cs, err := c.Connect(ctx, &mcpsdk.SSEClientTransport{Endpoint: httpSrv.URL}, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = cs.Close() }()
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "get_query_results_summary",
+		Arguments: resultSummaryInput{TabID: "tab2"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	text := extractText(t, res)
+	if !strings.Contains(text, "qid-tab2") {
+		t.Errorf("expected query ID qid-tab2 in result, got: %s", text)
+	}
+	if !strings.Contains(text, "hello") {
+		t.Errorf("expected sample data in result, got: %s", text)
+	}
+}
+
 // TestGetQueryResultsSummaryModeGating verifies get_query_results_summary is
 // NOT registered in metadata mode (it exposes data rows).
 func TestGetQueryResultsSummaryModeGating(t *testing.T) {
