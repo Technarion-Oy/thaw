@@ -75,7 +75,12 @@ func (s *session) start() error {
 	}
 
 	s.server = buildServer(s.client, s.mode, s.cfg, s.editorCtx)
-	sse := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return s.server }, nil)
+	sse := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server {
+		s.mu.Lock()
+		srv := s.server
+		s.mu.Unlock()
+		return srv
+	}, nil)
 	// loopbackGuard (DNS-rebinding defense) runs first, then tokenGuard
 	// authenticates the session-creating GET against the per-session token.
 	handler := loopbackGuard(tokenGuard(s.token, sse))
@@ -144,15 +149,50 @@ func (s *session) stop() error {
 }
 
 // updateMode rebuilds the MCP server with a new execution mode, swapping the
-// server pointer atomically under s.mu. The existing SSE handler closure reads
-// s.server per-request, so new connections automatically get the new tool set.
-// Existing connections keep old tools until reconnect (standard MCP behavior).
-func (s *session) updateMode(newMode string) {
+// server pointer under s.mu. The SSE handler's factory closure acquires s.mu
+// per-request, so new connections automatically get the new tool set. Existing
+// connections keep old tools until reconnect (standard MCP behavior).
+//
+// When switching to a non-metadata mode, session config (role/warehouse
+// pinning, secondary roles) is applied via Snowflake round-trips using ctx.
+// These round-trips run outside s.mu to avoid holding the lock during I/O.
+func (s *session) updateMode(ctx context.Context, newMode string) error {
+	// Apply session config before acquiring s.mu — the Snowflake round-trips
+	// can take time and must not block the SSE factory closure.
+	if newMode != ExecutionModeMetadata {
+		if err := s.applySessionConfig(ctx); err != nil {
+			return err
+		}
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.server = buildServer(s.client, newMode, s.cfg, s.editorCtx)
 	s.mode = newMode
+	return nil
+}
+
+// applySessionConfig runs USE ROLE / USE WAREHOUSE / USE SECONDARY ROLES NONE
+// on the session's Snowflake client if configured. This is idempotent — safe
+// to call on every mode switch to a non-metadata mode.
+func (s *session) applySessionConfig(ctx context.Context) error {
+	if s.cfg.Role != "" {
+		if err := s.client.UseRole(ctx, s.cfg.Role); err != nil {
+			return fmt.Errorf("mcp: failed to set role: %w", err)
+		}
+	}
+	if s.cfg.Warehouse != "" {
+		if err := s.client.UseWarehouse(ctx, s.cfg.Warehouse); err != nil {
+			return fmt.Errorf("mcp: failed to set warehouse: %w", err)
+		}
+	}
+	if s.cfg.SecondaryRoles == "none" {
+		if _, err := s.client.QuerySingle(ctx, "USE SECONDARY ROLES NONE"); err != nil {
+			return fmt.Errorf("mcp: failed to disable secondary roles: %w", err)
+		}
+	}
+	return nil
 }
 
 // info returns the serializable snapshot for this session.

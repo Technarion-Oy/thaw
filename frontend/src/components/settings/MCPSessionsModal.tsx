@@ -48,6 +48,19 @@ const EXECUTION_MODES = [
   { value: "explain_only", label: "Explain Only", description: "Returns the EXPLAIN verdict without executing. AI can check query safety but never sees data." },
 ];
 
+// Shared option renderer for execution mode dropdowns — shows label + description.
+function renderModeOption(option: { value?: string | number | null }) {
+  const m = EXECUTION_MODES.find((x) => x.value === option.value);
+  return (
+    <div>
+      <div>{m?.label}</div>
+      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+        {m?.description}
+      </div>
+    </div>
+  );
+}
+
 export default function MCPSessionsModal({ onClose }: Props) {
   const sessions = useMCPStore((s) => s.sessions);
   const refresh = useMCPStore((s) => s.refresh);
@@ -211,17 +224,7 @@ export default function MCPSessionsModal({ onClose }: Props) {
               disabled={!canStart}
               popupMatchSelectWidth={false}
               dropdownStyle={{ minWidth: 320 }}
-              optionRender={(option) => {
-                const m = EXECUTION_MODES.find((x) => x.value === option.value);
-                return (
-                  <div>
-                    <div>{m?.label}</div>
-                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-                      {m?.description}
-                    </div>
-                  </div>
-                );
-              }}
+              optionRender={renderModeOption}
             />
           </Form.Item>
           <Form.Item
@@ -347,17 +350,7 @@ export default function MCPSessionsModal({ onClose }: Props) {
                     style={{ width: 130, fontSize: 11 }}
                     popupMatchSelectWidth={false}
                     dropdownStyle={{ minWidth: 320 }}
-                    optionRender={(option) => {
-                      const m = EXECUTION_MODES.find((x) => x.value === option.value);
-                      return (
-                        <div>
-                          <div>{m?.label}</div>
-                          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-                            {m?.description}
-                          </div>
-                        </div>
-                      );
-                    }}
+                    optionRender={renderModeOption}
                   />
                   {s.pinnedRole ? ` · role: ${s.pinnedRole}` : ""}
                   {s.pinnedWarehouse ? ` · wh: ${s.pinnedWarehouse}` : ""}

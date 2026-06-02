@@ -765,8 +765,10 @@ func TestManagerUpdateMode(t *testing.T) {
 	m.sessions["test"] = s
 	m.mu.Unlock()
 
+	ctx := context.Background()
+
 	// Valid mode change.
-	info, err := m.UpdateMode("test", ExecutionModeReadonly)
+	info, err := m.UpdateMode(ctx, "test", ExecutionModeReadonly)
 	if err != nil {
 		t.Fatalf("UpdateMode failed: %v", err)
 	}
@@ -775,12 +777,12 @@ func TestManagerUpdateMode(t *testing.T) {
 	}
 
 	// Invalid mode rejected.
-	if _, err := m.UpdateMode("test", "dangerous"); err == nil {
+	if _, err := m.UpdateMode(ctx, "test", "dangerous"); err == nil {
 		t.Error("expected error for invalid mode, got nil")
 	}
 
 	// Unknown session.
-	if _, err := m.UpdateMode("nonexistent", ExecutionModeMetadata); err == nil {
+	if _, err := m.UpdateMode(ctx, "nonexistent", ExecutionModeMetadata); err == nil {
 		t.Error("expected error for unknown session, got nil")
 	}
 }
@@ -802,15 +804,21 @@ func TestUpdateModeChangesTools(t *testing.T) {
 		t.Fatal("execute_snowflake_sql should not exist in metadata mode")
 	}
 
+	ctx := context.Background()
+
 	// Switch to readonly — execute_snowflake_sql should appear.
-	s.updateMode(ExecutionModeReadonly)
+	if err := s.updateMode(ctx, ExecutionModeReadonly); err != nil {
+		t.Fatalf("updateMode to readonly: %v", err)
+	}
 	names = toolNames(t, s.server)
 	if !hasToolName(names, "execute_snowflake_sql") {
 		t.Fatal("execute_snowflake_sql should exist after switching to readonly")
 	}
 
 	// Switch back to metadata — execute_snowflake_sql should disappear.
-	s.updateMode(ExecutionModeMetadata)
+	if err := s.updateMode(ctx, ExecutionModeMetadata); err != nil {
+		t.Fatalf("updateMode to metadata: %v", err)
+	}
 	names = toolNames(t, s.server)
 	if hasToolName(names, "execute_snowflake_sql") {
 		t.Fatal("execute_snowflake_sql should not exist after switching back to metadata")

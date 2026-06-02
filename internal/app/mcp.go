@@ -83,7 +83,7 @@ func (a *App) UpdateMCPSessionMode(label, mode string) (mcp.SessionInfo, error) 
 		return mcp.SessionInfo{}, fmt.Errorf("MCP Server is disabled. Enable it under View → Enabled Features…")
 	}
 
-	info, err := a.mcpManager.UpdateMode(label, mode)
+	info, err := a.mcpManager.UpdateMode(a.ctx, label, mode)
 	if err != nil {
 		return mcp.SessionInfo{}, err
 	}

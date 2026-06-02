@@ -214,9 +214,11 @@ func (m *Manager) AuthenticatedURL(label string) (string, bool) {
 // UpdateMode changes the execution mode of a running session, rebuilding its
 // tool set. The session's dedicated connection and port are unaffected. New MCP
 // client connections will see the updated tools; existing connections keep old
-// tools until they reconnect (standard MCP behavior). Returns the updated
+// tools until they reconnect (standard MCP behavior). When switching to a
+// non-metadata mode, session config (role/warehouse pinning, secondary roles)
+// is re-applied via Snowflake round-trips using ctx. Returns the updated
 // SessionInfo.
-func (m *Manager) UpdateMode(label, newMode string) (SessionInfo, error) {
+func (m *Manager) UpdateMode(ctx context.Context, label, newMode string) (SessionInfo, error) {
 	if !validModes[newMode] {
 		return SessionInfo{}, fmt.Errorf("mcp: unsupported execution mode %q", newMode)
 	}
@@ -229,7 +231,9 @@ func (m *Manager) UpdateMode(label, newMode string) (SessionInfo, error) {
 		return SessionInfo{}, fmt.Errorf("mcp: no session named %q", label)
 	}
 
-	s.updateMode(newMode)
+	if err := s.updateMode(ctx, newMode); err != nil {
+		return SessionInfo{}, err
+	}
 	return s.info(), nil
 }
 
