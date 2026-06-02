@@ -42,25 +42,29 @@ export function useEditorContextSync(): void {
     prevTabIdsRef.current = new Set(initial.tabs.map((t: Tab) => t.id));
     UpdateEditorContext(initial.activeTabId, initialTab?.sql ?? "").catch(() => {});
 
-    return useQueryStore.subscribe((state) => {
+    const unsub = useQueryStore.subscribe((state) => {
       const activeTab = state.tabs.find((t: Tab) => t.id === state.activeTabId);
       const sql = activeTab?.sql ?? "";
       const result = activeTab?.result ?? null;
 
-      // Active tab changed.
+      // Active tab changed — cancel any pending debounce from the old tab
+      // since UpdateEditorContext already sends the new tab's SQL.
       if (state.activeTabId !== prevActiveTabRef.current) {
+        if (debounceRef.current) clearTimeout(debounceRef.current);
         prevActiveTabRef.current = state.activeTabId;
         prevSqlRef.current = sql;
         UpdateEditorContext(state.activeTabId, sql).catch(() => {});
       }
 
-      // SQL changed (debounced).
+      // SQL changed (debounced). Capture tabId at schedule time so a
+      // tab switch within the 300ms window doesn't send stale SQL to
+      // the wrong tab.
       if (sql !== prevSqlRef.current) {
         prevSqlRef.current = sql;
         if (debounceRef.current) clearTimeout(debounceRef.current);
+        const currentTabId = state.activeTabId;
         debounceRef.current = setTimeout(() => {
-          const tabId = useQueryStore.getState().activeTabId;
-          UpdateEditorTabSQL(tabId, sql).catch(() => {});
+          UpdateEditorTabSQL(currentTabId, sql).catch(() => {});
         }, 300);
       }
 
@@ -89,5 +93,10 @@ export function useEditorContextSync(): void {
       });
       prevTabIdsRef.current = currentIds;
     });
+
+    return () => {
+      unsub();
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
   }, []);
 }

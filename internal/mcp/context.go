@@ -112,7 +112,7 @@ func (s *EditorContextStore) RemoveTab(tabID string) {
 
 // ActiveEditorSQL returns the SQL content of the currently active tab.
 // The second return value is false when no active tab is set or the tab
-// has no content.
+// entry is missing from the store.
 func (s *EditorContextStore) ActiveEditorSQL() (string, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
