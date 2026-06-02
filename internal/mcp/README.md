@@ -13,7 +13,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | File | Purpose |
 |---|---|
 | `manager.go` | `Manager` (multi-session registry), `SessionInfo`/`SessionConfig` types, execution mode constants, port allocation, `Start`/`Stop`/`UpdateMode`/`List`/`StopAll`, `EditorContext()` accessor |
-| `session.go` | Per-session `http.Server` + SSE lifecycle (`start`/`stop`/`updateMode`/`info`); serves on the held loopback listener and owns/closes its `*snowflake.Client`. `updateMode` rebuilds the server pointer under `s.mu` so new connections get the updated tool set. If the serve goroutine exits unexpectedly it closes the client and self-removes from the `Manager` (`removeIfPresent`) so no dead row or leaked connection lingers |
+| `session.go` | Per-session `http.Server` + SSE lifecycle (`start`/`stop`/`updateMode`/`info`); serves on the held loopback listener and owns/closes its `*snowflake.Client`. `updateMode` rebuilds the server pointer under `s.mu` and closes all sessions on the old server to force MCP clients to reconnect with the updated tool set. If the serve goroutine exits unexpectedly it closes the client and self-removes from the `Manager` (`removeIfPresent`) so no dead row or leaked connection lingers |
 | `security.go` | `loopbackGuard` middleware (rejects non-loopback `Host`/cross-origin `Origin` — DNS-rebinding defense), `tokenGuard` middleware (per-session token auth on the SSE GET), and `newSessionToken` (crypto-random token) |
 | `server.go` | `buildServer(client, mode, cfg, editorCtx)` — constructs the MCP server and registers tools based on execution mode |
 | `tools.go` | Tool input structs + `registerTools` (schema-browsing tools); `jsonResult`/`textResult` content helpers |
@@ -38,7 +38,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `NewManager()` | Empty registry with initialized `EditorContextStore`. Safe for concurrent use. |
 | `EditorContext()` | Returns the shared `*EditorContextStore`; MCP tools read, frontend pushes state via App IPC. |
 | `Start(label, connLabel, mode, port, client, cfg)` | Starts a session under a unique `label`; `port == 0` auto-assigns from `9100`. Takes ownership of `client`. Applies `SessionConfig` (role/warehouse pinning, secondary roles). |
-| `UpdateMode(label, newMode)` | Changes the execution mode of a running session, rebuilding its tool set. New MCP client connections see the updated tools; existing connections keep old tools until reconnect. |
+| `UpdateMode(ctx, label, newMode)` | Changes the execution mode of a running session, rebuilding its tool set and closing existing MCP client sessions to force reconnection with the updated tools. Re-applies session config (role/warehouse pinning) when switching to a non-metadata mode. |
 | `Stop(label)` | Stops and removes the named session, closing its connection. |
 | `List()` | Snapshot of all sessions (`[]SessionInfo`) sorted by label. |
 | `StopAll()` | Stops every session; called on app `shutdown` and `Disconnect`. |
