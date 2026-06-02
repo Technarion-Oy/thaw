@@ -181,6 +181,11 @@ func (s *session) updateMode(ctx context.Context, newMode string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Re-check: stop() may have run while applySessionConfig was in flight.
+	if !s.running {
+		return fmt.Errorf("mcp: session %q was stopped during mode update", s.label)
+	}
+
 	s.server = buildServer(s.client, newMode, s.cfg, s.editorCtx)
 	s.mode = newMode
 	return nil

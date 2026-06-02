@@ -137,8 +137,11 @@ func (s *EditorContextStore) ActiveEditorSQL() (string, bool) {
 // summary for a tab. If tabID is empty, the active tab is used.
 // Returns nil when no result is available.
 //
-// A copy is returned so that callers cannot hold a reference into the
-// store's internal state after the read lock is released.
+// A shallow copy is returned so callers don't hold a direct pointer to
+// the store's internal *ResultSummary. Note: slice fields (Columns,
+// SampleRows) share backing arrays with the store — safe because
+// SetTabResult always replaces the entire pointer rather than mutating
+// slices in place.
 func (s *EditorContextStore) QueryResultSummary(tabID string) *ResultSummary {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

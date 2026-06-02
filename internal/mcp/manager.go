@@ -109,20 +109,8 @@ func (m *Manager) Start(ctx context.Context, label, connLabel, mode string, port
 	// no SQL tools are registered, so role/warehouse pinning is a no-op —
 	// skip the Snowflake round-trips to avoid confusion.
 	if mode != ExecutionModeMetadata {
-		if cfg.Role != "" {
-			if err := client.UseRole(ctx, cfg.Role); err != nil {
-				return SessionInfo{}, fmt.Errorf("mcp: failed to set role: %w", err)
-			}
-		}
-		if cfg.Warehouse != "" {
-			if err := client.UseWarehouse(ctx, cfg.Warehouse); err != nil {
-				return SessionInfo{}, fmt.Errorf("mcp: failed to set warehouse: %w", err)
-			}
-		}
-		if cfg.SecondaryRoles == "none" {
-			if _, err := client.QuerySingle(ctx, "USE SECONDARY ROLES NONE"); err != nil {
-				return SessionInfo{}, fmt.Errorf("mcp: failed to disable secondary roles: %w", err)
-			}
+		if err := applySessionConfig(ctx, client, cfg); err != nil {
+			return SessionInfo{}, err
 		}
 	}
 
