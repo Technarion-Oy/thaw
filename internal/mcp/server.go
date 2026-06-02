@@ -17,6 +17,19 @@ import (
 	"thaw/internal/version"
 )
 
+// modeSpecificToolNames lists tools that are only registered in non-metadata
+// modes. updateMode removes these before re-registering for the new mode.
+// RemoveTools ignores names that aren't registered, so including use_role and
+// use_warehouse (which may be absent when pinned) is harmless.
+var modeSpecificToolNames = []string{
+	"execute_snowflake_sql",
+	"use_role",
+	"use_warehouse",
+	"use_database",
+	"use_schema",
+	"get_query_results_summary",
+}
+
 // buildServer constructs an MCP server and registers tools based on the
 // execution mode. Schema-browsing and diagnostics tools are always registered.
 // SQL execution tools (execute_snowflake_sql + context-switching) are only

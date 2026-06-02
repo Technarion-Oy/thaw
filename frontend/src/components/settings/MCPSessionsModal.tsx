@@ -134,7 +134,7 @@ export default function MCPSessionsModal({ onClose }: Props) {
       await UpdateMCPSessionMode(sessionLabel, newMode);
       await refresh();
       window.dispatchEvent(new Event("thaw:mcp-changed"));
-      message.success(`Mode changed to "${EXECUTION_MODES.find((m) => m.value === newMode)?.label ?? newMode}". Connected MCP clients will reconnect automatically.`);
+      message.success(`Mode changed to "${EXECUTION_MODES.find((m) => m.value === newMode)?.label ?? newMode}".`);
     } catch (e: unknown) {
       message.error(String(e));
     }

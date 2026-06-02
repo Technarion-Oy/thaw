@@ -13,9 +13,9 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | File | Purpose |
 |---|---|
 | `manager.go` | `Manager` (multi-session registry), `SessionInfo`/`SessionConfig` types, execution mode constants, port allocation, `Start`/`Stop`/`UpdateMode`/`List`/`StopAll`, `EditorContext()` accessor |
-| `session.go` | Per-session `http.Server` + SSE lifecycle (`start`/`stop`/`updateMode`/`info`); serves on the held loopback listener and owns/closes its `*snowflake.Client`. `updateMode` rebuilds the server pointer under `s.mu` and closes all sessions on the old server to force MCP clients to reconnect with the updated tool set. If the serve goroutine exits unexpectedly it closes the client and self-removes from the `Manager` (`removeIfPresent`) so no dead row or leaked connection lingers |
+| `session.go` | Per-session `http.Server` + SSE lifecycle (`start`/`stop`/`updateMode`/`info`); serves on the held loopback listener and owns/closes its `*snowflake.Client`. `updateMode` mutates the existing server's tool registry via `RemoveTools`/`AddTool` — the SDK sends `tools/list_changed` notifications so connected clients update seamlessly. If the serve goroutine exits unexpectedly it closes the client and self-removes from the `Manager` (`removeIfPresent`) so no dead row or leaked connection lingers |
 | `security.go` | `loopbackGuard` middleware (rejects non-loopback `Host`/cross-origin `Origin` — DNS-rebinding defense), `tokenGuard` middleware (per-session token auth on the SSE GET), and `newSessionToken` (crypto-random token) |
-| `server.go` | `buildServer(client, mode, cfg, editorCtx)` — constructs the MCP server and registers tools based on execution mode |
+| `server.go` | `buildServer(client, mode, cfg, editorCtx)` — constructs the MCP server and registers tools based on execution mode; `modeSpecificToolNames` lists tools that `updateMode` removes/re-registers on mode switch |
 | `tools.go` | Tool input structs + `registerTools` (schema-browsing tools); `jsonResult`/`textResult` content helpers |
 | `diag_tools.go` | `registerDiagTools` — SQL diagnostics & validation tools (`validate_sql`, `suggest_join_conditions`, `format_sql`, `get_snowflake_keywords`); type-conversion helpers for sqleditor ↔ snowflake types |
 | `context.go` | `EditorContextStore` — concurrency-safe in-memory store for per-tab editor SQL and result summaries; `ResultSummary` and `QueryHistoryEntry` types |
@@ -38,7 +38,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `NewManager()` | Empty registry with initialized `EditorContextStore`. Safe for concurrent use. |
 | `EditorContext()` | Returns the shared `*EditorContextStore`; MCP tools read, frontend pushes state via App IPC. |
 | `Start(label, connLabel, mode, port, client, cfg)` | Starts a session under a unique `label`; `port == 0` auto-assigns from `9100`. Takes ownership of `client`. Applies `SessionConfig` (role/warehouse pinning, secondary roles). |
-| `UpdateMode(ctx, label, newMode)` | Changes the execution mode of a running session, rebuilding its tool set and closing existing MCP client sessions to force reconnection with the updated tools. Re-applies session config (role/warehouse pinning) when switching to a non-metadata mode. |
+| `UpdateMode(ctx, label, newMode)` | Changes the execution mode of a running session by mutating the server's tool registry in place. The SDK sends `tools/list_changed` notifications to connected clients automatically. Re-applies session config (role/warehouse pinning) when switching to a non-metadata mode. |
 | `Stop(label)` | Stops and removes the named session, closing its connection. |
 | `List()` | Snapshot of all sessions (`[]SessionInfo`) sorted by label. |
 | `StopAll()` | Stops every session; called on app `shutdown` and `Disconnect`. |

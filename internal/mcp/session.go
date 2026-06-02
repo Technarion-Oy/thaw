@@ -148,12 +148,10 @@ func (s *session) stop() error {
 	return nil
 }
 
-// updateMode rebuilds the MCP server with a new execution mode, swapping the
-// server pointer under s.mu. The SSE handler's factory closure acquires s.mu
-// per-request, so new connections get the updated tool set. After the swap,
-// all sessions on the old server are closed to force clients to reconnect —
-// the SDK's SSE factory is only called on the initial GET, so existing
-// connections would otherwise stay bound to the old server indefinitely.
+// updateMode changes the execution mode by mutating the existing server's tool
+// registry in place. The SDK's RemoveTools and AddTool methods automatically
+// send tools/list_changed notifications to all connected MCP clients, so they
+// re-list tools without needing to reconnect.
 //
 // When switching to a non-metadata mode, session config (role/warehouse
 // pinning, secondary roles) is applied via Snowflake round-trips using ctx.
@@ -181,25 +179,23 @@ func (s *session) updateMode(ctx context.Context, newMode string) error {
 	}
 
 	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	// Re-check: stop() may have run while applySessionConfig was in flight.
 	if !s.running {
-		s.mu.Unlock()
 		return fmt.Errorf("mcp: session %q was stopped during mode update", s.label)
 	}
-	oldServer := s.server
-	s.server = buildServer(s.client, newMode, s.cfg, s.editorCtx)
-	s.mode = newMode
-	s.mu.Unlock()
 
-	// Close all sessions on the old server outside s.mu. The SDK's SSE
-	// factory function is called once per GET, so existing connections are
-	// permanently bound to the old server. Closing them forces MCP clients
-	// to reconnect; the factory then returns the new server with the
-	// updated tool set. ServerSession.Close is idempotent and safe.
-	for ss := range oldServer.Sessions() {
-		_ = ss.Close()
+	// Remove all mode-specific tools, then re-register for the new mode.
+	// The SDK debounces and coalesces these changes into a single
+	// tools/list_changed notification sent to all connected sessions.
+	s.server.RemoveTools(modeSpecificToolNames...)
+	if newMode == ExecutionModeReadonly || newMode == ExecutionModeExplainOnly {
+		registerSQLTools(s.server, s.client, newMode, s.cfg)
 	}
+	registerEditorTools(s.server, s.client, newMode, s.editorCtx)
 
+	s.mode = newMode
 	return nil
 }
 
