@@ -752,13 +752,15 @@ func TestManagerUpdateMode(t *testing.T) {
 	m := NewManager()
 
 	// Register a fake session directly (no real HTTP server needed for
-	// updateMode — it only rebuilds the MCP server pointer).
+	// updateMode — it only rebuilds the MCP server pointer). Set running=true
+	// so updateMode's guard check passes.
 	s := &session{
 		label:     "test",
 		connLabel: "acct/user",
 		mode:      ExecutionModeMetadata,
 		port:      9999,
 		cfg:       SessionConfig{},
+		running:   true,
 	}
 	s.server = buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil)
 	m.mu.Lock()
@@ -795,6 +797,7 @@ func TestUpdateModeChangesTools(t *testing.T) {
 		connLabel: "acct/user",
 		mode:      ExecutionModeMetadata,
 		cfg:       SessionConfig{},
+		running:   true,
 	}
 	s.server = buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil)
 

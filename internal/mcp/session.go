@@ -155,12 +155,25 @@ func (s *session) stop() error {
 //
 // When switching to a non-metadata mode, session config (role/warehouse
 // pinning, secondary roles) is applied via Snowflake round-trips using ctx.
-// These round-trips run outside s.mu to avoid holding the lock during I/O.
+// These round-trips run outside s.mu to avoid holding the lock during I/O;
+// the client pointer is snapshot under s.mu first so a concurrent stop()
+// cannot nil it mid-flight.
 func (s *session) updateMode(ctx context.Context, newMode string) error {
-	// Apply session config before acquiring s.mu — the Snowflake round-trips
-	// can take time and must not block the SSE factory closure.
+	// Snapshot client and running flag under s.mu so a concurrent stop()
+	// (which nils s.client under s.mu) cannot race with applySessionConfig.
+	s.mu.Lock()
+	client := s.client
+	running := s.running
+	s.mu.Unlock()
+
+	if !running {
+		return fmt.Errorf("mcp: session %q is not running", s.label)
+	}
+
+	// Apply session config before re-acquiring s.mu — the Snowflake
+	// round-trips can take time and must not block the SSE factory closure.
 	if newMode != ExecutionModeMetadata {
-		if err := s.applySessionConfig(ctx); err != nil {
+		if err := applySessionConfig(ctx, client, s.cfg); err != nil {
 			return err
 		}
 	}
@@ -174,21 +187,26 @@ func (s *session) updateMode(ctx context.Context, newMode string) error {
 }
 
 // applySessionConfig runs USE ROLE / USE WAREHOUSE / USE SECONDARY ROLES NONE
-// on the session's Snowflake client if configured. This is idempotent — safe
-// to call on every mode switch to a non-metadata mode.
-func (s *session) applySessionConfig(ctx context.Context) error {
-	if s.cfg.Role != "" {
-		if err := s.client.UseRole(ctx, s.cfg.Role); err != nil {
+// on the supplied client if configured. This is idempotent — safe to call on
+// every mode switch to a non-metadata mode. The client is passed explicitly
+// (rather than read from s.client) to ensure the caller snapshots it under
+// s.mu first, preventing a race with stop().
+func applySessionConfig(ctx context.Context, client *snowflake.Client, cfg SessionConfig) error {
+	if client == nil {
+		return nil
+	}
+	if cfg.Role != "" {
+		if err := client.UseRole(ctx, cfg.Role); err != nil {
 			return fmt.Errorf("mcp: failed to set role: %w", err)
 		}
 	}
-	if s.cfg.Warehouse != "" {
-		if err := s.client.UseWarehouse(ctx, s.cfg.Warehouse); err != nil {
+	if cfg.Warehouse != "" {
+		if err := client.UseWarehouse(ctx, cfg.Warehouse); err != nil {
 			return fmt.Errorf("mcp: failed to set warehouse: %w", err)
 		}
 	}
-	if s.cfg.SecondaryRoles == "none" {
-		if _, err := s.client.QuerySingle(ctx, "USE SECONDARY ROLES NONE"); err != nil {
+	if cfg.SecondaryRoles == "none" {
+		if _, err := client.QuerySingle(ctx, "USE SECONDARY ROLES NONE"); err != nil {
 			return fmt.Errorf("mcp: failed to disable secondary roles: %w", err)
 		}
 	}

@@ -68,8 +68,10 @@ func registerEditorTools(srv *mcpsdk.Server, client *snowflake.Client, mode stri
 		})
 	}
 
-	// get_query_history — available in all modes. Uses the MCP session's
-	// own Snowflake client to query INFORMATION_SCHEMA.QUERY_HISTORY.
+	// get_query_history — available in all modes. Query history is metadata
+	// about past executions (SQL text, timing, status), not query result data,
+	// so it is not suppressed in metadata mode. Uses the MCP session's own
+	// Snowflake client to query INFORMATION_SCHEMA.QUERY_HISTORY.
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
 		Name: "get_query_history",
 		Description: "Return the user's recent Snowflake query history (up to 50 entries), " +

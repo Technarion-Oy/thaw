@@ -40,8 +40,21 @@ export function useEditorContextSync(): void {
     const initialTab = initial.tabs.find((t: Tab) => t.id === initial.activeTabId);
     prevActiveTabRef.current = initial.activeTabId;
     prevSqlRef.current = initialTab?.sql ?? "";
+    prevResultRef.current = initialTab?.result ?? null;
     prevTabIdsRef.current = new Set(initial.tabs.map((t: Tab) => t.id));
     UpdateEditorContext(initial.activeTabId, initialTab?.sql ?? "").catch(() => {});
+    // Sync any pre-existing result (e.g. after hot module reload in dev).
+    if (initialTab?.result) {
+      const r = initialTab.result;
+      UpdateQueryResult(
+        initial.activeTabId,
+        r.columns ?? [],
+        r.rows?.length ?? 0,
+        r.truncated ?? false,
+        (r.rows ?? []).slice(0, 5),
+        r.queryID ?? "",
+      ).catch(() => {});
+    }
 
     const unsub = useQueryStore.subscribe((state) => {
       const activeTab = state.tabs.find((t: Tab) => t.id === state.activeTabId);
