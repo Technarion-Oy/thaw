@@ -1282,6 +1282,10 @@ export function UpdateEditorTabSQL(arg1, arg2) {
   return window['go']['app']['App']['UpdateEditorTabSQL'](arg1, arg2);
 }
 
+export function UpdateMCPSessionMode(arg1, arg2) {
+  return window['go']['app']['App']['UpdateMCPSessionMode'](arg1, arg2);
+}
+
 export function UpdateQueryResult(arg1, arg2, arg3, arg4, arg5, arg6) {
   return window['go']['app']['App']['UpdateQueryResult'](arg1, arg2, arg3, arg4, arg5, arg6);
 }

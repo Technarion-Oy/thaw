@@ -670,6 +670,8 @@ export function UpdateEditorContext(arg1:string,arg2:string):Promise<void>;
 
 export function UpdateEditorTabSQL(arg1:string,arg2:string):Promise<void>;
 
+export function UpdateMCPSessionMode(arg1:string,arg2:string):Promise<mcp.SessionInfo>;
+
 export function UpdateQueryResult(arg1:string,arg2:Array<string>,arg3:number,arg4:boolean,arg5:Array<any>,arg6:string):Promise<void>;
 
 export function UploadFileToStage(arg1:string,arg2:string,arg3:number,arg4:boolean,arg5:string,arg6:boolean):Promise<void>;

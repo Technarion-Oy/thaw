@@ -143,6 +143,18 @@ func (s *session) stop() error {
 	return nil
 }
 
+// updateMode rebuilds the MCP server with a new execution mode, swapping the
+// server pointer atomically under s.mu. The existing SSE handler closure reads
+// s.server per-request, so new connections automatically get the new tool set.
+// Existing connections keep old tools until reconnect (standard MCP behavior).
+func (s *session) updateMode(newMode string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.server = buildServer(s.client, newMode, s.cfg, s.editorCtx)
+	s.mode = newMode
+}
+
 // info returns the serializable snapshot for this session.
 func (s *session) info() SessionInfo {
 	s.mu.Lock()

@@ -743,3 +743,76 @@ func TestServerPinnedWarehouseHidesUseWarehouse(t *testing.T) {
 		t.Error("use_role should still be present when PinnedRole is false")
 	}
 }
+
+// ── UpdateMode tests ─────────────────────────────────────────────────────────
+
+// TestManagerUpdateMode verifies that UpdateMode swaps the execution mode,
+// rejects invalid modes, and returns an error for unknown sessions.
+func TestManagerUpdateMode(t *testing.T) {
+	m := NewManager()
+
+	// Register a fake session directly (no real HTTP server needed for
+	// updateMode — it only rebuilds the MCP server pointer).
+	s := &session{
+		label:     "test",
+		connLabel: "acct/user",
+		mode:      ExecutionModeMetadata,
+		port:      9999,
+		cfg:       SessionConfig{},
+	}
+	s.server = buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil)
+	m.mu.Lock()
+	m.sessions["test"] = s
+	m.mu.Unlock()
+
+	// Valid mode change.
+	info, err := m.UpdateMode("test", ExecutionModeReadonly)
+	if err != nil {
+		t.Fatalf("UpdateMode failed: %v", err)
+	}
+	if info.ExecutionMode != ExecutionModeReadonly {
+		t.Errorf("mode = %q, want %q", info.ExecutionMode, ExecutionModeReadonly)
+	}
+
+	// Invalid mode rejected.
+	if _, err := m.UpdateMode("test", "dangerous"); err == nil {
+		t.Error("expected error for invalid mode, got nil")
+	}
+
+	// Unknown session.
+	if _, err := m.UpdateMode("nonexistent", ExecutionModeMetadata); err == nil {
+		t.Error("expected error for unknown session, got nil")
+	}
+}
+
+// TestUpdateModeChangesTools verifies that switching from metadata to readonly
+// makes execute_snowflake_sql available, and switching back removes it.
+func TestUpdateModeChangesTools(t *testing.T) {
+	s := &session{
+		label:     "tools-test",
+		connLabel: "acct/user",
+		mode:      ExecutionModeMetadata,
+		cfg:       SessionConfig{},
+	}
+	s.server = buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil)
+
+	// In metadata mode, execute_snowflake_sql should be absent.
+	names := toolNames(t, s.server)
+	if hasToolName(names, "execute_snowflake_sql") {
+		t.Fatal("execute_snowflake_sql should not exist in metadata mode")
+	}
+
+	// Switch to readonly — execute_snowflake_sql should appear.
+	s.updateMode(ExecutionModeReadonly)
+	names = toolNames(t, s.server)
+	if !hasToolName(names, "execute_snowflake_sql") {
+		t.Fatal("execute_snowflake_sql should exist after switching to readonly")
+	}
+
+	// Switch back to metadata — execute_snowflake_sql should disappear.
+	s.updateMode(ExecutionModeMetadata)
+	names = toolNames(t, s.server)
+	if hasToolName(names, "execute_snowflake_sql") {
+		t.Fatal("execute_snowflake_sql should not exist after switching back to metadata")
+	}
+}

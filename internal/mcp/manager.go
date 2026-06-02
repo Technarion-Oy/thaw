@@ -211,6 +211,28 @@ func (m *Manager) AuthenticatedURL(label string) (string, bool) {
 	return fmt.Sprintf("http://127.0.0.1:%d/sse?token=%s", s.port, s.token), true
 }
 
+// UpdateMode changes the execution mode of a running session, rebuilding its
+// tool set. The session's dedicated connection and port are unaffected. New MCP
+// client connections will see the updated tools; existing connections keep old
+// tools until they reconnect (standard MCP behavior). Returns the updated
+// SessionInfo.
+func (m *Manager) UpdateMode(label, newMode string) (SessionInfo, error) {
+	if !validModes[newMode] {
+		return SessionInfo{}, fmt.Errorf("mcp: unsupported execution mode %q", newMode)
+	}
+
+	m.mu.Lock()
+	s, ok := m.sessions[label]
+	m.mu.Unlock()
+
+	if !ok {
+		return SessionInfo{}, fmt.Errorf("mcp: no session named %q", label)
+	}
+
+	s.updateMode(newMode)
+	return s.info(), nil
+}
+
 // StopAll stops every session. It is called on application shutdown and on
 // disconnect. Errors are ignored since the process is tearing down.
 func (m *Manager) StopAll() {
