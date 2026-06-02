@@ -103,7 +103,12 @@ func registerEditorTools(srv *mcpsdk.Server, client *snowflake.Client, mode stri
 			false, // exclude client-generated statements
 		)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to fetch query history: %w", err)
+			return &mcpsdk.CallToolResult{
+				Content: []mcpsdk.Content{&mcpsdk.TextContent{
+					Text: fmt.Sprintf("failed to fetch query history: %v", err),
+				}},
+				IsError: true,
+			}, nil, nil
 		}
 
 		// Project to the condensed QueryHistoryEntry type.

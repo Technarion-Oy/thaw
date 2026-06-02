@@ -61,18 +61,24 @@ func NewEditorContextStore() *EditorContextStore {
 	return &EditorContextStore{tabs: make(map[string]*tabContext)}
 }
 
+// getOrCreateLocked returns the tabContext for tabID, creating it if
+// absent. Must be called with s.mu held for writing.
+func (s *EditorContextStore) getOrCreateLocked(tabID string) *tabContext {
+	tc := s.tabs[tabID]
+	if tc == nil {
+		tc = &tabContext{}
+		s.tabs[tabID] = tc
+	}
+	return tc
+}
+
 // SetActiveTab sets the active tab and its SQL content. This is called
 // when the user switches tabs.
 func (s *EditorContextStore) SetActiveTab(tabID, sql string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.activeTab = tabID
-	tc := s.tabs[tabID]
-	if tc == nil {
-		tc = &tabContext{}
-		s.tabs[tabID] = tc
-	}
-	tc.sql = sql
+	s.getOrCreateLocked(tabID).sql = sql
 }
 
 // SetTabSQL updates the SQL content for a specific tab without changing
@@ -80,24 +86,14 @@ func (s *EditorContextStore) SetActiveTab(tabID, sql string) {
 func (s *EditorContextStore) SetTabSQL(tabID, sql string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	tc := s.tabs[tabID]
-	if tc == nil {
-		tc = &tabContext{}
-		s.tabs[tabID] = tc
-	}
-	tc.sql = sql
+	s.getOrCreateLocked(tabID).sql = sql
 }
 
 // SetTabResult stores the latest result summary for a tab.
 func (s *EditorContextStore) SetTabResult(tabID string, result *ResultSummary) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	tc := s.tabs[tabID]
-	if tc == nil {
-		tc = &tabContext{}
-		s.tabs[tabID] = tc
-	}
-	tc.result = result
+	s.getOrCreateLocked(tabID).result = result
 }
 
 // RemoveTab removes all state for a tab. Called on tab close.
