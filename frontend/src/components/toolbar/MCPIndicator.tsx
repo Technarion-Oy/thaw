@@ -8,14 +8,14 @@
 // @thaw-domain: MCP Server
 
 import { useEffect } from "react";
-import { Tag, Tooltip } from "antd";
+import { Tooltip } from "antd";
 import { ApiOutlined } from "@ant-design/icons";
 import { useMCPStore } from "../../store/mcpStore";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 
-// MCPIndicator is a self-contained toolbar pill showing the number of running
-// MCP sessions. It is hidden when the MCP Server feature is disabled or when
-// there are no running sessions. Clicking it opens the MCP Sessions panel.
+// MCPIndicator is a self-contained toolbar widget showing running MCP session
+// info. It is hidden when the MCP Server feature is disabled or when there are
+// no running sessions. Clicking it opens the MCP Sessions panel.
 export default function MCPIndicator() {
   const sessions = useMCPStore((s) => s.sessions);
   const refresh = useMCPStore((s) => s.refresh);
@@ -34,15 +34,42 @@ export default function MCPIndicator() {
   if (!enabled || active === 0) return null;
 
   return (
-    <Tooltip title="Open MCP Sessions">
-      <Tag
-        icon={<ApiOutlined />}
-        color="purple"
-        style={{ margin: 0, cursor: "pointer", fontSize: 11 }}
+    <Tooltip title="Click to manage MCP sessions">
+      <div
+        style={{
+          border: "1px solid #9254de",
+          borderRadius: 5,
+          overflow: "hidden",
+          cursor: "pointer",
+          fontSize: 11,
+          lineHeight: 1.4,
+        }}
         onClick={() => window.dispatchEvent(new Event("thaw:open-mcp-sessions"))}
       >
-        MCP: {active} active
-      </Tag>
+        {/* ── Thick header bar ── */}
+        <div style={{
+          background: "#f9f0ff",
+          borderBottom: "1px solid #9254de",
+          padding: "2px 8px",
+          color: "#531dab",
+          fontWeight: 500,
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
+          whiteSpace: "nowrap",
+        }}>
+          <ApiOutlined style={{ fontSize: 11 }} />
+          MCP: {active} active {active === 1 ? "session" : "sessions"}
+        </div>
+        {/* ── Session details ── */}
+        <div style={{ padding: "3px 8px", color: "var(--text-muted)" }}>
+          {sessions.map((s) => (
+            <div key={s.label} style={{ whiteSpace: "nowrap" }}>
+              {s.connectionLabel} · {s.label} · {s.executionMode}
+            </div>
+          ))}
+        </div>
+      </div>
     </Tooltip>
   );
 }

@@ -209,8 +209,6 @@ export default function Toolbar({
           </>
         )}
 
-        {/* MCP running-session indicator (self-contained; hidden when none) */}
-        <MCPIndicator />
       </div>
 
       {/* ── Right: connect button or session context ── */}
@@ -294,6 +292,8 @@ export default function Toolbar({
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+          {/* MCP running-session indicator (self-contained; hidden when none) */}
+          <MCPIndicator />
           {params && (
             <>
               {(currentUser || currentRegion) && (
