@@ -12,6 +12,9 @@ on:
       - "wails.json"
       - ".github/workflows/unit-tests.yml"
 
+env:
+  PYTHONDONTWRITEBYTECODE: 1
+
 jobs:
   # ── Pure Go unit tests (no system deps, combined to save runner startup) ──
   pure-go-unit-tests:
