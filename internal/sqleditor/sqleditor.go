@@ -25,13 +25,20 @@ import (
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 // DiagMarker represents a Monaco editor marker (error or warning).
+// Monaco marker severity constants. These match the MarkerSeverity enum in
+// monaco-editor (monaco.MarkerSeverity.Error = 8, Warning = 4).
+const (
+	SeverityError   = 8
+	SeverityWarning = 4
+)
+
 type DiagMarker struct {
 	StartLineNumber int    `json:"startLineNumber"`
 	StartColumn     int    `json:"startColumn"`
 	EndLineNumber   int    `json:"endLineNumber"`
 	EndColumn       int    `json:"endColumn"`
 	Message         string `json:"message"`
-	Severity        int    `json:"severity"`        // 8 = Error (red), 4 = Warning (yellow)
+	Severity        int    `json:"severity"`        // SeverityError (red) or SeverityWarning (yellow)
 	Code            string `json:"code,omitempty"`   // JSON quick-fix metadata (e.g. qualify-table suggestions)
 }
 

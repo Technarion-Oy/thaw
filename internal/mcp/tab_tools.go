@@ -45,9 +45,10 @@ func registerTabTools(srv *mcpsdk.Server, client *snowflake.Client, emit func(st
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
 		Name: "open_sql_tab",
 		Description: "Open a new editor tab in Thaw with the provided SQL. " +
-			"The SQL is formatted according to the user's editor preferences and " +
-			"validated with inline diagnostics. The user must manually run the query " +
-			"(human-in-the-loop). Returns a success message or a count of diagnostic errors.",
+			"Keyword, identifier, and function casing is applied according to the user's " +
+			"editor preferences, and the SQL is validated with inline diagnostics. " +
+			"The user must manually run the query (human-in-the-loop). " +
+			"Returns a success message or a count of diagnostic errors.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in openSqlTabInput) (*mcpsdk.CallToolResult, any, error) {
 		if in.SQL == "" {
 			return nil, nil, fmt.Errorf("sql is required")
@@ -76,10 +77,9 @@ func registerTabTools(srv *mcpsdk.Server, client *snowflake.Client, emit func(st
 			Markers: markers,
 		})
 
-		// Count errors (severity 8 = Error in Monaco).
 		errorCount := 0
 		for _, m := range markers {
-			if m.Severity == 8 {
+			if m.Severity == sqleditor.SeverityError {
 				errorCount++
 			}
 		}
