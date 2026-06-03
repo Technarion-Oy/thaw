@@ -12,7 +12,7 @@ git gutter decorations, the tab bar, editor preferences, and the cross-tab searc
 
 | File | Purpose |
 |------|---------|
-| `SqlEditor.tsx` | Main editor component. Mounts Monaco, registers all completion/hover/code-action/signature providers (module-level, not in render), runs `runDiagnostics` on content change, handles git gutter decoration, clipboard patching, and the snippet context menu via internal Monaco `MenuRegistry`. Exports `DiagMarker`, `ColInfo`, `ResolvedRef`. |
+| `SqlEditor.tsx` | Main editor component. Mounts Monaco, registers all completion/hover/code-action/signature providers (module-level, not in render), runs `runDiagnostics` on content change, handles git gutter decoration, clipboard patching, and the snippet context menu via internal Monaco `MenuRegistry`. Exports `DiagMarker`, `ColInfo`, `ResolvedRef`, `pendingMcpMarkers`. |
 | `sqlEditorUtils.ts` | Pure helpers: `UC`, `quoteIfNecessary`, `FKEntry`, `getFKs` (async, deduped), `getFKsCached`, `setFKCache`, `buildVariableSuggestions`, `getQualifiedIdent`, `getStatementLineRanges`. No React. |
 | `editorRef.ts` | Singleton ref to the active `IStandaloneCodeEditor`. Exports `setEditorInstance`, `getEditorInstance`, `insertAtCursor`. Kept separate from `SqlEditor.tsx` so Vite Fast Refresh is not broken by mixing component and non-component exports. |
 | `monacoSetup.ts` | One-time Monaco initialisation: Snowflake Monarch language, Python Monarch grammar (inlined to avoid side-effect imports), YAML worker wiring, `thawDarkTheme`/`thawLightTheme` registration. Called via `ensureMonacoSetup()` guard. |
@@ -20,7 +20,7 @@ git gutter decorations, the tab bar, editor preferences, and the cross-tab searc
 | `snowflakeSnippets.ts` | Snowflake Scripting snippet definitions (`getSnowflakeSnippets`) and `SNIPPET_CATEGORIES` for the cascading context-menu submenu. Snippets are applied through `applyPrefsToSnippet` at insertion time (keyword casing, indent style). |
 | `CrossTabSearch.tsx` | Search/replace panel triggered by `⌘⇧H` / `Ctrl+Shift+H`. Searches all tabs (SQL, YAML, Python) and notebook cell sources. Navigates via `thaw:scroll-to-line` / `thaw:editor-ready` events. Supports regex with back-references, case-sensitive toggle, and match counter. Gated behind the `crossTabSearch` feature flag. |
 | `CrossTabSearch.test.ts` | Unit tests for `getNotebookCellSources` and related helpers in `CrossTabSearch.tsx`. |
-| `TabBar.tsx` | Renders the tab strip above the editor. Supports drag-to-reorder, right-click context menu (close, close others, split, duplicate), bulk-close confirmation, and split-tab mode. Reads/writes `queryStore`. |
+| `TabBar.tsx` | Renders the tab strip above the editor. Supports drag-to-reorder, right-click context menu (close, close others, split, duplicate), bulk-close confirmation, and split-tab mode. MCP-created tabs (`tab.mcpOrigin`) display a `RobotOutlined` icon in the accent color. Reads/writes `queryStore`. |
 | `EditorPreferencesModal.tsx` | Modal for editor preferences (keyword case, indent style/size, font, font size). Calls `GetEditorPrefs`/`SaveEditorPrefs` IPC. Shows a live SQL preview using `formatSQL`. |
 | `yamlWorker.ts` | Vite worker entry point that imports `monaco-yaml/yaml.worker` for YAML language support. |
 
@@ -48,6 +48,7 @@ git gutter decorations, the tab bar, editor preferences, and the cross-tab searc
 - `fetchedDatabaseSchemas` — `Set<string>` for schema listing dedup.
 - `headContentCache` — `Map<filePath, headContent>` for git gutter diffs.
 - FK cache lives in `sqlEditorUtils.ts` (`fkCache` Map + `fetchingFKs` Set).
+- `pendingMcpMarkers` — `Map<tabId, DiagMarker[]>` for MCP marker seeding. Written by `QueryPage` when the `mcp:open-sql-tab` Wails event fires; read and cleared by `onDidChangeModelContent` in `SqlEditor`. Markers are applied immediately before the 400ms debounced diagnostics run, so the user sees inline errors as soon as the tab opens.
 
 **Provider registration:** All completion, hover, signature-help, and code-action providers
 are registered once at module level (disposable refs). Never re-register inside the component

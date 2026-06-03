@@ -151,6 +151,35 @@ func DefaultEditorPrefs() EditorPrefs {
 	}
 }
 
+// EditorPrefsWithDefaults returns a copy of prefs with any zero-value fields
+// filled from DefaultEditorPrefs. Use this instead of manually back-filling
+// defaults in multiple call sites.
+func EditorPrefsWithDefaults(prefs EditorPrefs) EditorPrefs {
+	defaults := DefaultEditorPrefs()
+	if prefs.KeywordCase == "" {
+		prefs.KeywordCase = defaults.KeywordCase
+	}
+	if prefs.IdentifierCase == "" {
+		prefs.IdentifierCase = defaults.IdentifierCase
+	}
+	if prefs.FunctionCase == "" {
+		prefs.FunctionCase = defaults.FunctionCase
+	}
+	if prefs.IndentStyle == "" {
+		prefs.IndentStyle = defaults.IndentStyle
+	}
+	if prefs.IndentSize == 0 {
+		prefs.IndentSize = defaults.IndentSize
+	}
+	if prefs.CommaPosition == "" {
+		prefs.CommaPosition = defaults.CommaPosition
+	}
+	if prefs.OperatorPosition == "" {
+		prefs.OperatorPosition = defaults.OperatorPosition
+	}
+	return prefs
+}
+
 // NotebookPrefs holds user preferences for the notebook editor.
 type NotebookPrefs struct {
 	// SyntaxMode controls how Python diagnostics are produced.

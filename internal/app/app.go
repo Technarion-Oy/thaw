@@ -111,7 +111,6 @@ type App struct {
 func NewApp() *App {
 	return &App{
 		gitCommitFilters: make(map[string]string),
-		mcpManager:       mcp.NewManager(),
 	}
 }
 
@@ -134,6 +133,12 @@ func (a *App) startup(ctx context.Context) {
 	if cfg, err := config.Load(); err == nil {
 		a.setExportDir(cfg.Git.ExportDir)
 	}
+
+	// Initialize the MCP manager with the Wails event emitter so MCP tools
+	// can send events to the frontend (e.g. open_sql_tab).
+	a.mcpManager = mcp.NewManager(func(eventName string, data interface{}) {
+		wailsruntime.EventsEmit(ctx, eventName, data)
+	})
 
 	// Initialize delegated service instances.
 	a.migrationSvc = migration.NewService(func(eventName string, data interface{}) {

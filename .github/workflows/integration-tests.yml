@@ -58,3 +58,7 @@ jobs:
         if: always()
         with:
           files: report.xml
+
+      - name: Unlock permissions for host runner agent
+        if: always() 
+        run: chmod -R 777 $GITHUB_WORKSPACE/../../_actions || true

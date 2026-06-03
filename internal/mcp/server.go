@@ -34,8 +34,9 @@ var modeSpecificToolNames = []string{
 // execution mode. Schema-browsing and diagnostics tools are always registered.
 // SQL execution tools (execute_snowflake_sql + context-switching) are only
 // registered in readonly and explain_only modes. Editor context tools are
-// registered when editorCtx is non-nil.
-func buildServer(client *snowflake.Client, mode string, cfg SessionConfig, editorCtx *EditorContextStore) *mcpsdk.Server {
+// registered when editorCtx is non-nil. Tab tools (open_sql_tab) are
+// registered when emit is non-nil (i.e. running inside the app, not tests).
+func buildServer(client *snowflake.Client, mode string, cfg SessionConfig, editorCtx *EditorContextStore, emit func(string, interface{})) *mcpsdk.Server {
 	srv := mcpsdk.NewServer(&mcpsdk.Implementation{
 		Name:    "thaw",
 		Version: version.Version,
@@ -44,6 +45,7 @@ func buildServer(client *snowflake.Client, mode string, cfg SessionConfig, edito
 	registerTools(srv, client)
 	registerDiagTools(srv, client)
 	registerEditorTools(srv, client, mode, editorCtx)
+	registerTabTools(srv, client, emit)
 
 	if mode == ExecutionModeReadonly || mode == ExecutionModeExplainOnly {
 		registerSQLTools(srv, client, mode, cfg)

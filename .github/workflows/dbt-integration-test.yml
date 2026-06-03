@@ -74,3 +74,7 @@ jobs:
         with:
           files: report-dbt.xml
           check_name: dbt round-trip test
+      
+      - name: Unlock permissions for host runner agent
+        if: always() 
+        run: chmod -R 777 $GITHUB_WORKSPACE/../../_actions || true

@@ -58,3 +58,20 @@ for i in $(seq 1 $NUM_RUNNERS); do
 
     # Configure runner as the unprivileged user
     sudo -u "$RUNNER_USER" ./config.sh \
+        --url "$GITHUB_URL" \
+        --token "$RUNNER_TOKEN" \
+        --name "$(hostname)-runner-$i" \
+        --unattended \
+        --replace
+
+    # Register the cleanup hook in the runner's environment
+    echo "ACTIONS_RUNNER_HOOK_JOB_COMPLETED=$HOOK_SCRIPT" | sudo -u "$RUNNER_USER" tee -a .env > /dev/null
+
+    # Install systemd service (this requires root, but the service is configured to run as RUNNER_USER)
+    ./svc.sh install "$RUNNER_USER"
+    
+    # Start the service
+    ./svc.sh start
+done
+
+echo "Successfully configured $NUM_RUNNERS hygienic runners!"

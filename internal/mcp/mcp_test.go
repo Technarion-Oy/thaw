@@ -48,7 +48,7 @@ var expectedTools = []string{
 // tools. A nil client is sufficient because tool *listing* does not invoke the
 // handlers (which would call into Snowflake).
 func TestServerExposesToolsOverSSE(t *testing.T) {
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil)
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil)
 
 	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
 	httpSrv := httptest.NewServer(handler)
@@ -86,7 +86,7 @@ func TestServerExposesToolsOverSSE(t *testing.T) {
 // TestManagerPortAllocation verifies auto-assignment starts at basePort and
 // that an explicit port already claimed by a session is rejected.
 func TestManagerPortAllocation(t *testing.T) {
-	m := NewManager()
+	m := NewManager(nil)
 
 	ln, err := m.allocatePortLocked(0)
 	if err != nil {
@@ -206,7 +206,7 @@ func TestNewSessionTokenUnique(t *testing.T) {
 // without the token is rejected at connect.
 func TestAuthenticatedSSERoundTrip(t *testing.T) {
 	const token = "round-trip-token"
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil)
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil)
 	sse := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
 	handler := loopbackGuard(tokenGuard(token, sse))
 	httpSrv := httptest.NewServer(handler)
@@ -270,7 +270,7 @@ func TestValidateSqlPureMarkers(t *testing.T) {
 // (not "null") through the tool handler, so external clients don't need to
 // special-case nil slices.
 func TestValidateSqlEmptyArrayNotNull(t *testing.T) {
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil)
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil)
 	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
 	httpSrv := httptest.NewServer(handler)
 	defer httpSrv.Close()
@@ -298,7 +298,7 @@ func TestValidateSqlEmptyArrayNotNull(t *testing.T) {
 
 // TestFormatSqlInvalidCase verifies that invalid case values are rejected.
 func TestFormatSqlInvalidCase(t *testing.T) {
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil)
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil)
 	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
 	httpSrv := httptest.NewServer(handler)
 	defer httpSrv.Close()
@@ -343,7 +343,7 @@ func TestFormatSqlTool(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil)
+			srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil)
 			handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
 			httpSrv := httptest.NewServer(handler)
 			defer httpSrv.Close()
@@ -378,7 +378,7 @@ func TestFormatSqlTool(t *testing.T) {
 
 // TestGetSnowflakeKeywordsTool verifies the keyword list is non-empty.
 func TestGetSnowflakeKeywordsTool(t *testing.T) {
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil)
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil)
 	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
 	httpSrv := httptest.NewServer(handler)
 	defer httpSrv.Close()
@@ -412,7 +412,7 @@ func TestGetSnowflakeKeywordsTool(t *testing.T) {
 // TestValidateSqlToolSSE exercises validate_sql through the full SSE transport
 // with a nil client (phase-1 only), verifying the handler returns valid JSON.
 func TestValidateSqlToolSSE(t *testing.T) {
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil)
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil)
 	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
 	httpSrv := httptest.NewServer(handler)
 	defer httpSrv.Close()
@@ -442,7 +442,7 @@ func TestValidateSqlToolSSE(t *testing.T) {
 // TestSuggestJoinConditionsNilClient verifies the nil-client error is returned
 // through the SSE transport.
 func TestSuggestJoinConditionsNilClient(t *testing.T) {
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil)
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil)
 	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
 	httpSrv := httptest.NewServer(handler)
 	defer httpSrv.Close()
@@ -671,7 +671,7 @@ func hasToolName(names []string, name string) bool {
 // TestServerMetadataNoSQLTools verifies that metadata mode does NOT expose
 // SQL execution or context-switching tools.
 func TestServerMetadataNoSQLTools(t *testing.T) {
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil)
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil)
 	names := toolNames(t, srv)
 
 	sqlTools := []string{"execute_snowflake_sql", "use_role", "use_warehouse", "use_database", "use_schema"}
@@ -685,7 +685,7 @@ func TestServerMetadataNoSQLTools(t *testing.T) {
 // TestServerExposesReadonlyTools verifies that readonly mode exposes SQL
 // execution and context-switching tools.
 func TestServerExposesReadonlyTools(t *testing.T) {
-	srv := buildServer(nil, ExecutionModeReadonly, SessionConfig{}, nil)
+	srv := buildServer(nil, ExecutionModeReadonly, SessionConfig{}, nil, nil)
 	names := toolNames(t, srv)
 
 	required := []string{"execute_snowflake_sql", "use_role", "use_warehouse", "use_database", "use_schema"}
@@ -699,7 +699,7 @@ func TestServerExposesReadonlyTools(t *testing.T) {
 // TestServerExposesExplainOnlyTools verifies that explain_only mode exposes
 // the same SQL tools as readonly.
 func TestServerExposesExplainOnlyTools(t *testing.T) {
-	srv := buildServer(nil, ExecutionModeExplainOnly, SessionConfig{}, nil)
+	srv := buildServer(nil, ExecutionModeExplainOnly, SessionConfig{}, nil, nil)
 	names := toolNames(t, srv)
 
 	required := []string{"execute_snowflake_sql", "use_database", "use_schema"}
@@ -714,7 +714,7 @@ func TestServerExposesExplainOnlyTools(t *testing.T) {
 // the use_role tool is not registered.
 func TestServerPinnedRoleHidesUseRole(t *testing.T) {
 	cfg := SessionConfig{PinnedRole: true, Role: "ANALYST_RO"}
-	srv := buildServer(nil, ExecutionModeReadonly, cfg, nil)
+	srv := buildServer(nil, ExecutionModeReadonly, cfg, nil, nil)
 	names := toolNames(t, srv)
 
 	if hasToolName(names, "use_role") {
@@ -733,7 +733,7 @@ func TestServerPinnedRoleHidesUseRole(t *testing.T) {
 // PinnedWarehouse is set, the use_warehouse tool is not registered.
 func TestServerPinnedWarehouseHidesUseWarehouse(t *testing.T) {
 	cfg := SessionConfig{PinnedWarehouse: true, Warehouse: "COMPUTE_WH"}
-	srv := buildServer(nil, ExecutionModeReadonly, cfg, nil)
+	srv := buildServer(nil, ExecutionModeReadonly, cfg, nil, nil)
 	names := toolNames(t, srv)
 
 	if hasToolName(names, "use_warehouse") {
@@ -749,7 +749,7 @@ func TestServerPinnedWarehouseHidesUseWarehouse(t *testing.T) {
 // TestManagerUpdateMode verifies that UpdateMode swaps the execution mode,
 // rejects invalid modes, and returns an error for unknown sessions.
 func TestManagerUpdateMode(t *testing.T) {
-	m := NewManager()
+	m := NewManager(nil)
 
 	// Register a fake session directly (no real HTTP server needed for
 	// updateMode — it only rebuilds the MCP server pointer). Set running=true
@@ -762,7 +762,7 @@ func TestManagerUpdateMode(t *testing.T) {
 		cfg:       SessionConfig{},
 		running:   true,
 	}
-	s.server = buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil)
+	s.server = buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil)
 	m.mu.Lock()
 	m.sessions["test"] = s
 	m.mu.Unlock()
@@ -799,7 +799,7 @@ func TestUpdateModeChangesTools(t *testing.T) {
 		cfg:       SessionConfig{},
 		running:   true,
 	}
-	s.server = buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil)
+	s.server = buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil)
 
 	// In metadata mode, execute_snowflake_sql should be absent.
 	names := toolNames(t, s.server)

@@ -27,7 +27,7 @@ import KeyboardShortcutsModal from "../components/help/KeyboardShortcutsModal";
 import AboutModal from "../components/help/AboutModal";
 import { usePanelLayoutStore } from "../store/panelLayoutStore";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
-import SqlEditor from "../components/editor/SqlEditor";
+import SqlEditor, { type DiagMarker, pendingMcpMarkers } from "../components/editor/SqlEditor";
 import TabBar from "../components/editor/TabBar";
 import CrossTabSearch from "../components/editor/CrossTabSearch";
 import { DiffEditor } from "@monaco-editor/react";
@@ -633,6 +633,9 @@ export default function QueryPage() {
     const { tabs } = useQueryStore.getState();
     const tab = tabs.find((t) => t.id === tabId);
     if (!tab) return;
+    // Clean up any pending MCP markers for this tab (prevents a small leak
+    // if a tab is closed before its editor ever mounts and consumes them).
+    pendingMcpMarkers.delete(tabId);
     const isDirty = tab.sql !== tab.savedSql;
     const isTabRunning = tab.isRunning ?? false;
     if (isTabRunning || isDirty) {
@@ -889,6 +892,19 @@ export default function QueryPage() {
 
   useEffect(() => {
     const off = EventsOn("menu:about", () => setAboutOpen(true));
+    return () => off();
+  }, []);
+
+  // MCP open_sql_tab — opens a new tab with AI-generated SQL and pre-seeded diagnostics.
+  useEffect(() => {
+    const off = EventsOn("mcp:open-sql-tab", (payload: {
+      title: string; sql: string; markers: DiagMarker[];
+    }) => {
+      const tabId = useQueryStore.getState().openMcpTab(payload.title, payload.sql);
+      if (payload.markers?.length > 0) {
+        pendingMcpMarkers.set(tabId, payload.markers);
+      }
+    });
     return () => off();
   }, []);
 

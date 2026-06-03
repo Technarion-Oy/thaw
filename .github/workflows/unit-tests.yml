@@ -76,3 +76,7 @@ jobs:
         with:
           files: report-*.xml
           check_name: Pure Go Unit Tests
+
+      - name: Unlock permissions for host runner agent
+        if: always() 
+        run: chmod -R 777 $GITHUB_WORKSPACE/../../_actions || true

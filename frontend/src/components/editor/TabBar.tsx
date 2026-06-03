@@ -10,7 +10,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Button, Modal, Tooltip } from "antd";
-import { FileOutlined, CodeOutlined, PlusOutlined, CloseOutlined, DiffOutlined, ExperimentOutlined } from "@ant-design/icons";
+import { FileOutlined, CodeOutlined, PlusOutlined, CloseOutlined, DiffOutlined, ExperimentOutlined, RobotOutlined } from "@ant-design/icons";
 import { useQueryStore } from "../../store/queryStore";
 import { GetTabSessionID } from "../../../wailsjs/go/app/App";
 import { useConnectionStore } from "../../store/connectionStore";
@@ -178,6 +178,8 @@ export default function TabBar() {
               ? <DiffOutlined style={{ fontSize: 11, flexShrink: 0 }} />
               : tab.kind === "notebook"
               ? <ExperimentOutlined style={{ fontSize: 11, flexShrink: 0 }} />
+              : tab.mcpOrigin
+              ? <RobotOutlined style={{ fontSize: 11, flexShrink: 0, color: "var(--accent)" }} />
               : tab.path
               ? <FileOutlined style={{ fontSize: 11, flexShrink: 0 }} />
               : <CodeOutlined style={{ fontSize: 11, flexShrink: 0 }} />
