@@ -64,6 +64,12 @@ export interface ResolvedRef {
 // Module-level map used to pass pre-computed diagnostics from MCP open_sql_tab
 // to the editor without going through React state. QueryPage writes into it
 // when the Wails event fires; onDidChangeModelContent reads and clears.
+//
+// Timing: the write (EventsOn callback) and read (onDidChangeModelContent) run
+// in different React lifecycles, but Monaco fires onDidChangeModelContent when
+// the new tab's model receives its initial SQL content (setValue during mount),
+// so the markers are always consumed. Cleanup on tab close (requestClose in
+// QueryPage) prevents leaks for tabs closed before their editor mounts.
 export const pendingMcpMarkers = new Map<string, DiagMarker[]>();
 
 // ─────────────────────────────────────────────────────────────────────────────

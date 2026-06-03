@@ -183,3 +183,59 @@ func TestOpenSqlTabDefaultTitle(t *testing.T) {
 		t.Errorf("payload.Title = %q, want %q", payload.Title, "AI Query")
 	}
 }
+
+// TestOpenSqlTabTitleTruncation verifies that titles longer than 100 runes are
+// truncated without splitting multi-byte UTF-8 characters.
+func TestOpenSqlTabTitleTruncation(t *testing.T) {
+	var mu sync.Mutex
+	var emittedData interface{}
+	emit := func(_ string, data interface{}) {
+		mu.Lock()
+		emittedData = data
+		mu.Unlock()
+	}
+
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, emit)
+
+	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
+	httpSrv := httptest.NewServer(handler)
+	defer httpSrv.Close()
+
+	ctx := context.Background()
+	c := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test", Version: "v1"}, nil)
+	cs, err := c.Connect(ctx, &mcpsdk.SSEClientTransport{Endpoint: httpSrv.URL}, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = cs.Close() }()
+
+	// Build a title with 105 runes including multi-byte characters.
+	// "日本語テスト" = 5 runes; repeated 21 times = 105 runes (315 bytes).
+	longTitle := strings.Repeat("日本語テスト", 21) // 105 runes
+
+	_, err = cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "open_sql_tab",
+		Arguments: openSqlTabInput{SQL: "SELECT 1", Title: longTitle},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	payload, ok := emittedData.(OpenSqlTabPayload)
+	if !ok {
+		t.Fatalf("emitted data is %T, want OpenSqlTabPayload", emittedData)
+	}
+	runes := []rune(payload.Title)
+	if len(runes) != 100 {
+		t.Errorf("payload.Title has %d runes, want 100", len(runes))
+	}
+	// Verify the truncated string is valid UTF-8 (no split multi-byte chars).
+	for i, r := range runes {
+		if r == '\uFFFD' {
+			t.Errorf("replacement character at rune index %d — UTF-8 was split", i)
+		}
+	}
+}

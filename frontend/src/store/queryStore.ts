@@ -513,6 +513,9 @@ export const useQueryStore = create<QueryState>()(
   },
 
   openMcpTab: (title, sql) => {
+    // savedSql: "" makes the tab "dirty" (sql !== savedSql) so the user sees
+    // a close-confirmation dialog — intentional because MCP-delivered SQL is
+    // not persisted to any file and should not be silently discarded.
     const newTab = makeTab({ title, sql, savedSql: "", mcpOrigin: true });
     set((state) => ({
       tabs: [...state.tabs, newTab],
