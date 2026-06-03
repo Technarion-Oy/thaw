@@ -549,6 +549,7 @@ export const useQueryStore = create<QueryState>()(
         isRunning: false,  // never persist running state
         result: null,
         diff: null,
+        mcpOrigin: undefined, // MCP origin is session-only; don't persist
         sql:      t.path ? "" : t.sql,
         savedSql: t.path ? "" : t.savedSql,
       })),

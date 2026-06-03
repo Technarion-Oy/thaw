@@ -48,31 +48,7 @@ func (a *App) GetEditorPrefs() config.EditorPrefs {
 	if err != nil {
 		return config.DefaultEditorPrefs()
 	}
-	prefs := cfg.Editor
-	// Back-fill any zero fields with defaults so callers always get a fully populated struct.
-	defaults := config.DefaultEditorPrefs()
-	if prefs.KeywordCase == "" {
-		prefs.KeywordCase = defaults.KeywordCase
-	}
-	if prefs.IdentifierCase == "" {
-		prefs.IdentifierCase = defaults.IdentifierCase
-	}
-	if prefs.FunctionCase == "" {
-		prefs.FunctionCase = defaults.FunctionCase
-	}
-	if prefs.IndentStyle == "" {
-		prefs.IndentStyle = defaults.IndentStyle
-	}
-	if prefs.IndentSize == 0 {
-		prefs.IndentSize = defaults.IndentSize
-	}
-	if prefs.CommaPosition == "" {
-		prefs.CommaPosition = defaults.CommaPosition
-	}
-	if prefs.OperatorPosition == "" {
-		prefs.OperatorPosition = defaults.OperatorPosition
-	}
-	return prefs
+	return config.EditorPrefsWithDefaults(cfg.Editor)
 }
 
 // SaveEditorPrefs persists SQL editor formatting preferences to disk.

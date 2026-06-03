@@ -189,6 +189,11 @@ func (s *session) updateMode(ctx context.Context, newMode string) error {
 	// Remove all mode-specific tools, then re-register for the new mode.
 	// The SDK debounces and coalesces these changes into a single
 	// tools/list_changed notification sent to all connected sessions.
+	//
+	// Note: tab tools (open_sql_tab) and schema-browsing tools are always-on
+	// and not mode-gated — they are registered once in buildServer and must
+	// NOT appear in modeSpecificToolNames. Only SQL execution and editor
+	// context tools are mode-specific.
 	s.server.RemoveTools(modeSpecificToolNames...)
 	if newMode == ExecutionModeReadonly || newMode == ExecutionModeExplainOnly {
 		registerSQLTools(s.server, s.client, newMode, s.cfg)

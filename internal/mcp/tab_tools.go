@@ -92,24 +92,11 @@ func registerTabTools(srv *mcpsdk.Server, client *snowflake.Client, emit func(st
 }
 
 // loadEditorPrefs reads the user's editor preferences from the config file
-// and back-fills defaults for any missing fields. This is a minor duplication
-// of App.GetEditorPrefs but avoids importing internal/app (which would create
-// a circular dependency).
+// and back-fills defaults for any missing fields.
 func loadEditorPrefs() config.EditorPrefs {
 	cfg, err := config.Load()
 	if err != nil {
 		return config.DefaultEditorPrefs()
 	}
-	prefs := cfg.Editor
-	defaults := config.DefaultEditorPrefs()
-	if prefs.KeywordCase == "" {
-		prefs.KeywordCase = defaults.KeywordCase
-	}
-	if prefs.IdentifierCase == "" {
-		prefs.IdentifierCase = defaults.IdentifierCase
-	}
-	if prefs.FunctionCase == "" {
-		prefs.FunctionCase = defaults.FunctionCase
-	}
-	return prefs
+	return config.EditorPrefsWithDefaults(cfg.Editor)
 }
