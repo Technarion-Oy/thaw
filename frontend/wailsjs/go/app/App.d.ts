@@ -132,6 +132,8 @@ export function ClearObjectCache():Promise<void>;
 
 export function ClearObjectCacheForDatabase(arg1:string):Promise<void>;
 
+export function ClearQueryResult(arg1:string):Promise<void>;
+
 export function CloneChildTask(arg1:string,arg2:string,arg3:string,arg4:string,arg5:boolean,arg6:Array<string>):Promise<void>;
 
 export function CloneProfile(arg1:string,arg2:string):Promise<void>;
@@ -558,6 +560,8 @@ export function ReadFileHead(arg1:string,arg2:number):Promise<string>;
 
 export function ReadNotebook(arg1:string):Promise<string>;
 
+export function RemoveEditorTab(arg1:string):Promise<void>;
+
 export function RemoveStageFiles(arg1:string,arg2:string):Promise<void>;
 
 export function RenameFile(arg1:string,arg2:string):Promise<void>;
@@ -661,6 +665,14 @@ export function TaskHasChildren(arg1:string,arg2:string,arg3:string):Promise<boo
 export function TestAIModel(arg1:string,arg2:string,arg3:string,arg4:number,arg5:number):Promise<string>;
 
 export function UninstallEnvPackage(arg1:string):Promise<void>;
+
+export function UpdateEditorContext(arg1:string,arg2:string):Promise<void>;
+
+export function UpdateEditorTabSQL(arg1:string,arg2:string):Promise<void>;
+
+export function UpdateMCPSessionMode(arg1:string,arg2:string):Promise<mcp.SessionInfo>;
+
+export function UpdateQueryResult(arg1:string,arg2:Array<string>,arg3:number,arg4:boolean,arg5:Array<any>,arg6:string):Promise<void>;
 
 export function UploadFileToStage(arg1:string,arg2:string,arg3:number,arg4:boolean,arg5:string,arg6:boolean):Promise<void>;
 

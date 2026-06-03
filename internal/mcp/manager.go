@@ -64,13 +64,23 @@ type SessionInfo struct {
 
 // Manager owns the set of running MCP sessions. It is safe for concurrent use.
 type Manager struct {
-	mu       sync.Mutex
-	sessions map[string]*session
+	mu        sync.Mutex
+	sessions  map[string]*session
+	editorCtx *EditorContextStore
 }
 
-// NewManager returns an empty Manager.
+// NewManager returns an empty Manager with an initialized EditorContextStore.
 func NewManager() *Manager {
-	return &Manager{sessions: make(map[string]*session)}
+	return &Manager{
+		sessions:  make(map[string]*session),
+		editorCtx: NewEditorContextStore(),
+	}
+}
+
+// EditorContext returns the shared editor context store. MCP tool handlers
+// read from this store; the frontend pushes state into it via App IPC methods.
+func (m *Manager) EditorContext() *EditorContextStore {
+	return m.editorCtx
 }
 
 // Start creates and starts a new session bound to the supplied client. The
@@ -99,20 +109,8 @@ func (m *Manager) Start(ctx context.Context, label, connLabel, mode string, port
 	// no SQL tools are registered, so role/warehouse pinning is a no-op —
 	// skip the Snowflake round-trips to avoid confusion.
 	if mode != ExecutionModeMetadata {
-		if cfg.Role != "" {
-			if err := client.UseRole(ctx, cfg.Role); err != nil {
-				return SessionInfo{}, fmt.Errorf("mcp: failed to set role: %w", err)
-			}
-		}
-		if cfg.Warehouse != "" {
-			if err := client.UseWarehouse(ctx, cfg.Warehouse); err != nil {
-				return SessionInfo{}, fmt.Errorf("mcp: failed to set warehouse: %w", err)
-			}
-		}
-		if cfg.SecondaryRoles == "none" {
-			if _, err := client.QuerySingle(ctx, "USE SECONDARY ROLES NONE"); err != nil {
-				return SessionInfo{}, fmt.Errorf("mcp: failed to disable secondary roles: %w", err)
-			}
+		if err := applySessionConfig(ctx, client, cfg); err != nil {
+			return SessionInfo{}, err
 		}
 	}
 
@@ -135,7 +133,7 @@ func (m *Manager) Start(ctx context.Context, label, connLabel, mode string, port
 		return SessionInfo{}, fmt.Errorf("mcp: failed to generate session token: %w", err)
 	}
 
-	s := newSession(m, label, connLabel, mode, token, assigned, client, ln, cfg)
+	s := newSession(m, label, connLabel, mode, token, assigned, client, ln, cfg, m.editorCtx)
 	if err := s.start(); err != nil {
 		_ = ln.Close()
 		return SessionInfo{}, err
@@ -199,6 +197,32 @@ func (m *Manager) AuthenticatedURL(label string) (string, bool) {
 		return "", false
 	}
 	return fmt.Sprintf("http://127.0.0.1:%d/sse?token=%s", s.port, s.token), true
+}
+
+// UpdateMode changes the execution mode of a running session, rebuilding its
+// tool set. The session's dedicated connection and port are unaffected. New MCP
+// client connections will see the updated tools; existing connections keep old
+// tools until they reconnect (standard MCP behavior). When switching to a
+// non-metadata mode, session config (role/warehouse pinning, secondary roles)
+// is re-applied via Snowflake round-trips using ctx. Returns the updated
+// SessionInfo.
+func (m *Manager) UpdateMode(ctx context.Context, label, newMode string) (SessionInfo, error) {
+	if !validModes[newMode] {
+		return SessionInfo{}, fmt.Errorf("mcp: unsupported execution mode %q", newMode)
+	}
+
+	m.mu.Lock()
+	s, ok := m.sessions[label]
+	m.mu.Unlock()
+
+	if !ok {
+		return SessionInfo{}, fmt.Errorf("mcp: no session named %q", label)
+	}
+
+	if err := s.updateMode(ctx, newMode); err != nil {
+		return SessionInfo{}, err
+	}
+	return s.info(), nil
 }
 
 // StopAll stops every session. It is called on application shutdown and on

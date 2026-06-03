@@ -75,6 +75,22 @@ func (a *App) StartMCPSession(label, mode string, port int, role, warehouse, sec
 	return info, nil
 }
 
+// UpdateMCPSessionMode changes the execution mode of a running session,
+// rebuilding its tool set. New MCP client connections see the updated tools;
+// existing connections keep old tools until they reconnect.
+func (a *App) UpdateMCPSessionMode(label, mode string) (mcp.SessionInfo, error) {
+	if !a.mcpEnabled() {
+		return mcp.SessionInfo{}, fmt.Errorf("MCP Server is disabled. Enable it under View → Enabled Features…")
+	}
+
+	info, err := a.mcpManager.UpdateMode(a.ctx, label, mode)
+	if err != nil {
+		return mcp.SessionInfo{}, err
+	}
+	logger.L.Info("mcp session mode updated", "label", label, "mode", mode)
+	return info, nil
+}
+
 // StopMCPSession stops the named session, closing its dedicated connection.
 func (a *App) StopMCPSession(label string) error {
 	if err := a.mcpManager.Stop(label); err != nil {

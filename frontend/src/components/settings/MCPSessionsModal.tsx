@@ -28,6 +28,7 @@ import {
   GetMCPSessionConfig,
   StartMCPSession,
   StopMCPSession,
+  UpdateMCPSessionMode,
 } from "../../../wailsjs/go/app/App";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { useMCPStore } from "../../store/mcpStore";
@@ -42,10 +43,23 @@ interface Props {
 
 // Execution modes. Values must match internal/mcp.ExecutionMode* constants.
 const EXECUTION_MODES = [
-  { value: "metadata", label: "Metadata Only" },
-  { value: "readonly", label: "Read-Only SQL" },
-  { value: "explain_only", label: "Explain Only" },
+  { value: "metadata", label: "Metadata Only", description: "Schema browsing and diagnostics only. No SQL execution." },
+  { value: "readonly", label: "Read-Only SQL", description: "Read-only SQL execution with EXPLAIN gate, LIMIT injection, and row cap." },
+  { value: "explain_only", label: "Explain Only", description: "Returns the EXPLAIN verdict without executing. AI can check query safety but never sees data." },
 ];
+
+// Shared option renderer for execution mode dropdowns — shows label + description.
+function renderModeOption(option: { value?: string | number | null }) {
+  const m = EXECUTION_MODES.find((x) => x.value === option.value);
+  return (
+    <div>
+      <div>{m?.label}</div>
+      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+        {m?.description}
+      </div>
+    </div>
+  );
+}
 
 export default function MCPSessionsModal({ onClose }: Props) {
   const sessions = useMCPStore((s) => s.sessions);
@@ -110,6 +124,17 @@ export default function MCPSessionsModal({ onClose }: Props) {
       await refresh();
       window.dispatchEvent(new Event("thaw:mcp-changed"));
       message.success(`MCP session "${sessionLabel}" stopped`);
+    } catch (e: unknown) {
+      message.error(String(e));
+    }
+  }
+
+  async function handleModeChange(sessionLabel: string, newMode: string) {
+    try {
+      await UpdateMCPSessionMode(sessionLabel, newMode);
+      await refresh();
+      window.dispatchEvent(new Event("thaw:mcp-changed"));
+      message.success(`Mode changed to "${EXECUTION_MODES.find((m) => m.value === newMode)?.label ?? newMode}".`);
     } catch (e: unknown) {
       message.error(String(e));
     }
@@ -197,6 +222,9 @@ export default function MCPSessionsModal({ onClose }: Props) {
               options={EXECUTION_MODES}
               style={{ width: 150 }}
               disabled={!canStart}
+              popupMatchSelectWidth={false}
+              dropdownStyle={{ minWidth: 320 }}
+              optionRender={renderModeOption}
             />
           </Form.Item>
           <Form.Item
@@ -311,8 +339,19 @@ export default function MCPSessionsModal({ onClose }: Props) {
                   <Text strong style={{ fontSize: 13 }}>{s.label}</Text>
                   <Tag color="green">Running</Tag>
                 </div>
-                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-                  {s.connectionLabel} · port {s.port} · {s.executionMode}
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2, display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+                  {s.connectionLabel} · port {s.port} ·{" "}
+                  <Select
+                    size="small"
+                    variant="borderless"
+                    value={s.executionMode}
+                    onChange={(v) => handleModeChange(s.label, v)}
+                    options={EXECUTION_MODES}
+                    style={{ width: 130, fontSize: 11 }}
+                    popupMatchSelectWidth={false}
+                    dropdownStyle={{ minWidth: 320 }}
+                    optionRender={renderModeOption}
+                  />
                   {s.pinnedRole ? ` · role: ${s.pinnedRole}` : ""}
                   {s.pinnedWarehouse ? ` · wh: ${s.pinnedWarehouse}` : ""}
                 </div>

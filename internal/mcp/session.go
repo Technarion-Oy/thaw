@@ -34,11 +34,12 @@ type session struct {
 	token     string
 	cfg       SessionConfig
 
-	client *snowflake.Client
-	server *mcpsdk.Server
-	ln     net.Listener
-	http   *http.Server
-	mgr    *Manager
+	client    *snowflake.Client
+	editorCtx *EditorContextStore
+	server    *mcpsdk.Server
+	ln        net.Listener
+	http      *http.Server
+	mgr       *Manager
 
 	mu      sync.Mutex
 	running bool
@@ -48,7 +49,7 @@ type session struct {
 // ln is the already-bound loopback listener the HTTP server will serve on;
 // mgr is the owning Manager, used to self-remove if the server dies. token is
 // the per-session secret required to open the SSE GET (see tokenGuard).
-func newSession(mgr *Manager, label, connLabel, mode, token string, port int, client *snowflake.Client, ln net.Listener, cfg SessionConfig) *session {
+func newSession(mgr *Manager, label, connLabel, mode, token string, port int, client *snowflake.Client, ln net.Listener, cfg SessionConfig, editorCtx *EditorContextStore) *session {
 	return &session{
 		label:     label,
 		connLabel: connLabel,
@@ -56,6 +57,7 @@ func newSession(mgr *Manager, label, connLabel, mode, token string, port int, cl
 		token:     token,
 		port:      port,
 		client:    client,
+		editorCtx: editorCtx,
 		ln:        ln,
 		mgr:       mgr,
 		cfg:       cfg,
@@ -72,8 +74,13 @@ func (s *session) start() error {
 		return fmt.Errorf("mcp: session %q already running", s.label)
 	}
 
-	s.server = buildServer(s.client, s.mode, s.cfg)
-	sse := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return s.server }, nil)
+	s.server = buildServer(s.client, s.mode, s.cfg, s.editorCtx)
+	sse := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server {
+		s.mu.Lock()
+		srv := s.server
+		s.mu.Unlock()
+		return srv
+	}, nil)
 	// loopbackGuard (DNS-rebinding defense) runs first, then tokenGuard
 	// authenticates the session-creating GET against the per-session token.
 	handler := loopbackGuard(tokenGuard(s.token, sse))
@@ -137,6 +144,84 @@ func (s *session) stop() error {
 
 	if s.http != nil {
 		return s.http.Shutdown(ctx)
+	}
+	return nil
+}
+
+// updateMode changes the execution mode by mutating the existing server's tool
+// registry in place. The SDK's RemoveTools and AddTool methods automatically
+// send tools/list_changed notifications to all connected MCP clients, so they
+// re-list tools without needing to reconnect.
+//
+// When switching to a non-metadata mode, session config (role/warehouse
+// pinning, secondary roles) is applied via Snowflake round-trips using ctx.
+// These round-trips run outside s.mu to avoid holding the lock during I/O;
+// the client pointer is snapshot under s.mu first so a concurrent stop()
+// cannot nil it mid-flight.
+func (s *session) updateMode(ctx context.Context, newMode string) error {
+	// Snapshot client and running flag under s.mu so a concurrent stop()
+	// (which nils s.client under s.mu) cannot race with applySessionConfig.
+	s.mu.Lock()
+	client := s.client
+	running := s.running
+	s.mu.Unlock()
+
+	if !running {
+		return fmt.Errorf("mcp: session %q is not running", s.label)
+	}
+
+	// Apply session config before re-acquiring s.mu — the Snowflake
+	// round-trips can take time and must not block the SSE factory closure.
+	if newMode != ExecutionModeMetadata {
+		if err := applySessionConfig(ctx, client, s.cfg); err != nil {
+			return err
+		}
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Re-check: stop() may have run while applySessionConfig was in flight.
+	if !s.running {
+		return fmt.Errorf("mcp: session %q was stopped during mode update", s.label)
+	}
+
+	// Remove all mode-specific tools, then re-register for the new mode.
+	// The SDK debounces and coalesces these changes into a single
+	// tools/list_changed notification sent to all connected sessions.
+	s.server.RemoveTools(modeSpecificToolNames...)
+	if newMode == ExecutionModeReadonly || newMode == ExecutionModeExplainOnly {
+		registerSQLTools(s.server, s.client, newMode, s.cfg)
+	}
+	registerEditorTools(s.server, s.client, newMode, s.editorCtx)
+
+	s.mode = newMode
+	return nil
+}
+
+// applySessionConfig runs USE ROLE / USE WAREHOUSE / USE SECONDARY ROLES NONE
+// on the supplied client if configured. This is idempotent — safe to call on
+// every mode switch to a non-metadata mode. The client is passed explicitly
+// (rather than read from s.client) to ensure the caller snapshots it under
+// s.mu first, preventing a race with stop().
+func applySessionConfig(ctx context.Context, client *snowflake.Client, cfg SessionConfig) error {
+	if client == nil {
+		return nil
+	}
+	if cfg.Role != "" {
+		if err := client.UseRole(ctx, cfg.Role); err != nil {
+			return fmt.Errorf("mcp: failed to set role: %w", err)
+		}
+	}
+	if cfg.Warehouse != "" {
+		if err := client.UseWarehouse(ctx, cfg.Warehouse); err != nil {
+			return fmt.Errorf("mcp: failed to set warehouse: %w", err)
+		}
+	}
+	if cfg.SecondaryRoles == "none" {
+		if _, err := client.QuerySingle(ctx, "USE SECONDARY ROLES NONE"); err != nil {
+			return fmt.Errorf("mcp: failed to disable secondary roles: %w", err)
+		}
 	}
 	return nil
 }

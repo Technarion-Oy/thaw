@@ -209,8 +209,6 @@ export default function Toolbar({
           </>
         )}
 
-        {/* MCP running-session indicator (self-contained; hidden when none) */}
-        <MCPIndicator />
       </div>
 
       {/* ── Right: connect button or session context ── */}
@@ -293,39 +291,41 @@ export default function Toolbar({
           </Space>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
-          {params && (
-            <>
-              {(currentUser || currentRegion) && (
-                <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "monospace", lineHeight: 1 }}>
-                  {[currentUser, currentRegion].filter(Boolean).join(" \u00B7 ")}
-                </div>
-              )}
-              <Dropdown
-                trigger={["contextMenu"]}
-                menu={{
-                  items: [
-                    { key: "session-props", label: "Session Properties", onClick: onOpenSessionProperties },
-                    { key: "snowsight", label: "Open Snowsight\u2026", onClick: onOpenSnowsight },
-                  ],
-                }}
-              >
-                <Tag color="blue" style={{ fontSize: 11, margin: 0, cursor: "context-menu" }}>
-                  {params.account} \u00B7 {params.user}
-                </Tag>
-              </Dropdown>
-            </>
-          )}
-          <Button
-            icon={<DisconnectOutlined />}
-            size="small"
-            danger
-            onClick={onDisconnect}
-            style={{ width: "100%", marginTop: 2 }}
-          >
-            Disconnect
-          </Button>
-        </div>
+        <MCPIndicator>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+            {params && (
+              <>
+                {(currentUser || currentRegion) && (
+                  <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "monospace", lineHeight: 1 }}>
+                    {[currentUser, currentRegion].filter(Boolean).join(" \u00B7 ")}
+                  </div>
+                )}
+                <Dropdown
+                  trigger={["contextMenu"]}
+                  menu={{
+                    items: [
+                      { key: "session-props", label: "Session Properties", onClick: onOpenSessionProperties },
+                      { key: "snowsight", label: "Open Snowsight\u2026", onClick: onOpenSnowsight },
+                    ],
+                  }}
+                >
+                  <Tag color="blue" style={{ fontSize: 11, margin: 0, cursor: "context-menu" }}>
+                    {params.account} \u00B7 {params.user}
+                  </Tag>
+                </Dropdown>
+              </>
+            )}
+            <Button
+              icon={<DisconnectOutlined />}
+              size="small"
+              danger
+              onClick={onDisconnect}
+              style={{ width: "100%", marginTop: 2 }}
+            >
+              Disconnect
+            </Button>
+          </div>
+        </MCPIndicator>
       </Space>
     </div>
   );

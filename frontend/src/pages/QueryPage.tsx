@@ -47,6 +47,7 @@ import { useNotebookToolbarStore } from "../store/notebookToolbarStore";
 import { useGridStore } from "../store/gridStore";
 import Toolbar from "../components/toolbar/Toolbar";
 import { NotebookToolbarSlot } from "../components/notebook/NotebookToolbarSlot";
+import { useEditorContextSync } from "../hooks/useEditorContextSync";
 
 const { Text } = Typography;
 
@@ -95,6 +96,10 @@ export default function QueryPage() {
   const [resultPane, setResultPane] = useState<"results" | "terminal">("results");
   const [terminalOpen, setTerminalOpen] = useState(false);
   const featureFlags = useFeatureFlagsStore((s) => s.flags);
+
+  // Sync editor state to the MCP EditorContextStore so external AI clients
+  // can read the active SQL and query results.
+  useEditorContextSync();
 
   // ── Result history — per tab (last 10 unpinned + all pinned, most-recent-first) ────
   interface HistoryEntry { id: string; queryID: string; sql: string; result: QueryResult; pinned: boolean; }
