@@ -17,6 +17,7 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"thaw/internal/config"
+	"thaw/internal/logger"
 	"thaw/internal/snowflake"
 	"thaw/internal/sqleditor"
 )
@@ -58,6 +59,9 @@ func registerTabTools(srv *mcpsdk.Server, client *snowflake.Client, emit func(st
 		if title == "" {
 			title = "AI Query"
 		}
+		if len(title) > 100 {
+			title = title[:100]
+		}
 
 		// Load editor preferences for formatting.
 		prefs := loadEditorPrefs()
@@ -71,11 +75,21 @@ func registerTabTools(srv *mcpsdk.Server, client *snowflake.Client, emit func(st
 			markers = []sqleditor.DiagMarker{}
 		}
 
-		emit("mcp:open-sql-tab", OpenSqlTabPayload{
-			Title:   title,
-			SQL:     formatted,
-			Markers: markers,
-		})
+		// Emit the event to the frontend. Recover from panics so that a
+		// torn-down Wails context during shutdown doesn't kill the MCP
+		// server goroutine.
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.L.Error("mcp open_sql_tab: emit panicked", "err", r)
+				}
+			}()
+			emit("mcp:open-sql-tab", OpenSqlTabPayload{
+				Title:   title,
+				SQL:     formatted,
+				Markers: markers,
+			})
+		}()
 
 		errorCount := 0
 		for _, m := range markers {
