@@ -60,6 +60,7 @@ export interface Tab {
   diff?: TabDiff | null; // populated for diff tabs; absent for regular SQL tabs
   isRunning?: boolean;   // per-tab running state; never persisted
   orphaned?: boolean;    // true when the backing file was deleted from disk
+  mcpOrigin?: boolean;   // true when the tab was created by an MCP tool (open_sql_tab)
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -137,6 +138,7 @@ interface QueryState {
   executeWith: (sql: string) => Promise<void>;
   executeInNewTab: (sql: string) => void;
   loadInNewTab: (sql: string) => void;
+  openMcpTab: (title: string, sql: string) => string;
 }
 
 // ── store ─────────────────────────────────────────────────────────────────────
@@ -508,6 +510,21 @@ export const useQueryStore = create<QueryState>()(
       error: null,
       isRunning: false,
     }));
+  },
+
+  openMcpTab: (title, sql) => {
+    const newTab = makeTab({ title, sql, savedSql: "", mcpOrigin: true });
+    set((state) => ({
+      tabs: [...state.tabs, newTab],
+      activeTabId: newTab.id,
+      sql,
+      selectedSql: "",
+      currentFile: null,
+      result: null,
+      error: null,
+      isRunning: false,
+    }));
+    return newTab.id;
   },
 }),
 {

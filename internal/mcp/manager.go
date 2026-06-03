@@ -67,13 +67,18 @@ type Manager struct {
 	mu        sync.Mutex
 	sessions  map[string]*session
 	editorCtx *EditorContextStore
+	emit      func(string, interface{}) // Wails event emitter; nil when running outside the app (tests)
 }
 
 // NewManager returns an empty Manager with an initialized EditorContextStore.
-func NewManager() *Manager {
+// emit is an optional callback for emitting Wails events from MCP tool handlers
+// (e.g. opening a SQL tab in the frontend). Pass nil in tests or when the Wails
+// runtime is not available.
+func NewManager(emit func(string, interface{})) *Manager {
 	return &Manager{
 		sessions:  make(map[string]*session),
 		editorCtx: NewEditorContextStore(),
+		emit:      emit,
 	}
 }
 

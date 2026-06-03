@@ -15,16 +15,18 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `manager.go` | `Manager` (multi-session registry), `SessionInfo`/`SessionConfig` types, execution mode constants, port allocation, `Start`/`Stop`/`UpdateMode`/`List`/`StopAll`, `EditorContext()` accessor |
 | `session.go` | Per-session `http.Server` + SSE lifecycle (`start`/`stop`/`updateMode`/`info`); serves on the held loopback listener and owns/closes its `*snowflake.Client`. `updateMode` mutates the existing server's tool registry via `RemoveTools`/`AddTool` — the SDK sends `tools/list_changed` notifications so connected clients update seamlessly. If the serve goroutine exits unexpectedly it closes the client and self-removes from the `Manager` (`removeIfPresent`) so no dead row or leaked connection lingers |
 | `security.go` | `loopbackGuard` middleware (rejects non-loopback `Host`/cross-origin `Origin` — DNS-rebinding defense), `tokenGuard` middleware (per-session token auth on the SSE GET), and `newSessionToken` (crypto-random token) |
-| `server.go` | `buildServer(client, mode, cfg, editorCtx)` — constructs the MCP server and registers tools based on execution mode; `modeSpecificToolNames` lists tools that `updateMode` removes/re-registers on mode switch |
+| `server.go` | `buildServer(client, mode, cfg, editorCtx, emit)` — constructs the MCP server and registers tools based on execution mode; `modeSpecificToolNames` lists tools that `updateMode` removes/re-registers on mode switch |
 | `tools.go` | Tool input structs + `registerTools` (schema-browsing tools); `jsonResult`/`textResult` content helpers |
 | `diag_tools.go` | `registerDiagTools` — SQL diagnostics & validation tools (`validate_sql`, `suggest_join_conditions`, `format_sql`, `get_snowflake_keywords`); type-conversion helpers for sqleditor ↔ snowflake types |
 | `context.go` | `EditorContextStore` — concurrency-safe in-memory store for per-tab editor SQL and result summaries; `ResultSummary` and `QueryHistoryEntry` types |
 | `editor_tools.go` | `registerEditorTools` — editor context tools (`get_current_editor_sql`, `get_query_results_summary`, `get_query_history`); bridges frontend editor state to MCP clients |
+| `tab_tools.go` | `registerTabTools` — tab-delivery tool (`open_sql_tab`); formats SQL with user prefs, runs diagnostics, emits `mcp:open-sql-tab` Wails event. Registered when `emit` is non-nil. `OpenSqlTabPayload` type, `loadEditorPrefs` helper |
 | `gate.go` | EXPLAIN precompilation gate: `queryRunner` interface, `CheckGate` (3-layer validation), `checkExplainPlan`, `readOnlyOps` allow-list, `extractOperations`, `isUSEStatement` |
 | `sql_tools.go` | `registerSQLTools` — SQL execution tool (`execute_snowflake_sql`) with EXPLAIN-gated pipeline (`executeSQLPipeline`), LIMIT injection (`injectLimit`), and trusted context-switching tools (`use_role`, `use_warehouse`, `use_database`, `use_schema`); only registered in `readonly`/`explain_only` modes |
 | `gate_test.go` | Unit tests for the EXPLAIN gate and `checkExplainPlan` |
 | `sql_tools_test.go` | Unit tests for `injectLimit` and the full `executeSQLPipeline` (EXPLAIN error rejection, LIMIT injection, row cap, CTE+DELETE detection, etc.) |
 | `context_test.go` | Unit tests for `EditorContextStore` (set/get, remove, concurrent access) |
+| `tab_tools_test.go` | Unit tests for `open_sql_tab` tool (nil-emit graceful degradation, registration, empty SQL rejection, emit payload shape) |
 | `editor_tools_test.go` | Unit tests for editor context tools (empty store, content return, mode-gating, nil client handling) |
 | `mcp_test.go` | SSE round-trip test (external client lists tools), port-allocation test, diagnostics tool tests, mode-gating tests |
 | `doc.go` | Package doc + `thaw:domain: MCP Server` annotation |
@@ -35,7 +37,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 
 | Function | Behaviour |
 |---|---|
-| `NewManager()` | Empty registry with initialized `EditorContextStore`. Safe for concurrent use. |
+| `NewManager(emit)` | Empty registry with initialized `EditorContextStore`. `emit` is an optional Wails event emitter for tab-delivery tools; pass `nil` in tests. Safe for concurrent use. |
 | `EditorContext()` | Returns the shared `*EditorContextStore`; MCP tools read, frontend pushes state via App IPC. |
 | `Start(label, connLabel, mode, port, client, cfg)` | Starts a session under a unique `label`; `port == 0` auto-assigns from `9100`. Takes ownership of `client`. Applies `SessionConfig` (role/warehouse pinning, secondary roles). |
 | `UpdateMode(ctx, label, newMode)` | Changes the execution mode of a running session by mutating the server's tool registry in place. The SDK sends `tools/list_changed` notifications to connected clients automatically. Re-applies session config (role/warehouse pinning) when switching to a non-metadata mode. |
@@ -95,7 +97,7 @@ Metadata needs (listing databases, describing tables, etc.) are served by the de
 
 ### Tools
 
-The server exposes 13 tools in metadata mode and up to 19 tools in readonly/explain_only modes (with `EditorContextStore` provided):
+The server exposes 14 tools in metadata mode and up to 20 tools in readonly/explain_only modes (with `EditorContextStore` and `emit` provided):
 
 **Schema-browsing tools** (always registered, `tools.go`): `get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`.
 
@@ -120,6 +122,14 @@ The server exposes 13 tools in metadata mode and up to 19 tools in readonly/expl
 | `use_warehouse` | Switch the active Snowflake warehouse | Omitted when `PinnedWarehouse` |
 | `use_database` | Switch the active Snowflake database | Always registered |
 | `use_schema` | Switch the active Snowflake schema | Always registered |
+
+**Tab-delivery tools** (`tab_tools.go`, registered when `emit` is non-nil):
+
+| Tool | Purpose | Event |
+|---|---|---|
+| `open_sql_tab` | Format SQL with user prefs, run diagnostics, open a new editor tab | Emits `mcp:open-sql-tab` Wails event with `{title, sql, markers}` |
+
+`open_sql_tab` completes the Phase 1 MCP round-trip: the AI validates and formats SQL, then delivers it into a new editor tab. The user sees diagnostics inline and must manually run the query (human-in-the-loop preserved). The event emitter callback is injected into `Manager` at construction (`NewManager(emit)`) and threaded through `buildServer` to `registerTabTools`. The emitter pattern follows the established `migration.NewService` approach — `internal/mcp` cannot import `internal/app`, so the Wails runtime is accessed via a closure wired in `App.startup()`.
 
 **Diagnostics vs. EXPLAIN gate**: The diagnostics tools serve the *editor/notebook delivery path* — the AI writes SQL, validates it, then places it in front of the human for review. The EXPLAIN gate validates SQL immediately before execution in the `execute_snowflake_sql` tool.
 

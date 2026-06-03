@@ -61,6 +61,11 @@ export interface ResolvedRef {
   schema: string;
   name: string;
 }
+// Module-level map used to pass pre-computed diagnostics from MCP open_sql_tab
+// to the editor without going through React state. QueryPage writes into it
+// when the Wails event fires; onDidChangeModelContent reads and clears.
+export const pendingMcpMarkers = new Map<string, DiagMarker[]>();
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Module-level DDL cache and hover provider handle so we only register once
@@ -767,6 +772,14 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     };
 
     editor.onDidChangeModelContent(() => {
+      // Apply any pending MCP markers immediately (before the debounced diagnostics run).
+      const curTabId = tabId ?? useQueryStore.getState().activeTabId;
+      const pending = pendingMcpMarkers.get(curTabId);
+      if (pending) {
+        pendingMcpMarkers.delete(curTabId);
+        const m = editor.getModel();
+        if (m) monaco.editor.setModelMarkers(m, "thaw-sql", pending);
+      }
       if (diagTimerRef.current) clearTimeout(diagTimerRef.current);
       diagTimerRef.current = setTimeout(runDiagnostics, 400);
     });

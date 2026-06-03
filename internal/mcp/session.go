@@ -74,7 +74,7 @@ func (s *session) start() error {
 		return fmt.Errorf("mcp: session %q already running", s.label)
 	}
 
-	s.server = buildServer(s.client, s.mode, s.cfg, s.editorCtx)
+	s.server = buildServer(s.client, s.mode, s.cfg, s.editorCtx, s.mgr.emit)
 	sse := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server {
 		s.mu.Lock()
 		srv := s.server
