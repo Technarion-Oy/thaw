@@ -776,9 +776,11 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       const curTabId = tabId ?? useQueryStore.getState().activeTabId;
       const pending = pendingMcpMarkers.get(curTabId);
       if (pending) {
-        pendingMcpMarkers.delete(curTabId);
         const m = editor.getModel();
-        if (m) monaco.editor.setModelMarkers(m, "thaw-sql", pending);
+        if (m) {
+          pendingMcpMarkers.delete(curTabId);
+          monaco.editor.setModelMarkers(m, "thaw-sql", pending);
+        }
       }
       if (diagTimerRef.current) clearTimeout(diagTimerRef.current);
       diagTimerRef.current = setTimeout(runDiagnostics, 400);
