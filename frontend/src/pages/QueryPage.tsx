@@ -633,6 +633,9 @@ export default function QueryPage() {
     const { tabs } = useQueryStore.getState();
     const tab = tabs.find((t) => t.id === tabId);
     if (!tab) return;
+    // Clean up any pending MCP markers for this tab (prevents a small leak
+    // if a tab is closed before its editor ever mounts and consumes them).
+    pendingMcpMarkers.delete(tabId);
     const isDirty = tab.sql !== tab.savedSql;
     const isTabRunning = tab.isRunning ?? false;
     if (isTabRunning || isDirty) {

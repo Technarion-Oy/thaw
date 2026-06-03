@@ -13,6 +13,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"unicode/utf8"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -59,8 +60,8 @@ func registerTabTools(srv *mcpsdk.Server, client *snowflake.Client, emit func(st
 		if title == "" {
 			title = "AI Query"
 		}
-		if len(title) > 100 {
-			title = title[:100]
+		if utf8.RuneCountInString(title) > 100 {
+			title = string([]rune(title)[:100])
 		}
 
 		// Load editor preferences for formatting.
@@ -78,10 +79,12 @@ func registerTabTools(srv *mcpsdk.Server, client *snowflake.Client, emit func(st
 		// Emit the event to the frontend. Recover from panics so that a
 		// torn-down Wails context during shutdown doesn't kill the MCP
 		// server goroutine.
+		var emitFailed bool
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
 					logger.L.Error("mcp open_sql_tab: emit panicked", "err", r)
+					emitFailed = true
 				}
 			}()
 			emit("mcp:open-sql-tab", OpenSqlTabPayload{
@@ -90,6 +93,9 @@ func registerTabTools(srv *mcpsdk.Server, client *snowflake.Client, emit func(st
 				Markers: markers,
 			})
 		}()
+		if emitFailed {
+			return textResult("Failed to open tab: internal error"), nil, nil
+		}
 
 		errorCount := 0
 		for _, m := range markers {
