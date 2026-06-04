@@ -9,7 +9,11 @@ Three related capabilities live here:
 1. **Operator stats** — wraps `GET_QUERY_OPERATOR_STATS` and returns typed
    `OperatorStat` rows with JSON columns pre-parsed into Go values.
 2. **Explain plan** — runs `EXPLAIN USING JSON`, parses the result into a typed
-   `ExplainPlan` tree (`ExplainGlobalStats` + `[][]ExplainNode`).
+   `ExplainPlan` tree (`ExplainGlobalStats` + `[][]ExplainNode`). Automatically
+   falls back to `EXPLAIN USING TABULAR` if JSON parsing fails. The TABULAR
+   fallback produces a valid plan but `JoinType` and `EstimatedRows` are
+   unavailable, so joinType-based cartesian detection and row explosion warnings
+   will not fire in fallback mode.
 3. **Diagnostics** — walks the plan tree and emits `ExplainMarker` annotations
    (full table scans, cartesian joins, row explosion) mapped to Monaco editor
    line/column positions for inline highlighting.
@@ -31,11 +35,13 @@ Three related capabilities live here:
 ### Explain plan
 | Symbol | Description |
 |--------|-------------|
-| `ExplainPlan` | Top-level plan: `GlobalStats ExplainGlobalStats` + `Operations [][]ExplainNode` |
+| `ExplainPlan` | Top-level plan: `GlobalStats ExplainGlobalStats` + `Operations [][]ExplainNode` + `TabularFallback bool` |
 | `ExplainGlobalStats` | `PartitionsTotal`, `PartitionsScanned`, `BytesAssigned` |
 | `ExplainNode` | Single plan node: `ID`, `Parent`, `Operation`, `Objects`, `PartitionsScanned`, `PartitionsTotal`, `JoinType`, `EstimatedRows` |
-| `GetExplainPlan(ctx, client, sql)` | Runs `EXPLAIN USING JSON <sql>`, unmarshals the JSON string from row 0 |
+| `GetExplainPlan(ctx, client, sql)` | Runs `EXPLAIN USING JSON`, falls back to TABULAR if JSON parsing fails; sets `TabularFallback` and logs warning |
 | `GetExplainPlanOnConn(ctx, client, conn, sql)` | Same but on a pinned `*sql.Conn` |
+| `explainWithFallback(run)` | Internal helper: try JSON → fallback TABULAR, log, set `TabularFallback` flag |
+| `parseTabularExplainResult(result)` | Converts TABULAR EXPLAIN output to `ExplainPlan`; `JoinType`/`EstimatedRows` unavailable |
 
 ### Diagnostics
 | Symbol | Description |
@@ -55,7 +61,8 @@ Three related capabilities live here:
 - **Cartesian join**: fires on any node where `Operation` or `JoinType` contains
   `CARTESIAN` or `CROSS` (case-insensitive). Always severity Error.
 - **Row explosion**: fires on non-Cartesian join nodes where `EstimatedRows > 10 000 000`.
-  Warning; Error when `> 1 000 000 000`.
+  Warning; Error when `> 1 000 000 000`. **Not available** in TABULAR fallback
+  (`EstimatedRows` is always 0).
 
 ## Patterns & integration (thin-delegator)
 
