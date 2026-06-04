@@ -19,6 +19,8 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `tools.go` | Tool input structs + `registerTools` (schema-browsing tools); `jsonResult`/`textResult` content helpers |
 | `schema_tools.go` | `registerSchemaTools` — extended schema discovery tools (`get_schema_foreign_keys`, `get_database_ddl`, `get_er_model`, `search_objects`, `get_all_data_types`, `validate_data_type`, `list_dropped_tables`, `list_dropped_schemas`, `get_data_retention`); always registered in all modes |
 | `diag_tools.go` | `registerDiagTools` — SQL diagnostics & validation tools (`validate_sql`, `suggest_join_conditions`, `format_sql`, `get_snowflake_keywords`); type-conversion helpers for sqleditor ↔ snowflake types |
+| `profile_tools.go` | `registerProfileTools` — query profiling tools (`explain_query`, `get_explain_diagnostics`); wraps `queryprofile.RunExplain` and `queryprofile.GetExplainDiagnostics`; always registered in all modes |
+| `lineage_tools.go` | `registerLineageTools` — object lineage and cross-dependency tools (`get_object_lineage`, `get_schema_cross_deps`, `get_database_cross_deps`); wraps `Client.GetObjectDependencies`, `Client.GetSchemaCrossDeps`, `Client.GetDatabaseCrossDeps`; always registered in all modes |
 | `context.go` | `EditorContextStore` — concurrency-safe in-memory store for per-tab editor SQL and result summaries; `ResultSummary` and `QueryHistoryEntry` types |
 | `editor_tools.go` | `registerEditorTools` — editor context tools (`get_current_editor_sql`, `get_query_results_summary`, `get_query_history`); bridges frontend editor state to MCP clients |
 | `tab_tools.go` | `registerTabTools` — tab-delivery tool (`open_sql_tab`); formats SQL with user prefs, runs diagnostics, emits `mcp:open-sql-tab` Wails event. Registered when `emit` is non-nil. `OpenSqlTabPayload` type, `loadEditorPrefs` helper |
@@ -30,6 +32,8 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `tab_tools_test.go` | Unit tests for `open_sql_tab` tool (nil-emit graceful degradation, registration, empty SQL rejection, emit payload shape) |
 | `editor_tools_test.go` | Unit tests for editor context tools (empty store, content return, mode-gating, nil client handling) |
 | `schema_tools_test.go` | Unit tests for schema tools (registration, validate_data_type valid/invalid, get_data_retention input validation, search_objects empty pattern, get_all_data_types, mode coverage) |
+| `profile_tools_test.go` | Unit tests for profiling tools (registration in all modes, nil client, empty SQL validation) |
+| `lineage_tools_test.go` | Unit tests for lineage tools (registration in all modes, nil client, missing fields, invalid kind validation) |
 | `mcp_test.go` | SSE round-trip test (external client lists tools), port-allocation test, diagnostics tool tests, mode-gating tests |
 | `doc.go` | Package doc + `thaw:domain: MCP Server` annotation |
 
@@ -99,7 +103,7 @@ Metadata needs (listing databases, describing tables, etc.) are served by the de
 
 ### Tools
 
-The server exposes 23 tools in metadata mode and up to 29 tools in readonly/explain_only modes (with `EditorContextStore` and `emit` provided):
+The server exposes 28 tools in metadata mode and up to 34 tools in readonly/explain_only modes (with `EditorContextStore` and `emit` provided):
 
 **Schema-browsing tools** (always registered, `tools.go`): `get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`.
 
@@ -118,6 +122,21 @@ The server exposes 23 tools in metadata mode and up to 29 tools in readonly/expl
 | `get_data_retention` | Return data retention period (days) at database, schema, or table level |
 
 **SQL diagnostics tools** (always registered, `diag_tools.go`): `validate_sql`, `suggest_join_conditions`, `format_sql`, `get_snowflake_keywords`.
+
+**Query profiling tools** (always registered, `profile_tools.go`):
+
+| Tool | Description |
+|---|---|
+| `explain_query` | Full EXPLAIN plan tree (partitions, bytes, operations) plus performance diagnostics (full scans, cartesian joins, row explosion) |
+| `get_explain_diagnostics` | Diagnostics only (lighter than `explain_query` when you only need the warnings, not the full plan tree) |
+
+**Object lineage tools** (always registered, `lineage_tools.go`):
+
+| Tool | Description |
+|---|---|
+| `get_object_lineage` | Recursive dependency tree for a VIEW, PROCEDURE, or FUNCTION (upstream impact analysis) |
+| `get_schema_cross_deps` | Cross-schema references from views in a schema |
+| `get_database_cross_deps` | Combined cross-schema references across multiple schemas in a database (deduplicated) |
 
 **Editor context tools** (`editor_tools.go`, registered when `EditorContextStore` is non-nil):
 

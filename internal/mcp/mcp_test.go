@@ -31,12 +31,17 @@ import (
 // get_query_history) are NOT listed because the test uses a nil store.
 var expectedTools = []string{
 	"describe_table",
+	"explain_query",
 	"format_sql",
 	"get_all_data_types",
 	"get_data_retention",
+	"get_database_cross_deps",
 	"get_database_ddl",
 	"get_ddl",
 	"get_er_model",
+	"get_explain_diagnostics",
+	"get_object_lineage",
+	"get_schema_cross_deps",
 	"get_schema_foreign_keys",
 	"get_session_context",
 	"get_snowflake_keywords",
