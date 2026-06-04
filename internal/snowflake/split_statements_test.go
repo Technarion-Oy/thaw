@@ -8,7 +8,7 @@
 package snowflake
 
 import (
-	"fmt"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -145,6 +145,11 @@ func TestSplitStatements(t *testing.T) {
 			want: []string{`SELECT "" FROM t`},
 		},
 		{
+			name: "escaped double-quote inside identifier with semicolon",
+			sql:  `SELECT "semi;""colon" FROM t; SELECT 1`,
+			want: []string{`SELECT "semi;""colon" FROM t`, "SELECT 1"},
+		},
+		{
 			name: "unterminated double-quoted identifier with semicolons",
 			sql:  `SELECT "unterminated;ident`,
 			want: []string{`SELECT "unterminated;ident`},
@@ -214,9 +219,10 @@ func TestSplitStatements(t *testing.T) {
 			want: []string{`SELECT /* "not;ident" */ 1`},
 		},
 		{
-			name: "nested block comment markers stop at first close",
+			name: "nested block comment markers stop at first close (known parser limitation)",
 			sql:  "SELECT /* outer /* inner */ still_comment */ 1",
-			// Parser finds first */, so "still_comment */ 1" is SQL, not comment.
+			// Snowflake supports nested block comments, but the parser does not.
+			// It terminates at the first */, so "still_comment */ 1" becomes SQL.
 			want: []string{"SELECT /* outer /* inner */ still_comment */ 1"},
 		},
 		{
@@ -480,6 +486,11 @@ $$;`,
 			sql:  "SELECT 1;\n-- transition\nSELECT 2;",
 			want: []string{"SELECT 1", "-- transition\nSELECT 2"},
 		},
+		{
+			name: "EXECUTE IMMEDIATE with dollar-quoted body",
+			sql:  "EXECUTE IMMEDIATE $$INSERT INTO t VALUES (1);$$; SELECT 1",
+			want: []string{"EXECUTE IMMEDIATE $$INSERT INTO t VALUES (1);$$", "SELECT 1"},
+		},
 
 		// ── PUT/GET normalization (called via normalizePutGet) ───────────
 		{
@@ -532,38 +543,39 @@ $$;`,
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := splitStatements(tt.sql)
-			if !slicesEqual(got, tt.want) {
-				t.Errorf("splitStatements(%q)\n  got:  %v\n  want: %v", tt.sql, formatStmts(got), formatStmts(tt.want))
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("splitStatements(%q)\n  got:  %q\n  want: %q", tt.sql, got, tt.want)
 			}
 		})
 	}
 }
 
-// slicesEqual compares two string slices, treating nil and empty as equivalent
-// for the purpose of "no statements returned".
-func slicesEqual(a, b []string) bool {
-	if len(a) == 0 && len(b) == 0 {
-		return true
+// FuzzSplitStatements verifies that splitStatements never panics on arbitrary
+// input and that every returned statement is non-empty after trimming.
+func FuzzSplitStatements(f *testing.F) {
+	// Seed corpus with interesting inputs.
+	seeds := []string{
+		"",
+		"SELECT 1",
+		"SELECT 1; SELECT 2",
+		"SELECT 'a;b'",
+		`SELECT "a;b"`,
+		"SELECT $$a;b$$",
+		"SELECT $tag$a;b$tag$",
+		"SELECT /* ; */ 1",
+		"SELECT 1 -- ;comment",
+		"SELECT '''';",
+		"SELECT '\\'; DROP TABLE t; --'",
 	}
-	if len(a) != len(b) {
-		return false
+	for _, s := range seeds {
+		f.Add(s)
 	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
+	f.Fuzz(func(t *testing.T, sql string) {
+		stmts := splitStatements(sql)
+		for i, s := range stmts {
+			if strings.TrimSpace(s) == "" {
+				t.Errorf("splitStatements(%q): statement[%d] is empty or whitespace-only", sql, i)
+			}
 		}
-	}
-	return true
-}
-
-// formatStmts formats a slice of statements for readable test output.
-func formatStmts(ss []string) string {
-	if ss == nil {
-		return "nil"
-	}
-	parts := make([]string, len(ss))
-	for i, s := range ss {
-		parts[i] = fmt.Sprintf("%q", s)
-	}
-	return "[" + strings.Join(parts, ", ") + "]"
+	})
 }
