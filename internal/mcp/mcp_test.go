@@ -32,14 +32,23 @@ import (
 var expectedTools = []string{
 	"describe_table",
 	"format_sql",
+	"get_all_data_types",
+	"get_data_retention",
+	"get_database_ddl",
 	"get_ddl",
+	"get_er_model",
+	"get_schema_foreign_keys",
 	"get_session_context",
 	"get_snowflake_keywords",
 	"get_table_foreign_keys",
 	"list_databases",
+	"list_dropped_schemas",
+	"list_dropped_tables",
 	"list_objects",
 	"list_schemas",
+	"search_objects",
 	"suggest_join_conditions",
+	"validate_data_type",
 	"validate_sql",
 }
 

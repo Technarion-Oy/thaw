@@ -17,6 +17,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `security.go` | `loopbackGuard` middleware (rejects non-loopback `Host`/cross-origin `Origin` — DNS-rebinding defense), `tokenGuard` middleware (per-session token auth on the SSE GET), and `newSessionToken` (crypto-random token) |
 | `server.go` | `buildServer(client, mode, cfg, editorCtx, emit)` — constructs the MCP server and registers tools based on execution mode; `modeSpecificToolNames` lists tools that `updateMode` removes/re-registers on mode switch |
 | `tools.go` | Tool input structs + `registerTools` (schema-browsing tools); `jsonResult`/`textResult` content helpers |
+| `schema_tools.go` | `registerSchemaTools` — extended schema discovery tools (`get_schema_foreign_keys`, `get_database_ddl`, `get_er_model`, `search_objects`, `get_all_data_types`, `validate_data_type`, `list_dropped_tables`, `list_dropped_schemas`, `get_data_retention`); always registered in all modes |
 | `diag_tools.go` | `registerDiagTools` — SQL diagnostics & validation tools (`validate_sql`, `suggest_join_conditions`, `format_sql`, `get_snowflake_keywords`); type-conversion helpers for sqleditor ↔ snowflake types |
 | `context.go` | `EditorContextStore` — concurrency-safe in-memory store for per-tab editor SQL and result summaries; `ResultSummary` and `QueryHistoryEntry` types |
 | `editor_tools.go` | `registerEditorTools` — editor context tools (`get_current_editor_sql`, `get_query_results_summary`, `get_query_history`); bridges frontend editor state to MCP clients |
@@ -28,6 +29,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `context_test.go` | Unit tests for `EditorContextStore` (set/get, remove, concurrent access) |
 | `tab_tools_test.go` | Unit tests for `open_sql_tab` tool (nil-emit graceful degradation, registration, empty SQL rejection, emit payload shape) |
 | `editor_tools_test.go` | Unit tests for editor context tools (empty store, content return, mode-gating, nil client handling) |
+| `schema_tools_test.go` | Unit tests for schema tools (registration, validate_data_type valid/invalid, get_data_retention input validation, search_objects empty pattern, get_all_data_types, mode coverage) |
 | `mcp_test.go` | SSE round-trip test (external client lists tools), port-allocation test, diagnostics tool tests, mode-gating tests |
 | `doc.go` | Package doc + `thaw:domain: MCP Server` annotation |
 
@@ -97,9 +99,23 @@ Metadata needs (listing databases, describing tables, etc.) are served by the de
 
 ### Tools
 
-The server exposes 14 tools in metadata mode and up to 20 tools in readonly/explain_only modes (with `EditorContextStore` and `emit` provided):
+The server exposes 23 tools in metadata mode and up to 29 tools in readonly/explain_only modes (with `EditorContextStore` and `emit` provided):
 
 **Schema-browsing tools** (always registered, `tools.go`): `get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`.
+
+**Extended schema discovery tools** (always registered, `schema_tools.go`):
+
+| Tool | Description |
+|---|---|
+| `get_schema_foreign_keys` | Bulk FK listing for an entire schema (cheaper than per-table queries) |
+| `get_database_ddl` | Complete DDL export for a database (all schemas and objects) |
+| `get_er_model` | ER diagram data: tables with columns, PKs, nullability, and FK relationships |
+| `search_objects` | Cross-schema object and column name search using SQL ILIKE patterns |
+| `get_all_data_types` | Complete list of supported Snowflake data types with parameter syntax hints |
+| `validate_data_type` | Validate a data type string and return the normalised form |
+| `list_dropped_tables` | List tables dropped in a schema (available for time-travel undrop) |
+| `list_dropped_schemas` | List schemas dropped in a database (available for time-travel undrop) |
+| `get_data_retention` | Return data retention period (days) at database, schema, or table level |
 
 **SQL diagnostics tools** (always registered, `diag_tools.go`): `validate_sql`, `suggest_join_conditions`, `format_sql`, `get_snowflake_keywords`.
 

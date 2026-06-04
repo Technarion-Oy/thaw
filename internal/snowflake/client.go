@@ -4380,3 +4380,130 @@ func (c *Client) DeployNotebook(ctx context.Context, params DeployNotebookParams
 	}
 	return nil
 }
+
+// ── Cross-schema object search ───────────────────────────────────────────────
+
+// SearchResult holds the results of a cross-schema object and column name
+// search against INFORMATION_SCHEMA.
+type SearchResult struct {
+	Objects []SearchObjectMatch `json:"objects"`
+	Columns []SearchColumnMatch `json:"columns"`
+}
+
+// SearchObjectMatch represents a table/view whose name matched the search
+// pattern.
+type SearchObjectMatch struct {
+	Database string `json:"database"`
+	Schema   string `json:"schema"`
+	Name     string `json:"name"`
+	Kind     string `json:"kind"`
+}
+
+// SearchColumnMatch represents a column whose name matched the search pattern.
+type SearchColumnMatch struct {
+	Database string `json:"database"`
+	Schema   string `json:"schema"`
+	Table    string `json:"table"`
+	Column   string `json:"column"`
+	DataType string `json:"dataType"`
+}
+
+// SearchObjects searches for objects and columns matching a SQL ILIKE pattern
+// across all schemas in the given database. If database is empty, the session's
+// current database is used. Both INFORMATION_SCHEMA.TABLES and
+// INFORMATION_SCHEMA.COLUMNS are queried concurrently, each limited to 100 rows.
+func (c *Client) SearchObjects(ctx context.Context, pattern, database string) (SearchResult, error) {
+	if database == "" {
+		sc, err := c.GetSessionContext(ctx)
+		if err != nil {
+			return SearchResult{}, fmt.Errorf("get session context: %w", err)
+		}
+		database = sc.Database
+		if database == "" {
+			return SearchResult{}, fmt.Errorf("no database specified and no current database in session")
+		}
+	}
+
+	db := QuoteIdent(database)
+
+	type objResult struct {
+		objects []SearchObjectMatch
+		err     error
+	}
+	type colResult struct {
+		columns []SearchColumnMatch
+		err     error
+	}
+
+	objCh := make(chan objResult, 1)
+	colCh := make(chan colResult, 1)
+
+	go func() {
+		query := fmt.Sprintf(
+			`SELECT TABLE_CATALOG, TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE FROM %s.INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME ILIKE ? AND TABLE_SCHEMA != 'INFORMATION_SCHEMA' LIMIT 100`,
+			db,
+		)
+		rows, err := c.db.QueryContext(ctx, query, pattern)
+		if err != nil {
+			objCh <- objResult{err: err}
+			return
+		}
+		defer rows.Close() //nolint:errcheck
+
+		var objects []SearchObjectMatch
+		for rows.Next() {
+			var m SearchObjectMatch
+			if err := rows.Scan(&m.Database, &m.Schema, &m.Name, &m.Kind); err != nil {
+				objCh <- objResult{err: err}
+				return
+			}
+			objects = append(objects, m)
+		}
+		if objects == nil {
+			objects = []SearchObjectMatch{}
+		}
+		objCh <- objResult{objects: objects, err: rows.Err()}
+	}()
+
+	go func() {
+		query := fmt.Sprintf(
+			`SELECT TABLE_CATALOG, TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, DATA_TYPE FROM %s.INFORMATION_SCHEMA.COLUMNS WHERE COLUMN_NAME ILIKE ? AND TABLE_SCHEMA != 'INFORMATION_SCHEMA' LIMIT 100`,
+			db,
+		)
+		rows, err := c.db.QueryContext(ctx, query, pattern)
+		if err != nil {
+			colCh <- colResult{err: err}
+			return
+		}
+		defer rows.Close() //nolint:errcheck
+
+		var columns []SearchColumnMatch
+		for rows.Next() {
+			var m SearchColumnMatch
+			if err := rows.Scan(&m.Database, &m.Schema, &m.Table, &m.Column, &m.DataType); err != nil {
+				colCh <- colResult{err: err}
+				return
+			}
+			columns = append(columns, m)
+		}
+		if columns == nil {
+			columns = []SearchColumnMatch{}
+		}
+		colCh <- colResult{columns: columns, err: rows.Err()}
+	}()
+
+	objRes := <-objCh
+	colRes := <-colCh
+
+	if objRes.err != nil {
+		return SearchResult{}, fmt.Errorf("search objects: %w", objRes.err)
+	}
+	if colRes.err != nil {
+		return SearchResult{}, fmt.Errorf("search columns: %w", colRes.err)
+	}
+
+	return SearchResult{
+		Objects: objRes.objects,
+		Columns: colRes.columns,
+	}, nil
+}
