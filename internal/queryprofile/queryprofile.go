@@ -128,32 +128,50 @@ type ExplainNode struct {
 	EstimatedRows     int64    `json:"estimatedRows,omitempty"` // Snowflake compiler row estimate
 }
 
-// GetExplainPlan runs EXPLAIN USING JSON for the provided SQL query
-// and parses the result into a typed ExplainPlan.
+// GetExplainPlan runs EXPLAIN USING JSON for the provided SQL query and parses
+// the result into a typed ExplainPlan. If JSON parsing fails (e.g. undocumented
+// format changes), it automatically falls back to EXPLAIN USING TABULAR. The
+// TABULAR fallback produces a valid plan but JoinType and EstimatedRows are
+// unavailable, so joinType-based cartesian detection and row explosion warnings
+// will not fire.
 func GetExplainPlan(ctx context.Context, client *snowflake.Client, query string) (*ExplainPlan, error) {
-	// 1. Wrap the raw query
-	explainQuery := "EXPLAIN USING JSON " + query
-
-	// 2. Execute against Snowflake
-	result, err := client.Execute(ctx, explainQuery)
+	result, err := client.Explain(ctx, query, snowflake.ExplainJSON)
 	if err != nil {
-		// If the SQL is invalid, Snowflake returns an error here
 		return nil, err
 	}
-	return parseExplainResult(result)
+
+	plan, parseErr := parseExplainResult(result)
+	if parseErr == nil {
+		return plan, nil
+	}
+
+	// JSON parse failed — fall back to TABULAR.
+	result, err = client.Explain(ctx, query, snowflake.ExplainTabular)
+	if err != nil {
+		return nil, fmt.Errorf("queryprofile: JSON parse failed (%w), TABULAR fallback also failed: %w", parseErr, err)
+	}
+	return parseTabularExplainResult(result)
 }
 
-// GetExplainPlanOnConn is the same as GetExplainPlan but runs on a pinned connection.
+// GetExplainPlanOnConn is the same as GetExplainPlan but runs on a pinned
+// connection. Falls back to TABULAR if JSON parsing fails.
 func GetExplainPlanOnConn(ctx context.Context, client *snowflake.Client, conn *sql.Conn, query string) (*ExplainPlan, error) {
-	// 1. Wrap the raw query
-	explainQuery := "EXPLAIN USING JSON " + query
-
-	// 2. Execute against Snowflake on the pinned connection
-	result, err := client.ExecuteOnConn(ctx, conn, explainQuery)
+	result, err := client.ExplainOnConn(ctx, conn, query, snowflake.ExplainJSON)
 	if err != nil {
 		return nil, err
 	}
-	return parseExplainResult(result)
+
+	plan, parseErr := parseExplainResult(result)
+	if parseErr == nil {
+		return plan, nil
+	}
+
+	// JSON parse failed — fall back to TABULAR.
+	result, err = client.ExplainOnConn(ctx, conn, query, snowflake.ExplainTabular)
+	if err != nil {
+		return nil, fmt.Errorf("queryprofile: JSON parse failed (%w), TABULAR fallback also failed: %w", parseErr, err)
+	}
+	return parseTabularExplainResult(result)
 }
 
 func parseExplainResult(result *snowflake.QueryResult) (*ExplainPlan, error) {
@@ -179,6 +197,84 @@ func parseExplainResult(result *snowflake.QueryResult) (*ExplainPlan, error) {
 		return nil, fmt.Errorf("queryprofile: failed to parse explain JSON: %w", err)
 	}
 
+	return &plan, nil
+}
+
+// parseTabularExplainResult converts a TABULAR EXPLAIN result into an
+// ExplainPlan. TABULAR output has one row per operator with named columns.
+// JoinType and EstimatedRows are not available in this format and remain
+// zero-valued in the returned nodes.
+func parseTabularExplainResult(result *snowflake.QueryResult) (*ExplainPlan, error) {
+	if len(result.Rows) == 0 {
+		return nil, fmt.Errorf("queryprofile: TABULAR explain returned no rows")
+	}
+
+	// Build case-insensitive column index.
+	idx := make(map[string]int, len(result.Columns))
+	for i, c := range result.Columns {
+		idx[strings.ToUpper(c)] = i
+	}
+
+	// Require at least the operation column.
+	opIdx, ok := idx["OPERATION"]
+	if !ok {
+		return nil, fmt.Errorf("queryprofile: TABULAR explain missing 'operation' column")
+	}
+
+	var plan ExplainPlan
+	var nodes []ExplainNode
+
+	for _, row := range result.Rows {
+		op := asString(row, opIdx)
+
+		// GlobalStats is a synthetic summary row — extract it separately.
+		if strings.EqualFold(op, "GlobalStats") {
+			if i, ok := idx["PARTITIONSTOTAL"]; ok {
+				plan.GlobalStats.PartitionsTotal = asInt64(row, i)
+			}
+			if i, ok := idx["PARTITIONSASSIGNED"]; ok {
+				plan.GlobalStats.PartitionsScanned = asInt64(row, i)
+			}
+			if i, ok := idx["BYTESASSIGNED"]; ok {
+				plan.GlobalStats.BytesAssigned = asInt64(row, i)
+			}
+			continue
+		}
+
+		node := ExplainNode{Operation: op}
+
+		if i, ok := idx["ID"]; ok {
+			node.ID = asInt64(row, i)
+		}
+		if i, ok := idx["PARENTOPERATORS"]; ok {
+			parents := asInt64Slice(asString(row, i))
+			if len(parents) > 0 {
+				p := parents[0]
+				node.Parent = &p
+			}
+		}
+		if i, ok := idx["OBJECTS"]; ok {
+			raw := asString(row, i)
+			if raw != "" {
+				node.Objects = strings.Split(raw, ",")
+				for j := range node.Objects {
+					node.Objects[j] = strings.TrimSpace(node.Objects[j])
+				}
+			}
+		}
+		if i, ok := idx["PARTITIONSTOTAL"]; ok {
+			node.PartitionsTotal = asInt64(row, i)
+		}
+		if i, ok := idx["PARTITIONSASSIGNED"]; ok {
+			node.PartitionsScanned = asInt64(row, i)
+		}
+		// JoinType and EstimatedRows are not available in TABULAR format.
+
+		nodes = append(nodes, node)
+	}
+
+	// TABULAR has no explicit step grouping — all nodes go into a single step.
+	plan.Operations = [][]ExplainNode{nodes}
 	return &plan, nil
 }
 

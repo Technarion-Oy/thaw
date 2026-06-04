@@ -19,6 +19,7 @@ No business logic belongs here — callers pass SQL strings or high-level parame
 | `collations.go` | `CollationOption`, `CollationLocale`, `CollationSpecifier`; `Collations()`, `CollationLocales()`, `CollationSpecifiers()` — single source of truth for the collation registry surfaced in the UI |
 | `helpers.go` | `IsBoolean`, `IsNumeric`, `NeedsQuotes` — data-type predicate helpers used by column DDL builders |
 | `lineage.go` | `DependencyNode`, `SchemaRef`, `GetObjectDependencies`, `GetSchemaCrossDeps` — recursive DDL-parsing dependency tree (capped at depth 8 by `maxDependencyDepth`) |
+| `explain.go` | `ExplainFormat`, `Explain`, `ExplainOnConn` — format-parameterised EXPLAIN execution helpers |
 | `datatypes.go` | Snowflake data type normalisation and validation |
 | `doc.go` | Package doc + `thaw:domain` annotation |
 
@@ -35,6 +36,9 @@ No business logic belongs here — callers pass SQL strings or high-level parame
 - `ExecDDL(ctx, sql)` — fire-and-forget DDL (no result set)
 - `CancelSnowflakeQuery(ctx, queryID)` — calls `SYSTEM$CANCEL_QUERY`
 - `SplitStatements(sql) []string` — exported wrapper around `splitStatements`; handles `--`, `/* */`, `'…'`, `"…"`, `$tag$…$tag$`
+- `ExplainFormat` (`string`) — `ExplainJSON` or `ExplainTabular`
+- `Explain(ctx, query, format)` — runs `EXPLAIN USING <format> <query>` via `QuerySingle`
+- `ExplainOnConn(ctx, conn, query, format)` — same on a pinned `*sql.Conn` via `queryOnConn` (no session sync)
 
 ### Result types
 - `QueryResult{Columns, Rows, RowsAffected, QueryID, Truncated}` — capped at `maxQueryRows = 50_000`
