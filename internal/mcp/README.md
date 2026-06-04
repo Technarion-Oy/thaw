@@ -132,7 +132,7 @@ The server exposes 36 tools in metadata mode and up to 42 tools in readonly/expl
 | `get_role_ddl` | Return the CREATE ROLE DDL for a role, including granted privileges |
 | `list_warehouses` | List all warehouses accessible to the current session |
 | `get_warehouse_ddl` | Return the CREATE WAREHOUSE DDL for a warehouse |
-| `list_integrations` | List integrations of a given kind (API, NOTIFICATION, SECURITY, STORAGE, CATALOG) |
+| `list_integrations` | List integrations of a given kind (API, NOTIFICATION, SECURITY, STORAGE, CATALOG, EXTERNAL ACCESS) |
 | `list_secrets` | List all secrets visible in the account (name, database, schema) |
 | `list_file_formats` | List file formats defined in a schema |
 

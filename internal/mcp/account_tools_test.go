@@ -45,6 +45,42 @@ func TestAccountToolsRegistered(t *testing.T) {
 	}
 }
 
+// TestListRolesNilClient verifies the tool returns an error when no Snowflake
+// client is available (no-input tool).
+func TestListRolesNilClient(t *testing.T) {
+	cs := newTestSession(t)
+	ctx := context.Background()
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "list_roles",
+		Arguments: emptyInput{},
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned Go error: %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for nil client")
+	}
+}
+
+// TestGetRoleDDLNilClient verifies the tool returns an error when no Snowflake
+// client is available (tool with input validation).
+func TestGetRoleDDLNilClient(t *testing.T) {
+	cs := newTestSession(t)
+	ctx := context.Background()
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "get_role_ddl",
+		Arguments: nameInput{Name: "SYSADMIN"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned Go error: %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for nil client")
+	}
+}
+
 // TestListIntegrationsEmptyKind verifies that an empty kind returns an error.
 func TestListIntegrationsEmptyKind(t *testing.T) {
 	cs := newTestSession(t)
