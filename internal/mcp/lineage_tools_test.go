@@ -237,6 +237,7 @@ func TestGetDatabaseCrossDepsMissingFields(t *testing.T) {
 		{"missing database", databaseCrossDepsInput{Schemas: []string{"PUBLIC"}}, "database is required"},
 		{"missing schemas", databaseCrossDepsInput{Database: "DB"}, "schemas is required"},
 		{"empty schemas", databaseCrossDepsInput{Database: "DB", Schemas: []string{}}, "schemas is required"},
+		{"too many schemas", databaseCrossDepsInput{Database: "DB", Schemas: make([]string, 21)}, "too many schemas"},
 	}
 
 	for _, tc := range cases {

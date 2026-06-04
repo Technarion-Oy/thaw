@@ -35,11 +35,12 @@ Three related capabilities live here:
 ### Explain plan
 | Symbol | Description |
 |--------|-------------|
-| `ExplainPlan` | Top-level plan: `GlobalStats ExplainGlobalStats` + `Operations [][]ExplainNode` |
+| `ExplainPlan` | Top-level plan: `GlobalStats ExplainGlobalStats` + `Operations [][]ExplainNode` + `TabularFallback bool` |
 | `ExplainGlobalStats` | `PartitionsTotal`, `PartitionsScanned`, `BytesAssigned` |
 | `ExplainNode` | Single plan node: `ID`, `Parent`, `Operation`, `Objects`, `PartitionsScanned`, `PartitionsTotal`, `JoinType`, `EstimatedRows` |
-| `GetExplainPlan(ctx, client, sql)` | Runs `EXPLAIN USING JSON`, falls back to TABULAR if JSON parsing fails |
+| `GetExplainPlan(ctx, client, sql)` | Runs `EXPLAIN USING JSON`, falls back to TABULAR if JSON parsing fails; sets `TabularFallback` and logs warning |
 | `GetExplainPlanOnConn(ctx, client, conn, sql)` | Same but on a pinned `*sql.Conn` |
+| `explainWithFallback(run)` | Internal helper: try JSON → fallback TABULAR, log, set `TabularFallback` flag |
 | `parseTabularExplainResult(result)` | Converts TABULAR EXPLAIN output to `ExplainPlan`; `JoinType`/`EstimatedRows` unavailable |
 
 ### Diagnostics

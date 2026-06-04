@@ -37,8 +37,8 @@ No business logic belongs here — callers pass SQL strings or high-level parame
 - `CancelSnowflakeQuery(ctx, queryID)` — calls `SYSTEM$CANCEL_QUERY`
 - `SplitStatements(sql) []string` — exported wrapper around `splitStatements`; handles `--`, `/* */`, `'…'`, `"…"`, `$tag$…$tag$`
 - `ExplainFormat` (`string`) — `ExplainJSON` or `ExplainTabular`
-- `Explain(ctx, query, format)` — runs `EXPLAIN USING <format> <query>` via `QuerySingle`
-- `ExplainOnConn(ctx, conn, query, format)` — same on a pinned `*sql.Conn` via `queryOnConn` (no session sync)
+- `Explain(ctx, query, format)` — runs `EXPLAIN USING <format> <query>` via `QuerySingle`; validates format before SQL construction
+- `ExplainOnConn(ctx, conn, query, format)` — same on a pinned `*sql.Conn` via `queryOnConn` (no session sync); validates format
 
 ### Result types
 - `QueryResult{Columns, Rows, RowsAffected, QueryID, Truncated}` — capped at `maxQueryRows = 50_000`

@@ -111,6 +111,10 @@ func registerLineageTools(srv *mcpsdk.Server, client *snowflake.Client) {
 		if len(in.Schemas) == 0 {
 			return nil, nil, fmt.Errorf("schemas is required (at least one schema name)")
 		}
+		const maxSchemas = 20
+		if len(in.Schemas) > maxSchemas {
+			return nil, nil, fmt.Errorf("too many schemas: %d exceeds maximum of %d", len(in.Schemas), maxSchemas)
+		}
 		if client == nil {
 			return nil, nil, fmt.Errorf("no Snowflake connection available")
 		}

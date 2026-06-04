@@ -18,7 +18,7 @@ func TestExplainFormatConstants(t *testing.T) {
 	}
 }
 
-func TestExplainSQLConstruction(t *testing.T) {
+func TestExplainSQLFormat(t *testing.T) {
 	tests := []struct {
 		query  string
 		format ExplainFormat
@@ -40,6 +40,22 @@ func TestExplainSQLConstruction(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("Explain SQL for format %q, query %q:\n  got  %q\n  want %q",
 				tt.format, tt.query, got, tt.want)
+		}
+	}
+}
+
+func TestValidateExplainFormat(t *testing.T) {
+	// Valid formats.
+	for _, f := range []ExplainFormat{ExplainJSON, ExplainTabular} {
+		if err := validateExplainFormat(f); err != nil {
+			t.Errorf("validateExplainFormat(%q) returned unexpected error: %v", f, err)
+		}
+	}
+
+	// Invalid formats.
+	for _, f := range []ExplainFormat{"", "XML", "TEXT", ExplainFormat("JSON; DROP TABLE users--")} {
+		if err := validateExplainFormat(f); err == nil {
+			t.Errorf("validateExplainFormat(%q) should return error", f)
 		}
 	}
 }

@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"strings"
 
+	"thaw/internal/logger"
 	"thaw/internal/snowflake"
 )
 
@@ -107,6 +108,11 @@ type ExplainPlan struct {
 	// Operations is a 2D array. The outer array represents execution steps,
 	// and the inner array represents the flat list of nodes in that step.
 	Operations [][]ExplainNode `json:"Operations"`
+	// TabularFallback is true when JSON parsing failed and the plan was
+	// constructed from TABULAR output. JoinType and EstimatedRows are
+	// unavailable in this mode, so joinType-based cartesian detection
+	// and row explosion diagnostics will not fire.
+	TabularFallback bool `json:"tabularFallback,omitempty"`
 }
 
 // ExplainGlobalStats contains the top-level execution estimates.
@@ -133,30 +139,25 @@ type ExplainNode struct {
 // format changes), it automatically falls back to EXPLAIN USING TABULAR. The
 // TABULAR fallback produces a valid plan but JoinType and EstimatedRows are
 // unavailable, so joinType-based cartesian detection and row explosion warnings
-// will not fire.
+// will not fire. ExplainPlan.TabularFallback is set when fallback is used.
 func GetExplainPlan(ctx context.Context, client *snowflake.Client, query string) (*ExplainPlan, error) {
-	result, err := client.Explain(ctx, query, snowflake.ExplainJSON)
-	if err != nil {
-		return nil, err
-	}
-
-	plan, parseErr := parseExplainResult(result)
-	if parseErr == nil {
-		return plan, nil
-	}
-
-	// JSON parse failed — fall back to TABULAR.
-	result, err = client.Explain(ctx, query, snowflake.ExplainTabular)
-	if err != nil {
-		return nil, fmt.Errorf("queryprofile: JSON parse failed (%w), TABULAR fallback also failed: %w", parseErr, err)
-	}
-	return parseTabularExplainResult(result)
+	return explainWithFallback(func(f snowflake.ExplainFormat) (*snowflake.QueryResult, error) {
+		return client.Explain(ctx, query, f)
+	})
 }
 
 // GetExplainPlanOnConn is the same as GetExplainPlan but runs on a pinned
 // connection. Falls back to TABULAR if JSON parsing fails.
 func GetExplainPlanOnConn(ctx context.Context, client *snowflake.Client, conn *sql.Conn, query string) (*ExplainPlan, error) {
-	result, err := client.ExplainOnConn(ctx, conn, query, snowflake.ExplainJSON)
+	return explainWithFallback(func(f snowflake.ExplainFormat) (*snowflake.QueryResult, error) {
+		return client.ExplainOnConn(ctx, conn, query, f)
+	})
+}
+
+// explainWithFallback tries JSON EXPLAIN first; if parsing fails, falls back
+// to TABULAR. The run function abstracts over which Client method is used.
+func explainWithFallback(run func(snowflake.ExplainFormat) (*snowflake.QueryResult, error)) (*ExplainPlan, error) {
+	result, err := run(snowflake.ExplainJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -167,11 +168,20 @@ func GetExplainPlanOnConn(ctx context.Context, client *snowflake.Client, conn *s
 	}
 
 	// JSON parse failed — fall back to TABULAR.
-	result, err = client.ExplainOnConn(ctx, conn, query, snowflake.ExplainTabular)
+	logger.L.Warn("explain JSON parse failed, falling back to TABULAR",
+		"error", parseErr)
+
+	result, err = run(snowflake.ExplainTabular)
 	if err != nil {
 		return nil, fmt.Errorf("queryprofile: JSON parse failed (%w), TABULAR fallback also failed: %w", parseErr, err)
 	}
-	return parseTabularExplainResult(result)
+
+	plan, err = parseTabularExplainResult(result)
+	if err != nil {
+		return nil, err
+	}
+	plan.TabularFallback = true
+	return plan, nil
 }
 
 func parseExplainResult(result *snowflake.QueryResult) (*ExplainPlan, error) {

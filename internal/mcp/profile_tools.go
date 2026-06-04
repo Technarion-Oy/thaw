@@ -33,7 +33,7 @@ type explainInput struct {
 func registerProfileTools(srv *mcpsdk.Server, client *snowflake.Client) {
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
 		Name: "explain_query",
-		Description: "Run EXPLAIN USING TABULAR on a SQL statement and return the full plan tree " +
+		Description: "Run EXPLAIN on a SQL statement and return the full plan tree " +
 			"(partitions, bytes, operations) plus performance diagnostics (full scans, cartesian joins, row explosion).",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in explainInput) (*mcpsdk.CallToolResult, any, error) {
 		sql := strings.TrimSpace(in.SQL)
