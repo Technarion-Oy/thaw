@@ -45,6 +45,12 @@ func registerSchemaTools(srv *mcpsdk.Server, client *snowflake.Client) {
 		Name:        "get_schema_foreign_keys",
 		Description: "List all foreign-key relationships in a schema (bulk — cheaper than per-table queries).",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in schemaInput) (*mcpsdk.CallToolResult, any, error) {
+		if in.Database == "" {
+			return nil, nil, fmt.Errorf("database is required")
+		}
+		if in.Schema == "" {
+			return nil, nil, fmt.Errorf("schema is required")
+		}
 		fks, err := client.GetSchemaForeignKeys(ctx, in.Database, in.Schema)
 		if err != nil {
 			return nil, nil, err
@@ -53,9 +59,14 @@ func registerSchemaTools(srv *mcpsdk.Server, client *snowflake.Client) {
 	})
 
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
-		Name:        "get_database_ddl",
-		Description: "Return the complete DDL for a database (all schemas and objects).",
+		Name: "get_database_ddl",
+		Description: "Return the complete DDL for a database (all schemas and objects). " +
+			"For large databases with many schemas/tables the response can be very large; " +
+			"consider querying individual schemas instead.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in databaseInput) (*mcpsdk.CallToolResult, any, error) {
+		if in.Database == "" {
+			return nil, nil, fmt.Errorf("database is required")
+		}
 		ddl, err := client.GetCompleteDatabaseDDL(ctx, in.Database)
 		if err != nil {
 			return nil, nil, err
@@ -64,9 +75,14 @@ func registerSchemaTools(srv *mcpsdk.Server, client *snowflake.Client) {
 	})
 
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
-		Name:        "get_er_model",
-		Description: "Return ER diagram data for a database: tables with columns, primary keys, nullability, and foreign-key relationships.",
+		Name: "get_er_model",
+		Description: "Return ER diagram data for a database: tables with columns, primary keys, nullability, " +
+			"and foreign-key relationships. For large databases with many schemas/tables the response can be " +
+			"very large; consider narrowing your query to specific schemas.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in databaseInput) (*mcpsdk.CallToolResult, any, error) {
+		if in.Database == "" {
+			return nil, nil, fmt.Errorf("database is required")
+		}
 		data, err := client.GetERDiagramData(ctx, in.Database)
 		if err != nil {
 			return nil, nil, err
@@ -75,8 +91,9 @@ func registerSchemaTools(srv *mcpsdk.Server, client *snowflake.Client) {
 	})
 
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
-		Name:        "search_objects",
-		Description: "Search for objects and columns matching a SQL ILIKE pattern across all schemas in a database. Returns up to 100 matching objects and 100 matching columns.",
+		Name: "search_objects",
+		Description: "Search for objects and columns matching a SQL ILIKE pattern across all schemas in a database. " +
+			"Defaults to the current session database if database is omitted. Returns up to 100 matching objects and 100 matching columns.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in searchObjectsInput) (*mcpsdk.CallToolResult, any, error) {
 		if in.Pattern == "" {
 			return nil, nil, fmt.Errorf("pattern is required")
@@ -129,6 +146,12 @@ func registerSchemaTools(srv *mcpsdk.Server, client *snowflake.Client) {
 		Name:        "list_dropped_tables",
 		Description: "List tables that have been dropped in a schema (available for time-travel undrop).",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in schemaInput) (*mcpsdk.CallToolResult, any, error) {
+		if in.Database == "" {
+			return nil, nil, fmt.Errorf("database is required")
+		}
+		if in.Schema == "" {
+			return nil, nil, fmt.Errorf("schema is required")
+		}
 		tables, err := client.ListDroppedTables(ctx, in.Database, in.Schema)
 		if err != nil {
 			return nil, nil, err
@@ -140,6 +163,9 @@ func registerSchemaTools(srv *mcpsdk.Server, client *snowflake.Client) {
 		Name:        "list_dropped_schemas",
 		Description: "List schemas that have been dropped in a database (available for time-travel undrop).",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in databaseInput) (*mcpsdk.CallToolResult, any, error) {
+		if in.Database == "" {
+			return nil, nil, fmt.Errorf("database is required")
+		}
 		schemas, err := client.ListDroppedSchemas(ctx, in.Database)
 		if err != nil {
 			return nil, nil, err
@@ -153,6 +179,9 @@ func registerSchemaTools(srv *mcpsdk.Server, client *snowflake.Client) {
 			"Provide only database for database-level, database+schema for schema-level, " +
 			"or database+schema+table for table-level retention.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in dataRetentionInput) (*mcpsdk.CallToolResult, any, error) {
+		if in.Database == "" {
+			return nil, nil, fmt.Errorf("database is required")
+		}
 		if in.Table != "" && in.Schema == "" {
 			return nil, nil, fmt.Errorf("schema is required when table is specified")
 		}

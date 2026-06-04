@@ -22,6 +22,25 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// newTestSession creates a test MCP server+client session using SSE transport.
+// The returned session should be closed by the caller via defer.
+func newTestSession(t *testing.T) *mcpsdk.ClientSession {
+	t.Helper()
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil)
+	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
+	httpSrv := httptest.NewServer(handler)
+	t.Cleanup(httpSrv.Close)
+
+	ctx := context.Background()
+	c := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test", Version: "v1"}, nil)
+	cs, err := c.Connect(ctx, &mcpsdk.SSEClientTransport{Endpoint: httpSrv.URL}, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { _ = cs.Close() })
+	return cs
+}
+
 // TestSchemaToolsRegistered verifies that all 9 extended schema tools are
 // registered on a server built with a nil client (tool listing does not invoke
 // handlers).
@@ -50,18 +69,8 @@ func TestSchemaToolsRegistered(t *testing.T) {
 // TestValidateDataTypeToolValid exercises validate_data_type through SSE with
 // a valid data type and verifies the structured result.
 func TestValidateDataTypeToolValid(t *testing.T) {
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil)
-	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
-	httpSrv := httptest.NewServer(handler)
-	defer httpSrv.Close()
-
+	cs := newTestSession(t)
 	ctx := context.Background()
-	c := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test", Version: "v1"}, nil)
-	cs, err := c.Connect(ctx, &mcpsdk.SSEClientTransport{Endpoint: httpSrv.URL}, nil)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	defer func() { _ = cs.Close() }()
 
 	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
 		Name:      "validate_data_type",
@@ -91,18 +100,8 @@ func TestValidateDataTypeToolValid(t *testing.T) {
 // TestValidateDataTypeToolInvalid exercises validate_data_type with an invalid
 // data type and verifies the structured error result (not a Go error).
 func TestValidateDataTypeToolInvalid(t *testing.T) {
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil)
-	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
-	httpSrv := httptest.NewServer(handler)
-	defer httpSrv.Close()
-
+	cs := newTestSession(t)
 	ctx := context.Background()
-	c := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test", Version: "v1"}, nil)
-	cs, err := c.Connect(ctx, &mcpsdk.SSEClientTransport{Endpoint: httpSrv.URL}, nil)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	defer func() { _ = cs.Close() }()
 
 	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
 		Name:      "validate_data_type",
@@ -136,18 +135,8 @@ func TestValidateDataTypeToolInvalid(t *testing.T) {
 // TestGetDataRetentionTableWithoutSchema verifies that specifying a table
 // without a schema returns an error.
 func TestGetDataRetentionTableWithoutSchema(t *testing.T) {
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil)
-	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
-	httpSrv := httptest.NewServer(handler)
-	defer httpSrv.Close()
-
+	cs := newTestSession(t)
 	ctx := context.Background()
-	c := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test", Version: "v1"}, nil)
-	cs, err := c.Connect(ctx, &mcpsdk.SSEClientTransport{Endpoint: httpSrv.URL}, nil)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	defer func() { _ = cs.Close() }()
 
 	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
 		Name: "get_data_retention",
@@ -172,18 +161,8 @@ func TestGetDataRetentionTableWithoutSchema(t *testing.T) {
 
 // TestSearchObjectsEmptyPattern verifies that an empty pattern is rejected.
 func TestSearchObjectsEmptyPattern(t *testing.T) {
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil)
-	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
-	httpSrv := httptest.NewServer(handler)
-	defer httpSrv.Close()
-
+	cs := newTestSession(t)
 	ctx := context.Background()
-	c := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test", Version: "v1"}, nil)
-	cs, err := c.Connect(ctx, &mcpsdk.SSEClientTransport{Endpoint: httpSrv.URL}, nil)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	defer func() { _ = cs.Close() }()
 
 	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
 		Name:      "search_objects",
@@ -205,18 +184,8 @@ func TestSearchObjectsEmptyPattern(t *testing.T) {
 // TestGetAllDataTypesTool verifies the tool returns a non-empty JSON array
 // of data types.
 func TestGetAllDataTypesTool(t *testing.T) {
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil)
-	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
-	httpSrv := httptest.NewServer(handler)
-	defer httpSrv.Close()
-
+	cs := newTestSession(t)
 	ctx := context.Background()
-	c := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test", Version: "v1"}, nil)
-	cs, err := c.Connect(ctx, &mcpsdk.SSEClientTransport{Endpoint: httpSrv.URL}, nil)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	defer func() { _ = cs.Close() }()
 
 	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
 		Name:      "get_all_data_types",
