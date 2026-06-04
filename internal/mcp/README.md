@@ -18,6 +18,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `server.go` | `buildServer(client, mode, cfg, editorCtx, emit)` — constructs the MCP server and registers tools based on execution mode; `modeSpecificToolNames` lists tools that `updateMode` removes/re-registers on mode switch |
 | `tools.go` | Tool input structs + `registerTools` (schema-browsing tools); `jsonResult`/`textResult` content helpers |
 | `schema_tools.go` | `registerSchemaTools` — extended schema discovery tools (`get_schema_foreign_keys`, `get_database_ddl`, `get_er_model`, `search_objects`, `get_all_data_types`, `validate_data_type`, `list_dropped_tables`, `list_dropped_schemas`, `get_data_retention`); always registered in all modes |
+| `account_tools.go` | `registerAccountTools` — account & infrastructure tools (`list_roles`, `list_available_roles`, `get_role_ddl`, `list_warehouses`, `get_warehouse_ddl`, `list_integrations`, `list_secrets`, `list_file_formats`); always registered in all modes |
 | `diag_tools.go` | `registerDiagTools` — SQL diagnostics & validation tools (`validate_sql`, `suggest_join_conditions`, `format_sql`, `get_snowflake_keywords`); type-conversion helpers for sqleditor ↔ snowflake types |
 | `profile_tools.go` | `registerProfileTools` — query profiling tools (`explain_query`, `get_explain_diagnostics`); wraps `queryprofile.RunExplain` and `queryprofile.GetExplainDiagnostics`; always registered in all modes |
 | `lineage_tools.go` | `registerLineageTools` — object lineage and cross-dependency tools (`get_object_lineage`, `get_schema_cross_deps`, `get_database_cross_deps`); wraps `Client.GetObjectDependencies`, `Client.GetSchemaCrossDeps`, `Client.GetDatabaseCrossDeps`; always registered in all modes |
@@ -31,6 +32,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `context_test.go` | Unit tests for `EditorContextStore` (set/get, remove, concurrent access) |
 | `tab_tools_test.go` | Unit tests for `open_sql_tab` tool (nil-emit graceful degradation, registration, empty SQL rejection, emit payload shape) |
 | `editor_tools_test.go` | Unit tests for editor context tools (empty store, content return, mode-gating, nil client handling) |
+| `account_tools_test.go` | Unit tests for account tools (registration in all modes, empty kind/name/schema validation) |
 | `schema_tools_test.go` | Unit tests for schema tools (registration, validate_data_type valid/invalid, get_data_retention input validation, search_objects empty pattern, get_all_data_types, mode coverage) |
 | `profile_tools_test.go` | Unit tests for profiling tools (registration in all modes, nil client, empty SQL validation) |
 | `lineage_tools_test.go` | Unit tests for lineage tools (registration in all modes, nil client, missing fields, invalid kind validation) |
@@ -103,7 +105,7 @@ Metadata needs (listing databases, describing tables, etc.) are served by the de
 
 ### Tools
 
-The server exposes 28 tools in metadata mode and up to 34 tools in readonly/explain_only modes (with `EditorContextStore` and `emit` provided):
+The server exposes 36 tools in metadata mode and up to 42 tools in readonly/explain_only modes (with `EditorContextStore` and `emit` provided):
 
 **Schema-browsing tools** (always registered, `tools.go`): `get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`.
 
@@ -120,6 +122,19 @@ The server exposes 28 tools in metadata mode and up to 34 tools in readonly/expl
 | `list_dropped_tables` | List tables dropped in a schema (available for time-travel undrop) |
 | `list_dropped_schemas` | List schemas dropped in a database (available for time-travel undrop) |
 | `get_data_retention` | Return data retention period (days) at database, schema, or table level |
+
+**Account & infrastructure tools** (always registered, `account_tools.go`):
+
+| Tool | Description |
+|---|---|
+| `list_roles` | List all roles visible to the current session |
+| `list_available_roles` | List roles available (grantable) to the current user |
+| `get_role_ddl` | Return the CREATE ROLE DDL for a role, including granted privileges |
+| `list_warehouses` | List all warehouses accessible to the current session |
+| `get_warehouse_ddl` | Return the CREATE WAREHOUSE DDL for a warehouse |
+| `list_integrations` | List integrations of a given kind (API, NOTIFICATION, SECURITY, STORAGE, CATALOG) |
+| `list_secrets` | List all secrets visible in the account (name, database, schema) |
+| `list_file_formats` | List file formats defined in a schema |
 
 **SQL diagnostics tools** (always registered, `diag_tools.go`): `validate_sql`, `suggest_join_conditions`, `format_sql`, `get_snowflake_keywords`.
 
