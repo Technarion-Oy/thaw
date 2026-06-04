@@ -43,6 +43,7 @@ func buildServer(client *snowflake.Client, mode string, cfg SessionConfig, edito
 	}, nil)
 
 	registerTools(srv, client)
+	registerSchemaTools(srv, client)
 	registerDiagTools(srv, client)
 	registerEditorTools(srv, client, mode, editorCtx)
 	registerTabTools(srv, client, emit)
