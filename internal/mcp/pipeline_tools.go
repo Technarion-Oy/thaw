@@ -101,6 +101,11 @@ type taskDependenciesResult struct {
 // tasks.HasChildren would make. The predecessors field is a JSON array or
 // Snowflake-quoted bracket syntax; we parse each entry's last dot-segment and
 // compare case-insensitively, matching the logic in tasks.HasChildren.
+//
+// NOTE: The bracket-syntax fallback splits on "." to find the last segment.
+// If a quoted identifier contains a literal dot (e.g. "MY.DB"."SCH"."TASK"),
+// the split produces incorrect segments. This is the same limitation as
+// tasks.HasChildren and is extremely rare in practice.
 func hasChildrenFromRows(rows []tasks.StatusRow, taskName string) bool {
 	upper := strings.ToUpper(taskName)
 	for _, r := range rows {
@@ -133,12 +138,13 @@ func hasChildrenFromRows(rows []tasks.StatusRow, taskName string) bool {
 	return false
 }
 
-// registerPipelineTools wires task graph, stage, and pipe inspection tools
-// onto srv. Most tools are always-on metadata operations. preview_stage_file
-// is mode-gated (readonly/explain_only only). open_task_graph is emit-gated.
-func registerPipelineTools(srv *mcpsdk.Server, client *snowflake.Client, mode string, emit func(string, interface{})) {
+// registerPipelineTools wires the always-on task graph, stage, and pipe
+// inspection tools onto srv. These are registered once in buildServer and
+// are not re-registered on mode switches. For mode-gated pipeline tools
+// (preview_stage_file), see registerPipelineModeTools.
+func registerPipelineTools(srv *mcpsdk.Server, client *snowflake.Client, emit func(string, interface{})) {
 
-	// ── Task tools (always-on) ────────────────────────────────────────────
+	// ── Task tools ────────────────────────────────────────────────────────
 
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
 		Name:        "list_tasks",
@@ -228,7 +234,7 @@ func registerPipelineTools(srv *mcpsdk.Server, client *snowflake.Client, mode st
 		}), nil, nil
 	})
 
-	// ── Stage tools (always-on) ───────────────────────────────────────────
+	// ── Stage tools ───────────────────────────────────────────────────────
 
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
 		Name: "list_stage_files",
@@ -252,44 +258,7 @@ func registerPipelineTools(srv *mcpsdk.Server, client *snowflake.Client, mode st
 		return jsonResult(files), nil, nil
 	})
 
-	// ── Stage preview (mode-gated: readonly / explain_only) ───────────────
-
-	if mode == ExecutionModeReadonly || mode == ExecutionModeExplainOnly {
-		mcpsdk.AddTool(srv, &mcpsdk.Tool{
-			Name: "preview_stage_file",
-			Description: "Preview up to 50 rows from a stage file. Requires a stage path " +
-				"and file type (CSV, JSON, AVRO, ORC, PARQUET, XML). " +
-				"Optional parameters control CSV parsing (field_delimiter, skip_header, " +
-				"parse_header) and compression.",
-		}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in previewStageFileInput) (*mcpsdk.CallToolResult, any, error) {
-			if in.StagePath == "" {
-				return nil, nil, fmt.Errorf("stage_path is required")
-			}
-			if in.Type == "" {
-				return nil, nil, fmt.Errorf("type is required")
-			}
-			if client == nil {
-				return nil, nil, fmt.Errorf("no Snowflake connection available")
-			}
-			cfg := fileformat.FileFormatConfig{
-				Type:           in.Type,
-				FieldDelimiter: in.FieldDelimiter,
-				SkipHeader:     in.SkipHeader,
-				ParseHeader:    in.ParseHeader,
-				Compression:    in.Compression,
-			}
-			result, err := fileformat.PreviewStageFile(ctx, client, in.StagePath, cfg)
-			if err != nil {
-				return nil, nil, err
-			}
-			if result.Error != "" {
-				return textResult(result.Error), nil, nil
-			}
-			return jsonResult(result), nil, nil
-		})
-	}
-
-	// ── Pipe tools (always-on) ────────────────────────────────────────────
+	// ── Pipe tools ────────────────────────────────────────────────────────
 
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
 		Name: "get_pipe_status",
@@ -308,8 +277,10 @@ func registerPipelineTools(srv *mcpsdk.Server, client *snowflake.Client, mode st
 		if client == nil {
 			return nil, nil, fmt.Errorf("no Snowflake connection available")
 		}
-		pipeFqn := snowflake.QuoteIdent(in.Database) + "." + snowflake.QuoteIdent(in.Schema) + "." + snowflake.QuoteIdent(in.Name)
-		sql := fmt.Sprintf("SELECT SYSTEM$PIPE_STATUS('%s')", snowflake.EscapeStringLit(pipeFqn))
+		// pipeFqnQuoted is already double-quoted by QuoteIdent; EscapeStringLit
+		// escapes the surrounding single-quote delimiters for the SQL literal.
+		pipeFqnQuoted := snowflake.QuoteIdent(in.Database) + "." + snowflake.QuoteIdent(in.Schema) + "." + snowflake.QuoteIdent(in.Name)
+		sql := fmt.Sprintf("SELECT SYSTEM$PIPE_STATUS('%s')", snowflake.EscapeStringLit(pipeFqnQuoted))
 		result, err := client.Execute(ctx, sql)
 		if err != nil {
 			return nil, nil, err
@@ -390,6 +361,47 @@ func registerPipelineTools(srv *mcpsdk.Server, client *snowflake.Client, mode st
 				return textResult("Failed to open task graph: internal error"), nil, nil
 			}
 			return textResult("Task graph opened successfully."), nil, nil
+		})
+	}
+}
+
+// registerPipelineModeTools registers pipeline tools that are mode-gated.
+// Called in both buildServer (initial setup) and updateMode (mode switches).
+// Only preview_stage_file is mode-gated; it is listed in modeSpecificToolNames
+// so updateMode removes it before calling this function.
+func registerPipelineModeTools(srv *mcpsdk.Server, client *snowflake.Client, mode string) {
+	if mode == ExecutionModeReadonly || mode == ExecutionModeExplainOnly {
+		mcpsdk.AddTool(srv, &mcpsdk.Tool{
+			Name: "preview_stage_file",
+			Description: "Preview up to 50 rows from a stage file. Requires a stage path " +
+				"and file type (CSV, JSON, AVRO, ORC, PARQUET, XML). " +
+				"Optional parameters control CSV parsing (field_delimiter, skip_header, " +
+				"parse_header) and compression.",
+		}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in previewStageFileInput) (*mcpsdk.CallToolResult, any, error) {
+			if in.StagePath == "" {
+				return nil, nil, fmt.Errorf("stage_path is required")
+			}
+			if in.Type == "" {
+				return nil, nil, fmt.Errorf("type is required")
+			}
+			if client == nil {
+				return nil, nil, fmt.Errorf("no Snowflake connection available")
+			}
+			cfg := fileformat.FileFormatConfig{
+				Type:           in.Type,
+				FieldDelimiter: in.FieldDelimiter,
+				SkipHeader:     in.SkipHeader,
+				ParseHeader:    in.ParseHeader,
+				Compression:    in.Compression,
+			}
+			result, err := fileformat.PreviewStageFile(ctx, client, in.StagePath, cfg)
+			if err != nil {
+				return nil, nil, err
+			}
+			if result.Error != "" {
+				return textResult(result.Error), nil, nil
+			}
+			return jsonResult(result), nil, nil
 		})
 	}
 }

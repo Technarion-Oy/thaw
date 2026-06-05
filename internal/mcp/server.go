@@ -54,7 +54,8 @@ func buildServer(client *snowflake.Client, mode string, cfg SessionConfig, edito
 	}
 	registerEditorTools(srv, client, mode, editorCtx)
 	registerTabTools(srv, client, emit)
-	registerPipelineTools(srv, client, mode, emit)
+	registerPipelineTools(srv, client, emit)
+	registerPipelineModeTools(srv, client, mode)
 
 	if mode == ExecutionModeReadonly || mode == ExecutionModeExplainOnly {
 		registerSQLTools(srv, client, mode, cfg)

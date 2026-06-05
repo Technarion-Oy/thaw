@@ -199,11 +199,7 @@ func (s *session) updateMode(ctx context.Context, newMode string) error {
 		registerSQLTools(s.server, s.client, newMode, s.cfg)
 	}
 	registerEditorTools(s.server, s.client, newMode, s.editorCtx)
-	var emit func(string, interface{})
-	if s.mgr != nil {
-		emit = s.mgr.emit
-	}
-	registerPipelineTools(s.server, s.client, newMode, emit)
+	registerPipelineModeTools(s.server, s.client, newMode)
 
 	s.mode = newMode
 	return nil
