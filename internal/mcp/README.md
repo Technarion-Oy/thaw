@@ -22,6 +22,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `diag_tools.go` | `registerDiagTools` — SQL diagnostics & validation tools (`validate_sql`, `suggest_join_conditions`, `format_sql`, `get_snowflake_keywords`); type-conversion helpers for sqleditor ↔ snowflake types |
 | `profile_tools.go` | `registerProfileTools` — query profiling tools (`explain_query`, `get_explain_diagnostics`); wraps `queryprofile.RunExplain` and `queryprofile.GetExplainDiagnostics`; always registered in all modes |
 | `lineage_tools.go` | `registerLineageTools` — object lineage and cross-dependency tools (`get_object_lineage`, `get_schema_cross_deps`, `get_database_cross_deps`); wraps `Client.GetObjectDependencies`, `Client.GetSchemaCrossDeps`, `Client.GetDatabaseCrossDeps`; always registered in all modes |
+| `workspace_tools.go` | `registerWorkspaceTools` — local filesystem and git read-only tools (`git_status`, `git_list_branches`, `git_get_head_file`, `git_diff_lines`, `list_directory`, `read_file`, `search_files`); delegates to `gitrepo`, `filesystem`, and `sqleditor` packages; no Snowflake client needed; always registered in all modes |
 | `context.go` | `EditorContextStore` — concurrency-safe in-memory store for per-tab editor SQL and result summaries; `ResultSummary` and `QueryHistoryEntry` types |
 | `editor_tools.go` | `registerEditorTools` — editor context tools (`get_current_editor_sql`, `get_query_results_summary`, `get_query_history`); bridges frontend editor state to MCP clients |
 | `tab_tools.go` | `registerTabTools` — tab-delivery tool (`open_sql_tab`); formats SQL with user prefs, runs diagnostics, emits `mcp:open-sql-tab` Wails event. Registered when `emit` is non-nil. `OpenSqlTabPayload` type, `loadEditorPrefs` helper |
@@ -36,6 +37,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `schema_tools_test.go` | Unit tests for schema tools (registration, validate_data_type valid/invalid, get_data_retention input validation, search_objects empty pattern, get_all_data_types, mode coverage) |
 | `profile_tools_test.go` | Unit tests for profiling tools (registration in all modes, nil client, empty SQL validation) |
 | `lineage_tools_test.go` | Unit tests for lineage tools (registration in all modes, nil client, missing fields, invalid kind validation) |
+| `workspace_tools_test.go` | Unit tests for workspace tools (registration in all modes, input validation, functional tests with temp directories) |
 | `mcp_test.go` | SSE round-trip test (external client lists tools), port-allocation test, diagnostics tool tests, mode-gating tests |
 | `doc.go` | Package doc + `thaw:domain: MCP Server` annotation |
 
@@ -105,7 +107,7 @@ Metadata needs (listing databases, describing tables, etc.) are served by the de
 
 ### Tools
 
-The server exposes 36 tools in metadata mode and up to 42 tools in readonly/explain_only modes (with `EditorContextStore` and `emit` provided):
+The server exposes 43 tools in metadata mode and up to 49 tools in readonly/explain_only modes (with `EditorContextStore` and `emit` provided):
 
 **Schema-browsing tools** (always registered, `tools.go`): `get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`.
 
@@ -152,6 +154,18 @@ The server exposes 36 tools in metadata mode and up to 42 tools in readonly/expl
 | `get_object_lineage` | Recursive dependency tree for a VIEW, PROCEDURE, or FUNCTION (upstream impact analysis) |
 | `get_schema_cross_deps` | Cross-schema references from views in a schema |
 | `get_database_cross_deps` | Combined cross-schema references across multiple schemas in a database (deduplicated) |
+
+**Workspace tools** (always registered, `workspace_tools.go`):
+
+| Tool | Description |
+|---|---|
+| `git_status` | Git status for a directory: branch, modified/added/deleted files, remote info, ahead count |
+| `git_list_branches` | List all local and remote branches in a git repository |
+| `git_get_head_file` | Content of a file as it exists in the HEAD commit |
+| `git_diff_lines` | Line-level diff between HEAD and current content (added, modified, deleted line numbers) |
+| `list_directory` | Direct children of a directory with name, path, size, and type |
+| `read_file` | Read file content (up to 50 KB) |
+| `search_files` | Recursive text/regex search across files in a directory |
 
 **Editor context tools** (`editor_tools.go`, registered when `EditorContextStore` is non-nil):
 
