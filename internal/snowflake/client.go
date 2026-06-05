@@ -2094,13 +2094,7 @@ func strVal(vals []interface{}, i int) string {
 
 // GetWarehouseDDL returns the DDL for a single warehouse using Snowflake's GET_DDL function.
 func (c *Client) GetWarehouseDDL(ctx context.Context, name string) (string, error) {
-	escaped := strings.ReplaceAll(name, "'", "''")
-	row := c.db.QueryRowContext(ctx, fmt.Sprintf("SELECT GET_DDL('WAREHOUSE', '%s')", escaped))
-	var src string
-	if err := row.Scan(&src); err != nil {
-		return "", fmt.Errorf("GET_DDL(WAREHOUSE %s): %w", name, err)
-	}
-	return src, nil
+	return c.GetObjectDDL(ctx, "", "", "WAREHOUSE", name, "")
 }
 
 // UseRole switches the active role for the current session.
@@ -3190,38 +3184,59 @@ func (c *Client) ListFileFormats(ctx context.Context, database, schema string) (
 	return c.queryStringSlice(ctx, fmt.Sprintf("SHOW FILE FORMATS IN SCHEMA %s", q), 1)
 }
 
-// GetObjectDDL returns the definition of a single schema object using
-// GET_DDL('<kind>', '<db>.<schema>.<name>'). The name components are
-// double-quote escaped to handle mixed-case and special characters.
+// GetObjectDDL returns the DDL definition of a Snowflake object using GET_DDL.
+//
+// For account-level objects (warehouses, databases, etc.) pass empty strings
+// for database and schema — the name is used unqualified.  For schema-scoped
+// objects pass the owning database and schema so the function builds a fully
+// qualified '<db>.<schema>.<name>' identifier.
 //
 // For procedures and functions the arguments parameter must contain the
 // parameter type list (e.g. "NUMBER, VARCHAR") so that Snowflake can resolve
 // the correct overload. Pass an empty string for all other object kinds.
 func (c *Client) GetObjectDDL(ctx context.Context, database, schema, kind, name, arguments string) (string, error) {
-	qualified := fmt.Sprintf(`%s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(name))
-	// Procedures and functions require the argument type list (which may be
-	// empty for zero-arg procedures) appended so Snowflake can resolve the
-	// overload.  Omitting the parentheses entirely causes GET_DDL to return
-	// "Object does not exist" even when the procedure exists.
-	//
-	// Safety: arguments is interpolated into qualified, which is then
-	// single-quote-escaped below before embedding in the GET_DDL string
-	// literal. Any single quotes in arguments are doubled, preventing
-	// breakout from the SQL string context. If this code is refactored,
-	// ensure arguments still passes through the same single-quote escaping.
-	upperKind := strings.ToUpper(kind)
-	if upperKind == "PROCEDURE" || upperKind == "FUNCTION" {
-		qualified += fmt.Sprintf("(%s)", arguments)
-	}
-	escapedKind := strings.ReplaceAll(kind, "'", "''")
-	query := fmt.Sprintf("SELECT GET_DDL('%s', '%s', true)", escapedKind, strings.ReplaceAll(qualified, "'", "''"))
+	query, identifier := buildGetDDLQuery(database, schema, kind, name, arguments)
 
 	row := c.db.QueryRowContext(ctx, query)
 	var src string
 	if err := row.Scan(&src); err != nil {
-		return "", fmt.Errorf("GET_DDL(%s %s): %w", kind, qualified, err)
+		return "", fmt.Errorf("GET_DDL(%s %s): %w", kind, identifier, err)
 	}
 	return src, nil
+}
+
+// buildGetDDLQuery constructs the GET_DDL SQL query and returns both the query
+// string and the identifier used (for error messages).
+func buildGetDDLQuery(database, schema, kind, name, arguments string) (query, identifier string) {
+	// Account-level objects (warehouses, databases, etc.) use an unqualified
+	// name; schema-scoped objects use a fully qualified database.schema.name.
+	if database == "" && schema == "" {
+		identifier = strings.ReplaceAll(name, "'", "''")
+	} else {
+		identifier = fmt.Sprintf(`%s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(name))
+		// Procedures and functions require the argument type list (which may be
+		// empty for zero-arg procedures) appended so Snowflake can resolve the
+		// overload.  Omitting the parentheses entirely causes GET_DDL to return
+		// "Object does not exist" even when the procedure exists.
+		//
+		// Safety: arguments is interpolated into identifier, which is then
+		// single-quote-escaped below before embedding in the GET_DDL string
+		// literal. Any single quotes in arguments are doubled, preventing
+		// breakout from the SQL string context. If this code is refactored,
+		// ensure arguments still passes through the same single-quote escaping.
+		upperKind := strings.ToUpper(kind)
+		if upperKind == "PROCEDURE" || upperKind == "FUNCTION" {
+			identifier += fmt.Sprintf("(%s)", arguments)
+		}
+		identifier = strings.ReplaceAll(identifier, "'", "''")
+	}
+	escapedKind := strings.ReplaceAll(kind, "'", "''")
+	// The third argument (true) enables recursive DDL output for objects that
+	// contain dependents (e.g. databases → schemas → tables).  For object types
+	// without dependents (e.g. warehouses) Snowflake silently ignores it, so
+	// passing true unconditionally is safe and keeps the code path simple.
+	query = fmt.Sprintf("SELECT GET_DDL('%s', '%s', true)", escapedKind, identifier)
+	return query, identifier
 }
 
 // GetCompleteDatabaseDDL returns the full DDL for a database in a single
@@ -3244,17 +3259,7 @@ func (c *Client) GetCompleteDatabaseDDL(ctx context.Context, database string) (s
 //
 // The database name is safely escaped to prevent SQL injection.
 func (c *Client) GetDatabaseDDL(ctx context.Context, database string) (string, error) {
-	// GET_DDL does not support bind parameters for its object-name argument, so
-	// we must interpolate it directly — escaping single quotes by doubling them.
-	escaped := strings.ReplaceAll(database, "'", "''")
-	query := fmt.Sprintf("SELECT GET_DDL('DATABASE', '%s', true)", escaped)
-
-	row := c.db.QueryRowContext(ctx, query)
-	var ddl string
-	if err := row.Scan(&ddl); err != nil {
-		return "", fmt.Errorf("GET_DDL(%s): %w", database, err)
-	}
-	return ddl, nil
+	return c.GetObjectDDL(ctx, "", "", "DATABASE", database, "")
 }
 
 // loadPrivateKey reads a PEM-encoded RSA private key from disk.
