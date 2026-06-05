@@ -28,6 +28,7 @@ var modeSpecificToolNames = []string{
 	"use_database",
 	"use_schema",
 	"get_query_results_summary",
+	"preview_stage_file",
 }
 
 // buildServer constructs an MCP server and registers tools based on the
@@ -53,6 +54,7 @@ func buildServer(client *snowflake.Client, mode string, cfg SessionConfig, edito
 	}
 	registerEditorTools(srv, client, mode, editorCtx)
 	registerTabTools(srv, client, emit)
+	registerPipelineTools(srv, client, mode, emit)
 
 	if mode == ExecutionModeReadonly || mode == ExecutionModeExplainOnly {
 		registerSQLTools(srv, client, mode, cfg)
