@@ -378,11 +378,7 @@ func registerPipelineTools(srv *mcpsdk.Server, client *snowflake.Client, mode st
 						emitFailed = true
 					}
 				}()
-				emit("mcp:open-task-graph", OpenTaskGraphPayload{
-					Database: in.Database,
-					Schema:   in.Schema,
-					Task:     in.Task,
-				})
+				emit("mcp:open-task-graph", OpenTaskGraphPayload(in))
 			}()
 			if emitFailed {
 				return textResult("Failed to open task graph: internal error"), nil, nil
