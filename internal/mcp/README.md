@@ -26,6 +26,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `context.go` | `EditorContextStore` — concurrency-safe in-memory store for per-tab editor SQL and result summaries; `ResultSummary` and `QueryHistoryEntry` types |
 | `editor_tools.go` | `registerEditorTools` — editor context tools (`get_current_editor_sql`, `get_query_results_summary`, `get_query_history`); bridges frontend editor state to MCP clients |
 | `tab_tools.go` | `registerTabTools` — tab-delivery tool (`open_sql_tab`); formats SQL with user prefs, runs diagnostics, emits `mcp:open-sql-tab` Wails event. Registered when `emit` is non-nil. `OpenSqlTabPayload` type, `loadEditorPrefs` helper |
+| `pipeline_tools.go` | `registerPipelineTools` — task graph, stage, and pipe inspection tools (`list_tasks`, `get_task_run_history`, `get_task_dependencies`, `list_stage_files`, `preview_stage_file`, `get_pipe_status`, `get_pipe_copy_history`, `open_task_graph`); delegates to `tasks`, `stage`, `fileformat`, `pipe` packages. `preview_stage_file` is mode-gated (readonly/explain_only). `open_task_graph` is emit-gated. `OpenTaskGraphPayload` type |
 | `gate.go` | EXPLAIN precompilation gate: `queryRunner` interface, `CheckGate` (3-layer validation), `checkExplainPlan`, `readOnlyOps` allow-list, `extractOperations`, `isUSEStatement` |
 | `sql_tools.go` | `registerSQLTools` — SQL execution tool (`execute_snowflake_sql`) with EXPLAIN-gated pipeline (`executeSQLPipeline`), LIMIT injection (`injectLimit`), and trusted context-switching tools (`use_role`, `use_warehouse`, `use_database`, `use_schema`); only registered in `readonly`/`explain_only` modes |
 | `gate_test.go` | Unit tests for the EXPLAIN gate and `checkExplainPlan` |
@@ -33,6 +34,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `context_test.go` | Unit tests for `EditorContextStore` (set/get, remove, concurrent access) |
 | `tab_tools_test.go` | Unit tests for `open_sql_tab` tool (nil-emit graceful degradation, registration, empty SQL rejection, emit payload shape) |
 | `editor_tools_test.go` | Unit tests for editor context tools (empty store, content return, mode-gating, nil client handling) |
+| `pipeline_tools_test.go` | Unit tests for pipeline tools (registration in all modes, mode-gating for `preview_stage_file`, emit-gating for `open_task_graph`, nil client, input validation) |
 | `account_tools_test.go` | Unit tests for account tools (registration in all modes, empty kind/name/schema validation) |
 | `schema_tools_test.go` | Unit tests for schema tools (registration, validate_data_type valid/invalid, get_data_retention input validation, search_objects empty pattern, get_all_data_types, mode coverage) |
 | `profile_tools_test.go` | Unit tests for profiling tools (registration in all modes, nil client, empty SQL validation) |
@@ -108,7 +110,7 @@ Metadata needs (listing databases, describing tables, etc.) are served by the de
 
 ### Tools
 
-The server exposes up to 36 tools in metadata mode (without workspace tools) or 43 (with `WorkspaceRoot` set), and up to 49 in readonly/explain_only modes (with `EditorContextStore`, `emit`, and `WorkspaceRoot` all provided):
+The server exposes up to 43 tools in metadata mode (without workspace tools) or 50 (with `WorkspaceRoot` set), and up to 57 in readonly/explain_only modes (with `EditorContextStore`, `emit`, and `WorkspaceRoot` all provided):
 
 **Schema-browsing tools** (always registered, `tools.go`): `get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`.
 
@@ -155,6 +157,21 @@ The server exposes up to 36 tools in metadata mode (without workspace tools) or 
 | `get_object_lineage` | Recursive dependency tree for a VIEW, PROCEDURE, or FUNCTION (upstream impact analysis) |
 | `get_schema_cross_deps` | Cross-schema references from views in a schema |
 | `get_database_cross_deps` | Combined cross-schema references across multiple schemas in a database (deduplicated) |
+
+**Pipeline tools** (`pipeline_tools.go`; task, stage, and pipe inspection):
+
+| Tool | Mode gate | Description |
+|---|---|---|
+| `list_tasks` | All modes | List tasks in a schema with state, predecessors, and last run status |
+| `get_task_run_history` | All modes | Run history for a task (or root task graph); configurable day range (default 7, max 30) |
+| `get_task_dependencies` | All modes | Topological order and child status for a root task's dependency graph |
+| `list_stage_files` | All modes | List files in a Snowflake stage with optional regex filter |
+| `preview_stage_file` | readonly, explain_only only (NOT metadata) | Preview up to 50 rows from a stage file with configurable file format |
+| `get_pipe_status` | All modes | Snowpipe status via `SYSTEM$PIPE_STATUS` (execution state, pending files, notification channel) |
+| `get_pipe_copy_history` | All modes | Snowpipe copy history from `INFORMATION_SCHEMA` with optional time/status/file filters |
+| `open_task_graph` | All modes (emit-gated) | Open the task graph visualization in Thaw; emits `mcp:open-task-graph` Wails event |
+
+`preview_stage_file` is suppressed in metadata mode because it reads actual file data. `open_task_graph` is only registered when `emit` is non-nil (i.e. running inside the app, not in tests). The emit pattern matches `open_sql_tab` — panic recovery around the Wails event emitter prevents a torn-down context from crashing the MCP server goroutine.
 
 **Workspace tools** (registered when `WorkspaceRoot` is set, `workspace_tools.go`; sandboxed to the configured workspace root):
 

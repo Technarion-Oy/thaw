@@ -63,7 +63,7 @@ import {
   typeGroupIcon,
   columnIcon,
 } from "../sidebar/objectIcons";
-import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
 import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, UploadFileToStage, PickOpenFile, ExecDDL, ListStageEntries, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory, BuildDropColumnSql, BuildRenameColumnSql, BuildSetColumnNotNullSql, BuildDropColumnNotNullSql, BuildSetColumnCommentSql, BuildChangeColumnTypeSql } from "../../../wailsjs/go/app/App";
@@ -562,6 +562,14 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     prevConnectedRef.current = isConnected;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConnected]);
+
+  // MCP open_task_graph — opens the task graph modal from an MCP tool call.
+  useEffect(() => {
+    const off = EventsOn("mcp:open-task-graph", (payload: { database: string; schema: string; task: string }) => {
+      setTaskGraphModal({ db: payload.database, schema: payload.schema, name: payload.task });
+    });
+    return () => off();
+  }, []);
 
   const insertTarget    = useInsertMappingStore((s) => s.target);
   const insertSources   = useInsertMappingStore((s) => s.sources);
