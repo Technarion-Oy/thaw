@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -95,6 +96,43 @@ type taskDependenciesResult struct {
 	HasChildren      bool                   `json:"hasChildren"`
 }
 
+// hasChildrenFromRows derives whether taskName appears as a predecessor in any
+// of the given status rows, avoiding a redundant SHOW TASKS round-trip that
+// tasks.HasChildren would make. The predecessors field is a JSON array or
+// Snowflake-quoted bracket syntax; we parse each entry's last dot-segment and
+// compare case-insensitively, matching the logic in tasks.HasChildren.
+func hasChildrenFromRows(rows []tasks.StatusRow, taskName string) bool {
+	upper := strings.ToUpper(taskName)
+	for _, r := range rows {
+		preds := r.Predecessors
+		if preds == "" || preds == "[]" || preds == "<nil>" || preds == "null" {
+			continue
+		}
+		// Try JSON array first (e.g. ["DB.SCH.TASK_A"]).
+		var jsonArr []string
+		if json.Unmarshal([]byte(preds), &jsonArr) == nil {
+			for _, ref := range jsonArr {
+				segs := strings.Split(ref, ".")
+				last := strings.Trim(segs[len(segs)-1], `"`)
+				if strings.ToUpper(last) == upper {
+					return true
+				}
+			}
+			continue
+		}
+		// Fallback: bracket syntax like ["DB"."SCH"."TASK_A"].
+		p := strings.TrimSuffix(strings.TrimPrefix(preds, "["), "]")
+		for _, part := range strings.Split(p, ",") {
+			segs := strings.Split(strings.TrimSpace(part), ".")
+			last := strings.Trim(segs[len(segs)-1], `" `)
+			if strings.ToUpper(last) == upper {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // registerPipelineTools wires task graph, stage, and pipe inspection tools
 // onto srv. Most tools are always-on metadata operations. preview_stage_file
 // is mode-gated (readonly/explain_only only). open_task_graph is emit-gated.
@@ -150,6 +188,9 @@ func registerPipelineTools(srv *mcpsdk.Server, client *snowflake.Client, mode st
 		if err != nil {
 			return nil, nil, err
 		}
+		if len(rows) > maxMCPResultRows {
+			rows = rows[:maxMCPResultRows]
+		}
 		return jsonResult(rows), nil, nil
 	})
 
@@ -175,13 +216,12 @@ func registerPipelineTools(srv *mcpsdk.Server, client *snowflake.Client, mode st
 			return nil, nil, err
 		}
 		topo := tasks.GetTopologicalOrder(statuses.Rows, in.Task)
-		hasChildren, err := tasks.HasChildren(ctx, client, in.Database, in.Schema, in.Task)
-		if err != nil {
-			return nil, nil, err
-		}
+		// Derive HasChildren from the already-fetched rows to avoid a
+		// redundant SHOW TASKS round-trip (tasks.HasChildren makes one).
+		children := hasChildrenFromRows(statuses.Rows, in.Task)
 		return jsonResult(taskDependenciesResult{
 			TopologicalOrder: topo,
-			HasChildren:      hasChildren,
+			HasChildren:      children,
 		}), nil, nil
 	})
 
@@ -304,6 +344,10 @@ func registerPipelineTools(srv *mcpsdk.Server, client *snowflake.Client, mode st
 		result, err := pipe.GetCopyHistory(ctx, client, in.Database, in.Schema, in.Name, in.StartTime, in.Status, in.FileName)
 		if err != nil {
 			return nil, nil, err
+		}
+		if result != nil && len(result.Rows) > maxMCPResultRows {
+			result.Rows = result.Rows[:maxMCPResultRows]
+			result.Truncated = true
 		}
 		return jsonResult(result), nil, nil
 	})
