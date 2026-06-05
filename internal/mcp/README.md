@@ -22,7 +22,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `diag_tools.go` | `registerDiagTools` — SQL diagnostics & validation tools (`validate_sql`, `suggest_join_conditions`, `format_sql`, `get_snowflake_keywords`); type-conversion helpers for sqleditor ↔ snowflake types |
 | `profile_tools.go` | `registerProfileTools` — query profiling tools (`explain_query`, `get_explain_diagnostics`); wraps `queryprofile.RunExplain` and `queryprofile.GetExplainDiagnostics`; always registered in all modes |
 | `lineage_tools.go` | `registerLineageTools` — object lineage and cross-dependency tools (`get_object_lineage`, `get_schema_cross_deps`, `get_database_cross_deps`); wraps `Client.GetObjectDependencies`, `Client.GetSchemaCrossDeps`, `Client.GetDatabaseCrossDeps`; always registered in all modes |
-| `workspace_tools.go` | `registerWorkspaceTools` — local filesystem and git read-only tools (`git_status`, `git_list_branches`, `git_get_head_file`, `git_diff_lines`, `list_directory`, `read_file`, `search_files`); delegates to `gitrepo`, `filesystem`, and `sqleditor` packages; no Snowflake client needed; always registered in all modes |
+| `workspace_tools.go` | `registerWorkspaceTools(srv, workspaceRoot)` — local filesystem and git read-only tools (`git_status`, `git_list_branches`, `git_get_head_file`, `git_diff_lines`, `list_directory`, `read_file`, `search_files`); delegates to `gitrepo`, `filesystem`, and `sqleditor` packages; no Snowflake client needed; **only registered when `WorkspaceRoot` is set** in `SessionConfig`; all path inputs are validated against the workspace root using `filesystem.ValidateInsideOrEqual` (symlink-resolving defense-in-depth) |
 | `context.go` | `EditorContextStore` — concurrency-safe in-memory store for per-tab editor SQL and result summaries; `ResultSummary` and `QueryHistoryEntry` types |
 | `editor_tools.go` | `registerEditorTools` — editor context tools (`get_current_editor_sql`, `get_query_results_summary`, `get_query_history`); bridges frontend editor state to MCP clients |
 | `tab_tools.go` | `registerTabTools` — tab-delivery tool (`open_sql_tab`); formats SQL with user prefs, runs diagnostics, emits `mcp:open-sql-tab` Wails event. Registered when `emit` is non-nil. `OpenSqlTabPayload` type, `loadEditorPrefs` helper |
@@ -37,7 +37,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `schema_tools_test.go` | Unit tests for schema tools (registration, validate_data_type valid/invalid, get_data_retention input validation, search_objects empty pattern, get_all_data_types, mode coverage) |
 | `profile_tools_test.go` | Unit tests for profiling tools (registration in all modes, nil client, empty SQL validation) |
 | `lineage_tools_test.go` | Unit tests for lineage tools (registration in all modes, nil client, missing fields, invalid kind validation) |
-| `workspace_tools_test.go` | Unit tests for workspace tools (registration in all modes, input validation, functional tests with temp directories) |
+| `workspace_tools_test.go` | Unit tests for workspace tools (registration when `WorkspaceRoot` is set, absence when empty, input validation, path-escape sandbox tests, functional tests with temp directories) |
 | `mcp_test.go` | SSE round-trip test (external client lists tools), port-allocation test, diagnostics tool tests, mode-gating tests |
 | `doc.go` | Package doc + `thaw:domain: MCP Server` annotation |
 
@@ -87,6 +87,7 @@ A `sync.RWMutex`-protected map of `tabID → {sql, result}` plus the active tab 
 | `Role` / `PinnedRole` | Runs `USE ROLE <role>` at session start. When `PinnedRole` is true, the `use_role` tool is not registered, preventing the AI client from switching roles. |
 | `Warehouse` / `PinnedWarehouse` | Runs `USE WAREHOUSE <warehouse>` at session start. When `PinnedWarehouse` is true, the `use_warehouse` tool is not registered. |
 | `SecondaryRoles` | When set to `"none"`, runs `USE SECONDARY ROLES NONE` at session start to restrict the session to only its primary role's grants. |
+| `WorkspaceRoot` | The directory that workspace tools are sandboxed to (populated from the app's cached export directory). When empty, workspace tools are not registered at all. All path inputs are validated against this root using `filesystem.ValidateInsideOrEqual` (symlink-resolving, case-aware). |
 
 ### SQL execution pipeline
 
@@ -107,7 +108,7 @@ Metadata needs (listing databases, describing tables, etc.) are served by the de
 
 ### Tools
 
-The server exposes 43 tools in metadata mode and up to 49 tools in readonly/explain_only modes (with `EditorContextStore` and `emit` provided):
+The server exposes up to 36 tools in metadata mode (without workspace tools) or 43 (with `WorkspaceRoot` set), and up to 49 in readonly/explain_only modes (with `EditorContextStore`, `emit`, and `WorkspaceRoot` all provided):
 
 **Schema-browsing tools** (always registered, `tools.go`): `get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`.
 
@@ -155,7 +156,7 @@ The server exposes 43 tools in metadata mode and up to 49 tools in readonly/expl
 | `get_schema_cross_deps` | Cross-schema references from views in a schema |
 | `get_database_cross_deps` | Combined cross-schema references across multiple schemas in a database (deduplicated) |
 
-**Workspace tools** (always registered, `workspace_tools.go`):
+**Workspace tools** (registered when `WorkspaceRoot` is set, `workspace_tools.go`; sandboxed to the configured workspace root):
 
 | Tool | Description |
 |---|---|
@@ -166,6 +167,8 @@ The server exposes 43 tools in metadata mode and up to 49 tools in readonly/expl
 | `list_directory` | Direct children of a directory with name, path, size, and type |
 | `read_file` | Read file content (up to 50 KB) |
 | `search_files` | Recursive text/regex search across files in a directory |
+
+All workspace tools that accept a directory or file path validate the input against `WorkspaceRoot` using `filesystem.ValidateInsideOrEqual` before delegating to the underlying implementation. This prevents an MCP client from reading files outside the workspace (e.g. `~/.ssh/id_rsa`). The `git_diff_lines` tool is exempt as it operates on line arrays, not file paths.
 
 **Editor context tools** (`editor_tools.go`, registered when `EditorContextStore` is non-nil):
 

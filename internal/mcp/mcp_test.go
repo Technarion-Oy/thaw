@@ -29,6 +29,8 @@ import (
 // expectedTools is the full tool set the server exposes in metadata mode
 // (alphabetically sorted). Editor context tools (get_current_editor_sql,
 // get_query_history) are NOT listed because the test uses a nil store.
+// Workspace tools (git_*, list_directory, read_file, search_files) are NOT
+// listed because the test uses an empty SessionConfig (no WorkspaceRoot).
 var expectedTools = []string{
 	"describe_table",
 	"explain_query",
@@ -48,13 +50,8 @@ var expectedTools = []string{
 	"get_snowflake_keywords",
 	"get_table_foreign_keys",
 	"get_warehouse_ddl",
-	"git_diff_lines",
-	"git_get_head_file",
-	"git_list_branches",
-	"git_status",
 	"list_available_roles",
 	"list_databases",
-	"list_directory",
 	"list_dropped_schemas",
 	"list_dropped_tables",
 	"list_file_formats",
@@ -64,8 +61,6 @@ var expectedTools = []string{
 	"list_schemas",
 	"list_secrets",
 	"list_warehouses",
-	"read_file",
-	"search_files",
 	"search_objects",
 	"suggest_join_conditions",
 	"validate_data_type",

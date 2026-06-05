@@ -56,12 +56,19 @@ func (a *App) StartMCPSession(label, mode string, port int, role, warehouse, sec
 		return mcp.SessionInfo{}, fmt.Errorf("mcp: failed to open connection: %w", err)
 	}
 
+	// Read the cached export directory (non-blocking). An empty value means
+	// no workspace is configured — workspace tools will not be registered.
+	a.exportDirMu.RLock()
+	workspaceRoot := a.cachedExportDir
+	a.exportDirMu.RUnlock()
+
 	cfg := mcp.SessionConfig{
 		PinnedRole:      role != "",
 		PinnedWarehouse: warehouse != "",
 		Role:            role,
 		Warehouse:       warehouse,
 		SecondaryRoles:  secondaryRoles,
+		WorkspaceRoot:   workspaceRoot,
 	}
 
 	connLabel := fmt.Sprintf("%s / %s", params.Account, params.User)

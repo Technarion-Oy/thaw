@@ -13,6 +13,8 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,8 +27,30 @@ import (
 	"thaw/internal/sqleditor"
 )
 
+// newWorkspaceTestSession creates a test MCP client session with WorkspaceRoot
+// set to the given directory. This is required for tests that exercise
+// workspace tools, since they are only registered when WorkspaceRoot is set.
+func newWorkspaceTestSession(t *testing.T, workspaceRoot string) *mcpsdk.ClientSession {
+	t.Helper()
+	cfg := SessionConfig{WorkspaceRoot: workspaceRoot}
+	srv := buildServer(nil, ExecutionModeMetadata, cfg, nil, nil)
+	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
+	httpSrv := httptest.NewServer(handler)
+	t.Cleanup(httpSrv.Close)
+
+	ctx := context.Background()
+	c := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test", Version: "v1"}, nil)
+	cs, err := c.Connect(ctx, &mcpsdk.SSEClientTransport{Endpoint: httpSrv.URL}, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { _ = cs.Close() })
+	return cs
+}
+
 // TestWorkspaceToolsRegistered verifies that all 7 workspace tools are
-// registered in metadata, readonly, and explain_only modes.
+// registered in metadata, readonly, and explain_only modes when WorkspaceRoot
+// is set.
 func TestWorkspaceToolsRegistered(t *testing.T) {
 	workspaceTools := []string{
 		"git_status",
@@ -38,9 +62,12 @@ func TestWorkspaceToolsRegistered(t *testing.T) {
 		"search_files",
 	}
 
+	tmp := t.TempDir()
+
 	for _, mode := range []string{ExecutionModeMetadata, ExecutionModeReadonly, ExecutionModeExplainOnly} {
 		t.Run(mode, func(t *testing.T) {
-			srv := buildServer(nil, mode, SessionConfig{}, nil, nil)
+			cfg := SessionConfig{WorkspaceRoot: tmp}
+			srv := buildServer(nil, mode, cfg, nil, nil)
 			names := toolNames(t, srv)
 			for _, tool := range workspaceTools {
 				if !hasToolName(names, tool) {
@@ -51,9 +78,32 @@ func TestWorkspaceToolsRegistered(t *testing.T) {
 	}
 }
 
+// TestWorkspaceToolsNotRegisteredWithoutRoot verifies that workspace tools
+// are NOT registered when WorkspaceRoot is empty.
+func TestWorkspaceToolsNotRegisteredWithoutRoot(t *testing.T) {
+	workspaceTools := []string{
+		"git_status",
+		"git_list_branches",
+		"git_get_head_file",
+		"git_diff_lines",
+		"list_directory",
+		"read_file",
+		"search_files",
+	}
+
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil)
+	names := toolNames(t, srv)
+	for _, tool := range workspaceTools {
+		if hasToolName(names, tool) {
+			t.Errorf("workspace tool %q should NOT be registered when WorkspaceRoot is empty", tool)
+		}
+	}
+}
+
 // TestGitStatusEmptyDir verifies that an empty dir returns an error.
 func TestGitStatusEmptyDir(t *testing.T) {
-	cs := newTestSession(t)
+	tmp := t.TempDir()
+	cs := newWorkspaceTestSession(t, tmp)
 	ctx := context.Background()
 
 	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
@@ -75,9 +125,9 @@ func TestGitStatusEmptyDir(t *testing.T) {
 // TestGitStatusNonRepo verifies that git_status on a non-repo directory
 // returns isRepo=false without an error.
 func TestGitStatusNonRepo(t *testing.T) {
-	cs := newTestSession(t)
-	ctx := context.Background()
 	tmp := t.TempDir()
+	cs := newWorkspaceTestSession(t, tmp)
+	ctx := context.Background()
 
 	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
 		Name:      "git_status",
@@ -101,7 +151,8 @@ func TestGitStatusNonRepo(t *testing.T) {
 
 // TestGitListBranchesEmptyDir verifies input validation.
 func TestGitListBranchesEmptyDir(t *testing.T) {
-	cs := newTestSession(t)
+	tmp := t.TempDir()
+	cs := newWorkspaceTestSession(t, tmp)
 	ctx := context.Background()
 
 	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
@@ -118,7 +169,8 @@ func TestGitListBranchesEmptyDir(t *testing.T) {
 
 // TestGitGetHeadFileEmptyPath verifies input validation.
 func TestGitGetHeadFileEmptyPath(t *testing.T) {
-	cs := newTestSession(t)
+	tmp := t.TempDir()
+	cs := newWorkspaceTestSession(t, tmp)
 	ctx := context.Background()
 
 	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
@@ -135,7 +187,8 @@ func TestGitGetHeadFileEmptyPath(t *testing.T) {
 
 // TestGitDiffLinesKnownInput verifies git_diff_lines with known inputs.
 func TestGitDiffLinesKnownInput(t *testing.T) {
-	cs := newTestSession(t)
+	tmp := t.TempDir()
+	cs := newWorkspaceTestSession(t, tmp)
 	ctx := context.Background()
 
 	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
@@ -164,7 +217,8 @@ func TestGitDiffLinesKnownInput(t *testing.T) {
 
 // TestGitDiffLinesNilHeadLines verifies that nil head_lines returns an error.
 func TestGitDiffLinesNilHeadLines(t *testing.T) {
-	cs := newTestSession(t)
+	tmp := t.TempDir()
+	cs := newWorkspaceTestSession(t, tmp)
 	ctx := context.Background()
 
 	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
@@ -182,7 +236,8 @@ func TestGitDiffLinesNilHeadLines(t *testing.T) {
 
 // TestListDirectoryEmptyDir verifies input validation.
 func TestListDirectoryEmptyDir(t *testing.T) {
-	cs := newTestSession(t)
+	tmp := t.TempDir()
+	cs := newWorkspaceTestSession(t, tmp)
 	ctx := context.Background()
 
 	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
@@ -199,10 +254,10 @@ func TestListDirectoryEmptyDir(t *testing.T) {
 
 // TestListDirectoryTempDir verifies list_directory returns correct entries.
 func TestListDirectoryTempDir(t *testing.T) {
-	cs := newTestSession(t)
+	tmp := t.TempDir()
+	cs := newWorkspaceTestSession(t, tmp)
 	ctx := context.Background()
 
-	tmp := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(tmp, "subdir"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +294,8 @@ func TestListDirectoryTempDir(t *testing.T) {
 
 // TestReadFileEmptyPath verifies input validation.
 func TestReadFileEmptyPath(t *testing.T) {
-	cs := newTestSession(t)
+	tmp := t.TempDir()
+	cs := newWorkspaceTestSession(t, tmp)
 	ctx := context.Background()
 
 	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
@@ -256,10 +312,10 @@ func TestReadFileEmptyPath(t *testing.T) {
 
 // TestReadFileTempFile verifies read_file returns the file content.
 func TestReadFileTempFile(t *testing.T) {
-	cs := newTestSession(t)
+	tmp := t.TempDir()
+	cs := newWorkspaceTestSession(t, tmp)
 	ctx := context.Background()
 
-	tmp := t.TempDir()
 	filePath := filepath.Join(tmp, "test.sql")
 	content := "SELECT 1;\n"
 	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
@@ -285,7 +341,8 @@ func TestReadFileTempFile(t *testing.T) {
 
 // TestSearchFilesEmptyDir verifies input validation for empty dir.
 func TestSearchFilesEmptyDir(t *testing.T) {
-	cs := newTestSession(t)
+	tmp := t.TempDir()
+	cs := newWorkspaceTestSession(t, tmp)
 	ctx := context.Background()
 
 	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
@@ -302,12 +359,13 @@ func TestSearchFilesEmptyDir(t *testing.T) {
 
 // TestSearchFilesEmptyQuery verifies input validation for empty query.
 func TestSearchFilesEmptyQuery(t *testing.T) {
-	cs := newTestSession(t)
+	tmp := t.TempDir()
+	cs := newWorkspaceTestSession(t, tmp)
 	ctx := context.Background()
 
 	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
 		Name:      "search_files",
-		Arguments: searchFilesInput{Dir: "/tmp", Query: ""},
+		Arguments: searchFilesInput{Dir: tmp, Query: ""},
 	})
 	if err != nil {
 		t.Fatalf("CallTool: %v", err)
@@ -319,10 +377,10 @@ func TestSearchFilesEmptyQuery(t *testing.T) {
 
 // TestSearchFilesTempDir verifies search_files finds content in a temp directory.
 func TestSearchFilesTempDir(t *testing.T) {
-	cs := newTestSession(t)
+	tmp := t.TempDir()
+	cs := newWorkspaceTestSession(t, tmp)
 	ctx := context.Background()
 
-	tmp := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tmp, "a.sql"), []byte("SELECT * FROM orders;\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -350,5 +408,159 @@ func TestSearchFilesTempDir(t *testing.T) {
 	}
 	if !strings.HasSuffix(matches[0].Path, "a.sql") {
 		t.Errorf("match path = %q, want suffix a.sql", matches[0].Path)
+	}
+}
+
+// ── Path-escape sandbox tests ────────────────────────────────────────────────
+
+// TestReadFileOutsideWorkspaceRejected verifies that read_file rejects a path
+// outside the workspace root with an access-denied error.
+func TestReadFileOutsideWorkspaceRejected(t *testing.T) {
+	workspace := t.TempDir()
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(outsideFile, []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cs := newWorkspaceTestSession(t, workspace)
+	ctx := context.Background()
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "read_file",
+		Arguments: pathInput{Path: outsideFile},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for path outside workspace")
+	}
+	text := extractText(t, res)
+	if !strings.Contains(text, "access denied") {
+		t.Errorf("error should mention access denied, got: %s", text)
+	}
+}
+
+// TestListDirectoryOutsideWorkspaceRejected verifies that list_directory
+// rejects a dir outside the workspace root.
+func TestListDirectoryOutsideWorkspaceRejected(t *testing.T) {
+	workspace := t.TempDir()
+	outside := t.TempDir()
+
+	cs := newWorkspaceTestSession(t, workspace)
+	ctx := context.Background()
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "list_directory",
+		Arguments: dirInput{Dir: outside},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for dir outside workspace")
+	}
+	text := extractText(t, res)
+	if !strings.Contains(text, "access denied") {
+		t.Errorf("error should mention access denied, got: %s", text)
+	}
+}
+
+// TestSearchFilesOutsideWorkspaceRejected verifies that search_files rejects
+// a dir outside the workspace root.
+func TestSearchFilesOutsideWorkspaceRejected(t *testing.T) {
+	workspace := t.TempDir()
+	outside := t.TempDir()
+
+	cs := newWorkspaceTestSession(t, workspace)
+	ctx := context.Background()
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "search_files",
+		Arguments: searchFilesInput{Dir: outside, Query: "test"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for dir outside workspace")
+	}
+	text := extractText(t, res)
+	if !strings.Contains(text, "access denied") {
+		t.Errorf("error should mention access denied, got: %s", text)
+	}
+}
+
+// TestGitStatusOutsideWorkspaceRejected verifies that git_status rejects
+// a dir outside the workspace root.
+func TestGitStatusOutsideWorkspaceRejected(t *testing.T) {
+	workspace := t.TempDir()
+	outside := t.TempDir()
+
+	cs := newWorkspaceTestSession(t, workspace)
+	ctx := context.Background()
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "git_status",
+		Arguments: dirInput{Dir: outside},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for dir outside workspace")
+	}
+	text := extractText(t, res)
+	if !strings.Contains(text, "access denied") {
+		t.Errorf("error should mention access denied, got: %s", text)
+	}
+}
+
+// TestGitGetHeadFileOutsideWorkspaceRejected verifies that git_get_head_file
+// rejects a path outside the workspace root.
+func TestGitGetHeadFileOutsideWorkspaceRejected(t *testing.T) {
+	workspace := t.TempDir()
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "file.sql")
+	if err := os.WriteFile(outsideFile, []byte("SELECT 1;"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cs := newWorkspaceTestSession(t, workspace)
+	ctx := context.Background()
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "git_get_head_file",
+		Arguments: pathInput{Path: outsideFile},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for path outside workspace")
+	}
+	text := extractText(t, res)
+	if !strings.Contains(text, "access denied") {
+		t.Errorf("error should mention access denied, got: %s", text)
+	}
+}
+
+// TestWorkspaceRootItselfAllowed verifies that the workspace root directory
+// itself is a valid target (inside-or-equal semantics).
+func TestWorkspaceRootItselfAllowed(t *testing.T) {
+	tmp := t.TempDir()
+	cs := newWorkspaceTestSession(t, tmp)
+	ctx := context.Background()
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "list_directory",
+		Arguments: dirInput{Dir: tmp},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Errorf("workspace root itself should be allowed, got error: %s", extractText(t, res))
 	}
 }
