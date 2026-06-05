@@ -29,6 +29,8 @@ import (
 // expectedTools is the full tool set the server exposes in metadata mode
 // (alphabetically sorted). Editor context tools (get_current_editor_sql,
 // get_query_history) are NOT listed because the test uses a nil store.
+// Workspace tools (git_*, list_directory, read_file, search_files) are NOT
+// listed because the test uses an empty SessionConfig (no WorkspaceRoot).
 var expectedTools = []string{
 	"describe_table",
 	"explain_query",

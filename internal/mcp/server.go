@@ -48,6 +48,9 @@ func buildServer(client *snowflake.Client, mode string, cfg SessionConfig, edito
 	registerDiagTools(srv, client)
 	registerProfileTools(srv, client)
 	registerLineageTools(srv, client)
+	if cfg.WorkspaceRoot != "" {
+		registerWorkspaceTools(srv, cfg.WorkspaceRoot)
+	}
 	registerEditorTools(srv, client, mode, editorCtx)
 	registerTabTools(srv, client, emit)
 

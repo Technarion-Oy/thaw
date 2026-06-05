@@ -40,13 +40,18 @@ var validModes = map[string]bool{
 }
 
 // SessionConfig holds optional per-session configuration applied at startup.
-// It controls role/warehouse pinning and secondary-role restrictions.
+// It controls role/warehouse pinning, secondary-role restrictions, and
+// workspace sandboxing.
 type SessionConfig struct {
 	PinnedRole      bool   `json:"pinnedRole"`
 	PinnedWarehouse bool   `json:"pinnedWarehouse"`
 	Role            string `json:"role,omitempty"`
 	Warehouse       string `json:"warehouse,omitempty"`
 	SecondaryRoles  string `json:"secondaryRoles,omitempty"`
+	// WorkspaceRoot is the directory that workspace tools (read_file,
+	// list_directory, search_files, git_*) are sandboxed to. When empty,
+	// workspace tools are not registered at all.
+	WorkspaceRoot string `json:"workspaceRoot,omitempty"`
 }
 
 // SessionInfo is the serializable view of a session exposed to the frontend.

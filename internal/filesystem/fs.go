@@ -289,8 +289,14 @@ func validateNewPath(path, allowedRoot string) error {
 	return checkStrictlyInside(realPath, realRoot)
 }
 
-// validateInsideOrEqual checks that an existing path is inside or equal to
-// allowedRoot, resolving symlinks. Used for read-only operations like Reveal.
+// ValidateInsideOrEqual checks that an existing path is inside or equal to
+// allowedRoot, resolving symlinks. Used for read-only operations like Reveal
+// and MCP workspace tool sandboxing.
+func ValidateInsideOrEqual(path, allowedRoot string) error {
+	return validateInsideOrEqual(path, allowedRoot)
+}
+
+// validateInsideOrEqual is the unexported implementation of ValidateInsideOrEqual.
 func validateInsideOrEqual(path, allowedRoot string) error {
 	realPath, err := filepath.EvalSymlinks(path)
 	if err != nil {
