@@ -16,6 +16,8 @@ import (
 	"testing"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"thaw/internal/tasks"
 )
 
 // TestPipelineToolsRegistered verifies that the 6 always-on pipeline tools are
@@ -278,5 +280,131 @@ func TestGetPipeCopyHistoryEmptyInputs(t *testing.T) {
 	text := extractText(t, res)
 	if !strings.Contains(text, "database is required") {
 		t.Errorf("error message should mention database requirement, got: %s", text)
+	}
+}
+
+// TestHasChildrenFromRows verifies the in-memory predecessor scanning used by
+// get_task_dependencies to avoid a redundant SHOW TASKS round-trip.
+func TestHasChildrenFromRows(t *testing.T) {
+	tests := []struct {
+		name     string
+		rows     []tasks.StatusRow
+		task     string
+		expected bool
+	}{
+		{
+			name:     "empty rows",
+			rows:     nil,
+			task:     "ROOT",
+			expected: false,
+		},
+		{
+			name: "empty predecessors",
+			rows: []tasks.StatusRow{
+				{Name: "CHILD", Predecessors: ""},
+			},
+			task:     "ROOT",
+			expected: false,
+		},
+		{
+			name: "predecessors is []",
+			rows: []tasks.StatusRow{
+				{Name: "CHILD", Predecessors: "[]"},
+			},
+			task:     "ROOT",
+			expected: false,
+		},
+		{
+			name: "predecessors is <nil>",
+			rows: []tasks.StatusRow{
+				{Name: "CHILD", Predecessors: "<nil>"},
+			},
+			task:     "ROOT",
+			expected: false,
+		},
+		{
+			name: "predecessors is null",
+			rows: []tasks.StatusRow{
+				{Name: "CHILD", Predecessors: "null"},
+			},
+			task:     "ROOT",
+			expected: false,
+		},
+		{
+			name: "JSON array match",
+			rows: []tasks.StatusRow{
+				{Name: "CHILD_A", Predecessors: `["DB.SCH.ROOT"]`},
+			},
+			task:     "ROOT",
+			expected: true,
+		},
+		{
+			name: "JSON array no match",
+			rows: []tasks.StatusRow{
+				{Name: "CHILD_A", Predecessors: `["DB.SCH.OTHER_TASK"]`},
+			},
+			task:     "ROOT",
+			expected: false,
+		},
+		{
+			name: "JSON array case insensitive",
+			rows: []tasks.StatusRow{
+				{Name: "CHILD_A", Predecessors: `["DB.SCH.root"]`},
+			},
+			task:     "ROOT",
+			expected: true,
+		},
+		{
+			name: "JSON array multiple predecessors",
+			rows: []tasks.StatusRow{
+				{Name: "CHILD_A", Predecessors: `["DB.SCH.TASK_X","DB.SCH.ROOT"]`},
+			},
+			task:     "ROOT",
+			expected: true,
+		},
+		{
+			name: "bracket syntax match",
+			rows: []tasks.StatusRow{
+				{Name: "CHILD_A", Predecessors: `["DB"."SCH"."ROOT"]`},
+			},
+			task:     "ROOT",
+			expected: true,
+		},
+		{
+			name: "bracket syntax no match",
+			rows: []tasks.StatusRow{
+				{Name: "CHILD_A", Predecessors: `["DB"."SCH"."OTHER"]`},
+			},
+			task:     "ROOT",
+			expected: false,
+		},
+		{
+			name: "multiple rows one matches",
+			rows: []tasks.StatusRow{
+				{Name: "ROOT", Predecessors: ""},
+				{Name: "CHILD_A", Predecessors: `["DB.SCH.OTHER"]`},
+				{Name: "CHILD_B", Predecessors: `["DB.SCH.ROOT"]`},
+			},
+			task:     "ROOT",
+			expected: true,
+		},
+		{
+			name: "multiple rows none match",
+			rows: []tasks.StatusRow{
+				{Name: "ROOT", Predecessors: ""},
+				{Name: "CHILD_A", Predecessors: `["DB.SCH.OTHER"]`},
+			},
+			task:     "ROOT",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := hasChildrenFromRows(tt.rows, tt.task)
+			if got != tt.expected {
+				t.Errorf("hasChildrenFromRows(%v, %q) = %v, want %v", tt.rows, tt.task, got, tt.expected)
+			}
+		})
 	}
 }

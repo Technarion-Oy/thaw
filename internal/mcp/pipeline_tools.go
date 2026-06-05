@@ -157,6 +157,9 @@ func registerPipelineTools(srv *mcpsdk.Server, client *snowflake.Client, mode st
 		if err != nil {
 			return nil, nil, err
 		}
+		if len(result.Rows) > maxMCPResultRows {
+			result.Rows = result.Rows[:maxMCPResultRows]
+		}
 		return jsonResult(result), nil, nil
 	})
 
@@ -242,6 +245,9 @@ func registerPipelineTools(srv *mcpsdk.Server, client *snowflake.Client, mode st
 		files, err := stage.ListStageFiles(ctx, client, in.Stage, in.Pattern)
 		if err != nil {
 			return nil, nil, err
+		}
+		if len(files) > maxMCPResultRows {
+			files = files[:maxMCPResultRows]
 		}
 		return jsonResult(files), nil, nil
 	})
