@@ -110,7 +110,7 @@ Metadata needs (listing databases, describing tables, etc.) are served by the de
 
 ### Tools
 
-The server exposes up to 44 tools in metadata mode (without workspace tools) or 51 (with `WorkspaceRoot` set), and up to 58 in readonly/explain_only modes (with `EditorContextStore`, `emit`, and `WorkspaceRoot` all provided):
+The server exposes up to 43 tools in metadata mode (without workspace tools) or 50 (with `WorkspaceRoot` set), and up to 57 in readonly/explain_only modes (with `EditorContextStore`, `emit`, and `WorkspaceRoot` all provided):
 
 **Schema-browsing tools** (always registered, `tools.go`): `get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`.
 

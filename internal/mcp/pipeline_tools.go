@@ -96,6 +96,38 @@ type taskDependenciesResult struct {
 	HasChildren      bool                   `json:"hasChildren"`
 }
 
+// Wrapper types for pipeline tool results that may be truncated. These add a
+// Truncated flag so MCP clients know when the result is incomplete, preventing
+// LLMs from drawing wrong conclusions about total counts.
+
+type listTasksResult struct {
+	Rows         []tasks.StatusRow `json:"rows"`
+	HistoryError string            `json:"historyError,omitempty"`
+	Truncated    bool              `json:"truncated,omitempty"`
+}
+
+type taskRunHistoryResult struct {
+	Rows      []tasks.TaskHistoryRow `json:"rows"`
+	Truncated bool                   `json:"truncated,omitempty"`
+}
+
+type listStageFilesResult struct {
+	Files     []stage.StageFile `json:"files"`
+	Truncated bool              `json:"truncated,omitempty"`
+}
+
+// validStageFileTypes is the set of accepted Snowflake file format types for
+// preview_stage_file. Validated before calling fileformat.PreviewStageFile to
+// give a clear error rather than a Snowflake SQL error.
+var validStageFileTypes = map[string]bool{
+	"CSV":     true,
+	"JSON":    true,
+	"AVRO":    true,
+	"ORC":     true,
+	"PARQUET": true,
+	"XML":     true,
+}
+
 // hasChildrenFromRows derives whether taskName appears as a predecessor in any
 // of the given status rows, avoiding a redundant SHOW TASKS round-trip that
 // tasks.HasChildren would make. The predecessors field is a JSON array or
@@ -163,10 +195,12 @@ func registerPipelineTools(srv *mcpsdk.Server, client *snowflake.Client, emit fu
 		if err != nil {
 			return nil, nil, err
 		}
-		if len(result.Rows) > maxMCPResultRows {
-			result.Rows = result.Rows[:maxMCPResultRows]
+		out := listTasksResult{Rows: result.Rows, HistoryError: result.HistoryError}
+		if len(out.Rows) > maxMCPResultRows {
+			out.Rows = out.Rows[:maxMCPResultRows]
+			out.Truncated = true
 		}
-		return jsonResult(result), nil, nil
+		return jsonResult(out), nil, nil
 	})
 
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
@@ -197,10 +231,12 @@ func registerPipelineTools(srv *mcpsdk.Server, client *snowflake.Client, emit fu
 		if err != nil {
 			return nil, nil, err
 		}
-		if len(rows) > maxMCPResultRows {
-			rows = rows[:maxMCPResultRows]
+		out := taskRunHistoryResult{Rows: rows}
+		if len(out.Rows) > maxMCPResultRows {
+			out.Rows = out.Rows[:maxMCPResultRows]
+			out.Truncated = true
 		}
-		return jsonResult(rows), nil, nil
+		return jsonResult(out), nil, nil
 	})
 
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
@@ -252,10 +288,12 @@ func registerPipelineTools(srv *mcpsdk.Server, client *snowflake.Client, emit fu
 		if err != nil {
 			return nil, nil, err
 		}
-		if len(files) > maxMCPResultRows {
-			files = files[:maxMCPResultRows]
+		out := listStageFilesResult{Files: files}
+		if len(out.Files) > maxMCPResultRows {
+			out.Files = out.Files[:maxMCPResultRows]
+			out.Truncated = true
 		}
-		return jsonResult(files), nil, nil
+		return jsonResult(out), nil, nil
 	})
 
 	// ── Pipe tools ────────────────────────────────────────────────────────
@@ -286,7 +324,7 @@ func registerPipelineTools(srv *mcpsdk.Server, client *snowflake.Client, emit fu
 			return nil, nil, err
 		}
 		if result == nil || len(result.Rows) == 0 || len(result.Rows[0]) == 0 || result.Rows[0][0] == nil {
-			return textResult("{}"), nil, nil
+			return textResult("Pipe not found or no status available."), nil, nil
 		}
 		raw := fmt.Sprint(result.Rows[0][0])
 		// Pretty-print the JSON for readability.
@@ -384,11 +422,14 @@ func registerPipelineModeTools(srv *mcpsdk.Server, client *snowflake.Client, mod
 			if in.Type == "" {
 				return nil, nil, fmt.Errorf("type is required")
 			}
+			if !validStageFileTypes[strings.ToUpper(in.Type)] {
+				return nil, nil, fmt.Errorf("invalid type %q: must be one of CSV, JSON, AVRO, ORC, PARQUET, XML", in.Type)
+			}
 			if client == nil {
 				return nil, nil, fmt.Errorf("no Snowflake connection available")
 			}
 			cfg := fileformat.FileFormatConfig{
-				Type:           in.Type,
+				Type:           strings.ToUpper(in.Type),
 				FieldDelimiter: in.FieldDelimiter,
 				SkipHeader:     in.SkipHeader,
 				ParseHeader:    in.ParseHeader,
