@@ -193,7 +193,7 @@ function ERCanvasInner({
     }
 
     setEdges(newEdges);
-  }, [filteredTables, mode, database, setNodes, setEdges, fitView]);
+  }, [filteredTables, filteredTableIdStr, mode, database, setNodes, setEdges, fitView]);
 
   // Sync parent selectedTableIds to XYFlow node.selected
   useEffect(() => {
@@ -394,7 +394,7 @@ function ERCanvasInner({
         fitViewOptions={{ padding: 0.15 }}
         nodesDraggable={mode === "edit"}
         nodesConnectable={mode === "edit"}
-        deleteKeyCode={mode === "edit" ? "Delete" : null}
+        deleteKeyCode={null}
         proOptions={{ hideAttribution: true }}
         style={{ background: "var(--bg)" }}
       >
@@ -437,7 +437,7 @@ function ERCanvasInner({
               style={{ position: "fixed", inset: 0, zIndex: 998 }}
               onClick={() => setCtxMenu(null)}
             />
-            <div style={{ position: "fixed", top: ctxMenu.y, left: ctxMenu.x, zIndex: 999 }}>
+            <div style={{ position: "fixed", top: Math.min(ctxMenu.y, window.innerHeight - 260), left: Math.min(ctxMenu.x, window.innerWidth - 220), zIndex: 999 }}>
               <Menu
                 style={{
                   minWidth: 200,

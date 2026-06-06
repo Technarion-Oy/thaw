@@ -64,12 +64,3 @@ export function flushERLayout(database: string): void {
   saveTimers.delete(key);
   writePending(key);
 }
-
-/** Remove saved layout for a database. */
-export function clearERLayout(database: string): void {
-  try {
-    localStorage.removeItem(storageKey(database));
-  } catch {
-    // ignore
-  }
-}

@@ -14,6 +14,18 @@ import {
   ER_COL_LIMIT,
 } from "./erTypes";
 
+/** Lazily resolve and cache the --accent CSS variable for SVG markers. */
+let cachedAccentHex: string | null = null;
+function getAccentHex(): string {
+  if (cachedAccentHex === null) {
+    cachedAccentHex =
+      typeof document !== "undefined"
+        ? getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#58a6ff"
+        : "#58a6ff";
+  }
+  return cachedAccentHex;
+}
+
 /** Calculate the pixel height of a table node based on its column count. */
 function nodeHeight(colCount: number): number {
   const rows = Math.min(colCount, ER_COL_LIMIT) + (colCount > ER_COL_LIMIT ? 1 : 0);
@@ -67,10 +79,7 @@ export function tablesToNodesAndEdges(
     }
   }
 
-  // Resolve --accent to a hex value for SVG markers (CSS variables break marker IDs)
-  const accentHex = typeof document !== "undefined"
-    ? getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#58a6ff"
-    : "#58a6ff";
+  const accentHex = getAccentHex();
 
   const edges: Edge[] = [];
   for (const t of tables) {

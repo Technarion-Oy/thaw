@@ -460,7 +460,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
 
   const handleDuplicateTable = useCallback(
     (tableId: string) => {
-      const source = tables.find((t) => t.id === tableId);
+      const source = tablesRef.current.find((t) => t.id === tableId);
       if (!source) return;
       const newTable: DesignerTable = {
         id: crypto.randomUUID(),
@@ -474,7 +474,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
       setTables((prev) => [...prev, newTable]);
       setSelectedTableIds([newTable.id]);
     },
-    [tables],
+    [],
   );
 
   const handleDeleteTable = useCallback(
@@ -506,8 +506,8 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
 
   const handleAddFK = useCallback(
     (tableIdA: string, tableIdB: string) => {
-      const tableA = tables.find((t) => t.id === tableIdA);
-      const tableB = tables.find((t) => t.id === tableIdB);
+      const tableA = tablesRef.current.find((t) => t.id === tableIdA);
+      const tableB = tablesRef.current.find((t) => t.id === tableIdB);
 
       let childColId = "";
       let parentColId = "";
@@ -538,7 +538,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
         parentColId,
       });
     },
-    [tables],
+    [],
   );
 
   const commitFK = useCallback(() => {
@@ -546,7 +546,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
     const { childTableId, childColId, parentTableId, parentColId } = fkDialog;
     if (!childColId || !parentColId) return;
 
-    const parentTable = tables.find((t) => t.id === parentTableId);
+    const parentTable = tablesRef.current.find((t) => t.id === parentTableId);
     if (!parentTable || !parentTable.schema || !parentTable.name.trim()) return;
     const parentCol = parentTable.columns.find((c) => c.id === parentColId);
     if (!parentCol || !parentCol.name.trim()) return;
@@ -554,7 +554,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
     const fkRef = `${parentTable.schema}.${parentTable.name.trim()}.${parentCol.name.trim()}`;
     updateColumn(childTableId, childColId, { fkRef });
     setFkDialog(null);
-  }, [fkDialog, tables, updateColumn]);
+  }, [fkDialog, updateColumn]);
 
   // ── SQL & run ─────────────────────────────────────────────────────────────────
 
