@@ -3,7 +3,7 @@
 
 import React, { useState, useCallback } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { ER_NODE_WIDTH, ER_COL_LIMIT, type DesignerColumn } from "./erTypes";
+import { ER_NODE_WIDTH, ER_COL_LIMIT, type DesignerColumn, normalizeIdentifier } from "./erTypes";
 import type { ERTableNodeData } from "./erCanvasLayout";
 
 const SHORT_TYPES: Record<string, string> = {
@@ -40,9 +40,9 @@ function ERTableNodeInner({ data, selected }: NodeProps) {
 
   const commitHeader = useCallback(() => {
     setEditingHeader(false);
-    const trimmed = headerValue.trim();
-    if (trimmed && trimmed !== table.name) {
-      onTableRename?.(table.id, trimmed);
+    const normalized = normalizeIdentifier(headerValue);
+    if (normalized && normalized !== table.name) {
+      onTableRename?.(table.id, normalized);
     }
   }, [headerValue, table.name, table.id, onTableRename]);
 
@@ -56,9 +56,9 @@ function ERTableNodeInner({ data, selected }: NodeProps) {
   );
 
   const commitCol = useCallback(() => {
-    const trimmed = colValue.trim();
-    if (editingColId && trimmed) {
-      onColumnRename?.(table.id, editingColId, trimmed);
+    const normalized = normalizeIdentifier(colValue);
+    if (editingColId && normalized) {
+      onColumnRename?.(table.id, editingColId, normalized);
     }
     setEditingColId(null);
   }, [editingColId, colValue, table.id, onColumnRename]);
@@ -97,7 +97,7 @@ function ERTableNodeInner({ data, selected }: NodeProps) {
           <input
             autoFocus
             value={headerValue}
-            onChange={(e) => setHeaderValue(e.target.value.toUpperCase())}
+            onChange={(e) => setHeaderValue(e.target.value)}
             onBlur={commitHeader}
             onKeyDown={(e) => {
               if (e.key === "Enter") commitHeader();

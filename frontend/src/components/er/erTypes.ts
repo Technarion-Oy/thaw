@@ -30,6 +30,23 @@ export const SF_TYPES = [
   "OBJECT",
 ];
 
+/**
+ * Normalise a Snowflake identifier following Snowflake conventions:
+ *   - Wrapped in double quotes → preserve inner case, keep quotes in stored name
+ *   - Not quoted → uppercase the whole value
+ *
+ * This is applied on blur / commit, NOT on every keystroke, so the user
+ * can freely type quotes and mixed case while editing.
+ */
+export function normalizeIdentifier(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('"') && trimmed.endsWith('"') && trimmed.length >= 2) {
+    // Quoted identifier — preserve case, keep quotes
+    return trimmed;
+  }
+  return trimmed.toUpperCase();
+}
+
 export const ER_NODE_WIDTH = 240;
 export const ER_NODE_HEADER_HEIGHT = 32;
 export const ER_NODE_ROW_HEIGHT = 24;

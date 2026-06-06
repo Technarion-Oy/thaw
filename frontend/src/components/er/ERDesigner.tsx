@@ -8,7 +8,7 @@ import { ExecuteQuery, ListSchemas } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 import ERCanvas from "./ERCanvas";
 import { initFromERData, normalizeDataType } from "./erCanvasLayout";
-import { type DesignerColumn, type DesignerTable, SF_TYPES } from "./erTypes";
+import { type DesignerColumn, type DesignerTable, SF_TYPES, normalizeIdentifier } from "./erTypes";
 
 interface Props {
   database: string;
@@ -624,7 +624,8 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
                     size="small"
                     placeholder="TABLE_NAME"
                     value={t.name}
-                    onChange={(e) => updateTable(t.id, { name: e.target.value.toUpperCase() })}
+                    onChange={(e) => updateTable(t.id, { name: e.target.value })}
+                    onBlur={(e) => updateTable(t.id, { name: normalizeIdentifier(e.target.value) })}
                     style={{ fontFamily: "monospace", fontSize: 13, fontWeight: 600 }}
                     onClick={(e) => e.stopPropagation()}
                   />
@@ -636,9 +637,10 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
                     <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 4 }} onClick={(e) => e.stopPropagation()}>
                       <Input
                         size="small"
-                        placeholder="column_name"
+                        placeholder="COLUMN_NAME"
                         value={c.name}
                         onChange={(e) => updateColumn(t.id, c.id, { name: e.target.value })}
+                        onBlur={(e) => updateColumn(t.id, c.id, { name: normalizeIdentifier(e.target.value) })}
                         style={{ flex: 1, fontFamily: "monospace", fontSize: 11, minWidth: 80 }}
                       />
                       <Select
