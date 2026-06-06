@@ -27,6 +27,8 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `editor_tools.go` | `registerEditorTools` — editor context tools (`get_current_editor_sql`, `get_query_results_summary`, `get_query_history`); bridges frontend editor state to MCP clients |
 | `tab_tools.go` | `registerTabTools` — tab-delivery tool (`open_sql_tab`); formats SQL with user prefs, runs diagnostics, emits `mcp:open-sql-tab` Wails event. Registered when `emit` is non-nil. `OpenSqlTabPayload` type, `loadEditorPrefs` helper |
 | `pipeline_tools.go` | `registerPipelineTools` — task graph, stage, and pipe inspection tools (`list_tasks`, `get_task_run_history`, `get_task_dependencies`, `list_stage_files`, `preview_stage_file`, `get_pipe_status`, `get_pipe_copy_history`, `open_task_graph`); delegates to `tasks`, `stage`, `fileformat`, `pipe` packages. `preview_stage_file` is mode-gated (readonly/explain_only). `open_task_graph` is emit-gated. `OpenTaskGraphPayload` type |
+| `function_tools.go` | `registerFunctionTools` — function/procedure metadata and invocation builder tools (`search_functions`, `get_function_tooltip`, `get_procedure_params`, `get_function_info`, `build_call_statement`, `build_function_select`); delegates to `fnmeta.Store`, `snowflake.Client`, and `procedure` packages; always registered in all modes |
+| `builder_tools.go` | `registerBuilderTools` — pure DDL builder tools (`build_create_stage_sql`, `build_alter_stage_sql`, `build_create_file_format_sql`, `build_create_pipe_sql`, `build_refresh_pipe_sql`, `build_create_secret_sql`, `build_storage_integration_sql`, `build_api_integration_sql`, `build_catalog_integration_sql`, `build_external_access_integration_sql`, `build_notification_integration_sql`, `build_security_integration_sql`); delegates to `stage`, `fileformat`, `pipe`, `secret`, `integrations` packages; no Snowflake client needed; always registered in all modes |
 | `gate.go` | EXPLAIN precompilation gate: `queryRunner` interface, `CheckGate` (3-layer validation), `checkExplainPlan`, `readOnlyOps` allow-list, `extractOperations`, `isUSEStatement` |
 | `sql_tools.go` | `registerSQLTools` — SQL execution tool (`execute_snowflake_sql`) with EXPLAIN-gated pipeline (`executeSQLPipeline`), LIMIT injection (`injectLimit`), and trusted context-switching tools (`use_role`, `use_warehouse`, `use_database`, `use_schema`); only registered in `readonly`/`explain_only` modes |
 | `gate_test.go` | Unit tests for the EXPLAIN gate and `checkExplainPlan` |
@@ -40,6 +42,8 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `profile_tools_test.go` | Unit tests for profiling tools (registration in all modes, nil client, empty SQL validation) |
 | `lineage_tools_test.go` | Unit tests for lineage tools (registration in all modes, nil client, missing fields, invalid kind validation) |
 | `workspace_tools_test.go` | Unit tests for workspace tools (registration when `WorkspaceRoot` is set, absence when empty, input validation, path-escape sandbox tests, functional tests with temp directories) |
+| `function_tools_test.go` | Unit tests for function/procedure tools (registration in all modes, nil fnStore, empty inputs, nil client, success paths for `build_call_statement` and `build_function_select`) |
+| `builder_tools_test.go` | Unit tests for DDL builder tools (registration in all modes, empty db/schema validation, success paths for stage, pipe, secret, and all six integration builders) |
 | `mcp_test.go` | SSE round-trip test (external client lists tools), port-allocation test, diagnostics tool tests, mode-gating tests |
 | `doc.go` | Package doc + `thaw:domain: MCP Server` annotation |
 
@@ -51,6 +55,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 |---|---|
 | `NewManager(emit)` | Empty registry with initialized `EditorContextStore`. `emit` is an optional Wails event emitter for tab-delivery tools; pass `nil` in tests. Safe for concurrent use. |
 | `EditorContext()` | Returns the shared `*EditorContextStore`; MCP tools read, frontend pushes state via App IPC. |
+| `SetFnStore(store)` | Sets the function metadata store (`*fnmeta.Store`) on the manager. New sessions started after this call will expose function/procedure lookup tools. Called from `App.startup` after the fnStore is opened. |
 | `Start(label, connLabel, mode, port, client, cfg)` | Starts a session under a unique `label`; `port == 0` auto-assigns from `9100`. Takes ownership of `client`. Applies `SessionConfig` (role/warehouse pinning, secondary roles). |
 | `UpdateMode(ctx, label, newMode)` | Changes the execution mode of a running session by mutating the server's tool registry in place. The SDK sends `tools/list_changed` notifications to connected clients automatically. Re-applies session config (role/warehouse pinning) when switching to a non-metadata mode. |
 | `Stop(label)` | Stops and removes the named session, closing its connection. |
@@ -110,7 +115,7 @@ Metadata needs (listing databases, describing tables, etc.) are served by the de
 
 ### Tools
 
-The server exposes up to 43 tools in metadata mode (without workspace tools) or 50 (with `WorkspaceRoot` set), and up to 57 in readonly/explain_only modes (with `EditorContextStore`, `emit`, and `WorkspaceRoot` all provided):
+The server exposes up to 61 tools in metadata mode (without workspace tools) or 68 (with `WorkspaceRoot` set), and up to 75 in readonly/explain_only modes (with `EditorContextStore`, `emit`, and `WorkspaceRoot` all provided):
 
 **Schema-browsing tools** (always registered, `tools.go`): `get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`.
 
@@ -172,6 +177,38 @@ The server exposes up to 43 tools in metadata mode (without workspace tools) or 
 | `open_task_graph` | All modes (emit-gated) | Open the task graph visualization in Thaw; emits `mcp:open-task-graph` Wails event |
 
 `preview_stage_file` is suppressed in metadata mode because it reads actual file data. `open_task_graph` is only registered when `emit` is non-nil (i.e. running inside the app, not in tests). The emit pattern matches `open_sql_tab` — panic recovery around the Wails event emitter prevents a torn-down context from crashing the MCP server goroutine.
+
+**Function metadata tools** (always registered, `function_tools.go`):
+
+| Tool | Description |
+|---|---|
+| `search_functions` | Search the local function metadata cache by name prefix |
+| `get_function_tooltip` | Look up function metadata (signature, description, type) by exact name |
+| `get_procedure_params` | Retrieve parameter metadata for a stored procedure from its Snowflake DDL |
+| `get_function_info` | Retrieve parameter and return-type metadata for a user-defined function from its DDL |
+| `build_call_statement` | Generate a syntactically correct CALL statement for a stored procedure (pure builder, no execution) |
+| `build_function_select` | Generate a SELECT statement to invoke a UDF (scalar or table function form; pure builder, no execution) |
+
+`search_functions` and `get_function_tooltip` use the local `fnmeta.Store` (populated from the fallback bundle and optional Snowflake sync). `get_procedure_params` and `get_function_info` fetch DDL from the live Snowflake connection. `build_call_statement` and `build_function_select` are pure SQL generators — no client needed.
+
+**DDL builder tools** (always registered, `builder_tools.go`):
+
+| Tool | Description |
+|---|---|
+| `build_create_stage_sql` | Generate CREATE STAGE DDL |
+| `build_alter_stage_sql` | Generate ALTER STAGE DDL |
+| `build_create_file_format_sql` | Generate CREATE FILE FORMAT DDL |
+| `build_create_pipe_sql` | Generate CREATE PIPE DDL with COPY INTO definition |
+| `build_refresh_pipe_sql` | Generate ALTER PIPE ... REFRESH with optional prefix/modifiedAfter filters |
+| `build_create_secret_sql` | Generate CREATE SECRET DDL |
+| `build_storage_integration_sql` | Generate CREATE STORAGE INTEGRATION DDL |
+| `build_api_integration_sql` | Generate CREATE API INTEGRATION DDL |
+| `build_catalog_integration_sql` | Generate CREATE CATALOG INTEGRATION DDL |
+| `build_external_access_integration_sql` | Generate CREATE EXTERNAL ACCESS INTEGRATION DDL |
+| `build_notification_integration_sql` | Generate CREATE NOTIFICATION INTEGRATION DDL |
+| `build_security_integration_sql` | Generate CREATE SECURITY INTEGRATION DDL |
+
+All builder tools are pure SQL generators — no Snowflake client required, no SQL execution. They delegate to the existing domain builder packages (`stage`, `fileformat`, `pipe`, `secret`, `integrations`) and return the generated DDL string.
 
 **Workspace tools** (registered when `WorkspaceRoot` is set, `workspace_tools.go`; sandboxed to the configured workspace root):
 

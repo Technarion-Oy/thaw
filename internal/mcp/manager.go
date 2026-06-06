@@ -17,6 +17,7 @@ import (
 	"sort"
 	"sync"
 
+	"thaw/internal/fnmeta"
 	"thaw/internal/snowflake"
 )
 
@@ -73,6 +74,7 @@ type Manager struct {
 	sessions  map[string]*session
 	editorCtx *EditorContextStore
 	emit      func(string, interface{}) // Wails event emitter; nil when running outside the app (tests)
+	fnStore   *fnmeta.Store             // local function metadata cache; nil until set via SetFnStore
 }
 
 // NewManager returns an empty Manager with an initialized EditorContextStore.
@@ -91,6 +93,15 @@ func NewManager(emit func(string, interface{})) *Manager {
 // read from this store; the frontend pushes state into it via App IPC methods.
 func (m *Manager) EditorContext() *EditorContextStore {
 	return m.editorCtx
+}
+
+// SetFnStore sets the function metadata store on the manager so new MCP
+// sessions can expose function/procedure lookup tools. Existing sessions
+// are unaffected — only sessions started after this call will see the store.
+func (m *Manager) SetFnStore(store *fnmeta.Store) {
+	m.mu.Lock()
+	m.fnStore = store
+	m.mu.Unlock()
 }
 
 // Start creates and starts a new session bound to the supplied client. The

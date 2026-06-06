@@ -13,6 +13,7 @@ package mcp
 import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"thaw/internal/fnmeta"
 	"thaw/internal/snowflake"
 	"thaw/internal/version"
 )
@@ -37,7 +38,7 @@ var modeSpecificToolNames = []string{
 // registered in readonly and explain_only modes. Editor context tools are
 // registered when editorCtx is non-nil. Tab tools (open_sql_tab) are
 // registered when emit is non-nil (i.e. running inside the app, not tests).
-func buildServer(client *snowflake.Client, mode string, cfg SessionConfig, editorCtx *EditorContextStore, emit func(string, interface{})) *mcpsdk.Server {
+func buildServer(client *snowflake.Client, mode string, cfg SessionConfig, editorCtx *EditorContextStore, emit func(string, interface{}), fnStore *fnmeta.Store) *mcpsdk.Server {
 	srv := mcpsdk.NewServer(&mcpsdk.Implementation{
 		Name:    "thaw",
 		Version: version.Version,
@@ -56,6 +57,9 @@ func buildServer(client *snowflake.Client, mode string, cfg SessionConfig, edito
 	registerTabTools(srv, client, emit)
 	registerPipelineTools(srv, client, emit)
 	registerPipelineModeTools(srv, client, mode)
+
+	registerFunctionTools(srv, client, fnStore)
+	registerBuilderTools(srv)
 
 	if mode == ExecutionModeReadonly || mode == ExecutionModeExplainOnly {
 		registerSQLTools(srv, client, mode, cfg)
