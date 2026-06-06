@@ -2,7 +2,7 @@
 // @thaw-domain: ER Designer
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Modal, Button, Input, Select, Checkbox, AutoComplete, message as antMessage } from "antd";
+import { App as AntApp, Modal, Button, Input, Select, Checkbox, AutoComplete } from "antd";
 import { PlusOutlined, DeleteOutlined, CopyOutlined } from "@ant-design/icons";
 import { ExecuteQuery, ListSchemas } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
@@ -310,6 +310,7 @@ function generateDiffSQL(
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function ERDesigner({ database, initialData, onClose, onSuccess }: Props) {
+  const { modal, message } = AntApp.useApp();
   const [leftWidth, setLeftWidth] = useState(490);
   const [resizing, setResizing] = useState(false);
   const resizeStart = useRef({ x: 0, width: 0 });
@@ -501,7 +502,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
     setRunError(null);
     try {
       await ExecuteQuery(sql);
-      antMessage.success("Changes applied successfully.");
+      message.success("Changes applied successfully.");
       setSqlModalOpen(false);
       onSuccess();
     } catch (e) {
@@ -515,7 +516,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
 
   const handleClose = () => {
     if (!hasChanges) { onClose(); return; }
-    Modal.confirm({
+    modal.confirm({
       title: "Discard unsaved changes?",
       content: "You have unapplied schema changes. Close anyway?",
       okText: "Discard changes",
