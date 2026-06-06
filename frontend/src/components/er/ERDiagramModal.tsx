@@ -1,9 +1,10 @@
 // Copyright (c) 2026 Technarion Oy. All rights reserved.
 // @thaw-domain: ER Designer
 
-import { useState, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Modal, Button, Checkbox } from "antd";
 import { CopyOutlined, EditOutlined } from "@ant-design/icons";
+import { ListSchemas } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { buildMermaid } from "./buildMermaid";
 import ERDesigner from "./ERDesigner";
@@ -18,9 +19,23 @@ interface Props {
 }
 
 export default function ERDiagramModal({ database, data, onClose, onDesignerSuccess }: Props) {
-  const allSchemas = [...new Set(data.tables.map((t) => t.schema))].sort();
+  const dataSchemas = useMemo(
+    () => [...new Set(data.tables.map((t) => t.schema))],
+    [data],
+  );
 
-  const [visibleSchemas, setVisibleSchemas] = useState<Set<string>>(new Set(allSchemas));
+  const [dbSchemas, setDbSchemas] = useState<string[]>([]);
+  useEffect(() => {
+    ListSchemas(database).then(setDbSchemas).catch(() => {});
+  }, [database]);
+
+  // Merge schemas from ER data with all database schemas
+  const allSchemas = useMemo(
+    () => [...new Set([...dataSchemas, ...dbSchemas])].sort(),
+    [dataSchemas, dbSchemas],
+  );
+
+  const [visibleSchemas, setVisibleSchemas] = useState<Set<string>>(new Set(dataSchemas));
   const [designerOpen, setDesignerOpen] = useState(false);
 
   const designerTables = useMemo(() => initFromERData(data), [data]);
