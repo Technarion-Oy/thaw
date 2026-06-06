@@ -44,6 +44,14 @@ type generateDbtProjectInput struct {
 	Schemas map[string][]string    `json:"schemas" jsonschema:"map of database names to lists of schema names to include"`
 }
 
+// validMigrationStrategy is the set of accepted table migration strategies.
+var validMigrationStrategy = map[migration.TableMigrationStrategy]bool{
+	migration.StrategyInPlace:            true,
+	migration.StrategyBlueGreenSwap:      true,
+	migration.StrategyViewAbstraction:    true,
+	migration.StrategyDestructiveRebuild: true,
+}
+
 // registerMigrationTools wires migration diff/script tools and the dbt project
 // generator onto srv. scan_migration_source and generate_dbt_project are
 // workspace-gated (only registered when workspaceRoot is non-empty).
@@ -131,7 +139,14 @@ func registerMigrationTools(srv *mcpsdk.Server, client *snowflake.Client, worksp
 		if len(in.Items) == 0 {
 			return nil, nil, fmt.Errorf("items is required")
 		}
-		script := migration.GenerateScript(in.Items, in.Database, migration.TableMigrationStrategy(in.Strategy))
+		strategy := migration.TableMigrationStrategy(in.Strategy)
+		if strategy == "" {
+			strategy = migration.StrategyInPlace
+		}
+		if !validMigrationStrategy[strategy] {
+			return nil, nil, fmt.Errorf("invalid strategy %q: must be one of in_place, blue_green_swap, view_abstraction, destructive_rebuild", in.Strategy)
+		}
+		script := migration.GenerateScript(in.Items, in.Database, strategy)
 		return textResult(script), nil, nil
 	})
 }

@@ -326,6 +326,79 @@ func TestGenerateMigrationScriptSuccess(t *testing.T) {
 	}
 }
 
+// TestGenerateMigrationScriptInvalidStrategy verifies that an invalid strategy
+// returns an error.
+func TestGenerateMigrationScriptInvalidStrategy(t *testing.T) {
+	cs := newTestSession(t)
+	ctx := context.Background()
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "generate_migration_script",
+		Arguments: generateMigrationScriptInput{
+			Items: []migration.MigrationDiffItem{{
+				Object: migration.MigrationObject{
+					Database:   "MYDB",
+					Schema:     "PUBLIC",
+					ObjectName: "USERS",
+					ObjectKind: "TABLE",
+					DDL:        "CREATE TABLE USERS (ID INT)",
+				},
+				Status:   "new",
+				LocalDDL: "CREATE TABLE USERS (ID INT)",
+			}},
+			Database: "MYDB",
+			Strategy: "invalid_strategy",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for invalid strategy")
+	}
+	text := extractText(t, res)
+	if !strings.Contains(text, "invalid strategy") {
+		t.Errorf("error should mention invalid strategy, got: %s", text)
+	}
+}
+
+// TestGenerateMigrationScriptEmptyStrategyDefaultsToInPlace verifies that an
+// empty strategy defaults to in_place and produces a valid script.
+func TestGenerateMigrationScriptEmptyStrategyDefaultsToInPlace(t *testing.T) {
+	cs := newTestSession(t)
+	ctx := context.Background()
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "generate_migration_script",
+		Arguments: generateMigrationScriptInput{
+			Items: []migration.MigrationDiffItem{{
+				Object: migration.MigrationObject{
+					Database:   "MYDB",
+					Schema:     "PUBLIC",
+					ObjectName: "USERS",
+					ObjectKind: "TABLE",
+					DDL:        "CREATE TABLE USERS (ID INT)",
+				},
+				Status:   "new",
+				LocalDDL: "CREATE TABLE USERS (ID INT)",
+			}},
+			Database: "MYDB",
+			Strategy: "",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected error: %s", extractText(t, res))
+	}
+
+	text := extractText(t, res)
+	if !strings.Contains(text, "Migration Script") {
+		t.Errorf("expected script header, got: %s", text)
+	}
+}
+
 // ── generate_dbt_project tests ──────────────────────────────────────────────
 
 // TestGenerateDbtProjectNilClient verifies that a nil client returns an error.
