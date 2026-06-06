@@ -38,6 +38,7 @@ type session struct {
 	client    *snowflake.Client
 	editorCtx *EditorContextStore
 	fnStore   *fnmeta.Store
+	nb        NotebookBackend
 	server    *mcpsdk.Server
 	ln        net.Listener
 	http      *http.Server
@@ -61,6 +62,7 @@ func newSession(mgr *Manager, label, connLabel, mode, token string, port int, cl
 		client:    client,
 		editorCtx: editorCtx,
 		fnStore:   mgr.fnStore,
+		nb:        mgr.nb,
 		ln:        ln,
 		mgr:       mgr,
 		cfg:       cfg,
@@ -77,7 +79,7 @@ func (s *session) start() error {
 		return fmt.Errorf("mcp: session %q already running", s.label)
 	}
 
-	s.server = buildServer(s.client, s.mode, s.cfg, s.editorCtx, s.mgr.emit, s.fnStore)
+	s.server = buildServer(s.client, s.mode, s.cfg, s.editorCtx, s.mgr.emit, s.fnStore, s.nb)
 	sse := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server {
 		s.mu.Lock()
 		srv := s.server

@@ -75,6 +75,7 @@ type Manager struct {
 	editorCtx *EditorContextStore
 	emit      func(string, interface{}) // Wails event emitter; nil when running outside the app (tests)
 	fnStore   *fnmeta.Store             // local function metadata cache; nil until set via SetFnStore
+	nb        NotebookBackend           // notebook/Snowpark backend; nil until set via SetNotebookBackend
 }
 
 // NewManager returns an empty Manager with an initialized EditorContextStore.
@@ -101,6 +102,16 @@ func (m *Manager) EditorContext() *EditorContextStore {
 func (m *Manager) SetFnStore(store *fnmeta.Store) {
 	m.mu.Lock()
 	m.fnStore = store
+	m.mu.Unlock()
+}
+
+// SetNotebookBackend sets the notebook/Snowpark backend on the manager so
+// new MCP sessions can expose notebook tools (get_notebook_completions,
+// check_python_syntax). Existing sessions are unaffected — only sessions
+// started after this call will see the backend.
+func (m *Manager) SetNotebookBackend(nb NotebookBackend) {
+	m.mu.Lock()
+	m.nb = nb
 	m.mu.Unlock()
 }
 

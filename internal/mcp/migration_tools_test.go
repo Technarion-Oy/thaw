@@ -39,7 +39,7 @@ func TestMigrationToolsRegistered(t *testing.T) {
 	for _, mode := range []string{ExecutionModeMetadata, ExecutionModeReadonly, ExecutionModeExplainOnly} {
 		t.Run(mode, func(t *testing.T) {
 			cfg := SessionConfig{WorkspaceRoot: tmp}
-			srv := buildServer(nil, mode, cfg, nil, nil, nil)
+			srv := buildServer(nil, mode, cfg, nil, nil, nil, nil)
 			names := toolNames(t, srv)
 			for _, tool := range migrationTools {
 				if !hasToolName(names, tool) {
@@ -63,7 +63,7 @@ func TestMigrationWorkspaceToolsNotRegisteredWithoutRoot(t *testing.T) {
 		"generate_migration_script",
 	}
 
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil, nil)
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil, nil, nil)
 	names := toolNames(t, srv)
 
 	for _, tool := range workspaceGated {

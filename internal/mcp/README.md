@@ -15,7 +15,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `manager.go` | `Manager` (multi-session registry), `SessionInfo`/`SessionConfig` types, execution mode constants, port allocation, `Start`/`Stop`/`UpdateMode`/`List`/`StopAll`, `EditorContext()` accessor |
 | `session.go` | Per-session `http.Server` + SSE lifecycle (`start`/`stop`/`updateMode`/`info`); serves on the held loopback listener and owns/closes its `*snowflake.Client`. `updateMode` mutates the existing server's tool registry via `RemoveTools`/`AddTool` — the SDK sends `tools/list_changed` notifications so connected clients update seamlessly. If the serve goroutine exits unexpectedly it closes the client and self-removes from the `Manager` (`removeIfPresent`) so no dead row or leaked connection lingers |
 | `security.go` | `loopbackGuard` middleware (rejects non-loopback `Host`/cross-origin `Origin` — DNS-rebinding defense), `tokenGuard` middleware (per-session token auth on the SSE GET), and `newSessionToken` (crypto-random token) |
-| `server.go` | `buildServer(client, mode, cfg, editorCtx, emit)` — constructs the MCP server and registers tools based on execution mode; `modeSpecificToolNames` lists tools that `updateMode` removes/re-registers on mode switch |
+| `server.go` | `buildServer(client, mode, cfg, editorCtx, emit, fnStore, nb)` — constructs the MCP server and registers tools based on execution mode; `modeSpecificToolNames` lists tools that `updateMode` removes/re-registers on mode switch |
 | `tools.go` | Tool input structs + `registerTools` (schema-browsing tools); `jsonResult`/`textResult` content helpers |
 | `schema_tools.go` | `registerSchemaTools` — extended schema discovery tools (`get_schema_foreign_keys`, `get_database_ddl`, `get_er_model`, `search_objects`, `get_all_data_types`, `validate_data_type`, `list_dropped_tables`, `list_dropped_schemas`, `get_data_retention`); always registered in all modes |
 | `account_tools.go` | `registerAccountTools` — account & infrastructure tools (`list_roles`, `list_available_roles`, `get_role_ddl`, `list_warehouses`, `get_warehouse_ddl`, `list_integrations`, `list_secrets`, `list_file_formats`); always registered in all modes |
@@ -26,6 +26,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `context.go` | `EditorContextStore` — concurrency-safe in-memory store for per-tab editor SQL and result summaries; `ResultSummary` and `QueryHistoryEntry` types |
 | `editor_tools.go` | `registerEditorTools` — editor context tools (`get_current_editor_sql`, `get_query_results_summary`, `get_query_history`); bridges frontend editor state to MCP clients |
 | `tab_tools.go` | `registerTabTools` — tab-delivery tool (`open_sql_tab`); formats SQL with user prefs, runs diagnostics, emits `mcp:open-sql-tab` Wails event. Registered when `emit` is non-nil. `OpenSqlTabPayload` type, `loadEditorPrefs` helper |
+| `notebook_tools.go` | `registerNotebookTools` — notebook/Snowpark tools (`read_notebook`, `get_notebook_completions`, `check_python_syntax`, `open_notebook_tab`); `NotebookBackend` interface (dependency-injected from `App` via adapter), MCP-local type duplicates (`NotebookCompletion`, `NotebookSyntaxError`), `OpenNotebookTabPayload` type, `buildNbformat` helper. `read_notebook` is workspace-gated; kernel tools are backend-gated; `open_notebook_tab` is emit-gated |
 | `pipeline_tools.go` | `registerPipelineTools` — task graph, stage, and pipe inspection tools (`list_tasks`, `get_task_run_history`, `get_task_dependencies`, `list_stage_files`, `preview_stage_file`, `get_pipe_status`, `get_pipe_copy_history`, `open_task_graph`); delegates to `tasks`, `stage`, `fileformat`, `pipe` packages. `preview_stage_file` is mode-gated (readonly/explain_only). `open_task_graph` is emit-gated. `OpenTaskGraphPayload` type |
 | `function_tools.go` | `registerFunctionTools` — function/procedure metadata and invocation builder tools (`search_functions`, `get_function_tooltip`, `get_procedure_params`, `get_function_info`, `build_call_statement`, `build_function_select`); delegates to `fnmeta.Store`, `snowflake.Client`, and `procedure` packages; always registered in all modes |
 | `builder_tools.go` | `registerBuilderTools` — pure DDL builder tools (`build_create_stage_sql`, `build_alter_stage_sql`, `build_create_file_format_sql`, `build_create_pipe_sql`, `build_refresh_pipe_sql`, `build_create_secret_sql`, `build_storage_integration_sql`, `build_api_integration_sql`, `build_catalog_integration_sql`, `build_external_access_integration_sql`, `build_notification_integration_sql`, `build_security_integration_sql`); delegates to `stage`, `fileformat`, `pipe`, `secret`, `integrations` packages; no Snowflake client needed; always registered in all modes |
@@ -36,6 +37,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `sql_tools_test.go` | Unit tests for `injectLimit` and the full `executeSQLPipeline` (EXPLAIN error rejection, LIMIT injection, row cap, CTE+DELETE detection, etc.) |
 | `context_test.go` | Unit tests for `EditorContextStore` (set/get, remove, concurrent access) |
 | `tab_tools_test.go` | Unit tests for `open_sql_tab` tool (nil-emit graceful degradation, registration, empty SQL rejection, emit payload shape) |
+| `notebook_tools_test.go` | Unit tests for notebook tools (registration gating for nil backend/workspace/emit, `open_notebook_tab` event payload, default title, truncation, cell kind validation, `buildNbformat` mapping with outputs/execution_count, kernel tool input validation, `read_notebook` sandbox and extension check) |
 | `editor_tools_test.go` | Unit tests for editor context tools (empty store, content return, mode-gating, nil client handling) |
 | `pipeline_tools_test.go` | Unit tests for pipeline tools (registration in all modes, mode-gating for `preview_stage_file`, emit-gating for `open_task_graph`, nil client, input validation) |
 | `account_tools_test.go` | Unit tests for account tools (registration in all modes, empty kind/name/schema validation) |
@@ -58,6 +60,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `NewManager(emit)` | Empty registry with initialized `EditorContextStore`. `emit` is an optional Wails event emitter for tab-delivery tools; pass `nil` in tests. Safe for concurrent use. |
 | `EditorContext()` | Returns the shared `*EditorContextStore`; MCP tools read, frontend pushes state via App IPC. |
 | `SetFnStore(store)` | Sets the function metadata store (`*fnmeta.Store`) on the manager. New sessions started after this call will expose function/procedure lookup tools. Called from `App.startup` after the fnStore is opened. |
+| `SetNotebookBackend(nb)` | Sets the notebook/Snowpark backend (`NotebookBackend`) on the manager. New sessions started after this call will expose notebook tools (`get_notebook_completions`, `check_python_syntax`). Called from `App.startup` after the `snowparkSvc` is created. |
 | `Start(label, connLabel, mode, port, client, cfg)` | Starts a session under a unique `label`; `port == 0` auto-assigns from `9100`. Takes ownership of `client`. Applies `SessionConfig` (role/warehouse pinning, secondary roles). |
 | `UpdateMode(ctx, label, newMode)` | Changes the execution mode of a running session by mutating the server's tool registry in place. The SDK sends `tools/list_changed` notifications to connected clients automatically. Re-applies session config (role/warehouse pinning) when switching to a non-metadata mode. |
 | `Stop(label)` | Stops and removes the named session, closing its connection. |
@@ -117,7 +120,7 @@ Metadata needs (listing databases, describing tables, etc.) are served by the de
 
 ### Tools
 
-The server exposes up to 63 tools in metadata mode (without workspace tools) or 72 (with `WorkspaceRoot` set), and up to 79 in readonly/explain_only modes (with `EditorContextStore`, `emit`, and `WorkspaceRoot` all provided):
+The server exposes 60 tools in the baseline metadata mode (no workspace, no emit, no editorCtx, no fnStore, no nb). Additional tools are registered when optional dependencies are provided: workspace tools (+8), emit-gated tools (+3), editor context tools (+2–3), notebook backend tools (+2), and SQL execution tools (+6–7 in readonly/explain_only modes):
 
 **Schema-browsing tools** (always registered, `tools.go`): `get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`.
 
@@ -256,6 +259,17 @@ All workspace tools that accept a directory or file path validate the input agai
 | `use_warehouse` | Switch the active Snowflake warehouse | Omitted when `PinnedWarehouse` |
 | `use_database` | Switch the active Snowflake database | Always registered |
 | `use_schema` | Switch the active Snowflake schema | Always registered |
+
+**Notebook/Snowpark tools** (`notebook_tools.go`):
+
+| Tool | Gating | Description |
+|---|---|---|
+| `read_notebook` | Workspace-gated | Read a Jupyter notebook (.ipynb) file from the workspace (up to 5 MB, `.ipynb` extension required); returns raw JSON |
+| `get_notebook_completions` | Backend-gated | Get Python intellisense completions from the running kernel at a cursor position |
+| `check_python_syntax` | Backend-gated | Validate Python syntax and check for common errors using the running kernel |
+| `open_notebook_tab` | Emit-gated | Open a new notebook tab in Thaw with pre-filled cells (python, markdown, sql); builds nbformat v4 JSON; emits `mcp:open-notebook-tab` Wails event |
+
+`read_notebook` is only registered when `WorkspaceRoot` is set; path inputs are validated against the workspace root and must have a `.ipynb` extension. File size is checked via `os.Stat` before reading to prevent OOM on large files. Kernel-dependent tools (`get_notebook_completions`, `check_python_syntax`) are only registered when the `NotebookBackend` is non-nil (set via `SetNotebookBackend`). `open_notebook_tab` is only registered when `emit` is non-nil. The `NotebookBackend` interface is implemented by `notebookBackendAdapter` in `internal/app/mcp_notebook.go`, which delegates to `snowpark.Service` and maps snowpark types to MCP-local duplicates.
 
 **Tab-delivery tools** (`tab_tools.go`, registered when `emit` is non-nil):
 

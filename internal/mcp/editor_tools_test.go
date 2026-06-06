@@ -24,7 +24,7 @@ import (
 // when no SQL is in the active editor.
 func TestGetCurrentEditorSQLEmpty(t *testing.T) {
 	store := NewEditorContextStore()
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, store, nil, nil)
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, store, nil, nil, nil)
 
 	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
 	httpSrv := httptest.NewServer(handler)
@@ -56,7 +56,7 @@ func TestGetCurrentEditorSQLEmpty(t *testing.T) {
 func TestGetCurrentEditorSQLReturnsContent(t *testing.T) {
 	store := NewEditorContextStore()
 	store.SetActiveTab("tab1", "SELECT * FROM users")
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, store, nil, nil)
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, store, nil, nil, nil)
 
 	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
 	httpSrv := httptest.NewServer(handler)
@@ -88,7 +88,7 @@ func TestGetCurrentEditorSQLReturnsContent(t *testing.T) {
 func TestGetQueryResultsSummaryEmpty(t *testing.T) {
 	store := NewEditorContextStore()
 	store.SetActiveTab("tab1", "SELECT 1")
-	srv := buildServer(nil, ExecutionModeReadonly, SessionConfig{}, store, nil, nil)
+	srv := buildServer(nil, ExecutionModeReadonly, SessionConfig{}, store, nil, nil, nil)
 
 	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
 	httpSrv := httptest.NewServer(handler)
@@ -128,7 +128,7 @@ func TestGetQueryResultsSummaryReturnsData(t *testing.T) {
 		SampleRows: [][]any{{1, "Alice"}, {2, "Bob"}},
 		QueryID:    "qid-abc",
 	})
-	srv := buildServer(nil, ExecutionModeReadonly, SessionConfig{}, store, nil, nil)
+	srv := buildServer(nil, ExecutionModeReadonly, SessionConfig{}, store, nil, nil, nil)
 
 	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
 	httpSrv := httptest.NewServer(handler)
@@ -170,7 +170,7 @@ func TestGetQueryResultsSummaryExplicitTabID(t *testing.T) {
 		SampleRows: [][]any{{"hello"}},
 		QueryID:    "qid-tab2",
 	})
-	srv := buildServer(nil, ExecutionModeReadonly, SessionConfig{}, store, nil, nil)
+	srv := buildServer(nil, ExecutionModeReadonly, SessionConfig{}, store, nil, nil, nil)
 
 	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
 	httpSrv := httptest.NewServer(handler)
@@ -204,7 +204,7 @@ func TestGetQueryResultsSummaryExplicitTabID(t *testing.T) {
 // NOT registered in metadata mode (it exposes data rows).
 func TestGetQueryResultsSummaryModeGating(t *testing.T) {
 	store := NewEditorContextStore()
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, store, nil, nil)
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, store, nil, nil, nil)
 	names := toolNames(t, srv)
 
 	if hasToolName(names, "get_query_results_summary") {
@@ -220,7 +220,7 @@ func TestEditorToolsRegisteredInAllModes(t *testing.T) {
 	always := []string{"get_current_editor_sql", "get_query_history"}
 
 	for _, mode := range modes {
-		srv := buildServer(nil, mode, SessionConfig{}, store, nil, nil)
+		srv := buildServer(nil, mode, SessionConfig{}, store, nil, nil, nil)
 		names := toolNames(t, srv)
 
 		for _, tool := range always {
@@ -234,7 +234,7 @@ func TestEditorToolsRegisteredInAllModes(t *testing.T) {
 // TestEditorToolsNotRegisteredWithNilStore verifies that no editor tools are
 // registered when the store is nil (graceful degradation in tests).
 func TestEditorToolsNotRegisteredWithNilStore(t *testing.T) {
-	srv := buildServer(nil, ExecutionModeReadonly, SessionConfig{}, nil, nil, nil)
+	srv := buildServer(nil, ExecutionModeReadonly, SessionConfig{}, nil, nil, nil, nil)
 	names := toolNames(t, srv)
 
 	editorTools := []string{"get_current_editor_sql", "get_query_results_summary", "get_query_history"}
@@ -249,7 +249,7 @@ func TestEditorToolsNotRegisteredWithNilStore(t *testing.T) {
 // when no Snowflake client is available.
 func TestGetQueryHistoryNilClient(t *testing.T) {
 	store := NewEditorContextStore()
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, store, nil, nil)
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, store, nil, nil, nil)
 
 	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
 	httpSrv := httptest.NewServer(handler)
