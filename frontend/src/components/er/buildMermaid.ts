@@ -33,7 +33,8 @@ export function buildMermaid(
   );
 
   for (const t of validTables) {
-    const namedCols = t.columns.filter((c) => c.name.trim()).slice(0, ER_COL_LIMIT);
+    const allNamedCols = t.columns.filter((c) => c.name.trim());
+    const namedCols = allNamedCols.slice(0, ER_COL_LIMIT);
     if (namedCols.length === 0) continue;
     const id = entityId(t.schema, t.name.trim());
     lines.push(`  ${id} {`);
@@ -41,6 +42,10 @@ export function buildMermaid(
       const type = shortType(c.dataType) || "string";
       const pk = c.isPK ? " PK" : "";
       lines.push(`    ${type} ${sanitiseId(c.name)}${pk}`);
+    }
+    const overflow = allNamedCols.length - ER_COL_LIMIT;
+    if (overflow > 0) {
+      lines.push(`    string _and_${overflow}_more_columns`);
     }
     lines.push("  }");
   }

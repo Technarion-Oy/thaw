@@ -333,11 +333,9 @@ function ERTableNodeInner({ data, selected }: NodeProps<ERTableNodeType>) {
 // excluded from the comparator — ERCanvas routes them through stable
 // callbackRefs so their identity never changes between renders.
 const ERTableNode = React.memo(ERTableNodeInner, (prev, next) => {
-  const prevData = prev.data as ERTableNodeData;
-  const nextData = next.data as ERTableNodeData;
   return (
-    prevData.table === nextData.table &&
-    prevData.mode === nextData.mode &&
+    prev.data.table === next.data.table &&
+    prev.data.mode === next.data.mode &&
     prev.selected === next.selected
   );
 });

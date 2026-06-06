@@ -221,6 +221,9 @@ function ERCanvasInner({
   callbackRefs.current = { onTableRename, onColumnRename, onColumnRemove };
   const tablesRef = useRef(tables);
   tablesRef.current = tables;
+  // Guard to prevent selection sync loop: when a selection change originates
+  // from the canvas (handleSelectionChange), skip the parent→canvas sync effect.
+  const selectionFromCanvas = useRef(false);
 
   // Flush any pending debounced position save on unmount
   useEffect(() => {
@@ -232,6 +235,12 @@ function ERCanvasInner({
     if (!visibleSchemas) return tables;
     return tables.filter((t) => visibleSchemas.has(t.schema));
   }, [tables, visibleSchemas]);
+
+  // Memoized table lookup — reused by layout effect, context menu, etc.
+  const filteredTableById = useMemo(
+    () => new Map(filteredTables.map((t) => [t.id, t])),
+    [filteredTables],
+  );
 
   // Stable, sorted ID string for detecting table set changes (add/remove).
   // Memoized separately so the O(n log n) sort only runs when filteredTables changes,
@@ -261,13 +270,12 @@ function ERCanvasInner({
       // Apply saved positions or dagre layout
       const saved = loadERLayout(database);
       let positioned = newNodes;
-      const tableById = new Map(filteredTables.map((t) => [t.id, t]));
 
       if (saved) {
         // Apply saved positions to nodes that have them, mark others for dagre
         const needsLayout = new Set<string>();
         positioned = newNodes.map((n) => {
-          const table = tableById.get(n.id);
+          const table = filteredTableById.get(n.id);
           if (!table) return n;
           const key = positionKey(table.schema, table.name);
           const pos = saved[key];
@@ -330,26 +338,27 @@ function ERCanvasInner({
     setEdges(newEdges);
   }, [filteredTables, filteredTableIdStr, mode, database, setNodes, setEdges, fitView]);
 
-  // Sync parent selectedTableIds to XYFlow node.selected
+  // Sync parent selectedTableIds to XYFlow node.selected.
+  // Skipped when the change originated from the canvas itself (via
+  // handleSelectionChange) to prevent a sync loop.
   useEffect(() => {
+    if (selectionFromCanvas.current) {
+      selectionFromCanvas.current = false;
+      return;
+    }
     const desiredSet = new Set(selectedTableIds ?? []);
-    const currentNodes = getNodes();
-    const alreadyMatches = currentNodes.every(
-      (n) => (n.selected ?? false) === desiredSet.has(n.id),
-    );
-    if (alreadyMatches) return;
-
     setNodes((prev) =>
       prev.map((n) => ({
         ...n,
         selected: desiredSet.has(n.id),
       })),
     );
-  }, [selectedTableIds, setNodes, getNodes]);
+  }, [selectedTableIds, setNodes]);
 
   // Propagate XYFlow selection changes (Cmd/Ctrl+click multi-select) to parent
   const handleSelectionChange = useCallback(
     ({ nodes: selectedNodes }: { nodes: Node[] }) => {
+      selectionFromCanvas.current = true;
       onSelectionChangeProp?.(selectedNodes.map((n) => n.id));
     },
     [onSelectionChangeProp],
@@ -406,10 +415,11 @@ function ERCanvasInner({
   const handleAutoLayout = useCallback(() => {
     const currentEdges = getEdges();
     const tableById = new Map(tablesRef.current.map((t) => [t.id, t]));
+    // Read saved positions outside the state updater to avoid side effects inside a reducer
+    const positions = loadERLayout(database) ?? {};
     setNodes((prev) => {
       const laid = applyERLayout(prev, currentEdges);
       // Merge with existing saved positions so filtered-out schemas are preserved
-      const positions = loadERLayout(database) ?? {};
       for (const n of laid) {
         const table = tableById.get(n.id);
         if (table && table.schema && table.name.trim()) {
@@ -447,9 +457,8 @@ function ERCanvasInner({
       if (!visibleKeys.has(k)) preserved[k] = v;
     }
     // Add new dagre positions for visible tables
-    const tableById = new Map(filteredTables.map((t) => [t.id, t]));
     for (const n of laid) {
-      const table = tableById.get(n.id);
+      const table = filteredTableById.get(n.id);
       if (table && table.schema && table.name.trim()) {
         preserved[positionKey(table.schema, table.name)] = n.position;
       }
@@ -463,7 +472,10 @@ function ERCanvasInner({
 
   const handlePaneClick = useCallback(() => {
     setCtxMenu(null);
-  }, []);
+    // Clear selection — pane click doesn't trigger XYFlow's onSelectionChange,
+    // so we propagate deselection to the parent explicitly.
+    onSelectionChangeProp?.([]);
+  }, [onSelectionChangeProp]);
 
   // ── Context menu ─────────────────────────────────────────────────────────
   const [ctxMenu, setCtxMenu] = useState<CtxMenuState | null>(null);
@@ -472,7 +484,7 @@ function ERCanvasInner({
     (event: React.MouseEvent, node: Node) => {
       if (mode !== "edit") return;
       event.preventDefault();
-      const table = filteredTables.find((t) => t.id === node.id);
+      const table = filteredTableById.get(node.id);
       if (!table) return;
       const hasFKs = table.columns.some((c) => c.fkRef);
       setCtxMenu({
@@ -483,7 +495,7 @@ function ERCanvasInner({
         hasFKs,
       });
     },
-    [mode, filteredTables],
+    [mode, filteredTableById],
   );
 
   if (filteredTables.length === 0) {
