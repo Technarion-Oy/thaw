@@ -385,9 +385,9 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
     if (selectedTableId === tableId) setSelectedTableId(null);
   };
 
-  const updateTable = (tableId: string, patch: Partial<Pick<DesignerTable, "name" | "schema">>) => {
+  const updateTable = useCallback((tableId: string, patch: Partial<Pick<DesignerTable, "name" | "schema">>) => {
     setTables((prev) => prev.map((t) => (t.id === tableId ? { ...t, ...patch } : t)));
-  };
+  }, []);
 
   const addColumn = (tableId: string) => {
     setTables((prev) =>
@@ -405,7 +405,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
     );
   };
 
-  const updateColumn = (tableId: string, colId: string, patch: Partial<DesignerColumn>) => {
+  const updateColumn = useCallback((tableId: string, colId: string, patch: Partial<DesignerColumn>) => {
     setTables((prev) =>
       prev.map((t) =>
         t.id === tableId
@@ -421,7 +421,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
           : t
       )
     );
-  };
+  }, []);
 
   // FK options: "SCHEMA.TABLE.COLUMN" for every named column in every other table
   const fkOptions = (currentTableId: string): { value: string; label: string }[] => {
@@ -437,7 +437,17 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
     return opts;
   };
 
-  // ── Canvas FK connect handler ──────────────────────────────────────────────
+  // ── Canvas callbacks ────────────────────────────────────────────────────────
+
+  const handleTableRename = useCallback(
+    (tableId: string, newName: string) => updateTable(tableId, { name: newName }),
+    [updateTable],
+  );
+
+  const handleColumnRename = useCallback(
+    (tableId: string, colId: string, newName: string) => updateColumn(tableId, colId, { name: newName }),
+    [updateColumn],
+  );
 
   const handleFKConnect = useCallback(
     (fromTableId: string, fromColId: string, toTableId: string, toColId: string) => {
@@ -449,7 +459,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
       const fkRef = `${toTable.schema}.${toTable.name.trim()}.${toCol.name.trim()}`;
       updateColumn(fromTableId, fromColId, { fkRef });
     },
-    [tables],
+    [tables, updateColumn],
   );
 
   // ── SQL & run ─────────────────────────────────────────────────────────────────
@@ -699,8 +709,8 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
               selectedTableId={selectedTableId}
               onTableSelect={setSelectedTableId}
               onConnect={handleFKConnect}
-              onTableRename={(tid, name) => updateTable(tid, { name })}
-              onColumnRename={(tid, cid, name) => updateColumn(tid, cid, { name })}
+              onTableRename={handleTableRename}
+              onColumnRename={handleColumnRename}
             />
           </div>
         </div>

@@ -4,12 +4,14 @@
 import { useEffect, useCallback, useRef, useMemo } from "react";
 import {
   ReactFlow,
+  ReactFlowProvider,
   Background,
   Controls,
   MiniMap,
   Panel,
   useNodesState,
   useEdgesState,
+  useReactFlow,
   type Node,
   type Edge,
   type OnConnect,
@@ -48,7 +50,7 @@ export interface ERCanvasProps {
   onColumnRename?: (tableId: string, colId: string, newName: string) => void;
 }
 
-export default function ERCanvas({
+function ERCanvasInner({
   tables,
   mode,
   database,
@@ -61,37 +63,9 @@ export default function ERCanvas({
 }: ERCanvasProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([] as Node[]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([] as Edge[]);
+  const { getNodes } = useReactFlow();
   const initialLayoutDone = useRef(false);
   const prevTableIds = useRef<string>("");
-
-  // Callbacks for node interactions
-  const handleHeaderDoubleClick = useCallback(
-    (tableId: string) => {
-      if (!onTableRename) return;
-      const table = tables.find((t) => t.id === tableId);
-      if (!table) return;
-      const newName = prompt("Rename table:", table.name);
-      if (newName !== null && newName.trim()) {
-        onTableRename(tableId, newName.trim().toUpperCase());
-      }
-    },
-    [tables, onTableRename],
-  );
-
-  const handleColumnDoubleClick = useCallback(
-    (tableId: string, colId: string) => {
-      if (!onColumnRename) return;
-      const table = tables.find((t) => t.id === tableId);
-      if (!table) return;
-      const col = table.columns.find((c) => c.id === colId);
-      if (!col) return;
-      const newName = prompt("Rename column:", col.name);
-      if (newName !== null && newName.trim()) {
-        onColumnRename(tableId, colId, newName.trim());
-      }
-    },
-    [tables, onColumnRename],
-  );
 
   // Filter tables by visible schemas if provided
   const filteredTables = useMemo(() => {
@@ -104,10 +78,9 @@ export default function ERCanvas({
     const { nodes: newNodes, edges: newEdges } = tablesToNodesAndEdges(
       filteredTables,
       mode,
-      selectedTableId,
       {
-        onHeaderDoubleClick: handleHeaderDoubleClick,
-        onColumnDoubleClick: handleColumnDoubleClick,
+        onTableRename,
+        onColumnRename,
       },
     );
 
@@ -125,7 +98,8 @@ export default function ERCanvas({
       let positioned = newNodes;
 
       if (saved) {
-        let allFound = true;
+        // Apply saved positions to nodes that have them, mark others for dagre
+        const needsLayout: string[] = [];
         positioned = newNodes.map((n) => {
           const table = filteredTables.find((t) => t.id === n.id);
           if (!table) return n;
@@ -134,13 +108,18 @@ export default function ERCanvas({
           if (pos) {
             return { ...n, position: pos };
           }
-          allFound = false;
+          needsLayout.push(n.id);
           return n;
         });
 
-        // If some nodes don't have saved positions, apply dagre to all
-        if (!allFound) {
-          positioned = applyERLayout(positioned, newEdges);
+        // Apply dagre only to nodes without saved positions
+        if (needsLayout.length > 0) {
+          const onlyNew = positioned.filter((n) => needsLayout.includes(n.id));
+          const laid = applyERLayout(onlyNew, newEdges);
+          const laidMap = new Map(laid.map((n) => [n.id, n.position]));
+          positioned = positioned.map((n) =>
+            laidMap.has(n.id) ? { ...n, position: laidMap.get(n.id)! } : n,
+          );
         }
       } else {
         positioned = applyERLayout(newNodes, newEdges);
@@ -160,35 +139,41 @@ export default function ERCanvas({
     }
 
     setEdges(newEdges);
-  }, [filteredTables, mode, selectedTableId, database, handleHeaderDoubleClick, handleColumnDoubleClick, setNodes, setEdges]);
+  }, [filteredTables, mode, database, onTableRename, onColumnRename, setNodes, setEdges]);
+
+  // Apply XYFlow's built-in selected property when selectedTableId changes
+  useEffect(() => {
+    setNodes((prev) =>
+      prev.map((n) => ({
+        ...n,
+        selected: n.id === selectedTableId,
+      })),
+    );
+  }, [selectedTableId, setNodes]);
 
   // Track position changes and persist
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
       onNodesChange(changes);
 
-      // Check if any position changes occurred
+      // Check if any position changes occurred (only completed drags, not in-progress)
       const hasPositionChange = changes.some(
-        (c) => c.type === "position" && c.position,
+        (c) => c.type === "position" && c.dragging === false,
       );
       if (!hasPositionChange) return;
 
-      // Debounced save — read current node positions after React state updates
-      setTimeout(() => {
-        setNodes((currentNodes) => {
-          const positions: Record<string, { x: number; y: number }> = {};
-          for (const n of currentNodes) {
-            const table = tables.find((t) => t.id === n.id);
-            if (table && table.schema && table.name.trim()) {
-              positions[positionKey(table.schema, table.name)] = n.position;
-            }
-          }
-          saveERLayout(database, positions);
-          return currentNodes; // no-op update, just reading state
-        });
-      }, 0);
+      // Read current positions via useReactFlow and persist
+      const currentNodes = getNodes();
+      const positions: Record<string, { x: number; y: number }> = {};
+      for (const n of currentNodes) {
+        const table = tables.find((t) => t.id === n.id);
+        if (table && table.schema && table.name.trim()) {
+          positions[positionKey(table.schema, table.name)] = n.position;
+        }
+      }
+      saveERLayout(database, positions);
     },
-    [onNodesChange, tables, database, setNodes],
+    [onNodesChange, tables, database, getNodes],
   );
 
   // Handle new connections (FK creation via drag)
@@ -233,17 +218,16 @@ export default function ERCanvas({
     const { nodes: newNodes, edges: newEdges } = tablesToNodesAndEdges(
       filteredTables,
       mode,
-      selectedTableId,
       {
-        onHeaderDoubleClick: handleHeaderDoubleClick,
-        onColumnDoubleClick: handleColumnDoubleClick,
+        onTableRename,
+        onColumnRename,
       },
     );
     const laid = applyERLayout(newNodes, newEdges);
     setNodes(laid);
     setEdges(newEdges);
     initialLayoutDone.current = true;
-  }, [database, filteredTables, mode, selectedTableId, handleHeaderDoubleClick, handleColumnDoubleClick, setNodes, setEdges]);
+  }, [database, filteredTables, mode, onTableRename, onColumnRename, setNodes, setEdges]);
 
   const handleNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
@@ -321,5 +305,13 @@ export default function ERCanvas({
         </Panel>
       </ReactFlow>
     </div>
+  );
+}
+
+export default function ERCanvas(props: ERCanvasProps) {
+  return (
+    <ReactFlowProvider>
+      <ERCanvasInner {...props} />
+    </ReactFlowProvider>
   );
 }

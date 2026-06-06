@@ -3,11 +3,7 @@
 
 import React, { useState, useCallback } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import {
-  ER_NODE_WIDTH,
-  ER_COL_LIMIT,
-  type DesignerColumn,
-} from "./erTypes";
+import { ER_NODE_WIDTH, ER_COL_LIMIT, type DesignerColumn } from "./erTypes";
 import type { ERTableNodeData } from "./erCanvasLayout";
 
 const SHORT_TYPES: Record<string, string> = {
@@ -27,8 +23,8 @@ function abbreviateType(dt: string): string {
   return SHORT_TYPES[dt] ?? dt.slice(0, 4);
 }
 
-function ERTableNodeInner({ data }: NodeProps) {
-  const { table, selected, mode, onHeaderDoubleClick, onColumnDoubleClick } =
+function ERTableNodeInner({ data, selected }: NodeProps) {
+  const { table, mode, onTableRename, onColumnRename } =
     data as ERTableNodeData;
 
   const [editingHeader, setEditingHeader] = useState(false);
@@ -37,33 +33,35 @@ function ERTableNodeInner({ data }: NodeProps) {
   const [colValue, setColValue] = useState("");
 
   const handleHeaderDoubleClick = useCallback(() => {
-    if (mode !== "edit" || !onHeaderDoubleClick) return;
+    if (mode !== "edit" || !onTableRename) return;
     setHeaderValue(table.name);
     setEditingHeader(true);
-  }, [mode, onHeaderDoubleClick, table.name]);
+  }, [mode, onTableRename, table.name]);
 
   const commitHeader = useCallback(() => {
     setEditingHeader(false);
-    if (headerValue.trim() && headerValue.trim() !== table.name) {
-      onHeaderDoubleClick?.(table.id);
+    const trimmed = headerValue.trim();
+    if (trimmed && trimmed !== table.name) {
+      onTableRename?.(table.id, trimmed);
     }
-  }, [headerValue, table.name, table.id, onHeaderDoubleClick]);
+  }, [headerValue, table.name, table.id, onTableRename]);
 
   const handleColDoubleClick = useCallback(
     (col: DesignerColumn) => {
-      if (mode !== "edit" || !onColumnDoubleClick) return;
+      if (mode !== "edit" || !onColumnRename) return;
       setColValue(col.name);
       setEditingColId(col.id);
     },
-    [mode, onColumnDoubleClick],
+    [mode, onColumnRename],
   );
 
   const commitCol = useCallback(() => {
-    if (editingColId && colValue.trim()) {
-      onColumnDoubleClick?.(table.id, editingColId);
+    const trimmed = colValue.trim();
+    if (editingColId && trimmed) {
+      onColumnRename?.(table.id, editingColId, trimmed);
     }
     setEditingColId(null);
-  }, [editingColId, colValue, table.id, onColumnDoubleClick]);
+  }, [editingColId, colValue, table.id, onColumnRename]);
 
   const displayCols = table.columns.slice(0, ER_COL_LIMIT);
   const overflowCount = table.columns.length - ER_COL_LIMIT;

@@ -6,7 +6,7 @@ const DEBOUNCE_MS = 500;
 
 type PositionMap = Record<string, { x: number; y: number }>;
 
-let saveTimer: ReturnType<typeof setTimeout> | null = null;
+const saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function storageKey(database: string): string {
   return KEY_PREFIX + database.toUpperCase();
@@ -17,16 +17,22 @@ export function positionKey(schema: string, table: string): string {
   return `${schema.toUpperCase()}.${table.trim().toUpperCase()}`;
 }
 
-/** Save node positions to localStorage (debounced). */
+/** Save node positions to localStorage (debounced per database). */
 export function saveERLayout(database: string, positions: PositionMap): void {
-  if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    try {
-      localStorage.setItem(storageKey(database), JSON.stringify(positions));
-    } catch {
-      // localStorage full or unavailable — silently ignore
-    }
-  }, DEBOUNCE_MS);
+  const key = storageKey(database);
+  const existing = saveTimers.get(key);
+  if (existing) clearTimeout(existing);
+  saveTimers.set(
+    key,
+    setTimeout(() => {
+      saveTimers.delete(key);
+      try {
+        localStorage.setItem(key, JSON.stringify(positions));
+      } catch {
+        // localStorage full or unavailable — silently ignore
+      }
+    }, DEBOUNCE_MS),
+  );
 }
 
 /** Load saved positions, or null if none exist. */

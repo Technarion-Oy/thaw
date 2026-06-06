@@ -24,8 +24,8 @@ export interface ERTableNodeData {
   table: DesignerTable;
   selected: boolean;
   mode: "edit" | "readonly";
-  onHeaderDoubleClick?: (tableId: string) => void;
-  onColumnDoubleClick?: (tableId: string, colId: string) => void;
+  onTableRename?: (tableId: string, newName: string) => void;
+  onColumnRename?: (tableId: string, colId: string, newName: string) => void;
   [key: string]: unknown;
 }
 
@@ -36,10 +36,9 @@ export interface ERTableNodeData {
 export function tablesToNodesAndEdges(
   tables: DesignerTable[],
   mode: "edit" | "readonly",
-  selectedId?: string | null,
   callbacks?: {
-    onHeaderDoubleClick?: (tableId: string) => void;
-    onColumnDoubleClick?: (tableId: string, colId: string) => void;
+    onTableRename?: (tableId: string, newName: string) => void;
+    onColumnRename?: (tableId: string, colId: string, newName: string) => void;
   },
 ): { nodes: Node[]; edges: Edge[] } {
   const nodes: Node[] = tables.map((t) => ({
@@ -48,10 +47,10 @@ export function tablesToNodesAndEdges(
     position: { x: 0, y: 0 },
     data: {
       table: t,
-      selected: t.id === selectedId,
+      selected: false,
       mode,
-      onHeaderDoubleClick: callbacks?.onHeaderDoubleClick,
-      onColumnDoubleClick: callbacks?.onColumnDoubleClick,
+      onTableRename: callbacks?.onTableRename,
+      onColumnRename: callbacks?.onColumnRename,
     } satisfies ERTableNodeData,
     width: ER_NODE_WIDTH,
     height: nodeHeight(t.columns.length),
