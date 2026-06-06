@@ -26,7 +26,7 @@ import (
 // The returned session should be closed by the caller via defer.
 func newTestSession(t *testing.T) *mcpsdk.ClientSession {
 	t.Helper()
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil, nil)
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil, nil, nil)
 	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
 	httpSrv := httptest.NewServer(handler)
 	t.Cleanup(httpSrv.Close)
@@ -45,7 +45,7 @@ func newTestSession(t *testing.T) *mcpsdk.ClientSession {
 // registered on a server built with a nil client (tool listing does not invoke
 // handlers).
 func TestSchemaToolsRegistered(t *testing.T) {
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil, nil)
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil, nil, nil)
 	names := toolNames(t, srv)
 
 	expected := []string{
@@ -228,7 +228,7 @@ func TestSchemaToolsRegisteredInAllModes(t *testing.T) {
 
 	for _, mode := range []string{ExecutionModeMetadata, ExecutionModeReadonly, ExecutionModeExplainOnly} {
 		t.Run(mode, func(t *testing.T) {
-			srv := buildServer(nil, mode, SessionConfig{}, nil, nil, nil)
+			srv := buildServer(nil, mode, SessionConfig{}, nil, nil, nil, nil)
 			names := toolNames(t, srv)
 			for _, tool := range schemaTools {
 				if !hasToolName(names, tool) {

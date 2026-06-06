@@ -908,6 +908,16 @@ export default function QueryPage() {
     return () => off();
   }, []);
 
+  // MCP open_notebook_tab — opens a new notebook tab with AI-generated cells.
+  useEffect(() => {
+    const off = EventsOn("mcp:open-notebook-tab", (payload: {
+      title: string; content: string;
+    }) => {
+      useQueryStore.getState().openMcpNotebookTab(payload.title, payload.content);
+    });
+    return () => off();
+  }, []);
+
   // ⌘E / Ctrl+E — Export current results as CSV (wired from keyboard handler).
   useEffect(() => {
     const handler = () => { if (featureFlags.resultsetExport) exportCSV(); };

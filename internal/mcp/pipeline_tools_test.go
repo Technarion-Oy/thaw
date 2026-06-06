@@ -34,7 +34,7 @@ func TestPipelineToolsRegistered(t *testing.T) {
 
 	for _, mode := range []string{ExecutionModeMetadata, ExecutionModeReadonly, ExecutionModeExplainOnly} {
 		t.Run(mode, func(t *testing.T) {
-			srv := buildServer(nil, mode, SessionConfig{}, nil, nil, nil)
+			srv := buildServer(nil, mode, SessionConfig{}, nil, nil, nil, nil)
 			names := toolNames(t, srv)
 			for _, tool := range alwaysOn {
 				if !hasToolName(names, tool) {
@@ -48,7 +48,7 @@ func TestPipelineToolsRegistered(t *testing.T) {
 // TestPreviewStageFileModeGated verifies that preview_stage_file is absent in
 // metadata mode but present in readonly and explain_only modes.
 func TestPreviewStageFileModeGated(t *testing.T) {
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil, nil)
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil, nil, nil)
 	names := toolNames(t, srv)
 	if hasToolName(names, "preview_stage_file") {
 		t.Error("preview_stage_file should not be registered in metadata mode")
@@ -56,7 +56,7 @@ func TestPreviewStageFileModeGated(t *testing.T) {
 
 	for _, mode := range []string{ExecutionModeReadonly, ExecutionModeExplainOnly} {
 		t.Run(mode, func(t *testing.T) {
-			srv := buildServer(nil, mode, SessionConfig{}, nil, nil, nil)
+			srv := buildServer(nil, mode, SessionConfig{}, nil, nil, nil, nil)
 			names := toolNames(t, srv)
 			if !hasToolName(names, "preview_stage_file") {
 				t.Errorf("preview_stage_file should be registered in %s mode (got: %v)", mode, names)
@@ -68,7 +68,7 @@ func TestPreviewStageFileModeGated(t *testing.T) {
 // TestOpenTaskGraphNotRegisteredWithNilEmit verifies that open_task_graph is
 // not registered when emit is nil.
 func TestOpenTaskGraphNotRegisteredWithNilEmit(t *testing.T) {
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil, nil)
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil, nil, nil)
 	names := toolNames(t, srv)
 	if hasToolName(names, "open_task_graph") {
 		t.Error("open_task_graph should not be registered when emit is nil")
@@ -79,7 +79,7 @@ func TestOpenTaskGraphNotRegisteredWithNilEmit(t *testing.T) {
 // registered when a non-nil emit function is provided.
 func TestOpenTaskGraphRegisteredWithEmit(t *testing.T) {
 	emit := func(string, interface{}) {}
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, emit, nil)
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, emit, nil, nil)
 	names := toolNames(t, srv)
 	if !hasToolName(names, "open_task_graph") {
 		t.Errorf("open_task_graph should be registered when emit is non-nil (got: %v)", names)

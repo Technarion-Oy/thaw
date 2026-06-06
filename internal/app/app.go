@@ -163,6 +163,7 @@ func (a *App) startup(ctx context.Context) {
 			}
 		}
 	})
+	a.mcpManager.SetNotebookBackend(&notebookBackendAdapter{svc: a.snowparkSvc})
 
 	// Open the function-metadata SQLite cache and seed it from the embedded
 	// fallback JSON so autocomplete works immediately, even offline.

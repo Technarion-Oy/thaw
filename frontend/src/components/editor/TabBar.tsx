@@ -176,10 +176,10 @@ export default function TabBar() {
           >
             {tab.diff
               ? <DiffOutlined style={{ fontSize: 11, flexShrink: 0 }} />
-              : tab.kind === "notebook"
-              ? <ExperimentOutlined style={{ fontSize: 11, flexShrink: 0 }} />
               : tab.mcpOrigin
               ? <RobotOutlined style={{ fontSize: 11, flexShrink: 0, color: "var(--accent)" }} />
+              : tab.kind === "notebook"
+              ? <ExperimentOutlined style={{ fontSize: 11, flexShrink: 0 }} />
               : tab.path
               ? <FileOutlined style={{ fontSize: 11, flexShrink: 0 }} />
               : <CodeOutlined style={{ fontSize: 11, flexShrink: 0 }} />

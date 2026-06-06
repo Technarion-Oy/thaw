@@ -60,7 +60,7 @@ export interface Tab {
   diff?: TabDiff | null; // populated for diff tabs; absent for regular SQL tabs
   isRunning?: boolean;   // per-tab running state; never persisted
   orphaned?: boolean;    // true when the backing file was deleted from disk
-  mcpOrigin?: boolean;   // true when the tab was created by an MCP tool (open_sql_tab)
+  mcpOrigin?: boolean;   // true when the tab was created by an MCP tool
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -139,6 +139,7 @@ interface QueryState {
   executeInNewTab: (sql: string) => void;
   loadInNewTab: (sql: string) => void;
   openMcpTab: (title: string, sql: string) => string;
+  openMcpNotebookTab: (title: string, content: string) => string;
 }
 
 // ── store ─────────────────────────────────────────────────────────────────────
@@ -521,6 +522,23 @@ export const useQueryStore = create<QueryState>()(
       tabs: [...state.tabs, newTab],
       activeTabId: newTab.id,
       sql,
+      selectedSql: "",
+      currentFile: null,
+      result: null,
+      error: null,
+      isRunning: false,
+    }));
+    return newTab.id;
+  },
+
+  openMcpNotebookTab: (title, content) => {
+    // Notebook tabs store nbformat JSON in the `sql` field — this is the
+    // existing convention used by openNotebook/openNotebookUnsaved.
+    const newTab = makeTab({ kind: "notebook", title, sql: content, savedSql: "", mcpOrigin: true });
+    set((state) => ({
+      tabs: [...state.tabs, newTab],
+      activeTabId: newTab.id,
+      sql: content,
       selectedSql: "",
       currentFile: null,
       result: null,

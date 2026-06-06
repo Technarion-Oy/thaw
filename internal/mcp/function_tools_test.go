@@ -38,7 +38,7 @@ func TestFunctionToolsRegistered(t *testing.T) {
 
 	for _, mode := range []string{ExecutionModeMetadata, ExecutionModeReadonly, ExecutionModeExplainOnly} {
 		t.Run(mode, func(t *testing.T) {
-			srv := buildServer(nil, mode, SessionConfig{}, nil, nil, nil)
+			srv := buildServer(nil, mode, SessionConfig{}, nil, nil, nil, nil)
 			names := toolNames(t, srv)
 			for _, tool := range functionTools {
 				if !hasToolName(names, tool) {
@@ -404,7 +404,7 @@ func openTestFnStore(t *testing.T) *fnmeta.Store {
 // that depend on the store being available.
 func newFnStoreTestSession(t *testing.T, store *fnmeta.Store) *mcpsdk.ClientSession {
 	t.Helper()
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil, store)
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil, store, nil)
 	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
 	httpSrv := httptest.NewServer(handler)
 	t.Cleanup(httpSrv.Close)

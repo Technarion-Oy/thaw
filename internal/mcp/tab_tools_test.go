@@ -24,7 +24,7 @@ import (
 // TestOpenSqlTabNotRegisteredWithNilEmit verifies that the open_sql_tab tool
 // is not registered when emit is nil (graceful degradation in tests).
 func TestOpenSqlTabNotRegisteredWithNilEmit(t *testing.T) {
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil, nil)
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil, nil, nil)
 	names := toolNames(t, srv)
 
 	if hasToolName(names, "open_sql_tab") {
@@ -36,7 +36,7 @@ func TestOpenSqlTabNotRegisteredWithNilEmit(t *testing.T) {
 // registered when a non-nil emit function is provided.
 func TestOpenSqlTabRegisteredWithEmit(t *testing.T) {
 	emit := func(string, interface{}) {}
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, emit, nil)
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, emit, nil, nil)
 	names := toolNames(t, srv)
 
 	if !hasToolName(names, "open_sql_tab") {
@@ -48,7 +48,7 @@ func TestOpenSqlTabRegisteredWithEmit(t *testing.T) {
 // returns an error.
 func TestOpenSqlTabEmptySQL(t *testing.T) {
 	emit := func(string, interface{}) {}
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, emit, nil)
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, emit, nil, nil)
 
 	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
 	httpSrv := httptest.NewServer(handler)
@@ -87,7 +87,7 @@ func TestOpenSqlTabEmitsEvent(t *testing.T) {
 		mu.Unlock()
 	}
 
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, emit, nil)
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, emit, nil, nil)
 
 	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
 	httpSrv := httptest.NewServer(handler)
@@ -150,7 +150,7 @@ func TestOpenSqlTabDefaultTitle(t *testing.T) {
 		mu.Unlock()
 	}
 
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, emit, nil)
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, emit, nil, nil)
 
 	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
 	httpSrv := httptest.NewServer(handler)
@@ -195,7 +195,7 @@ func TestOpenSqlTabTitleTruncation(t *testing.T) {
 		mu.Unlock()
 	}
 
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, emit, nil)
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, emit, nil, nil)
 
 	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
 	httpSrv := httptest.NewServer(handler)

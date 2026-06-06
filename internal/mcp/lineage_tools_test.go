@@ -21,7 +21,7 @@ import (
 // TestLineageToolsRegistered verifies that all 3 lineage tools are registered
 // on a server built with a nil client (tool listing does not invoke handlers).
 func TestLineageToolsRegistered(t *testing.T) {
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil, nil)
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil, nil, nil)
 	names := toolNames(t, srv)
 
 	expected := []string{"get_object_lineage", "get_schema_cross_deps", "get_database_cross_deps"}
@@ -39,7 +39,7 @@ func TestLineageToolsRegisteredInAllModes(t *testing.T) {
 
 	for _, mode := range []string{ExecutionModeMetadata, ExecutionModeReadonly, ExecutionModeExplainOnly} {
 		t.Run(mode, func(t *testing.T) {
-			srv := buildServer(nil, mode, SessionConfig{}, nil, nil, nil)
+			srv := buildServer(nil, mode, SessionConfig{}, nil, nil, nil, nil)
 			names := toolNames(t, srv)
 			for _, tool := range lineageTools {
 				if !hasToolName(names, tool) {
