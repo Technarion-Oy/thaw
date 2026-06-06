@@ -80,8 +80,9 @@ func TestMigrationWorkspaceToolsNotRegisteredWithoutRoot(t *testing.T) {
 
 // ── scan_migration_source tests ─────────────────────────────────────────────
 
-// TestScanMigrationSourceEmptyDir verifies that an empty dir returns an error.
-func TestScanMigrationSourceEmptyDir(t *testing.T) {
+// TestScanMigrationSourceMissingDir verifies that an empty dir string returns
+// an error.
+func TestScanMigrationSourceMissingDir(t *testing.T) {
 	tmp := t.TempDir()
 	cs := newWorkspaceTestSession(t, tmp)
 	ctx := context.Background()
@@ -515,9 +516,10 @@ func TestGenerateDbtProjectEmptySchemas(t *testing.T) {
 	}
 }
 
-// TestGenerateDbtProjectOutsideWorkspace verifies that an output dir outside
-// the workspace root is rejected with an access-denied error.
-func TestGenerateDbtProjectOutsideWorkspace(t *testing.T) {
+// TestGenerateDbtProjectOutsideWorkspaceNilClient verifies that a nil client
+// is rejected before path validation — preventing path-existence probing via
+// differing ValidateInsideOrEqual errors when no connection is available.
+func TestGenerateDbtProjectOutsideWorkspaceNilClient(t *testing.T) {
 	workspace := t.TempDir()
 	outside := t.TempDir()
 
@@ -538,10 +540,10 @@ func TestGenerateDbtProjectOutsideWorkspace(t *testing.T) {
 		t.Fatalf("CallTool: %v", err)
 	}
 	if !res.IsError {
-		t.Error("expected IsError=true for output dir outside workspace")
+		t.Error("expected IsError=true for nil client")
 	}
 	text := extractText(t, res)
-	if !strings.Contains(text, "access denied") {
-		t.Errorf("error should mention access denied, got: %s", text)
+	if !strings.Contains(text, "no active Snowflake connection") {
+		t.Errorf("nil-client check should fire before path validation, got: %s", text)
 	}
 }

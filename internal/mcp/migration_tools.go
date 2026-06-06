@@ -44,6 +44,10 @@ type generateDbtProjectInput struct {
 	Schemas map[string][]string    `json:"schemas" jsonschema:"map of database names to lists of schema names to include"`
 }
 
+// noopEmit is a no-op event callback for migration.NewService; MCP does not
+// stream progress events.
+var noopEmit = func(string, any) {}
+
 // validMigrationStrategy is the set of accepted table migration strategies.
 var validMigrationStrategy = map[migration.TableMigrationStrategy]bool{
 	migration.StrategyInPlace:            true,
@@ -71,7 +75,7 @@ func registerMigrationTools(srv *mcpsdk.Server, client *snowflake.Client, worksp
 			if err := filesystem.ValidateInsideOrEqual(in.Dir, workspaceRoot); err != nil {
 				return nil, nil, fmt.Errorf("access denied: %w", err)
 			}
-			svc := migration.NewService(func(string, any) {})
+			svc := migration.NewService(noopEmit)
 			objects, err := svc.ScanSource(in.Dir)
 			if err != nil {
 				return nil, nil, err
@@ -92,11 +96,11 @@ func registerMigrationTools(srv *mcpsdk.Server, client *snowflake.Client, worksp
 			if len(in.Schemas) == 0 {
 				return nil, nil, fmt.Errorf("schemas is required")
 			}
-			if err := filesystem.ValidateInsideOrEqual(in.Request.OutputDir, workspaceRoot); err != nil {
-				return nil, nil, fmt.Errorf("access denied: %w", err)
-			}
 			if client == nil {
 				return nil, nil, fmt.Errorf("no active Snowflake connection")
+			}
+			if err := filesystem.ValidateInsideOrEqual(in.Request.OutputDir, workspaceRoot); err != nil {
+				return nil, nil, fmt.Errorf("access denied: %w", err)
 			}
 			result, err := dbt.CreateProject(ctx, client, in.Request, in.Schemas)
 			if err != nil {
@@ -121,7 +125,7 @@ func registerMigrationTools(srv *mcpsdk.Server, client *snowflake.Client, worksp
 		if client == nil {
 			return nil, nil, fmt.Errorf("no active Snowflake connection")
 		}
-		svc := migration.NewService(func(string, any) {})
+		svc := migration.NewService(noopEmit)
 		diffItems, err := svc.Analyze(client, in.Objects, in.Database)
 		if err != nil {
 			return nil, nil, err
