@@ -29,6 +29,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `pipeline_tools.go` | `registerPipelineTools` — task graph, stage, and pipe inspection tools (`list_tasks`, `get_task_run_history`, `get_task_dependencies`, `list_stage_files`, `preview_stage_file`, `get_pipe_status`, `get_pipe_copy_history`, `open_task_graph`); delegates to `tasks`, `stage`, `fileformat`, `pipe` packages. `preview_stage_file` is mode-gated (readonly/explain_only). `open_task_graph` is emit-gated. `OpenTaskGraphPayload` type |
 | `function_tools.go` | `registerFunctionTools` — function/procedure metadata and invocation builder tools (`search_functions`, `get_function_tooltip`, `get_procedure_params`, `get_function_info`, `build_call_statement`, `build_function_select`); delegates to `fnmeta.Store`, `snowflake.Client`, and `procedure` packages; always registered in all modes |
 | `builder_tools.go` | `registerBuilderTools` — pure DDL builder tools (`build_create_stage_sql`, `build_alter_stage_sql`, `build_create_file_format_sql`, `build_create_pipe_sql`, `build_refresh_pipe_sql`, `build_create_secret_sql`, `build_storage_integration_sql`, `build_api_integration_sql`, `build_catalog_integration_sql`, `build_external_access_integration_sql`, `build_notification_integration_sql`, `build_security_integration_sql`); delegates to `stage`, `fileformat`, `pipe`, `secret`, `integrations` packages; no Snowflake client needed; always registered in all modes |
+| `migration_tools.go` | `registerMigrationTools` — migration diff/script engine and dbt project scaffolder tools (`scan_migration_source`, `analyze_migration`, `generate_migration_script`, `generate_dbt_project`); delegates to `migration` and `dbt` packages; `scan_migration_source` and `generate_dbt_project` are workspace-gated; `analyze_migration` and `generate_migration_script` are always registered |
 | `gate.go` | EXPLAIN precompilation gate: `queryRunner` interface, `CheckGate` (3-layer validation), `checkExplainPlan`, `readOnlyOps` allow-list, `extractOperations`, `isUSEStatement` |
 | `sql_tools.go` | `registerSQLTools` — SQL execution tool (`execute_snowflake_sql`) with EXPLAIN-gated pipeline (`executeSQLPipeline`), LIMIT injection (`injectLimit`), and trusted context-switching tools (`use_role`, `use_warehouse`, `use_database`, `use_schema`); only registered in `readonly`/`explain_only` modes |
 | `gate_test.go` | Unit tests for the EXPLAIN gate and `checkExplainPlan` |
@@ -44,6 +45,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `workspace_tools_test.go` | Unit tests for workspace tools (registration when `WorkspaceRoot` is set, absence when empty, input validation, path-escape sandbox tests, functional tests with temp directories) |
 | `function_tools_test.go` | Unit tests for function/procedure tools (registration in all modes, nil fnStore, empty inputs, nil client, success paths for `build_call_statement` and `build_function_select`) |
 | `builder_tools_test.go` | Unit tests for DDL builder tools (registration in all modes, empty db/schema validation, success paths for stage, pipe, secret, and all six integration builders) |
+| `migration_tools_test.go` | Unit tests for migration/dbt tools (registration in all modes, workspace-gating, input validation, sandbox path tests, success paths for scan and script generation) |
 | `mcp_test.go` | SSE round-trip test (external client lists tools), port-allocation test, diagnostics tool tests, mode-gating tests |
 | `doc.go` | Package doc + `thaw:domain: MCP Server` annotation |
 
@@ -115,7 +117,7 @@ Metadata needs (listing databases, describing tables, etc.) are served by the de
 
 ### Tools
 
-The server exposes up to 61 tools in metadata mode (without workspace tools) or 68 (with `WorkspaceRoot` set), and up to 75 in readonly/explain_only modes (with `EditorContextStore`, `emit`, and `WorkspaceRoot` all provided):
+The server exposes up to 63 tools in metadata mode (without workspace tools) or 72 (with `WorkspaceRoot` set), and up to 79 in readonly/explain_only modes (with `EditorContextStore`, `emit`, and `WorkspaceRoot` all provided):
 
 **Schema-browsing tools** (always registered, `tools.go`): `get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`.
 
@@ -209,6 +211,17 @@ The server exposes up to 61 tools in metadata mode (without workspace tools) or 
 | `build_security_integration_sql` | Generate CREATE SECURITY INTEGRATION DDL |
 
 All builder tools are pure SQL generators — no Snowflake client required, no SQL execution. They delegate to the existing domain builder packages (`stage`, `fileformat`, `pipe`, `secret`, `integrations`) and return the generated DDL string.
+
+**Migration & dbt tools** (`migration_tools.go`):
+
+| Tool | Gating | Description |
+|---|---|---|
+| `scan_migration_source` | Workspace-gated | Scan a local directory for `.sql` files and return the DDL objects found (delegates to `migration.ScanSource`) |
+| `analyze_migration` | Always registered (nil-client check at call time) | Compare local DDL objects against a live Snowflake database and return a diff for each object (delegates to `migration.Analyze`) |
+| `generate_migration_script` | Always registered (pure function) | Generate a human-readable SQL migration script from diff items (delegates to `migration.GenerateScript`) |
+| `generate_dbt_project` | Workspace-gated (nil-client check at call time) | Scaffold a dbt project pre-wired to the active Snowflake connection (delegates to `dbt.CreateProject`) |
+
+`scan_migration_source` and `generate_dbt_project` are only registered when `WorkspaceRoot` is set in `SessionConfig`, matching the `registerWorkspaceTools` pattern. Both validate path inputs against the workspace root using `filesystem.ValidateInsideOrEqual`. `analyze_migration` and `generate_migration_script` are always registered (like builder tools); `analyze_migration` checks for a nil client at call time. All tools use a no-op emit callback since MCP does not stream progress events.
 
 **Workspace tools** (registered when `WorkspaceRoot` is set, `workspace_tools.go`; sandboxed to the configured workspace root):
 

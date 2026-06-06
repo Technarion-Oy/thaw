@@ -32,6 +32,7 @@ import (
 // Workspace tools (git_*, list_directory, read_file, search_files) are NOT
 // listed because the test uses an empty SessionConfig (no WorkspaceRoot).
 var expectedTools = []string{
+	"analyze_migration",
 	"build_alter_stage_sql",
 	"build_api_integration_sql",
 	"build_call_statement",
@@ -49,6 +50,7 @@ var expectedTools = []string{
 	"describe_table",
 	"explain_query",
 	"format_sql",
+	"generate_migration_script",
 	"get_all_data_types",
 	"get_data_retention",
 	"get_database_cross_deps",

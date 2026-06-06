@@ -60,6 +60,7 @@ func buildServer(client *snowflake.Client, mode string, cfg SessionConfig, edito
 
 	registerFunctionTools(srv, client, fnStore)
 	registerBuilderTools(srv)
+	registerMigrationTools(srv, client, cfg.WorkspaceRoot)
 
 	if mode == ExecutionModeReadonly || mode == ExecutionModeExplainOnly {
 		registerSQLTools(srv, client, mode, cfg)
