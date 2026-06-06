@@ -29,9 +29,11 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
     ListSchemas(database).then(setDbSchemas).catch(() => {});
   }, [database]);
 
-  // Merge schemas from ER data with all database schemas
+  // Merge schemas from ER data with all database schemas, excluding INFORMATION_SCHEMA
   const allSchemas = useMemo(
-    () => [...new Set([...dataSchemas, ...dbSchemas])].sort(),
+    () => [...new Set([...dataSchemas, ...dbSchemas])]
+      .filter((s) => s.toUpperCase() !== "INFORMATION_SCHEMA")
+      .sort(),
     [dataSchemas, dbSchemas],
   );
 

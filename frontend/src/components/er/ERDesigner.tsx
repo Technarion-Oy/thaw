@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Technarion Oy. All rights reserved.
 // @thaw-domain: ER Designer
 
-import { useState, useEffect, useRef, useCallback } from "react";
-import { Modal, Button, Input, Select, message as antMessage } from "antd";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { Modal, Button, Input, Select, Checkbox, message as antMessage } from "antd";
 import { PlusOutlined, DeleteOutlined, CopyOutlined } from "@ant-design/icons";
 import { ExecuteQuery, ListSchemas } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
@@ -360,8 +360,37 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
   // ── Fetch schemas on mount ──────────────────────────────────────────────────
 
   useEffect(() => {
-    ListSchemas(database).then(setSchemas).catch(() => {});
+    ListSchemas(database)
+      .then((s) => setSchemas(s.filter((n) => n.toUpperCase() !== "INFORMATION_SCHEMA")))
+      .catch(() => {});
   }, [database]);
+
+  // ── Schema filter for canvas ──────────────────────────────────────────────
+
+  const canvasSchemas = useMemo(() => {
+    const fromTables = tables.map((t) => t.schema).filter(Boolean);
+    return [...new Set([...fromTables, ...schemas])]
+      .filter((s) => s.toUpperCase() !== "INFORMATION_SCHEMA")
+      .sort();
+  }, [tables, schemas]);
+
+  const [visibleSchemas, setVisibleSchemas] = useState<Set<string> | null>(null);
+
+  // Show all schemas by default (null = no filter)
+  const effectiveVisibleSchemas = visibleSchemas ?? new Set(canvasSchemas);
+
+  const toggleSchema = (schema: string) => {
+    setVisibleSchemas((prev) => {
+      const current = prev ?? new Set(canvasSchemas);
+      const next = new Set(current);
+      if (next.has(schema)) {
+        next.delete(schema);
+      } else {
+        next.add(schema);
+      }
+      return next;
+    });
+  };
 
   // ── Scroll sidebar to selected table ───────────────────────────────────────
 
@@ -691,12 +720,23 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: 4,
+                gap: 8,
                 padding: "6px 12px",
                 borderBottom: "1px solid var(--border)",
-                justifyContent: "flex-end",
+                flexWrap: "wrap",
               }}
             >
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", flex: 1, alignItems: "center" }}>
+                {canvasSchemas.map((s) => (
+                  <Checkbox
+                    key={s}
+                    checked={effectiveVisibleSchemas.has(s)}
+                    onChange={() => toggleSchema(s)}
+                  >
+                    <span style={{ fontSize: 11 }}>{s}</span>
+                  </Checkbox>
+                ))}
+              </div>
               <Button size="small" icon={<CopyOutlined />} onClick={copyMermaid}>
                 Copy Mermaid
               </Button>
@@ -706,6 +746,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
               tables={tables}
               mode="edit"
               database={database}
+              visibleSchemas={effectiveVisibleSchemas}
               selectedTableId={selectedTableId}
               onTableSelect={setSelectedTableId}
               onConnect={handleFKConnect}
