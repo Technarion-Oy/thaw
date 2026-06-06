@@ -107,6 +107,7 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
       {/* Canvas area */}
       <div style={{ height: "70vh" }}>
         <ERCanvas
+          key={database}
           tables={designerTables}
           mode="readonly"
           database={database}

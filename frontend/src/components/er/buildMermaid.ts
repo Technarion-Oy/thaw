@@ -61,7 +61,8 @@ export function buildMermaid(
       if (!validKeys.has(`${refSchema.toUpperCase()}\x00${refTable.trim().toUpperCase()}`)) continue;
       const fromId = entityId(t.schema, t.name.trim());
       const toId = entityId(refSchema, refTable.trim());
-      const pairKey = `${fromId}__${toId}`;
+      // Sort so bidirectional FKs between the same pair collapse into one line
+      const pairKey = [fromId, toId].sort().join("__");
       if (seen.has(pairKey)) continue;
       seen.add(pairKey);
       lines.push(`  ${fromId} }o--|| ${toId} : "FK"`);

@@ -561,6 +561,8 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
   );
 
   // ── Context menu handlers ──────────────────────────────────────────────────
+  // Empty dep arrays are intentional: tablesRef is a stable ref,
+  // setTables/setSelectedTableIds are stable state setters.
 
   const handleDuplicateTable = useCallback(
     (tableId: string) => {
@@ -577,14 +579,6 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
       };
       setTables((prev) => [...prev, newTable]);
       setSelectedTableIds([newTable.id]);
-    },
-    [],
-  );
-
-  const handleDeleteTable = useCallback(
-    (tableId: string) => {
-      setTables((prev) => prev.filter((t) => t.id !== tableId));
-      setSelectedTableIds((prev) => prev.filter((id) => id !== tableId));
     },
     [],
   );
@@ -934,7 +928,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
               onColumnRename={handleColumnRename}
               onColumnRemove={removeColumn}
               onDuplicateTable={handleDuplicateTable}
-              onDeleteTable={handleDeleteTable}
+              onDeleteTable={removeTable}
               onAddFK={handleAddFK}
               onRemoveFKs={handleRemoveFKs}
             />

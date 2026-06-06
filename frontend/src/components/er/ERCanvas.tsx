@@ -558,8 +558,8 @@ function ERCanvasInner({
       {ctxMenu && (
         <ERContextMenu
           ctxMenu={ctxMenu}
-          selectedNodeIds={getNodes().filter((n) => n.selected).map((n) => n.id)}
-          onClose={() => setCtxMenu(null)}
+          selectedNodeIds={selectedTableIds ?? []}
+          onClose={handlePaneClick}
           onDuplicateTable={onDuplicateTable}
           onDeleteTable={onDeleteTable}
           onAddFK={onAddFK}
