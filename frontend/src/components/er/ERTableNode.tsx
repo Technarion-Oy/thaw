@@ -56,7 +56,9 @@ const SHORT_TYPES: Record<string, string> = {
 };
 
 function abbreviateType(dt: string): string {
-  return SHORT_TYPES[dt] ?? dt.slice(0, 4);
+  // Extract base type name before any parenthesized parameters
+  const base = dt.replace(/\s*\(.*$/, "").trim();
+  return SHORT_TYPES[base] ?? base.slice(0, 4);
 }
 
 function ERTableNodeInner({ data, selected }: NodeProps) {

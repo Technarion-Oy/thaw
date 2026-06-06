@@ -2,7 +2,7 @@
 // @thaw-domain: ER Designer
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Modal, Button, Input, Select, Checkbox, message as antMessage } from "antd";
+import { Modal, Button, Input, Select, Checkbox, AutoComplete, message as antMessage } from "antd";
 import { PlusOutlined, DeleteOutlined, CopyOutlined } from "@ant-design/icons";
 import { ExecuteQuery, ListSchemas } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
@@ -643,17 +643,23 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
                         onBlur={(e) => updateColumn(t.id, c.id, { name: normalizeIdentifier(e.target.value) })}
                         style={{ flex: 1, fontFamily: "monospace", fontSize: 11, minWidth: 80 }}
                       />
-                      <Select
+                      <AutoComplete
                         size="small"
                         value={c.dataType}
                         onChange={(v) => updateColumn(t.id, c.id, { dataType: v })}
-                        style={{ width: 130, flexShrink: 0 }}
-                        showSearch
+                        onBlur={(e) => {
+                          const val = (e.target as HTMLInputElement).value.trim().toUpperCase();
+                          if (val) updateColumn(t.id, c.id, { dataType: val });
+                        }}
+                        style={{ width: 150, flexShrink: 0 }}
                         popupMatchSelectWidth={false}
                         options={SF_DATA_TYPES.map((dt) => ({
                           value: dt.name,
                           label: dt.paramHint ? `${dt.name} ${dt.paramHint}` : dt.name,
                         }))}
+                        filterOption={(input, option) =>
+                          (option?.label as string ?? "").toUpperCase().includes(input.toUpperCase())
+                        }
                       />
                       <Button
                         size="small"

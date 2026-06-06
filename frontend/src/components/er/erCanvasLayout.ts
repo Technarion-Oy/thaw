@@ -136,10 +136,19 @@ export function applyERLayout(nodes: Node[], edges: Edge[]): Node[] {
   });
 }
 
-/** Map Snowflake INFORMATION_SCHEMA type strings to the canonical SF_TYPES list. */
+/**
+ * Normalise a Snowflake INFORMATION_SCHEMA data type string to a canonical
+ * form.  Preserves any parenthesised parameters (e.g. "VARCHAR(50)" stays
+ * "VARCHAR(50)", "NUMBER(10,2)" stays "NUMBER(10,2)").  Unknown aliases
+ * (TEXT, STRING, NVARCHAR, …) are mapped to their canonical base type.
+ */
 export function normalizeDataType(dt: string): string {
+  const paramsMatch = dt.match(/(\([^)]*\))\s*$/);
+  const params = paramsMatch ? paramsMatch[1] : "";
   const base = dt.replace(/\s*\([^)]*\)/g, "").trim().toUpperCase();
-  if (SF_TYPES.includes(base)) return base;
+
+  if (SF_TYPES.includes(base)) return base + params;
+
   const aliases: Record<string, string> = {
     TEXT: "VARCHAR", STRING: "VARCHAR", CHAR: "VARCHAR", CHARACTER: "VARCHAR",
     NCHAR: "VARCHAR", NVARCHAR: "VARCHAR", NVARCHAR2: "VARCHAR",
@@ -150,7 +159,7 @@ export function normalizeDataType(dt: string): string {
     DATETIME: "TIMESTAMP_NTZ", TIMESTAMP: "TIMESTAMP_NTZ",
     TIMESTAMP_TZ: "TIMESTAMP_LTZ",
   };
-  return aliases[base] ?? "VARCHAR";
+  return (aliases[base] ?? "VARCHAR") + params;
 }
 
 /** Convert snowflake.ERDiagramData to DesignerTable[] with FK wiring. */
