@@ -71,6 +71,7 @@ func GetCodebaseSemanticMap() string {
         "internal/procedure/",
         "internal/secret/",
         "internal/snowflake/",
+        "internal/sqlutil/",
         "internal/stage/",
         "internal/table/",
         "internal/tasks/",
@@ -151,6 +152,7 @@ func GetCodebaseSemanticMap() string {
       "frontend_paths": [
         "frontend/src/components/settings/MCPSessionsModal.tsx",
         "frontend/src/components/toolbar/MCPIndicator.tsx",
+        "frontend/src/hooks/useEditorContextSync.ts",
         "frontend/src/store/mcpStore.ts"
       ],
       "description": "Model Context Protocol servers exposing the Snowflake connection to external AI clients over localhost."

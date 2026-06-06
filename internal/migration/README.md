@@ -69,7 +69,7 @@ func GenerateScript(items []MigrationDiffItem, database string, strategy TableMi
 - The `in_place` strategy uses `DESCRIBE TABLE` for the remote column list and parses the local DDL with `parseLocalTableColumns`; it issues individual `ALTER TABLE ADD/DROP/ALTER COLUMN TYPE` statements.
 - The `blue_green_swap` strategy rewrites the local DDL table name via `replaceDDLTableName`, creates the temp table, copies shared columns, swaps with `ALTER TABLE … SWAP WITH`, then drops the temp.
 - Empty tables (row count 0) always use destructive rebuild regardless of the chosen strategy.
-- `ScanSource` uses `internal/ddl.Split` and `internal/ddl.Parse` for statement splitting and object kind detection.
+- `ScanSource` uses `internal/sqlutil.Split` and `internal/ddl.Parse` for statement splitting and object kind detection.
 
 ## Gotchas
 
