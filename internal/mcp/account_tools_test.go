@@ -34,7 +34,7 @@ func TestAccountToolsRegistered(t *testing.T) {
 
 	for _, mode := range []string{ExecutionModeMetadata, ExecutionModeReadonly, ExecutionModeExplainOnly} {
 		t.Run(mode, func(t *testing.T) {
-			srv := buildServer(nil, mode, SessionConfig{}, nil, nil)
+			srv := buildServer(nil, mode, SessionConfig{}, nil, nil, nil)
 			names := toolNames(t, srv)
 			for _, tool := range accountTools {
 				if !hasToolName(names, tool) {

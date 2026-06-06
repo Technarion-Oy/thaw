@@ -33,7 +33,7 @@ import (
 func newWorkspaceTestSession(t *testing.T, workspaceRoot string) *mcpsdk.ClientSession {
 	t.Helper()
 	cfg := SessionConfig{WorkspaceRoot: workspaceRoot}
-	srv := buildServer(nil, ExecutionModeMetadata, cfg, nil, nil)
+	srv := buildServer(nil, ExecutionModeMetadata, cfg, nil, nil, nil)
 	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
 	httpSrv := httptest.NewServer(handler)
 	t.Cleanup(httpSrv.Close)
@@ -67,7 +67,7 @@ func TestWorkspaceToolsRegistered(t *testing.T) {
 	for _, mode := range []string{ExecutionModeMetadata, ExecutionModeReadonly, ExecutionModeExplainOnly} {
 		t.Run(mode, func(t *testing.T) {
 			cfg := SessionConfig{WorkspaceRoot: tmp}
-			srv := buildServer(nil, mode, cfg, nil, nil)
+			srv := buildServer(nil, mode, cfg, nil, nil, nil)
 			names := toolNames(t, srv)
 			for _, tool := range workspaceTools {
 				if !hasToolName(names, tool) {
@@ -91,7 +91,7 @@ func TestWorkspaceToolsNotRegisteredWithoutRoot(t *testing.T) {
 		"search_files",
 	}
 
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil)
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil, nil)
 	names := toolNames(t, srv)
 	for _, tool := range workspaceTools {
 		if hasToolName(names, tool) {

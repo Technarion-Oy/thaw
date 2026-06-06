@@ -21,7 +21,7 @@ import (
 // TestProfileToolsRegistered verifies that both profiling tools are registered
 // on a server built with a nil client (tool listing does not invoke handlers).
 func TestProfileToolsRegistered(t *testing.T) {
-	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil)
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil, nil)
 	names := toolNames(t, srv)
 
 	expected := []string{"explain_query", "get_explain_diagnostics"}
@@ -39,7 +39,7 @@ func TestProfileToolsRegisteredInAllModes(t *testing.T) {
 
 	for _, mode := range []string{ExecutionModeMetadata, ExecutionModeReadonly, ExecutionModeExplainOnly} {
 		t.Run(mode, func(t *testing.T) {
-			srv := buildServer(nil, mode, SessionConfig{}, nil, nil)
+			srv := buildServer(nil, mode, SessionConfig{}, nil, nil, nil)
 			names := toolNames(t, srv)
 			for _, tool := range profileTools {
 				if !hasToolName(names, tool) {

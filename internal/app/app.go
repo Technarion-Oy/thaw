@@ -170,6 +170,7 @@ func (a *App) startup(ctx context.Context) {
 		storeDir := filepath.Join(cfgDir, "Thaw")
 		if store, err := fnmeta.Open(storeDir); err == nil {
 			a.fnStore = store
+			a.mcpManager.SetFnStore(store)
 			go func() {
 				if err := store.LoadFallback(); err != nil {
 					logger.L.Warn("fnmeta: load fallback failed", "err", err)
