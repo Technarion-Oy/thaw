@@ -575,7 +575,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
               </div>
             )}
 
-            {tables.map((t) => (
+            {tables.filter((t) => !t.schema || effectiveVisibleSchemas.has(t.schema)).map((t) => (
               <div
                 key={t.id}
                 ref={(el) => {
