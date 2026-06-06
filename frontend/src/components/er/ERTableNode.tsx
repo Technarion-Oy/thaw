@@ -7,16 +7,52 @@ import { ER_NODE_WIDTH, ER_COL_LIMIT, type DesignerColumn, normalizeIdentifier }
 import type { ERTableNodeData } from "./erCanvasLayout";
 
 const SHORT_TYPES: Record<string, string> = {
-  VARCHAR: "VC",
+  // Numeric — exact
   NUMBER: "NUM",
-  BOOLEAN: "BOOL",
-  TIMESTAMP_NTZ: "TS",
-  TIMESTAMP_LTZ: "TSZ",
+  DECIMAL: "DEC",
+  NUMERIC: "NUM",
+  INT: "INT",
+  INTEGER: "INT",
+  BIGINT: "BINT",
+  SMALLINT: "SINT",
+  TINYINT: "TINT",
+  BYTEINT: "BYTE",
+  // Numeric — approximate
   FLOAT: "FLT",
-  VARIANT: "VAR",
-  ARRAY: "ARR",
-  OBJECT: "OBJ",
+  FLOAT4: "FLT4",
+  FLOAT8: "FLT8",
+  DOUBLE: "DBL",
+  "DOUBLE PRECISION": "DBL",
+  REAL: "REAL",
+  // String
+  VARCHAR: "VC",
+  CHAR: "CHR",
+  CHARACTER: "CHR",
+  STRING: "STR",
+  TEXT: "TXT",
+  // Binary
+  BINARY: "BIN",
+  VARBINARY: "VBIN",
+  // Logical
+  BOOLEAN: "BOOL",
+  // Date & Time
   DATE: "DATE",
+  DATETIME: "DTTM",
+  TIME: "TIME",
+  TIMESTAMP: "TS",
+  TIMESTAMP_LTZ: "TSZ",
+  TIMESTAMP_NTZ: "TS",
+  TIMESTAMP_TZ: "TSTZ",
+  // Semi-structured
+  VARIANT: "VAR",
+  OBJECT: "OBJ",
+  ARRAY: "ARR",
+  MAP: "MAP",
+  // Geospatial
+  GEOGRAPHY: "GEO",
+  GEOMETRY: "GEOM",
+  // Vector
+  VECTOR: "VEC",
 };
 
 function abbreviateType(dt: string): string {

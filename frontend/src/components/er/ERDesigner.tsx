@@ -8,7 +8,7 @@ import { ExecuteQuery, ListSchemas } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 import ERCanvas from "./ERCanvas";
 import { initFromERData, normalizeDataType } from "./erCanvasLayout";
-import { type DesignerColumn, type DesignerTable, SF_TYPES, normalizeIdentifier } from "./erTypes";
+import { type DesignerColumn, type DesignerTable, SF_DATA_TYPES, normalizeIdentifier } from "./erTypes";
 
 interface Props {
   database: string;
@@ -647,9 +647,13 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
                         size="small"
                         value={c.dataType}
                         onChange={(v) => updateColumn(t.id, c.id, { dataType: v })}
-                        style={{ width: 100, flexShrink: 0 }}
+                        style={{ width: 130, flexShrink: 0 }}
                         showSearch
-                        options={SF_TYPES.map((sf) => ({ value: sf, label: sf }))}
+                        popupMatchSelectWidth={false}
+                        options={SF_DATA_TYPES.map((dt) => ({
+                          value: dt.name,
+                          label: dt.paramHint ? `${dt.name} ${dt.paramHint}` : dt.name,
+                        }))}
                       />
                       <Button
                         size="small"

@@ -17,18 +17,62 @@ export interface DesignerTable {
   columns: DesignerColumn[];
 }
 
-export const SF_TYPES = [
-  "NUMBER",
-  "VARCHAR",
-  "BOOLEAN",
-  "DATE",
-  "TIMESTAMP_NTZ",
-  "TIMESTAMP_LTZ",
-  "FLOAT",
-  "VARIANT",
-  "ARRAY",
-  "OBJECT",
+/**
+ * Full Snowflake data type catalogue, mirroring internal/snowflake/datatypes.go.
+ * Each entry has a canonical name and an optional parameter hint for the UI.
+ */
+export const SF_DATA_TYPES: { name: string; paramHint: string }[] = [
+  // Numeric — exact
+  { name: "NUMBER", paramHint: "(precision, scale)" },
+  { name: "DECIMAL", paramHint: "(precision, scale)" },
+  { name: "NUMERIC", paramHint: "(precision, scale)" },
+  { name: "INT", paramHint: "" },
+  { name: "INTEGER", paramHint: "" },
+  { name: "BIGINT", paramHint: "" },
+  { name: "SMALLINT", paramHint: "" },
+  { name: "TINYINT", paramHint: "" },
+  { name: "BYTEINT", paramHint: "" },
+  // Numeric — approximate
+  { name: "FLOAT", paramHint: "" },
+  { name: "FLOAT4", paramHint: "" },
+  { name: "FLOAT8", paramHint: "" },
+  { name: "DOUBLE", paramHint: "" },
+  { name: "DOUBLE PRECISION", paramHint: "" },
+  { name: "REAL", paramHint: "" },
+  // String
+  { name: "VARCHAR", paramHint: "(length)" },
+  { name: "CHAR", paramHint: "(length)" },
+  { name: "CHARACTER", paramHint: "(length)" },
+  { name: "STRING", paramHint: "" },
+  { name: "TEXT", paramHint: "" },
+  // Binary
+  { name: "BINARY", paramHint: "(length)" },
+  { name: "VARBINARY", paramHint: "(length)" },
+  // Logical
+  { name: "BOOLEAN", paramHint: "" },
+  // Date & Time
+  { name: "DATE", paramHint: "" },
+  { name: "DATETIME", paramHint: "" },
+  { name: "TIME", paramHint: "(scale)" },
+  { name: "TIMESTAMP", paramHint: "(scale)" },
+  { name: "TIMESTAMP_LTZ", paramHint: "(scale)" },
+  { name: "TIMESTAMP_NTZ", paramHint: "(scale)" },
+  { name: "TIMESTAMP_TZ", paramHint: "(scale)" },
+  // Semi-structured
+  { name: "VARIANT", paramHint: "" },
+  { name: "OBJECT", paramHint: "(name type, ...)" },
+  { name: "ARRAY", paramHint: "(element_type)" },
+  // Structured
+  { name: "MAP", paramHint: "(key_type, value_type)" },
+  // Geospatial
+  { name: "GEOGRAPHY", paramHint: "" },
+  { name: "GEOMETRY", paramHint: "" },
+  // Vector
+  { name: "VECTOR", paramHint: "(element_type, dimension)" },
 ];
+
+/** Flat list of canonical type names (for normalizeDataType lookups). */
+export const SF_TYPES = SF_DATA_TYPES.map((dt) => dt.name);
 
 /**
  * Normalise a Snowflake identifier following Snowflake conventions:
