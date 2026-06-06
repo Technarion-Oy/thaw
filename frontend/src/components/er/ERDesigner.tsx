@@ -27,6 +27,110 @@ function setsEqual<T>(a: Set<T>, b: Set<T>): boolean {
   return true;
 }
 
+// ── FK dialog (extracted component) ────────────────────────────────────────────
+
+interface FKDialogState {
+  childTableId: string;
+  parentTableId: string;
+  childColId: string;
+  parentColId: string;
+}
+
+function FKDialog({
+  fkDialog,
+  tables,
+  onClose,
+  onCommit,
+  onUpdate,
+}: {
+  fkDialog: FKDialogState;
+  tables: DesignerTable[];
+  onClose: () => void;
+  onCommit: () => void;
+  onUpdate: (patch: FKDialogState) => void;
+}) {
+  const childTable = tables.find((t) => t.id === fkDialog.childTableId);
+  const parentTable = tables.find((t) => t.id === fkDialog.parentTableId);
+  const childCols = childTable?.columns.filter((c) => c.name.trim()) ?? [];
+  const parentCols = parentTable?.columns.filter((c) => c.name.trim()) ?? [];
+  const childLabel = childTable
+    ? `${childTable.schema}.${childTable.name || "(unnamed)"}`
+    : "(unknown)";
+  const parentLabel = parentTable
+    ? `${parentTable.schema}.${parentTable.name || "(unnamed)"}`
+    : "(unknown)";
+
+  return (
+    <Modal
+      open
+      title={
+        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <LinkOutlined style={{ color: "var(--accent)" }} />
+          Add FK Reference
+        </span>
+      }
+      okText="Add Reference"
+      okButtonProps={{ disabled: !fkDialog.childColId || !fkDialog.parentColId }}
+      onCancel={onClose}
+      onOk={onCommit}
+      width={480}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 8 }}>
+        {/* Direction header with swap button */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontFamily: "monospace", fontSize: 12, flex: 1, textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {childLabel}
+          </span>
+          <Button
+            size="small"
+            icon={<SwapOutlined />}
+            onClick={() =>
+              onUpdate({
+                childTableId: fkDialog.parentTableId,
+                parentTableId: fkDialog.childTableId,
+                childColId: fkDialog.parentColId,
+                parentColId: fkDialog.childColId,
+              })
+            }
+            title="Swap direction"
+          />
+          <span style={{ fontFamily: "monospace", fontSize: 12, flex: 1, textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {parentLabel}
+          </span>
+        </div>
+        <div>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>
+            Child column (on {childLabel})
+          </div>
+          <Select
+            style={{ width: "100%" }}
+            placeholder="Select column"
+            value={fkDialog.childColId || undefined}
+            onChange={(v) => onUpdate({ ...fkDialog, childColId: v })}
+            options={childCols.map((c) => ({ value: c.id, label: c.name }))}
+            showSearch
+            optionFilterProp="label"
+          />
+        </div>
+        <div>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>
+            Parent column (on {parentLabel})
+          </div>
+          <Select
+            style={{ width: "100%" }}
+            placeholder="Select column"
+            value={fkDialog.parentColId || undefined}
+            onChange={(v) => onUpdate({ ...fkDialog, parentColId: v })}
+            options={parentCols.map((c) => ({ value: c.id, label: c.name }))}
+            showSearch
+            optionFilterProp="label"
+          />
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ── SQL generation (diff-based) ───────────────────────────────────────────────
 
 /**
@@ -497,12 +601,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
 
   // FK dialog state (two tables pre-populated from multi-select)
   // "child" = table that holds the FK column, "parent" = referenced table
-  const [fkDialog, setFkDialog] = useState<{
-    childTableId: string;
-    parentTableId: string;
-    childColId: string;
-    parentColId: string;
-  } | null>(null);
+  const [fkDialog, setFkDialog] = useState<FKDialogState | null>(null);
 
   const handleAddFK = useCallback(
     (tableIdA: string, tableIdB: string) => {
@@ -844,88 +943,15 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
       </Modal>
 
       {/* Add FK reference dialog (two tables pre-populated from multi-select) */}
-      {fkDialog && (() => {
-        const childTable = tables.find((t) => t.id === fkDialog.childTableId);
-        const parentTable = tables.find((t) => t.id === fkDialog.parentTableId);
-        const childCols = childTable?.columns.filter((c) => c.name.trim()) ?? [];
-        const parentCols = parentTable?.columns.filter((c) => c.name.trim()) ?? [];
-        const childLabel = childTable
-          ? `${childTable.schema}.${childTable.name || "(unnamed)"}`
-          : "(unknown)";
-        const parentLabel = parentTable
-          ? `${parentTable.schema}.${parentTable.name || "(unnamed)"}`
-          : "(unknown)";
-
-        return (
-          <Modal
-            open
-            title={
-              <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <LinkOutlined style={{ color: "var(--accent)" }} />
-                Add FK Reference
-              </span>
-            }
-            okText="Add Reference"
-            okButtonProps={{ disabled: !fkDialog.childColId || !fkDialog.parentColId }}
-            onCancel={() => setFkDialog(null)}
-            onOk={commitFK}
-            width={480}
-          >
-            <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 8 }}>
-              {/* Direction header with swap button */}
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontFamily: "monospace", fontSize: 12, flex: 1, textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {childLabel}
-                </span>
-                <Button
-                  size="small"
-                  icon={<SwapOutlined />}
-                  onClick={() =>
-                    setFkDialog({
-                      childTableId: fkDialog.parentTableId,
-                      parentTableId: fkDialog.childTableId,
-                      childColId: fkDialog.parentColId,
-                      parentColId: fkDialog.childColId,
-                    })
-                  }
-                  title="Swap direction"
-                />
-                <span style={{ fontFamily: "monospace", fontSize: 12, flex: 1, textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {parentLabel}
-                </span>
-              </div>
-              <div>
-                <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>
-                  Child column (on {childLabel})
-                </div>
-                <Select
-                  style={{ width: "100%" }}
-                  placeholder="Select column"
-                  value={fkDialog.childColId || undefined}
-                  onChange={(v) => setFkDialog({ ...fkDialog, childColId: v })}
-                  options={childCols.map((c) => ({ value: c.id, label: c.name }))}
-                  showSearch
-                  optionFilterProp="label"
-                />
-              </div>
-              <div>
-                <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>
-                  Parent column (on {parentLabel})
-                </div>
-                <Select
-                  style={{ width: "100%" }}
-                  placeholder="Select column"
-                  value={fkDialog.parentColId || undefined}
-                  onChange={(v) => setFkDialog({ ...fkDialog, parentColId: v })}
-                  options={parentCols.map((c) => ({ value: c.id, label: c.name }))}
-                  showSearch
-                  optionFilterProp="label"
-                />
-              </div>
-            </div>
-          </Modal>
-        );
-      })()}
+      {fkDialog && (
+        <FKDialog
+          fkDialog={fkDialog}
+          tables={tables}
+          onClose={() => setFkDialog(null)}
+          onCommit={commitFK}
+          onUpdate={setFkDialog}
+        />
+      )}
 
       {/* SQL review modal */}
       <Modal

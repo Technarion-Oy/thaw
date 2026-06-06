@@ -44,10 +44,15 @@ export function saveERLayout(database: string, positions: PositionMap): void {
   );
 }
 
-/** Load saved positions, or null if none exist. */
+/** Load saved positions, or null if none exist.
+ *  Checks pending (unflushed) data first so callers always see the latest
+ *  positions even if the debounce timer hasn't fired yet. */
 export function loadERLayout(database: string): PositionMap | null {
+  const key = storageKey(database);
+  const pending = pendingData.get(key);
+  if (pending) return { ...pending.positions };
   try {
-    const raw = localStorage.getItem(storageKey(database));
+    const raw = localStorage.getItem(key);
     if (!raw) return null;
     return JSON.parse(raw) as PositionMap;
   } catch {

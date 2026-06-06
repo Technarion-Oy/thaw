@@ -84,6 +84,15 @@ function ERContextMenu({
     });
   }, [ctxMenu.x, ctxMenu.y]);
 
+  // Dismiss on Escape key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
   const twoSelected = selectedNodeIds.length === 2 && selectedNodeIds.includes(ctxMenu.tableId);
 
   return (
@@ -206,10 +215,12 @@ function ERCanvasInner({
   const initialLayoutDone = useRef(false);
   const prevTableIds = useRef<string>("");
 
-  // Stable refs for callbacks — avoids re-running the main layout effect when
-  // callback identity changes (e.g. parent re-renders)
+  // Stable refs — avoids re-running effects / recreating callbacks when
+  // prop identity changes (e.g. parent re-renders)
   const callbackRefs = useRef({ onTableRename, onColumnRename, onColumnRemove });
   callbackRefs.current = { onTableRename, onColumnRename, onColumnRemove };
+  const tablesRef = useRef(tables);
+  tablesRef.current = tables;
 
   // Flush any pending debounced position save on unmount
   useEffect(() => {
@@ -299,9 +310,11 @@ function ERCanvasInner({
       setNodes(positioned);
       initialLayoutDone.current = true;
 
-      // Ensure newly laid-out nodes are visible in the viewport
+      // Ensure newly laid-out nodes are visible in the viewport.
+      // requestAnimationFrame guarantees a paint cycle has occurred so
+      // XYFlow has measured the new nodes before fitView runs.
       if (tableSetChanged) {
-        setTimeout(() => fitView({ padding: 0.15 }), 0);
+        requestAnimationFrame(() => fitView({ padding: 0.15 }));
       }
     } else {
       // Preserve current positions, update data only
@@ -355,7 +368,7 @@ function ERCanvasInner({
 
       // Merge with existing saved positions so filtered-out schemas are preserved
       const currentNodes = getNodes();
-      const tableById = new Map(tables.map((t) => [t.id, t]));
+      const tableById = new Map(tablesRef.current.map((t) => [t.id, t]));
       const positions = loadERLayout(database) ?? {};
       for (const n of currentNodes) {
         const table = tableById.get(n.id);
@@ -365,7 +378,7 @@ function ERCanvasInner({
       }
       saveERLayout(database, positions);
     },
-    [onNodesChange, tables, database, getNodes],
+    [onNodesChange, database, getNodes],
   );
 
   // Handle new connections (FK creation via drag)
@@ -392,7 +405,7 @@ function ERCanvasInner({
 
   const handleAutoLayout = useCallback(() => {
     const currentEdges = getEdges();
-    const tableById = new Map(tables.map((t) => [t.id, t]));
+    const tableById = new Map(tablesRef.current.map((t) => [t.id, t]));
     setNodes((prev) => {
       const laid = applyERLayout(prev, currentEdges);
       // Merge with existing saved positions so filtered-out schemas are preserved
@@ -406,7 +419,7 @@ function ERCanvasInner({
       saveERLayout(database, positions);
       return laid;
     });
-  }, [tables, database, setNodes, getEdges]);
+  }, [database, setNodes, getEdges]);
 
   const handleResetLayout = useCallback(() => {
     initialLayoutDone.current = false;
