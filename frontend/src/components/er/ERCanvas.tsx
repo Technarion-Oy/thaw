@@ -221,6 +221,9 @@ function ERCanvasInner({
   callbackRefs.current = { onTableRename, onColumnRename, onColumnRemove };
   const tablesRef = useRef(tables);
   tablesRef.current = tables;
+  // Track the last selection propagated to/from the parent to avoid
+  // unnecessary re-renders and sync loops.
+  const lastSelectionRef = useRef<string[]>([]);
 
   // Flush any pending debounced position save on unmount
   useEffect(() => {
@@ -290,7 +293,7 @@ function ERCanvasInner({
 
           // Offset dagre output below saved-position nodes to avoid overlap
           const savedNodes = positioned.filter((n) => !needsLayout.has(n.id));
-          if (savedNodes.length > 0) {
+          if (laid.length > 0 && savedNodes.length > 0) {
             let maxBottom = -Infinity;
             for (const n of savedNodes) {
               const bottom = n.position.y + (n.height ?? 200);
@@ -336,27 +339,43 @@ function ERCanvasInner({
   }, [filteredTables, filteredTableById, filteredTableIdStr, mode, database, setNodes, setEdges, fitView]);
 
   // Sync parent selectedTableIds to XYFlow node.selected.
-  // Compares against current node selection to avoid unnecessary updates
-  // and prevent sync loops with handleSelectionChange.
+  // Uses lastSelectionRef to detect whether this update was already propagated
+  // (by handleSelectionChange) and skip the redundant setNodes call.
   useEffect(() => {
-    const desiredSet = new Set(selectedTableIds ?? []);
-    const currentNodes = getNodes();
-    const alreadyMatches = currentNodes.every(
-      (n) => (n.selected ?? false) === desiredSet.has(n.id),
-    );
-    if (alreadyMatches) return;
+    const incoming = selectedTableIds ?? [];
+    const last = lastSelectionRef.current;
+    // Shallow equality — skip if selection hasn't actually changed
+    if (
+      incoming.length === last.length &&
+      incoming.every((id, i) => id === last[i])
+    ) {
+      return;
+    }
+    lastSelectionRef.current = incoming;
+    const desiredSet = new Set(incoming);
     setNodes((prev) =>
       prev.map((n) => ({
         ...n,
         selected: desiredSet.has(n.id),
       })),
     );
-  }, [selectedTableIds, setNodes, getNodes]);
+  }, [selectedTableIds, setNodes]);
 
-  // Propagate XYFlow selection changes (Cmd/Ctrl+click multi-select) to parent
+  // Propagate XYFlow selection changes (Cmd/Ctrl+click multi-select) to parent.
+  // Shallow-compares against the last known selection to avoid re-renders
+  // from intermediate states during box-select drags.
   const handleSelectionChange = useCallback(
     ({ nodes: selectedNodes }: { nodes: Node[] }) => {
-      onSelectionChangeProp?.(selectedNodes.map((n) => n.id));
+      const ids = selectedNodes.map((n) => n.id).sort();
+      const last = lastSelectionRef.current;
+      if (
+        ids.length === last.length &&
+        ids.every((id, i) => id === last[i])
+      ) {
+        return;
+      }
+      lastSelectionRef.current = ids;
+      onSelectionChangeProp?.(ids);
     },
     [onSelectionChangeProp],
   );
