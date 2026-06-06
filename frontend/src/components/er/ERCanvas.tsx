@@ -336,7 +336,7 @@ function ERCanvasInner({
     }
 
     setEdges(newEdges);
-  }, [filteredTables, filteredTableIdStr, mode, database, setNodes, setEdges, fitView]);
+  }, [filteredTables, filteredTableById, filteredTableIdStr, mode, database, setNodes, setEdges, fitView]);
 
   // Sync parent selectedTableIds to XYFlow node.selected.
   // Skipped when the change originated from the canvas itself (via
@@ -426,9 +426,10 @@ function ERCanvasInner({
           positions[positionKey(table.schema, table.name)] = n.position;
         }
       }
-      saveERLayout(database, positions);
       return laid;
     });
+    // positions was mutated inside the updater (which runs synchronously)
+    saveERLayout(database, positions);
   }, [database, setNodes, getEdges]);
 
   const handleResetLayout = useCallback(() => {
@@ -468,12 +469,18 @@ function ERCanvasInner({
     setNodes(laid);
     setEdges(newEdges);
     initialLayoutDone.current = true;
-  }, [database, filteredTables, mode, setNodes, setEdges]);
+  }, [database, filteredTables, filteredTableById, mode, setNodes, setEdges]);
 
+  // Close the context menu without affecting selection — used by menu item
+  // actions so the action's own selection update isn't overwritten.
+  const closeContextMenu = useCallback(() => {
+    setCtxMenu(null);
+  }, []);
+
+  // Pane click: close context menu AND clear selection (pane click doesn't
+  // trigger XYFlow's onSelectionChange, so we propagate deselection explicitly).
   const handlePaneClick = useCallback(() => {
     setCtxMenu(null);
-    // Clear selection — pane click doesn't trigger XYFlow's onSelectionChange,
-    // so we propagate deselection to the parent explicitly.
     onSelectionChangeProp?.([]);
   }, [onSelectionChangeProp]);
 
@@ -571,7 +578,7 @@ function ERCanvasInner({
         <ERContextMenu
           ctxMenu={ctxMenu}
           selectedNodeIds={selectedTableIds ?? []}
-          onClose={handlePaneClick}
+          onClose={closeContextMenu}
           onDuplicateTable={onDuplicateTable}
           onDeleteTable={onDeleteTable}
           onAddFK={onAddFK}

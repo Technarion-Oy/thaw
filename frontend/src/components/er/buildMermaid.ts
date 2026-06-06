@@ -1,4 +1,5 @@
 // Copyright (c) 2026 Technarion Oy. All rights reserved.
+// @thaw-domain: ER Designer
 
 import type { DesignerTable } from "./erTypes";
 import { ER_COL_LIMIT } from "./erTypes";
