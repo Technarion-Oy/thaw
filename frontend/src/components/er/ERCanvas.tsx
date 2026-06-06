@@ -221,9 +221,6 @@ function ERCanvasInner({
   callbackRefs.current = { onTableRename, onColumnRename, onColumnRemove };
   const tablesRef = useRef(tables);
   tablesRef.current = tables;
-  // Guard to prevent selection sync loop: when a selection change originates
-  // from the canvas (handleSelectionChange), skip the parent→canvas sync effect.
-  const selectionFromCanvas = useRef(false);
 
   // Flush any pending debounced position save on unmount
   useEffect(() => {
@@ -339,26 +336,26 @@ function ERCanvasInner({
   }, [filteredTables, filteredTableById, filteredTableIdStr, mode, database, setNodes, setEdges, fitView]);
 
   // Sync parent selectedTableIds to XYFlow node.selected.
-  // Skipped when the change originated from the canvas itself (via
-  // handleSelectionChange) to prevent a sync loop.
+  // Compares against current node selection to avoid unnecessary updates
+  // and prevent sync loops with handleSelectionChange.
   useEffect(() => {
-    if (selectionFromCanvas.current) {
-      selectionFromCanvas.current = false;
-      return;
-    }
     const desiredSet = new Set(selectedTableIds ?? []);
+    const currentNodes = getNodes();
+    const alreadyMatches = currentNodes.every(
+      (n) => (n.selected ?? false) === desiredSet.has(n.id),
+    );
+    if (alreadyMatches) return;
     setNodes((prev) =>
       prev.map((n) => ({
         ...n,
         selected: desiredSet.has(n.id),
       })),
     );
-  }, [selectedTableIds, setNodes]);
+  }, [selectedTableIds, setNodes, getNodes]);
 
   // Propagate XYFlow selection changes (Cmd/Ctrl+click multi-select) to parent
   const handleSelectionChange = useCallback(
     ({ nodes: selectedNodes }: { nodes: Node[] }) => {
-      selectionFromCanvas.current = true;
       onSelectionChangeProp?.(selectedNodes.map((n) => n.id));
     },
     [onSelectionChangeProp],
@@ -414,23 +411,20 @@ function ERCanvasInner({
 
   const handleAutoLayout = useCallback(() => {
     const currentEdges = getEdges();
+    const currentNodes = getNodes();
     const tableById = new Map(tablesRef.current.map((t) => [t.id, t]));
-    // Read saved positions outside the state updater to avoid side effects inside a reducer
+    const laid = applyERLayout(currentNodes, currentEdges);
+    setNodes(laid);
+    // Merge new positions with saved positions for filtered-out schemas
     const positions = loadERLayout(database) ?? {};
-    setNodes((prev) => {
-      const laid = applyERLayout(prev, currentEdges);
-      // Merge with existing saved positions so filtered-out schemas are preserved
-      for (const n of laid) {
-        const table = tableById.get(n.id);
-        if (table && table.schema && table.name.trim()) {
-          positions[positionKey(table.schema, table.name)] = n.position;
-        }
+    for (const n of laid) {
+      const table = tableById.get(n.id);
+      if (table && table.schema && table.name.trim()) {
+        positions[positionKey(table.schema, table.name)] = n.position;
       }
-      return laid;
-    });
-    // positions was mutated inside the updater (which runs synchronously)
+    }
     saveERLayout(database, positions);
-  }, [database, setNodes, getEdges]);
+  }, [database, setNodes, getNodes, getEdges]);
 
   const handleResetLayout = useCallback(() => {
     initialLayoutDone.current = false;

@@ -10,7 +10,7 @@ import type { snowflake } from "../../../wailsjs/go/models";
 import ERCanvas from "./ERCanvas";
 import { initFromERData, normalizeDataType } from "./erCanvasLayout";
 import { buildMermaid } from "./buildMermaid";
-import { type DesignerColumn, type DesignerTable, SF_DATA_TYPES, normalizeIdentifier } from "./erTypes";
+import { type DesignerColumn, type DesignerTable, SF_DATA_TYPES, SF_TYPES, normalizeIdentifier } from "./erTypes";
 
 interface Props {
   database: string;
@@ -18,6 +18,9 @@ interface Props {
   onClose: () => void;
   onSuccess: () => void;
 }
+
+/** Set of canonical Snowflake type names for O(1) lookups in AutoComplete filter. */
+const SF_TYPES_SET = new Set(SF_TYPES);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -651,7 +654,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
 
   // ── SQL & run ─────────────────────────────────────────────────────────────────
 
-  const sql = generateDiffSQL(tables, database, initialData);
+  const sql = useMemo(() => generateDiffSQL(tables, database, initialData), [tables, database, initialData]);
   const hasChanges = sql.trim().length > 0;
 
   const runSQL = async () => {
@@ -818,7 +821,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
                         filterOption={(input, option) => {
                           // Show all options when input is an existing type (possibly with params)
                           const base = input.replace(/\s*\(.*$/, "").trim().toUpperCase();
-                          if (SF_DATA_TYPES.some((dt) => dt.name === base)) return true;
+                          if (SF_TYPES_SET.has(base)) return true;
                           return (option?.label as string ?? "").toUpperCase().includes(input.toUpperCase());
                         }}
                       />
