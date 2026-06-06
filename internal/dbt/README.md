@@ -31,6 +31,8 @@ This package is a **pure file-generation** package for classic (local) dbt proje
 
 `App.CreateDbtProject(req, schemasMap)` in `internal/app/dbtproject.go` is the thin delegator: nil-check → `dbt.CreateProject(...)` → return `*dbt.CreateResult`. All Snowflake queries and file I/O happen inside this package.
 
+`CreateProject` is also exposed via the MCP tool `generate_dbt_project` in `internal/mcp/migration_tools.go`. The MCP tool is workspace-gated (only registered when a workspace root is configured) and validates that the output directory is inside the workspace root before delegating.
+
 `InlineViewDefs` mode: when enabled, `CreateProject` fetches each view's DDL via `client.GetObjectDDL`, extracts the SELECT body with `snowflake.ExtractDDLBody`, then rewrites three-part Snowflake object references into `{{ source('...', '...') }}` (for tables) or `{{ ref('...') }}` (for views) using `snowflake.RewriteSQLReferences`. The rewrite is a best-effort text transformation — references not found in the discovered object set are left as-is.
 
 `DatabaseVars` mode: when enabled, each database used in a source entry becomes a `vars:` entry in `dbt_project.yml` and the `database:` fields in `_sources.yml` reference them via `{{ var('db_mydb', 'MYDB') }}`.
