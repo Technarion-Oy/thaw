@@ -12,7 +12,7 @@ No business logic belongs here — callers pass SQL strings or high-level parame
 
 | File | Purpose |
 |------|---------|
-| `client.go` | `Client` struct, `NewClient`, `Execute`, `QuerySingle`, `SplitStatements`, `ListObjects`, object cache, `Use*` methods, DDL fetchers, and all other `*Client` methods |
+| `client.go` | `Client` struct, `NewClient`, `Execute`, `QuerySingle`, `ListObjects`, object cache, `Use*` methods, DDL fetchers, and all other `*Client` methods |
 | `result.go` | Shared result-parsing helpers: `ColIdx`, `CellString/Float/Int64/Bool`, `PropertyPair`, `ResultToPairs` |
 | `session.go` | `SessionParam`, `SessionVar`, `GetSessionParameters`, `GetSessionVariables`, `QuoteSessionParamValue` |
 | `identifiers.go` | `NeedsQuoting`, `QuoteIdent`, `QuoteStringLit`, `EscapeLikePattern`, `QuoteOrBare`, `ReservedKeywords`, `GetQuotedIdentifiersIgnoreCase` |
@@ -31,11 +31,10 @@ No business logic belongs here — callers pass SQL strings or high-level parame
 - `sessionConnector` — internal `driver.Connector` that applies the stored role/warehouse/database/schema to every newly created pool connection, flushing idle connections when context changes
 
 ### Query execution
-- `Execute(ctx, sql, onProgress...)` — splits on semicolons, runs statements sequentially on a pinned `*sql.Conn`; single-statement path uses async mode via `sf.WithQueryIDChan`; PUT/GET use a sync context
+- `Execute(ctx, sql, onProgress...)` — uses `sqlutil.Split` to split on semicolons, applies `normalizePutGet` to each statement, runs them sequentially on a pinned `*sql.Conn`; single-statement path uses async mode via `sf.WithQueryIDChan`; PUT/GET use a sync context
 - `QuerySingle(ctx, sql)` — always synchronous, bypasses multi-statement logic
 - `ExecDDL(ctx, sql)` — fire-and-forget DDL (no result set)
 - `CancelSnowflakeQuery(ctx, queryID)` — calls `SYSTEM$CANCEL_QUERY`
-- `SplitStatements(sql) []string` — exported wrapper around `splitStatements`; handles `--`, `/* */`, `'…'`, `"…"`, `$tag$…$tag$`
 - `ExplainFormat` (`string`) — `ExplainJSON` or `ExplainTabular`
 - `Explain(ctx, query, format)` — runs `EXPLAIN USING <format> <query>` via `QuerySingle`; validates format before SQL construction
 - `ExplainOnConn(ctx, conn, query, format)` — same on a pinned `*sql.Conn` via `queryOnConn` (no session sync); validates format

@@ -1,12 +1,12 @@
 # internal/ddl
 
-> Snowflake DDL splitter, per-object metadata extractor, and parallel git-export pipeline.
+> Snowflake DDL per-object metadata extractor and parallel git-export pipeline.
 
 ## Responsibility
 
 This package has two jobs:
 
-1. **Parsing** — split a raw DDL string (as returned by `GET_DDL`) into individual SQL statements and extract structured metadata (object kind, database, schema, name, argument signature) from each CREATE statement.
+1. **Parsing** — extract structured metadata (object kind, database, schema, name, argument signature) from each CREATE statement. Statement splitting is handled by `internal/sqlutil`.
 2. **Exporting** — drive a concurrent, multi-database DDL export to disk, determining the correct on-disk file path for each object and handling file-path collisions.
 
 A separate `account.go` sub-pipeline handles account-level objects (roles, warehouses) that live outside any database.
@@ -15,23 +15,13 @@ A separate `account.go` sub-pipeline handles account-level objects (roles, wareh
 
 | File | Purpose |
 |------|---------|
-| `parser.go` | `Split(src) []string` — byte-level SQL statement splitter; handles all Snowflake quoting and comment styles |
+| `parser.go` | Helper functions (`isIdentRune`, `runesEqual`) used by tests |
 | `object.go` | `Object`, `Kind` constants, `Parse(sql) Object`, `FilePath()`, `FilePathFor(template, db)`, `nameTracker` (collision resolver) |
 | `exporter.go` | `ExportDatabases(ctx, dbs, fetch, opts, progress)` — parallel export pipeline; `ExportOptions`, `ExportResult`, `ProgressFunc`, `FetchDDL` |
 | `account.go` | `ExportAccountObjects(ctx, client, outputDir)` — exports roles and warehouses to `_account/roles/` and `_account/warehouses/` |
 | `doc.go` | Package doc + `thaw:domain` annotation |
 
 ## Key types & functions
-
-### Splitting
-`Split(src string) []string` in `parser.go` tokenises at the byte level and flushes on each unquoted `;`. It correctly skips semicolons inside:
-- line comments (`-- … \n`)
-- block comments (`/* … */`)
-- single-quoted strings (`'…'` with `''` escaping)
-- double-quoted identifiers (`"…"` with `""` escaping)
-- dollar-quoted bodies (`$$…$$` or `$tag$…$tag$`)
-
-SIMD-accelerated `strings.Index`/`strings.IndexByte` make large procedure bodies very fast to skip.
 
 ### Object metadata
 ```go

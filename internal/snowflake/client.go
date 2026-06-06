@@ -31,6 +31,8 @@ import (
 	"time"
 
 	sf "github.com/snowflakedb/gosnowflake/v2"
+
+	"thaw/internal/sqlutil"
 )
 
 // ConnectParams holds all fields needed to open a Snowflake connection.
@@ -457,7 +459,11 @@ func isContextChangingQuery(sql string) bool {
 // statement finishes).  The parameter is variadic so all existing callers
 // remain unchanged.
 func (c *Client) Execute(ctx context.Context, query string, onProgress ...func(idx, total int, qidChan <-chan string)) (*QueryResult, error) {
-	stmts := splitStatements(query)
+	rawStmts := sqlutil.Split(query)
+	stmts := make([]string, len(rawStmts))
+	for i, s := range rawStmts {
+		stmts[i] = normalizePutGet(s)
+	}
 	if len(stmts) == 0 {
 		return &QueryResult{Rows: [][]interface{}{}}, nil
 	}
@@ -629,114 +635,6 @@ func (c *Client) QuerySingle(ctx context.Context, query string) (*QueryResult, e
 	return result, nil
 }
 
-// SplitStatements splits a SQL string into individual statements on
-// semicolons, respecting single-quoted strings, double-quoted identifiers,
-// line comments (--), block comments (/* */), and Snowflake dollar-quoted
-// strings ($$..$$ and $tag$..$tag$).
-func SplitStatements(sql string) []string { return splitStatements(sql) }
-
-// splitStatements is the internal implementation of SplitStatements.
-func splitStatements(sql string) []string {
-	var stmts []string
-	var cur strings.Builder
-	i, n := 0, len(sql)
-	for i < n {
-		ch := sql[i]
-		switch {
-		case ch == '-' && i+1 < n && sql[i+1] == '-':
-			// Line comment — consume through end of line.
-			for i < n && sql[i] != '\n' {
-				cur.WriteByte(sql[i])
-				i++
-			}
-		case ch == '/' && i+1 < n && sql[i+1] == '*':
-			// Block comment — consume through */.
-			cur.WriteByte(sql[i])
-			cur.WriteByte(sql[i+1])
-			i += 2
-			for i < n {
-				if sql[i] == '*' && i+1 < n && sql[i+1] == '/' {
-					cur.WriteByte(sql[i])
-					cur.WriteByte(sql[i+1])
-					i += 2
-					break
-				}
-				cur.WriteByte(sql[i])
-				i++
-			}
-		case ch == '\'':
-			// Single-quoted string — handle '' escaping.
-			cur.WriteByte(ch)
-			i++
-			for i < n {
-				c := sql[i]
-				cur.WriteByte(c)
-				i++
-				if c == '\'' {
-					if i < n && sql[i] == '\'' {
-						cur.WriteByte(sql[i])
-						i++
-					} else {
-						break
-					}
-				}
-			}
-		case ch == '"':
-			// Double-quoted identifier.
-			cur.WriteByte(ch)
-			i++
-			for i < n {
-				c := sql[i]
-				cur.WriteByte(c)
-				i++
-				if c == '"' {
-					break
-				}
-			}
-		case ch == '$':
-			// Possible dollar-quoted string: $$...$$ or $tag$...$tag$.
-			end := i + 1
-			for end < n && (sql[end] == '_' ||
-				(sql[end] >= 'a' && sql[end] <= 'z') ||
-				(sql[end] >= 'A' && sql[end] <= 'Z') ||
-				(sql[end] >= '0' && sql[end] <= '9')) {
-				end++
-			}
-			if end < n && sql[end] == '$' {
-				tag := sql[i : end+1] // e.g. "$$" or "$my_tag$"
-				cur.WriteString(tag)
-				i = end + 1
-				for i < n {
-					if strings.HasPrefix(sql[i:], tag) {
-						cur.WriteString(tag)
-						i += len(tag)
-						break
-					}
-					cur.WriteByte(sql[i])
-					i++
-				}
-			} else {
-				cur.WriteByte(ch)
-				i++
-			}
-		case ch == ';':
-			stmt := normalizePutGet(strings.TrimSpace(cur.String()))
-			if stmt != "" {
-				stmts = append(stmts, stmt)
-			}
-			cur.Reset()
-			i++
-		default:
-			cur.WriteByte(ch)
-			i++
-		}
-	}
-	if stmt := normalizePutGet(strings.TrimSpace(cur.String())); stmt != "" {
-		stmts = append(stmts, stmt)
-	}
-	return stmts
-}
-
 // normalizePutGet prepares PUT and GET statements for the gosnowflake driver:
 //
 //  1. Collapses internal newlines to spaces — the Snowflake server's location
@@ -852,7 +750,11 @@ func (c *Client) GetSessionContextOnConn(ctx context.Context, conn *sql.Conn) (S
 // ExecuteOnConn runs one or more SQL statements on a pinned connection and
 // returns the last result set. It also syncs the session context.
 func (c *Client) ExecuteOnConn(ctx context.Context, conn *sql.Conn, query string) (*QueryResult, error) {
-	stmts := splitStatements(query)
+	rawStmts := sqlutil.Split(query)
+	stmts := make([]string, len(rawStmts))
+	for i, s := range rawStmts {
+		stmts[i] = normalizePutGet(s)
+	}
 	if len(stmts) == 0 {
 		return &QueryResult{Rows: [][]interface{}{}}, nil
 	}

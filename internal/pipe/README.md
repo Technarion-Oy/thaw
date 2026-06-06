@@ -69,4 +69,4 @@ Owns three distinct concerns that are tied together by the pipe object lifecycle
 
 `copy_history` filters by `pipe_catalog_name`, `pipe_schema_name`, and `pipe_name` separately (not a single FQN column) because Snowflake does not expose a combined pipe FQN column in that function's output.
 
-`validateCopyStatement` uses `snowflake.SplitStatements` to detect multi-statement input and rejects it with an error, preventing users from accidentally embedding multiple statements in the pipe definition.
+`validateCopyStatement` uses `sqlutil.Split` to detect multi-statement input and rejects it with an error, preventing users from accidentally embedding multiple statements in the pipe definition.
