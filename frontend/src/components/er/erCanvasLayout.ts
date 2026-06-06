@@ -2,7 +2,7 @@
 // @thaw-domain: ER Designer
 
 import dagre from "@dagrejs/dagre";
-import type { Node, Edge } from "@xyflow/react";
+import { MarkerType, type Node, type Edge } from "@xyflow/react";
 import type { snowflake } from "../../../wailsjs/go/models";
 import {
   type DesignerTable,
@@ -22,10 +22,10 @@ function nodeHeight(colCount: number): number {
 
 export interface ERTableNodeData {
   table: DesignerTable;
-  selected: boolean;
   mode: "edit" | "readonly";
   onTableRename?: (tableId: string, newName: string) => void;
   onColumnRename?: (tableId: string, colId: string, newName: string) => void;
+  onColumnRemove?: (tableId: string, colId: string) => void;
   [key: string]: unknown;
 }
 
@@ -39,6 +39,7 @@ export function tablesToNodesAndEdges(
   callbacks?: {
     onTableRename?: (tableId: string, newName: string) => void;
     onColumnRename?: (tableId: string, colId: string, newName: string) => void;
+    onColumnRemove?: (tableId: string, colId: string) => void;
   },
 ): { nodes: Node[]; edges: Edge[] } {
   const nodes: Node[] = tables.map((t) => ({
@@ -47,10 +48,10 @@ export function tablesToNodesAndEdges(
     position: { x: 0, y: 0 },
     data: {
       table: t,
-      selected: false,
       mode,
       onTableRename: callbacks?.onTableRename,
       onColumnRename: callbacks?.onColumnRename,
+      onColumnRemove: callbacks?.onColumnRemove,
     } satisfies ERTableNodeData,
     width: ER_NODE_WIDTH,
     height: nodeHeight(t.columns.length),
@@ -65,6 +66,11 @@ export function tablesToNodesAndEdges(
       keyToId.set(tableKey(t.schema, t.name), t.id);
     }
   }
+
+  // Resolve --accent to a hex value for SVG markers (CSS variables break marker IDs)
+  const accentHex = typeof document !== "undefined"
+    ? getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#58a6ff"
+    : "#58a6ff";
 
   const edges: Edge[] = [];
   for (const t of tables) {
@@ -93,6 +99,12 @@ export function tablesToNodesAndEdges(
         type: "smoothstep",
         animated: true,
         style: { stroke: "var(--accent)", strokeWidth: 1.5 },
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          color: accentHex,
+          width: 16,
+          height: 16,
+        },
         label: "FK",
         labelStyle: { fontSize: 10, fill: "var(--text-muted)" },
         labelBgStyle: { fill: "var(--bg-overlay)", fillOpacity: 0.8 },
@@ -147,17 +159,14 @@ export function normalizeDataType(dt: string): string {
   const params = paramsMatch ? paramsMatch[1] : "";
   const base = dt.replace(/\s*\([^)]*\)/g, "").trim().toUpperCase();
 
+  // SF_TYPES includes all canonical Snowflake types plus multi-word forms
+  // like "DOUBLE PRECISION", so they're returned as-is (e.g. INT stays INT).
   if (SF_TYPES.includes(base)) return base + params;
 
+  // Only aliases NOT already in SF_TYPES need to be mapped here.
   const aliases: Record<string, string> = {
-    TEXT: "VARCHAR", STRING: "VARCHAR", CHAR: "VARCHAR", CHARACTER: "VARCHAR",
     NCHAR: "VARCHAR", NVARCHAR: "VARCHAR", NVARCHAR2: "VARCHAR",
-    INT: "NUMBER", INTEGER: "NUMBER", BIGINT: "NUMBER", SMALLINT: "NUMBER",
-    TINYINT: "NUMBER", BYTEINT: "NUMBER", DECIMAL: "NUMBER", NUMERIC: "NUMBER",
-    DOUBLE: "FLOAT", REAL: "FLOAT", FLOAT4: "FLOAT", FLOAT8: "FLOAT",
     BOOL: "BOOLEAN",
-    DATETIME: "TIMESTAMP_NTZ", TIMESTAMP: "TIMESTAMP_NTZ",
-    TIMESTAMP_TZ: "TIMESTAMP_LTZ",
   };
   return (aliases[base] ?? "VARCHAR") + params;
 }

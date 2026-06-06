@@ -2,9 +2,11 @@
 // @thaw-domain: ER Designer
 
 import React, { useState, useCallback } from "react";
-import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 import { ER_NODE_WIDTH, ER_COL_LIMIT, type DesignerColumn, normalizeIdentifier } from "./erTypes";
 import type { ERTableNodeData } from "./erCanvasLayout";
+
+type ERTableNodeType = Node<ERTableNodeData, "erTable">;
 
 const SHORT_TYPES: Record<string, string> = {
   // Numeric — exact
@@ -61,9 +63,8 @@ function abbreviateType(dt: string): string {
   return SHORT_TYPES[base] ?? base.slice(0, 4);
 }
 
-function ERTableNodeInner({ data, selected }: NodeProps) {
-  const { table, mode, onTableRename, onColumnRename } =
-    data as ERTableNodeData;
+function ERTableNodeInner({ data, selected }: NodeProps<ERTableNodeType>) {
+  const { table, mode, onTableRename, onColumnRename, onColumnRemove } = data;
 
   const [editingHeader, setEditingHeader] = useState(false);
   const [headerValue, setHeaderValue] = useState(table.name);
@@ -269,6 +270,26 @@ function ERTableNodeInner({ data, selected }: NodeProps) {
                     FK
                   </span>
                 )}
+                {mode === "edit" && onColumnRemove && (
+                  <span
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onColumnRemove(table.id, col.id);
+                    }}
+                    style={{
+                      color: "var(--text-muted)",
+                      fontSize: 11,
+                      cursor: "pointer",
+                      flexShrink: 0,
+                      lineHeight: 1,
+                      opacity: 0.4,
+                      padding: "0 1px",
+                    }}
+                    title="Remove column"
+                  >
+                    ×
+                  </span>
+                )}
               </>
             )}
 
@@ -308,5 +329,13 @@ function ERTableNodeInner({ data, selected }: NodeProps) {
   );
 }
 
-const ERTableNode = React.memo(ERTableNodeInner);
+const ERTableNode = React.memo(ERTableNodeInner, (prev, next) => {
+  const prevData = prev.data as ERTableNodeData;
+  const nextData = next.data as ERTableNodeData;
+  return (
+    prevData.table === nextData.table &&
+    prevData.mode === nextData.mode &&
+    prev.selected === next.selected
+  );
+});
 export default ERTableNode;

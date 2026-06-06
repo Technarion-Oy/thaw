@@ -17,12 +17,12 @@ Renders an interactive ER diagram using `@xyflow/react` from Snowflake table/col
 | `ERCanvas.tsx` | Shared `ReactFlow` canvas used by both `ERDiagramModal` (readonly) and `ERDesigner` (edit). Manages layout (dagre + saved positions), node dragging, FK connection, selection, auto-layout, and reset-layout buttons. |
 | `ERDiagramModal.tsx` | Primary viewer: interactive canvas, schema filter checkboxes, "Copy Mermaid" button, and a "Design Tables…" button that opens `ERDesigner`. |
 | `ERDesigner.tsx` | Interactive table designer. Left sidebar with table/column CRUD forms, right panel with `ERCanvas` in edit mode. Generates diff-based SQL (`CREATE TABLE`, `ALTER TABLE`, `DROP TABLE`) and executes via `ExecuteQuery`. |
-| `buildMermaid.ts` | Pure function `buildMermaid(data, visibleSchemas)` that converts `snowflake.ERDiagramData` into a Mermaid `erDiagram` string. Used for the "Copy Mermaid" clipboard export. |
+| `buildMermaid.ts` | Pure function `buildMermaid(tables, visibleSchemas?)` that converts `DesignerTable[]` into a Mermaid `erDiagram` string. Used by both `ERDiagramModal` and `ERDesigner` for the "Copy Mermaid" clipboard export. Also exports shared helpers `sanitiseId`, `entityId`, `shortType`. |
 
 ## Patterns & integration
 
 **IPC calls:**
-- `ERDiagramModal` receives `snowflake.ERDiagramData` as a prop (pre-fetched by the caller)
+- `ERDiagramModal` receives `snowflake.ERDiagramData` as a prop (pre-fetched by the caller) and calls `ListSchemas(database)` on mount to populate the schema filter with all database schemas (not just those present in the ER data)
 - `ERDesigner` calls `ListSchemas(database)` for the schema picker and `ExecuteQuery(sql)` to run generated DDL
 - All other files are pure TypeScript/React with no IPC
 
@@ -38,6 +38,6 @@ Renders an interactive ER diagram using `@xyflow/react` from Snowflake table/col
 
 - `nodeTypes` must be defined at module level, not inside a component — XYFlow re-registers node types on every reference change, causing flickering.
 - FK edges are derived from `column.fkRef` fields, not stored separately. Adding/removing FK edges always goes through column state updates.
-- The "Copy Mermaid" button in `ERDiagramModal` uses `buildMermaid` from `buildMermaid.ts` (works on raw `ERDiagramData`), while `ERDesigner` uses its own `buildDesignerMermaid` (works on `DesignerTable[]`).
+- Both `ERDiagramModal` and `ERDesigner` use the shared `buildMermaid(tables, visibleSchemas?)` from `buildMermaid.ts` for Mermaid clipboard export.
 - Column cap at 30 (`ER_COL_LIMIT`) prevents excessively tall nodes — overflow shows "+N more columns".
-- The copy-Mermaid button calls `navigator.clipboard.writeText` directly. In WKWebView contexts, switch to `ClipboardSetText` if needed.
+- Clipboard operations use `ClipboardSetText` from `wailsjs/runtime/runtime` (required because WKWebView blocks `navigator.clipboard`).

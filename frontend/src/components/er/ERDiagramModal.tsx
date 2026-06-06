@@ -5,6 +5,7 @@ import { useState, useEffect, useMemo } from "react";
 import { Modal, Button, Checkbox } from "antd";
 import { CopyOutlined, EditOutlined } from "@ant-design/icons";
 import { ListSchemas } from "../../../wailsjs/go/app/App";
+import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { buildMermaid } from "./buildMermaid";
 import ERDesigner from "./ERDesigner";
@@ -55,7 +56,7 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
   };
 
   const copyMermaid = () => {
-    navigator.clipboard.writeText(buildMermaid(data, visibleSchemas));
+    ClipboardSetText(buildMermaid(designerTables, visibleSchemas));
   };
 
   return (
