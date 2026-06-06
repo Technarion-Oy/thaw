@@ -657,9 +657,12 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
                           value: dt.name,
                           label: dt.paramHint ? `${dt.name} ${dt.paramHint}` : dt.name,
                         }))}
-                        filterOption={(input, option) =>
-                          (option?.label as string ?? "").toUpperCase().includes(input.toUpperCase())
-                        }
+                        filterOption={(input, option) => {
+                          // Show all options when input is an existing type (possibly with params)
+                          const base = input.replace(/\s*\(.*$/, "").trim().toUpperCase();
+                          if (SF_DATA_TYPES.some((dt) => dt.name === base)) return true;
+                          return (option?.label as string ?? "").toUpperCase().includes(input.toUpperCase());
+                        }}
                       />
                       <Button
                         size="small"
