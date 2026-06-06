@@ -14,13 +14,16 @@ import {
   ER_COL_LIMIT,
 } from "./erTypes";
 
+/** Fallback accent color when CSS variable is unavailable (SSR, tests, or empty value). */
+const ACCENT_FALLBACK = "#58a6ff";
+
 /** Resolve the --accent CSS variable to a hex value for SVG markers.
  *  CSS variables don't work inside SVG marker definitions, so we need the
  *  computed value. Called per `tablesToNodesAndEdges` invocation (not a hot
  *  path) so the color stays correct after theme changes. */
 function resolveAccentHex(): string {
-  if (typeof document === "undefined") return "#58a6ff";
-  return getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#58a6ff";
+  if (typeof document === "undefined") return ACCENT_FALLBACK;
+  return getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || ACCENT_FALLBACK;
 }
 
 /** Calculate the pixel height of a table node based on its column count. */

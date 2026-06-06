@@ -687,7 +687,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
   };
 
   const copyMermaid = () => {
-    ClipboardSetText(buildMermaid(tables));
+    ClipboardSetText(buildMermaid(tables, effectiveVisibleSchemas));
   };
 
   // ── Render ────────────────────────────────────────────────────────────────────
