@@ -14,16 +14,13 @@ import {
   ER_COL_LIMIT,
 } from "./erTypes";
 
-/** Lazily resolve and cache the --accent CSS variable for SVG markers. */
-let cachedAccentHex: string | null = null;
-function getAccentHex(): string {
-  if (cachedAccentHex === null) {
-    cachedAccentHex =
-      typeof document !== "undefined"
-        ? getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#58a6ff"
-        : "#58a6ff";
-  }
-  return cachedAccentHex;
+/** Resolve the --accent CSS variable to a hex value for SVG markers.
+ *  CSS variables don't work inside SVG marker definitions, so we need the
+ *  computed value. Called per `tablesToNodesAndEdges` invocation (not a hot
+ *  path) so the color stays correct after theme changes. */
+function resolveAccentHex(): string {
+  if (typeof document === "undefined") return "#58a6ff";
+  return getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#58a6ff";
 }
 
 /** Calculate the pixel height of a table node based on its column count. */
@@ -79,7 +76,7 @@ export function tablesToNodesAndEdges(
     }
   }
 
-  const accentHex = getAccentHex();
+  const accentHex = resolveAccentHex();
 
   const edges: Edge[] = [];
   for (const t of tables) {
@@ -173,6 +170,8 @@ export function normalizeDataType(dt: string): string {
   if (SF_TYPES.includes(base)) return base + params;
 
   // Only aliases NOT already in SF_TYPES need to be mapped here.
+  // Types like INT, TEXT, DATETIME, DECIMAL, etc. are valid Snowflake types
+  // included in SF_TYPES, so they pass through as-is above.
   const aliases: Record<string, string> = {
     NCHAR: "VARCHAR", NVARCHAR: "VARCHAR", NVARCHAR2: "VARCHAR",
     BOOL: "BOOLEAN",

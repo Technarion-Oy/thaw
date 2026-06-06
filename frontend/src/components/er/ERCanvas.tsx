@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Technarion Oy. All rights reserved.
 // @thaw-domain: ER Designer
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from "react";
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -39,6 +39,128 @@ import {
 
 // Module-level nodeTypes — XYFlow requires this to be stable across renders
 const nodeTypes = { erTable: ERTableNode };
+
+/** Vertical gap (px) between saved-position nodes and dagre-positioned new nodes. */
+const DAGRE_OFFSET_GAP = 120;
+
+// ── Context menu (extracted for readability / testability) ──────────────────
+
+interface CtxMenuState {
+  x: number;
+  y: number;
+  tableId: string;
+  tableName: string;
+  hasFKs: boolean;
+}
+
+function ERContextMenu({
+  ctxMenu,
+  selectedNodeIds,
+  onClose,
+  onDuplicateTable,
+  onDeleteTable,
+  onAddFK,
+  onRemoveFKs,
+}: {
+  ctxMenu: CtxMenuState;
+  selectedNodeIds: string[];
+  onClose: () => void;
+  onDuplicateTable?: (tableId: string) => void;
+  onDeleteTable?: (tableId: string) => void;
+  onAddFK?: (tableIdA: string, tableIdB: string) => void;
+  onRemoveFKs?: (tableId: string) => void;
+}) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ top: ctxMenu.y, left: ctxMenu.x });
+
+  // Measure the menu after first paint and clamp to viewport
+  useLayoutEffect(() => {
+    const el = menuRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    setPos({
+      top: Math.min(ctxMenu.y, window.innerHeight - rect.height - 8),
+      left: Math.min(ctxMenu.x, window.innerWidth - rect.width - 8),
+    });
+  }, [ctxMenu.x, ctxMenu.y]);
+
+  const twoSelected = selectedNodeIds.length === 2 && selectedNodeIds.includes(ctxMenu.tableId);
+
+  return (
+    <>
+      {/* Transparent overlay to dismiss on click-away */}
+      <div
+        style={{ position: "fixed", inset: 0, zIndex: 998 }}
+        onClick={onClose}
+      />
+      <div ref={menuRef} style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 999 }}>
+        <Menu
+          style={{
+            minWidth: 200,
+            borderRadius: 6,
+            boxShadow: "0 4px 16px rgba(0,0,0,0.35)",
+            border: "1px solid var(--border)",
+          }}
+          items={[
+            {
+              key: "label",
+              label: (
+                <span style={{ fontFamily: "monospace", fontSize: 11, color: "var(--text-muted)" }}>
+                  {ctxMenu.tableName}
+                </span>
+              ),
+              disabled: true,
+            },
+            { type: "divider" as const },
+            {
+              key: "duplicate",
+              icon: <CopyOutlined />,
+              label: "Duplicate Table",
+              onClick: () => {
+                onDuplicateTable?.(ctxMenu.tableId);
+                onClose();
+              },
+            },
+            {
+              key: "delete",
+              icon: <DeleteOutlined />,
+              danger: true,
+              label: "Delete Table",
+              onClick: () => {
+                onDeleteTable?.(ctxMenu.tableId);
+                onClose();
+              },
+            },
+            { type: "divider" as const },
+            {
+              key: "add-fk",
+              icon: <LinkOutlined />,
+              label: twoSelected
+                ? "Add FK Reference..."
+                : "Add FK Reference... (select 2 tables)",
+              disabled: !twoSelected,
+              onClick: () => {
+                const [idA, idB] = selectedNodeIds;
+                onAddFK?.(idA, idB);
+                onClose();
+              },
+            },
+            {
+              key: "remove-fks",
+              icon: <DisconnectOutlined />,
+              label: "Remove FK References",
+              disabled: !ctxMenu.hasFKs,
+              onClick: () => {
+                onRemoveFKs?.(ctxMenu.tableId);
+                onClose();
+              },
+            },
+          ]}
+        />
+      </div>
+    </>
+  );
+}
 
 export interface ERCanvasProps {
   tables: DesignerTable[];
@@ -159,7 +281,7 @@ function ERCanvasInner({
               if (bottom > maxBottom) maxBottom = bottom;
             }
             const dagreMinY = Math.min(...laid.map((n) => n.position.y));
-            const offsetY = maxBottom + 120 - dagreMinY;
+            const offsetY = maxBottom + DAGRE_OFFSET_GAP - dagreMinY;
             for (const n of laid) {
               n.position = { x: n.position.x, y: n.position.y + offsetY };
             }
@@ -331,13 +453,7 @@ function ERCanvasInner({
   }, []);
 
   // ── Context menu ─────────────────────────────────────────────────────────
-  const [ctxMenu, setCtxMenu] = useState<{
-    x: number;
-    y: number;
-    tableId: string;
-    tableName: string;
-    hasFKs: boolean;
-  } | null>(null);
+  const [ctxMenu, setCtxMenu] = useState<CtxMenuState | null>(null);
 
   const handleNodeContextMenu = useCallback(
     (event: React.MouseEvent, node: Node) => {
@@ -426,85 +542,17 @@ function ERCanvasInner({
       </ReactFlow>
 
       {/* ── Node right-click context menu ──────────────────────────────── */}
-      {ctxMenu && (() => {
-        const selectedOnCanvas = getNodes().filter((n) => n.selected).map((n) => n.id);
-        const twoSelected = selectedOnCanvas.length === 2 && selectedOnCanvas.includes(ctxMenu.tableId);
-
-        return (
-          <>
-            {/* Transparent overlay to dismiss on click-away */}
-            <div
-              style={{ position: "fixed", inset: 0, zIndex: 998 }}
-              onClick={() => setCtxMenu(null)}
-            />
-            <div style={{ position: "fixed", top: Math.min(ctxMenu.y, window.innerHeight - 260), left: Math.min(ctxMenu.x, window.innerWidth - 220), zIndex: 999 }}>
-              <Menu
-                style={{
-                  minWidth: 200,
-                  borderRadius: 6,
-                  boxShadow: "0 4px 16px rgba(0,0,0,0.35)",
-                  border: "1px solid var(--border)",
-                }}
-                items={[
-                  {
-                    key: "label",
-                    label: (
-                      <span style={{ fontFamily: "monospace", fontSize: 11, color: "var(--text-muted)" }}>
-                        {ctxMenu.tableName}
-                      </span>
-                    ),
-                    disabled: true,
-                  },
-                  { type: "divider" as const },
-                  {
-                    key: "duplicate",
-                    icon: <CopyOutlined />,
-                    label: "Duplicate Table",
-                    onClick: () => {
-                      onDuplicateTable?.(ctxMenu.tableId);
-                      setCtxMenu(null);
-                    },
-                  },
-                  {
-                    key: "delete",
-                    icon: <DeleteOutlined />,
-                    danger: true,
-                    label: "Delete Table",
-                    onClick: () => {
-                      onDeleteTable?.(ctxMenu.tableId);
-                      setCtxMenu(null);
-                    },
-                  },
-                  { type: "divider" as const },
-                  {
-                    key: "add-fk",
-                    icon: <LinkOutlined />,
-                    label: twoSelected
-                      ? "Add FK Reference..."
-                      : "Add FK Reference... (select 2 tables)",
-                    disabled: !twoSelected,
-                    onClick: () => {
-                      const [idA, idB] = selectedOnCanvas;
-                      onAddFK?.(idA, idB);
-                      setCtxMenu(null);
-                    },
-                  },
-                  {
-                    key: "remove-fks",
-                    icon: <DisconnectOutlined />,
-                    label: "Remove FK References",
-                    disabled: !ctxMenu.hasFKs,
-                    onClick: () => {
-                      onRemoveFKs?.(ctxMenu.tableId);
-                      setCtxMenu(null);
-                    },
-                  },
-                ]}
-              />
-            </div>
-          </>
-        );
-      })()}
+      {ctxMenu && (
+        <ERContextMenu
+          ctxMenu={ctxMenu}
+          selectedNodeIds={getNodes().filter((n) => n.selected).map((n) => n.id)}
+          onClose={() => setCtxMenu(null)}
+          onDuplicateTable={onDuplicateTable}
+          onDeleteTable={onDeleteTable}
+          onAddFK={onAddFK}
+          onRemoveFKs={onRemoveFKs}
+        />
+      )}
     </div>
   );
 }

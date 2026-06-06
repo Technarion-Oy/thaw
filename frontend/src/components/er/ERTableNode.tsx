@@ -329,6 +329,9 @@ function ERTableNodeInner({ data, selected }: NodeProps<ERTableNodeType>) {
   );
 }
 
+// Callbacks (onTableRename, onColumnRename, onColumnRemove) are intentionally
+// excluded from the comparator — ERCanvas routes them through stable
+// callbackRefs so their identity never changes between renders.
 const ERTableNode = React.memo(ERTableNodeInner, (prev, next) => {
   const prevData = prev.data as ERTableNodeData;
   const nextData = next.data as ERTableNodeData;
