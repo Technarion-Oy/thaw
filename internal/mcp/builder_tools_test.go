@@ -55,6 +55,100 @@ func TestBuilderToolsRegistered(t *testing.T) {
 	}
 }
 
+// TestBuildCreateStageSqlEmptyFields verifies that missing database/schema
+// return errors.
+func TestBuildCreateStageSqlEmptyFields(t *testing.T) {
+	cs := newTestSession(t)
+	ctx := context.Background()
+
+	// Missing database.
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "build_create_stage_sql",
+		Arguments: stage.StageConfig{
+			Name:   "MY_STAGE",
+			Schema: "PUBLIC",
+			Type:   "INTERNAL",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for empty database")
+	}
+	text := extractText(t, res)
+	if !strings.Contains(text, "database is required") {
+		t.Errorf("error message should mention database requirement, got: %s", text)
+	}
+
+	// Missing schema.
+	res, err = cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "build_create_stage_sql",
+		Arguments: stage.StageConfig{
+			Name:     "MY_STAGE",
+			Database: "MYDB",
+			Type:     "INTERNAL",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for empty schema")
+	}
+	text = extractText(t, res)
+	if !strings.Contains(text, "schema is required") {
+		t.Errorf("error message should mention schema requirement, got: %s", text)
+	}
+}
+
+// TestBuildAlterStageSqlEmptyFields verifies that missing database/schema
+// return errors.
+func TestBuildAlterStageSqlEmptyFields(t *testing.T) {
+	cs := newTestSession(t)
+	ctx := context.Background()
+
+	// Missing database.
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "build_alter_stage_sql",
+		Arguments: stage.AlterStageConfig{
+			Name:   "MY_STAGE",
+			Schema: "PUBLIC",
+			Action: "RENAME",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for empty database")
+	}
+	text := extractText(t, res)
+	if !strings.Contains(text, "database is required") {
+		t.Errorf("error message should mention database requirement, got: %s", text)
+	}
+
+	// Missing schema.
+	res, err = cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "build_alter_stage_sql",
+		Arguments: stage.AlterStageConfig{
+			Name:     "MY_STAGE",
+			Database: "MYDB",
+			Action:   "RENAME",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for empty schema")
+	}
+	text = extractText(t, res)
+	if !strings.Contains(text, "schema is required") {
+		t.Errorf("error message should mention schema requirement, got: %s", text)
+	}
+}
+
 // TestBuildCreateStageSqlSuccess verifies that a minimal stage config produces
 // a CREATE STAGE statement.
 func TestBuildCreateStageSqlSuccess(t *testing.T) {

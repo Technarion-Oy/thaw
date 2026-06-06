@@ -62,6 +62,12 @@ func registerBuilderTools(srv *mcpsdk.Server) {
 		Name:        "build_create_stage_sql",
 		Description: "Generate a CREATE STAGE DDL statement from a stage configuration. Returns the SQL string without executing it.",
 	}, func(_ context.Context, _ *mcpsdk.CallToolRequest, in stage.StageConfig) (*mcpsdk.CallToolResult, any, error) {
+		if in.Database == "" {
+			return nil, nil, fmt.Errorf("database is required")
+		}
+		if in.Schema == "" {
+			return nil, nil, fmt.Errorf("schema is required")
+		}
 		sql := stage.BuildCreateStageSql(in)
 		return textResult(sql), nil, nil
 	})
@@ -70,6 +76,12 @@ func registerBuilderTools(srv *mcpsdk.Server) {
 		Name:        "build_alter_stage_sql",
 		Description: "Generate an ALTER STAGE DDL statement from an alter-stage configuration. Returns the SQL string without executing it.",
 	}, func(_ context.Context, _ *mcpsdk.CallToolRequest, in stage.AlterStageConfig) (*mcpsdk.CallToolResult, any, error) {
+		if in.Database == "" {
+			return nil, nil, fmt.Errorf("database is required")
+		}
+		if in.Schema == "" {
+			return nil, nil, fmt.Errorf("schema is required")
+		}
 		sql := stage.BuildAlterStageSql(in)
 		return textResult(sql), nil, nil
 	})
