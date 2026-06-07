@@ -6,6 +6,7 @@ import { MarkerType, type Node, type Edge } from "@xyflow/react";
 import type { snowflake } from "../../../wailsjs/go/models";
 import {
   type DesignerTable,
+  tableKey,
   SF_TYPES,
   ER_NODE_WIDTH,
   ER_NODE_HEADER_HEIGHT,
@@ -70,9 +71,7 @@ export function tablesToNodesAndEdges(
     height: nodeHeight(t.columns.length),
   }));
 
-  // Build a lookup: "SCHEMA.TABLE" (uppercase) → tableId
-  const tableKey = (schema: string, name: string) =>
-    `${schema.toUpperCase()}.${name.trim().toUpperCase()}`;
+  // Build a lookup: "SCHEMA.TABLE" → tableId
   const keyToId = new Map<string, string>();
   for (const t of tables) {
     if (t.schema && t.name.trim()) {
@@ -96,7 +95,7 @@ export function tablesToNodesAndEdges(
       const targetTable = tables.find((tt) => tt.id === targetTableId);
       if (!targetTable) continue;
       const targetCol = targetTable.columns.find(
-        (tc) => tc.name.trim().toUpperCase() === refCol.trim().toUpperCase(),
+        (tc) => tc.name.trim() === refCol.trim(),
       );
       if (!targetCol) continue;
 
@@ -204,7 +203,7 @@ export interface AITableIn {
 
 /**
  * Merge AI-generated tables into the current designer state.
- * - Matched by uppercase SCHEMA.NAME (same logic as backend mergeAITables).
+ * - Matched by SCHEMA.NAME (same logic as backend mergeAITables).
  * - Replaced tables preserve their UUID id (canvas positions survive);
  *   columns get fresh UUIDs.
  * - New tables are appended with fresh UUIDs.
@@ -214,9 +213,6 @@ export function mergeAITablesIntoDesigner(
   current: DesignerTable[],
   aiTables: AITableIn[],
 ): DesignerTable[] {
-  const tableKey = (schema: string, name: string) =>
-    `${schema.toUpperCase()}.${name.trim().toUpperCase()}`;
-
   // Build lookup of current tables by key.
   const currentMap = new Map<string, DesignerTable>();
   for (const t of current) {

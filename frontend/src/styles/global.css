@@ -869,3 +869,24 @@ body,
   transition: filter 0.12s ease;
 }
 .thaw-tb-vstack-primary:hover { filter: brightness(1.08); }
+
+/* ── ER Diagram: intermediate table node in a join path ────────────────
+   !important is required because ERTableNode.tsx sets border styles via
+   inline `style` props (which have higher specificity than class rules).
+   XYFlow does not expose a className-based styling API for custom nodes,
+   so overriding inline styles is the only option without refactoring the
+   node component itself.
+   ──────────────────────────────────────────────────────────────────────── */
+.react-flow__node.er-intermediate > div {
+  border-style: dashed !important;
+  border-color: var(--accent) !important;
+}
+
+/* ── ER Diagram: join path disambiguation option hover ───────────────── */
+.er-join-path-option {
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.er-join-path-option:hover {
+  border-color: var(--accent) !important;
+  background: var(--bg-overlay);
+}

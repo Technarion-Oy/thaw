@@ -578,6 +578,212 @@ export namespace ddl {
 
 }
 
+export namespace erdesigner {
+	
+	export class FKColRef {
+	    schema: string;
+	    table: string;
+	    col: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FKColRef(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.schema = source["schema"];
+	        this.table = source["table"];
+	        this.col = source["col"];
+	    }
+	}
+	export class FKPair {
+	    from: FKColRef;
+	    to: FKColRef;
+	
+	    static createFrom(source: any = {}) {
+	        return new FKPair(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.from = this.convertValues(source["from"], FKColRef);
+	        this.to = this.convertValues(source["to"], FKColRef);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class TableRef {
+	    schema: string;
+	    name: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TableRef(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.schema = source["schema"];
+	        this.name = source["name"];
+	    }
+	}
+	export class JoinEntry {
+	    table: TableRef;
+	    joinType: string;
+	    onCondition: string;
+	    fkPairs: FKPair[];
+	    isIntermediate: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new JoinEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.table = this.convertValues(source["table"], TableRef);
+	        this.joinType = source["joinType"];
+	        this.onCondition = source["onCondition"];
+	        this.fkPairs = this.convertValues(source["fkPairs"], FKPair);
+	        this.isIntermediate = source["isIntermediate"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class JoinPathEdge {
+	    from: FKColRef;
+	    to: FKColRef;
+	
+	    static createFrom(source: any = {}) {
+	        return new JoinPathEdge(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.from = this.convertValues(source["from"], FKColRef);
+	        this.to = this.convertValues(source["to"], FKColRef);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class JoinPath {
+	    tables: TableRef[];
+	    edges: JoinPathEdge[];
+	
+	    static createFrom(source: any = {}) {
+	        return new JoinPath(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.tables = this.convertValues(source["tables"], TableRef);
+	        this.edges = this.convertValues(source["edges"], JoinPathEdge);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	export class JoinQueryState {
+	    database: string;
+	    baseTable: TableRef;
+	    joins: JoinEntry[];
+	    selectedColumns: Record<string, Array<string>>;
+	
+	    static createFrom(source: any = {}) {
+	        return new JoinQueryState(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.database = source["database"];
+	        this.baseTable = this.convertValues(source["baseTable"], TableRef);
+	        this.joins = this.convertValues(source["joins"], JoinEntry);
+	        this.selectedColumns = source["selectedColumns"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
 export namespace fileformat {
 	
 	export class FileFormatConfig {

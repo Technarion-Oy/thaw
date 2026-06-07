@@ -50,6 +50,7 @@ var domainDescriptions = map[string]string{
 	"Snowpark & Developer Workflows":  "Python environment management, Jupyter kernels, and dbt project scaffolding.",
 	"Git Integration":                 "Git repository operations, Snowflake Git repository objects, and schema export versioning.",
 	"MCP Server":                       "Model Context Protocol servers exposing the Snowflake connection to external AI clients over localhost.",
+	"ER Designer":                      "Entity-relationship diagram viewer, interactive table designer, join pathfinding, and SQL generation.",
 }
 
 // domainOrder controls the output ordering. Domains not listed here are

@@ -156,6 +156,24 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/store/mcpStore.ts"
       ],
       "description": "Model Context Protocol servers exposing the Snowflake connection to external AI clients over localhost."
+    },
+    {
+      "name": "ER Designer",
+      "backend_paths": [
+        "internal/erdesigner/"
+      ],
+      "frontend_paths": [
+        "frontend/src/components/er/ERCanvas.tsx",
+        "frontend/src/components/er/ERDesigner.tsx",
+        "frontend/src/components/er/ERDiagramModal.tsx",
+        "frontend/src/components/er/ERTableNode.tsx",
+        "frontend/src/components/er/JoinQueryPanel.tsx",
+        "frontend/src/components/er/buildMermaid.ts",
+        "frontend/src/components/er/erCanvasLayout.ts",
+        "frontend/src/components/er/erLayoutStore.ts",
+        "frontend/src/components/er/erTypes.ts"
+      ],
+      "description": "Entity-relationship diagram viewer, interactive table designer, join pathfinding, and SQL generation."
     }
   ]
 }`

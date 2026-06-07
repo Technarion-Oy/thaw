@@ -91,6 +91,41 @@ export function normalizeIdentifier(raw: string): string {
   return trimmed.toUpperCase();
 }
 
+// ── Join Query Builder types ─────────────────────────────────────────────────
+// These mirror the Go types in internal/erdesigner/ and the Wails-generated
+// models. Keeping hand-written interfaces avoids coupling to generation timing.
+
+export interface FKPair {
+  from: { schema: string; table: string; col: string };
+  to: { schema: string; table: string; col: string };
+}
+
+export interface JoinEntry {
+  table: { schema: string; name: string };
+  joinType: "INNER" | "LEFT" | "RIGHT" | "FULL OUTER";
+  onCondition: string;
+  /** Structured FK column pairs used in this join — avoids reverse-parsing onCondition for highlighting. */
+  fkPairs: FKPair[];
+  isIntermediate: boolean;
+}
+
+export interface JoinQueryState {
+  database: string;
+  baseTable: { schema: string; name: string };
+  joins: JoinEntry[];
+  selectedColumns: Record<string, string[]>; // "SCHEMA.TABLE" → column names (empty = *)
+}
+
+export interface JoinPath {
+  tables: { schema: string; name: string }[];
+  edges: { from: { schema: string; table: string; col: string }; to: { schema: string; table: string; col: string } }[];
+}
+
+/** Canonical key for a table: "SCHEMA.TABLE" (both parts trimmed, case-preserved).
+ *  Matches Go's `snowflake.TableKey` which trims both parts. */
+export const tableKey = (schema: string, name: string) =>
+  `${schema.trim()}.${name.trim()}`;
+
 export const ER_NODE_WIDTH = 240;
 export const ER_NODE_HEADER_HEIGHT = 32;
 export const ER_NODE_ROW_HEIGHT = 24;

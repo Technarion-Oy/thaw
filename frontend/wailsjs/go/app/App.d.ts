@@ -10,6 +10,7 @@ import {fileformat} from '../models';
 import {snowgitrepo} from '../models';
 import {pipe} from '../models';
 import {secret} from '../models';
+import {erdesigner} from '../models';
 import {snowpark} from '../models';
 import {snowflake} from '../models';
 import {dbt} from '../models';
@@ -89,6 +90,10 @@ export function BuildDropColumnSql(arg1:string,arg2:string,arg3:string,arg4:stri
 export function BuildExecuteDbtProjectSql(arg1:string,arg2:string,arg3:string,arg4:dbtproject.ExecuteConfig):Promise<string>;
 
 export function BuildFunctionSelectStatement(arg1:string,arg2:string,arg3:string,arg4:Array<procedure.Argument>,arg5:boolean):Promise<string>;
+
+export function BuildJoinSQL(arg1:erdesigner.JoinQueryState):Promise<string>;
+
+export function BuildJoinState(arg1:erdesigner.JoinPath,arg2:Array<erdesigner.TableRef>,arg3:string):Promise<erdesigner.JoinQueryState>;
 
 export function BuildModifyGitRepositorySql(arg1:string,arg2:string,arg3:string,arg4:snowgitrepo.GitRepositoryConfig,arg5:string,arg6:string,arg7:string):Promise<Array<string>>;
 
@@ -229,6 +234,8 @@ export function ExportGraphDDL(arg1:string,arg2:string,arg3:string,arg4:boolean)
 export function ExportTableData(arg1:snowflake.ExportTableParams):Promise<snowflake.ExportTableResult>;
 
 export function FetchNotebookContent(arg1:string,arg2:string,arg3:string):Promise<string>;
+
+export function FindJoinPaths(arg1:Array<erdesigner.TableRef>,arg2:Array<snowflake.ERForeignKey>):Promise<Array<erdesigner.JoinPath>>;
 
 export function GenerateKeyPair(arg1:string,arg2:string,arg3:string):Promise<keypair.KeyPairResult>;
 
