@@ -27,6 +27,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `editor_tools.go` | `registerEditorTools` — editor context tools (`get_current_editor_sql`, `get_query_results_summary`, `get_query_history`); bridges frontend editor state to MCP clients |
 | `tab_tools.go` | `registerTabTools` — tab-delivery tool (`open_sql_tab`); formats SQL with user prefs, runs diagnostics, emits `mcp:open-sql-tab` Wails event. Registered when `emit` is non-nil. `OpenSqlTabPayload` type, `loadEditorPrefs` helper |
 | `notebook_tools.go` | `registerNotebookTools` — notebook/Snowpark tools (`read_notebook`, `get_notebook_completions`, `check_python_syntax`, `open_notebook_tab`); `NotebookBackend` interface (dependency-injected from `App` via adapter), MCP-local type duplicates (`NotebookCompletion`, `NotebookSyntaxError`), `OpenNotebookTabPayload` type, `buildNbformat` helper. `read_notebook` is workspace-gated; kernel tools are backend-gated; `open_notebook_tab` is emit-gated |
+| `er_tools.go` | `registerERDesignerTools` — ER designer delivery tool (`open_er_designer`); fetches live ER data, merges AI-generated tables via `mergeAITables`, emits `mcp:open-er-designer` Wails event. Emit-gated. `OpenERDesignerPayload` type, input types `openERDesignerInput`, `erDesignerTableIn`, `erDesignerColumnIn` |
 | `pipeline_tools.go` | `registerPipelineTools` — task graph, stage, and pipe inspection tools (`list_tasks`, `get_task_run_history`, `get_task_dependencies`, `list_stage_files`, `preview_stage_file`, `get_pipe_status`, `get_pipe_copy_history`, `open_task_graph`); delegates to `tasks`, `stage`, `fileformat`, `pipe` packages. `preview_stage_file` is mode-gated (readonly/explain_only). `open_task_graph` is emit-gated. `OpenTaskGraphPayload` type |
 | `function_tools.go` | `registerFunctionTools` — function/procedure metadata and invocation builder tools (`search_functions`, `get_function_tooltip`, `get_procedure_params`, `get_function_info`, `build_call_statement`, `build_function_select`); delegates to `fnmeta.Store`, `snowflake.Client`, and `procedure` packages; always registered in all modes |
 | `builder_tools.go` | `registerBuilderTools` — pure DDL builder tools (`build_create_stage_sql`, `build_alter_stage_sql`, `build_create_file_format_sql`, `build_create_pipe_sql`, `build_refresh_pipe_sql`, `build_create_secret_sql`, `build_storage_integration_sql`, `build_api_integration_sql`, `build_catalog_integration_sql`, `build_external_access_integration_sql`, `build_notification_integration_sql`, `build_security_integration_sql`); delegates to `stage`, `fileformat`, `pipe`, `secret`, `integrations` packages; no Snowflake client needed; always registered in all modes |
@@ -39,6 +40,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `tab_tools_test.go` | Unit tests for `open_sql_tab` tool (nil-emit graceful degradation, registration, empty SQL rejection, emit payload shape) |
 | `notebook_tools_test.go` | Unit tests for notebook tools (registration gating for nil backend/workspace/emit, `open_notebook_tab` event payload, default title, truncation, cell kind validation, `buildNbformat` mapping with outputs/execution_count, kernel tool input validation, `read_notebook` sandbox and extension check) |
 | `editor_tools_test.go` | Unit tests for editor context tools (empty store, content return, mode-gating, nil client handling) |
+| `er_tools_test.go` | Unit tests for ER designer tools (`mergeAITables` merge logic, emit-gating for `open_er_designer`) |
 | `pipeline_tools_test.go` | Unit tests for pipeline tools (registration in all modes, mode-gating for `preview_stage_file`, emit-gating for `open_task_graph`, nil client, input validation) |
 | `account_tools_test.go` | Unit tests for account tools (registration in all modes, empty kind/name/schema validation) |
 | `schema_tools_test.go` | Unit tests for schema tools (registration, validate_data_type valid/invalid, get_data_retention input validation, search_objects empty pattern, get_all_data_types, mode coverage) |
@@ -120,7 +122,7 @@ Metadata needs (listing databases, describing tables, etc.) are served by the de
 
 ### Tools
 
-The server exposes 60 tools in the baseline metadata mode (no workspace, no emit, no editorCtx, no fnStore, no nb). Additional tools are registered when optional dependencies are provided: workspace tools (+8), emit-gated tools (+3), editor context tools (+2–3), notebook backend tools (+2), and SQL execution tools (+6–7 in readonly/explain_only modes):
+The server exposes 60 tools in the baseline metadata mode (no workspace, no emit, no editorCtx, no fnStore, no nb). Additional tools are registered when optional dependencies are provided: workspace tools (+8), emit-gated tools (+4), editor context tools (+2–3), notebook backend tools (+2), and SQL execution tools (+6–7 in readonly/explain_only modes):
 
 **Schema-browsing tools** (always registered, `tools.go`): `get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`.
 
@@ -278,6 +280,14 @@ All workspace tools that accept a directory or file path validate the input agai
 | `open_sql_tab` | Format SQL with user prefs, run diagnostics, open a new editor tab | Emits `mcp:open-sql-tab` Wails event with `{title, sql, markers}` |
 
 `open_sql_tab` completes the Phase 1 MCP round-trip: the AI validates and formats SQL, then delivers it into a new editor tab. The user sees diagnostics inline and must manually run the query (human-in-the-loop preserved). The event emitter callback is injected into `Manager` at construction (`NewManager(emit)`) and threaded through `buildServer` to `registerTabTools`. The emitter pattern follows the established `migration.NewService` approach — `internal/mcp` cannot import `internal/app`, so the Wails runtime is accessed via a closure wired in `App.startup()`.
+
+**ER designer tools** (`er_tools.go`, registered when `emit` is non-nil):
+
+| Tool | Purpose | Event |
+|---|---|---|
+| `open_er_designer` | Fetch live ER data, merge AI-generated tables, open the ER designer | Emits `mcp:open-er-designer` Wails event with `{database, merged, baseline}` |
+
+`open_er_designer` enables the "AI scaffolds, human refines" workflow: the AI generates tables from natural language and delivers them onto the interactive ER canvas. The `mergeAITables` function merges AI tables into the live schema — matching tables (by uppercase `SCHEMA.NAME`) are replaced, new tables are appended, untouched live tables are preserved. The frontend receives both the merged data (for display) and the baseline (original live schema for diff SQL generation). The user reviews the visual model and the generated SQL diff before applying.
 
 **Diagnostics vs. EXPLAIN gate**: The diagnostics tools serve the *editor/notebook delivery path* — the AI writes SQL, validates it, then places it in front of the human for review. The EXPLAIN gate validates SQL immediately before execution in the `execute_snowflake_sql` tool.
 

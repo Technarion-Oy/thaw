@@ -15,6 +15,7 @@ import { type DesignerColumn, type DesignerTable, SF_DATA_TYPES, SF_TYPES, norma
 interface Props {
   database: string;
   initialData?: snowflake.ERDiagramData;
+  mergedData?: snowflake.ERDiagramData;
   onClose: () => void;
   onSuccess: () => void;
 }
@@ -378,16 +379,18 @@ function generateDiffSQL(
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function ERDesigner({ database, initialData, onClose, onSuccess }: Props) {
+export default function ERDesigner({ database, initialData, mergedData, onClose, onSuccess }: Props) {
   const { modal, message } = AntApp.useApp();
   const [leftWidth, setLeftWidth] = useState(490);
   const [resizing, setResizing] = useState(false);
   const resizeStart = useRef({ x: 0, width: 0 });
 
   const [schemas, setSchemas] = useState<string[]>([]);
-  const [tables, setTables] = useState<DesignerTable[]>(() =>
-    initialData ? initFromERData(initialData) : []
-  );
+  const [tables, setTables] = useState<DesignerTable[]>(() => {
+    if (mergedData) return initFromERData(mergedData);
+    if (initialData) return initFromERData(initialData);
+    return [];
+  });
 
   // Stable ref for tables — used in callbacks that shouldn't re-create on every tables change
   const tablesRef = useRef(tables);

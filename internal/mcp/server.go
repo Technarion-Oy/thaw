@@ -57,6 +57,7 @@ func buildServer(client *snowflake.Client, mode string, cfg SessionConfig, edito
 	registerTabTools(srv, client, emit)
 	registerNotebookTools(srv, nb, cfg.WorkspaceRoot, emit)
 	registerPipelineTools(srv, client, emit)
+	registerERDesignerTools(srv, client, emit)
 	registerPipelineModeTools(srv, client, mode)
 
 	registerFunctionTools(srv, client, fnStore)

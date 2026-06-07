@@ -26,6 +26,8 @@ Renders an interactive ER diagram using `@xyflow/react` from Snowflake table/col
 - `ERDesigner` calls `ListSchemas(database)` for the schema picker and `ExecuteQuery(sql)` to run generated DDL
 - All other files are pure TypeScript/React with no IPC
 
+**MCP integration:** The `open_er_designer` MCP tool (in `internal/mcp/er_tools.go`) emits a `mcp:open-er-designer` Wails event. `Sidebar.tsx` listens for this event and opens `ERDesigner` with two data sets: `mergedData` (AI tables merged into live schema, used for initial canvas population) and `initialData` (the original live schema, used as the baseline for diff SQL generation). The `mergedData` prop takes priority over `initialData` for table initialization, while `initialData` continues to drive `generateDiffSQL`.
+
 **XYFlow canvas:** Uses `@xyflow/react` v12 with a custom `ERTableNode` registered via module-level `nodeTypes` (required by XYFlow to prevent re-registration). Layout is computed by `@dagrejs/dagre` with `rankdir: "TB"`, `nodesep: 60`, `ranksep: 120`. Node heights are dynamic based on column count.
 
 **Position persistence:** Node positions are saved to localStorage via `erLayoutStore`, keyed by `SCHEMA.TABLE` (uppercase). Positions are loaded on mount and written back (debounced 500ms) on drag. "Reset Layout" clears saved positions and re-runs dagre.
