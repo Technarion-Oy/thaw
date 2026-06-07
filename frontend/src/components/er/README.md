@@ -18,6 +18,9 @@ Renders an interactive ER diagram using `@xyflow/react` from Snowflake table/col
 | `ERDiagramModal.tsx` | Primary viewer: interactive canvas, schema filter checkboxes, "Copy Mermaid" button, and a "Design Tables…" button that opens `ERDesigner`. |
 | `ERDesigner.tsx` | Interactive table designer. Left sidebar with table/column CRUD forms, right panel with `ERCanvas` in edit mode. Generates diff-based SQL (`CREATE TABLE`, `ALTER TABLE`, `DROP TABLE`) and executes via `ExecuteQuery`. Syncs state to backend MCP cache (mount/unmount/debounced changes) and listens for `mcp:modify-er-designer` events. |
 | `buildMermaid.ts` | Pure function `buildMermaid(tables, visibleSchemas?)` that converts `DesignerTable[]` into a Mermaid `erDiagram` string. Used by both `ERDiagramModal` and `ERDesigner` for the "Copy Mermaid" clipboard export. Also exports shared helpers `sanitiseId`, `entityId`, `shortType`. |
+| `joinPathfinder.ts` | BFS pathfinder on FK adjacency graph. `findJoinPaths()` finds shortest paths connecting selected tables (with disambiguation for multiple equal-length paths). `buildJoinState()` converts a path into a `JoinQueryState` for SQL generation. Pure TypeScript, no React. |
+| `buildJoinQuery.ts` | Pure SQL generator. `buildJoinSQL()` takes a `JoinQueryState` and produces formatted `SELECT ... JOIN ...` SQL with table aliases and aliased ON conditions. |
+| `JoinQueryPanel.tsx` | Bottom panel UI for the visual join builder. Shows join configuration (type selector, ON conditions), column picker, live SQL preview, and "Open in Editor" button. Also exports `JoinPathDisambiguation` for choosing between multiple candidate join paths. |
 
 ## Patterns & integration
 
@@ -37,6 +40,8 @@ Renders an interactive ER diagram using `@xyflow/react` from Snowflake table/col
 **FK connections (edit mode):** Per-column handles (`col-source-{colId}` / `col-target-{colId}`) enable dragging edges between specific columns. The `onConnect` callback resolves table/column references and updates `fkRef` on the source column.
 
 **Selection sync:** Clicking a table on the canvas highlights it and scrolls the sidebar to the corresponding card (and vice versa).
+
+**Visual join builder (readonly mode):** Select 2+ tables on the canvas (Cmd/Ctrl+click), right-click → "Build Query". `ERDiagramModal` runs `findJoinPaths()` to find FK paths connecting the selected tables. If multiple equal-length paths exist (e.g. two FKs between the same tables), a disambiguation panel appears. The `JoinQueryPanel` shows join configuration (adjustable join types), column selection, and a live SQL preview. "Open in Editor" calls `loadInNewTab(sql)` from `queryStore` and closes the modal. The canvas highlights edges in the join path and marks intermediate tables with a dashed border via `highlightedEdgeIds`/`highlightedNodeIds` props on `ERCanvas`.
 
 ## Gotchas
 

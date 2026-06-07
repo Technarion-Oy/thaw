@@ -1,16 +1,20 @@
 // Copyright (c) 2026 Technarion Oy. All rights reserved.
 // @thaw-domain: ER Designer
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Modal, Button, Checkbox } from "antd";
 import { CopyOutlined, EditOutlined } from "@ant-design/icons";
 import { ListSchemas } from "../../../wailsjs/go/app/App";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { snowflake } from "../../../wailsjs/go/models";
+import type { JoinQueryState, JoinPath } from "./erTypes";
 import { buildMermaid } from "./buildMermaid";
 import ERDesigner from "./ERDesigner";
 import ERCanvas from "./ERCanvas";
 import { initFromERData } from "./erCanvasLayout";
+import { findJoinPaths, buildJoinState } from "./joinPathfinder";
+import JoinQueryPanel, { JoinPathDisambiguation } from "./JoinQueryPanel";
+import { useQueryStore } from "../../store/queryStore";
 
 interface Props {
   database: string;
@@ -40,8 +44,35 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
 
   const [visibleSchemas, setVisibleSchemas] = useState<Set<string>>(new Set(dataSchemas));
   const [designerOpen, setDesignerOpen] = useState(false);
+  const [selectedTableIds, setSelectedTableIds] = useState<string[]>([]);
+
+  // Join builder state
+  const [joinPanelOpen, setJoinPanelOpen] = useState(false);
+  const [joinState, setJoinState] = useState<JoinQueryState | null>(null);
+  const [joinPaths, setJoinPaths] = useState<JoinPath[] | null>(null);
+
+  const loadInNewTab = useQueryStore((s) => s.loadInNewTab);
 
   const designerTables = useMemo(() => initFromERData(data), [data]);
+
+  // Build a lookup of table columns for the JoinQueryPanel column picker
+  const tableColumnsMap = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const t of data.tables) {
+      const key = `${t.schema.toUpperCase()}.${t.name.toUpperCase()}`;
+      m.set(key, t.columns.map((c) => c.name));
+    }
+    return m;
+  }, [data]);
+
+  // Map designer table UUIDs to schema.name for reverse lookup
+  const tableIdToSchemaName = useMemo(() => {
+    const m = new Map<string, { schema: string; name: string }>();
+    for (const t of designerTables) {
+      m.set(t.id, { schema: t.schema, name: t.name });
+    }
+    return m;
+  }, [designerTables]);
 
   const toggleSchema = (schema: string) => {
     setVisibleSchemas((prev) => {
@@ -58,6 +89,106 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
   const copyMermaid = () => {
     ClipboardSetText(buildMermaid(designerTables, visibleSchemas));
   };
+
+  // Handle "Build Query" from context menu
+  const handleBuildQuery = useCallback(
+    (tableIds: string[]) => {
+      const selected = tableIds
+        .map((id) => tableIdToSchemaName.get(id))
+        .filter((t): t is { schema: string; name: string } => !!t);
+
+      if (selected.length < 2) return;
+
+      const paths = findJoinPaths(selected, data.fks ?? []);
+      if (paths.length === 0) return; // disconnected tables
+
+      if (paths.length === 1) {
+        // Single path — open panel directly
+        const state = buildJoinState(paths[0], selected, data.fks ?? []);
+        setJoinState(state);
+        setJoinPaths(null);
+        setJoinPanelOpen(true);
+      } else {
+        // Multiple paths — show disambiguation
+        setJoinPaths(paths);
+        setJoinState(null);
+        setJoinPanelOpen(true);
+      }
+    },
+    [data.fks, tableIdToSchemaName],
+  );
+
+  const handleDisambiguationSelect = useCallback(
+    (index: number) => {
+      if (!joinPaths) return;
+      const selected = selectedTableIds
+        .map((id) => tableIdToSchemaName.get(id))
+        .filter((t): t is { schema: string; name: string } => !!t);
+      const state = buildJoinState(joinPaths[index], selected, data.fks ?? []);
+      setJoinState(state);
+      setJoinPaths(null);
+    },
+    [joinPaths, selectedTableIds, tableIdToSchemaName, data.fks],
+  );
+
+  const handleCloseJoinPanel = useCallback(() => {
+    setJoinPanelOpen(false);
+    setJoinState(null);
+    setJoinPaths(null);
+  }, []);
+
+  // Compute highlighted edge IDs for visual feedback on the canvas
+  const highlightedEdgeIds = useMemo(() => {
+    if (!joinPanelOpen || !joinState) return undefined;
+    const ids = new Set<string>();
+    // Match edges by FK column pairs against the join path's ON conditions
+    for (const t of designerTables) {
+      for (const c of t.columns) {
+        if (!c.fkRef) continue;
+        const parts = c.fkRef.split(".");
+        if (parts.length !== 3) continue;
+        const [refSchema, refTable, refCol] = parts;
+        // Find the target table's designer ID
+        const targetTable = designerTables.find(
+          (tt) => tt.schema.toUpperCase() === refSchema.toUpperCase() &&
+                  tt.name.toUpperCase() === refTable.toUpperCase(),
+        );
+        if (!targetTable) continue;
+        const targetCol = targetTable.columns.find(
+          (tc) => tc.name.toUpperCase() === refCol.toUpperCase(),
+        );
+        if (!targetCol) continue;
+
+        // Check if this FK is part of the join path
+        const fromKey = `${t.schema.toUpperCase()}.${t.name.toUpperCase()}`;
+        const toKey = `${refSchema.toUpperCase()}.${refTable.toUpperCase()}`;
+        const baseKey = `${joinState.baseTable.schema.toUpperCase()}.${joinState.baseTable.name.toUpperCase()}`;
+        const joinKeys = new Set([baseKey, ...joinState.joins.map((j) =>
+          `${j.table.schema.toUpperCase()}.${j.table.name.toUpperCase()}`
+        )]);
+
+        if (joinKeys.has(fromKey) && joinKeys.has(toKey)) {
+          ids.add(`fk-${t.id}-${c.id}-${targetTable.id}-${targetCol.id}`);
+        }
+      }
+    }
+    return ids.size > 0 ? ids : undefined;
+  }, [joinPanelOpen, joinState, designerTables]);
+
+  // Compute highlighted node IDs (intermediate tables) for visual feedback
+  const highlightedNodeIds = useMemo(() => {
+    if (!joinPanelOpen || !joinState) return undefined;
+    const ids = new Set<string>();
+    for (const j of joinState.joins) {
+      if (!j.isIntermediate) continue;
+      const t = designerTables.find(
+        (dt) => dt.schema.toUpperCase() === j.table.schema.toUpperCase() &&
+                dt.name.toUpperCase() === j.table.name.toUpperCase(),
+      );
+      if (t) ids.add(t.id);
+    }
+    return ids.size > 0 ? ids : undefined;
+  }, [joinPanelOpen, joinState, designerTables]);
 
   return (
     <>
@@ -104,16 +235,44 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
         </div>
       </div>
 
-      {/* Canvas area */}
-      <div style={{ height: "70vh" }}>
+      {/* Canvas area — shrinks when join panel is open */}
+      <div style={{ height: joinPanelOpen ? "45vh" : "70vh", transition: "height 0.2s ease" }}>
         <ERCanvas
           key={database}
           tables={designerTables}
           mode="readonly"
           database={database}
           visibleSchemas={visibleSchemas}
+          selectedTableIds={selectedTableIds}
+          onSelectionChange={setSelectedTableIds}
+          onBuildQuery={handleBuildQuery}
+          highlightedEdgeIds={highlightedEdgeIds}
+          highlightedNodeIds={highlightedNodeIds}
         />
       </div>
+
+      {/* Join query builder panel */}
+      {joinPanelOpen && joinPaths && !joinState && (
+        <JoinPathDisambiguation
+          paths={joinPaths}
+          onSelect={handleDisambiguationSelect}
+          onCancel={handleCloseJoinPanel}
+        />
+      )}
+      {joinPanelOpen && joinState && (
+        <div style={{ height: "25vh" }}>
+          <JoinQueryPanel
+            state={joinState}
+            tableColumns={tableColumnsMap}
+            onChange={setJoinState}
+            onOpenInEditor={(sql) => {
+              loadInNewTab(sql);
+              onClose();
+            }}
+            onClose={handleCloseJoinPanel}
+          />
+        </div>
+      )}
     </Modal>
 
     {designerOpen && (

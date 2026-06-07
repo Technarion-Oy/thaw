@@ -26,6 +26,7 @@ import {
   DeleteOutlined,
   LinkOutlined,
   DisconnectOutlined,
+  BuildOutlined,
 } from "@ant-design/icons";
 import ERTableNode from "./ERTableNode";
 import type { DesignerTable } from "./erTypes";
@@ -184,6 +185,96 @@ function ERContextMenu({
   );
 }
 
+// ── Readonly context menu (Build Query only) ────────────────────────────────
+
+function ERReadonlyContextMenu({
+  ctxMenu,
+  selectedCount,
+  onClose,
+  onBuildQuery,
+  canvasRef,
+}: {
+  ctxMenu: CtxMenuState;
+  selectedCount: number;
+  onClose: () => void;
+  onBuildQuery: () => void;
+  canvasRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ top: ctxMenu.y, left: ctxMenu.x });
+  const [visible, setVisible] = useState(false);
+
+  useLayoutEffect(() => {
+    const el = menuRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    setPos({
+      top: Math.min(ctxMenu.y, window.innerHeight - rect.height - 8),
+      left: Math.min(ctxMenu.x, window.innerWidth - rect.width - 8),
+    });
+    setVisible(true);
+  }, [ctxMenu.x, ctxMenu.y]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    const handleWheel = () => onClose();
+    const canvas = canvasRef.current;
+    window.addEventListener("keydown", handleKeyDown);
+    canvas?.addEventListener("wheel", handleWheel, { passive: true });
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      canvas?.removeEventListener("wheel", handleWheel);
+    };
+  }, [onClose, canvasRef]);
+
+  const canBuild = selectedCount >= 2;
+
+  return (
+    <>
+      <div
+        style={{ position: "fixed", inset: 0, zIndex: 998 }}
+        onClick={onClose}
+      />
+      <div ref={menuRef} style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 999, visibility: visible ? "visible" : "hidden" }}>
+        <Menu
+          style={{
+            minWidth: 200,
+            borderRadius: 6,
+            boxShadow: "0 4px 16px rgba(0,0,0,0.35)",
+            border: "1px solid var(--border)",
+          }}
+          items={[
+            {
+              key: "label",
+              label: (
+                <span style={{ fontFamily: "monospace", fontSize: 11, color: "var(--text-muted)" }}>
+                  {ctxMenu.tableName}
+                </span>
+              ),
+              disabled: true,
+            },
+            { type: "divider" as const },
+            {
+              key: "build-query",
+              icon: <BuildOutlined />,
+              label: canBuild
+                ? "Build Query"
+                : "Build Query (select 2+ tables)",
+              disabled: !canBuild,
+              onClick: () => {
+                onBuildQuery();
+                onClose();
+              },
+            },
+          ]}
+        />
+      </div>
+    </>
+  );
+}
+
 export interface ERCanvasProps {
   tables: DesignerTable[];
   mode: "edit" | "readonly";
@@ -204,6 +295,9 @@ export interface ERCanvasProps {
   onDeleteTable?: (tableId: string) => void;
   onAddFK?: (tableIdA: string, tableIdB: string) => void;
   onRemoveFKs?: (tableId: string) => void;
+  onBuildQuery?: (tableIds: string[]) => void;
+  highlightedEdgeIds?: Set<string>;
+  highlightedNodeIds?: Set<string>;
 }
 
 function ERCanvasInner({
@@ -221,6 +315,9 @@ function ERCanvasInner({
   onDeleteTable,
   onAddFK,
   onRemoveFKs,
+  onBuildQuery,
+  highlightedEdgeIds,
+  highlightedNodeIds,
 }: ERCanvasProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([] as Node[]);
   const [edges, setEdges] = useEdgesState<Edge>([] as Edge[]);
@@ -353,6 +450,34 @@ function ERCanvasInner({
 
     setEdges(newEdges);
   }, [filteredTables, filteredTableById, filteredTableIdStr, mode, database, setNodes, setEdges, fitView]);
+
+  // Apply visual highlighting to edges and nodes for join path feedback
+  const styledEdges = useMemo(() => {
+    if (!highlightedEdgeIds || highlightedEdgeIds.size === 0) return edges;
+    return edges.map((e) => {
+      if (highlightedEdgeIds.has(e.id)) {
+        return {
+          ...e,
+          animated: false,
+          style: { ...e.style, strokeWidth: 3, stroke: "var(--accent)" },
+        };
+      }
+      return e;
+    });
+  }, [edges, highlightedEdgeIds]);
+
+  const styledNodes = useMemo(() => {
+    if (!highlightedNodeIds || highlightedNodeIds.size === 0) return nodes;
+    return nodes.map((n) => {
+      if (highlightedNodeIds.has(n.id)) {
+        return {
+          ...n,
+          className: `${n.className ?? ""} er-intermediate`.trim(),
+        };
+      }
+      return n;
+    });
+  }, [nodes, highlightedNodeIds]);
 
   // Sync parent selectedTableIds to XYFlow node.selected.
   // Uses lastSelectionRef to detect whether this update was already propagated
@@ -536,7 +661,7 @@ function ERCanvasInner({
   // In practice the natural click delay makes this a non-issue.
   const handleNodeContextMenu = useCallback(
     (event: React.MouseEvent, node: Node) => {
-      if (mode !== "edit") return;
+      if (mode !== "edit" && !onBuildQuery) return;
       event.preventDefault();
       const table = filteredTableById.get(node.id);
       if (!table) return;
@@ -549,7 +674,7 @@ function ERCanvasInner({
         hasFKs,
       });
     },
-    [mode, filteredTableById],
+    [mode, filteredTableById, onBuildQuery],
   );
 
   if (filteredTables.length === 0) {
@@ -576,13 +701,13 @@ function ERCanvasInner({
     <div ref={canvasRef} style={{ flex: 1, width: "100%", height: "100%" }}>
       {/* onEdgesChange intentionally omitted — edges are derived from fkRef (read-only) */}
       <ReactFlow
-        nodes={nodes}
-        edges={edges}
+        nodes={styledNodes}
+        edges={styledEdges}
         onNodesChange={handleNodesChange}
         onConnect={mode === "edit" ? handleConnect : undefined}
         onNodeClick={closeContextMenu}
         onPaneClick={handlePaneClick}
-        onNodeContextMenu={mode === "edit" ? handleNodeContextMenu : undefined}
+        onNodeContextMenu={mode === "edit" || onBuildQuery ? handleNodeContextMenu : undefined}
         onSelectionChange={handleSelectionChange}
         nodeTypes={nodeTypes}
         fitView
@@ -621,7 +746,7 @@ function ERCanvasInner({
       </ReactFlow>
 
       {/* ── Node right-click context menu ──────────────────────────────── */}
-      {ctxMenu && (
+      {ctxMenu && mode === "edit" && (
         <ERContextMenu
           ctxMenu={ctxMenu}
           selectedNodeIds={selectedTableIds ?? []}
@@ -631,6 +756,15 @@ function ERCanvasInner({
           onDeleteTable={onDeleteTable}
           onAddFK={onAddFK}
           onRemoveFKs={onRemoveFKs}
+        />
+      )}
+      {ctxMenu && mode === "readonly" && onBuildQuery && (
+        <ERReadonlyContextMenu
+          ctxMenu={ctxMenu}
+          selectedCount={(selectedTableIds ?? []).length}
+          onClose={closeContextMenu}
+          onBuildQuery={() => onBuildQuery(selectedTableIds ?? [])}
+          canvasRef={canvasRef}
         />
       )}
     </div>

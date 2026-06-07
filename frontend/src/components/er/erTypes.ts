@@ -91,6 +91,26 @@ export function normalizeIdentifier(raw: string): string {
   return trimmed.toUpperCase();
 }
 
+// ── Join Query Builder types ─────────────────────────────────────────────────
+
+export interface JoinEntry {
+  table: { schema: string; name: string };
+  joinType: "INNER" | "LEFT" | "RIGHT" | "FULL OUTER";
+  onCondition: string;
+  isIntermediate: boolean;
+}
+
+export interface JoinQueryState {
+  baseTable: { schema: string; name: string };
+  joins: JoinEntry[];
+  selectedColumns: Map<string, string[]>; // "SCHEMA.TABLE" → column names (empty = *)
+}
+
+export interface JoinPath {
+  tables: { schema: string; name: string }[];
+  edges: { from: { schema: string; table: string; col: string }; to: { schema: string; table: string; col: string } }[];
+}
+
 export const ER_NODE_WIDTH = 240;
 export const ER_NODE_HEADER_HEIGHT = 32;
 export const ER_NODE_ROW_HEIGHT = 24;
