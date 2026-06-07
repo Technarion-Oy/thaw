@@ -12,8 +12,8 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
-	"strings"
 
 	"thaw/internal/apperrors"
 	"thaw/internal/config"
@@ -136,8 +136,7 @@ func (a *App) saveMCPCredential(label string, port int) {
 
 // isPortConflict reports whether the error indicates the requested port was unavailable.
 func isPortConflict(err error) bool {
-	msg := err.Error()
-	return strings.Contains(msg, "port") && (strings.Contains(msg, "not available") || strings.Contains(msg, "already in use"))
+	return errors.Is(err, mcp.ErrPortUnavailable)
 }
 
 // UpdateMCPSessionMode changes the execution mode of a running session,

@@ -404,17 +404,17 @@ type MCPSessionCredential struct {
 
 // AppConfig is the on-disk configuration for Thaw.
 type AppConfig struct {
-	Connections            []Connection      `json:"connections"`
-	Git                    GitConfig         `json:"git"`
-	OAuth                  OAuthConfig       `json:"oauth"`
-	AI                     AIConfig          `json:"ai"`
-	Snowpark               SnowparkConfig    `json:"snowpark"`
-	PipRegistry            PipRegistryConfig `json:"pipRegistry"`
-	Editor                 EditorPrefs       `json:"editor"`
-	NotebookPrefs          NotebookPrefs     `json:"notebookPrefs"`
-	Session                SessionConfig     `json:"session"`
-	SnowflakeCLIConfigPath string                        `json:"snowflakeCliConfigPath"`
-	FeatureFlags           FeatureFlags                  `json:"featureFlags"`
+	Connections            []Connection                    `json:"connections"`
+	Git                    GitConfig                       `json:"git"`
+	OAuth                  OAuthConfig                     `json:"oauth"`
+	AI                     AIConfig                        `json:"ai"`
+	Snowpark               SnowparkConfig                  `json:"snowpark"`
+	PipRegistry            PipRegistryConfig               `json:"pipRegistry"`
+	Editor                 EditorPrefs                     `json:"editor"`
+	NotebookPrefs          NotebookPrefs                   `json:"notebookPrefs"`
+	Session                SessionConfig                   `json:"session"`
+	SnowflakeCLIConfigPath string                          `json:"snowflakeCliConfigPath"`
+	FeatureFlags           FeatureFlags                    `json:"featureFlags"`
 	MCPCredentials         map[string]MCPSessionCredential `json:"mcpCredentials,omitempty"`
 }
 

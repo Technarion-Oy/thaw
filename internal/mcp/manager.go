@@ -12,6 +12,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"sort"
@@ -20,6 +21,11 @@ import (
 	"thaw/internal/fnmeta"
 	"thaw/internal/snowflake"
 )
+
+// ErrPortUnavailable is returned by Start when the requested port cannot be
+// bound (either already claimed by another session or by the OS). Callers can
+// use errors.Is to detect this condition and retry with a different port.
+var ErrPortUnavailable = errors.New("mcp: port unavailable")
 
 // basePort is the first port tried when auto-assigning a session port.
 const basePort = 9100
@@ -311,11 +317,11 @@ func (m *Manager) allocatePortLocked(preferred int) (net.Listener, error) {
 
 	if preferred != 0 {
 		if inUse(preferred) {
-			return nil, fmt.Errorf("mcp: port %d is already in use by another session", preferred)
+			return nil, fmt.Errorf("%w: port %d is already in use by another session", ErrPortUnavailable, preferred)
 		}
 		ln, err := listenLoopback(preferred)
 		if err != nil {
-			return nil, fmt.Errorf("mcp: port %d is not available", preferred)
+			return nil, fmt.Errorf("%w: port %d is not available", ErrPortUnavailable, preferred)
 		}
 		return ln, nil
 	}
