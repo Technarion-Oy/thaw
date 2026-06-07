@@ -634,58 +634,75 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
       let parentColId = "";
 
       // Auto-detect the best FK column pair between the two tables.
-      // Priority: 1) child column whose name contains the parent table name
-      //              matching a PK column on the parent (e.g. CUSTOMER_ID → CUSTOMER.ID)
-      //           2) PK column on the parent that shares a name with a child column
-      //           3) any common column name between the two tables
+      // Tries both directions (A=child/B=parent, then B=child/A=parent) and
+      // picks the first match.
+      // Priority per direction:
+      //   1) child column whose name contains the parent table name
+      //      matching a PK column on the parent (e.g. CUSTOMER_ID → CUSTOMER.ID)
+      //   2) PK column on the parent that shares a name with a child column
+      //   3) any common column name between the two tables
+      let childTableId = tableIdA;
+      let parentTableId = tableIdB;
+
       if (tableA && tableB) {
-        const namedA = tableA.columns.filter((c) => c.name.trim());
-        const namedB = tableB.columns.filter((c) => c.name.trim());
-        const colMapA = new Map(namedA.map((c) => [c.name.trim().toUpperCase(), c]));
-        const parentName = tableB.name.trim().toUpperCase();
+        const tryDetect = (
+          child: DesignerTable,
+          parent: DesignerTable,
+        ): { childColId: string; parentColId: string } | null => {
+          const namedChild = child.columns.filter((c) => c.name.trim());
+          const namedParent = parent.columns.filter((c) => c.name.trim());
+          const colMapChild = new Map(namedChild.map((c) => [c.name.trim().toUpperCase(), c]));
+          const pName = parent.name.trim().toUpperCase();
 
-        // Strategy 1: child col name contains parent table name + parent PK
-        if (parentName) {
-          const parentPK = namedB.find((c) => c.isPK);
-          if (parentPK) {
-            const candidate = namedA.find(
-              (c) => c.name.trim().toUpperCase().includes(parentName),
-            );
-            if (candidate) {
-              childColId = candidate.id;
-              parentColId = parentPK.id;
+          // Strategy 1: child col name contains parent table name + parent PK
+          if (pName) {
+            const parentPK = namedParent.find((c) => c.isPK);
+            if (parentPK) {
+              const candidate = namedChild.find(
+                (c) => c.name.trim().toUpperCase().includes(pName),
+              );
+              if (candidate) return { childColId: candidate.id, parentColId: parentPK.id };
             }
           }
-        }
 
-        // Strategy 2: parent PK column name exists in child
-        if (!childColId) {
-          const parentPK = namedB.find((c) => c.isPK);
+          // Strategy 2: parent PK column name exists in child
+          const parentPK = namedParent.find((c) => c.isPK);
           if (parentPK) {
-            const match = colMapA.get(parentPK.name.trim().toUpperCase());
-            if (match) {
-              childColId = match.id;
-              parentColId = parentPK.id;
-            }
+            const match = colMapChild.get(parentPK.name.trim().toUpperCase());
+            if (match) return { childColId: match.id, parentColId: parentPK.id };
           }
-        }
 
-        // Strategy 3: any common column name
-        if (!childColId) {
-          for (const colB of namedB) {
-            const match = colMapA.get(colB.name.trim().toUpperCase());
-            if (match) {
-              childColId = match.id;
-              parentColId = colB.id;
-              break;
-            }
+          // Strategy 3: any common column name
+          for (const colP of namedParent) {
+            const match = colMapChild.get(colP.name.trim().toUpperCase());
+            if (match) return { childColId: match.id, parentColId: colP.id };
+          }
+
+          return null;
+        };
+
+        // Try A=child, B=parent first
+        const forward = tryDetect(tableA, tableB);
+        if (forward) {
+          childColId = forward.childColId;
+          parentColId = forward.parentColId;
+          childTableId = tableIdA;
+          parentTableId = tableIdB;
+        } else {
+          // Try B=child, A=parent
+          const reverse = tryDetect(tableB, tableA);
+          if (reverse) {
+            childColId = reverse.childColId;
+            parentColId = reverse.parentColId;
+            childTableId = tableIdB;
+            parentTableId = tableIdA;
           }
         }
       }
 
       setFkDialog({
-        childTableId: tableIdA,
-        parentTableId: tableIdB,
+        childTableId,
+        parentTableId,
         childColId,
         parentColId,
       });

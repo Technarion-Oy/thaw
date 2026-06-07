@@ -17,17 +17,18 @@ import {
 /** Fallback accent color when CSS variable is unavailable (SSR, tests, or empty value). */
 const ACCENT_FALLBACK = "#58a6ff";
 
-/** Resolve the --accent CSS variable to a hex value for SVG markers.
+/** Resolve the --accent CSS variable to a computed color for SVG markers.
  *  CSS variables don't work inside SVG marker definitions, so we need the
- *  computed value. Called per `tablesToNodesAndEdges` invocation (not a hot
- *  path) so the color stays correct after theme changes. */
-function resolveAccentHex(): string {
+ *  computed value (may be hex, rgb, or hsl depending on theme definition).
+ *  Called per `tablesToNodesAndEdges` invocation (not a hot path) so the
+ *  color stays correct after theme changes. */
+function resolveAccentColor(): string {
   if (typeof document === "undefined") return ACCENT_FALLBACK;
   return getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || ACCENT_FALLBACK;
 }
 
 /** Calculate the pixel height of a table node based on its column count. */
-function nodeHeight(colCount: number): number {
+export function nodeHeight(colCount: number): number {
   const rows = Math.min(colCount, ER_COL_LIMIT) + (colCount > ER_COL_LIMIT ? 1 : 0);
   return ER_NODE_HEADER_HEIGHT + rows * ER_NODE_ROW_HEIGHT + ER_NODE_PADDING;
 }
@@ -79,7 +80,7 @@ export function tablesToNodesAndEdges(
     }
   }
 
-  const accentHex = resolveAccentHex();
+  const accentColor = resolveAccentColor();
 
   const edges: Edge[] = [];
   for (const t of tables) {
@@ -110,7 +111,7 @@ export function tablesToNodesAndEdges(
         style: { stroke: "var(--accent)", strokeWidth: 1.5 },
         markerEnd: {
           type: MarkerType.ArrowClosed,
-          color: accentHex,
+          color: accentColor,
           width: 16,
           height: 16,
         },

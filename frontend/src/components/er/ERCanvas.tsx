@@ -29,7 +29,7 @@ import {
 } from "@ant-design/icons";
 import ERTableNode from "./ERTableNode";
 import type { DesignerTable } from "./erTypes";
-import { tablesToNodesAndEdges, applyERLayout } from "./erCanvasLayout";
+import { tablesToNodesAndEdges, applyERLayout, nodeHeight } from "./erCanvasLayout";
 import {
   loadERLayout,
   saveERLayout,
@@ -61,6 +61,7 @@ function ERContextMenu({
   onDeleteTable,
   onAddFK,
   onRemoveFKs,
+  canvasRef,
 }: {
   ctxMenu: CtxMenuState;
   selectedNodeIds: string[];
@@ -69,6 +70,7 @@ function ERContextMenu({
   onDeleteTable?: (tableId: string) => void;
   onAddFK?: (tableIdA: string, tableIdB: string) => void;
   onRemoveFKs?: (tableId: string) => void;
+  canvasRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ top: ctxMenu.y, left: ctxMenu.x });
@@ -87,19 +89,22 @@ function ERContextMenu({
     setVisible(true);
   }, [ctxMenu.x, ctxMenu.y]);
 
-  // Dismiss on Escape key or scroll (wheel on canvas causes visual disconnect)
+  // Dismiss on Escape key or scroll on the canvas (prevents the menu from
+  // floating over a panned canvas). Scoped to the canvas container so that
+  // scrolling the sidebar or other areas doesn't dismiss the menu.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     const handleWheel = () => onClose();
+    const canvas = canvasRef.current;
     window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("wheel", handleWheel, { passive: true });
+    canvas?.addEventListener("wheel", handleWheel, { passive: true });
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("wheel", handleWheel);
+      canvas?.removeEventListener("wheel", handleWheel);
     };
-  }, [onClose]);
+  }, [onClose, canvasRef]);
 
   const twoSelected = selectedNodeIds.length === 2 && selectedNodeIds.includes(ctxMenu.tableId);
 
@@ -222,6 +227,7 @@ function ERCanvasInner({
   const { getNodes, getEdges, fitView } = useReactFlow();
   const initialLayoutDone = useRef(false);
   const prevTableIds = useRef<string>("");
+  const canvasRef = useRef<HTMLDivElement>(null);
 
   // Stable refs — avoids re-running effects / recreating callbacks when
   // prop identity changes (e.g. parent re-renders)
@@ -304,7 +310,9 @@ function ERCanvasInner({
           if (laid.length > 0 && savedNodes.length > 0) {
             let maxBottom = -Infinity;
             for (const n of savedNodes) {
-              const bottom = n.position.y + (n.height ?? 200);
+              const table = filteredTableById.get(n.id);
+              const h = n.height ?? (table ? nodeHeight(table.columns.length) : 200);
+              const bottom = n.position.y + h;
               if (bottom > maxBottom) maxBottom = bottom;
             }
             const dagreMinY = Math.min(...laid.map((n) => n.position.y));
@@ -565,7 +573,7 @@ function ERCanvasInner({
   }
 
   return (
-    <div style={{ flex: 1, width: "100%", height: "100%" }}>
+    <div ref={canvasRef} style={{ flex: 1, width: "100%", height: "100%" }}>
       {/* onEdgesChange intentionally omitted — edges are derived from fkRef (read-only) */}
       <ReactFlow
         nodes={nodes}
@@ -618,6 +626,7 @@ function ERCanvasInner({
           ctxMenu={ctxMenu}
           selectedNodeIds={selectedTableIds ?? []}
           onClose={closeContextMenu}
+          canvasRef={canvasRef}
           onDuplicateTable={onDuplicateTable}
           onDeleteTable={onDeleteTable}
           onAddFK={onAddFK}
