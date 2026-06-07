@@ -3,12 +3,14 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { App as AntApp, Modal, Button, Input, Select, Checkbox, AutoComplete } from "antd";
-import { PlusOutlined, DeleteOutlined, CopyOutlined } from "@ant-design/icons";
+import { PlusOutlined, DeleteOutlined, CopyOutlined, LinkOutlined, SwapOutlined } from "@ant-design/icons";
 import { ExecuteQuery, ListSchemas } from "../../../wailsjs/go/app/App";
+import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { snowflake } from "../../../wailsjs/go/models";
 import ERCanvas from "./ERCanvas";
 import { initFromERData, normalizeDataType } from "./erCanvasLayout";
-import { type DesignerColumn, type DesignerTable, SF_DATA_TYPES, normalizeIdentifier } from "./erTypes";
+import { buildMermaid } from "./buildMermaid";
+import { type DesignerColumn, type DesignerTable, SF_DATA_TYPES, SF_TYPES, normalizeIdentifier } from "./erTypes";
 
 interface Props {
   database: string;
@@ -16,6 +18,9 @@ interface Props {
   onClose: () => void;
   onSuccess: () => void;
 }
+
+/** Set of canonical Snowflake type names for O(1) lookups in AutoComplete filter. */
+const SF_TYPES_SET = new Set(SF_TYPES);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -25,56 +30,108 @@ function setsEqual<T>(a: Set<T>, b: Set<T>): boolean {
   return true;
 }
 
-// ── Mermaid export (for "Copy Mermaid" button) ────────────────────────────────
+// ── FK dialog (extracted component) ────────────────────────────────────────────
 
-function sanitiseId(s: string): string {
-  const id = s.replace(/[^a-zA-Z0-9_]/g, "_");
-  return /^[0-9]/.test(id) ? "_" + id : id;
+interface FKDialogState {
+  childTableId: string;
+  parentTableId: string;
+  childColId: string;
+  parentColId: string;
 }
 
-function entityId(schema: string, table: string): string {
-  return sanitiseId(schema) + "__" + sanitiseId(table);
-}
+function FKDialog({
+  fkDialog,
+  tables,
+  onClose,
+  onCommit,
+  onUpdate,
+}: {
+  fkDialog: FKDialogState;
+  tables: DesignerTable[];
+  onClose: () => void;
+  onCommit: () => void;
+  onUpdate: (patch: FKDialogState) => void;
+}) {
+  const childTable = tables.find((t) => t.id === fkDialog.childTableId);
+  const parentTable = tables.find((t) => t.id === fkDialog.parentTableId);
+  const childCols = childTable?.columns.filter((c) => c.name.trim()) ?? [];
+  const parentCols = parentTable?.columns.filter((c) => c.name.trim()) ?? [];
+  const childLabel = childTable
+    ? `${childTable.schema}.${childTable.name || "(unnamed)"}`
+    : "(unknown)";
+  const parentLabel = parentTable
+    ? `${parentTable.schema}.${parentTable.name || "(unnamed)"}`
+    : "(unknown)";
 
-function shortType(dt: string): string {
-  return dt.replace(/\s*\([^)]*\)/g, "").replace(/\s+/g, "_") || "string";
-}
-
-function buildDesignerMermaid(tables: DesignerTable[]): string {
-  const lines: string[] = ["erDiagram"];
-  const validTables = tables.filter((t) => t.schema && t.name.trim());
-
-  for (const t of validTables) {
-    const namedCols = t.columns.filter((c) => c.name.trim());
-    if (namedCols.length === 0) continue;
-    const id = entityId(t.schema, t.name.trim());
-    lines.push(`  ${id} {`);
-    for (const c of namedCols) {
-      const type = shortType(c.dataType) || "string";
-      const pk = c.isPK ? " PK" : "";
-      lines.push(`    ${type} ${sanitiseId(c.name)}${pk}`);
-    }
-    lines.push("  }");
-  }
-
-  const seen = new Set<string>();
-  for (const t of validTables) {
-    for (const c of t.columns) {
-      if (!c.fkRef) continue;
-      const parts = c.fkRef.split(".");
-      if (parts.length !== 3) continue;
-      const [refSchema, refTable] = parts;
-      if (!refTable.trim()) continue;
-      const fromId = entityId(t.schema, t.name.trim());
-      const toId = entityId(refSchema, refTable.trim());
-      const pairKey = `${fromId}__${toId}`;
-      if (seen.has(pairKey)) continue;
-      seen.add(pairKey);
-      lines.push(`  ${fromId} }o--|| ${toId} : "FK"`);
-    }
-  }
-
-  return lines.join("\n");
+  return (
+    <Modal
+      open
+      title={
+        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <LinkOutlined style={{ color: "var(--accent)" }} />
+          Add FK Reference
+        </span>
+      }
+      okText="Add Reference"
+      okButtonProps={{ disabled: !fkDialog.childColId || !fkDialog.parentColId }}
+      onCancel={onClose}
+      onOk={onCommit}
+      width={480}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 8 }}>
+        {/* Direction header with swap button */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontFamily: "monospace", fontSize: 12, flex: 1, textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {childLabel}
+          </span>
+          <Button
+            size="small"
+            icon={<SwapOutlined />}
+            onClick={() =>
+              onUpdate({
+                childTableId: fkDialog.parentTableId,
+                parentTableId: fkDialog.childTableId,
+                childColId: fkDialog.parentColId,
+                parentColId: fkDialog.childColId,
+              })
+            }
+            title="Swap direction"
+          />
+          <span style={{ fontFamily: "monospace", fontSize: 12, flex: 1, textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {parentLabel}
+          </span>
+        </div>
+        <div>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>
+            Child column (on {childLabel})
+          </div>
+          <Select
+            style={{ width: "100%" }}
+            placeholder="Select column"
+            value={fkDialog.childColId || undefined}
+            onChange={(v) => onUpdate({ ...fkDialog, childColId: v })}
+            options={childCols.map((c) => ({ value: c.id, label: c.name }))}
+            showSearch
+            optionFilterProp="label"
+          />
+        </div>
+        <div>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>
+            Parent column (on {parentLabel})
+          </div>
+          <Select
+            style={{ width: "100%" }}
+            placeholder="Select column"
+            value={fkDialog.parentColId || undefined}
+            onChange={(v) => onUpdate({ ...fkDialog, parentColId: v })}
+            options={parentCols.map((c) => ({ value: c.id, label: c.name }))}
+            showSearch
+            optionFilterProp="label"
+          />
+        </div>
+      </div>
+    </Modal>
+  );
 }
 
 // ── SQL generation (diff-based) ───────────────────────────────────────────────
@@ -94,7 +151,14 @@ function generateDiffSQL(
   database: string,
   baseline?: snowflake.ERDiagramData
 ): string {
-  const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
+  // Quote a Snowflake identifier. Handles names that are already wrapped in double quotes
+  // (from normalizeIdentifier) by stripping the outer quotes before re-quoting.
+  const q = (s: string) => {
+    const inner = (s.startsWith('"') && s.endsWith('"') && s.length >= 2)
+      ? s.slice(1, -1)
+      : s;
+    return `"${inner.replace(/"/g, '""')}"`;
+  };
   const tableRef = (schema: string, name: string) =>
     `${q(database)}.${q(schema)}.${q(name.trim())}`;
 
@@ -244,7 +308,12 @@ function generateDiffSQL(
           const nn = c.isPK || c.notNull ? " NOT NULL" : "";
           stmts.push(`${alter} ADD COLUMN ${q(c.name.trim())} ${c.dataType}${nn};`);
         } else {
-          // Existing column — check for type change
+          // Existing column — check for type change.
+          // normalizeDataType is applied to bc.dataType (raw from INFORMATION_SCHEMA)
+          // so it matches the form used by initFromERData when populating the designer.
+          // Alias types like INT, TEXT, DATETIME are valid Snowflake DDL types that
+          // pass through normalizeDataType as-is, so an unmodified designer column
+          // will always match its baseline.
           if (normalizeDataType(bc.dataType) !== c.dataType) {
             stmts.push(`${alter} ALTER COLUMN ${q(c.name.trim())} SET DATA TYPE ${c.dataType};`);
           }
@@ -320,8 +389,12 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
     initialData ? initFromERData(initialData) : []
   );
 
-  // Canvas selection
-  const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
+  // Stable ref for tables — used in callbacks that shouldn't re-create on every tables change
+  const tablesRef = useRef(tables);
+  tablesRef.current = tables;
+
+  // Canvas selection (multi-select via Cmd/Ctrl+click)
+  const [selectedTableIds, setSelectedTableIds] = useState<string[]>([]);
 
   // SQL modal
   const [sqlModalOpen, setSqlModalOpen] = useState(false);
@@ -368,17 +441,19 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
 
   // ── Schema filter for canvas ──────────────────────────────────────────────
 
+  // schemas already has INFORMATION_SCHEMA filtered out on fetch
   const canvasSchemas = useMemo(() => {
     const fromTables = tables.map((t) => t.schema).filter(Boolean);
-    return [...new Set([...fromTables, ...schemas])]
-      .filter((s) => s.toUpperCase() !== "INFORMATION_SCHEMA")
-      .sort();
+    return [...new Set([...fromTables, ...schemas])].sort();
   }, [tables, schemas]);
 
   const [visibleSchemas, setVisibleSchemas] = useState<Set<string> | null>(null);
 
   // Show all schemas by default (null = no filter)
-  const effectiveVisibleSchemas = visibleSchemas ?? new Set(canvasSchemas);
+  const effectiveVisibleSchemas = useMemo(
+    () => visibleSchemas ?? new Set(canvasSchemas),
+    [visibleSchemas, canvasSchemas],
+  );
 
   const toggleSchema = (schema: string) => {
     setVisibleSchemas((prev) => {
@@ -396,10 +471,11 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
   // ── Scroll sidebar to selected table ───────────────────────────────────────
 
   useEffect(() => {
-    if (!selectedTableId) return;
-    const el = tableCardRefs.current.get(selectedTableId);
+    if (selectedTableIds.length === 0) return;
+    const lastId = selectedTableIds[selectedTableIds.length - 1];
+    const el = tableCardRefs.current.get(lastId);
     el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, [selectedTableId]);
+  }, [selectedTableIds]);
 
   // ── Table / column mutators ───────────────────────────────────────────────────
 
@@ -410,16 +486,34 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
     ]);
   };
 
-  const removeTable = (tableId: string) => {
+  const removeTable = useCallback((tableId: string) => {
     setTables((prev) => prev.filter((t) => t.id !== tableId));
-    if (selectedTableId === tableId) setSelectedTableId(null);
-  };
+    setSelectedTableIds((prev) => prev.filter((id) => id !== tableId));
+  }, []);
+
+  const confirmRemoveTable = useCallback(
+    (tableId: string) => {
+      const table = tablesRef.current.find((t) => t.id === tableId);
+      const label = table
+        ? `${table.schema ? table.schema + "." : ""}${table.name || "(unnamed)"}`
+        : "this table";
+      modal.confirm({
+        title: "Delete table?",
+        content: `"${label}" and all its columns will be removed from the designer. This does not drop the table in Snowflake.`,
+        okText: "Delete",
+        okButtonProps: { danger: true },
+        onOk: () => removeTable(tableId),
+      });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- tablesRef is a stable ref, modal/removeTable are stable
+    [modal, removeTable],
+  );
 
   const updateTable = useCallback((tableId: string, patch: Partial<Pick<DesignerTable, "name" | "schema">>) => {
     setTables((prev) => prev.map((t) => (t.id === tableId ? { ...t, ...patch } : t)));
   }, []);
 
-  const addColumn = (tableId: string) => {
+  const addColumn = useCallback((tableId: string) => {
     setTables((prev) =>
       prev.map((t) =>
         t.id === tableId
@@ -427,13 +521,13 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
           : t
       )
     );
-  };
+  }, []);
 
-  const removeColumn = (tableId: string, colId: string) => {
+  const removeColumn = useCallback((tableId: string, colId: string) => {
     setTables((prev) =>
       prev.map((t) => (t.id === tableId ? { ...t, columns: t.columns.filter((c) => c.id !== colId) } : t))
     );
-  };
+  }, []);
 
   const updateColumn = useCallback((tableId: string, colId: string, patch: Partial<DesignerColumn>) => {
     setTables((prev) =>
@@ -481,7 +575,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
 
   const handleFKConnect = useCallback(
     (fromTableId: string, fromColId: string, toTableId: string, toColId: string) => {
-      const toTable = tables.find((t) => t.id === toTableId);
+      const toTable = tablesRef.current.find((t) => t.id === toTableId);
       if (!toTable || !toTable.schema || !toTable.name.trim()) return;
       const toCol = toTable.columns.find((c) => c.id === toColId);
       if (!toCol || !toCol.name.trim()) return;
@@ -489,12 +583,152 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
       const fkRef = `${toTable.schema}.${toTable.name.trim()}.${toCol.name.trim()}`;
       updateColumn(fromTableId, fromColId, { fkRef });
     },
-    [tables, updateColumn],
+    [updateColumn],
   );
+
+  // ── Context menu handlers ──────────────────────────────────────────────────
+  // Empty dep arrays are intentional: tablesRef is a stable ref,
+  // setTables/setSelectedTableIds are stable state setters.
+
+  const handleDuplicateTable = useCallback(
+    (tableId: string) => {
+      const source = tablesRef.current.find((t) => t.id === tableId);
+      if (!source) return;
+      const newTable: DesignerTable = {
+        id: crypto.randomUUID(),
+        schema: source.schema,
+        name: source.name ? `${source.name}_COPY` : "",
+        columns: source.columns.map((c) => ({
+          ...c,
+          id: crypto.randomUUID(),
+          fkRef: "", // Clear FK refs — the copy is a fresh table
+        })),
+      };
+      setTables((prev) => [...prev, newTable]);
+      setSelectedTableIds([newTable.id]);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- tablesRef is a stable ref
+    [],
+  );
+
+  const handleRemoveFKs = useCallback((tableId: string) => {
+    setTables((prev) =>
+      prev.map((t) =>
+        t.id === tableId
+          ? { ...t, columns: t.columns.map((c) => ({ ...c, fkRef: "" })) }
+          : t,
+      ),
+    );
+  }, []);
+
+  // FK dialog state (two tables pre-populated from multi-select)
+  // "child" = table that holds the FK column, "parent" = referenced table
+  const [fkDialog, setFkDialog] = useState<FKDialogState | null>(null);
+
+  const handleAddFK = useCallback(
+    (tableIdA: string, tableIdB: string) => {
+      const tableA = tablesRef.current.find((t) => t.id === tableIdA);
+      const tableB = tablesRef.current.find((t) => t.id === tableIdB);
+
+      let childColId = "";
+      let parentColId = "";
+
+      // Auto-detect the best FK column pair between the two tables.
+      // Tries both directions (A=child/B=parent, then B=child/A=parent) and
+      // picks the first match.
+      // Priority per direction:
+      //   1) child column whose name contains the parent table name
+      //      matching a PK column on the parent (e.g. CUSTOMER_ID → CUSTOMER.ID)
+      //   2) PK column on the parent that shares a name with a child column
+      //   3) any common column name between the two tables
+      let childTableId = tableIdA;
+      let parentTableId = tableIdB;
+
+      if (tableA && tableB) {
+        const tryDetect = (
+          child: DesignerTable,
+          parent: DesignerTable,
+        ): { childColId: string; parentColId: string } | null => {
+          const namedChild = child.columns.filter((c) => c.name.trim());
+          const namedParent = parent.columns.filter((c) => c.name.trim());
+          const colMapChild = new Map(namedChild.map((c) => [c.name.trim().toUpperCase(), c]));
+          const pName = parent.name.trim().toUpperCase();
+
+          // Strategy 1: child col name contains parent table name + parent PK
+          if (pName) {
+            const parentPK = namedParent.find((c) => c.isPK);
+            if (parentPK) {
+              const candidate = namedChild.find(
+                (c) => c.name.trim().toUpperCase().includes(pName),
+              );
+              if (candidate) return { childColId: candidate.id, parentColId: parentPK.id };
+            }
+          }
+
+          // Strategy 2: parent PK column name exists in child
+          const parentPK = namedParent.find((c) => c.isPK);
+          if (parentPK) {
+            const match = colMapChild.get(parentPK.name.trim().toUpperCase());
+            if (match) return { childColId: match.id, parentColId: parentPK.id };
+          }
+
+          // Strategy 3: any common column name
+          for (const colP of namedParent) {
+            const match = colMapChild.get(colP.name.trim().toUpperCase());
+            if (match) return { childColId: match.id, parentColId: colP.id };
+          }
+
+          return null;
+        };
+
+        // Try A=child, B=parent first
+        const forward = tryDetect(tableA, tableB);
+        if (forward) {
+          childColId = forward.childColId;
+          parentColId = forward.parentColId;
+          childTableId = tableIdA;
+          parentTableId = tableIdB;
+        } else {
+          // Try B=child, A=parent
+          const reverse = tryDetect(tableB, tableA);
+          if (reverse) {
+            childColId = reverse.childColId;
+            parentColId = reverse.parentColId;
+            childTableId = tableIdB;
+            parentTableId = tableIdA;
+          }
+        }
+      }
+
+      setFkDialog({
+        childTableId,
+        parentTableId,
+        childColId,
+        parentColId,
+      });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- tablesRef is a stable ref
+    [],
+  );
+
+  const commitFK = useCallback(() => {
+    if (!fkDialog) return;
+    const { childTableId, childColId, parentTableId, parentColId } = fkDialog;
+    if (!childColId || !parentColId) return;
+
+    const parentTable = tablesRef.current.find((t) => t.id === parentTableId);
+    if (!parentTable || !parentTable.schema || !parentTable.name.trim()) return;
+    const parentCol = parentTable.columns.find((c) => c.id === parentColId);
+    if (!parentCol || !parentCol.name.trim()) return;
+
+    const fkRef = `${parentTable.schema}.${parentTable.name.trim()}.${parentCol.name.trim()}`;
+    updateColumn(childTableId, childColId, { fkRef });
+    setFkDialog(null);
+  }, [fkDialog, updateColumn]);
 
   // ── SQL & run ─────────────────────────────────────────────────────────────────
 
-  const sql = generateDiffSQL(tables, database, initialData);
+  const sql = useMemo(() => generateDiffSQL(tables, database, initialData), [tables, database, initialData]);
   const hasChanges = sql.trim().length > 0;
 
   const runSQL = async () => {
@@ -527,7 +761,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
   };
 
   const copyMermaid = () => {
-    navigator.clipboard.writeText(buildDesignerMermaid(tables));
+    ClipboardSetText(buildMermaid(tables, effectiveVisibleSchemas));
   };
 
   // ── Render ────────────────────────────────────────────────────────────────────
@@ -588,10 +822,10 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
                   borderRadius: 6,
                   overflow: "hidden",
                   flexShrink: 0,
-                  borderLeft: selectedTableId === t.id ? "3px solid var(--accent)" : "1px solid var(--border)",
+                  borderLeft: selectedTableIds.includes(t.id) ? "3px solid var(--accent)" : "1px solid var(--border)",
                   cursor: "pointer",
                 }}
-                onClick={() => setSelectedTableId(t.id)}
+                onClick={() => setSelectedTableIds([t.id])}
               >
                 {/* Table header — two rows: schema+delete, then table name */}
                 <div
@@ -618,7 +852,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
                       size="small"
                       type="text"
                       icon={<DeleteOutlined style={{ color: "#f85149" }} />}
-                      onClick={(e) => { e.stopPropagation(); removeTable(t.id); }}
+                      onClick={(e) => { e.stopPropagation(); confirmRemoveTable(t.id); }}
                     />
                   </div>
                   <Input
@@ -661,7 +895,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
                         filterOption={(input, option) => {
                           // Show all options when input is an existing type (possibly with params)
                           const base = input.replace(/\s*\(.*$/, "").trim().toUpperCase();
-                          if (SF_DATA_TYPES.some((dt) => dt.name === base)) return true;
+                          if (SF_TYPES_SET.has(base)) return true;
                           return (option?.label as string ?? "").toUpperCase().includes(input.toUpperCase());
                         }}
                       />
@@ -759,19 +993,36 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
             </div>
 
             <ERCanvas
+              key={database}
               tables={tables}
               mode="edit"
               database={database}
               visibleSchemas={effectiveVisibleSchemas}
-              selectedTableId={selectedTableId}
-              onTableSelect={setSelectedTableId}
+              selectedTableIds={selectedTableIds}
+              onSelectionChange={setSelectedTableIds}
               onConnect={handleFKConnect}
               onTableRename={handleTableRename}
               onColumnRename={handleColumnRename}
+              onColumnRemove={removeColumn}
+              onDuplicateTable={handleDuplicateTable}
+              onDeleteTable={confirmRemoveTable}
+              onAddFK={handleAddFK}
+              onRemoveFKs={handleRemoveFKs}
             />
           </div>
         </div>
       </Modal>
+
+      {/* Add FK reference dialog (two tables pre-populated from multi-select) */}
+      {fkDialog && (
+        <FKDialog
+          fkDialog={fkDialog}
+          tables={tables}
+          onClose={() => setFkDialog(null)}
+          onCommit={commitFK}
+          onUpdate={setFkDialog}
+        />
+      )}
 
       {/* SQL review modal */}
       <Modal
@@ -788,7 +1039,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
               )}
             </div>
             <div style={{ display: "flex", gap: 8 }}>
-              <Button onClick={() => navigator.clipboard.writeText(sql)} icon={<CopyOutlined />}>Copy</Button>
+              <Button onClick={() => ClipboardSetText(sql)} icon={<CopyOutlined />}>Copy</Button>
               <Button type="primary" loading={running} onClick={runSQL} disabled={!hasChanges}>Apply</Button>
             </div>
           </div>

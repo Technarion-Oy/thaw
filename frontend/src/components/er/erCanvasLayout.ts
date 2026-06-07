@@ -2,7 +2,7 @@
 // @thaw-domain: ER Designer
 
 import dagre from "@dagrejs/dagre";
-import type { Node, Edge } from "@xyflow/react";
+import { MarkerType, type Node, type Edge } from "@xyflow/react";
 import type { snowflake } from "../../../wailsjs/go/models";
 import {
   type DesignerTable,
@@ -14,18 +14,31 @@ import {
   ER_COL_LIMIT,
 } from "./erTypes";
 
+/** Fallback accent color when CSS variable is unavailable (SSR, tests, or empty value). */
+const ACCENT_FALLBACK = "#58a6ff";
+
+/** Resolve the --accent CSS variable to a computed color for SVG markers.
+ *  CSS variables don't work inside SVG marker definitions, so we need the
+ *  computed value (may be hex, rgb, or hsl depending on theme definition).
+ *  Called per `tablesToNodesAndEdges` invocation (not a hot path) so the
+ *  color stays correct after theme changes. */
+function resolveAccentColor(): string {
+  if (typeof document === "undefined") return ACCENT_FALLBACK;
+  return getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || ACCENT_FALLBACK;
+}
+
 /** Calculate the pixel height of a table node based on its column count. */
-function nodeHeight(colCount: number): number {
+export function nodeHeight(colCount: number): number {
   const rows = Math.min(colCount, ER_COL_LIMIT) + (colCount > ER_COL_LIMIT ? 1 : 0);
   return ER_NODE_HEADER_HEIGHT + rows * ER_NODE_ROW_HEIGHT + ER_NODE_PADDING;
 }
 
 export interface ERTableNodeData {
   table: DesignerTable;
-  selected: boolean;
   mode: "edit" | "readonly";
   onTableRename?: (tableId: string, newName: string) => void;
   onColumnRename?: (tableId: string, colId: string, newName: string) => void;
+  onColumnRemove?: (tableId: string, colId: string) => void;
   [key: string]: unknown;
 }
 
@@ -39,6 +52,7 @@ export function tablesToNodesAndEdges(
   callbacks?: {
     onTableRename?: (tableId: string, newName: string) => void;
     onColumnRename?: (tableId: string, colId: string, newName: string) => void;
+    onColumnRemove?: (tableId: string, colId: string) => void;
   },
 ): { nodes: Node[]; edges: Edge[] } {
   const nodes: Node[] = tables.map((t) => ({
@@ -47,10 +61,10 @@ export function tablesToNodesAndEdges(
     position: { x: 0, y: 0 },
     data: {
       table: t,
-      selected: false,
       mode,
       onTableRename: callbacks?.onTableRename,
       onColumnRename: callbacks?.onColumnRename,
+      onColumnRemove: callbacks?.onColumnRemove,
     } satisfies ERTableNodeData,
     width: ER_NODE_WIDTH,
     height: nodeHeight(t.columns.length),
@@ -65,6 +79,8 @@ export function tablesToNodesAndEdges(
       keyToId.set(tableKey(t.schema, t.name), t.id);
     }
   }
+
+  const accentColor = resolveAccentColor();
 
   const edges: Edge[] = [];
   for (const t of tables) {
@@ -93,6 +109,12 @@ export function tablesToNodesAndEdges(
         type: "smoothstep",
         animated: true,
         style: { stroke: "var(--accent)", strokeWidth: 1.5 },
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          color: accentColor,
+          width: 16,
+          height: 16,
+        },
         label: "FK",
         labelStyle: { fontSize: 10, fill: "var(--text-muted)" },
         labelBgStyle: { fill: "var(--bg-overlay)", fillOpacity: 0.8 },
@@ -147,17 +169,19 @@ export function normalizeDataType(dt: string): string {
   const params = paramsMatch ? paramsMatch[1] : "";
   const base = dt.replace(/\s*\([^)]*\)/g, "").trim().toUpperCase();
 
+  // SF_TYPES includes all canonical Snowflake types plus multi-word forms
+  // like "DOUBLE PRECISION", so they're returned as-is (e.g. INT stays INT).
+  // Notably, TIMESTAMP_TZ passes through here — it is NOT aliased to
+  // TIMESTAMP_LTZ. These are distinct Snowflake types (TZ stores the UTC
+  // offset, LTZ converts to the session timezone). The old mapping was a bug.
   if (SF_TYPES.includes(base)) return base + params;
 
+  // Only aliases NOT already in SF_TYPES need to be mapped here.
+  // Types like INT, TEXT, DATETIME, DECIMAL, etc. are valid Snowflake types
+  // included in SF_TYPES, so they pass through as-is above.
   const aliases: Record<string, string> = {
-    TEXT: "VARCHAR", STRING: "VARCHAR", CHAR: "VARCHAR", CHARACTER: "VARCHAR",
     NCHAR: "VARCHAR", NVARCHAR: "VARCHAR", NVARCHAR2: "VARCHAR",
-    INT: "NUMBER", INTEGER: "NUMBER", BIGINT: "NUMBER", SMALLINT: "NUMBER",
-    TINYINT: "NUMBER", BYTEINT: "NUMBER", DECIMAL: "NUMBER", NUMERIC: "NUMBER",
-    DOUBLE: "FLOAT", REAL: "FLOAT", FLOAT4: "FLOAT", FLOAT8: "FLOAT",
     BOOL: "BOOLEAN",
-    DATETIME: "TIMESTAMP_NTZ", TIMESTAMP: "TIMESTAMP_NTZ",
-    TIMESTAMP_TZ: "TIMESTAMP_LTZ",
   };
   return (aliases[base] ?? "VARCHAR") + params;
 }
