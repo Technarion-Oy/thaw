@@ -101,6 +101,7 @@ export interface JoinEntry {
 }
 
 export interface JoinQueryState {
+  database: string;
   baseTable: { schema: string; name: string };
   joins: JoinEntry[];
   selectedColumns: Map<string, string[]>; // "SCHEMA.TABLE" → column names (empty = *)

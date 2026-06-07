@@ -2,7 +2,7 @@
 // @thaw-domain: ER Designer
 
 import { useMemo, useCallback } from "react";
-import { Button, Select, Tag, Collapse } from "antd";
+import { Button, Select, Tag, Collapse, Checkbox } from "antd";
 import { CloseOutlined, CodeOutlined } from "@ant-design/icons";
 import type { JoinQueryState, JoinEntry, JoinPath } from "./erTypes";
 import { buildJoinSQL } from "./buildJoinQuery";
@@ -359,23 +359,21 @@ function ColumnPicker({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <label style={{ fontSize: 11, cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
-        <input
-          type="checkbox"
-          checked={selected.length === 0}
-          onChange={() => onChange([])}
-        />
+      <Checkbox
+        checked={selected.length === 0}
+        onChange={() => onChange([])}
+        style={{ fontSize: 11 }}
+      >
         <span style={{ color: "var(--text-muted)" }}>All columns (*)</span>
-      </label>
+      </Checkbox>
       {columns.length > 0 && (
-        <label style={{ fontSize: 11, cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
-          <input
-            type="checkbox"
-            checked={allSelected}
-            onChange={() => onChange(allSelected ? [] : [...columns])}
-          />
+        <Checkbox
+          checked={allSelected}
+          onChange={() => onChange(allSelected ? [] : [...columns])}
+          style={{ fontSize: 11 }}
+        >
           <span style={{ color: "var(--text-muted)" }}>Select all</span>
-        </label>
+        </Checkbox>
       )}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 4 }}>
         {columns.map((col) => (

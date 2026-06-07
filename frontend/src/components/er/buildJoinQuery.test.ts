@@ -6,6 +6,7 @@ import type { JoinQueryState } from "./erTypes";
 
 function makeState(overrides: Partial<JoinQueryState> = {}): JoinQueryState {
   return {
+    database: "MY_DB",
     baseTable: { schema: "S", name: "ORDERS" },
     joins: [
       {
@@ -21,13 +22,13 @@ function makeState(overrides: Partial<JoinQueryState> = {}): JoinQueryState {
 }
 
 describe("buildJoinSQL", () => {
-  it("generates basic INNER JOIN with all columns", () => {
+  it("generates basic INNER JOIN with database-qualified table names", () => {
     const sql = buildJoinSQL(makeState());
     expect(sql).toContain("SELECT");
     expect(sql).toContain("t1.*");
     expect(sql).toContain("t2.*");
-    expect(sql).toContain("FROM S.ORDERS t1");
-    expect(sql).toContain("INNER JOIN S.USERS t2 ON t1.USER_ID = t2.ID");
+    expect(sql).toContain("FROM MY_DB.S.ORDERS t1");
+    expect(sql).toContain("INNER JOIN MY_DB.S.USERS t2 ON t1.USER_ID = t2.ID");
   });
 
   it("respects LEFT join type", () => {
@@ -39,7 +40,7 @@ describe("buildJoinSQL", () => {
         isIntermediate: false,
       }],
     }));
-    expect(sql).toContain("LEFT JOIN S.USERS t2");
+    expect(sql).toContain("LEFT JOIN MY_DB.S.USERS t2");
   });
 
   it("respects RIGHT join type", () => {
@@ -51,7 +52,7 @@ describe("buildJoinSQL", () => {
         isIntermediate: false,
       }],
     }));
-    expect(sql).toContain("RIGHT JOIN S.USERS t2");
+    expect(sql).toContain("RIGHT JOIN MY_DB.S.USERS t2");
   });
 
   it("respects FULL OUTER join type", () => {
@@ -63,7 +64,7 @@ describe("buildJoinSQL", () => {
         isIntermediate: false,
       }],
     }));
-    expect(sql).toContain("FULL OUTER JOIN S.USERS t2");
+    expect(sql).toContain("FULL OUTER JOIN MY_DB.S.USERS t2");
   });
 
   it("uses specific columns when selectedColumns is set", () => {
@@ -94,6 +95,7 @@ describe("buildJoinSQL", () => {
 
   it("handles multiple joins with correct aliases", () => {
     const sql = buildJoinSQL({
+      database: "MY_DB",
       baseTable: { schema: "S", name: "ORDER_ITEMS" },
       joins: [
         {
@@ -111,9 +113,9 @@ describe("buildJoinSQL", () => {
       ],
       selectedColumns: new Map(),
     });
-    expect(sql).toContain("FROM S.ORDER_ITEMS t1");
-    expect(sql).toContain("INNER JOIN S.ORDERS t2 ON t1.ORDER_ID = t2.ID");
-    expect(sql).toContain("LEFT JOIN S.USERS t3 ON t2.USER_ID = t3.ID");
+    expect(sql).toContain("FROM MY_DB.S.ORDER_ITEMS t1");
+    expect(sql).toContain("INNER JOIN MY_DB.S.ORDERS t2 ON t1.ORDER_ID = t2.ID");
+    expect(sql).toContain("LEFT JOIN MY_DB.S.USERS t3 ON t2.USER_ID = t3.ID");
     expect(sql).toContain("t1.*");
     expect(sql).toContain("t2.*");
     expect(sql).toContain("t3.*");
@@ -121,6 +123,7 @@ describe("buildJoinSQL", () => {
 
   it("handles cross-schema references", () => {
     const sql = buildJoinSQL({
+      database: "MY_DB",
       baseTable: { schema: "SALES", name: "ORDERS" },
       joins: [{
         table: { schema: "CATALOG", name: "PRODUCTS" },
@@ -130,7 +133,7 @@ describe("buildJoinSQL", () => {
       }],
       selectedColumns: new Map(),
     });
-    expect(sql).toContain("FROM SALES.ORDERS t1");
-    expect(sql).toContain("INNER JOIN CATALOG.PRODUCTS t2 ON t1.PRODUCT_ID = t2.ID");
+    expect(sql).toContain("FROM MY_DB.SALES.ORDERS t1");
+    expect(sql).toContain("INNER JOIN MY_DB.CATALOG.PRODUCTS t2 ON t1.PRODUCT_ID = t2.ID");
   });
 });

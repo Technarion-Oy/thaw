@@ -2,7 +2,7 @@
 // @thaw-domain: ER Designer
 
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { Modal, Button, Checkbox } from "antd";
+import { Modal, Button, Checkbox, message } from "antd";
 import { CopyOutlined, EditOutlined } from "@ant-design/icons";
 import { ListSchemas } from "../../../wailsjs/go/app/App";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
@@ -100,11 +100,14 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
       if (selected.length < 2) return;
 
       const paths = findJoinPaths(selected, data.fks ?? []);
-      if (paths.length === 0) return; // disconnected tables
+      if (paths.length === 0) {
+        void message.warning("Selected tables are not connected by foreign keys");
+        return;
+      }
 
       if (paths.length === 1) {
         // Single path — open panel directly
-        const state = buildJoinState(paths[0], selected, data.fks ?? []);
+        const state = buildJoinState(paths[0], selected, database);
         setJoinState(state);
         setJoinPaths(null);
         setJoinPanelOpen(true);
@@ -115,7 +118,7 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
         setJoinPanelOpen(true);
       }
     },
-    [data.fks, tableIdToSchemaName],
+    [data.fks, tableIdToSchemaName, database],
   );
 
   const handleDisambiguationSelect = useCallback(
@@ -124,11 +127,11 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
       const selected = selectedTableIds
         .map((id) => tableIdToSchemaName.get(id))
         .filter((t): t is { schema: string; name: string } => !!t);
-      const state = buildJoinState(joinPaths[index], selected, data.fks ?? []);
+      const state = buildJoinState(joinPaths[index], selected, database);
       setJoinState(state);
       setJoinPaths(null);
     },
-    [joinPaths, selectedTableIds, tableIdToSchemaName, data.fks],
+    [joinPaths, selectedTableIds, tableIdToSchemaName, database],
   );
 
   const handleCloseJoinPanel = useCallback(() => {

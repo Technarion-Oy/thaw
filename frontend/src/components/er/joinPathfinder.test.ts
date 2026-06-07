@@ -127,9 +127,10 @@ describe("buildJoinState", () => {
     const state = buildJoinState(
       paths[0],
       [tbl("S", "ORDERS"), tbl("S", "USERS")],
-      fks,
+      "MY_DB",
     );
 
+    expect(state.database).toBe("MY_DB");
     expect(state.baseTable.name).toBe("ORDERS");
     expect(state.joins).toHaveLength(1);
     expect(state.joins[0].table.name).toBe("USERS");
@@ -151,7 +152,7 @@ describe("buildJoinState", () => {
     const state = buildJoinState(
       paths[0],
       [tbl("S", "ORDER_ITEMS"), tbl("S", "USERS")],
-      fks,
+      "MY_DB",
     );
 
     // ORDERS should be intermediate (not in user's selection)
@@ -165,7 +166,7 @@ describe("buildJoinState", () => {
   it("initializes with empty selectedColumns", () => {
     const fks = [fk("S", "A", "B_ID", "S", "B", "ID")];
     const paths = findJoinPaths([tbl("S", "A"), tbl("S", "B")], fks);
-    const state = buildJoinState(paths[0], [tbl("S", "A"), tbl("S", "B")], fks);
+    const state = buildJoinState(paths[0], [tbl("S", "A"), tbl("S", "B")], "MY_DB");
     expect(state.selectedColumns.size).toBe(0);
   });
 });

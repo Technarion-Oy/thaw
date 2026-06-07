@@ -4,10 +4,18 @@
 import type { JoinQueryState } from "./erTypes";
 
 /**
+ * Fully qualify a table name as DATABASE.SCHEMA.TABLE.
+ */
+function fqn(database: string, schema: string, table: string): string {
+  return `${database}.${schema}.${table}`;
+}
+
+/**
  * Generate a formatted SELECT ... JOIN ... SQL string from a JoinQueryState.
  *
  * Assigns short aliases (t1, t2, ...) per table, uses fully-qualified
- * SCHEMA.TABLE names, and respects selectedColumns (defaults to * when empty).
+ * DATABASE.SCHEMA.TABLE names, and respects selectedColumns (defaults to *
+ * when empty).
  */
 export function buildJoinSQL(state: JoinQueryState): string {
   // Assign aliases: t1 for base, t2, t3, ... for joins
@@ -46,7 +54,7 @@ export function buildJoinSQL(state: JoinQueryState): string {
 
   // Build FROM clause
   const baseAlias = "t1";
-  const fromLine = `FROM ${state.baseTable.schema}.${state.baseTable.name} ${baseAlias}`;
+  const fromLine = `FROM ${fqn(state.database, state.baseTable.schema, state.baseTable.name)} ${baseAlias}`;
 
   // Build JOIN clauses with aliased ON conditions
   const joinLines: string[] = [];
@@ -67,7 +75,7 @@ export function buildJoinSQL(state: JoinQueryState): string {
       aliasedCondition = aliasedCondition.replace(pattern, `${tblAlias}.`);
     }
 
-    joinLines.push(`${joinKw} ${j.table.schema}.${j.table.name} ${alias} ON ${aliasedCondition}`);
+    joinLines.push(`${joinKw} ${fqn(state.database, j.table.schema, j.table.name)} ${alias} ON ${aliasedCondition}`);
   }
 
   // Assemble

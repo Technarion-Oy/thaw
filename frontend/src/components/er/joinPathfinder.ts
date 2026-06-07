@@ -186,6 +186,7 @@ export function findJoinPaths(
   // Start from first selected table, iteratively BFS to nearest unconnected
   const connected = new Set<string>([selectedKeys[0]]);
   const treeKeys: string[] = [selectedKeys[0]];
+  const treeKeySet = new Set<string>([selectedKeys[0]]);
   const treeEdges: AdjEdge[] = [];
   const remaining = new Set(selectedKeys.slice(1));
 
@@ -211,7 +212,10 @@ export function findJoinPaths(
     // Add all nodes and edges from this path to the tree
     for (const key of bestPath.path) {
       connected.add(key);
-      if (!treeKeys.includes(key)) treeKeys.push(key);
+      if (!treeKeySet.has(key)) {
+        treeKeySet.add(key);
+        treeKeys.push(key);
+      }
     }
     treeEdges.push(...bestPath.edges);
     remaining.delete(bestTarget);
@@ -247,7 +251,7 @@ function bfsResultToJoinPath(result: BFSResult): JoinPath {
 export function buildJoinState(
   path: JoinPath,
   selectedTables: { schema: string; name: string }[],
-  _fks: FKEdge[],
+  database: string,
 ): JoinQueryState {
   const selectedSet = new Set(
     selectedTables.map((t) => tableKey(t.schema, t.name)),
@@ -290,6 +294,7 @@ export function buildJoinState(
   }
 
   return {
+    database,
     baseTable: { schema: baseTable.schema, name: baseTable.name },
     joins,
     selectedColumns: new Map(),

@@ -44,7 +44,7 @@ const nodeTypes = { erTable: ERTableNode };
 /** Vertical gap (px) between saved-position nodes and dagre-positioned new nodes. */
 const DAGRE_OFFSET_GAP = 120;
 
-// ── Context menu (extracted for readability / testability) ──────────────────
+// ── Context menu shell (shared positioning / dismiss logic) ─────────────────
 
 interface CtxMenuState {
   x: number;
@@ -53,6 +53,80 @@ interface CtxMenuState {
   tableName: string;
   hasFKs: boolean;
 }
+
+/**
+ * Shared wrapper for context menus — handles viewport clamping, Escape key
+ * dismissal, wheel-to-close, and a transparent click-away overlay.
+ */
+function ContextMenuShell({
+  x,
+  y,
+  onClose,
+  canvasRef,
+  children,
+}: {
+  x: number;
+  y: number;
+  onClose: () => void;
+  canvasRef: React.RefObject<HTMLDivElement | null>;
+  children: React.ReactNode;
+}) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ top: y, left: x });
+  const [visible, setVisible] = useState(false);
+
+  // Measure the menu after first paint and clamp to viewport.
+  // Starts hidden to prevent a flash at the unclamped position.
+  useLayoutEffect(() => {
+    const el = menuRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    setPos({
+      top: Math.min(y, window.innerHeight - rect.height - 8),
+      left: Math.min(x, window.innerWidth - rect.width - 8),
+    });
+    setVisible(true);
+  }, [x, y]);
+
+  // Dismiss on Escape key or scroll on the canvas (prevents the menu from
+  // floating over a panned canvas). Scoped to the canvas container so that
+  // scrolling the sidebar or other areas doesn't dismiss the menu.
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    const handleWheel = () => onClose();
+    const canvas = canvasRef.current;
+    window.addEventListener("keydown", handleKeyDown);
+    canvas?.addEventListener("wheel", handleWheel, { passive: true });
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      canvas?.removeEventListener("wheel", handleWheel);
+    };
+  }, [onClose, canvasRef]);
+
+  return (
+    <>
+      {/* Transparent overlay to dismiss on click-away */}
+      <div
+        style={{ position: "fixed", inset: 0, zIndex: 998 }}
+        onClick={onClose}
+      />
+      <div ref={menuRef} style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 999, visibility: visible ? "visible" : "hidden" }}>
+        {children}
+      </div>
+    </>
+  );
+}
+
+const menuStyle = {
+  minWidth: 200,
+  borderRadius: 6,
+  boxShadow: "0 4px 16px rgba(0,0,0,0.35)",
+  border: "1px solid var(--border)",
+};
+
+// ── Edit context menu ────────────────────────────────────────────────────────
 
 function ERContextMenu({
   ctxMenu,
@@ -73,115 +147,69 @@ function ERContextMenu({
   onRemoveFKs?: (tableId: string) => void;
   canvasRef: React.RefObject<HTMLDivElement | null>;
 }) {
-  const menuRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ top: ctxMenu.y, left: ctxMenu.x });
-  const [visible, setVisible] = useState(false);
-
-  // Measure the menu after first paint and clamp to viewport.
-  // Starts hidden to prevent a flash at the unclamped position.
-  useLayoutEffect(() => {
-    const el = menuRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    setPos({
-      top: Math.min(ctxMenu.y, window.innerHeight - rect.height - 8),
-      left: Math.min(ctxMenu.x, window.innerWidth - rect.width - 8),
-    });
-    setVisible(true);
-  }, [ctxMenu.x, ctxMenu.y]);
-
-  // Dismiss on Escape key or scroll on the canvas (prevents the menu from
-  // floating over a panned canvas). Scoped to the canvas container so that
-  // scrolling the sidebar or other areas doesn't dismiss the menu.
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    const handleWheel = () => onClose();
-    const canvas = canvasRef.current;
-    window.addEventListener("keydown", handleKeyDown);
-    canvas?.addEventListener("wheel", handleWheel, { passive: true });
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      canvas?.removeEventListener("wheel", handleWheel);
-    };
-  }, [onClose, canvasRef]);
-
   const twoSelected = selectedNodeIds.length === 2 && selectedNodeIds.includes(ctxMenu.tableId);
 
   return (
-    <>
-      {/* Transparent overlay to dismiss on click-away */}
-      <div
-        style={{ position: "fixed", inset: 0, zIndex: 998 }}
-        onClick={onClose}
+    <ContextMenuShell x={ctxMenu.x} y={ctxMenu.y} onClose={onClose} canvasRef={canvasRef}>
+      <Menu
+        style={menuStyle}
+        items={[
+          {
+            key: "label",
+            label: (
+              <span style={{ fontFamily: "monospace", fontSize: 11, color: "var(--text-muted)" }}>
+                {ctxMenu.tableName}
+              </span>
+            ),
+            disabled: true,
+          },
+          { type: "divider" as const },
+          {
+            key: "duplicate",
+            icon: <CopyOutlined />,
+            label: "Duplicate Table",
+            onClick: () => {
+              onDuplicateTable?.(ctxMenu.tableId);
+              onClose();
+            },
+          },
+          {
+            key: "delete",
+            icon: <DeleteOutlined />,
+            danger: true,
+            label: "Delete Table",
+            onClick: () => {
+              onDeleteTable?.(ctxMenu.tableId);
+              onClose();
+            },
+          },
+          { type: "divider" as const },
+          {
+            key: "add-fk",
+            icon: <LinkOutlined />,
+            label: twoSelected
+              ? "Add FK Reference..."
+              : "Add FK Reference... (select 2 tables)",
+            disabled: !twoSelected,
+            onClick: () => {
+              const [idA, idB] = selectedNodeIds;
+              onAddFK?.(idA, idB);
+              onClose();
+            },
+          },
+          {
+            key: "remove-fks",
+            icon: <DisconnectOutlined />,
+            label: "Remove FK References",
+            disabled: !ctxMenu.hasFKs,
+            onClick: () => {
+              onRemoveFKs?.(ctxMenu.tableId);
+              onClose();
+            },
+          },
+        ]}
       />
-      <div ref={menuRef} style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 999, visibility: visible ? "visible" : "hidden" }}>
-        <Menu
-          style={{
-            minWidth: 200,
-            borderRadius: 6,
-            boxShadow: "0 4px 16px rgba(0,0,0,0.35)",
-            border: "1px solid var(--border)",
-          }}
-          items={[
-            {
-              key: "label",
-              label: (
-                <span style={{ fontFamily: "monospace", fontSize: 11, color: "var(--text-muted)" }}>
-                  {ctxMenu.tableName}
-                </span>
-              ),
-              disabled: true,
-            },
-            { type: "divider" as const },
-            {
-              key: "duplicate",
-              icon: <CopyOutlined />,
-              label: "Duplicate Table",
-              onClick: () => {
-                onDuplicateTable?.(ctxMenu.tableId);
-                onClose();
-              },
-            },
-            {
-              key: "delete",
-              icon: <DeleteOutlined />,
-              danger: true,
-              label: "Delete Table",
-              onClick: () => {
-                onDeleteTable?.(ctxMenu.tableId);
-                onClose();
-              },
-            },
-            { type: "divider" as const },
-            {
-              key: "add-fk",
-              icon: <LinkOutlined />,
-              label: twoSelected
-                ? "Add FK Reference..."
-                : "Add FK Reference... (select 2 tables)",
-              disabled: !twoSelected,
-              onClick: () => {
-                const [idA, idB] = selectedNodeIds;
-                onAddFK?.(idA, idB);
-                onClose();
-              },
-            },
-            {
-              key: "remove-fks",
-              icon: <DisconnectOutlined />,
-              label: "Remove FK References",
-              disabled: !ctxMenu.hasFKs,
-              onClick: () => {
-                onRemoveFKs?.(ctxMenu.tableId);
-                onClose();
-              },
-            },
-          ]}
-        />
-      </div>
-    </>
+    </ContextMenuShell>
   );
 }
 
@@ -200,78 +228,38 @@ function ERReadonlyContextMenu({
   onBuildQuery: () => void;
   canvasRef: React.RefObject<HTMLDivElement | null>;
 }) {
-  const menuRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ top: ctxMenu.y, left: ctxMenu.x });
-  const [visible, setVisible] = useState(false);
-
-  useLayoutEffect(() => {
-    const el = menuRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    setPos({
-      top: Math.min(ctxMenu.y, window.innerHeight - rect.height - 8),
-      left: Math.min(ctxMenu.x, window.innerWidth - rect.width - 8),
-    });
-    setVisible(true);
-  }, [ctxMenu.x, ctxMenu.y]);
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    const handleWheel = () => onClose();
-    const canvas = canvasRef.current;
-    window.addEventListener("keydown", handleKeyDown);
-    canvas?.addEventListener("wheel", handleWheel, { passive: true });
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      canvas?.removeEventListener("wheel", handleWheel);
-    };
-  }, [onClose, canvasRef]);
-
   const canBuild = selectedCount >= 2;
 
   return (
-    <>
-      <div
-        style={{ position: "fixed", inset: 0, zIndex: 998 }}
-        onClick={onClose}
+    <ContextMenuShell x={ctxMenu.x} y={ctxMenu.y} onClose={onClose} canvasRef={canvasRef}>
+      <Menu
+        style={menuStyle}
+        items={[
+          {
+            key: "label",
+            label: (
+              <span style={{ fontFamily: "monospace", fontSize: 11, color: "var(--text-muted)" }}>
+                {ctxMenu.tableName}
+              </span>
+            ),
+            disabled: true,
+          },
+          { type: "divider" as const },
+          {
+            key: "build-query",
+            icon: <BuildOutlined />,
+            label: canBuild
+              ? "Build Query"
+              : "Build Query (select 2+ tables)",
+            disabled: !canBuild,
+            onClick: () => {
+              onBuildQuery();
+              onClose();
+            },
+          },
+        ]}
       />
-      <div ref={menuRef} style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 999, visibility: visible ? "visible" : "hidden" }}>
-        <Menu
-          style={{
-            minWidth: 200,
-            borderRadius: 6,
-            boxShadow: "0 4px 16px rgba(0,0,0,0.35)",
-            border: "1px solid var(--border)",
-          }}
-          items={[
-            {
-              key: "label",
-              label: (
-                <span style={{ fontFamily: "monospace", fontSize: 11, color: "var(--text-muted)" }}>
-                  {ctxMenu.tableName}
-                </span>
-              ),
-              disabled: true,
-            },
-            { type: "divider" as const },
-            {
-              key: "build-query",
-              icon: <BuildOutlined />,
-              label: canBuild
-                ? "Build Query"
-                : "Build Query (select 2+ tables)",
-              disabled: !canBuild,
-              onClick: () => {
-                onBuildQuery();
-                onClose();
-              },
-            },
-          ]}
-        />
-      </div>
-    </>
+    </ContextMenuShell>
   );
 }
 
