@@ -11,6 +11,8 @@
 package mcp
 
 import (
+	"time"
+
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"thaw/internal/fnmeta"
@@ -42,7 +44,9 @@ func buildServer(client *snowflake.Client, mode string, cfg SessionConfig, edito
 	srv := mcpsdk.NewServer(&mcpsdk.Implementation{
 		Name:    "thaw",
 		Version: version.Version,
-	}, nil)
+	}, &mcpsdk.ServerOptions{
+		KeepAlive: 30 * time.Second,
+	})
 
 	registerTools(srv, client)
 	registerSchemaTools(srv, client)
