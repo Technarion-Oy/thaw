@@ -12,9 +12,11 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"thaw/internal/apperrors"
+	"thaw/internal/config"
 	"thaw/internal/logger"
 	"thaw/internal/mcp"
 	"thaw/internal/snowflake"
@@ -30,9 +32,11 @@ func (a *App) mcpEnabled() bool {
 // StartMCPSession opens a dedicated Snowflake connection (inheriting the
 // current connect params) and starts an MCP server bound to it. The label
 // must be unique among running sessions; if port is 0 a free port is
-// auto-assigned starting at 9100. Sessions never auto-start and are not
-// persisted across restarts. The role, warehouse, and secondaryRoles
-// parameters configure optional session pinning for non-metadata modes.
+// auto-assigned starting at 9100. Credentials (port + token) are persisted
+// per label so restarting Thaw and re-launching the same label reuses the
+// same URL, keeping external AI client configs valid. The role, warehouse,
+// and secondaryRoles parameters configure optional session pinning for
+// non-metadata modes.
 func (a *App) StartMCPSession(label, mode string, port int, role, warehouse, secondaryRoles string) (mcp.SessionInfo, error) {
 	if !a.mcpEnabled() {
 		return mcp.SessionInfo{}, fmt.Errorf("MCP Server is disabled. Enable it under View → Enabled Features…")
@@ -47,6 +51,24 @@ func (a *App) StartMCPSession(label, mode string, port int, role, warehouse, sec
 	}
 	if mode == "" {
 		mode = mcp.ExecutionModeMetadata
+	}
+
+	// Load persisted credentials for this label so the session reuses the
+	// same port+token across app restarts.
+	var savedPort int
+	var savedToken string
+	if appCfg, err := config.Load(); err == nil && appCfg.MCPCredentials != nil {
+		if cred, ok := appCfg.MCPCredentials[label]; ok {
+			savedToken = cred.Token
+			if port == 0 {
+				savedPort = cred.Port
+			}
+		}
+	}
+
+	preferredPort := port
+	if preferredPort == 0 && savedPort != 0 {
+		preferredPort = savedPort
 	}
 
 	// Each session owns an isolated client so it survives independently of the
@@ -72,14 +94,49 @@ func (a *App) StartMCPSession(label, mode string, port int, role, warehouse, sec
 	}
 
 	connLabel := fmt.Sprintf("%s / %s", params.Account, params.User)
-	info, err := a.mcpManager.Start(a.ctx, label, connLabel, mode, port, client, cfg)
+	info, err := a.mcpManager.Start(a.ctx, label, connLabel, mode, preferredPort, client, cfg, savedToken)
 	if err != nil {
-		_ = client.Close()
-		return mcp.SessionInfo{}, err
+		// If we used a saved port and it's now unavailable, retry with auto-assign
+		// but keep the saved token so the URL only changes the port portion.
+		if savedPort != 0 && preferredPort == savedPort && isPortConflict(err) {
+			info, err = a.mcpManager.Start(a.ctx, label, connLabel, mode, 0, client, cfg, savedToken)
+		}
+		if err != nil {
+			_ = client.Close()
+			return mcp.SessionInfo{}, err
+		}
 	}
+
+	// Persist the actual port and token so subsequent restarts reuse them.
+	a.saveMCPCredential(label, info.Port)
 
 	logger.L.Info("mcp session started", "label", info.Label, "port", info.Port, "mode", info.ExecutionMode)
 	return info, nil
+}
+
+// saveMCPCredential persists the port and token for a session label to config.
+func (a *App) saveMCPCredential(label string, port int) {
+	token, ok := a.mcpManager.SessionToken(label)
+	if !ok {
+		return
+	}
+	appCfg, err := config.Load()
+	if err != nil {
+		logger.L.Warn("mcp: failed to load config for credential save", "err", err)
+		return
+	}
+	if appCfg.MCPCredentials == nil {
+		appCfg.MCPCredentials = make(map[string]config.MCPSessionCredential)
+	}
+	appCfg.MCPCredentials[label] = config.MCPSessionCredential{Port: port, Token: token}
+	if err := config.Save(appCfg); err != nil {
+		logger.L.Warn("mcp: failed to save credential", "label", label, "err", err)
+	}
+}
+
+// isPortConflict reports whether the error indicates the requested port was unavailable.
+func isPortConflict(err error) bool {
+	return errors.Is(err, mcp.ErrPortUnavailable)
 }
 
 // UpdateMCPSessionMode changes the execution mode of a running session,

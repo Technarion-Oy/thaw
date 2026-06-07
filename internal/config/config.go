@@ -394,19 +394,28 @@ func MigrateFlags(f FeatureFlags) FeatureFlags {
 	return f
 }
 
+// MCPSessionCredential holds the persisted port and auth token for an MCP
+// session so that restarting Thaw and re-launching the same session label
+// reuses the same URL, keeping external AI client configs valid.
+type MCPSessionCredential struct {
+	Port  int    `json:"port"`
+	Token string `json:"token"`
+}
+
 // AppConfig is the on-disk configuration for Thaw.
 type AppConfig struct {
-	Connections            []Connection      `json:"connections"`
-	Git                    GitConfig         `json:"git"`
-	OAuth                  OAuthConfig       `json:"oauth"`
-	AI                     AIConfig          `json:"ai"`
-	Snowpark               SnowparkConfig    `json:"snowpark"`
-	PipRegistry            PipRegistryConfig `json:"pipRegistry"`
-	Editor                 EditorPrefs       `json:"editor"`
-	NotebookPrefs          NotebookPrefs     `json:"notebookPrefs"`
-	Session                SessionConfig     `json:"session"`
-	SnowflakeCLIConfigPath string            `json:"snowflakeCliConfigPath"`
-	FeatureFlags           FeatureFlags      `json:"featureFlags"`
+	Connections            []Connection                    `json:"connections"`
+	Git                    GitConfig                       `json:"git"`
+	OAuth                  OAuthConfig                     `json:"oauth"`
+	AI                     AIConfig                        `json:"ai"`
+	Snowpark               SnowparkConfig                  `json:"snowpark"`
+	PipRegistry            PipRegistryConfig               `json:"pipRegistry"`
+	Editor                 EditorPrefs                     `json:"editor"`
+	NotebookPrefs          NotebookPrefs                   `json:"notebookPrefs"`
+	Session                SessionConfig                   `json:"session"`
+	SnowflakeCLIConfigPath string                          `json:"snowflakeCliConfigPath"`
+	FeatureFlags           FeatureFlags                    `json:"featureFlags"`
+	MCPCredentials         map[string]MCPSessionCredential `json:"mcpCredentials,omitempty"`
 }
 
 // configPath returns the absolute path to the application configuration file,
