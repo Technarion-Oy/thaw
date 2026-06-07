@@ -14,9 +14,9 @@ import {
   ER_COL_LIMIT,
 } from "./erTypes";
 
-/** Canonical key for a table: "SCHEMA.TABLE" (uppercase, trimmed). Canvas-only helper. */
+/** Canonical key for a table: "SCHEMA.TABLE" (trimmed, case-preserved). Canvas-only helper. */
 const tableKey = (schema: string, name: string) =>
-  `${schema.toUpperCase()}.${name.trim().toUpperCase()}`;
+  `${schema}.${name.trim()}`;
 
 /** Fallback accent color when CSS variable is unavailable (SSR, tests, or empty value). */
 const ACCENT_FALLBACK = "#58a6ff";
@@ -74,7 +74,7 @@ export function tablesToNodesAndEdges(
     height: nodeHeight(t.columns.length),
   }));
 
-  // Build a lookup: "SCHEMA.TABLE" (uppercase) → tableId
+  // Build a lookup: "SCHEMA.TABLE" → tableId
   const keyToId = new Map<string, string>();
   for (const t of tables) {
     if (t.schema && t.name.trim()) {
@@ -98,7 +98,7 @@ export function tablesToNodesAndEdges(
       const targetTable = tables.find((tt) => tt.id === targetTableId);
       if (!targetTable) continue;
       const targetCol = targetTable.columns.find(
-        (tc) => tc.name.trim().toUpperCase() === refCol.trim().toUpperCase(),
+        (tc) => tc.name.trim() === refCol.trim(),
       );
       if (!targetCol) continue;
 

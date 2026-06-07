@@ -58,11 +58,11 @@ var snowflakeReservedKeywords = map[string]struct{}{
 }
 
 // TableKey returns the canonical lookup key for a Snowflake table:
-// "SCHEMA.TABLE" with both parts uppercased and trimmed. This matches
-// Snowflake's default behaviour for unquoted identifiers.
+// "SCHEMA.TABLE" with both parts trimmed. Names arrive from Snowflake
+// metadata already in their canonical stored form (uppercase for unquoted
+// identifiers, original case for quoted ones), so no case folding is applied.
 func TableKey(schema, name string) string {
-	return strings.ToUpper(strings.TrimSpace(schema)) + "." +
-		strings.ToUpper(strings.TrimSpace(name))
+	return strings.TrimSpace(schema) + "." + strings.TrimSpace(name)
 }
 
 // NeedsQuoting reports whether the given Snowflake object name must be

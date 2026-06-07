@@ -10,12 +10,12 @@ const saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const pendingData = new Map<string, { key: string; positions: PositionMap }>();
 
 function storageKey(database: string): string {
-  return KEY_PREFIX + database.toUpperCase();
+  return KEY_PREFIX + database;
 }
 
-/** Position key for a table: "SCHEMA.TABLE" (uppercase, stable across sessions). */
+/** Position key for a table: "SCHEMA.TABLE" (trimmed, case-preserved, stable across sessions). */
 export function positionKey(schema: string, table: string): string {
-  return `${schema.toUpperCase()}.${table.trim().toUpperCase()}`;
+  return `${schema}.${table.trim()}`;
 }
 
 function writePending(key: string): void {

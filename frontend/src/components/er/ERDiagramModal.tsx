@@ -61,7 +61,7 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
   const tableColumnsMap = useMemo(() => {
     const m = new Map<string, string[]>();
     for (const t of data.tables) {
-      const key = `${t.schema.toUpperCase()}.${t.name.toUpperCase()}`;
+      const key = `${t.schema}.${t.name}`;
       m.set(key, t.columns.map((c) => c.name));
     }
     return m;
@@ -76,12 +76,12 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
     return m;
   }, [designerTables]);
 
-  // Pre-built lookup: "SCHEMA.TABLE" (uppercase) → DesignerTable
+  // Pre-built lookup: "SCHEMA.TABLE" → DesignerTable
   // Used by highlightedEdgeIds to avoid O(n) find per FK column.
   const designerTablesByKey = useMemo(() => {
     const m = new Map<string, DesignerTable>();
     for (const t of designerTables) {
-      m.set(`${t.schema.toUpperCase()}.${t.name.toUpperCase()}`, t);
+      m.set(`${t.schema}.${t.name}`, t);
     }
     return m;
   }, [designerTables]);
@@ -165,8 +165,8 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
     const usedFKPairs = new Set<string>();
     for (const j of joinState.joins) {
       for (const pair of j.fkPairs) {
-        const a = `${pair.from.schema}.${pair.from.table}.${pair.from.col}`.toUpperCase();
-        const b = `${pair.to.schema}.${pair.to.table}.${pair.to.col}`.toUpperCase();
+        const a = `${pair.from.schema}.${pair.from.table}.${pair.from.col}`;
+        const b = `${pair.to.schema}.${pair.to.table}.${pair.to.col}`;
         const [lo, hi] = [a, b].sort();
         usedFKPairs.add(`${lo}=${hi}`);
       }
@@ -180,16 +180,16 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
         if (parts.length !== 3) continue;
         const [refSchema, refTable, refCol] = parts;
         const targetTable = designerTablesByKey.get(
-          `${refSchema.toUpperCase()}.${refTable.toUpperCase()}`,
+          `${refSchema}.${refTable}`,
         );
         if (!targetTable) continue;
         const targetCol = targetTable.columns.find(
-          (tc) => tc.name.toUpperCase() === refCol.toUpperCase(),
+          (tc) => tc.name === refCol,
         );
         if (!targetCol) continue;
 
-        const fromRef = `${t.schema.toUpperCase()}.${t.name.toUpperCase()}.${c.name.toUpperCase()}`;
-        const toRef = `${refSchema.toUpperCase()}.${refTable.toUpperCase()}.${refCol.toUpperCase()}`;
+        const fromRef = `${t.schema}.${t.name}.${c.name}`;
+        const toRef = `${refSchema}.${refTable}.${refCol}`;
         const [lo, hi] = [fromRef, toRef].sort();
         if (usedFKPairs.has(`${lo}=${hi}`)) {
           ids.add(`fk-${t.id}-${c.id}-${targetTable.id}-${targetCol.id}`);
@@ -206,8 +206,7 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
     for (const j of joinState.joins) {
       if (!j.isIntermediate) continue;
       const t = designerTables.find(
-        (dt) => dt.schema.toUpperCase() === j.table.schema.toUpperCase() &&
-                dt.name.toUpperCase() === j.table.name.toUpperCase(),
+        (dt) => dt.schema === j.table.schema && dt.name === j.table.name,
       );
       if (t) ids.add(t.id);
     }

@@ -21,11 +21,12 @@ func TestTableKey(t *testing.T) {
 		want   string
 	}{
 		{"PUBLIC", "USERS", "PUBLIC.USERS"},
-		{"public", "users", "PUBLIC.USERS"},
-		{"Public", "Orders", "PUBLIC.ORDERS"},
-		{" sales ", " orders ", "SALES.ORDERS"},
+		{"public", "users", "public.users"},         // preserves lowercase (quoted identifiers)
+		{"Public", "Orders", "Public.Orders"},        // preserves mixed case
+		{" sales ", " orders ", "sales.orders"},      // trims whitespace, preserves case
 		{"", "T", ".T"},
 		{"S", "", "S."},
+		{"PUBLIC", "my_table", "PUBLIC.my_table"},    // case-sensitive table in PUBLIC schema
 	}
 	for _, tc := range tests {
 		t.Run(tc.schema+"_"+tc.name, func(t *testing.T) {

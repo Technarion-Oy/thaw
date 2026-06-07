@@ -7,9 +7,9 @@ import { CloseOutlined, CodeOutlined } from "@ant-design/icons";
 import { BuildJoinSQL } from "../../../wailsjs/go/app/App";
 import type { JoinQueryState, JoinEntry, JoinPath } from "./erTypes";
 
-/** Canonical key for a table: "SCHEMA.TABLE" (uppercase, trimmed). */
+/** Canonical key for a table: "SCHEMA.TABLE" (trimmed, case-preserved). */
 const tableKey = (schema: string, name: string) =>
-  `${schema.toUpperCase()}.${name.trim().toUpperCase()}`;
+  `${schema}.${name.trim()}`;
 
 const JOIN_TYPES: JoinEntry["joinType"][] = ["INNER", "LEFT", "RIGHT", "FULL OUTER"];
 
