@@ -12,6 +12,7 @@ package erdesigner
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"thaw/internal/snowflake"
@@ -189,7 +190,9 @@ func bfsAllShortest(adj map[string][]adjEdge, start, end string, maxPaths int) [
 			if len(results) >= maxPaths {
 				return
 			}
-			backtrack(pe.parent, append(path, pe.parent), append(edges, pe.edge))
+			// Clone before appending — sibling recursive calls must not share
+			// the same backing array.
+			backtrack(pe.parent, append(slices.Clone(path), pe.parent), append(slices.Clone(edges), pe.edge))
 		}
 	}
 

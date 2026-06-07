@@ -121,6 +121,11 @@ export interface JoinPath {
   edges: { from: { schema: string; table: string; col: string }; to: { schema: string; table: string; col: string } }[];
 }
 
+/** Canonical key for a table: "SCHEMA.TABLE" (both parts trimmed, case-preserved).
+ *  Matches Go's `snowflake.TableKey` which trims both parts. */
+export const tableKey = (schema: string, name: string) =>
+  `${schema.trim()}.${name.trim()}`;
+
 export const ER_NODE_WIDTH = 240;
 export const ER_NODE_HEADER_HEIGHT = 32;
 export const ER_NODE_ROW_HEIGHT = 24;

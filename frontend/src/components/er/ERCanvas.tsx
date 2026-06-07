@@ -439,20 +439,26 @@ function ERCanvasInner({
     setEdges(newEdges);
   }, [filteredTables, filteredTableById, filteredTableIdStr, mode, database, setNodes, setEdges, fitView]);
 
-  // Apply visual highlighting to edges and nodes for join path feedback
-  const styledEdges = useMemo(() => {
-    if (!highlightedEdgeIds || highlightedEdgeIds.size === 0) return edges;
-    return edges.map((e) => {
-      if (highlightedEdgeIds.has(e.id)) {
-        return {
-          ...e,
-          animated: false,
-          style: { ...e.style, strokeWidth: 3, stroke: "var(--accent)" },
-        };
-      }
-      return e;
-    });
-  }, [edges, highlightedEdgeIds]);
+  // Apply edge highlighting via setEdges only when the highlighted set
+  // changes — avoids a full .map() on every drag/position update (XYFlow
+  // recalculates edge routing on node moves, triggering edges updates).
+  const prevHighlightEdgeRef = useRef<Set<string> | undefined>(undefined);
+  useEffect(() => {
+    if (prevHighlightEdgeRef.current === highlightedEdgeIds) return;
+    prevHighlightEdgeRef.current = highlightedEdgeIds;
+    setEdges((es) =>
+      es.map((e) => {
+        if (highlightedEdgeIds?.has(e.id)) {
+          return {
+            ...e,
+            animated: false,
+            style: { ...e.style, strokeWidth: 3, stroke: "var(--accent)" },
+          };
+        }
+        return { ...e, animated: true, style: { ...e.style, strokeWidth: 1.5 } };
+      }),
+    );
+  }, [highlightedEdgeIds, setEdges]);
 
   // Apply intermediate-node className via setNodes only when the highlighted
   // set changes, avoiding a full .map() on every drag/position update.
@@ -692,7 +698,7 @@ function ERCanvasInner({
       {/* onEdgesChange intentionally omitted — edges are derived from fkRef (read-only) */}
       <ReactFlow
         nodes={nodes}
-        edges={styledEdges}
+        edges={edges}
         onNodesChange={handleNodesChange}
         onConnect={mode === "edit" ? handleConnect : undefined}
         onNodeClick={closeContextMenu}

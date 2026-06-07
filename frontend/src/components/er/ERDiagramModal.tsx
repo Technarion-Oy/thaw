@@ -7,13 +7,37 @@ import { CopyOutlined, EditOutlined } from "@ant-design/icons";
 import { ListSchemas, FindJoinPaths, BuildJoinState } from "../../../wailsjs/go/app/App";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { snowflake, erdesigner } from "../../../wailsjs/go/models";
-import type { JoinQueryState, JoinPath, DesignerTable } from "./erTypes";
+import { tableKey, type JoinQueryState, type JoinPath, type DesignerTable } from "./erTypes";
 import { buildMermaid } from "./buildMermaid";
 import ERDesigner from "./ERDesigner";
 import ERCanvas from "./ERCanvas";
 import { initFromERData } from "./erCanvasLayout";
 import JoinQueryPanel, { JoinPathDisambiguation } from "./JoinQueryPanel";
 import { useQueryStore } from "../../store/queryStore";
+
+// ── Typed Wails IPC wrappers ──────────────────────────────────────────────────
+// Concentrate the Wails class ↔ interface casts in one place. At runtime Wails
+// serializes/deserializes plain JSON objects; the generated .d.ts declares class
+// types with extra methods (constructors, convertValues) that require casts.
+type TableRef = { schema: string; name: string };
+
+async function findJoinPaths(
+  tables: TableRef[], fks: snowflake.ERForeignKey[],
+): Promise<JoinPath[]> {
+  return FindJoinPaths(
+    tables as unknown as erdesigner.TableRef[], fks,
+  ) as Promise<JoinPath[]>;
+}
+
+async function buildJoinState(
+  path: JoinPath, selected: TableRef[], database: string,
+): Promise<JoinQueryState> {
+  return BuildJoinState(
+    path as unknown as erdesigner.JoinPath,
+    selected as unknown as erdesigner.TableRef[],
+    database,
+  ) as Promise<JoinQueryState>;
+}
 
 interface Props {
   database: string;
@@ -47,6 +71,7 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
 
   // Join builder state
   const [joinPanelOpen, setJoinPanelOpen] = useState(false);
+  const [joinLoading, setJoinLoading] = useState(false);
   const [joinState, setJoinState] = useState<JoinQueryState | null>(null);
   const [joinPaths, setJoinPaths] = useState<JoinPath[] | null>(null);
   // Captured at the time paths were computed — prevents stale reads if
@@ -61,8 +86,7 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
   const tableColumnsMap = useMemo(() => {
     const m = new Map<string, string[]>();
     for (const t of data.tables) {
-      const key = `${t.schema}.${t.name}`;
-      m.set(key, t.columns.map((c) => c.name));
+      m.set(tableKey(t.schema, t.name), t.columns.map((c) => c.name));
     }
     return m;
   }, [data]);
@@ -81,7 +105,7 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
   const designerTablesByKey = useMemo(() => {
     const m = new Map<string, DesignerTable>();
     for (const t of designerTables) {
-      m.set(`${t.schema}.${t.name}`, t);
+      m.set(tableKey(t.schema, t.name), t);
     }
     return m;
   }, [designerTables]);
@@ -115,13 +139,9 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
 
       if (selected.length < 2) return;
 
+      setJoinLoading(true);
       try {
-        // Wails IPC accepts plain objects (JSON-serialized) but the generated
-        // .d.ts declares class types with extra methods — cast at the boundary.
-        const paths = await FindJoinPaths(
-          selected as unknown as erdesigner.TableRef[],
-          data.fks ?? [],
-        ) as JoinPath[];
+        const paths = await findJoinPaths(selected, data.fks ?? []);
         if (paths.length === 0) {
           void message.warning("Selected tables are not connected by foreign keys");
           return;
@@ -131,11 +151,7 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
 
         if (paths.length === 1) {
           // Single path — open panel directly
-          const state = await BuildJoinState(
-            paths[0] as unknown as erdesigner.JoinPath,
-            selected as unknown as erdesigner.TableRef[],
-            database,
-          ) as JoinQueryState;
+          const state = await buildJoinState(paths[0], selected, database);
           setJoinState(state);
           setJoinPaths(null);
           setJoinPanelOpen(true);
@@ -147,6 +163,8 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
         }
       } catch {
         void message.error("Failed to compute join paths");
+      } finally {
+        setJoinLoading(false);
       }
     },
     [data.fks, tableIdToSchemaName, database],
@@ -155,16 +173,17 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
   const handleDisambiguationSelect = useCallback(
     async (index: number) => {
       if (!joinPaths) return;
+      setJoinLoading(true);
       try {
-        const state = await BuildJoinState(
-          joinPaths[index] as unknown as erdesigner.JoinPath,
-          resolvedTablesRef.current as unknown as erdesigner.TableRef[],
-          database,
-        ) as JoinQueryState;
+        const state = await buildJoinState(
+          joinPaths[index], resolvedTablesRef.current, database,
+        );
         setJoinState(state);
         setJoinPaths(null);
       } catch {
         void message.error("Failed to build join state");
+      } finally {
+        setJoinLoading(false);
       }
     },
     [joinPaths, database],
@@ -226,7 +245,7 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
     const ids = new Set<string>();
     for (const j of joinState.joins) {
       if (!j.isIntermediate) continue;
-      const t = designerTablesByKey.get(`${j.table.schema}.${j.table.name}`);
+      const t = designerTablesByKey.get(tableKey(j.table.schema, j.table.name));
       if (t) ids.add(t.id);
     }
     return ids.size > 0 ? ids : undefined;
@@ -294,6 +313,11 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
       </div>
 
       {/* Join query builder panel */}
+      {joinLoading && !joinPanelOpen && (
+        <div style={{ padding: "12px 16px", borderTop: "1px solid var(--border)", fontSize: 12, color: "var(--text-muted)" }}>
+          Computing join paths…
+        </div>
+      )}
       {joinPanelOpen && joinPaths && !joinState && (
         <JoinPathDisambiguation
           paths={joinPaths}

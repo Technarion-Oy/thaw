@@ -86,8 +86,10 @@ func BuildJoinSQL(state JoinQueryState) string {
 			}
 			aliasedCondition = strings.Join(parts, " AND ")
 		} else {
-			// Fallback: replace SCHEMA.TABLE. prefixes with aliases in the
-			// pre-formatted OnCondition string.
+			// Fallback for states without structured FKPairs (e.g. manually
+			// constructed test data). Column names are intentionally not quoted
+			// here; BuildJoinState always populates FKPairs so production use
+			// takes the quoting path above.
 			aliasedCondition = j.OnCondition
 			for tblKey, tblAlias := range aliasMap {
 				schema, table, ok := strings.Cut(tblKey, ".")

@@ -6,6 +6,7 @@ import { MarkerType, type Node, type Edge } from "@xyflow/react";
 import type { snowflake } from "../../../wailsjs/go/models";
 import {
   type DesignerTable,
+  tableKey,
   SF_TYPES,
   ER_NODE_WIDTH,
   ER_NODE_HEADER_HEIGHT,
@@ -13,10 +14,6 @@ import {
   ER_NODE_PADDING,
   ER_COL_LIMIT,
 } from "./erTypes";
-
-/** Canonical key for a table: "SCHEMA.TABLE" (trimmed, case-preserved). Canvas-only helper. */
-const tableKey = (schema: string, name: string) =>
-  `${schema}.${name.trim()}`;
 
 /** Fallback accent color when CSS variable is unavailable (SSR, tests, or empty value). */
 const ACCENT_FALLBACK = "#58a6ff";

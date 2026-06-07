@@ -6,11 +6,12 @@ import { Button, Select, Tag, Collapse, Checkbox } from "antd";
 import { CloseOutlined, CodeOutlined } from "@ant-design/icons";
 import { BuildJoinSQL } from "../../../wailsjs/go/app/App";
 import type { erdesigner } from "../../../wailsjs/go/models";
-import type { JoinQueryState, JoinEntry, JoinPath } from "./erTypes";
+import { tableKey, type JoinQueryState, type JoinEntry, type JoinPath } from "./erTypes";
 
-/** Canonical key for a table: "SCHEMA.TABLE" (trimmed, case-preserved). */
-const tableKey = (schema: string, name: string) =>
-  `${schema}.${name.trim()}`;
+// Typed Wails IPC wrapper — see ERDiagramModal.tsx for explanation.
+async function buildJoinSQL(state: JoinQueryState): Promise<string> {
+  return BuildJoinSQL(state as unknown as erdesigner.JoinQueryState);
+}
 
 const JOIN_TYPES: JoinEntry["joinType"][] = ["INNER", "LEFT", "RIGHT", "FULL OUTER"];
 
@@ -23,7 +24,7 @@ const SQL_KEYWORDS = new Set([
 function highlightSQL(sql: string): JSX.Element[] {
 
   return sql.split("\n").map((line, li) => {
-    const tokens = line.split(/(\b\w+\b|[.,*()=])/g);
+    const tokens = line.split(/(\b\w+\b|[.,*()=])/g).filter(Boolean);
     return (
       <div key={li}>
         {tokens.map((tok, ti) => {
@@ -132,7 +133,7 @@ export default function JoinQueryPanel({
 }: JoinQueryPanelProps) {
   const [sql, setSql] = useState("");
   useEffect(() => {
-    BuildJoinSQL(state as unknown as erdesigner.JoinQueryState).then(setSql).catch(() => setSql("-- error generating SQL"));
+    buildJoinSQL(state).then(setSql).catch(() => setSql("-- error generating SQL"));
   }, [state]);
 
   const updateJoinType = useCallback(
