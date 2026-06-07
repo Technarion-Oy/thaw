@@ -11,12 +11,12 @@ Renders an interactive ER diagram using `@xyflow/react` from Snowflake table/col
 | File | Purpose |
 |------|---------|
 | `erTypes.ts` | Shared types (`DesignerColumn`, `DesignerTable`), `SF_TYPES` constant, and node dimension constants (`ER_NODE_WIDTH`, etc.). |
-| `erCanvasLayout.ts` | Pure layout utilities: `tablesToNodesAndEdges()`, `applyERLayout()` (dagre), `initFromERData()`, `normalizeDataType()`. No React imports. |
+| `erCanvasLayout.ts` | Pure layout utilities: `tablesToNodesAndEdges()`, `applyERLayout()` (dagre), `initFromERData()`, `normalizeDataType()`, `mergeAITablesIntoDesigner()`. No React imports. |
 | `erLayoutStore.ts` | localStorage persistence for node positions, keyed by `thaw-er-layout:{DATABASE}` and `SCHEMA.TABLE`. Debounced writes. |
 | `ERTableNode.tsx` | Custom XYFlow node component. Renders table header + column rows with per-column source/target handles, PK/NN/FK badges, and inline rename on double-click (edit mode). Wrapped in `React.memo`. |
 | `ERCanvas.tsx` | Shared `ReactFlow` canvas used by both `ERDiagramModal` (readonly) and `ERDesigner` (edit). Manages layout (dagre + saved positions), node dragging, FK connection, selection, auto-layout, and reset-layout buttons. |
 | `ERDiagramModal.tsx` | Primary viewer: interactive canvas, schema filter checkboxes, "Copy Mermaid" button, and a "Design Tables…" button that opens `ERDesigner`. |
-| `ERDesigner.tsx` | Interactive table designer. Left sidebar with table/column CRUD forms, right panel with `ERCanvas` in edit mode. Generates diff-based SQL (`CREATE TABLE`, `ALTER TABLE`, `DROP TABLE`) and executes via `ExecuteQuery`. |
+| `ERDesigner.tsx` | Interactive table designer. Left sidebar with table/column CRUD forms, right panel with `ERCanvas` in edit mode. Generates diff-based SQL (`CREATE TABLE`, `ALTER TABLE`, `DROP TABLE`) and executes via `ExecuteQuery`. Syncs state to backend MCP cache (mount/unmount/debounced changes) and listens for `mcp:modify-er-designer` events. |
 | `buildMermaid.ts` | Pure function `buildMermaid(tables, visibleSchemas?)` that converts `DesignerTable[]` into a Mermaid `erDiagram` string. Used by both `ERDiagramModal` and `ERDesigner` for the "Copy Mermaid" clipboard export. Also exports shared helpers `sanitiseId`, `entityId`, `shortType`. |
 
 ## Patterns & integration
@@ -27,6 +27,8 @@ Renders an interactive ER diagram using `@xyflow/react` from Snowflake table/col
 - All other files are pure TypeScript/React with no IPC
 
 **MCP integration:** The `open_er_designer` MCP tool (in `internal/mcp/er_tools.go`) emits a `mcp:open-er-designer` Wails event. `Sidebar.tsx` listens for this event and opens `ERDesigner` with two data sets: `mergedData` (AI tables merged into live schema, used for initial canvas population) and `initialData` (the original live schema, used as the baseline for diff SQL generation). The `mergedData` prop takes priority over `initialData` for table initialization, while `initialData` continues to drive `generateDiffSQL`.
+
+**MCP state sync:** `ERDesigner.tsx` pushes its table state to the backend's `ERDesignerStateStore` via `UpdateERDesignerState` IPC on mount, on debounced (300ms) table changes, and clears via `ClearERDesignerState` on unmount. The `get_er_designer_state` MCP tool reads from this cache. The `modify_er_designer` MCP tool emits a `mcp:modify-er-designer` Wails event, which `ERDesigner.tsx` listens for and merges into its current state via `mergeAITablesIntoDesigner` — matching tables (by uppercase `SCHEMA.NAME`) are replaced (preserving canvas-positioning UUIDs), new tables are appended.
 
 **XYFlow canvas:** Uses `@xyflow/react` v12 with a custom `ERTableNode` registered via module-level `nodeTypes` (required by XYFlow to prevent re-registration). Layout is computed by `@dagrejs/dagre` with `rankdir: "TB"`, `nodesep: 60`, `ranksep: 120`. Node heights are dynamic based on column count.
 

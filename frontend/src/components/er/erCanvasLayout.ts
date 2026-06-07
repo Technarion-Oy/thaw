@@ -186,6 +186,81 @@ export function normalizeDataType(dt: string): string {
   return (aliases[base] ?? "VARCHAR") + params;
 }
 
+/**
+ * AI table input from an MCP modify_er_designer event. Matches the Go
+ * erDesignerTableIn / erDesignerColumnIn types — no React UUIDs.
+ */
+export interface AITableIn {
+  schema: string;
+  name: string;
+  columns: {
+    name: string;
+    dataType: string;
+    isPK?: boolean;
+    notNull?: boolean;
+    fkRef?: string;
+  }[];
+}
+
+/**
+ * Merge AI-generated tables into the current designer state.
+ * - Matched by uppercase SCHEMA.NAME (same logic as backend mergeAITables).
+ * - Replaced tables preserve their UUID id (canvas positions survive);
+ *   columns get fresh UUIDs.
+ * - New tables are appended with fresh UUIDs.
+ * - Untouched tables are preserved as-is.
+ */
+export function mergeAITablesIntoDesigner(
+  current: DesignerTable[],
+  aiTables: AITableIn[],
+): DesignerTable[] {
+  const tableKey = (schema: string, name: string) =>
+    `${schema.toUpperCase()}.${name.trim().toUpperCase()}`;
+
+  // Build lookup of current tables by key.
+  const currentMap = new Map<string, DesignerTable>();
+  for (const t of current) {
+    if (t.schema && t.name.trim()) {
+      currentMap.set(tableKey(t.schema, t.name), t);
+    }
+  }
+
+  // Track which current tables are replaced.
+  const replaced = new Set<string>();
+
+  // Convert AI tables.
+  const aiDesignerTables: DesignerTable[] = aiTables.map((at) => {
+    const key = tableKey(at.schema, at.name);
+    const existing = currentMap.get(key);
+    if (existing) replaced.add(key);
+
+    return {
+      id: existing?.id ?? crypto.randomUUID(),
+      schema: at.schema,
+      name: at.name,
+      columns: at.columns.map((c) => ({
+        id: crypto.randomUUID(),
+        name: c.name,
+        dataType: c.dataType,
+        isPK: c.isPK ?? false,
+        notNull: c.notNull ?? (c.isPK ?? false),
+        fkRef: c.fkRef ?? "",
+      })),
+    };
+  });
+
+  // Build merged: untouched current tables, then AI tables.
+  const merged: DesignerTable[] = [];
+  for (const t of current) {
+    const key = t.schema && t.name.trim() ? tableKey(t.schema, t.name) : "";
+    if (!key || !replaced.has(key)) {
+      merged.push(t);
+    }
+  }
+  merged.push(...aiDesignerTables);
+  return merged;
+}
+
 /** Convert snowflake.ERDiagramData to DesignerTable[] with FK wiring. */
 export function initFromERData(data: snowflake.ERDiagramData): DesignerTable[] {
   const tables: DesignerTable[] = data.tables.map((t) => ({

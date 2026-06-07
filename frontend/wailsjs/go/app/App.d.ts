@@ -128,6 +128,8 @@ export function CheckSnowparkEnv():Promise<snowpark.SnowparkCheckResult>;
 
 export function ClearDefaultProfile():Promise<void>;
 
+export function ClearERDesignerState():Promise<void>;
+
 export function ClearObjectCache():Promise<void>;
 
 export function ClearObjectCacheForDatabase(arg1:string):Promise<void>;
@@ -665,6 +667,8 @@ export function TaskHasChildren(arg1:string,arg2:string,arg3:string):Promise<boo
 export function TestAIModel(arg1:string,arg2:string,arg3:string,arg4:number,arg5:number):Promise<string>;
 
 export function UninstallEnvPackage(arg1:string):Promise<void>;
+
+export function UpdateERDesignerState(arg1:string,arg2:Array<mcp.ERDesignerTableOut>):Promise<void>;
 
 export function UpdateEditorContext(arg1:string,arg2:string):Promise<void>;
 

@@ -198,6 +198,10 @@ export function ClearDefaultProfile() {
   return window['go']['app']['App']['ClearDefaultProfile']();
 }
 
+export function ClearERDesignerState() {
+  return window['go']['app']['App']['ClearERDesignerState']();
+}
+
 export function ClearObjectCache() {
   return window['go']['app']['App']['ClearObjectCache']();
 }
@@ -1272,6 +1276,10 @@ export function TestAIModel(arg1, arg2, arg3, arg4, arg5) {
 
 export function UninstallEnvPackage(arg1) {
   return window['go']['app']['App']['UninstallEnvPackage'](arg1);
+}
+
+export function UpdateERDesignerState(arg1, arg2) {
+  return window['go']['app']['App']['UpdateERDesignerState'](arg1, arg2);
 }
 
 export function UpdateEditorContext(arg1, arg2) {
