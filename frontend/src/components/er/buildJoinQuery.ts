@@ -2,6 +2,7 @@
 // @thaw-domain: ER Designer
 
 import type { JoinQueryState } from "./erTypes";
+import { tableKey } from "./erTypes";
 
 /**
  * Fully qualify a table name as DATABASE.SCHEMA.TABLE.
@@ -20,8 +21,6 @@ function fqn(database: string, schema: string, table: string): string {
 export function buildJoinSQL(state: JoinQueryState): string {
   // Assign aliases: t1 for base, t2, t3, ... for joins
   const aliasMap = new Map<string, string>();
-  const tableKey = (schema: string, name: string) =>
-    `${schema.toUpperCase()}.${name.toUpperCase()}`;
 
   aliasMap.set(
     tableKey(state.baseTable.schema, state.baseTable.name),
@@ -85,7 +84,7 @@ export function buildJoinSQL(state: JoinQueryState): string {
     selectParts.join(",\n"),
     fromLine,
     ...joinLines,
-    "LIMIT 1000",
+    "LIMIT 1000;",
   ];
 
   return lines.join("\n");

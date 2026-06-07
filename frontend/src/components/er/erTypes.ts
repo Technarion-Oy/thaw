@@ -91,6 +91,11 @@ export function normalizeIdentifier(raw: string): string {
   return trimmed.toUpperCase();
 }
 
+/** Canonical key for a table: "SCHEMA.TABLE" (uppercase, unquoted identifiers). */
+export function tableKey(schema: string, name: string): string {
+  return `${schema.toUpperCase()}.${name.trim().toUpperCase()}`;
+}
+
 // ── Join Query Builder types ─────────────────────────────────────────────────
 
 export interface FKPair {

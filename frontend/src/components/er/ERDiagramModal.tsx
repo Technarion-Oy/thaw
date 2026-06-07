@@ -7,7 +7,7 @@ import { CopyOutlined, EditOutlined } from "@ant-design/icons";
 import { ListSchemas } from "../../../wailsjs/go/app/App";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { snowflake } from "../../../wailsjs/go/models";
-import type { JoinQueryState, JoinPath } from "./erTypes";
+import type { JoinQueryState, JoinPath, DesignerTable } from "./erTypes";
 import { buildMermaid } from "./buildMermaid";
 import ERDesigner from "./ERDesigner";
 import ERCanvas from "./ERCanvas";
@@ -77,6 +77,16 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
     return m;
   }, [designerTables]);
 
+  // Pre-built lookup: "SCHEMA.TABLE" (uppercase) → DesignerTable
+  // Used by highlightedEdgeIds to avoid O(n) find per FK column.
+  const designerTablesByKey = useMemo(() => {
+    const m = new Map<string, DesignerTable>();
+    for (const t of designerTables) {
+      m.set(`${t.schema.toUpperCase()}.${t.name.toUpperCase()}`, t);
+    }
+    return m;
+  }, [designerTables]);
+
   const toggleSchema = (schema: string) => {
     setVisibleSchemas((prev) => {
       const next = new Set(prev);
@@ -93,7 +103,11 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
     ClipboardSetText(buildMermaid(designerTables, visibleSchemas));
   };
 
-  // Handle "Build Query" from context menu
+  // Handle "Build Query" from context menu.
+  // Note: once the join panel is open, changing the canvas selection does not
+  // update the panel — the user must close and re-trigger "Build Query" with
+  // the new selection. This is intentional: live-updating would be disorienting
+  // and the disambiguation flow doesn't support incremental changes.
   const handleBuildQuery = useCallback(
     (tableIds: string[]) => {
       const selected = tableIds
@@ -166,9 +180,8 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
         const parts = c.fkRef.split(".");
         if (parts.length !== 3) continue;
         const [refSchema, refTable, refCol] = parts;
-        const targetTable = designerTables.find(
-          (tt) => tt.schema.toUpperCase() === refSchema.toUpperCase() &&
-                  tt.name.toUpperCase() === refTable.toUpperCase(),
+        const targetTable = designerTablesByKey.get(
+          `${refSchema.toUpperCase()}.${refTable.toUpperCase()}`,
         );
         if (!targetTable) continue;
         const targetCol = targetTable.columns.find(
@@ -185,7 +198,7 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
       }
     }
     return ids.size > 0 ? ids : undefined;
-  }, [joinPanelOpen, joinState, designerTables]);
+  }, [joinPanelOpen, joinState, designerTables, designerTablesByKey]);
 
   // Compute highlighted node IDs (intermediate tables) for visual feedback
   const highlightedNodeIds = useMemo(() => {

@@ -5,6 +5,7 @@ import { useMemo, useCallback } from "react";
 import { Button, Select, Tag, Collapse, Checkbox } from "antd";
 import { CloseOutlined, CodeOutlined } from "@ant-design/icons";
 import type { JoinQueryState, JoinEntry, JoinPath } from "./erTypes";
+import { tableKey } from "./erTypes";
 import { buildJoinSQL } from "./buildJoinQuery";
 
 const JOIN_TYPES: JoinEntry["joinType"][] = ["INNER", "LEFT", "RIGHT", "FULL OUTER"];
@@ -148,9 +149,6 @@ export default function JoinQueryPanel({
     },
     [state, onChange],
   );
-
-  const tableKey = (schema: string, name: string) =>
-    `${schema.toUpperCase()}.${name.toUpperCase()}`;
 
   const baseKey = tableKey(state.baseTable.schema, state.baseTable.name);
 

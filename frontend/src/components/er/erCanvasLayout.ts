@@ -7,6 +7,7 @@ import type { snowflake } from "../../../wailsjs/go/models";
 import {
   type DesignerTable,
   SF_TYPES,
+  tableKey,
   ER_NODE_WIDTH,
   ER_NODE_HEADER_HEIGHT,
   ER_NODE_ROW_HEIGHT,
@@ -71,8 +72,6 @@ export function tablesToNodesAndEdges(
   }));
 
   // Build a lookup: "SCHEMA.TABLE" (uppercase) → tableId
-  const tableKey = (schema: string, name: string) =>
-    `${schema.toUpperCase()}.${name.trim().toUpperCase()}`;
   const keyToId = new Map<string, string>();
   for (const t of tables) {
     if (t.schema && t.name.trim()) {
@@ -214,9 +213,6 @@ export function mergeAITablesIntoDesigner(
   current: DesignerTable[],
   aiTables: AITableIn[],
 ): DesignerTable[] {
-  const tableKey = (schema: string, name: string) =>
-    `${schema.toUpperCase()}.${name.trim().toUpperCase()}`;
-
   // Build lookup of current tables by key.
   const currentMap = new Map<string, DesignerTable>();
   for (const t of current) {

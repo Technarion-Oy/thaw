@@ -2,6 +2,7 @@
 // @thaw-domain: ER Designer
 
 import type { JoinPath, JoinQueryState, JoinEntry, FKPair } from "./erTypes";
+import { tableKey } from "./erTypes";
 
 /** FK edge in the adjacency graph. */
 interface FKEdge {
@@ -11,11 +12,6 @@ interface FKEdge {
   toSchema: string;
   toTable: string;
   toCol: string;
-}
-
-/** Canonical key for a table node: "SCHEMA.TABLE" (uppercase). */
-function tableKey(schema: string, name: string): string {
-  return `${schema.toUpperCase()}.${name.trim().toUpperCase()}`;
 }
 
 /** Parse a table key back into schema + name.
@@ -104,11 +100,12 @@ function bfsAllShortest(
   parents.set(start, []);
 
   const queue: string[] = [start];
+  let head = 0;
   let found = false;
   let targetDist = Infinity;
 
-  while (queue.length > 0) {
-    const current = queue.shift()!;
+  while (head < queue.length) {
+    const current = queue[head++];
     const currentDist = dist.get(current)!;
 
     if (found && currentDist >= targetDist) break;
@@ -189,7 +186,12 @@ export function findJoinPaths(
     return results.map((r) => bfsResultToJoinPath(r));
   }
 
-  // 3+ tables: Steiner tree approximation
+  // 3+ tables: Steiner tree approximation (greedy).
+  // Known limitation: only returns a single tree. In schemas where multiple
+  // valid spanning trees of equal cost exist, the user gets whichever tree the
+  // greedy heuristic finds first — no disambiguation is offered. This is an
+  // acceptable trade-off for v1; multi-tree enumeration for 3+ tables is
+  // combinatorially expensive and rarely needed in practice.
   // Start from first selected table, iteratively BFS to nearest unconnected
   const connected = new Set<string>([selectedKeys[0]]);
   const treeKeys: string[] = [selectedKeys[0]];

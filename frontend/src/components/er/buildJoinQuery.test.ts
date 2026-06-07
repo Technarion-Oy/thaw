@@ -131,7 +131,7 @@ describe("buildJoinSQL", () => {
 
   it("includes LIMIT 1000 by default", () => {
     const sql = buildJoinSQL(makeState());
-    expect(sql).toContain("LIMIT 1000");
+    expect(sql).toContain("LIMIT 1000;");
   });
 
   it("handles cross-schema references", () => {

@@ -169,4 +169,45 @@ describe("buildJoinState", () => {
     const state = buildJoinState(paths[0], [tbl("S", "A"), tbl("S", "B")], "MY_DB");
     expect(state.selectedColumns.size).toBe(0);
   });
+
+  it("populates fkPairs that match the edge FK columns", () => {
+    const fks = [
+      fk("S", "ORDERS", "USER_ID", "S", "USERS", "ID"),
+    ];
+    const paths = findJoinPaths(
+      [tbl("S", "ORDERS"), tbl("S", "USERS")],
+      fks,
+    );
+    const state = buildJoinState(
+      paths[0],
+      [tbl("S", "ORDERS"), tbl("S", "USERS")],
+      "MY_DB",
+    );
+    expect(state.joins).toHaveLength(1);
+    expect(state.joins[0].fkPairs).toHaveLength(1);
+    expect(state.joins[0].fkPairs[0].from.col).toBe("USER_ID");
+    expect(state.joins[0].fkPairs[0].to.col).toBe("ID");
+  });
+
+  it("populates fkPairs for composite FKs from a multi-edge path", () => {
+    // Construct a path with two edges between the same table pair directly,
+    // simulating a composite FK. (findJoinPaths treats separate FK edges as
+    // disambiguation candidates, so we test buildJoinState in isolation.)
+    const path = {
+      tables: [tbl("S", "DETAILS"), tbl("S", "ORDERS")],
+      edges: [
+        { from: { schema: "S", table: "DETAILS", col: "ORDER_ID" }, to: { schema: "S", table: "ORDERS", col: "ID" } },
+        { from: { schema: "S", table: "DETAILS", col: "REGION" }, to: { schema: "S", table: "ORDERS", col: "REGION" } },
+      ],
+    };
+    const state = buildJoinState(
+      path,
+      [tbl("S", "DETAILS"), tbl("S", "ORDERS")],
+      "MY_DB",
+    );
+    expect(state.joins).toHaveLength(1);
+    expect(state.joins[0].fkPairs).toHaveLength(2);
+    const cols = state.joins[0].fkPairs.map((p) => p.from.col).sort();
+    expect(cols).toEqual(["ORDER_ID", "REGION"]);
+  });
 });
