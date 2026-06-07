@@ -119,6 +119,9 @@ func mergeAITables(live snowflake.ERDiagramData, aiTables []erDesignerTableIn) s
 	mergedTables = append(mergedTables, aiERTables...)
 
 	// Build merged FKs: keep FKs from non-replaced live tables, add AI FKs.
+	// Note: FKs pointing TO replaced tables are intentionally preserved — if the
+	// AI's replacement removes the referenced column, the FK becomes dangling but
+	// the user can fix it in the designer (the "AI scaffolds, human refines" intent).
 	var mergedFKs []snowflake.ERForeignKey
 	for _, fk := range live.FKs {
 		key := strings.ToUpper(fk.FromSchema) + "." + strings.ToUpper(fk.FromTable)
@@ -152,6 +155,16 @@ func registerERDesignerTools(srv *mcpsdk.Server, client *snowflake.Client, emit 
 		if in.Database == "" {
 			return nil, nil, fmt.Errorf("database is required")
 		}
+		if client == nil {
+			return nil, nil, fmt.Errorf("no active Snowflake connection")
+		}
+
+		// Validate AI table inputs before fetching live data.
+		for _, t := range in.Tables {
+			if strings.TrimSpace(t.Schema) == "" || strings.TrimSpace(t.Name) == "" {
+				return nil, nil, fmt.Errorf("each table must have a non-empty schema and name")
+			}
+		}
 
 		// Fetch live ER data.
 		live, err := client.GetERDiagramData(ctx, in.Database)
@@ -184,19 +197,18 @@ func registerERDesignerTools(srv *mcpsdk.Server, client *snowflake.Client, emit 
 			return textResult("Failed to open ER designer: internal error"), nil, nil
 		}
 
-		liveCount := len(live.Tables)
-		aiCount := len(in.Tables)
 		mergedCount := len(merged.Tables)
+		aiCount := len(in.Tables)
 		if aiCount > 0 {
 			return textResult(fmt.Sprintf(
-				"ER designer opened with %d table(s) (%d from live schema, %d AI-generated). "+
+				"ER designer opened with %d table(s) (%d from AI). "+
 					"The user can now review and refine the model visually.",
-				mergedCount, liveCount, aiCount,
+				mergedCount, aiCount,
 			)), nil, nil
 		}
 		return textResult(fmt.Sprintf(
 			"ER designer opened with %d live table(s). The user can now edit the model visually.",
-			liveCount,
+			mergedCount,
 		)), nil, nil
 	})
 }

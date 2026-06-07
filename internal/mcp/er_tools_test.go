@@ -11,10 +11,36 @@
 package mcp
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"thaw/internal/snowflake"
 )
+
+// newTestSessionWithEmit creates a test MCP server+client session with a
+// non-nil emit function so emit-gated tools (like open_er_designer) are
+// registered. The client is nil so handler calls that need Snowflake will error.
+func newTestSessionWithEmit(t *testing.T) *mcpsdk.ClientSession {
+	t.Helper()
+	emit := func(string, interface{}) {}
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, emit, nil, nil)
+	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
+	httpSrv := httptest.NewServer(handler)
+	t.Cleanup(httpSrv.Close)
+
+	ctx := context.Background()
+	c := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test", Version: "v1"}, nil)
+	cs, err := c.Connect(ctx, &mcpsdk.SSEClientTransport{Endpoint: httpSrv.URL}, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { _ = cs.Close() })
+	return cs
+}
 
 // TestMergeAITablesEmpty verifies that merging with no AI tables returns the
 // live data unchanged.
@@ -260,6 +286,83 @@ func TestMergeAITablesNullability(t *testing.T) {
 	}
 	if cols[2].Nullable != "YES" {
 		t.Errorf("nullable column should be YES, got Nullable=%q", cols[2].Nullable)
+	}
+}
+
+// TestOpenERDesignerNilClient verifies the tool returns an error when no
+// Snowflake client is available.
+func TestOpenERDesignerNilClient(t *testing.T) {
+	cs := newTestSessionWithEmit(t)
+	ctx := context.Background()
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "open_er_designer",
+		Arguments: openERDesignerInput{Database: "DB"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned Go error: %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for nil client")
+	}
+}
+
+// TestOpenERDesignerEmptyDatabase verifies the tool returns an error when
+// database is empty.
+func TestOpenERDesignerEmptyDatabase(t *testing.T) {
+	cs := newTestSessionWithEmit(t)
+	ctx := context.Background()
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "open_er_designer",
+		Arguments: openERDesignerInput{Database: ""},
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned Go error: %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for empty database")
+	}
+}
+
+// TestOpenERDesignerEmptyTableSchemaName verifies validation rejects tables
+// with empty schema or name.
+func TestOpenERDesignerEmptyTableSchemaName(t *testing.T) {
+	cs := newTestSessionWithEmit(t)
+	ctx := context.Background()
+
+	// Empty schema.
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "open_er_designer",
+		Arguments: openERDesignerInput{
+			Database: "DB",
+			Tables: []erDesignerTableIn{
+				{Schema: "", Name: "T", Columns: []erDesignerColumnIn{{Name: "ID", DataType: "INT"}}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned Go error: %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for empty schema")
+	}
+
+	// Empty name.
+	res, err = cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "open_er_designer",
+		Arguments: openERDesignerInput{
+			Database: "DB",
+			Tables: []erDesignerTableIn{
+				{Schema: "PUBLIC", Name: "", Columns: []erDesignerColumnIn{{Name: "ID", DataType: "INT"}}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned Go error: %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for empty name")
 	}
 }
 
