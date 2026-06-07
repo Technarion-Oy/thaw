@@ -19,7 +19,7 @@ import (
 
 // reUnquotedIdent matches a Snowflake bare (unquoted) identifier: starts with
 // a letter or underscore, followed by letters, digits, underscores, or dollar
-// signs. The pattern is case-insensitive because Snowflake normalises unquoted
+// signs. The pattern is case-insensitive because Snowflake normalizes unquoted
 // identifiers to uppercase regardless of how they were written.
 var reUnquotedIdent = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_$]*$`)
 

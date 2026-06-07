@@ -5,6 +5,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { Button, Select, Tag, Collapse, Checkbox } from "antd";
 import { CloseOutlined, CodeOutlined } from "@ant-design/icons";
 import { BuildJoinSQL } from "../../../wailsjs/go/app/App";
+import type { erdesigner } from "../../../wailsjs/go/models";
 import type { JoinQueryState, JoinEntry, JoinPath } from "./erTypes";
 
 /** Canonical key for a table: "SCHEMA.TABLE" (trimmed, case-preserved). */
@@ -131,7 +132,7 @@ export default function JoinQueryPanel({
 }: JoinQueryPanelProps) {
   const [sql, setSql] = useState("");
   useEffect(() => {
-    BuildJoinSQL(state as never).then(setSql);
+    BuildJoinSQL(state as unknown as erdesigner.JoinQueryState).then(setSql).catch(() => setSql("-- error generating SQL"));
   }, [state]);
 
   const updateJoinType = useCallback(

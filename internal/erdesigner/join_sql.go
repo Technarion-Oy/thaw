@@ -12,7 +12,6 @@ package erdesigner
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	"thaw/internal/snowflake"
@@ -48,7 +47,7 @@ func BuildJoinSQL(state JoinQueryState) string {
 			selectParts = append(selectParts, fmt.Sprintf("  %s.*", alias))
 		} else {
 			for _, col := range cols {
-				selectParts = append(selectParts, fmt.Sprintf("  %s.%s", alias, col))
+				selectParts = append(selectParts, fmt.Sprintf("  %s.%s", alias, snowflake.QuoteIdent(col)))
 			}
 		}
 	}
@@ -73,17 +72,31 @@ func BuildJoinSQL(state JoinQueryState) string {
 			joinKw = "FULL OUTER JOIN"
 		}
 
-		// Replace SCHEMA.TABLE.COL with alias.COL in the ON condition.
-		aliasedCondition := j.OnCondition
-		for tblKey, tblAlias := range aliasMap {
-			schema, table, ok := strings.Cut(tblKey, ".")
-			if !ok {
-				continue
+		// Build aliased ON condition from structured FK pairs when available,
+		// which also ensures column identifiers are properly quoted.
+		var aliasedCondition string
+		if len(j.FKPairs) > 0 {
+			var parts []string
+			for _, pair := range j.FKPairs {
+				fromAlias := aliasMap[snowflake.TableKey(pair.From.Schema, pair.From.Table)]
+				toAlias := aliasMap[snowflake.TableKey(pair.To.Schema, pair.To.Table)]
+				parts = append(parts, fmt.Sprintf("%s.%s = %s.%s",
+					fromAlias, snowflake.QuoteIdent(pair.From.Col),
+					toAlias, snowflake.QuoteIdent(pair.To.Col)))
 			}
-			pattern := regexp.MustCompile(
-				`(?i)` + regexp.QuoteMeta(schema) + `\.` + regexp.QuoteMeta(table) + `\.`,
-			)
-			aliasedCondition = pattern.ReplaceAllString(aliasedCondition, tblAlias+".")
+			aliasedCondition = strings.Join(parts, " AND ")
+		} else {
+			// Fallback: replace SCHEMA.TABLE. prefixes with aliases in the
+			// pre-formatted OnCondition string.
+			aliasedCondition = j.OnCondition
+			for tblKey, tblAlias := range aliasMap {
+				schema, table, ok := strings.Cut(tblKey, ".")
+				if !ok {
+					continue
+				}
+				aliasedCondition = strings.ReplaceAll(aliasedCondition,
+					schema+"."+table+".", tblAlias+".")
+			}
 		}
 
 		joinLines = append(joinLines, fmt.Sprintf("%s %s %s ON %s",

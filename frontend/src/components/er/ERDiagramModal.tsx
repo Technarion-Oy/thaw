@@ -6,7 +6,7 @@ import { Modal, Button, Checkbox, message } from "antd";
 import { CopyOutlined, EditOutlined } from "@ant-design/icons";
 import { ListSchemas, FindJoinPaths, BuildJoinState } from "../../../wailsjs/go/app/App";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type { snowflake, erdesigner } from "../../../wailsjs/go/models";
 import type { JoinQueryState, JoinPath, DesignerTable } from "./erTypes";
 import { buildMermaid } from "./buildMermaid";
 import ERDesigner from "./ERDesigner";
@@ -115,25 +115,38 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
 
       if (selected.length < 2) return;
 
-      const paths = await FindJoinPaths(selected, data.fks ?? []) as unknown as JoinPath[];
-      if (paths.length === 0) {
-        void message.warning("Selected tables are not connected by foreign keys");
-        return;
-      }
+      try {
+        // Wails IPC accepts plain objects (JSON-serialized) but the generated
+        // .d.ts declares class types with extra methods — cast at the boundary.
+        const paths = await FindJoinPaths(
+          selected as unknown as erdesigner.TableRef[],
+          data.fks ?? [],
+        ) as JoinPath[];
+        if (paths.length === 0) {
+          void message.warning("Selected tables are not connected by foreign keys");
+          return;
+        }
 
-      resolvedTablesRef.current = selected;
+        resolvedTablesRef.current = selected;
 
-      if (paths.length === 1) {
-        // Single path — open panel directly
-        const state = await BuildJoinState(paths[0] as never, selected, database) as unknown as JoinQueryState;
-        setJoinState(state);
-        setJoinPaths(null);
-        setJoinPanelOpen(true);
-      } else {
-        // Multiple paths — show disambiguation
-        setJoinPaths(paths);
-        setJoinState(null);
-        setJoinPanelOpen(true);
+        if (paths.length === 1) {
+          // Single path — open panel directly
+          const state = await BuildJoinState(
+            paths[0] as unknown as erdesigner.JoinPath,
+            selected as unknown as erdesigner.TableRef[],
+            database,
+          ) as JoinQueryState;
+          setJoinState(state);
+          setJoinPaths(null);
+          setJoinPanelOpen(true);
+        } else {
+          // Multiple paths — show disambiguation
+          setJoinPaths(paths);
+          setJoinState(null);
+          setJoinPanelOpen(true);
+        }
+      } catch {
+        void message.error("Failed to compute join paths");
       }
     },
     [data.fks, tableIdToSchemaName, database],
@@ -142,9 +155,17 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
   const handleDisambiguationSelect = useCallback(
     async (index: number) => {
       if (!joinPaths) return;
-      const state = await BuildJoinState(joinPaths[index] as never, resolvedTablesRef.current, database) as unknown as JoinQueryState;
-      setJoinState(state);
-      setJoinPaths(null);
+      try {
+        const state = await BuildJoinState(
+          joinPaths[index] as unknown as erdesigner.JoinPath,
+          resolvedTablesRef.current as unknown as erdesigner.TableRef[],
+          database,
+        ) as JoinQueryState;
+        setJoinState(state);
+        setJoinPaths(null);
+      } catch {
+        void message.error("Failed to build join state");
+      }
     },
     [joinPaths, database],
   );
@@ -205,13 +226,11 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
     const ids = new Set<string>();
     for (const j of joinState.joins) {
       if (!j.isIntermediate) continue;
-      const t = designerTables.find(
-        (dt) => dt.schema === j.table.schema && dt.name === j.table.name,
-      );
+      const t = designerTablesByKey.get(`${j.table.schema}.${j.table.name}`);
       if (t) ids.add(t.id);
     }
     return ids.size > 0 ? ids : undefined;
-  }, [joinPanelOpen, joinState, designerTables]);
+  }, [joinPanelOpen, joinState, designerTablesByKey]);
 
   return (
     <>

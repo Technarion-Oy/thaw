@@ -199,12 +199,8 @@ func bfsAllShortest(adj map[string][]adjEdge, start, end string, maxPaths int) [
 
 // parseKey splits a table key "SCHEMA.TABLE" back into schema + name.
 func parseKey(key string) TableRef {
-	for i := 0; i < len(key); i++ {
-		if key[i] == '.' {
-			return TableRef{Schema: key[:i], Name: key[i+1:]}
-		}
-	}
-	return TableRef{Name: key}
+	schema, name, _ := strings.Cut(key, ".")
+	return TableRef{Schema: schema, Name: name}
 }
 
 // bfsResultToJoinPath converts a bfsResult to a JoinPath.

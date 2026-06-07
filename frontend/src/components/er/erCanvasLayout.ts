@@ -206,7 +206,7 @@ export interface AITableIn {
 
 /**
  * Merge AI-generated tables into the current designer state.
- * - Matched by uppercase SCHEMA.NAME (same logic as backend mergeAITables).
+ * - Matched by SCHEMA.NAME (same logic as backend mergeAITables).
  * - Replaced tables preserve their UUID id (canvas positions survive);
  *   columns get fresh UUIDs.
  * - New tables are appended with fresh UUIDs.
