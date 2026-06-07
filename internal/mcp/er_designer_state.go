@@ -74,13 +74,18 @@ func (s *ERDesignerStateStore) Get() *ERDesignerState {
 	if s.state == nil {
 		return nil
 	}
-	cp := *s.state
-	cp.Tables = make([]ERDesignerTableOut, len(s.state.Tables))
+	tables := make([]ERDesignerTableOut, len(s.state.Tables))
 	for i, t := range s.state.Tables {
-		cp.Tables[i] = t
-		cp.Tables[i].Columns = append([]ERDesignerColumnOut(nil), t.Columns...)
+		tables[i] = ERDesignerTableOut{
+			Schema:  t.Schema,
+			Name:    t.Name,
+			Columns: append([]ERDesignerColumnOut(nil), t.Columns...),
+		}
 	}
-	return &cp
+	return &ERDesignerState{
+		Database: s.state.Database,
+		Tables:   tables,
+	}
 }
 
 // IsOpen returns true when the designer is currently open (state is set).

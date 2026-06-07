@@ -466,21 +466,20 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
   }, [database]);
 
   // Push initial state on mount, clear on unmount.
-  // Subsequent changes are debounced (300ms) to avoid flooding IPC.
-  const mountedRef = useRef(false);
   useEffect(() => {
-    if (!mountedRef.current) {
-      mountedRef.current = true;
-      pushState(tablesRef.current);
-      return;
-    }
+    pushState(tablesRef.current);
+    return () => { ClearERDesignerState().catch(() => {}); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- mount/unmount only
+  }, []);
+
+  // Debounced push on subsequent tables changes (300ms).
+  const prevTablesRef = useRef(tables);
+  useEffect(() => {
+    if (prevTablesRef.current === tables) return;
+    prevTablesRef.current = tables;
     const timer = setTimeout(() => pushState(tables), 300);
     return () => clearTimeout(timer);
   }, [tables, pushState]);
-
-  useEffect(() => {
-    return () => { ClearERDesignerState().catch(() => {}); };
-  }, []);
 
   // ── Listen for MCP modify_er_designer events ─────────────────────────────
 

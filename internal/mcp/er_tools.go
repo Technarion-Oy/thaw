@@ -268,6 +268,9 @@ func registerERDesignerStateTools(srv *mcpsdk.Server, emit func(string, interfac
 					if strings.TrimSpace(c.Name) == "" || strings.TrimSpace(c.DataType) == "" {
 						return nil, nil, fmt.Errorf("each column in %s.%s must have a non-empty name and dataType", t.Schema, t.Name)
 					}
+					// Simple 3-part split check. Quoted identifiers containing
+					// dots (e.g. PUBLIC."MY.TABLE".COL) are not supported —
+					// the designer uses unquoted uppercase identifiers.
 					if c.FKRef != "" && len(strings.Split(c.FKRef, ".")) != 3 {
 						return nil, nil, fmt.Errorf("fkRef %q in %s.%s.%s must be in SCHEMA.TABLE.COLUMN format", c.FKRef, t.Schema, t.Name, c.Name)
 					}
@@ -288,6 +291,9 @@ func registerERDesignerStateTools(srv *mcpsdk.Server, emit func(string, interfac
 						emitFailed = true
 					}
 				}()
+				// Type conversion — works because ModifyERDesignerPayload and
+				// modifyERDesignerInput have identical fields. If either type
+				// gains a field, the compiler will catch the mismatch.
 				emit("mcp:modify-er-designer", ModifyERDesignerPayload(in))
 			}()
 			if emitFailed {
