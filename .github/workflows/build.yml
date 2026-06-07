@@ -16,7 +16,7 @@ jobs:
           - os: macos-latest   # arm64 (M-series runner)
             platform: darwin
             arch: arm64
-          - os: macos-13       # last Intel runner
+          - os: macos-15-large  # Intel (x86_64) runner
             platform: darwin
             arch: amd64
           - os: windows-latest
