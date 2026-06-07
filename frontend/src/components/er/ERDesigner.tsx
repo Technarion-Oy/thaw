@@ -578,6 +578,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
         columns: source.columns.map((c) => ({
           ...c,
           id: crypto.randomUUID(),
+          fkRef: "", // Clear FK refs — the copy is a fresh table
         })),
       };
       setTables((prev) => [...prev, newTable]);

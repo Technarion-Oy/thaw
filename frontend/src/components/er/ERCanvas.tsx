@@ -342,9 +342,10 @@ function ERCanvasInner({
   // Uses lastSelectionRef to detect whether this update was already propagated
   // (by handleSelectionChange) and skip the redundant setNodes call.
   useEffect(() => {
-    const incoming = selectedTableIds ?? [];
+    const incoming = [...(selectedTableIds ?? [])].sort();
     const last = lastSelectionRef.current;
-    // Shallow equality — skip if selection hasn't actually changed
+    // Shallow equality — skip if selection hasn't actually changed.
+    // Both sides are sorted so order differences don't cause spurious updates.
     if (
       incoming.length === last.length &&
       incoming.every((id, i) => id === last[i])
@@ -434,6 +435,7 @@ function ERCanvasInner({
     const tableById = new Map(tablesRef.current.map((t) => [t.id, t]));
     const laid = applyERLayout(currentNodes, currentEdges);
     setNodes(laid);
+    requestAnimationFrame(() => fitView({ padding: 0.15 }));
     // Merge new positions with saved positions for filtered-out schemas
     const positions = loadERLayout(database) ?? {};
     for (const n of laid) {
@@ -481,8 +483,9 @@ function ERCanvasInner({
 
     setNodes(laid);
     setEdges(newEdges);
+    requestAnimationFrame(() => fitView({ padding: 0.15 }));
     initialLayoutDone.current = true;
-  }, [database, filteredTables, filteredTableById, mode, setNodes, setEdges]);
+  }, [database, filteredTables, filteredTableById, mode, setNodes, setEdges, fitView]);
 
   // Close the context menu without affecting selection — used by menu item
   // actions so the action's own selection update isn't overwritten.
