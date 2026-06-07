@@ -94,6 +94,7 @@ import TaskHistoryModal from "../task/TaskHistoryModal";
 import TaskPropertiesModal from "../task/TaskPropertiesModal";
 import TaskStatusesModal from "../task/TaskStatusesModal";
 import ERDiagramModal from "../er/ERDiagramModal";
+import ERDesigner from "../er/ERDesigner";
 import ExportTableModal from "../export/ExportTableModal";
 import ImportTableModal from "../export/ImportTableModal";
 import PropertiesModal from "../common/PropertiesModal";
@@ -520,6 +521,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [renameQiic, setRenameQiic]   = useState(false);
   const [timeTravelModal, setTimeTravelModal] = useState<TimeTravelModal | null>(null);
   const [erModal, setErModal] = useState<{ database: string; data: snowflake.ERDiagramData } | null>(null);
+  const [mcpErDesigner, setMcpErDesigner] = useState<{ database: string; merged: snowflake.ERDiagramData; baseline: snowflake.ERDiagramData } | null>(null);
   const [propsModal, setPropsModal] = useState<{ title: string; rows: snowflake.PropertyPair[] | null; error: string | null; tableContext?: { db: string; schema: string; table: string } } | null>(null);
   const [exportModal, setExportModal] = useState<{ db: string; schema: string; table: string } | null>(null);
   const [importModal, setImportModal] = useState<{ db: string; schema: string; table: string } | null>(null);
@@ -567,6 +569,14 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   useEffect(() => {
     const off = EventsOn("mcp:open-task-graph", (payload: { database: string; schema: string; task: string }) => {
       setTaskGraphModal({ db: payload.database, schema: payload.schema, name: payload.task });
+    });
+    return () => off();
+  }, []);
+
+  // MCP open_er_designer — opens the ER designer pre-populated with AI-generated tables.
+  useEffect(() => {
+    const off = EventsOn("mcp:open-er-designer", (payload: { database: string; merged: snowflake.ERDiagramData; baseline: snowflake.ERDiagramData }) => {
+      setMcpErDesigner({ database: payload.database, merged: payload.merged, baseline: payload.baseline });
     });
     return () => off();
   }, []);
@@ -3853,6 +3863,20 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           data={erModal.data}
           onClose={() => setErModal(null)}
           onDesignerSuccess={() => refreshDatabaseByName(erModal.database)}
+        />
+      )}
+
+      {/* MCP ER Designer — opened by the open_er_designer MCP tool */}
+      {mcpErDesigner && (
+        <ERDesigner
+          database={mcpErDesigner.database}
+          initialData={mcpErDesigner.baseline}
+          mergedData={mcpErDesigner.merged}
+          onClose={() => setMcpErDesigner(null)}
+          onSuccess={() => {
+            refreshDatabaseByName(mcpErDesigner.database);
+            setMcpErDesigner(null);
+          }}
         />
       )}
 
