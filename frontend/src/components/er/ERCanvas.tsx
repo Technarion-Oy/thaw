@@ -72,8 +72,10 @@ function ERContextMenu({
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ top: ctxMenu.y, left: ctxMenu.x });
+  const [visible, setVisible] = useState(false);
 
-  // Measure the menu after first paint and clamp to viewport
+  // Measure the menu after first paint and clamp to viewport.
+  // Starts hidden to prevent a flash at the unclamped position.
   useLayoutEffect(() => {
     const el = menuRef.current;
     if (!el) return;
@@ -82,6 +84,7 @@ function ERContextMenu({
       top: Math.min(ctxMenu.y, window.innerHeight - rect.height - 8),
       left: Math.min(ctxMenu.x, window.innerWidth - rect.width - 8),
     });
+    setVisible(true);
   }, [ctxMenu.x, ctxMenu.y]);
 
   // Dismiss on Escape key
@@ -102,7 +105,7 @@ function ERContextMenu({
         style={{ position: "fixed", inset: 0, zIndex: 998 }}
         onClick={onClose}
       />
-      <div ref={menuRef} style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 999 }}>
+      <div ref={menuRef} style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 999, visibility: visible ? "visible" : "hidden" }}>
         <Menu
           style={{
             minWidth: 200,
@@ -367,6 +370,9 @@ function ERCanvasInner({
   // frame during box-select drags. Shallow-compares against the last known
   // selection to skip no-op updates.
   const selectionRafRef = useRef(0);
+  useEffect(() => {
+    return () => cancelAnimationFrame(selectionRafRef.current);
+  }, []);
   const handleSelectionChange = useCallback(
     ({ nodes: selectedNodes }: { nodes: Node[] }) => {
       cancelAnimationFrame(selectionRafRef.current);
@@ -548,13 +554,13 @@ function ERCanvasInner({
 
   return (
     <div style={{ flex: 1, width: "100%", height: "100%" }}>
+      {/* onEdgesChange intentionally omitted — edges are derived from fkRef (read-only) */}
       <ReactFlow
         nodes={nodes}
         edges={edges}
         onNodesChange={handleNodesChange}
-        onEdgesChange={undefined} /* edges are derived from fkRef — read-only */
         onConnect={mode === "edit" ? handleConnect : undefined}
-        onNodeClick={() => setCtxMenu(null)}
+        onNodeClick={closeContextMenu}
         onPaneClick={handlePaneClick}
         onNodeContextMenu={mode === "edit" ? handleNodeContextMenu : undefined}
         onSelectionChange={handleSelectionChange}

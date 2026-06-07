@@ -308,7 +308,12 @@ function generateDiffSQL(
           const nn = c.isPK || c.notNull ? " NOT NULL" : "";
           stmts.push(`${alter} ADD COLUMN ${q(c.name.trim())} ${c.dataType}${nn};`);
         } else {
-          // Existing column — check for type change
+          // Existing column — check for type change.
+          // normalizeDataType is applied to bc.dataType (raw from INFORMATION_SCHEMA)
+          // so it matches the form used by initFromERData when populating the designer.
+          // Alias types like INT, TEXT, DATETIME are valid Snowflake DDL types that
+          // pass through normalizeDataType as-is, so an unmodified designer column
+          // will always match its baseline.
           if (normalizeDataType(bc.dataType) !== c.dataType) {
             stmts.push(`${alter} ALTER COLUMN ${q(c.name.trim())} SET DATA TYPE ${c.dataType};`);
           }
@@ -584,6 +589,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
       setTables((prev) => [...prev, newTable]);
       setSelectedTableIds([newTable.id]);
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- tablesRef is a stable ref
     [],
   );
 
@@ -666,6 +672,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
         parentColId,
       });
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- tablesRef is a stable ref
     [],
   );
 
