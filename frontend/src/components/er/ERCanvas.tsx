@@ -453,6 +453,9 @@ function ERCanvasInner({
     const tableById = new Map(tablesRef.current.map((t) => [t.id, t]));
     const laid = applyERLayout(currentNodes, currentEdges);
     setNodes(laid);
+    // fitView via rAF: React commits the setNodes synchronously in most
+    // cases, and the rAF fires after the next paint — giving XYFlow time
+    // to measure the new node positions before fitting the viewport.
     requestAnimationFrame(() => fitView({ padding: 0.15 }));
     // Merge new positions with saved positions for filtered-out schemas
     const positions = loadERLayout(database) ?? {};
@@ -466,8 +469,6 @@ function ERCanvasInner({
   }, [database, setNodes, getNodes, getEdges, fitView]);
 
   const handleResetLayout = useCallback(() => {
-    initialLayoutDone.current = false;
-    // Force re-layout
     const { nodes: newNodes, edges: newEdges } = tablesToNodesAndEdges(
       filteredTables,
       mode,
@@ -521,6 +522,10 @@ function ERCanvasInner({
   // ── Context menu ─────────────────────────────────────────────────────────
   const [ctxMenu, setCtxMenu] = useState<CtxMenuState | null>(null);
 
+  // Note: selectedTableIds may lag by one rAF frame due to debounced
+  // handleSelectionChange. If a user Ctrl+clicks and immediately right-clicks,
+  // the FK "Add" option might show "select 2 tables" until the next frame.
+  // In practice the natural click delay makes this a non-issue.
   const handleNodeContextMenu = useCallback(
     (event: React.MouseEvent, node: Node) => {
       if (mode !== "edit") return;

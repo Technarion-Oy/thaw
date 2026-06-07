@@ -491,6 +491,24 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
     setSelectedTableIds((prev) => prev.filter((id) => id !== tableId));
   }, []);
 
+  const confirmRemoveTable = useCallback(
+    (tableId: string) => {
+      const table = tablesRef.current.find((t) => t.id === tableId);
+      const label = table
+        ? `${table.schema ? table.schema + "." : ""}${table.name || "(unnamed)"}`
+        : "this table";
+      modal.confirm({
+        title: "Delete table?",
+        content: `"${label}" and all its columns will be removed from the designer. This does not drop the table in Snowflake.`,
+        okText: "Delete",
+        okButtonProps: { danger: true },
+        onOk: () => removeTable(tableId),
+      });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- tablesRef is a stable ref, modal/removeTable are stable
+    [modal, removeTable],
+  );
+
   const updateTable = useCallback((tableId: string, patch: Partial<Pick<DesignerTable, "name" | "schema">>) => {
     setTables((prev) => prev.map((t) => (t.id === tableId ? { ...t, ...patch } : t)));
   }, []);
@@ -817,7 +835,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
                       size="small"
                       type="text"
                       icon={<DeleteOutlined style={{ color: "#f85149" }} />}
-                      onClick={(e) => { e.stopPropagation(); removeTable(t.id); }}
+                      onClick={(e) => { e.stopPropagation(); confirmRemoveTable(t.id); }}
                     />
                   </div>
                   <Input
@@ -970,7 +988,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
               onColumnRename={handleColumnRename}
               onColumnRemove={removeColumn}
               onDuplicateTable={handleDuplicateTable}
-              onDeleteTable={removeTable}
+              onDeleteTable={confirmRemoveTable}
               onAddFK={handleAddFK}
               onRemoveFKs={handleRemoveFKs}
             />
