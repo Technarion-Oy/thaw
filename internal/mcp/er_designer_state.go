@@ -66,8 +66,8 @@ func (s *ERDesignerStateStore) Clear() {
 	s.state = nil
 }
 
-// Get returns a deep copy of the current designer state. Returns nil
-// when the designer is not open.
+// Get returns a deep copy of the current designer state (including nested
+// column slices). Returns nil when the designer is not open.
 func (s *ERDesignerStateStore) Get() *ERDesignerState {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -75,7 +75,11 @@ func (s *ERDesignerStateStore) Get() *ERDesignerState {
 		return nil
 	}
 	cp := *s.state
-	cp.Tables = append([]ERDesignerTableOut(nil), s.state.Tables...)
+	cp.Tables = make([]ERDesignerTableOut, len(s.state.Tables))
+	for i, t := range s.state.Tables {
+		cp.Tables[i] = t
+		cp.Tables[i].Columns = append([]ERDesignerColumnOut(nil), t.Columns...)
+	}
 	return &cp
 }
 

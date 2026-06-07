@@ -225,16 +225,13 @@ export function mergeAITablesIntoDesigner(
     }
   }
 
-  // Track which current tables are replaced.
-  const replaced = new Set<string>();
-
-  // Convert AI tables.
-  const aiDesignerTables: DesignerTable[] = aiTables.map((at) => {
+  // Pre-convert AI tables into a lookup by key.
+  const aiByKey = new Map<string, DesignerTable>();
+  const newTables: DesignerTable[] = [];
+  for (const at of aiTables) {
     const key = tableKey(at.schema, at.name);
     const existing = currentMap.get(key);
-    if (existing) replaced.add(key);
-
-    return {
+    const dt: DesignerTable = {
       id: existing?.id ?? crypto.randomUUID(),
       schema: at.schema,
       name: at.name,
@@ -247,17 +244,20 @@ export function mergeAITablesIntoDesigner(
         fkRef: c.fkRef ?? "",
       })),
     };
-  });
-
-  // Build merged: untouched current tables, then AI tables.
-  const merged: DesignerTable[] = [];
-  for (const t of current) {
-    const key = t.schema && t.name.trim() ? tableKey(t.schema, t.name) : "";
-    if (!key || !replaced.has(key)) {
-      merged.push(t);
+    if (existing) {
+      aiByKey.set(key, dt);
+    } else {
+      newTables.push(dt);
     }
   }
-  merged.push(...aiDesignerTables);
+
+  // Build merged: replaced tables stay in their original position,
+  // untouched tables are preserved, new tables are appended.
+  const merged: DesignerTable[] = current.map((t) => {
+    const key = t.schema && t.name.trim() ? tableKey(t.schema, t.name) : "";
+    return (key ? aiByKey.get(key) : undefined) ?? t;
+  });
+  merged.push(...newTables);
   return merged;
 }
 

@@ -781,4 +781,40 @@ func TestModifyERDesignerColumnValidation(t *testing.T) {
 	if !res.IsError {
 		t.Error("expected IsError=true for empty column dataType")
 	}
+
+	// Malformed fkRef (not 3 parts).
+	res, err = cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "modify_er_designer",
+		Arguments: modifyERDesignerInput{
+			Tables: []erDesignerTableIn{
+				{Schema: "PUBLIC", Name: "T", Columns: []erDesignerColumnIn{
+					{Name: "ID", DataType: "INT", FKRef: "USERS.ID"},
+				}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned Go error: %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for malformed fkRef")
+	}
+
+	// Valid fkRef (3 parts) should pass validation.
+	res, err = cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "modify_er_designer",
+		Arguments: modifyERDesignerInput{
+			Tables: []erDesignerTableIn{
+				{Schema: "PUBLIC", Name: "T", Columns: []erDesignerColumnIn{
+					{Name: "ID", DataType: "INT", FKRef: "PUBLIC.USERS.ID"},
+				}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned Go error: %v", err)
+	}
+	if res.IsError {
+		t.Error("expected no error for valid 3-part fkRef")
+	}
 }

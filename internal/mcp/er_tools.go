@@ -268,6 +268,9 @@ func registerERDesignerStateTools(srv *mcpsdk.Server, emit func(string, interfac
 					if strings.TrimSpace(c.Name) == "" || strings.TrimSpace(c.DataType) == "" {
 						return nil, nil, fmt.Errorf("each column in %s.%s must have a non-empty name and dataType", t.Schema, t.Name)
 					}
+					if c.FKRef != "" && len(strings.Split(c.FKRef, ".")) != 3 {
+						return nil, nil, fmt.Errorf("fkRef %q in %s.%s.%s must be in SCHEMA.TABLE.COLUMN format", c.FKRef, t.Schema, t.Name, c.Name)
+					}
 				}
 			}
 			// Note: a TOCTOU window exists between IsOpen() and emit() — the
@@ -291,6 +294,10 @@ func registerERDesignerStateTools(srv *mcpsdk.Server, emit func(string, interfac
 				return textResult("Failed to modify ER designer: internal error"), nil, nil
 			}
 
+			// Note: the state store is eventually consistent — the frontend
+			// merges the event into React state and pushes back via IPC after
+			// a 300ms debounce. A get_er_designer_state call within that
+			// window returns pre-modification data.
 			return textResult(fmt.Sprintf(
 				"%d table(s) sent to the ER designer. The user can now review the changes visually.",
 				len(in.Tables),
