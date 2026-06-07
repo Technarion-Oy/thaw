@@ -241,7 +241,7 @@ export function mergeAITablesIntoDesigner(
       columns: at.columns.map((c) => ({
         id: crypto.randomUUID(),
         name: c.name,
-        dataType: c.dataType,
+        dataType: normalizeDataType(c.dataType),
         isPK: c.isPK ?? false,
         notNull: c.notNull ?? (c.isPK ?? false),
         fkRef: c.fkRef ?? "",

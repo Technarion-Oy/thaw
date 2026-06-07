@@ -727,3 +727,58 @@ func TestModifyERDesignerEmptySchemaName(t *testing.T) {
 		t.Error("expected IsError=true for empty name")
 	}
 }
+
+func TestModifyERDesignerColumnValidation(t *testing.T) {
+	erState := NewERDesignerStateStore()
+	erState.Set(&ERDesignerState{Database: "DB"})
+	cs := newTestSessionWithEmitAndState(t, erState)
+	ctx := context.Background()
+
+	// Zero columns.
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "modify_er_designer",
+		Arguments: modifyERDesignerInput{
+			Tables: []erDesignerTableIn{
+				{Schema: "PUBLIC", Name: "T", Columns: nil},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned Go error: %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for zero columns")
+	}
+
+	// Empty column name.
+	res, err = cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "modify_er_designer",
+		Arguments: modifyERDesignerInput{
+			Tables: []erDesignerTableIn{
+				{Schema: "PUBLIC", Name: "T", Columns: []erDesignerColumnIn{{Name: "", DataType: "INT"}}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned Go error: %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for empty column name")
+	}
+
+	// Empty column dataType.
+	res, err = cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "modify_er_designer",
+		Arguments: modifyERDesignerInput{
+			Tables: []erDesignerTableIn{
+				{Schema: "PUBLIC", Name: "T", Columns: []erDesignerColumnIn{{Name: "ID", DataType: ""}}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned Go error: %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for empty column dataType")
+	}
+}

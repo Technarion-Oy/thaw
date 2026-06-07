@@ -261,7 +261,18 @@ func registerERDesignerStateTools(srv *mcpsdk.Server, emit func(string, interfac
 				if strings.TrimSpace(t.Schema) == "" || strings.TrimSpace(t.Name) == "" {
 					return nil, nil, fmt.Errorf("each table must have a non-empty schema and name")
 				}
+				if len(t.Columns) == 0 {
+					return nil, nil, fmt.Errorf("table %s.%s must have at least one column", t.Schema, t.Name)
+				}
+				for _, c := range t.Columns {
+					if strings.TrimSpace(c.Name) == "" || strings.TrimSpace(c.DataType) == "" {
+						return nil, nil, fmt.Errorf("each column in %s.%s must have a non-empty name and dataType", t.Schema, t.Name)
+					}
+				}
 			}
+			// Note: a TOCTOU window exists between IsOpen() and emit() — the
+			// designer could close in between. This is accepted: the frontend
+			// listener is torn down on unmount so a stale event is harmless.
 			if !erState.IsOpen() {
 				return textResult("The ER designer is not currently open. Use open_er_designer to open it first."), nil, nil
 			}

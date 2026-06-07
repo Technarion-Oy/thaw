@@ -66,7 +66,7 @@ func (s *ERDesignerStateStore) Clear() {
 	s.state = nil
 }
 
-// Get returns a shallow copy of the current designer state. Returns nil
+// Get returns a deep copy of the current designer state. Returns nil
 // when the designer is not open.
 func (s *ERDesignerStateStore) Get() *ERDesignerState {
 	s.mu.RLock()
@@ -75,6 +75,7 @@ func (s *ERDesignerStateStore) Get() *ERDesignerState {
 		return nil
 	}
 	cp := *s.state
+	cp.Tables = append([]ERDesignerTableOut(nil), s.state.Tables...)
 	return &cp
 }
 
