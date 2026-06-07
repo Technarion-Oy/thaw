@@ -12,6 +12,7 @@ package erdesigner
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -275,8 +276,12 @@ func FindJoinPaths(selectedTables []TableRef, fks []snowflake.ERForeignKey) []Jo
 		var bestPath *bfsResult
 		var bestTarget string
 
-		for target := range remaining {
-			for source := range connected {
+		// Sort keys for deterministic iteration — same inputs always produce
+		// the same Steiner tree regardless of Go map ordering.
+		sortedRemaining := slices.Sorted(maps.Keys(remaining))
+		sortedConnected := slices.Sorted(maps.Keys(connected))
+		for _, target := range sortedRemaining {
+			for _, source := range sortedConnected {
 				paths := bfsAllShortest(adj, source, target, 1)
 				if len(paths) == 0 {
 					continue

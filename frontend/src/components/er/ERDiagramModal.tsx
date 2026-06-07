@@ -204,7 +204,7 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
     // Build a set of normalised FK pair keys from the structured data
     const usedFKPairs = new Set<string>();
     for (const j of joinState.joins) {
-      for (const pair of j.fkPairs) {
+      for (const pair of (j.fkPairs ?? [])) {
         const a = `${pair.from.schema}.${pair.from.table}.${pair.from.col}`;
         const b = `${pair.to.schema}.${pair.to.table}.${pair.to.col}`;
         const [lo, hi] = [a, b].sort();

@@ -17,7 +17,7 @@ const JOIN_TYPES: JoinEntry["joinType"][] = ["INNER", "LEFT", "RIGHT", "FULL OUT
 
 const SQL_KEYWORDS = new Set([
   "SELECT", "FROM", "INNER", "LEFT", "RIGHT", "FULL", "OUTER", "JOIN",
-  "ON", "AND", "OR", "AS", "WHERE", "ORDER", "BY", "GROUP", "HAVING",
+  "ON", "AND", "OR", "AS", "WHERE", "ORDER", "BY", "GROUP", "HAVING", "LIMIT",
 ]);
 
 /** SQL keyword highlighting — basic tokenizer for the preview. */
@@ -133,7 +133,11 @@ export default function JoinQueryPanel({
 }: JoinQueryPanelProps) {
   const [sql, setSql] = useState("");
   useEffect(() => {
-    buildJoinSQL(state).then(setSql).catch(() => setSql("-- error generating SQL"));
+    let cancelled = false;
+    buildJoinSQL(state)
+      .then((s) => { if (!cancelled) setSql(s); })
+      .catch(() => { if (!cancelled) setSql("-- error generating SQL"); });
+    return () => { cancelled = true; };
   }, [state]);
 
   const updateJoinType = useCallback(

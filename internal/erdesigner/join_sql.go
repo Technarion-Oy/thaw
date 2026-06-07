@@ -68,9 +68,6 @@ func BuildJoinSQL(state JoinQueryState) string {
 		alias := aliasMap[key]
 
 		joinKw := j.JoinType + " JOIN"
-		if j.JoinType == "FULL OUTER" {
-			joinKw = "FULL OUTER JOIN"
-		}
 
 		// Build aliased ON condition from structured FK pairs when available,
 		// which also ensures column identifiers are properly quoted.
