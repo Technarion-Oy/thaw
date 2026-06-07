@@ -1,12 +1,15 @@
 // Copyright (c) 2026 Technarion Oy. All rights reserved.
 // @thaw-domain: ER Designer
 
-import { useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Button, Select, Tag, Collapse, Checkbox } from "antd";
 import { CloseOutlined, CodeOutlined } from "@ant-design/icons";
+import { BuildJoinSQL } from "../../../wailsjs/go/app/App";
 import type { JoinQueryState, JoinEntry, JoinPath } from "./erTypes";
-import { tableKey } from "./erTypes";
-import { buildJoinSQL } from "./buildJoinQuery";
+
+/** Canonical key for a table: "SCHEMA.TABLE" (uppercase, trimmed). */
+const tableKey = (schema: string, name: string) =>
+  `${schema.toUpperCase()}.${name.trim().toUpperCase()}`;
 
 const JOIN_TYPES: JoinEntry["joinType"][] = ["INNER", "LEFT", "RIGHT", "FULL OUTER"];
 
@@ -126,7 +129,10 @@ export default function JoinQueryPanel({
   onOpenInEditor,
   onClose,
 }: JoinQueryPanelProps) {
-  const sql = useMemo(() => buildJoinSQL(state), [state]);
+  const [sql, setSql] = useState("");
+  useEffect(() => {
+    BuildJoinSQL(state as never).then(setSql);
+  }, [state]);
 
   const updateJoinType = useCallback(
     (index: number, joinType: JoinEntry["joinType"]) => {
@@ -138,14 +144,14 @@ export default function JoinQueryPanel({
   );
 
   const updateSelectedColumns = useCallback(
-    (tableKey: string, cols: string[]) => {
-      const newMap = new Map(state.selectedColumns);
+    (tblKey: string, cols: string[]) => {
+      const updated = { ...state.selectedColumns };
       if (cols.length === 0) {
-        newMap.delete(tableKey);
+        delete updated[tblKey];
       } else {
-        newMap.set(tableKey, cols);
+        updated[tblKey] = cols;
       }
-      onChange({ ...state, selectedColumns: newMap });
+      onChange({ ...state, selectedColumns: updated });
     },
     [state, onChange],
   );
@@ -165,7 +171,7 @@ export default function JoinQueryPanel({
       children: (
         <ColumnPicker
           columns={tableColumns.get(baseKey) ?? []}
-          selected={state.selectedColumns.get(baseKey) ?? []}
+          selected={state.selectedColumns[baseKey] ?? []}
           onChange={(cols) => updateSelectedColumns(baseKey, cols)}
         />
       ),
@@ -185,7 +191,7 @@ export default function JoinQueryPanel({
         children: (
           <ColumnPicker
             columns={tableColumns.get(jKey) ?? []}
-            selected={state.selectedColumns.get(jKey) ?? []}
+            selected={state.selectedColumns[jKey] ?? []}
             onChange={(cols) => updateSelectedColumns(jKey, cols)}
           />
         ),

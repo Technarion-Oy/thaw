@@ -14,6 +14,29 @@ import (
 	"testing"
 )
 
+func TestTableKey(t *testing.T) {
+	tests := []struct {
+		schema string
+		name   string
+		want   string
+	}{
+		{"PUBLIC", "USERS", "PUBLIC.USERS"},
+		{"public", "users", "PUBLIC.USERS"},
+		{"Public", "Orders", "PUBLIC.ORDERS"},
+		{" sales ", " orders ", "SALES.ORDERS"},
+		{"", "T", ".T"},
+		{"S", "", "S."},
+	}
+	for _, tc := range tests {
+		t.Run(tc.schema+"_"+tc.name, func(t *testing.T) {
+			got := TableKey(tc.schema, tc.name)
+			if got != tc.want {
+				t.Errorf("TableKey(%q, %q) = %q, want %q", tc.schema, tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestNeedsQuoting(t *testing.T) {
 	tests := []struct {
 		name string

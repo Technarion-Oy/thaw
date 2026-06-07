@@ -7,13 +7,16 @@ import type { snowflake } from "../../../wailsjs/go/models";
 import {
   type DesignerTable,
   SF_TYPES,
-  tableKey,
   ER_NODE_WIDTH,
   ER_NODE_HEADER_HEIGHT,
   ER_NODE_ROW_HEIGHT,
   ER_NODE_PADDING,
   ER_COL_LIMIT,
 } from "./erTypes";
+
+/** Canonical key for a table: "SCHEMA.TABLE" (uppercase, trimmed). Canvas-only helper. */
+const tableKey = (schema: string, name: string) =>
+  `${schema.toUpperCase()}.${name.trim().toUpperCase()}`;
 
 /** Fallback accent color when CSS variable is unavailable (SSR, tests, or empty value). */
 const ACCENT_FALLBACK = "#58a6ff";

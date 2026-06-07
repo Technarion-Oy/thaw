@@ -4,7 +4,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Modal, Button, Checkbox, message } from "antd";
 import { CopyOutlined, EditOutlined } from "@ant-design/icons";
-import { ListSchemas } from "../../../wailsjs/go/app/App";
+import { ListSchemas, FindJoinPaths, BuildJoinState } from "../../../wailsjs/go/app/App";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { snowflake } from "../../../wailsjs/go/models";
 import type { JoinQueryState, JoinPath, DesignerTable } from "./erTypes";
@@ -12,7 +12,6 @@ import { buildMermaid } from "./buildMermaid";
 import ERDesigner from "./ERDesigner";
 import ERCanvas from "./ERCanvas";
 import { initFromERData } from "./erCanvasLayout";
-import { findJoinPaths, buildJoinState } from "./joinPathfinder";
 import JoinQueryPanel, { JoinPathDisambiguation } from "./JoinQueryPanel";
 import { useQueryStore } from "../../store/queryStore";
 
@@ -109,14 +108,14 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
   // the new selection. This is intentional: live-updating would be disorienting
   // and the disambiguation flow doesn't support incremental changes.
   const handleBuildQuery = useCallback(
-    (tableIds: string[]) => {
+    async (tableIds: string[]) => {
       const selected = tableIds
         .map((id) => tableIdToSchemaName.get(id))
         .filter((t): t is { schema: string; name: string } => !!t);
 
       if (selected.length < 2) return;
 
-      const paths = findJoinPaths(selected, data.fks ?? []);
+      const paths = await FindJoinPaths(selected, data.fks ?? []) as unknown as JoinPath[];
       if (paths.length === 0) {
         void message.warning("Selected tables are not connected by foreign keys");
         return;
@@ -126,7 +125,7 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
 
       if (paths.length === 1) {
         // Single path — open panel directly
-        const state = buildJoinState(paths[0], selected, database);
+        const state = await BuildJoinState(paths[0] as never, selected, database) as unknown as JoinQueryState;
         setJoinState(state);
         setJoinPaths(null);
         setJoinPanelOpen(true);
@@ -141,9 +140,9 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
   );
 
   const handleDisambiguationSelect = useCallback(
-    (index: number) => {
+    async (index: number) => {
       if (!joinPaths) return;
-      const state = buildJoinState(joinPaths[index], resolvedTablesRef.current, database);
+      const state = await BuildJoinState(joinPaths[index] as never, resolvedTablesRef.current, database) as unknown as JoinQueryState;
       setJoinState(state);
       setJoinPaths(null);
     },

@@ -57,6 +57,14 @@ var snowflakeReservedKeywords = map[string]struct{}{
 	"WHEN": {}, "WHENEVER": {}, "WHERE": {}, "WITH": {},
 }
 
+// TableKey returns the canonical lookup key for a Snowflake table:
+// "SCHEMA.TABLE" with both parts uppercased and trimmed. This matches
+// Snowflake's default behaviour for unquoted identifiers.
+func TableKey(schema, name string) string {
+	return strings.ToUpper(strings.TrimSpace(schema)) + "." +
+		strings.ToUpper(strings.TrimSpace(name))
+}
+
 // NeedsQuoting reports whether the given Snowflake object name must be
 // double-quoted when used in a SQL statement. A name requires quoting when:
 //   - it contains characters outside [A-Za-z0-9_$] or does not start with

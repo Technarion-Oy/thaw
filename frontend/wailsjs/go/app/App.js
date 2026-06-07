@@ -122,6 +122,14 @@ export function BuildFunctionSelectStatement(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['BuildFunctionSelectStatement'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function BuildJoinSQL(arg1) {
+  return window['go']['app']['App']['BuildJoinSQL'](arg1);
+}
+
+export function BuildJoinState(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildJoinState'](arg1, arg2, arg3);
+}
+
 export function BuildModifyGitRepositorySql(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
   return window['go']['app']['App']['BuildModifyGitRepositorySql'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
 }
@@ -400,6 +408,10 @@ export function ExportTableData(arg1) {
 
 export function FetchNotebookContent(arg1, arg2, arg3) {
   return window['go']['app']['App']['FetchNotebookContent'](arg1, arg2, arg3);
+}
+
+export function FindJoinPaths(arg1, arg2) {
+  return window['go']['app']['App']['FindJoinPaths'](arg1, arg2);
 }
 
 export function GenerateKeyPair(arg1, arg2, arg3) {

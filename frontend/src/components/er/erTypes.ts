@@ -91,12 +91,9 @@ export function normalizeIdentifier(raw: string): string {
   return trimmed.toUpperCase();
 }
 
-/** Canonical key for a table: "SCHEMA.TABLE" (uppercase, unquoted identifiers). */
-export function tableKey(schema: string, name: string): string {
-  return `${schema.toUpperCase()}.${name.trim().toUpperCase()}`;
-}
-
 // ── Join Query Builder types ─────────────────────────────────────────────────
+// These mirror the Go types in internal/erdesigner/ and the Wails-generated
+// models. Keeping hand-written interfaces avoids coupling to generation timing.
 
 export interface FKPair {
   from: { schema: string; table: string; col: string };
@@ -116,7 +113,7 @@ export interface JoinQueryState {
   database: string;
   baseTable: { schema: string; name: string };
   joins: JoinEntry[];
-  selectedColumns: Map<string, string[]>; // "SCHEMA.TABLE" → column names (empty = *)
+  selectedColumns: Record<string, string[]>; // "SCHEMA.TABLE" → column names (empty = *)
 }
 
 export interface JoinPath {
