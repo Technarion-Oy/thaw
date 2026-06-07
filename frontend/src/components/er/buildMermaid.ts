@@ -51,7 +51,9 @@ export function buildMermaid(
     lines.push("  }");
   }
 
-  // FK relationships — deduplicate by table pair
+  // FK relationships — deduplicate multiple FK columns in the same direction
+  // into a single edge, but preserve both directions (A→B and B→A are distinct
+  // relationships that Mermaid can render separately).
   const validKeys = new Set(
     validTables.map((t) => `${t.schema.toUpperCase()}\x00${t.name.trim().toUpperCase()}`),
   );
@@ -67,8 +69,7 @@ export function buildMermaid(
       if (!validKeys.has(`${refSchema.toUpperCase()}\x00${refTable.trim().toUpperCase()}`)) continue;
       const fromId = entityId(t.schema, t.name.trim());
       const toId = entityId(refSchema, refTable.trim());
-      // Sort so bidirectional FKs between the same pair collapse into one line
-      const pairKey = [fromId, toId].sort().join("__");
+      const pairKey = `${fromId}__${toId}`;
       if (seen.has(pairKey)) continue;
       seen.add(pairKey);
       lines.push(`  ${fromId} }o--|| ${toId} : "FK"`);

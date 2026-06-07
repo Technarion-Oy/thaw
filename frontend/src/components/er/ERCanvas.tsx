@@ -87,13 +87,18 @@ function ERContextMenu({
     setVisible(true);
   }, [ctxMenu.x, ctxMenu.y]);
 
-  // Dismiss on Escape key
+  // Dismiss on Escape key or scroll (wheel on canvas causes visual disconnect)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
+    const handleWheel = () => onClose();
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("wheel", handleWheel, { passive: true });
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("wheel", handleWheel);
+    };
   }, [onClose]);
 
   const twoSelected = selectedNodeIds.length === 2 && selectedNodeIds.includes(ctxMenu.tableId);
@@ -403,7 +408,9 @@ function ERCanvasInner({
       );
       if (!hasPositionChange) return;
 
-      // Merge with existing saved positions so filtered-out schemas are preserved
+      // Merge with existing saved positions so filtered-out schemas are preserved.
+      // loadERLayout is called on each drop; the pendingData fast path in
+      // erLayoutStore avoids hitting localStorage between debounce flushes.
       const currentNodes = getNodes();
       const tableById = new Map(tablesRef.current.map((t) => [t.id, t]));
       const positions = loadERLayout(database) ?? {};

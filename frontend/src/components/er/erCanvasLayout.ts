@@ -170,6 +170,9 @@ export function normalizeDataType(dt: string): string {
 
   // SF_TYPES includes all canonical Snowflake types plus multi-word forms
   // like "DOUBLE PRECISION", so they're returned as-is (e.g. INT stays INT).
+  // Notably, TIMESTAMP_TZ passes through here — it is NOT aliased to
+  // TIMESTAMP_LTZ. These are distinct Snowflake types (TZ stores the UTC
+  // offset, LTZ converts to the session timezone). The old mapping was a bug.
   if (SF_TYPES.includes(base)) return base + params;
 
   // Only aliases NOT already in SF_TYPES need to be mapped here.
