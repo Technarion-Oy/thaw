@@ -157,6 +157,71 @@ func TestManagerPortAllocation(t *testing.T) {
 	}
 }
 
+// TestManagerPreferredToken verifies that passing a non-empty preferredToken to
+// Start causes that token to be used (retrievable via SessionToken) rather than
+// generating a new random one, and that an empty preferredToken still generates
+// a random token.
+func TestManagerPreferredToken(t *testing.T) {
+	m := NewManager(nil)
+
+	// Start a session with a preferred token. We use a nil client since the
+	// test operates in metadata mode (no Snowflake calls needed for start).
+	const wantToken = "my-persisted-token-abc123"
+	info, err := m.Start(context.Background(), "preferred", "acct/user", ExecutionModeMetadata, 0, nil, SessionConfig{}, wantToken)
+	if err != nil {
+		t.Fatalf("Start with preferredToken failed: %v", err)
+	}
+	defer func() { _ = m.Stop("preferred") }()
+
+	got, ok := m.SessionToken("preferred")
+	if !ok {
+		t.Fatal("SessionToken returned false for running session")
+	}
+	if got != wantToken {
+		t.Errorf("SessionToken = %q, want %q", got, wantToken)
+	}
+
+	// The token should also be embedded in the authenticated URL.
+	url, ok := m.AuthenticatedURL("preferred")
+	if !ok {
+		t.Fatal("AuthenticatedURL returned false for running session")
+	}
+	if !strings.Contains(url, wantToken) {
+		t.Errorf("AuthenticatedURL = %q, does not contain token %q", url, wantToken)
+	}
+
+	// Verify port was assigned.
+	if info.Port == 0 {
+		t.Error("expected auto-assigned port, got 0")
+	}
+
+	// Start another session without a preferred token — should get a random one.
+	_, err = m.Start(context.Background(), "random", "acct/user", ExecutionModeMetadata, 0, nil, SessionConfig{}, "")
+	if err != nil {
+		t.Fatalf("Start without preferredToken failed: %v", err)
+	}
+	defer func() { _ = m.Stop("random") }()
+
+	randomToken, ok := m.SessionToken("random")
+	if !ok {
+		t.Fatal("SessionToken returned false for 'random' session")
+	}
+	if randomToken == "" {
+		t.Error("expected non-empty random token")
+	}
+	if randomToken == wantToken {
+		t.Error("random token should differ from the preferred token")
+	}
+}
+
+// TestSessionTokenMissing verifies SessionToken returns false for non-existent sessions.
+func TestSessionTokenMissing(t *testing.T) {
+	m := NewManager(nil)
+	if _, ok := m.SessionToken("nonexistent"); ok {
+		t.Error("expected false for non-existent session")
+	}
+}
+
 // TestLoopbackGuard verifies the SSE handler rejects non-loopback Host headers
 // and cross-origin browser requests while allowing loopback traffic.
 func TestLoopbackGuard(t *testing.T) {

@@ -121,7 +121,9 @@ func (m *Manager) SetNotebookBackend(nb NotebookBackend) {
 // and closes it when stopped. cfg controls optional role/warehouse pinning
 // applied at session startup. The context is used for the initial session
 // setup (USE ROLE, USE WAREHOUSE, etc.) and can be canceled by the caller.
-func (m *Manager) Start(ctx context.Context, label, connLabel, mode string, port int, client *snowflake.Client, cfg SessionConfig) (SessionInfo, error) {
+// If preferredToken is non-empty it is used as the session auth token instead
+// of generating a new random one; this allows persisting tokens across restarts.
+func (m *Manager) Start(ctx context.Context, label, connLabel, mode string, port int, client *snowflake.Client, cfg SessionConfig, preferredToken string) (SessionInfo, error) {
 	if label == "" {
 		return SessionInfo{}, fmt.Errorf("mcp: session label is required")
 	}
@@ -159,10 +161,14 @@ func (m *Manager) Start(ctx context.Context, label, connLabel, mode string, port
 	}
 	assigned := ln.Addr().(*net.TCPAddr).Port
 
-	token, err := newSessionToken()
-	if err != nil {
-		_ = ln.Close()
-		return SessionInfo{}, fmt.Errorf("mcp: failed to generate session token: %w", err)
+	token := preferredToken
+	if token == "" {
+		var err error
+		token, err = newSessionToken()
+		if err != nil {
+			_ = ln.Close()
+			return SessionInfo{}, fmt.Errorf("mcp: failed to generate session token: %w", err)
+		}
 	}
 
 	s := newSession(m, label, connLabel, mode, token, assigned, client, ln, cfg, m.editorCtx)
@@ -229,6 +235,20 @@ func (m *Manager) AuthenticatedURL(label string) (string, bool) {
 		return "", false
 	}
 	return fmt.Sprintf("http://127.0.0.1:%d/sse?token=%s", s.port, s.token), true
+}
+
+// SessionToken returns the raw auth token for the named running session. This
+// is used by the app layer to persist the token to config after a successful
+// start. Returns ("", false) if no session with that label exists.
+func (m *Manager) SessionToken(label string) (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.sessions[label]
+	if !ok {
+		return "", false
+	}
+	return s.token, true
 }
 
 // UpdateMode changes the execution mode of a running session, rebuilding its
