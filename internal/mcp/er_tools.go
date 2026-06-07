@@ -274,9 +274,7 @@ func registerERDesignerStateTools(srv *mcpsdk.Server, emit func(string, interfac
 						emitFailed = true
 					}
 				}()
-				emit("mcp:modify-er-designer", ModifyERDesignerPayload{
-					Tables: in.Tables,
-				})
+				emit("mcp:modify-er-designer", ModifyERDesignerPayload(in))
 			}()
 			if emitFailed {
 				return textResult("Failed to modify ER designer: internal error"), nil, nil

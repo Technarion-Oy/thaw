@@ -176,7 +176,7 @@ func (c *Client) GetSchemaCrossDeps(ctx context.Context, db, schema string) ([]S
 
 	rows, err := c.db.QueryContext(ctx, q)
 	if err != nil {
-		return nil, nil //nolint:nilerr — inaccessible schema is non-fatal
+		return nil, nil //nolint:nilerr // inaccessible schema is non-fatal
 	}
 	defer rows.Close() //nolint:errcheck
 
