@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Technarion Oy. All rights reserved.
 // @thaw-domain: ER Designer
 
-import type { JoinPath, JoinQueryState, JoinEntry } from "./erTypes";
+import type { JoinPath, JoinQueryState, JoinEntry, FKPair } from "./erTypes";
 
 /** FK edge in the adjacency graph. */
 interface FKEdge {
@@ -285,6 +285,7 @@ export function buildJoinState(
 
     // Find all edges connecting this table to any already-visited table
     const conditions: string[] = [];
+    const fkPairs: FKPair[] = [];
     for (const edge of path.edges) {
       const fromKey = tableKey(edge.from.schema, edge.from.table);
       const toKey = tableKey(edge.to.schema, edge.to.table);
@@ -296,6 +297,7 @@ export function buildJoinState(
         conditions.push(
           `${edge.from.schema}.${edge.from.table}.${edge.from.col} = ${edge.to.schema}.${edge.to.table}.${edge.to.col}`,
         );
+        fkPairs.push({ from: { ...edge.from }, to: { ...edge.to } });
       }
     }
 
@@ -305,6 +307,7 @@ export function buildJoinState(
       table: { schema: table.schema, name: table.name },
       joinType: "INNER",
       onCondition: conditions.join(" AND "),
+      fkPairs,
       isIntermediate: !selectedSet.has(tKey),
     });
   }

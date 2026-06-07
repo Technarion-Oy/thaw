@@ -78,8 +78,16 @@ export function JoinPathDisambiguation({ paths, onSelect, onCancel }: Disambigua
         {paths.map((path, i) => (
           <div
             key={i}
+            role="button"
+            tabIndex={0}
             className="er-join-path-option"
             onClick={() => onSelect(i)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onSelect(i);
+              }
+            }}
             style={{
               padding: "8px 12px",
               borderRadius: 6,

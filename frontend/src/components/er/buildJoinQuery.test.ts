@@ -14,6 +14,7 @@ function makeState(overrides: Partial<JoinQueryState> = {}): JoinQueryState {
         table: { schema: "S", name: "USERS" },
         joinType: "INNER",
         onCondition: "S.ORDERS.USER_ID = S.USERS.ID",
+        fkPairs: [],
         isIntermediate: false,
       },
     ],
@@ -38,6 +39,7 @@ describe("buildJoinSQL", () => {
         table: { schema: "S", name: "USERS" },
         joinType: "LEFT",
         onCondition: "S.ORDERS.USER_ID = S.USERS.ID",
+        fkPairs: [],
         isIntermediate: false,
       }],
     }));
@@ -50,6 +52,7 @@ describe("buildJoinSQL", () => {
         table: { schema: "S", name: "USERS" },
         joinType: "RIGHT",
         onCondition: "S.ORDERS.USER_ID = S.USERS.ID",
+        fkPairs: [],
         isIntermediate: false,
       }],
     }));
@@ -62,6 +65,7 @@ describe("buildJoinSQL", () => {
         table: { schema: "S", name: "USERS" },
         joinType: "FULL OUTER",
         onCondition: "S.ORDERS.USER_ID = S.USERS.ID",
+        fkPairs: [],
         isIntermediate: false,
       }],
     }));
@@ -88,6 +92,7 @@ describe("buildJoinSQL", () => {
         table: { schema: "S", name: "DETAILS" },
         joinType: "INNER",
         onCondition: "S.ORDERS.ID = S.DETAILS.ORDER_ID AND S.ORDERS.REGION = S.DETAILS.REGION",
+        fkPairs: [],
         isIntermediate: false,
       }],
     }));
@@ -103,12 +108,14 @@ describe("buildJoinSQL", () => {
           table: { schema: "S", name: "ORDERS" },
           joinType: "INNER",
           onCondition: "S.ORDER_ITEMS.ORDER_ID = S.ORDERS.ID",
+          fkPairs: [],
           isIntermediate: true,
         },
         {
           table: { schema: "S", name: "USERS" },
           joinType: "LEFT",
           onCondition: "S.ORDERS.USER_ID = S.USERS.ID",
+          fkPairs: [],
           isIntermediate: false,
         },
       ],
@@ -135,6 +142,7 @@ describe("buildJoinSQL", () => {
         table: { schema: "CATALOG", name: "PRODUCTS" },
         joinType: "INNER",
         onCondition: "SALES.ORDERS.PRODUCT_ID = CATALOG.PRODUCTS.ID",
+        fkPairs: [],
         isIntermediate: false,
       }],
       selectedColumns: new Map(),

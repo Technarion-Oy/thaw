@@ -93,10 +93,17 @@ export function normalizeIdentifier(raw: string): string {
 
 // ── Join Query Builder types ─────────────────────────────────────────────────
 
+export interface FKPair {
+  from: { schema: string; table: string; col: string };
+  to: { schema: string; table: string; col: string };
+}
+
 export interface JoinEntry {
   table: { schema: string; name: string };
   joinType: "INNER" | "LEFT" | "RIGHT" | "FULL OUTER";
   onCondition: string;
+  /** Structured FK column pairs used in this join — avoids reverse-parsing onCondition for highlighting. */
+  fkPairs: FKPair[];
   isIntermediate: boolean;
 }
 

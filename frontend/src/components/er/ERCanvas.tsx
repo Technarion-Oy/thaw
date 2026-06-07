@@ -454,18 +454,19 @@ function ERCanvasInner({
     });
   }, [edges, highlightedEdgeIds]);
 
-  const styledNodes = useMemo(() => {
-    if (!highlightedNodeIds || highlightedNodeIds.size === 0) return nodes;
-    return nodes.map((n) => {
-      if (highlightedNodeIds.has(n.id)) {
-        return {
-          ...n,
-          className: `${n.className ?? ""} er-intermediate`.trim(),
-        };
-      }
-      return n;
-    });
-  }, [nodes, highlightedNodeIds]);
+  // Apply intermediate-node className via setNodes only when the highlighted
+  // set changes, avoiding a full .map() on every drag/position update.
+  const prevHighlightRef = useRef<Set<string> | undefined>(undefined);
+  useEffect(() => {
+    if (prevHighlightRef.current === highlightedNodeIds) return;
+    prevHighlightRef.current = highlightedNodeIds;
+    setNodes((ns) =>
+      ns.map((n) => ({
+        ...n,
+        className: highlightedNodeIds?.has(n.id) ? "er-intermediate" : undefined,
+      })),
+    );
+  }, [highlightedNodeIds, setNodes]);
 
   // Sync parent selectedTableIds to XYFlow node.selected.
   // Uses lastSelectionRef to detect whether this update was already propagated
@@ -690,7 +691,7 @@ function ERCanvasInner({
     <div ref={canvasRef} style={{ flex: 1, width: "100%", height: "100%" }}>
       {/* onEdgesChange intentionally omitted — edges are derived from fkRef (read-only) */}
       <ReactFlow
-        nodes={styledNodes}
+        nodes={nodes}
         edges={styledEdges}
         onNodesChange={handleNodesChange}
         onConnect={mode === "edit" ? handleConnect : undefined}

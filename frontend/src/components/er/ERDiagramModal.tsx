@@ -143,22 +143,19 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
   }, []);
 
   // Compute highlighted edge IDs for visual feedback on the canvas.
-  // Only highlights the specific FK columns used in the join ON conditions,
-  // not all FKs between two tables.
+  // Uses structured fkPairs from JoinEntry to match specific FK columns,
+  // avoiding brittle string parsing of ON conditions.
   const highlightedEdgeIds = useMemo(() => {
     if (!joinPanelOpen || !joinState) return undefined;
 
-    // Extract the set of FK column pairs actually used in join ON conditions.
-    // ON conditions have the form "SCHEMA.TABLE.COL = SCHEMA.TABLE.COL"
-    // (possibly ANDed for composite FKs).
+    // Build a set of normalised FK pair keys from the structured data
     const usedFKPairs = new Set<string>();
     for (const j of joinState.joins) {
-      for (const cond of j.onCondition.split(" AND ")) {
-        const parts = cond.trim().split(/\s*=\s*/);
-        if (parts.length !== 2) continue;
-        // Normalise to "SCHEMA.TABLE.COL=SCHEMA.TABLE.COL" (uppercase, sorted)
-        const [a, b] = parts.map((p) => p.trim().toUpperCase()).sort();
-        usedFKPairs.add(`${a}=${b}`);
+      for (const pair of j.fkPairs) {
+        const a = `${pair.from.schema}.${pair.from.table}.${pair.from.col}`.toUpperCase();
+        const b = `${pair.to.schema}.${pair.to.table}.${pair.to.col}`.toUpperCase();
+        const [lo, hi] = [a, b].sort();
+        usedFKPairs.add(`${lo}=${hi}`);
       }
     }
 
@@ -179,11 +176,10 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
         );
         if (!targetCol) continue;
 
-        // Check if this specific FK column pair is used in the join
         const fromRef = `${t.schema.toUpperCase()}.${t.name.toUpperCase()}.${c.name.toUpperCase()}`;
         const toRef = `${refSchema.toUpperCase()}.${refTable.toUpperCase()}.${refCol.toUpperCase()}`;
-        const [a, b] = [fromRef, toRef].sort();
-        if (usedFKPairs.has(`${a}=${b}`)) {
+        const [lo, hi] = [fromRef, toRef].sort();
+        if (usedFKPairs.has(`${lo}=${hi}`)) {
           ids.add(`fk-${t.id}-${c.id}-${targetTable.id}-${targetCol.id}`);
         }
       }
