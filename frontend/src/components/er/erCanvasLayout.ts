@@ -186,6 +186,81 @@ export function normalizeDataType(dt: string): string {
   return (aliases[base] ?? "VARCHAR") + params;
 }
 
+/**
+ * AI table input from an MCP modify_er_designer event. Matches the Go
+ * erDesignerTableIn / erDesignerColumnIn types — no React UUIDs.
+ */
+export interface AITableIn {
+  schema: string;
+  name: string;
+  columns: {
+    name: string;
+    dataType: string;
+    isPK?: boolean;
+    notNull?: boolean;
+    fkRef?: string;
+  }[];
+}
+
+/**
+ * Merge AI-generated tables into the current designer state.
+ * - Matched by uppercase SCHEMA.NAME (same logic as backend mergeAITables).
+ * - Replaced tables preserve their UUID id (canvas positions survive);
+ *   columns get fresh UUIDs.
+ * - New tables are appended with fresh UUIDs.
+ * - Untouched tables are preserved as-is.
+ */
+export function mergeAITablesIntoDesigner(
+  current: DesignerTable[],
+  aiTables: AITableIn[],
+): DesignerTable[] {
+  const tableKey = (schema: string, name: string) =>
+    `${schema.toUpperCase()}.${name.trim().toUpperCase()}`;
+
+  // Build lookup of current tables by key.
+  const currentMap = new Map<string, DesignerTable>();
+  for (const t of current) {
+    if (t.schema && t.name.trim()) {
+      currentMap.set(tableKey(t.schema, t.name), t);
+    }
+  }
+
+  // Pre-convert AI tables into a lookup by key.
+  const aiByKey = new Map<string, DesignerTable>();
+  const newTables: DesignerTable[] = [];
+  for (const at of aiTables) {
+    const key = tableKey(at.schema, at.name);
+    const existing = currentMap.get(key);
+    const dt: DesignerTable = {
+      id: existing?.id ?? crypto.randomUUID(),
+      schema: at.schema,
+      name: at.name,
+      columns: at.columns.map((c) => ({
+        id: crypto.randomUUID(),
+        name: c.name,
+        dataType: normalizeDataType(c.dataType),
+        isPK: c.isPK ?? false,
+        notNull: c.notNull ?? (c.isPK ?? false),
+        fkRef: c.fkRef ?? "",
+      })),
+    };
+    if (existing) {
+      aiByKey.set(key, dt);
+    } else {
+      newTables.push(dt);
+    }
+  }
+
+  // Build merged: replaced tables stay in their original position,
+  // untouched tables are preserved, new tables are appended.
+  const merged: DesignerTable[] = current.map((t) => {
+    const key = t.schema && t.name.trim() ? tableKey(t.schema, t.name) : "";
+    return (key ? aiByKey.get(key) : undefined) ?? t;
+  });
+  merged.push(...newTables);
+  return merged;
+}
+
 /** Convert snowflake.ERDiagramData to DesignerTable[] with FK wiring. */
 export function initFromERData(data: snowflake.ERDiagramData): DesignerTable[] {
   const tables: DesignerTable[] = data.tables.map((t) => ({

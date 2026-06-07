@@ -45,6 +45,7 @@ nil-check → delegate → return.
 | `users.go` | User/role management IPC: `ListUsers`, `ListRoles`, `CreateUser`, `DropUser`, `AlterUserProperty`, `GetUserRSAKeyPair`; delegates to `internal/keypair`. |
 | `tasks.go` | Task graph queries and run-history IPC; delegates to `internal/tasks`. |
 | `integrations.go` | Security/API integration and secrets listing; delegates to `internal/snowflake` and `internal/integrations`. |
+| `erdesigner.go` | ER designer state sync IPC: `UpdateERDesignerState`, `ClearERDesignerState`; pushes designer table state into `mcp.Manager.ERDesignerState()` for MCP tool access. |
 | `notebook_native.go` | Snowflake Notebooks CRUD IPC; delegates to `internal/snowflake`. |
 | `migration.go` | Schema-migration IPC (`ScanMigrationSource`, `AnalyzeMigration`, `CreateMigrationSnapshot`, `ExecuteMigration`); delegates to `a.migrationSvc` (`internal/migration`). |
 | `snowpark.go` | Snowpark/Jupyter environment check, setup, kernel lifecycle; delegates to `a.snowparkSvc` (`internal/snowpark`). |

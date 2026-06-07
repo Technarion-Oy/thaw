@@ -12,8 +12,11 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -26,8 +29,17 @@ import (
 // registered. The client is nil so handler calls that need Snowflake will error.
 func newTestSessionWithEmit(t *testing.T) *mcpsdk.ClientSession {
 	t.Helper()
+	return newTestSessionWithEmitAndState(t, NewERDesignerStateStore())
+}
+
+// newTestSessionWithEmitAndState creates a test MCP server+client session with
+// a non-nil emit function and the provided ER designer state store. Pass nil
+// erState to test the nil-store gating.
+func newTestSessionWithEmitAndState(t *testing.T, erState *ERDesignerStateStore) *mcpsdk.ClientSession {
+	t.Helper()
 	emit := func(string, interface{}) {}
 	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, emit, nil, nil)
+	registerERDesignerStateTools(srv, emit, erState)
 	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
 	httpSrv := httptest.NewServer(handler)
 	t.Cleanup(httpSrv.Close)
@@ -384,5 +396,425 @@ func TestOpenERDesignerRegisteredWithEmit(t *testing.T) {
 	names := toolNames(t, srv)
 	if !hasToolName(names, "open_er_designer") {
 		t.Errorf("open_er_designer should be registered when emit is non-nil (got: %v)", names)
+	}
+}
+
+// ── ERDesignerStateStore unit tests ─────────────────────────────────────────
+
+func TestERDesignerStateStoreSetGet(t *testing.T) {
+	store := NewERDesignerStateStore()
+	if store.IsOpen() {
+		t.Error("new store should not be open")
+	}
+	if store.Get() != nil {
+		t.Error("new store Get() should return nil")
+	}
+
+	state := &ERDesignerState{
+		Database: "DB1",
+		Tables: []ERDesignerTableOut{
+			{Schema: "PUBLIC", Name: "USERS", Columns: []ERDesignerColumnOut{
+				{Name: "ID", DataType: "NUMBER(38,0)", IsPK: true, NotNull: true},
+			}},
+		},
+	}
+	store.Set(state)
+	if !store.IsOpen() {
+		t.Error("store should be open after Set")
+	}
+	got := store.Get()
+	if got == nil {
+		t.Fatal("Get() should return non-nil after Set")
+	}
+	if got.Database != "DB1" {
+		t.Errorf("Database = %q, want DB1", got.Database)
+	}
+	if len(got.Tables) != 1 {
+		t.Fatalf("Tables len = %d, want 1", len(got.Tables))
+	}
+}
+
+func TestERDesignerStateStoreClear(t *testing.T) {
+	store := NewERDesignerStateStore()
+	store.Set(&ERDesignerState{Database: "DB"})
+	if !store.IsOpen() {
+		t.Fatal("store should be open after Set")
+	}
+	store.Clear()
+	if store.IsOpen() {
+		t.Error("store should not be open after Clear")
+	}
+	if store.Get() != nil {
+		t.Error("Get() should return nil after Clear")
+	}
+}
+
+func TestERDesignerStateStoreConcurrent(t *testing.T) {
+	store := NewERDesignerStateStore()
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			store.Set(&ERDesignerState{Database: "DB"})
+			_ = store.Get()
+			_ = store.IsOpen()
+			store.Clear()
+		}()
+	}
+	wg.Wait()
+}
+
+// ── get_er_designer_state registration tests ─────────────────────────────────
+
+func TestGetERDesignerStateRegisteredWithStore(t *testing.T) {
+	emit := func(string, interface{}) {}
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, emit, nil, nil)
+	registerERDesignerStateTools(srv, emit, NewERDesignerStateStore())
+	names := toolNames(t, srv)
+	if !hasToolName(names, "get_er_designer_state") {
+		t.Errorf("get_er_designer_state should be registered with non-nil store (got: %v)", names)
+	}
+}
+
+func TestGetERDesignerStateNotRegisteredWithNilStore(t *testing.T) {
+	emit := func(string, interface{}) {}
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, emit, nil, nil)
+	registerERDesignerStateTools(srv, emit, nil)
+	names := toolNames(t, srv)
+	if hasToolName(names, "get_er_designer_state") {
+		t.Error("get_er_designer_state should not be registered with nil store")
+	}
+}
+
+// ── modify_er_designer registration tests ────────────────────────────────────
+
+func TestModifyERDesignerRegisteredWithEmitAndStore(t *testing.T) {
+	emit := func(string, interface{}) {}
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, emit, nil, nil)
+	registerERDesignerStateTools(srv, emit, NewERDesignerStateStore())
+	names := toolNames(t, srv)
+	if !hasToolName(names, "modify_er_designer") {
+		t.Errorf("modify_er_designer should be registered with emit and store (got: %v)", names)
+	}
+}
+
+func TestModifyERDesignerNotRegisteredWithNilEmit(t *testing.T) {
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil, nil, nil)
+	registerERDesignerStateTools(srv, nil, NewERDesignerStateStore())
+	names := toolNames(t, srv)
+	if hasToolName(names, "modify_er_designer") {
+		t.Error("modify_er_designer should not be registered with nil emit")
+	}
+}
+
+func TestModifyERDesignerNotRegisteredWithNilStore(t *testing.T) {
+	emit := func(string, interface{}) {}
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, emit, nil, nil)
+	registerERDesignerStateTools(srv, emit, nil)
+	names := toolNames(t, srv)
+	if hasToolName(names, "modify_er_designer") {
+		t.Error("modify_er_designer should not be registered with nil store")
+	}
+}
+
+// ── get_er_designer_state tool behavior ──────────────────────────────────────
+
+func TestGetERDesignerStateDesignerClosed(t *testing.T) {
+	cs := newTestSessionWithEmit(t)
+	ctx := context.Background()
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "get_er_designer_state",
+		Arguments: struct{}{},
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned Go error: %v", err)
+	}
+	if res.IsError {
+		t.Error("expected no error for designer-closed case")
+	}
+	text := res.Content[0].(*mcpsdk.TextContent).Text
+	if !strings.Contains(text, "not currently open") {
+		t.Errorf("expected 'not currently open' message, got: %s", text)
+	}
+}
+
+func TestGetERDesignerStateDesignerOpen(t *testing.T) {
+	erState := NewERDesignerStateStore()
+	erState.Set(&ERDesignerState{
+		Database: "TESTDB",
+		Tables: []ERDesignerTableOut{
+			{Schema: "PUBLIC", Name: "USERS", Columns: []ERDesignerColumnOut{
+				{Name: "ID", DataType: "NUMBER(38,0)", IsPK: true, NotNull: true},
+				{Name: "EMAIL", DataType: "VARCHAR(256)", NotNull: true},
+			}},
+		},
+	})
+
+	cs := newTestSessionWithEmitAndState(t, erState)
+	ctx := context.Background()
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "get_er_designer_state",
+		Arguments: struct{}{},
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned Go error: %v", err)
+	}
+	if res.IsError {
+		t.Error("expected no error for designer-open case")
+	}
+	text := res.Content[0].(*mcpsdk.TextContent).Text
+	var state ERDesignerState
+	if err := json.Unmarshal([]byte(text), &state); err != nil {
+		t.Fatalf("response is not valid JSON: %v", err)
+	}
+	if state.Database != "TESTDB" {
+		t.Errorf("Database = %q, want TESTDB", state.Database)
+	}
+	if len(state.Tables) != 1 {
+		t.Fatalf("Tables len = %d, want 1", len(state.Tables))
+	}
+	if state.Tables[0].Name != "USERS" {
+		t.Errorf("Tables[0].Name = %q, want USERS", state.Tables[0].Name)
+	}
+	if len(state.Tables[0].Columns) != 2 {
+		t.Errorf("Columns len = %d, want 2", len(state.Tables[0].Columns))
+	}
+}
+
+// ── modify_er_designer tool behavior ─────────────────────────────────────────
+
+func TestModifyERDesignerEmptyTables(t *testing.T) {
+	erState := NewERDesignerStateStore()
+	erState.Set(&ERDesignerState{Database: "DB"})
+	cs := newTestSessionWithEmitAndState(t, erState)
+	ctx := context.Background()
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "modify_er_designer",
+		Arguments: modifyERDesignerInput{Tables: nil},
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned Go error: %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for empty tables")
+	}
+}
+
+func TestModifyERDesignerDesignerClosed(t *testing.T) {
+	cs := newTestSessionWithEmit(t)
+	ctx := context.Background()
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "modify_er_designer",
+		Arguments: modifyERDesignerInput{
+			Tables: []erDesignerTableIn{
+				{Schema: "PUBLIC", Name: "T", Columns: []erDesignerColumnIn{{Name: "ID", DataType: "INT"}}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned Go error: %v", err)
+	}
+	if res.IsError {
+		t.Error("expected no MCP error for designer-closed (graceful message)")
+	}
+	text := res.Content[0].(*mcpsdk.TextContent).Text
+	if !strings.Contains(text, "not currently open") {
+		t.Errorf("expected 'not currently open' message, got: %s", text)
+	}
+}
+
+func TestModifyERDesignerEmitsEvent(t *testing.T) {
+	var emitted bool
+	var emittedName string
+	var emittedPayload interface{}
+	emit := func(name string, data interface{}) {
+		emitted = true
+		emittedName = name
+		emittedPayload = data
+	}
+
+	erState := NewERDesignerStateStore()
+	erState.Set(&ERDesignerState{Database: "DB"})
+
+	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, emit, nil, nil)
+	registerERDesignerStateTools(srv, emit, erState)
+	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
+	httpSrv := httptest.NewServer(handler)
+	t.Cleanup(httpSrv.Close)
+
+	ctx := context.Background()
+	c := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test", Version: "v1"}, nil)
+	cs, err := c.Connect(ctx, &mcpsdk.SSEClientTransport{Endpoint: httpSrv.URL}, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { _ = cs.Close() })
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "modify_er_designer",
+		Arguments: modifyERDesignerInput{
+			Tables: []erDesignerTableIn{
+				{Schema: "PUBLIC", Name: "ORDERS", Columns: []erDesignerColumnIn{
+					{Name: "ID", DataType: "NUMBER(38,0)", IsPK: true},
+				}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned Go error: %v", err)
+	}
+	if res.IsError {
+		t.Error("expected no error for valid modify call")
+	}
+	if !emitted {
+		t.Fatal("expected emit to be called")
+	}
+	if emittedName != "mcp:modify-er-designer" {
+		t.Errorf("emitted event name = %q, want mcp:modify-er-designer", emittedName)
+	}
+	payload, ok := emittedPayload.(ModifyERDesignerPayload)
+	if !ok {
+		t.Fatalf("payload type = %T, want ModifyERDesignerPayload", emittedPayload)
+	}
+	if len(payload.Tables) != 1 {
+		t.Fatalf("payload Tables len = %d, want 1", len(payload.Tables))
+	}
+	if payload.Tables[0].Name != "ORDERS" {
+		t.Errorf("payload Tables[0].Name = %q, want ORDERS", payload.Tables[0].Name)
+	}
+}
+
+func TestModifyERDesignerEmptySchemaName(t *testing.T) {
+	erState := NewERDesignerStateStore()
+	erState.Set(&ERDesignerState{Database: "DB"})
+	cs := newTestSessionWithEmitAndState(t, erState)
+	ctx := context.Background()
+
+	// Empty schema.
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "modify_er_designer",
+		Arguments: modifyERDesignerInput{
+			Tables: []erDesignerTableIn{
+				{Schema: "", Name: "T", Columns: []erDesignerColumnIn{{Name: "ID", DataType: "INT"}}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned Go error: %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for empty schema")
+	}
+
+	// Empty name.
+	res, err = cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "modify_er_designer",
+		Arguments: modifyERDesignerInput{
+			Tables: []erDesignerTableIn{
+				{Schema: "PUBLIC", Name: "", Columns: []erDesignerColumnIn{{Name: "ID", DataType: "INT"}}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned Go error: %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for empty name")
+	}
+}
+
+func TestModifyERDesignerColumnValidation(t *testing.T) {
+	erState := NewERDesignerStateStore()
+	erState.Set(&ERDesignerState{Database: "DB"})
+	cs := newTestSessionWithEmitAndState(t, erState)
+	ctx := context.Background()
+
+	// Zero columns.
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "modify_er_designer",
+		Arguments: modifyERDesignerInput{
+			Tables: []erDesignerTableIn{
+				{Schema: "PUBLIC", Name: "T", Columns: nil},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned Go error: %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for zero columns")
+	}
+
+	// Empty column name.
+	res, err = cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "modify_er_designer",
+		Arguments: modifyERDesignerInput{
+			Tables: []erDesignerTableIn{
+				{Schema: "PUBLIC", Name: "T", Columns: []erDesignerColumnIn{{Name: "", DataType: "INT"}}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned Go error: %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for empty column name")
+	}
+
+	// Empty column dataType.
+	res, err = cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "modify_er_designer",
+		Arguments: modifyERDesignerInput{
+			Tables: []erDesignerTableIn{
+				{Schema: "PUBLIC", Name: "T", Columns: []erDesignerColumnIn{{Name: "ID", DataType: ""}}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned Go error: %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for empty column dataType")
+	}
+
+	// Malformed fkRef (not 3 parts).
+	res, err = cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "modify_er_designer",
+		Arguments: modifyERDesignerInput{
+			Tables: []erDesignerTableIn{
+				{Schema: "PUBLIC", Name: "T", Columns: []erDesignerColumnIn{
+					{Name: "ID", DataType: "INT", FKRef: "USERS.ID"},
+				}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned Go error: %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for malformed fkRef")
+	}
+
+	// Valid fkRef (3 parts) should pass validation.
+	res, err = cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "modify_er_designer",
+		Arguments: modifyERDesignerInput{
+			Tables: []erDesignerTableIn{
+				{Schema: "PUBLIC", Name: "T", Columns: []erDesignerColumnIn{
+					{Name: "ID", DataType: "INT", FKRef: "PUBLIC.USERS.ID"},
+				}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned Go error: %v", err)
+	}
+	if res.IsError {
+		t.Error("expected no error for valid 3-part fkRef")
 	}
 }

@@ -4,11 +4,13 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { App as AntApp, Modal, Button, Input, Select, Checkbox, AutoComplete } from "antd";
 import { PlusOutlined, DeleteOutlined, CopyOutlined, LinkOutlined, SwapOutlined } from "@ant-design/icons";
-import { ExecuteQuery, ListSchemas } from "../../../wailsjs/go/app/App";
-import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import { ExecuteQuery, ListSchemas, UpdateERDesignerState, ClearERDesignerState } from "../../../wailsjs/go/app/App";
+import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 import type { snowflake } from "../../../wailsjs/go/models";
+import { mcp } from "../../../wailsjs/go/models";
 import ERCanvas from "./ERCanvas";
-import { initFromERData, normalizeDataType } from "./erCanvasLayout";
+import { initFromERData, normalizeDataType, mergeAITablesIntoDesigner } from "./erCanvasLayout";
+import type { AITableIn } from "./erCanvasLayout";
 import { buildMermaid } from "./buildMermaid";
 import { type DesignerColumn, type DesignerTable, SF_DATA_TYPES, SF_TYPES, normalizeIdentifier } from "./erTypes";
 
@@ -441,6 +443,54 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
       .then((s) => setSchemas(s.filter((n) => n.toUpperCase() !== "INFORMATION_SCHEMA")))
       .catch(() => {});
   }, [database]);
+
+  // ── Sync designer state to backend for MCP tools ──────────────────────────
+
+  const pushState = useCallback((tbls: DesignerTable[]) => {
+    const out = tbls.map((t) =>
+      new mcp.ERDesignerTableOut({
+        schema: t.schema,
+        name: t.name,
+        columns: t.columns.map((c) =>
+          new mcp.ERDesignerColumnOut({
+            name: c.name,
+            dataType: c.dataType,
+            isPK: c.isPK,
+            notNull: c.notNull,
+            fkRef: c.fkRef || undefined,
+          }),
+        ),
+      }),
+    );
+    UpdateERDesignerState(database, out).catch(() => {});
+  }, [database]);
+
+  // Push initial state on mount, clear on unmount.
+  useEffect(() => {
+    pushState(tablesRef.current);
+    return () => { ClearERDesignerState().catch(() => {}); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- mount/unmount only
+  }, []);
+
+  // Debounced push on subsequent tables changes (300ms).
+  const prevTablesRef = useRef(tables);
+  useEffect(() => {
+    if (prevTablesRef.current === tables) return;
+    prevTablesRef.current = tables;
+    const timer = setTimeout(() => pushState(tables), 300);
+    return () => clearTimeout(timer);
+  }, [tables, pushState]);
+
+  // ── Listen for MCP modify_er_designer events ─────────────────────────────
+
+  useEffect(() => {
+    const off = EventsOn("mcp:modify-er-designer", (payload: { tables: AITableIn[] }) => {
+      setTables((prev) => mergeAITablesIntoDesigner(prev, payload.tables));
+      message.info(`${payload.tables.length} table(s) updated by AI`);
+    });
+    return () => off();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- message is stable
+  }, []);
 
   // ── Schema filter for canvas ──────────────────────────────────────────────
 

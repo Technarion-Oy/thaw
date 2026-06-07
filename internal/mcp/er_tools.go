@@ -212,3 +212,102 @@ func registerERDesignerTools(srv *mcpsdk.Server, client *snowflake.Client, emit 
 		)), nil, nil
 	})
 }
+
+// modifyERDesignerInput is the tool input for modify_er_designer.
+type modifyERDesignerInput struct {
+	Tables []erDesignerTableIn `json:"tables" jsonschema:"the tables to merge into the open ER designer; matched by SCHEMA.NAME"`
+}
+
+// ModifyERDesignerPayload is the Wails event payload for "mcp:modify-er-designer".
+// The frontend listens for this event and merges the AI tables into the canvas.
+type ModifyERDesignerPayload struct {
+	Tables []erDesignerTableIn `json:"tables"`
+}
+
+// registerERDesignerStateTools wires the ER designer state inspection and
+// modification tools onto srv. Called from session.start() after buildServer()
+// to avoid changing the buildServer signature (and touching ~60 test call sites).
+//
+// erState must be non-nil for get_er_designer_state to be registered.
+// Both emit and erState must be non-nil for modify_er_designer to be registered.
+func registerERDesignerStateTools(srv *mcpsdk.Server, emit func(string, interface{}), erState *ERDesignerStateStore) {
+	if erState != nil {
+		mcpsdk.AddTool(srv, &mcpsdk.Tool{
+			Name: "get_er_designer_state",
+			Description: "Get the current state of the ER Designer if it is open. " +
+				"Returns the database name and all tables with their columns, primary keys, nullability, and FK references. " +
+				"Returns a message if the designer is not currently open.",
+		}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in struct{}) (*mcpsdk.CallToolResult, any, error) {
+			state := erState.Get()
+			if state == nil {
+				return textResult("The ER designer is not currently open."), nil, nil
+			}
+			return jsonResult(state), nil, nil
+		})
+	}
+
+	if emit != nil && erState != nil {
+		mcpsdk.AddTool(srv, &mcpsdk.Tool{
+			Name: "modify_er_designer",
+			Description: "Push table modifications into the currently open ER Designer. " +
+				"Tables are matched by uppercase SCHEMA.NAME: matching tables are replaced, new tables are appended. " +
+				"The designer must be open (use open_er_designer first). " +
+				"Columns need a name and dataType; isPK, notNull, and fkRef are optional.",
+		}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in modifyERDesignerInput) (*mcpsdk.CallToolResult, any, error) {
+			if len(in.Tables) == 0 {
+				return nil, nil, fmt.Errorf("tables must contain at least one table")
+			}
+			for _, t := range in.Tables {
+				if strings.TrimSpace(t.Schema) == "" || strings.TrimSpace(t.Name) == "" {
+					return nil, nil, fmt.Errorf("each table must have a non-empty schema and name")
+				}
+				if len(t.Columns) == 0 {
+					return nil, nil, fmt.Errorf("table %s.%s must have at least one column", t.Schema, t.Name)
+				}
+				for _, c := range t.Columns {
+					if strings.TrimSpace(c.Name) == "" || strings.TrimSpace(c.DataType) == "" {
+						return nil, nil, fmt.Errorf("each column in %s.%s must have a non-empty name and dataType", t.Schema, t.Name)
+					}
+					// Simple 3-part split check. Quoted identifiers containing
+					// dots (e.g. PUBLIC."MY.TABLE".COL) are not supported —
+					// the designer uses unquoted uppercase identifiers.
+					if c.FKRef != "" && len(strings.Split(c.FKRef, ".")) != 3 {
+						return nil, nil, fmt.Errorf("fkRef %q in %s.%s.%s must be in SCHEMA.TABLE.COLUMN format", c.FKRef, t.Schema, t.Name, c.Name)
+					}
+				}
+			}
+			// Note: a TOCTOU window exists between IsOpen() and emit() — the
+			// designer could close in between. This is accepted: the frontend
+			// listener is torn down on unmount so a stale event is harmless.
+			if !erState.IsOpen() {
+				return textResult("The ER designer is not currently open. Use open_er_designer to open it first."), nil, nil
+			}
+
+			var emitFailed bool
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						logger.L.Error("mcp modify_er_designer: emit panicked", "err", r)
+						emitFailed = true
+					}
+				}()
+				// Type conversion — works because ModifyERDesignerPayload and
+				// modifyERDesignerInput have identical fields. If either type
+				// gains a field, the compiler will catch the mismatch.
+				emit("mcp:modify-er-designer", ModifyERDesignerPayload(in))
+			}()
+			if emitFailed {
+				return textResult("Failed to modify ER designer: internal error"), nil, nil
+			}
+
+			// Note: the state store is eventually consistent — the frontend
+			// merges the event into React state and pushes back via IPC after
+			// a 300ms debounce. A get_er_designer_state call within that
+			// window returns pre-modification data.
+			return textResult(fmt.Sprintf(
+				"%d table(s) sent to the ER designer. The user can now review the changes visually.",
+				len(in.Tables),
+			)), nil, nil
+		})
+	}
+}

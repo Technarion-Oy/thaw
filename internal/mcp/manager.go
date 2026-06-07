@@ -76,12 +76,13 @@ type SessionInfo struct {
 
 // Manager owns the set of running MCP sessions. It is safe for concurrent use.
 type Manager struct {
-	mu        sync.Mutex
-	sessions  map[string]*session
-	editorCtx *EditorContextStore
-	emit      func(string, interface{}) // Wails event emitter; nil when running outside the app (tests)
-	fnStore   *fnmeta.Store             // local function metadata cache; nil until set via SetFnStore
-	nb        NotebookBackend           // notebook/Snowpark backend; nil until set via SetNotebookBackend
+	mu              sync.Mutex
+	sessions        map[string]*session
+	editorCtx       *EditorContextStore
+	erDesignerState *ERDesignerStateStore
+	emit            func(string, interface{}) // Wails event emitter; nil when running outside the app (tests)
+	fnStore         *fnmeta.Store             // local function metadata cache; nil until set via SetFnStore
+	nb              NotebookBackend           // notebook/Snowpark backend; nil until set via SetNotebookBackend
 }
 
 // NewManager returns an empty Manager with an initialized EditorContextStore.
@@ -90,9 +91,10 @@ type Manager struct {
 // runtime is not available.
 func NewManager(emit func(string, interface{})) *Manager {
 	return &Manager{
-		sessions:  make(map[string]*session),
-		editorCtx: NewEditorContextStore(),
-		emit:      emit,
+		sessions:        make(map[string]*session),
+		editorCtx:       NewEditorContextStore(),
+		erDesignerState: NewERDesignerStateStore(),
+		emit:            emit,
 	}
 }
 
@@ -100,6 +102,12 @@ func NewManager(emit func(string, interface{})) *Manager {
 // read from this store; the frontend pushes state into it via App IPC methods.
 func (m *Manager) EditorContext() *EditorContextStore {
 	return m.editorCtx
+}
+
+// ERDesignerState returns the shared ER designer state store. MCP tool handlers
+// read from this store; the frontend pushes state into it via App IPC methods.
+func (m *Manager) ERDesignerState() *ERDesignerStateStore {
+	return m.erDesignerState
 }
 
 // SetFnStore sets the function metadata store on the manager so new MCP

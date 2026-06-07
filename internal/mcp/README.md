@@ -12,7 +12,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 
 | File | Purpose |
 |---|---|
-| `manager.go` | `Manager` (multi-session registry), `SessionInfo`/`SessionConfig` types, execution mode constants, port allocation, `Start`/`Stop`/`UpdateMode`/`List`/`StopAll`, `EditorContext()` accessor |
+| `manager.go` | `Manager` (multi-session registry), `SessionInfo`/`SessionConfig` types, execution mode constants, port allocation, `Start`/`Stop`/`UpdateMode`/`List`/`StopAll`, `EditorContext()`/`ERDesignerState()` accessors |
 | `session.go` | Per-session `http.Server` + SSE lifecycle (`start`/`stop`/`updateMode`/`info`); serves on the held loopback listener and owns/closes its `*snowflake.Client`. `updateMode` mutates the existing server's tool registry via `RemoveTools`/`AddTool` — the SDK sends `tools/list_changed` notifications so connected clients update seamlessly. If the serve goroutine exits unexpectedly it closes the client and self-removes from the `Manager` (`removeIfPresent`) so no dead row or leaked connection lingers |
 | `security.go` | `loopbackGuard` middleware (rejects non-loopback `Host`/cross-origin `Origin` — DNS-rebinding defense), `tokenGuard` middleware (per-session token auth on the SSE GET), and `newSessionToken` (crypto-random token) |
 | `server.go` | `buildServer(client, mode, cfg, editorCtx, emit, fnStore, nb)` — constructs the MCP server and registers tools based on execution mode; `modeSpecificToolNames` lists tools that `updateMode` removes/re-registers on mode switch |
@@ -24,10 +24,11 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `lineage_tools.go` | `registerLineageTools` — object lineage and cross-dependency tools (`get_object_lineage`, `get_schema_cross_deps`, `get_database_cross_deps`); wraps `Client.GetObjectDependencies`, `Client.GetSchemaCrossDeps`, `Client.GetDatabaseCrossDeps`; always registered in all modes |
 | `workspace_tools.go` | `registerWorkspaceTools(srv, workspaceRoot)` — local filesystem and git read-only tools (`git_status`, `git_list_branches`, `git_get_head_file`, `git_diff_lines`, `list_directory`, `read_file`, `search_files`); delegates to `gitrepo`, `filesystem`, and `sqleditor` packages; no Snowflake client needed; **only registered when `WorkspaceRoot` is set** in `SessionConfig`; all path inputs are validated against the workspace root using `filesystem.ValidateInsideOrEqual` (symlink-resolving defense-in-depth) |
 | `context.go` | `EditorContextStore` — concurrency-safe in-memory store for per-tab editor SQL and result summaries; `ResultSummary` and `QueryHistoryEntry` types |
+| `er_designer_state.go` | `ERDesignerStateStore` — concurrency-safe in-memory cache for the open ER designer's state (database, tables, columns); `ERDesignerState`, `ERDesignerTableOut`, `ERDesignerColumnOut` types. Frontend pushes state via IPC; `get_er_designer_state` reads from it |
 | `editor_tools.go` | `registerEditorTools` — editor context tools (`get_current_editor_sql`, `get_query_results_summary`, `get_query_history`); bridges frontend editor state to MCP clients |
 | `tab_tools.go` | `registerTabTools` — tab-delivery tool (`open_sql_tab`); formats SQL with user prefs, runs diagnostics, emits `mcp:open-sql-tab` Wails event. Registered when `emit` is non-nil. `OpenSqlTabPayload` type, `loadEditorPrefs` helper |
 | `notebook_tools.go` | `registerNotebookTools` — notebook/Snowpark tools (`read_notebook`, `get_notebook_completions`, `check_python_syntax`, `open_notebook_tab`); `NotebookBackend` interface (dependency-injected from `App` via adapter), MCP-local type duplicates (`NotebookCompletion`, `NotebookSyntaxError`), `OpenNotebookTabPayload` type, `buildNbformat` helper. `read_notebook` is workspace-gated; kernel tools are backend-gated; `open_notebook_tab` is emit-gated |
-| `er_tools.go` | `registerERDesignerTools` — ER designer delivery tool (`open_er_designer`); fetches live ER data, merges AI-generated tables via `mergeAITables`, emits `mcp:open-er-designer` Wails event. Emit-gated. `OpenERDesignerPayload` type, input types `openERDesignerInput`, `erDesignerTableIn`, `erDesignerColumnIn` |
+| `er_tools.go` | `registerERDesignerTools` — ER designer delivery tool (`open_er_designer`); fetches live ER data, merges AI-generated tables via `mergeAITables`, emits `mcp:open-er-designer` Wails event. Emit-gated. `registerERDesignerStateTools` — ER designer state tools (`get_er_designer_state`, `modify_er_designer`); registered in `session.start()` after `buildServer()` to avoid changing the buildServer signature. `OpenERDesignerPayload`, `ModifyERDesignerPayload` types, input types `openERDesignerInput`, `modifyERDesignerInput`, `erDesignerTableIn`, `erDesignerColumnIn` |
 | `pipeline_tools.go` | `registerPipelineTools` — task graph, stage, and pipe inspection tools (`list_tasks`, `get_task_run_history`, `get_task_dependencies`, `list_stage_files`, `preview_stage_file`, `get_pipe_status`, `get_pipe_copy_history`, `open_task_graph`); delegates to `tasks`, `stage`, `fileformat`, `pipe` packages. `preview_stage_file` is mode-gated (readonly/explain_only). `open_task_graph` is emit-gated. `OpenTaskGraphPayload` type |
 | `function_tools.go` | `registerFunctionTools` — function/procedure metadata and invocation builder tools (`search_functions`, `get_function_tooltip`, `get_procedure_params`, `get_function_info`, `build_call_statement`, `build_function_select`); delegates to `fnmeta.Store`, `snowflake.Client`, and `procedure` packages; always registered in all modes |
 | `builder_tools.go` | `registerBuilderTools` — pure DDL builder tools (`build_create_stage_sql`, `build_alter_stage_sql`, `build_create_file_format_sql`, `build_create_pipe_sql`, `build_refresh_pipe_sql`, `build_create_secret_sql`, `build_storage_integration_sql`, `build_api_integration_sql`, `build_catalog_integration_sql`, `build_external_access_integration_sql`, `build_notification_integration_sql`, `build_security_integration_sql`); delegates to `stage`, `fileformat`, `pipe`, `secret`, `integrations` packages; no Snowflake client needed; always registered in all modes |
@@ -40,7 +41,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `tab_tools_test.go` | Unit tests for `open_sql_tab` tool (nil-emit graceful degradation, registration, empty SQL rejection, emit payload shape) |
 | `notebook_tools_test.go` | Unit tests for notebook tools (registration gating for nil backend/workspace/emit, `open_notebook_tab` event payload, default title, truncation, cell kind validation, `buildNbformat` mapping with outputs/execution_count, kernel tool input validation, `read_notebook` sandbox and extension check) |
 | `editor_tools_test.go` | Unit tests for editor context tools (empty store, content return, mode-gating, nil client handling) |
-| `er_tools_test.go` | Unit tests for ER designer tools (`mergeAITables` merge logic, emit-gating for `open_er_designer`) |
+| `er_tools_test.go` | Unit tests for ER designer tools (`mergeAITables` merge logic, emit-gating for `open_er_designer`); `ERDesignerStateStore` unit tests (set/get, clear, concurrent access); registration gating for `get_er_designer_state` and `modify_er_designer`; tool behavior tests (designer open/closed, event emission, input validation) |
 | `pipeline_tools_test.go` | Unit tests for pipeline tools (registration in all modes, mode-gating for `preview_stage_file`, emit-gating for `open_task_graph`, nil client, input validation) |
 | `account_tools_test.go` | Unit tests for account tools (registration in all modes, empty kind/name/schema validation) |
 | `schema_tools_test.go` | Unit tests for schema tools (registration, validate_data_type valid/invalid, get_data_retention input validation, search_objects empty pattern, get_all_data_types, mode coverage) |
@@ -59,8 +60,9 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 
 | Function | Behaviour |
 |---|---|
-| `NewManager(emit)` | Empty registry with initialized `EditorContextStore`. `emit` is an optional Wails event emitter for tab-delivery tools; pass `nil` in tests. Safe for concurrent use. |
+| `NewManager(emit)` | Empty registry with initialized `EditorContextStore` and `ERDesignerStateStore`. `emit` is an optional Wails event emitter for tab-delivery tools; pass `nil` in tests. Safe for concurrent use. |
 | `EditorContext()` | Returns the shared `*EditorContextStore`; MCP tools read, frontend pushes state via App IPC. |
+| `ERDesignerState()` | Returns the shared `*ERDesignerStateStore`; `get_er_designer_state` reads, frontend pushes state via App IPC. |
 | `SetFnStore(store)` | Sets the function metadata store (`*fnmeta.Store`) on the manager. New sessions started after this call will expose function/procedure lookup tools. Called from `App.startup` after the fnStore is opened. |
 | `SetNotebookBackend(nb)` | Sets the notebook/Snowpark backend (`NotebookBackend`) on the manager. New sessions started after this call will expose notebook tools (`get_notebook_completions`, `check_python_syntax`). Called from `App.startup` after the `snowparkSvc` is created. |
 | `Start(label, connLabel, mode, port, client, cfg)` | Starts a session under a unique `label`; `port == 0` auto-assigns from `9100`. Takes ownership of `client`. Applies `SessionConfig` (role/warehouse pinning, secondary roles). |
@@ -281,13 +283,17 @@ All workspace tools that accept a directory or file path validate the input agai
 
 `open_sql_tab` completes the Phase 1 MCP round-trip: the AI validates and formats SQL, then delivers it into a new editor tab. The user sees diagnostics inline and must manually run the query (human-in-the-loop preserved). The event emitter callback is injected into `Manager` at construction (`NewManager(emit)`) and threaded through `buildServer` to `registerTabTools`. The emitter pattern follows the established `migration.NewService` approach — `internal/mcp` cannot import `internal/app`, so the Wails runtime is accessed via a closure wired in `App.startup()`.
 
-**ER designer tools** (`er_tools.go`, registered when `emit` is non-nil):
+**ER designer tools** (`er_tools.go`):
 
-| Tool | Purpose | Event |
-|---|---|---|
-| `open_er_designer` | Fetch live ER data, merge AI-generated tables, open the ER designer | Emits `mcp:open-er-designer` Wails event with `{database, merged, baseline}` |
+| Tool | Gating | Purpose | Event |
+|---|---|---|---|
+| `open_er_designer` | Emit-gated | Fetch live ER data, merge AI-generated tables, open the ER designer | Emits `mcp:open-er-designer` Wails event with `{database, merged, baseline}` |
+| `get_er_designer_state` | erState-gated | Read current tables/columns/FKs from the open designer | None (reads from `ERDesignerStateStore` cache) |
+| `modify_er_designer` | Emit+erState-gated | Push AI table modifications into the open designer | Emits `mcp:modify-er-designer` Wails event with `{tables}` |
 
 `open_er_designer` enables the "AI scaffolds, human refines" workflow: the AI generates tables from natural language and delivers them onto the interactive ER canvas. The `mergeAITables` function merges AI tables into the live schema — matching tables (by uppercase `SCHEMA.NAME`) are replaced, new tables are appended, untouched live tables are preserved. The frontend receives both the merged data (for display) and the baseline (original live schema for diff SQL generation). The user reviews the visual model and the generated SQL diff before applying.
+
+`get_er_designer_state` and `modify_er_designer` are registered via `registerERDesignerStateTools`, called from `session.start()` after `buildServer()` to avoid changing the `buildServer` signature (and touching ~60 test call sites). `get_er_designer_state` reads from the `ERDesignerStateStore` cache (pushed by the frontend via IPC). `modify_er_designer` validates inputs, checks the designer is open, and emits a `mcp:modify-er-designer` event — the frontend runs the merge against its React state, preserving UUIDs and canvas positions.
 
 **Diagnostics vs. EXPLAIN gate**: The diagnostics tools serve the *editor/notebook delivery path* — the AI writes SQL, validates it, then places it in front of the human for review. The EXPLAIN gate validates SQL immediately before execution in the `execute_snowflake_sql` tool.
 
@@ -298,6 +304,14 @@ Editor SQL and query results live in the frontend Zustand `queryStore`, while MC
 1. **`EditorContextStore`** (`context.go`) — a `sync.RWMutex`-protected in-memory store owned by `Manager`, initialized in `NewManager()`.
 2. **App IPC methods** (`internal/app/editorcontext.go`) — four thin delegators (`UpdateEditorContext`, `UpdateEditorTabSQL`, `UpdateQueryResult`, `RemoveEditorTab`) that write into `Manager.EditorContext()`.
 3. **Frontend sync hook** (`frontend/src/hooks/useEditorContextSync.ts`) — a React hook mounted once in `QueryPage.tsx` that subscribes to `queryStore` and pushes state changes to the backend via IPC (debounced SQL updates, immediate tab switch and result notifications, tab removal cleanup).
+
+### ER designer state bridge
+
+The ER designer's table state lives in `ERDesigner.tsx` (React `useState`), while the `get_er_designer_state` and `modify_er_designer` MCP tools run in `internal/mcp/`. The bridge follows the same pattern as the editor context bridge:
+
+1. **`ERDesignerStateStore`** (`er_designer_state.go`) — a `sync.RWMutex`-protected cache owned by `Manager`, initialized in `NewManager()`. Holds `ERDesignerState` (database + `[]ERDesignerTableOut`), or nil when the designer is closed.
+2. **App IPC methods** (`internal/app/erdesigner.go`) — two thin delegators (`UpdateERDesignerState`, `ClearERDesignerState`) that write into `Manager.ERDesignerState()`.
+3. **Frontend sync** (`ERDesigner.tsx`) — pushes state on mount, on debounced (300ms) `tables` changes, and clears on unmount. Listens for `mcp:modify-er-designer` Wails events and merges AI tables via `mergeAITablesIntoDesigner`.
 
 ## Patterns & integration
 
