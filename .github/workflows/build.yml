@@ -53,8 +53,7 @@ jobs:
       - name: Download Go dependencies
         run: go mod download
 
-      - name: Install garble (macOS & Linux only)
-        if: matrix.platform != 'windows'
+      - name: Install garble
         run: go install mvdan.cc/garble@latest
 
       - name: Install NSIS (Windows only)
@@ -79,77 +78,27 @@ jobs:
           fi
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
-      # ── Standard Wails Builds ──────────────────────────────────────────────
+      # ── Wails Builds (obfuscated via garble) ──────────────────────────────
+      # -obfuscated: invokes garble as the Go compiler toolchain within the
+      #   Wails build pipeline, producing an obfuscated binary without a
+      #   separate post-build step.  This preserves macOS ad-hoc signing
+      #   (no binary replacement after codesign) and Windows .syso embedding.
+      # -platform:   explicit target to avoid implicit runner-architecture deps.
+      # -tags webkit2_41: Ubuntu 24.04 only ships libwebkit2gtk-4.1-dev;
+      #   Wails' CGO directives default to webkit2gtk-4.0 without this tag.
+      #   Harmless on macOS (webkit CGO is gated behind //go:build linux).
 
       - name: Build (macOS & Linux)
         if: matrix.platform != 'windows'
-        # Run the standard Wails build first.  This step:
-        #   1. Compiles and bundles the React frontend into frontend/dist.
-        #   2. Generates the Wails JS/TS bindings.
-        #   3. Compiles the Go binary (non-obfuscated).
-        # Garble is NOT applied here because GOFLAGS=-toolexec=garble would
-        # be active during step 2 (binding generation), which runs before
-        # frontend/dist exists.  The //go:embed all:frontend/dist directive
-        # then fails with "no matching files found".  The obfuscated binary
-        # is produced in the next step once all embed inputs are present.
-        #
-        # -ldflags "-s -w"  strips the symbol table (-s) and DWARF debug info
-        #                   (-w) so function/variable names are not recoverable.
-        # -trimpath         removes all local file-system paths embedded by the
-        #                   compiler (source file references, module cache paths).
-        # -tags webkit2_41: Ubuntu 24.04 only ships libwebkit2gtk-4.1-dev;
-        #   Wails' CGO directives default to webkit2gtk-4.0 without this tag.
-        #   Harmless on macOS (webkit CGO is gated behind //go:build linux).
-        run: wails build -clean -tags webkit2_41 -ldflags "-s -w -X thaw/internal/version.Version=${{ steps.prep.outputs.version }}" -trimpath
+        run: wails build -obfuscated -platform ${{ matrix.platform }}/${{ matrix.arch }} -clean -tags webkit2_41 -ldflags "-s -w -X thaw/internal/version.Version=${{ steps.prep.outputs.version }}" -trimpath
         env:
-          # The macOS arm64 runner has 7 GB RAM.  javascript-obfuscator's
-          # control-flow flattening can multiply the AST size of each
-          # function several times over.  Combined with Terser's multi-pass
-          # compression running in the same Node process, the default 4 GB
-          # limit is insufficient.  6 GB leaves ~1 GB for the OS.
           NODE_OPTIONS: --max-old-space-size=6144
 
       - name: Build & Package Installer (Windows)
         if: matrix.platform == 'windows'
-        # Since we dropped garble for Windows, we can let Wails handle 
-        # both the compilation AND the NSIS installer generation natively!
-        run: wails build -clean -nsis -ldflags "-s -w -X thaw/internal/version.Version=${{ steps.prep.outputs.version }}" -trimpath
+        run: wails build -obfuscated -platform windows/amd64 -clean -nsis -ldflags "-s -w -X thaw/internal/version.Version=${{ steps.prep.outputs.version }}" -trimpath
         env:
           NODE_OPTIONS: --max-old-space-size=6144
-
-      # ── Rebuild Go binary with garble ──────────────────────────────────────
-      # frontend/dist is now fully populated, so //go:embed resolves correctly.
-      # garble recompiles the same package with obfuscation (hashed package
-      # paths, mangled identifiers) and overwrites the binary that wails build
-      # produced.  Wails' platform packaging (macOS .app bundle structure,
-      # Windows manifest/icon) is left intact.
-
-      - name: Obfuscate binary (macOS)
-        if: matrix.platform == 'darwin'
-        # CGO_LDFLAGS supplies the UniformTypeIdentifiers framework that Wails
-        # uses for file-type handling (_OBJC_CLASS_$_UTType).  wails build adds
-        # this via its own CGO setup; garble build running standalone only sees
-        # #cgo LDFLAGS directives in the source, which omit this framework,
-        # causing an "Undefined symbols for architecture arm64" linker error.
-        # Go aggregates CGO_LDFLAGS into the external link command alongside
-        # all #cgo LDFLAGS entries, so setting it here is sufficient.
-        env:
-          CGO_LDFLAGS: -framework UniformTypeIdentifiers
-        run: |
-          garble build \
-            -tags desktop,production \
-            -trimpath -ldflags="-s -w -X thaw/internal/version.Version=${{ steps.prep.outputs.version }}" \
-            -o build/bin/thaw.app/Contents/MacOS/thaw \
-            .
-
-      - name: Obfuscate binary (Linux)
-        if: matrix.platform == 'linux'
-        run: |
-          garble build \
-            -tags desktop,production,webkit2_41 \
-            -trimpath -ldflags="-s -w -X thaw/internal/version.Version=${{ steps.prep.outputs.version }}" \
-            -o build/bin/thaw \
-            .
 
       # ── Rename / package output with tag version ───────────────────────────
       - name: Package macOS app bundle

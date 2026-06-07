@@ -96,7 +96,7 @@ jobs:
           - os: windows-latest
             platform: windows
             arch: amd64
-          - os: ubuntu-22.04
+          - os: ubuntu-24.04
             platform: linux
             arch: amd64
 
@@ -133,8 +133,7 @@ jobs:
       - name: Download Go dependencies
         run: go mod download
 
-      - name: Install garble (macOS & Linux only)
-        if: matrix.platform != 'windows'
+      - name: Install garble
         run: go install mvdan.cc/garble@latest
 
       - name: Install NSIS (Windows only)
@@ -144,41 +143,19 @@ jobs:
           choco install nsis
           echo "C:\Program Files (x86)\NSIS" >> $GITHUB_PATH
 
-      # ── Standard Wails Builds ──────────────────────────────────────────────
+      # ── Wails Builds (obfuscated via garble) ──────────────────────────────
 
       - name: Build (macOS & Linux)
         if: matrix.platform != 'windows'
-        run: wails build -clean -tags webkit2_41 -ldflags "-s -w -X thaw/internal/version.Version=${{ needs.release.outputs.version }}" -trimpath
+        run: wails build -obfuscated -platform ${{ matrix.platform }}/${{ matrix.arch }} -clean -tags webkit2_41 -ldflags "-s -w -X thaw/internal/version.Version=${{ needs.release.outputs.version }}" -trimpath
         env:
           NODE_OPTIONS: --max-old-space-size=6144
 
       - name: Build & Package Installer (Windows)
         if: matrix.platform == 'windows'
-        run: wails build -clean -nsis -ldflags "-s -w -X thaw/internal/version.Version=${{ needs.release.outputs.version }}" -trimpath
+        run: wails build -obfuscated -platform windows/amd64 -clean -nsis -ldflags "-s -w -X thaw/internal/version.Version=${{ needs.release.outputs.version }}" -trimpath
         env:
           NODE_OPTIONS: --max-old-space-size=6144
-
-      # ── Rebuild Go binary with garble ──────────────────────────────────────
-
-      - name: Obfuscate binary (macOS)
-        if: matrix.platform == 'darwin'
-        env:
-          CGO_LDFLAGS: -framework UniformTypeIdentifiers
-        run: |
-          garble build \
-            -tags desktop,production \
-            -trimpath -ldflags="-s -w -X thaw/internal/version.Version=${{ needs.release.outputs.version }}" \
-            -o build/bin/thaw.app/Contents/MacOS/thaw \
-            .
-
-      - name: Obfuscate binary (Linux)
-        if: matrix.platform == 'linux'
-        run: |
-          garble build \
-            -tags desktop,production,webkit2_41 \
-            -trimpath -ldflags="-s -w -X thaw/internal/version.Version=${{ needs.release.outputs.version }}" \
-            -o build/bin/thaw \
-            .
 
       # ── Rename / package output ────────────────────────────────────────────
       
