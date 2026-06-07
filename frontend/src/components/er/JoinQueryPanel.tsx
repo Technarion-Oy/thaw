@@ -36,7 +36,8 @@ function highlightSQL(sql: string): JSX.Element[] {
   });
 }
 
-/** Format a join path as a readable chain for disambiguation. */
+/** Format a join path as a readable chain for disambiguation.
+ *  Guards against malformed paths where edges.length >= tables.length. */
 export function formatPathLabel(path: JoinPath): string {
   if (path.tables.length === 0) return "";
   const parts: string[] = [
@@ -45,6 +46,7 @@ export function formatPathLabel(path: JoinPath): string {
   for (let i = 0; i < path.edges.length; i++) {
     const edge = path.edges[i];
     const nextTable = path.tables[i + 1];
+    if (!nextTable) break;
     parts.push(`--(${edge.from.col} = ${edge.to.col})-->`);
     parts.push(`${nextTable.schema}.${nextTable.name}`);
   }

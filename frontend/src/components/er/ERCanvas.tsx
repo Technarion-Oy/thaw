@@ -649,7 +649,8 @@ function ERCanvasInner({
   // In practice the natural click delay makes this a non-issue.
   const handleNodeContextMenu = useCallback(
     (event: React.MouseEvent, node: Node) => {
-      if (mode !== "edit" && !onBuildQuery) return;
+      if (mode !== "edit" && mode !== "readonly") return;
+      if (mode === "readonly" && !onBuildQuery) return;
       event.preventDefault();
       const table = filteredTableById.get(node.id);
       if (!table) return;
@@ -695,7 +696,7 @@ function ERCanvasInner({
         onConnect={mode === "edit" ? handleConnect : undefined}
         onNodeClick={closeContextMenu}
         onPaneClick={handlePaneClick}
-        onNodeContextMenu={mode === "edit" || onBuildQuery ? handleNodeContextMenu : undefined}
+        onNodeContextMenu={mode === "edit" || (mode === "readonly" && onBuildQuery) ? handleNodeContextMenu : undefined}
         onSelectionChange={handleSelectionChange}
         nodeTypes={nodeTypes}
         fitView

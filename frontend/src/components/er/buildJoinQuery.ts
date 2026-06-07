@@ -78,12 +78,14 @@ export function buildJoinSQL(state: JoinQueryState): string {
     joinLines.push(`${joinKw} ${fqn(state.database, j.table.schema, j.table.name)} ${alias} ON ${aliasedCondition}`);
   }
 
-  // Assemble
+  // Assemble — include a default LIMIT to prevent accidental full-table scans
+  // on large Snowflake tables. The user can adjust or remove it in the editor.
   const lines = [
     "SELECT",
     selectParts.join(",\n"),
     fromLine,
     ...joinLines,
+    "LIMIT 1000",
   ];
 
   return lines.join("\n");

@@ -2,7 +2,8 @@
 
 import { describe, expect, it } from "vitest";
 import { buildJoinSQL } from "./buildJoinQuery";
-import type { JoinQueryState } from "./erTypes";
+import { formatPathLabel } from "./JoinQueryPanel";
+import type { JoinQueryState, JoinPath } from "./erTypes";
 
 function makeState(overrides: Partial<JoinQueryState> = {}): JoinQueryState {
   return {
@@ -121,6 +122,11 @@ describe("buildJoinSQL", () => {
     expect(sql).toContain("t3.*");
   });
 
+  it("includes LIMIT 1000 by default", () => {
+    const sql = buildJoinSQL(makeState());
+    expect(sql).toContain("LIMIT 1000");
+  });
+
   it("handles cross-schema references", () => {
     const sql = buildJoinSQL({
       database: "MY_DB",
@@ -135,5 +141,36 @@ describe("buildJoinSQL", () => {
     });
     expect(sql).toContain("FROM MY_DB.SALES.ORDERS t1");
     expect(sql).toContain("INNER JOIN MY_DB.CATALOG.PRODUCTS t2 ON t1.PRODUCT_ID = t2.ID");
+  });
+});
+
+describe("formatPathLabel", () => {
+  it("formats a normal path", () => {
+    const path: JoinPath = {
+      tables: [
+        { schema: "S", name: "A" },
+        { schema: "S", name: "B" },
+      ],
+      edges: [
+        { from: { schema: "S", table: "A", col: "B_ID" }, to: { schema: "S", table: "B", col: "ID" } },
+      ],
+    };
+    expect(formatPathLabel(path)).toBe("S.A --(B_ID = ID)--> S.B");
+  });
+
+  it("returns empty string for empty path", () => {
+    expect(formatPathLabel({ tables: [], edges: [] })).toBe("");
+  });
+
+  it("handles malformed path where edges outnumber tables", () => {
+    const path: JoinPath = {
+      tables: [{ schema: "S", name: "A" }],
+      edges: [
+        { from: { schema: "S", table: "A", col: "X" }, to: { schema: "S", table: "B", col: "Y" } },
+      ],
+    };
+    // Should not throw — stops gracefully when nextTable is undefined
+    const label = formatPathLabel(path);
+    expect(label).toBe("S.A");
   });
 });
