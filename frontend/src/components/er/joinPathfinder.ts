@@ -18,7 +18,10 @@ function tableKey(schema: string, name: string): string {
   return `${schema.toUpperCase()}.${name.trim().toUpperCase()}`;
 }
 
-/** Parse a table key back into schema + name. */
+/** Parse a table key back into schema + name.
+ *  Splits on the first dot — safe for Snowflake ER data which uses uppercase
+ *  unquoted identifiers. Quoted identifiers containing dots (e.g. "my.schema")
+ *  are not expected from the ER metadata pipeline. */
 function parseKey(key: string): { schema: string; name: string } {
   const dot = key.indexOf(".");
   return { schema: key.slice(0, dot), name: key.slice(dot + 1) };
@@ -132,15 +135,19 @@ function bfsAllShortest(
 
   if (!found) return [];
 
-  // Reconstruct all shortest paths via backtracking
+  // Reconstruct shortest paths via backtracking, capped to avoid
+  // overwhelming the disambiguation UI in dense schemas.
+  const MAX_PATHS = 10;
   const results: BFSResult[] = [];
 
   function backtrack(node: string, path: string[], edges: AdjEdge[]) {
+    if (results.length >= MAX_PATHS) return;
     if (node === start) {
       results.push({ path: [...path].reverse(), edges: [...edges].reverse() });
       return;
     }
     for (const { parent, edge } of parents.get(node) ?? []) {
+      if (results.length >= MAX_PATHS) return;
       path.push(parent);
       edges.push(edge);
       backtrack(parent, path, edges);
@@ -188,6 +195,7 @@ export function findJoinPaths(
   const treeKeys: string[] = [selectedKeys[0]];
   const treeKeySet = new Set<string>([selectedKeys[0]]);
   const treeEdges: AdjEdge[] = [];
+  const treeEdgeKeys = new Set<string>();
   const remaining = new Set(selectedKeys.slice(1));
 
   while (remaining.size > 0) {
@@ -217,7 +225,15 @@ export function findJoinPaths(
         treeKeys.push(key);
       }
     }
-    treeEdges.push(...bestPath.edges);
+    // Deduplicate edges — sub-paths through already-connected nodes may
+    // re-traverse edges already in the tree.
+    for (const e of bestPath.edges) {
+      const eKey = `${e.fromSchema}.${e.fromTable}.${e.fromCol}-${e.toSchema}.${e.toTable}.${e.toCol}`;
+      if (!treeEdgeKeys.has(eKey)) {
+        treeEdgeKeys.add(eKey);
+        treeEdges.push(e);
+      }
+    }
     remaining.delete(bestTarget);
   }
 

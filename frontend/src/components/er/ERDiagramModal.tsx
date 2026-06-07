@@ -140,18 +140,33 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
     setJoinPaths(null);
   }, []);
 
-  // Compute highlighted edge IDs for visual feedback on the canvas
+  // Compute highlighted edge IDs for visual feedback on the canvas.
+  // Only highlights the specific FK columns used in the join ON conditions,
+  // not all FKs between two tables.
   const highlightedEdgeIds = useMemo(() => {
     if (!joinPanelOpen || !joinState) return undefined;
+
+    // Extract the set of FK column pairs actually used in join ON conditions.
+    // ON conditions have the form "SCHEMA.TABLE.COL = SCHEMA.TABLE.COL"
+    // (possibly ANDed for composite FKs).
+    const usedFKPairs = new Set<string>();
+    for (const j of joinState.joins) {
+      for (const cond of j.onCondition.split(" AND ")) {
+        const parts = cond.trim().split(/\s*=\s*/);
+        if (parts.length !== 2) continue;
+        // Normalise to "SCHEMA.TABLE.COL=SCHEMA.TABLE.COL" (uppercase, sorted)
+        const [a, b] = parts.map((p) => p.trim().toUpperCase()).sort();
+        usedFKPairs.add(`${a}=${b}`);
+      }
+    }
+
     const ids = new Set<string>();
-    // Match edges by FK column pairs against the join path's ON conditions
     for (const t of designerTables) {
       for (const c of t.columns) {
         if (!c.fkRef) continue;
         const parts = c.fkRef.split(".");
         if (parts.length !== 3) continue;
         const [refSchema, refTable, refCol] = parts;
-        // Find the target table's designer ID
         const targetTable = designerTables.find(
           (tt) => tt.schema.toUpperCase() === refSchema.toUpperCase() &&
                   tt.name.toUpperCase() === refTable.toUpperCase(),
@@ -162,15 +177,11 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
         );
         if (!targetCol) continue;
 
-        // Check if this FK is part of the join path
-        const fromKey = `${t.schema.toUpperCase()}.${t.name.toUpperCase()}`;
-        const toKey = `${refSchema.toUpperCase()}.${refTable.toUpperCase()}`;
-        const baseKey = `${joinState.baseTable.schema.toUpperCase()}.${joinState.baseTable.name.toUpperCase()}`;
-        const joinKeys = new Set([baseKey, ...joinState.joins.map((j) =>
-          `${j.table.schema.toUpperCase()}.${j.table.name.toUpperCase()}`
-        )]);
-
-        if (joinKeys.has(fromKey) && joinKeys.has(toKey)) {
+        // Check if this specific FK column pair is used in the join
+        const fromRef = `${t.schema.toUpperCase()}.${t.name.toUpperCase()}.${c.name.toUpperCase()}`;
+        const toRef = `${refSchema.toUpperCase()}.${refTable.toUpperCase()}.${refCol.toUpperCase()}`;
+        const [a, b] = [fromRef, toRef].sort();
+        if (usedFKPairs.has(`${a}=${b}`)) {
           ids.add(`fk-${t.id}-${c.id}-${targetTable.id}-${targetCol.id}`);
         }
       }

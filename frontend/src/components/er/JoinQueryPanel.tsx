@@ -9,19 +9,20 @@ import { buildJoinSQL } from "./buildJoinQuery";
 
 const JOIN_TYPES: JoinEntry["joinType"][] = ["INNER", "LEFT", "RIGHT", "FULL OUTER"];
 
+const SQL_KEYWORDS = new Set([
+  "SELECT", "FROM", "INNER", "LEFT", "RIGHT", "FULL", "OUTER", "JOIN",
+  "ON", "AND", "OR", "AS", "WHERE", "ORDER", "BY", "GROUP", "HAVING",
+]);
+
 /** SQL keyword highlighting — basic tokenizer for the preview. */
 function highlightSQL(sql: string): JSX.Element[] {
-  const keywords = new Set([
-    "SELECT", "FROM", "INNER", "LEFT", "RIGHT", "FULL", "OUTER", "JOIN",
-    "ON", "AND", "OR", "AS", "WHERE", "ORDER", "BY", "GROUP", "HAVING",
-  ]);
 
   return sql.split("\n").map((line, li) => {
     const tokens = line.split(/(\b\w+\b|[.,*()=])/g);
     return (
       <div key={li}>
         {tokens.map((tok, ti) => {
-          if (keywords.has(tok.toUpperCase())) {
+          if (SQL_KEYWORDS.has(tok.toUpperCase())) {
             return (
               <span key={ti} style={{ color: "var(--accent)", fontWeight: 600 }}>
                 {tok}
@@ -75,6 +76,7 @@ export function JoinPathDisambiguation({ paths, onSelect, onCancel }: Disambigua
         {paths.map((path, i) => (
           <div
             key={i}
+            className="er-join-path-option"
             onClick={() => onSelect(i)}
             style={{
               padding: "8px 12px",
@@ -85,14 +87,6 @@ export function JoinPathDisambiguation({ paths, onSelect, onCancel }: Disambigua
               fontSize: 11,
               lineHeight: 1.6,
               wordBreak: "break-all",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = "var(--accent)";
-              e.currentTarget.style.background = "var(--bg-overlay)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = "var(--border)";
-              e.currentTarget.style.background = "";
             }}
           >
             {formatPathLabel(path)}
@@ -151,7 +145,7 @@ export default function JoinQueryPanel({
   const baseKey = tableKey(state.baseTable.schema, state.baseTable.name);
 
   // Build collapse items for column selection
-  const collapseItems = [
+  const collapseItems = useMemo(() => [
     {
       key: baseKey,
       label: (
@@ -189,7 +183,7 @@ export default function JoinQueryPanel({
         ),
       };
     }),
-  ];
+  ], [state, tableColumns, baseKey, updateSelectedColumns]);
 
   return (
     <div
