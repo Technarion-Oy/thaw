@@ -609,21 +609,52 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
       let childColId = "";
       let parentColId = "";
 
-      // Auto-detect common column names between the two tables
+      // Auto-detect the best FK column pair between the two tables.
+      // Priority: 1) child column whose name contains the parent table name
+      //              matching a PK column on the parent (e.g. CUSTOMER_ID → CUSTOMER.ID)
+      //           2) PK column on the parent that shares a name with a child column
+      //           3) any common column name between the two tables
       if (tableA && tableB) {
-        const colNamesA = new Set(
-          tableA.columns.filter((c) => c.name.trim()).map((c) => c.name.trim().toUpperCase()),
-        );
-        const commonColB = tableB.columns.find(
-          (c) => c.name.trim() && colNamesA.has(c.name.trim().toUpperCase()),
-        );
-        if (commonColB) {
-          const commonColA = tableA.columns.find(
-            (c) => c.name.trim().toUpperCase() === commonColB.name.trim().toUpperCase(),
-          );
-          if (commonColA) {
-            childColId = commonColA.id;
-            parentColId = commonColB.id;
+        const namedA = tableA.columns.filter((c) => c.name.trim());
+        const namedB = tableB.columns.filter((c) => c.name.trim());
+        const colMapA = new Map(namedA.map((c) => [c.name.trim().toUpperCase(), c]));
+        const parentName = tableB.name.trim().toUpperCase();
+
+        // Strategy 1: child col name contains parent table name + parent PK
+        if (parentName) {
+          const parentPK = namedB.find((c) => c.isPK);
+          if (parentPK) {
+            const candidate = namedA.find(
+              (c) => c.name.trim().toUpperCase().includes(parentName),
+            );
+            if (candidate) {
+              childColId = candidate.id;
+              parentColId = parentPK.id;
+            }
+          }
+        }
+
+        // Strategy 2: parent PK column name exists in child
+        if (!childColId) {
+          const parentPK = namedB.find((c) => c.isPK);
+          if (parentPK) {
+            const match = colMapA.get(parentPK.name.trim().toUpperCase());
+            if (match) {
+              childColId = match.id;
+              parentColId = parentPK.id;
+            }
+          }
+        }
+
+        // Strategy 3: any common column name
+        if (!childColId) {
+          for (const colB of namedB) {
+            const match = colMapA.get(colB.name.trim().toUpperCase());
+            if (match) {
+              childColId = match.id;
+              parentColId = colB.id;
+              break;
+            }
           }
         }
       }

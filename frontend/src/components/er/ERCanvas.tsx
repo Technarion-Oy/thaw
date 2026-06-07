@@ -363,20 +363,25 @@ function ERCanvasInner({
   }, [selectedTableIds, setNodes]);
 
   // Propagate XYFlow selection changes (Cmd/Ctrl+click multi-select) to parent.
-  // Shallow-compares against the last known selection to avoid re-renders
-  // from intermediate states during box-select drags.
+  // Debounced via requestAnimationFrame so at most one update fires per paint
+  // frame during box-select drags. Shallow-compares against the last known
+  // selection to skip no-op updates.
+  const selectionRafRef = useRef(0);
   const handleSelectionChange = useCallback(
     ({ nodes: selectedNodes }: { nodes: Node[] }) => {
-      const ids = selectedNodes.map((n) => n.id).sort();
-      const last = lastSelectionRef.current;
-      if (
-        ids.length === last.length &&
-        ids.every((id, i) => id === last[i])
-      ) {
-        return;
-      }
-      lastSelectionRef.current = ids;
-      onSelectionChangeProp?.(ids);
+      cancelAnimationFrame(selectionRafRef.current);
+      selectionRafRef.current = requestAnimationFrame(() => {
+        const ids = selectedNodes.map((n) => n.id).sort();
+        const last = lastSelectionRef.current;
+        if (
+          ids.length === last.length &&
+          ids.every((id, i) => id === last[i])
+        ) {
+          return;
+        }
+        lastSelectionRef.current = ids;
+        onSelectionChangeProp?.(ids);
+      });
     },
     [onSelectionChangeProp],
   );
@@ -445,7 +450,7 @@ function ERCanvasInner({
       }
     }
     saveERLayout(database, positions);
-  }, [database, setNodes, getNodes, getEdges]);
+  }, [database, setNodes, getNodes, getEdges, fitView]);
 
   const handleResetLayout = useCallback(() => {
     initialLayoutDone.current = false;
