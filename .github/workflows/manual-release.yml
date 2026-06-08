@@ -172,6 +172,7 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
           allow-no-subscriptions: true
+          auth-type: SERVICE_PRINCIPAL
 
       - name: Sign Windows binaries
         if: matrix.platform == 'windows'
