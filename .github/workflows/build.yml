@@ -125,6 +125,23 @@ jobs:
         if: matrix.platform == 'linux'
         run: mv build/bin/thaw "build/bin/thaw-${{ steps.prep.outputs.version }}-linux-amd64"
 
+      # ── Linux binary verification (checksums + GPG signing) ───────────────
+
+      - name: Generate checksums (Linux)
+        if: matrix.platform == 'linux'
+        run: cd build/bin && sha256sum thaw-*-linux-amd64 > checksums.txt
+
+      - name: Import GPG key (Linux)
+        if: matrix.platform == 'linux'
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Sign checksums (Linux)
+        if: matrix.platform == 'linux'
+        run: cd build/bin && gpg --detach-sign --armor --local-user releases@technarion.com --output checksums.txt.sig checksums.txt
+
       # ── Store artifact (non-tag runs) ──────────────────────────────────────
       # On tag runs binaries are attached directly to the GitHub Release below.
       - name: Upload artifact
@@ -132,7 +149,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: thaw-${{ steps.prep.outputs.version }}-${{ matrix.platform }}-${{ matrix.arch }}
-          path: build/bin/thaw-${{ steps.prep.outputs.version }}-*
+          path: |
+            build/bin/thaw-${{ steps.prep.outputs.version }}-*
+            build/bin/checksums.txt
+            build/bin/checksums.txt.sig
           retention-days: 30
           if-no-files-found: error
 
@@ -147,3 +167,14 @@ jobs:
           append_body: false
           fail_on_unmatched_files: true
           files: build/bin/thaw-${{ steps.prep.outputs.version }}-*
+
+      - name: Upload checksums to GitHub Release (Linux)
+        if: github.ref_type == 'tag' && matrix.platform == 'linux'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          append_body: false
+          fail_on_unmatched_files: true
+          files: |
+            build/bin/checksums.txt
+            build/bin/checksums.txt.sig

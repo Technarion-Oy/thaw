@@ -182,8 +182,25 @@ jobs:
         if: matrix.platform == 'linux'
         run: mv build/bin/thaw "build/bin/thaw-${{ needs.release.outputs.version }}-linux-amd64"
 
+      # ── Linux binary verification (checksums + GPG signing) ───────────────
+
+      - name: Generate checksums (Linux)
+        if: matrix.platform == 'linux'
+        run: cd build/bin && sha256sum thaw-*-linux-amd64 > checksums.txt
+
+      - name: Import GPG key (Linux)
+        if: matrix.platform == 'linux'
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Sign checksums (Linux)
+        if: matrix.platform == 'linux'
+        run: cd build/bin && gpg --detach-sign --armor --local-user releases@technarion.com --output checksums.txt.sig checksums.txt
+
       # ── Attach binaries to GitHub Release ──────────────────────────────────
-      
+
       - name: Upload binaries to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -191,3 +208,14 @@ jobs:
           append_body: false
           fail_on_unmatched_files: true
           files: build/bin/thaw-${{ needs.release.outputs.version }}-*
+
+      - name: Upload checksums to GitHub Release (Linux)
+        if: matrix.platform == 'linux'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.release.outputs.version }}
+          append_body: false
+          fail_on_unmatched_files: true
+          files: |
+            build/bin/checksums.txt
+            build/bin/checksums.txt.sig
