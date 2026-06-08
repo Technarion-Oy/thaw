@@ -1,26 +1,110 @@
 name: Build Binaries
 
 on:
-  # push:
-  #   tags:
-  #     - "v*"
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
 
 jobs:
   build:
-    name: Test Azure Login
+    name: Build — ${{ matrix.platform }}-${{ matrix.arch }}
     strategy:
       fail-fast: false
       matrix:
         include:
+          - os: macos-latest   # arm64 (M-series runner)
+            platform: darwin
+            arch: arm64
+          - os: macos-15-large  # Intel (x86_64) runner
+            platform: darwin
+            arch: amd64
           - os: windows-latest
             platform: windows
             arch: amd64
+          - os: windows-latest # cross-compile arm64 on amd64 runner
+            platform: windows
+            arch: arm64
+          - os: ubuntu-24.04   # pinned: ubuntu-latest may lack libwebkit2gtk-4.1-dev
+            platform: linux
+            arch: amd64
 
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0
+
+      - name: Download Go dependencies
+        run: go mod download
+
+      - name: Install garble
+        run: go install mvdan.cc/garble@latest
+
+      - name: Install NSIS (Windows only)
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: |
+          choco install nsis
+          # Explicitly add NSIS to the GitHub runner's PATH for subsequent steps
+          echo "C:\Program Files (x86)\NSIS" >> $GITHUB_PATH
+
+      - name: Prepare version string
+        id: prep
+        shell: bash
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            # Strip the leading "v" from semantic version tags (v1.2.3 → 1.2.3)
+            VERSION="${{ github.ref_name }}"
+            VERSION="${VERSION#v}"
+          else
+            # Replace / with - in branch names to avoid path issues in filenames
+            VERSION=$(echo "${{ github.ref_name }}" | sed 's/\//-/g')
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      # ── Wails Builds (obfuscated via garble) ──────────────────────────────
+      # -obfuscated: invokes garble as the Go compiler toolchain within the
+      #   Wails build pipeline, producing an obfuscated binary without a
+      #   separate post-build step.  This preserves macOS ad-hoc signing
+      #   (no binary replacement after codesign) and Windows .syso embedding.
+      # -platform:   explicit target to avoid implicit runner-architecture deps.
+      # -tags webkit2_41: Ubuntu 24.04 only ships libwebkit2gtk-4.1-dev;
+      #   Wails' CGO directives default to webkit2gtk-4.0 without this tag.
+      #   Harmless on macOS (webkit CGO is gated behind //go:build linux).
+
+      - name: Build (macOS & Linux)
+        if: matrix.platform != 'windows'
+        run: wails build -obfuscated -platform ${{ matrix.platform }}/${{ matrix.arch }} -clean -tags webkit2_41 -ldflags "-s -w -X thaw/internal/version.Version=${{ steps.prep.outputs.version }}" -trimpath
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+
+      - name: Build & Package Installer (Windows)
+        if: matrix.platform == 'windows'
+        run: wails build -obfuscated -platform windows/${{ matrix.arch }} -clean -nsis -ldflags "-s -w -X thaw/internal/version.Version=${{ steps.prep.outputs.version }}" -trimpath
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
 
       # ── Sign Windows binaries (Azure Trusted Signing) ───────────────────────
       - name: Azure Login (Windows only)
@@ -30,6 +114,91 @@ jobs:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
           allow-no-subscriptions: true
 
-      - name: Verify login
+      - name: Sign Windows binaries
+        if: matrix.platform == 'windows'
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ vars.AZURE_CODE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ vars.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ vars.AZURE_CERTIFICATE_PROFILE_NAME }}
+          files-folder: build/bin
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      # ── Rename / package output with tag version ───────────────────────────
+      - name: Package macOS app bundle
+        if: matrix.platform == 'darwin'
+        run: |
+          cd build/bin
+          zip -r "thaw-${{ steps.prep.outputs.version }}-darwin-${{ matrix.arch }}.zip" thaw.app
+
+      - name: Rename Windows binaries
+        if: matrix.platform == 'windows'
         shell: pwsh
-        run: az account show
+        # Wails natively outputted both the raw executable and the installer, we rename both
+        run: |
+          Move-Item build/bin/thaw.exe "build/bin/thaw-${{ steps.prep.outputs.version }}-windows-${{ matrix.arch }}-portable.exe"
+          Move-Item "build/bin/thaw-${{ matrix.arch }}-installer.exe" "build/bin/thaw-${{ steps.prep.outputs.version }}-windows-${{ matrix.arch }}-installer.exe"
+
+      - name: Rename Linux binary
+        if: matrix.platform == 'linux'
+        run: mv build/bin/thaw "build/bin/thaw-${{ steps.prep.outputs.version }}-linux-amd64"
+
+      # ── Linux binary verification (checksums + GPG signing) ───────────────
+
+      - name: Generate checksums (Linux)
+        if: matrix.platform == 'linux'
+        run: cd build/bin && sha256sum thaw-*-linux-amd64 > checksums.txt
+
+      - name: Import GPG key (Linux)
+        if: matrix.platform == 'linux'
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Sign checksums (Linux)
+        if: matrix.platform == 'linux'
+        run: cd build/bin && gpg --detach-sign --armor --local-user releases@technarion.com --output checksums.txt.sig checksums.txt
+
+      # ── Store artifact (non-tag runs) ──────────────────────────────────────
+      # On tag runs binaries are attached directly to the GitHub Release below.
+      - name: Upload artifact
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: thaw-${{ steps.prep.outputs.version }}-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            build/bin/thaw-${{ steps.prep.outputs.version }}-*
+            build/bin/checksums.txt
+            build/bin/checksums.txt.sig
+          retention-days: 30
+          if-no-files-found: error
+
+      # ── Attach binaries to GitHub Release (tag runs only) ──────────────────
+      # The release itself (notes + tag) is created by manual-release.yml via
+      # semantic-release.  This step appends the platform binary to it.
+      - name: Upload binaries to GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          append_body: false
+          fail_on_unmatched_files: true
+          files: build/bin/thaw-${{ steps.prep.outputs.version }}-*
+
+      - name: Upload checksums to GitHub Release (Linux)
+        if: github.ref_type == 'tag' && matrix.platform == 'linux'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          append_body: false
+          fail_on_unmatched_files: true
+          files: |
+            build/bin/checksums.txt
+            build/bin/checksums.txt.sig
