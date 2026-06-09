@@ -140,7 +140,7 @@ func TestValidateSnowflakePatterns_CreateHybridTable(t *testing.T) {
 		// "Secondary indexes (INDEX) are only supported on hybrid tables" warning.
 		`CREATE TABLE t1 (id INT, "INDEX" INT)`,
 		// NOTNULL (single word, no space) is a valid Snowflake synonym for NOT NULL.
-		// The validator must recognise it as satisfying the hybrid-table NOT NULL requirement.
+		// The validator must recognize it as satisfying the hybrid-table NOT NULL requirement.
 		"CREATE HYBRID TABLE t1 (id INT PRIMARY KEY NOTNULL)",
 		"CREATE HYBRID TABLE t1 (id INT NOTNULL, PRIMARY KEY (id))",
 		// Quoted identifier containing a space — strings.Fields must not split it.

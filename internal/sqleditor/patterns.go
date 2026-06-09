@@ -2546,7 +2546,7 @@ func stripCommentsSafe(s string) string {
 	return strings.TrimSpace(stripAndMask(s, false))
 }
 
-// stripAndMask performs a single-pass scan that recognises string literals,
+// stripAndMask performs a single-pass scan that recognizes string literals,
 // line comments (--), and block comments (/* ... */) in priority order.
 // If maskStrings is true, string literals are replaced with ''; otherwise
 // they are copied verbatim.
@@ -4751,9 +4751,10 @@ func stripQuotedIdentsAndParens(s string) string {
 			depth := 1
 			i++
 			for i < len(s) && depth > 0 {
-				if s[i] == '(' {
+				switch s[i] {
+				case '(':
 					depth++
-				} else if s[i] == ')' {
+				case ')':
 					depth--
 				}
 				i++
