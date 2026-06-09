@@ -32,9 +32,7 @@ interface QueryLogEntry {
   tabID: string;
 }
 
-interface Props {
-  onClose: () => void;
-}
+interface Props {}
 
 const statusColors: Record<string, string> = {
   SUCCESS: "green",
@@ -67,14 +65,17 @@ function formatEntryForCopy(e: QueryLogEntry): string {
   return `[${ts}] [${e.status}] ${dur} [${e.source}] ${e.queryID || "-"}\n  ${e.sql}`;
 }
 
-export default function QueryLogPane({ onClose: _onClose }: Props) {
+export default function QueryLogPane(_props: Props) {
   const [entries, setEntries] = useState<QueryLogEntry[]>([]);
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const mountedRef = useRef(true);
 
-  // Auto-enable backend logging on mount if not already enabled, and load existing entries.
+  // Intentionally always enable backend logging on mount (and never disable on
+  // unmount). The log is session-scoped and lightweight — keeping it running in
+  // the background ensures entries are captured even when the pane isn't visible,
+  // so opening it later still shows the full session history.
   useEffect(() => {
     mountedRef.current = true;
     IsQueryLogEnabled().then((enabled) => {
@@ -110,7 +111,15 @@ export default function QueryLogPane({ onClose: _onClose }: Props) {
         ),
       );
     });
-    return () => { offEntry(); offUpdate(); };
+    const offFilter = EventsOn("menu:query-log-filter", (filter: string) => {
+      if (!mountedRef.current) return;
+      setSourceFilter(filter);
+    });
+    const offCleared = EventsOn("querylog:cleared", () => {
+      if (!mountedRef.current) return;
+      setEntries([]);
+    });
+    return () => { offEntry(); offUpdate(); offFilter(); offCleared(); };
   }, []);
 
   const handleClear = useCallback(() => {

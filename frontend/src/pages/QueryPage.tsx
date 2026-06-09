@@ -14,7 +14,7 @@ import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip,
 import { CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined, SearchOutlined, CloudUploadOutlined } from "@ant-design/icons";
 import * as XLSX from "xlsx";
 import { ClipboardSetText, BrowserOpenURL } from "../../wailsjs/runtime/runtime";
-import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, CloseTabSession, GetSessionInitMode, InitTabSession, SetQueryLogEnabled, SetQueryLogFilter } from "../../wailsjs/go/app/App";
+import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, CloseTabSession, GetSessionInitMode, InitTabSession, SetQueryLogEnabled } from "../../wailsjs/go/app/App";
 import { GetSqlStatementRanges } from "../../wailsjs/go/sqleditor/Service";
 import type { snowflake } from "../../wailsjs/go/models";
 import SessionPropertiesModal from "../components/common/SessionPropertiesModal";
@@ -871,13 +871,6 @@ export default function QueryPage() {
     return () => off();
   }, [featureFlags.queryLog]);
 
-  useEffect(() => {
-    const off = EventsOn("menu:query-log-filter", (filter: string) => {
-      SetQueryLogFilter(filter);
-    });
-    return () => off();
-  }, []);
-
   // Reset to Results pane if queryLog feature flag is disabled while viewing the log.
   useEffect(() => {
     if (!featureFlags.queryLog) {
@@ -1551,7 +1544,7 @@ export default function QueryPage() {
 
           {featureFlags.queryLog && (
             <div style={{ flex: 1, overflow: "hidden", display: resultPane === "querylog" ? "flex" : "none", flexDirection: "column" }}>
-              <QueryLogPane onClose={() => { setResultPane("results"); }} />
+              <QueryLogPane />
             </div>
           )}
       </div>}

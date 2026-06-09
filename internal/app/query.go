@@ -55,7 +55,7 @@ func (a *App) ExecuteQuery(sql string) (*snowflake.QueryResult, error) {
 	}
 
 	// Record the completed query in the session log.
-	if a.queryLog.IsEnabled() && a.queryLog.Filter() != "internal" {
+	if a.queryLog.IsEnabled() {
 		status := querylog.StatusSuccess
 		var errMsg string
 		if err != nil {
@@ -75,7 +75,7 @@ func (a *App) ExecuteQuery(sql string) (*snowflake.QueryResult, error) {
 			Error:      errMsg,
 			Source:     querylog.SourceUser,
 		}
-		a.queryLog.Record(entry)
+		entry.ID = a.queryLog.Record(entry)
 		wailsruntime.EventsEmit(a.ctx, "querylog:entry", entry)
 	}
 
@@ -159,15 +159,17 @@ func (a *App) StartQuery(tabId string, sql string) (string, error) {
 	// Record a RUNNING entry in the query log before execution begins.
 	var logEntryID int
 	logStart := time.Now()
-	if a.queryLog.IsEnabled() && a.queryLog.Filter() != "internal" {
-		logEntryID = a.queryLog.Record(querylog.Entry{
+	if a.queryLog.IsEnabled() {
+		entry := querylog.Entry{
 			Timestamp: logStart,
 			SQL:       sql,
 			Status:    querylog.StatusRunning,
 			Source:    querylog.SourceUser,
 			TabID:     tabId,
-		})
-		wailsruntime.EventsEmit(a.ctx, "querylog:entry", a.queryLog.Entries()[len(a.queryLog.Entries())-1])
+		}
+		entry.ID = a.queryLog.Record(entry)
+		logEntryID = entry.ID
+		wailsruntime.EventsEmit(a.ctx, "querylog:entry", entry)
 	}
 
 	ts.queryMu.Lock()

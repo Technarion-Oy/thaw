@@ -485,10 +485,6 @@ func (a *App) Connect(params snowflake.ConnectParams) error {
 		if src == querylog.SourceUser {
 			return // user queries are tracked separately with RUNNING→final status
 		}
-		filter := a.queryLog.Filter()
-		if filter == "user" {
-			return
-		}
 		status := querylog.StatusSuccess
 		var errMsg string
 		if err != nil {
@@ -505,7 +501,7 @@ func (a *App) Connect(params snowflake.ConnectParams) error {
 			Source:     querylog.SourceInternal,
 			TabID:      querylog.GetTabID(ctx),
 		}
-		a.queryLog.Record(entry)
+		entry.ID = a.queryLog.Record(entry)
 		wailsruntime.EventsEmit(a.ctx, "querylog:entry", entry)
 	}
 	logger.L.Info("connected", "account", params.Account, "user", params.User)
@@ -562,8 +558,10 @@ func (a *App) Disconnect() error {
 		return true
 	})
 
-	// Clear the session query log on disconnect.
+	// Clear the session query log on disconnect and notify the frontend so it
+	// drops stale entries (the component may still be mounted).
 	a.queryLog.Clear()
+	wailsruntime.EventsEmit(a.ctx, "querylog:cleared")
 
 	if a.client == nil {
 		return nil

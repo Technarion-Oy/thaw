@@ -222,8 +222,11 @@ func (c *Client) execCtx(ctx context.Context, query string, args ...any) (sql.Re
 }
 
 // queryRowCtx wraps c.db.QueryRowContext with the OnQuery hook.
-// The hook fires immediately after the round-trip; row-level Scan errors
-// are not captured.
+// NOTE: The hook always fires with err=nil because QueryRowContext defers the
+// actual error to Row.Scan(). Queries routed through this wrapper will appear
+// as SUCCESS in the query log even if the subsequent Scan() fails. This is a
+// known limitation of the sql.Row API — the network round-trip succeeded but
+// the row-level result may still carry an error.
 func (c *Client) queryRowCtx(ctx context.Context, query string, args ...any) *sql.Row {
 	start := time.Now()
 	row := c.db.QueryRowContext(ctx, query, args...)
