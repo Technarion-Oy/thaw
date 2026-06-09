@@ -14,7 +14,7 @@ import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip,
 import { CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined, SearchOutlined, CloudUploadOutlined } from "@ant-design/icons";
 import * as XLSX from "xlsx";
 import { ClipboardSetText, BrowserOpenURL } from "../../wailsjs/runtime/runtime";
-import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, CloseTabSession, GetSessionInitMode, InitTabSession } from "../../wailsjs/go/app/App";
+import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, CloseTabSession, GetSessionInitMode, InitTabSession, SetQueryLogEnabled } from "../../wailsjs/go/app/App";
 import { GetSqlStatementRanges } from "../../wailsjs/go/sqleditor/Service";
 import type { snowflake } from "../../wailsjs/go/models";
 import SessionPropertiesModal from "../components/common/SessionPropertiesModal";
@@ -38,6 +38,7 @@ import GridSearch from "../components/results/GridSearch";
 import StatusBar from "../components/results/StatusBar";
 import QueryProfileModal from "../components/results/QueryProfileModal";
 import TerminalPanel from "../components/terminal/TerminalPanel";
+import QueryLogPane from "../components/results/QueryLogPane";
 import NotebookTab from "../components/notebook/NotebookTab";
 import { useQueryStore, type QueryResult, EXECUTE_IN_TAB_EVENT } from "../store/queryStore";
 import { useConnectionStore } from "../store/connectionStore";
@@ -93,7 +94,7 @@ export default function QueryPage() {
   // Used to map backend-reported indices (relative to selection) back to the
   // full-buffer indices that SqlEditor's decorator uses.
   const selectionBaseStmtIdxRef = useRef(0);
-  const [resultPane, setResultPane] = useState<"results" | "terminal">("results");
+  const [resultPane, setResultPane] = useState<"results" | "terminal" | "querylog">("results");
   const [terminalOpen, setTerminalOpen] = useState(false);
   const featureFlags = useFeatureFlagsStore((s) => s.flags);
 
@@ -860,6 +861,23 @@ export default function QueryPage() {
     return () => off();
   }, [featureFlags.embeddedTerminal]);
 
+  // Query Log — toggle and filter via View → Query Log menu
+  useEffect(() => {
+    const off = EventsOn("menu:query-log-toggle", (enabled: boolean) => {
+      if (!featureFlags.queryLog) return;
+      if (enabled) setResultPane("querylog");
+      SetQueryLogEnabled(enabled);
+    });
+    return () => off();
+  }, [featureFlags.queryLog]);
+
+  // Reset to Results pane if queryLog feature flag is disabled while viewing the log.
+  useEffect(() => {
+    if (!featureFlags.queryLog) {
+      setResultPane((prev) => prev === "querylog" ? "results" : prev);
+    }
+  }, [featureFlags.queryLog]);
+
   useEffect(() => {
     const off = EventsOn("menu:code-snippets", () => { if (featureFlags.codeSnippets) setSnippetsOpen(true); });
     return () => off();
@@ -1188,7 +1206,7 @@ export default function QueryPage() {
       <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
         {/* Tab bar */}
         <div style={{ display: "flex", background: "var(--bg-raised)", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-          {(["results", ...(terminalOpen && featureFlags.embeddedTerminal ? ["terminal"] : [])] as Array<"results" | "terminal">).map((tab) => (
+          {(["results", ...(terminalOpen && featureFlags.embeddedTerminal ? ["terminal"] : []), ...(featureFlags.queryLog ? ["querylog"] : [])] as Array<"results" | "terminal" | "querylog">).map((tab) => (
             <button
               key={tab}
               onClick={() => setResultPane(tab)}
@@ -1202,7 +1220,7 @@ export default function QueryPage() {
                 cursor: "pointer",
               }}
             >
-              {tab === "results" ? "Results" : "Terminal"}
+              {tab === "results" ? "Results" : tab === "terminal" ? "Terminal" : "Query Log"}
             </button>
           ))}
         </div>
@@ -1521,6 +1539,12 @@ export default function QueryPage() {
           {terminalOpen && (
             <div style={{ flex: 1, overflow: "hidden", display: resultPane === "terminal" ? "flex" : "none", flexDirection: "column" }}>
               <TerminalPanel onClose={() => { setTerminalOpen(false); setResultPane("results"); }} />
+            </div>
+          )}
+
+          {featureFlags.queryLog && (
+            <div style={{ flex: 1, overflow: "hidden", display: resultPane === "querylog" ? "flex" : "none", flexDirection: "column" }}>
+              <QueryLogPane />
             </div>
           )}
       </div>}

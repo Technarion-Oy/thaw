@@ -25,6 +25,7 @@ import (
 	"thaw/internal/logger"
 	"thaw/internal/mcp"
 	"thaw/internal/migration"
+	"thaw/internal/querylog"
 	"thaw/internal/session"
 	"thaw/internal/snowflake"
 	"thaw/internal/snowpark"
@@ -48,6 +49,8 @@ type tabSession struct {
 	queryErr           error
 	queryCancelFunc    context.CancelFunc
 	queryCancelCtxDone <-chan struct{}
+	queryLogEntryID    int       // ID in queryLog for RUNNING → final status updates
+	queryLogStart      time.Time // timestamp when the query was submitted, for duration
 }
 
 // tabSessionInitMu serializes lazy creation of new tab sessions so that two
@@ -105,12 +108,17 @@ type App struct {
 	ptyMu  sync.Mutex
 	ptmx   *os.File
 	ptyCmd *exec.Cmd
+
+	// Session-scoped query log for debugging and issue reporting.
+	queryLog             *querylog.Log
+	setQueryLogMenuCheck func(bool) // set by buildMenu; updates the native menu checkbox
 }
 
 // NewApp creates and returns a new App instance for use with the Wails runtime.
 func NewApp() *App {
 	return &App{
 		gitCommitFilters: make(map[string]string),
+		queryLog:         querylog.New(),
 	}
 }
 
@@ -240,6 +248,11 @@ func (a *App) getOrInitTabSession(tabId string) (*tabSession, error) {
 		maxIdle = 1
 	}
 	client.SetPoolLimits(maxOpen, maxIdle)
+	// Inherit the query-log hook from the shared client so internal queries
+	// on tab sessions are also captured.
+	if a.client != nil {
+		client.OnQuery = a.client.OnQuery
+	}
 	ts := &tabSession{client: client}
 	ts.lastUsed.Store(time.Now().UnixNano())
 	a.tabSessions.Store(tabId, ts)
@@ -463,6 +476,35 @@ func (a *App) Connect(params snowflake.ConnectParams) error {
 	a.client = client
 	a.connectParams = &params
 	a.applyFeatureFlagExclusions()
+	// Wire the query-log hook on the shared client so internal queries
+	// (object listing, DDL fetching, session setup) are captured.
+	client.OnQuery = func(ctx context.Context, sql, qid string, err error, dur time.Duration) {
+		if !a.queryLog.IsEnabled() {
+			return
+		}
+		src := querylog.GetSource(ctx)
+		if src == querylog.SourceUser {
+			return // user queries are tracked separately with RUNNING→final status
+		}
+		status := querylog.StatusSuccess
+		var errMsg string
+		if err != nil {
+			status = querylog.StatusFail
+			errMsg = err.Error()
+		}
+		entry := querylog.Entry{
+			Timestamp:  time.Now(),
+			SQL:        sql,
+			QueryID:    qid,
+			Status:     status,
+			DurationMs: dur.Milliseconds(),
+			Error:      errMsg,
+			Source:     querylog.SourceInternal,
+			TabID:      querylog.GetTabID(ctx),
+		}
+		entry.ID = a.queryLog.Record(entry)
+		wailsruntime.EventsEmit(a.ctx, "querylog:entry", entry)
+	}
 	logger.L.Info("connected", "account", params.Account, "user", params.User)
 	telemetry.Track(telemetry.EventConnected, telemetry.Props{"authenticator": params.Authenticator})
 
@@ -516,6 +558,11 @@ func (a *App) Disconnect() error {
 		a.evictedContexts.Delete(key)
 		return true
 	})
+
+	// Clear the session query log on disconnect and notify the frontend so it
+	// drops stale entries (the component may still be mounted).
+	a.queryLog.Clear()
+	wailsruntime.EventsEmit(a.ctx, "querylog:cleared")
 
 	if a.client == nil {
 		return nil

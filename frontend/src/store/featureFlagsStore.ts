@@ -53,6 +53,7 @@ const allEnabled: config.FeatureFlags = {
   fileWatcher: true,
   columnManagement: true,
   mcpServer: false,
+  queryLog: false,
 };
 
 // allLocked default: nothing is admin-locked.
@@ -95,6 +96,7 @@ const nothingLocked: config.FeatureFlags = {
   fileWatcher: false,
   columnManagement: false,
   mcpServer: false,
+  queryLog: false,
 };
 
 interface FeatureFlagsState {

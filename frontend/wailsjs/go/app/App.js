@@ -218,6 +218,10 @@ export function ClearObjectCacheForDatabase(arg1) {
   return window['go']['app']['App']['ClearObjectCacheForDatabase'](arg1);
 }
 
+export function ClearQueryLog() {
+  return window['go']['app']['App']['ClearQueryLog']();
+}
+
 export function ClearQueryResult(arg1) {
   return window['go']['app']['App']['ClearQueryResult'](arg1);
 }
@@ -594,6 +598,10 @@ export function GetQueryHistory(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) 
   return window['go']['app']['App']['GetQueryHistory'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
 }
 
+export function GetQueryLogEntries() {
+  return window['go']['app']['App']['GetQueryLogEntries']();
+}
+
 export function GetQueryOperatorStats(arg1) {
   return window['go']['app']['App']['GetQueryOperatorStats'](arg1);
 }
@@ -838,6 +846,10 @@ export function IsNumeric(arg1) {
   return window['go']['app']['App']['IsNumeric'](arg1);
 }
 
+export function IsQueryLogEnabled() {
+  return window['go']['app']['App']['IsQueryLogEnabled']();
+}
+
 export function ListAIModels(arg1, arg2, arg3) {
   return window['go']['app']['App']['ListAIModels'](arg1, arg2, arg3);
 }
@@ -1054,6 +1066,10 @@ export function PickOpenFile() {
   return window['go']['app']['App']['PickOpenFile']();
 }
 
+export function PickQueryLogExportFile(arg1) {
+  return window['go']['app']['App']['PickQueryLogExportFile'](arg1);
+}
+
 export function PickSaveExportFile(arg1, arg2) {
   return window['go']['app']['App']['PickSaveExportFile'](arg1, arg2);
 }
@@ -1212,6 +1228,10 @@ export function SetGitCommitFilter(arg1, arg2, arg3, arg4) {
 
 export function SetNotebookQueryWarehouse(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['SetNotebookQueryWarehouse'](arg1, arg2, arg3, arg4);
+}
+
+export function SetQueryLogEnabled(arg1) {
+  return window['go']['app']['App']['SetQueryLogEnabled'](arg1);
 }
 
 export function SetSessionParameter(arg1, arg2, arg3) {

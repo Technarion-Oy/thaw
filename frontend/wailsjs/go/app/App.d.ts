@@ -23,6 +23,7 @@ import {app} from '../models';
 import {objects} from '../models';
 import {table} from '../models';
 import {queryhistory} from '../models';
+import {querylog} from '../models';
 import {queryprofile} from '../models';
 import {warehouse} from '../models';
 import {gitrepo} from '../models';
@@ -138,6 +139,8 @@ export function ClearERDesignerState():Promise<void>;
 export function ClearObjectCache():Promise<void>;
 
 export function ClearObjectCacheForDatabase(arg1:string):Promise<void>;
+
+export function ClearQueryLog():Promise<void>;
 
 export function ClearQueryResult(arg1:string):Promise<void>;
 
@@ -327,6 +330,8 @@ export function GetProcedureParams(arg1:string,arg2:string,arg3:string,arg4:stri
 
 export function GetQueryHistory(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:number,arg8:boolean):Promise<Array<queryhistory.QueryHistoryRow>>;
 
+export function GetQueryLogEntries():Promise<Array<querylog.Entry>>;
+
 export function GetQueryOperatorStats(arg1:string):Promise<Array<queryprofile.OperatorStat>>;
 
 export function GetQuotedIdentifiersIgnoreCase():Promise<boolean>;
@@ -449,6 +454,8 @@ export function IsConnected():Promise<boolean>;
 
 export function IsNumeric(arg1:string):Promise<boolean>;
 
+export function IsQueryLogEnabled():Promise<boolean>;
+
 export function ListAIModels(arg1:string,arg2:string,arg3:number):Promise<Array<string>>;
 
 export function ListApiIntegrations():Promise<Array<snowflake.ApiIntegration>>;
@@ -557,6 +564,8 @@ export function PickNotebookFile():Promise<string>;
 
 export function PickOpenFile():Promise<string>;
 
+export function PickQueryLogExportFile(arg1:string):Promise<string>;
+
 export function PickSaveExportFile(arg1:string,arg2:string):Promise<string>;
 
 export function PickSaveFile(arg1:string):Promise<string>;
@@ -636,6 +645,8 @@ export function SetDefaultProfile(arg1:string):Promise<void>;
 export function SetGitCommitFilter(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function SetNotebookQueryWarehouse(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function SetQueryLogEnabled(arg1:boolean):Promise<void>;
 
 export function SetSessionParameter(arg1:string,arg2:string,arg3:string):Promise<void>;
 

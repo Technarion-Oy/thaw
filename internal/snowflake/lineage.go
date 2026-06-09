@@ -174,7 +174,7 @@ func (c *Client) GetObjectDependencies(ctx context.Context, database, schema, ki
 func (c *Client) GetSchemaCrossDeps(ctx context.Context, db, schema string) ([]SchemaRef, error) {
 	q := fmt.Sprintf(`SHOW VIEWS IN SCHEMA %s.%s`, QuoteIdent(db), QuoteIdent(schema))
 
-	rows, err := c.db.QueryContext(ctx, q)
+	rows, err := c.queryCtx(ctx, q)
 	if err != nil {
 		return nil, nil //nolint:nilerr // inaccessible schema is non-fatal
 	}
@@ -344,7 +344,7 @@ func (c *Client) isViewInSchema(ctx context.Context, db, schema, name string) bo
 		escVal(strings.ToUpper(schema)),
 		escVal(strings.ToUpper(name)),
 	)
-	row := c.db.QueryRowContext(ctx, q)
+	row := c.queryRowCtx(ctx, q)
 	var typ string
 	if err := row.Scan(&typ); err != nil {
 		return false
@@ -368,7 +368,7 @@ func (c *Client) resolveProcedureRef(ctx context.Context, ref sqlRef, vis depVis
 		strings.ReplaceAll(ref.db, `"`, `""`),
 		strings.ReplaceAll(ref.schema, `"`, `""`),
 	)
-	rows, err := c.db.QueryContext(ctx, query)
+	rows, err := c.queryCtx(ctx, query)
 	if err != nil {
 		node.Error = err.Error()
 		return node

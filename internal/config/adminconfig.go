@@ -90,6 +90,7 @@ type adminDevEnv struct {
 type adminPerfDiag struct {
 	QueryProfile ptrBool `json:"queryProfile,omitempty"`
 	ExplainSQL   ptrBool `json:"explainSql,omitempty"`
+	QueryLog     ptrBool `json:"queryLog,omitempty"`
 }
 
 // adminConnection is the "connection" category.
@@ -238,6 +239,7 @@ func mergeAdminOverrides(user FeatureFlags, cfg adminConfigJSON) (effective Feat
 	// Performance & Diagnostics
 	apply(&effective.QueryProfile, &locked.QueryProfile, cfg.PerformanceDiagnostics.QueryProfile)
 	apply(&effective.ExplainSQL, &locked.ExplainSQL, cfg.PerformanceDiagnostics.ExplainSQL)
+	apply(&effective.QueryLog, &locked.QueryLog, cfg.PerformanceDiagnostics.QueryLog)
 
 	// Connection
 	apply(&effective.SnowflakeCLIProfileManager, &locked.SnowflakeCLIProfileManager, cfg.Connection.SnowflakeCLIProfileManager)

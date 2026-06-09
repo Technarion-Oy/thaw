@@ -19,6 +19,7 @@ import (
 	"thaw/internal/apperrors"
 	"thaw/internal/logger"
 	"thaw/internal/queryhistory"
+	"thaw/internal/querylog"
 	"thaw/internal/queryprofile"
 	"thaw/internal/snowflake"
 	"thaw/internal/telemetry"
@@ -37,15 +38,47 @@ func (a *App) ExecuteQuery(sql string) (*snowflake.QueryResult, error) {
 	}
 	qidChan := make(chan string, 1)
 	ctx := sf.WithQueryIDChan(a.ctx, qidChan)
+	ctx = querylog.WithSource(ctx, querylog.SourceUser)
 
+	start := time.Now()
 	result, err := a.client.Execute(ctx, sql)
+	dur := time.Since(start)
+
+	var qid string
 	if result != nil {
 		select {
-		case qid := <-qidChan:
-			result.QueryID = qid
+		case q := <-qidChan:
+			qid = q
+			result.QueryID = q
 		default:
 		}
 	}
+
+	// Record the completed query in the session log.
+	if a.queryLog.IsEnabled() {
+		status := querylog.StatusSuccess
+		var errMsg string
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				status = querylog.StatusCanceled
+			} else {
+				status = querylog.StatusFail
+				errMsg = err.Error()
+			}
+		}
+		entry := querylog.Entry{
+			Timestamp:  start,
+			SQL:        sql,
+			QueryID:    qid,
+			Status:     status,
+			DurationMs: dur.Milliseconds(),
+			Error:      errMsg,
+			Source:     querylog.SourceUser,
+		}
+		entry.ID = a.queryLog.Record(entry)
+		wailsruntime.EventsEmit(a.ctx, "querylog:entry", entry)
+	}
+
 	return result, err
 }
 
@@ -121,6 +154,23 @@ func (a *App) StartQuery(tabId string, sql string) (string, error) {
 
 	// Create a per-query cancellable context and replace any previous one.
 	ctx, cancel := context.WithCancel(a.ctx)
+	ctx = querylog.WithSource(ctx, querylog.SourceUser)
+
+	// Record a RUNNING entry in the query log before execution begins.
+	var logEntryID int
+	logStart := time.Now()
+	if a.queryLog.IsEnabled() {
+		entry := querylog.Entry{
+			Timestamp: logStart,
+			SQL:       sql,
+			Status:    querylog.StatusRunning,
+			Source:    querylog.SourceUser,
+			TabID:     tabId,
+		}
+		entry.ID = a.queryLog.Record(entry)
+		logEntryID = entry.ID
+		wailsruntime.EventsEmit(a.ctx, "querylog:entry", entry)
+	}
 
 	ts.queryMu.Lock()
 	if ts.queryCancelFunc != nil {
@@ -130,6 +180,8 @@ func (a *App) StartQuery(tabId string, sql string) (string, error) {
 	ts.queryCancelCtxDone = ctx.Done()
 	ts.queryDone = nil // clear stale channel from previous query
 	ts.queryID = ""
+	ts.queryLogEntryID = logEntryID
+	ts.queryLogStart = logStart
 	ts.queryMu.Unlock()
 
 	qidChan := make(chan string, 1)
@@ -294,7 +346,20 @@ func (a *App) WaitForQueryResult(tabId string) (*snowflake.QueryResult, error) {
 			ts.queryDone = nil
 			ts.queryID = ""
 			ts.queryCancelCtxDone = nil
+			stuckLogID := ts.queryLogEntryID
+			stuckLogStart := ts.queryLogStart
+			ts.queryLogEntryID = 0
 			ts.queryMu.Unlock()
+			// Update log entry for the stuck-canceled query.
+			if stuckLogID > 0 {
+				durationMs := time.Since(stuckLogStart).Milliseconds()
+				a.queryLog.UpdateStatus(stuckLogID, querylog.StatusCanceled, durationMs, "", "")
+				wailsruntime.EventsEmit(a.ctx, "querylog:update", map[string]interface{}{
+					"id":         stuckLogID,
+					"status":     querylog.StatusCanceled,
+					"durationMs": durationMs,
+				})
+			}
 			return nil, context.Canceled
 		}
 	}
@@ -305,6 +370,8 @@ func (a *App) WaitForQueryResult(tabId string) (*snowflake.QueryResult, error) {
 	// Read queryID after done fires so multi-statement queries get the last
 	// per-statement qid (updated by wg-tracked goroutines before close(done)).
 	queryID := ts.queryID
+	logEntryID := ts.queryLogEntryID
+	logStart := ts.queryLogStart
 	// Snapshot whether the query was explicitly canceled by the user BEFORE
 	// calling queryCancelFunc: the cancel func also closes ctxDone, so
 	// checking after cleanup would always report "canceled".
@@ -322,6 +389,7 @@ func (a *App) WaitForQueryResult(tabId string) (*snowflake.QueryResult, error) {
 	ts.queryDone = nil
 	ts.queryID = ""
 	ts.queryCancelCtxDone = nil
+	ts.queryLogEntryID = 0
 	ts.queryMu.Unlock()
 
 	if result != nil && queryID != "" {
@@ -346,6 +414,32 @@ func (a *App) WaitForQueryResult(tabId string) (*snowflake.QueryResult, error) {
 		logger.L.Info("query completed", "queryID", queryID)
 		telemetry.Track(telemetry.EventQueryCompleted, nil)
 	}
+
+	// Update the query log entry with the final status.
+	if logEntryID > 0 {
+		durationMs := time.Since(logStart).Milliseconds()
+		var status querylog.Status
+		var errMsg string
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				status = querylog.StatusCanceled
+			} else {
+				status = querylog.StatusFail
+				errMsg = err.Error()
+			}
+		} else {
+			status = querylog.StatusSuccess
+		}
+		a.queryLog.UpdateStatus(logEntryID, status, durationMs, errMsg, queryID)
+		wailsruntime.EventsEmit(a.ctx, "querylog:update", map[string]interface{}{
+			"id":         logEntryID,
+			"status":     status,
+			"durationMs": durationMs,
+			"error":      errMsg,
+			"queryID":    queryID,
+		})
+	}
+
 	return result, err
 }
 
