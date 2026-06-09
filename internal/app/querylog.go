@@ -45,6 +45,24 @@ func (a *App) GetQueryLogFilter() string {
 	return a.queryLog.Filter()
 }
 
+// PickQueryLogExportFile opens a native save-file dialog with log/text filters
+// and returns the chosen path, or an empty string if the user cancels.
+func (a *App) PickQueryLogExportFile(defaultName string) string {
+	path, err := wailsruntime.SaveFileDialog(a.ctx, wailsruntime.SaveDialogOptions{
+		Title:           "Export Query Log",
+		DefaultFilename: defaultName,
+		Filters: []wailsruntime.FileFilter{
+			{DisplayName: "Log Files (*.log)", Pattern: "*.log"},
+			{DisplayName: "Text Files (*.txt)", Pattern: "*.txt"},
+			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		},
+	})
+	if err != nil {
+		return ""
+	}
+	return path
+}
+
 // SetQueryLogFilter sets the source filter and emits a state event.
 func (a *App) SetQueryLogFilter(filter string) {
 	a.queryLog.SetFilter(filter)

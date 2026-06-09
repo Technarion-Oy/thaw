@@ -1070,6 +1070,10 @@ export function PickOpenFile() {
   return window['go']['app']['App']['PickOpenFile']();
 }
 
+export function PickQueryLogExportFile(arg1) {
+  return window['go']['app']['App']['PickQueryLogExportFile'](arg1);
+}
+
 export function PickSaveExportFile(arg1, arg2) {
   return window['go']['app']['App']['PickSaveExportFile'](arg1, arg2);
 }

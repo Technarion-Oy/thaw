@@ -16,7 +16,7 @@ import { ClearOutlined, CopyOutlined, DownloadOutlined } from "@ant-design/icons
 import type { ColumnsType } from "antd/es/table";
 import { EventsOn } from "../../../wailsjs/runtime/runtime";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import { GetQueryLogEntries, ClearQueryLog, IsQueryLogEnabled, SetQueryLogEnabled, PickSaveFile, SaveFile } from "../../../wailsjs/go/app/App";
+import { GetQueryLogEntries, ClearQueryLog, IsQueryLogEnabled, SetQueryLogEnabled, PickQueryLogExportFile, SaveFile } from "../../../wailsjs/go/app/App";
 
 const { Text } = Typography;
 
@@ -131,7 +131,7 @@ export default function QueryLogPane({ onClose: _onClose }: Props) {
       return;
     }
     try {
-      const path = await PickSaveFile("thaw-query-log.log");
+      const path = await PickQueryLogExportFile("thaw-query-log.log");
       if (!path) return;
       const header = `# Thaw Query Log — exported ${new Date().toISOString()}\n# ${filtered.length} entries\n\n`;
       const body = filtered.map((e) => formatEntryForCopy(e)).join("\n\n");

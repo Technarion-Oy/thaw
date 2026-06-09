@@ -566,6 +566,8 @@ export function PickNotebookFile():Promise<string>;
 
 export function PickOpenFile():Promise<string>;
 
+export function PickQueryLogExportFile(arg1:string):Promise<string>;
+
 export function PickSaveExportFile(arg1:string,arg2:string):Promise<string>;
 
 export function PickSaveFile(arg1:string):Promise<string>;
