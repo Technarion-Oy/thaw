@@ -12,12 +12,12 @@ import { useState } from "react";
 import { Modal, Spin, Button, Input, Switch, Tooltip, message } from "antd";
 import { CopyOutlined, EditOutlined, CheckOutlined, CloseOutlined, SearchOutlined } from "@ant-design/icons";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import type { main } from "../../../wailsjs/go/models";
-import { SetSessionParameter, SetSessionVariable } from "../../../wailsjs/go/main/App";
+import type { snowflake } from "../../../wailsjs/go/models";
+import { SetSessionParameter, SetSessionVariable } from "../../../wailsjs/go/app/App";
 
 interface Props {
-  parameters: main.SessionParam[] | null;
-  variables: main.SessionVar[] | null;
+  parameters: snowflake.SessionParam[] | null;
+  variables: snowflake.SessionVar[] | null;
   error: string | null;
   onClose: () => void;
   // callbacks so the caller can refresh state after a save
@@ -63,7 +63,7 @@ function ParamsTable({
   rows,
   onSave,
 }: {
-  rows: main.SessionParam[];
+  rows: snowflake.SessionParam[];
   onSave: (key: string, value: string) => void;
 }) {
   const [editKey, setEditKey]   = useState<string | null>(null);
@@ -77,7 +77,7 @@ function ParamsTable({
   const startEdit = (key: string, current: string) => { setEditKey(key); setEditVal(current); };
   const cancel    = () => { setEditKey(null); setEditVal(""); };
 
-  const save = async (row: main.SessionParam) => {
+  const save = async (row: snowflake.SessionParam) => {
     setSaving(true);
     try {
       await SetSessionParameter(row.key, editVal, row.type);
@@ -91,7 +91,7 @@ function ParamsTable({
     }
   };
 
-  const toggle = async (row: main.SessionParam, checked: boolean) => {
+  const toggle = async (row: snowflake.SessionParam, checked: boolean) => {
     const val = checked ? "TRUE" : "FALSE";
     try {
       await SetSessionParameter(row.key, val, row.type);
@@ -169,7 +169,7 @@ function VarsTable({
   rows,
   onSave,
 }: {
-  rows: main.SessionVar[];
+  rows: snowflake.SessionVar[];
   onSave: (key: string, value: string) => void;
 }) {
   const [editKey, setEditKey] = useState<string | null>(null);
@@ -183,7 +183,7 @@ function VarsTable({
   const startEdit = (key: string, current: string) => { setEditKey(key); setEditVal(current); };
   const cancel    = () => { setEditKey(null); setEditVal(""); };
 
-  const save = async (row: main.SessionVar) => {
+  const save = async (row: snowflake.SessionVar) => {
     setSaving(true);
     try {
       await SetSessionVariable(row.key, editVal, row.type);
@@ -197,7 +197,7 @@ function VarsTable({
     }
   };
 
-  const toggle = async (row: main.SessionVar, checked: boolean) => {
+  const toggle = async (row: snowflake.SessionVar, checked: boolean) => {
     const val = checked ? "TRUE" : "FALSE";
     try {
       await SetSessionVariable(row.key, val, row.type);

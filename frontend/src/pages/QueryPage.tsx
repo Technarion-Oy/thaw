@@ -11,12 +11,12 @@
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message, Modal, type MenuProps } from "antd";
-import { CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined, SearchOutlined } from "@ant-design/icons";
+import { CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined, SearchOutlined, CloudUploadOutlined } from "@ant-design/icons";
 import * as XLSX from "xlsx";
 import { ClipboardSetText, BrowserOpenURL } from "../../wailsjs/runtime/runtime";
-import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, CloseTabSession, GetSessionInitMode, InitTabSession } from "../../wailsjs/go/main/App";
+import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, CloseTabSession, GetSessionInitMode, InitTabSession, SetQueryLogEnabled } from "../../wailsjs/go/app/App";
 import { GetSqlStatementRanges } from "../../wailsjs/go/sqleditor/Service";
-import type { main } from "../../wailsjs/go/models";
+import type { snowflake } from "../../wailsjs/go/models";
 import SessionPropertiesModal from "../components/common/SessionPropertiesModal";
 import SnippetsModal from "../components/snippets/SnippetsModal";
 import ExportPathFormatModal from "../components/export/ExportPathFormatModal";
@@ -27,7 +27,7 @@ import KeyboardShortcutsModal from "../components/help/KeyboardShortcutsModal";
 import AboutModal from "../components/help/AboutModal";
 import { usePanelLayoutStore } from "../store/panelLayoutStore";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
-import SqlEditor from "../components/editor/SqlEditor";
+import SqlEditor, { type DiagMarker, pendingMcpMarkers } from "../components/editor/SqlEditor";
 import TabBar from "../components/editor/TabBar";
 import CrossTabSearch from "../components/editor/CrossTabSearch";
 import { DiffEditor } from "@monaco-editor/react";
@@ -38,6 +38,7 @@ import GridSearch from "../components/results/GridSearch";
 import StatusBar from "../components/results/StatusBar";
 import QueryProfileModal from "../components/results/QueryProfileModal";
 import TerminalPanel from "../components/terminal/TerminalPanel";
+import QueryLogPane from "../components/results/QueryLogPane";
 import NotebookTab from "../components/notebook/NotebookTab";
 import { useQueryStore, type QueryResult, EXECUTE_IN_TAB_EVENT } from "../store/queryStore";
 import { useConnectionStore } from "../store/connectionStore";
@@ -46,7 +47,8 @@ import { useFeatureFlagsStore } from "../store/featureFlagsStore";
 import { useNotebookToolbarStore } from "../store/notebookToolbarStore";
 import { useGridStore } from "../store/gridStore";
 import Toolbar from "../components/toolbar/Toolbar";
-import { notebookButtons, NotebookStatusIndicator } from "../components/toolbar/NotebookToolbarSlot";
+import { NotebookToolbarSlot } from "../components/notebook/NotebookToolbarSlot";
+import { useEditorContextSync } from "../hooks/useEditorContextSync";
 
 const { Text } = Typography;
 
@@ -92,9 +94,13 @@ export default function QueryPage() {
   // Used to map backend-reported indices (relative to selection) back to the
   // full-buffer indices that SqlEditor's decorator uses.
   const selectionBaseStmtIdxRef = useRef(0);
-  const [resultPane, setResultPane] = useState<"results" | "terminal">("results");
+  const [resultPane, setResultPane] = useState<"results" | "terminal" | "querylog">("results");
   const [terminalOpen, setTerminalOpen] = useState(false);
   const featureFlags = useFeatureFlagsStore((s) => s.flags);
+
+  // Sync editor state to the MCP EditorContextStore so external AI clients
+  // can read the active SQL and query results.
+  useEditorContextSync();
 
   // ── Result history — per tab (last 10 unpinned + all pinned, most-recent-first) ────
   interface HistoryEntry { id: string; queryID: string; sql: string; result: QueryResult; pinned: boolean; }
@@ -140,8 +146,8 @@ export default function QueryPage() {
   const [currentRegion, setCurrentRegion] = useState<string | null>(null);
   const [snowsightUrl, setSnowsightUrl] = useState<string | null>(null);
   const [snowsightModalOpen, setSnowsightModalOpen] = useState(false);
-  const [sessionParams, setSessionParams] = useState<main.SessionParam[] | null>(null);
-  const [sessionVars, setSessionVars] = useState<main.SessionVar[] | null>(null);
+  const [sessionParams, setSessionParams] = useState<snowflake.SessionParam[] | null>(null);
+  const [sessionVars, setSessionVars] = useState<snowflake.SessionVar[] | null>(null);
   const [sessionPropsError, setSessionPropsError] = useState<string | null>(null);
   // Ref so the async runQuery closure can detect user-initiated cancellation
   // without relying on stale React state.
@@ -463,7 +469,13 @@ export default function QueryPage() {
 
   const handleDisconnect = () => {
     const anyRunning = useQueryStore.getState().tabs.some((t) => t.isRunning);
-    const doDisconnect = async () => { await Disconnect(); disconnect(); };
+    const doDisconnect = async () => {
+      await Disconnect(); // backend tears down all MCP sessions (StopAll)
+      disconnect();
+      // Disconnect stops every MCP session server-side; refresh the store so
+      // the toolbar indicator and sessions modal don't show stale "Running".
+      window.dispatchEvent(new Event("thaw:mcp-changed"));
+    };
     if (anyRunning) {
       Modal.confirm({
         title: "Disconnect while query is running?",
@@ -622,6 +634,9 @@ export default function QueryPage() {
     const { tabs } = useQueryStore.getState();
     const tab = tabs.find((t) => t.id === tabId);
     if (!tab) return;
+    // Clean up any pending MCP markers for this tab (prevents a small leak
+    // if a tab is closed before its editor ever mounts and consumes them).
+    pendingMcpMarkers.delete(tabId);
     const isDirty = tab.sql !== tab.savedSql;
     const isTabRunning = tab.isRunning ?? false;
     if (isTabRunning || isDirty) {
@@ -846,6 +861,23 @@ export default function QueryPage() {
     return () => off();
   }, [featureFlags.embeddedTerminal]);
 
+  // Query Log — toggle and filter via View → Query Log menu
+  useEffect(() => {
+    const off = EventsOn("menu:query-log-toggle", (enabled: boolean) => {
+      if (!featureFlags.queryLog) return;
+      if (enabled) setResultPane("querylog");
+      SetQueryLogEnabled(enabled);
+    });
+    return () => off();
+  }, [featureFlags.queryLog]);
+
+  // Reset to Results pane if queryLog feature flag is disabled while viewing the log.
+  useEffect(() => {
+    if (!featureFlags.queryLog) {
+      setResultPane((prev) => prev === "querylog" ? "results" : prev);
+    }
+  }, [featureFlags.queryLog]);
+
   useEffect(() => {
     const off = EventsOn("menu:code-snippets", () => { if (featureFlags.codeSnippets) setSnippetsOpen(true); });
     return () => off();
@@ -881,6 +913,29 @@ export default function QueryPage() {
     return () => off();
   }, []);
 
+  // MCP open_sql_tab — opens a new tab with AI-generated SQL and pre-seeded diagnostics.
+  useEffect(() => {
+    const off = EventsOn("mcp:open-sql-tab", (payload: {
+      title: string; sql: string; markers: DiagMarker[];
+    }) => {
+      const tabId = useQueryStore.getState().openMcpTab(payload.title, payload.sql);
+      if (payload.markers?.length > 0) {
+        pendingMcpMarkers.set(tabId, payload.markers);
+      }
+    });
+    return () => off();
+  }, []);
+
+  // MCP open_notebook_tab — opens a new notebook tab with AI-generated cells.
+  useEffect(() => {
+    const off = EventsOn("mcp:open-notebook-tab", (payload: {
+      title: string; content: string;
+    }) => {
+      useQueryStore.getState().openMcpNotebookTab(payload.title, payload.content);
+    });
+    return () => off();
+  }, []);
+
   // ⌘E / Ctrl+E — Export current results as CSV (wired from keyboard handler).
   useEffect(() => {
     const handler = () => { if (featureFlags.resultsetExport) exportCSV(); };
@@ -910,13 +965,13 @@ export default function QueryPage() {
   };
 
   // ── Notebook toolbar state (read from store, bridged by NotebookTab) ──────
-  const nbKernelReady    = useNotebookToolbarStore((s) => s.kernelReady);
-  const nbKernelStarting = useNotebookToolbarStore((s) => s.kernelStarting);
-  const nbKernelError    = useNotebookToolbarStore((s) => s.kernelError);
-  const nbOnRestartKernel = useNotebookToolbarStore((s) => s.onRestartKernel);
-  const nbOnAddCell       = useNotebookToolbarStore((s) => s.onAddCell);
-  const nbOnDeploy        = useNotebookToolbarStore((s) => s.onDeploy);
-  const nbOnRunAll        = useNotebookToolbarStore((s) => s.onRunAll);
+  const nbKernelReady         = useNotebookToolbarStore((s) => s.kernelReady);
+  const nbKernelStarting      = useNotebookToolbarStore((s) => s.kernelStarting);
+  const nbKernelError         = useNotebookToolbarStore((s) => s.kernelError);
+  const nbKernelPythonVersion = useNotebookToolbarStore((s) => s.kernelPythonVersion);
+  const nbOnRestartKernel     = useNotebookToolbarStore((s) => s.onRestartKernel);
+  const nbOnDeploy            = useNotebookToolbarStore((s) => s.onDeploy);
+  const nbOnRunAll            = useNotebookToolbarStore((s) => s.onRunAll);
 
   const handleNewNotebook = () => {
     const blank = JSON.stringify({
@@ -931,14 +986,26 @@ export default function QueryPage() {
     openNotebookUnsaved("Untitled Notebook", blank);
   };
 
-  const nbSlotProps = isNotebookTab && nbOnRestartKernel && nbOnAddCell && nbOnDeploy ? {
+  const nbSlotProps = isNotebookTab && nbOnRestartKernel ? {
     kernelReady: nbKernelReady,
     kernelStarting: nbKernelStarting,
     kernelError: nbKernelError,
+    kernelName: nbKernelPythonVersion ? `Python ${nbKernelPythonVersion}` : undefined,
     onRestartKernel: nbOnRestartKernel,
-    onAddCell: nbOnAddCell,
-    onDeploy: nbOnDeploy,
   } : null;
+
+  const deployButton = isNotebookTab && nbOnDeploy ? (
+    <Tooltip title="Deploy notebook to Snowflake">
+      <Button
+        className="thaw-tb-vstack-primary"
+        aria-label="Deploy notebook"
+        icon={<CloudUploadOutlined />}
+        onClick={nbOnDeploy}
+      >
+        Deploy
+      </Button>
+    </Tooltip>
+  ) : undefined;
 
   return (
     <div data-query-layout style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--bg)" }}>
@@ -957,8 +1024,8 @@ export default function QueryPage() {
         onNewSql={openScratch}
         onNewNotebook={handleNewNotebook}
         onSave={handleSave}
-        contextButtons={nbSlotProps ? notebookButtons(nbSlotProps) : undefined}
-        contextStatus={nbSlotProps ? <NotebookStatusIndicator {...nbSlotProps} /> : undefined}
+        contextSlot={nbSlotProps ? <NotebookToolbarSlot {...nbSlotProps} /> : undefined}
+        primaryAction={deployButton}
       />
 
       {/* Session error banner (role/warehouse switch failures) */}
@@ -1139,7 +1206,7 @@ export default function QueryPage() {
       <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
         {/* Tab bar */}
         <div style={{ display: "flex", background: "var(--bg-raised)", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-          {(["results", ...(terminalOpen && featureFlags.embeddedTerminal ? ["terminal"] : [])] as Array<"results" | "terminal">).map((tab) => (
+          {(["results", ...(terminalOpen && featureFlags.embeddedTerminal ? ["terminal"] : []), ...(featureFlags.queryLog ? ["querylog"] : [])] as Array<"results" | "terminal" | "querylog">).map((tab) => (
             <button
               key={tab}
               onClick={() => setResultPane(tab)}
@@ -1153,7 +1220,7 @@ export default function QueryPage() {
                 cursor: "pointer",
               }}
             >
-              {tab === "results" ? "Results" : "Terminal"}
+              {tab === "results" ? "Results" : tab === "terminal" ? "Terminal" : "Query Log"}
             </button>
           ))}
         </div>
@@ -1472,6 +1539,12 @@ export default function QueryPage() {
           {terminalOpen && (
             <div style={{ flex: 1, overflow: "hidden", display: resultPane === "terminal" ? "flex" : "none", flexDirection: "column" }}>
               <TerminalPanel onClose={() => { setTerminalOpen(false); setResultPane("results"); }} />
+            </div>
+          )}
+
+          {featureFlags.queryLog && (
+            <div style={{ flex: 1, overflow: "hidden", display: resultPane === "querylog" ? "flex" : "none", flexDirection: "column" }}>
+              <QueryLogPane />
             </div>
           )}
       </div>}

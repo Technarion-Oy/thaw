@@ -9,10 +9,11 @@
 // license agreement with Technarion Oy.
 
 import { create } from "zustand";
-import { GetAdminLockedFlags, GetFeatureFlags } from "../../wailsjs/go/main/App";
+import { GetAdminLockedFlags, GetFeatureFlags } from "../../wailsjs/go/app/App";
 import type { config } from "../../wailsjs/go/models";
 
-// Optimistic defaults: every feature enabled until the backend responds.
+// Optimistic defaults: every feature enabled until the backend responds,
+// except opt-in features whose backend default is false (e.g. mcpServer).
 const allEnabled: config.FeatureFlags = {
   initialized: true,
   version: 1,
@@ -32,6 +33,7 @@ const allEnabled: config.FeatureFlags = {
   aiInlineCompletions: true,
   schemaMigration: true,
   dbtScaffolding: true,
+  dbtProjectBrowser: true,
   erDiagramDesigner: true,
   taskGraphVisualizer: true,
   insertMapping: true,
@@ -48,6 +50,10 @@ const allEnabled: config.FeatureFlags = {
   snowflakeCLIProfileManager: true,
   multiCellCopy: true,
   crossTabSearch: true,
+  fileWatcher: true,
+  columnManagement: true,
+  mcpServer: false,
+  queryLog: false,
 };
 
 // allLocked default: nothing is admin-locked.
@@ -70,6 +76,7 @@ const nothingLocked: config.FeatureFlags = {
   aiInlineCompletions: false,
   schemaMigration: false,
   dbtScaffolding: false,
+  dbtProjectBrowser: false,
   erDiagramDesigner: false,
   taskGraphVisualizer: false,
   insertMapping: false,
@@ -86,6 +93,10 @@ const nothingLocked: config.FeatureFlags = {
   snowflakeCLIProfileManager: false,
   multiCellCopy: false,
   crossTabSearch: false,
+  fileWatcher: false,
+  columnManagement: false,
+  mcpServer: false,
+  queryLog: false,
 };
 
 interface FeatureFlagsState {

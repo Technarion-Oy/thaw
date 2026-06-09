@@ -448,22 +448,28 @@ def _thaw_run_sql_cell(sql_str):
                                 "session_context": _thaw_get_session_context()})
 
     stmts = _thaw_split_sql(sql_str)
-    last = {"columns": [], "rows": [], "rowCount": 0, "error": None}
+    last = {"columns": [], "rows": [], "rowCount": 0, "error": None, "truncated": False}
     for _stmt in stmts:
         _stmt = _stmt.strip()
         if not _stmt:
             continue
         try:
             _df = _sql_fn(_stmt)
-            _rows = _df.collect()
+            # Row capping: fetch max 50,001 to detect truncation.
+            _rows = _df.limit(50001).collect()
+            _truncated = len(_rows) > 50000
+            if _truncated:
+                _rows = _rows[:50000]
+
             last = {
                 "columns": [f.name for f in _df.schema.fields],
                 "rows":    [[_jval(v) for v in r] for r in _rows],
                 "rowCount": len(_rows),
                 "error": None,
+                "truncated": _truncated,
             }
         except Exception as _ex:
-            last = {"columns": [], "rows": [], "rowCount": 0, "error": str(_ex)}
+            last = {"columns": [], "rows": [], "rowCount": 0, "error": str(_ex), "truncated": False}
     last["session_context"] = _thaw_get_session_context()
     return _json.dumps(last)
 
@@ -679,10 +685,11 @@ type NotebookCellOutput struct {
 
 // NotebookSqlResult is returned by RunNotebookSql.
 type NotebookSqlResult struct {
-	Columns  []string `json:"columns"`
-	Rows     [][]any  `json:"rows"`
-	RowCount int64    `json:"rowCount"`
-	QueryID  string   `json:"queryID"`
+	Columns   []string `json:"columns"`
+	Rows      [][]any  `json:"rows"`
+	RowCount  int64    `json:"rowCount"`
+	QueryID   string   `json:"queryID"`
+	Truncated bool     `json:"truncated"`
 }
 
 // PackageInfo describes a Python package installed in the Snowpark environment.
@@ -714,11 +721,12 @@ type NotebookSyntaxError struct {
 // ─── kernel session management ────────────────────────────────────────────────
 
 type notebookSession struct {
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	stdout  *bufio.Reader
-	mu      sync.Mutex
-	lastCtx NotebookSessionContext // last known kernel session context
+	cmd           *exec.Cmd
+	stdin         io.WriteCloser
+	stdout        *bufio.Reader
+	mu            sync.Mutex
+	lastCtx       NotebookSessionContext // last known kernel session context
+	pythonVersion string                 // e.g. "3.11.9", detected at start
 }
 
 var (
@@ -1754,10 +1762,11 @@ func (s *Service) RunNotebookSql(client *snowflake.Client, sql string) (Notebook
 		rows = [][]any{}
 	}
 	return NotebookSqlResult{
-		Columns:  result.Columns,
-		Rows:     rows,
-		RowCount: result.RowsAffected,
-		QueryID:  result.QueryID,
+		Columns:   result.Columns,
+		Rows:      rows,
+		RowCount:  result.RowsAffected,
+		QueryID:   result.QueryID,
+		Truncated: result.Truncated,
 	}, nil
 }
 
@@ -1815,6 +1824,9 @@ func (s *Service) StartNotebookSession(client *snowflake.Client, connectParams *
 		return err
 	}
 
+	// Detect the Python version for the kernel indicator.
+	pyVer := detectPythonVersion(python)
+
 	cmd := exec.Command(python, "-u", scriptPath)
 	// Inject connection parameters so the kernel can auto-create a Snowpark
 	// session that matches the app's active connection.
@@ -1851,12 +1863,38 @@ func (s *Service) StartNotebookSession(client *snowflake.Client, connectParams *
 	}
 
 	notebookSessions.Store(tabId, &notebookSession{
-		cmd:     cmd,
-		stdin:   stdin,
-		stdout:  bufio.NewReader(stdout),
-		lastCtx: initCtx,
+		cmd:           cmd,
+		stdin:         stdin,
+		stdout:        bufio.NewReader(stdout),
+		lastCtx:       initCtx,
+		pythonVersion: pyVer,
 	})
 	return nil
+}
+
+// GetKernelPythonVersion returns the Python version string (e.g. "3.11.9")
+// for the kernel running in the given tab, or "" if unknown.
+func (s *Service) GetKernelPythonVersion(tabId string) string {
+	val, ok := notebookSessions.Load(tabId)
+	if !ok {
+		return ""
+	}
+	return val.(*notebookSession).pythonVersion
+}
+
+// detectPythonVersion runs `python --version` and extracts the version number.
+// Returns "" on any error so callers can fall back gracefully.
+func detectPythonVersion(pythonBin string) string {
+	out, err := exec.Command(pythonBin, "--version").Output()
+	if err != nil {
+		return ""
+	}
+	// Output is "Python 3.11.9\n" — extract the version part.
+	s := strings.TrimSpace(string(out))
+	if after, ok := strings.CutPrefix(s, "Python "); ok {
+		return after
+	}
+	return s
 }
 
 // RunNotebookCell sends code to the kernel and returns its output.
@@ -2144,6 +2182,7 @@ func (s *Service) RunNotebookCellSql(client *snowflake.Client, tabId, sql string
 		Error          *string                 `json:"error"`
 		QueryID        string                  `json:"queryID"`
 		SessionContext *NotebookSessionContext `json:"session_context"`
+		Truncated      bool                    `json:"truncated"`
 	}
 	if resultJSON != "" {
 		if err := json.Unmarshal([]byte(resultJSON), &raw); err != nil {
@@ -2161,10 +2200,11 @@ func (s *Service) RunNotebookCellSql(client *snowflake.Client, tabId, sql string
 		rows = [][]any{}
 	}
 	return NotebookSqlResult{
-		Columns:  raw.Columns,
-		Rows:     rows,
-		RowCount: raw.RowCount,
-		QueryID:  raw.QueryID,
+		Columns:   raw.Columns,
+		Rows:      rows,
+		RowCount:  raw.RowCount,
+		QueryID:   raw.QueryID,
+		Truncated: raw.Truncated,
 	}, nil
 }
 

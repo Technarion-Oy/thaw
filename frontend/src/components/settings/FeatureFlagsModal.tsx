@@ -11,7 +11,7 @@
 import { useEffect, useState } from "react";
 import { Button, Modal, Switch, Tooltip, Typography, message } from "antd";
 import { LockOutlined } from "@ant-design/icons";
-import { GetFeatureFlags, SaveFeatureFlags } from "../../../wailsjs/go/main/App";
+import { GetFeatureFlags, SaveFeatureFlags } from "../../../wailsjs/go/app/App";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import type { config } from "../../../wailsjs/go/models";
 
@@ -290,6 +290,13 @@ export default function FeatureFlagsModal({ onClose }: Props) {
             onChange={(v) => set("dbtScaffolding", v)}
           />
           <FlagRow
+            label="DBT Project Browser"
+            description="Browse and manage Snowflake-native DBT PROJECT objects in the sidebar."
+            checked={flags.dbtProjectBrowser}
+            locked={locked.dbtProjectBrowser}
+            onChange={(v) => set("dbtProjectBrowser", v)}
+          />
+          <FlagRow
             label="ER Diagram & Designer"
             description="Visual database modeling and interactive ALTER TABLE generation."
             checked={flags.erDiagramDesigner}
@@ -350,6 +357,13 @@ export default function FeatureFlagsModal({ onClose }: Props) {
             onChange={(v) => set("gitIntegration", v)}
             preview
           />
+          <FlagRow
+            label="File Watcher"
+            description="Auto-refresh the file browser when files are created, renamed, or deleted externally."
+            checked={flags.fileWatcher}
+            locked={locked.fileWatcher}
+            onChange={(v) => set("fileWatcher", v)}
+          />
         </Category>
 
         {/* ── Performance & Diagnostics ── */}
@@ -367,6 +381,13 @@ export default function FeatureFlagsModal({ onClose }: Props) {
             checked={flags.explainSql}
             locked={locked.explainSql}
             onChange={(v) => set("explainSql", v)}
+          />
+          <FlagRow
+            label="Query Log"
+            description="Session-scoped log of all SQL queries Thaw sends to Snowflake, for debugging and issue reporting."
+            checked={flags.queryLog}
+            locked={locked.queryLog}
+            onChange={(v) => set("queryLog", v)}
           />
         </Category>
 
@@ -421,6 +442,29 @@ export default function FeatureFlagsModal({ onClose }: Props) {
             checked={flags.crossTabSearch}
             locked={locked.crossTabSearch}
             onChange={(v) => set("crossTabSearch", v)}
+          />
+        </Category>
+
+        {/* ── Schema Management ── */}
+        <Category title="Schema Management">
+          <FlagRow
+            label="Column Management"
+            description="Add, rename, retype, set/drop NOT NULL, set comment, and drop table columns directly from the sidebar tree."
+            checked={flags.columnManagement}
+            locked={locked.columnManagement}
+            onChange={(v) => set("columnManagement", v)}
+          />
+        </Category>
+
+        {/* ── Integrations ── */}
+        <Category title="Integrations">
+          <FlagRow
+            label="MCP Server"
+            description="Expose the active Snowflake connection to external AI clients over a local Model Context Protocol server (View → MCP Sessions)."
+            checked={flags.mcpServer}
+            locked={locked.mcpServer}
+            onChange={(v) => set("mcpServer", v)}
+            preview
           />
         </Category>
 

@@ -14,6 +14,30 @@ import (
 	"testing"
 )
 
+func TestTableKey(t *testing.T) {
+	tests := []struct {
+		schema string
+		name   string
+		want   string
+	}{
+		{"PUBLIC", "USERS", "PUBLIC.USERS"},
+		{"public", "users", "public.users"},         // preserves lowercase (quoted identifiers)
+		{"Public", "Orders", "Public.Orders"},        // preserves mixed case
+		{" sales ", " orders ", "sales.orders"},      // trims whitespace, preserves case
+		{"", "T", ".T"},
+		{"S", "", "S."},
+		{"PUBLIC", "my_table", "PUBLIC.my_table"},    // case-sensitive table in PUBLIC schema
+	}
+	for _, tc := range tests {
+		t.Run(tc.schema+"_"+tc.name, func(t *testing.T) {
+			got := TableKey(tc.schema, tc.name)
+			if got != tc.want {
+				t.Errorf("TableKey(%q, %q) = %q, want %q", tc.schema, tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestNeedsQuoting(t *testing.T) {
 	tests := []struct {
 		name string

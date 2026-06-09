@@ -11,7 +11,7 @@
 import { useState, useEffect } from "react";
 import { Modal, Form, Input, Select, Button, Space, Typography, Tag, Spin } from "antd";
 import { PlayCircleOutlined } from "@ant-design/icons";
-import { GetProcedureParams, BuildCallStatement, IsBoolean, IsNumeric, NeedsQuotes } from "../../../wailsjs/go/main/App";
+import { GetProcedureParams, BuildCallStatement, IsBoolean, IsNumeric, NeedsQuotes } from "../../../wailsjs/go/app/App";
 import { useQueryStore } from "../../store/queryStore";
 
 const { Text } = Typography;

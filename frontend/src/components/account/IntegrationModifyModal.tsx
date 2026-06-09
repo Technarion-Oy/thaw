@@ -10,8 +10,8 @@
 
 import { useState, useEffect } from "react";
 import { Modal, Spin, Button, Alert, Input } from "antd";
-import { GetIntegrationProperties, ExecuteQuery } from "../../../wailsjs/go/main/App";
-import type { main } from "../../../wailsjs/go/models";
+import { GetIntegrationProperties, ExecuteQuery } from "../../../wailsjs/go/app/App";
+import type { snowflake } from "../../../wailsjs/go/models";
 
 const { TextArea } = Input;
 
@@ -22,7 +22,7 @@ interface Props {
 }
 
 export default function IntegrationModifyModal({ name, onClose, onSuccess }: Props) {
-  const [props, setProps]     = useState<main.PropertyPair[] | null>(null);
+  const [props, setProps]     = useState<snowflake.PropertyPair[] | null>(null);
   const [propsErr, setPropsErr] = useState<string | null>(null);
   const [sql, setSql]         = useState(
     `ALTER INTEGRATION "${name.replace(/"/g, '""')}" SET\n  ENABLED = TRUE\n  -- COMMENT = 'new comment'`

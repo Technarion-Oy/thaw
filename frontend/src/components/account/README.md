@@ -1,0 +1,37 @@
+# frontend/src/components/account
+
+> Account-level administration panels and modals: users, warehouses, integrations, query history, and key-pair authentication.
+
+## Responsibility
+
+Provides the UI for administering Snowflake account objects that are not schema-scoped. All panels are hosted inside `AccountPanel`, which renders a tree of roles and warehouses and acts as the entry point for every sub-panel and modal in this folder.
+
+## Files
+
+| File | Purpose |
+|---|---|
+| `AccountPanel.tsx` | Root panel: Ant Design `Tree` of roles and warehouses; hosts all context actions (DDL copy, properties, metering, query history, DDL export); conditionally renders `UserManagementPanel`, `IntegrationsPanel`, `BackupPoliciesPanel`. Tagged `@thaw-domain: Object Browser & Administration`. |
+| `UserManagementPanel.tsx` | Table of Snowflake users with Create, Edit, Drop, and key-pair assignment actions; reads from `ListUsers` IPC and routes to `CreateUserModal`, `EditUserModal`, `KeyPairAuthModal`. Gated behind `userRoleManagement` feature flag. |
+| `CreateUserModal.tsx` | Form for `CREATE USER` with login name, display name, role, warehouse, default database/schema, and password; calls `CreateUser` IPC. |
+| `EditUserModal.tsx` | Pre-populated form for `ALTER USER`; updates the same fields as create; calls `EditUser` IPC. |
+| `KeyPairAuthModal.tsx` | Generates or imports RSA key pairs; calls `CheckAvailableKeyTools`, `GenerateKeyPair`, and `SetUserPublicKey` IPC methods from `internal/keypair`. Returns a `keypair.KeyPairResult`. |
+| `IntegrationsPanel.tsx` | Ant Design `Tree` grouped by integration kind (Storage, API, Security, Catalog, etc.); supports Create, Modify, Drop, and Properties via `ListIntegrations`, `DropIntegration`, `CanCreateIntegration`, `GetIntegrationProperties`. Gated behind `integrationsManagement` feature flag. |
+| `CreateIntegrationModal.tsx` | Wizard-style form for `CREATE INTEGRATION` covering storage, API, and security kinds; calls `CreateIntegration` IPC. |
+| `IntegrationModifyModal.tsx` | Modal for `ALTER INTEGRATION` property changes; calls `AlterIntegration` IPC. |
+| `QueryHistoryModal.tsx` | Searchable/paginated query history table; calls `GetQueryHistory` IPC (backed by `internal/queryhistory`); supports filter by user and warehouse. Gated behind `queryActivityHistory` feature flag. |
+| `WarehouseMeteringModal.tsx` | Credit-usage charts and table for a selected warehouse; calls `GetWarehouseMeteringHistory` IPC (backed by `internal/warehouse`). Gated behind `warehouseCreditUsage` feature flag. |
+| `WarehousePropertiesModal.tsx` | Displays and allows editing of warehouse properties; calls `GetObjectProperties` and `AlterWarehouseProperty` IPC methods; uses `PropertiesModal` from `common/` for the property table. Gated behind `warehouseManagement` feature flag. |
+
+## Patterns & integration
+
+- **IPC**: All calls go through `wailsjs/go/app/App` to `internal/app` delegators, which forward to `internal/users`, `internal/warehouse`, `internal/queryhistory`, `internal/keypair`, and `internal/snowflake`.
+- **Stores**: `useConnectionStore` (current role/warehouse context), `useFeatureFlagsStore` (gate checks), `useDiffStore`/`useGitStore` (DDL export paths in `AccountPanel`).
+- **Feature flags**: `userRoleManagement`, `warehouseManagement`, `warehouseCreditUsage`, `queryActivityHistory`, `integrationsManagement`, `backupPoliciesAndSets` — all checked from `useFeatureFlagsStore`. When a flag is disabled, the corresponding tree node or button is hidden.
+- **Shared components**: `AccountPanel` renders `BackupPoliciesPanel` from `../backup/` and `PropertiesModal` from `../common/` directly.
+- **Clipboard**: uses Wails `ClipboardSetText` (not `navigator.clipboard`, which is blocked in WKWebView).
+
+## Gotchas
+
+- `AccountPanel` reads `CanViewWarehouseMeteringHistory` before showing the metering menu item — the underlying Snowflake privilege check may fail silently; handle errors from the check before rendering the button.
+- `KeyPairAuthModal` depends on OS-available tools (`openssl` / `ssh-keygen`); `CheckAvailableKeyTools` must be called first to select the generation method — do not assume any tool is present.
+- `WarehousePropertiesModal` delegates the editable property list to the backend `AlterWarehouseProperty` builder; do not add ALTER SQL inline in the component.

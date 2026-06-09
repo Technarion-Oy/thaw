@@ -151,6 +151,35 @@ func DefaultEditorPrefs() EditorPrefs {
 	}
 }
 
+// EditorPrefsWithDefaults returns a copy of prefs with any zero-value fields
+// filled from DefaultEditorPrefs. Use this instead of manually back-filling
+// defaults in multiple call sites.
+func EditorPrefsWithDefaults(prefs EditorPrefs) EditorPrefs {
+	defaults := DefaultEditorPrefs()
+	if prefs.KeywordCase == "" {
+		prefs.KeywordCase = defaults.KeywordCase
+	}
+	if prefs.IdentifierCase == "" {
+		prefs.IdentifierCase = defaults.IdentifierCase
+	}
+	if prefs.FunctionCase == "" {
+		prefs.FunctionCase = defaults.FunctionCase
+	}
+	if prefs.IndentStyle == "" {
+		prefs.IndentStyle = defaults.IndentStyle
+	}
+	if prefs.IndentSize == 0 {
+		prefs.IndentSize = defaults.IndentSize
+	}
+	if prefs.CommaPosition == "" {
+		prefs.CommaPosition = defaults.CommaPosition
+	}
+	if prefs.OperatorPosition == "" {
+		prefs.OperatorPosition = defaults.OperatorPosition
+	}
+	return prefs
+}
+
 // NotebookPrefs holds user preferences for the notebook editor.
 type NotebookPrefs struct {
 	// SyntaxMode controls how Python diagnostics are produced.
@@ -180,8 +209,8 @@ func DefaultNotebookPrefs() NotebookPrefs {
 //
 // Version tracks the schema revision so new flags introduced after an initial
 // save can be filled with their defaults rather than the zero value (false).
-// Current version: 9 (removed AIChat and AIImportSuggest).
-const flagsVersion = 9
+// Current version: 14 (added QueryLog).
+const flagsVersion = 14
 
 type FeatureFlags struct {
 	Initialized bool `json:"initialized"`
@@ -210,6 +239,7 @@ type FeatureFlags struct {
 	// Advanced Tools & Data Engineering
 	SchemaMigration     bool `json:"schemaMigration"`
 	DbtScaffolding      bool `json:"dbtScaffolding"`
+	DbtProjectBrowser   bool `json:"dbtProjectBrowser"`
 	ERDiagramDesigner   bool `json:"erDiagramDesigner"`
 	TaskGraphVisualizer bool `json:"taskGraphVisualizer"`
 	InsertMapping       bool `json:"insertMapping"`
@@ -223,6 +253,7 @@ type FeatureFlags struct {
 	// Performance & Diagnostics
 	QueryProfile bool `json:"queryProfile"`
 	ExplainSQL   bool `json:"explainSql"`
+	QueryLog     bool `json:"queryLog"` // Session-scoped log of all SQL queries for debugging
 
 	// SQL Editor
 	SqlDiagnostics     bool `json:"sqlDiagnostics"`
@@ -240,6 +271,15 @@ type FeatureFlags struct {
 
 	// Editor Productivity
 	CrossTabSearch bool `json:"crossTabSearch"` // Search and replace across all open tabs
+
+	// File Browser
+	FileWatcher bool `json:"fileWatcher"` // Auto-refresh file browser on external changes
+
+	// Schema Management
+	ColumnManagement bool `json:"columnManagement"` // Add/alter/drop columns from the sidebar tree
+
+	// Integrations
+	MCPServer bool `json:"mcpServer"` // Model Context Protocol server for external AI clients
 }
 
 // DefaultFeatureFlags returns a FeatureFlags with every feature enabled.
@@ -263,6 +303,7 @@ func DefaultFeatureFlags() FeatureFlags {
 		AIInlineCompletions:    true,
 		SchemaMigration:        true,
 		DbtScaffolding:         true,
+		DbtProjectBrowser:      true,
 		ERDiagramDesigner:      true,
 		TaskGraphVisualizer:    true,
 		InsertMapping:          true,
@@ -272,6 +313,7 @@ func DefaultFeatureFlags() FeatureFlags {
 		GitIntegration:         true,
 		QueryProfile:           true,
 		ExplainSQL:             true,
+		QueryLog:               false,
 		SqlDiagnostics:         true,
 		SchemaAutocomplete:     true,
 		DdlHoverTooltips:       true,
@@ -279,6 +321,9 @@ func DefaultFeatureFlags() FeatureFlags {
 		SnowflakeCLIProfileManager: true,
 		MultiCellCopy:              true,
 		CrossTabSearch:             true,
+		FileWatcher:                true,
+		ColumnManagement:           true,
+		MCPServer:                  false,
 	}
 }
 
@@ -337,23 +382,44 @@ func MigrateFlags(f FeatureFlags) FeatureFlags {
 	setIfZero(&f.MultiCellCopy, defaults.MultiCellCopy)
 	// Version 7 → 8: CrossTabSearch added; defaults to true.
 	setIfZero(&f.CrossTabSearch, defaults.CrossTabSearch)
+	// Version 9 → 10: FileWatcher added; defaults to true.
+	setIfZero(&f.FileWatcher, defaults.FileWatcher)
+	// Version 10 → 11: DbtProjectBrowser added; defaults to true.
+	setIfZero(&f.DbtProjectBrowser, defaults.DbtProjectBrowser)
+	// Version 11 → 12: ColumnManagement added; defaults to true.
+	setIfZero(&f.ColumnManagement, defaults.ColumnManagement)
+	// Version 12 → 13: MCPServer added; defaults to false (opt-in).
+	// setIfZero is a no-op here because the default is false (the zero
+	// value), but kept for consistency with the migration pattern.
+	setIfZero(&f.MCPServer, defaults.MCPServer)
+	// Version 13 → 14: QueryLog added; defaults to false (opt-in).
+	setIfZero(&f.QueryLog, defaults.QueryLog)
 	f.Version = flagsVersion
 	return f
 }
 
+// MCPSessionCredential holds the persisted port and auth token for an MCP
+// session so that restarting Thaw and re-launching the same session label
+// reuses the same URL, keeping external AI client configs valid.
+type MCPSessionCredential struct {
+	Port  int    `json:"port"`
+	Token string `json:"token"`
+}
+
 // AppConfig is the on-disk configuration for Thaw.
 type AppConfig struct {
-	Connections            []Connection      `json:"connections"`
-	Git                    GitConfig         `json:"git"`
-	OAuth                  OAuthConfig       `json:"oauth"`
-	AI                     AIConfig          `json:"ai"`
-	Snowpark               SnowparkConfig    `json:"snowpark"`
-	PipRegistry            PipRegistryConfig `json:"pipRegistry"`
-	Editor                 EditorPrefs       `json:"editor"`
-	NotebookPrefs          NotebookPrefs     `json:"notebookPrefs"`
-	Session                SessionConfig     `json:"session"`
-	SnowflakeCLIConfigPath string            `json:"snowflakeCliConfigPath"`
-	FeatureFlags           FeatureFlags      `json:"featureFlags"`
+	Connections            []Connection                    `json:"connections"`
+	Git                    GitConfig                       `json:"git"`
+	OAuth                  OAuthConfig                     `json:"oauth"`
+	AI                     AIConfig                        `json:"ai"`
+	Snowpark               SnowparkConfig                  `json:"snowpark"`
+	PipRegistry            PipRegistryConfig               `json:"pipRegistry"`
+	Editor                 EditorPrefs                     `json:"editor"`
+	NotebookPrefs          NotebookPrefs                   `json:"notebookPrefs"`
+	Session                SessionConfig                   `json:"session"`
+	SnowflakeCLIConfigPath string                          `json:"snowflakeCliConfigPath"`
+	FeatureFlags           FeatureFlags                    `json:"featureFlags"`
+	MCPCredentials         map[string]MCPSessionCredential `json:"mcpCredentials,omitempty"`
 }
 
 // configPath returns the absolute path to the application configuration file,

@@ -22,13 +22,17 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	sf "github.com/snowflakedb/gosnowflake/v2"
+
+	"thaw/internal/sqlutil"
 )
 
 // ConnectParams holds all fields needed to open a Snowflake connection.
@@ -177,7 +181,81 @@ func connExec(conn driver.Conn, query string) {
 type Client struct {
 	db        *sql.DB
 	connector *sessionConnector
+
+	objectCacheMu sync.RWMutex
+	objectCache   map[string]objectCacheEntry
+
+	// excludedExtendedKinds stores a map[string]bool of object kinds to skip
+	// in ListExtendedObjects. Accessed via SetExcludedExtendedKinds (write)
+	// and getExcludedExtendedKinds (read) which use atomic.Value for safe
+	// concurrent access without locking.
+	excludedExtendedKinds atomic.Value // stores map[string]bool
+
+	// OnQuery is an optional hook called after every SQL statement execution.
+	// Parameters: ctx, sql text, query ID (may be empty), error (nil on success),
+	// wall-clock duration. Nil-checked before invocation.
+	OnQuery func(ctx context.Context, sql string, queryID string, err error, dur time.Duration)
 }
+
+// ── Instrumented DB wrappers ────────────────────────────────────────────────
+// These replace direct c.db.QueryContext / ExecContext / QueryRowContext calls
+// so that every SQL round-trip fires the OnQuery hook.
+
+// queryCtx wraps c.db.QueryContext with the OnQuery hook.
+func (c *Client) queryCtx(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	start := time.Now()
+	rows, err := c.db.QueryContext(ctx, query, args...)
+	if c.OnQuery != nil {
+		c.OnQuery(ctx, query, "", err, time.Since(start))
+	}
+	return rows, err
+}
+
+// execCtx wraps c.db.ExecContext with the OnQuery hook.
+func (c *Client) execCtx(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	start := time.Now()
+	result, err := c.db.ExecContext(ctx, query, args...)
+	if c.OnQuery != nil {
+		c.OnQuery(ctx, query, "", err, time.Since(start))
+	}
+	return result, err
+}
+
+// queryRowCtx wraps c.db.QueryRowContext with the OnQuery hook.
+// NOTE: The hook always fires with err=nil because QueryRowContext defers the
+// actual error to Row.Scan(). Queries routed through this wrapper will appear
+// as SUCCESS in the query log even if the subsequent Scan() fails. This is a
+// known limitation of the sql.Row API — the network round-trip succeeded but
+// the row-level result may still carry an error.
+func (c *Client) queryRowCtx(ctx context.Context, query string, args ...any) *sql.Row {
+	start := time.Now()
+	row := c.db.QueryRowContext(ctx, query, args...)
+	if c.OnQuery != nil {
+		c.OnQuery(ctx, query, "", nil, time.Since(start))
+	}
+	return row
+}
+
+// SetExcludedExtendedKinds atomically replaces the set of object kinds that
+// ListExtendedObjects will skip. Safe to call concurrently with ListExtendedObjects.
+func (c *Client) SetExcludedExtendedKinds(kinds map[string]bool) {
+	c.excludedExtendedKinds.Store(kinds)
+}
+
+func (c *Client) getExcludedExtendedKinds() map[string]bool {
+	v := c.excludedExtendedKinds.Load()
+	if v == nil {
+		return nil
+	}
+	return v.(map[string]bool)
+}
+
+type objectCacheEntry struct {
+	objects []SnowflakeObject
+	ts      time.Time
+}
+
+const objectCacheTTL = 30 * time.Second
 
 // NewClient opens a new Snowflake connection. The provided context can be
 // canceled to abort the login handshake (useful for MFA/browser flows).
@@ -286,7 +364,7 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 		sc.mu.Unlock()
 	}
 
-	return &Client{db: db, connector: sc}, nil
+	return &Client{db: db, connector: sc, objectCache: make(map[string]objectCacheEntry)}, nil
 }
 
 // IsAlive checks that the underlying connection is still usable.
@@ -311,7 +389,7 @@ func (c *Client) SetPoolLimits(maxOpen, maxIdle int) {
 // GetSessionID returns the Snowflake session ID via SELECT CURRENT_SESSION().
 func (c *Client) GetSessionID(ctx context.Context) (string, error) {
 	var id string
-	if err := c.db.QueryRowContext(ctx, "SELECT CURRENT_SESSION()").Scan(&id); err != nil {
+	if err := c.queryRowCtx(ctx, "SELECT CURRENT_SESSION()").Scan(&id); err != nil {
 		return "", err
 	}
 	return id, nil
@@ -425,7 +503,11 @@ func isContextChangingQuery(sql string) bool {
 // statement finishes).  The parameter is variadic so all existing callers
 // remain unchanged.
 func (c *Client) Execute(ctx context.Context, query string, onProgress ...func(idx, total int, qidChan <-chan string)) (*QueryResult, error) {
-	stmts := splitStatements(query)
+	rawStmts := sqlutil.Split(query)
+	stmts := make([]string, len(rawStmts))
+	for i, s := range rawStmts {
+		stmts[i] = normalizePutGet(s)
+	}
 	if len(stmts) == 0 {
 		return &QueryResult{Rows: [][]interface{}{}}, nil
 	}
@@ -484,9 +566,17 @@ func (c *Client) Execute(ctx context.Context, query string, onProgress ...func(i
 			onProgress[0](i, len(stmts), qidChan)
 		}
 
+		start := time.Now()
 		result, err := queryOnConn(stmtCtx, conn, stmt)
+		dur := time.Since(start)
 		if err != nil {
+			if c.OnQuery != nil {
+				c.OnQuery(ctx, stmt, "", err, dur)
+			}
 			return nil, err
+		}
+		if c.OnQuery != nil {
+			c.OnQuery(ctx, stmt, "", nil, dur)
 		}
 		last = result
 	}
@@ -572,8 +662,13 @@ func (c *Client) QuerySingle(ctx context.Context, query string) (*QueryResult, e
 	}
 	defer func() { _ = conn.Close() }()
 
+	start := time.Now()
 	result, err := queryOnConn(ctx, conn, query)
+	dur := time.Since(start)
 	if err != nil {
+		if c.OnQuery != nil {
+			c.OnQuery(ctx, query, "", err, dur)
+		}
 		return nil, err
 	}
 
@@ -594,115 +689,10 @@ func (c *Client) QuerySingle(ctx context.Context, query string) (*QueryResult, e
 		_, _ = c.GetSessionContextOnConn(syncCtx, conn)
 	}
 
+	if c.OnQuery != nil {
+		c.OnQuery(ctx, query, "", nil, dur)
+	}
 	return result, nil
-}
-
-// SplitStatements splits a SQL string into individual statements on
-// semicolons, respecting single-quoted strings, double-quoted identifiers,
-// line comments (--), block comments (/* */), and Snowflake dollar-quoted
-// strings ($$..$$ and $tag$..$tag$).
-func SplitStatements(sql string) []string { return splitStatements(sql) }
-
-// splitStatements is the internal implementation of SplitStatements.
-func splitStatements(sql string) []string {
-	var stmts []string
-	var cur strings.Builder
-	i, n := 0, len(sql)
-	for i < n {
-		ch := sql[i]
-		switch {
-		case ch == '-' && i+1 < n && sql[i+1] == '-':
-			// Line comment — consume through end of line.
-			for i < n && sql[i] != '\n' {
-				cur.WriteByte(sql[i])
-				i++
-			}
-		case ch == '/' && i+1 < n && sql[i+1] == '*':
-			// Block comment — consume through */.
-			cur.WriteByte(sql[i])
-			cur.WriteByte(sql[i+1])
-			i += 2
-			for i < n {
-				if sql[i] == '*' && i+1 < n && sql[i+1] == '/' {
-					cur.WriteByte(sql[i])
-					cur.WriteByte(sql[i+1])
-					i += 2
-					break
-				}
-				cur.WriteByte(sql[i])
-				i++
-			}
-		case ch == '\'':
-			// Single-quoted string — handle '' escaping.
-			cur.WriteByte(ch)
-			i++
-			for i < n {
-				c := sql[i]
-				cur.WriteByte(c)
-				i++
-				if c == '\'' {
-					if i < n && sql[i] == '\'' {
-						cur.WriteByte(sql[i])
-						i++
-					} else {
-						break
-					}
-				}
-			}
-		case ch == '"':
-			// Double-quoted identifier.
-			cur.WriteByte(ch)
-			i++
-			for i < n {
-				c := sql[i]
-				cur.WriteByte(c)
-				i++
-				if c == '"' {
-					break
-				}
-			}
-		case ch == '$':
-			// Possible dollar-quoted string: $$...$$ or $tag$...$tag$.
-			end := i + 1
-			for end < n && (sql[end] == '_' ||
-				(sql[end] >= 'a' && sql[end] <= 'z') ||
-				(sql[end] >= 'A' && sql[end] <= 'Z') ||
-				(sql[end] >= '0' && sql[end] <= '9')) {
-				end++
-			}
-			if end < n && sql[end] == '$' {
-				tag := sql[i : end+1] // e.g. "$$" or "$my_tag$"
-				cur.WriteString(tag)
-				i = end + 1
-				for i < n {
-					if strings.HasPrefix(sql[i:], tag) {
-						cur.WriteString(tag)
-						i += len(tag)
-						break
-					}
-					cur.WriteByte(sql[i])
-					i++
-				}
-			} else {
-				cur.WriteByte(ch)
-				i++
-			}
-		case ch == ';':
-			stmt := normalizePutGet(strings.TrimSpace(cur.String()))
-			if stmt != "" {
-				stmts = append(stmts, stmt)
-			}
-			cur.Reset()
-			i++
-		default:
-			cur.WriteByte(ch)
-			i++
-		}
-	}
-	if stmt := normalizePutGet(strings.TrimSpace(cur.String())); stmt != "" {
-		stmts = append(stmts, stmt)
-	}
-	return stmts
 }
 
 // normalizePutGet prepares PUT and GET statements for the gosnowflake driver:
@@ -762,7 +752,7 @@ func quotePutFilePath(stmt string) string {
 // This is a best-effort call; the caller may ignore errors.
 func (c *Client) CancelSnowflakeQuery(ctx context.Context, queryID string) error {
 	escaped := strings.ReplaceAll(queryID, "'", "''")
-	_, err := c.db.ExecContext(ctx, fmt.Sprintf("SELECT SYSTEM$CANCEL_QUERY('%s')", escaped))
+	_, err := c.execCtx(ctx, fmt.Sprintf("SELECT SYSTEM$CANCEL_QUERY('%s')", escaped))
 	return err
 }
 
@@ -788,6 +778,11 @@ func (c *Client) GetSessionContext(ctx context.Context) (SessionContext, error) 
 }
 
 // GetSessionContextOnConn is the same as GetSessionContext but runs on a pinned connection.
+//
+// NOTE: Intentionally not instrumented via the OnQuery hook. This runs on a
+// pinned *sql.Conn (not c.db) so the queryRowCtx wrapper cannot be used, and
+// the query fires after every QuerySingle/ExecuteOnConn call — logging it
+// would add significant noise to the query log without useful signal.
 func (c *Client) GetSessionContextOnConn(ctx context.Context, conn *sql.Conn) (SessionContext, error) {
 	// Ensure sync query is NOT async even if the parent context is.
 	syncCtx, cancel := context.WithCancel(context.Background())
@@ -820,16 +815,28 @@ func (c *Client) GetSessionContextOnConn(ctx context.Context, conn *sql.Conn) (S
 // ExecuteOnConn runs one or more SQL statements on a pinned connection and
 // returns the last result set. It also syncs the session context.
 func (c *Client) ExecuteOnConn(ctx context.Context, conn *sql.Conn, query string) (*QueryResult, error) {
-	stmts := splitStatements(query)
+	rawStmts := sqlutil.Split(query)
+	stmts := make([]string, len(rawStmts))
+	for i, s := range rawStmts {
+		stmts[i] = normalizePutGet(s)
+	}
 	if len(stmts) == 0 {
 		return &QueryResult{Rows: [][]interface{}{}}, nil
 	}
 
 	var last *QueryResult
 	for _, stmt := range stmts {
+		start := time.Now()
 		result, err := queryOnConn(ctx, conn, stmt)
+		dur := time.Since(start)
 		if err != nil {
+			if c.OnQuery != nil {
+				c.OnQuery(ctx, stmt, "", err, dur)
+			}
 			return nil, err
+		}
+		if c.OnQuery != nil {
+			c.OnQuery(ctx, stmt, "", nil, dur)
 		}
 		last = result
 	}
@@ -854,7 +861,7 @@ func (c *Client) ListRoles(ctx context.Context) ([]string, error) {
 // that USE ROLE will accept without error.
 func (c *Client) ListAvailableRoles(ctx context.Context) ([]string, error) {
 	var raw string
-	if err := c.db.QueryRowContext(ctx, "SELECT CURRENT_AVAILABLE_ROLES()").Scan(&raw); err != nil {
+	if err := c.queryRowCtx(ctx, "SELECT CURRENT_AVAILABLE_ROLES()").Scan(&raw); err != nil {
 		return nil, err
 	}
 	// Result is a JSON array string, e.g. ["PUBLIC","SYSADMIN","ACCOUNTADMIN"]
@@ -1050,13 +1057,24 @@ func (c *Client) ListSecretsInAccount(ctx context.Context) ([]AccountSecret, err
 	return secrets, nil
 }
 
-// GitRepoEntry represents a file or directory inside a Snowflake git repository stage.
+// GitRepoEntry represents a file or directory entry returned by listing
+// a Snowflake git repository, internal stage, or workspace. The struct
+// is generic (name, path, isDir, size) and reused across all location types.
 type GitRepoEntry struct {
 	Name  string `json:"name"`
 	Path  string `json:"path"`
 	IsDir bool   `json:"isDir"`
 	Size  int64  `json:"size,omitempty"`
 }
+
+// StageEntry is a documentation-only alias for GitRepoEntry, used by
+// ListStageEntries for readability. Go type aliases provide no compile-time
+// distinction — a StageEntry is freely interchangeable with GitRepoEntry.
+type StageEntry = GitRepoEntry
+
+// WorkspaceEntry is a documentation-only alias for GitRepoEntry, used by
+// ListWorkspaceEntries for readability. Same caveat as StageEntry.
+type WorkspaceEntry = GitRepoEntry
 
 // GitBranch represents a branch in a Snowflake git repository.
 type GitBranch struct {
@@ -1068,26 +1086,11 @@ type GitTag struct {
 	Name string `json:"name"`
 }
 
-// ListGitRepoEntries returns the immediate children (files and directories) at
-// dirPath within the git repository stage @database.schema.repoName/dirPath.
-// Pass an empty dirPath to list the root. Directories are sorted first, then
-// files; both groups are sorted case-insensitively by name.
-func (c *Client) ListGitRepoEntries(ctx context.Context, database, schema, repoName, dirPath string) ([]GitRepoEntry, error) {
-	// NORMALIZE DIRPATH
-	// Remove leading slash so HasPrefix matches relPath safely.
-	dirPath = strings.TrimPrefix(dirPath, "/")
-	// Ensure trailing slash to prevent swallowing files into empty-named directories.
-	if dirPath != "" && !strings.HasSuffix(dirPath, "/") {
-		dirPath += "/"
-	}
-
-	sql := fmt.Sprintf(`LIST @%s.%s.%s/%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(repoName), dirPath)
-
-	res, err := c.Execute(ctx, sql)
-	if err != nil {
-		return nil, err
-	}
-
+// parseListEntries parses the result of a LIST @stage/path command into
+// directory-aware GitRepoEntry values. stageName is the unquoted object name
+// used to strip the stage/repo prefix from the NAME column. dirPath is the
+// normalized directory prefix (with trailing slash when non-empty).
+func parseListEntries(res *QueryResult, stageName, dirPath string) []GitRepoEntry {
 	nameIdx := -1
 	sizeIdx := -1
 	for i, col := range res.Columns {
@@ -1099,7 +1102,7 @@ func (c *Client) ListGitRepoEntries(ctx context.Context, database, schema, repoN
 		}
 	}
 	if nameIdx == -1 {
-		return []GitRepoEntry{}, nil
+		return []GitRepoEntry{}
 	}
 
 	seen := make(map[string]struct{})
@@ -1116,10 +1119,10 @@ func (c *Client) ListGitRepoEntries(ctx context.Context, database, schema, repoN
 		if slashIdx := strings.Index(fullName, "/"); slashIdx >= 0 {
 			prefix := fullName[:slashIdx]
 			up := strings.ToUpper(prefix)
-			ur := strings.ToUpper(repoName)
+			ur := strings.ToUpper(stageName)
 
 			// Determine if the part before the first slash is a stage prefix.
-			// It might be REPO, "REPO", @REPO, or a qualified DB.SCHEMA.REPO.
+			// It might be STAGE, "STAGE", @STAGE, or a qualified DB.SCHEMA.STAGE.
 			isPrefix := up == ur ||
 				up == `"`+ur+`"` ||
 				strings.HasPrefix(up, "@") ||
@@ -1177,7 +1180,200 @@ func (c *Client) ListGitRepoEntries(ctx context.Context, database, schema, repoN
 		return strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name)
 	})
 
-	return entries, nil
+	return entries
+}
+
+// normalizeDirPath normalizes a directory path for LIST queries: strips
+// leading slash, ensures trailing slash when non-empty.
+func normalizeDirPath(dirPath string) string {
+	dirPath = strings.TrimPrefix(dirPath, "/")
+	if dirPath != "" && !strings.HasSuffix(dirPath, "/") {
+		dirPath += "/"
+	}
+	return dirPath
+}
+
+// ListGitRepoEntries returns the immediate children (files and directories) at
+// dirPath within the git repository stage @database.schema.repoName/dirPath.
+// Pass an empty dirPath to list the root. Directories are sorted first, then
+// files; both groups are sorted case-insensitively by name.
+func (c *Client) ListGitRepoEntries(ctx context.Context, database, schema, repoName, dirPath string) ([]GitRepoEntry, error) {
+	dirPath = normalizeDirPath(dirPath)
+
+	sql := fmt.Sprintf(`LIST @%s.%s.%s/%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(repoName), dirPath)
+
+	res, err := c.Execute(ctx, sql)
+	if err != nil {
+		return nil, err
+	}
+
+	return parseListEntries(res, repoName, dirPath), nil
+}
+
+// ListStageEntries returns the immediate children (files and directories) at
+// dirPath within an internal named stage @database.schema.stageName/dirPath.
+// Pass an empty dirPath to list the root. Reuses the same directory-aware
+// parsing logic as ListGitRepoEntries.
+func (c *Client) ListStageEntries(ctx context.Context, database, schema, stageName, dirPath string) ([]StageEntry, error) {
+	dirPath = normalizeDirPath(dirPath)
+
+	sql := fmt.Sprintf(`LIST @%s.%s.%s/%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(stageName), dirPath)
+
+	res, err := c.Execute(ctx, sql)
+	if err != nil {
+		return nil, err
+	}
+
+	return parseListEntries(res, stageName, dirPath), nil
+}
+
+// DbtProjectVersion represents a version of a Snowflake-native DBT PROJECT.
+type DbtProjectVersion struct {
+	Version   string `json:"version"`
+	Alias     string `json:"alias"`
+	IsDefault bool   `json:"isDefault"`
+}
+
+// ListDbtProjectVersions returns all versions of the given DBT PROJECT.
+func (c *Client) ListDbtProjectVersions(ctx context.Context, database, schema, name string) ([]DbtProjectVersion, error) {
+	sql := fmt.Sprintf(`SHOW VERSIONS IN DBT PROJECT %s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(name))
+
+	res, err := c.Execute(ctx, sql)
+	if err != nil {
+		return nil, err
+	}
+
+	versionIdx := -1
+	aliasIdx := -1
+	defaultIdx := -1
+	for i, col := range res.Columns {
+		switch strings.ToUpper(col) {
+		case "VERSION":
+			versionIdx = i
+		case "ALIAS":
+			aliasIdx = i
+		case "IS_DEFAULT", "DEFAULT":
+			defaultIdx = i
+		}
+	}
+	if versionIdx == -1 {
+		return []DbtProjectVersion{}, nil
+	}
+
+	var versions []DbtProjectVersion
+	for _, row := range res.Rows {
+		v := DbtProjectVersion{
+			Version: strVal(row, versionIdx),
+		}
+		if aliasIdx != -1 {
+			v.Alias = strVal(row, aliasIdx)
+		}
+		if defaultIdx != -1 {
+			d := strings.ToLower(strVal(row, defaultIdx))
+			v.IsDefault = d == "true" || d == "1" || d == "yes" || d == "y"
+		}
+		versions = append(versions, v)
+	}
+	return versions, nil
+}
+
+// WorkspaceInfo represents a Snowflake workspace. Workspaces are discovered via
+// SHOW GIT REPOSITORIES (they appear as repos with REPOSITORY_ORIGIN = "WORKSPACE").
+type WorkspaceInfo struct {
+	Name     string `json:"name"`
+	Database string `json:"database"`
+	Schema   string `json:"schema"`
+	Owner    string `json:"owner"`
+}
+
+// ListWorkspaces returns all workspaces visible to the current user.
+// Workspaces appear as git repositories whose name follows the pattern
+// <USER>$.<SCHEMA>."<workspace_name>". We filter by checking the
+// repository_origin column for "WORKSPACE" or by name pattern.
+//
+// TODO: revisit once Snowflake provides a dedicated SHOW WORKSPACES command
+// or supports WHERE/LIKE filtering for REPOSITORY_ORIGIN. The current approach
+// fetches all git repos account-wide, which may be slow on large accounts.
+func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
+	res, err := c.Execute(ctx, "SHOW GIT REPOSITORIES IN ACCOUNT")
+	if err != nil {
+		return nil, err
+	}
+
+	nameIdx := -1
+	dbIdx := -1
+	schemaIdx := -1
+	ownerIdx := -1
+	originIdx := -1
+	for i, col := range res.Columns {
+		switch strings.ToUpper(col) {
+		case "NAME":
+			nameIdx = i
+		case "DATABASE_NAME":
+			dbIdx = i
+		case "SCHEMA_NAME":
+			schemaIdx = i
+		case "OWNER":
+			ownerIdx = i
+		case "REPOSITORY_ORIGIN":
+			originIdx = i
+		}
+	}
+	if nameIdx == -1 {
+		return []WorkspaceInfo{}, nil
+	}
+
+	var workspaces []WorkspaceInfo
+	for _, row := range res.Rows {
+		// Filter: prefer the REPOSITORY_ORIGIN column ("WORKSPACE") which
+		// is present on modern Snowflake versions. Fall back to the "$" name
+		// heuristic only when the column is missing from the response (older
+		// versions). Note: the "$" heuristic can false-positive on repos
+		// that happen to contain "$" in their name.
+		origin := ""
+		if originIdx != -1 {
+			origin = strings.ToUpper(strVal(row, originIdx))
+		}
+		name := strVal(row, nameIdx)
+		if originIdx != -1 {
+			// Column available — use authoritative check only.
+			if origin != "WORKSPACE" {
+				continue
+			}
+		} else {
+			// Column unavailable — fall back to name heuristic.
+			if !strings.Contains(name, "$") {
+				continue
+			}
+		}
+		w := WorkspaceInfo{Name: name}
+		if dbIdx != -1 {
+			w.Database = strVal(row, dbIdx)
+		}
+		if schemaIdx != -1 {
+			w.Schema = strVal(row, schemaIdx)
+		}
+		if ownerIdx != -1 {
+			w.Owner = strVal(row, ownerIdx)
+		}
+		workspaces = append(workspaces, w)
+	}
+	return workspaces, nil
+}
+
+// ListWorkspaceEntries returns directory-aware entries within a workspace.
+// The workspace is addressed as a git repository stage: @db.schema."workspace_name"/dirPath.
+func (c *Client) ListWorkspaceEntries(ctx context.Context, database, schema, workspaceName, dirPath string) ([]WorkspaceEntry, error) {
+	dirPath = normalizeDirPath(dirPath)
+
+	sql := fmt.Sprintf(`LIST @%s.%s.%s/%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(workspaceName), dirPath)
+
+	res, err := c.Execute(ctx, sql)
+	if err != nil {
+		return nil, err
+	}
+
+	return parseListEntries(res, workspaceName, dirPath), nil
 }
 
 // ListGitBranches returns all branches in the given git repository.
@@ -1257,7 +1453,8 @@ func (c *Client) GetGitFileContent(ctx context.Context, database, schema, repoNa
 	return content.String(), nil
 }
 
-// ExecuteGitFile executes a SQL file from a git repository.
+// ExecuteGitFile executes a SQL file via EXECUTE IMMEDIATE FROM @db.schema.name/path.
+// Also used for stage files (via App.ExecuteStageFile) since the SQL pattern is identical.
 func (c *Client) ExecuteGitFile(ctx context.Context, database, schema, repoName, filePath string) error {
 	sql := fmt.Sprintf(`EXECUTE IMMEDIATE FROM @%s.%s.%s/%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(repoName), filePath)
 
@@ -1286,7 +1483,7 @@ func (c *Client) ListIntegrations(ctx context.Context, kind string) ([]Integrati
 	if !validKinds[upper] {
 		return nil, fmt.Errorf("unknown integration kind: %q", kind)
 	}
-	rows, err := c.db.QueryContext(ctx, fmt.Sprintf("SHOW %s INTEGRATIONS", upper))
+	rows, err := c.queryCtx(ctx, fmt.Sprintf("SHOW %s INTEGRATIONS", upper))
 	if err != nil {
 		return nil, err
 	}
@@ -1340,7 +1537,7 @@ func (c *Client) ListIntegrations(ctx context.Context, kind string) ([]Integrati
 // DropIntegration drops the named integration.
 func (c *Client) DropIntegration(ctx context.Context, name string) error {
 	esc := strings.ReplaceAll(name, `"`, `""`)
-	_, err := c.db.ExecContext(ctx, fmt.Sprintf(`DROP INTEGRATION %s`, esc))
+	_, err := c.execCtx(ctx, fmt.Sprintf(`DROP INTEGRATION %s`, esc))
 	return err
 }
 
@@ -1350,7 +1547,7 @@ func (c *Client) DropDatabase(ctx context.Context, name string, mode string) err
 		mode = "CASCADE"
 	}
 	esc := strings.ReplaceAll(name, `"`, `""`)
-	_, err := c.db.ExecContext(ctx, fmt.Sprintf(`DROP DATABASE %s %s`, esc, mode))
+	_, err := c.execCtx(ctx, fmt.Sprintf(`DROP DATABASE %s %s`, esc, mode))
 	return err
 }
 
@@ -1361,7 +1558,7 @@ func (c *Client) DropSchema(ctx context.Context, database, schema string, mode s
 	}
 	escDb := strings.ReplaceAll(database, `"`, `""`)
 	escSch := strings.ReplaceAll(schema, `"`, `""`)
-	_, err := c.db.ExecContext(ctx, fmt.Sprintf(`DROP SCHEMA %s.%s %s`, escDb, escSch, mode))
+	_, err := c.execCtx(ctx, fmt.Sprintf(`DROP SCHEMA %s.%s %s`, escDb, escSch, mode))
 	return err
 }
 
@@ -1369,7 +1566,7 @@ func (c *Client) DropSchema(ctx context.Context, database, schema string, mode s
 // The caller is responsible for ensuring the SQL is safe; use the integrations
 // package helpers to build injection-safe DDL before calling this method.
 func (c *Client) ExecDDL(ctx context.Context, sql string) error {
-	_, err := c.db.ExecContext(ctx, sql)
+	_, err := c.execCtx(ctx, sql)
 	return err
 }
 
@@ -1384,7 +1581,7 @@ func (c *Client) CanCreateIntegration(ctx context.Context, role string) (bool, e
 	}
 
 	if role == "" {
-		if err := c.db.QueryRowContext(ctx, "SELECT CURRENT_ROLE()").Scan(&role); err != nil {
+		if err := c.queryRowCtx(ctx, "SELECT CURRENT_ROLE()").Scan(&role); err != nil {
 			return false, fmt.Errorf("CanCreateIntegration: %w", err)
 		}
 		role = strings.TrimSpace(role)
@@ -1399,7 +1596,7 @@ func (c *Client) CanCreateIntegration(ctx context.Context, role string) (bool, e
 // running DESCRIBE USER and translating the property/value pairs.
 func (c *Client) GetUserDDL(ctx context.Context, name string) (string, error) {
 
-	rows, err := c.db.QueryContext(ctx, fmt.Sprintf(`DESCRIBE USER %s`, QuoteIdent(name)))
+	rows, err := c.queryCtx(ctx, fmt.Sprintf(`DESCRIBE USER %s`, QuoteIdent(name)))
 	if err != nil {
 		return "", err
 	}
@@ -1491,7 +1688,7 @@ func (c *Client) roleGrantsPrivilege(
 	acceptedPrivs map[string]bool,
 ) (bool, []string, error) {
 	esc := strings.ReplaceAll(role, `"`, `""`)
-	rows, err := c.db.QueryContext(ctx, fmt.Sprintf(`SHOW GRANTS TO ROLE %s`, esc))
+	rows, err := c.queryCtx(ctx, fmt.Sprintf(`SHOW GRANTS TO ROLE %s`, esc))
 	if err != nil {
 		return false, nil, err
 	}
@@ -1572,7 +1769,7 @@ func (c *Client) collectRoleHierarchy(ctx context.Context, startRole string) (ma
 		}
 		seen[upper] = true
 		esc := strings.ReplaceAll(role, `"`, `""`)
-		rows, err := c.db.QueryContext(ctx, fmt.Sprintf(`SHOW GRANTS TO ROLE %s`, esc))
+		rows, err := c.queryCtx(ctx, fmt.Sprintf(`SHOW GRANTS TO ROLE %s`, esc))
 		if err != nil {
 			continue // restricted; skip this role
 		}
@@ -1602,7 +1799,7 @@ func (c *Client) CanModifyUserAuth(ctx context.Context, username string) (bool, 
 	role := c.connector.role
 	c.connector.mu.RUnlock()
 	if role == "" {
-		if err := c.db.QueryRowContext(ctx, "SELECT CURRENT_ROLE()").Scan(&role); err != nil {
+		if err := c.queryRowCtx(ctx, "SELECT CURRENT_ROLE()").Scan(&role); err != nil {
 			return false, fmt.Errorf("CanModifyUserAuth: %w", err)
 		}
 		role = strings.TrimSpace(role)
@@ -1626,7 +1823,7 @@ func (c *Client) CanModifyUserAuth(ctx context.Context, username string) (bool, 
 
 	// Check object-level grants on this specific user.
 	esc := strings.ReplaceAll(username, `"`, `""`)
-	rows, err := c.db.QueryContext(ctx, fmt.Sprintf(`SHOW GRANTS ON USER %s`, esc))
+	rows, err := c.queryCtx(ctx, fmt.Sprintf(`SHOW GRANTS ON USER %s`, esc))
 	if err != nil {
 		return false, err
 	}
@@ -1661,7 +1858,7 @@ func (c *Client) CanCreateUsers(ctx context.Context, role string) (bool, error) 
 
 	if role == "" {
 		// Fallback: ask the DB directly (e.g. before first UseRole call).
-		if err := c.db.QueryRowContext(ctx, "SELECT CURRENT_ROLE()").Scan(&role); err != nil {
+		if err := c.queryRowCtx(ctx, "SELECT CURRENT_ROLE()").Scan(&role); err != nil {
 			return false, fmt.Errorf("CanCreateUsers: %w", err)
 		}
 		role = strings.TrimSpace(role)
@@ -1683,7 +1880,7 @@ func (c *Client) CanManageUsers(ctx context.Context, role string) (bool, error) 
 	}
 
 	if role == "" {
-		if err := c.db.QueryRowContext(ctx, "SELECT CURRENT_ROLE()").Scan(&role); err != nil {
+		if err := c.queryRowCtx(ctx, "SELECT CURRENT_ROLE()").Scan(&role); err != nil {
 			return false, fmt.Errorf("CanManageUsers: %w", err)
 		}
 		role = strings.TrimSpace(role)
@@ -1705,7 +1902,7 @@ func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
 
 	// ── Comment from SHOW ROLES LIKE ────────────────────────────────────────
 	var comment string
-	if rows, err := c.db.QueryContext(ctx,
+	if rows, err := c.queryCtx(ctx,
 		fmt.Sprintf("SHOW ROLES LIKE '%s'", escapedLike)); err == nil {
 		cols, _ := rows.Columns()
 		idxs := colIndexMap(cols, "comment")
@@ -1742,7 +1939,7 @@ func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
 	sb.WriteString(";\n")
 
 	// ── SHOW GRANTS TO ROLE → privileges granted to this role ────────────────
-	if rows, err := c.db.QueryContext(ctx,
+	if rows, err := c.queryCtx(ctx,
 		fmt.Sprintf(`SHOW GRANTS TO ROLE %s`, escapedIdent)); err == nil {
 		cols, _ := rows.Columns()
 		idxs := colIndexMap(cols, "privilege", "granted_on", "name", "grant_option")
@@ -1764,7 +1961,7 @@ func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
 	}
 
 	// ── SHOW GRANTS ON ROLE → who this role is granted to ────────────────────
-	if rows, err := c.db.QueryContext(ctx,
+	if rows, err := c.queryCtx(ctx,
 		fmt.Sprintf(`SHOW GRANTS ON ROLE %s`, escapedIdent)); err == nil {
 		cols, _ := rows.Columns()
 		idxs := colIndexMap(cols, "granted_to", "grantee_name")
@@ -1872,19 +2069,12 @@ func strVal(vals []interface{}, i int) string {
 
 // GetWarehouseDDL returns the DDL for a single warehouse using Snowflake's GET_DDL function.
 func (c *Client) GetWarehouseDDL(ctx context.Context, name string) (string, error) {
-	escaped := strings.ReplaceAll(name, "'", "''")
-	row := c.db.QueryRowContext(ctx, fmt.Sprintf("SELECT GET_DDL('WAREHOUSE', '%s')", escaped))
-	var src string
-	if err := row.Scan(&src); err != nil {
-		return "", fmt.Errorf("GET_DDL(WAREHOUSE %s): %w", name, err)
-	}
-	return src, nil
+	return c.GetObjectDDL(ctx, "", "", "WAREHOUSE", name, "")
 }
 
 // UseRole switches the active role for the current session.
 func (c *Client) UseRole(ctx context.Context, role string) error {
-	escaped := strings.ReplaceAll(role, `"`, `""`)
-	if _, err := c.db.ExecContext(ctx, fmt.Sprintf(`USE ROLE %s`, escaped)); err != nil {
+	if _, err := c.execCtx(ctx, fmt.Sprintf(`USE ROLE %s`, QuoteIdent(role))); err != nil {
 		return err
 	}
 	c.connector.mu.Lock()
@@ -1899,8 +2089,7 @@ func (c *Client) UseRole(ctx context.Context, role string) error {
 
 // UseWarehouse switches the active warehouse for the current session.
 func (c *Client) UseWarehouse(ctx context.Context, warehouse string) error {
-	escaped := strings.ReplaceAll(warehouse, `"`, `""`)
-	if _, err := c.db.ExecContext(ctx, fmt.Sprintf(`USE WAREHOUSE %s`, escaped)); err != nil {
+	if _, err := c.execCtx(ctx, fmt.Sprintf(`USE WAREHOUSE %s`, QuoteIdent(warehouse))); err != nil {
 		return err
 	}
 	c.connector.mu.Lock()
@@ -1916,8 +2105,7 @@ func (c *Client) UseWarehouse(ctx context.Context, warehouse string) error {
 // UseDatabase switches the active database for the current session.
 // Switching the database also resets the active schema.
 func (c *Client) UseDatabase(ctx context.Context, database string) error {
-	escaped := strings.ReplaceAll(database, `"`, `""`)
-	if _, err := c.db.ExecContext(ctx, fmt.Sprintf(`USE DATABASE %s`, escaped)); err != nil {
+	if _, err := c.execCtx(ctx, fmt.Sprintf(`USE DATABASE %s`, QuoteIdent(database))); err != nil {
 		return err
 	}
 	c.connector.mu.Lock()
@@ -1938,16 +2126,14 @@ func (c *Client) UseSchema(ctx context.Context, schema string) error {
 	db := c.connector.db
 	c.connector.mu.RUnlock()
 
-	escapedSc := strings.ReplaceAll(schema, `"`, `""`)
 	var query string
 	if db != "" {
-		escapedDb := strings.ReplaceAll(db, `"`, `""`)
-		query = fmt.Sprintf(`USE SCHEMA %s.%s`, escapedDb, escapedSc)
+		query = fmt.Sprintf(`USE SCHEMA %s.%s`, QuoteIdent(db), QuoteIdent(schema))
 	} else {
-		query = fmt.Sprintf(`USE SCHEMA %s`, escapedSc)
+		query = fmt.Sprintf(`USE SCHEMA %s`, QuoteIdent(schema))
 	}
 
-	if _, err := c.db.ExecContext(ctx, query); err != nil {
+	if _, err := c.execCtx(ctx, query); err != nil {
 		return err
 	}
 	c.connector.mu.Lock()
@@ -1967,7 +2153,7 @@ func (c *Client) ListDatabases(ctx context.Context) ([]string, error) {
 // (origin column is empty). Shared / imported databases such as
 // SNOWFLAKE_SAMPLE_DATA are excluded because GET_DDL is not supported on them.
 func (c *Client) ListExportableDatabases(ctx context.Context) ([]string, error) {
-	rows, err := c.db.QueryContext(ctx, "SHOW DATABASES")
+	rows, err := c.queryCtx(ctx, "SHOW DATABASES")
 	if err != nil {
 		return nil, err
 	}
@@ -2005,8 +2191,7 @@ func (c *Client) ListExportableDatabases(ctx context.Context) ([]string, error) 
 
 // ListSchemas returns schemas inside a database.
 func (c *Client) ListSchemas(ctx context.Context, database string) ([]string, error) {
-	escaped := strings.ReplaceAll(database, `"`, `""`)
-	return c.queryStringSlice(ctx, fmt.Sprintf(`SHOW SCHEMAS IN DATABASE %s`, escaped), 1)
+	return c.queryStringSlice(ctx, fmt.Sprintf(`SHOW SCHEMAS IN DATABASE %s`, QuoteIdent(database)), 1)
 }
 
 // extractArgTypes parses the "arguments" column returned by SHOW PROCEDURES /
@@ -2044,7 +2229,7 @@ func (c *Client) ListDroppedTables(ctx context.Context, database, schema string)
 // It reads any result set that has "name" and "dropped_on" columns and returns
 // only the rows where dropped_on is non-empty (i.e. the object is dropped).
 func (c *Client) listDroppedHistory(ctx context.Context, query string) ([]DroppedTable, error) {
-	rows, err := c.db.QueryContext(ctx, query)
+	rows, err := c.queryCtx(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -2091,7 +2276,7 @@ func (c *Client) ListDroppedDatabases(ctx context.Context) ([]DroppedTable, erro
 // for the given database. Returns 1 if the value cannot be determined.
 func (c *Client) GetDatabaseRetentionDays(ctx context.Context, dbName string) (int, error) {
 	query := fmt.Sprintf(`SHOW PARAMETERS LIKE 'DATA_RETENTION_TIME_IN_DAYS' IN DATABASE %s`, QuoteIdent(dbName))
-	rows, err := c.db.QueryContext(ctx, query)
+	rows, err := c.queryCtx(ctx, query)
 	if err != nil {
 		return 1, err
 	}
@@ -2118,7 +2303,7 @@ func (c *Client) GetDatabaseRetentionDays(ctx context.Context, dbName string) (i
 // for the given schema. Returns 1 if the value cannot be determined.
 func (c *Client) GetSchemaRetentionDays(ctx context.Context, database, schema string) (int, error) {
 	query := fmt.Sprintf(`SHOW PARAMETERS LIKE 'DATA_RETENTION_TIME_IN_DAYS' IN SCHEMA %s.%s`, QuoteIdent(database), QuoteIdent(schema))
-	rows, err := c.db.QueryContext(ctx, query)
+	rows, err := c.queryCtx(ctx, query)
 	if err != nil {
 		return 1, err
 	}
@@ -2149,7 +2334,7 @@ func (c *Client) GetTableRetentionDays(ctx context.Context, database, schema, na
 	query := fmt.Sprintf(`SHOW TABLES LIKE '%s' IN SCHEMA %s.%s`,
 		strings.ReplaceAll(name, "'", "''"), QuoteIdent(database), QuoteIdent(schema))
 
-	rows, err := c.db.QueryContext(ctx, query)
+	rows, err := c.queryCtx(ctx, query)
 	if err != nil {
 		return 0, err
 	}
@@ -2196,7 +2381,7 @@ type SnowflakeUser struct {
 // Returns an error (e.g. insufficient privileges) that the caller should
 // treat as "user management not available".
 func (c *Client) ListUsers(ctx context.Context) ([]SnowflakeUser, error) {
-	rows, err := c.db.QueryContext(ctx, "SHOW USERS")
+	rows, err := c.queryCtx(ctx, "SHOW USERS")
 	if err != nil {
 		return nil, err
 	}
@@ -2358,7 +2543,7 @@ type FunctionInfo struct {
 // by running DESCRIBE TABLE (which works for both base tables and views in Snowflake).
 func (c *Client) GetTableColumns(ctx context.Context, database, schema, name string) ([]string, error) {
 	query := fmt.Sprintf(`DESCRIBE TABLE %s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(name))
-	rows, err := c.db.QueryContext(ctx, query)
+	rows, err := c.queryCtx(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -2409,7 +2594,7 @@ type TableForeignKey struct {
 // the pk_*/fk_* columns into TableForeignKey values.
 func (c *Client) GetTableForeignKeys(ctx context.Context, database, schema, table string) ([]TableForeignKey, error) {
 	query := fmt.Sprintf(`SHOW IMPORTED KEYS IN TABLE %s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(table))
-	rows, err := c.db.QueryContext(ctx, query)
+	rows, err := c.queryCtx(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -2454,20 +2639,21 @@ type ColumnInfo struct {
 	Nullable     bool   `json:"nullable"`
 	IsPrimaryKey bool   `json:"isPrimaryKey"`
 	IsUnique     bool   `json:"isUnique"`
+	Comment      string `json:"comment"` // column comment, empty if none
 }
 
 // GetTableColumnsWithTypes returns the ordered column list for a table or view
 // together with their data types by running DESCRIBE TABLE.
 func (c *Client) GetTableColumnsWithTypes(ctx context.Context, database, schema, name string) ([]ColumnInfo, error) {
 	query := fmt.Sprintf(`DESCRIBE TABLE %s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(name))
-	rows, err := c.db.QueryContext(ctx, query)
+	rows, err := c.queryCtx(ctx, query)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close() //nolint:errcheck
 
 	cols, _ := rows.Columns()
-	idxs := colIndexMap(cols, "name", "type", "null?", "primary key", "unique key")
+	idxs := colIndexMap(cols, "name", "type", "null?", "primary key", "unique key", "comment")
 
 	result := []ColumnInfo{}
 	for rows.Next() {
@@ -2485,6 +2671,7 @@ func (c *Client) GetTableColumnsWithTypes(ctx context.Context, database, schema,
 			Nullable:     strVal(vals, idxs["null?"]) == "Y",
 			IsPrimaryKey: strVal(vals, idxs["primary key"]) == "Y",
 			IsUnique:     strVal(vals, idxs["unique key"]) == "Y",
+			Comment:      strVal(vals, idxs["comment"]),
 		})
 	}
 	return result, rows.Err()
@@ -2496,7 +2683,7 @@ func (c *Client) GetTableColumnsWithTypes(ctx context.Context, database, schema,
 // The result set columns are identical to SHOW IMPORTED KEYS IN TABLE.
 func (c *Client) GetSchemaForeignKeys(ctx context.Context, database, schema string) ([]TableForeignKey, error) {
 	query := fmt.Sprintf(`SHOW IMPORTED KEYS IN SCHEMA %s.%s`, QuoteIdent(database), QuoteIdent(schema))
-	rows, err := c.db.QueryContext(ctx, query)
+	rows, err := c.queryCtx(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -2554,7 +2741,7 @@ func (c *Client) GetFunctionInfo(ctx context.Context, database, schema, name, ar
 // For PROCEDURE and FUNCTION kinds the "arguments" column is also captured so
 // that GET_DDL can be called with the correct overload signature.
 func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema string) ([]SnowflakeObject, error) {
-	rows, err := c.db.QueryContext(ctx, query)
+	rows, err := c.queryCtx(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -2736,24 +2923,38 @@ func parseFinalizeFromDDLText(ddl string) string {
 	return strings.TrimRight(rest[:end], ";,")
 }
 
-// ListObjects returns all objects inside a schema by running multiple SHOW
-// commands concurrently. Individual commands that fail (e.g. due to missing
-// privileges on a particular object type) are silently skipped so that the
-// rest still appear.
-func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]SnowflakeObject, error) {
-	quoteIdent := func(v string) string {
-		v = strings.Trim(v, `"`)
-		v = strings.ReplaceAll(v, `"`, `""`)
-		return `"` + v + `"`
+// ListBasicObjects returns the "basic" objects inside a schema by running a
+// single SHOW OBJECTS IN SCHEMA command. This returns TABLEs, VIEWs,
+// SEQUENCEs, and other object types exposed by the kind column — but not
+// PROCEDUREs, FUNCTIONs, TASKs, STREAMs, STAGEs, etc.
+func (c *Client) ListBasicObjects(ctx context.Context, database, schema string) ([]SnowflakeObject, error) {
+	cacheKey := "basic\x00" + database + "\x00" + schema
+	if cached, ok := c.getObjectCache(cacheKey); ok {
+		return cached, nil
 	}
-	q := fmt.Sprintf("%s.%s", quoteIdent(database), quoteIdent(schema))
+
+	q := fmt.Sprintf("%s.%s", QuoteIdent(database), QuoteIdent(schema))
+	objs, err := c.showInSchema(ctx, fmt.Sprintf("SHOW OBJECTS IN SCHEMA %s", q), "", schema)
+	if err != nil {
+		return nil, err
+	}
+	c.putObjectCache(cacheKey, objs)
+	return objs, nil
+}
+
+// ListExtendedObjects returns the "extended" objects inside a schema by running
+// dedicated SHOW commands for object types not covered by SHOW OBJECTS
+// (PROCEDURE, FUNCTION, TASK, STREAM, STAGE, FILE FORMAT, PIPE, NOTEBOOK,
+// SECRET, GIT REPOSITORY). Individual commands that fail (e.g. due to missing
+// privileges) are silently skipped. Includes the TASK finalize enrichment logic.
+func (c *Client) ListExtendedObjects(ctx context.Context, database, schema string) ([]SnowflakeObject, error) {
+	q := fmt.Sprintf("%s.%s", QuoteIdent(database), QuoteIdent(schema))
 
 	type showCmd struct {
 		query string
-		kind  string // empty → read from result's "kind" column
+		kind  string
 	}
 	commands := []showCmd{
-		{fmt.Sprintf("SHOW OBJECTS IN SCHEMA %s", q), ""},
 		{fmt.Sprintf("SHOW PROCEDURES IN SCHEMA %s", q), "PROCEDURE"},
 		{fmt.Sprintf("SHOW FUNCTIONS IN SCHEMA %s", q), "FUNCTION"},
 		{fmt.Sprintf("SHOW TASKS IN SCHEMA %s", q), "TASK"},
@@ -2764,6 +2965,19 @@ func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]Sn
 		{fmt.Sprintf("SHOW NOTEBOOKS IN SCHEMA %s", q), "NOTEBOOK"},
 		{fmt.Sprintf("SHOW SECRETS IN SCHEMA %s", q), "SECRET"},
 		{fmt.Sprintf("SHOW GIT REPOSITORIES IN SCHEMA %s", q), "GIT REPOSITORY"},
+		{fmt.Sprintf("SHOW DBT PROJECTS IN SCHEMA %s", q), "DBT PROJECT"},
+	}
+
+	// Filter out disabled object kinds (set via SetExcludedExtendedKinds).
+	excl := c.getExcludedExtendedKinds()
+	if len(excl) > 0 {
+		filtered := make([]showCmd, 0, len(commands))
+		for _, cmd := range commands {
+			if !excl[cmd.kind] {
+				filtered = append(filtered, cmd)
+			}
+		}
+		commands = filtered
 	}
 
 	type result struct {
@@ -2794,59 +3008,149 @@ func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]Sn
 	// relationship via SHOW TASKS columns (task_relations / finalize), call
 	// GET_DDL on standalone TASK objects to detect finalizer tasks.
 	// "Standalone" = no predecessors AND no other task depends on it (not a root).
-	{
-		hasChildrenSet := map[string]bool{}
-		for _, o := range all {
-			if o.Kind != "TASK" {
-				continue
-			}
-			preds := strings.TrimSpace(o.Predecessors)
-			if preds == "" || preds == "[]" || preds == "<nil>" {
-				continue
-			}
-			stripped := strings.TrimPrefix(strings.TrimSuffix(preds, "]"), "[")
-			for _, part := range strings.Split(stripped, ",") {
-				part = strings.TrimSpace(part)
-				if part == "" {
-					continue
-				}
-				segs := strings.Split(part, ".")
-				bare := strings.Trim(segs[len(segs)-1], `"`)
-				if bare != "" {
-					hasChildrenSet[strings.ToUpper(bare)] = true
-				}
-			}
-		}
-
-		var enrichWG sync.WaitGroup
-		for i, o := range all {
-			if o.Kind != "TASK" || o.Finalize != "" {
-				continue
-			}
-			preds := strings.TrimSpace(o.Predecessors)
-			if preds != "" && preds != "[]" && preds != "<nil>" {
-				continue
-			}
-			if hasChildrenSet[strings.ToUpper(o.Name)] {
-				continue
-			}
-			i := i // capture for goroutine
-			enrichWG.Add(1)
-			go func() {
-				defer enrichWG.Done()
-				ddl, err := c.GetObjectDDL(ctx, database, schema, "TASK", all[i].Name, "")
-				if err != nil {
-					return
-				}
-				if fin := parseFinalizeFromDDLText(ddl); fin != "" {
-					all[i].Finalize = fin
-				}
-			}()
-		}
-		enrichWG.Wait()
-	}
+	enrichTaskFinalize(ctx, c, database, schema, all)
 
 	return all, nil
+}
+
+// enrichTaskFinalize enriches TASK objects with FINALIZE metadata by calling
+// GET_DDL on standalone tasks that don't already have the finalize field set.
+func enrichTaskFinalize(ctx context.Context, c *Client, database, schema string, all []SnowflakeObject) {
+	hasChildrenSet := map[string]bool{}
+	for _, o := range all {
+		if o.Kind != "TASK" {
+			continue
+		}
+		preds := strings.TrimSpace(o.Predecessors)
+		if preds == "" || preds == "[]" || preds == "<nil>" {
+			continue
+		}
+		stripped := strings.TrimPrefix(strings.TrimSuffix(preds, "]"), "[")
+		for _, part := range strings.Split(stripped, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			segs := strings.Split(part, ".")
+			bare := strings.Trim(segs[len(segs)-1], `"`)
+			if bare != "" {
+				hasChildrenSet[strings.ToUpper(bare)] = true
+			}
+		}
+	}
+
+	var enrichWG sync.WaitGroup
+	for i, o := range all {
+		if o.Kind != "TASK" || o.Finalize != "" {
+			continue
+		}
+		preds := strings.TrimSpace(o.Predecessors)
+		if preds != "" && preds != "[]" && preds != "<nil>" {
+			continue
+		}
+		if hasChildrenSet[strings.ToUpper(o.Name)] {
+			continue
+		}
+		i := i // capture for goroutine
+		enrichWG.Add(1)
+		go func() {
+			defer enrichWG.Done()
+			ddl, err := c.GetObjectDDL(ctx, database, schema, "TASK", all[i].Name, "")
+			if err != nil {
+				return
+			}
+			if fin := parseFinalizeFromDDLText(ddl); fin != "" {
+				all[i].Finalize = fin
+			}
+		}()
+	}
+	enrichWG.Wait()
+}
+
+// ListObjects returns all objects inside a schema by running multiple SHOW
+// commands concurrently. Individual commands that fail (e.g. due to missing
+// privileges on a particular object type) are silently skipped so that the
+// rest still appear.
+func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]SnowflakeObject, error) {
+	cacheKey := "full\x00" + database + "\x00" + schema
+	if cached, ok := c.getObjectCache(cacheKey); ok {
+		return cached, nil
+	}
+
+	basic, err := c.ListBasicObjects(ctx, database, schema)
+	if err != nil {
+		return nil, err
+	}
+	extended, err := c.ListExtendedObjects(ctx, database, schema)
+	if err != nil {
+		// If extended objects fail, still return basic objects.
+		return basic, nil
+	}
+	all := append(basic, extended...)
+	c.putObjectCache(cacheKey, all)
+	return all, nil
+}
+
+// getObjectCache returns a cached result if it exists and hasn't expired.
+// The returned slice is a shallow clone so callers can safely append without
+// corrupting the cached backing array. Expired entries are deleted on access.
+func (c *Client) getObjectCache(key string) ([]SnowflakeObject, bool) {
+	c.objectCacheMu.RLock()
+	entry, ok := c.objectCache[key]
+	if !ok {
+		c.objectCacheMu.RUnlock()
+		return nil, false
+	}
+	if time.Since(entry.ts) > objectCacheTTL {
+		c.objectCacheMu.RUnlock()
+		c.objectCacheMu.Lock()
+		// Re-check: another goroutine may have written a fresh entry
+		// between RUnlock and Lock.
+		if e, ok := c.objectCache[key]; ok && time.Since(e.ts) > objectCacheTTL {
+			delete(c.objectCache, key)
+		}
+		c.objectCacheMu.Unlock()
+		return nil, false
+	}
+	result := slices.Clone(entry.objects)
+	c.objectCacheMu.RUnlock()
+	return result, true
+}
+
+// putObjectCache stores a result in the cache with the current timestamp.
+func (c *Client) putObjectCache(key string, objects []SnowflakeObject) {
+	c.objectCacheMu.Lock()
+	defer c.objectCacheMu.Unlock()
+	c.objectCache[key] = objectCacheEntry{objects: objects, ts: time.Now()}
+}
+
+// ClearObjectCache removes all cached object listings.
+func (c *Client) ClearObjectCache() {
+	c.objectCacheMu.Lock()
+	defer c.objectCacheMu.Unlock()
+	c.objectCache = make(map[string]objectCacheEntry)
+}
+
+// ClearObjectCacheForDatabase removes all cached object listings whose key
+// contains the given database (both full and basic-only entries).
+func (c *Client) ClearObjectCacheForDatabase(database string) {
+	c.objectCacheMu.Lock()
+	defer c.objectCacheMu.Unlock()
+	fullPrefix := "full\x00" + database + "\x00"
+	basicPrefix := "basic\x00" + database + "\x00"
+	for k := range c.objectCache {
+		if strings.HasPrefix(k, fullPrefix) || strings.HasPrefix(k, basicPrefix) {
+			delete(c.objectCache, k)
+		}
+	}
+}
+
+// ClearObjectCacheForSchema removes cached object listings for a specific schema.
+func (c *Client) ClearObjectCacheForSchema(database, schema string) {
+	c.objectCacheMu.Lock()
+	defer c.objectCacheMu.Unlock()
+	delete(c.objectCache, "full\x00"+database+"\x00"+schema)
+	delete(c.objectCache, "basic\x00"+database+"\x00"+schema)
 }
 
 // ListFileFormats returns the names of all file formats in the specified schema.
@@ -2855,32 +3159,59 @@ func (c *Client) ListFileFormats(ctx context.Context, database, schema string) (
 	return c.queryStringSlice(ctx, fmt.Sprintf("SHOW FILE FORMATS IN SCHEMA %s", q), 1)
 }
 
-// GetObjectDDL returns the definition of a single schema object using
-// GET_DDL('<kind>', '<db>.<schema>.<name>'). The name components are
-// double-quote escaped to handle mixed-case and special characters.
+// GetObjectDDL returns the DDL definition of a Snowflake object using GET_DDL.
+//
+// For account-level objects (warehouses, databases, etc.) pass empty strings
+// for database and schema — the name is used unqualified.  For schema-scoped
+// objects pass the owning database and schema so the function builds a fully
+// qualified '<db>.<schema>.<name>' identifier.
 //
 // For procedures and functions the arguments parameter must contain the
 // parameter type list (e.g. "NUMBER, VARCHAR") so that Snowflake can resolve
 // the correct overload. Pass an empty string for all other object kinds.
 func (c *Client) GetObjectDDL(ctx context.Context, database, schema, kind, name, arguments string) (string, error) {
-	qualified := fmt.Sprintf(`%s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(name))
-	// Procedures and functions require the argument type list (which may be
-	// empty for zero-arg procedures) appended so Snowflake can resolve the
-	// overload.  Omitting the parentheses entirely causes GET_DDL to return
-	// "Object does not exist" even when the procedure exists.
-	upperKind := strings.ToUpper(kind)
-	if upperKind == "PROCEDURE" || upperKind == "FUNCTION" {
-		qualified += fmt.Sprintf("(%s)", arguments)
-	}
-	escapedKind := strings.ReplaceAll(kind, "'", "''")
-	query := fmt.Sprintf("SELECT GET_DDL('%s', '%s', true)", escapedKind, strings.ReplaceAll(qualified, "'", "''"))
+	query, identifier := buildGetDDLQuery(database, schema, kind, name, arguments)
 
-	row := c.db.QueryRowContext(ctx, query)
+	row := c.queryRowCtx(ctx, query)
 	var src string
 	if err := row.Scan(&src); err != nil {
-		return "", fmt.Errorf("GET_DDL(%s %s): %w", kind, qualified, err)
+		return "", fmt.Errorf("GET_DDL(%s %s): %w", kind, identifier, err)
 	}
 	return src, nil
+}
+
+// buildGetDDLQuery constructs the GET_DDL SQL query and returns both the query
+// string and the identifier used (for error messages).
+func buildGetDDLQuery(database, schema, kind, name, arguments string) (query, identifier string) {
+	// Account-level objects (warehouses, databases, etc.) use an unqualified
+	// name; schema-scoped objects use a fully qualified database.schema.name.
+	if database == "" && schema == "" {
+		identifier = strings.ReplaceAll(name, "'", "''")
+	} else {
+		identifier = fmt.Sprintf(`%s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(name))
+		// Procedures and functions require the argument type list (which may be
+		// empty for zero-arg procedures) appended so Snowflake can resolve the
+		// overload.  Omitting the parentheses entirely causes GET_DDL to return
+		// "Object does not exist" even when the procedure exists.
+		//
+		// Safety: arguments is interpolated into identifier, which is then
+		// single-quote-escaped below before embedding in the GET_DDL string
+		// literal. Any single quotes in arguments are doubled, preventing
+		// breakout from the SQL string context. If this code is refactored,
+		// ensure arguments still passes through the same single-quote escaping.
+		upperKind := strings.ToUpper(kind)
+		if upperKind == "PROCEDURE" || upperKind == "FUNCTION" {
+			identifier += fmt.Sprintf("(%s)", arguments)
+		}
+		identifier = strings.ReplaceAll(identifier, "'", "''")
+	}
+	escapedKind := strings.ReplaceAll(kind, "'", "''")
+	// The third argument (true) enables recursive DDL output for objects that
+	// contain dependents (e.g. databases → schemas → tables).  For object types
+	// without dependents (e.g. warehouses) Snowflake silently ignores it, so
+	// passing true unconditionally is safe and keeps the code path simple.
+	query = fmt.Sprintf("SELECT GET_DDL('%s', '%s', true)", escapedKind, identifier)
+	return query, identifier
 }
 
 // GetCompleteDatabaseDDL returns the full DDL for a database in a single
@@ -2903,17 +3234,7 @@ func (c *Client) GetCompleteDatabaseDDL(ctx context.Context, database string) (s
 //
 // The database name is safely escaped to prevent SQL injection.
 func (c *Client) GetDatabaseDDL(ctx context.Context, database string) (string, error) {
-	// GET_DDL does not support bind parameters for its object-name argument, so
-	// we must interpolate it directly — escaping single quotes by doubling them.
-	escaped := strings.ReplaceAll(database, "'", "''")
-	query := fmt.Sprintf("SELECT GET_DDL('DATABASE', '%s', true)", escaped)
-
-	row := c.db.QueryRowContext(ctx, query)
-	var ddl string
-	if err := row.Scan(&ddl); err != nil {
-		return "", fmt.Errorf("GET_DDL(%s): %w", database, err)
-	}
-	return ddl, nil
+	return c.GetObjectDDL(ctx, "", "", "DATABASE", database, "")
 }
 
 // loadPrivateKey reads a PEM-encoded RSA private key from disk.
@@ -3019,7 +3340,7 @@ func (c *Client) GetERDiagramData(ctx context.Context, database string) (ERDiagr
 				` WHERE c.TABLE_SCHEMA != 'INFORMATION_SCHEMA'`+
 				` AND t.TABLE_TYPE = 'BASE TABLE'`+
 				` ORDER BY c.TABLE_SCHEMA, c.TABLE_NAME, c.ORDINAL_POSITION`, db, db)
-		rows, err := c.db.QueryContext(ctx, query)
+		rows, err := c.queryCtx(ctx, query)
 		if err != nil {
 			colErr = err
 			return
@@ -3040,7 +3361,7 @@ func (c *Client) GetERDiagramData(ctx context.Context, database string) (ERDiagr
 	go func() {
 		defer wg.Done()
 		query := fmt.Sprintf(`SHOW PRIMARY KEYS IN DATABASE %s`, db)
-		rows, err := c.db.QueryContext(ctx, query)
+		rows, err := c.queryCtx(ctx, query)
 		if err != nil {
 			pkErr = err
 			return
@@ -3066,7 +3387,7 @@ func (c *Client) GetERDiagramData(ctx context.Context, database string) (ERDiagr
 	go func() {
 		defer wg.Done()
 		query := fmt.Sprintf(`SHOW IMPORTED KEYS IN DATABASE %s`, db)
-		rows, err := c.db.QueryContext(ctx, query)
+		rows, err := c.queryCtx(ctx, query)
 		if err != nil {
 			fkErr = err
 			return
@@ -3162,7 +3483,7 @@ func (c *Client) GetERDiagramData(ctx context.Context, database string) (ERDiagr
 
 // queryStringSlice is a helper that reads a single string column from a SHOW command.
 func (c *Client) queryStringSlice(ctx context.Context, query string, colIdx int) ([]string, error) {
-	rows, err := c.db.QueryContext(ctx, query)
+	rows, err := c.queryCtx(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -3222,15 +3543,15 @@ func (c *Client) ExportTableData(ctx context.Context, params ExportTableParams) 
 	tableRef := fmt.Sprintf(`%s.%s.%s`, QuoteIdent(params.Database), QuoteIdent(params.Schema), QuoteIdent(params.Table))
 
 	// Create a temporary stage (auto-dropped when the session ends)
-	if _, err := c.db.ExecContext(ctx, "CREATE TEMPORARY STAGE "+stageRef); err != nil {
+	if _, err := c.execCtx(ctx, "CREATE TEMPORARY STAGE "+stageRef); err != nil {
 		return ExportTableResult{}, fmt.Errorf("create export stage: %w", err)
 	}
 	// Explicit cleanup — also runs on error paths
-	defer c.db.ExecContext(context.Background(), "DROP STAGE IF EXISTS "+stageRef) //nolint:errcheck
+	defer c.execCtx(context.Background(), "DROP STAGE IF EXISTS "+stageRef) //nolint:errcheck
 
 	// COPY data into the stage
 	copySQL := buildExportCopySQL(stageAt, tableRef, params)
-	copyRows, err := c.db.QueryContext(ctx, copySQL)
+	copyRows, err := c.queryCtx(ctx, copySQL)
 	if err != nil {
 		return ExportTableResult{}, fmt.Errorf("copy into stage: %w", err)
 	}
@@ -3254,7 +3575,7 @@ func (c *Client) ExportTableData(ctx context.Context, params ExportTableParams) 
 
 	// GET @stage → local directory
 	getSQL := fmt.Sprintf("GET %s '%s'", stageAt, fileURL)
-	getRows, err := c.db.QueryContext(ctx, getSQL)
+	getRows, err := c.queryCtx(ctx, getSQL)
 	if err != nil {
 		return ExportTableResult{}, fmt.Errorf("download files from stage: %w", err)
 	}
@@ -3454,10 +3775,10 @@ func (c *Client) ImportTableData(ctx context.Context, params ImportTableParams) 
 	stageAt := "@" + stageRef
 	tableRef := fmt.Sprintf(`%s.%s.%s`, QuoteIdent(params.Database), QuoteIdent(params.Schema), QuoteIdent(params.Table))
 
-	if _, err := c.db.ExecContext(ctx, "CREATE TEMPORARY STAGE "+stageRef); err != nil {
+	if _, err := c.execCtx(ctx, "CREATE TEMPORARY STAGE "+stageRef); err != nil {
 		return ImportTableResult{}, fmt.Errorf("create import stage: %w", err)
 	}
-	defer c.db.ExecContext(context.Background(), "DROP STAGE IF EXISTS "+stageRef) //nolint:errcheck
+	defer c.execCtx(context.Background(), "DROP STAGE IF EXISTS "+stageRef) //nolint:errcheck
 
 	// PUT each local file to the stage.
 	for _, fp := range params.FilePaths {
@@ -3467,7 +3788,7 @@ func (c *Client) ImportTableData(ctx context.Context, params ImportTableParams) 
 		}
 		escapedURL := strings.ReplaceAll(fileURL, "'", "\\'")
 		putSQL := fmt.Sprintf("PUT '%s' %s AUTO_COMPRESS=FALSE OVERWRITE=TRUE", escapedURL, stageAt)
-		putRows, err := c.db.QueryContext(ctx, putSQL)
+		putRows, err := c.queryCtx(ctx, putSQL)
 		if err != nil {
 			return ImportTableResult{}, fmt.Errorf("upload %s to stage: %w", filepath.Base(fp), err)
 		}
@@ -3483,26 +3804,26 @@ func (c *Client) ImportTableData(ctx context.Context, params ImportTableParams) 
 		fmtName := fmt.Sprintf("THAW_IMPORT_FF_%d", time.Now().UnixNano())
 		fmtRef := fmt.Sprintf(`%s.%s.%s`, QuoteIdent(params.Database), QuoteIdent(params.Schema), fmtName)
 		createFmtSQL := fmt.Sprintf("CREATE OR REPLACE FILE FORMAT %s %s", fmtRef, buildFFOptions(params.Format, params.Options))
-		if _, err := c.db.ExecContext(ctx, createFmtSQL); err != nil {
+		if _, err := c.execCtx(ctx, createFmtSQL); err != nil {
 			return ImportTableResult{}, fmt.Errorf("create file format: %w", err)
 		}
-		defer c.db.ExecContext(context.Background(), "DROP FILE FORMAT IF EXISTS "+fmtRef) //nolint:errcheck
+		defer c.execCtx(context.Background(), "DROP FILE FORMAT IF EXISTS "+fmtRef) //nolint:errcheck
 		inferFmtRef = fmtRef
 	}
 
 	if params.CreateTable {
 		createSQL := buildCreateTableSQL(stageAt, tableRef, inferFmtRef, params)
-		if _, err := c.db.ExecContext(ctx, createSQL); err != nil {
+		if _, err := c.execCtx(ctx, createSQL); err != nil {
 			return ImportTableResult{}, fmt.Errorf("create table: %w", err)
 		}
 	} else if params.Overwrite {
-		if _, err := c.db.ExecContext(ctx, "TRUNCATE TABLE IF EXISTS "+tableRef); err != nil {
+		if _, err := c.execCtx(ctx, "TRUNCATE TABLE IF EXISTS "+tableRef); err != nil {
 			return ImportTableResult{}, fmt.Errorf("truncate table: %w", err)
 		}
 	}
 
 	copySQL := buildImportCopySQL(stageAt, tableRef, params)
-	copyRows, err := c.db.QueryContext(ctx, copySQL)
+	copyRows, err := c.queryCtx(ctx, copySQL)
 	if err != nil {
 		return ImportTableResult{}, fmt.Errorf("copy into table: %w", err)
 	}
@@ -3743,7 +4064,7 @@ func (c *Client) FetchNotebookContent(ctx context.Context, database, schema, nam
 	notebookRef := fmt.Sprintf(`%s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(name))
 
 	// DESC NOTEBOOK to find the stage URI of the latest version.
-	descRows, err := c.db.QueryContext(ctx, "DESC NOTEBOOK "+notebookRef)
+	descRows, err := c.queryCtx(ctx, "DESC NOTEBOOK "+notebookRef)
 	if err != nil {
 		return "", fmt.Errorf("describe notebook: %w", err)
 	}
@@ -3799,7 +4120,7 @@ func (c *Client) FetchNotebookContent(ctx context.Context, database, schema, nam
 	}
 
 	getSQL := fmt.Sprintf("GET '%s' '%s'", strings.ReplaceAll(stageURI, "'", "\\'"), dirURL)
-	getRows, err := c.db.QueryContext(ctx, getSQL)
+	getRows, err := c.queryCtx(ctx, getSQL)
 	if err != nil {
 		return "", fmt.Errorf("GET notebook file: %w", err)
 	}
@@ -3981,10 +4302,10 @@ func (c *Client) DeployNotebook(ctx context.Context, params DeployNotebookParams
 	stageRef := fmt.Sprintf(`%s.%s.%s`, QuoteIdent(params.Database), QuoteIdent(params.Schema), stageName)
 	stageAt := "@" + stageRef
 
-	if _, err := c.db.ExecContext(ctx, "CREATE TEMPORARY STAGE "+stageRef); err != nil {
+	if _, err := c.execCtx(ctx, "CREATE TEMPORARY STAGE "+stageRef); err != nil {
 		return fmt.Errorf("create notebook stage: %w", err)
 	}
-	defer c.db.ExecContext(context.Background(), "DROP STAGE IF EXISTS "+stageRef) //nolint:errcheck
+	defer c.execCtx(context.Background(), "DROP STAGE IF EXISTS "+stageRef) //nolint:errcheck
 
 	// PUT the .ipynb file to the stage.
 	fileURL, err := localFileURLForFile(params.FilePath)
@@ -3993,7 +4314,7 @@ func (c *Client) DeployNotebook(ctx context.Context, params DeployNotebookParams
 	}
 	escapedURL := strings.ReplaceAll(fileURL, "'", "\\'")
 	putSQL := fmt.Sprintf("PUT '%s' %s AUTO_COMPRESS=FALSE OVERWRITE=TRUE", escapedURL, stageAt)
-	putRows, err := c.db.QueryContext(ctx, putSQL)
+	putRows, err := c.queryCtx(ctx, putSQL)
 	if err != nil {
 		return fmt.Errorf("upload notebook to stage: %w", err)
 	}
@@ -4034,8 +4355,135 @@ func (c *Client) DeployNotebook(ctx context.Context, params DeployNotebookParams
 		sb.WriteString(fmt.Sprintf("\n  WAREHOUSE = %s", params.Warehouse))
 	}
 
-	if _, err := c.db.ExecContext(ctx, sb.String()); err != nil {
+	if _, err := c.execCtx(ctx, sb.String()); err != nil {
 		return fmt.Errorf("create notebook: %w", err)
 	}
 	return nil
+}
+
+// ── Cross-schema object search ───────────────────────────────────────────────
+
+// SearchResult holds the results of a cross-schema object and column name
+// search against INFORMATION_SCHEMA.
+type SearchResult struct {
+	Objects []SearchObjectMatch `json:"objects"`
+	Columns []SearchColumnMatch `json:"columns"`
+}
+
+// SearchObjectMatch represents a table/view whose name matched the search
+// pattern.
+type SearchObjectMatch struct {
+	Database string `json:"database"`
+	Schema   string `json:"schema"`
+	Name     string `json:"name"`
+	Kind     string `json:"kind"`
+}
+
+// SearchColumnMatch represents a column whose name matched the search pattern.
+type SearchColumnMatch struct {
+	Database string `json:"database"`
+	Schema   string `json:"schema"`
+	Table    string `json:"table"`
+	Column   string `json:"column"`
+	DataType string `json:"dataType"`
+}
+
+// SearchObjects searches for objects and columns matching a SQL ILIKE pattern
+// across all schemas in the given database. If database is empty, the session's
+// current database is used. Both INFORMATION_SCHEMA.TABLES and
+// INFORMATION_SCHEMA.COLUMNS are queried concurrently, each limited to 100 rows.
+func (c *Client) SearchObjects(ctx context.Context, pattern, database string) (SearchResult, error) {
+	if database == "" {
+		sc, err := c.GetSessionContext(ctx)
+		if err != nil {
+			return SearchResult{}, fmt.Errorf("get session context: %w", err)
+		}
+		database = sc.Database
+		if database == "" {
+			return SearchResult{}, fmt.Errorf("no database specified and no current database in session")
+		}
+	}
+
+	db := QuoteIdent(database)
+
+	type objResult struct {
+		objects []SearchObjectMatch
+		err     error
+	}
+	type colResult struct {
+		columns []SearchColumnMatch
+		err     error
+	}
+
+	objCh := make(chan objResult, 1)
+	colCh := make(chan colResult, 1)
+
+	go func() {
+		query := fmt.Sprintf(
+			`SELECT TABLE_CATALOG, TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE FROM %s.INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME ILIKE ? AND TABLE_SCHEMA != 'INFORMATION_SCHEMA' LIMIT 100`,
+			db,
+		)
+		rows, err := c.queryCtx(ctx, query, pattern)
+		if err != nil {
+			objCh <- objResult{err: err}
+			return
+		}
+		defer rows.Close() //nolint:errcheck
+
+		var objects []SearchObjectMatch
+		for rows.Next() {
+			var m SearchObjectMatch
+			if err := rows.Scan(&m.Database, &m.Schema, &m.Name, &m.Kind); err != nil {
+				objCh <- objResult{err: err}
+				return
+			}
+			objects = append(objects, m)
+		}
+		if objects == nil {
+			objects = []SearchObjectMatch{}
+		}
+		objCh <- objResult{objects: objects, err: rows.Err()}
+	}()
+
+	go func() {
+		query := fmt.Sprintf(
+			`SELECT TABLE_CATALOG, TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, DATA_TYPE FROM %s.INFORMATION_SCHEMA.COLUMNS WHERE COLUMN_NAME ILIKE ? AND TABLE_SCHEMA != 'INFORMATION_SCHEMA' LIMIT 100`,
+			db,
+		)
+		rows, err := c.queryCtx(ctx, query, pattern)
+		if err != nil {
+			colCh <- colResult{err: err}
+			return
+		}
+		defer rows.Close() //nolint:errcheck
+
+		var columns []SearchColumnMatch
+		for rows.Next() {
+			var m SearchColumnMatch
+			if err := rows.Scan(&m.Database, &m.Schema, &m.Table, &m.Column, &m.DataType); err != nil {
+				colCh <- colResult{err: err}
+				return
+			}
+			columns = append(columns, m)
+		}
+		if columns == nil {
+			columns = []SearchColumnMatch{}
+		}
+		colCh <- colResult{columns: columns, err: rows.Err()}
+	}()
+
+	objRes := <-objCh
+	colRes := <-colCh
+
+	if objRes.err != nil {
+		return SearchResult{}, fmt.Errorf("search objects: %w", objRes.err)
+	}
+	if colRes.err != nil {
+		return SearchResult{}, fmt.Errorf("search columns: %w", colRes.err)
+	}
+
+	return SearchResult{
+		Objects: objRes.objects,
+		Columns: colRes.columns,
+	}, nil
 }

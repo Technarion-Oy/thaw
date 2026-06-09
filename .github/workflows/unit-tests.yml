@@ -12,6 +12,9 @@ on:
       - "wails.json"
       - ".github/workflows/unit-tests.yml"
 
+env:
+  PYTHONDONTWRITEBYTECODE: 1
+
 jobs:
   # ── Pure Go unit tests (no system deps, combined to save runner startup) ──
   pure-go-unit-tests:
@@ -31,7 +34,7 @@ jobs:
       - name: Install base tools
         run: |
           apt-get update
-          apt-get install -y git curl wget
+          apt-get install -y git curl wget python3 python3-pip python3-venv
 
       - uses: actions/checkout@v4
 
@@ -58,13 +61,25 @@ jobs:
         if: always()
         run: go test -v -race -count=1 ./internal/sqleditor/... 2>&1 | go-junit-report -set-exit-code > report-sqleditor.xml
 
+      - name: Run Filesystem tests
+        continue-on-error: true
+        run: go test -v -race -count=1 ./internal/filesystem/... 2>&1 | go-junit-report -set-exit-code > report-filesystem.xml
+
       - name: Run Migration tests
         if: always()
         run: go test -v -race -count=1 ./internal/migration/... 2>&1 | go-junit-report -set-exit-code > report-migration.xml
 
+      - name: Run MCP tests
+        continue-on-error: true
+        run: go test -v -race -count=1 ./internal/mcp/... 2>&1 | go-junit-report -set-exit-code > report-mcp.xml
+
       - name: Publish test results
-        uses: EnricoMi/publish-unit-test-result-action@v2
+        uses: EnricoMi/publish-unit-test-result-action/linux@v2
         if: always()
         with:
           files: report-*.xml
           check_name: Pure Go Unit Tests
+
+      - name: Unlock permissions for host runner agent
+        if: always() 
+        run: chmod -R 777 $GITHUB_WORKSPACE/../../_actions || true

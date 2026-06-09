@@ -14,7 +14,7 @@ import {
   Typography, Button, Alert, DatePicker,
 } from "antd";
 import { KeyOutlined } from "@ant-design/icons";
-import { ListSecurityIntegrations, ExecDDL, GetObjectProperties, BuildModifySecretSql } from "../../../wailsjs/go/main/App";
+import { ListSecurityIntegrations, ExecDDL, GetObjectProperties, BuildModifySecretSql } from "../../../wailsjs/go/app/App";
 import type { secret } from "../../../wailsjs/go/models";
 import dayjs from "dayjs";
 

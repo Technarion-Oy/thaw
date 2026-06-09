@@ -19,7 +19,7 @@ import (
 
 // reUnquotedIdent matches a Snowflake bare (unquoted) identifier: starts with
 // a letter or underscore, followed by letters, digits, underscores, or dollar
-// signs. The pattern is case-insensitive because Snowflake normalises unquoted
+// signs. The pattern is case-insensitive because Snowflake normalizes unquoted
 // identifiers to uppercase regardless of how they were written.
 var reUnquotedIdent = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_$]*$`)
 
@@ -55,6 +55,14 @@ var snowflakeReservedKeywords = map[string]struct{}{
 	"UNION": {}, "UNIQUE": {}, "UPDATE": {}, "USING": {},
 	"VALUES": {}, "VIEW": {},
 	"WHEN": {}, "WHENEVER": {}, "WHERE": {}, "WITH": {},
+}
+
+// TableKey returns the canonical lookup key for a Snowflake table:
+// "SCHEMA.TABLE" with both parts trimmed. Names arrive from Snowflake
+// metadata already in their canonical stored form (uppercase for unquoted
+// identifiers, original case for quoted ones), so no case folding is applied.
+func TableKey(schema, name string) string {
+	return strings.TrimSpace(schema) + "." + strings.TrimSpace(name)
 }
 
 // NeedsQuoting reports whether the given Snowflake object name must be

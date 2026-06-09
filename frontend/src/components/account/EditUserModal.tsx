@@ -14,7 +14,7 @@ import {
   Divider, InputNumber, Button, message,
 } from "antd";
 import { UserOutlined } from "@ant-design/icons";
-import { ListWarehouses, ListRoles, ExecuteQuery } from "../../../wailsjs/go/main/App";
+import { ListWarehouses, ListRoles, ExecuteQuery } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;

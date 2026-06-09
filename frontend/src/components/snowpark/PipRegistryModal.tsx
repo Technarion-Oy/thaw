@@ -25,7 +25,7 @@ import {
   SavePipRegistryConfig,
   ResetPipRegistryConfig,
   PickCACertFile,
-} from "../../../wailsjs/go/main/App";
+} from "../../../wailsjs/go/app/App";
 
 const { Title, Text } = Typography;
 

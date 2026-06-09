@@ -10,7 +10,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Button, Input, Modal, Radio, Select, Switch, Tag, Typography, message } from "antd";
-import { GetAIConfig, GetSystemRAMGB, ListAIModels, SaveAIConfig, TestAIModel } from "../../../wailsjs/go/main/App";
+import { GetAIConfig, GetSystemRAMGB, ListAIModels, SaveAIConfig, TestAIModel } from "../../../wailsjs/go/app/App";
 
 const { Text } = Typography;
 

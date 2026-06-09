@@ -14,7 +14,7 @@ import {
   Typography, Divider, InputNumber, Button, Tag, Alert,
 } from "antd";
 import { ClockCircleOutlined, PlusOutlined, InfoCircleOutlined } from "@ant-design/icons";
-import { ListWarehouses, ListNotificationIntegrations, ListObjects, ExecDDL, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/main/App";
+import { ListWarehouses, ListNotificationIntegrations, ListObjects, ExecDDL, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 import ScheduleEditor from "./ScheduleEditor";
 import WhenConditionBuilder from "./WhenConditionBuilder";

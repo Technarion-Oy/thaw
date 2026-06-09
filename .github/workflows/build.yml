@@ -16,9 +16,15 @@ jobs:
           - os: macos-latest   # arm64 (M-series runner)
             platform: darwin
             arch: arm64
+          - os: macos-15-large  # Intel (x86_64) runner
+            platform: darwin
+            arch: amd64
           - os: windows-latest
             platform: windows
             arch: amd64
+          - os: windows-latest # cross-compile arm64 on amd64 runner
+            platform: windows
+            arch: arm64
           - os: ubuntu-24.04   # pinned: ubuntu-latest may lack libwebkit2gtk-4.1-dev
             platform: linux
             arch: amd64
@@ -53,8 +59,7 @@ jobs:
       - name: Download Go dependencies
         run: go mod download
 
-      - name: Install garble (macOS & Linux only)
-        if: matrix.platform != 'windows'
+      - name: Install garble
         run: go install mvdan.cc/garble@latest
 
       - name: Install NSIS (Windows only)
@@ -79,96 +84,87 @@ jobs:
           fi
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
-      # ── Standard Wails Builds ──────────────────────────────────────────────
+      # ── Wails Builds (obfuscated via garble) ──────────────────────────────
+      # -obfuscated: invokes garble as the Go compiler toolchain within the
+      #   Wails build pipeline, producing an obfuscated binary without a
+      #   separate post-build step.  This preserves macOS ad-hoc signing
+      #   (no binary replacement after codesign) and Windows .syso embedding.
+      # -platform:   explicit target to avoid implicit runner-architecture deps.
+      # -tags webkit2_41: Ubuntu 24.04 only ships libwebkit2gtk-4.1-dev;
+      #   Wails' CGO directives default to webkit2gtk-4.0 without this tag.
+      #   Harmless on macOS (webkit CGO is gated behind //go:build linux).
 
       - name: Build (macOS & Linux)
         if: matrix.platform != 'windows'
-        # Run the standard Wails build first.  This step:
-        #   1. Compiles and bundles the React frontend into frontend/dist.
-        #   2. Generates the Wails JS/TS bindings.
-        #   3. Compiles the Go binary (non-obfuscated).
-        # Garble is NOT applied here because GOFLAGS=-toolexec=garble would
-        # be active during step 2 (binding generation), which runs before
-        # frontend/dist exists.  The //go:embed all:frontend/dist directive
-        # then fails with "no matching files found".  The obfuscated binary
-        # is produced in the next step once all embed inputs are present.
-        #
-        # -ldflags "-s -w"  strips the symbol table (-s) and DWARF debug info
-        #                   (-w) so function/variable names are not recoverable.
-        # -trimpath         removes all local file-system paths embedded by the
-        #                   compiler (source file references, module cache paths).
-        # -tags webkit2_41: Ubuntu 24.04 only ships libwebkit2gtk-4.1-dev;
-        #   Wails' CGO directives default to webkit2gtk-4.0 without this tag.
-        #   Harmless on macOS (webkit CGO is gated behind //go:build linux).
-        run: wails build -clean -tags webkit2_41 -ldflags "-s -w -X thaw/internal/version.Version=${{ steps.prep.outputs.version }}" -trimpath
+        run: wails build -obfuscated -platform ${{ matrix.platform }}/${{ matrix.arch }} -clean -tags webkit2_41 -ldflags "-s -w -X thaw/internal/version.Version=${{ steps.prep.outputs.version }}" -trimpath
         env:
-          # The macOS arm64 runner has 7 GB RAM.  javascript-obfuscator's
-          # control-flow flattening can multiply the AST size of each
-          # function several times over.  Combined with Terser's multi-pass
-          # compression running in the same Node process, the default 4 GB
-          # limit is insufficient.  6 GB leaves ~1 GB for the OS.
           NODE_OPTIONS: --max-old-space-size=6144
 
       - name: Build & Package Installer (Windows)
         if: matrix.platform == 'windows'
-        # Since we dropped garble for Windows, we can let Wails handle 
-        # both the compilation AND the NSIS installer generation natively!
-        run: wails build -clean -nsis -ldflags "-s -w -X thaw/internal/version.Version=${{ steps.prep.outputs.version }}" -trimpath
+        run: wails build -obfuscated -platform windows/${{ matrix.arch }} -clean -nsis -ldflags "-s -w -X thaw/internal/version.Version=${{ steps.prep.outputs.version }}" -trimpath
         env:
           NODE_OPTIONS: --max-old-space-size=6144
 
-      # ── Rebuild Go binary with garble ──────────────────────────────────────
-      # frontend/dist is now fully populated, so //go:embed resolves correctly.
-      # garble recompiles the same package with obfuscation (hashed package
-      # paths, mangled identifiers) and overwrites the binary that wails build
-      # produced.  Wails' platform packaging (macOS .app bundle structure,
-      # Windows manifest/icon) is left intact.
+      # ── Sign Windows binaries (Azure Trusted Signing) ───────────────────────
+      - name: Azure Login (Windows only)
+        if: matrix.platform == 'windows'
+        uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+          allow-no-subscriptions: true
 
-      - name: Obfuscate binary (macOS)
-        if: matrix.platform == 'darwin'
-        # CGO_LDFLAGS supplies the UniformTypeIdentifiers framework that Wails
-        # uses for file-type handling (_OBJC_CLASS_$_UTType).  wails build adds
-        # this via its own CGO setup; garble build running standalone only sees
-        # #cgo LDFLAGS directives in the source, which omit this framework,
-        # causing an "Undefined symbols for architecture arm64" linker error.
-        # Go aggregates CGO_LDFLAGS into the external link command alongside
-        # all #cgo LDFLAGS entries, so setting it here is sufficient.
-        env:
-          CGO_LDFLAGS: -framework UniformTypeIdentifiers
-        run: |
-          garble build \
-            -tags desktop,production \
-            -trimpath -ldflags="-s -w -X thaw/internal/version.Version=${{ steps.prep.outputs.version }}" \
-            -o build/bin/thaw.app/Contents/MacOS/thaw \
-            .
-
-      - name: Obfuscate binary (Linux)
-        if: matrix.platform == 'linux'
-        run: |
-          garble build \
-            -tags desktop,production,webkit2_41 \
-            -trimpath -ldflags="-s -w -X thaw/internal/version.Version=${{ steps.prep.outputs.version }}" \
-            -o build/bin/thaw \
-            .
+      - name: Sign Windows binaries
+        if: matrix.platform == 'windows'
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ vars.AZURE_CODE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ vars.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ vars.AZURE_CERTIFICATE_PROFILE_NAME }}
+          files-folder: build/bin
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
 
       # ── Rename / package output with tag version ───────────────────────────
       - name: Package macOS app bundle
         if: matrix.platform == 'darwin'
         run: |
           cd build/bin
-          zip -r "thaw-${{ steps.prep.outputs.version }}-darwin-arm64.zip" thaw.app
+          zip -r "thaw-${{ steps.prep.outputs.version }}-darwin-${{ matrix.arch }}.zip" thaw.app
 
       - name: Rename Windows binaries
         if: matrix.platform == 'windows'
         shell: pwsh
         # Wails natively outputted both the raw executable and the installer, we rename both
         run: |
-          Move-Item build/bin/thaw.exe "build/bin/thaw-${{ steps.prep.outputs.version }}-windows-amd64-portable.exe"
-          Move-Item build/bin/thaw-amd64-installer.exe "build/bin/thaw-${{ steps.prep.outputs.version }}-windows-amd64-installer.exe"
+          Move-Item build/bin/thaw.exe "build/bin/thaw-${{ steps.prep.outputs.version }}-windows-${{ matrix.arch }}-portable.exe"
+          Move-Item "build/bin/thaw-${{ matrix.arch }}-installer.exe" "build/bin/thaw-${{ steps.prep.outputs.version }}-windows-${{ matrix.arch }}-installer.exe"
 
       - name: Rename Linux binary
         if: matrix.platform == 'linux'
         run: mv build/bin/thaw "build/bin/thaw-${{ steps.prep.outputs.version }}-linux-amd64"
+
+      # ── Linux binary verification (checksums + GPG signing) ───────────────
+
+      - name: Generate checksums (Linux)
+        if: matrix.platform == 'linux'
+        run: cd build/bin && sha256sum thaw-*-linux-amd64 > checksums.txt
+
+      - name: Import GPG key (Linux)
+        if: matrix.platform == 'linux'
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Sign checksums (Linux)
+        if: matrix.platform == 'linux'
+        run: cd build/bin && gpg --detach-sign --armor --local-user releases@technarion.com --output checksums.txt.sig checksums.txt
 
       # ── Store artifact (non-tag runs) ──────────────────────────────────────
       # On tag runs binaries are attached directly to the GitHub Release below.
@@ -177,7 +173,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: thaw-${{ steps.prep.outputs.version }}-${{ matrix.platform }}-${{ matrix.arch }}
-          path: build/bin/thaw-${{ steps.prep.outputs.version }}-*
+          path: |
+            build/bin/thaw-${{ steps.prep.outputs.version }}-*
+            build/bin/checksums.txt
+            build/bin/checksums.txt.sig
           retention-days: 30
           if-no-files-found: error
 
@@ -192,3 +191,14 @@ jobs:
           append_body: false
           fail_on_unmatched_files: true
           files: build/bin/thaw-${{ steps.prep.outputs.version }}-*
+
+      - name: Upload checksums to GitHub Release (Linux)
+        if: github.ref_type == 'tag' && matrix.platform == 'linux'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          append_body: false
+          fail_on_unmatched_files: true
+          files: |
+            build/bin/checksums.txt
+            build/bin/checksums.txt.sig

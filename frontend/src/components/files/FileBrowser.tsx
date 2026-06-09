@@ -40,12 +40,15 @@ import {
   CreateDirectory,
   CreateFile,
   DuplicateFile,
-} from "../../../wailsjs/go/main/App";
-import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+  StartFileWatcher,
+  StopFileWatcher,
+} from "../../../wailsjs/go/app/App";
+import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 import { useGitStore } from "../../store/gitStore";
 import { useQueryStore } from "../../store/queryStore";
 import { useDiffStore } from "../../store/diffStore";
 import { getPlatformOS, getCachedPlatformOS, revealLabel } from "./platformUtil";
+import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import type { filesystem } from "../../../wailsjs/go/models";
 
 type FileEntry    = filesystem.FileEntry;
@@ -85,11 +88,27 @@ function entriesToNodes(entries: FileEntry[]): DataNode[] {
   }));
 }
 
-function updateNode(nodes: DataNode[], targetKey: string, children: DataNode[]): DataNode[] {
+/** Merge fresh entries into existing ones, preserving children of nodes that
+ *  still exist so expanded subtrees aren't lost. Works for both root-level
+ *  and subdirectory refreshes. */
+function mergeNodes(prev: DataNode[], fresh: DataNode[]): DataNode[] {
+  const oldByKey = new Map(prev.map((n) => [String(n.key), n]));
+  return fresh.map((f) => {
+    const existing = oldByKey.get(String(f.key));
+    // Keep expanded children only if the fresh node is still a directory.
+    // If a directory was replaced by a file with the same name, drop the stale children.
+    return existing?.children && !f.isLeaf ? { ...f, children: existing.children } : f;
+  });
+}
+
+function updateNode(nodes: DataNode[], targetKey: string, children: DataNode[], merge?: boolean): DataNode[] {
   return nodes.map((node) => {
-    if (node.key === targetKey) return { ...node, children };
+    if (node.key === targetKey) {
+      const merged = merge && node.children ? mergeNodes(node.children, children) : children;
+      return { ...node, children: merged };
+    }
     if ((node as any).children) {
-      return { ...node, children: updateNode((node as any).children, targetKey, children) };
+      return { ...node, children: updateNode((node as any).children, targetKey, children, merge) };
     }
     return node;
   });
@@ -249,6 +268,37 @@ export default function FileBrowser() {
   const selectForComp = useDiffStore((s) => s.selectForComparison);
   const compareWith   = useDiffStore((s) => s.compareWith);
 
+  const fileWatcherEnabled = useFeatureFlagsStore((s) => s.flags.fileWatcher);
+
+  // ── Self-change suppression ────────────────────────────────────────────────
+  // Tracks directories modified by in-app operations so watcher events don't
+  // cause a redundant (flickering) refresh. Entries are auto-cleared after 500ms.
+  const selfChangedDirs = useRef(new Set<string>());
+  const selfChangeTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+
+  const markSelfChanged = (dir: string) => {
+    selfChangedDirs.current.add(dir);
+    const prev = selfChangeTimers.current.get(dir);
+    if (prev) clearTimeout(prev);
+    selfChangeTimers.current.set(dir, setTimeout(() => {
+      selfChangedDirs.current.delete(dir);
+      selfChangeTimers.current.delete(dir);
+    }, 500));
+  };
+
+  // Clear pending self-change suppression timers on unmount.
+  useEffect(() => {
+    return () => {
+      for (const t of selfChangeTimers.current.values()) clearTimeout(t);
+    };
+  }, []);
+
+  // Stable refs so effects can read current values without re-registering.
+  const loadedKeysRef = useRef(loadedKeys);
+  loadedKeysRef.current = loadedKeys;
+  const loadedRef = useRef(loaded);
+  loadedRef.current = loaded;
+
   // Close file context menu on outside click or Escape key
   useEffect(() => {
     if (!fileCtxMenu) return;
@@ -284,6 +334,63 @@ export default function FileBrowser() {
     setLoadedKeys([]);
     setSelectedKey(null);
   }, [exportDir]);
+
+  // ── File system watcher lifecycle ──────────────────────────────────────────
+  // Only watch while the panel is expanded to conserve inotify watches on Linux.
+  // On re-expand, refresh root entries to catch changes that happened while collapsed.
+  useEffect(() => {
+    if (!exportDir || !fileWatcherEnabled || !expanded) return;
+    StartFileWatcher(exportDir).catch((e) => console.warn("File watcher failed to start:", e));
+    // Refresh root to pick up changes that occurred while collapsed.
+    if (loadedRef.current) {
+      ListDirectory(exportDir)
+        .then((entries) => setTreeData((prev) => mergeNodes(prev, entriesToNodes(entries))))
+        .catch(() => {});
+    }
+    return () => { StopFileWatcher().catch(() => {}); };
+  }, [exportDir, fileWatcherEnabled, expanded]);
+
+  // ── File system change listener ────────────────────────────────────────────
+  useEffect(() => {
+    if (!exportDir || !fileWatcherEnabled) return;
+    const off = EventsOn("fs:changed", (evt: { dir: string }) => {
+      if (selfChangedDirs.current.has(evt.dir)) return;
+
+      // After refreshing a directory, prune loadedKeys entries that reference
+      // children which no longer exist (prevents unbounded stale-key growth).
+      const pruneLoadedKeys = (freshKeys: Set<string>) => {
+        setLoadedKeys((prev) => prev.filter((k) => {
+          const ks = String(k);
+          const parent = ks.substring(0, ks.lastIndexOf("/")) || ks.substring(0, ks.lastIndexOf("\\"));
+          // Only prune keys whose parent is the refreshed directory.
+          if (parent !== evt.dir) return true;
+          return freshKeys.has(ks);
+        }));
+      };
+
+      if (evt.dir === exportDir) {
+        // Root directory changed — merge new entries into existing tree
+        // so expanded subtrees (children) are preserved.
+        ListDirectory(exportDir)
+          .then((entries) => {
+            const fresh = entriesToNodes(entries);
+            setTreeData((prev) => mergeNodes(prev, fresh));
+            pruneLoadedKeys(new Set(entries.map((e) => e.path)));
+          })
+          .catch(() => {});
+        return;
+      }
+      // Only refresh directories that are already expanded (in loadedKeys).
+      if (!loadedKeysRef.current.some((k) => String(k) === evt.dir)) return;
+      ListDirectory(evt.dir)
+        .then((entries) => {
+          setTreeData((prev) => updateNode(prev, evt.dir, entriesToNodes(entries), true));
+          pruneLoadedKeys(new Set(entries.map((e) => e.path)));
+        })
+        .catch(() => {});
+    });
+    return off;
+  }, [exportDir, fileWatcherEnabled]);
 
   // Keep selected key in sync with the active tab (including tab switches)
   useEffect(() => {
@@ -469,6 +576,7 @@ export default function FileBrowser() {
       const newPath = await DuplicateFile(path);
       const name = pathBase(newPath);
       const parentDir = pathDir(newPath);
+      markSelfChanged(parentDir);
       setTreeData(prev => addChild(prev, parentDir, makeNode(newPath, name, false)));
       message.success(`Created ${name}`);
     } catch (e) {
@@ -492,6 +600,7 @@ export default function FileBrowser() {
           } else {
             await DeleteFile(path);
           }
+          markSelfChanged(pathDir(path));
           // Read fresh tabs from the store (not the stale closure captured at render time).
           const currentTabs = useQueryStore.getState().tabs;
           const sep = pathSep(path);
@@ -550,6 +659,7 @@ export default function FileBrowser() {
     editActionRef.current = "submitting";
     try {
       await RenameFile(path, newPath);
+      markSelfChanged(dir);
       const currentTabs = useQueryStore.getState().tabs;
       const prefix = path + sep;
       for (const tab of currentTabs) {
@@ -621,6 +731,7 @@ export default function FileBrowser() {
         const sep = pathSep(path);
         const folderPath = `${path}${sep}${sanitized}`;
         await CreateDirectory(folderPath);
+        markSelfChanged(path);
         setTreeData(prev => addChild(prev, path, makeNode(folderPath, sanitized, true)));
         message.success(`Created folder ${sanitized}`);
       } else {
@@ -628,6 +739,7 @@ export default function FileBrowser() {
         const name = sanitized.endsWith(".sql") ? sanitized : `${sanitized}.sql`;
         const filePath = `${path}${sep}${name}`;
         await CreateFile(filePath);
+        markSelfChanged(path);
         setTreeData(prev => addChild(prev, path, makeNode(filePath, name, false)));
         message.success(`Created ${name}`);
       }

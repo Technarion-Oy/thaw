@@ -6,6 +6,22 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 
 ---
 
+## Documentation
+
+This README is the front door. Deeper documentation is organized as follows:
+
+| Where | What |
+|-------|------|
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to branch, commit, open PRs, and write code & docs |
+| [`docs/concepts/`](docs/concepts/) | High-level guides: [architecture](docs/concepts/architecture.md), [onboarding](docs/concepts/onboarding.md), [patterns](docs/concepts/patterns.md), [gotchas](docs/concepts/gotchas.md), [testing](docs/concepts/testing.md) |
+| `internal/<pkg>/README.md` | Per-package reference for every backend domain (e.g. [`internal/snowflake`](internal/snowflake/README.md), [`internal/app`](internal/app/README.md)) |
+| `frontend/src/<dir>/README.md` | Per-folder reference for every frontend area (e.g. [`editor`](frontend/src/components/editor/README.md), [`store`](frontend/src/store/README.md)) |
+| [`FEATURES.md`](FEATURES.md) | The complete feature catalogue |
+| [`docs/`](docs/README.md) (`make docs`) | Generated API reference (TypeDoc + gomarkdoc), browsable via docsify |
+| [`CLAUDE.md`](CLAUDE.md) / [`GEMINI.md`](GEMINI.md) | LLM-agent guides |
+
+---
+
 ## Features
 
 ### Snowflake connectivity
@@ -118,7 +134,8 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - **Backend choice** — select **conda** or **venv** from a radio group; the wizard adapts all commands accordingly
 - **Python interpreter selector** (venv only) — a dropdown lists every Python interpreter found on the system (`/usr/bin`, `/usr/local/bin`, `/opt/homebrew/bin`, Homebrew formula dirs, `~/.pyenv/versions/*/bin`); duplicates are removed by resolving symlinks; selection is persisted to `config.json`
 - **Apple Silicon warning** (conda only) — when an Apple M-series chip is detected, the conda environment is created with `CONDA_SUBDIR=osx-64` to work around a known `pyOpenSSL` incompatibility; a warning banner explains this automatically
-- **Delete venv folder** — danger button with confirmation dialog removes the venv directory and resets all steps, letting the user reinstall cleanly
+- **Use Existing venv** (venv only) — browse to or type the path of an existing virtual environment; the wizard validates it and auto-marks completed steps, jumping to the first missing dependency (or straight to the package manager if fully set up); re-opening the modal with a partially configured venv auto-enters this mode; **Create New Instead** resets to the standard create flow
+- **Delete venv folder** — danger button (hidden in "use existing" mode) with confirmation dialog removes the venv directory and resets all steps, letting the user reinstall cleanly
 - Each step streams its output line-by-line into a scrollable log panel as the command runs; errors are surfaced immediately with retry support
 - The project directory (same location used for DDL export and the embedded terminal) is shown in the setup dialog for reference
 - Environment and backend settings are persisted to `~/.config/thaw/config.json`
@@ -168,7 +185,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - SQL cells execute through the **Snowpark kernel session** — the same session Python cells use — so `USE` commands in SQL cells affect Python cells and vice versa, and `SELECT CURRENT_DATABASE()` always returns the same value in both cell types
 - SQL is split into individual statements by a parser that correctly handles `--` line comments, `/* */` block comments, single-quoted strings, and `$$`-dollar-quoted strings; each statement runs in order and the last result is displayed
 - **Run selection** — if text is selected in a SQL cell, only the selected SQL is sent for execution
-- Results are rendered in a **sticky-header scrollable table** (up to 1 000 rows displayed)
+- Results are rendered in a **ResultGrid** (up to 50 000 rows); when a query returns more than 50 000 rows a **truncated** tag is shown in the status bar
 - DDL / DML statements with no result set show an "OK — N rows affected" line
 - `Shift+Enter` runs the SQL (or selection) and displays the result inline below the cell
 - `USE DATABASE X;` in a SQL cell updates the toolbar dropdowns and the Python session automatically
@@ -178,8 +195,9 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - **Run All** — executes all code and SQL cells sequentially
 - **Restart Kernel** — stops and relaunches the Python kernel subprocess; existing SQL cell results are preserved
 - **Save** — writes the notebook to disk at its original path; the tab's unsaved-change indicator clears
-- **Add Cell** — inserts a new code cell at the bottom or below a specific cell
-- **Deploy** — deploys the notebook as a Snowflake Notebook object; opens a dialog with all `CREATE NOTEBOOK` options: database, schema, name, `OR REPLACE` / `IF NOT EXISTS`, comment, query warehouse (for SQL queries), Python runtime warehouse, idle auto-shutdown seconds, runtime name, and compute pool; works for both saved notebooks (uploaded from their file path) and unsaved notebooks (the current in-memory content is serialised and written to a temporary file before upload; the temp file is removed after the stage transfer)
+- **Deploy** — deploys the notebook as a Snowflake Notebook object; the Deploy button is stacked above the toolbar icon row in a vertical layout; opens a dialog with all `CREATE NOTEBOOK` options: database, schema, name, `OR REPLACE` / `IF NOT EXISTS`, comment, query warehouse (for SQL queries), Python runtime warehouse, idle auto-shutdown seconds, runtime name, and compute pool; works for both saved notebooks (uploaded from their file path) and unsaved notebooks (the current in-memory content is serialised and written to a temporary file before upload; the temp file is removed after the stage transfer)
+- **Cell gutter** — each cell has a left gutter showing the execution count and a colour-coded kind tag (Code / SQL / Markdown) with a per-kind accent stripe
+- **AddCellBar** — hover-reveal bars between cells let you insert Code, SQL, or Markdown cells inline; the bar below the last cell is permanently visible
 - Per-cell controls: run, move up, move down, add below, **delete** (with confirmation dialog)
 - **Command mode** — when no cell editor is focused, single-key shortcuts operate on the selected cell (the last clicked or focused cell, highlighted with an accent left border):
   - `B` — add a new code cell below
@@ -201,10 +219,11 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - **Show in Finder after export** — after a DDL export completes, click the folder icon in the results summary to open the export directory in the platform file manager
 
 ### Object browser (sidebar)
-- Browse databases → schemas → objects (tables, views, functions, procedures, notebooks, …)
+- Browse databases → schemas → objects (tables, views, functions, procedures, notebooks, dbt projects, …)
+- **Expandable objects** — tables and views expand to show columns; Git Repositories expand to branches/tags/commits; Stages expand to a hierarchical file/directory tree; DBT Projects expand to versions, then directories and files — all with lazy-loading
 - **Multi-selection** — hold `⌘` (macOS) or `Ctrl` (Windows/Linux) and click anywhere on an object row to toggle selection; selected objects are highlighted row-wide; click any non-modifier area to clear the selection
 - **Batch deletion** — when multiple objects are selected, right-click any of them and choose **Delete N selected objects…** to drop all of them in one operation; a confirmation dialog lists all objects to be removed
-- **Filter objects** — type in the search box at the top of the sidebar to filter objects by name across all databases and schemas; the tree cascade-loads all schemas and objects automatically and collapses back to the database list when the search is cleared
+- **Filter objects** — type in the search box at the top of the sidebar to filter objects by name across all databases and schemas; the tree cascade-loads all schemas and objects automatically and collapses back to the database list when the search is cleared. For schemas already expanded in the tree, search covers all object types; for schemas not yet expanded, search uses a fast path that returns tables, views, and sequences only (procedures, tasks, stages, etc. appear after manually expanding the schema)
 - **Refresh** button (`↺`) in the sidebar header reloads the entire database tree from Snowflake
 - **Create Database** button (**+**) in the Objects section header opens the Create Database dialog; also accessible by right-clicking any database node and choosing **Create Database…** — covers the full `CREATE DATABASE` syntax:
   - **Name & case** — type the database name; a **Case-insensitive / Case-sensitive** radio group controls whether the name is emitted unquoted (Snowflake uppercases it) or double-quoted (preserves exact case); the case-insensitive option is automatically greyed out and forced to double-quoted when the name contains characters that require quoting (spaces, special characters, lowercase letters, leading digits)
@@ -276,6 +295,8 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
   - **Rename** the object (`ALTER … RENAME TO`) — available for tables, views, sequences, stages, streams, tasks, file formats, and pipes
   - **Delete** the object (`DROP …`) — with a confirmation dialog
 - **Drag and drop** — drag any table or view node from the sidebar into the editor to insert a fully-qualified `SELECT` with all column names (fetched from Snowflake and listed individually, not `*`) at the drop position; drag a user from the User Management panel to insert a `CREATE USER` DDL statement
+- **Column management** — right-click any column under a table to rename it, change its data type, set/drop NOT NULL, set a comment, or drop it; each action executes the appropriate `ALTER TABLE … ALTER COLUMN` SQL built by the backend `internal/column` package; right-clicking a view column shows only **Insert Column Name**; **Add Column…** is available on the table node itself and opens a dialog with name (case control), data type, NOT NULL, default, comment, and a live backend-generated SQL preview; all altering actions are gated behind the **Column Management** feature flag (**View → Enabled Features → Column Management**)
+- **Column type icons** — when expanding a table or view's column list, each column is prefixed with a type-family icon (text, number, datetime, boolean, variant/array, binary, geo, vector) coloured per the theme's column palette; primary-key and foreign-key columns get a distinct key icon
 - **Empty table indicator** — table names with zero rows are shown in a faded colour in the object tree, making it easy to spot unpopulated tables at a glance
 - **Hover tooltip** — hovering over any object in the tree shows its DDL definition; cached with a 60-second TTL so changes made outside the app are visible promptly
 - **View Definition** — right-click any object → **View Definition** opens a modal with the full DDL; a **Copy** button copies the SQL to the clipboard
@@ -551,6 +572,7 @@ Open **Tools → Schema Migration…** in the menu bar to deploy local `.sql` DD
 - Lazy-loads subdirectories on demand
 - Click any file to open it in a new editor tab
 - Auto-refreshes after a DDL export completes
+- **File system watcher** — monitors the working directory for external changes (terminal, editors, git operations) and incrementally refreshes only the affected directories; toggleable via **View → Enabled Features → File Watcher**
 - Highlights the file that matches the currently active tab
 
 ### Git integration
@@ -569,6 +591,15 @@ Open **Tools → Schema Migration…** in the menu bar to deploy local `.sql` DD
 - Git credentials are **never saved to disk** — tokens are held in memory only for the duration of the operation
 - OS junk files (`.DS_Store`, `Thumbs.db`, `desktop.ini`) are automatically excluded and added to `.gitignore`
 
+### MCP server
+- **Model Context Protocol** — expose the active Snowflake connection to external AI clients (Claude Desktop, Cursor, etc.) over a localhost SSE/HTTP transport, built on the official Go MCP SDK (`github.com/modelcontextprotocol/go-sdk`)
+- **Multi-session** — open **View → MCP Sessions…** to start one or more independent servers; each session binds its own dedicated Snowflake connection and listens on its own localhost port, auto-assigned from `9100` (overridable per session). Because each session opens a separate Snowflake connection, interactive authenticators (e.g. `externalbrowser`) may prompt again on start, and each running session consumes one additional Snowflake session
+- **Lifecycle** — sessions start/stop only on explicit user action and all stop cleanly on app quit; no auto-start. Sessions are **not persisted**: they live only for the lifetime of the running app and are not restored on the next launch
+- **Metadata Only execution mode** — read-only schema-browsing tools: `get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`
+- **Copy Config** — one click copies the client config block `{ "mcpServers": { "thaw-<label>": { "url": "http://localhost:<port>/sse" } } }`
+- A toolbar **MCP: N active** indicator opens the panel; toggleable via **View → Enabled Features → MCP Server** (admin-lockable)
+- **Security** — the listener binds only loopback and rejects non-loopback `Host` and cross-origin `Origin` headers (DNS-rebinding defense against malicious web pages). There is **no authentication token**, so any other local process on the same machine that can reach `localhost:<port>` can still call the read-only metadata tools; stop sessions when not in use
+
 ### UI
 - **Drag-and-drop panel layout** — every sidebar panel (Export DDL, File Browser, Git, Object Browser, Administration) has a drag handle at its top edge; drag panels between the left and right sidebars or reorder them within a sidebar; layout is persisted across sessions
 - **Reset Layout** — restore default panel positions and split ratio from the **Customize Layout…** dialog
@@ -576,7 +607,7 @@ Open **Tools → Schema Migration…** in the menu bar to deploy local `.sql` DD
 - **Resizable editor/results split** — drag the horizontal divider between the SQL editor and the results pane; ratio is persisted across sessions
 - **Object browser height** — the Objects panel is collapsible (click the label or the ▶/▼ chevron) and vertically resizable (drag the handle below the tree, 80 – 800 px); the Administration panel fills the remaining space
 - **Theming** — light, dark, and system-default themes; switch via **View → Appearance** in the native menu bar; preference is persisted across sessions
-- Native application menu bar with **File** (open / save / new tab), **View → Appearance** (System / Light / Dark), **AI → Configure AI…**, **Tools** (**Code Snippets…**, **Export Path Format…**, **Schema Migration…**, **Create dbt Project…**), **Snowpark** (**Check Environment…**, **Setup Environment…**, **New Notebook…**, **Open Notebook…**), and **Help** (**Function Catalog…**, **Keyboard Shortcuts…**) menus
+- Native application menu bar with **File** (open / save / new tab), **View → Appearance** (System / Light / Dark), **View** (**Enabled Features…**, **MCP Sessions…**, **Advanced → Session Management…**), **AI → Configure AI…**, **Tools** (**Code Snippets…**, **Export Path Format…**, **Schema Migration…**, **Create dbt Project…**), **Snowpark** (**Check Environment…**, **Setup Environment…**, **New Notebook…**, **Open Notebook…**), and **Help** (**Function Catalog…**, **Keyboard Shortcuts…**) menus
 - Object browser scrolls horizontally when object names are wider than the sidebar
 - Right-click context menu is always clamped inside the viewport — never overflows the screen edges
 - Closing the app while a query is running shows a confirmation dialog; if confirmed, the query is cancelled in Snowflake before exit
@@ -670,8 +701,7 @@ The build script allocates 6 GB of Node heap (`--max-old-space-size=6144`) to ac
 
 ```
 thaw/
-├── main.go                        # Wails entry point, window config, native menu
-├── app.go                         # Methods bound to the frontend (Connect, ExecuteQuery, …)
+├── main.go                        # Thin entry point: //go:embed frontend/dist + app.Run(assets)
 ├── go.mod
 ├── wails.json                     # Wails project configuration
 ├── build/
@@ -679,7 +709,9 @@ thaw/
 │   └── windows/                   # Windows resources
 ├── internal/
 │   ├── ai/ai.go                   # AI provider HTTP clients (OpenAI, Google AI Studios, Ollama); inline completions; model listing and testing
+│   ├── app/                        # Wails-bound App struct (package app): app.go (lifecycle), run.go (wails.Run wiring), menu.go (native menu), + IPC methods split by domain (query.go, objects.go, …). Most methods are thin delegators (nil-check → domain-package func → return); real logic lives in the domain packages below
 │   ├── apperrors/                  # Sentinel errors (ErrNotConnected etc.)
+│   ├── backup/                    # Backup sets/policies: SHOW parsers + CREATE/ALTER/RESTORE SQL builders (BackupSetRow, BackupPolicyRow, BackupRow)
 │   ├── config/config.go           # Saved git / export / AI settings
 │   ├── crashreport/crashreport.go # Panic handler; writes JSON crash file; remote-send placeholder
 │   ├── ddl/
@@ -700,6 +732,7 @@ thaw/
 │   ├── filesystem/fs.go           # Directory listing, file reading and writing
 │   ├── fnmeta/                    # Function catalog metadata (SQLite cache + embedded JSON fallback + live sync)
 │   ├── gitrepo/repo.go            # Git operations via go-git (status, commit/push, pull, clone, branches)
+│   ├── keypair/                   # RSA key-pair generation (go/openssl/ssh-keygen) + ALTER USER RSA_PUBLIC_KEY builder (KeyPairResult)
 │   ├── integration/
 │   │   ├── basic_test.go          # Connectivity + result-shape integration tests (key-pair auth)
 │   │   ├── export_test.go         # DDL export end-to-end tests (require live Snowflake account)
@@ -711,8 +744,10 @@ thaw/
 │   │   ├── path_dev.go            # Log path for dev builds (./logs/thaw.log)
 │   │   └── path_prod.go           # Log path for production builds (OS-specific)
 │   ├── migration/                  # Schema migration engine (Service pattern with NewService)
+│   ├── objects/                   # Object-properties query builders + column-comment parse/set (ColumnComment, PropertyPair projections)
 │   ├── pipe/                      # Pipe management: CREATE PIPE SQL builder, copy history, COPY statement validation
 │   ├── procedure/                 # Procedure/function call statement builder (CALL, SELECT for scalar/table functions)
+│   ├── queryhistory/             # QUERY_HISTORY table-function SQL builder + row parser (QueryHistoryRow)
 │   ├── queryprofile/              # Query execution profile and EXPLAIN plan parser; performance diagnostics
 │   ├── secret/                    # Secret management: CREATE/ALTER SECRET SQL builder (OAUTH2, PASSWORD, GENERIC_STRING, etc.)
 │   ├── session/                    # Window state persistence (load/save, OS-specific paths)
@@ -722,11 +757,17 @@ thaw/
 │   ├── snowflake/lineage.go       # DDL-based dependency/lineage parser (recursive, cycle-safe)
 │   ├── snowflake/lineage_test.go  # Unit tests for lineage parser (56 cases; no Snowflake required)
 │   ├── snowgitrepo/               # Snowflake Git repository integration: CREATE/ALTER GIT REPOSITORY SQL builder
+│   ├── dbtproject/                # Snowflake-native DBT PROJECT objects: CREATE/ALTER/EXECUTE SQL builders
+│   ├── column/                    # Table column DDL builders: ADD/DROP/RENAME COLUMN, ALTER COLUMN (NOT NULL, type, comment)
+│   ├── mcp/                        # MCP servers (Go MCP SDK): multi-session manager, SSE/HTTP transport, schema-browsing tools
 │   ├── snowpark/                   # Snowpark/Jupyter support (Service pattern with NewService)
 │   ├── stage/                     # Stage creation SQL builder (internal/external, encryption, directory tables)
+│   ├── sysinfo/                   # Host system info (MemoryGB via sysctl)
+│   ├── table/                     # Table-summary/settings queries + ALTER TABLE property builder (TableSummary, TableSettings)
 │   ├── tasks/                     # Task graph management: schedule parsing, execution history, status tracking
 │   ├── telemetry/telemetry.go     # Anonymous event tracking; remote-send placeholder
-│   └── version/                   # Version string (set via -ldflags `-X thaw/internal/version.Version=`)
+│   ├── version/                   # Version string (set via -ldflags `-X thaw/internal/version.Version=`)
+│   └── warehouse/                 # ALTER WAREHOUSE property builder + metering-history query/parse (WarehouseMeteringRow)
 └── frontend/
     ├── index.html
     ├── vite.config.ts
@@ -735,12 +776,13 @@ thaw/
     │   ├── App.tsx                # Root component, Ant Design dark theme
     │   ├── main.tsx               # React entry point; suppresses WebView context menu
     │   ├── styles/global.css      # Global styles incl. Monaco occurrence-highlight class
-    │   ├── store/                   # Zustand stores (13 stores)
+    │   ├── store/                   # Zustand stores (14 stores)
     │   │   ├── connectionStore.ts  # Connection state
     │   │   ├── diffStore.ts        # Text comparison pending item + fetch state
     │   │   ├── featureFlagsStore.ts # Feature flags (loaded on startup, reloaded after modal save)
     │   │   ├── gitStore.ts         # Git / export directory state
     │   │   ├── insertMappingStore.ts # Insert Mapping source/target selection state
+    │   │   ├── mcpStore.ts         # Running MCP session list (refreshed from backend)
     │   │   ├── notebookPrefsStore.ts # Notebook preferences (persisted)
     │   │   ├── objectStore.ts      # Object browser state
     │   │   ├── panelLayoutStore.ts # Sidebar panel order, widths, editor split (persisted)
@@ -765,6 +807,7 @@ thaw/
     │       ├── function/             # Function selection modal
     │       ├── git/                  # GitPanel + GitOperationsDialog (commit, pull, clone, branches)
     │       ├── gitrepoobj/           # Snowflake Git Repository objects: create, modify, commit filter
+    │       ├── dbtproject/           # Snowflake-native DBT PROJECT objects: create, execute, modify, add version, source location picker
     │       ├── help/                 # About dialog, keyboard shortcuts modal
     │       ├── layout/               # AppLayout (two-sidebar drag-and-drop), Sidebar (object tree + context menus)
     │       ├── lineage/              # Recursive dependency tree modal with DDL hover tooltips
@@ -774,13 +817,13 @@ thaw/
     │       ├── procedure/            # Call Procedure / Call Function modals
     │       ├── results/              # ResultGrid, GridSearch, StatusBar, QuickChartModal, ColumnFilterDropdown, ConditionalFormattingModal, DataTypeFormatModal, ExplainModal, QueryProfileModal
     │       ├── secret/               # Secret management: create, modify (OAUTH2, PASSWORD, etc.)
-    │       ├── settings/             # AI settings, Feature Flags toggle, Layout settings
+    │       ├── settings/             # AI settings, Feature Flags toggle, Layout settings, MCP Sessions panel
     │       ├── shared/               # Shared UI utilities (ObjectNameCaseControl)
     │       ├── snippets/             # Code Snippets browser (Tools menu)
     │       ├── snowpark/             # Snowpark setup wizard, environment check, pip registries
     │       ├── task/                 # Task management: create, execute, properties, graph DAG, schedule editor
     │       ├── terminal/             # Embedded xterm.js terminal panel
-    │       └── toolbar/              # Unified toolbar: Toolbar shell, NotebookToolbarSlot
+    │       └── toolbar/              # Unified toolbar: Toolbar shell + MCP session indicator
     └── wailsjs/                   # Auto-generated Go→JS bridge (do not edit)
 ```
 
@@ -1099,12 +1142,14 @@ Workflow: `.github/workflows/gosec.yml`
 
 ## Development workflow
 
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full workflow (branching, commits, PRs, the docs-with-code rule, and quality gates) and [`docs/concepts/patterns.md`](docs/concepts/patterns.md) for engineering patterns. The essentials:
+
 - **Backend changes** — edit any `.go` file; `wails dev` recompiles automatically.
 - **Frontend changes** — edit files under `frontend/src/`; Vite HMR updates the UI instantly.
-- **Adding a new backend method** — add the method to `app.go`, then run `wails generate module` to regenerate the JS bindings in `frontend/wailsjs/`.
-- **Adding a new Go package** — place it under `internal/` and import it from `app.go`.
-- **Adding a native menu item** — extend `buildMenu` in `main.go`; emit a Wails event from the callback and listen with `EventsOn` in the relevant frontend component.
-- **GoDoc coverage** — every exported identifier and every significant unexported function carries a GoDoc comment; run `go doc ./...` or hover in any LSP-enabled editor to browse them.
+- **Adding a new backend method** — add the method (on `*App`) to the `internal/app/<domain>.go` file matching its domain, then run `wails generate module` to regenerate the JS bindings in `frontend/wailsjs/`.
+- **Adding a new Go package** — place it under `internal/`, give it a `README.md`, and import it from the relevant `internal/app/<domain>.go` file.
+- **Adding a native menu item** — extend `buildMenu` in `internal/app/menu.go`; emit a Wails event from the callback and listen with `EventsOn` in the relevant frontend component.
+- **GoDoc coverage** — every exported identifier carries a GoDoc comment; run `go doc ./...` or hover in any LSP-enabled editor to browse them.
 
 ---
 

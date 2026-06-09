@@ -15,7 +15,7 @@ import {
   CloseCircleOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
-import { CheckSnowparkEnv } from "../../../wailsjs/go/main/App";
+import { CheckSnowparkEnv } from "../../../wailsjs/go/app/App";
 import type { snowpark } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;

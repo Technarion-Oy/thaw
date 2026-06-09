@@ -23,7 +23,7 @@ import {
   CancelExport,
   ListExportableDatabases,
   RevealInFinder,
-} from "../../../wailsjs/go/main/App";
+} from "../../../wailsjs/go/app/App";
 import { useGitStore } from "../../store/gitStore";
 import { useConnectionStore } from "../../store/connectionStore";
 import { getPlatformOS, getCachedPlatformOS, revealLabel } from "../files/platformUtil";

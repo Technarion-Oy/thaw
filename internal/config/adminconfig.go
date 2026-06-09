@@ -36,7 +36,10 @@ import (
 //	  "advancedTools":            { "schemaMigration": false },
 //	  "developerEnvironments":    { "snowparkNotebooks": false },
 //	  "performanceDiagnostics":   { "explainSql": false },
-//	  "connection":               { "snowflakeCLIProfileManager": false }
+//	  "connection":               { "snowflakeCLIProfileManager": false },
+//	  "fileBrowser":              { "fileWatcher": false },
+//	  "schemaManagement":         { "columnManagement": false },
+//	  "integrations":             { "mcpServer": false }
 //	}
 
 // ptrbool is a small helper so JSON null / absent ≠ false.
@@ -69,6 +72,7 @@ type adminAI struct {
 type adminAdvancedTools struct {
 	SchemaMigration     ptrBool `json:"schemaMigration,omitempty"`
 	DbtScaffolding      ptrBool `json:"dbtScaffolding,omitempty"`
+	DbtProjectBrowser   ptrBool `json:"dbtProjectBrowser,omitempty"`
 	ERDiagramDesigner   ptrBool `json:"erDiagramDesigner,omitempty"`
 	TaskGraphVisualizer ptrBool `json:"taskGraphVisualizer,omitempty"`
 	InsertMapping       ptrBool `json:"insertMapping,omitempty"`
@@ -86,6 +90,7 @@ type adminDevEnv struct {
 type adminPerfDiag struct {
 	QueryProfile ptrBool `json:"queryProfile,omitempty"`
 	ExplainSQL   ptrBool `json:"explainSql,omitempty"`
+	QueryLog     ptrBool `json:"queryLog,omitempty"`
 }
 
 // adminConnection is the "connection" category.
@@ -98,6 +103,21 @@ type adminResultsGrid struct {
 	MultiCellCopy ptrBool `json:"multiCellCopy,omitempty"`
 }
 
+// adminFileBrowser is the "fileBrowser" category.
+type adminFileBrowser struct {
+	FileWatcher ptrBool `json:"fileWatcher,omitempty"`
+}
+
+// adminSchemaManagement is the "schemaManagement" category.
+type adminSchemaManagement struct {
+	ColumnManagement ptrBool `json:"columnManagement,omitempty"`
+}
+
+// adminIntegrations is the "integrations" category.
+type adminIntegrations struct {
+	MCPServer ptrBool `json:"mcpServer,omitempty"`
+}
+
 // adminConfigJSON is the full schema for the admin features.json file.
 type adminConfigJSON struct {
 	DataExportImport         adminDataExportImport `json:"dataExportImport"`
@@ -108,6 +128,9 @@ type adminConfigJSON struct {
 	PerformanceDiagnostics   adminPerfDiag         `json:"performanceDiagnostics"`
 	Connection               adminConnection       `json:"connection"`
 	ResultsGrid              adminResultsGrid      `json:"resultsGrid"`
+	FileBrowser              adminFileBrowser      `json:"fileBrowser"`
+	SchemaManagement         adminSchemaManagement `json:"schemaManagement"`
+	Integrations             adminIntegrations     `json:"integrations"`
 }
 
 // ─── System config file path ───────────────────────────────────────────────────
@@ -202,6 +225,7 @@ func mergeAdminOverrides(user FeatureFlags, cfg adminConfigJSON) (effective Feat
 	// Advanced Tools & Data Engineering
 	apply(&effective.SchemaMigration, &locked.SchemaMigration, cfg.AdvancedTools.SchemaMigration)
 	apply(&effective.DbtScaffolding, &locked.DbtScaffolding, cfg.AdvancedTools.DbtScaffolding)
+	apply(&effective.DbtProjectBrowser, &locked.DbtProjectBrowser, cfg.AdvancedTools.DbtProjectBrowser)
 	apply(&effective.ERDiagramDesigner, &locked.ERDiagramDesigner, cfg.AdvancedTools.ERDiagramDesigner)
 	apply(&effective.TaskGraphVisualizer, &locked.TaskGraphVisualizer, cfg.AdvancedTools.TaskGraphVisualizer)
 	apply(&effective.InsertMapping, &locked.InsertMapping, cfg.AdvancedTools.InsertMapping)
@@ -215,12 +239,22 @@ func mergeAdminOverrides(user FeatureFlags, cfg adminConfigJSON) (effective Feat
 	// Performance & Diagnostics
 	apply(&effective.QueryProfile, &locked.QueryProfile, cfg.PerformanceDiagnostics.QueryProfile)
 	apply(&effective.ExplainSQL, &locked.ExplainSQL, cfg.PerformanceDiagnostics.ExplainSQL)
+	apply(&effective.QueryLog, &locked.QueryLog, cfg.PerformanceDiagnostics.QueryLog)
 
 	// Connection
 	apply(&effective.SnowflakeCLIProfileManager, &locked.SnowflakeCLIProfileManager, cfg.Connection.SnowflakeCLIProfileManager)
 
 	// Results Grid
 	apply(&effective.MultiCellCopy, &locked.MultiCellCopy, cfg.ResultsGrid.MultiCellCopy)
+
+	// File Browser
+	apply(&effective.FileWatcher, &locked.FileWatcher, cfg.FileBrowser.FileWatcher)
+
+	// Schema Management
+	apply(&effective.ColumnManagement, &locked.ColumnManagement, cfg.SchemaManagement.ColumnManagement)
+
+	// Integrations
+	apply(&effective.MCPServer, &locked.MCPServer, cfg.Integrations.MCPServer)
 
 	return effective, locked
 }

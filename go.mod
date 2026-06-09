@@ -1,6 +1,6 @@
 module thaw
 
-go 1.26.3
+go 1.26.4
 
 require (
 	github.com/BurntSushi/toml v1.6.0
@@ -15,7 +15,18 @@ require (
 	modernc.org/sqlite v1.47.0
 )
 
-require github.com/valyala/fastjson v1.6.10
+require (
+	github.com/fsnotify/fsnotify v1.9.0
+	github.com/modelcontextprotocol/go-sdk v1.6.1
+	github.com/valyala/fastjson v1.6.10
+)
+
+require (
+	github.com/google/jsonschema-go v0.4.3 // indirect
+	github.com/segmentio/asm v1.1.3 // indirect
+	github.com/segmentio/encoding v0.5.4 // indirect
+	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
+)
 
 require (
 	dario.cat/mergo v1.0.0 // indirect
@@ -59,7 +70,7 @@ require (
 	github.com/goccy/go-json v0.10.5 // indirect
 	github.com/godbus/dbus v0.0.0-20190726142602-4481cbc300e2 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
-	github.com/golang-jwt/jwt/v5 v5.2.2 // indirect
+	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/google/flatbuffers v25.2.10+incompatible // indirect
 	github.com/google/uuid v1.6.0 // indirect
@@ -102,7 +113,7 @@ require (
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
 	golang.org/x/mod v0.35.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
-	golang.org/x/oauth2 v0.30.0 // indirect
+	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260409153401-be6f6cb8b1fa // indirect
 	golang.org/x/term v0.43.0 // indirect

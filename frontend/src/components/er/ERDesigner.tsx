@@ -1,98 +1,143 @@
 // Copyright (c) 2026 Technarion Oy. All rights reserved.
+// @thaw-domain: ER Designer
 
-import { useState, useId, useEffect, useRef, useMemo } from "react";
-import { Modal, Button, Input, Select, Spin, message as antMessage } from "antd";
-import { PlusOutlined, DeleteOutlined, ZoomInOutlined, ZoomOutOutlined, CopyOutlined } from "@ant-design/icons";
-import mermaid from "mermaid";
-import { ExecuteQuery, ListSchemas } from "../../../wailsjs/go/main/App";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { App as AntApp, Modal, Button, Input, Select, Checkbox, AutoComplete } from "antd";
+import { PlusOutlined, DeleteOutlined, CopyOutlined, LinkOutlined, SwapOutlined } from "@ant-design/icons";
+import { ExecuteQuery, ListSchemas, UpdateERDesignerState, ClearERDesignerState } from "../../../wailsjs/go/app/App";
+import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 import type { snowflake } from "../../../wailsjs/go/models";
-
-mermaid.initialize({ startOnLoad: false, securityLevel: "loose", theme: "dark" });
-
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-interface DesignerColumn {
-  id: string;
-  name: string;
-  dataType: string;
-  isPK: boolean;
-  notNull: boolean;
-  fkRef: string; // "SCHEMA.TABLE.COLUMN" or "" for none
-}
-
-interface DesignerTable {
-  id: string;
-  schema: string;
-  name: string;
-  columns: DesignerColumn[];
-}
+import { mcp } from "../../../wailsjs/go/models";
+import ERCanvas from "./ERCanvas";
+import { initFromERData, normalizeDataType, mergeAITablesIntoDesigner } from "./erCanvasLayout";
+import type { AITableIn } from "./erCanvasLayout";
+import { buildMermaid } from "./buildMermaid";
+import { type DesignerColumn, type DesignerTable, SF_DATA_TYPES, SF_TYPES, normalizeIdentifier } from "./erTypes";
 
 interface Props {
   database: string;
   initialData?: snowflake.ERDiagramData;
+  mergedData?: snowflake.ERDiagramData;
   onClose: () => void;
   onSuccess: () => void;
 }
 
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-const SF_TYPES = [
-  "NUMBER",
-  "VARCHAR",
-  "BOOLEAN",
-  "DATE",
-  "TIMESTAMP_NTZ",
-  "TIMESTAMP_LTZ",
-  "FLOAT",
-  "VARIANT",
-  "ARRAY",
-  "OBJECT",
-];
+/** Set of canonical Snowflake type names for O(1) lookups in AutoComplete filter. */
+const SF_TYPES_SET = new Set(SF_TYPES);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function sanitiseId(s: string): string {
-  const id = s.replace(/[^a-zA-Z0-9_]/g, "_");
-  return /^[0-9]/.test(id) ? "_" + id : id;
-}
-
-function entityId(schema: string, table: string): string {
-  return sanitiseId(schema) + "__" + sanitiseId(table);
-}
-
-function shortType(dt: string): string {
-  return dt.replace(/\s*\([^)]*\)/g, "").replace(/\s+/g, "_") || "string";
-}
-
-function applyZoom(svg: string, zoom: number): string {
-  if (!svg) return svg;
-  const maxWidthMatch = svg.match(/max-width:\s*([\d.]+)px/);
-  if (maxWidthMatch) {
-    const naturalPx = parseFloat(maxWidthMatch[1]);
-    const zoomedPx = Math.round(naturalPx * zoom);
-    return svg
-      .replace(/max-width:\s*[\d.]+px;?\s*/, `max-width: ${zoomedPx}px; `)
-      .replace(/\bwidth="100%"/, `width="${zoomedPx}"`);
-  }
-  const wMatch = svg.match(/\bwidth="([\d.]+)"/);
-  const hMatch = svg.match(/\bheight="([\d.]+)"/);
-  if (wMatch && hMatch) {
-    const w = Math.round(parseFloat(wMatch[1]) * zoom);
-    const h = Math.round(parseFloat(hMatch[1]) * zoom);
-    return svg
-      .replace(/\bwidth="[\d.]+"/, `width="${w}"`)
-      .replace(/\bheight="[\d.]+"/, `height="${h}"`);
-  }
-  return svg;
-}
-
-// ── SQL generation (diff-based) ───────────────────────────────────────────────
 
 function setsEqual<T>(a: Set<T>, b: Set<T>): boolean {
   if (a.size !== b.size) return false;
   for (const x of a) if (!b.has(x)) return false;
   return true;
 }
+
+// ── FK dialog (extracted component) ────────────────────────────────────────────
+
+interface FKDialogState {
+  childTableId: string;
+  parentTableId: string;
+  childColId: string;
+  parentColId: string;
+}
+
+function FKDialog({
+  fkDialog,
+  tables,
+  onClose,
+  onCommit,
+  onUpdate,
+}: {
+  fkDialog: FKDialogState;
+  tables: DesignerTable[];
+  onClose: () => void;
+  onCommit: () => void;
+  onUpdate: (patch: FKDialogState) => void;
+}) {
+  const childTable = tables.find((t) => t.id === fkDialog.childTableId);
+  const parentTable = tables.find((t) => t.id === fkDialog.parentTableId);
+  const childCols = childTable?.columns.filter((c) => c.name.trim()) ?? [];
+  const parentCols = parentTable?.columns.filter((c) => c.name.trim()) ?? [];
+  const childLabel = childTable
+    ? `${childTable.schema}.${childTable.name || "(unnamed)"}`
+    : "(unknown)";
+  const parentLabel = parentTable
+    ? `${parentTable.schema}.${parentTable.name || "(unnamed)"}`
+    : "(unknown)";
+
+  return (
+    <Modal
+      open
+      title={
+        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <LinkOutlined style={{ color: "var(--accent)" }} />
+          Add FK Reference
+        </span>
+      }
+      okText="Add Reference"
+      okButtonProps={{ disabled: !fkDialog.childColId || !fkDialog.parentColId }}
+      onCancel={onClose}
+      onOk={onCommit}
+      width={480}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 8 }}>
+        {/* Direction header with swap button */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontFamily: "monospace", fontSize: 12, flex: 1, textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {childLabel}
+          </span>
+          <Button
+            size="small"
+            icon={<SwapOutlined />}
+            onClick={() =>
+              onUpdate({
+                childTableId: fkDialog.parentTableId,
+                parentTableId: fkDialog.childTableId,
+                childColId: fkDialog.parentColId,
+                parentColId: fkDialog.childColId,
+              })
+            }
+            title="Swap direction"
+          />
+          <span style={{ fontFamily: "monospace", fontSize: 12, flex: 1, textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {parentLabel}
+          </span>
+        </div>
+        <div>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>
+            Child column (on {childLabel})
+          </div>
+          <Select
+            style={{ width: "100%" }}
+            placeholder="Select column"
+            value={fkDialog.childColId || undefined}
+            onChange={(v) => onUpdate({ ...fkDialog, childColId: v })}
+            options={childCols.map((c) => ({ value: c.id, label: c.name }))}
+            showSearch
+            optionFilterProp="label"
+          />
+        </div>
+        <div>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>
+            Parent column (on {parentLabel})
+          </div>
+          <Select
+            style={{ width: "100%" }}
+            placeholder="Select column"
+            value={fkDialog.parentColId || undefined}
+            onChange={(v) => onUpdate({ ...fkDialog, parentColId: v })}
+            options={parentCols.map((c) => ({ value: c.id, label: c.name }))}
+            showSearch
+            optionFilterProp="label"
+          />
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ── SQL generation (diff-based) ───────────────────────────────────────────────
 
 /**
  * Compare the designer tables against the baseline (initialData) and produce
@@ -109,7 +154,14 @@ function generateDiffSQL(
   database: string,
   baseline?: snowflake.ERDiagramData
 ): string {
-  const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
+  // Quote a Snowflake identifier. Handles names that are already wrapped in double quotes
+  // (from normalizeIdentifier) by stripping the outer quotes before re-quoting.
+  const q = (s: string) => {
+    const inner = (s.startsWith('"') && s.endsWith('"') && s.length >= 2)
+      ? s.slice(1, -1)
+      : s;
+    return `"${inner.replace(/"/g, '""')}"`;
+  };
   const tableRef = (schema: string, name: string) =>
     `${q(database)}.${q(schema)}.${q(name.trim())}`;
 
@@ -259,7 +311,12 @@ function generateDiffSQL(
           const nn = c.isPK || c.notNull ? " NOT NULL" : "";
           stmts.push(`${alter} ADD COLUMN ${q(c.name.trim())} ${c.dataType}${nn};`);
         } else {
-          // Existing column — check for type change
+          // Existing column — check for type change.
+          // normalizeDataType is applied to bc.dataType (raw from INFORMATION_SCHEMA)
+          // so it matches the form used by initFromERData when populating the designer.
+          // Alias types like INT, TEXT, DATETIME are valid Snowflake DDL types that
+          // pass through normalizeDataType as-is, so an unmodified designer column
+          // will always match its baseline.
           if (normalizeDataType(bc.dataType) !== c.dataType) {
             stmts.push(`${alter} ALTER COLUMN ${q(c.name.trim())} SET DATA TYPE ${c.dataType};`);
           }
@@ -322,123 +379,35 @@ function generateDiffSQL(
   return stmts.join("\n\n");
 }
 
-// ── Mermaid generation ────────────────────────────────────────────────────────
-
-function buildDesignerMermaid(tables: DesignerTable[]): string {
-  const lines: string[] = ["erDiagram"];
-  const validTables = tables.filter((t) => t.schema && t.name.trim());
-
-  for (const t of validTables) {
-    const namedCols = t.columns.filter((c) => c.name.trim());
-    if (namedCols.length === 0) continue; // empty {} blocks are invalid Mermaid syntax
-    const id = entityId(t.schema, t.name.trim());
-    lines.push(`  ${id} {`);
-    for (const c of namedCols) {
-      const type = shortType(c.dataType) || "string";
-      const pk = c.isPK ? " PK" : "";
-      lines.push(`    ${type} ${sanitiseId(c.name)}${pk}`);
-    }
-    lines.push("  }");
-  }
-
-  // FK relationships — deduplicate by entity pair
-  const seen = new Set<string>();
-  for (const t of validTables) {
-    for (const c of t.columns) {
-      if (!c.fkRef) continue;
-      const parts = c.fkRef.split(".");
-      if (parts.length !== 3) continue;
-      const [refSchema, refTable] = parts;
-      if (!refTable.trim()) continue;
-      const fromId = entityId(t.schema, t.name.trim());
-      const toId = entityId(refSchema, refTable.trim());
-      const pairKey = `${fromId}__${toId}`;
-      if (seen.has(pairKey)) continue;
-      seen.add(pairKey);
-      lines.push(`  ${fromId} }o--|| ${toId} : "FK"`);
-    }
-  }
-
-  return lines.join("\n");
-}
-
-// ── Seed from existing ER data ────────────────────────────────────────────────
-
-/** Map Snowflake INFORMATION_SCHEMA type strings to the canonical SF_TYPES list. */
-function normalizeDataType(dt: string): string {
-  const base = dt.replace(/\s*\([^)]*\)/g, "").trim().toUpperCase();
-  if (SF_TYPES.includes(base)) return base;
-  const aliases: Record<string, string> = {
-    TEXT: "VARCHAR", STRING: "VARCHAR", CHAR: "VARCHAR", CHARACTER: "VARCHAR",
-    NCHAR: "VARCHAR", NVARCHAR: "VARCHAR", NVARCHAR2: "VARCHAR",
-    INT: "NUMBER", INTEGER: "NUMBER", BIGINT: "NUMBER", SMALLINT: "NUMBER",
-    TINYINT: "NUMBER", BYTEINT: "NUMBER", DECIMAL: "NUMBER", NUMERIC: "NUMBER",
-    DOUBLE: "FLOAT", REAL: "FLOAT", FLOAT4: "FLOAT", FLOAT8: "FLOAT",
-    BOOL: "BOOLEAN",
-    DATETIME: "TIMESTAMP_NTZ", TIMESTAMP: "TIMESTAMP_NTZ",
-    TIMESTAMP_TZ: "TIMESTAMP_LTZ",
-  };
-  return aliases[base] ?? "VARCHAR";
-}
-
-function initFromERData(data: snowflake.ERDiagramData): DesignerTable[] {
-  const tables: DesignerTable[] = data.tables.map((t) => ({
-    id: crypto.randomUUID(),
-    schema: t.schema,
-    name: t.name,
-    columns: t.columns.map((c) => ({
-      id: crypto.randomUUID(),
-      name: c.name,
-      dataType: normalizeDataType(c.dataType),
-      isPK: c.isPK,
-      notNull: c.isPK || c.nullable === "NO",
-      fkRef: "",
-    })),
-  }));
-
-  // Wire up FK references
-  for (const fk of data.fks ?? []) {
-    const tbl = tables.find((t) => t.schema === fk.fromSchema && t.name === fk.fromTable);
-    if (!tbl) continue;
-    const col = tbl.columns.find((c) => c.name === fk.fromCol);
-    if (!col) continue;
-    col.fkRef = `${fk.toSchema}.${fk.toTable}.${fk.toCol}`;
-  }
-
-  return tables;
-}
-
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function ERDesigner({ database, initialData, onClose, onSuccess }: Props) {
-  const baseId = useId().replace(/:/g, "_");
-  const renderCount = useRef(0);
-
+export default function ERDesigner({ database, initialData, mergedData, onClose, onSuccess }: Props) {
+  const { modal, message } = AntApp.useApp();
   const [leftWidth, setLeftWidth] = useState(490);
   const [resizing, setResizing] = useState(false);
   const resizeStart = useRef({ x: 0, width: 0 });
 
   const [schemas, setSchemas] = useState<string[]>([]);
-  const [tables, setTables] = useState<DesignerTable[]>(() =>
-    initialData ? initFromERData(initialData) : []
-  );
+  const [tables, setTables] = useState<DesignerTable[]>(() => {
+    if (mergedData) return initFromERData(mergedData);
+    if (initialData) return initFromERData(initialData);
+    return [];
+  });
 
-  // Preview state
-  const [rawSvg, setRawSvg] = useState<string>("");
-  const [zoom, setZoom] = useState(1);
-  const [rendering, setRendering] = useState(false);
-  const [renderError, setRenderError] = useState<string | null>(null);
+  // Stable ref for tables — used in callbacks that shouldn't re-create on every tables change
+  const tablesRef = useRef(tables);
+  tablesRef.current = tables;
 
-  // Panning
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [panning, setPanning] = useState(false);
-  const panningRef = useRef(false);
-  const panOrigin = useRef({ x: 0, y: 0, scrollLeft: 0, scrollTop: 0 });
+  // Canvas selection (multi-select via Cmd/Ctrl+click)
+  const [selectedTableIds, setSelectedTableIds] = useState<string[]>([]);
 
   // SQL modal
   const [sqlModalOpen, setSqlModalOpen] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
+
+  // Refs for scrolling sidebar to selected table
+  const tableCardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   // ── Left panel resize ────────────────────────────────────────────────────────
 
@@ -470,62 +439,96 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
   // ── Fetch schemas on mount ──────────────────────────────────────────────────
 
   useEffect(() => {
-    ListSchemas(database).then(setSchemas).catch(() => {});
+    ListSchemas(database)
+      .then((s) => setSchemas(s.filter((n) => n.toUpperCase() !== "INFORMATION_SCHEMA")))
+      .catch(() => {});
   }, [database]);
 
-  // ── Panning handlers ────────────────────────────────────────────────────────
+  // ── Sync designer state to backend for MCP tools ──────────────────────────
 
-  const startPan = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!containerRef.current) return;
-    panningRef.current = true;
-    setPanning(true);
-    panOrigin.current = {
-      x: e.clientX,
-      y: e.clientY,
-      scrollLeft: containerRef.current.scrollLeft,
-      scrollTop: containerRef.current.scrollTop,
-    };
-  };
+  const pushState = useCallback((tbls: DesignerTable[]) => {
+    const out = tbls.map((t) =>
+      new mcp.ERDesignerTableOut({
+        schema: t.schema,
+        name: t.name,
+        columns: t.columns.map((c) =>
+          new mcp.ERDesignerColumnOut({
+            name: c.name,
+            dataType: c.dataType,
+            isPK: c.isPK,
+            notNull: c.notNull,
+            fkRef: c.fkRef || undefined,
+          }),
+        ),
+      }),
+    );
+    UpdateERDesignerState(database, out).catch(() => {});
+  }, [database]);
 
-  const doPan = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!panningRef.current || !containerRef.current) return;
-    containerRef.current.scrollLeft = panOrigin.current.scrollLeft - (e.clientX - panOrigin.current.x);
-    containerRef.current.scrollTop = panOrigin.current.scrollTop - (e.clientY - panOrigin.current.y);
-  };
+  // Push initial state on mount, clear on unmount.
+  useEffect(() => {
+    pushState(tablesRef.current);
+    return () => { ClearERDesignerState().catch(() => {}); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- mount/unmount only
+  }, []);
 
-  const stopPan = () => {
-    panningRef.current = false;
-    setPanning(false);
-  };
+  // Debounced push on subsequent tables changes (300ms).
+  const prevTablesRef = useRef(tables);
+  useEffect(() => {
+    if (prevTablesRef.current === tables) return;
+    prevTablesRef.current = tables;
+    const timer = setTimeout(() => pushState(tables), 300);
+    return () => clearTimeout(timer);
+  }, [tables, pushState]);
 
-  // ── Live preview ─────────────────────────────────────────────────────────────
+  // ── Listen for MCP modify_er_designer events ─────────────────────────────
 
   useEffect(() => {
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      const validTables = tables.filter((t) => t.schema && t.name.trim() && t.columns.some((c) => c.name.trim()));
+    const off = EventsOn("mcp:modify-er-designer", (payload: { tables: AITableIn[] }) => {
+      setTables((prev) => mergeAITablesIntoDesigner(prev, payload.tables));
+      message.info(`${payload.tables.length} table(s) updated by AI`);
+    });
+    return () => off();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- message is stable
+  }, []);
 
-      if (validTables.length === 0) {
-        if (!cancelled) { setRawSvg(""); setRenderError(null); }
-        return;
+  // ── Schema filter for canvas ──────────────────────────────────────────────
+
+  // schemas already has INFORMATION_SCHEMA filtered out on fetch
+  const canvasSchemas = useMemo(() => {
+    const fromTables = tables.map((t) => t.schema).filter(Boolean);
+    return [...new Set([...fromTables, ...schemas])].sort();
+  }, [tables, schemas]);
+
+  const [visibleSchemas, setVisibleSchemas] = useState<Set<string> | null>(null);
+
+  // Show all schemas by default (null = no filter)
+  const effectiveVisibleSchemas = useMemo(
+    () => visibleSchemas ?? new Set(canvasSchemas),
+    [visibleSchemas, canvasSchemas],
+  );
+
+  const toggleSchema = (schema: string) => {
+    setVisibleSchemas((prev) => {
+      const current = prev ?? new Set(canvasSchemas);
+      const next = new Set(current);
+      if (next.has(schema)) {
+        next.delete(schema);
+      } else {
+        next.add(schema);
       }
+      return next;
+    });
+  };
 
-      const src = buildDesignerMermaid(tables);
-      const renderId = `${baseId}_${++renderCount.current}`;
-      setRendering(true);
-      setRenderError(null);
+  // ── Scroll sidebar to selected table ───────────────────────────────────────
 
-      mermaid
-        .render(renderId, src)
-        .then(({ svg: rendered }) => { if (!cancelled) setRawSvg(rendered); })
-        .catch((e) => { if (!cancelled) setRenderError(String(e)); })
-        .finally(() => { if (!cancelled) setRendering(false); });
-    }, 300);
-
-    return () => { cancelled = true; clearTimeout(timer); };
-  }, [tables, baseId]);
-
-  const displaySvg = useMemo(() => applyZoom(rawSvg, zoom), [rawSvg, zoom]);
+  useEffect(() => {
+    if (selectedTableIds.length === 0) return;
+    const lastId = selectedTableIds[selectedTableIds.length - 1];
+    const el = tableCardRefs.current.get(lastId);
+    el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [selectedTableIds]);
 
   // ── Table / column mutators ───────────────────────────────────────────────────
 
@@ -536,15 +539,34 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
     ]);
   };
 
-  const removeTable = (tableId: string) => {
+  const removeTable = useCallback((tableId: string) => {
     setTables((prev) => prev.filter((t) => t.id !== tableId));
-  };
+    setSelectedTableIds((prev) => prev.filter((id) => id !== tableId));
+  }, []);
 
-  const updateTable = (tableId: string, patch: Partial<Pick<DesignerTable, "name" | "schema">>) => {
+  const confirmRemoveTable = useCallback(
+    (tableId: string) => {
+      const table = tablesRef.current.find((t) => t.id === tableId);
+      const label = table
+        ? `${table.schema ? table.schema + "." : ""}${table.name || "(unnamed)"}`
+        : "this table";
+      modal.confirm({
+        title: "Delete table?",
+        content: `"${label}" and all its columns will be removed from the designer. This does not drop the table in Snowflake.`,
+        okText: "Delete",
+        okButtonProps: { danger: true },
+        onOk: () => removeTable(tableId),
+      });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- tablesRef is a stable ref, modal/removeTable are stable
+    [modal, removeTable],
+  );
+
+  const updateTable = useCallback((tableId: string, patch: Partial<Pick<DesignerTable, "name" | "schema">>) => {
     setTables((prev) => prev.map((t) => (t.id === tableId ? { ...t, ...patch } : t)));
-  };
+  }, []);
 
-  const addColumn = (tableId: string) => {
+  const addColumn = useCallback((tableId: string) => {
     setTables((prev) =>
       prev.map((t) =>
         t.id === tableId
@@ -552,15 +574,15 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
           : t
       )
     );
-  };
+  }, []);
 
-  const removeColumn = (tableId: string, colId: string) => {
+  const removeColumn = useCallback((tableId: string, colId: string) => {
     setTables((prev) =>
       prev.map((t) => (t.id === tableId ? { ...t, columns: t.columns.filter((c) => c.id !== colId) } : t))
     );
-  };
+  }, []);
 
-  const updateColumn = (tableId: string, colId: string, patch: Partial<DesignerColumn>) => {
+  const updateColumn = useCallback((tableId: string, colId: string, patch: Partial<DesignerColumn>) => {
     setTables((prev) =>
       prev.map((t) =>
         t.id === tableId
@@ -576,7 +598,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
           : t
       )
     );
-  };
+  }, []);
 
   // FK options: "SCHEMA.TABLE.COLUMN" for every named column in every other table
   const fkOptions = (currentTableId: string): { value: string; label: string }[] => {
@@ -592,9 +614,174 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
     return opts;
   };
 
+  // ── Canvas callbacks ────────────────────────────────────────────────────────
+
+  const handleTableRename = useCallback(
+    (tableId: string, newName: string) => updateTable(tableId, { name: newName }),
+    [updateTable],
+  );
+
+  const handleColumnRename = useCallback(
+    (tableId: string, colId: string, newName: string) => updateColumn(tableId, colId, { name: newName }),
+    [updateColumn],
+  );
+
+  const handleFKConnect = useCallback(
+    (fromTableId: string, fromColId: string, toTableId: string, toColId: string) => {
+      const toTable = tablesRef.current.find((t) => t.id === toTableId);
+      if (!toTable || !toTable.schema || !toTable.name.trim()) return;
+      const toCol = toTable.columns.find((c) => c.id === toColId);
+      if (!toCol || !toCol.name.trim()) return;
+
+      const fkRef = `${toTable.schema}.${toTable.name.trim()}.${toCol.name.trim()}`;
+      updateColumn(fromTableId, fromColId, { fkRef });
+    },
+    [updateColumn],
+  );
+
+  // ── Context menu handlers ──────────────────────────────────────────────────
+  // Empty dep arrays are intentional: tablesRef is a stable ref,
+  // setTables/setSelectedTableIds are stable state setters.
+
+  const handleDuplicateTable = useCallback(
+    (tableId: string) => {
+      const source = tablesRef.current.find((t) => t.id === tableId);
+      if (!source) return;
+      const newTable: DesignerTable = {
+        id: crypto.randomUUID(),
+        schema: source.schema,
+        name: source.name ? `${source.name}_COPY` : "",
+        columns: source.columns.map((c) => ({
+          ...c,
+          id: crypto.randomUUID(),
+          fkRef: "", // Clear FK refs — the copy is a fresh table
+        })),
+      };
+      setTables((prev) => [...prev, newTable]);
+      setSelectedTableIds([newTable.id]);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- tablesRef is a stable ref
+    [],
+  );
+
+  const handleRemoveFKs = useCallback((tableId: string) => {
+    setTables((prev) =>
+      prev.map((t) =>
+        t.id === tableId
+          ? { ...t, columns: t.columns.map((c) => ({ ...c, fkRef: "" })) }
+          : t,
+      ),
+    );
+  }, []);
+
+  // FK dialog state (two tables pre-populated from multi-select)
+  // "child" = table that holds the FK column, "parent" = referenced table
+  const [fkDialog, setFkDialog] = useState<FKDialogState | null>(null);
+
+  const handleAddFK = useCallback(
+    (tableIdA: string, tableIdB: string) => {
+      const tableA = tablesRef.current.find((t) => t.id === tableIdA);
+      const tableB = tablesRef.current.find((t) => t.id === tableIdB);
+
+      let childColId = "";
+      let parentColId = "";
+
+      // Auto-detect the best FK column pair between the two tables.
+      // Tries both directions (A=child/B=parent, then B=child/A=parent) and
+      // picks the first match.
+      // Priority per direction:
+      //   1) child column whose name contains the parent table name
+      //      matching a PK column on the parent (e.g. CUSTOMER_ID → CUSTOMER.ID)
+      //   2) PK column on the parent that shares a name with a child column
+      //   3) any common column name between the two tables
+      let childTableId = tableIdA;
+      let parentTableId = tableIdB;
+
+      if (tableA && tableB) {
+        const tryDetect = (
+          child: DesignerTable,
+          parent: DesignerTable,
+        ): { childColId: string; parentColId: string } | null => {
+          const namedChild = child.columns.filter((c) => c.name.trim());
+          const namedParent = parent.columns.filter((c) => c.name.trim());
+          const colMapChild = new Map(namedChild.map((c) => [c.name.trim().toUpperCase(), c]));
+          const pName = parent.name.trim().toUpperCase();
+
+          // Strategy 1: child col name contains parent table name + parent PK
+          if (pName) {
+            const parentPK = namedParent.find((c) => c.isPK);
+            if (parentPK) {
+              const candidate = namedChild.find(
+                (c) => c.name.trim().toUpperCase().includes(pName),
+              );
+              if (candidate) return { childColId: candidate.id, parentColId: parentPK.id };
+            }
+          }
+
+          // Strategy 2: parent PK column name exists in child
+          const parentPK = namedParent.find((c) => c.isPK);
+          if (parentPK) {
+            const match = colMapChild.get(parentPK.name.trim().toUpperCase());
+            if (match) return { childColId: match.id, parentColId: parentPK.id };
+          }
+
+          // Strategy 3: any common column name
+          for (const colP of namedParent) {
+            const match = colMapChild.get(colP.name.trim().toUpperCase());
+            if (match) return { childColId: match.id, parentColId: colP.id };
+          }
+
+          return null;
+        };
+
+        // Try A=child, B=parent first
+        const forward = tryDetect(tableA, tableB);
+        if (forward) {
+          childColId = forward.childColId;
+          parentColId = forward.parentColId;
+          childTableId = tableIdA;
+          parentTableId = tableIdB;
+        } else {
+          // Try B=child, A=parent
+          const reverse = tryDetect(tableB, tableA);
+          if (reverse) {
+            childColId = reverse.childColId;
+            parentColId = reverse.parentColId;
+            childTableId = tableIdB;
+            parentTableId = tableIdA;
+          }
+        }
+      }
+
+      setFkDialog({
+        childTableId,
+        parentTableId,
+        childColId,
+        parentColId,
+      });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- tablesRef is a stable ref
+    [],
+  );
+
+  const commitFK = useCallback(() => {
+    if (!fkDialog) return;
+    const { childTableId, childColId, parentTableId, parentColId } = fkDialog;
+    if (!childColId || !parentColId) return;
+
+    const parentTable = tablesRef.current.find((t) => t.id === parentTableId);
+    if (!parentTable || !parentTable.schema || !parentTable.name.trim()) return;
+    const parentCol = parentTable.columns.find((c) => c.id === parentColId);
+    if (!parentCol || !parentCol.name.trim()) return;
+
+    const fkRef = `${parentTable.schema}.${parentTable.name.trim()}.${parentCol.name.trim()}`;
+    updateColumn(childTableId, childColId, { fkRef });
+    setFkDialog(null);
+  }, [fkDialog, updateColumn]);
+
   // ── SQL & run ─────────────────────────────────────────────────────────────────
 
-  const sql = generateDiffSQL(tables, database, initialData);
+  const sql = useMemo(() => generateDiffSQL(tables, database, initialData), [tables, database, initialData]);
   const hasChanges = sql.trim().length > 0;
 
   const runSQL = async () => {
@@ -602,7 +789,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
     setRunError(null);
     try {
       await ExecuteQuery(sql);
-      antMessage.success("Changes applied successfully.");
+      message.success("Changes applied successfully.");
       setSqlModalOpen(false);
       onSuccess();
     } catch (e) {
@@ -616,7 +803,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
 
   const handleClose = () => {
     if (!hasChanges) { onClose(); return; }
-    Modal.confirm({
+    modal.confirm({
       title: "Discard unsaved changes?",
       content: "You have unapplied schema changes. Close anyway?",
       okText: "Discard changes",
@@ -624,6 +811,10 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
       cancelText: "Keep editing",
       onOk: onClose,
     });
+  };
+
+  const copyMermaid = () => {
+    ClipboardSetText(buildMermaid(tables, effectiveVisibleSchemas));
   };
 
   // ── Render ────────────────────────────────────────────────────────────────────
@@ -672,8 +863,23 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
               </div>
             )}
 
-            {tables.map((t) => (
-              <div key={t.id} style={{ border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden", flexShrink: 0 }}>
+            {tables.filter((t) => !t.schema || effectiveVisibleSchemas.has(t.schema)).map((t) => (
+              <div
+                key={t.id}
+                ref={(el) => {
+                  if (el) tableCardRefs.current.set(t.id, el);
+                  else tableCardRefs.current.delete(t.id);
+                }}
+                style={{
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  overflow: "hidden",
+                  flexShrink: 0,
+                  borderLeft: selectedTableIds.includes(t.id) ? "3px solid var(--accent)" : "1px solid var(--border)",
+                  cursor: "pointer",
+                }}
+                onClick={() => setSelectedTableIds([t.id])}
+              >
                 {/* Table header — two rows: schema+delete, then table name */}
                 <div
                   style={{
@@ -699,36 +905,52 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
                       size="small"
                       type="text"
                       icon={<DeleteOutlined style={{ color: "#f85149" }} />}
-                      onClick={() => removeTable(t.id)}
+                      onClick={(e) => { e.stopPropagation(); confirmRemoveTable(t.id); }}
                     />
                   </div>
                   <Input
                     size="small"
                     placeholder="TABLE_NAME"
                     value={t.name}
-                    onChange={(e) => updateTable(t.id, { name: e.target.value.toUpperCase() })}
+                    onChange={(e) => updateTable(t.id, { name: e.target.value })}
+                    onBlur={(e) => updateTable(t.id, { name: normalizeIdentifier(e.target.value) })}
                     style={{ fontFamily: "monospace", fontSize: 13, fontWeight: 600 }}
+                    onClick={(e) => e.stopPropagation()}
                   />
                 </div>
 
                 {/* Columns */}
                 <div style={{ padding: "6px 8px", display: "flex", flexDirection: "column", gap: 4 }}>
                   {t.columns.map((c) => (
-                    <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 4 }} onClick={(e) => e.stopPropagation()}>
                       <Input
                         size="small"
-                        placeholder="column_name"
+                        placeholder="COLUMN_NAME"
                         value={c.name}
                         onChange={(e) => updateColumn(t.id, c.id, { name: e.target.value })}
+                        onBlur={(e) => updateColumn(t.id, c.id, { name: normalizeIdentifier(e.target.value) })}
                         style={{ flex: 1, fontFamily: "monospace", fontSize: 11, minWidth: 80 }}
                       />
-                      <Select
+                      <AutoComplete
                         size="small"
                         value={c.dataType}
                         onChange={(v) => updateColumn(t.id, c.id, { dataType: v })}
-                        style={{ width: 100, flexShrink: 0 }}
-                        showSearch
-                        options={SF_TYPES.map((sf) => ({ value: sf, label: sf }))}
+                        onBlur={(e) => {
+                          const val = (e.target as HTMLInputElement).value.trim().toUpperCase();
+                          if (val) updateColumn(t.id, c.id, { dataType: val });
+                        }}
+                        style={{ width: 150, flexShrink: 0 }}
+                        popupMatchSelectWidth={false}
+                        options={SF_DATA_TYPES.map((dt) => ({
+                          value: dt.name,
+                          label: dt.paramHint ? `${dt.name} ${dt.paramHint}` : dt.name,
+                        }))}
+                        filterOption={(input, option) => {
+                          // Show all options when input is an existing type (possibly with params)
+                          const base = input.replace(/\s*\(.*$/, "").trim().toUpperCase();
+                          if (SF_TYPES_SET.has(base)) return true;
+                          return (option?.label as string ?? "").toUpperCase().includes(input.toUpperCase());
+                        }}
                       />
                       <Button
                         size="small"
@@ -770,7 +992,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
                     size="small"
                     type="dashed"
                     icon={<PlusOutlined />}
-                    onClick={() => addColumn(t.id)}
+                    onClick={(e) => { e.stopPropagation(); addColumn(t.id); }}
                     style={{ alignSelf: "flex-start", fontSize: 11, marginTop: 2 }}
                   >
                     Add Column
@@ -795,65 +1017,65 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
             onMouseLeave={(e) => { if (!resizing) e.currentTarget.style.background = "transparent"; }}
           />
 
-          {/* Right panel — live preview */}
+          {/* Right panel — interactive canvas */}
           <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", userSelect: resizing ? "none" : undefined }}>
             <div
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: 4,
+                gap: 8,
                 padding: "6px 12px",
                 borderBottom: "1px solid var(--border)",
-                justifyContent: "flex-end",
+                flexWrap: "wrap",
               }}
             >
-              <Button size="small" icon={<ZoomOutOutlined />} onClick={() => setZoom((z) => Math.max(0.25, +(z - 0.25).toFixed(2)))} />
-              <Button size="small" onClick={() => setZoom(1)} style={{ minWidth: 50, fontSize: 12 }}>
-                {Math.round(zoom * 100)}%
-              </Button>
-              <Button size="small" icon={<ZoomInOutlined />} onClick={() => setZoom((z) => Math.min(4, +(z + 0.25).toFixed(2)))} />
-              <Button size="small" icon={<CopyOutlined />} onClick={() => navigator.clipboard.writeText(buildDesignerMermaid(tables))}>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", flex: 1, alignItems: "center" }}>
+                {canvasSchemas.map((s) => (
+                  <Checkbox
+                    key={s}
+                    checked={effectiveVisibleSchemas.has(s)}
+                    onChange={() => toggleSchema(s)}
+                  >
+                    <span style={{ fontSize: 11 }}>{s}</span>
+                  </Checkbox>
+                ))}
+              </div>
+              <Button size="small" icon={<CopyOutlined />} onClick={copyMermaid}>
                 Copy Mermaid
               </Button>
             </div>
 
-            <div
-              ref={containerRef}
-              onMouseDown={startPan}
-              onMouseMove={doPan}
-              onMouseUp={stopPan}
-              onMouseLeave={stopPan}
-              style={{
-                flex: 1,
-                overflow: "auto",
-                background: "var(--bg)",
-                padding: 16,
-                cursor: panning ? "grabbing" : "grab",
-                userSelect: panning ? "none" : "auto",
-              }}
-            >
-              {rendering && (
-                <div style={{ textAlign: "center", padding: "80px 0" }}>
-                  <Spin />
-                  <div style={{ marginTop: 12, fontSize: 12, color: "var(--text-muted)" }}>Rendering diagram…</div>
-                </div>
-              )}
-              {!rendering && renderError && (
-                <div style={{ color: "#f85149", fontFamily: "monospace", fontSize: 12, padding: 8 }}>{renderError}</div>
-              )}
-              {!rendering && !renderError && !displaySvg && (
-                <div style={{ textAlign: "center", padding: "80px 0", color: "var(--text-muted)", fontSize: 13 }}>
-                  Add tables and columns to see the live preview.
-                </div>
-              )}
-              {!rendering && !renderError && displaySvg && (
-                // eslint-disable-next-line react/no-danger
-                <div dangerouslySetInnerHTML={{ __html: displaySvg }} />
-              )}
-            </div>
+            <ERCanvas
+              key={database}
+              tables={tables}
+              mode="edit"
+              database={database}
+              visibleSchemas={effectiveVisibleSchemas}
+              selectedTableIds={selectedTableIds}
+              onSelectionChange={setSelectedTableIds}
+              onConnect={handleFKConnect}
+              onTableRename={handleTableRename}
+              onColumnRename={handleColumnRename}
+              onColumnRemove={removeColumn}
+              onDuplicateTable={handleDuplicateTable}
+              onDeleteTable={confirmRemoveTable}
+              onAddFK={handleAddFK}
+              onRemoveFKs={handleRemoveFKs}
+            />
           </div>
         </div>
       </Modal>
+
+      {/* Add FK reference dialog (two tables pre-populated from multi-select) */}
+      {fkDialog && (
+        <FKDialog
+          fkDialog={fkDialog}
+          tables={tables}
+          onClose={() => setFkDialog(null)}
+          onCommit={commitFK}
+          onUpdate={setFkDialog}
+        />
+      )}
 
       {/* SQL review modal */}
       <Modal
@@ -870,7 +1092,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
               )}
             </div>
             <div style={{ display: "flex", gap: 8 }}>
-              <Button onClick={() => navigator.clipboard.writeText(sql)} icon={<CopyOutlined />}>Copy</Button>
+              <Button onClick={() => ClipboardSetText(sql)} icon={<CopyOutlined />}>Copy</Button>
               <Button type="primary" loading={running} onClick={runSQL} disabled={!hasChanges}>Apply</Button>
             </div>
           </div>

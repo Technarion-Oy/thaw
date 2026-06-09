@@ -1,49 +1,42 @@
 // Copyright (c) 2026 Technarion Oy. All rights reserved.
+// @thaw-domain: ER Designer
 
-import { useState, useId, useEffect, useRef, useMemo } from "react";
-import { Modal, Button, Checkbox, Spin } from "antd";
-import { ZoomInOutlined, ZoomOutOutlined, CopyOutlined, EditOutlined } from "@ant-design/icons";
-import mermaid from "mermaid";
-import type { snowflake } from "../../../wailsjs/go/models";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { Modal, Button, Checkbox, message } from "antd";
+import { CopyOutlined, EditOutlined } from "@ant-design/icons";
+import { ListSchemas, FindJoinPaths, BuildJoinState } from "../../../wailsjs/go/app/App";
+import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import type { snowflake, erdesigner } from "../../../wailsjs/go/models";
+import { tableKey, type JoinQueryState, type JoinPath, type DesignerTable } from "./erTypes";
 import { buildMermaid } from "./buildMermaid";
 import ERDesigner from "./ERDesigner";
+import ERCanvas from "./ERCanvas";
+import { initFromERData } from "./erCanvasLayout";
+import JoinQueryPanel, { JoinPathDisambiguation } from "./JoinQueryPanel";
+import { useQueryStore } from "../../store/queryStore";
 
-mermaid.initialize({
-  startOnLoad: false,
-  securityLevel: "loose",
-  theme: "dark",
-});
+// ── Typed Wails IPC wrappers ──────────────────────────────────────────────────
+// Concentrate the Wails class ↔ interface casts in one place. At runtime Wails
+// serializes/deserializes plain JSON objects; the generated .d.ts declares class
+// types with extra methods (constructors, convertValues) that require casts.
+type TableRef = { schema: string; name: string };
 
-/**
- * Scale an SVG string to the requested zoom level by rewriting its
- * width / max-width attributes.  Mermaid outputs SVGs with
- * `width="100%"` and `style="max-width: Npx;"`.  We replace those
- * with explicit pixel values so the browser lays the element out at
- * the correct size and the scroll container shows scrollbars when
- * the diagram is larger than the viewport.
- */
-function applyZoom(svg: string, zoom: number): string {
-  if (!svg) return svg;
-  // Extract the natural pixel width from the max-width style
-  const maxWidthMatch = svg.match(/max-width:\s*([\d.]+)px/);
-  if (maxWidthMatch) {
-    const naturalPx = parseFloat(maxWidthMatch[1]);
-    const zoomedPx = Math.round(naturalPx * zoom);
-    return svg
-      .replace(/max-width:\s*[\d.]+px;?\s*/, `max-width: ${zoomedPx}px; `)
-      .replace(/\bwidth="100%"/, `width="${zoomedPx}"`);
-  }
-  // Fallback: SVG has explicit width/height attributes
-  const wMatch = svg.match(/\bwidth="([\d.]+)"/);
-  const hMatch = svg.match(/\bheight="([\d.]+)"/);
-  if (wMatch && hMatch) {
-    const w = Math.round(parseFloat(wMatch[1]) * zoom);
-    const h = Math.round(parseFloat(hMatch[1]) * zoom);
-    return svg
-      .replace(/\bwidth="[\d.]+"/, `width="${w}"`)
-      .replace(/\bheight="[\d.]+"/, `height="${h}"`);
-  }
-  return svg;
+async function findJoinPaths(
+  tables: TableRef[], fks: snowflake.ERForeignKey[],
+): Promise<JoinPath[]> {
+  return FindJoinPaths(
+    tables as unknown as erdesigner.TableRef[], fks,
+  ) as Promise<JoinPath[]>;
+}
+
+async function buildJoinState(
+  path: JoinPath, selected: TableRef[], database: string,
+): Promise<JoinQueryState> {
+  return BuildJoinState(
+    path as unknown as erdesigner.JoinPath,
+    selected as unknown as erdesigner.TableRef[],
+    database,
+  ) as Promise<JoinQueryState>;
 }
 
 interface Props {
@@ -54,80 +47,68 @@ interface Props {
 }
 
 export default function ERDiagramModal({ database, data, onClose, onDesignerSuccess }: Props) {
-  const baseId = useId().replace(/:/g, "_");
-  const renderCount = useRef(0);
+  const dataSchemas = useMemo(
+    () => [...new Set(data.tables.map((t) => t.schema))],
+    [data],
+  );
 
-  const allSchemas = [...new Set(data.tables.map((t) => t.schema))].sort();
-
-  const [visibleSchemas, setVisibleSchemas] = useState<Set<string>>(new Set(allSchemas));
-  const [designerOpen, setDesignerOpen] = useState(false);
-  const [zoom, setZoom] = useState(1);
-  const [rawSvg, setRawSvg] = useState<string>("");
-  const [rendering, setRendering] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // Panning state
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [panning, setPanning] = useState(false);
-  const panningRef = useRef(false); // ref avoids stale closure in mousemove
-  const panOrigin = useRef({ x: 0, y: 0, scrollLeft: 0, scrollTop: 0 });
-
-  const startPan = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!containerRef.current) return;
-    panningRef.current = true;
-    setPanning(true);
-    panOrigin.current = {
-      x: e.clientX,
-      y: e.clientY,
-      scrollLeft: containerRef.current.scrollLeft,
-      scrollTop: containerRef.current.scrollTop,
-    };
-  };
-
-  const doPan = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!panningRef.current || !containerRef.current) return;
-    containerRef.current.scrollLeft = panOrigin.current.scrollLeft - (e.clientX - panOrigin.current.x);
-    containerRef.current.scrollTop  = panOrigin.current.scrollTop  - (e.clientY - panOrigin.current.y);
-  };
-
-  const stopPan = () => {
-    panningRef.current = false;
-    setPanning(false);
-  };
-
-  // Re-render the diagram whenever the visible schema selection changes
+  const [dbSchemas, setDbSchemas] = useState<string[]>([]);
   useEffect(() => {
-    if (visibleSchemas.size === 0) {
-      setRawSvg("");
-      return;
+    ListSchemas(database).then(setDbSchemas).catch(() => {});
+  }, [database]);
+
+  // Merge schemas from ER data with all database schemas, excluding INFORMATION_SCHEMA
+  const allSchemas = useMemo(
+    () => [...new Set([...dataSchemas, ...dbSchemas])]
+      .filter((s) => s.toUpperCase() !== "INFORMATION_SCHEMA")
+      .sort(),
+    [dataSchemas, dbSchemas],
+  );
+
+  const [visibleSchemas, setVisibleSchemas] = useState<Set<string>>(new Set(dataSchemas));
+  const [designerOpen, setDesignerOpen] = useState(false);
+  const [selectedTableIds, setSelectedTableIds] = useState<string[]>([]);
+
+  // Join builder state
+  const [joinPanelOpen, setJoinPanelOpen] = useState(false);
+  const [joinLoading, setJoinLoading] = useState(false);
+  const [joinState, setJoinState] = useState<JoinQueryState | null>(null);
+  const [joinPaths, setJoinPaths] = useState<JoinPath[] | null>(null);
+  // Captured at the time paths were computed — prevents stale reads if
+  // selection changes between opening disambiguation and clicking a path.
+  const resolvedTablesRef = useRef<{ schema: string; name: string }[]>([]);
+
+  const loadInNewTab = useQueryStore((s) => s.loadInNewTab);
+
+  const designerTables = useMemo(() => initFromERData(data), [data]);
+
+  // Build a lookup of table columns for the JoinQueryPanel column picker
+  const tableColumnsMap = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const t of data.tables) {
+      m.set(tableKey(t.schema, t.name), t.columns.map((c) => c.name));
     }
+    return m;
+  }, [data]);
 
-    let cancelled = false;
-    const renderId = `${baseId}_${++renderCount.current}`;
-    const src = buildMermaid(data, visibleSchemas);
+  // Map designer table UUIDs to schema.name for reverse lookup
+  const tableIdToSchemaName = useMemo(() => {
+    const m = new Map<string, { schema: string; name: string }>();
+    for (const t of designerTables) {
+      m.set(t.id, { schema: t.schema, name: t.name });
+    }
+    return m;
+  }, [designerTables]);
 
-    setRendering(true);
-    setError(null);
-
-    mermaid
-      .render(renderId, src)
-      .then(({ svg: rendered }) => {
-        if (!cancelled) setRawSvg(rendered);
-      })
-      .catch((e) => {
-        if (!cancelled) setError(String(e));
-      })
-      .finally(() => {
-        if (!cancelled) setRendering(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [visibleSchemas, data, baseId]);
-
-  // Derive the display SVG by rewriting width attributes — no CSS transform needed
-  const displaySvg = useMemo(() => applyZoom(rawSvg, zoom), [rawSvg, zoom]);
+  // Pre-built lookup: "SCHEMA.TABLE" → DesignerTable
+  // Used by highlightedEdgeIds to avoid O(n) find per FK column.
+  const designerTablesByKey = useMemo(() => {
+    const m = new Map<string, DesignerTable>();
+    for (const t of designerTables) {
+      m.set(tableKey(t.schema, t.name), t);
+    }
+    return m;
+  }, [designerTables]);
 
   const toggleSchema = (schema: string) => {
     setVisibleSchemas((prev) => {
@@ -142,8 +123,133 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
   };
 
   const copyMermaid = () => {
-    navigator.clipboard.writeText(buildMermaid(data, visibleSchemas));
+    ClipboardSetText(buildMermaid(designerTables, visibleSchemas));
   };
+
+  // Handle "Build Query" from context menu.
+  // Note: once the join panel is open, changing the canvas selection does not
+  // update the panel — the user must close and re-trigger "Build Query" with
+  // the new selection. This is intentional: live-updating would be disorienting
+  // and the disambiguation flow doesn't support incremental changes.
+  const handleBuildQuery = useCallback(
+    async (tableIds: string[]) => {
+      const selected = tableIds
+        .map((id) => tableIdToSchemaName.get(id))
+        .filter((t): t is { schema: string; name: string } => !!t);
+
+      if (selected.length < 2) return;
+
+      setJoinLoading(true);
+      try {
+        const paths = await findJoinPaths(selected, data.fks ?? []);
+        if (paths.length === 0) {
+          void message.warning("Selected tables are not connected by foreign keys");
+          return;
+        }
+
+        resolvedTablesRef.current = selected;
+
+        if (paths.length === 1) {
+          // Single path — open panel directly
+          const state = await buildJoinState(paths[0], selected, database);
+          setJoinState(state);
+          setJoinPaths(null);
+          setJoinPanelOpen(true);
+        } else {
+          // Multiple paths — show disambiguation
+          setJoinPaths(paths);
+          setJoinState(null);
+          setJoinPanelOpen(true);
+        }
+      } catch {
+        void message.error("Failed to compute join paths");
+      } finally {
+        setJoinLoading(false);
+      }
+    },
+    [data.fks, tableIdToSchemaName, database],
+  );
+
+  const handleDisambiguationSelect = useCallback(
+    async (index: number) => {
+      if (!joinPaths) return;
+      setJoinLoading(true);
+      try {
+        const state = await buildJoinState(
+          joinPaths[index], resolvedTablesRef.current, database,
+        );
+        setJoinState(state);
+        setJoinPaths(null);
+      } catch {
+        void message.error("Failed to build join state");
+      } finally {
+        setJoinLoading(false);
+      }
+    },
+    [joinPaths, database],
+  );
+
+  const handleCloseJoinPanel = useCallback(() => {
+    setJoinPanelOpen(false);
+    setJoinState(null);
+    setJoinPaths(null);
+  }, []);
+
+  // Compute highlighted edge IDs for visual feedback on the canvas.
+  // Uses structured fkPairs from JoinEntry to match specific FK columns,
+  // avoiding brittle string parsing of ON conditions.
+  const highlightedEdgeIds = useMemo(() => {
+    if (!joinPanelOpen || !joinState) return undefined;
+
+    // Build a set of normalised FK pair keys from the structured data
+    const usedFKPairs = new Set<string>();
+    for (const j of joinState.joins) {
+      for (const pair of (j.fkPairs ?? [])) {
+        const a = `${pair.from.schema}.${pair.from.table}.${pair.from.col}`;
+        const b = `${pair.to.schema}.${pair.to.table}.${pair.to.col}`;
+        const [lo, hi] = [a, b].sort();
+        usedFKPairs.add(`${lo}=${hi}`);
+      }
+    }
+
+    const ids = new Set<string>();
+    for (const t of designerTables) {
+      for (const c of t.columns) {
+        if (!c.fkRef) continue;
+        const parts = c.fkRef.split(".");
+        if (parts.length !== 3) continue;
+        const [refSchema, refTable, refCol] = parts;
+        const targetTable = designerTablesByKey.get(
+          `${refSchema}.${refTable}`,
+        );
+        if (!targetTable) continue;
+        const targetCol = targetTable.columns.find(
+          (tc) => tc.name === refCol,
+        );
+        if (!targetCol) continue;
+
+        const fromRef = `${t.schema}.${t.name}.${c.name}`;
+        const toRef = `${refSchema}.${refTable}.${refCol}`;
+        const [lo, hi] = [fromRef, toRef].sort();
+        if (usedFKPairs.has(`${lo}=${hi}`)) {
+          ids.add(`fk-${t.id}-${c.id}-${targetTable.id}-${targetCol.id}`);
+        }
+      }
+    }
+    return ids.size > 0 ? ids : undefined;
+  }, [joinPanelOpen, joinState, designerTables, designerTablesByKey]);
+
+  // Compute highlighted node IDs (intermediate tables) for visual feedback
+  const highlightedNodeIds = useMemo(() => {
+    if (!joinPanelOpen || !joinState) return undefined;
+    const ids = new Set<string>();
+    for (const j of joinState.joins) {
+      if (!j.isIntermediate) continue;
+      const t = designerTablesByKey.get(tableKey(j.table.schema, j.table.name));
+      if (t) ids.add(t.id);
+    }
+    return ids.size > 0 ? ids : undefined;
+  }, [joinPanelOpen, joinState, designerTablesByKey]);
 
   return (
     <>
@@ -179,21 +285,8 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
           ))}
         </div>
 
-        {/* Zoom + copy + design controls */}
+        {/* Copy + design controls */}
         <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-          <Button
-            size="small"
-            icon={<ZoomOutOutlined />}
-            onClick={() => setZoom((z) => Math.max(0.25, +(z - 0.25).toFixed(2)))}
-          />
-          <Button size="small" onClick={() => setZoom(1)} style={{ minWidth: 50, fontSize: 12 }}>
-            {Math.round(zoom * 100)}%
-          </Button>
-          <Button
-            size="small"
-            icon={<ZoomInOutlined />}
-            onClick={() => setZoom((z) => Math.min(4, +(z + 0.25).toFixed(2)))}
-          />
           <Button size="small" icon={<CopyOutlined />} onClick={copyMermaid}>
             Copy Mermaid
           </Button>
@@ -203,55 +296,49 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
         </div>
       </div>
 
-      {/* Diagram area — drag to pan */}
-      <div
-        ref={containerRef}
-        onMouseDown={startPan}
-        onMouseMove={doPan}
-        onMouseUp={stopPan}
-        onMouseLeave={stopPan}
-        style={{
-          height: "70vh",
-          overflow: "auto",
-          background: "var(--bg)",
-          padding: 16,
-          cursor: panning ? "grabbing" : "grab",
-          userSelect: panning ? "none" : "auto",
-        }}
-      >
-        {rendering && (
-          <div style={{ textAlign: "center", padding: "80px 0" }}>
-            <Spin />
-            <div style={{ marginTop: 12, fontSize: 12, color: "var(--text-muted)" }}>
-              Rendering diagram…
-            </div>
-          </div>
-        )}
-
-        {!rendering && error && (
-          <div style={{ color: "#f85149", fontFamily: "monospace", fontSize: 12, padding: 8 }}>
-            {error}
-          </div>
-        )}
-
-        {!rendering && visibleSchemas.size === 0 && (
-          <div
-            style={{
-              textAlign: "center",
-              padding: "80px 0",
-              color: "var(--text-muted)",
-              fontSize: 13,
-            }}
-          >
-            Select at least one schema to show the diagram.
-          </div>
-        )}
-
-        {!rendering && !error && displaySvg && (
-          // eslint-disable-next-line react/no-danger
-          <div dangerouslySetInnerHTML={{ __html: displaySvg }} />
-        )}
+      {/* Canvas area — shrinks when join panel is open */}
+      <div style={{ height: joinPanelOpen ? "45vh" : "70vh", transition: "height 0.2s ease" }}>
+        <ERCanvas
+          key={database}
+          tables={designerTables}
+          mode="readonly"
+          database={database}
+          visibleSchemas={visibleSchemas}
+          selectedTableIds={selectedTableIds}
+          onSelectionChange={setSelectedTableIds}
+          onBuildQuery={handleBuildQuery}
+          highlightedEdgeIds={highlightedEdgeIds}
+          highlightedNodeIds={highlightedNodeIds}
+        />
       </div>
+
+      {/* Join query builder panel */}
+      {joinLoading && !joinPanelOpen && (
+        <div style={{ padding: "12px 16px", borderTop: "1px solid var(--border)", fontSize: 12, color: "var(--text-muted)" }}>
+          Computing join paths…
+        </div>
+      )}
+      {joinPanelOpen && joinPaths && !joinState && (
+        <JoinPathDisambiguation
+          paths={joinPaths}
+          onSelect={handleDisambiguationSelect}
+          onCancel={handleCloseJoinPanel}
+        />
+      )}
+      {joinPanelOpen && joinState && (
+        <div style={{ height: "25vh" }}>
+          <JoinQueryPanel
+            state={joinState}
+            tableColumns={tableColumnsMap}
+            onChange={setJoinState}
+            onOpenInEditor={(sql) => {
+              loadInNewTab(sql);
+              onClose();
+            }}
+            onClose={handleCloseJoinPanel}
+          />
+        </div>
+      )}
     </Modal>
 
     {designerOpen && (

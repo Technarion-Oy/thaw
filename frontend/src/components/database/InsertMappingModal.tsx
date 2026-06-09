@@ -15,7 +15,7 @@ import {
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { SyncOutlined, DeleteOutlined, InfoCircleOutlined } from "@ant-design/icons";
-import { GetTableColumnsWithTypes } from "../../../wailsjs/go/main/App";
+import { GetTableColumnsWithTypes } from "../../../wailsjs/go/app/App";
 import { snowflake } from "../../../wailsjs/go/models";
 import { useInsertMappingStore } from "../../store/insertMappingStore";
 import { useObjectStore } from "../../store/objectStore";

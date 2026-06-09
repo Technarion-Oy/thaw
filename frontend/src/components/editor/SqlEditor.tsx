@@ -32,7 +32,7 @@ import { useThemeStore } from "../../store/themeStore";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import { patchMonacoClipboard } from "../../utils/monacoClipboard";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, GetAllDataTypes, GitGetHeadFileContent } from "../../../wailsjs/go/main/App";
+import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, GetAllDataTypes, GitGetHeadFileContent } from "../../../wailsjs/go/app/App";
 import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateSnowflakePatterns, ValidateDataTypes, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContextFull, ResolveTableRefs, ComputeGitLineDiff } from "../../../wailsjs/go/sqleditor/Service";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { UC, quoteIfNecessary, getFKs, getFKsCached, setFKCache, FKEntry, buildVariableSuggestions } from "./sqlEditorUtils";
@@ -61,6 +61,17 @@ export interface ResolvedRef {
   schema: string;
   name: string;
 }
+// Module-level map used to pass pre-computed diagnostics from MCP open_sql_tab
+// to the editor without going through React state. QueryPage writes into it
+// when the Wails event fires; onDidChangeModelContent reads and clears.
+//
+// Timing: the write (EventsOn callback) and read (onDidChangeModelContent) run
+// in different React lifecycles, but Monaco fires onDidChangeModelContent when
+// the new tab's model receives its initial SQL content (setValue during mount),
+// so the markers are always consumed. Cleanup on tab close (requestClose in
+// QueryPage) prevents leaks for tabs closed before their editor mounts.
+export const pendingMcpMarkers = new Map<string, DiagMarker[]>();
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Module-level DDL cache and hover provider handle so we only register once
@@ -614,6 +625,10 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       const diagMarkers: DiagMarker[] = [];
 
       try {
+        // NOTE: This diagnostics pipeline is mirrored server-side in
+        // internal/mcp/diag_tools.go (validateSQL). Changes to validation
+        // ordering or request assembly should be reflected there too (#336).
+
         // ADD || [] to prevent spreading null from Go's nil slices!
         const syntaxErrors = await AnalyzeSqlSyntax(diagSql);
         if (model.getVersionId() !== diagVersion) return;
@@ -763,6 +778,16 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     };
 
     editor.onDidChangeModelContent(() => {
+      // Apply any pending MCP markers immediately (before the debounced diagnostics run).
+      const curTabId = tabId ?? useQueryStore.getState().activeTabId;
+      const pending = pendingMcpMarkers.get(curTabId);
+      if (pending) {
+        const m = editor.getModel();
+        if (m) {
+          pendingMcpMarkers.delete(curTabId);
+          monaco.editor.setModelMarkers(m, "thaw-sql", pending);
+        }
+      }
       if (diagTimerRef.current) clearTimeout(diagTimerRef.current);
       diagTimerRef.current = setTimeout(runDiagnostics, 400);
     });

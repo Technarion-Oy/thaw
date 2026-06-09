@@ -49,6 +49,8 @@ var domainDescriptions = map[string]string{
 	"AI Tooling":                      "API clients for LLM providers; inline completion and model management.",
 	"Snowpark & Developer Workflows":  "Python environment management, Jupyter kernels, and dbt project scaffolding.",
 	"Git Integration":                 "Git repository operations, Snowflake Git repository objects, and schema export versioning.",
+	"MCP Server":                       "Model Context Protocol servers exposing the Snowflake connection to external AI clients over localhost.",
+	"ER Designer":                      "Entity-relationship diagram viewer, interactive table designer, join pathfinding, and SQL generation.",
 }
 
 // domainOrder controls the output ordering. Domains not listed here are
@@ -61,6 +63,7 @@ var domainOrder = []string{
 	"AI Tooling",
 	"Snowpark & Developer Workflows",
 	"Git Integration",
+	"MCP Server",
 }
 
 // staticFrontendPaths are frontend paths that cannot be annotated (e.g. auto-generated

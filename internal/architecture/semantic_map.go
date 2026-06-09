@@ -12,7 +12,7 @@ func GetCodebaseSemanticMap() string {
     {
       "name": "Core IPC \u0026 App Lifecycle",
       "backend_paths": [
-        "app.go",
+        "internal/app/",
         "internal/apperrors/",
         "internal/config/",
         "internal/crashreport/",
@@ -20,6 +20,7 @@ func GetCodebaseSemanticMap() string {
         "internal/logger/",
         "internal/session/",
         "internal/sfconfig/",
+        "internal/sysinfo/",
         "internal/telemetry/",
         "internal/version/",
         "main.go"
@@ -36,6 +37,8 @@ func GetCodebaseSemanticMap() string {
     {
       "name": "SQL Editor \u0026 Diagnostics",
       "backend_paths": [
+        "internal/queryhistory/",
+        "internal/querylog/",
         "internal/queryprofile/",
         "internal/sqleditor/"
       ],
@@ -47,6 +50,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/results/ConditionalFormattingModal.tsx",
         "frontend/src/components/results/DataTypeFormatModal.tsx",
         "frontend/src/components/results/GridSearch.tsx",
+        "frontend/src/components/results/QueryLogPane.tsx",
         "frontend/src/components/results/QuickChartModal.tsx",
         "frontend/src/components/results/ResultGrid.tsx",
         "frontend/src/components/results/StatusBar.tsx",
@@ -58,20 +62,35 @@ func GetCodebaseSemanticMap() string {
     {
       "name": "Object Browser \u0026 Administration",
       "backend_paths": [
+        "internal/backup/",
+        "internal/column/",
+        "internal/dbtproject/",
         "internal/fnmeta/",
         "internal/integrations/",
+        "internal/keypair/",
+        "internal/objects/",
         "internal/pipe/",
         "internal/procedure/",
         "internal/secret/",
         "internal/snowflake/",
+        "internal/sqlutil/",
         "internal/stage/",
-        "internal/tasks/"
+        "internal/table/",
+        "internal/tasks/",
+        "internal/warehouse/"
       ],
       "frontend_paths": [
         "frontend/src/components/account/AccountPanel.tsx",
         "frontend/src/components/database/CreateStageModal.tsx",
         "frontend/src/components/database/StagePropertiesModal.tsx",
+        "frontend/src/components/dbtproject/AddDbtProjectVersionModal.tsx",
+        "frontend/src/components/dbtproject/CreateDbtProjectModal.tsx",
+        "frontend/src/components/dbtproject/ExecuteDbtProjectModal.tsx",
+        "frontend/src/components/dbtproject/ModifyDbtProjectModal.tsx",
+        "frontend/src/components/dbtproject/SourceLocationPicker.tsx",
         "frontend/src/components/layout/Sidebar.tsx",
+        "frontend/src/components/shared/SqlPreview.tsx",
+        "frontend/src/components/sidebar/objectIcons.tsx",
         "frontend/src/components/task/TaskHistoryModal.tsx",
         "frontend/src/store/objectStore.ts"
       ],
@@ -109,7 +128,7 @@ func GetCodebaseSemanticMap() string {
       ],
       "frontend_paths": [
         "frontend/src/components/notebook/NotebookTab.tsx",
-        "frontend/src/components/toolbar/NotebookToolbarSlot.tsx",
+        "frontend/src/components/notebook/NotebookToolbarSlot.tsx",
         "frontend/src/store/notebookPrefsStore.ts",
         "frontend/src/store/notebookToolbarStore.ts"
       ],
@@ -126,6 +145,37 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/store/gitStore.ts"
       ],
       "description": "Git repository operations, Snowflake Git repository objects, and schema export versioning."
+    },
+    {
+      "name": "MCP Server",
+      "backend_paths": [
+        "internal/mcp/"
+      ],
+      "frontend_paths": [
+        "frontend/src/components/settings/MCPSessionsModal.tsx",
+        "frontend/src/components/toolbar/MCPIndicator.tsx",
+        "frontend/src/hooks/useEditorContextSync.ts",
+        "frontend/src/store/mcpStore.ts"
+      ],
+      "description": "Model Context Protocol servers exposing the Snowflake connection to external AI clients over localhost."
+    },
+    {
+      "name": "ER Designer",
+      "backend_paths": [
+        "internal/erdesigner/"
+      ],
+      "frontend_paths": [
+        "frontend/src/components/er/ERCanvas.tsx",
+        "frontend/src/components/er/ERDesigner.tsx",
+        "frontend/src/components/er/ERDiagramModal.tsx",
+        "frontend/src/components/er/ERTableNode.tsx",
+        "frontend/src/components/er/JoinQueryPanel.tsx",
+        "frontend/src/components/er/buildMermaid.ts",
+        "frontend/src/components/er/erCanvasLayout.ts",
+        "frontend/src/components/er/erLayoutStore.ts",
+        "frontend/src/components/er/erTypes.ts"
+      ],
+      "description": "Entity-relationship diagram viewer, interactive table designer, join pathfinding, and SQL generation."
     }
   ]
 }`

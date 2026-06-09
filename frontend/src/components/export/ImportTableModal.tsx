@@ -19,7 +19,7 @@ import {
 } from "@ant-design/icons";
 import {
   ImportTableData, PickDataFilesByFormat, ReadFileHead, ListFileFormats,
-} from "../../../wailsjs/go/main/App";
+} from "../../../wailsjs/go/app/App";
 import { snowflake, fileformat } from "../../../wailsjs/go/models";
 import FileFormatFields, { BASE_DEFAULTS } from "../database/FileFormatFields";
 

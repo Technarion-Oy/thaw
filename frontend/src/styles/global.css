@@ -6,30 +6,136 @@
   padding: 0;
 }
 
-/* ── Dark theme (default) ───────────────────────────────────────────────── */
+/* ── Dark theme (default) ────────────────────────────────────────────────
+   Every text tier is at or above WCAG 2.1 AA (4.5:1) against --bg.
+   --border is decorative (panel dividers, table cell separators) and exempt
+   from 1.4.11 because the surface is already identifiable by its bg tone.
+   --border-strong is the value used for actual UI controls (inputs, focus
+   rings) — it clears the 3:1 non-text contrast requirement.
+   ──────────────────────────────────────────────────────────────────────── */
 :root {
-  --bg:           #0d1117;
-  --bg-raised:    #161b22;
-  --bg-overlay:   #1c2128;
-  --border:       #30363d;
-  --text:         #f0f6fc;
-  --text-muted:   #adbac7;
-  --text-faint:   #545d68;
-  --accent:       #388bfd;
-  --link:         #58a6ff;
+  /* Surfaces */
+  --bg:            #0d1117;
+  --bg-raised:     #161b22;
+  --bg-overlay:    #21262d;     /* ↑ from #1c2128 — clearer elevation       */
+  --bg-hover:      #262c34;     /* new — rows, menu, table hover            */
+
+  /* Borders — two tiers */
+  --border:        #3d444d;     /* 1.9:1 — decorative only                  */
+  --border-strong: #6e7681;     /* 4.1:1 — controls, focus rings            */
+
+  /* Text */
+  --text:          #f0f6fc;     /* 16.0:1  AAA                              */
+  --text-muted:    #c9d1d9;     /* 11.4:1  AAA  (was #adbac7, 9.0:1)        */
+  --text-faint:    #8b949e;     /*  5.3:1  AA   (was #545d68, 3.4:1 ❌)     */
+
+  /* Brand + status */
+  --accent:        #58a6ff;
+  --link:          #79c0ff;
+  --success:       #3fb950;
+  --warning:       #d29922;
+  --danger:        #f85149;
+
+  /* Notebook cells — per-kind accent stripe + output surfaces */
+  --cell-accent-code:     var(--accent);
+  --cell-accent-sql:      #4ec9b0;
+  --cell-accent-markdown: #a371f7;
+  --cell-editor-bg:       #1e1e1e;
+  --cell-output-bg:       #1a1a1a;
+  --cell-output-stdout:   #d4d4d4;
+  --cell-output-stderr:   #e6a817;
+  --cell-output-error:    #ff4d4f;
+
+  /* Object-browser icon palette — distinct hue per Snowflake object kind.
+     Same lightness band so no single icon overpowers a row; every value
+     clears 3:1 (non-text contrast) against --bg. */
+  --icon-database:    #58a6ff;  /* blue   (matches accent — keeps brand)   */
+  --icon-schema:      #a371f7;  /* violet                                   */
+  --icon-table:       #79c0ff;  /* light blue                               */
+  --icon-view:        #56d364;  /* green                                    */
+  --icon-function:    #f0883e;  /* orange                                   */
+  --icon-procedure:   #ff7b72;  /* coral                                    */
+  --icon-sequence:    #d2a8ff;  /* lilac                                    */
+  --icon-stage:       #39c5cf;  /* teal                                     */
+  --icon-stream:      #ff9bb3;  /* pink   (real-time — attention)           */
+  --icon-task:        #e3b341;  /* gold                                     */
+  --icon-fileformat:  #adbac7;  /* gray-blue                                */
+  --icon-pipe:        #76e3ea;  /* light teal                               */
+  --icon-notebook:    #c297ff;  /* violet                                   */
+  --icon-secret:      #ff7b72;  /* coral red (sensitive)                    */
+  --icon-gitrepo:     #ff9248;  /* warm orange (git family)                 */
+  --icon-dbtproject:  #7ee787;  /* mint green (dbt build/deploy)            */
+
+  /* Column icons */
+  --col-text:         #8b949e;
+  --col-number:       #79c0ff;
+  --col-datetime:     #a371f7;
+  --col-boolean:      #3fb950;
+  --col-variant:      #d29922;
+  --col-array:        #d29922;
+  --col-binary:       #8b949e;
+  --col-geo:          #58a6ff;
+  --col-vector:       #ff7b72;
 }
 
-/* ── Light theme ────────────────────────────────────────────────────────── */
+/* ── Light theme ──────────────────────────────────────────────────────── */
 [data-theme="light"] {
-  --bg:           #ffffff;
-  --bg-raised:    #f6f8fa;
-  --bg-overlay:   #ffffff;
-  --border:       #d0d7de;
-  --text:         #1f2328;
-  --text-muted:   #636c76;
-  --text-faint:   #9198a1;
-  --accent:       #0969da;
-  --link:         #0969da;
+  --bg:            #ffffff;
+  --bg-raised:     #f6f8fa;
+  --bg-overlay:    #ffffff;
+  --bg-hover:      #eaeef2;
+
+  --border:        #c2c8d0;     /* 1.7:1 — decorative only                  */
+  --border-strong: #8c959f;     /* 3.0:1 — controls, focus rings            */
+
+  --text:          #0f1419;     /* 19.6:1  AAA  (was #1f2328, 14.0:1)       */
+  --text-muted:    #4a5159;     /*  8.6:1  AAA  (was #636c76, 5.6:1)        */
+  --text-faint:    #6e7681;     /*  4.7:1  AA   (was #9198a1, 3.0:1 ❌)     */
+
+  --accent:        #0550ae;     /*  8.6:1  AAA  (was #0969da, 4.6:1)        */
+  --link:          #0969da;
+  --success:       #1a7f37;
+  --warning:       #9a6700;
+  --danger:        #cf222e;
+
+  /* Notebook cells — per-kind accent stripe + output surfaces */
+  --cell-accent-code:     var(--accent);
+  --cell-accent-sql:      #0a7266;
+  --cell-accent-markdown: #8250df;
+  --cell-editor-bg:       #ffffff;
+  --cell-output-bg:       #fafafa;
+  --cell-output-stdout:   #1f2328;
+  --cell-output-stderr:   #9a6700;
+  --cell-output-error:    #cf222e;
+
+  /* Same hue mapping as dark, retuned for adequate contrast on white. */
+  --icon-database:    #0969da;
+  --icon-schema:      #8250df;
+  --icon-table:       #1f6feb;
+  --icon-view:        #1a7f37;
+  --icon-function:    #bc4c00;
+  --icon-procedure:   #cf222e;
+  --icon-sequence:    #6f42c1;
+  --icon-stage:       #1b7c83;
+  --icon-stream:      #bf3989;
+  --icon-task:        #9a6700;
+  --icon-fileformat:  #6e7681;
+  --icon-pipe:        #0550ae;
+  --icon-notebook:    #6f42c1;
+  --icon-secret:      #cf222e;
+  --icon-gitrepo:     #bc4c00;
+  --icon-dbtproject:  #116329;
+
+  /* Column icons */
+  --col-text:         #6e7681;
+  --col-number:       #0969da;
+  --col-datetime:     #8250df;
+  --col-boolean:      #1a7f37;
+  --col-variant:      #9a6700;
+  --col-array:        #9a6700;
+  --col-binary:       #6e7681;
+  --col-geo:          #0550ae;
+  --col-vector:       #cf222e;
 }
 
 html,
@@ -41,7 +147,11 @@ body,
   background: var(--bg);
   color: var(--text);
   font-family: var(--ui-font, "Inter", "SF Pro Text", system-ui, sans-serif);
-  font-weight: 500;
+  /* Body weight 450 (variable-axis) reads sharper than 500 on WKWebView's
+     subpixel pipeline; headings stay at 600 via fontWeightStrong. */
+  font-weight: 450;
+  font-feature-settings: "cv11", "ss01", "ss03"; /* Inter glyph variants     */
+  text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -51,20 +161,49 @@ body,
   --wails-draggable: drag;
 }
 
-/* Scrollbar styling */
+/* ── Scrollbar styling ──────────────────────────────────────────────────
+   Widened 6 → 10px; the previous bar was hard to grab on retina displays.
+   The 2px border on the thumb fakes inner padding so the bar reads as
+   inset rather than flush against the panel edge. */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 10px;
+  height: 10px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
   background: var(--border);
-  border-radius: 3px;
+  border-radius: 5px;
+  border: 2px solid var(--bg);
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-faint);
+  background: var(--border-strong);
+}
+
+/* ── Keyboard focus ring ────────────────────────────────────────────────
+   Always visible for keyboard users; suppressed for mouse via :focus-visible.
+   Necessary for WCAG 2.4.7 (Focus Visible). */
+:where(button, [role="button"], a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Use the strong border tier on actual UI controls so WCAG 1.4.11 is
+   satisfied even when ConfigProvider's colorBorder is overridden elsewhere. */
+.ant-btn-default,
+.ant-input,
+.ant-input-affix-wrapper,
+.ant-input-number,
+.ant-select-selector,
+.ant-picker {
+  border-color: var(--border-strong) !important;
+}
+
+/* Reduce tree indentation so deeply-nested columns fit in the object browser */
+.object-browser-tree .ant-tree-indent-unit {
+  width: 14px;
 }
 
 /* Keep tree node titles on one line and let the list scroll horizontally */
@@ -130,16 +269,17 @@ body,
 }
 
 /* Monaco editor — custom selection occurrence highlights.
-   Applied to every match of the selected text that is not the selection itself. */
+   Applied to every match of the selected text that is not the selection itself.
+   Bumped opacity slightly so the highlight reads at the new background tones. */
 .sql-occurrence-highlight {
-  background: rgba(173, 214, 255, 0.15);
-  border: 1px solid rgba(173, 214, 255, 0.4);
+  background: rgba(121, 192, 255, 0.18);
+  border: 1px solid rgba(121, 192, 255, 0.45);
   border-radius: 2px;
 }
 
 [data-theme="light"] .sql-occurrence-highlight {
-  background: rgba(9, 105, 218, 0.12);
-  border: 1px solid rgba(9, 105, 218, 0.35);
+  background: rgba(5, 80, 174, 0.14);
+  border: 1px solid rgba(5, 80, 174, 0.40);
 }
 
 /* Monaco editor — currently-running statement highlight (multi-statement mode) */
@@ -162,13 +302,13 @@ body,
 
 /* Monaco editor — git gutter indicators (VS Code-style) */
 .git-gutter-added {
-  background: #3fb950;
+  background: var(--success);
   border-radius: 2px;
   width: 3px !important;
   margin-left: 1px;
 }
 .git-gutter-modified {
-  background: #388bfd;
+  background: var(--accent);
   border-radius: 2px;
   width: 3px !important;
   margin-left: 1px;
@@ -177,15 +317,12 @@ body,
 .git-gutter-deleted {
   border-top: 4px solid transparent;
   border-bottom: 0;
-  border-left: 4px solid #f85149;
+  border-left: 4px solid var(--danger);
   width: 0 !important;
   height: 0 !important;
   margin-left: 1px;
   margin-top: 8px;
 }
-[data-theme="light"] .git-gutter-added    { background: #1a7f37; }
-[data-theme="light"] .git-gutter-modified { background: #0969da; }
-[data-theme="light"] .git-gutter-deleted  { border-left-color: #cf222e; }
 
 /* Monaco editor — Snowflake function call highlighting.
    Built-ins use the same gold as the Monarch `predefined` token so they are
@@ -206,7 +343,7 @@ body,
   white-space: nowrap;
 }
 .ctx-item:hover {
-  background: var(--bg-raised);
+  background: var(--bg-hover);
 }
 
 /* ── ReactFlow Controls theme bridge ───────────────────────────────────────
@@ -220,8 +357,8 @@ body,
   --xy-controls-button-background-color-hover: var(--bg-raised);
   --xy-controls-button-color: var(--text);
   --xy-controls-button-color-hover: var(--text);
-  --xy-controls-button-border-color: var(--border);
-  --xy-controls-box-shadow: 0 0 0 1px var(--border);
+  --xy-controls-button-border-color: var(--border-strong);
+  --xy-controls-box-shadow: 0 0 0 1px var(--border-strong);
 }
 
 /* ── Notebook debug breakpoint glyph ────────────────────────────────────── */
@@ -233,7 +370,7 @@ body,
 }
 .thaw-debug-breakpoint::before {
   content: "⬤";
-  color: #e03131;
+  color: var(--danger);
   font-size: 11px;
   line-height: 1;
 }
@@ -246,7 +383,7 @@ body,
 /* ── Notebook debug current-line highlight ───────────────────────────────── */
 .thaw-debug-current-line {
   background: rgba(255, 200, 0, 0.18) !important;
-  border-left: 2px solid #f5a623;
+  border-left: 2px solid var(--warning);
 }
 .thaw-debug-current-line-arrow {
   display: flex;
@@ -255,28 +392,28 @@ body,
 }
 .thaw-debug-current-line-arrow::before {
   content: "▶";
-  color: #f5a623;
+  color: var(--warning);
   font-size: 10px;
   line-height: 1;
 }
 
 /* ── Monaco squiggle colour overrides ───────────────────────────────────── */
-/* Match Ant Design / Thaw palette for error (#ff4d4f) and warning (#faad14) */
+/* Match the new --danger / --warning / --accent values. */
 .monaco-editor .redsquiggly {
-  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 6 3' height='3' width='6'%3E%3Cg fill='%23ff4d4f'%3E%3Cpolygon points='5.5,0 2.5,3 1.1,3 4.1,0'/%3E%3Cpolygon points='4,0 6,2 6,0.6 5.4,0'/%3E%3Cpolygon points='0,2 1,3 2.4,3 0,0.6'/%3E%3C/g%3E%3C/svg%3E") repeat-x bottom left;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 6 3' height='3' width='6'%3E%3Cg fill='%23f85149'%3E%3Cpolygon points='5.5,0 2.5,3 1.1,3 4.1,0'/%3E%3Cpolygon points='4,0 6,2 6,0.6 5.4,0'/%3E%3Cpolygon points='0,2 1,3 2.4,3 0,0.6'/%3E%3C/g%3E%3C/svg%3E") repeat-x bottom left;
 }
 .monaco-editor .yellowsquiggly {
-  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 6 3' height='3' width='6'%3E%3Cg fill='%23faad14'%3E%3Cpolygon points='5.5,0 2.5,3 1.1,3 4.1,0'/%3E%3Cpolygon points='4,0 6,2 6,0.6 5.4,0'/%3E%3Cpolygon points='0,2 1,3 2.4,3 0,0.6'/%3E%3C/g%3E%3C/svg%3E") repeat-x bottom left;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 6 3' height='3' width='6'%3E%3Cg fill='%23d29922'%3E%3Cpolygon points='5.5,0 2.5,3 1.1,3 4.1,0'/%3E%3Cpolygon points='4,0 6,2 6,0.6 5.4,0'/%3E%3Cpolygon points='0,2 1,3 2.4,3 0,0.6'/%3E%3C/g%3E%3C/svg%3E") repeat-x bottom left;
 }
 .monaco-editor .bluesquiggly {
-  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 6 3' height='3' width='6'%3E%3Cg fill='%231677ff'%3E%3Cpolygon points='5.5,0 2.5,3 1.1,3 4.1,0'/%3E%3Cpolygon points='4,0 6,2 6,0.6 5.4,0'/%3E%3Cpolygon points='0,2 1,3 2.4,3 0,0.6'/%3E%3C/g%3E%3C/svg%3E") repeat-x bottom left;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 6 3' height='3' width='6'%3E%3Cg fill='%2358a6ff'%3E%3Cpolygon points='5.5,0 2.5,3 1.1,3 4.1,0'/%3E%3Cpolygon points='4,0 6,2 6,0.6 5.4,0'/%3E%3Cpolygon points='0,2 1,3 2.4,3 0,0.6'/%3E%3C/g%3E%3C/svg%3E") repeat-x bottom left;
 }
 
 /* Monaco native hover widget — align with Thaw's tooltip theme */
 .monaco-editor .monaco-hover {
   background-color: var(--bg-overlay) !important;
-  border: 1px solid var(--border) !important;
-  color: var(--text-primary) !important;
+  border: 1px solid var(--border-strong) !important;
+  color: var(--text) !important;
 }
 .monaco-editor .monaco-hover hr {
   border-top: 1px solid var(--border);
@@ -285,4 +422,471 @@ body,
 /* Task history / status tables — highlight failed rows */
 .task-row-failed td {
   background: rgba(248, 81, 73, 0.06) !important;
+}
+
+/* ── Object browser — lock icon + title on one row ─────────────────────────
+   Antd Tree renders each node as:
+     <span .ant-tree-node-content-wrapper>
+       <span .ant-tree-iconEle>…icon…</span>
+       <span .ant-tree-title>…titleRender(node)…</span>
+     </span>
+   If anything inside titleRender uses display:block (ObjTooltip's wrapper,
+   <Typography.Text block>, etc.) the title takes 100% width and breaks to a
+   new line below the icon. Forcing the wrapper + every direct child of the
+   title to inline-flex keeps everything on one row regardless of what the
+   titleRender function returns. */
+.ant-tree .ant-tree-node-content-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;                /* required so inner text can ellipsis     */
+}
+.ant-tree .ant-tree-iconEle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px;                 /* fixed slot — keeps titles column-aligned */
+  margin-right: 0;             /* gap on the wrapper handles spacing now   */
+}
+.ant-tree .ant-tree-title {
+  display: inline-flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+.ant-tree .ant-tree-title > span,
+.ant-tree .ant-tree-title > .ant-space {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+/* Pair with the font-size normalisation from the LLM workflow patch. */
+.ant-tree .ant-tree-title,
+.ant-tree .ant-tree-title .ant-typography {
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+/* ── Notebook cell polish ─────────────────────────────────────────────── */
+
+.thaw-nb-cell {
+  position: relative;
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  border: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 0 20px 10px;
+  overflow: hidden;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  background: var(--bg-raised);
+}
+
+.thaw-nb-cell::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--cell-accent, var(--text-faint));
+  opacity: 0.85;
+}
+
+.thaw-nb-cell[data-kind="code"] { --cell-accent: var(--cell-accent-code); }
+.thaw-nb-cell[data-kind="sql"] { --cell-accent: var(--cell-accent-sql); }
+.thaw-nb-cell[data-kind="markdown"] { --cell-accent: var(--cell-accent-markdown); }
+
+.thaw-nb-cell[data-selected="true"] {
+  border-color: color-mix(in oklab, var(--cell-accent) 60%, var(--border-strong));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--cell-accent) 18%, transparent);
+}
+
+.thaw-nb-cell[data-selected="true"]::before {
+  width: 4px;
+  opacity: 1;
+}
+
+/* Left gutter — execution count + kind tag. Sits inside the accent
+   stripe (which is drawn via ::before on .thaw-nb-cell). */
+.thaw-nb-cell-gutter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 0 0;
+  background: var(--bg-raised);
+  border-right: 1px solid var(--border);
+  gap: 4px;
+  user-select: none;
+  font-family: var(--editor-font, "JetBrains Mono", monospace);
+}
+
+.thaw-nb-count {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  min-height: 14px;
+}
+
+.thaw-nb-kind-tag {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--cell-accent) 18%, transparent);
+  color: var(--cell-accent);
+  text-transform: uppercase;
+}
+
+/* The previous toolbar / editor / output rules were direct children of
+   .thaw-nb-cell. Now they need to sit inside a body wrapper so they only
+   occupy the second grid column. */
+.thaw-nb-cell-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Editor + output surfaces */
+.thaw-nb-editor-area { background: var(--cell-editor-bg); }
+.thaw-nb-output-area {
+  background: var(--cell-output-bg);
+  border-top: 1px solid var(--border);
+  padding: 8px 14px;
+}
+.thaw-nb-output-stdout { color: var(--cell-output-stdout); }
+.thaw-nb-output-stderr { color: var(--cell-output-stderr); }
+.thaw-nb-output-error  { color: var(--cell-output-error); }
+
+
+/* ── Notebook Toolbar ─────────────────────────────────────────────────── */
+
+.thaw-nb-btn-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.thaw-nb-btn-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--border);
+  margin: 0 4px;
+}
+
+.thaw-nb-icon-btn {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  transition: all 0.1s;
+}
+
+.thaw-nb-icon-btn:hover:not(:disabled) {
+  background: var(--bg-overlay);
+  color: var(--text);
+}
+
+.thaw-nb-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Nav buttons (move up / move down) — internal arrow renders larger so the
+   affordance reads cleanly at the 28px button size. */
+.thaw-nb-icon-btn.nav .anticon { font-size: 15px; }
+
+/* Run reads as the cell's primary action — wider hit target (~50% wider
+   than siblings) and a permanent tinted background. */
+.thaw-nb-icon-btn.run {
+  width: 44px;
+  color: var(--cell-accent, var(--accent));
+  background: color-mix(in oklab, var(--cell-accent, var(--accent)) 12%, transparent);
+  border-color: color-mix(in oklab, var(--cell-accent, var(--accent)) 30%, transparent);
+}
+.thaw-nb-icon-btn.run:hover:not(:disabled) {
+  background: var(--cell-accent, var(--accent));
+  color: #fff;
+  border-color: transparent;
+}
+
+.thaw-nb-icon-btn.danger:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--danger) 15%, transparent);
+  color: var(--danger);
+}
+
+.thaw-nb-btn {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.1s;
+}
+
+.thaw-nb-btn:hover:not(:disabled) {
+  background: var(--bg-overlay);
+  border-color: var(--border-strong);
+}
+
+.thaw-nb-btn.primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: transparent;
+}
+
+.thaw-nb-btn.primary:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--accent) 85%, #000);
+}
+
+/* ── Inline "add cell" bars ───────────────────────────────────────────── */
+
+/* Hover-reveal bar between cells; permanent variant below last cell */
+.thaw-nb-add-row {
+  position: relative;
+  margin: -2px 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.thaw-nb-add-line {
+  position: absolute;
+  left: 8px; right: 8px;
+  top: 50%;
+  height: 1px;
+  background: var(--border);
+  opacity: 0.65;
+  transition: opacity 0.15s ease;
+  transform: translateY(-0.5px);
+}
+.thaw-nb-add-buttons {
+  display: inline-flex;
+  gap: 6px;
+  position: relative;
+  z-index: 1;
+  background: var(--bg);
+  padding: 0 8px;
+  opacity: 0;
+  transform: translateY(2px);
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.thaw-nb-add-row:hover .thaw-nb-add-buttons,
+.thaw-nb-add-row.permanent .thaw-nb-add-buttons {
+  opacity: 1; transform: translateY(0); pointer-events: auto;
+}
+.thaw-nb-add-row:hover .thaw-nb-add-line,
+.thaw-nb-add-row.permanent .thaw-nb-add-line { opacity: 0; }
+
+.thaw-nb-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+.thaw-nb-add-btn:hover {
+  color: var(--text);
+  background: var(--bg-overlay);
+}
+.thaw-nb-add-btn[data-kind="code"]:hover     { border-color: var(--cell-accent-code); }
+.thaw-nb-add-btn[data-kind="sql"]:hover      { border-color: var(--cell-accent-sql); }
+.thaw-nb-add-btn[data-kind="markdown"]:hover { border-color: var(--cell-accent-markdown); }
+
+.thaw-nb-add-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.thaw-nb-add-btn[data-kind="code"]     .thaw-nb-add-dot { background: var(--cell-accent-code); }
+.thaw-nb-add-btn[data-kind="sql"]      .thaw-nb-add-dot { background: var(--cell-accent-sql); }
+.thaw-nb-add-btn[data-kind="markdown"] .thaw-nb-add-dot { background: var(--cell-accent-markdown); }
+
+/* ── App toolbar buttons (Toolbar.tsx) ──────────────────────────────────
+   The top toolbar's left side. Sized to read at the same height as the
+   Antd primary Run button (32px) so the row reads as a coherent strip
+   instead of a grid of tiny chips. */
+
+.thaw-tb-icon-btn,
+.thaw-tb-text-btn,
+.thaw-tb-primary-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-overlay);
+  color: var(--text);
+  white-space: nowrap;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.thaw-tb-icon-btn { width: 32px; padding: 0; }
+.thaw-tb-text-btn { padding: 0 12px 0 10px; }
+.thaw-tb-primary-btn {
+  padding: 0 14px 0 12px;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  box-shadow: 0 1px 0 rgba(0,0,0,0.18);
+}
+.thaw-tb-icon-btn:hover,
+.thaw-tb-text-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--text-faint);
+}
+.thaw-tb-primary-btn:hover { filter: brightness(1.08); }
+
+/* Cluster wrapper + separator */
+.thaw-tb-group { display: inline-flex; gap: 2px; align-items: center; }
+.thaw-tb-sep {
+  width: 1px;
+  height: 24px;
+  background: var(--border-strong);
+  opacity: 0.55;
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+
+/* Kernel status — minimal dot. Full info lives in the title tooltip. */
+.thaw-kernel-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  cursor: help;
+}
+.thaw-kernel-dot.ready .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow:
+    0 0 0 3px color-mix(in oklab, var(--success) 25%, transparent),
+    0 0 8px color-mix(in oklab, var(--success) 60%, transparent);
+}
+.thaw-kernel-dot.error .anticon    { color: var(--danger);  font-size: 14px; }
+.thaw-kernel-dot.starting .anticon { color: var(--accent); }
+
+/* ── Sidebar column icons ─────────────────────────────────────────────── */
+.thaw-col-icon {
+  color: var(--col-text); /* fallback */
+}
+.thaw-col-icon[data-family="pk"]       { color: var(--warning); }
+.thaw-col-icon[data-family="fk"]       { color: var(--link); }
+.thaw-col-icon[data-family="text"]     { color: var(--col-text); }
+.thaw-col-icon[data-family="number"]   { color: var(--col-number); }
+.thaw-col-icon[data-family="datetime"] { color: var(--col-datetime); }
+.thaw-col-icon[data-family="boolean"]  { color: var(--col-boolean); }
+.thaw-col-icon[data-family="variant"]  { color: var(--col-variant); }
+.thaw-col-icon[data-family="array"]    { color: var(--col-array); }
+.thaw-col-icon[data-family="binary"]   { color: var(--col-binary); }
+.thaw-col-icon[data-family="geo"]      { color: var(--col-geo); }
+.thaw-col-icon[data-family="vector"]   { color: var(--col-vector); }
+
+/* ── App toolbar — vertical-stack of primary action over icon row ──────
+   Used when the active tab has a "deploy"-style action (e.g. notebook).
+   The primary button sits above the row of three square buttons, sharing
+   their 100px horizontal footprint (3 × 32px + 2 × 2px gap). */
+
+.thaw-tb-vstack {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 3px;
+  flex-shrink: 0;
+}
+.thaw-tb-vstack-row {
+  display: inline-flex;
+  gap: 2px;
+}
+
+/* The three icon buttons in the bottom row — narrower height than the
+   stand-alone .thaw-tb-icon-btn so the total stack stays compact. */
+.thaw-tb-vstack-icon {
+  width: 32px;
+  height: 22px;
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  border-radius: 5px;
+  cursor: pointer;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.thaw-tb-vstack-icon:hover {
+  background: var(--bg-hover);
+  border-color: var(--text-faint);
+}
+
+/* The primary action — full width of the row below. */
+.thaw-tb-vstack-primary {
+  width: 100px;                 /* = 3 × 32 + 2 × 2 gap */
+  height: 22px;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: #fff;
+  border-radius: 5px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  box-shadow: 0 1px 0 rgba(0,0,0,0.18);
+  transition: filter 0.12s ease;
+}
+.thaw-tb-vstack-primary:hover { filter: brightness(1.08); }
+
+/* ── ER Diagram: intermediate table node in a join path ────────────────
+   !important is required because ERTableNode.tsx sets border styles via
+   inline `style` props (which have higher specificity than class rules).
+   XYFlow does not expose a className-based styling API for custom nodes,
+   so overriding inline styles is the only option without refactoring the
+   node component itself.
+   ──────────────────────────────────────────────────────────────────────── */
+.react-flow__node.er-intermediate > div {
+  border-style: dashed !important;
+  border-color: var(--accent) !important;
+}
+
+/* ── ER Diagram: join path disambiguation option hover ───────────────── */
+.er-join-path-option {
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.er-join-path-option:hover {
+  border-color: var(--accent) !important;
+  background: var(--bg-overlay);
 }

@@ -66,6 +66,10 @@ var plistFeatureKeys = []plistFeatureKey{
 	{"DisableExplainSQL", func(c *adminConfigJSON, v bool) { c.PerformanceDiagnostics.ExplainSQL = boolPtr(!v) }},
 
 	{"DisableSnowflakeCLIProfileManager", func(c *adminConfigJSON, v bool) { c.Connection.SnowflakeCLIProfileManager = boolPtr(!v) }},
+
+	{"DisableColumnManagement", func(c *adminConfigJSON, v bool) { c.SchemaManagement.ColumnManagement = boolPtr(!v) }},
+
+	{"DisableMCPServer", func(c *adminConfigJSON, v bool) { c.Integrations.MCPServer = boolPtr(!v) }},
 }
 
 func boolPtr(b bool) *bool { return &b }

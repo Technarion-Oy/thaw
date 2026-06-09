@@ -18,7 +18,6 @@ import {
   EyeOutlined,
   FunctionOutlined,
   CodeOutlined,
-  OrderedListOutlined,
   InboxOutlined,
   ApiOutlined,
   ClockCircleOutlined,
@@ -49,21 +48,26 @@ import {
   RightOutlined,
   ShareAltOutlined,
   ExperimentOutlined,
+  BuildOutlined,
   DashboardOutlined,
   SyncOutlined,
   KeyOutlined,
-  LinkOutlined,
-  LineOutlined,
   DisconnectOutlined,
   BranchesOutlined,
   CloseOutlined,
 } from "@ant-design/icons";
-import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import {
+  objectIcon,
+  databaseIcon,
+  schemaIcon,
+  typeGroupIcon,
+  columnIcon,
+} from "../sidebar/objectIcons";
+import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, UploadFileToStage, PickOpenFile, ExecDDL } from "../../../wailsjs/go/main/App";
-import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
-import type { main } from "../../../wailsjs/go/models";
+import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, UploadFileToStage, PickOpenFile, ExecDDL, ListStageEntries, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory, BuildDropColumnSql, BuildRenameColumnSql, BuildSetColumnNotNullSql, BuildDropColumnNotNullSql, BuildSetColumnCommentSql, BuildChangeColumnTypeSql } from "../../../wailsjs/go/app/App";
+import ObjectNameCaseControl, { identToken, quoteIdent } from "../shared/ObjectNameCaseControl";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
 import { insertAtCursor } from "../editor/editorRef";
@@ -80,6 +84,8 @@ import SelectFunctionModal from "../function/SelectFunctionModal";
 import CreateTaskModal from "../task/CreateTaskModal";
 import CreateDatabaseModal from "../database/CreateDatabaseModal";
 import CreateTableModal from "../database/CreateTableModal";
+import AddColumnModal from "../database/AddColumnModal";
+import DataTypeSelect from "../shared/DataTypeSelect";
 import CreateFileFormatModal from "../database/CreateFileFormatModal";
 import ObjectSummariesModal from "../database/ObjectSummariesModal";
 import ExecuteTaskModal from "../task/ExecuteTaskModal";
@@ -88,6 +94,7 @@ import TaskHistoryModal from "../task/TaskHistoryModal";
 import TaskPropertiesModal from "../task/TaskPropertiesModal";
 import TaskStatusesModal from "../task/TaskStatusesModal";
 import ERDiagramModal from "../er/ERDiagramModal";
+import ERDesigner from "../er/ERDesigner";
 import ExportTableModal from "../export/ExportTableModal";
 import ImportTableModal from "../export/ImportTableModal";
 import PropertiesModal from "../common/PropertiesModal";
@@ -107,6 +114,10 @@ import PipeStatusModal from "../pipe/PipeStatusModal";
 import CreateStageModal from "../database/CreateStageModal";
 import StagePropertiesModal from "../database/StagePropertiesModal";
 import StageBrowserModal from "../database/StageBrowserModal";
+import CreateDbtProjectModal from "../dbtproject/CreateDbtProjectModal";
+import ExecuteDbtProjectModal from "../dbtproject/ExecuteDbtProjectModal";
+import ModifyDbtProjectModal from "../dbtproject/ModifyDbtProjectModal";
+import AddDbtProjectVersionModal from "../dbtproject/AddDbtProjectVersionModal";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 
 const { Text } = Typography;
@@ -125,38 +136,24 @@ const KIND_LABEL: Record<string, string> = {
   NOTEBOOK:      "Notebooks",
   SECRET:        "Secrets",
   "GIT REPOSITORY": "Git Repositories",
+  "DBT PROJECT": "DBT Projects",
 };
 
-const KIND_ORDER = ["TABLE", "VIEW", "FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY"];
+const KIND_ORDER = ["TABLE", "VIEW", "FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT"];
 
-function kindIcon(kind: string) {
-  switch (kind) {
-    case "TABLE":       return <TableOutlined />;
-    case "VIEW":        return <EyeOutlined />;
-    case "FUNCTION":    return <FunctionOutlined />;
-    case "PROCEDURE":   return <CodeOutlined />;
-    case "SEQUENCE":    return <OrderedListOutlined />;
-    case "STAGE":       return <InboxOutlined />;
-    case "STREAM":      return <ApiOutlined />;
-    case "TASK":        return <ClockCircleOutlined />;
-    case "FILE FORMAT": return <FileOutlined />;
-    case "PIPE":        return <ApiOutlined />;
-    case "NOTEBOOK":    return <ExperimentOutlined />;
-    case "SECRET":          return <KeyOutlined />;
-    case "GIT REPOSITORY":  return <BranchesOutlined />;
-    default:                return <FileOutlined />;
-  }
-}
+const kindIcon = (kind: string) => objectIcon(kind);
 
 interface ContextMenu {
   x: number;
   y: number;
   nodeKey: string;
-  nodeType: "db" | "schema" | "type" | "obj" | "gitcommits" | "gitdir" | "gitfile";
+  // dbtfile is intentionally absent — DBT files have no context menu actions
+  nodeType: "db" | "schema" | "type" | "obj" | "col" | "gitcommits" | "gitdir" | "gitfile" | "stagedir" | "stagefile" | "dbtversion" | "dbtdir";
   objKind?: string;     // set for nodeType === "type" or "obj"
   objArgs?: string;     // parameter type list for PROCEDURE / FUNCTION
   isFinalizer?: boolean; // true when right-clicking a finalizer TASK node
   isRootTask?: boolean;  // true when right-clicking a root-level TASK node (no predecessors, not a finalizer)
+  colMeta?: { dataType: string; nullable: boolean; isPrimaryKey: boolean; parentKind: string; comment: string }; // set for nodeType === "col"
 }
 
 interface UndropModal {
@@ -223,7 +220,14 @@ function removeNode(nodes: DataNode[], targetKey: string): DataNode[] {
     .filter((node) => node.key !== targetKey)
     .map((node) => {
       if ((node as any).children) {
-        return { ...node, children: removeNode((node as any).children, targetKey) };
+        const updated = removeNode((node as any).children, targetKey);
+        // If the last child was removed, strip children entirely so
+        // loadData re-triggers on the next expand (re-fetches from server).
+        if (updated.length === 0) {
+          const { children, ...rest } = node as any;
+          return rest;
+        }
+        return { ...node, children: updated };
       }
       return node;
     });
@@ -425,6 +429,43 @@ function ObjTooltip({ cacheKey, db, schema, kind, name, args, children }: {
   );
 }
 
+// --- Pure helpers for tree node construction (module-level to avoid re-creation per render) ---
+
+// Parses keys in the format prefix:DB:SCHEMA:NAME:path (stagefile, stagedir, dbtdir, dbtversion).
+// Currently used for stage file actions (execute, download, delete, upload) and stageFileIsSql.
+function parseStageOrDbtKey(menu: ContextMenu | null): { db: string; schema: string; name: string; path: string } | null {
+  if (!menu) return null;
+  const parts = menu.nodeKey.split(":");
+  if (parts.length < 4) return null;
+  return { db: parts[1], schema: parts[2], name: parts[3], path: parts.slice(4).join(":") };
+}
+
+function buildEntryNodes(
+  db: string, schema: string, name: string, entries: snowflake.GitRepoEntry[],
+  dirPrefix: string, filePrefix: string,
+): DataNode[] {
+  return entries.map((e) => ({
+    title: e.name,
+    key: `${e.isDir ? dirPrefix : filePrefix}:${db}:${schema}:${name}:${e.path}`,
+    icon: e.isDir
+      ? <FolderOutlined style={{ color: "var(--text-muted)" }} />
+      : <FileOutlined style={{ color: "var(--text-muted)", fontSize: "10px" }} />,
+    isLeaf: !e.isDir,
+  }));
+}
+
+function emptyChildNode(parentKey: string): DataNode {
+  return {
+    title: (
+      <Text type="secondary" style={{ fontStyle: "italic", fontSize: 11 }}>
+        (empty)
+      </Text>
+    ),
+    key: `empty:${parentKey}`,
+    isLeaf: true,
+  };
+}
+
 export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel?: boolean }) {
   const { modal, message: contextMsg } = AntApp.useApp();
   const [treeData, setTreeData] = useState<DataNode[]>([]);
@@ -443,6 +484,11 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [executeNotebookModal, setExecuteNotebookModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createDbOpen, setCreateDbOpen] = useState(false);
   const [createTableModal, setCreateTableModal] = useState<{ db: string; schema: string } | null>(null);
+  const [addColumnModal, setAddColumnModal] = useState<{ db: string; schema: string; table: string } | null>(null);
+  const [renameColumnModal, setRenameColumnModal] = useState<{ db: string; schema: string; table: string; oldName: string; newName: string; caseSensitive: boolean } | null>(null);
+  const [renameColQiic, setRenameColQiic] = useState(false);
+  const [columnCommentModal, setColumnCommentModal] = useState<{ db: string; schema: string; table: string; column: string; comment: string } | null>(null);
+  const [changeDataTypeModal, setChangeDataTypeModal] = useState<{ db: string; schema: string; table: string; column: string; dataType: string } | null>(null);
   const [createStageModal, setCreateStageModal] = useState<{ db: string; schema: string } | null>(null);
   const [stagePropertiesModal, setStagePropertiesModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [stageBrowserModal, setStageBrowserModal] = useState<{ db: string; schema: string; name: string } | null>(null);
@@ -452,6 +498,10 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [createGitRepoModal, setCreateGitRepoModal] = useState<{ db: string; schema: string } | null>(null);
   const [modifyGitRepoModal, setModifyGitRepoModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [gitCommitFilterModal, setGitCommitFilterModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [createDbtProjectModal, setCreateDbtProjectModal] = useState<{ db: string; schema: string } | null>(null);
+  const [executeDbtProjectModal, setExecuteDbtProjectModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [modifyDbtProjectModal, setModifyDbtProjectModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [addDbtProjectVersionModal, setAddDbtProjectVersionModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createPipeModal, setCreatePipeModal] = useState<{ db: string; schema: string } | null>(null);
   const [pipePropsModal, setPipePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [refreshPipeModal, setRefreshPipeModal] = useState<{ db: string; schema: string; name: string } | null>(null);
@@ -471,7 +521,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [renameQiic, setRenameQiic]   = useState(false);
   const [timeTravelModal, setTimeTravelModal] = useState<TimeTravelModal | null>(null);
   const [erModal, setErModal] = useState<{ database: string; data: snowflake.ERDiagramData } | null>(null);
-  const [propsModal, setPropsModal] = useState<{ title: string; rows: main.PropertyPair[] | null; error: string | null; tableContext?: { db: string; schema: string; table: string } } | null>(null);
+  const [mcpErDesigner, setMcpErDesigner] = useState<{ database: string; merged: snowflake.ERDiagramData; baseline: snowflake.ERDiagramData } | null>(null);
+  const [propsModal, setPropsModal] = useState<{ title: string; rows: snowflake.PropertyPair[] | null; error: string | null; tableContext?: { db: string; schema: string; table: string } } | null>(null);
   const [exportModal, setExportModal] = useState<{ db: string; schema: string; table: string } | null>(null);
   const [importModal, setImportModal] = useState<{ db: string; schema: string; table: string } | null>(null);
   const [backupSetsModal, setBackupSetsModal] = useState<{ scopeType: "DATABASE" | "SCHEMA" | "TABLE"; db: string; schema: string; table: string } | null>(null);
@@ -513,6 +564,22 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     prevConnectedRef.current = isConnected;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConnected]);
+
+  // MCP open_task_graph — opens the task graph modal from an MCP tool call.
+  useEffect(() => {
+    const off = EventsOn("mcp:open-task-graph", (payload: { database: string; schema: string; task: string }) => {
+      setTaskGraphModal({ db: payload.database, schema: payload.schema, name: payload.task });
+    });
+    return () => off();
+  }, []);
+
+  // MCP open_er_designer — opens the ER designer pre-populated with AI-generated tables.
+  useEffect(() => {
+    const off = EventsOn("mcp:open-er-designer", (payload: { database: string; merged: snowflake.ERDiagramData; baseline: snowflake.ERDiagramData }) => {
+      setMcpErDesigner({ database: payload.database, merged: payload.merged, baseline: payload.baseline });
+    });
+    return () => off();
+  }, []);
 
   const insertTarget    = useInsertMappingStore((s) => s.target);
   const insertSources   = useInsertMappingStore((s) => s.sources);
@@ -586,12 +653,16 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     if (waiting) return; // re-runs when searchResults gains schema children
 
     // Step 4: trigger object loads for schema nodes without children.
+    // NOTE: basicOnly=true means only TABLEs, VIEWs, and SEQUENCEs are
+    // searched. Extended types (PROCEDURE, FUNCTION, TASK, STREAM, STAGE,
+    // etc.) won't appear in search results. This is a deliberate trade-off:
+    // 1 query per schema instead of 11.
     for (const dbNode of searchResults) {
       for (const schemaNode of ((dbNode as any).children ?? []) as DataNode[]) {
         const key = String(schemaNode.key);
         if (!(schemaNode as any).children && !loadingNodes.current.has(key)) {
           loadingNodes.current.add(key);
-          onLoadData(schemaNode as any, setSearchResults).finally(() => loadingNodes.current.delete(key));
+          onLoadData(schemaNode as any, setSearchResults, true).finally(() => loadingNodes.current.delete(key));
           waiting = true;
         }
       }
@@ -606,6 +677,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const displayData = useMemo(
     () => (searchQuery ? filterTree(searchResults, searchQuery) : treeData),
     [searchResults, treeData, searchQuery],
+  );
+
+  // Derived flag: is the right-clicked stage file a .sql file? Used to gate Execute File and the divider.
+  const stageFileIsSql = useMemo(
+    () => ctxMenu?.nodeType === "stagefile" && parseStageOrDbtKey(ctxMenu)?.path.toLowerCase().endsWith(".sql"),
+    [ctxMenu],
   );
 
   // Clamp context menu inside the viewport (runs before browser paint — no flash)
@@ -628,7 +705,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         dbs.map((db) => ({
           title: db,
           key: `db:${db}`,
-          icon: <DatabaseOutlined />,
+          icon: databaseIcon(),
           isLeaf: false,
         }))
       );
@@ -647,7 +724,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     doLoadDatabases();
   };
 
-  const refreshAllDatabases = () => {
+  const refreshAllDatabases = async () => {
+    await ClearObjectCache();
     setLoaded(false);
     setTreeData([]);
     setSearchQuery("");
@@ -663,9 +741,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
 
   // commit is setSearchResults when called from the cascade; omitted (→ setTreeData)
   // for user-triggered tree expansion. Cascade results never touch treeData.
+  // basicOnly skips extended object types (PROCEDURE, FUNCTION, TASK, etc.)
+  // for faster loading during the search cascade.
   const onLoadData = async (
     node: DataNode & { children?: DataNode[] },
     commit?: React.Dispatch<React.SetStateAction<DataNode[]>>,
+    basicOnly?: boolean,
   ) => {
     if (node.children) return;
     const key    = String(node.key);
@@ -681,7 +762,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           updateNode(prev, key, schemas.map((s) => ({
             title:  s,
             key:    `schema:${db}:${s}`,
-            icon:   <FolderOutlined />,
+            icon:   schemaIcon(),
             isLeaf: false,
           })))
         );
@@ -697,7 +778,17 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       const [, db, schema] = parts;
       setLoadingTreeNodes((prev) => { const s = new Set(prev); s.add(key); return s; });
       try {
-        const objects = await ListObjects(db, schema);
+        // When in search cascade mode (basicOnly), check if objectStore already
+        // has objects for this schema from a prior normal expansion. This avoids
+        // any IPC call and includes all object types (procedures, tasks, etc.).
+        const cached = basicOnly
+          ? useObjectStore.getState().objects.filter((o) => o.db === db && o.schema === schema)
+          : [];
+        const objects = cached.length > 0
+          ? cached.map((o) => ({ name: o.name, kind: o.kind })) as snowflake.SnowflakeObject[]
+          : basicOnly
+            ? await ListBasicObjects(db, schema)
+            : await ListObjects(db, schema);
 
         const groups: Record<string, typeof objects> = {};
         for (const obj of objects) {
@@ -705,6 +796,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           if (!groups[k]) groups[k] = [];
           groups[k].push(obj);
         }
+
+        // Filter out gated object types
+        if (!featureFlags.dbtProjectBrowser) delete groups["DBT PROJECT"];
 
         const sortedKinds = [
           ...KIND_ORDER.filter((k) => groups[k]),
@@ -714,14 +808,14 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         const typeNodes: DataNode[] = sortedKinds.map((kind) => ({
           title:    KIND_LABEL[kind] ?? kind,
           key:      `type:${db}:${schema}:${kind}`,
-          icon:     <FolderOutlined style={{ color: "var(--text-muted)" }} />,
+          icon:     typeGroupIcon(),
           children: kind === "TASK"
             ? buildTaskTree(groups[kind], db, schema)
             : groups[kind].map((o) => ({
                 title:     o.name,
                 key:       `obj:${db}:${schema}:${kind}:${o.name}`,
                 icon:      kindIcon(kind),
-                isLeaf:    kind !== "TABLE" && kind !== "VIEW" && kind !== "GIT REPOSITORY",
+                isLeaf:    kind !== "TABLE" && kind !== "VIEW" && kind !== "GIT REPOSITORY" && kind !== "STAGE" && kind !== "DBT PROJECT",
                 arguments: o.arguments ?? "",
                 rowCount:  o.rowCount,
               })),
@@ -760,27 +854,42 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             const isPK = c.isPrimaryKey;
             const fk = fkMap.get(c.name);
 
-            let icon = <LineOutlined style={{ color: "var(--text-muted)", fontSize: "10px" }} />;
-            if (isPK) icon = <KeyOutlined style={{ color: "#faad14" }} />;
-            else if (fk) icon = <LinkOutlined style={{ color: "#1890ff" }} />;
-
             const title = (
               <span style={{ display: "flex", alignItems: "center", width: "100%", overflow: "hidden" }}>
                 <Text style={{ fontSize: "12px" }} ellipsis>
                   {c.name}
-                  <Text type="secondary" style={{ fontSize: "10px", marginLeft: "4px", fontStyle: "italic" }}>
-                    ({c.dataType.toLowerCase().replace("(16777216)", "")})
-                    {fk && ` → ${fk.pkTable}`}
-                  </Text>
+                  {fk && (
+                    <Text type="secondary" style={{ fontSize: "10px", marginLeft: "4px", fontStyle: "italic" }}>
+                      → {fk.pkTable}
+                    </Text>
+                  )}
                 </Text>
+                <span style={{
+                  marginLeft: "auto",
+                  fontSize: 10,
+                  color: "var(--text-faint)",
+                  fontFamily: "var(--editor-font, monospace)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.04em",
+                }}>
+                  {c.dataType.split("(")[0]}
+                </span>
               </span>
             );
 
             return {
               title,
               key: `col:${db}:${schema}:${name}:${c.name}`,
-              icon,
+              icon: columnIcon(c.dataType, {
+                primaryKey: isPK,
+                foreignKey: !!fk,
+              }),
               isLeaf: true,
+              colDataType: c.dataType,
+              colNullable: c.nullable,
+              colIsPrimaryKey: isPK,
+              colParentKind: kind,
+              colComment: c.comment,
             };
           });
 
@@ -813,6 +922,39 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           },
         ];
         setData((prev) => updateNode(prev, key, typeNodes));
+      } else if (kind === "STAGE") {
+        setLoadingGitNodes((prev) => { const s = new Set(prev); s.add(key); return s; });
+        try {
+          const entries = await ListStageEntries(db, schema, name, "");
+          const nodes = buildEntryNodes(db, schema, name, entries ?? [], "stagedir", "stagefile");
+          setData((prev) => updateNode(prev, key, nodes.length ? nodes : [emptyChildNode(key)]));
+        } catch (e) {
+          console.error(e);
+          setData((prev) => clearNodeChildren(prev, key));
+        } finally {
+          setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
+        }
+      } else if (kind === "DBT PROJECT") {
+        setLoadingGitNodes((prev) => { const s = new Set(prev); s.add(key); return s; });
+        try {
+          const versions = await ListDbtProjectVersions(db, schema, name);
+          const nodes: DataNode[] = (versions ?? []).map((v) => {
+            const badge = v.isDefault ? " (default)" : "";
+            const label = v.alias ? `${v.version} — ${v.alias}${badge}` : `${v.version}${badge}`;
+            return {
+              title: label,
+              key: `dbtversion:${db}:${schema}:${name}:${v.version}`,
+              icon: <FolderOutlined style={{ color: "var(--text-muted)" }} />,
+              isLeaf: false,
+            };
+          });
+          setData((prev) => updateNode(prev, key, nodes.length ? nodes : [emptyChildNode(key)]));
+        } catch (e) {
+          console.error(e);
+          setData((prev) => clearNodeChildren(prev, key));
+        } finally {
+          setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
+        }
       }
     } else if (parts[0] === "gitbranches") {
       const db     = parts[1];
@@ -830,7 +972,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         setData((prev) => updateNode(prev, key, items.length ? items : [gitEmptyNode(key)]));
       } catch (e) {
         console.error(e);
-        setData((prev) => updateNode(prev, key, []));
+        setData((prev) => clearNodeChildren(prev, key));
       } finally {
         setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
       }
@@ -850,7 +992,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         setData((prev) => updateNode(prev, key, items.length ? items : [gitEmptyNode(key)]));
       } catch (e) {
         console.error(e);
-        setData((prev) => updateNode(prev, key, []));
+        setData((prev) => clearNodeChildren(prev, key));
       } finally {
         setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
       }
@@ -888,7 +1030,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         }
       } catch (e) {
         console.error(e);
-        setData((prev) => updateNode(prev, key, []));
+        setData((prev) => clearNodeChildren(prev, key));
       } finally {
         setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
       }
@@ -904,7 +1046,57 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         setData((prev) => updateNode(prev, key, nodes.length ? nodes : [gitEmptyNode(key)]));
       } catch (e) {
         console.error(e);
-        setData((prev) => updateNode(prev, key, []));
+        setData((prev) => clearNodeChildren(prev, key));
+      } finally {
+        setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
+      }
+    } else if (parts[0] === "stagedir") {
+      const db        = parts[1];
+      const schema    = parts[2];
+      const stageName = parts[3];
+      const dirPath   = parts.slice(4).join(":");
+      setLoadingGitNodes((prev) => { const s = new Set(prev); s.add(key); return s; });
+      try {
+        const entries = await ListStageEntries(db, schema, stageName, dirPath);
+        const nodes = buildEntryNodes(db, schema, stageName, entries ?? [], "stagedir", "stagefile");
+        setData((prev) => updateNode(prev, key, nodes.length ? nodes : [emptyChildNode(key)]));
+      } catch (e) {
+        console.error(e);
+        setData((prev) => clearNodeChildren(prev, key));
+      } finally {
+        setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
+      }
+    } else if (parts[0] === "dbtversion") {
+      const db      = parts[1];
+      const schema  = parts[2];
+      const dbtName = parts[3];
+      const version = parts.slice(4).join(":");
+      setLoadingGitNodes((prev) => { const s = new Set(prev); s.add(key); return s; });
+      try {
+        // Snowflake-native DBT PROJECTs store files under @project/versions/<N>/…
+        // (observed from SHOW VERSIONS IN DBT PROJECT and LIST @project output)
+        const entries = await ListDbtProjectEntries(db, schema, dbtName, `versions/${version}/`);
+        const nodes = buildEntryNodes(db, schema, dbtName, entries ?? [], "dbtdir", "dbtfile");
+        setData((prev) => updateNode(prev, key, nodes.length ? nodes : [emptyChildNode(key)]));
+      } catch (e) {
+        console.error(e);
+        setData((prev) => clearNodeChildren(prev, key));
+      } finally {
+        setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
+      }
+    } else if (parts[0] === "dbtdir") {
+      const db      = parts[1];
+      const schema  = parts[2];
+      const dbtName = parts[3];
+      const dirPath = parts.slice(4).join(":");
+      setLoadingGitNodes((prev) => { const s = new Set(prev); s.add(key); return s; });
+      try {
+        const entries = await ListDbtProjectEntries(db, schema, dbtName, dirPath);
+        const nodes = buildEntryNodes(db, schema, dbtName, entries ?? [], "dbtdir", "dbtfile");
+        setData((prev) => updateNode(prev, key, nodes.length ? nodes : [emptyChildNode(key)]));
+      } catch (e) {
+        console.error(e);
+        setData((prev) => clearNodeChildren(prev, key));
       } finally {
         setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
       }
@@ -970,10 +1162,28 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "gitdir" });
     } else if (key.startsWith("gitfile:")) {
       setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "gitfile" });
+    } else if (key.startsWith("stagedir:")) {
+      setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "stagedir" });
+    } else if (key.startsWith("stagefile:")) {
+      setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "stagefile" });
+    } else if (key.startsWith("dbtversion:")) {
+      setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "dbtversion" });
+    } else if (key.startsWith("dbtdir:")) {
+      setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "dbtdir" });
+    } else if (key.startsWith("col:")) {
+      const colMeta = {
+        dataType: (node as any).colDataType ?? "",
+        nullable: !!(node as any).colNullable,
+        isPrimaryKey: !!(node as any).colIsPrimaryKey,
+        parentKind: (node as any).colParentKind ?? "",
+        comment: (node as any).colComment ?? "",
+      };
+      setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "col", colMeta });
     }
   };
 
-  const refreshDatabaseByName = (db: string) => {
+  const refreshDatabaseByName = async (db: string) => {
+    await ClearObjectCacheForDatabase(db);
     const dbKey = `db:${db}`;
     useObjectStore.getState().clearDatabase(db);
     // Stripping the children array is enough: onExpand will re-trigger
@@ -1259,6 +1469,65 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setModifyGitRepoModal({ db, schema, name });
   };
 
+  const openCreateDbtProject = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    setCtxMenu(null);
+    setCreateDbtProjectModal({ db, schema });
+  };
+
+  const openExecuteDbtProject = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts[4];
+    setCtxMenu(null);
+    setExecuteDbtProjectModal({ db, schema, name });
+  };
+
+  const openModifyDbtProject = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts[4];
+    setCtxMenu(null);
+    setModifyDbtProjectModal({ db, schema, name });
+  };
+
+  const openAddDbtProjectVersion = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts[4];
+    setCtxMenu(null);
+    setAddDbtProjectVersionModal({ db, schema, name });
+  };
+
+  const showDbtProjectVersions = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts[4];
+    setCtxMenu(null);
+    useQueryStore.getState().executeInNewTab(`SHOW VERSIONS IN DBT PROJECT ${quoteIdent(db)}.${quoteIdent(schema)}.${quoteIdent(name)};`);
+  };
+
+  const describeDbtProject = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts[4];
+    setCtxMenu(null);
+    useQueryStore.getState().executeInNewTab(`DESCRIBE DBT PROJECT ${quoteIdent(db)}.${quoteIdent(schema)}.${quoteIdent(name)};`);
+  };
+
   const openCreatePipe = () => {
     if (!ctxMenu) return;
     const parts = ctxMenu.nodeKey.split(":");
@@ -1383,7 +1652,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     message.success("Commit filter cleared");
   };
 
-  const refreshGitNode = () => {
+  const refreshTreeNode = () => {
     if (!ctxMenu) return;
     const key = ctxMenu.nodeKey;
     setCtxMenu(null);
@@ -1428,6 +1697,102 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     }
   };
 
+
+  // --- Stage file action handlers ---
+
+  const executeStageFile = async () => {
+    const k = parseStageOrDbtKey(ctxMenu);
+    if (!k) return;
+    setCtxMenu(null);
+    const hide = message.loading(`Executing ${k.path}…`, 0);
+    try {
+      await ExecuteStageFile(k.db, k.schema, k.name, k.path);
+      message.success(`${k.path} executed successfully`);
+    } catch (e) {
+      message.error(String(e));
+    } finally {
+      hide();
+    }
+  };
+
+  const downloadStageFile = async () => {
+    const k = parseStageOrDbtKey(ctxMenu);
+    if (!k) return;
+    setCtxMenu(null);
+    const localPath = await PickDirectory();
+    if (!localPath) return;
+    const stageRef = `@${quoteIdent(k.db)}.${quoteIdent(k.schema)}.${quoteIdent(k.name)}/${k.path}`;
+    const hide = message.loading(`Downloading ${k.path}…`, 0);
+    try {
+      await DownloadFileFromStage(stageRef, localPath, 4, "");
+      message.success(`Downloaded ${k.path} successfully.`);
+    } catch (e) {
+      message.error(`Failed to download file: ${String(e)}`);
+    } finally {
+      hide();
+    }
+  };
+
+  const deleteStageFile = () => {
+    const k = parseStageOrDbtKey(ctxMenu);
+    if (!k) return;
+    const fileKey = ctxMenu!.nodeKey;
+    setCtxMenu(null);
+    const stageRef = `@${quoteIdent(k.db)}.${quoteIdent(k.schema)}.${quoteIdent(k.name)}/${k.path}`;
+    modal.confirm({
+      title: "Delete Stage File",
+      content: `Are you sure you want to delete ${k.path}?`,
+      okText: "Delete",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        const hide = message.loading(`Deleting ${k.path}…`, 0);
+        try {
+          await RemoveStageFiles(stageRef, "");
+          message.success(`${k.path} deleted.`);
+          setTreeData((prev) => removeNode(prev, fileKey));
+        } catch (e) {
+          message.error(`Failed to delete: ${String(e)}`);
+        } finally {
+          hide();
+        }
+      },
+    });
+  };
+
+  const uploadToStageDir = async () => {
+    const k = parseStageOrDbtKey(ctxMenu);
+    if (!k) return;
+    const nodeKey = ctxMenu!.nodeKey;
+    setCtxMenu(null);
+    const localPath = await PickOpenFile();
+    if (!localPath) return;
+    const stageRef = `@${quoteIdent(k.db)}.${quoteIdent(k.schema)}.${quoteIdent(k.name)}/${k.path}`;
+    const hide = message.loading(`Uploading to ${k.name}/${k.path}…`, 0);
+    try {
+      await UploadFileToStage(localPath, stageRef, 4, true, "AUTO_DETECT", true);
+      message.success(`Uploaded successfully.`);
+    } catch (e) {
+      message.error(`Failed to upload file: ${String(e)}`);
+      return; // Skip re-fetch on upload failure
+    } finally {
+      hide();
+    }
+    // Re-fetch directory contents so the new file appears without collapsing.
+    // Separated from the upload try/catch so a re-fetch failure doesn't show
+    // the misleading "Failed to upload" message.
+    try {
+      const entries = await ListStageEntries(k.db, k.schema, k.name, k.path);
+      const nodes = buildEntryNodes(k.db, k.schema, k.name, entries ?? [], "stagedir", "stagefile");
+      setTreeData((prev) => updateNode(prev, nodeKey, nodes.length ? nodes : [emptyChildNode(nodeKey)]));
+    } catch (e) {
+      console.error("Failed to refresh directory after upload:", e);
+      // Fall back to clearing children so the next expand re-fetches
+      setTreeData((prev) => clearNodeChildren(prev, nodeKey));
+    }
+  };
+
+  // --- DBT Project file action handlers ---
+
   const fetchGitRepository = async () => {
     if (!ctxMenu) return;
     const parts = ctxMenu.nodeKey.split(":");
@@ -1439,7 +1804,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const sql = `ALTER GIT REPOSITORY ${q(db)}.${q(schema)}.${q(name)} FETCH;`;
     const hide = message.loading("Fetching repository…", 0);
     try {
-      const { ExecDDL } = await import("../../../wailsjs/go/main/App");
+      const { ExecDDL } = await import("../../../wailsjs/go/app/App");
       await ExecDDL(sql);
       hide();
       message.success("Repository fetched successfully");
@@ -1730,6 +2095,168 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     } catch (e) {
       message.error(String(e));
     }
+  };
+
+  // ── Column context menu handlers ──────────────────────────────────────────
+
+  // Refresh only the columns of a specific table (surgical — no full DB refresh).
+  const refreshTableColumns = (db: string, schema: string, table: string) => {
+    // The "TABLE" kind is hardcoded because every caller is a column ALTER
+    // action, which Snowflake only permits on tables (never views). If this is
+    // ever reused for view columns, the obj: key prefix must use the right kind.
+    const tableKey = `obj:${db}:${schema}:TABLE:${table}`;
+    setTreeData((prev) => clearNodeChildren(prev, tableKey));
+  };
+
+  // Helper to parse col: key → { db, schema, table, column }
+  const parseColKey = (key: string) => {
+    // key format: col:DB:SCHEMA:TABLE:COLUMN
+    const [, db, schema, table, ...colParts] = key.split(":");
+    return { db, schema, table, column: colParts.join(":") };
+  };
+
+  const openAddColumnModal = () => {
+    if (!ctxMenu) return;
+    // Can be called from TABLE obj: node or col: node
+    if (ctxMenu.nodeType === "obj") {
+      const [, db, schema, , ...nameParts] = ctxMenu.nodeKey.split(":");
+      setCtxMenu(null);
+      setAddColumnModal({ db, schema, table: nameParts.join(":") });
+    } else if (ctxMenu.nodeType === "col") {
+      const { db, schema, table } = parseColKey(ctxMenu.nodeKey);
+      setCtxMenu(null);
+      setAddColumnModal({ db, schema, table });
+    }
+  };
+
+  const dropColumn = () => {
+    if (!ctxMenu) return;
+    const { db, schema, table, column } = parseColKey(ctxMenu.nodeKey);
+    setCtxMenu(null);
+
+    modal.confirm({
+      title: `Drop column "${column}"?`,
+      content: `This will permanently remove column "${column}" from ${db}.${schema}.${table}. This action cannot be undone.`,
+      okText: "Drop",
+      okType: "danger",
+      cancelText: "Cancel",
+      onOk: async () => {
+        try {
+          await ExecDDL(await BuildDropColumnSql(db, schema, table, column));
+          message.success(`Dropped column "${column}"`);
+          refreshTableColumns(db, schema, table);
+        } catch (e) {
+          message.error(String(e));
+        }
+      },
+    });
+  };
+
+  const openRenameColumn = () => {
+    if (!ctxMenu) return;
+    const { db, schema, table, column } = parseColKey(ctxMenu.nodeKey);
+    setCtxMenu(null);
+    setRenameColumnModal({ db, schema, table, oldName: column, newName: column, caseSensitive: false });
+    setRenameColQiic(false);
+    GetQuotedIdentifiersIgnoreCase().then((v) => setRenameColQiic(v ?? false)).catch(() => {});
+  };
+
+  const executeRenameColumn = async () => {
+    if (!renameColumnModal) return;
+    const { db, schema, table, oldName, newName, caseSensitive } = renameColumnModal;
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName) {
+      setRenameColumnModal(null);
+      return;
+    }
+    setRenameColumnModal(null);
+    try {
+      await ExecDDL(await BuildRenameColumnSql(db, schema, table, oldName, trimmed, caseSensitive));
+      message.success(`Renamed column "${oldName}" to "${trimmed}"`);
+      refreshTableColumns(db, schema, table);
+    } catch (e) {
+      message.error(String(e));
+    }
+  };
+
+  const setColumnNotNull = async () => {
+    if (!ctxMenu) return;
+    const { db, schema, table, column } = parseColKey(ctxMenu.nodeKey);
+    setCtxMenu(null);
+    try {
+      await ExecDDL(await BuildSetColumnNotNullSql(db, schema, table, column));
+      message.success(`Set NOT NULL on "${column}"`);
+      refreshTableColumns(db, schema, table);
+    } catch (e) {
+      message.error(String(e));
+    }
+  };
+
+  const dropColumnNotNull = async () => {
+    if (!ctxMenu) return;
+    const { db, schema, table, column } = parseColKey(ctxMenu.nodeKey);
+    setCtxMenu(null);
+    try {
+      await ExecDDL(await BuildDropColumnNotNullSql(db, schema, table, column));
+      message.success(`Dropped NOT NULL on "${column}"`);
+      refreshTableColumns(db, schema, table);
+    } catch (e) {
+      message.error(String(e));
+    }
+  };
+
+  const openColumnComment = () => {
+    if (!ctxMenu) return;
+    const { db, schema, table, column } = parseColKey(ctxMenu.nodeKey);
+    const existing = ctxMenu.colMeta?.comment ?? "";
+    setCtxMenu(null);
+    setColumnCommentModal({ db, schema, table, column, comment: existing });
+  };
+
+  const executeColumnComment = async () => {
+    if (!columnCommentModal) return;
+    const { db, schema, table, column, comment } = columnCommentModal;
+    setColumnCommentModal(null);
+    try {
+      await ExecDDL(await BuildSetColumnCommentSql(db, schema, table, column, comment));
+      message.success(comment.trim() ? `Set comment on "${column}"` : `Removed comment from "${column}"`);
+      refreshTableColumns(db, schema, table);
+    } catch (e) {
+      message.error(String(e));
+    }
+  };
+
+  const openChangeDataType = () => {
+    if (!ctxMenu) return;
+    const { db, schema, table, column } = parseColKey(ctxMenu.nodeKey);
+    const currentType = ctxMenu.colMeta?.dataType ?? "VARCHAR";
+    setCtxMenu(null);
+    setChangeDataTypeModal({ db, schema, table, column, dataType: currentType });
+  };
+
+  const executeChangeDataType = async () => {
+    if (!changeDataTypeModal) return;
+    const { db, schema, table, column, dataType } = changeDataTypeModal;
+    const trimmed = dataType.trim();
+    if (!trimmed) {
+      setChangeDataTypeModal(null);
+      return;
+    }
+    setChangeDataTypeModal(null);
+    try {
+      await ExecDDL(await BuildChangeColumnTypeSql(db, schema, table, column, trimmed));
+      message.success(`Changed data type of "${column}" to ${trimmed}`);
+      refreshTableColumns(db, schema, table);
+    } catch (e) {
+      message.error(String(e));
+    }
+  };
+
+  const insertColumnName = () => {
+    if (!ctxMenu) return;
+    const { column } = parseColKey(ctxMenu.nodeKey);
+    setCtxMenu(null);
+    insertAtCursor(quoteIdent(column));
   };
 
   const openTimeTravelModal = async () => {
@@ -2225,8 +2752,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
               }}
             >
             <Tree
-               treeData={displayData}
-               onRightClick={onRightClick as any}
+              className="object-browser-tree"
+              treeData={displayData}
+              onRightClick={onRightClick as any}
                selectedKeys={Array.from(selectedNodeKeys)}
                multiple
                switcherIcon={(props: any) => {
@@ -2359,6 +2887,19 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                       </span>
                     );
                   }
+                  if (kind === "STAGE" || kind === "DBT PROJECT" || kind === "GIT REPOSITORY") {
+                    const isLoadingObj = loadingGitNodes.has(key);
+                    return (
+                      <span style={selectionStyle}>
+                        {isLoadingObj ? (
+                          <Space size={4}>
+                            {tooltip}
+                            <SyncOutlined spin style={{ fontSize: 10, color: "var(--text-muted)" }} />
+                          </Space>
+                        ) : tooltip}
+                      </span>
+                    );
+                  }
                   return (
                     <span style={selectionStyle}>
                       {tooltip}
@@ -2369,7 +2910,10 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                   key.startsWith("gitbranches:") ||
                   key.startsWith("gittags:") ||
                   key.startsWith("gitcommits:") ||
-                  key.startsWith("gitdir:")
+                  key.startsWith("gitdir:") ||
+                  key.startsWith("stagedir:") ||
+                  key.startsWith("dbtversion:") ||
+                  key.startsWith("dbtdir:")
                 ) {
                   const isLoading = loadingGitNodes.has(key);
                   return (
@@ -2451,6 +2995,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
               {menuItem("Pipe…", <ApiOutlined style={{ fontSize: 12 }} />, openCreatePipe)}
               {menuItem("Secret…", <KeyOutlined style={{ fontSize: 12 }} />, openCreateSecret)}
               {menuItem("Git Repository…", <BranchesOutlined style={{ fontSize: 12 }} />, openCreateGitRepository)}
+              {menuItem("DBT Project…", <BuildOutlined style={{ fontSize: 12 }} />, openCreateDbtProject, undefined, !featureFlags.dbtProjectBrowser, "DBT Project Browser is disabled. Enable it under View → Enabled Features…")}
 </>
               ))}          {ctxMenu.nodeType === "schema" && menuItem("Show Dropped Tables…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedTables)}
           {ctxMenu.nodeType === "schema" && menuItem("Export Data…", <DownloadOutlined style={{ fontSize: 12 }} />, openSchemaExportModal, undefined, !featureFlags.exportTableData, "Table Data Export is disabled. Enable it under View → Enabled Features…")}
@@ -2475,7 +3020,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "FILE FORMAT" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STAGE" &&
-            menuItem("Browse Stage Files…", <SearchOutlined style={{ fontSize: 12 }} />, openStageBrowser, undefined, !featureFlags.getCommand && !featureFlags.removeCommand, "Stage browsing is only useful when GET or REMOVE commands are enabled.")}
+            menuItem("Manage Storage Files…", <SearchOutlined style={{ fontSize: 12 }} />, openStageBrowser, undefined, !featureFlags.getCommand && !featureFlags.removeCommand, "Stage browsing is only useful when GET or REMOVE commands are enabled.")}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STAGE" &&
             menuItem("Upload File to Stage…", <UploadOutlined style={{ fontSize: 12 }} />, uploadToStage, undefined, !featureFlags.putCommand, "PUT commands are disabled. Enable them under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STAGE" &&
@@ -2502,14 +3047,42 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Modify…", <EditOutlined style={{ fontSize: 12 }} />, openModifyGitRepository)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "GIT REPOSITORY" &&
             menuItem("Set Commit Filter…", <EditOutlined style={{ fontSize: 12 }} />, openCommitFilterModal)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "DBT PROJECT" &&
+            menuItem("Create DBT Project…", <BuildOutlined style={{ fontSize: 12 }} />, openCreateDbtProject)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "DBT PROJECT" &&
+            menuItem("Execute…", <PlayCircleOutlined style={{ fontSize: 12 }} />, openExecuteDbtProject)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "DBT PROJECT" &&
+            menuItem("Show Versions", <EyeOutlined style={{ fontSize: 12 }} />, showDbtProjectVersions)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "DBT PROJECT" &&
+            menuItem("Describe", <FileOutlined style={{ fontSize: 12 }} />, describeDbtProject)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "DBT PROJECT" &&
+            menuItem("Modify…", <EditOutlined style={{ fontSize: 12 }} />, openModifyDbtProject)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "DBT PROJECT" &&
+            menuItem("Add Version…", <PlusOutlined style={{ fontSize: 12 }} />, openAddDbtProjectVersion)}
           {ctxMenu.nodeType === "gitcommits" &&
             menuItem("Set Commit Filter…", <EditOutlined style={{ fontSize: 12 }} />, openCommitFilterModal)}
           {ctxMenu.nodeType === "gitcommits" &&
             menuItem("Clear Commit Filter", <CloseOutlined style={{ fontSize: 12 }} />, clearGitCommitFilter)}
           {(ctxMenu.nodeKey.startsWith("gitdir:") || ctxMenu.nodeKey.startsWith("gitbranches:") || ctxMenu.nodeKey.startsWith("gittags:") || ctxMenu.nodeKey.startsWith("gitcommits:")) &&
-            menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshGitNode)}
+            menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshTreeNode)}
           {ctxMenu.nodeType === "gitfile" && menuItem("View Content", <EyeOutlined style={{ fontSize: 12 }} />, viewGitFileContent)}
           {ctxMenu.nodeType === "gitfile" && menuItem("Execute File", <PlayCircleOutlined style={{ fontSize: 12 }} />, executeGitFile)}
+
+          {/* Stage directory/file context menu */}
+          {ctxMenu.nodeType === "stagedir" && menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshTreeNode)}
+          {ctxMenu.nodeType === "stagedir" &&
+            menuItem("Upload File…", <UploadOutlined style={{ fontSize: 12 }} />, uploadToStageDir, undefined, !featureFlags.putCommand, "PUT commands are disabled. Enable it under View → Enabled Features…")}
+          {ctxMenu.nodeType === "stagefile" && stageFileIsSql &&
+            menuItem("Execute File", <PlayCircleOutlined style={{ fontSize: 12 }} />, executeStageFile)}
+          {ctxMenu.nodeType === "stagefile" &&
+            menuItem("Download…", <DownloadOutlined style={{ fontSize: 12 }} />, downloadStageFile, undefined, !featureFlags.getCommand, "GET commands are disabled. Enable them under View → Enabled Features…")}
+          {ctxMenu.nodeType === "stagefile" && <Divider style={{ margin: "4px 0" }} />}
+          {ctxMenu.nodeType === "stagefile" &&
+            menuItem("Delete…", <DeleteOutlined style={{ fontSize: 12 }} />, deleteStageFile, undefined, !featureFlags.removeCommand, "REMOVE commands are disabled. Enable them under View → Enabled Features…")}
+
+          {/* DBT Project version/directory/file context menu */}
+          {(ctxMenu.nodeType === "dbtversion" || ctxMenu.nodeType === "dbtdir") && menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshTreeNode)}
+
           {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW") &&
             menuItem("Select Top 1000 Rows", <TableOutlined style={{ fontSize: 12 }} />, selectTop1000)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
@@ -2531,6 +3104,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Import Data…", <UploadOutlined style={{ fontSize: 12 }} />, openImportModal, undefined, !featureFlags.tableDataImport, "Table Data Import is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
             menuItem("Backup Sets…", <SaveOutlined style={{ fontSize: 12 }} />, openBackupSets, undefined, !featureFlags.backupPoliciesAndSets, "Backup Policies & Sets is disabled. Enable it under View → Enabled Features…")}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
+            menuItem("Add Column…", <PlusOutlined style={{ fontSize: 12 }} />, openAddColumnModal, undefined, !featureFlags.columnManagement, "Column Management is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TASK" &&
             menuItem("Execute Task", <PlayCircleOutlined style={{ fontSize: 12 }} />, executeTask)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TASK" &&
@@ -2574,6 +3149,28 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
               )}
             </>
           )}
+
+          {/* Column context menu */}
+          {ctxMenu.nodeType === "col" &&
+            menuItem("Insert Column Name", <CodeOutlined style={{ fontSize: 12 }} />, insertColumnName)}
+          {ctxMenu.nodeType === "col" && ctxMenu.colMeta?.parentKind === "TABLE" && (() => {
+            const disabled = !featureFlags.columnManagement;
+            const reason = "Column Management is disabled. Enable it under View → Enabled Features…";
+            return (
+              <>
+                <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+                {menuItem("Rename Column…", <EditOutlined style={{ fontSize: 12 }} />, openRenameColumn, undefined, disabled, reason)}
+                {menuItem("Change Data Type…", <EditOutlined style={{ fontSize: 12 }} />, openChangeDataType, undefined, disabled, reason)}
+                {menuItem("Set Comment…", <EditOutlined style={{ fontSize: 12 }} />, openColumnComment, undefined, disabled, reason)}
+                {ctxMenu.colMeta.nullable && !ctxMenu.colMeta.isPrimaryKey &&
+                  menuItem("Set NOT NULL", null, setColumnNotNull, undefined, disabled, reason)}
+                {!ctxMenu.colMeta.nullable && !ctxMenu.colMeta.isPrimaryKey &&
+                  menuItem("Drop NOT NULL", null, dropColumnNotNull, undefined, disabled, reason)}
+                <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+                {menuItem("Drop Column…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, dropColumn, "#f85149", disabled, reason)}
+              </>
+            );
+          })()}
         </div>
       )}
 
@@ -2839,6 +3436,44 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           name={gitCommitFilterModal.name}
           onClose={() => setGitCommitFilterModal(null)}
           onSuccess={() => setTreeData((prev) => clearNodeChildren(prev, `gitcommits:${gitCommitFilterModal.db}:${gitCommitFilterModal.schema}:${gitCommitFilterModal.name}`))}
+        />
+      )}
+
+      {createDbtProjectModal && (
+        <CreateDbtProjectModal
+          db={createDbtProjectModal.db}
+          schema={createDbtProjectModal.schema}
+          onClose={() => setCreateDbtProjectModal(null)}
+          onSuccess={() => refreshDatabaseByName(createDbtProjectModal.db)}
+        />
+      )}
+
+      {executeDbtProjectModal && (
+        <ExecuteDbtProjectModal
+          db={executeDbtProjectModal.db}
+          schema={executeDbtProjectModal.schema}
+          name={executeDbtProjectModal.name}
+          onClose={() => setExecuteDbtProjectModal(null)}
+        />
+      )}
+
+      {modifyDbtProjectModal && (
+        <ModifyDbtProjectModal
+          db={modifyDbtProjectModal.db}
+          schema={modifyDbtProjectModal.schema}
+          name={modifyDbtProjectModal.name}
+          onClose={() => setModifyDbtProjectModal(null)}
+          onSuccess={() => refreshDatabaseByName(modifyDbtProjectModal.db)}
+        />
+      )}
+
+      {addDbtProjectVersionModal && (
+        <AddDbtProjectVersionModal
+          db={addDbtProjectVersionModal.db}
+          schema={addDbtProjectVersionModal.schema}
+          name={addDbtProjectVersionModal.name}
+          onClose={() => setAddDbtProjectVersionModal(null)}
+          onSuccess={() => refreshDatabaseByName(addDbtProjectVersionModal.db)}
         />
       )}
 
@@ -3141,6 +3776,86 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         </div>
       </Modal>
 
+      {/* Add Column modal */}
+      {addColumnModal && (
+        <AddColumnModal
+          db={addColumnModal.db}
+          schema={addColumnModal.schema}
+          table={addColumnModal.table}
+          onClose={() => setAddColumnModal(null)}
+          onSuccess={() => refreshTableColumns(addColumnModal.db, addColumnModal.schema, addColumnModal.table)}
+        />
+      )}
+
+      {/* Rename Column modal */}
+      <Modal
+        open={renameColumnModal !== null}
+        title={renameColumnModal ? `Rename column "${renameColumnModal.oldName}"` : ""}
+        onOk={executeRenameColumn}
+        onCancel={() => setRenameColumnModal(null)}
+        okText="Rename"
+        width={460}
+      >
+        <div style={{ padding: "8px 0" }}>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>New name</div>
+          <Input
+            value={renameColumnModal?.newName ?? ""}
+            onChange={(e) => setRenameColumnModal((prev) => prev ? { ...prev, newName: e.target.value } : null)}
+            onPressEnter={executeRenameColumn}
+            autoFocus
+            style={{ marginBottom: 8 }}
+          />
+          <ObjectNameCaseControl
+            name={renameColumnModal?.newName ?? ""}
+            caseSensitive={renameColumnModal?.caseSensitive ?? false}
+            onCaseSensitiveChange={(v) => setRenameColumnModal((prev) => prev ? { ...prev, caseSensitive: v } : null)}
+            quotedIdentifiersIgnoreCase={renameColQiic}
+          />
+        </div>
+      </Modal>
+
+      {/* Column Comment modal */}
+      <Modal
+        open={columnCommentModal !== null}
+        title={columnCommentModal ? `Set comment on "${columnCommentModal.column}"` : ""}
+        onOk={executeColumnComment}
+        onCancel={() => setColumnCommentModal(null)}
+        okText="Save"
+        width={460}
+      >
+        <div style={{ padding: "8px 0" }}>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>Comment (prefilled with the current value; leave empty to remove)</div>
+          <Input.TextArea
+            value={columnCommentModal?.comment ?? ""}
+            onChange={(e) => setColumnCommentModal((prev) => prev ? { ...prev, comment: e.target.value } : null)}
+            rows={3}
+            autoFocus
+          />
+        </div>
+      </Modal>
+
+      {/* Change Data Type modal */}
+      <Modal
+        open={changeDataTypeModal !== null}
+        title={changeDataTypeModal ? `Change data type of "${changeDataTypeModal.column}"` : ""}
+        onOk={executeChangeDataType}
+        onCancel={() => setChangeDataTypeModal(null)}
+        okText="Change"
+        width={460}
+      >
+        <div style={{ padding: "8px 0" }}>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>New data type</div>
+          <DataTypeSelect
+            value={changeDataTypeModal?.dataType ?? "VARCHAR"}
+            onChange={(v) => setChangeDataTypeModal((prev) => prev ? { ...prev, dataType: v } : null)}
+          />
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8, lineHeight: 1.5 }}>
+            Snowflake only permits a narrow set of <code>SET DATA TYPE</code> changes — e.g. increasing a
+            VARCHAR length or a NUMBER scale. Arbitrary base-type conversions are rejected by the server.
+          </div>
+        </div>
+      </Modal>
+
       {/* ER Diagram modal */}
       {erModal && (
         <ERDiagramModal
@@ -3148,6 +3863,20 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           data={erModal.data}
           onClose={() => setErModal(null)}
           onDesignerSuccess={() => refreshDatabaseByName(erModal.database)}
+        />
+      )}
+
+      {/* MCP ER Designer — opened by the open_er_designer MCP tool */}
+      {mcpErDesigner && (
+        <ERDesigner
+          database={mcpErDesigner.database}
+          initialData={mcpErDesigner.baseline}
+          mergedData={mcpErDesigner.merged}
+          onClose={() => setMcpErDesigner(null)}
+          onSuccess={() => {
+            refreshDatabaseByName(mcpErDesigner.database);
+            setMcpErDesigner(null);
+          }}
         />
       )}
 

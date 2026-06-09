@@ -11,7 +11,7 @@
 import { useState, useEffect } from "react";
 import { Modal, Select, Switch, Input, Button, Space, Typography, Spin, Segmented } from "antd";
 import { DownloadOutlined, FolderOpenOutlined, CheckCircleOutlined } from "@ant-design/icons";
-import { ExportTableData, PickDirectory, ListObjects } from "../../../wailsjs/go/main/App";
+import { ExportTableData, PickDirectory, ListObjects } from "../../../wailsjs/go/app/App";
 
 const { Text } = Typography;
 

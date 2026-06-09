@@ -10,13 +10,14 @@
 
 import { useState, useEffect } from "react";
 import {
-  Modal, Form, Input, Select, Checkbox, Radio, Space,
+  Modal, Form, Input, Checkbox, Radio, Space,
   Typography, Divider, InputNumber, Button, Table, Tooltip, Alert,
 } from "antd";
 import { TableOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { ExecDDL, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/main/App";
+import { ExecDDL, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
+import DataTypeSelect from "../shared/DataTypeSelect";
 
 const { Text } = Typography;
 
@@ -183,27 +184,11 @@ export default function CreateTableModal({ db, schema, onClose, onSuccess }: Pro
     {
       title: "Type",
       dataIndex: "type",
-      width: 150,
+      width: 200,
       render: (val, record) => (
-        <Select
-          size="small"
-          showSearch
+        <DataTypeSelect
           value={val}
-          style={{ width: "100%" }}
-          onChange={v => updateColumn(record.key, { type: v })}
-          options={[
-            { value: "NUMBER(38,0)", label: "NUMBER(38,0)" },
-            { value: "VARCHAR", label: "VARCHAR" },
-            { value: "VARCHAR(16777216)", label: "VARCHAR(16777216)" },
-            { value: "BOOLEAN", label: "BOOLEAN" },
-            { value: "DATE", label: "DATE" },
-            { value: "TIMESTAMP_NTZ", label: "TIMESTAMP_NTZ" },
-            { value: "TIMESTAMP_TZ", label: "TIMESTAMP_TZ" },
-            { value: "VARIANT", label: "VARIANT" },
-            { value: "OBJECT", label: "OBJECT" },
-            { value: "ARRAY", label: "ARRAY" },
-            { value: "FLOAT", label: "FLOAT" },
-          ]}
+          onChange={(v) => updateColumn(record.key, { type: v })}
         />
       )
     },

@@ -118,7 +118,8 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
     - Fully gated by the **File Format Builder** feature flag
   - **Live SQL Preview** — the full `CREATE STAGE` statement updates in real-time as you modify the form
   - **Execution** — runs `ExecDDL` and refreshes the schema tree automatically on success
-- **Stage File Browser** — right-click any stage and choose **Browse Stage Files…** to open a virtualised TanStack Table grid view of the stage contents:
+- **Stage Sidebar Tree** — expand any stage in the sidebar to browse its contents hierarchically (directories and files), with lazy-loading on expand; right-click `.sql` files for **Execute File** (`EXECUTE IMMEDIATE FROM @stage/path`), all files for **Download…** and **Delete…**; right-click directories for **Refresh** and **Upload File…**; gated by `getCommand`/`putCommand`/`removeCommand` feature flags as appropriate
+- **Stage File Browser** — right-click any stage and choose **Manage Storage Files…** to open a virtualised TanStack Table grid view of the stage contents:
     - **LIST view** — displays name, size, MD5, and last modified timestamp for all files in the stage
     - **Regex filtering** — a search bar allows filtering files using the Snowflake `PATTERN` parameter
     - **Bulk operations** — select multiple files to **Download** to a local directory or **Delete** from the stage in one go
@@ -136,7 +137,16 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Fetch** — right-click a git repository and choose **Fetch** to run `ALTER GIT REPOSITORY … FETCH`; displays a loading toast during the operation and a success or error message on completion
   - **Modify** — pre-fills current API integration, git credentials, and comment from `DESCRIBE GIT REPOSITORY`; generates correct `ALTER GIT REPOSITORY … SET` and `UNSET` statements (credentials and comment can be cleared via UNSET; API_INTEGRATION can only be SET); live SQL preview; multi-statement execution
   - **Properties** — right-click and choose **Properties** to view `DESCRIBE GIT REPOSITORY` output in the properties panel
-- **Search** — filter objects by name across all databases and schemas in real time
+- **DBT Project Browser** — right-click any schema and choose **Create Object** → **DBT Project…**, or right-click an existing DBT PROJECT object for full lifecycle management:
+  - **Sidebar Tree** — expand any DBT PROJECT in the sidebar to browse its versions; each version expands into a hierarchical file/directory tree with lazy-loading; right-click versions/directories for **Refresh**
+  - **Create** — specify source location (required), optional dbt version, default target, external access integrations, and comment; live SQL preview shows the full `CREATE DBT PROJECT` statement; supports OR REPLACE, IF NOT EXISTS, and case-sensitive naming; **Source Location Picker** lets you browse available git repositories, internal stages, existing dbt projects, and workspaces visually — select a source type, pick a database and schema (or browse any schema in the account), choose an object, select a branch/tag or version, and browse directories in a tree; the assembled location string is generated automatically
+  - **Execute** — choose between Direct and From Workspace execution modes; specify dbt CLI args, optional dbt version override, workspace name, and project root; live SQL preview; results stream to a new query tab
+  - **Modify** — pre-fills current dbt version, default target, integrations, and comment from `DESCRIBE DBT PROJECT`; generates correct `ALTER DBT PROJECT … SET` and `UNSET` statements; live SQL preview; multi-statement execution
+  - **Add Version** — add a version alias and source location via `ALTER DBT PROJECT … ADD VERSION`; live SQL preview; includes Source Location Picker in stage-only mode (git repositories and internal stages)
+  - **Show Versions** — runs `SHOW VERSIONS IN DBT PROJECT` in a new tab
+  - **Describe** — runs `DESCRIBE DBT PROJECT` in a new tab
+  - **Properties** — right-click and choose **Properties** to view `SHOW DBT PROJECTS LIKE` output in the properties panel
+- **Search** — filter objects by name across all databases and schemas in real time; for previously expanded schemas all object types are searched instantly (no network call); for schemas not yet expanded, a fast path returns tables, views, and sequences only — extended types (procedures, tasks, stages, etc.) appear after manually expanding the schema
 - **Right-click procedures** to open a parameter dialog; clicking **Execute** generates the `CALL` statement, opens a new tab, and runs it immediately — no manual Run press needed
 - **Right-click functions** (**Call Function…**) to open a parameter dialog; detects scalar vs. table functions and generates the correct SQL; clicking **Execute** opens a new tab and runs it immediately
 - **View Dependencies…** (views, procedures, functions) — right-click any view, procedure, or function and choose **View Dependencies…** to open a recursive dependency tree built by parsing DDL:
@@ -257,6 +267,17 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Execute Notebook…** — opens a dialog to run `EXECUTE NOTEBOOK` with optional string parameters (each value is automatically single-quoted); the dialog shows the notebook's current Query Warehouse fetched from `SHOW NOTEBOOKS`; if none is set a warning alert offers a **Set Warehouse** button that opens a separate dialog with a warehouse selector and explicit **Save** / **Cancel** buttons (saves via `ALTER NOTEBOOK … SET QUERY_WAREHOUSE`); the execute dialog updates live once the warehouse is saved; a live SQL preview shows the exact statement that will run
 - **Right-click a table** to open **Backup Sets…** (shows backup sets scoped to its schema)
 - **Drag and drop** — drag any table or view into the editor to insert a `SELECT` statement with all column names listed individually
+- **Column management** — right-click any column under a **table** node to (all DDL is generated by the backend `internal/column` package, unit-tested, and never built in the frontend):
+  - **Insert Column Name** — inserts the quoted column name at the current editor cursor position (also available for view columns)
+  - **Rename Column…** — opens a rename dialog with case-sensitivity control; executes `ALTER TABLE … RENAME COLUMN`
+  - **Change Data Type…** — opens a dialog pre-filled with the current type; executes `ALTER TABLE … ALTER COLUMN … SET DATA TYPE`
+  - **Set Comment…** — opens a comment dialog prefilled with the column's current comment; executes `ALTER TABLE … ALTER COLUMN … COMMENT` (or `UNSET COMMENT` when cleared)
+  - **Set NOT NULL** / **Drop NOT NULL** — shown contextually based on the column's current nullability; executes `ALTER TABLE … ALTER COLUMN … SET/DROP NOT NULL` (hidden for primary key columns)
+  - **Drop Column…** — with a confirmation dialog; executes `ALTER TABLE … DROP COLUMN`
+  - Right-clicking a **view** column shows only **Insert Column Name** (view columns cannot be altered)
+  - All altering actions (Rename, Change Data Type, Set Comment, Set/Drop NOT NULL, Drop Column, and **Add Column…**) are gated behind the **Column Management** feature flag (**View → Enabled Features → Column Management**) for IT-admin policy control; **Insert Column Name** is never gated
+- **Add Column…** — right-click any table node to add a new column via a dedicated dialog with column name (case-sensitivity control), data type (searchable dropdown), value mode (none/default/autoincrement/computed), inline constraints (NOT NULL, UNIQUE, PRIMARY KEY, FOREIGN KEY with cascading reference selectors), collation (the selectable list is sourced from the backend `internal/snowflake` collation registry), comment, and a live backend-generated SQL preview. Submission is gated for invalid combinations (e.g. a default value is required in *Default* mode, AUTOINCREMENT requires a numeric type, a foreign key requires a referenced table); constraints and collation are hidden for computed (virtual) columns
+- **Column type icons** — when expanding a table or view's column list, each column is prefixed with a type-family icon (text, number, datetime, boolean, variant/array, binary, geo, vector) coloured per the theme's column palette; primary-key and foreign-key columns get a distinct key icon
 - **Empty table indicator** — table names with zero rows appear in a faded colour so unpopulated tables are immediately visible in the tree
 - **Hover tooltips** — hovering any object in the tree shows its DDL definition
 - **View Definition** — opens the DDL in a modal with a Copy button
@@ -305,6 +326,7 @@ Ghost-text SQL suggestions appear automatically as you type in the editor. Press
 
 - **Model Validation** — when configuring AI, a live **model status indicator** appears next to the model selector: a green `● Model OK` confirms the model is reachable, while a red indicator shows the exact API error — so misconfigured model names are caught immediately rather than at runtime.
 - **Query Profile** — click the graph icon in the results status bar (visible for successful runs) to see the execution profile for the query; shows Operator Statistics, Execution Time Breakdown, and Operator Attributes sourced from `GET_QUERY_OPERATOR_STATS`.
+- **Query Log** — session-scoped log of all SQL queries Thaw sends to Snowflake (both user-initiated from the editor and internal queries like object listing and DDL fetching). Appears as a third result pane tab ("Query Log") alongside Results and Terminal. Useful for debugging and attaching to issue reports. Enable via **View → Enabled Features → Query Log** or **View → Query Log → Enable Query Log**. Supports source filtering (All/User/Internal), status filtering, text search, and one-click copy formatting.
 
 ### Configuration
 
@@ -319,7 +341,7 @@ Open **AI → Configure AI…** in the menu bar to set your provider, API key, a
 - **Save** (`⌘S` / `Ctrl+S`) — writes back to the file's original path
 - **Save As…** (`⌘⇧S` / `Ctrl+Shift+S`) — native OS save dialog; promotes a scratch tab to a named file
 - **New Tab** (`⌘T` / `Ctrl+T`) — opens a blank scratch tab
-- **File Browser** — browse the working directory in the sidebar; click any file to open it; auto-refreshes after a DDL export; right-click any file or folder to access the context menu:
+- **File Browser** — browse the working directory in the sidebar; click any file to open it; auto-refreshes after a DDL export; **file system watcher** monitors the working directory for external changes (files created, renamed, or deleted in the terminal, other editors, or via git) and incrementally refreshes only the affected directories — no manual reload needed; toggleable via **View → Enabled Features → File Watcher**; right-click any file or folder to access the context menu:
   - **Reveal in Finder** / **Show in Explorer** — opens the platform file manager and selects the file or folder
   - **Copy Path** — copies the full file path to the clipboard
   - **Duplicate** (files only) — creates a copy of the file in the same directory with a `_copy` suffix
@@ -667,7 +689,14 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - **Backend choice** — radio group selects **conda** or **venv**; all commands adapt accordingly
 - **Python interpreter selector** (venv only) — dropdown lists every Python interpreter found on the system (`/usr/bin`, Homebrew, pyenv, etc.); duplicates are removed by resolving symlinks; the selection is saved to `config.json`
 - **Apple Silicon warning** (conda only) — `CONDA_SUBDIR=osx-64` is applied automatically on Apple M-series chips to work around a known `pyOpenSSL` incompatibility; a banner explains this
-- **Delete venv folder** — danger button with a confirmation dialog removes the venv directory and resets all steps
+- **Use Existing venv** (venv only) — point the wizard at a pre-existing virtual environment (project-specific, shared team env, pyenv-managed, etc.) instead of creating a new one:
+  - **Browse** button opens a native directory picker; the path can also be typed manually
+  - **Use Existing / Re-validate** validates the selected directory via `CheckSnowparkEnv`, showing a checklist (venv present, `snowflake-snowpark-python`, `notebook`) with detected Python version
+  - Steps that are already satisfied are auto-marked done; the wizard jumps to the first missing step (or straight to the package manager if everything is installed)
+  - The Python interpreter selector is hidden in "use existing" mode (the venv already has its own Python)
+  - Re-opening the modal with a partially configured venv auto-enters "use existing" mode
+  - **Create New Instead** resets back to the standard create-from-scratch flow
+- **Delete venv folder** — danger button (hidden in "use existing" mode) with a confirmation dialog removes the venv directory and resets all steps
 - The project directory (same path used for DDL export and the terminal) is shown for reference
 - **Manage Packages** — a 4th step in the setup wizard is always accessible (via the stepper or the "Manage Packages" footer button) regardless of whether the setup steps have been run in the current session:
   - **Install** — enter any package name and press Install or hit Enter; output streams line-by-line into a log panel; the package list refreshes automatically on success
@@ -712,20 +741,52 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - SQL is split into individual statements by a parser that handles `--` line comments, `/* */` block comments, single-quoted strings, and `$$`-dollar-quoted strings; each statement runs in order and the last result is displayed
 - **Run selection** — if text is selected in a SQL cell, only the selected SQL is executed
 - `USE DATABASE X;` in a SQL cell updates the toolbar dropdowns and the Python session automatically
-- Results render in a **sticky-header scrollable table** (up to 1 000 rows)
+- Results render in a **ResultGrid** (up to 50 000 rows); when a query returns more than 50 000 rows a **truncated** tag is shown in the status bar
 - DDL / DML with no result set shows "OK — N rows affected"
 
 ### Notebook management
 
-- **Run All**, **Restart Kernel**, **Save**, **Add Cell** in the toolbar
+- **Run All**, **Restart Kernel**, **Save** in the toolbar; **Deploy** button is stacked above the icon row in a vertical toolbar layout
 - **Deploy** — deploys the notebook to Snowflake via a dialog with all `CREATE NOTEBOOK` options (database, schema, name, `OR REPLACE` / `IF NOT EXISTS`, comment, query warehouse, Python runtime warehouse, idle auto-shutdown seconds, runtime name, compute pool); works for both saved and unsaved notebooks — unsaved content is serialised and written to a temporary file automatically
 - Per-cell controls: run, move up/down, add below, **delete** (confirmation dialog)
+- **Cell gutter** — each cell has a left gutter showing the execution count and a colour-coded kind tag (Code / SQL / Markdown) with a per-kind accent stripe
+- **AddCellBar** — hover-reveal bars between cells let you insert Code, SQL, or Markdown cells inline; the bar below the last cell is permanently visible
 - **Command mode** — when no cell Monaco editor is focused, the selected cell (last clicked or focused, shown with an accent left border) can be operated on with single-key shortcuts:
   - `B` — add a new code cell below the selected cell
   - `A` — add a new code cell above the selected cell
   - `D D` — delete the selected cell (a confirmation dialog is always shown)
   - `Y` / `M` / `S` — change the selected cell's type to Code / Markdown / SQL
 - Kernel status indicator: starting spinner → "Kernel ready" → "Kernel error"
+
+---
+
+## MCP Server
+
+Thaw can expose the active Snowflake connection to external AI clients (Claude Desktop, Cursor, etc.) through the **Model Context Protocol**, built on the official Go MCP SDK over a localhost SSE/HTTP transport.
+
+- **Multi-session** — open **View → MCP Sessions…** to start one or more independent servers. Each session is bound to its own dedicated Snowflake connection (inheriting the current connect parameters) and listens on its own localhost port, auto-assigned from `9100` (a port can be overridden). Because each session opens a *separate* Snowflake connection, interactive authenticators (e.g. `externalbrowser`) may re-prompt when a session starts, and every running session consumes one additional Snowflake session.
+- **Lifecycle** — sessions start and stop only on explicit user action; all sessions stop cleanly when the app quits. There is no auto-start on launch. Sessions are **not persisted** — they exist only for the lifetime of the running app and are not restored on the next launch.
+- **Execution modes** — three modes control what a session can do:
+  - **Metadata Only** — schema-browsing and diagnostics tools only. No SQL execution.
+  - **Read-Only SQL** — SQL execution via `execute_snowflake_sql`. Every statement passes through the EXPLAIN precompilation gate (only read-only operations allowed).
+  - **Explain Only** — same gate validation as Read-Only, but returns only the EXPLAIN plan metadata without executing the statement.
+- **EXPLAIN precompilation gate** — a defense-in-depth layer that validates every SQL statement before execution. Three layers: single-statement check, USE statement rejection, and EXPLAIN plan operation allow-listing (default-deny). The gate fails safe by over-rejecting — any unknown operation is denied. The real security boundary is the Snowflake role's grants; the gate provides an additional defense layer.
+- **Session configuration** — non-metadata sessions can optionally pin the role and/or warehouse at startup. When pinned, the corresponding `use_role`/`use_warehouse` tool is not exposed to the AI client, preventing context-switching. Secondary roles can be set to "none" to restrict the session to only its primary role's grants.
+- **Copy Config** — each running session offers a one-click copy of the client configuration block. The embedded URL carries the session's auth token, so the copied block is a **secret** — treat it like a password:
+  ```json
+  { "mcpServers": { "thaw-<label>": { "url": "http://localhost:<port>/sse?token=<token>" } } }
+  ```
+- **Tab delivery (`open_sql_tab`)** — an MCP tool that formats SQL with the user's editor preferences, runs the full diagnostics pipeline, and opens a new editor tab in Thaw with the result. Diagnostic markers appear inline immediately. The user must manually run the query (human-in-the-loop preserved). MCP-created tabs display a robot icon in the tab bar.
+- **Notebook/Snowpark tools** — read notebook files (`read_notebook`, workspace-gated), get intellisense completions (`get_notebook_completions`), validate Python syntax (`check_python_syntax`), and deliver pre-filled notebooks into Thaw (`open_notebook_tab`). Kernel-dependent tools require an active notebook kernel. `open_notebook_tab` builds nbformat v4 JSON from python/markdown/sql cells and opens a new notebook tab with the robot icon badge. The user must manually run cells (human-in-the-loop preserved).
+- **ER designer delivery (`open_er_designer`)** — an MCP tool that fetches live ER data from Snowflake, merges AI-generated tables onto the canvas, and opens the interactive ER Designer in Thaw. The AI can scaffold a complete data model from natural language; the user then visually refines table positions, columns, and FK relationships, reviews the generated diff SQL, and applies changes. Matching tables (by schema + name) are replaced; new tables are appended; untouched live tables are preserved.
+- **ER designer inspection & modification (`get_er_designer_state`, `modify_er_designer`)** — MCP tools that let an AI client read the current state of an open ER designer (tables, columns, PKs, nullability, FKs) and push modifications into it. The designer's state is synced to the backend via IPC on mount, changes (debounced 300ms), and unmount. `modify_er_designer` emits a Wails event that the frontend merges into the live canvas, preserving table positions and React state. Enables iterative AI-assisted data modeling without re-opening the designer.
+- **Data pipeline tools** — task graph inspection (`list_tasks`, `get_task_run_history`, `get_task_dependencies`), stage file browsing (`list_stage_files`, `preview_stage_file`), and Snowpipe status/history (`get_pipe_status`, `get_pipe_copy_history`). `preview_stage_file` is mode-gated (readonly/explain_only only). `open_task_graph` opens the interactive task graph visualization in Thaw from an MCP client.
+- **Function & procedure metadata tools** — search the local function metadata cache (`search_functions`, `get_function_tooltip`), retrieve parameter metadata from Snowflake DDL (`get_procedure_params`, `get_function_info`), and generate invocation SQL (`build_call_statement`, `build_function_select`). Always registered in all modes.
+- **DDL builder tools** — pure SQL generators for stages (`build_create_stage_sql`, `build_alter_stage_sql`), file formats (`build_create_file_format_sql`), pipes (`build_create_pipe_sql`, `build_refresh_pipe_sql`), secrets (`build_create_secret_sql`), and all six integration types (`build_storage_integration_sql`, `build_api_integration_sql`, `build_catalog_integration_sql`, `build_external_access_integration_sql`, `build_notification_integration_sql`, `build_security_integration_sql`). No Snowflake connection required — all tools return syntactically correct DDL without executing it. Always registered in all modes.
+- **Migration & dbt tools** — scan local `.sql` files for DDL objects (`scan_migration_source`, workspace-gated), compare local objects against a live Snowflake database (`analyze_migration`), generate a human-readable migration script (`generate_migration_script`), and scaffold a dbt project pre-wired to the active connection (`generate_dbt_project`, workspace-gated). `scan_migration_source` and `generate_dbt_project` are only registered when a workspace root is configured; `analyze_migration` and `generate_migration_script` are always registered.
+- **Toolbar indicator** — a "MCP: N active" pill appears in the toolbar while sessions are running; clicking it opens the MCP Sessions panel.
+- Gated behind the **MCP Server** feature flag (admin-lockable; **View → Enabled Features → MCP Server**). The flag is enforced in the backend (`StartMCPSession`) using the effective flags, so an IT-admin lock cannot be bypassed via the native menu.
+- **Security** — the listener binds only the loopback interface and rejects requests with a non-loopback `Host` header or a cross-origin `Origin` header, defending against DNS-rebinding attacks from a malicious web page. Each session additionally has a **per-session auth token** (crypto-random) required to open the SSE connection, presented as an `Authorization: Bearer` header or a `?token=…` query parameter — so another local process cannot read schema metadata without the token from the copied config. The token defends against non-admin local users only; a local administrator can bypass it (process memory, loopback capture). For SQL execution modes, always use a scoped read-only Snowflake role for defense in depth. Sessions should be stopped when not in use.
 
 ---
 
@@ -745,7 +806,7 @@ Features are organized into six categories, each with individual toggles:
 
 **Developer Environments** — Snowpark & Notebooks, Embedded Terminal, Git Integration
 
-**Performance & Diagnostics** — Query Profile, Explain SQL
+**Performance & Diagnostics** — Query Profile, Explain SQL, Query Log
 
 ### IT Admin Management
 
@@ -803,6 +864,7 @@ The following features are identified as feasible to be turned off via feature f
 **Advanced Tools & Data Engineering**
 - **Schema Migration** (DDL diffing and deployment wizard)
 - **dbt Project Scaffolding** (Automated dbt project generation)
+- **DBT Project Browser** (Browse and manage Snowflake-native DBT PROJECT objects in the sidebar)
 - **ER Diagram & Designer** (Visual database modeling and `ALTER TABLE` generation)
 - **Task Graph Visualizer** (Interactive DAG viewer and manager for Snowflake tasks)
 - **Insert Mapping** (Visual side-by-side mapping for `INSERT INTO ... SELECT` with UNIONs)
@@ -817,6 +879,7 @@ The following features are identified as feasible to be turned off via feature f
 **Performance & Diagnostics**
 - **Query Profile** (Operator statistics and execution time breakdown graphs)
 - **Explain SQL** (Pre-execution linter for full table scans and cartesian joins)
+- **Query Log** (Session-scoped log of all SQL queries Thaw sends to Snowflake, for debugging and issue reporting)
 
 **Results Grid**
 - **Multi-Cell Copy & Selection** (Range selection, multi-cell copy, selection aggregations, and quick charting)
@@ -826,6 +889,15 @@ The following features are identified as feasible to be turned off via feature f
 
 **Connection**
 - **Snowflake CLI Profile Manager** (Manage Snowflake CLI profiles from the connection dialog)
+
+**File Browser**
+- **File Watcher** (Auto-refresh the file browser when files are created, renamed, or deleted externally)
+
+**Schema Management**
+- **Column Management** (Add, rename, retype, set/drop NOT NULL, set comment, and drop table columns from the sidebar tree)
+
+**Integrations**
+- **MCP Server** (Expose the active Snowflake connection to external AI clients over a local Model Context Protocol server)
 
 ---
 

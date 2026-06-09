@@ -11,7 +11,7 @@
 import { useState, useEffect } from "react";
 import { Button, Select, Input, Checkbox, Spin } from "antd";
 import { PlusOutlined, DeleteOutlined } from "@ant-design/icons";
-import { ListObjects } from "../../../wailsjs/go/main/App";
+import { ListObjects } from "../../../wailsjs/go/app/App";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

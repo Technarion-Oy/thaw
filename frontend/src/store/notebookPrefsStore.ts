@@ -11,7 +11,7 @@
 // @thaw-domain: Snowpark & Developer Workflows
 
 import { create } from "zustand";
-import { GetNotebookPrefs } from "../../wailsjs/go/main/App";
+import { GetNotebookPrefs } from "../../wailsjs/go/app/App";
 import type { config } from "../../wailsjs/go/models";
 
 interface NotebookPrefsState {

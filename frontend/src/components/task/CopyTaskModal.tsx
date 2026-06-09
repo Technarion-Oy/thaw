@@ -4,7 +4,7 @@
 import { useState, useEffect } from "react";
 import { Modal, Form, Input, Select, Button, Space, Typography, Alert } from "antd";
 import { CopyOutlined } from "@ant-design/icons";
-import { CloneChildTask, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/main/App";
+import { CloneChildTask, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 
 const { Text } = Typography;

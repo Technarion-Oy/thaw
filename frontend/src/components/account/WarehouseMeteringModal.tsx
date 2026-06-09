@@ -35,9 +35,9 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
-import { GetWarehouseMeteringHistory } from "../../../wailsjs/go/main/App";
+import { GetWarehouseMeteringHistory } from "../../../wailsjs/go/app/App";
 import { useSessionStore } from "../../store/sessionStore";
-import type { main } from "../../../wailsjs/go/models";
+import type { warehouse } from "../../../wailsjs/go/models";
 
 const { RangePicker } = DatePicker;
 
@@ -62,7 +62,7 @@ export default function WarehouseMeteringModal({ onClose }: Props) {
     dayjs().subtract(30, "day"),
     dayjs(),
   ]);
-  const [rows,           setRows]           = useState<main.WarehouseMeteringRow[] | null>(null);
+  const [rows,           setRows]           = useState<warehouse.WarehouseMeteringRow[] | null>(null);
   const [loading,        setLoading]        = useState(false);
   const [error,          setError]          = useState<string | null>(null);
   const [tableCollapsed, setTableCollapsed] = useState(false);
@@ -124,7 +124,7 @@ export default function WarehouseMeteringModal({ onClose }: Props) {
 
   const chartData = granularity === "daily" ? dailyData : hourlyData;
 
-  const columns: ColumnsType<main.WarehouseMeteringRow> = [
+  const columns: ColumnsType<warehouse.WarehouseMeteringRow> = [
     {
       key: "startTime",
       title: "Start Time",
@@ -290,7 +290,7 @@ export default function WarehouseMeteringModal({ onClose }: Props) {
               </AntTooltip>
             </div>
             {!tableCollapsed && (
-              <Table<main.WarehouseMeteringRow>
+              <Table<warehouse.WarehouseMeteringRow>
                 dataSource={rows}
                 columns={columns}
                 rowKey={(r) => `${r.startTime}-${r.warehouseName}`}

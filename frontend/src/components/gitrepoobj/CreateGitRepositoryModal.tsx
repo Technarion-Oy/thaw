@@ -21,7 +21,7 @@ import {
   GetQuotedIdentifiersIgnoreCase,
   ListApiIntegrations,
   ListSecretsInAccount,
-} from "../../../wailsjs/go/main/App";
+} from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import type { snowflake } from "../../../wailsjs/go/models";
 
