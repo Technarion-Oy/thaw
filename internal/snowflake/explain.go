@@ -14,6 +14,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 )
 
 // ExplainFormat selects the output format for Snowflake's EXPLAIN command.
@@ -47,5 +48,11 @@ func (c *Client) ExplainOnConn(ctx context.Context, conn *sql.Conn, query string
 	if err := validateExplainFormat(format); err != nil {
 		return nil, err
 	}
-	return queryOnConn(ctx, conn, "EXPLAIN USING "+string(format)+" "+query)
+	sql := "EXPLAIN USING " + string(format) + " " + query
+	start := time.Now()
+	result, err := queryOnConn(ctx, conn, sql)
+	if c.OnQuery != nil {
+		c.OnQuery(ctx, sql, "", err, time.Since(start))
+	}
+	return result, err
 }
