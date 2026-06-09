@@ -120,7 +120,7 @@ var (
 	reIsCreateHybridTable = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:(?:OR\s+REPLACE|TRANSIENT)\s+)*HYBRID\s+TABLE\b`)
 	reHybridTablePreamble = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:(?:OR\s+REPLACE|TRANSIENT)\s+)*HYBRID\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath)
 	reIndexKeyword        = regexp.MustCompile(`(?i)\bINDEX\b`)
-	reNotNull             = regexp.MustCompile(`(?i)\bNOT\s+NULL\b`)
+	reNotNull             = regexp.MustCompile(`(?i)\b(?:NOT\s+NULL|NOTNULL)\b`)
 	rePrimaryKey          = regexp.MustCompile(`(?i)\bPRIMARY\s+KEY\b`)
 	rePrimaryKeyCols      = regexp.MustCompile(`(?i)PRIMARY\s+KEY\s*\([^)]+\)`)
 	reChangeTracking      = regexp.MustCompile(`(?i)\bCHANGE_TRACKING\b`)
@@ -725,14 +725,14 @@ var (
 	reDropApplicationName   = regexp.MustCompile(`(?i)^\s*DROP\s+APPLICATION\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
 
 	// ── CREATE EVENT TABLE ──────────────────────────────────────────────────
-	reIsCreateEventTable   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EVENT\s+TABLE\b`)
-	reCreateEventTableName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EVENT\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
+	reIsCreateEventTable   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:(?:OR\s+REPLACE|TRANSIENT)\s+)*EVENT\s+TABLE\b`)
+	reCreateEventTableName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:(?:OR\s+REPLACE|TRANSIENT)\s+)*EVENT\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
 	// reEventTableColumnList detects a parenthesised column list after the table name.
 	// Event tables have a fixed schema and do not allow user-defined columns.
-	reEventTableColumnList   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EVENT\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath + `\s*\(`)
-	reEvtRetentionDays       = regexp.MustCompile(`(?i)\bDATA_RETENTION_TIME_IN_DAYS\s*=\s*(-?\d+\b|-?\w+)`)
-	reEvtExtensionDays       = regexp.MustCompile(`(?i)\bMAX_DATA_EXTENSION_TIME_IN_DAYS\s*=\s*(-?\d+\b|-?\w+)`)
-	reEvtChangeTrackingValue = regexp.MustCompile(`(?i)\bCHANGE_TRACKING\s*=\s*(\w+)`)
+	reEventTableColumnList   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:(?:OR\s+REPLACE|TRANSIENT)\s+)*EVENT\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath + `\s*\(`)
+	reEvtRetentionDays       = regexp.MustCompile(`(?i)\bDATA_RETENTION_TIME_IN_DAYS\s*=\s*(-?\d+(?:\.\d+)?|-?\w+|'')`)
+	reEvtExtensionDays       = regexp.MustCompile(`(?i)\bMAX_DATA_EXTENSION_TIME_IN_DAYS\s*=\s*(-?\d+(?:\.\d+)?|-?\w+|'')`)
+	reEvtChangeTrackingValue = regexp.MustCompile(`(?i)\bCHANGE_TRACKING\s*=\s*(\w+|'')`)
 
 	// ── CREATE EXTERNAL VOLUME ────────────────────────────────────────────────
 	reIsCreateExternalVolume   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EXTERNAL\s+VOLUME\b`)
@@ -1959,7 +1959,7 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 				endIdx := findMatchingParen(rest)
 				if endIdx != -1 {
 					colsContent := rest[1:endIdx]
-					colsClean := reStripStringLiterals.ReplaceAllString(colsContent, " ")
+					colsClean := stripQuotedIdents(reStripStringLiterals.ReplaceAllString(colsContent, " "))
 					if reIndexKeyword.MatchString(colsClean) {
 						markers = append(markers, diagMarkerSpan(r, "Secondary indexes (INDEX) are only supported on hybrid tables.", 4))
 					}
@@ -2531,11 +2531,82 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 
 // ── Shared validation helpers (DRY) ───────────────────────────────────────────
 
-// cleanParseText strips string literals (replacing them with ''), then removes
-// SQL comments and trims whitespace. The two-step ordering prevents '--' inside
-// quoted strings from being treated as line comments.
+// cleanParseText strips both SQL comments and string literals in a single pass,
+// correctly handling apostrophes inside comments (e.g. -- let's) and comment
+// markers inside string literals (e.g. 'a--b'). String literals are replaced
+// with the placeholder ''.
 func cleanParseText(s string) string {
-	return strings.TrimSpace(stripCommentsSQL(reStripStringLiterals.ReplaceAllString(s, "''")))
+	return strings.TrimSpace(stripAndMask(s, true))
+}
+
+// stripCommentsSafe removes SQL comments while correctly handling apostrophes
+// inside comments and comment markers inside string literals. Unlike
+// cleanParseText, string literals are preserved verbatim.
+func stripCommentsSafe(s string) string {
+	return strings.TrimSpace(stripAndMask(s, false))
+}
+
+// stripAndMask performs a single-pass scan that recognises string literals,
+// line comments (--), and block comments (/* ... */) in priority order.
+// If maskStrings is true, string literals are replaced with ''; otherwise
+// they are copied verbatim.
+func stripAndMask(s string, maskStrings bool) string {
+	var buf strings.Builder
+	i := 0
+	n := len(s)
+	for i < n {
+		if s[i] == '\'' {
+			// String literal
+			if maskStrings {
+				buf.WriteString("''")
+			} else {
+				buf.WriteByte('\'')
+			}
+			i++
+			for i < n {
+				if s[i] == '\'' {
+					if i+1 < n && s[i+1] == '\'' {
+						if !maskStrings {
+							buf.WriteString("''")
+						}
+						i += 2
+					} else {
+						if !maskStrings {
+							buf.WriteByte('\'')
+						}
+						i++
+						break
+					}
+				} else {
+					if !maskStrings {
+						buf.WriteByte(s[i])
+					}
+					i++
+				}
+			}
+		} else if i+1 < n && s[i] == '-' && s[i+1] == '-' {
+			// Line comment — skip until end of line, preserve newline
+			i += 2
+			for i < n && s[i] != '\n' {
+				i++
+			}
+		} else if i+1 < n && s[i] == '/' && s[i+1] == '*' {
+			// Block comment — replace with space
+			buf.WriteByte(' ')
+			i += 2
+			for i < n {
+				if i+1 < n && s[i] == '*' && s[i+1] == '/' {
+					i += 2
+					break
+				}
+				i++
+			}
+		} else {
+			buf.WriteByte(s[i])
+			i++
+		}
+	}
+	return buf.String()
 }
 
 // checkOrReplaceConflict returns a diagnostic and true if both OR REPLACE and
@@ -4498,6 +4569,10 @@ func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker 
 		markers = append(markers, diagMarkerSpan(r, "OR REPLACE is not supported for hybrid tables.", 4))
 	}
 
+	if marker, conflict := checkOrReplaceConflict(clean, r, "CREATE HYBRID TABLE"); conflict {
+		markers = append(markers, marker)
+	}
+
 	if reTransient.MatchString(clean) {
 		markers = append(markers, diagMarkerSpan(r, "TRANSIENT is not supported for hybrid tables.", 4))
 	}
@@ -4563,15 +4638,20 @@ func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker 
 						}
 					}
 				} else if !strings.HasPrefix(content, "FOREIGN KEY") && !strings.HasPrefix(content, "UNIQUE") && !strings.HasPrefix(content, "INDEX") {
-					// Column definition
-					words := strings.Fields(segClean)
-					if len(words) > 0 {
-						colName := normalizeIdent(words[0])
+					// Column definition â extract leading identifier
+					// (handles quoted identifiers with spaces like "MY COL").
+					colName := extractLeadingIdent(segClean)
+					if colName != "" {
 						if rePrimaryKey.MatchString(upSeg) {
 							hasPK = true
 							pkCols[colName] = true
 						}
-						if reNotNull.MatchString(upSeg) || reAutoIncrement.MatchString(upSeg) {
+						// Strip quoted identifiers and parenthesized content
+						// before checking NOT NULL / AUTOINCREMENT so that
+						// column names like "AUTOINCREMENT" or expressions
+						// like CHECK(id IS NOT NULL) don't cause false matches.
+						bareUpSeg := strings.ToUpper(stripQuotedIdentsAndParens(segClean))
+						if reNotNull.MatchString(bareUpSeg) || reAutoIncrement.MatchString(bareUpSeg) {
 							colHasNotNull[colName] = true
 						}
 					}
@@ -4600,6 +4680,90 @@ func normalizeIdent(s string) string {
 		return s[1 : len(s)-1]
 	}
 	return strings.ToUpper(s)
+}
+
+// extractLeadingIdent extracts the first SQL identifier from a column
+// definition segment, handling double-quoted identifiers that may contain
+// spaces (e.g. "MY COL" INT NOT NULL).
+func extractLeadingIdent(seg string) string {
+	seg = strings.TrimSpace(seg)
+	m := reIdentOrQuoted.FindString(seg)
+	if m == "" {
+		return ""
+	}
+	return normalizeIdent(m)
+}
+
+// stripQuotedIdents replaces double-quoted identifiers with a single space,
+// preventing identifier names like "INDEX" from matching keyword regexes.
+func stripQuotedIdents(s string) string {
+	var buf strings.Builder
+	i := 0
+	for i < len(s) {
+		if s[i] == '"' {
+			buf.WriteByte(' ')
+			i++
+			for i < len(s) {
+				if s[i] == '"' {
+					if i+1 < len(s) && s[i+1] == '"' {
+						i += 2
+					} else {
+						i++
+						break
+					}
+				} else {
+					i++
+				}
+			}
+		} else {
+			buf.WriteByte(s[i])
+			i++
+		}
+	}
+	return buf.String()
+}
+
+// stripQuotedIdentsAndParens removes double-quoted identifiers and
+// parenthesized content (depth-aware) from s, replacing them with spaces.
+// This prevents identifiers named "AUTOINCREMENT" or expressions like
+// CHECK(id IS NOT NULL) from matching keyword regexes.
+func stripQuotedIdentsAndParens(s string) string {
+	var buf strings.Builder
+	i := 0
+	for i < len(s) {
+		if s[i] == '"' {
+			buf.WriteByte(' ')
+			i++
+			for i < len(s) {
+				if s[i] == '"' {
+					if i+1 < len(s) && s[i+1] == '"' {
+						i += 2
+					} else {
+						i++
+						break
+					}
+				} else {
+					i++
+				}
+			}
+		} else if s[i] == '(' {
+			buf.WriteByte(' ')
+			depth := 1
+			i++
+			for i < len(s) && depth > 0 {
+				if s[i] == '(' {
+					depth++
+				} else if s[i] == ')' {
+					depth--
+				}
+				i++
+			}
+		} else {
+			buf.WriteByte(s[i])
+			i++
+		}
+	}
+	return buf.String()
 }
 
 func splitHybridSegments(s string) []string {
@@ -5074,13 +5238,19 @@ func validateCreateEventTable(parseText string, r StatementRange) []DiagMarker {
 		return markers
 	}
 
-	// 3. Column definitions are not allowed — event tables have a fixed schema.
+	// 3. TRANSIENT is not supported for event tables.
+	if reTransient.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"TRANSIENT is not supported for event tables.", 4))
+	}
+
+	// 4. Column definitions are not allowed — event tables have a fixed schema.
 	if reEventTableColumnList.MatchString(clean) {
 		markers = append(markers, diagMarkerSpan(r,
 			"Event tables have a fixed schema and do not support column definitions.", 4))
 	}
 
-	// 4. CLUSTER BY is not supported for event tables.
+	// 5. CLUSTER BY is not supported for event tables.
 	if rePatternClusterBy.MatchString(clean) {
 		markers = append(markers, diagMarkerSpan(r,
 			"CLUSTER BY is not supported for EVENT TABLE.", 4))
@@ -8057,6 +8227,19 @@ func validateAlterTableSearchOptimization(stripped string, r StatementRange) []D
 			markers = append(markers, diagMarkerSpan(r,
 				fmt.Sprintf("Unknown search optimization type %q. Valid types are EQUALITY, SUBSTRING, GEO, FULL_TEXT.", funcName), 4))
 		}
+		// Check for trailing content after the closing paren of the
+		// expression — a missing comma between expressions like
+		// EQUALITY(c1) SUBSTRING(c2) would otherwise go undetected.
+		if openIdx := strings.Index(expr, "("); openIdx != -1 {
+			closeIdx := findMatchingParen(expr[openIdx:])
+			if closeIdx != -1 {
+				trailing := strings.TrimRight(strings.TrimSpace(expr[openIdx+closeIdx+1:]), "; ")
+				if trailing != "" {
+					markers = append(markers, diagMarkerSpan(r,
+						fmt.Sprintf("Unexpected trailing content after search optimization expression %s(...): %q. Separate multiple expressions with commas.", funcName, trailing), 4))
+				}
+			}
+		}
 	}
 
 	return markers
@@ -8142,10 +8325,12 @@ func validateAlterDynamicTable(parseText string, r StatementRange) []DiagMarker 
 
 	// 6. SET TARGET_LAG value validation.
 	//    The bare check uses suffix (no string literals to worry about).
-	//    The value check uses parseText (raw) because clean has string literals
-	//    stripped, and the lag value is inside a string literal (e.g. '1 minute').
+	//    The value check uses stripCommentsSafe (comments removed but strings
+	//    preserved) so that a valid TARGET_LAG inside a comment does not mask
+	//    an invalid actual value.
 	if hasSet && reAlterDynTableTargetLagBare.MatchString(suffix) {
-		if !reAlterDynTableTargetLagVal.MatchString(parseText) {
+		commentStripped := stripCommentsSafe(parseText)
+		if !reAlterDynTableTargetLagVal.MatchString(commentStripped) {
 			markers = append(markers, diagMarkerSpan(r,
 				"Invalid TARGET_LAG value. Expected a quoted duration (e.g. '1 minute') or DOWNSTREAM.", 4))
 		}
@@ -8173,7 +8358,7 @@ func validateAlterTableSwapWith(parseText string, r StatementRange) []DiagMarker
 			"ALTER TABLE … SWAP WITH requires a table name.", 4))
 		return markers
 	}
-	srcName := strings.ToUpper(strings.ReplaceAll(srcMatch[1], `"`, ""))
+	srcParts := normalizeSnowflakeIdent(srcMatch[1])
 
 	// 2. Target table name is required after SWAP WITH.
 	tgtMatch := reAlterTableSwapTarget.FindStringSubmatch(clean)
@@ -8182,10 +8367,10 @@ func validateAlterTableSwapWith(parseText string, r StatementRange) []DiagMarker
 			"SWAP WITH requires a target table name.", 4))
 		return markers
 	}
-	tgtName := strings.ToUpper(strings.ReplaceAll(tgtMatch[1], `"`, ""))
+	tgtParts := normalizeSnowflakeIdent(tgtMatch[1])
 
 	// 3. Source and target must be different (same name is a no-op).
-	if srcName == tgtName {
+	if slices.Equal(srcParts, tgtParts) {
 		markers = append(markers, diagMarkerSpan(r,
 			fmt.Sprintf("SWAP WITH the same table '%s' is a no-op.", tgtMatch[1]), 4))
 	}
@@ -8197,4 +8382,43 @@ func validateAlterTableSwapWith(parseText string, r StatementRange) []DiagMarker
 	}
 
 	return markers
+}
+
+// normalizeSnowflakeIdent normalises a possibly multi-part Snowflake identifier
+// (e.g. db.schema.table) into a slice of canonical parts. Unquoted parts are
+// uppercased (case-insensitive in Snowflake). Quoted parts preserve their
+// exact case (case-sensitive in Snowflake), with escaped "" unescaped.
+// This enables correct same-table comparisons: "orders" != ORDERS,
+// "A.B" (1 part) != A.B (2 parts), "lower" != "LOWER".
+func normalizeSnowflakeIdent(s string) []string {
+	rawParts := splitIdentParts(s)
+	normalized := make([]string, len(rawParts))
+	for i, p := range rawParts {
+		p = strings.TrimSpace(p)
+		if len(p) >= 2 && p[0] == '"' && p[len(p)-1] == '"' {
+			inner := p[1 : len(p)-1]
+			normalized[i] = strings.ReplaceAll(inner, `""`, `"`)
+		} else {
+			normalized[i] = strings.ToUpper(p)
+		}
+	}
+	return normalized
+}
+
+// splitIdentParts splits a multi-part identifier on dots that are NOT inside
+// double quotes. "A.B" is a single part; A.B is two parts.
+func splitIdentParts(s string) []string {
+	var parts []string
+	inQuote := false
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '"' {
+			inQuote = !inQuote
+		} else if s[i] == '.' && !inQuote {
+			parts = append(parts, s[start:i])
+			start = i + 1
+		}
+	}
+	parts = append(parts, s[start:])
+	return parts
 }
