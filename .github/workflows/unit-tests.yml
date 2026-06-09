@@ -26,6 +26,10 @@ jobs:
       checks: write
       pull-requests: write
 
+    defaults:
+      run:
+        shell: bash
+
     steps:
       - name: Install base tools
         run: |
@@ -51,11 +55,10 @@ jobs:
           mv go-junit-report /usr/local/bin/
 
       - name: Run DDL tests
-        continue-on-error: true
         run: go test -v -race -count=1 ./internal/ddl/... 2>&1 | go-junit-report -set-exit-code > report-ddl.xml
 
       - name: Run SQLEditor tests
-        continue-on-error: true
+        if: always()
         run: go test -v -race -count=1 ./internal/sqleditor/... 2>&1 | go-junit-report -set-exit-code > report-sqleditor.xml
 
       - name: Run Filesystem tests
@@ -63,7 +66,7 @@ jobs:
         run: go test -v -race -count=1 ./internal/filesystem/... 2>&1 | go-junit-report -set-exit-code > report-filesystem.xml
 
       - name: Run Migration tests
-        continue-on-error: true
+        if: always()
         run: go test -v -race -count=1 ./internal/migration/... 2>&1 | go-junit-report -set-exit-code > report-migration.xml
 
       - name: Run MCP tests
