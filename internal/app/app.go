@@ -110,7 +110,8 @@ type App struct {
 	ptyCmd *exec.Cmd
 
 	// Session-scoped query log for debugging and issue reporting.
-	queryLog *querylog.Log
+	queryLog             *querylog.Log
+	setQueryLogMenuCheck func(bool) // set by buildMenu; updates the native menu checkbox
 }
 
 // NewApp creates and returns a new App instance for use with the Wails runtime.

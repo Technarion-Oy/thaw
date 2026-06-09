@@ -103,6 +103,10 @@ func buildMenu(app *App) *menu.Menu {
 	queryLogEnabled = queryLogMenu.AddCheckbox("Enable Query Log", false, nil, func(_ *menu.CallbackData) {
 		wailsruntime.EventsEmit(app.ctx, "menu:query-log-toggle", queryLogEnabled.Checked)
 	})
+	app.setQueryLogMenuCheck = func(checked bool) {
+		queryLogEnabled.Checked = checked
+		wailsruntime.MenuUpdateApplicationMenu(app.ctx)
+	}
 
 	queryLogMenu.AddSeparator()
 

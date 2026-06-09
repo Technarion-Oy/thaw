@@ -14,8 +14,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Input, Select, Table, Tag, Tooltip, Typography, message } from "antd";
 import { ClearOutlined, CopyOutlined, DownloadOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { EventsOn } from "../../../wailsjs/runtime/runtime";
-import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import { EventsOn, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { GetQueryLogEntries, ClearQueryLog, IsQueryLogEnabled, SetQueryLogEnabled, PickQueryLogExportFile, SaveFile } from "../../../wailsjs/go/app/App";
 
 const { Text } = Typography;
@@ -65,12 +64,105 @@ function formatEntryForCopy(e: QueryLogEntry): string {
   return `[${ts}] [${e.status}] ${dur} [${e.source}] ${e.queryID || "-"}\n  ${e.sql}`;
 }
 
+const columns: ColumnsType<QueryLogEntry> = [
+  {
+    title: "Time",
+    dataIndex: "timestamp",
+    key: "timestamp",
+    width: 100,
+    render: (ts: string) => (
+      <Text style={{ fontFamily: "monospace", fontSize: 11 }}>{formatTime(ts)}</Text>
+    ),
+  },
+  {
+    title: "SQL",
+    dataIndex: "sql",
+    key: "sql",
+    ellipsis: true,
+    render: (sql: string) => (
+      <Tooltip title={sql} placement="topLeft">
+        <Text style={{ fontFamily: "monospace", fontSize: 11 }}>
+          {sql.length > 120 ? sql.slice(0, 120) + "..." : sql}
+        </Text>
+      </Tooltip>
+    ),
+  },
+  {
+    title: "Source",
+    dataIndex: "source",
+    key: "source",
+    width: 80,
+    render: (src: string) => <Tag color={sourceColors[src] ?? "default"} style={{ fontSize: 10 }}>{src}</Tag>,
+  },
+  {
+    title: "Status",
+    dataIndex: "status",
+    key: "status",
+    width: 90,
+    render: (status: string) => <Tag color={statusColors[status] ?? "default"} style={{ fontSize: 10 }}>{status}</Tag>,
+  },
+  {
+    title: "Duration",
+    dataIndex: "durationMs",
+    key: "durationMs",
+    width: 80,
+    align: "right",
+    render: (ms: number, record: QueryLogEntry) =>
+      record.status === "RUNNING" ? (
+        <Text style={{ fontSize: 11, color: "var(--text-muted)" }}>...</Text>
+      ) : (
+        <Text style={{ fontFamily: "monospace", fontSize: 11 }}>{ms > 0 ? `${ms}ms` : "-"}</Text>
+      ),
+  },
+  {
+    title: "Query ID",
+    dataIndex: "queryID",
+    key: "queryID",
+    width: 160,
+    render: (qid: string) =>
+      qid ? (
+        <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <Text style={{ fontFamily: "monospace", fontSize: 10 }}>{qid}</Text>
+          <Button
+            type="text"
+            size="small"
+            icon={<CopyOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />}
+            style={{ height: 16, padding: "0 2px", minWidth: 0 }}
+            onClick={() => ClipboardSetText(qid).then(() => message.success("Query ID copied"))}
+          />
+        </span>
+      ) : (
+        <Text style={{ fontSize: 11, color: "var(--text-faint)" }}>-</Text>
+      ),
+  },
+  {
+    title: "",
+    key: "actions",
+    width: 32,
+    render: (_: unknown, record: QueryLogEntry) => (
+      <Tooltip title="Copy entry">
+        <Button
+          type="text"
+          size="small"
+          icon={<CopyOutlined style={{ fontSize: 11, color: "var(--text-muted)" }} />}
+          style={{ height: 20, padding: "0 4px", minWidth: 0 }}
+          onClick={() =>
+            ClipboardSetText(formatEntryForCopy(record)).then(() => message.success("Entry copied"))
+          }
+        />
+      </Tooltip>
+    ),
+  },
+];
+
 export default function QueryLogPane() {
   const [entries, setEntries] = useState<QueryLogEntry[]>([]);
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const mountedRef = useRef(true);
+  const tableContainerRef = useRef<HTMLDivElement>(null);
+  const [tableHeight, setTableHeight] = useState<number>(300);
 
   // Intentionally always enable backend logging on mount (and never disable on
   // unmount). The log is session-scoped and lightweight — keeping it running in
@@ -125,6 +217,21 @@ export default function QueryLogPane() {
     return () => { offEntry(); offUpdate(); offFilter(); offCleared(); };
   }, []);
 
+  // Measure the table container so Ant Table gets a concrete pixel scroll height.
+  useEffect(() => {
+    const el = tableContainerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        // Subtract Ant Table header height (~39px for size="small").
+        const h = Math.max(entry.contentRect.height - 39, 100);
+        setTableHeight(h);
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const handleClear = useCallback(() => {
     ClearQueryLog().then(() => setEntries([])).catch(() => {});
   }, []);
@@ -156,97 +263,6 @@ export default function QueryLogPane() {
       message.error(String(err));
     }
   };
-
-  const columns: ColumnsType<QueryLogEntry> = [
-    {
-      title: "Time",
-      dataIndex: "timestamp",
-      key: "timestamp",
-      width: 100,
-      render: (ts: string) => (
-        <Text style={{ fontFamily: "monospace", fontSize: 11 }}>{formatTime(ts)}</Text>
-      ),
-    },
-    {
-      title: "SQL",
-      dataIndex: "sql",
-      key: "sql",
-      ellipsis: true,
-      render: (sql: string) => (
-        <Tooltip title={sql} placement="topLeft">
-          <Text style={{ fontFamily: "monospace", fontSize: 11 }}>
-            {sql.length > 120 ? sql.slice(0, 120) + "..." : sql}
-          </Text>
-        </Tooltip>
-      ),
-    },
-    {
-      title: "Source",
-      dataIndex: "source",
-      key: "source",
-      width: 80,
-      render: (src: string) => <Tag color={sourceColors[src] ?? "default"} style={{ fontSize: 10 }}>{src}</Tag>,
-    },
-    {
-      title: "Status",
-      dataIndex: "status",
-      key: "status",
-      width: 90,
-      render: (status: string) => <Tag color={statusColors[status] ?? "default"} style={{ fontSize: 10 }}>{status}</Tag>,
-    },
-    {
-      title: "Duration",
-      dataIndex: "durationMs",
-      key: "durationMs",
-      width: 80,
-      align: "right",
-      render: (ms: number, record: QueryLogEntry) =>
-        record.status === "RUNNING" ? (
-          <Text style={{ fontSize: 11, color: "var(--text-muted)" }}>...</Text>
-        ) : (
-          <Text style={{ fontFamily: "monospace", fontSize: 11 }}>{ms > 0 ? `${ms}ms` : "-"}</Text>
-        ),
-    },
-    {
-      title: "Query ID",
-      dataIndex: "queryID",
-      key: "queryID",
-      width: 160,
-      render: (qid: string) =>
-        qid ? (
-          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <Text style={{ fontFamily: "monospace", fontSize: 10 }}>{qid}</Text>
-            <Button
-              type="text"
-              size="small"
-              icon={<CopyOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />}
-              style={{ height: 16, padding: "0 2px", minWidth: 0 }}
-              onClick={() => ClipboardSetText(qid).then(() => message.success("Query ID copied"))}
-            />
-          </span>
-        ) : (
-          <Text style={{ fontSize: 11, color: "var(--text-faint)" }}>-</Text>
-        ),
-    },
-    {
-      title: "",
-      key: "actions",
-      width: 32,
-      render: (_: unknown, record: QueryLogEntry) => (
-        <Tooltip title="Copy entry">
-          <Button
-            type="text"
-            size="small"
-            icon={<CopyOutlined style={{ fontSize: 11, color: "var(--text-muted)" }} />}
-            style={{ height: 20, padding: "0 4px", minWidth: 0 }}
-            onClick={() =>
-              ClipboardSetText(formatEntryForCopy(record)).then(() => message.success("Entry copied"))
-            }
-          />
-        </Tooltip>
-      ),
-    },
-  ];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
@@ -317,14 +333,14 @@ export default function QueryLogPane() {
       </div>
 
       {/* Table */}
-      <div style={{ flex: 1, overflow: "auto" }}>
+      <div ref={tableContainerRef} style={{ flex: 1, overflow: "hidden" }}>
         <Table<QueryLogEntry>
           dataSource={filtered}
           columns={columns}
           rowKey="id"
           size="small"
           pagination={false}
-          scroll={{ y: "calc(100vh - 200px)" }}
+          scroll={{ y: tableHeight }}
           style={{ fontSize: 11 }}
           locale={{ emptyText: entries.length === 0 ? "No queries logged yet. Run a query to see entries here." : "No matching entries." }}
         />

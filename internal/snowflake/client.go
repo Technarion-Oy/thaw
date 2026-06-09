@@ -778,6 +778,11 @@ func (c *Client) GetSessionContext(ctx context.Context) (SessionContext, error) 
 }
 
 // GetSessionContextOnConn is the same as GetSessionContext but runs on a pinned connection.
+//
+// NOTE: Intentionally not instrumented via the OnQuery hook. This runs on a
+// pinned *sql.Conn (not c.db) so the queryRowCtx wrapper cannot be used, and
+// the query fires after every QuerySingle/ExecuteOnConn call — logging it
+// would add significant noise to the query log without useful signal.
 func (c *Client) GetSessionContextOnConn(ctx context.Context, conn *sql.Conn) (SessionContext, error) {
 	// Ensure sync query is NOT async even if the parent context is.
 	syncCtx, cancel := context.WithCancel(context.Background())

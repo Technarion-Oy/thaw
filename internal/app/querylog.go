@@ -31,9 +31,13 @@ func (a *App) IsQueryLogEnabled() bool {
 	return a.queryLog.IsEnabled()
 }
 
-// SetQueryLogEnabled enables or disables the query log and emits a state event.
+// SetQueryLogEnabled enables or disables the query log, emits a state event,
+// and keeps the native menu checkbox in sync.
 func (a *App) SetQueryLogEnabled(enabled bool) {
 	a.queryLog.SetEnabled(enabled)
+	if a.setQueryLogMenuCheck != nil {
+		a.setQueryLogMenuCheck(enabled)
+	}
 	wailsruntime.EventsEmit(a.ctx, "querylog:state", map[string]interface{}{
 		"enabled": enabled,
 	})
