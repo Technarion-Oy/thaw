@@ -39,6 +39,7 @@ nil-check → delegate → return.
 | `filesystem.go` | File read/write/rename/delete, `StartFileWatcher`/`StopFileWatcher`, reveal in Finder; delegates to `internal/filesystem`. |
 | `profiles.go` | Snowflake CLI profile CRUD (save, delete, clone, rename, set default); delegates to `internal/sfconfig`. |
 | `ddlexport.go` | `ExportDatabaseDDL`, `ExportAllDatabasesDDL`, `ExportAccountObjectsDDL`, `GetERDiagramData`. Contain goroutine orchestration and `ddl:progress` event emission — not thin delegators. |
+| `querylog.go` | `GetQueryLogEntries`, `ClearQueryLog`, `IsQueryLogEnabled`, `SetQueryLogEnabled`, `GetQueryLogFilter`, `SetQueryLogFilter`. Thin delegators to `a.queryLog` (`internal/querylog`). |
 | `config.go` | `GetFeatureFlags`/`SaveFeatureFlags`/`GetAdminLockedFlags`, `GetEditorPrefs`/`SaveEditorPrefs`, `GetGitConfig`/`SaveGitConfig`, `GetSessionConfig`/`SaveSessionConfig`/`GetSessionInitMode`. |
 | `ai.go` | `ListAIModels`, `TestAIModel`, `GetAISuggestion`, `GetAIEdit`, `GetAIExplain`, `GetEditorPrefs` back-fill; delegates to `internal/ai`. |
 | `shell.go` | Embedded terminal (PTY): `GetAvailableShells`, `StartShell`, `StopShell`, `WriteShell`, `ResizeShell`. Contains PTY goroutine; emits `shell:data` events. |

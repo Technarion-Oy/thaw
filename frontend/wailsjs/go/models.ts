@@ -234,6 +234,7 @@ export namespace config {
 	    gitIntegration: boolean;
 	    queryProfile: boolean;
 	    explainSql: boolean;
+	    queryLog: boolean;
 	    sqlDiagnostics: boolean;
 	    schemaAutocomplete: boolean;
 	    ddlHoverTooltips: boolean;
@@ -279,6 +280,7 @@ export namespace config {
 	        this.gitIntegration = source["gitIntegration"];
 	        this.queryProfile = source["queryProfile"];
 	        this.explainSql = source["explainSql"];
+	        this.queryLog = source["queryLog"];
 	        this.sqlDiagnostics = source["sqlDiagnostics"];
 	        this.schemaAutocomplete = source["schemaAutocomplete"];
 	        this.ddlHoverTooltips = source["ddlHoverTooltips"];
@@ -1720,6 +1722,58 @@ export namespace queryhistory {
 	        this.rowsProduced = source["rowsProduced"];
 	        this.bytesScanned = source["bytesScanned"];
 	    }
+	}
+
+}
+
+export namespace querylog {
+	
+	export class Entry {
+	    id: number;
+	    // Go type: time
+	    timestamp: any;
+	    sql: string;
+	    queryID: string;
+	    status: string;
+	    durationMs: number;
+	    error: string;
+	    source: string;
+	    tabID: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Entry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.timestamp = this.convertValues(source["timestamp"], null);
+	        this.sql = source["sql"];
+	        this.queryID = source["queryID"];
+	        this.status = source["status"];
+	        this.durationMs = source["durationMs"];
+	        this.error = source["error"];
+	        this.source = source["source"];
+	        this.tabID = source["tabID"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }

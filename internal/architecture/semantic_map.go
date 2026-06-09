@@ -38,6 +38,7 @@ func GetCodebaseSemanticMap() string {
       "name": "SQL Editor \u0026 Diagnostics",
       "backend_paths": [
         "internal/queryhistory/",
+        "internal/querylog/",
         "internal/queryprofile/",
         "internal/sqleditor/"
       ],
@@ -49,6 +50,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/results/ConditionalFormattingModal.tsx",
         "frontend/src/components/results/DataTypeFormatModal.tsx",
         "frontend/src/components/results/GridSearch.tsx",
+        "frontend/src/components/results/QueryLogPane.tsx",
         "frontend/src/components/results/QuickChartModal.tsx",
         "frontend/src/components/results/ResultGrid.tsx",
         "frontend/src/components/results/StatusBar.tsx",

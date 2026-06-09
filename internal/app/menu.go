@@ -96,6 +96,34 @@ func buildMenu(app *App) *menu.Menu {
 		wailsruntime.EventsEmit(app.ctx, "menu:mcp-sessions")
 	})
 
+	// ── Query Log submenu ────────────────────────────────────────────────
+	queryLogMenu := viewMenu.AddSubmenu("Query Log")
+
+	var queryLogEnabled *menu.MenuItem
+	queryLogEnabled = queryLogMenu.AddCheckbox("Enable Query Log", false, nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:query-log-toggle", queryLogEnabled.Checked)
+	})
+
+	queryLogMenu.AddSeparator()
+
+	var logAll, logUser, logInternal *menu.MenuItem
+	setLogFilter := func(selected *menu.MenuItem, value string) {
+		logAll.Checked = selected == logAll
+		logUser.Checked = selected == logUser
+		logInternal.Checked = selected == logInternal
+		wailsruntime.MenuUpdateApplicationMenu(app.ctx)
+		wailsruntime.EventsEmit(app.ctx, "menu:query-log-filter", value)
+	}
+	logAll = queryLogMenu.AddRadio("Log All Queries", true, nil, func(_ *menu.CallbackData) {
+		setLogFilter(logAll, "all")
+	})
+	logUser = queryLogMenu.AddRadio("Log User Queries Only", false, nil, func(_ *menu.CallbackData) {
+		setLogFilter(logUser, "user")
+	})
+	logInternal = queryLogMenu.AddRadio("Log Internal Queries Only", false, nil, func(_ *menu.CallbackData) {
+		setLogFilter(logInternal, "internal")
+	})
+
 	viewMenu.AddSeparator()
 	advancedMenu := viewMenu.AddSubmenu("Advanced")
 	advancedMenu.AddText("Session Management…", nil, func(_ *menu.CallbackData) {

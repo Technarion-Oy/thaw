@@ -22,12 +22,14 @@ with the `gridStore` singleton for shared selection/search/formatting state.
 | `QuickChartModal.tsx` | Modal rendering bar, line, or scatter charts (Recharts) over the selected grid range. |
 | `ExplainModal.tsx` | Modal that calls `RunExplain` IPC, then renders a flattened EXPLAIN plan as an Ant Design Table with step/operation/cost/rows/bytes columns. |
 | `QueryProfileModal.tsx` | Modal that calls `GetQueryOperatorStats` IPC. Shows operator-level stats (type, execution time, rows, bytes, spilling) with `liveRefresh` auto-poll every 3 s while a query is still running. |
+| `QueryLogPane.tsx` | Session-scoped query log panel. Subscribes to `querylog:entry` and `querylog:update` Wails events for live updates. Calls `GetQueryLogEntries` and `ClearQueryLog` IPC. Provides source/status filtering, text search, and copy-to-clipboard formatting for debugging and issue reporting. Gated behind the `queryLog` feature flag. |
 
 ## Patterns & integration
 
 **IPC calls:**
 - `ExplainModal.tsx` — `RunExplain` from `wailsjs/go/app/App`.
 - `QueryProfileModal.tsx` — `GetQueryOperatorStats` from `wailsjs/go/app/App`.
+- `QueryLogPane.tsx` — `GetQueryLogEntries`, `ClearQueryLog` from `wailsjs/go/app/App`; `ClipboardSetText` from `wailsjs/runtime/runtime`.
 - `ResultGrid.tsx` — `ClipboardSetText` from `wailsjs/runtime/runtime` (WKWebView clipboard workaround).
 
 **Stores used:**

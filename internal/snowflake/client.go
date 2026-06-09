@@ -190,6 +190,11 @@ type Client struct {
 	// and getExcludedExtendedKinds (read) which use atomic.Value for safe
 	// concurrent access without locking.
 	excludedExtendedKinds atomic.Value // stores map[string]bool
+
+	// OnQuery is an optional hook called after every SQL statement execution.
+	// Parameters: ctx, sql text, query ID (may be empty), error (nil on success),
+	// wall-clock duration. Nil-checked before invocation.
+	OnQuery func(ctx context.Context, sql string, queryID string, err error, dur time.Duration)
 }
 
 // SetExcludedExtendedKinds atomically replaces the set of object kinds that
@@ -522,9 +527,17 @@ func (c *Client) Execute(ctx context.Context, query string, onProgress ...func(i
 			onProgress[0](i, len(stmts), qidChan)
 		}
 
+		start := time.Now()
 		result, err := queryOnConn(stmtCtx, conn, stmt)
+		dur := time.Since(start)
 		if err != nil {
+			if c.OnQuery != nil {
+				c.OnQuery(ctx, stmt, "", err, dur)
+			}
 			return nil, err
+		}
+		if c.OnQuery != nil {
+			c.OnQuery(ctx, stmt, "", nil, dur)
 		}
 		last = result
 	}
@@ -610,8 +623,13 @@ func (c *Client) QuerySingle(ctx context.Context, query string) (*QueryResult, e
 	}
 	defer func() { _ = conn.Close() }()
 
+	start := time.Now()
 	result, err := queryOnConn(ctx, conn, query)
+	dur := time.Since(start)
 	if err != nil {
+		if c.OnQuery != nil {
+			c.OnQuery(ctx, query, "", err, dur)
+		}
 		return nil, err
 	}
 
@@ -632,6 +650,9 @@ func (c *Client) QuerySingle(ctx context.Context, query string) (*QueryResult, e
 		_, _ = c.GetSessionContextOnConn(syncCtx, conn)
 	}
 
+	if c.OnQuery != nil {
+		c.OnQuery(ctx, query, "", nil, dur)
+	}
 	return result, nil
 }
 

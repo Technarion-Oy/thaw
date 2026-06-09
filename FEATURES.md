@@ -326,6 +326,7 @@ Ghost-text SQL suggestions appear automatically as you type in the editor. Press
 
 - **Model Validation** — when configuring AI, a live **model status indicator** appears next to the model selector: a green `● Model OK` confirms the model is reachable, while a red indicator shows the exact API error — so misconfigured model names are caught immediately rather than at runtime.
 - **Query Profile** — click the graph icon in the results status bar (visible for successful runs) to see the execution profile for the query; shows Operator Statistics, Execution Time Breakdown, and Operator Attributes sourced from `GET_QUERY_OPERATOR_STATS`.
+- **Query Log** — session-scoped log of all SQL queries Thaw sends to Snowflake (both user-initiated from the editor and internal queries like object listing and DDL fetching). Appears as a third result pane tab ("Query Log") alongside Results and Terminal. Useful for debugging and attaching to issue reports. Enable via **View → Enabled Features → Query Log** or **View → Query Log → Enable Query Log**. Supports source filtering (All/User/Internal), status filtering, text search, and one-click copy formatting.
 
 ### Configuration
 
@@ -805,7 +806,7 @@ Features are organized into six categories, each with individual toggles:
 
 **Developer Environments** — Snowpark & Notebooks, Embedded Terminal, Git Integration
 
-**Performance & Diagnostics** — Query Profile, Explain SQL
+**Performance & Diagnostics** — Query Profile, Explain SQL, Query Log
 
 ### IT Admin Management
 
@@ -878,6 +879,7 @@ The following features are identified as feasible to be turned off via feature f
 **Performance & Diagnostics**
 - **Query Profile** (Operator statistics and execution time breakdown graphs)
 - **Explain SQL** (Pre-execution linter for full table scans and cartesian joins)
+- **Query Log** (Session-scoped log of all SQL queries Thaw sends to Snowflake, for debugging and issue reporting)
 
 **Results Grid**
 - **Multi-Cell Copy & Selection** (Range selection, multi-cell copy, selection aggregations, and quick charting)

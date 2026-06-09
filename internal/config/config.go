@@ -209,8 +209,8 @@ func DefaultNotebookPrefs() NotebookPrefs {
 //
 // Version tracks the schema revision so new flags introduced after an initial
 // save can be filled with their defaults rather than the zero value (false).
-// Current version: 13 (added MCPServer).
-const flagsVersion = 13
+// Current version: 14 (added QueryLog).
+const flagsVersion = 14
 
 type FeatureFlags struct {
 	Initialized bool `json:"initialized"`
@@ -253,6 +253,7 @@ type FeatureFlags struct {
 	// Performance & Diagnostics
 	QueryProfile bool `json:"queryProfile"`
 	ExplainSQL   bool `json:"explainSql"`
+	QueryLog     bool `json:"queryLog"` // Session-scoped log of all SQL queries for debugging
 
 	// SQL Editor
 	SqlDiagnostics     bool `json:"sqlDiagnostics"`
@@ -312,6 +313,7 @@ func DefaultFeatureFlags() FeatureFlags {
 		GitIntegration:         true,
 		QueryProfile:           true,
 		ExplainSQL:             true,
+		QueryLog:               false,
 		SqlDiagnostics:         true,
 		SchemaAutocomplete:     true,
 		DdlHoverTooltips:       true,
@@ -390,6 +392,8 @@ func MigrateFlags(f FeatureFlags) FeatureFlags {
 	// setIfZero is a no-op here because the default is false (the zero
 	// value), but kept for consistency with the migration pattern.
 	setIfZero(&f.MCPServer, defaults.MCPServer)
+	// Version 13 → 14: QueryLog added; defaults to false (opt-in).
+	setIfZero(&f.QueryLog, defaults.QueryLog)
 	f.Version = flagsVersion
 	return f
 }

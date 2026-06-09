@@ -382,6 +382,13 @@ export default function FeatureFlagsModal({ onClose }: Props) {
             locked={locked.explainSql}
             onChange={(v) => set("explainSql", v)}
           />
+          <FlagRow
+            label="Query Log"
+            description="Session-scoped log of all SQL queries Thaw sends to Snowflake, for debugging and issue reporting."
+            checked={flags.queryLog}
+            locked={locked.queryLog}
+            onChange={(v) => set("queryLog", v)}
+          />
         </Category>
 
         {/* ── Connection ── */}
