@@ -55,14 +55,12 @@ type Log struct {
 	entries    []Entry
 	nextID     int
 	enabled    bool
-	filter     string // "all", "user", "internal"
 	maxEntries int
 }
 
 // New creates a new Log with default settings.
 func New() *Log {
 	return &Log{
-		filter:     "all",
 		maxEntries: defaultMaxEntries,
 	}
 }
@@ -128,20 +126,6 @@ func (l *Log) IsEnabled() bool {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.enabled
-}
-
-// SetFilter sets the source filter: "all", "user", or "internal".
-func (l *Log) SetFilter(filter string) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.filter = filter
-}
-
-// Filter returns the current source filter.
-func (l *Log) Filter() string {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	return l.filter
 }
 
 // ── Context helpers ─────────────────────────────────────────────────────────

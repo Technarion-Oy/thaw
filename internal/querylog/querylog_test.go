@@ -116,21 +116,6 @@ func TestEnableDisable(t *testing.T) {
 	}
 }
 
-func TestFilter(t *testing.T) {
-	l := New()
-	if l.Filter() != "all" {
-		t.Fatalf("expected default filter 'all', got %s", l.Filter())
-	}
-	l.SetFilter("user")
-	if l.Filter() != "user" {
-		t.Fatalf("expected filter 'user', got %s", l.Filter())
-	}
-	l.SetFilter("internal")
-	if l.Filter() != "internal" {
-		t.Fatalf("expected filter 'internal', got %s", l.Filter())
-	}
-}
-
 func TestContextHelpers(t *testing.T) {
 	ctx := context.Background()
 

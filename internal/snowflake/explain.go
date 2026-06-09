@@ -48,11 +48,11 @@ func (c *Client) ExplainOnConn(ctx context.Context, conn *sql.Conn, query string
 	if err := validateExplainFormat(format); err != nil {
 		return nil, err
 	}
-	sql := "EXPLAIN USING " + string(format) + " " + query
+	stmt := "EXPLAIN USING " + string(format) + " " + query
 	start := time.Now()
-	result, err := queryOnConn(ctx, conn, sql)
+	result, err := queryOnConn(ctx, conn, stmt)
 	if c.OnQuery != nil {
-		c.OnQuery(ctx, sql, "", err, time.Since(start))
+		c.OnQuery(ctx, stmt, "", err, time.Since(start))
 	}
 	return result, err
 }

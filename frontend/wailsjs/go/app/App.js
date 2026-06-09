@@ -602,10 +602,6 @@ export function GetQueryLogEntries() {
   return window['go']['app']['App']['GetQueryLogEntries']();
 }
 
-export function GetQueryLogFilter() {
-  return window['go']['app']['App']['GetQueryLogFilter']();
-}
-
 export function GetQueryOperatorStats(arg1) {
   return window['go']['app']['App']['GetQueryOperatorStats'](arg1);
 }
@@ -1236,10 +1232,6 @@ export function SetNotebookQueryWarehouse(arg1, arg2, arg3, arg4) {
 
 export function SetQueryLogEnabled(arg1) {
   return window['go']['app']['App']['SetQueryLogEnabled'](arg1);
-}
-
-export function SetQueryLogFilter(arg1) {
-  return window['go']['app']['App']['SetQueryLogFilter'](arg1);
 }
 
 export function SetSessionParameter(arg1, arg2, arg3) {

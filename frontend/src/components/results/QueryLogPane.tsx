@@ -10,7 +10,7 @@
 //
 // @thaw-domain: SQL Editor & Diagnostics
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Input, Select, Table, Tag, Tooltip, Typography, message } from "antd";
 import { ClearOutlined, CopyOutlined, DownloadOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
@@ -32,7 +32,7 @@ interface QueryLogEntry {
   tabID: string;
 }
 
-interface Props {}
+const MAX_FRONTEND_ENTRIES = 5000;
 
 const statusColors: Record<string, string> = {
   SUCCESS: "green",
@@ -65,7 +65,7 @@ function formatEntryForCopy(e: QueryLogEntry): string {
   return `[${ts}] [${e.status}] ${dur} [${e.source}] ${e.queryID || "-"}\n  ${e.sql}`;
 }
 
-export default function QueryLogPane(_props: Props) {
+export default function QueryLogPane() {
   const [entries, setEntries] = useState<QueryLogEntry[]>([]);
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -91,7 +91,10 @@ export default function QueryLogPane(_props: Props) {
   useEffect(() => {
     const offEntry = EventsOn("querylog:entry", (entry: QueryLogEntry) => {
       if (!mountedRef.current) return;
-      setEntries((prev) => [...prev, entry]);
+      setEntries((prev) => {
+        const next = [...prev, entry];
+        return next.length > MAX_FRONTEND_ENTRIES ? next.slice(next.length - MAX_FRONTEND_ENTRIES) : next;
+      });
     });
     const offUpdate = EventsOn("querylog:update", (update: {
       id: number; status: string; durationMs: number; error?: string; queryID?: string;
@@ -126,13 +129,16 @@ export default function QueryLogPane(_props: Props) {
     ClearQueryLog().then(() => setEntries([])).catch(() => {});
   }, []);
 
-  // Client-side filtering.
-  const filtered = entries.filter((e) => {
-    if (sourceFilter !== "all" && e.source !== sourceFilter) return false;
-    if (statusFilter !== "all" && e.status !== statusFilter) return false;
-    if (search && !e.sql.toLowerCase().includes(search.toLowerCase()) && !e.queryID.toLowerCase().includes(search.toLowerCase())) return false;
-    return true;
-  });
+  // Client-side filtering (memoized to avoid re-filtering on every render).
+  const filtered = useMemo(() =>
+    entries.filter((e) => {
+      if (sourceFilter !== "all" && e.source !== sourceFilter) return false;
+      if (statusFilter !== "all" && e.status !== statusFilter) return false;
+      if (search && !e.sql.toLowerCase().includes(search.toLowerCase()) && !e.queryID.toLowerCase().includes(search.toLowerCase())) return false;
+      return true;
+    }),
+    [entries, sourceFilter, statusFilter, search],
+  );
 
   const handleExport = async () => {
     if (filtered.length === 0) {
@@ -318,7 +324,7 @@ export default function QueryLogPane(_props: Props) {
           rowKey="id"
           size="small"
           pagination={false}
-          scroll={{ y: "100%" }}
+          scroll={{ y: "calc(100vh - 200px)" }}
           style={{ fontSize: 11 }}
           locale={{ emptyText: entries.length === 0 ? "No queries logged yet. Run a query to see entries here." : "No matching entries." }}
         />

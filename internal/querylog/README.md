@@ -28,7 +28,6 @@ issue reporting via the "Query Log" result pane tab.
 | `Entries() []Entry` | Returns a snapshot copy of all entries. |
 | `Clear()` | Removes all entries and resets the ID counter. |
 | `SetEnabled(bool)` / `IsEnabled() bool` | Enable/disable logging. |
-| `SetFilter(string)` / `Filter() string` | Source filter: `"all"`, `"user"`, `"internal"`. |
 
 ### Context helpers
 

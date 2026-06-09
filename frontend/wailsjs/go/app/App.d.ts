@@ -332,8 +332,6 @@ export function GetQueryHistory(arg1:string,arg2:string,arg3:string,arg4:string,
 
 export function GetQueryLogEntries():Promise<Array<querylog.Entry>>;
 
-export function GetQueryLogFilter():Promise<string>;
-
 export function GetQueryOperatorStats(arg1:string):Promise<Array<queryprofile.OperatorStat>>;
 
 export function GetQuotedIdentifiersIgnoreCase():Promise<boolean>;
@@ -649,8 +647,6 @@ export function SetGitCommitFilter(arg1:string,arg2:string,arg3:string,arg4:stri
 export function SetNotebookQueryWarehouse(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function SetQueryLogEnabled(arg1:boolean):Promise<void>;
-
-export function SetQueryLogFilter(arg1:string):Promise<void>;
 
 export function SetSessionParameter(arg1:string,arg2:string,arg3:string):Promise<void>;
 

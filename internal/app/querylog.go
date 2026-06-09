@@ -36,13 +36,7 @@ func (a *App) SetQueryLogEnabled(enabled bool) {
 	a.queryLog.SetEnabled(enabled)
 	wailsruntime.EventsEmit(a.ctx, "querylog:state", map[string]interface{}{
 		"enabled": enabled,
-		"filter":  a.queryLog.Filter(),
 	})
-}
-
-// GetQueryLogFilter returns the current source filter ("all", "user", "internal").
-func (a *App) GetQueryLogFilter() string {
-	return a.queryLog.Filter()
 }
 
 // PickQueryLogExportFile opens a native save-file dialog with log/text filters
@@ -63,11 +57,3 @@ func (a *App) PickQueryLogExportFile(defaultName string) string {
 	return path
 }
 
-// SetQueryLogFilter sets the source filter and emits a state event.
-func (a *App) SetQueryLogFilter(filter string) {
-	a.queryLog.SetFilter(filter)
-	wailsruntime.EventsEmit(a.ctx, "querylog:state", map[string]interface{}{
-		"enabled": a.queryLog.IsEnabled(),
-		"filter":  filter,
-	})
-}
