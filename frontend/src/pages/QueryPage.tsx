@@ -96,7 +96,6 @@ export default function QueryPage() {
   const selectionBaseStmtIdxRef = useRef(0);
   const [resultPane, setResultPane] = useState<"results" | "terminal" | "querylog">("results");
   const [terminalOpen, setTerminalOpen] = useState(false);
-  const [queryLogOpen, setQueryLogOpen] = useState(false);
   const featureFlags = useFeatureFlagsStore((s) => s.flags);
 
   // Sync editor state to the MCP EditorContextStore so external AI clients
@@ -866,7 +865,6 @@ export default function QueryPage() {
   useEffect(() => {
     const off = EventsOn("menu:query-log-toggle", (enabled: boolean) => {
       if (!featureFlags.queryLog) return;
-      setQueryLogOpen(enabled);
       if (enabled) setResultPane("querylog");
       SetQueryLogEnabled(enabled);
     });
@@ -879,6 +877,13 @@ export default function QueryPage() {
     });
     return () => off();
   }, []);
+
+  // Reset to Results pane if queryLog feature flag is disabled while viewing the log.
+  useEffect(() => {
+    if (!featureFlags.queryLog) {
+      setResultPane((prev) => prev === "querylog" ? "results" : prev);
+    }
+  }, [featureFlags.queryLog]);
 
   useEffect(() => {
     const off = EventsOn("menu:code-snippets", () => { if (featureFlags.codeSnippets) setSnippetsOpen(true); });
@@ -1208,7 +1213,7 @@ export default function QueryPage() {
       <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
         {/* Tab bar */}
         <div style={{ display: "flex", background: "var(--bg-raised)", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-          {(["results", ...(terminalOpen && featureFlags.embeddedTerminal ? ["terminal"] : []), ...(queryLogOpen && featureFlags.queryLog ? ["querylog"] : [])] as Array<"results" | "terminal" | "querylog">).map((tab) => (
+          {(["results", ...(terminalOpen && featureFlags.embeddedTerminal ? ["terminal"] : []), ...(featureFlags.queryLog ? ["querylog"] : [])] as Array<"results" | "terminal" | "querylog">).map((tab) => (
             <button
               key={tab}
               onClick={() => setResultPane(tab)}
@@ -1544,9 +1549,9 @@ export default function QueryPage() {
             </div>
           )}
 
-          {queryLogOpen && (
+          {featureFlags.queryLog && (
             <div style={{ flex: 1, overflow: "hidden", display: resultPane === "querylog" ? "flex" : "none", flexDirection: "column" }}>
-              <QueryLogPane onClose={() => { setQueryLogOpen(false); setResultPane("results"); }} />
+              <QueryLogPane onClose={() => { setResultPane("results"); }} />
             </div>
           )}
       </div>}

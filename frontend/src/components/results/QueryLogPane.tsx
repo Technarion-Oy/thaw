@@ -16,7 +16,7 @@ import { ClearOutlined, CopyOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { EventsOn } from "../../../wailsjs/runtime/runtime";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import { GetQueryLogEntries, ClearQueryLog } from "../../../wailsjs/go/app/App";
+import { GetQueryLogEntries, ClearQueryLog, IsQueryLogEnabled, SetQueryLogEnabled } from "../../../wailsjs/go/app/App";
 
 const { Text } = Typography;
 
@@ -74,9 +74,12 @@ export default function QueryLogPane({ onClose: _onClose }: Props) {
   const [search, setSearch] = useState("");
   const mountedRef = useRef(true);
 
-  // Initial load.
+  // Auto-enable backend logging on mount if not already enabled, and load existing entries.
   useEffect(() => {
     mountedRef.current = true;
+    IsQueryLogEnabled().then((enabled) => {
+      if (!enabled) SetQueryLogEnabled(true);
+    }).catch(() => {});
     GetQueryLogEntries().then((data) => {
       if (mountedRef.current && data) setEntries(data as QueryLogEntry[]);
     }).catch(() => {});
