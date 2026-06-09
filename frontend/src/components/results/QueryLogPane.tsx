@@ -12,11 +12,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Input, Select, Table, Tag, Tooltip, Typography, message } from "antd";
-import { ClearOutlined, CopyOutlined } from "@ant-design/icons";
+import { ClearOutlined, CopyOutlined, DownloadOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { EventsOn } from "../../../wailsjs/runtime/runtime";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import { GetQueryLogEntries, ClearQueryLog, IsQueryLogEnabled, SetQueryLogEnabled } from "../../../wailsjs/go/app/App";
+import { GetQueryLogEntries, ClearQueryLog, IsQueryLogEnabled, SetQueryLogEnabled, PickSaveFile, SaveFile } from "../../../wailsjs/go/app/App";
 
 const { Text } = Typography;
 
@@ -124,6 +124,23 @@ export default function QueryLogPane({ onClose: _onClose }: Props) {
     if (search && !e.sql.toLowerCase().includes(search.toLowerCase()) && !e.queryID.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
+
+  const handleExport = async () => {
+    if (filtered.length === 0) {
+      message.info("No entries to export");
+      return;
+    }
+    try {
+      const path = await PickSaveFile("thaw-query-log.log");
+      if (!path) return;
+      const header = `# Thaw Query Log — exported ${new Date().toISOString()}\n# ${filtered.length} entries\n\n`;
+      const body = filtered.map((e) => formatEntryForCopy(e)).join("\n\n");
+      await SaveFile(path, header + body + "\n");
+      message.success("Query log exported");
+    } catch (err) {
+      message.error(String(err));
+    }
+  };
 
   const columns: ColumnsType<QueryLogEntry> = [
     {
@@ -262,6 +279,14 @@ export default function QueryLogPane({ onClose: _onClose }: Props) {
           allowClear
           style={{ width: 200, fontSize: 11 }}
         />
+        <Tooltip title="Export log to file">
+          <Button
+            size="small"
+            icon={<DownloadOutlined style={{ fontSize: 11 }} />}
+            onClick={handleExport}
+            disabled={filtered.length === 0}
+          />
+        </Tooltip>
         <Tooltip title="Clear all entries">
           <Button
             size="small"
