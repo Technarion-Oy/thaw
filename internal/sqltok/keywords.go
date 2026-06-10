@@ -270,7 +270,7 @@ func IsReserved(upper string) bool {
 	return ok
 }
 
-// IsKeyword reports whether upper is any SQL keyword recognised by the tokenizer.
+// IsKeyword reports whether upper is any SQL keyword recognized by the tokenizer.
 func IsKeyword(upper string) bool {
 	_, ok := keywords[upper]
 	return ok

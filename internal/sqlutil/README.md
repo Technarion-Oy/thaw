@@ -4,7 +4,7 @@
 
 ## Responsibility
 
-Provides a thin wrapper around `sqltok.Split` for backward compatibility. The original hand-rolled state machine is retained as `splitOriginal` for cross-validation in the test suite. The test suite verifies that `sqltok.Split` produces identical results.
+Provides a thin wrapper around `sqltok.Split` for backward compatibility. `Split` delegates directly to `sqltok.Split`; the test suite verifies that the wrapper produces correct, non-empty statement splits across a comprehensive corpus and a fuzz test.
 
 ## Key files
 

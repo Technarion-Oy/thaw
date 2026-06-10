@@ -845,9 +845,10 @@ func matchInsertColList(sig []sqltok.Token, sql string) (tablePath, colListRaw s
 	parenStart := sig[i].Start
 	depth := 0
 	for j := i; j < len(sig); j++ {
-		if sig[j].Kind == sqltok.LParen {
+		switch sig[j].Kind {
+		case sqltok.LParen:
 			depth++
-		} else if sig[j].Kind == sqltok.RParen {
+		case sqltok.RParen:
 			depth--
 			if depth == 0 {
 				// Column list is between the parens (exclusive)
@@ -1084,18 +1085,6 @@ func guardKWAlt(alts ...string) func([]sqltok.Token, string) bool {
 	}
 	return func(sig []sqltok.Token, sql string) bool {
 		return len(sig) > 0 && set[tokUpper(sig[0], sql)]
-	}
-}
-
-// guardKWAlt2 returns a guard that matches KW1 KW2 where KW1 can be any of
-// the given alternatives. For guards like (DESCRIBE|DESC) + following keyword.
-func guardKWAlt2(alts []string, second string) func([]sqltok.Token, string) bool {
-	set := make(map[string]bool, len(alts))
-	for _, a := range alts {
-		set[a] = true
-	}
-	return func(sig []sqltok.Token, sql string) bool {
-		return len(sig) >= 2 && set[tokUpper(sig[0], sql)] && tokUpper(sig[1], sql) == second
 	}
 }
 

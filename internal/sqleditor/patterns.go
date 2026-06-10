@@ -37,7 +37,7 @@ const (
 var (
 	// ── Snowflake false-positive guard ───────────────────────────────────────
 	// The matchesSnowflakeFP token scan (below) uses these object-noun sets to
-	// recognise CREATE/ALTER/DROP of objects whose statements the bare-column and
+	// recognize CREATE/ALTER/DROP of objects whose statements the bare-column and
 	// table-existence validators can't handle and should skip. The two-word nouns
 	// IMAGE REPOSITORY and GIT REPOSITORY are matched separately in fpObjectNoun.
 	fpCreateNouns = toUpperSet([]string{
@@ -1008,7 +1008,7 @@ func fpObjectNoun(sig []sqltok.Token, sql string, i int, single map[string]bool)
 }
 
 // matchesSnowflakeFP reports whether a statement contains Snowflake-specific
-// syntax that the bare-column-ref and table-existence validators cannot analyse
+// syntax that the bare-column-ref and table-existence validators cannot analyze
 // and should therefore skip (to avoid emitting noise). It is the token-based
 // replacement for the old reSnowflakeFP regex guard.
 //
@@ -2915,23 +2915,6 @@ func validateAlterStage(parseText string, r StatementRange) []DiagMarker {
 
 // ── Shared validation helpers (DRY) ───────────────────────────────────────────
 
-// stripStringsPreserveLen replaces string literals with spaces of the same
-// byte length, preserving offsets for downstream index-based operations.
-func stripStringsPreserveLen(sql string) string {
-	buf := []byte(sql)
-	for _, tok := range sqltok.Tokenize(sql) {
-		if tok.Kind == sqltok.EOF {
-			break
-		}
-		if tok.Kind == sqltok.StringLit {
-			for i := tok.Start; i < tok.End; i++ {
-				buf[i] = ' '
-			}
-		}
-	}
-	return string(buf)
-}
-
 // cleanParseText strips SQL comments and string literals, returning a trimmed
 // result suitable for regex-based property/keyword detection. Comments are
 // replaced with whitespace (preserving newlines) and string literals are
@@ -2984,16 +2967,6 @@ func checkAccountLevelPrefix(name string, r StatementRange, objType string, mark
 		*markers = append(*markers, diagMarkerSpan(r,
 			objType+" are account-level objects and cannot have a database or schema prefix."))
 	}
-}
-
-// checkNameSwallowedByIF detects the case where a regex captures "IF" as the
-// object name because the IF [NOT] EXISTS / IF EXISTS clause consumed the
-// actual name slot. Returns the error marker and true if the name was swallowed.
-func checkNameSwallowedByIF(name string, clean string, r StatementRange, reExists *regexp.Regexp, errMsg string) (DiagMarker, bool) {
-	if strings.EqualFold(name, "IF") && reExists.MatchString(clean) {
-		return diagMarkerSpan(r, errMsg), true
-	}
-	return DiagMarker{}, false
 }
 
 // ── PIVOT / UNPIVOT validation ────────────────────────────────────────────────

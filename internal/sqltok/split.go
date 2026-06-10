@@ -51,7 +51,7 @@ type StatementRange struct {
 // SplitRanges returns per-statement ranges with line/offset info.
 // Semicolons inside comments, strings, and dollar-quoted blocks are ignored.
 // Leading comments between statements are attached to the following statement
-// (matching the GetStatementRanges behaviour).
+// (matching the GetStatementRanges behavior).
 func SplitRanges(sql string) []StatementRange {
 	var ranges []StatementRange
 

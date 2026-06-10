@@ -25,20 +25,21 @@ var reIdentOrQuoted = regexp.MustCompile(`[a-zA-Z_][a-zA-Z0-9_$]*|"(?:[^"]|"")*"
 
 // stripCommentsSQL removes SQL single-line (--) and block (/* */) comments.
 // Line comments are removed entirely; block comments are replaced with a
-// single space (matching the legacy regex behaviour).
+// single space (matching the legacy regex behavior).
 func stripCommentsSQL(sql string) string {
 	tokens := sqltok.Tokenize(sql)
 	var sb strings.Builder
 	sb.Grow(len(sql))
 	prev := 0
 	for _, tok := range tokens {
-		if tok.Kind == sqltok.EOF {
-			break
-		}
-		if tok.Kind == sqltok.LineComment {
+		switch tok.Kind {
+		case sqltok.EOF:
+			sb.WriteString(sql[prev:])
+			return sb.String()
+		case sqltok.LineComment:
 			sb.WriteString(sql[prev:tok.Start])
 			prev = tok.End
-		} else if tok.Kind == sqltok.BlockComment {
+		case sqltok.BlockComment:
 			sb.WriteString(sql[prev:tok.Start])
 			sb.WriteByte(' ')
 			prev = tok.End

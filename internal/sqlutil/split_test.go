@@ -1005,19 +1005,3 @@ func FuzzSplit(f *testing.F) {
 		}
 	})
 }
-
-func TestIsIdentByte(t *testing.T) {
-	yes := []byte{'a', 'z', 'A', 'Z', '0', '9', '_'}
-	for _, b := range yes {
-		if !isIdentByte(b) {
-			t.Errorf("isIdentByte(%q) = false, want true", b)
-		}
-	}
-
-	no := []byte{' ', '\t', '\n', '$', '.', '-', '(', ')', ';', '\'', '"'}
-	for _, b := range no {
-		if isIdentByte(b) {
-			t.Errorf("isIdentByte(%q) = true, want false", b)
-		}
-	}
-}
