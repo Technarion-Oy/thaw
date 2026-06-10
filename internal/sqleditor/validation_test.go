@@ -690,6 +690,9 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"External Table partition missing parens", "CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) PARTITION BY c1 WITH LOCATION = @s1/path/ FILE_FORMAT = (TYPE = CSV)", "requires a parenthesised column list"},
 		{"External Table partition unclosed parens", "CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) PARTITION BY (c1 WITH LOCATION = @s1/path/ FILE_FORMAT = (TYPE = CSV)", "Unclosed parenthesised column list in PARTITION BY clause"},
 		{"External Table empty columns", "CREATE EXTERNAL TABLE et () WITH LOCATION = @s/p/ FILE_FORMAT = (TYPE = CSV)", "Column list must not be empty"},
+		{"External Table unknown prop", "CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) WITH LOCATION = @s/p/ FILE_FORMAT = (TYPE = CSV) BOGUS = 1", "Unexpected syntax in CREATE EXTERNAL TABLE properties"},
+		{"External Table bad TABLE_FORMAT", "CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) WITH LOCATION = @s/p/ FILE_FORMAT = (TYPE = CSV) TABLE_FORMAT = ICEBERG", "Unexpected syntax in CREATE EXTERNAL TABLE properties"},
+		{"External Table bad FILE_FORMAT contents", "CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) WITH LOCATION = @s/p/ FILE_FORMAT = (BOGUS = 1)", "Unexpected syntax in CREATE EXTERNAL TABLE properties"},
 
 		// Invalid Network Policies
 		{"Network Policy with prefix", "CREATE NETWORK POLICY MY_DB.PUBLIC.bad_policy ALLOWED_IP_LIST = ('10.0.0.0/8')", "account-level"},

@@ -108,21 +108,8 @@ var (
 	// ── CREATE EXTERNAL TABLE ────────────────────────────────────────────────
 	// (reExternalTablePreamble removed — token-based: findPreambleEnd)
 
-	extTableProps = strings.Join([]string{
-		`WITH\s+LOCATION\s*=\s*@\S+`,
-		`REFRESH_ON_CREATE\s*=\s*(?:TRUE|FALSE)`,
-		`AUTO_REFRESH\s*=\s*(?:TRUE|FALSE)`,
-		`PATTERN\s*=\s*'(?:[^']|'')*'`,
-		`FILE_FORMAT\s*=\s*\((?:FORMAT_NAME\s*=\s*` + _identPath + `|TYPE\s*=\s*[a-zA-Z]+)(?:\s+[^)]+)*\)`,
-		`AWS_SNS_TOPIC\s*=\s*'(?:[^']|'')*'`,
-		`INTEGRATION\s*=\s*'(?:[^']|'')*'`,
-		`PARTITION_TYPE\s*=\s*USER_SPECIFIED`,
-		`TABLE_FORMAT\s*=\s*DELTA`,
-		`COPY\s+GRANTS`,
-		`COMMENT\s*=\s*'(?:[^']|'')*'`,
-		`(?:WITH\s+)?TAG\s*` + _balancedParens,
-	}, "|")
-	extTablePropsRe = regexp.MustCompile(`(?i)^\s*(?:(?:` + extTableProps + `)(?:\s+|$))*$`)
+	// (extTableProps / extTablePropsRe removed — token-based:
+	// validExtTablePropsTail / consumeExtTableProp)
 
 	// ── CREATE RESOURCE MONITOR ───────────────────────────────────────────────
 	rmProps = strings.Join([]string{
@@ -2120,10 +2107,88 @@ func validateCreateExternalTable(parseText string, r StatementRange) []DiagMarke
 	}
 
 	// Validate remaining properties
-	if after != "" && !extTablePropsRe.MatchString(after) {
+	if !validExtTablePropsTail(afterSig, after) {
 		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE EXTERNAL TABLE properties."))
 	}
 	return markers
+}
+
+// validExtTablePropsTail reports whether sig is consumed entirely by valid
+// CREATE EXTERNAL TABLE properties (an empty sig is vacuously valid). It is the
+// token-based replacement for the extTableProps / extTablePropsRe allow-list.
+func validExtTablePropsTail(sig []sqltok.Token, sql string) bool {
+	i := 0
+	for i < len(sig) {
+		next, ok := consumeExtTableProp(sig, sql, i)
+		if !ok {
+			return false
+		}
+		i = next
+	}
+	return true
+}
+
+// consumeExtTableProp matches one CREATE EXTERNAL TABLE property starting at
+// sig[i] and returns the index just past it; ok is false if none matches.
+func consumeExtTableProp(sig []sqltok.Token, sql string, i int) (int, bool) {
+	if kwAt(sig, sql, i, "WITH") {
+		// WITH LOCATION = @<stage>, or [WITH] TAG ( … ).
+		switch {
+		case kwAt(sig, sql, i+1, "LOCATION"):
+			if !isOpEq(sig, sql, i+2) || i+3 >= len(sig) || sig[i+3].Kind != sqltok.At {
+				return 0, false
+			}
+			return consumeAtPath(sig, sql, i+3), true
+		case kwAt(sig, sql, i+1, "TAG"):
+			return skipParenGroup(sig, i+2)
+		}
+		return 0, false
+	}
+	switch {
+	case kwAt(sig, sql, i, "TAG"):
+		return skipParenGroup(sig, i+1)
+	case kwAt(sig, sql, i, "COPY") && kwAt(sig, sql, i+1, "GRANTS"):
+		return i + 2, true
+	case kwAt(sig, sql, i, "FILE_FORMAT"):
+		// FILE_FORMAT = ( FORMAT_NAME … | TYPE … )
+		if !isOpEq(sig, sql, i+1) {
+			return 0, false
+		}
+		innerStart, _, ok := parenInnerRange(sig, i+2)
+		if !ok || !(kwAt(sig, sql, innerStart, "FORMAT_NAME") || kwAt(sig, sql, innerStart, "TYPE")) {
+			return 0, false
+		}
+		return skipParenGroup(sig, i+2)
+	case kwAt(sig, sql, i, "PATTERN"), kwAt(sig, sql, i, "AWS_SNS_TOPIC"),
+		kwAt(sig, sql, i, "INTEGRATION"), kwAt(sig, sql, i, "COMMENT"):
+		return eqValueProp(sig, sql, i, sqltok.StringLit)
+	case kwAt(sig, sql, i, "REFRESH_ON_CREATE"), kwAt(sig, sql, i, "AUTO_REFRESH"):
+		return eqBoolProp(sig, sql, i)
+	case kwAt(sig, sql, i, "PARTITION_TYPE"):
+		return eqKeywordProp(sig, sql, i, "USER_SPECIFIED")
+	case kwAt(sig, sql, i, "TABLE_FORMAT"):
+		return eqKeywordProp(sig, sql, i, "DELTA")
+	}
+	return 0, false
+}
+
+// consumeAtPath consumes an @-prefixed stage reference (sig[i] is the "@" token)
+// up to the next whitespace, mirroring the regex @\S+, and returns the index just
+// past it. Token boundaries don't preserve whitespace, so the run end is found in
+// the source.
+func consumeAtPath(sig []sqltok.Token, sql string, i int) int {
+	end := len(sql)
+	for k := sig[i].Start; k < len(sql); k++ {
+		if c := sql[k]; c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+			end = k
+			break
+		}
+	}
+	j := i + 1
+	for j < len(sig) && sig[j].Start < end {
+		j++
+	}
+	return j
 }
 
 // validateCreateTablePreamble validates the CREATE TABLE preamble: the OR
