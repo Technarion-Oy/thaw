@@ -15,6 +15,12 @@ import "strings"
 // Split returns trimmed SQL statements split at top-level semicolons.
 // It correctly handles all Snowflake quoting and comment styles.
 // This is a direct replacement for sqlutil.Split.
+//
+// Note: Split keeps each statement's full text between semicolons, so a leading
+// comment before a statement stays with that statement (harmless for execution,
+// which is Split's purpose). SplitRanges instead attaches a leading comment to
+// the following statement's range, because it drives editor positioning. The two
+// therefore differ intentionally on leading-comment attachment.
 func Split(sql string) []string {
 	n := len(sql)
 	out := make([]string, 0, 64)
@@ -102,11 +108,10 @@ func SplitRanges(sql string) []StatementRange {
 		for i := len(tokens) - 1; i >= 0; i-- {
 			t := tokens[i]
 			if t.Kind != EOF && t.Kind != Whitespace && t.Kind != Newline {
-				endLine = t.Line
-				// For block comments that span multiple lines, compute the end line.
-				if t.Kind == BlockComment {
-					endLine += strings.Count(sql[t.Start:t.End], "\n")
-				}
+				// t.Line is where the token starts; add any newlines it spans so
+				// multi-line block comments, string literals, and dollar-quoted
+				// bodies report the correct end line.
+				endLine = t.Line + strings.Count(sql[t.Start:t.End], "\n")
 				endOffset = t.End
 				break
 			}

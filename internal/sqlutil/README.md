@@ -16,6 +16,6 @@ Provides a thin wrapper around `sqltok.Split` for backward compatibility. `Split
 
 ## Gotchas
 
-- Block comments are **not** nested (per Snowflake spec): `/* outer /* inner */` ends at the first `*/`.
+- Block comments **nest** (per Snowflake spec): in `/* outer /* inner */ still */`, the inner `*/` only closes the inner comment; the whole span is one comment.
 - Backslash is **not** an escape character in Snowflake strings: `'a\'` closes the string.
 - Dollar-quote tags are case-sensitive: `$BODY$` does not close `$body$`.

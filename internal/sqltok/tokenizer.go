@@ -103,12 +103,24 @@ func scan(src string, n int, pos, line, col *int) Token {
 		return Token{Kind: LineComment, Start: start, End: i, Line: startLine, Col: startCol}
 
 	// ── Block comment /* */ ─────────────────────────────────────────────
+	// Snowflake block comments nest, so track depth: a `/*` before the next
+	// `*/` opens an inner comment that must be closed first.
 	case c == '/' && start+1 < n && src[start+1] == '*':
 		i := start + 2
-		if end := strings.Index(src[i:], "*/"); end < 0 {
-			i = n
-		} else {
-			i += end + 2
+		for depth := 1; depth > 0; {
+			openIdx := strings.Index(src[i:], "/*")
+			closeIdx := strings.Index(src[i:], "*/")
+			if closeIdx < 0 {
+				i = n // unterminated — consume to end of input
+				break
+			}
+			if openIdx >= 0 && openIdx < closeIdx {
+				depth++
+				i += openIdx + 2
+			} else {
+				depth--
+				i += closeIdx + 2
+			}
 		}
 		// Count newlines in the block comment for line tracking.
 		span := src[start:i]
@@ -352,6 +364,12 @@ func scan(src string, n int, pos, line, col *int) Token {
 }
 
 // scanNumber reads a numeric literal starting at start.
+//
+// It is lenient about digit groups: a "0x" with no following hex digits, or an
+// "e"/"E" exponent with no following digits, still yields a NumberLit. This is
+// intentional — the tokenizer's job is to classify and never drop input; a
+// malformed number is still consumed as a NumberLit rather than split, and any
+// strict numeric validation is left to the validators.
 func scanNumber(src string, n int, pos, _ /* line */, col *int, start, startLine, startCol int) Token {
 	i := start
 

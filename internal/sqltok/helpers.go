@@ -45,7 +45,12 @@ func StripComments(sql string) string {
 	return sb.String()
 }
 
-// StripStrings replaces single-quoted string literals with a single space.
+// StripStrings replaces each single-quoted string literal with a single space.
+//
+// Unlike StripComments, this does NOT preserve byte offsets: a multi-byte literal
+// collapses to one space, so the result is shorter than the input. Do not chain
+// StripStrings before any offset-dependent operation on the original text (it is
+// safe to re-tokenize the result, which is the only way it is used here).
 func StripStrings(sql string) string {
 	tokens := Tokenize(sql)
 	var sb strings.Builder

@@ -171,7 +171,7 @@ func TestSplit(t *testing.T) {
 			want:  []string{`SELECT /* "not;ident" */ 1`},
 		},
 		{
-			name:  "nested block comment markers stop at first close",
+			name:  "nested block comment closes at the matching outer */",
 			input: "SELECT /* outer /* inner */ still_comment */ 1",
 			want:  []string{"SELECT /* outer /* inner */ still_comment */ 1"},
 		},
@@ -532,14 +532,22 @@ func TestSplit(t *testing.T) {
 			want:  []string{"SELECT /*** triple star ***/ 1"},
 		},
 		{
-			name:  "block comments are not nested — inner /* does not extend comment",
-			input: "SELECT /* outer /* inner */ not_in_comment;",
-			want:  []string{"SELECT /* outer /* inner */ not_in_comment"},
+			// Nesting: a ';' between the inner and outer close stays in the comment.
+			name:  "nested block comment: ; before the outer close stays in the comment",
+			input: "SELECT /* a /* b */ ; c */ 1",
+			want:  []string{"SELECT /* a /* b */ ; c */ 1"},
 		},
 		{
-			name:  "non-nesting: semicolon after first */ ends statement",
-			input: "SELECT /* outer /* inner */ rest; trailing;",
-			want:  []string{"SELECT /* outer /* inner */ rest", "trailing"},
+			// A fully-closed nested comment, then a real top-level ';' splits.
+			name:  "nested block comment then real statement split",
+			input: "SELECT /* a /* b */ c */ 1; SELECT 2",
+			want:  []string{"SELECT /* a /* b */ c */ 1", "SELECT 2"},
+		},
+		{
+			// Unbalanced nesting runs to end of input; the trailing ';' is consumed.
+			name:  "unbalanced nested block comment runs to end of input",
+			input: "SELECT /* outer /* inner */ rest;",
+			want:  []string{"SELECT /* outer /* inner */ rest;"},
 		},
 		{
 			name:  "unterminated block comment captured by final flush",

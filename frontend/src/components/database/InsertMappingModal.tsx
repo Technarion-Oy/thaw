@@ -28,6 +28,20 @@ const { Option } = Select;
 // Identifiers that are structurally safe (no special chars / spaces)
 const SAFE_IDENT = /^[a-zA-Z_][a-zA-Z0-9_$]*$/;
 
+// Minimal reserved-word fallback used until GetSnowflakeKeywords() resolves, so a
+// modal opened immediately after launch still quotes common reserved-word
+// identifiers instead of emitting invalid SQL. Replaced by the full backend set
+// once the IPC call returns (and retained if that call fails).
+const RESERVED_FALLBACK = new Set<string>([
+  "ALL", "ALTER", "AND", "AS", "ASC", "BETWEEN", "BY", "CASE", "CAST", "CHECK",
+  "COLUMN", "CONSTRAINT", "CREATE", "CROSS", "CURRENT", "DELETE", "DESC",
+  "DISTINCT", "DROP", "ELSE", "END", "EXISTS", "FALSE", "FOR", "FROM", "FULL",
+  "GRANT", "GROUP", "HAVING", "IN", "INNER", "INSERT", "INTERSECT", "INTO", "IS",
+  "JOIN", "LEFT", "LIKE", "NATURAL", "NOT", "NULL", "ON", "OR", "ORDER",
+  "QUALIFY", "RIGHT", "ROW", "ROWS", "SELECT", "SET", "TABLE", "THEN", "TO",
+  "TRUE", "UNION", "UNIQUE", "UPDATE", "USING", "VALUES", "WHEN", "WHERE", "WITH",
+]);
+
 interface ColumnMapping {
   targetCol: string;
   sourceExpr: string; // column name, constant, or expression
@@ -49,7 +63,7 @@ export default function InsertMappingModal() {
   const [loadingTarget, setLoadingTarget] = useState(false);
   const [loadingSources, setLoadingSources] = useState(false);
   const [quoteIdentifiers, setQuoteIdentifiers] = useState(true);
-  const [reservedWords, setReservedWords] = useState<Set<string>>(new Set());
+  const [reservedWords, setReservedWords] = useState<Set<string>>(RESERVED_FALLBACK);
 
   // Prevent concurrent duplicate loads for the same source index
   const loadingIndices = useRef<Set<number>>(new Set());

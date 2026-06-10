@@ -3768,12 +3768,16 @@ func TestPkHeuristicConditions_QuotedAliases(t *testing.T) {
 }
 
 func TestGetStatementRanges_NestedBlockComments(t *testing.T) {
-	// Snowflake doesn't support nested block comments. The parser should
-	// close on the first */ and treat the rest as SQL.
-	sql := "/* outer /* inner */ SELECT 1"
+	// Snowflake block comments nest: the inner */ does not close the outer
+	// comment, so the whole /* outer /* inner */ still */ is one comment and the
+	// statement begins at SELECT (not at "still").
+	sql := "/* outer /* inner */ still */ SELECT 1"
 	got := GetStatementRanges(sql)
 	if len(got) != 1 {
-		t.Fatalf("expected 1 range after nested block comment closes, got %d: %v", len(got), got)
+		t.Fatalf("expected 1 range, got %d: %v", len(got), got)
+	}
+	if stmt := strings.TrimSpace(sql[got[0].StartOffset:got[0].EndOffset]); stmt != "SELECT 1" {
+		t.Errorf("expected statement %q, got %q", "SELECT 1", stmt)
 	}
 }
 
