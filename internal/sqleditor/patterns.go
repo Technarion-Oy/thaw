@@ -56,7 +56,7 @@ var (
 	// (reCortexFuncCall removed — token-based)
 
 	// (reConstraintCol removed — token-based)
-	reVirtualColAS = regexp.MustCompile(`(?i)\bAS\s*\([\s\S]*\)\s*$`)
+	// (reVirtualColAS removed — token-based: isVirtualColumn)
 	// (rePartitionBy removed — token-based)
 
 	// ── CREATE VIEW ───────────────────────────────────────────────────────────
@@ -1990,19 +1990,28 @@ func consumeDbSchemaClone(sig []sqltok.Token, sql string, i int) (int, bool) {
 	return j, true
 }
 
+// isVirtualColumn reports whether an EXTERNAL TABLE column definition (its
+// significant tokens colSig) is a virtual column: it contains an "AS (" and ends
+// with ")". Token-based replacement for reVirtualColAS.
+func isVirtualColumn(colSig []sqltok.Token, col string) bool {
+	if len(colSig) == 0 || colSig[len(colSig)-1].Kind != sqltok.RParen {
+		return false
+	}
+	for k := 0; k+1 < len(colSig); k++ {
+		if tokUpper(colSig[k], col) == "AS" && colSig[k+1].Kind == sqltok.LParen {
+			return true
+		}
+	}
+	return false
+}
+
 // validateCreateExternalTable validates CREATE EXTERNAL TABLE statements: it
 // rejects OR REPLACE / CLUSTER BY / DATA_RETENTION_TIME_IN_DAYS, requires a
 // non-empty column list of virtual (AS <expr>) columns, allows an optional
-// PARTITION BY (...), and requires WITH LOCATION and FILE_FORMAT.
-//
-// Mostly tokenised — the structural walk (preamble, column splitting, clause
-// detection) is token-based. Two checks remain regex-based on purpose:
-//   - reVirtualColAS confirms a column ends in "AS ( … )"; and
-//   - extTablePropsRe validates the trailing property list against an allow-set
-//     *with value formats* (e.g. AUTO_REFRESH = TRUE|FALSE, PATTERN = '…').
-//
-// Those two encode value-format grammars, not SQL structure; reproducing them
-// token-by-token would be larger and no clearer, so the regexes are retained.
+// PARTITION BY (...), and requires WITH LOCATION and FILE_FORMAT. Fully
+// tokenised — the preamble/column/clause walk, the virtual-column check
+// (isVirtualColumn), and the property tail (validExtTablePropsTail) all operate
+// on the token stream.
 func validateCreateExternalTable(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
@@ -2060,7 +2069,7 @@ func validateCreateExternalTable(parseText string, r StatementRange) []DiagMarke
 				continue
 			}
 		}
-		if !reVirtualColAS.MatchString(col) {
+		if !isVirtualColumn(colSig, col) {
 			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Column '%s' in EXTERNAL TABLE must be a virtual column using AS <expr>.", col)))
 			hasColError = true
 		}
