@@ -975,7 +975,8 @@ func TestGetStatementRanges_Extended(t *testing.T) {
 			name: "unicode in string literal",
 			sql:  "SELECT '日本語';",
 			want: []StatementRange{
-				{StartLine: 1, EndLine: 1, StartOffset: 0, EndOffset: 13},
+				// EndOffset is byte-based: SELECT(6) + space(1) + '(1) + 3*3(9) + '(1) + ;(1) = 19
+				{StartLine: 1, EndLine: 1, StartOffset: 0, EndOffset: 19},
 			},
 		},
 	}

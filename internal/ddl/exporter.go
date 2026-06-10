@@ -19,7 +19,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"thaw/internal/sqlutil"
+	"thaw/internal/sqltok"
 )
 
 // ─── public types ─────────────────────────────────────────────────────────────
@@ -150,7 +150,7 @@ func exportOne(ctx context.Context, database string, fetch FetchDDL, opts Export
 	// Parse all statements and resolve file-path collisions.
 	// This is intentionally single-threaded: the collision resolver is stateful
 	// and sequential resolution gives deterministic, reproducible output.
-	stmts := sqlutil.Split(rawDDL)
+	stmts := sqltok.Split(rawDDL)
 	tracker := newNameTracker()
 
 	jobs := make([]writeJob, 0, len(stmts))

@@ -10,29 +10,25 @@
 
 package sqlutil
 
-import "strings"
+import (
+	"strings"
 
-// Split tokenises src and returns individual, whitespace-trimmed SQL
-// statements.  It correctly handles all quoting and comment styles that
-// Snowflake DDL can produce:
-//
-//   - line comments   --  ...  \n
-//   - block comments  /* ... */   (non-nesting per Snowflake spec)
-//   - single-quoted string literals  '...'  with '' escapes
-//   - double-quoted identifiers      "..."  with "" escapes
-//   - dollar-quoted bodies           $$...$$ or $tag$...$tag$
-//
-// Semicolons inside any of the above are never treated as statement
-// terminators.
-//
-// Implementation notes:
-//   - Works entirely at the byte level — no []rune allocation.
-//   - Uses strings.Index / strings.IndexByte for comment and quoted-body
-//     boundaries; these compile to SIMD-accelerated memchr/memmem on
-//     amd64 and arm64, making large procedure bodies very fast to skip.
-//   - Plain SQL text is bulk-copied with WriteString rather than emitted
-//     one rune at a time.
+	"thaw/internal/sqltok"
+)
+
+// Deprecated: Split is superseded by [thaw/internal/sqltok.Split], which
+// uses a single-pass tokenizer instead of a hand-rolled state machine.
+// All new callers should use sqltok.Split directly. This wrapper exists
+// only for backward compatibility during migration; it delegates to the
+// new implementation and will be removed once all callers have migrated.
 func Split(src string) []string {
+	return sqltok.Split(src)
+}
+
+// splitOriginal is the original implementation, retained so the sqlutil
+// test suite can verify backward compatibility with the new tokenizer.
+// It will be removed once migration is complete.
+func splitOriginal(src string) []string {
 	n := len(src)
 
 	out := make([]string, 0, 64)

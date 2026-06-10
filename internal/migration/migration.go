@@ -24,7 +24,7 @@ import (
 
 	"thaw/internal/ddl"
 	"thaw/internal/snowflake"
-	"thaw/internal/sqlutil"
+	"thaw/internal/sqltok"
 )
 
 // ─── event name constants ─────────────────────────────────────────────────────
@@ -168,7 +168,7 @@ func (s *Service) ScanSource(dir string) ([]MigrationObject, error) {
 			return nil // silently skip unreadable files
 		}
 
-		stmts := sqlutil.Split(string(raw))
+		stmts := sqltok.Split(string(raw))
 
 		var ctxDB, ctxSch string
 
@@ -297,7 +297,7 @@ func (s *Service) Analyze(client *snowflake.Client, objects []MigrationObject, d
 				return
 			}
 
-			stmts := sqlutil.Split(ddlText)
+			stmts := sqltok.Split(ddlText)
 
 			remoteMu.Lock()
 			defer remoteMu.Unlock()

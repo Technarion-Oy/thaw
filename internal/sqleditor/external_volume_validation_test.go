@@ -387,11 +387,9 @@ func TestValidateSnowflakePatterns_CreateExternalVolume(t *testing.T) {
 			"CREATE EXTERNAL VOLUME my_vol ALLOW_WRITES = MAYBE",
 			[]string{"STORAGE_LOCATIONS is mandatory"},
 		},
-		{
-			"ENCRYPTION TYPE not first key reports missing TYPE",
-			"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' ENCRYPTION = (KMS_KEY_ID = 'k' TYPE = 'AWS_SSE_KMS') ))",
-			[]string{"ENCRYPTION block must specify a TYPE key"},
-		},
+		// Note: TYPE not being the first key inside ENCRYPTION = (...) is now
+		// correctly handled by the token-based parser. The test case was removed
+		// because TYPE is found regardless of position.
 		{
 			"AWS_SSE_S3 encryption on GCS location in multi-provider with S3",
 			"CREATE EXTERNAL VOLUME v STORAGE_LOCATIONS = (( NAME = 's3' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' ) ( NAME = 'gcs' STORAGE_PROVIDER = 'GCS' STORAGE_BASE_URL = 'gcs://b/' ENCRYPTION = (TYPE = 'AWS_SSE_S3') ))",
@@ -561,15 +559,15 @@ func TestValidateSnowflakePatterns_CreateExternalVolume(t *testing.T) {
 		}
 	})
 
-	// ENCRYPTION TYPE not first key — regex requires TYPE immediately after
-	// ENCRYPTION = (, so a preceding key causes "missing TYPE" error.
-	t.Run("ENCRYPTION TYPE not first key emits exactly one warning", func(t *testing.T) {
+	// ENCRYPTION TYPE not first key — token-based parser correctly finds TYPE
+	// regardless of position inside the ENCRYPTION block, so no warning is emitted.
+	t.Run("ENCRYPTION TYPE not first key produces no warning", func(t *testing.T) {
 		sql := "CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' ENCRYPTION = (KMS_KEY_ID = 'k' TYPE = 'AWS_SSE_KMS') ))"
 		ranges := GetStatementRanges(sql)
 		markers := ValidateSnowflakePatterns(sql, ranges)
 		warns := getWarnings(markers)
-		if len(warns) != 1 {
-			t.Errorf("Expected exactly 1 warning (missing TYPE key), got %d: %v", len(warns), warns)
+		if len(warns) != 0 {
+			t.Errorf("Expected 0 warnings (TYPE found regardless of position), got %d: %v", len(warns), warns)
 		}
 	})
 

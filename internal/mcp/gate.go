@@ -16,7 +16,7 @@ import (
 	"strings"
 
 	"thaw/internal/snowflake"
-	"thaw/internal/sqlutil"
+	"thaw/internal/sqltok"
 )
 
 // queryRunner is the minimal interface needed by the EXPLAIN gate. In
@@ -131,7 +131,7 @@ func CheckGate(ctx context.Context, runner queryRunner, sql string) (GateVerdict
 	}
 
 	// Layer 1: single-statement check.
-	stmts := sqlutil.Split(trimmed)
+	stmts := sqltok.Split(trimmed)
 	if len(stmts) != 1 {
 		return GateVerdict{
 			Reason: fmt.Sprintf("multi-statement SQL not allowed (%d statements)", len(stmts)),

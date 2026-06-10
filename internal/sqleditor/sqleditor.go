@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	sf "thaw/internal/snowflake"
+	"thaw/internal/sqltok"
 )
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -337,181 +338,30 @@ type parenEntry struct {
 type StatementRange struct {
 	StartLine   int `json:"startLine"`   // 1-indexed line of trimmed statement start
 	EndLine     int `json:"endLine"`     // 1-indexed line of trailing ';' (or last char)
-	StartOffset int `json:"startOffset"` // rune offset of trimmed statement start
-	EndOffset   int `json:"endOffset"`   // rune offset just past ';' (or end of string)
+	StartOffset int `json:"startOffset"` // byte offset of trimmed statement start
+	EndOffset   int `json:"endOffset"`   // byte offset just past ';' (or end of string)
 }
 
-// GetStatementRanges splits sql into per-statement ranges by scanning
-// character-by-character.  Semicolons inside string literals, quoted
-// identifiers, block comments, line comments, and dollar-quoted blocks are
-// correctly ignored.  No Snowflake connection is required.
+// GetStatementRanges splits sql into per-statement ranges.  Semicolons inside
+// string literals, quoted identifiers, block comments, line comments, and
+// dollar-quoted blocks are correctly ignored.  No Snowflake connection is
+// required.
+//
+// Delegates to [sqltok.SplitRanges] for the actual tokenization.
 func GetStatementRanges(sql string) []StatementRange {
-	var ranges []StatementRange
-
-	runes := []rune(sql)
-	n := len(runes)
-
-	line := 1 // current 1-indexed line number
-
-	// Position of the current statement's trimmed start (-1 = not yet started).
-	stmtStartLine := -1
-	stmtStartOffset := 0
-	inStmt := false
-
-	// Record the start of a new statement at rune index i.
-	// Called once per statement on the first non-whitespace, non-comment char.
-	startStmt := func(i int) {
-		if !inStmt {
-			stmtStartLine = line
-			stmtStartOffset = i
-			inStmt = true
+	tokRanges := sqltok.SplitRanges(sql)
+	if len(tokRanges) == 0 {
+		return nil
+	}
+	ranges := make([]StatementRange, len(tokRanges))
+	for i, r := range tokRanges {
+		ranges[i] = StatementRange{
+			StartLine:   r.StartLine,
+			EndLine:     r.EndLine,
+			StartOffset: r.StartOffset,
+			EndOffset:   r.EndOffset,
 		}
 	}
-
-	// Emit the current statement ending at rune index endOffset (exclusive).
-	emit := func(endLine, endOffset int) {
-		if inStmt {
-			ranges = append(ranges, StatementRange{
-				StartLine:   stmtStartLine,
-				EndLine:     endLine,
-				StartOffset: stmtStartOffset,
-				EndOffset:   endOffset,
-			})
-			inStmt = false
-			stmtStartLine = -1
-		}
-	}
-
-	i := 0
-	for i < n {
-		ch := runes[i]
-
-		// ── Newline ────────────────────────────────────────────────────────
-		if ch == '\n' {
-			line++
-			i++
-			continue
-		}
-
-		// ── Whitespace ────────────────────────────────────────────────────
-		if ch == ' ' || ch == '\t' || ch == '\r' || ch == '\u00a0' {
-			i++
-			continue
-		}
-
-		// ── Line comment -- ───────────────────────────────────────────────
-		if ch == '-' && i+1 < n && runes[i+1] == '-' {
-			i += 2
-			for i < n && runes[i] != '\n' {
-				i++
-			}
-			continue
-		}
-
-		// ── Block comment /* */ ───────────────────────────────────────────
-		if ch == '/' && i+1 < n && runes[i+1] == '*' {
-			i += 2
-			for i < n {
-				if runes[i] == '\n' {
-					line++
-					i++
-				} else if runes[i] == '*' && i+1 < n && runes[i+1] == '/' {
-					i += 2
-					break
-				} else {
-					i++
-				}
-			}
-			continue
-		}
-
-		// All remaining chars belong to a statement; record its start.
-		startStmt(i)
-
-		// ── Single-quoted string '...' ────────────────────────────────────
-		if ch == '\'' {
-			i++
-			for i < n {
-				if runes[i] == '\n' {
-					line++
-					i++
-				} else if runes[i] == '\'' && i+1 < n && runes[i+1] == '\'' {
-					i += 2
-				} else if runes[i] == '\'' {
-					i++
-					break
-				} else {
-					i++
-				}
-			}
-			continue
-		}
-
-		// ── Double-quoted identifier "..." ────────────────────────────────
-		if ch == '"' {
-			i++
-			for i < n {
-				if runes[i] == '\n' {
-					line++
-					i++
-				} else if runes[i] == '"' && i+1 < n && runes[i+1] == '"' {
-					i += 2
-				} else if runes[i] == '"' {
-					i++
-					break
-				} else {
-					i++
-				}
-			}
-			continue
-		}
-
-		// ── Dollar-quoted block $tag$...$tag$ ─────────────────────────────
-		if ch == '$' {
-			tag := extractDollarTag(runes, i)
-			if tag != "" {
-				tagRunes := []rune(tag)
-				tagLen := len(tagRunes)
-				i += tagLen // skip opening tag
-				// Scan for the matching closing tag.
-				for i < n {
-					if runes[i] == '\n' {
-						line++
-						i++
-					} else if runes[i] == tagRunes[0] && i+tagLen <= n {
-						match := true
-						for k := 1; k < tagLen; k++ {
-							if runes[i+k] != tagRunes[k] {
-								match = false
-								break
-							}
-						}
-						if match {
-							i += tagLen
-							break
-						}
-						i++
-					} else {
-						i++
-					}
-				}
-				continue
-			}
-		}
-
-		// ── Semicolon: end of statement ───────────────────────────────────
-		if ch == ';' {
-			emit(line, i+1)
-			i++
-			continue
-		}
-
-		i++
-	}
-
-	// Emit trailing statement with no semicolon.
-	emit(line, n)
-
 	return ranges
 }
 
@@ -984,12 +834,14 @@ var builtinFunctions = map[string]bool{
 // keywordCase: "UPPER" | "lower" | "Title" | "Preserve"
 // identifierCase: "Preserve" | "UPPER" | "lower"
 // functionCase: "UPPER" | "lower"
+//
+// Uses [sqltok.Tokenize] for tokenization.
 func ApplyCasing(sql, keywordCase, identifierCase, functionCase string) string {
 	if sql == "" {
 		return sql
 	}
-	runes := []rune(sql)
-	n := len(runes)
+
+	tokens := sqltok.Tokenize(sql)
 	var sb strings.Builder
 	sb.Grow(len(sql))
 
@@ -1010,136 +862,52 @@ func ApplyCasing(sql, keywordCase, identifierCase, functionCase string) string {
 		}
 	}
 
-	i := 0
-	for i < n {
-		ch := runes[i]
-
-		// ── Double-quoted identifier — pass through unchanged ──────────────────
-		if ch == '"' {
-			j := i + 1
-			for j < n {
-				if runes[j] == '"' {
-					if j+1 < n && runes[j+1] == '"' {
-						j += 2
-						continue
-					}
-					j++
-					break
-				}
-				j++
+	// peekNextNonWS finds the next non-whitespace, non-newline token after index i.
+	peekNextNonWS := func(i int) (sqltok.Token, bool) {
+		for j := i + 1; j < len(tokens); j++ {
+			k := tokens[j].Kind
+			if k != sqltok.Whitespace && k != sqltok.Newline {
+				return tokens[j], true
 			}
-			sb.WriteString(string(runes[i:j]))
-			i = j
-			continue
 		}
+		return sqltok.Token{}, false
+	}
 
-		// ── Single-quoted string — pass through unchanged ──────────────────────
-		if ch == '\'' {
-			j := i + 1
-			for j < n {
-				if runes[j] == '\'' {
-					if j+1 < n && runes[j+1] == '\'' {
-						j += 2
-						continue
-					}
-					j++
-					break
-				}
-				j++
-			}
-			sb.WriteString(string(runes[i:j]))
-			i = j
-			continue
+	for i, tok := range tokens {
+		if tok.Kind == sqltok.EOF {
+			break
 		}
+		text := tok.Text(sql)
 
-		// ── Dollar-quoted string — recursively apply casing unless tag is $query$ ──
-		if ch == '$' {
-			tagEnd := i + 1
-			for tagEnd < n && runes[tagEnd] != '$' && runes[tagEnd] != '\n' {
-				tagEnd++
-			}
-			if tagEnd < n && runes[tagEnd] == '$' {
-				tag := string(runes[i : tagEnd+1]) // e.g. "$$" or "$body$"
-				rest := string(runes[tagEnd+1:])
-				closeByteIdx := strings.Index(rest, tag)
-				if closeByteIdx >= 0 {
-					innerStart := tagEnd + 1
-					closeRuneOff := len([]rune(rest[:closeByteIdx]))
-					innerEnd := innerStart + closeRuneOff
-					innerSql := string(runes[innerStart:innerEnd])
+		switch tok.Kind {
+		case sqltok.QuotedIdent, sqltok.StringLit,
+			sqltok.LineComment, sqltok.BlockComment:
+			// Pass through unchanged.
+			sb.WriteString(text)
 
-					sb.WriteString(tag)
-					tagUpper := strings.ToUpper(tag)
-					if tagUpper == "$QUERY$" {
-						// Pass through $query$ blocks unchanged (likely contains a query string literal)
-						sb.WriteString(innerSql)
-					} else {
-						// Recursively process scripting bodies ($$, $body$, etc.)
-						sb.WriteString(ApplyCasing(innerSql, keywordCase, identifierCase, functionCase))
-					}
-
-					sb.WriteString(tag)
-
-					i = innerEnd + len([]rune(tag))
-					continue
-				}
-			}
-			// Not a valid dollar-quoted string — pass the '$' through.
-			sb.WriteRune(ch)
-			i++
-			continue
-		}
-
-		// ── Line comment -- … newline — pass through unchanged ─────────────────
-		if ch == '-' && i+1 < n && runes[i+1] == '-' {
-			j := i
-			for j < n && runes[j] != '\n' {
-				j++
-			}
-			if j < n {
-				j++ // include the newline
-			}
-			sb.WriteString(string(runes[i:j]))
-			i = j
-			continue
-		}
-
-		// ── Block comment /* … */ — pass through unchanged ─────────────────────
-		if ch == '/' && i+1 < n && runes[i+1] == '*' {
-			j := i + 2
-			for j+1 < n && !(runes[j] == '*' && runes[j+1] == '/') {
-				j++
-			}
-			if j+1 < n {
-				j += 2 // skip past */
+		case sqltok.DollarQuoted:
+			// Recursively apply casing to dollar-quoted bodies (except $query$).
+			tag := tok.Tag
+			tagLen := len(tag)
+			inner := text[tagLen : len(text)-tagLen]
+			sb.WriteString(tag)
+			if strings.ToUpper(tag) == "$QUERY$" {
+				sb.WriteString(inner)
 			} else {
-				j = n // unclosed comment — consume to end
+				sb.WriteString(ApplyCasing(inner, keywordCase, identifierCase, functionCase))
 			}
-			sb.WriteString(string(runes[i:j]))
-			i = j
-			continue
-		}
+			sb.WriteString(tag)
 
-		// ── Word token (identifier / keyword / function name) ──────────────────
-		if isAlpha(ch) {
-			j := i + 1
-			for j < n && (isWordChar(runes[j]) || runes[j] == '$') {
-				j++
-			}
-			word := string(runes[i:j])
+		case sqltok.Keyword, sqltok.Identifier:
+			word := text
 			upper := strings.ToUpper(word)
 
-			// Peek past whitespace to determine if this is a function call.
-			k := j
-			for k < n && (runes[k] == ' ' || runes[k] == '\t' || runes[k] == '\n' || runes[k] == '\r') {
-				k++
-			}
-			isCall := k < n && runes[k] == '('
+			// Peek past whitespace to check if followed by '(' (function call).
+			nextTok, hasNext := peekNextNonWS(i)
+			isCall := hasNext && nextTok.Kind == sqltok.LParen
 
 			var result string
 			if isCall {
-				// Keywords that use '(' structurally (OVER, IN, …) keep keyword casing.
-				// Built-in functions and UDFs get function casing.
 				if sqlFormatterKeywords[upper] && !builtinFunctions[upper] {
 					result = applyCase(word, keywordCase)
 				} else {
@@ -1151,21 +919,27 @@ func ApplyCasing(sql, keywordCase, identifierCase, functionCase string) string {
 				result = applyCase(word, identifierCase)
 			}
 
-			// For function tokens (not pure keyword constructs), strip the space
-			// sql-formatter inserted before '(' so e.g. "COUNT (" → "COUNT(".
+			// For function tokens, strip whitespace before '(' that sql-formatter inserted.
 			isFunctionToken := isCall && (!sqlFormatterKeywords[upper] || builtinFunctions[upper])
 			sb.WriteString(result)
 			if isFunctionToken {
-				i = k // advance past the whitespace before '('
-			} else {
-				i = j
+				// Skip whitespace tokens between the word and '('.
+				// Zero the text range so they emit nothing, but keep Kind
+				// unchanged to avoid triggering the EOF break.
+				for j := i + 1; j < len(tokens); j++ {
+					k := tokens[j].Kind
+					if k == sqltok.Whitespace || k == sqltok.Newline {
+						tokens[j].End = tokens[j].Start
+					} else {
+						break
+					}
+				}
 			}
-			continue
-		}
 
-		// Numbers, operators, whitespace, punctuation — pass through unchanged.
-		sb.WriteRune(ch)
-		i++
+		default:
+			// Numbers, operators, whitespace, newlines, punctuation — pass through.
+			sb.WriteString(text)
+		}
 	}
 
 	return sb.String()
@@ -2260,16 +2034,17 @@ func extractProjectedColName(expr string) string {
 // table(s) found in the immediate FROM/JOIN of this SELECT block.
 func extractSelectProjections(sql string, localScope map[string][]ColInfo) []ColInfo {
 	stripped := stripCommentsSQL(sql)
-	selLoc := reSelectKW.FindStringIndex(stripped)
-	if selLoc == nil {
+	strippedToks := sqltok.Tokenize(stripped)
+	strippedSig := sigToks(strippedToks)
+	selOff := findSelectKWOffset(strippedSig, stripped)
+	if selOff < 0 {
 		return nil
 	}
 
 	// 1. Determine the context for this SELECT (Step A: Source Resolution)
 	// We extract table references only from THIS select block.
 	activeContext := make(map[string][]ColInfo)
-	for _, fm := range reFromJoinSel.FindAllStringSubmatch(stripped, -1) {
-		tablePath := fm[1]
+	for _, tablePath := range findFromJoinTables2(strippedSig, stripped) {
 		parts := extractIdentParts(tablePath, true)
 		if len(parts) > 0 {
 			tableNameU := parts[len(parts)-1]
@@ -2280,7 +2055,7 @@ func extractSelectProjections(sql string, localScope map[string][]ColInfo) []Col
 	}
 
 	// 2. Evaluate the SELECT clause (Step C: Output Registration)
-	afterSelect := strings.TrimSpace(stripped[selLoc[1]:])
+	afterSelect := strings.TrimSpace(stripped[selOff+6:])
 	upAfter := strings.ToUpper(afterSelect)
 	if strings.HasPrefix(upAfter, "DISTINCT ") || strings.HasPrefix(upAfter, "DISTINCT\t") || strings.HasPrefix(upAfter, "DISTINCT\n") {
 		afterSelect = strings.TrimSpace(afterSelect[8:])
@@ -2304,51 +2079,19 @@ func extractSelectProjections(sql string, localScope map[string][]ColInfo) []Col
 	return cols
 }
 
-// extractNextAlias reads past optional whitespace (and an optional AS keyword)
-// from position afterIdx in s and returns the next bare identifier, or "" if
-// none is present.  This is used to find explicit table aliases that appear
-// directly after a FROM/JOIN table path.
-func extractNextAlias(s string, afterIdx int) string {
-	rest := s[afterIdx:]
-	// Skip leading whitespace.
-	i := 0
-	for i < len(rest) && (rest[i] == ' ' || rest[i] == '\t' || rest[i] == '\r' || rest[i] == '\n') {
-		i++
-	}
-	if i == len(rest) {
-		return ""
-	}
-	// Skip optional AS keyword.
-	if i+2 <= len(rest) && strings.ToUpper(rest[i:i+2]) == "AS" {
-		if i+2 == len(rest) || !isWordChar(rune(rest[i+2])) {
-			i += 2
-			for i < len(rest) && (rest[i] == ' ' || rest[i] == '\t') {
-				i++
-			}
-		}
-	}
-	if i == len(rest) || !isAlpha(rune(rest[i])) {
-		return ""
-	}
-	// Scan the identifier.
-	j := i
-	for j < len(rest) && isWordChar(rune(rest[j])) {
-		j++
-	}
-	return rest[i:j]
-}
-
 // isSimpleCTESelect returns true when every item in the CTE's SELECT list is a
 // bare or qualified column reference with no function calls, arithmetic operators,
 // or AS-renamed aliases.  For such CTEs the effective schema equals the source
 // table's actual columns, allowing us to detect bare column typos in the CTE body.
 func isSimpleCTESelect(innerSQL string) bool {
 	stripped := stripCommentsSQL(innerSQL)
-	selLoc := reSelectKW.FindStringIndex(stripped)
-	if selLoc == nil {
+	strippedToks := sqltok.Tokenize(stripped)
+	strippedSig := sigToks(strippedToks)
+	selOff := findSelectKWOffset(strippedSig, stripped)
+	if selOff < 0 {
 		return false
 	}
-	afterSelect := strings.TrimSpace(stripped[selLoc[1]:])
+	afterSelect := strings.TrimSpace(stripped[selOff+6:])
 	upAfter := strings.ToUpper(afterSelect)
 	if strings.HasPrefix(upAfter, "DISTINCT ") || strings.HasPrefix(upAfter, "DISTINCT\t") || strings.HasPrefix(upAfter, "DISTINCT\n") {
 		afterSelect = strings.TrimSpace(afterSelect[8:])
@@ -2374,11 +2117,13 @@ func isSimpleCTESelect(innerSQL string) bool {
 // select list contains a wildcard.
 func getSimpleSelectColumnNames(innerSQL string) []string {
 	stripped := stripCommentsSQL(innerSQL)
-	selLoc := reSelectKW.FindStringIndex(stripped)
-	if selLoc == nil {
+	strippedToks := sqltok.Tokenize(stripped)
+	strippedSig := sigToks(strippedToks)
+	selOff := findSelectKWOffset(strippedSig, stripped)
+	if selOff < 0 {
 		return nil
 	}
-	afterSelect := strings.TrimSpace(stripped[selLoc[1]:])
+	afterSelect := strings.TrimSpace(stripped[selOff+6:])
 	upAfter := strings.ToUpper(afterSelect)
 	if strings.HasPrefix(upAfter, "DISTINCT ") || strings.HasPrefix(upAfter, "DISTINCT\t") || strings.HasPrefix(upAfter, "DISTINCT\n") {
 		afterSelect = strings.TrimSpace(afterSelect[8:])
@@ -2462,9 +2207,10 @@ func extractCTEProjections(stripped string, globalRegistry map[string][]ColInfo)
 			// projection list.
 			if isSimpleCTESelect(innerSQL) {
 				innerStripped := stripCommentsSQL(innerSQL)
+				innerToks := sqltok.Tokenize(innerStripped)
+				innerSig := sigToks(innerToks)
 				var allSourceCols []ColInfo
-				for _, fm := range reFromJoinSel.FindAllStringSubmatch(innerStripped, -1) {
-					tablePath := fm[1]
+				for _, tablePath := range findFromJoinTables2(innerSig, innerStripped) {
 					parts := extractIdentParts(tablePath, true)
 					if len(parts) > 0 {
 						tableNameU := parts[len(parts)-1]
@@ -2576,13 +2322,15 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 	for idx, r := range stmtRanges {
 		raw := sqlStmt(sql, r)
 		stripped := stripCommentsSQL(raw)
+		rawToks := sqltok.Tokenize(raw)
+		rawSig := sigToks(rawToks)
+		strippedToks := sqltok.Tokenize(stripped)
+		strippedSig := sigToks(strippedToks)
 
 		// 1. Update localColCache if this is a CREATE TABLE
-		if m := reCreateTablePreScan.FindStringSubmatchIndex(raw); m != nil {
-			nameStr := raw[m[2]:m[3]]
+		if nameStr, parenStart, ok := matchCreateTablePre(rawSig, raw); ok {
 			parts := extractIdentParts(nameStr, true)
 			if len(parts) > 0 {
-				parenStart := m[1] - 1
 				colsRaw := extractBalancedBlock(raw, parenStart)
 				if len(colsRaw) >= 2 {
 					colsRaw = colsRaw[1 : len(colsRaw)-1]
@@ -2606,23 +2354,24 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 			activeKeys:   make([]string, 0),
 		}
 
-		// NEW: Add the object being created to the aliasMap so it's not flagged as a missing column.
-		if m := reCreateTVMatch.FindStringSubmatch(raw); m != nil {
-			if parts := extractIdentParts(m[1], true); len(parts) > 0 {
+		// Add the object being created to the aliasMap so it's not flagged as a missing column.
+		if rawPath, _, ok := matchCreateTV(rawSig, raw); ok {
+			if parts := extractIdentParts(rawPath, true); len(parts) > 0 {
 				objNameU := strings.ToUpper(parts[len(parts)-1])
 				ctx.aliasMap[objNameU] = "__object__"
 			}
-		} else if m := reCreateDbSchMatch.FindStringSubmatch(raw); m != nil {
-			if parts := extractIdentParts(m[1], true); len(parts) > 0 {
+		} else if rawPath, ok := matchCreateDbSch(rawSig, raw); ok {
+			if parts := extractIdentParts(rawPath, true); len(parts) > 0 {
 				objNameU := strings.ToUpper(parts[len(parts)-1])
 				ctx.aliasMap[objNameU] = "__object__"
 			}
 		}
 
-		// NEW: Pre-scan for column aliases (AS alias) and add them to the aliasMap.
+		// Pre-scan for column aliases (AS alias) and add them to the aliasMap.
 		// This prevents false positives on alias names within the same statement.
-		for _, m := range reAsAliasSel.FindAllStringSubmatch(stripped, -1) {
-			aliasU := strings.ToUpper(normIdent(m[1], true))
+		for _, loc := range findAsAliases(strippedSig, stripped) {
+			aliasText := stripped[loc.aliasStart:loc.aliasEnd]
+			aliasU := strings.ToUpper(normIdent(aliasText, true))
 			if !sqlAllKeywords[aliasU] {
 				ctx.aliasMap[aliasU] = "__alias__"
 			}
@@ -2648,9 +2397,8 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 		// In that case bareColValidation is disabled for the whole statement to prevent
 		// false positives on column references from those unknown tables.
 		hasUnknownTable := false
-		for _, mIdx := range reFromJoinSel.FindAllStringSubmatchIndex(stripped, -1) {
-			tablePath := stripped[mIdx[2]:mIdx[3]]
-			parts := extractIdentParts(tablePath, true)
+		for _, ta := range findFromJoinWithAlias(strippedSig, stripped) {
+			parts := extractIdentParts(ta.tablePath, true)
 			if len(parts) == 0 {
 				continue
 			}
@@ -2688,11 +2436,9 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 			if cacheKey != "" {
 				ctx.activeKeys = append(ctx.activeKeys, cacheKey)
 
-				// Extract an explicit alias from the text immediately after the table path.
-				afterTableIdx := mIdx[3]
-				alias := extractNextAlias(stripped, afterTableIdx)
-				if alias != "" {
-					aliasU := strings.ToUpper(alias)
+				// Register explicit alias if present.
+				if ta.alias != "" {
+					aliasU := strings.ToUpper(ta.alias)
 					if !joinStopKW[aliasU] {
 						ctx.aliasMap[aliasU] = cacheKey
 					}
@@ -3369,20 +3115,18 @@ func ExtractInEditorTableDefs(
 		raw := sqlStmt(sql, r)
 
 		// Must be a CREATE TABLE (not CTAS/CLONE/LIKE)
-		if !reCreateTableGuard.MatchString(raw) {
+		rawToks := sqltok.Tokenize(raw)
+		rawSig := sigToks(rawToks)
+		if !matchCreateTableGuard(rawSig, raw) {
 			continue
 		}
 
-		m := reCreateTablePreScan.FindStringSubmatchIndex(raw)
-		if m == nil {
+		nameStr, parenStart, ok := matchCreateTablePre(rawSig, raw)
+		if !ok {
 			continue
 		}
 
 		// Check for CTAS: if AS SELECT follows the column block or there is no column block
-		nameStr := raw[m[2]:m[3]]
-
-		// Extract balanced column block starting at the opening paren.
-		parenStart := m[1] - 1
 		colsRaw := extractBalancedBlock(raw, parenStart)
 		if colsRaw == "" {
 			continue

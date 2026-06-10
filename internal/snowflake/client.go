@@ -32,7 +32,7 @@ import (
 
 	sf "github.com/snowflakedb/gosnowflake/v2"
 
-	"thaw/internal/sqlutil"
+	"thaw/internal/sqltok"
 )
 
 // ConnectParams holds all fields needed to open a Snowflake connection.
@@ -503,7 +503,7 @@ func isContextChangingQuery(sql string) bool {
 // statement finishes).  The parameter is variadic so all existing callers
 // remain unchanged.
 func (c *Client) Execute(ctx context.Context, query string, onProgress ...func(idx, total int, qidChan <-chan string)) (*QueryResult, error) {
-	rawStmts := sqlutil.Split(query)
+	rawStmts := sqltok.Split(query)
 	stmts := make([]string, len(rawStmts))
 	for i, s := range rawStmts {
 		stmts[i] = normalizePutGet(s)
@@ -815,7 +815,7 @@ func (c *Client) GetSessionContextOnConn(ctx context.Context, conn *sql.Conn) (S
 // ExecuteOnConn runs one or more SQL statements on a pinned connection and
 // returns the last result set. It also syncs the session context.
 func (c *Client) ExecuteOnConn(ctx context.Context, conn *sql.Conn, query string) (*QueryResult, error) {
-	rawStmts := sqlutil.Split(query)
+	rawStmts := sqltok.Split(query)
 	stmts := make([]string, len(rawStmts))
 	for i, s := range rawStmts {
 		stmts[i] = normalizePutGet(s)

@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"thaw/internal/sqlutil"
+	"thaw/internal/sqltok"
 	"sync"
 	"testing"
 )
@@ -1431,7 +1431,7 @@ create or replace file format "ACME"."SALES"."CSV_FORMAT"
 create or replace pipe "ACME"."SALES"."ORDERS_PIPE"
     as copy into "ACME"."SALES"."ORDERS" from @"ACME"."SALES"."LOAD_STAGE";`
 
-	stmts := sqlutil.Split(ddl)
+	stmts := sqltok.Split(ddl)
 
 	type wantRow struct {
 		kind   Kind

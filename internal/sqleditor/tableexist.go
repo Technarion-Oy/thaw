@@ -14,6 +14,8 @@ import (
 	"encoding/json"
 	"regexp"
 	"strings"
+
+	"thaw/internal/sqltok"
 )
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -42,93 +44,6 @@ type ValidateTablesExistRequest struct {
 	// quick-fix qualification suggestions via the Code field.
 	AllKnownTables []ResolvedRef `json:"allKnownTables"`
 }
-
-// ── Precompiled regexes ───────────────────────────────────────────────────────
-
-var (
-	// CREATE TABLE/VIEW
-	reCreateTVMatch = regexp.MustCompile(
-		`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:INTERACTIVE\s+)?` +
-			`(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)?` +
-			`(?:RECURSIVE\s+)?(?:MATERIALIZED\s+)?(?:TABLE|VIEW)\s+` +
-			`(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
-
-	// CREATE DATABASE/SCHEMA
-	reCreateDbSchMatch = regexp.MustCompile(
-		`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?` +
-			`(?:DATABASE|SCHEMA)\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
-
-	// DROP TABLE
-	reDropTableMatch = regexp.MustCompile(
-		`(?i)^\s*DROP\s+(?:TABLE)\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
-
-	// DROP DATABASE/SCHEMA
-	reDropDbSchMatch = regexp.MustCompile(
-		`(?i)^\s*DROP\s+(?:DATABASE|SCHEMA)\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
-
-	// UNDROP TABLE
-	reUndropTableMatch = regexp.MustCompile(
-		`(?i)^\s*UNDROP\s+TABLE\s+(` + _identPath + `)`)
-
-	// UNDROP DATABASE/SCHEMA
-	reUndropDbSchMatch = regexp.MustCompile(
-		`(?i)^\s*UNDROP\s+(?:DATABASE|SCHEMA)\s+(` + _identPath + `)`)
-
-	// USE DATABASE / USE SCHEMA / USE <db>.<schema>
-	reUseDatabase      = regexp.MustCompile(`(?i)^\s*USE\s+DATABASE\s+`)
-	reUseSchema        = regexp.MustCompile(`(?i)^\s*USE\s+SCHEMA\s+`)
-	reUseTwoPartSchema = regexp.MustCompile(`(?i)^\s*USE\s+SCHEMA\s+` + _ident + `\.` + _ident)
-	// Go regexp does not support negative lookaheads, so capture the first
-	// token and reject DATABASE/SCHEMA/ROLE/WAREHOUSE in code.
-	reUseTwoPart = regexp.MustCompile(`(?i)^\s*USE\s+(` + _ident + `)\.` + _ident)
-
-	// Capturing variants used for existence validation.
-	// reUseDatabaseIdent: captures DB name from USE DATABASE <name>
-	reUseDatabaseIdent = regexp.MustCompile(`(?i)^\s*USE\s+DATABASE\s+(` + _ident + `)`)
-	// reUseSchemaIdents: captures (db, schema) from USE SCHEMA <db>.<schema>
-	reUseSchemaIdents = regexp.MustCompile(`(?i)^\s*USE\s+SCHEMA\s+(` + _ident + `)\.(` + _ident + `)`)
-	// reUseSchemaIdent: captures schema from USE SCHEMA <schema> (one-part, no dot)
-	reUseSchemaIdent = regexp.MustCompile(`(?i)^\s*USE\s+SCHEMA\s+(` + _ident + `)[;\s]*$`)
-	// reUseTwoPartIdents: captures (db, schema) from bare USE <db>.<schema> (no keyword)
-	reUseTwoPartIdents = regexp.MustCompile(`(?i)^\s*USE\s+(` + _ident + `)\.(` + _ident + `)`)
-	// reUseOnePartIdent: captures name from bare USE <name> (no keyword, no dot)
-	reUseOnePartIdent = regexp.MustCompile(`(?i)^\s*USE\s+(` + _ident + `)[;\s]*$`)
-	reCreateAnyDb      = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?DATABASE\b`)
-	reCreateAnySchema  = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?SCHEMA\b`)
-
-	// CREATE TABLE/VIEW (context – for qualification checks)
-	reCreateTVCtxMatch = reCreateTVMatch // same regex
-
-	// CREATE SCHEMA (with target path)
-	reCreateSchemaMatch = regexp.MustCompile(
-		`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?SCHEMA\s+` +
-			`(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
-
-	// DROP DATABASE (with optional IF EXISTS)
-	reDropDbMatch = regexp.MustCompile(
-		`(?i)^\s*DROP\s+DATABASE\s+(?:IF\s+EXISTS\s+)?(` + _ident + `)`)
-	reDropSchemaMatch = regexp.MustCompile(
-		`(?i)^\s*DROP\s+SCHEMA\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
-	reIfExists = regexp.MustCompile(`(?i)\bIF\s+EXISTS\b`)
-
-	// UNDROP DATABASE / UNDROP SCHEMA / UNDROP TABLE
-	reUndropDbMatch  = regexp.MustCompile(`(?i)^\s*UNDROP\s+DATABASE\s+(` + _ident + `)`)
-	reUndropSchMatch = regexp.MustCompile(`(?i)^\s*UNDROP\s+SCHEMA\s+(` + _identPath + `)`)
-	reUndropTabMatch = regexp.MustCompile(`(?i)^\s*UNDROP\s+TABLE\s+(` + _identPath + `)`)
-
-	// ALTER TABLE/VIEW
-	reAlterTVMatch = regexp.MustCompile(
-		`(?i)^\s*ALTER\s+(TABLE|VIEW)\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
-
-	// FROM/JOIN regex for fallback table extraction
-	reFromJoinFallback = regexp.MustCompile(
-		`(?i)(?:FROM|JOIN|MERGE\s+INTO|USING|INSERT\s+INTO|COPY\s+INTO|UPDATE|CLONE|LIKE|THEN\s+INTO|ELSE\s+INTO)\s+(` + _identPath + `)`)
-
-	// CREATE DYNAMIC TABLE → extract SELECT portion.
-	// Go regexp has no lookahead; capture SELECT|WITH so the caller can slice
-	// from asM[2] (start of the captured keyword) to keep it in the result.
-	reDynAsMatch = regexp.MustCompile(`(?i)\bAS\s+(SELECT|WITH)\b`)
-)
 
 // ── ValidateTablesExist ───────────────────────────────────────────────────────
 
@@ -172,16 +87,18 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 
 	for _, r := range req.StmtRanges {
 		raw := sqlStmt(req.SQL, r)
+		tokens := sqltok.Tokenize(raw)
+		sig := sigToks(tokens)
 
 		// ── (a) Apply CREATE effects before validation ─────────────
-		if m := reCreateTVMatch.FindStringSubmatch(raw); m != nil {
-			if parts := extractIdentParts(m[1], ic); len(parts) > 0 {
+		if rawPath, _, ok := matchCreateTV(sig, raw); ok {
+			if parts := extractIdentParts(rawPath, ic); len(parts) > 0 {
 				scriptCreatedTables[parts[len(parts)-1]] = struct{}{}
 				scriptCreatedTables[strings.Join(parts, ".")] = struct{}{}
 			}
 		}
-		if m := reCreateDbSchMatch.FindStringSubmatch(raw); m != nil {
-			if parts := extractIdentParts(m[1], ic); len(parts) > 0 {
+		if rawPath, ok := matchCreateDbSch(sig, raw); ok {
+			if parts := extractIdentParts(rawPath, ic); len(parts) > 0 {
 				scriptCreatedDbsAndSchemas[parts[len(parts)-1]] = struct{}{}
 				scriptCreatedDbsAndSchemas[strings.Join(parts, ".")] = struct{}{}
 				// Track 2-part CREATE SCHEMA <db>.<sch> so we can validate
@@ -193,27 +110,35 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		}
 
 		// Track USE/CREATE statements that establish an active DB/schema
-		if reUseDatabase.MatchString(raw) || reCreateAnyDb.MatchString(raw) {
-			scriptHasActiveDB = true
+		firstKw := ""
+		if len(sig) > 0 {
+			firstKw = tokUpper(sig[0], raw)
 		}
-		if reUseTwoPartSchema.MatchString(raw) {
-			scriptHasActiveDB = true
-		}
-		if m2 := reUseTwoPart.FindStringSubmatch(raw); m2 != nil {
-			first := strings.ToUpper(m2[1])
-			if first != "DATABASE" && first != "SCHEMA" && first != "ROLE" && first != "WAREHOUSE" {
-				scriptHasActiveDB = true
-				scriptHasActiveSchema = true
+
+		if firstKw == "USE" {
+			if u, ok := matchUse(sig, raw); ok {
+				switch {
+				case u.kind == "DATABASE":
+					scriptHasActiveDB = true
+				case u.kind == "SCHEMA" && u.parts == 2:
+					scriptHasActiveDB = true
+					scriptHasActiveSchema = true
+				case u.kind == "SCHEMA":
+					scriptHasActiveSchema = true
+				case u.kind == "" && u.parts == 2:
+					scriptHasActiveDB = true
+					scriptHasActiveSchema = true
+				case u.kind == "" && u.parts == 1:
+					scriptHasActiveDB = true
+				}
 			}
 		}
-		if reUseSchema.MatchString(raw) || reCreateAnySchema.MatchString(raw) {
-			scriptHasActiveSchema = true
-		}
-		// Bare USE <name> (no keyword, no dot) is equivalent to USE DATABASE.
-		if m := reUseOnePartIdent.FindStringSubmatch(raw); m != nil {
-			first := strings.ToUpper(m[1])
-			if first != "DATABASE" && first != "SCHEMA" && first != "ROLE" && first != "WAREHOUSE" {
+		if firstKw == "CREATE" {
+			if matchCreateAnyDB(sig, raw) {
 				scriptHasActiveDB = true
+			}
+			if matchCreateAnySchema(sig, raw) {
+				scriptHasActiveSchema = true
 			}
 		}
 
@@ -221,11 +146,11 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		hasGlobalSchema := len(req.KnownSchemas) > 0 || anyHasSchema(req.ResolvedRefs)
 
 		// ── CREATE TABLE/VIEW ─────────────────────────────────────────
-		if m := reCreateTVCtxMatch.FindStringSubmatch(raw); m != nil {
-			parts := extractIdentParts(m[1], ic)
-			rawParts := reIdentOrQuoted.FindAllString(m[1], -1)
+		if rawPath, objKwTV, ok := matchCreateTV(sig, raw); ok {
+			parts := extractIdentParts(rawPath, ic)
+			rawParts, _ := readIdentParts(sig, raw, findPathStartInSig(sig, raw, rawPath))
 			objType := "table"
-			if regexp.MustCompile(`(?i)\bVIEW\b`).MatchString(m[0]) {
+			if objKwTV == "VIEW" {
 				objType = "view"
 			}
 
@@ -245,7 +170,11 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			case 2:
 				schemaNorm := parts[0]
 				if !hasGlobalDB && !scriptHasActiveDB {
-					for _, t := range findTokensLocally(raw, []string{normIdent(rawParts[0], ic)}, r.StartLine, ic) {
+					searchToken := parts[0]
+					if len(rawParts) > 0 {
+						searchToken = normIdent(rawParts[0], ic)
+					}
+					for _, t := range findTokensLocally(raw, []string{searchToken}, r.StartLine, ic) {
 						markers = append(markers, diagMarkerAt(t,
 							"No database selected. Cannot create "+objType+" using schema '"+t.name+"'.", 8))
 					}
@@ -274,15 +203,6 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 				} else {
 					schemaNorm := parts[1]
 					schemaPath := dbNorm + "." + schemaNorm
-					// Only validate the schema if we have actual schema data for
-					// this specific DB. Without data we cannot distinguish
-					// "schema doesn't exist" from "schema list not yet loaded",
-					// which would produce false alarms when no session context
-					// is set.  Three sources count as "having schema data":
-					//   1. KnownSchemas has at least one entry for this DB
-					//   2. ResolvedRefs has at least one ref for this DB
-					//   3. The script itself issued CREATE SCHEMA <db>.<sch> for
-					//      this DB (tracked in scriptEverCreatedSchemasByDB)
 					hasSchemaDataForDB :=
 						len(schemasForDB(req.KnownSchemas, dbNorm, checkEq)) > 0 ||
 							isIn(scriptEverCreatedSchemasByDB, dbNorm)
@@ -306,9 +226,9 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		}
 
 		// ── CREATE SCHEMA ─────────────────────────────────────────────
-		if m := reCreateSchemaMatch.FindStringSubmatch(raw); m != nil {
-			parts := extractIdentParts(m[1], ic)
-			rawParts := reIdentOrQuoted.FindAllString(m[1], -1)
+		if rawPath, ok := matchCreateSchema(sig, raw); ok {
+			parts := extractIdentParts(rawPath, ic)
+			rawParts, _ := readIdentParts(sig, raw, findPathStartInSig(sig, raw, rawPath))
 			hasGlobalDBHere := len(req.KnownDatabases) > 0 || anyHasDB(req.ResolvedRefs)
 			switch len(parts) {
 			case 1:
@@ -322,7 +242,11 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 				dbNorm := parts[0]
 				if len(req.KnownDatabases) > 0 {
 					if !dbExists(dbNorm, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
-						for _, t := range findTokensLocally(raw, []string{normIdent(rawParts[0], ic)}, r.StartLine, ic) {
+						searchToken := parts[0]
+						if len(rawParts) > 0 {
+							searchToken = normIdent(rawParts[0], ic)
+						}
+						for _, t := range findTokensLocally(raw, []string{searchToken}, r.StartLine, ic) {
 							markers = append(markers, diagMarkerAt(t,
 								"Database '"+t.name+"' does not exist or is not authorized.", 8))
 						}
@@ -332,9 +256,9 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		}
 
 		// ── DROP DATABASE ─────────────────────────────────────────────
-		if m := reDropDbMatch.FindStringSubmatch(raw); m != nil {
-			if !reIfExists.MatchString(raw) && len(req.KnownDatabases) > 0 {
-				dbNorm := normIdent(m[1], ic)
+		if rawPath, hasIfExists, ok := matchDropDB(sig, raw); ok {
+			if !hasIfExists && len(req.KnownDatabases) > 0 {
+				dbNorm := normIdent(rawPath, ic)
 				if !dbExists(dbNorm, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
 					for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, ic) {
 						markers = append(markers, diagMarkerAt(t,
@@ -345,10 +269,10 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		}
 
 		// ── DROP SCHEMA ───────────────────────────────────────────────
-		if m := reDropSchemaMatch.FindStringSubmatch(raw); m != nil {
-			if !reIfExists.MatchString(raw) {
-				parts := extractIdentParts(m[1], ic)
-				rawParts := reIdentOrQuoted.FindAllString(m[1], -1)
+		if rawPath, hasIfExists, ok := matchDropSchema(sig, raw); ok {
+			if !hasIfExists {
+				parts := extractIdentParts(rawPath, ic)
+				rawParts, _ := readIdentParts(sig, raw, findPathStartInSig(sig, raw, rawPath))
 				hasGlobalDBHere := len(req.KnownDatabases) > 0 || anyHasDB(req.ResolvedRefs)
 				var targetDB, targetSch string
 				if len(parts) >= 2 {
@@ -359,7 +283,11 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 				}
 				if targetDB != "" {
 					if !dbExists(targetDB, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
-						for _, t := range findTokensLocally(raw, []string{normIdent(rawParts[0], ic)}, r.StartLine, ic) {
+						searchToken := targetDB
+						if len(rawParts) > 0 {
+							searchToken = normIdent(rawParts[0], ic)
+						}
+						for _, t := range findTokensLocally(raw, []string{searchToken}, r.StartLine, ic) {
 							markers = append(markers, diagMarkerAt(t,
 								"Database '"+t.name+"' does not exist or is not authorized.", 8))
 						}
@@ -391,8 +319,8 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		}
 
 		// ── UNDROP DATABASE ───────────────────────────────────────────
-		if m := reUndropDbMatch.FindStringSubmatch(raw); m != nil {
-			dbNorm := normIdent(m[1], ic)
+		if rawPath, ok := matchUndropDB(sig, raw); ok {
+			dbNorm := normIdent(rawPath, ic)
 			isDropped := isIn(scriptDroppedDbsAndSchemas, dbNorm) ||
 				anyEq(req.DroppedDatabases, dbNorm, checkEq)
 			if !isDropped {
@@ -404,8 +332,8 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		}
 
 		// ── UNDROP SCHEMA ─────────────────────────────────────────────
-		if m := reUndropSchMatch.FindStringSubmatch(raw); m != nil {
-			parts := extractIdentParts(m[1], ic)
+		if rawPath, ok := matchUndropSchema(sig, raw); ok {
+			parts := extractIdentParts(rawPath, ic)
 			targetSch := parts[len(parts)-1]
 			path := strings.Join(parts, ".")
 			isDropped := isIn(scriptDroppedDbsAndSchemas, targetSch) ||
@@ -420,8 +348,8 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		}
 
 		// ── UNDROP TABLE ──────────────────────────────────────────────
-		if m := reUndropTabMatch.FindStringSubmatch(raw); m != nil {
-			parts := extractIdentParts(m[1], ic)
+		if rawPath, ok := matchUndropTable(sig, raw); ok {
+			parts := extractIdentParts(rawPath, ic)
 			targetTab := parts[len(parts)-1]
 			path := strings.Join(parts, ".")
 			isDropped := isIn(scriptDroppedTables, targetTab) ||
@@ -436,9 +364,9 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		}
 
 		// ── ALTER TABLE/VIEW ──────────────────────────────────────────
-		if m := reAlterTVMatch.FindStringSubmatch(raw); m != nil {
-			if !reIfExists.MatchString(raw) {
-				parts := extractIdentParts(m[2], ic)
+		if rawPath, _, hasIfExists, ok := matchAlterTV(sig, raw); ok {
+			if !hasIfExists {
+				parts := extractIdentParts(rawPath, ic)
 				ftTable := parts[len(parts)-1]
 				ftDB := ""
 				ftSchema := ""
@@ -465,8 +393,8 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			}
 
 			// ── ALTER TABLE … SWAP WITH: validate the target table ──────
-			if tgtMatch := reAlterTableSwapTarget.FindStringSubmatch(raw); tgtMatch != nil {
-				tgtParts := extractIdentParts(tgtMatch[1], ic)
+			if tgtPath, ok := findSwapWith(sig, raw); ok {
+				tgtParts := extractIdentParts(tgtPath, ic)
 				tgtTable := tgtParts[len(tgtParts)-1]
 				tgtDB := ""
 				tgtSchema := ""
@@ -476,8 +404,8 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 				} else if len(tgtParts) == 2 {
 					tgtSchema = tgtParts[0]
 				}
-				tgtPath := strings.Join(tgtParts, ".")
-				if !isIn(scriptCreatedTables, tgtTable) && !isIn(scriptCreatedTables, tgtPath) {
+				tgtPathStr := strings.Join(tgtParts, ".")
+				if !isIn(scriptCreatedTables, tgtTable) && !isIn(scriptCreatedTables, tgtPathStr) {
 					isLive := anyRefMatch(req.ResolvedRefs, tgtTable, tgtDB, tgtSchema, checkEq)
 					if !isLive {
 						if tgtDB != "" && len(req.KnownDatabases) == 0 {
@@ -494,8 +422,8 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		}
 
 		// ── Validate USE DATABASE <name> ──────────────────────────────────────
-		if m := reUseDatabaseIdent.FindStringSubmatch(raw); m != nil {
-			dbNorm := normIdent(m[1], ic)
+		if u, ok := matchUse(sig, raw); ok && u.kind == "DATABASE" {
+			dbNorm := normIdent(u.ident1, ic)
 			if len(req.KnownDatabases) > 0 && !dbExists(dbNorm, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
 				for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, ic) {
 					markers = append(markers, diagMarkerAt(t,
@@ -505,9 +433,9 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		}
 
 		// ── Validate USE SCHEMA <db>.<schema> ─────────────────────────────────
-		if m := reUseSchemaIdents.FindStringSubmatch(raw); m != nil {
-			dbNorm := normIdent(m[1], ic)
-			schNorm := normIdent(m[2], ic)
+		if u, ok := matchUse(sig, raw); ok && u.kind == "SCHEMA" && u.parts == 2 {
+			dbNorm := normIdent(u.ident1, ic)
+			schNorm := normIdent(u.ident2, ic)
 			if len(req.KnownDatabases) > 0 && !dbExists(dbNorm, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
 				for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, ic) {
 					markers = append(markers, diagMarkerAt(t,
@@ -525,8 +453,8 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		}
 
 		// ── Validate USE SCHEMA <schema> (one-part, no dot) ───────────────────
-		if m := reUseSchemaIdent.FindStringSubmatch(raw); m != nil {
-			schNorm := normIdent(m[1], ic)
+		if u, ok := matchUse(sig, raw); ok && u.kind == "SCHEMA" && u.parts == 1 {
+			schNorm := normIdent(u.ident1, ic)
 			if len(req.KnownSchemas) > 0 || anyHasSchema(req.ResolvedRefs) {
 				if !schemaExists(schNorm, "", scriptCreatedDbsAndSchemas, req.KnownSchemas, req.ResolvedRefs, checkEq) {
 					for _, t := range findTokensLocally(raw, []string{schNorm}, r.StartLine, ic) {
@@ -538,38 +466,32 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		}
 
 		// ── Validate bare USE <db>.<schema> (no keyword) ──────────────────────
-		if m := reUseTwoPartIdents.FindStringSubmatch(raw); m != nil {
-			first := strings.ToUpper(m[1])
-			if first != "DATABASE" && first != "SCHEMA" && first != "ROLE" && first != "WAREHOUSE" {
-				dbNorm := normIdent(m[1], ic)
-				schNorm := normIdent(m[2], ic)
-				if len(req.KnownDatabases) > 0 && !dbExists(dbNorm, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
-					for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, ic) {
+		if u, ok := matchUse(sig, raw); ok && u.kind == "" && u.parts == 2 {
+			dbNorm := normIdent(u.ident1, ic)
+			schNorm := normIdent(u.ident2, ic)
+			if len(req.KnownDatabases) > 0 && !dbExists(dbNorm, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
+				for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, ic) {
+					markers = append(markers, diagMarkerAt(t,
+						"Database '"+t.name+"' does not exist or is not authorized.", 8))
+				}
+			} else {
+				schPath := dbNorm + "." + schNorm
+				if !schemaExistsForDB(dbNorm, schNorm, schPath, scriptCreatedDbsAndSchemas, req.KnownSchemas, req.ResolvedRefs, checkEq) {
+					for _, t := range findTokensLocally(raw, []string{schNorm}, r.StartLine, ic) {
 						markers = append(markers, diagMarkerAt(t,
-							"Database '"+t.name+"' does not exist or is not authorized.", 8))
-					}
-				} else {
-					schPath := dbNorm + "." + schNorm
-					if !schemaExistsForDB(dbNorm, schNorm, schPath, scriptCreatedDbsAndSchemas, req.KnownSchemas, req.ResolvedRefs, checkEq) {
-						for _, t := range findTokensLocally(raw, []string{schNorm}, r.StartLine, ic) {
-							markers = append(markers, diagMarkerAt(t,
-								"Schema '"+t.name+"' does not exist or is not authorized.", 8))
-						}
+							"Schema '"+t.name+"' does not exist or is not authorized.", 8))
 					}
 				}
 			}
 		}
 
 		// ── Validate bare USE <name> (no keyword, no dot) → USE DATABASE ──────
-		if m := reUseOnePartIdent.FindStringSubmatch(raw); m != nil {
-			first := strings.ToUpper(m[1])
-			if first != "DATABASE" && first != "SCHEMA" && first != "ROLE" && first != "WAREHOUSE" {
-				dbNorm := normIdent(m[1], ic)
-				if len(req.KnownDatabases) > 0 && !dbExists(dbNorm, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
-					for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, ic) {
-						markers = append(markers, diagMarkerAt(t,
-							"Database '"+t.name+"' does not exist or is not authorized.", 8))
-					}
+		if u, ok := matchUse(sig, raw); ok && u.kind == "" && u.parts == 1 {
+			dbNorm := normIdent(u.ident1, ic)
+			if len(req.KnownDatabases) > 0 && !dbExists(dbNorm, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
+				for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, ic) {
+					markers = append(markers, diagMarkerAt(t,
+						"Database '"+t.name+"' does not exist or is not authorized.", 8))
 				}
 			}
 		}
@@ -577,8 +499,8 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		// ── (d) Apply DROP/UNDROP effects after validation ─────────
 		// Runs before the SELECT/WITH continue so DROP TABLE etc. always
 		// update state even though DROP is not in the SELECT/WITH list.
-		if m := reDropTableMatch.FindStringSubmatch(raw); m != nil {
-			if parts := extractIdentParts(m[1], ic); len(parts) > 0 {
+		if rawPath, ok := matchDropTable(sig, raw); ok {
+			if parts := extractIdentParts(rawPath, ic); len(parts) > 0 {
 				name, path := parts[len(parts)-1], strings.Join(parts, ".")
 				scriptDroppedTables[name] = struct{}{}
 				scriptDroppedTables[path] = struct{}{}
@@ -586,8 +508,8 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 				delete(scriptCreatedTables, path)
 			}
 		}
-		if m := reDropDbSchMatch.FindStringSubmatch(raw); m != nil {
-			if parts := extractIdentParts(m[1], ic); len(parts) > 0 {
+		if rawPath, ok := matchDropDbSch(sig, raw); ok {
+			if parts := extractIdentParts(rawPath, ic); len(parts) > 0 {
 				name, path := parts[len(parts)-1], strings.Join(parts, ".")
 				scriptDroppedDbsAndSchemas[name] = struct{}{}
 				scriptDroppedDbsAndSchemas[path] = struct{}{}
@@ -595,23 +517,22 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 				delete(scriptCreatedDbsAndSchemas, path)
 			}
 		}
-		if m := reUndropTableMatch.FindStringSubmatch(raw); m != nil {
-			if parts := extractIdentParts(m[1], ic); len(parts) > 0 {
+		if rawPath, ok := matchUndropTable(sig, raw); ok {
+			if parts := extractIdentParts(rawPath, ic); len(parts) > 0 {
 				scriptCreatedTables[parts[len(parts)-1]] = struct{}{}
 				scriptCreatedTables[strings.Join(parts, ".")] = struct{}{}
 			}
 		}
-		if m := reUndropDbSchMatch.FindStringSubmatch(raw); m != nil {
-			if parts := extractIdentParts(m[1], ic); len(parts) > 0 {
+		if rawPath, ok := matchUndropDbSch(sig, raw); ok {
+			if parts := extractIdentParts(rawPath, ic); len(parts) > 0 {
 				scriptCreatedDbsAndSchemas[parts[len(parts)-1]] = struct{}{}
 				scriptCreatedDbsAndSchemas[strings.Join(parts, ".")] = struct{}{}
 			}
 		}
 
 		// ── SELECT / WITH / CREATE AS SELECT: table existence ─────────
-		firstTok := getFirstSQLToken(raw)
-		if firstTok != "SELECT" && firstTok != "WITH" && firstTok != "CREATE" && firstTok != "UNDROP" &&
-			firstTok != "MERGE" && firstTok != "INSERT" && firstTok != "UPDATE" && firstTok != "DELETE" {
+		if firstKw != "SELECT" && firstKw != "WITH" && firstKw != "CREATE" && firstKw != "UNDROP" &&
+			firstKw != "MERGE" && firstKw != "INSERT" && firstKw != "UPDATE" && firstKw != "DELETE" {
 			continue
 		}
 		strippedCtx := strings.TrimSpace(stripCommentsSQL(raw))
@@ -623,16 +544,16 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		parseText := strings.TrimRight(strings.TrimSpace(raw), "; \t\r\n")
 
 		// For CREATE DYNAMIC TABLE, extract the SELECT part.
-		// reDynAsMatch captures SELECT|WITH; asM[2] is the start of that keyword.
 		if reIsCreateDynTable.MatchString(parseText) {
-			if asM := reDynAsMatch.FindStringSubmatchIndex(parseText); asM != nil {
-				parseText = parseText[asM[2]:]
+			asOffset := findDynAsSelect(sig, raw)
+			if asOffset >= 0 {
+				parseText = parseText[asOffset:]
 			} else {
 				continue
 			}
 		}
 
-		// Extract FROM tables using regex (mirrors the TS fallback path).
+		// Extract FROM tables using token matching.
 		// Strip single-quoted string literals first so keywords inside
 		// strings (e.g. 'USING CRON …' in CREATE TASK SCHEDULE clauses)
 		// are not mistaken for SQL syntax.
@@ -641,8 +562,9 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		}
 		var fromTables []fromTable
 		noStringsCtx := stripStringLiterals(strippedCtx)
-		for _, fm := range reFromJoinFallback.FindAllStringSubmatch(noStringsCtx, -1) {
-			parts := extractIdentParts(fm[1], ic)
+		noStringsSig := sigToks(sqltok.Tokenize(noStringsCtx))
+		for _, path := range findFromJoinTables(noStringsSig, noStringsCtx) {
+			parts := extractIdentParts(path, ic)
 			switch len(parts) {
 			case 3:
 				fromTables = append(fromTables, fromTable{parts[0], parts[1], parts[2]})
@@ -655,9 +577,9 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 
 		// Also handle CREATE TABLE ... REFERENCES
 		if reIsCreateTable.MatchString(parseText) {
-			reRefs := regexp.MustCompile(`(?i)\bREFERENCES\s+(` + _identPath + `)`)
-			for _, rf := range reRefs.FindAllStringSubmatch(parseText, -1) {
-				parts := extractIdentParts(rf[1], ic)
+			parseSig := sigToks(sqltok.Tokenize(parseText))
+			for _, rm := range findReferences(parseSig, parseText) {
+				parts := extractIdentParts(rm.tablePath, ic)
 				switch len(parts) {
 				case 3:
 					fromTables = append(fromTables, fromTable{parts[0], parts[1], parts[2]})
@@ -670,16 +592,9 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		}
 
 		// CTE names — every identifier that appears as `name AS (` is a CTE
-		// definition.  Using a simple "ident AS (" pattern (without requiring
-		// the preceding WITH keyword) captures all CTEs in a multi-CTE query
-		// such as:
-		//   WITH cte1 AS (...), cte2 AS (...) SELECT ...
-		// where the old WITH-anchored regex only found the first CTE name.
-		cteNames := make(map[string]struct{})
-		reCTEName := regexp.MustCompile(`(?i)\b(` + _ident + `)\s+AS\s*\(`)
-		for _, cm := range reCTEName.FindAllStringSubmatch(strippedCtx, -1) {
-			cteNames[normIdent(cm[1], ic)] = struct{}{}
-		}
+		// definition.
+		strippedSig := sigToks(sqltok.Tokenize(strippedCtx))
+		cteNames := findCTENames(strippedSig, strippedCtx, ic)
 
 		missingTokens := make(map[string]func(string) string)
 
@@ -756,6 +671,30 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
+
+// findPathStartInSig finds the position in sig where the given rawPath begins.
+// This is used to call readIdentParts for getting raw token texts.
+func findPathStartInSig(sig []sqltok.Token, sql, rawPath string) int {
+	if rawPath == "" {
+		return 0
+	}
+	for i, tok := range sig {
+		if isIdent(tok) && tok.Start == strings.Index(sql, rawPath) {
+			return i
+		}
+	}
+	// Fallback: scan for the path start byte offset
+	pathStart := strings.Index(sql, rawPath)
+	if pathStart < 0 {
+		return 0
+	}
+	for i, tok := range sig {
+		if tok.Start == pathStart {
+			return i
+		}
+	}
+	return 0
+}
 
 func isIn(m map[string]struct{}, key string) bool {
 	_, ok := m[key]

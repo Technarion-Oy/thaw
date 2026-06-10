@@ -15,7 +15,7 @@ import (
 	"strings"
 
 	"thaw/internal/snowflake"
-	"thaw/internal/sqlutil"
+	"thaw/internal/sqltok"
 )
 
 // TagPair is a single tag name/value pair used in SET TAG / UNSET TAG clauses.
@@ -51,7 +51,7 @@ func escLit(s string) string {
 // validateCopyStatement ensures rawStmt contains exactly one SQL statement and
 // that it begins with COPY INTO. Returns the trimmed statement on success.
 func validateCopyStatement(rawStmt string) (string, error) {
-	stmts := sqlutil.Split(rawStmt)
+	stmts := sqltok.Split(rawStmt)
 	if len(stmts) != 1 {
 		return "", fmt.Errorf("copy statement must contain exactly one SQL statement, got %d", len(stmts))
 	}
