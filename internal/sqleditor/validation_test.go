@@ -19,6 +19,13 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE TRANSIENT DATABASE my_db",
 		"CREATE DATABASE my_db DATA_RETENTION_TIME_IN_DAYS = 90",
 		"CREATE TRANSIENT SCHEMA my_sch",
+		"CREATE OR REPLACE DATABASE db CLONE src",
+		"CREATE DATABASE db CLONE src AT (TIMESTAMP => 1) IGNORE TABLES WITH INSUFFICIENT DATA RETENTION IGNORE HYBRID TABLES",
+		"CREATE SCHEMA s WITH MANAGED ACCESS COMMENT = 'sch'",
+		"CREATE DATABASE db FROM SHARE provider_acct.my_share",
+		"CREATE DATABASE db EXTERNAL_VOLUME = vol CATALOG = cat STORAGE_SERIALIZATION_POLICY = OPTIMIZED",
+		"CREATE DATABASE db CATALOG_SYNC = 'open' CATALOG_SYNC_NAMESPACE_MODE = FLATTEN OBJECT_VISIBILITY = PRIVILEGED",
+		"CREATE DATABASE db REPLACE_INVALID_CHARACTERS = TRUE MAX_DATA_EXTENSION_TIME_IN_DAYS = 14 WITH TAG (t = 'v') CONTACT (support = c)",
 		// Snowflake Views
 		"CREATE VIEW v AS SELECT 1 FROM t",
 		"CREATE OR REPLACE SECURE VIEW v AS SELECT 1 FROM t",
@@ -488,6 +495,9 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		// Invalid Preambles
 		{"Invalid DB", "CREATE DATABASE my_db DATA_RETENTION_TIME_IN_DAYS 10", "Unexpected syntax"}, // Missing =
 		{"Invalid Schema", "CREATE SCHEMA my_sch WITH MANAGED ACCESS = TRUE", "Unexpected syntax"},
+		{"DB unknown property", "CREATE DATABASE db BOGUS_PROP = 1", "Unexpected syntax"},
+		{"DB enum bad value", "CREATE DATABASE db STORAGE_SERIALIZATION_POLICY = BOGUS", "Unexpected syntax"},
+		{"DB bool prop bad value", "CREATE DATABASE db ENABLE_DATA_COMPACTION = MAYBE", "Unexpected syntax"},
 		{"Invalid View", "CREATE VIEW v SELECT 1", "Unexpected syntax"}, // Missing AS
 		{"Invalid Mat View", "CREATE MATERIALIZED VIEW mv SELECT 1", "Unexpected syntax"},
 		{"View bad clause", "CREATE VIEW v BOGUS_PROP = 1 AS SELECT 1", "Unexpected syntax"},

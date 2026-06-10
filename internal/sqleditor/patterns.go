@@ -72,29 +72,8 @@ var (
 	// (tableProps removed — token-based: validTablePropsTail / consumeCreateTableProp)
 
 	// ── CREATE DATABASE / SCHEMA ──────────────────────────────────────────────
-	dbSchemaProps = strings.Join([]string{
-		`CLONE\s+` + _identPath + `(?:\s+(?:AT|BEFORE)\s*\(\s*(?:TIMESTAMP|OFFSET|STATEMENT)\s*=>\s*[^)]+\))?(?:\s+IGNORE\s+TABLES\s+WITH\s+INSUFFICIENT\s+DATA\s+RETENTION)?(?:\s+IGNORE\s+HYBRID\s+TABLES)?`,
-		`WITH\s+MANAGED\s+ACCESS`,
-		`(?:DATA_RETENTION_TIME_IN_DAYS|MAX_DATA_EXTENSION_TIME_IN_DAYS|ICEBERG_VERSION_DEFAULT)\s*=\s*\d+`,
-		`(?:ENABLE_ICEBERG_MERGE_ON_READ|REPLACE_INVALID_CHARACTERS|ENABLE_DATA_COMPACTION)\s*=\s*(?:TRUE|FALSE)`,
-		`(?:EXTERNAL_VOLUME|CATALOG)\s*=\s*` + _ident,
-		`DEFAULT_DDL_COLLATION\s*=\s*'(?:[^']|'')*'`,
-		`STORAGE_SERIALIZATION_POLICY\s*=\s*(?:COMPATIBLE|OPTIMIZED)`,
-		`CLASSIFICATION_PROFILE\s*=\s*'(?:[^']|'')*'`,
-		`COMMENT\s*=\s*'(?:[^']|'')*'`,
-		`CATALOG_SYNC\s*=\s*'(?:[^']|'')*'`,
-		`CATALOG_SYNC_NAMESPACE_MODE\s*=\s*(?:NEST|FLATTEN)`,
-		`CATALOG_SYNC_NAMESPACE_FLATTEN_DELIMITER\s*=\s*'(?:[^']|'')*'`,
-		`(?:WITH\s+)?TAG\s*\([^)]+\)`,
-		`(?:WITH\s+)?CONTACT\s*\([^)]+\)`,
-		`OBJECT_VISIBILITY\s*=\s*(?:PRIVILEGED|` + _ident + `)`,
-		// CREATE DATABASE <name> FROM SHARE <provider_account>.<share_name>
-		`FROM\s+SHARE\s+` + _ident + `\.` + _ident,
-	}, "|")
-
-	reValidCreateDbSchema = regexp.MustCompile(
-		`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:DATABASE|SCHEMA)\s+(?:IF\s+NOT\s+EXISTS\s+)?` +
-			_identPath + `(?:\s+(?:` + dbSchemaProps + `))*\s*$`)
+	// (dbSchemaProps / reValidCreateDbSchema removed — token-based:
+	// isValidCreateDbSchema / consumeDbSchemaProp)
 
 	// ── DROP DATABASE / SCHEMA ────────────────────────────────────────────────
 	reValidDropDbSchema = regexp.MustCompile(`(?i)^\s*DROP\s+(?:DATABASE|SCHEMA)\s+(?:IF\s+EXISTS\s+)?` + _identPath + `(?:\s+(?:CASCADE|RESTRICT))?\s*$`)
@@ -1858,9 +1837,24 @@ func eqValueProp(sig []sqltok.Token, sql string, i int, valKind sqltok.TokenKind
 	return 0, false
 }
 
+// eqKeywordProp matches "KEY = <kw>" where the value is one of the allowed
+// keywords; it returns the index just past the value.
+func eqKeywordProp(sig []sqltok.Token, sql string, i int, allowed ...string) (int, bool) {
+	if isOpEq(sig, sql, i+1) && kwAtAny(sig, sql, i+2, allowed...) != "" {
+		return i + 3, true
+	}
+	return 0, false
+}
+
 // eqBoolProp matches "KEY = TRUE|FALSE"; it returns the index just past the value.
 func eqBoolProp(sig []sqltok.Token, sql string, i int) (int, bool) {
-	if isOpEq(sig, sql, i+1) && kwAtAny(sig, sql, i+2, "TRUE", "FALSE") != "" {
+	return eqKeywordProp(sig, sql, i, "TRUE", "FALSE")
+}
+
+// eqIdentProp matches "KEY = <identifier>" (bare or quoted); it returns the index
+// just past the value.
+func eqIdentProp(sig []sqltok.Token, sql string, i int) (int, bool) {
+	if isOpEq(sig, sql, i+1) && i+2 < len(sig) && isIdent(sig[i+2]) {
 		return i + 3, true
 	}
 	return 0, false
@@ -1913,6 +1907,124 @@ func consumeCreateTableProp(sig []sqltok.Token, sql string, i int) (int, bool) {
 		return eqBoolProp(sig, sql, i)
 	}
 	return 0, false
+}
+
+// isValidCreateDbSchema reports whether sig is a well-formed CREATE DATABASE or
+// CREATE SCHEMA statement. It accepts:
+//
+//	CREATE [OR REPLACE] [TRANSIENT] {DATABASE|SCHEMA} [IF NOT EXISTS] <name> <prop>*
+//
+// with the property tail validated by consumeDbSchemaProp. It is the token-based
+// replacement for the dbSchemaProps / reValidCreateDbSchema allow-list.
+func isValidCreateDbSchema(sig []sqltok.Token, sql string) bool {
+	i := 0
+	if !kwAt(sig, sql, i, "CREATE") {
+		return false
+	}
+	i++
+	if kwAt(sig, sql, i, "OR") && kwAt(sig, sql, i+1, "REPLACE") {
+		i += 2
+	}
+	if kwAt(sig, sql, i, "TRANSIENT") {
+		i++
+	}
+	if kwAtAny(sig, sql, i, "DATABASE", "SCHEMA") == "" {
+		return false
+	}
+	i++
+	if kwAt(sig, sql, i, "IF") && kwAt(sig, sql, i+1, "NOT") && kwAt(sig, sql, i+2, "EXISTS") {
+		i += 3
+	}
+	if i >= len(sig) || !isIdent(sig[i]) {
+		return false
+	}
+	_, i = readIdentPath(sig, sql, i)
+	for i < len(sig) {
+		next, ok := consumeDbSchemaProp(sig, sql, i)
+		if !ok {
+			return false
+		}
+		i = next
+	}
+	return true
+}
+
+// consumeDbSchemaProp matches one CREATE DATABASE/SCHEMA property starting at
+// sig[i] and returns the index just past it; ok is false if none matches. Unlike
+// the view/table CONTACT clause, both TAG and CONTACT accept an optional WITH
+// here, so the WITH prefix is handled locally rather than via
+// consumeObjectPolicyClause.
+func consumeDbSchemaProp(sig []sqltok.Token, sql string, i int) (int, bool) {
+	if kwAt(sig, sql, i, "WITH") {
+		// WITH MANAGED ACCESS, or WITH TAG/CONTACT ( … ).
+		if kwAt(sig, sql, i+1, "MANAGED") && kwAt(sig, sql, i+2, "ACCESS") {
+			return i + 3, true
+		}
+		if kwAt(sig, sql, i+1, "TAG") || kwAt(sig, sql, i+1, "CONTACT") {
+			return skipParenGroup(sig, i+2)
+		}
+		return 0, false
+	}
+	switch {
+	case kwAt(sig, sql, i, "CLONE"):
+		return consumeDbSchemaClone(sig, sql, i)
+	case kwAt(sig, sql, i, "TAG"), kwAt(sig, sql, i, "CONTACT"):
+		return skipParenGroup(sig, i+1)
+	case kwAt(sig, sql, i, "FROM") && kwAt(sig, sql, i+1, "SHARE"):
+		// FROM SHARE <provider>.<share>
+		j := i + 2
+		if j+2 < len(sig) && isIdent(sig[j]) && sig[j+1].Kind == sqltok.Dot && isIdent(sig[j+2]) {
+			return j + 3, true
+		}
+		return 0, false
+	case kwAt(sig, sql, i, "COMMENT"), kwAt(sig, sql, i, "DEFAULT_DDL_COLLATION"),
+		kwAt(sig, sql, i, "CLASSIFICATION_PROFILE"), kwAt(sig, sql, i, "CATALOG_SYNC"),
+		kwAt(sig, sql, i, "CATALOG_SYNC_NAMESPACE_FLATTEN_DELIMITER"):
+		return eqValueProp(sig, sql, i, sqltok.StringLit)
+	case kwAt(sig, sql, i, "DATA_RETENTION_TIME_IN_DAYS"), kwAt(sig, sql, i, "MAX_DATA_EXTENSION_TIME_IN_DAYS"),
+		kwAt(sig, sql, i, "ICEBERG_VERSION_DEFAULT"):
+		return eqValueProp(sig, sql, i, sqltok.NumberLit)
+	case kwAt(sig, sql, i, "ENABLE_ICEBERG_MERGE_ON_READ"), kwAt(sig, sql, i, "REPLACE_INVALID_CHARACTERS"),
+		kwAt(sig, sql, i, "ENABLE_DATA_COMPACTION"):
+		return eqBoolProp(sig, sql, i)
+	case kwAt(sig, sql, i, "EXTERNAL_VOLUME"), kwAt(sig, sql, i, "CATALOG"), kwAt(sig, sql, i, "OBJECT_VISIBILITY"):
+		return eqIdentProp(sig, sql, i)
+	case kwAt(sig, sql, i, "STORAGE_SERIALIZATION_POLICY"):
+		return eqKeywordProp(sig, sql, i, "COMPATIBLE", "OPTIMIZED")
+	case kwAt(sig, sql, i, "CATALOG_SYNC_NAMESPACE_MODE"):
+		return eqKeywordProp(sig, sql, i, "NEST", "FLATTEN")
+	}
+	return 0, false
+}
+
+// consumeDbSchemaClone matches a CLONE property:
+//
+//	CLONE <name> [{AT|BEFORE} ( … )]
+//	  [IGNORE TABLES WITH INSUFFICIENT DATA RETENTION] [IGNORE HYBRID TABLES]
+//
+// The AT/BEFORE time-travel parens are skipped wholesale; their contents are
+// validated separately by validateTimeTravelClauses.
+func consumeDbSchemaClone(sig []sqltok.Token, sql string, i int) (int, bool) {
+	j := i + 1
+	if j >= len(sig) || !isIdent(sig[j]) {
+		return 0, false
+	}
+	_, j = readIdentPath(sig, sql, j)
+	if kwAtAny(sig, sql, j, "AT", "BEFORE") != "" {
+		next, ok := skipParenGroup(sig, j+1)
+		if !ok {
+			return 0, false
+		}
+		j = next
+	}
+	if kwAt(sig, sql, j, "IGNORE") && kwAt(sig, sql, j+1, "TABLES") && kwAt(sig, sql, j+2, "WITH") &&
+		kwAt(sig, sql, j+3, "INSUFFICIENT") && kwAt(sig, sql, j+4, "DATA") && kwAt(sig, sql, j+5, "RETENTION") {
+		j += 6
+	}
+	if kwAt(sig, sql, j, "IGNORE") && kwAt(sig, sql, j+1, "HYBRID") && kwAt(sig, sql, j+2, "TABLES") {
+		j += 3
+	}
+	return j, true
 }
 
 // validateCreateExternalTable validates CREATE EXTERNAL TABLE statements: it
@@ -2118,12 +2230,11 @@ func isCreateTableBackup(sig []sqltok.Token, text string) bool {
 // accepted grammar: the name plus any of the many optional properties (CLONE,
 // WITH MANAGED ACCESS, retention/extension days, catalog/volume, tags, …).
 //
-// Not tokenised: reValidCreateDbSchema is a compact whole-statement grammar
-// whitelist with per-property value formats. An equivalent token walk would be
-// larger for no behavioural gain, so the regex is kept.
+// The grammar walk lives in isValidCreateDbSchema (token-based); kind only
+// selects the wording of the diagnostic.
 func validateCreateDbOrSchema(kind string) func(string, StatementRange) []DiagMarker {
 	return func(parseText string, r StatementRange) []DiagMarker {
-		if !reValidCreateDbSchema.MatchString(parseText) {
+		if !isValidCreateDbSchema(sigTokens(parseText), parseText) {
 			return oneMarker(r, "Unexpected syntax in CREATE "+kind+" statement.")
 		}
 		return nil
