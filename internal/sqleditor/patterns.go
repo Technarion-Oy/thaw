@@ -1094,6 +1094,17 @@ var parseTextRoutes = []parseTextRoute{
 	{guardKW("SHOW"), validateShow},
 }
 
+// ValidateSnowflakePatterns is the entry point for Snowflake-specific pattern
+// diagnostics. For each statement range it runs a series of inline custom checks
+// (LATERAL FLATTEN typo, FLATTEN without LATERAL, variant-path dots, QUALIFY
+// placement, time travel, MERGE rules, unknown Cortex functions) and then a
+// table-driven dispatch (parseTextRoutes) that routes each statement to its
+// dedicated validator. It also tracks block-level transactions across the script
+// to flag stray COMMIT/ROLLBACK and unclosed BEGIN.
+//
+// Token-based: statements are tokenised once and the checks/guards operate on the
+// significant-token stream, so keywords inside comments, strings, and
+// dollar-quoted bodies are never matched.
 func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
@@ -1562,8 +1573,16 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 
 // ── Extracted validator functions (dispatch-table entries) ─────────────────────
 
-// validateCreateView checks the CREATE VIEW preamble against the comprehensive
-// regex that covers all optional clauses (COPY GRANTS, COMMENT, policies, etc.).
+// validateCreateView reports a generic "unexpected syntax" diagnostic when a
+// CREATE VIEW statement does not match the expected preamble grammar (all the
+// optional clauses: COPY GRANTS, COMMENT, row-access/aggregation/join policies,
+// CLUSTER BY, TAG, CONTACT, … up to the AS body).
+//
+// Not tokenised: this is a single whole-statement grammar acceptance check, and
+// reValidCreateViewPreamble expresses that grammar — clause alternatives, value
+// formats, and ordering — far more compactly than an equivalent hand-written
+// token walk would. A token version would be strictly more code for the same
+// pass/fail result, so the regex is kept deliberately.
 func validateCreateView(parseText string, r StatementRange) []DiagMarker {
 	if !reValidCreateViewPreamble.MatchString(parseText) {
 		return oneMarker(r, "Unexpected syntax in CREATE VIEW statement.")
@@ -1571,8 +1590,19 @@ func validateCreateView(parseText string, r StatementRange) []DiagMarker {
 	return nil
 }
 
-// validateCreateExternalTable validates CREATE EXTERNAL TABLE statements
-// including column list, PARTITION BY, WITH LOCATION, FILE_FORMAT, and property checks.
+// validateCreateExternalTable validates CREATE EXTERNAL TABLE statements: it
+// rejects OR REPLACE / CLUSTER BY / DATA_RETENTION_TIME_IN_DAYS, requires a
+// non-empty column list of virtual (AS <expr>) columns, allows an optional
+// PARTITION BY (...), and requires WITH LOCATION and FILE_FORMAT.
+//
+// Mostly tokenised — the structural walk (preamble, column splitting, clause
+// detection) is token-based. Two checks remain regex-based on purpose:
+//   - reVirtualColAS confirms a column ends in "AS ( … )"; and
+//   - extTablePropsRe validates the trailing property list against an allow-set
+//     *with value formats* (e.g. AUTO_REFRESH = TRUE|FALSE, PATTERN = '…').
+//
+// Those two encode value-format grammars, not SQL structure; reproducing them
+// token-by-token would be larger and no clearer, so the regexes are retained.
 func validateCreateExternalTable(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
@@ -1672,9 +1702,17 @@ func validateCreateExternalTable(parseText string, r StatementRange) []DiagMarke
 	return markers
 }
 
-// validateCreateTablePreamble validates CREATE TABLE preamble: OR REPLACE vs
-// IF NOT EXISTS conflict, column list, table properties, CTAS, CLONE, LIKE,
-// and USING TEMPLATE forms.
+// validateCreateTablePreamble validates the CREATE TABLE preamble: the OR
+// REPLACE vs IF NOT EXISTS conflict, the modifier order, and that the body is
+// one of the accepted forms — a column list (optionally followed by table
+// properties or AS SELECT), CTAS, CLONE, LIKE, FROM BACKUP SET, or USING
+// TEMPLATE.
+//
+// Tokenised for everything except the trailing table-property list, which is
+// matched with a locally-compiled tablePropsRe built from the tableProps allow-
+// set. That property grammar validates value formats (CLUSTER BY (...),
+// DATA_RETENTION_TIME_IN_DAYS = \d+, COMMENT = '…', …); a token walk of equal
+// strictness would be longer, so the regex is kept for the property tail only.
 func validateCreateTablePreamble(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 	sig := sigTokens(parseText)
@@ -1752,7 +1790,14 @@ func isCreateTableBackup(sig []sqltok.Token, text string) bool {
 	return false
 }
 
-// validateCreateDbOrSchema returns a validator for CREATE DATABASE or CREATE SCHEMA.
+// validateCreateDbOrSchema returns a validator that flags a CREATE DATABASE or
+// CREATE SCHEMA statement (kind selects which) whose syntax does not match the
+// accepted grammar: the name plus any of the many optional properties (CLONE,
+// WITH MANAGED ACCESS, retention/extension days, catalog/volume, tags, …).
+//
+// Not tokenised: reValidCreateDbSchema is a compact whole-statement grammar
+// whitelist with per-property value formats. An equivalent token walk would be
+// larger for no behavioural gain, so the regex is kept.
 func validateCreateDbOrSchema(kind string) func(string, StatementRange) []DiagMarker {
 	return func(parseText string, r StatementRange) []DiagMarker {
 		if !reValidCreateDbSchema.MatchString(parseText) {
@@ -1762,7 +1807,12 @@ func validateCreateDbOrSchema(kind string) func(string, StatementRange) []DiagMa
 	}
 }
 
-// validateDropDbOrSchema returns a validator for DROP DATABASE or DROP SCHEMA.
+// validateDropDbOrSchema returns a validator that flags a DROP DATABASE or DROP
+// SCHEMA statement (kind selects which) that is not "DROP <kind> [IF EXISTS]
+// <name> [CASCADE|RESTRICT]".
+//
+// Not tokenised: the accepted shape is a one-line regex (reValidDropDbSchema);
+// a token walk would be more code for the same accept/reject result.
 func validateDropDbOrSchema(kind string) func(string, StatementRange) []DiagMarker {
 	return func(parseText string, r StatementRange) []DiagMarker {
 		if !reValidDropDbSchema.MatchString(parseText) {
@@ -1772,7 +1822,11 @@ func validateDropDbOrSchema(kind string) func(string, StatementRange) []DiagMark
 	}
 }
 
-// validateCreateSequence validates CREATE SEQUENCE including ORDER/NOORDER conflict.
+// validateCreateSequence flags a CREATE SEQUENCE whose syntax is invalid or that
+// specifies both ORDER and NOORDER (mutually exclusive). The ORDER/NOORDER clash
+// is detected token-based (hasKW); the overall shape — START/INCREMENT values,
+// COMMENT, etc. — is checked by the reValidCreateSeq grammar whitelist, which is
+// more compact than an equivalent token walk and is kept for that reason.
 func validateCreateSequence(parseText string, r StatementRange) []DiagMarker {
 	sig := sigTokens(parseText)
 	bothOrderNoorder := hasKW(sig, parseText, "ORDER") && hasKW(sig, parseText, "NOORDER")
@@ -1782,7 +1836,11 @@ func validateCreateSequence(parseText string, r StatementRange) []DiagMarker {
 	return nil
 }
 
-// validateAlterSequence validates ALTER SEQUENCE including ORDER/NOORDER conflict.
+// validateAlterSequence flags an ALTER SEQUENCE that is syntactically invalid or
+// that specifies both ORDER and NOORDER. As in validateCreateSequence, the
+// ORDER/NOORDER clash is token-based and the statement shape (RENAME TO,
+// SET INCREMENT/ORDER/COMMENT, UNSET COMMENT) is checked by the reValidAlterSeq
+// grammar whitelist — kept because it is shorter than an equivalent token walk.
 func validateAlterSequence(parseText string, r StatementRange) []DiagMarker {
 	sig := sigTokens(parseText)
 	bothOrderNoorder := hasKW(sig, parseText, "ORDER") && hasKW(sig, parseText, "NOORDER")
@@ -1792,7 +1850,11 @@ func validateAlterSequence(parseText string, r StatementRange) []DiagMarker {
 	return nil
 }
 
-// validateDropSequence validates DROP SEQUENCE syntax.
+// validateDropSequence flags a DROP SEQUENCE that is not
+// "DROP SEQUENCE [IF EXISTS] <name> [CASCADE|RESTRICT]".
+//
+// Not tokenised: the accepted shape is a one-line regex (reValidDropSeq); a
+// token walk would be more code for the same accept/reject result.
 func validateDropSequence(parseText string, r StatementRange) []DiagMarker {
 	if !reValidDropSeq.MatchString(parseText) {
 		return oneMarker(r, "Unexpected syntax in DROP SEQUENCE statement.")
@@ -1877,8 +1939,13 @@ func validateCreateResourceMonitor(parseText string, r StatementRange) []DiagMar
 	return markers
 }
 
-// validateCreateStream validates CREATE STREAM: OR REPLACE vs IF NOT EXISTS
-// conflict and full preamble regex.
+// validateCreateStream validates CREATE STREAM: the OR REPLACE vs IF NOT EXISTS
+// conflict (token-based) and the overall statement shape — ON TABLE/VIEW/STAGE/
+// EXTERNAL TABLE, optional AT/BEFORE time travel, and stream properties.
+//
+// The shape check uses the reValidCreateStream grammar whitelist, which captures
+// the ON-target alternatives and per-property value formats more compactly than
+// an equivalent token walk; it is therefore kept regex-based on purpose.
 func validateCreateStream(parseText string, r StatementRange) []DiagMarker {
 	sig := sigTokens(parseText)
 	if marker, conflict := checkOrReplaceConflictTok(sig, parseText, r, "CREATE STREAM"); conflict {
@@ -2170,6 +2237,10 @@ func toUpperSet(keys []string) map[string]bool {
 	return m
 }
 
+// cleanParseText returns s with comments and string-literal contents removed and
+// surrounding whitespace trimmed, leaving only structural tokens for callers that
+// then re-tokenise. Fully tokeniser-driven: both StripComments and StripStrings
+// are sqltok helpers, so comment/quote nesting is handled correctly.
 func cleanParseText(s string) string {
 	return strings.TrimSpace(sqltok.StripStrings(sqltok.StripComments(s)))
 }
@@ -3266,6 +3337,10 @@ func validateProperties(s string, validProps string, r StatementRange, markers *
 	}
 }
 
+// validateCreateAlert validates CREATE ALERT: the OR REPLACE vs IF NOT EXISTS
+// conflict, the mandatory WAREHOUSE / SCHEDULE / IF (condition) / THEN clauses,
+// and the allowed property keys. Token-based throughout — clauses and properties
+// are located by scanning the significant-token stream.
 func validateCreateAlert(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
@@ -3351,6 +3426,11 @@ func validateCreateAlert(parseText string, r StatementRange) []DiagMarker {
 	return markers
 }
 
+// validateCreateNetworkPolicy validates CREATE NETWORK POLICY: the account-level
+// name (no db/schema prefix), that at least one of ALLOWED_IP_LIST or
+// ALLOWED_NETWORK_RULE_LIST is present and non-empty, CIDR validity of the IP
+// lists, and the allowed property keys. Token-based; the IP-list contents are
+// extracted with findKWAssignParenContent and re-tokenised per entry.
 func validateCreateNetworkPolicy(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
@@ -4060,6 +4140,12 @@ func normalizeGrantObjectType(t string) string {
 	return upper
 }
 
+// validateCopyInto validates COPY INTO in both directions: loading into a table
+// and unloading into a stage/location. It locates the target, skips an optional
+// column list and the FROM source (a stage, literal, or subquery), then checks
+// direction-specific property rules. Fully token-based — the target, source, and
+// properties are walked over the significant-token stream (paren groups skipped
+// via parenInnerRange).
 func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
@@ -4286,6 +4372,11 @@ func validateBoolPropTok(sig []sqltok.Token, sql, prop string, r StatementRange,
 	}
 }
 
+// validateCreateIcebergTable validates CREATE ICEBERG TABLE: it enforces the
+// CATALOG-dependent rules (e.g. Snowflake-managed vs external catalog require
+// different mandatory keys like EXTERNAL_VOLUME, BASE_LOCATION, CATALOG_TABLE_NAME)
+// and checks boolean/enum property values. Token-based: property KEY=VALUE pairs
+// are gathered by getStatementProperties (top-level paren-depth scan).
 func validateCreateIcebergTable(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 	// Strip comments first to prevent comment-spoofing in property parsing
@@ -4374,6 +4465,10 @@ func validateCreateIcebergTable(parseText string, r StatementRange) []DiagMarker
 
 // ── CREATE ICEBERG TABLE helpers ──────────────────────────────────────────
 
+// getStatementProperties returns the top-level KEY = VALUE properties of a
+// statement as an upper-cased-key map. Token-based: it walks the significant
+// tokens and collects only pairs at paren depth 0, so nested content such as
+// column definitions or CHECK(...) cannot spoof property keys.
 func getStatementProperties(s string) map[string]string {
 	props := make(map[string]string)
 	// Only collect top-level (paren depth 0) KEY = VALUE pairs, so nested content
@@ -4401,15 +4496,25 @@ func getStatementProperties(s string) map[string]string {
 	return props
 }
 
+// isBool reports whether s (with any surrounding single quotes removed) is the
+// literal TRUE or FALSE, case-insensitively. A plain value check on an
+// already-extracted property value — no tokenisation involved.
 func isBool(s string) bool {
 	upper := strings.ToUpper(strings.Trim(s, "'"))
 	return upper == "TRUE" || upper == "FALSE"
 }
 
+// isValidEnumValue reports whether val (with surrounding single quotes removed,
+// upper-cased) is one of validValues. A plain membership check on an
+// already-extracted property value — no tokenisation involved.
 func isValidEnumValue(val string, validValues ...string) bool {
 	return slices.Contains(validValues, strings.ToUpper(strings.Trim(val, "'")))
 }
 
+// validateCreateHybridTable validates CREATE HYBRID TABLE: it rejects OR REPLACE,
+// requires a column list with a PRIMARY KEY, and validates index definitions.
+// Token-based — the column/constraint segments are split with splitHybridSegments
+// and each is re-tokenised for inspection.
 func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
@@ -4546,6 +4651,10 @@ func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker 
 	return markers
 }
 
+// normalizeIdent normalises a single identifier for comparison: a "quoted"
+// identifier keeps its exact inner case (quotes removed); an unquoted one is
+// upper-cased, matching Snowflake's case-folding rules. Operates on one
+// already-isolated identifier string, so no tokenisation is needed.
 func normalizeIdent(s string) string {
 	s = strings.TrimSpace(s)
 	if strings.HasPrefix(s, "\"") && strings.HasSuffix(s, "\"") {
@@ -4624,6 +4733,10 @@ func stripQuotedIdentsAndParens(s string) string {
 	return buf.String()
 }
 
+// splitHybridSegments splits s (the content of a hybrid-table column list) on
+// top-level commas, trimming each segment. Token-based: it tokenises s and
+// splits at Comma tokens that sit at paren depth 0, so commas inside type
+// parameters like NUMBER(10,2) or inside string literals do not split a segment.
 func splitHybridSegments(s string) []string {
 	var segments []string
 	depth := 0
@@ -4645,6 +4758,15 @@ func splitHybridSegments(s string) []string {
 	return segments
 }
 
+// validateCreateFileFormat validates CREATE FILE FORMAT: the OR REPLACE vs
+// IF NOT EXISTS conflict, the unsupported TRANSIENT/TEMPORARY modifiers, and
+// that every property key is allowed for the declared TYPE (CSV, JSON, AVRO,
+// ORC, PARQUET, XML — defaulting to CSV).
+//
+// Structurally tokenised: properties are collected by scanning the token stream
+// for KEY = VALUE. The one regex used here, reFileFormatValidEsc, validates a
+// single escape-character *value* (e.g. \n, \xNN, \uNNNN) — a character-format
+// check, not SQL structure — so tokenisation does not apply to it.
 func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
@@ -5419,8 +5541,13 @@ func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMark
 
 // splitLocationBlocks iterates over s (the content inside a STORAGE_LOCATIONS
 // outer paren) and returns each inner (…) block with its enclosing parens
-// stripped. String literals inside the blocks are preserved so that
-// per-location regex checks operate on real values.
+// stripped. String literals inside the blocks are preserved so the per-location
+// checks see real values.
+//
+// Operates on the extracted string rather than the token stream: it walks the
+// raw text and delegates paren balancing to findMatchingParen (itself token-
+// based). Each returned block is re-tokenised by the caller, so this stays a
+// thin string-splitting step.
 func splitLocationBlocks(s string) []string {
 	var blocks []string
 	for i := 0; i < len(s); i++ {
@@ -6742,9 +6869,17 @@ func countIdentParts(m string) int {
 	return parts
 }
 
-// matchStringLiteral returns the position right after the closing single quote
-// of a SQL string literal at the start of s, or -1 if s does not start with a
-// valid string literal.  Embedded doubled single-quotes are handled.
+// matchStringLiteral returns the byte position just past the closing single
+// quote of a SQL string literal at the start of s, or -1 if s does not start
+// with a *terminated* string literal. Embedded doubled single-quotes (”) are
+// handled.
+//
+// Deliberately byte-level rather than tokenised: the tokenizer treats an
+// unterminated string as a StringLit running to end-of-input, so it cannot
+// distinguish "valid, terminated literal" from "unterminated literal". The
+// SHOW/DESCRIBE validators rely on that distinction to emit an "unterminated
+// string literal" diagnostic, so this scanner returns -1 for the unterminated
+// case where a token check could not.
 func matchStringLiteral(s string) int {
 	if len(s) == 0 || s[0] != '\'' {
 		return -1
