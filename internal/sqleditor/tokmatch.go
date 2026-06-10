@@ -1813,6 +1813,30 @@ func extractParenContentTok(sig []sqltok.Token, sql string, kwIdx int) string {
 	return sql[openPos:]
 }
 
+// parenInnerRange returns the half-open token range [start, end) strictly inside
+// the parenthesised group whose opening "(" is sig[openIdx], plus closeIdx (the
+// index of the matching ")"). start == openIdx+1 and end == closeIdx. ok is
+// false if sig[openIdx] is not "(" or the group is unterminated. It replaces the
+// recurring inline "scan for the matching close paren and slice the body" loop.
+func parenInnerRange(sig []sqltok.Token, openIdx int) (start, closeIdx int, ok bool) {
+	if openIdx < 0 || openIdx >= len(sig) || sig[openIdx].Kind != sqltok.LParen {
+		return 0, 0, false
+	}
+	depth := 0
+	for j := openIdx; j < len(sig); j++ {
+		switch sig[j].Kind {
+		case sqltok.LParen:
+			depth++
+		case sqltok.RParen:
+			depth--
+			if depth == 0 {
+				return openIdx + 1, j, true
+			}
+		}
+	}
+	return 0, 0, false
+}
+
 // findKWAssignParenContent scans for KEYWORD = ( ... ) and returns the raw
 // text inside the parentheses. This replaces regex patterns like
 // `\bKEYWORD\s*=\s*\(([^)]*)\)`.

@@ -340,11 +340,6 @@ var (
 		"STDDEV": true, "VARIANCE": true,
 	}
 
-	// ── ASOF JOIN ──────────────────────────────────────────────────────
-	// Detection: matches ASOF JOIN (the core Snowflake time-series join).
-	// Kept for findTopLevelMatches tests; production code uses token-based matching.
-	reAsofJoinClause = regexp.MustCompile(`(?i)\bASOF\s+JOIN\b`)
-
 	// ── ALTER TABLE … ADD/DROP SEARCH OPTIMIZATION ─────────────────────
 	// Detection: matches ALTER TABLE <name> ADD SEARCH OPTIMIZATION or
 	// ALTER TABLE <name> DROP SEARCH OPTIMIZATION.
@@ -2366,23 +2361,10 @@ func validateMatchRecognizeClauses(stripped string, r StatementRange) []DiagMark
 			continue
 		}
 		// Extract balanced paren body as tokens.
-		bodyStart := i + 2
-		depth := 1
-		bodyEnd := bodyStart
-		for j := bodyStart; j < len(sig); j++ {
-			switch sig[j].Kind {
-			case sqltok.LParen:
-				depth++
-			case sqltok.RParen:
-				depth--
-				if depth == 0 {
-					bodyEnd = j
-					goto foundBody
-				}
-			}
+		bodyStart, bodyEnd, ok := parenInnerRange(sig, i+1)
+		if !ok {
+			continue
 		}
-		continue
-	foundBody:
 		body := sig[bodyStart:bodyEnd]
 
 		// 1. Validate mandatory PATTERN clause.
@@ -2623,25 +2605,8 @@ func validateAsofJoinClauses(stripped string, r StatementRange) []DiagMarker {
 		if hasMatchCondition {
 			mcIdx := findKWLParen(scope, clean, "MATCH_CONDITION")
 			if mcIdx >= 0 {
-				// Check if paren is properly closed (balanced).
-				matched := false
-				if mcIdx+1 < len(scope) && scope[mcIdx+1].Kind == sqltok.LParen {
-					depth := 1
-					for j := mcIdx + 2; j < len(scope); j++ {
-						switch scope[j].Kind {
-						case sqltok.LParen:
-							depth++
-						case sqltok.RParen:
-							depth--
-							if depth == 0 {
-								matched = true
-							}
-						}
-						if matched {
-							break
-						}
-					}
-				}
+				// Check if the MATCH_CONDITION paren is properly closed.
+				_, _, matched := parenInnerRange(scope, mcIdx+1)
 				if matched {
 					mcBody := extractParenContentTok(scope, clean, mcIdx)
 					// Empty body or body without valid comparison.
@@ -2788,157 +2753,100 @@ func validateInsertFirst(stripped string, r StatementRange) []DiagMarker {
 }
 
 // validateInsertMultiTable is the shared implementation for INSERT ALL and
-// INSERT FIRST validation.
+// INSERT FIRST validation. It is fully token-based: the tokenizer classifies
+// keywords inside string literals as non-keyword tokens, so they are ignored
+// without a separate string-stripping pass, and word boundaries are intrinsic.
 func validateInsertMultiTable(keyword string, stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	clean := strings.TrimSpace(sqltok.StripStrings(stripped))
-	upper := strings.ToUpper(clean)
+	sig := sigToks(sqltok.Tokenize(stripped))
 
-	// Find the position of the trailing top-level SELECT. Keywords after
-	// this position belong to the source query and must be ignored (e.g.
-	// CASE WHEN/ELSE inside the SELECT clause).
-	trailingSelectPos := findLastTopLevelSelectPos(upper)
-
-	// Scan for top-level WHEN, ELSE, and INTO keywords (depth == 0) that
-	// appear before the trailing SELECT.
-	scanLimit := len(upper)
-	if trailingSelectPos >= 0 {
-		scanLimit = trailingSelectPos
-	}
-
-	whenPositions, hasElse, hasInto := scanInsertMultiKeywords(upper, scanLimit)
-	hasWhen := len(whenPositions) > 0
-
-	// Determine if this is a conditional form (has WHEN or ELSE) or
-	// unconditional (bare INSERT ALL INTO ... INTO ... SELECT).
-	isConditional := hasWhen || hasElse
-
-	if keyword == "FIRST" {
-		// INSERT FIRST always requires WHEN branches.
-		if !hasWhen {
-			markers = append(markers, diagMarkerSpan(r,
-				"INSERT FIRST requires at least one WHEN branch. Use WHEN <condition> THEN INTO <table>.", 4))
-			return markers
+	// Find the last top-level (depth 0) SELECT. Keywords after it belong to the
+	// source query (e.g. CASE WHEN/ELSE inside the SELECT) and must be ignored.
+	trailingSelectIdx := -1
+	depth := 0
+	for i, t := range sig {
+		switch t.Kind {
+		case sqltok.LParen:
+			depth++
+		case sqltok.RParen:
+			if depth > 0 {
+				depth--
+			}
+		default:
+			if depth == 0 && tokUpper(t, stripped) == "SELECT" {
+				trailingSelectIdx = i
+			}
 		}
 	}
 
-	if isConditional {
+	// Scan for top-level WHEN/ELSE/INTO keywords before the trailing SELECT.
+	scanEnd := len(sig)
+	if trailingSelectIdx >= 0 {
+		scanEnd = trailingSelectIdx
+	}
+	var whenIdxs []int
+	hasElse, hasInto := false, false
+	depth = 0
+	for i := 0; i < scanEnd; i++ {
+		switch sig[i].Kind {
+		case sqltok.LParen:
+			depth++
+		case sqltok.RParen:
+			if depth > 0 {
+				depth--
+			}
+		default:
+			if depth != 0 {
+				continue
+			}
+			switch tokUpper(sig[i], stripped) {
+			case "WHEN":
+				whenIdxs = append(whenIdxs, i)
+			case "ELSE":
+				hasElse = true
+			case "INTO":
+				hasInto = true
+			}
+		}
+	}
+	hasWhen := len(whenIdxs) > 0
+
+	// INSERT FIRST always requires WHEN branches.
+	if keyword == "FIRST" && !hasWhen {
+		return append(markers, diagMarkerSpan(r,
+			"INSERT FIRST requires at least one WHEN branch. Use WHEN <condition> THEN INTO <table>.", 4))
+	}
+
+	if hasWhen || hasElse {
 		// Conditional form: require at least one WHEN (ELSE alone is invalid).
 		if !hasWhen {
-			markers = append(markers, diagMarkerSpan(r,
+			return append(markers, diagMarkerSpan(r,
 				"INSERT "+keyword+" requires at least one WHEN branch when using conditional insert. Use WHEN <condition> THEN INTO <table>.", 4))
-			return markers
 		}
-
-		// Each WHEN must have a THEN INTO.
-		for i, whenPos := range whenPositions {
-			end := scanLimit
-			if i+1 < len(whenPositions) {
-				end = whenPositions[i+1]
+		// Each WHEN must contain a THEN INTO before the next WHEN.
+		for k, w := range whenIdxs {
+			end := scanEnd
+			if k+1 < len(whenIdxs) {
+				end = whenIdxs[k+1]
 			}
-			clause := upper[whenPos:end]
-			clauseSig := sigToks(sqltok.Tokenize(clause))
-			if !hasKWPair(clauseSig, clause, "THEN", "INTO") {
+			if !hasKWPair(sig[w:end], stripped, "THEN", "INTO") {
 				markers = append(markers, diagMarkerSpan(r,
 					"WHEN branch must contain INTO clause. Use WHEN <condition> THEN INTO <table>.", 4))
 			}
 		}
-	} else {
+	} else if !hasInto {
 		// Unconditional form: require at least one INTO.
-		if !hasInto {
-			markers = append(markers, diagMarkerSpan(r,
-				"INSERT "+keyword+" requires at least one INTO clause.", 4))
-			return markers
-		}
+		return append(markers, diagMarkerSpan(r,
+			"INSERT "+keyword+" requires at least one INTO clause.", 4))
 	}
 
 	// Trailing SELECT is mandatory for all multi-table inserts.
-	if trailingSelectPos < 0 {
+	if trailingSelectIdx < 0 {
 		markers = append(markers, diagMarkerSpan(r,
 			"INSERT "+keyword+" requires a source SELECT at the end of the statement.", 4))
 	}
 
 	return markers
-}
-
-// scanInsertMultiKeywords scans upper (already uppercased) up to scanLimit for
-// top-level (depth == 0) WHEN, ELSE, and INTO keywords. Returns the positions
-// of each WHEN, and whether ELSE and INTO were found.
-// Note: word-boundary checks peek one character past the keyword end using
-// len(upper) (not scanLimit) because we need to verify the character after the
-// keyword is not a word character. This is safe — the keyword start is always
-// within scanLimit, and we only read (not match) one byte beyond.
-func scanInsertMultiKeywords(upper string, scanLimit int) (whenPositions []int, hasElse bool, hasInto bool) {
-	depth := 0
-	for i := 0; i < scanLimit; i++ {
-		switch upper[i] {
-		case '(':
-			depth++
-		case ')':
-			if depth > 0 {
-				depth--
-			}
-		case 'W':
-			if depth == 0 && i+4 <= scanLimit && upper[i:i+4] == "WHEN" {
-				if i > 0 && isWordChar(rune(upper[i-1])) {
-					continue
-				}
-				if i+4 < len(upper) && isWordChar(rune(upper[i+4])) {
-					continue
-				}
-				whenPositions = append(whenPositions, i)
-			}
-		case 'E':
-			if depth == 0 && i+4 <= scanLimit && upper[i:i+4] == "ELSE" {
-				if i > 0 && isWordChar(rune(upper[i-1])) {
-					continue
-				}
-				if i+4 < len(upper) && isWordChar(rune(upper[i+4])) {
-					continue
-				}
-				hasElse = true
-			}
-		case 'I':
-			if depth == 0 && i+4 <= scanLimit && upper[i:i+4] == "INTO" {
-				if i > 0 && isWordChar(rune(upper[i-1])) {
-					continue
-				}
-				if i+4 < len(upper) && isWordChar(rune(upper[i+4])) {
-					continue
-				}
-				hasInto = true
-			}
-		}
-	}
-	return
-}
-
-// findLastTopLevelSelectPos returns the position of the last top-level SELECT
-// keyword (depth == 0) in s, or -1 if none found.
-func findLastTopLevelSelectPos(upper string) int {
-	depth := 0
-	lastPos := -1
-	for i := 0; i < len(upper); i++ {
-		switch upper[i] {
-		case '(':
-			depth++
-		case ')':
-			if depth > 0 {
-				depth--
-			}
-		case 'S':
-			if depth == 0 && i+6 <= len(upper) && upper[i:i+6] == "SELECT" {
-				if i > 0 && isWordChar(rune(upper[i-1])) {
-					continue
-				}
-				if i+6 < len(upper) && isWordChar(rune(upper[i+6])) {
-					continue
-				}
-				lastPos = i
-			}
-		}
-	}
-	return lastPos
 }
 
 // validateInsertOverwrite validates INSERT OVERWRITE INTO statements.
@@ -2983,20 +2891,11 @@ func validateInsertOverwrite(stripped string, r StatementRange) []DiagMarker {
 	}
 	// Skip optional column list (parenthesized).
 	if i < len(sig) && sig[i].Kind == sqltok.LParen {
-		depth := 0
-		for ; i < len(sig); i++ {
-			switch sig[i].Kind {
-			case sqltok.LParen:
-				depth++
-			case sqltok.RParen:
-				depth--
-				if depth == 0 {
-					i++
-					goto doneColList
-				}
-			}
+		if _, closeIdx, ok := parenInnerRange(sig, i); ok {
+			i = closeIdx + 1
+		} else {
+			i = len(sig)
 		}
-	doneColList:
 	}
 
 	hasSource := false
@@ -3013,44 +2912,6 @@ func validateInsertOverwrite(stripped string, r StatementRange) []DiagMarker {
 	}
 
 	return markers
-}
-
-// findTopLevelMatches returns all matches of re in s that are not inside
-// parenthesized groups. This prevents nested ASOF JOINs inside subqueries
-// from corrupting the scope splitting of the outer ASOF JOIN.
-func findTopLevelMatches(s string, re *regexp.Regexp) [][]int {
-	allLocs := re.FindAllStringIndex(s, -1)
-	if len(allLocs) == 0 {
-		return nil
-	}
-	// Precompute paren depth at every position that starts a match.
-	// We scan once to build a depth array up to the last match start.
-	maxPos := allLocs[len(allLocs)-1][0]
-	depth := 0
-	depthAt := make(map[int]int, len(allLocs))
-	matchIdx := 0
-	for i := 0; i <= maxPos && matchIdx < len(allLocs); i++ {
-		if i == allLocs[matchIdx][0] {
-			depthAt[i] = depth
-			matchIdx++
-		}
-		switch s[i] {
-		case '(':
-			depth++
-		case ')':
-			if depth > 0 {
-				depth--
-			}
-		}
-	}
-
-	var result [][]int
-	for _, loc := range allLocs {
-		if depthAt[loc[0]] == 0 {
-			result = append(result, loc)
-		}
-	}
-	return result
 }
 
 // findMatchingParen finds the index of the closing ')' that matches the opening
@@ -4299,22 +4160,11 @@ func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
 
 	// Skip optional column list: (col1, col2, ...)
 	if afterTargetIdx < len(sig) && sig[afterTargetIdx].Kind == sqltok.LParen {
-		depth := 1
-		afterTargetIdx++
-		for afterTargetIdx < len(sig) {
-			switch sig[afterTargetIdx].Kind {
-			case sqltok.LParen:
-				depth++
-			case sqltok.RParen:
-				depth--
-				if depth == 0 {
-					afterTargetIdx++
-					goto doneColList
-				}
-			}
-			afterTargetIdx++
+		if _, closeIdx, ok := parenInnerRange(sig, afterTargetIdx); ok {
+			afterTargetIdx = closeIdx + 1
+		} else {
+			afterTargetIdx = len(sig)
 		}
-	doneColList:
 	}
 
 	// FROM clause is mandatory.
@@ -4331,23 +4181,12 @@ func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
 	propStartIdx := fromIdx
 	if propStartIdx < len(sig) {
 		if sig[propStartIdx].Kind == sqltok.LParen {
-			// Subquery: skip balanced parens.
-			depth := 1
-			propStartIdx++
-			for propStartIdx < len(sig) {
-				switch sig[propStartIdx].Kind {
-				case sqltok.LParen:
-					depth++
-				case sqltok.RParen:
-					depth--
-					if depth == 0 {
-						propStartIdx++
-						goto doneFromSource
-					}
-				}
-				propStartIdx++
+			// Subquery: skip the balanced parens.
+			if _, closeIdx, ok := parenInnerRange(sig, propStartIdx); ok {
+				propStartIdx = closeIdx + 1
+			} else {
+				propStartIdx = len(sig)
 			}
-		doneFromSource:
 		} else {
 			// Skip source tokens until we hit a keyword = pattern (property).
 			for propStartIdx < len(sig) {
@@ -7165,24 +7004,10 @@ func validateTimeTravelClauses(stripped string, r StatementRange) []DiagMarker {
 		}
 
 		// Extract tokens inside the parentheses.
-		depth := 0
-		innerStart := i + 2
-		innerEnd := innerStart
-		for j := i + 1; j < len(sig); j++ {
-			switch sig[j].Kind {
-			case sqltok.LParen:
-				depth++
-			case sqltok.RParen:
-				depth--
-				if depth == 0 {
-					innerEnd = j
-					goto foundClose
-				}
-			}
+		innerStart, innerEnd, ok := parenInnerRange(sig, i+1)
+		if !ok {
+			continue // Unbalanced — the syntax checker will flag it.
 		}
-		continue // Unbalanced — the syntax checker will flag it.
-	foundClose:
-
 		innerSig := sig[innerStart:innerEnd]
 
 		// Count how many valid keyword arguments appear (KW =>).
