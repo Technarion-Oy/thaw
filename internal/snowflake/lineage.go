@@ -83,7 +83,22 @@ func depKey(db, schema, name string) string {
 // ── compiled regexes ───────────────────────────────────────────────────────────
 
 // identPat matches a single- or multi-part (up to three) Snowflake identifier.
-// Supports both quoted ("my object") and unquoted (MY_OBJ) names.
+// It is a fragment embedded in the FROM/JOIN/INTO/… reference regexes below.
+//
+// Breakdown:
+//   - (?:"[^"]*"|\w+)            one part: a "double-quoted" name or a bare word
+//   - (?:\.(?:"[^"]*"|\w+)){0,2} zero-to-two more ".part" segments → ≤ 3 parts
+//
+// Matches, e.g.:
+//   - CUSTOMERS                   (bare, 1 part)
+//   - PUBLIC.CUSTOMERS            (schema.object, 2 parts)
+//   - MY_DB.PUBLIC.CUSTOMERS      (db.schema.object, 3 parts)
+//   - "My Schema"."My Table"      (quoted parts, spaces allowed inside quotes)
+//   - MY_DB."Weird.Name"          (mixed quoted/unquoted)
+//
+// Limitations: a quoted part uses [^"]* so it stops at the first '"' and does
+// not understand the "" escape for a literal quote; it is capped at 3 parts; and
+// a 4th ".part" (e.g. a column) is simply left unmatched, not rejected.
 const identPat = `(?:"[^"]*"|\w+)(?:\.(?:"[^"]*"|\w+)){0,2}`
 
 var (
@@ -102,8 +117,29 @@ var (
 	// does not match identPat, so JOIN columns are never picked up here.
 	reUsing = regexp.MustCompile(`(?i)\bUSING\s+(` + identPat + `)`)
 
-	// reNextTable matches comma-separated identifiers in a FROM clause,
-	// accounting for optional aliases.
+	// reNextTable picks up the next table in an old-style comma join
+	// (FROM a, b, c). It is applied with ^-anchored matching to the text that
+	// immediately follows a table already captured by reFrom, then re-run on the
+	// remainder in a loop to walk the whole comma list.
+	//
+	// Breakdown (case-insensitive for the AS keyword):
+	//   - ^                           must match at the start of the remaining text
+	//   - (?:\s+(?:AS\s+)?(?:"…"|\w+))?  optional alias for the *previous* table,
+	//                                  e.g. " t1" or " AS t1"
+	//   - \s*,\s*                     the comma separating the two tables
+	//   - (identPat)                  capture group 1: the next table identifier
+	//
+	// Applied to the text after "FROM ORDERS", it matches, e.g.:
+	//   - ", CUSTOMERS"               → captures CUSTOMERS
+	//   - " o, PUBLIC.CUSTOMERS"      → skips alias "o", captures PUBLIC.CUSTOMERS
+	//   - " AS o, DB.PUBLIC.CUST"     → skips alias "AS o", captures DB.PUBLIC.CUST
+	// and fails (stopping the loop) on " JOIN x" or " WHERE …" — anything whose
+	// next token is not a comma.
+	//
+	// Limitations: only comma joins are handled here (JOINs are caught by reJoin);
+	// the alias is a single identifier word (no column lists or quoted multi-word
+	// aliases beyond one "…" token); and a trailing alias on the *last* table is
+	// simply left unconsumed.
 	reNextTable = regexp.MustCompile(`(?i)^(?:\s+(?:AS\s+)?(?:"[^"]*"|\w+))?\s*,\s*(` + identPat + `)`)
 
 	// Procedure calls
