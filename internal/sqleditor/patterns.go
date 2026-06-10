@@ -1391,6 +1391,15 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			}
 		}
 
+		// ── Custom check 8: stray literal after a FROM/JOIN table reference ──
+		// Only for data-query statements, where FROM/JOIN is a real table source —
+		// not, e.g., EXECUTE/ALTER SERVICE … FROM SPECIFICATION $$…$$ or
+		// CREATE DATABASE … FROM SHARE.
+		switch firstTok {
+		case "SELECT", "WITH", "INSERT", "UPDATE", "DELETE", "MERGE":
+			markers = append(markers, checkStrayAfterTableRef(sigToks(sqltok.Tokenize(stripped)), stripped, r)...)
+		}
+
 		// ── Table-driven dispatch: try each parseTextRoute in order. ──────
 		// Routes with dedicated validator functions are checked first. If a
 		// guard matches, the validator runs and we continue to the next
@@ -1583,6 +1592,49 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			"Transaction not committed or rolled back. Add COMMIT or ROLLBACK before the end of the script."))
 	}
 
+	return markers
+}
+
+// checkStrayAfterTableRef flags a literal (number / string / dollar-quoted) that
+// directly follows a FROM or JOIN table reference and its optional alias — e.g.
+// `FROM t 1000` or `FROM t alias 1000` — which is a syntax error Snowflake
+// rejects. Only literals are flagged: a literal can never validly occupy the
+// alias slot or follow an alias, whereas the legitimate continuations (a comma,
+// a clause/modifier keyword such as WHERE/JOIN/AT/SAMPLE, "(", ";", or end) all
+// tokenize as keywords/punctuation, so there are no false positives. Subqueries
+// and @stage sources (the token after FROM/JOIN is not an identifier) are skipped.
+func checkStrayAfterTableRef(sig []sqltok.Token, sql string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+	for i := 0; i+1 < len(sig); i++ {
+		if u := tokUpper(sig[i], sql); u != "FROM" && u != "JOIN" {
+			continue
+		}
+		j := i + 1
+		if j >= len(sig) || !isIdent(sig[j]) {
+			continue // subquery "(", @stage, or nothing — not a bare table path
+		}
+		_, j = readIdentPath(sig, sql, j)
+		// Optional [AS] <alias>. An implicit alias must be an Identifier/QuotedIdent
+		// (not a keyword), mirroring findFromJoinWithAlias.
+		if j < len(sig) && tokUpper(sig[j], sql) == "AS" {
+			if j+1 < len(sig) && isAliasTok(sig[j+1]) {
+				j += 2
+			} else {
+				j++
+			}
+		} else if j < len(sig) && isAliasTok(sig[j]) {
+			j++
+		}
+		if j < len(sig) {
+			switch sig[j].Kind {
+			case sqltok.NumberLit, sqltok.StringLit, sqltok.DollarQuoted:
+				markers = append(markers, diagMarkerSpan(r, fmt.Sprintf(
+					"Unexpected token '%s' after table reference in FROM clause. Add a comma, JOIN, or WHERE clause.",
+					sig[j].Text(sql))))
+			}
+		}
+		i = j - 1 // resume scanning after this table reference
+	}
 	return markers
 }
 

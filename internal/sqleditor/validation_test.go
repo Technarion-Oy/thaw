@@ -476,6 +476,17 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"SELECT * FROM orders BEFORE (TIMESTAMP => '2024-01-01 00:00:00'::TIMESTAMP_LTZ)",
 		"SELECT * FROM orders BEFORE (OFFSET => -3600)",
 		"SELECT * FROM orders AT (STREAM => my_stream)",
+		// Table aliases and clause keywords after a table ref must not be flagged
+		// as stray tokens (PR #472 follow-up — trailing-token check).
+		`SELECT * FROM "DB"."PUBLIC"."DUMMY_ORDERS" li`,
+		"SELECT * FROM orders o",
+		"SELECT * FROM orders AS o",
+		"SELECT * FROM orders LIMIT 10",
+		"SELECT * FROM orders WHERE id = 1000",
+		"SELECT * FROM orders o WHERE o.id = 1000",
+		"SELECT * FROM orders SAMPLE (10 ROWS)",
+		"SELECT * FROM t1 JOIN t2 ON t1.id = 1000",
+		"SELECT * FROM t1 o1 JOIN t2 o2 ON o1.id = o2.id",
 	}
 
 	for _, sql := range validQueries {
@@ -501,6 +512,11 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"FLATTEN missing LATERAL", "SELECT * FROM raw_events, FLATTEN(input => doc)", "requires LATERAL"},
 		{"QUALIFY ordering", "SELECT id FROM t ORDER BY id QUALIFY ROW_NUMBER() OVER(ORDER BY id) = 1", "after 'WHERE' or 'HAVING'"},
 		{"Variant Path Colon", "SELECT payload.metadata.source FROM t", "Missing colon for variant path"},
+		// Stray literal after a table reference / alias (the reported bug).
+		{"FROM table then number", `SELECT * FROM "DB"."PUBLIC"."DUMMY_ORDERS" 1000`, "Unexpected token"},
+		{"FROM alias then number", `SELECT * FROM "DB"."PUBLIC"."DUMMY_ORDERS" li 1000`, "Unexpected token"},
+		{"FROM table then string", "SELECT * FROM orders 'x'", "Unexpected token"},
+		{"JOIN table then number", "SELECT * FROM a JOIN b 1000 ON a.id = b.id", "Unexpected token"},
 
 		// Invalid Preambles
 		{"Invalid DB", "CREATE DATABASE my_db DATA_RETENTION_TIME_IN_DAYS 10", "Unexpected syntax"}, // Missing =
