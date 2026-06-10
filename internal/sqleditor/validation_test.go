@@ -23,6 +23,16 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE VIEW v AS SELECT 1 FROM t",
 		"CREATE OR REPLACE SECURE VIEW v AS SELECT 1 FROM t",
 		"CREATE MATERIALIZED VIEW mv AS SELECT 1 FROM t",
+		"CREATE VIEW IF NOT EXISTS db.sch.v AS SELECT 1 FROM t",
+		"CREATE VIEW v (a, b) AS SELECT 1, 2 FROM t",
+		"CREATE VIEW v COPY GRANTS COMMENT = 'my view' AS SELECT 1 FROM t",
+		"CREATE VIEW v CHANGE_TRACKING = TRUE AS SELECT 1 FROM t",
+		"CREATE VIEW v CLUSTER BY (a, b) AS SELECT a, b FROM t",
+		"CREATE VIEW v WITH ROW ACCESS POLICY p ON (a) AS SELECT a FROM t",
+		"CREATE VIEW v WITH AGGREGATION POLICY p ENTITY KEY (a) AS SELECT a FROM t",
+		"CREATE VIEW v WITH TAG (cost_center = 'sales') AS SELECT 1 FROM t",
+		"CREATE VIEW v WITH CONTACT (support = c) AS SELECT 1 FROM t",
+		"CREATE LOCAL TEMP RECURSIVE VIEW v (a) AS SELECT 1 FROM t",
 		// Snowflake Dynamic Tables
 		"CREATE DYNAMIC TABLE dt TARGET_LAG = '1 minute' WAREHOUSE = wh AS SELECT 1 FROM t",
 		// ALTER DYNAMIC TABLE — comprehensive tests in TestValidateSnowflakePatterns_AlterDynamicTable
@@ -471,6 +481,10 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Invalid Schema", "CREATE SCHEMA my_sch WITH MANAGED ACCESS = TRUE", "Unexpected syntax"},
 		{"Invalid View", "CREATE VIEW v SELECT 1", "Unexpected syntax"}, // Missing AS
 		{"Invalid Mat View", "CREATE MATERIALIZED VIEW mv SELECT 1", "Unexpected syntax"},
+		{"View bad clause", "CREATE VIEW v BOGUS_PROP = 1 AS SELECT 1", "Unexpected syntax"},
+		{"View CHANGE_TRACKING bad value", "CREATE VIEW v CHANGE_TRACKING = MAYBE AS SELECT 1", "Unexpected syntax"},
+		{"View CLUSTER BY no parens", "CREATE VIEW v CLUSTER BY a AS SELECT a FROM t", "Unexpected syntax"},
+		{"View CONTACT without WITH", "CREATE VIEW v CONTACT (x = c) AS SELECT 1", "Unexpected syntax"},
 		{"Invalid Dynamic Table", "CREATE DYNAMIC TABLE dt AS SELECT 1", "Unexpected syntax"}, // Missing TARGET_LAG / WAREHOUSE
 		{"Invalid Drop DB", "DROP DATABASE my_db CASCADE RESTRICT", "Unexpected syntax"},      // Conflicting modifiers
 		{"Invalid Sequence", "CREATE SEQUENCE my_seq START WITH 'abc'", "Unexpected syntax"},

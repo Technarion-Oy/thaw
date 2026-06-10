@@ -61,24 +61,7 @@ var (
 
 	// ── CREATE VIEW ───────────────────────────────────────────────────────────
 	// (reIsCreateView removed — token-based: isCreateViewGuard)
-
-	reValidCreateViewPreamble = regexp.MustCompile(
-		`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?` +
-			`(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE)\s+)?` +
-			`(?:RECURSIVE\s+)?(?:INTERACTIVE\s+)?(?:MATERIALIZED\s+)?` +
-			`VIEW\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath +
-			`(?:\s*` + _balancedParens + `)?` +
-			`(?:\s+(?:` +
-			`COPY\s+GRANTS` +
-			`|COMMENT\s*=\s*'(?:[^']|'')*'` +
-			`|CHANGE_TRACKING\s*=\s*(?:TRUE|FALSE)` +
-			`|(?:WITH\s+)?ROW\s+ACCESS\s+POLICY\s+` + _identPath + `\s+ON\s*` + _balancedParens +
-			`|(?:WITH\s+)?AGGREGATION\s+POLICY\s+` + _identPath + `(?:\s+ENTITY\s+KEY\s*` + _balancedParens + `)?` +
-			`|(?:WITH\s+)?JOIN\s+POLICY\s+` + _identPath + `(?:\s+ALLOWED\s+JOIN\s+KEYS\s*` + _balancedParens + `)?` +
-			`|CLUSTER\s+BY\s*` + _balancedParens +
-			`|(?:WITH\s+)?TAG\s*` + _balancedParens +
-			`|WITH\s+CONTACT\s*` + _balancedParens +
-			`))*\s+AS\s+`)
+	// (reValidCreateViewPreamble removed — token-based: isValidCreateViewPreamble)
 
 	// ── CREATE TABLE ─────────────────────────────────────────────────────────
 	// (reIsCreateTable removed — token-based: isCreateTableGuard)
@@ -1682,20 +1665,190 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 // ── Extracted validator functions (dispatch-table entries) ─────────────────────
 
 // validateCreateView reports a generic "unexpected syntax" diagnostic when a
-// CREATE VIEW statement does not match the expected preamble grammar (all the
-// optional clauses: COPY GRANTS, COMMENT, row-access/aggregation/join policies,
-// CLUSTER BY, TAG, CONTACT, … up to the AS body).
-//
-// Not tokenised: this is a single whole-statement grammar acceptance check, and
-// reValidCreateViewPreamble expresses that grammar — clause alternatives, value
-// formats, and ordering — far more compactly than an equivalent hand-written
-// token walk would. A token version would be strictly more code for the same
-// pass/fail result, so the regex is kept deliberately.
+// CREATE VIEW statement does not match the expected preamble grammar, up to the
+// AS that introduces the body. The grammar walk lives in
+// isValidCreateViewPreamble; doing it on tokens (rather than the previous
+// reValidCreateViewPreamble regex over raw parseText) means comments between the
+// keywords no longer break the match.
 func validateCreateView(parseText string, r StatementRange) []DiagMarker {
-	if !reValidCreateViewPreamble.MatchString(parseText) {
+	if !isValidCreateViewPreamble(sigTokens(parseText), parseText) {
 		return oneMarker(r, "Unexpected syntax in CREATE VIEW statement.")
 	}
 	return nil
+}
+
+// isOpEq reports whether sig[i] is the "=" operator token.
+func isOpEq(sig []sqltok.Token, sql string, i int) bool {
+	return i < len(sig) && sig[i].Kind == sqltok.Operator && sig[i].Text(sql) == "="
+}
+
+// skipParenGroup requires sig[openIdx] to be "(" and returns the index just past
+// the matching ")". ok is false if there is no "(" there or it is unbalanced.
+func skipParenGroup(sig []sqltok.Token, openIdx int) (int, bool) {
+	if openIdx >= len(sig) || sig[openIdx].Kind != sqltok.LParen {
+		return 0, false
+	}
+	_, closeIdx, ok := parenInnerRange(sig, openIdx)
+	if !ok {
+		return 0, false
+	}
+	return closeIdx + 1, true
+}
+
+// isValidCreateViewPreamble reports whether sig is a well-formed CREATE VIEW
+// preamble up to and including the AS that introduces the view body. It accepts:
+//
+//	CREATE [OR REPLACE] [SECURE] [[LOCAL|GLOBAL] {TEMP|TEMPORARY|VOLATILE}]
+//	  [RECURSIVE] [INTERACTIVE] [MATERIALIZED]
+//	  VIEW [IF NOT EXISTS] <name> [ ( … ) ] <clause>* AS <body>
+//
+// where each clause is one of: COPY GRANTS; COMMENT = '…'; CHANGE_TRACKING =
+// TRUE|FALSE; [WITH] ROW ACCESS POLICY <name> ON (…); [WITH] AGGREGATION POLICY
+// <name> [ENTITY KEY (…)]; [WITH] JOIN POLICY <name> [ALLOWED JOIN KEYS (…)];
+// CLUSTER BY (…); [WITH] TAG (…); or WITH CONTACT (…).
+func isValidCreateViewPreamble(sig []sqltok.Token, sql string) bool {
+	i := 0
+	if !kwAt(sig, sql, i, "CREATE") {
+		return false
+	}
+	i++
+	if kwAt(sig, sql, i, "OR") && kwAt(sig, sql, i+1, "REPLACE") {
+		i += 2
+	}
+	if kwAt(sig, sql, i, "SECURE") {
+		i++
+	}
+	// Optional [LOCAL|GLOBAL] {TEMP|TEMPORARY|VOLATILE}: LOCAL/GLOBAL is only
+	// consumed when a TEMP/TEMPORARY/VOLATILE keyword follows it.
+	{
+		j := i
+		if kwAtAny(sig, sql, j, "LOCAL", "GLOBAL") != "" {
+			j++
+		}
+		if kwAtAny(sig, sql, j, "TEMP", "TEMPORARY", "VOLATILE") != "" {
+			i = j + 1
+		}
+	}
+	if kwAt(sig, sql, i, "RECURSIVE") {
+		i++
+	}
+	if kwAt(sig, sql, i, "INTERACTIVE") {
+		i++
+	}
+	if kwAt(sig, sql, i, "MATERIALIZED") {
+		i++
+	}
+	if !kwAt(sig, sql, i, "VIEW") {
+		return false
+	}
+	i++
+	if kwAt(sig, sql, i, "IF") && kwAt(sig, sql, i+1, "NOT") && kwAt(sig, sql, i+2, "EXISTS") {
+		i += 3
+	}
+	// View name: a 1–3 part identifier path.
+	if i >= len(sig) || !isIdent(sig[i]) {
+		return false
+	}
+	i++
+	for parts := 1; parts < 3 && i+1 < len(sig) && sig[i].Kind == sqltok.Dot && isIdent(sig[i+1]); parts++ {
+		i += 2
+	}
+	// Optional column list "( … )".
+	if i < len(sig) && sig[i].Kind == sqltok.LParen {
+		next, ok := skipParenGroup(sig, i)
+		if !ok {
+			return false
+		}
+		i = next
+	}
+	// Zero or more optional clauses, terminated by AS followed by a body.
+	for {
+		if kwAt(sig, sql, i, "AS") {
+			return i+1 < len(sig)
+		}
+		next, ok := consumeCreateViewClause(sig, sql, i)
+		if !ok {
+			return false
+		}
+		i = next
+	}
+}
+
+// consumeCreateViewClause matches one optional CREATE VIEW clause starting at
+// sig[i] and returns the index just past it; ok is false if no clause matches.
+func consumeCreateViewClause(sig []sqltok.Token, sql string, i int) (int, bool) {
+	withPrefix := false
+	if kwAt(sig, sql, i, "WITH") {
+		withPrefix = true
+		i++
+	}
+
+	// Clauses that allow an optional leading WITH.
+	switch {
+	case kwAt(sig, sql, i, "ROW") && kwAt(sig, sql, i+1, "ACCESS") && kwAt(sig, sql, i+2, "POLICY"):
+		// ROW ACCESS POLICY <name> ON ( … )
+		j := i + 3
+		if j >= len(sig) || !isIdent(sig[j]) {
+			return 0, false
+		}
+		_, j = readIdentPath(sig, sql, j)
+		if !kwAt(sig, sql, j, "ON") {
+			return 0, false
+		}
+		return skipParenGroup(sig, j+1)
+	case kwAt(sig, sql, i, "AGGREGATION") && kwAt(sig, sql, i+1, "POLICY"):
+		// AGGREGATION POLICY <name> [ENTITY KEY ( … )]
+		j := i + 2
+		if j >= len(sig) || !isIdent(sig[j]) {
+			return 0, false
+		}
+		_, j = readIdentPath(sig, sql, j)
+		if kwAt(sig, sql, j, "ENTITY") && kwAt(sig, sql, j+1, "KEY") {
+			return skipParenGroup(sig, j+2)
+		}
+		return j, true
+	case kwAt(sig, sql, i, "JOIN") && kwAt(sig, sql, i+1, "POLICY"):
+		// JOIN POLICY <name> [ALLOWED JOIN KEYS ( … )]
+		j := i + 2
+		if j >= len(sig) || !isIdent(sig[j]) {
+			return 0, false
+		}
+		_, j = readIdentPath(sig, sql, j)
+		if kwAt(sig, sql, j, "ALLOWED") && kwAt(sig, sql, j+1, "JOIN") && kwAt(sig, sql, j+2, "KEYS") {
+			return skipParenGroup(sig, j+3)
+		}
+		return j, true
+	case kwAt(sig, sql, i, "TAG"):
+		// [WITH] TAG ( … )
+		return skipParenGroup(sig, i+1)
+	}
+
+	if withPrefix {
+		// CONTACT requires the WITH prefix: WITH CONTACT ( … ).
+		if kwAt(sig, sql, i, "CONTACT") {
+			return skipParenGroup(sig, i+1)
+		}
+		return 0, false
+	}
+
+	// Clauses with no WITH prefix.
+	switch {
+	case kwAt(sig, sql, i, "COPY") && kwAt(sig, sql, i+1, "GRANTS"):
+		return i + 2, true
+	case kwAt(sig, sql, i, "COMMENT"):
+		if isOpEq(sig, sql, i+1) && i+2 < len(sig) && sig[i+2].Kind == sqltok.StringLit {
+			return i + 3, true
+		}
+		return 0, false
+	case kwAt(sig, sql, i, "CHANGE_TRACKING"):
+		if isOpEq(sig, sql, i+1) && kwAtAny(sig, sql, i+2, "TRUE", "FALSE") != "" {
+			return i + 3, true
+		}
+		return 0, false
+	case kwAt(sig, sql, i, "CLUSTER") && kwAt(sig, sql, i+1, "BY"):
+		return skipParenGroup(sig, i+2)
+	}
+	return 0, false
 }
 
 // validateCreateExternalTable validates CREATE EXTERNAL TABLE statements: it
