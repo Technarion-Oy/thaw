@@ -1566,7 +1566,7 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 // regex that covers all optional clauses (COPY GRANTS, COMMENT, policies, etc.).
 func validateCreateView(parseText string, r StatementRange) []DiagMarker {
 	if !reValidCreateViewPreamble.MatchString(parseText) {
-		return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in CREATE VIEW statement.")}
+		return oneMarker(r, "Unexpected syntax in CREATE VIEW statement.")
 	}
 	return nil
 }
@@ -1580,31 +1580,31 @@ func validateCreateExternalTable(parseText string, r StatementRange) []DiagMarke
 
 	preambleEnd := findPreambleEnd(sig, stripped, "TABLE")
 	if preambleEnd < 0 {
-		return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in CREATE EXTERNAL TABLE statement.")}
+		return oneMarker(r, "Unexpected syntax in CREATE EXTERNAL TABLE statement.")
 	}
 
 	// OR REPLACE is invalid for EXTERNAL TABLE.
 	if hasKWPair(sig, stripped, "OR", "REPLACE") {
-		return []DiagMarker{diagMarkerSpan(r, "OR REPLACE is not supported for EXTERNAL TABLE. Use DROP and CREATE.")}
+		return oneMarker(r, "OR REPLACE is not supported for EXTERNAL TABLE. Use DROP and CREATE.")
 	}
 
 	if hasKWPair(sig, stripped, "CLUSTER", "BY") {
-		return []DiagMarker{diagMarkerSpan(r, "CLUSTER BY is not supported for EXTERNAL TABLE.")}
+		return oneMarker(r, "CLUSTER BY is not supported for EXTERNAL TABLE.")
 	}
 	if hasKW(sig, stripped, "DATA_RETENTION_TIME_IN_DAYS") {
-		return []DiagMarker{diagMarkerSpan(r, "DATA_RETENTION_TIME_IN_DAYS is not applicable to EXTERNAL TABLE.")}
+		return oneMarker(r, "DATA_RETENTION_TIME_IN_DAYS is not applicable to EXTERNAL TABLE.")
 	}
 
 	rest := strings.TrimSpace(stripped[preambleEnd:])
 
 	if !strings.HasPrefix(rest, "(") {
-		return []DiagMarker{diagMarkerSpan(r, "EXTERNAL TABLE must have a column list.")}
+		return oneMarker(r, "EXTERNAL TABLE must have a column list.")
 	}
 
 	// Find matching close paren for column list
 	endIdx := findMatchingParen(rest)
 	if endIdx == -1 {
-		return []DiagMarker{diagMarkerSpan(r, "Unclosed column list in CREATE EXTERNAL TABLE statement.")}
+		return oneMarker(r, "Unclosed column list in CREATE EXTERNAL TABLE statement.")
 	}
 
 	colList := rest[1:endIdx]
@@ -1612,7 +1612,7 @@ func validateCreateExternalTable(parseText string, r StatementRange) []DiagMarke
 
 	// Snowflake rejects empty column lists
 	if len(cols) == 0 || (len(cols) == 1 && strings.TrimSpace(cols[0]) == "") {
-		return []DiagMarker{diagMarkerSpan(r, "Column list must not be empty.")}
+		return oneMarker(r, "Column list must not be empty.")
 	}
 
 	hasColError := false
@@ -1688,7 +1688,7 @@ func validateCreateTablePreamble(parseText string, r StatementRange) []DiagMarke
 	// CREATE [OR (REPLACE|ALTER)] [LOCAL|GLOBAL] [TEMP|TEMPORARY|VOLATILE|TRANSIENT] TABLE
 	preambleEnd := findCreateTablePreambleEnd(sig, parseText)
 	if preambleEnd < 0 {
-		return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in CREATE TABLE statement.")}
+		return oneMarker(r, "Unexpected syntax in CREATE TABLE statement.")
 	}
 	rest := strings.TrimSpace(stripCommentsSQL(parseText[preambleEnd:]))
 
@@ -1756,7 +1756,7 @@ func isCreateTableBackup(sig []sqltok.Token, text string) bool {
 func validateCreateDbOrSchema(kind string) func(string, StatementRange) []DiagMarker {
 	return func(parseText string, r StatementRange) []DiagMarker {
 		if !reValidCreateDbSchema.MatchString(parseText) {
-			return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in CREATE "+kind+" statement.")}
+			return oneMarker(r, "Unexpected syntax in CREATE "+kind+" statement.")
 		}
 		return nil
 	}
@@ -1766,7 +1766,7 @@ func validateCreateDbOrSchema(kind string) func(string, StatementRange) []DiagMa
 func validateDropDbOrSchema(kind string) func(string, StatementRange) []DiagMarker {
 	return func(parseText string, r StatementRange) []DiagMarker {
 		if !reValidDropDbSchema.MatchString(parseText) {
-			return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in DROP "+kind+" statement.")}
+			return oneMarker(r, "Unexpected syntax in DROP "+kind+" statement.")
 		}
 		return nil
 	}
@@ -1777,7 +1777,7 @@ func validateCreateSequence(parseText string, r StatementRange) []DiagMarker {
 	sig := sigTokens(parseText)
 	bothOrderNoorder := hasKW(sig, parseText, "ORDER") && hasKW(sig, parseText, "NOORDER")
 	if !reValidCreateSeq.MatchString(parseText) || bothOrderNoorder {
-		return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in CREATE SEQUENCE statement.")}
+		return oneMarker(r, "Unexpected syntax in CREATE SEQUENCE statement.")
 	}
 	return nil
 }
@@ -1787,7 +1787,7 @@ func validateAlterSequence(parseText string, r StatementRange) []DiagMarker {
 	sig := sigTokens(parseText)
 	bothOrderNoorder := hasKW(sig, parseText, "ORDER") && hasKW(sig, parseText, "NOORDER")
 	if !reValidAlterSeq.MatchString(parseText) || bothOrderNoorder {
-		return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in ALTER SEQUENCE statement.")}
+		return oneMarker(r, "Unexpected syntax in ALTER SEQUENCE statement.")
 	}
 	return nil
 }
@@ -1795,7 +1795,7 @@ func validateAlterSequence(parseText string, r StatementRange) []DiagMarker {
 // validateDropSequence validates DROP SEQUENCE syntax.
 func validateDropSequence(parseText string, r StatementRange) []DiagMarker {
 	if !reValidDropSeq.MatchString(parseText) {
-		return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in DROP SEQUENCE statement.")}
+		return oneMarker(r, "Unexpected syntax in DROP SEQUENCE statement.")
 	}
 	return nil
 }
@@ -1807,7 +1807,7 @@ func validateCreateDynTable(parseText string, r StatementRange) []DiagMarker {
 	if !hasKWAssign(sig, parseText, "TARGET_LAG") ||
 		!hasKWAssign(sig, parseText, "WAREHOUSE") ||
 		!(hasKWPair(sig, parseText, "AS", "SELECT") || hasKWPair(sig, parseText, "AS", "WITH")) {
-		return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in CREATE DYNAMIC TABLE statement.")}
+		return oneMarker(r, "Unexpected syntax in CREATE DYNAMIC TABLE statement.")
 	}
 	return nil
 }
@@ -1886,7 +1886,7 @@ func validateCreateStream(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	if !reValidCreateStream.MatchString(parseText) {
-		return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in CREATE STREAM statement.")}
+		return oneMarker(r, "Unexpected syntax in CREATE STREAM statement.")
 	}
 	return nil
 }
@@ -1913,7 +1913,7 @@ func validateCreatePipe(parseText string, r StatementRange) []DiagMarker {
 		}
 	}
 	if asIdx < 0 {
-		return []DiagMarker{diagMarkerSpan(r, "Missing mandatory AS COPY INTO clause in CREATE PIPE statement.")}
+		return oneMarker(r, "Missing mandatory AS COPY INTO clause in CREATE PIPE statement.")
 	}
 
 	preambleSig := sig[:asIdx]
@@ -2100,7 +2100,7 @@ func validateCreateRole(parseText string, r StatementRange) []DiagMarker {
 	sig := sigTokens(parseText)
 	name, _ := extractNameAfterCreate(sig, parseText, nil, "ROLE")
 	if name != "" && strings.Contains(name, ".") {
-		return []DiagMarker{diagMarkerSpan(r, "Roles are account-level objects and cannot have a database or schema prefix.")}
+		return oneMarker(r, "Roles are account-level objects and cannot have a database or schema prefix.")
 	}
 	return nil
 }
@@ -2109,7 +2109,7 @@ func validateCreateRole(parseText string, r StatementRange) []DiagMarker {
 func validateCreateMaskingPolicy(parseText string, r StatementRange) []DiagMarker {
 	sig := sigTokens(parseText)
 	if !hasKW(sig, parseText, "RETURNS") {
-		return []DiagMarker{diagMarkerSpan(r, "Missing RETURNS clause in Masking Policy definition.")}
+		return oneMarker(r, "Missing RETURNS clause in Masking Policy definition.")
 	}
 	return nil
 }
@@ -2195,17 +2195,14 @@ func stripDollarQuoted(sql string) string {
 	return sb.String()
 }
 
-// checkAccountLevelPrefix returns a diagnostic if the SQL identifier path
+// checkAccountLevelPrefix appends a diagnostic when the SQL identifier path
 // contains a dot outside of double-quoted segments, indicating a database or
 // schema prefix on an account-level object.
-func checkAccountLevelPrefix(name string, r StatementRange, objType string) *DiagMarker {
+func checkAccountLevelPrefix(name string, r StatementRange, objType string, markers *[]DiagMarker) {
 	if sqlIdentPathHasDot(name) {
-		m := diagMarkerSpan(r,
-			objType+" are account-level objects and cannot have a database or schema prefix.")
-
-		return &m
+		*markers = append(*markers, diagMarkerSpan(r,
+			objType+" are account-level objects and cannot have a database or schema prefix."))
 	}
-	return nil
 }
 
 // checkNameSwallowedByIF detects the case where a regex captures "IF" as the
@@ -3364,9 +3361,7 @@ func validateCreateNetworkPolicy(parseText string, r StatementRange) []DiagMarke
 	for i := 0; i < len(sig); i++ {
 		if tokUpper(sig[i], stripped) == "POLICY" && i+1 < len(sig) && isIdent(sig[i+1]) {
 			name, _ := readIdentPath(sig, stripped, i+1)
-			if pfx := checkAccountLevelPrefix(name, r, "Network policies"); pfx != nil {
-				markers = append(markers, *pfx)
-			}
+			checkAccountLevelPrefix(name, r, "Network policies", &markers)
 			break
 		}
 	}
@@ -3493,9 +3488,7 @@ func validateCreateSessionPolicy(parseText string, r StatementRange) []DiagMarke
 	for i := 0; i < len(sig); i++ {
 		if tokUpper(sig[i], stripped) == "POLICY" && i+1 < len(sig) && isIdent(sig[i+1]) {
 			name, _ := readIdentPath(sig, stripped, i+1)
-			if pfx := checkAccountLevelPrefix(name, r, "Session policies"); pfx != nil {
-				markers = append(markers, *pfx)
-			}
+			checkAccountLevelPrefix(name, r, "Session policies", &markers)
 			break
 		}
 	}
@@ -3532,9 +3525,7 @@ func validateCreatePasswordPolicy(parseText string, r StatementRange) []DiagMark
 	for i := 0; i < len(sig); i++ {
 		if tokUpper(sig[i], stripped) == "POLICY" && i+1 < len(sig) && isIdent(sig[i+1]) {
 			name, _ := readIdentPath(sig, stripped, i+1)
-			if pfx := checkAccountLevelPrefix(name, r, "Password policies"); pfx != nil {
-				markers = append(markers, *pfx)
-			}
+			checkAccountLevelPrefix(name, r, "Password policies", &markers)
 			break
 		}
 	}
@@ -5263,9 +5254,7 @@ func validateCreateShare(parseText string, r StatementRange) []DiagMarker {
 		markers = append(markers, marker)
 		return markers
 	}
-	if pfx := checkAccountLevelPrefix(name, r, "Shares"); pfx != nil {
-		markers = append(markers, *pfx)
-	}
+	checkAccountLevelPrefix(name, r, "Shares", &markers)
 
 	// 3. Only COMMENT is a valid property for CREATE SHARE.
 	validateProperties(parseText, `COMMENT`, r, &markers)
@@ -5315,9 +5304,7 @@ func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMark
 	// 1. Account-level: name must not have db.schema prefix.
 	name, _ := extractNameAfterCreate(sig, clean, nil, "EXTERNAL", "VOLUME")
 	if name != "" {
-		if pfx := checkAccountLevelPrefix(name, r, "External volumes"); pfx != nil {
-			markers = append(markers, *pfx)
-		}
+		checkAccountLevelPrefix(name, r, "External volumes", &markers)
 	}
 
 	// 2. STORAGE_LOCATIONS is mandatory.
@@ -7072,9 +7059,7 @@ func validateCreateReplOrFailoverGroup(parseText string, r StatementRange, group
 			fmt.Sprintf("CREATE %s GROUP requires a group name.", groupType)))
 		return markers
 	}
-	if pfx := checkAccountLevelPrefix(name, r, groupType+" groups"); pfx != nil {
-		markers = append(markers, *pfx)
-	}
+	checkAccountLevelPrefix(name, r, groupType+" groups", &markers)
 
 	// Use tokens after the name for clause detection.
 	_, afterIdx := readIdentPath(sig, stripped, nameIdx)
@@ -7142,9 +7127,7 @@ func validateAlterReplicationOrFailoverGroup(parseText string, r StatementRange,
 		}
 	}
 	if name != "" {
-		if pfx := checkAccountLevelPrefix(name, r, groupType+" groups"); pfx != nil {
-			markers = append(markers, *pfx)
-		}
+		checkAccountLevelPrefix(name, r, groupType+" groups", &markers)
 	}
 
 	// 2. Must contain a valid action after the group name.
@@ -7225,9 +7208,7 @@ func validateDropReplicationOrFailoverGroup(parseText string, r StatementRange, 
 			fmt.Sprintf("DROP %s GROUP requires a group name.", groupType)))
 		return markers
 	}
-	if pfx := checkAccountLevelPrefix(name, r, groupType+" groups"); pfx != nil {
-		markers = append(markers, *pfx)
-	}
+	checkAccountLevelPrefix(name, r, groupType+" groups", &markers)
 
 	return markers
 }
@@ -7263,9 +7244,7 @@ func validateCreateComputePool(parseText string, r StatementRange) []DiagMarker 
 		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE COMPUTE POOL statement."))
 		return markers
 	}
-	if pfx := checkAccountLevelPrefix(name, r, "Compute pools"); pfx != nil {
-		markers = append(markers, *pfx)
-	}
+	checkAccountLevelPrefix(name, r, "Compute pools", &markers)
 
 	// 3. Mandatory properties: MIN_NODES, MAX_NODES, INSTANCE_FAMILY.
 	minNodesVal, hasMinNodesProp := findKWAssignInt(sig, stripped, "MIN_NODES")
@@ -7363,9 +7342,7 @@ func validateCreateDatashare(parseText string, r StatementRange) []DiagMarker {
 		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE DATASHARE statement."))
 		return markers
 	}
-	if pfx := checkAccountLevelPrefix(name, r, "Datashares"); pfx != nil {
-		markers = append(markers, *pfx)
-	}
+	checkAccountLevelPrefix(name, r, "Datashares", &markers)
 
 	// 3. Only COMMENT and SHARE_RESTRICTIONS are valid properties.
 	noComments := strings.TrimSpace(stripCommentsSQL(parseText))
@@ -7400,9 +7377,7 @@ func validateAlterDatashare(parseText string, r StatementRange) []DiagMarker {
 			"ALTER DATASHARE requires a datashare name."))
 		return markers
 	}
-	if pfx := checkAccountLevelPrefix(name, r, "Datashares"); pfx != nil {
-		markers = append(markers, *pfx)
-	}
+	checkAccountLevelPrefix(name, r, "Datashares", &markers)
 
 	// 2. If none of the known actions are present, warn about unknown sub-command.
 	hasAddAccounts := hasKWPair(sig, stripped, "ADD", "ACCOUNTS")
@@ -7475,9 +7450,7 @@ func validateDropDatashare(parseText string, r StatementRange) []DiagMarker {
 			"DROP DATASHARE requires a datashare name."))
 		return markers
 	}
-	if pfx := checkAccountLevelPrefix(name, r, "Datashares"); pfx != nil {
-		markers = append(markers, *pfx)
-	}
+	checkAccountLevelPrefix(name, r, "Datashares", &markers)
 
 	return markers
 }
@@ -7850,10 +7823,10 @@ func validateDropImageRepository(parseText string, r StatementRange) []DiagMarke
 // validateAlterImageRepository warns that ALTER IMAGE REPOSITORY is not
 // supported in the current Snowflake specification.
 func validateAlterImageRepository(_ string, r StatementRange) []DiagMarker {
-	return []DiagMarker{
-		diagMarkerSpan(r,
-			"ALTER IMAGE REPOSITORY is not supported in the current Snowflake specification."),
-	}
+	return oneMarker(
+		r,
+		"ALTER IMAGE REPOSITORY is not supported in the current Snowflake specification.")
+
 }
 
 // ── validateCreateApplicationPackage ──────────────────────────────────────────
@@ -7887,9 +7860,7 @@ func validateCreateApplicationPackage(parseText string, r StatementRange) []Diag
 		markers = append(markers, marker)
 		return markers
 	}
-	if pfx := checkAccountLevelPrefix(name, r, "Application packages"); pfx != nil {
-		markers = append(markers, *pfx)
-	}
+	checkAccountLevelPrefix(name, r, "Application packages", &markers)
 
 	// 3. DISTRIBUTION must be INTERNAL or EXTERNAL if present.
 	if distVal, ok := findKWAssign(sig, stripped, "DISTRIBUTION"); ok {
@@ -8018,9 +7989,7 @@ func validateCreateApplication(parseText string, r StatementRange) []DiagMarker 
 		markers = append(markers, marker)
 		return markers
 	}
-	if pfx := checkAccountLevelPrefix(name, r, "Applications"); pfx != nil {
-		markers = append(markers, *pfx)
-	}
+	checkAccountLevelPrefix(name, r, "Applications", &markers)
 
 	// 3. FROM APPLICATION PACKAGE is mandatory.
 	if !hasKWSeq(sig, stripped, "FROM", "APPLICATION", "PACKAGE") {

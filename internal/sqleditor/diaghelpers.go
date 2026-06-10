@@ -182,6 +182,12 @@ func diagMarkerSpan(r StatementRange, msg string) DiagMarker {
 	}
 }
 
+// oneMarker wraps a single statement-span warning in a slice, for the common
+// "fail fast with one diagnostic" return in the validators.
+func oneMarker(r StatementRange, msg string) []DiagMarker {
+	return []DiagMarker{diagMarkerSpan(r, msg)}
+}
+
 // sqlStmt returns the raw statement text from sql given a StatementRange.
 // StatementRange offsets are byte-based (not rune-based).
 func sqlStmt(sql string, r StatementRange) string {
