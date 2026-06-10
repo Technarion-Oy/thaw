@@ -107,6 +107,15 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE TABLE t CLONE s AT (TIMESTAMP => TO_TIMESTAMP_TZ('2023-01-01 00:00:00'))",
 		"CREATE TABLE t (id INT) COMMENT = 'my table' TAG (tag1 = 'val1')",
 		"CREATE OR ALTER TABLE t (id INT, val VARCHAR)",
+		// CREATE TABLE property tail — one per supported property
+		"CREATE TABLE t (id INT) MAX_DATA_EXTENSION_TIME_IN_DAYS = 14 DEFAULT_DDL_COLLATION = 'en_US'",
+		"CREATE TABLE t (id INT) COPY GRANTS COPY TAGS",
+		"CREATE TABLE t (id INT) ERROR_LOGGING = TRUE ROW_TIMESTAMP = FALSE CHANGE_TRACKING = TRUE",
+		"CREATE TABLE t (id INT) WITH AGGREGATION POLICY ap ENTITY KEY (id)",
+		"CREATE TABLE t (id INT) WITH JOIN POLICY jp ALLOWED JOIN KEYS (id)",
+		"CREATE TABLE t (id INT) STORAGE LIFECYCLE POLICY slp ON (id)",
+		"CREATE TABLE t (id INT) WITH TAG (cost = 'x') WITH CONTACT (support = c)",
+		"CREATE TABLE t (id INT) ROW ACCESS POLICY rap ON (id)",
 		// Integrations
 		"CREATE STORAGE INTEGRATION my_storage_int TYPE=EXTERNAL_STAGE STORAGE_PROVIDER='S3' ENABLED=TRUE STORAGE_AWS_ROLE_ARN='arn:aws:iam::123456789012:role/my_role' STORAGE_ALLOWED_LOCATIONS=('s3://my-bucket/')",
 		"CREATE STAGE my_s3_stage URL='s3://bucket/' STORAGE_INTEGRATION=s3_int DIRECTORY=(ENABLE=TRUE)",
@@ -492,6 +501,9 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Table Replace IF NOT EXISTS", "CREATE OR REPLACE TABLE foo IF NOT EXISTS (id INT)", "Conflict between OR REPLACE and IF NOT EXISTS"},
 		{"Table CLUSTER BY no parens", "CREATE TABLE foo (id INT) CLUSTER BY id", "Unexpected syntax"},
 		{"Table Retention invalid", "CREATE TABLE foo (id INT) DATA_RETENTION_TIME_IN_DAYS = 'abc'", "Unexpected syntax"},
+		{"Table unknown property", "CREATE TABLE foo (id INT) BOGUS_PROP = 1", "Unexpected syntax"},
+		{"Table bool prop bad value", "CREATE TABLE foo (id INT) CHANGE_TRACKING = MAYBE", "Unexpected syntax"},
+		{"Table CONTACT without WITH-only on contact", "CREATE TABLE foo (id INT) CONTACT (c = x)", "Unexpected syntax"},
 
 		// Invalid Stream
 		{"Stream missing ON", "CREATE STREAM s TABLE t", "Unexpected syntax"},

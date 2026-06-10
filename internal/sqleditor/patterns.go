@@ -69,25 +69,7 @@ var (
 
 	// (reCreateTableCTAS, reCreateTableClone, reCreateTableTemplate, reCreateTableBackup removed — token-based)
 
-	tableProps = strings.Join([]string{
-		`CLUSTER\s+BY\s*` + _balancedParens,
-		`ENABLE_SCHEMA_EVOLUTION\s*=\s*(?:TRUE|FALSE)`,
-		`DATA_RETENTION_TIME_IN_DAYS\s*=\s*\d+`,
-		`MAX_DATA_EXTENSION_TIME_IN_DAYS\s*=\s*\d+`,
-		`CHANGE_TRACKING\s*=\s*(?:TRUE|FALSE)`,
-		`DEFAULT_DDL_COLLATION\s*=\s*'(?:[^']|'')*'`,
-		`COPY\s+GRANTS`,
-		`ERROR_LOGGING\s*=\s*(?:TRUE|FALSE)`,
-		`COPY\s+TAGS`,
-		`COMMENT\s*=\s*'(?:[^']|'')*'`,
-		`ROW_TIMESTAMP\s*=\s*(?:TRUE|FALSE)`,
-		`(?:WITH\s+)?ROW(?:\s+|_)ACCESS(?:\s+|_)POLICY\s+` + _identPath + `\s+ON\s*` + _balancedParens,
-		`(?:WITH\s+)?AGGREGATION\s+POLICY\s+` + _identPath + `(?:\s+ENTITY\s+KEY\s*` + _balancedParens + `)?`,
-		`(?:WITH\s+)?JOIN\s+POLICY\s+` + _identPath + `(?:\s+ALLOWED\s+JOIN\s+KEYS\s*` + _balancedParens + `)?`,
-		`(?:WITH\s+)?STORAGE\s+LIFECYCLE\s+POLICY\s+` + _identPath + `\s+ON\s*` + _balancedParens,
-		`(?:WITH\s+)?TAG\s*` + _balancedParens,
-		`WITH\s+CONTACT\s*` + _balancedParens,
-	}, "|")
+	// (tableProps removed — token-based: validTablePropsTail / consumeCreateTableProp)
 
 	// ── CREATE DATABASE / SCHEMA ──────────────────────────────────────────────
 	dbSchemaProps = strings.Join([]string{
@@ -1777,17 +1759,45 @@ func isValidCreateViewPreamble(sig []sqltok.Token, sql string) bool {
 // consumeCreateViewClause matches one optional CREATE VIEW clause starting at
 // sig[i] and returns the index just past it; ok is false if no clause matches.
 func consumeCreateViewClause(sig []sqltok.Token, sql string, i int) (int, bool) {
-	withPrefix := false
+	withConsumed := false
 	if kwAt(sig, sql, i, "WITH") {
-		withPrefix = true
+		withConsumed = true
 		i++
 	}
-
-	// Clauses that allow an optional leading WITH.
+	if n, ok := consumeObjectPolicyClause(sig, sql, i, withConsumed, false); ok {
+		return n, ok
+	}
+	if withConsumed {
+		return 0, false // WITH is only valid before a policy / TAG / CONTACT clause
+	}
 	switch {
-	case kwAt(sig, sql, i, "ROW") && kwAt(sig, sql, i+1, "ACCESS") && kwAt(sig, sql, i+2, "POLICY"):
-		// ROW ACCESS POLICY <name> ON ( … )
-		j := i + 3
+	case kwAt(sig, sql, i, "COPY") && kwAt(sig, sql, i+1, "GRANTS"):
+		return i + 2, true
+	case kwAt(sig, sql, i, "COMMENT"):
+		return eqValueProp(sig, sql, i, sqltok.StringLit)
+	case kwAt(sig, sql, i, "CHANGE_TRACKING"):
+		return eqBoolProp(sig, sql, i)
+	case kwAt(sig, sql, i, "CLUSTER") && kwAt(sig, sql, i+1, "BY"):
+		return skipParenGroup(sig, i+2)
+	}
+	return 0, false
+}
+
+// consumeObjectPolicyClause matches the policy / TAG / CONTACT clauses shared by
+// the CREATE VIEW preamble and the CREATE TABLE property tail. i points at the
+// clause keyword, with any leading WITH already consumed by the caller (recorded
+// in withConsumed). STORAGE LIFECYCLE POLICY is accepted only when
+// allowStorageLifecycle is set (tables, not views). Returns the index just past
+// the clause and ok.
+func consumeObjectPolicyClause(sig []sqltok.Token, sql string, i int, withConsumed, allowStorageLifecycle bool) (int, bool) {
+	switch {
+	case kwAt(sig, sql, i, "ROW_ACCESS_POLICY") ||
+		(kwAt(sig, sql, i, "ROW") && kwAt(sig, sql, i+1, "ACCESS") && kwAt(sig, sql, i+2, "POLICY")):
+		// [WITH] ROW ACCESS POLICY <name> ON ( … )  (also glued ROW_ACCESS_POLICY)
+		j := i + 1
+		if !kwAt(sig, sql, i, "ROW_ACCESS_POLICY") {
+			j = i + 3
+		}
 		if j >= len(sig) || !isIdent(sig[j]) {
 			return 0, false
 		}
@@ -1818,35 +1828,89 @@ func consumeCreateViewClause(sig []sqltok.Token, sql string, i int) (int, bool) 
 			return skipParenGroup(sig, j+3)
 		}
 		return j, true
+	case allowStorageLifecycle && kwAt(sig, sql, i, "STORAGE") && kwAt(sig, sql, i+1, "LIFECYCLE") && kwAt(sig, sql, i+2, "POLICY"):
+		// STORAGE LIFECYCLE POLICY <name> ON ( … )
+		j := i + 3
+		if j >= len(sig) || !isIdent(sig[j]) {
+			return 0, false
+		}
+		_, j = readIdentPath(sig, sql, j)
+		if !kwAt(sig, sql, j, "ON") {
+			return 0, false
+		}
+		return skipParenGroup(sig, j+1)
 	case kwAt(sig, sql, i, "TAG"):
 		// [WITH] TAG ( … )
 		return skipParenGroup(sig, i+1)
+	case withConsumed && kwAt(sig, sql, i, "CONTACT"):
+		// WITH CONTACT ( … )
+		return skipParenGroup(sig, i+1)
 	}
+	return 0, false
+}
 
-	if withPrefix {
-		// CONTACT requires the WITH prefix: WITH CONTACT ( … ).
-		if kwAt(sig, sql, i, "CONTACT") {
-			return skipParenGroup(sig, i+1)
+// eqValueProp matches "KEY = <value>" where sig[i] is KEY and the value token
+// has kind valKind; it returns the index just past the value.
+func eqValueProp(sig []sqltok.Token, sql string, i int, valKind sqltok.TokenKind) (int, bool) {
+	if isOpEq(sig, sql, i+1) && i+2 < len(sig) && sig[i+2].Kind == valKind {
+		return i + 3, true
+	}
+	return 0, false
+}
+
+// eqBoolProp matches "KEY = TRUE|FALSE"; it returns the index just past the value.
+func eqBoolProp(sig []sqltok.Token, sql string, i int) (int, bool) {
+	if isOpEq(sig, sql, i+1) && kwAtAny(sig, sql, i+2, "TRUE", "FALSE") != "" {
+		return i + 3, true
+	}
+	return 0, false
+}
+
+// validTablePropsTail reports whether sig is consumed entirely by valid CREATE
+// TABLE property clauses (an empty sig is vacuously valid). It is the token-based
+// replacement for the tableProps / tablePropsRe allow-list.
+func validTablePropsTail(sig []sqltok.Token, sql string) bool {
+	i := 0
+	for i < len(sig) {
+		next, ok := consumeCreateTableProp(sig, sql, i)
+		if !ok {
+			return false
 		}
+		i = next
+	}
+	return true
+}
+
+// consumeCreateTableProp matches one CREATE TABLE property starting at sig[i] and
+// returns the index just past it; ok is false if none matches. It shares the
+// policy / TAG / CONTACT clauses with the view preamble via
+// consumeObjectPolicyClause and adds the table-only scalar properties.
+func consumeCreateTableProp(sig []sqltok.Token, sql string, i int) (int, bool) {
+	withConsumed := false
+	if kwAt(sig, sql, i, "WITH") {
+		withConsumed = true
+		i++
+	}
+	if n, ok := consumeObjectPolicyClause(sig, sql, i, withConsumed, true); ok {
+		return n, ok
+	}
+	if withConsumed {
 		return 0, false
 	}
-
-	// Clauses with no WITH prefix.
 	switch {
 	case kwAt(sig, sql, i, "COPY") && kwAt(sig, sql, i+1, "GRANTS"):
 		return i + 2, true
-	case kwAt(sig, sql, i, "COMMENT"):
-		if isOpEq(sig, sql, i+1) && i+2 < len(sig) && sig[i+2].Kind == sqltok.StringLit {
-			return i + 3, true
-		}
-		return 0, false
-	case kwAt(sig, sql, i, "CHANGE_TRACKING"):
-		if isOpEq(sig, sql, i+1) && kwAtAny(sig, sql, i+2, "TRUE", "FALSE") != "" {
-			return i + 3, true
-		}
-		return 0, false
+	case kwAt(sig, sql, i, "COPY") && kwAt(sig, sql, i+1, "TAGS"):
+		return i + 2, true
 	case kwAt(sig, sql, i, "CLUSTER") && kwAt(sig, sql, i+1, "BY"):
 		return skipParenGroup(sig, i+2)
+	case kwAt(sig, sql, i, "COMMENT"), kwAt(sig, sql, i, "DEFAULT_DDL_COLLATION"):
+		return eqValueProp(sig, sql, i, sqltok.StringLit)
+	case kwAt(sig, sql, i, "DATA_RETENTION_TIME_IN_DAYS"), kwAt(sig, sql, i, "MAX_DATA_EXTENSION_TIME_IN_DAYS"):
+		return eqValueProp(sig, sql, i, sqltok.NumberLit)
+	case kwAt(sig, sql, i, "ENABLE_SCHEMA_EVOLUTION"), kwAt(sig, sql, i, "CHANGE_TRACKING"),
+		kwAt(sig, sql, i, "ERROR_LOGGING"), kwAt(sig, sql, i, "ROW_TIMESTAMP"):
+		return eqBoolProp(sig, sql, i)
 	}
 	return 0, false
 }
@@ -1969,11 +2033,10 @@ func validateCreateExternalTable(parseText string, r StatementRange) []DiagMarke
 // properties or AS SELECT), CTAS, CLONE, LIKE, FROM BACKUP SET, or USING
 // TEMPLATE.
 //
-// Tokenised for everything except the trailing table-property list, which is
-// matched with a locally-compiled tablePropsRe built from the tableProps allow-
-// set. That property grammar validates value formats (CLUSTER BY (...),
-// DATA_RETENTION_TIME_IN_DAYS = \d+, COMMENT = '…', …); a token walk of equal
-// strictness would be longer, so the regex is kept for the property tail only.
+// Fully tokenised: the modifier order is checked by findCreateTablePreambleEnd,
+// the body form by token inspection, and the trailing table-property list by
+// validTablePropsTail (which shares its policy/TAG/CONTACT clause matching with
+// the CREATE VIEW preamble via consumeObjectPolicyClause).
 func validateCreateTablePreamble(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 	sig := sigTokens(parseText)
@@ -2014,9 +2077,8 @@ func validateCreateTablePreamble(parseText string, r StatementRange) []DiagMarke
 			}
 
 			after := strings.TrimSpace(rest[endIdx+1:])
-			tablePropsRe := regexp.MustCompile(`(?i)^(?:(?:` + tableProps + `)(?:\s+|$))*$`)
 			afterSigCT := sigTokens(after)
-			if after == "" || tablePropsRe.MatchString(after) || isCreateTableCTAS(afterSigCT, after) {
+			if validTablePropsTail(afterSigCT, after) || isCreateTableCTAS(afterSigCT, after) {
 				isValid = true
 			}
 		}
