@@ -1115,6 +1115,40 @@ func guardDrop(objKWs ...string) func([]sqltok.Token, string) bool {
 	}
 }
 
+// guardCreateIntegration matches CREATE [OR REPLACE] (STORAGE|API|NOTIFICATION|SECURITY|EXTERNAL ACCESS) INTEGRATION.
+func guardCreateIntegration() func([]sqltok.Token, string) bool {
+	return func(sig []sqltok.Token, sql string) bool {
+		i := 0
+		if i >= len(sig) || tokUpper(sig[i], sql) != "CREATE" {
+			return false
+		}
+		i++
+		if i < len(sig) && tokUpper(sig[i], sql) == "OR" {
+			i++
+			if i < len(sig) && tokUpper(sig[i], sql) == "REPLACE" {
+				i++
+			}
+		}
+		if i >= len(sig) {
+			return false
+		}
+		u := tokUpper(sig[i], sql)
+		switch u {
+		case "STORAGE", "API", "NOTIFICATION", "SECURITY":
+			i++
+		case "EXTERNAL":
+			i++
+			if i >= len(sig) || tokUpper(sig[i], sql) != "ACCESS" {
+				return false
+			}
+			i++
+		default:
+			return false
+		}
+		return i < len(sig) && tokUpper(sig[i], sql) == "INTEGRATION"
+	}
+}
+
 // guardExecuteService matches EXECUTE [JOB] SERVICE.
 func guardExecuteService() func([]sqltok.Token, string) bool {
 	return func(sig []sqltok.Token, sql string) bool {

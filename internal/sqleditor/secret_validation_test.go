@@ -2635,22 +2635,15 @@ func TestValidateSnowflakePatterns_Secret_AlterQuotedNameNoIfExistsNoAction(t *t
 }
 
 func TestValidateSnowflakePatterns_Secret_UnexpectedPropertyInBlockComment(t *testing.T) {
-	// validateProperties receives the raw parseText (not comment-stripped), so
-	// a KEY = pattern inside a block comment is still detected. This test
-	// documents that known limitation — properties inside comments trigger
-	// "Unexpected property" false positives.
+	// Token-based validateProperties correctly ignores KEY = patterns inside
+	// block comments. Previously this was a known false positive with regex.
 	sql := "CREATE SECRET s TYPE = PASSWORD USERNAME = 'u' PASSWORD = 'p' /* WAREHOUSE = my_wh */"
 	ranges := GetStatementRanges(sql)
 	markers := ValidateSnowflakePatterns(sql, ranges)
 	warns := getWarnings(markers)
-	found := false
 	for _, w := range warns {
 		if strings.Contains(w.Message, "Unexpected property") && strings.Contains(w.Message, "WAREHOUSE") {
-			found = true
-			break
+			t.Errorf("Token-based validateProperties should not flag WAREHOUSE inside a block comment, got: %s", w.Message)
 		}
-	}
-	if !found {
-		t.Errorf("Expected 'Unexpected property WAREHOUSE' warning (known false positive from comment), got: %v", warnMsgs(warns))
 	}
 }
