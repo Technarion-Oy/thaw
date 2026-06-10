@@ -155,7 +155,7 @@ func ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {
 		case "CREATE":
 			markers = append(markers,
 				validateReferencesCols(raw, r, req.ResolvedRefs, colInfoCache, localColCache, checkEq, ic)...)
-			if reIsCreateView.MatchString(raw) {
+			if isCreateView(raw) {
 				markers = append(markers,
 					validateSelectCols(raw, r, req.ResolvedRefs, colInfoCache, localColCache, checkEq, ic)...)
 			}

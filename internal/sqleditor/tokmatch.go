@@ -67,6 +67,88 @@ func isNonEmptyIdent(tok sqltok.Token, sql string) bool {
 	return text != ""
 }
 
+// findPreambleEnd scans sig for the target keyword (e.g. "TABLE"),
+// skips optional "IF NOT EXISTS" after it, reads an ident path, and returns
+// the byte position in sql immediately after the ident path. Returns -1 if
+// the target keyword or ident path is not found.
+func findPreambleEnd(sig []sqltok.Token, sql, targetKW string) int {
+	// Find the target keyword.
+	idx := -1
+	for i, t := range sig {
+		if t.Kind == sqltok.Keyword && strings.EqualFold(t.Text(sql), targetKW) {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return -1
+	}
+	pos := idx + 1
+	// Skip optional IF NOT EXISTS.
+	if pos+2 < len(sig) &&
+		kwAt(sig, sql, pos, "IF") &&
+		kwAt(sig, sql, pos+1, "NOT") &&
+		kwAt(sig, sql, pos+2, "EXISTS") {
+		pos += 3
+	}
+	// Read ident path.
+	if pos >= len(sig) || !isIdent(sig[pos]) {
+		return -1
+	}
+	_, nextPos := readIdentPath(sig, sql, pos)
+	// Return byte position after the last consumed token.
+	return sig[nextPos-1].End
+}
+
+// findCreateTablePreambleEnd validates the strict modifier order for CREATE TABLE:
+//   CREATE [OR (REPLACE|ALTER)] [LOCAL|GLOBAL] [TEMP|TEMPORARY|VOLATILE|TRANSIENT] TABLE [IF NOT EXISTS] <identPath>
+// Returns the byte position after the ident path, or -1 if the preamble is invalid.
+func findCreateTablePreambleEnd(sig []sqltok.Token, sql string) int {
+	if len(sig) == 0 || tokUpper(sig[0], sql) != "CREATE" {
+		return -1
+	}
+	i := 1
+	// Optional OR (REPLACE|ALTER)
+	if i < len(sig) && tokUpper(sig[i], sql) == "OR" {
+		i++
+		if i < len(sig) {
+			u := tokUpper(sig[i], sql)
+			if u == "REPLACE" || u == "ALTER" {
+				i++
+			}
+		}
+	}
+	// Optional LOCAL|GLOBAL
+	if i < len(sig) {
+		u := tokUpper(sig[i], sql)
+		if u == "LOCAL" || u == "GLOBAL" {
+			i++
+		}
+	}
+	// Optional TEMP|TEMPORARY|VOLATILE|TRANSIENT
+	if i < len(sig) {
+		u := tokUpper(sig[i], sql)
+		if u == "TEMP" || u == "TEMPORARY" || u == "VOLATILE" || u == "TRANSIENT" {
+			i++
+		}
+	}
+	// TABLE
+	if i >= len(sig) || tokUpper(sig[i], sql) != "TABLE" {
+		return -1
+	}
+	i++
+	// Optional IF NOT EXISTS
+	if i+2 < len(sig) && kwAt(sig, sql, i, "IF") && kwAt(sig, sql, i+1, "NOT") && kwAt(sig, sql, i+2, "EXISTS") {
+		i += 3
+	}
+	// ident path
+	if i >= len(sig) || !isIdent(sig[i]) {
+		return -1
+	}
+	_, nextPos := readIdentPath(sig, sql, i)
+	return sig[nextPos-1].End
+}
+
 // readIdentPath reads a dot-separated identifier path (1–3 parts) from
 // sig[pos:] and returns the raw substring and the position after the last
 // consumed token. The raw substring can be passed to extractIdentParts.

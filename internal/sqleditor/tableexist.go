@@ -544,7 +544,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		parseText := strings.TrimRight(strings.TrimSpace(raw), "; \t\r\n")
 
 		// For CREATE DYNAMIC TABLE, extract the SELECT part.
-		if reIsCreateDynTable.MatchString(parseText) {
+		if isCreateDynTable(parseText) {
 			asOffset := findDynAsSelect(sig, raw)
 			if asOffset >= 0 {
 				parseText = parseText[asOffset:]
@@ -576,7 +576,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		}
 
 		// Also handle CREATE TABLE ... REFERENCES
-		if reIsCreateTable.MatchString(parseText) {
+		if isCreateTable(parseText) {
 			parseSig := sigToks(sqltok.Tokenize(parseText))
 			for _, rm := range findReferences(parseSig, parseText) {
 				parts := extractIdentParts(rm.tablePath, ic)

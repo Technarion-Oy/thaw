@@ -62,15 +62,12 @@ var (
 
 	// (reCortexFuncCall removed — token-based)
 
-	reConstraintCol = regexp.MustCompile(`(?i)^(?:CONSTRAINT|PRIMARY\s+KEY|UNIQUE|FOREIGN\s+KEY)\b`)
-	reVirtualColAS  = regexp.MustCompile(`(?i)\bAS\s*\([\s\S]*\)\s*$`)
-	rePartitionBy   = regexp.MustCompile(`(?i)^PARTITION\s+BY\b`)
+	// (reConstraintCol removed — token-based)
+	reVirtualColAS = regexp.MustCompile(`(?i)\bAS\s*\([\s\S]*\)\s*$`)
+	// (rePartitionBy removed — token-based)
 
 	// ── CREATE VIEW ───────────────────────────────────────────────────────────
-	reIsCreateView = regexp.MustCompile(
-		`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?` +
-			`(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE)\s+)?` +
-			`(?:RECURSIVE\s+)?(?:INTERACTIVE\s+)?(?:MATERIALIZED\s+)?VIEW\b`)
+	// (reIsCreateView removed — token-based: isCreateViewGuard)
 
 	reValidCreateViewPreamble = regexp.MustCompile(
 		`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?` +
@@ -91,14 +88,10 @@ var (
 			`))*\s+AS\s+`)
 
 	// ── CREATE TABLE ─────────────────────────────────────────────────────────
-	reIsCreateTable       = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:(?:OR\s+(?:REPLACE|ALTER)|LOCAL|GLOBAL|TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)*TABLE\b`)
-	reCreateTablePreamble = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+(?:REPLACE|ALTER)\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath)
-	reHybridTablePreamble = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:(?:OR\s+REPLACE|TRANSIENT)\s+)*HYBRID\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath)
+	// (reIsCreateTable removed — token-based: isCreateTableGuard)
+	// (reCreateTablePreamble, reHybridTablePreamble removed — token-based: findPreambleEnd)
 
-	reCreateTableCTAS     = regexp.MustCompile(`(?i)^AS\s+(?:SELECT|WITH)\b`)
-	reCreateTableClone    = regexp.MustCompile(`(?i)^(?:CLONE|LIKE)\b`)
-	reCreateTableTemplate = regexp.MustCompile(`(?i)^USING\s+TEMPLATE\s*\(`)
-	reCreateTableBackup   = regexp.MustCompile(`(?i)^FROM\s+BACKUP\s+SET\s+(?:` + _identPath + `\s+IDENTIFIER\s+)?'[^']+'\s*$`)
+	// (reCreateTableCTAS, reCreateTableClone, reCreateTableTemplate, reCreateTableBackup removed — token-based)
 
 	tableProps = strings.Join([]string{
 		`CLUSTER\s+BY\s*` + _balancedParens,
@@ -171,7 +164,7 @@ var (
 	reValidDropSeq = regexp.MustCompile(`(?i)^\s*DROP\s+SEQUENCE\s+(?:IF\s+EXISTS\s+)?` + _identPath + `(?:\s+(?:CASCADE|RESTRICT))?\s*$`)
 
 	// ── CREATE DYNAMIC TABLE ─────────────────────────────────────────────────
-	reIsCreateDynTable = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?DYNAMIC\s+TABLE\b`)
+	// (reIsCreateDynTable removed — token-based: isCreateDynTableGuard)
 
 	// ── ALTER DYNAMIC TABLE ──────────────────────────────────────────────────
 	// (reAlterDynTableName and 11 ALTER DYNAMIC TABLE regexes removed — token-based)
@@ -189,7 +182,7 @@ var (
 	}, "|")
 
 	// ── CREATE EXTERNAL TABLE ────────────────────────────────────────────────
-	reExternalTablePreamble = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EXTERNAL\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath)
+	// (reExternalTablePreamble removed — token-based: findPreambleEnd)
 
 	extTableProps = strings.Join([]string{
 		`WITH\s+LOCATION\s*=\s*@\S+`,
@@ -388,9 +381,8 @@ var (
 	}, "|")
 
 	// ── CREATE FILE FORMAT ───────────────────────────────────────────────────
-	// (reFileFormatPropKey removed — token-based)
-	reFileFormatPropValue = regexp.MustCompile(`^\s*('[^']*'|[A-Za-z0-9_.-]+)`)
-	reFileFormatValidEsc  = regexp.MustCompile(`^\\([ntr'\"]|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|[0-7]{1,3})$`)
+	// (reFileFormatPropKey, reFileFormatPropValue removed — token-based)
+	reFileFormatValidEsc = regexp.MustCompile(`^\\([ntr'\"]|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|[0-7]{1,3})$`)
 	// (reFileFormatTemporary removed — token-based)
 
 	fileFormatCommonProps = []string{`TYPE`, `COMMENT`}
@@ -431,13 +423,13 @@ var (
 		`SKIP_BYTE_ORDER_MARK`,
 	}
 
-	// Pre-compiled allowed property regexes for each file format type
-	reFileFormatAllowedCsv     = regexp.MustCompile("(?i)^(" + strings.Join(append(fileFormatCommonProps, fileFormatCsvProps...), "|") + ")$")
-	reFileFormatAllowedJson    = regexp.MustCompile("(?i)^(" + strings.Join(append(fileFormatCommonProps, fileFormatJsonProps...), "|") + ")$")
-	reFileFormatAllowedAvro    = regexp.MustCompile("(?i)^(" + strings.Join(append(fileFormatCommonProps, fileFormatAvroProps...), "|") + ")$")
-	reFileFormatAllowedOrc     = regexp.MustCompile("(?i)^(" + strings.Join(append(fileFormatCommonProps, fileFormatOrcProps...), "|") + ")$")
-	reFileFormatAllowedParquet = regexp.MustCompile("(?i)^(" + strings.Join(append(fileFormatCommonProps, fileFormatParquetProps...), "|") + ")$")
-	reFileFormatAllowedXml     = regexp.MustCompile("(?i)^(" + strings.Join(append(fileFormatCommonProps, fileFormatXmlProps...), "|") + ")$")
+	// Allowed property maps for each file format type (upper-cased keys).
+	fileFormatAllowedCsv     = toUpperSet(append(fileFormatCommonProps, fileFormatCsvProps...))
+	fileFormatAllowedJson    = toUpperSet(append(fileFormatCommonProps, fileFormatJsonProps...))
+	fileFormatAllowedAvro    = toUpperSet(append(fileFormatCommonProps, fileFormatAvroProps...))
+	fileFormatAllowedOrc     = toUpperSet(append(fileFormatCommonProps, fileFormatOrcProps...))
+	fileFormatAllowedParquet = toUpperSet(append(fileFormatCommonProps, fileFormatParquetProps...))
+	fileFormatAllowedXml     = toUpperSet(append(fileFormatCommonProps, fileFormatXmlProps...))
 
 	// ── CREATE ICEBERG TABLE ────────────────────────────────────────────────
 	// (reIsCreateTransientIcebergTable removed — token-based)
@@ -489,6 +481,54 @@ var (
 		"TRY_COMPLETE":    true,
 	}
 )
+
+// Precomputed token-based guard closures replacing regex guards.
+var (
+	// isCreateTableGuard matches CREATE [modifiers...] TABLE in any modifier order,
+	// mirroring the old regex (?i)CREATE\s+(?:(?:OR\s+(?:REPLACE|ALTER)|LOCAL|GLOBAL|TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)*TABLE.
+	isCreateTableGuard = func() func([]sqltok.Token, string) bool {
+		tableMods := map[string]bool{
+			"OR": true, "REPLACE": true, "ALTER": true,
+			"LOCAL": true, "GLOBAL": true,
+			"TEMP": true, "TEMPORARY": true, "VOLATILE": true, "TRANSIENT": true,
+		}
+		return func(sig []sqltok.Token, sql string) bool {
+			if len(sig) == 0 || tokUpper(sig[0], sql) != "CREATE" {
+				return false
+			}
+			for i := 1; i < len(sig); i++ {
+				u := tokUpper(sig[i], sql)
+				if u == "TABLE" {
+					return true
+				}
+				if !tableMods[u] {
+					return false
+				}
+			}
+			return false
+		}
+	}()
+	isCreateViewGuard     = guardCreateWithMods([][]string{{"SECURE"}, {"LOCAL", "GLOBAL"}, {"TEMP", "TEMPORARY", "VOLATILE"}, {"RECURSIVE"}, {"INTERACTIVE"}, {"MATERIALIZED"}}, "VIEW")
+	isCreateDynTableGuard = guardCreate("DYNAMIC", "TABLE")
+)
+
+// isCreateTable reports whether sql is a CREATE TABLE statement (token-based).
+func isCreateTable(sql string) bool {
+	sig := sigToks(sqltok.Tokenize(sql))
+	return isCreateTableGuard(sig, sql)
+}
+
+// isCreateView reports whether sql is a CREATE VIEW statement (token-based).
+func isCreateView(sql string) bool {
+	sig := sigToks(sqltok.Tokenize(sql))
+	return isCreateViewGuard(sig, sql)
+}
+
+// isCreateDynTable reports whether sql is a CREATE DYNAMIC TABLE statement (token-based).
+func isCreateDynTable(sql string) bool {
+	sig := sigToks(sqltok.Tokenize(sql))
+	return isCreateDynTableGuard(sig, sql)
+}
 
 // showObjectTypes lists all valid Snowflake object type keywords after SHOW,
 // sorted by word count descending so the longest match is attempted first.
@@ -886,7 +926,7 @@ var parseTextRoutes = []parseTextRoute{
 	{guardCreateWithMods([][]string{{"TRANSIENT"}}, "HYBRID", "TABLE"), validateCreateHybridTable},
 	{guardCreate("DYNAMIC", "TABLE"), validateCreateDynTable},
 	{guardCreate("EXTERNAL", "TABLE"), validateCreateExternalTable},
-	{func(_ []sqltok.Token, sql string) bool { return reIsCreateTable.MatchString(sql) }, validateCreateTablePreamble},
+	{isCreateTableGuard, validateCreateTablePreamble},
 
 	// ── VIEW ──
 	{guardCreateWithMods([][]string{{"SECURE"}, {"LOCAL", "GLOBAL"}, {"TEMP", "TEMPORARY", "VOLATILE"}, {"RECURSIVE"}, {"INTERACTIVE"}, {"MATERIALIZED"}}, "VIEW"), validateCreateView},
@@ -1553,8 +1593,8 @@ func validateCreateExternalTable(parseText string, r StatementRange) []DiagMarke
 	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
 	sig := sigToks(sqltok.Tokenize(stripped))
 
-	preambleMatch := reExternalTablePreamble.FindString(parseText)
-	if preambleMatch == "" {
+	preambleEnd := findPreambleEnd(sig, stripped, "TABLE")
+	if preambleEnd < 0 {
 		return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in CREATE EXTERNAL TABLE statement.", 4)}
 	}
 
@@ -1570,8 +1610,7 @@ func validateCreateExternalTable(parseText string, r StatementRange) []DiagMarke
 		return []DiagMarker{diagMarkerSpan(r, "DATA_RETENTION_TIME_IN_DAYS is not applicable to EXTERNAL TABLE.", 4)}
 	}
 
-	rest := strings.TrimSpace(parseText[len(preambleMatch):])
-	rest = strings.TrimSpace(stripCommentsSQL(rest))
+	rest := strings.TrimSpace(stripped[preambleEnd:])
 
 	if !strings.HasPrefix(rest, "(") {
 		return []DiagMarker{diagMarkerSpan(r, "EXTERNAL TABLE must have a column list.", 4)}
@@ -1597,8 +1636,14 @@ func validateCreateExternalTable(parseText string, r StatementRange) []DiagMarke
 		if col == "" {
 			continue
 		}
-		if reConstraintCol.MatchString(col) {
-			continue
+		colSig := sigToks(sqltok.Tokenize(col))
+		if len(colSig) > 0 {
+			first := strings.ToUpper(colSig[0].Text(col))
+			if first == "CONSTRAINT" || first == "UNIQUE" ||
+				(first == "PRIMARY" && len(colSig) > 1 && kwAt(colSig, col, 1, "KEY")) ||
+				(first == "FOREIGN" && len(colSig) > 1 && kwAt(colSig, col, 1, "KEY")) {
+				continue
+			}
 		}
 		if !reVirtualColAS.MatchString(col) {
 			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Column '%s' in EXTERNAL TABLE must be a virtual column using AS <expr>.", col), 4))
@@ -1612,8 +1657,9 @@ func validateCreateExternalTable(parseText string, r StatementRange) []DiagMarke
 	after := strings.TrimSpace(rest[endIdx+1:])
 
 	// Check for PARTITION BY
-	if loc := rePartitionBy.FindStringIndex(after); loc != nil {
-		remainder := strings.TrimSpace(after[loc[1]:])
+	afterSigPB := sigToks(sqltok.Tokenize(after))
+	if len(afterSigPB) >= 2 && kwAt(afterSigPB, after, 0, "PARTITION") && kwAt(afterSigPB, after, 1, "BY") {
+		remainder := strings.TrimSpace(after[afterSigPB[1].End:])
 		if !strings.HasPrefix(remainder, "(") {
 			return append(markers, diagMarkerSpan(r, "PARTITION BY in EXTERNAL TABLE requires a parenthesised column list.", 4))
 		}
@@ -1653,22 +1699,25 @@ func validateCreateTablePreamble(parseText string, r StatementRange) []DiagMarke
 		return []DiagMarker{marker}
 	}
 
-	preambleMatch := reCreateTablePreamble.FindString(parseText)
-	if preambleMatch == "" {
+	// Validate that the preamble follows the expected modifier order:
+	// CREATE [OR (REPLACE|ALTER)] [LOCAL|GLOBAL] [TEMP|TEMPORARY|VOLATILE|TRANSIENT] TABLE
+	preambleEnd := findCreateTablePreambleEnd(sig, parseText)
+	if preambleEnd < 0 {
 		return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in CREATE TABLE statement.", 4)}
 	}
-	rest := strings.TrimSpace(parseText[len(preambleMatch):])
-	rest = strings.TrimSpace(strings.TrimSpace(stripCommentsSQL(rest)))
+	rest := strings.TrimSpace(stripCommentsSQL(parseText[preambleEnd:]))
 
+	restSig := sigToks(sqltok.Tokenize(rest))
 	isValid := false
 	switch {
-	case reCreateTableBackup.MatchString(rest):
+	case isCreateTableBackup(restSig, rest):
 		isValid = true
-	case reCreateTableCTAS.MatchString(rest):
+	case isCreateTableCTAS(restSig, rest):
 		isValid = true
-	case reCreateTableClone.MatchString(rest):
+	case len(restSig) > 0 && (kwAt(restSig, rest, 0, "CLONE") || kwAt(restSig, rest, 0, "LIKE")):
 		isValid = true
-	case reCreateTableTemplate.MatchString(rest):
+	case len(restSig) >= 2 && kwAt(restSig, rest, 0, "USING") && kwAt(restSig, rest, 1, "TEMPLATE") &&
+		len(restSig) > 2 && restSig[2].Kind == sqltok.LParen:
 		isValid = true
 	case strings.HasPrefix(rest, "("):
 		endIdx := findMatchingParen(rest)
@@ -1682,7 +1731,8 @@ func validateCreateTablePreamble(parseText string, r StatementRange) []DiagMarke
 
 			after := strings.TrimSpace(rest[endIdx+1:])
 			tablePropsRe := regexp.MustCompile(`(?i)^(?:(?:` + tableProps + `)(?:\s+|$))*$`)
-			if after == "" || tablePropsRe.MatchString(after) || reCreateTableCTAS.MatchString(after) {
+			afterSigCT := sigToks(sqltok.Tokenize(after))
+			if after == "" || tablePropsRe.MatchString(after) || isCreateTableCTAS(afterSigCT, after) {
 				isValid = true
 			}
 		}
@@ -1692,6 +1742,29 @@ func validateCreateTablePreamble(parseText string, r StatementRange) []DiagMarke
 		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE TABLE statement.", 4))
 	}
 	return markers
+}
+
+// isCreateTableCTAS checks whether sig starts with AS SELECT or AS WITH.
+func isCreateTableCTAS(sig []sqltok.Token, text string) bool {
+	return len(sig) >= 2 && kwAt(sig, text, 0, "AS") &&
+		(kwAt(sig, text, 1, "SELECT") || kwAt(sig, text, 1, "WITH"))
+}
+
+// isCreateTableBackup checks whether sig starts with FROM BACKUP SET ... '<name>'.
+func isCreateTableBackup(sig []sqltok.Token, text string) bool {
+	if len(sig) < 4 {
+		return false
+	}
+	if !kwAt(sig, text, 0, "FROM") || !kwAt(sig, text, 1, "BACKUP") || !kwAt(sig, text, 2, "SET") {
+		return false
+	}
+	// After SET, we may have an optional identPath + IDENTIFIER, then a string literal.
+	for i := 3; i < len(sig); i++ {
+		if sig[i].Kind == sqltok.StringLit {
+			return true
+		}
+	}
+	return false
 }
 
 // validateCreateDbOrSchema returns a validator for CREATE DATABASE or CREATE SCHEMA.
@@ -2103,6 +2176,15 @@ func stripStringsPreserveLen(sql string) string {
 // replaced with a single space each. The tokenizer handles interaction between
 // comments and strings correctly (e.g. apostrophes inside comments, comment
 // markers inside strings).
+// toUpperSet builds a map[string]bool from a slice of strings, upper-casing each key.
+func toUpperSet(keys []string) map[string]bool {
+	m := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		m[strings.ToUpper(k)] = true
+	}
+	return m
+}
+
 func cleanParseText(s string) string {
 	return strings.TrimSpace(sqltok.StripStrings(sqltok.StripComments(s)))
 }
@@ -3243,62 +3325,35 @@ func parseColumnDefs(colsContent string, contentOffset int, onTypeFound func(str
 }
 
 func processColumnDef(seg string, segOffset int, onTypeFound func(string, int)) {
-	reWord := regexp.MustCompile(`(?i)^[a-zA-Z_][a-zA-Z0-9_]*|"[^"]+"`)
-
-	var tokens []struct {
+	// Collect significant word tokens (identifiers, keywords, quoted identifiers).
+	type wordTok struct {
 		text   string
 		offset int
+		quoted bool
+	}
+	var words []wordTok
+	for _, t := range sqltok.Tokenize(seg) {
+		switch t.Kind {
+		case sqltok.Keyword, sqltok.Identifier:
+			words = append(words, wordTok{t.Text(seg), segOffset + t.Start, false})
+		case sqltok.QuotedIdent:
+			words = append(words, wordTok{t.Text(seg), segOffset + t.Start, true})
+		}
+		if len(words) >= 2 {
+			break // only need first two
+		}
 	}
 
-	i := 0
-	for i < len(seg) {
-		c := seg[i]
-		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
-			i++
-			continue
-		}
-		// Strip line comments
-		if c == '-' && i+1 < len(seg) && seg[i+1] == '-' {
-			for i < len(seg) && seg[i] != '\n' {
-				i++
-			}
-			continue
-		}
-		// Strip block comments
-		if c == '/' && i+1 < len(seg) && seg[i+1] == '*' {
-			i += 2
-			for i < len(seg) {
-				if i+1 < len(seg) && seg[i] == '*' && seg[i+1] == '/' {
-					i += 2
-					break
-				}
-				i++
-			}
-			continue
-		}
-
-		if m := reWord.FindStringIndex(seg[i:]); m != nil {
-			tokens = append(tokens, struct {
-				text   string
-				offset int
-			}{seg[i : i+m[1]], segOffset + i})
-			i += m[1]
-			continue
-		}
-
-		i++ // skip over parens or unrecognized characters
-	}
-
-	// We need at least the column name and the datatype token
-	if len(tokens) >= 2 {
-		first := strings.ToUpper(tokens[0].text)
-		// Ignore constraint definitions
+	// We need at least the column name and the datatype token.
+	if len(words) >= 2 {
+		first := strings.ToUpper(words[0].text)
+		// Ignore constraint definitions.
 		if first == "CONSTRAINT" || first == "PRIMARY" || first == "UNIQUE" || first == "FOREIGN" || first == "INDEX" || first == "CHECK" {
 			return
 		}
-		typeToken := tokens[1]
-		if !strings.HasPrefix(typeToken.text, `"`) {
-			onTypeFound(typeToken.text, typeToken.offset)
+		typeWord := words[1]
+		if !typeWord.quoted {
+			onTypeFound(typeWord.text, typeWord.offset)
 		}
 	}
 }
@@ -3356,7 +3411,7 @@ func stripParenContents(s string) string {
 // validateProperties scans s for words that look like property keys (KEY =)
 // and checks if they match the pipe-separated list of validProps.
 func validateProperties(s string, validProps string, r StatementRange, markers *[]DiagMarker) {
-	reValid := regexp.MustCompile(`(?i)^(` + validProps + `)$`)
+	valid := toUpperSet(strings.Split(validProps, "|"))
 
 	strippedS := sqltok.StripStrings(s)
 	sig := sigToks(sqltok.Tokenize(strippedS))
@@ -3365,7 +3420,7 @@ func validateProperties(s string, validProps string, r StatementRange, markers *
 		if (sig[i].Kind == sqltok.Keyword || sig[i].Kind == sqltok.Identifier) &&
 			sig[i+1].Kind == sqltok.Operator && sig[i+1].Text(strippedS) == "=" {
 			key := sig[i].Text(strippedS)
-			if !reValid.MatchString(key) {
+			if !valid[strings.ToUpper(key)] {
 				*markers = append(*markers, diagMarkerSpan(r, fmt.Sprintf("Unexpected property '%s' in statement.", key), 4))
 			}
 		}
@@ -4575,13 +4630,13 @@ func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker 
 		markers = append(markers, diagMarkerSpan(r, "COPY GRANTS is not supported on hybrid tables.", 4))
 	}
 
-	preambleMatch := reHybridTablePreamble.FindString(stripped)
-	if preambleMatch == "" {
+	preambleEnd := findPreambleEnd(hybridSig, stripped, "TABLE")
+	if preambleEnd < 0 {
 		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE HYBRID TABLE statement.", 4))
 		return markers
 	}
 
-	rest := strings.TrimSpace(stripped[len(preambleMatch):])
+	rest := strings.TrimSpace(stripped[preambleEnd:])
 	if strings.HasPrefix(rest, "(") {
 		endIdx := findMatchingParen(rest)
 		if endIdx != -1 {
@@ -4869,20 +4924,20 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 		rawType = "CSV"
 	}
 
-	var allowedRe *regexp.Regexp
+	var allowed map[string]bool
 	switch rawType {
 	case "CSV":
-		allowedRe = reFileFormatAllowedCsv
+		allowed = fileFormatAllowedCsv
 	case "JSON":
-		allowedRe = reFileFormatAllowedJson
+		allowed = fileFormatAllowedJson
 	case "AVRO":
-		allowedRe = reFileFormatAllowedAvro
+		allowed = fileFormatAllowedAvro
 	case "ORC":
-		allowedRe = reFileFormatAllowedOrc
+		allowed = fileFormatAllowedOrc
 	case "PARQUET":
-		allowedRe = reFileFormatAllowedParquet
+		allowed = fileFormatAllowedParquet
 	case "XML":
-		allowedRe = reFileFormatAllowedXml
+		allowed = fileFormatAllowedXml
 	default:
 		markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Invalid TYPE '%s' for FILE FORMAT. Must be CSV, JSON, AVRO, ORC, PARQUET, or XML.", rawType), 4))
 		return markers
@@ -4890,7 +4945,7 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 
 	// 2. Validate property keys and values
 	for _, p := range props {
-		if !allowedRe.MatchString(p.key) {
+		if !allowed[p.key] {
 			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Property '%s' is not applicable for %s file format.", p.key, rawType), 4))
 			continue
 		}
