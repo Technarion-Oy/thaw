@@ -517,6 +517,8 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"FROM alias then number", `SELECT * FROM "DB"."PUBLIC"."DUMMY_ORDERS" li 1000`, "Unexpected token"},
 		{"FROM table then string", "SELECT * FROM orders 'x'", "Unexpected token"},
 		{"JOIN table then number", "SELECT * FROM a JOIN b 1000 ON a.id = b.id", "Unexpected token"},
+		{"FROM table then dangling AS", `SELECT * FROM "DB"."PUBLIC"."DUMMY_ORDERS" as;`, "alias after AS"},
+		{"FROM alias then stray AS", `SELECT * FROM "DB"."PUBLIC"."DUMMY_ORDERS" aaa as;`, "after the table alias"},
 
 		// Invalid Preambles
 		{"Invalid DB", "CREATE DATABASE my_db DATA_RETENTION_TIME_IN_DAYS 10", "Unexpected syntax"}, // Missing =

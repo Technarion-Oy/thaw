@@ -1595,14 +1595,18 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 	return markers
 }
 
-// checkStrayAfterTableRef flags a literal (number / string / dollar-quoted) that
-// directly follows a FROM or JOIN table reference and its optional alias — e.g.
-// `FROM t 1000` or `FROM t alias 1000` — which is a syntax error Snowflake
-// rejects. Only literals are flagged: a literal can never validly occupy the
-// alias slot or follow an alias, whereas the legitimate continuations (a comma,
-// a clause/modifier keyword such as WHERE/JOIN/AT/SAMPLE, "(", ";", or end) all
-// tokenize as keywords/punctuation, so there are no false positives. Subqueries
-// and @stage sources (the token after FROM/JOIN is not an identifier) are skipped.
+// checkStrayAfterTableRef flags malformed tails of a FROM or JOIN table
+// reference and its optional alias:
+//   - a literal (number / string / dollar-quoted) in the alias slot or after the
+//     alias, e.g. `FROM t 1000` or `FROM t alias 1000`;
+//   - AS with no alias following, e.g. `FROM t AS`;
+//   - a stray AS after an alias was already given, e.g. `FROM t aaa AS`.
+//
+// All of these are syntax errors Snowflake rejects. The legitimate continuations
+// (a comma, a clause/modifier keyword such as WHERE/JOIN/AT/SAMPLE, "(", ";", or
+// end) all tokenize as keywords/punctuation, so there are no false positives.
+// Subqueries and @stage sources (the token after FROM/JOIN is not an identifier)
+// are skipped.
 func checkStrayAfterTableRef(sig []sqltok.Token, sql string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 	for i := 0; i+1 < len(sig); i++ {
@@ -1614,24 +1618,36 @@ func checkStrayAfterTableRef(sig []sqltok.Token, sql string, r StatementRange) [
 			continue // subquery "(", @stage, or nothing — not a bare table path
 		}
 		_, j = readIdentPath(sig, sql, j)
+
 		// Optional [AS] <alias>. An implicit alias must be an Identifier/QuotedIdent
 		// (not a keyword), mirroring findFromJoinWithAlias.
+		hadAS, aliasConsumed := false, false
 		if j < len(sig) && tokUpper(sig[j], sql) == "AS" {
-			if j+1 < len(sig) && isAliasTok(sig[j+1]) {
-				j += 2
-			} else {
+			hadAS = true
+			j++
+			if j < len(sig) && isAliasTok(sig[j]) {
 				j++
+				aliasConsumed = true
 			}
 		} else if j < len(sig) && isAliasTok(sig[j]) {
 			j++
+			aliasConsumed = true
 		}
-		if j < len(sig) {
-			switch sig[j].Kind {
-			case sqltok.NumberLit, sqltok.StringLit, sqltok.DollarQuoted:
-				markers = append(markers, diagMarkerSpan(r, fmt.Sprintf(
-					"Unexpected token '%s' after table reference in FROM clause. Add a comma, JOIN, or WHERE clause.",
-					sig[j].Text(sql))))
-			}
+
+		switch {
+		case hadAS && !aliasConsumed:
+			// `FROM t AS` with no (valid) alias after AS.
+			markers = append(markers, diagMarkerSpan(r,
+				"Expected an alias after AS in the FROM clause."))
+		case j < len(sig) && (sig[j].Kind == sqltok.NumberLit ||
+			sig[j].Kind == sqltok.StringLit || sig[j].Kind == sqltok.DollarQuoted):
+			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf(
+				"Unexpected token '%s' after table reference in FROM clause. Add a comma, JOIN, or WHERE clause.",
+				sig[j].Text(sql))))
+		case j < len(sig) && aliasConsumed && tokUpper(sig[j], sql) == "AS":
+			// `FROM t aaa AS …` — a second AS after the alias is already given.
+			markers = append(markers, diagMarkerSpan(r,
+				"Unexpected 'AS' after the table alias in the FROM clause."))
 		}
 		i = j - 1 // resume scanning after this table reference
 	}
