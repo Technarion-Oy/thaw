@@ -37,7 +37,7 @@ type ValidateTablesExistRequest struct {
 	DroppedDatabases            []string         `json:"droppedDatabases"`
 	DroppedSchemas              []SchemaEntry    `json:"droppedSchemas"`
 	// DroppedTables uses ResolvedRef (Alias field is ignored).
-	DroppedTables  []ResolvedRef `json:"droppedTables"`
+	DroppedTables []ResolvedRef `json:"droppedTables"`
 	// AllKnownTables is the full set of resolved table references available in
 	// the session. When a "table not found" marker is emitted, this list is
 	// searched for tables with the same name in other schemas, enabling
@@ -70,9 +70,9 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 	// for DROP/UNDROP so DROP validations see the pre-drop state).
 	// droppedTables/droppedDbsAndSchemas are append-only ("ever dropped")
 	// and are used only for UNDROP validation.
-	scriptCreatedTables        := make(map[string]struct{})
+	scriptCreatedTables := make(map[string]struct{})
 	scriptCreatedDbsAndSchemas := make(map[string]struct{})
-	scriptDroppedTables        := make(map[string]struct{})
+	scriptDroppedTables := make(map[string]struct{})
 	scriptDroppedDbsAndSchemas := make(map[string]struct{})
 	// scriptEverCreatedSchemasByDB tracks every DB for which a 2-part
 	// CREATE SCHEMA db.sch appeared in the script (append-only; not cleared by
@@ -82,7 +82,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 	// exists (and catch "schema was dropped" errors).
 	scriptEverCreatedSchemasByDB := make(map[string]struct{})
 
-	scriptHasActiveDB     := false
+	scriptHasActiveDB := false
 	scriptHasActiveSchema := false
 
 	for _, r := range req.StmtRanges {
@@ -142,7 +142,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			}
 		}
 
-		hasGlobalDB     := len(req.KnownDatabases) > 0 || anyHasDB(req.ResolvedRefs)
+		hasGlobalDB := len(req.KnownDatabases) > 0 || anyHasDB(req.ResolvedRefs)
 		hasGlobalSchema := len(req.KnownSchemas) > 0 || anyHasSchema(req.ResolvedRefs)
 
 		// ── CREATE TABLE/VIEW ─────────────────────────────────────────

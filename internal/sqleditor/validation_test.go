@@ -785,7 +785,6 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 
 // ── 2. ValidateBareColumnRefs Tests ───────────────────────────────────────────
 
-
 func TestValidateBareColumnRefs_Valid(t *testing.T) {
 	validQueries := []string{
 		// Standard
@@ -935,7 +934,6 @@ func TestValidateBareColumnRefs_Invalid(t *testing.T) {
 }
 
 // ── 3. ValidateTablesExist Tests ──────────────────────────────────────────────
-
 
 func TestValidateTablesExist_Valid(t *testing.T) {
 	validQueries := []string{
@@ -2044,7 +2042,6 @@ $$;
 		t.Errorf("Unexpected bare column diagnostic marker: %s at line %d, col %d", m.Message, m.StartLineNumber, m.StartColumn)
 	}
 }
-
 
 func TestMatchStringLiteral(t *testing.T) {
 	tests := []struct {

@@ -626,5 +626,3 @@ func TestValidateSnowflakePatterns_CreateExternalVolume(t *testing.T) {
 		}
 	})
 }
-
-

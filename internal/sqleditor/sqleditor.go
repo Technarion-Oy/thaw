@@ -39,8 +39,8 @@ type DiagMarker struct {
 	EndLineNumber   int    `json:"endLineNumber"`
 	EndColumn       int    `json:"endColumn"`
 	Message         string `json:"message"`
-	Severity        int    `json:"severity"`        // SeverityError (red) or SeverityWarning (yellow)
-	Code            string `json:"code,omitempty"`   // JSON quick-fix metadata (e.g. qualify-table suggestions)
+	Severity        int    `json:"severity"`       // SeverityError (red) or SeverityWarning (yellow)
+	Code            string `json:"code,omitempty"` // JSON quick-fix metadata (e.g. qualify-table suggestions)
 }
 
 // JoinTableRef is a table reference parsed from a FROM/JOIN clause.
@@ -108,7 +108,6 @@ type JoinCondition struct {
 	SortText  string `json:"sortText"`
 }
 
-
 // CTEColumnEntry represents a CTE name and its projected columns for autocomplete.
 type CTEColumnEntry struct {
 	Name string    `json:"name"` // Uppercase CTE name
@@ -148,8 +147,8 @@ type InEditorTableDef struct {
 // AutocompleteContextRequest bundles all inputs for the extended autocomplete context.
 type AutocompleteContextRequest struct {
 	SQL          string          `json:"sql"`
-	CursorOffset int            `json:"cursorOffset"`
-	StoreObjects []StoreObject  `json:"storeObjects"`
+	CursorOffset int             `json:"cursorOffset"`
+	StoreObjects []StoreObject   `json:"storeObjects"`
 	Session      *SessionContext `json:"session,omitempty"`
 	LineUpToWord string          `json:"lineUpToWord"`
 }

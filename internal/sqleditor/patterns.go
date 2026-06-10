@@ -225,7 +225,7 @@ var (
 	// (ALTER TASK regexes removed — token-based)
 
 	// ── CREATE ALERT ──────────────────────────────────────────────────────────
-	alertProps      = strings.Join([]string{
+	alertProps = strings.Join([]string{
 		`WAREHOUSE`, `SCHEDULE`, `COMMENT`,
 	}, "|")
 	// (reAlertIfExists, reAlertThen, reAlertWarehouse, reAlertSchedule removed — token-based)
@@ -361,8 +361,6 @@ var (
 	// reInsertOverwriteSource, reInsertOverwritePrefix removed — token-based)
 
 	// (reInsertMultiThenInto removed — token-based)
-
-
 
 	// ── CREATE STAGE ──────────────────────────────────────────────────────────
 	// stageProps lists only top-level CREATE STAGE property keys.
@@ -1414,7 +1412,7 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			markers = append(markers, validateBeginStripped(beginStripped, r)...)
 			if txnDepth > 0 {
 				markers = append(markers, diagMarkerSpan(r,
-					"Snowflake does not support nested BEGIN. A transaction is already open.", 4))
+					"Snowflake does not support nested BEGIN. A transaction is already open."))
 				// Don't increment txnDepth — Snowflake rejects nested BEGIN,
 				// so we keep tracking only the original transaction.
 			} else {
@@ -1430,7 +1428,7 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			markers = append(markers, validateCommitStripped(commitStripped, r)...)
 			if txnDepth == 0 {
 				markers = append(markers, diagMarkerSpan(r,
-					"COMMIT with no open transaction. Add BEGIN before COMMIT.", 4))
+					"COMMIT with no open transaction. Add BEGIN before COMMIT."))
 			} else {
 				txnDepth--
 			}
@@ -1455,7 +1453,7 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			if !isToSavepoint {
 				if txnDepth == 0 {
 					markers = append(markers, diagMarkerSpan(r,
-						"ROLLBACK with no open transaction. Add BEGIN before ROLLBACK.", 4))
+						"ROLLBACK with no open transaction. Add BEGIN before ROLLBACK."))
 				} else {
 					txnDepth--
 				}
@@ -1480,7 +1478,7 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// ── Bare RELEASE (without SAVEPOINT keyword) ────────────────────
 		if firstTok == "RELEASE" {
 			markers = append(markers, diagMarkerSpan(r,
-				"RELEASE requires SAVEPOINT keyword. Use RELEASE SAVEPOINT <name>.", 4))
+				"RELEASE requires SAVEPOINT keyword. Use RELEASE SAVEPOINT <name>."))
 			continue
 		}
 
@@ -1556,7 +1554,7 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 	// ── Post-loop: unclosed transaction check ────────────────────────────
 	if txnDepth > 0 {
 		markers = append(markers, diagMarkerSpan(txnBeginRange,
-			"Transaction not committed or rolled back. Add COMMIT or ROLLBACK before the end of the script.", 4))
+			"Transaction not committed or rolled back. Add COMMIT or ROLLBACK before the end of the script."))
 	}
 
 	return markers
@@ -1568,7 +1566,7 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 // regex that covers all optional clauses (COPY GRANTS, COMMENT, policies, etc.).
 func validateCreateView(parseText string, r StatementRange) []DiagMarker {
 	if !reValidCreateViewPreamble.MatchString(parseText) {
-		return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in CREATE VIEW statement.", 4)}
+		return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in CREATE VIEW statement.")}
 	}
 	return nil
 }
@@ -1582,31 +1580,31 @@ func validateCreateExternalTable(parseText string, r StatementRange) []DiagMarke
 
 	preambleEnd := findPreambleEnd(sig, stripped, "TABLE")
 	if preambleEnd < 0 {
-		return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in CREATE EXTERNAL TABLE statement.", 4)}
+		return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in CREATE EXTERNAL TABLE statement.")}
 	}
 
 	// OR REPLACE is invalid for EXTERNAL TABLE.
 	if hasKWPair(sig, stripped, "OR", "REPLACE") {
-		return []DiagMarker{diagMarkerSpan(r, "OR REPLACE is not supported for EXTERNAL TABLE. Use DROP and CREATE.", 4)}
+		return []DiagMarker{diagMarkerSpan(r, "OR REPLACE is not supported for EXTERNAL TABLE. Use DROP and CREATE.")}
 	}
 
 	if hasKWPair(sig, stripped, "CLUSTER", "BY") {
-		return []DiagMarker{diagMarkerSpan(r, "CLUSTER BY is not supported for EXTERNAL TABLE.", 4)}
+		return []DiagMarker{diagMarkerSpan(r, "CLUSTER BY is not supported for EXTERNAL TABLE.")}
 	}
 	if hasKW(sig, stripped, "DATA_RETENTION_TIME_IN_DAYS") {
-		return []DiagMarker{diagMarkerSpan(r, "DATA_RETENTION_TIME_IN_DAYS is not applicable to EXTERNAL TABLE.", 4)}
+		return []DiagMarker{diagMarkerSpan(r, "DATA_RETENTION_TIME_IN_DAYS is not applicable to EXTERNAL TABLE.")}
 	}
 
 	rest := strings.TrimSpace(stripped[preambleEnd:])
 
 	if !strings.HasPrefix(rest, "(") {
-		return []DiagMarker{diagMarkerSpan(r, "EXTERNAL TABLE must have a column list.", 4)}
+		return []DiagMarker{diagMarkerSpan(r, "EXTERNAL TABLE must have a column list.")}
 	}
 
 	// Find matching close paren for column list
 	endIdx := findMatchingParen(rest)
 	if endIdx == -1 {
-		return []DiagMarker{diagMarkerSpan(r, "Unclosed column list in CREATE EXTERNAL TABLE statement.", 4)}
+		return []DiagMarker{diagMarkerSpan(r, "Unclosed column list in CREATE EXTERNAL TABLE statement.")}
 	}
 
 	colList := rest[1:endIdx]
@@ -1614,7 +1612,7 @@ func validateCreateExternalTable(parseText string, r StatementRange) []DiagMarke
 
 	// Snowflake rejects empty column lists
 	if len(cols) == 0 || (len(cols) == 1 && strings.TrimSpace(cols[0]) == "") {
-		return []DiagMarker{diagMarkerSpan(r, "Column list must not be empty.", 4)}
+		return []DiagMarker{diagMarkerSpan(r, "Column list must not be empty.")}
 	}
 
 	hasColError := false
@@ -1633,7 +1631,7 @@ func validateCreateExternalTable(parseText string, r StatementRange) []DiagMarke
 			}
 		}
 		if !reVirtualColAS.MatchString(col) {
-			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Column '%s' in EXTERNAL TABLE must be a virtual column using AS <expr>.", col), 4))
+			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Column '%s' in EXTERNAL TABLE must be a virtual column using AS <expr>.", col)))
 			hasColError = true
 		}
 	}
@@ -1648,28 +1646,28 @@ func validateCreateExternalTable(parseText string, r StatementRange) []DiagMarke
 	if len(afterSigPB) >= 2 && kwAt(afterSigPB, after, 0, "PARTITION") && kwAt(afterSigPB, after, 1, "BY") {
 		remainder := strings.TrimSpace(after[afterSigPB[1].End:])
 		if !strings.HasPrefix(remainder, "(") {
-			return append(markers, diagMarkerSpan(r, "PARTITION BY in EXTERNAL TABLE requires a parenthesised column list.", 4))
+			return append(markers, diagMarkerSpan(r, "PARTITION BY in EXTERNAL TABLE requires a parenthesised column list."))
 		}
 		partEnd := findMatchingParen(remainder)
 		if partEnd != -1 {
 			after = strings.TrimSpace(remainder[partEnd+1:])
 		} else {
-			return append(markers, diagMarkerSpan(r, "Unclosed parenthesised column list in PARTITION BY clause.", 4))
+			return append(markers, diagMarkerSpan(r, "Unclosed parenthesised column list in PARTITION BY clause."))
 		}
 	}
 
 	// Mandatory WITH LOCATION and FILE_FORMAT
 	afterSig := sigTokens(after)
 	if !(hasKW(afterSig, after, "WITH") && hasKWAssign(afterSig, after, "LOCATION")) {
-		return append(markers, diagMarkerSpan(r, "WITH LOCATION = @<stage> is mandatory for EXTERNAL TABLE.", 4))
+		return append(markers, diagMarkerSpan(r, "WITH LOCATION = @<stage> is mandatory for EXTERNAL TABLE."))
 	}
 	if !hasKWAssign(afterSig, after, "FILE_FORMAT") {
-		return append(markers, diagMarkerSpan(r, "FILE_FORMAT is mandatory for EXTERNAL TABLE.", 4))
+		return append(markers, diagMarkerSpan(r, "FILE_FORMAT is mandatory for EXTERNAL TABLE."))
 	}
 
 	// Validate remaining properties
 	if after != "" && !extTablePropsRe.MatchString(after) {
-		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE EXTERNAL TABLE properties.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE EXTERNAL TABLE properties."))
 	}
 	return markers
 }
@@ -1690,7 +1688,7 @@ func validateCreateTablePreamble(parseText string, r StatementRange) []DiagMarke
 	// CREATE [OR (REPLACE|ALTER)] [LOCAL|GLOBAL] [TEMP|TEMPORARY|VOLATILE|TRANSIENT] TABLE
 	preambleEnd := findCreateTablePreambleEnd(sig, parseText)
 	if preambleEnd < 0 {
-		return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in CREATE TABLE statement.", 4)}
+		return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in CREATE TABLE statement.")}
 	}
 	rest := strings.TrimSpace(stripCommentsSQL(parseText[preambleEnd:]))
 
@@ -1713,7 +1711,7 @@ func validateCreateTablePreamble(parseText string, r StatementRange) []DiagMarke
 			colsClean := stripQuotedIdents(sqltok.StripStrings(colsContent))
 			colsSig := sigTokens(colsClean)
 			if hasKW(colsSig, colsClean, "INDEX") {
-				markers = append(markers, diagMarkerSpan(r, "Secondary indexes (INDEX) are only supported on hybrid tables.", 4))
+				markers = append(markers, diagMarkerSpan(r, "Secondary indexes (INDEX) are only supported on hybrid tables."))
 			}
 
 			after := strings.TrimSpace(rest[endIdx+1:])
@@ -1726,7 +1724,7 @@ func validateCreateTablePreamble(parseText string, r StatementRange) []DiagMarke
 	}
 
 	if !isValid {
-		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE TABLE statement.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE TABLE statement."))
 	}
 	return markers
 }
@@ -1758,7 +1756,7 @@ func isCreateTableBackup(sig []sqltok.Token, text string) bool {
 func validateCreateDbOrSchema(kind string) func(string, StatementRange) []DiagMarker {
 	return func(parseText string, r StatementRange) []DiagMarker {
 		if !reValidCreateDbSchema.MatchString(parseText) {
-			return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in CREATE "+kind+" statement.", 4)}
+			return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in CREATE "+kind+" statement.")}
 		}
 		return nil
 	}
@@ -1768,7 +1766,7 @@ func validateCreateDbOrSchema(kind string) func(string, StatementRange) []DiagMa
 func validateDropDbOrSchema(kind string) func(string, StatementRange) []DiagMarker {
 	return func(parseText string, r StatementRange) []DiagMarker {
 		if !reValidDropDbSchema.MatchString(parseText) {
-			return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in DROP "+kind+" statement.", 4)}
+			return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in DROP "+kind+" statement.")}
 		}
 		return nil
 	}
@@ -1779,7 +1777,7 @@ func validateCreateSequence(parseText string, r StatementRange) []DiagMarker {
 	sig := sigTokens(parseText)
 	bothOrderNoorder := hasKW(sig, parseText, "ORDER") && hasKW(sig, parseText, "NOORDER")
 	if !reValidCreateSeq.MatchString(parseText) || bothOrderNoorder {
-		return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in CREATE SEQUENCE statement.", 4)}
+		return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in CREATE SEQUENCE statement.")}
 	}
 	return nil
 }
@@ -1789,7 +1787,7 @@ func validateAlterSequence(parseText string, r StatementRange) []DiagMarker {
 	sig := sigTokens(parseText)
 	bothOrderNoorder := hasKW(sig, parseText, "ORDER") && hasKW(sig, parseText, "NOORDER")
 	if !reValidAlterSeq.MatchString(parseText) || bothOrderNoorder {
-		return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in ALTER SEQUENCE statement.", 4)}
+		return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in ALTER SEQUENCE statement.")}
 	}
 	return nil
 }
@@ -1797,7 +1795,7 @@ func validateAlterSequence(parseText string, r StatementRange) []DiagMarker {
 // validateDropSequence validates DROP SEQUENCE syntax.
 func validateDropSequence(parseText string, r StatementRange) []DiagMarker {
 	if !reValidDropSeq.MatchString(parseText) {
-		return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in DROP SEQUENCE statement.", 4)}
+		return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in DROP SEQUENCE statement.")}
 	}
 	return nil
 }
@@ -1809,7 +1807,7 @@ func validateCreateDynTable(parseText string, r StatementRange) []DiagMarker {
 	if !hasKWAssign(sig, parseText, "TARGET_LAG") ||
 		!hasKWAssign(sig, parseText, "WAREHOUSE") ||
 		!(hasKWPair(sig, parseText, "AS", "SELECT") || hasKWPair(sig, parseText, "AS", "WITH")) {
-		return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in CREATE DYNAMIC TABLE statement.", 4)}
+		return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in CREATE DYNAMIC TABLE statement.")}
 	}
 	return nil
 }
@@ -1828,7 +1826,7 @@ func validateCreateIntegration(parseText string, r StatementRange) []DiagMarker 
 		if tokUpper(sig[i], stripped) == "INTEGRATION" {
 			name, _ := readIdentPath(sig, stripped, i+1)
 			if name != "" && strings.Contains(name, ".") {
-				markers = append(markers, diagMarkerSpan(r, "Integrations are account-level objects and cannot have a database or schema prefix.", 4))
+				markers = append(markers, diagMarkerSpan(r, "Integrations are account-level objects and cannot have a database or schema prefix."))
 			}
 			break
 		}
@@ -1838,22 +1836,22 @@ func validateCreateIntegration(parseText string, r StatementRange) []DiagMarker 
 	switch {
 	case hasKWPair(sig, stripped, "API", "INTEGRATION"):
 		if !hasKWAssign(sig, stripped, "API_PROVIDER") {
-			markers = append(markers, diagMarkerSpan(r, "Missing required parameter API_PROVIDER for API Integration.", 4))
+			markers = append(markers, diagMarkerSpan(r, "Missing required parameter API_PROVIDER for API Integration."))
 		}
 	case hasKWPair(sig, stripped, "NOTIFICATION", "INTEGRATION"):
 		if typeVal, ok := findKWAssign(sig, stripped, "TYPE"); ok {
 			t := strings.ToUpper(typeVal)
 			if t != "EMAIL" && t != "QUEUE" {
-				markers = append(markers, diagMarkerSpan(r, "Invalid TYPE for Notification Integration. Valid types are EMAIL, QUEUE.", 4))
+				markers = append(markers, diagMarkerSpan(r, "Invalid TYPE for Notification Integration. Valid types are EMAIL, QUEUE."))
 			}
 		}
 	case hasKWPair(sig, stripped, "SECURITY", "INTEGRATION"):
 		if !hasKWAssign(sig, stripped, "TYPE") {
-			markers = append(markers, diagMarkerSpan(r, "Missing required parameter TYPE for Security Integration.", 4))
+			markers = append(markers, diagMarkerSpan(r, "Missing required parameter TYPE for Security Integration."))
 		}
 	case hasKWSeq(sig, stripped, "EXTERNAL", "ACCESS", "INTEGRATION"):
 		if hasKWAssign(sig, stripped, "MAX_RETRIES") {
-			markers = append(markers, diagMarkerSpan(r, "Unexpected property 'MAX_RETRIES' for External Access Integration.", 4))
+			markers = append(markers, diagMarkerSpan(r, "Unexpected property 'MAX_RETRIES' for External Access Integration."))
 		}
 	}
 	return markers
@@ -1866,7 +1864,7 @@ func validateCreateWarehouse(parseText string, r StatementRange) []DiagMarker {
 	sig := sigTokens(parseText)
 	name, _ := extractNameAfterCreate(sig, parseText, nil, "WAREHOUSE")
 	if name != "" && strings.Contains(name, ".") {
-		markers = append(markers, diagMarkerSpan(r, "Warehouses are account-level objects and cannot have a database or schema prefix.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Warehouses are account-level objects and cannot have a database or schema prefix."))
 	}
 	validateProperties(parseText, whProps, r, &markers)
 	return markers
@@ -1888,7 +1886,7 @@ func validateCreateStream(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	if !reValidCreateStream.MatchString(parseText) {
-		return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in CREATE STREAM statement.", 4)}
+		return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in CREATE STREAM statement.")}
 	}
 	return nil
 }
@@ -1915,7 +1913,7 @@ func validateCreatePipe(parseText string, r StatementRange) []DiagMarker {
 		}
 	}
 	if asIdx < 0 {
-		return []DiagMarker{diagMarkerSpan(r, "Missing mandatory AS COPY INTO clause in CREATE PIPE statement.", 4)}
+		return []DiagMarker{diagMarkerSpan(r, "Missing mandatory AS COPY INTO clause in CREATE PIPE statement.")}
 	}
 
 	preambleSig := sig[:asIdx]
@@ -1927,7 +1925,7 @@ func validateCreatePipe(parseText string, r StatementRange) []DiagMarker {
 	if hasKWAssign(preambleSig, parseText, "AWS_SNS_TOPIC") {
 		autoIngestVal, _ := findKWAssignIdent(preambleSig, parseText, "AUTO_INGEST")
 		if !strings.EqualFold(autoIngestVal, "TRUE") {
-			markers = append(markers, diagMarkerSpan(r, "AWS_SNS_TOPIC is only meaningful when AUTO_INGEST = TRUE.", 4))
+			markers = append(markers, diagMarkerSpan(r, "AWS_SNS_TOPIC is only meaningful when AUTO_INGEST = TRUE."))
 		}
 	}
 
@@ -1944,7 +1942,7 @@ func validateCreatePipe(parseText string, r StatementRange) []DiagMarker {
 			}
 		}
 		if !hasFromStage {
-			markers = append(markers, diagMarkerSpan(r, "AUTO_INGEST = TRUE typically requires a stage source (FROM @stage).", 4))
+			markers = append(markers, diagMarkerSpan(r, "AUTO_INGEST = TRUE typically requires a stage source (FROM @stage)."))
 		}
 	}
 
@@ -1960,7 +1958,7 @@ func validateCreateFunction(parseText string, r StatementRange) []DiagMarker {
 
 	preambleSig := sig
 	if asBodyIdx < 0 {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory AS clause in CREATE FUNCTION statement.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory AS clause in CREATE FUNCTION statement."))
 	} else {
 		preambleSig = sig[:asBodyIdx]
 	}
@@ -1969,7 +1967,7 @@ func validateCreateFunction(parseText string, r StatementRange) []DiagMarker {
 	isSecure := hasKW(preambleSig, parseText, "SECURE")
 
 	if isSecure && isAggregate {
-		markers = append(markers, diagMarkerSpan(r, "SECURE is not supported for AGGREGATE functions.", 4))
+		markers = append(markers, diagMarkerSpan(r, "SECURE is not supported for AGGREGATE functions."))
 	}
 
 	// 1. Mandatory RETURNS
@@ -1985,21 +1983,21 @@ func validateCreateFunction(parseText string, r StatementRange) []DiagMarker {
 		}
 	}
 	if returnsIdx < 0 {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory RETURNS clause in CREATE FUNCTION statement.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory RETURNS clause in CREATE FUNCTION statement."))
 	} else if isAggregate && isTable {
-		markers = append(markers, diagMarkerSpan(r, "AGGREGATE functions cannot return a TABLE.", 4))
+		markers = append(markers, diagMarkerSpan(r, "AGGREGATE functions cannot return a TABLE."))
 	}
 
 	// 2. Mandatory LANGUAGE
 	lang := findLanguage(preambleSig, parseText)
 	if lang == "" {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory LANGUAGE clause in CREATE FUNCTION statement.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory LANGUAGE clause in CREATE FUNCTION statement."))
 	} else {
 		switch lang {
 		case "JAVASCRIPT", "PYTHON", "JAVA", "SCALA", "SQL":
 			// valid
 		default:
-			markers = append(markers, diagMarkerSpan(r, "Unknown or unsupported LANGUAGE '"+lang+"' in CREATE FUNCTION.", 4))
+			markers = append(markers, diagMarkerSpan(r, "Unknown or unsupported LANGUAGE '"+lang+"' in CREATE FUNCTION."))
 		}
 
 		if lang == "PYTHON" {
@@ -2007,7 +2005,7 @@ func validateCreateFunction(parseText string, r StatementRange) []DiagMarker {
 		}
 		if lang == "JAVA" || lang == "SCALA" {
 			if !hasKW(preambleSig, parseText, "HANDLER") {
-				markers = append(markers, diagMarkerSpan(r, "HANDLER is required for "+lang+" functions.", 4))
+				markers = append(markers, diagMarkerSpan(r, "HANDLER is required for "+lang+" functions."))
 			}
 		}
 	}
@@ -2017,7 +2015,7 @@ func validateCreateFunction(parseText string, r StatementRange) []DiagMarker {
 	// MEMOIZABLE
 	if hasKW(preambleSig, parseText, "MEMOIZABLE") {
 		if isAggregate || isTable {
-			markers = append(markers, diagMarkerSpan(r, "MEMOIZABLE is only valid for scalar functions.", 4))
+			markers = append(markers, diagMarkerSpan(r, "MEMOIZABLE is only valid for scalar functions."))
 		}
 	}
 
@@ -2040,26 +2038,26 @@ func validateCreateProcedure(parseText string, r StatementRange) []DiagMarker {
 
 	preambleSig := sig
 	if asBodyIdx < 0 {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory AS clause in CREATE PROCEDURE statement.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory AS clause in CREATE PROCEDURE statement."))
 	} else {
 		preambleSig = sig[:asBodyIdx]
 	}
 
 	// 1. Mandatory RETURNS
 	if !hasKW(preambleSig, parseText, "RETURNS") {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory RETURNS clause in CREATE PROCEDURE statement.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory RETURNS clause in CREATE PROCEDURE statement."))
 	}
 
 	// 2. Mandatory LANGUAGE
 	lang := findLanguage(preambleSig, parseText)
 	if lang == "" {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory LANGUAGE clause in CREATE PROCEDURE statement.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory LANGUAGE clause in CREATE PROCEDURE statement."))
 	} else {
 		switch lang {
 		case "JAVASCRIPT", "PYTHON", "JAVA", "SCALA", "SQL":
 			// valid
 		default:
-			markers = append(markers, diagMarkerSpan(r, "Unknown or unsupported LANGUAGE '"+lang+"' in CREATE PROCEDURE.", 4))
+			markers = append(markers, diagMarkerSpan(r, "Unknown or unsupported LANGUAGE '"+lang+"' in CREATE PROCEDURE."))
 		}
 
 		if lang == "PYTHON" {
@@ -2076,7 +2074,7 @@ func validateCreateProcedure(parseText string, r StatementRange) []DiagMarker {
 			isIdent(preambleSig[pi+2]) {
 			execVal := strings.ToUpper(preambleSig[pi+2].Text(parseText))
 			if execVal != "CALLER" && execVal != "OWNER" {
-				markers = append(markers, diagMarkerSpan(r, "EXECUTE AS must be CALLER or OWNER.", 4))
+				markers = append(markers, diagMarkerSpan(r, "EXECUTE AS must be CALLER or OWNER."))
 			}
 			break
 		}
@@ -2091,7 +2089,7 @@ func validateCreateUser(parseText string, r StatementRange) []DiagMarker {
 	sig := sigTokens(parseText)
 	name, _ := extractNameAfterCreate(sig, parseText, nil, "USER")
 	if name != "" && strings.Contains(name, ".") {
-		markers = append(markers, diagMarkerSpan(r, "Users are account-level objects and cannot have a database or schema prefix.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Users are account-level objects and cannot have a database or schema prefix."))
 	}
 	validateProperties(parseText, userProps, r, &markers)
 	return markers
@@ -2102,7 +2100,7 @@ func validateCreateRole(parseText string, r StatementRange) []DiagMarker {
 	sig := sigTokens(parseText)
 	name, _ := extractNameAfterCreate(sig, parseText, nil, "ROLE")
 	if name != "" && strings.Contains(name, ".") {
-		return []DiagMarker{diagMarkerSpan(r, "Roles are account-level objects and cannot have a database or schema prefix.", 4)}
+		return []DiagMarker{diagMarkerSpan(r, "Roles are account-level objects and cannot have a database or schema prefix.")}
 	}
 	return nil
 }
@@ -2111,7 +2109,7 @@ func validateCreateRole(parseText string, r StatementRange) []DiagMarker {
 func validateCreateMaskingPolicy(parseText string, r StatementRange) []DiagMarker {
 	sig := sigTokens(parseText)
 	if !hasKW(sig, parseText, "RETURNS") {
-		return []DiagMarker{diagMarkerSpan(r, "Missing RETURNS clause in Masking Policy definition.", 4)}
+		return []DiagMarker{diagMarkerSpan(r, "Missing RETURNS clause in Masking Policy definition.")}
 	}
 	return nil
 }
@@ -2203,7 +2201,8 @@ func stripDollarQuoted(sql string) string {
 func checkAccountLevelPrefix(name string, r StatementRange, objType string) *DiagMarker {
 	if sqlIdentPathHasDot(name) {
 		m := diagMarkerSpan(r,
-			objType+" are account-level objects and cannot have a database or schema prefix.", 4)
+			objType+" are account-level objects and cannot have a database or schema prefix.")
+
 		return &m
 	}
 	return nil
@@ -2214,7 +2213,7 @@ func checkAccountLevelPrefix(name string, r StatementRange, objType string) *Dia
 // actual name slot. Returns the error marker and true if the name was swallowed.
 func checkNameSwallowedByIF(name string, clean string, r StatementRange, reExists *regexp.Regexp, errMsg string) (DiagMarker, bool) {
 	if strings.EqualFold(name, "IF") && reExists.MatchString(clean) {
-		return diagMarkerSpan(r, errMsg, 4), true
+		return diagMarkerSpan(r, errMsg), true
 	}
 	return DiagMarker{}, false
 }
@@ -2249,7 +2248,7 @@ func validatePivotClauses(stripped string, r StatementRange) []DiagMarker {
 			funcName := strings.ToUpper(bodySig[0].Text(pivotBody))
 			if !pivotValidAggs[funcName] {
 				markers = append(markers, diagMarkerSpan(r,
-					"'"+funcName+"' is not a valid aggregate function for PIVOT. Use SUM, AVG, COUNT, MAX, MIN, ANY_VALUE, LISTAGG, MEDIAN, STDDEV, or VARIANCE.", 4))
+					"'"+funcName+"' is not a valid aggregate function for PIVOT. Use SUM, AVG, COUNT, MAX, MIN, ANY_VALUE, LISTAGG, MEDIAN, STDDEV, or VARIANCE."))
 			}
 		}
 
@@ -2263,7 +2262,7 @@ func validatePivotClauses(stripped string, r StatementRange) []DiagMarker {
 						// 3. Check IN list is not empty — LParen immediately followed by RParen.
 						if k+2 < len(bodySig) && bodySig[k+2].Kind == sqltok.RParen {
 							markers = append(markers, diagMarkerSpan(r,
-								"PIVOT IN list must not be empty. Provide at least one literal value.", 4))
+								"PIVOT IN list must not be empty. Provide at least one literal value."))
 						}
 						break
 					}
@@ -2273,7 +2272,7 @@ func validatePivotClauses(stripped string, r StatementRange) []DiagMarker {
 		}
 		if !hasForIn {
 			markers = append(markers, diagMarkerSpan(r,
-				"PIVOT requires FOR <column> IN (<values>).", 4))
+				"PIVOT requires FOR <column> IN (<values>)."))
 		}
 	}
 	return markers
@@ -2325,7 +2324,7 @@ func validateUnpivotClauses(stripped string, r StatementRange) []DiagMarker {
 						// 2. Check IN list is not empty.
 						if m+2 < len(bodySig) && bodySig[m+2].Kind == sqltok.RParen {
 							markers = append(markers, diagMarkerSpan(r,
-								"UNPIVOT IN list must not be empty. Provide at least one column name.", 4))
+								"UNPIVOT IN list must not be empty. Provide at least one column name."))
 						}
 						break
 					}
@@ -2335,7 +2334,7 @@ func validateUnpivotClauses(stripped string, r StatementRange) []DiagMarker {
 		}
 		if !hasForIn {
 			markers = append(markers, diagMarkerSpan(r,
-				"UNPIVOT requires FOR <name_column> IN (<columns>).", 4))
+				"UNPIVOT requires FOR <name_column> IN (<columns>)."))
 		}
 	}
 	return markers
@@ -2371,14 +2370,14 @@ func validateMatchRecognizeClauses(stripped string, r StatementRange) []DiagMark
 		patternIdx := findKWLParen(body, clean, "PATTERN")
 		if patternIdx < 0 {
 			markers = append(markers, diagMarkerSpan(r,
-				"MATCH_RECOGNIZE requires a PATTERN clause.", 4))
+				"MATCH_RECOGNIZE requires a PATTERN clause."))
 		} else {
 			// Check for empty PATTERN — LParen immediately followed by RParen.
 			lpIdx := patternIdx + 1 // the LParen after PATTERN
 			if lpIdx < len(body) && lpIdx+1 < len(body) && body[lpIdx+1].Kind == sqltok.RParen {
 				// Verify the RParen matches this LParen (depth=1).
 				markers = append(markers, diagMarkerSpan(r,
-					"MATCH_RECOGNIZE PATTERN must contain at least one pattern variable.", 4))
+					"MATCH_RECOGNIZE PATTERN must contain at least one pattern variable."))
 			}
 		}
 
@@ -2393,7 +2392,7 @@ func validateMatchRecognizeClauses(stripped string, r StatementRange) []DiagMark
 		}
 		if !hasDefine {
 			markers = append(markers, diagMarkerSpan(r,
-				"MATCH_RECOGNIZE requires a DEFINE clause to bind pattern variables.", 4))
+				"MATCH_RECOGNIZE requires a DEFINE clause to bind pattern variables."))
 		}
 
 		// 3. ONE ROW PER MATCH / ALL ROWS PER MATCH mutual exclusion.
@@ -2401,7 +2400,7 @@ func validateMatchRecognizeClauses(stripped string, r StatementRange) []DiagMark
 		hasAllRows := hasKWSeq4(body, clean, "ALL", "ROWS", "PER", "MATCH")
 		if hasOneRow && hasAllRows {
 			markers = append(markers, diagMarkerSpan(r,
-				"ONE ROW PER MATCH and ALL ROWS PER MATCH are mutually exclusive. Use one or the other.", 4))
+				"ONE ROW PER MATCH and ALL ROWS PER MATCH are mutually exclusive. Use one or the other."))
 		}
 
 		// 4. AFTER MATCH SKIP target validation.
@@ -2424,7 +2423,7 @@ func validateMatchRecognizeClauses(stripped string, r StatementRange) []DiagMark
 					targetToks := body[target:end]
 					if !isValidAfterMatchSkipTarget(targetToks, clean) {
 						markers = append(markers, diagMarkerSpan(r,
-							"Invalid AFTER MATCH SKIP target. Use TO NEXT ROW, PAST LAST ROW, TO FIRST <variable>, or TO LAST <variable>.", 4))
+							"Invalid AFTER MATCH SKIP target. Use TO NEXT ROW, PAST LAST ROW, TO FIRST <variable>, or TO LAST <variable>."))
 					}
 				}
 				break
@@ -2502,13 +2501,13 @@ func findLanguage(sig []sqltok.Token, sql string) string {
 // RUNTIME_VERSION, HANDLER, and PACKAGES or IMPORTS.
 func checkPythonRequirements(sig []sqltok.Token, sql string, r StatementRange, markers *[]DiagMarker, objType string) {
 	if !hasKW(sig, sql, "RUNTIME_VERSION") {
-		*markers = append(*markers, diagMarkerSpan(r, "RUNTIME_VERSION is required for PYTHON "+objType+".", 4))
+		*markers = append(*markers, diagMarkerSpan(r, "RUNTIME_VERSION is required for PYTHON "+objType+"."))
 	}
 	if objType == "functions" && !hasKW(sig, sql, "HANDLER") {
-		*markers = append(*markers, diagMarkerSpan(r, "HANDLER is required for PYTHON "+objType+".", 4))
+		*markers = append(*markers, diagMarkerSpan(r, "HANDLER is required for PYTHON "+objType+"."))
 	}
 	if !hasKW(sig, sql, "PACKAGES") && !hasKW(sig, sql, "IMPORTS") {
-		*markers = append(*markers, diagMarkerSpan(r, "PACKAGES or IMPORTS is required for PYTHON "+objType+".", 4))
+		*markers = append(*markers, diagMarkerSpan(r, "PACKAGES or IMPORTS is required for PYTHON "+objType+"."))
 	}
 }
 
@@ -2530,10 +2529,10 @@ func checkNullInputHandling(sig []sqltok.Token, sql string, r StatementRange, ma
 	hasStrict := hasKW(sig, sql, "STRICT")
 
 	if hasCalledOnNull && (hasReturnsNull || hasStrict) {
-		*markers = append(*markers, diagMarkerSpan(r, "CALLED ON NULL INPUT and RETURNS NULL ON NULL INPUT (or STRICT) are mutually exclusive.", 4))
+		*markers = append(*markers, diagMarkerSpan(r, "CALLED ON NULL INPUT and RETURNS NULL ON NULL INPUT (or STRICT) are mutually exclusive."))
 	}
 	if hasReturnsNull && hasStrict {
-		*markers = append(*markers, diagMarkerSpan(r, "STRICT and RETURNS NULL ON NULL INPUT are redundant.", 4))
+		*markers = append(*markers, diagMarkerSpan(r, "STRICT and RETURNS NULL ON NULL INPUT are redundant."))
 	}
 }
 
@@ -2583,21 +2582,21 @@ func validateAsofJoinClauses(stripped string, r StatementRange) []DiagMarker {
 		flaggedOnOrUsing := false
 		if hasOnClauseTok(scope, clean, hasMatchCondition) {
 			markers = append(markers, diagMarkerSpan(r,
-				"ON clause is not valid with ASOF JOIN. Use MATCH_CONDITION instead.", 4))
+				"ON clause is not valid with ASOF JOIN. Use MATCH_CONDITION instead."))
 			flaggedOnOrUsing = true
 		}
 
 		// 2. Check for invalid USING clause (plain USING, not USING FUNCTION).
 		if hasUsingClauseTok(scope, clean, hasUsingFunction) {
 			markers = append(markers, diagMarkerSpan(r,
-				"USING clause is not valid with ASOF JOIN. Use MATCH_CONDITION instead.", 4))
+				"USING clause is not valid with ASOF JOIN. Use MATCH_CONDITION instead."))
 			flaggedOnOrUsing = true
 		}
 
 		// 3. Validate MATCH_CONDITION or USING FUNCTION is present.
 		if !hasMatchCondition && !hasUsingFunction && !flaggedOnOrUsing {
 			markers = append(markers, diagMarkerSpan(r,
-				"ASOF JOIN requires a MATCH_CONDITION clause. Use ASOF JOIN <table> MATCH_CONDITION (<left_expr> >= <right_expr>).", 4))
+				"ASOF JOIN requires a MATCH_CONDITION clause. Use ASOF JOIN <table> MATCH_CONDITION (<left_expr> >= <right_expr>)."))
 			continue
 		}
 
@@ -2612,7 +2611,7 @@ func validateAsofJoinClauses(stripped string, r StatementRange) []DiagMarker {
 					// Empty body or body without valid comparison.
 					if !containsAsofValidComparison(mcBody) {
 						markers = append(markers, diagMarkerSpan(r,
-							"MATCH_CONDITION comparison must use one of: >=, >, <=, <. Operators =, <>, != are not supported.", 4))
+							"MATCH_CONDITION comparison must use one of: >=, >, <=, <. Operators =, <>, != are not supported."))
 					}
 				}
 			}
@@ -2814,14 +2813,14 @@ func validateInsertMultiTable(keyword string, stripped string, r StatementRange)
 	// INSERT FIRST always requires WHEN branches.
 	if keyword == "FIRST" && !hasWhen {
 		return append(markers, diagMarkerSpan(r,
-			"INSERT FIRST requires at least one WHEN branch. Use WHEN <condition> THEN INTO <table>.", 4))
+			"INSERT FIRST requires at least one WHEN branch. Use WHEN <condition> THEN INTO <table>."))
 	}
 
 	if hasWhen || hasElse {
 		// Conditional form: require at least one WHEN (ELSE alone is invalid).
 		if !hasWhen {
 			return append(markers, diagMarkerSpan(r,
-				"INSERT "+keyword+" requires at least one WHEN branch when using conditional insert. Use WHEN <condition> THEN INTO <table>.", 4))
+				"INSERT "+keyword+" requires at least one WHEN branch when using conditional insert. Use WHEN <condition> THEN INTO <table>."))
 		}
 		// Each WHEN must contain a THEN INTO before the next WHEN.
 		for k, w := range whenIdxs {
@@ -2831,19 +2830,19 @@ func validateInsertMultiTable(keyword string, stripped string, r StatementRange)
 			}
 			if !hasKWPair(sig[w:end], stripped, "THEN", "INTO") {
 				markers = append(markers, diagMarkerSpan(r,
-					"WHEN branch must contain INTO clause. Use WHEN <condition> THEN INTO <table>.", 4))
+					"WHEN branch must contain INTO clause. Use WHEN <condition> THEN INTO <table>."))
 			}
 		}
 	} else if !hasInto {
 		// Unconditional form: require at least one INTO.
 		return append(markers, diagMarkerSpan(r,
-			"INSERT "+keyword+" requires at least one INTO clause.", 4))
+			"INSERT "+keyword+" requires at least one INTO clause."))
 	}
 
 	// Trailing SELECT is mandatory for all multi-table inserts.
 	if trailingSelectIdx < 0 {
 		markers = append(markers, diagMarkerSpan(r,
-			"INSERT "+keyword+" requires a source SELECT at the end of the statement.", 4))
+			"INSERT "+keyword+" requires a source SELECT at the end of the statement."))
 	}
 
 	return markers
@@ -2879,7 +2878,7 @@ func validateInsertOverwrite(stripped string, r StatementRange) []DiagMarker {
 	// sig[0]=INSERT, sig[1]=OVERWRITE — check sig[2] for INTO.
 	if len(sig) < 3 || tokUpper(sig[2], stripped) != "INTO" {
 		markers = append(markers, diagMarkerSpan(r,
-			"INSERT OVERWRITE requires INTO. Use INSERT OVERWRITE INTO <table>.", 4))
+			"INSERT OVERWRITE requires INTO. Use INSERT OVERWRITE INTO <table>."))
 		return markers
 	}
 
@@ -2908,7 +2907,7 @@ func validateInsertOverwrite(stripped string, r StatementRange) []DiagMarker {
 	}
 	if !hasSource {
 		markers = append(markers, diagMarkerSpan(r,
-			"INSERT OVERWRITE INTO requires a source SELECT or VALUES clause.", 4))
+			"INSERT OVERWRITE INTO requires a source SELECT or VALUES clause."))
 	}
 
 	return markers
@@ -3264,7 +3263,7 @@ func validateProperties(s string, validProps string, r StatementRange, markers *
 			sig[i+1].Kind == sqltok.Operator && sig[i+1].Text(s) == "=" {
 			key := sig[i].Text(s)
 			if !valid[strings.ToUpper(key)] {
-				*markers = append(*markers, diagMarkerSpan(r, fmt.Sprintf("Unexpected property '%s' in statement.", key), 4))
+				*markers = append(*markers, diagMarkerSpan(r, fmt.Sprintf("Unexpected property '%s' in statement.", key)))
 			}
 		}
 	}
@@ -3304,7 +3303,7 @@ func validateCreateAlert(parseText string, r StatementRange) []DiagMarker {
 
 	// 2. Mandatory IF (EXISTS (...))
 	if ifExistsIdx < 0 {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory IF (EXISTS (...)) clause in CREATE ALERT statement.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory IF (EXISTS (...)) clause in CREATE ALERT statement."))
 	}
 
 	// 3. Mandatory THEN — must appear at paren depth 0 after the IF clause.
@@ -3327,7 +3326,7 @@ func validateCreateAlert(parseText string, r StatementRange) []DiagMarker {
 			}
 		}
 		if !hasThen {
-			markers = append(markers, diagMarkerSpan(r, "Missing mandatory THEN keyword in CREATE ALERT statement.", 4))
+			markers = append(markers, diagMarkerSpan(r, "Missing mandatory THEN keyword in CREATE ALERT statement."))
 		}
 	}
 
@@ -3337,12 +3336,12 @@ func validateCreateAlert(parseText string, r StatementRange) []DiagMarker {
 		preambleSig = sig[:ifExistsIdx]
 	}
 	if !hasKWAssign(preambleSig, stripped, "WAREHOUSE") {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory WAREHOUSE property in CREATE ALERT statement.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory WAREHOUSE property in CREATE ALERT statement."))
 	}
 
 	// 5. Mandatory SCHEDULE
 	if !hasKWAssign(preambleSig, stripped, "SCHEDULE") {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory SCHEDULE property in CREATE ALERT statement.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory SCHEDULE property in CREATE ALERT statement."))
 	}
 
 	// 6. Validate properties
@@ -3379,7 +3378,7 @@ func validateCreateNetworkPolicy(parseText string, r StatementRange) []DiagMarke
 	allowedRulesContent := findKWAssignParenContent(sig, stripped, "ALLOWED_NETWORK_RULE_LIST")
 	hasAllowedRules := allowedRulesContent != "" && networkPolicyListHasEntries(allowedRulesContent)
 	if !hasAllowedIP && !hasAllowedRules {
-		markers = append(markers, diagMarkerSpan(r, "Network policy has no effect: at least one of ALLOWED_IP_LIST or ALLOWED_NETWORK_RULE_LIST must be specified and non-empty.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Network policy has no effect: at least one of ALLOWED_IP_LIST or ALLOWED_NETWORK_RULE_LIST must be specified and non-empty."))
 	}
 
 	// 3. Validate IP lists and collect IPs for overlap check.
@@ -3404,8 +3403,7 @@ func validateCreateNetworkPolicy(parseText string, r StatementRange) []DiagMarke
 			}
 			if !isValidIPv4CIDR(entry) {
 				markers = append(markers, diagMarkerSpan(r,
-					fmt.Sprintf("Invalid IPv4 address or CIDR '%s' in %s. Expected an IPv4 address, optionally with a CIDR prefix (e.g. 192.168.0.0/24 or 10.0.0.1/32). IPv6 addresses must be added via ALLOWED_NETWORK_RULE_LIST.", entry, listKind),
-					4))
+					fmt.Sprintf("Invalid IPv4 address or CIDR '%s' in %s. Expected an IPv4 address, optionally with a CIDR prefix (e.g. 192.168.0.0/24 or 10.0.0.1/32). IPv6 addresses must be added via ALLOWED_NETWORK_RULE_LIST.", entry, listKind)))
 				continue
 			}
 			if listKind == "ALLOWED_IP_LIST" {
@@ -3426,8 +3424,7 @@ func validateCreateNetworkPolicy(parseText string, r StatementRange) []DiagMarke
 		for _, ip := range blockedIPs {
 			if allowedSet[ip] {
 				markers = append(markers, diagMarkerSpan(r,
-					fmt.Sprintf("IP '%s' appears in both ALLOWED_IP_LIST and BLOCKED_IP_LIST.", ip),
-					4))
+					fmt.Sprintf("IP '%s' appears in both ALLOWED_IP_LIST and BLOCKED_IP_LIST.", ip)))
 			}
 		}
 	}
@@ -3506,14 +3503,14 @@ func validateCreateSessionPolicy(parseText string, r StatementRange) []DiagMarke
 	// 2. Validate SESSION_IDLE_TIMEOUT_MINS range (0–56400).
 	if v, ok := findKWAssignInt(sig, stripped, "SESSION_IDLE_TIMEOUT_MINS"); ok {
 		if v < 0 || v > 56400 {
-			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("SESSION_IDLE_TIMEOUT_MINS value %d is out of range (0–56400). Use 0 to disable the timeout.", v), 4))
+			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("SESSION_IDLE_TIMEOUT_MINS value %d is out of range (0–56400). Use 0 to disable the timeout.", v)))
 		}
 	}
 
 	// 3. Validate SESSION_UI_IDLE_TIMEOUT_MINS range (0–56400).
 	if v, ok := findKWAssignInt(sig, stripped, "SESSION_UI_IDLE_TIMEOUT_MINS"); ok {
 		if v < 0 || v > 56400 {
-			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("SESSION_UI_IDLE_TIMEOUT_MINS value %d is out of range (0–56400). Use 0 to disable the timeout.", v), 4))
+			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("SESSION_UI_IDLE_TIMEOUT_MINS value %d is out of range (0–56400). Use 0 to disable the timeout.", v)))
 		}
 	}
 
@@ -3572,10 +3569,10 @@ func validateCreatePasswordPolicy(parseText string, r StatementRange) []DiagMark
 		values[p.name] = v
 		if v < p.min {
 			msg := fmt.Sprintf("%s value %d is below the minimum (%d).", p.name, v, p.min)
-			markers = append(markers, diagMarkerSpan(r, msg, 4))
+			markers = append(markers, diagMarkerSpan(r, msg))
 		} else if p.max >= 0 && v > p.max {
 			msg := fmt.Sprintf("%s value %d exceeds the maximum (%d).", p.name, v, p.max)
-			markers = append(markers, diagMarkerSpan(r, msg, 4))
+			markers = append(markers, diagMarkerSpan(r, msg))
 		}
 	}
 
@@ -3584,15 +3581,13 @@ func validateCreatePasswordPolicy(parseText string, r StatementRange) []DiagMark
 	maxLen, hasMaxLen := values["PASSWORD_MAX_LENGTH"]
 	if hasMinLen && hasMaxLen && maxLen < minLen {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("PASSWORD_MAX_LENGTH (%d) must be greater than or equal to PASSWORD_MIN_LENGTH (%d).", maxLen, minLen),
-			4))
+			fmt.Sprintf("PASSWORD_MAX_LENGTH (%d) must be greater than or equal to PASSWORD_MIN_LENGTH (%d).", maxLen, minLen)))
 	}
 	minAge, hasMinAge := values["PASSWORD_MIN_AGE_DAYS"]
 	maxAge, hasMaxAge := values["PASSWORD_MAX_AGE_DAYS"]
 	if hasMinAge && hasMaxAge && maxAge > 0 && minAge > maxAge {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("PASSWORD_MIN_AGE_DAYS (%d) must be less than or equal to PASSWORD_MAX_AGE_DAYS (%d).", minAge, maxAge),
-			4))
+			fmt.Sprintf("PASSWORD_MIN_AGE_DAYS (%d) must be less than or equal to PASSWORD_MAX_AGE_DAYS (%d).", minAge, maxAge)))
 	}
 
 	// 4. Validate property keys.
@@ -3624,13 +3619,13 @@ func validateCreateRowAccessPolicy(parseText string, r StatementRange) []DiagMar
 
 	// 2. Mandatory AS (<arg_name> <arg_type> [, ...]) parameter list.
 	if asIdx < 0 {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory AS (<arg_name> <arg_type> [, ...]) parameter list in CREATE ROW ACCESS POLICY.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory AS (<arg_name> <arg_type> [, ...]) parameter list in CREATE ROW ACCESS POLICY."))
 	} else {
 		// Extract content inside AS ( ... ) respecting paren depth.
 		paramContent := extractParenContentTok(sig, stripped, asIdx)
 		paramContent = strings.TrimSpace(paramContent)
 		if paramContent == "" {
-			markers = append(markers, diagMarkerSpan(r, "Row access policy parameter list must declare at least one argument.", 4))
+			markers = append(markers, diagMarkerSpan(r, "Row access policy parameter list must declare at least one argument."))
 		} else {
 			// Validate each parameter's declared data type.
 			validTypes := make(map[string]bool)
@@ -3652,7 +3647,7 @@ func validateCreateRowAccessPolicy(parseText string, r StatementRange) []DiagMar
 					typeName := strings.ToUpper(rawType)
 					if !validTypes[typeName] {
 						markers = append(markers, diagMarkerSpan(r,
-							fmt.Sprintf("Unknown data type '%s' in row access policy parameter.", typeName), 4))
+							fmt.Sprintf("Unknown data type '%s' in row access policy parameter.", typeName)))
 					}
 				}
 			}
@@ -3661,12 +3656,12 @@ func validateCreateRowAccessPolicy(parseText string, r StatementRange) []DiagMar
 
 	// 3. Mandatory RETURNS BOOLEAN clause.
 	if !hasKWPair(sig, stripped, "RETURNS", "BOOLEAN") {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory RETURNS BOOLEAN clause in CREATE ROW ACCESS POLICY.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory RETURNS BOOLEAN clause in CREATE ROW ACCESS POLICY."))
 	}
 
 	// 4. Mandatory -> separator between signature and body.
 	if !hasKWPairArrow(sig, stripped, "RETURNS", "BOOLEAN") {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory '->' separator between signature and body in CREATE ROW ACCESS POLICY.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory '->' separator between signature and body in CREATE ROW ACCESS POLICY."))
 	}
 
 	return markers
@@ -3719,17 +3714,17 @@ func validateCreateAggregationPolicy(parseText string, r StatementRange) []DiagM
 
 	// 2. Mandatory AS () parameter list.
 	if asIdx < 0 {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory AS () clause in CREATE AGGREGATION POLICY.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory AS () clause in CREATE AGGREGATION POLICY."))
 	}
 
 	// 3. Mandatory RETURNS AGGREGATION_CONSTRAINT clause.
 	if !hasKWPair(sig, stripped, "RETURNS", "AGGREGATION_CONSTRAINT") {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory RETURNS AGGREGATION_CONSTRAINT clause in CREATE AGGREGATION POLICY.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory RETURNS AGGREGATION_CONSTRAINT clause in CREATE AGGREGATION POLICY."))
 	}
 
 	// 4. Mandatory -> separator between signature and body.
 	if !hasKWPairArrow(sig, stripped, "RETURNS", "AGGREGATION_CONSTRAINT") {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory '->' separator between signature and body in CREATE AGGREGATION POLICY.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory '->' separator between signature and body in CREATE AGGREGATION POLICY."))
 	}
 
 	// 5. Validate MIN_GROUP_SIZE range (1–1 000 000) if present.
@@ -3737,7 +3732,7 @@ func validateCreateAggregationPolicy(parseText string, r StatementRange) []DiagM
 	if val, ok := findKWFatArrowInt(sig, stripped, "MIN_GROUP_SIZE"); ok {
 		if val < 1 || val > 1000000 {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("MIN_GROUP_SIZE (%d) must be between 1 and 1000000.", val), 4))
+				fmt.Sprintf("MIN_GROUP_SIZE (%d) must be between 1 and 1000000.", val)))
 		}
 	}
 
@@ -3767,17 +3762,17 @@ func validateCreateProjectionPolicy(parseText string, r StatementRange) []DiagMa
 
 	// 2. Mandatory AS () parameter list.
 	if asIdx < 0 {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory AS () clause in CREATE PROJECTION POLICY.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory AS () clause in CREATE PROJECTION POLICY."))
 	}
 
 	// 3. Mandatory RETURNS PROJECTION_CONSTRAINT clause.
 	if !hasKWPair(sig, stripped, "RETURNS", "PROJECTION_CONSTRAINT") {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory RETURNS PROJECTION_CONSTRAINT clause in CREATE PROJECTION POLICY.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory RETURNS PROJECTION_CONSTRAINT clause in CREATE PROJECTION POLICY."))
 	}
 
 	// 4. Mandatory -> separator between signature and body.
 	if !hasKWPairArrow(sig, stripped, "RETURNS", "PROJECTION_CONSTRAINT") {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory '->' separator between signature and body in CREATE PROJECTION POLICY.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory '->' separator between signature and body in CREATE PROJECTION POLICY."))
 	}
 
 	// 5. Validate ALLOW value if present: must be 'none' or 'transformation'.
@@ -3785,7 +3780,7 @@ func validateCreateProjectionPolicy(parseText string, r StatementRange) []DiagMa
 		lower := strings.ToLower(val)
 		if lower != "none" && lower != "transformation" {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("ALLOW value '%s' is invalid; must be 'none' or 'transformation'.", val), 4))
+				fmt.Sprintf("ALLOW value '%s' is invalid; must be 'none' or 'transformation'.", val)))
 		}
 	}
 
@@ -3809,7 +3804,7 @@ func validateAlterAggregationOrProjectionPolicy(parseText string, r StatementRan
 
 	if !hasSetBody && !hasSetComment && !hasUnsetComment && !hasRenameTo {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("ALTER %s POLICY requires SET BODY, SET COMMENT, UNSET COMMENT, or RENAME TO.", policyType), 4))
+			fmt.Sprintf("ALTER %s POLICY requires SET BODY, SET COMMENT, UNSET COMMENT, or RENAME TO.", policyType)))
 	}
 
 	return markers
@@ -3828,7 +3823,7 @@ func validateDropAggregationOrProjectionPolicy(parseText string, r StatementRang
 	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", policyType, "POLICY")
 	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("DROP %s POLICY requires a policy name.", policyType), 4))
+			fmt.Sprintf("DROP %s POLICY requires a policy name.", policyType)))
 	}
 
 	return markers
@@ -3853,10 +3848,10 @@ func validateCreatePackagesPolicy(parseText string, r StatementRange) []DiagMark
 	// 2. LANGUAGE is mandatory and must be PYTHON.
 	lang, hasLang := findKWFollowedByIdent(sig, stripped, "LANGUAGE")
 	if !hasLang {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory LANGUAGE clause in CREATE PACKAGES POLICY. Only LANGUAGE PYTHON is supported.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory LANGUAGE clause in CREATE PACKAGES POLICY. Only LANGUAGE PYTHON is supported."))
 	} else if strings.ToUpper(lang) != "PYTHON" {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("LANGUAGE '%s' is not supported for PACKAGES POLICY; only PYTHON is allowed.", lang), 4))
+			fmt.Sprintf("LANGUAGE '%s' is not supported for PACKAGES POLICY; only PYTHON is allowed.", lang)))
 	}
 
 	return markers
@@ -3883,7 +3878,7 @@ func validateAlterPackagesPolicy(parseText string, r StatementRange) []DiagMarke
 	}
 	if !anyKnown {
 		markers = append(markers, diagMarkerSpan(r,
-			"ALTER PACKAGES POLICY requires SET ALLOWLIST, SET BLOCKLIST, SET ADDITIONAL_CREATION_BLOCKLIST, SET COMMENT, UNSET ALLOWLIST, UNSET BLOCKLIST, UNSET ADDITIONAL_CREATION_BLOCKLIST, or UNSET COMMENT.", 4))
+			"ALTER PACKAGES POLICY requires SET ALLOWLIST, SET BLOCKLIST, SET ADDITIONAL_CREATION_BLOCKLIST, SET COMMENT, UNSET ALLOWLIST, UNSET BLOCKLIST, UNSET ADDITIONAL_CREATION_BLOCKLIST, or UNSET COMMENT."))
 	}
 
 	return markers
@@ -3900,7 +3895,7 @@ func validateDropPackagesPolicy(parseText string, r StatementRange) []DiagMarker
 	sig := sigTokens(stripped)
 	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", "PACKAGES", "POLICY")
 	if name == "" {
-		markers = append(markers, diagMarkerSpan(r, "DROP PACKAGES POLICY requires a policy name.", 4))
+		markers = append(markers, diagMarkerSpan(r, "DROP PACKAGES POLICY requires a policy name."))
 	}
 
 	return markers
@@ -3923,17 +3918,17 @@ func validateGrant(parseText string, r StatementRange) []DiagMarker {
 		// WITH GRANT OPTION is not valid for role grants.
 		if hasKWSeq(sig, stripped, "WITH", "GRANT", "OPTION") {
 			markers = append(markers, diagMarkerSpan(r,
-				"WITH GRANT OPTION is not valid for GRANT ROLE statements.", 4))
+				"WITH GRANT OPTION is not valid for GRANT ROLE statements."))
 		}
 		// Role grants use TO USER or TO ROLE, never TO TABLE.
 		if hasKWPair(sig, stripped, "TO", "TABLE") {
 			markers = append(markers, diagMarkerSpan(r,
-				"Unexpected syntax: Roles can be granted to other roles or users, but not directly to tables.", 4))
+				"Unexpected syntax: Roles can be granted to other roles or users, but not directly to tables."))
 		}
 		// Must have a grantee.
 		if !hasGrantee(sig, stripped, "TO") {
 			markers = append(markers, diagMarkerSpan(r,
-				"GRANT ROLE requires a TO ROLE or TO USER clause.", 4))
+				"GRANT ROLE requires a TO ROLE or TO USER clause."))
 		}
 		return markers
 	}
@@ -3947,13 +3942,13 @@ func validateGrant(parseText string, r StatementRange) []DiagMarker {
 	// ── Grantee required ──────────────────────────────────────────────────────
 	if !hasGrantee(sig, stripped, "TO") {
 		markers = append(markers, diagMarkerSpan(r,
-			"GRANT statement requires a grantee (TO ROLE, TO DATABASE ROLE, or TO USER).", 4))
+			"GRANT statement requires a grantee (TO ROLE, TO DATABASE ROLE, or TO USER)."))
 	}
 
 	// ── ON ALL / ON FUTURE requires IN SCHEMA or IN DATABASE ─────────────────
 	if hasKWPairAny(sig, stripped, "ON", []string{"ALL", "FUTURE"}) && !hasKWPairAny(sig, stripped, "IN", []string{"SCHEMA", "DATABASE"}) {
 		markers = append(markers, diagMarkerSpan(r,
-			"ON ALL/FUTURE <objects> requires an IN SCHEMA or IN DATABASE qualifier.", 4))
+			"ON ALL/FUTURE <objects> requires an IN SCHEMA or IN DATABASE qualifier."))
 	}
 
 	// ── Privilege validation for known object types ───────────────────────────
@@ -3969,7 +3964,7 @@ func validateGrant(parseText string, r StatementRange) []DiagMarker {
 					msg = "'GRANT USAGE ON ROLE' is not valid Snowflake syntax. " +
 						"Use 'GRANT ROLE <name> TO ROLE/USER' to assign a role."
 				}
-				markers = append(markers, diagMarkerSpan(r, msg, 4))
+				markers = append(markers, diagMarkerSpan(r, msg))
 			}
 		}
 	}
@@ -3993,7 +3988,7 @@ func validateRevoke(parseText string, r StatementRange) []DiagMarker {
 	if isRevokeRole {
 		if !hasGrantee(sig, stripped, "FROM") {
 			markers = append(markers, diagMarkerSpan(r,
-				"REVOKE ROLE requires a FROM ROLE or FROM USER clause.", 4))
+				"REVOKE ROLE requires a FROM ROLE or FROM USER clause."))
 		}
 		return markers
 	}
@@ -4008,7 +4003,7 @@ func validateRevoke(parseText string, r StatementRange) []DiagMarker {
 	// ── ON ALL / ON FUTURE requires IN SCHEMA or IN DATABASE ─────────────────
 	if hasKWPairAny(sig, stripped, "ON", []string{"ALL", "FUTURE"}) && !hasKWPairAny(sig, stripped, "IN", []string{"SCHEMA", "DATABASE"}) {
 		markers = append(markers, diagMarkerSpan(r,
-			"ON ALL/FUTURE <objects> requires an IN SCHEMA or IN DATABASE qualifier.", 4))
+			"ON ALL/FUTURE <objects> requires an IN SCHEMA or IN DATABASE qualifier."))
 	}
 
 	// ── CASCADE and RESTRICT are mutually exclusive ───────────────────────────
@@ -4016,13 +4011,13 @@ func validateRevoke(parseText string, r StatementRange) []DiagMarker {
 	hasRestrict := hasKW(sig, stripped, "RESTRICT")
 	if hasCascade && hasRestrict {
 		markers = append(markers, diagMarkerSpan(r,
-			"CASCADE and RESTRICT are mutually exclusive in REVOKE statement.", 4))
+			"CASCADE and RESTRICT are mutually exclusive in REVOKE statement."))
 	}
 
 	// ── FROM clause required ──────────────────────────────────────────────────
 	if !hasGrantee(sig, stripped, "FROM") {
 		markers = append(markers, diagMarkerSpan(r,
-			"REVOKE statement requires a FROM ROLE, FROM DATABASE ROLE, or FROM USER clause.", 4))
+			"REVOKE statement requires a FROM ROLE, FROM DATABASE ROLE, or FROM USER clause."))
 	}
 
 	// ── Privilege validation for known object types ───────────────────────────
@@ -4038,7 +4033,7 @@ func validateRevoke(parseText string, r StatementRange) []DiagMarker {
 					msg = "'REVOKE USAGE ON ROLE' is not valid Snowflake syntax. " +
 						"Use 'REVOKE ROLE <name> FROM ROLE/USER' to revoke a role."
 				}
-				markers = append(markers, diagMarkerSpan(r, msg, 4))
+				markers = append(markers, diagMarkerSpan(r, msg))
 			}
 		}
 	}
@@ -4081,14 +4076,14 @@ func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
 
 	// Expect: COPY INTO <target> ...
 	if len(sig) < 3 || tokUpper(sig[0], parseText) != "COPY" || tokUpper(sig[1], parseText) != "INTO" {
-		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in COPY INTO statement.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in COPY INTO statement."))
 		return markers
 	}
 
 	// Read target: could be ident path, @stage, or 'string literal'.
 	targetIdx := 2
 	if targetIdx >= len(sig) {
-		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in COPY INTO statement.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in COPY INTO statement."))
 		return markers
 	}
 
@@ -4133,7 +4128,7 @@ func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
 
 	// FROM clause is mandatory.
 	if afterTargetIdx >= len(sig) || tokUpper(sig[afterTargetIdx], parseText) != "FROM" {
-		markers = append(markers, diagMarkerSpan(r, "COPY INTO statement is missing the mandatory FROM clause.", 4))
+		markers = append(markers, diagMarkerSpan(r, "COPY INTO statement is missing the mandatory FROM clause."))
 		return markers
 	}
 
@@ -4171,7 +4166,7 @@ func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
 		hasFiles := hasKWAssign(propSig, parseText, "FILES")
 		hasPattern := hasKWAssign(propSig, parseText, "PATTERN")
 		if hasFiles && hasPattern {
-			markers = append(markers, diagMarkerSpan(r, "FILES and PATTERN are mutually exclusive in COPY INTO statement.", 4))
+			markers = append(markers, diagMarkerSpan(r, "FILES and PATTERN are mutually exclusive in COPY INTO statement."))
 		}
 
 		// FILE_FORMAT
@@ -4181,7 +4176,7 @@ func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
 			hasFFName := hasKWAssign(ffSig, ffContent, "FORMAT_NAME")
 			hasFFType := hasKWAssign(ffSig, ffContent, "TYPE")
 			if hasFFName && hasFFType {
-				markers = append(markers, diagMarkerSpan(r, "FORMAT_NAME and inline TYPE are mutually exclusive in FILE_FORMAT clause.", 4))
+				markers = append(markers, diagMarkerSpan(r, "FORMAT_NAME and inline TYPE are mutually exclusive in FILE_FORMAT clause."))
 			}
 			if hasFFType {
 				typeVal, ok := findKWAssignStr(ffSig, ffContent, "TYPE")
@@ -4194,7 +4189,7 @@ func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
 					"ORC": true, "PARQUET": true, "XML": true,
 				}
 				if !validTypes[typeUpper] {
-					markers = append(markers, diagMarkerSpan(r, "Invalid FILE_FORMAT TYPE. Must be CSV, JSON, AVRO, ORC, PARQUET, or XML.", 4))
+					markers = append(markers, diagMarkerSpan(r, "Invalid FILE_FORMAT TYPE. Must be CSV, JSON, AVRO, ORC, PARQUET, or XML."))
 				}
 			}
 		}
@@ -4204,7 +4199,7 @@ func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
 			val := strings.ToUpper(onErrVal)
 			if val != "CONTINUE" && val != "ABORT_STATEMENT" && val != "SKIP_FILE" &&
 				!isValidSkipFileValue(val) {
-				markers = append(markers, diagMarkerSpan(r, "Invalid ON_ERROR value. Must be CONTINUE, SKIP_FILE, SKIP_FILE_<n>, SKIP_FILE_<n>%, or ABORT_STATEMENT.", 4))
+				markers = append(markers, diagMarkerSpan(r, "Invalid ON_ERROR value. Must be CONTINUE, SKIP_FILE, SKIP_FILE_<n>, SKIP_FILE_<n>%, or ABORT_STATEMENT."))
 			}
 		}
 
@@ -4215,7 +4210,7 @@ func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
 		if matchVal, ok := findKWAssignIdent(propSig, parseText, "MATCH_BY_COLUMN_NAME"); ok {
 			val := strings.ToUpper(matchVal)
 			if val != "CASE_SENSITIVE" && val != "CASE_INSENSITIVE" && val != "NONE" {
-				markers = append(markers, diagMarkerSpan(r, "Invalid MATCH_BY_COLUMN_NAME value. Must be CASE_SENSITIVE, CASE_INSENSITIVE, or NONE.", 4))
+				markers = append(markers, diagMarkerSpan(r, "Invalid MATCH_BY_COLUMN_NAME value. Must be CASE_SENSITIVE, CASE_INSENSITIVE, or NONE."))
 			}
 		}
 	} else {
@@ -4227,11 +4222,11 @@ func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
 
 		if mfsVal, ok := findKWAssignIdent(propSig, parseText, "MAX_FILE_SIZE"); ok {
 			if !isPositiveIntStr(mfsVal) {
-				markers = append(markers, diagMarkerSpan(r, "MAX_FILE_SIZE must be a positive integer.", 4))
+				markers = append(markers, diagMarkerSpan(r, "MAX_FILE_SIZE must be a positive integer."))
 			}
 		} else if mfsVal, ok := findKWAssignInt(propSig, parseText, "MAX_FILE_SIZE"); ok {
 			if mfsVal <= 0 {
-				markers = append(markers, diagMarkerSpan(r, "MAX_FILE_SIZE must be a positive integer.", 4))
+				markers = append(markers, diagMarkerSpan(r, "MAX_FILE_SIZE must be a positive integer."))
 			}
 		}
 	}
@@ -4293,7 +4288,7 @@ func validateBoolPropTok(sig []sqltok.Token, sql, prop string, r StatementRange,
 		if sig[i+1].Kind == sqltok.Operator && sig[i+1].Text(sql) == "=" {
 			val := strings.ToUpper(sig[i+2].Text(sql))
 			if val != "TRUE" && val != "FALSE" {
-				*markers = append(*markers, diagMarkerSpan(r, fmt.Sprintf("%s must be TRUE or FALSE.", prop), 4))
+				*markers = append(*markers, diagMarkerSpan(r, fmt.Sprintf("%s must be TRUE or FALSE.", prop)))
 			}
 			return
 		}
@@ -4311,16 +4306,16 @@ func validateCreateIcebergTable(parseText string, r StatementRange) []DiagMarker
 
 	// Rule: BASE_LOCATION is mandatory for all Iceberg tables.
 	if val, ok := props["BASE_LOCATION"]; !ok || strings.TrimSpace(strings.Trim(val, "'")) == "" {
-		markers = append(markers, diagMarkerSpan(r, "BASE_LOCATION is mandatory for all Iceberg tables and cannot be empty.", 4))
+		markers = append(markers, diagMarkerSpan(r, "BASE_LOCATION is mandatory for all Iceberg tables and cannot be empty."))
 	}
 
 	// Rule: EXTERNAL_VOLUME and CATALOG are mandatory for non-Snowflake catalogs.
 	if !isSnowflakeCatalog {
 		if val, ok := props["EXTERNAL_VOLUME"]; !ok || strings.TrimSpace(strings.Trim(val, "'")) == "" {
-			markers = append(markers, diagMarkerSpan(r, "EXTERNAL_VOLUME is mandatory for Iceberg tables with external catalogs.", 4))
+			markers = append(markers, diagMarkerSpan(r, "EXTERNAL_VOLUME is mandatory for Iceberg tables with external catalogs."))
 		}
 		if val, ok := props["CATALOG"]; !ok || strings.TrimSpace(strings.Trim(val, "'")) == "" {
-			markers = append(markers, diagMarkerSpan(r, "CATALOG is mandatory for Iceberg tables with external catalogs.", 4))
+			markers = append(markers, diagMarkerSpan(r, "CATALOG is mandatory for Iceberg tables with external catalogs."))
 		}
 	}
 
@@ -4333,7 +4328,7 @@ func validateCreateIcebergTable(parseText string, r StatementRange) []DiagMarker
 			break // past the preamble
 		}
 		if u == "TRANSIENT" {
-			markers = append(markers, diagMarkerSpan(r, "TRANSIENT is not supported for Iceberg tables.", 4))
+			markers = append(markers, diagMarkerSpan(r, "TRANSIENT is not supported for Iceberg tables."))
 			break
 		}
 	}
@@ -4341,10 +4336,10 @@ func validateCreateIcebergTable(parseText string, r StatementRange) []DiagMarker
 	// Rule: CATALOG_TABLE_NAME and CATALOG_NAMESPACE are only valid for non-Snowflake catalogs.
 	if isSnowflakeCatalog {
 		if _, ok := props["CATALOG_TABLE_NAME"]; ok {
-			markers = append(markers, diagMarkerSpan(r, "CATALOG_TABLE_NAME is only valid when CATALOG is not 'SNOWFLAKE'.", 4))
+			markers = append(markers, diagMarkerSpan(r, "CATALOG_TABLE_NAME is only valid when CATALOG is not 'SNOWFLAKE'."))
 		}
 		if _, ok := props["CATALOG_NAMESPACE"]; ok {
-			markers = append(markers, diagMarkerSpan(r, "CATALOG_NAMESPACE is only valid when CATALOG is not 'SNOWFLAKE'.", 4))
+			markers = append(markers, diagMarkerSpan(r, "CATALOG_NAMESPACE is only valid when CATALOG is not 'SNOWFLAKE'."))
 		}
 	}
 
@@ -4356,31 +4351,31 @@ func validateCreateIcebergTable(parseText string, r StatementRange) []DiagMarker
 
 	// Rule: OR REPLACE is not supported for external catalogs.
 	if !isSnowflakeCatalog && hasKWPair(sig, stripped, "OR", "REPLACE") {
-		markers = append(markers, diagMarkerSpan(r, "OR REPLACE is not supported for Iceberg tables backed by external catalogs.", 4))
+		markers = append(markers, diagMarkerSpan(r, "OR REPLACE is not supported for Iceberg tables backed by external catalogs."))
 	}
 
 	// Rule: CLUSTER BY is only for Snowflake-managed tables.
 	if !isSnowflakeCatalog && hasKWPair(sig, stripped, "CLUSTER", "BY") {
-		markers = append(markers, diagMarkerSpan(r, "CLUSTER BY is supported only for Snowflake-managed Iceberg tables.", 4))
+		markers = append(markers, diagMarkerSpan(r, "CLUSTER BY is supported only for Snowflake-managed Iceberg tables."))
 	}
 
 	// Rule: DATA_RETENTION_TIME_IN_DAYS is only for Snowflake-managed tables.
 	if !isSnowflakeCatalog && hasKW(sig, stripped, "DATA_RETENTION_TIME_IN_DAYS") {
-		markers = append(markers, diagMarkerSpan(r, "DATA_RETENTION_TIME_IN_DAYS applies only to Snowflake-managed Iceberg tables.", 4))
+		markers = append(markers, diagMarkerSpan(r, "DATA_RETENTION_TIME_IN_DAYS applies only to Snowflake-managed Iceberg tables."))
 	}
 
 	// Value validation for specific properties
 	if val, ok := props["REPLACE_INVALID_CHARACTERS"]; ok && !isBool(val) {
-		markers = append(markers, diagMarkerSpan(r, "REPLACE_INVALID_CHARACTERS must be TRUE or FALSE.", 4))
+		markers = append(markers, diagMarkerSpan(r, "REPLACE_INVALID_CHARACTERS must be TRUE or FALSE."))
 	}
 	if val, ok := props["AUTO_REFRESH"]; ok && !isBool(val) {
-		markers = append(markers, diagMarkerSpan(r, "AUTO_REFRESH must be TRUE or FALSE.", 4))
+		markers = append(markers, diagMarkerSpan(r, "AUTO_REFRESH must be TRUE or FALSE."))
 	}
 	if val, ok := props["REFRESH_MODE"]; ok && !isValidEnumValue(val, "AUTO", "FULL", "INCREMENTAL") {
-		markers = append(markers, diagMarkerSpan(r, "Invalid REFRESH_MODE value. Must be AUTO, FULL, or INCREMENTAL.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Invalid REFRESH_MODE value. Must be AUTO, FULL, or INCREMENTAL."))
 	}
 	if val, ok := props["INITIALIZE"]; ok && !isValidEnumValue(val, "ON_CREATE", "ON_SCHEDULE") {
-		markers = append(markers, diagMarkerSpan(r, "Invalid INITIALIZE value. Must be ON_CREATE or ON_SCHEDULE.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Invalid INITIALIZE value. Must be ON_CREATE or ON_SCHEDULE."))
 	}
 
 	return markers
@@ -4430,7 +4425,7 @@ func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker 
 	hybridSig := sigTokens(stripped)
 
 	if hasKWPair(hybridSig, stripped, "OR", "REPLACE") {
-		markers = append(markers, diagMarkerSpan(r, "OR REPLACE is not supported for hybrid tables.", 4))
+		markers = append(markers, diagMarkerSpan(r, "OR REPLACE is not supported for hybrid tables."))
 	}
 
 	if marker, conflict := checkOrReplaceConflictTok(hybridSig, stripped, r, "CREATE HYBRID TABLE"); conflict {
@@ -4438,28 +4433,28 @@ func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker 
 	}
 
 	if hasKW(hybridSig, stripped, "TRANSIENT") {
-		markers = append(markers, diagMarkerSpan(r, "TRANSIENT is not supported for hybrid tables.", 4))
+		markers = append(markers, diagMarkerSpan(r, "TRANSIENT is not supported for hybrid tables."))
 	}
 
 	if hasKWPair(hybridSig, stripped, "CLUSTER", "BY") {
-		markers = append(markers, diagMarkerSpan(r, "CLUSTER BY is not supported on hybrid tables.", 4))
+		markers = append(markers, diagMarkerSpan(r, "CLUSTER BY is not supported on hybrid tables."))
 	}
 
 	if hasKW(hybridSig, stripped, "DATA_RETENTION_TIME_IN_DAYS") {
-		markers = append(markers, diagMarkerSpan(r, "DATA_RETENTION_TIME_IN_DAYS is not applicable to hybrid tables.", 4))
+		markers = append(markers, diagMarkerSpan(r, "DATA_RETENTION_TIME_IN_DAYS is not applicable to hybrid tables."))
 	}
 
 	if hasKW(hybridSig, stripped, "CHANGE_TRACKING") {
-		markers = append(markers, diagMarkerSpan(r, "CHANGE_TRACKING is not supported on hybrid tables.", 4))
+		markers = append(markers, diagMarkerSpan(r, "CHANGE_TRACKING is not supported on hybrid tables."))
 	}
 
 	if hasKWPair(hybridSig, stripped, "COPY", "GRANTS") {
-		markers = append(markers, diagMarkerSpan(r, "COPY GRANTS is not supported on hybrid tables.", 4))
+		markers = append(markers, diagMarkerSpan(r, "COPY GRANTS is not supported on hybrid tables."))
 	}
 
 	preambleEnd := findPreambleEnd(hybridSig, stripped, "TABLE")
 	if preambleEnd < 0 {
-		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE HYBRID TABLE statement.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE HYBRID TABLE statement."))
 		return markers
 	}
 
@@ -4545,13 +4540,13 @@ func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker 
 			}
 
 			if !hasPK {
-				markers = append(markers, diagMarkerSpan(r, "Hybrid tables must have a PRIMARY KEY constraint.", 4))
+				markers = append(markers, diagMarkerSpan(r, "Hybrid tables must have a PRIMARY KEY constraint."))
 			}
 
 			// Check for NOT NULL on all PK columns
 			for pkCol := range pkCols {
 				if !colHasNotNull[pkCol] {
-					markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Primary key columns in a hybrid table must be NOT NULL (column '%s' omits it).", pkCol), 4))
+					markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Primary key columns in a hybrid table must be NOT NULL (column '%s' omits it).", pkCol)))
 				}
 			}
 		}
@@ -4671,11 +4666,11 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 	}
 
 	if hasKW(ffSig, stripped, "TRANSIENT") {
-		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax: TRANSIENT is not supported for FILE FORMAT objects.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax: TRANSIENT is not supported for FILE FORMAT objects."))
 	}
 
 	if hasKW(ffSig, stripped, "TEMPORARY") || hasKW(ffSig, stripped, "TEMP") {
-		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax: TEMPORARY is not supported for FILE FORMAT objects.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax: TEMPORARY is not supported for FILE FORMAT objects."))
 	}
 
 	// 1. Extract all properties by scanning tokens for KEY = VALUE patterns.
@@ -4723,14 +4718,14 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 	case "XML":
 		allowed = fileFormatAllowedXml
 	default:
-		markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Invalid TYPE '%s' for FILE FORMAT. Must be CSV, JSON, AVRO, ORC, PARQUET, or XML.", rawType), 4))
+		markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Invalid TYPE '%s' for FILE FORMAT. Must be CSV, JSON, AVRO, ORC, PARQUET, or XML.", rawType)))
 		return markers
 	}
 
 	// 2. Validate property keys and values
 	for _, p := range props {
 		if !allowed[p.key] {
-			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Property '%s' is not applicable for %s file format.", p.key, rawType), 4))
+			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Property '%s' is not applicable for %s file format.", p.key, rawType)))
 			continue
 		}
 
@@ -4741,15 +4736,15 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 				val := strings.Trim(p.val, "'")
 				if strings.ToUpper(val) != "NONE" {
 					if len([]rune(val)) == 0 {
-						markers = append(markers, diagMarkerSpan(r, "FIELD_DELIMITER cannot be empty.", 4))
+						markers = append(markers, diagMarkerSpan(r, "FIELD_DELIMITER cannot be empty."))
 					} else if len([]rune(val)) > 1 && !reFileFormatValidEsc.MatchString(val) {
-						markers = append(markers, diagMarkerSpan(r, "FIELD_DELIMITER must be a single-character string or 'NONE'.", 4))
+						markers = append(markers, diagMarkerSpan(r, "FIELD_DELIMITER must be a single-character string or 'NONE'."))
 					}
 				}
 			case "SKIP_HEADER":
 				val := strings.Trim(p.val, "'")
 				if strings.HasPrefix(val, "-") {
-					markers = append(markers, diagMarkerSpan(r, "SKIP_HEADER must be a non-negative integer.", 4))
+					markers = append(markers, diagMarkerSpan(r, "SKIP_HEADER must be a non-negative integer."))
 				}
 			}
 		}
@@ -4775,7 +4770,7 @@ func validateCall(parseText string, r StatementRange) []DiagMarker {
 	// 1. Procedure name must be present: CALL <ident_path>
 	if len(sig) < 2 || !isIdent(sig[1]) {
 		markers = append(markers, diagMarkerSpan(r,
-			"Missing procedure name in CALL statement.", 4))
+			"Missing procedure name in CALL statement."))
 		return markers
 	}
 
@@ -4789,7 +4784,7 @@ func validateCall(parseText string, r StatementRange) []DiagMarker {
 	}
 	if !hasParens {
 		markers = append(markers, diagMarkerSpan(r,
-			"CALL statement requires a parenthesised argument list. Use CALL proc_name() even when there are no arguments.", 4))
+			"CALL statement requires a parenthesised argument list. Use CALL proc_name() even when there are no arguments."))
 	}
 
 	// 3. INTO :<variable> — the variable must be prefixed with ':' in scripting contexts.
@@ -4800,7 +4795,7 @@ func validateCall(parseText string, r StatementRange) []DiagMarker {
 			if !strings.HasPrefix(varText, ":") {
 				markers = append(markers, diagMarkerSpan(r, fmt.Sprintf(
 					"INTO variable must be prefixed with ':' in Snowflake Scripting. Use INTO :%s instead of INTO %s.",
-					varText, varText), 4))
+					varText, varText)))
 			}
 			break
 		}
@@ -4851,7 +4846,7 @@ func validateWithProcedureCall(parseText string, r StatementRange) []DiagMarker 
 	afterSig := sigTokens(afterBody)
 	if len(afterSig) == 0 || tokUpper(afterSig[0], afterBody) != "CALL" {
 		markers = append(markers, diagMarkerSpan(r, fmt.Sprintf(
-			"WITH ... AS PROCEDURE block must end with CALL %s(...).", alias), 4))
+			"WITH ... AS PROCEDURE block must end with CALL %s(...).", alias)))
 		return markers
 	}
 
@@ -4881,7 +4876,7 @@ func validateExecuteImmediate(parseText string, r StatementRange) []DiagMarker {
 	// sig[0]=EXECUTE, sig[1]=IMMEDIATE, sig[2]=argument
 	if len(sig) < 3 {
 		markers = append(markers, diagMarkerSpan(r,
-			"EXECUTE IMMEDIATE requires a SQL string argument (string literal, dollar-quoted string, or variable reference).", 4))
+			"EXECUTE IMMEDIATE requires a SQL string argument (string literal, dollar-quoted string, or variable reference)."))
 		return markers
 	}
 
@@ -4936,7 +4931,7 @@ func validateExecuteImmediate(parseText string, r StatementRange) []DiagMarker {
 			}
 			if !hasValidIdent {
 				markers = append(markers, diagMarkerSpan(r,
-					"USING clause in EXECUTE IMMEDIATE must contain at least one bind variable.", 4))
+					"USING clause in EXECUTE IMMEDIATE must contain at least one bind variable."))
 			}
 			break
 		}
@@ -4958,7 +4953,7 @@ func validateExecuteTask(parseText string, r StatementRange) []DiagMarker {
 	// EXECUTE TASK <name> → need at least 3 significant tokens with a non-empty ident.
 	if len(sig) < 3 || !isNonEmptyIdent(sig[2], stripped) {
 		markers = append(markers, diagMarkerSpan(r,
-			"EXECUTE TASK requires a task name. Use EXECUTE TASK <task_name>.", 4))
+			"EXECUTE TASK requires a task name. Use EXECUTE TASK <task_name>."))
 	}
 
 	return markers
@@ -4995,21 +4990,21 @@ func validatePut(parseText string, r StatementRange) []DiagMarker {
 	// 1. file:// source is mandatory.
 	if !hasFileURI {
 		markers = append(markers, diagMarkerSpan(r,
-			"PUT source path must use the file:// prefix (e.g. PUT file:///tmp/data.csv @mystage).", 4))
+			"PUT source path must use the file:// prefix (e.g. PUT file:///tmp/data.csv @mystage)."))
 		return markers
 	}
 
 	// 2. @<stage> destination is mandatory.
 	if atPos < 0 {
 		markers = append(markers, diagMarkerSpan(r,
-			"PUT requires a stage destination (e.g. @mystage or @~/path/).", 4))
+			"PUT requires a stage destination (e.g. @mystage or @~/path/)."))
 		return markers
 	}
 
 	// 3. Verify positional order: PUT file://<path> @<stage>.
 	if fileURIPos > atPos {
 		markers = append(markers, diagMarkerSpan(r,
-			"PUT source and destination are in the wrong order. Correct syntax: PUT file://<path> @<stage>.", 4))
+			"PUT source and destination are in the wrong order. Correct syntax: PUT file://<path> @<stage>."))
 		return markers
 	}
 
@@ -5068,21 +5063,21 @@ func validateGet(parseText string, r StatementRange) []DiagMarker {
 	// 1. @<stage> source is mandatory (GET @stage …).
 	if atPos < 0 {
 		markers = append(markers, diagMarkerSpan(r,
-			"GET requires a stage source (e.g. GET @mystage file:///tmp/).", 4))
+			"GET requires a stage source (e.g. GET @mystage file:///tmp/)."))
 		return markers
 	}
 
 	// 2. file:// destination is mandatory.
 	if fileURIPos < 0 {
 		markers = append(markers, diagMarkerSpan(r,
-			"GET destination path must use the file:// prefix (e.g. GET @mystage file:///tmp/).", 4))
+			"GET destination path must use the file:// prefix (e.g. GET @mystage file:///tmp/)."))
 		return markers
 	}
 
 	// 3. Verify positional order: GET @stage file://<path>.
 	if fileURIPos < atPos {
 		markers = append(markers, diagMarkerSpan(r,
-			"GET requires a stage source (e.g. GET @mystage file:///tmp/).", 4))
+			"GET requires a stage source (e.g. GET @mystage file:///tmp/)."))
 		return markers
 	}
 
@@ -5116,7 +5111,7 @@ func validateList(parseText string, r StatementRange) []DiagMarker {
 	}
 	if !hasAt {
 		markers = append(markers, diagMarkerSpan(r,
-			"LIST (LS) requires a stage argument (e.g. LIST @mystage).", 4))
+			"LIST (LS) requires a stage argument (e.g. LIST @mystage)."))
 	}
 
 	return markers
@@ -5140,7 +5135,7 @@ func validateRemove(parseText string, r StatementRange) []DiagMarker {
 	}
 	if !hasAt {
 		markers = append(markers, diagMarkerSpan(r,
-			"REMOVE (RM) requires a stage argument (e.g. REMOVE @mystage).", 4))
+			"REMOVE (RM) requires a stage argument (e.g. REMOVE @mystage)."))
 	}
 
 	return markers
@@ -5178,14 +5173,14 @@ func validateCreateEventTable(parseText string, r StatementRange) []DiagMarker {
 	// 2. Event table name is required.
 	name, nameIdx := extractNameAfterCreate(sig, stripped, []string{"TRANSIENT"}, "EVENT", "TABLE")
 	if name == "" {
-		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE EVENT TABLE statement.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE EVENT TABLE statement."))
 		return markers
 	}
 
 	// 3. TRANSIENT is not supported for event tables.
 	if hasKW(sig, stripped, "TRANSIENT") {
 		markers = append(markers, diagMarkerSpan(r,
-			"TRANSIENT is not supported for event tables.", 4))
+			"TRANSIENT is not supported for event tables."))
 	}
 
 	// 4. Column definitions are not allowed — event tables have a fixed schema.
@@ -5200,14 +5195,14 @@ func validateCreateEventTable(parseText string, r StatementRange) []DiagMarker {
 		prevUpper := tokUpper(sig[afterName-1], stripped)
 		if prevUpper != "TAG" {
 			markers = append(markers, diagMarkerSpan(r,
-				"Event tables have a fixed schema and do not support column definitions.", 4))
+				"Event tables have a fixed schema and do not support column definitions."))
 		}
 	}
 
 	// 5. CLUSTER BY is not supported for event tables.
 	if hasKWPair(sig, stripped, "CLUSTER", "BY") {
 		markers = append(markers, diagMarkerSpan(r,
-			"CLUSTER BY is not supported for EVENT TABLE.", 4))
+			"CLUSTER BY is not supported for EVENT TABLE."))
 	}
 
 	// 5. Validate property values.
@@ -5215,20 +5210,20 @@ func validateCreateEventTable(parseText string, r StatementRange) []DiagMarker {
 		v, ok := findKWAssignInt(sig, stripped, "DATA_RETENTION_TIME_IN_DAYS")
 		if !ok || v < 0 {
 			markers = append(markers, diagMarkerSpan(r,
-				"DATA_RETENTION_TIME_IN_DAYS must be a non-negative integer.", 4))
+				"DATA_RETENTION_TIME_IN_DAYS must be a non-negative integer."))
 		}
 	}
 	if hasKWAssign(sig, stripped, "MAX_DATA_EXTENSION_TIME_IN_DAYS") {
 		v, ok := findKWAssignInt(sig, stripped, "MAX_DATA_EXTENSION_TIME_IN_DAYS")
 		if !ok || v < 0 {
 			markers = append(markers, diagMarkerSpan(r,
-				"MAX_DATA_EXTENSION_TIME_IN_DAYS must be a non-negative integer.", 4))
+				"MAX_DATA_EXTENSION_TIME_IN_DAYS must be a non-negative integer."))
 		}
 	}
 	if val, ok := findKWAssign(sig, stripped, "CHANGE_TRACKING"); ok {
 		if !isBool(val) {
 			markers = append(markers, diagMarkerSpan(r,
-				"CHANGE_TRACKING must be TRUE or FALSE.", 4))
+				"CHANGE_TRACKING must be TRUE or FALSE."))
 		}
 	}
 
@@ -5260,7 +5255,7 @@ func validateCreateShare(parseText string, r StatementRange) []DiagMarker {
 	// 2. Share name is required; also used for the account-level prefix check.
 	name, _ := extractNameAfterCreate(sig, stripped, nil, "SHARE")
 	if name == "" {
-		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE SHARE statement.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE SHARE statement."))
 		return markers
 	}
 	if marker, swallowed := checkNameSwallowedByIFTok(name, sig, stripped, r,
@@ -5329,7 +5324,7 @@ func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMark
 	slContent := findKWAssignParenContent(sig, clean, "STORAGE_LOCATIONS")
 	if slContent == "" && !hasKWAssign(sig, clean, "STORAGE_LOCATIONS") {
 		markers = append(markers, diagMarkerSpan(r,
-			"STORAGE_LOCATIONS is mandatory for CREATE EXTERNAL VOLUME.", 4))
+			"STORAGE_LOCATIONS is mandatory for CREATE EXTERNAL VOLUME."))
 		return markers
 	}
 
@@ -5341,7 +5336,7 @@ func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMark
 	locations := splitLocationBlocks(storLocContent)
 	if len(locations) == 0 {
 		markers = append(markers, diagMarkerSpan(r,
-			"STORAGE_LOCATIONS must contain at least one storage location block.", 4))
+			"STORAGE_LOCATIONS must contain at least one storage location block."))
 		return markers
 	}
 
@@ -5352,20 +5347,20 @@ func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMark
 		// 3. NAME is required — check NAME = '<string>'.
 		if _, ok := findKWAssignStr(locSig, loc, "NAME"); !ok {
 			markers = append(markers, diagMarkerSpan(r,
-				"Each storage location requires a NAME attribute.", 4))
+				"Each storage location requires a NAME attribute."))
 		}
 
 		// 4. STORAGE_BASE_URL is required.
 		if _, ok := findKWAssignStr(locSig, loc, "STORAGE_BASE_URL"); !ok {
 			markers = append(markers, diagMarkerSpan(r,
-				"Each storage location requires STORAGE_BASE_URL.", 4))
+				"Each storage location requires STORAGE_BASE_URL."))
 		}
 
 		// 5. STORAGE_PROVIDER must be present and valid.
 		providerVal, hasProvider := findKWAssignStr(locSig, loc, "STORAGE_PROVIDER")
 		if !hasProvider {
 			markers = append(markers, diagMarkerSpan(r,
-				"Each storage location requires STORAGE_PROVIDER (S3, S3GOV, S3CHINA, S3COMPAT, GCS, or AZURE).", 4))
+				"Each storage location requires STORAGE_PROVIDER (S3, S3GOV, S3CHINA, S3COMPAT, GCS, or AZURE)."))
 			continue
 		}
 		provider := strings.ToUpper(strings.Trim(providerVal, "'"))
@@ -5374,26 +5369,26 @@ func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMark
 		isAzure := provider == "AZURE"
 		if !isS3 && !isGCS && !isAzure {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("Invalid STORAGE_PROVIDER '%s'. Must be S3, S3GOV, S3CHINA, S3COMPAT, GCS, or AZURE.", strings.Trim(providerVal, "'")), 4))
+				fmt.Sprintf("Invalid STORAGE_PROVIDER '%s'. Must be S3, S3GOV, S3CHINA, S3COMPAT, GCS, or AZURE.", strings.Trim(providerVal, "'"))))
 			continue
 		}
 
 		// 6. STORAGE_AWS_ROLE_ARN is required for S3-family.
 		if isS3 && !hasKWAssign(locSig, loc, "STORAGE_AWS_ROLE_ARN") {
 			markers = append(markers, diagMarkerSpan(r,
-				"STORAGE_AWS_ROLE_ARN is required for S3, S3GOV, S3CHINA, and S3COMPAT storage providers.", 4))
+				"STORAGE_AWS_ROLE_ARN is required for S3, S3GOV, S3CHINA, and S3COMPAT storage providers."))
 		}
 
 		// 7. AZURE_TENANT_ID is required for AZURE.
 		if isAzure && !hasKWAssign(locSig, loc, "AZURE_TENANT_ID") {
 			markers = append(markers, diagMarkerSpan(r,
-				"AZURE_TENANT_ID is required for AZURE storage provider.", 4))
+				"AZURE_TENANT_ID is required for AZURE storage provider."))
 		}
 
 		// 8. STORAGE_AWS_EXTERNAL_ID is only valid for S3-family.
 		if !isS3 && hasKWAssign(locSig, loc, "STORAGE_AWS_EXTERNAL_ID") {
 			markers = append(markers, diagMarkerSpan(r,
-				"STORAGE_AWS_EXTERNAL_ID is only valid for S3, S3GOV, S3CHINA, or S3COMPAT storage providers.", 4))
+				"STORAGE_AWS_EXTERNAL_ID is only valid for S3, S3GOV, S3CHINA, or S3COMPAT storage providers."))
 		}
 
 		// 9. ENCRYPTION handling.
@@ -5401,28 +5396,28 @@ func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMark
 		hasEncryption := encContent != "" || hasKWAssign(locSig, loc, "ENCRYPTION")
 		if isAzure && hasEncryption {
 			markers = append(markers, diagMarkerSpan(r,
-				"AZURE storage locations do not support the ENCRYPTION parameter.", 4))
+				"AZURE storage locations do not support the ENCRYPTION parameter."))
 		} else if hasEncryption && !isAzure {
 			if encContent == "" {
 				markers = append(markers, diagMarkerSpan(r,
-					"ENCRYPTION block must specify a TYPE key (NONE, AWS_SSE_S3, AWS_SSE_KMS, or GCS_SSE_KMS).", 4))
+					"ENCRYPTION block must specify a TYPE key (NONE, AWS_SSE_S3, AWS_SSE_KMS, or GCS_SSE_KMS)."))
 			} else {
 				encSig := sigTokens(encContent)
 				encType, hasType := findKWAssignStr(encSig, encContent, "TYPE")
 				if !hasType {
 					markers = append(markers, diagMarkerSpan(r,
-						"ENCRYPTION block must specify a TYPE key (NONE, AWS_SSE_S3, AWS_SSE_KMS, or GCS_SSE_KMS).", 4))
+						"ENCRYPTION block must specify a TYPE key (NONE, AWS_SSE_S3, AWS_SSE_KMS, or GCS_SSE_KMS)."))
 				} else {
 					et := strings.ToUpper(strings.Trim(encType, "'"))
 					if !slices.Contains(extVolValidEncTypes, et) {
 						markers = append(markers, diagMarkerSpan(r,
-							fmt.Sprintf("Invalid ENCRYPTION TYPE '%s'. Must be NONE, AWS_SSE_S3, AWS_SSE_KMS, or GCS_SSE_KMS.", strings.Trim(encType, "'")), 4))
+							fmt.Sprintf("Invalid ENCRYPTION TYPE '%s'. Must be NONE, AWS_SSE_S3, AWS_SSE_KMS, or GCS_SSE_KMS.", strings.Trim(encType, "'"))))
 					} else if (et == "AWS_SSE_S3" || et == "AWS_SSE_KMS") && !isS3 {
 						markers = append(markers, diagMarkerSpan(r,
-							fmt.Sprintf("ENCRYPTION TYPE '%s' is only valid for S3, S3GOV, S3CHINA, or S3COMPAT storage providers.", strings.Trim(encType, "'")), 4))
+							fmt.Sprintf("ENCRYPTION TYPE '%s' is only valid for S3, S3GOV, S3CHINA, or S3COMPAT storage providers.", strings.Trim(encType, "'"))))
 					} else if et == "GCS_SSE_KMS" && !isGCS {
 						markers = append(markers, diagMarkerSpan(r,
-							"ENCRYPTION TYPE 'GCS_SSE_KMS' is only valid for GCS storage provider.", 4))
+							"ENCRYPTION TYPE 'GCS_SSE_KMS' is only valid for GCS storage provider."))
 					}
 				}
 			}
@@ -5472,13 +5467,13 @@ func validateAlterShare(parseText string, r StatementRange) []DiagMarker {
 	// Check if RESTRICT is the last significant token (trailing position).
 	if len(sig) > 0 && tokUpper(sig[len(sig)-1], stripped) == "RESTRICT" && !hasAddAccounts {
 		markers = append(markers, diagMarkerSpan(r,
-			"RESTRICT is only valid with ADD ACCOUNTS in ALTER SHARE.", 4))
+			"RESTRICT is only valid with ADD ACCOUNTS in ALTER SHARE."))
 	}
 
 	// ADD ACCOUNTS = requires at least one account identifier after the '='.
 	if hasAddAccounts && !hasKWPairAssignIdent(sig, stripped, "ADD", "ACCOUNTS") {
 		markers = append(markers, diagMarkerSpan(r,
-			"ADD ACCOUNTS requires at least one account identifier.", 4))
+			"ADD ACCOUNTS requires at least one account identifier."))
 	}
 
 	return markers
@@ -5495,7 +5490,7 @@ func validateUseRole(parseText string, r StatementRange) []DiagMarker {
 	// USE ROLE <name> → need at least 3 significant tokens.
 	if len(sig) < 3 || !isIdent(sig[2]) {
 		markers = append(markers, diagMarkerSpan(r,
-			"USE ROLE requires a role name. Use USE ROLE <role_name>.", 4))
+			"USE ROLE requires a role name. Use USE ROLE <role_name>."))
 	}
 
 	return markers
@@ -5512,7 +5507,7 @@ func validateUseWarehouse(parseText string, r StatementRange) []DiagMarker {
 	// USE WAREHOUSE <name> → need at least 3 significant tokens.
 	if len(sig) < 3 || !isIdent(sig[2]) {
 		markers = append(markers, diagMarkerSpan(r,
-			"USE WAREHOUSE requires a warehouse name. Use USE WAREHOUSE <warehouse_name>.", 4))
+			"USE WAREHOUSE requires a warehouse name. Use USE WAREHOUSE <warehouse_name>."))
 	}
 
 	return markers
@@ -5531,13 +5526,13 @@ func validateUseSecondaryRoles(parseText string, r StatementRange) []DiagMarker 
 	// USE SECONDARY ROLES (ALL|NONE) → need 4 tokens with specific 4th value.
 	if len(sig) < 4 {
 		markers = append(markers, diagMarkerSpan(r,
-			"USE SECONDARY ROLES requires ALL or NONE.", 4))
+			"USE SECONDARY ROLES requires ALL or NONE."))
 		return markers
 	}
 	v := tokUpper(sig[3], stripped)
 	if v != "ALL" && v != "NONE" {
 		markers = append(markers, diagMarkerSpan(r,
-			"USE SECONDARY ROLES requires ALL or NONE.", 4))
+			"USE SECONDARY ROLES requires ALL or NONE."))
 	}
 
 	return markers
@@ -5620,14 +5615,14 @@ func validateAlterSession(parseText string, r StatementRange) []DiagMarker {
 	// sig[0]=ALTER, sig[1]=SESSION, sig[2]=SET|UNSET
 	if len(sig) < 3 {
 		markers = append(markers, diagMarkerSpan(r,
-			"ALTER SESSION requires SET or UNSET. Use ALTER SESSION SET <param> = <value> or ALTER SESSION UNSET <param>.", 4))
+			"ALTER SESSION requires SET or UNSET. Use ALTER SESSION SET <param> = <value> or ALTER SESSION UNSET <param>."))
 		return markers
 	}
 
 	action := tokUpper(sig[2], stripped)
 	if action != "SET" && action != "UNSET" {
 		markers = append(markers, diagMarkerSpan(r,
-			"ALTER SESSION requires SET or UNSET. Use ALTER SESSION SET <param> = <value> or ALTER SESSION UNSET <param>.", 4))
+			"ALTER SESSION requires SET or UNSET. Use ALTER SESSION SET <param> = <value> or ALTER SESSION UNSET <param>."))
 		return markers
 	}
 
@@ -5676,20 +5671,20 @@ func validateAlterSession(parseText string, r StatementRange) []DiagMarker {
 
 		if len(pairs) == 0 {
 			markers = append(markers, diagMarkerSpan(r,
-				"ALTER SESSION SET requires at least one parameter assignment. Use ALTER SESSION SET <param> = <value>.", 4))
+				"ALTER SESSION SET requires at least one parameter assignment. Use ALTER SESSION SET <param> = <value>."))
 			return markers
 		}
 
 		for _, s := range stray {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("Parameter '%s' is missing '= <value>' assignment.", s), 4))
+				fmt.Sprintf("Parameter '%s' is missing '= <value>' assignment.", s)))
 		}
 
 		for _, pair := range pairs {
 			spec, known := knownSessionParams[pair.name]
 			if !known {
 				markers = append(markers, diagMarkerSpan(r,
-					fmt.Sprintf("Unknown session parameter '%s'.", pair.name), 4))
+					fmt.Sprintf("Unknown session parameter '%s'.", pair.name)))
 				continue
 			}
 
@@ -5707,25 +5702,25 @@ func validateAlterSession(parseText string, r StatementRange) []DiagMarker {
 				upper := strings.ToUpper(value)
 				if upper != "TRUE" && upper != "FALSE" {
 					markers = append(markers, diagMarkerSpan(r,
-						fmt.Sprintf("%s must be TRUE or FALSE.", pair.name), 4))
+						fmt.Sprintf("%s must be TRUE or FALSE.", pair.name)))
 				}
 			case spIntRange:
 				n, err := strconv.Atoi(value)
 				if err != nil || n < spec.min || n > spec.max {
 					markers = append(markers, diagMarkerSpan(r,
-						fmt.Sprintf("%s must be an integer between %d and %d.", pair.name, spec.min, spec.max), 4))
+						fmt.Sprintf("%s must be an integer between %d and %d.", pair.name, spec.min, spec.max)))
 				}
 			case spNonNeg:
 				n, err := strconv.Atoi(value)
 				if err != nil || n < 0 {
 					markers = append(markers, diagMarkerSpan(r,
-						fmt.Sprintf("%s must be a non-negative integer.", pair.name), 4))
+						fmt.Sprintf("%s must be a non-negative integer.", pair.name)))
 				}
 			case spEnum:
 				upper := strings.ToUpper(value)
 				if !slices.Contains(spec.vals, upper) {
 					markers = append(markers, diagMarkerSpan(r,
-						fmt.Sprintf("%s must be one of: %s.", pair.name, strings.Join(spec.vals, ", ")), 4))
+						fmt.Sprintf("%s must be one of: %s.", pair.name, strings.Join(spec.vals, ", "))))
 				}
 			}
 		}
@@ -5734,7 +5729,7 @@ func validateAlterSession(parseText string, r StatementRange) []DiagMarker {
 	if action == "UNSET" {
 		if len(rest) == 0 {
 			markers = append(markers, diagMarkerSpan(r,
-				"ALTER SESSION UNSET requires at least one parameter name.", 4))
+				"ALTER SESSION UNSET requires at least one parameter name."))
 			return markers
 		}
 
@@ -5748,7 +5743,7 @@ func validateAlterSession(parseText string, r StatementRange) []DiagMarker {
 			text := strings.ToUpper(tok.Text(stripped))
 			if _, known := knownSessionParams[text]; !known {
 				markers = append(markers, diagMarkerSpan(r,
-					fmt.Sprintf("Unknown session parameter '%s'.", text), 4))
+					fmt.Sprintf("Unknown session parameter '%s'.", text)))
 			}
 		}
 	}
@@ -5800,7 +5795,7 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 	i := 1
 	if i >= len(sig) {
 		markers = append(markers, diagMarkerSpan(r,
-			"SHOW requires an object type. Use SHOW TABLES, SHOW VIEWS, SHOW SCHEMAS, etc.", 4))
+			"SHOW requires an object type. Use SHOW TABLES, SHOW VIEWS, SHOW SCHEMAS, etc."))
 		return markers
 	}
 
@@ -5825,10 +5820,10 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 		if i >= len(sig) {
 			// Reached when TERSE consumed everything, e.g. "SHOW TERSE".
 			markers = append(markers, diagMarkerSpan(r,
-				"SHOW TERSE requires an object type. Use SHOW TERSE TABLES, SHOW TERSE VIEWS, etc.", 4))
+				"SHOW TERSE requires an object type. Use SHOW TERSE TABLES, SHOW TERSE VIEWS, etc."))
 		} else {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("Unknown object type '%s' in SHOW statement.", firstField(i)), 4))
+				fmt.Sprintf("Unknown object type '%s' in SHOW statement.", firstField(i))))
 		}
 		return markers
 	}
@@ -5836,14 +5831,14 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 	// ── Validate TERSE eligibility ───────────────────────────────────────
 	if isTerse && !showTerseEligible[objType] {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("TERSE is not valid for SHOW %s. TERSE is supported for TABLES, EXTERNAL TABLES, VIEWS, SCHEMAS, DATABASES, STAGES, STREAMS, USERS.", objType), 4))
+			fmt.Sprintf("TERSE is not valid for SHOW %s. TERSE is supported for TABLES, EXTERNAL TABLES, VIEWS, SCHEMAS, DATABASES, STAGES, STREAMS, USERS.", objType)))
 	}
 
 	// ── HISTORY modifier ─────────────────────────────────────────────────
 	if i < len(sig) && tokUpper(sig[i], s) == "HISTORY" {
 		if !showHistoryEligible[objType] {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("HISTORY is only valid for SHOW PIPES and SHOW REPLICATION DATABASES, not SHOW %s.", objType), 4))
+				fmt.Sprintf("HISTORY is only valid for SHOW PIPES and SHOW REPLICATION DATABASES, not SHOW %s.", objType)))
 		}
 		i++
 	}
@@ -5867,12 +5862,12 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 			i++
 			if i >= len(sig) || sig[i].Kind != sqltok.StringLit {
 				markers = append(markers, diagMarkerSpan(r,
-					"LIKE requires a string literal. Use LIKE '<pattern>'.", 4))
+					"LIKE requires a string literal. Use LIKE '<pattern>'."))
 				return markers
 			}
 			if matchStringLiteral(s[sig[i].Start:]) == -1 {
 				markers = append(markers, diagMarkerSpan(r,
-					"Unterminated string literal in LIKE clause.", 4))
+					"Unterminated string literal in LIKE clause."))
 				return markers
 			}
 			i++
@@ -5905,7 +5900,7 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 			if !matched {
 				if i >= len(sig) {
 					markers = append(markers, diagMarkerSpan(r,
-						"IN clause requires a scope. Use IN ACCOUNT, IN DATABASE, IN SCHEMA, or IN TABLE.", 4))
+						"IN clause requires a scope. Use IN ACCOUNT, IN DATABASE, IN SCHEMA, or IN TABLE."))
 					return markers
 				}
 				if next := consumeShowScopePath(sig, s, i); next > i {
@@ -5915,10 +5910,10 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 				if !matched {
 					if w := firstField(i); w != "" {
 						markers = append(markers, diagMarkerSpan(r,
-							fmt.Sprintf("Invalid scope '%s' in IN clause. Valid scopes are ACCOUNT, DATABASE, SCHEMA, TABLE.", w), 4))
+							fmt.Sprintf("Invalid scope '%s' in IN clause. Valid scopes are ACCOUNT, DATABASE, SCHEMA, TABLE.", w)))
 					} else {
 						markers = append(markers, diagMarkerSpan(r,
-							"IN clause requires a scope. Use IN ACCOUNT, IN DATABASE, IN SCHEMA, or IN TABLE.", 4))
+							"IN clause requires a scope. Use IN ACCOUNT, IN DATABASE, IN SCHEMA, or IN TABLE."))
 					}
 					return markers
 				}
@@ -5932,18 +5927,18 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 			i++
 			if i >= len(sig) || tokUpper(sig[i], s) != "WITH" {
 				markers = append(markers, diagMarkerSpan(r,
-					"Expected WITH after STARTS. Use STARTS WITH '<prefix>'.", 4))
+					"Expected WITH after STARTS. Use STARTS WITH '<prefix>'."))
 				return markers
 			}
 			i++
 			if i >= len(sig) || sig[i].Kind != sqltok.StringLit {
 				markers = append(markers, diagMarkerSpan(r,
-					"STARTS WITH requires a string literal. Use STARTS WITH '<prefix>'.", 4))
+					"STARTS WITH requires a string literal. Use STARTS WITH '<prefix>'."))
 				return markers
 			}
 			if matchStringLiteral(s[sig[i].Start:]) == -1 {
 				markers = append(markers, diagMarkerSpan(r,
-					"Unterminated string literal in STARTS WITH clause.", 4))
+					"Unterminated string literal in STARTS WITH clause."))
 				return markers
 			}
 			i++
@@ -5957,7 +5952,7 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 
 			if i >= len(sig) {
 				markers = append(markers, diagMarkerSpan(r,
-					"LIMIT requires a positive integer. Use LIMIT <n>.", 4))
+					"LIMIT requires a positive integer. Use LIMIT <n>."))
 				return markers
 			}
 
@@ -5972,7 +5967,7 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 			n, err := strconv.Atoi(numStr)
 			if err != nil || n <= 0 {
 				markers = append(markers, diagMarkerSpan(r,
-					fmt.Sprintf("LIMIT requires a positive integer, got '%s'.", numStr), 4))
+					fmt.Sprintf("LIMIT requires a positive integer, got '%s'.", numStr)))
 				return markers
 			}
 			// Advance past every token covered by the count chunk.
@@ -5986,12 +5981,12 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 				i++
 				if i >= len(sig) || sig[i].Kind != sqltok.StringLit {
 					markers = append(markers, diagMarkerSpan(r,
-						"FROM in LIMIT clause requires a string literal. Use LIMIT <n> FROM '<name>'.", 4))
+						"FROM in LIMIT clause requires a string literal. Use LIMIT <n> FROM '<name>'."))
 					return markers
 				}
 				if matchStringLiteral(s[sig[i].Start:]) == -1 {
 					markers = append(markers, diagMarkerSpan(r,
-						"Unterminated string literal in LIMIT FROM clause.", 4))
+						"Unterminated string literal in LIMIT FROM clause."))
 					return markers
 				}
 				i++
@@ -6006,7 +6001,7 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 	// ── Trailing unrecognized content ────────────────────────────────────
 	if w := firstField(i); w != "" {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("Unexpected token '%s' in SHOW statement.", w), 4))
+			fmt.Sprintf("Unexpected token '%s' in SHOW statement.", w)))
 	}
 
 	return markers
@@ -6074,7 +6069,7 @@ func validateDescribe(parseText string, r StatementRange) []DiagMarker {
 	i := 1
 	if i >= len(sig) {
 		markers = append(markers, diagMarkerSpan(r,
-			"DESCRIBE requires an object type and name. Use DESCRIBE TABLE <name>, DESCRIBE VIEW <name>, etc.", 4))
+			"DESCRIBE requires an object type and name. Use DESCRIBE TABLE <name>, DESCRIBE VIEW <name>, etc."))
 		return markers
 	}
 
@@ -6090,7 +6085,7 @@ func validateDescribe(parseText string, r StatementRange) []DiagMarker {
 
 	if objType == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("Unknown object type '%s' in DESCRIBE statement.", firstField(i)), 4))
+			fmt.Sprintf("Unknown object type '%s' in DESCRIBE statement.", firstField(i))))
 		return markers
 	}
 
@@ -6099,7 +6094,7 @@ func validateDescribe(parseText string, r StatementRange) []DiagMarker {
 	if objType == "RESULT" || objType == "TRANSACTION" {
 		if i >= len(sig) {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("DESCRIBE %s requires a query/transaction ID. Use DESCRIBE %s '<id>'.", objType, objType), 4))
+				fmt.Sprintf("DESCRIBE %s requires a query/transaction ID. Use DESCRIBE %s '<id>'.", objType, objType)))
 		}
 		return markers
 	}
@@ -6107,7 +6102,7 @@ func validateDescribe(parseText string, r StatementRange) []DiagMarker {
 	// ── Object name is mandatory ─────────────────────────────────────────
 	if i >= len(sig) {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("DESCRIBE %s requires an object name.", objType), 4))
+			fmt.Sprintf("DESCRIBE %s requires an object name.", objType)))
 		return markers
 	}
 
@@ -6122,7 +6117,7 @@ func validateDescribe(parseText string, r StatementRange) []DiagMarker {
 		}
 		if !hasParen {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("DESCRIBE %s requires a parameter signature. Use DESCRIBE %s <name>(<arg_types>).", objType, objType), 4))
+				fmt.Sprintf("DESCRIBE %s requires a parameter signature. Use DESCRIBE %s <name>(<arg_types>).", objType, objType)))
 		}
 		return markers
 	}
@@ -6130,7 +6125,7 @@ func validateDescribe(parseText string, r StatementRange) []DiagMarker {
 	// ── Consume the identifier path (up to three parts, like _identPath) ──
 	if !isIdent(sig[i]) {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("Expected an object name after DESCRIBE %s.", objType), 4))
+			fmt.Sprintf("Expected an object name after DESCRIBE %s.", objType)))
 		return markers
 	}
 	pathStart := sig[i].Start
@@ -6143,7 +6138,7 @@ func validateDescribe(parseText string, r StatementRange) []DiagMarker {
 	// ── Account-level objects: warn on db/schema prefix ──────────────────
 	if describeAccountLevel[objType] && countIdentParts(m) > 1 {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("%s is an account-level object and should not be qualified with a database or schema prefix.", objType), 4))
+			fmt.Sprintf("%s is an account-level object and should not be qualified with a database or schema prefix.", objType)))
 	}
 
 	// ── Trailing unrecognized content ────────────────────────────────────
@@ -6152,7 +6147,7 @@ func validateDescribe(parseText string, r StatementRange) []DiagMarker {
 	if nextPos < len(sig) && sig[nextPos].Kind != sqltok.QuotedIdent {
 		if w := firstField(nextPos); w != "" {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("Unexpected token '%s' after object name in DESCRIBE statement.", w), 4))
+				fmt.Sprintf("Unexpected token '%s' after object name in DESCRIBE statement.", w)))
 		}
 	}
 
@@ -6182,7 +6177,7 @@ func validateCreateTag(parseText string, r StatementRange) []DiagMarker {
 	// 2. Tag name is required.
 	name, _ := extractNameAfterCreate(sig, stripped, nil, "TAG")
 	if name == "" {
-		markers = append(markers, diagMarkerSpan(r, "CREATE TAG requires a tag name.", 4))
+		markers = append(markers, diagMarkerSpan(r, "CREATE TAG requires a tag name."))
 		return markers
 	}
 	if marker, swallowed := checkNameSwallowedByIFTok(name, sig, stripped, r,
@@ -6217,7 +6212,7 @@ func validateCreateTag(parseText string, r StatementRange) []DiagMarker {
 			hasEqualsAfter := nextSigIdx >= 0 && avToks[nextSigIdx].Kind == sqltok.Operator && avToks[nextSigIdx].Text(parseText) == "="
 			if hasEqualsAfter {
 				markers = append(markers, diagMarkerSpan(r,
-					"ALLOWED_VALUES requires a list of string literals (e.g. ALLOWED_VALUES 'v1', 'v2').", 4))
+					"ALLOWED_VALUES requires a list of string literals (e.g. ALLOWED_VALUES 'v1', 'v2')."))
 			} else {
 				// Collect properly terminated string literals after ALLOWED_VALUES.
 				hasValidStrings := false
@@ -6232,7 +6227,7 @@ func validateCreateTag(parseText string, r StatementRange) []DiagMarker {
 				}
 				if !hasValidStrings {
 					markers = append(markers, diagMarkerSpan(r,
-						"ALLOWED_VALUES requires a list of string literals (e.g. ALLOWED_VALUES 'v1', 'v2').", 4))
+						"ALLOWED_VALUES requires a list of string literals (e.g. ALLOWED_VALUES 'v1', 'v2')."))
 				} else {
 					// Extract the substring from after ALLOWED_VALUES to the end of the last valid StringLit.
 					listStart := avToks[avIdx].End
@@ -6283,7 +6278,7 @@ func checkDuplicateAllowedValues(listStr string, r StatementRange) []DiagMarker 
 			if raw != orig {
 				msg = fmt.Sprintf("Duplicate value '%s' in ALLOWED_VALUES list (case-insensitive match with '%s').", raw, orig)
 			}
-			markers = append(markers, diagMarkerSpan(r, msg, 4))
+			markers = append(markers, diagMarkerSpan(r, msg))
 		} else {
 			seen[key] = raw
 		}
@@ -6319,7 +6314,7 @@ func validateAlterTag(parseText string, r StatementRange) []DiagMarker {
 			tokUpper(sig[3], stripped) == "EXISTS" &&
 			(len(sig) == 4 || !isNonEmptyIdent(sig[4], stripped))
 		if !ifExistsNoName {
-			markers = append(markers, diagMarkerSpan(r, "ALTER TAG requires a tag name.", 4))
+			markers = append(markers, diagMarkerSpan(r, "ALTER TAG requires a tag name."))
 			return markers
 		}
 	}
@@ -6336,7 +6331,7 @@ func validateAlterTag(parseText string, r StatementRange) []DiagMarker {
 
 	if !anyKnown {
 		markers = append(markers, diagMarkerSpan(r,
-			"Unknown ALTER TAG sub-command. Expected RENAME TO, ADD ALLOWED_VALUES, DROP ALLOWED_VALUES, UNSET ALLOWED_VALUES, SET COMMENT, or UNSET COMMENT.", 4))
+			"Unknown ALTER TAG sub-command. Expected RENAME TO, ADD ALLOWED_VALUES, DROP ALLOWED_VALUES, UNSET ALLOWED_VALUES, SET COMMENT, or UNSET COMMENT."))
 		return markers
 	}
 
@@ -6349,7 +6344,7 @@ func validateAlterTag(parseText string, r StatementRange) []DiagMarker {
 	}
 	if subCmdCount > 1 {
 		markers = append(markers, diagMarkerSpan(r,
-			"ALTER TAG supports only one sub-command per statement.", 4))
+			"ALTER TAG supports only one sub-command per statement."))
 	}
 
 	// 2. RENAME TO requires a new name.
@@ -6365,7 +6360,7 @@ func validateAlterTag(parseText string, r StatementRange) []DiagMarker {
 		}
 		if !found {
 			markers = append(markers, diagMarkerSpan(r,
-				"ALTER TAG RENAME TO requires a new tag name.", 4))
+				"ALTER TAG RENAME TO requires a new tag name."))
 		}
 	}
 
@@ -6386,7 +6381,7 @@ func validateAlterTag(parseText string, r StatementRange) []DiagMarker {
 		}
 		if !found {
 			markers = append(markers, diagMarkerSpan(r,
-				"ADD ALLOWED_VALUES requires at least one string literal value.", 4))
+				"ADD ALLOWED_VALUES requires at least one string literal value."))
 		}
 	}
 
@@ -6406,7 +6401,7 @@ func validateAlterTag(parseText string, r StatementRange) []DiagMarker {
 		}
 		if !found {
 			markers = append(markers, diagMarkerSpan(r,
-				"DROP ALLOWED_VALUES requires at least one string literal value.", 4))
+				"DROP ALLOWED_VALUES requires at least one string literal value."))
 		}
 	}
 
@@ -6427,7 +6422,7 @@ func validateDropTag(parseText string, r StatementRange) []DiagMarker {
 	// 1. Tag name is required.
 	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", "TAG")
 	if name == "" {
-		markers = append(markers, diagMarkerSpan(r, "DROP TAG requires a tag name.", 4))
+		markers = append(markers, diagMarkerSpan(r, "DROP TAG requires a tag name."))
 		return markers
 	}
 
@@ -6436,7 +6431,7 @@ func validateDropTag(parseText string, r StatementRange) []DiagMarker {
 		lastKW := tokUpper(sig[len(sig)-1], stripped)
 		if lastKW == "CASCADE" || lastKW == "RESTRICT" {
 			markers = append(markers, diagMarkerSpan(r,
-				"CASCADE / RESTRICT are not valid for DROP TAG.", 4))
+				"CASCADE / RESTRICT are not valid for DROP TAG."))
 		}
 	}
 
@@ -6470,7 +6465,7 @@ func validateCreateTask(parseText string, r StatementRange) []DiagMarker {
 	// 2. Task name is required.
 	name, _ := extractNameAfterCreate(sig, stripped, nil, "TASK")
 	if name == "" {
-		markers = append(markers, diagMarkerSpan(r, "CREATE TASK requires a task name.", 4))
+		markers = append(markers, diagMarkerSpan(r, "CREATE TASK requires a task name."))
 		return markers
 	}
 
@@ -6515,7 +6510,7 @@ func validateCreateTask(parseText string, r StatementRange) []DiagMarker {
 
 	// 3. AS clause is required.
 	if !hasAS {
-		markers = append(markers, diagMarkerSpan(r, "CREATE TASK requires an AS clause with a SQL statement body.", 4))
+		markers = append(markers, diagMarkerSpan(r, "CREATE TASK requires an AS clause with a SQL statement body."))
 		return markers
 	}
 
@@ -6523,17 +6518,17 @@ func validateCreateTask(parseText string, r StatementRange) []DiagMarker {
 	if hasFinalize {
 		if hasAfter {
 			markers = append(markers, diagMarkerSpan(r,
-				"FINALIZE must not be combined with AFTER in a CREATE TASK statement.", 4))
+				"FINALIZE must not be combined with AFTER in a CREATE TASK statement."))
 		}
 		if hasSchedule {
 			markers = append(markers, diagMarkerSpan(r,
-				"FINALIZE must not be combined with SCHEDULE in a CREATE TASK statement.", 4))
+				"FINALIZE must not be combined with SCHEDULE in a CREATE TASK statement."))
 		}
 		// FINALIZE requires the = <name> syntax (FINALIZE = <name>).
 		_, hasFinalizeAssign := findKWAssign(pre, preSrc, "FINALIZE")
 		if !hasFinalizeAssign {
 			markers = append(markers, diagMarkerSpan(r,
-				"FINALIZE requires a root task name (e.g. FINALIZE = root_task).", 4))
+				"FINALIZE requires a root task name (e.g. FINALIZE = root_task)."))
 		}
 		return markers
 	}
@@ -6541,7 +6536,7 @@ func validateCreateTask(parseText string, r StatementRange) []DiagMarker {
 	// 5. AFTER and SCHEDULE are mutually exclusive.
 	if hasAfter && hasSchedule {
 		markers = append(markers, diagMarkerSpan(r,
-			"AFTER and SCHEDULE are mutually exclusive in a CREATE TASK statement. A child task (AFTER) must not also set SCHEDULE.", 4))
+			"AFTER and SCHEDULE are mutually exclusive in a CREATE TASK statement. A child task (AFTER) must not also set SCHEDULE."))
 	}
 
 	// 6. Bare AFTER without predecessor names.
@@ -6555,14 +6550,14 @@ func validateCreateTask(parseText string, r StatementRange) []DiagMarker {
 		}
 		if !afterHasName {
 			markers = append(markers, diagMarkerSpan(r,
-				"AFTER requires at least one predecessor task name.", 4))
+				"AFTER requires at least one predecessor task name."))
 		}
 	}
 
 	// 7. Root task without SCHEDULE.
 	if !hasAfter && !hasSchedule {
 		markers = append(markers, diagMarkerSpan(r,
-			"Root task (no AFTER or FINALIZE clause) requires a SCHEDULE property.", 4))
+			"Root task (no AFTER or FINALIZE clause) requires a SCHEDULE property."))
 	}
 
 	// 8. WHEN checks.
@@ -6577,7 +6572,7 @@ func validateCreateTask(parseText string, r StatementRange) []DiagMarker {
 		}
 		if !whenHasExpr {
 			markers = append(markers, diagMarkerSpan(r,
-				"WHEN requires a boolean expression.", 4))
+				"WHEN requires a boolean expression."))
 		}
 	}
 
@@ -6609,7 +6604,7 @@ func validateAlterTask(parseText string, r StatementRange) []DiagMarker {
 			tokUpper(sig[3], stripped) == "EXISTS" &&
 			(len(sig) == 4 || !isNonEmptyIdent(sig[4], stripped))
 		if !ifExistsNoName {
-			markers = append(markers, diagMarkerSpan(r, "ALTER TASK requires a task name.", 4))
+			markers = append(markers, diagMarkerSpan(r, "ALTER TASK requires a task name."))
 			return markers
 		}
 	}
@@ -6640,7 +6635,7 @@ func validateAlterTask(parseText string, r StatementRange) []DiagMarker {
 
 	if !anyKnown {
 		markers = append(markers, diagMarkerSpan(r,
-			"Unknown ALTER TASK sub-command. Expected RESUME, SUSPEND, SET, UNSET, ADD AFTER, REMOVE AFTER, MODIFY AS, MODIFY WHEN, REMOVE WHEN, SET FINALIZE, UNSET FINALIZE, SET TAG, or UNSET TAG.", 4))
+			"Unknown ALTER TASK sub-command. Expected RESUME, SUSPEND, SET, UNSET, ADD AFTER, REMOVE AFTER, MODIFY AS, MODIFY WHEN, REMOVE WHEN, SET FINALIZE, UNSET FINALIZE, SET TAG, or UNSET TAG."))
 		return markers
 	}
 
@@ -6657,7 +6652,7 @@ func validateAlterTask(parseText string, r StatementRange) []DiagMarker {
 		}
 		if !found {
 			markers = append(markers, diagMarkerSpan(r,
-				"ADD AFTER requires at least one predecessor task name.", 4))
+				"ADD AFTER requires at least one predecessor task name."))
 		}
 	}
 
@@ -6674,7 +6669,7 @@ func validateAlterTask(parseText string, r StatementRange) []DiagMarker {
 		}
 		if !found {
 			markers = append(markers, diagMarkerSpan(r,
-				"REMOVE AFTER requires at least one predecessor task name.", 4))
+				"REMOVE AFTER requires at least one predecessor task name."))
 		}
 	}
 
@@ -6691,7 +6686,7 @@ func validateAlterTask(parseText string, r StatementRange) []DiagMarker {
 		}
 		if !found {
 			markers = append(markers, diagMarkerSpan(r,
-				"MODIFY AS requires a SQL statement.", 4))
+				"MODIFY AS requires a SQL statement."))
 		}
 	}
 
@@ -6708,7 +6703,7 @@ func validateAlterTask(parseText string, r StatementRange) []DiagMarker {
 		}
 		if !found {
 			markers = append(markers, diagMarkerSpan(r,
-				"MODIFY WHEN requires a boolean expression.", 4))
+				"MODIFY WHEN requires a boolean expression."))
 		}
 	}
 
@@ -6717,7 +6712,7 @@ func validateAlterTask(parseText string, r StatementRange) []DiagMarker {
 		_, hasFinalizeIdent := findKWAssign(sig, stripped, "FINALIZE")
 		if !hasFinalizeIdent {
 			markers = append(markers, diagMarkerSpan(r,
-				"SET FINALIZE requires a root task name (e.g. SET FINALIZE = root_task).", 4))
+				"SET FINALIZE requires a root task name (e.g. SET FINALIZE = root_task)."))
 		}
 	}
 
@@ -6741,7 +6736,7 @@ func validateDropTask(parseText string, r StatementRange) []DiagMarker {
 	sig := sigTokens(stripped)
 	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", "TASK")
 	if name == "" {
-		markers = append(markers, diagMarkerSpan(r, "DROP TASK requires a task name.", 4))
+		markers = append(markers, diagMarkerSpan(r, "DROP TASK requires a task name."))
 	}
 
 	return markers
@@ -6810,14 +6805,14 @@ func validateBeginStripped(stripped string, r StatementRange) []DiagMarker {
 		i++
 		if i >= len(sig) || !isIdent(sig[i]) {
 			markers = append(markers, diagMarkerSpan(r,
-				"BEGIN NAME requires a transaction name. Use BEGIN NAME <name>.", 4))
+				"BEGIN NAME requires a transaction name. Use BEGIN NAME <name>."))
 			return markers
 		}
 		return markers // valid: BEGIN [WORK|TRANSACTION] NAME <ident>
 	}
 	if i < len(sig) {
 		markers = append(markers, diagMarkerSpan(r,
-			"Unexpected token after BEGIN. Valid forms: BEGIN, BEGIN WORK, BEGIN TRANSACTION, BEGIN [TRANSACTION] NAME <name>.", 4))
+			"Unexpected token after BEGIN. Valid forms: BEGIN, BEGIN WORK, BEGIN TRANSACTION, BEGIN [TRANSACTION] NAME <name>."))
 	}
 	return markers
 }
@@ -6841,7 +6836,7 @@ func validateCommitStripped(stripped string, r StatementRange) []DiagMarker {
 		return markers // COMMIT WORK
 	}
 	markers = append(markers, diagMarkerSpan(r,
-		"Unexpected token after COMMIT. Valid forms: COMMIT, COMMIT WORK.", 4))
+		"Unexpected token after COMMIT. Valid forms: COMMIT, COMMIT WORK."))
 	return markers
 }
 
@@ -6871,16 +6866,16 @@ func validateRollbackStripped(stripped string, r StatementRange) []DiagMarker {
 				return markers // valid: ROLLBACK [WORK] TO SAVEPOINT <name>
 			}
 			markers = append(markers, diagMarkerSpan(r,
-				"ROLLBACK TO SAVEPOINT requires a savepoint name. Use ROLLBACK TO SAVEPOINT <name>.", 4))
+				"ROLLBACK TO SAVEPOINT requires a savepoint name. Use ROLLBACK TO SAVEPOINT <name>."))
 			return markers
 		}
 		markers = append(markers, diagMarkerSpan(r,
-			"ROLLBACK TO requires SAVEPOINT keyword. Use ROLLBACK TO SAVEPOINT <name>.", 4))
+			"ROLLBACK TO requires SAVEPOINT keyword. Use ROLLBACK TO SAVEPOINT <name>."))
 		return markers
 	}
 
 	markers = append(markers, diagMarkerSpan(r,
-		"Unexpected token after ROLLBACK. Valid forms: ROLLBACK, ROLLBACK WORK, ROLLBACK [WORK] TO SAVEPOINT <name>.", 4))
+		"Unexpected token after ROLLBACK. Valid forms: ROLLBACK, ROLLBACK WORK, ROLLBACK [WORK] TO SAVEPOINT <name>."))
 	return markers
 }
 
@@ -6896,7 +6891,7 @@ func validateSavepointStripped(stripped string, r StatementRange) []DiagMarker {
 	// SAVEPOINT <name> — name is mandatory (at least 2 sig tokens)
 	if len(sig) < 2 || !isIdent(sig[1]) {
 		markers = append(markers, diagMarkerSpan(r,
-			"SAVEPOINT requires a savepoint name. Use SAVEPOINT <name>.", 4))
+			"SAVEPOINT requires a savepoint name. Use SAVEPOINT <name>."))
 	}
 	return markers
 }
@@ -6913,7 +6908,7 @@ func validateReleaseSavepointStripped(stripped string, r StatementRange) []DiagM
 	// RELEASE SAVEPOINT <name> — name is mandatory (at least 3 sig tokens)
 	if len(sig) < 3 || !isIdent(sig[2]) {
 		markers = append(markers, diagMarkerSpan(r,
-			"RELEASE SAVEPOINT requires a savepoint name. Use RELEASE SAVEPOINT <name>.", 4))
+			"RELEASE SAVEPOINT requires a savepoint name. Use RELEASE SAVEPOINT <name>."))
 	}
 	return markers
 }
@@ -6960,7 +6955,7 @@ func validateTimeTravelClauses(stripped string, r StatementRange) []DiagMarker {
 			for _, kw := range ttKWs {
 				if nextU == kw {
 					markers = append(markers, diagMarkerSpan(r,
-						"Time Travel clause requires parentheses. Use AT (TIMESTAMP => ...) or BEFORE (STATEMENT => ...).", 4))
+						"Time Travel clause requires parentheses. Use AT (TIMESTAMP => ...) or BEFORE (STATEMENT => ...)."))
 					break
 				}
 			}
@@ -7013,24 +7008,24 @@ func validateTimeTravelClauses(stripped string, r StatementRange) []DiagMarker {
 			}
 			if bareKW != "" {
 				markers = append(markers, diagMarkerSpan(r,
-					"Missing '=>' operator in "+keyword+" clause. Use "+bareKW+" => <value>.", 4))
+					"Missing '=>' operator in "+keyword+" clause. Use "+bareKW+" => <value>."))
 			} else {
 				markers = append(markers, diagMarkerSpan(r,
-					"Invalid "+keyword+" clause. Expected one of: TIMESTAMP =>, OFFSET =>, STATEMENT =>"+streamExpected+".", 4))
+					"Invalid "+keyword+" clause. Expected one of: TIMESTAMP =>, OFFSET =>, STATEMENT =>"+streamExpected+"."))
 			}
 			continue
 		}
 
 		if len(args) > 1 {
 			markers = append(markers, diagMarkerSpan(r,
-				"Multiple keyword arguments in "+keyword+" clause. Only one of TIMESTAMP, OFFSET, STATEMENT"+streamPlain+" is allowed.", 4))
+				"Multiple keyword arguments in "+keyword+" clause. Only one of TIMESTAMP, OFFSET, STATEMENT"+streamPlain+" is allowed."))
 			continue
 		}
 
 		// Exactly one argument — validate STREAM restriction.
 		if args[0] == "STREAM" && keyword == "BEFORE" {
 			markers = append(markers, diagMarkerSpan(r,
-				"STREAM => is not valid in a BEFORE clause. STREAM is only supported with AT.", 4))
+				"STREAM => is not valid in a BEFORE clause. STREAM is only supported with AT."))
 		}
 	}
 
@@ -7074,7 +7069,7 @@ func validateCreateReplOrFailoverGroup(parseText string, r StatementRange, group
 	}
 	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("CREATE %s GROUP requires a group name.", groupType), 4))
+			fmt.Sprintf("CREATE %s GROUP requires a group name.", groupType)))
 		return markers
 	}
 	if pfx := checkAccountLevelPrefix(name, r, groupType+" groups"); pfx != nil {
@@ -7088,7 +7083,7 @@ func validateCreateReplOrFailoverGroup(parseText string, r StatementRange, group
 	// 2. OBJECT_TYPES is mandatory.
 	if !hasKWAssign(afterName, stripped, "OBJECT_TYPES") {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("Missing mandatory OBJECT_TYPES in CREATE %s GROUP.", groupType), 4))
+			fmt.Sprintf("Missing mandatory OBJECT_TYPES in CREATE %s GROUP.", groupType)))
 		return markers
 	}
 
@@ -7096,12 +7091,12 @@ func validateCreateReplOrFailoverGroup(parseText string, r StatementRange, group
 	if groupType == "FAILOVER" {
 		if !hasKWAssign(afterName, stripped, "ALLOWED_ACCOUNTS") && !hasKWAssign(afterName, stripped, "ALLOWED_FAILOVER_ACCOUNTS") {
 			markers = append(markers, diagMarkerSpan(r,
-				"Missing mandatory ALLOWED_ACCOUNTS or ALLOWED_FAILOVER_ACCOUNTS in CREATE FAILOVER GROUP.", 4))
+				"Missing mandatory ALLOWED_ACCOUNTS or ALLOWED_FAILOVER_ACCOUNTS in CREATE FAILOVER GROUP."))
 		}
 	} else {
 		if !hasKWAssign(afterName, stripped, "ALLOWED_ACCOUNTS") {
 			markers = append(markers, diagMarkerSpan(r,
-				"Missing mandatory ALLOWED_ACCOUNTS in CREATE REPLICATION GROUP.", 4))
+				"Missing mandatory ALLOWED_ACCOUNTS in CREATE REPLICATION GROUP."))
 		}
 	}
 
@@ -7109,11 +7104,11 @@ func validateCreateReplOrFailoverGroup(parseText string, r StatementRange, group
 	otValue := extractObjectTypesValue(afterName, stripped)
 	if strings.Contains(otValue, "DATABASES") && !hasKWAssign(afterName, stripped, "ALLOWED_DATABASES") {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("OBJECT_TYPES includes DATABASES but ALLOWED_DATABASES is missing in CREATE %s GROUP.", groupType), 4))
+			fmt.Sprintf("OBJECT_TYPES includes DATABASES but ALLOWED_DATABASES is missing in CREATE %s GROUP.", groupType)))
 	}
 	if strings.Contains(otValue, "INTEGRATIONS") && !hasKWAssign(afterName, stripped, "ALLOWED_INTEGRATION_TYPES") {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("OBJECT_TYPES includes INTEGRATIONS but ALLOWED_INTEGRATION_TYPES is missing in CREATE %s GROUP.", groupType), 4))
+			fmt.Sprintf("OBJECT_TYPES includes INTEGRATIONS but ALLOWED_INTEGRATION_TYPES is missing in CREATE %s GROUP.", groupType)))
 	}
 
 	return markers
@@ -7142,7 +7137,7 @@ func validateAlterReplicationOrFailoverGroup(parseText string, r StatementRange,
 			(len(sig) == 5 || !isNonEmptyIdent(sig[5], stripped))
 		if !ifExistsNoName {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("ALTER %s GROUP requires a group name.", groupType), 4))
+				fmt.Sprintf("ALTER %s GROUP requires a group name.", groupType)))
 			return markers
 		}
 	}
@@ -7195,10 +7190,10 @@ func validateAlterReplicationOrFailoverGroup(parseText string, r StatementRange,
 	if !hasAction {
 		if groupType == "FAILOVER" {
 			markers = append(markers, diagMarkerSpan(r,
-				"ALTER FAILOVER GROUP requires an action: ADD, REMOVE, MOVE DATABASES, SET, RENAME TO, PRIMARY, REFRESH, SUSPEND, or RESUME.", 4))
+				"ALTER FAILOVER GROUP requires an action: ADD, REMOVE, MOVE DATABASES, SET, RENAME TO, PRIMARY, REFRESH, SUSPEND, or RESUME."))
 		} else {
 			markers = append(markers, diagMarkerSpan(r,
-				"ALTER REPLICATION GROUP requires an action: ADD, REMOVE, MOVE DATABASES, SET, or RENAME TO.", 4))
+				"ALTER REPLICATION GROUP requires an action: ADD, REMOVE, MOVE DATABASES, SET, or RENAME TO."))
 		}
 		return markers
 	}
@@ -7206,7 +7201,7 @@ func validateAlterReplicationOrFailoverGroup(parseText string, r StatementRange,
 	// 3. MOVE DATABASES requires TO REPLICATION GROUP <name>.
 	if hasMoveDatabases && !hasKWSeqFollowedByIdent(afterName, stripped, "TO", "REPLICATION", "GROUP") {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("MOVE DATABASES in ALTER %s GROUP requires TO REPLICATION GROUP <name>.", groupType), 4))
+			fmt.Sprintf("MOVE DATABASES in ALTER %s GROUP requires TO REPLICATION GROUP <name>.", groupType)))
 	}
 
 	return markers
@@ -7227,7 +7222,7 @@ func validateDropReplicationOrFailoverGroup(parseText string, r StatementRange, 
 	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", groupType, "GROUP")
 	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("DROP %s GROUP requires a group name.", groupType), 4))
+			fmt.Sprintf("DROP %s GROUP requires a group name.", groupType)))
 		return markers
 	}
 	if pfx := checkAccountLevelPrefix(name, r, groupType+" groups"); pfx != nil {
@@ -7265,7 +7260,7 @@ func validateCreateComputePool(parseText string, r StatementRange) []DiagMarker 
 	// 2. Pool name is required; also used for account-level prefix check.
 	name, _ := extractNameAfterCreate(sig, stripped, nil, "COMPUTE", "POOL")
 	if name == "" {
-		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE COMPUTE POOL statement.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE COMPUTE POOL statement."))
 		return markers
 	}
 	if pfx := checkAccountLevelPrefix(name, r, "Compute pools"); pfx != nil {
@@ -7279,32 +7274,32 @@ func validateCreateComputePool(parseText string, r StatementRange) []DiagMarker 
 
 	if !hasMinNodesProp {
 		markers = append(markers, diagMarkerSpan(r,
-			"Missing mandatory property MIN_NODES in CREATE COMPUTE POOL statement.", 4))
+			"Missing mandatory property MIN_NODES in CREATE COMPUTE POOL statement."))
 	}
 	if !hasMaxNodesProp {
 		markers = append(markers, diagMarkerSpan(r,
-			"Missing mandatory property MAX_NODES in CREATE COMPUTE POOL statement.", 4))
+			"Missing mandatory property MAX_NODES in CREATE COMPUTE POOL statement."))
 	}
 	if !hasInstanceFamily {
 		markers = append(markers, diagMarkerSpan(r,
-			"Missing mandatory property INSTANCE_FAMILY in CREATE COMPUTE POOL statement.", 4))
+			"Missing mandatory property INSTANCE_FAMILY in CREATE COMPUTE POOL statement."))
 	}
 
 	// 4. Validate MIN_NODES value (>= 1).
 	if hasMinNodesProp && minNodesVal < 1 {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("MIN_NODES value %d is below the minimum (1).", minNodesVal), 4))
+			fmt.Sprintf("MIN_NODES value %d is below the minimum (1).", minNodesVal)))
 	}
 
 	// 5. Validate MAX_NODES value (>= 1, >= MIN_NODES).
 	if hasMaxNodesProp {
 		if maxNodesVal < 1 {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("MAX_NODES value %d is below the minimum (1).", maxNodesVal), 4))
+				fmt.Sprintf("MAX_NODES value %d is below the minimum (1).", maxNodesVal)))
 		}
 		if hasMinNodesProp && maxNodesVal < minNodesVal {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("MAX_NODES (%d) must be >= MIN_NODES (%d).", maxNodesVal, minNodesVal), 4))
+				fmt.Sprintf("MAX_NODES (%d) must be >= MIN_NODES (%d).", maxNodesVal, minNodesVal)))
 		}
 	}
 
@@ -7319,7 +7314,7 @@ func validateCreateComputePool(parseText string, r StatementRange) []DiagMarker 
 		if !slices.Contains(validFamilies, family) {
 			markers = append(markers, diagMarkerSpan(r,
 				fmt.Sprintf("Invalid INSTANCE_FAMILY '%s'. Valid values: %s.",
-					instanceFamilyRaw, strings.Join(validFamilies, ", ")), 4))
+					instanceFamilyRaw, strings.Join(validFamilies, ", "))))
 		}
 	}
 
@@ -7327,7 +7322,7 @@ func validateCreateComputePool(parseText string, r StatementRange) []DiagMarker 
 	if susVal, ok := findKWAssignInt(sig, stripped, "AUTO_SUSPEND_SECS"); ok {
 		if susVal < 0 {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("AUTO_SUSPEND_SECS value %d must be a non-negative integer.", susVal), 4))
+				fmt.Sprintf("AUTO_SUSPEND_SECS value %d must be a non-negative integer.", susVal)))
 		}
 	}
 
@@ -7365,7 +7360,7 @@ func validateCreateDatashare(parseText string, r StatementRange) []DiagMarker {
 	// 2. Datashare name is required; also used for the account-level prefix check.
 	name, _ := extractNameAfterCreate(sig, stripped, nil, "DATASHARE")
 	if name == "" {
-		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE DATASHARE statement.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE DATASHARE statement."))
 		return markers
 	}
 	if pfx := checkAccountLevelPrefix(name, r, "Datashares"); pfx != nil {
@@ -7402,7 +7397,7 @@ func validateAlterDatashare(parseText string, r StatementRange) []DiagMarker {
 	name, _ := extractNameAfterKeywords(sig, stripped, "ALTER", "DATASHARE")
 	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"ALTER DATASHARE requires a datashare name.", 4))
+			"ALTER DATASHARE requires a datashare name."))
 		return markers
 	}
 	if pfx := checkAccountLevelPrefix(name, r, "Datashares"); pfx != nil {
@@ -7420,7 +7415,7 @@ func validateAlterDatashare(parseText string, r StatementRange) []DiagMarker {
 	anyKnown := hasAddAccounts || hasRemoveAccounts || hasAddDatabases || hasRemoveDatabases || hasSetComment || hasUnsetComment
 	if !anyKnown {
 		markers = append(markers, diagMarkerSpan(r,
-			"Unknown ALTER DATASHARE sub-command. Expected ADD ACCOUNTS, REMOVE ACCOUNTS, ADD DATABASES, REMOVE DATABASES, SET COMMENT, or UNSET COMMENT.", 4))
+			"Unknown ALTER DATASHARE sub-command. Expected ADD ACCOUNTS, REMOVE ACCOUNTS, ADD DATABASES, REMOVE DATABASES, SET COMMENT, or UNSET COMMENT."))
 		return markers
 	}
 
@@ -7428,25 +7423,25 @@ func validateAlterDatashare(parseText string, r StatementRange) []DiagMarker {
 	// Check: ADD ACCOUNTS followed by = then at least one ident.
 	if hasAddAccounts && !hasKWPairAssignIdent(sig, stripped, "ADD", "ACCOUNTS") {
 		markers = append(markers, diagMarkerSpan(r,
-			"ADD ACCOUNTS requires at least one account identifier.", 4))
+			"ADD ACCOUNTS requires at least one account identifier."))
 	}
 
 	// 4. REMOVE ACCOUNTS = requires at least one account.
 	if hasRemoveAccounts && !hasKWPairAssignIdent(sig, stripped, "REMOVE", "ACCOUNTS") {
 		markers = append(markers, diagMarkerSpan(r,
-			"REMOVE ACCOUNTS requires at least one account identifier.", 4))
+			"REMOVE ACCOUNTS requires at least one account identifier."))
 	}
 
 	// 5. ADD DATABASES requires at least one database.
 	if hasAddDatabases && !hasKWPairFollowedByIdent(sig, stripped, "ADD", "DATABASES") {
 		markers = append(markers, diagMarkerSpan(r,
-			"ADD DATABASES requires at least one database identifier.", 4))
+			"ADD DATABASES requires at least one database identifier."))
 	}
 
 	// 6. REMOVE DATABASES requires at least one database.
 	if hasRemoveDatabases && !hasKWPairFollowedByIdent(sig, stripped, "REMOVE", "DATABASES") {
 		markers = append(markers, diagMarkerSpan(r,
-			"REMOVE DATABASES requires at least one database identifier.", 4))
+			"REMOVE DATABASES requires at least one database identifier."))
 	}
 
 	// 7. SHARE_RESTRICTIONS validation: always check the boolean value, and
@@ -7456,7 +7451,7 @@ func validateAlterDatashare(parseText string, r StatementRange) []DiagMarker {
 		validateBoolPropTok(sig, stripped, "SHARE_RESTRICTIONS", r, &markers)
 		if !hasAddAccounts {
 			markers = append(markers, diagMarkerSpan(r,
-				"SHARE_RESTRICTIONS is only valid with ADD ACCOUNTS in ALTER DATASHARE.", 4))
+				"SHARE_RESTRICTIONS is only valid with ADD ACCOUNTS in ALTER DATASHARE."))
 		}
 	}
 
@@ -7477,7 +7472,7 @@ func validateDropDatashare(parseText string, r StatementRange) []DiagMarker {
 	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", "DATASHARE")
 	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"DROP DATASHARE requires a datashare name.", 4))
+			"DROP DATASHARE requires a datashare name."))
 		return markers
 	}
 	if pfx := checkAccountLevelPrefix(name, r, "Datashares"); pfx != nil {
@@ -7518,14 +7513,14 @@ func validateCreateService(parseText string, r StatementRange) []DiagMarker {
 	// 2. Service name is required.
 	name, _ := extractNameAfterCreate(sig, clean, nil, "SERVICE")
 	if name == "" {
-		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE SERVICE statement.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE SERVICE statement."))
 		return markers
 	}
 
 	// 3. IN COMPUTE POOL is mandatory.
 	if !hasKWSeq(sig, clean, "IN", "COMPUTE", "POOL") {
 		markers = append(markers, diagMarkerSpan(r,
-			"Missing mandatory IN COMPUTE POOL clause in CREATE SERVICE statement.", 4))
+			"Missing mandatory IN COMPUTE POOL clause in CREATE SERVICE statement."))
 	}
 
 	// 4. Exactly one of FROM SPECIFICATION or FROM SPECIFICATION_FILE is required.
@@ -7533,10 +7528,10 @@ func validateCreateService(parseText string, r StatementRange) []DiagMarker {
 	hasSpec := hasFromSpecKW(sig, clean, []string{"SPECIFICATION", "SPECIFICATION_TEMPLATE"})
 	if hasSpec && hasSpecFile {
 		markers = append(markers, diagMarkerSpan(r,
-			"CREATE SERVICE requires exactly one of FROM SPECIFICATION or FROM SPECIFICATION_FILE, not both.", 4))
+			"CREATE SERVICE requires exactly one of FROM SPECIFICATION or FROM SPECIFICATION_FILE, not both."))
 	} else if !hasSpec && !hasSpecFile {
 		markers = append(markers, diagMarkerSpan(r,
-			"Missing mandatory FROM SPECIFICATION or FROM SPECIFICATION_FILE clause in CREATE SERVICE statement.", 4))
+			"Missing mandatory FROM SPECIFICATION or FROM SPECIFICATION_FILE clause in CREATE SERVICE statement."))
 	}
 
 	// 5. Validate MIN_INSTANCES value (non-negative).
@@ -7547,7 +7542,7 @@ func validateCreateService(parseText string, r StatementRange) []DiagMarker {
 		hasMinInstances = true
 		if v < 0 {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("MIN_INSTANCES value %d must be a non-negative integer.", v), 4))
+				fmt.Sprintf("MIN_INSTANCES value %d must be a non-negative integer.", v)))
 		}
 	}
 
@@ -7555,11 +7550,11 @@ func validateCreateService(parseText string, r StatementRange) []DiagMarker {
 	if v, ok := findKWAssignInt(sig, clean, "MAX_INSTANCES"); ok {
 		if v < 0 {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("MAX_INSTANCES value %d must be a non-negative integer.", v), 4))
+				fmt.Sprintf("MAX_INSTANCES value %d must be a non-negative integer.", v)))
 		}
 		if hasMinInstances && v < minInstances {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("MAX_INSTANCES (%d) must be >= MIN_INSTANCES (%d).", v, minInstances), 4))
+				fmt.Sprintf("MAX_INSTANCES (%d) must be >= MIN_INSTANCES (%d).", v, minInstances)))
 		}
 	}
 
@@ -7600,14 +7595,14 @@ func validateExecuteService(parseText string, r StatementRange) []DiagMarker {
 		name, _ = extractNameAfterKeywords(sig, clean, "EXECUTE", "JOB", "SERVICE")
 	}
 	if name == "" {
-		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in EXECUTE SERVICE statement.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in EXECUTE SERVICE statement."))
 		return markers
 	}
 
 	// 2. IN COMPUTE POOL is mandatory.
 	if !hasKWSeq(sig, clean, "IN", "COMPUTE", "POOL") {
 		markers = append(markers, diagMarkerSpan(r,
-			"Missing mandatory IN COMPUTE POOL clause in EXECUTE SERVICE statement.", 4))
+			"Missing mandatory IN COMPUTE POOL clause in EXECUTE SERVICE statement."))
 	}
 
 	// 3. Exactly one of FROM SPECIFICATION or FROM SPECIFICATION_FILE is required.
@@ -7615,20 +7610,20 @@ func validateExecuteService(parseText string, r StatementRange) []DiagMarker {
 	hasSpec := hasFromSpecKW(sig, clean, []string{"SPECIFICATION", "SPECIFICATION_TEMPLATE"})
 	if hasSpec && hasSpecFile {
 		markers = append(markers, diagMarkerSpan(r,
-			"EXECUTE SERVICE requires exactly one of FROM SPECIFICATION or FROM SPECIFICATION_FILE, not both.", 4))
+			"EXECUTE SERVICE requires exactly one of FROM SPECIFICATION or FROM SPECIFICATION_FILE, not both."))
 	} else if !hasSpec && !hasSpecFile {
 		markers = append(markers, diagMarkerSpan(r,
-			"Missing mandatory FROM SPECIFICATION or FROM SPECIFICATION_FILE clause in EXECUTE SERVICE statement.", 4))
+			"Missing mandatory FROM SPECIFICATION or FROM SPECIFICATION_FILE clause in EXECUTE SERVICE statement."))
 	}
 
 	// 4. MIN_INSTANCES / MAX_INSTANCES are not supported for job services.
 	if hasKWAssign(sig, clean, "MIN_INSTANCES") {
 		markers = append(markers, diagMarkerSpan(r,
-			"MIN_INSTANCES is not supported in EXECUTE SERVICE (job services run once).", 4))
+			"MIN_INSTANCES is not supported in EXECUTE SERVICE (job services run once)."))
 	}
 	if hasKWAssign(sig, clean, "MAX_INSTANCES") {
 		markers = append(markers, diagMarkerSpan(r,
-			"MAX_INSTANCES is not supported in EXECUTE SERVICE (job services run once).", 4))
+			"MAX_INSTANCES is not supported in EXECUTE SERVICE (job services run once)."))
 	}
 
 	// 5. Only known properties are accepted.
@@ -7668,7 +7663,7 @@ func validateAlterService(parseText string, r StatementRange) []DiagMarker {
 			(len(sig) == 4 || !isNonEmptyIdent(sig[4], clean))
 		if !ifExistsNoName {
 			markers = append(markers, diagMarkerSpan(r,
-				"ALTER SERVICE requires a service name.", 4))
+				"ALTER SERVICE requires a service name."))
 			return markers
 		}
 	}
@@ -7727,13 +7722,13 @@ func validateAlterService(parseText string, r StatementRange) []DiagMarker {
 	if !anyKnown {
 		if hasBareSet {
 			markers = append(markers, diagMarkerSpan(r,
-				"Unknown property in ALTER SERVICE SET. Valid properties: MIN_INSTANCES, MAX_INSTANCES, COMMENT, QUERY_WAREHOUSE.", 4))
+				"Unknown property in ALTER SERVICE SET. Valid properties: MIN_INSTANCES, MAX_INSTANCES, COMMENT, QUERY_WAREHOUSE."))
 		} else if hasBareUnset {
 			markers = append(markers, diagMarkerSpan(r,
-				"Unknown property in ALTER SERVICE UNSET. Valid properties: COMMENT, QUERY_WAREHOUSE, MIN_INSTANCES, MAX_INSTANCES.", 4))
+				"Unknown property in ALTER SERVICE UNSET. Valid properties: COMMENT, QUERY_WAREHOUSE, MIN_INSTANCES, MAX_INSTANCES."))
 		} else {
 			markers = append(markers, diagMarkerSpan(r,
-				"Unknown ALTER SERVICE sub-command. Expected SUSPEND, RESUME, SET, UNSET, or FROM SPECIFICATION.", 4))
+				"Unknown ALTER SERVICE sub-command. Expected SUSPEND, RESUME, SET, UNSET, or FROM SPECIFICATION."))
 		}
 		return markers
 	}
@@ -7746,7 +7741,7 @@ func validateAlterService(parseText string, r StatementRange) []DiagMarker {
 		hasMinInstances = true
 		if v < 0 {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("MIN_INSTANCES value %d must be a non-negative integer.", v), 4))
+				fmt.Sprintf("MIN_INSTANCES value %d must be a non-negative integer.", v)))
 		}
 	}
 
@@ -7754,11 +7749,11 @@ func validateAlterService(parseText string, r StatementRange) []DiagMarker {
 	if v, ok := findKWAssignInt(sig, clean, "MAX_INSTANCES"); ok {
 		if v < 0 {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("MAX_INSTANCES value %d must be a non-negative integer.", v), 4))
+				fmt.Sprintf("MAX_INSTANCES value %d must be a non-negative integer.", v)))
 		}
 		if hasMinInstances && v < minInstances {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("MAX_INSTANCES (%d) must be >= MIN_INSTANCES (%d).", v, minInstances), 4))
+				fmt.Sprintf("MAX_INSTANCES (%d) must be >= MIN_INSTANCES (%d).", v, minInstances)))
 		}
 	}
 
@@ -7786,7 +7781,7 @@ func validateDropService(parseText string, r StatementRange) []DiagMarker {
 	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", "SERVICE")
 	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"DROP SERVICE requires a service name.", 4))
+			"DROP SERVICE requires a service name."))
 	}
 
 	return markers
@@ -7816,7 +7811,7 @@ func validateCreateImageRepository(parseText string, r StatementRange) []DiagMar
 	name, _ := extractNameAfterCreate(sig, stripped, nil, "IMAGE", "REPOSITORY")
 	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"Unexpected syntax in CREATE IMAGE REPOSITORY statement.", 4))
+			"Unexpected syntax in CREATE IMAGE REPOSITORY statement."))
 		return markers
 	}
 	if marker, swallowed := checkNameSwallowedByIFTok(name, sig, stripped, r, "Unexpected syntax in CREATE IMAGE REPOSITORY statement."); swallowed {
@@ -7844,7 +7839,7 @@ func validateDropImageRepository(parseText string, r StatementRange) []DiagMarke
 	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", "IMAGE", "REPOSITORY")
 	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"DROP IMAGE REPOSITORY requires a repository name.", 4))
+			"DROP IMAGE REPOSITORY requires a repository name."))
 	}
 
 	return markers
@@ -7857,7 +7852,7 @@ func validateDropImageRepository(parseText string, r StatementRange) []DiagMarke
 func validateAlterImageRepository(_ string, r StatementRange) []DiagMarker {
 	return []DiagMarker{
 		diagMarkerSpan(r,
-			"ALTER IMAGE REPOSITORY is not supported in the current Snowflake specification.", 4),
+			"ALTER IMAGE REPOSITORY is not supported in the current Snowflake specification."),
 	}
 }
 
@@ -7885,7 +7880,7 @@ func validateCreateApplicationPackage(parseText string, r StatementRange) []Diag
 	name, _ := extractNameAfterCreate(sig, stripped, nil, "APPLICATION", "PACKAGE")
 	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"Unexpected syntax in CREATE APPLICATION PACKAGE statement.", 4))
+			"Unexpected syntax in CREATE APPLICATION PACKAGE statement."))
 		return markers
 	}
 	if marker, swallowed := checkNameSwallowedByIFTok(name, sig, stripped, r, "Unexpected syntax in CREATE APPLICATION PACKAGE statement."); swallowed {
@@ -7901,7 +7896,7 @@ func validateCreateApplicationPackage(parseText string, r StatementRange) []Diag
 		val := strings.ToUpper(distVal)
 		if val != "INTERNAL" && val != "EXTERNAL" {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("DISTRIBUTION must be INTERNAL or EXTERNAL, got '%s'.", distVal), 4))
+				fmt.Sprintf("DISTRIBUTION must be INTERNAL or EXTERNAL, got '%s'.", distVal)))
 		}
 	}
 
@@ -7930,7 +7925,7 @@ func validateAlterApplicationPackage(parseText string, r StatementRange) []DiagM
 	name, _ := extractNameAfterKeywords(sig, stripped, "ALTER", "APPLICATION", "PACKAGE")
 	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"ALTER APPLICATION PACKAGE requires a package name.", 4))
+			"ALTER APPLICATION PACKAGE requires a package name."))
 		return markers
 	}
 
@@ -7950,10 +7945,10 @@ func validateAlterApplicationPackage(parseText string, r StatementRange) []DiagM
 		}
 		if hasSetIdent {
 			markers = append(markers, diagMarkerSpan(r,
-				"Unknown property in ALTER APPLICATION PACKAGE SET. Valid properties: DEFAULT RELEASE DIRECTIVE, DISTRIBUTION.", 4))
+				"Unknown property in ALTER APPLICATION PACKAGE SET. Valid properties: DEFAULT RELEASE DIRECTIVE, DISTRIBUTION."))
 		} else {
 			markers = append(markers, diagMarkerSpan(r,
-				"Unknown ALTER APPLICATION PACKAGE sub-command. Expected SET DEFAULT RELEASE DIRECTIVE, ADD VERSION, DROP VERSION, or SET DISTRIBUTION.", 4))
+				"Unknown ALTER APPLICATION PACKAGE sub-command. Expected SET DEFAULT RELEASE DIRECTIVE, ADD VERSION, DROP VERSION, or SET DISTRIBUTION."))
 		}
 		return markers
 	}
@@ -7963,7 +7958,7 @@ func validateAlterApplicationPackage(parseText string, r StatementRange) []DiagM
 		val := strings.ToUpper(distVal)
 		if val != "INTERNAL" && val != "EXTERNAL" {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("DISTRIBUTION must be INTERNAL or EXTERNAL, got '%s'.", distVal), 4))
+				fmt.Sprintf("DISTRIBUTION must be INTERNAL or EXTERNAL, got '%s'.", distVal)))
 		}
 	}
 
@@ -7984,7 +7979,7 @@ func validateDropApplicationPackage(parseText string, r StatementRange) []DiagMa
 	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", "APPLICATION", "PACKAGE")
 	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"DROP APPLICATION PACKAGE requires a package name.", 4))
+			"DROP APPLICATION PACKAGE requires a package name."))
 	}
 
 	return markers
@@ -8016,7 +8011,7 @@ func validateCreateApplication(parseText string, r StatementRange) []DiagMarker 
 	name, _ := extractNameAfterCreate(sig, stripped, nil, "APPLICATION")
 	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"Unexpected syntax in CREATE APPLICATION statement.", 4))
+			"Unexpected syntax in CREATE APPLICATION statement."))
 		return markers
 	}
 	if marker, swallowed := checkNameSwallowedByIFTok(name, sig, stripped, r, "Unexpected syntax in CREATE APPLICATION statement."); swallowed {
@@ -8030,13 +8025,13 @@ func validateCreateApplication(parseText string, r StatementRange) []DiagMarker 
 	// 3. FROM APPLICATION PACKAGE is mandatory.
 	if !hasKWSeq(sig, stripped, "FROM", "APPLICATION", "PACKAGE") {
 		markers = append(markers, diagMarkerSpan(r,
-			"Missing mandatory FROM APPLICATION PACKAGE clause in CREATE APPLICATION statement.", 4))
+			"Missing mandatory FROM APPLICATION PACKAGE clause in CREATE APPLICATION statement."))
 	}
 
 	// 4. If USING VERSION is present, PATCH must also be present.
 	if hasKWPair(sig, stripped, "USING", "VERSION") && !hasKW(sig, stripped, "PATCH") {
 		markers = append(markers, diagMarkerSpan(r,
-			"USING VERSION requires a PATCH number in CREATE APPLICATION statement.", 4))
+			"USING VERSION requires a PATCH number in CREATE APPLICATION statement."))
 	}
 
 	// 5. DEBUG_MODE must be TRUE or FALSE if present.
@@ -8066,7 +8061,7 @@ func validateAlterApplication(parseText string, r StatementRange) []DiagMarker {
 	name, _ := extractNameAfterKeywords(sig, stripped, "ALTER", "APPLICATION")
 	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"ALTER APPLICATION requires an application name.", 4))
+			"ALTER APPLICATION requires an application name."))
 		return markers
 	}
 
@@ -8089,13 +8084,13 @@ func validateAlterApplication(parseText string, r StatementRange) []DiagMarker {
 		}
 		if hasSetIdent {
 			markers = append(markers, diagMarkerSpan(r,
-				"Unknown property in ALTER APPLICATION SET. Valid properties: DEBUG_MODE.", 4))
+				"Unknown property in ALTER APPLICATION SET. Valid properties: DEBUG_MODE."))
 		} else if hasUnsetIdent {
 			markers = append(markers, diagMarkerSpan(r,
-				"Unknown property in ALTER APPLICATION UNSET. Valid properties: DEBUG_MODE.", 4))
+				"Unknown property in ALTER APPLICATION UNSET. Valid properties: DEBUG_MODE."))
 		} else {
 			markers = append(markers, diagMarkerSpan(r,
-				"Unknown ALTER APPLICATION sub-command. Expected UPGRADE, SET DEBUG_MODE, or UNSET DEBUG_MODE.", 4))
+				"Unknown ALTER APPLICATION sub-command. Expected UPGRADE, SET DEBUG_MODE, or UNSET DEBUG_MODE."))
 		}
 		return markers
 	}
@@ -8103,7 +8098,7 @@ func validateAlterApplication(parseText string, r StatementRange) []DiagMarker {
 	// 3. If UPGRADE USING VERSION is present, PATCH must also be present.
 	if hasKWPair(sig, stripped, "USING", "VERSION") && !hasKW(sig, stripped, "PATCH") {
 		markers = append(markers, diagMarkerSpan(r,
-			"USING VERSION requires a PATCH number in ALTER APPLICATION UPGRADE.", 4))
+			"USING VERSION requires a PATCH number in ALTER APPLICATION UPGRADE."))
 	}
 
 	// 4. DEBUG_MODE must be TRUE or FALSE when used with SET.
@@ -8126,7 +8121,7 @@ func validateDropApplication(parseText string, r StatementRange) []DiagMarker {
 	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", "APPLICATION")
 	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"DROP APPLICATION requires an application name.", 4))
+			"DROP APPLICATION requires an application name."))
 	}
 
 	return markers
@@ -8157,7 +8152,7 @@ func validateCreateGitRepository(parseText string, r StatementRange) []DiagMarke
 	name, _ := extractNameAfterCreate(sig, stripped, nil, "GIT", "REPOSITORY")
 	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"Unexpected syntax in CREATE GIT REPOSITORY statement.", 4))
+			"Unexpected syntax in CREATE GIT REPOSITORY statement."))
 		return markers
 	}
 	if marker, swallowed := checkNameSwallowedByIFTok(name, sig, stripped, r, "Unexpected syntax in CREATE GIT REPOSITORY statement."); swallowed {
@@ -8168,7 +8163,7 @@ func validateCreateGitRepository(parseText string, r StatementRange) []DiagMarke
 	// 3. API_INTEGRATION is mandatory — needs KEYWORD = <ident>.
 	if _, ok := findKWAssign(sig, stripped, "API_INTEGRATION"); !ok {
 		markers = append(markers, diagMarkerSpan(r,
-			"CREATE GIT REPOSITORY requires API_INTEGRATION = <integration_name>.", 4))
+			"CREATE GIT REPOSITORY requires API_INTEGRATION = <integration_name>."))
 	}
 
 	// 4. ORIGIN is mandatory and must be a valid-looking URL.
@@ -8179,15 +8174,15 @@ func validateCreateGitRepository(parseText string, r StatementRange) []DiagMarke
 		if hasKWAssign(sig, stripped, "ORIGIN") {
 			// ORIGIN = is present but value is not a string literal.
 			markers = append(markers, diagMarkerSpan(r,
-				"ORIGIN value must be a string literal (e.g. ORIGIN = 'https://...').", 4))
+				"ORIGIN value must be a string literal (e.g. ORIGIN = 'https://...')."))
 		} else {
 			markers = append(markers, diagMarkerSpan(r,
-				"CREATE GIT REPOSITORY requires ORIGIN = '<url>'.", 4))
+				"CREATE GIT REPOSITORY requires ORIGIN = '<url>'."))
 		}
 	} else {
 		if !strings.HasPrefix(strings.ToLower(originURL), "https://") && !strings.HasPrefix(originURL, "git@") {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("ORIGIN URL should start with 'https://' or 'git@', got '%s'.", originURL), 4))
+				fmt.Sprintf("ORIGIN URL should start with 'https://' or 'git@', got '%s'.", originURL)))
 		}
 	}
 
@@ -8216,7 +8211,7 @@ func validateAlterGitRepository(parseText string, r StatementRange) []DiagMarker
 	name, _ := extractNameAfterKeywords(sig, stripped, "ALTER", "GIT", "REPOSITORY")
 	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"ALTER GIT REPOSITORY requires a repository name.", 4))
+			"ALTER GIT REPOSITORY requires a repository name."))
 		return markers
 	}
 
@@ -8229,7 +8224,7 @@ func validateAlterGitRepository(parseText string, r StatementRange) []DiagMarker
 		hasKWPair(sig, stripped, "UNSET", "COMMENT")
 	if !hasKnownAction {
 		markers = append(markers, diagMarkerSpan(r,
-			"Unknown ALTER GIT REPOSITORY sub-command. Expected FETCH, SET API_INTEGRATION/GIT_CREDENTIALS/COMMENT, or UNSET GIT_CREDENTIALS/COMMENT.", 4))
+			"Unknown ALTER GIT REPOSITORY sub-command. Expected FETCH, SET API_INTEGRATION/GIT_CREDENTIALS/COMMENT, or UNSET GIT_CREDENTIALS/COMMENT."))
 	}
 
 	return markers
@@ -8248,7 +8243,7 @@ func validateDropGitRepository(parseText string, r StatementRange) []DiagMarker 
 	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", "GIT", "REPOSITORY")
 	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"DROP GIT REPOSITORY requires a repository name.", 4))
+			"DROP GIT REPOSITORY requires a repository name."))
 	}
 
 	return markers
@@ -8331,7 +8326,7 @@ func validateCreateSecret(parseText string, r StatementRange) []DiagMarker {
 	name, _ := extractNameAfterCreate(sig, stripped, nil, "SECRET")
 	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"Unexpected syntax in CREATE SECRET statement.", 4))
+			"Unexpected syntax in CREATE SECRET statement."))
 		return markers
 	}
 	if marker, swallowed := checkNameSwallowedByIFTok(name, sig, stripped, r, "Unexpected syntax in CREATE SECRET statement."); swallowed {
@@ -8343,7 +8338,7 @@ func validateCreateSecret(parseText string, r StatementRange) []DiagMarker {
 	typeVal, hasType := findKWAssign(sig, stripped, "TYPE")
 	if !hasType {
 		markers = append(markers, diagMarkerSpan(r,
-			"CREATE SECRET requires TYPE = OAUTH2 | PASSWORD | GENERIC_STRING | CLOUD_PROVIDER_TOKEN | SYMMETRIC_KEY.", 4))
+			"CREATE SECRET requires TYPE = OAUTH2 | PASSWORD | GENERIC_STRING | CLOUD_PROVIDER_TOKEN | SYMMETRIC_KEY."))
 		return markers
 	}
 
@@ -8353,7 +8348,7 @@ func validateCreateSecret(parseText string, r StatementRange) []DiagMarker {
 	allowed, ok := secretTypeAllowed[secretType]
 	if !ok {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("Unknown TYPE '%s'. Valid types: OAUTH2, PASSWORD, GENERIC_STRING, CLOUD_PROVIDER_TOKEN, SYMMETRIC_KEY.", typeVal), 4))
+			fmt.Sprintf("Unknown TYPE '%s'. Valid types: OAUTH2, PASSWORD, GENERIC_STRING, CLOUD_PROVIDER_TOKEN, SYMMETRIC_KEY.", typeVal)))
 		return markers
 	}
 
@@ -8362,7 +8357,7 @@ func validateCreateSecret(parseText string, r StatementRange) []DiagMarker {
 		for _, mp := range mandatory {
 			if !hasKWAssign(sig, stripped, mp.keyword) {
 				markers = append(markers, diagMarkerSpan(r,
-					fmt.Sprintf("TYPE = %s requires %s.", secretType, mp.hint), 4))
+					fmt.Sprintf("TYPE = %s requires %s.", secretType, mp.hint)))
 			}
 		}
 	}
@@ -8375,7 +8370,7 @@ func validateCreateSecret(parseText string, r StatementRange) []DiagMarker {
 		if hasKWAssign(sig, stripped, sp.keyword) {
 			markers = append(markers, diagMarkerSpan(r,
 				fmt.Sprintf("%s is not valid for TYPE = %s. %s belongs to TYPE = %s.",
-					sp.name, secretType, sp.name, sp.owner), 4))
+					sp.name, secretType, sp.name, sp.owner)))
 		}
 	}
 
@@ -8415,7 +8410,7 @@ func validateAlterSecret(parseText string, r StatementRange) []DiagMarker {
 			(len(sig) == 4 || !isNonEmptyIdent(sig[4], stripped))
 		if !ifExistsNoName {
 			markers = append(markers, diagMarkerSpan(r,
-				"ALTER SECRET requires a secret name.", 4))
+				"ALTER SECRET requires a secret name."))
 			return markers
 		}
 	}
@@ -8435,7 +8430,7 @@ func validateAlterSecret(parseText string, r StatementRange) []DiagMarker {
 	}
 	if !hasKnownAction {
 		markers = append(markers, diagMarkerSpan(r,
-			"Unknown ALTER SECRET sub-command. Expected SET SECRET_STRING/USERNAME/PASSWORD/OAUTH_REFRESH_TOKEN/OAUTH_REFRESH_TOKEN_EXPIRY_TIME/OAUTH_SCOPES/API_AUTHENTICATION/COMMENT, or UNSET COMMENT.", 4))
+			"Unknown ALTER SECRET sub-command. Expected SET SECRET_STRING/USERNAME/PASSWORD/OAUTH_REFRESH_TOKEN/OAUTH_REFRESH_TOKEN_EXPIRY_TIME/OAUTH_SCOPES/API_AUTHENTICATION/COMMENT, or UNSET COMMENT."))
 	}
 
 	return markers
@@ -8463,7 +8458,7 @@ func validateCreateNotebook(parseText string, r StatementRange) []DiagMarker {
 	name, _ := extractNameAfterCreate(sig, stripped, nil, "NOTEBOOK")
 	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"CREATE NOTEBOOK requires a notebook name.", 4))
+			"CREATE NOTEBOOK requires a notebook name."))
 		return markers
 	}
 
@@ -8478,7 +8473,7 @@ func validateCreateNotebook(parseText string, r StatementRange) []DiagMarker {
 	}
 	if hasFrom && !hasKWAssign(sig, stripped, "MAIN_FILE") {
 		markers = append(markers, diagMarkerSpan(r,
-			"MAIN_FILE is required when FROM is specified in CREATE NOTEBOOK.", 4))
+			"MAIN_FILE is required when FROM is specified in CREATE NOTEBOOK."))
 	}
 
 	return markers
@@ -8507,7 +8502,7 @@ func validateAlterNotebook(parseText string, r StatementRange) []DiagMarker {
 			(len(sig) == 4 || !isNonEmptyIdent(sig[4], stripped))
 		if !ifExistsNoName {
 			markers = append(markers, diagMarkerSpan(r,
-				"ALTER NOTEBOOK requires a notebook name.", 4))
+				"ALTER NOTEBOOK requires a notebook name."))
 			return markers
 		}
 	}
@@ -8519,7 +8514,7 @@ func validateAlterNotebook(parseText string, r StatementRange) []DiagMarker {
 	hasAddLive := hasKWSeq(sig, stripped, "ADD", "LIVE", "VERSION")
 	if !hasSet && !hasUnset && !hasRename && !hasAddLive {
 		markers = append(markers, diagMarkerSpan(r,
-			"Unknown ALTER NOTEBOOK sub-command. Expected SET, UNSET, RENAME TO, or ADD LIVE VERSION FROM LAST.", 4))
+			"Unknown ALTER NOTEBOOK sub-command. Expected SET, UNSET, RENAME TO, or ADD LIVE VERSION FROM LAST."))
 		return markers
 	}
 
@@ -8537,14 +8532,14 @@ func validateAlterNotebook(parseText string, r StatementRange) []DiagMarker {
 		}
 		if !found {
 			markers = append(markers, diagMarkerSpan(r,
-				"RENAME TO requires a new notebook name.", 4))
+				"RENAME TO requires a new notebook name."))
 		}
 	}
 
 	// 4. ADD LIVE VERSION requires FROM LAST.
 	if hasAddLive && !hasKWPair(sig, stripped, "FROM", "LAST") {
 		markers = append(markers, diagMarkerSpan(r,
-			"ADD LIVE VERSION requires FROM LAST.", 4))
+			"ADD LIVE VERSION requires FROM LAST."))
 	}
 
 	return markers
@@ -8565,7 +8560,7 @@ func validateDropNotebook(parseText string, r StatementRange) []DiagMarker {
 	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", "NOTEBOOK")
 	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"DROP NOTEBOOK requires a notebook name.", 4))
+			"DROP NOTEBOOK requires a notebook name."))
 		return markers
 	}
 
@@ -8574,7 +8569,7 @@ func validateDropNotebook(parseText string, r StatementRange) []DiagMarker {
 		lastKW := tokUpper(sig[len(sig)-1], stripped)
 		if lastKW == "CASCADE" || lastKW == "RESTRICT" {
 			markers = append(markers, diagMarkerSpan(r,
-				"CASCADE / RESTRICT are not valid for DROP NOTEBOOK.", 4))
+				"CASCADE / RESTRICT are not valid for DROP NOTEBOOK."))
 		}
 	}
 
@@ -8616,7 +8611,7 @@ func validateAlterTableSearchOptimization(stripped string, r StatementRange) []D
 
 	if onBody == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"SEARCH OPTIMIZATION ON requires at least one expression (e.g. EQUALITY, SUBSTRING, GEO, FULL_TEXT).", 4))
+			"SEARCH OPTIMIZATION ON requires at least one expression (e.g. EQUALITY, SUBSTRING, GEO, FULL_TEXT)."))
 		return markers
 	}
 
@@ -8632,13 +8627,13 @@ func validateAlterTableSearchOptimization(stripped string, r StatementRange) []D
 		exprSig := sigTokens(expr)
 		if len(exprSig) < 2 || !isIdent(exprSig[0]) || exprSig[1].Kind != sqltok.LParen {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("Invalid search optimization expression: %q. Expected EQUALITY, SUBSTRING, GEO, or FULL_TEXT.", expr), 4))
+				fmt.Sprintf("Invalid search optimization expression: %q. Expected EQUALITY, SUBSTRING, GEO, or FULL_TEXT.", expr)))
 			continue
 		}
 		funcName := strings.ToUpper(exprSig[0].Text(expr))
 		if !searchOptValidExprs[funcName] {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("Unknown search optimization type %q. Valid types are EQUALITY, SUBSTRING, GEO, FULL_TEXT.", funcName), 4))
+				fmt.Sprintf("Unknown search optimization type %q. Valid types are EQUALITY, SUBSTRING, GEO, FULL_TEXT.", funcName)))
 		}
 		// Check for trailing content after the closing paren of the
 		// expression — a missing comma between expressions like
@@ -8649,7 +8644,7 @@ func validateAlterTableSearchOptimization(stripped string, r StatementRange) []D
 				trailing := strings.TrimRight(strings.TrimSpace(expr[openIdx+closeIdx+1:]), "; ")
 				if trailing != "" {
 					markers = append(markers, diagMarkerSpan(r,
-						fmt.Sprintf("Unexpected trailing content after search optimization expression %s(...): %q. Separate multiple expressions with commas.", funcName, trailing), 4))
+						fmt.Sprintf("Unexpected trailing content after search optimization expression %s(...): %q. Separate multiple expressions with commas.", funcName, trailing)))
 				}
 			}
 		}
@@ -8685,7 +8680,7 @@ func validateAlterDynamicTable(parseText string, r StatementRange) []DiagMarker 
 			(len(sig) == 5 || !isNonEmptyIdent(sig[5], stripped))
 		if !ifExistsNoName {
 			markers = append(markers, diagMarkerSpan(r,
-				"ALTER DYNAMIC TABLE requires a table name.", 4))
+				"ALTER DYNAMIC TABLE requires a table name."))
 			return markers
 		}
 		// No name — sub-commands start after IF EXISTS
@@ -8712,7 +8707,7 @@ func validateAlterDynamicTable(parseText string, r StatementRange) []DiagMarker 
 
 	if !anyKnown {
 		markers = append(markers, diagMarkerSpan(r,
-			"Unknown ALTER DYNAMIC TABLE sub-command. Expected REFRESH, SUSPEND, RESUME, SET, UNSET, SWAP WITH, or RENAME TO.", 4))
+			"Unknown ALTER DYNAMIC TABLE sub-command. Expected REFRESH, SUSPEND, RESUME, SET, UNSET, SWAP WITH, or RENAME TO."))
 		return markers
 	}
 
@@ -8725,7 +8720,7 @@ func validateAlterDynamicTable(parseText string, r StatementRange) []DiagMarker 
 	}
 	if subCmdCount > 1 {
 		markers = append(markers, diagMarkerSpan(r,
-			"ALTER DYNAMIC TABLE supports only one sub-command per statement.", 4))
+			"ALTER DYNAMIC TABLE supports only one sub-command per statement."))
 	}
 
 	// 3. SWAP WITH requires a target table name.
@@ -8741,7 +8736,7 @@ func validateAlterDynamicTable(parseText string, r StatementRange) []DiagMarker 
 		}
 		if !hasTarget {
 			markers = append(markers, diagMarkerSpan(r,
-				"SWAP WITH requires a target table name.", 4))
+				"SWAP WITH requires a target table name."))
 		}
 	}
 
@@ -8758,18 +8753,18 @@ func validateAlterDynamicTable(parseText string, r StatementRange) []DiagMarker 
 		}
 		if !hasTarget {
 			markers = append(markers, diagMarkerSpan(r,
-				"RENAME TO requires a new table name.", 4))
+				"RENAME TO requires a new table name."))
 		}
 	}
 
 	// 5. Bare SET / UNSET without a property name.
 	if hasSet && !hasUnset && len(afterName) == 1 && tokUpper(afterName[0], stripped) == "SET" {
 		markers = append(markers, diagMarkerSpan(r,
-			"SET requires at least one property (e.g. TARGET_LAG, WAREHOUSE).", 4))
+			"SET requires at least one property (e.g. TARGET_LAG, WAREHOUSE)."))
 	}
 	if hasUnset && !hasSet && len(afterName) == 1 && tokUpper(afterName[0], stripped) == "UNSET" {
 		markers = append(markers, diagMarkerSpan(r,
-			"UNSET requires at least one property name.", 4))
+			"UNSET requires at least one property name."))
 	}
 
 	// 6. SET TARGET_LAG value validation.
@@ -8796,7 +8791,7 @@ func validateAlterDynamicTable(parseText string, r StatementRange) []DiagMarker 
 		}
 		if !valid {
 			markers = append(markers, diagMarkerSpan(r,
-				"Invalid TARGET_LAG value. Expected a quoted duration (e.g. '1 minute') or DOWNSTREAM.", 4))
+				"Invalid TARGET_LAG value. Expected a quoted duration (e.g. '1 minute') or DOWNSTREAM."))
 		}
 	}
 
@@ -8820,7 +8815,7 @@ func validateAlterTableSwapWith(parseText string, r StatementRange) []DiagMarker
 	srcName, srcEnd := extractNameAfterKeywords(sig, stripped, "ALTER", "TABLE")
 	if srcName == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"ALTER TABLE … SWAP WITH requires a table name.", 4))
+			"ALTER TABLE … SWAP WITH requires a table name."))
 		return markers
 	}
 	srcParts := normalizeSnowflakeIdent(srcName)
@@ -8838,7 +8833,7 @@ func validateAlterTableSwapWith(parseText string, r StatementRange) []DiagMarker
 	}
 	if tgtName == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"SWAP WITH requires a target table name.", 4))
+			"SWAP WITH requires a target table name."))
 		return markers
 	}
 	tgtParts := normalizeSnowflakeIdent(tgtName)
@@ -8846,7 +8841,7 @@ func validateAlterTableSwapWith(parseText string, r StatementRange) []DiagMarker
 	// 3. Source and target must be different (same name is a no-op).
 	if slices.Equal(srcParts, tgtParts) {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("SWAP WITH the same table '%s' is a no-op.", tgtName), 4))
+			fmt.Sprintf("SWAP WITH the same table '%s' is a no-op.", tgtName)))
 	}
 
 	// 4. No additional clauses after the target table name.
@@ -8860,7 +8855,7 @@ func validateAlterTableSwapWith(parseText string, r StatementRange) []DiagMarker
 	}
 	if hasTrailing {
 		markers = append(markers, diagMarkerSpan(r,
-			"Unexpected clause after SWAP WITH target table. SWAP WITH must be the final clause.", 4))
+			"Unexpected clause after SWAP WITH target table. SWAP WITH must be the final clause."))
 	}
 
 	return markers

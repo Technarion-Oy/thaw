@@ -1556,4 +1556,3 @@ func TestValidateSnowflakePatterns_AsofJoinAdditional(t *testing.T) {
 		}
 	})
 }
-

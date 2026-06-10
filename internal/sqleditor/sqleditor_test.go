@@ -637,7 +637,7 @@ func TestParseJoinTables(t *testing.T) {
 				{Name: "CTE", Alias: "C1"},
 				{Name: "T2", Alias: "T2"},
 			},
-		},		{
+		}, {
 			name: "Three-part quoted names with spaces and dollar",
 			sql:  `SELECT * FROM "DB-1"."SCHEMA$1"."TABLE 1" AS "T 1"`,
 			want: []JoinTableRef{

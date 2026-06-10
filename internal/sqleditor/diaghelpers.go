@@ -48,7 +48,7 @@ func stripCommentsSQL(sql string) string {
 	return sb.String()
 }
 
-// stripStringLiterals replaces single-quoted string literals (handling ''
+// stripStringLiterals replaces single-quoted string literals (handling ”
 // escape sequences) with a single space, preventing SQL keywords inside
 // strings from being mistaken for actual syntax.
 func stripStringLiterals(sql string) string {
@@ -169,15 +169,16 @@ func diagMarkerAt(t tokenPos, msg string, severity int) DiagMarker {
 	}
 }
 
-// diagMarkerSpan constructs a DiagMarker covering the full statement.
-func diagMarkerSpan(r StatementRange, msg string, severity int) DiagMarker {
+// diagMarkerSpan constructs a Warning DiagMarker covering the full statement.
+// Every pattern diagnostic is a warning (severity 4), so the severity is fixed.
+func diagMarkerSpan(r StatementRange, msg string) DiagMarker {
 	return DiagMarker{
 		StartLineNumber: r.StartLine,
 		StartColumn:     1,
 		EndLineNumber:   r.EndLine,
 		EndColumn:       100,
 		Message:         msg,
-		Severity:        severity,
+		Severity:        4, // Warning
 	}
 }
 

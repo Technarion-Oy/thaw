@@ -566,7 +566,7 @@ func isWordCharByte2(c byte) bool {
 
 // buildSingleQuoteMask returns a boolean slice where true indicates the byte
 // position is inside a single-quoted SQL string literal (including the quotes
-// themselves).  Handles SQL-style escaped quotes ('').
+// themselves).  Handles SQL-style escaped quotes (”).
 func buildSingleQuoteMask(s string) []bool {
 	mask := make([]bool, len(s))
 	inSingle := false

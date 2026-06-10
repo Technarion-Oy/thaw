@@ -108,7 +108,9 @@ func findPreambleEnd(sig []sqltok.Token, sql, targetKW string) int {
 }
 
 // findCreateTablePreambleEnd validates the strict modifier order for CREATE TABLE:
-//   CREATE [OR (REPLACE|ALTER)] [LOCAL|GLOBAL] [TEMP|TEMPORARY|VOLATILE|TRANSIENT] TABLE [IF NOT EXISTS] <identPath>
+//
+//	CREATE [OR (REPLACE|ALTER)] [LOCAL|GLOBAL] [TEMP|TEMPORARY|VOLATILE|TRANSIENT] TABLE [IF NOT EXISTS] <identPath>
+//
 // Returns the byte position after the ident path, or -1 if the preamble is invalid.
 func findCreateTablePreambleEnd(sig []sqltok.Token, sql string) int {
 	if len(sig) == 0 || tokUpper(sig[0], sql) != "CREATE" {
@@ -1353,7 +1355,7 @@ func checkOptionValue(toks []sqltok.Token, sql string, r StatementRange, optionK
 				if j < len(toks) {
 					val := toks[j].Text(sql)
 					if msg := validate(val); msg != "" {
-						return []DiagMarker{diagMarkerSpan(r, msg, 4)}
+						return []DiagMarker{diagMarkerSpan(r, msg)}
 					}
 				}
 			}
@@ -1372,7 +1374,8 @@ func checkOrReplaceConflictTok(sig []sqltok.Token, sql string, r StatementRange,
 	hasIfNotExists := hasKWSeq(sig, sql, "IF", "NOT", "EXISTS")
 	if hasOrReplace && hasIfNotExists {
 		return diagMarkerSpan(r,
-			"Conflict between OR REPLACE and IF NOT EXISTS in "+stmtType+" statement.", 4), true
+				"Conflict between OR REPLACE and IF NOT EXISTS in "+stmtType+" statement."),
+			true
 	}
 	return DiagMarker{}, false
 }
@@ -1464,7 +1467,7 @@ func findKWAssignStr(sig []sqltok.Token, sql, keyword string) (string, bool) {
 func checkNameSwallowedByIFTok(name string, sig []sqltok.Token, sql string, r StatementRange, errMsg string) (DiagMarker, bool) {
 	if strings.EqualFold(name, "IF") &&
 		(hasKWSeq(sig, sql, "IF", "NOT", "EXISTS") || hasKWPair(sig, sql, "IF", "EXISTS")) {
-		return diagMarkerSpan(r, errMsg, 4), true
+		return diagMarkerSpan(r, errMsg), true
 	}
 	return DiagMarker{}, false
 }

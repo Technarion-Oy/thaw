@@ -521,5 +521,3 @@ func TestValidateSnowflakePatterns_AlterSession(t *testing.T) {
 }
 
 // ── SHOW commands ─────────────────────────────────────────────────────────────
-
-

@@ -177,5 +177,3 @@ func TestValidateSnowflakePatterns_GitRepository(t *testing.T) {
 		})
 	}
 }
-
-

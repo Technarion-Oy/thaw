@@ -161,4 +161,3 @@ func TestValidateBareColumnRefs_MatchRecognizeSuppression(t *testing.T) {
 		})
 	}
 }
-

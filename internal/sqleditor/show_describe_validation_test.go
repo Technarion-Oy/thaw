@@ -1843,7 +1843,7 @@ func TestValidateShow_CommentStripsObjectType(t *testing.T) {
 }
 
 // TestValidateShow_LikeEscapedQuoteOnlyPattern tests that a LIKE pattern
-// consisting solely of an escaped single quote ('''') is accepted.
+// consisting solely of an escaped single quote (””) is accepted.
 func TestValidateShow_LikeEscapedQuoteOnlyPattern(t *testing.T) {
 	sql := "SHOW TABLES LIKE ''''"
 	ranges := GetStatementRanges(sql)
@@ -2387,7 +2387,7 @@ func TestValidateShow_NoClauseValidationAcceptsArbitraryContent(t *testing.T) {
 // literals with multiple consecutive escaped single quotes are accepted.
 func TestValidateShow_MultipleEscapedQuotesInStringLiteral(t *testing.T) {
 	validCases := []string{
-		"SHOW TABLES LIKE 'a''''b'",               // a''b
+		"SHOW TABLES LIKE 'a''''b'",                // a''b
 		"SHOW TABLES LIKE '''''test'''''",          // ''test''
 		"SHOW TABLES STARTS WITH 'it''s a''thing'", // it's a'thing
 		"SHOW TABLES LIMIT 10 FROM 'x''''y'",       // x''y
@@ -2477,13 +2477,13 @@ func TestValidateShow_TabInClausePositions(t *testing.T) {
 // accepts any non-empty content after these special types.
 func TestValidateDescribe_ResultTransactionVariousIDs(t *testing.T) {
 	validCases := []string{
-		"DESCRIBE RESULT ''",          // empty string literal
-		"DESCRIBE RESULT 'a b c'",     // spaces in string
-		"DESC RESULT 12345",           // numeric ID
-		"DESCRIBE TRANSACTION 0",      // zero
-		"DESC TRANSACTION 99999999",   // large number
-		"DESCRIBE RESULT some_var",    // bare identifier
-		"DESC RESULT 'it''s a test'",  // escaped quotes in string
+		"DESCRIBE RESULT ''",         // empty string literal
+		"DESCRIBE RESULT 'a b c'",    // spaces in string
+		"DESC RESULT 12345",          // numeric ID
+		"DESCRIBE TRANSACTION 0",     // zero
+		"DESC TRANSACTION 99999999",  // large number
+		"DESCRIBE RESULT some_var",   // bare identifier
+		"DESC RESULT 'it''s a test'", // escaped quotes in string
 	}
 
 	for _, sql := range validCases {
@@ -2782,5 +2782,3 @@ func TestValidateShow_InQuotedIdentFollowedByClause(t *testing.T) {
 }
 
 // ── Tag Tests ────────────────────────────────────────────────────────────────
-
-
