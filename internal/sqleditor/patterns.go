@@ -367,8 +367,8 @@ var (
 	// ── CREATE STAGE ──────────────────────────────────────────────────────────
 	// stageProps lists only top-level CREATE STAGE property keys.
 	// Nested keys inside FILE_FORMAT=(...), ENCRYPTION=(...), DIRECTORY=(...),
-	// CREDENTIALS=(...), and COPY_OPTIONS=(...) are stripped before validation
-	// via stripParenContents so they never trigger a false positive.
+	// CREDENTIALS=(...), and COPY_OPTIONS=(...) are skipped by validateProperties'
+	// paren-depth tracking, so they never trigger a false positive.
 	stageProps = strings.Join([]string{
 		`URL`, `STORAGE_INTEGRATION`, `CREDENTIALS`, `ENCRYPTION`,
 		`AWS_ACCESS_POINT_ARN`, `USE_PRIVATELINK_ENDPOINT`, `ENDPOINT`,
@@ -2119,7 +2119,7 @@ func validateCreateMaskingPolicy(parseText string, r StatementRange) []DiagMarke
 // validateCreateStage validates CREATE STAGE properties (after stripping nested parens).
 func validateCreateStage(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	validateProperties(stripParenContents(parseText), stageProps, r, &markers)
+	validateProperties(parseText, stageProps, r, &markers)
 	return markers
 }
 
@@ -2132,7 +2132,7 @@ func validateAlterStage(parseText string, r StatementRange) []DiagMarker {
 		hasKW(sig, parseText, "UNSET")
 	if !noValidate {
 		var markers []DiagMarker
-		validateProperties(stripParenContents(parseText), alterStageProps, r, &markers)
+		validateProperties(parseText, alterStageProps, r, &markers)
 		return markers
 	}
 	return nil
@@ -3237,68 +3237,32 @@ func walkColumnDefTypes(sig []sqltok.Token, sql string, lparenIdx int, onType fu
 	}
 }
 
-// stripParenContents returns s with all content inside parentheses removed
-// while keeping the parenthesis characters themselves.  String literals
-// (single- or double-quoted) are tracked so that parentheses appearing inside
-// quoted values are not counted as structural delimiters.
-//
-// Example:
-//
-//	"FILE_FORMAT = (TYPE = 'CSV' SKIP_HEADER = 1) COMMENT = 'x'"
-//	→ "FILE_FORMAT = () COMMENT = 'x'"
-//
-// This prevents nested KEY=VALUE pairs inside blocks such as
-// FILE_FORMAT=(...), ENCRYPTION=(...), CREDENTIALS=(...), or DIRECTORY=(...)
-// from being falsely flagged as unexpected top-level properties.
-func stripParenContents(s string) string {
-	out := make([]byte, 0, len(s))
-	depth := 0
-	inSingle := false
-	inDouble := false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case !inDouble && c == '\'':
-			inSingle = !inSingle
-			if depth == 0 {
-				out = append(out, c)
-			}
-		case !inSingle && c == '"':
-			inDouble = !inDouble
-			if depth == 0 {
-				out = append(out, c)
-			}
-		case inSingle || inDouble:
-			if depth == 0 {
-				out = append(out, c)
-			}
-		case c == '(':
-			depth++
-			out = append(out, c)
-		case c == ')':
-			depth--
-			out = append(out, c)
-		default:
-			if depth == 0 {
-				out = append(out, c)
-			}
-		}
-	}
-	return string(out)
-}
-
-// validateProperties scans s for words that look like property keys (KEY =)
-// and checks if they match the pipe-separated list of validProps.
+// validateProperties scans s for top-level (paren depth 0) property keys (KEY =)
+// and checks them against the pipe-separated validProps allow-list. Keys nested
+// inside parens — e.g. TYPE inside FILE_FORMAT=(...) — are skipped, so callers no
+// longer need to pre-strip paren contents. The tokenizer classifies string
+// literals as non-keyword tokens, so values like COMMENT='a = b' never produce a
+// spurious key.
 func validateProperties(s string, validProps string, r StatementRange, markers *[]DiagMarker) {
 	valid := toUpperSet(strings.Split(validProps, "|"))
+	sig := sigToks(sqltok.Tokenize(s))
 
-	strippedS := sqltok.StripStrings(s)
-	sig := sigToks(sqltok.Tokenize(strippedS))
-
-	for i := 0; i+1 < len(sig); i++ {
-		if (sig[i].Kind == sqltok.Keyword || sig[i].Kind == sqltok.Identifier) &&
-			sig[i+1].Kind == sqltok.Operator && sig[i+1].Text(strippedS) == "=" {
-			key := sig[i].Text(strippedS)
+	depth := 0
+	for i := 0; i < len(sig); i++ {
+		switch sig[i].Kind {
+		case sqltok.LParen:
+			depth++
+			continue
+		case sqltok.RParen:
+			if depth > 0 {
+				depth--
+			}
+			continue
+		}
+		if depth == 0 && i+1 < len(sig) &&
+			(sig[i].Kind == sqltok.Keyword || sig[i].Kind == sqltok.Identifier) &&
+			sig[i+1].Kind == sqltok.Operator && sig[i+1].Text(s) == "=" {
+			key := sig[i].Text(s)
 			if !valid[strings.ToUpper(key)] {
 				*markers = append(*markers, diagMarkerSpan(r, fmt.Sprintf("Unexpected property '%s' in statement.", key), 4))
 			}
@@ -3469,7 +3433,7 @@ func validateCreateNetworkPolicy(parseText string, r StatementRange) []DiagMarke
 	}
 
 	// 5. Validate top-level property keys (strip list contents to avoid false positives).
-	validateProperties(stripParenContents(parseText), networkPolicyProps, r, &markers)
+	validateProperties(parseText, networkPolicyProps, r, &markers)
 
 	return markers
 }
@@ -4426,16 +4390,26 @@ func validateCreateIcebergTable(parseText string, r StatementRange) []DiagMarker
 
 func getStatementProperties(s string) map[string]string {
 	props := make(map[string]string)
-	// Strip parentheses and their contents first, as they contain column definitions, CHECKs, etc.
-	// This helps avoid spoofing property keys like CATALOG or EXTERNAL_VOLUME.
-	s = stripParenContents(s)
+	// Only collect top-level (paren depth 0) KEY = VALUE pairs, so nested content
+	// such as column definitions or CHECK(...) cannot spoof property keys like
+	// CATALOG or EXTERNAL_VOLUME.
 	sig := sigToks(sqltok.Tokenize(s))
-	for i := 0; i+2 < len(sig); i++ {
-		if (sig[i].Kind == sqltok.Keyword || sig[i].Kind == sqltok.Identifier) &&
+	depth := 0
+	for i := 0; i < len(sig); i++ {
+		switch sig[i].Kind {
+		case sqltok.LParen:
+			depth++
+			continue
+		case sqltok.RParen:
+			if depth > 0 {
+				depth--
+			}
+			continue
+		}
+		if depth == 0 && i+2 < len(sig) &&
+			(sig[i].Kind == sqltok.Keyword || sig[i].Kind == sqltok.Identifier) &&
 			sig[i+1].Kind == sqltok.Operator && sig[i+1].Text(s) == "=" {
-			key := strings.ToUpper(sig[i].Text(s))
-			val := sig[i+2].Text(s)
-			props[key] = val
+			props[strings.ToUpper(sig[i].Text(s))] = sig[i+2].Text(s)
 		}
 	}
 	return props
@@ -5258,9 +5232,9 @@ func validateCreateEventTable(parseText string, r StatementRange) []DiagMarker {
 		}
 	}
 
-	// 6. Validate allowed properties. Use stripParenContents to avoid
-	// false positives from keys inside TAG(...) or other paren blocks.
-	validateProperties(stripParenContents(sqltok.StripStrings(stripped)), `DATA_RETENTION_TIME_IN_DAYS|MAX_DATA_EXTENSION_TIME_IN_DAYS|CHANGE_TRACKING|DEFAULT_DDL_COLLATION|COMMENT|TAG`, r, &markers)
+	// 6. Validate allowed properties. validateProperties skips keys nested inside
+	// TAG(...) or other paren blocks via its paren-depth tracking.
+	validateProperties(stripped, `DATA_RETENTION_TIME_IN_DAYS|MAX_DATA_EXTENSION_TIME_IN_DAYS|CHANGE_TRACKING|DEFAULT_DDL_COLLATION|COMMENT|TAG`, r, &markers)
 
 	return markers
 }
