@@ -16,6 +16,7 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import { SyncOutlined, DeleteOutlined, InfoCircleOutlined } from "@ant-design/icons";
 import { GetTableColumnsWithTypes } from "../../../wailsjs/go/app/App";
+import { GetSnowflakeKeywords } from "../../../wailsjs/go/sqleditor/Service";
 import { snowflake } from "../../../wailsjs/go/models";
 import { useInsertMappingStore } from "../../store/insertMappingStore";
 import { useObjectStore } from "../../store/objectStore";
@@ -26,35 +27,6 @@ const { Option } = Select;
 
 // Identifiers that are structurally safe (no special chars / spaces)
 const SAFE_IDENT = /^[a-zA-Z_][a-zA-Z0-9_$]*$/;
-
-// Snowflake reserved keywords — must always be double-quoted when used as identifiers
-const SNOWFLAKE_RESERVED = new Set([
-  "ACCOUNT", "ALL", "ALTER", "AND", "ANY", "AS",
-  "BETWEEN", "BY",
-  "CASE", "CAST", "CHECK", "COLUMN", "CONNECT", "CONNECTION", "CONSTRAINT",
-  "CREATE", "CROSS", "CROSS", "CURRENT", "CURRENT_DATE", "CURRENT_TIME",
-  "CURRENT_TIMESTAMP", "CURRENT_USER",
-  "DATABASE", "DELETE", "DISTINCT", "DROP",
-  "ELSE", "END", "EXISTS",
-  "FAIL", "FALSE", "FOLLOWING", "FOR", "FOREIGN", "FROM", "FULL",
-  "GRANT", "GROUP", "GSCLUSTER",
-  "HAVING",
-  "ILIKE", "IN", "INCREMENT", "INNER", "INSERT", "INTERSECT", "INTO", "IS", "ISSUE",
-  "JOIN",
-  "LATERAL", "LEFT", "LIKE", "LIMIT", "LOCALTIME", "LOCALTIMESTAMP",
-  "MAX", "MIN",
-  "MINUS",
-  "NATURAL", "NOT", "NULL",
-  "OF", "ON", "OR", "ORDER",
-  "PRECEDING", "PRIMARY",
-  "QUALIFY",
-  "REGEXP", "REVOKE", "RIGHT", "RLIKE", "ROW", "ROWS",
-  "SAMPLE", "SCHEMA", "SELECT", "SET", "SOME", "START",
-  "TABLE", "TABLESAMPLE", "THEN", "TO", "TRIGGER", "TRUE", "TRY_CAST",
-  "UNION", "UNIQUE", "UNPIVOT", "UPDATE", "USING",
-  "VALUES", "VIEW",
-  "WHEN", "WHENEVER", "WHERE", "WITH",
-]);
 
 interface ColumnMapping {
   targetCol: string;
@@ -77,15 +49,20 @@ export default function InsertMappingModal() {
   const [loadingTarget, setLoadingTarget] = useState(false);
   const [loadingSources, setLoadingSources] = useState(false);
   const [quoteIdentifiers, setQuoteIdentifiers] = useState(true);
+  const [reservedWords, setReservedWords] = useState<Set<string>>(new Set());
 
   // Prevent concurrent duplicate loads for the same source index
   const loadingIndices = useRef<Set<number>>(new Set());
+
+  useEffect(() => {
+    GetSnowflakeKeywords().then((kws) => setReservedWords(new Set(kws)));
+  }, []);
 
   // ── Quoting helper ──────────────────────────────────────────────────────────
   const q = (s: string) =>
     quoteIdentifiers ||
     !SAFE_IDENT.test(s) ||
-    SNOWFLAKE_RESERVED.has(s.toUpperCase()) ||
+    reservedWords.has(s.toUpperCase()) ||
     s !== s.toUpperCase()
       ? `"${s.replace(/"/g, '""')}"`
       : s;

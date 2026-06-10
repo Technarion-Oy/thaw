@@ -10,6 +10,8 @@
 
 package sqltok
 
+import "sort"
+
 // reservedKeywords is the Snowflake reserved-keyword set from the official spec.
 // An unquoted identifier matching one of these is always a keyword.
 // Source: internal/snowflake/identifiers.go
@@ -249,6 +251,16 @@ var builtinFunctions = map[string]struct{}{
 	"WEEK": {}, "WEEKISO": {}, "WEEKOFYEAR": {},
 	"XMLGET": {}, "YEAR": {}, "YEAROFWEEK": {},
 	"YEAROFWEEKISO": {}, "ZEROIFNULL": {},
+}
+
+// ReservedKeywordList returns the Snowflake reserved keywords as a sorted slice.
+func ReservedKeywordList() []string {
+	out := make([]string, 0, len(reservedKeywords))
+	for kw := range reservedKeywords {
+		out = append(out, kw)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // IsReserved reports whether upper (an already-uppercased word) is a

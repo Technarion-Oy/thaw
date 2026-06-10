@@ -659,7 +659,7 @@ func scanSelectClauseForUnknownCols(clause string, metaCols, localCols map[strin
 
 		// Skip known SQL keywords to prevent flagging things like FROM, WHERE, etc.
 		normUpper := strings.ToUpper(normName)
-		if sqlAllKeywords[normUpper] {
+		if sqltok.IsKeyword(normUpper) {
 			continue
 		}
 
