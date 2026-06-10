@@ -12,7 +12,6 @@ package sqleditor
 
 import (
 	"encoding/json"
-	"regexp"
 	"strings"
 
 	"thaw/internal/sqltok"
@@ -535,11 +534,10 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			firstKw != "MERGE" && firstKw != "INSERT" && firstKw != "UPDATE" && firstKw != "DELETE" {
 			continue
 		}
-		strippedCtx := strings.TrimSpace(stripCommentsSQL(raw))
-		checkCtx := regexp.MustCompile(`(?i)\bCLUSTER\s+BY\s*\([^)]+\)`).ReplaceAllString(strippedCtx, "")
-		if reSnowflakeFP.MatchString(checkCtx) {
+		if matchesSnowflakeFP(sig, raw) {
 			continue
 		}
+		strippedCtx := strings.TrimSpace(stripCommentsSQL(raw))
 
 		parseText := strings.TrimRight(strings.TrimSpace(raw), "; \t\r\n")
 

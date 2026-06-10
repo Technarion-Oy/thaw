@@ -11,7 +11,6 @@
 package sqleditor
 
 import (
-	"regexp"
 	"strings"
 
 	"thaw/internal/sqltok"
@@ -31,9 +30,6 @@ type ValidateBareColsRequest struct {
 // ── Precompiled regexes & Maps ────────────────────────────────────────────────
 
 var (
-	// CLUSTER BY (...) – remove before FP check
-	reClusterBy = regexp.MustCompile(`(?i)\bCLUSTER\s+BY\s*\([^)]+\)`)
-
 	// Date parts and functions for context-aware bare column skipping
 	bcrDateParts = map[string]bool{
 		"YEAR": true, "MONTH": true, "DAY": true, "HOUR": true, "MINUTE": true,
@@ -141,9 +137,7 @@ func ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {
 
 		// False-positive guard: skip statements with Snowflake-specific syntax
 		// that would produce noise.
-		stripped := strings.TrimSpace(stripCommentsSQL(raw))
-		checkText := reClusterBy.ReplaceAllString(stripped, "")
-		if reSnowflakeFP.MatchString(checkText) {
+		if matchesSnowflakeFP(sigTokens(raw), raw) {
 			continue
 		}
 

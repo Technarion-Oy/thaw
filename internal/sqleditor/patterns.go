@@ -36,29 +36,22 @@ const (
 
 var (
 	// ── Snowflake false-positive guard ───────────────────────────────────────
-	// Statements matching this regex contain Snowflake syntax that the
-	// node-sql-parser doesn't support; we skip them.  We keep this guard here so
-	// the preamble validators don't accidentally emit for them.
-	reSnowflakeFP = regexp.MustCompile(
-		`(?i)\bTABLESAMPLE\b|\bSAMPLE\s*\(|\bWITHIN\s+GROUP\b|\bCONNECT\s+BY\b` +
-			`|\bAT\s*\(|\bBEFORE\s*\(|\bIN\s+TABLE\b` +
-			`|CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:STAGE` +
-			`|REPLICATION|FAILOVER|APPLICATION\s+PACKAGE|APPLICATION|DATASHARE|SERVICE|IMAGE\s+REPOSITORY|GIT\s+REPOSITORY)\b` +
-			`|ALTER\s+(?:TABLE|VIEW|STREAM|DATABASE|STAGE|PIPE|PROCEDURE|FUNCTION` +
-			`|ALERT|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK` +
-			`|REPLICATION|FAILOVER|APPLICATION\s+PACKAGE|APPLICATION|DATASHARE|SERVICE|IMAGE\s+REPOSITORY|GIT\s+REPOSITORY)\b` +
-			`|DROP\s+(?:TABLE|VIEW|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION|APPLICATION\s+PACKAGE|APPLICATION|DATASHARE|SERVICE|IMAGE\s+REPOSITORY|GIT\s+REPOSITORY)\b` +
-			`|EXECUTE\s+(?:JOB\s+)?SERVICE\b` +
-			`|UNDROP\s+(?:DATABASE|SCHEMA|TABLE)\b` +
-			`|^INSERT\s+(?:OVERWRITE\s+)?(?:ALL|FIRST)\b` +
-			`|TRUNCATE\s+\S+\s+IF\b` +
-			`|\bLATERAL\s+FLATTEN\b` +
-			`|\bINFER_SCHEMA\b` +
-			`|\bPIVOT\s*\(` +
-			`|\bUNPIVOT\b` +
-			`|\bMATCH_RECOGNIZE\s*\(` +
-			`|\bASOF\s+JOIN\b`,
-	)
+	// The matchesSnowflakeFP token scan (below) uses these object-noun sets to
+	// recognise CREATE/ALTER/DROP of objects whose statements the bare-column and
+	// table-existence validators can't handle and should skip. The two-word nouns
+	// IMAGE REPOSITORY and GIT REPOSITORY are matched separately in fpObjectNoun.
+	fpCreateNouns = toUpperSet([]string{
+		"STAGE", "REPLICATION", "FAILOVER", "APPLICATION", "DATASHARE", "SERVICE",
+	})
+	fpAlterNouns = toUpperSet([]string{
+		"TABLE", "VIEW", "STREAM", "DATABASE", "STAGE", "PIPE", "PROCEDURE", "FUNCTION",
+		"ALERT", "EXTERNAL", "NOTIFICATION", "STORAGE", "SECURITY", "MASKING", "NETWORK",
+		"REPLICATION", "FAILOVER", "APPLICATION", "DATASHARE", "SERVICE",
+	})
+	fpDropNouns = toUpperSet([]string{
+		"TABLE", "VIEW", "STREAM", "STAGE", "PIPE", "PROCEDURE", "FUNCTION",
+		"APPLICATION", "DATASHARE", "SERVICE",
+	})
 
 	// (reCortexFuncCall removed — token-based)
 
@@ -1092,6 +1085,121 @@ var parseTextRoutes = []parseTextRoute{
 	// ── DESCRIBE / SHOW ──
 	{guardKWAlt("DESCRIBE", "DESC"), validateDescribe},
 	{guardKW("SHOW"), validateShow},
+}
+
+// fpObjectNoun reports whether sig[i] (optionally with sig[i+1]) is one of the
+// object nouns in single, or the two-word IMAGE REPOSITORY / GIT REPOSITORY.
+func fpObjectNoun(sig []sqltok.Token, sql string, i int, single map[string]bool) bool {
+	if i >= len(sig) {
+		return false
+	}
+	n := tokUpper(sig[i], sql)
+	if single[n] {
+		return true
+	}
+	return (n == "IMAGE" || n == "GIT") && i+1 < len(sig) && tokUpper(sig[i+1], sql) == "REPOSITORY"
+}
+
+// matchesSnowflakeFP reports whether a statement contains Snowflake-specific
+// syntax that the bare-column-ref and table-existence validators cannot analyse
+// and should therefore skip (to avoid emitting noise). It is the token-based
+// replacement for the old reSnowflakeFP regex guard.
+//
+// Working on the significant-token stream means keywords inside string literals,
+// comments, and dollar-quoted bodies are never matched (the regex, applied to
+// comment-stripped-but-not-string-stripped text, could mis-fire on e.g.
+// SELECT 'DROP TABLE x'). CLUSTER BY (...) clauses are skipped wholesale so their
+// contents cannot trigger a match, replacing the prior reClusterBy pre-strip.
+func matchesSnowflakeFP(sig []sqltok.Token, sql string) bool {
+	// Statement-initial INSERT [OVERWRITE] ALL|FIRST (the old ^INSERT anchor).
+	if len(sig) > 0 && tokUpper(sig[0], sql) == "INSERT" {
+		j := 1
+		if j < len(sig) && tokUpper(sig[j], sql) == "OVERWRITE" {
+			j++
+		}
+		if j < len(sig) {
+			if u := tokUpper(sig[j], sql); u == "ALL" || u == "FIRST" {
+				return true
+			}
+		}
+	}
+
+	for i := 0; i < len(sig); i++ {
+		switch tokUpper(sig[i], sql) {
+		case "CLUSTER":
+			// Skip CLUSTER BY ( ... ) so its contents don't trigger a match.
+			if i+2 < len(sig) && tokUpper(sig[i+1], sql) == "BY" && sig[i+2].Kind == sqltok.LParen {
+				if _, closeIdx, ok := parenInnerRange(sig, i+2); ok {
+					i = closeIdx
+				}
+			}
+		case "TABLESAMPLE", "INFER_SCHEMA", "UNPIVOT":
+			return true
+		case "SAMPLE", "PIVOT", "MATCH_RECOGNIZE", "AT", "BEFORE":
+			if i+1 < len(sig) && sig[i+1].Kind == sqltok.LParen {
+				return true
+			}
+		case "WITHIN":
+			if i+1 < len(sig) && tokUpper(sig[i+1], sql) == "GROUP" {
+				return true
+			}
+		case "CONNECT":
+			if i+1 < len(sig) && tokUpper(sig[i+1], sql) == "BY" {
+				return true
+			}
+		case "IN":
+			if i+1 < len(sig) && tokUpper(sig[i+1], sql) == "TABLE" {
+				return true
+			}
+		case "LATERAL":
+			if i+1 < len(sig) && tokUpper(sig[i+1], sql) == "FLATTEN" {
+				return true
+			}
+		case "ASOF":
+			if i+1 < len(sig) && tokUpper(sig[i+1], sql) == "JOIN" {
+				return true
+			}
+		case "EXECUTE":
+			j := i + 1
+			if j < len(sig) && tokUpper(sig[j], sql) == "JOB" {
+				j++
+			}
+			if j < len(sig) && tokUpper(sig[j], sql) == "SERVICE" {
+				return true
+			}
+		case "UNDROP":
+			if i+1 < len(sig) {
+				if u := tokUpper(sig[i+1], sql); u == "DATABASE" || u == "SCHEMA" || u == "TABLE" {
+					return true
+				}
+			}
+		case "TRUNCATE":
+			// TRUNCATE <name-word> IF  (TRUNCATE [TABLE] IF EXISTS …).
+			if i+2 < len(sig) && isIdent(sig[i+1]) && tokUpper(sig[i+2], sql) == "IF" {
+				return true
+			}
+		case "CREATE":
+			j := i + 1
+			if j+1 < len(sig) && tokUpper(sig[j], sql) == "OR" && tokUpper(sig[j+1], sql) == "REPLACE" {
+				j += 2
+			}
+			if j < len(sig) && tokUpper(sig[j], sql) == "TRANSIENT" {
+				j++
+			}
+			if fpObjectNoun(sig, sql, j, fpCreateNouns) {
+				return true
+			}
+		case "ALTER":
+			if fpObjectNoun(sig, sql, i+1, fpAlterNouns) {
+				return true
+			}
+		case "DROP":
+			if fpObjectNoun(sig, sql, i+1, fpDropNouns) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ValidateSnowflakePatterns is the entry point for Snowflake-specific pattern
