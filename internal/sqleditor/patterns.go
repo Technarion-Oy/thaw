@@ -442,9 +442,6 @@ var (
 		`FILE_FORMAT`, `COPY_OPTIONS`, `COMMENT`, `DIRECTORY`, `SUBPATH`,
 	}, "|")
 
-	// ── Shared ───────────────────────────────────────────────────────────────
-	reIdentPathAnchored = regexp.MustCompile(`^` + _identPath)
-
 	// ── SHOW ─────────────────────────────────────────────────────────────────
 
 	// ── DESCRIBE / DESC ──────────────────────────────────────────────────────
@@ -1555,15 +1552,10 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			markers = append(markers, validateAsofJoinClauses(stripped, r)...)
 		}
 
-		// ── Skip Snowflake false-positive statements ──────────────────────
-		// (statements with Snowflake-specific syntax that the parser can't
-		// handle; we emit no error for these)
-		checkText := stripClusterByParens(stripped)
-		if reSnowflakeFP.MatchString(checkText) {
-			continue
-		}
-		// Generic SELECT/INSERT/UPDATE/WITH: no additional checks here.
-		// ValidateSyntax (the tokenizer) already covers them.
+		// Generic SELECT/INSERT/UPDATE/WITH and other Snowflake-specific
+		// statements need no additional checks here — ValidateSyntax (the
+		// tokenizer) already covers them, and the dedicated validators above
+		// handle the statements with structural rules.
 	}
 
 	// ── Post-loop: unclosed transaction check ────────────────────────────
@@ -2481,48 +2473,6 @@ func isValidAfterMatchSkipTarget(toks []sqltok.Token, sql string) bool {
 		}
 	}
 	return false
-}
-
-// stripClusterByParens removes CLUSTER BY (...) clauses from the text to prevent
-// false positive syntax errors on Snowflake-specific DDL.
-func stripClusterByParens(s string) string {
-	toks := sqltok.Tokenize(s)
-	sig := sigToks(toks)
-	// Find CLUSTER BY ( positions and collect byte ranges to remove.
-	type spanRange struct{ start, end int }
-	var ranges []spanRange
-	for i := 0; i+2 < len(sig); i++ {
-		if tokUpper(sig[i], s) == "CLUSTER" && tokUpper(sig[i+1], s) == "BY" &&
-			sig[i+2].Kind == sqltok.LParen {
-			// Find the matching close paren.
-			depth := 1
-			for j := i + 3; j < len(sig); j++ {
-				switch sig[j].Kind {
-				case sqltok.LParen:
-					depth++
-				case sqltok.RParen:
-					depth--
-					if depth == 0 {
-						ranges = append(ranges, spanRange{sig[i].Start, sig[j].End})
-						i = j
-						goto nextCluster
-					}
-				}
-			}
-		nextCluster:
-		}
-	}
-	if len(ranges) == 0 {
-		return s
-	}
-	var b strings.Builder
-	prev := 0
-	for _, r := range ranges {
-		b.WriteString(s[prev:r.start])
-		prev = r.end
-	}
-	b.WriteString(s[prev:])
-	return b.String()
 }
 
 // ── CREATE FUNCTION / PROCEDURE helpers ──────────────────────────────────────
@@ -5995,17 +5945,6 @@ func validateAlterSession(parseText string, r StatementRange) []DiagMarker {
 
 // ── validateShow ──────────────────────────────────────────────────────────────
 
-// isKeywordBoundary reports whether position pos in s is at a word boundary
-// (end of string, whitespace, semicolon, or opening parenthesis).
-// Used by validateShow and validateDescribe for keyword-termination checks.
-func isKeywordBoundary(s string, pos int) bool {
-	if pos >= len(s) {
-		return true
-	}
-	c := s[pos]
-	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ';' || c == '(' || c == ')'
-}
-
 // showClauseKeywords is the set of SHOW clause keywords that must not be
 // consumed as identifiers when parsing optional scope names in the IN clause.
 var showClauseKeywords = map[string]bool{
@@ -6027,13 +5966,26 @@ var showClauseKeywords = map[string]bool{
 func validateShow(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+	s := strings.TrimSpace(stripCommentsSQL(parseText))
+	sig := sigToks(sqltok.Tokenize(s))
 
-	// Remove "SHOW" keyword.
-	rest := strings.TrimSpace(stripped[len("SHOW"):])
-	restUp := strings.ToUpper(rest)
+	// firstField returns the first whitespace-delimited, upper-cased word of the
+	// source remaining at sig[idx]. It reproduces the old strings.Fields(restUp)[0]
+	// used verbatim in diagnostic messages.
+	firstField := func(idx int) string {
+		if idx < 0 || idx >= len(sig) {
+			return ""
+		}
+		f := strings.Fields(strings.ToUpper(s[sig[idx].Start:]))
+		if len(f) == 0 {
+			return ""
+		}
+		return f[0]
+	}
 
-	if restUp == "" {
+	// sig[0] is SHOW (guaranteed by the dispatch guard).
+	i := 1
+	if i >= len(sig) {
 		markers = append(markers, diagMarkerSpan(r,
 			"SHOW requires an object type. Use SHOW TABLES, SHOW VIEWS, SHOW SCHEMAS, etc.", 4))
 		return markers
@@ -6041,32 +5993,29 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 
 	// ── TERSE modifier ───────────────────────────────────────────────────
 	isTerse := false
-	if strings.HasPrefix(restUp, "TERSE") && isKeywordBoundary(restUp, 5) {
+	if tokUpper(sig[i], s) == "TERSE" {
 		isTerse = true
-		rest = strings.TrimSpace(rest[5:])
-		restUp = strings.ToUpper(rest)
+		i++
 	}
 
 	// ── Object type (longest match first) ────────────────────────────────
 	objType := ""
 	for _, ot := range showObjectTypes {
-		if strings.HasPrefix(restUp, ot) && isKeywordBoundary(restUp, len(ot)) {
+		if matchKeywordPhrase(sig, s, i, ot) {
 			objType = ot
-			rest = strings.TrimSpace(rest[len(ot):])
-			restUp = strings.ToUpper(rest)
+			i += len(strings.Split(ot, " "))
 			break
 		}
 	}
 
 	if objType == "" {
-		if restUp == "" {
+		if i >= len(sig) {
 			// Reached when TERSE consumed everything, e.g. "SHOW TERSE".
 			markers = append(markers, diagMarkerSpan(r,
 				"SHOW TERSE requires an object type. Use SHOW TERSE TABLES, SHOW TERSE VIEWS, etc.", 4))
 		} else {
-			words := strings.Fields(restUp)
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("Unknown object type '%s' in SHOW statement.", words[0]), 4))
+				fmt.Sprintf("Unknown object type '%s' in SHOW statement.", firstField(i)), 4))
 		}
 		return markers
 	}
@@ -6078,17 +6027,16 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// ── HISTORY modifier ─────────────────────────────────────────────────
-	if strings.HasPrefix(restUp, "HISTORY") && isKeywordBoundary(restUp, 7) {
+	if i < len(sig) && tokUpper(sig[i], s) == "HISTORY" {
 		if !showHistoryEligible[objType] {
 			markers = append(markers, diagMarkerSpan(r,
 				fmt.Sprintf("HISTORY is only valid for SHOW PIPES and SHOW REPLICATION DATABASES, not SHOW %s.", objType), 4))
 		}
-		rest = strings.TrimSpace(rest[7:])
-		restUp = strings.ToUpper(rest)
+		i++
 	}
 
 	// Skip clause validation for types with non-standard syntax.
-	if showNoClauseValidation[objType] || restUp == "" {
+	if showNoClauseValidation[objType] || i >= len(sig) {
 		return markers
 	}
 
@@ -6097,51 +6045,42 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 	// Each clause is consumed at most once; the loop exits when no clause
 	// keyword matches the current position.
 	seenLike, seenIn, seenStartsWith, seenLimit := false, false, false, false
-	for restUp != "" {
+	for i < len(sig) {
+		u := tokUpper(sig[i], s)
+
 		// ── LIKE '<pattern>' ─────────────────────────────────────────
-		if !seenLike && strings.HasPrefix(restUp, "LIKE") && isKeywordBoundary(restUp, 4) {
+		if !seenLike && u == "LIKE" {
 			seenLike = true
-			rest = strings.TrimSpace(rest[4:])
-			if rest == "" || rest[0] != '\'' {
+			i++
+			if i >= len(sig) || sig[i].Kind != sqltok.StringLit {
 				markers = append(markers, diagMarkerSpan(r,
 					"LIKE requires a string literal. Use LIKE '<pattern>'.", 4))
 				return markers
 			}
-			end := matchStringLiteral(rest)
-			if end == -1 {
+			if matchStringLiteral(s[sig[i].Start:]) == -1 {
 				markers = append(markers, diagMarkerSpan(r,
 					"Unterminated string literal in LIKE clause.", 4))
 				return markers
 			}
-			rest = strings.TrimSpace(rest[end:])
-			restUp = strings.ToUpper(rest)
+			i++
 			continue
 		}
 
 		// ── IN { ACCOUNT | DATABASE [<db>] | SCHEMA [<schema>] | TABLE [<tbl>] | <ident> }
-		if !seenIn && strings.HasPrefix(restUp, "IN") && isKeywordBoundary(restUp, 2) {
+		if !seenIn && u == "IN" {
 			seenIn = true
-			rest = strings.TrimSpace(rest[2:])
-			restUp = strings.ToUpper(rest)
+			i++
 
 			matched := false
 			for _, scope := range []string{"ACCOUNT", "DATABASE", "SCHEMA", "TABLE"} {
-				if strings.HasPrefix(restUp, scope) && isKeywordBoundary(restUp, len(scope)) {
+				if i < len(sig) && tokUpper(sig[i], s) == scope {
 					matched = true
-					rest = strings.TrimSpace(rest[len(scope):])
-					restUp = strings.ToUpper(rest)
-					// Consume optional identifier path for non-ACCOUNT scopes,
-					// but never swallow a clause keyword. Check the first path
-					// component so that e.g. "my_db.LIKE" is not consumed whole.
-					// Quoted identifiers (e.g. "LIKE") are always safe to consume.
-					if scope != "ACCOUNT" && rest != "" {
-						if m := reIdentPathAnchored.FindString(rest); m != "" {
-							first := strings.SplitN(m, ".", 2)[0]
-							if strings.HasPrefix(first, `"`) || !showClauseKeywords[strings.ToUpper(first)] {
-								rest = strings.TrimSpace(rest[len(m):])
-								restUp = strings.ToUpper(rest)
-							}
-						}
+					i++
+					// Consume an optional identifier path for non-ACCOUNT scopes,
+					// but never swallow a clause keyword (so e.g. "my_db LIKE" keeps
+					// LIKE for the clause parser). Quoted idents are always safe.
+					if scope != "ACCOUNT" {
+						i = consumeShowScopePath(sig, s, i)
 					}
 					break
 				}
@@ -6151,24 +6090,19 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 			// (e.g., SHOW TABLES IN my_schema). Try consuming an identifier
 			// path as an implicit schema scope before reporting an error.
 			if !matched {
-				if rest == "" {
+				if i >= len(sig) {
 					markers = append(markers, diagMarkerSpan(r,
 						"IN clause requires a scope. Use IN ACCOUNT, IN DATABASE, IN SCHEMA, or IN TABLE.", 4))
 					return markers
 				}
-				if m := reIdentPathAnchored.FindString(rest); m != "" {
-					first := strings.SplitN(m, ".", 2)[0]
-					if strings.HasPrefix(first, `"`) || !showClauseKeywords[strings.ToUpper(first)] {
-						rest = strings.TrimSpace(rest[len(m):])
-						restUp = strings.ToUpper(rest)
-						matched = true
-					}
+				if next := consumeShowScopePath(sig, s, i); next > i {
+					i = next
+					matched = true
 				}
 				if !matched {
-					words := strings.Fields(restUp)
-					if len(words) > 0 {
+					if w := firstField(i); w != "" {
 						markers = append(markers, diagMarkerSpan(r,
-							fmt.Sprintf("Invalid scope '%s' in IN clause. Valid scopes are ACCOUNT, DATABASE, SCHEMA, TABLE.", words[0]), 4))
+							fmt.Sprintf("Invalid scope '%s' in IN clause. Valid scopes are ACCOUNT, DATABASE, SCHEMA, TABLE.", w), 4))
 					} else {
 						markers = append(markers, diagMarkerSpan(r,
 							"IN clause requires a scope. Use IN ACCOUNT, IN DATABASE, IN SCHEMA, or IN TABLE.", 4))
@@ -6180,77 +6114,74 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 		}
 
 		// ── STARTS WITH '<prefix>' ───────────────────────────────────
-		if !seenStartsWith && strings.HasPrefix(restUp, "STARTS") && isKeywordBoundary(restUp, 6) {
+		if !seenStartsWith && u == "STARTS" {
 			seenStartsWith = true
-			rest = strings.TrimSpace(rest[6:])
-			restUp = strings.ToUpper(rest)
-			if !(strings.HasPrefix(restUp, "WITH") && isKeywordBoundary(restUp, 4)) {
+			i++
+			if i >= len(sig) || tokUpper(sig[i], s) != "WITH" {
 				markers = append(markers, diagMarkerSpan(r,
 					"Expected WITH after STARTS. Use STARTS WITH '<prefix>'.", 4))
 				return markers
 			}
-			rest = strings.TrimSpace(rest[4:])
-			if rest == "" || rest[0] != '\'' {
+			i++
+			if i >= len(sig) || sig[i].Kind != sqltok.StringLit {
 				markers = append(markers, diagMarkerSpan(r,
 					"STARTS WITH requires a string literal. Use STARTS WITH '<prefix>'.", 4))
 				return markers
 			}
-			end := matchStringLiteral(rest)
-			if end == -1 {
+			if matchStringLiteral(s[sig[i].Start:]) == -1 {
 				markers = append(markers, diagMarkerSpan(r,
 					"Unterminated string literal in STARTS WITH clause.", 4))
 				return markers
 			}
-			rest = strings.TrimSpace(rest[end:])
-			restUp = strings.ToUpper(rest)
+			i++
 			continue
 		}
 
 		// ── LIMIT <n> [FROM '<name>'] ────────────────────────────────
-		if !seenLimit && strings.HasPrefix(restUp, "LIMIT") && isKeywordBoundary(restUp, 5) {
+		if !seenLimit && u == "LIMIT" {
 			seenLimit = true
-			rest = strings.TrimSpace(rest[5:])
+			i++
 
-			// Extract the number token.
-			idx := strings.IndexAny(rest, " \t\n\r;")
-			numStr := rest
-			if idx != -1 {
-				numStr = rest[:idx]
-				rest = strings.TrimSpace(rest[idx:])
-			} else {
-				rest = ""
-			}
-			restUp = strings.ToUpper(rest)
-
-			if numStr == "" {
+			if i >= len(sig) {
 				markers = append(markers, diagMarkerSpan(r,
 					"LIMIT requires a positive integer. Use LIMIT <n>.", 4))
 				return markers
 			}
 
+			// Extract the first whitespace/';'-delimited chunk as the count, to
+			// preserve the exact text reported (e.g. negative or non-numeric).
+			numStart := sig[i].Start
+			raw := s[numStart:]
+			numStr := raw
+			if idx := strings.IndexAny(raw, " \t\n\r;"); idx != -1 {
+				numStr = raw[:idx]
+			}
 			n, err := strconv.Atoi(numStr)
 			if err != nil || n <= 0 {
 				markers = append(markers, diagMarkerSpan(r,
 					fmt.Sprintf("LIMIT requires a positive integer, got '%s'.", numStr), 4))
 				return markers
 			}
+			// Advance past every token covered by the count chunk.
+			numEnd := numStart + len(numStr)
+			for i < len(sig) && sig[i].Start < numEnd {
+				i++
+			}
 
 			// Optional FROM '<name>'
-			if strings.HasPrefix(restUp, "FROM") && isKeywordBoundary(restUp, 4) {
-				rest = strings.TrimSpace(rest[4:])
-				if rest == "" || rest[0] != '\'' {
+			if i < len(sig) && tokUpper(sig[i], s) == "FROM" {
+				i++
+				if i >= len(sig) || sig[i].Kind != sqltok.StringLit {
 					markers = append(markers, diagMarkerSpan(r,
 						"FROM in LIMIT clause requires a string literal. Use LIMIT <n> FROM '<name>'.", 4))
 					return markers
 				}
-				end := matchStringLiteral(rest)
-				if end == -1 {
+				if matchStringLiteral(s[sig[i].Start:]) == -1 {
 					markers = append(markers, diagMarkerSpan(r,
 						"Unterminated string literal in LIMIT FROM clause.", 4))
 					return markers
 				}
-				rest = strings.TrimSpace(rest[end:])
-				restUp = strings.ToUpper(rest)
+				i++
 			}
 			continue
 		}
@@ -6260,14 +6191,46 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// ── Trailing unrecognized content ────────────────────────────────────
-	if restUp != "" {
-		if words := strings.Fields(restUp); len(words) > 0 {
-			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("Unexpected token '%s' in SHOW statement.", words[0]), 4))
-		}
+	if w := firstField(i); w != "" {
+		markers = append(markers, diagMarkerSpan(r,
+			fmt.Sprintf("Unexpected token '%s' in SHOW statement.", w), 4))
 	}
 
 	return markers
+}
+
+// matchKeywordPhrase reports whether the space-separated keyword phrase matches
+// the consecutive significant tokens starting at sig[start].
+func matchKeywordPhrase(sig []sqltok.Token, sql string, start int, phrase string) bool {
+	words := strings.Split(phrase, " ")
+	if start+len(words) > len(sig) {
+		return false
+	}
+	for k, w := range words {
+		if tokUpper(sig[start+k], sql) != w {
+			return false
+		}
+	}
+	return true
+}
+
+// consumeShowScopePath consumes a dot-separated identifier path (up to three
+// parts, mirroring _identPath) starting at sig[i], used for the optional scope
+// name after IN. It refuses to consume a bare clause keyword (LIKE, LIMIT, …) so
+// that the clause parser can still see it; quoted identifiers are always safe.
+// Returns the index past the consumed path, or i if nothing was consumed.
+func consumeShowScopePath(sig []sqltok.Token, sql string, i int) int {
+	if i >= len(sig) || !isIdent(sig[i]) {
+		return i
+	}
+	if sig[i].Kind != sqltok.QuotedIdent && showClauseKeywords[strings.ToUpper(sig[i].Text(sql))] {
+		return i
+	}
+	j := i + 1
+	for parts := 1; parts < 3 && j+1 < len(sig) && sig[j].Kind == sqltok.Dot && isIdent(sig[j+1]); parts++ {
+		j += 2
+	}
+	return j
 }
 
 // validateDescribe validates a DESCRIBE / DESC statement:
@@ -6280,19 +6243,23 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 func validateDescribe(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
-	strippedUp := strings.ToUpper(stripped)
+	s := strings.TrimSpace(stripCommentsSQL(parseText))
+	sig := sigToks(sqltok.Tokenize(s))
 
-	// Remove the leading DESCRIBE or DESC keyword.
-	var rest string
-	if strings.HasPrefix(strippedUp, "DESCRIBE") {
-		rest = strings.TrimSpace(stripped[len("DESCRIBE"):])
-	} else {
-		rest = strings.TrimSpace(stripped[len("DESC"):])
+	firstField := func(idx int) string {
+		if idx < 0 || idx >= len(sig) {
+			return ""
+		}
+		f := strings.Fields(strings.ToUpper(s[sig[idx].Start:]))
+		if len(f) == 0 {
+			return ""
+		}
+		return f[0]
 	}
-	restUp := strings.ToUpper(rest)
 
-	if restUp == "" {
+	// sig[0] is DESCRIBE or DESC (guaranteed by the dispatch guard).
+	i := 1
+	if i >= len(sig) {
 		markers = append(markers, diagMarkerSpan(r,
 			"DESCRIBE requires an object type and name. Use DESCRIBE TABLE <name>, DESCRIBE VIEW <name>, etc.", 4))
 		return markers
@@ -6301,25 +6268,23 @@ func validateDescribe(parseText string, r StatementRange) []DiagMarker {
 	// ── Object type (longest match first) ────────────────────────────────
 	objType := ""
 	for _, ot := range describeObjectTypes {
-		if strings.HasPrefix(restUp, ot) && isKeywordBoundary(restUp, len(ot)) {
+		if matchKeywordPhrase(sig, s, i, ot) {
 			objType = ot
-			rest = strings.TrimSpace(rest[len(ot):])
-			restUp = strings.ToUpper(rest)
+			i += len(strings.Split(ot, " "))
 			break
 		}
 	}
 
 	if objType == "" {
-		words := strings.Fields(restUp)
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("Unknown object type '%s' in DESCRIBE statement.", words[0]), 4))
+			fmt.Sprintf("Unknown object type '%s' in DESCRIBE statement.", firstField(i)), 4))
 		return markers
 	}
 
 	// ── RESULT and TRANSACTION are special: they take a string literal
 	// (query ID / transaction ID) rather than an identifier path.
 	if objType == "RESULT" || objType == "TRANSACTION" {
-		if restUp == "" {
+		if i >= len(sig) {
 			markers = append(markers, diagMarkerSpan(r,
 				fmt.Sprintf("DESCRIBE %s requires a query/transaction ID. Use DESCRIBE %s '<id>'.", objType, objType), 4))
 		}
@@ -6327,7 +6292,7 @@ func validateDescribe(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// ── Object name is mandatory ─────────────────────────────────────────
-	if restUp == "" {
+	if i >= len(sig) {
 		markers = append(markers, diagMarkerSpan(r,
 			fmt.Sprintf("DESCRIBE %s requires an object name.", objType), 4))
 		return markers
@@ -6335,39 +6300,46 @@ func validateDescribe(parseText string, r StatementRange) []DiagMarker {
 
 	// ── FUNCTION / PROCEDURE: require parenthesised signature ────────────
 	if describeNeedsSignature[objType] {
-		if !strings.Contains(rest, "(") {
+		hasParen := false
+		for j := i; j < len(sig); j++ {
+			if sig[j].Kind == sqltok.LParen {
+				hasParen = true
+				break
+			}
+		}
+		if !hasParen {
 			markers = append(markers, diagMarkerSpan(r,
 				fmt.Sprintf("DESCRIBE %s requires a parameter signature. Use DESCRIBE %s <name>(<arg_types>).", objType, objType), 4))
-			return markers
 		}
 		return markers
 	}
 
-	// ── Consume the identifier path ──────────────────────────────────────
-	m := reIdentPathAnchored.FindString(rest)
-	if m == "" {
+	// ── Consume the identifier path (up to three parts, like _identPath) ──
+	if !isIdent(sig[i]) {
 		markers = append(markers, diagMarkerSpan(r,
 			fmt.Sprintf("Expected an object name after DESCRIBE %s.", objType), 4))
 		return markers
 	}
+	pathStart := sig[i].Start
+	nextPos := i + 1
+	for parts := 1; parts < 3 && nextPos+1 < len(sig) && sig[nextPos].Kind == sqltok.Dot && isIdent(sig[nextPos+1]); parts++ {
+		nextPos += 2
+	}
+	m := s[pathStart:sig[nextPos-1].End]
 
 	// ── Account-level objects: warn on db/schema prefix ──────────────────
-	if describeAccountLevel[objType] {
-		if countIdentParts(m) > 1 {
-			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("%s is an account-level object and should not be qualified with a database or schema prefix.", objType), 4))
-		}
+	if describeAccountLevel[objType] && countIdentParts(m) > 1 {
+		markers = append(markers, diagMarkerSpan(r,
+			fmt.Sprintf("%s is an account-level object and should not be qualified with a database or schema prefix.", objType), 4))
 	}
 
 	// ── Trailing unrecognized content ────────────────────────────────────
-	// Skip trailing check when remainder starts with '"' — this indicates
-	// an escaped double-quote within a quoted identifier (e.g. "complex""name")
-	// that _ident cannot fully consume.
-	trailing := strings.TrimSpace(rest[len(m):])
-	if trailing != "" && !strings.HasPrefix(trailing, "\"") {
-		if words := strings.Fields(strings.ToUpper(trailing)); len(words) > 0 {
+	// Skip the check when the next token is a quoted identifier — this mirrors
+	// the old guard against escaped double-quotes within a quoted name.
+	if nextPos < len(sig) && sig[nextPos].Kind != sqltok.QuotedIdent {
+		if w := firstField(nextPos); w != "" {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("Unexpected token '%s' after object name in DESCRIBE statement.", words[0]), 4))
+				fmt.Sprintf("Unexpected token '%s' after object name in DESCRIBE statement.", w), 4))
 		}
 	}
 
