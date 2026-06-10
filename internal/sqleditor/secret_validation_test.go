@@ -1043,17 +1043,16 @@ func TestValidateSnowflakePatterns_Secret_MultipleTYPEDeclarations(t *testing.T)
 }
 
 func TestValidateSnowflakePatterns_Secret_CreateIfExistsWrongModifier(t *testing.T) {
-	// CREATE SECRET IF EXISTS (should be IF NOT EXISTS) — the validator
-	// treats "IF" as the secret name because the optional group only matches
-	// IF NOT EXISTS. The statement validates without warnings since TYPE and
-	// mandatory properties are present.
+	// CREATE SECRET IF EXISTS (should be IF NOT EXISTS): only the full
+	// IF NOT EXISTS clause is consumed, so "IF" is parsed as the name and the
+	// name-swallowed-by-IF guard flags the statement. (Previously the lenient
+	// parse silently accepted the DROP-style modifier.)
 	sql := "CREATE SECRET IF EXISTS my_secret TYPE = GENERIC_STRING SECRET_STRING = 'val'"
 	ranges := GetStatementRanges(sql)
 	markers := ValidateSnowflakePatterns(sql, ranges)
 	warns := getWarnings(markers)
-	// "IF" is captured as the name; TYPE + SECRET_STRING satisfy GENERIC_STRING.
-	if len(warns) != 0 {
-		t.Errorf("Expected 0 warnings (wrong modifier not detected, name='IF'), got %d: %v", len(warns), warnMsgs(warns))
+	if len(warns) != 1 || !strings.Contains(warns[0].Message, "Unexpected syntax in CREATE SECRET") {
+		t.Errorf("Expected 1 wrong-modifier warning, got %d: %v", len(warns), warnMsgs(warns))
 	}
 }
 

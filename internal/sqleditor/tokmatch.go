@@ -59,6 +59,13 @@ func isIdent(tok sqltok.Token) bool {
 	return tok.Kind == sqltok.Keyword || tok.Kind == sqltok.Identifier || tok.Kind == sqltok.QuotedIdent
 }
 
+// isAliasTok reports whether tok can be a table alias: an unquoted identifier or
+// a "quoted" identifier, but not a bare keyword. This prevents a following clause
+// keyword (WHERE, GROUP, JOIN, …) from being captured as an implicit alias.
+func isAliasTok(tok sqltok.Token) bool {
+	return tok.Kind == sqltok.Identifier || tok.Kind == sqltok.QuotedIdent
+}
+
 // isNonEmptyIdent checks that tok is an identifier token with actual content.
 // Unlike isIdent, it rejects empty quoted identifiers ("") and unclosed quotes.
 func isNonEmptyIdent(tok sqltok.Token, sql string) bool {
@@ -215,6 +222,39 @@ func kwAtAny(sig []sqltok.Token, sql string, pos int, kws ...string) string {
 // identifier path. They operate on "significant tokens" (sig) — the output
 // of sigToks.
 
+// skipCreateOr consumes an optional "OR REPLACE" / "OR ALTER" prefix at sig[i]
+// (Snowflake's CREATE OR ALTER is valid for tables, tasks, etc.). ok is false
+// only when "OR" is present but not followed by REPLACE or ALTER — a malformed
+// prefix the caller should reject.
+func skipCreateOr(sig []sqltok.Token, sql string, i int) (next int, ok bool) {
+	if !kwAt(sig, sql, i, "OR") {
+		return i, true
+	}
+	if kwAtAny(sig, sql, i+1, "REPLACE", "ALTER") == "" {
+		return i, false
+	}
+	return i + 2, true
+}
+
+// skipIfNotExists consumes an "IF NOT EXISTS" clause at sig[i] only when all
+// three keywords are present, so a partial sequence such as the DROP-style
+// "IF EXISTS" is left unconsumed rather than silently treated as IF NOT EXISTS.
+func skipIfNotExists(sig []sqltok.Token, sql string, i int) int {
+	if kwAt(sig, sql, i, "IF") && kwAt(sig, sql, i+1, "NOT") && kwAt(sig, sql, i+2, "EXISTS") {
+		return i + 3
+	}
+	return i
+}
+
+// skipIfExists consumes an "IF EXISTS" clause at sig[i] only when both keywords
+// are present, returning the new index and whether the clause was present.
+func skipIfExists(sig []sqltok.Token, sql string, i int) (next int, present bool) {
+	if kwAt(sig, sql, i, "IF") && kwAt(sig, sql, i+1, "EXISTS") {
+		return i + 2, true
+	}
+	return i, false
+}
+
 // matchCreateTV matches:
 //
 //	CREATE [OR REPLACE] [SECURE] [INTERACTIVE]
@@ -229,12 +269,9 @@ func matchCreateTV(sig []sqltok.Token, sql string) (rawPath, objKw string, ok bo
 		return
 	}
 	i++
-	if kwAt(sig, sql, i, "OR") {
-		i++
-		if !kwAt(sig, sql, i, "REPLACE") {
-			return
-		}
-		i++
+	i, orOK := skipCreateOr(sig, sql, i)
+	if !orOK {
+		return
 	}
 	if kwAt(sig, sql, i, "SECURE") {
 		i++
@@ -259,15 +296,7 @@ func matchCreateTV(sig []sqltok.Token, sql string) (rawPath, objKw string, ok bo
 		return
 	}
 	i++
-	if kwAt(sig, sql, i, "IF") {
-		i++
-		if kwAt(sig, sql, i, "NOT") {
-			i++
-		}
-		if kwAt(sig, sql, i, "EXISTS") {
-			i++
-		}
-	}
+	i = skipIfNotExists(sig, sql, i)
 	rawPath, _ = readIdentPath(sig, sql, i)
 	ok = rawPath != ""
 	return
@@ -284,12 +313,9 @@ func matchCreateDbSch(sig []sqltok.Token, sql string) (rawPath string, ok bool) 
 		return
 	}
 	i++
-	if kwAt(sig, sql, i, "OR") {
-		i++
-		if !kwAt(sig, sql, i, "REPLACE") {
-			return
-		}
-		i++
+	i, orOK := skipCreateOr(sig, sql, i)
+	if !orOK {
+		return
 	}
 	if kwAt(sig, sql, i, "TRANSIENT") {
 		i++
@@ -298,15 +324,7 @@ func matchCreateDbSch(sig []sqltok.Token, sql string) (rawPath string, ok bool) 
 		return
 	}
 	i++
-	if kwAt(sig, sql, i, "IF") {
-		i++
-		if kwAt(sig, sql, i, "NOT") {
-			i++
-		}
-		if kwAt(sig, sql, i, "EXISTS") {
-			i++
-		}
-	}
+	i = skipIfNotExists(sig, sql, i)
 	rawPath, _ = readIdentPath(sig, sql, i)
 	ok = rawPath != ""
 	return
@@ -321,12 +339,9 @@ func matchCreateSchema(sig []sqltok.Token, sql string) (rawPath string, ok bool)
 		return
 	}
 	i++
-	if kwAt(sig, sql, i, "OR") {
-		i++
-		if !kwAt(sig, sql, i, "REPLACE") {
-			return
-		}
-		i++
+	i, orOK := skipCreateOr(sig, sql, i)
+	if !orOK {
+		return
 	}
 	if kwAt(sig, sql, i, "TRANSIENT") {
 		i++
@@ -335,15 +350,7 @@ func matchCreateSchema(sig []sqltok.Token, sql string) (rawPath string, ok bool)
 		return
 	}
 	i++
-	if kwAt(sig, sql, i, "IF") {
-		i++
-		if kwAt(sig, sql, i, "NOT") {
-			i++
-		}
-		if kwAt(sig, sql, i, "EXISTS") {
-			i++
-		}
-	}
+	i = skipIfNotExists(sig, sql, i)
 	rawPath, _ = readIdentPath(sig, sql, i)
 	ok = rawPath != ""
 	return
@@ -360,12 +367,9 @@ func matchCreateAnyDB(sig []sqltok.Token, sql string) bool {
 		return false
 	}
 	i++
-	if kwAt(sig, sql, i, "OR") {
-		i++
-		if !kwAt(sig, sql, i, "REPLACE") {
-			return false
-		}
-		i++
+	i, orOK := skipCreateOr(sig, sql, i)
+	if !orOK {
+		return false
 	}
 	if kwAt(sig, sql, i, "TRANSIENT") {
 		i++
@@ -382,12 +386,9 @@ func matchCreateAnySchema(sig []sqltok.Token, sql string) bool {
 		return false
 	}
 	i++
-	if kwAt(sig, sql, i, "OR") {
-		i++
-		if !kwAt(sig, sql, i, "REPLACE") {
-			return false
-		}
-		i++
+	i, orOK := skipCreateOr(sig, sql, i)
+	if !orOK {
+		return false
 	}
 	if kwAt(sig, sql, i, "TRANSIENT") {
 		i++
@@ -408,12 +409,7 @@ func matchDropTable(sig []sqltok.Token, sql string) (rawPath string, ok bool) {
 		return
 	}
 	i++
-	if kwAt(sig, sql, i, "IF") {
-		i++
-		if kwAt(sig, sql, i, "EXISTS") {
-			i++
-		}
-	}
+	i, _ = skipIfExists(sig, sql, i)
 	rawPath, _ = readIdentPath(sig, sql, i)
 	ok = rawPath != ""
 	return
@@ -432,12 +428,7 @@ func matchDropDbSch(sig []sqltok.Token, sql string) (rawPath string, ok bool) {
 		return
 	}
 	i++
-	if kwAt(sig, sql, i, "IF") {
-		i++
-		if kwAt(sig, sql, i, "EXISTS") {
-			i++
-		}
-	}
+	i, _ = skipIfExists(sig, sql, i)
 	rawPath, _ = readIdentPath(sig, sql, i)
 	ok = rawPath != ""
 	return
@@ -455,13 +446,7 @@ func matchDropDB(sig []sqltok.Token, sql string) (rawPath string, hasIfExists, o
 		return
 	}
 	i++
-	if kwAt(sig, sql, i, "IF") {
-		i++
-		if kwAt(sig, sql, i, "EXISTS") {
-			i++
-		}
-		hasIfExists = true
-	}
+	i, hasIfExists = skipIfExists(sig, sql, i)
 	rawPath, _ = readIdentPath(sig, sql, i)
 	ok = rawPath != ""
 	return
@@ -479,13 +464,7 @@ func matchDropSchema(sig []sqltok.Token, sql string) (rawPath string, hasIfExist
 		return
 	}
 	i++
-	if kwAt(sig, sql, i, "IF") {
-		i++
-		if kwAt(sig, sql, i, "EXISTS") {
-			i++
-		}
-		hasIfExists = true
-	}
+	i, hasIfExists = skipIfExists(sig, sql, i)
 	rawPath, _ = readIdentPath(sig, sql, i)
 	ok = rawPath != ""
 	return
@@ -572,13 +551,7 @@ func matchAlterTV(sig []sqltok.Token, sql string) (rawPath, objKw string, hasIfE
 		return
 	}
 	i++
-	if kwAt(sig, sql, i, "IF") {
-		i++
-		if kwAt(sig, sql, i, "EXISTS") {
-			i++
-		}
-		hasIfExists = true
-	}
+	i, hasIfExists = skipIfExists(sig, sql, i)
 	rawPath, _ = readIdentPath(sig, sql, i)
 	ok = rawPath != ""
 	return
@@ -758,12 +731,9 @@ func matchCreateTablePre(sig []sqltok.Token, sql string) (rawPath string, parenO
 		return
 	}
 	i++
-	if kwAt(sig, sql, i, "OR") {
-		i++
-		if !kwAt(sig, sql, i, "REPLACE") {
-			return
-		}
-		i++
+	i, orOK := skipCreateOr(sig, sql, i)
+	if !orOK {
+		return
 	}
 	if kwAtAny(sig, sql, i, "LOCAL", "GLOBAL") != "" {
 		i++
@@ -775,15 +745,7 @@ func matchCreateTablePre(sig []sqltok.Token, sql string) (rawPath string, parenO
 		return
 	}
 	i++
-	if kwAt(sig, sql, i, "IF") {
-		i++
-		if kwAt(sig, sql, i, "NOT") {
-			i++
-		}
-		if kwAt(sig, sql, i, "EXISTS") {
-			i++
-		}
-	}
+	i = skipIfNotExists(sig, sql, i)
 	rawPath, i = readIdentPath(sig, sql, i)
 	if rawPath == "" {
 		return
@@ -803,12 +765,9 @@ func matchCreateTableGuard(sig []sqltok.Token, sql string) bool {
 		return false
 	}
 	i++
-	if kwAt(sig, sql, i, "OR") {
-		i++
-		if !kwAt(sig, sql, i, "REPLACE") {
-			return false
-		}
-		i++
+	i, orOK := skipCreateOr(sig, sql, i)
+	if !orOK {
+		return false
 	}
 	if kwAtAny(sig, sql, i, "LOCAL", "GLOBAL") != "" {
 		i++
@@ -954,16 +913,18 @@ func findFromJoinWithAlias(sig []sqltok.Token, sql string) []tableAlias {
 		}
 		i = end
 
-		// Check for optional alias: [AS] <ident>
+		// Check for optional alias: [AS] <alias>. An implicit alias must be an
+		// Identifier or QuotedIdent — never a bare keyword — so a following clause
+		// keyword (FROM mytable WHERE …) is not captured as the alias.
 		var alias string
-		if i < len(sig) && isIdent(sig[i]) {
+		if i < len(sig) {
 			if tokUpper(sig[i], sql) == "AS" {
 				i++
-				if i < len(sig) && isIdent(sig[i]) {
+				if i < len(sig) && isAliasTok(sig[i]) {
 					alias = sig[i].Text(sql)
 					i++
 				}
-			} else {
+			} else if isAliasTok(sig[i]) {
 				alias = sig[i].Text(sql)
 				i++
 			}
@@ -1506,12 +1467,9 @@ func extractNameAfterCreate(sig []sqltok.Token, sql string, modKWs []string, obj
 	}
 	i++
 	// Optional OR REPLACE / OR ALTER.
-	if kwAt(sig, sql, i, "OR") {
-		i++
-		if !kwAt(sig, sql, i, "REPLACE") && !kwAt(sig, sql, i, "ALTER") {
-			return "", -1
-		}
-		i++
+	i, orOK := skipCreateOr(sig, sql, i)
+	if !orOK {
+		return "", -1
 	}
 	// Optional modifiers.
 	for _, mod := range modKWs {
@@ -1526,18 +1484,12 @@ func extractNameAfterCreate(sig []sqltok.Token, sql string, modKWs []string, obj
 		}
 		i++
 	}
-	// Skip optional IF NOT EXISTS — but only if a non-empty ident follows.
-	if kwAt(sig, sql, i, "IF") {
-		j := i + 1
-		if kwAt(sig, sql, j, "NOT") {
-			j++
-		}
-		if kwAt(sig, sql, j, "EXISTS") {
-			// Only skip if there's a non-empty ident after EXISTS.
-			if j+1 < len(sig) && isNonEmptyIdent(sig[j+1], sql) {
-				i = j + 1
-			}
-		}
+	// Skip an IF NOT EXISTS clause — only the full three-keyword sequence, and
+	// only when a non-empty ident follows (so "IF EXISTS" or a bare "IF" is not
+	// mistaken for the clause).
+	if kwAt(sig, sql, i, "IF") && kwAt(sig, sql, i+1, "NOT") && kwAt(sig, sql, i+2, "EXISTS") &&
+		i+3 < len(sig) && isNonEmptyIdent(sig[i+3], sql) {
+		i += 3
 	}
 	// Read identifier path — reject empty quoted identifiers.
 	if i >= len(sig) || !isNonEmptyIdent(sig[i], sql) {

@@ -1004,6 +1004,8 @@ func TestValidateTablesExist_Valid(t *testing.T) {
 		// Pre-pass tracking
 		"CREATE TEMPORARY TABLE local_tab AS SELECT 1;\nSELECT * FROM local_tab;",
 		"CREATE OR REPLACE VIEW my_view AS SELECT 1;\nSELECT * FROM my_view;",
+		// CREATE OR ALTER must also register the table (PR #472 review finding 1).
+		"CREATE OR ALTER TABLE local_oa (id INT);\nSELECT * FROM local_oa;",
 		"CREATE DATABASE local_db;\nCREATE SCHEMA local_db.local_sch;\nDROP SCHEMA local_db.local_sch;",
 		// Identifiers inside comments
 		"SELECT * FROM -- MISSING_TABLE \nLIVE_TABLE",
