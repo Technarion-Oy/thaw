@@ -3111,23 +3111,14 @@ func findMatchingParen(s string) int {
 		return -1
 	}
 	depth := 0
-	inSingle := false
-	inDouble := false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c == '\'' && !inDouble {
-			inSingle = !inSingle
-		} else if c == '"' && !inSingle {
-			inDouble = !inDouble
-		} else if !inSingle && !inDouble {
-			switch c {
-			case '(':
-				depth++
-			case ')':
-				depth--
-				if depth == 0 {
-					return i
-				}
+	for _, t := range sqltok.Tokenize(s) {
+		switch t.Kind {
+		case sqltok.LParen:
+			depth++
+		case sqltok.RParen:
+			depth--
+			if depth == 0 {
+				return t.Start
 			}
 		}
 	}
@@ -3135,16 +3126,6 @@ func findMatchingParen(s string) int {
 }
 
 // ── ValidateDataTypes ─────────────────────────────────────────────────────────
-
-var (
-	reCastShorthand  = regexp.MustCompile(`::\s*([a-zA-Z_][a-zA-Z0-9_]*)`)
-	reCastFunction   = regexp.MustCompile(`(?i)\b(?:TRY_)?CAST\s*\([\s\S]+?\bAS\s+([a-zA-Z_][a-zA-Z0-9_]+)`)
-	reAlterTableAdd  = regexp.MustCompile(`(?i)\bALTER\s+TABLE\s+` + _identPath + `\s+ADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?` + _ident + `\s+([a-zA-Z_][a-zA-Z0-9_]*)`)
-	reCreateTableExt = regexp.MustCompile(`(?is)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath + `\s*\(`)
-	reCreateProcExt  = regexp.MustCompile(`(?is)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PROCEDURE\s+` + _identPath + `\s*\(`)
-	reCreateFuncExt  = regexp.MustCompile(`(?is)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:TEMPORARY\s+|TEMP\s+)?(?:AGGREGATE\s+)?FUNCTION\s+` + _identPath + `\s*\(`)
-	reReturnsType    = regexp.MustCompile(`(?i)\bRETURNS\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\s*\([^)]*\))?\b`)
-)
 
 // ValidateDataTypes checks that explicit data type declarations within
 // CREATE TABLE, ALTER TABLE, and CAST() functions exist in Snowflake's registry.
@@ -3188,70 +3169,96 @@ func ValidateDataTypes(sql string, stmtRanges []StatementRange) []DiagMarker {
 		rawText := sqlStmt(sql, r)
 		stmtOffset := r.StartOffset
 
-		// 1. Shorthand cast (::)
-		for _, m := range reCastShorthand.FindAllStringSubmatchIndex(rawText, -1) {
-			if len(m) >= 4 && m[2] != -1 {
-				typeName := rawText[m[2]:m[3]]
-				checkType(typeName, stmtOffset+m[2])
+		sig := sigToks(sqltok.Tokenize(rawText))
+
+		// rel reports a type whose offset is relative to rawText, translating it
+		// to an absolute document offset for checkType.
+		rel := func(name string, relOffset int) { checkType(name, stmtOffset+relOffset) }
+
+		// 1. Shorthand cast (::TYPE) — the "::" operator followed by a bare word.
+		for i := 0; i+1 < len(sig); i++ {
+			if sig[i].Kind == sqltok.Operator && sig[i].Text(rawText) == "::" {
+				nt := sig[i+1]
+				if nt.Kind == sqltok.Keyword || nt.Kind == sqltok.Identifier {
+					rel(nt.Text(rawText), nt.Start)
+				}
 			}
 		}
 
-		// 2. CAST / TRY_CAST function
-		for _, m := range reCastFunction.FindAllStringSubmatchIndex(rawText, -1) {
-			if len(m) >= 4 && m[2] != -1 {
-				typeName := rawText[m[2]:m[3]]
-				checkType(typeName, stmtOffset+m[2])
+		// 2. CAST / TRY_CAST ( … AS TYPE ) — first AS after the opening paren.
+		for i := 0; i+1 < len(sig); i++ {
+			u := tokUpper(sig[i], rawText)
+			if (u != "CAST" && u != "TRY_CAST") || sig[i+1].Kind != sqltok.LParen {
+				continue
 			}
-		}
-
-		// 3. ALTER TABLE ... ADD
-		for _, m := range reAlterTableAdd.FindAllStringSubmatchIndex(rawText, -1) {
-			if len(m) >= 4 && m[2] != -1 {
-				typeName := rawText[m[2]:m[3]]
-				checkType(typeName, stmtOffset+m[2])
-			}
-		}
-
-		// 4. CREATE TABLE
-		if m := reCreateTableExt.FindStringSubmatchIndex(rawText); m != nil {
-			parenStart := m[1] - 1
-			colsRaw := extractBalancedBlockPat(rawText, parenStart)
-			if len(colsRaw) >= 2 {
-				colsContent := colsRaw[1 : len(colsRaw)-1] // strip the outer ()
-				contentOffset := stmtOffset + parenStart + 1
-
-				parseColumnDefs(colsContent, contentOffset, checkType)
-			}
-		}
-
-		// 5. CREATE PROCEDURE/FUNCTION (parameters and returns)
-		if m := reCreateProcExt.FindStringSubmatchIndex(rawText); m != nil {
-			parenStart := m[1] - 1
-			colsRaw := extractBalancedBlockPat(rawText, parenStart)
-			if len(colsRaw) >= 2 {
-				colsContent := colsRaw[1 : len(colsRaw)-1]
-				contentOffset := stmtOffset + parenStart + 1
-				parseColumnDefs(colsContent, contentOffset, checkType)
-			}
-		} else if m := reCreateFuncExt.FindStringSubmatchIndex(rawText); m != nil {
-			parenStart := m[1] - 1
-			colsRaw := extractBalancedBlockPat(rawText, parenStart)
-			if len(colsRaw) >= 2 {
-				colsContent := colsRaw[1 : len(colsRaw)-1]
-				contentOffset := stmtOffset + parenStart + 1
-				parseColumnDefs(colsContent, contentOffset, checkType)
-			}
-		}
-
-		// Check RETURNS type for any statement that has it (e.g. CREATE PROCEDURE / FUNCTION)
-		if strings.Contains(strings.ToUpper(rawText), "CREATE") && strings.Contains(strings.ToUpper(rawText), "RETURNS") {
-			for _, m := range reReturnsType.FindAllStringSubmatchIndex(rawText, -1) {
-				if len(m) >= 4 && m[2] != -1 {
-					typeName := rawText[m[2]:m[3]]
-					// Ignore "NULL" in RETURNS NULL ON NULL INPUT and "TABLE" in RETURNS TABLE(...)
-					if strings.ToUpper(typeName) != "NULL" && strings.ToUpper(typeName) != "TABLE" {
-						checkType(typeName, stmtOffset+m[2])
+			for j := i + 2; j < len(sig); j++ {
+				if tokUpper(sig[j], rawText) != "AS" {
+					continue
+				}
+				if j+1 < len(sig) {
+					tt := sig[j+1]
+					// The old regex required a 2+ char type ([a-zA-Z_][a-zA-Z0-9_]+).
+					if (tt.Kind == sqltok.Keyword || tt.Kind == sqltok.Identifier) && tt.End-tt.Start >= 2 {
+						rel(tt.Text(rawText), tt.Start)
 					}
+				}
+				break
+			}
+		}
+
+		// 3. ALTER TABLE <name> ADD [COLUMN] [IF NOT EXISTS] <col> <type>
+		if kwAt(sig, rawText, 0, "ALTER") && kwAt(sig, rawText, 1, "TABLE") {
+			_, pos := readIdentPath(sig, rawText, 2)
+			if kwAt(sig, rawText, pos, "ADD") {
+				pos++
+				if kwAt(sig, rawText, pos, "COLUMN") {
+					pos++
+				}
+				if pos+2 < len(sig) && kwAt(sig, rawText, pos, "IF") &&
+					kwAt(sig, rawText, pos+1, "NOT") && kwAt(sig, rawText, pos+2, "EXISTS") {
+					pos += 3
+				}
+				// Column name (one ident token), then the declared type.
+				if pos < len(sig) && isIdent(sig[pos]) {
+					pos++
+					if pos < len(sig) && (sig[pos].Kind == sqltok.Keyword || sig[pos].Kind == sqltok.Identifier) {
+						rel(sig[pos].Text(rawText), sig[pos].Start)
+					}
+				}
+			}
+		}
+
+		isCreate := kwAt(sig, rawText, 0, "CREATE")
+
+		// 4. CREATE TABLE column definitions.
+		if isCreate {
+			if lp := createTableColParen(sig, rawText); lp >= 0 {
+				walkColumnDefTypes(sig, rawText, lp, rel)
+			}
+		}
+
+		// 5. CREATE PROCEDURE / FUNCTION parameter list.
+		if isCreate {
+			if lp := createProcParamParen(sig, rawText); lp >= 0 {
+				walkColumnDefTypes(sig, rawText, lp, rel)
+			} else if lp := createFuncParamParen(sig, rawText); lp >= 0 {
+				walkColumnDefTypes(sig, rawText, lp, rel)
+			}
+		}
+
+		// 6. RETURNS type (CREATE PROCEDURE / FUNCTION). "NULL" (RETURNS NULL ON
+		// NULL INPUT) and "TABLE" (RETURNS TABLE(...)) are not data types.
+		if isCreate {
+			for i := 0; i+1 < len(sig); i++ {
+				if tokUpper(sig[i], rawText) != "RETURNS" {
+					continue
+				}
+				tt := sig[i+1]
+				if tt.Kind != sqltok.Keyword && tt.Kind != sqltok.Identifier {
+					continue
+				}
+				if u := strings.ToUpper(tt.Text(rawText)); u != "NULL" && u != "TABLE" {
+					rel(tt.Text(rawText), tt.Start)
 				}
 			}
 		}
@@ -3260,100 +3267,161 @@ func ValidateDataTypes(sql string, stmtRanges []StatementRange) []DiagMarker {
 	return markers
 }
 
-// extractBalancedBlockPat returns the balanced substring starting at openIdx.
-func extractBalancedBlockPat(s string, openIdx int) string {
-	if openIdx < 0 || openIdx >= len(s) || s[openIdx] != '(' {
-		return ""
+// createTableColParen returns the index in sig of the "(" that opens the column
+// list of a CREATE [scope] TABLE statement, or -1. Mirrors the old reCreateTableExt
+// regex: CREATE [OR REPLACE] [LOCAL|GLOBAL] [TEMP|TEMPORARY|VOLATILE|TRANSIENT]
+// TABLE [IF NOT EXISTS] <ident_path> "(".
+func createTableColParen(sig []sqltok.Token, sql string) int {
+	if !kwAt(sig, sql, 0, "CREATE") {
+		return -1
 	}
+	i := 1
+	if kwAt(sig, sql, i, "OR") && kwAt(sig, sql, i+1, "REPLACE") {
+		i += 2
+	}
+	if kwAtAny(sig, sql, i, "LOCAL", "GLOBAL") != "" {
+		i++
+	}
+	if kwAtAny(sig, sql, i, "TEMP", "TEMPORARY", "VOLATILE", "TRANSIENT") != "" {
+		i++
+	}
+	if !kwAt(sig, sql, i, "TABLE") {
+		return -1
+	}
+	i++
+	if i+2 < len(sig) && kwAt(sig, sql, i, "IF") && kwAt(sig, sql, i+1, "NOT") && kwAt(sig, sql, i+2, "EXISTS") {
+		i += 3
+	}
+	return identPathThenParen(sig, sql, i)
+}
+
+// createProcParamParen mirrors reCreateProcExt:
+// CREATE [OR REPLACE] PROCEDURE <ident_path> "(".
+func createProcParamParen(sig []sqltok.Token, sql string) int {
+	if !kwAt(sig, sql, 0, "CREATE") {
+		return -1
+	}
+	i := 1
+	if kwAt(sig, sql, i, "OR") && kwAt(sig, sql, i+1, "REPLACE") {
+		i += 2
+	}
+	if !kwAt(sig, sql, i, "PROCEDURE") {
+		return -1
+	}
+	return identPathThenParen(sig, sql, i+1)
+}
+
+// createFuncParamParen mirrors reCreateFuncExt:
+// CREATE [OR REPLACE] [SECURE] [TEMPORARY|TEMP] [AGGREGATE] FUNCTION <ident_path> "(".
+func createFuncParamParen(sig []sqltok.Token, sql string) int {
+	if !kwAt(sig, sql, 0, "CREATE") {
+		return -1
+	}
+	i := 1
+	if kwAt(sig, sql, i, "OR") && kwAt(sig, sql, i+1, "REPLACE") {
+		i += 2
+	}
+	if kwAt(sig, sql, i, "SECURE") {
+		i++
+	}
+	if kwAtAny(sig, sql, i, "TEMPORARY", "TEMP") != "" {
+		i++
+	}
+	if kwAt(sig, sql, i, "AGGREGATE") {
+		i++
+	}
+	if !kwAt(sig, sql, i, "FUNCTION") {
+		return -1
+	}
+	return identPathThenParen(sig, sql, i+1)
+}
+
+// identPathThenParen reads an ident path starting at sig[pos]; if the token
+// immediately following the path is "(", it returns that paren's index, else -1.
+func identPathThenParen(sig []sqltok.Token, sql string, pos int) int {
+	if pos >= len(sig) || !isIdent(sig[pos]) {
+		return -1
+	}
+	_, next := readIdentPath(sig, sql, pos)
+	if next < len(sig) && sig[next].Kind == sqltok.LParen {
+		return next
+	}
+	return -1
+}
+
+// walkColumnDefTypes iterates the comma-separated definitions inside the
+// parenthesised group whose opening "(" is sig[lparenIdx], reporting the
+// declared data type of each column definition — the second word token of the
+// segment — via onType(text, relOffset). Constraint definitions (CONSTRAINT,
+// PRIMARY, UNIQUE, FOREIGN, INDEX, CHECK) and quoted type tokens are skipped.
+// This replaces the old extractBalancedBlockPat + parseColumnDefs + processColumnDef
+// helpers; the tokenizer handles strings, comments, and nested parens correctly.
+func walkColumnDefTypes(sig []sqltok.Token, sql string, lparenIdx int, onType func(string, int)) {
+	if lparenIdx < 0 || lparenIdx >= len(sig) || sig[lparenIdx].Kind != sqltok.LParen {
+		return
+	}
+	// Locate the matching close paren. If the group is unterminated, skip
+	// entirely (the old extractBalancedBlockPat returned "" for unbalanced parens,
+	// so malformed input produced no type warnings).
 	depth := 0
-	inSingle := false
-	inDouble := false
-	for i := openIdx; i < len(s); i++ {
-		c := s[i]
-		if c == '\'' && !inDouble {
-			inSingle = !inSingle
-		} else if c == '"' && !inSingle {
-			inDouble = !inDouble
-		} else if !inSingle && !inDouble {
-			switch c {
-			case '(':
-				depth++
-			case ')':
-				depth--
-				if depth == 0 {
-					return s[openIdx : i+1]
+	closeIdx := -1
+	for i := lparenIdx; i < len(sig); i++ {
+		switch sig[i].Kind {
+		case sqltok.LParen:
+			depth++
+		case sqltok.RParen:
+			depth--
+			if depth == 0 {
+				closeIdx = i
+			}
+		}
+		if closeIdx >= 0 {
+			break
+		}
+	}
+	if closeIdx < 0 {
+		return
+	}
+
+	var w0, w1 sqltok.Token
+	wn := 0
+	flush := func() {
+		if wn >= 2 {
+			switch strings.ToUpper(w0.Text(sql)) {
+			case "CONSTRAINT", "PRIMARY", "UNIQUE", "FOREIGN", "INDEX", "CHECK":
+				// table-level constraint, not a column definition
+			default:
+				if w1.Kind != sqltok.QuotedIdent {
+					onType(w1.Text(sql), w1.Start)
 				}
 			}
 		}
+		wn = 0
 	}
-	return ""
-}
-
-func parseColumnDefs(colsContent string, contentOffset int, onTypeFound func(string, int)) {
-	depth := 0
-	inSingle := false
-	inDouble := false
-
-	startIdx := 0
-	for i := 0; i <= len(colsContent); i++ {
-		var c byte
-		if i < len(colsContent) {
-			c = colsContent[i]
-		} else {
-			c = ',' // force end of last segment
-		}
-
-		if c == '\'' && !inDouble {
-			inSingle = !inSingle
-		} else if c == '"' && !inSingle {
-			inDouble = !inDouble
-		} else if !inSingle && !inDouble {
-			switch c {
-			case '(':
-				depth++
-			case ')':
-				depth--
-			case ',':
-				if depth == 0 {
-					seg := colsContent[startIdx:i]
-					processColumnDef(seg, contentOffset+startIdx, onTypeFound)
-					startIdx = i + 1
-				}
+	depth = 0
+	for i := lparenIdx; i <= closeIdx; i++ {
+		switch sig[i].Kind {
+		case sqltok.LParen:
+			depth++
+		case sqltok.RParen:
+			depth--
+			if depth == 0 {
+				flush()
+				return
 			}
-		}
-	}
-}
-
-func processColumnDef(seg string, segOffset int, onTypeFound func(string, int)) {
-	// Collect significant word tokens (identifiers, keywords, quoted identifiers).
-	type wordTok struct {
-		text   string
-		offset int
-		quoted bool
-	}
-	var words []wordTok
-	for _, t := range sqltok.Tokenize(seg) {
-		switch t.Kind {
-		case sqltok.Keyword, sqltok.Identifier:
-			words = append(words, wordTok{t.Text(seg), segOffset + t.Start, false})
-		case sqltok.QuotedIdent:
-			words = append(words, wordTok{t.Text(seg), segOffset + t.Start, true})
-		}
-		if len(words) >= 2 {
-			break // only need first two
-		}
-	}
-
-	// We need at least the column name and the datatype token.
-	if len(words) >= 2 {
-		first := strings.ToUpper(words[0].text)
-		// Ignore constraint definitions.
-		if first == "CONSTRAINT" || first == "PRIMARY" || first == "UNIQUE" || first == "FOREIGN" || first == "INDEX" || first == "CHECK" {
-			return
-		}
-		typeWord := words[1]
-		if !typeWord.quoted {
-			onTypeFound(typeWord.text, typeWord.offset)
+		case sqltok.Comma:
+			if depth == 1 {
+				flush()
+			}
+		case sqltok.Keyword, sqltok.Identifier, sqltok.QuotedIdent:
+			// Collect the first two word tokens of the current segment (the
+			// column name and its type), regardless of nesting depth.
+			switch wn {
+			case 0:
+				w0, wn = sig[i], 1
+			case 1:
+				w1, wn = sig[i], 2
+			}
 		}
 	}
 }
@@ -3631,15 +3699,11 @@ func isValidIPv4CIDR(s string) bool {
 // Dots that appear inside a double-quoted identifier token (e.g. "my.policy")
 // are not counted, so a single-part quoted name never triggers a false positive.
 func sqlIdentPathHasDot(s string) bool {
-	inQuote := false
-	for _, c := range s {
-		switch c {
-		case '"':
-			inQuote = !inQuote
-		case '.':
-			if !inQuote {
-				return true
-			}
+	// A dot inside a "quoted identifier" is part of the name, not a separator;
+	// the tokenizer only emits a Dot token for separators outside quotes.
+	for _, t := range sqltok.Tokenize(s) {
+		if t.Kind == sqltok.Dot {
+			return true
 		}
 	}
 	return false
@@ -3840,16 +3904,16 @@ func splitCommaRespectingParens(s string) []string {
 	var parts []string
 	depth := 0
 	start := 0
-	for i := 0; i < len(s); i++ {
-		switch s[i] {
-		case '(':
+	for _, t := range sqltok.Tokenize(s) {
+		switch t.Kind {
+		case sqltok.LParen:
 			depth++
-		case ')':
+		case sqltok.RParen:
 			depth--
-		case ',':
+		case sqltok.Comma:
 			if depth == 0 {
-				parts = append(parts, s[start:i])
-				start = i + 1
+				parts = append(parts, s[start:t.Start])
+				start = t.End
 			}
 		}
 	}
@@ -4757,28 +4821,16 @@ func extractLeadingIdent(seg string) string {
 // preventing identifier names like "INDEX" from matching keyword regexes.
 func stripQuotedIdents(s string) string {
 	var buf strings.Builder
-	i := 0
-	for i < len(s) {
-		if s[i] == '"' {
+	buf.Grow(len(s))
+	prev := 0
+	for _, t := range sqltok.Tokenize(s) {
+		if t.Kind == sqltok.QuotedIdent {
+			buf.WriteString(s[prev:t.Start])
 			buf.WriteByte(' ')
-			i++
-			for i < len(s) {
-				if s[i] == '"' {
-					if i+1 < len(s) && s[i+1] == '"' {
-						i += 2
-					} else {
-						i++
-						break
-					}
-				} else {
-					i++
-				}
-			}
-		} else {
-			buf.WriteByte(s[i])
-			i++
+			prev = t.End
 		}
 	}
+	buf.WriteString(s[prev:])
 	return buf.String()
 }
 
@@ -4788,40 +4840,37 @@ func stripQuotedIdents(s string) string {
 // CHECK(id IS NOT NULL) from matching keyword regexes.
 func stripQuotedIdentsAndParens(s string) string {
 	var buf strings.Builder
-	i := 0
-	for i < len(s) {
-		if s[i] == '"' {
-			buf.WriteByte(' ')
-			i++
-			for i < len(s) {
-				if s[i] == '"' {
-					if i+1 < len(s) && s[i+1] == '"' {
-						i += 2
-					} else {
-						i++
-						break
-					}
-				} else {
-					i++
+	buf.Grow(len(s))
+	prev := 0
+	depth := 0
+	for _, t := range sqltok.Tokenize(s) {
+		switch t.Kind {
+		case sqltok.QuotedIdent:
+			if depth == 0 {
+				buf.WriteString(s[prev:t.Start])
+				buf.WriteByte(' ')
+				prev = t.End
+			}
+		case sqltok.LParen:
+			if depth == 0 {
+				buf.WriteString(s[prev:t.Start])
+				buf.WriteByte(' ')
+				prev = t.End
+			}
+			depth++
+		case sqltok.RParen:
+			if depth > 0 {
+				depth--
+				if depth == 0 {
+					prev = t.End
 				}
 			}
-		} else if s[i] == '(' {
-			buf.WriteByte(' ')
-			depth := 1
-			i++
-			for i < len(s) && depth > 0 {
-				switch s[i] {
-				case '(':
-					depth++
-				case ')':
-					depth--
-				}
-				i++
-			}
-		} else {
-			buf.WriteByte(s[i])
-			i++
 		}
+	}
+	// Drop a trailing unterminated paren group (matches the old scanner, which
+	// consumed to end of string once inside an unclosed "(").
+	if depth == 0 {
+		buf.WriteString(s[prev:])
 	}
 	return buf.String()
 }
@@ -4829,49 +4878,21 @@ func stripQuotedIdentsAndParens(s string) string {
 func splitHybridSegments(s string) []string {
 	var segments []string
 	depth := 0
-	inSingle := false
-	inDouble := false
 	start := 0
-	for i := 0; i <= len(s); i++ {
-		var c byte
-		if i < len(s) {
-			c = s[i]
-		} else {
-			c = ','
-		}
-
-		if inSingle {
-			if c == '\'' {
-				// Check for doubled quote (escaped quote)
-				if i+1 < len(s) && s[i+1] == '\'' {
-					i++ // Skip the escaped quote
-				} else {
-					inSingle = false
-				}
-			}
-		} else if inDouble {
-			if c == '"' {
-				if i+1 < len(s) && s[i+1] == '"' {
-					i++
-				} else {
-					inDouble = false
-				}
-			}
-		} else {
-			if c == '\'' {
-				inSingle = true
-			} else if c == '"' {
-				inDouble = true
-			} else if c == '(' {
-				depth++
-			} else if c == ')' {
-				depth--
-			} else if c == ',' && depth == 0 {
-				segments = append(segments, strings.TrimSpace(s[start:i]))
-				start = i + 1
+	for _, t := range sqltok.Tokenize(s) {
+		switch t.Kind {
+		case sqltok.LParen:
+			depth++
+		case sqltok.RParen:
+			depth--
+		case sqltok.Comma:
+			if depth == 0 {
+				segments = append(segments, strings.TrimSpace(s[start:t.Start]))
+				start = t.End
 			}
 		}
 	}
+	segments = append(segments, strings.TrimSpace(s[start:]))
 	return segments
 }
 
@@ -6946,15 +6967,8 @@ func validateDropTask(parseText string, r StatementRange) []DiagMarker {
 // For example: "my.db".schema.tbl → 3, "my.warehouse" → 1.
 func countIdentParts(m string) int {
 	parts := 1
-	for i := 0; i < len(m); i++ {
-		switch m[i] {
-		case '"':
-			// Skip to closing quote (handles _ident's "[^"]+" pattern).
-			i++
-			for i < len(m) && m[i] != '"' {
-				i++
-			}
-		case '.':
+	for _, t := range sqltok.Tokenize(m) {
+		if t.Kind == sqltok.Dot {
 			parts++
 		}
 	}
@@ -9106,14 +9120,11 @@ func normalizeSnowflakeIdent(s string) []string {
 // double quotes. "A.B" is a single part; A.B is two parts.
 func splitIdentParts(s string) []string {
 	var parts []string
-	inQuote := false
 	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '"' {
-			inQuote = !inQuote
-		} else if s[i] == '.' && !inQuote {
-			parts = append(parts, s[start:i])
-			start = i + 1
+	for _, t := range sqltok.Tokenize(s) {
+		if t.Kind == sqltok.Dot {
+			parts = append(parts, s[start:t.Start])
+			start = t.End
 		}
 	}
 	parts = append(parts, s[start:])

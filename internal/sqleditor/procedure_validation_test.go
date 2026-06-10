@@ -1515,15 +1515,15 @@ func TestValidateSnowflakePatterns_CreateProcedure(t *testing.T) {
 			sql:           "CREATE PROCEDURE my_proc() RETURNS VARCHAR LANGUAGE SQL COMMENT = 'line1\nline2' AS $$ BEGIN RETURN 'ok'; END; $$",
 			expectWarning: false,
 		},
-		// Known limitation: COMMENT value containing "RETURNS LANGUAGE" causes
-		// ValidateDataTypes to match RETURNS\s+LANGUAGE and flag "LANGUAGE" as
-		// an unknown data type, because COMMENT values are not stripped from
-		// the text before regex matching.
+		// COMMENT value containing "RETURNS LANGUAGE" must not be flagged: the
+		// tokenizer classifies the COMMENT value as a string literal, so the
+		// "RETURNS" inside it is never treated as a keyword. (Previously the
+		// regex-based validator matched inside the string and falsely flagged
+		// "LANGUAGE" as an unknown data type.)
 		{
-			name:          "Known limitation: COMMENT containing RETURNS LANGUAGE triggers false data type warning",
+			name:          "COMMENT containing RETURNS LANGUAGE does not trigger false data type warning",
 			sql:           "CREATE PROCEDURE my_proc() RETURNS VARCHAR LANGUAGE SQL COMMENT = 'RETURNS LANGUAGE EXECUTE AS' AS $$ BEGIN RETURN 'ok'; END; $$",
-			expectWarning: true,
-			expectedMatch: "Unknown data type",
+			expectWarning: false,
 		},
 
 		// ── Block comment placement ─────────────────────────────────────
@@ -3127,8 +3127,8 @@ func TestValidateSnowflakePatterns_ProcedureMultipleWarnings(t *testing.T) {
 	})
 
 	t.Run("Unclosed paren still validates preamble but skips param type checking", func(t *testing.T) {
-		// extractBalancedBlockPat returns "" for unclosed parens, so
-		// ValidateDataTypes produces no param type warnings. But
+		// An unterminated parameter list produces no param type warnings (the
+		// token-based walker skips unbalanced paren groups). But
 		// ValidateSnowflakePatterns still checks mandatory clauses.
 		sql := "CREATE PROCEDURE my_proc(a BADTYPE, b ALSOBAD RETURNS VARCHAR LANGUAGE SQL AS $$ $$"
 		ranges := GetStatementRanges(sql)
@@ -4717,43 +4717,34 @@ func TestValidateDataTypes_ProcedureMarkerPrecision(t *testing.T) {
 		}
 	})
 
-	t.Run("Known limitation: RETURNS inside dollar-quoted body produces false positive", func(t *testing.T) {
-		// ValidateDataTypes uses rawText (not tokenized parseText), so
-		// reReturnsType matches RETURNS inside the dollar-quoted body.
+	t.Run("RETURNS inside dollar-quoted body is not flagged", func(t *testing.T) {
+		// The tokenizer treats the $$...$$ body as a single DollarQuoted token,
+		// so the "RETURNS" inside it is never seen as a keyword. (The old
+		// regex-based validator scanned rawText and falsely flagged it.)
 		sql := "CREATE PROCEDURE my_proc() RETURNS VARCHAR LANGUAGE SQL AS $$ RETURNS BADTYPE $$"
 		ranges := GetStatementRanges(sql)
 		markers := ValidateDataTypes(sql, ranges)
 		warnings := getWarnings(markers)
 
-		found := false
 		for _, w := range warnings {
 			if strings.Contains(strings.ToLower(w.Message), "badtype") {
-				found = true
-				break
+				t.Errorf("RETURNS BADTYPE inside dollar-quoted body must not be flagged, got: %s", w.Message)
 			}
-		}
-		if !found {
-			t.Error("Expected false positive warning for RETURNS BADTYPE inside body (known limitation), not found")
 		}
 	})
 
-	t.Run("Known limitation: cast shorthand inside dollar-quoted body produces false positive", func(t *testing.T) {
-		// ValidateDataTypes uses rawText, so reCastShorthand matches
-		// ::BADTYPE inside the dollar-quoted body.
+	t.Run("cast shorthand inside dollar-quoted body is not flagged", func(t *testing.T) {
+		// ::BADTYPE inside the $$...$$ body must not be flagged; the body is a
+		// single token, not scanned for casts.
 		sql := "CREATE PROCEDURE my_proc() RETURNS VARCHAR LANGUAGE JAVASCRIPT AS $$ var x = y::BADTYPE; $$"
 		ranges := GetStatementRanges(sql)
 		markers := ValidateDataTypes(sql, ranges)
 		warnings := getWarnings(markers)
 
-		found := false
 		for _, w := range warnings {
 			if strings.Contains(strings.ToLower(w.Message), "badtype") {
-				found = true
-				break
+				t.Errorf("::BADTYPE inside dollar-quoted body must not be flagged, got: %s", w.Message)
 			}
-		}
-		if !found {
-			t.Error("Expected false positive warning for ::BADTYPE inside body (known limitation), not found")
 		}
 	})
 
