@@ -562,7 +562,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		}
 		var fromTables []fromTable
 		noStringsCtx := stripStringLiterals(strippedCtx)
-		noStringsSig := sigToks(sqltok.Tokenize(noStringsCtx))
+		noStringsSig := sigTokens(noStringsCtx)
 		for _, path := range findFromJoinTables(noStringsSig, noStringsCtx) {
 			parts := extractIdentParts(path, ic)
 			switch len(parts) {
@@ -577,7 +577,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 
 		// Also handle CREATE TABLE ... REFERENCES
 		if isCreateTable(parseText) {
-			parseSig := sigToks(sqltok.Tokenize(parseText))
+			parseSig := sigTokens(parseText)
 			for _, rm := range findReferences(parseSig, parseText) {
 				parts := extractIdentParts(rm.tablePath, ic)
 				switch len(parts) {
@@ -593,7 +593,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 
 		// CTE names — every identifier that appears as `name AS (` is a CTE
 		// definition.
-		strippedSig := sigToks(sqltok.Tokenize(strippedCtx))
+		strippedSig := sigTokens(strippedCtx)
 		cteNames := findCTENames(strippedSig, strippedCtx, ic)
 
 		missingTokens := make(map[string]func(string) string)

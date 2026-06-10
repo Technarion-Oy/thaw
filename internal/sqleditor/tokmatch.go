@@ -37,6 +37,13 @@ func sigToks(tokens []sqltok.Token) []sqltok.Token {
 	return out
 }
 
+// sigTokens tokenizes sql and returns only its significant tokens. It is the
+// string-input shorthand for sigToks(sqltok.Tokenize(sql)) — the setup used by
+// nearly every validator.
+func sigTokens(sql string) []sqltok.Token {
+	return sigToks(sqltok.Tokenize(sql))
+}
+
 // tokUpper returns the uppercased text of a keyword/identifier token.
 // Returns "" for any other token kind.
 func tokUpper(tok sqltok.Token, sql string) string {

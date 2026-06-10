@@ -506,19 +506,19 @@ var (
 
 // isCreateTable reports whether sql is a CREATE TABLE statement (token-based).
 func isCreateTable(sql string) bool {
-	sig := sigToks(sqltok.Tokenize(sql))
+	sig := sigTokens(sql)
 	return isCreateTableGuard(sig, sql)
 }
 
 // isCreateView reports whether sql is a CREATE VIEW statement (token-based).
 func isCreateView(sql string) bool {
-	sig := sigToks(sqltok.Tokenize(sql))
+	sig := sigTokens(sql)
 	return isCreateViewGuard(sig, sql)
 }
 
 // isCreateDynTable reports whether sql is a CREATE DYNAMIC TABLE statement (token-based).
 func isCreateDynTable(sql string) bool {
-	sig := sigToks(sqltok.Tokenize(sql))
+	sig := sigTokens(sql)
 	return isCreateDynTableGuard(sig, sql)
 }
 
@@ -1139,7 +1139,7 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 
 		// ── Custom check 2: FLATTEN without LATERAL ───────────────────────
 		{
-			sig := sigToks(sqltok.Tokenize(stripped))
+			sig := sigTokens(stripped)
 			hasFlattenFromJoin := false
 			hasLateralFlatten := false
 			hasTableFlatten := false
@@ -1184,7 +1184,7 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 
 		// ── Custom check 3: variant path with dots (payload.field.sub) ────
 		{
-			rawSig := sigToks(sqltok.Tokenize(rawText))
+			rawSig := sigTokens(rawText)
 			for i := 0; i+4 < len(rawSig); i++ {
 				if rawSig[i].Kind == sqltok.Identifier &&
 					rawSig[i+1].Kind == sqltok.Dot &&
@@ -1213,7 +1213,7 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 
 		// ── Custom check 4: QUALIFY after ORDER BY ────────────────────────
 		{
-			sig := sigToks(sqltok.Tokenize(stripped))
+			sig := sigTokens(stripped)
 			orderByIdx := -1
 			for i := 0; i+1 < len(sig); i++ {
 				if tokUpper(sig[i], stripped) == "ORDER" && tokUpper(sig[i+1], stripped) == "BY" {
@@ -1284,7 +1284,7 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 					end = whenStarts[i+1]
 				}
 				clause := rawText[start:end]
-				clauseSig := sigToks(sqltok.Tokenize(stripCommentsSQL(clause)))
+				clauseSig := sigTokens(stripCommentsSQL(clause))
 
 				lines := strings.Split(rawText[:start], "\n")
 				errLine := r.StartLine + len(lines) - 1
@@ -1338,7 +1338,7 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// Skip for GRANT/REVOKE statements where function signatures appear
 		// as object references (e.g. GRANT USAGE ON PROCEDURE SNOWFLAKE.CORTEX.X(...)).
 		if firstTok != "GRANT" && firstTok != "REVOKE" {
-			cortexSig := sigToks(sqltok.Tokenize(rawText))
+			cortexSig := sigTokens(rawText)
 			for i := 0; i+5 < len(cortexSig); i++ {
 				if tokUpper(cortexSig[i], rawText) == "SNOWFLAKE" &&
 					cortexSig[i+1].Kind == sqltok.Dot &&
@@ -1404,7 +1404,7 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			// GetStatementRanges splits on semicolons, so the first "statement"
 			// of an anonymous block looks like "BEGIN\n  LET x := 1".
 			beginStripped := strings.TrimSpace(stripCommentsSQL(parseText))
-			beginSig := sigToks(sqltok.Tokenize(beginStripped))
+			beginSig := sigTokens(beginStripped)
 			if len(beginSig) >= 2 {
 				u := tokUpper(beginSig[1], beginStripped)
 				if u == "LET" || u == "IF" || u == "FOR" || u == "WHILE" || u == "LOOP" || u == "DECLARE" || u == "RETURN" || u == "CASE" || u == "CALL" {
@@ -1444,7 +1444,7 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			markers = append(markers, validateRollbackStripped(rollbackStripped, r)...)
 			// ROLLBACK TO SAVEPOINT does NOT end the transaction — only bare
 			// ROLLBACK / ROLLBACK WORK closes it.
-			rbSig := sigToks(sqltok.Tokenize(rollbackStripped))
+			rbSig := sigTokens(rollbackStripped)
 			isToSavepoint := false
 			for j := 0; j+1 < len(rbSig); j++ {
 				if tokUpper(rbSig[j], rollbackStripped) == "TO" && tokUpper(rbSig[j+1], rollbackStripped) == "SAVEPOINT" {
@@ -1578,7 +1578,7 @@ func validateCreateView(parseText string, r StatementRange) []DiagMarker {
 func validateCreateExternalTable(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	preambleEnd := findPreambleEnd(sig, stripped, "TABLE")
 	if preambleEnd < 0 {
@@ -1623,7 +1623,7 @@ func validateCreateExternalTable(parseText string, r StatementRange) []DiagMarke
 		if col == "" {
 			continue
 		}
-		colSig := sigToks(sqltok.Tokenize(col))
+		colSig := sigTokens(col)
 		if len(colSig) > 0 {
 			first := strings.ToUpper(colSig[0].Text(col))
 			if first == "CONSTRAINT" || first == "UNIQUE" ||
@@ -1644,7 +1644,7 @@ func validateCreateExternalTable(parseText string, r StatementRange) []DiagMarke
 	after := strings.TrimSpace(rest[endIdx+1:])
 
 	// Check for PARTITION BY
-	afterSigPB := sigToks(sqltok.Tokenize(after))
+	afterSigPB := sigTokens(after)
 	if len(afterSigPB) >= 2 && kwAt(afterSigPB, after, 0, "PARTITION") && kwAt(afterSigPB, after, 1, "BY") {
 		remainder := strings.TrimSpace(after[afterSigPB[1].End:])
 		if !strings.HasPrefix(remainder, "(") {
@@ -1659,7 +1659,7 @@ func validateCreateExternalTable(parseText string, r StatementRange) []DiagMarke
 	}
 
 	// Mandatory WITH LOCATION and FILE_FORMAT
-	afterSig := sigToks(sqltok.Tokenize(after))
+	afterSig := sigTokens(after)
 	if !(hasKW(afterSig, after, "WITH") && hasKWAssign(afterSig, after, "LOCATION")) {
 		return append(markers, diagMarkerSpan(r, "WITH LOCATION = @<stage> is mandatory for EXTERNAL TABLE.", 4))
 	}
@@ -1679,7 +1679,7 @@ func validateCreateExternalTable(parseText string, r StatementRange) []DiagMarke
 // and USING TEMPLATE forms.
 func validateCreateTablePreamble(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	sig := sigToks(sqltok.Tokenize(parseText))
+	sig := sigTokens(parseText)
 
 	// Specific Snowflake Error: OR REPLACE and IF NOT EXISTS are mutually exclusive
 	if marker, conflict := checkOrReplaceConflictTok(sig, parseText, r, "CREATE TABLE"); conflict {
@@ -1694,7 +1694,7 @@ func validateCreateTablePreamble(parseText string, r StatementRange) []DiagMarke
 	}
 	rest := strings.TrimSpace(stripCommentsSQL(parseText[preambleEnd:]))
 
-	restSig := sigToks(sqltok.Tokenize(rest))
+	restSig := sigTokens(rest)
 	isValid := false
 	switch {
 	case isCreateTableBackup(restSig, rest):
@@ -1711,14 +1711,14 @@ func validateCreateTablePreamble(parseText string, r StatementRange) []DiagMarke
 		if endIdx != -1 {
 			colsContent := rest[1:endIdx]
 			colsClean := stripQuotedIdents(sqltok.StripStrings(colsContent))
-			colsSig := sigToks(sqltok.Tokenize(colsClean))
+			colsSig := sigTokens(colsClean)
 			if hasKW(colsSig, colsClean, "INDEX") {
 				markers = append(markers, diagMarkerSpan(r, "Secondary indexes (INDEX) are only supported on hybrid tables.", 4))
 			}
 
 			after := strings.TrimSpace(rest[endIdx+1:])
 			tablePropsRe := regexp.MustCompile(`(?i)^(?:(?:` + tableProps + `)(?:\s+|$))*$`)
-			afterSigCT := sigToks(sqltok.Tokenize(after))
+			afterSigCT := sigTokens(after)
 			if after == "" || tablePropsRe.MatchString(after) || isCreateTableCTAS(afterSigCT, after) {
 				isValid = true
 			}
@@ -1776,7 +1776,7 @@ func validateDropDbOrSchema(kind string) func(string, StatementRange) []DiagMark
 
 // validateCreateSequence validates CREATE SEQUENCE including ORDER/NOORDER conflict.
 func validateCreateSequence(parseText string, r StatementRange) []DiagMarker {
-	sig := sigToks(sqltok.Tokenize(parseText))
+	sig := sigTokens(parseText)
 	bothOrderNoorder := hasKW(sig, parseText, "ORDER") && hasKW(sig, parseText, "NOORDER")
 	if !reValidCreateSeq.MatchString(parseText) || bothOrderNoorder {
 		return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in CREATE SEQUENCE statement.", 4)}
@@ -1786,7 +1786,7 @@ func validateCreateSequence(parseText string, r StatementRange) []DiagMarker {
 
 // validateAlterSequence validates ALTER SEQUENCE including ORDER/NOORDER conflict.
 func validateAlterSequence(parseText string, r StatementRange) []DiagMarker {
-	sig := sigToks(sqltok.Tokenize(parseText))
+	sig := sigTokens(parseText)
 	bothOrderNoorder := hasKW(sig, parseText, "ORDER") && hasKW(sig, parseText, "NOORDER")
 	if !reValidAlterSeq.MatchString(parseText) || bothOrderNoorder {
 		return []DiagMarker{diagMarkerSpan(r, "Unexpected syntax in ALTER SEQUENCE statement.", 4)}
@@ -1805,7 +1805,7 @@ func validateDropSequence(parseText string, r StatementRange) []DiagMarker {
 // validateCreateDynTable validates CREATE DYNAMIC TABLE for mandatory clauses
 // (TARGET_LAG, WAREHOUSE, AS SELECT/WITH) using token-based detection.
 func validateCreateDynTable(parseText string, r StatementRange) []DiagMarker {
-	sig := sigToks(sqltok.Tokenize(parseText))
+	sig := sigTokens(parseText)
 	if !hasKWAssign(sig, parseText, "TARGET_LAG") ||
 		!hasKWAssign(sig, parseText, "WAREHOUSE") ||
 		!(hasKWPair(sig, parseText, "AS", "SELECT") || hasKWPair(sig, parseText, "AS", "WITH")) {
@@ -1820,7 +1820,7 @@ func validateCreateIntegration(parseText string, r StatementRange) []DiagMarker 
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. Account-level check: no prefix allowed.
 	// Find the name token(s) after INTEGRATION keyword.
@@ -1863,7 +1863,7 @@ func validateCreateIntegration(parseText string, r StatementRange) []DiagMarker 
 // and property validation.
 func validateCreateWarehouse(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	sig := sigToks(sqltok.Tokenize(parseText))
+	sig := sigTokens(parseText)
 	name, _ := extractNameAfterCreate(sig, parseText, nil, "WAREHOUSE")
 	if name != "" && strings.Contains(name, ".") {
 		markers = append(markers, diagMarkerSpan(r, "Warehouses are account-level objects and cannot have a database or schema prefix.", 4))
@@ -1882,7 +1882,7 @@ func validateCreateResourceMonitor(parseText string, r StatementRange) []DiagMar
 // validateCreateStream validates CREATE STREAM: OR REPLACE vs IF NOT EXISTS
 // conflict and full preamble regex.
 func validateCreateStream(parseText string, r StatementRange) []DiagMarker {
-	sig := sigToks(sqltok.Tokenize(parseText))
+	sig := sigTokens(parseText)
 	if marker, conflict := checkOrReplaceConflictTok(sig, parseText, r, "CREATE STREAM"); conflict {
 		return []DiagMarker{marker}
 	}
@@ -1897,7 +1897,7 @@ func validateCreateStream(parseText string, r StatementRange) []DiagMarker {
 // AS COPY INTO, property validation, and AUTO_INGEST/AWS_SNS_TOPIC checks.
 func validateCreatePipe(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	sig := sigToks(sqltok.Tokenize(parseText))
+	sig := sigTokens(parseText)
 
 	// 1. Conflict between OR REPLACE and IF NOT EXISTS
 	if marker, conflict := checkOrReplaceConflictTok(sig, parseText, r, "CREATE PIPE"); conflict {
@@ -1955,7 +1955,7 @@ func validateCreatePipe(parseText string, r StatementRange) []DiagMarker {
 // AS body, AGGREGATE/SECURE conflicts, Python/Java/Scala requirements, MEMOIZABLE.
 func validateCreateFunction(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	sig := sigToks(sqltok.Tokenize(parseText))
+	sig := sigTokens(parseText)
 	asBodyIdx := findFuncBodyAS(sig, parseText)
 
 	preambleSig := sig
@@ -2028,7 +2028,7 @@ func validateCreateFunction(parseText string, r StatementRange) []DiagMarker {
 // LANGUAGE, AS body, Python requirements, EXECUTE AS clause.
 func validateCreateProcedure(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	sig := sigToks(sqltok.Tokenize(parseText))
+	sig := sigTokens(parseText)
 
 	// CREATE OR ALTER PROCEDURE is not validated here (Snowflake-specific
 	// syntax not yet fully supported by the validator).
@@ -2088,7 +2088,7 @@ func validateCreateProcedure(parseText string, r StatementRange) []DiagMarker {
 // validateCreateUser validates CREATE USER: account-level prefix + properties.
 func validateCreateUser(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	sig := sigToks(sqltok.Tokenize(parseText))
+	sig := sigTokens(parseText)
 	name, _ := extractNameAfterCreate(sig, parseText, nil, "USER")
 	if name != "" && strings.Contains(name, ".") {
 		markers = append(markers, diagMarkerSpan(r, "Users are account-level objects and cannot have a database or schema prefix.", 4))
@@ -2099,7 +2099,7 @@ func validateCreateUser(parseText string, r StatementRange) []DiagMarker {
 
 // validateCreateRole validates CREATE ROLE: account-level prefix check.
 func validateCreateRole(parseText string, r StatementRange) []DiagMarker {
-	sig := sigToks(sqltok.Tokenize(parseText))
+	sig := sigTokens(parseText)
 	name, _ := extractNameAfterCreate(sig, parseText, nil, "ROLE")
 	if name != "" && strings.Contains(name, ".") {
 		return []DiagMarker{diagMarkerSpan(r, "Roles are account-level objects and cannot have a database or schema prefix.", 4)}
@@ -2109,7 +2109,7 @@ func validateCreateRole(parseText string, r StatementRange) []DiagMarker {
 
 // validateCreateMaskingPolicy validates CREATE MASKING POLICY: mandatory RETURNS clause.
 func validateCreateMaskingPolicy(parseText string, r StatementRange) []DiagMarker {
-	sig := sigToks(sqltok.Tokenize(parseText))
+	sig := sigTokens(parseText)
 	if !hasKW(sig, parseText, "RETURNS") {
 		return []DiagMarker{diagMarkerSpan(r, "Missing RETURNS clause in Masking Policy definition.", 4)}
 	}
@@ -2126,7 +2126,7 @@ func validateCreateStage(parseText string, r StatementRange) []DiagMarker {
 // validateAlterStage validates ALTER STAGE: skip RENAME TO / UNSET / SET TAG forms,
 // otherwise validate properties.
 func validateAlterStage(parseText string, r StatementRange) []DiagMarker {
-	sig := sigToks(sqltok.Tokenize(parseText))
+	sig := sigTokens(parseText)
 	noValidate := hasKWPair(sig, parseText, "RENAME", "TO") ||
 		hasKWPair(sig, parseText, "SET", "TAG") ||
 		hasKW(sig, parseText, "UNSET")
@@ -2227,7 +2227,7 @@ func checkNameSwallowedByIF(name string, clean string, r StatementRange, reExist
 func validatePivotClauses(stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// Find all PIVOT ( occurrences in the token stream.
 	for i := 0; i+1 < len(sig); i++ {
@@ -2244,7 +2244,7 @@ func validatePivotClauses(stripped string, r StatementRange) []DiagMarker {
 		}
 
 		// 1. Validate aggregate function — first ident followed by ( inside the body.
-		bodySig := sigToks(sqltok.Tokenize(pivotBody))
+		bodySig := sigTokens(pivotBody)
 		if len(bodySig) >= 2 && isIdent(bodySig[0]) && bodySig[1].Kind == sqltok.LParen {
 			funcName := strings.ToUpper(bodySig[0].Text(pivotBody))
 			if !pivotValidAggs[funcName] {
@@ -2284,7 +2284,7 @@ func validatePivotClauses(stripped string, r StatementRange) []DiagMarker {
 func validateUnpivotClauses(stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// Find all UNPIVOT [INCLUDE|EXCLUDE NULLS] ( occurrences.
 	for i := 0; i < len(sig); i++ {
@@ -2313,7 +2313,7 @@ func validateUnpivotClauses(stripped string, r StatementRange) []DiagMarker {
 		}
 
 		// Tokenize the body for structural checks.
-		bodySig := sigToks(sqltok.Tokenize(unpivotBody))
+		bodySig := sigTokens(unpivotBody)
 
 		// 1. Check FOR ... IN ( is present.
 		hasForIn := false
@@ -2353,7 +2353,7 @@ func validateMatchRecognizeClauses(stripped string, r StatementRange) []DiagMark
 	var markers []DiagMarker
 	clean := cleanParseText(stripped)
 
-	sig := sigToks(sqltok.Tokenize(clean))
+	sig := sigTokens(clean)
 
 	// Find all MATCH_RECOGNIZE ( occurrences at the top level.
 	for i := 0; i+1 < len(sig); i++ {
@@ -2547,7 +2547,7 @@ func checkNullInputHandling(sig []sqltok.Token, sql string, r StatementRange, ma
 func validateAsofJoinClauses(stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 	clean := cleanParseText(stripped)
-	sig := sigToks(sqltok.Tokenize(clean))
+	sig := sigTokens(clean)
 
 	// Find all top-level ASOF JOIN positions (skip matches inside parens).
 	type asofPos struct{ afterIdx int } // index into sig after "JOIN"
@@ -2758,7 +2758,7 @@ func validateInsertFirst(stripped string, r StatementRange) []DiagMarker {
 // without a separate string-stripping pass, and word boundaries are intrinsic.
 func validateInsertMultiTable(keyword string, stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// Find the last top-level (depth 0) SELECT. Keywords after it belong to the
 	// source query (e.g. CASE WHEN/ELSE inside the SELECT) and must be ignored.
@@ -2856,7 +2856,7 @@ func validateInsertMultiTable(keyword string, stripped string, r StatementRange)
 func validateInsertOverwrite(stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 	if len(sig) < 2 {
 		return nil
 	}
@@ -2980,7 +2980,7 @@ func ValidateDataTypes(sql string, stmtRanges []StatementRange) []DiagMarker {
 		rawText := sqlStmt(sql, r)
 		stmtOffset := r.StartOffset
 
-		sig := sigToks(sqltok.Tokenize(rawText))
+		sig := sigTokens(rawText)
 
 		// rel reports a type whose offset is relative to rawText, translating it
 		// to an absolute document offset for checkType.
@@ -3245,7 +3245,7 @@ func walkColumnDefTypes(sig []sqltok.Token, sql string, lparenIdx int, onType fu
 // spurious key.
 func validateProperties(s string, validProps string, r StatementRange, markers *[]DiagMarker) {
 	valid := toUpperSet(strings.Split(validProps, "|"))
-	sig := sigToks(sqltok.Tokenize(s))
+	sig := sigTokens(s)
 
 	depth := 0
 	for i := 0; i < len(sig); i++ {
@@ -3274,7 +3274,7 @@ func validateCreateAlert(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. Mutually exclusive OR REPLACE and IF NOT EXISTS.
 	// Restrict check to tokens before the IF ( EXISTS ( condition clause.
@@ -3359,7 +3359,7 @@ func validateCreateNetworkPolicy(parseText string, r StatementRange) []DiagMarke
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. Account-level: name must not have a database or schema prefix.
 	for i := 0; i < len(sig); i++ {
@@ -3490,7 +3490,7 @@ func validateCreateSessionPolicy(parseText string, r StatementRange) []DiagMarke
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. Account-level: object name must not have a database or schema prefix.
 	for i := 0; i < len(sig); i++ {
@@ -3529,7 +3529,7 @@ func validateCreatePasswordPolicy(parseText string, r StatementRange) []DiagMark
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. Account-level: object name must not have a database or schema prefix.
 	for i := 0; i < len(sig); i++ {
@@ -3607,7 +3607,7 @@ func validateCreateRowAccessPolicy(parseText string, r StatementRange) []DiagMar
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
 	// Restrict check to preamble before AS ( so that IF in the policy body
@@ -3704,7 +3704,7 @@ func validateCreateAggregationPolicy(parseText string, r StatementRange) []DiagM
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
 	asIdx := findKWLParen(sig, stripped, "AS")
@@ -3752,7 +3752,7 @@ func validateCreateProjectionPolicy(parseText string, r StatementRange) []DiagMa
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
 	asIdx := findKWLParen(sig, stripped, "AS")
@@ -3800,7 +3800,7 @@ func validateAlterAggregationOrProjectionPolicy(parseText string, r StatementRan
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	hasSetBody := hasKWPair(sig, stripped, "SET", "BODY")
 	hasSetComment := hasKWPair(sig, stripped, "SET", "COMMENT")
@@ -3823,7 +3823,7 @@ func validateDropAggregationOrProjectionPolicy(parseText string, r StatementRang
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 	// DROP <policyType> POLICY [IF EXISTS] <name>
 	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", policyType, "POLICY")
 	if name == "" {
@@ -3842,7 +3842,7 @@ func validateCreatePackagesPolicy(parseText string, r StatementRange) []DiagMark
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
 	if marker, conflict := checkOrReplaceConflictTok(sig, stripped, r, "CREATE PACKAGES POLICY"); conflict {
@@ -3870,7 +3870,7 @@ func validateAlterPackagesPolicy(parseText string, r StatementRange) []DiagMarke
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// Must contain a valid action.
 	validProps := []string{"ALLOWLIST", "BLOCKLIST", "ADDITIONAL_CREATION_BLOCKLIST", "COMMENT"}
@@ -3897,7 +3897,7 @@ func validateDropPackagesPolicy(parseText string, r StatementRange) []DiagMarker
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", "PACKAGES", "POLICY")
 	if name == "" {
 		markers = append(markers, diagMarkerSpan(r, "DROP PACKAGES POLICY requires a policy name.", 4))
@@ -3914,7 +3914,7 @@ func validateGrant(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// ── GRANT ROLE / GRANT DATABASE ROLE ─────────────────────────────────────
 	isGrantRole := (len(sig) >= 2 && tokUpper(sig[1], stripped) == "ROLE") ||
@@ -3985,7 +3985,7 @@ func validateRevoke(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// ── REVOKE ROLE / REVOKE DATABASE ROLE ────────────────────────────────────
 	isRevokeRole := (len(sig) >= 2 && tokUpper(sig[1], stripped) == "ROLE") ||
@@ -4077,7 +4077,7 @@ func normalizeGrantObjectType(t string) string {
 func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	sig := sigToks(sqltok.Tokenize(parseText))
+	sig := sigTokens(parseText)
 
 	// Expect: COPY INTO <target> ...
 	if len(sig) < 3 || tokUpper(sig[0], parseText) != "COPY" || tokUpper(sig[1], parseText) != "INTO" {
@@ -4177,7 +4177,7 @@ func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
 		// FILE_FORMAT
 		ffContent := findKWAssignParenContent(propSig, parseText, "FILE_FORMAT")
 		if ffContent != "" {
-			ffSig := sigToks(sqltok.Tokenize(ffContent))
+			ffSig := sigTokens(ffContent)
 			hasFFName := hasKWAssign(ffSig, ffContent, "FORMAT_NAME")
 			hasFFType := hasKWAssign(ffSig, ffContent, "TYPE")
 			if hasFFName && hasFFType {
@@ -4326,7 +4326,7 @@ func validateCreateIcebergTable(parseText string, r StatementRange) []DiagMarker
 
 	// Rule: TRANSIENT is not supported for Iceberg tables.
 	// Only match TRANSIENT in the preamble (between CREATE and ICEBERG).
-	icebergSig := sigToks(sqltok.Tokenize(stripped))
+	icebergSig := sigTokens(stripped)
 	for i := 0; i < len(icebergSig); i++ {
 		u := tokUpper(icebergSig[i], stripped)
 		if u == "ICEBERG" || u == "TABLE" {
@@ -4349,7 +4349,7 @@ func validateCreateIcebergTable(parseText string, r StatementRange) []DiagMarker
 	}
 
 	// Rule: OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 	if marker, conflict := checkOrReplaceConflictTok(sig, stripped, r, "CREATE ICEBERG TABLE"); conflict {
 		markers = append(markers, marker)
 	}
@@ -4393,7 +4393,7 @@ func getStatementProperties(s string) map[string]string {
 	// Only collect top-level (paren depth 0) KEY = VALUE pairs, so nested content
 	// such as column definitions or CHECK(...) cannot spoof property keys like
 	// CATALOG or EXTERNAL_VOLUME.
-	sig := sigToks(sqltok.Tokenize(s))
+	sig := sigTokens(s)
 	depth := 0
 	for i := 0; i < len(sig); i++ {
 		switch sig[i].Kind {
@@ -4427,7 +4427,7 @@ func isValidEnumValue(val string, validValues ...string) bool {
 func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
-	hybridSig := sigToks(sqltok.Tokenize(stripped))
+	hybridSig := sigTokens(stripped)
 
 	if hasKWPair(hybridSig, stripped, "OR", "REPLACE") {
 		markers = append(markers, diagMarkerSpan(r, "OR REPLACE is not supported for hybrid tables.", 4))
@@ -4493,7 +4493,7 @@ func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker 
 				if strings.HasPrefix(content, "PRIMARY KEY") {
 					hasPK = true
 					// Out of line: PRIMARY KEY (c1, c2) -- scan tokens
-					segSig := sigToks(sqltok.Tokenize(segClean))
+					segSig := sigTokens(segClean)
 					for j := 0; j < len(segSig)-1; j++ {
 						if tokUpper(segSig[j], segClean) == "PRIMARY" && tokUpper(segSig[j+1], segClean) == "KEY" {
 							for k := j + 2; k < len(segSig); k++ {
@@ -4525,7 +4525,7 @@ func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker 
 					// (handles quoted identifiers with spaces like "MY COL").
 					colName := extractLeadingIdent(segClean)
 					if colName != "" {
-						segSig := sigToks(sqltok.Tokenize(segClean))
+						segSig := sigTokens(segClean)
 						if hasKWPair(segSig, segClean, "PRIMARY", "KEY") {
 							hasPK = true
 							pkCols[colName] = true
@@ -4535,7 +4535,7 @@ func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker 
 						// column names like "AUTOINCREMENT" or expressions
 						// like CHECK(id IS NOT NULL) don't cause false matches.
 						bareUpSeg := strings.ToUpper(stripQuotedIdentsAndParens(segClean))
-						bareSig := sigToks(sqltok.Tokenize(bareUpSeg))
+						bareSig := sigTokens(bareUpSeg)
 						if hasKWPair(bareSig, bareUpSeg, "NOT", "NULL") || hasKW(bareSig, bareUpSeg, "NOTNULL") ||
 							hasKW(bareSig, bareUpSeg, "AUTOINCREMENT") || hasKW(bareSig, bareUpSeg, "IDENTITY") {
 							colHasNotNull[colName] = true
@@ -4665,7 +4665,7 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 	stripped := strings.TrimSpace(stripCommentsSQL(s))
 
 	// Snowflake Rule: OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	ffSig := sigToks(sqltok.Tokenize(stripped))
+	ffSig := sigTokens(stripped)
 	if marker, conflict := checkOrReplaceConflictTok(ffSig, stripped, r, "CREATE FILE FORMAT"); conflict {
 		markers = append(markers, marker)
 	}
@@ -4848,7 +4848,7 @@ func validateWithProcedureCall(parseText string, r StatementRange) []DiagMarker 
 	}
 
 	// Check if CALL follows the body.
-	afterSig := sigToks(sqltok.Tokenize(afterBody))
+	afterSig := sigTokens(afterBody)
 	if len(afterSig) == 0 || tokUpper(afterSig[0], afterBody) != "CALL" {
 		markers = append(markers, diagMarkerSpan(r, fmt.Sprintf(
 			"WITH ... AS PROCEDURE block must end with CALL %s(...).", alias), 4))
@@ -4875,7 +4875,7 @@ func validateExecuteImmediate(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. A SQL string argument is mandatory: EXECUTE IMMEDIATE <arg>
 	// sig[0]=EXECUTE, sig[1]=IMMEDIATE, sig[2]=argument
@@ -4954,7 +4954,7 @@ func validateExecuteTask(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 	// EXECUTE TASK <name> → need at least 3 significant tokens with a non-empty ident.
 	if len(sig) < 3 || !isNonEmptyIdent(sig[2], stripped) {
 		markers = append(markers, diagMarkerSpan(r,
@@ -5167,7 +5167,7 @@ func validateCreateEventTable(parseText string, r StatementRange) []DiagMarker {
 	// keyword searches via tokUpper skip StringLit tokens.
 	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
 
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
 	if marker, conflict := checkOrReplaceConflictTok(sig, stripped, r, "CREATE EVENT TABLE"); conflict {
@@ -5249,7 +5249,7 @@ func validateCreateShare(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
 	if marker, conflict := checkOrReplaceConflictTok(sig, stripped, r, "CREATE SHARE"); conflict {
@@ -5309,7 +5309,7 @@ func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMark
 
 	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
 	clean := cleanParseText(parseText)
-	sig := sigToks(sqltok.Tokenize(clean))
+	sig := sigTokens(clean)
 
 	// 0. OR REPLACE and IF NOT EXISTS are mutually exclusive.
 	if marker, conflict := checkOrReplaceConflictTok(sig, clean, r, "CREATE EXTERNAL VOLUME"); conflict {
@@ -5336,7 +5336,7 @@ func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMark
 	// Extract location blocks from STORAGE_LOCATIONS outer parens.
 	// Tokenize stripped (comments removed, literals intact) so the tokenizer
 	// correctly handles parens inside quoted string values.
-	strippedSig := sigToks(sqltok.Tokenize(stripped))
+	strippedSig := sigTokens(stripped)
 	storLocContent := findKWAssignParenContent(strippedSig, stripped, "STORAGE_LOCATIONS")
 	locations := splitLocationBlocks(storLocContent)
 	if len(locations) == 0 {
@@ -5347,7 +5347,7 @@ func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMark
 
 	// 3–9. Per-location validation.
 	for _, loc := range locations {
-		locSig := sigToks(sqltok.Tokenize(loc))
+		locSig := sigTokens(loc)
 
 		// 3. NAME is required — check NAME = '<string>'.
 		if _, ok := findKWAssignStr(locSig, loc, "NAME"); !ok {
@@ -5407,7 +5407,7 @@ func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMark
 				markers = append(markers, diagMarkerSpan(r,
 					"ENCRYPTION block must specify a TYPE key (NONE, AWS_SSE_S3, AWS_SSE_KMS, or GCS_SSE_KMS).", 4))
 			} else {
-				encSig := sigToks(sqltok.Tokenize(encContent))
+				encSig := sigTokens(encContent)
 				encType, hasType := findKWAssignStr(encSig, encContent, "TYPE")
 				if !hasType {
 					markers = append(markers, diagMarkerSpan(r,
@@ -5464,7 +5464,7 @@ func validateAlterShare(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	hasAddAccounts := hasKWPair(sig, stripped, "ADD", "ACCOUNTS")
 
@@ -5491,7 +5491,7 @@ func validateAlterShare(parseText string, r StatementRange) []DiagMarker {
 func validateUseRole(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	sig := sigToks(sqltok.Tokenize(stripCommentsSQL(parseText)))
+	sig := sigTokens(stripCommentsSQL(parseText))
 	// USE ROLE <name> → need at least 3 significant tokens.
 	if len(sig) < 3 || !isIdent(sig[2]) {
 		markers = append(markers, diagMarkerSpan(r,
@@ -5508,7 +5508,7 @@ func validateUseRole(parseText string, r StatementRange) []DiagMarker {
 func validateUseWarehouse(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	sig := sigToks(sqltok.Tokenize(stripCommentsSQL(parseText)))
+	sig := sigTokens(stripCommentsSQL(parseText))
 	// USE WAREHOUSE <name> → need at least 3 significant tokens.
 	if len(sig) < 3 || !isIdent(sig[2]) {
 		markers = append(markers, diagMarkerSpan(r,
@@ -5527,7 +5527,7 @@ func validateUseSecondaryRoles(parseText string, r StatementRange) []DiagMarker 
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 	// USE SECONDARY ROLES (ALL|NONE) → need 4 tokens with specific 4th value.
 	if len(sig) < 4 {
 		markers = append(markers, diagMarkerSpan(r,
@@ -5615,7 +5615,7 @@ func validateAlterSession(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// sig[0]=ALTER, sig[1]=SESSION, sig[2]=SET|UNSET
 	if len(sig) < 3 {
@@ -5780,7 +5780,7 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	s := strings.TrimSpace(stripCommentsSQL(parseText))
-	sig := sigToks(sqltok.Tokenize(s))
+	sig := sigTokens(s)
 
 	// firstField returns the first whitespace-delimited, upper-cased word of the
 	// source remaining at sig[idx]. It reproduces the old strings.Fields(restUp)[0]
@@ -6057,7 +6057,7 @@ func validateDescribe(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	s := strings.TrimSpace(stripCommentsSQL(parseText))
-	sig := sigToks(sqltok.Tokenize(s))
+	sig := sigTokens(s)
 
 	firstField := func(idx int) string {
 		if idx < 0 || idx >= len(sig) {
@@ -6171,7 +6171,7 @@ func validateCreateTag(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
 	if marker, conflict := checkOrReplaceConflictTok(sig, stripped, r, "CREATE TAG"); conflict {
@@ -6305,7 +6305,7 @@ func validateAlterTag(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. Tag name is required.
 	name, _ := extractNameAfterKeywords(sig, stripped, "ALTER", "TAG")
@@ -6422,7 +6422,7 @@ func validateDropTag(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. Tag name is required.
 	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", "TAG")
@@ -6459,7 +6459,7 @@ func validateCreateTask(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	stripped := sqltok.StripStrings(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
 	if marker, conflict := checkOrReplaceConflictTok(sig, stripped, r, "CREATE TASK"); conflict {
@@ -6598,7 +6598,7 @@ func validateAlterTask(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	stripped := sqltok.StripStrings(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. Task name is required.
 	name, _ := extractNameAfterKeywords(sig, stripped, "ALTER", "TASK")
@@ -6738,7 +6738,7 @@ func validateDropTask(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", "TASK")
 	if name == "" {
 		markers = append(markers, diagMarkerSpan(r, "DROP TASK requires a task name.", 4))
@@ -6788,7 +6788,7 @@ func matchStringLiteral(s string) int {
 //   - NAME <name> provides an optional transaction name (identifier).
 func validateBeginStripped(stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// Valid forms (token sequences):
 	//   BEGIN
@@ -6830,7 +6830,7 @@ func validateBeginStripped(stripped string, r StatementRange) []DiagMarker {
 //   - WORK is optional and redundant; extra tokens should warn.
 func validateCommitStripped(stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// Valid forms: COMMIT, COMMIT WORK
 	n := len(sig)
@@ -6852,7 +6852,7 @@ func validateCommitStripped(stripped string, r StatementRange) []DiagMarker {
 // the caller has already stripped the text for block-level tracking.
 func validateRollbackStripped(stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// Valid forms: ROLLBACK, ROLLBACK WORK, ROLLBACK [WORK] TO SAVEPOINT <name>
 	i := 1 // skip ROLLBACK
@@ -6891,7 +6891,7 @@ func validateRollbackStripped(stripped string, r StatementRange) []DiagMarker {
 //   - SAVEPOINT <name> — name is mandatory.
 func validateSavepointStripped(stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// SAVEPOINT <name> — name is mandatory (at least 2 sig tokens)
 	if len(sig) < 2 || !isIdent(sig[1]) {
@@ -6908,7 +6908,7 @@ func validateSavepointStripped(stripped string, r StatementRange) []DiagMarker {
 //   - RELEASE SAVEPOINT <name> — name is mandatory.
 func validateReleaseSavepointStripped(stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// RELEASE SAVEPOINT <name> — name is mandatory (at least 3 sig tokens)
 	if len(sig) < 3 || !isIdent(sig[2]) {
@@ -6931,7 +6931,7 @@ func validateReleaseSavepointStripped(stripped string, r StatementRange) []DiagM
 func validateTimeTravelClauses(stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// Check for bare AT/BEFORE without parentheses after a table reference.
 	// Pattern: FROM/JOIN <ident> AT/BEFORE TIMESTAMP/OFFSET/STATEMENT/STREAM
@@ -7064,7 +7064,7 @@ func validateCreateReplOrFailoverGroup(parseText string, r StatementRange, group
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. Group name is required and must be account-level (no dot prefix).
 	name, nameIdx := extractNameAfterKeywords(sig, stripped, "CREATE", groupType, "GROUP")
@@ -7130,7 +7130,7 @@ func validateAlterReplicationOrFailoverGroup(parseText string, r StatementRange,
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. Group name is required and must be account-level (no dot prefix).
 	name, nameIdx := extractNameAfterKeywords(sig, stripped, "ALTER", groupType, "GROUP")
@@ -7221,7 +7221,7 @@ func validateDropReplicationOrFailoverGroup(parseText string, r StatementRange, 
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// DROP (REPLICATION|FAILOVER) GROUP [IF EXISTS] <name>
 	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", groupType, "GROUP")
@@ -7254,7 +7254,7 @@ func validateCreateComputePool(parseText string, r StatementRange) []DiagMarker 
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
 	if marker, conflict := checkOrReplaceConflictTok(sig, stripped, r, "CREATE COMPUTE POOL"); conflict {
@@ -7354,7 +7354,7 @@ func validateCreateDatashare(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
 	if marker, conflict := checkOrReplaceConflictTok(sig, stripped, r, "CREATE DATASHARE"); conflict {
@@ -7396,7 +7396,7 @@ func validateAlterDatashare(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. Datashare name is required.
 	name, _ := extractNameAfterKeywords(sig, stripped, "ALTER", "DATASHARE")
@@ -7472,7 +7472,7 @@ func validateDropDatashare(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", "DATASHARE")
 	if name == "" {
@@ -7507,7 +7507,7 @@ func validateCreateService(parseText string, r StatementRange) []DiagMarker {
 	noLiterals := sqltok.StripStrings(noDollar)
 	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
 
-	sig := sigToks(sqltok.Tokenize(clean))
+	sig := sigTokens(clean)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
 	if marker, conflict := checkOrReplaceConflictTok(sig, clean, r, "CREATE SERVICE"); conflict {
@@ -7590,7 +7590,7 @@ func validateExecuteService(parseText string, r StatementRange) []DiagMarker {
 	noLiterals := sqltok.StripStrings(noDollar)
 	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
 
-	sig := sigToks(sqltok.Tokenize(clean))
+	sig := sigTokens(clean)
 
 	// 1. Service name is required.
 	// EXECUTE [JOB] SERVICE <name>
@@ -7655,7 +7655,7 @@ func validateAlterService(parseText string, r StatementRange) []DiagMarker {
 	noLiterals := sqltok.StripStrings(noDollar)
 	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
 
-	sig := sigToks(sqltok.Tokenize(clean))
+	sig := sigTokens(clean)
 
 	// 1. Service name is required.
 	name, _ := extractNameAfterKeywords(sig, clean, "ALTER", "SERVICE")
@@ -7781,7 +7781,7 @@ func validateDropService(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", "SERVICE")
 	if name == "" {
@@ -7804,7 +7804,7 @@ func validateCreateImageRepository(parseText string, r StatementRange) []DiagMar
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
 	if marker, conflict := checkOrReplaceConflictTok(sig, stripped, r, "CREATE IMAGE REPOSITORY"); conflict {
@@ -7839,7 +7839,7 @@ func validateDropImageRepository(parseText string, r StatementRange) []DiagMarke
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", "IMAGE", "REPOSITORY")
 	if name == "" {
@@ -7873,7 +7873,7 @@ func validateCreateApplicationPackage(parseText string, r StatementRange) []Diag
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
 	if marker, conflict := checkOrReplaceConflictTok(sig, stripped, r, "CREATE APPLICATION PACKAGE"); conflict {
@@ -7924,7 +7924,7 @@ func validateAlterApplicationPackage(parseText string, r StatementRange) []DiagM
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. Package name is required.
 	name, _ := extractNameAfterKeywords(sig, stripped, "ALTER", "APPLICATION", "PACKAGE")
@@ -7979,7 +7979,7 @@ func validateDropApplicationPackage(parseText string, r StatementRange) []DiagMa
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", "APPLICATION", "PACKAGE")
 	if name == "" {
@@ -8004,7 +8004,7 @@ func validateCreateApplication(parseText string, r StatementRange) []DiagMarker 
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
 	if marker, conflict := checkOrReplaceConflictTok(sig, stripped, r, "CREATE APPLICATION"); conflict {
@@ -8060,7 +8060,7 @@ func validateAlterApplication(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. Application name is required.
 	name, _ := extractNameAfterKeywords(sig, stripped, "ALTER", "APPLICATION")
@@ -8121,7 +8121,7 @@ func validateDropApplication(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", "APPLICATION")
 	if name == "" {
@@ -8145,7 +8145,7 @@ func validateCreateGitRepository(parseText string, r StatementRange) []DiagMarke
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
 	if marker, conflict := checkOrReplaceConflictTok(sig, stripped, r, "CREATE GIT REPOSITORY"); conflict {
@@ -8173,7 +8173,7 @@ func validateCreateGitRepository(parseText string, r StatementRange) []DiagMarke
 
 	// 4. ORIGIN is mandatory and must be a valid-looking URL.
 	// Use the original (with string literals) for URL value extraction.
-	origSig := sigToks(sqltok.Tokenize(strings.TrimSpace(stripCommentsSQL(parseText))))
+	origSig := sigTokens(strings.TrimSpace(stripCommentsSQL(parseText)))
 	originURL, hasOriginStr := findKWAssignStr(origSig, strings.TrimSpace(stripCommentsSQL(parseText)), "ORIGIN")
 	if !hasOriginStr {
 		if hasKWAssign(sig, stripped, "ORIGIN") {
@@ -8210,7 +8210,7 @@ func validateAlterGitRepository(parseText string, r StatementRange) []DiagMarker
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. Repository name is required.
 	name, _ := extractNameAfterKeywords(sig, stripped, "ALTER", "GIT", "REPOSITORY")
@@ -8243,7 +8243,7 @@ func validateDropGitRepository(parseText string, r StatementRange) []DiagMarker 
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", "GIT", "REPOSITORY")
 	if name == "" {
@@ -8319,7 +8319,7 @@ func validateCreateSecret(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
 	if marker, conflict := checkOrReplaceConflictTok(sig, stripped, r, "CREATE SECRET"); conflict {
@@ -8398,7 +8398,7 @@ func validateAlterSecret(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. Secret name is required.
 	// Note: extractNameAfterKeywords skips IF EXISTS, so
@@ -8451,7 +8451,7 @@ func validateCreateNotebook(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
 	if marker, conflict := checkOrReplaceConflictTok(sig, stripped, r, "CREATE NOTEBOOK"); conflict {
@@ -8494,7 +8494,7 @@ func validateAlterNotebook(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. Notebook name is required.
 	name, _ := extractNameAfterKeywords(sig, stripped, "ALTER", "NOTEBOOK")
@@ -8559,7 +8559,7 @@ func validateDropNotebook(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. Notebook name is required.
 	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", "NOTEBOOK")
@@ -8592,7 +8592,7 @@ func validateAlterTableSearchOptimization(stripped string, r StatementRange) []D
 	var markers []DiagMarker
 
 	clean := strings.TrimSpace(sqltok.StripStrings(stripped))
-	soSig := sigToks(sqltok.Tokenize(clean))
+	soSig := sigTokens(clean)
 
 	// Find SEARCH OPTIMIZATION ON sequence in tokens.
 	onIdx := -1
@@ -8629,7 +8629,7 @@ func validateAlterTableSearchOptimization(stripped string, r StatementRange) []D
 			continue
 		}
 		// Token-scan each expression for IDENTIFIER( pattern.
-		exprSig := sigToks(sqltok.Tokenize(expr))
+		exprSig := sigTokens(expr)
 		if len(exprSig) < 2 || !isIdent(exprSig[0]) || exprSig[1].Kind != sqltok.LParen {
 			markers = append(markers, diagMarkerSpan(r,
 				fmt.Sprintf("Invalid search optimization expression: %q. Expected EQUALITY, SUBSTRING, GEO, or FULL_TEXT.", expr), 4))
@@ -8672,7 +8672,7 @@ func validateAlterDynamicTable(parseText string, r StatementRange) []DiagMarker 
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. Table name is required.
 	name, nameIdx := extractNameAfterKeywords(sig, stripped, "ALTER", "DYNAMIC", "TABLE")
@@ -8814,7 +8814,7 @@ func validateAlterTableSwapWith(parseText string, r StatementRange) []DiagMarker
 	var markers []DiagMarker
 
 	stripped := stripCommentsSQL(parseText)
-	sig := sigToks(sqltok.Tokenize(stripped))
+	sig := sigTokens(stripped)
 
 	// 1. Extract source table name: ALTER TABLE [IF EXISTS] <name> SWAP WITH ...
 	srcName, srcEnd := extractNameAfterKeywords(sig, stripped, "ALTER", "TABLE")

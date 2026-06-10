@@ -614,7 +614,7 @@ func scanSelectClauseForUnknownCols(clause string, metaCols, localCols map[strin
 	// Build set of start positions that are AS aliases (or the AS keyword itself).
 	aliasStarts := make(map[int]struct{})
 	// Use token-based AS alias detection.
-	clauseSig := sigToks(sqltok.Tokenize(clause))
+	clauseSig := sigTokens(clause)
 	for _, a := range findAsAliases(clauseSig, clause) {
 		aliasStarts[a.asStart] = struct{}{}
 		aliasStarts[a.aliasStart] = struct{}{}

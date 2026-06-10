@@ -965,7 +965,7 @@ func TestContainsAsofValidComparison(t *testing.T) {
 
 func TestHasOnClauseTok(t *testing.T) {
 	toSig := func(s string) ([]sqltok.Token, string) {
-		return sigToks(sqltok.Tokenize(s)), s
+		return sigTokens(s), s
 	}
 	tests := []struct {
 		name              string
@@ -1003,7 +1003,7 @@ func TestHasOnClauseTok(t *testing.T) {
 
 func TestHasUsingClauseTok(t *testing.T) {
 	toSig := func(s string) ([]sqltok.Token, string) {
-		return sigToks(sqltok.Tokenize(s)), s
+		return sigTokens(s), s
 	}
 	tests := []struct {
 		name             string
