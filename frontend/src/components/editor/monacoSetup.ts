@@ -50,54 +50,85 @@ const PYTHON_MONARCH_LANGUAGE = {
     { open: "[", close: "]", token: "delimiter.bracket" },
     { open: "(", close: ")", token: "delimiter.parenthesis" },
   ],
+  // A Monarch tokenizer is a small state machine used purely for *syntax
+  // highlighting* (it does not parse Python — it only classifies spans of text).
+  // Each state is an ordered list of rules `[regex, tokenClass, nextState?]`:
+  // for the text at the current cursor, Monaco tries the rules top-to-bottom,
+  // the first regex that matches consumes that text and tags it with the given
+  // token class (which the theme then colours, e.g. "keyword", "string",
+  // "comment"), and the optional third element pushes/pops a state so multi-line
+  // constructs like triple-quoted strings keep their highlighting across lines.
+  // `@name` references another state/list; `@brackets`/`@keywords` reference the
+  // bracket and keyword tables declared above.
   tokenizer: {
+    // Top-level state: whitespace/comments, then numbers, then strings, then
+    // punctuation, decorators (@foo), and finally words — classified as a
+    // keyword when they appear in `keywords`, otherwise a plain identifier.
     root: [
       { include: "@whitespace" },
       { include: "@numbers" },
       { include: "@strings" },
-      [/[,:;]/, "delimiter"],
-      [/[{}\[\]()]/, "@brackets"],
-      [/@[a-zA-Z_]\w*/, "tag"],
+      [/[,:;]/, "delimiter"],                 // separators
+      [/[{}\[\]()]/, "@brackets"],            // brackets (matched via the brackets table)
+      [/@[a-zA-Z_]\w*/, "tag"],               // decorators, e.g. @staticmethod
+      // A word: `keyword` if it's in the keyword list above, else `identifier`.
       [/[a-zA-Z_]\w*/, { cases: { "@keywords": "keyword", "@default": "identifier" } }],
     ],
+    // Whitespace, `#` line comments, and the opening of triple-quoted strings.
+    // A triple quote switches into a dedicated state so the whole multi-line
+    // block stays highlighted as a string until the closing triple quote.
     whitespace: [
-      [/\s+/, "white"],
-      [/(#.*$)/, "comment"],
-      [/'''/, "string", "@endDocString"],
-      [/"""/, "string", "@endDblDocString"],
+      [/\s+/, "white"],                       // runs of spaces/tabs/newlines
+      [/(#.*$)/, "comment"],                  // `# …` to end of line
+      [/'''/, "string", "@endDocString"],     // start of '''…''' docstring
+      [/"""/, "string", "@endDblDocString"],  // start of """…""" docstring
     ],
+    // Inside a '''…''' block: stay here colouring text as string until '''.
     endDocString: [
-      [/[^']+/, "string"],
-      [/\\'/, "string"],
-      [/'''/, "string", "@popall"],
-      [/'/, "string"],
+      [/[^']+/, "string"],                    // any run without a single quote
+      [/\\'/, "string"],                      // escaped quote stays inside
+      [/'''/, "string", "@popall"],           // closing triple quote → exit
+      [/'/, "string"],                        // a lone quote (not the closer)
     ],
+    // Inside a """…""" block: same as above but for double quotes.
     endDblDocString: [
       [/[^"]+/, "string"],
       [/\\"/, "string"],
       [/"""/, "string", "@popall"],
       [/"/, "string"],
     ],
+    // Numeric literals. Hex first (so 0x… isn't split), then int/float with an
+    // optional fraction, exponent, and j/l (complex/long) suffixes.
     numbers: [
-      [/-?0x([abcdef]|[ABCDEF]|\d)+[lL]?/, "number.hex"],
-      [/-?(\d*\.)?\d+([eE][+\-]?\d+)?[jJ]?[lL]?/, "number"],
+      [/-?0x([abcdef]|[ABCDEF]|\d)+[lL]?/, "number.hex"],       // 0x1F, -0xABl
+      [/-?(\d*\.)?\d+([eE][+\-]?\d+)?[jJ]?[lL]?/, "number"],    // 42, 3.14, 1e-9, 2j
     ],
+    // Opening of a single-line string. The opening quote is tagged
+    // "string.escape" (the quote glyph) and we branch into a body state by
+    // quote style: f-strings (f'…' / f"…") use the f* bodies so `{…}`
+    // interpolations get their own highlighting; plain strings use the others.
+    // A quote immediately at end-of-line (`'$`) is an empty/unterminated string,
+    // so just pop.
     strings: [
       [/'$/, "string.escape", "@popall"],
-      [/f'{1,3}/, "string.escape", "@fStringBody"],
+      [/f'{1,3}/, "string.escape", "@fStringBody"],   // f'…' (1–3 opening quotes)
       [/'/, "string.escape", "@stringBody"],
       [/"$/, "string.escape", "@popall"],
-      [/f"{1,3}/, "string.escape", "@fDblStringBody"],
+      [/f"{1,3}/, "string.escape", "@fDblStringBody"], // f"…"
       [/"/, "string.escape", "@dblStringBody"],
     ],
+    // Body of a single-quoted f-string. Runs of plain text are coloured string;
+    // a `{` opens an interpolation handled by fStringDetail; `\.` is an escape;
+    // a closing `'` ends the string. The `…$` variants pop at line end.
     fStringBody: [
-      [/[^\\'\{\}]+$/, "string", "@popall"],
-      [/[^\\'\{\}]+/, "string"],
-      [/\{[^\}':!=]+/, "identifier", "@fStringDetail"],
-      [/\\./, "string"],
-      [/'/, "string.escape", "@popall"],
-      [/\\$/, "string"],
+      [/[^\\'\{\}]+$/, "string", "@popall"],   // text to end of line → close
+      [/[^\\'\{\}]+/, "string"],               // text (no backslash/quote/brace)
+      [/\{[^\}':!=]+/, "identifier", "@fStringDetail"], // `{expr` → interpolation
+      [/\\./, "string"],                       // escape sequence, e.g. \n, \'
+      [/'/, "string.escape", "@popall"],       // closing quote
+      [/\\$/, "string"],                       // trailing line-continuation
     ],
+    // Body of a plain single-quoted string (no `{…}` interpolation handling).
     stringBody: [
       [/[^\\']+$/, "string", "@popall"],
       [/[^\\']+/, "string"],
@@ -105,6 +136,7 @@ const PYTHON_MONARCH_LANGUAGE = {
       [/'/, "string.escape", "@popall"],
       [/\\$/, "string"],
     ],
+    // Body of a double-quoted f-string (mirror of fStringBody for `"`).
     fDblStringBody: [
       [/[^\\"\{\}]+$/, "string", "@popall"],
       [/[^\\"\{\}]+/, "string"],
@@ -113,6 +145,7 @@ const PYTHON_MONARCH_LANGUAGE = {
       [/"/, "string.escape", "@popall"],
       [/\\$/, "string"],
     ],
+    // Body of a plain double-quoted string (mirror of stringBody for `"`).
     dblStringBody: [
       [/[^\\"]+$/, "string", "@popall"],
       [/[^\\"]+/, "string"],
@@ -120,10 +153,13 @@ const PYTHON_MONARCH_LANGUAGE = {
       [/"/, "string.escape", "@popall"],
       [/\\$/, "string"],
     ],
+    // Inside an f-string `{…}` interpolation: a `:format`, `!a/!r/!s`
+    // conversion, or `=` debug spec stays string-coloured; the closing `}`
+    // ends the interpolation and pops back to the string body.
     fStringDetail: [
-      [/[:][^}]+/, "string"],
-      [/[!][ars]/, "string"],
-      [/=/, "string"],
+      [/[:][^}]+/, "string"],   // :format_spec
+      [/[!][ars]/, "string"],   // !a / !r / !s conversion
+      [/=/, "string"],          // f"{x=}" debug form
       [/\}/, "identifier", "@pop"],
     ],
   },
