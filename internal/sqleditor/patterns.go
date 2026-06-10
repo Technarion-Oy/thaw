@@ -117,19 +117,8 @@ var (
 	}, "|")
 
 	// ── CREATE STREAM ─────────────────────────────────────────────────────────
-	streamProps = strings.Join([]string{
-		`APPEND_ONLY\s*=\s*(?:TRUE|FALSE)`,
-		`INSERT_ONLY\s*=\s*(?:TRUE|FALSE)`,
-		`SHOW_INITIAL_ROWS\s*=\s*(?:TRUE|FALSE)`,
-		`CHANGE_TRACKING\s*=\s*(?:TRUE|FALSE)`,
-		`COMMENT\s*=\s*'(?:[^']|'')*'`,
-	}, "|")
-
-	reValidCreateStream = regexp.MustCompile(
-		`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?STREAM\s+(?:IF\s+NOT\s+EXISTS\s+)?` +
-			_identPath + `(?:\s+COPY\s+GRANTS)?\s+ON\s+(?:TABLE|VIEW|STAGE|EXTERNAL\s+TABLE)\s+` + _identPath +
-			`(?:\s+(?:AT|BEFORE)\s*` + _balancedParens + `)?` +
-			`(?:\s+(?:` + streamProps + `))*\s*$`)
+	// (streamProps / reValidCreateStream removed — token-based:
+	// isValidCreateStream / consumeStreamProp)
 
 	// (CREATE TASK regexes removed — token-based)
 
@@ -2552,20 +2541,93 @@ func validateCreateResourceMonitor(parseText string, r StatementRange) []DiagMar
 	return markers
 }
 
-// validateCreateStream validates CREATE STREAM: the OR REPLACE vs IF NOT EXISTS
-// conflict (token-based) and the overall statement shape — ON TABLE/VIEW/STAGE/
-// EXTERNAL TABLE, optional AT/BEFORE time travel, and stream properties.
+// isValidCreateStream reports whether sig is a well-formed CREATE STREAM:
 //
-// The shape check uses the reValidCreateStream grammar whitelist, which captures
-// the ON-target alternatives and per-property value formats more compactly than
-// an equivalent token walk; it is therefore kept regex-based on purpose.
+//	CREATE [OR REPLACE] STREAM [IF NOT EXISTS] <name> [COPY GRANTS]
+//	  ON {TABLE|VIEW|STAGE|EXTERNAL TABLE} <source> [{AT|BEFORE} ( … )] <prop>*
+//
+// where each prop is APPEND_ONLY / INSERT_ONLY / SHOW_INITIAL_ROWS /
+// CHANGE_TRACKING = TRUE|FALSE, or COMMENT = '…'. Token-based replacement for
+// reValidCreateStream.
+func isValidCreateStream(sig []sqltok.Token, sql string) bool {
+	i := 0
+	if !kwAt(sig, sql, i, "CREATE") {
+		return false
+	}
+	i++
+	if kwAt(sig, sql, i, "OR") && kwAt(sig, sql, i+1, "REPLACE") {
+		i += 2
+	}
+	if !kwAt(sig, sql, i, "STREAM") {
+		return false
+	}
+	i++
+	if kwAt(sig, sql, i, "IF") && kwAt(sig, sql, i+1, "NOT") && kwAt(sig, sql, i+2, "EXISTS") {
+		i += 3
+	}
+	if i >= len(sig) || !isIdent(sig[i]) {
+		return false
+	}
+	_, i = readIdentPath(sig, sql, i)
+	if kwAt(sig, sql, i, "COPY") && kwAt(sig, sql, i+1, "GRANTS") { // only valid before ON
+		i += 2
+	}
+	if !kwAt(sig, sql, i, "ON") {
+		return false
+	}
+	i++
+	switch {
+	case kwAtAny(sig, sql, i, "TABLE", "VIEW", "STAGE") != "":
+		i++
+	case kwAt(sig, sql, i, "EXTERNAL") && kwAt(sig, sql, i+1, "TABLE"):
+		i += 2
+	default:
+		return false
+	}
+	if i >= len(sig) || !isIdent(sig[i]) {
+		return false
+	}
+	_, i = readIdentPath(sig, sql, i)
+	if kwAtAny(sig, sql, i, "AT", "BEFORE") != "" { // optional time travel
+		next, ok := skipParenGroup(sig, i+1)
+		if !ok {
+			return false
+		}
+		i = next
+	}
+	for i < len(sig) {
+		next, ok := consumeStreamProp(sig, sql, i)
+		if !ok {
+			return false
+		}
+		i = next
+	}
+	return true
+}
+
+// consumeStreamProp matches one CREATE STREAM property starting at sig[i].
+func consumeStreamProp(sig []sqltok.Token, sql string, i int) (int, bool) {
+	switch {
+	case kwAt(sig, sql, i, "APPEND_ONLY"), kwAt(sig, sql, i, "INSERT_ONLY"),
+		kwAt(sig, sql, i, "SHOW_INITIAL_ROWS"), kwAt(sig, sql, i, "CHANGE_TRACKING"):
+		return eqBoolProp(sig, sql, i)
+	case kwAt(sig, sql, i, "COMMENT"):
+		return eqValueProp(sig, sql, i, sqltok.StringLit)
+	}
+	return 0, false
+}
+
+// validateCreateStream validates CREATE STREAM: the OR REPLACE vs IF NOT EXISTS
+// conflict and the overall statement shape (ON TABLE/VIEW/STAGE/EXTERNAL TABLE,
+// optional AT/BEFORE time travel, and stream properties). Both checks are
+// token-based, via checkOrReplaceConflictTok and isValidCreateStream.
 func validateCreateStream(parseText string, r StatementRange) []DiagMarker {
 	sig := sigTokens(parseText)
 	if marker, conflict := checkOrReplaceConflictTok(sig, parseText, r, "CREATE STREAM"); conflict {
 		return []DiagMarker{marker}
 	}
 
-	if !reValidCreateStream.MatchString(parseText) {
+	if !isValidCreateStream(sig, parseText) {
 		return oneMarker(r, "Unexpected syntax in CREATE STREAM statement.")
 	}
 	return nil
