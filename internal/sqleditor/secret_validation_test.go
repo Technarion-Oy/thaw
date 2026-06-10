@@ -809,9 +809,9 @@ func TestValidateSnowflakePatterns_Secret_CreateQuotedThreePartName(t *testing.T
 }
 
 func TestValidateSnowflakePatterns_Secret_TypeValueSpecialChars(t *testing.T) {
-	// TYPE values with special characters: the regex ([\w]+) stops at
-	// non-word characters, producing different errors depending on whether
-	// a partial word is captured.
+	// TYPE values with special characters: the token-based parser picks up
+	// the first token after "=", so non-word prefixes like "@" are captured
+	// as the TYPE value and flagged as unknown.
 	cases := []struct {
 		name    string
 		sql     string
@@ -823,9 +823,9 @@ func TestValidateSnowflakePatterns_Secret_TypeValueSpecialChars(t *testing.T) {
 			"Unknown TYPE",
 		},
 		{
-			"non-word prefix means TYPE not found",
+			"non-word prefix means unknown TYPE",
 			"CREATE SECRET my_secret TYPE = @OAUTH2 API_AUTHENTICATION = my_int",
-			"CREATE SECRET requires TYPE",
+			"Unknown TYPE",
 		},
 	}
 	for _, tc := range cases {

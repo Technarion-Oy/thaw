@@ -60,10 +60,7 @@ var (
 			`|\bASOF\s+JOIN\b`,
 	)
 
-	// ── Snowflake Cortex AI function call detection ──────────────────────────
-	// Matches SNOWFLAKE.CORTEX.<function>( — captures the function name.
-	reCortexFuncCall = regexp.MustCompile(
-		`(?i)\bSNOWFLAKE\s*\.\s*CORTEX\s*\.\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\(`)
+	// (reCortexFuncCall removed — token-based)
 
 	reConstraintCol = regexp.MustCompile(`(?i)^(?:CONSTRAINT|PRIMARY\s+KEY|UNIQUE|FOREIGN\s+KEY)\b`)
 	reVirtualColAS  = regexp.MustCompile(`(?i)\bAS\s*\([\s\S]*\)\s*$`)
@@ -180,9 +177,7 @@ var (
 	// (reAlterDynTableName and 11 ALTER DYNAMIC TABLE regexes removed — token-based)
 
 	// ── CREATE INTEGRATION ────────────────────────────────────────────────────
-	reIntegrationName = regexp.MustCompile(`(?i)INTEGRATION\s+(` + _identPath + `)`)
-	reIntegrationType     = regexp.MustCompile(`(?i)\bTYPE\s*=\s*([a-zA-Z_0-9]+)`)
-	reIntegrationProvider = regexp.MustCompile(`(?i)\b(?:STORAGE|API)_PROVIDER\s*=\s*('[^']+'|[a-zA-Z_0-9]+)`)
+	// (reIntegrationName, reIntegrationType, reIntegrationProvider removed — token-based)
 
 	// ── CREATE WAREHOUSE ──────────────────────────────────────────────────────
 	whProps = strings.Join([]string{
@@ -325,17 +320,9 @@ var (
 	// (CREATE / EXECUTE / ALTER SERVICE regexes removed — token-based)
 
 	// ── CREATE / ALTER Secret ─────────────────────────────────────────────
-	reSecretType        = regexp.MustCompile(`(?i)\bTYPE\b\s*=\s*([\w]+)`)
-	reSecretAPIA        = regexp.MustCompile(`(?i)\bAPI_AUTHENTICATION\s*=\s*` + _ident)
-	reSecretUsername    = regexp.MustCompile(`(?i)\bUSERNAME\s*=`)
-	reSecretPassword    = regexp.MustCompile(`(?i)\bPASSWORD\s*=`)
-	reSecretString      = regexp.MustCompile(`(?i)\bSECRET_STRING\s*=`)
-	reSecretEnabled     = regexp.MustCompile(`(?i)\bENABLED\s*=`)
-	reSecretAlgorithm   = regexp.MustCompile(`(?i)\bALGORITHM\s*=`)
-	reSecretOAuthScopes = regexp.MustCompile(`(?i)\bOAUTH_SCOPES\s*=`)
-	reSecretOAuthRT     = regexp.MustCompile(`(?i)\bOAUTH_REFRESH_TOKEN\s*=`)
-	reSecretOAuthRTExp  = regexp.MustCompile(`(?i)\bOAUTH_REFRESH_TOKEN_EXPIRY_TIME\s*=`)
-	// (reAlterSecretName, reAlterSecretAction removed — token-based)
+	// (reSecretType, reSecretAPIA, reSecretUsername, reSecretPassword, reSecretString,
+	// reSecretEnabled, reSecretAlgorithm, reSecretOAuthScopes, reSecretOAuthRT,
+	// reSecretOAuthRTExp, reAlterSecretName, reAlterSecretAction removed — token-based)
 
 	// ── CREATE / ALTER / DROP APPLICATION PACKAGE (Native Apps) ────────────
 	// (reCreateApplicationPackageName .. reAppPkgDistribution removed — token-based)
@@ -348,9 +335,7 @@ var (
 
 	// ── CREATE TAG / ALTER TAG / DROP TAG ────────────────────────────────
 	// (reCreateTagName, reAlterTagName, reAlterTagRenameTo .. reAlterTagUnsetComment removed — token-based)
-	// reTagAllowedValues and reTagStringLiteralList are still used for string-literal list parsing.
-	reTagAllowedValues     = regexp.MustCompile(`(?i)\bALLOWED_VALUES\s+`)
-	reTagStringLiteralList = regexp.MustCompile(`(?i)\bALLOWED_VALUES\s+('(?:''|[^'])*'(?:\s*,\s*'(?:''|[^'])*')*)`)
+	// (reTagAllowedValues, reTagStringLiteralList removed — token-based)
 	// ── CREATE NOTEBOOK / ALTER NOTEBOOK / DROP NOTEBOOK ─────────────
 	// (all notebook regexes removed — token-based)
 
@@ -371,12 +356,7 @@ var (
 	// Detection: matches ALTER TABLE <name> ADD SEARCH OPTIMIZATION or
 	// ALTER TABLE <name> DROP SEARCH OPTIMIZATION.
 	// ON clause: captures everything after ON (expression list).
-	reSearchOptOnClause = regexp.MustCompile(
-		`(?i)\bSEARCH\s+OPTIMIZATION\s+ON\b`)
-	// Extracts individual expression-type calls: EQUALITY(...), SUBSTRING(...), etc.
-	// Anchored to start-of-expression since input is pre-split by splitTopLevelCommas.
-	reSearchOptExpr = regexp.MustCompile(
-		`(?i)^\s*([A-Z_]+)\s*\(`)
+	// (reSearchOptOnClause, reSearchOptExpr removed — token-based)
 	// Valid search optimization expression types.
 	searchOptValidExprs = map[string]bool{
 		"EQUALITY":  true,
@@ -392,8 +372,7 @@ var (
 	// (reIsInsertAll, reIsInsertFirst, reIsInsertOverwrite,
 	// reInsertOverwriteSource, reInsertOverwritePrefix removed — token-based)
 
-	// Structural patterns used inside the validators.
-	reInsertMultiThenInto = regexp.MustCompile(`(?i)\bTHEN\s+INTO\b`)
+	// (reInsertMultiThenInto removed — token-based)
 
 
 
@@ -409,10 +388,10 @@ var (
 	}, "|")
 
 	// ── CREATE FILE FORMAT ───────────────────────────────────────────────────
-	reFileFormatPropKey   = regexp.MustCompile(`(?i)\b([a-zA-Z_0-9]+)\s*=`)
+	// (reFileFormatPropKey removed — token-based)
 	reFileFormatPropValue = regexp.MustCompile(`^\s*('[^']*'|[A-Za-z0-9_.-]+)`)
 	reFileFormatValidEsc  = regexp.MustCompile(`^\\([ntr'\"]|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|[0-7]{1,3})$`)
-	reFileFormatTemporary = regexp.MustCompile(`(?i)\b(TEMPORARY|TEMP)\b`)
+	// (reFileFormatTemporary removed — token-based)
 
 	fileFormatCommonProps = []string{`TYPE`, `COMMENT`}
 
@@ -461,7 +440,7 @@ var (
 	reFileFormatAllowedXml     = regexp.MustCompile("(?i)^(" + strings.Join(append(fileFormatCommonProps, fileFormatXmlProps...), "|") + ")$")
 
 	// ── CREATE ICEBERG TABLE ────────────────────────────────────────────────
-	reIsCreateTransientIcebergTable = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TRANSIENT\s+ICEBERG\s+TABLE\b`)
+	// (reIsCreateTransientIcebergTable removed — token-based)
 	// ── ALTER STAGE ───────────────────────────────────────────────────────────
 	// alterStageProps lists valid top-level ALTER STAGE SET property keys.
 	// SUBPATH is valid in ALTER STAGE ... REFRESH SUBPATH = '...'.
@@ -1247,25 +1226,46 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 
 		// ── Custom check 6: MERGE statement rules ─────────────────────────
 		if firstTok == "MERGE" {
-			// Find all WHEN clauses
-			reWhen := regexp.MustCompile(`(?i)\bWHEN\s+`)
-			locs := reWhen.FindAllStringIndex(rawText, -1)
-			for i, loc := range locs {
-				start := loc[0]
+			// Tokenize rawText and find top-level WHEN clause boundaries.
+			mergeToks := sqltok.Tokenize(rawText)
+			mergeSig := sigToks(mergeToks)
+			// Collect byte positions of top-level WHEN tokens (depth 0).
+			var whenStarts []int
+			depth := 0
+			for _, t := range mergeSig {
+				switch t.Kind {
+				case sqltok.LParen:
+					depth++
+				case sqltok.RParen:
+					if depth > 0 {
+						depth--
+					}
+				default:
+					if depth == 0 && tokUpper(t, rawText) == "WHEN" {
+						whenStarts = append(whenStarts, t.Start)
+					}
+				}
+			}
+			for i, start := range whenStarts {
 				end := len(rawText)
-				if i+1 < len(locs) {
-					end = locs[i+1][0]
+				if i+1 < len(whenStarts) {
+					end = whenStarts[i+1]
 				}
 				clause := rawText[start:end]
-				clauseStripped := strings.TrimSpace(stripCommentsSQL(clause))
+				clauseSig := sigToks(sqltok.Tokenize(stripCommentsSQL(clause)))
 
 				lines := strings.Split(rawText[:start], "\n")
 				errLine := r.StartLine + len(lines) - 1
 				errCol := len(lines[len(lines)-1]) + 1
 
+				// Classify the clause by inspecting leading sig tokens.
+				isWhenMatched := len(clauseSig) >= 2 && kwAt(clauseSig, clause, 0, "WHEN") && kwAt(clauseSig, clause, 1, "MATCHED")
+				isWhenNotMatched := len(clauseSig) >= 3 && kwAt(clauseSig, clause, 0, "WHEN") && kwAt(clauseSig, clause, 1, "NOT") && kwAt(clauseSig, clause, 2, "MATCHED")
+				hasBySource := hasKWPair(clauseSig, clause, "BY", "SOURCE")
+
 				// 1. WHEN MATCHED (but NOT 'NOT MATCHED')
-				if regexp.MustCompile(`(?i)^WHEN\s+MATCHED\b`).MatchString(clauseStripped) {
-					if regexp.MustCompile(`(?i)\bTHEN\s+INSERT\b`).MatchString(clauseStripped) {
+				if isWhenMatched && !isWhenNotMatched {
+					if hasKWPair(clauseSig, clause, "THEN", "INSERT") {
 						markers = append(markers, DiagMarker{
 							StartLineNumber: errLine, StartColumn: errCol,
 							EndLineNumber: errLine, EndColumn: errCol + 12,
@@ -1276,9 +1276,8 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 				}
 
 				// 2. WHEN NOT MATCHED (specifically NOT 'BY SOURCE')
-				if regexp.MustCompile(`(?i)^WHEN\s+NOT\s+MATCHED\b`).MatchString(clauseStripped) &&
-					!regexp.MustCompile(`(?i)\bBY\s+SOURCE\b`).MatchString(clauseStripped) {
-					if regexp.MustCompile(`(?i)\bTHEN\s+(UPDATE|DELETE)\b`).MatchString(clauseStripped) {
+				if isWhenNotMatched && !hasBySource {
+					if hasKWPair(clauseSig, clause, "THEN", "UPDATE") || hasKWPair(clauseSig, clause, "THEN", "DELETE") {
 						markers = append(markers, DiagMarker{
 							StartLineNumber: errLine, StartColumn: errCol,
 							EndLineNumber: errLine, EndColumn: errCol + 16,
@@ -1289,7 +1288,7 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 				}
 
 				// 3. WHEN NOT MATCHED BY SOURCE (Not supported by Snowflake)
-				if regexp.MustCompile(`(?i)^WHEN\s+NOT\s+MATCHED\s+BY\s+SOURCE\b`).MatchString(clauseStripped) {
+				if isWhenNotMatched && hasBySource {
 					markers = append(markers, DiagMarker{
 						StartLineNumber: errLine, StartColumn: errCol,
 						EndLineNumber: errLine, EndColumn: errCol + 26,
@@ -1301,30 +1300,37 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		}
 
 		// ── Custom check 7: unknown SNOWFLAKE.CORTEX.<function> ──────────
-		// Run reCortexFuncCall on rawText so each match gets an accurate
-		// position.  Use an inert-region mask to skip matches inside SQL
-		// comments, string literals, and dollar-quoted blocks.
+		// Token-based scan for SNOWFLAKE.CORTEX.<func>( pattern. The
+		// tokenizer naturally classifies comment/string/$$-block content as
+		// non-identifier tokens, so no separate inert-region check is needed.
 		// Skip for GRANT/REVOKE statements where function signatures appear
 		// as object references (e.g. GRANT USAGE ON PROCEDURE SNOWFLAKE.CORTEX.X(...)).
-		if reCortexFuncCall.MatchString(rawText) && firstTok != "GRANT" && firstTok != "REVOKE" {
-			inertRegions := sqltok.InertRegions(rawText)
-			for _, m := range reCortexFuncCall.FindAllStringSubmatchIndex(rawText, -1) {
-				if sqltok.IsInert(inertRegions, m[0]) {
-					continue // match starts inside a comment, string, or $$-block
-				}
-				funcName := strings.ToUpper(rawText[m[2]:m[3]])
-				if !knownCortexFunctions[funcName] {
-					fullMatch := rawText[m[0] : m[1]-1] // exclude trailing '('
-					upTo := rawText[:m[0]]
-					lines := strings.Split(upTo, "\n")
-					errLine := r.StartLine + len(lines) - 1
-					errCol := len(lines[len(lines)-1]) + 1
-					markers = append(markers, DiagMarker{
-						StartLineNumber: errLine, StartColumn: errCol,
-						EndLineNumber: errLine, EndColumn: errCol + len(fullMatch),
-						Message:  "Unknown Cortex function '" + rawText[m[2]:m[3]] + "'. Known functions: COMPLETE, EXTRACT_ANSWER, SENTIMENT, SUMMARIZE, TRANSLATE, CLASSIFY_TEXT, EMBED_TEXT_768, EMBED_TEXT_1024, FINETUNE, SEARCH_PREVIEW, TRY_COMPLETE.",
-						Severity: 4,
-					})
+		if firstTok != "GRANT" && firstTok != "REVOKE" {
+			cortexSig := sigToks(sqltok.Tokenize(rawText))
+			for i := 0; i+5 < len(cortexSig); i++ {
+				if tokUpper(cortexSig[i], rawText) == "SNOWFLAKE" &&
+					cortexSig[i+1].Kind == sqltok.Dot &&
+					tokUpper(cortexSig[i+2], rawText) == "CORTEX" &&
+					cortexSig[i+3].Kind == sqltok.Dot &&
+					isIdent(cortexSig[i+4]) &&
+					cortexSig[i+5].Kind == sqltok.LParen {
+					funcName := strings.ToUpper(cortexSig[i+4].Text(rawText))
+					if !knownCortexFunctions[funcName] {
+						startTok := cortexSig[i]
+						endTok := cortexSig[i+4]
+						fullMatch := rawText[startTok.Start:endTok.End]
+						upTo := rawText[:startTok.Start]
+						lines := strings.Split(upTo, "\n")
+						errLine := r.StartLine + len(lines) - 1
+						errCol := len(lines[len(lines)-1]) + 1
+						markers = append(markers, DiagMarker{
+							StartLineNumber: errLine, StartColumn: errCol,
+							EndLineNumber: errLine, EndColumn: errCol + len(fullMatch),
+							Message:  "Unknown Cortex function '" + cortexSig[i+4].Text(rawText) + "'. Known functions: COMPLETE, EXTRACT_ANSWER, SENTIMENT, SUMMARIZE, TRANSLATE, CLASSIFY_TEXT, EMBED_TEXT_768, EMBED_TEXT_1024, FINETUNE, SEARCH_PREVIEW, TRY_COMPLETE.",
+							Severity: 4,
+						})
+					}
+					i += 5 // skip past this match
 				}
 			}
 		}
@@ -1753,35 +1759,40 @@ func validateCreateDynTable(parseText string, r StatementRange) []DiagMarker {
 func validateCreateIntegration(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	// 1. Account-level check: no prefix allowed
-	if m := reIntegrationName.FindStringSubmatch(parseText); m != nil {
-		name := m[1]
-		if strings.Contains(name, ".") {
-			markers = append(markers, diagMarkerSpan(r, "Integrations are account-level objects and cannot have a database or schema prefix.", 4))
+	stripped := stripCommentsSQL(parseText)
+	sig := sigToks(sqltok.Tokenize(stripped))
+
+	// 1. Account-level check: no prefix allowed.
+	// Find the name token(s) after INTEGRATION keyword.
+	for i := 0; i < len(sig); i++ {
+		if tokUpper(sig[i], stripped) == "INTEGRATION" {
+			name, _ := readIdentPath(sig, stripped, i+1)
+			if name != "" && strings.Contains(name, ".") {
+				markers = append(markers, diagMarkerSpan(r, "Integrations are account-level objects and cannot have a database or schema prefix.", 4))
+			}
+			break
 		}
 	}
 
 	// 2. Type-specific checks
-	upper := strings.ToUpper(parseText)
 	switch {
-	case strings.Contains(upper, "API INTEGRATION"):
-		if !reIntegrationProvider.MatchString(parseText) {
+	case hasKWPair(sig, stripped, "API", "INTEGRATION"):
+		if !hasKWAssign(sig, stripped, "API_PROVIDER") {
 			markers = append(markers, diagMarkerSpan(r, "Missing required parameter API_PROVIDER for API Integration.", 4))
 		}
-	case strings.Contains(upper, "NOTIFICATION INTEGRATION"):
-		if m := reIntegrationType.FindStringSubmatch(parseText); m != nil {
-			t := strings.ToUpper(m[1])
+	case hasKWPair(sig, stripped, "NOTIFICATION", "INTEGRATION"):
+		if typeVal, ok := findKWAssign(sig, stripped, "TYPE"); ok {
+			t := strings.ToUpper(typeVal)
 			if t != "EMAIL" && t != "QUEUE" {
 				markers = append(markers, diagMarkerSpan(r, "Invalid TYPE for Notification Integration. Valid types are EMAIL, QUEUE.", 4))
 			}
 		}
-	case strings.Contains(upper, "SECURITY INTEGRATION"):
-		if !reIntegrationType.MatchString(parseText) {
+	case hasKWPair(sig, stripped, "SECURITY", "INTEGRATION"):
+		if !hasKWAssign(sig, stripped, "TYPE") {
 			markers = append(markers, diagMarkerSpan(r, "Missing required parameter TYPE for Security Integration.", 4))
 		}
-	case strings.Contains(upper, "EXTERNAL ACCESS INTEGRATION"):
-		intSig := sigToks(sqltok.Tokenize(parseText))
-		if hasKWAssign(intSig, parseText, "MAX_RETRIES") {
+	case hasKWSeq(sig, stripped, "EXTERNAL", "ACCESS", "INTEGRATION"):
+		if hasKWAssign(sig, stripped, "MAX_RETRIES") {
 			markers = append(markers, diagMarkerSpan(r, "Unexpected property 'MAX_RETRIES' for External Access Integration.", 4))
 		}
 	}
@@ -2794,7 +2805,8 @@ func validateInsertMultiTable(keyword string, stripped string, r StatementRange)
 				end = whenPositions[i+1]
 			}
 			clause := upper[whenPos:end]
-			if !reInsertMultiThenInto.MatchString(clause) {
+			clauseSig := sigToks(sqltok.Tokenize(clause))
+			if !hasKWPair(clauseSig, clause, "THEN", "INTO") {
 				markers = append(markers, diagMarkerSpan(r,
 					"WHEN branch must contain INTO clause. Use WHEN <condition> THEN INTO <table>.", 4))
 			}
@@ -4282,12 +4294,6 @@ func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
 
 	propSig := sig[propStartIdx:]
 
-	// Build a properties string from remaining tokens for validateBoolProp compatibility.
-	var properties string
-	if propStartIdx < len(sig) {
-		properties = parseText[sig[propStartIdx].Start:]
-	}
-
 	if !isUnloading {
 		// Loading (table target)
 		hasFiles := hasKWAssign(propSig, parseText, "FILES")
@@ -4330,9 +4336,9 @@ func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
 			}
 		}
 
-		validateBoolProp(properties, "PURGE", r, &markers)
-		validateBoolProp(properties, "FORCE", r, &markers)
-		validateBoolProp(properties, "LOAD_UNCERTAIN_FILES", r, &markers)
+		validateBoolPropTok(propSig, parseText, "PURGE", r, &markers)
+		validateBoolPropTok(propSig, parseText, "FORCE", r, &markers)
+		validateBoolPropTok(propSig, parseText, "LOAD_UNCERTAIN_FILES", r, &markers)
 
 		if matchVal, ok := findKWAssignIdent(propSig, parseText, "MATCH_BY_COLUMN_NAME"); ok {
 			val := strings.ToUpper(matchVal)
@@ -4342,10 +4348,10 @@ func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
 		}
 	} else {
 		// Unloading (stage target)
-		validateBoolProp(properties, "OVERWRITE", r, &markers)
-		validateBoolProp(properties, "SINGLE", r, &markers)
-		validateBoolProp(properties, "INCLUDE_QUERY_ID", r, &markers)
-		validateBoolProp(properties, "DETAILED_OUTPUT", r, &markers)
+		validateBoolPropTok(propSig, parseText, "OVERWRITE", r, &markers)
+		validateBoolPropTok(propSig, parseText, "SINGLE", r, &markers)
+		validateBoolPropTok(propSig, parseText, "INCLUDE_QUERY_ID", r, &markers)
+		validateBoolPropTok(propSig, parseText, "DETAILED_OUTPUT", r, &markers)
 
 		if mfsVal, ok := findKWAssignIdent(propSig, parseText, "MAX_FILE_SIZE"); ok {
 			if !isPositiveIntStr(mfsVal) {
@@ -4405,32 +4411,8 @@ func findKWAssignIdent(sig []sqltok.Token, sql, keyword string) (string, bool) {
 	return "", false
 }
 
-// reBoolPropMap holds pre-compiled regexes for validateBoolProp. Each entry
-// matches PROP = value where value is a word token. The map is built at init
-// time so regexes are compiled once rather than on every call.
-var reBoolPropMap = func() map[string]*regexp.Regexp {
-	props := []string{"ALLOW_WRITES", "PURGE", "FORCE", "LOAD_UNCERTAIN_FILES", "OVERWRITE", "SINGLE", "INCLUDE_QUERY_ID", "DETAILED_OUTPUT", "SHARE_RESTRICTIONS", "AUTO_RESUME", "INITIALLY_SUSPENDED", "DEBUG_MODE"}
-	m := make(map[string]*regexp.Regexp, len(props))
-	for _, p := range props {
-		m[p] = regexp.MustCompile(`(?i)\b` + p + `\s*=\s*(\w+)\b`)
-	}
-	return m
-}()
-
-func validateBoolProp(s string, prop string, r StatementRange, markers *[]DiagMarker) {
-	re := reBoolPropMap[prop]
-	if re == nil {
-		panic("validateBoolProp: unregistered prop " + prop + " — add it to reBoolPropMap")
-	}
-	if m := re.FindStringSubmatch(s); m != nil {
-		val := strings.ToUpper(m[1])
-		if val != "TRUE" && val != "FALSE" {
-			*markers = append(*markers, diagMarkerSpan(r, fmt.Sprintf("%s must be TRUE or FALSE.", prop), 4))
-		}
-	}
-}
-
-// validateBoolPropTok is the token-based equivalent of validateBoolProp.
+// validateBoolPropTok checks if PROP = <value> appears in the significant
+// token stream and flags when the value is not TRUE or FALSE.
 func validateBoolPropTok(sig []sqltok.Token, sql, prop string, r StatementRange, markers *[]DiagMarker) {
 	for i := 0; i+2 < len(sig); i++ {
 		if tokUpper(sig[i], sql) != prop {
@@ -4444,34 +4426,6 @@ func validateBoolPropTok(sig []sqltok.Token, sql, prop string, r StatementRange,
 			return
 		}
 	}
-}
-
-// reParenKeyMap holds pre-compiled regexes for extractParenContent. Each entry
-// matches KEY = ( to locate the start of a parenthesized block.
-var reParenKeyMap = func() map[string]*regexp.Regexp {
-	keys := []string{"STORAGE_LOCATIONS"}
-	m := make(map[string]*regexp.Regexp, len(keys))
-	for _, k := range keys {
-		m[k] = regexp.MustCompile(`(?i)\b` + k + `\s*=\s*\(`)
-	}
-	return m
-}()
-
-func extractParenContent(s string, key string) string {
-	re := reParenKeyMap[key]
-	if re == nil {
-		panic("extractParenContent: unregistered key " + key + " — add it to reParenKeyMap")
-	}
-	loc := re.FindStringIndex(s)
-	if loc == nil {
-		return ""
-	}
-	content := s[loc[1]-1:]
-	endIdx := findMatchingParen(content)
-	if endIdx == -1 {
-		return content[1:]
-	}
-	return content[1:endIdx]
 }
 
 func validateCreateIcebergTable(parseText string, r StatementRange) []DiagMarker {
@@ -4499,8 +4453,17 @@ func validateCreateIcebergTable(parseText string, r StatementRange) []DiagMarker
 	}
 
 	// Rule: TRANSIENT is not supported for Iceberg tables.
-	if reIsCreateTransientIcebergTable.MatchString(stripped) {
-		markers = append(markers, diagMarkerSpan(r, "TRANSIENT is not supported for Iceberg tables.", 4))
+	// Only match TRANSIENT in the preamble (between CREATE and ICEBERG).
+	icebergSig := sigToks(sqltok.Tokenize(stripped))
+	for i := 0; i < len(icebergSig); i++ {
+		u := tokUpper(icebergSig[i], stripped)
+		if u == "ICEBERG" || u == "TABLE" {
+			break // past the preamble
+		}
+		if u == "TRANSIENT" {
+			markers = append(markers, diagMarkerSpan(r, "TRANSIENT is not supported for Iceberg tables.", 4))
+			break
+		}
 	}
 
 	// Rule: CATALOG_TABLE_NAME and CATALOG_NAMESPACE are only valid for non-Snowflake catalogs.
@@ -4861,8 +4824,6 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	stripped := strings.TrimSpace(stripCommentsSQL(s))
-	// Use length-preserving masking for string literals to maintain offsets
-	strippedS := stripStringsPreserveLen(stripped)
 
 	// Snowflake Rule: OR REPLACE and IF NOT EXISTS are mutually exclusive.
 	ffSig := sigToks(sqltok.Tokenize(stripped))
@@ -4874,11 +4835,11 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax: TRANSIENT is not supported for FILE FORMAT objects.", 4))
 	}
 
-	if reFileFormatTemporary.MatchString(strippedS) {
+	if hasKW(ffSig, stripped, "TEMPORARY") || hasKW(ffSig, stripped, "TEMP") {
 		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax: TEMPORARY is not supported for FILE FORMAT objects.", 4))
 	}
 
-	// 1. Extract all properties correctly by finding keys in strippedS and values in stripped
+	// 1. Extract all properties by scanning tokens for KEY = VALUE patterns.
 	type rawProp struct {
 		key string
 		val string
@@ -4886,16 +4847,15 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 	var props []rawProp
 	var rawType string
 
-	for _, m := range reFileFormatPropKey.FindAllStringSubmatchIndex(strippedS, -1) {
-		key := strings.ToUpper(strippedS[m[2]:m[3]])
-		// Find value in stripped starting after the "KEY ="
-		valRest := stripped[m[1]:]
-		// Match value: either a quoted string or a word
-		valMatch := reFileFormatPropValue.FindStringSubmatch(valRest)
-		val := ""
-		if valMatch != nil {
-			val = valMatch[1]
+	for i := 0; i+2 < len(ffSig); i++ {
+		if !isIdent(ffSig[i]) {
+			continue
 		}
+		if ffSig[i+1].Kind != sqltok.Operator || ffSig[i+1].Text(stripped) != "=" {
+			continue
+		}
+		key := strings.ToUpper(ffSig[i].Text(stripped))
+		val := ffSig[i+2].Text(stripped)
 
 		if key == "TYPE" {
 			rawType = strings.ToUpper(strings.Trim(val, "'"))
@@ -5535,9 +5495,10 @@ func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMark
 	}
 
 	// Extract location blocks from STORAGE_LOCATIONS outer parens.
-	// Use stripped (comments removed, literals intact) for extractParenContent
-	// so findMatchingParen can skip parens inside quoted string values.
-	storLocContent := extractParenContent(stripped, "STORAGE_LOCATIONS")
+	// Tokenize stripped (comments removed, literals intact) so the tokenizer
+	// correctly handles parens inside quoted string values.
+	strippedSig := sigToks(sqltok.Tokenize(stripped))
+	storLocContent := findKWAssignParenContent(strippedSig, stripped, "STORAGE_LOCATIONS")
 	locations := splitLocationBlocks(storLocContent)
 	if len(locations) == 0 {
 		markers = append(markers, diagMarkerSpan(r,
@@ -6370,14 +6331,64 @@ func validateCreateTag(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// 3. ALLOWED_VALUES values must be string literals; check for duplicates.
-	// Token-based check for presence, then regex for value extraction.
 	if hasKW(sig, stripped, "ALLOWED_VALUES") {
-		lm := reTagStringLiteralList.FindStringSubmatch(parseText)
-		if lm == nil {
-			markers = append(markers, diagMarkerSpan(r,
-				"ALLOWED_VALUES requires a list of string literals (e.g. ALLOWED_VALUES 'v1', 'v2').", 4))
-		} else {
-			markers = append(markers, checkDuplicateAllowedValues(lm[1], r)...)
+		// Find ALLOWED_VALUES in the full token stream of parseText and
+		// extract the string literal list that follows.
+		avToks := sqltok.Tokenize(parseText)
+		avIdx := -1
+		for i, t := range avToks {
+			if (t.Kind == sqltok.Keyword || t.Kind == sqltok.Identifier) &&
+				strings.EqualFold(t.Text(parseText), "ALLOWED_VALUES") {
+				avIdx = i
+				break
+			}
+		}
+		if avIdx >= 0 {
+			// ALLOWED_VALUES does not use "=" — flag if "=" follows immediately.
+			nextSigIdx := -1
+			for j := avIdx + 1; j < len(avToks); j++ {
+				k := avToks[j].Kind
+				if k != sqltok.Whitespace && k != sqltok.Newline {
+					nextSigIdx = j
+					break
+				}
+			}
+			hasEqualsAfter := nextSigIdx >= 0 && avToks[nextSigIdx].Kind == sqltok.Operator && avToks[nextSigIdx].Text(parseText) == "="
+			if hasEqualsAfter {
+				markers = append(markers, diagMarkerSpan(r,
+					"ALLOWED_VALUES requires a list of string literals (e.g. ALLOWED_VALUES 'v1', 'v2').", 4))
+			} else {
+				// Collect properly terminated string literals after ALLOWED_VALUES.
+				hasValidStrings := false
+				for j := avIdx + 1; j < len(avToks); j++ {
+					if avToks[j].Kind == sqltok.StringLit {
+						text := avToks[j].Text(parseText)
+						if len(text) >= 2 && text[0] == '\'' && text[len(text)-1] == '\'' {
+							hasValidStrings = true
+							break
+						}
+					}
+				}
+				if !hasValidStrings {
+					markers = append(markers, diagMarkerSpan(r,
+						"ALLOWED_VALUES requires a list of string literals (e.g. ALLOWED_VALUES 'v1', 'v2').", 4))
+				} else {
+					// Extract the substring from after ALLOWED_VALUES to the end of the last valid StringLit.
+					listStart := avToks[avIdx].End
+					listEnd := listStart
+					for j := avIdx + 1; j < len(avToks); j++ {
+						if avToks[j].Kind == sqltok.StringLit {
+							text := avToks[j].Text(parseText)
+							if len(text) >= 2 && text[0] == '\'' && text[len(text)-1] == '\'' {
+								listEnd = avToks[j].End
+							}
+						} else if avToks[j].Kind == sqltok.EOF || isIdent(avToks[j]) {
+							break // stop at next keyword/identifier (a property key)
+						}
+					}
+					markers = append(markers, checkDuplicateAllowedValues(strings.TrimSpace(parseText[listStart:listEnd]), r)...)
+				}
+			}
 		}
 	}
 
@@ -7481,9 +7492,8 @@ func validateCreateComputePool(parseText string, r StatementRange) []DiagMarker 
 	}
 
 	// 8. Validate boolean properties.
-	clean := cleanParseText(parseText)
-	validateBoolProp(clean, "AUTO_RESUME", r, &markers)
-	validateBoolProp(clean, "INITIALLY_SUSPENDED", r, &markers)
+	validateBoolPropTok(sig, stripped, "AUTO_RESUME", r, &markers)
+	validateBoolPropTok(sig, stripped, "INITIALLY_SUSPENDED", r, &markers)
 
 	// 9. Only known properties are accepted.
 	noComments := strings.TrimSpace(stripCommentsSQL(parseText))
@@ -7527,8 +7537,7 @@ func validateCreateDatashare(parseText string, r StatementRange) []DiagMarker {
 	validateProperties(noComments, `COMMENT|SHARE_RESTRICTIONS`, r, &markers)
 
 	// 4. SHARE_RESTRICTIONS must be TRUE or FALSE.
-	clean := cleanParseText(parseText)
-	validateBoolProp(clean, "SHARE_RESTRICTIONS", r, &markers)
+	validateBoolPropTok(sig, stripped, "SHARE_RESTRICTIONS", r, &markers)
 
 	return markers
 }
@@ -7604,8 +7613,7 @@ func validateAlterDatashare(parseText string, r StatementRange) []DiagMarker {
 	// warn if it appears without ADD ACCOUNTS (the only valid context).
 	hasShareRestrictions := hasKW(sig, stripped, "SHARE_RESTRICTIONS")
 	if hasShareRestrictions {
-		clean := cleanParseText(parseText)
-		validateBoolProp(clean, "SHARE_RESTRICTIONS", r, &markers)
+		validateBoolPropTok(sig, stripped, "SHARE_RESTRICTIONS", r, &markers)
 		if !hasAddAccounts {
 			markers = append(markers, diagMarkerSpan(r,
 				"SHARE_RESTRICTIONS is only valid with ADD ACCOUNTS in ALTER DATASHARE.", 4))
@@ -7716,7 +7724,7 @@ func validateCreateService(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// 7. Validate boolean properties.
-	validateBoolProp(clean, "AUTO_RESUME", r, &markers)
+	validateBoolPropTok(sig, clean, "AUTO_RESUME", r, &markers)
 
 	// 8. Only known properties are accepted.
 	noComments := strings.TrimSpace(stripCommentsSQL(noDollar))
@@ -8192,8 +8200,7 @@ func validateCreateApplication(parseText string, r StatementRange) []DiagMarker 
 	}
 
 	// 5. DEBUG_MODE must be TRUE or FALSE if present.
-	clean := cleanParseText(parseText)
-	validateBoolProp(clean, "DEBUG_MODE", r, &markers)
+	validateBoolPropTok(sig, stripped, "DEBUG_MODE", r, &markers)
 
 	// 6. Only known properties are accepted.
 	noComments := strings.TrimSpace(stripCommentsSQL(parseText))
@@ -8260,8 +8267,7 @@ func validateAlterApplication(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// 4. DEBUG_MODE must be TRUE or FALSE when used with SET.
-	clean := cleanParseText(parseText)
-	validateBoolProp(clean, "DEBUG_MODE", r, &markers)
+	validateBoolPropTok(sig, stripped, "DEBUG_MODE", r, &markers)
 
 	return markers
 }
@@ -8410,50 +8416,50 @@ func validateDropGitRepository(parseText string, r StatementRange) []DiagMarker 
 
 // ── CREATE SECRET data-driven type validation ────────────────────────────────
 
-// secretPropDef associates a regex with its display name and owning type(s).
+// secretPropDef associates a keyword with its display name and owning type(s).
 type secretPropDef struct {
-	re    *regexp.Regexp
-	name  string
-	owner string // human-readable owner type(s)
+	keyword string // e.g. "API_AUTHENTICATION"
+	name    string
+	owner   string // human-readable owner type(s)
 }
 
 // secretMandatoryDef describes a mandatory property for a given TYPE.
 type secretMandatoryDef struct {
-	re   *regexp.Regexp
-	hint string // e.g. "API_AUTHENTICATION = <security_integration_name>"
+	keyword string // e.g. "API_AUTHENTICATION"
+	hint    string // e.g. "API_AUTHENTICATION = <security_integration_name>"
 }
 
-// secretTypeAllowed maps each TYPE to the set of type-specific property regexes
+// secretTypeAllowed maps each TYPE to the set of type-specific property keywords
 // that are valid for it. Properties not in this set trigger a cross-type warning.
-var secretTypeAllowed = map[string]map[*regexp.Regexp]bool{
-	"OAUTH2":               {reSecretAPIA: true, reSecretOAuthScopes: true, reSecretOAuthRT: true, reSecretOAuthRTExp: true},
-	"PASSWORD":             {reSecretUsername: true, reSecretPassword: true},
-	"GENERIC_STRING":       {reSecretString: true},
-	"CLOUD_PROVIDER_TOKEN": {reSecretAPIA: true, reSecretEnabled: true},
-	"SYMMETRIC_KEY":        {reSecretAlgorithm: true},
+var secretTypeAllowed = map[string]map[string]bool{
+	"OAUTH2":               {"API_AUTHENTICATION": true, "OAUTH_SCOPES": true, "OAUTH_REFRESH_TOKEN": true, "OAUTH_REFRESH_TOKEN_EXPIRY_TIME": true},
+	"PASSWORD":             {"USERNAME": true, "PASSWORD": true},
+	"GENERIC_STRING":       {"SECRET_STRING": true},
+	"CLOUD_PROVIDER_TOKEN": {"API_AUTHENTICATION": true, "ENABLED": true},
+	"SYMMETRIC_KEY":        {"ALGORITHM": true},
 }
 
 // secretTypeMandatory maps each TYPE to its mandatory properties.
 var secretTypeMandatory = map[string][]secretMandatoryDef{
-	"OAUTH2":               {{reSecretAPIA, "API_AUTHENTICATION = <security_integration_name>"}},
-	"PASSWORD":             {{reSecretUsername, "USERNAME = '<username>'"}, {reSecretPassword, "PASSWORD = '<password>'"}},
-	"GENERIC_STRING":       {{reSecretString, "SECRET_STRING = '<value>'"}},
-	"CLOUD_PROVIDER_TOKEN": {{reSecretAPIA, "API_AUTHENTICATION = <security_integration_name>"}},
-	"SYMMETRIC_KEY":        {{reSecretAlgorithm, "ALGORITHM = '<algorithm>'"}},
+	"OAUTH2":               {{"API_AUTHENTICATION", "API_AUTHENTICATION = <security_integration_name>"}},
+	"PASSWORD":             {{"USERNAME", "USERNAME = '<username>'"}, {"PASSWORD", "PASSWORD = '<password>'"}},
+	"GENERIC_STRING":       {{"SECRET_STRING", "SECRET_STRING = '<value>'"}},
+	"CLOUD_PROVIDER_TOKEN": {{"API_AUTHENTICATION", "API_AUTHENTICATION = <security_integration_name>"}},
+	"SYMMETRIC_KEY":        {{"ALGORITHM", "ALGORITHM = '<algorithm>'"}},
 }
 
 // secretTypedProps lists all type-specific properties with their owning type.
 // This is iterated for cross-type violation detection.
 var secretTypedProps = []secretPropDef{
-	{reSecretAPIA, "API_AUTHENTICATION", "OAUTH2 or CLOUD_PROVIDER_TOKEN"},
-	{reSecretUsername, "USERNAME", "PASSWORD"},
-	{reSecretPassword, "PASSWORD", "PASSWORD"},
-	{reSecretString, "SECRET_STRING", "GENERIC_STRING"},
-	{reSecretEnabled, "ENABLED", "CLOUD_PROVIDER_TOKEN"},
-	{reSecretAlgorithm, "ALGORITHM", "SYMMETRIC_KEY"},
-	{reSecretOAuthScopes, "OAUTH_SCOPES", "OAUTH2"},
-	{reSecretOAuthRT, "OAUTH_REFRESH_TOKEN", "OAUTH2"},
-	{reSecretOAuthRTExp, "OAUTH_REFRESH_TOKEN_EXPIRY_TIME", "OAUTH2"},
+	{"API_AUTHENTICATION", "API_AUTHENTICATION", "OAUTH2 or CLOUD_PROVIDER_TOKEN"},
+	{"USERNAME", "USERNAME", "PASSWORD"},
+	{"PASSWORD", "PASSWORD", "PASSWORD"},
+	{"SECRET_STRING", "SECRET_STRING", "GENERIC_STRING"},
+	{"ENABLED", "ENABLED", "CLOUD_PROVIDER_TOKEN"},
+	{"ALGORITHM", "ALGORITHM", "SYMMETRIC_KEY"},
+	{"OAUTH_SCOPES", "OAUTH_SCOPES", "OAUTH2"},
+	{"OAUTH_REFRESH_TOKEN", "OAUTH_REFRESH_TOKEN", "OAUTH2"},
+	{"OAUTH_REFRESH_TOKEN_EXPIRY_TIME", "OAUTH_REFRESH_TOKEN_EXPIRY_TIME", "OAUTH2"},
 }
 
 // ── validateCreateSecret ─────────────────────────────────────────────────────
@@ -8494,28 +8500,27 @@ func validateCreateSecret(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// 3. TYPE is mandatory.
-	clean := cleanParseText(parseText)
-	typeMatch := reSecretType.FindStringSubmatch(clean)
-	if typeMatch == nil {
+	typeVal, hasType := findKWAssign(sig, stripped, "TYPE")
+	if !hasType {
 		markers = append(markers, diagMarkerSpan(r,
 			"CREATE SECRET requires TYPE = OAUTH2 | PASSWORD | GENERIC_STRING | CLOUD_PROVIDER_TOKEN | SYMMETRIC_KEY.", 4))
 		return markers
 	}
 
-	secretType := strings.ToUpper(typeMatch[1])
+	secretType := strings.ToUpper(typeVal)
 
 	// 4. Validate TYPE value and type-specific properties.
 	allowed, ok := secretTypeAllowed[secretType]
 	if !ok {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("Unknown TYPE '%s'. Valid types: OAUTH2, PASSWORD, GENERIC_STRING, CLOUD_PROVIDER_TOKEN, SYMMETRIC_KEY.", typeMatch[1]), 4))
+			fmt.Sprintf("Unknown TYPE '%s'. Valid types: OAUTH2, PASSWORD, GENERIC_STRING, CLOUD_PROVIDER_TOKEN, SYMMETRIC_KEY.", typeVal), 4))
 		return markers
 	}
 
 	// Check mandatory properties.
 	if mandatory, hasMandatory := secretTypeMandatory[secretType]; hasMandatory {
 		for _, mp := range mandatory {
-			if !mp.re.MatchString(clean) {
+			if !hasKWAssign(sig, stripped, mp.keyword) {
 				markers = append(markers, diagMarkerSpan(r,
 					fmt.Sprintf("TYPE = %s requires %s.", secretType, mp.hint), 4))
 			}
@@ -8524,10 +8529,10 @@ func validateCreateSecret(parseText string, r StatementRange) []DiagMarker {
 
 	// Cross-type property checks.
 	for _, sp := range secretTypedProps {
-		if allowed[sp.re] {
+		if allowed[sp.keyword] {
 			continue // property is valid for this TYPE
 		}
-		if sp.re.MatchString(clean) {
+		if hasKWAssign(sig, stripped, sp.keyword) {
 			markers = append(markers, diagMarkerSpan(r,
 				fmt.Sprintf("%s is not valid for TYPE = %s. %s belongs to TYPE = %s.",
 					sp.name, secretType, sp.name, sp.owner), 4))
@@ -8747,13 +8752,27 @@ func validateAlterTableSearchOptimization(stripped string, r StatementRange) []D
 	var markers []DiagMarker
 
 	clean := strings.TrimSpace(sqltok.StripStrings(stripped))
+	soSig := sigToks(sqltok.Tokenize(clean))
 
-	// If there is no ON clause, the bare form is valid — nothing to check.
-	loc := reSearchOptOnClause.FindStringIndex(clean)
-	if loc == nil {
+	// Find SEARCH OPTIMIZATION ON sequence in tokens.
+	onIdx := -1
+	for i := 0; i+2 < len(soSig); i++ {
+		if tokUpper(soSig[i], clean) == "SEARCH" &&
+			tokUpper(soSig[i+1], clean) == "OPTIMIZATION" &&
+			tokUpper(soSig[i+2], clean) == "ON" {
+			onIdx = i + 2
+			break
+		}
+	}
+	if onIdx < 0 {
 		return markers
 	}
-	onBody := strings.TrimSpace(clean[loc[1]:])
+
+	// Extract the text after ON.
+	onBody := ""
+	if onIdx+1 < len(soSig) {
+		onBody = strings.TrimSpace(clean[soSig[onIdx].End:])
+	}
 
 	if onBody == "" {
 		markers = append(markers, diagMarkerSpan(r,
@@ -8769,13 +8788,14 @@ func validateAlterTableSearchOptimization(stripped string, r StatementRange) []D
 		if expr == "" {
 			continue
 		}
-		m := reSearchOptExpr.FindStringSubmatch(expr)
-		if m == nil {
+		// Token-scan each expression for IDENTIFIER( pattern.
+		exprSig := sigToks(sqltok.Tokenize(expr))
+		if len(exprSig) < 2 || !isIdent(exprSig[0]) || exprSig[1].Kind != sqltok.LParen {
 			markers = append(markers, diagMarkerSpan(r,
 				fmt.Sprintf("Invalid search optimization expression: %q. Expected EQUALITY, SUBSTRING, GEO, or FULL_TEXT.", expr), 4))
 			continue
 		}
-		funcName := strings.ToUpper(m[1])
+		funcName := strings.ToUpper(exprSig[0].Text(expr))
 		if !searchOptValidExprs[funcName] {
 			markers = append(markers, diagMarkerSpan(r,
 				fmt.Sprintf("Unknown search optimization type %q. Valid types are EQUALITY, SUBSTRING, GEO, FULL_TEXT.", funcName), 4))
