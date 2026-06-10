@@ -54,6 +54,10 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE SEQUENCE s WITH START 5 INCREMENT 1 NOORDER",
 		"CREATE SEQUENCE s START -10 INCREMENT = 3",
 		"ALTER SEQUENCE my_seq INCREMENT = 10",
+		"ALTER SEQUENCE IF EXISTS s RENAME TO s2",
+		"ALTER SEQUENCE s SET INCREMENT BY -5",
+		"ALTER SEQUENCE s SET ORDER COMMENT = 'x'",
+		"ALTER SEQUENCE s UNSET COMMENT",
 		"DROP SEQUENCE IF EXISTS my_seq CASCADE",
 		// Streams
 		"CREATE STREAM my_stream ON TABLE my_table",
@@ -513,6 +517,9 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Sequence ORDER+NOORDER", "CREATE SEQUENCE s ORDER NOORDER", "Unexpected syntax"},
 		{"Sequence unknown clause", "CREATE SEQUENCE s BOGUS = 1", "Unexpected syntax"},
 		{"Sequence START no value", "CREATE SEQUENCE s START WITH", "Unexpected syntax"},
+		{"Alter Sequence bad action", "ALTER SEQUENCE s SET FOO = 1", "Unexpected syntax"},
+		{"Alter Sequence SET ORDER+NOORDER", "ALTER SEQUENCE s SET ORDER NOORDER", "Unexpected syntax"},
+		{"Alter Sequence trailing junk", "ALTER SEQUENCE s RENAME TO s2 EXTRA", "Unexpected syntax"},
 		{"Invalid Table", "CREATE TRANSIENT OR REPLACE TABLE foo (id INT)", "Unexpected syntax"}, // Wrong modifier order
 		{"Table Replace IF NOT EXISTS", "CREATE OR REPLACE TABLE foo IF NOT EXISTS (id INT)", "Conflict between OR REPLACE and IF NOT EXISTS"},
 		{"Table CLUSTER BY no parens", "CREATE TABLE foo (id INT) CLUSTER BY id", "Unexpected syntax"},

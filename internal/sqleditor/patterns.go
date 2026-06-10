@@ -82,13 +82,7 @@ var (
 	// (reValidCreateSeq removed — token-based: isValidCreateSeq)
 
 	// ── ALTER SEQUENCE ────────────────────────────────────────────────────────
-	reValidAlterSeq = regexp.MustCompile(
-		`(?i)^\s*ALTER\s+SEQUENCE\s+(?:IF\s+EXISTS\s+)?` + _identPath + `\s+` +
-			`(?:RENAME\s+TO\s+` + _identPath +
-			`|(?:SET\s+)?INCREMENT(?:\s+BY|\s*=)?\s+-?\d+` +
-			`|SET(?:\s+(?:ORDER|NOORDER|COMMENT\s*=\s*'(?:[^']|'')*'))+` +
-			`|UNSET\s+COMMENT` +
-			`)\s*$`)
+	// (reValidAlterSeq removed — token-based: isValidAlterSeq)
 
 	// ── DROP SEQUENCE ─────────────────────────────────────────────────────────
 	reValidDropSeq = regexp.MustCompile(`(?i)^\s*DROP\s+SEQUENCE\s+(?:IF\s+EXISTS\s+)?` + _identPath + `(?:\s+(?:CASCADE|RESTRICT))?\s*$`)
@@ -2332,15 +2326,73 @@ func validateCreateSequence(parseText string, r StatementRange) []DiagMarker {
 	return nil
 }
 
+// isValidAlterSeq reports whether sig is a well-formed ALTER SEQUENCE statement:
+//
+//	ALTER SEQUENCE [IF EXISTS] <name> <action>
+//
+// where <action> is exactly one of: RENAME TO <name>; [SET] INCREMENT [BY|=]
+// <int>; SET (ORDER|NOORDER|COMMENT = '…')+; or UNSET COMMENT. Token-based
+// replacement for reValidAlterSeq.
+func isValidAlterSeq(sig []sqltok.Token, sql string) bool {
+	i := 0
+	if !kwAt(sig, sql, i, "ALTER") || !kwAt(sig, sql, i+1, "SEQUENCE") {
+		return false
+	}
+	i += 2
+	if kwAt(sig, sql, i, "IF") && kwAt(sig, sql, i+1, "EXISTS") {
+		i += 2
+	}
+	if i >= len(sig) || !isIdent(sig[i]) {
+		return false
+	}
+	_, i = readIdentPath(sig, sql, i)
+
+	switch {
+	case kwAt(sig, sql, i, "RENAME") && kwAt(sig, sql, i+1, "TO"):
+		j := i + 2
+		if j >= len(sig) || !isIdent(sig[j]) {
+			return false
+		}
+		_, j = readIdentPath(sig, sql, j)
+		return j == len(sig)
+	case kwAt(sig, sql, i, "SET") && kwAt(sig, sql, i+1, "INCREMENT"):
+		next, ok := consumeSeqValueClause(sig, sql, i+1, "BY")
+		return ok && next == len(sig)
+	case kwAt(sig, sql, i, "INCREMENT"):
+		next, ok := consumeSeqValueClause(sig, sql, i, "BY")
+		return ok && next == len(sig)
+	case kwAt(sig, sql, i, "SET"):
+		// SET (ORDER | NOORDER | COMMENT = '…')+  — at least one entry.
+		j, count := i+1, 0
+		for j < len(sig) {
+			switch {
+			case kwAt(sig, sql, j, "ORDER"), kwAt(sig, sql, j, "NOORDER"):
+				j++
+			case kwAt(sig, sql, j, "COMMENT"):
+				next, ok := eqValueProp(sig, sql, j, sqltok.StringLit)
+				if !ok {
+					return false
+				}
+				j = next
+			default:
+				return false
+			}
+			count++
+		}
+		return count >= 1
+	case kwAt(sig, sql, i, "UNSET") && kwAt(sig, sql, i+1, "COMMENT"):
+		return i+2 == len(sig)
+	}
+	return false
+}
+
 // validateAlterSequence flags an ALTER SEQUENCE that is syntactically invalid or
-// that specifies both ORDER and NOORDER. As in validateCreateSequence, the
-// ORDER/NOORDER clash is token-based and the statement shape (RENAME TO,
-// SET INCREMENT/ORDER/COMMENT, UNSET COMMENT) is checked by the reValidAlterSeq
-// grammar whitelist — kept because it is shorter than an equivalent token walk.
+// that specifies both ORDER and NOORDER. Both checks are token-based: the
+// ORDER/NOORDER clash via hasKW, the statement shape via isValidAlterSeq.
 func validateAlterSequence(parseText string, r StatementRange) []DiagMarker {
 	sig := sigTokens(parseText)
 	bothOrderNoorder := hasKW(sig, parseText, "ORDER") && hasKW(sig, parseText, "NOORDER")
-	if !reValidAlterSeq.MatchString(parseText) || bothOrderNoorder {
+	if !isValidAlterSeq(sig, parseText) || bothOrderNoorder {
 		return oneMarker(r, "Unexpected syntax in ALTER SEQUENCE statement.")
 	}
 	return nil
