@@ -24,7 +24,7 @@ import (
 
 	"thaw/internal/ddl"
 	"thaw/internal/snowflake"
-	"thaw/internal/sqlutil"
+	"thaw/internal/sqltok"
 )
 
 // ─── event name constants ─────────────────────────────────────────────────────
@@ -109,12 +109,8 @@ var (
 	useDatabaseRE  = regexp.MustCompile(`(?i)^\s*USE\s+DATABASE\s+"?([^"\s;]+)"?`)
 	useSchemaRE    = regexp.MustCompile(`(?i)^\s*USE\s+SCHEMA\s+"?([^"\s;]+)"?`)
 	isReplaceRE    = regexp.MustCompile(`(?i)^\s*CREATE\s+OR\s+REPLACE\b`)
-
-	// column-parsing patterns used by table migration strategies
-	constraintPrefixRE = regexp.MustCompile(
-		`(?i)^\s*(CONSTRAINT|PRIMARY\s+KEY|UNIQUE|CHECK|FOREIGN\s+KEY|CLUSTER\s+BY)`)
-	colNameRE = regexp.MustCompile(`(?i)^\s*"?([A-Za-z_][A-Za-z0-9_$]*)"?\s+\S`)
-	colTypeRE = regexp.MustCompile(`(?i)^\w+(?:\s*\([^)]*\))?`)
+	// Column parsing (constraint prefixes, column names, type expressions) is
+	// token-based — see parseLocalTableColumns / parseColumnSegment.
 )
 
 // ─── column helpers ──────────────────────────────────────────────────────────
@@ -168,7 +164,7 @@ func (s *Service) ScanSource(dir string) ([]MigrationObject, error) {
 			return nil // silently skip unreadable files
 		}
 
-		stmts := sqlutil.Split(string(raw))
+		stmts := sqltok.Split(string(raw))
 
 		var ctxDB, ctxSch string
 
@@ -297,7 +293,7 @@ func (s *Service) Analyze(client *snowflake.Client, objects []MigrationObject, d
 				return
 			}
 
-			stmts := sqlutil.Split(ddlText)
+			stmts := sqltok.Split(ddlText)
 
 			remoteMu.Lock()
 			defer remoteMu.Unlock()
@@ -707,74 +703,153 @@ func migrQuote(s string) string {
 
 // parseLocalTableColumns extracts column definitions from a CREATE TABLE DDL
 // statement. Constraint and clustering clauses are skipped.
+//
+// It is token-based: the column-list parentheses, the comma split between
+// columns, and each column's type-precision parentheses are all located on the
+// sqltok token stream. Commas or parentheses appearing inside a string default
+// or a comment (e.g. DEFAULT '(a,b)') therefore no longer corrupt the split, and
+// a quoted column name containing spaces is captured whole.
 func parseLocalTableColumns(ddlText string) []colDef {
-	// Locate the outermost parenthesised block.
-	start := strings.IndexByte(ddlText, '(')
-	if start < 0 {
-		return nil
-	}
-	depth, end := 0, -1
-	for i := start; i < len(ddlText); i++ {
-		switch ddlText[i] {
-		case '(':
-			depth++
-		case ')':
-			depth--
-			if depth == 0 {
-				end = i
-			}
-		}
-		if end >= 0 {
+	sig := migSigToks(sqltok.Tokenize(ddlText))
+
+	// The column list is the first parenthesised group.
+	open := -1
+	for i := range sig {
+		if sig[i].Kind == sqltok.LParen {
+			open = i
 			break
 		}
 	}
-	if end < 0 {
+	if open < 0 {
+		return nil
+	}
+	closeIdx := matchParen(sig, open)
+	if closeIdx < 0 {
 		return nil
 	}
 
 	var cols []colDef
-	for _, part := range splitTopLevel(ddlText[start+1:end], ',') {
-		part = strings.TrimSpace(part)
-		if part == "" || constraintPrefixRE.MatchString(part) {
-			continue
+	depth := 0
+	segStart := open + 1
+	addSegment := func(end int) {
+		if c, ok := parseColumnSegment(sig[segStart:end], ddlText); ok {
+			cols = append(cols, c)
 		}
-		locs := colNameRE.FindStringSubmatchIndex(part)
-		if locs == nil {
-			continue
-		}
-		name := strings.ToUpper(part[locs[2]:locs[3]]) // capture group [1]
-		rest := strings.TrimSpace(part[locs[1]-1:])
-		typeExpr := ""
-		if tm := colTypeRE.FindString(rest); tm != "" {
-			typeExpr = strings.ToUpper(strings.TrimSpace(tm))
-		} else if len(strings.Fields(rest)) > 0 {
-			typeExpr = strings.ToUpper(strings.Fields(rest)[0])
-		}
-		if typeExpr != "" {
-			cols = append(cols, colDef{Name: name, TypeExpr: typeExpr})
-		}
+		segStart = end + 1
 	}
-	return cols
-}
-
-// splitTopLevel splits s on sep, respecting nested parentheses.
-func splitTopLevel(s string, sep byte) []string {
-	var parts []string
-	depth, start := 0, 0
-	for i := 0; i < len(s); i++ {
-		switch s[i] {
-		case '(':
+	for i := open + 1; i < closeIdx; i++ {
+		switch sig[i].Kind {
+		case sqltok.LParen:
 			depth++
-		case ')':
+		case sqltok.RParen:
 			depth--
-		default:
-			if s[i] == sep && depth == 0 {
-				parts = append(parts, s[start:i])
-				start = i + 1
+		case sqltok.Comma:
+			if depth == 0 {
+				addSegment(i)
 			}
 		}
 	}
-	return append(parts, s[start:])
+	addSegment(closeIdx) // the final column, between the last comma and ")"
+	return cols
+}
+
+// parseColumnSegment classifies one comma-separated entry of a CREATE TABLE
+// column list. It returns ok=false for empty entries and for table-level
+// constraint / clustering clauses (CONSTRAINT, PRIMARY KEY, UNIQUE, CHECK,
+// FOREIGN KEY, CLUSTER BY). Otherwise it returns the column name (quotes
+// stripped, upper-cased) and its type expression — the first type token plus any
+// trailing "( … )" precision, e.g. NUMBER(38,0) — also upper-cased.
+func parseColumnSegment(seg []sqltok.Token, sql string) (colDef, bool) {
+	if len(seg) == 0 {
+		return colDef{}, false
+	}
+	// Skip table-level constraint / clustering clauses.
+	switch upperToken(seg[0], sql) {
+	case "CONSTRAINT", "UNIQUE", "CHECK":
+		return colDef{}, false
+	case "PRIMARY", "FOREIGN":
+		if len(seg) > 1 && upperToken(seg[1], sql) == "KEY" {
+			return colDef{}, false
+		}
+	case "CLUSTER":
+		if len(seg) > 1 && upperToken(seg[1], sql) == "BY" {
+			return colDef{}, false
+		}
+	}
+	// A column definition needs a name token and a type token.
+	if len(seg) < 2 || !isWordToken(seg[0]) || !isWordToken(seg[1]) {
+		return colDef{}, false
+	}
+	name := upperIdentText(seg[0], sql)
+	// Type expression: the first type token plus an optional "( … )" precision.
+	typeEnd := seg[1].End
+	if len(seg) > 2 && seg[2].Kind == sqltok.LParen {
+		if cl := matchParen(seg, 2); cl >= 0 {
+			typeEnd = seg[cl].End
+		}
+	}
+	typeExpr := strings.ToUpper(strings.TrimSpace(sql[seg[1].Start:typeEnd]))
+	if typeExpr == "" {
+		return colDef{}, false
+	}
+	return colDef{Name: name, TypeExpr: typeExpr}, true
+}
+
+// migSigToks returns the significant tokens (dropping whitespace, newlines,
+// comments, and the EOF sentinel) so the column walk indexes structural tokens.
+func migSigToks(toks []sqltok.Token) []sqltok.Token {
+	out := make([]sqltok.Token, 0, len(toks)/2)
+	for _, t := range toks {
+		switch t.Kind {
+		case sqltok.Whitespace, sqltok.Newline, sqltok.LineComment, sqltok.BlockComment, sqltok.EOF:
+			// skip
+		default:
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// matchParen returns the index of the ")" that matches the "(" at sig[open],
+// handling nesting, or -1 if there is none.
+func matchParen(sig []sqltok.Token, open int) int {
+	depth := 0
+	for i := open; i < len(sig); i++ {
+		switch sig[i].Kind {
+		case sqltok.LParen:
+			depth++
+		case sqltok.RParen:
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// isWordToken reports whether t can be a column name or type keyword.
+func isWordToken(t sqltok.Token) bool {
+	return t.Kind == sqltok.Keyword || t.Kind == sqltok.Identifier || t.Kind == sqltok.QuotedIdent
+}
+
+// upperToken returns the upper-cased text of a keyword/identifier token, or ""
+// for any other kind (so quoted/punctuation tokens never match a keyword check).
+func upperToken(t sqltok.Token, sql string) string {
+	if t.Kind == sqltok.Keyword || t.Kind == sqltok.Identifier {
+		return strings.ToUpper(t.Text(sql))
+	}
+	return ""
+}
+
+// upperIdentText returns a column name upper-cased, with the surrounding quotes
+// stripped from a "quoted identifier".
+func upperIdentText(t sqltok.Token, sql string) string {
+	s := t.Text(sql)
+	if t.Kind == sqltok.QuotedIdent && len(s) >= 2 {
+		s = s[1 : len(s)-1]
+	}
+	return strings.ToUpper(s)
 }
 
 // commonColumnNames returns column names from a that also appear in b,

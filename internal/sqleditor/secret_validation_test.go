@@ -809,9 +809,9 @@ func TestValidateSnowflakePatterns_Secret_CreateQuotedThreePartName(t *testing.T
 }
 
 func TestValidateSnowflakePatterns_Secret_TypeValueSpecialChars(t *testing.T) {
-	// TYPE values with special characters: the regex ([\w]+) stops at
-	// non-word characters, producing different errors depending on whether
-	// a partial word is captured.
+	// TYPE values with special characters: the token-based parser picks up
+	// the first token after "=", so non-word prefixes like "@" are captured
+	// as the TYPE value and flagged as unknown.
 	cases := []struct {
 		name    string
 		sql     string
@@ -823,9 +823,9 @@ func TestValidateSnowflakePatterns_Secret_TypeValueSpecialChars(t *testing.T) {
 			"Unknown TYPE",
 		},
 		{
-			"non-word prefix means TYPE not found",
+			"non-word prefix means unknown TYPE",
 			"CREATE SECRET my_secret TYPE = @OAUTH2 API_AUTHENTICATION = my_int",
-			"CREATE SECRET requires TYPE",
+			"Unknown TYPE",
 		},
 	}
 	for _, tc := range cases {
@@ -1043,17 +1043,16 @@ func TestValidateSnowflakePatterns_Secret_MultipleTYPEDeclarations(t *testing.T)
 }
 
 func TestValidateSnowflakePatterns_Secret_CreateIfExistsWrongModifier(t *testing.T) {
-	// CREATE SECRET IF EXISTS (should be IF NOT EXISTS) — the validator
-	// treats "IF" as the secret name because the optional group only matches
-	// IF NOT EXISTS. The statement validates without warnings since TYPE and
-	// mandatory properties are present.
+	// CREATE SECRET IF EXISTS (should be IF NOT EXISTS): only the full
+	// IF NOT EXISTS clause is consumed, so "IF" is parsed as the name and the
+	// name-swallowed-by-IF guard flags the statement. (Previously the lenient
+	// parse silently accepted the DROP-style modifier.)
 	sql := "CREATE SECRET IF EXISTS my_secret TYPE = GENERIC_STRING SECRET_STRING = 'val'"
 	ranges := GetStatementRanges(sql)
 	markers := ValidateSnowflakePatterns(sql, ranges)
 	warns := getWarnings(markers)
-	// "IF" is captured as the name; TYPE + SECRET_STRING satisfy GENERIC_STRING.
-	if len(warns) != 0 {
-		t.Errorf("Expected 0 warnings (wrong modifier not detected, name='IF'), got %d: %v", len(warns), warnMsgs(warns))
+	if len(warns) != 1 || !strings.Contains(warns[0].Message, "Unexpected syntax in CREATE SECRET") {
+		t.Errorf("Expected 1 wrong-modifier warning, got %d: %v", len(warns), warnMsgs(warns))
 	}
 }
 
@@ -2635,22 +2634,15 @@ func TestValidateSnowflakePatterns_Secret_AlterQuotedNameNoIfExistsNoAction(t *t
 }
 
 func TestValidateSnowflakePatterns_Secret_UnexpectedPropertyInBlockComment(t *testing.T) {
-	// validateProperties receives the raw parseText (not comment-stripped), so
-	// a KEY = pattern inside a block comment is still detected. This test
-	// documents that known limitation — properties inside comments trigger
-	// "Unexpected property" false positives.
+	// Token-based validateProperties correctly ignores KEY = patterns inside
+	// block comments. Previously this was a known false positive with regex.
 	sql := "CREATE SECRET s TYPE = PASSWORD USERNAME = 'u' PASSWORD = 'p' /* WAREHOUSE = my_wh */"
 	ranges := GetStatementRanges(sql)
 	markers := ValidateSnowflakePatterns(sql, ranges)
 	warns := getWarnings(markers)
-	found := false
 	for _, w := range warns {
 		if strings.Contains(w.Message, "Unexpected property") && strings.Contains(w.Message, "WAREHOUSE") {
-			found = true
-			break
+			t.Errorf("Token-based validateProperties should not flag WAREHOUSE inside a block comment, got: %s", w.Message)
 		}
-	}
-	if !found {
-		t.Errorf("Expected 'Unexpected property WAREHOUSE' warning (known false positive from comment), got: %v", warnMsgs(warns))
 	}
 }

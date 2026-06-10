@@ -87,73 +87,6 @@ func TestNormalizeDDL(t *testing.T) {
 	}
 }
 
-// ─── splitTopLevel ────────────────────────────────────────────────────────────
-
-func TestSplitTopLevel(t *testing.T) {
-	cases := []struct {
-		name  string
-		input string
-		sep   byte
-		want  []string
-	}{
-		{
-			name:  "simple_csv",
-			input: "a,b,c",
-			sep:   ',',
-			want:  []string{"a", "b", "c"},
-		},
-		{
-			name:  "comma_inside_parens_not_split",
-			input: "a,NUMBER(38,0),c",
-			sep:   ',',
-			want:  []string{"a", "NUMBER(38,0)", "c"},
-		},
-		{
-			name:  "deeply_nested_parens",
-			input: "FUNC(a(b,c),d),e",
-			sep:   ',',
-			want:  []string{"FUNC(a(b,c),d)", "e"},
-		},
-		{
-			name:  "single_element",
-			input: "abc",
-			sep:   ',',
-			want:  []string{"abc"},
-		},
-		{
-			name:  "empty_string",
-			input: "",
-			sep:   ',',
-			want:  []string{""},
-		},
-		{
-			name:  "trailing_separator",
-			input: "a,b,",
-			sep:   ',',
-			want:  []string{"a", "b", ""},
-		},
-		{
-			name:  "multiple_nested_levels",
-			input: "TIMESTAMP_NTZ(9),OBJECT(key VARCHAR,val VARIANT),TEXT",
-			sep:   ',',
-			want:  []string{"TIMESTAMP_NTZ(9)", "OBJECT(key VARCHAR,val VARIANT)", "TEXT"},
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := splitTopLevel(tc.input, tc.sep)
-			if len(got) != len(tc.want) {
-				t.Fatalf("splitTopLevel(%q) len=%d, want %d: %v", tc.input, len(got), len(tc.want), got)
-			}
-			for i := range got {
-				if got[i] != tc.want[i] {
-					t.Errorf("splitTopLevel(%q)[%d] = %q, want %q", tc.input, i, got[i], tc.want[i])
-				}
-			}
-		})
-	}
-}
-
 // ─── migrQuote ────────────────────────────────────────────────────────────────
 
 func TestMigrQuote(t *testing.T) {
@@ -266,6 +199,27 @@ func TestParseLocalTableColumns(t *testing.T) {
 			name: "foreign_key_skipped",
 			ddl:  `CREATE TABLE t (id NUMBER, ref_id NUMBER, FOREIGN KEY (ref_id) REFERENCES other(id))`,
 			want: []colDef{{Name: "ID", TypeExpr: "NUMBER"}, {Name: "REF_ID", TypeExpr: "NUMBER"}},
+		},
+		{
+			// Bug fix: a ")" inside a string default used to prematurely close
+			// the column-list scan (byte-level depth counting), dropping every
+			// later column. The token scan treats the string as one token.
+			name: "paren_inside_string_default",
+			ddl:  `CREATE TABLE t (a VARCHAR DEFAULT ')', b NUMBER)`,
+			want: []colDef{{Name: "A", TypeExpr: "VARCHAR"}, {Name: "B", TypeExpr: "NUMBER"}},
+		},
+		{
+			// Bug fix: a comma inside a string default no longer splits a column.
+			name: "comma_inside_string_default",
+			ddl:  `CREATE TABLE t (label VARCHAR DEFAULT 'a,b', id NUMBER)`,
+			want: []colDef{{Name: "LABEL", TypeExpr: "VARCHAR"}, {Name: "ID", TypeExpr: "NUMBER"}},
+		},
+		{
+			// Bug fix: a quoted column name containing a space is captured whole
+			// (the old regex stopped at the first space, yielding just "MY").
+			name: "quoted_name_with_space",
+			ddl:  `CREATE TABLE t ("My Col" VARCHAR, id NUMBER)`,
+			want: []colDef{{Name: "MY COL", TypeExpr: "VARCHAR"}, {Name: "ID", TypeExpr: "NUMBER"}},
 		},
 	}
 	for _, tc := range cases {

@@ -222,7 +222,6 @@ func TestValidateSnowflakePatterns_CreateHybridTable(t *testing.T) {
 	}
 }
 
-
 func TestValidateSnowflakePatterns_CreateEventTable(t *testing.T) {
 	validCases := []string{
 		// Minimal valid event table
@@ -432,7 +431,6 @@ func TestValidateSnowflakePatterns_CreateEventTable(t *testing.T) {
 }
 
 // ── ALTER SESSION SET / UNSET ─────────────────────────────────────────────────
-
 
 func TestValidateSnowflakePatterns_AlterTableSearchOptimization(t *testing.T) {
 	t.Run("valid ALTER TABLE SEARCH OPTIMIZATION", func(t *testing.T) {
@@ -991,5 +989,3 @@ func TestValidateSnowflakePatterns_MultiStatement(t *testing.T) {
 		}
 	})
 }
-
-

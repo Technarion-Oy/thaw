@@ -606,10 +606,9 @@ func TestValidateSnowflakePatterns_CreateProcedure(t *testing.T) {
 		// COMMENT clause placed before RETURNS containing the word AS:
 		// premature AS detection may truncate the preamble before RETURNS.
 		{
-			name:          "COMMENT containing AS placed before RETURNS truncates preamble",
+			name:          "COMMENT containing AS no longer truncates preamble",
 			sql:           "CREATE PROCEDURE my_proc() COMMENT = 'known as foo' RETURNS VARCHAR LANGUAGE SQL AS $$ BEGIN RETURN 'ok'; END; $$",
-			expectWarning: true,
-			expectedMatch: "Missing mandatory RETURNS",
+			expectWarning: false,
 		},
 
 		// Parameterized return type: ValidateDataTypes must validate the base
@@ -670,22 +669,25 @@ func TestValidateSnowflakePatterns_CreateProcedure(t *testing.T) {
 		// strip comments from parseText, so RETURNS inside a comment satisfies
 		// the \bRETURNS\b check (known false negative).
 		{
-			name:          "Known limitation: RETURNS in line comment masks missing RETURNS",
+			name:          "RETURNS in line comment correctly detected as missing",
 			sql:           "CREATE PROCEDURE my_proc()\n-- RETURNS VARCHAR\nLANGUAGE SQL AS $$ BEGIN RETURN 1; END; $$",
-			expectWarning: false, // false negative: comment RETURNS matches
+			expectWarning: true,
+			expectedMatch: "Missing mandatory RETURNS",
 		},
 		// RETURNS keyword only inside a block comment: same false negative.
 		{
-			name:          "Known limitation: RETURNS in block comment masks missing RETURNS",
+			name:          "RETURNS in block comment correctly detected as missing",
 			sql:           "CREATE PROCEDURE my_proc() /* RETURNS VARCHAR */ LANGUAGE SQL AS $$ BEGIN RETURN 1; END; $$",
-			expectWarning: false, // false negative: comment RETURNS matches
+			expectWarning: true,
+			expectedMatch: "Missing mandatory RETURNS",
 		},
 		// LANGUAGE keyword only inside a block comment: the regex
 		// matches LANGUAGE inside the comment (known false negative).
 		{
-			name:          "Known limitation: LANGUAGE in block comment masks missing LANGUAGE",
+			name:          "LANGUAGE in block comment correctly detected as missing",
 			sql:           "CREATE PROCEDURE my_proc() RETURNS VARCHAR /* LANGUAGE SQL */ AS $$ BEGIN RETURN 1; END; $$",
-			expectWarning: false, // false negative: comment LANGUAGE matches
+			expectWarning: true,
+			expectedMatch: "Missing mandatory LANGUAGE",
 		},
 
 		// Mixed valid and invalid parameter types in a multi-param list:
@@ -720,9 +722,10 @@ func TestValidateSnowflakePatterns_CreateProcedure(t *testing.T) {
 		// the \bLANGUAGE\s+...\b regex check (analogous to RETURNS-in-comment).
 		// Uses SQL to avoid Python-specific secondary warnings.
 		{
-			name:          "Known limitation: COMMENT containing LANGUAGE masks missing LANGUAGE",
+			name:          "COMMENT containing LANGUAGE correctly detected as missing",
 			sql:           "CREATE PROCEDURE my_proc() RETURNS VARCHAR COMMENT = 'LANGUAGE SQL' AS $$ BEGIN RETURN 'ok'; END; $$",
-			expectWarning: false, // false negative: LANGUAGE inside COMMENT string matches
+			expectWarning: true,
+			expectedMatch: "Missing mandatory LANGUAGE",
 		},
 		// First EXECUTE AS is invalid, second is valid: FindStringSubmatch returns
 		// only the first match, so the invalid value is caught.
@@ -802,9 +805,10 @@ func TestValidateSnowflakePatterns_CreateProcedure(t *testing.T) {
 		// EXECUTE AS with quoted identifier: regex [a-zA-Z0-9_]+ won't
 		// match, so no EXECUTE AS warning fires (known false negative).
 		{
-			name:          "Known limitation: EXECUTE AS with quoted identifier produces no warning",
+			name:          "EXECUTE AS with quoted identifier correctly flagged",
 			sql:           `CREATE PROCEDURE my_proc() RETURNS VARCHAR LANGUAGE SQL EXECUTE AS "ADMIN" AS $$ BEGIN RETURN 'ok'; END; $$`,
-			expectWarning: false, // false negative: regex doesn't match quoted value
+			expectWarning: true,
+			expectedMatch: "EXECUTE AS must be CALLER or OWNER",
 		},
 		// COPY GRANTS clause (valid Snowflake syntax for OR REPLACE procedures).
 		{
@@ -878,10 +882,9 @@ func TestValidateSnowflakePatterns_CreateProcedure(t *testing.T) {
 		// Known limitation: quoted procedure name containing "AS" at word boundary
 		// truncates the preamble early, causing false missing-clause warnings.
 		{
-			name:          "Known limitation: quoted name containing AS truncates preamble",
+			name:          "Quoted name containing AS no longer truncates preamble",
 			sql:           `CREATE PROCEDURE "MY AS PROC"() RETURNS VARCHAR LANGUAGE SQL AS $$ BEGIN RETURN 'ok'; END; $$`,
-			expectWarning: true,
-			expectedMatch: "Missing mandatory",
+			expectWarning: false,
 		},
 		// CALLED ON NULL INPUT with extra spaces between keywords:
 		// \s+ in the regex handles multiple spaces.
@@ -929,10 +932,9 @@ func TestValidateSnowflakePatterns_CreateProcedure(t *testing.T) {
 		// LANGUAGE followed by line comment then value on next line:
 		// \s+ cannot span across the comment text, so the regex fails to capture the value.
 		{
-			name:          "Known limitation: LANGUAGE value after line comment triggers missing LANGUAGE",
+			name:          "LANGUAGE value after line comment correctly parsed",
 			sql:           "CREATE PROCEDURE my_proc() RETURNS VARCHAR LANGUAGE\n-- a comment\nSQL AS $$ BEGIN RETURN 'ok'; END; $$",
-			expectWarning: true,
-			expectedMatch: "Missing mandatory LANGUAGE",
+			expectWarning: false,
 		},
 		// RETURNS TABLE with multiple typed columns: TABLE() column types
 		// are not validated, only procedure parameter types are.
@@ -974,10 +976,9 @@ func TestValidateSnowflakePatterns_CreateProcedure(t *testing.T) {
 		// the \bSTRICT\b regex matches inside the COMMENT string value, producing
 		// a false mutually exclusive conflict warning.
 		{
-			name:          "Known limitation: COMMENT containing STRICT with CALLED ON NULL INPUT triggers false conflict",
+			name:          "COMMENT containing STRICT no longer triggers false conflict",
 			sql:           "CREATE PROCEDURE my_proc(a INT) RETURNS INT LANGUAGE SQL COMMENT = 'STRICT mode' CALLED ON NULL INPUT AS $$ BEGIN RETURN a; END; $$",
-			expectWarning: true,
-			expectedMatch: "mutually exclusive",
+			expectWarning: false,
 		},
 
 		// ── Additional edge cases ─────────────────────────────────────────
@@ -1514,15 +1515,15 @@ func TestValidateSnowflakePatterns_CreateProcedure(t *testing.T) {
 			sql:           "CREATE PROCEDURE my_proc() RETURNS VARCHAR LANGUAGE SQL COMMENT = 'line1\nline2' AS $$ BEGIN RETURN 'ok'; END; $$",
 			expectWarning: false,
 		},
-		// Known limitation: COMMENT value containing "RETURNS LANGUAGE" causes
-		// ValidateDataTypes to match RETURNS\s+LANGUAGE and flag "LANGUAGE" as
-		// an unknown data type, because COMMENT values are not stripped from
-		// the text before regex matching.
+		// COMMENT value containing "RETURNS LANGUAGE" must not be flagged: the
+		// tokenizer classifies the COMMENT value as a string literal, so the
+		// "RETURNS" inside it is never treated as a keyword. (Previously the
+		// regex-based validator matched inside the string and falsely flagged
+		// "LANGUAGE" as an unknown data type.)
 		{
-			name:          "Known limitation: COMMENT containing RETURNS LANGUAGE triggers false data type warning",
+			name:          "COMMENT containing RETURNS LANGUAGE does not trigger false data type warning",
 			sql:           "CREATE PROCEDURE my_proc() RETURNS VARCHAR LANGUAGE SQL COMMENT = 'RETURNS LANGUAGE EXECUTE AS' AS $$ BEGIN RETURN 'ok'; END; $$",
-			expectWarning: true,
-			expectedMatch: "Unknown data type",
+			expectWarning: false,
 		},
 
 		// ── Block comment placement ─────────────────────────────────────
@@ -1731,23 +1732,26 @@ func TestValidateSnowflakePatterns_CreateProcedure(t *testing.T) {
 		// satisfies the \bRUNTIME_VERSION\b check (analogous to
 		// LANGUAGE-in-comment known limitation).
 		{
-			name:          "Known limitation: COMMENT containing RUNTIME_VERSION masks missing RUNTIME_VERSION",
+			name:          "COMMENT containing RUNTIME_VERSION correctly detected as missing",
 			sql:           "CREATE PROCEDURE my_proc() RETURNS VARCHAR LANGUAGE PYTHON COMMENT = 'RUNTIME_VERSION is set' IMPORTS = ('@stage/f.py') AS $$ def main(session): return 'hello' $$",
-			expectWarning: false, // false negative: RUNTIME_VERSION inside COMMENT matches
+			expectWarning: true,
+			expectedMatch: "RUNTIME_VERSION",
 		},
 		// Known limitation: IMPORTS inside a COMMENT string value satisfies
 		// the \bIMPORTS\b check, masking the missing PACKAGES/IMPORTS clause.
 		{
-			name:          "Known limitation: COMMENT containing IMPORTS masks missing PACKAGES and IMPORTS",
+			name:          "COMMENT containing IMPORTS correctly detected as missing",
 			sql:           "CREATE PROCEDURE my_proc() RETURNS VARCHAR LANGUAGE PYTHON RUNTIME_VERSION = '3.8' COMMENT = 'IMPORTS needed' AS $$ def main(session): return 'hello' $$",
-			expectWarning: false, // false negative: IMPORTS inside COMMENT matches
+			expectWarning: true,
+			expectedMatch: "PACKAGES or IMPORTS",
 		},
 		// Known limitation: PACKAGES inside a COMMENT string value satisfies
 		// the \bPACKAGES\b check similarly.
 		{
-			name:          "Known limitation: COMMENT containing PACKAGES masks missing PACKAGES and IMPORTS",
+			name:          "COMMENT containing PACKAGES correctly detected as missing",
 			sql:           "CREATE PROCEDURE my_proc() RETURNS VARCHAR LANGUAGE PYTHON RUNTIME_VERSION = '3.8' COMMENT = 'PACKAGES list' AS $$ def main(session): return 'hello' $$",
-			expectWarning: false, // false negative: PACKAGES inside COMMENT matches
+			expectWarning: true,
+			expectedMatch: "PACKAGES or IMPORTS",
 		},
 
 		// ── COPY GRANTS + IF NOT EXISTS with missing clause ─────────────
@@ -3123,8 +3127,8 @@ func TestValidateSnowflakePatterns_ProcedureMultipleWarnings(t *testing.T) {
 	})
 
 	t.Run("Unclosed paren still validates preamble but skips param type checking", func(t *testing.T) {
-		// extractBalancedBlockPat returns "" for unclosed parens, so
-		// ValidateDataTypes produces no param type warnings. But
+		// An unterminated parameter list produces no param type warnings (the
+		// token-based walker skips unbalanced paren groups). But
 		// ValidateSnowflakePatterns still checks mandatory clauses.
 		sql := "CREATE PROCEDURE my_proc(a BADTYPE, b ALSOBAD RETURNS VARCHAR LANGUAGE SQL AS $$ $$"
 		ranges := GetStatementRanges(sql)
@@ -4713,43 +4717,34 @@ func TestValidateDataTypes_ProcedureMarkerPrecision(t *testing.T) {
 		}
 	})
 
-	t.Run("Known limitation: RETURNS inside dollar-quoted body produces false positive", func(t *testing.T) {
-		// ValidateDataTypes uses rawText (not tokenized parseText), so
-		// reReturnsType matches RETURNS inside the dollar-quoted body.
+	t.Run("RETURNS inside dollar-quoted body is not flagged", func(t *testing.T) {
+		// The tokenizer treats the $$...$$ body as a single DollarQuoted token,
+		// so the "RETURNS" inside it is never seen as a keyword. (The old
+		// regex-based validator scanned rawText and falsely flagged it.)
 		sql := "CREATE PROCEDURE my_proc() RETURNS VARCHAR LANGUAGE SQL AS $$ RETURNS BADTYPE $$"
 		ranges := GetStatementRanges(sql)
 		markers := ValidateDataTypes(sql, ranges)
 		warnings := getWarnings(markers)
 
-		found := false
 		for _, w := range warnings {
 			if strings.Contains(strings.ToLower(w.Message), "badtype") {
-				found = true
-				break
+				t.Errorf("RETURNS BADTYPE inside dollar-quoted body must not be flagged, got: %s", w.Message)
 			}
-		}
-		if !found {
-			t.Error("Expected false positive warning for RETURNS BADTYPE inside body (known limitation), not found")
 		}
 	})
 
-	t.Run("Known limitation: cast shorthand inside dollar-quoted body produces false positive", func(t *testing.T) {
-		// ValidateDataTypes uses rawText, so reCastShorthand matches
-		// ::BADTYPE inside the dollar-quoted body.
+	t.Run("cast shorthand inside dollar-quoted body is not flagged", func(t *testing.T) {
+		// ::BADTYPE inside the $$...$$ body must not be flagged; the body is a
+		// single token, not scanned for casts.
 		sql := "CREATE PROCEDURE my_proc() RETURNS VARCHAR LANGUAGE JAVASCRIPT AS $$ var x = y::BADTYPE; $$"
 		ranges := GetStatementRanges(sql)
 		markers := ValidateDataTypes(sql, ranges)
 		warnings := getWarnings(markers)
 
-		found := false
 		for _, w := range warnings {
 			if strings.Contains(strings.ToLower(w.Message), "badtype") {
-				found = true
-				break
+				t.Errorf("::BADTYPE inside dollar-quoted body must not be flagged, got: %s", w.Message)
 			}
-		}
-		if !found {
-			t.Error("Expected false positive warning for ::BADTYPE inside body (known limitation), not found")
 		}
 	})
 

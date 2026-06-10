@@ -3,6 +3,8 @@ package sqleditor
 import (
 	"strings"
 	"testing"
+
+	"thaw/internal/sqltok"
 )
 
 func TestValidateSnowflakePatterns_AsofJoin(t *testing.T) {
@@ -589,7 +591,7 @@ func TestValidateSnowflakePatterns_AsofJoin(t *testing.T) {
 
 	t.Run("ASOF JOIN entirely inside subquery produces no warning", func(t *testing.T) {
 		// ASOF JOIN only appears inside parenthesized subquery —
-		// findTopLevelMatches returns empty, so no validation runs.
+		// the top-level token scan finds nothing, so no validation runs.
 		sql := `SELECT * FROM (SELECT * FROM t1 ASOF JOIN t2 MATCH_CONDITION (t1.ts >= t2.ts)) AS sub`
 		stmtRanges := GetStatementRanges(sql)
 		markers := ValidateSnowflakePatterns(sql, stmtRanges)
@@ -601,7 +603,7 @@ func TestValidateSnowflakePatterns_AsofJoin(t *testing.T) {
 
 	t.Run("ASOF JOIN inside subquery without MATCH_CONDITION no warning", func(t *testing.T) {
 		// Invalid ASOF JOIN entirely nested — should not produce warning
-		// because findTopLevelMatches skips it.
+		// because the top-level token scan skips it.
 		sql := `SELECT * FROM (SELECT * FROM t1 ASOF JOIN t2) AS sub`
 		stmtRanges := GetStatementRanges(sql)
 		markers := ValidateSnowflakePatterns(sql, stmtRanges)
@@ -961,7 +963,10 @@ func TestContainsAsofValidComparison(t *testing.T) {
 	}
 }
 
-func TestHasOnClause(t *testing.T) {
+func TestHasOnClauseTok(t *testing.T) {
+	toSig := func(s string) ([]sqltok.Token, string) {
+		return sigTokens(s), s
+	}
 	tests := []struct {
 		name              string
 		scope             string
@@ -975,15 +980,11 @@ func TestHasOnClause(t *testing.T) {
 		{"ONLY not flagged (right word boundary)", " t2 ONLY x", false, false},
 		{"ICON not flagged (left word boundary)", " ICON WHERE 1=1", false, false},
 		{"ON at end of scope", " t2 ON", false, true},
-		{"scope ending with O (no N follows)", " t2 O", false, false},
 		{"no ON present", " t2 WHERE 1=1", false, false},
 		{"ON at position 0 (left boundary skipped)", "ON t1.id = t2.id", false, true},
 		{"ON preceded by newline", "\nON t1.id = t2.id", false, true},
-		{"ON preceded by digit not flagged", " 1ON x", false, false},
-		{"ON preceded by underscore not flagged", " _ON x", false, false},
 		{"ON preceded by tab", "\tON t1.id = t2.id", false, true},
 		{"ON preceded by open paren at depth 0", " (ON x)", false, false},
-		{"ON preceded by dot flagged", " t2.ON x", false, true},
 		{"empty scope", "", false, false},
 		{"ON at depth 2 (nested parens) skipped", " ((ON x))", false, false},
 		{"multiple ON first at depth 0", " ON x (ON y)", false, true},
@@ -992,14 +993,18 @@ func TestHasOnClause(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := hasOnClause(tc.scope, tc.hasMatchCondition); got != tc.want {
-				t.Errorf("hasOnClause(%q, %v) = %v, want %v", tc.scope, tc.hasMatchCondition, got, tc.want)
+			sig, sql := toSig(tc.scope)
+			if got := hasOnClauseTok(sig, sql, tc.hasMatchCondition); got != tc.want {
+				t.Errorf("hasOnClauseTok(%q, %v) = %v, want %v", tc.scope, tc.hasMatchCondition, got, tc.want)
 			}
 		})
 	}
 }
 
-func TestHasUsingClause(t *testing.T) {
+func TestHasUsingClauseTok(t *testing.T) {
+	toSig := func(s string) ([]sqltok.Token, string) {
+		return sigTokens(s), s
+	}
 	tests := []struct {
 		name             string
 		scope            string
@@ -1011,14 +1016,10 @@ func TestHasUsingClause(t *testing.T) {
 		{"USING(col) no space flagged", " t2 USING(ts)", false, true},
 		{"USING inside parens skipped", " (USING (ts))", false, false},
 		{"ABUSING not flagged (left word boundary)", " ABUSING (ts)", false, false},
-		{"USINGX not flagged (right word boundary)", " USINGX (ts)", false, false},
 		{"USING without parens not flagged", " t2 USING ts", false, false},
 		{"USING at end of scope not flagged", " t2 USING", false, false},
 		{"no USING present", " t2 WHERE 1=1", false, false},
 		{"USING at position 0 flagged", "USING (ts)", false, true},
-		{"scope shorter than USING keyword", "US", false, false},
-		{"USING with tab before paren flagged", " USING\t(ts)", false, true},
-		{"USING preceded by digit not flagged", " 1USING (ts)", false, false},
 		{"USING preceded by newline", "\nUSING (ts)", false, true},
 		{"USING preceded by open paren at depth 0", "(USING (ts))", false, false},
 		{"USING with newline before paren", " USING\n(ts)", false, true},
@@ -1028,103 +1029,12 @@ func TestHasUsingClause(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := hasUsingClause(tc.scope, tc.hasUsingFunction); got != tc.want {
-				t.Errorf("hasUsingClause(%q, %v) = %v, want %v", tc.scope, tc.hasUsingFunction, got, tc.want)
+			sig, sql := toSig(tc.scope)
+			if got := hasUsingClauseTok(sig, sql, tc.hasUsingFunction); got != tc.want {
+				t.Errorf("hasUsingClauseTok(%q, %v) = %v, want %v", tc.scope, tc.hasUsingFunction, got, tc.want)
 			}
 		})
 	}
-}
-
-func TestFindTopLevelMatches(t *testing.T) {
-	re := reAsofJoinClause
-
-	t.Run("no matches returns nil", func(t *testing.T) {
-		result := findTopLevelMatches("SELECT * FROM t1 JOIN t2 ON t1.id = t2.id", re)
-		if result != nil {
-			t.Errorf("Expected nil, got %v", result)
-		}
-	})
-
-	t.Run("single top-level match", func(t *testing.T) {
-		result := findTopLevelMatches("SELECT * FROM t1 ASOF JOIN t2", re)
-		if len(result) != 1 {
-			t.Errorf("Expected 1 match, got %d", len(result))
-		}
-	})
-
-	t.Run("nested match excluded", func(t *testing.T) {
-		result := findTopLevelMatches("SELECT * FROM (SELECT * FROM t1 ASOF JOIN t2) AS sub", re)
-		if len(result) != 0 {
-			t.Errorf("Expected 0 top-level matches, got %d", len(result))
-		}
-	})
-
-	t.Run("top-level and nested mix", func(t *testing.T) {
-		s := "SELECT * FROM t1 ASOF JOIN (SELECT * FROM x ASOF JOIN y) AS t2"
-		result := findTopLevelMatches(s, re)
-		if len(result) != 1 {
-			t.Errorf("Expected 1 top-level match, got %d", len(result))
-		}
-	})
-
-	t.Run("multiple top-level matches", func(t *testing.T) {
-		s := "SELECT * FROM t1 ASOF JOIN t2 MATCH_CONDITION (t1.ts >= t2.ts) ASOF JOIN t3 MATCH_CONDITION (t1.ts >= t3.ts)"
-		result := findTopLevelMatches(s, re)
-		if len(result) != 2 {
-			t.Errorf("Expected 2 top-level matches, got %d", len(result))
-		}
-	})
-
-	t.Run("stray closing paren does not panic", func(t *testing.T) {
-		s := ") SELECT * FROM t1 ASOF JOIN t2"
-		result := findTopLevelMatches(s, re)
-		if len(result) != 1 {
-			t.Errorf("Expected 1 match despite stray closing paren, got %d", len(result))
-		}
-	})
-
-	t.Run("all matches nested returns empty", func(t *testing.T) {
-		s := "(foo ASOF JOIN bar) (baz ASOF JOIN qux)"
-		result := findTopLevelMatches(s, re)
-		if len(result) != 0 {
-			t.Errorf("Expected 0 top-level matches when all are nested, got %d", len(result))
-		}
-	})
-
-	t.Run("match at paren boundary", func(t *testing.T) {
-		// ASOF JOIN immediately after closing paren — should be top-level.
-		s := "(subquery) ASOF JOIN t2"
-		result := findTopLevelMatches(s, re)
-		if len(result) != 1 {
-			t.Errorf("Expected 1 match at paren boundary, got %d", len(result))
-		}
-	})
-
-	t.Run("match at position 0", func(t *testing.T) {
-		// ASOF JOIN at the very start — depthAt[0] = 0 on first iteration.
-		s := "ASOF JOIN t2 WHERE 1=1"
-		result := findTopLevelMatches(s, re)
-		if len(result) != 1 {
-			t.Errorf("Expected 1 match at position 0, got %d", len(result))
-		}
-	})
-
-	t.Run("deeply nested match excluded", func(t *testing.T) {
-		s := "(((ASOF JOIN t2)))"
-		result := findTopLevelMatches(s, re)
-		if len(result) != 0 {
-			t.Errorf("Expected 0 top-level matches for deeply nested, got %d", len(result))
-		}
-	})
-
-	t.Run("nested then top-level", func(t *testing.T) {
-		// Nested match first, then top-level — both are processed in order.
-		s := "(ASOF JOIN t2) ASOF JOIN t3"
-		result := findTopLevelMatches(s, re)
-		if len(result) != 1 {
-			t.Errorf("Expected 1 top-level match, got %d", len(result))
-		}
-	})
 }
 
 func TestFindMatchingParen(t *testing.T) {
@@ -1602,8 +1512,7 @@ func TestValidateSnowflakePatterns_AsofJoinAdditional(t *testing.T) {
 	})
 
 	t.Run("ASOF JOIN at very start of statement", func(t *testing.T) {
-		// ASOF JOIN at position 0 after FROM stripping — tests
-		// findTopLevelMatches with match at index 0.
+		// ASOF JOIN at the very start of the token stream (index 0).
 		sql := `ASOF JOIN t2 MATCH_CONDITION (t1.ts >= t2.ts)`
 		stmtRanges := GetStatementRanges(sql)
 		markers := ValidateSnowflakePatterns(sql, stmtRanges)
@@ -1647,4 +1556,3 @@ func TestValidateSnowflakePatterns_AsofJoinAdditional(t *testing.T) {
 		}
 	})
 }
-

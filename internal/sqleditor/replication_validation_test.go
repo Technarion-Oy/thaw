@@ -249,5 +249,3 @@ func TestValidateSnowflakePatterns_ReplicationFailoverGroup(t *testing.T) {
 		})
 	}
 }
-
-

@@ -105,5 +105,3 @@ func TestValidateSnowflakePatterns_TimeTravel(t *testing.T) {
 }
 
 // ── Replication Group / Failover Group Tests ────────────────────────────────
-
-

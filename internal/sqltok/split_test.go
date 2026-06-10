@@ -8,13 +8,14 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-package sqlutil
+package sqltok
 
 import (
 	"strings"
 	"testing"
 )
 
+// TestSplit ports all test cases from internal/sqlutil/split_test.go verbatim.
 func TestSplit(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -479,8 +480,8 @@ func TestSplit(t *testing.T) {
 		// ── unicode ───────────────────────────────────────────────────────────
 		{
 			name:  "unicode characters in single-quoted string",
-			input: "SELECT 'caf\u00e9 r\u00e9sum\u00e9 na\u00efve';",
-			want:  []string{"SELECT 'caf\u00e9 r\u00e9sum\u00e9 na\u00efve'"},
+			input: "SELECT 'café résumé naïve';",
+			want:  []string{"SELECT 'café résumé naïve'"},
 		},
 		{
 			name:  "unicode in double-quoted identifier",
@@ -532,7 +533,8 @@ func TestSplit(t *testing.T) {
 			want:  []string{"SELECT /*** triple star ***/ 1"},
 		},
 		{
-			// Nesting: a ';' between the inner and outer close stays in the comment.
+			// Nesting: a ';' that sits between the inner and outer close is still
+			// inside the comment, so it does not terminate the statement.
 			name:  "nested block comment: ; before the outer close stays in the comment",
 			input: "SELECT /* a /* b */ ; c */ 1",
 			want:  []string{"SELECT /* a /* b */ ; c */ 1"},
@@ -544,7 +546,8 @@ func TestSplit(t *testing.T) {
 			want:  []string{"SELECT /* a /* b */ c */ 1", "SELECT 2"},
 		},
 		{
-			// Unbalanced nesting runs to end of input; the trailing ';' is consumed.
+			// Unbalanced nesting (one unclosed inner /*) runs to end of input, so
+			// the trailing ';' is consumed by the comment rather than splitting.
 			name:  "unbalanced nested block comment runs to end of input",
 			input: "SELECT /* outer /* inner */ rest;",
 			want:  []string{"SELECT /* outer /* inner */ rest;"},
@@ -710,7 +713,7 @@ func TestSplit(t *testing.T) {
 		{
 			name: "large single-quoted string with embedded semicolons",
 			input: func() string {
-				inner := strings.Repeat("a;b;c;", 80) // 480 chars
+				inner := strings.Repeat("a;b;c;", 80)
 				return "SELECT '" + inner + "';"
 			}(),
 			want: func() []string {
@@ -781,7 +784,7 @@ func TestSplit(t *testing.T) {
 				}
 				return b.String()
 			}(),
-			want: nil, // handled separately in the loop below
+			want: nil, // handled separately below
 		},
 
 		// ── realistic Snowflake DDL ─────────────────────────────────────────
@@ -810,7 +813,7 @@ func TestSplit(t *testing.T) {
 				`    return X * 2;`,
 				`$$;`,
 			}, "\n"),
-			want: nil, // handled by a separate count assertion below
+			want: nil, // handled by count assertion below
 		},
 
 		// ── realistic Snowflake SQL ─────────────────────────────────────────
@@ -985,8 +988,93 @@ $$;`,
 	}
 }
 
-// FuzzSplit verifies that Split never panics on arbitrary input and that
-// every returned statement is non-empty after trimming.
+func TestSplitRanges(t *testing.T) {
+	tests := []struct {
+		name  string
+		sql   string
+		want  []StatementRange
+	}{
+		{
+			name: "single statement no semicolon",
+			sql:  "SELECT 1",
+			want: []StatementRange{
+				{StartLine: 1, EndLine: 1, StartOffset: 0, EndOffset: 8},
+			},
+		},
+		{
+			name: "single statement with semicolon",
+			sql:  "SELECT 1;",
+			want: []StatementRange{
+				{StartLine: 1, EndLine: 1, StartOffset: 0, EndOffset: 9},
+			},
+		},
+		{
+			name: "two statements",
+			sql:  "SELECT 1;\nSELECT 2;",
+			want: []StatementRange{
+				{StartLine: 1, EndLine: 1, StartOffset: 0, EndOffset: 9},
+				{StartLine: 2, EndLine: 2, StartOffset: 10, EndOffset: 19},
+			},
+		},
+		{
+			name: "multiline statement",
+			sql:  "SELECT\n  1\nFROM dual;",
+			want: []StatementRange{
+				{StartLine: 1, EndLine: 3, StartOffset: 0, EndOffset: 21},
+			},
+		},
+		{
+			name: "trailing statement without semicolon",
+			sql:  "SELECT 1; SELECT 2",
+			want: []StatementRange{
+				{StartLine: 1, EndLine: 1, StartOffset: 0, EndOffset: 9},
+				{StartLine: 1, EndLine: 1, StartOffset: 10, EndOffset: 18},
+			},
+		},
+		{
+			name: "comments between statements are skipped",
+			sql:  "SELECT 1;\n-- comment\nSELECT 2;",
+			want: []StatementRange{
+				{StartLine: 1, EndLine: 1, StartOffset: 0, EndOffset: 9},
+				{StartLine: 3, EndLine: 3, StartOffset: 21, EndOffset: 30},
+			},
+		},
+		{
+			name: "semicolon in string is not a terminator",
+			sql:  "SELECT 'a;b';",
+			want: []StatementRange{
+				{StartLine: 1, EndLine: 1, StartOffset: 0, EndOffset: 13},
+			},
+		},
+		{
+			name: "empty",
+			sql:  "",
+			want: nil,
+		},
+		{
+			name: "only whitespace",
+			sql:  "   \n\n  ",
+			want: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SplitRanges(tt.sql)
+			if len(got) != len(tt.want) {
+				t.Fatalf("SplitRanges() returned %d ranges, want %d\ngot:  %v\nwant: %v",
+					len(got), len(tt.want), got, tt.want)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Errorf("range[%d]:\ngot:  %+v\nwant: %+v", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+// FuzzSplit verifies that Split never panics and returns only non-empty statements.
 func FuzzSplit(f *testing.F) {
 	seeds := []string{
 		"",

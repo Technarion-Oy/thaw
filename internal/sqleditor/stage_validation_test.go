@@ -1435,5 +1435,3 @@ func TestAlterStage_Invalid(t *testing.T) {
 		})
 	}
 }
-
-

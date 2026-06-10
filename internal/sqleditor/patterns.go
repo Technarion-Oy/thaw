@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	sf "thaw/internal/snowflake"
+	"thaw/internal/sqltok"
 )
 
 // ── Precompiled regexes for ValidateSnowflakePatterns ─────────────────────────
@@ -31,221 +32,72 @@ const (
 	_ident          = `(?:[a-zA-Z_][a-zA-Z0-9_$]*|"[^"]+")`
 	_identPath      = _ident + `(?:\.` + _ident + `){0,2}`
 	_balancedParens = `\([^()]*(?:(?:\([^()]*\))[^()]*)*\)`
-
-	// _grantObjType matches the object-type token(s) in a GRANT/REVOKE ON clause.
-	// Two-word types are listed explicitly before the single-word fallback so that
-	// a greedy `(\w+(?:\s+\w+)?)` cannot swallow the object name (e.g. matching
-	// "TABLE my_table" instead of just "TABLE").
-	_grantObjType = `EXTERNAL\s+TABLE|MATERIALIZED\s+VIEW|HYBRID\s+TABLE|ICEBERG\s+TABLE|DYNAMIC\s+TABLE|FILE\s+FORMAT|\w+`
 )
 
 var (
 	// ── Snowflake false-positive guard ───────────────────────────────────────
-	// Statements matching this regex contain Snowflake syntax that the
-	// node-sql-parser doesn't support; we skip them.  We keep this guard here so
-	// the preamble validators don't accidentally emit for them.
-	reSnowflakeFP = regexp.MustCompile(
-		`(?i)\bTABLESAMPLE\b|\bSAMPLE\s*\(|\bWITHIN\s+GROUP\b|\bCONNECT\s+BY\b` +
-			`|\bAT\s*\(|\bBEFORE\s*\(|\bIN\s+TABLE\b` +
-			`|CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:STAGE` +
-			`|REPLICATION|FAILOVER|APPLICATION\s+PACKAGE|APPLICATION|DATASHARE|SERVICE|IMAGE\s+REPOSITORY|GIT\s+REPOSITORY)\b` +
-			`|ALTER\s+(?:TABLE|VIEW|STREAM|DATABASE|STAGE|PIPE|PROCEDURE|FUNCTION` +
-			`|ALERT|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK` +
-			`|REPLICATION|FAILOVER|APPLICATION\s+PACKAGE|APPLICATION|DATASHARE|SERVICE|IMAGE\s+REPOSITORY|GIT\s+REPOSITORY)\b` +
-			`|DROP\s+(?:TABLE|VIEW|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION|APPLICATION\s+PACKAGE|APPLICATION|DATASHARE|SERVICE|IMAGE\s+REPOSITORY|GIT\s+REPOSITORY)\b` +
-			`|EXECUTE\s+(?:JOB\s+)?SERVICE\b` +
-			`|UNDROP\s+(?:DATABASE|SCHEMA|TABLE)\b` +
-			`|^INSERT\s+(?:OVERWRITE\s+)?(?:ALL|FIRST)\b` +
-			`|TRUNCATE\s+\S+\s+IF\b` +
-			`|\bLATERAL\s+FLATTEN\b` +
-			`|\bINFER_SCHEMA\b` +
-			`|\bPIVOT\s*\(` +
-			`|\bUNPIVOT\b` +
-			`|\bMATCH_RECOGNIZE\s*\(` +
-			`|\bASOF\s+JOIN\b`,
-	)
+	// The matchesSnowflakeFP token scan (below) uses these object-noun sets to
+	// recognize CREATE/ALTER/DROP of objects whose statements the bare-column and
+	// table-existence validators can't handle and should skip. The two-word nouns
+	// IMAGE REPOSITORY and GIT REPOSITORY are matched separately in fpObjectNoun.
+	fpCreateNouns = toUpperSet([]string{
+		"STAGE", "REPLICATION", "FAILOVER", "APPLICATION", "DATASHARE", "SERVICE",
+	})
+	fpAlterNouns = toUpperSet([]string{
+		"TABLE", "VIEW", "STREAM", "DATABASE", "STAGE", "PIPE", "PROCEDURE", "FUNCTION",
+		"ALERT", "EXTERNAL", "NOTIFICATION", "STORAGE", "SECURITY", "MASKING", "NETWORK",
+		"REPLICATION", "FAILOVER", "APPLICATION", "DATASHARE", "SERVICE",
+	})
+	fpDropNouns = toUpperSet([]string{
+		"TABLE", "VIEW", "STREAM", "STAGE", "PIPE", "PROCEDURE", "FUNCTION",
+		"APPLICATION", "DATASHARE", "SERVICE",
+	})
 
-	// ── Snowflake Cortex AI function call detection ──────────────────────────
-	// Matches SNOWFLAKE.CORTEX.<function>( — captures the function name.
-	reCortexFuncCall = regexp.MustCompile(
-		`(?i)\bSNOWFLAKE\s*\.\s*CORTEX\s*\.\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\(`)
+	// (reCortexFuncCall removed — token-based)
 
-	// ── Custom check patterns ─────────────────────────────────────────────────
-	reLateralFlatten      = regexp.MustCompile(`(?i)\bLATERALFLATTEN\b`)
-	reFlattenFromJoin     = regexp.MustCompile(`(?i)(?:FROM|JOIN|,)\s+FLATTEN\s*\(`)
-	reLateralOK           = regexp.MustCompile(`(?i)\bLATERAL\s+FLATTEN\s*\(`)
-	reTableFlatten        = regexp.MustCompile(`(?i)\bTABLE\s*\(\s*FLATTEN\s*\(`)
-	reQualifyAfterOrder   = regexp.MustCompile(`(?is)\bORDER\s+BY[\s\S]+?\bQUALIFY\b`)
-	reVariantDotPath      = regexp.MustCompile(`(?i)\b([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\b`)
-	reOrReplace           = regexp.MustCompile(`(?i)\bOR\s+REPLACE\b`)
-	reIfNotExists         = regexp.MustCompile(`(?i)\bIF\s+NOT\s+EXISTS\b`)
-	reStripStringLiterals = regexp.MustCompile(`'(?:''|[^'])*'`)
-	// rePatternClusterBy — distinct from the CLUSTER BY pattern in `tableProps` for CREATE TABLE.
-	rePatternClusterBy = regexp.MustCompile(`(?i)\bCLUSTER\s+BY\b`)
-	reDataRetention    = regexp.MustCompile(`(?i)\bDATA_RETENTION_TIME_IN_DAYS\b`)
-	reConstraintCol    = regexp.MustCompile(`(?i)^(?:CONSTRAINT|PRIMARY\s+KEY|UNIQUE|FOREIGN\s+KEY)\b`)
-	reVirtualColAS     = regexp.MustCompile(`(?i)\bAS\s*\([\s\S]*\)\s*$`)
-	rePartitionBy      = regexp.MustCompile(`(?i)^PARTITION\s+BY\b`)
-
-	reWithLocation = regexp.MustCompile(`(?i)\bWITH\s+LOCATION\s*=`)
-	reFileFormat   = regexp.MustCompile(`(?i)\bFILE_FORMAT\s*=`)
+	// (reConstraintCol removed — token-based)
+	// (reVirtualColAS removed — token-based: isVirtualColumn)
+	// (rePartitionBy removed — token-based)
 
 	// ── CREATE VIEW ───────────────────────────────────────────────────────────
-	reIsCreateView = regexp.MustCompile(
-		`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?` +
-			`(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE)\s+)?` +
-			`(?:RECURSIVE\s+)?(?:INTERACTIVE\s+)?(?:MATERIALIZED\s+)?VIEW\b`)
-
-	reValidCreateViewPreamble = regexp.MustCompile(
-		`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?` +
-			`(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE)\s+)?` +
-			`(?:RECURSIVE\s+)?(?:INTERACTIVE\s+)?(?:MATERIALIZED\s+)?` +
-			`VIEW\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath +
-			`(?:\s*` + _balancedParens + `)?` +
-			`(?:\s+(?:` +
-			`COPY\s+GRANTS` +
-			`|COMMENT\s*=\s*'(?:[^']|'')*'` +
-			`|CHANGE_TRACKING\s*=\s*(?:TRUE|FALSE)` +
-			`|(?:WITH\s+)?ROW\s+ACCESS\s+POLICY\s+` + _identPath + `\s+ON\s*` + _balancedParens +
-			`|(?:WITH\s+)?AGGREGATION\s+POLICY\s+` + _identPath + `(?:\s+ENTITY\s+KEY\s*` + _balancedParens + `)?` +
-			`|(?:WITH\s+)?JOIN\s+POLICY\s+` + _identPath + `(?:\s+ALLOWED\s+JOIN\s+KEYS\s*` + _balancedParens + `)?` +
-			`|CLUSTER\s+BY\s*` + _balancedParens +
-			`|(?:WITH\s+)?TAG\s*` + _balancedParens +
-			`|WITH\s+CONTACT\s*` + _balancedParens +
-			`))*\s+AS\s+`)
+	// (reIsCreateView removed — token-based: isCreateViewGuard)
+	// (reValidCreateViewPreamble removed — token-based: isValidCreateViewPreamble)
 
 	// ── CREATE TABLE ─────────────────────────────────────────────────────────
-	reIsCreateTable       = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:(?:OR\s+(?:REPLACE|ALTER)|LOCAL|GLOBAL|TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)*TABLE\b`)
-	reCreateTablePreamble = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+(?:REPLACE|ALTER)\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath)
-	reIsCreateHybridTable = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:(?:OR\s+REPLACE|TRANSIENT)\s+)*HYBRID\s+TABLE\b`)
-	reHybridTablePreamble = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:(?:OR\s+REPLACE|TRANSIENT)\s+)*HYBRID\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath)
-	reIndexKeyword        = regexp.MustCompile(`(?i)\bINDEX\b`)
-	reNotNull             = regexp.MustCompile(`(?i)\b(?:NOT\s+NULL|NOTNULL)\b`)
-	rePrimaryKey          = regexp.MustCompile(`(?i)\bPRIMARY\s+KEY\b`)
-	rePrimaryKeyCols      = regexp.MustCompile(`(?i)PRIMARY\s+KEY\s*\([^)]+\)`)
-	reChangeTracking      = regexp.MustCompile(`(?i)\bCHANGE_TRACKING\b`)
-	reCopyGrants          = regexp.MustCompile(`(?i)\bCOPY\s+GRANTS\b`)
-	reTransient           = regexp.MustCompile(`(?i)\bTRANSIENT\b`)
-	reAutoIncrement       = regexp.MustCompile(`(?i)\b(?:AUTOINCREMENT|IDENTITY)\b`)
+	// (reIsCreateTable removed — token-based: isCreateTableGuard)
+	// (reCreateTablePreamble, reHybridTablePreamble removed — token-based: findPreambleEnd)
 
-	// ── COPY INTO ────────────────────────────────────────────────────────────
-	reIsCopyInto          = regexp.MustCompile(`(?i)^\s*COPY\s+INTO\b`)
-	reCopyInto            = regexp.MustCompile(`(?i)^\s*COPY\s+INTO\s+(` + _identPath + `|@\S+|'[^']+')(?:\s*\([^)]*\))?(?:\s+|$)`)
-	reCreateTableCTAS     = regexp.MustCompile(`(?i)^AS\s+(?:SELECT|WITH)\b`)
-	reCreateTableClone    = regexp.MustCompile(`(?i)^(?:CLONE|LIKE)\b`)
-	reCreateTableTemplate = regexp.MustCompile(`(?i)^USING\s+TEMPLATE\s*\(`)
-	reCreateTableBackup   = regexp.MustCompile(`(?i)^FROM\s+BACKUP\s+SET\s+(?:` + _identPath + `\s+IDENTIFIER\s+)?'[^']+'\s*$`)
+	// (reCreateTableCTAS, reCreateTableClone, reCreateTableTemplate, reCreateTableBackup removed — token-based)
 
-	tableProps = strings.Join([]string{
-		`CLUSTER\s+BY\s*` + _balancedParens,
-		`ENABLE_SCHEMA_EVOLUTION\s*=\s*(?:TRUE|FALSE)`,
-		`DATA_RETENTION_TIME_IN_DAYS\s*=\s*\d+`,
-		`MAX_DATA_EXTENSION_TIME_IN_DAYS\s*=\s*\d+`,
-		`CHANGE_TRACKING\s*=\s*(?:TRUE|FALSE)`,
-		`DEFAULT_DDL_COLLATION\s*=\s*'(?:[^']|'')*'`,
-		`COPY\s+GRANTS`,
-		`ERROR_LOGGING\s*=\s*(?:TRUE|FALSE)`,
-		`COPY\s+TAGS`,
-		`COMMENT\s*=\s*'(?:[^']|'')*'`,
-		`ROW_TIMESTAMP\s*=\s*(?:TRUE|FALSE)`,
-		`(?:WITH\s+)?ROW(?:\s+|_)ACCESS(?:\s+|_)POLICY\s+` + _identPath + `\s+ON\s*` + _balancedParens,
-		`(?:WITH\s+)?AGGREGATION\s+POLICY\s+` + _identPath + `(?:\s+ENTITY\s+KEY\s*` + _balancedParens + `)?`,
-		`(?:WITH\s+)?JOIN\s+POLICY\s+` + _identPath + `(?:\s+ALLOWED\s+JOIN\s+KEYS\s*` + _balancedParens + `)?`,
-		`(?:WITH\s+)?STORAGE\s+LIFECYCLE\s+POLICY\s+` + _identPath + `\s+ON\s*` + _balancedParens,
-		`(?:WITH\s+)?TAG\s*` + _balancedParens,
-		`WITH\s+CONTACT\s*` + _balancedParens,
-	}, "|")
+	// (tableProps removed — token-based: validTablePropsTail / consumeCreateTableProp)
 
 	// ── CREATE DATABASE / SCHEMA ──────────────────────────────────────────────
-	reIsCreateDbSchema = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(DATABASE|SCHEMA)\b`)
-
-	dbSchemaProps = strings.Join([]string{
-		`CLONE\s+` + _identPath + `(?:\s+(?:AT|BEFORE)\s*\(\s*(?:TIMESTAMP|OFFSET|STATEMENT)\s*=>\s*[^)]+\))?(?:\s+IGNORE\s+TABLES\s+WITH\s+INSUFFICIENT\s+DATA\s+RETENTION)?(?:\s+IGNORE\s+HYBRID\s+TABLES)?`,
-		`WITH\s+MANAGED\s+ACCESS`,
-		`(?:DATA_RETENTION_TIME_IN_DAYS|MAX_DATA_EXTENSION_TIME_IN_DAYS|ICEBERG_VERSION_DEFAULT)\s*=\s*\d+`,
-		`(?:ENABLE_ICEBERG_MERGE_ON_READ|REPLACE_INVALID_CHARACTERS|ENABLE_DATA_COMPACTION)\s*=\s*(?:TRUE|FALSE)`,
-		`(?:EXTERNAL_VOLUME|CATALOG)\s*=\s*` + _ident,
-		`DEFAULT_DDL_COLLATION\s*=\s*'(?:[^']|'')*'`,
-		`STORAGE_SERIALIZATION_POLICY\s*=\s*(?:COMPATIBLE|OPTIMIZED)`,
-		`CLASSIFICATION_PROFILE\s*=\s*'(?:[^']|'')*'`,
-		`COMMENT\s*=\s*'(?:[^']|'')*'`,
-		`CATALOG_SYNC\s*=\s*'(?:[^']|'')*'`,
-		`CATALOG_SYNC_NAMESPACE_MODE\s*=\s*(?:NEST|FLATTEN)`,
-		`CATALOG_SYNC_NAMESPACE_FLATTEN_DELIMITER\s*=\s*'(?:[^']|'')*'`,
-		`(?:WITH\s+)?TAG\s*\([^)]+\)`,
-		`(?:WITH\s+)?CONTACT\s*\([^)]+\)`,
-		`OBJECT_VISIBILITY\s*=\s*(?:PRIVILEGED|` + _ident + `)`,
-		// CREATE DATABASE <name> FROM SHARE <provider_account>.<share_name>
-		`FROM\s+SHARE\s+` + _ident + `\.` + _ident,
-	}, "|")
-
-	reValidCreateDbSchema = regexp.MustCompile(
-		`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:DATABASE|SCHEMA)\s+(?:IF\s+NOT\s+EXISTS\s+)?` +
-			_identPath + `(?:\s+(?:` + dbSchemaProps + `))*\s*$`)
+	// (dbSchemaProps / reValidCreateDbSchema removed — token-based:
+	// isValidCreateDbSchema / consumeDbSchemaProp)
 
 	// ── DROP DATABASE / SCHEMA ────────────────────────────────────────────────
-	reIsDropDbSchema    = regexp.MustCompile(`(?i)^\s*DROP\s+(DATABASE|SCHEMA)\b`)
-	reValidDropDbSchema = regexp.MustCompile(`(?i)^\s*DROP\s+(?:DATABASE|SCHEMA)\s+(?:IF\s+EXISTS\s+)?` + _identPath + `(?:\s+(?:CASCADE|RESTRICT))?\s*$`)
+	// (reValidDropDbSchema removed — token-based: isValidDropStmt)
 
 	// ── CREATE SEQUENCE ───────────────────────────────────────────────────────
-	reIsCreateSeq    = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SEQUENCE\b`)
-	reValidCreateSeq = regexp.MustCompile(
-		`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SEQUENCE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath +
-			`(?:\s+WITH)?(?:\s+(?:` +
-			`START(?:\s+WITH|\s*=)?\s+-?\d+` +
-			`|INCREMENT(?:\s+BY|\s*=)?\s+-?\d+` +
-			`|ORDER|NOORDER` +
-			`|COMMENT\s*=\s*'(?:[^']|'')*'` +
-			`))*\s*$`)
+	// (reValidCreateSeq removed — token-based: isValidCreateSeq)
 
 	// ── ALTER SEQUENCE ────────────────────────────────────────────────────────
-	reIsAlterSeq    = regexp.MustCompile(`(?i)^\s*ALTER\s+SEQUENCE\b`)
-	reValidAlterSeq = regexp.MustCompile(
-		`(?i)^\s*ALTER\s+SEQUENCE\s+(?:IF\s+EXISTS\s+)?` + _identPath + `\s+` +
-			`(?:RENAME\s+TO\s+` + _identPath +
-			`|(?:SET\s+)?INCREMENT(?:\s+BY|\s*=)?\s+-?\d+` +
-			`|SET(?:\s+(?:ORDER|NOORDER|COMMENT\s*=\s*'(?:[^']|'')*'))+` +
-			`|UNSET\s+COMMENT` +
-			`)\s*$`)
+	// (reValidAlterSeq removed — token-based: isValidAlterSeq)
 
 	// ── DROP SEQUENCE ─────────────────────────────────────────────────────────
-	reIsDropSeq    = regexp.MustCompile(`(?i)^\s*DROP\s+SEQUENCE\b`)
-	reValidDropSeq = regexp.MustCompile(`(?i)^\s*DROP\s+SEQUENCE\s+(?:IF\s+EXISTS\s+)?` + _identPath + `(?:\s+(?:CASCADE|RESTRICT))?\s*$`)
+	// (reValidDropSeq removed — token-based: isValidDropStmt)
 
 	// ── CREATE DYNAMIC TABLE ─────────────────────────────────────────────────
-	reIsCreateDynTable = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?DYNAMIC\s+TABLE\b`)
-	reDynHasTargetLag  = regexp.MustCompile(`(?i)\bTARGET_LAG\s*=`)
-	reDynHasWarehouse  = regexp.MustCompile(`(?i)\bWAREHOUSE\s*=`)
-	reDynHasAs         = regexp.MustCompile(`(?i)\bAS\s+(?:SELECT|WITH)\b`)
+	// (reIsCreateDynTable removed — token-based: isCreateDynTableGuard)
 
 	// ── ALTER DYNAMIC TABLE ──────────────────────────────────────────────────
-	reIsAlterDynTable   = regexp.MustCompile(`(?i)^\s*ALTER\s+DYNAMIC\s+TABLE\b`)
-	reAlterDynTableName = regexp.MustCompile(
-		`(?i)^\s*ALTER\s+DYNAMIC\s+TABLE\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
-	// Sub-command detection (matched against the cleaned text after the table name).
-	reAlterDynTableRefresh      = regexp.MustCompile(`(?i)\bREFRESH\b`)
-	reAlterDynTableSuspend      = regexp.MustCompile(`(?i)\bSUSPEND\b`)
-	reAlterDynTableResume       = regexp.MustCompile(`(?i)\bRESUME\b`)
-	reAlterDynTableSet          = regexp.MustCompile(`(?i)\bSET\b`)
-	reAlterDynTableUnset        = regexp.MustCompile(`(?i)\bUNSET\b`)
-	reAlterDynTableSwapWith     = regexp.MustCompile(`(?i)\bSWAP\s+WITH\b`)
-	reAlterDynTableRenameTo     = regexp.MustCompile(`(?i)\bRENAME\s+TO\b`)
-	reAlterDynTableSwapTarget   = regexp.MustCompile(`(?i)\bSWAP\s+WITH\s+(` + _identPath + `)`)
-	reAlterDynTableRenameTarget = regexp.MustCompile(`(?i)\bRENAME\s+TO\s+(` + _identPath + `)`)
-	// SET property detection
-	reAlterDynTableTargetLagBare = regexp.MustCompile(`(?i)\bTARGET_LAG\s*=`)
-	reAlterDynTableTargetLagVal  = regexp.MustCompile(
-		`(?i)\bTARGET_LAG\s*=\s*(?:'(?:[1-9]\d*\s+(?:seconds?|minutes?|hours?|days?))'|DOWNSTREAM\b)`)
+	// (reAlterDynTableName and 11 ALTER DYNAMIC TABLE regexes removed — token-based)
 
 	// ── CREATE INTEGRATION ────────────────────────────────────────────────────
-	reIsCreateIntegration = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:STORAGE|API|NOTIFICATION|SECURITY|EXTERNAL\s+ACCESS)\s+INTEGRATION\b`)
-	reIntegrationName     = regexp.MustCompile(`(?i)INTEGRATION\s+(` + _identPath + `)`)
-	reIntegrationType     = regexp.MustCompile(`(?i)\bTYPE\s*=\s*([a-zA-Z_0-9]+)`)
-	reIntegrationProvider = regexp.MustCompile(`(?i)\b(?:STORAGE|API)_PROVIDER\s*=\s*('[^']+'|[a-zA-Z_0-9]+)`)
+	// (reIntegrationName, reIntegrationType, reIntegrationProvider removed — token-based)
 
 	// ── CREATE WAREHOUSE ──────────────────────────────────────────────────────
-	reIsCreateWarehouse = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?WAREHOUSE\b`)
-	whProps             = strings.Join([]string{
+	whProps = strings.Join([]string{
 		`WAREHOUSE_SIZE`, `WAREHOUSE_TYPE`, `MAX_CLUSTER_COUNT`, `MIN_CLUSTER_COUNT`, `SCALING_POLICY`,
 		`AUTO_SUSPEND`, `AUTO_RESUME`, `INITIALLY_SUSPENDED`, `RESOURCE_MONITOR`, `COMMENT`,
 		`ENABLE_QUERY_ACCELERATION`, `QUERY_ACCELERATION_MAX_SCALE_FACTOR`,
@@ -254,174 +106,65 @@ var (
 	}, "|")
 
 	// ── CREATE EXTERNAL TABLE ────────────────────────────────────────────────
-	reIsCreateExternalTable = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EXTERNAL\s+TABLE\b`)
-	reExternalTablePreamble = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EXTERNAL\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath)
+	// (reExternalTablePreamble removed — token-based: findPreambleEnd)
 
-	extTableProps = strings.Join([]string{
-		`WITH\s+LOCATION\s*=\s*@\S+`,
-		`REFRESH_ON_CREATE\s*=\s*(?:TRUE|FALSE)`,
-		`AUTO_REFRESH\s*=\s*(?:TRUE|FALSE)`,
-		`PATTERN\s*=\s*'(?:[^']|'')*'`,
-		`FILE_FORMAT\s*=\s*\((?:FORMAT_NAME\s*=\s*` + _identPath + `|TYPE\s*=\s*[a-zA-Z]+)(?:\s+[^)]+)*\)`,
-		`AWS_SNS_TOPIC\s*=\s*'(?:[^']|'')*'`,
-		`INTEGRATION\s*=\s*'(?:[^']|'')*'`,
-		`PARTITION_TYPE\s*=\s*USER_SPECIFIED`,
-		`TABLE_FORMAT\s*=\s*DELTA`,
-		`COPY\s+GRANTS`,
-		`COMMENT\s*=\s*'(?:[^']|'')*'`,
-		`(?:WITH\s+)?TAG\s*` + _balancedParens,
-	}, "|")
-	extTablePropsRe = regexp.MustCompile(`(?i)^\s*(?:(?:` + extTableProps + `)(?:\s+|$))*$`)
+	// (extTableProps / extTablePropsRe removed — token-based:
+	// validExtTablePropsTail / consumeExtTableProp)
 
 	// ── CREATE RESOURCE MONITOR ───────────────────────────────────────────────
-	reIsCreateResourceMonitor = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?RESOURCE\s+MONITOR\b`)
-	rmProps                   = strings.Join([]string{
+	rmProps = strings.Join([]string{
 		`CREDIT_QUOTA`, `FREQUENCY`, `START_TIMESTAMP`, `END_TIMESTAMP`, `NOTIFY_USERS`,
 	}, "|")
 
 	// ── CREATE STREAM ─────────────────────────────────────────────────────────
-	reIsCreateStream = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?STREAM\b`)
-	streamProps      = strings.Join([]string{
-		`APPEND_ONLY\s*=\s*(?:TRUE|FALSE)`,
-		`INSERT_ONLY\s*=\s*(?:TRUE|FALSE)`,
-		`SHOW_INITIAL_ROWS\s*=\s*(?:TRUE|FALSE)`,
-		`CHANGE_TRACKING\s*=\s*(?:TRUE|FALSE)`,
-		`COMMENT\s*=\s*'(?:[^']|'')*'`,
-	}, "|")
+	// (streamProps / reValidCreateStream removed — token-based:
+	// isValidCreateStream / consumeStreamProp)
 
-	reValidCreateStream = regexp.MustCompile(
-		`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?STREAM\s+(?:IF\s+NOT\s+EXISTS\s+)?` +
-			_identPath + `(?:\s+COPY\s+GRANTS)?\s+ON\s+(?:TABLE|VIEW|STAGE|EXTERNAL\s+TABLE)\s+` + _identPath +
-			`(?:\s+(?:AT|BEFORE)\s*` + _balancedParens + `)?` +
-			`(?:\s+(?:` + streamProps + `))*\s*$`)
+	// (CREATE TASK regexes removed — token-based)
 
-	// ── CREATE TASK ───────────────────────────────────────────────────────────
-	reIsCreateTask   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+(?:REPLACE|ALTER)\s+)?TASK\b`)
-	reCreateTaskName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+(?:REPLACE|ALTER)\s+)?TASK\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
-	reTaskAS           = regexp.MustCompile(`(?i)\bAS\b`)
-	reTaskSchedule     = regexp.MustCompile(`(?i)\bSCHEDULE\s*=`)
-	reTaskAfter        = regexp.MustCompile(`(?i)\bAFTER\b`)
-	reTaskAfterNames   = regexp.MustCompile(`(?i)\bAFTER\s+(` + _identPath + `(?:\s*,\s*` + _identPath + `)*)`)
-	reTaskFinalizeBare = regexp.MustCompile(`(?i)\bFINALIZE\b`)
-	reTaskFinalizeN    = regexp.MustCompile(`(?i)\bFINALIZE\s*=\s*(` + _identPath + `)`)
-	reTaskWhen         = regexp.MustCompile(`(?i)\bWHEN\b`)
-	reTaskWhenExpr     = regexp.MustCompile(`(?i)\bWHEN\s+\S`)
-	reTaskClone        = regexp.MustCompile(`(?i)\bCLONE\s+` + _identPath)
-	reTaskExecAs       = regexp.MustCompile(`(?i)\bEXECUTE\s+AS\b`)
-
-	// ── ALTER TASK ────────────────────────────────────────────────────────────
-	reIsAlterTask           = regexp.MustCompile(`(?i)^\s*ALTER\s+TASK\b`)
-	reAlterTaskName         = regexp.MustCompile(`(?i)^\s*ALTER\s+TASK\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
-	reAlterTaskResume       = regexp.MustCompile(`(?i)\bRESUME\s*$`)
-	reAlterTaskSusp         = regexp.MustCompile(`(?i)\bSUSPEND\s*$`)
-	reAlterTaskSet          = regexp.MustCompile(`(?i)\bSET\b`)
-	reAlterTaskUnset        = regexp.MustCompile(`(?i)\bUNSET\b`)
-	reAlterTaskRemAfter     = regexp.MustCompile(`(?i)\bREMOVE\s+AFTER\b`)
-	reAlterTaskRemAfterN    = regexp.MustCompile(`(?i)\bREMOVE\s+AFTER\s+(` + _identPath + `(?:\s*,\s*` + _identPath + `)*)`)
-	reAlterTaskAddAfter     = regexp.MustCompile(`(?i)\bADD\s+AFTER\b`)
-	reAlterTaskAddAfterN    = regexp.MustCompile(`(?i)\bADD\s+AFTER\s+(` + _identPath + `(?:\s*,\s*` + _identPath + `)*)`)
-	reAlterTaskModifyAS     = regexp.MustCompile(`(?i)\bMODIFY\s+AS\b`)
-	reAlterTaskModifyASBody = regexp.MustCompile(`(?i)\bMODIFY\s+AS\s+\S`)
-	reAlterTaskModifyWhen   = regexp.MustCompile(`(?i)\bMODIFY\s+WHEN\b`)
-	reAlterTaskModifyWhenE  = regexp.MustCompile(`(?i)\bMODIFY\s+WHEN\s+\S`)
-	reAlterTaskSetFinalize   = regexp.MustCompile(`(?i)\bSET\s+FINALIZE\s*=`)
-	reAlterTaskSetFinalizeN  = regexp.MustCompile(`(?i)\bSET\s+FINALIZE\s*=\s*(` + _identPath + `)`)
-	reAlterTaskUnsetFinalize = regexp.MustCompile(`(?i)\bUNSET\s+FINALIZE\b`)
-	reAlterTaskRemoveWhen    = regexp.MustCompile(`(?i)\bREMOVE\s+WHEN\b`)
-	reAlterTaskSetTag        = regexp.MustCompile(`(?i)\bSET\s+TAG\b`)
-	reAlterTaskUnsetTag      = regexp.MustCompile(`(?i)\bUNSET\s+TAG\b`)
-	// ── DROP TASK ─────────────────────────────────────────────────────────────
-	reIsDropTask   = regexp.MustCompile(`(?i)^\s*DROP\s+TASK\b`)
-	reDropTaskName = regexp.MustCompile(`(?i)^\s*DROP\s+TASK\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
+	// (ALTER TASK regexes removed — token-based)
 
 	// ── CREATE ALERT ──────────────────────────────────────────────────────────
-	reIsCreateAlert = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?ALERT\b`)
-	alertProps      = strings.Join([]string{
+	alertProps = strings.Join([]string{
 		`WAREHOUSE`, `SCHEDULE`, `COMMENT`,
 	}, "|")
-	reAlertIfExists  = regexp.MustCompile(`(?i)\bIF\s*\(\s*EXISTS\s*\(`)
-	reAlertThen      = regexp.MustCompile(`(?i)\bTHEN\b`)
-	reAlertWarehouse = regexp.MustCompile(`(?i)\bWAREHOUSE\s*=`)
-	reAlertSchedule  = regexp.MustCompile(`(?i)\bSCHEDULE\s*=`)
-
-	// Regular expression to match property keys (e.g., KEY =)
-	reProp = regexp.MustCompile(`(?i)\b([a-zA-Z_0-9]+)\s*=`)
+	// (reAlertIfExists, reAlertThen, reAlertWarehouse, reAlertSchedule removed — token-based)
 
 	// ── CREATE PIPE ───────────────────────────────────────────────────────────
-	reIsCreatePipe = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PIPE\b`)
-	pipeProps      = strings.Join([]string{
+	pipeProps = strings.Join([]string{
 		`AUTO_INGEST`, `AWS_SNS_TOPIC`, `INTEGRATION`, `COMMENT`, `ERROR_INTEGRATION`,
 	}, "|")
 
-	// ── CREATE PROCEDURE ───────────────────────────────────────────────────────
-	reIsCreateProcedure = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PROCEDURE\b`)
-
-	// ── CREATE FUNCTION ────────────────────────────────────────────────────────
-	reIsCreateFunction = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:TEMPORARY\s+|TEMP\s+)?(?:AGGREGATE\s+)?FUNCTION\b`)
-
 	// ── CREATE USER ───────────────────────────────────────────────────────────
-	reIsCreateUser = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?USER\b`)
-	userProps      = strings.Join([]string{
+	userProps = strings.Join([]string{
 		`PASSWORD`, `LOGIN_NAME`, `DISPLAY_NAME`, `FIRST_NAME`, `MIDDLE_NAME`, `LAST_NAME`,
 		`EMAIL`, `MUST_CHANGE_PASSWORD`, `DISABLED`, `DAYS_TO_EXPIRY`, `MINS_TO_UNLOCK`,
 		`DEFAULT_WAREHOUSE`, `DEFAULT_NAMESPACE`, `DEFAULT_ROLE`, `RSA_PUBLIC_KEY`,
 		`RSA_PUBLIC_KEY_2`, `COMMENT`, `TYPE`,
 	}, "|")
 
-	// ── CREATE ROLE ───────────────────────────────────────────────────────────
-	reIsCreateRole = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?ROLE\b`)
-
-	// ── CREATE MASKING POLICY ─────────────────────────────────────────────────
-	reIsCreateMaskingPolicy = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?MASKING\s+POLICY\b`)
-
 	// ── CREATE NETWORK POLICY ─────────────────────────────────────────────────
-	reIsCreateNetworkPolicy        = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?NETWORK\s+POLICY\b`)
-	reNetworkPolicyName            = regexp.MustCompile(`(?i)POLICY\s+(` + _identPath + `)`)
-	reNetworkPolicyIPList          = regexp.MustCompile(`(?i)\b(ALLOWED_IP_LIST|BLOCKED_IP_LIST)\s*=\s*\(([^)]*)\)`)
-	reNetworkPolicyHasAllowedIP    = regexp.MustCompile(`(?i)\bALLOWED_IP_LIST\s*=\s*\(([^)]*)\)`)
-	reNetworkPolicyHasAllowedRules = regexp.MustCompile(`(?i)\bALLOWED_NETWORK_RULE_LIST\s*=\s*\(([^)]*)\)`)
-	networkPolicyProps             = strings.Join([]string{
+	// (reNetworkPolicyName, reNetworkPolicyIPList, reNetworkPolicyHasAllowedIP,
+	// reNetworkPolicyHasAllowedRules removed — token-based)
+	networkPolicyProps = strings.Join([]string{
 		`ALLOWED_IP_LIST`, `BLOCKED_IP_LIST`,
 		`ALLOWED_NETWORK_RULE_LIST`, `BLOCKED_NETWORK_RULE_LIST`,
 		`COMMENT`,
 	}, "|")
 
 	// ── CREATE ROW ACCESS POLICY ──────────────────────────────────────────────
-	reIsCreateRowAccessPolicy = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?ROW\s+ACCESS\s+POLICY\b`)
-	// reRowAccessPolicyAS matches the mandatory AS (...) parameter list.
-	// The capture group holds the raw parameter list content; one level of
-	// nested parens is supported to accommodate types like NUMBER(10,2).
-	reRowAccessPolicyParamList = regexp.MustCompile(`(?i)\bAS\s*\(([^()]*(?:\([^()]*\)[^()]*)*)\)`)
-	reRowAccessPolicyReturns   = regexp.MustCompile(`(?i)\bRETURNS\s+BOOLEAN\b`)
-	// reRowAccessPolicyArrow requires the -> to appear after RETURNS BOOLEAN,
-	// preventing a bare -> elsewhere in the SQL from satisfying the check.
-	reRowAccessPolicyArrow  = regexp.MustCompile(`(?i)\bRETURNS\s+BOOLEAN\s*->`)
-	reRowAccessPolicyASOpen = regexp.MustCompile(`(?i)\bAS\s*\(`)
+	// (reRowAccessPolicyParamList, reRowAccessPolicyReturns, reRowAccessPolicyArrow,
+	// reRowAccessPolicyASOpen removed — token-based)
 
 	// ── CREATE SESSION POLICY ─────────────────────────────────────────────────
-	reIsCreateSessionPolicy = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SESSION\s+POLICY\b`)
-	reSessionPolicyName     = regexp.MustCompile(`(?i)POLICY\s+(` + _identPath + `)`)
-	reSessionIdleTimeout    = regexp.MustCompile(`(?i)\bSESSION_IDLE_TIMEOUT_MINS\s*=\s*(-?\d+)`)
-	reSessionUIIdleTimeout  = regexp.MustCompile(`(?i)\bSESSION_UI_IDLE_TIMEOUT_MINS\s*=\s*(-?\d+)`)
-	sessionPolicyProps      = strings.Join([]string{
+	// (reSessionPolicyName, reSessionIdleTimeout, reSessionUIIdleTimeout removed — token-based)
+	sessionPolicyProps = strings.Join([]string{
 		`SESSION_IDLE_TIMEOUT_MINS`, `SESSION_UI_IDLE_TIMEOUT_MINS`, `COMMENT`,
 	}, "|")
 
 	// ── CREATE PASSWORD POLICY ────────────────────────────────────────────────
-	reIsCreatePasswordPolicy  = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PASSWORD\s+POLICY\b`)
-	rePasswordPolicyName      = regexp.MustCompile(`(?i)POLICY\s+(` + _identPath + `)`)
-	rePasswordMinLength       = regexp.MustCompile(`(?i)\bPASSWORD_MIN_LENGTH\s*=\s*(-?\d+)`)
-	rePasswordMaxLength       = regexp.MustCompile(`(?i)\bPASSWORD_MAX_LENGTH\s*=\s*(-?\d+)`)
-	rePasswordMinUpperCase    = regexp.MustCompile(`(?i)\bPASSWORD_MIN_UPPER_CASE_CHARS\s*=\s*(-?\d+)`)
-	rePasswordMinLowerCase    = regexp.MustCompile(`(?i)\bPASSWORD_MIN_LOWER_CASE_CHARS\s*=\s*(-?\d+)`)
-	rePasswordMinNumeric      = regexp.MustCompile(`(?i)\bPASSWORD_MIN_NUMERIC_CHARS\s*=\s*(-?\d+)`)
-	rePasswordMinSpecial      = regexp.MustCompile(`(?i)\bPASSWORD_MIN_SPECIAL_CHARS\s*=\s*(-?\d+)`)
-	rePasswordMinAgeDays      = regexp.MustCompile(`(?i)\bPASSWORD_MIN_AGE_DAYS\s*=\s*(-?\d+)`)
-	rePasswordMaxAgeDays      = regexp.MustCompile(`(?i)\bPASSWORD_MAX_AGE_DAYS\s*=\s*(-?\d+)`)
-	rePasswordMaxRetries      = regexp.MustCompile(`(?i)\bPASSWORD_MAX_RETRIES\s*=\s*(-?\d+)`)
-	rePasswordLockoutTimeMins = regexp.MustCompile(`(?i)\bPASSWORD_LOCKOUT_TIME_MINS\s*=\s*(-?\d+)`)
-	rePasswordHistory         = regexp.MustCompile(`(?i)\bPASSWORD_HISTORY\s*=\s*(-?\d+)`)
-	passwordPolicyProps       = strings.Join([]string{
+	// (rePasswordPolicyName and 11 password property regexes removed — token-based)
+	passwordPolicyProps = strings.Join([]string{
 		`PASSWORD_MIN_LENGTH`, `PASSWORD_MAX_LENGTH`,
 		`PASSWORD_MIN_UPPER_CASE_CHARS`, `PASSWORD_MIN_LOWER_CASE_CHARS`,
 		`PASSWORD_MIN_NUMERIC_CHARS`, `PASSWORD_MIN_SPECIAL_CHARS`,
@@ -431,410 +174,65 @@ var (
 	}, "|")
 
 	// ── CREATE AGGREGATION POLICY ────────────────────────────────────────────
-	reIsCreateAggregationPolicy = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?AGGREGATION\s+POLICY\b`)
-	reAggPolicyAS               = regexp.MustCompile(`(?i)\bAS\s*\(`)
-	reAggPolicyReturns          = regexp.MustCompile(`(?i)\bRETURNS\s+AGGREGATION_CONSTRAINT\b`)
-	reAggPolicyArrow            = regexp.MustCompile(`(?i)\bRETURNS\s+AGGREGATION_CONSTRAINT\s*->`)
-	reAggPolicyMinGroupSize     = regexp.MustCompile(`(?i)\bMIN_GROUP_SIZE\s*=>\s*(-?\d+)`)
+	// (reAggPolicyAS, reAggPolicyReturns, reAggPolicyArrow,
+	// reAggPolicyMinGroupSize removed — token-based)
 
 	// ── CREATE PROJECTION POLICY ────────────────────────────────────────────
-	reIsCreateProjectionPolicy = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PROJECTION\s+POLICY\b`)
-	reProjPolicyAS             = regexp.MustCompile(`(?i)\bAS\s*\(`)
-	reProjPolicyReturns        = regexp.MustCompile(`(?i)\bRETURNS\s+PROJECTION_CONSTRAINT\b`)
-	reProjPolicyArrow          = regexp.MustCompile(`(?i)\bRETURNS\s+PROJECTION_CONSTRAINT\s*->`)
-	reProjPolicyAllowValue     = regexp.MustCompile(`(?i)\bALLOW\s*=>\s*'([^']*)'`)
+	// (reProjPolicyAS, reProjPolicyReturns, reProjPolicyArrow,
+	// reProjPolicyAllowValue removed — token-based)
 
 	// ── ALTER / DROP AGGREGATION POLICY ──────────────────────────────────────
-	reIsAlterAggregationPolicy = regexp.MustCompile(`(?i)^\s*ALTER\s+AGGREGATION\s+POLICY\b`)
-	reIsDropAggregationPolicy  = regexp.MustCompile(`(?i)^\s*DROP\s+AGGREGATION\s+POLICY\b`)
-	reAlterPolicyAction        = regexp.MustCompile(`(?i)\b(?:SET\s+BODY\s*->|SET\s+COMMENT\s*=|UNSET\s+COMMENT\b|RENAME\s+TO\b)`)
-	reDropPolicyHasName        = regexp.MustCompile(`(?i)POLICY\s+(?:IF\s+EXISTS\s+)?` + _identPath)
+	// (reAlterPolicyAction removed — token-based)
 
 	// ── ALTER / DROP PROJECTION POLICY ───────────────────────────────────────
-	reIsAlterProjectionPolicy = regexp.MustCompile(`(?i)^\s*ALTER\s+PROJECTION\s+POLICY\b`)
-	reIsDropProjectionPolicy  = regexp.MustCompile(`(?i)^\s*DROP\s+PROJECTION\s+POLICY\b`)
 
 	// ── CREATE PACKAGES POLICY ──────────────────────────────────────────────
-	reIsCreatePackagesPolicy = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PACKAGES\s+POLICY\b`)
-	rePkgPolicyLanguage      = regexp.MustCompile(`(?i)\bLANGUAGE\s+(\w+)`)
+	// (rePkgPolicyLanguage removed — token-based)
 
 	// ── ALTER / DROP PACKAGES POLICY ────────────────────────────────────────
-	reIsAlterPackagesPolicy = regexp.MustCompile(`(?i)^\s*ALTER\s+PACKAGES\s+POLICY\b`)
-	reIsDropPackagesPolicy  = regexp.MustCompile(`(?i)^\s*DROP\s+PACKAGES\s+POLICY\b`)
-	reAlterPkgPolicyAction  = regexp.MustCompile(`(?i)\b(?:SET\s+(?:ALLOWLIST|BLOCKLIST|ADDITIONAL_CREATION_BLOCKLIST|COMMENT)\b|UNSET\s+(?:ALLOWLIST|BLOCKLIST|ADDITIONAL_CREATION_BLOCKLIST|COMMENT)\b)`)
+	// (reAlterPkgPolicyAction removed — token-based)
 
 	// ── CREATE / ALTER / DROP REPLICATION GROUP ─────────────────────────────
-	reIsCreateReplicationGroup  = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?REPLICATION\s+GROUP\b`)
-	reIsAlterReplicationGroup   = regexp.MustCompile(`(?i)^\s*ALTER\s+REPLICATION\s+GROUP\b`)
-	reIsDropReplicationGroup    = regexp.MustCompile(`(?i)^\s*DROP\s+REPLICATION\s+GROUP\b`)
-	reReplGroupName             = regexp.MustCompile(`(?i)(?:REPLICATION|FAILOVER)\s+GROUP\s+(?:IF\s+(?:NOT\s+)?EXISTS\s+)?(` + _identPath + `)`)
-	reReplGroupObjectTypes      = regexp.MustCompile(`(?i)\bOBJECT_TYPES\s*=`)
-	reReplGroupAllowedAccounts  = regexp.MustCompile(`(?i)\bALLOWED_ACCOUNTS\s*=`)
-	reReplGroupAllowedDatabases = regexp.MustCompile(`(?i)\bALLOWED_DATABASES\s*=`)
-	reReplGroupAllowedIntTypes  = regexp.MustCompile(`(?i)\bALLOWED_INTEGRATION_TYPES\s*=`)
-	// reReplGroupObjectTypesValue captures the value portion after OBJECT_TYPES =
-	// up to the next known keyword boundary (or end-of-string), so substring
-	// checks for DATABASES or INTEGRATIONS only examine the actual type list.
-	reReplGroupObjectTypesValue = regexp.MustCompile(`(?i)\bOBJECT_TYPES\s*=\s*(.+?)(?:\s+(?:ALLOWED_|IGNORE\s+EDITION|REPLICATION_SCHEDULE)|\s*$)`)
-	// ALTER actions
-	reAlterReplGroupAdd           = regexp.MustCompile(`(?i)\bADD\s+` + _ident)
-	reAlterReplGroupRemove        = regexp.MustCompile(`(?i)\bREMOVE\s+` + _ident)
-	reAlterReplGroupMoveDatabases = regexp.MustCompile(`(?i)\bMOVE\s+DATABASES\b`)
-	reAlterReplGroupMoveTo        = regexp.MustCompile(`(?i)\bTO\s+REPLICATION\s+GROUP\s+` + _ident)
-	reAlterReplGroupSet           = regexp.MustCompile(`(?i)\bSET\s+(?:REPLICATION_SCHEDULE|OBJECT_TYPES)\b`)
-	reAlterReplGroupRename        = regexp.MustCompile(`(?i)\bRENAME\s+TO\s+` + _ident)
+	// (reReplGroupName and 12 REPLICATION/FAILOVER GROUP regexes removed — token-based)
 
 	// ── CREATE / ALTER / DROP FAILOVER GROUP ────────────────────────────────
-	reIsCreateFailoverGroup        = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?FAILOVER\s+GROUP\b`)
-	reIsAlterFailoverGroup         = regexp.MustCompile(`(?i)^\s*ALTER\s+FAILOVER\s+GROUP\b`)
-	reIsDropFailoverGroup          = regexp.MustCompile(`(?i)^\s*DROP\s+FAILOVER\s+GROUP\b`)
-	reFailoverGroupAllowedAccounts = regexp.MustCompile(`(?i)\bALLOWED_(?:FAILOVER_)?ACCOUNTS\s*=`)
-	reAlterFailoverPrimary         = regexp.MustCompile(`(?i)\bPRIMARY\b`)
-	reAlterFailoverRefresh         = regexp.MustCompile(`(?i)\bREFRESH\b`)
-	reAlterFailoverSuspend         = regexp.MustCompile(`(?i)\bSUSPEND\b`)
-	reAlterFailoverResume          = regexp.MustCompile(`(?i)\bRESUME\b`)
+	// (reFailoverGroupAllowedAccounts, reAlterFailoverPrimary .. Resume removed — token-based)
 
 	// ── Time Travel AT / BEFORE clauses ──────────────────────────────────────
-	reTimeTravelClause = regexp.MustCompile(`(?i)\b(AT|BEFORE)\s*\(`)
-	// Bare AT/BEFORE after a table ref without parentheses (missing parens).
-	reTimeTravelBare = regexp.MustCompile(`(?i)(?:FROM|JOIN)\s+` + _identPath + `\s+(?:AT|BEFORE)\s+(?:TIMESTAMP|OFFSET|STATEMENT|STREAM)\b`)
-	// Valid keyword arguments inside AT/BEFORE clause.
-	reTimeTravelArg = regexp.MustCompile(`(?i)\b(TIMESTAMP|OFFSET|STATEMENT|STREAM)\s*=>`)
-	// Bare keyword without => inside AT/BEFORE parens.
-	reTimeTravelBareKW = regexp.MustCompile(`(?i)\b(TIMESTAMP|OFFSET|STATEMENT|STREAM)\b`)
-
-	// ── GRANT / REVOKE ────────────────────────────────────────────────────────
-	// reIsGrantRole is used inside validateGrant (not in the top-level dispatch)
-	// to distinguish "GRANT ROLE <name>" (role assignment) from privilege grants.
-	reIsGrantRole          = regexp.MustCompile(`(?i)^\s*GRANT\s+ROLE\b`)
-	reIsGrantDatabaseRole  = regexp.MustCompile(`(?i)^\s*GRANT\s+DATABASE\s+ROLE\b`)
-	reIsGrant              = regexp.MustCompile(`(?i)^\s*GRANT\b`)
-	reIsRevoke             = regexp.MustCompile(`(?i)^\s*REVOKE\b`)
-	reIsRevokeRole         = regexp.MustCompile(`(?i)^\s*REVOKE\s+ROLE\b`)
-	reIsRevokeDatabaseRole = regexp.MustCompile(`(?i)^\s*REVOKE\s+DATABASE\s+ROLE\b`)
-	// reGrantOnObject / reRevokeOnObject use a lazy ([\s\S]+?) to capture the
-	// privilege list, stopping at the first occurrence of " ON ". This is safe
-	// as long as no Snowflake privilege name itself contains the substring " ON ";
-	// verify this assumption when adding new privileges to grantObjectPrivileges.
-	reGrantOnObject    = regexp.MustCompile(`(?i)\bGRANT\s+([\s\S]+?)\s+ON\s+(ALL\s+|FUTURE\s+)?(` + _grantObjType + `)`)
-	reRevokeOnObject   = regexp.MustCompile(`(?i)\bREVOKE\s+(?:GRANT\s+OPTION\s+FOR\s+)?([\s\S]+?)\s+ON\s+(ALL\s+|FUTURE\s+)?(` + _grantObjType + `)`)
-	reGrantee          = regexp.MustCompile(`(?i)\bTO\s+(?:ROLE|USER|DATABASE\s+ROLE|SHARE)\b`)
-	reGranteeFrom      = regexp.MustCompile(`(?i)\bFROM\s+(?:ROLE|USER|DATABASE\s+ROLE|SHARE)\b`)
-	reGrantAllFuture   = regexp.MustCompile(`(?i)\bON\s+(?:ALL|FUTURE)\b`)
-	reGrantInQualifier = regexp.MustCompile(`(?i)\bIN\s+(?:SCHEMA|DATABASE)\b`)
-	reGrantToTable     = regexp.MustCompile(`(?i)\bTO\s+TABLE\b`)
-	reWithGrantOption  = regexp.MustCompile(`(?i)\bWITH\s+GRANT\s+OPTION\b`)
-	// reRevokeCascade / reRevokeRestrict match the keywords anywhere in the
-	// statement. Unquoted identifiers that are exactly CASCADE or RESTRICT
-	// (valid but uncommon Snowflake names) could in theory produce a false
-	// positive — word boundaries mitigate this for composite names like
-	// cascade_table, but a bare unquoted name CASCADE remains a theoretical
-	// edge case. This is an accepted limitation documented here for future readers.
-	reRevokeCascade  = regexp.MustCompile(`(?i)\bCASCADE\b`)
-	reRevokeRestrict = regexp.MustCompile(`(?i)\bRESTRICT\b`)
-
-	// ── CALL ──────────────────────────────────────────────────────────────────
-	reIsCall        = regexp.MustCompile(`(?i)^\s*CALL\b`)
-	reCallProcName  = regexp.MustCompile(`(?i)^\s*CALL\s+` + _identPath)
-	reCallArgParens = regexp.MustCompile(`(?i)^\s*CALL\s+` + _identPath + `\s*\(`)
-	reCallInto      = regexp.MustCompile(`(?i)\bINTO\s+([^\s;,)]+)`)
-	reWithProcAlias = regexp.MustCompile(`(?i)^\s*WITH\s+(` + _ident + `)\s+AS\s+PROCEDURE\b`)
-	// reAnyDollarTag matches both untagged ($$) and tagged ($tag$) Snowflake
-	// dollar-quote delimiters; used to locate the closing body delimiter.
-	reAnyDollarTag = regexp.MustCompile(`\$\w*\$`)
-
-	// ── EXECUTE IMMEDIATE / EXECUTE TASK ─────────────────────────────────────
-	reIsExecuteImmediate = regexp.MustCompile(`(?i)^\s*EXECUTE\s+IMMEDIATE\b`)
-	reIsExecuteTask      = regexp.MustCompile(`(?i)^\s*EXECUTE\s+TASK\b`)
-	reIsExecute          = regexp.MustCompile(`(?i)^\s*EXECUTE\b`)
-	// reExecImmHasArg requires a non-whitespace, non-semicolon character after
-	// EXECUTE IMMEDIATE so that "EXECUTE IMMEDIATE ;" (space before semicolon)
-	// is correctly flagged as missing an argument.
-	reExecImmHasArg        = regexp.MustCompile(`(?i)^\s*EXECUTE\s+IMMEDIATE\s+[^\s;]`)
-	reExecImmUsing         = regexp.MustCompile(`(?i)\bUSING\s*\(`)
-	reExecImmUsingHasIdent = regexp.MustCompile(`(?i)\bUSING\s*\(\s*` + _ident)
-	// reStripDollarQuoted strips dollar-quoted blocks ($$…$$ and $tag$…$tag$)
-	// so that SQL content inside them does not cause false-positive USING checks.
-	// The pattern intentionally matches mismatched tags ($foo$…$bar$): Go's
-	// regexp package has no backreferences, so equal-tag enforcement is not
-	// possible. Over-stripping is safe here — the goal is to remove content,
-	// not to validate delimiters.
-	reStripDollarQuoted = regexp.MustCompile(`\$\w*\$[\s\S]*?\$\w*\$`)
-	reExecTaskName      = regexp.MustCompile(`(?i)^\s*EXECUTE\s+TASK\s+` + _identPath)
-
-	// ── PUT / GET / LIST / REMOVE stage commands ──────────────────────────────
-	reIsPut    = regexp.MustCompile(`(?i)^\s*PUT\b`)
-	reIsGet    = regexp.MustCompile(`(?i)^\s*GET\b`)
-	reIsList   = regexp.MustCompile(`(?i)^\s*(?:LIST|LS)\b`)
-	reIsRemove = regexp.MustCompile(`(?i)^\s*(?:REMOVE|RM)\b`)
-	// reFileURIArg matches a file:// URI argument (shared by PUT and GET).
-	reFileURIArg = regexp.MustCompile(`(?i)\bfile://\S+`)
-	rePutKWStrip = regexp.MustCompile(`(?i)^PUT\s+`)
-	reStageRef   = regexp.MustCompile(`@\S+`)
-	// rePutCorrectOrder validates that PUT has file:// before @stage.
-	rePutCorrectOrder = regexp.MustCompile(`(?i)^\s*PUT\s+file://\S+\s+@\S+`)
-	rePutSourceComp   = regexp.MustCompile(`(?i)\bSOURCE_COMPRESSION\s*=\s*(\w+)`)
-	rePutOverwrite    = regexp.MustCompile(`(?i)\bOVERWRITE\s*=\s*(\w+)`)
-	rePutAutoCompress = regexp.MustCompile(`(?i)\bAUTO_COMPRESS\s*=\s*(\w+)`)
-	// reParallelOption matches a PARALLEL = <n> option (shared by PUT and GET).
-	// The capture group includes an optional leading minus so that negative
-	// values like PARALLEL = -1 are captured and fail the range check rather
-	// than being silently skipped.
-	reParallelOption = regexp.MustCompile(`(?i)\bPARALLEL\s*=\s*(-?\d+)`)
-	reGetStageArg    = regexp.MustCompile(`(?i)^\s*GET\s+@\S+`)
-	reListStageArg   = regexp.MustCompile(`(?i)^\s*(?:LIST|LS)\s+@\S+`)
-	reRemoveStageArg = regexp.MustCompile(`(?i)^\s*(?:REMOVE|RM)\s+@\S+`)
+	// (reTimeTravelClause, reTimeTravelBare, reTimeTravelArg, reTimeTravelBareKW removed — token-based)
 
 	// validPutCompressions lists the accepted SOURCE_COMPRESSION values for PUT.
 	validPutCompressions = []string{"AUTO_DETECT", "GZIP", "BZ2", "BROTLI", "ZSTD", "DEFLATE", "RAW_DEFLATE", "NONE"}
 
 	// ── CREATE SHARE ─────────────────────────────────────────────────────────
-	reIsCreateShare   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SHARE\b`)
-	reCreateShareName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SHARE\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
-	// ── ALTER SHARE ────────────────────────────────────────────────────────────
-	reIsAlterShare          = regexp.MustCompile(`(?i)^\s*ALTER\s+SHARE\b`)
-	reAlterShareAddAccounts = regexp.MustCompile(`(?i)\bADD\s+ACCOUNTS\b`)
-	reAlterShareAddAcctsEq  = regexp.MustCompile(`(?i)\bADD\s+ACCOUNTS\s*=`)
-	// reAlterShareHasAcctList verifies that ADD ACCOUNTS = is followed by at least one identifier.
-	reAlterShareHasAcctList = regexp.MustCompile(`(?i)\bADD\s+ACCOUNTS\s*=\s*` + _ident)
-	// reAlterShareRestrictTrailing matches RESTRICT only at the end of the cleaned
-	// statement text. Anchoring to $ prevents false positives when the share name
-	// (e.g. ALTER SHARE restrict ...) or a quoted identifier ("restrict") contains
-	// the word RESTRICT somewhere other than the trailing position.
-	reAlterShareRestrictTrailing = regexp.MustCompile(`(?i)\bRESTRICT\s*$`)
+	// (reCreateShareName removed — token-based)
+	// (ALTER SHARE regexes removed — token-based)
 
-	// ── CREATE DATASHARE ─────────────────────────────────────────────────────
-	reIsCreateDatashare   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?DATASHARE\b`)
-	reCreateDatashareName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?DATASHARE\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
-	// ── ALTER DATASHARE ──────────────────────────────────────────────────────
-	reIsAlterDatashare              = regexp.MustCompile(`(?i)^\s*ALTER\s+DATASHARE\b`)
-	reAlterDatashareName            = regexp.MustCompile(`(?i)^\s*ALTER\s+DATASHARE\s+(` + _identPath + `)`)
-	reAlterDatashareAddAccounts     = regexp.MustCompile(`(?i)\bADD\s+ACCOUNTS\s*=`)
-	reAlterDatashareAddAcctList     = regexp.MustCompile(`(?i)\bADD\s+ACCOUNTS\s*=\s*` + _ident)
-	reAlterDatashareRemoveAccounts  = regexp.MustCompile(`(?i)\bREMOVE\s+ACCOUNTS\s*=`)
-	reAlterDatashareRemoveAcctList  = regexp.MustCompile(`(?i)\bREMOVE\s+ACCOUNTS\s*=\s*` + _ident)
-	reAlterDatashareAddDatabases    = regexp.MustCompile(`(?i)\bADD\s+DATABASES\b`)
-	reAlterDatashareAddDbList       = regexp.MustCompile(`(?i)\bADD\s+DATABASES\s+` + _ident)
-	reAlterDatashareRemoveDatabases = regexp.MustCompile(`(?i)\bREMOVE\s+DATABASES\b`)
-	reAlterDatashareRemoveDbList    = regexp.MustCompile(`(?i)\bREMOVE\s+DATABASES\s+` + _ident)
-	reAlterDatashareShareRestrict   = regexp.MustCompile(`(?i)\bSHARE_RESTRICTIONS\b`)
-	// reAlterDatashareAction matches any known ALTER DATASHARE sub-command.
-	reAlterDatashareAction = regexp.MustCompile(`(?i)\b(?:ADD\s+ACCOUNTS|REMOVE\s+ACCOUNTS|ADD\s+DATABASES|REMOVE\s+DATABASES|SET\s+COMMENT|UNSET\s+COMMENT)\b`)
-	// ── DROP DATASHARE ───────────────────────────────────────────────────────
-	reIsDropDatashare   = regexp.MustCompile(`(?i)^\s*DROP\s+DATASHARE\b`)
-	reDropDatashareName = regexp.MustCompile(`(?i)^\s*DROP\s+DATASHARE\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
+	// (ALTER DATASHARE regexes removed — token-based)
 
-	// ── CREATE COMPUTE POOL ─────────────────────────────────────────────────
-	reIsCreateComputePool       = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?COMPUTE\s+POOL\b`)
-	reCreateComputePoolName     = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?COMPUTE\s+POOL\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
-	reComputePoolMinNodes       = regexp.MustCompile(`(?i)\bMIN_NODES\s*=\s*(-?\d+)`)
-	reComputePoolMaxNodes       = regexp.MustCompile(`(?i)\bMAX_NODES\s*=\s*(-?\d+)`)
-	reComputePoolInstanceFamily = regexp.MustCompile(`(?i)\bINSTANCE_FAMILY\s*=\s*([a-zA-Z0-9_]+)`)
-	reComputePoolAutoSuspend    = regexp.MustCompile(`(?i)\bAUTO_SUSPEND_SECS\s*=\s*(-?\d+)`)
+	// (CREATE / EXECUTE / ALTER SERVICE regexes removed — token-based)
 
-	// ── CREATE / EXECUTE / ALTER / DROP SERVICE (SPCS) ────────────────────
-	reIsCreateService     = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SERVICE\b`)
-	reCreateServiceName   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SERVICE\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
-	reIsExecuteService    = regexp.MustCompile(`(?i)^\s*EXECUTE\s+(?:JOB\s+)?SERVICE\b`)
-	reExecuteServiceName  = regexp.MustCompile(`(?i)^\s*EXECUTE\s+(?:JOB\s+)?SERVICE\s+(` + _identPath + `)`)
-	reIsAlterService      = regexp.MustCompile(`(?i)^\s*ALTER\s+SERVICE\b`)
-	reAlterServiceName    = regexp.MustCompile(`(?i)^\s*ALTER\s+SERVICE\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
-	reIsDropService       = regexp.MustCompile(`(?i)^\s*DROP\s+SERVICE\b`)
-	reDropServiceName     = regexp.MustCompile(`(?i)^\s*DROP\s+SERVICE\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
-	reDropServiceIfExists = regexp.MustCompile(`(?i)\bIF\s+EXISTS\b`)
-	// Service property patterns
-	reServiceInComputePool = regexp.MustCompile(`(?i)\bIN\s+COMPUTE\s+POOL\s+(` + _ident + `)`)
-	// reServiceFromSpec matches FROM SPECIFICATION and FROM SPECIFICATION_TEMPLATE
-	// (inline YAML). The \b after SPECIFICATION prevents matching _FILE/_TEMPLATE_FILE.
-	reServiceFromSpec = regexp.MustCompile(`(?i)\bFROM\s+(?:@` + _identPath + `\s+)?SPECIFICATION(?:_TEMPLATE)?\b`)
-	// reServiceFromSpecFile matches FROM SPECIFICATION_FILE and
-	// FROM SPECIFICATION_TEMPLATE_FILE, including the FROM @stage prefix form.
-	reServiceFromSpecFile = regexp.MustCompile(`(?i)\bFROM\s+(?:@` + _identPath + `\s+)?SPECIFICATION(?:_TEMPLATE)?_FILE\b`)
-	reServiceMinInstances = regexp.MustCompile(`(?i)\bMIN_INSTANCES\s*=\s*(-?\d+)`)
-	reServiceMaxInstances = regexp.MustCompile(`(?i)\bMAX_INSTANCES\s*=\s*(-?\d+)`)
-	// ALTER SERVICE actions — reAlterServiceAction matches any known sub-command
-	// for the "unknown sub-command" guard. reAlterServiceSetBare matches bare
-	// SET (with any property) so we can distinguish "unknown property within SET"
-	// from "unknown sub-command entirely".
-	reAlterServiceAction    = regexp.MustCompile(`(?i)\b(?:SUSPEND|RESUME|SET\s+(?:MIN_INSTANCES|MAX_INSTANCES|COMMENT|QUERY_WAREHOUSE)|UNSET\s+(?:COMMENT|QUERY_WAREHOUSE|MIN_INSTANCES|MAX_INSTANCES)|FROM\s+(?:@` + _identPath + `\s+)?SPECIFICATION(?:_TEMPLATE)?(?:_FILE)?)\b`)
-	reAlterServiceSetBare   = regexp.MustCompile(`(?i)\bSET\s+\w+`)
-	reAlterServiceUnsetBare = regexp.MustCompile(`(?i)\bUNSET\s+\w+`)
-
-	// ── CREATE / DROP IMAGE REPOSITORY (SPCS) ────────────────────────────
-	reIsCreateImageRepository   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?IMAGE\s+REPOSITORY\b`)
-	reCreateImageRepositoryName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?IMAGE\s+REPOSITORY\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
-	reIsDropImageRepository     = regexp.MustCompile(`(?i)^\s*DROP\s+IMAGE\s+REPOSITORY\b`)
-	reDropImageRepositoryName   = regexp.MustCompile(`(?i)^\s*DROP\s+IMAGE\s+REPOSITORY\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
-	reIsAlterImageRepository    = regexp.MustCompile(`(?i)^\s*ALTER\s+IMAGE\s+REPOSITORY\b`)
-
-	// ── CREATE / ALTER / DROP GIT REPOSITORY ──────────────────────────────
-	reIsCreateGitRepository   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?GIT\s+REPOSITORY\b`)
-	reCreateGitRepositoryName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?GIT\s+REPOSITORY\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
-	reGitRepoAPIIntegration   = regexp.MustCompile(`(?i)\bAPI_INTEGRATION\s*=\s*` + _ident)
-	reGitRepoOrigin           = regexp.MustCompile(`(?i)\bORIGIN\s*=\s*'([^']*)'`)
-	reGitRepoOriginBare       = regexp.MustCompile(`(?i)\bORIGIN\s*=`)
-	reIsAlterGitRepository    = regexp.MustCompile(`(?i)^\s*ALTER\s+GIT\s+REPOSITORY\b`)
-	reAlterGitRepositoryName  = regexp.MustCompile(`(?i)^\s*ALTER\s+GIT\s+REPOSITORY\s+(` + _identPath + `)`)
-	reAlterGitRepoAction      = regexp.MustCompile(`(?i)\b(?:FETCH|SET\s+(?:API_INTEGRATION|GIT_CREDENTIALS|COMMENT)|UNSET\s+(?:GIT_CREDENTIALS|COMMENT))\b`)
-	reIsDropGitRepository     = regexp.MustCompile(`(?i)^\s*DROP\s+GIT\s+REPOSITORY\b`)
-	reDropGitRepositoryName   = regexp.MustCompile(`(?i)^\s*DROP\s+GIT\s+REPOSITORY\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
-
-	// ── CREATE / ALTER SECRET ─────────────────────────────────────────────
-	reIsCreateSecret    = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SECRET\b`)
-	reCreateSecretName  = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SECRET\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
-	reSecretType        = regexp.MustCompile(`(?i)\bTYPE\b\s*=\s*([\w]+)`)
-	reSecretAPIA        = regexp.MustCompile(`(?i)\bAPI_AUTHENTICATION\s*=\s*` + _ident)
-	reSecretUsername    = regexp.MustCompile(`(?i)\bUSERNAME\s*=`)
-	reSecretPassword    = regexp.MustCompile(`(?i)\bPASSWORD\s*=`)
-	reSecretString      = regexp.MustCompile(`(?i)\bSECRET_STRING\s*=`)
-	reSecretEnabled     = regexp.MustCompile(`(?i)\bENABLED\s*=`)
-	reSecretAlgorithm   = regexp.MustCompile(`(?i)\bALGORITHM\s*=`)
-	reSecretOAuthScopes = regexp.MustCompile(`(?i)\bOAUTH_SCOPES\s*=`)
-	reSecretOAuthRT     = regexp.MustCompile(`(?i)\bOAUTH_REFRESH_TOKEN\s*=`)
-	reSecretOAuthRTExp  = regexp.MustCompile(`(?i)\bOAUTH_REFRESH_TOKEN_EXPIRY_TIME\s*=`)
-	reIsAlterSecret     = regexp.MustCompile(`(?i)^\s*ALTER\s+SECRET\b`)
-	reAlterSecretName   = regexp.MustCompile(`(?i)^\s*ALTER\s+SECRET\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
-	reAlterSecretAction = regexp.MustCompile(`(?i)\b(?:SET\s+(?:SECRET_STRING|USERNAME|PASSWORD|OAUTH_REFRESH_TOKEN|OAUTH_REFRESH_TOKEN_EXPIRY_TIME|OAUTH_SCOPES|API_AUTHENTICATION|COMMENT)|UNSET\s+COMMENT)\b`)
+	// ── CREATE / ALTER Secret ─────────────────────────────────────────────
+	// (reSecretType, reSecretAPIA, reSecretUsername, reSecretPassword, reSecretString,
+	// reSecretEnabled, reSecretAlgorithm, reSecretOAuthScopes, reSecretOAuthRT,
+	// reSecretOAuthRTExp, reAlterSecretName, reAlterSecretAction removed — token-based)
 
 	// ── CREATE / ALTER / DROP APPLICATION PACKAGE (Native Apps) ────────────
-	reIsCreateApplicationPackage   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?APPLICATION\s+PACKAGE\b`)
-	reCreateApplicationPackageName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?APPLICATION\s+PACKAGE\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
-	reIsAlterApplicationPackage    = regexp.MustCompile(`(?i)^\s*ALTER\s+APPLICATION\s+PACKAGE\b`)
-	reAlterApplicationPackageName  = regexp.MustCompile(`(?i)^\s*ALTER\s+APPLICATION\s+PACKAGE\s+(` + _identPath + `)`)
-	reAlterAppPkgAction            = regexp.MustCompile(`(?i)\b(?:SET\s+(?:DEFAULT\s+RELEASE\s+DIRECTIVE|DISTRIBUTION)|ADD\s+VERSION|DROP\s+VERSION)\b`)
-	reAlterAppPkgSetBare           = regexp.MustCompile(`(?i)\bSET\s+\w+`)
-	reAppPkgDistribution           = regexp.MustCompile(`(?i)\bDISTRIBUTION\s*=\s*(\w+)`)
-	reIsDropApplicationPackage     = regexp.MustCompile(`(?i)^\s*DROP\s+APPLICATION\s+PACKAGE\b`)
-	reDropApplicationPackageName   = regexp.MustCompile(`(?i)^\s*DROP\s+APPLICATION\s+PACKAGE\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
+	// (reCreateApplicationPackageName .. reAppPkgDistribution removed — token-based)
 
 	// ── CREATE / ALTER / DROP APPLICATION (Native Apps) ───────────────────
-	// Note: These regexes match both "APPLICATION" and "APPLICATION PACKAGE".
-	// The dispatch loop checks APPLICATION PACKAGE patterns first, so these
-	// only fire for bare APPLICATION statements.
-	reIsCreateApplication   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?APPLICATION\b`)
-	reCreateApplicationName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?APPLICATION\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
-	reAppFromPackage        = regexp.MustCompile(`(?i)\bFROM\s+APPLICATION\s+PACKAGE\s+(` + _identPath + `)`)
-	reAppUsingVersion       = regexp.MustCompile(`(?i)\bUSING\s+VERSION\b`)
-	reAppUsingVersionPatch  = regexp.MustCompile(`(?i)\bUSING\s+VERSION\s+` + _ident + `\s+PATCH\s+\d+\b`)
-	reIsAlterApplication    = regexp.MustCompile(`(?i)^\s*ALTER\s+APPLICATION\b`)
-	reAlterApplicationName  = regexp.MustCompile(`(?i)^\s*ALTER\s+APPLICATION\s+(` + _identPath + `)`)
-	reAlterAppAction        = regexp.MustCompile(`(?i)\b(?:UPGRADE|SET\s+DEBUG_MODE|UNSET\s+DEBUG_MODE)\b`)
-	reAlterAppSetBare       = regexp.MustCompile(`(?i)\bSET\s+\w+`)
-	reAlterAppUnsetBare     = regexp.MustCompile(`(?i)\bUNSET\s+\w+`)
-	reIsDropApplication     = regexp.MustCompile(`(?i)^\s*DROP\s+APPLICATION\b`)
-	reDropApplicationName   = regexp.MustCompile(`(?i)^\s*DROP\s+APPLICATION\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
+	// (reCreateApplicationName .. reAlterAppUnsetBare removed — token-based)
 
 	// ── CREATE EVENT TABLE ──────────────────────────────────────────────────
-	reIsCreateEventTable   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:(?:OR\s+REPLACE|TRANSIENT)\s+)*EVENT\s+TABLE\b`)
-	reCreateEventTableName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:(?:OR\s+REPLACE|TRANSIENT)\s+)*EVENT\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
-	// reEventTableColumnList detects a parenthesised column list after the table name.
-	// Event tables have a fixed schema and do not allow user-defined columns.
-	reEventTableColumnList   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:(?:OR\s+REPLACE|TRANSIENT)\s+)*EVENT\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath + `\s*\(`)
-	reEvtRetentionDays       = regexp.MustCompile(`(?i)\bDATA_RETENTION_TIME_IN_DAYS\s*=\s*(-?\d+(?:\.\d+)?|-?\w+|'')`)
-	reEvtExtensionDays       = regexp.MustCompile(`(?i)\bMAX_DATA_EXTENSION_TIME_IN_DAYS\s*=\s*(-?\d+(?:\.\d+)?|-?\w+|'')`)
-	reEvtChangeTrackingValue = regexp.MustCompile(`(?i)\bCHANGE_TRACKING\s*=\s*(\w+|'')`)
-
-	// ── CREATE EXTERNAL VOLUME ────────────────────────────────────────────────
-	reIsCreateExternalVolume   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EXTERNAL\s+VOLUME\b`)
-	reCreateExternalVolumeName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EXTERNAL\s+VOLUME\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
-	reExtVolHasStorageLocs     = regexp.MustCompile(`(?i)\bSTORAGE_LOCATIONS\s*=\s*\(`)
-	// reExtVolLocationName matches NAME = ' to detect the required attribute.
-	// \b already prevents matching embedded words like CONTAINER_NAME (_N has
-	// no word boundary). The trailing ' further ensures we only match
-	// string-valued assignments; on locClean, 'value' → '' so the opening '
-	// of the empty placeholder still satisfies the pattern.
-	reExtVolLocationName    = regexp.MustCompile(`(?i)\bNAME\s*=\s*'`)
-	reExtVolStorageProvider = regexp.MustCompile(`(?i)\bSTORAGE_PROVIDER\s*=\s*'([^']*)'`)
-	reExtVolStorageBaseURL  = regexp.MustCompile(`(?i)\bSTORAGE_BASE_URL\s*=\s*'[^']*'`)
-	reExtVolAwsRoleArn      = regexp.MustCompile(`(?i)\bSTORAGE_AWS_ROLE_ARN\s*=`)
-	reExtVolAzureTenantID   = regexp.MustCompile(`(?i)\bAZURE_TENANT_ID\s*=`)
-	reExtVolAwsExternalID   = regexp.MustCompile(`(?i)\bSTORAGE_AWS_EXTERNAL_ID\s*=`)
-	// reExtVolHasEncryption detects any ENCRYPTION = ( block regardless of its
-	// contents. Used as a coarse presence check before reExtVolEncryptionType,
-	// which additionally requires TYPE = '...'. This ensures blocks like
-	// ENCRYPTION = (KMS_KEY_ID = 'k') (no TYPE key) are not silently ignored.
-	reExtVolHasEncryption = regexp.MustCompile(`(?i)\bENCRYPTION\s*=\s*\(`)
-	// reExtVolEncryptionType assumes TYPE is the first key inside the
-	// ENCRYPTION block (i.e. ENCRYPTION = ( TYPE = '...' )). If TYPE appears
-	// after another key (e.g. ENCRYPTION = (KMS_KEY_ID = 'k' TYPE = '...')),
-	// the regex will not match and the validator will report a missing TYPE
-	// key. This matches Snowflake's documented DDL convention where TYPE is
-	// always the leading key in ENCRYPTION blocks.
-	reExtVolEncryptionType = regexp.MustCompile(`(?i)\bENCRYPTION\s*=\s*\(\s*TYPE\s*=\s*'([^']*)'`)
+	// (reCreateEventTableName .. reEvtChangeTrackingValue removed — token-based)
 
 	// ── CREATE TAG / ALTER TAG / DROP TAG ────────────────────────────────
-	reIsCreateTag   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TAG\b`)
-	reCreateTagName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TAG\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
-	reIsAlterTag    = regexp.MustCompile(`(?i)^\s*ALTER\s+TAG\b`)
-	reAlterTagName  = regexp.MustCompile(`(?i)^\s*ALTER\s+TAG\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
-	reIsDropTag     = regexp.MustCompile(`(?i)^\s*DROP\s+TAG\b`)
-	reDropTagName   = regexp.MustCompile(`(?i)^\s*DROP\s+TAG\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
-	// reTagAllowedValues detects the presence of the ALLOWED_VALUES keyword
-	// followed by whitespace. The actual string-literal list parsing is done
-	// by reTagStringLiteralList.
-	reTagAllowedValues     = regexp.MustCompile(`(?i)\bALLOWED_VALUES\s+`)
-	reTagStringLiteralList = regexp.MustCompile(`(?i)\bALLOWED_VALUES\s+('(?:''|[^'])*'(?:\s*,\s*'(?:''|[^'])*')*)`)
-	// reAlterTagRename matches ALTER TAG <name> RENAME TO <new_name>.
-	reAlterTagRenameTo = regexp.MustCompile(`(?i)\bRENAME\s+TO\s+(` + _identPath + `)`)
-	// reAlterTagAddAllowed matches ALTER TAG <name> ADD ALLOWED_VALUES.
-	reAlterTagAddAllowed  = regexp.MustCompile(`(?i)\bADD\s+ALLOWED_VALUES\b`)
-	reAlterTagDropAllowed = regexp.MustCompile(`(?i)\bDROP\s+ALLOWED_VALUES\b`)
-	// reAlterTagRenameToBare matches RENAME TO without requiring a name after it.
-	reAlterTagRenameToBare = regexp.MustCompile(`(?i)\bRENAME\s+TO\b`)
-	// reAlterTagUnsetAllowed matches ALTER TAG <name> UNSET ALLOWED_VALUES.
-	reAlterTagUnsetAllowed = regexp.MustCompile(`(?i)\bUNSET\s+ALLOWED_VALUES\b`)
-	reAlterTagSetComment   = regexp.MustCompile(`(?i)\bSET\s+COMMENT\s*=`)
-	reAlterTagUnsetComment = regexp.MustCompile(`(?i)\bUNSET\s+COMMENT\b`)
-	// reCascadeRestrictTrailing detects CASCADE or RESTRICT trailing a DROP
-	// statement. Used by DROP TAG and DROP NOTEBOOK validators. $ is safe here:
-	// parseText has trailing semicolons stripped and clean has comments removed
-	// before matching.
-	reCascadeRestrictTrailing = regexp.MustCompile(`(?i)\b(?:CASCADE|RESTRICT)\s*$`)
-
+	// (reCreateTagName, reAlterTagName, reAlterTagRenameTo .. reAlterTagUnsetComment removed — token-based)
+	// (reTagAllowedValues, reTagStringLiteralList removed — token-based)
 	// ── CREATE NOTEBOOK / ALTER NOTEBOOK / DROP NOTEBOOK ─────────────
-	reIsCreateNotebook   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?NOTEBOOK\b`)
-	reCreateNotebookName = regexp.MustCompile(
-		`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?NOTEBOOK\s+(?:IF\s+NOT\s+EXISTS\s+)?` +
-			`(` + _identPath + `)`)
-	reIsAlterNotebook   = regexp.MustCompile(`(?i)^\s*ALTER\s+NOTEBOOK\b`)
-	reAlterNotebookName = regexp.MustCompile(
-		`(?i)^\s*ALTER\s+NOTEBOOK\s+(?:IF\s+EXISTS\s+)?` +
-			`(` + _identPath + `)`)
-	reAlterNotebookAction = regexp.MustCompile(
-		`(?i)\b(?:SET\b|UNSET\b|RENAME\s+TO\b|ADD\s+LIVE\s+VERSION\b)`)
-	reAlterNotebookRenameTo = regexp.MustCompile(
-		`(?i)\bRENAME\s+TO\s+(` + _identPath + `)`)
-	reAlterNotebookRenameToBare = regexp.MustCompile(`(?i)\bRENAME\s+TO\s*$`)
-	// reAlterNotebookAddLiveVersionFull matches the complete ADD LIVE VERSION FROM LAST.
-	reAlterNotebookAddLiveVersionFull = regexp.MustCompile(`(?i)\bADD\s+LIVE\s+VERSION\s+FROM\s+LAST\b`)
-	// reAlterNotebookAddLiveVersion detects the ADD LIVE VERSION sub-command
-	// (with or without the required FROM LAST suffix).
-	reAlterNotebookAddLiveVersion = regexp.MustCompile(`(?i)\bADD\s+LIVE\s+VERSION\b`)
-	reIsDropNotebook              = regexp.MustCompile(`(?i)^\s*DROP\s+NOTEBOOK\b`)
-	reDropNotebookName            = regexp.MustCompile(
-		`(?i)^\s*DROP\s+NOTEBOOK\s+(?:IF\s+EXISTS\s+)?` +
-			`(` + _identPath + `)`)
-	// reCreateNotebookFrom detects the FROM '@...' clause.
-	reCreateNotebookFrom = regexp.MustCompile(`(?i)\bFROM\s+'[^']*'`)
-	// reCreateNotebookMainFile detects the MAIN_FILE = '...' clause.
-	reCreateNotebookMainFile = regexp.MustCompile(`(?i)\bMAIN_FILE\s*=\s*'[^']*'`)
+	// (all notebook regexes removed — token-based)
 
 	// ── PIVOT / UNPIVOT ──────────────────────────────────────────────────
-	// Detection: matches PIVOT( or UNPIVOT( after a table reference in a
-	// SELECT/WITH statement.
-	// rePivotAgg uses \bPIVOT which cannot match inside UNPIVOT because \b
-	// does not fire between two word characters (N and P).
-	rePivotClause   = regexp.MustCompile(`(?i)\bPIVOT\s*\(`)
-	reUnpivotClause = regexp.MustCompile(`(?i)\bUNPIVOT\s*(?:(?:INCLUDE|EXCLUDE)\s+NULLS\s*)?\(`)
-
-	// PIVOT structural: captures the aggregate function name
-	rePivotAgg = regexp.MustCompile(`(?i)\bPIVOT\s*\(\s*([\w]+)\s*\(`)
-	// Shared PIVOT/UNPIVOT structural patterns:
-	// - FOR ... IN (...) presence
-	rePivotForIn = regexp.MustCompile(`(?i)\bFOR\b[\s\S]+?\bIN\s*\(`)
-	// - Empty IN list: IN ()
-	rePivotEmptyIn = regexp.MustCompile(`(?i)\bIN\s*\(\s*\)`)
-
 	// Valid aggregate functions for PIVOT
 	pivotValidAggs = map[string]bool{
 		"SUM": true, "AVG": true, "COUNT": true, "MAX": true, "MIN": true,
@@ -842,60 +240,11 @@ var (
 		"STDDEV": true, "VARIANCE": true,
 	}
 
-	// ── MATCH_RECOGNIZE ─────────────────────────────────────────────────
-	// Detection: matches MATCH_RECOGNIZE( (typically appears after a table
-	// reference in FROM).
-	reMatchRecognizeClause = regexp.MustCompile(`(?i)\bMATCH_RECOGNIZE\s*\(`)
-
-	// Structural: mandatory PATTERN (...) inside the MATCH_RECOGNIZE body.
-	reMatchRecognizePattern = regexp.MustCompile(`(?i)\bPATTERN\s*\(`)
-	// Empty PATTERN: PATTERN ()
-	reMatchRecognizeEmptyPattern = regexp.MustCompile(`(?i)\bPATTERN\s*\(\s*\)`)
-	// DEFINE clause detection.
-	reMatchRecognizeDefine = regexp.MustCompile(`(?i)\bDEFINE\s+`)
-
-	// ONE ROW PER MATCH / ALL ROWS PER MATCH detection.
-	reOneRowPerMatch  = regexp.MustCompile(`(?i)\bONE\s+ROW\s+PER\s+MATCH\b`)
-	reAllRowsPerMatch = regexp.MustCompile(`(?i)\bALL\s+ROWS\s+PER\s+MATCH\b`)
-
-	// AFTER MATCH SKIP — captures the skip target text.
-	// Uses [\s\S]+? instead of .+? so that the match spans newlines in
-	// multi-line MATCH_RECOGNIZE bodies.
-	// NOTE: the terminator keyword list must be kept in sync with any new
-	// sub-clauses Snowflake may add to MATCH_RECOGNIZE in the future.
-	reAfterMatchSkip = regexp.MustCompile(`(?i)\bAFTER\s+MATCH\s+SKIP\s+([\s\S]+?)(?:\b(?:PATTERN|DEFINE|MEASURES|ONE|ALL|ORDER|PARTITION)\b|$)`)
-	// Valid AFTER MATCH SKIP targets.
-	reAfterMatchSkipValid = regexp.MustCompile(
-		`(?i)^\s*(?:TO\s+NEXT\s+ROW|PAST\s+LAST\s+ROW|TO\s+FIRST\s+` + _ident + `|TO\s+LAST\s+` + _ident + `)\s*$`)
-
-	// ── ASOF JOIN ──────────────────────────────────────────────────────
-	// Detection: matches ASOF JOIN (the core Snowflake time-series join).
-	reAsofJoinClause = regexp.MustCompile(`(?i)\bASOF\s+JOIN\b`)
-
-	// MATCH_CONDITION (...) — mandatory clause for ASOF JOIN.
-	reAsofMatchCondition = regexp.MustCompile(`(?i)\bMATCH_CONDITION\s*\(`)
-
-	// USING (match_function(...)) form — alternative to MATCH_CONDITION for
-	// custom matching logic.  Matches USING ( <func_name>( to distinguish from
-	// the plain USING (column_list) form used by regular JOINs.
-	reAsofUsingFunction = regexp.MustCompile(`(?i)\bUSING\s*\(\s*` + _ident + `(?:\.` + _ident + `){0,2}\s*\(`)
-
-	// Valid comparison operators inside MATCH_CONDITION: >=, >, <=, <.
-	// The check logic uses containsAsofValidComparison() instead of a single
-	// regex because Go's regexp package (RE2) does not support lookaheads.
-
 	// ── ALTER TABLE … ADD/DROP SEARCH OPTIMIZATION ─────────────────────
 	// Detection: matches ALTER TABLE <name> ADD SEARCH OPTIMIZATION or
 	// ALTER TABLE <name> DROP SEARCH OPTIMIZATION.
-	reIsAlterTableSearchOpt = regexp.MustCompile(
-		`(?i)^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?` + _identPath + `\s+(?:ADD|DROP)\s+SEARCH\s+OPTIMIZATION\b`)
 	// ON clause: captures everything after ON (expression list).
-	reSearchOptOnClause = regexp.MustCompile(
-		`(?i)\bSEARCH\s+OPTIMIZATION\s+ON\b`)
-	// Extracts individual expression-type calls: EQUALITY(...), SUBSTRING(...), etc.
-	// Anchored to start-of-expression since input is pre-split by splitTopLevelCommas.
-	reSearchOptExpr = regexp.MustCompile(
-		`(?i)^\s*([A-Z_]+)\s*\(`)
+	// (reSearchOptOnClause, reSearchOptExpr removed — token-based)
 	// Valid search optimization expression types.
 	searchOptValidExprs = map[string]bool{
 		"EQUALITY":  true,
@@ -905,94 +254,19 @@ var (
 	}
 
 	// ── ALTER TABLE … SWAP WITH ─────────────────────────────────────────
-	// Detection: matches ALTER TABLE <name> SWAP WITH …
-	reIsAlterTableSwapWith = regexp.MustCompile(
-		`(?i)^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?` + _identPath + `\s+SWAP\s+WITH\b`)
-	// Captures the source table name.
-	reAlterTableSwapWithName = regexp.MustCompile(
-		`(?i)^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)\s+SWAP\s+WITH\b`)
-	// Captures the target table name after SWAP WITH.
-	reAlterTableSwapTarget = regexp.MustCompile(
-		`(?i)\bSWAP\s+WITH\s+(` + _identPath + `)`)
-	// Detects trailing tokens after the target table name (ignores semicolons and whitespace).
-	reAlterTableSwapTrailing = regexp.MustCompile(
-		`(?i)\bSWAP\s+WITH\s+` + _identPath + `\s+[^\s;]`)
+	// (reAlterTableSwapWithName, reAlterTableSwapTarget, reAlterTableSwapTrailing removed — token-based)
 
 	// ── INSERT ALL / INSERT FIRST / INSERT OVERWRITE ────────────────────
-	// Detection regexes for multi-table INSERT and INSERT OVERWRITE.
-	reIsInsertAll       = regexp.MustCompile(`(?i)^\s*INSERT\s+(?:OVERWRITE\s+)?ALL\b`)
-	reIsInsertFirst     = regexp.MustCompile(`(?i)^\s*INSERT\s+(?:OVERWRITE\s+)?FIRST\b`)
-	reIsInsertOverwrite = regexp.MustCompile(`(?i)^\s*INSERT\s+OVERWRITE\s+INTO\b`)
-	// INSERT OVERWRITE without INTO (e.g. INSERT OVERWRITE t1 ...)
-	reIsInsertOverwriteBare = regexp.MustCompile(`(?i)^\s*INSERT\s+OVERWRITE\b`)
+	// (reIsInsertAll, reIsInsertFirst, reIsInsertOverwrite,
+	// reInsertOverwriteSource, reInsertOverwritePrefix removed — token-based)
 
-	// Structural patterns used inside the validators.
-	reInsertMultiThenInto   = regexp.MustCompile(`(?i)\bTHEN\s+INTO\b`)
-	reInsertOverwriteSource = regexp.MustCompile(`(?i)\b(?:SELECT|VALUES)\b`)
-	reInsertOverwritePrefix = regexp.MustCompile(`(?i)^\s*INSERT\s+OVERWRITE\s+INTO\s+` + _identPath)
-
-	// ── BEGIN / COMMIT / ROLLBACK / SAVEPOINT / RELEASE SAVEPOINT ────────
-	reIsBegin            = regexp.MustCompile(`(?i)^\s*BEGIN\b`)
-	reIsCommit           = regexp.MustCompile(`(?i)^\s*COMMIT\b`)
-	reIsRollback         = regexp.MustCompile(`(?i)^\s*ROLLBACK\b`)
-	reIsSavepoint        = regexp.MustCompile(`(?i)^\s*SAVEPOINT\b`)
-	reIsReleaseSavepoint = regexp.MustCompile(`(?i)^\s*RELEASE\s+SAVEPOINT\b`)
-
-	// BEGIN [WORK|TRANSACTION] [NAME <ident>] — the full valid form.
-	reBeginValid = regexp.MustCompile(`(?i)^\s*BEGIN(\s+(WORK|TRANSACTION))?\s*$`)
-	// Detects a scripting block: BEGIN followed by a known scripting keyword
-	// (LET, IF, FOR, WHILE, LOOP, DECLARE, RETURN, CASE, CALL).
-	// GetStatementRanges splits on semicolons, so the first "statement" of an
-	// anonymous block looks like "BEGIN\n  LET x := 1" — this regex catches
-	// that pattern so we skip transaction validation and txnDepth tracking.
-	reBeginScripting = regexp.MustCompile(`(?i)^\s*BEGIN\s+(?:LET|IF|FOR|WHILE|LOOP|DECLARE|RETURN|CASE|CALL)\b`)
-	// BEGIN ... NAME <ident> variant (supports quoted identifiers).
-	reBeginName = regexp.MustCompile(`(?i)^\s*BEGIN(\s+(WORK|TRANSACTION))?\s+NAME\s+` + _ident + `\s*$`)
-	// BEGIN ... NAME (bare, missing name).
-	reBeginNameBare = regexp.MustCompile(`(?i)\bNAME\s*$`)
-	// COMMIT [WORK] — full valid form.
-	reCommitValid = regexp.MustCompile(`(?i)^\s*COMMIT(\s+WORK)?\s*$`)
-	// ROLLBACK [WORK] [TO SAVEPOINT <ident>] — full valid form.
-	reRollbackValid = regexp.MustCompile(`(?i)^\s*ROLLBACK(\s+WORK)?(\s+TO\s+SAVEPOINT\s+` + _ident + `)?\s*$`)
-	// ROLLBACK ... TO without SAVEPOINT keyword.
-	reRollbackToBare = regexp.MustCompile(`(?i)\bTO\b`)
-	// ROLLBACK ... TO SAVEPOINT (without name).
-	reRollbackToSavepointBare = regexp.MustCompile(`(?i)\bTO\s+SAVEPOINT\s*$`)
-	// ROLLBACK ... TO SAVEPOINT <name> — detects the full form (used for block-level tracking).
-	reRollbackToSavepointFull = regexp.MustCompile(`(?i)\bTO\s+SAVEPOINT\b`)
-	// SAVEPOINT <name> — name is mandatory.
-	reSavepointHasName = regexp.MustCompile(`(?i)^\s*SAVEPOINT\s+[^\s;]`)
-	// RELEASE SAVEPOINT <name> — name is mandatory.
-	reReleaseSavepointHasName = regexp.MustCompile(`(?i)^\s*RELEASE\s+SAVEPOINT\s+[^\s;]`)
-
-	// ── USE ROLE / USE WAREHOUSE / USE SECONDARY ROLES ────────────────────
-	reIsUseRole           = regexp.MustCompile(`(?i)^\s*USE\s+ROLE\b`)
-	reIsUseWarehouse      = regexp.MustCompile(`(?i)^\s*USE\s+WAREHOUSE\b`)
-	reIsUseSecondaryRoles = regexp.MustCompile(`(?i)^\s*USE\s+SECONDARY\s+ROLES\b`)
-	// reUseRoleHasName requires a non-whitespace, non-semicolon character after
-	// USE ROLE so that "USE ROLE ;" is correctly flagged as missing a role name.
-	reUseRoleHasName = regexp.MustCompile(`(?i)^\s*USE\s+ROLE\s+[^\s;]`)
-	// reUseWarehouseHasName requires a non-whitespace, non-semicolon character after
-	// USE WAREHOUSE so that "USE WAREHOUSE ;" is correctly flagged.
-	reUseWarehouseHasName = regexp.MustCompile(`(?i)^\s*USE\s+WAREHOUSE\s+[^\s;]`)
-	// reUseSecondaryRolesValue matches ALL or NONE after USE SECONDARY ROLES.
-	reUseSecondaryRolesValue = regexp.MustCompile(`(?i)^\s*USE\s+SECONDARY\s+ROLES\s+(ALL|NONE)\b`)
-
-	// ── ALTER SESSION ──────────────────────────────────────────────────────────
-	reIsAlterSession    = regexp.MustCompile(`(?i)^\s*ALTER\s+SESSION\b`)
-	reAlterSessionSet   = regexp.MustCompile(`(?i)^\s*ALTER\s+SESSION\s+SET\b`)
-	reAlterSessionUnset = regexp.MustCompile(`(?i)^\s*ALTER\s+SESSION\s+UNSET\b`)
-	// reAlterSessionParam extracts <PARAM> = <value> pairs from ALTER SESSION SET.
-	// Value is either a quoted string (with escaped quotes) or a non-whitespace token.
-	reAlterSessionParam      = regexp.MustCompile(`(?i)([A-Z_][A-Z0-9_]*)\s*=\s*('(?:''|[^'])*'|[^\s;]+)`)
-	reAlterSessionParamSplit = regexp.MustCompile(`[,\s]+`)
+	// (reInsertMultiThenInto removed — token-based)
 
 	// ── CREATE STAGE ──────────────────────────────────────────────────────────
-	reIsCreateStage = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+)?STAGE\b`)
 	// stageProps lists only top-level CREATE STAGE property keys.
 	// Nested keys inside FILE_FORMAT=(...), ENCRYPTION=(...), DIRECTORY=(...),
-	// CREDENTIALS=(...), and COPY_OPTIONS=(...) are stripped before validation
-	// via stripParenContents so they never trigger a false positive.
+	// CREDENTIALS=(...), and COPY_OPTIONS=(...) are skipped by validateProperties'
+	// paren-depth tracking, so they never trigger a false positive.
 	stageProps = strings.Join([]string{
 		`URL`, `STORAGE_INTEGRATION`, `CREDENTIALS`, `ENCRYPTION`,
 		`AWS_ACCESS_POINT_ARN`, `USE_PRIVATELINK_ENDPOINT`, `ENDPOINT`,
@@ -1000,11 +274,9 @@ var (
 	}, "|")
 
 	// ── CREATE FILE FORMAT ───────────────────────────────────────────────────
-	reIsCreateFileFormat  = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+|TEMP\s+|TRANSIENT\s+)?FILE\s+FORMAT\b`)
-	reFileFormatPropKey   = regexp.MustCompile(`(?i)\b([a-zA-Z_0-9]+)\s*=`)
-	reFileFormatPropValue = regexp.MustCompile(`^\s*('[^']*'|[A-Za-z0-9_.-]+)`)
-	reFileFormatValidEsc  = regexp.MustCompile(`^\\([ntr'\"]|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|[0-7]{1,3})$`)
-	reFileFormatTemporary = regexp.MustCompile(`(?i)\b(TEMPORARY|TEMP)\b`)
+	// (reFileFormatPropKey, reFileFormatPropValue removed — token-based)
+	reFileFormatValidEsc = regexp.MustCompile(`^\\([ntr'\"]|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|[0-7]{1,3})$`)
+	// (reFileFormatTemporary removed — token-based)
 
 	fileFormatCommonProps = []string{`TYPE`, `COMMENT`}
 
@@ -1044,22 +316,17 @@ var (
 		`SKIP_BYTE_ORDER_MARK`,
 	}
 
-	// Pre-compiled allowed property regexes for each file format type
-	reFileFormatAllowedCsv     = regexp.MustCompile("(?i)^(" + strings.Join(append(fileFormatCommonProps, fileFormatCsvProps...), "|") + ")$")
-	reFileFormatAllowedJson    = regexp.MustCompile("(?i)^(" + strings.Join(append(fileFormatCommonProps, fileFormatJsonProps...), "|") + ")$")
-	reFileFormatAllowedAvro    = regexp.MustCompile("(?i)^(" + strings.Join(append(fileFormatCommonProps, fileFormatAvroProps...), "|") + ")$")
-	reFileFormatAllowedOrc     = regexp.MustCompile("(?i)^(" + strings.Join(append(fileFormatCommonProps, fileFormatOrcProps...), "|") + ")$")
-	reFileFormatAllowedParquet = regexp.MustCompile("(?i)^(" + strings.Join(append(fileFormatCommonProps, fileFormatParquetProps...), "|") + ")$")
-	reFileFormatAllowedXml     = regexp.MustCompile("(?i)^(" + strings.Join(append(fileFormatCommonProps, fileFormatXmlProps...), "|") + ")$")
+	// Allowed property maps for each file format type (upper-cased keys).
+	fileFormatAllowedCsv     = toUpperSet(append(fileFormatCommonProps, fileFormatCsvProps...))
+	fileFormatAllowedJson    = toUpperSet(append(fileFormatCommonProps, fileFormatJsonProps...))
+	fileFormatAllowedAvro    = toUpperSet(append(fileFormatCommonProps, fileFormatAvroProps...))
+	fileFormatAllowedOrc     = toUpperSet(append(fileFormatCommonProps, fileFormatOrcProps...))
+	fileFormatAllowedParquet = toUpperSet(append(fileFormatCommonProps, fileFormatParquetProps...))
+	fileFormatAllowedXml     = toUpperSet(append(fileFormatCommonProps, fileFormatXmlProps...))
 
 	// ── CREATE ICEBERG TABLE ────────────────────────────────────────────────
-	reIsCreateIcebergTable          = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?ICEBERG\s+TABLE\b`)
-	reIsCreateTransientIcebergTable = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TRANSIENT\s+ICEBERG\s+TABLE\b`)
-	reGetStatementProperties        = regexp.MustCompile(`(?i)\b([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*('(?:''|[^'])*'|[\w$]+)`)
-
+	// (reIsCreateTransientIcebergTable removed — token-based)
 	// ── ALTER STAGE ───────────────────────────────────────────────────────────
-	reIsAlterStage         = regexp.MustCompile(`(?i)^\s*ALTER\s+STAGE\b`)
-	reAlterStageNoValidate = regexp.MustCompile(`(?i)\b(?:RENAME\s+TO|UNSET\b|SET\s+TAG\b)`)
 	// alterStageProps lists valid top-level ALTER STAGE SET property keys.
 	// SUBPATH is valid in ALTER STAGE ... REFRESH SUBPATH = '...'.
 	alterStageProps = strings.Join([]string{
@@ -1068,14 +335,9 @@ var (
 		`FILE_FORMAT`, `COPY_OPTIONS`, `COMMENT`, `DIRECTORY`, `SUBPATH`,
 	}, "|")
 
-	// ── Shared ───────────────────────────────────────────────────────────────
-	reIdentPathAnchored = regexp.MustCompile(`^` + _identPath)
-
 	// ── SHOW ─────────────────────────────────────────────────────────────────
-	reIsShow = regexp.MustCompile(`(?i)^\s*SHOW\b`)
 
 	// ── DESCRIBE / DESC ──────────────────────────────────────────────────────
-	reIsDescribe = regexp.MustCompile(`(?i)^\s*(?:DESCRIBE|DESC)\b`)
 
 	// ── Parseable keywords ────────────────────────────────────────────────────
 	parseableKWs = map[string]bool{
@@ -1109,6 +371,54 @@ var (
 		"TRY_COMPLETE":    true,
 	}
 )
+
+// Precomputed token-based guard closures replacing regex guards.
+var (
+	// isCreateTableGuard matches CREATE [modifiers...] TABLE in any modifier order,
+	// mirroring the old regex (?i)CREATE\s+(?:(?:OR\s+(?:REPLACE|ALTER)|LOCAL|GLOBAL|TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)*TABLE.
+	isCreateTableGuard = func() func([]sqltok.Token, string) bool {
+		tableMods := map[string]bool{
+			"OR": true, "REPLACE": true, "ALTER": true,
+			"LOCAL": true, "GLOBAL": true,
+			"TEMP": true, "TEMPORARY": true, "VOLATILE": true, "TRANSIENT": true,
+		}
+		return func(sig []sqltok.Token, sql string) bool {
+			if len(sig) == 0 || tokUpper(sig[0], sql) != "CREATE" {
+				return false
+			}
+			for i := 1; i < len(sig); i++ {
+				u := tokUpper(sig[i], sql)
+				if u == "TABLE" {
+					return true
+				}
+				if !tableMods[u] {
+					return false
+				}
+			}
+			return false
+		}
+	}()
+	isCreateViewGuard     = guardCreateWithMods([][]string{{"SECURE"}, {"LOCAL", "GLOBAL"}, {"TEMP", "TEMPORARY", "VOLATILE"}, {"RECURSIVE"}, {"INTERACTIVE"}, {"MATERIALIZED"}}, "VIEW")
+	isCreateDynTableGuard = guardCreate("DYNAMIC", "TABLE")
+)
+
+// isCreateTable reports whether sql is a CREATE TABLE statement (token-based).
+func isCreateTable(sql string) bool {
+	sig := sigTokens(sql)
+	return isCreateTableGuard(sig, sql)
+}
+
+// isCreateView reports whether sql is a CREATE VIEW statement (token-based).
+func isCreateView(sql string) bool {
+	sig := sigTokens(sql)
+	return isCreateViewGuard(sig, sql)
+}
+
+// isCreateDynTable reports whether sql is a CREATE DYNAMIC TABLE statement (token-based).
+func isCreateDynTable(sql string) bool {
+	sig := sigTokens(sql)
+	return isCreateDynTableGuard(sig, sql)
+}
 
 // showObjectTypes lists all valid Snowflake object type keywords after SHOW,
 // sorted by word count descending so the longest match is attempted first.
@@ -1488,111 +798,328 @@ var grantObjectTypePlurals = map[string]string{
 // errors.  It is a pure Go replacement for the validateWithParser function in
 // sqlDiagnostics.ts; the node-sql-parser dependency is dropped because
 // ValidateSyntax already covers generic syntax errors via its tokenizer.
-// parseTextRoute pairs a guard regex with a validation function. When the
+// parseTextRoute pairs a guard predicate with a validation function. When the
 // guard matches parseText, the validator is called and its markers are
 // appended. The statement is then skipped (continue).
 type parseTextRoute struct {
-	guard *regexp.Regexp
+	guard func(sig []sqltok.Token, parseText string) bool
 	fn    func(string, StatementRange) []DiagMarker
 }
 
-// parseTextRoutes is the declarative dispatch table for simple regex→validator
-// entries in ValidateSnowflakePatterns. Order matters: the first matching
-// guard wins (mirroring the original if/continue chain).
+// parseTextRoutes is the declarative dispatch table for
+// ValidateSnowflakePatterns. Order matters: the first matching guard wins
+// (mirroring the original if/continue chain). Guards are token-based
+// predicates that check statement preambles via significant-token sequences.
 var parseTextRoutes = []parseTextRoute{
-	{reIsCreateIcebergTable, validateCreateIcebergTable},
-	{reIsCreateHybridTable, validateCreateHybridTable},
-	{reIsCopyInto, validateCopyInto},
-	{reIsCreateTask, validateCreateTask},
-	{reIsAlterTask, validateAlterTask},
-	{reIsDropTask, validateDropTask},
-	{reIsCreateAlert, validateCreateAlert},
-	{reIsCreateNetworkPolicy, validateCreateNetworkPolicy},
-	{reIsCreateSessionPolicy, validateCreateSessionPolicy},
-	{reIsCreatePasswordPolicy, validateCreatePasswordPolicy},
-	{reIsCreateRowAccessPolicy, validateCreateRowAccessPolicy},
-	{reIsCreateAggregationPolicy, validateCreateAggregationPolicy},
-	{reIsCreateProjectionPolicy, validateCreateProjectionPolicy},
-	{reIsAlterAggregationPolicy, func(pt string, r StatementRange) []DiagMarker {
+	// ── CREATE TABLE variants (more specific first) ──
+	{guardCreateWithMods([][]string{{"TRANSIENT"}}, "ICEBERG", "TABLE"), validateCreateIcebergTable},
+	{guardCreateWithMods([][]string{{"TRANSIENT"}}, "HYBRID", "TABLE"), validateCreateHybridTable},
+	{guardCreate("DYNAMIC", "TABLE"), validateCreateDynTable},
+	{guardCreate("EXTERNAL", "TABLE"), validateCreateExternalTable},
+	{isCreateTableGuard, validateCreateTablePreamble},
+
+	// ── VIEW ──
+	{guardCreateWithMods([][]string{{"SECURE"}, {"LOCAL", "GLOBAL"}, {"TEMP", "TEMPORARY", "VOLATILE"}, {"RECURSIVE"}, {"INTERACTIVE"}, {"MATERIALIZED"}}, "VIEW"), validateCreateView},
+
+	// ── COPY INTO ──
+	{guardKW("COPY", "INTO"), validateCopyInto},
+
+	// ── TASK ──
+	{guardCreate("TASK"), validateCreateTask},
+	{guardAlter("TASK"), validateAlterTask},
+	{guardDrop("TASK"), validateDropTask},
+
+	// ── ALERT ──
+	{guardCreate("ALERT"), validateCreateAlert},
+
+	// ── Policies ──
+	{guardCreate("NETWORK", "POLICY"), validateCreateNetworkPolicy},
+	{guardCreate("SESSION", "POLICY"), validateCreateSessionPolicy},
+	{guardCreate("PASSWORD", "POLICY"), validateCreatePasswordPolicy},
+	{guardCreate("ROW", "ACCESS", "POLICY"), validateCreateRowAccessPolicy},
+	{guardCreate("AGGREGATION", "POLICY"), validateCreateAggregationPolicy},
+	{guardCreate("PROJECTION", "POLICY"), validateCreateProjectionPolicy},
+	{guardAlter("AGGREGATION", "POLICY"), func(pt string, r StatementRange) []DiagMarker {
 		return validateAlterAggregationOrProjectionPolicy(pt, r, "AGGREGATION")
 	}},
-	{reIsAlterProjectionPolicy, func(pt string, r StatementRange) []DiagMarker {
+	{guardAlter("PROJECTION", "POLICY"), func(pt string, r StatementRange) []DiagMarker {
 		return validateAlterAggregationOrProjectionPolicy(pt, r, "PROJECTION")
 	}},
-	{reIsDropAggregationPolicy, func(pt string, r StatementRange) []DiagMarker {
+	{guardDrop("AGGREGATION", "POLICY"), func(pt string, r StatementRange) []DiagMarker {
 		return validateDropAggregationOrProjectionPolicy(pt, r, "AGGREGATION")
 	}},
-	{reIsDropProjectionPolicy, func(pt string, r StatementRange) []DiagMarker {
+	{guardDrop("PROJECTION", "POLICY"), func(pt string, r StatementRange) []DiagMarker {
 		return validateDropAggregationOrProjectionPolicy(pt, r, "PROJECTION")
 	}},
-	{reIsCreatePackagesPolicy, validateCreatePackagesPolicy},
-	{reIsAlterPackagesPolicy, validateAlterPackagesPolicy},
-	{reIsDropPackagesPolicy, validateDropPackagesPolicy},
-	{reIsCreateReplicationGroup, validateCreateReplicationGroup},
-	{reIsAlterReplicationGroup, func(pt string, r StatementRange) []DiagMarker {
+	{guardCreate("PACKAGES", "POLICY"), validateCreatePackagesPolicy},
+	{guardAlter("PACKAGES", "POLICY"), validateAlterPackagesPolicy},
+	{guardDrop("PACKAGES", "POLICY"), validateDropPackagesPolicy},
+
+	// ── Replication / Failover Groups ──
+	{guardCreate("REPLICATION", "GROUP"), validateCreateReplicationGroup},
+	{guardAlter("REPLICATION", "GROUP"), func(pt string, r StatementRange) []DiagMarker {
 		return validateAlterReplicationOrFailoverGroup(pt, r, "REPLICATION")
 	}},
-	{reIsDropReplicationGroup, func(pt string, r StatementRange) []DiagMarker {
+	{guardDrop("REPLICATION", "GROUP"), func(pt string, r StatementRange) []DiagMarker {
 		return validateDropReplicationOrFailoverGroup(pt, r, "REPLICATION")
 	}},
-	{reIsCreateFailoverGroup, validateCreateFailoverGroup},
-	{reIsAlterFailoverGroup, func(pt string, r StatementRange) []DiagMarker {
+	{guardCreate("FAILOVER", "GROUP"), validateCreateFailoverGroup},
+	{guardAlter("FAILOVER", "GROUP"), func(pt string, r StatementRange) []DiagMarker {
 		return validateAlterReplicationOrFailoverGroup(pt, r, "FAILOVER")
 	}},
-	{reIsDropFailoverGroup, func(pt string, r StatementRange) []DiagMarker {
+	{guardDrop("FAILOVER", "GROUP"), func(pt string, r StatementRange) []DiagMarker {
 		return validateDropReplicationOrFailoverGroup(pt, r, "FAILOVER")
 	}},
-	{reIsCreateFileFormat, validateCreateFileFormat},
-	{reWithProcAlias, validateWithProcedureCall},
-	{reIsCall, validateCall},
-	{reIsGrant, validateGrant},
-	{reIsRevoke, validateRevoke},
-	{reIsExecuteImmediate, validateExecuteImmediate},
-	{reIsExecuteTask, validateExecuteTask},
-	{reIsExecuteService, validateExecuteService},
-	{reIsPut, validatePut},
-	{reIsGet, validateGet},
-	{reIsList, validateList},
-	{reIsRemove, validateRemove},
-	{reIsCreateShare, validateCreateShare},
-	{reIsAlterShare, validateAlterShare},
-	{reIsCreateDatashare, validateCreateDatashare},
-	{reIsAlterDatashare, validateAlterDatashare},
-	{reIsDropDatashare, validateDropDatashare},
-	{reIsCreateComputePool, validateCreateComputePool},
-	{reIsCreateService, validateCreateService},
-	{reIsAlterService, validateAlterService},
-	{reIsDropService, validateDropService},
-	{reIsCreateImageRepository, validateCreateImageRepository},
-	{reIsDropImageRepository, validateDropImageRepository},
-	{reIsAlterImageRepository, validateAlterImageRepository},
-	{reIsCreateGitRepository, validateCreateGitRepository},
-	{reIsAlterGitRepository, validateAlterGitRepository},
-	{reIsDropGitRepository, validateDropGitRepository},
-	{reIsCreateSecret, validateCreateSecret},
-	{reIsAlterSecret, validateAlterSecret},
-	{reIsCreateApplicationPackage, validateCreateApplicationPackage},
-	{reIsAlterApplicationPackage, validateAlterApplicationPackage},
-	{reIsDropApplicationPackage, validateDropApplicationPackage},
-	{reIsCreateApplication, validateCreateApplication},
-	{reIsAlterApplication, validateAlterApplication},
-	{reIsDropApplication, validateDropApplication},
-	{reIsCreateTag, validateCreateTag},
-	{reIsAlterTag, validateAlterTag},
-	{reIsDropTag, validateDropTag},
-	{reIsCreateNotebook, validateCreateNotebook},
-	{reIsAlterNotebook, validateAlterNotebook},
-	{reIsDropNotebook, validateDropNotebook},
-	{reIsAlterSession, validateAlterSession},
-	{reIsCreateEventTable, validateCreateEventTable},
-	{reIsCreateExternalVolume, validateCreateExternalVolume},
-	{reIsUseRole, validateUseRole},
-	{reIsUseWarehouse, validateUseWarehouse},
-	{reIsUseSecondaryRoles, validateUseSecondaryRoles},
-	{reIsDescribe, validateDescribe},
-	{reIsShow, validateShow},
+
+	// ── FILE FORMAT ──
+	{guardCreateWithMods([][]string{{"TEMPORARY", "TEMP", "TRANSIENT"}}, "FILE", "FORMAT"), validateCreateFileFormat},
+
+	// ── CALL / Procedure ──
+	{guardWithProcAlias(), validateWithProcedureCall},
+	{guardKW("CALL"), validateCall},
+
+	// ── GRANT / REVOKE ──
+	{guardKW("GRANT"), validateGrant},
+	{guardKW("REVOKE"), validateRevoke},
+
+	// ── EXECUTE ──
+	{guardKW("EXECUTE", "IMMEDIATE"), validateExecuteImmediate},
+	{guardKW("EXECUTE", "TASK"), validateExecuteTask},
+	{guardExecuteService(), validateExecuteService},
+
+	// ── Stage commands ──
+	{guardKW("PUT"), validatePut},
+	{guardKW("GET"), validateGet},
+	{guardKWAlt("LIST", "LS"), validateList},
+	{guardKWAlt("REMOVE", "RM"), validateRemove},
+
+	// ── Shares ──
+	{guardCreate("SHARE"), validateCreateShare},
+	{guardAlter("SHARE"), validateAlterShare},
+	{guardCreate("DATASHARE"), validateCreateDatashare},
+	{guardAlter("DATASHARE"), validateAlterDatashare},
+	{guardDrop("DATASHARE"), validateDropDatashare},
+
+	// ── SPCS (Compute Pool, Service, Image/Git Repository) ──
+	{guardCreate("COMPUTE", "POOL"), validateCreateComputePool},
+	{guardCreate("SERVICE"), validateCreateService},
+	{guardAlter("SERVICE"), validateAlterService},
+	{guardDrop("SERVICE"), validateDropService},
+	{guardCreate("IMAGE", "REPOSITORY"), validateCreateImageRepository},
+	{guardDrop("IMAGE", "REPOSITORY"), validateDropImageRepository},
+	{guardAlter("IMAGE", "REPOSITORY"), validateAlterImageRepository},
+	{guardCreate("GIT", "REPOSITORY"), validateCreateGitRepository},
+	{guardAlter("GIT", "REPOSITORY"), validateAlterGitRepository},
+	{guardDrop("GIT", "REPOSITORY"), validateDropGitRepository},
+
+	// ── Secret ──
+	{guardCreate("SECRET"), validateCreateSecret},
+	{guardAlter("SECRET"), validateAlterSecret},
+
+	// ── Native Apps (APPLICATION PACKAGE before APPLICATION) ──
+	{guardCreate("APPLICATION", "PACKAGE"), validateCreateApplicationPackage},
+	{guardAlter("APPLICATION", "PACKAGE"), validateAlterApplicationPackage},
+	{guardDrop("APPLICATION", "PACKAGE"), validateDropApplicationPackage},
+	{guardCreate("APPLICATION"), validateCreateApplication},
+	{guardAlter("APPLICATION"), validateAlterApplication},
+	{guardDrop("APPLICATION"), validateDropApplication},
+
+	// ── Tag ──
+	{guardCreate("TAG"), validateCreateTag},
+	{guardAlter("TAG"), validateAlterTag},
+	{guardDrop("TAG"), validateDropTag},
+
+	// ── Notebook ──
+	{guardCreate("NOTEBOOK"), validateCreateNotebook},
+	{guardAlter("NOTEBOOK"), validateAlterNotebook},
+	{guardDrop("NOTEBOOK"), validateDropNotebook},
+
+	// ── Session ──
+	{guardAlter("SESSION"), validateAlterSession},
+
+	// ── Event Table ──
+	{guardCreateWithMods([][]string{{"TRANSIENT"}}, "EVENT", "TABLE"), validateCreateEventTable},
+
+	// ── Database / Schema ──
+	{guardCreateWithMods([][]string{{"TRANSIENT"}}, "DATABASE"), validateCreateDbOrSchema("DATABASE")},
+	{guardCreateWithMods([][]string{{"TRANSIENT"}}, "SCHEMA"), validateCreateDbOrSchema("SCHEMA")},
+	{guardDrop("DATABASE"), validateDropDbOrSchema("DATABASE")},
+	{guardDrop("SCHEMA"), validateDropDbOrSchema("SCHEMA")},
+
+	// ── Sequence ──
+	{guardCreate("SEQUENCE"), validateCreateSequence},
+	{guardAlter("SEQUENCE"), validateAlterSequence},
+	{guardDrop("SEQUENCE"), validateDropSequence},
+
+	// ── Integration ──
+	{guardCreateIntegration(), validateCreateIntegration},
+
+	// ── Warehouse ──
+	{guardCreate("WAREHOUSE"), validateCreateWarehouse},
+
+	// ── Resource Monitor ──
+	{guardCreate("RESOURCE", "MONITOR"), validateCreateResourceMonitor},
+
+	// ── Stream ──
+	{guardCreate("STREAM"), validateCreateStream},
+
+	// ── Pipe ──
+	{guardCreate("PIPE"), validateCreatePipe},
+
+	// ── Function / Procedure ──
+	{guardCreateWithMods([][]string{{"SECURE"}, {"TEMPORARY", "TEMP"}, {"AGGREGATE"}}, "FUNCTION"), validateCreateFunction},
+	{guardCreate("PROCEDURE"), validateCreateProcedure},
+
+	// ── User / Role ──
+	{guardCreate("USER"), validateCreateUser},
+	{guardCreate("ROLE"), validateCreateRole},
+
+	// ── Masking Policy ──
+	{guardCreate("MASKING", "POLICY"), validateCreateMaskingPolicy},
+
+	// ── Stage ──
+	{guardCreateWithMods([][]string{{"TEMPORARY"}}, "STAGE"), validateCreateStage},
+	{guardAlter("STAGE"), validateAlterStage},
+
+	// ── External Volume ──
+	{guardCreate("EXTERNAL", "VOLUME"), validateCreateExternalVolume},
+
+	// ── USE ──
+	{guardKW("USE", "ROLE"), validateUseRole},
+	{guardKW("USE", "WAREHOUSE"), validateUseWarehouse},
+	{guardKW("USE", "SECONDARY", "ROLES"), validateUseSecondaryRoles},
+
+	// ── DESCRIBE / SHOW ──
+	{guardKWAlt("DESCRIBE", "DESC"), validateDescribe},
+	{guardKW("SHOW"), validateShow},
 }
 
+// fpObjectNoun reports whether sig[i] (optionally with sig[i+1]) is one of the
+// object nouns in single, or the two-word IMAGE REPOSITORY / GIT REPOSITORY.
+func fpObjectNoun(sig []sqltok.Token, sql string, i int, single map[string]bool) bool {
+	if i >= len(sig) {
+		return false
+	}
+	n := tokUpper(sig[i], sql)
+	if single[n] {
+		return true
+	}
+	return (n == "IMAGE" || n == "GIT") && i+1 < len(sig) && tokUpper(sig[i+1], sql) == "REPOSITORY"
+}
+
+// matchesSnowflakeFP reports whether a statement contains Snowflake-specific
+// syntax that the bare-column-ref and table-existence validators cannot analyze
+// and should therefore skip (to avoid emitting noise). It is the token-based
+// replacement for the old reSnowflakeFP regex guard.
+//
+// Working on the significant-token stream means keywords inside string literals,
+// comments, and dollar-quoted bodies are never matched (the regex, applied to
+// comment-stripped-but-not-string-stripped text, could mis-fire on e.g.
+// SELECT 'DROP TABLE x'). CLUSTER BY (...) clauses are skipped wholesale so their
+// contents cannot trigger a match, replacing the prior reClusterBy pre-strip.
+func matchesSnowflakeFP(sig []sqltok.Token, sql string) bool {
+	// Statement-initial INSERT [OVERWRITE] ALL|FIRST (the old ^INSERT anchor).
+	if len(sig) > 0 && tokUpper(sig[0], sql) == "INSERT" {
+		j := 1
+		if j < len(sig) && tokUpper(sig[j], sql) == "OVERWRITE" {
+			j++
+		}
+		if j < len(sig) {
+			if u := tokUpper(sig[j], sql); u == "ALL" || u == "FIRST" {
+				return true
+			}
+		}
+	}
+
+	for i := 0; i < len(sig); i++ {
+		switch tokUpper(sig[i], sql) {
+		case "CLUSTER":
+			// Skip CLUSTER BY ( ... ) so its contents don't trigger a match.
+			if i+2 < len(sig) && tokUpper(sig[i+1], sql) == "BY" && sig[i+2].Kind == sqltok.LParen {
+				if _, closeIdx, ok := parenInnerRange(sig, i+2); ok {
+					i = closeIdx
+				}
+			}
+		case "TABLESAMPLE", "INFER_SCHEMA", "UNPIVOT":
+			return true
+		case "SAMPLE", "PIVOT", "MATCH_RECOGNIZE", "AT", "BEFORE":
+			if i+1 < len(sig) && sig[i+1].Kind == sqltok.LParen {
+				return true
+			}
+		case "WITHIN":
+			if i+1 < len(sig) && tokUpper(sig[i+1], sql) == "GROUP" {
+				return true
+			}
+		case "CONNECT":
+			if i+1 < len(sig) && tokUpper(sig[i+1], sql) == "BY" {
+				return true
+			}
+		case "IN":
+			if i+1 < len(sig) && tokUpper(sig[i+1], sql) == "TABLE" {
+				return true
+			}
+		case "LATERAL":
+			if i+1 < len(sig) && tokUpper(sig[i+1], sql) == "FLATTEN" {
+				return true
+			}
+		case "ASOF":
+			if i+1 < len(sig) && tokUpper(sig[i+1], sql) == "JOIN" {
+				return true
+			}
+		case "EXECUTE":
+			j := i + 1
+			if j < len(sig) && tokUpper(sig[j], sql) == "JOB" {
+				j++
+			}
+			if j < len(sig) && tokUpper(sig[j], sql) == "SERVICE" {
+				return true
+			}
+		case "UNDROP":
+			if i+1 < len(sig) {
+				if u := tokUpper(sig[i+1], sql); u == "DATABASE" || u == "SCHEMA" || u == "TABLE" {
+					return true
+				}
+			}
+		case "TRUNCATE":
+			// TRUNCATE <name-word> IF  (TRUNCATE [TABLE] IF EXISTS …).
+			if i+2 < len(sig) && isIdent(sig[i+1]) && tokUpper(sig[i+2], sql) == "IF" {
+				return true
+			}
+		case "CREATE":
+			j := i + 1
+			if j+1 < len(sig) && tokUpper(sig[j], sql) == "OR" && tokUpper(sig[j+1], sql) == "REPLACE" {
+				j += 2
+			}
+			if j < len(sig) && tokUpper(sig[j], sql) == "TRANSIENT" {
+				j++
+			}
+			if fpObjectNoun(sig, sql, j, fpCreateNouns) {
+				return true
+			}
+		case "ALTER":
+			if fpObjectNoun(sig, sql, i+1, fpAlterNouns) {
+				return true
+			}
+		case "DROP":
+			if fpObjectNoun(sig, sql, i+1, fpDropNouns) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ValidateSnowflakePatterns is the entry point for Snowflake-specific pattern
+// diagnostics. For each statement range it runs a series of inline custom checks
+// (LATERAL FLATTEN typo, FLATTEN without LATERAL, variant-path dots, QUALIFY
+// placement, time travel, MERGE rules, unknown Cortex functions) and then a
+// table-driven dispatch (parseTextRoutes) that routes each statement to its
+// dedicated validator. It also tracks block-level transactions across the script
+// to flag stray COMMIT/ROLLBACK and unclosed BEGIN.
+//
+// Token-based: statements are tokenised once and the checks/guards operate on the
+// significant-token stream, so keywords inside comments, strings, and
+// dollar-quoted bodies are never matched.
 func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
@@ -1614,19 +1141,19 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		parseText := strings.TrimRight(strings.TrimSpace(rawText), "; \t\r\n")
 
 		// ── Custom check 1: LATERALFLATTEN typo ──────────────────────────
-		if reLateralFlatten.MatchString(stripped) {
-			seen := make(map[string]struct{})
-			for _, loc := range reLateralFlatten.FindAllStringIndex(rawText, -1) {
-				upTo := rawText[:loc[0]]
-				lines := strings.Split(upTo, "\n")
-				errLine := r.StartLine + len(lines) - 1
-				errCol := len(lines[len(lines)-1]) + 1
-				key := fmt.Sprintf("%d-%d", errLine, errCol)
-				if _, dup := seen[key]; !dup {
-					seen[key] = struct{}{}
+		{
+			rawToks := sqltok.Tokenize(rawText)
+			for _, tok := range rawToks {
+				if tok.Kind == sqltok.EOF {
+					break
+				}
+				if (tok.Kind == sqltok.Keyword || tok.Kind == sqltok.Identifier) &&
+					strings.EqualFold(tok.Text(rawText), "LATERALFLATTEN") {
+					errLine := r.StartLine + tok.Line - 1
+					errCol := tok.Col
 					markers = append(markers, DiagMarker{
 						StartLineNumber: errLine, StartColumn: errCol,
-						EndLineNumber: errLine, EndColumn: errCol + 14,
+						EndLineNumber: errLine, EndColumn: errCol + (tok.End - tok.Start),
 						Message:  "Typo detected: Did you mean 'LATERAL FLATTEN'?",
 						Severity: 4,
 					})
@@ -1635,102 +1162,166 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		}
 
 		// ── Custom check 2: FLATTEN without LATERAL ───────────────────────
-		if reFlattenFromJoin.MatchString(stripped) &&
-			!reLateralOK.MatchString(stripped) &&
-			!reTableFlatten.MatchString(stripped) {
-			reFlattenRaw := regexp.MustCompile(`(?i)\bFLATTEN\b`)
-			seen := make(map[string]struct{})
-			for _, loc := range reFlattenRaw.FindAllStringIndex(rawText, -1) {
-				upTo := rawText[:loc[0]]
-				lines := strings.Split(upTo, "\n")
-				errLine := r.StartLine + len(lines) - 1
-				errCol := len(lines[len(lines)-1]) + 1
-				key := fmt.Sprintf("%d-%d", errLine, errCol)
-				if _, dup := seen[key]; !dup {
-					seen[key] = struct{}{}
-					markers = append(markers, DiagMarker{
-						StartLineNumber: errLine, StartColumn: errCol,
-						EndLineNumber: errLine, EndColumn: errCol + 7,
-						Message:  "FLATTEN used as a table function requires LATERAL. Use LATERAL FLATTEN(...) or TABLE(FLATTEN(...)).",
-						Severity: 4,
-					})
+		{
+			sig := sigTokens(stripped)
+			hasFlattenFromJoin := false
+			hasLateralFlatten := false
+			hasTableFlatten := false
+			for i, tok := range sig {
+				u := tokUpper(tok, stripped)
+				if u == "FLATTEN" {
+					if i > 0 && tokUpper(sig[i-1], stripped) == "LATERAL" {
+						hasLateralFlatten = true
+					}
+					if i > 0 {
+						prev := sig[i-1]
+						prevU := tokUpper(prev, stripped)
+						if prevU == "FROM" || prevU == "JOIN" || prev.Kind == sqltok.Comma {
+							hasFlattenFromJoin = true
+						}
+					}
+					if i >= 2 && tokUpper(sig[i-2], stripped) == "TABLE" && sig[i-1].Kind == sqltok.LParen {
+						hasTableFlatten = true
+					}
+				}
+			}
+			if hasFlattenFromJoin && !hasLateralFlatten && !hasTableFlatten {
+				rawToks := sqltok.Tokenize(rawText)
+				for _, tok := range rawToks {
+					if tok.Kind == sqltok.EOF {
+						break
+					}
+					if (tok.Kind == sqltok.Keyword || tok.Kind == sqltok.Identifier) &&
+						strings.EqualFold(tok.Text(rawText), "FLATTEN") {
+						errLine := r.StartLine + tok.Line - 1
+						errCol := tok.Col
+						markers = append(markers, DiagMarker{
+							StartLineNumber: errLine, StartColumn: errCol,
+							EndLineNumber: errLine, EndColumn: errCol + (tok.End - tok.Start),
+							Message:  "FLATTEN used as a table function requires LATERAL. Use LATERAL FLATTEN(...) or TABLE(FLATTEN(...)).",
+							Severity: 4,
+						})
+					}
 				}
 			}
 		}
 
 		// ── Custom check 3: variant path with dots (payload.field.sub) ────
-		for _, m := range reVariantDotPath.FindAllStringSubmatchIndex(stripped, -1) {
-			submatch := stripped[m[0]:m[1]]
-			g1Start, g1End := m[2], m[3]
-			word1 := strings.ToLower(stripped[g1Start:g1End])
-			if word1 == "payload" {
-				rawPat := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(submatch) + `\b`)
-				for _, rloc := range rawPat.FindAllStringIndex(rawText, -1) {
-					upTo := rawText[:rloc[0]]
-					lines := strings.Split(upTo, "\n")
-					errLine := r.StartLine + len(lines) - 1
-					errCol := len(lines[len(lines)-1]) + 1
-					// Suggest colon notation
-					parts := strings.SplitN(submatch, ".", 3)
-					suggestion := parts[0] + ":" + strings.Join(parts[1:], ".")
-					markers = append(markers, DiagMarker{
-						StartLineNumber: errLine, StartColumn: errCol,
-						EndLineNumber: errLine, EndColumn: errCol + len(submatch),
-						Message:  "Missing colon for variant path. Use ':' for Snowflake JSON traversal (e.g. " + suggestion + ").",
-						Severity: 4,
-					})
+		{
+			rawSig := sigTokens(rawText)
+			for i := 0; i+4 < len(rawSig); i++ {
+				if rawSig[i].Kind == sqltok.Identifier &&
+					rawSig[i+1].Kind == sqltok.Dot &&
+					rawSig[i+2].Kind == sqltok.Identifier &&
+					rawSig[i+3].Kind == sqltok.Dot &&
+					rawSig[i+4].Kind == sqltok.Identifier {
+					word1 := strings.ToLower(rawSig[i].Text(rawText))
+					if word1 == "payload" {
+						startTok := rawSig[i]
+						endTok := rawSig[i+4]
+						submatch := rawText[startTok.Start:endTok.End]
+						errLine := r.StartLine + startTok.Line - 1
+						errCol := startTok.Col
+						parts := strings.SplitN(submatch, ".", 3)
+						suggestion := parts[0] + ":" + strings.Join(parts[1:], ".")
+						markers = append(markers, DiagMarker{
+							StartLineNumber: errLine, StartColumn: errCol,
+							EndLineNumber: errLine, EndColumn: errCol + len(submatch),
+							Message:  "Missing colon for variant path. Use ':' for Snowflake JSON traversal (e.g. " + suggestion + ").",
+							Severity: 4,
+						})
+					}
 				}
 			}
 		}
 
 		// ── Custom check 4: QUALIFY after ORDER BY ────────────────────────
-		if reQualifyAfterOrder.MatchString(stripped) {
-			reQualify := regexp.MustCompile(`(?i)\bQUALIFY\b`)
-			seen := make(map[string]struct{})
-			for _, loc := range reQualify.FindAllStringIndex(rawText, -1) {
-				upTo := rawText[:loc[0]]
-				lines := strings.Split(upTo, "\n")
-				errLine := r.StartLine + len(lines) - 1
-				errCol := len(lines[len(lines)-1]) + 1
-				key := fmt.Sprintf("%d-%d", errLine, errCol)
-				if _, dup := seen[key]; !dup {
-					seen[key] = struct{}{}
-					markers = append(markers, DiagMarker{
-						StartLineNumber: errLine, StartColumn: errCol,
-						EndLineNumber: errLine, EndColumn: errCol + 7,
-						Message:  "Snowflake 'QUALIFY' must come after 'WHERE' or 'HAVING' but before 'ORDER BY'.",
-						Severity: 4,
-					})
+		{
+			sig := sigTokens(stripped)
+			orderByIdx := -1
+			for i := 0; i+1 < len(sig); i++ {
+				if tokUpper(sig[i], stripped) == "ORDER" && tokUpper(sig[i+1], stripped) == "BY" {
+					orderByIdx = i
+					break
+				}
+			}
+			if orderByIdx >= 0 {
+				hasQualifyAfter := false
+				for i := orderByIdx + 2; i < len(sig); i++ {
+					if tokUpper(sig[i], stripped) == "QUALIFY" {
+						hasQualifyAfter = true
+						break
+					}
+				}
+				if hasQualifyAfter {
+					rawToks := sqltok.Tokenize(rawText)
+					for _, tok := range rawToks {
+						if tok.Kind == sqltok.EOF {
+							break
+						}
+						if (tok.Kind == sqltok.Keyword || tok.Kind == sqltok.Identifier) &&
+							strings.EqualFold(tok.Text(rawText), "QUALIFY") {
+							errLine := r.StartLine + tok.Line - 1
+							errCol := tok.Col
+							markers = append(markers, DiagMarker{
+								StartLineNumber: errLine, StartColumn: errCol,
+								EndLineNumber: errLine, EndColumn: errCol + (tok.End - tok.Start),
+								Message:  "Snowflake 'QUALIFY' must come after 'WHERE' or 'HAVING' but before 'ORDER BY'.",
+								Severity: 4,
+							})
+						}
+					}
 				}
 			}
 		}
 
 		// ── Custom check 5: Time Travel AT / BEFORE clause validation ────
-		if reTimeTravelClause.MatchString(stripped) || reTimeTravelBare.MatchString(stripped) {
+		if strings.Contains(strings.ToUpper(stripped), "AT") || strings.Contains(strings.ToUpper(stripped), "BEFORE") {
 			markers = append(markers, validateTimeTravelClauses(stripped, r)...)
 		}
 
 		// ── Custom check 6: MERGE statement rules ─────────────────────────
 		if firstTok == "MERGE" {
-			// Find all WHEN clauses
-			reWhen := regexp.MustCompile(`(?i)\bWHEN\s+`)
-			locs := reWhen.FindAllStringIndex(rawText, -1)
-			for i, loc := range locs {
-				start := loc[0]
+			// Tokenize rawText and find top-level WHEN clause boundaries.
+			mergeToks := sqltok.Tokenize(rawText)
+			mergeSig := sigToks(mergeToks)
+			// Collect byte positions of top-level WHEN tokens (depth 0).
+			var whenStarts []int
+			depth := 0
+			for _, t := range mergeSig {
+				switch t.Kind {
+				case sqltok.LParen:
+					depth++
+				case sqltok.RParen:
+					if depth > 0 {
+						depth--
+					}
+				default:
+					if depth == 0 && tokUpper(t, rawText) == "WHEN" {
+						whenStarts = append(whenStarts, t.Start)
+					}
+				}
+			}
+			for i, start := range whenStarts {
 				end := len(rawText)
-				if i+1 < len(locs) {
-					end = locs[i+1][0]
+				if i+1 < len(whenStarts) {
+					end = whenStarts[i+1]
 				}
 				clause := rawText[start:end]
-				clauseStripped := strings.TrimSpace(stripCommentsSQL(clause))
+				clauseSig := sigTokens(stripCommentsSQL(clause))
 
 				lines := strings.Split(rawText[:start], "\n")
 				errLine := r.StartLine + len(lines) - 1
 				errCol := len(lines[len(lines)-1]) + 1
 
+				// Classify the clause by inspecting leading sig tokens.
+				isWhenMatched := len(clauseSig) >= 2 && kwAt(clauseSig, clause, 0, "WHEN") && kwAt(clauseSig, clause, 1, "MATCHED")
+				isWhenNotMatched := len(clauseSig) >= 3 && kwAt(clauseSig, clause, 0, "WHEN") && kwAt(clauseSig, clause, 1, "NOT") && kwAt(clauseSig, clause, 2, "MATCHED")
+				hasBySource := hasKWPair(clauseSig, clause, "BY", "SOURCE")
+
 				// 1. WHEN MATCHED (but NOT 'NOT MATCHED')
-				if regexp.MustCompile(`(?i)^WHEN\s+MATCHED\b`).MatchString(clauseStripped) {
-					if regexp.MustCompile(`(?i)\bTHEN\s+INSERT\b`).MatchString(clauseStripped) {
+				if isWhenMatched && !isWhenNotMatched {
+					if hasKWPair(clauseSig, clause, "THEN", "INSERT") {
 						markers = append(markers, DiagMarker{
 							StartLineNumber: errLine, StartColumn: errCol,
 							EndLineNumber: errLine, EndColumn: errCol + 12,
@@ -1741,9 +1332,8 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 				}
 
 				// 2. WHEN NOT MATCHED (specifically NOT 'BY SOURCE')
-				if regexp.MustCompile(`(?i)^WHEN\s+NOT\s+MATCHED\b`).MatchString(clauseStripped) &&
-					!regexp.MustCompile(`(?i)\bBY\s+SOURCE\b`).MatchString(clauseStripped) {
-					if regexp.MustCompile(`(?i)\bTHEN\s+(UPDATE|DELETE)\b`).MatchString(clauseStripped) {
+				if isWhenNotMatched && !hasBySource {
+					if hasKWPair(clauseSig, clause, "THEN", "UPDATE") || hasKWPair(clauseSig, clause, "THEN", "DELETE") {
 						markers = append(markers, DiagMarker{
 							StartLineNumber: errLine, StartColumn: errCol,
 							EndLineNumber: errLine, EndColumn: errCol + 16,
@@ -1754,7 +1344,7 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 				}
 
 				// 3. WHEN NOT MATCHED BY SOURCE (Not supported by Snowflake)
-				if regexp.MustCompile(`(?i)^WHEN\s+NOT\s+MATCHED\s+BY\s+SOURCE\b`).MatchString(clauseStripped) {
+				if isWhenNotMatched && hasBySource {
 					markers = append(markers, DiagMarker{
 						StartLineNumber: errLine, StartColumn: errCol,
 						EndLineNumber: errLine, EndColumn: errCol + 26,
@@ -1766,42 +1356,60 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		}
 
 		// ── Custom check 7: unknown SNOWFLAKE.CORTEX.<function> ──────────
-		// Run reCortexFuncCall on rawText so each match gets an accurate
-		// position.  Use an inert-region mask to skip matches inside SQL
-		// comments, string literals, and dollar-quoted blocks.
+		// Token-based scan for SNOWFLAKE.CORTEX.<func>( pattern. The
+		// tokenizer naturally classifies comment/string/$$-block content as
+		// non-identifier tokens, so no separate inert-region check is needed.
 		// Skip for GRANT/REVOKE statements where function signatures appear
 		// as object references (e.g. GRANT USAGE ON PROCEDURE SNOWFLAKE.CORTEX.X(...)).
-		if reCortexFuncCall.MatchString(rawText) && !reIsGrant.MatchString(parseText) && !reIsRevoke.MatchString(parseText) {
-			inertMask := buildInertMask(rawText)
-			for _, m := range reCortexFuncCall.FindAllStringSubmatchIndex(rawText, -1) {
-				if m[0] < len(inertMask) && inertMask[m[0]] {
-					continue // match starts inside a comment, string, or $$-block
-				}
-				funcName := strings.ToUpper(rawText[m[2]:m[3]])
-				if !knownCortexFunctions[funcName] {
-					fullMatch := rawText[m[0] : m[1]-1] // exclude trailing '('
-					upTo := rawText[:m[0]]
-					lines := strings.Split(upTo, "\n")
-					errLine := r.StartLine + len(lines) - 1
-					errCol := len(lines[len(lines)-1]) + 1
-					markers = append(markers, DiagMarker{
-						StartLineNumber: errLine, StartColumn: errCol,
-						EndLineNumber: errLine, EndColumn: errCol + len(fullMatch),
-						Message:  "Unknown Cortex function '" + rawText[m[2]:m[3]] + "'. Known functions: COMPLETE, EXTRACT_ANSWER, SENTIMENT, SUMMARIZE, TRANSLATE, CLASSIFY_TEXT, EMBED_TEXT_768, EMBED_TEXT_1024, FINETUNE, SEARCH_PREVIEW, TRY_COMPLETE.",
-						Severity: 4,
-					})
+		if firstTok != "GRANT" && firstTok != "REVOKE" {
+			cortexSig := sigTokens(rawText)
+			for i := 0; i+5 < len(cortexSig); i++ {
+				if tokUpper(cortexSig[i], rawText) == "SNOWFLAKE" &&
+					cortexSig[i+1].Kind == sqltok.Dot &&
+					tokUpper(cortexSig[i+2], rawText) == "CORTEX" &&
+					cortexSig[i+3].Kind == sqltok.Dot &&
+					isIdent(cortexSig[i+4]) &&
+					cortexSig[i+5].Kind == sqltok.LParen {
+					funcName := strings.ToUpper(cortexSig[i+4].Text(rawText))
+					if !knownCortexFunctions[funcName] {
+						startTok := cortexSig[i]
+						endTok := cortexSig[i+4]
+						fullMatch := rawText[startTok.Start:endTok.End]
+						upTo := rawText[:startTok.Start]
+						lines := strings.Split(upTo, "\n")
+						errLine := r.StartLine + len(lines) - 1
+						errCol := len(lines[len(lines)-1]) + 1
+						markers = append(markers, DiagMarker{
+							StartLineNumber: errLine, StartColumn: errCol,
+							EndLineNumber: errLine, EndColumn: errCol + len(fullMatch),
+							Message:  "Unknown Cortex function '" + cortexSig[i+4].Text(rawText) + "'. Known functions: COMPLETE, EXTRACT_ANSWER, SENTIMENT, SUMMARIZE, TRANSLATE, CLASSIFY_TEXT, EMBED_TEXT_768, EMBED_TEXT_1024, FINETUNE, SEARCH_PREVIEW, TRY_COMPLETE.",
+							Severity: 4,
+						})
+					}
+					i += 5 // skip past this match
 				}
 			}
 		}
 
+		// ── Custom check 8: stray literal after a FROM/JOIN table reference ──
+		// Only for data-query statements, where FROM/JOIN is a real table source —
+		// not, e.g., EXECUTE/ALTER SERVICE … FROM SPECIFICATION $$…$$ or
+		// CREATE DATABASE … FROM SHARE.
+		switch firstTok {
+		case "SELECT", "WITH", "INSERT", "UPDATE", "DELETE", "MERGE":
+			markers = append(markers, checkStrayAfterTableRef(sigToks(sqltok.Tokenize(stripped)), stripped, r)...)
+		}
+
 		// ── Table-driven dispatch: try each parseTextRoute in order. ──────
 		// Routes with dedicated validator functions are checked first. If a
-		// guard regex matches, the validator runs and we continue to the next
+		// guard matches, the validator runs and we continue to the next
 		// statement. Inline dispatch blocks below handle statements that
 		// require access to loop-local variables (txnDepth, stripped, etc.).
+		ptToks := sqltok.Tokenize(parseText)
+		ptSig := sigToks(ptToks)
 		routeMatched := false
 		for _, route := range parseTextRoutes {
-			if route.guard.MatchString(parseText) {
+			if route.guard(ptSig, parseText) {
 				markers = append(markers, route.fn(parseText, r)...)
 				routeMatched = true
 				break
@@ -1811,555 +1419,8 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			continue
 		}
 
-		// ── Preamble: CREATE VIEW ─────────────────────────────────────────
-		if reIsCreateView.MatchString(parseText) {
-			if !reValidCreateViewPreamble.MatchString(parseText) {
-				markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE VIEW statement.", 4))
-			}
-			continue
-		}
-
-		// ── Preamble: CREATE EXTERNAL TABLE ──────────────────────────────
-		if reIsCreateExternalTable.MatchString(parseText) {
-			preambleMatch := reExternalTablePreamble.FindString(parseText)
-			if preambleMatch == "" {
-				markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE EXTERNAL TABLE statement.", 4))
-				continue
-			}
-
-			// OR REPLACE is already matched by the preamble regex if present, but it's invalid for EXTERNAL TABLE.
-			if reOrReplace.MatchString(preambleMatch) {
-				markers = append(markers, diagMarkerSpan(r, "OR REPLACE is not supported for EXTERNAL TABLE. Use DROP and CREATE.", 4))
-				continue
-			}
-
-			// Use a clean version of stripped without string literals to avoid false positives
-			// in string properties like COMMENT = '... CLUSTER BY ...'
-			clean := reStripStringLiterals.ReplaceAllString(stripped, " ")
-
-			if rePatternClusterBy.MatchString(clean) {
-				markers = append(markers, diagMarkerSpan(r, "CLUSTER BY is not supported for EXTERNAL TABLE.", 4))
-				continue
-			}
-			if reDataRetention.MatchString(clean) {
-				markers = append(markers, diagMarkerSpan(r, "DATA_RETENTION_TIME_IN_DAYS is not applicable to EXTERNAL TABLE.", 4))
-				continue
-			}
-
-			rest := strings.TrimSpace(parseText[len(preambleMatch):])
-			rest = strings.TrimSpace(stripCommentsSQL(rest))
-
-			if !strings.HasPrefix(rest, "(") {
-				markers = append(markers, diagMarkerSpan(r, "EXTERNAL TABLE must have a column list.", 4))
-				continue
-			}
-
-			// Find matching close paren for column list
-			endIdx := findMatchingParen(rest)
-			if endIdx == -1 {
-				markers = append(markers, diagMarkerSpan(r, "Unclosed column list in CREATE EXTERNAL TABLE statement.", 4))
-				continue
-			}
-
-			colList := rest[1:endIdx]
-			// Column validation: must use AS <expr> for non-partition columns
-			// We split by top-level commas and check each column.
-			cols := splitTopLevelCommas(colList)
-
-			// Snowflake rejects empty column lists
-			if len(cols) == 0 || (len(cols) == 1 && strings.TrimSpace(cols[0]) == "") {
-				markers = append(markers, diagMarkerSpan(r, "Column list must not be empty.", 4))
-				continue
-			}
-
-			hasColError := false
-			for _, col := range cols {
-				col = strings.TrimSpace(col)
-				if col == "" {
-					continue
-				}
-				// Skip if it's a constraint like PRIMARY KEY or UNIQUE (though rare in EXTERNAL TABLE)
-				if reConstraintCol.MatchString(col) {
-					continue
-				}
-				// External table column must have "AS (" or "AS <expr>"
-				if !reVirtualColAS.MatchString(col) {
-					markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Column '%s' in EXTERNAL TABLE must be a virtual column using AS <expr>.", col), 4))
-					hasColError = true
-				}
-			}
-			if hasColError {
-				continue
-			}
-
-			after := strings.TrimSpace(rest[endIdx+1:])
-
-			// Check for PARTITION BY
-			if loc := rePartitionBy.FindStringIndex(after); loc != nil {
-				// The next non-whitespace character must be '('
-				remainder := strings.TrimSpace(after[loc[1]:])
-				if !strings.HasPrefix(remainder, "(") {
-					markers = append(markers, diagMarkerSpan(r, "PARTITION BY in EXTERNAL TABLE requires a parenthesised column list.", 4))
-					continue
-				}
-				partEnd := findMatchingParen(remainder)
-				if partEnd != -1 {
-					after = strings.TrimSpace(remainder[partEnd+1:])
-				} else {
-					markers = append(markers, diagMarkerSpan(r, "Unclosed parenthesised column list in PARTITION BY clause.", 4))
-					continue
-				}
-			}
-
-			// Mandatory WITH LOCATION and FILE_FORMAT
-			if !reWithLocation.MatchString(after) {
-				markers = append(markers, diagMarkerSpan(r, "WITH LOCATION = @<stage> is mandatory for EXTERNAL TABLE.", 4))
-				continue
-			}
-			if !reFileFormat.MatchString(after) {
-				markers = append(markers, diagMarkerSpan(r, "FILE_FORMAT is mandatory for EXTERNAL TABLE.", 4))
-				continue
-			}
-
-			// Validate remaining properties
-			if after != "" && !extTablePropsRe.MatchString(after) {
-				markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE EXTERNAL TABLE properties.", 4))
-			}
-			continue
-		}
-
-		// ── Preamble: CREATE TABLE ────────────────────────────────────────
-		if reIsCreateTable.MatchString(parseText) {
-			// Specific Snowflake Error: OR REPLACE and IF NOT EXISTS are mutually exclusive
-			if marker, conflict := checkOrReplaceConflict(parseText, r, "CREATE TABLE"); conflict {
-				markers = append(markers, marker)
-				continue
-			}
-
-			preambleMatch := reCreateTablePreamble.FindString(parseText)
-			if preambleMatch == "" {
-				markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE TABLE statement.", 4))
-				continue
-			}
-			rest := strings.TrimSpace(parseText[len(preambleMatch):])
-			rest = strings.TrimSpace(strings.TrimSpace(stripCommentsSQL(rest)))
-
-			isValid := false
-			switch {
-			case reCreateTableBackup.MatchString(rest):
-				isValid = true
-			case reCreateTableCTAS.MatchString(rest):
-				isValid = true
-			case reCreateTableClone.MatchString(rest):
-				isValid = true
-			case reCreateTableTemplate.MatchString(rest):
-				isValid = true
-			case strings.HasPrefix(rest, "("):
-				// Find matching close paren (depth-aware, skip strings)
-				endIdx := findMatchingParen(rest)
-				if endIdx != -1 {
-					colsContent := rest[1:endIdx]
-					colsClean := stripQuotedIdents(reStripStringLiterals.ReplaceAllString(colsContent, " "))
-					if reIndexKeyword.MatchString(colsClean) {
-						markers = append(markers, diagMarkerSpan(r, "Secondary indexes (INDEX) are only supported on hybrid tables.", 4))
-					}
-
-					after := strings.TrimSpace(rest[endIdx+1:])
-					tablePropsRe := regexp.MustCompile(`(?i)^(?:(?:` + tableProps + `)(?:\s+|$))*$`)
-					if after == "" || tablePropsRe.MatchString(after) || reCreateTableCTAS.MatchString(after) {
-						isValid = true
-					}
-				}
-			}
-
-			if !isValid {
-				markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE TABLE statement.", 4))
-			}
-			continue
-		}
-
-		// ── Preamble: CREATE DATABASE / SCHEMA ────────────────────────────
-		if m := reIsCreateDbSchema.FindStringSubmatch(parseText); m != nil {
-			kind := strings.ToUpper(m[1])
-			if !reValidCreateDbSchema.MatchString(parseText) {
-				markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE "+kind+" statement.", 4))
-			}
-			continue
-		}
-
-		// ── Preamble: DROP DATABASE / SCHEMA ─────────────────────────────
-		if m := reIsDropDbSchema.FindStringSubmatch(parseText); m != nil {
-			kind := strings.ToUpper(m[1])
-			if !reValidDropDbSchema.MatchString(parseText) {
-				markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in DROP "+kind+" statement.", 4))
-			}
-			continue
-		}
-
-		// ── Preamble: CREATE SEQUENCE ─────────────────────────────────────
-		if reIsCreateSeq.MatchString(parseText) {
-			unquoted := regexp.MustCompile(`"[^"]+"`).ReplaceAllString(parseText, `""`)
-			bothOrderNoorder := regexp.MustCompile(`(?i)\bORDER\b`).MatchString(unquoted) &&
-				regexp.MustCompile(`(?i)\bNOORDER\b`).MatchString(unquoted)
-			if !reValidCreateSeq.MatchString(parseText) || bothOrderNoorder {
-				markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE SEQUENCE statement.", 4))
-			}
-			continue
-		}
-
-		// ── Preamble: ALTER SEQUENCE ──────────────────────────────────────
-		if reIsAlterSeq.MatchString(parseText) {
-			unquoted := regexp.MustCompile(`"[^"]+"`).ReplaceAllString(parseText, `""`)
-			bothOrderNoorder := regexp.MustCompile(`(?i)\bORDER\b`).MatchString(unquoted) &&
-				regexp.MustCompile(`(?i)\bNOORDER\b`).MatchString(unquoted)
-			if !reValidAlterSeq.MatchString(parseText) || bothOrderNoorder {
-				markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in ALTER SEQUENCE statement.", 4))
-			}
-			continue
-		}
-
-		// ── Preamble: DROP SEQUENCE ───────────────────────────────────────
-		if reIsDropSeq.MatchString(parseText) {
-			if !reValidDropSeq.MatchString(parseText) {
-				markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in DROP SEQUENCE statement.", 4))
-			}
-			continue
-		}
-
-		// ── Preamble: CREATE DYNAMIC TABLE ───────────────────────────────
-		if reIsCreateDynTable.MatchString(parseText) {
-			if !reDynHasTargetLag.MatchString(parseText) ||
-				!reDynHasWarehouse.MatchString(parseText) ||
-				!reDynHasAs.MatchString(parseText) {
-				markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE DYNAMIC TABLE statement.", 4))
-			}
-			continue
-		}
-
-		// ── Preamble: CREATE INTEGRATION ─────────────────────────────────
-		if reIsCreateIntegration.MatchString(parseText) {
-			// 1. Account-level check: no prefix allowed
-			if m := reIntegrationName.FindStringSubmatch(parseText); m != nil {
-				name := m[1]
-				if strings.Contains(name, ".") {
-					markers = append(markers, diagMarkerSpan(r, "Integrations are account-level objects and cannot have a database or schema prefix.", 4))
-				}
-			}
-
-			// 2. Type-specific checks
-			upper := strings.ToUpper(parseText)
-			switch {
-			case strings.Contains(upper, "API INTEGRATION"):
-				if !reIntegrationProvider.MatchString(parseText) {
-					markers = append(markers, diagMarkerSpan(r, "Missing required parameter API_PROVIDER for API Integration.", 4))
-				}
-			case strings.Contains(upper, "NOTIFICATION INTEGRATION"):
-				if m := reIntegrationType.FindStringSubmatch(parseText); m != nil {
-					t := strings.ToUpper(m[1])
-					if t != "EMAIL" && t != "QUEUE" {
-						markers = append(markers, diagMarkerSpan(r, "Invalid TYPE for Notification Integration. Valid types are EMAIL, QUEUE.", 4))
-					}
-				}
-			case strings.Contains(upper, "SECURITY INTEGRATION"):
-				if !reIntegrationType.MatchString(parseText) {
-					markers = append(markers, diagMarkerSpan(r, "Missing required parameter TYPE for Security Integration.", 4))
-				}
-			case strings.Contains(upper, "EXTERNAL ACCESS INTEGRATION"):
-				if regexp.MustCompile(`(?i)\bMAX_RETRIES\s*=`).MatchString(parseText) {
-					markers = append(markers, diagMarkerSpan(r, "Unexpected property 'MAX_RETRIES' for External Access Integration.", 4))
-				}
-			}
-			continue
-		}
-
-		// ── Preamble: CREATE WAREHOUSE ────────────────────────────────────
-		if reIsCreateWarehouse.MatchString(parseText) {
-			if m := regexp.MustCompile(`(?i)WAREHOUSE\s+(` + _identPath + `)`).FindStringSubmatch(parseText); m != nil {
-				if strings.Contains(m[1], ".") {
-					markers = append(markers, diagMarkerSpan(r, "Warehouses are account-level objects and cannot have a database or schema prefix.", 4))
-				}
-			}
-			validateProperties(parseText, whProps, r, &markers)
-			continue
-		}
-
-		// ── Preamble: CREATE RESOURCE MONITOR ────────────────────────────
-		if reIsCreateResourceMonitor.MatchString(parseText) {
-			validateProperties(parseText, rmProps, r, &markers)
-			continue
-		}
-
-		// ── Preamble: CREATE STREAM ──────────────────────────────────────
-		if reIsCreateStream.MatchString(parseText) {
-			if marker, conflict := checkOrReplaceConflict(parseText, r, "CREATE STREAM"); conflict {
-				markers = append(markers, marker)
-				continue
-			}
-
-			if !reValidCreateStream.MatchString(parseText) {
-				markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE STREAM statement.", 4))
-			}
-			continue
-		}
-
-		// ── Preamble: CREATE PIPE ────────────────────────────────────────
-		if reIsCreatePipe.MatchString(parseText) {
-			// 1. Conflict between OR REPLACE and IF NOT EXISTS
-			if marker, conflict := checkOrReplaceConflict(parseText, r, "CREATE PIPE"); conflict {
-				markers = append(markers, marker)
-				continue
-			}
-
-			// 2. Mandatory AS COPY INTO
-			asIdx := regexp.MustCompile(`(?i)\bAS\s+COPY\s+INTO\b`).FindStringIndex(parseText)
-			if asIdx == nil {
-				markers = append(markers, diagMarkerSpan(r, "Missing mandatory AS COPY INTO clause in CREATE PIPE statement.", 4))
-				continue
-			}
-
-			preamble := parseText[:asIdx[0]]
-			// 3. Property validation
-			validateProperties(preamble, pipeProps, r, &markers)
-
-			// 4. AWS_SNS_TOPIC requires AUTO_INGEST = TRUE
-			if regexp.MustCompile(`(?i)\bAWS_SNS_TOPIC\s*=`).MatchString(preamble) {
-				if !regexp.MustCompile(`(?i)\bAUTO_INGEST\s*=\s*TRUE\b`).MatchString(preamble) {
-					markers = append(markers, diagMarkerSpan(r, "AWS_SNS_TOPIC is only meaningful when AUTO_INGEST = TRUE.", 4))
-				}
-			}
-
-			// 5. Warning for AUTO_INGEST = TRUE without stage source
-			if regexp.MustCompile(`(?i)\bAUTO_INGEST\s*=\s*TRUE\b`).MatchString(preamble) {
-				copyBody := parseText[asIdx[0]:]
-				if !regexp.MustCompile(`(?i)\bFROM\s+@`).MatchString(copyBody) {
-					markers = append(markers, diagMarkerSpan(r, "AUTO_INGEST = TRUE typically requires a stage source (FROM @stage).", 4))
-				}
-			}
-
-			continue
-		}
-
-		// ── Preamble: CREATE FUNCTION ─────────────────────────────────────────
-		if reIsCreateFunction.MatchString(parseText) {
-			asBodyIdx := -1
-			for _, loc := range regexp.MustCompile(`(?i)\bAS\b`).FindAllStringIndex(parseText, -1) {
-				prefix := parseText[:loc[0]]
-				if regexp.MustCompile(`(?i)\bEXECUTE\s+$`).MatchString(prefix) {
-					continue
-				}
-				asBodyIdx = loc[0]
-				break
-			}
-
-			preamble := parseText
-			if asBodyIdx == -1 {
-				markers = append(markers, diagMarkerSpan(r, "Missing mandatory AS clause in CREATE FUNCTION statement.", 4))
-			} else {
-				preamble = parseText[:asBodyIdx]
-			}
-
-			isAggregate := regexp.MustCompile(`(?i)\bAGGREGATE\s+FUNCTION\b`).MatchString(preamble)
-			isSecure := regexp.MustCompile(`(?i)\bSECURE\s+(?:AGGREGATE\s+)?FUNCTION\b`).MatchString(preamble)
-
-			if isSecure && isAggregate {
-				markers = append(markers, diagMarkerSpan(r, "SECURE is not supported for AGGREGATE functions.", 4))
-			}
-
-			// 1. Mandatory RETURNS
-			returnsMatch := regexp.MustCompile(`(?i)\bRETURNS\s+(TABLE)?`).FindStringSubmatch(preamble)
-			if returnsMatch == nil {
-				markers = append(markers, diagMarkerSpan(r, "Missing mandatory RETURNS clause in CREATE FUNCTION statement.", 4))
-			} else {
-				isTable := strings.ToUpper(returnsMatch[1]) == "TABLE"
-				if isAggregate && isTable {
-					markers = append(markers, diagMarkerSpan(r, "AGGREGATE functions cannot return a TABLE.", 4))
-				}
-			}
-
-			// 2. Mandatory LANGUAGE
-			langMatch := regexp.MustCompile(`(?i)\bLANGUAGE\s+([a-zA-Z0-9_]+)\b`).FindStringSubmatch(preamble)
-			if langMatch == nil {
-				markers = append(markers, diagMarkerSpan(r, "Missing mandatory LANGUAGE clause in CREATE FUNCTION statement.", 4))
-			} else {
-				lang := strings.ToUpper(langMatch[1])
-				switch lang {
-				case "JAVASCRIPT", "PYTHON", "JAVA", "SCALA", "SQL":
-					// valid
-				default:
-					markers = append(markers, diagMarkerSpan(r, "Unknown or unsupported LANGUAGE '"+langMatch[1]+"' in CREATE FUNCTION.", 4))
-				}
-
-				// Python specific checks
-				if lang == "PYTHON" {
-					if !regexp.MustCompile(`(?i)\bRUNTIME_VERSION\b`).MatchString(preamble) {
-						markers = append(markers, diagMarkerSpan(r, "RUNTIME_VERSION is required for PYTHON functions.", 4))
-					}
-					if !regexp.MustCompile(`(?i)\bHANDLER\b`).MatchString(preamble) {
-						markers = append(markers, diagMarkerSpan(r, "HANDLER is required for PYTHON functions.", 4))
-					}
-					hasPackages := regexp.MustCompile(`(?i)\bPACKAGES\b`).MatchString(preamble)
-					hasImports := regexp.MustCompile(`(?i)\bIMPORTS\b`).MatchString(preamble)
-					if !hasPackages && !hasImports {
-						markers = append(markers, diagMarkerSpan(r, "PACKAGES or IMPORTS is required for PYTHON functions.", 4))
-					}
-				}
-
-				// Java / Scala specific checks
-				if lang == "JAVA" || lang == "SCALA" {
-					if !regexp.MustCompile(`(?i)\bHANDLER\b`).MatchString(preamble) {
-						markers = append(markers, diagMarkerSpan(r, "HANDLER is required for "+lang+" functions.", 4))
-					}
-				}
-			}
-
-			// 4. Null input handling: mutually exclusive / redundant
-			hasCalledOnNull := regexp.MustCompile(`(?i)\bCALLED\s+ON\s+NULL\s+INPUT\b`).MatchString(preamble)
-			hasReturnsNull := regexp.MustCompile(`(?i)\bRETURNS\s+NULL\s+ON\s+NULL\s+INPUT\b`).MatchString(preamble)
-			hasStrict := regexp.MustCompile(`(?i)\bSTRICT\b`).MatchString(preamble)
-
-			if hasCalledOnNull && (hasReturnsNull || hasStrict) {
-				markers = append(markers, diagMarkerSpan(r, "CALLED ON NULL INPUT and RETURNS NULL ON NULL INPUT (or STRICT) are mutually exclusive.", 4))
-			}
-			if hasReturnsNull && hasStrict {
-				markers = append(markers, diagMarkerSpan(r, "STRICT and RETURNS NULL ON NULL INPUT are redundant.", 4))
-			}
-
-			// MEMOIZABLE
-			if regexp.MustCompile(`(?i)\bMEMOIZABLE\b`).MatchString(preamble) {
-				returnsMatch := regexp.MustCompile(`(?i)\bRETURNS\s+(TABLE)?`).FindStringSubmatch(preamble)
-				isTable := returnsMatch != nil && strings.ToUpper(returnsMatch[1]) == "TABLE"
-				if isAggregate || isTable {
-					markers = append(markers, diagMarkerSpan(r, "MEMOIZABLE is only valid for scalar functions.", 4))
-				}
-			}
-
-			continue
-		}
-		if reIsCreateProcedure.MatchString(parseText) {
-			asBodyIdx := -1
-			for _, loc := range regexp.MustCompile(`(?i)\bAS\b`).FindAllStringIndex(parseText, -1) {
-				prefix := parseText[:loc[0]]
-				if regexp.MustCompile(`(?i)\bEXECUTE\s+$`).MatchString(prefix) {
-					continue
-				}
-				asBodyIdx = loc[0]
-				break
-			}
-
-			preamble := parseText
-			if asBodyIdx == -1 {
-				markers = append(markers, diagMarkerSpan(r, "Missing mandatory AS clause in CREATE PROCEDURE statement.", 4))
-			} else {
-				preamble = parseText[:asBodyIdx]
-			}
-
-			// 1. Mandatory RETURNS
-			if !regexp.MustCompile(`(?i)\bRETURNS\b`).MatchString(preamble) {
-				markers = append(markers, diagMarkerSpan(r, "Missing mandatory RETURNS clause in CREATE PROCEDURE statement.", 4))
-			}
-
-			// 2. Mandatory LANGUAGE
-			langMatch := regexp.MustCompile(`(?i)\bLANGUAGE\s+([a-zA-Z0-9_]+)\b`).FindStringSubmatch(preamble)
-			if langMatch == nil {
-				markers = append(markers, diagMarkerSpan(r, "Missing mandatory LANGUAGE clause in CREATE PROCEDURE statement.", 4))
-			} else {
-				lang := strings.ToUpper(langMatch[1])
-				switch lang {
-				case "JAVASCRIPT", "PYTHON", "JAVA", "SCALA", "SQL":
-					// valid
-				default:
-					markers = append(markers, diagMarkerSpan(r, "Unknown or unsupported LANGUAGE '"+langMatch[1]+"' in CREATE PROCEDURE.", 4))
-				}
-
-				// Python specific checks
-				if lang == "PYTHON" {
-					if !regexp.MustCompile(`(?i)\bRUNTIME_VERSION\b`).MatchString(preamble) {
-						markers = append(markers, diagMarkerSpan(r, "RUNTIME_VERSION is required for PYTHON procedures.", 4))
-					}
-					hasPackages := regexp.MustCompile(`(?i)\bPACKAGES\b`).MatchString(preamble)
-					hasImports := regexp.MustCompile(`(?i)\bIMPORTS\b`).MatchString(preamble)
-					if !hasPackages && !hasImports {
-						markers = append(markers, diagMarkerSpan(r, "PACKAGES or IMPORTS is required for PYTHON procedures.", 4))
-					}
-				}
-			}
-
-			// 4. Null input handling: mutually exclusive / redundant
-			hasCalledOnNull := regexp.MustCompile(`(?i)\bCALLED\s+ON\s+NULL\s+INPUT\b`).MatchString(preamble)
-			hasReturnsNull := regexp.MustCompile(`(?i)\bRETURNS\s+NULL\s+ON\s+NULL\s+INPUT\b`).MatchString(preamble)
-			hasStrict := regexp.MustCompile(`(?i)\bSTRICT\b`).MatchString(preamble)
-
-			if hasCalledOnNull && (hasReturnsNull || hasStrict) {
-				markers = append(markers, diagMarkerSpan(r, "CALLED ON NULL INPUT and RETURNS NULL ON NULL INPUT (or STRICT) are mutually exclusive.", 4))
-			}
-			if hasReturnsNull && hasStrict {
-				markers = append(markers, diagMarkerSpan(r, "STRICT and RETURNS NULL ON NULL INPUT are redundant.", 4))
-			}
-
-			// 5. EXECUTE AS
-			if execAsMatch := regexp.MustCompile(`(?i)\bEXECUTE\s+AS\s+([a-zA-Z0-9_]+)\b`).FindStringSubmatch(preamble); execAsMatch != nil {
-				execVal := strings.ToUpper(execAsMatch[1])
-				if execVal != "CALLER" && execVal != "OWNER" {
-					markers = append(markers, diagMarkerSpan(r, "EXECUTE AS must be CALLER or OWNER.", 4))
-				}
-			}
-
-			continue
-		}
-
-		// ── Preamble: CREATE USER ────────────────────────────────────────
-		if reIsCreateUser.MatchString(parseText) {
-			if m := regexp.MustCompile(`(?i)USER\s+(` + _identPath + `)`).FindStringSubmatch(parseText); m != nil {
-				if strings.Contains(m[1], ".") {
-					markers = append(markers, diagMarkerSpan(r, "Users are account-level objects and cannot have a database or schema prefix.", 4))
-				}
-			}
-			validateProperties(parseText, userProps, r, &markers)
-			continue
-		}
-
-		// ── Preamble: CREATE ROLE ────────────────────────────────────────
-		if reIsCreateRole.MatchString(parseText) {
-			if m := regexp.MustCompile(`(?i)ROLE\s+(` + _identPath + `)`).FindStringSubmatch(parseText); m != nil {
-				if strings.Contains(m[1], ".") {
-					markers = append(markers, diagMarkerSpan(r, "Roles are account-level objects and cannot have a database or schema prefix.", 4))
-				}
-			}
-			continue
-		}
-
-		// ── Preamble: CREATE MASKING POLICY ──────────────────────────────
-		if reIsCreateMaskingPolicy.MatchString(parseText) {
-			if !regexp.MustCompile(`(?i)\bRETURNS\b`).MatchString(parseText) {
-				markers = append(markers, diagMarkerSpan(r, "Missing RETURNS clause in Masking Policy definition.", 4))
-			}
-			continue
-		}
-
-		// ── Preamble: CREATE STAGE ───────────────────────────────────────
-		// stripParenContents removes nested KEY=VALUE pairs inside blocks
-		// like FILE_FORMAT=(...), ENCRYPTION=(...), DIRECTORY=(...) before
-		// property validation, preventing false positives like "Unexpected
-		// property 'TYPE'" for FILE_FORMAT=(TYPE='CSV' ...).
-		if reIsCreateStage.MatchString(parseText) {
-			validateProperties(stripParenContents(parseText), stageProps, r, &markers)
-			continue
-		}
-
-		// ── Preamble: ALTER STAGE ─────────────────────────────────────────
-		// RENAME TO, UNSET TAG, SET TAG, and UNSET DCM forms carry dynamic
-		// identifiers (new name, tag names) that cannot be property-validated.
-		// All other forms (SET FILE_FORMAT=..., SET COMMENT=..., REFRESH, etc.)
-		// are validated for top-level property keys after stripping nested parens.
-		if reIsAlterStage.MatchString(parseText) {
-			if !reAlterStageNoValidate.MatchString(parseText) {
-				validateProperties(stripParenContents(parseText), alterStageProps, r, &markers)
-			}
-			continue
-		}
-
 		// ── Other EXECUTE forms (EXECUTE ALERT, etc.) — pass through ─────
-		if reIsExecute.MatchString(parseText) {
+		if firstTok == "EXECUTE" {
 			continue
 		}
 
@@ -2371,18 +1432,22 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		}
 
 		// ── BEGIN (transaction) ─────────────────────────────────────────
-		if reIsBegin.MatchString(parseText) {
+		if firstTok == "BEGIN" {
 			// Skip anonymous scripting blocks (BEGIN followed by LET, IF, etc.).
 			// GetStatementRanges splits on semicolons, so the first "statement"
 			// of an anonymous block looks like "BEGIN\n  LET x := 1".
 			beginStripped := strings.TrimSpace(stripCommentsSQL(parseText))
-			if reBeginScripting.MatchString(beginStripped) {
-				continue // scripting block, not a transaction
+			beginSig := sigTokens(beginStripped)
+			if len(beginSig) >= 2 {
+				u := tokUpper(beginSig[1], beginStripped)
+				if u == "LET" || u == "IF" || u == "FOR" || u == "WHILE" || u == "LOOP" || u == "DECLARE" || u == "RETURN" || u == "CASE" || u == "CALL" {
+					continue // scripting block, not a transaction
+				}
 			}
 			markers = append(markers, validateBeginStripped(beginStripped, r)...)
 			if txnDepth > 0 {
 				markers = append(markers, diagMarkerSpan(r,
-					"Snowflake does not support nested BEGIN. A transaction is already open.", 4))
+					"Snowflake does not support nested BEGIN. A transaction is already open."))
 				// Don't increment txnDepth — Snowflake rejects nested BEGIN,
 				// so we keep tracking only the original transaction.
 			} else {
@@ -2393,12 +1458,12 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		}
 
 		// ── COMMIT ──────────────────────────────────────────────────────
-		if reIsCommit.MatchString(parseText) {
+		if firstTok == "COMMIT" {
 			commitStripped := strings.TrimSpace(stripCommentsSQL(parseText))
 			markers = append(markers, validateCommitStripped(commitStripped, r)...)
 			if txnDepth == 0 {
 				markers = append(markers, diagMarkerSpan(r,
-					"COMMIT with no open transaction. Add BEGIN before COMMIT.", 4))
+					"COMMIT with no open transaction. Add BEGIN before COMMIT."))
 			} else {
 				txnDepth--
 			}
@@ -2406,17 +1471,24 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		}
 
 		// ── ROLLBACK ────────────────────────────────────────────────────
-		if reIsRollback.MatchString(parseText) {
+		if firstTok == "ROLLBACK" {
 			// Strip comments once and reuse for both validation and block-level tracking.
 			rollbackStripped := strings.TrimSpace(stripCommentsSQL(parseText))
 			markers = append(markers, validateRollbackStripped(rollbackStripped, r)...)
 			// ROLLBACK TO SAVEPOINT does NOT end the transaction — only bare
 			// ROLLBACK / ROLLBACK WORK closes it.
-			isToSavepoint := reRollbackToSavepointFull.MatchString(rollbackStripped)
+			rbSig := sigTokens(rollbackStripped)
+			isToSavepoint := false
+			for j := 0; j+1 < len(rbSig); j++ {
+				if tokUpper(rbSig[j], rollbackStripped) == "TO" && tokUpper(rbSig[j+1], rollbackStripped) == "SAVEPOINT" {
+					isToSavepoint = true
+					break
+				}
+			}
 			if !isToSavepoint {
 				if txnDepth == 0 {
 					markers = append(markers, diagMarkerSpan(r,
-						"ROLLBACK with no open transaction. Add BEGIN before ROLLBACK.", 4))
+						"ROLLBACK with no open transaction. Add BEGIN before ROLLBACK."))
 				} else {
 					txnDepth--
 				}
@@ -2425,14 +1497,14 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		}
 
 		// ── SAVEPOINT ───────────────────────────────────────────────────
-		if reIsSavepoint.MatchString(parseText) {
+		if firstTok == "SAVEPOINT" {
 			spStripped := strings.TrimSpace(stripCommentsSQL(parseText))
 			markers = append(markers, validateSavepointStripped(spStripped, r)...)
 			continue
 		}
 
 		// ── RELEASE SAVEPOINT ───────────────────────────────────────────
-		if reIsReleaseSavepoint.MatchString(parseText) {
+		if guardKW("RELEASE", "SAVEPOINT")(ptSig, parseText) {
 			relStripped := strings.TrimSpace(stripCommentsSQL(parseText))
 			markers = append(markers, validateReleaseSavepointStripped(relStripped, r)...)
 			continue
@@ -2441,205 +1513,1528 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// ── Bare RELEASE (without SAVEPOINT keyword) ────────────────────
 		if firstTok == "RELEASE" {
 			markers = append(markers, diagMarkerSpan(r,
-				"RELEASE requires SAVEPOINT keyword. Use RELEASE SAVEPOINT <name>.", 4))
+				"RELEASE requires SAVEPOINT keyword. Use RELEASE SAVEPOINT <name>."))
 			continue
 		}
 
 		// ── INSERT ALL structural validation ─────────────────────────────
 		// Validate before the FP guard skips the statement.
-		if reIsInsertAll.MatchString(stripped) {
+		if guardInsertVariant(ptSig, parseText, "ALL") {
 			markers = append(markers, validateInsertAll(stripped, r)...)
 			continue
 		}
 
 		// ── INSERT FIRST structural validation ───────────────────────────
 		// Validate before the FP guard skips the statement.
-		if reIsInsertFirst.MatchString(stripped) {
+		if guardInsertVariant(ptSig, parseText, "FIRST") {
 			markers = append(markers, validateInsertFirst(stripped, r)...)
 			continue
 		}
 
 		// ── INSERT OVERWRITE structural validation ───────────────────────
 		// Validate before the FP guard skips the statement.
-		if reIsInsertOverwriteBare.MatchString(stripped) {
+		if guardKW("INSERT", "OVERWRITE")(ptSig, parseText) {
 			markers = append(markers, validateInsertOverwrite(stripped, r)...)
 			continue
 		}
 
 		// ── ALTER TABLE … SWAP WITH ──────────────────────────────────────
 		// Validate before the FP guard skips the statement.
-		if reIsAlterTableSwapWith.MatchString(stripped) {
+		if guardAlterTableAction(ptSig, parseText, "SWAP", "WITH") {
 			markers = append(markers, validateAlterTableSwapWith(stripped, r)...)
 			continue
 		}
 
 		// ── ALTER TABLE … ADD/DROP SEARCH OPTIMIZATION ──────────────────
 		// Validate before the FP guard skips the statement.
-		if reIsAlterTableSearchOpt.MatchString(stripped) {
+		if guardAlterTableSearchOpt(ptSig, parseText) {
 			markers = append(markers, validateAlterTableSearchOptimization(stripped, r)...)
 			continue
 		}
 
 		// ── ALTER DYNAMIC TABLE lifecycle commands ───────────────────────
 		// Validate before the FP guard skips the statement.
-		if reIsAlterDynTable.MatchString(parseText) {
+		if guardAlter("DYNAMIC", "TABLE")(ptSig, parseText) {
 			markers = append(markers, validateAlterDynamicTable(parseText, r)...)
 			continue
 		}
 
 		// ── PIVOT / UNPIVOT structural validation ────────────────────────
 		// Validate before the FP guard skips the statement.
-		if rePivotClause.MatchString(stripped) {
+		if strings.Contains(strings.ToUpper(stripped), "PIVOT") {
 			markers = append(markers, validatePivotClauses(stripped, r)...)
 		}
-		if reUnpivotClause.MatchString(stripped) {
+		if strings.Contains(strings.ToUpper(stripped), "UNPIVOT") {
 			markers = append(markers, validateUnpivotClauses(stripped, r)...)
 		}
 
 		// ── MATCH_RECOGNIZE structural validation ────────────────────────
 		// Validate before the FP guard skips the statement.
-		if reMatchRecognizeClause.MatchString(stripped) {
+		if strings.Contains(strings.ToUpper(stripped), "MATCH_RECOGNIZE") {
 			markers = append(markers, validateMatchRecognizeClauses(stripped, r)...)
 		}
 
 		// ── ASOF JOIN structural validation ──────────────────────────────
 		// Validate before the FP guard skips the statement.
-		if reAsofJoinClause.MatchString(stripped) {
+		if strings.Contains(strings.ToUpper(stripped), "ASOF") {
 			markers = append(markers, validateAsofJoinClauses(stripped, r)...)
 		}
 
-		// ── Skip Snowflake false-positive statements ──────────────────────
-		// (statements with Snowflake-specific syntax that the parser can't
-		// handle; we emit no error for these)
-		checkText := regexp.MustCompile(`(?i)\bCLUSTER\s+BY\s*\([^)]+\)`).
-			ReplaceAllString(stripped, "")
-		if reSnowflakeFP.MatchString(checkText) {
-			continue
-		}
-		// Generic SELECT/INSERT/UPDATE/WITH: no additional checks here.
-		// ValidateSyntax (the tokenizer) already covers them.
+		// Generic SELECT/INSERT/UPDATE/WITH and other Snowflake-specific
+		// statements need no additional checks here — ValidateSyntax (the
+		// tokenizer) already covers them, and the dedicated validators above
+		// handle the statements with structural rules.
 	}
 
 	// ── Post-loop: unclosed transaction check ────────────────────────────
 	if txnDepth > 0 {
 		markers = append(markers, diagMarkerSpan(txnBeginRange,
-			"Transaction not committed or rolled back. Add COMMIT or ROLLBACK before the end of the script.", 4))
+			"Transaction not committed or rolled back. Add COMMIT or ROLLBACK before the end of the script."))
 	}
 
 	return markers
 }
 
-// ── Shared validation helpers (DRY) ───────────────────────────────────────────
-
-// cleanParseText strips both SQL comments and string literals in a single pass,
-// correctly handling apostrophes inside comments (e.g. -- let's) and comment
-// markers inside string literals (e.g. 'a--b'). String literals are replaced
-// with the placeholder ''.
-func cleanParseText(s string) string {
-	return strings.TrimSpace(stripAndMask(s, true))
-}
-
-// stripCommentsSafe removes SQL comments while correctly handling apostrophes
-// inside comments and comment markers inside string literals. Unlike
-// cleanParseText, string literals are preserved verbatim.
-func stripCommentsSafe(s string) string {
-	return strings.TrimSpace(stripAndMask(s, false))
-}
-
-// stripAndMask performs a single-pass scan that recognizes string literals,
-// line comments (--), and block comments (/* ... */) in priority order.
-// If maskStrings is true, string literals are replaced with ''; otherwise
-// they are copied verbatim.
-func stripAndMask(s string, maskStrings bool) string {
-	var buf strings.Builder
-	i := 0
-	n := len(s)
-	for i < n {
-		if s[i] == '\'' {
-			// String literal
-			if maskStrings {
-				buf.WriteString("''")
-			} else {
-				buf.WriteByte('\'')
-			}
-			i++
-			for i < n {
-				if s[i] == '\'' {
-					if i+1 < n && s[i+1] == '\'' {
-						if !maskStrings {
-							buf.WriteString("''")
-						}
-						i += 2
-					} else {
-						if !maskStrings {
-							buf.WriteByte('\'')
-						}
-						i++
-						break
-					}
-				} else {
-					if !maskStrings {
-						buf.WriteByte(s[i])
-					}
-					i++
-				}
-			}
-		} else if i+1 < n && s[i] == '-' && s[i+1] == '-' {
-			// Line comment — skip until end of line, preserve newline
-			i += 2
-			for i < n && s[i] != '\n' {
-				i++
-			}
-		} else if i+1 < n && s[i] == '/' && s[i+1] == '*' {
-			// Block comment — replace with space
-			buf.WriteByte(' ')
-			i += 2
-			for i < n {
-				if i+1 < n && s[i] == '*' && s[i+1] == '/' {
-					i += 2
-					break
-				}
-				i++
-			}
-		} else {
-			buf.WriteByte(s[i])
-			i++
+// checkStrayAfterTableRef flags malformed tails of a FROM or JOIN table
+// reference and its optional alias:
+//   - a literal (number / string / dollar-quoted) in the alias slot or after the
+//     alias, e.g. `FROM t 1000` or `FROM t alias 1000`;
+//   - AS with no alias following, e.g. `FROM t AS`;
+//   - a stray AS after an alias was already given, e.g. `FROM t aaa AS`.
+//
+// All of these are syntax errors Snowflake rejects. The legitimate continuations
+// (a comma, a clause/modifier keyword such as WHERE/JOIN/AT/SAMPLE, "(", ";", or
+// end) all tokenize as keywords/punctuation, so there are no false positives.
+// Subqueries and @stage sources (the token after FROM/JOIN is not an identifier)
+// are skipped.
+func checkStrayAfterTableRef(sig []sqltok.Token, sql string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+	for i := 0; i+1 < len(sig); i++ {
+		if u := tokUpper(sig[i], sql); u != "FROM" && u != "JOIN" {
+			continue
 		}
+		j := i + 1
+		if j >= len(sig) || !isIdent(sig[j]) {
+			continue // subquery "(", @stage, or nothing — not a bare table path
+		}
+		_, j = readIdentPath(sig, sql, j)
+
+		// Optional [AS] <alias>. An implicit alias must be an Identifier/QuotedIdent
+		// (not a keyword), mirroring findFromJoinWithAlias.
+		hadAS, aliasConsumed := false, false
+		if j < len(sig) && tokUpper(sig[j], sql) == "AS" {
+			hadAS = true
+			j++
+			if j < len(sig) && isAliasTok(sig[j]) {
+				j++
+				aliasConsumed = true
+			}
+		} else if j < len(sig) && isAliasTok(sig[j]) {
+			j++
+			aliasConsumed = true
+		}
+
+		switch {
+		case hadAS && !aliasConsumed:
+			// `FROM t AS` with no (valid) alias after AS.
+			markers = append(markers, diagMarkerSpan(r,
+				"Expected an alias after AS in the FROM clause."))
+		case j < len(sig) && (sig[j].Kind == sqltok.NumberLit ||
+			sig[j].Kind == sqltok.StringLit || sig[j].Kind == sqltok.DollarQuoted):
+			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf(
+				"Unexpected token '%s' after table reference in FROM clause. Add a comma, JOIN, or WHERE clause.",
+				sig[j].Text(sql))))
+		case j < len(sig) && aliasConsumed && tokUpper(sig[j], sql) == "AS":
+			// `FROM t aaa AS …` — a second AS after the alias is already given.
+			markers = append(markers, diagMarkerSpan(r,
+				"Unexpected 'AS' after the table alias in the FROM clause."))
+		}
+		i = j - 1 // resume scanning after this table reference
 	}
-	return buf.String()
+	return markers
 }
 
-// checkOrReplaceConflict returns a diagnostic and true if both OR REPLACE and
-// IF NOT EXISTS modifiers are present in text. stmtType is included in the
-// message (e.g. "CREATE DATASHARE").
-func checkOrReplaceConflict(text string, r StatementRange, stmtType string) (DiagMarker, bool) {
-	if reOrReplace.MatchString(text) && reIfNotExists.MatchString(text) {
-		return diagMarkerSpan(r,
-			"Conflict between OR REPLACE and IF NOT EXISTS in "+stmtType+" statement.", 4), true
-	}
-	return DiagMarker{}, false
-}
+// ── Extracted validator functions (dispatch-table entries) ─────────────────────
 
-// checkAccountLevelPrefix returns a diagnostic if the SQL identifier path
-// contains a dot outside of double-quoted segments, indicating a database or
-// schema prefix on an account-level object.
-func checkAccountLevelPrefix(name string, r StatementRange, objType string) *DiagMarker {
-	if sqlIdentPathHasDot(name) {
-		m := diagMarkerSpan(r,
-			objType+" are account-level objects and cannot have a database or schema prefix.", 4)
-		return &m
+// validateCreateView reports a generic "unexpected syntax" diagnostic when a
+// CREATE VIEW statement does not match the expected preamble grammar, up to the
+// AS that introduces the body. The grammar walk lives in
+// isValidCreateViewPreamble; doing it on tokens (rather than the previous
+// reValidCreateViewPreamble regex over raw parseText) means comments between the
+// keywords no longer break the match.
+func validateCreateView(parseText string, r StatementRange) []DiagMarker {
+	if !isValidCreateViewPreamble(sigTokens(parseText), parseText) {
+		return oneMarker(r, "Unexpected syntax in CREATE VIEW statement.")
 	}
 	return nil
 }
 
-// checkNameSwallowedByIF detects the case where a regex captures "IF" as the
-// object name because the IF [NOT] EXISTS / IF EXISTS clause consumed the
-// actual name slot. Returns the error marker and true if the name was swallowed.
-func checkNameSwallowedByIF(name string, clean string, r StatementRange, reExists *regexp.Regexp, errMsg string) (DiagMarker, bool) {
-	if strings.EqualFold(name, "IF") && reExists.MatchString(clean) {
-		return diagMarkerSpan(r, errMsg, 4), true
+// isOpEq reports whether sig[i] is the "=" operator token.
+func isOpEq(sig []sqltok.Token, sql string, i int) bool {
+	return i < len(sig) && sig[i].Kind == sqltok.Operator && sig[i].Text(sql) == "="
+}
+
+// skipParenGroup requires sig[openIdx] to be "(" and returns the index just past
+// the matching ")". ok is false if there is no "(" there or it is unbalanced.
+func skipParenGroup(sig []sqltok.Token, openIdx int) (int, bool) {
+	if openIdx >= len(sig) || sig[openIdx].Kind != sqltok.LParen {
+		return 0, false
 	}
-	return DiagMarker{}, false
+	_, closeIdx, ok := parenInnerRange(sig, openIdx)
+	if !ok {
+		return 0, false
+	}
+	return closeIdx + 1, true
+}
+
+// isValidCreateViewPreamble reports whether sig is a well-formed CREATE VIEW
+// preamble up to and including the AS that introduces the view body. It accepts:
+//
+//	CREATE [OR REPLACE] [SECURE] [[LOCAL|GLOBAL] {TEMP|TEMPORARY|VOLATILE}]
+//	  [RECURSIVE] [INTERACTIVE] [MATERIALIZED]
+//	  VIEW [IF NOT EXISTS] <name> [ ( … ) ] <clause>* AS <body>
+//
+// where each clause is one of: COPY GRANTS; COMMENT = '…'; CHANGE_TRACKING =
+// TRUE|FALSE; [WITH] ROW ACCESS POLICY <name> ON (…); [WITH] AGGREGATION POLICY
+// <name> [ENTITY KEY (…)]; [WITH] JOIN POLICY <name> [ALLOWED JOIN KEYS (…)];
+// CLUSTER BY (…); [WITH] TAG (…); or WITH CONTACT (…).
+func isValidCreateViewPreamble(sig []sqltok.Token, sql string) bool {
+	i := 0
+	if !kwAt(sig, sql, i, "CREATE") {
+		return false
+	}
+	i++
+	if kwAt(sig, sql, i, "OR") && kwAt(sig, sql, i+1, "REPLACE") {
+		i += 2
+	}
+	if kwAt(sig, sql, i, "SECURE") {
+		i++
+	}
+	// Optional [LOCAL|GLOBAL] {TEMP|TEMPORARY|VOLATILE}: LOCAL/GLOBAL is only
+	// consumed when a TEMP/TEMPORARY/VOLATILE keyword follows it.
+	{
+		j := i
+		if kwAtAny(sig, sql, j, "LOCAL", "GLOBAL") != "" {
+			j++
+		}
+		if kwAtAny(sig, sql, j, "TEMP", "TEMPORARY", "VOLATILE") != "" {
+			i = j + 1
+		}
+	}
+	if kwAt(sig, sql, i, "RECURSIVE") {
+		i++
+	}
+	if kwAt(sig, sql, i, "INTERACTIVE") {
+		i++
+	}
+	if kwAt(sig, sql, i, "MATERIALIZED") {
+		i++
+	}
+	if !kwAt(sig, sql, i, "VIEW") {
+		return false
+	}
+	i++
+	if kwAt(sig, sql, i, "IF") && kwAt(sig, sql, i+1, "NOT") && kwAt(sig, sql, i+2, "EXISTS") {
+		i += 3
+	}
+	// View name: a 1–3 part identifier path.
+	if i >= len(sig) || !isIdent(sig[i]) {
+		return false
+	}
+	i++
+	for parts := 1; parts < 3 && i+1 < len(sig) && sig[i].Kind == sqltok.Dot && isIdent(sig[i+1]); parts++ {
+		i += 2
+	}
+	// Optional column list "( … )".
+	if i < len(sig) && sig[i].Kind == sqltok.LParen {
+		next, ok := skipParenGroup(sig, i)
+		if !ok {
+			return false
+		}
+		i = next
+	}
+	// Zero or more optional clauses, terminated by AS followed by a body.
+	for {
+		if kwAt(sig, sql, i, "AS") {
+			return i+1 < len(sig)
+		}
+		next, ok := consumeCreateViewClause(sig, sql, i)
+		if !ok {
+			return false
+		}
+		i = next
+	}
+}
+
+// consumeCreateViewClause matches one optional CREATE VIEW clause starting at
+// sig[i] and returns the index just past it; ok is false if no clause matches.
+func consumeCreateViewClause(sig []sqltok.Token, sql string, i int) (int, bool) {
+	withConsumed := false
+	if kwAt(sig, sql, i, "WITH") {
+		withConsumed = true
+		i++
+	}
+	if n, ok := consumeObjectPolicyClause(sig, sql, i, withConsumed, false); ok {
+		return n, ok
+	}
+	if withConsumed {
+		return 0, false // WITH is only valid before a policy / TAG / CONTACT clause
+	}
+	switch {
+	case kwAt(sig, sql, i, "COPY") && kwAt(sig, sql, i+1, "GRANTS"):
+		return i + 2, true
+	case kwAt(sig, sql, i, "COMMENT"):
+		return eqValueProp(sig, sql, i, sqltok.StringLit)
+	case kwAt(sig, sql, i, "CHANGE_TRACKING"):
+		return eqBoolProp(sig, sql, i)
+	case kwAt(sig, sql, i, "CLUSTER") && kwAt(sig, sql, i+1, "BY"):
+		return skipParenGroup(sig, i+2)
+	}
+	return 0, false
+}
+
+// consumeObjectPolicyClause matches the policy / TAG / CONTACT clauses shared by
+// the CREATE VIEW preamble and the CREATE TABLE property tail. i points at the
+// clause keyword, with any leading WITH already consumed by the caller (recorded
+// in withConsumed). STORAGE LIFECYCLE POLICY is accepted only when
+// allowStorageLifecycle is set (tables, not views). Returns the index just past
+// the clause and ok.
+func consumeObjectPolicyClause(sig []sqltok.Token, sql string, i int, withConsumed, allowStorageLifecycle bool) (int, bool) {
+	switch {
+	case kwAt(sig, sql, i, "ROW_ACCESS_POLICY") ||
+		(kwAt(sig, sql, i, "ROW") && kwAt(sig, sql, i+1, "ACCESS") && kwAt(sig, sql, i+2, "POLICY")):
+		// [WITH] ROW ACCESS POLICY <name> ON ( … )  (also glued ROW_ACCESS_POLICY)
+		j := i + 1
+		if !kwAt(sig, sql, i, "ROW_ACCESS_POLICY") {
+			j = i + 3
+		}
+		if j >= len(sig) || !isIdent(sig[j]) {
+			return 0, false
+		}
+		_, j = readIdentPath(sig, sql, j)
+		if !kwAt(sig, sql, j, "ON") {
+			return 0, false
+		}
+		return skipParenGroup(sig, j+1)
+	case kwAt(sig, sql, i, "AGGREGATION") && kwAt(sig, sql, i+1, "POLICY"):
+		// AGGREGATION POLICY <name> [ENTITY KEY ( … )]
+		j := i + 2
+		if j >= len(sig) || !isIdent(sig[j]) {
+			return 0, false
+		}
+		_, j = readIdentPath(sig, sql, j)
+		if kwAt(sig, sql, j, "ENTITY") && kwAt(sig, sql, j+1, "KEY") {
+			return skipParenGroup(sig, j+2)
+		}
+		return j, true
+	case kwAt(sig, sql, i, "JOIN") && kwAt(sig, sql, i+1, "POLICY"):
+		// JOIN POLICY <name> [ALLOWED JOIN KEYS ( … )]
+		j := i + 2
+		if j >= len(sig) || !isIdent(sig[j]) {
+			return 0, false
+		}
+		_, j = readIdentPath(sig, sql, j)
+		if kwAt(sig, sql, j, "ALLOWED") && kwAt(sig, sql, j+1, "JOIN") && kwAt(sig, sql, j+2, "KEYS") {
+			return skipParenGroup(sig, j+3)
+		}
+		return j, true
+	case allowStorageLifecycle && kwAt(sig, sql, i, "STORAGE") && kwAt(sig, sql, i+1, "LIFECYCLE") && kwAt(sig, sql, i+2, "POLICY"):
+		// STORAGE LIFECYCLE POLICY <name> ON ( … )
+		j := i + 3
+		if j >= len(sig) || !isIdent(sig[j]) {
+			return 0, false
+		}
+		_, j = readIdentPath(sig, sql, j)
+		if !kwAt(sig, sql, j, "ON") {
+			return 0, false
+		}
+		return skipParenGroup(sig, j+1)
+	case kwAt(sig, sql, i, "TAG"):
+		// [WITH] TAG ( … )
+		return skipParenGroup(sig, i+1)
+	case withConsumed && kwAt(sig, sql, i, "CONTACT"):
+		// WITH CONTACT ( … )
+		return skipParenGroup(sig, i+1)
+	}
+	return 0, false
+}
+
+// eqValueProp matches "KEY = <value>" where sig[i] is KEY and the value token
+// has kind valKind; it returns the index just past the value.
+func eqValueProp(sig []sqltok.Token, sql string, i int, valKind sqltok.TokenKind) (int, bool) {
+	if isOpEq(sig, sql, i+1) && i+2 < len(sig) && sig[i+2].Kind == valKind {
+		return i + 3, true
+	}
+	return 0, false
+}
+
+// eqKeywordProp matches "KEY = <kw>" where the value is one of the allowed
+// keywords; it returns the index just past the value.
+func eqKeywordProp(sig []sqltok.Token, sql string, i int, allowed ...string) (int, bool) {
+	if isOpEq(sig, sql, i+1) && kwAtAny(sig, sql, i+2, allowed...) != "" {
+		return i + 3, true
+	}
+	return 0, false
+}
+
+// eqBoolProp matches "KEY = TRUE|FALSE"; it returns the index just past the value.
+func eqBoolProp(sig []sqltok.Token, sql string, i int) (int, bool) {
+	return eqKeywordProp(sig, sql, i, "TRUE", "FALSE")
+}
+
+// eqIdentProp matches "KEY = <identifier>" (bare or quoted); it returns the index
+// just past the value.
+func eqIdentProp(sig []sqltok.Token, sql string, i int) (int, bool) {
+	if isOpEq(sig, sql, i+1) && i+2 < len(sig) && isIdent(sig[i+2]) {
+		return i + 3, true
+	}
+	return 0, false
+}
+
+// validTablePropsTail reports whether sig is consumed entirely by valid CREATE
+// TABLE property clauses (an empty sig is vacuously valid). It is the token-based
+// replacement for the tableProps / tablePropsRe allow-list.
+func validTablePropsTail(sig []sqltok.Token, sql string) bool {
+	i := 0
+	for i < len(sig) {
+		next, ok := consumeCreateTableProp(sig, sql, i)
+		if !ok {
+			return false
+		}
+		i = next
+	}
+	return true
+}
+
+// consumeCreateTableProp matches one CREATE TABLE property starting at sig[i] and
+// returns the index just past it; ok is false if none matches. It shares the
+// policy / TAG / CONTACT clauses with the view preamble via
+// consumeObjectPolicyClause and adds the table-only scalar properties.
+func consumeCreateTableProp(sig []sqltok.Token, sql string, i int) (int, bool) {
+	withConsumed := false
+	if kwAt(sig, sql, i, "WITH") {
+		withConsumed = true
+		i++
+	}
+	if n, ok := consumeObjectPolicyClause(sig, sql, i, withConsumed, true); ok {
+		return n, ok
+	}
+	if withConsumed {
+		return 0, false
+	}
+	switch {
+	case kwAt(sig, sql, i, "COPY") && kwAt(sig, sql, i+1, "GRANTS"):
+		return i + 2, true
+	case kwAt(sig, sql, i, "COPY") && kwAt(sig, sql, i+1, "TAGS"):
+		return i + 2, true
+	case kwAt(sig, sql, i, "CLUSTER") && kwAt(sig, sql, i+1, "BY"):
+		return skipParenGroup(sig, i+2)
+	case kwAt(sig, sql, i, "COMMENT"), kwAt(sig, sql, i, "DEFAULT_DDL_COLLATION"):
+		return eqValueProp(sig, sql, i, sqltok.StringLit)
+	case kwAt(sig, sql, i, "DATA_RETENTION_TIME_IN_DAYS"), kwAt(sig, sql, i, "MAX_DATA_EXTENSION_TIME_IN_DAYS"):
+		return eqValueProp(sig, sql, i, sqltok.NumberLit)
+	case kwAt(sig, sql, i, "ENABLE_SCHEMA_EVOLUTION"), kwAt(sig, sql, i, "CHANGE_TRACKING"),
+		kwAt(sig, sql, i, "ERROR_LOGGING"), kwAt(sig, sql, i, "ROW_TIMESTAMP"):
+		return eqBoolProp(sig, sql, i)
+	}
+	return 0, false
+}
+
+// isValidCreateDbSchema reports whether sig is a well-formed CREATE DATABASE or
+// CREATE SCHEMA statement. It accepts:
+//
+//	CREATE [OR REPLACE] [TRANSIENT] {DATABASE|SCHEMA} [IF NOT EXISTS] <name> <prop>*
+//
+// with the property tail validated by consumeDbSchemaProp. It is the token-based
+// replacement for the dbSchemaProps / reValidCreateDbSchema allow-list.
+func isValidCreateDbSchema(sig []sqltok.Token, sql string) bool {
+	i := 0
+	if !kwAt(sig, sql, i, "CREATE") {
+		return false
+	}
+	i++
+	if kwAt(sig, sql, i, "OR") && kwAt(sig, sql, i+1, "REPLACE") {
+		i += 2
+	}
+	if kwAt(sig, sql, i, "TRANSIENT") {
+		i++
+	}
+	if kwAtAny(sig, sql, i, "DATABASE", "SCHEMA") == "" {
+		return false
+	}
+	i++
+	if kwAt(sig, sql, i, "IF") && kwAt(sig, sql, i+1, "NOT") && kwAt(sig, sql, i+2, "EXISTS") {
+		i += 3
+	}
+	if i >= len(sig) || !isIdent(sig[i]) {
+		return false
+	}
+	_, i = readIdentPath(sig, sql, i)
+	for i < len(sig) {
+		next, ok := consumeDbSchemaProp(sig, sql, i)
+		if !ok {
+			return false
+		}
+		i = next
+	}
+	return true
+}
+
+// consumeDbSchemaProp matches one CREATE DATABASE/SCHEMA property starting at
+// sig[i] and returns the index just past it; ok is false if none matches. Unlike
+// the view/table CONTACT clause, both TAG and CONTACT accept an optional WITH
+// here, so the WITH prefix is handled locally rather than via
+// consumeObjectPolicyClause.
+func consumeDbSchemaProp(sig []sqltok.Token, sql string, i int) (int, bool) {
+	if kwAt(sig, sql, i, "WITH") {
+		// WITH MANAGED ACCESS, or WITH TAG/CONTACT ( … ).
+		if kwAt(sig, sql, i+1, "MANAGED") && kwAt(sig, sql, i+2, "ACCESS") {
+			return i + 3, true
+		}
+		if kwAt(sig, sql, i+1, "TAG") || kwAt(sig, sql, i+1, "CONTACT") {
+			return skipParenGroup(sig, i+2)
+		}
+		return 0, false
+	}
+	switch {
+	case kwAt(sig, sql, i, "CLONE"):
+		return consumeDbSchemaClone(sig, sql, i)
+	case kwAt(sig, sql, i, "TAG"), kwAt(sig, sql, i, "CONTACT"):
+		return skipParenGroup(sig, i+1)
+	case kwAt(sig, sql, i, "FROM") && kwAt(sig, sql, i+1, "SHARE"):
+		// FROM SHARE <provider>.<share>
+		j := i + 2
+		if j+2 < len(sig) && isIdent(sig[j]) && sig[j+1].Kind == sqltok.Dot && isIdent(sig[j+2]) {
+			return j + 3, true
+		}
+		return 0, false
+	case kwAt(sig, sql, i, "COMMENT"), kwAt(sig, sql, i, "DEFAULT_DDL_COLLATION"),
+		kwAt(sig, sql, i, "CLASSIFICATION_PROFILE"), kwAt(sig, sql, i, "CATALOG_SYNC"),
+		kwAt(sig, sql, i, "CATALOG_SYNC_NAMESPACE_FLATTEN_DELIMITER"):
+		return eqValueProp(sig, sql, i, sqltok.StringLit)
+	case kwAt(sig, sql, i, "DATA_RETENTION_TIME_IN_DAYS"), kwAt(sig, sql, i, "MAX_DATA_EXTENSION_TIME_IN_DAYS"),
+		kwAt(sig, sql, i, "ICEBERG_VERSION_DEFAULT"):
+		return eqValueProp(sig, sql, i, sqltok.NumberLit)
+	case kwAt(sig, sql, i, "ENABLE_ICEBERG_MERGE_ON_READ"), kwAt(sig, sql, i, "REPLACE_INVALID_CHARACTERS"),
+		kwAt(sig, sql, i, "ENABLE_DATA_COMPACTION"):
+		return eqBoolProp(sig, sql, i)
+	case kwAt(sig, sql, i, "EXTERNAL_VOLUME"), kwAt(sig, sql, i, "CATALOG"), kwAt(sig, sql, i, "OBJECT_VISIBILITY"):
+		return eqIdentProp(sig, sql, i)
+	case kwAt(sig, sql, i, "STORAGE_SERIALIZATION_POLICY"):
+		return eqKeywordProp(sig, sql, i, "COMPATIBLE", "OPTIMIZED")
+	case kwAt(sig, sql, i, "CATALOG_SYNC_NAMESPACE_MODE"):
+		return eqKeywordProp(sig, sql, i, "NEST", "FLATTEN")
+	}
+	return 0, false
+}
+
+// consumeDbSchemaClone matches a CLONE property:
+//
+//	CLONE <name> [{AT|BEFORE} ( … )]
+//	  [IGNORE TABLES WITH INSUFFICIENT DATA RETENTION] [IGNORE HYBRID TABLES]
+//
+// The AT/BEFORE time-travel parens are skipped wholesale; their contents are
+// validated separately by validateTimeTravelClauses.
+func consumeDbSchemaClone(sig []sqltok.Token, sql string, i int) (int, bool) {
+	j := i + 1
+	if j >= len(sig) || !isIdent(sig[j]) {
+		return 0, false
+	}
+	_, j = readIdentPath(sig, sql, j)
+	if kwAtAny(sig, sql, j, "AT", "BEFORE") != "" {
+		next, ok := skipParenGroup(sig, j+1)
+		if !ok {
+			return 0, false
+		}
+		j = next
+	}
+	if kwAt(sig, sql, j, "IGNORE") && kwAt(sig, sql, j+1, "TABLES") && kwAt(sig, sql, j+2, "WITH") &&
+		kwAt(sig, sql, j+3, "INSUFFICIENT") && kwAt(sig, sql, j+4, "DATA") && kwAt(sig, sql, j+5, "RETENTION") {
+		j += 6
+	}
+	if kwAt(sig, sql, j, "IGNORE") && kwAt(sig, sql, j+1, "HYBRID") && kwAt(sig, sql, j+2, "TABLES") {
+		j += 3
+	}
+	return j, true
+}
+
+// isVirtualColumn reports whether an EXTERNAL TABLE column definition (its
+// significant tokens colSig) is a virtual column: it contains an "AS (" and ends
+// with ")". Token-based replacement for reVirtualColAS.
+func isVirtualColumn(colSig []sqltok.Token, col string) bool {
+	if len(colSig) == 0 || colSig[len(colSig)-1].Kind != sqltok.RParen {
+		return false
+	}
+	for k := 0; k+1 < len(colSig); k++ {
+		if tokUpper(colSig[k], col) == "AS" && colSig[k+1].Kind == sqltok.LParen {
+			return true
+		}
+	}
+	return false
+}
+
+// validateCreateExternalTable validates CREATE EXTERNAL TABLE statements: it
+// rejects OR REPLACE / CLUSTER BY / DATA_RETENTION_TIME_IN_DAYS, requires a
+// non-empty column list of virtual (AS <expr>) columns, allows an optional
+// PARTITION BY (...), and requires WITH LOCATION and FILE_FORMAT. Fully
+// tokenised — the preamble/column/clause walk, the virtual-column check
+// (isVirtualColumn), and the property tail (validExtTablePropsTail) all operate
+// on the token stream.
+func validateCreateExternalTable(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+	sig := sigTokens(stripped)
+
+	preambleEnd := findPreambleEnd(sig, stripped, "TABLE")
+	if preambleEnd < 0 {
+		return oneMarker(r, "Unexpected syntax in CREATE EXTERNAL TABLE statement.")
+	}
+
+	// OR REPLACE is invalid for EXTERNAL TABLE.
+	if hasKWPair(sig, stripped, "OR", "REPLACE") {
+		return oneMarker(r, "OR REPLACE is not supported for EXTERNAL TABLE. Use DROP and CREATE.")
+	}
+
+	if hasKWPair(sig, stripped, "CLUSTER", "BY") {
+		return oneMarker(r, "CLUSTER BY is not supported for EXTERNAL TABLE.")
+	}
+	if hasKW(sig, stripped, "DATA_RETENTION_TIME_IN_DAYS") {
+		return oneMarker(r, "DATA_RETENTION_TIME_IN_DAYS is not applicable to EXTERNAL TABLE.")
+	}
+
+	rest := strings.TrimSpace(stripped[preambleEnd:])
+
+	if !strings.HasPrefix(rest, "(") {
+		return oneMarker(r, "EXTERNAL TABLE must have a column list.")
+	}
+
+	// Find matching close paren for column list
+	endIdx := findMatchingParen(rest)
+	if endIdx == -1 {
+		return oneMarker(r, "Unclosed column list in CREATE EXTERNAL TABLE statement.")
+	}
+
+	colList := rest[1:endIdx]
+	cols := splitTopLevelCommas(colList)
+
+	// Snowflake rejects empty column lists
+	if len(cols) == 0 || (len(cols) == 1 && strings.TrimSpace(cols[0]) == "") {
+		return oneMarker(r, "Column list must not be empty.")
+	}
+
+	hasColError := false
+	for _, col := range cols {
+		col = strings.TrimSpace(col)
+		if col == "" {
+			continue
+		}
+		colSig := sigTokens(col)
+		if len(colSig) > 0 {
+			first := strings.ToUpper(colSig[0].Text(col))
+			if first == "CONSTRAINT" || first == "UNIQUE" ||
+				(first == "PRIMARY" && len(colSig) > 1 && kwAt(colSig, col, 1, "KEY")) ||
+				(first == "FOREIGN" && len(colSig) > 1 && kwAt(colSig, col, 1, "KEY")) {
+				continue
+			}
+		}
+		if !isVirtualColumn(colSig, col) {
+			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Column '%s' in EXTERNAL TABLE must be a virtual column using AS <expr>.", col)))
+			hasColError = true
+		}
+	}
+	if hasColError {
+		return markers
+	}
+
+	after := strings.TrimSpace(rest[endIdx+1:])
+
+	// Check for PARTITION BY
+	afterSigPB := sigTokens(after)
+	if len(afterSigPB) >= 2 && kwAt(afterSigPB, after, 0, "PARTITION") && kwAt(afterSigPB, after, 1, "BY") {
+		remainder := strings.TrimSpace(after[afterSigPB[1].End:])
+		if !strings.HasPrefix(remainder, "(") {
+			return append(markers, diagMarkerSpan(r, "PARTITION BY in EXTERNAL TABLE requires a parenthesised column list."))
+		}
+		partEnd := findMatchingParen(remainder)
+		if partEnd != -1 {
+			after = strings.TrimSpace(remainder[partEnd+1:])
+		} else {
+			return append(markers, diagMarkerSpan(r, "Unclosed parenthesised column list in PARTITION BY clause."))
+		}
+	}
+
+	// Mandatory WITH LOCATION and FILE_FORMAT
+	afterSig := sigTokens(after)
+	if !(hasKW(afterSig, after, "WITH") && hasKWAssign(afterSig, after, "LOCATION")) {
+		return append(markers, diagMarkerSpan(r, "WITH LOCATION = @<stage> is mandatory for EXTERNAL TABLE."))
+	}
+	if !hasKWAssign(afterSig, after, "FILE_FORMAT") {
+		return append(markers, diagMarkerSpan(r, "FILE_FORMAT is mandatory for EXTERNAL TABLE."))
+	}
+
+	// Validate remaining properties
+	if !validExtTablePropsTail(afterSig, after) {
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE EXTERNAL TABLE properties."))
+	}
+	return markers
+}
+
+// validExtTablePropsTail reports whether sig is consumed entirely by valid
+// CREATE EXTERNAL TABLE properties (an empty sig is vacuously valid). It is the
+// token-based replacement for the extTableProps / extTablePropsRe allow-list.
+func validExtTablePropsTail(sig []sqltok.Token, sql string) bool {
+	i := 0
+	for i < len(sig) {
+		next, ok := consumeExtTableProp(sig, sql, i)
+		if !ok {
+			return false
+		}
+		i = next
+	}
+	return true
+}
+
+// consumeExtTableProp matches one CREATE EXTERNAL TABLE property starting at
+// sig[i] and returns the index just past it; ok is false if none matches.
+func consumeExtTableProp(sig []sqltok.Token, sql string, i int) (int, bool) {
+	if kwAt(sig, sql, i, "WITH") {
+		// WITH LOCATION = @<stage>, or [WITH] TAG ( … ).
+		switch {
+		case kwAt(sig, sql, i+1, "LOCATION"):
+			if !isOpEq(sig, sql, i+2) || i+3 >= len(sig) || sig[i+3].Kind != sqltok.At {
+				return 0, false
+			}
+			return consumeAtPath(sig, sql, i+3), true
+		case kwAt(sig, sql, i+1, "TAG"):
+			return skipParenGroup(sig, i+2)
+		}
+		return 0, false
+	}
+	switch {
+	case kwAt(sig, sql, i, "TAG"):
+		return skipParenGroup(sig, i+1)
+	case kwAt(sig, sql, i, "COPY") && kwAt(sig, sql, i+1, "GRANTS"):
+		return i + 2, true
+	case kwAt(sig, sql, i, "FILE_FORMAT"):
+		// FILE_FORMAT = ( FORMAT_NAME … | TYPE … )
+		if !isOpEq(sig, sql, i+1) {
+			return 0, false
+		}
+		innerStart, _, ok := parenInnerRange(sig, i+2)
+		if !ok || !(kwAt(sig, sql, innerStart, "FORMAT_NAME") || kwAt(sig, sql, innerStart, "TYPE")) {
+			return 0, false
+		}
+		return skipParenGroup(sig, i+2)
+	case kwAt(sig, sql, i, "PATTERN"), kwAt(sig, sql, i, "AWS_SNS_TOPIC"),
+		kwAt(sig, sql, i, "INTEGRATION"), kwAt(sig, sql, i, "COMMENT"):
+		return eqValueProp(sig, sql, i, sqltok.StringLit)
+	case kwAt(sig, sql, i, "REFRESH_ON_CREATE"), kwAt(sig, sql, i, "AUTO_REFRESH"):
+		return eqBoolProp(sig, sql, i)
+	case kwAt(sig, sql, i, "PARTITION_TYPE"):
+		return eqKeywordProp(sig, sql, i, "USER_SPECIFIED")
+	case kwAt(sig, sql, i, "TABLE_FORMAT"):
+		return eqKeywordProp(sig, sql, i, "DELTA")
+	}
+	return 0, false
+}
+
+// consumeAtPath consumes an @-prefixed stage reference (sig[i] is the "@" token)
+// up to the next whitespace, mirroring the regex @\S+, and returns the index just
+// past it. Token boundaries don't preserve whitespace, so the run end is found in
+// the source.
+func consumeAtPath(sig []sqltok.Token, sql string, i int) int {
+	end := len(sql)
+	for k := sig[i].Start; k < len(sql); k++ {
+		if c := sql[k]; c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+			end = k
+			break
+		}
+	}
+	j := i + 1
+	for j < len(sig) && sig[j].Start < end {
+		j++
+	}
+	return j
+}
+
+// validateCreateTablePreamble validates the CREATE TABLE preamble: the OR
+// REPLACE vs IF NOT EXISTS conflict, the modifier order, and that the body is
+// one of the accepted forms — a column list (optionally followed by table
+// properties or AS SELECT), CTAS, CLONE, LIKE, FROM BACKUP SET, or USING
+// TEMPLATE.
+//
+// Fully tokenised: the modifier order is checked by findCreateTablePreambleEnd,
+// the body form by token inspection, and the trailing table-property list by
+// validTablePropsTail (which shares its policy/TAG/CONTACT clause matching with
+// the CREATE VIEW preamble via consumeObjectPolicyClause).
+func validateCreateTablePreamble(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+	sig := sigTokens(parseText)
+
+	// Specific Snowflake Error: OR REPLACE and IF NOT EXISTS are mutually exclusive
+	if marker, conflict := checkOrReplaceConflictTok(sig, parseText, r, "CREATE TABLE"); conflict {
+		return []DiagMarker{marker}
+	}
+
+	// Validate that the preamble follows the expected modifier order:
+	// CREATE [OR (REPLACE|ALTER)] [LOCAL|GLOBAL] [TEMP|TEMPORARY|VOLATILE|TRANSIENT] TABLE
+	preambleEnd := findCreateTablePreambleEnd(sig, parseText)
+	if preambleEnd < 0 {
+		return oneMarker(r, "Unexpected syntax in CREATE TABLE statement.")
+	}
+	rest := strings.TrimSpace(stripCommentsSQL(parseText[preambleEnd:]))
+
+	restSig := sigTokens(rest)
+	isValid := false
+	switch {
+	case isCreateTableBackup(restSig, rest):
+		isValid = true
+	case isCreateTableCTAS(restSig, rest):
+		isValid = true
+	case len(restSig) > 0 && (kwAt(restSig, rest, 0, "CLONE") || kwAt(restSig, rest, 0, "LIKE")):
+		isValid = true
+	case len(restSig) >= 2 && kwAt(restSig, rest, 0, "USING") && kwAt(restSig, rest, 1, "TEMPLATE") &&
+		len(restSig) > 2 && restSig[2].Kind == sqltok.LParen:
+		isValid = true
+	case strings.HasPrefix(rest, "("):
+		endIdx := findMatchingParen(rest)
+		if endIdx != -1 {
+			colsContent := rest[1:endIdx]
+			colsClean := stripQuotedIdents(sqltok.StripStrings(colsContent))
+			colsSig := sigTokens(colsClean)
+			if hasKW(colsSig, colsClean, "INDEX") {
+				markers = append(markers, diagMarkerSpan(r, "Secondary indexes (INDEX) are only supported on hybrid tables."))
+			}
+
+			after := strings.TrimSpace(rest[endIdx+1:])
+			afterSigCT := sigTokens(after)
+			if validTablePropsTail(afterSigCT, after) || isCreateTableCTAS(afterSigCT, after) {
+				isValid = true
+			}
+		}
+	}
+
+	if !isValid {
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE TABLE statement."))
+	}
+	return markers
+}
+
+// isCreateTableCTAS checks whether sig starts with AS SELECT or AS WITH.
+func isCreateTableCTAS(sig []sqltok.Token, text string) bool {
+	return len(sig) >= 2 && kwAt(sig, text, 0, "AS") &&
+		(kwAt(sig, text, 1, "SELECT") || kwAt(sig, text, 1, "WITH"))
+}
+
+// isCreateTableBackup checks whether sig starts with FROM BACKUP SET ... '<name>'.
+func isCreateTableBackup(sig []sqltok.Token, text string) bool {
+	if len(sig) < 4 {
+		return false
+	}
+	if !kwAt(sig, text, 0, "FROM") || !kwAt(sig, text, 1, "BACKUP") || !kwAt(sig, text, 2, "SET") {
+		return false
+	}
+	// After SET, we may have an optional identPath + IDENTIFIER, then a string literal.
+	for i := 3; i < len(sig); i++ {
+		if sig[i].Kind == sqltok.StringLit {
+			return true
+		}
+	}
+	return false
+}
+
+// validateCreateDbOrSchema returns a validator that flags a CREATE DATABASE or
+// CREATE SCHEMA statement (kind selects which) whose syntax does not match the
+// accepted grammar: the name plus any of the many optional properties (CLONE,
+// WITH MANAGED ACCESS, retention/extension days, catalog/volume, tags, …).
+//
+// The grammar walk lives in isValidCreateDbSchema (token-based); kind only
+// selects the wording of the diagnostic.
+func validateCreateDbOrSchema(kind string) func(string, StatementRange) []DiagMarker {
+	return func(parseText string, r StatementRange) []DiagMarker {
+		if !isValidCreateDbSchema(sigTokens(parseText), parseText) {
+			return oneMarker(r, "Unexpected syntax in CREATE "+kind+" statement.")
+		}
+		return nil
+	}
+}
+
+// isValidDropStmt reports whether sig is a simple DROP statement of the form
+//
+//	DROP <object> [IF EXISTS] <name> [CASCADE|RESTRICT]
+//
+// where <object> is the space-separated keyword phrase (e.g. "DATABASE",
+// "SEQUENCE"). Token-based replacement for the reValidDropDbSchema /
+// reValidDropSeq one-liners, shared by the object types with this exact grammar.
+func isValidDropStmt(sig []sqltok.Token, sql, object string) bool {
+	if !kwAt(sig, sql, 0, "DROP") {
+		return false
+	}
+	i := 1
+	for _, w := range strings.Split(object, " ") {
+		if !kwAt(sig, sql, i, w) {
+			return false
+		}
+		i++
+	}
+	if kwAt(sig, sql, i, "IF") && kwAt(sig, sql, i+1, "EXISTS") {
+		i += 2
+	}
+	if i >= len(sig) || !isIdent(sig[i]) {
+		return false
+	}
+	_, i = readIdentPath(sig, sql, i)
+	if kwAtAny(sig, sql, i, "CASCADE", "RESTRICT") != "" {
+		i++
+	}
+	return i == len(sig)
+}
+
+// validateDropDbOrSchema returns a validator that flags a DROP DATABASE or DROP
+// SCHEMA statement (kind selects which) that is not "DROP <kind> [IF EXISTS]
+// <name> [CASCADE|RESTRICT]". Token-based via isValidDropStmt.
+func validateDropDbOrSchema(kind string) func(string, StatementRange) []DiagMarker {
+	return func(parseText string, r StatementRange) []DiagMarker {
+		if !isValidDropStmt(sigTokens(parseText), parseText, kind) {
+			return oneMarker(r, "Unexpected syntax in DROP "+kind+" statement.")
+		}
+		return nil
+	}
+}
+
+// isValidCreateSeq reports whether sig is a well-formed CREATE SEQUENCE statement:
+//
+//	CREATE [OR REPLACE] SEQUENCE [IF NOT EXISTS] <name> [WITH] <clause>*
+//
+// where each clause is START [WITH|=] <int>, INCREMENT [BY|=] <int>, ORDER,
+// NOORDER, or COMMENT = '…'. Token-based replacement for reValidCreateSeq.
+func isValidCreateSeq(sig []sqltok.Token, sql string) bool {
+	i := 0
+	if !kwAt(sig, sql, i, "CREATE") {
+		return false
+	}
+	i++
+	if kwAt(sig, sql, i, "OR") && kwAt(sig, sql, i+1, "REPLACE") {
+		i += 2
+	}
+	if !kwAt(sig, sql, i, "SEQUENCE") {
+		return false
+	}
+	i++
+	if kwAt(sig, sql, i, "IF") && kwAt(sig, sql, i+1, "NOT") && kwAt(sig, sql, i+2, "EXISTS") {
+		i += 3
+	}
+	if i >= len(sig) || !isIdent(sig[i]) {
+		return false
+	}
+	_, i = readIdentPath(sig, sql, i)
+	if kwAt(sig, sql, i, "WITH") { // optional leading WITH
+		i++
+	}
+	for i < len(sig) {
+		next, ok := consumeSequenceClause(sig, sql, i)
+		if !ok {
+			return false
+		}
+		i = next
+	}
+	return true
+}
+
+// consumeSequenceClause matches one CREATE SEQUENCE clause starting at sig[i].
+func consumeSequenceClause(sig []sqltok.Token, sql string, i int) (int, bool) {
+	switch {
+	case kwAt(sig, sql, i, "START"):
+		return consumeSeqValueClause(sig, sql, i, "WITH")
+	case kwAt(sig, sql, i, "INCREMENT"):
+		return consumeSeqValueClause(sig, sql, i, "BY")
+	case kwAt(sig, sql, i, "ORDER"), kwAt(sig, sql, i, "NOORDER"):
+		return i + 1, true
+	case kwAt(sig, sql, i, "COMMENT"):
+		return eqValueProp(sig, sql, i, sqltok.StringLit)
+	}
+	return 0, false
+}
+
+// consumeSeqValueClause matches "START|INCREMENT [midKW|=] <signed int>", where
+// midKW is WITH (for START) or BY (for INCREMENT).
+func consumeSeqValueClause(sig []sqltok.Token, sql string, i int, midKW string) (int, bool) {
+	j := i + 1
+	if kwAt(sig, sql, j, midKW) || isOpEq(sig, sql, j) {
+		j++
+	}
+	if j < len(sig) && sig[j].Kind == sqltok.Operator && sig[j].Text(sql) == "-" {
+		j++ // optional negative sign
+	}
+	if j < len(sig) && sig[j].Kind == sqltok.NumberLit {
+		return j + 1, true
+	}
+	return 0, false
+}
+
+// validateCreateSequence flags a CREATE SEQUENCE whose syntax is invalid or that
+// specifies both ORDER and NOORDER (mutually exclusive). Both checks are
+// token-based: the ORDER/NOORDER clash via hasKW, the overall shape via
+// isValidCreateSeq.
+func validateCreateSequence(parseText string, r StatementRange) []DiagMarker {
+	sig := sigTokens(parseText)
+	bothOrderNoorder := hasKW(sig, parseText, "ORDER") && hasKW(sig, parseText, "NOORDER")
+	if !isValidCreateSeq(sig, parseText) || bothOrderNoorder {
+		return oneMarker(r, "Unexpected syntax in CREATE SEQUENCE statement.")
+	}
+	return nil
+}
+
+// isValidAlterSeq reports whether sig is a well-formed ALTER SEQUENCE statement:
+//
+//	ALTER SEQUENCE [IF EXISTS] <name> <action>
+//
+// where <action> is exactly one of: RENAME TO <name>; [SET] INCREMENT [BY|=]
+// <int>; SET (ORDER|NOORDER|COMMENT = '…')+; or UNSET COMMENT. Token-based
+// replacement for reValidAlterSeq.
+func isValidAlterSeq(sig []sqltok.Token, sql string) bool {
+	i := 0
+	if !kwAt(sig, sql, i, "ALTER") || !kwAt(sig, sql, i+1, "SEQUENCE") {
+		return false
+	}
+	i += 2
+	if kwAt(sig, sql, i, "IF") && kwAt(sig, sql, i+1, "EXISTS") {
+		i += 2
+	}
+	if i >= len(sig) || !isIdent(sig[i]) {
+		return false
+	}
+	_, i = readIdentPath(sig, sql, i)
+
+	switch {
+	case kwAt(sig, sql, i, "RENAME") && kwAt(sig, sql, i+1, "TO"):
+		j := i + 2
+		if j >= len(sig) || !isIdent(sig[j]) {
+			return false
+		}
+		_, j = readIdentPath(sig, sql, j)
+		return j == len(sig)
+	case kwAt(sig, sql, i, "SET") && kwAt(sig, sql, i+1, "INCREMENT"):
+		next, ok := consumeSeqValueClause(sig, sql, i+1, "BY")
+		return ok && next == len(sig)
+	case kwAt(sig, sql, i, "INCREMENT"):
+		next, ok := consumeSeqValueClause(sig, sql, i, "BY")
+		return ok && next == len(sig)
+	case kwAt(sig, sql, i, "SET"):
+		// SET (ORDER | NOORDER | COMMENT = '…')+  — at least one entry.
+		j, count := i+1, 0
+		for j < len(sig) {
+			switch {
+			case kwAt(sig, sql, j, "ORDER"), kwAt(sig, sql, j, "NOORDER"):
+				j++
+			case kwAt(sig, sql, j, "COMMENT"):
+				next, ok := eqValueProp(sig, sql, j, sqltok.StringLit)
+				if !ok {
+					return false
+				}
+				j = next
+			default:
+				return false
+			}
+			count++
+		}
+		return count >= 1
+	case kwAt(sig, sql, i, "UNSET") && kwAt(sig, sql, i+1, "COMMENT"):
+		return i+2 == len(sig)
+	}
+	return false
+}
+
+// validateAlterSequence flags an ALTER SEQUENCE that is syntactically invalid or
+// that specifies both ORDER and NOORDER. Both checks are token-based: the
+// ORDER/NOORDER clash via hasKW, the statement shape via isValidAlterSeq.
+func validateAlterSequence(parseText string, r StatementRange) []DiagMarker {
+	sig := sigTokens(parseText)
+	bothOrderNoorder := hasKW(sig, parseText, "ORDER") && hasKW(sig, parseText, "NOORDER")
+	if !isValidAlterSeq(sig, parseText) || bothOrderNoorder {
+		return oneMarker(r, "Unexpected syntax in ALTER SEQUENCE statement.")
+	}
+	return nil
+}
+
+// validateDropSequence flags a DROP SEQUENCE that is not
+// "DROP SEQUENCE [IF EXISTS] <name> [CASCADE|RESTRICT]". Token-based via
+// isValidDropStmt.
+func validateDropSequence(parseText string, r StatementRange) []DiagMarker {
+	if !isValidDropStmt(sigTokens(parseText), parseText, "SEQUENCE") {
+		return oneMarker(r, "Unexpected syntax in DROP SEQUENCE statement.")
+	}
+	return nil
+}
+
+// validateCreateDynTable validates CREATE DYNAMIC TABLE for mandatory clauses
+// (TARGET_LAG, WAREHOUSE, AS SELECT/WITH) using token-based detection.
+func validateCreateDynTable(parseText string, r StatementRange) []DiagMarker {
+	sig := sigTokens(parseText)
+	if !hasKWAssign(sig, parseText, "TARGET_LAG") ||
+		!hasKWAssign(sig, parseText, "WAREHOUSE") ||
+		!(hasKWPair(sig, parseText, "AS", "SELECT") || hasKWPair(sig, parseText, "AS", "WITH")) {
+		return oneMarker(r, "Unexpected syntax in CREATE DYNAMIC TABLE statement.")
+	}
+	return nil
+}
+
+// validateCreateIntegration validates CREATE INTEGRATION statements:
+// account-level name check and type-specific property requirements.
+func validateCreateIntegration(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
+
+	// 1. Account-level check: no prefix allowed.
+	// Find the name token(s) after INTEGRATION keyword.
+	for i := 0; i < len(sig); i++ {
+		if tokUpper(sig[i], stripped) == "INTEGRATION" {
+			name, _ := readIdentPath(sig, stripped, i+1)
+			if name != "" && strings.Contains(name, ".") {
+				markers = append(markers, diagMarkerSpan(r, "Integrations are account-level objects and cannot have a database or schema prefix."))
+			}
+			break
+		}
+	}
+
+	// 2. Type-specific checks
+	switch {
+	case hasKWPair(sig, stripped, "API", "INTEGRATION"):
+		if !hasKWAssign(sig, stripped, "API_PROVIDER") {
+			markers = append(markers, diagMarkerSpan(r, "Missing required parameter API_PROVIDER for API Integration."))
+		}
+	case hasKWPair(sig, stripped, "NOTIFICATION", "INTEGRATION"):
+		if typeVal, ok := findKWAssign(sig, stripped, "TYPE"); ok {
+			t := strings.ToUpper(typeVal)
+			if t != "EMAIL" && t != "QUEUE" {
+				markers = append(markers, diagMarkerSpan(r, "Invalid TYPE for Notification Integration. Valid types are EMAIL, QUEUE."))
+			}
+		}
+	case hasKWPair(sig, stripped, "SECURITY", "INTEGRATION"):
+		if !hasKWAssign(sig, stripped, "TYPE") {
+			markers = append(markers, diagMarkerSpan(r, "Missing required parameter TYPE for Security Integration."))
+		}
+	case hasKWSeq(sig, stripped, "EXTERNAL", "ACCESS", "INTEGRATION"):
+		if hasKWAssign(sig, stripped, "MAX_RETRIES") {
+			markers = append(markers, diagMarkerSpan(r, "Unexpected property 'MAX_RETRIES' for External Access Integration."))
+		}
+	}
+	return markers
+}
+
+// validateCreateWarehouse validates CREATE WAREHOUSE: account-level prefix check
+// and property validation.
+func validateCreateWarehouse(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+	sig := sigTokens(parseText)
+	name, _ := extractNameAfterCreate(sig, parseText, nil, "WAREHOUSE")
+	if name != "" && strings.Contains(name, ".") {
+		markers = append(markers, diagMarkerSpan(r, "Warehouses are account-level objects and cannot have a database or schema prefix."))
+	}
+	validateProperties(parseText, whProps, r, &markers)
+	return markers
+}
+
+// validateCreateResourceMonitor validates CREATE RESOURCE MONITOR properties.
+func validateCreateResourceMonitor(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+	validateProperties(parseText, rmProps, r, &markers)
+	return markers
+}
+
+// isValidCreateStream reports whether sig is a well-formed CREATE STREAM:
+//
+//	CREATE [OR REPLACE] STREAM [IF NOT EXISTS] <name> [COPY GRANTS]
+//	  ON {TABLE|VIEW|STAGE|EXTERNAL TABLE} <source> [{AT|BEFORE} ( … )] <prop>*
+//
+// where each prop is APPEND_ONLY / INSERT_ONLY / SHOW_INITIAL_ROWS /
+// CHANGE_TRACKING = TRUE|FALSE, or COMMENT = '…'. Token-based replacement for
+// reValidCreateStream.
+func isValidCreateStream(sig []sqltok.Token, sql string) bool {
+	i := 0
+	if !kwAt(sig, sql, i, "CREATE") {
+		return false
+	}
+	i++
+	if kwAt(sig, sql, i, "OR") && kwAt(sig, sql, i+1, "REPLACE") {
+		i += 2
+	}
+	if !kwAt(sig, sql, i, "STREAM") {
+		return false
+	}
+	i++
+	if kwAt(sig, sql, i, "IF") && kwAt(sig, sql, i+1, "NOT") && kwAt(sig, sql, i+2, "EXISTS") {
+		i += 3
+	}
+	if i >= len(sig) || !isIdent(sig[i]) {
+		return false
+	}
+	_, i = readIdentPath(sig, sql, i)
+	if kwAt(sig, sql, i, "COPY") && kwAt(sig, sql, i+1, "GRANTS") { // only valid before ON
+		i += 2
+	}
+	if !kwAt(sig, sql, i, "ON") {
+		return false
+	}
+	i++
+	switch {
+	case kwAtAny(sig, sql, i, "TABLE", "VIEW", "STAGE") != "":
+		i++
+	case kwAt(sig, sql, i, "EXTERNAL") && kwAt(sig, sql, i+1, "TABLE"):
+		i += 2
+	default:
+		return false
+	}
+	if i >= len(sig) || !isIdent(sig[i]) {
+		return false
+	}
+	_, i = readIdentPath(sig, sql, i)
+	if kwAtAny(sig, sql, i, "AT", "BEFORE") != "" { // optional time travel
+		next, ok := skipParenGroup(sig, i+1)
+		if !ok {
+			return false
+		}
+		i = next
+	}
+	for i < len(sig) {
+		next, ok := consumeStreamProp(sig, sql, i)
+		if !ok {
+			return false
+		}
+		i = next
+	}
+	return true
+}
+
+// consumeStreamProp matches one CREATE STREAM property starting at sig[i].
+func consumeStreamProp(sig []sqltok.Token, sql string, i int) (int, bool) {
+	switch {
+	case kwAt(sig, sql, i, "APPEND_ONLY"), kwAt(sig, sql, i, "INSERT_ONLY"),
+		kwAt(sig, sql, i, "SHOW_INITIAL_ROWS"), kwAt(sig, sql, i, "CHANGE_TRACKING"):
+		return eqBoolProp(sig, sql, i)
+	case kwAt(sig, sql, i, "COMMENT"):
+		return eqValueProp(sig, sql, i, sqltok.StringLit)
+	}
+	return 0, false
+}
+
+// validateCreateStream validates CREATE STREAM: the OR REPLACE vs IF NOT EXISTS
+// conflict and the overall statement shape (ON TABLE/VIEW/STAGE/EXTERNAL TABLE,
+// optional AT/BEFORE time travel, and stream properties). Both checks are
+// token-based, via checkOrReplaceConflictTok and isValidCreateStream.
+func validateCreateStream(parseText string, r StatementRange) []DiagMarker {
+	sig := sigTokens(parseText)
+	if marker, conflict := checkOrReplaceConflictTok(sig, parseText, r, "CREATE STREAM"); conflict {
+		return []DiagMarker{marker}
+	}
+
+	if !isValidCreateStream(sig, parseText) {
+		return oneMarker(r, "Unexpected syntax in CREATE STREAM statement.")
+	}
+	return nil
+}
+
+// validateCreatePipe validates CREATE PIPE: OR REPLACE conflict, mandatory
+// AS COPY INTO, property validation, and AUTO_INGEST/AWS_SNS_TOPIC checks.
+func validateCreatePipe(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+	sig := sigTokens(parseText)
+
+	// 1. Conflict between OR REPLACE and IF NOT EXISTS
+	if marker, conflict := checkOrReplaceConflictTok(sig, parseText, r, "CREATE PIPE"); conflict {
+		return []DiagMarker{marker}
+	}
+
+	// 2. Mandatory AS COPY INTO — find using tokens.
+	asIdx := -1
+	for pi := 0; pi+2 < len(sig); pi++ {
+		if tokUpper(sig[pi], parseText) == "AS" &&
+			tokUpper(sig[pi+1], parseText) == "COPY" &&
+			tokUpper(sig[pi+2], parseText) == "INTO" {
+			asIdx = pi
+			break
+		}
+	}
+	if asIdx < 0 {
+		return oneMarker(r, "Missing mandatory AS COPY INTO clause in CREATE PIPE statement.")
+	}
+
+	preambleSig := sig[:asIdx]
+	preamble := parseText[:sig[asIdx].Start]
+	// 3. Property validation
+	validateProperties(preamble, pipeProps, r, &markers)
+
+	// 4. AWS_SNS_TOPIC requires AUTO_INGEST = TRUE
+	if hasKWAssign(preambleSig, parseText, "AWS_SNS_TOPIC") {
+		autoIngestVal, _ := findKWAssignIdent(preambleSig, parseText, "AUTO_INGEST")
+		if !strings.EqualFold(autoIngestVal, "TRUE") {
+			markers = append(markers, diagMarkerSpan(r, "AWS_SNS_TOPIC is only meaningful when AUTO_INGEST = TRUE."))
+		}
+	}
+
+	// 5. Warning for AUTO_INGEST = TRUE without stage source
+	autoIngestVal, _ := findKWAssignIdent(preambleSig, parseText, "AUTO_INGEST")
+	if strings.EqualFold(autoIngestVal, "TRUE") {
+		copySig := sig[asIdx:]
+		hasFromStage := false
+		for pi := 0; pi+1 < len(copySig); pi++ {
+			if tokUpper(copySig[pi], parseText) == "FROM" &&
+				pi+1 < len(copySig) && copySig[pi+1].Kind == sqltok.At {
+				hasFromStage = true
+				break
+			}
+		}
+		if !hasFromStage {
+			markers = append(markers, diagMarkerSpan(r, "AUTO_INGEST = TRUE typically requires a stage source (FROM @stage)."))
+		}
+	}
+
+	return markers
+}
+
+// validateCreateFunction validates CREATE FUNCTION: mandatory RETURNS, LANGUAGE,
+// AS body, AGGREGATE/SECURE conflicts, Python/Java/Scala requirements, MEMOIZABLE.
+func validateCreateFunction(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+	sig := sigTokens(parseText)
+	asBodyIdx := findFuncBodyAS(sig, parseText)
+
+	preambleSig := sig
+	if asBodyIdx < 0 {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory AS clause in CREATE FUNCTION statement."))
+	} else {
+		preambleSig = sig[:asBodyIdx]
+	}
+
+	isAggregate := hasKWPair(preambleSig, parseText, "AGGREGATE", "FUNCTION")
+	isSecure := hasKW(preambleSig, parseText, "SECURE")
+
+	if isSecure && isAggregate {
+		markers = append(markers, diagMarkerSpan(r, "SECURE is not supported for AGGREGATE functions."))
+	}
+
+	// 1. Mandatory RETURNS
+	returnsIdx := -1
+	isTable := false
+	for pi := 0; pi < len(preambleSig); pi++ {
+		if tokUpper(preambleSig[pi], parseText) == "RETURNS" {
+			returnsIdx = pi
+			if pi+1 < len(preambleSig) && tokUpper(preambleSig[pi+1], parseText) == "TABLE" {
+				isTable = true
+			}
+			break
+		}
+	}
+	if returnsIdx < 0 {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory RETURNS clause in CREATE FUNCTION statement."))
+	} else if isAggregate && isTable {
+		markers = append(markers, diagMarkerSpan(r, "AGGREGATE functions cannot return a TABLE."))
+	}
+
+	// 2. Mandatory LANGUAGE
+	lang := findLanguage(preambleSig, parseText)
+	if lang == "" {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory LANGUAGE clause in CREATE FUNCTION statement."))
+	} else {
+		switch lang {
+		case "JAVASCRIPT", "PYTHON", "JAVA", "SCALA", "SQL":
+			// valid
+		default:
+			markers = append(markers, diagMarkerSpan(r, "Unknown or unsupported LANGUAGE '"+lang+"' in CREATE FUNCTION."))
+		}
+
+		if lang == "PYTHON" {
+			checkPythonRequirements(preambleSig, parseText, r, &markers, "functions")
+		}
+		if lang == "JAVA" || lang == "SCALA" {
+			if !hasKW(preambleSig, parseText, "HANDLER") {
+				markers = append(markers, diagMarkerSpan(r, "HANDLER is required for "+lang+" functions."))
+			}
+		}
+	}
+
+	checkNullInputHandling(preambleSig, parseText, r, &markers)
+
+	// MEMOIZABLE
+	if hasKW(preambleSig, parseText, "MEMOIZABLE") {
+		if isAggregate || isTable {
+			markers = append(markers, diagMarkerSpan(r, "MEMOIZABLE is only valid for scalar functions."))
+		}
+	}
+
+	return markers
+}
+
+// validateCreateProcedure validates CREATE PROCEDURE: mandatory RETURNS,
+// LANGUAGE, AS body, Python requirements, EXECUTE AS clause.
+func validateCreateProcedure(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+	sig := sigTokens(parseText)
+
+	// CREATE OR ALTER PROCEDURE is not validated here (Snowflake-specific
+	// syntax not yet fully supported by the validator).
+	if len(sig) >= 3 && tokUpper(sig[1], parseText) == "OR" && tokUpper(sig[2], parseText) == "ALTER" {
+		return nil
+	}
+
+	asBodyIdx := findFuncBodyAS(sig, parseText)
+
+	preambleSig := sig
+	if asBodyIdx < 0 {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory AS clause in CREATE PROCEDURE statement."))
+	} else {
+		preambleSig = sig[:asBodyIdx]
+	}
+
+	// 1. Mandatory RETURNS
+	if !hasKW(preambleSig, parseText, "RETURNS") {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory RETURNS clause in CREATE PROCEDURE statement."))
+	}
+
+	// 2. Mandatory LANGUAGE
+	lang := findLanguage(preambleSig, parseText)
+	if lang == "" {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory LANGUAGE clause in CREATE PROCEDURE statement."))
+	} else {
+		switch lang {
+		case "JAVASCRIPT", "PYTHON", "JAVA", "SCALA", "SQL":
+			// valid
+		default:
+			markers = append(markers, diagMarkerSpan(r, "Unknown or unsupported LANGUAGE '"+lang+"' in CREATE PROCEDURE."))
+		}
+
+		if lang == "PYTHON" {
+			checkPythonRequirements(preambleSig, parseText, r, &markers, "procedures")
+		}
+	}
+
+	checkNullInputHandling(preambleSig, parseText, r, &markers)
+
+	// 5. EXECUTE AS
+	for pi := 0; pi+2 < len(preambleSig); pi++ {
+		if tokUpper(preambleSig[pi], parseText) == "EXECUTE" &&
+			tokUpper(preambleSig[pi+1], parseText) == "AS" &&
+			isIdent(preambleSig[pi+2]) {
+			execVal := strings.ToUpper(preambleSig[pi+2].Text(parseText))
+			if execVal != "CALLER" && execVal != "OWNER" {
+				markers = append(markers, diagMarkerSpan(r, "EXECUTE AS must be CALLER or OWNER."))
+			}
+			break
+		}
+	}
+
+	return markers
+}
+
+// validateCreateUser validates CREATE USER: account-level prefix + properties.
+func validateCreateUser(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+	sig := sigTokens(parseText)
+	name, _ := extractNameAfterCreate(sig, parseText, nil, "USER")
+	if name != "" && strings.Contains(name, ".") {
+		markers = append(markers, diagMarkerSpan(r, "Users are account-level objects and cannot have a database or schema prefix."))
+	}
+	validateProperties(parseText, userProps, r, &markers)
+	return markers
+}
+
+// validateCreateRole validates CREATE ROLE: account-level prefix check.
+func validateCreateRole(parseText string, r StatementRange) []DiagMarker {
+	sig := sigTokens(parseText)
+	name, _ := extractNameAfterCreate(sig, parseText, nil, "ROLE")
+	if name != "" && strings.Contains(name, ".") {
+		return oneMarker(r, "Roles are account-level objects and cannot have a database or schema prefix.")
+	}
+	return nil
+}
+
+// validateCreateMaskingPolicy validates CREATE MASKING POLICY: mandatory RETURNS clause.
+func validateCreateMaskingPolicy(parseText string, r StatementRange) []DiagMarker {
+	sig := sigTokens(parseText)
+	if !hasKW(sig, parseText, "RETURNS") {
+		return oneMarker(r, "Missing RETURNS clause in Masking Policy definition.")
+	}
+	return nil
+}
+
+// validateCreateStage validates CREATE STAGE properties (after stripping nested parens).
+func validateCreateStage(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+	validateProperties(parseText, stageProps, r, &markers)
+	return markers
+}
+
+// validateAlterStage validates ALTER STAGE: skip RENAME TO / UNSET / SET TAG forms,
+// otherwise validate properties.
+func validateAlterStage(parseText string, r StatementRange) []DiagMarker {
+	sig := sigTokens(parseText)
+	noValidate := hasKWPair(sig, parseText, "RENAME", "TO") ||
+		hasKWPair(sig, parseText, "SET", "TAG") ||
+		hasKW(sig, parseText, "UNSET")
+	if !noValidate {
+		var markers []DiagMarker
+		validateProperties(parseText, alterStageProps, r, &markers)
+		return markers
+	}
+	return nil
+}
+
+// ── Shared validation helpers (DRY) ───────────────────────────────────────────
+
+// cleanParseText strips SQL comments and string literals, returning a trimmed
+// result suitable for regex-based property/keyword detection. Comments are
+// replaced with whitespace (preserving newlines) and string literals are
+// replaced with a single space each. The tokenizer handles interaction between
+// comments and strings correctly (e.g. apostrophes inside comments, comment
+// markers inside strings).
+// toUpperSet builds a map[string]bool from a slice of strings, upper-casing each key.
+func toUpperSet(keys []string) map[string]bool {
+	m := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		m[strings.ToUpper(k)] = true
+	}
+	return m
+}
+
+// cleanParseText returns s with comments and string-literal contents removed and
+// surrounding whitespace trimmed, leaving only structural tokens for callers that
+// then re-tokenise. Fully tokeniser-driven: both StripComments and StripStrings
+// are sqltok helpers, so comment/quote nesting is handled correctly.
+func cleanParseText(s string) string {
+	return strings.TrimSpace(sqltok.StripStrings(sqltok.StripComments(s)))
+}
+
+// stripDollarQuoted replaces dollar-quoted blocks ($$…$$ and $tag$…$tag$)
+// with a single space, using the tokenizer to handle nesting correctly.
+func stripDollarQuoted(sql string) string {
+	tokens := sqltok.Tokenize(sql)
+	var sb strings.Builder
+	sb.Grow(len(sql))
+	prev := 0
+	for _, tok := range tokens {
+		if tok.Kind == sqltok.EOF {
+			break
+		}
+		if tok.Kind == sqltok.DollarQuoted {
+			sb.WriteString(sql[prev:tok.Start])
+			sb.WriteByte(' ')
+			prev = tok.End
+		}
+	}
+	sb.WriteString(sql[prev:])
+	return sb.String()
+}
+
+// checkAccountLevelPrefix appends a diagnostic when the SQL identifier path
+// contains a dot outside of double-quoted segments, indicating a database or
+// schema prefix on an account-level object.
+func checkAccountLevelPrefix(name string, r StatementRange, objType string, markers *[]DiagMarker) {
+	if sqlIdentPathHasDot(name) {
+		*markers = append(*markers, diagMarkerSpan(r,
+			objType+" are account-level objects and cannot have a database or schema prefix."))
+	}
 }
 
 // ── PIVOT / UNPIVOT validation ────────────────────────────────────────────────
@@ -2649,43 +3044,54 @@ func checkNameSwallowedByIF(name string, clean string, r StatementRange, reExist
 // IN list.
 func validatePivotClauses(stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	// stripped is already comment-free; only mask string literals.
-	clean := strings.TrimSpace(reStripStringLiterals.ReplaceAllString(stripped, "''"))
 
-	// Find all PIVOT( occurrences
-	for _, loc := range rePivotClause.FindAllStringIndex(clean, -1) {
-		// Extract the balanced PIVOT(...) block
-		parenIdx := strings.Index(clean[loc[0]:], "(")
-		if parenIdx < 0 {
+	sig := sigTokens(stripped)
+
+	// Find all PIVOT ( occurrences in the token stream.
+	for i := 0; i+1 < len(sig); i++ {
+		if tokUpper(sig[i], stripped) != "PIVOT" || sig[i+1].Kind != sqltok.LParen {
 			continue
 		}
-		blockStart := loc[0] + parenIdx
-		blockEnd := findMatchingParen(clean[blockStart:])
-		if blockEnd < 0 {
+		// Make sure this is not UNPIVOT (the U and N are separate tokens? No —
+		// UNPIVOT is a single keyword token, so PIVOT here is standalone).
+
+		// Extract balanced paren content.
+		pivotBody := extractParenContentTok(sig, stripped, i)
+		if pivotBody == "" {
 			continue
 		}
-		pivotBody := clean[blockStart+1 : blockStart+blockEnd]
 
-		// 1. Validate aggregate function
-		if m := rePivotAgg.FindStringSubmatch(clean[loc[0]:]); m != nil {
-			funcName := strings.ToUpper(m[1])
+		// 1. Validate aggregate function — first ident followed by ( inside the body.
+		bodySig := sigTokens(pivotBody)
+		if len(bodySig) >= 2 && isIdent(bodySig[0]) && bodySig[1].Kind == sqltok.LParen {
+			funcName := strings.ToUpper(bodySig[0].Text(pivotBody))
 			if !pivotValidAggs[funcName] {
 				markers = append(markers, diagMarkerSpan(r,
-					"'"+funcName+"' is not a valid aggregate function for PIVOT. Use SUM, AVG, COUNT, MAX, MIN, ANY_VALUE, LISTAGG, MEDIAN, STDDEV, or VARIANCE.", 4))
+					"'"+funcName+"' is not a valid aggregate function for PIVOT. Use SUM, AVG, COUNT, MAX, MIN, ANY_VALUE, LISTAGG, MEDIAN, STDDEV, or VARIANCE."))
 			}
 		}
 
-		// 2. Check FOR ... IN is present
-		if !rePivotForIn.MatchString(pivotBody) {
-			markers = append(markers, diagMarkerSpan(r,
-				"PIVOT requires FOR <column> IN (<values>).", 4))
-			continue
+		// 2. Check FOR ... IN ( is present in body.
+		hasForIn := false
+		for j := 0; j+2 < len(bodySig); j++ {
+			if tokUpper(bodySig[j], pivotBody) == "FOR" {
+				for k := j + 1; k+1 < len(bodySig); k++ {
+					if tokUpper(bodySig[k], pivotBody) == "IN" && bodySig[k+1].Kind == sqltok.LParen {
+						hasForIn = true
+						// 3. Check IN list is not empty — LParen immediately followed by RParen.
+						if k+2 < len(bodySig) && bodySig[k+2].Kind == sqltok.RParen {
+							markers = append(markers, diagMarkerSpan(r,
+								"PIVOT IN list must not be empty. Provide at least one literal value."))
+						}
+						break
+					}
+				}
+				break
+			}
 		}
-
-		// 3. Check IN list is not empty
-		if rePivotEmptyIn.MatchString(pivotBody) {
+		if !hasForIn {
 			markers = append(markers, diagMarkerSpan(r,
-				"PIVOT IN list must not be empty. Provide at least one literal value.", 4))
+				"PIVOT requires FOR <column> IN (<values>)."))
 		}
 	}
 	return markers
@@ -2695,34 +3101,59 @@ func validatePivotClauses(stripped string, r StatementRange) []DiagMarker {
 // for structural correctness: FOR ... IN ..., non-empty IN list.
 func validateUnpivotClauses(stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	// stripped is already comment-free; only mask string literals.
-	clean := strings.TrimSpace(reStripStringLiterals.ReplaceAllString(stripped, "''"))
 
-	// Find all UNPIVOT( occurrences
-	for _, loc := range reUnpivotClause.FindAllStringIndex(clean, -1) {
-		// Extract the balanced UNPIVOT(...) block
-		parenIdx := strings.Index(clean[loc[0]:], "(")
-		if parenIdx < 0 {
+	sig := sigTokens(stripped)
+
+	// Find all UNPIVOT [INCLUDE|EXCLUDE NULLS] ( occurrences.
+	for i := 0; i < len(sig); i++ {
+		if tokUpper(sig[i], stripped) != "UNPIVOT" {
 			continue
 		}
-		blockStart := loc[0] + parenIdx
-		blockEnd := findMatchingParen(clean[blockStart:])
-		if blockEnd < 0 {
+		// Skip optional INCLUDE/EXCLUDE NULLS.
+		j := i + 1
+		if j < len(sig) {
+			u := tokUpper(sig[j], stripped)
+			if u == "INCLUDE" || u == "EXCLUDE" {
+				j++
+				if j < len(sig) && tokUpper(sig[j], stripped) == "NULLS" {
+					j++
+				}
+			}
+		}
+		if j >= len(sig) || sig[j].Kind != sqltok.LParen {
 			continue
 		}
-		unpivotBody := clean[blockStart+1 : blockStart+blockEnd]
 
-		// 1. Check FOR ... IN is present
-		if !rePivotForIn.MatchString(unpivotBody) {
+		// Extract balanced paren content.
+		unpivotBody := extractParenContentTok(sig, stripped, j-1)
+		if unpivotBody == "" {
+			continue
+		}
+
+		// Tokenize the body for structural checks.
+		bodySig := sigTokens(unpivotBody)
+
+		// 1. Check FOR ... IN ( is present.
+		hasForIn := false
+		for k := 0; k+2 < len(bodySig); k++ {
+			if tokUpper(bodySig[k], unpivotBody) == "FOR" {
+				for m := k + 1; m+1 < len(bodySig); m++ {
+					if tokUpper(bodySig[m], unpivotBody) == "IN" && bodySig[m+1].Kind == sqltok.LParen {
+						hasForIn = true
+						// 2. Check IN list is not empty.
+						if m+2 < len(bodySig) && bodySig[m+2].Kind == sqltok.RParen {
+							markers = append(markers, diagMarkerSpan(r,
+								"UNPIVOT IN list must not be empty. Provide at least one column name."))
+						}
+						break
+					}
+				}
+				break
+			}
+		}
+		if !hasForIn {
 			markers = append(markers, diagMarkerSpan(r,
-				"UNPIVOT requires FOR <name_column> IN (<columns>).", 4))
-			continue
-		}
-
-		// 2. Check IN list is not empty
-		if rePivotEmptyIn.MatchString(unpivotBody) {
-			markers = append(markers, diagMarkerSpan(r,
-				"UNPIVOT IN list must not be empty. Provide at least one column name.", 4))
+				"UNPIVOT requires FOR <name_column> IN (<columns>)."))
 		}
 	}
 	return markers
@@ -2738,54 +3169,190 @@ func validateUnpivotClauses(stripped string, r StatementRange) []DiagMarker {
 //   - AFTER MATCH SKIP target validity
 func validateMatchRecognizeClauses(stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	clean := strings.TrimSpace(reStripStringLiterals.ReplaceAllString(stripped, "''"))
+	clean := cleanParseText(stripped)
 
-	for _, loc := range reMatchRecognizeClause.FindAllStringIndex(clean, -1) {
-		// Extract the balanced MATCH_RECOGNIZE(...) block.
-		parenIdx := strings.Index(clean[loc[0]:], "(")
-		if parenIdx < 0 {
+	sig := sigTokens(clean)
+
+	// Find all MATCH_RECOGNIZE ( occurrences at the top level.
+	for i := 0; i+1 < len(sig); i++ {
+		if tokUpper(sig[i], clean) != "MATCH_RECOGNIZE" || sig[i+1].Kind != sqltok.LParen {
 			continue
 		}
-		blockStart := loc[0] + parenIdx
-		blockEnd := findMatchingParen(clean[blockStart:])
-		if blockEnd < 0 {
+		// Extract balanced paren body as tokens.
+		bodyStart, bodyEnd, ok := parenInnerRange(sig, i+1)
+		if !ok {
 			continue
 		}
-		mrBody := clean[blockStart+1 : blockStart+blockEnd]
+		body := sig[bodyStart:bodyEnd]
 
 		// 1. Validate mandatory PATTERN clause.
-		if !reMatchRecognizePattern.MatchString(mrBody) {
+		patternIdx := findKWLParen(body, clean, "PATTERN")
+		if patternIdx < 0 {
 			markers = append(markers, diagMarkerSpan(r,
-				"MATCH_RECOGNIZE requires a PATTERN clause.", 4))
-		} else if reMatchRecognizeEmptyPattern.MatchString(mrBody) {
-			markers = append(markers, diagMarkerSpan(r,
-				"MATCH_RECOGNIZE PATTERN must contain at least one pattern variable.", 4))
+				"MATCH_RECOGNIZE requires a PATTERN clause."))
+		} else {
+			// Check for empty PATTERN — LParen immediately followed by RParen.
+			lpIdx := patternIdx + 1 // the LParen after PATTERN
+			if lpIdx < len(body) && lpIdx+1 < len(body) && body[lpIdx+1].Kind == sqltok.RParen {
+				// Verify the RParen matches this LParen (depth=1).
+				markers = append(markers, diagMarkerSpan(r,
+					"MATCH_RECOGNIZE PATTERN must contain at least one pattern variable."))
+			}
 		}
 
-		// 2. Validate mandatory DEFINE clause.
-		if !reMatchRecognizeDefine.MatchString(mrBody) {
+		// 2. Validate mandatory DEFINE clause (DEFINE must be followed by at least
+		//    one binding — bare "DEFINE)" is treated as missing).
+		hasDefine := false
+		for j := 0; j < len(body); j++ {
+			if tokUpper(body[j], clean) == "DEFINE" && j+1 < len(body) {
+				hasDefine = true
+				break
+			}
+		}
+		if !hasDefine {
 			markers = append(markers, diagMarkerSpan(r,
-				"MATCH_RECOGNIZE requires a DEFINE clause to bind pattern variables.", 4))
+				"MATCH_RECOGNIZE requires a DEFINE clause to bind pattern variables."))
 		}
 
 		// 3. ONE ROW PER MATCH / ALL ROWS PER MATCH mutual exclusion.
-		hasOneRow := reOneRowPerMatch.MatchString(mrBody)
-		hasAllRows := reAllRowsPerMatch.MatchString(mrBody)
+		hasOneRow := hasKWSeq4(body, clean, "ONE", "ROW", "PER", "MATCH")
+		hasAllRows := hasKWSeq4(body, clean, "ALL", "ROWS", "PER", "MATCH")
 		if hasOneRow && hasAllRows {
 			markers = append(markers, diagMarkerSpan(r,
-				"ONE ROW PER MATCH and ALL ROWS PER MATCH are mutually exclusive. Use one or the other.", 4))
+				"ONE ROW PER MATCH and ALL ROWS PER MATCH are mutually exclusive. Use one or the other."))
 		}
 
 		// 4. AFTER MATCH SKIP target validation.
-		if m := reAfterMatchSkip.FindStringSubmatch(mrBody); m != nil {
-			target := strings.TrimSpace(m[1])
-			if !reAfterMatchSkipValid.MatchString(target) {
-				markers = append(markers, diagMarkerSpan(r,
-					"Invalid AFTER MATCH SKIP target. Use TO NEXT ROW, PAST LAST ROW, TO FIRST <variable>, or TO LAST <variable>.", 4))
+		for j := 0; j+2 < len(body); j++ {
+			if tokUpper(body[j], clean) == "AFTER" &&
+				tokUpper(body[j+1], clean) == "MATCH" &&
+				tokUpper(body[j+2], clean) == "SKIP" {
+				// Collect target tokens until a boundary keyword or end.
+				target := j + 3
+				end := len(body)
+				for k := target; k < len(body); k++ {
+					u := tokUpper(body[k], clean)
+					if u == "PATTERN" || u == "DEFINE" || u == "MEASURES" ||
+						u == "ONE" || u == "ALL" || u == "ORDER" || u == "PARTITION" {
+						end = k
+						break
+					}
+				}
+				if target < end {
+					targetToks := body[target:end]
+					if !isValidAfterMatchSkipTarget(targetToks, clean) {
+						markers = append(markers, diagMarkerSpan(r,
+							"Invalid AFTER MATCH SKIP target. Use TO NEXT ROW, PAST LAST ROW, TO FIRST <variable>, or TO LAST <variable>."))
+					}
+				}
+				break
 			}
 		}
 	}
 	return markers
+}
+
+// isValidAfterMatchSkipTarget checks if the token sequence represents a valid
+// AFTER MATCH SKIP target: TO NEXT ROW, PAST LAST ROW, TO FIRST <ident>, TO LAST <ident>.
+func isValidAfterMatchSkipTarget(toks []sqltok.Token, sql string) bool {
+	if len(toks) < 2 {
+		return false
+	}
+	first := tokUpper(toks[0], sql)
+	switch first {
+	case "TO":
+		if len(toks) >= 3 && tokUpper(toks[1], sql) == "NEXT" && tokUpper(toks[2], sql) == "ROW" {
+			return true
+		}
+		if len(toks) >= 3 && (tokUpper(toks[1], sql) == "FIRST" || tokUpper(toks[1], sql) == "LAST") && isIdent(toks[2]) {
+			return true
+		}
+	case "PAST":
+		if len(toks) >= 3 && tokUpper(toks[1], sql) == "LAST" && tokUpper(toks[2], sql) == "ROW" {
+			return true
+		}
+	}
+	return false
+}
+
+// ── CREATE FUNCTION / PROCEDURE helpers ──────────────────────────────────────
+
+// findFuncBodyAS finds the index of the AS keyword that introduces the function/
+// procedure body, skipping "EXECUTE AS" which is a different construct. Returns -1
+// if no AS body is found.
+func findFuncBodyAS(sig []sqltok.Token, sql string) int {
+	for i := 0; i < len(sig); i++ {
+		upper := tokUpper(sig[i], sql)
+		if upper != "AS" {
+			// Handle AS$$ / AS$tag$ glued to dollar-quote (no space).
+			if len(upper) > 2 && upper[:2] == "AS" && upper[2] == '$' {
+				if i > 0 && tokUpper(sig[i-1], sql) == "EXECUTE" {
+					continue
+				}
+				return i
+			}
+			continue
+		}
+		// Skip EXECUTE AS — check if the previous significant token is EXECUTE.
+		if i > 0 && tokUpper(sig[i-1], sql) == "EXECUTE" {
+			continue
+		}
+		return i
+	}
+	return -1
+}
+
+// findLanguage finds LANGUAGE <ident> in the preamble and returns the uppercased
+// language name, or "" if not found.
+func findLanguage(sig []sqltok.Token, sql string) string {
+	for i := 0; i+1 < len(sig); i++ {
+		if tokUpper(sig[i], sql) == "LANGUAGE" {
+			next := sig[i+1]
+			if isIdent(next) || next.Kind == sqltok.NumberLit {
+				return strings.ToUpper(next.Text(sql))
+			}
+		}
+	}
+	return ""
+}
+
+// checkPythonRequirements validates Python-specific requirements in the preamble:
+// RUNTIME_VERSION, HANDLER, and PACKAGES or IMPORTS.
+func checkPythonRequirements(sig []sqltok.Token, sql string, r StatementRange, markers *[]DiagMarker, objType string) {
+	if !hasKW(sig, sql, "RUNTIME_VERSION") {
+		*markers = append(*markers, diagMarkerSpan(r, "RUNTIME_VERSION is required for PYTHON "+objType+"."))
+	}
+	if objType == "functions" && !hasKW(sig, sql, "HANDLER") {
+		*markers = append(*markers, diagMarkerSpan(r, "HANDLER is required for PYTHON "+objType+"."))
+	}
+	if !hasKW(sig, sql, "PACKAGES") && !hasKW(sig, sql, "IMPORTS") {
+		*markers = append(*markers, diagMarkerSpan(r, "PACKAGES or IMPORTS is required for PYTHON "+objType+"."))
+	}
+}
+
+// checkNullInputHandling validates mutual exclusion of null input handling clauses:
+// CALLED ON NULL INPUT vs RETURNS NULL ON NULL INPUT vs STRICT.
+func checkNullInputHandling(sig []sqltok.Token, sql string, r StatementRange, markers *[]DiagMarker) {
+	hasCalledOnNull := hasKWSeq4(sig, sql, "CALLED", "ON", "NULL", "INPUT")
+	hasReturnsNull := false
+	for i := 0; i+4 < len(sig); i++ {
+		if tokUpper(sig[i], sql) == "RETURNS" &&
+			tokUpper(sig[i+1], sql) == "NULL" &&
+			tokUpper(sig[i+2], sql) == "ON" &&
+			tokUpper(sig[i+3], sql) == "NULL" &&
+			tokUpper(sig[i+4], sql) == "INPUT" {
+			hasReturnsNull = true
+			break
+		}
+	}
+	hasStrict := hasKW(sig, sql, "STRICT")
+
+	if hasCalledOnNull && (hasReturnsNull || hasStrict) {
+		*markers = append(*markers, diagMarkerSpan(r, "CALLED ON NULL INPUT and RETURNS NULL ON NULL INPUT (or STRICT) are mutually exclusive."))
+	}
+	if hasReturnsNull && hasStrict {
+		*markers = append(*markers, diagMarkerSpan(r, "STRICT and RETURNS NULL ON NULL INPUT are redundant."))
+	}
 }
 
 // ── ASOF JOIN validation ───────────────────────────────────────────────────────
@@ -2797,70 +3364,155 @@ func validateMatchRecognizeClauses(stripped string, r StatementRange) []DiagMark
 //   - ON and USING clauses are not valid with ASOF JOIN
 func validateAsofJoinClauses(stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	clean := strings.TrimSpace(reStripStringLiterals.ReplaceAllString(stripped, "''"))
+	clean := cleanParseText(stripped)
+	sig := sigTokens(clean)
 
-	// Find all top-level ASOF JOIN positions (skip matches inside parenthesized
-	// subqueries so nested ASOF JOINs don't corrupt the outer scope).
-	topLevelLocs := findTopLevelMatches(clean, reAsofJoinClause)
-
-	for i, loc := range topLevelLocs {
-		// Scope: text after this ASOF JOIN up to the next top-level ASOF JOIN
-		// (or end of statement).
-		afterJoin := clean[loc[1]:]
-		var scope string
-		if i+1 < len(topLevelLocs) {
-			scope = clean[loc[1]:topLevelLocs[i+1][0]]
-		} else {
-			scope = afterJoin
+	// Find all top-level ASOF JOIN positions (skip matches inside parens).
+	type asofPos struct{ afterIdx int } // index into sig after "JOIN"
+	var asofPositions []asofPos
+	depth := 0
+	for i := 0; i+1 < len(sig); i++ {
+		switch sig[i].Kind {
+		case sqltok.LParen:
+			depth++
+		case sqltok.RParen:
+			if depth > 0 {
+				depth--
+			}
+		default:
+			if depth == 0 && tokUpper(sig[i], clean) == "ASOF" && tokUpper(sig[i+1], clean) == "JOIN" {
+				asofPositions = append(asofPositions, asofPos{afterIdx: i + 2})
+			}
 		}
+	}
 
-		hasMatchCondition := reAsofMatchCondition.MatchString(scope)
-		hasUsingFunction := reAsofUsingFunction.MatchString(scope)
+	for idx, ap := range asofPositions {
+		// Scope: tokens after this ASOF JOIN up to the next top-level ASOF JOIN.
+		scopeEnd := len(sig)
+		if idx+1 < len(asofPositions) {
+			scopeEnd = asofPositions[idx+1].afterIdx - 2
+		}
+		scope := sig[ap.afterIdx:scopeEnd]
+
+		hasMatchCondition := findKWLParen(scope, clean, "MATCH_CONDITION") >= 0
+		hasUsingFunction := hasUsingFunctionTok(scope, clean)
 
 		// 1. Check for invalid ON clause.
 		flaggedOnOrUsing := false
-		if hasOnClause(scope, hasMatchCondition) {
+		if hasOnClauseTok(scope, clean, hasMatchCondition) {
 			markers = append(markers, diagMarkerSpan(r,
-				"ON clause is not valid with ASOF JOIN. Use MATCH_CONDITION instead.", 4))
+				"ON clause is not valid with ASOF JOIN. Use MATCH_CONDITION instead."))
 			flaggedOnOrUsing = true
 		}
 
 		// 2. Check for invalid USING clause (plain USING, not USING FUNCTION).
-		if hasUsingClause(scope, hasUsingFunction) {
+		if hasUsingClauseTok(scope, clean, hasUsingFunction) {
 			markers = append(markers, diagMarkerSpan(r,
-				"USING clause is not valid with ASOF JOIN. Use MATCH_CONDITION instead.", 4))
+				"USING clause is not valid with ASOF JOIN. Use MATCH_CONDITION instead."))
 			flaggedOnOrUsing = true
 		}
 
 		// 3. Validate MATCH_CONDITION or USING FUNCTION is present.
-		// Skip if ON/USING was already flagged — those messages already say
-		// "Use MATCH_CONDITION instead", so a second warning is redundant.
 		if !hasMatchCondition && !hasUsingFunction && !flaggedOnOrUsing {
 			markers = append(markers, diagMarkerSpan(r,
-				"ASOF JOIN requires a MATCH_CONDITION clause. Use ASOF JOIN <table> MATCH_CONDITION (<left_expr> >= <right_expr>).", 4))
+				"ASOF JOIN requires a MATCH_CONDITION clause. Use ASOF JOIN <table> MATCH_CONDITION (<left_expr> >= <right_expr>)."))
 			continue
 		}
 
 		// 4. If MATCH_CONDITION is present, validate the comparison operator.
 		if hasMatchCondition {
-			mcLoc := reAsofMatchCondition.FindStringIndex(scope)
-			if mcLoc != nil {
-				parenStart := strings.Index(scope[mcLoc[0]:], "(")
-				if parenStart >= 0 {
-					absStart := mcLoc[0] + parenStart
-					blockEnd := findMatchingParen(scope[absStart:])
-					if blockEnd > 0 {
-						mcBody := scope[absStart+1 : absStart+blockEnd]
-						if !containsAsofValidComparison(mcBody) {
-							markers = append(markers, diagMarkerSpan(r,
-								"MATCH_CONDITION comparison must use one of: >=, >, <=, <. Operators =, <>, != are not supported.", 4))
-						}
+			mcIdx := findKWLParen(scope, clean, "MATCH_CONDITION")
+			if mcIdx >= 0 {
+				// Check if the MATCH_CONDITION paren is properly closed.
+				_, _, matched := parenInnerRange(scope, mcIdx+1)
+				if matched {
+					mcBody := extractParenContentTok(scope, clean, mcIdx)
+					// Empty body or body without valid comparison.
+					if !containsAsofValidComparison(mcBody) {
+						markers = append(markers, diagMarkerSpan(r,
+							"MATCH_CONDITION comparison must use one of: >=, >, <=, <. Operators =, <>, != are not supported."))
 					}
 				}
 			}
 		}
 	}
 	return markers
+}
+
+// hasOnClauseTok checks if a top-level ON keyword appears in the token scope,
+// excluding ON that appears after MATCH_CONDITION.
+func hasOnClauseTok(scope []sqltok.Token, sql string, hasMatchCondition bool) bool {
+	mcIdx := -1
+	if hasMatchCondition {
+		mcIdx = findKWLParen(scope, sql, "MATCH_CONDITION")
+	}
+	depth := 0
+	for i := 0; i < len(scope); i++ {
+		switch scope[i].Kind {
+		case sqltok.LParen:
+			depth++
+		case sqltok.RParen:
+			if depth > 0 {
+				depth--
+			}
+		default:
+			if depth == 0 && tokUpper(scope[i], sql) == "ON" {
+				if mcIdx >= 0 && i > mcIdx {
+					continue
+				}
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// hasUsingClauseTok checks if USING ( appears at the top level, and it's not
+// the USING (func(...)) function form.
+func hasUsingClauseTok(scope []sqltok.Token, sql string, hasUsingFunction bool) bool {
+	if hasUsingFunction {
+		return false
+	}
+	depth := 0
+	for i := 0; i < len(scope); i++ {
+		switch scope[i].Kind {
+		case sqltok.LParen:
+			depth++
+		case sqltok.RParen:
+			if depth > 0 {
+				depth--
+			}
+		default:
+			if depth == 0 && tokUpper(scope[i], sql) == "USING" &&
+				i+1 < len(scope) && scope[i+1].Kind == sqltok.LParen {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// hasUsingFunctionTok checks for the USING (func_name(...)) pattern in scope.
+// This detects: USING ( ident [. ident]* (
+func hasUsingFunctionTok(scope []sqltok.Token, sql string) bool {
+	for i := 0; i+2 < len(scope); i++ {
+		if tokUpper(scope[i], sql) != "USING" || scope[i+1].Kind != sqltok.LParen {
+			continue
+		}
+		// After '(' look for ident [.ident]* (
+		j := i + 2
+		if j >= len(scope) || !isIdent(scope[j]) {
+			continue
+		}
+		j++
+		for j+1 < len(scope) && scope[j].Kind == sqltok.Dot && isIdent(scope[j+1]) {
+			j += 2
+		}
+		if j < len(scope) && scope[j].Kind == sqltok.LParen {
+			return true
+		}
+	}
+	return false
 }
 
 // containsAsofValidComparison checks whether the MATCH_CONDITION body contains
@@ -2897,89 +3549,6 @@ func containsAsofValidComparison(body string) bool {
 	return false
 }
 
-// hasOnClause checks if the scope after an ASOF JOIN contains a bare ON keyword
-// at the top level (not inside parenthesized subqueries or MATCH_CONDITION).
-func hasOnClause(scope string, hasMatchCondition bool) bool {
-	upper := strings.ToUpper(scope)
-	mcPos := -1
-	if hasMatchCondition {
-		mcPos = strings.Index(upper, "MATCH_CONDITION")
-	}
-	depth := 0
-	for i := 0; i < len(upper); i++ {
-		switch upper[i] {
-		case '(':
-			depth++
-		case ')':
-			if depth > 0 {
-				depth--
-			}
-		case 'O':
-			if depth > 0 {
-				continue // inside parenthesized group — skip
-			}
-			if i+1 < len(upper) && upper[i+1] == 'N' {
-				// Check word boundaries.
-				if i > 0 && isWordChar(rune(upper[i-1])) {
-					continue
-				}
-				if i+2 < len(upper) && isWordChar(rune(upper[i+2])) {
-					continue
-				}
-				// Found bare ON at top level.
-				// If there's a MATCH_CONDITION, ON after it is likely part of
-				// WHERE or another clause — skip.
-				if mcPos >= 0 && i > mcPos {
-					continue
-				}
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// hasUsingClause checks if the scope after an ASOF JOIN contains a bare USING
-// keyword at the top level (not inside parenthesized subqueries) that is NOT
-// the USING (match_function(...)) form.
-func hasUsingClause(scope string, hasUsingFunction bool) bool {
-	if hasUsingFunction {
-		return false
-	}
-	upper := strings.ToUpper(scope)
-	depth := 0
-	for i := 0; i < len(upper); i++ {
-		switch upper[i] {
-		case '(':
-			depth++
-		case ')':
-			if depth > 0 {
-				depth--
-			}
-		case 'U':
-			if depth > 0 {
-				continue // inside parenthesized group — skip
-			}
-			// Check for "USING" at position i.
-			if i+5 <= len(upper) && upper[i:i+5] == "USING" {
-				// Check word boundaries.
-				if i > 0 && isWordChar(rune(upper[i-1])) {
-					continue
-				}
-				if i+5 < len(upper) && isWordChar(rune(upper[i+5])) {
-					continue
-				}
-				// Found bare USING at top level — check if followed by '('.
-				after := strings.TrimSpace(upper[i+5:])
-				if strings.HasPrefix(after, "(") {
-					return true // USING (...) column-list form, not valid
-				}
-			}
-		}
-	}
-	return false
-}
-
 // ── INSERT ALL / INSERT FIRST / INSERT OVERWRITE validation ───────────────────
 
 // validateInsertAll validates INSERT [OVERWRITE] ALL statements.
@@ -3002,156 +3571,100 @@ func validateInsertFirst(stripped string, r StatementRange) []DiagMarker {
 }
 
 // validateInsertMultiTable is the shared implementation for INSERT ALL and
-// INSERT FIRST validation.
+// INSERT FIRST validation. It is fully token-based: the tokenizer classifies
+// keywords inside string literals as non-keyword tokens, so they are ignored
+// without a separate string-stripping pass, and word boundaries are intrinsic.
 func validateInsertMultiTable(keyword string, stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	clean := strings.TrimSpace(reStripStringLiterals.ReplaceAllString(stripped, "''"))
-	upper := strings.ToUpper(clean)
+	sig := sigTokens(stripped)
 
-	// Find the position of the trailing top-level SELECT. Keywords after
-	// this position belong to the source query and must be ignored (e.g.
-	// CASE WHEN/ELSE inside the SELECT clause).
-	trailingSelectPos := findLastTopLevelSelectPos(upper)
-
-	// Scan for top-level WHEN, ELSE, and INTO keywords (depth == 0) that
-	// appear before the trailing SELECT.
-	scanLimit := len(upper)
-	if trailingSelectPos >= 0 {
-		scanLimit = trailingSelectPos
-	}
-
-	whenPositions, hasElse, hasInto := scanInsertMultiKeywords(upper, scanLimit)
-	hasWhen := len(whenPositions) > 0
-
-	// Determine if this is a conditional form (has WHEN or ELSE) or
-	// unconditional (bare INSERT ALL INTO ... INTO ... SELECT).
-	isConditional := hasWhen || hasElse
-
-	if keyword == "FIRST" {
-		// INSERT FIRST always requires WHEN branches.
-		if !hasWhen {
-			markers = append(markers, diagMarkerSpan(r,
-				"INSERT FIRST requires at least one WHEN branch. Use WHEN <condition> THEN INTO <table>.", 4))
-			return markers
-		}
-	}
-
-	if isConditional {
-		// Conditional form: require at least one WHEN (ELSE alone is invalid).
-		if !hasWhen {
-			markers = append(markers, diagMarkerSpan(r,
-				"INSERT "+keyword+" requires at least one WHEN branch when using conditional insert. Use WHEN <condition> THEN INTO <table>.", 4))
-			return markers
-		}
-
-		// Each WHEN must have a THEN INTO.
-		for i, whenPos := range whenPositions {
-			end := scanLimit
-			if i+1 < len(whenPositions) {
-				end = whenPositions[i+1]
-			}
-			clause := upper[whenPos:end]
-			if !reInsertMultiThenInto.MatchString(clause) {
-				markers = append(markers, diagMarkerSpan(r,
-					"WHEN branch must contain INTO clause. Use WHEN <condition> THEN INTO <table>.", 4))
-			}
-		}
-	} else {
-		// Unconditional form: require at least one INTO.
-		if !hasInto {
-			markers = append(markers, diagMarkerSpan(r,
-				"INSERT "+keyword+" requires at least one INTO clause.", 4))
-			return markers
-		}
-	}
-
-	// Trailing SELECT is mandatory for all multi-table inserts.
-	if trailingSelectPos < 0 {
-		markers = append(markers, diagMarkerSpan(r,
-			"INSERT "+keyword+" requires a source SELECT at the end of the statement.", 4))
-	}
-
-	return markers
-}
-
-// scanInsertMultiKeywords scans upper (already uppercased) up to scanLimit for
-// top-level (depth == 0) WHEN, ELSE, and INTO keywords. Returns the positions
-// of each WHEN, and whether ELSE and INTO were found.
-// Note: word-boundary checks peek one character past the keyword end using
-// len(upper) (not scanLimit) because we need to verify the character after the
-// keyword is not a word character. This is safe — the keyword start is always
-// within scanLimit, and we only read (not match) one byte beyond.
-func scanInsertMultiKeywords(upper string, scanLimit int) (whenPositions []int, hasElse bool, hasInto bool) {
+	// Find the last top-level (depth 0) SELECT. Keywords after it belong to the
+	// source query (e.g. CASE WHEN/ELSE inside the SELECT) and must be ignored.
+	trailingSelectIdx := -1
 	depth := 0
-	for i := 0; i < scanLimit; i++ {
-		switch upper[i] {
-		case '(':
+	for i, t := range sig {
+		switch t.Kind {
+		case sqltok.LParen:
 			depth++
-		case ')':
+		case sqltok.RParen:
 			if depth > 0 {
 				depth--
 			}
-		case 'W':
-			if depth == 0 && i+4 <= scanLimit && upper[i:i+4] == "WHEN" {
-				if i > 0 && isWordChar(rune(upper[i-1])) {
-					continue
-				}
-				if i+4 < len(upper) && isWordChar(rune(upper[i+4])) {
-					continue
-				}
-				whenPositions = append(whenPositions, i)
+		default:
+			if depth == 0 && tokUpper(t, stripped) == "SELECT" {
+				trailingSelectIdx = i
 			}
-		case 'E':
-			if depth == 0 && i+4 <= scanLimit && upper[i:i+4] == "ELSE" {
-				if i > 0 && isWordChar(rune(upper[i-1])) {
-					continue
-				}
-				if i+4 < len(upper) && isWordChar(rune(upper[i+4])) {
-					continue
-				}
+		}
+	}
+
+	// Scan for top-level WHEN/ELSE/INTO keywords before the trailing SELECT.
+	scanEnd := len(sig)
+	if trailingSelectIdx >= 0 {
+		scanEnd = trailingSelectIdx
+	}
+	var whenIdxs []int
+	hasElse, hasInto := false, false
+	depth = 0
+	for i := 0; i < scanEnd; i++ {
+		switch sig[i].Kind {
+		case sqltok.LParen:
+			depth++
+		case sqltok.RParen:
+			if depth > 0 {
+				depth--
+			}
+		default:
+			if depth != 0 {
+				continue
+			}
+			switch tokUpper(sig[i], stripped) {
+			case "WHEN":
+				whenIdxs = append(whenIdxs, i)
+			case "ELSE":
 				hasElse = true
-			}
-		case 'I':
-			if depth == 0 && i+4 <= scanLimit && upper[i:i+4] == "INTO" {
-				if i > 0 && isWordChar(rune(upper[i-1])) {
-					continue
-				}
-				if i+4 < len(upper) && isWordChar(rune(upper[i+4])) {
-					continue
-				}
+			case "INTO":
 				hasInto = true
 			}
 		}
 	}
-	return
-}
+	hasWhen := len(whenIdxs) > 0
 
-// findLastTopLevelSelectPos returns the position of the last top-level SELECT
-// keyword (depth == 0) in s, or -1 if none found.
-func findLastTopLevelSelectPos(upper string) int {
-	depth := 0
-	lastPos := -1
-	for i := 0; i < len(upper); i++ {
-		switch upper[i] {
-		case '(':
-			depth++
-		case ')':
-			if depth > 0 {
-				depth--
+	// INSERT FIRST always requires WHEN branches.
+	if keyword == "FIRST" && !hasWhen {
+		return append(markers, diagMarkerSpan(r,
+			"INSERT FIRST requires at least one WHEN branch. Use WHEN <condition> THEN INTO <table>."))
+	}
+
+	if hasWhen || hasElse {
+		// Conditional form: require at least one WHEN (ELSE alone is invalid).
+		if !hasWhen {
+			return append(markers, diagMarkerSpan(r,
+				"INSERT "+keyword+" requires at least one WHEN branch when using conditional insert. Use WHEN <condition> THEN INTO <table>."))
+		}
+		// Each WHEN must contain a THEN INTO before the next WHEN.
+		for k, w := range whenIdxs {
+			end := scanEnd
+			if k+1 < len(whenIdxs) {
+				end = whenIdxs[k+1]
 			}
-		case 'S':
-			if depth == 0 && i+6 <= len(upper) && upper[i:i+6] == "SELECT" {
-				if i > 0 && isWordChar(rune(upper[i-1])) {
-					continue
-				}
-				if i+6 < len(upper) && isWordChar(rune(upper[i+6])) {
-					continue
-				}
-				lastPos = i
+			if !hasKWPair(sig[w:end], stripped, "THEN", "INTO") {
+				markers = append(markers, diagMarkerSpan(r,
+					"WHEN branch must contain INTO clause. Use WHEN <condition> THEN INTO <table>."))
 			}
 		}
+	} else if !hasInto {
+		// Unconditional form: require at least one INTO.
+		return append(markers, diagMarkerSpan(r,
+			"INSERT "+keyword+" requires at least one INTO clause."))
 	}
-	return lastPos
+
+	// Trailing SELECT is mandatory for all multi-table inserts.
+	if trailingSelectIdx < 0 {
+		markers = append(markers, diagMarkerSpan(r,
+			"INSERT "+keyword+" requires a source SELECT at the end of the statement."))
+	}
+
+	return markers
 }
 
 // validateInsertOverwrite validates INSERT OVERWRITE INTO statements.
@@ -3160,76 +3673,63 @@ func findLastTopLevelSelectPos(upper string) int {
 //   - A source SELECT or VALUES is required
 func validateInsertOverwrite(stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	clean := strings.TrimSpace(reStripStringLiterals.ReplaceAllString(stripped, "''"))
+
+	sig := sigTokens(stripped)
+	if len(sig) < 2 {
+		return nil
+	}
 
 	// If this is actually INSERT OVERWRITE ALL or INSERT OVERWRITE FIRST,
 	// those are handled by validateInsertAll/validateInsertFirst.
-	if reIsInsertAll.MatchString(clean) || reIsInsertFirst.MatchString(clean) {
-		return nil
+	// Check: INSERT [OVERWRITE] ALL/FIRST
+	idx := 1 // start after INSERT
+	if tokUpper(sig[idx], stripped) == "OVERWRITE" {
+		idx++
+	}
+	if idx < len(sig) {
+		kw := tokUpper(sig[idx], stripped)
+		if kw == "ALL" || kw == "FIRST" {
+			return nil
+		}
 	}
 
-	if !reIsInsertOverwrite.MatchString(clean) {
-		// INSERT OVERWRITE without INTO
+	// INSERT OVERWRITE must be followed by INTO.
+	// sig[0]=INSERT, sig[1]=OVERWRITE — check sig[2] for INTO.
+	if len(sig) < 3 || tokUpper(sig[2], stripped) != "INTO" {
 		markers = append(markers, diagMarkerSpan(r,
-			"INSERT OVERWRITE requires INTO. Use INSERT OVERWRITE INTO <table>.", 4))
+			"INSERT OVERWRITE requires INTO. Use INSERT OVERWRITE INTO <table>."))
 		return markers
 	}
 
-	// Check for a source: SELECT or VALUES must appear.
-	// Remove the INSERT OVERWRITE INTO <table> prefix first to avoid matching
-	// the INTO keyword itself.
-	afterPrefix := reInsertOverwritePrefix.ReplaceAllString(clean, "")
-	// Strip optional column list
-	afterPrefix = strings.TrimSpace(afterPrefix)
-	if strings.HasPrefix(afterPrefix, "(") {
-		if endIdx := findMatchingParen(afterPrefix); endIdx > 0 {
-			afterPrefix = strings.TrimSpace(afterPrefix[endIdx+1:])
+	// Check for a source: SELECT or VALUES must appear after the table name
+	// and optional column list.
+	i := 3 // after INTO
+	if i < len(sig) && isIdent(sig[i]) {
+		_, i = readIdentPath(sig, stripped, i)
+	}
+	// Skip optional column list (parenthesized).
+	if i < len(sig) && sig[i].Kind == sqltok.LParen {
+		if _, closeIdx, ok := parenInnerRange(sig, i); ok {
+			i = closeIdx + 1
+		} else {
+			i = len(sig)
 		}
 	}
-	if !reInsertOverwriteSource.MatchString(afterPrefix) {
+
+	hasSource := false
+	for ; i < len(sig); i++ {
+		u := tokUpper(sig[i], stripped)
+		if u == "SELECT" || u == "VALUES" {
+			hasSource = true
+			break
+		}
+	}
+	if !hasSource {
 		markers = append(markers, diagMarkerSpan(r,
-			"INSERT OVERWRITE INTO requires a source SELECT or VALUES clause.", 4))
+			"INSERT OVERWRITE INTO requires a source SELECT or VALUES clause."))
 	}
 
 	return markers
-}
-
-// findTopLevelMatches returns all matches of re in s that are not inside
-// parenthesized groups. This prevents nested ASOF JOINs inside subqueries
-// from corrupting the scope splitting of the outer ASOF JOIN.
-func findTopLevelMatches(s string, re *regexp.Regexp) [][]int {
-	allLocs := re.FindAllStringIndex(s, -1)
-	if len(allLocs) == 0 {
-		return nil
-	}
-	// Precompute paren depth at every position that starts a match.
-	// We scan once to build a depth array up to the last match start.
-	maxPos := allLocs[len(allLocs)-1][0]
-	depth := 0
-	depthAt := make(map[int]int, len(allLocs))
-	matchIdx := 0
-	for i := 0; i <= maxPos && matchIdx < len(allLocs); i++ {
-		if i == allLocs[matchIdx][0] {
-			depthAt[i] = depth
-			matchIdx++
-		}
-		switch s[i] {
-		case '(':
-			depth++
-		case ')':
-			if depth > 0 {
-				depth--
-			}
-		}
-	}
-
-	var result [][]int
-	for _, loc := range allLocs {
-		if depthAt[loc[0]] == 0 {
-			result = append(result, loc)
-		}
-	}
-	return result
 }
 
 // findMatchingParen finds the index of the closing ')' that matches the opening
@@ -3240,23 +3740,14 @@ func findMatchingParen(s string) int {
 		return -1
 	}
 	depth := 0
-	inSingle := false
-	inDouble := false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c == '\'' && !inDouble {
-			inSingle = !inSingle
-		} else if c == '"' && !inSingle {
-			inDouble = !inDouble
-		} else if !inSingle && !inDouble {
-			switch c {
-			case '(':
-				depth++
-			case ')':
-				depth--
-				if depth == 0 {
-					return i
-				}
+	for _, t := range sqltok.Tokenize(s) {
+		switch t.Kind {
+		case sqltok.LParen:
+			depth++
+		case sqltok.RParen:
+			depth--
+			if depth == 0 {
+				return t.Start
 			}
 		}
 	}
@@ -3264,16 +3755,6 @@ func findMatchingParen(s string) int {
 }
 
 // ── ValidateDataTypes ─────────────────────────────────────────────────────────
-
-var (
-	reCastShorthand  = regexp.MustCompile(`::\s*([a-zA-Z_][a-zA-Z0-9_]*)`)
-	reCastFunction   = regexp.MustCompile(`(?i)\b(?:TRY_)?CAST\s*\([\s\S]+?\bAS\s+([a-zA-Z_][a-zA-Z0-9_]+)`)
-	reAlterTableAdd  = regexp.MustCompile(`(?i)\bALTER\s+TABLE\s+` + _identPath + `\s+ADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?` + _ident + `\s+([a-zA-Z_][a-zA-Z0-9_]*)`)
-	reCreateTableExt = regexp.MustCompile(`(?is)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath + `\s*\(`)
-	reCreateProcExt  = regexp.MustCompile(`(?is)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PROCEDURE\s+` + _identPath + `\s*\(`)
-	reCreateFuncExt  = regexp.MustCompile(`(?is)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:TEMPORARY\s+|TEMP\s+)?(?:AGGREGATE\s+)?FUNCTION\s+` + _identPath + `\s*\(`)
-	reReturnsType    = regexp.MustCompile(`(?i)\bRETURNS\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\s*\([^)]*\))?\b`)
-)
 
 // ValidateDataTypes checks that explicit data type declarations within
 // CREATE TABLE, ALTER TABLE, and CAST() functions exist in Snowflake's registry.
@@ -3317,70 +3798,96 @@ func ValidateDataTypes(sql string, stmtRanges []StatementRange) []DiagMarker {
 		rawText := sqlStmt(sql, r)
 		stmtOffset := r.StartOffset
 
-		// 1. Shorthand cast (::)
-		for _, m := range reCastShorthand.FindAllStringSubmatchIndex(rawText, -1) {
-			if len(m) >= 4 && m[2] != -1 {
-				typeName := rawText[m[2]:m[3]]
-				checkType(typeName, stmtOffset+m[2])
+		sig := sigTokens(rawText)
+
+		// rel reports a type whose offset is relative to rawText, translating it
+		// to an absolute document offset for checkType.
+		rel := func(name string, relOffset int) { checkType(name, stmtOffset+relOffset) }
+
+		// 1. Shorthand cast (::TYPE) — the "::" operator followed by a bare word.
+		for i := 0; i+1 < len(sig); i++ {
+			if sig[i].Kind == sqltok.Operator && sig[i].Text(rawText) == "::" {
+				nt := sig[i+1]
+				if nt.Kind == sqltok.Keyword || nt.Kind == sqltok.Identifier {
+					rel(nt.Text(rawText), nt.Start)
+				}
 			}
 		}
 
-		// 2. CAST / TRY_CAST function
-		for _, m := range reCastFunction.FindAllStringSubmatchIndex(rawText, -1) {
-			if len(m) >= 4 && m[2] != -1 {
-				typeName := rawText[m[2]:m[3]]
-				checkType(typeName, stmtOffset+m[2])
+		// 2. CAST / TRY_CAST ( … AS TYPE ) — first AS after the opening paren.
+		for i := 0; i+1 < len(sig); i++ {
+			u := tokUpper(sig[i], rawText)
+			if (u != "CAST" && u != "TRY_CAST") || sig[i+1].Kind != sqltok.LParen {
+				continue
 			}
-		}
-
-		// 3. ALTER TABLE ... ADD
-		for _, m := range reAlterTableAdd.FindAllStringSubmatchIndex(rawText, -1) {
-			if len(m) >= 4 && m[2] != -1 {
-				typeName := rawText[m[2]:m[3]]
-				checkType(typeName, stmtOffset+m[2])
-			}
-		}
-
-		// 4. CREATE TABLE
-		if m := reCreateTableExt.FindStringSubmatchIndex(rawText); m != nil {
-			parenStart := m[1] - 1
-			colsRaw := extractBalancedBlockPat(rawText, parenStart)
-			if len(colsRaw) >= 2 {
-				colsContent := colsRaw[1 : len(colsRaw)-1] // strip the outer ()
-				contentOffset := stmtOffset + parenStart + 1
-
-				parseColumnDefs(colsContent, contentOffset, checkType)
-			}
-		}
-
-		// 5. CREATE PROCEDURE/FUNCTION (parameters and returns)
-		if m := reCreateProcExt.FindStringSubmatchIndex(rawText); m != nil {
-			parenStart := m[1] - 1
-			colsRaw := extractBalancedBlockPat(rawText, parenStart)
-			if len(colsRaw) >= 2 {
-				colsContent := colsRaw[1 : len(colsRaw)-1]
-				contentOffset := stmtOffset + parenStart + 1
-				parseColumnDefs(colsContent, contentOffset, checkType)
-			}
-		} else if m := reCreateFuncExt.FindStringSubmatchIndex(rawText); m != nil {
-			parenStart := m[1] - 1
-			colsRaw := extractBalancedBlockPat(rawText, parenStart)
-			if len(colsRaw) >= 2 {
-				colsContent := colsRaw[1 : len(colsRaw)-1]
-				contentOffset := stmtOffset + parenStart + 1
-				parseColumnDefs(colsContent, contentOffset, checkType)
-			}
-		}
-
-		// Check RETURNS type for any statement that has it (e.g. CREATE PROCEDURE / FUNCTION)
-		if strings.Contains(strings.ToUpper(rawText), "CREATE") && strings.Contains(strings.ToUpper(rawText), "RETURNS") {
-			for _, m := range reReturnsType.FindAllStringSubmatchIndex(rawText, -1) {
-				if len(m) >= 4 && m[2] != -1 {
-					typeName := rawText[m[2]:m[3]]
-					// Ignore "NULL" in RETURNS NULL ON NULL INPUT and "TABLE" in RETURNS TABLE(...)
-					if strings.ToUpper(typeName) != "NULL" && strings.ToUpper(typeName) != "TABLE" {
-						checkType(typeName, stmtOffset+m[2])
+			for j := i + 2; j < len(sig); j++ {
+				if tokUpper(sig[j], rawText) != "AS" {
+					continue
+				}
+				if j+1 < len(sig) {
+					tt := sig[j+1]
+					// The old regex required a 2+ char type ([a-zA-Z_][a-zA-Z0-9_]+).
+					if (tt.Kind == sqltok.Keyword || tt.Kind == sqltok.Identifier) && tt.End-tt.Start >= 2 {
+						rel(tt.Text(rawText), tt.Start)
 					}
+				}
+				break
+			}
+		}
+
+		// 3. ALTER TABLE <name> ADD [COLUMN] [IF NOT EXISTS] <col> <type>
+		if kwAt(sig, rawText, 0, "ALTER") && kwAt(sig, rawText, 1, "TABLE") {
+			_, pos := readIdentPath(sig, rawText, 2)
+			if kwAt(sig, rawText, pos, "ADD") {
+				pos++
+				if kwAt(sig, rawText, pos, "COLUMN") {
+					pos++
+				}
+				if pos+2 < len(sig) && kwAt(sig, rawText, pos, "IF") &&
+					kwAt(sig, rawText, pos+1, "NOT") && kwAt(sig, rawText, pos+2, "EXISTS") {
+					pos += 3
+				}
+				// Column name (one ident token), then the declared type.
+				if pos < len(sig) && isIdent(sig[pos]) {
+					pos++
+					if pos < len(sig) && (sig[pos].Kind == sqltok.Keyword || sig[pos].Kind == sqltok.Identifier) {
+						rel(sig[pos].Text(rawText), sig[pos].Start)
+					}
+				}
+			}
+		}
+
+		isCreate := kwAt(sig, rawText, 0, "CREATE")
+
+		// 4. CREATE TABLE column definitions.
+		if isCreate {
+			if lp := createTableColParen(sig, rawText); lp >= 0 {
+				walkColumnDefTypes(sig, rawText, lp, rel)
+			}
+		}
+
+		// 5. CREATE PROCEDURE / FUNCTION parameter list.
+		if isCreate {
+			if lp := createProcParamParen(sig, rawText); lp >= 0 {
+				walkColumnDefTypes(sig, rawText, lp, rel)
+			} else if lp := createFuncParamParen(sig, rawText); lp >= 0 {
+				walkColumnDefTypes(sig, rawText, lp, rel)
+			}
+		}
+
+		// 6. RETURNS type (CREATE PROCEDURE / FUNCTION). "NULL" (RETURNS NULL ON
+		// NULL INPUT) and "TABLE" (RETURNS TABLE(...)) are not data types.
+		if isCreate {
+			for i := 0; i+1 < len(sig); i++ {
+				if tokUpper(sig[i], rawText) != "RETURNS" {
+					continue
+				}
+				tt := sig[i+1]
+				if tt.Kind != sqltok.Keyword && tt.Kind != sqltok.Identifier {
+					continue
+				}
+				if u := strings.ToUpper(tt.Text(rawText)); u != "NULL" && u != "TABLE" {
+					rel(tt.Text(rawText), tt.Start)
 				}
 			}
 		}
@@ -3389,280 +3896,325 @@ func ValidateDataTypes(sql string, stmtRanges []StatementRange) []DiagMarker {
 	return markers
 }
 
-// extractBalancedBlockPat returns the balanced substring starting at openIdx.
-func extractBalancedBlockPat(s string, openIdx int) string {
-	if openIdx < 0 || openIdx >= len(s) || s[openIdx] != '(' {
-		return ""
+// createTableColParen returns the index in sig of the "(" that opens the column
+// list of a CREATE [scope] TABLE statement, or -1. Mirrors the old reCreateTableExt
+// regex: CREATE [OR REPLACE] [LOCAL|GLOBAL] [TEMP|TEMPORARY|VOLATILE|TRANSIENT]
+// TABLE [IF NOT EXISTS] <ident_path> "(".
+func createTableColParen(sig []sqltok.Token, sql string) int {
+	if !kwAt(sig, sql, 0, "CREATE") {
+		return -1
 	}
-	depth := 0
-	inSingle := false
-	inDouble := false
-	for i := openIdx; i < len(s); i++ {
-		c := s[i]
-		if c == '\'' && !inDouble {
-			inSingle = !inSingle
-		} else if c == '"' && !inSingle {
-			inDouble = !inDouble
-		} else if !inSingle && !inDouble {
-			switch c {
-			case '(':
-				depth++
-			case ')':
-				depth--
-				if depth == 0 {
-					return s[openIdx : i+1]
-				}
-			}
-		}
+	i := 1
+	if kwAt(sig, sql, i, "OR") && kwAt(sig, sql, i+1, "REPLACE") {
+		i += 2
 	}
-	return ""
+	if kwAtAny(sig, sql, i, "LOCAL", "GLOBAL") != "" {
+		i++
+	}
+	if kwAtAny(sig, sql, i, "TEMP", "TEMPORARY", "VOLATILE", "TRANSIENT") != "" {
+		i++
+	}
+	if !kwAt(sig, sql, i, "TABLE") {
+		return -1
+	}
+	i++
+	if i+2 < len(sig) && kwAt(sig, sql, i, "IF") && kwAt(sig, sql, i+1, "NOT") && kwAt(sig, sql, i+2, "EXISTS") {
+		i += 3
+	}
+	return identPathThenParen(sig, sql, i)
 }
 
-func parseColumnDefs(colsContent string, contentOffset int, onTypeFound func(string, int)) {
-	depth := 0
-	inSingle := false
-	inDouble := false
-
-	startIdx := 0
-	for i := 0; i <= len(colsContent); i++ {
-		var c byte
-		if i < len(colsContent) {
-			c = colsContent[i]
-		} else {
-			c = ',' // force end of last segment
-		}
-
-		if c == '\'' && !inDouble {
-			inSingle = !inSingle
-		} else if c == '"' && !inSingle {
-			inDouble = !inDouble
-		} else if !inSingle && !inDouble {
-			switch c {
-			case '(':
-				depth++
-			case ')':
-				depth--
-			case ',':
-				if depth == 0 {
-					seg := colsContent[startIdx:i]
-					processColumnDef(seg, contentOffset+startIdx, onTypeFound)
-					startIdx = i + 1
-				}
-			}
-		}
+// createProcParamParen mirrors reCreateProcExt:
+// CREATE [OR REPLACE] PROCEDURE <ident_path> "(".
+func createProcParamParen(sig []sqltok.Token, sql string) int {
+	if !kwAt(sig, sql, 0, "CREATE") {
+		return -1
 	}
+	i := 1
+	if kwAt(sig, sql, i, "OR") && kwAt(sig, sql, i+1, "REPLACE") {
+		i += 2
+	}
+	if !kwAt(sig, sql, i, "PROCEDURE") {
+		return -1
+	}
+	return identPathThenParen(sig, sql, i+1)
 }
 
-func processColumnDef(seg string, segOffset int, onTypeFound func(string, int)) {
-	reWord := regexp.MustCompile(`(?i)^[a-zA-Z_][a-zA-Z0-9_]*|"[^"]+"`)
-
-	var tokens []struct {
-		text   string
-		offset int
+// createFuncParamParen mirrors reCreateFuncExt:
+// CREATE [OR REPLACE] [SECURE] [TEMPORARY|TEMP] [AGGREGATE] FUNCTION <ident_path> "(".
+func createFuncParamParen(sig []sqltok.Token, sql string) int {
+	if !kwAt(sig, sql, 0, "CREATE") {
+		return -1
 	}
-
-	i := 0
-	for i < len(seg) {
-		c := seg[i]
-		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
-			i++
-			continue
-		}
-		// Strip line comments
-		if c == '-' && i+1 < len(seg) && seg[i+1] == '-' {
-			for i < len(seg) && seg[i] != '\n' {
-				i++
-			}
-			continue
-		}
-		// Strip block comments
-		if c == '/' && i+1 < len(seg) && seg[i+1] == '*' {
-			i += 2
-			for i < len(seg) {
-				if i+1 < len(seg) && seg[i] == '*' && seg[i+1] == '/' {
-					i += 2
-					break
-				}
-				i++
-			}
-			continue
-		}
-
-		if m := reWord.FindStringIndex(seg[i:]); m != nil {
-			tokens = append(tokens, struct {
-				text   string
-				offset int
-			}{seg[i : i+m[1]], segOffset + i})
-			i += m[1]
-			continue
-		}
-
-		i++ // skip over parens or unrecognized characters
+	i := 1
+	if kwAt(sig, sql, i, "OR") && kwAt(sig, sql, i+1, "REPLACE") {
+		i += 2
 	}
-
-	// We need at least the column name and the datatype token
-	if len(tokens) >= 2 {
-		first := strings.ToUpper(tokens[0].text)
-		// Ignore constraint definitions
-		if first == "CONSTRAINT" || first == "PRIMARY" || first == "UNIQUE" || first == "FOREIGN" || first == "INDEX" || first == "CHECK" {
-			return
-		}
-		typeToken := tokens[1]
-		if !strings.HasPrefix(typeToken.text, `"`) {
-			onTypeFound(typeToken.text, typeToken.offset)
-		}
+	if kwAt(sig, sql, i, "SECURE") {
+		i++
 	}
+	if kwAtAny(sig, sql, i, "TEMPORARY", "TEMP") != "" {
+		i++
+	}
+	if kwAt(sig, sql, i, "AGGREGATE") {
+		i++
+	}
+	if !kwAt(sig, sql, i, "FUNCTION") {
+		return -1
+	}
+	return identPathThenParen(sig, sql, i+1)
 }
 
-// stripParenContents returns s with all content inside parentheses removed
-// while keeping the parenthesis characters themselves.  String literals
-// (single- or double-quoted) are tracked so that parentheses appearing inside
-// quoted values are not counted as structural delimiters.
-//
-// Example:
-//
-//	"FILE_FORMAT = (TYPE = 'CSV' SKIP_HEADER = 1) COMMENT = 'x'"
-//	→ "FILE_FORMAT = () COMMENT = 'x'"
-//
-// This prevents nested KEY=VALUE pairs inside blocks such as
-// FILE_FORMAT=(...), ENCRYPTION=(...), CREDENTIALS=(...), or DIRECTORY=(...)
-// from being falsely flagged as unexpected top-level properties.
-func stripParenContents(s string) string {
-	out := make([]byte, 0, len(s))
+// identPathThenParen reads an ident path starting at sig[pos]; if the token
+// immediately following the path is "(", it returns that paren's index, else -1.
+func identPathThenParen(sig []sqltok.Token, sql string, pos int) int {
+	if pos >= len(sig) || !isIdent(sig[pos]) {
+		return -1
+	}
+	_, next := readIdentPath(sig, sql, pos)
+	if next < len(sig) && sig[next].Kind == sqltok.LParen {
+		return next
+	}
+	return -1
+}
+
+// walkColumnDefTypes iterates the comma-separated definitions inside the
+// parenthesised group whose opening "(" is sig[lparenIdx], reporting the
+// declared data type of each column definition — the second word token of the
+// segment — via onType(text, relOffset). Constraint definitions (CONSTRAINT,
+// PRIMARY, UNIQUE, FOREIGN, INDEX, CHECK) and quoted type tokens are skipped.
+// This replaces the old extractBalancedBlockPat + parseColumnDefs + processColumnDef
+// helpers; the tokenizer handles strings, comments, and nested parens correctly.
+func walkColumnDefTypes(sig []sqltok.Token, sql string, lparenIdx int, onType func(string, int)) {
+	if lparenIdx < 0 || lparenIdx >= len(sig) || sig[lparenIdx].Kind != sqltok.LParen {
+		return
+	}
+	// Locate the matching close paren. If the group is unterminated, skip
+	// entirely (the old extractBalancedBlockPat returned "" for unbalanced parens,
+	// so malformed input produced no type warnings).
 	depth := 0
-	inSingle := false
-	inDouble := false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case !inDouble && c == '\'':
-			inSingle = !inSingle
-			if depth == 0 {
-				out = append(out, c)
-			}
-		case !inSingle && c == '"':
-			inDouble = !inDouble
-			if depth == 0 {
-				out = append(out, c)
-			}
-		case inSingle || inDouble:
-			if depth == 0 {
-				out = append(out, c)
-			}
-		case c == '(':
+	closeIdx := -1
+	for i := lparenIdx; i < len(sig); i++ {
+		switch sig[i].Kind {
+		case sqltok.LParen:
 			depth++
-			out = append(out, c)
-		case c == ')':
+		case sqltok.RParen:
 			depth--
-			out = append(out, c)
-		default:
 			if depth == 0 {
-				out = append(out, c)
+				closeIdx = i
+			}
+		}
+		if closeIdx >= 0 {
+			break
+		}
+	}
+	if closeIdx < 0 {
+		return
+	}
+
+	var w0, w1 sqltok.Token
+	wn := 0
+	flush := func() {
+		if wn >= 2 {
+			switch strings.ToUpper(w0.Text(sql)) {
+			case "CONSTRAINT", "PRIMARY", "UNIQUE", "FOREIGN", "INDEX", "CHECK":
+				// table-level constraint, not a column definition
+			default:
+				if w1.Kind != sqltok.QuotedIdent {
+					onType(w1.Text(sql), w1.Start)
+				}
+			}
+		}
+		wn = 0
+	}
+	depth = 0
+	for i := lparenIdx; i <= closeIdx; i++ {
+		switch sig[i].Kind {
+		case sqltok.LParen:
+			depth++
+		case sqltok.RParen:
+			depth--
+			if depth == 0 {
+				flush()
+				return
+			}
+		case sqltok.Comma:
+			if depth == 1 {
+				flush()
+			}
+		case sqltok.Keyword, sqltok.Identifier, sqltok.QuotedIdent:
+			// Collect the first two word tokens of the current segment (the
+			// column name and its type), regardless of nesting depth.
+			switch wn {
+			case 0:
+				w0, wn = sig[i], 1
+			case 1:
+				w1, wn = sig[i], 2
 			}
 		}
 	}
-	return string(out)
 }
 
-// validateProperties scans s for words that look like property keys (KEY =)
-// and checks if they match the pipe-separated list of validProps.
+// validateProperties scans s for top-level (paren depth 0) property keys (KEY =)
+// and checks them against the pipe-separated validProps allow-list. Keys nested
+// inside parens — e.g. TYPE inside FILE_FORMAT=(...) — are skipped, so callers no
+// longer need to pre-strip paren contents. The tokenizer classifies string
+// literals as non-keyword tokens, so values like COMMENT='a = b' never produce a
+// spurious key.
 func validateProperties(s string, validProps string, r StatementRange, markers *[]DiagMarker) {
-	reValid := regexp.MustCompile(`(?i)^(` + validProps + `)$`)
+	valid := toUpperSet(strings.Split(validProps, "|"))
+	sig := sigTokens(s)
 
-	strippedS := reStripStringLiterals.ReplaceAllString(s, "''")
-
-	for _, m := range reProp.FindAllStringSubmatch(strippedS, -1) {
-		key := m[1]
-		if !reValid.MatchString(key) {
-			*markers = append(*markers, diagMarkerSpan(r, fmt.Sprintf("Unexpected property '%s' in statement.", key), 4))
+	depth := 0
+	for i := 0; i < len(sig); i++ {
+		switch sig[i].Kind {
+		case sqltok.LParen:
+			depth++
+			continue
+		case sqltok.RParen:
+			if depth > 0 {
+				depth--
+			}
+			continue
+		}
+		if depth == 0 && i+1 < len(sig) &&
+			(sig[i].Kind == sqltok.Keyword || sig[i].Kind == sqltok.Identifier) &&
+			sig[i+1].Kind == sqltok.Operator && sig[i+1].Text(s) == "=" {
+			key := sig[i].Text(s)
+			if !valid[strings.ToUpper(key)] {
+				*markers = append(*markers, diagMarkerSpan(r, fmt.Sprintf("Unexpected property '%s' in statement.", key)))
+			}
 		}
 	}
 }
 
+// validateCreateAlert validates CREATE ALERT: the OR REPLACE vs IF NOT EXISTS
+// conflict, the mandatory WAREHOUSE / SCHEDULE / IF (condition) / THEN clauses,
+// and the allowed property keys. Token-based throughout — clauses and properties
+// are located by scanning the significant-token stream.
 func validateCreateAlert(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	// 1. Mutually exclusive OR REPLACE and IF NOT EXISTS
-	ifIdx := reAlertIfExists.FindStringIndex(parseText)
 
-	preambleToCheck := parseText
-	if ifIdx != nil {
-		preambleToCheck = parseText[:ifIdx[0]]
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
+
+	// 1. Mutually exclusive OR REPLACE and IF NOT EXISTS.
+	// Restrict check to tokens before the IF ( EXISTS ( condition clause.
+	ifExistsIdx := -1
+	for i := 0; i+3 < len(sig); i++ {
+		if tokUpper(sig[i], stripped) == "IF" &&
+			sig[i+1].Kind == sqltok.LParen &&
+			tokUpper(sig[i+2], stripped) == "EXISTS" &&
+			sig[i+3].Kind == sqltok.LParen {
+			ifExistsIdx = i
+			break
+		}
 	}
 
-	if marker, conflict := checkOrReplaceConflict(preambleToCheck, r, "CREATE ALERT"); conflict {
-		markers = append(markers, marker)
-		return markers
+	if ifExistsIdx >= 0 {
+		preambleSig := sig[:ifExistsIdx]
+		if marker, conflict := checkOrReplaceConflictTok(preambleSig, stripped, r, "CREATE ALERT"); conflict {
+			markers = append(markers, marker)
+			return markers
+		}
+	} else {
+		if marker, conflict := checkOrReplaceConflictTok(sig, stripped, r, "CREATE ALERT"); conflict {
+			markers = append(markers, marker)
+			return markers
+		}
 	}
 
 	// 2. Mandatory IF (EXISTS (...))
-	if ifIdx == nil {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory IF (EXISTS (...)) clause in CREATE ALERT statement.", 4))
+	if ifExistsIdx < 0 {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory IF (EXISTS (...)) clause in CREATE ALERT statement."))
 	}
 
-	var preamble string
-	var body string
-	if ifIdx != nil {
-		preamble = parseText[:ifIdx[0]]
-		body = parseText[ifIdx[0]:]
-	} else {
-		// If IF (EXISTS ( is missing, consider the whole statement as preamble for other checks
-		preamble = parseText
-		body = ""
+	// 3. Mandatory THEN — must appear at paren depth 0 after the IF clause.
+	if ifExistsIdx >= 0 {
+		hasThen := false
+		depth := 0
+		for i := ifExistsIdx; i < len(sig); i++ {
+			switch sig[i].Kind {
+			case sqltok.LParen:
+				depth++
+			case sqltok.RParen:
+				depth--
+			default:
+				if depth == 0 && tokUpper(sig[i], stripped) == "THEN" {
+					hasThen = true
+				}
+			}
+			if hasThen {
+				break
+			}
+		}
+		if !hasThen {
+			markers = append(markers, diagMarkerSpan(r, "Missing mandatory THEN keyword in CREATE ALERT statement."))
+		}
 	}
 
-	// 3. Mandatory THEN
-	// body is empty when IF clause is absent; THEN check is skipped
-	if body != "" && reAlertThen.FindStringIndex(stripParenContents(body)) == nil {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory THEN keyword in CREATE ALERT statement.", 4))
+	// 4. Mandatory WAREHOUSE (in preamble before IF clause)
+	preambleSig := sig
+	if ifExistsIdx >= 0 {
+		preambleSig = sig[:ifExistsIdx]
 	}
-
-	// 4. Mandatory WAREHOUSE
-	if !reAlertWarehouse.MatchString(preamble) {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory WAREHOUSE property in CREATE ALERT statement.", 4))
+	if !hasKWAssign(preambleSig, stripped, "WAREHOUSE") {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory WAREHOUSE property in CREATE ALERT statement."))
 	}
 
 	// 5. Mandatory SCHEDULE
-	if !reAlertSchedule.MatchString(preamble) {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory SCHEDULE property in CREATE ALERT statement.", 4))
+	if !hasKWAssign(preambleSig, stripped, "SCHEDULE") {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory SCHEDULE property in CREATE ALERT statement."))
 	}
 
 	// 6. Validate properties
+	preamble := parseText
+	if ifExistsIdx >= 0 {
+		preamble = stripped[:sig[ifExistsIdx].Start]
+	}
 	validateProperties(preamble, alertProps, r, &markers)
 
 	return markers
 }
 
+// validateCreateNetworkPolicy validates CREATE NETWORK POLICY: the account-level
+// name (no db/schema prefix), that at least one of ALLOWED_IP_LIST or
+// ALLOWED_NETWORK_RULE_LIST is present and non-empty, CIDR validity of the IP
+// lists, and the allowed property keys. Token-based; the IP-list contents are
+// extracted with findKWAssignParenContent and re-tokenised per entry.
 func validateCreateNetworkPolicy(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
+
 	// 1. Account-level: name must not have a database or schema prefix.
-	// checkAccountLevelPrefix uses sqlIdentPathHasDot so that a quoted
-	// identifier whose inner text contains a dot (e.g. "my.policy") is not
-	// falsely flagged as a prefix.
-	if m := reNetworkPolicyName.FindStringSubmatch(parseText); m != nil {
-		if pfx := checkAccountLevelPrefix(m[1], r, "Network policies"); pfx != nil {
-			markers = append(markers, *pfx)
+	for i := 0; i < len(sig); i++ {
+		if tokUpper(sig[i], stripped) == "POLICY" && i+1 < len(sig) && isIdent(sig[i+1]) {
+			name, _ := readIdentPath(sig, stripped, i+1)
+			checkAccountLevelPrefix(name, r, "Network policies", &markers)
+			break
 		}
 	}
 
 	// 2. At least one of ALLOWED_IP_LIST or ALLOWED_NETWORK_RULE_LIST must be present
-	// and non-empty. An empty list (e.g. ALLOWED_IP_LIST = ()) has no effect.
-	// networkPolicyListHasEntries is used instead of a plain TrimSpace check so
-	// that whitespace-only quoted entries like ('   ') are also treated as empty.
-	allowedIPMatch := reNetworkPolicyHasAllowedIP.FindStringSubmatch(parseText)
-	hasAllowedIP := allowedIPMatch != nil && networkPolicyListHasEntries(allowedIPMatch[1])
-	allowedRulesMatch := reNetworkPolicyHasAllowedRules.FindStringSubmatch(parseText)
-	hasAllowedRules := allowedRulesMatch != nil && networkPolicyListHasEntries(allowedRulesMatch[1])
+	// and non-empty.
+	allowedIPContent := findKWAssignParenContent(sig, stripped, "ALLOWED_IP_LIST")
+	hasAllowedIP := allowedIPContent != "" && networkPolicyListHasEntries(allowedIPContent)
+	allowedRulesContent := findKWAssignParenContent(sig, stripped, "ALLOWED_NETWORK_RULE_LIST")
+	hasAllowedRules := allowedRulesContent != "" && networkPolicyListHasEntries(allowedRulesContent)
 	if !hasAllowedIP && !hasAllowedRules {
-		markers = append(markers, diagMarkerSpan(r, "Network policy has no effect: at least one of ALLOWED_IP_LIST or ALLOWED_NETWORK_RULE_LIST must be specified and non-empty.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Network policy has no effect: at least one of ALLOWED_IP_LIST or ALLOWED_NETWORK_RULE_LIST must be specified and non-empty."))
 	}
 
 	// 3. Validate IP lists and collect IPs for overlap check.
 	var allowedIPs []string
 	var blockedIPs []string
-	for _, m := range reNetworkPolicyIPList.FindAllStringSubmatch(parseText, -1) {
-		listKind := strings.ToUpper(m[1])
-		listContent := m[2]
+	for _, listKind := range []string{"ALLOWED_IP_LIST", "BLOCKED_IP_LIST"} {
+		listContent := findKWAssignParenContent(sig, stripped, listKind)
+		if listContent == "" {
+			continue
+		}
 		for rawEntry := range strings.SplitSeq(listContent, ",") {
 			entry := strings.TrimSpace(rawEntry)
 			if entry == "" {
@@ -3677,8 +4229,7 @@ func validateCreateNetworkPolicy(parseText string, r StatementRange) []DiagMarke
 			}
 			if !isValidIPv4CIDR(entry) {
 				markers = append(markers, diagMarkerSpan(r,
-					fmt.Sprintf("Invalid IPv4 address or CIDR '%s' in %s. Expected an IPv4 address, optionally with a CIDR prefix (e.g. 192.168.0.0/24 or 10.0.0.1/32). IPv6 addresses must be added via ALLOWED_NETWORK_RULE_LIST.", entry, listKind),
-					4))
+					fmt.Sprintf("Invalid IPv4 address or CIDR '%s' in %s. Expected an IPv4 address, optionally with a CIDR prefix (e.g. 192.168.0.0/24 or 10.0.0.1/32). IPv6 addresses must be added via ALLOWED_NETWORK_RULE_LIST.", entry, listKind)))
 				continue
 			}
 			if listKind == "ALLOWED_IP_LIST" {
@@ -3690,8 +4241,7 @@ func validateCreateNetworkPolicy(parseText string, r StatementRange) []DiagMarke
 	}
 
 	// 4. Warn if the same IP/CIDR string appears in both ALLOWED_IP_LIST and
-	// BLOCKED_IP_LIST. Note: this is a string-exact comparison; semantic subnet
-	// overlaps (e.g. 10.0.0.0/8 allowed vs 10.0.1.5 blocked) are not detected.
+	// BLOCKED_IP_LIST.
 	if len(allowedIPs) > 0 && len(blockedIPs) > 0 {
 		allowedSet := make(map[string]bool, len(allowedIPs))
 		for _, ip := range allowedIPs {
@@ -3700,14 +4250,13 @@ func validateCreateNetworkPolicy(parseText string, r StatementRange) []DiagMarke
 		for _, ip := range blockedIPs {
 			if allowedSet[ip] {
 				markers = append(markers, diagMarkerSpan(r,
-					fmt.Sprintf("IP '%s' appears in both ALLOWED_IP_LIST and BLOCKED_IP_LIST.", ip),
-					4))
+					fmt.Sprintf("IP '%s' appears in both ALLOWED_IP_LIST and BLOCKED_IP_LIST.", ip)))
 			}
 		}
 	}
 
 	// 5. Validate top-level property keys (strip list contents to avoid false positives).
-	validateProperties(stripParenContents(parseText), networkPolicyProps, r, &markers)
+	validateProperties(parseText, networkPolicyProps, r, &markers)
 
 	return markers
 }
@@ -3748,15 +4297,11 @@ func isValidIPv4CIDR(s string) bool {
 // Dots that appear inside a double-quoted identifier token (e.g. "my.policy")
 // are not counted, so a single-part quoted name never triggers a false positive.
 func sqlIdentPathHasDot(s string) bool {
-	inQuote := false
-	for _, c := range s {
-		switch c {
-		case '"':
-			inQuote = !inQuote
-		case '.':
-			if !inQuote {
-				return true
-			}
+	// A dot inside a "quoted identifier" is part of the name, not a separator;
+	// the tokenizer only emits a Dot token for separators outside quotes.
+	for _, t := range sqltok.Tokenize(s) {
+		if t.Kind == sqltok.Dot {
+			return true
 		}
 	}
 	return false
@@ -3767,24 +4312,29 @@ func sqlIdentPathHasDot(s string) bool {
 func validateCreateSessionPolicy(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
+
 	// 1. Account-level: object name must not have a database or schema prefix.
-	if m := reSessionPolicyName.FindStringSubmatch(parseText); m != nil {
-		if pfx := checkAccountLevelPrefix(m[1], r, "Session policies"); pfx != nil {
-			markers = append(markers, *pfx)
+	for i := 0; i < len(sig); i++ {
+		if tokUpper(sig[i], stripped) == "POLICY" && i+1 < len(sig) && isIdent(sig[i+1]) {
+			name, _ := readIdentPath(sig, stripped, i+1)
+			checkAccountLevelPrefix(name, r, "Session policies", &markers)
+			break
 		}
 	}
 
 	// 2. Validate SESSION_IDLE_TIMEOUT_MINS range (0–56400).
-	if m := reSessionIdleTimeout.FindStringSubmatch(parseText); m != nil {
-		if v, err := strconv.Atoi(m[1]); err == nil && (v < 0 || v > 56400) {
-			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("SESSION_IDLE_TIMEOUT_MINS value %d is out of range (0–56400). Use 0 to disable the timeout.", v), 4))
+	if v, ok := findKWAssignInt(sig, stripped, "SESSION_IDLE_TIMEOUT_MINS"); ok {
+		if v < 0 || v > 56400 {
+			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("SESSION_IDLE_TIMEOUT_MINS value %d is out of range (0–56400). Use 0 to disable the timeout.", v)))
 		}
 	}
 
 	// 3. Validate SESSION_UI_IDLE_TIMEOUT_MINS range (0–56400).
-	if m := reSessionUIIdleTimeout.FindStringSubmatch(parseText); m != nil {
-		if v, err := strconv.Atoi(m[1]); err == nil && (v < 0 || v > 56400) {
-			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("SESSION_UI_IDLE_TIMEOUT_MINS value %d is out of range (0–56400). Use 0 to disable the timeout.", v), 4))
+	if v, ok := findKWAssignInt(sig, stripped, "SESSION_UI_IDLE_TIMEOUT_MINS"); ok {
+		if v < 0 || v > 56400 {
+			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("SESSION_UI_IDLE_TIMEOUT_MINS value %d is out of range (0–56400). Use 0 to disable the timeout.", v)))
 		}
 	}
 
@@ -3799,52 +4349,52 @@ func validateCreateSessionPolicy(parseText string, r StatementRange) []DiagMarke
 func validateCreatePasswordPolicy(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
+
 	// 1. Account-level: object name must not have a database or schema prefix.
-	if m := rePasswordPolicyName.FindStringSubmatch(parseText); m != nil {
-		if pfx := checkAccountLevelPrefix(m[1], r, "Password policies"); pfx != nil {
-			markers = append(markers, *pfx)
+	for i := 0; i < len(sig); i++ {
+		if tokUpper(sig[i], stripped) == "POLICY" && i+1 < len(sig) && isIdent(sig[i+1]) {
+			name, _ := readIdentPath(sig, stripped, i+1)
+			checkAccountLevelPrefix(name, r, "Password policies", &markers)
+			break
 		}
 	}
 
 	// 2. Per-property range validation.
 	type intProp struct {
-		re   *regexp.Regexp
 		name string
 		min  int
 		max  int // -1 means no upper bound
 	}
 
 	props := []intProp{
-		{rePasswordMinLength, "PASSWORD_MIN_LENGTH", 8, 256},
-		{rePasswordMaxLength, "PASSWORD_MAX_LENGTH", 8, 256},
-		{rePasswordMinUpperCase, "PASSWORD_MIN_UPPER_CASE_CHARS", 0, 256},
-		{rePasswordMinLowerCase, "PASSWORD_MIN_LOWER_CASE_CHARS", 0, 256},
-		{rePasswordMinNumeric, "PASSWORD_MIN_NUMERIC_CHARS", 0, 256},
-		{rePasswordMinSpecial, "PASSWORD_MIN_SPECIAL_CHARS", 0, 256},
-		{rePasswordMinAgeDays, "PASSWORD_MIN_AGE_DAYS", 0, 999},
-		{rePasswordMaxAgeDays, "PASSWORD_MAX_AGE_DAYS", 0, 999},
-		{rePasswordMaxRetries, "PASSWORD_MAX_RETRIES", 1, 10},
-		{rePasswordLockoutTimeMins, "PASSWORD_LOCKOUT_TIME_MINS", 1, 999},
-		{rePasswordHistory, "PASSWORD_HISTORY", 0, 24},
+		{"PASSWORD_MIN_LENGTH", 8, 256},
+		{"PASSWORD_MAX_LENGTH", 8, 256},
+		{"PASSWORD_MIN_UPPER_CASE_CHARS", 0, 256},
+		{"PASSWORD_MIN_LOWER_CASE_CHARS", 0, 256},
+		{"PASSWORD_MIN_NUMERIC_CHARS", 0, 256},
+		{"PASSWORD_MIN_SPECIAL_CHARS", 0, 256},
+		{"PASSWORD_MIN_AGE_DAYS", 0, 999},
+		{"PASSWORD_MAX_AGE_DAYS", 0, 999},
+		{"PASSWORD_MAX_RETRIES", 1, 10},
+		{"PASSWORD_LOCKOUT_TIME_MINS", 1, 999},
+		{"PASSWORD_HISTORY", 0, 24},
 	}
 
 	values := make(map[string]int)
 	for _, p := range props {
-		m := p.re.FindStringSubmatch(parseText)
-		if m == nil {
-			continue
-		}
-		v, err := strconv.Atoi(m[1])
-		if err != nil {
+		v, ok := findKWAssignInt(sig, stripped, p.name)
+		if !ok {
 			continue
 		}
 		values[p.name] = v
 		if v < p.min {
 			msg := fmt.Sprintf("%s value %d is below the minimum (%d).", p.name, v, p.min)
-			markers = append(markers, diagMarkerSpan(r, msg, 4))
+			markers = append(markers, diagMarkerSpan(r, msg))
 		} else if p.max >= 0 && v > p.max {
 			msg := fmt.Sprintf("%s value %d exceeds the maximum (%d).", p.name, v, p.max)
-			markers = append(markers, diagMarkerSpan(r, msg, 4))
+			markers = append(markers, diagMarkerSpan(r, msg))
 		}
 	}
 
@@ -3853,15 +4403,13 @@ func validateCreatePasswordPolicy(parseText string, r StatementRange) []DiagMark
 	maxLen, hasMaxLen := values["PASSWORD_MAX_LENGTH"]
 	if hasMinLen && hasMaxLen && maxLen < minLen {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("PASSWORD_MAX_LENGTH (%d) must be greater than or equal to PASSWORD_MIN_LENGTH (%d).", maxLen, minLen),
-			4))
+			fmt.Sprintf("PASSWORD_MAX_LENGTH (%d) must be greater than or equal to PASSWORD_MIN_LENGTH (%d).", maxLen, minLen)))
 	}
 	minAge, hasMinAge := values["PASSWORD_MIN_AGE_DAYS"]
 	maxAge, hasMaxAge := values["PASSWORD_MAX_AGE_DAYS"]
 	if hasMinAge && hasMaxAge && maxAge > 0 && minAge > maxAge {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("PASSWORD_MIN_AGE_DAYS (%d) must be less than or equal to PASSWORD_MAX_AGE_DAYS (%d).", minAge, maxAge),
-			4))
+			fmt.Sprintf("PASSWORD_MIN_AGE_DAYS (%d) must be less than or equal to PASSWORD_MAX_AGE_DAYS (%d).", minAge, maxAge)))
 	}
 
 	// 4. Validate property keys.
@@ -3875,27 +4423,31 @@ func validateCreatePasswordPolicy(parseText string, r StatementRange) []DiagMark
 func validateCreateRowAccessPolicy(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
+
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	// Restrict the check to the preamble before AS (...) so that an IF in
-	// the policy body expression is not mistaken for the DDL modifier.
-	asIdx := reRowAccessPolicyASOpen.FindStringIndex(parseText)
-	preamble := parseText
-	if asIdx != nil {
-		preamble = parseText[:asIdx[0]]
+	// Restrict check to preamble before AS ( so that IF in the policy body
+	// is not mistaken for the DDL modifier.
+	asIdx := findKWLParen(sig, stripped, "AS")
+	preambleSig := sig
+	if asIdx >= 0 {
+		preambleSig = sig[:asIdx]
 	}
-	if marker, conflict := checkOrReplaceConflict(preamble, r, "CREATE ROW ACCESS POLICY"); conflict {
+	if marker, conflict := checkOrReplaceConflictTok(preambleSig, stripped, r, "CREATE ROW ACCESS POLICY"); conflict {
 		markers = append(markers, marker)
 		return markers
 	}
 
 	// 2. Mandatory AS (<arg_name> <arg_type> [, ...]) parameter list.
-	paramMatch := reRowAccessPolicyParamList.FindStringSubmatch(parseText)
-	if paramMatch == nil {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory AS (<arg_name> <arg_type> [, ...]) parameter list in CREATE ROW ACCESS POLICY.", 4))
+	if asIdx < 0 {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory AS (<arg_name> <arg_type> [, ...]) parameter list in CREATE ROW ACCESS POLICY."))
 	} else {
-		paramContent := strings.TrimSpace(paramMatch[1])
+		// Extract content inside AS ( ... ) respecting paren depth.
+		paramContent := extractParenContentTok(sig, stripped, asIdx)
+		paramContent = strings.TrimSpace(paramContent)
 		if paramContent == "" {
-			markers = append(markers, diagMarkerSpan(r, "Row access policy parameter list must declare at least one argument.", 4))
+			markers = append(markers, diagMarkerSpan(r, "Row access policy parameter list must declare at least one argument."))
 		} else {
 			// Validate each parameter's declared data type.
 			validTypes := make(map[string]bool)
@@ -3917,7 +4469,7 @@ func validateCreateRowAccessPolicy(parseText string, r StatementRange) []DiagMar
 					typeName := strings.ToUpper(rawType)
 					if !validTypes[typeName] {
 						markers = append(markers, diagMarkerSpan(r,
-							fmt.Sprintf("Unknown data type '%s' in row access policy parameter.", typeName), 4))
+							fmt.Sprintf("Unknown data type '%s' in row access policy parameter.", typeName)))
 					}
 				}
 			}
@@ -3925,13 +4477,13 @@ func validateCreateRowAccessPolicy(parseText string, r StatementRange) []DiagMar
 	}
 
 	// 3. Mandatory RETURNS BOOLEAN clause.
-	if !reRowAccessPolicyReturns.MatchString(parseText) {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory RETURNS BOOLEAN clause in CREATE ROW ACCESS POLICY.", 4))
+	if !hasKWPair(sig, stripped, "RETURNS", "BOOLEAN") {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory RETURNS BOOLEAN clause in CREATE ROW ACCESS POLICY."))
 	}
 
 	// 4. Mandatory -> separator between signature and body.
-	if !reRowAccessPolicyArrow.MatchString(parseText) {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory '->' separator between signature and body in CREATE ROW ACCESS POLICY.", 4))
+	if !hasKWPairArrow(sig, stripped, "RETURNS", "BOOLEAN") {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory '->' separator between signature and body in CREATE ROW ACCESS POLICY."))
 	}
 
 	return markers
@@ -3944,16 +4496,16 @@ func splitCommaRespectingParens(s string) []string {
 	var parts []string
 	depth := 0
 	start := 0
-	for i := 0; i < len(s); i++ {
-		switch s[i] {
-		case '(':
+	for _, t := range sqltok.Tokenize(s) {
+		switch t.Kind {
+		case sqltok.LParen:
 			depth++
-		case ')':
+		case sqltok.RParen:
 			depth--
-		case ',':
+		case sqltok.Comma:
 			if depth == 0 {
-				parts = append(parts, s[start:i])
-				start = i + 1
+				parts = append(parts, s[start:t.Start])
+				start = t.End
 			}
 		}
 	}
@@ -3968,38 +4520,41 @@ func splitCommaRespectingParens(s string) []string {
 func validateCreateAggregationPolicy(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
+
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	asIdx := reAggPolicyAS.FindStringIndex(parseText)
-	preamble := parseText
-	if asIdx != nil {
-		preamble = parseText[:asIdx[0]]
+	asIdx := findKWLParen(sig, stripped, "AS")
+	preambleSig := sig
+	if asIdx >= 0 {
+		preambleSig = sig[:asIdx]
 	}
-	if marker, conflict := checkOrReplaceConflict(preamble, r, "CREATE AGGREGATION POLICY"); conflict {
+	if marker, conflict := checkOrReplaceConflictTok(preambleSig, stripped, r, "CREATE AGGREGATION POLICY"); conflict {
 		markers = append(markers, marker)
 		return markers
 	}
 
 	// 2. Mandatory AS () parameter list.
-	if !reAggPolicyAS.MatchString(parseText) {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory AS () clause in CREATE AGGREGATION POLICY.", 4))
+	if asIdx < 0 {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory AS () clause in CREATE AGGREGATION POLICY."))
 	}
 
 	// 3. Mandatory RETURNS AGGREGATION_CONSTRAINT clause.
-	if !reAggPolicyReturns.MatchString(parseText) {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory RETURNS AGGREGATION_CONSTRAINT clause in CREATE AGGREGATION POLICY.", 4))
+	if !hasKWPair(sig, stripped, "RETURNS", "AGGREGATION_CONSTRAINT") {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory RETURNS AGGREGATION_CONSTRAINT clause in CREATE AGGREGATION POLICY."))
 	}
 
 	// 4. Mandatory -> separator between signature and body.
-	if !reAggPolicyArrow.MatchString(parseText) {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory '->' separator between signature and body in CREATE AGGREGATION POLICY.", 4))
+	if !hasKWPairArrow(sig, stripped, "RETURNS", "AGGREGATION_CONSTRAINT") {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory '->' separator between signature and body in CREATE AGGREGATION POLICY."))
 	}
 
 	// 5. Validate MIN_GROUP_SIZE range (1–1 000 000) if present.
-	if m := reAggPolicyMinGroupSize.FindStringSubmatch(parseText); m != nil {
-		val, err := strconv.Atoi(m[1])
-		if err == nil && (val < 1 || val > 1000000) {
+	// MIN_GROUP_SIZE => value (uses fat arrow =>)
+	if val, ok := findKWFatArrowInt(sig, stripped, "MIN_GROUP_SIZE"); ok {
+		if val < 1 || val > 1000000 {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("MIN_GROUP_SIZE (%d) must be between 1 and 1000000.", val), 4))
+				fmt.Sprintf("MIN_GROUP_SIZE (%d) must be between 1 and 1000000.", val)))
 		}
 	}
 
@@ -4013,38 +4568,41 @@ func validateCreateAggregationPolicy(parseText string, r StatementRange) []DiagM
 func validateCreateProjectionPolicy(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
+
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	asIdx := reProjPolicyAS.FindStringIndex(parseText)
-	preamble := parseText
-	if asIdx != nil {
-		preamble = parseText[:asIdx[0]]
+	asIdx := findKWLParen(sig, stripped, "AS")
+	preambleSig := sig
+	if asIdx >= 0 {
+		preambleSig = sig[:asIdx]
 	}
-	if marker, conflict := checkOrReplaceConflict(preamble, r, "CREATE PROJECTION POLICY"); conflict {
+	if marker, conflict := checkOrReplaceConflictTok(preambleSig, stripped, r, "CREATE PROJECTION POLICY"); conflict {
 		markers = append(markers, marker)
 		return markers
 	}
 
 	// 2. Mandatory AS () parameter list.
-	if !reProjPolicyAS.MatchString(parseText) {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory AS () clause in CREATE PROJECTION POLICY.", 4))
+	if asIdx < 0 {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory AS () clause in CREATE PROJECTION POLICY."))
 	}
 
 	// 3. Mandatory RETURNS PROJECTION_CONSTRAINT clause.
-	if !reProjPolicyReturns.MatchString(parseText) {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory RETURNS PROJECTION_CONSTRAINT clause in CREATE PROJECTION POLICY.", 4))
+	if !hasKWPair(sig, stripped, "RETURNS", "PROJECTION_CONSTRAINT") {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory RETURNS PROJECTION_CONSTRAINT clause in CREATE PROJECTION POLICY."))
 	}
 
 	// 4. Mandatory -> separator between signature and body.
-	if !reProjPolicyArrow.MatchString(parseText) {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory '->' separator between signature and body in CREATE PROJECTION POLICY.", 4))
+	if !hasKWPairArrow(sig, stripped, "RETURNS", "PROJECTION_CONSTRAINT") {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory '->' separator between signature and body in CREATE PROJECTION POLICY."))
 	}
 
 	// 5. Validate ALLOW value if present: must be 'none' or 'transformation'.
-	if m := reProjPolicyAllowValue.FindStringSubmatch(parseText); m != nil {
-		val := strings.ToLower(m[1])
-		if val != "none" && val != "transformation" {
+	if val, ok := findKWFatArrowStr(sig, stripped, "ALLOW"); ok {
+		lower := strings.ToLower(val)
+		if lower != "none" && lower != "transformation" {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("ALLOW value '%s' is invalid; must be 'none' or 'transformation'.", m[1]), 4))
+				fmt.Sprintf("ALLOW value '%s' is invalid; must be 'none' or 'transformation'.", val)))
 		}
 	}
 
@@ -4058,9 +4616,17 @@ func validateCreateProjectionPolicy(parseText string, r StatementRange) []DiagMa
 func validateAlterAggregationOrProjectionPolicy(parseText string, r StatementRange, policyType string) []DiagMarker {
 	var markers []DiagMarker
 
-	if !reAlterPolicyAction.MatchString(parseText) {
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
+
+	hasSetBody := hasKWPair(sig, stripped, "SET", "BODY")
+	hasSetComment := hasKWPair(sig, stripped, "SET", "COMMENT")
+	hasUnsetComment := hasKWPair(sig, stripped, "UNSET", "COMMENT")
+	hasRenameTo := hasKWPair(sig, stripped, "RENAME", "TO")
+
+	if !hasSetBody && !hasSetComment && !hasUnsetComment && !hasRenameTo {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("ALTER %s POLICY requires SET BODY, SET COMMENT, UNSET COMMENT, or RENAME TO.", policyType), 4))
+			fmt.Sprintf("ALTER %s POLICY requires SET BODY, SET COMMENT, UNSET COMMENT, or RENAME TO.", policyType)))
 	}
 
 	return markers
@@ -4073,9 +4639,13 @@ func validateAlterAggregationOrProjectionPolicy(parseText string, r StatementRan
 func validateDropAggregationOrProjectionPolicy(parseText string, r StatementRange, policyType string) []DiagMarker {
 	var markers []DiagMarker
 
-	if !reDropPolicyHasName.MatchString(parseText) {
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
+	// DROP <policyType> POLICY [IF EXISTS] <name>
+	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", policyType, "POLICY")
+	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("DROP %s POLICY requires a policy name.", policyType), 4))
+			fmt.Sprintf("DROP %s POLICY requires a policy name.", policyType)))
 	}
 
 	return markers
@@ -4088,19 +4658,22 @@ func validateDropAggregationOrProjectionPolicy(parseText string, r StatementRang
 func validateCreatePackagesPolicy(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
+
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if marker, conflict := checkOrReplaceConflict(parseText, r, "CREATE PACKAGES POLICY"); conflict {
+	if marker, conflict := checkOrReplaceConflictTok(sig, stripped, r, "CREATE PACKAGES POLICY"); conflict {
 		markers = append(markers, marker)
 		return markers
 	}
 
 	// 2. LANGUAGE is mandatory and must be PYTHON.
-	m := rePkgPolicyLanguage.FindStringSubmatch(parseText)
-	if m == nil {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory LANGUAGE clause in CREATE PACKAGES POLICY. Only LANGUAGE PYTHON is supported.", 4))
-	} else if strings.ToUpper(m[1]) != "PYTHON" {
+	lang, hasLang := findKWFollowedByIdent(sig, stripped, "LANGUAGE")
+	if !hasLang {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory LANGUAGE clause in CREATE PACKAGES POLICY. Only LANGUAGE PYTHON is supported."))
+	} else if strings.ToUpper(lang) != "PYTHON" {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("LANGUAGE '%s' is not supported for PACKAGES POLICY; only PYTHON is allowed.", m[1]), 4))
+			fmt.Sprintf("LANGUAGE '%s' is not supported for PACKAGES POLICY; only PYTHON is allowed.", lang)))
 	}
 
 	return markers
@@ -4113,10 +4686,21 @@ func validateCreatePackagesPolicy(parseText string, r StatementRange) []DiagMark
 func validateAlterPackagesPolicy(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
+
 	// Must contain a valid action.
-	if !reAlterPkgPolicyAction.MatchString(parseText) {
+	validProps := []string{"ALLOWLIST", "BLOCKLIST", "ADDITIONAL_CREATION_BLOCKLIST", "COMMENT"}
+	anyKnown := false
+	for _, prop := range validProps {
+		if hasKWPair(sig, stripped, "SET", prop) || hasKWPair(sig, stripped, "UNSET", prop) {
+			anyKnown = true
+			break
+		}
+	}
+	if !anyKnown {
 		markers = append(markers, diagMarkerSpan(r,
-			"ALTER PACKAGES POLICY requires SET ALLOWLIST, SET BLOCKLIST, SET ADDITIONAL_CREATION_BLOCKLIST, SET COMMENT, UNSET ALLOWLIST, UNSET BLOCKLIST, UNSET ADDITIONAL_CREATION_BLOCKLIST, or UNSET COMMENT.", 4))
+			"ALTER PACKAGES POLICY requires SET ALLOWLIST, SET BLOCKLIST, SET ADDITIONAL_CREATION_BLOCKLIST, SET COMMENT, UNSET ALLOWLIST, UNSET BLOCKLIST, UNSET ADDITIONAL_CREATION_BLOCKLIST, or UNSET COMMENT."))
 	}
 
 	return markers
@@ -4129,9 +4713,11 @@ func validateAlterPackagesPolicy(parseText string, r StatementRange) []DiagMarke
 func validateDropPackagesPolicy(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	// Policy name is required.
-	if !reDropPolicyHasName.MatchString(parseText) {
-		markers = append(markers, diagMarkerSpan(r, "DROP PACKAGES POLICY requires a policy name.", 4))
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
+	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", "PACKAGES", "POLICY")
+	if name == "" {
+		markers = append(markers, diagMarkerSpan(r, "DROP PACKAGES POLICY requires a policy name."))
 	}
 
 	return markers
@@ -4144,57 +4730,53 @@ func validateDropPackagesPolicy(parseText string, r StatementRange) []DiagMarker
 func validateGrant(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
+
 	// ── GRANT ROLE / GRANT DATABASE ROLE ─────────────────────────────────────
-	isGrantRole := reIsGrantRole.MatchString(parseText) ||
-		reIsGrantDatabaseRole.MatchString(parseText)
+	isGrantRole := (len(sig) >= 2 && tokUpper(sig[1], stripped) == "ROLE") ||
+		(len(sig) >= 3 && tokUpper(sig[1], stripped) == "DATABASE" && tokUpper(sig[2], stripped) == "ROLE")
 	if isGrantRole {
 		// WITH GRANT OPTION is not valid for role grants.
-		if reWithGrantOption.MatchString(parseText) {
+		if hasKWSeq(sig, stripped, "WITH", "GRANT", "OPTION") {
 			markers = append(markers, diagMarkerSpan(r,
-				"WITH GRANT OPTION is not valid for GRANT ROLE statements.", 4))
+				"WITH GRANT OPTION is not valid for GRANT ROLE statements."))
 		}
 		// Role grants use TO USER or TO ROLE, never TO TABLE.
-		if reGrantToTable.MatchString(parseText) {
+		if hasKWPair(sig, stripped, "TO", "TABLE") {
 			markers = append(markers, diagMarkerSpan(r,
-				"Unexpected syntax: Roles can be granted to other roles or users, but not directly to tables.", 4))
+				"Unexpected syntax: Roles can be granted to other roles or users, but not directly to tables."))
 		}
 		// Must have a grantee.
-		if !reGrantee.MatchString(parseText) {
+		if !hasGrantee(sig, stripped, "TO") {
 			markers = append(markers, diagMarkerSpan(r,
-				"GRANT ROLE requires a TO ROLE or TO USER clause.", 4))
+				"GRANT ROLE requires a TO ROLE or TO USER clause."))
 		}
 		return markers
 	}
 
 	// ── GRANT <privileges> ON <object_type> ───────────────────────────────────
-	m := reGrantOnObject.FindStringSubmatch(parseText)
-	if m == nil {
-		// No recognizable ON clause — incomplete or unsupported form; skip.
+	privListRaw, allFuture, objectType, ok := findOnObjectClause(sig, stripped)
+	if !ok {
 		return markers
 	}
-	privListRaw := m[1]
-	allFuture := strings.TrimSpace(strings.ToUpper(m[2])) // "ALL", "FUTURE", or ""
-	objectType := normalizeGrantObjectType(m[3])
 
 	// ── Grantee required ──────────────────────────────────────────────────────
-	if !reGrantee.MatchString(parseText) {
+	if !hasGrantee(sig, stripped, "TO") {
 		markers = append(markers, diagMarkerSpan(r,
-			"GRANT statement requires a grantee (TO ROLE, TO DATABASE ROLE, or TO USER).", 4))
+			"GRANT statement requires a grantee (TO ROLE, TO DATABASE ROLE, or TO USER)."))
 	}
 
 	// ── ON ALL / ON FUTURE requires IN SCHEMA or IN DATABASE ─────────────────
-	if reGrantAllFuture.MatchString(parseText) && !reGrantInQualifier.MatchString(parseText) {
+	if hasKWPairAny(sig, stripped, "ON", []string{"ALL", "FUTURE"}) && !hasKWPairAny(sig, stripped, "IN", []string{"SCHEMA", "DATABASE"}) {
 		markers = append(markers, diagMarkerSpan(r,
-			"ON ALL/FUTURE <objects> requires an IN SCHEMA or IN DATABASE qualifier.", 4))
+			"ON ALL/FUTURE <objects> requires an IN SCHEMA or IN DATABASE qualifier."))
 	}
 
 	// ── Privilege validation for known object types ───────────────────────────
-	// Bulk grants (ALL/FUTURE) are skipped — the privilege set may be
-	// legitimately broad and varies by object type.
 	validPrivs, knownObj := grantObjectPrivileges[objectType]
 	if knownObj && allFuture == "" {
 		for _, priv := range splitPrivileges(privListRaw) {
-			// OWNERSHIP, ALL, and ALL PRIVILEGES are always accepted.
 			if priv == "OWNERSHIP" || priv == "ALL" || priv == "ALL PRIVILEGES" {
 				continue
 			}
@@ -4204,7 +4786,7 @@ func validateGrant(parseText string, r StatementRange) []DiagMarker {
 					msg = "'GRANT USAGE ON ROLE' is not valid Snowflake syntax. " +
 						"Use 'GRANT ROLE <name> TO ROLE/USER' to assign a role."
 				}
-				markers = append(markers, diagMarkerSpan(r, msg, 4))
+				markers = append(markers, diagMarkerSpan(r, msg))
 			}
 		}
 	}
@@ -4219,45 +4801,45 @@ func validateGrant(parseText string, r StatementRange) []DiagMarker {
 func validateRevoke(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
+
 	// ── REVOKE ROLE / REVOKE DATABASE ROLE ────────────────────────────────────
-	isRevokeRole := reIsRevokeRole.MatchString(parseText) ||
-		reIsRevokeDatabaseRole.MatchString(parseText)
+	isRevokeRole := (len(sig) >= 2 && tokUpper(sig[1], stripped) == "ROLE") ||
+		(len(sig) >= 3 && tokUpper(sig[1], stripped) == "DATABASE" && tokUpper(sig[2], stripped) == "ROLE")
 	if isRevokeRole {
-		if !reGranteeFrom.MatchString(parseText) {
+		if !hasGrantee(sig, stripped, "FROM") {
 			markers = append(markers, diagMarkerSpan(r,
-				"REVOKE ROLE requires a FROM ROLE or FROM USER clause.", 4))
+				"REVOKE ROLE requires a FROM ROLE or FROM USER clause."))
 		}
 		return markers
 	}
 
 	// ── REVOKE <privileges> ON <object_type> ──────────────────────────────────
-	m := reRevokeOnObject.FindStringSubmatch(parseText)
-	if m == nil {
+	// Skip GRANT OPTION FOR prefix if present.
+	privListRaw, allFuture, objectType, ok := findOnObjectClause(sig, stripped)
+	if !ok {
 		return markers
 	}
-	privListRaw := m[1]
-	// allFuture is "" for plain object revokes and "ALL" or "FUTURE" for bulk
-	// revokes. It gates privilege validation: bulk revokes are always skipped
-	// because the full privilege set is determined dynamically by Snowflake.
-	allFuture := strings.TrimSpace(strings.ToUpper(m[2]))
-	objectType := normalizeGrantObjectType(m[3])
 
 	// ── ON ALL / ON FUTURE requires IN SCHEMA or IN DATABASE ─────────────────
-	if reGrantAllFuture.MatchString(parseText) && !reGrantInQualifier.MatchString(parseText) {
+	if hasKWPairAny(sig, stripped, "ON", []string{"ALL", "FUTURE"}) && !hasKWPairAny(sig, stripped, "IN", []string{"SCHEMA", "DATABASE"}) {
 		markers = append(markers, diagMarkerSpan(r,
-			"ON ALL/FUTURE <objects> requires an IN SCHEMA or IN DATABASE qualifier.", 4))
+			"ON ALL/FUTURE <objects> requires an IN SCHEMA or IN DATABASE qualifier."))
 	}
 
 	// ── CASCADE and RESTRICT are mutually exclusive ───────────────────────────
-	if reRevokeCascade.MatchString(parseText) && reRevokeRestrict.MatchString(parseText) {
+	hasCascade := hasKW(sig, stripped, "CASCADE")
+	hasRestrict := hasKW(sig, stripped, "RESTRICT")
+	if hasCascade && hasRestrict {
 		markers = append(markers, diagMarkerSpan(r,
-			"CASCADE and RESTRICT are mutually exclusive in REVOKE statement.", 4))
+			"CASCADE and RESTRICT are mutually exclusive in REVOKE statement."))
 	}
 
 	// ── FROM clause required ──────────────────────────────────────────────────
-	if !reGranteeFrom.MatchString(parseText) {
+	if !hasGrantee(sig, stripped, "FROM") {
 		markers = append(markers, diagMarkerSpan(r,
-			"REVOKE statement requires a FROM ROLE, FROM DATABASE ROLE, or FROM USER clause.", 4))
+			"REVOKE statement requires a FROM ROLE, FROM DATABASE ROLE, or FROM USER clause."))
 	}
 
 	// ── Privilege validation for known object types ───────────────────────────
@@ -4273,7 +4855,7 @@ func validateRevoke(parseText string, r StatementRange) []DiagMarker {
 					msg = "'REVOKE USAGE ON ROLE' is not valid Snowflake syntax. " +
 						"Use 'REVOKE ROLE <name> FROM ROLE/USER' to revoke a role."
 				}
-				markers = append(markers, diagMarkerSpan(r, msg, 4))
+				markers = append(markers, diagMarkerSpan(r, msg))
 			}
 		}
 	}
@@ -4309,97 +4891,170 @@ func normalizeGrantObjectType(t string) string {
 	return upper
 }
 
+// validateCopyInto validates COPY INTO in both directions: loading into a table
+// and unloading into a stage/location. It locates the target, skips an optional
+// column list and the FROM source (a stage, literal, or subquery), then checks
+// direction-specific property rules. Fully token-based — the target, source, and
+// properties are walked over the significant-token stream (paren groups skipped
+// via parenInnerRange).
 func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	m := reCopyInto.FindStringSubmatch(parseText)
-	if m == nil {
-		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in COPY INTO statement.", 4))
+	sig := sigTokens(parseText)
+
+	// Expect: COPY INTO <target> ...
+	if len(sig) < 3 || tokUpper(sig[0], parseText) != "COPY" || tokUpper(sig[1], parseText) != "INTO" {
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in COPY INTO statement."))
 		return markers
 	}
 
-	target := m[1]
-	rest := strings.TrimSpace(parseText[len(m[0]):])
+	// Read target: could be ident path, @stage, or 'string literal'.
+	targetIdx := 2
+	if targetIdx >= len(sig) {
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in COPY INTO statement."))
+		return markers
+	}
 
-	// FROM clause is mandatory
-	fromMatch := regexp.MustCompile(`(?i)^FROM\s+`).FindStringIndex(rest)
-	if fromMatch == nil {
-		markers = append(markers, diagMarkerSpan(r, "COPY INTO statement is missing the mandatory FROM clause.", 4))
+	var target string
+	var afterTargetIdx int
+	if sig[targetIdx].Kind == sqltok.At {
+		// Stage reference: @stage_name or @db.schema.stage/path
+		afterTargetIdx = targetIdx + 1
+		for afterTargetIdx < len(sig) {
+			k := sig[afterTargetIdx].Kind
+			if k == sqltok.Identifier || k == sqltok.QuotedIdent || k == sqltok.Dot {
+				afterTargetIdx++
+			} else if k == sqltok.Operator && sig[afterTargetIdx].Text(parseText) == "/" {
+				// Slash in stage paths
+				afterTargetIdx++
+			} else {
+				break
+			}
+		}
+		target = "@"
+		if afterTargetIdx > targetIdx+1 {
+			target += parseText[sig[targetIdx+1].Start:sig[afterTargetIdx-1].End]
+		}
+	} else if sig[targetIdx].Kind == sqltok.StringLit {
+		target = sig[targetIdx].Text(parseText)
+		afterTargetIdx = targetIdx + 1
+	} else {
+		// Identifier path (table name)
+		_, pathEnd := readIdentPath(sig, parseText, targetIdx)
+		target = parseText[sig[targetIdx].Start:sig[pathEnd-1].End]
+		afterTargetIdx = pathEnd
+	}
+
+	// Skip optional column list: (col1, col2, ...)
+	if afterTargetIdx < len(sig) && sig[afterTargetIdx].Kind == sqltok.LParen {
+		if _, closeIdx, ok := parenInnerRange(sig, afterTargetIdx); ok {
+			afterTargetIdx = closeIdx + 1
+		} else {
+			afterTargetIdx = len(sig)
+		}
+	}
+
+	// FROM clause is mandatory.
+	if afterTargetIdx >= len(sig) || tokUpper(sig[afterTargetIdx], parseText) != "FROM" {
+		markers = append(markers, diagMarkerSpan(r, "COPY INTO statement is missing the mandatory FROM clause."))
 		return markers
 	}
 
 	isUnloading := strings.HasPrefix(target, "@") || strings.HasPrefix(target, "'")
-	// Extract properties (everything after the FROM source)
-	restOfFrom := rest[fromMatch[1]:]
-	var properties string
-	if strings.HasPrefix(restOfFrom, "(") {
-		endIdx := findMatchingParen(restOfFrom)
-		if endIdx != -1 {
-			properties = strings.TrimSpace(restOfFrom[endIdx+1:])
+
+	// Skip FROM and its source to find properties.
+	fromIdx := afterTargetIdx + 1
+	// The FROM source can be: ident path, @stage, 'string', or (SELECT ...)
+	propStartIdx := fromIdx
+	if propStartIdx < len(sig) {
+		if sig[propStartIdx].Kind == sqltok.LParen {
+			// Subquery: skip the balanced parens.
+			if _, closeIdx, ok := parenInnerRange(sig, propStartIdx); ok {
+				propStartIdx = closeIdx + 1
+			} else {
+				propStartIdx = len(sig)
+			}
 		} else {
-			properties = restOfFrom
-		}
-	} else {
-		// Find first word that looks like a property key (KEY =)
-		propIdx := regexp.MustCompile(`(?i)\b[a-zA-Z_0-9]+\s*=`).FindStringIndex(restOfFrom)
-		if propIdx != nil {
-			properties = restOfFrom[propIdx[0]:]
+			// Skip source tokens until we hit a keyword = pattern (property).
+			for propStartIdx < len(sig) {
+				if propStartIdx+1 < len(sig) && isIdent(sig[propStartIdx]) &&
+					sig[propStartIdx+1].Kind == sqltok.Operator &&
+					sig[propStartIdx+1].Text(parseText) == "=" {
+					break
+				}
+				propStartIdx++
+			}
 		}
 	}
 
+	propSig := sig[propStartIdx:]
+
 	if !isUnloading {
 		// Loading (table target)
-		hasFiles := regexp.MustCompile(`(?i)\bFILES\s*=\s*`).MatchString(properties)
-		hasPattern := regexp.MustCompile(`(?i)\bPATTERN\s*=\s*`).MatchString(properties)
+		hasFiles := hasKWAssign(propSig, parseText, "FILES")
+		hasPattern := hasKWAssign(propSig, parseText, "PATTERN")
 		if hasFiles && hasPattern {
-			markers = append(markers, diagMarkerSpan(r, "FILES and PATTERN are mutually exclusive in COPY INTO statement.", 4))
+			markers = append(markers, diagMarkerSpan(r, "FILES and PATTERN are mutually exclusive in COPY INTO statement."))
 		}
 
 		// FILE_FORMAT
-		if regexp.MustCompile(`(?i)\bFILE_FORMAT\s*=\s*\(`).MatchString(properties) {
-			ffInner := extractParenContent(properties, "FILE_FORMAT")
-			hasFFName := regexp.MustCompile(`(?i)\bFORMAT_NAME\s*=\s*`).MatchString(ffInner)
-			hasFFType := regexp.MustCompile(`(?i)\bTYPE\s*=\s*`).MatchString(ffInner)
+		ffContent := findKWAssignParenContent(propSig, parseText, "FILE_FORMAT")
+		if ffContent != "" {
+			ffSig := sigTokens(ffContent)
+			hasFFName := hasKWAssign(ffSig, ffContent, "FORMAT_NAME")
+			hasFFType := hasKWAssign(ffSig, ffContent, "TYPE")
 			if hasFFName && hasFFType {
-				markers = append(markers, diagMarkerSpan(r, "FORMAT_NAME and inline TYPE are mutually exclusive in FILE_FORMAT clause.", 4))
+				markers = append(markers, diagMarkerSpan(r, "FORMAT_NAME and inline TYPE are mutually exclusive in FILE_FORMAT clause."))
 			}
 			if hasFFType {
-				if !regexp.MustCompile(`(?i)\bTYPE\s*=\s*(?:'?"?)(CSV|JSON|AVRO|ORC|PARQUET|XML)(?:'?"?)\b`).MatchString(ffInner) {
-					markers = append(markers, diagMarkerSpan(r, "Invalid FILE_FORMAT TYPE. Must be CSV, JSON, AVRO, ORC, PARQUET, or XML.", 4))
+				typeVal, ok := findKWAssignStr(ffSig, ffContent, "TYPE")
+				if !ok {
+					typeVal, _ = findKWAssignIdent(ffSig, ffContent, "TYPE")
+				}
+				typeUpper := strings.ToUpper(strings.Trim(typeVal, "'\""))
+				validTypes := map[string]bool{
+					"CSV": true, "JSON": true, "AVRO": true,
+					"ORC": true, "PARQUET": true, "XML": true,
+				}
+				if !validTypes[typeUpper] {
+					markers = append(markers, diagMarkerSpan(r, "Invalid FILE_FORMAT TYPE. Must be CSV, JSON, AVRO, ORC, PARQUET, or XML."))
 				}
 			}
 		}
 
 		// ON_ERROR
-		if onErrorMatch := regexp.MustCompile(`(?i)\bON_ERROR\s*=\s*([a-zA-Z_0-9%]+)`).FindStringSubmatch(properties); onErrorMatch != nil {
-			val := strings.ToUpper(onErrorMatch[1])
+		if onErrVal, ok := findKWAssignIdent(propSig, parseText, "ON_ERROR"); ok {
+			val := strings.ToUpper(onErrVal)
 			if val != "CONTINUE" && val != "ABORT_STATEMENT" && val != "SKIP_FILE" &&
-				!regexp.MustCompile(`^SKIP_FILE_\d+%?$`).MatchString(val) {
-				markers = append(markers, diagMarkerSpan(r, "Invalid ON_ERROR value. Must be CONTINUE, SKIP_FILE, SKIP_FILE_<n>, SKIP_FILE_<n>%, or ABORT_STATEMENT.", 4))
+				!isValidSkipFileValue(val) {
+				markers = append(markers, diagMarkerSpan(r, "Invalid ON_ERROR value. Must be CONTINUE, SKIP_FILE, SKIP_FILE_<n>, SKIP_FILE_<n>%, or ABORT_STATEMENT."))
 			}
 		}
 
-		validateBoolProp(properties, "PURGE", r, &markers)
-		validateBoolProp(properties, "FORCE", r, &markers)
-		validateBoolProp(properties, "LOAD_UNCERTAIN_FILES", r, &markers)
+		validateBoolPropTok(propSig, parseText, "PURGE", r, &markers)
+		validateBoolPropTok(propSig, parseText, "FORCE", r, &markers)
+		validateBoolPropTok(propSig, parseText, "LOAD_UNCERTAIN_FILES", r, &markers)
 
-		if matchMatch := regexp.MustCompile(`(?i)\bMATCH_BY_COLUMN_NAME\s*=\s*(\w+)\b`).FindStringSubmatch(properties); matchMatch != nil {
-			val := strings.ToUpper(matchMatch[1])
+		if matchVal, ok := findKWAssignIdent(propSig, parseText, "MATCH_BY_COLUMN_NAME"); ok {
+			val := strings.ToUpper(matchVal)
 			if val != "CASE_SENSITIVE" && val != "CASE_INSENSITIVE" && val != "NONE" {
-				markers = append(markers, diagMarkerSpan(r, "Invalid MATCH_BY_COLUMN_NAME value. Must be CASE_SENSITIVE, CASE_INSENSITIVE, or NONE.", 4))
+				markers = append(markers, diagMarkerSpan(r, "Invalid MATCH_BY_COLUMN_NAME value. Must be CASE_SENSITIVE, CASE_INSENSITIVE, or NONE."))
 			}
 		}
 	} else {
 		// Unloading (stage target)
-		validateBoolProp(properties, "OVERWRITE", r, &markers)
-		validateBoolProp(properties, "SINGLE", r, &markers)
-		validateBoolProp(properties, "INCLUDE_QUERY_ID", r, &markers)
-		validateBoolProp(properties, "DETAILED_OUTPUT", r, &markers)
+		validateBoolPropTok(propSig, parseText, "OVERWRITE", r, &markers)
+		validateBoolPropTok(propSig, parseText, "SINGLE", r, &markers)
+		validateBoolPropTok(propSig, parseText, "INCLUDE_QUERY_ID", r, &markers)
+		validateBoolPropTok(propSig, parseText, "DETAILED_OUTPUT", r, &markers)
 
-		if mfsMatch := regexp.MustCompile(`(?i)\bMAX_FILE_SIZE\s*=\s*(\S+)\b`).FindStringSubmatch(properties); mfsMatch != nil {
-			val := mfsMatch[1]
-			if !regexp.MustCompile(`^\d+$`).MatchString(val) || val == "0" {
-				markers = append(markers, diagMarkerSpan(r, "MAX_FILE_SIZE must be a positive integer.", 4))
+		if mfsVal, ok := findKWAssignIdent(propSig, parseText, "MAX_FILE_SIZE"); ok {
+			if !isPositiveIntStr(mfsVal) {
+				markers = append(markers, diagMarkerSpan(r, "MAX_FILE_SIZE must be a positive integer."))
+			}
+		} else if mfsVal, ok := findKWAssignInt(propSig, parseText, "MAX_FILE_SIZE"); ok {
+			if mfsVal <= 0 {
+				markers = append(markers, diagMarkerSpan(r, "MAX_FILE_SIZE must be a positive integer."))
 			}
 		}
 	}
@@ -4407,64 +5062,76 @@ func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
 	return markers
 }
 
-// reBoolPropMap holds pre-compiled regexes for validateBoolProp. Each entry
-// matches PROP = value where value is a word token. The map is built at init
-// time so regexes are compiled once rather than on every call.
-var reBoolPropMap = func() map[string]*regexp.Regexp {
-	props := []string{"ALLOW_WRITES", "PURGE", "FORCE", "LOAD_UNCERTAIN_FILES", "OVERWRITE", "SINGLE", "INCLUDE_QUERY_ID", "DETAILED_OUTPUT", "SHARE_RESTRICTIONS", "AUTO_RESUME", "INITIALLY_SUSPENDED", "DEBUG_MODE"}
-	m := make(map[string]*regexp.Regexp, len(props))
-	for _, p := range props {
-		m[p] = regexp.MustCompile(`(?i)\b` + p + `\s*=\s*(\w+)\b`)
+// isValidSkipFileValue checks SKIP_FILE_<n> or SKIP_FILE_<n>% format.
+func isValidSkipFileValue(val string) bool {
+	if !strings.HasPrefix(val, "SKIP_FILE_") {
+		return false
 	}
-	return m
-}()
+	rest := val[len("SKIP_FILE_"):]
+	rest = strings.TrimSuffix(rest, "%")
+	if rest == "" {
+		return false
+	}
+	for _, b := range rest {
+		if b < '0' || b > '9' {
+			return false
+		}
+	}
+	return true
+}
 
-func validateBoolProp(s string, prop string, r StatementRange, markers *[]DiagMarker) {
-	re := reBoolPropMap[prop]
-	if re == nil {
-		panic("validateBoolProp: unregistered prop " + prop + " — add it to reBoolPropMap")
+// isPositiveIntStr checks if s is a string of digits representing a positive integer.
+func isPositiveIntStr(s string) bool {
+	if s == "" || s == "0" {
+		return false
 	}
-	if m := re.FindStringSubmatch(s); m != nil {
-		val := strings.ToUpper(m[1])
-		if val != "TRUE" && val != "FALSE" {
-			*markers = append(*markers, diagMarkerSpan(r, fmt.Sprintf("%s must be TRUE or FALSE.", prop), 4))
+	for _, b := range s {
+		if b < '0' || b > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// findKWAssignIdent scans for KEYWORD = <identifier> and returns the identifier text.
+func findKWAssignIdent(sig []sqltok.Token, sql, keyword string) (string, bool) {
+	for i := 0; i+2 < len(sig); i++ {
+		if tokUpper(sig[i], sql) != keyword {
+			continue
+		}
+		if sig[i+1].Kind == sqltok.Operator && sig[i+1].Text(sql) == "=" && isIdent(sig[i+2]) {
+			return sig[i+2].Text(sql), true
+		}
+	}
+	return "", false
+}
+
+// validateBoolPropTok checks if PROP = <value> appears in the significant
+// token stream and flags when the value is not TRUE or FALSE.
+func validateBoolPropTok(sig []sqltok.Token, sql, prop string, r StatementRange, markers *[]DiagMarker) {
+	for i := 0; i+2 < len(sig); i++ {
+		if tokUpper(sig[i], sql) != prop {
+			continue
+		}
+		if sig[i+1].Kind == sqltok.Operator && sig[i+1].Text(sql) == "=" {
+			val := strings.ToUpper(sig[i+2].Text(sql))
+			if val != "TRUE" && val != "FALSE" {
+				*markers = append(*markers, diagMarkerSpan(r, fmt.Sprintf("%s must be TRUE or FALSE.", prop)))
+			}
+			return
 		}
 	}
 }
 
-// reParenKeyMap holds pre-compiled regexes for extractParenContent. Each entry
-// matches KEY = ( to locate the start of a parenthesized block.
-var reParenKeyMap = func() map[string]*regexp.Regexp {
-	keys := []string{"FILE_FORMAT", "STORAGE_LOCATIONS"}
-	m := make(map[string]*regexp.Regexp, len(keys))
-	for _, k := range keys {
-		m[k] = regexp.MustCompile(`(?i)\b` + k + `\s*=\s*\(`)
-	}
-	return m
-}()
-
-func extractParenContent(s string, key string) string {
-	re := reParenKeyMap[key]
-	if re == nil {
-		panic("extractParenContent: unregistered key " + key + " — add it to reParenKeyMap")
-	}
-	loc := re.FindStringIndex(s)
-	if loc == nil {
-		return ""
-	}
-	content := s[loc[1]-1:]
-	endIdx := findMatchingParen(content)
-	if endIdx == -1 {
-		return content[1:]
-	}
-	return content[1:endIdx]
-}
-
+// validateCreateIcebergTable validates CREATE ICEBERG TABLE: it enforces the
+// CATALOG-dependent rules (e.g. Snowflake-managed vs external catalog require
+// different mandatory keys like EXTERNAL_VOLUME, BASE_LOCATION, CATALOG_TABLE_NAME)
+// and checks boolean/enum property values. Token-based: property KEY=VALUE pairs
+// are gathered by getStatementProperties (top-level paren-depth scan).
 func validateCreateIcebergTable(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 	// Strip comments first to prevent comment-spoofing in property parsing
 	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
-	clean := reStripStringLiterals.ReplaceAllString(stripped, " ")
 	props := getStatementProperties(stripped)
 
 	catalog, hasCatalog := props["CATALOG"]
@@ -4472,66 +5139,76 @@ func validateCreateIcebergTable(parseText string, r StatementRange) []DiagMarker
 
 	// Rule: BASE_LOCATION is mandatory for all Iceberg tables.
 	if val, ok := props["BASE_LOCATION"]; !ok || strings.TrimSpace(strings.Trim(val, "'")) == "" {
-		markers = append(markers, diagMarkerSpan(r, "BASE_LOCATION is mandatory for all Iceberg tables and cannot be empty.", 4))
+		markers = append(markers, diagMarkerSpan(r, "BASE_LOCATION is mandatory for all Iceberg tables and cannot be empty."))
 	}
 
 	// Rule: EXTERNAL_VOLUME and CATALOG are mandatory for non-Snowflake catalogs.
 	if !isSnowflakeCatalog {
 		if val, ok := props["EXTERNAL_VOLUME"]; !ok || strings.TrimSpace(strings.Trim(val, "'")) == "" {
-			markers = append(markers, diagMarkerSpan(r, "EXTERNAL_VOLUME is mandatory for Iceberg tables with external catalogs.", 4))
+			markers = append(markers, diagMarkerSpan(r, "EXTERNAL_VOLUME is mandatory for Iceberg tables with external catalogs."))
 		}
 		if val, ok := props["CATALOG"]; !ok || strings.TrimSpace(strings.Trim(val, "'")) == "" {
-			markers = append(markers, diagMarkerSpan(r, "CATALOG is mandatory for Iceberg tables with external catalogs.", 4))
+			markers = append(markers, diagMarkerSpan(r, "CATALOG is mandatory for Iceberg tables with external catalogs."))
 		}
 	}
 
 	// Rule: TRANSIENT is not supported for Iceberg tables.
-	if reIsCreateTransientIcebergTable.MatchString(stripped) {
-		markers = append(markers, diagMarkerSpan(r, "TRANSIENT is not supported for Iceberg tables.", 4))
+	// Only match TRANSIENT in the preamble (between CREATE and ICEBERG).
+	icebergSig := sigTokens(stripped)
+	for i := 0; i < len(icebergSig); i++ {
+		u := tokUpper(icebergSig[i], stripped)
+		if u == "ICEBERG" || u == "TABLE" {
+			break // past the preamble
+		}
+		if u == "TRANSIENT" {
+			markers = append(markers, diagMarkerSpan(r, "TRANSIENT is not supported for Iceberg tables."))
+			break
+		}
 	}
 
 	// Rule: CATALOG_TABLE_NAME and CATALOG_NAMESPACE are only valid for non-Snowflake catalogs.
 	if isSnowflakeCatalog {
 		if _, ok := props["CATALOG_TABLE_NAME"]; ok {
-			markers = append(markers, diagMarkerSpan(r, "CATALOG_TABLE_NAME is only valid when CATALOG is not 'SNOWFLAKE'.", 4))
+			markers = append(markers, diagMarkerSpan(r, "CATALOG_TABLE_NAME is only valid when CATALOG is not 'SNOWFLAKE'."))
 		}
 		if _, ok := props["CATALOG_NAMESPACE"]; ok {
-			markers = append(markers, diagMarkerSpan(r, "CATALOG_NAMESPACE is only valid when CATALOG is not 'SNOWFLAKE'.", 4))
+			markers = append(markers, diagMarkerSpan(r, "CATALOG_NAMESPACE is only valid when CATALOG is not 'SNOWFLAKE'."))
 		}
 	}
 
 	// Rule: OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if marker, conflict := checkOrReplaceConflict(clean, r, "CREATE ICEBERG TABLE"); conflict {
+	sig := sigTokens(stripped)
+	if marker, conflict := checkOrReplaceConflictTok(sig, stripped, r, "CREATE ICEBERG TABLE"); conflict {
 		markers = append(markers, marker)
 	}
 
 	// Rule: OR REPLACE is not supported for external catalogs.
-	if !isSnowflakeCatalog && reOrReplace.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r, "OR REPLACE is not supported for Iceberg tables backed by external catalogs.", 4))
+	if !isSnowflakeCatalog && hasKWPair(sig, stripped, "OR", "REPLACE") {
+		markers = append(markers, diagMarkerSpan(r, "OR REPLACE is not supported for Iceberg tables backed by external catalogs."))
 	}
 
 	// Rule: CLUSTER BY is only for Snowflake-managed tables.
-	if !isSnowflakeCatalog && rePatternClusterBy.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r, "CLUSTER BY is supported only for Snowflake-managed Iceberg tables.", 4))
+	if !isSnowflakeCatalog && hasKWPair(sig, stripped, "CLUSTER", "BY") {
+		markers = append(markers, diagMarkerSpan(r, "CLUSTER BY is supported only for Snowflake-managed Iceberg tables."))
 	}
 
 	// Rule: DATA_RETENTION_TIME_IN_DAYS is only for Snowflake-managed tables.
-	if !isSnowflakeCatalog && reDataRetention.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r, "DATA_RETENTION_TIME_IN_DAYS applies only to Snowflake-managed Iceberg tables.", 4))
+	if !isSnowflakeCatalog && hasKW(sig, stripped, "DATA_RETENTION_TIME_IN_DAYS") {
+		markers = append(markers, diagMarkerSpan(r, "DATA_RETENTION_TIME_IN_DAYS applies only to Snowflake-managed Iceberg tables."))
 	}
 
 	// Value validation for specific properties
 	if val, ok := props["REPLACE_INVALID_CHARACTERS"]; ok && !isBool(val) {
-		markers = append(markers, diagMarkerSpan(r, "REPLACE_INVALID_CHARACTERS must be TRUE or FALSE.", 4))
+		markers = append(markers, diagMarkerSpan(r, "REPLACE_INVALID_CHARACTERS must be TRUE or FALSE."))
 	}
 	if val, ok := props["AUTO_REFRESH"]; ok && !isBool(val) {
-		markers = append(markers, diagMarkerSpan(r, "AUTO_REFRESH must be TRUE or FALSE.", 4))
+		markers = append(markers, diagMarkerSpan(r, "AUTO_REFRESH must be TRUE or FALSE."))
 	}
 	if val, ok := props["REFRESH_MODE"]; ok && !isValidEnumValue(val, "AUTO", "FULL", "INCREMENTAL") {
-		markers = append(markers, diagMarkerSpan(r, "Invalid REFRESH_MODE value. Must be AUTO, FULL, or INCREMENTAL.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Invalid REFRESH_MODE value. Must be AUTO, FULL, or INCREMENTAL."))
 	}
 	if val, ok := props["INITIALIZE"]; ok && !isValidEnumValue(val, "ON_CREATE", "ON_SCHEDULE") {
-		markers = append(markers, diagMarkerSpan(r, "Invalid INITIALIZE value. Must be ON_CREATE or ON_SCHEDULE.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Invalid INITIALIZE value. Must be ON_CREATE or ON_SCHEDULE."))
 	}
 
 	return markers
@@ -4539,67 +5216,96 @@ func validateCreateIcebergTable(parseText string, r StatementRange) []DiagMarker
 
 // ── CREATE ICEBERG TABLE helpers ──────────────────────────────────────────
 
+// getStatementProperties returns the top-level KEY = VALUE properties of a
+// statement as an upper-cased-key map. Token-based: it walks the significant
+// tokens and collects only pairs at paren depth 0, so nested content such as
+// column definitions or CHECK(...) cannot spoof property keys.
 func getStatementProperties(s string) map[string]string {
 	props := make(map[string]string)
-	// Strip parentheses and their contents first, as they contain column definitions, CHECKs, etc.
-	// This helps avoid spoofing property keys like CATALOG or EXTERNAL_VOLUME.
-	s = stripParenContents(s)
-	matches := reGetStatementProperties.FindAllStringSubmatch(s, -1)
-	for _, match := range matches {
-		props[strings.ToUpper(match[1])] = match[2]
+	// Only collect top-level (paren depth 0) KEY = VALUE pairs, so nested content
+	// such as column definitions or CHECK(...) cannot spoof property keys like
+	// CATALOG or EXTERNAL_VOLUME.
+	sig := sigTokens(s)
+	depth := 0
+	for i := 0; i < len(sig); i++ {
+		switch sig[i].Kind {
+		case sqltok.LParen:
+			depth++
+			continue
+		case sqltok.RParen:
+			if depth > 0 {
+				depth--
+			}
+			continue
+		}
+		if depth == 0 && i+2 < len(sig) &&
+			(sig[i].Kind == sqltok.Keyword || sig[i].Kind == sqltok.Identifier) &&
+			sig[i+1].Kind == sqltok.Operator && sig[i+1].Text(s) == "=" {
+			props[strings.ToUpper(sig[i].Text(s))] = sig[i+2].Text(s)
+		}
 	}
 	return props
 }
 
+// isBool reports whether s (with any surrounding single quotes removed) is the
+// literal TRUE or FALSE, case-insensitively. A plain value check on an
+// already-extracted property value — no tokenisation involved.
 func isBool(s string) bool {
 	upper := strings.ToUpper(strings.Trim(s, "'"))
 	return upper == "TRUE" || upper == "FALSE"
 }
 
+// isValidEnumValue reports whether val (with surrounding single quotes removed,
+// upper-cased) is one of validValues. A plain membership check on an
+// already-extracted property value — no tokenisation involved.
 func isValidEnumValue(val string, validValues ...string) bool {
 	return slices.Contains(validValues, strings.ToUpper(strings.Trim(val, "'")))
 }
 
+// validateCreateHybridTable validates CREATE HYBRID TABLE: it rejects OR REPLACE,
+// requires a column list with a PRIMARY KEY, and validates index definitions.
+// Token-based — the column/constraint segments are split with splitHybridSegments
+// and each is re-tokenised for inspection.
 func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
-	clean := reStripStringLiterals.ReplaceAllString(stripped, " ")
+	hybridSig := sigTokens(stripped)
 
-	if reOrReplace.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r, "OR REPLACE is not supported for hybrid tables.", 4))
+	if hasKWPair(hybridSig, stripped, "OR", "REPLACE") {
+		markers = append(markers, diagMarkerSpan(r, "OR REPLACE is not supported for hybrid tables."))
 	}
 
-	if marker, conflict := checkOrReplaceConflict(clean, r, "CREATE HYBRID TABLE"); conflict {
+	if marker, conflict := checkOrReplaceConflictTok(hybridSig, stripped, r, "CREATE HYBRID TABLE"); conflict {
 		markers = append(markers, marker)
 	}
 
-	if reTransient.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r, "TRANSIENT is not supported for hybrid tables.", 4))
+	if hasKW(hybridSig, stripped, "TRANSIENT") {
+		markers = append(markers, diagMarkerSpan(r, "TRANSIENT is not supported for hybrid tables."))
 	}
 
-	if rePatternClusterBy.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r, "CLUSTER BY is not supported on hybrid tables.", 4))
+	if hasKWPair(hybridSig, stripped, "CLUSTER", "BY") {
+		markers = append(markers, diagMarkerSpan(r, "CLUSTER BY is not supported on hybrid tables."))
 	}
 
-	if reDataRetention.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r, "DATA_RETENTION_TIME_IN_DAYS is not applicable to hybrid tables.", 4))
+	if hasKW(hybridSig, stripped, "DATA_RETENTION_TIME_IN_DAYS") {
+		markers = append(markers, diagMarkerSpan(r, "DATA_RETENTION_TIME_IN_DAYS is not applicable to hybrid tables."))
 	}
 
-	if reChangeTracking.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r, "CHANGE_TRACKING is not supported on hybrid tables.", 4))
+	if hasKW(hybridSig, stripped, "CHANGE_TRACKING") {
+		markers = append(markers, diagMarkerSpan(r, "CHANGE_TRACKING is not supported on hybrid tables."))
 	}
 
-	if reCopyGrants.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r, "COPY GRANTS is not supported on hybrid tables.", 4))
+	if hasKWPair(hybridSig, stripped, "COPY", "GRANTS") {
+		markers = append(markers, diagMarkerSpan(r, "COPY GRANTS is not supported on hybrid tables."))
 	}
 
-	preambleMatch := reHybridTablePreamble.FindString(stripped)
-	if preambleMatch == "" {
-		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE HYBRID TABLE statement.", 4))
+	preambleEnd := findPreambleEnd(hybridSig, stripped, "TABLE")
+	if preambleEnd < 0 {
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE HYBRID TABLE statement."))
 		return markers
 	}
 
-	rest := strings.TrimSpace(stripped[len(preambleMatch):])
+	rest := strings.TrimSpace(stripped[preambleEnd:])
 	if strings.HasPrefix(rest, "(") {
 		endIdx := findMatchingParen(rest)
 		if endIdx != -1 {
@@ -4611,7 +5317,7 @@ func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker 
 
 			segments := splitHybridSegments(colsContent)
 			for _, seg := range segments {
-				segClean := reStripStringLiterals.ReplaceAllString(seg, " ")
+				segClean := sqltok.StripStrings(seg)
 				upSeg := strings.ToUpper(segClean)
 
 				// Normalize whitespace before checking prefixes
@@ -4628,13 +5334,32 @@ func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker 
 
 				if strings.HasPrefix(content, "PRIMARY KEY") {
 					hasPK = true
-					// Out of line: PRIMARY KEY (c1, c2)
-					if m := rePrimaryKeyCols.FindString(segClean); m != "" {
-						if openIdx := strings.Index(m, "("); openIdx != -1 {
-							mStr := m[openIdx+1 : len(m)-1]
-							for p := range strings.SplitSeq(mStr, ",") {
-								pkCols[normalizeIdent(p)] = true
+					// Out of line: PRIMARY KEY (c1, c2) -- scan tokens
+					segSig := sigTokens(segClean)
+					for j := 0; j < len(segSig)-1; j++ {
+						if tokUpper(segSig[j], segClean) == "PRIMARY" && tokUpper(segSig[j+1], segClean) == "KEY" {
+							for k := j + 2; k < len(segSig); k++ {
+								if segSig[k].Kind == sqltok.LParen {
+									depth := 1
+									start := k
+									for l := k + 1; l < len(segSig) && depth > 0; l++ {
+										if segSig[l].Kind == sqltok.LParen {
+											depth++
+										}
+										if segSig[l].Kind == sqltok.RParen {
+											depth--
+										}
+										if depth == 0 {
+											inner := segClean[segSig[start].End:segSig[l].Start]
+											for p := range strings.SplitSeq(inner, ",") {
+												pkCols[normalizeIdent(p)] = true
+											}
+										}
+									}
+									break
+								}
 							}
+							break
 						}
 					}
 				} else if !strings.HasPrefix(content, "FOREIGN KEY") && !strings.HasPrefix(content, "UNIQUE") && !strings.HasPrefix(content, "INDEX") {
@@ -4642,7 +5367,8 @@ func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker 
 					// (handles quoted identifiers with spaces like "MY COL").
 					colName := extractLeadingIdent(segClean)
 					if colName != "" {
-						if rePrimaryKey.MatchString(upSeg) {
+						segSig := sigTokens(segClean)
+						if hasKWPair(segSig, segClean, "PRIMARY", "KEY") {
 							hasPK = true
 							pkCols[colName] = true
 						}
@@ -4651,7 +5377,9 @@ func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker 
 						// column names like "AUTOINCREMENT" or expressions
 						// like CHECK(id IS NOT NULL) don't cause false matches.
 						bareUpSeg := strings.ToUpper(stripQuotedIdentsAndParens(segClean))
-						if reNotNull.MatchString(bareUpSeg) || reAutoIncrement.MatchString(bareUpSeg) {
+						bareSig := sigTokens(bareUpSeg)
+						if hasKWPair(bareSig, bareUpSeg, "NOT", "NULL") || hasKW(bareSig, bareUpSeg, "NOTNULL") ||
+							hasKW(bareSig, bareUpSeg, "AUTOINCREMENT") || hasKW(bareSig, bareUpSeg, "IDENTITY") {
 							colHasNotNull[colName] = true
 						}
 					}
@@ -4659,13 +5387,13 @@ func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker 
 			}
 
 			if !hasPK {
-				markers = append(markers, diagMarkerSpan(r, "Hybrid tables must have a PRIMARY KEY constraint.", 4))
+				markers = append(markers, diagMarkerSpan(r, "Hybrid tables must have a PRIMARY KEY constraint."))
 			}
 
 			// Check for NOT NULL on all PK columns
 			for pkCol := range pkCols {
 				if !colHasNotNull[pkCol] {
-					markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Primary key columns in a hybrid table must be NOT NULL (column '%s' omits it).", pkCol), 4))
+					markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Primary key columns in a hybrid table must be NOT NULL (column '%s' omits it).", pkCol)))
 				}
 			}
 		}
@@ -4674,6 +5402,10 @@ func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker 
 	return markers
 }
 
+// normalizeIdent normalises a single identifier for comparison: a "quoted"
+// identifier keeps its exact inner case (quotes removed); an unquoted one is
+// upper-cased, matching Snowflake's case-folding rules. Operates on one
+// already-isolated identifier string, so no tokenisation is needed.
 func normalizeIdent(s string) string {
 	s = strings.TrimSpace(s)
 	if strings.HasPrefix(s, "\"") && strings.HasSuffix(s, "\"") {
@@ -4698,28 +5430,16 @@ func extractLeadingIdent(seg string) string {
 // preventing identifier names like "INDEX" from matching keyword regexes.
 func stripQuotedIdents(s string) string {
 	var buf strings.Builder
-	i := 0
-	for i < len(s) {
-		if s[i] == '"' {
+	buf.Grow(len(s))
+	prev := 0
+	for _, t := range sqltok.Tokenize(s) {
+		if t.Kind == sqltok.QuotedIdent {
+			buf.WriteString(s[prev:t.Start])
 			buf.WriteByte(' ')
-			i++
-			for i < len(s) {
-				if s[i] == '"' {
-					if i+1 < len(s) && s[i+1] == '"' {
-						i += 2
-					} else {
-						i++
-						break
-					}
-				} else {
-					i++
-				}
-			}
-		} else {
-			buf.WriteByte(s[i])
-			i++
+			prev = t.End
 		}
 	}
+	buf.WriteString(s[prev:])
 	return buf.String()
 }
 
@@ -4729,116 +5449,95 @@ func stripQuotedIdents(s string) string {
 // CHECK(id IS NOT NULL) from matching keyword regexes.
 func stripQuotedIdentsAndParens(s string) string {
 	var buf strings.Builder
-	i := 0
-	for i < len(s) {
-		if s[i] == '"' {
-			buf.WriteByte(' ')
-			i++
-			for i < len(s) {
-				if s[i] == '"' {
-					if i+1 < len(s) && s[i+1] == '"' {
-						i += 2
-					} else {
-						i++
-						break
-					}
-				} else {
-					i++
+	buf.Grow(len(s))
+	prev := 0
+	depth := 0
+	for _, t := range sqltok.Tokenize(s) {
+		switch t.Kind {
+		case sqltok.QuotedIdent:
+			if depth == 0 {
+				buf.WriteString(s[prev:t.Start])
+				buf.WriteByte(' ')
+				prev = t.End
+			}
+		case sqltok.LParen:
+			if depth == 0 {
+				buf.WriteString(s[prev:t.Start])
+				buf.WriteByte(' ')
+				prev = t.End
+			}
+			depth++
+		case sqltok.RParen:
+			if depth > 0 {
+				depth--
+				if depth == 0 {
+					prev = t.End
 				}
 			}
-		} else if s[i] == '(' {
-			buf.WriteByte(' ')
-			depth := 1
-			i++
-			for i < len(s) && depth > 0 {
-				switch s[i] {
-				case '(':
-					depth++
-				case ')':
-					depth--
-				}
-				i++
-			}
-		} else {
-			buf.WriteByte(s[i])
-			i++
 		}
+	}
+	// Drop a trailing unterminated paren group (matches the old scanner, which
+	// consumed to end of string once inside an unclosed "(").
+	if depth == 0 {
+		buf.WriteString(s[prev:])
 	}
 	return buf.String()
 }
 
+// splitHybridSegments splits s (the content of a hybrid-table column list) on
+// top-level commas, trimming each segment. Token-based: it tokenises s and
+// splits at Comma tokens that sit at paren depth 0, so commas inside type
+// parameters like NUMBER(10,2) or inside string literals do not split a segment.
 func splitHybridSegments(s string) []string {
 	var segments []string
 	depth := 0
-	inSingle := false
-	inDouble := false
 	start := 0
-	for i := 0; i <= len(s); i++ {
-		var c byte
-		if i < len(s) {
-			c = s[i]
-		} else {
-			c = ','
-		}
-
-		if inSingle {
-			if c == '\'' {
-				// Check for doubled quote (escaped quote)
-				if i+1 < len(s) && s[i+1] == '\'' {
-					i++ // Skip the escaped quote
-				} else {
-					inSingle = false
-				}
-			}
-		} else if inDouble {
-			if c == '"' {
-				if i+1 < len(s) && s[i+1] == '"' {
-					i++
-				} else {
-					inDouble = false
-				}
-			}
-		} else {
-			if c == '\'' {
-				inSingle = true
-			} else if c == '"' {
-				inDouble = true
-			} else if c == '(' {
-				depth++
-			} else if c == ')' {
-				depth--
-			} else if c == ',' && depth == 0 {
-				segments = append(segments, strings.TrimSpace(s[start:i]))
-				start = i + 1
+	for _, t := range sqltok.Tokenize(s) {
+		switch t.Kind {
+		case sqltok.LParen:
+			depth++
+		case sqltok.RParen:
+			depth--
+		case sqltok.Comma:
+			if depth == 0 {
+				segments = append(segments, strings.TrimSpace(s[start:t.Start]))
+				start = t.End
 			}
 		}
 	}
+	segments = append(segments, strings.TrimSpace(s[start:]))
 	return segments
 }
 
+// validateCreateFileFormat validates CREATE FILE FORMAT: the OR REPLACE vs
+// IF NOT EXISTS conflict, the unsupported TRANSIENT/TEMPORARY modifiers, and
+// that every property key is allowed for the declared TYPE (CSV, JSON, AVRO,
+// ORC, PARQUET, XML — defaulting to CSV).
+//
+// Structurally tokenised: properties are collected by scanning the token stream
+// for KEY = VALUE. The one regex used here, reFileFormatValidEsc, validates a
+// single escape-character *value* (e.g. \n, \xNN, \uNNNN) — a character-format
+// check, not SQL structure — so tokenisation does not apply to it.
 func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	stripped := strings.TrimSpace(stripCommentsSQL(s))
-	// Use length-preserving masking for string literals to maintain offsets
-	strippedS := reStripStringLiterals.ReplaceAllStringFunc(stripped, func(m string) string {
-		return strings.Repeat(" ", len(m))
-	})
 
 	// Snowflake Rule: OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if marker, conflict := checkOrReplaceConflict(strippedS, r, "CREATE FILE FORMAT"); conflict {
+	ffSig := sigTokens(stripped)
+	if marker, conflict := checkOrReplaceConflictTok(ffSig, stripped, r, "CREATE FILE FORMAT"); conflict {
 		markers = append(markers, marker)
 	}
 
-	if reTransient.MatchString(strippedS) {
-		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax: TRANSIENT is not supported for FILE FORMAT objects.", 4))
+	if hasKW(ffSig, stripped, "TRANSIENT") {
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax: TRANSIENT is not supported for FILE FORMAT objects."))
 	}
 
-	if reFileFormatTemporary.MatchString(strippedS) {
-		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax: TEMPORARY is not supported for FILE FORMAT objects.", 4))
+	if hasKW(ffSig, stripped, "TEMPORARY") || hasKW(ffSig, stripped, "TEMP") {
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax: TEMPORARY is not supported for FILE FORMAT objects."))
 	}
 
-	// 1. Extract all properties correctly by finding keys in strippedS and values in stripped
+	// 1. Extract all properties by scanning tokens for KEY = VALUE patterns.
 	type rawProp struct {
 		key string
 		val string
@@ -4846,16 +5545,15 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 	var props []rawProp
 	var rawType string
 
-	for _, m := range reFileFormatPropKey.FindAllStringSubmatchIndex(strippedS, -1) {
-		key := strings.ToUpper(strippedS[m[2]:m[3]])
-		// Find value in stripped starting after the "KEY ="
-		valRest := stripped[m[1]:]
-		// Match value: either a quoted string or a word
-		valMatch := reFileFormatPropValue.FindStringSubmatch(valRest)
-		val := ""
-		if valMatch != nil {
-			val = valMatch[1]
+	for i := 0; i+2 < len(ffSig); i++ {
+		if !isIdent(ffSig[i]) {
+			continue
 		}
+		if ffSig[i+1].Kind != sqltok.Operator || ffSig[i+1].Text(stripped) != "=" {
+			continue
+		}
+		key := strings.ToUpper(ffSig[i].Text(stripped))
+		val := ffSig[i+2].Text(stripped)
 
 		if key == "TYPE" {
 			rawType = strings.ToUpper(strings.Trim(val, "'"))
@@ -4869,29 +5567,29 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 		rawType = "CSV"
 	}
 
-	var allowedRe *regexp.Regexp
+	var allowed map[string]bool
 	switch rawType {
 	case "CSV":
-		allowedRe = reFileFormatAllowedCsv
+		allowed = fileFormatAllowedCsv
 	case "JSON":
-		allowedRe = reFileFormatAllowedJson
+		allowed = fileFormatAllowedJson
 	case "AVRO":
-		allowedRe = reFileFormatAllowedAvro
+		allowed = fileFormatAllowedAvro
 	case "ORC":
-		allowedRe = reFileFormatAllowedOrc
+		allowed = fileFormatAllowedOrc
 	case "PARQUET":
-		allowedRe = reFileFormatAllowedParquet
+		allowed = fileFormatAllowedParquet
 	case "XML":
-		allowedRe = reFileFormatAllowedXml
+		allowed = fileFormatAllowedXml
 	default:
-		markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Invalid TYPE '%s' for FILE FORMAT. Must be CSV, JSON, AVRO, ORC, PARQUET, or XML.", rawType), 4))
+		markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Invalid TYPE '%s' for FILE FORMAT. Must be CSV, JSON, AVRO, ORC, PARQUET, or XML.", rawType)))
 		return markers
 	}
 
 	// 2. Validate property keys and values
 	for _, p := range props {
-		if !allowedRe.MatchString(p.key) {
-			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Property '%s' is not applicable for %s file format.", p.key, rawType), 4))
+		if !allowed[p.key] {
+			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Property '%s' is not applicable for %s file format.", p.key, rawType)))
 			continue
 		}
 
@@ -4902,15 +5600,15 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 				val := strings.Trim(p.val, "'")
 				if strings.ToUpper(val) != "NONE" {
 					if len([]rune(val)) == 0 {
-						markers = append(markers, diagMarkerSpan(r, "FIELD_DELIMITER cannot be empty.", 4))
+						markers = append(markers, diagMarkerSpan(r, "FIELD_DELIMITER cannot be empty."))
 					} else if len([]rune(val)) > 1 && !reFileFormatValidEsc.MatchString(val) {
-						markers = append(markers, diagMarkerSpan(r, "FIELD_DELIMITER must be a single-character string or 'NONE'.", 4))
+						markers = append(markers, diagMarkerSpan(r, "FIELD_DELIMITER must be a single-character string or 'NONE'."))
 					}
 				}
 			case "SKIP_HEADER":
 				val := strings.Trim(p.val, "'")
 				if strings.HasPrefix(val, "-") {
-					markers = append(markers, diagMarkerSpan(r, "SKIP_HEADER must be a non-negative integer.", 4))
+					markers = append(markers, diagMarkerSpan(r, "SKIP_HEADER must be a non-negative integer."))
 				}
 			}
 		}
@@ -4929,29 +5627,41 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 func validateCall(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	// 1. Procedure name must be present.
-	if !reCallProcName.MatchString(parseText) {
+	stripped := stripCommentsSQL(parseText)
+	toks := sqltok.Tokenize(stripped)
+	sig := sigToks(toks)
+
+	// 1. Procedure name must be present: CALL <ident_path>
+	if len(sig) < 2 || !isIdent(sig[1]) {
 		markers = append(markers, diagMarkerSpan(r,
-			"Missing procedure name in CALL statement.", 4))
+			"Missing procedure name in CALL statement."))
 		return markers
 	}
 
-	// 2. Argument list must be parenthesised.
-	if !reCallArgParens.MatchString(parseText) {
+	// 2. Argument list must be parenthesised — scan for LParen after ident path.
+	hasParens := false
+	for _, t := range toks {
+		if t.Kind == sqltok.LParen {
+			hasParens = true
+			break
+		}
+	}
+	if !hasParens {
 		markers = append(markers, diagMarkerSpan(r,
-			"CALL statement requires a parenthesised argument list. Use CALL proc_name() even when there are no arguments.", 4))
+			"CALL statement requires a parenthesised argument list. Use CALL proc_name() even when there are no arguments."))
 	}
 
 	// 3. INTO :<variable> — the variable must be prefixed with ':' in scripting contexts.
-	// Run against the comment-stripped text to avoid false positives when INTO
-	// appears inside a -- or /* */ comment (e.g. "CALL p() -- INTO x is done").
-	callStripped := stripCommentsSQL(parseText)
-	if m := reCallInto.FindStringSubmatch(callStripped); m != nil {
-		varToken := m[1]
-		if !strings.HasPrefix(varToken, ":") {
-			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf(
-				"INTO variable must be prefixed with ':' in Snowflake Scripting. Use INTO :%s instead of INTO %s.",
-				varToken, varToken), 4))
+	for i, t := range sig {
+		if tokUpper(t, stripped) == "INTO" && i+1 < len(sig) {
+			varTok := sig[i+1]
+			varText := varTok.Text(stripped)
+			if !strings.HasPrefix(varText, ":") {
+				markers = append(markers, diagMarkerSpan(r, fmt.Sprintf(
+					"INTO variable must be prefixed with ':' in Snowflake Scripting. Use INTO :%s instead of INTO %s.",
+					varText, varText)))
+			}
+			break
 		}
 	}
 
@@ -4967,38 +5677,44 @@ func validateCall(parseText string, r StatementRange) []DiagMarker {
 func validateWithProcedureCall(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	// Extract the alias name.
-	m := reWithProcAlias.FindStringSubmatch(parseText)
-	if m == nil {
+	toks := sqltok.Tokenize(parseText)
+	sig := sigToks(toks)
+
+	// Extract the alias name: WITH <alias> AS PROCEDURE
+	if len(sig) < 4 || tokUpper(sig[0], parseText) != "WITH" ||
+		!isIdent(sig[1]) || tokUpper(sig[2], parseText) != "AS" ||
+		tokUpper(sig[3], parseText) != "PROCEDURE" {
 		return markers
 	}
-	alias := m[1]
+	alias := sig[1].Text(parseText)
 
-	// Find the closing delimiter of the procedure body.
-	// Snowflake supports both untagged ($$...$$) and tagged ($tag$...$tag$)
-	// dollar-quoting.  We collect all $<tag>$ tokens via reAnyDollarTag and
-	// treat the rightmost one as the closing delimiter so that tagged forms like
-	// $proc$...$proc$ work correctly alongside the plain $$ form.
+	// Find the closing delimiter of the procedure body by scanning tokens
+	// for the last DollarQuoted token, then looking after it.
+	afterBodyStart := -1
+	for i := len(toks) - 1; i >= 0; i-- {
+		if toks[i].Kind == sqltok.DollarQuoted {
+			afterBodyStart = toks[i].End
+			break
+		}
+	}
+
 	var afterBody string
-	if tagMatches := reAnyDollarTag.FindAllStringIndex(parseText, -1); len(tagMatches) > 0 {
-		lastTagEnd := tagMatches[len(tagMatches)-1][1]
-		afterBody = strings.TrimSpace(parseText[lastTagEnd:])
+	if afterBodyStart >= 0 {
+		afterBody = strings.TrimSpace(parseText[afterBodyStart:])
 	} else {
 		// No dollar-quoted body found; look for CALL anywhere in the statement.
 		afterBody = parseText
 	}
 
-	if !reIsCall.MatchString(afterBody) {
+	// Check if CALL follows the body.
+	afterSig := sigTokens(afterBody)
+	if len(afterSig) == 0 || tokUpper(afterSig[0], afterBody) != "CALL" {
 		markers = append(markers, diagMarkerSpan(r, fmt.Sprintf(
-			"WITH ... AS PROCEDURE block must end with CALL %s(...).", alias), 4))
+			"WITH ... AS PROCEDURE block must end with CALL %s(...).", alias)))
 		return markers
 	}
 
 	// Delegate structural validation of the trailing CALL to validateCall.
-	// Note: validateCall only checks structural correctness (name present, parens,
-	// INTO syntax) — it does not verify that the invoked name matches alias.
-	// A CALL to a completely different procedure after the WITH block is not flagged
-	// here; this is an intentional limitation of static regex-based validation.
 	callText := strings.TrimSpace(afterBody)
 	markers = append(markers, validateCall(callText, r)...)
 
@@ -5017,24 +5733,72 @@ func validateWithProcedureCall(parseText string, r StatementRange) []DiagMarker 
 func validateExecuteImmediate(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
-	// 1. A SQL string argument is mandatory.
-	if !reExecImmHasArg.MatchString(stripped) {
+	// 1. A SQL string argument is mandatory: EXECUTE IMMEDIATE <arg>
+	// sig[0]=EXECUTE, sig[1]=IMMEDIATE, sig[2]=argument
+	if len(sig) < 3 {
 		markers = append(markers, diagMarkerSpan(r,
-			"EXECUTE IMMEDIATE requires a SQL string argument (string literal, dollar-quoted string, or variable reference).", 4))
+			"EXECUTE IMMEDIATE requires a SQL string argument (string literal, dollar-quoted string, or variable reference)."))
 		return markers
 	}
 
 	// 2. USING clause, if present, must contain at least one bind variable.
-	// Strip both single-quoted literals and dollar-quoted blocks first to avoid
-	// false positives from USING appearing inside the SQL string argument itself
-	// (e.g. EXECUTE IMMEDIATE $$MERGE INTO t USING () ON …$$).
-	cleanText := reStripStringLiterals.ReplaceAllString(stripped, " ")
-	cleanText = reStripDollarQuoted.ReplaceAllString(cleanText, " ")
-	if reExecImmUsing.MatchString(cleanText) && !reExecImmUsingHasIdent.MatchString(cleanText) {
-		markers = append(markers, diagMarkerSpan(r,
-			"USING clause in EXECUTE IMMEDIATE must contain at least one bind variable.", 4))
+	// Scan tokens outside strings/dollar-quoted blocks for USING keyword.
+	// The USING clause requires a parenthesised list: USING (<idents>).
+	toks := sqltok.Tokenize(stripped)
+	for i, t := range toks {
+		if t.Kind == sqltok.StringLit || t.Kind == sqltok.DollarQuoted {
+			continue
+		}
+		if (t.Kind == sqltok.Keyword || t.Kind == sqltok.Identifier) &&
+			strings.EqualFold(t.Text(stripped), "USING") {
+			// USING must be followed by '(' to be a USING clause.
+			// Bare "USING" without parens is not a USING clause (could be a variable name).
+			hasParen := false
+			for j := i + 1; j < len(toks); j++ {
+				k := toks[j].Kind
+				if k == sqltok.Whitespace || k == sqltok.Newline {
+					continue
+				}
+				if k == sqltok.LParen {
+					hasParen = true
+				}
+				break
+			}
+			if !hasParen {
+				break
+			}
+
+			// Check that the paren list contains at least one valid identifier.
+			// Bare identifiers and non-empty quoted identifiers are valid.
+			// Colon-prefixed variables (:v1) and empty quoted identifiers ("") are not.
+			hasValidIdent := false
+			for j := i + 1; j < len(toks); j++ {
+				k := toks[j].Kind
+				if k == sqltok.Whitespace || k == sqltok.Newline || k == sqltok.LParen || k == sqltok.Comma {
+					continue
+				}
+				if k == sqltok.RParen {
+					break
+				}
+				if k == sqltok.Identifier || k == sqltok.Keyword {
+					hasValidIdent = true
+					break
+				}
+				if k == sqltok.QuotedIdent && isNonEmptyIdent(toks[j], stripped) {
+					hasValidIdent = true
+					break
+				}
+				break
+			}
+			if !hasValidIdent {
+				markers = append(markers, diagMarkerSpan(r,
+					"USING clause in EXECUTE IMMEDIATE must contain at least one bind variable."))
+			}
+			break
+		}
 	}
 
 	return markers
@@ -5048,11 +5812,12 @@ func validateExecuteImmediate(parseText string, r StatementRange) []DiagMarker {
 func validateExecuteTask(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
-
-	if !reExecTaskName.MatchString(stripped) {
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
+	// EXECUTE TASK <name> → need at least 3 significant tokens with a non-empty ident.
+	if len(sig) < 3 || !isNonEmptyIdent(sig[2], stripped) {
 		markers = append(markers, diagMarkerSpan(r,
-			"EXECUTE TASK requires a task name. Use EXECUTE TASK <task_name>.", 4))
+			"EXECUTE TASK requires a task name. Use EXECUTE TASK <task_name>."))
 	}
 
 	return markers
@@ -5071,65 +5836,68 @@ func validateExecuteTask(parseText string, r StatementRange) []DiagMarker {
 func validatePut(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+	stripped := stripCommentsSQL(parseText)
+	toks := sqltok.Tokenize(stripped)
+
+	// Locate file:// and @ positions for order/presence checks.
+	fileURIPos := strings.Index(strings.ToUpper(stripped), "FILE://")
+	hasFileURI := fileURIPos >= 0
+
+	atPos := -1
+	for _, t := range toks {
+		if t.Kind == sqltok.At {
+			atPos = t.Start
+			break
+		}
+	}
 
 	// 1. file:// source is mandatory.
-	if !reFileURIArg.MatchString(stripped) {
+	if !hasFileURI {
 		markers = append(markers, diagMarkerSpan(r,
-			"PUT source path must use the file:// prefix (e.g. PUT file:///tmp/data.csv @mystage).", 4))
+			"PUT source path must use the file:// prefix (e.g. PUT file:///tmp/data.csv @mystage)."))
 		return markers
 	}
 
 	// 2. @<stage> destination is mandatory.
-	// Strip the PUT keyword so that identifiers that happen to contain "@" in
-	// comments do not cause false negatives.
-	afterKW := strings.TrimSpace(rePutKWStrip.ReplaceAllString(stripped, ""))
-	if !reStageRef.MatchString(afterKW) {
+	if atPos < 0 {
 		markers = append(markers, diagMarkerSpan(r,
-			"PUT requires a stage destination (e.g. @mystage or @~/path/).", 4))
+			"PUT requires a stage destination (e.g. @mystage or @~/path/)."))
 		return markers
 	}
 
 	// 3. Verify positional order: PUT file://<path> @<stage>.
-	if !rePutCorrectOrder.MatchString(stripped) {
+	if fileURIPos > atPos {
 		markers = append(markers, diagMarkerSpan(r,
-			"PUT source and destination are in the wrong order. Correct syntax: PUT file://<path> @<stage>.", 4))
+			"PUT source and destination are in the wrong order. Correct syntax: PUT file://<path> @<stage>."))
 		return markers
 	}
 
-	// 4. PARALLEL must be 1–99.
-	if m := reParallelOption.FindStringSubmatch(stripped); m != nil {
-		n, err := strconv.Atoi(m[1])
+	// 4-7. Check option values using token scan for <OPTION> = <value> patterns.
+	markers = append(markers, checkOptionValue(toks, stripped, r, "PARALLEL", func(val string) string {
+		n, err := strconv.Atoi(val)
 		if err != nil || n < 1 || n > 99 {
-			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("PARALLEL must be a positive integer between 1 and 99, got '%s'.", m[1]), 4))
+			return fmt.Sprintf("PARALLEL must be a positive integer between 1 and 99, got '%s'.", val)
 		}
-	}
-
-	// 5. SOURCE_COMPRESSION must be a known compression type.
-	if m := rePutSourceComp.FindStringSubmatch(stripped); m != nil {
-		compType := strings.ToUpper(m[1])
-		if !slices.Contains(validPutCompressions, compType) {
-			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("Invalid SOURCE_COMPRESSION '%s'. Valid values: AUTO_DETECT, GZIP, BZ2, BROTLI, ZSTD, DEFLATE, RAW_DEFLATE, NONE.", m[1]), 4))
+		return ""
+	})...)
+	markers = append(markers, checkOptionValue(toks, stripped, r, "SOURCE_COMPRESSION", func(val string) string {
+		if !slices.Contains(validPutCompressions, strings.ToUpper(val)) {
+			return fmt.Sprintf("Invalid SOURCE_COMPRESSION '%s'. Valid values: AUTO_DETECT, GZIP, BZ2, BROTLI, ZSTD, DEFLATE, RAW_DEFLATE, NONE.", val)
 		}
-	}
-
-	// 6. OVERWRITE must be TRUE or FALSE.
-	if m := rePutOverwrite.FindStringSubmatch(stripped); m != nil {
-		if v := strings.ToUpper(m[1]); v != "TRUE" && v != "FALSE" {
-			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("OVERWRITE must be TRUE or FALSE, got '%s'.", m[1]), 4))
+		return ""
+	})...)
+	markers = append(markers, checkOptionValue(toks, stripped, r, "OVERWRITE", func(val string) string {
+		if v := strings.ToUpper(val); v != "TRUE" && v != "FALSE" {
+			return fmt.Sprintf("OVERWRITE must be TRUE or FALSE, got '%s'.", val)
 		}
-	}
-
-	// 7. AUTO_COMPRESS must be TRUE or FALSE.
-	if m := rePutAutoCompress.FindStringSubmatch(stripped); m != nil {
-		if v := strings.ToUpper(m[1]); v != "TRUE" && v != "FALSE" {
-			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("AUTO_COMPRESS must be TRUE or FALSE, got '%s'.", m[1]), 4))
+		return ""
+	})...)
+	markers = append(markers, checkOptionValue(toks, stripped, r, "AUTO_COMPRESS", func(val string) string {
+		if v := strings.ToUpper(val); v != "TRUE" && v != "FALSE" {
+			return fmt.Sprintf("AUTO_COMPRESS must be TRUE or FALSE, got '%s'.", val)
 		}
-	}
+		return ""
+	})...)
 
 	return markers
 }
@@ -5143,30 +5911,48 @@ func validatePut(parseText string, r StatementRange) []DiagMarker {
 func validateGet(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+	stripped := stripCommentsSQL(parseText)
+	toks := sqltok.Tokenize(stripped)
+
+	// Locate @ and file:// positions.
+	atPos := -1
+	for _, t := range toks {
+		if t.Kind == sqltok.At {
+			atPos = t.Start
+			break
+		}
+	}
+	fileURIPos := strings.Index(strings.ToUpper(stripped), "FILE://")
 
 	// 1. @<stage> source is mandatory (GET @stage …).
-	if !reGetStageArg.MatchString(stripped) {
+	if atPos < 0 {
 		markers = append(markers, diagMarkerSpan(r,
-			"GET requires a stage source (e.g. GET @mystage file:///tmp/).", 4))
+			"GET requires a stage source (e.g. GET @mystage file:///tmp/)."))
 		return markers
 	}
 
 	// 2. file:// destination is mandatory.
-	if !reFileURIArg.MatchString(stripped) {
+	if fileURIPos < 0 {
 		markers = append(markers, diagMarkerSpan(r,
-			"GET destination path must use the file:// prefix (e.g. GET @mystage file:///tmp/).", 4))
+			"GET destination path must use the file:// prefix (e.g. GET @mystage file:///tmp/)."))
 		return markers
 	}
 
-	// 3. PARALLEL must be 1–99.
-	if m := reParallelOption.FindStringSubmatch(stripped); m != nil {
-		n, err := strconv.Atoi(m[1])
-		if err != nil || n < 1 || n > 99 {
-			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("PARALLEL must be a positive integer between 1 and 99, got '%s'.", m[1]), 4))
-		}
+	// 3. Verify positional order: GET @stage file://<path>.
+	if fileURIPos < atPos {
+		markers = append(markers, diagMarkerSpan(r,
+			"GET requires a stage source (e.g. GET @mystage file:///tmp/)."))
+		return markers
 	}
+
+	// 4. PARALLEL must be 1–99.
+	markers = append(markers, checkOptionValue(toks, stripped, r, "PARALLEL", func(val string) string {
+		n, err := strconv.Atoi(val)
+		if err != nil || n < 1 || n > 99 {
+			return fmt.Sprintf("PARALLEL must be a positive integer between 1 and 99, got '%s'.", val)
+		}
+		return ""
+	})...)
 
 	return markers
 }
@@ -5178,11 +5964,18 @@ func validateGet(parseText string, r StatementRange) []DiagMarker {
 func validateList(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
-
-	if !reListStageArg.MatchString(stripped) {
+	toks := sqltok.Tokenize(stripCommentsSQL(parseText))
+	// LIST @<stage> → look for At token after keyword.
+	hasAt := false
+	for _, t := range toks {
+		if t.Kind == sqltok.At {
+			hasAt = true
+			break
+		}
+	}
+	if !hasAt {
 		markers = append(markers, diagMarkerSpan(r,
-			"LIST (LS) requires a stage argument (e.g. LIST @mystage).", 4))
+			"LIST (LS) requires a stage argument (e.g. LIST @mystage)."))
 	}
 
 	return markers
@@ -5195,11 +5988,18 @@ func validateList(parseText string, r StatementRange) []DiagMarker {
 func validateRemove(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
-
-	if !reRemoveStageArg.MatchString(stripped) {
+	toks := sqltok.Tokenize(stripCommentsSQL(parseText))
+	// REMOVE @<stage> → look for At token after keyword.
+	hasAt := false
+	for _, t := range toks {
+		if t.Kind == sqltok.At {
+			hasAt = true
+			break
+		}
+	}
+	if !hasAt {
 		markers = append(markers, diagMarkerSpan(r,
-			"REMOVE (RM) requires a stage argument (e.g. REMOVE @mystage).", 4))
+			"REMOVE (RM) requires a stage argument (e.g. REMOVE @mystage)."))
 	}
 
 	return markers
@@ -5221,67 +6021,79 @@ func validateRemove(parseText string, r StatementRange) []DiagMarker {
 func validateCreateEventTable(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	// Strip comments and string literals so that keywords inside -- / /* */
-	// comments or COMMENT values don't trigger false positive checks.
+	// Strip comments so that keywords inside -- / /* */ comments don't trigger
+	// false positive checks. The tokenizer naturally handles string literals —
+	// keyword searches via tokUpper skip StringLit tokens.
 	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
-	clean := reStripStringLiterals.ReplaceAllString(stripped, "''")
+
+	sig := sigTokens(stripped)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if marker, conflict := checkOrReplaceConflict(clean, r, "CREATE EVENT TABLE"); conflict {
+	if marker, conflict := checkOrReplaceConflictTok(sig, stripped, r, "CREATE EVENT TABLE"); conflict {
 		markers = append(markers, marker)
 		return markers
 	}
 
 	// 2. Event table name is required.
-	m := reCreateEventTableName.FindStringSubmatch(stripped)
-	if m == nil {
-		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE EVENT TABLE statement.", 4))
+	name, nameIdx := extractNameAfterCreate(sig, stripped, []string{"TRANSIENT"}, "EVENT", "TABLE")
+	if name == "" {
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE EVENT TABLE statement."))
 		return markers
 	}
 
 	// 3. TRANSIENT is not supported for event tables.
-	if reTransient.MatchString(clean) {
+	if hasKW(sig, stripped, "TRANSIENT") {
 		markers = append(markers, diagMarkerSpan(r,
-			"TRANSIENT is not supported for event tables.", 4))
+			"TRANSIENT is not supported for event tables."))
 	}
 
 	// 4. Column definitions are not allowed — event tables have a fixed schema.
-	if reEventTableColumnList.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			"Event tables have a fixed schema and do not support column definitions.", 4))
+	// Check if a LParen immediately follows the name path (not after TAG or
+	// other keywords). Walk past the name path and check the next token.
+	afterName := nameIdx
+	for afterName < len(sig) && (isIdent(sig[afterName]) || sig[afterName].Kind == sqltok.Dot) {
+		afterName++
+	}
+	if afterName < len(sig) && sig[afterName].Kind == sqltok.LParen {
+		// Only flag if the token before LParen is NOT TAG (which takes a paren block).
+		prevUpper := tokUpper(sig[afterName-1], stripped)
+		if prevUpper != "TAG" {
+			markers = append(markers, diagMarkerSpan(r,
+				"Event tables have a fixed schema and do not support column definitions."))
+		}
 	}
 
 	// 5. CLUSTER BY is not supported for event tables.
-	if rePatternClusterBy.MatchString(clean) {
+	if hasKWPair(sig, stripped, "CLUSTER", "BY") {
 		markers = append(markers, diagMarkerSpan(r,
-			"CLUSTER BY is not supported for EVENT TABLE.", 4))
+			"CLUSTER BY is not supported for EVENT TABLE."))
 	}
 
-	// 5. Validate property values using package-level regexes.
-	if m := reEvtRetentionDays.FindStringSubmatch(clean); m != nil {
-		if n, err := strconv.Atoi(m[1]); err != nil || n < 0 {
+	// 5. Validate property values.
+	if hasKWAssign(sig, stripped, "DATA_RETENTION_TIME_IN_DAYS") {
+		v, ok := findKWAssignInt(sig, stripped, "DATA_RETENTION_TIME_IN_DAYS")
+		if !ok || v < 0 {
 			markers = append(markers, diagMarkerSpan(r,
-				"DATA_RETENTION_TIME_IN_DAYS must be a non-negative integer.", 4))
+				"DATA_RETENTION_TIME_IN_DAYS must be a non-negative integer."))
 		}
 	}
-	if m := reEvtExtensionDays.FindStringSubmatch(clean); m != nil {
-		if n, err := strconv.Atoi(m[1]); err != nil || n < 0 {
+	if hasKWAssign(sig, stripped, "MAX_DATA_EXTENSION_TIME_IN_DAYS") {
+		v, ok := findKWAssignInt(sig, stripped, "MAX_DATA_EXTENSION_TIME_IN_DAYS")
+		if !ok || v < 0 {
 			markers = append(markers, diagMarkerSpan(r,
-				"MAX_DATA_EXTENSION_TIME_IN_DAYS must be a non-negative integer.", 4))
+				"MAX_DATA_EXTENSION_TIME_IN_DAYS must be a non-negative integer."))
 		}
 	}
-	if m := reEvtChangeTrackingValue.FindStringSubmatch(clean); m != nil {
-		if !isBool(m[1]) {
+	if val, ok := findKWAssign(sig, stripped, "CHANGE_TRACKING"); ok {
+		if !isBool(val) {
 			markers = append(markers, diagMarkerSpan(r,
-				"CHANGE_TRACKING must be TRUE or FALSE.", 4))
+				"CHANGE_TRACKING must be TRUE or FALSE."))
 		}
 	}
 
-	// 6. Validate allowed properties. Use stripParenContents to avoid
-	// false positives from keys inside TAG(...) or other paren blocks.
-	// Note: COPY GRANTS is a standalone clause (no '='), so it bypasses
-	// validateProperties entirely and needs no allowlist entry.
-	validateProperties(stripParenContents(clean), `DATA_RETENTION_TIME_IN_DAYS|MAX_DATA_EXTENSION_TIME_IN_DAYS|CHANGE_TRACKING|DEFAULT_DDL_COLLATION|COMMENT|TAG`, r, &markers)
+	// 6. Validate allowed properties. validateProperties skips keys nested inside
+	// TAG(...) or other paren blocks via its paren-depth tracking.
+	validateProperties(stripped, `DATA_RETENTION_TIME_IN_DAYS|MAX_DATA_EXTENSION_TIME_IN_DAYS|CHANGE_TRACKING|DEFAULT_DDL_COLLATION|COMMENT|TAG`, r, &markers)
 
 	return markers
 }
@@ -5295,23 +6107,27 @@ func validateCreateEventTable(parseText string, r StatementRange) []DiagMarker {
 func validateCreateShare(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
+
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	// Use cleanParseText so that phrases inside COMMENT values or comments
-	// do not trigger false positive checks.
-	if marker, conflict := checkOrReplaceConflict(cleanParseText(parseText), r, "CREATE SHARE"); conflict {
+	if marker, conflict := checkOrReplaceConflictTok(sig, stripped, r, "CREATE SHARE"); conflict {
 		markers = append(markers, marker)
 		return markers
 	}
 
 	// 2. Share name is required; also used for the account-level prefix check.
-	m := reCreateShareName.FindStringSubmatch(parseText)
-	if m == nil {
-		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE SHARE statement.", 4))
+	name, _ := extractNameAfterCreate(sig, stripped, nil, "SHARE")
+	if name == "" {
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE SHARE statement."))
 		return markers
 	}
-	if pfx := checkAccountLevelPrefix(m[1], r, "Shares"); pfx != nil {
-		markers = append(markers, *pfx)
+	if marker, swallowed := checkNameSwallowedByIFTok(name, sig, stripped, r,
+		"Unexpected syntax in CREATE SHARE statement."); swallowed {
+		markers = append(markers, marker)
+		return markers
 	}
+	checkAccountLevelPrefix(name, r, "Shares", &markers)
 
 	// 3. Only COMMENT is a valid property for CREATE SHARE.
 	validateProperties(parseText, `COMMENT`, r, &markers)
@@ -5348,165 +6164,141 @@ var extVolValidEncTypes = []string{"NONE", "AWS_SSE_S3", "AWS_SSE_KMS", "GCS_SSE
 func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	// stripped has comments removed but string literals intact; used wherever
-	// we need findMatchingParen / extractParenContent to correctly skip strings.
 	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
-	// clean has both comments and string literals removed; used for keyword
-	// presence checks that must not match inside quoted values.
-	clean := reStripStringLiterals.ReplaceAllString(stripped, "''")
+	clean := cleanParseText(parseText)
+	sig := sigTokens(clean)
 
 	// 0. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if marker, conflict := checkOrReplaceConflict(clean, r, "CREATE EXTERNAL VOLUME"); conflict {
+	if marker, conflict := checkOrReplaceConflictTok(sig, clean, r, "CREATE EXTERNAL VOLUME"); conflict {
 		markers = append(markers, marker)
 		return markers
 	}
 
 	// 1. Account-level: name must not have db.schema prefix.
-	if m := reCreateExternalVolumeName.FindStringSubmatch(parseText); m != nil {
-		if pfx := checkAccountLevelPrefix(m[1], r, "External volumes"); pfx != nil {
-			markers = append(markers, *pfx)
-		}
+	name, _ := extractNameAfterCreate(sig, clean, nil, "EXTERNAL", "VOLUME")
+	if name != "" {
+		checkAccountLevelPrefix(name, r, "External volumes", &markers)
 	}
 
 	// 2. STORAGE_LOCATIONS is mandatory.
-	if !reExtVolHasStorageLocs.MatchString(clean) {
+	slContent := findKWAssignParenContent(sig, clean, "STORAGE_LOCATIONS")
+	if slContent == "" && !hasKWAssign(sig, clean, "STORAGE_LOCATIONS") {
 		markers = append(markers, diagMarkerSpan(r,
-			"STORAGE_LOCATIONS is mandatory for CREATE EXTERNAL VOLUME.", 4))
+			"STORAGE_LOCATIONS is mandatory for CREATE EXTERNAL VOLUME."))
 		return markers
 	}
 
-	// Extract STORAGE_LOCATIONS outer block, then split into individual location
-	// entries. Each entry is a (…) block inside the outer (…).
-	// We use stripped (comments removed, literals intact) rather than clean so
-	// that findMatchingParen can skip parentheses inside quoted string values.
-	// Known limitation: if a string literal before the real STORAGE_LOCATIONS
-	// clause contains the substring "STORAGE_LOCATIONS = (", extractParenContent
-	// may start extraction at the wrong parenthesis. This is extremely unlikely
-	// in practice for Snowflake DDL. Comments are absent because stripCommentsSQL
-	// was already applied; loc blocks therefore contain no -- or /* */ text.
-	// An empty STORAGE_LOCATIONS = () block produces storLocContent == "" and
-	// len(locations) == 0, which is caught by the check below.
-	storLocContent := extractParenContent(stripped, "STORAGE_LOCATIONS")
+	// Extract location blocks from STORAGE_LOCATIONS outer parens.
+	// Tokenize stripped (comments removed, literals intact) so the tokenizer
+	// correctly handles parens inside quoted string values.
+	strippedSig := sigTokens(stripped)
+	storLocContent := findKWAssignParenContent(strippedSig, stripped, "STORAGE_LOCATIONS")
 	locations := splitLocationBlocks(storLocContent)
 	if len(locations) == 0 {
 		markers = append(markers, diagMarkerSpan(r,
-			"STORAGE_LOCATIONS must contain at least one storage location block.", 4))
+			"STORAGE_LOCATIONS must contain at least one storage location block."))
 		return markers
 	}
 
 	// 3–9. Per-location validation.
 	for _, loc := range locations {
-		// locClean has string literals replaced with '' so structural keyword
-		// checks cannot match inside quoted URL or ARN values.
-		locClean := reStripStringLiterals.ReplaceAllString(loc, "''")
+		locSig := sigTokens(loc)
 
-		// 3. NAME is required in every location block (checked before provider
-		// so it is reported even when STORAGE_PROVIDER is also missing).
-		if !reExtVolLocationName.MatchString(locClean) {
+		// 3. NAME is required — check NAME = '<string>'.
+		if _, ok := findKWAssignStr(locSig, loc, "NAME"); !ok {
 			markers = append(markers, diagMarkerSpan(r,
-				"Each storage location requires a NAME attribute.", 4))
+				"Each storage location requires a NAME attribute."))
 		}
 
-		// 4. STORAGE_BASE_URL is required regardless of provider. Checked before
-		// the STORAGE_PROVIDER guard so it is reported even when both attributes
-		// are absent — the author sees all missing required fields at once.
-		// Note: after literal stripping, STORAGE_BASE_URL = '' satisfies the
-		// pattern — empty-string URLs are an accepted trade-off for a structural
-		// preamble validator.
-		if !reExtVolStorageBaseURL.MatchString(locClean) {
+		// 4. STORAGE_BASE_URL is required.
+		if _, ok := findKWAssignStr(locSig, loc, "STORAGE_BASE_URL"); !ok {
 			markers = append(markers, diagMarkerSpan(r,
-				"Each storage location requires STORAGE_BASE_URL.", 4))
+				"Each storage location requires STORAGE_BASE_URL."))
 		}
 
-		// 5. STORAGE_PROVIDER must be present and valid. Use the literal-
-		// preserving loc so the regex captures the actual provider string.
-		// First-match assumption: if a NAME or COMMENT value happened to
-		// contain "STORAGE_PROVIDER = 'S3'" the wrong match would be returned.
-		// In practice this is negligible risk for Snowflake DDL.
-		pm := reExtVolStorageProvider.FindStringSubmatch(loc)
-		if pm == nil {
+		// 5. STORAGE_PROVIDER must be present and valid.
+		providerVal, hasProvider := findKWAssignStr(locSig, loc, "STORAGE_PROVIDER")
+		if !hasProvider {
 			markers = append(markers, diagMarkerSpan(r,
-				"Each storage location requires STORAGE_PROVIDER (S3, S3GOV, S3CHINA, S3COMPAT, GCS, or AZURE).", 4))
-			// Cannot validate provider-specific rules without knowing the provider.
+				"Each storage location requires STORAGE_PROVIDER (S3, S3GOV, S3CHINA, S3COMPAT, GCS, or AZURE)."))
 			continue
 		}
-		provider := strings.ToUpper(pm[1])
+		provider := strings.ToUpper(strings.Trim(providerVal, "'"))
 		isS3 := provider == "S3" || provider == "S3GOV" || provider == "S3CHINA" || provider == "S3COMPAT"
 		isGCS := provider == "GCS"
 		isAzure := provider == "AZURE"
 		if !isS3 && !isGCS && !isAzure {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("Invalid STORAGE_PROVIDER '%s'. Must be S3, S3GOV, S3CHINA, S3COMPAT, GCS, or AZURE.", pm[1]), 4))
+				fmt.Sprintf("Invalid STORAGE_PROVIDER '%s'. Must be S3, S3GOV, S3CHINA, S3COMPAT, GCS, or AZURE.", strings.Trim(providerVal, "'"))))
 			continue
 		}
 
-		// 6. STORAGE_AWS_ROLE_ARN is required for S3, S3GOV, S3CHINA, and S3COMPAT.
-		if isS3 && !reExtVolAwsRoleArn.MatchString(locClean) {
+		// 6. STORAGE_AWS_ROLE_ARN is required for S3-family.
+		if isS3 && !hasKWAssign(locSig, loc, "STORAGE_AWS_ROLE_ARN") {
 			markers = append(markers, diagMarkerSpan(r,
-				"STORAGE_AWS_ROLE_ARN is required for S3, S3GOV, S3CHINA, and S3COMPAT storage providers.", 4))
+				"STORAGE_AWS_ROLE_ARN is required for S3, S3GOV, S3CHINA, and S3COMPAT storage providers."))
 		}
 
 		// 7. AZURE_TENANT_ID is required for AZURE.
-		if isAzure && !reExtVolAzureTenantID.MatchString(locClean) {
+		if isAzure && !hasKWAssign(locSig, loc, "AZURE_TENANT_ID") {
 			markers = append(markers, diagMarkerSpan(r,
-				"AZURE_TENANT_ID is required for AZURE storage provider.", 4))
+				"AZURE_TENANT_ID is required for AZURE storage provider."))
 		}
 
-		// 8. STORAGE_AWS_EXTERNAL_ID is only valid for S3-family providers.
-		if !isS3 && reExtVolAwsExternalID.MatchString(locClean) {
+		// 8. STORAGE_AWS_EXTERNAL_ID is only valid for S3-family.
+		if !isS3 && hasKWAssign(locSig, loc, "STORAGE_AWS_EXTERNAL_ID") {
 			markers = append(markers, diagMarkerSpan(r,
-				"STORAGE_AWS_EXTERNAL_ID is only valid for S3, S3GOV, S3CHINA, or S3COMPAT storage providers.", 4))
+				"STORAGE_AWS_EXTERNAL_ID is only valid for S3, S3GOV, S3CHINA, or S3COMPAT storage providers."))
 		}
 
-		// 9. ENCRYPTION handling is provider-specific (inside per-location loop).
-		if isAzure {
-			// AZURE uses native storage encryption; the ENCRYPTION parameter is
-			// not supported at all for AZURE external volumes. Use the loose
-			// presence regex (reExtVolHasEncryption) so blocks like
-			// ENCRYPTION = (KMS_KEY_ID = 'k') without a TYPE key are caught too.
-			if reExtVolHasEncryption.MatchString(locClean) {
+		// 9. ENCRYPTION handling.
+		encContent := findKWAssignParenContent(locSig, loc, "ENCRYPTION")
+		hasEncryption := encContent != "" || hasKWAssign(locSig, loc, "ENCRYPTION")
+		if isAzure && hasEncryption {
+			markers = append(markers, diagMarkerSpan(r,
+				"AZURE storage locations do not support the ENCRYPTION parameter."))
+		} else if hasEncryption && !isAzure {
+			if encContent == "" {
 				markers = append(markers, diagMarkerSpan(r,
-					"AZURE storage locations do not support the ENCRYPTION parameter.", 4))
-			}
-		} else if reExtVolHasEncryption.MatchString(locClean) {
-			// An ENCRYPTION block is present on an S3 or GCS location.
-			// Use the literal-preserving loc so the regex captures the actual type string.
-			ems := reExtVolEncryptionType.FindAllStringSubmatch(loc, -1)
-			if len(ems) == 0 {
-				// ENCRYPTION block exists but has no TYPE key — always an error.
-				markers = append(markers, diagMarkerSpan(r,
-					"ENCRYPTION block must specify a TYPE key (NONE, AWS_SSE_S3, AWS_SSE_KMS, or GCS_SSE_KMS).", 4))
+					"ENCRYPTION block must specify a TYPE key (NONE, AWS_SSE_S3, AWS_SSE_KMS, or GCS_SSE_KMS)."))
 			} else {
-				for _, em := range ems {
-					encType := strings.ToUpper(em[1])
-					if !slices.Contains(extVolValidEncTypes, encType) {
+				encSig := sigTokens(encContent)
+				encType, hasType := findKWAssignStr(encSig, encContent, "TYPE")
+				if !hasType {
+					markers = append(markers, diagMarkerSpan(r,
+						"ENCRYPTION block must specify a TYPE key (NONE, AWS_SSE_S3, AWS_SSE_KMS, or GCS_SSE_KMS)."))
+				} else {
+					et := strings.ToUpper(strings.Trim(encType, "'"))
+					if !slices.Contains(extVolValidEncTypes, et) {
 						markers = append(markers, diagMarkerSpan(r,
-							fmt.Sprintf("Invalid ENCRYPTION TYPE '%s'. Must be NONE, AWS_SSE_S3, AWS_SSE_KMS, or GCS_SSE_KMS.", em[1]), 4))
-					} else if (encType == "AWS_SSE_S3" || encType == "AWS_SSE_KMS") && !isS3 {
+							fmt.Sprintf("Invalid ENCRYPTION TYPE '%s'. Must be NONE, AWS_SSE_S3, AWS_SSE_KMS, or GCS_SSE_KMS.", strings.Trim(encType, "'"))))
+					} else if (et == "AWS_SSE_S3" || et == "AWS_SSE_KMS") && !isS3 {
 						markers = append(markers, diagMarkerSpan(r,
-							fmt.Sprintf("ENCRYPTION TYPE '%s' is only valid for S3, S3GOV, S3CHINA, or S3COMPAT storage providers.", em[1]), 4))
-					} else if encType == "GCS_SSE_KMS" && !isGCS {
+							fmt.Sprintf("ENCRYPTION TYPE '%s' is only valid for S3, S3GOV, S3CHINA, or S3COMPAT storage providers.", strings.Trim(encType, "'"))))
+					} else if et == "GCS_SSE_KMS" && !isGCS {
 						markers = append(markers, diagMarkerSpan(r,
-							"ENCRYPTION TYPE 'GCS_SSE_KMS' is only valid for GCS storage provider.", 4))
+							"ENCRYPTION TYPE 'GCS_SSE_KMS' is only valid for GCS storage provider."))
 					}
 				}
 			}
 		}
 	}
 
-	// 10. ALLOW_WRITES must be TRUE or FALSE if present. Use clean (comments and
-	// string literals both removed) so neither "-- ALLOW_WRITES = maybe" in a
-	// comment nor 'ALLOW_WRITES = MAYBE' inside a COMMENT string value can
-	// produce a false positive.
-	validateBoolProp(clean, "ALLOW_WRITES", r, &markers)
+	// 10. ALLOW_WRITES must be TRUE or FALSE if present.
+	validateBoolPropTok(sig, clean, "ALLOW_WRITES", r, &markers)
 
 	return markers
 }
 
 // splitLocationBlocks iterates over s (the content inside a STORAGE_LOCATIONS
 // outer paren) and returns each inner (…) block with its enclosing parens
-// stripped. String literals inside the blocks are preserved so that
-// per-location regex checks operate on real values.
+// stripped. String literals inside the blocks are preserved so the per-location
+// checks see real values.
+//
+// Operates on the extracted string rather than the token stream: it walks the
+// raw text and delegates paren balancing to findMatchingParen (itself token-
+// based). Each returned block is re-tokenised by the caller, so this stays a
+// thin string-splitting step.
 func splitLocationBlocks(s string) []string {
 	var blocks []string
 	for i := 0; i < len(s); i++ {
@@ -5531,27 +6323,22 @@ func splitLocationBlocks(s string) []string {
 func validateAlterShare(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	// Strip string literals and comments, then trim, so that RESTRICT or
-	// ACCOUNTS inside a COMMENT value or after a trailing line comment cannot
-	// cause false positives. clean is also trimmed so the $ anchor in
-	// reAlterShareRestrictTrailing reliably targets end-of-statement.
-	clean := cleanParseText(parseText)
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
-	hasAddAccounts := reAlterShareAddAccounts.MatchString(clean)
-	hasRestrict := reAlterShareRestrictTrailing.MatchString(clean)
-	hasAddAcctsEq := reAlterShareAddAcctsEq.MatchString(clean)
-	hasAcctList := reAlterShareHasAcctList.MatchString(clean)
+	hasAddAccounts := hasKWPair(sig, stripped, "ADD", "ACCOUNTS")
 
 	// RESTRICT is only valid with ADD ACCOUNTS.
-	if hasRestrict && !hasAddAccounts {
+	// Check if RESTRICT is the last significant token (trailing position).
+	if len(sig) > 0 && tokUpper(sig[len(sig)-1], stripped) == "RESTRICT" && !hasAddAccounts {
 		markers = append(markers, diagMarkerSpan(r,
-			"RESTRICT is only valid with ADD ACCOUNTS in ALTER SHARE.", 4))
+			"RESTRICT is only valid with ADD ACCOUNTS in ALTER SHARE."))
 	}
 
 	// ADD ACCOUNTS = requires at least one account identifier after the '='.
-	if hasAddAcctsEq && !hasAcctList {
+	if hasAddAccounts && !hasKWPairAssignIdent(sig, stripped, "ADD", "ACCOUNTS") {
 		markers = append(markers, diagMarkerSpan(r,
-			"ADD ACCOUNTS requires at least one account identifier.", 4))
+			"ADD ACCOUNTS requires at least one account identifier."))
 	}
 
 	return markers
@@ -5564,11 +6351,11 @@ func validateAlterShare(parseText string, r StatementRange) []DiagMarker {
 func validateUseRole(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
-
-	if !reUseRoleHasName.MatchString(stripped) {
+	sig := sigTokens(stripCommentsSQL(parseText))
+	// USE ROLE <name> → need at least 3 significant tokens.
+	if len(sig) < 3 || !isIdent(sig[2]) {
 		markers = append(markers, diagMarkerSpan(r,
-			"USE ROLE requires a role name. Use USE ROLE <role_name>.", 4))
+			"USE ROLE requires a role name. Use USE ROLE <role_name>."))
 	}
 
 	return markers
@@ -5581,11 +6368,11 @@ func validateUseRole(parseText string, r StatementRange) []DiagMarker {
 func validateUseWarehouse(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
-
-	if !reUseWarehouseHasName.MatchString(stripped) {
+	sig := sigTokens(stripCommentsSQL(parseText))
+	// USE WAREHOUSE <name> → need at least 3 significant tokens.
+	if len(sig) < 3 || !isIdent(sig[2]) {
 		markers = append(markers, diagMarkerSpan(r,
-			"USE WAREHOUSE requires a warehouse name. Use USE WAREHOUSE <warehouse_name>.", 4))
+			"USE WAREHOUSE requires a warehouse name. Use USE WAREHOUSE <warehouse_name>."))
 	}
 
 	return markers
@@ -5599,11 +6386,18 @@ func validateUseWarehouse(parseText string, r StatementRange) []DiagMarker {
 func validateUseSecondaryRoles(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
-
-	if !reUseSecondaryRolesValue.MatchString(stripped) {
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
+	// USE SECONDARY ROLES (ALL|NONE) → need 4 tokens with specific 4th value.
+	if len(sig) < 4 {
 		markers = append(markers, diagMarkerSpan(r,
-			"USE SECONDARY ROLES requires ALL or NONE.", 4))
+			"USE SECONDARY ROLES requires ALL or NONE."))
+		return markers
+	}
+	v := tokUpper(sig[3], stripped)
+	if v != "ALL" && v != "NONE" {
+		markers = append(markers, diagMarkerSpan(r,
+			"USE SECONDARY ROLES requires ALL or NONE."))
 	}
 
 	return markers
@@ -5680,53 +6474,87 @@ var knownSessionParams = map[string]sessionParamSpec{
 func validateAlterSession(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
-	isSet := reAlterSessionSet.MatchString(stripped)
-	isUnset := reAlterSessionUnset.MatchString(stripped)
-
-	if !isSet && !isUnset {
+	// sig[0]=ALTER, sig[1]=SESSION, sig[2]=SET|UNSET
+	if len(sig) < 3 {
 		markers = append(markers, diagMarkerSpan(r,
-			"ALTER SESSION requires SET or UNSET. Use ALTER SESSION SET <param> = <value> or ALTER SESSION UNSET <param>.", 4))
+			"ALTER SESSION requires SET or UNSET. Use ALTER SESSION SET <param> = <value> or ALTER SESSION UNSET <param>."))
 		return markers
 	}
 
-	if isSet {
-		loc := reAlterSessionSet.FindStringIndex(stripped)
-		rest := strings.TrimSpace(stripped[loc[1]:])
+	action := tokUpper(sig[2], stripped)
+	if action != "SET" && action != "UNSET" {
+		markers = append(markers, diagMarkerSpan(r,
+			"ALTER SESSION requires SET or UNSET. Use ALTER SESSION SET <param> = <value> or ALTER SESSION UNSET <param>."))
+		return markers
+	}
 
-		pairs := reAlterSessionParam.FindAllStringSubmatch(rest, -1)
+	// Tokens after ALTER SESSION SET/UNSET.
+	rest := sig[3:]
+
+	if action == "SET" {
+		// Parse <param> = <value> pairs from the significant token stream.
+		type paramPair struct {
+			name  string
+			value string
+		}
+		var pairs []paramPair
+		var stray []string
+
+		i := 0
+		for i < len(rest) {
+			// Skip commas between assignments.
+			if rest[i].Kind == sqltok.Comma {
+				i++
+				continue
+			}
+			if !isIdent(rest[i]) {
+				i++
+				continue
+			}
+			paramName := tokUpper(rest[i], stripped)
+			// Check for = after the param name.
+			if i+1 < len(rest) && rest[i+1].Kind == sqltok.Operator && rest[i+1].Text(stripped) == "=" {
+				if i+2 < len(rest) {
+					valTok := rest[i+2]
+					rawValue := valTok.Text(stripped)
+					pairs = append(pairs, paramPair{name: paramName, value: rawValue})
+					i += 3
+				} else {
+					// = without value — still count as a pair attempt.
+					stray = append(stray, paramName)
+					i += 2
+				}
+			} else {
+				// Identifier without = → stray parameter.
+				stray = append(stray, paramName)
+				i++
+			}
+		}
+
 		if len(pairs) == 0 {
 			markers = append(markers, diagMarkerSpan(r,
-				"ALTER SESSION SET requires at least one parameter assignment. Use ALTER SESSION SET <param> = <value>.", 4))
+				"ALTER SESSION SET requires at least one parameter assignment. Use ALTER SESSION SET <param> = <value>."))
 			return markers
 		}
 
-		// Check for stray tokens — parameter names without a = value assignment.
-		// Remove all matched param = value regions, then look for leftover identifiers.
-		residual := reAlterSessionParam.ReplaceAllString(rest, " ")
-		for _, tok := range reAlterSessionParamSplit.Split(residual, -1) {
-			tok = strings.TrimSpace(tok)
-			if tok == "" {
-				continue
-			}
+		for _, s := range stray {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("Parameter '%s' is missing '= <value>' assignment.", strings.ToUpper(tok)), 4))
+				fmt.Sprintf("Parameter '%s' is missing '= <value>' assignment.", s)))
 		}
 
 		for _, pair := range pairs {
-			paramName := strings.ToUpper(pair[1])
-			rawValue := pair[2]
-
-			spec, known := knownSessionParams[paramName]
+			spec, known := knownSessionParams[pair.name]
 			if !known {
 				markers = append(markers, diagMarkerSpan(r,
-					fmt.Sprintf("Unknown session parameter '%s'.", paramName), 4))
+					fmt.Sprintf("Unknown session parameter '%s'.", pair.name)))
 				continue
 			}
 
 			// Unquote string values.
-			value := rawValue
+			value := pair.value
 			if strings.HasPrefix(value, "'") && strings.HasSuffix(value, "'") && len(value) >= 2 {
 				value = value[1 : len(value)-1]
 				value = strings.ReplaceAll(value, "''", "'")
@@ -5739,51 +6567,48 @@ func validateAlterSession(parseText string, r StatementRange) []DiagMarker {
 				upper := strings.ToUpper(value)
 				if upper != "TRUE" && upper != "FALSE" {
 					markers = append(markers, diagMarkerSpan(r,
-						fmt.Sprintf("%s must be TRUE or FALSE.", paramName), 4))
+						fmt.Sprintf("%s must be TRUE or FALSE.", pair.name)))
 				}
 			case spIntRange:
 				n, err := strconv.Atoi(value)
 				if err != nil || n < spec.min || n > spec.max {
 					markers = append(markers, diagMarkerSpan(r,
-						fmt.Sprintf("%s must be an integer between %d and %d.", paramName, spec.min, spec.max), 4))
+						fmt.Sprintf("%s must be an integer between %d and %d.", pair.name, spec.min, spec.max)))
 				}
 			case spNonNeg:
 				n, err := strconv.Atoi(value)
 				if err != nil || n < 0 {
 					markers = append(markers, diagMarkerSpan(r,
-						fmt.Sprintf("%s must be a non-negative integer.", paramName), 4))
+						fmt.Sprintf("%s must be a non-negative integer.", pair.name)))
 				}
 			case spEnum:
 				upper := strings.ToUpper(value)
 				if !slices.Contains(spec.vals, upper) {
 					markers = append(markers, diagMarkerSpan(r,
-						fmt.Sprintf("%s must be one of: %s.", paramName, strings.Join(spec.vals, ", ")), 4))
+						fmt.Sprintf("%s must be one of: %s.", pair.name, strings.Join(spec.vals, ", "))))
 				}
 			}
 		}
 	}
 
-	if isUnset {
-		loc := reAlterSessionUnset.FindStringIndex(stripped)
-		rest := strings.TrimSpace(stripped[loc[1]:])
-
-		if rest == "" {
+	if action == "UNSET" {
+		if len(rest) == 0 {
 			markers = append(markers, diagMarkerSpan(r,
-				"ALTER SESSION UNSET requires at least one parameter name.", 4))
+				"ALTER SESSION UNSET requires at least one parameter name."))
 			return markers
 		}
 
-		// Parameter names may be comma-separated or whitespace-separated.
-		parts := reAlterSessionParamSplit.Split(rest, -1)
-		for _, p := range parts {
-			p = strings.TrimSpace(p)
-			if p == "" {
+		// Parameter names may be comma-separated.
+		// Any non-comma significant token is treated as a parameter name.
+		// This means = and values in "UNSET QUERY_TAG = 'test'" are flagged.
+		for _, tok := range rest {
+			if tok.Kind == sqltok.Comma {
 				continue
 			}
-			paramName := strings.ToUpper(p)
-			if _, known := knownSessionParams[paramName]; !known {
+			text := strings.ToUpper(tok.Text(stripped))
+			if _, known := knownSessionParams[text]; !known {
 				markers = append(markers, diagMarkerSpan(r,
-					fmt.Sprintf("Unknown session parameter '%s'.", paramName), 4))
+					fmt.Sprintf("Unknown session parameter '%s'.", text)))
 			}
 		}
 	}
@@ -5792,17 +6617,6 @@ func validateAlterSession(parseText string, r StatementRange) []DiagMarker {
 }
 
 // ── validateShow ──────────────────────────────────────────────────────────────
-
-// isKeywordBoundary reports whether position pos in s is at a word boundary
-// (end of string, whitespace, semicolon, or opening parenthesis).
-// Used by validateShow and validateDescribe for keyword-termination checks.
-func isKeywordBoundary(s string, pos int) bool {
-	if pos >= len(s) {
-		return true
-	}
-	c := s[pos]
-	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ';' || c == '(' || c == ')'
-}
 
 // showClauseKeywords is the set of SHOW clause keywords that must not be
 // consumed as identifiers when parsing optional scope names in the IN clause.
@@ -5825,46 +6639,56 @@ var showClauseKeywords = map[string]bool{
 func validateShow(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+	s := strings.TrimSpace(stripCommentsSQL(parseText))
+	sig := sigTokens(s)
 
-	// Remove "SHOW" keyword.
-	rest := strings.TrimSpace(stripped[len("SHOW"):])
-	restUp := strings.ToUpper(rest)
+	// firstField returns the first whitespace-delimited, upper-cased word of the
+	// source remaining at sig[idx]. It reproduces the old strings.Fields(restUp)[0]
+	// used verbatim in diagnostic messages.
+	firstField := func(idx int) string {
+		if idx < 0 || idx >= len(sig) {
+			return ""
+		}
+		f := strings.Fields(strings.ToUpper(s[sig[idx].Start:]))
+		if len(f) == 0 {
+			return ""
+		}
+		return f[0]
+	}
 
-	if restUp == "" {
+	// sig[0] is SHOW (guaranteed by the dispatch guard).
+	i := 1
+	if i >= len(sig) {
 		markers = append(markers, diagMarkerSpan(r,
-			"SHOW requires an object type. Use SHOW TABLES, SHOW VIEWS, SHOW SCHEMAS, etc.", 4))
+			"SHOW requires an object type. Use SHOW TABLES, SHOW VIEWS, SHOW SCHEMAS, etc."))
 		return markers
 	}
 
 	// ── TERSE modifier ───────────────────────────────────────────────────
 	isTerse := false
-	if strings.HasPrefix(restUp, "TERSE") && isKeywordBoundary(restUp, 5) {
+	if tokUpper(sig[i], s) == "TERSE" {
 		isTerse = true
-		rest = strings.TrimSpace(rest[5:])
-		restUp = strings.ToUpper(rest)
+		i++
 	}
 
 	// ── Object type (longest match first) ────────────────────────────────
 	objType := ""
 	for _, ot := range showObjectTypes {
-		if strings.HasPrefix(restUp, ot) && isKeywordBoundary(restUp, len(ot)) {
+		if matchKeywordPhrase(sig, s, i, ot) {
 			objType = ot
-			rest = strings.TrimSpace(rest[len(ot):])
-			restUp = strings.ToUpper(rest)
+			i += len(strings.Split(ot, " "))
 			break
 		}
 	}
 
 	if objType == "" {
-		if restUp == "" {
+		if i >= len(sig) {
 			// Reached when TERSE consumed everything, e.g. "SHOW TERSE".
 			markers = append(markers, diagMarkerSpan(r,
-				"SHOW TERSE requires an object type. Use SHOW TERSE TABLES, SHOW TERSE VIEWS, etc.", 4))
+				"SHOW TERSE requires an object type. Use SHOW TERSE TABLES, SHOW TERSE VIEWS, etc."))
 		} else {
-			words := strings.Fields(restUp)
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("Unknown object type '%s' in SHOW statement.", words[0]), 4))
+				fmt.Sprintf("Unknown object type '%s' in SHOW statement.", firstField(i))))
 		}
 		return markers
 	}
@@ -5872,21 +6696,20 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 	// ── Validate TERSE eligibility ───────────────────────────────────────
 	if isTerse && !showTerseEligible[objType] {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("TERSE is not valid for SHOW %s. TERSE is supported for TABLES, EXTERNAL TABLES, VIEWS, SCHEMAS, DATABASES, STAGES, STREAMS, USERS.", objType), 4))
+			fmt.Sprintf("TERSE is not valid for SHOW %s. TERSE is supported for TABLES, EXTERNAL TABLES, VIEWS, SCHEMAS, DATABASES, STAGES, STREAMS, USERS.", objType)))
 	}
 
 	// ── HISTORY modifier ─────────────────────────────────────────────────
-	if strings.HasPrefix(restUp, "HISTORY") && isKeywordBoundary(restUp, 7) {
+	if i < len(sig) && tokUpper(sig[i], s) == "HISTORY" {
 		if !showHistoryEligible[objType] {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("HISTORY is only valid for SHOW PIPES and SHOW REPLICATION DATABASES, not SHOW %s.", objType), 4))
+				fmt.Sprintf("HISTORY is only valid for SHOW PIPES and SHOW REPLICATION DATABASES, not SHOW %s.", objType)))
 		}
-		rest = strings.TrimSpace(rest[7:])
-		restUp = strings.ToUpper(rest)
+		i++
 	}
 
 	// Skip clause validation for types with non-standard syntax.
-	if showNoClauseValidation[objType] || restUp == "" {
+	if showNoClauseValidation[objType] || i >= len(sig) {
 		return markers
 	}
 
@@ -5895,51 +6718,42 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 	// Each clause is consumed at most once; the loop exits when no clause
 	// keyword matches the current position.
 	seenLike, seenIn, seenStartsWith, seenLimit := false, false, false, false
-	for restUp != "" {
+	for i < len(sig) {
+		u := tokUpper(sig[i], s)
+
 		// ── LIKE '<pattern>' ─────────────────────────────────────────
-		if !seenLike && strings.HasPrefix(restUp, "LIKE") && isKeywordBoundary(restUp, 4) {
+		if !seenLike && u == "LIKE" {
 			seenLike = true
-			rest = strings.TrimSpace(rest[4:])
-			if rest == "" || rest[0] != '\'' {
+			i++
+			if i >= len(sig) || sig[i].Kind != sqltok.StringLit {
 				markers = append(markers, diagMarkerSpan(r,
-					"LIKE requires a string literal. Use LIKE '<pattern>'.", 4))
+					"LIKE requires a string literal. Use LIKE '<pattern>'."))
 				return markers
 			}
-			end := matchStringLiteral(rest)
-			if end == -1 {
+			if matchStringLiteral(s[sig[i].Start:]) == -1 {
 				markers = append(markers, diagMarkerSpan(r,
-					"Unterminated string literal in LIKE clause.", 4))
+					"Unterminated string literal in LIKE clause."))
 				return markers
 			}
-			rest = strings.TrimSpace(rest[end:])
-			restUp = strings.ToUpper(rest)
+			i++
 			continue
 		}
 
 		// ── IN { ACCOUNT | DATABASE [<db>] | SCHEMA [<schema>] | TABLE [<tbl>] | <ident> }
-		if !seenIn && strings.HasPrefix(restUp, "IN") && isKeywordBoundary(restUp, 2) {
+		if !seenIn && u == "IN" {
 			seenIn = true
-			rest = strings.TrimSpace(rest[2:])
-			restUp = strings.ToUpper(rest)
+			i++
 
 			matched := false
 			for _, scope := range []string{"ACCOUNT", "DATABASE", "SCHEMA", "TABLE"} {
-				if strings.HasPrefix(restUp, scope) && isKeywordBoundary(restUp, len(scope)) {
+				if i < len(sig) && tokUpper(sig[i], s) == scope {
 					matched = true
-					rest = strings.TrimSpace(rest[len(scope):])
-					restUp = strings.ToUpper(rest)
-					// Consume optional identifier path for non-ACCOUNT scopes,
-					// but never swallow a clause keyword. Check the first path
-					// component so that e.g. "my_db.LIKE" is not consumed whole.
-					// Quoted identifiers (e.g. "LIKE") are always safe to consume.
-					if scope != "ACCOUNT" && rest != "" {
-						if m := reIdentPathAnchored.FindString(rest); m != "" {
-							first := strings.SplitN(m, ".", 2)[0]
-							if strings.HasPrefix(first, `"`) || !showClauseKeywords[strings.ToUpper(first)] {
-								rest = strings.TrimSpace(rest[len(m):])
-								restUp = strings.ToUpper(rest)
-							}
-						}
+					i++
+					// Consume an optional identifier path for non-ACCOUNT scopes,
+					// but never swallow a clause keyword (so e.g. "my_db LIKE" keeps
+					// LIKE for the clause parser). Quoted idents are always safe.
+					if scope != "ACCOUNT" {
+						i = consumeShowScopePath(sig, s, i)
 					}
 					break
 				}
@@ -5949,27 +6763,22 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 			// (e.g., SHOW TABLES IN my_schema). Try consuming an identifier
 			// path as an implicit schema scope before reporting an error.
 			if !matched {
-				if rest == "" {
+				if i >= len(sig) {
 					markers = append(markers, diagMarkerSpan(r,
-						"IN clause requires a scope. Use IN ACCOUNT, IN DATABASE, IN SCHEMA, or IN TABLE.", 4))
+						"IN clause requires a scope. Use IN ACCOUNT, IN DATABASE, IN SCHEMA, or IN TABLE."))
 					return markers
 				}
-				if m := reIdentPathAnchored.FindString(rest); m != "" {
-					first := strings.SplitN(m, ".", 2)[0]
-					if strings.HasPrefix(first, `"`) || !showClauseKeywords[strings.ToUpper(first)] {
-						rest = strings.TrimSpace(rest[len(m):])
-						restUp = strings.ToUpper(rest)
-						matched = true
-					}
+				if next := consumeShowScopePath(sig, s, i); next > i {
+					i = next
+					matched = true
 				}
 				if !matched {
-					words := strings.Fields(restUp)
-					if len(words) > 0 {
+					if w := firstField(i); w != "" {
 						markers = append(markers, diagMarkerSpan(r,
-							fmt.Sprintf("Invalid scope '%s' in IN clause. Valid scopes are ACCOUNT, DATABASE, SCHEMA, TABLE.", words[0]), 4))
+							fmt.Sprintf("Invalid scope '%s' in IN clause. Valid scopes are ACCOUNT, DATABASE, SCHEMA, TABLE.", w)))
 					} else {
 						markers = append(markers, diagMarkerSpan(r,
-							"IN clause requires a scope. Use IN ACCOUNT, IN DATABASE, IN SCHEMA, or IN TABLE.", 4))
+							"IN clause requires a scope. Use IN ACCOUNT, IN DATABASE, IN SCHEMA, or IN TABLE."))
 					}
 					return markers
 				}
@@ -5978,77 +6787,74 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 		}
 
 		// ── STARTS WITH '<prefix>' ───────────────────────────────────
-		if !seenStartsWith && strings.HasPrefix(restUp, "STARTS") && isKeywordBoundary(restUp, 6) {
+		if !seenStartsWith && u == "STARTS" {
 			seenStartsWith = true
-			rest = strings.TrimSpace(rest[6:])
-			restUp = strings.ToUpper(rest)
-			if !(strings.HasPrefix(restUp, "WITH") && isKeywordBoundary(restUp, 4)) {
+			i++
+			if i >= len(sig) || tokUpper(sig[i], s) != "WITH" {
 				markers = append(markers, diagMarkerSpan(r,
-					"Expected WITH after STARTS. Use STARTS WITH '<prefix>'.", 4))
+					"Expected WITH after STARTS. Use STARTS WITH '<prefix>'."))
 				return markers
 			}
-			rest = strings.TrimSpace(rest[4:])
-			if rest == "" || rest[0] != '\'' {
+			i++
+			if i >= len(sig) || sig[i].Kind != sqltok.StringLit {
 				markers = append(markers, diagMarkerSpan(r,
-					"STARTS WITH requires a string literal. Use STARTS WITH '<prefix>'.", 4))
+					"STARTS WITH requires a string literal. Use STARTS WITH '<prefix>'."))
 				return markers
 			}
-			end := matchStringLiteral(rest)
-			if end == -1 {
+			if matchStringLiteral(s[sig[i].Start:]) == -1 {
 				markers = append(markers, diagMarkerSpan(r,
-					"Unterminated string literal in STARTS WITH clause.", 4))
+					"Unterminated string literal in STARTS WITH clause."))
 				return markers
 			}
-			rest = strings.TrimSpace(rest[end:])
-			restUp = strings.ToUpper(rest)
+			i++
 			continue
 		}
 
 		// ── LIMIT <n> [FROM '<name>'] ────────────────────────────────
-		if !seenLimit && strings.HasPrefix(restUp, "LIMIT") && isKeywordBoundary(restUp, 5) {
+		if !seenLimit && u == "LIMIT" {
 			seenLimit = true
-			rest = strings.TrimSpace(rest[5:])
+			i++
 
-			// Extract the number token.
-			idx := strings.IndexAny(rest, " \t\n\r;")
-			numStr := rest
-			if idx != -1 {
-				numStr = rest[:idx]
-				rest = strings.TrimSpace(rest[idx:])
-			} else {
-				rest = ""
-			}
-			restUp = strings.ToUpper(rest)
-
-			if numStr == "" {
+			if i >= len(sig) {
 				markers = append(markers, diagMarkerSpan(r,
-					"LIMIT requires a positive integer. Use LIMIT <n>.", 4))
+					"LIMIT requires a positive integer. Use LIMIT <n>."))
 				return markers
 			}
 
+			// Extract the first whitespace/';'-delimited chunk as the count, to
+			// preserve the exact text reported (e.g. negative or non-numeric).
+			numStart := sig[i].Start
+			raw := s[numStart:]
+			numStr := raw
+			if idx := strings.IndexAny(raw, " \t\n\r;"); idx != -1 {
+				numStr = raw[:idx]
+			}
 			n, err := strconv.Atoi(numStr)
 			if err != nil || n <= 0 {
 				markers = append(markers, diagMarkerSpan(r,
-					fmt.Sprintf("LIMIT requires a positive integer, got '%s'.", numStr), 4))
+					fmt.Sprintf("LIMIT requires a positive integer, got '%s'.", numStr)))
 				return markers
+			}
+			// Advance past every token covered by the count chunk.
+			numEnd := numStart + len(numStr)
+			for i < len(sig) && sig[i].Start < numEnd {
+				i++
 			}
 
 			// Optional FROM '<name>'
-			if strings.HasPrefix(restUp, "FROM") && isKeywordBoundary(restUp, 4) {
-				rest = strings.TrimSpace(rest[4:])
-				if rest == "" || rest[0] != '\'' {
+			if i < len(sig) && tokUpper(sig[i], s) == "FROM" {
+				i++
+				if i >= len(sig) || sig[i].Kind != sqltok.StringLit {
 					markers = append(markers, diagMarkerSpan(r,
-						"FROM in LIMIT clause requires a string literal. Use LIMIT <n> FROM '<name>'.", 4))
+						"FROM in LIMIT clause requires a string literal. Use LIMIT <n> FROM '<name>'."))
 					return markers
 				}
-				end := matchStringLiteral(rest)
-				if end == -1 {
+				if matchStringLiteral(s[sig[i].Start:]) == -1 {
 					markers = append(markers, diagMarkerSpan(r,
-						"Unterminated string literal in LIMIT FROM clause.", 4))
+						"Unterminated string literal in LIMIT FROM clause."))
 					return markers
 				}
-				rest = strings.TrimSpace(rest[end:])
-				restUp = strings.ToUpper(rest)
+				i++
 			}
 			continue
 		}
@@ -6058,14 +6864,46 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// ── Trailing unrecognized content ────────────────────────────────────
-	if restUp != "" {
-		if words := strings.Fields(restUp); len(words) > 0 {
-			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("Unexpected token '%s' in SHOW statement.", words[0]), 4))
-		}
+	if w := firstField(i); w != "" {
+		markers = append(markers, diagMarkerSpan(r,
+			fmt.Sprintf("Unexpected token '%s' in SHOW statement.", w)))
 	}
 
 	return markers
+}
+
+// matchKeywordPhrase reports whether the space-separated keyword phrase matches
+// the consecutive significant tokens starting at sig[start].
+func matchKeywordPhrase(sig []sqltok.Token, sql string, start int, phrase string) bool {
+	words := strings.Split(phrase, " ")
+	if start+len(words) > len(sig) {
+		return false
+	}
+	for k, w := range words {
+		if tokUpper(sig[start+k], sql) != w {
+			return false
+		}
+	}
+	return true
+}
+
+// consumeShowScopePath consumes a dot-separated identifier path (up to three
+// parts, mirroring _identPath) starting at sig[i], used for the optional scope
+// name after IN. It refuses to consume a bare clause keyword (LIKE, LIMIT, …) so
+// that the clause parser can still see it; quoted identifiers are always safe.
+// Returns the index past the consumed path, or i if nothing was consumed.
+func consumeShowScopePath(sig []sqltok.Token, sql string, i int) int {
+	if i >= len(sig) || !isIdent(sig[i]) {
+		return i
+	}
+	if sig[i].Kind != sqltok.QuotedIdent && showClauseKeywords[strings.ToUpper(sig[i].Text(sql))] {
+		return i
+	}
+	j := i + 1
+	for parts := 1; parts < 3 && j+1 < len(sig) && sig[j].Kind == sqltok.Dot && isIdent(sig[j+1]); parts++ {
+		j += 2
+	}
+	return j
 }
 
 // validateDescribe validates a DESCRIBE / DESC statement:
@@ -6078,94 +6916,103 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 func validateDescribe(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
-	strippedUp := strings.ToUpper(stripped)
+	s := strings.TrimSpace(stripCommentsSQL(parseText))
+	sig := sigTokens(s)
 
-	// Remove the leading DESCRIBE or DESC keyword.
-	var rest string
-	if strings.HasPrefix(strippedUp, "DESCRIBE") {
-		rest = strings.TrimSpace(stripped[len("DESCRIBE"):])
-	} else {
-		rest = strings.TrimSpace(stripped[len("DESC"):])
+	firstField := func(idx int) string {
+		if idx < 0 || idx >= len(sig) {
+			return ""
+		}
+		f := strings.Fields(strings.ToUpper(s[sig[idx].Start:]))
+		if len(f) == 0 {
+			return ""
+		}
+		return f[0]
 	}
-	restUp := strings.ToUpper(rest)
 
-	if restUp == "" {
+	// sig[0] is DESCRIBE or DESC (guaranteed by the dispatch guard).
+	i := 1
+	if i >= len(sig) {
 		markers = append(markers, diagMarkerSpan(r,
-			"DESCRIBE requires an object type and name. Use DESCRIBE TABLE <name>, DESCRIBE VIEW <name>, etc.", 4))
+			"DESCRIBE requires an object type and name. Use DESCRIBE TABLE <name>, DESCRIBE VIEW <name>, etc."))
 		return markers
 	}
 
 	// ── Object type (longest match first) ────────────────────────────────
 	objType := ""
 	for _, ot := range describeObjectTypes {
-		if strings.HasPrefix(restUp, ot) && isKeywordBoundary(restUp, len(ot)) {
+		if matchKeywordPhrase(sig, s, i, ot) {
 			objType = ot
-			rest = strings.TrimSpace(rest[len(ot):])
-			restUp = strings.ToUpper(rest)
+			i += len(strings.Split(ot, " "))
 			break
 		}
 	}
 
 	if objType == "" {
-		words := strings.Fields(restUp)
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("Unknown object type '%s' in DESCRIBE statement.", words[0]), 4))
+			fmt.Sprintf("Unknown object type '%s' in DESCRIBE statement.", firstField(i))))
 		return markers
 	}
 
 	// ── RESULT and TRANSACTION are special: they take a string literal
 	// (query ID / transaction ID) rather than an identifier path.
 	if objType == "RESULT" || objType == "TRANSACTION" {
-		if restUp == "" {
+		if i >= len(sig) {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("DESCRIBE %s requires a query/transaction ID. Use DESCRIBE %s '<id>'.", objType, objType), 4))
+				fmt.Sprintf("DESCRIBE %s requires a query/transaction ID. Use DESCRIBE %s '<id>'.", objType, objType)))
 		}
 		return markers
 	}
 
 	// ── Object name is mandatory ─────────────────────────────────────────
-	if restUp == "" {
+	if i >= len(sig) {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("DESCRIBE %s requires an object name.", objType), 4))
+			fmt.Sprintf("DESCRIBE %s requires an object name.", objType)))
 		return markers
 	}
 
 	// ── FUNCTION / PROCEDURE: require parenthesised signature ────────────
 	if describeNeedsSignature[objType] {
-		if !strings.Contains(rest, "(") {
+		hasParen := false
+		for j := i; j < len(sig); j++ {
+			if sig[j].Kind == sqltok.LParen {
+				hasParen = true
+				break
+			}
+		}
+		if !hasParen {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("DESCRIBE %s requires a parameter signature. Use DESCRIBE %s <name>(<arg_types>).", objType, objType), 4))
-			return markers
+				fmt.Sprintf("DESCRIBE %s requires a parameter signature. Use DESCRIBE %s <name>(<arg_types>).", objType, objType)))
 		}
 		return markers
 	}
 
-	// ── Consume the identifier path ──────────────────────────────────────
-	m := reIdentPathAnchored.FindString(rest)
-	if m == "" {
+	// ── Consume the identifier path (up to three parts, like _identPath) ──
+	if !isIdent(sig[i]) {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("Expected an object name after DESCRIBE %s.", objType), 4))
+			fmt.Sprintf("Expected an object name after DESCRIBE %s.", objType)))
 		return markers
 	}
+	pathStart := sig[i].Start
+	nextPos := i + 1
+	for parts := 1; parts < 3 && nextPos+1 < len(sig) && sig[nextPos].Kind == sqltok.Dot && isIdent(sig[nextPos+1]); parts++ {
+		nextPos += 2
+	}
+	m := s[pathStart:sig[nextPos-1].End]
 
 	// ── Account-level objects: warn on db/schema prefix ──────────────────
-	if describeAccountLevel[objType] {
-		if countIdentParts(m) > 1 {
-			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("%s is an account-level object and should not be qualified with a database or schema prefix.", objType), 4))
-		}
+	if describeAccountLevel[objType] && countIdentParts(m) > 1 {
+		markers = append(markers, diagMarkerSpan(r,
+			fmt.Sprintf("%s is an account-level object and should not be qualified with a database or schema prefix.", objType)))
 	}
 
 	// ── Trailing unrecognized content ────────────────────────────────────
-	// Skip trailing check when remainder starts with '"' — this indicates
-	// an escaped double-quote within a quoted identifier (e.g. "complex""name")
-	// that _ident cannot fully consume.
-	trailing := strings.TrimSpace(rest[len(m):])
-	if trailing != "" && !strings.HasPrefix(trailing, "\"") {
-		if words := strings.Fields(strings.ToUpper(trailing)); len(words) > 0 {
+	// Skip the check when the next token is a quoted identifier — this mirrors
+	// the old guard against escaped double-quotes within a quoted name.
+	if nextPos < len(sig) && sig[nextPos].Kind != sqltok.QuotedIdent {
+		if w := firstField(nextPos); w != "" {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("Unexpected token '%s' after object name in DESCRIBE statement.", words[0]), 4))
+				fmt.Sprintf("Unexpected token '%s' after object name in DESCRIBE statement.", w)))
 		}
 	}
 
@@ -6183,35 +7030,90 @@ func validateDescribe(parseText string, r StatementRange) []DiagMarker {
 func validateCreateTag(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	clean := cleanParseText(parseText)
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if marker, conflict := checkOrReplaceConflict(clean, r, "CREATE TAG"); conflict {
+	if marker, conflict := checkOrReplaceConflictTok(sig, stripped, r, "CREATE TAG"); conflict {
 		markers = append(markers, marker)
 		return markers
 	}
 
 	// 2. Tag name is required.
-	m := reCreateTagName.FindStringSubmatch(parseText)
-	if m == nil {
-		markers = append(markers, diagMarkerSpan(r, "CREATE TAG requires a tag name.", 4))
+	name, _ := extractNameAfterCreate(sig, stripped, nil, "TAG")
+	if name == "" {
+		markers = append(markers, diagMarkerSpan(r, "CREATE TAG requires a tag name."))
+		return markers
+	}
+	if marker, swallowed := checkNameSwallowedByIFTok(name, sig, stripped, r,
+		"CREATE TAG requires a tag name."); swallowed {
+		markers = append(markers, marker)
 		return markers
 	}
 
 	// 3. ALLOWED_VALUES values must be string literals; check for duplicates.
-	if reTagAllowedValues.MatchString(clean) {
-		lm := reTagStringLiteralList.FindStringSubmatch(parseText)
-		if lm == nil {
-			markers = append(markers, diagMarkerSpan(r,
-				"ALLOWED_VALUES requires a list of string literals (e.g. ALLOWED_VALUES 'v1', 'v2').", 4))
-		} else {
-			markers = append(markers, checkDuplicateAllowedValues(lm[1], r)...)
+	if hasKW(sig, stripped, "ALLOWED_VALUES") {
+		// Find ALLOWED_VALUES in the full token stream of parseText and
+		// extract the string literal list that follows.
+		avToks := sqltok.Tokenize(parseText)
+		avIdx := -1
+		for i, t := range avToks {
+			if (t.Kind == sqltok.Keyword || t.Kind == sqltok.Identifier) &&
+				strings.EqualFold(t.Text(parseText), "ALLOWED_VALUES") {
+				avIdx = i
+				break
+			}
+		}
+		if avIdx >= 0 {
+			// ALLOWED_VALUES does not use "=" — flag if "=" follows immediately.
+			nextSigIdx := -1
+			for j := avIdx + 1; j < len(avToks); j++ {
+				k := avToks[j].Kind
+				if k != sqltok.Whitespace && k != sqltok.Newline {
+					nextSigIdx = j
+					break
+				}
+			}
+			hasEqualsAfter := nextSigIdx >= 0 && avToks[nextSigIdx].Kind == sqltok.Operator && avToks[nextSigIdx].Text(parseText) == "="
+			if hasEqualsAfter {
+				markers = append(markers, diagMarkerSpan(r,
+					"ALLOWED_VALUES requires a list of string literals (e.g. ALLOWED_VALUES 'v1', 'v2')."))
+			} else {
+				// Collect properly terminated string literals after ALLOWED_VALUES.
+				hasValidStrings := false
+				for j := avIdx + 1; j < len(avToks); j++ {
+					if avToks[j].Kind == sqltok.StringLit {
+						text := avToks[j].Text(parseText)
+						if len(text) >= 2 && text[0] == '\'' && text[len(text)-1] == '\'' {
+							hasValidStrings = true
+							break
+						}
+					}
+				}
+				if !hasValidStrings {
+					markers = append(markers, diagMarkerSpan(r,
+						"ALLOWED_VALUES requires a list of string literals (e.g. ALLOWED_VALUES 'v1', 'v2')."))
+				} else {
+					// Extract the substring from after ALLOWED_VALUES to the end of the last valid StringLit.
+					listStart := avToks[avIdx].End
+					listEnd := listStart
+					for j := avIdx + 1; j < len(avToks); j++ {
+						if avToks[j].Kind == sqltok.StringLit {
+							text := avToks[j].Text(parseText)
+							if len(text) >= 2 && text[0] == '\'' && text[len(text)-1] == '\'' {
+								listEnd = avToks[j].End
+							}
+						} else if avToks[j].Kind == sqltok.EOF || isIdent(avToks[j]) {
+							break // stop at next keyword/identifier (a property key)
+						}
+					}
+					markers = append(markers, checkDuplicateAllowedValues(strings.TrimSpace(parseText[listStart:listEnd]), r)...)
+				}
+			}
 		}
 	}
 
 	// 4. Only COMMENT is a valid KEY = VALUE property for CREATE TAG.
-	// ALLOWED_VALUES uses space-separated syntax (no '='), so reProp
-	// inside validateProperties cannot match it — it is already validated above.
 	validateProperties(parseText, `COMMENT`, r, &markers)
 
 	return markers
@@ -6241,7 +7143,7 @@ func checkDuplicateAllowedValues(listStr string, r StatementRange) []DiagMarker 
 			if raw != orig {
 				msg = fmt.Sprintf("Duplicate value '%s' in ALLOWED_VALUES list (case-insensitive match with '%s').", raw, orig)
 			}
-			markers = append(markers, diagMarkerSpan(r, msg, 4))
+			markers = append(markers, diagMarkerSpan(r, msg))
 		} else {
 			seen[key] = raw
 		}
@@ -6262,28 +7164,39 @@ func checkDuplicateAllowedValues(listStr string, r StatementRange) []DiagMarker 
 func validateAlterTag(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	clean := cleanParseText(parseText)
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
 	// 1. Tag name is required.
-	nm := reAlterTagName.FindStringSubmatch(parseText)
-	if nm == nil {
-		markers = append(markers, diagMarkerSpan(r, "ALTER TAG requires a tag name.", 4))
-		return markers
+	name, _ := extractNameAfterKeywords(sig, stripped, "ALTER", "TAG")
+	if name == "" {
+		// When the old regex captured "IF" as the name (ALTER TAG IF EXISTS
+		// with no actual name), it fell through to sub-command detection.
+		// Preserve that behavior: if IF EXISTS is present but no name
+		// follows, skip the name error and let the sub-command check fire.
+		ifExistsNoName := len(sig) >= 4 &&
+			tokUpper(sig[2], stripped) == "IF" &&
+			tokUpper(sig[3], stripped) == "EXISTS" &&
+			(len(sig) == 4 || !isNonEmptyIdent(sig[4], stripped))
+		if !ifExistsNoName {
+			markers = append(markers, diagMarkerSpan(r, "ALTER TAG requires a tag name."))
+			return markers
+		}
 	}
 
-	// Determine the sub-command by checking after the tag name.
-	hasRename := reAlterTagRenameToBare.MatchString(clean)
-	hasAddAllowed := reAlterTagAddAllowed.MatchString(clean)
-	hasDropAllowed := reAlterTagDropAllowed.MatchString(clean)
-	hasUnsetAllowed := reAlterTagUnsetAllowed.MatchString(clean)
-	hasSetComment := reAlterTagSetComment.MatchString(clean)
-	hasUnsetComment := reAlterTagUnsetComment.MatchString(clean)
+	// Determine the sub-command by checking token sequences.
+	hasRename := hasKWPair(sig, stripped, "RENAME", "TO")
+	hasAddAllowed := hasKWPair(sig, stripped, "ADD", "ALLOWED_VALUES")
+	hasDropAllowed := hasKWPair(sig, stripped, "DROP", "ALLOWED_VALUES")
+	hasUnsetAllowed := hasKWPair(sig, stripped, "UNSET", "ALLOWED_VALUES")
+	hasSetComment := hasKWAssign(sig, stripped, "COMMENT") && hasKW(sig, stripped, "SET")
+	hasUnsetComment := hasKWPair(sig, stripped, "UNSET", "COMMENT")
 
 	anyKnown := hasRename || hasAddAllowed || hasDropAllowed || hasUnsetAllowed || hasSetComment || hasUnsetComment
 
 	if !anyKnown {
 		markers = append(markers, diagMarkerSpan(r,
-			"Unknown ALTER TAG sub-command. Expected RENAME TO, ADD ALLOWED_VALUES, DROP ALLOWED_VALUES, UNSET ALLOWED_VALUES, SET COMMENT, or UNSET COMMENT.", 4))
+			"Unknown ALTER TAG sub-command. Expected RENAME TO, ADD ALLOWED_VALUES, DROP ALLOWED_VALUES, UNSET ALLOWED_VALUES, SET COMMENT, or UNSET COMMENT."))
 		return markers
 	}
 
@@ -6296,46 +7209,64 @@ func validateAlterTag(parseText string, r StatementRange) []DiagMarker {
 	}
 	if subCmdCount > 1 {
 		markers = append(markers, diagMarkerSpan(r,
-			"ALTER TAG supports only one sub-command per statement.", 4))
+			"ALTER TAG supports only one sub-command per statement."))
 	}
 
 	// 2. RENAME TO requires a new name.
-	if hasRename && !reAlterTagRenameTo.MatchString(parseText) {
-		markers = append(markers, diagMarkerSpan(r,
-			"ALTER TAG RENAME TO requires a new tag name.", 4))
+	if hasRename {
+		found := false
+		for i := 0; i+2 < len(sig); i++ {
+			if tokUpper(sig[i], stripped) == "RENAME" && tokUpper(sig[i+1], stripped) == "TO" {
+				if i+2 < len(sig) && isNonEmptyIdent(sig[i+2], stripped) {
+					found = true
+				}
+				break
+			}
+		}
+		if !found {
+			markers = append(markers, diagMarkerSpan(r,
+				"ALTER TAG RENAME TO requires a new tag name."))
+		}
 	}
 
 	// 3. ADD ALLOWED_VALUES requires at least one string literal value.
 	if hasAddAllowed {
-		after := reAlterTagAddAllowed.FindStringIndex(parseText)
-		if after == nil {
-			markers = append(markers, diagMarkerSpan(r,
-				"ADD ALLOWED_VALUES requires at least one string literal value.", 4))
-		} else {
-			rest := strings.TrimSpace(parseText[after[1]:])
-			if len(rest) == 0 || rest[0] != '\'' {
-				markers = append(markers, diagMarkerSpan(r,
-					"ADD ALLOWED_VALUES requires at least one string literal value.", 4))
-			} else {
-				markers = append(markers, checkDuplicateAllowedValues(rest, r)...)
+		found := false
+		for i := 0; i+1 < len(sig); i++ {
+			if tokUpper(sig[i], stripped) == "ADD" && tokUpper(sig[i+1], stripped) == "ALLOWED_VALUES" {
+				// Check original parseText for string literals after the keyword position.
+				after := sig[i+1].End
+				rest := strings.TrimSpace(parseText[after:])
+				if len(rest) > 0 && rest[0] == '\'' {
+					found = true
+					markers = append(markers, checkDuplicateAllowedValues(rest, r)...)
+				}
+				break
 			}
+		}
+		if !found {
+			markers = append(markers, diagMarkerSpan(r,
+				"ADD ALLOWED_VALUES requires at least one string literal value."))
 		}
 	}
 
 	// 4. DROP ALLOWED_VALUES requires at least one string literal value.
 	if hasDropAllowed {
-		after := reAlterTagDropAllowed.FindStringIndex(parseText)
-		if after == nil {
-			markers = append(markers, diagMarkerSpan(r,
-				"DROP ALLOWED_VALUES requires at least one string literal value.", 4))
-		} else {
-			rest := strings.TrimSpace(parseText[after[1]:])
-			if len(rest) == 0 || rest[0] != '\'' {
-				markers = append(markers, diagMarkerSpan(r,
-					"DROP ALLOWED_VALUES requires at least one string literal value.", 4))
-			} else {
-				markers = append(markers, checkDuplicateAllowedValues(rest, r)...)
+		found := false
+		for i := 0; i+1 < len(sig); i++ {
+			if tokUpper(sig[i], stripped) == "DROP" && tokUpper(sig[i+1], stripped) == "ALLOWED_VALUES" {
+				after := sig[i+1].End
+				rest := strings.TrimSpace(parseText[after:])
+				if len(rest) > 0 && rest[0] == '\'' {
+					found = true
+					markers = append(markers, checkDuplicateAllowedValues(rest, r)...)
+				}
+				break
 			}
+		}
+		if !found {
+			markers = append(markers, diagMarkerSpan(r,
+				"DROP ALLOWED_VALUES requires at least one string literal value."))
 		}
 	}
 
@@ -6350,19 +7281,23 @@ func validateAlterTag(parseText string, r StatementRange) []DiagMarker {
 func validateDropTag(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	clean := cleanParseText(parseText)
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
 	// 1. Tag name is required.
-	m := reDropTagName.FindStringSubmatch(parseText)
-	if m == nil {
-		markers = append(markers, diagMarkerSpan(r, "DROP TAG requires a tag name.", 4))
+	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", "TAG")
+	if name == "" {
+		markers = append(markers, diagMarkerSpan(r, "DROP TAG requires a tag name."))
 		return markers
 	}
 
 	// 2. CASCADE / RESTRICT are not valid for DROP TAG.
-	if reCascadeRestrictTrailing.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			"CASCADE / RESTRICT are not valid for DROP TAG.", 4))
+	if len(sig) > 0 {
+		lastKW := tokUpper(sig[len(sig)-1], stripped)
+		if lastKW == "CASCADE" || lastKW == "RESTRICT" {
+			markers = append(markers, diagMarkerSpan(r,
+				"CASCADE / RESTRICT are not valid for DROP TAG."))
+		}
 	}
 
 	return markers
@@ -6383,48 +7318,64 @@ func validateDropTag(parseText string, r StatementRange) []DiagMarker {
 func validateCreateTask(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	stripped := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	stripped := sqltok.StripStrings(parseText)
+	sig := sigTokens(stripped)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if marker, conflict := checkOrReplaceConflict(stripped, r, "CREATE TASK"); conflict {
+	if marker, conflict := checkOrReplaceConflictTok(sig, stripped, r, "CREATE TASK"); conflict {
 		markers = append(markers, marker)
 		return markers
 	}
 
 	// 2. Task name is required.
-	if reCreateTaskName.FindStringSubmatch(parseText) == nil {
-		markers = append(markers, diagMarkerSpan(r, "CREATE TASK requires a task name.", 4))
+	name, _ := extractNameAfterCreate(sig, stripped, nil, "TASK")
+	if name == "" {
+		markers = append(markers, diagMarkerSpan(r, "CREATE TASK requires a task name."))
 		return markers
 	}
 
 	// 3. CLONE variant — CREATE TASK <name> CLONE <source> requires no AS/SCHEDULE.
-	if reTaskClone.MatchString(stripped) {
-		return markers
+	// Check for CLONE followed by an identifier (the source name).
+	for i := 0; i < len(sig); i++ {
+		if tokUpper(sig[i], stripped) == "CLONE" && i+1 < len(sig) && isIdent(sig[i+1]) {
+			return markers
+		}
 	}
 
-	// Split into preamble (before AS) and body for property and structural checks.
-	// We need to find the standalone AS keyword that introduces the task body, not
-	// AS inside EXECUTE AS CALLER/OWNER/USER or string literals. Neutralize
-	// "EXECUTE AS" before scanning so the first \bAS\b match is the body delimiter.
-	asSearch := reTaskExecAs.ReplaceAllString(stripped, "EXECUTE_AS")
-	asIdx := reTaskAS.FindStringIndex(asSearch)
-	hasAS := asIdx != nil
+	// Split sig into preamble (before AS) and check body. Find the standalone
+	// AS keyword that introduces the task body, skipping EXECUTE AS.
+	asIdx := -1
+	for i := 0; i < len(sig); i++ {
+		if tokUpper(sig[i], stripped) == "AS" {
+			// Skip EXECUTE AS.
+			if i > 0 && tokUpper(sig[i-1], stripped) == "EXECUTE" {
+				continue
+			}
+			asIdx = i
+			break
+		}
+	}
+	hasAS := asIdx >= 0
 
-	var preamble string
+	// Build preamble tokens.
+	var pre []sqltok.Token
+	var preSrc string
 	if hasAS {
-		preamble = stripped[:asIdx[0]]
+		pre = sig[:asIdx]
+		preSrc = stripped
 	} else {
-		preamble = stripped
+		pre = sig
+		preSrc = stripped
 	}
 
-	hasAfter := reTaskAfter.MatchString(preamble)
-	hasSchedule := reTaskSchedule.MatchString(preamble)
-	hasFinalize := reTaskFinalizeBare.MatchString(preamble)
-	hasWhen := reTaskWhen.MatchString(preamble)
+	hasAfter := hasKW(pre, preSrc, "AFTER")
+	hasSchedule := hasKWAssign(pre, preSrc, "SCHEDULE")
+	hasFinalize := hasKW(pre, preSrc, "FINALIZE")
+	hasWhen := hasKW(pre, preSrc, "WHEN")
 
 	// 3. AS clause is required.
 	if !hasAS {
-		markers = append(markers, diagMarkerSpan(r, "CREATE TASK requires an AS clause with a SQL statement body.", 4))
+		markers = append(markers, diagMarkerSpan(r, "CREATE TASK requires an AS clause with a SQL statement body."))
 		return markers
 	}
 
@@ -6432,51 +7383,63 @@ func validateCreateTask(parseText string, r StatementRange) []DiagMarker {
 	if hasFinalize {
 		if hasAfter {
 			markers = append(markers, diagMarkerSpan(r,
-				"FINALIZE must not be combined with AFTER in a CREATE TASK statement.", 4))
+				"FINALIZE must not be combined with AFTER in a CREATE TASK statement."))
 		}
 		if hasSchedule {
 			markers = append(markers, diagMarkerSpan(r,
-				"FINALIZE must not be combined with SCHEDULE in a CREATE TASK statement.", 4))
+				"FINALIZE must not be combined with SCHEDULE in a CREATE TASK statement."))
 		}
 		// FINALIZE requires the = <name> syntax (FINALIZE = <name>).
-		if !reTaskFinalizeN.MatchString(preamble) {
+		_, hasFinalizeAssign := findKWAssign(pre, preSrc, "FINALIZE")
+		if !hasFinalizeAssign {
 			markers = append(markers, diagMarkerSpan(r,
-				"FINALIZE requires a root task name (e.g. FINALIZE = root_task).", 4))
+				"FINALIZE requires a root task name (e.g. FINALIZE = root_task)."))
 		}
-		// No property validation — tasks accept arbitrary session parameters
-		// (TIMEZONE, QUERY_TAG, etc.) which would produce false-positive warnings.
 		return markers
 	}
 
 	// 5. AFTER and SCHEDULE are mutually exclusive.
 	if hasAfter && hasSchedule {
 		markers = append(markers, diagMarkerSpan(r,
-			"AFTER and SCHEDULE are mutually exclusive in a CREATE TASK statement. A child task (AFTER) must not also set SCHEDULE.", 4))
+			"AFTER and SCHEDULE are mutually exclusive in a CREATE TASK statement. A child task (AFTER) must not also set SCHEDULE."))
 	}
 
 	// 6. Bare AFTER without predecessor names.
-	if hasAfter && !reTaskAfterNames.MatchString(preamble) {
-		markers = append(markers, diagMarkerSpan(r,
-			"AFTER requires at least one predecessor task name.", 4))
+	if hasAfter {
+		afterHasName := false
+		for i := 0; i < len(pre); i++ {
+			if tokUpper(pre[i], preSrc) == "AFTER" && i+1 < len(pre) && isIdent(pre[i+1]) {
+				afterHasName = true
+				break
+			}
+		}
+		if !afterHasName {
+			markers = append(markers, diagMarkerSpan(r,
+				"AFTER requires at least one predecessor task name."))
+		}
 	}
 
 	// 7. Root task without SCHEDULE.
 	if !hasAfter && !hasSchedule {
 		markers = append(markers, diagMarkerSpan(r,
-			"Root task (no AFTER or FINALIZE clause) requires a SCHEDULE property.", 4))
+			"Root task (no AFTER or FINALIZE clause) requires a SCHEDULE property."))
 	}
 
 	// 8. WHEN checks.
 	if hasWhen {
-		// WHEN requires an expression (not bare WHEN followed directly by AS).
-		if !reTaskWhenExpr.MatchString(preamble) {
+		// WHEN requires an expression — check that something follows WHEN.
+		whenHasExpr := false
+		for i := 0; i < len(pre); i++ {
+			if tokUpper(pre[i], preSrc) == "WHEN" && i+1 < len(pre) {
+				whenHasExpr = true
+				break
+			}
+		}
+		if !whenHasExpr {
 			markers = append(markers, diagMarkerSpan(r,
-				"WHEN requires a boolean expression.", 4))
+				"WHEN requires a boolean expression."))
 		}
 	}
-
-	// No property validation — tasks accept arbitrary session parameters
-	// (TIMEZONE, QUERY_TAG, etc.) which would produce false-positive warnings.
 
 	return markers
 }
@@ -6494,29 +7457,42 @@ func validateCreateTask(parseText string, r StatementRange) []DiagMarker {
 func validateAlterTask(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	stripped := reStripStringLiterals.ReplaceAllString(parseText, "''")
-	clean := strings.TrimSpace(stripped)
+	stripped := sqltok.StripStrings(parseText)
+	sig := sigTokens(stripped)
 
 	// 1. Task name is required.
-	if reAlterTaskName.FindStringSubmatch(parseText) == nil {
-		markers = append(markers, diagMarkerSpan(r, "ALTER TASK requires a task name.", 4))
-		return markers
+	name, _ := extractNameAfterKeywords(sig, stripped, "ALTER", "TASK")
+	if name == "" {
+		// Preserve old regex behavior for ALTER TASK IF EXISTS (no name).
+		ifExistsNoName := len(sig) >= 4 &&
+			tokUpper(sig[2], stripped) == "IF" &&
+			tokUpper(sig[3], stripped) == "EXISTS" &&
+			(len(sig) == 4 || !isNonEmptyIdent(sig[4], stripped))
+		if !ifExistsNoName {
+			markers = append(markers, diagMarkerSpan(r, "ALTER TASK requires a task name."))
+			return markers
+		}
 	}
 
 	// Determine the sub-command.
-	hasResume := reAlterTaskResume.MatchString(clean)
-	hasSuspend := reAlterTaskSusp.MatchString(clean)
-	hasSet := reAlterTaskSet.MatchString(clean)
-	hasUnset := reAlterTaskUnset.MatchString(clean)
-	hasRemAfter := reAlterTaskRemAfter.MatchString(clean)
-	hasAddAfter := reAlterTaskAddAfter.MatchString(clean)
-	hasModifyAS := reAlterTaskModifyAS.MatchString(clean)
-	hasModifyWhen := reAlterTaskModifyWhen.MatchString(clean)
-	hasSetFinalize := reAlterTaskSetFinalize.MatchString(clean)
-	hasUnsetFinalize := reAlterTaskUnsetFinalize.MatchString(clean)
-	hasRemoveWhen := reAlterTaskRemoveWhen.MatchString(clean)
-	hasSetTag := reAlterTaskSetTag.MatchString(clean)
-	hasUnsetTag := reAlterTaskUnsetTag.MatchString(clean)
+	// RESUME and SUSPEND must be the last significant token (no trailing content).
+	lastTok := ""
+	if len(sig) > 0 {
+		lastTok = tokUpper(sig[len(sig)-1], stripped)
+	}
+	hasResume := lastTok == "RESUME"
+	hasSuspend := lastTok == "SUSPEND"
+	hasSet := hasKW(sig, stripped, "SET")
+	hasUnset := hasKW(sig, stripped, "UNSET")
+	hasRemAfter := hasKWPair(sig, stripped, "REMOVE", "AFTER")
+	hasAddAfter := hasKWPair(sig, stripped, "ADD", "AFTER")
+	hasModifyAS := hasKWPair(sig, stripped, "MODIFY", "AS")
+	hasModifyWhen := hasKWPair(sig, stripped, "MODIFY", "WHEN")
+	hasSetFinalize := hasKWAssign(sig, stripped, "FINALIZE") && hasSet
+	hasUnsetFinalize := hasKWPair(sig, stripped, "UNSET", "FINALIZE")
+	hasRemoveWhen := hasKWPair(sig, stripped, "REMOVE", "WHEN")
+	hasSetTag := hasKWPair(sig, stripped, "SET", "TAG")
+	hasUnsetTag := hasKWPair(sig, stripped, "UNSET", "TAG")
 
 	anyKnown := hasResume || hasSuspend || hasSet || hasUnset ||
 		hasRemAfter || hasAddAfter || hasModifyAS || hasModifyWhen ||
@@ -6524,38 +7500,85 @@ func validateAlterTask(parseText string, r StatementRange) []DiagMarker {
 
 	if !anyKnown {
 		markers = append(markers, diagMarkerSpan(r,
-			"Unknown ALTER TASK sub-command. Expected RESUME, SUSPEND, SET, UNSET, ADD AFTER, REMOVE AFTER, MODIFY AS, MODIFY WHEN, REMOVE WHEN, SET FINALIZE, UNSET FINALIZE, SET TAG, or UNSET TAG.", 4))
+			"Unknown ALTER TASK sub-command. Expected RESUME, SUSPEND, SET, UNSET, ADD AFTER, REMOVE AFTER, MODIFY AS, MODIFY WHEN, REMOVE WHEN, SET FINALIZE, UNSET FINALIZE, SET TAG, or UNSET TAG."))
 		return markers
 	}
 
 	// 2. ADD AFTER requires at least one predecessor name.
-	if hasAddAfter && !reAlterTaskAddAfterN.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			"ADD AFTER requires at least one predecessor task name.", 4))
+	if hasAddAfter {
+		found := false
+		for i := 0; i+2 < len(sig); i++ {
+			if tokUpper(sig[i], stripped) == "ADD" && tokUpper(sig[i+1], stripped) == "AFTER" {
+				if i+2 < len(sig) && isIdent(sig[i+2]) {
+					found = true
+				}
+				break
+			}
+		}
+		if !found {
+			markers = append(markers, diagMarkerSpan(r,
+				"ADD AFTER requires at least one predecessor task name."))
+		}
 	}
 
 	// 3. REMOVE AFTER requires at least one predecessor name.
-	if hasRemAfter && !reAlterTaskRemAfterN.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			"REMOVE AFTER requires at least one predecessor task name.", 4))
+	if hasRemAfter {
+		found := false
+		for i := 0; i+2 < len(sig); i++ {
+			if tokUpper(sig[i], stripped) == "REMOVE" && tokUpper(sig[i+1], stripped) == "AFTER" {
+				if i+2 < len(sig) && isIdent(sig[i+2]) {
+					found = true
+				}
+				break
+			}
+		}
+		if !found {
+			markers = append(markers, diagMarkerSpan(r,
+				"REMOVE AFTER requires at least one predecessor task name."))
+		}
 	}
 
 	// 4. MODIFY AS requires a SQL body.
-	if hasModifyAS && !reAlterTaskModifyASBody.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			"MODIFY AS requires a SQL statement.", 4))
+	if hasModifyAS {
+		found := false
+		for i := 0; i+2 < len(sig); i++ {
+			if tokUpper(sig[i], stripped) == "MODIFY" && tokUpper(sig[i+1], stripped) == "AS" {
+				if i+2 < len(sig) {
+					found = true
+				}
+				break
+			}
+		}
+		if !found {
+			markers = append(markers, diagMarkerSpan(r,
+				"MODIFY AS requires a SQL statement."))
+		}
 	}
 
 	// 5. MODIFY WHEN requires a boolean expression.
-	if hasModifyWhen && !reAlterTaskModifyWhenE.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			"MODIFY WHEN requires a boolean expression.", 4))
+	if hasModifyWhen {
+		found := false
+		for i := 0; i+2 < len(sig); i++ {
+			if tokUpper(sig[i], stripped) == "MODIFY" && tokUpper(sig[i+1], stripped) == "WHEN" {
+				if i+2 < len(sig) {
+					found = true
+				}
+				break
+			}
+		}
+		if !found {
+			markers = append(markers, diagMarkerSpan(r,
+				"MODIFY WHEN requires a boolean expression."))
+		}
 	}
 
 	// 6. SET FINALIZE requires a root task name.
-	if hasSetFinalize && !reAlterTaskSetFinalizeN.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			"SET FINALIZE requires a root task name (e.g. SET FINALIZE = root_task).", 4))
+	if hasSetFinalize {
+		_, hasFinalizeIdent := findKWAssign(sig, stripped, "FINALIZE")
+		if !hasFinalizeIdent {
+			markers = append(markers, diagMarkerSpan(r,
+				"SET FINALIZE requires a root task name (e.g. SET FINALIZE = root_task)."))
+		}
 	}
 
 	// No property validation for SET/UNSET — tasks accept arbitrary session
@@ -6574,8 +7597,11 @@ func validateAlterTask(parseText string, r StatementRange) []DiagMarker {
 func validateDropTask(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	if reDropTaskName.FindStringSubmatch(parseText) == nil {
-		markers = append(markers, diagMarkerSpan(r, "DROP TASK requires a task name.", 4))
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
+	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", "TASK")
+	if name == "" {
+		markers = append(markers, diagMarkerSpan(r, "DROP TASK requires a task name."))
 	}
 
 	return markers
@@ -6586,24 +7612,25 @@ func validateDropTask(parseText string, r StatementRange) []DiagMarker {
 // For example: "my.db".schema.tbl → 3, "my.warehouse" → 1.
 func countIdentParts(m string) int {
 	parts := 1
-	for i := 0; i < len(m); i++ {
-		switch m[i] {
-		case '"':
-			// Skip to closing quote (handles _ident's "[^"]+" pattern).
-			i++
-			for i < len(m) && m[i] != '"' {
-				i++
-			}
-		case '.':
+	for _, t := range sqltok.Tokenize(m) {
+		if t.Kind == sqltok.Dot {
 			parts++
 		}
 	}
 	return parts
 }
 
-// matchStringLiteral returns the position right after the closing single quote
-// of a SQL string literal at the start of s, or -1 if s does not start with a
-// valid string literal.  Embedded doubled single-quotes are handled.
+// matchStringLiteral returns the byte position just past the closing single
+// quote of a SQL string literal at the start of s, or -1 if s does not start
+// with a *terminated* string literal. Embedded doubled single-quotes (”) are
+// handled.
+//
+// Deliberately byte-level rather than tokenised: the tokenizer treats an
+// unterminated string as a StringLit running to end-of-input, so it cannot
+// distinguish "valid, terminated literal" from "unterminated literal". The
+// SHOW/DESCRIBE validators rely on that distinction to emit an "unterminated
+// string literal" diagnostic, so this scanner returns -1 for the unterminated
+// case where a token check could not.
 func matchStringLiteral(s string) int {
 	if len(s) == 0 || s[0] != '\'' {
 		return -1
@@ -6629,19 +7656,36 @@ func matchStringLiteral(s string) int {
 //   - NAME <name> provides an optional transaction name (identifier).
 func validateBeginStripped(stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
+	sig := sigTokens(stripped)
 
-	// BEGIN [WORK|TRANSACTION] with optional NAME <ident>
-	if reBeginName.MatchString(stripped) {
-		return markers // valid: BEGIN [WORK|TRANSACTION] NAME <ident>
-	}
-	if reBeginNameBare.MatchString(stripped) {
-		markers = append(markers, diagMarkerSpan(r,
-			"BEGIN NAME requires a transaction name. Use BEGIN NAME <name>.", 4))
+	// Valid forms (token sequences):
+	//   BEGIN
+	//   BEGIN WORK
+	//   BEGIN TRANSACTION
+	//   BEGIN [WORK|TRANSACTION] NAME <ident>
+	i := 0
+	if i >= len(sig) || tokUpper(sig[i], stripped) != "BEGIN" {
 		return markers
 	}
-	if !reBeginValid.MatchString(stripped) {
+	i++
+	if i < len(sig) {
+		u := tokUpper(sig[i], stripped)
+		if u == "WORK" || u == "TRANSACTION" {
+			i++
+		}
+	}
+	if i < len(sig) && tokUpper(sig[i], stripped) == "NAME" {
+		i++
+		if i >= len(sig) || !isIdent(sig[i]) {
+			markers = append(markers, diagMarkerSpan(r,
+				"BEGIN NAME requires a transaction name. Use BEGIN NAME <name>."))
+			return markers
+		}
+		return markers // valid: BEGIN [WORK|TRANSACTION] NAME <ident>
+	}
+	if i < len(sig) {
 		markers = append(markers, diagMarkerSpan(r,
-			"Unexpected token after BEGIN. Valid forms: BEGIN, BEGIN WORK, BEGIN TRANSACTION, BEGIN [TRANSACTION] NAME <name>.", 4))
+			"Unexpected token after BEGIN. Valid forms: BEGIN, BEGIN WORK, BEGIN TRANSACTION, BEGIN [TRANSACTION] NAME <name>."))
 	}
 	return markers
 }
@@ -6654,11 +7698,18 @@ func validateBeginStripped(stripped string, r StatementRange) []DiagMarker {
 //   - WORK is optional and redundant; extra tokens should warn.
 func validateCommitStripped(stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
+	sig := sigTokens(stripped)
 
-	if !reCommitValid.MatchString(stripped) {
-		markers = append(markers, diagMarkerSpan(r,
-			"Unexpected token after COMMIT. Valid forms: COMMIT, COMMIT WORK.", 4))
+	// Valid forms: COMMIT, COMMIT WORK
+	n := len(sig)
+	if n == 1 {
+		return markers // bare COMMIT
 	}
+	if n == 2 && tokUpper(sig[1], stripped) == "WORK" {
+		return markers // COMMIT WORK
+	}
+	markers = append(markers, diagMarkerSpan(r,
+		"Unexpected token after COMMIT. Valid forms: COMMIT, COMMIT WORK."))
 	return markers
 }
 
@@ -6669,28 +7720,35 @@ func validateCommitStripped(stripped string, r StatementRange) []DiagMarker {
 // the caller has already stripped the text for block-level tracking.
 func validateRollbackStripped(stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
+	sig := sigTokens(stripped)
 
-	if reRollbackValid.MatchString(stripped) {
-		return markers // valid form
+	// Valid forms: ROLLBACK, ROLLBACK WORK, ROLLBACK [WORK] TO SAVEPOINT <name>
+	i := 1 // skip ROLLBACK
+	if i < len(sig) && tokUpper(sig[i], stripped) == "WORK" {
+		i++
 	}
-
-	// Check for TO SAVEPOINT without name.
-	if reRollbackToSavepointBare.MatchString(stripped) {
-		markers = append(markers, diagMarkerSpan(r,
-			"ROLLBACK TO SAVEPOINT requires a savepoint name. Use ROLLBACK TO SAVEPOINT <name>.", 4))
-		return markers
+	if i == len(sig) {
+		return markers // bare ROLLBACK or ROLLBACK WORK
 	}
-
-	// Check for TO without SAVEPOINT keyword.
-	if reRollbackToBare.MatchString(stripped) {
-		// Has TO but no valid SAVEPOINT pattern — probably missing SAVEPOINT keyword.
+	// Expect TO SAVEPOINT <name>
+	if tokUpper(sig[i], stripped) == "TO" {
+		i++
+		if i < len(sig) && tokUpper(sig[i], stripped) == "SAVEPOINT" {
+			i++
+			if i < len(sig) && isIdent(sig[i]) {
+				return markers // valid: ROLLBACK [WORK] TO SAVEPOINT <name>
+			}
+			markers = append(markers, diagMarkerSpan(r,
+				"ROLLBACK TO SAVEPOINT requires a savepoint name. Use ROLLBACK TO SAVEPOINT <name>."))
+			return markers
+		}
 		markers = append(markers, diagMarkerSpan(r,
-			"ROLLBACK TO requires SAVEPOINT keyword. Use ROLLBACK TO SAVEPOINT <name>.", 4))
+			"ROLLBACK TO requires SAVEPOINT keyword. Use ROLLBACK TO SAVEPOINT <name>."))
 		return markers
 	}
 
 	markers = append(markers, diagMarkerSpan(r,
-		"Unexpected token after ROLLBACK. Valid forms: ROLLBACK, ROLLBACK WORK, ROLLBACK [WORK] TO SAVEPOINT <name>.", 4))
+		"Unexpected token after ROLLBACK. Valid forms: ROLLBACK, ROLLBACK WORK, ROLLBACK [WORK] TO SAVEPOINT <name>."))
 	return markers
 }
 
@@ -6701,10 +7759,12 @@ func validateRollbackStripped(stripped string, r StatementRange) []DiagMarker {
 //   - SAVEPOINT <name> — name is mandatory.
 func validateSavepointStripped(stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
+	sig := sigTokens(stripped)
 
-	if !reSavepointHasName.MatchString(stripped) {
+	// SAVEPOINT <name> — name is mandatory (at least 2 sig tokens)
+	if len(sig) < 2 || !isIdent(sig[1]) {
 		markers = append(markers, diagMarkerSpan(r,
-			"SAVEPOINT requires a savepoint name. Use SAVEPOINT <name>.", 4))
+			"SAVEPOINT requires a savepoint name. Use SAVEPOINT <name>."))
 	}
 	return markers
 }
@@ -6716,10 +7776,12 @@ func validateSavepointStripped(stripped string, r StatementRange) []DiagMarker {
 //   - RELEASE SAVEPOINT <name> — name is mandatory.
 func validateReleaseSavepointStripped(stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
+	sig := sigTokens(stripped)
 
-	if !reReleaseSavepointHasName.MatchString(stripped) {
+	// RELEASE SAVEPOINT <name> — name is mandatory (at least 3 sig tokens)
+	if len(sig) < 3 || !isIdent(sig[2]) {
 		markers = append(markers, diagMarkerSpan(r,
-			"RELEASE SAVEPOINT requires a savepoint name. Use RELEASE SAVEPOINT <name>.", 4))
+			"RELEASE SAVEPOINT requires a savepoint name. Use RELEASE SAVEPOINT <name>."))
 	}
 	return markers
 }
@@ -6737,30 +7799,71 @@ func validateReleaseSavepointStripped(stripped string, r StatementRange) []DiagM
 func validateTimeTravelClauses(stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	// Check for bare AT/BEFORE without parentheses (e.g. FROM t AT TIMESTAMP '...')
-	if reTimeTravelBare.MatchString(stripped) {
-		markers = append(markers, diagMarkerSpan(r,
-			"Time Travel clause requires parentheses. Use AT (TIMESTAMP => ...) or BEFORE (STATEMENT => ...).", 4))
+	sig := sigTokens(stripped)
+
+	// Check for bare AT/BEFORE without parentheses after a table reference.
+	// Pattern: FROM/JOIN <ident> AT/BEFORE TIMESTAMP/OFFSET/STATEMENT/STREAM
+	ttKWs := []string{"TIMESTAMP", "OFFSET", "STATEMENT", "STREAM"}
+	for i := 0; i+3 < len(sig); i++ {
+		u := tokUpper(sig[i], stripped)
+		if u != "FROM" && u != "JOIN" {
+			continue
+		}
+		// Skip ident path after FROM/JOIN
+		j := i + 1
+		if !isIdent(sig[j]) {
+			continue
+		}
+		_, j = readIdentPath(sig, stripped, j)
+		if j >= len(sig) {
+			continue
+		}
+		ab := tokUpper(sig[j], stripped)
+		if ab != "AT" && ab != "BEFORE" {
+			continue
+		}
+		// Check if next token is a time travel keyword (not LParen).
+		if j+1 < len(sig) && sig[j+1].Kind != sqltok.LParen {
+			nextU := tokUpper(sig[j+1], stripped)
+			for _, kw := range ttKWs {
+				if nextU == kw {
+					markers = append(markers, diagMarkerSpan(r,
+						"Time Travel clause requires parentheses. Use AT (TIMESTAMP => ...) or BEFORE (STATEMENT => ...)."))
+					break
+				}
+			}
+		}
 	}
 
 	// Find each AT(...) / BEFORE(...) occurrence and validate contents.
-	for _, loc := range reTimeTravelClause.FindAllStringSubmatchIndex(stripped, -1) {
-		keyword := strings.ToUpper(stripped[loc[2]:loc[3]]) // "AT" or "BEFORE"
+	for i := 0; i+1 < len(sig); i++ {
+		keyword := tokUpper(sig[i], stripped)
+		if keyword != "AT" && keyword != "BEFORE" {
+			continue
+		}
+		if sig[i+1].Kind != sqltok.LParen {
+			continue
+		}
 
-		// Find the opening paren position (end of the keyword match minus 1).
-		parenStart := loc[1] - 1
-		body := extractBalancedBlock(stripped, parenStart)
-		if body == "" {
+		// Extract tokens inside the parentheses.
+		innerStart, innerEnd, ok := parenInnerRange(sig, i+1)
+		if !ok {
 			continue // Unbalanced — the syntax checker will flag it.
 		}
-		// Strip outer parens.
-		inner := body[1 : len(body)-1]
+		innerSig := sig[innerStart:innerEnd]
 
-		// Count how many valid keyword arguments appear.
-		args := reTimeTravelArg.FindAllStringSubmatch(inner, -1)
+		// Count how many valid keyword arguments appear (KW =>).
+		var args []string
+		for k := 0; k+1 < len(innerSig); k++ {
+			u := tokUpper(innerSig[k], stripped)
+			if (u == "TIMESTAMP" || u == "OFFSET" || u == "STATEMENT" || u == "STREAM") &&
+				innerSig[k+1].Kind == sqltok.Operator && innerSig[k+1].Text(stripped) == "=>" {
+				args = append(args, u)
+			}
+		}
 
-		streamExpected := "" // for "Expected one of: …, STREAM =>"
-		streamPlain := ""    // for "Only one of …, STREAM"
+		streamExpected := ""
+		streamPlain := ""
 		if keyword == "AT" {
 			streamExpected = ", STREAM =>"
 			streamPlain = ", STREAM"
@@ -6768,27 +7871,34 @@ func validateTimeTravelClauses(stripped string, r StatementRange) []DiagMarker {
 
 		if len(args) == 0 {
 			// Check if the user wrote a keyword without =>
-			if m := reTimeTravelBareKW.FindStringSubmatch(inner); m != nil {
+			bareKW := ""
+			for k := 0; k < len(innerSig); k++ {
+				u := tokUpper(innerSig[k], stripped)
+				if u == "TIMESTAMP" || u == "OFFSET" || u == "STATEMENT" || u == "STREAM" {
+					bareKW = u
+					break
+				}
+			}
+			if bareKW != "" {
 				markers = append(markers, diagMarkerSpan(r,
-					"Missing '=>' operator in "+keyword+" clause. Use "+strings.ToUpper(m[1])+" => <value>.", 4))
+					"Missing '=>' operator in "+keyword+" clause. Use "+bareKW+" => <value>."))
 			} else {
 				markers = append(markers, diagMarkerSpan(r,
-					"Invalid "+keyword+" clause. Expected one of: TIMESTAMP =>, OFFSET =>, STATEMENT =>"+streamExpected+".", 4))
+					"Invalid "+keyword+" clause. Expected one of: TIMESTAMP =>, OFFSET =>, STATEMENT =>"+streamExpected+"."))
 			}
 			continue
 		}
 
 		if len(args) > 1 {
 			markers = append(markers, diagMarkerSpan(r,
-				"Multiple keyword arguments in "+keyword+" clause. Only one of TIMESTAMP, OFFSET, STATEMENT"+streamPlain+" is allowed.", 4))
+				"Multiple keyword arguments in "+keyword+" clause. Only one of TIMESTAMP, OFFSET, STATEMENT"+streamPlain+" is allowed."))
 			continue
 		}
 
 		// Exactly one argument — validate STREAM restriction.
-		argName := strings.ToUpper(args[0][1])
-		if argName == "STREAM" && keyword == "BEFORE" {
+		if args[0] == "STREAM" && keyword == "BEFORE" {
 			markers = append(markers, diagMarkerSpan(r,
-				"STREAM => is not valid in a BEFORE clause. STREAM is only supported with AT.", 4))
+				"STREAM => is not valid in a BEFORE clause. STREAM is only supported with AT."))
 		}
 	}
 
@@ -6821,55 +7931,55 @@ func validateCreateFailoverGroup(parseText string, r StatementRange) []DiagMarke
 func validateCreateReplOrFailoverGroup(parseText string, r StatementRange, groupType string) []DiagMarker {
 	var markers []DiagMarker
 
-	// Strip comments and string literals so commented-out clauses and quoted
-	// values cannot cause false positives.
-	noComments := strings.TrimSpace(stripCommentsSQL(parseText))
-	clean := reStripStringLiterals.ReplaceAllString(noComments, "''")
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
 	// 1. Group name is required and must be account-level (no dot prefix).
-	m := reReplGroupName.FindStringSubmatch(clean)
-	if m == nil {
+	name, nameIdx := extractNameAfterKeywords(sig, stripped, "CREATE", groupType, "GROUP")
+	// Also try CREATE OR REPLACE <groupType> GROUP
+	if name == "" {
+		name, nameIdx = extractNameAfterCreate(sig, stripped, nil, groupType, "GROUP")
+	}
+	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("CREATE %s GROUP requires a group name.", groupType), 4))
+			fmt.Sprintf("CREATE %s GROUP requires a group name.", groupType)))
 		return markers
 	}
-	if pfx := checkAccountLevelPrefix(m[1], r, groupType+" groups"); pfx != nil {
-		markers = append(markers, *pfx)
-	}
+	checkAccountLevelPrefix(name, r, groupType+" groups", &markers)
+
+	// Use tokens after the name for clause detection.
+	_, afterIdx := readIdentPath(sig, stripped, nameIdx)
+	afterName := sig[afterIdx:]
 
 	// 2. OBJECT_TYPES is mandatory.
-	if !reReplGroupObjectTypes.MatchString(clean) {
+	if !hasKWAssign(afterName, stripped, "OBJECT_TYPES") {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("Missing mandatory OBJECT_TYPES in CREATE %s GROUP.", groupType), 4))
+			fmt.Sprintf("Missing mandatory OBJECT_TYPES in CREATE %s GROUP.", groupType)))
 		return markers
 	}
 
 	// 3. ALLOWED_ACCOUNTS (or ALLOWED_FAILOVER_ACCOUNTS for failover) is mandatory.
 	if groupType == "FAILOVER" {
-		if !reFailoverGroupAllowedAccounts.MatchString(clean) {
+		if !hasKWAssign(afterName, stripped, "ALLOWED_ACCOUNTS") && !hasKWAssign(afterName, stripped, "ALLOWED_FAILOVER_ACCOUNTS") {
 			markers = append(markers, diagMarkerSpan(r,
-				"Missing mandatory ALLOWED_ACCOUNTS or ALLOWED_FAILOVER_ACCOUNTS in CREATE FAILOVER GROUP.", 4))
+				"Missing mandatory ALLOWED_ACCOUNTS or ALLOWED_FAILOVER_ACCOUNTS in CREATE FAILOVER GROUP."))
 		}
 	} else {
-		if !reReplGroupAllowedAccounts.MatchString(clean) {
+		if !hasKWAssign(afterName, stripped, "ALLOWED_ACCOUNTS") {
 			markers = append(markers, diagMarkerSpan(r,
-				"Missing mandatory ALLOWED_ACCOUNTS in CREATE REPLICATION GROUP.", 4))
+				"Missing mandatory ALLOWED_ACCOUNTS in CREATE REPLICATION GROUP."))
 		}
 	}
 
-	// 4–5. Extract the OBJECT_TYPES value list and check for DATABASES / INTEGRATIONS.
-	// We only inspect the captured value portion (not the entire SQL) to avoid
-	// false positives when the group name itself contains "databases" or "integrations".
-	if otMatch := reReplGroupObjectTypesValue.FindStringSubmatch(clean); otMatch != nil {
-		otValue := strings.ToUpper(otMatch[1])
-		if strings.Contains(otValue, "DATABASES") && !reReplGroupAllowedDatabases.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("OBJECT_TYPES includes DATABASES but ALLOWED_DATABASES is missing in CREATE %s GROUP.", groupType), 4))
-		}
-		if strings.Contains(otValue, "INTEGRATIONS") && !reReplGroupAllowedIntTypes.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("OBJECT_TYPES includes INTEGRATIONS but ALLOWED_INTEGRATION_TYPES is missing in CREATE %s GROUP.", groupType), 4))
-		}
+	// 4–5. Extract the OBJECT_TYPES value portion and check for DATABASES / INTEGRATIONS.
+	otValue := extractObjectTypesValue(afterName, stripped)
+	if strings.Contains(otValue, "DATABASES") && !hasKWAssign(afterName, stripped, "ALLOWED_DATABASES") {
+		markers = append(markers, diagMarkerSpan(r,
+			fmt.Sprintf("OBJECT_TYPES includes DATABASES but ALLOWED_DATABASES is missing in CREATE %s GROUP.", groupType)))
+	}
+	if strings.Contains(otValue, "INTEGRATIONS") && !hasKWAssign(afterName, stripped, "ALLOWED_INTEGRATION_TYPES") {
+		markers = append(markers, diagMarkerSpan(r,
+			fmt.Sprintf("OBJECT_TYPES includes INTEGRATIONS but ALLOWED_INTEGRATION_TYPES is missing in CREATE %s GROUP.", groupType)))
 	}
 
 	return markers
@@ -6885,56 +7995,82 @@ func validateCreateReplOrFailoverGroup(parseText string, r StatementRange, group
 func validateAlterReplicationOrFailoverGroup(parseText string, r StatementRange, groupType string) []DiagMarker {
 	var markers []DiagMarker
 
-	// Strip comments and string literals so trailing -- comments and quoted
-	// values cannot cause false positives or missed matches.
-	noComments := strings.TrimSpace(stripCommentsSQL(parseText))
-	clean := reStripStringLiterals.ReplaceAllString(noComments, "''")
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
 	// 1. Group name is required and must be account-level (no dot prefix).
-	m := reReplGroupName.FindStringSubmatch(clean)
-	mLoc := reReplGroupName.FindStringIndex(clean)
-	if mLoc == nil {
-		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("ALTER %s GROUP requires a group name.", groupType), 4))
-		return markers
+	name, nameIdx := extractNameAfterKeywords(sig, stripped, "ALTER", groupType, "GROUP")
+	if name == "" {
+		// Handle IF EXISTS without a name.
+		ifExistsNoName := len(sig) >= 5 &&
+			tokUpper(sig[3], stripped) == "IF" &&
+			tokUpper(sig[4], stripped) == "EXISTS" &&
+			(len(sig) == 5 || !isNonEmptyIdent(sig[5], stripped))
+		if !ifExistsNoName {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("ALTER %s GROUP requires a group name.", groupType)))
+			return markers
+		}
 	}
-	if pfx := checkAccountLevelPrefix(m[1], r, groupType+" groups"); pfx != nil {
-		markers = append(markers, *pfx)
+	if name != "" {
+		checkAccountLevelPrefix(name, r, groupType+" groups", &markers)
 	}
 
-	// 2. Must contain a valid action. Check only the portion after the group
-	// name so that a group named "primary", "refresh", etc. doesn't falsely
-	// satisfy the action check.
-	afterName := clean[mLoc[1]:]
-	hasAction := reAlterReplGroupAdd.MatchString(afterName) ||
-		reAlterReplGroupRemove.MatchString(afterName) ||
-		reAlterReplGroupMoveDatabases.MatchString(afterName) ||
-		reAlterReplGroupSet.MatchString(afterName) ||
-		reAlterReplGroupRename.MatchString(afterName)
+	// 2. Must contain a valid action after the group name.
+	var afterName []sqltok.Token
+	if name != "" {
+		_, pathEnd := readIdentPath(sig, stripped, nameIdx)
+		if pathEnd < len(sig) {
+			afterName = sig[pathEnd:]
+		}
+	} else {
+		// No name (IF EXISTS case) — start after IF EXISTS.
+		startIdx := 5
+		if startIdx < len(sig) {
+			afterName = sig[startIdx:]
+		}
+	}
+
+	hasAdd := hasKW(afterName, stripped, "ADD")
+	hasRemove := hasKW(afterName, stripped, "REMOVE")
+	hasMoveDatabases := hasKWPair(afterName, stripped, "MOVE", "DATABASES")
+	hasSet := false
+	for i := 0; i+1 < len(afterName); i++ {
+		if tokUpper(afterName[i], stripped) == "SET" {
+			next := tokUpper(afterName[i+1], stripped)
+			if next == "REPLICATION_SCHEDULE" || next == "OBJECT_TYPES" {
+				hasSet = true
+				break
+			}
+		}
+	}
+	hasRename := hasKWPair(afterName, stripped, "RENAME", "TO")
+
+	hasAction := hasAdd || hasRemove || hasMoveDatabases || hasSet || hasRename
 
 	if groupType == "FAILOVER" {
 		hasAction = hasAction ||
-			reAlterFailoverPrimary.MatchString(afterName) ||
-			reAlterFailoverRefresh.MatchString(afterName) ||
-			reAlterFailoverSuspend.MatchString(afterName) ||
-			reAlterFailoverResume.MatchString(afterName)
+			hasKW(afterName, stripped, "PRIMARY") ||
+			hasKW(afterName, stripped, "REFRESH") ||
+			hasKW(afterName, stripped, "SUSPEND") ||
+			hasKW(afterName, stripped, "RESUME")
 	}
 
 	if !hasAction {
 		if groupType == "FAILOVER" {
 			markers = append(markers, diagMarkerSpan(r,
-				"ALTER FAILOVER GROUP requires an action: ADD, REMOVE, MOVE DATABASES, SET, RENAME TO, PRIMARY, REFRESH, SUSPEND, or RESUME.", 4))
+				"ALTER FAILOVER GROUP requires an action: ADD, REMOVE, MOVE DATABASES, SET, RENAME TO, PRIMARY, REFRESH, SUSPEND, or RESUME."))
 		} else {
 			markers = append(markers, diagMarkerSpan(r,
-				"ALTER REPLICATION GROUP requires an action: ADD, REMOVE, MOVE DATABASES, SET, or RENAME TO.", 4))
+				"ALTER REPLICATION GROUP requires an action: ADD, REMOVE, MOVE DATABASES, SET, or RENAME TO."))
 		}
 		return markers
 	}
 
 	// 3. MOVE DATABASES requires TO REPLICATION GROUP <name>.
-	if reAlterReplGroupMoveDatabases.MatchString(afterName) && !reAlterReplGroupMoveTo.MatchString(afterName) {
+	if hasMoveDatabases && !hasKWSeqFollowedByIdent(afterName, stripped, "TO", "REPLICATION", "GROUP") {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("MOVE DATABASES in ALTER %s GROUP requires TO REPLICATION GROUP <name>.", groupType), 4))
+			fmt.Sprintf("MOVE DATABASES in ALTER %s GROUP requires TO REPLICATION GROUP <name>.", groupType)))
 	}
 
 	return markers
@@ -6948,18 +8084,17 @@ func validateAlterReplicationOrFailoverGroup(parseText string, r StatementRange,
 func validateDropReplicationOrFailoverGroup(parseText string, r StatementRange, groupType string) []DiagMarker {
 	var markers []DiagMarker
 
-	noComments := strings.TrimSpace(stripCommentsSQL(parseText))
-	clean := reStripStringLiterals.ReplaceAllString(noComments, "''")
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
-	m := reReplGroupName.FindStringSubmatch(clean)
-	if m == nil {
+	// DROP (REPLICATION|FAILOVER) GROUP [IF EXISTS] <name>
+	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", groupType, "GROUP")
+	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("DROP %s GROUP requires a group name.", groupType), 4))
+			fmt.Sprintf("DROP %s GROUP requires a group name.", groupType)))
 		return markers
 	}
-	if pfx := checkAccountLevelPrefix(m[1], r, groupType+" groups"); pfx != nil {
-		markers = append(markers, *pfx)
-	}
+	checkAccountLevelPrefix(name, r, groupType+" groups", &markers)
 
 	return markers
 }
@@ -6980,69 +8115,56 @@ func validateDropReplicationOrFailoverGroup(parseText string, r StatementRange, 
 func validateCreateComputePool(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	clean := cleanParseText(parseText)
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if marker, conflict := checkOrReplaceConflict(clean, r, "CREATE COMPUTE POOL"); conflict {
+	if marker, conflict := checkOrReplaceConflictTok(sig, stripped, r, "CREATE COMPUTE POOL"); conflict {
 		markers = append(markers, marker)
 		return markers
 	}
 
 	// 2. Pool name is required; also used for account-level prefix check.
-	m := reCreateComputePoolName.FindStringSubmatch(clean)
-	if m == nil {
-		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE COMPUTE POOL statement.", 4))
+	name, _ := extractNameAfterCreate(sig, stripped, nil, "COMPUTE", "POOL")
+	if name == "" {
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE COMPUTE POOL statement."))
 		return markers
 	}
-	if pfx := checkAccountLevelPrefix(m[1], r, "Compute pools"); pfx != nil {
-		markers = append(markers, *pfx)
-	}
+	checkAccountLevelPrefix(name, r, "Compute pools", &markers)
 
 	// 3. Mandatory properties: MIN_NODES, MAX_NODES, INSTANCE_FAMILY.
-	minNodesMatch := reComputePoolMinNodes.FindStringSubmatch(clean)
-	maxNodesMatch := reComputePoolMaxNodes.FindStringSubmatch(clean)
-	instanceFamilyMatch := reComputePoolInstanceFamily.FindStringSubmatch(clean)
+	minNodesVal, hasMinNodesProp := findKWAssignInt(sig, stripped, "MIN_NODES")
+	maxNodesVal, hasMaxNodesProp := findKWAssignInt(sig, stripped, "MAX_NODES")
+	instanceFamilyRaw, hasInstanceFamily := findKWAssign(sig, stripped, "INSTANCE_FAMILY")
 
-	if minNodesMatch == nil {
+	if !hasMinNodesProp {
 		markers = append(markers, diagMarkerSpan(r,
-			"Missing mandatory property MIN_NODES in CREATE COMPUTE POOL statement.", 4))
+			"Missing mandatory property MIN_NODES in CREATE COMPUTE POOL statement."))
 	}
-	if maxNodesMatch == nil {
+	if !hasMaxNodesProp {
 		markers = append(markers, diagMarkerSpan(r,
-			"Missing mandatory property MAX_NODES in CREATE COMPUTE POOL statement.", 4))
+			"Missing mandatory property MAX_NODES in CREATE COMPUTE POOL statement."))
 	}
-	if instanceFamilyMatch == nil {
+	if !hasInstanceFamily {
 		markers = append(markers, diagMarkerSpan(r,
-			"Missing mandatory property INSTANCE_FAMILY in CREATE COMPUTE POOL statement.", 4))
+			"Missing mandatory property INSTANCE_FAMILY in CREATE COMPUTE POOL statement."))
 	}
 
 	// 4. Validate MIN_NODES value (>= 1).
-	var minNodes int
-	hasMinNodes := false
-	if minNodesMatch != nil {
-		v, err := strconv.Atoi(minNodesMatch[1])
-		if err == nil {
-			minNodes = v
-			hasMinNodes = true
-			if v < 1 {
-				markers = append(markers, diagMarkerSpan(r,
-					fmt.Sprintf("MIN_NODES value %d is below the minimum (1).", v), 4))
-			}
-		}
+	if hasMinNodesProp && minNodesVal < 1 {
+		markers = append(markers, diagMarkerSpan(r,
+			fmt.Sprintf("MIN_NODES value %d is below the minimum (1).", minNodesVal)))
 	}
 
 	// 5. Validate MAX_NODES value (>= 1, >= MIN_NODES).
-	if maxNodesMatch != nil {
-		v, err := strconv.Atoi(maxNodesMatch[1])
-		if err == nil {
-			if v < 1 {
-				markers = append(markers, diagMarkerSpan(r,
-					fmt.Sprintf("MAX_NODES value %d is below the minimum (1).", v), 4))
-			}
-			if hasMinNodes && v < minNodes {
-				markers = append(markers, diagMarkerSpan(r,
-					fmt.Sprintf("MAX_NODES (%d) must be >= MIN_NODES (%d).", v, minNodes), 4))
-			}
+	if hasMaxNodesProp {
+		if maxNodesVal < 1 {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("MAX_NODES value %d is below the minimum (1).", maxNodesVal)))
+		}
+		if hasMinNodesProp && maxNodesVal < minNodesVal {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("MAX_NODES (%d) must be >= MIN_NODES (%d).", maxNodesVal, minNodesVal)))
 		}
 	}
 
@@ -7052,27 +8174,26 @@ func validateCreateComputePool(parseText string, r StatementRange) []DiagMarker 
 		"HIGHMEM_X64_S", "HIGHMEM_X64_M", "HIGHMEM_X64_L", "HIGHMEM_X64_SL",
 		"GPU_NV_S", "GPU_NV_M", "GPU_NV_L", "GPU_NV_XL", "GPU_NV_4XL",
 	}
-	if instanceFamilyMatch != nil {
-		family := strings.ToUpper(instanceFamilyMatch[1])
+	if hasInstanceFamily {
+		family := strings.ToUpper(instanceFamilyRaw)
 		if !slices.Contains(validFamilies, family) {
 			markers = append(markers, diagMarkerSpan(r,
 				fmt.Sprintf("Invalid INSTANCE_FAMILY '%s'. Valid values: %s.",
-					instanceFamilyMatch[1], strings.Join(validFamilies, ", ")), 4))
+					instanceFamilyRaw, strings.Join(validFamilies, ", "))))
 		}
 	}
 
 	// 7. Validate AUTO_SUSPEND_SECS (non-negative integer).
-	if susMatch := reComputePoolAutoSuspend.FindStringSubmatch(clean); susMatch != nil {
-		v, err := strconv.Atoi(susMatch[1])
-		if err == nil && v < 0 {
+	if susVal, ok := findKWAssignInt(sig, stripped, "AUTO_SUSPEND_SECS"); ok {
+		if susVal < 0 {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("AUTO_SUSPEND_SECS value %d must be a non-negative integer.", v), 4))
+				fmt.Sprintf("AUTO_SUSPEND_SECS value %d must be a non-negative integer.", susVal)))
 		}
 	}
 
 	// 8. Validate boolean properties.
-	validateBoolProp(clean, "AUTO_RESUME", r, &markers)
-	validateBoolProp(clean, "INITIALLY_SUSPENDED", r, &markers)
+	validateBoolPropTok(sig, stripped, "AUTO_RESUME", r, &markers)
+	validateBoolPropTok(sig, stripped, "INITIALLY_SUSPENDED", r, &markers)
 
 	// 9. Only known properties are accepted.
 	noComments := strings.TrimSpace(stripCommentsSQL(parseText))
@@ -7092,34 +8213,29 @@ func validateCreateComputePool(parseText string, r StatementRange) []DiagMarker 
 func validateCreateDatashare(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	// Strip string literals first so that stripCommentsSQL cannot be misled
-	// by '--' inside a quoted value (e.g. COMMENT = 'test -- value').
-	clean := cleanParseText(parseText)
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if marker, conflict := checkOrReplaceConflict(clean, r, "CREATE DATASHARE"); conflict {
+	if marker, conflict := checkOrReplaceConflictTok(sig, stripped, r, "CREATE DATASHARE"); conflict {
 		markers = append(markers, marker)
 		return markers
 	}
 
 	// 2. Datashare name is required; also used for the account-level prefix check.
-	m := reCreateDatashareName.FindStringSubmatch(clean)
-	if m == nil {
-		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE DATASHARE statement.", 4))
+	name, _ := extractNameAfterCreate(sig, stripped, nil, "DATASHARE")
+	if name == "" {
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE DATASHARE statement."))
 		return markers
 	}
-	if pfx := checkAccountLevelPrefix(m[1], r, "Datashares"); pfx != nil {
-		markers = append(markers, *pfx)
-	}
+	checkAccountLevelPrefix(name, r, "Datashares", &markers)
 
 	// 3. Only COMMENT and SHARE_RESTRICTIONS are valid properties.
-	// validateProperties strips string literals internally but not comments,
-	// so pass the comment-stripped (but literals-intact) form.
 	noComments := strings.TrimSpace(stripCommentsSQL(parseText))
 	validateProperties(noComments, `COMMENT|SHARE_RESTRICTIONS`, r, &markers)
 
 	// 4. SHARE_RESTRICTIONS must be TRUE or FALSE.
-	validateBoolProp(clean, "SHARE_RESTRICTIONS", r, &markers)
+	validateBoolPropTok(sig, stripped, "SHARE_RESTRICTIONS", r, &markers)
 
 	return markers
 }
@@ -7137,59 +8253,66 @@ func validateCreateDatashare(parseText string, r StatementRange) []DiagMarker {
 func validateAlterDatashare(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	clean := cleanParseText(parseText)
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
 	// 1. Datashare name is required.
-	m := reAlterDatashareName.FindStringSubmatch(clean)
-	if m == nil {
+	name, _ := extractNameAfterKeywords(sig, stripped, "ALTER", "DATASHARE")
+	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"ALTER DATASHARE requires a datashare name.", 4))
+			"ALTER DATASHARE requires a datashare name."))
 		return markers
 	}
-	if pfx := checkAccountLevelPrefix(m[1], r, "Datashares"); pfx != nil {
-		markers = append(markers, *pfx)
-	}
+	checkAccountLevelPrefix(name, r, "Datashares", &markers)
 
 	// 2. If none of the known actions are present, warn about unknown sub-command.
-	if !reAlterDatashareAction.MatchString(clean) {
+	hasAddAccounts := hasKWPair(sig, stripped, "ADD", "ACCOUNTS")
+	hasRemoveAccounts := hasKWPair(sig, stripped, "REMOVE", "ACCOUNTS")
+	hasAddDatabases := hasKWPair(sig, stripped, "ADD", "DATABASES")
+	hasRemoveDatabases := hasKWPair(sig, stripped, "REMOVE", "DATABASES")
+	hasSetComment := hasKWPair(sig, stripped, "SET", "COMMENT")
+	hasUnsetComment := hasKWPair(sig, stripped, "UNSET", "COMMENT")
+
+	anyKnown := hasAddAccounts || hasRemoveAccounts || hasAddDatabases || hasRemoveDatabases || hasSetComment || hasUnsetComment
+	if !anyKnown {
 		markers = append(markers, diagMarkerSpan(r,
-			"Unknown ALTER DATASHARE sub-command. Expected ADD ACCOUNTS, REMOVE ACCOUNTS, ADD DATABASES, REMOVE DATABASES, SET COMMENT, or UNSET COMMENT.", 4))
+			"Unknown ALTER DATASHARE sub-command. Expected ADD ACCOUNTS, REMOVE ACCOUNTS, ADD DATABASES, REMOVE DATABASES, SET COMMENT, or UNSET COMMENT."))
 		return markers
 	}
 
 	// 3. ADD ACCOUNTS = requires at least one account.
-	hasAddAccounts := reAlterDatashareAddAccounts.MatchString(clean)
-	if hasAddAccounts && !reAlterDatashareAddAcctList.MatchString(clean) {
+	// Check: ADD ACCOUNTS followed by = then at least one ident.
+	if hasAddAccounts && !hasKWPairAssignIdent(sig, stripped, "ADD", "ACCOUNTS") {
 		markers = append(markers, diagMarkerSpan(r,
-			"ADD ACCOUNTS requires at least one account identifier.", 4))
+			"ADD ACCOUNTS requires at least one account identifier."))
 	}
 
 	// 4. REMOVE ACCOUNTS = requires at least one account.
-	if reAlterDatashareRemoveAccounts.MatchString(clean) && !reAlterDatashareRemoveAcctList.MatchString(clean) {
+	if hasRemoveAccounts && !hasKWPairAssignIdent(sig, stripped, "REMOVE", "ACCOUNTS") {
 		markers = append(markers, diagMarkerSpan(r,
-			"REMOVE ACCOUNTS requires at least one account identifier.", 4))
+			"REMOVE ACCOUNTS requires at least one account identifier."))
 	}
 
 	// 5. ADD DATABASES requires at least one database.
-	if reAlterDatashareAddDatabases.MatchString(clean) && !reAlterDatashareAddDbList.MatchString(clean) {
+	if hasAddDatabases && !hasKWPairFollowedByIdent(sig, stripped, "ADD", "DATABASES") {
 		markers = append(markers, diagMarkerSpan(r,
-			"ADD DATABASES requires at least one database identifier.", 4))
+			"ADD DATABASES requires at least one database identifier."))
 	}
 
 	// 6. REMOVE DATABASES requires at least one database.
-	if reAlterDatashareRemoveDatabases.MatchString(clean) && !reAlterDatashareRemoveDbList.MatchString(clean) {
+	if hasRemoveDatabases && !hasKWPairFollowedByIdent(sig, stripped, "REMOVE", "DATABASES") {
 		markers = append(markers, diagMarkerSpan(r,
-			"REMOVE DATABASES requires at least one database identifier.", 4))
+			"REMOVE DATABASES requires at least one database identifier."))
 	}
 
 	// 7. SHARE_RESTRICTIONS validation: always check the boolean value, and
 	// warn if it appears without ADD ACCOUNTS (the only valid context).
-	hasShareRestrictions := reAlterDatashareShareRestrict.MatchString(clean)
+	hasShareRestrictions := hasKW(sig, stripped, "SHARE_RESTRICTIONS")
 	if hasShareRestrictions {
-		validateBoolProp(clean, "SHARE_RESTRICTIONS", r, &markers)
+		validateBoolPropTok(sig, stripped, "SHARE_RESTRICTIONS", r, &markers)
 		if !hasAddAccounts {
 			markers = append(markers, diagMarkerSpan(r,
-				"SHARE_RESTRICTIONS is only valid with ADD ACCOUNTS in ALTER DATASHARE.", 4))
+				"SHARE_RESTRICTIONS is only valid with ADD ACCOUNTS in ALTER DATASHARE."))
 		}
 	}
 
@@ -7204,17 +8327,16 @@ func validateAlterDatashare(parseText string, r StatementRange) []DiagMarker {
 func validateDropDatashare(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	clean := cleanParseText(parseText)
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
-	m := reDropDatashareName.FindStringSubmatch(clean)
-	if m == nil {
+	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", "DATASHARE")
+	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"DROP DATASHARE requires a datashare name.", 4))
+			"DROP DATASHARE requires a datashare name."))
 		return markers
 	}
-	if pfx := checkAccountLevelPrefix(m[1], r, "Datashares"); pfx != nil {
-		markers = append(markers, *pfx)
-	}
+	checkAccountLevelPrefix(name, r, "Datashares", &markers)
 
 	return markers
 }
@@ -7235,74 +8357,68 @@ func validateCreateService(parseText string, r StatementRange) []DiagMarker {
 
 	// Strip dollar-quoted bodies so inline YAML does not cause false-positive
 	// property warnings (e.g. keys inside $$spec$$ matching reProp).
-	noDollar := reStripDollarQuoted.ReplaceAllString(parseText, "''")
-	noLiterals := reStripStringLiterals.ReplaceAllString(noDollar, "''")
+	noDollar := stripDollarQuoted(parseText)
+	noLiterals := sqltok.StripStrings(noDollar)
 	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
 
+	sig := sigTokens(clean)
+
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if marker, conflict := checkOrReplaceConflict(clean, r, "CREATE SERVICE"); conflict {
+	if marker, conflict := checkOrReplaceConflictTok(sig, clean, r, "CREATE SERVICE"); conflict {
 		markers = append(markers, marker)
 		return markers
 	}
 
 	// 2. Service name is required.
-	m := reCreateServiceName.FindStringSubmatch(clean)
-	if m == nil {
-		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE SERVICE statement.", 4))
+	name, _ := extractNameAfterCreate(sig, clean, nil, "SERVICE")
+	if name == "" {
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE SERVICE statement."))
 		return markers
 	}
 
 	// 3. IN COMPUTE POOL is mandatory.
-	if !reServiceInComputePool.MatchString(clean) {
+	if !hasKWSeq(sig, clean, "IN", "COMPUTE", "POOL") {
 		markers = append(markers, diagMarkerSpan(r,
-			"Missing mandatory IN COMPUTE POOL clause in CREATE SERVICE statement.", 4))
+			"Missing mandatory IN COMPUTE POOL clause in CREATE SERVICE statement."))
 	}
 
 	// 4. Exactly one of FROM SPECIFICATION or FROM SPECIFICATION_FILE is required.
-	// \b in reServiceFromSpec prevents matching SPECIFICATION_FILE (underscore
-	// is a word character), so the two regexes are mutually exclusive.
-	hasSpec := reServiceFromSpec.MatchString(clean)
-	hasSpecFile := reServiceFromSpecFile.MatchString(clean)
+	hasSpecFile := hasFromSpecKW(sig, clean, []string{"SPECIFICATION_FILE", "SPECIFICATION_TEMPLATE_FILE"})
+	hasSpec := hasFromSpecKW(sig, clean, []string{"SPECIFICATION", "SPECIFICATION_TEMPLATE"})
 	if hasSpec && hasSpecFile {
 		markers = append(markers, diagMarkerSpan(r,
-			"CREATE SERVICE requires exactly one of FROM SPECIFICATION or FROM SPECIFICATION_FILE, not both.", 4))
+			"CREATE SERVICE requires exactly one of FROM SPECIFICATION or FROM SPECIFICATION_FILE, not both."))
 	} else if !hasSpec && !hasSpecFile {
 		markers = append(markers, diagMarkerSpan(r,
-			"Missing mandatory FROM SPECIFICATION or FROM SPECIFICATION_FILE clause in CREATE SERVICE statement.", 4))
+			"Missing mandatory FROM SPECIFICATION or FROM SPECIFICATION_FILE clause in CREATE SERVICE statement."))
 	}
 
 	// 5. Validate MIN_INSTANCES value (non-negative).
 	var minInstances int
 	hasMinInstances := false
-	if minMatch := reServiceMinInstances.FindStringSubmatch(clean); minMatch != nil {
-		v, err := strconv.Atoi(minMatch[1])
-		if err == nil {
-			minInstances = v
-			hasMinInstances = true
-			if v < 0 {
-				markers = append(markers, diagMarkerSpan(r,
-					fmt.Sprintf("MIN_INSTANCES value %d must be a non-negative integer.", v), 4))
-			}
+	if v, ok := findKWAssignInt(sig, clean, "MIN_INSTANCES"); ok {
+		minInstances = v
+		hasMinInstances = true
+		if v < 0 {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("MIN_INSTANCES value %d must be a non-negative integer.", v)))
 		}
 	}
 
 	// 6. Validate MAX_INSTANCES value (non-negative, >= MIN_INSTANCES).
-	if maxMatch := reServiceMaxInstances.FindStringSubmatch(clean); maxMatch != nil {
-		v, err := strconv.Atoi(maxMatch[1])
-		if err == nil {
-			if v < 0 {
-				markers = append(markers, diagMarkerSpan(r,
-					fmt.Sprintf("MAX_INSTANCES value %d must be a non-negative integer.", v), 4))
-			}
-			if hasMinInstances && v < minInstances {
-				markers = append(markers, diagMarkerSpan(r,
-					fmt.Sprintf("MAX_INSTANCES (%d) must be >= MIN_INSTANCES (%d).", v, minInstances), 4))
-			}
+	if v, ok := findKWAssignInt(sig, clean, "MAX_INSTANCES"); ok {
+		if v < 0 {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("MAX_INSTANCES value %d must be a non-negative integer.", v)))
+		}
+		if hasMinInstances && v < minInstances {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("MAX_INSTANCES (%d) must be >= MIN_INSTANCES (%d).", v, minInstances)))
 		}
 	}
 
 	// 7. Validate boolean properties.
-	validateBoolProp(clean, "AUTO_RESUME", r, &markers)
+	validateBoolPropTok(sig, clean, "AUTO_RESUME", r, &markers)
 
 	// 8. Only known properties are accepted.
 	noComments := strings.TrimSpace(stripCommentsSQL(noDollar))
@@ -7324,42 +8440,49 @@ func validateCreateService(parseText string, r StatementRange) []DiagMarker {
 func validateExecuteService(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	noDollar := reStripDollarQuoted.ReplaceAllString(parseText, "''")
-	noLiterals := reStripStringLiterals.ReplaceAllString(noDollar, "''")
+	noDollar := stripDollarQuoted(parseText)
+	noLiterals := sqltok.StripStrings(noDollar)
 	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
 
+	sig := sigTokens(clean)
+
 	// 1. Service name is required.
-	m := reExecuteServiceName.FindStringSubmatch(clean)
-	if m == nil {
-		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in EXECUTE SERVICE statement.", 4))
+	// EXECUTE [JOB] SERVICE <name>
+	name, _ := extractNameAfterKeywords(sig, clean, "EXECUTE", "SERVICE")
+	if name == "" {
+		// Try with JOB keyword: EXECUTE JOB SERVICE <name>
+		name, _ = extractNameAfterKeywords(sig, clean, "EXECUTE", "JOB", "SERVICE")
+	}
+	if name == "" {
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in EXECUTE SERVICE statement."))
 		return markers
 	}
 
 	// 2. IN COMPUTE POOL is mandatory.
-	if !reServiceInComputePool.MatchString(clean) {
+	if !hasKWSeq(sig, clean, "IN", "COMPUTE", "POOL") {
 		markers = append(markers, diagMarkerSpan(r,
-			"Missing mandatory IN COMPUTE POOL clause in EXECUTE SERVICE statement.", 4))
+			"Missing mandatory IN COMPUTE POOL clause in EXECUTE SERVICE statement."))
 	}
 
 	// 3. Exactly one of FROM SPECIFICATION or FROM SPECIFICATION_FILE is required.
-	hasSpec := reServiceFromSpec.MatchString(clean)
-	hasSpecFile := reServiceFromSpecFile.MatchString(clean)
+	hasSpecFile := hasFromSpecKW(sig, clean, []string{"SPECIFICATION_FILE", "SPECIFICATION_TEMPLATE_FILE"})
+	hasSpec := hasFromSpecKW(sig, clean, []string{"SPECIFICATION", "SPECIFICATION_TEMPLATE"})
 	if hasSpec && hasSpecFile {
 		markers = append(markers, diagMarkerSpan(r,
-			"EXECUTE SERVICE requires exactly one of FROM SPECIFICATION or FROM SPECIFICATION_FILE, not both.", 4))
+			"EXECUTE SERVICE requires exactly one of FROM SPECIFICATION or FROM SPECIFICATION_FILE, not both."))
 	} else if !hasSpec && !hasSpecFile {
 		markers = append(markers, diagMarkerSpan(r,
-			"Missing mandatory FROM SPECIFICATION or FROM SPECIFICATION_FILE clause in EXECUTE SERVICE statement.", 4))
+			"Missing mandatory FROM SPECIFICATION or FROM SPECIFICATION_FILE clause in EXECUTE SERVICE statement."))
 	}
 
 	// 4. MIN_INSTANCES / MAX_INSTANCES are not supported for job services.
-	if reServiceMinInstances.MatchString(clean) {
+	if hasKWAssign(sig, clean, "MIN_INSTANCES") {
 		markers = append(markers, diagMarkerSpan(r,
-			"MIN_INSTANCES is not supported in EXECUTE SERVICE (job services run once).", 4))
+			"MIN_INSTANCES is not supported in EXECUTE SERVICE (job services run once)."))
 	}
-	if reServiceMaxInstances.MatchString(clean) {
+	if hasKWAssign(sig, clean, "MAX_INSTANCES") {
 		markers = append(markers, diagMarkerSpan(r,
-			"MAX_INSTANCES is not supported in EXECUTE SERVICE (job services run once).", 4))
+			"MAX_INSTANCES is not supported in EXECUTE SERVICE (job services run once)."))
 	}
 
 	// 5. Only known properties are accepted.
@@ -7382,31 +8505,89 @@ func validateExecuteService(parseText string, r StatementRange) []DiagMarker {
 func validateAlterService(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	noDollar := reStripDollarQuoted.ReplaceAllString(parseText, "''")
-	noLiterals := reStripStringLiterals.ReplaceAllString(noDollar, "''")
+	noDollar := stripDollarQuoted(parseText)
+	noLiterals := sqltok.StripStrings(noDollar)
 	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
 
+	sig := sigTokens(clean)
+
 	// 1. Service name is required.
-	m := reAlterServiceName.FindStringSubmatch(clean)
-	if m == nil {
-		markers = append(markers, diagMarkerSpan(r,
-			"ALTER SERVICE requires a service name.", 4))
-		return markers
+	name, _ := extractNameAfterKeywords(sig, clean, "ALTER", "SERVICE")
+	if name == "" {
+		// Preserve old regex behavior: ALTER SERVICE IF EXISTS with no name
+		// captured "IF" as name, fell through to sub-command check.
+		ifExistsNoName := len(sig) >= 4 &&
+			tokUpper(sig[2], clean) == "IF" &&
+			tokUpper(sig[3], clean) == "EXISTS" &&
+			(len(sig) == 4 || !isNonEmptyIdent(sig[4], clean))
+		if !ifExistsNoName {
+			markers = append(markers, diagMarkerSpan(r,
+				"ALTER SERVICE requires a service name."))
+			return markers
+		}
 	}
 
-	// 2. At least one known action must be present. Distinguish between
-	// "SET with an unrecognized property" and "entirely unknown sub-command"
-	// so the user gets a more actionable message.
-	if !reAlterServiceAction.MatchString(clean) {
-		if reAlterServiceSetBare.MatchString(clean) {
+	// 2. At least one known action must be present.
+	hasSuspend := hasKW(sig, clean, "SUSPEND")
+	hasResume := hasKW(sig, clean, "RESUME")
+	// FROM [@stage] SPECIFICATION* — stage reference tokens may appear between FROM and SPECIFICATION.
+	hasFromSpec := hasFromSpecKW(sig, clean, []string{"SPECIFICATION", "SPECIFICATION_TEMPLATE", "SPECIFICATION_FILE", "SPECIFICATION_TEMPLATE_FILE"})
+
+	// Check if SET/UNSET has a known property following it.
+	// Bare SET or UNSET (with no following word) is treated as unknown sub-command.
+	knownSetProps := []string{"MIN_INSTANCES", "MAX_INSTANCES", "COMMENT", "QUERY_WAREHOUSE"}
+	hasKnownSet := false
+	hasBareSet := false
+	for i := 0; i < len(sig); i++ {
+		if tokUpper(sig[i], clean) == "SET" {
+			if i+1 < len(sig) && isIdent(sig[i+1]) {
+				// SET followed by a word — check if it's a known property.
+				prop := tokUpper(sig[i+1], clean)
+				for _, kp := range knownSetProps {
+					if prop == kp {
+						hasKnownSet = true
+						break
+					}
+				}
+				if !hasKnownSet {
+					hasBareSet = true // SET with unknown property
+				}
+			}
+			break
+		}
+	}
+	knownUnsetProps := []string{"COMMENT", "QUERY_WAREHOUSE", "MIN_INSTANCES", "MAX_INSTANCES"}
+	hasKnownUnset := false
+	hasBareUnset := false
+	for i := 0; i < len(sig); i++ {
+		if tokUpper(sig[i], clean) == "UNSET" {
+			if i+1 < len(sig) && isIdent(sig[i+1]) {
+				prop := tokUpper(sig[i+1], clean)
+				for _, kp := range knownUnsetProps {
+					if prop == kp {
+						hasKnownUnset = true
+						break
+					}
+				}
+				if !hasKnownUnset {
+					hasBareUnset = true
+				}
+			}
+			break
+		}
+	}
+
+	anyKnown := hasSuspend || hasResume || hasKnownSet || hasKnownUnset || hasFromSpec
+	if !anyKnown {
+		if hasBareSet {
 			markers = append(markers, diagMarkerSpan(r,
-				"Unknown property in ALTER SERVICE SET. Valid properties: MIN_INSTANCES, MAX_INSTANCES, COMMENT, QUERY_WAREHOUSE.", 4))
-		} else if reAlterServiceUnsetBare.MatchString(clean) {
+				"Unknown property in ALTER SERVICE SET. Valid properties: MIN_INSTANCES, MAX_INSTANCES, COMMENT, QUERY_WAREHOUSE."))
+		} else if hasBareUnset {
 			markers = append(markers, diagMarkerSpan(r,
-				"Unknown property in ALTER SERVICE UNSET. Valid properties: COMMENT, QUERY_WAREHOUSE, MIN_INSTANCES, MAX_INSTANCES.", 4))
+				"Unknown property in ALTER SERVICE UNSET. Valid properties: COMMENT, QUERY_WAREHOUSE, MIN_INSTANCES, MAX_INSTANCES."))
 		} else {
 			markers = append(markers, diagMarkerSpan(r,
-				"Unknown ALTER SERVICE sub-command. Expected SUSPEND, RESUME, SET, UNSET, or FROM SPECIFICATION.", 4))
+				"Unknown ALTER SERVICE sub-command. Expected SUSPEND, RESUME, SET, UNSET, or FROM SPECIFICATION."))
 		}
 		return markers
 	}
@@ -7414,36 +8595,29 @@ func validateAlterService(parseText string, r StatementRange) []DiagMarker {
 	// 3. Validate MIN_INSTANCES value (non-negative) if present in SET.
 	var minInstances int
 	hasMinInstances := false
-	if minMatch := reServiceMinInstances.FindStringSubmatch(clean); minMatch != nil {
-		v, err := strconv.Atoi(minMatch[1])
-		if err == nil {
-			minInstances = v
-			hasMinInstances = true
-			if v < 0 {
-				markers = append(markers, diagMarkerSpan(r,
-					fmt.Sprintf("MIN_INSTANCES value %d must be a non-negative integer.", v), 4))
-			}
+	if v, ok := findKWAssignInt(sig, clean, "MIN_INSTANCES"); ok {
+		minInstances = v
+		hasMinInstances = true
+		if v < 0 {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("MIN_INSTANCES value %d must be a non-negative integer.", v)))
 		}
 	}
 
 	// 4. Validate MAX_INSTANCES value (non-negative, >= MIN_INSTANCES) if present.
-	if maxMatch := reServiceMaxInstances.FindStringSubmatch(clean); maxMatch != nil {
-		v, err := strconv.Atoi(maxMatch[1])
-		if err == nil {
-			if v < 0 {
-				markers = append(markers, diagMarkerSpan(r,
-					fmt.Sprintf("MAX_INSTANCES value %d must be a non-negative integer.", v), 4))
-			}
-			if hasMinInstances && v < minInstances {
-				markers = append(markers, diagMarkerSpan(r,
-					fmt.Sprintf("MAX_INSTANCES (%d) must be >= MIN_INSTANCES (%d).", v, minInstances), 4))
-			}
+	if v, ok := findKWAssignInt(sig, clean, "MAX_INSTANCES"); ok {
+		if v < 0 {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("MAX_INSTANCES value %d must be a non-negative integer.", v)))
+		}
+		if hasMinInstances && v < minInstances {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("MAX_INSTANCES (%d) must be >= MIN_INSTANCES (%d).", v, minInstances)))
 		}
 	}
 
-	// 5. Validate allowed properties when SET is used (catches unknown props
-	// in multi-property statements like SET COMMENT = 'x' UNKNOWN = y).
-	if reAlterServiceSetBare.MatchString(clean) {
+	// 5. Validate allowed properties when SET is used.
+	if hasKnownSet || hasBareSet {
 		noComments := strings.TrimSpace(stripCommentsSQL(noDollar))
 		validateProperties(noComments,
 			`MIN_INSTANCES|MAX_INSTANCES|COMMENT|QUERY_WAREHOUSE`,
@@ -7460,18 +8634,13 @@ func validateAlterService(parseText string, r StatementRange) []DiagMarker {
 func validateDropService(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	clean := cleanParseText(parseText)
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
-	m := reDropServiceName.FindStringSubmatch(clean)
-	if m == nil {
+	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", "SERVICE")
+	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"DROP SERVICE requires a service name.", 4))
-		return markers
-	}
-	// Guard against "DROP SERVICE IF EXISTS" (no name): the optional
-	if marker, swallowed := checkNameSwallowedByIF(m[1], clean, r, reDropServiceIfExists, "DROP SERVICE requires a service name."); swallowed {
-		markers = append(markers, marker)
-		return markers
+			"DROP SERVICE requires a service name."))
 	}
 
 	return markers
@@ -7488,22 +8657,23 @@ func validateDropService(parseText string, r StatementRange) []DiagMarker {
 func validateCreateImageRepository(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	clean := cleanParseText(parseText)
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if marker, conflict := checkOrReplaceConflict(clean, r, "CREATE IMAGE REPOSITORY"); conflict {
+	if marker, conflict := checkOrReplaceConflictTok(sig, stripped, r, "CREATE IMAGE REPOSITORY"); conflict {
 		markers = append(markers, marker)
 		return markers
 	}
 
 	// 2. Repository name is required.
-	m := reCreateImageRepositoryName.FindStringSubmatch(clean)
-	if m == nil {
+	name, _ := extractNameAfterCreate(sig, stripped, nil, "IMAGE", "REPOSITORY")
+	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"Unexpected syntax in CREATE IMAGE REPOSITORY statement.", 4))
+			"Unexpected syntax in CREATE IMAGE REPOSITORY statement."))
 		return markers
 	}
-	if marker, swallowed := checkNameSwallowedByIF(m[1], clean, r, reIfNotExists, "Unexpected syntax in CREATE IMAGE REPOSITORY statement."); swallowed {
+	if marker, swallowed := checkNameSwallowedByIFTok(name, sig, stripped, r, "Unexpected syntax in CREATE IMAGE REPOSITORY statement."); swallowed {
 		markers = append(markers, marker)
 		return markers
 	}
@@ -7522,20 +8692,13 @@ func validateCreateImageRepository(parseText string, r StatementRange) []DiagMar
 func validateDropImageRepository(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	clean := cleanParseText(parseText)
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
-	m := reDropImageRepositoryName.FindStringSubmatch(clean)
-	if m == nil {
+	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", "IMAGE", "REPOSITORY")
+	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"DROP IMAGE REPOSITORY requires a repository name.", 4))
-		return markers
-	}
-	// Guard against "DROP IMAGE REPOSITORY IF EXISTS" (no name): the optional
-	// IF\s+EXISTS\s+ group fails (no trailing whitespace+ident), so the
-	// regex captures "IF" as the name. Detect this and flag it.
-	if marker, swallowed := checkNameSwallowedByIF(m[1], clean, r, reDropServiceIfExists, "DROP IMAGE REPOSITORY requires a repository name."); swallowed {
-		markers = append(markers, marker)
-		return markers
+			"DROP IMAGE REPOSITORY requires a repository name."))
 	}
 
 	return markers
@@ -7546,10 +8709,10 @@ func validateDropImageRepository(parseText string, r StatementRange) []DiagMarke
 // validateAlterImageRepository warns that ALTER IMAGE REPOSITORY is not
 // supported in the current Snowflake specification.
 func validateAlterImageRepository(_ string, r StatementRange) []DiagMarker {
-	return []DiagMarker{
-		diagMarkerSpan(r,
-			"ALTER IMAGE REPOSITORY is not supported in the current Snowflake specification.", 4),
-	}
+	return oneMarker(
+		r,
+		"ALTER IMAGE REPOSITORY is not supported in the current Snowflake specification.")
+
 }
 
 // ── validateCreateApplicationPackage ──────────────────────────────────────────
@@ -7563,35 +8726,34 @@ func validateAlterImageRepository(_ string, r StatementRange) []DiagMarker {
 func validateCreateApplicationPackage(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	clean := cleanParseText(parseText)
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if marker, conflict := checkOrReplaceConflict(clean, r, "CREATE APPLICATION PACKAGE"); conflict {
+	if marker, conflict := checkOrReplaceConflictTok(sig, stripped, r, "CREATE APPLICATION PACKAGE"); conflict {
 		markers = append(markers, marker)
 		return markers
 	}
 
 	// 2. Package name is required; also used for account-level prefix check.
-	m := reCreateApplicationPackageName.FindStringSubmatch(clean)
-	if m == nil {
+	name, _ := extractNameAfterCreate(sig, stripped, nil, "APPLICATION", "PACKAGE")
+	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"Unexpected syntax in CREATE APPLICATION PACKAGE statement.", 4))
+			"Unexpected syntax in CREATE APPLICATION PACKAGE statement."))
 		return markers
 	}
-	if marker, swallowed := checkNameSwallowedByIF(m[1], clean, r, reIfNotExists, "Unexpected syntax in CREATE APPLICATION PACKAGE statement."); swallowed {
+	if marker, swallowed := checkNameSwallowedByIFTok(name, sig, stripped, r, "Unexpected syntax in CREATE APPLICATION PACKAGE statement."); swallowed {
 		markers = append(markers, marker)
 		return markers
 	}
-	if pfx := checkAccountLevelPrefix(m[1], r, "Application packages"); pfx != nil {
-		markers = append(markers, *pfx)
-	}
+	checkAccountLevelPrefix(name, r, "Application packages", &markers)
 
 	// 3. DISTRIBUTION must be INTERNAL or EXTERNAL if present.
-	if distMatch := reAppPkgDistribution.FindStringSubmatch(clean); distMatch != nil {
-		val := strings.ToUpper(distMatch[1])
+	if distVal, ok := findKWAssign(sig, stripped, "DISTRIBUTION"); ok {
+		val := strings.ToUpper(distVal)
 		if val != "INTERNAL" && val != "EXTERNAL" {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("DISTRIBUTION must be INTERNAL or EXTERNAL, got '%s'.", distMatch[1]), 4))
+				fmt.Sprintf("DISTRIBUTION must be INTERNAL or EXTERNAL, got '%s'.", distVal)))
 		}
 	}
 
@@ -7613,34 +8775,47 @@ func validateCreateApplicationPackage(parseText string, r StatementRange) []Diag
 func validateAlterApplicationPackage(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	clean := cleanParseText(parseText)
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
 	// 1. Package name is required.
-	m := reAlterApplicationPackageName.FindStringSubmatch(clean)
-	if m == nil {
+	name, _ := extractNameAfterKeywords(sig, stripped, "ALTER", "APPLICATION", "PACKAGE")
+	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"ALTER APPLICATION PACKAGE requires a package name.", 4))
+			"ALTER APPLICATION PACKAGE requires a package name."))
 		return markers
 	}
 
 	// 2. At least one known action must be present.
-	if !reAlterAppPkgAction.MatchString(clean) {
-		if reAlterAppPkgSetBare.MatchString(clean) {
+	hasKnownAction := hasKWSeq(sig, stripped, "SET", "DEFAULT", "RELEASE") ||
+		hasKWPair(sig, stripped, "SET", "DISTRIBUTION") ||
+		hasKWPair(sig, stripped, "ADD", "VERSION") ||
+		hasKWPair(sig, stripped, "DROP", "VERSION")
+	if !hasKnownAction {
+		// Distinguish "unknown SET property" from "unknown sub-command".
+		hasSetIdent := false
+		for i := 0; i+1 < len(sig); i++ {
+			if tokUpper(sig[i], stripped) == "SET" && isIdent(sig[i+1]) {
+				hasSetIdent = true
+				break
+			}
+		}
+		if hasSetIdent {
 			markers = append(markers, diagMarkerSpan(r,
-				"Unknown property in ALTER APPLICATION PACKAGE SET. Valid properties: DEFAULT RELEASE DIRECTIVE, DISTRIBUTION.", 4))
+				"Unknown property in ALTER APPLICATION PACKAGE SET. Valid properties: DEFAULT RELEASE DIRECTIVE, DISTRIBUTION."))
 		} else {
 			markers = append(markers, diagMarkerSpan(r,
-				"Unknown ALTER APPLICATION PACKAGE sub-command. Expected SET DEFAULT RELEASE DIRECTIVE, ADD VERSION, DROP VERSION, or SET DISTRIBUTION.", 4))
+				"Unknown ALTER APPLICATION PACKAGE sub-command. Expected SET DEFAULT RELEASE DIRECTIVE, ADD VERSION, DROP VERSION, or SET DISTRIBUTION."))
 		}
 		return markers
 	}
 
 	// 3. DISTRIBUTION must be INTERNAL or EXTERNAL if present.
-	if distMatch := reAppPkgDistribution.FindStringSubmatch(clean); distMatch != nil {
-		val := strings.ToUpper(distMatch[1])
+	if distVal, ok := findKWAssign(sig, stripped, "DISTRIBUTION"); ok {
+		val := strings.ToUpper(distVal)
 		if val != "INTERNAL" && val != "EXTERNAL" {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("DISTRIBUTION must be INTERNAL or EXTERNAL, got '%s'.", distMatch[1]), 4))
+				fmt.Sprintf("DISTRIBUTION must be INTERNAL or EXTERNAL, got '%s'.", distVal)))
 		}
 	}
 
@@ -7655,17 +8830,13 @@ func validateAlterApplicationPackage(parseText string, r StatementRange) []DiagM
 func validateDropApplicationPackage(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	clean := cleanParseText(parseText)
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
-	m := reDropApplicationPackageName.FindStringSubmatch(clean)
-	if m == nil {
+	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", "APPLICATION", "PACKAGE")
+	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"DROP APPLICATION PACKAGE requires a package name.", 4))
-		return markers
-	}
-	if marker, swallowed := checkNameSwallowedByIF(m[1], clean, r, reDropServiceIfExists, "DROP APPLICATION PACKAGE requires a package name."); swallowed {
-		markers = append(markers, marker)
-		return markers
+			"DROP APPLICATION PACKAGE requires a package name."))
 	}
 
 	return markers
@@ -7684,44 +8855,42 @@ func validateDropApplicationPackage(parseText string, r StatementRange) []DiagMa
 func validateCreateApplication(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	clean := cleanParseText(parseText)
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if marker, conflict := checkOrReplaceConflict(clean, r, "CREATE APPLICATION"); conflict {
+	if marker, conflict := checkOrReplaceConflictTok(sig, stripped, r, "CREATE APPLICATION"); conflict {
 		markers = append(markers, marker)
 		return markers
 	}
 
 	// 2. Application name is required.
-	m := reCreateApplicationName.FindStringSubmatch(clean)
-	if m == nil {
+	name, _ := extractNameAfterCreate(sig, stripped, nil, "APPLICATION")
+	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"Unexpected syntax in CREATE APPLICATION statement.", 4))
+			"Unexpected syntax in CREATE APPLICATION statement."))
 		return markers
 	}
-	// Guard against "CREATE APPLICATION IF NOT EXISTS" (no name).
-	if marker, swallowed := checkNameSwallowedByIF(m[1], clean, r, reIfNotExists, "Unexpected syntax in CREATE APPLICATION statement."); swallowed {
+	if marker, swallowed := checkNameSwallowedByIFTok(name, sig, stripped, r, "Unexpected syntax in CREATE APPLICATION statement."); swallowed {
 		markers = append(markers, marker)
 		return markers
 	}
-	if pfx := checkAccountLevelPrefix(m[1], r, "Applications"); pfx != nil {
-		markers = append(markers, *pfx)
-	}
+	checkAccountLevelPrefix(name, r, "Applications", &markers)
 
 	// 3. FROM APPLICATION PACKAGE is mandatory.
-	if !reAppFromPackage.MatchString(clean) {
+	if !hasKWSeq(sig, stripped, "FROM", "APPLICATION", "PACKAGE") {
 		markers = append(markers, diagMarkerSpan(r,
-			"Missing mandatory FROM APPLICATION PACKAGE clause in CREATE APPLICATION statement.", 4))
+			"Missing mandatory FROM APPLICATION PACKAGE clause in CREATE APPLICATION statement."))
 	}
 
 	// 4. If USING VERSION is present, PATCH must also be present.
-	if reAppUsingVersion.MatchString(clean) && !reAppUsingVersionPatch.MatchString(clean) {
+	if hasKWPair(sig, stripped, "USING", "VERSION") && !hasKW(sig, stripped, "PATCH") {
 		markers = append(markers, diagMarkerSpan(r,
-			"USING VERSION requires a PATCH number in CREATE APPLICATION statement.", 4))
+			"USING VERSION requires a PATCH number in CREATE APPLICATION statement."))
 	}
 
 	// 5. DEBUG_MODE must be TRUE or FALSE if present.
-	validateBoolProp(clean, "DEBUG_MODE", r, &markers)
+	validateBoolPropTok(sig, stripped, "DEBUG_MODE", r, &markers)
 
 	// 6. Only known properties are accepted.
 	noComments := strings.TrimSpace(stripCommentsSQL(parseText))
@@ -7740,39 +8909,55 @@ func validateCreateApplication(parseText string, r StatementRange) []DiagMarker 
 func validateAlterApplication(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	clean := cleanParseText(parseText)
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
 	// 1. Application name is required.
-	m := reAlterApplicationName.FindStringSubmatch(clean)
-	if m == nil {
+	name, _ := extractNameAfterKeywords(sig, stripped, "ALTER", "APPLICATION")
+	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"ALTER APPLICATION requires an application name.", 4))
+			"ALTER APPLICATION requires an application name."))
 		return markers
 	}
 
 	// 2. At least one known action must be present.
-	if !reAlterAppAction.MatchString(clean) {
-		if reAlterAppSetBare.MatchString(clean) {
+	hasKnownAction := hasKW(sig, stripped, "UPGRADE") ||
+		hasKWPair(sig, stripped, "SET", "DEBUG_MODE") ||
+		hasKWPair(sig, stripped, "UNSET", "DEBUG_MODE")
+	if !hasKnownAction {
+		// Distinguish "unknown property within SET/UNSET" vs "unknown sub-command".
+		hasSetIdent := false
+		hasUnsetIdent := false
+		for i := 0; i+1 < len(sig); i++ {
+			u := tokUpper(sig[i], stripped)
+			if u == "SET" && isIdent(sig[i+1]) {
+				hasSetIdent = true
+			}
+			if u == "UNSET" && isIdent(sig[i+1]) {
+				hasUnsetIdent = true
+			}
+		}
+		if hasSetIdent {
 			markers = append(markers, diagMarkerSpan(r,
-				"Unknown property in ALTER APPLICATION SET. Valid properties: DEBUG_MODE.", 4))
-		} else if reAlterAppUnsetBare.MatchString(clean) {
+				"Unknown property in ALTER APPLICATION SET. Valid properties: DEBUG_MODE."))
+		} else if hasUnsetIdent {
 			markers = append(markers, diagMarkerSpan(r,
-				"Unknown property in ALTER APPLICATION UNSET. Valid properties: DEBUG_MODE.", 4))
+				"Unknown property in ALTER APPLICATION UNSET. Valid properties: DEBUG_MODE."))
 		} else {
 			markers = append(markers, diagMarkerSpan(r,
-				"Unknown ALTER APPLICATION sub-command. Expected UPGRADE, SET DEBUG_MODE, or UNSET DEBUG_MODE.", 4))
+				"Unknown ALTER APPLICATION sub-command. Expected UPGRADE, SET DEBUG_MODE, or UNSET DEBUG_MODE."))
 		}
 		return markers
 	}
 
 	// 3. If UPGRADE USING VERSION is present, PATCH must also be present.
-	if reAppUsingVersion.MatchString(clean) && !reAppUsingVersionPatch.MatchString(clean) {
+	if hasKWPair(sig, stripped, "USING", "VERSION") && !hasKW(sig, stripped, "PATCH") {
 		markers = append(markers, diagMarkerSpan(r,
-			"USING VERSION requires a PATCH number in ALTER APPLICATION UPGRADE.", 4))
+			"USING VERSION requires a PATCH number in ALTER APPLICATION UPGRADE."))
 	}
 
 	// 4. DEBUG_MODE must be TRUE or FALSE when used with SET.
-	validateBoolProp(clean, "DEBUG_MODE", r, &markers)
+	validateBoolPropTok(sig, stripped, "DEBUG_MODE", r, &markers)
 
 	return markers
 }
@@ -7785,17 +8970,13 @@ func validateAlterApplication(parseText string, r StatementRange) []DiagMarker {
 func validateDropApplication(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	clean := cleanParseText(parseText)
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
-	m := reDropApplicationName.FindStringSubmatch(clean)
-	if m == nil {
+	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", "APPLICATION")
+	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"DROP APPLICATION requires an application name.", 4))
-		return markers
-	}
-	if marker, swallowed := checkNameSwallowedByIF(m[1], clean, r, reDropServiceIfExists, "DROP APPLICATION requires an application name."); swallowed {
-		markers = append(markers, marker)
-		return markers
+			"DROP APPLICATION requires an application name."))
 	}
 
 	return markers
@@ -7813,50 +8994,50 @@ func validateDropApplication(parseText string, r StatementRange) []DiagMarker {
 func validateCreateGitRepository(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	clean := cleanParseText(parseText)
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if marker, conflict := checkOrReplaceConflict(clean, r, "CREATE GIT REPOSITORY"); conflict {
+	if marker, conflict := checkOrReplaceConflictTok(sig, stripped, r, "CREATE GIT REPOSITORY"); conflict {
 		markers = append(markers, marker)
 		return markers
 	}
 
 	// 2. Repository name is required.
-	m := reCreateGitRepositoryName.FindStringSubmatch(clean)
-	if m == nil {
+	name, _ := extractNameAfterCreate(sig, stripped, nil, "GIT", "REPOSITORY")
+	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"Unexpected syntax in CREATE GIT REPOSITORY statement.", 4))
+			"Unexpected syntax in CREATE GIT REPOSITORY statement."))
 		return markers
 	}
-	if marker, swallowed := checkNameSwallowedByIF(m[1], clean, r, reIfNotExists, "Unexpected syntax in CREATE GIT REPOSITORY statement."); swallowed {
+	if marker, swallowed := checkNameSwallowedByIFTok(name, sig, stripped, r, "Unexpected syntax in CREATE GIT REPOSITORY statement."); swallowed {
 		markers = append(markers, marker)
 		return markers
 	}
 
-	// 3. API_INTEGRATION is mandatory.
-	if !reGitRepoAPIIntegration.MatchString(clean) {
+	// 3. API_INTEGRATION is mandatory — needs KEYWORD = <ident>.
+	if _, ok := findKWAssign(sig, stripped, "API_INTEGRATION"); !ok {
 		markers = append(markers, diagMarkerSpan(r,
-			"CREATE GIT REPOSITORY requires API_INTEGRATION = <integration_name>.", 4))
+			"CREATE GIT REPOSITORY requires API_INTEGRATION = <integration_name>."))
 	}
 
 	// 4. ORIGIN is mandatory and must be a valid-looking URL.
-	// Check against the original (with string literals) for the URL value.
-	noLiteralsOrig := strings.TrimSpace(stripCommentsSQL(parseText))
-	originMatch := reGitRepoOrigin.FindStringSubmatch(noLiteralsOrig)
-	if originMatch == nil {
-		if reGitRepoOriginBare.MatchString(clean) {
+	// Use the original (with string literals) for URL value extraction.
+	origSig := sigTokens(strings.TrimSpace(stripCommentsSQL(parseText)))
+	originURL, hasOriginStr := findKWAssignStr(origSig, strings.TrimSpace(stripCommentsSQL(parseText)), "ORIGIN")
+	if !hasOriginStr {
+		if hasKWAssign(sig, stripped, "ORIGIN") {
 			// ORIGIN = is present but value is not a string literal.
 			markers = append(markers, diagMarkerSpan(r,
-				"ORIGIN value must be a string literal (e.g. ORIGIN = 'https://...').", 4))
+				"ORIGIN value must be a string literal (e.g. ORIGIN = 'https://...')."))
 		} else {
 			markers = append(markers, diagMarkerSpan(r,
-				"CREATE GIT REPOSITORY requires ORIGIN = '<url>'.", 4))
+				"CREATE GIT REPOSITORY requires ORIGIN = '<url>'."))
 		}
 	} else {
-		url := originMatch[1]
-		if !strings.HasPrefix(strings.ToLower(url), "https://") && !strings.HasPrefix(url, "git@") {
+		if !strings.HasPrefix(strings.ToLower(originURL), "https://") && !strings.HasPrefix(originURL, "git@") {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("ORIGIN URL should start with 'https://' or 'git@', got '%s'.", url), 4))
+				fmt.Sprintf("ORIGIN URL should start with 'https://' or 'git@', got '%s'.", originURL)))
 		}
 	}
 
@@ -7878,20 +9059,27 @@ func validateCreateGitRepository(parseText string, r StatementRange) []DiagMarke
 func validateAlterGitRepository(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	clean := cleanParseText(parseText)
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
 	// 1. Repository name is required.
-	m := reAlterGitRepositoryName.FindStringSubmatch(clean)
-	if m == nil {
+	name, _ := extractNameAfterKeywords(sig, stripped, "ALTER", "GIT", "REPOSITORY")
+	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"ALTER GIT REPOSITORY requires a repository name.", 4))
+			"ALTER GIT REPOSITORY requires a repository name."))
 		return markers
 	}
 
 	// 2. Check for known sub-commands.
-	if !reAlterGitRepoAction.MatchString(clean) {
+	hasKnownAction := hasKW(sig, stripped, "FETCH") ||
+		hasKWPair(sig, stripped, "SET", "API_INTEGRATION") ||
+		hasKWPair(sig, stripped, "SET", "GIT_CREDENTIALS") ||
+		hasKWPair(sig, stripped, "SET", "COMMENT") ||
+		hasKWPair(sig, stripped, "UNSET", "GIT_CREDENTIALS") ||
+		hasKWPair(sig, stripped, "UNSET", "COMMENT")
+	if !hasKnownAction {
 		markers = append(markers, diagMarkerSpan(r,
-			"Unknown ALTER GIT REPOSITORY sub-command. Expected FETCH, SET API_INTEGRATION/GIT_CREDENTIALS/COMMENT, or UNSET GIT_CREDENTIALS/COMMENT.", 4))
+			"Unknown ALTER GIT REPOSITORY sub-command. Expected FETCH, SET API_INTEGRATION/GIT_CREDENTIALS/COMMENT, or UNSET GIT_CREDENTIALS/COMMENT."))
 	}
 
 	return markers
@@ -7904,18 +9092,13 @@ func validateAlterGitRepository(parseText string, r StatementRange) []DiagMarker
 func validateDropGitRepository(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	clean := cleanParseText(parseText)
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
-	m := reDropGitRepositoryName.FindStringSubmatch(clean)
-	if m == nil {
+	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", "GIT", "REPOSITORY")
+	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"DROP GIT REPOSITORY requires a repository name.", 4))
-		return markers
-	}
-	// Guard against "DROP GIT REPOSITORY IF EXISTS" (no name).
-	if marker, swallowed := checkNameSwallowedByIF(m[1], clean, r, reDropServiceIfExists, "DROP GIT REPOSITORY requires a repository name."); swallowed {
-		markers = append(markers, marker)
-		return markers
+			"DROP GIT REPOSITORY requires a repository name."))
 	}
 
 	return markers
@@ -7923,50 +9106,50 @@ func validateDropGitRepository(parseText string, r StatementRange) []DiagMarker 
 
 // ── CREATE SECRET data-driven type validation ────────────────────────────────
 
-// secretPropDef associates a regex with its display name and owning type(s).
+// secretPropDef associates a keyword with its display name and owning type(s).
 type secretPropDef struct {
-	re    *regexp.Regexp
-	name  string
-	owner string // human-readable owner type(s)
+	keyword string // e.g. "API_AUTHENTICATION"
+	name    string
+	owner   string // human-readable owner type(s)
 }
 
 // secretMandatoryDef describes a mandatory property for a given TYPE.
 type secretMandatoryDef struct {
-	re   *regexp.Regexp
-	hint string // e.g. "API_AUTHENTICATION = <security_integration_name>"
+	keyword string // e.g. "API_AUTHENTICATION"
+	hint    string // e.g. "API_AUTHENTICATION = <security_integration_name>"
 }
 
-// secretTypeAllowed maps each TYPE to the set of type-specific property regexes
+// secretTypeAllowed maps each TYPE to the set of type-specific property keywords
 // that are valid for it. Properties not in this set trigger a cross-type warning.
-var secretTypeAllowed = map[string]map[*regexp.Regexp]bool{
-	"OAUTH2":               {reSecretAPIA: true, reSecretOAuthScopes: true, reSecretOAuthRT: true, reSecretOAuthRTExp: true},
-	"PASSWORD":             {reSecretUsername: true, reSecretPassword: true},
-	"GENERIC_STRING":       {reSecretString: true},
-	"CLOUD_PROVIDER_TOKEN": {reSecretAPIA: true, reSecretEnabled: true},
-	"SYMMETRIC_KEY":        {reSecretAlgorithm: true},
+var secretTypeAllowed = map[string]map[string]bool{
+	"OAUTH2":               {"API_AUTHENTICATION": true, "OAUTH_SCOPES": true, "OAUTH_REFRESH_TOKEN": true, "OAUTH_REFRESH_TOKEN_EXPIRY_TIME": true},
+	"PASSWORD":             {"USERNAME": true, "PASSWORD": true},
+	"GENERIC_STRING":       {"SECRET_STRING": true},
+	"CLOUD_PROVIDER_TOKEN": {"API_AUTHENTICATION": true, "ENABLED": true},
+	"SYMMETRIC_KEY":        {"ALGORITHM": true},
 }
 
 // secretTypeMandatory maps each TYPE to its mandatory properties.
 var secretTypeMandatory = map[string][]secretMandatoryDef{
-	"OAUTH2":               {{reSecretAPIA, "API_AUTHENTICATION = <security_integration_name>"}},
-	"PASSWORD":             {{reSecretUsername, "USERNAME = '<username>'"}, {reSecretPassword, "PASSWORD = '<password>'"}},
-	"GENERIC_STRING":       {{reSecretString, "SECRET_STRING = '<value>'"}},
-	"CLOUD_PROVIDER_TOKEN": {{reSecretAPIA, "API_AUTHENTICATION = <security_integration_name>"}},
-	"SYMMETRIC_KEY":        {{reSecretAlgorithm, "ALGORITHM = '<algorithm>'"}},
+	"OAUTH2":               {{"API_AUTHENTICATION", "API_AUTHENTICATION = <security_integration_name>"}},
+	"PASSWORD":             {{"USERNAME", "USERNAME = '<username>'"}, {"PASSWORD", "PASSWORD = '<password>'"}},
+	"GENERIC_STRING":       {{"SECRET_STRING", "SECRET_STRING = '<value>'"}},
+	"CLOUD_PROVIDER_TOKEN": {{"API_AUTHENTICATION", "API_AUTHENTICATION = <security_integration_name>"}},
+	"SYMMETRIC_KEY":        {{"ALGORITHM", "ALGORITHM = '<algorithm>'"}},
 }
 
 // secretTypedProps lists all type-specific properties with their owning type.
 // This is iterated for cross-type violation detection.
 var secretTypedProps = []secretPropDef{
-	{reSecretAPIA, "API_AUTHENTICATION", "OAUTH2 or CLOUD_PROVIDER_TOKEN"},
-	{reSecretUsername, "USERNAME", "PASSWORD"},
-	{reSecretPassword, "PASSWORD", "PASSWORD"},
-	{reSecretString, "SECRET_STRING", "GENERIC_STRING"},
-	{reSecretEnabled, "ENABLED", "CLOUD_PROVIDER_TOKEN"},
-	{reSecretAlgorithm, "ALGORITHM", "SYMMETRIC_KEY"},
-	{reSecretOAuthScopes, "OAUTH_SCOPES", "OAUTH2"},
-	{reSecretOAuthRT, "OAUTH_REFRESH_TOKEN", "OAUTH2"},
-	{reSecretOAuthRTExp, "OAUTH_REFRESH_TOKEN_EXPIRY_TIME", "OAUTH2"},
+	{"API_AUTHENTICATION", "API_AUTHENTICATION", "OAUTH2 or CLOUD_PROVIDER_TOKEN"},
+	{"USERNAME", "USERNAME", "PASSWORD"},
+	{"PASSWORD", "PASSWORD", "PASSWORD"},
+	{"SECRET_STRING", "SECRET_STRING", "GENERIC_STRING"},
+	{"ENABLED", "ENABLED", "CLOUD_PROVIDER_TOKEN"},
+	{"ALGORITHM", "ALGORITHM", "SYMMETRIC_KEY"},
+	{"OAUTH_SCOPES", "OAUTH_SCOPES", "OAUTH2"},
+	{"OAUTH_REFRESH_TOKEN", "OAUTH_REFRESH_TOKEN", "OAUTH2"},
+	{"OAUTH_REFRESH_TOKEN_EXPIRY_TIME", "OAUTH_REFRESH_TOKEN_EXPIRY_TIME", "OAUTH2"},
 }
 
 // ── validateCreateSecret ─────────────────────────────────────────────────────
@@ -7985,63 +9168,64 @@ var secretTypedProps = []secretPropDef{
 func validateCreateSecret(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	clean := cleanParseText(parseText)
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if marker, conflict := checkOrReplaceConflict(clean, r, "CREATE SECRET"); conflict {
+	if marker, conflict := checkOrReplaceConflictTok(sig, stripped, r, "CREATE SECRET"); conflict {
 		markers = append(markers, marker)
 		return markers
 	}
 
 	// 2. Secret name is required.
-	m := reCreateSecretName.FindStringSubmatch(clean)
-	if m == nil {
+	name, _ := extractNameAfterCreate(sig, stripped, nil, "SECRET")
+	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"Unexpected syntax in CREATE SECRET statement.", 4))
+			"Unexpected syntax in CREATE SECRET statement."))
 		return markers
 	}
-	if marker, swallowed := checkNameSwallowedByIF(m[1], clean, r, reIfNotExists, "Unexpected syntax in CREATE SECRET statement."); swallowed {
+	if marker, swallowed := checkNameSwallowedByIFTok(name, sig, stripped, r, "Unexpected syntax in CREATE SECRET statement."); swallowed {
 		markers = append(markers, marker)
 		return markers
 	}
 
 	// 3. TYPE is mandatory.
-	typeMatch := reSecretType.FindStringSubmatch(clean)
-	if typeMatch == nil {
+	typeVal, hasType := findKWAssign(sig, stripped, "TYPE")
+	if !hasType {
 		markers = append(markers, diagMarkerSpan(r,
-			"CREATE SECRET requires TYPE = OAUTH2 | PASSWORD | GENERIC_STRING | CLOUD_PROVIDER_TOKEN | SYMMETRIC_KEY.", 4))
+			"CREATE SECRET requires TYPE = OAUTH2 | PASSWORD | GENERIC_STRING | CLOUD_PROVIDER_TOKEN | SYMMETRIC_KEY."))
 		return markers
 	}
 
-	secretType := strings.ToUpper(typeMatch[1])
+	secretType := strings.ToUpper(typeVal)
 
 	// 4. Validate TYPE value and type-specific properties.
 	allowed, ok := secretTypeAllowed[secretType]
 	if !ok {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("Unknown TYPE '%s'. Valid types: OAUTH2, PASSWORD, GENERIC_STRING, CLOUD_PROVIDER_TOKEN, SYMMETRIC_KEY.", typeMatch[1]), 4))
+			fmt.Sprintf("Unknown TYPE '%s'. Valid types: OAUTH2, PASSWORD, GENERIC_STRING, CLOUD_PROVIDER_TOKEN, SYMMETRIC_KEY.", typeVal)))
 		return markers
 	}
 
 	// Check mandatory properties.
 	if mandatory, hasMandatory := secretTypeMandatory[secretType]; hasMandatory {
 		for _, mp := range mandatory {
-			if !mp.re.MatchString(clean) {
+			if !hasKWAssign(sig, stripped, mp.keyword) {
 				markers = append(markers, diagMarkerSpan(r,
-					fmt.Sprintf("TYPE = %s requires %s.", secretType, mp.hint), 4))
+					fmt.Sprintf("TYPE = %s requires %s.", secretType, mp.hint)))
 			}
 		}
 	}
 
 	// Cross-type property checks.
 	for _, sp := range secretTypedProps {
-		if allowed[sp.re] {
+		if allowed[sp.keyword] {
 			continue // property is valid for this TYPE
 		}
-		if sp.re.MatchString(clean) {
+		if hasKWAssign(sig, stripped, sp.keyword) {
 			markers = append(markers, diagMarkerSpan(r,
 				fmt.Sprintf("%s is not valid for TYPE = %s. %s belongs to TYPE = %s.",
-					sp.name, secretType, sp.name, sp.owner), 4))
+					sp.name, secretType, sp.name, sp.owner)))
 		}
 	}
 
@@ -8063,20 +9247,45 @@ func validateCreateSecret(parseText string, r StatementRange) []DiagMarker {
 func validateAlterSecret(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	clean := cleanParseText(parseText)
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
 	// 1. Secret name is required.
-	m := reAlterSecretName.FindStringSubmatch(clean)
-	if m == nil {
-		markers = append(markers, diagMarkerSpan(r,
-			"ALTER SECRET requires a secret name.", 4))
-		return markers
+	// Note: extractNameAfterKeywords skips IF EXISTS, so
+	// "ALTER SECRET IF EXISTS" (no name after) returns "". The old regex
+	// captured "IF" as the name via backtracking and then fell through to the
+	// sub-command check. Preserve that by detecting this specific pattern.
+	name, _ := extractNameAfterKeywords(sig, stripped, "ALTER", "SECRET")
+	if name == "" {
+		// Special case: "ALTER SECRET IF EXISTS" (no name) — fall through to
+		// sub-command check rather than returning "missing name" immediately.
+		ifExistsNoName := len(sig) >= 4 &&
+			tokUpper(sig[2], stripped) == "IF" &&
+			tokUpper(sig[3], stripped) == "EXISTS" &&
+			(len(sig) == 4 || !isNonEmptyIdent(sig[4], stripped))
+		if !ifExistsNoName {
+			markers = append(markers, diagMarkerSpan(r,
+				"ALTER SECRET requires a secret name."))
+			return markers
+		}
 	}
 
 	// 2. Check for known sub-commands.
-	if !reAlterSecretAction.MatchString(clean) {
+	validSetProps := []string{"SECRET_STRING", "USERNAME", "PASSWORD", "OAUTH_REFRESH_TOKEN",
+		"OAUTH_REFRESH_TOKEN_EXPIRY_TIME", "OAUTH_SCOPES", "API_AUTHENTICATION", "COMMENT"}
+	hasKnownAction := false
+	for _, prop := range validSetProps {
+		if hasKWPair(sig, stripped, "SET", prop) {
+			hasKnownAction = true
+			break
+		}
+	}
+	if !hasKnownAction {
+		hasKnownAction = hasKWPair(sig, stripped, "UNSET", "COMMENT")
+	}
+	if !hasKnownAction {
 		markers = append(markers, diagMarkerSpan(r,
-			"Unknown ALTER SECRET sub-command. Expected SET SECRET_STRING/USERNAME/PASSWORD/OAUTH_REFRESH_TOKEN/OAUTH_REFRESH_TOKEN_EXPIRY_TIME/OAUTH_SCOPES/API_AUTHENTICATION/COMMENT, or UNSET COMMENT.", 4))
+			"Unknown ALTER SECRET sub-command. Expected SET SECRET_STRING/USERNAME/PASSWORD/OAUTH_REFRESH_TOKEN/OAUTH_REFRESH_TOKEN_EXPIRY_TIME/OAUTH_SCOPES/API_AUTHENTICATION/COMMENT, or UNSET COMMENT."))
 	}
 
 	return markers
@@ -8091,27 +9300,35 @@ func validateAlterSecret(parseText string, r StatementRange) []DiagMarker {
 func validateCreateNotebook(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	clean := cleanParseText(parseText)
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if marker, conflict := checkOrReplaceConflict(clean, r, "CREATE NOTEBOOK"); conflict {
+	if marker, conflict := checkOrReplaceConflictTok(sig, stripped, r, "CREATE NOTEBOOK"); conflict {
 		markers = append(markers, marker)
 		return markers
 	}
 
 	// 2. Notebook name is required.
-	if reCreateNotebookName.FindStringSubmatch(clean) == nil {
+	name, _ := extractNameAfterCreate(sig, stripped, nil, "NOTEBOOK")
+	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"CREATE NOTEBOOK requires a notebook name.", 4))
+			"CREATE NOTEBOOK requires a notebook name."))
 		return markers
 	}
 
 	// 3. When FROM is specified, MAIN_FILE is required.
-	// Checks run against clean (string literals and comments removed) to avoid
-	// false positives from COMMENT values containing FROM or MAIN_FILE.
-	if reCreateNotebookFrom.MatchString(clean) && !reCreateNotebookMainFile.MatchString(clean) {
+	// Check FROM followed by a string literal in token stream.
+	hasFrom := false
+	for i := 0; i+1 < len(sig); i++ {
+		if tokUpper(sig[i], stripped) == "FROM" && sig[i+1].Kind == sqltok.StringLit {
+			hasFrom = true
+			break
+		}
+	}
+	if hasFrom && !hasKWAssign(sig, stripped, "MAIN_FILE") {
 		markers = append(markers, diagMarkerSpan(r,
-			"MAIN_FILE is required when FROM is specified in CREATE NOTEBOOK.", 4))
+			"MAIN_FILE is required when FROM is specified in CREATE NOTEBOOK."))
 	}
 
 	return markers
@@ -8126,33 +9343,58 @@ func validateCreateNotebook(parseText string, r StatementRange) []DiagMarker {
 func validateAlterNotebook(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	clean := cleanParseText(parseText)
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
 	// 1. Notebook name is required.
-	m := reAlterNotebookName.FindStringSubmatch(clean)
-	if m == nil {
-		markers = append(markers, diagMarkerSpan(r,
-			"ALTER NOTEBOOK requires a notebook name.", 4))
-		return markers
+	name, _ := extractNameAfterKeywords(sig, stripped, "ALTER", "NOTEBOOK")
+	if name == "" {
+		// When the old regex captured "IF" as the name (ALTER NOTEBOOK IF EXISTS
+		// with no actual name), it fell through to sub-command detection.
+		ifExistsNoName := len(sig) >= 4 &&
+			tokUpper(sig[2], stripped) == "IF" &&
+			tokUpper(sig[3], stripped) == "EXISTS" &&
+			(len(sig) == 4 || !isNonEmptyIdent(sig[4], stripped))
+		if !ifExistsNoName {
+			markers = append(markers, diagMarkerSpan(r,
+				"ALTER NOTEBOOK requires a notebook name."))
+			return markers
+		}
 	}
 
 	// 2. Check for known sub-commands.
-	if !reAlterNotebookAction.MatchString(clean) {
+	hasSet := hasKW(sig, stripped, "SET")
+	hasUnset := hasKW(sig, stripped, "UNSET")
+	hasRename := hasKWPair(sig, stripped, "RENAME", "TO")
+	hasAddLive := hasKWSeq(sig, stripped, "ADD", "LIVE", "VERSION")
+	if !hasSet && !hasUnset && !hasRename && !hasAddLive {
 		markers = append(markers, diagMarkerSpan(r,
-			"Unknown ALTER NOTEBOOK sub-command. Expected SET, UNSET, RENAME TO, or ADD LIVE VERSION FROM LAST.", 4))
+			"Unknown ALTER NOTEBOOK sub-command. Expected SET, UNSET, RENAME TO, or ADD LIVE VERSION FROM LAST."))
 		return markers
 	}
 
 	// 3. RENAME TO requires a target name.
-	if reAlterNotebookRenameToBare.MatchString(clean) && reAlterNotebookRenameTo.FindStringSubmatch(clean) == nil {
-		markers = append(markers, diagMarkerSpan(r,
-			"RENAME TO requires a new notebook name.", 4))
+	if hasRename {
+		// Find RENAME TO and check for a name after it.
+		found := false
+		for i := 0; i+2 < len(sig); i++ {
+			if tokUpper(sig[i], stripped) == "RENAME" && tokUpper(sig[i+1], stripped) == "TO" {
+				if i+2 < len(sig) && isNonEmptyIdent(sig[i+2], stripped) {
+					found = true
+				}
+				break
+			}
+		}
+		if !found {
+			markers = append(markers, diagMarkerSpan(r,
+				"RENAME TO requires a new notebook name."))
+		}
 	}
 
 	// 4. ADD LIVE VERSION requires FROM LAST.
-	if reAlterNotebookAddLiveVersion.MatchString(clean) && !reAlterNotebookAddLiveVersionFull.MatchString(clean) {
+	if hasAddLive && !hasKWPair(sig, stripped, "FROM", "LAST") {
 		markers = append(markers, diagMarkerSpan(r,
-			"ADD LIVE VERSION requires FROM LAST.", 4))
+			"ADD LIVE VERSION requires FROM LAST."))
 	}
 
 	return markers
@@ -8166,19 +9408,24 @@ func validateAlterNotebook(parseText string, r StatementRange) []DiagMarker {
 func validateDropNotebook(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	clean := cleanParseText(parseText)
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
 	// 1. Notebook name is required.
-	if reDropNotebookName.FindStringSubmatch(clean) == nil {
+	name, _ := extractNameAfterKeywords(sig, stripped, "DROP", "NOTEBOOK")
+	if name == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"DROP NOTEBOOK requires a notebook name.", 4))
+			"DROP NOTEBOOK requires a notebook name."))
 		return markers
 	}
 
 	// 2. CASCADE / RESTRICT are not valid for DROP NOTEBOOK.
-	if reCascadeRestrictTrailing.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			"CASCADE / RESTRICT are not valid for DROP NOTEBOOK.", 4))
+	if len(sig) > 0 {
+		lastKW := tokUpper(sig[len(sig)-1], stripped)
+		if lastKW == "CASCADE" || lastKW == "RESTRICT" {
+			markers = append(markers, diagMarkerSpan(r,
+				"CASCADE / RESTRICT are not valid for DROP NOTEBOOK."))
+		}
 	}
 
 	return markers
@@ -8194,18 +9441,32 @@ func validateDropNotebook(parseText string, r StatementRange) []DiagMarker {
 func validateAlterTableSearchOptimization(stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	clean := strings.TrimSpace(reStripStringLiterals.ReplaceAllString(stripped, "''"))
+	clean := strings.TrimSpace(sqltok.StripStrings(stripped))
+	soSig := sigTokens(clean)
 
-	// If there is no ON clause, the bare form is valid — nothing to check.
-	loc := reSearchOptOnClause.FindStringIndex(clean)
-	if loc == nil {
+	// Find SEARCH OPTIMIZATION ON sequence in tokens.
+	onIdx := -1
+	for i := 0; i+2 < len(soSig); i++ {
+		if tokUpper(soSig[i], clean) == "SEARCH" &&
+			tokUpper(soSig[i+1], clean) == "OPTIMIZATION" &&
+			tokUpper(soSig[i+2], clean) == "ON" {
+			onIdx = i + 2
+			break
+		}
+	}
+	if onIdx < 0 {
 		return markers
 	}
-	onBody := strings.TrimSpace(clean[loc[1]:])
+
+	// Extract the text after ON.
+	onBody := ""
+	if onIdx+1 < len(soSig) {
+		onBody = strings.TrimSpace(clean[soSig[onIdx].End:])
+	}
 
 	if onBody == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"SEARCH OPTIMIZATION ON requires at least one expression (e.g. EQUALITY, SUBSTRING, GEO, FULL_TEXT).", 4))
+			"SEARCH OPTIMIZATION ON requires at least one expression (e.g. EQUALITY, SUBSTRING, GEO, FULL_TEXT)."))
 		return markers
 	}
 
@@ -8217,16 +9478,17 @@ func validateAlterTableSearchOptimization(stripped string, r StatementRange) []D
 		if expr == "" {
 			continue
 		}
-		m := reSearchOptExpr.FindStringSubmatch(expr)
-		if m == nil {
+		// Token-scan each expression for IDENTIFIER( pattern.
+		exprSig := sigTokens(expr)
+		if len(exprSig) < 2 || !isIdent(exprSig[0]) || exprSig[1].Kind != sqltok.LParen {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("Invalid search optimization expression: %q. Expected EQUALITY, SUBSTRING, GEO, or FULL_TEXT.", expr), 4))
+				fmt.Sprintf("Invalid search optimization expression: %q. Expected EQUALITY, SUBSTRING, GEO, or FULL_TEXT.", expr)))
 			continue
 		}
-		funcName := strings.ToUpper(m[1])
+		funcName := strings.ToUpper(exprSig[0].Text(expr))
 		if !searchOptValidExprs[funcName] {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("Unknown search optimization type %q. Valid types are EQUALITY, SUBSTRING, GEO, FULL_TEXT.", funcName), 4))
+				fmt.Sprintf("Unknown search optimization type %q. Valid types are EQUALITY, SUBSTRING, GEO, FULL_TEXT.", funcName)))
 		}
 		// Check for trailing content after the closing paren of the
 		// expression — a missing comma between expressions like
@@ -8237,7 +9499,7 @@ func validateAlterTableSearchOptimization(stripped string, r StatementRange) []D
 				trailing := strings.TrimRight(strings.TrimSpace(expr[openIdx+closeIdx+1:]), "; ")
 				if trailing != "" {
 					markers = append(markers, diagMarkerSpan(r,
-						fmt.Sprintf("Unexpected trailing content after search optimization expression %s(...): %q. Separate multiple expressions with commas.", funcName, trailing), 4))
+						fmt.Sprintf("Unexpected trailing content after search optimization expression %s(...): %q. Separate multiple expressions with commas.", funcName, trailing)))
 				}
 			}
 		}
@@ -8259,33 +9521,48 @@ func validateAlterTableSearchOptimization(stripped string, r StatementRange) []D
 func validateAlterDynamicTable(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	clean := cleanParseText(parseText)
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
 	// 1. Table name is required.
-	nm := reAlterDynTableName.FindStringSubmatch(clean)
-	if nm == nil {
-		markers = append(markers, diagMarkerSpan(r,
-			"ALTER DYNAMIC TABLE requires a table name.", 4))
-		return markers
+	name, nameIdx := extractNameAfterKeywords(sig, stripped, "ALTER", "DYNAMIC", "TABLE")
+	var afterName []sqltok.Token
+	if name == "" {
+		// Handle IF EXISTS without a name (old regex captured "IF" as name).
+		ifExistsNoName := len(sig) >= 5 &&
+			tokUpper(sig[3], stripped) == "IF" &&
+			tokUpper(sig[4], stripped) == "EXISTS" &&
+			(len(sig) == 5 || !isNonEmptyIdent(sig[5], stripped))
+		if !ifExistsNoName {
+			markers = append(markers, diagMarkerSpan(r,
+				"ALTER DYNAMIC TABLE requires a table name."))
+			return markers
+		}
+		// No name — sub-commands start after IF EXISTS
+		if 5 < len(sig) {
+			afterName = sig[5:]
+		}
+	} else {
+		// Skip past the identifier path to find sub-commands.
+		_, pathEnd := readIdentPath(sig, stripped, nameIdx)
+		if pathEnd < len(sig) {
+			afterName = sig[pathEnd:]
+		}
 	}
 
-	// 2. Determine sub-command from the suffix after the table name, so that
-	//    a table name matching a keyword (e.g. "suspend") is not mistaken
-	//    for a sub-command.
-	suffix := clean[reAlterDynTableName.FindStringIndex(clean)[1]:]
-	hasRefresh := reAlterDynTableRefresh.MatchString(suffix)
-	hasSuspend := reAlterDynTableSuspend.MatchString(suffix)
-	hasResume := reAlterDynTableResume.MatchString(suffix)
-	hasSet := reAlterDynTableSet.MatchString(suffix)
-	hasUnset := reAlterDynTableUnset.MatchString(suffix)
-	hasSwap := reAlterDynTableSwapWith.MatchString(suffix)
-	hasRename := reAlterDynTableRenameTo.MatchString(suffix)
+	hasRefresh := hasKW(afterName, stripped, "REFRESH")
+	hasSuspend := hasKW(afterName, stripped, "SUSPEND")
+	hasResume := hasKW(afterName, stripped, "RESUME")
+	hasSet := hasKW(afterName, stripped, "SET")
+	hasUnset := hasKW(afterName, stripped, "UNSET")
+	hasSwap := hasKWPair(afterName, stripped, "SWAP", "WITH")
+	hasRename := hasKWPair(afterName, stripped, "RENAME", "TO")
 
 	anyKnown := hasRefresh || hasSuspend || hasResume || hasSet || hasUnset || hasSwap || hasRename
 
 	if !anyKnown {
 		markers = append(markers, diagMarkerSpan(r,
-			"Unknown ALTER DYNAMIC TABLE sub-command. Expected REFRESH, SUSPEND, RESUME, SET, UNSET, SWAP WITH, or RENAME TO.", 4))
+			"Unknown ALTER DYNAMIC TABLE sub-command. Expected REFRESH, SUSPEND, RESUME, SET, UNSET, SWAP WITH, or RENAME TO."))
 		return markers
 	}
 
@@ -8298,42 +9575,78 @@ func validateAlterDynamicTable(parseText string, r StatementRange) []DiagMarker 
 	}
 	if subCmdCount > 1 {
 		markers = append(markers, diagMarkerSpan(r,
-			"ALTER DYNAMIC TABLE supports only one sub-command per statement.", 4))
+			"ALTER DYNAMIC TABLE supports only one sub-command per statement."))
 	}
 
 	// 3. SWAP WITH requires a target table name.
-	if hasSwap && reAlterDynTableSwapTarget.FindStringSubmatch(suffix) == nil {
-		markers = append(markers, diagMarkerSpan(r,
-			"SWAP WITH requires a target table name.", 4))
+	if hasSwap {
+		hasTarget := false
+		for i := 0; i+2 < len(afterName); i++ {
+			if tokUpper(afterName[i], stripped) == "SWAP" && tokUpper(afterName[i+1], stripped) == "WITH" {
+				if i+2 < len(afterName) && isIdent(afterName[i+2]) {
+					hasTarget = true
+				}
+				break
+			}
+		}
+		if !hasTarget {
+			markers = append(markers, diagMarkerSpan(r,
+				"SWAP WITH requires a target table name."))
+		}
 	}
 
 	// 4. RENAME TO requires a new name.
-	if hasRename && reAlterDynTableRenameTarget.FindStringSubmatch(suffix) == nil {
-		markers = append(markers, diagMarkerSpan(r,
-			"RENAME TO requires a new table name.", 4))
+	if hasRename {
+		hasTarget := false
+		for i := 0; i+2 < len(afterName); i++ {
+			if tokUpper(afterName[i], stripped) == "RENAME" && tokUpper(afterName[i+1], stripped) == "TO" {
+				if i+2 < len(afterName) && isIdent(afterName[i+2]) {
+					hasTarget = true
+				}
+				break
+			}
+		}
+		if !hasTarget {
+			markers = append(markers, diagMarkerSpan(r,
+				"RENAME TO requires a new table name."))
+		}
 	}
 
 	// 5. Bare SET / UNSET without a property name.
-	suffixTrimmed := strings.TrimSpace(suffix)
-	if hasSet && !hasUnset && strings.EqualFold(suffixTrimmed, "SET") {
+	if hasSet && !hasUnset && len(afterName) == 1 && tokUpper(afterName[0], stripped) == "SET" {
 		markers = append(markers, diagMarkerSpan(r,
-			"SET requires at least one property (e.g. TARGET_LAG, WAREHOUSE).", 4))
+			"SET requires at least one property (e.g. TARGET_LAG, WAREHOUSE)."))
 	}
-	if hasUnset && !hasSet && strings.EqualFold(suffixTrimmed, "UNSET") {
+	if hasUnset && !hasSet && len(afterName) == 1 && tokUpper(afterName[0], stripped) == "UNSET" {
 		markers = append(markers, diagMarkerSpan(r,
-			"UNSET requires at least one property name.", 4))
+			"UNSET requires at least one property name."))
 	}
 
 	// 6. SET TARGET_LAG value validation.
-	//    The bare check uses suffix (no string literals to worry about).
-	//    The value check uses stripCommentsSafe (comments removed but strings
-	//    preserved) so that a valid TARGET_LAG inside a comment does not mask
-	//    an invalid actual value.
-	if hasSet && reAlterDynTableTargetLagBare.MatchString(suffix) {
-		commentStripped := stripCommentsSafe(parseText)
-		if !reAlterDynTableTargetLagVal.MatchString(commentStripped) {
+	if hasSet && hasKWAssign(afterName, stripped, "TARGET_LAG") {
+		valid := false
+		for i := 0; i+2 < len(afterName); i++ {
+			if tokUpper(afterName[i], stripped) != "TARGET_LAG" {
+				continue
+			}
+			if afterName[i+1].Kind != sqltok.Operator || afterName[i+1].Text(stripped) != "=" {
+				continue
+			}
+			valTok := afterName[i+2]
+			if tokUpper(valTok, stripped) == "DOWNSTREAM" {
+				valid = true
+			} else if valTok.Kind == sqltok.StringLit {
+				// Validate quoted duration: must be '<positive_int> <unit>'
+				raw := valTok.Text(stripped)
+				if len(raw) >= 2 && raw[0] == '\'' && raw[len(raw)-1] == '\'' {
+					valid = isValidTargetLagDuration(raw[1 : len(raw)-1])
+				}
+			}
+			break
+		}
+		if !valid {
 			markers = append(markers, diagMarkerSpan(r,
-				"Invalid TARGET_LAG value. Expected a quoted duration (e.g. '1 minute') or DOWNSTREAM.", 4))
+				"Invalid TARGET_LAG value. Expected a quoted duration (e.g. '1 minute') or DOWNSTREAM."))
 		}
 	}
 
@@ -8350,36 +9663,54 @@ func validateAlterDynamicTable(parseText string, r StatementRange) []DiagMarker 
 func validateAlterTableSwapWith(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	clean := cleanParseText(parseText)
+	stripped := stripCommentsSQL(parseText)
+	sig := sigTokens(stripped)
 
-	// 1. Extract source table name.
-	srcMatch := reAlterTableSwapWithName.FindStringSubmatch(clean)
-	if srcMatch == nil {
+	// 1. Extract source table name: ALTER TABLE [IF EXISTS] <name> SWAP WITH ...
+	srcName, srcEnd := extractNameAfterKeywords(sig, stripped, "ALTER", "TABLE")
+	if srcName == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"ALTER TABLE … SWAP WITH requires a table name.", 4))
+			"ALTER TABLE … SWAP WITH requires a table name."))
 		return markers
 	}
-	srcParts := normalizeSnowflakeIdent(srcMatch[1])
+	srcParts := normalizeSnowflakeIdent(srcName)
 
 	// 2. Target table name is required after SWAP WITH.
-	tgtMatch := reAlterTableSwapTarget.FindStringSubmatch(clean)
-	if tgtMatch == nil {
+	var tgtName string
+	var tgtEnd int
+	for i := srcEnd; i+2 < len(sig); i++ {
+		if tokUpper(sig[i], stripped) == "SWAP" && tokUpper(sig[i+1], stripped) == "WITH" {
+			if i+2 < len(sig) && isIdent(sig[i+2]) {
+				tgtName, tgtEnd = readIdentPath(sig, stripped, i+2)
+			}
+			break
+		}
+	}
+	if tgtName == "" {
 		markers = append(markers, diagMarkerSpan(r,
-			"SWAP WITH requires a target table name.", 4))
+			"SWAP WITH requires a target table name."))
 		return markers
 	}
-	tgtParts := normalizeSnowflakeIdent(tgtMatch[1])
+	tgtParts := normalizeSnowflakeIdent(tgtName)
 
 	// 3. Source and target must be different (same name is a no-op).
 	if slices.Equal(srcParts, tgtParts) {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("SWAP WITH the same table '%s' is a no-op.", tgtMatch[1]), 4))
+			fmt.Sprintf("SWAP WITH the same table '%s' is a no-op.", tgtName)))
 	}
 
 	// 4. No additional clauses after the target table name.
-	if reAlterTableSwapTrailing.MatchString(clean) {
+	// Skip any trailing semicolons.
+	hasTrailing := false
+	for i := tgtEnd; i < len(sig); i++ {
+		if sig[i].Kind != sqltok.Semicolon {
+			hasTrailing = true
+			break
+		}
+	}
+	if hasTrailing {
 		markers = append(markers, diagMarkerSpan(r,
-			"Unexpected clause after SWAP WITH target table. SWAP WITH must be the final clause.", 4))
+			"Unexpected clause after SWAP WITH target table. SWAP WITH must be the final clause."))
 	}
 
 	return markers
@@ -8410,14 +9741,11 @@ func normalizeSnowflakeIdent(s string) []string {
 // double quotes. "A.B" is a single part; A.B is two parts.
 func splitIdentParts(s string) []string {
 	var parts []string
-	inQuote := false
 	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '"' {
-			inQuote = !inQuote
-		} else if s[i] == '.' && !inQuote {
-			parts = append(parts, s[start:i])
-			start = i + 1
+	for _, t := range sqltok.Tokenize(s) {
+		if t.Kind == sqltok.Dot {
+			parts = append(parts, s[start:t.Start])
+			start = t.End
 		}
 	}
 	parts = append(parts, s[start:])

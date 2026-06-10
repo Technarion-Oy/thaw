@@ -360,10 +360,8 @@ func TestValidateSnowflakePatterns_Notebook(t *testing.T) {
 			// ── quoted identifiers ──────────────────────────────────────────
 			`DROP NOTEBOOK "My-Notebook"`,
 			`DROP NOTEBOOK IF EXISTS "db"."schema"."My Notebook"`,
-			// ── IF EXISTS without name (known false negative) ──────────────
-			// The regex backtracks and parses "IF" as the notebook name;
-			// no secondary check catches this, so no warning is produced.
-			"DROP NOTEBOOK IF EXISTS",
+			// DROP NOTEBOOK IF EXISTS (no name) is intentionally excluded —
+			// it is correctly flagged as missing a name by the token-based check.
 			// ── trailing semicolon ──────────────────────────────────────────
 			"DROP NOTEBOOK my_nb;",
 			// ── leading whitespace ──────────────────────────────────────────

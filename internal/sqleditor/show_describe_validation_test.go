@@ -967,43 +967,6 @@ func TestValidateDescribe_EdgeCases(t *testing.T) {
 	}
 }
 
-// TestIsKeywordBoundary tests the isKeywordBoundary helper that checks whether
-// a position in a string is at a word boundary (end, whitespace, semicolon, paren).
-func TestIsKeywordBoundary(t *testing.T) {
-	tests := []struct {
-		name string
-		s    string
-		pos  int
-		want bool
-	}{
-		{"end of string", "SHOW", 4, true},
-		{"space", "SHOW TABLES", 4, true},
-		{"tab", "SHOW\tTABLES", 4, true},
-		{"newline", "SHOW\nTABLES", 4, true},
-		{"carriage return", "SHOW\rTABLES", 4, true},
-		{"semicolon", "SHOW;", 4, true},
-		{"open paren", "FUNC(", 4, true},
-		{"close paren", "FUNC)", 4, true},
-		{"letter (not boundary)", "SHOWING", 4, false},
-		{"digit (not boundary)", "SHOW1", 4, false},
-		{"underscore (not boundary)", "SHOW_", 4, false},
-		{"pos 0 space", " SHOW", 0, true},
-		{"pos 0 letter", "SHOW", 0, false},
-		{"past end of string", "AB", 5, true},
-		{"dot (not boundary)", "DB.TABLE", 2, false},
-		{"dollar (not boundary)", "MY$VAR", 2, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := isKeywordBoundary(tt.s, tt.pos)
-			if got != tt.want {
-				t.Errorf("isKeywordBoundary(%q, %d) = %v, want %v", tt.s, tt.pos, got, tt.want)
-			}
-		})
-	}
-}
-
 // TestCountIdentParts_AdditionalEdgeCases extends countIdentParts coverage
 // with multi-part and degenerate inputs.
 func TestCountIdentParts_AdditionalEdgeCases(t *testing.T) {
@@ -1880,7 +1843,7 @@ func TestValidateShow_CommentStripsObjectType(t *testing.T) {
 }
 
 // TestValidateShow_LikeEscapedQuoteOnlyPattern tests that a LIKE pattern
-// consisting solely of an escaped single quote ('''') is accepted.
+// consisting solely of an escaped single quote (””) is accepted.
 func TestValidateShow_LikeEscapedQuoteOnlyPattern(t *testing.T) {
 	sql := "SHOW TABLES LIKE ''''"
 	ranges := GetStatementRanges(sql)
@@ -2223,8 +2186,8 @@ func TestValidateDescribe_FunctionTrailingContentIgnored(t *testing.T) {
 }
 
 // TestValidateDescribe_FourPartIdentifier tests that a four-part identifier
-// (exceeding the 3-part regex limit) produces a trailing content warning
-// because reIdentPathAnchored only matches up to 3 dot-separated parts.
+// produces a trailing content warning, because the object-name path is consumed
+// at most three dot-separated parts (mirroring _identPath).
 func TestValidateDescribe_FourPartIdentifier(t *testing.T) {
 	sql := "DESCRIBE TABLE a.b.c.d"
 	ranges := GetStatementRanges(sql)
@@ -2370,8 +2333,7 @@ func TestValidateShow_TerseAndHistoryBothEligible(t *testing.T) {
 }
 
 // TestValidateShow_CarriageReturnWhitespace tests that carriage returns are
-// handled as valid whitespace in full SHOW/DESCRIBE validation (not just in
-// the isKeywordBoundary unit test).
+// handled as valid whitespace in full SHOW/DESCRIBE validation.
 func TestValidateShow_CarriageReturnWhitespace(t *testing.T) {
 	validCases := []string{
 		"SHOW\rTABLES",
@@ -2425,7 +2387,7 @@ func TestValidateShow_NoClauseValidationAcceptsArbitraryContent(t *testing.T) {
 // literals with multiple consecutive escaped single quotes are accepted.
 func TestValidateShow_MultipleEscapedQuotesInStringLiteral(t *testing.T) {
 	validCases := []string{
-		"SHOW TABLES LIKE 'a''''b'",               // a''b
+		"SHOW TABLES LIKE 'a''''b'",                // a''b
 		"SHOW TABLES LIKE '''''test'''''",          // ''test''
 		"SHOW TABLES STARTS WITH 'it''s a''thing'", // it's a'thing
 		"SHOW TABLES LIMIT 10 FROM 'x''''y'",       // x''y
@@ -2515,13 +2477,13 @@ func TestValidateShow_TabInClausePositions(t *testing.T) {
 // accepts any non-empty content after these special types.
 func TestValidateDescribe_ResultTransactionVariousIDs(t *testing.T) {
 	validCases := []string{
-		"DESCRIBE RESULT ''",          // empty string literal
-		"DESCRIBE RESULT 'a b c'",     // spaces in string
-		"DESC RESULT 12345",           // numeric ID
-		"DESCRIBE TRANSACTION 0",      // zero
-		"DESC TRANSACTION 99999999",   // large number
-		"DESCRIBE RESULT some_var",    // bare identifier
-		"DESC RESULT 'it''s a test'",  // escaped quotes in string
+		"DESCRIBE RESULT ''",         // empty string literal
+		"DESCRIBE RESULT 'a b c'",    // spaces in string
+		"DESC RESULT 12345",          // numeric ID
+		"DESCRIBE TRANSACTION 0",     // zero
+		"DESC TRANSACTION 99999999",  // large number
+		"DESCRIBE RESULT some_var",   // bare identifier
+		"DESC RESULT 'it''s a test'", // escaped quotes in string
 	}
 
 	for _, sql := range validCases {
@@ -2820,5 +2782,3 @@ func TestValidateShow_InQuotedIdentFollowedByClause(t *testing.T) {
 }
 
 // ── Tag Tests ────────────────────────────────────────────────────────────────
-
-

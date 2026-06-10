@@ -221,11 +221,11 @@ func TestParseSignatureParams_Extended(t *testing.T) {
 
 func TestGetScriptingCompletions_Extended(t *testing.T) {
 	tests := []struct {
-		name       string
-		sql        string
-		offset     int // -1 means use len([]rune(sql))
-		wantVars   []string
-		wantColon  bool
+		name      string
+		sql       string
+		offset    int // -1 means use len([]rune(sql))
+		wantVars  []string
+		wantColon bool
 	}{
 		// ── Cursor outside $$ block → no variables ────────────────────────────
 		{
@@ -975,7 +975,8 @@ func TestGetStatementRanges_Extended(t *testing.T) {
 			name: "unicode in string literal",
 			sql:  "SELECT '日本語';",
 			want: []StatementRange{
-				{StartLine: 1, EndLine: 1, StartOffset: 0, EndOffset: 13},
+				// EndOffset is byte-based: SELECT(6) + space(1) + '(1) + 3*3(9) + '(1) + ;(1) = 19
+				{StartLine: 1, EndLine: 1, StartOffset: 0, EndOffset: 19},
 			},
 		},
 	}
@@ -1821,13 +1822,13 @@ SELECT * FROM alpha;`
 
 func TestComputeGitLineDiff(t *testing.T) {
 	tests := []struct {
-		name     string
-		head     []string
-		current  []string
-		max      int
-		wantAdd  []int
-		wantMod  []int
-		wantDel  []int
+		name    string
+		head    []string
+		current []string
+		max     int
+		wantAdd []int
+		wantMod []int
+		wantDel []int
 	}{
 		{
 			name:    "no changes",
@@ -2241,7 +2242,7 @@ func TestPkHeuristicConditions(t *testing.T) {
 		got := PkHeuristicConditions(
 			"ORDERS", "O", "CUSTOMER", "C",
 			[]string{"ORDER_ID", "CUSTOMER_ID", "TOTAL"}, // lastCols
-			[]string{"ID", "NAME", "EMAIL"},               // otherCols
+			[]string{"ID", "NAME", "EMAIL"},              // otherCols
 		)
 		if len(got) != 1 {
 			t.Fatalf("expected 1 heuristic condition, got %d: %v", len(got), got)
@@ -2688,7 +2689,6 @@ func TestGetAutocompleteContext_CursorAtZero(t *testing.T) {
 	}
 }
 
-
 // ══════════════════════════════════════════════════════════════════════════════
 // Additional edge cases: IsInJoinOnClause
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2736,7 +2736,6 @@ func TestIsInJoinOnClause_OrderByTerminates(t *testing.T) {
 		t.Error("expected false after ORDER BY terminates")
 	}
 }
-
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Additional edge cases: DetectUsingClause
@@ -3769,12 +3768,16 @@ func TestPkHeuristicConditions_QuotedAliases(t *testing.T) {
 }
 
 func TestGetStatementRanges_NestedBlockComments(t *testing.T) {
-	// Snowflake doesn't support nested block comments. The parser should
-	// close on the first */ and treat the rest as SQL.
-	sql := "/* outer /* inner */ SELECT 1"
+	// Snowflake block comments nest: the inner */ does not close the outer
+	// comment, so the whole /* outer /* inner */ still */ is one comment and the
+	// statement begins at SELECT (not at "still").
+	sql := "/* outer /* inner */ still */ SELECT 1"
 	got := GetStatementRanges(sql)
 	if len(got) != 1 {
-		t.Fatalf("expected 1 range after nested block comment closes, got %d: %v", len(got), got)
+		t.Fatalf("expected 1 range, got %d: %v", len(got), got)
+	}
+	if stmt := strings.TrimSpace(sql[got[0].StartOffset:got[0].EndOffset]); stmt != "SELECT 1" {
+		t.Errorf("expected statement %q, got %q", "SELECT 1", stmt)
 	}
 }
 
@@ -4631,4 +4634,3 @@ func TestComputeJoinOnConditions_SameNameDifferentCaseBothPresent(t *testing.T) 
 		t.Errorf("expected case-insensitive same-name column match for User_Id/USER_ID, got %v", got)
 	}
 }
-

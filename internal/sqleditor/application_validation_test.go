@@ -839,5 +839,3 @@ func TestValidateSnowflakePatterns_Application_AlterPackageQualifiedName(t *test
 		})
 	}
 }
-
-

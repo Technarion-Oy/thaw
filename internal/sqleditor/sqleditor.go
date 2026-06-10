@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	sf "thaw/internal/snowflake"
+	"thaw/internal/sqltok"
 )
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -38,8 +39,8 @@ type DiagMarker struct {
 	EndLineNumber   int    `json:"endLineNumber"`
 	EndColumn       int    `json:"endColumn"`
 	Message         string `json:"message"`
-	Severity        int    `json:"severity"`        // SeverityError (red) or SeverityWarning (yellow)
-	Code            string `json:"code,omitempty"`   // JSON quick-fix metadata (e.g. qualify-table suggestions)
+	Severity        int    `json:"severity"`       // SeverityError (red) or SeverityWarning (yellow)
+	Code            string `json:"code,omitempty"` // JSON quick-fix metadata (e.g. qualify-table suggestions)
 }
 
 // JoinTableRef is a table reference parsed from a FROM/JOIN clause.
@@ -107,7 +108,6 @@ type JoinCondition struct {
 	SortText  string `json:"sortText"`
 }
 
-
 // CTEColumnEntry represents a CTE name and its projected columns for autocomplete.
 type CTEColumnEntry struct {
 	Name string    `json:"name"` // Uppercase CTE name
@@ -147,8 +147,8 @@ type InEditorTableDef struct {
 // AutocompleteContextRequest bundles all inputs for the extended autocomplete context.
 type AutocompleteContextRequest struct {
 	SQL          string          `json:"sql"`
-	CursorOffset int            `json:"cursorOffset"`
-	StoreObjects []StoreObject  `json:"storeObjects"`
+	CursorOffset int             `json:"cursorOffset"`
+	StoreObjects []StoreObject   `json:"storeObjects"`
 	Session      *SessionContext `json:"session,omitempty"`
 	LineUpToWord string          `json:"lineUpToWord"`
 }
@@ -250,56 +250,6 @@ var joinStopKW = map[string]bool{
 	"ASOF": true, "MATCH_CONDITION": true,
 }
 
-var sqlAllKeywords = map[string]bool{
-	"SELECT": true, "FROM": true, "WHERE": true, "GROUP": true, "BY": true, "HAVING": true, "ORDER": true, "LIMIT": true,
-	"JOIN": true, "INNER": true, "LEFT": true, "RIGHT": true, "FULL": true, "OUTER": true, "CROSS": true, "ON": true, "USING": true,
-	"NATURAL": true, "QUALIFY": true, "PIVOT": true, "UNPIVOT": true, "RECURSIVE": true,
-	"WITH": true, "AS": true, "DISTINCT": true, "ALL": true, "UNION": true, "INTERSECT": true, "EXCEPT": true, "MINUS": true,
-	"INSERT": true, "INTO": true, "VALUES": true, "UPDATE": true, "SET": true, "DELETE": true, "MERGE": true, "MATCHED": true,
-	"CREATE": true, "OR": true, "REPLACE": true, "TABLE": true, "VIEW": true, "TEMPORARY": true, "TEMP": true, "TRANSIENT": true,
-	"DATABASE": true, "SCHEMA": true, "FUNCTION": true, "PROCEDURE": true, "TASK": true, "STREAM": true, "PIPE": true,
-	"DROP": true, "TRUNCATE": true, "ALTER": true, "RENAME": true, "ADD": true, "COLUMN": true, "MODIFY": true,
-	"USE": true, "WAREHOUSE": true, "ROLE": true, "USER": true, "GRANT": true, "REVOKE": true, "TO": true,
-	"AND": true, "NOT": true, "IN": true, "IS": true, "NULL": true, "TRUE": true, "FALSE": true, "BETWEEN": true, "LIKE": true, "ILIKE": true,
-	"CASE": true, "WHEN": true, "THEN": true, "ELSE": true, "END": true, "CAST": true, "TRY_CAST": true, "TYPE": true,
-	// ORDER BY / window frame keywords
-	"ASC": true, "DESC": true, "NULLS": true, "FIRST": true, "LAST": true,
-	"OVER": true, "PARTITION": true, "ROWS": true, "RANGE": true,
-	"UNBOUNDED": true, "PRECEDING": true, "FOLLOWING": true, "CURRENT": true, "ROW": true,
-	"CLUSTER": true, "OFFSET": true, "FETCH": true, "NEXT": true, "ONLY": true,
-	// Aggregate / analytic functions
-	"SUM": true, "COUNT": true, "AVG": true, "MIN": true, "MAX": true, "MEDIAN": true, "VARIANCE": true, "STDDEV": true,
-	// Date/time functions
-	"DATE_TRUNC": true, "DATEADD": true, "DATEDIFF": true, "DATE_PART": true, "CURRENT_DATE": true, "CURRENT_TIMESTAMP": true,
-	"TO_DATE": true, "TO_VARCHAR": true, "TO_NUMBER": true, "TO_TIMESTAMP": true, "TO_TIMESTAMP_NTZ": true, "TO_TIMESTAMP_LTZ": true, "TO_TIMESTAMP_TZ": true,
-	"TO_JSON": true, "TO_VARIANT": true,
-	// Conditional / conversion functions
-	"IFF": true, "IFNULL": true, "NVL": true, "COALESCE": true, "DECODE": true, "ZEROIFNULL": true, "NULLIF": true,
-	// Semi-structured / array functions
-	"LISTAGG": true, "ARRAY_AGG": true, "OBJECT_AGG": true, "GET": true, "FLATTEN": true, "LATERAL": true,
-	// Snowflake generator functions / keywords
-	"SEQ4": true, "SEQ8": true, "RANDOM": true, "UNIFORM": true, "RANDSTR": true, "GENERATOR": true, "ROWCOUNT": true,
-	// Snowflake Scripting & missing keywords
-	"BEGIN": true, "DECLARE": true, "LET": true, "VAR": true, "RETURN": true, "RETURNS": true, "EXCEPTION": true, "RAISE": true,
-	"LOOP": true, "WHILE": true, "REPEAT": true, "UNTIL": true, "IF": true,
-	"EXIT": true, "CONTINUE": true, "OPEN": true, "CLOSE": true, "CALL": true, "EXECUTE": true, "IMMEDIATE": true,
-	"LANGUAGE": true, "SQL": true, "PYTHON": true, "JAVASCRIPT": true, "SCALA": true, "JAVA": true, "SECURE": true, "VOLATILE": true,
-	"IMMUTABLE": true, "STABLE": true, "INTERNAL": true, "EXTERNAL": true, "STAGE": true, "FILE": true, "FORMAT": true,
-	"STORAGE": true, "INTEGRATION": true, "SECRET": true, "GIT": true, "REPOSITORY": true, "NOTEBOOK": true,
-	// Snowflake Cortex AI namespace identifiers (function names like
-	// COMPLETE and TRANSLATE are intentionally omitted — they are common
-	// words that users may use as column names; the dot/paren logic in
-	// scanSelectClauseForUnknownCols already skips them when used inside
-	// SNOWFLAKE.CORTEX.<name>(...) calls)
-	"SNOWFLAKE": true, "CORTEX": true, "MATCH_CONDITION": true,
-	// Data types
-	"INT": true, "INTEGER": true, "BIGINT": true, "SMALLINT": true, "TINYINT": true, "BYTEINT": true,
-	"NUMBER": true, "DECIMAL": true, "NUMERIC": true, "DOUBLE": true, "FLOAT": true, "REAL": true,
-	"VARCHAR": true, "STRING": true, "TEXT": true, "CHAR": true, "CHARACTER": true, "BINARY": true, "VARBINARY": true,
-	"BOOLEAN": true, "DATE": true, "DATETIME": true, "TIME": true, "TIMESTAMP": true, "TIMESTAMP_NTZ": true, "TIMESTAMP_LTZ": true, "TIMESTAMP_TZ": true,
-	"VARIANT": true, "OBJECT": true, "ARRAY": true, "GEOGRAPHY": true, "GEOMETRY": true,
-}
-
 func isWordChar(c rune) bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
 		(c >= '0' && c <= '9') || c == '_'
@@ -337,181 +287,30 @@ type parenEntry struct {
 type StatementRange struct {
 	StartLine   int `json:"startLine"`   // 1-indexed line of trimmed statement start
 	EndLine     int `json:"endLine"`     // 1-indexed line of trailing ';' (or last char)
-	StartOffset int `json:"startOffset"` // rune offset of trimmed statement start
-	EndOffset   int `json:"endOffset"`   // rune offset just past ';' (or end of string)
+	StartOffset int `json:"startOffset"` // byte offset of trimmed statement start
+	EndOffset   int `json:"endOffset"`   // byte offset just past ';' (or end of string)
 }
 
-// GetStatementRanges splits sql into per-statement ranges by scanning
-// character-by-character.  Semicolons inside string literals, quoted
-// identifiers, block comments, line comments, and dollar-quoted blocks are
-// correctly ignored.  No Snowflake connection is required.
+// GetStatementRanges splits sql into per-statement ranges.  Semicolons inside
+// string literals, quoted identifiers, block comments, line comments, and
+// dollar-quoted blocks are correctly ignored.  No Snowflake connection is
+// required.
+//
+// Delegates to [sqltok.SplitRanges] for the actual tokenization.
 func GetStatementRanges(sql string) []StatementRange {
-	var ranges []StatementRange
-
-	runes := []rune(sql)
-	n := len(runes)
-
-	line := 1 // current 1-indexed line number
-
-	// Position of the current statement's trimmed start (-1 = not yet started).
-	stmtStartLine := -1
-	stmtStartOffset := 0
-	inStmt := false
-
-	// Record the start of a new statement at rune index i.
-	// Called once per statement on the first non-whitespace, non-comment char.
-	startStmt := func(i int) {
-		if !inStmt {
-			stmtStartLine = line
-			stmtStartOffset = i
-			inStmt = true
+	tokRanges := sqltok.SplitRanges(sql)
+	if len(tokRanges) == 0 {
+		return nil
+	}
+	ranges := make([]StatementRange, len(tokRanges))
+	for i, r := range tokRanges {
+		ranges[i] = StatementRange{
+			StartLine:   r.StartLine,
+			EndLine:     r.EndLine,
+			StartOffset: r.StartOffset,
+			EndOffset:   r.EndOffset,
 		}
 	}
-
-	// Emit the current statement ending at rune index endOffset (exclusive).
-	emit := func(endLine, endOffset int) {
-		if inStmt {
-			ranges = append(ranges, StatementRange{
-				StartLine:   stmtStartLine,
-				EndLine:     endLine,
-				StartOffset: stmtStartOffset,
-				EndOffset:   endOffset,
-			})
-			inStmt = false
-			stmtStartLine = -1
-		}
-	}
-
-	i := 0
-	for i < n {
-		ch := runes[i]
-
-		// ── Newline ────────────────────────────────────────────────────────
-		if ch == '\n' {
-			line++
-			i++
-			continue
-		}
-
-		// ── Whitespace ────────────────────────────────────────────────────
-		if ch == ' ' || ch == '\t' || ch == '\r' || ch == '\u00a0' {
-			i++
-			continue
-		}
-
-		// ── Line comment -- ───────────────────────────────────────────────
-		if ch == '-' && i+1 < n && runes[i+1] == '-' {
-			i += 2
-			for i < n && runes[i] != '\n' {
-				i++
-			}
-			continue
-		}
-
-		// ── Block comment /* */ ───────────────────────────────────────────
-		if ch == '/' && i+1 < n && runes[i+1] == '*' {
-			i += 2
-			for i < n {
-				if runes[i] == '\n' {
-					line++
-					i++
-				} else if runes[i] == '*' && i+1 < n && runes[i+1] == '/' {
-					i += 2
-					break
-				} else {
-					i++
-				}
-			}
-			continue
-		}
-
-		// All remaining chars belong to a statement; record its start.
-		startStmt(i)
-
-		// ── Single-quoted string '...' ────────────────────────────────────
-		if ch == '\'' {
-			i++
-			for i < n {
-				if runes[i] == '\n' {
-					line++
-					i++
-				} else if runes[i] == '\'' && i+1 < n && runes[i+1] == '\'' {
-					i += 2
-				} else if runes[i] == '\'' {
-					i++
-					break
-				} else {
-					i++
-				}
-			}
-			continue
-		}
-
-		// ── Double-quoted identifier "..." ────────────────────────────────
-		if ch == '"' {
-			i++
-			for i < n {
-				if runes[i] == '\n' {
-					line++
-					i++
-				} else if runes[i] == '"' && i+1 < n && runes[i+1] == '"' {
-					i += 2
-				} else if runes[i] == '"' {
-					i++
-					break
-				} else {
-					i++
-				}
-			}
-			continue
-		}
-
-		// ── Dollar-quoted block $tag$...$tag$ ─────────────────────────────
-		if ch == '$' {
-			tag := extractDollarTag(runes, i)
-			if tag != "" {
-				tagRunes := []rune(tag)
-				tagLen := len(tagRunes)
-				i += tagLen // skip opening tag
-				// Scan for the matching closing tag.
-				for i < n {
-					if runes[i] == '\n' {
-						line++
-						i++
-					} else if runes[i] == tagRunes[0] && i+tagLen <= n {
-						match := true
-						for k := 1; k < tagLen; k++ {
-							if runes[i+k] != tagRunes[k] {
-								match = false
-								break
-							}
-						}
-						if match {
-							i += tagLen
-							break
-						}
-						i++
-					} else {
-						i++
-					}
-				}
-				continue
-			}
-		}
-
-		// ── Semicolon: end of statement ───────────────────────────────────
-		if ch == ';' {
-			emit(line, i+1)
-			i++
-			continue
-		}
-
-		i++
-	}
-
-	// Emit trailing statement with no semicolon.
-	emit(line, n)
-
 	return ranges
 }
 
@@ -801,195 +600,20 @@ func ParseSignatureParams(sig string) []SignatureParam {
 
 // ── Token-level casing ────────────────────────────────────────────────────────
 
-// sqlFormatterKeywords is the complete set of SQL reserved words for the
-// token-level casing pass (ApplyCasing).  Tokens in this set receive
-// keywordCase treatment unless they are also in builtinFunctions.
-var sqlFormatterKeywords = map[string]bool{
-	"ADD": true, "ALL": true, "ALTER": true, "AND": true, "ANY": true,
-	"AS": true, "ASC": true, "AT": true, "BEFORE": true, "BETWEEN": true,
-	"BY": true, "CALL": true, "CASCADE": true, "CASE": true, "CAST": true,
-	"CHANGES": true, "CLUSTER": true, "COLUMN": true, "COMMENT": true,
-	"COMMIT": true, "CONNECT": true, "CONSTRAINT": true, "COPY": true,
-	"CREATE": true, "CROSS": true, "CURRENT": true, "CURRENT_DATE": true,
-	"CURRENT_ROLE": true, "CURRENT_SCHEMA": true, "CURRENT_TIME": true,
-	"CURRENT_TIMESTAMP": true, "CURRENT_USER": true, "CURRENT_WAREHOUSE": true,
-	"DATABASE": true, "DEFAULT": true, "DELETE": true, "DESC": true,
-	"DESCRIBE": true, "DISTINCT": true, "DROP": true, "ELSE": true,
-	"END": true, "EXCEPT": true, "EXECUTE": true, "EXISTS": true,
-	"EXPLAIN": true, "EXTRACT": true, "FALSE": true, "FILE": true,
-	"FIRST": true, "FLATTEN": true, "FOLLOWING": true, "FOR": true,
-	"FORCE": true, "FOREIGN": true, "FROM": true, "FULL": true,
-	"FUNCTION": true, "DEFINE": true, "GRANT": true, "GROUP": true,
-	"GROUPING": true, "HAVING": true, "IF": true, "ILIKE": true,
-	"IN": true, "INDEX": true, "INNER": true, "INSERT": true,
-	"INTERSECT": true, "INTO": true, "IS": true, "JOIN": true,
-	"KEY": true, "LAST": true, "LATERAL": true, "LEFT": true,
-	"LIKE": true, "LIMIT": true, "MATCH_RECOGNIZE": true, "MEASURES": true,
-	"MERGE": true, "MINUS": true, "NATURAL": true, "NOT": true,
-	"NULL": true, "NULLS": true, "OF": true, "OFFSET": true,
-	"ON": true, "OR": true, "ORDER": true, "OUTER": true, "OVER": true,
-	"OVERWRITE": true, "PARTITION": true, "PATTERN": true, "PIPE": true,
-	"PRECEDING": true, "PRIMARY": true, "PROCEDURE": true, "PURGE": true,
-	"QUALIFY": true, "RANGE": true, "RECURSIVE": true, "REFERENCES": true,
-	"REPLACE": true, "RESTRICT": true, "REVOKE": true, "RIGHT": true,
-	"ROLLBACK": true, "ROW": true, "ROWS": true, "SAMPLE": true,
-	"SCHEMA": true, "SELECT": true, "SEMI": true, "SEQUENCE": true,
-	"SET": true, "SHOW": true, "SOME": true, "STAGE": true,
-	"START": true, "STREAM": true, "TABLE": true, "TABLESAMPLE": true,
-	"TASK": true, "THEN": true, "TO": true, "TOP": true,
-	"TRANSACTION": true, "TRUE": true, "TRUNCATE": true, "UNBOUNDED": true,
-	"UNION": true, "UNIQUE": true, "UPDATE": true, "USING": true,
-	"VALUES": true, "VIEW": true, "VOLATILE": true, "WAREHOUSE": true,
-	"WHEN": true, "WHERE": true, "WINDOW": true, "WITH": true,
-	"WITHIN": true, "WITHOUT": true,
-	// Snowflake-specific
-	"ANTI": true, "ASOF": true, "CLONE": true, "CRON": true, "MATCH_CONDITION": true,
-	"DYNAMIC": true, "ENABLE": true, "EXTERNAL": true, "FINALIZE": true,
-	"FORMAT": true, "ICEBERG": true, "MASKING": true, "NETWORK": true,
-	"NOTIFY": true, "POLICY": true, "PROJECTION": true, "RECOVER": true,
-	"REPLICATION": true, "RESUME": true, "ROLE": true, "SCHEDULE": true,
-	"SECURE": true, "SHARE": true, "SUSPEND": true, "TABULAR": true,
-	"TRANSIENT": true, "TRIGGER": true, "UNDROP": true,
-	// Additional Snowflake / Standard keywords
-	"IMMEDIATE": true, "NUMBER": true, "VARCHAR": true, "BOOLEAN": true, "DATE": true, "STRING": true, "FLOAT": true, "INTEGER": true, "INT": true,
-	"DOUBLE": true, "REAL": true, "DECIMAL": true, "NUMERIC": true, "BIGINT": true, "SMALLINT": true, "TINYINT": true, "BYTEINT": true,
-	"TIMESTAMP_NTZ": true, "TIMESTAMP_LTZ": true, "TIMESTAMP_TZ": true, "VARIANT": true, "OBJECT": true, "ARRAY": true,
-	"GEOGRAPHY": true, "GEOMETRY": true, "INPUT": true,
-	// Snowflake Scripting keywords
-	"DECLARE": true, "BEGIN": true, "LET": true, "RETURN": true, "VAR": true, "WHILE": true, "REPEAT": true, "LOOP": true, "EXCEPTION": true,
-}
-
-// builtinFunctions is the set of Snowflake built-in function names.
-// A token that is in both sqlFormatterKeywords and builtinFunctions and is
-// followed by "(" receives functionCase treatment (not keywordCase).
-var builtinFunctions = map[string]bool{
-	"ABS": true, "ACOS": true, "ACOSH": true, "ADD_MONTHS": true,
-	"ANY_VALUE": true, "APPROX_COUNT_DISTINCT": true, "APPROX_PERCENTILE": true,
-	"APPROX_TOP_K": true, "ARRAY_AGG": true, "ARRAY_APPEND": true,
-	"ARRAY_CAT": true, "ARRAY_COMPACT": true, "ARRAY_CONSTRUCT": true,
-	"ARRAY_CONTAINS": true, "ARRAY_DISTINCT": true, "ARRAY_EXCEPT": true,
-	"ARRAY_FLATTEN": true, "ARRAY_GENERATE_RANGE": true, "ARRAY_INSERT": true,
-	"ARRAY_INTERSECTION": true, "ARRAY_MAX": true, "ARRAY_MIN": true,
-	"ARRAY_PREPEND": true, "ARRAY_REMOVE": true, "ARRAY_REMOVE_AT": true,
-	"ARRAY_SIZE": true, "ARRAY_SLICE": true, "ARRAY_SORT": true,
-	"ARRAY_TO_STRING": true, "ARRAY_UNION_AGG": true, "ARRAY_UNIQUE_AGG": true,
-	"AS_ARRAY": true, "AS_BINARY": true, "AS_BOOLEAN": true, "AS_CHAR": true,
-	"AS_DATE": true, "AS_DECIMAL": true, "AS_DOUBLE": true, "AS_INTEGER": true,
-	"AS_NUMBER": true, "AS_OBJECT": true, "AS_REAL": true, "AS_TIME": true,
-	"AS_TIMESTAMP_LTZ": true, "AS_TIMESTAMP_NTZ": true, "AS_TIMESTAMP_TZ": true,
-	"AS_TINYINT": true, "AS_VARCHAR": true, "ASIN": true, "ASINH": true,
-	"ATAN": true, "ATAN2": true, "ATANH": true, "AVG": true,
-	"BASE64_DECODE_STRING": true, "BASE64_ENCODE": true, "BITNOT": true,
-	"BITSHIFTLEFT": true, "BITSHIFTRIGHT": true, "BITAND": true,
-	"BITOR": true, "BITXOR": true, "BOOLAND": true, "BOOLAND_AGG": true,
-	"BOOLNOT": true, "BOOLOR": true, "BOOLOR_AGG": true, "BOOLXOR": true,
-	"BOOLXOR_AGG": true,
-	"CASE":        true, "CAST": true, "CBRT": true, "CEIL": true, "CEILING": true,
-	"CHARINDEX": true, "CHR": true, "CHAR": true, "COALESCE": true,
-	"COLLATE": true, "COLLATION": true, "COMPRESS": true, "CONCAT": true,
-	"CONCAT_WS": true, "CONDITIONAL_CHANGE_EVENT": true,
-	"CONDITIONAL_TRUE_EVENT": true, "CONTAINS": true, "CONVERT_TIMEZONE": true,
-	"COS": true, "COSH": true, "COUNT": true, "COUNT_IF": true,
-	"COVAR_POP": true, "COVAR_SAMP": true, "CUME_DIST": true,
-	"DATE_FROM_PARTS": true, "DATE_PART": true, "DATE_TRUNC": true,
-	"DATEADD": true, "DATEDIFF": true, "DAYNAME": true, "DAYOFMONTH": true,
-	"DAYOFWEEK": true, "DAYOFWEEKISO": true, "DAYOFYEAR": true,
-	"DECODE": true, "DECOMPRESS": true, "DENSE_RANK": true, "DIV0": true,
-	"DIV0NULL":     true,
-	"EDITDISTANCE": true, "ENDSWITH": true, "EQUAL_NULL": true, "EXP": true,
-	"FIRST_VALUE": true, "FLATTEN": true, "FLOOR": true, "FORMAT_DATE": true,
-	"FORMAT_NUMBER": true,
-	"GENERATOR":     true, "GET": true, "GET_ABSOLUTE_PATH": true, "GET_DDL": true,
-	"GET_PATH": true, "GET_PRESIGNED_URL": true, "GET_STAGE_LOCATION": true,
-	"GETBIT": true, "GREATEST": true, "GROUPING": true, "GROUPING_ID": true,
-	"HASH": true, "HASH_AGG": true, "HAVERSINE": true,
-	"HEX_DECODE_BINARY": true, "HEX_DECODE_STRING": true, "HEX_ENCODE": true,
-	"HOUR": true, "HOURS": true,
-	"IFF": true, "IFNULL": true, "IN": true, "INITCAP": true,
-	"INSERT": true, "IS_ARRAY": true, "IS_BINARY": true, "IS_BOOLEAN": true,
-	"IS_CHAR": true, "IS_DATE": true, "IS_DATE_VALUE": true,
-	"IS_DECIMAL": true, "IS_DOUBLE": true, "IS_GRANTED_TO_INVOKER_ROLE": true,
-	"IS_INTEGER": true, "IS_NULL_VALUE": true, "IS_OBJECT": true,
-	"IS_REAL": true, "IS_TIME": true, "IS_TIMESTAMP_LTZ": true,
-	"IS_TIMESTAMP_NTZ": true, "IS_TIMESTAMP_TZ": true, "IS_VARCHAR": true,
-	"JAROWINKLER_SIMILARITY": true, "JSON_EXTRACT_PATH_TEXT": true,
-	"KURTOSIS": true, "LAG": true, "LAST_DAY": true, "LAST_VALUE": true,
-	"LEAD": true, "LEAST": true, "LEFT": true, "LENGTH": true, "LEN": true,
-	"LISTAGG": true, "LN": true, "LOG": true, "LOWER": true, "LPAD": true,
-	"LTRIM": true,
-	"MAX":   true, "MAX_BY": true, "MEDIAN": true, "MIN": true, "MIN_BY": true,
-	"MINUTE": true, "MINUTES": true, "MOD": true, "MODE": true,
-	"MONTH": true, "MONTHNAME": true, "MONTHS_BETWEEN": true,
-	"NORMAL": true, "NTH_VALUE": true, "NTILE": true, "NULLIF": true,
-	"NULLIFZERO": true, "NVL": true, "NVL2": true,
-	"OBJECT_AGG": true, "OBJECT_CONSTRUCT": true,
-	"OBJECT_CONSTRUCT_KEEP_NULL": true, "OBJECT_DELETE": true,
-	"OBJECT_INSERT": true, "OBJECT_KEYS": true, "OBJECT_PICK": true,
-	"PARSE_IP": true, "PARSE_JSON": true, "PARSE_URL": true,
-	"PARSE_XML": true, "PERCENT_RANK": true, "PERCENTILE_CONT": true,
-	"PERCENTILE_DISC": true, "PI": true, "POSITION": true, "POW": true,
-	"POWER":   true,
-	"RANDSTR": true, "RANDOM": true, "RANK": true, "RATIO_TO_REPORT": true,
-	"REGEXP": true, "REGEXP_COUNT": true, "REGEXP_EXTRACT": true,
-	"REGEXP_EXTRACT_ALL": true, "REGEXP_INSTR": true, "REGEXP_LIKE": true,
-	"REGEXP_REPLACE": true, "REGEXP_SUBSTR": true, "REPEAT": true,
-	"REPLACE": true, "REVERSE": true, "RIGHT": true, "ROUND": true,
-	"ROW_NUMBER": true, "RPAD": true, "RTRIM": true,
-	"SECOND": true, "SECONDS": true, "SHA1": true, "SHA1_BINARY": true,
-	"SHA1_HEX": true, "SHA2": true, "SHA2_BINARY": true, "SHA2_HEX": true,
-	"SIGN": true, "SIN": true, "SINH": true, "SKEW": true,
-	"SOUNDEX": true, "SPACE": true, "SPLIT": true, "SPLIT_PART": true,
-	"SPLIT_TO_TABLE": true, "SQL_VARIANT_PROPERTY": true, "SQRT": true,
-	"SQUARE": true, "STARTSWITH": true, "STDDEV": true, "STDDEV_POP": true,
-	"STDDEV_SAMP": true, "STRIP_NULL_VALUE": true, "STRTOK": true,
-	"STRTOK_SPLIT_TO_TABLE": true, "STRTOK_TO_ARRAY": true,
-	"SUBSTR": true, "SUBSTRING": true, "SUM": true,
-	"SYSTEM$ABORT_TRANSACTION": true, "SYSTEM$CANCEL_ALL_QUERIES": true,
-	"SYSTEM$CANCEL_QUERY": true, "SYSTEM$CLUSTERING_DEPTH": true,
-	"SYSTEM$CLUSTERING_INFORMATION":       true,
-	"SYSTEM$GET_PREDECESSOR_RETURN_VALUE": true,
-	"SYSTEM$STREAM_GET_TABLE_TIMESTAMP":   true, "SYSTEM$STREAM_HAS_DATA": true,
-	"SYSTEM$TASK_DEPENDENTS_ENABLE": true, "SYSTEM$TYPEOF": true,
-	"SYSTEM$WAIT": true,
-	"TAN":         true, "TANH": true, "TIME_FROM_PARTS": true, "TIMEADD": true,
-	"TIMEDIFF": true, "TIMESTAMPADD": true, "TIMESTAMPDIFF": true,
-	"TIMESTAMP_FROM_PARTS": true, "TIMESTAMP_LTZ_FROM_PARTS": true,
-	"TIMESTAMP_NTZ_FROM_PARTS": true, "TIMESTAMP_TZ_FROM_PARTS": true,
-	"TO_ARRAY": true, "TO_BINARY": true, "TO_BOOLEAN": true,
-	"TO_CHAR": true, "TO_DATE": true, "TO_DECIMAL": true, "TO_DOUBLE": true,
-	"TO_GEOGRAPHY": true, "TO_GEOMETRY": true, "TO_JSON": true,
-	"TO_NUMBER": true, "TO_OBJECT": true, "TO_REAL": true,
-	"TO_TIME": true, "TO_TIMESTAMP": true, "TO_TIMESTAMP_LTZ": true,
-	"TO_TIMESTAMP_NTZ": true, "TO_TIMESTAMP_TZ": true, "TO_VARIANT": true,
-	"TO_VARCHAR": true, "TO_XML": true, "TRANSLATE": true, "TRIM": true,
-	"TRUNCATE": true, "TRUNC": true, "TRY_BASE64_DECODE_BINARY": true,
-	"TRY_BASE64_DECODE_STRING": true, "TRY_CAST": true,
-	"TRY_HEX_DECODE_BINARY": true, "TRY_HEX_DECODE_STRING": true,
-	"TRY_PARSE_JSON": true, "TRY_TO_BINARY": true, "TRY_TO_BOOLEAN": true,
-	"TRY_TO_DATE": true, "TRY_TO_DECIMAL": true, "TRY_TO_DOUBLE": true,
-	"TRY_TO_NUMBER": true, "TRY_TO_TIME": true, "TRY_TO_TIMESTAMP": true,
-	"TRY_TO_TIMESTAMP_LTZ": true, "TRY_TO_TIMESTAMP_NTZ": true,
-	"TRY_TO_TIMESTAMP_TZ": true, "TYPEOF": true,
-	"UNIFORM": true, "UPPER": true, "UNISTR": true,
-	"VAR_POP": true, "VAR_SAMP": true, "VARIANCE": true,
-	"VARIANCE_POP": true, "VARIANCE_SAMP": true,
-	"WEEK": true, "WEEKISO": true, "WEEKOFYEAR": true,
-	"XMLGET": true, "YEAR": true, "YEAROFWEEK": true,
-	"YEAROFWEEKISO": true, "ZEROIFNULL": true,
-}
-
 // ApplyCasing walks a formatted SQL string token by token and applies
 // per-role casing preferences.  Double-quoted identifiers, single-quoted
 // strings, dollar-quoted strings, and comments are passed through unchanged.
 // keywordCase: "UPPER" | "lower" | "Title" | "Preserve"
 // identifierCase: "Preserve" | "UPPER" | "lower"
 // functionCase: "UPPER" | "lower"
+//
+// Uses [sqltok.Tokenize] for tokenization.
 func ApplyCasing(sql, keywordCase, identifierCase, functionCase string) string {
 	if sql == "" {
 		return sql
 	}
-	runes := []rune(sql)
-	n := len(runes)
+
+	tokens := sqltok.Tokenize(sql)
 	var sb strings.Builder
 	sb.Grow(len(sql))
 
@@ -1010,162 +634,84 @@ func ApplyCasing(sql, keywordCase, identifierCase, functionCase string) string {
 		}
 	}
 
-	i := 0
-	for i < n {
-		ch := runes[i]
-
-		// ── Double-quoted identifier — pass through unchanged ──────────────────
-		if ch == '"' {
-			j := i + 1
-			for j < n {
-				if runes[j] == '"' {
-					if j+1 < n && runes[j+1] == '"' {
-						j += 2
-						continue
-					}
-					j++
-					break
-				}
-				j++
+	// peekNextNonWS finds the next non-whitespace, non-newline token after index i.
+	peekNextNonWS := func(i int) (sqltok.Token, bool) {
+		for j := i + 1; j < len(tokens); j++ {
+			k := tokens[j].Kind
+			if k != sqltok.Whitespace && k != sqltok.Newline {
+				return tokens[j], true
 			}
-			sb.WriteString(string(runes[i:j]))
-			i = j
-			continue
 		}
+		return sqltok.Token{}, false
+	}
 
-		// ── Single-quoted string — pass through unchanged ──────────────────────
-		if ch == '\'' {
-			j := i + 1
-			for j < n {
-				if runes[j] == '\'' {
-					if j+1 < n && runes[j+1] == '\'' {
-						j += 2
-						continue
-					}
-					j++
-					break
-				}
-				j++
-			}
-			sb.WriteString(string(runes[i:j]))
-			i = j
-			continue
+	for i, tok := range tokens {
+		if tok.Kind == sqltok.EOF {
+			break
 		}
+		text := tok.Text(sql)
 
-		// ── Dollar-quoted string — recursively apply casing unless tag is $query$ ──
-		if ch == '$' {
-			tagEnd := i + 1
-			for tagEnd < n && runes[tagEnd] != '$' && runes[tagEnd] != '\n' {
-				tagEnd++
-			}
-			if tagEnd < n && runes[tagEnd] == '$' {
-				tag := string(runes[i : tagEnd+1]) // e.g. "$$" or "$body$"
-				rest := string(runes[tagEnd+1:])
-				closeByteIdx := strings.Index(rest, tag)
-				if closeByteIdx >= 0 {
-					innerStart := tagEnd + 1
-					closeRuneOff := len([]rune(rest[:closeByteIdx]))
-					innerEnd := innerStart + closeRuneOff
-					innerSql := string(runes[innerStart:innerEnd])
+		switch tok.Kind {
+		case sqltok.QuotedIdent, sqltok.StringLit,
+			sqltok.LineComment, sqltok.BlockComment:
+			// Pass through unchanged.
+			sb.WriteString(text)
 
-					sb.WriteString(tag)
-					tagUpper := strings.ToUpper(tag)
-					if tagUpper == "$QUERY$" {
-						// Pass through $query$ blocks unchanged (likely contains a query string literal)
-						sb.WriteString(innerSql)
-					} else {
-						// Recursively process scripting bodies ($$, $body$, etc.)
-						sb.WriteString(ApplyCasing(innerSql, keywordCase, identifierCase, functionCase))
-					}
-
-					sb.WriteString(tag)
-
-					i = innerEnd + len([]rune(tag))
-					continue
-				}
-			}
-			// Not a valid dollar-quoted string — pass the '$' through.
-			sb.WriteRune(ch)
-			i++
-			continue
-		}
-
-		// ── Line comment -- … newline — pass through unchanged ─────────────────
-		if ch == '-' && i+1 < n && runes[i+1] == '-' {
-			j := i
-			for j < n && runes[j] != '\n' {
-				j++
-			}
-			if j < n {
-				j++ // include the newline
-			}
-			sb.WriteString(string(runes[i:j]))
-			i = j
-			continue
-		}
-
-		// ── Block comment /* … */ — pass through unchanged ─────────────────────
-		if ch == '/' && i+1 < n && runes[i+1] == '*' {
-			j := i + 2
-			for j+1 < n && !(runes[j] == '*' && runes[j+1] == '/') {
-				j++
-			}
-			if j+1 < n {
-				j += 2 // skip past */
+		case sqltok.DollarQuoted:
+			// Recursively apply casing to dollar-quoted bodies (except $query$).
+			tag := tok.Tag
+			tagLen := len(tag)
+			inner := text[tagLen : len(text)-tagLen]
+			sb.WriteString(tag)
+			if strings.ToUpper(tag) == "$QUERY$" {
+				sb.WriteString(inner)
 			} else {
-				j = n // unclosed comment — consume to end
+				sb.WriteString(ApplyCasing(inner, keywordCase, identifierCase, functionCase))
 			}
-			sb.WriteString(string(runes[i:j]))
-			i = j
-			continue
-		}
+			sb.WriteString(tag)
 
-		// ── Word token (identifier / keyword / function name) ──────────────────
-		if isAlpha(ch) {
-			j := i + 1
-			for j < n && (isWordChar(runes[j]) || runes[j] == '$') {
-				j++
-			}
-			word := string(runes[i:j])
+		case sqltok.Keyword, sqltok.Identifier:
+			word := text
 			upper := strings.ToUpper(word)
 
-			// Peek past whitespace to determine if this is a function call.
-			k := j
-			for k < n && (runes[k] == ' ' || runes[k] == '\t' || runes[k] == '\n' || runes[k] == '\r') {
-				k++
-			}
-			isCall := k < n && runes[k] == '('
+			// Peek past whitespace to check if followed by '(' (function call).
+			nextTok, hasNext := peekNextNonWS(i)
+			isCall := hasNext && nextTok.Kind == sqltok.LParen
 
 			var result string
 			if isCall {
-				// Keywords that use '(' structurally (OVER, IN, …) keep keyword casing.
-				// Built-in functions and UDFs get function casing.
-				if sqlFormatterKeywords[upper] && !builtinFunctions[upper] {
+				if sqltok.IsKeyword(upper) && !sqltok.IsBuiltinFunction(upper) {
 					result = applyCase(word, keywordCase)
 				} else {
 					result = applyCase(word, functionCase)
 				}
-			} else if sqlFormatterKeywords[upper] {
+			} else if sqltok.IsKeyword(upper) {
 				result = applyCase(word, keywordCase)
 			} else {
 				result = applyCase(word, identifierCase)
 			}
 
-			// For function tokens (not pure keyword constructs), strip the space
-			// sql-formatter inserted before '(' so e.g. "COUNT (" → "COUNT(".
-			isFunctionToken := isCall && (!sqlFormatterKeywords[upper] || builtinFunctions[upper])
+			// For function tokens, strip whitespace before '(' that sql-formatter inserted.
+			isFunctionToken := isCall && (!sqltok.IsKeyword(upper) || sqltok.IsBuiltinFunction(upper))
 			sb.WriteString(result)
 			if isFunctionToken {
-				i = k // advance past the whitespace before '('
-			} else {
-				i = j
+				// Skip whitespace tokens between the word and '('.
+				// Zero the text range so they emit nothing, but keep Kind
+				// unchanged to avoid triggering the EOF break.
+				for j := i + 1; j < len(tokens); j++ {
+					k := tokens[j].Kind
+					if k == sqltok.Whitespace || k == sqltok.Newline {
+						tokens[j].End = tokens[j].Start
+					} else {
+						break
+					}
+				}
 			}
-			continue
-		}
 
-		// Numbers, operators, whitespace, punctuation — pass through unchanged.
-		sb.WriteRune(ch)
-		i++
+		default:
+			// Numbers, operators, whitespace, newlines, punctuation — pass through.
+			sb.WriteString(text)
+		}
 	}
 
 	return sb.String()
@@ -2260,16 +1806,17 @@ func extractProjectedColName(expr string) string {
 // table(s) found in the immediate FROM/JOIN of this SELECT block.
 func extractSelectProjections(sql string, localScope map[string][]ColInfo) []ColInfo {
 	stripped := stripCommentsSQL(sql)
-	selLoc := reSelectKW.FindStringIndex(stripped)
-	if selLoc == nil {
+	strippedToks := sqltok.Tokenize(stripped)
+	strippedSig := sigToks(strippedToks)
+	selOff := findSelectKWOffset(strippedSig, stripped)
+	if selOff < 0 {
 		return nil
 	}
 
 	// 1. Determine the context for this SELECT (Step A: Source Resolution)
 	// We extract table references only from THIS select block.
 	activeContext := make(map[string][]ColInfo)
-	for _, fm := range reFromJoinSel.FindAllStringSubmatch(stripped, -1) {
-		tablePath := fm[1]
+	for _, tablePath := range findFromJoinTables2(strippedSig, stripped) {
 		parts := extractIdentParts(tablePath, true)
 		if len(parts) > 0 {
 			tableNameU := parts[len(parts)-1]
@@ -2280,7 +1827,7 @@ func extractSelectProjections(sql string, localScope map[string][]ColInfo) []Col
 	}
 
 	// 2. Evaluate the SELECT clause (Step C: Output Registration)
-	afterSelect := strings.TrimSpace(stripped[selLoc[1]:])
+	afterSelect := strings.TrimSpace(stripped[selOff+6:])
 	upAfter := strings.ToUpper(afterSelect)
 	if strings.HasPrefix(upAfter, "DISTINCT ") || strings.HasPrefix(upAfter, "DISTINCT\t") || strings.HasPrefix(upAfter, "DISTINCT\n") {
 		afterSelect = strings.TrimSpace(afterSelect[8:])
@@ -2304,51 +1851,19 @@ func extractSelectProjections(sql string, localScope map[string][]ColInfo) []Col
 	return cols
 }
 
-// extractNextAlias reads past optional whitespace (and an optional AS keyword)
-// from position afterIdx in s and returns the next bare identifier, or "" if
-// none is present.  This is used to find explicit table aliases that appear
-// directly after a FROM/JOIN table path.
-func extractNextAlias(s string, afterIdx int) string {
-	rest := s[afterIdx:]
-	// Skip leading whitespace.
-	i := 0
-	for i < len(rest) && (rest[i] == ' ' || rest[i] == '\t' || rest[i] == '\r' || rest[i] == '\n') {
-		i++
-	}
-	if i == len(rest) {
-		return ""
-	}
-	// Skip optional AS keyword.
-	if i+2 <= len(rest) && strings.ToUpper(rest[i:i+2]) == "AS" {
-		if i+2 == len(rest) || !isWordChar(rune(rest[i+2])) {
-			i += 2
-			for i < len(rest) && (rest[i] == ' ' || rest[i] == '\t') {
-				i++
-			}
-		}
-	}
-	if i == len(rest) || !isAlpha(rune(rest[i])) {
-		return ""
-	}
-	// Scan the identifier.
-	j := i
-	for j < len(rest) && isWordChar(rune(rest[j])) {
-		j++
-	}
-	return rest[i:j]
-}
-
 // isSimpleCTESelect returns true when every item in the CTE's SELECT list is a
 // bare or qualified column reference with no function calls, arithmetic operators,
 // or AS-renamed aliases.  For such CTEs the effective schema equals the source
 // table's actual columns, allowing us to detect bare column typos in the CTE body.
 func isSimpleCTESelect(innerSQL string) bool {
 	stripped := stripCommentsSQL(innerSQL)
-	selLoc := reSelectKW.FindStringIndex(stripped)
-	if selLoc == nil {
+	strippedToks := sqltok.Tokenize(stripped)
+	strippedSig := sigToks(strippedToks)
+	selOff := findSelectKWOffset(strippedSig, stripped)
+	if selOff < 0 {
 		return false
 	}
-	afterSelect := strings.TrimSpace(stripped[selLoc[1]:])
+	afterSelect := strings.TrimSpace(stripped[selOff+6:])
 	upAfter := strings.ToUpper(afterSelect)
 	if strings.HasPrefix(upAfter, "DISTINCT ") || strings.HasPrefix(upAfter, "DISTINCT\t") || strings.HasPrefix(upAfter, "DISTINCT\n") {
 		afterSelect = strings.TrimSpace(afterSelect[8:])
@@ -2374,11 +1889,13 @@ func isSimpleCTESelect(innerSQL string) bool {
 // select list contains a wildcard.
 func getSimpleSelectColumnNames(innerSQL string) []string {
 	stripped := stripCommentsSQL(innerSQL)
-	selLoc := reSelectKW.FindStringIndex(stripped)
-	if selLoc == nil {
+	strippedToks := sqltok.Tokenize(stripped)
+	strippedSig := sigToks(strippedToks)
+	selOff := findSelectKWOffset(strippedSig, stripped)
+	if selOff < 0 {
 		return nil
 	}
-	afterSelect := strings.TrimSpace(stripped[selLoc[1]:])
+	afterSelect := strings.TrimSpace(stripped[selOff+6:])
 	upAfter := strings.ToUpper(afterSelect)
 	if strings.HasPrefix(upAfter, "DISTINCT ") || strings.HasPrefix(upAfter, "DISTINCT\t") || strings.HasPrefix(upAfter, "DISTINCT\n") {
 		afterSelect = strings.TrimSpace(afterSelect[8:])
@@ -2462,9 +1979,10 @@ func extractCTEProjections(stripped string, globalRegistry map[string][]ColInfo)
 			// projection list.
 			if isSimpleCTESelect(innerSQL) {
 				innerStripped := stripCommentsSQL(innerSQL)
+				innerToks := sqltok.Tokenize(innerStripped)
+				innerSig := sigToks(innerToks)
 				var allSourceCols []ColInfo
-				for _, fm := range reFromJoinSel.FindAllStringSubmatch(innerStripped, -1) {
-					tablePath := fm[1]
+				for _, tablePath := range findFromJoinTables2(innerSig, innerStripped) {
 					parts := extractIdentParts(tablePath, true)
 					if len(parts) > 0 {
 						tableNameU := parts[len(parts)-1]
@@ -2576,13 +2094,15 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 	for idx, r := range stmtRanges {
 		raw := sqlStmt(sql, r)
 		stripped := stripCommentsSQL(raw)
+		rawToks := sqltok.Tokenize(raw)
+		rawSig := sigToks(rawToks)
+		strippedToks := sqltok.Tokenize(stripped)
+		strippedSig := sigToks(strippedToks)
 
 		// 1. Update localColCache if this is a CREATE TABLE
-		if m := reCreateTablePreScan.FindStringSubmatchIndex(raw); m != nil {
-			nameStr := raw[m[2]:m[3]]
+		if nameStr, parenStart, ok := matchCreateTablePre(rawSig, raw); ok {
 			parts := extractIdentParts(nameStr, true)
 			if len(parts) > 0 {
-				parenStart := m[1] - 1
 				colsRaw := extractBalancedBlock(raw, parenStart)
 				if len(colsRaw) >= 2 {
 					colsRaw = colsRaw[1 : len(colsRaw)-1]
@@ -2606,24 +2126,25 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 			activeKeys:   make([]string, 0),
 		}
 
-		// NEW: Add the object being created to the aliasMap so it's not flagged as a missing column.
-		if m := reCreateTVMatch.FindStringSubmatch(raw); m != nil {
-			if parts := extractIdentParts(m[1], true); len(parts) > 0 {
+		// Add the object being created to the aliasMap so it's not flagged as a missing column.
+		if rawPath, _, ok := matchCreateTV(rawSig, raw); ok {
+			if parts := extractIdentParts(rawPath, true); len(parts) > 0 {
 				objNameU := strings.ToUpper(parts[len(parts)-1])
 				ctx.aliasMap[objNameU] = "__object__"
 			}
-		} else if m := reCreateDbSchMatch.FindStringSubmatch(raw); m != nil {
-			if parts := extractIdentParts(m[1], true); len(parts) > 0 {
+		} else if rawPath, ok := matchCreateDbSch(rawSig, raw); ok {
+			if parts := extractIdentParts(rawPath, true); len(parts) > 0 {
 				objNameU := strings.ToUpper(parts[len(parts)-1])
 				ctx.aliasMap[objNameU] = "__object__"
 			}
 		}
 
-		// NEW: Pre-scan for column aliases (AS alias) and add them to the aliasMap.
+		// Pre-scan for column aliases (AS alias) and add them to the aliasMap.
 		// This prevents false positives on alias names within the same statement.
-		for _, m := range reAsAliasSel.FindAllStringSubmatch(stripped, -1) {
-			aliasU := strings.ToUpper(normIdent(m[1], true))
-			if !sqlAllKeywords[aliasU] {
+		for _, loc := range findAsAliases(strippedSig, stripped) {
+			aliasText := stripped[loc.aliasStart:loc.aliasEnd]
+			aliasU := strings.ToUpper(normIdent(aliasText, true))
+			if !sqltok.IsKeyword(aliasU) {
 				ctx.aliasMap[aliasU] = "__alias__"
 			}
 		}
@@ -2648,9 +2169,8 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 		// In that case bareColValidation is disabled for the whole statement to prevent
 		// false positives on column references from those unknown tables.
 		hasUnknownTable := false
-		for _, mIdx := range reFromJoinSel.FindAllStringSubmatchIndex(stripped, -1) {
-			tablePath := stripped[mIdx[2]:mIdx[3]]
-			parts := extractIdentParts(tablePath, true)
+		for _, ta := range findFromJoinWithAlias(strippedSig, stripped) {
+			parts := extractIdentParts(ta.tablePath, true)
 			if len(parts) == 0 {
 				continue
 			}
@@ -2688,11 +2208,9 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 			if cacheKey != "" {
 				ctx.activeKeys = append(ctx.activeKeys, cacheKey)
 
-				// Extract an explicit alias from the text immediately after the table path.
-				afterTableIdx := mIdx[3]
-				alias := extractNextAlias(stripped, afterTableIdx)
-				if alias != "" {
-					aliasU := strings.ToUpper(alias)
+				// Register explicit alias if present.
+				if ta.alias != "" {
+					aliasU := strings.ToUpper(ta.alias)
 					if !joinStopKW[aliasU] {
 						ctx.aliasMap[aliasU] = cacheKey
 					}
@@ -2702,7 +2220,7 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 				if _, already := ctx.aliasMap[tableNameU]; !already {
 					ctx.aliasMap[tableNameU] = cacheKey
 				}
-			} else if !sqlAllKeywords[tableNameU] {
+			} else if !sqltok.IsKeyword(tableNameU) {
 				// Unknown table (not a CTE, not local, not in global registry, not a SQL
 				// keyword like TABLE).  Disable bare-column validation for this statement
 				// to prevent false positives on columns from the unknown source table.
@@ -2924,7 +2442,7 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 				if stmtIdx < len(stmtContexts) {
 					ctx := stmtContexts[stmtIdx]
 					// Skip if it's a known SQL keyword.
-					if !sqlAllKeywords[word1Norm] {
+					if !sqltok.IsKeyword(word1Norm) {
 						// Heuristic: skip if followed by '(' (likely a function call).
 						isFunction := false
 						k := i
@@ -3369,20 +2887,18 @@ func ExtractInEditorTableDefs(
 		raw := sqlStmt(sql, r)
 
 		// Must be a CREATE TABLE (not CTAS/CLONE/LIKE)
-		if !reCreateTableGuard.MatchString(raw) {
+		rawToks := sqltok.Tokenize(raw)
+		rawSig := sigToks(rawToks)
+		if !matchCreateTableGuard(rawSig, raw) {
 			continue
 		}
 
-		m := reCreateTablePreScan.FindStringSubmatchIndex(raw)
-		if m == nil {
+		nameStr, parenStart, ok := matchCreateTablePre(rawSig, raw)
+		if !ok {
 			continue
 		}
 
 		// Check for CTAS: if AS SELECT follows the column block or there is no column block
-		nameStr := raw[m[2]:m[3]]
-
-		// Extract balanced column block starting at the opening paren.
-		parenStart := m[1] - 1
 		colsRaw := extractBalancedBlock(raw, parenStart)
 		if colsRaw == "" {
 			continue

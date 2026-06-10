@@ -13,8 +13,9 @@ package snowflake
 import (
 	"context"
 	"regexp"
-	"sort"
 	"strings"
+
+	"thaw/internal/sqltok"
 )
 
 // reUnquotedIdent matches a Snowflake bare (unquoted) identifier: starts with
@@ -22,40 +23,6 @@ import (
 // signs. The pattern is case-insensitive because Snowflake normalizes unquoted
 // identifiers to uppercase regardless of how they were written.
 var reUnquotedIdent = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_$]*$`)
-
-// snowflakeReservedKeywords is the set of Snowflake SQL reserved words.
-// An unquoted identifier that matches one of these (case-insensitively) is
-// interpreted as a keyword and must be double-quoted to be used as a name.
-// Source: https://docs.snowflake.com/en/sql-reference/reserved-keywords
-var snowflakeReservedKeywords = map[string]struct{}{
-	"ACCOUNT": {}, "ALL": {}, "ALTER": {}, "AND": {}, "ANY": {}, "AS": {},
-	"BETWEEN": {}, "BY": {},
-	"CASE": {}, "CAST": {}, "CHECK": {}, "COLUMN": {}, "CONNECT": {},
-	"CONNECTION": {}, "CONSTRAINT": {}, "CREATE": {}, "CROSS": {},
-	"CURRENT": {}, "CURRENT_DATE": {}, "CURRENT_TIME": {},
-	"CURRENT_TIMESTAMP": {}, "CURRENT_USER": {},
-	"DATABASE": {}, "DELETE": {}, "DISTINCT": {}, "DROP": {},
-	"ELSE": {}, "EXISTS": {},
-	"FALSE": {}, "FOLLOWING": {}, "FOR": {}, "FROM": {}, "FULL": {},
-	"GRANT": {}, "GROUP": {}, "GSCLUSTER": {},
-	"HAVING": {},
-	"ILIKE": {}, "IN": {}, "INCREMENT": {}, "INNER": {}, "INSERT": {},
-	"INTERSECT": {}, "INTO": {}, "IS": {}, "ISSUE": {},
-	"JOIN": {},
-	"LATERAL": {}, "LEFT": {}, "LIKE": {}, "LIMIT": {},
-	"LOCALTIME": {}, "LOCALTIMESTAMP": {},
-	"MINUS": {},
-	"NATURAL": {}, "NOT": {}, "NULL": {},
-	"OF": {}, "ON": {}, "OR": {}, "ORDER": {}, "ORGANIZATION": {},
-	"QUALIFY": {},
-	"REGEXP": {}, "REVOKE": {}, "RIGHT": {}, "RLIKE": {}, "ROW": {}, "ROWS": {},
-	"SAMPLE": {}, "SELECT": {}, "SET": {}, "SHOW": {}, "SOME": {}, "START": {},
-	"TABLE": {}, "TABLESAMPLE": {}, "THEN": {}, "TO": {}, "TRIGGER": {},
-	"TRUE": {}, "TRY_CAST": {},
-	"UNION": {}, "UNIQUE": {}, "UPDATE": {}, "USING": {},
-	"VALUES": {}, "VIEW": {},
-	"WHEN": {}, "WHENEVER": {}, "WHERE": {}, "WITH": {},
-}
 
 // TableKey returns the canonical lookup key for a Snowflake table:
 // "SCHEMA.TABLE" with both parts trimmed. Names arrive from Snowflake
@@ -78,20 +45,13 @@ func NeedsQuoting(name string) bool {
 	if !reUnquotedIdent.MatchString(name) {
 		return true
 	}
-	_, reserved := snowflakeReservedKeywords[strings.ToUpper(name)]
-	return reserved
+	return sqltok.IsReserved(strings.ToUpper(name))
 }
 
 // ReservedKeywords returns the full list of Snowflake reserved keywords.
 // The returned slice is sorted alphabetically. Callers must not modify it.
 func ReservedKeywords() []string {
-	out := make([]string, 0, len(snowflakeReservedKeywords))
-	for kw := range snowflakeReservedKeywords {
-		out = append(out, kw)
-	}
-	// Sort for deterministic ordering (map iteration is random in Go).
-	sort.Strings(out)
-	return out
+	return sqltok.ReservedKeywordList()
 }
 
 // QuoteIdent wraps name in double-quotes, escaping any embedded double-quotes.

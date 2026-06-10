@@ -19,10 +19,27 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE TRANSIENT DATABASE my_db",
 		"CREATE DATABASE my_db DATA_RETENTION_TIME_IN_DAYS = 90",
 		"CREATE TRANSIENT SCHEMA my_sch",
+		"CREATE OR REPLACE DATABASE db CLONE src",
+		"CREATE DATABASE db CLONE src AT (TIMESTAMP => 1) IGNORE TABLES WITH INSUFFICIENT DATA RETENTION IGNORE HYBRID TABLES",
+		"CREATE SCHEMA s WITH MANAGED ACCESS COMMENT = 'sch'",
+		"CREATE DATABASE db FROM SHARE provider_acct.my_share",
+		"CREATE DATABASE db EXTERNAL_VOLUME = vol CATALOG = cat STORAGE_SERIALIZATION_POLICY = OPTIMIZED",
+		"CREATE DATABASE db CATALOG_SYNC = 'open' CATALOG_SYNC_NAMESPACE_MODE = FLATTEN OBJECT_VISIBILITY = PRIVILEGED",
+		"CREATE DATABASE db REPLACE_INVALID_CHARACTERS = TRUE MAX_DATA_EXTENSION_TIME_IN_DAYS = 14 WITH TAG (t = 'v') CONTACT (support = c)",
 		// Snowflake Views
 		"CREATE VIEW v AS SELECT 1 FROM t",
 		"CREATE OR REPLACE SECURE VIEW v AS SELECT 1 FROM t",
 		"CREATE MATERIALIZED VIEW mv AS SELECT 1 FROM t",
+		"CREATE VIEW IF NOT EXISTS db.sch.v AS SELECT 1 FROM t",
+		"CREATE VIEW v (a, b) AS SELECT 1, 2 FROM t",
+		"CREATE VIEW v COPY GRANTS COMMENT = 'my view' AS SELECT 1 FROM t",
+		"CREATE VIEW v CHANGE_TRACKING = TRUE AS SELECT 1 FROM t",
+		"CREATE VIEW v CLUSTER BY (a, b) AS SELECT a, b FROM t",
+		"CREATE VIEW v WITH ROW ACCESS POLICY p ON (a) AS SELECT a FROM t",
+		"CREATE VIEW v WITH AGGREGATION POLICY p ENTITY KEY (a) AS SELECT a FROM t",
+		"CREATE VIEW v WITH TAG (cost_center = 'sales') AS SELECT 1 FROM t",
+		"CREATE VIEW v WITH CONTACT (support = c) AS SELECT 1 FROM t",
+		"CREATE LOCAL TEMP RECURSIVE VIEW v (a) AS SELECT 1 FROM t",
 		// Snowflake Dynamic Tables
 		"CREATE DYNAMIC TABLE dt TARGET_LAG = '1 minute' WAREHOUSE = wh AS SELECT 1 FROM t",
 		// ALTER DYNAMIC TABLE — comprehensive tests in TestValidateSnowflakePatterns_AlterDynamicTable
@@ -33,7 +50,14 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"ALTER DYNAMIC TABLE my_dt SET WAREHOUSE = my_wh",
 		// Sequences
 		"CREATE SEQUENCE my_seq START WITH 1",
+		"CREATE OR REPLACE SEQUENCE IF NOT EXISTS s START = 100 INCREMENT BY -2 ORDER COMMENT = 'seq'",
+		"CREATE SEQUENCE s WITH START 5 INCREMENT 1 NOORDER",
+		"CREATE SEQUENCE s START -10 INCREMENT = 3",
 		"ALTER SEQUENCE my_seq INCREMENT = 10",
+		"ALTER SEQUENCE IF EXISTS s RENAME TO s2",
+		"ALTER SEQUENCE s SET INCREMENT BY -5",
+		"ALTER SEQUENCE s SET ORDER COMMENT = 'x'",
+		"ALTER SEQUENCE s UNSET COMMENT",
 		"DROP SEQUENCE IF EXISTS my_seq CASCADE",
 		// Streams
 		"CREATE STREAM my_stream ON TABLE my_table",
@@ -43,6 +67,8 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE STREAM my_stream ON TABLE my_table BEFORE (STATEMENT => '9e564d60-0000-0000-0000-000000000000')",
 		"CREATE STREAM my_stream ON TABLE t SHOW_INITIAL_ROWS = TRUE",
 		"CREATE STREAM s ON TABLE t CHANGE_TRACKING = TRUE",
+		"CREATE STREAM s ON EXTERNAL TABLE et INSERT_ONLY = TRUE",
+		"CREATE STREAM s ON TABLE t BEFORE (STATEMENT => 'x') APPEND_ONLY = FALSE COMMENT = 'c'",
 		"CREATE STREAM s COPY GRANTS ON TABLE t",
 		// Tables
 		"CREATE TABLE IF NOT EXISTS my_database.public.basic_employees (emp_id NUMBER)",
@@ -51,6 +77,7 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		// Drop
 		"DROP DATABASE my_db CASCADE",
 		"DROP SCHEMA IF EXISTS my_sch RESTRICT",
+		"DROP SCHEMA db.my_sch",
 		// Tags — comprehensive tests in TestValidateSnowflakePatterns_Tag
 		"CREATE TAG my_tag",
 		"ALTER TAG my_tag RENAME TO new_tag",
@@ -97,6 +124,15 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE TABLE t CLONE s AT (TIMESTAMP => TO_TIMESTAMP_TZ('2023-01-01 00:00:00'))",
 		"CREATE TABLE t (id INT) COMMENT = 'my table' TAG (tag1 = 'val1')",
 		"CREATE OR ALTER TABLE t (id INT, val VARCHAR)",
+		// CREATE TABLE property tail — one per supported property
+		"CREATE TABLE t (id INT) MAX_DATA_EXTENSION_TIME_IN_DAYS = 14 DEFAULT_DDL_COLLATION = 'en_US'",
+		"CREATE TABLE t (id INT) COPY GRANTS COPY TAGS",
+		"CREATE TABLE t (id INT) ERROR_LOGGING = TRUE ROW_TIMESTAMP = FALSE CHANGE_TRACKING = TRUE",
+		"CREATE TABLE t (id INT) WITH AGGREGATION POLICY ap ENTITY KEY (id)",
+		"CREATE TABLE t (id INT) WITH JOIN POLICY jp ALLOWED JOIN KEYS (id)",
+		"CREATE TABLE t (id INT) STORAGE LIFECYCLE POLICY slp ON (id)",
+		"CREATE TABLE t (id INT) WITH TAG (cost = 'x') WITH CONTACT (support = c)",
+		"CREATE TABLE t (id INT) ROW ACCESS POLICY rap ON (id)",
 		// Integrations
 		"CREATE STORAGE INTEGRATION my_storage_int TYPE=EXTERNAL_STAGE STORAGE_PROVIDER='S3' ENABLED=TRUE STORAGE_AWS_ROLE_ARN='arn:aws:iam::123456789012:role/my_role' STORAGE_ALLOWED_LOCATIONS=('s3://my-bucket/')",
 		"CREATE STAGE my_s3_stage URL='s3://bucket/' STORAGE_INTEGRATION=s3_int DIRECTORY=(ENABLE=TRUE)",
@@ -440,6 +476,17 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"SELECT * FROM orders BEFORE (TIMESTAMP => '2024-01-01 00:00:00'::TIMESTAMP_LTZ)",
 		"SELECT * FROM orders BEFORE (OFFSET => -3600)",
 		"SELECT * FROM orders AT (STREAM => my_stream)",
+		// Table aliases and clause keywords after a table ref must not be flagged
+		// as stray tokens (PR #472 follow-up — trailing-token check).
+		`SELECT * FROM "DB"."PUBLIC"."DUMMY_ORDERS" li`,
+		"SELECT * FROM orders o",
+		"SELECT * FROM orders AS o",
+		"SELECT * FROM orders LIMIT 10",
+		"SELECT * FROM orders WHERE id = 1000",
+		"SELECT * FROM orders o WHERE o.id = 1000",
+		"SELECT * FROM orders SAMPLE (10 ROWS)",
+		"SELECT * FROM t1 JOIN t2 ON t1.id = 1000",
+		"SELECT * FROM t1 o1 JOIN t2 o2 ON o1.id = o2.id",
 	}
 
 	for _, sql := range validQueries {
@@ -465,19 +512,44 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"FLATTEN missing LATERAL", "SELECT * FROM raw_events, FLATTEN(input => doc)", "requires LATERAL"},
 		{"QUALIFY ordering", "SELECT id FROM t ORDER BY id QUALIFY ROW_NUMBER() OVER(ORDER BY id) = 1", "after 'WHERE' or 'HAVING'"},
 		{"Variant Path Colon", "SELECT payload.metadata.source FROM t", "Missing colon for variant path"},
+		// Stray literal after a table reference / alias (the reported bug).
+		{"FROM table then number", `SELECT * FROM "DB"."PUBLIC"."DUMMY_ORDERS" 1000`, "Unexpected token"},
+		{"FROM alias then number", `SELECT * FROM "DB"."PUBLIC"."DUMMY_ORDERS" li 1000`, "Unexpected token"},
+		{"FROM table then string", "SELECT * FROM orders 'x'", "Unexpected token"},
+		{"JOIN table then number", "SELECT * FROM a JOIN b 1000 ON a.id = b.id", "Unexpected token"},
+		{"FROM table then dangling AS", `SELECT * FROM "DB"."PUBLIC"."DUMMY_ORDERS" as;`, "alias after AS"},
+		{"FROM alias then stray AS", `SELECT * FROM "DB"."PUBLIC"."DUMMY_ORDERS" aaa as;`, "after the table alias"},
 
 		// Invalid Preambles
 		{"Invalid DB", "CREATE DATABASE my_db DATA_RETENTION_TIME_IN_DAYS 10", "Unexpected syntax"}, // Missing =
 		{"Invalid Schema", "CREATE SCHEMA my_sch WITH MANAGED ACCESS = TRUE", "Unexpected syntax"},
+		{"DB unknown property", "CREATE DATABASE db BOGUS_PROP = 1", "Unexpected syntax"},
+		{"DB enum bad value", "CREATE DATABASE db STORAGE_SERIALIZATION_POLICY = BOGUS", "Unexpected syntax"},
+		{"DB bool prop bad value", "CREATE DATABASE db ENABLE_DATA_COMPACTION = MAYBE", "Unexpected syntax"},
 		{"Invalid View", "CREATE VIEW v SELECT 1", "Unexpected syntax"}, // Missing AS
 		{"Invalid Mat View", "CREATE MATERIALIZED VIEW mv SELECT 1", "Unexpected syntax"},
+		{"View bad clause", "CREATE VIEW v BOGUS_PROP = 1 AS SELECT 1", "Unexpected syntax"},
+		{"View CHANGE_TRACKING bad value", "CREATE VIEW v CHANGE_TRACKING = MAYBE AS SELECT 1", "Unexpected syntax"},
+		{"View CLUSTER BY no parens", "CREATE VIEW v CLUSTER BY a AS SELECT a FROM t", "Unexpected syntax"},
+		{"View CONTACT without WITH", "CREATE VIEW v CONTACT (x = c) AS SELECT 1", "Unexpected syntax"},
 		{"Invalid Dynamic Table", "CREATE DYNAMIC TABLE dt AS SELECT 1", "Unexpected syntax"}, // Missing TARGET_LAG / WAREHOUSE
 		{"Invalid Drop DB", "DROP DATABASE my_db CASCADE RESTRICT", "Unexpected syntax"},      // Conflicting modifiers
+		{"Drop DB trailing junk", "DROP DATABASE my_db FOO", "Unexpected syntax"},
+		{"Drop Sequence no name", "DROP SEQUENCE", "Unexpected syntax"},
 		{"Invalid Sequence", "CREATE SEQUENCE my_seq START WITH 'abc'", "Unexpected syntax"},
+		{"Sequence ORDER+NOORDER", "CREATE SEQUENCE s ORDER NOORDER", "Unexpected syntax"},
+		{"Sequence unknown clause", "CREATE SEQUENCE s BOGUS = 1", "Unexpected syntax"},
+		{"Sequence START no value", "CREATE SEQUENCE s START WITH", "Unexpected syntax"},
+		{"Alter Sequence bad action", "ALTER SEQUENCE s SET FOO = 1", "Unexpected syntax"},
+		{"Alter Sequence SET ORDER+NOORDER", "ALTER SEQUENCE s SET ORDER NOORDER", "Unexpected syntax"},
+		{"Alter Sequence trailing junk", "ALTER SEQUENCE s RENAME TO s2 EXTRA", "Unexpected syntax"},
 		{"Invalid Table", "CREATE TRANSIENT OR REPLACE TABLE foo (id INT)", "Unexpected syntax"}, // Wrong modifier order
 		{"Table Replace IF NOT EXISTS", "CREATE OR REPLACE TABLE foo IF NOT EXISTS (id INT)", "Conflict between OR REPLACE and IF NOT EXISTS"},
 		{"Table CLUSTER BY no parens", "CREATE TABLE foo (id INT) CLUSTER BY id", "Unexpected syntax"},
 		{"Table Retention invalid", "CREATE TABLE foo (id INT) DATA_RETENTION_TIME_IN_DAYS = 'abc'", "Unexpected syntax"},
+		{"Table unknown property", "CREATE TABLE foo (id INT) BOGUS_PROP = 1", "Unexpected syntax"},
+		{"Table bool prop bad value", "CREATE TABLE foo (id INT) CHANGE_TRACKING = MAYBE", "Unexpected syntax"},
+		{"Table CONTACT without WITH-only on contact", "CREATE TABLE foo (id INT) CONTACT (c = x)", "Unexpected syntax"},
 
 		// Invalid Stream
 		{"Stream missing ON", "CREATE STREAM s TABLE t", "Unexpected syntax"},
@@ -485,6 +557,7 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Stream invalid property", "CREATE STREAM s ON TABLE t AT (OFFSET => -100) INVALID_PROP = TRUE", "Unexpected syntax"},
 		{"Stream invalid object type", "CREATE STREAM s ON SEQUENCE seq", "Unexpected syntax"},
 		{"Stream COPY GRANTS after ON", "CREATE STREAM s ON TABLE t COPY GRANTS", "Unexpected syntax"},
+		{"Stream bad bool value", "CREATE STREAM s ON TABLE t APPEND_ONLY = YES", "Unexpected syntax"},
 		{"Stream Replace IF NOT EXISTS", "CREATE OR REPLACE STREAM foo IF NOT EXISTS ON TABLE t", "Conflict between OR REPLACE and IF NOT EXISTS"},
 
 		// Invalid MERGE
@@ -637,10 +710,14 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"External Table missing Location", "CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) FILE_FORMAT = (TYPE = CSV)", "WITH LOCATION = @<stage> is mandatory"},
 		{"External Table missing File Format", "CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) WITH LOCATION = @s1/path/", "FILE_FORMAT is mandatory"},
 		{"External Table non-virtual column", "CREATE EXTERNAL TABLE et (c1 int) WITH LOCATION = @s1/path/ FILE_FORMAT = (TYPE = CSV)", "must be a virtual column using AS"},
+		{"External Table AS without parens", "CREATE EXTERNAL TABLE et (c1 int as value) WITH LOCATION = @s1/path/ FILE_FORMAT = (TYPE = CSV)", "must be a virtual column using AS"},
 		{"External Table invalid prop", "CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) WITH LOCATION = @s1/path/ FILE_FORMAT = (TYPE = CSV) AUTO_REFRESH = YES", "Unexpected syntax in CREATE EXTERNAL TABLE properties"},
 		{"External Table partition missing parens", "CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) PARTITION BY c1 WITH LOCATION = @s1/path/ FILE_FORMAT = (TYPE = CSV)", "requires a parenthesised column list"},
 		{"External Table partition unclosed parens", "CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) PARTITION BY (c1 WITH LOCATION = @s1/path/ FILE_FORMAT = (TYPE = CSV)", "Unclosed parenthesised column list in PARTITION BY clause"},
 		{"External Table empty columns", "CREATE EXTERNAL TABLE et () WITH LOCATION = @s/p/ FILE_FORMAT = (TYPE = CSV)", "Column list must not be empty"},
+		{"External Table unknown prop", "CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) WITH LOCATION = @s/p/ FILE_FORMAT = (TYPE = CSV) BOGUS = 1", "Unexpected syntax in CREATE EXTERNAL TABLE properties"},
+		{"External Table bad TABLE_FORMAT", "CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) WITH LOCATION = @s/p/ FILE_FORMAT = (TYPE = CSV) TABLE_FORMAT = ICEBERG", "Unexpected syntax in CREATE EXTERNAL TABLE properties"},
+		{"External Table bad FILE_FORMAT contents", "CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) WITH LOCATION = @s/p/ FILE_FORMAT = (BOGUS = 1)", "Unexpected syntax in CREATE EXTERNAL TABLE properties"},
 
 		// Invalid Network Policies
 		{"Network Policy with prefix", "CREATE NETWORK POLICY MY_DB.PUBLIC.bad_policy ALLOWED_IP_LIST = ('10.0.0.0/8')", "account-level"},
@@ -784,7 +861,6 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 }
 
 // ── 2. ValidateBareColumnRefs Tests ───────────────────────────────────────────
-
 
 func TestValidateBareColumnRefs_Valid(t *testing.T) {
 	validQueries := []string{
@@ -936,7 +1012,6 @@ func TestValidateBareColumnRefs_Invalid(t *testing.T) {
 
 // ── 3. ValidateTablesExist Tests ──────────────────────────────────────────────
 
-
 func TestValidateTablesExist_Valid(t *testing.T) {
 	validQueries := []string{
 		// Standard
@@ -947,6 +1022,8 @@ func TestValidateTablesExist_Valid(t *testing.T) {
 		// Pre-pass tracking
 		"CREATE TEMPORARY TABLE local_tab AS SELECT 1;\nSELECT * FROM local_tab;",
 		"CREATE OR REPLACE VIEW my_view AS SELECT 1;\nSELECT * FROM my_view;",
+		// CREATE OR ALTER must also register the table (PR #472 review finding 1).
+		"CREATE OR ALTER TABLE local_oa (id INT);\nSELECT * FROM local_oa;",
 		"CREATE DATABASE local_db;\nCREATE SCHEMA local_db.local_sch;\nDROP SCHEMA local_db.local_sch;",
 		// Identifiers inside comments
 		"SELECT * FROM -- MISSING_TABLE \nLIVE_TABLE",
@@ -2044,7 +2121,6 @@ $$;
 		t.Errorf("Unexpected bare column diagnostic marker: %s at line %d, col %d", m.Message, m.StartLineNumber, m.StartColumn)
 	}
 }
-
 
 func TestMatchStringLiteral(t *testing.T) {
 	tests := []struct {

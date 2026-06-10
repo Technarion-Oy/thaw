@@ -186,4 +186,3 @@ func TestValidateBareColumnRefs_PivotSuppression(t *testing.T) {
 		})
 	}
 }
-

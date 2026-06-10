@@ -40,7 +40,8 @@ func GetCodebaseSemanticMap() string {
         "internal/queryhistory/",
         "internal/querylog/",
         "internal/queryprofile/",
-        "internal/sqleditor/"
+        "internal/sqleditor/",
+        "internal/sqltok/"
       ],
       "frontend_paths": [
         "frontend/src/components/editor/CrossTabSearch.tsx",

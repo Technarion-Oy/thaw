@@ -11,8 +11,9 @@
 package sqleditor
 
 import (
-	"regexp"
 	"strings"
+
+	"thaw/internal/sqltok"
 )
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -29,48 +30,6 @@ type ValidateBareColsRequest struct {
 // ── Precompiled regexes & Maps ────────────────────────────────────────────────
 
 var (
-	// FROM keyword at start (for SELECT clause extraction)
-	reFromKW = regexp.MustCompile(`(?i)^FROM\b`)
-	// SELECT keyword (to locate start of SELECT clause)
-	reSelectKW = regexp.MustCompile(`(?i)\bSELECT\b`)
-	// AS <alias> pattern (to mark alias names for skipping)
-	reAsAliasSel = regexp.MustCompile(`(?i)\bAS\s+([a-zA-Z0-9_$]+|"[^"]+")`)
-	// FROM/JOIN without trailing \b – handles quoted identifiers like "DB"."SCH"."TABLE"
-	// (reFromJoinFallback in tableexist.go has \b which fails after closing '"')
-	reFromJoinSel = regexp.MustCompile(`(?i)(?:FROM|JOIN|CROSS\s+JOIN|INSERT\s+INTO|UPDATE|TRUNCATE\s+TABLE|DELETE\s+FROM|MERGE\s+INTO|DESCRIBE\s+TABLE|DESC\s+TABLE|DESCRIBE\s+VIEW|DESC\s+VIEW)\s+(` + _ident + `(?:\.` + _ident + `){0,2})`)
-
-	// reFromJoinWithAlias captures (tablePath, optional_alias) from FROM/JOIN.
-	// The optional alias may be preceded by AS or appear bare (e.g. FROM t AS a
-	// or FROM t a).  SQL stop-words that look like aliases (ON, WHERE, …) are
-	// filtered out in Go code using joinStopKW.
-	reFromJoinWithAlias = regexp.MustCompile(
-		`(?i)(?:FROM|JOIN|CROSS\s+JOIN|INSERT\s+INTO|UPDATE|DELETE\s+FROM|MERGE\s+INTO)\s+(` + _ident + `(?:\.` + _ident + `){0,2})` +
-			`(?:\s+(?:AS\s+)?(` + _ident + `))?`)
-
-	// CREATE TABLE (for pre-scan): capture name + column block.
-	// The column block is captured as everything after the opening paren;
-	// balanced-paren matching is done in Go code.
-	reCreateTablePreScan = regexp.MustCompile(
-		`(?is)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?` +
-			`(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)?` +
-			`TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)\s*\(`)
-
-	// INSERT INTO table (columns) VALUES ...
-	reInsertColList = regexp.MustCompile(
-		`(?i)^\s*INSERT\s+(?:OVERWRITE\s+)?INTO\s+(` + _identPath + `)\s*\(([^)]+)\)`)
-
-	// REFERENCES table [(columns)]
-	reReferencesClause = regexp.MustCompile(
-		`(?i)\bREFERENCES\s+(` + _identPath + `)\s*(?:\(([^)]+)\))?`)
-
-	// CREATE TABLE guard (not CTAS/CLONE/LIKE/USING TEMPLATE)
-	reCreateTableGuard = regexp.MustCompile(
-		`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?` +
-			`(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)?TABLE\b`)
-
-	// CLUSTER BY (...) – remove before FP check
-	reClusterBy = regexp.MustCompile(`(?i)\bCLUSTER\s+BY\s*\([^)]+\)`)
-
 	// Date parts and functions for context-aware bare column skipping
 	bcrDateParts = map[string]bool{
 		"YEAR": true, "MONTH": true, "DAY": true, "HOUR": true, "MINUTE": true,
@@ -125,20 +84,20 @@ func ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {
 	localColCache := make(map[string][]ColInfo)
 	for _, r := range req.StmtRanges {
 		raw := sqlStmt(req.SQL, r)
-		m := reCreateTablePreScan.FindStringSubmatchIndex(raw)
-		if m == nil {
+		tokens := sqltok.Tokenize(raw)
+		sig := sigToks(tokens)
+
+		rawPath, parenOff, ok := matchCreateTablePre(sig, raw)
+		if !ok {
 			continue
 		}
-		// m[2:4] = capture group 1 (table name/path)
-		nameStr := raw[m[2]:m[3]]
-		parts := extractIdentParts(nameStr, ic)
+		parts := extractIdentParts(rawPath, ic)
 		if len(parts) == 0 {
 			continue
 		}
 
 		// Extract balanced column block starting at the opening paren.
-		parenStart := m[1] - 1 // index of '(' in raw
-		colsRaw := extractBalancedBlock(raw, parenStart)
+		colsRaw := extractBalancedBlock(raw, parenOff)
 		if colsRaw == "" {
 			continue
 		}
@@ -178,9 +137,7 @@ func ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {
 
 		// False-positive guard: skip statements with Snowflake-specific syntax
 		// that would produce noise.
-		stripped := strings.TrimSpace(stripCommentsSQL(raw))
-		checkText := reClusterBy.ReplaceAllString(stripped, "")
-		if reSnowflakeFP.MatchString(checkText) {
+		if matchesSnowflakeFP(sigTokens(raw), raw) {
 			continue
 		}
 
@@ -192,7 +149,7 @@ func ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {
 		case "CREATE":
 			markers = append(markers,
 				validateReferencesCols(raw, r, req.ResolvedRefs, colInfoCache, localColCache, checkEq, ic)...)
-			if reIsCreateView.MatchString(raw) {
+			if isCreateView(raw) {
 				markers = append(markers,
 					validateSelectCols(raw, r, req.ResolvedRefs, colInfoCache, localColCache, checkEq, ic)...)
 			}
@@ -355,14 +312,23 @@ func parseCreateTableColDefs(colsRaw string, ic bool) []ColInfo {
 	return columns
 }
 
-var reFirstColIdent = regexp.MustCompile(`^([a-zA-Z0-9_$]+|"(?:[^"]|"")*")`)
-
 func parseFirstIdentAsCol(def string, ic bool) (ColInfo, bool) {
-	m := reFirstColIdent.FindString(def)
-	if m == "" {
-		return ColInfo{}, false
+	// Tokenize the column definition and take the first identifier.
+	tokens := sqltok.Tokenize(def)
+	for _, tok := range tokens {
+		if tok.Kind == sqltok.EOF {
+			break
+		}
+		if tok.Kind == sqltok.Whitespace || tok.Kind == sqltok.Newline ||
+			tok.Kind == sqltok.LineComment || tok.Kind == sqltok.BlockComment {
+			continue
+		}
+		if isIdent(tok) {
+			return ColInfo{Name: normIdent(tok.Text(def), ic), DataType: "UNKNOWN"}, true
+		}
+		break // first non-WS token is not an identifier
 	}
-	return ColInfo{Name: normIdent(m, ic), DataType: "UNKNOWN"}, true
+	return ColInfo{}, false
 }
 
 // lookupColsForRef finds the ColInfo slice for a table identified by
@@ -439,12 +405,12 @@ func validateInsertCols(
 	colInfoCache, localColCache map[string][]ColInfo,
 	checkEq func(string, string) bool, ic bool,
 ) []DiagMarker {
-	m := reInsertColList.FindStringSubmatch(raw)
-	if m == nil {
+	tokens := sqltok.Tokenize(raw)
+	sig := sigToks(tokens)
+	tablePath, colListRaw, ok := matchInsertColList(sig, raw)
+	if !ok {
 		return nil // No explicit column list.
 	}
-	tablePath := m[1]
-	colListRaw := m[2]
 
 	parts := extractIdentParts(tablePath, ic)
 	if len(parts) == 0 {
@@ -466,10 +432,9 @@ func validateInsertCols(
 
 	knownCols := buildKnownColSet(cols, ic)
 
-	colIdents := reIdentOrQuoted.FindAllString(colListRaw, -1)
+	colIdents := extractIdentParts(colListRaw, ic)
 	var missing []string
-	for _, ident := range colIdents {
-		normName := normIdent(ident, ic)
+	for _, normName := range colIdents {
 		if _, found := knownCols[normName]; !found {
 			missing = append(missing, normName)
 		}
@@ -488,18 +453,18 @@ func validateReferencesCols(
 	colInfoCache, localColCache map[string][]ColInfo,
 	checkEq func(string, string) bool, ic bool,
 ) []DiagMarker {
-	if !reCreateTableGuard.MatchString(raw) {
+	tokens := sqltok.Tokenize(raw)
+	sig := sigToks(tokens)
+	if !matchCreateTableGuard(sig, raw) {
 		return nil
 	}
 	var markers []DiagMarker
 
-	for _, m := range reReferencesClause.FindAllStringSubmatch(raw, -1) {
-		colListRaw := m[2]
-		if colListRaw == "" {
+	for _, rm := range findReferences(sig, raw) {
+		if rm.colListRaw == "" {
 			continue // REFERENCES without an explicit column list; skip.
 		}
-		tablePath := m[1]
-		parts := extractIdentParts(tablePath, ic)
+		parts := extractIdentParts(rm.tablePath, ic)
 		if len(parts) == 0 {
 			continue
 		}
@@ -518,10 +483,9 @@ func validateReferencesCols(
 		}
 		knownCols := buildKnownColSet(cols, ic)
 
-		colIdents := reIdentOrQuoted.FindAllString(colListRaw, -1)
+		colIdents := extractIdentParts(rm.colListRaw, ic)
 		var missing []string
-		for _, ident := range colIdents {
-			normName := normIdent(ident, ic)
+		for _, normName := range colIdents {
 			if _, found := knownCols[normName]; !found {
 				missing = append(missing, normName)
 			}
@@ -577,13 +541,21 @@ func extractSelectClause(s string) string {
 			}
 		default:
 			if depth == 0 && (c == 'F' || c == 'f') {
-				if reFromKW.MatchString(s[i:]) {
+				upper := strings.ToUpper(s[i:min(i+5, len(s))])
+				if len(upper) >= 4 && upper[:4] == "FROM" &&
+					(len(upper) < 5 || !isWordCharByte2(upper[4])) {
 					return s[:i]
 				}
 			}
 		}
 	}
 	return s
+}
+
+// isWordCharByte2 reports whether c can continue a SQL word.
+func isWordCharByte2(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+		(c >= '0' && c <= '9') || c == '_' || c == '$'
 }
 
 // buildSingleQuoteMask returns a boolean slice where true indicates the byte
@@ -635,9 +607,11 @@ func scanSelectClauseForUnknownCols(clause string, metaCols, localCols map[strin
 
 	// Build set of start positions that are AS aliases (or the AS keyword itself).
 	aliasStarts := make(map[int]struct{})
-	for _, m := range reAsAliasSel.FindAllStringSubmatchIndex(clause, -1) {
-		aliasStarts[m[0]] = struct{}{} // the AS keyword start
-		aliasStarts[m[2]] = struct{}{} // the alias identifier start
+	// Use token-based AS alias detection.
+	clauseSig := sigTokens(clause)
+	for _, a := range findAsAliases(clauseSig, clause) {
+		aliasStarts[a.asStart] = struct{}{}
+		aliasStarts[a.aliasStart] = struct{}{}
 	}
 
 	var missing []string
@@ -679,7 +653,7 @@ func scanSelectClauseForUnknownCols(clause string, metaCols, localCols map[strin
 
 		// Skip known SQL keywords to prevent flagging things like FROM, WHERE, etc.
 		normUpper := strings.ToUpper(normName)
-		if sqlAllKeywords[normUpper] {
+		if sqltok.IsKeyword(normUpper) {
 			continue
 		}
 
@@ -788,16 +762,20 @@ func validateSelectCols(
 	stripped := stripCommentsSQL(raw)
 
 	// Find the SELECT keyword in the statement.
-	selLoc := reSelectKW.FindStringIndex(stripped)
-	if selLoc == nil {
+	strippedTokens := sqltok.Tokenize(stripped)
+	strippedSig := sigToks(strippedTokens)
+	selOffset := findSelectKWOffset(strippedSig, stripped)
+	if selOffset < 0 {
 		return nil
 	}
+	// selOffset is the byte offset of SELECT; advance past it.
+	selEnd := selOffset + len("SELECT")
 
 	// Extract FROM/JOIN table refs from the full stripped statement.
 	type tableRef struct{ db, schema, name string }
 	var tables []tableRef
-	for _, fm := range reFromJoinSel.FindAllStringSubmatch(stripped, -1) {
-		parts := extractIdentParts(fm[1], ic)
+	for _, path := range findFromJoinTables2(strippedSig, stripped) {
+		parts := extractIdentParts(path, ic)
 		switch len(parts) {
 		case 3:
 			tables = append(tables, tableRef{parts[0], parts[1], parts[2]})
@@ -841,15 +819,17 @@ func validateSelectCols(
 	}
 
 	// Extract the SELECT clause (text between SELECT and the first depth-0 FROM).
-	selectClause := extractSelectClause(stripped[selLoc[1]:])
+	selectClause := extractSelectClause(stripped[selEnd:])
 
 	// Scan for unknown bare (unqualified) column refs.
 	missing := scanSelectClauseForUnknownCols(selectClause, metaCols, localCols, ic)
 
 	// Skip the name of the object being created (e.g. the view name)
 	// to prevent false positives when a view has the same name as a column.
-	if m := reCreateTVMatch.FindStringSubmatch(raw); m != nil {
-		if parts := extractIdentParts(m[1], ic); len(parts) > 0 {
+	rawToks := sqltok.Tokenize(raw)
+	rawSig := sigToks(rawToks)
+	if rawPath, _, ok := matchCreateTV(rawSig, raw); ok {
+		if parts := extractIdentParts(rawPath, ic); len(parts) > 0 {
 			objName := parts[len(parts)-1] // already normalised by extractIdentParts
 			filtered := make([]string, 0, len(missing))
 			for _, m := range missing {
@@ -866,17 +846,17 @@ func validateSelectCols(
 	// Skip when there is no FROM clause — no aliases to check.
 	if !noFromClause {
 		aliasMap := make(map[string]*aliasColSets)
-		for _, fm := range reFromJoinWithAlias.FindAllStringSubmatch(stripped, -1) {
-			rawAlias := fm[2]
+		for _, ta := range findFromJoinWithAlias(strippedSig, stripped) {
+			rawAlias := ta.alias
 			if rawAlias == "" {
 				continue
 			}
 			aliasU := strings.ToUpper(normIdent(rawAlias, ic))
-			// Filter out SQL keywords that the regex may capture as aliases.
+			// Filter out SQL keywords that the matcher may capture as aliases.
 			if joinStopKW[aliasU] {
 				continue
 			}
-			parts := extractIdentParts(fm[1], ic)
+			parts := extractIdentParts(ta.tablePath, ic)
 			var tRef struct{ db, schema, name string }
 			switch len(parts) {
 			case 3:
