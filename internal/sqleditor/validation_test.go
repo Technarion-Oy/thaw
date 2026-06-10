@@ -50,6 +50,9 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"ALTER DYNAMIC TABLE my_dt SET WAREHOUSE = my_wh",
 		// Sequences
 		"CREATE SEQUENCE my_seq START WITH 1",
+		"CREATE OR REPLACE SEQUENCE IF NOT EXISTS s START = 100 INCREMENT BY -2 ORDER COMMENT = 'seq'",
+		"CREATE SEQUENCE s WITH START 5 INCREMENT 1 NOORDER",
+		"CREATE SEQUENCE s START -10 INCREMENT = 3",
 		"ALTER SEQUENCE my_seq INCREMENT = 10",
 		"DROP SEQUENCE IF EXISTS my_seq CASCADE",
 		// Streams
@@ -507,6 +510,9 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Invalid Dynamic Table", "CREATE DYNAMIC TABLE dt AS SELECT 1", "Unexpected syntax"}, // Missing TARGET_LAG / WAREHOUSE
 		{"Invalid Drop DB", "DROP DATABASE my_db CASCADE RESTRICT", "Unexpected syntax"},      // Conflicting modifiers
 		{"Invalid Sequence", "CREATE SEQUENCE my_seq START WITH 'abc'", "Unexpected syntax"},
+		{"Sequence ORDER+NOORDER", "CREATE SEQUENCE s ORDER NOORDER", "Unexpected syntax"},
+		{"Sequence unknown clause", "CREATE SEQUENCE s BOGUS = 1", "Unexpected syntax"},
+		{"Sequence START no value", "CREATE SEQUENCE s START WITH", "Unexpected syntax"},
 		{"Invalid Table", "CREATE TRANSIENT OR REPLACE TABLE foo (id INT)", "Unexpected syntax"}, // Wrong modifier order
 		{"Table Replace IF NOT EXISTS", "CREATE OR REPLACE TABLE foo IF NOT EXISTS (id INT)", "Conflict between OR REPLACE and IF NOT EXISTS"},
 		{"Table CLUSTER BY no parens", "CREATE TABLE foo (id INT) CLUSTER BY id", "Unexpected syntax"},

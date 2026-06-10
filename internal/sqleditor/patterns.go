@@ -79,14 +79,7 @@ var (
 	reValidDropDbSchema = regexp.MustCompile(`(?i)^\s*DROP\s+(?:DATABASE|SCHEMA)\s+(?:IF\s+EXISTS\s+)?` + _identPath + `(?:\s+(?:CASCADE|RESTRICT))?\s*$`)
 
 	// ── CREATE SEQUENCE ───────────────────────────────────────────────────────
-	reValidCreateSeq = regexp.MustCompile(
-		`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SEQUENCE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath +
-			`(?:\s+WITH)?(?:\s+(?:` +
-			`START(?:\s+WITH|\s*=)?\s+-?\d+` +
-			`|INCREMENT(?:\s+BY|\s*=)?\s+-?\d+` +
-			`|ORDER|NOORDER` +
-			`|COMMENT\s*=\s*'(?:[^']|'')*'` +
-			`))*\s*$`)
+	// (reValidCreateSeq removed — token-based: isValidCreateSeq)
 
 	// ── ALTER SEQUENCE ────────────────────────────────────────────────────────
 	reValidAlterSeq = regexp.MustCompile(
@@ -2256,15 +2249,84 @@ func validateDropDbOrSchema(kind string) func(string, StatementRange) []DiagMark
 	}
 }
 
+// isValidCreateSeq reports whether sig is a well-formed CREATE SEQUENCE statement:
+//
+//	CREATE [OR REPLACE] SEQUENCE [IF NOT EXISTS] <name> [WITH] <clause>*
+//
+// where each clause is START [WITH|=] <int>, INCREMENT [BY|=] <int>, ORDER,
+// NOORDER, or COMMENT = '…'. Token-based replacement for reValidCreateSeq.
+func isValidCreateSeq(sig []sqltok.Token, sql string) bool {
+	i := 0
+	if !kwAt(sig, sql, i, "CREATE") {
+		return false
+	}
+	i++
+	if kwAt(sig, sql, i, "OR") && kwAt(sig, sql, i+1, "REPLACE") {
+		i += 2
+	}
+	if !kwAt(sig, sql, i, "SEQUENCE") {
+		return false
+	}
+	i++
+	if kwAt(sig, sql, i, "IF") && kwAt(sig, sql, i+1, "NOT") && kwAt(sig, sql, i+2, "EXISTS") {
+		i += 3
+	}
+	if i >= len(sig) || !isIdent(sig[i]) {
+		return false
+	}
+	_, i = readIdentPath(sig, sql, i)
+	if kwAt(sig, sql, i, "WITH") { // optional leading WITH
+		i++
+	}
+	for i < len(sig) {
+		next, ok := consumeSequenceClause(sig, sql, i)
+		if !ok {
+			return false
+		}
+		i = next
+	}
+	return true
+}
+
+// consumeSequenceClause matches one CREATE SEQUENCE clause starting at sig[i].
+func consumeSequenceClause(sig []sqltok.Token, sql string, i int) (int, bool) {
+	switch {
+	case kwAt(sig, sql, i, "START"):
+		return consumeSeqValueClause(sig, sql, i, "WITH")
+	case kwAt(sig, sql, i, "INCREMENT"):
+		return consumeSeqValueClause(sig, sql, i, "BY")
+	case kwAt(sig, sql, i, "ORDER"), kwAt(sig, sql, i, "NOORDER"):
+		return i + 1, true
+	case kwAt(sig, sql, i, "COMMENT"):
+		return eqValueProp(sig, sql, i, sqltok.StringLit)
+	}
+	return 0, false
+}
+
+// consumeSeqValueClause matches "START|INCREMENT [midKW|=] <signed int>", where
+// midKW is WITH (for START) or BY (for INCREMENT).
+func consumeSeqValueClause(sig []sqltok.Token, sql string, i int, midKW string) (int, bool) {
+	j := i + 1
+	if kwAt(sig, sql, j, midKW) || isOpEq(sig, sql, j) {
+		j++
+	}
+	if j < len(sig) && sig[j].Kind == sqltok.Operator && sig[j].Text(sql) == "-" {
+		j++ // optional negative sign
+	}
+	if j < len(sig) && sig[j].Kind == sqltok.NumberLit {
+		return j + 1, true
+	}
+	return 0, false
+}
+
 // validateCreateSequence flags a CREATE SEQUENCE whose syntax is invalid or that
-// specifies both ORDER and NOORDER (mutually exclusive). The ORDER/NOORDER clash
-// is detected token-based (hasKW); the overall shape — START/INCREMENT values,
-// COMMENT, etc. — is checked by the reValidCreateSeq grammar whitelist, which is
-// more compact than an equivalent token walk and is kept for that reason.
+// specifies both ORDER and NOORDER (mutually exclusive). Both checks are
+// token-based: the ORDER/NOORDER clash via hasKW, the overall shape via
+// isValidCreateSeq.
 func validateCreateSequence(parseText string, r StatementRange) []DiagMarker {
 	sig := sigTokens(parseText)
 	bothOrderNoorder := hasKW(sig, parseText, "ORDER") && hasKW(sig, parseText, "NOORDER")
-	if !reValidCreateSeq.MatchString(parseText) || bothOrderNoorder {
+	if !isValidCreateSeq(sig, parseText) || bothOrderNoorder {
 		return oneMarker(r, "Unexpected syntax in CREATE SEQUENCE statement.")
 	}
 	return nil
