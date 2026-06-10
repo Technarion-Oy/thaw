@@ -77,6 +77,7 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		// Drop
 		"DROP DATABASE my_db CASCADE",
 		"DROP SCHEMA IF EXISTS my_sch RESTRICT",
+		"DROP SCHEMA db.my_sch",
 		// Tags — comprehensive tests in TestValidateSnowflakePatterns_Tag
 		"CREATE TAG my_tag",
 		"ALTER TAG my_tag RENAME TO new_tag",
@@ -515,6 +516,8 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"View CONTACT without WITH", "CREATE VIEW v CONTACT (x = c) AS SELECT 1", "Unexpected syntax"},
 		{"Invalid Dynamic Table", "CREATE DYNAMIC TABLE dt AS SELECT 1", "Unexpected syntax"}, // Missing TARGET_LAG / WAREHOUSE
 		{"Invalid Drop DB", "DROP DATABASE my_db CASCADE RESTRICT", "Unexpected syntax"},      // Conflicting modifiers
+		{"Drop DB trailing junk", "DROP DATABASE my_db FOO", "Unexpected syntax"},
+		{"Drop Sequence no name", "DROP SEQUENCE", "Unexpected syntax"},
 		{"Invalid Sequence", "CREATE SEQUENCE my_seq START WITH 'abc'", "Unexpected syntax"},
 		{"Sequence ORDER+NOORDER", "CREATE SEQUENCE s ORDER NOORDER", "Unexpected syntax"},
 		{"Sequence unknown clause", "CREATE SEQUENCE s BOGUS = 1", "Unexpected syntax"},

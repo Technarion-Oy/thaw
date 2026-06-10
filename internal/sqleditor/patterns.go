@@ -76,7 +76,7 @@ var (
 	// isValidCreateDbSchema / consumeDbSchemaProp)
 
 	// ── DROP DATABASE / SCHEMA ────────────────────────────────────────────────
-	reValidDropDbSchema = regexp.MustCompile(`(?i)^\s*DROP\s+(?:DATABASE|SCHEMA)\s+(?:IF\s+EXISTS\s+)?` + _identPath + `(?:\s+(?:CASCADE|RESTRICT))?\s*$`)
+	// (reValidDropDbSchema removed — token-based: isValidDropStmt)
 
 	// ── CREATE SEQUENCE ───────────────────────────────────────────────────────
 	// (reValidCreateSeq removed — token-based: isValidCreateSeq)
@@ -85,7 +85,7 @@ var (
 	// (reValidAlterSeq removed — token-based: isValidAlterSeq)
 
 	// ── DROP SEQUENCE ─────────────────────────────────────────────────────────
-	reValidDropSeq = regexp.MustCompile(`(?i)^\s*DROP\s+SEQUENCE\s+(?:IF\s+EXISTS\s+)?` + _identPath + `(?:\s+(?:CASCADE|RESTRICT))?\s*$`)
+	// (reValidDropSeq removed — token-based: isValidDropStmt)
 
 	// ── CREATE DYNAMIC TABLE ─────────────────────────────────────────────────
 	// (reIsCreateDynTable removed — token-based: isCreateDynTableGuard)
@@ -2291,15 +2291,43 @@ func validateCreateDbOrSchema(kind string) func(string, StatementRange) []DiagMa
 	}
 }
 
+// isValidDropStmt reports whether sig is a simple DROP statement of the form
+//
+//	DROP <object> [IF EXISTS] <name> [CASCADE|RESTRICT]
+//
+// where <object> is the space-separated keyword phrase (e.g. "DATABASE",
+// "SEQUENCE"). Token-based replacement for the reValidDropDbSchema /
+// reValidDropSeq one-liners, shared by the object types with this exact grammar.
+func isValidDropStmt(sig []sqltok.Token, sql, object string) bool {
+	if !kwAt(sig, sql, 0, "DROP") {
+		return false
+	}
+	i := 1
+	for _, w := range strings.Split(object, " ") {
+		if !kwAt(sig, sql, i, w) {
+			return false
+		}
+		i++
+	}
+	if kwAt(sig, sql, i, "IF") && kwAt(sig, sql, i+1, "EXISTS") {
+		i += 2
+	}
+	if i >= len(sig) || !isIdent(sig[i]) {
+		return false
+	}
+	_, i = readIdentPath(sig, sql, i)
+	if kwAtAny(sig, sql, i, "CASCADE", "RESTRICT") != "" {
+		i++
+	}
+	return i == len(sig)
+}
+
 // validateDropDbOrSchema returns a validator that flags a DROP DATABASE or DROP
 // SCHEMA statement (kind selects which) that is not "DROP <kind> [IF EXISTS]
-// <name> [CASCADE|RESTRICT]".
-//
-// Not tokenised: the accepted shape is a one-line regex (reValidDropDbSchema);
-// a token walk would be more code for the same accept/reject result.
+// <name> [CASCADE|RESTRICT]". Token-based via isValidDropStmt.
 func validateDropDbOrSchema(kind string) func(string, StatementRange) []DiagMarker {
 	return func(parseText string, r StatementRange) []DiagMarker {
-		if !reValidDropDbSchema.MatchString(parseText) {
+		if !isValidDropStmt(sigTokens(parseText), parseText, kind) {
 			return oneMarker(r, "Unexpected syntax in DROP "+kind+" statement.")
 		}
 		return nil
@@ -2462,12 +2490,10 @@ func validateAlterSequence(parseText string, r StatementRange) []DiagMarker {
 }
 
 // validateDropSequence flags a DROP SEQUENCE that is not
-// "DROP SEQUENCE [IF EXISTS] <name> [CASCADE|RESTRICT]".
-//
-// Not tokenised: the accepted shape is a one-line regex (reValidDropSeq); a
-// token walk would be more code for the same accept/reject result.
+// "DROP SEQUENCE [IF EXISTS] <name> [CASCADE|RESTRICT]". Token-based via
+// isValidDropStmt.
 func validateDropSequence(parseText string, r StatementRange) []DiagMarker {
-	if !reValidDropSeq.MatchString(parseText) {
+	if !isValidDropStmt(sigTokens(parseText), parseText, "SEQUENCE") {
 		return oneMarker(r, "Unexpected syntax in DROP SEQUENCE statement.")
 	}
 	return nil
