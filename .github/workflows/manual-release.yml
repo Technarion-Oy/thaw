@@ -187,8 +187,91 @@ jobs:
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
 
+      # ── Sign, notarize & staple macOS app (Developer ID) ────────────────────
+
+      - name: Set up signing keychain (macOS)
+        if: matrix.platform == 'darwin'
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+          echo "::add-mask::$KEYCHAIN_PASSWORD"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+          echo "$APPLE_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$KEYCHAIN_PATH" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          # Allow codesign to use the key without a UI prompt
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain
+
+          rm "$RUNNER_TEMP/certificate.p12"
+
+      - name: Sign app bundle (macOS)
+        if: matrix.platform == 'darwin'
+        run: |
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
+            | grep "Developer ID Application" | head -1 | sed -E 's/.*"(.+)".*/\1/')
+          if [ -z "$IDENTITY" ]; then
+            echo "::error::No 'Developer ID Application' identity found in keychain — check APPLE_CERTIFICATE_BASE64/APPLE_CERTIFICATE_PASSWORD"
+            exit 1
+          fi
+          echo "Signing with identity: $IDENTITY"
+          codesign --deep --force --options runtime \
+            --timestamp \
+            --entitlements build/darwin/entitlements.plist \
+            --sign "$IDENTITY" \
+            build/bin/thaw.app
+          codesign --verify --strict --verbose=2 build/bin/thaw.app
+
+      - name: Notarize and staple (macOS)
+        if: matrix.platform == 'darwin'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # ditto preserves extended attributes/resource forks, unlike plain zip
+          ditto -c -k --keepParent build/bin/thaw.app build/bin/thaw-notarize.zip
+
+          SUBMISSION=$(xcrun notarytool submit build/bin/thaw-notarize.zip \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait --output-format json)
+          echo "$SUBMISSION"
+          rm build/bin/thaw-notarize.zip
+
+          STATUS=$(echo "$SUBMISSION" | jq -r '.status')
+          SUBMISSION_ID=$(echo "$SUBMISSION" | jq -r '.id')
+          if [ "$STATUS" != "Accepted" ]; then
+            echo "::error::Notarization failed with status '$STATUS' — fetching log"
+            xcrun notarytool log "$SUBMISSION_ID" \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID"
+            exit 1
+          fi
+
+          xcrun stapler staple build/bin/thaw.app
+          spctl -a -vvv -t install build/bin/thaw.app
+
+      - name: Clean up signing keychain (macOS)
+        if: always() && matrix.platform == 'darwin'
+        run: |
+          rm -f "$RUNNER_TEMP/certificate.p12"
+          if [ -n "$KEYCHAIN_PATH" ] && [ -f "$KEYCHAIN_PATH" ]; then
+            security delete-keychain "$KEYCHAIN_PATH"
+          fi
+
       # ── Rename / package output ────────────────────────────────────────────
-      
+
       - name: Package macOS app bundle
         if: matrix.platform == 'darwin'
         run: |

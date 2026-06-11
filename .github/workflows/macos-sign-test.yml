@@ -1,0 +1,144 @@
+# TEMPORARY workflow for validating the macOS signing/notarization secrets and
+# steps (issue #228) without publishing a release. Mirrors the darwin build +
+# signing steps of manual-release.yml. Delete once a real signed release has
+# shipped successfully.
+name: macOS Sign Test (temporary)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  sign-test:
+    name: Sign test — darwin-${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            arch: arm64
+          - os: macos-15-large # Intel (x86_64) runner
+            arch: amd64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0
+
+      - name: Download Go dependencies
+        run: go mod download
+
+      - name: Install garble
+        run: go install mvdan.cc/garble@latest
+
+      - name: Build (macOS)
+        run: wails build -obfuscated -platform darwin/${{ matrix.arch }} -clean -tags webkit2_41 -ldflags "-s -w -X thaw/internal/version.Version=0.0.0-signtest" -trimpath
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+
+      # ── Sign, notarize & staple (same steps as manual-release.yml) ──────────
+
+      - name: Set up signing keychain (macOS)
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+          echo "::add-mask::$KEYCHAIN_PASSWORD"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+          echo "$APPLE_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$KEYCHAIN_PATH" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          # Allow codesign to use the key without a UI prompt
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain
+
+          rm "$RUNNER_TEMP/certificate.p12"
+
+      - name: Sign app bundle (macOS)
+        run: |
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
+            | grep "Developer ID Application" | head -1 | sed -E 's/.*"(.+)".*/\1/')
+          if [ -z "$IDENTITY" ]; then
+            echo "::error::No 'Developer ID Application' identity found in keychain — check APPLE_CERTIFICATE_BASE64/APPLE_CERTIFICATE_PASSWORD"
+            exit 1
+          fi
+          echo "Signing with identity: $IDENTITY"
+          codesign --deep --force --options runtime \
+            --timestamp \
+            --entitlements build/darwin/entitlements.plist \
+            --sign "$IDENTITY" \
+            build/bin/thaw.app
+          codesign --verify --strict --verbose=2 build/bin/thaw.app
+
+      - name: Notarize and staple (macOS)
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # ditto preserves extended attributes/resource forks, unlike plain zip
+          ditto -c -k --keepParent build/bin/thaw.app build/bin/thaw-notarize.zip
+
+          SUBMISSION=$(xcrun notarytool submit build/bin/thaw-notarize.zip \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait --output-format json)
+          echo "$SUBMISSION"
+          rm build/bin/thaw-notarize.zip
+
+          STATUS=$(echo "$SUBMISSION" | jq -r '.status')
+          SUBMISSION_ID=$(echo "$SUBMISSION" | jq -r '.id')
+          if [ "$STATUS" != "Accepted" ]; then
+            echo "::error::Notarization failed with status '$STATUS' — fetching log"
+            xcrun notarytool log "$SUBMISSION_ID" \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID"
+            exit 1
+          fi
+
+          xcrun stapler staple build/bin/thaw.app
+          spctl -a -vvv -t install build/bin/thaw.app
+
+      - name: Clean up signing keychain (macOS)
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/certificate.p12"
+          if [ -n "$KEYCHAIN_PATH" ] && [ -f "$KEYCHAIN_PATH" ]; then
+            security delete-keychain "$KEYCHAIN_PATH"
+          fi
+
+      # Zip with ditto so the stapled ticket and signatures survive the
+      # artifact round-trip (actions/upload-artifact strips xattrs from bare dirs)
+      - name: Package signed app
+        run: |
+          cd build/bin
+          ditto -c -k --keepParent thaw.app thaw-signtest-darwin-${{ matrix.arch }}.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: thaw-signtest-darwin-${{ matrix.arch }}
+          path: build/bin/thaw-signtest-darwin-${{ matrix.arch }}.zip
+          retention-days: 3
