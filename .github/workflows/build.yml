@@ -1,25 +1,37 @@
-# TEMPORARY: build.yml's real content is replaced on this branch only, so the
-# macOS sign test can be dispatched via `gh workflow run build.yml --ref <branch>`
-# (new workflows cannot be dispatched from non-default branches). REVERT this
-# file to the main version before merging.
-name: macOS Sign Test (temporary, via build.yml)
+name: Build Binaries
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
 
 jobs:
-  sign-test:
-    name: Sign test — darwin-${{ matrix.arch }}
+  build:
+    name: Build — ${{ matrix.platform }}-${{ matrix.arch }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
+          - os: macos-latest   # arm64 (M-series runner)
+            platform: darwin
             arch: arm64
-          - os: macos-15-large # Intel (x86_64) runner
+          - os: macos-15-large  # Intel (x86_64) runner
+            platform: darwin
+            arch: amd64
+          - os: windows-latest
+            platform: windows
+            arch: amd64
+          - os: windows-latest # cross-compile arm64 on amd64 runner
+            platform: windows
+            arch: arm64
+          - os: ubuntu-24.04   # pinned: ubuntu-latest may lack libwebkit2gtk-4.1-dev
+            platform: linux
             arch: amd64
 
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -35,6 +47,12 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0
 
@@ -44,137 +62,143 @@ jobs:
       - name: Install garble
         run: go install mvdan.cc/garble@latest
 
-      # Runs before the (slow) build so broken signing secrets fail in seconds.
-      - name: Set up signing keychain (macOS)
-        env:
-          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      - name: Install NSIS (Windows only)
+        if: matrix.platform == 'windows'
+        shell: bash
         run: |
-          KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
-          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
-          echo "::add-mask::$KEYCHAIN_PASSWORD"
-          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+          choco install nsis
+          # Explicitly add NSIS to the GitHub runner's PATH for subsequent steps
+          echo "C:\Program Files (x86)\NSIS" >> $GITHUB_PATH
 
-          echo "$APPLE_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
-          echo "Decoded .p12 size: $(wc -c < "$RUNNER_TEMP/certificate.p12") bytes"
-
-          # Re-pack the p12 with the system LibreSSL before importing. Apple's
-          # `security import` rejects several valid p12 variants (PBES2/AES
-          # exports from OpenSSL 3, password-encoding mismatches for non-ASCII
-          # passwords) with an unhelpful "MAC verification failed".
-          # /usr/bin/openssl (LibreSSL) reads both legacy and modern p12 files,
-          # and its -export defaults produce a p12 Apple always accepts.
-          export REPACK_PASSWORD="$(openssl rand -hex 16)"
-          echo "::add-mask::$REPACK_PASSWORD"
-          # Decrypt the p12 to PEM, trying several openssl flavors: they differ
-          # in cipher support (RC2/3DES needs OpenSSL 3's legacy provider) and
-          # in how non-ASCII passwords are encoded for MAC verification
-          # (OpenSSL 3 converts UTF-8 to UTF-16 correctly; LibreSSL and Apple's
-          # `security` encode byte-wise, so their MAC checks can fail on a
-          # password that is in fact correct).
-          : > "$RUNNER_TEMP/p12-check.log"
-          decrypted=""
-          for CMD in "openssl pkcs12" "openssl pkcs12 -legacy" "/usr/bin/openssl pkcs12"; do
-            if $CMD -in "$RUNNER_TEMP/certificate.p12" -nodes \
-                 -passin env:APPLE_CERTIFICATE_PASSWORD \
-                 -out "$RUNNER_TEMP/signing.pem" 2>> "$RUNNER_TEMP/p12-check.log"; then
-              echo "Decrypted p12 via: $CMD"
-              decrypted=1
-              break
-            fi
-          done
-          if [ -z "$decrypted" ]; then
-            echo "::error::Cannot open the decoded .p12 with APPLE_CERTIFICATE_PASSWORD — the password or base64 secret is wrong. openssl said:"
-            cat "$RUNNER_TEMP/p12-check.log"
-            exit 1
+      - name: Prepare version string
+        id: prep
+        shell: bash
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            # Strip the leading "v" from semantic version tags (v1.2.3 → 1.2.3)
+            VERSION="${{ github.ref_name }}"
+            VERSION="${VERSION#v}"
+          else
+            # Replace / with - in branch names to avoid path issues in filenames
+            VERSION=$(echo "${{ github.ref_name }}" | sed 's/\//-/g')
           fi
-          /usr/bin/openssl pkcs12 -export -in "$RUNNER_TEMP/signing.pem" \
-            -passout env:REPACK_PASSWORD -out "$RUNNER_TEMP/certificate-repacked.p12"
-          rm "$RUNNER_TEMP/signing.pem"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security import "$RUNNER_TEMP/certificate-repacked.p12" -k "$KEYCHAIN_PATH" \
-            -P "$REPACK_PASSWORD" -T /usr/bin/codesign
-          # Allow codesign to use the key without a UI prompt
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain
+      # ── Wails Builds (obfuscated via garble) ──────────────────────────────
+      # -obfuscated: invokes garble as the Go compiler toolchain within the
+      #   Wails build pipeline, producing an obfuscated binary without a
+      #   separate post-build step.  This preserves macOS ad-hoc signing
+      #   (no binary replacement after codesign) and Windows .syso embedding.
+      # -platform:   explicit target to avoid implicit runner-architecture deps.
+      # -tags webkit2_41: Ubuntu 24.04 only ships libwebkit2gtk-4.1-dev;
+      #   Wails' CGO directives default to webkit2gtk-4.0 without this tag.
+      #   Harmless on macOS (webkit CGO is gated behind //go:build linux).
 
-          rm -f "$RUNNER_TEMP/certificate.p12" "$RUNNER_TEMP/certificate-repacked.p12"
-
-      - name: Build (macOS)
-        run: wails build -obfuscated -platform darwin/${{ matrix.arch }} -clean -tags webkit2_41 -ldflags "-s -w -X thaw/internal/version.Version=0.0.0-signtest" -trimpath
+      - name: Build (macOS & Linux)
+        if: matrix.platform != 'windows'
+        run: wails build -obfuscated -platform ${{ matrix.platform }}/${{ matrix.arch }} -clean -tags webkit2_41 -ldflags "-s -w -X thaw/internal/version.Version=${{ steps.prep.outputs.version }}" -trimpath
         env:
           NODE_OPTIONS: --max-old-space-size=6144
 
-      # ── Sign, notarize & staple (same steps as manual-release.yml) ──────────
-
-      - name: Sign app bundle (macOS)
-        run: |
-          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
-            | grep "Developer ID Application" | head -1 | sed -E 's/.*"(.+)".*/\1/')
-          if [ -z "$IDENTITY" ]; then
-            echo "::error::No 'Developer ID Application' identity found in keychain — check APPLE_CERTIFICATE_BASE64/APPLE_CERTIFICATE_PASSWORD"
-            exit 1
-          fi
-          echo "Signing with identity: $IDENTITY"
-          codesign --deep --force --options runtime \
-            --timestamp \
-            --entitlements build/darwin/entitlements.plist \
-            --sign "$IDENTITY" \
-            build/bin/thaw.app
-          codesign --verify --strict --verbose=2 build/bin/thaw.app
-
-      - name: Notarize and staple (macOS)
+      - name: Build & Package Installer (Windows)
+        if: matrix.platform == 'windows'
+        run: wails build -obfuscated -platform windows/${{ matrix.arch }} -clean -nsis -ldflags "-s -w -X thaw/internal/version.Version=${{ steps.prep.outputs.version }}" -trimpath
         env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          # ditto preserves extended attributes/resource forks, unlike plain zip
-          ditto -c -k --keepParent build/bin/thaw.app build/bin/thaw-notarize.zip
+          NODE_OPTIONS: --max-old-space-size=6144
 
-          SUBMISSION=$(xcrun notarytool submit build/bin/thaw-notarize.zip \
-            --apple-id "$APPLE_ID" \
-            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
-            --team-id "$APPLE_TEAM_ID" \
-            --wait --output-format json)
-          echo "$SUBMISSION"
-          rm build/bin/thaw-notarize.zip
+      # ── Sign Windows binaries (Azure Trusted Signing) ───────────────────────
+      - name: Azure Login (Windows only)
+        if: matrix.platform == 'windows'
+        uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+          allow-no-subscriptions: true
 
-          STATUS=$(echo "$SUBMISSION" | jq -r '.status')
-          SUBMISSION_ID=$(echo "$SUBMISSION" | jq -r '.id')
-          if [ "$STATUS" != "Accepted" ]; then
-            echo "::error::Notarization failed with status '$STATUS' — fetching log"
-            xcrun notarytool log "$SUBMISSION_ID" \
-              --apple-id "$APPLE_ID" \
-              --password "$APPLE_APP_SPECIFIC_PASSWORD" \
-              --team-id "$APPLE_TEAM_ID"
-            exit 1
-          fi
+      - name: Sign Windows binaries
+        if: matrix.platform == 'windows'
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ vars.AZURE_CODE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ vars.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ vars.AZURE_CERTIFICATE_PROFILE_NAME }}
+          files-folder: build/bin
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
 
-          xcrun stapler staple build/bin/thaw.app
-          spctl -a -vvv -t install build/bin/thaw.app
-
-      - name: Clean up signing keychain (macOS)
-        if: always()
-        run: |
-          rm -f "$RUNNER_TEMP/certificate.p12" "$RUNNER_TEMP/certificate-repacked.p12" "$RUNNER_TEMP/signing.pem"
-          if [ -n "$KEYCHAIN_PATH" ] && [ -f "$KEYCHAIN_PATH" ]; then
-            security delete-keychain "$KEYCHAIN_PATH"
-          fi
-
-      # Zip with ditto so the stapled ticket and signatures survive the
-      # artifact round-trip (actions/upload-artifact strips xattrs from bare dirs)
-      - name: Package signed app
+      # ── Rename / package output with tag version ───────────────────────────
+      - name: Package macOS app bundle
+        if: matrix.platform == 'darwin'
         run: |
           cd build/bin
-          ditto -c -k --keepParent thaw.app thaw-signtest-darwin-${{ matrix.arch }}.zip
+          zip -r "thaw-${{ steps.prep.outputs.version }}-darwin-${{ matrix.arch }}.zip" thaw.app
 
+      - name: Rename Windows binaries
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        # Wails natively outputted both the raw executable and the installer, we rename both
+        run: |
+          Move-Item build/bin/thaw.exe "build/bin/thaw-${{ steps.prep.outputs.version }}-windows-${{ matrix.arch }}-portable.exe"
+          Move-Item "build/bin/thaw-${{ matrix.arch }}-installer.exe" "build/bin/thaw-${{ steps.prep.outputs.version }}-windows-${{ matrix.arch }}-installer.exe"
+
+      - name: Rename Linux binary
+        if: matrix.platform == 'linux'
+        run: mv build/bin/thaw "build/bin/thaw-${{ steps.prep.outputs.version }}-linux-amd64"
+
+      # ── Linux binary verification (checksums + GPG signing) ───────────────
+
+      - name: Generate checksums (Linux)
+        if: matrix.platform == 'linux'
+        run: cd build/bin && sha256sum thaw-*-linux-amd64 > checksums.txt
+
+      - name: Import GPG key (Linux)
+        if: matrix.platform == 'linux'
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Sign checksums (Linux)
+        if: matrix.platform == 'linux'
+        run: cd build/bin && gpg --detach-sign --armor --local-user releases@technarion.com --output checksums.txt.sig checksums.txt
+
+      # ── Store artifact (non-tag runs) ──────────────────────────────────────
+      # On tag runs binaries are attached directly to the GitHub Release below.
       - name: Upload artifact
+        if: github.ref_type != 'tag'
         uses: actions/upload-artifact@v4
         with:
-          name: thaw-signtest-darwin-${{ matrix.arch }}
-          path: build/bin/thaw-signtest-darwin-${{ matrix.arch }}.zip
-          retention-days: 3
+          name: thaw-${{ steps.prep.outputs.version }}-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            build/bin/thaw-${{ steps.prep.outputs.version }}-*
+            build/bin/checksums.txt
+            build/bin/checksums.txt.sig
+          retention-days: 30
+          if-no-files-found: error
+
+      # ── Attach binaries to GitHub Release (tag runs only) ──────────────────
+      # The release itself (notes + tag) is created by manual-release.yml via
+      # semantic-release.  This step appends the platform binary to it.
+      - name: Upload binaries to GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          append_body: false
+          fail_on_unmatched_files: true
+          files: build/bin/thaw-${{ steps.prep.outputs.version }}-*
+
+      - name: Upload checksums to GitHub Release (Linux)
+        if: github.ref_type == 'tag' && matrix.platform == 'linux'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          append_body: false
+          fail_on_unmatched_files: true
+          files: |
+            build/bin/checksums.txt
+            build/bin/checksums.txt.sig
