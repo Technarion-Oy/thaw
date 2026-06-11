@@ -20,6 +20,7 @@ const DEFAULT_EDITOR_SPLIT                 = 0.4;
 const DEFAULT_LEFT_WIDTH                   = 220;
 const DEFAULT_RIGHT_WIDTH                  = 260;
 const DEFAULT_SPLIT_EDITOR_WIDTH           = 0.5;
+const DEFAULT_CELL_DETAIL_WIDTH            = 300;
 
 interface PanelLayoutState {
   left:          PanelId[];
@@ -30,11 +31,13 @@ interface PanelLayoutState {
   leftHidden:    boolean;  // ⌘B sidebar toggle
 
   splitEditorWidth:    number;
+  cellDetailWidth:     number;   // width of the result-grid cell detail side panel
   movePanel:           (panelId: PanelId, targetId: PanelId | null, targetSidebar: SidebarId, insertBefore: boolean) => void;
   setEditorSplit:      (v: number) => void;
   setLeftWidth:        (v: number) => void;
   setRightWidth:       (v: number) => void;
   setSplitEditorWidth: (v: number) => void;
+  setCellDetailWidth:  (v: number) => void;
   toggleLeftHidden:    () => void;
   reset:               () => void;
 }
@@ -49,6 +52,7 @@ export const usePanelLayoutStore = create<PanelLayoutState>()(
       rightWidth:       DEFAULT_RIGHT_WIDTH,
       leftHidden:       false,
       splitEditorWidth: DEFAULT_SPLIT_EDITOR_WIDTH,
+      cellDetailWidth:  DEFAULT_CELL_DETAIL_WIDTH,
 
       movePanel: (panelId, targetId, targetSidebar, insertBefore) =>
         set((state) => {
@@ -73,6 +77,7 @@ export const usePanelLayoutStore = create<PanelLayoutState>()(
       setLeftWidth:        (leftWidth)        => set({ leftWidth }),
       setRightWidth:       (rightWidth)       => set({ rightWidth }),
       setSplitEditorWidth: (splitEditorWidth) => set({ splitEditorWidth }),
+      setCellDetailWidth:  (cellDetailWidth)  => set({ cellDetailWidth }),
       toggleLeftHidden:    ()                 => set((s) => ({ leftHidden: !s.leftHidden })),
 
       reset: () => set({
@@ -83,6 +88,7 @@ export const usePanelLayoutStore = create<PanelLayoutState>()(
         rightWidth:       DEFAULT_RIGHT_WIDTH,
         leftHidden:       false,
         splitEditorWidth: DEFAULT_SPLIT_EDITOR_WIDTH,
+        cellDetailWidth:  DEFAULT_CELL_DETAIL_WIDTH,
       }),
     }),
     { name: "thaw-panel-layout" }

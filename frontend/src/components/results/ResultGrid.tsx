@@ -39,6 +39,7 @@ import { useGridStore, type ConditionalRule } from "../../store/gridStore";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { computeColumnWidths, measureText } from "../../utils/gridMeasure";
+import { computeCellScrollLeft } from "./cellDetailUtils";
 import { applyFormat } from "./DataTypeFormatModal";
 import { columnFilterFn, type ColumnFilterValue } from "./ColumnFilterDropdown";
 import ColumnFilterDropdown from "./ColumnFilterDropdown";
@@ -48,6 +49,8 @@ import QuickChartModal from "./QuickChartModal";
 
 export interface ResultGridHandle {
   scrollToRow: (rowIndex: number) => void;
+  /** Minimally scroll so the cell at (rowIndex, original colIndex) is fully visible. */
+  scrollToCell: (rowIndex: number, colIndex: number) => void;
 }
 
 interface Props {
@@ -410,15 +413,21 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
     if (el) setContainerWidth(el.clientWidth);
   }, []);
 
-  // Expose scrollToRow for search navigation via a stable ref so the effect
-  // only runs once instead of every render (rowVirtualizer is new each render).
+  // Expose scrollToRow/scrollToCell via stable refs so the effect only runs
+  // once instead of every render (rowVirtualizer is new each render).
+  // scrollCellIntoViewRef is reassigned each render after the layout
+  // calculations below, so it always sees fresh column sizes.
   const rowVirtualizerRef = useRef(rowVirtualizer);
   rowVirtualizerRef.current = rowVirtualizer;
+  const scrollCellIntoViewRef = useRef<(rowIndex: number, colIndex: number) => void>(() => {});
   useEffect(() => {
     if (!gridRef) return;
     gridRef.current = {
       scrollToRow: (rowIndex: number) => {
         rowVirtualizerRef.current.scrollToIndex(rowIndex, { align: "center" });
+      },
+      scrollToCell: (rowIndex: number, colIndex: number) => {
+        scrollCellIntoViewRef.current(rowIndex, colIndex);
       },
     };
   }, [gridRef]);
@@ -462,7 +471,7 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
       scrollContainerRef.current?.focus(); // restore focus so ⌘C copy handler works
       selectionModeRef.current = "cell";
       selectionStartRef.current = { row: rowIndex, col: colIndex };
-      setSelectionRange({ startRow: rowIndex, endRow: rowIndex, startCol: colIndex, endCol: colIndex });
+      setSelectionRange({ startRow: rowIndex, endRow: rowIndex, startCol: colIndex, endCol: colIndex }, "cell");
       setIsSelecting(true);
     },
     [featureFlags.multiCellCopy, setSelectionRange, setIsSelecting],
@@ -523,7 +532,7 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
         endRow: rowIndex,
         startCol: 0,
         endCol: result.columns.length - 1,
-      });
+      }, "row");
       setIsSelecting(true);
     },
     [featureFlags.multiCellCopy, result.columns.length, setSelectionRange, setIsSelecting],
@@ -565,7 +574,7 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
           endRow: tableRows.length - 1,
           startCol: colIndex,
           endCol: colIndex,
-        });
+        }, "column");
         setIsSelecting(true);
       }, 200);
     },
@@ -670,7 +679,7 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
       endRow: tableRows.length - 1,
       startCol: 0,
       endCol: result.columns.length - 1,
-    });
+    }, "all");
   }, [featureFlags.multiCellCopy, tableRows.length, result.columns.length, setSelectionRange]);
 
   // ─── Context menus ────────────────────────────────────────────────────────
@@ -845,6 +854,30 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
   const dataColScale = dataColumnsWidth > 0 && containerWidth > fullTableWidth
     ? (containerWidth - selectAllColWidth) / dataColumnsWidth
     : 1;
+
+  // Scroll a cell into view with minimal movement. Reads el.clientWidth at
+  // call time so it accounts for viewport changes in the same commit (e.g.
+  // the cell detail panel opening and shrinking the grid). The visible window
+  // excludes the sticky regions (row-number gutter and pinned columns).
+  scrollCellIntoViewRef.current = (rowIndex: number, colIndex: number) => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    rowVirtualizerRef.current.scrollToIndex(rowIndex, { align: "auto" });
+    // Pinned columns are sticky — always visible, no horizontal scroll needed.
+    const centerIdx = centerColumns.findIndex((c) => colIdxFromColumnId(c.id) === colIndex);
+    if (centerIdx < 0) return;
+    let colStart = 0;
+    for (let i = 0; i < centerIdx; i++) colStart += centerColumns[i].getSize() * dataColScale;
+    const newScrollLeft = computeCellScrollLeft({
+      scrollLeft: el.scrollLeft,
+      clientWidth: el.clientWidth,
+      colStart: selectAllColWidth + pinnedLeftWidth * dataColScale + colStart,
+      colWidth: centerColumns[centerIdx].getSize() * dataColScale,
+      stickyLeadingWidth: selectAllColWidth + pinnedLeftWidth * dataColScale,
+      stickyTrailingWidth: pinnedRightWidth * dataColScale,
+    });
+    if (newScrollLeft !== null) el.scrollLeft = newScrollLeft;
+  };
 
   // Pre-compute sample values for the format modal (avoids IIFE re-creation every render)
   const sampleValues = useMemo(() => {

@@ -36,6 +36,7 @@ import { useThemeStore } from "../store/themeStore";
 import ResultGrid, { type ResultGridHandle } from "../components/results/ResultGrid";
 import GridSearch from "../components/results/GridSearch";
 import StatusBar from "../components/results/StatusBar";
+import CellDetailPanel from "../components/results/CellDetailPanel";
 import QueryProfileModal from "../components/results/QueryProfileModal";
 import TerminalPanel from "../components/terminal/TerminalPanel";
 import QueryLogPane from "../components/results/QueryLogPane";
@@ -1472,6 +1473,13 @@ export default function QueryPage() {
                         result={compareResult}
                       />
                     </div>
+                  )}
+                  {/* Cell detail side panel (hidden in compare mode — gridStore is a singleton) */}
+                  {featureFlags.cellDetailPanel && featureFlags.multiCellCopy && !compareResult && (
+                    <CellDetailPanel
+                      columns={displayedResult.columns}
+                      onVisibleCellChange={(row, col) => primaryGridRef.current?.scrollToCell(row, col)}
+                    />
                   )}
                 </div>{/* end grids row */}
                 {/* Selection aggregations status bar (hidden in compare mode — gridStore is a singleton) */}

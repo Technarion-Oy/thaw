@@ -411,6 +411,13 @@ export default function FeatureFlagsModal({ onClose }: Props) {
             locked={locked.multiCellCopy}
             onChange={(v) => set("multiCellCopy", v)}
           />
+          <FlagRow
+            label="Cell Detail Panel"
+            description="Side panel showing the full content of the selected cell with text selection, JSON formatting, and copy (requires Multi-Cell Copy & Selection)."
+            checked={flags.cellDetailPanel}
+            locked={locked.cellDetailPanel}
+            onChange={(v) => set("cellDetailPanel", v)}
+          />
         </Category>
 
         {/* ── SQL Editor ── */}

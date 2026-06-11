@@ -47,6 +47,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/editor/CrossTabSearch.tsx",
         "frontend/src/components/editor/SqlEditor.tsx",
         "frontend/src/components/editor/sqlEditorUtils.ts",
+        "frontend/src/components/results/CellDetailPanel.tsx",
         "frontend/src/components/results/ColumnFilterDropdown.tsx",
         "frontend/src/components/results/ConditionalFormattingModal.tsx",
         "frontend/src/components/results/DataTypeFormatModal.tsx",
@@ -55,6 +56,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/results/QuickChartModal.tsx",
         "frontend/src/components/results/ResultGrid.tsx",
         "frontend/src/components/results/StatusBar.tsx",
+        "frontend/src/components/results/cellDetailUtils.ts",
         "frontend/src/store/gridStore.ts",
         "frontend/src/store/queryStore.ts"
       ],
