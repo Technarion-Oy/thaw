@@ -22,6 +22,11 @@ export interface SelectionRange {
   endCol: number;
 }
 
+/** What initiated the current selection: a cell click, the row-number gutter,
+ *  a column header, or the select-all corner button. Consumers that only make
+ *  sense for cell-level inspection (e.g. CellDetailPanel) check for "cell". */
+export type SelectionOrigin = "cell" | "row" | "column" | "all";
+
 // ─── Search ───────────────────────────────────────────────────────────────────
 
 export interface CellCoord {
@@ -74,8 +79,11 @@ interface GridState {
 
   // Range selection
   selectionRange: SelectionRange | null;
+  selectionOrigin: SelectionOrigin | null;
   isSelecting: boolean;
-  setSelectionRange: (range: SelectionRange | null) => void;
+  /** Omitting `origin` preserves the current origin (drag-extend); it is
+   *  cleared automatically when `range` is null. */
+  setSelectionRange: (range: SelectionRange | null, origin?: SelectionOrigin) => void;
   setIsSelecting: (v: boolean) => void;
 
   // Search
@@ -107,6 +115,7 @@ interface GridState {
 const initialState = {
   tableRows: null as Row<unknown[]>[] | null,
   selectionRange: null as SelectionRange | null,
+  selectionOrigin: null as SelectionOrigin | null,
   isSelecting: false,
   searchTerm: "",
   searchMatches: [] as CellCoord[],
@@ -119,7 +128,11 @@ export const useGridStore = create<GridState>((set, get) => ({
   ...initialState,
 
   setTableRows: (rows) => set({ tableRows: rows }),
-  setSelectionRange: (range) => set({ selectionRange: range }),
+  setSelectionRange: (range, origin) =>
+    set((s) => ({
+      selectionRange: range,
+      selectionOrigin: range === null ? null : origin ?? s.selectionOrigin,
+    })),
   setIsSelecting: (v) => set({ isSelecting: v }),
 
   setSearchTerm: (term) => set({ searchTerm: term, currentMatchIndex: 0 }),
@@ -155,6 +168,7 @@ export const useGridStore = create<GridState>((set, get) => ({
   resetNavigation: () => set({
     tableRows: null,
     selectionRange: null,
+    selectionOrigin: null,
     isSelecting: false,
     searchTerm: "",
     searchMatches: [],

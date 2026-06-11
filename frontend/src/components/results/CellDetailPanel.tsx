@@ -16,6 +16,7 @@ import { CloseOutlined, CopyOutlined } from "@ant-design/icons";
 import { useGridStore } from "../../store/gridStore";
 import { usePanelLayoutStore } from "../../store/panelLayoutStore";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import { prettyPrintJson, truncateForDisplay, reconcileDismissedKey } from "./cellDetailUtils";
 
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 700;
@@ -35,19 +36,26 @@ interface Props {
  * from the gridStore singleton, so it must only be rendered alongside the
  * primary (non-standalone) ResultGrid.
  *
- * Opens when a cell is selected; closes via the ✕ button or Escape, and
+ * Opens when a cell is clicked (selections initiated from the row-number
+ * gutter, a column header, or the select-all button don't open it — those are
+ * copy gestures, not inspection); closes via the ✕ button or Escape, and
  * reopens when a different cell is selected. Gated behind the
  * `cellDetailPanel` feature flag by the parent (QueryPage).
  */
 export default function CellDetailPanel({ columns, onVisibleCellChange }: Props) {
   const selectionRange = useGridStore((s) => s.selectionRange);
+  const selectionOrigin = useGridStore((s) => s.selectionOrigin);
   const tableRows = useGridStore((s) => s.tableRows);
   const width = usePanelLayoutStore((s) => s.cellDetailWidth);
   const setWidth = usePanelLayoutStore((s) => s.setCellDetailWidth);
 
   // The anchor cell is selectionRange.start* — stable while dragging a range,
-  // changes when the user clicks a different cell.
-  const anchorKey = selectionRange ? `${selectionRange.startRow}:${selectionRange.startCol}` : null;
+  // changes when the user clicks a different cell. Only cell-originated
+  // selections count: row/column/select-all gestures must not open the panel
+  // (or auto-scroll the grid to their column-0 anchor).
+  const anchorKey = selectionRange && selectionOrigin === "cell"
+    ? `${selectionRange.startRow}:${selectionRange.startCol}`
+    : null;
 
   // Explicit close suppresses the panel for the current anchor only; selecting
   // a different cell reopens it.
@@ -55,15 +63,17 @@ export default function CellDetailPanel({ columns, onVisibleCellChange }: Props)
   const visible = anchorKey !== null && anchorKey !== dismissedKey;
 
   const [showRaw, setShowRaw] = useState(false);
+  const [showFull, setShowFull] = useState(false);
 
   // Start fresh whenever the anchor moves: clear a stale dismissal (so it
   // can't suppress an unrelated cell — or a new result — that happens to land
-  // on the same coordinates) and reset the Raw/Formatted toggle.
+  // on the same coordinates) and reset the per-cell view toggles.
   // Intentionally keyed on anchorKey only: reacting to dismissedKey would
   // undo the dismissal that Escape/✕ just set for the current anchor.
   useEffect(() => {
-    setDismissedKey((prev) => (prev !== anchorKey ? null : prev));
+    setDismissedKey((prev) => reconcileDismissedKey(prev, anchorKey));
     setShowRaw(false);
+    setShowFull(false);
   }, [anchorKey]);
 
   const cell = useMemo(() => {
@@ -81,20 +91,22 @@ export default function CellDetailPanel({ columns, onVisibleCellChange }: Props)
 
   const rawText = cell == null || cell.value == null ? null : String(cell.value);
 
-  // Pretty-print JSON values; null when the value isn't parseable JSON.
-  const prettyJson = useMemo(() => {
-    if (rawText == null) return null;
-    const t = rawText.trim();
-    if (!t.startsWith("{") && !t.startsWith("[")) return null;
-    try {
-      const formatted = JSON.stringify(JSON.parse(t), null, 2);
-      return formatted === t ? null : formatted;
-    } catch {
-      return null;
-    }
-  }, [rawText]);
+  // Pretty-print JSON values; null when the value isn't parseable JSON or is
+  // too large to parse without freezing the UI (Snowflake VARIANT can be 16 MB).
+  const prettyJson = useMemo(
+    () => (rawText == null ? null : prettyPrintJson(rawText)),
+    [rawText],
+  );
 
-  const displayText = prettyJson !== null && !showRaw ? prettyJson : rawText;
+  // Cap the rendered text on huge values; the copy button always copies the
+  // full raw value regardless of what is displayed.
+  const chosenText = prettyJson !== null && !showRaw ? prettyJson : rawText;
+  const { text: displayText, truncated } = useMemo(
+    () => (chosenText == null
+      ? { text: null, truncated: false }
+      : truncateForDisplay(chosenText, showFull)),
+    [chosenText, showFull],
+  );
 
   // Keep the selected cell visible when the panel opens or switches cells.
   // The callback lives in a ref and the effect keys on visible/anchorKey only,
@@ -112,14 +124,20 @@ export default function CellDetailPanel({ columns, onVisibleCellChange }: Props)
     if (!visible) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      // Don't steal Escape from inputs (e.g. the grid search box)
-      const tag = (document.activeElement as HTMLElement | null)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      // Don't steal Escape from inputs (e.g. the grid search box) or
+      // contentEditable hosts
+      const active = document.activeElement as HTMLElement | null;
+      if (active?.tagName === "INPUT" || active?.tagName === "TEXTAREA" || active?.isContentEditable) return;
       setDismissedKey(anchorKey);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [visible, anchorKey]);
+
+  // Track the active resize-drag cleanup so listeners are removed even when
+  // the panel unmounts mid-drag (e.g. a completing query resets the selection).
+  const resizeCleanupRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => resizeCleanupRef.current?.(), []);
 
   const onResizeStart = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -128,12 +146,14 @@ export default function CellDetailPanel({ columns, onVisibleCellChange }: Props)
     const onMove = (ev: MouseEvent) => {
       setWidth(Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, startW + (startX - ev.clientX))));
     };
-    const onUp = () => {
+    const cleanup = () => {
       document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", onUp);
+      document.removeEventListener("mouseup", cleanup);
+      resizeCleanupRef.current = null;
     };
     document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp);
+    document.addEventListener("mouseup", cleanup);
+    resizeCleanupRef.current = cleanup;
   };
 
   if (!visible || !cell) return null;
@@ -233,22 +253,35 @@ export default function CellDetailPanel({ columns, onVisibleCellChange }: Props)
             NULL
           </span>
         ) : (
-          <pre
-            style={{
-              margin: 0,
-              fontFamily: "var(--mono-font, ui-monospace, 'SF Mono', Menlo, monospace)",
-              fontSize: 11,
-              lineHeight: 1.5,
-              color: "var(--text)",
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-word",
-              userSelect: "text",
-              WebkitUserSelect: "text",
-              cursor: "text",
-            }}
-          >
-            {displayText}
-          </pre>
+          <>
+            <pre
+              style={{
+                margin: 0,
+                fontFamily: "var(--mono-font, ui-monospace, 'SF Mono', Menlo, monospace)",
+                fontSize: 11,
+                lineHeight: 1.5,
+                color: "var(--text)",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                userSelect: "text",
+                WebkitUserSelect: "text",
+                cursor: "text",
+              }}
+            >
+              {displayText}
+            </pre>
+            {truncated && chosenText !== null && (
+              <div style={{ padding: "6px 0" }}>
+                <span
+                  role="button"
+                  onClick={() => setShowFull(true)}
+                  style={{ fontSize: 10, cursor: "pointer", color: "var(--accent)", userSelect: "none" }}
+                >
+                  Truncated — show all {chosenText.length.toLocaleString()} characters
+                </span>
+              </div>
+            )}
+          </>
         )}
       </div>
 

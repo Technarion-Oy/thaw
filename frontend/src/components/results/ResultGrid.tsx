@@ -39,6 +39,7 @@ import { useGridStore, type ConditionalRule } from "../../store/gridStore";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { computeColumnWidths, measureText } from "../../utils/gridMeasure";
+import { computeCellScrollLeft } from "./cellDetailUtils";
 import { applyFormat } from "./DataTypeFormatModal";
 import { columnFilterFn, type ColumnFilterValue } from "./ColumnFilterDropdown";
 import ColumnFilterDropdown from "./ColumnFilterDropdown";
@@ -470,7 +471,7 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
       scrollContainerRef.current?.focus(); // restore focus so ⌘C copy handler works
       selectionModeRef.current = "cell";
       selectionStartRef.current = { row: rowIndex, col: colIndex };
-      setSelectionRange({ startRow: rowIndex, endRow: rowIndex, startCol: colIndex, endCol: colIndex });
+      setSelectionRange({ startRow: rowIndex, endRow: rowIndex, startCol: colIndex, endCol: colIndex }, "cell");
       setIsSelecting(true);
     },
     [featureFlags.multiCellCopy, setSelectionRange, setIsSelecting],
@@ -531,7 +532,7 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
         endRow: rowIndex,
         startCol: 0,
         endCol: result.columns.length - 1,
-      });
+      }, "row");
       setIsSelecting(true);
     },
     [featureFlags.multiCellCopy, result.columns.length, setSelectionRange, setIsSelecting],
@@ -573,7 +574,7 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
           endRow: tableRows.length - 1,
           startCol: colIndex,
           endCol: colIndex,
-        });
+        }, "column");
         setIsSelecting(true);
       }, 200);
     },
@@ -678,7 +679,7 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
       endRow: tableRows.length - 1,
       startCol: 0,
       endCol: result.columns.length - 1,
-    });
+    }, "all");
   }, [featureFlags.multiCellCopy, tableRows.length, result.columns.length, setSelectionRange]);
 
   // ─── Context menus ────────────────────────────────────────────────────────
@@ -867,16 +868,15 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
     if (centerIdx < 0) return;
     let colStart = 0;
     for (let i = 0; i < centerIdx; i++) colStart += centerColumns[i].getSize() * dataColScale;
-    const contentStart = selectAllColWidth + pinnedLeftWidth * dataColScale + colStart;
-    const contentEnd = contentStart + centerColumns[centerIdx].getSize() * dataColScale;
-    const viewStart = el.scrollLeft + selectAllColWidth + pinnedLeftWidth * dataColScale;
-    const viewEnd = el.scrollLeft + el.clientWidth - pinnedRightWidth * dataColScale;
-    if (contentStart < viewStart) {
-      el.scrollLeft -= viewStart - contentStart;
-    } else if (contentEnd > viewEnd) {
-      // Wide cells: never push the column start out of view while exposing the end.
-      el.scrollLeft += Math.min(contentEnd - viewEnd, contentStart - viewStart);
-    }
+    const newScrollLeft = computeCellScrollLeft({
+      scrollLeft: el.scrollLeft,
+      clientWidth: el.clientWidth,
+      colStart: selectAllColWidth + pinnedLeftWidth * dataColScale + colStart,
+      colWidth: centerColumns[centerIdx].getSize() * dataColScale,
+      stickyLeadingWidth: selectAllColWidth + pinnedLeftWidth * dataColScale,
+      stickyTrailingWidth: pinnedRightWidth * dataColScale,
+    });
+    if (newScrollLeft !== null) el.scrollLeft = newScrollLeft;
   };
 
   // Pre-compute sample values for the format modal (avoids IIFE re-creation every render)
