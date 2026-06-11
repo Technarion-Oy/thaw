@@ -1476,7 +1476,10 @@ export default function QueryPage() {
                   )}
                   {/* Cell detail side panel (hidden in compare mode — gridStore is a singleton) */}
                   {featureFlags.cellDetailPanel && featureFlags.multiCellCopy && !compareResult && (
-                    <CellDetailPanel columns={displayedResult.columns} />
+                    <CellDetailPanel
+                      columns={displayedResult.columns}
+                      onVisibleCellChange={(row, col) => primaryGridRef.current?.scrollToCell(row, col)}
+                    />
                   )}
                 </div>{/* end grids row */}
                 {/* Selection aggregations status bar (hidden in compare mode — gridStore is a singleton) */}

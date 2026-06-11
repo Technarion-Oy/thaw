@@ -48,6 +48,8 @@ import QuickChartModal from "./QuickChartModal";
 
 export interface ResultGridHandle {
   scrollToRow: (rowIndex: number) => void;
+  /** Minimally scroll so the cell at (rowIndex, original colIndex) is fully visible. */
+  scrollToCell: (rowIndex: number, colIndex: number) => void;
 }
 
 interface Props {
@@ -410,15 +412,21 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
     if (el) setContainerWidth(el.clientWidth);
   }, []);
 
-  // Expose scrollToRow for search navigation via a stable ref so the effect
-  // only runs once instead of every render (rowVirtualizer is new each render).
+  // Expose scrollToRow/scrollToCell via stable refs so the effect only runs
+  // once instead of every render (rowVirtualizer is new each render).
+  // scrollCellIntoViewRef is reassigned each render after the layout
+  // calculations below, so it always sees fresh column sizes.
   const rowVirtualizerRef = useRef(rowVirtualizer);
   rowVirtualizerRef.current = rowVirtualizer;
+  const scrollCellIntoViewRef = useRef<(rowIndex: number, colIndex: number) => void>(() => {});
   useEffect(() => {
     if (!gridRef) return;
     gridRef.current = {
       scrollToRow: (rowIndex: number) => {
         rowVirtualizerRef.current.scrollToIndex(rowIndex, { align: "center" });
+      },
+      scrollToCell: (rowIndex: number, colIndex: number) => {
+        scrollCellIntoViewRef.current(rowIndex, colIndex);
       },
     };
   }, [gridRef]);
@@ -845,6 +853,31 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
   const dataColScale = dataColumnsWidth > 0 && containerWidth > fullTableWidth
     ? (containerWidth - selectAllColWidth) / dataColumnsWidth
     : 1;
+
+  // Scroll a cell into view with minimal movement. Reads el.clientWidth at
+  // call time so it accounts for viewport changes in the same commit (e.g.
+  // the cell detail panel opening and shrinking the grid). The visible window
+  // excludes the sticky regions (row-number gutter and pinned columns).
+  scrollCellIntoViewRef.current = (rowIndex: number, colIndex: number) => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    rowVirtualizerRef.current.scrollToIndex(rowIndex, { align: "auto" });
+    // Pinned columns are sticky — always visible, no horizontal scroll needed.
+    const centerIdx = centerColumns.findIndex((c) => colIdxFromColumnId(c.id) === colIndex);
+    if (centerIdx < 0) return;
+    let colStart = 0;
+    for (let i = 0; i < centerIdx; i++) colStart += centerColumns[i].getSize() * dataColScale;
+    const contentStart = selectAllColWidth + pinnedLeftWidth * dataColScale + colStart;
+    const contentEnd = contentStart + centerColumns[centerIdx].getSize() * dataColScale;
+    const viewStart = el.scrollLeft + selectAllColWidth + pinnedLeftWidth * dataColScale;
+    const viewEnd = el.scrollLeft + el.clientWidth - pinnedRightWidth * dataColScale;
+    if (contentStart < viewStart) {
+      el.scrollLeft -= viewStart - contentStart;
+    } else if (contentEnd > viewEnd) {
+      // Wide cells: never push the column start out of view while exposing the end.
+      el.scrollLeft += Math.min(contentEnd - viewEnd, contentStart - viewStart);
+    }
+  };
 
   // Pre-compute sample values for the format modal (avoids IIFE re-creation every render)
   const sampleValues = useMemo(() => {

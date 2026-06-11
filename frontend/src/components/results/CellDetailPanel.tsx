@@ -10,7 +10,7 @@
 //
 // @thaw-domain: SQL Editor & Diagnostics
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Tooltip, message } from "antd";
 import { CloseOutlined, CopyOutlined } from "@ant-design/icons";
 import { useGridStore } from "../../store/gridStore";
@@ -23,6 +23,10 @@ const MAX_WIDTH = 700;
 interface Props {
   /** Column names of the displayed result (original order, matching selection indices). */
   columns: string[];
+  /** Called after the panel opens or switches to a different cell, so the
+   *  parent can scroll the grid to keep that cell visible (the panel shrinks
+   *  the grid viewport and can otherwise cover the selected cell). */
+  onVisibleCellChange?: (rowIndex: number, colIndex: number) => void;
 }
 
 /**
@@ -35,7 +39,7 @@ interface Props {
  * reopens when a different cell is selected. Gated behind the
  * `cellDetailPanel` feature flag by the parent (QueryPage).
  */
-export default function CellDetailPanel({ columns }: Props) {
+export default function CellDetailPanel({ columns, onVisibleCellChange }: Props) {
   const selectionRange = useGridStore((s) => s.selectionRange);
   const tableRows = useGridStore((s) => s.tableRows);
   const width = usePanelLayoutStore((s) => s.cellDetailWidth);
@@ -81,6 +85,17 @@ export default function CellDetailPanel({ columns }: Props) {
   }, [rawText]);
 
   const displayText = prettyJson !== null && !showRaw ? prettyJson : rawText;
+
+  // Keep the selected cell visible when the panel opens or switches cells.
+  // The callback lives in a ref and the effect keys on visible/anchorKey only,
+  // so unrelated parent re-renders don't re-scroll and fight user scrolling.
+  const onVisibleCellChangeRef = useRef(onVisibleCellChange);
+  onVisibleCellChangeRef.current = onVisibleCellChange;
+  useEffect(() => {
+    if (!visible || !anchorKey) return;
+    const [row, col] = anchorKey.split(":").map(Number);
+    onVisibleCellChangeRef.current?.(row, col);
+  }, [visible, anchorKey]);
 
   // Close on Escape
   useEffect(() => {
