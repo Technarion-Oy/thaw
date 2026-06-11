@@ -622,6 +622,7 @@ Right-click any warehouse in the Administration panel and choose **Properties** 
 - **Multi-Cell Copy & Selection** (feature-flagged) — click and drag to select a range of cells; `⌘C` copies the selection as TSV with headers to the native clipboard; a row-number gutter and select-all button appear when enabled
 - **Selection Aggregations** — when a range is selected, a status bar below the grid shows Sum, Avg, Count, Min, Max of numeric values in the selection
 - **Quick Charting** — with a range selected, right-click → **Create Chart…** to open a modal with bar, line, and scatter chart types powered by Recharts
+- **Cell Detail Panel** (feature-flagged) — clicking a cell opens a resizable side panel on the right edge of the results area showing the column name, row number, and the full cell content in a scrollable, selectable text view; JSON values are pretty-printed with a Raw/Formatted toggle; a copy button writes the raw value to the native clipboard; close with the × button or `Esc` — selecting another cell reopens it (requires Multi-Cell Copy & Selection)
 
 
 ### Snowflake Connectivity
@@ -883,6 +884,7 @@ The following features are identified as feasible to be turned off via feature f
 
 **Results Grid**
 - **Multi-Cell Copy & Selection** (Range selection, multi-cell copy, selection aggregations, and quick charting)
+- **Cell Detail Panel** (Side panel for inspecting and copying the full content of the selected cell)
 
 **SQL Editor**
 - **Cross-Tab Search & Replace** (Search and replace text across all open query tabs and notebook cells)

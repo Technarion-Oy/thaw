@@ -209,8 +209,8 @@ func DefaultNotebookPrefs() NotebookPrefs {
 //
 // Version tracks the schema revision so new flags introduced after an initial
 // save can be filled with their defaults rather than the zero value (false).
-// Current version: 14 (added QueryLog).
-const flagsVersion = 14
+// Current version: 15 (added CellDetailPanel).
+const flagsVersion = 15
 
 type FeatureFlags struct {
 	Initialized bool `json:"initialized"`
@@ -267,7 +267,8 @@ type FeatureFlags struct {
 	SnowflakeCLIProfileManager bool `json:"snowflakeCLIProfileManager"` // Manage Snowflake CLI profiles from the connection dialog
 
 	// Results Grid
-	MultiCellCopy bool `json:"multiCellCopy"` // Range selection and multi-cell copy in query results
+	MultiCellCopy   bool `json:"multiCellCopy"`   // Range selection and multi-cell copy in query results
+	CellDetailPanel bool `json:"cellDetailPanel"` // Side panel showing the full content of the selected cell
 
 	// Editor Productivity
 	CrossTabSearch bool `json:"crossTabSearch"` // Search and replace across all open tabs
@@ -320,6 +321,7 @@ func DefaultFeatureFlags() FeatureFlags {
 		FileFormatBuilder:      true,
 		SnowflakeCLIProfileManager: true,
 		MultiCellCopy:              true,
+		CellDetailPanel:            true,
 		CrossTabSearch:             true,
 		FileWatcher:                true,
 		ColumnManagement:           true,
@@ -394,6 +396,8 @@ func MigrateFlags(f FeatureFlags) FeatureFlags {
 	setIfZero(&f.MCPServer, defaults.MCPServer)
 	// Version 13 → 14: QueryLog added; defaults to false (opt-in).
 	setIfZero(&f.QueryLog, defaults.QueryLog)
+	// Version 14 → 15: CellDetailPanel added; defaults to true.
+	setIfZero(&f.CellDetailPanel, defaults.CellDetailPanel)
 	f.Version = flagsVersion
 	return f
 }
