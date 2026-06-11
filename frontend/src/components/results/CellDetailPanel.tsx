@@ -56,6 +56,16 @@ export default function CellDetailPanel({ columns, onVisibleCellChange }: Props)
 
   const [showRaw, setShowRaw] = useState(false);
 
+  // Start fresh whenever the anchor moves: clear a stale dismissal (so it
+  // can't suppress an unrelated cell — or a new result — that happens to land
+  // on the same coordinates) and reset the Raw/Formatted toggle.
+  // Intentionally keyed on anchorKey only: reacting to dismissedKey would
+  // undo the dismissal that Escape/✕ just set for the current anchor.
+  useEffect(() => {
+    setDismissedKey((prev) => (prev !== anchorKey ? null : prev));
+    setShowRaw(false);
+  }, [anchorKey]);
+
   const cell = useMemo(() => {
     if (!selectionRange || !tableRows) return null;
     const row = tableRows[selectionRange.startRow];
