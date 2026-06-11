@@ -44,13 +44,7 @@ jobs:
       - name: Install garble
         run: go install mvdan.cc/garble@latest
 
-      - name: Build (macOS)
-        run: wails build -obfuscated -platform darwin/${{ matrix.arch }} -clean -tags webkit2_41 -ldflags "-s -w -X thaw/internal/version.Version=0.0.0-signtest" -trimpath
-        env:
-          NODE_OPTIONS: --max-old-space-size=6144
-
-      # ── Sign, notarize & staple (same steps as manual-release.yml) ──────────
-
+      # Runs before the (slow) build so broken signing secrets fail in seconds.
       - name: Set up signing keychain (macOS)
         env:
           APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
@@ -62,6 +56,16 @@ jobs:
           echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
 
           echo "$APPLE_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          echo "Decoded .p12 size: $(wc -c < "$RUNNER_TEMP/certificate.p12") bytes"
+
+          # Diagnose the p12 before importing — `security import` reports every
+          # problem as "MAC verification failed", which is useless for debugging.
+          if ! openssl pkcs12 -in "$RUNNER_TEMP/certificate.p12" -noout \
+               -passin env:APPLE_CERTIFICATE_PASSWORD 2> "$RUNNER_TEMP/p12-check.log"; then
+            echo "::error::Cannot open the decoded .p12 with APPLE_CERTIFICATE_PASSWORD. Either the password/base64 secret is wrong, or the .p12 uses modern (PBES2/AES) encryption that macOS cannot import — re-export with 'openssl pkcs12 -export -legacy' or from Keychain Access. openssl said:"
+            cat "$RUNNER_TEMP/p12-check.log"
+            exit 1
+          fi
 
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
@@ -73,6 +77,13 @@ jobs:
           security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain
 
           rm "$RUNNER_TEMP/certificate.p12"
+
+      - name: Build (macOS)
+        run: wails build -obfuscated -platform darwin/${{ matrix.arch }} -clean -tags webkit2_41 -ldflags "-s -w -X thaw/internal/version.Version=0.0.0-signtest" -trimpath
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+
+      # ── Sign, notarize & staple (same steps as manual-release.yml) ──────────
 
       - name: Sign app bundle (macOS)
         run: |
