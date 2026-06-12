@@ -102,6 +102,17 @@ type ConnectParams struct {
 	// WorkloadIdentityImpersonationPath is a comma-separated impersonation
 	// chain for AWS/GCP WIF. Not supported on Azure (the driver rejects it).
 	WorkloadIdentityImpersonationPath string `json:"workloadIdentityImpersonationPath"`
+
+	// Forward-proxy configuration. When ProxyHost is set, these map directly to
+	// the gosnowflake sf.Config proxy fields and take precedence over the
+	// HTTP_PROXY/HTTPS_PROXY/NO_PROXY environment variables. The driver defaults
+	// ProxyProtocol to "http" when ProxyHost is set but ProxyProtocol is empty.
+	ProxyHost     string `json:"proxyHost"`
+	ProxyPort     int    `json:"proxyPort"`
+	ProxyUser     string `json:"proxyUser"`
+	ProxyPassword string `json:"proxyPassword"`
+	ProxyProtocol string `json:"proxyProtocol"`
+	NoProxy       string `json:"noProxy"`
 }
 
 // SnowflakeObject represents a database object (table, view, etc.).
@@ -406,6 +417,19 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 			return nil, fmt.Errorf("impersonation path is not supported for the Azure workload identity provider")
 		}
 		cfg.WorkloadIdentityImpersonationPath = path
+	}
+
+	// Forward proxy. When ProxyHost is set, these take precedence over the
+	// HTTP_PROXY/HTTPS_PROXY/NO_PROXY environment variables (which the driver
+	// otherwise honors as a fallback). Empty ProxyHost leaves all proxy fields
+	// unset so non-proxied connections are unaffected.
+	if p.ProxyHost != "" {
+		cfg.ProxyHost = p.ProxyHost
+		cfg.ProxyPort = p.ProxyPort
+		cfg.ProxyUser = p.ProxyUser
+		cfg.ProxyPassword = p.ProxyPassword
+		cfg.ProxyProtocol = p.ProxyProtocol
+		cfg.NoProxy = p.NoProxy
 	}
 
 	// Build the connector directly from the config (avoids the DSN round-trip

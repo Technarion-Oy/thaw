@@ -39,6 +39,13 @@ export interface ConnectionParams {
   workloadIdentityProvider: string;
   workloadIdentityEntraResource: string;
   workloadIdentityImpersonationPath: string;
+  // Forward-proxy configuration.
+  proxyHost: string;
+  proxyPort: number;
+  proxyUser: string;
+  proxyPassword: string;
+  proxyProtocol: string;
+  noProxy: string;
 }
 
 interface ConnectionState {
@@ -72,6 +79,7 @@ export const useConnectionStore = create<ConnectionState>()(
               privateKeyPassphrase: "",
               token: "",
               oauthClientSecret: "",
+              proxyPassword: "",
             }
           : null,
       }),

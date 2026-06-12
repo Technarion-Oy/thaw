@@ -13,7 +13,7 @@ Persistence is handled per-store via Zustand's `persist` middleware.
 
 | File | Purpose |
 |------|---------|
-| `connectionStore.ts` | Active connection flag and `ConnectionParams`. Persisted to `sessionStorage`; credentials (password, passcode, privateKeyPassphrase) are stripped before write. |
+| `connectionStore.ts` | Active connection flag and `ConnectionParams` (including forward-proxy fields). Persisted to `sessionStorage`; credentials (password, passcode, privateKeyPassphrase, token, oauthClientSecret, proxyPassword) are stripped before write. |
 | `queryStore.ts` | Tab list, active tab, per-tab SQL/result/error/running state, and flat aliases that mirror the active tab. Persisted to localStorage via a `safeLocalStorage` wrapper that swallows `QuotaExceededError`. Results and `isRunning` are never persisted. File-backed tab content is cleared before persist and reloaded from disk on startup. `Tab.mcpOrigin` marks tabs created by MCP tools; `openMcpTab(title, sql)` creates SQL tabs, `openMcpNotebookTab(title, content)` creates notebook tabs with MCP origin. |
 | `sessionStore.ts` | Live Snowflake session context (role, warehouse, database, schema) and per-tab context cache. Calls `GetSessionContext`, `UseRole`, `UseWarehouse`, `UseDatabase`, `UseSchema` IPC methods directly. Reads `activeTabId` from `queryStore` to determine which tab to send USE commands to. Not persisted. |
 | `objectStore.ts` | In-memory cache of databases, schemas, and objects expanded in the sidebar tree. Used as tier-1 of the search cascade. No persistence. |
@@ -59,9 +59,9 @@ Persistence is handled per-store via Zustand's `persist` middleware.
   `safeLocalStorage` silently drops writes; the in-memory store remains
   authoritative. Results are never persisted. File-backed tab SQL content is
   cleared before persist to stay within budget.
-- **`connectionStore` credential stripping.** `password`, `passcode`, and
-  `privateKeyPassphrase` are zeroed in the persisted slice so they are never
-  written to `sessionStorage`.
+- **`connectionStore` credential stripping.** `password`, `passcode`,
+  `privateKeyPassphrase`, `token`, `oauthClientSecret`, and `proxyPassword` are
+  zeroed in the persisted slice so they are never written to `sessionStorage`.
 - **`sessionStore` schema list invalidation.** When `switchDatabase` is called
   (or the database changes after `loadContext`), `schemas` and
   `schemasForDatabase` are reset so the dropdown re-fetches for the new database.

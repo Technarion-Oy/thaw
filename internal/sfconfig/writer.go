@@ -126,6 +126,21 @@ var connectionFieldOrder = []struct {
 	{"workload_identity_provider", func(c *Connection) string { return c.WorkloadIdentityProvider }},
 	{"workload_identity_entra_resource", func(c *Connection) string { return c.WorkloadIdentityEntraResource }},
 	{"workload_identity_impersonation_path", func(c *Connection) string { return c.WorkloadIdentityImpersonationPath }},
+	{"proxy_host", func(c *Connection) string { return c.ProxyHost }},
+	{"proxy_user", func(c *Connection) string { return c.ProxyUser }},
+	{"proxy_password", func(c *Connection) string { return c.ProxyPassword }},
+	{"proxy_protocol", func(c *Connection) string { return c.ProxyProtocol }},
+	{"no_proxy", func(c *Connection) string { return c.NoProxy }},
+}
+
+// connectionIntFieldOrder defines the canonical order for integer connection
+// fields. These render as unquoted TOML integers (e.g. `key = 8080`) and are
+// only emitted when non-zero.
+var connectionIntFieldOrder = []struct {
+	tomlKey string
+	getter  func(*Connection) int
+}{
+	{"proxy_port", func(c *Connection) int { return c.ProxyPort }},
 }
 
 // connectionBoolFieldOrder defines the canonical order for boolean connection
@@ -149,6 +164,11 @@ func connectionToTOMLLines(c Connection) []string {
 		}
 		out = append(out, fmt.Sprintf(`%s = "%s"`, f.tomlKey, tomlEscape(v)))
 	}
+	for _, f := range connectionIntFieldOrder {
+		if v := f.getter(&c); v != 0 {
+			out = append(out, fmt.Sprintf("%s = %d", f.tomlKey, v))
+		}
+	}
 	for _, f := range connectionBoolFieldOrder {
 		if f.getter(&c) {
 			out = append(out, fmt.Sprintf("%s = true", f.tomlKey))
@@ -164,8 +184,11 @@ var kvLineRe = regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=`)
 var knownConnectionKeys map[string]bool
 
 func init() {
-	knownConnectionKeys = make(map[string]bool, len(connectionFieldOrder)+len(connectionBoolFieldOrder))
+	knownConnectionKeys = make(map[string]bool, len(connectionFieldOrder)+len(connectionIntFieldOrder)+len(connectionBoolFieldOrder))
 	for _, f := range connectionFieldOrder {
+		knownConnectionKeys[f.tomlKey] = true
+	}
+	for _, f := range connectionIntFieldOrder {
 		knownConnectionKeys[f.tomlKey] = true
 	}
 	for _, f := range connectionBoolFieldOrder {

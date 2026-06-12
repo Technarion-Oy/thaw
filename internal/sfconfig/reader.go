@@ -52,6 +52,14 @@ type Connection struct {
 	WorkloadIdentityProvider          string `json:"workloadIdentityProvider"`
 	WorkloadIdentityEntraResource     string `json:"workloadIdentityEntraResource"`
 	WorkloadIdentityImpersonationPath string `json:"workloadIdentityImpersonationPath"`
+
+	// Forward-proxy configuration (see snowflake.ConnectParams).
+	ProxyHost     string `json:"proxyHost"`
+	ProxyPort     int    `json:"proxyPort"`
+	ProxyUser     string `json:"proxyUser"`
+	ProxyPassword string `json:"proxyPassword"`
+	ProxyProtocol string `json:"proxyProtocol"`
+	NoProxy       string `json:"noProxy"`
 }
 
 // Config is the parsed result of config.toml.
@@ -92,6 +100,12 @@ type rawConnection struct {
 	WorkloadIdentityProvider          string `toml:"workload_identity_provider"`
 	WorkloadIdentityEntraResource     string `toml:"workload_identity_entra_resource"`
 	WorkloadIdentityImpersonationPath string `toml:"workload_identity_impersonation_path"`
+	ProxyHost                         string `toml:"proxy_host"`
+	ProxyPort                         int    `toml:"proxy_port"`
+	ProxyUser                         string `toml:"proxy_user"`
+	ProxyPassword                     string `toml:"proxy_password"`
+	ProxyProtocol                     string `toml:"proxy_protocol"`
+	NoProxy                           string `toml:"no_proxy"`
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -148,6 +162,12 @@ func Load(path string) (*Config, error) {
 			WorkloadIdentityProvider:          c.WorkloadIdentityProvider,
 			WorkloadIdentityEntraResource:     c.WorkloadIdentityEntraResource,
 			WorkloadIdentityImpersonationPath: c.WorkloadIdentityImpersonationPath,
+			ProxyHost:                         c.ProxyHost,
+			ProxyPort:                         c.ProxyPort,
+			ProxyUser:                         c.ProxyUser,
+			ProxyPassword:                     c.ProxyPassword,
+			ProxyProtocol:                     c.ProxyProtocol,
+			NoProxy:                           c.NoProxy,
 		})
 	}
 

@@ -2058,6 +2058,12 @@ export namespace sfconfig {
 	    workloadIdentityProvider: string;
 	    workloadIdentityEntraResource: string;
 	    workloadIdentityImpersonationPath: string;
+	    proxyHost: string;
+	    proxyPort: number;
+	    proxyUser: string;
+	    proxyPassword: string;
+	    proxyProtocol: string;
+	    noProxy: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Connection(source);
@@ -2090,6 +2096,12 @@ export namespace sfconfig {
 	        this.workloadIdentityProvider = source["workloadIdentityProvider"];
 	        this.workloadIdentityEntraResource = source["workloadIdentityEntraResource"];
 	        this.workloadIdentityImpersonationPath = source["workloadIdentityImpersonationPath"];
+	        this.proxyHost = source["proxyHost"];
+	        this.proxyPort = source["proxyPort"];
+	        this.proxyUser = source["proxyUser"];
+	        this.proxyPassword = source["proxyPassword"];
+	        this.proxyProtocol = source["proxyProtocol"];
+	        this.noProxy = source["noProxy"];
 	    }
 	}
 	export class Config {
@@ -2254,6 +2266,12 @@ export namespace snowflake {
 	    workloadIdentityProvider: string;
 	    workloadIdentityEntraResource: string;
 	    workloadIdentityImpersonationPath: string;
+	    proxyHost: string;
+	    proxyPort: number;
+	    proxyUser: string;
+	    proxyPassword: string;
+	    proxyProtocol: string;
+	    noProxy: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ConnectParams(source);
@@ -2285,6 +2303,12 @@ export namespace snowflake {
 	        this.workloadIdentityProvider = source["workloadIdentityProvider"];
 	        this.workloadIdentityEntraResource = source["workloadIdentityEntraResource"];
 	        this.workloadIdentityImpersonationPath = source["workloadIdentityImpersonationPath"];
+	        this.proxyHost = source["proxyHost"];
+	        this.proxyPort = source["proxyPort"];
+	        this.proxyUser = source["proxyUser"];
+	        this.proxyPassword = source["proxyPassword"];
+	        this.proxyProtocol = source["proxyProtocol"];
+	        this.noProxy = source["noProxy"];
 	    }
 	}
 	export class DataTypeInfo {
