@@ -126,6 +126,29 @@ var connectionFieldOrder = []struct {
 	{"workload_identity_provider", func(c *Connection) string { return c.WorkloadIdentityProvider }},
 	{"workload_identity_entra_resource", func(c *Connection) string { return c.WorkloadIdentityEntraResource }},
 	{"workload_identity_impersonation_path", func(c *Connection) string { return c.WorkloadIdentityImpersonationPath }},
+	{"proxy_host", func(c *Connection) string { return c.ProxyHost }},
+	{"proxy_user", func(c *Connection) string { return c.ProxyUser }},
+	{"proxy_password", func(c *Connection) string { return c.ProxyPassword }},
+	{"proxy_protocol", func(c *Connection) string { return c.ProxyProtocol }},
+	{"no_proxy", func(c *Connection) string { return c.NoProxy }},
+}
+
+// connectionIntFieldOrder defines the canonical order for integer connection
+// fields. These render as unquoted TOML integers (e.g. `key = 8080`) and are
+// only emitted when non-zero.
+//
+// A separate slice is needed because connectionFieldOrder's getters return
+// string and its values are quoted (`key = "value"`). proxy_port is a numeric
+// TOML value, so it needs an int getter and unquoted rendering — quoting it
+// (`proxy_port = "8080"`) would make the TOML decoder fail to unmarshal it into
+// the int field on rawConnection. The empty-value sentinel also differs: string
+// fields skip on "", int fields skip on 0 (same reason connectionBoolFieldOrder
+// is separate — bools render unquoted and skip on false).
+var connectionIntFieldOrder = []struct {
+	tomlKey string
+	getter  func(*Connection) int
+}{
+	{"proxy_port", func(c *Connection) int { return c.ProxyPort }},
 }
 
 // connectionBoolFieldOrder defines the canonical order for boolean connection
@@ -140,6 +163,20 @@ var connectionBoolFieldOrder = []struct {
 
 // connectionToTOMLLines renders a Connection as TOML key=value lines (without
 // the section header). Only non-empty / true fields are included.
+//
+// String fields are quoted and escaped, integer fields (proxy_port) are
+// emitted unquoted and only when non-zero, and boolean fields are emitted
+// unquoted and only when true. For example, a Connection with Account "acme",
+// User "alice", ProxyHost "proxy.local", ProxyPort 8080, and
+// EnableSingleUseRefreshTokens true renders as:
+//
+//	account = "acme"
+//	user = "alice"
+//	proxy_host = "proxy.local"
+//	proxy_port = 8080
+//	enable_single_use_refresh_tokens = true
+//
+// The caller (SaveProfile) prepends the [connections.<name>] section header.
 func connectionToTOMLLines(c Connection) []string {
 	var out []string
 	for _, f := range connectionFieldOrder {
@@ -148,6 +185,11 @@ func connectionToTOMLLines(c Connection) []string {
 			continue
 		}
 		out = append(out, fmt.Sprintf(`%s = "%s"`, f.tomlKey, tomlEscape(v)))
+	}
+	for _, f := range connectionIntFieldOrder {
+		if v := f.getter(&c); v != 0 {
+			out = append(out, fmt.Sprintf("%s = %d", f.tomlKey, v))
+		}
 	}
 	for _, f := range connectionBoolFieldOrder {
 		if f.getter(&c) {
@@ -164,8 +206,11 @@ var kvLineRe = regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=`)
 var knownConnectionKeys map[string]bool
 
 func init() {
-	knownConnectionKeys = make(map[string]bool, len(connectionFieldOrder)+len(connectionBoolFieldOrder))
+	knownConnectionKeys = make(map[string]bool, len(connectionFieldOrder)+len(connectionIntFieldOrder)+len(connectionBoolFieldOrder))
 	for _, f := range connectionFieldOrder {
+		knownConnectionKeys[f.tomlKey] = true
+	}
+	for _, f := range connectionIntFieldOrder {
 		knownConnectionKeys[f.tomlKey] = true
 	}
 	for _, f := range connectionBoolFieldOrder {

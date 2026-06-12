@@ -11,7 +11,7 @@
 // @thaw-domain: Core IPC & App Lifecycle
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Form, Input, Button, Alert, Space, Typography, Select, Divider, Tooltip, Modal, Popconfirm, Switch, message } from "antd";
+import { Form, Input, InputNumber, Button, Alert, Space, Typography, Select, Divider, Tooltip, Modal, Popconfirm, Switch, Collapse, message } from "antd";
 import { CloudServerOutlined, FolderOpenOutlined, SaveOutlined, CopyOutlined, DeleteOutlined, StarOutlined, PlusOutlined, EditOutlined } from "@ant-design/icons";
 import UserAgreementModal from "./UserAgreementModal";
 import {
@@ -123,6 +123,9 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
   // path for AWS/GCP).
   const wifProvider             = Form.useWatch("workloadIdentityProvider", form);
   const [agreementOpen, setAgreementOpen] = useState(false);
+  // Proxy panel is collapsed by default; auto-expands when a loaded profile
+  // carries proxy settings so they are visible rather than silently applied.
+  const [proxyOpen, setProxyOpen] = useState(false);
   const setConnected            = useConnectionStore((s) => s.setConnected);
   const profileManagerEnabled   = useFeatureFlagsStore((s) => s.flags.snowflakeCLIProfileManager);
 
@@ -175,6 +178,7 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
     setSelectedProfile(undefined);
     form.resetFields();
     setAuth("username_password_mfa");
+    setProxyOpen(false);
   };
 
   const applyCliConnection = (name: string) => {
@@ -210,7 +214,14 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
       workloadIdentityProvider:          conn.workloadIdentityProvider,
       workloadIdentityEntraResource:     conn.workloadIdentityEntraResource,
       workloadIdentityImpersonationPath: conn.workloadIdentityImpersonationPath,
+      proxyHost:                         conn.proxyHost,
+      proxyPort:                         conn.proxyPort,
+      proxyUser:                         conn.proxyUser,
+      proxyPassword:                     conn.proxyPassword,
+      proxyProtocol:                     conn.proxyProtocol || "http",
+      noProxy:                           conn.noProxy,
     });
+    setProxyOpen(!!conn.proxyHost);
   };
 
   const profileNameIsValid = (name: string) =>
@@ -257,6 +268,12 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
       workloadIdentityProvider:          values.workloadIdentityProvider || "",
       workloadIdentityEntraResource:     values.workloadIdentityEntraResource || "",
       workloadIdentityImpersonationPath: values.workloadIdentityImpersonationPath || "",
+      proxyHost:                         values.proxyHost || "",
+      proxyPort:                         values.proxyPort || 0,
+      proxyUser:                         values.proxyUser || "",
+      proxyPassword:                     values.proxyPassword || "",
+      proxyProtocol:                     values.proxyProtocol || "",
+      noProxy:                           values.noProxy || "",
     });
   };
 
@@ -738,6 +755,63 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
                 )}
               </>
             )}
+
+            {/* ── Proxy (collapsed by default) ───────────────────────── */}
+            <Collapse
+              ghost
+              size="small"
+              style={{ marginTop: 4 }}
+              activeKey={proxyOpen ? ["proxy"] : []}
+              onChange={(keys) => setProxyOpen((Array.isArray(keys) ? keys : [keys]).includes("proxy"))}
+              items={[
+                {
+                  key: "proxy",
+                  label: "Proxy (optional)",
+                  children: (
+                    <>
+                      <Space.Compact style={{ width: "100%", gap: 8, display: "flex" }}>
+                        <Form.Item name="proxyHost" label="Host" style={{ flex: 2 }}>
+                          <Input placeholder="proxy.example.com" />
+                        </Form.Item>
+                        <Form.Item name="proxyPort" label="Port" style={{ flex: 1 }}>
+                          <InputNumber
+                            min={0}
+                            max={65535}
+                            controls={false}
+                            placeholder="8080"
+                            style={{ width: "100%" }}
+                          />
+                        </Form.Item>
+                        <Form.Item
+                          name="proxyProtocol"
+                          label="Protocol"
+                          initialValue="http"
+                          style={{ flex: 1 }}
+                        >
+                          <Select
+                            options={[
+                              { value: "http", label: "http" },
+                              { value: "https", label: "https" },
+                            ]}
+                          />
+                        </Form.Item>
+                      </Space.Compact>
+                      <Space.Compact style={{ width: "100%", gap: 8, display: "flex" }}>
+                        <Form.Item name="proxyUser" label="Username (optional)" style={{ flex: 1 }}>
+                          <Input autoComplete="off" />
+                        </Form.Item>
+                        <Form.Item name="proxyPassword" label="Password (optional)" style={{ flex: 1 }}>
+                          <Input.Password autoComplete="off" />
+                        </Form.Item>
+                      </Space.Compact>
+                      <Form.Item name="noProxy" label="No-proxy hosts (optional)">
+                        <Input placeholder="comma-separated, e.g. localhost,*.internal" />
+                      </Form.Item>
+                    </>
+                  ),
+                },
+              ]}
+            />
 
           </Form>
 

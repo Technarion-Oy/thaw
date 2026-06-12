@@ -748,6 +748,68 @@ func TestRoundTrip_AuthFields(t *testing.T) {
 	}
 }
 
+func TestRoundTrip_ProxyFields(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+
+	profile := Connection{
+		Name:          "proxied",
+		Account:       "myorg-test",
+		User:          "alice",
+		ProxyHost:     "proxy.example.com",
+		ProxyPort:     8080,
+		ProxyUser:     "puser",
+		ProxyPassword: "ppass",
+		ProxyProtocol: "https",
+		NoProxy:       "localhost,*.internal",
+	}
+
+	if err := SaveProfile(path, profile); err != nil {
+		t.Fatal(err)
+	}
+
+	out := readTestFile(t, path)
+	for _, key := range []string{
+		"proxy_host =", "proxy_user =", "proxy_password =", "proxy_protocol =", "no_proxy =",
+	} {
+		if !strings.Contains(out, key) {
+			t.Errorf("expected TOML key %q in output:\n%s", key, out)
+		}
+	}
+	// The port must be written as an unquoted TOML integer.
+	if !strings.Contains(out, "proxy_port = 8080") {
+		t.Errorf("expected unquoted int port in output:\n%s", out)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Connections) != 1 {
+		t.Fatalf("expected 1 connection, got %d", len(cfg.Connections))
+	}
+	c := cfg.Connections[0]
+	if c.ProxyHost != profile.ProxyHost || c.ProxyPort != profile.ProxyPort ||
+		c.ProxyUser != profile.ProxyUser || c.ProxyPassword != profile.ProxyPassword ||
+		c.ProxyProtocol != profile.ProxyProtocol || c.NoProxy != profile.NoProxy {
+		t.Errorf("proxy-field round-trip mismatch: got %+v", c)
+	}
+}
+
+// A zero proxy port must not be emitted, so non-proxied profiles stay clean.
+func TestRoundTrip_ProxyPortOmittedWhenZero(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+
+	if err := SaveProfile(path, Connection{Name: "plain", Account: "a"}); err != nil {
+		t.Fatal(err)
+	}
+	out := readTestFile(t, path)
+	if strings.Contains(out, "proxy_port") {
+		t.Errorf("expected no proxy_port key for zero port:\n%s", out)
+	}
+}
+
 func TestAtomicWrite_Permissions(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
