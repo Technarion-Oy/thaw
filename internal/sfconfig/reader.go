@@ -48,6 +48,7 @@ type Connection struct {
 	OAuthAuthorizationURL             string `json:"oauthAuthorizationUrl"`
 	OAuthRedirectURI                  string `json:"oauthRedirectUri"`
 	OAuthScope                        string `json:"oauthScope"`
+	EnableSingleUseRefreshTokens      bool   `json:"enableSingleUseRefreshTokens"`
 	WorkloadIdentityProvider          string `json:"workloadIdentityProvider"`
 	WorkloadIdentityEntraResource     string `json:"workloadIdentityEntraResource"`
 	WorkloadIdentityImpersonationPath string `json:"workloadIdentityImpersonationPath"`
@@ -87,6 +88,7 @@ type rawConnection struct {
 	OAuthAuthorizationURL             string `toml:"oauth_authorization_url"`
 	OAuthRedirectURI                  string `toml:"oauth_redirect_uri"`
 	OAuthScope                        string `toml:"oauth_scope"`
+	EnableSingleUseRefreshTokens      bool   `toml:"enable_single_use_refresh_tokens"`
 	WorkloadIdentityProvider          string `toml:"workload_identity_provider"`
 	WorkloadIdentityEntraResource     string `toml:"workload_identity_entra_resource"`
 	WorkloadIdentityImpersonationPath string `toml:"workload_identity_impersonation_path"`
@@ -142,6 +144,7 @@ func Load(path string) (*Config, error) {
 			OAuthAuthorizationURL:             c.OAuthAuthorizationURL,
 			OAuthRedirectURI:                  c.OAuthRedirectURI,
 			OAuthScope:                        c.OAuthScope,
+			EnableSingleUseRefreshTokens:      c.EnableSingleUseRefreshTokens,
 			WorkloadIdentityProvider:          c.WorkloadIdentityProvider,
 			WorkloadIdentityEntraResource:     c.WorkloadIdentityEntraResource,
 			WorkloadIdentityImpersonationPath: c.WorkloadIdentityImpersonationPath,

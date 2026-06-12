@@ -2054,6 +2054,7 @@ export namespace sfconfig {
 	    oauthAuthorizationUrl: string;
 	    oauthRedirectUri: string;
 	    oauthScope: string;
+	    enableSingleUseRefreshTokens: boolean;
 	    workloadIdentityProvider: string;
 	    workloadIdentityEntraResource: string;
 	    workloadIdentityImpersonationPath: string;
@@ -2085,6 +2086,7 @@ export namespace sfconfig {
 	        this.oauthAuthorizationUrl = source["oauthAuthorizationUrl"];
 	        this.oauthRedirectUri = source["oauthRedirectUri"];
 	        this.oauthScope = source["oauthScope"];
+	        this.enableSingleUseRefreshTokens = source["enableSingleUseRefreshTokens"];
 	        this.workloadIdentityProvider = source["workloadIdentityProvider"];
 	        this.workloadIdentityEntraResource = source["workloadIdentityEntraResource"];
 	        this.workloadIdentityImpersonationPath = source["workloadIdentityImpersonationPath"];

@@ -206,6 +206,7 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
       oauthAuthorizationUrl:             conn.oauthAuthorizationUrl,
       oauthRedirectUri:                  conn.oauthRedirectUri,
       oauthScope:                        conn.oauthScope,
+      enableSingleUseRefreshTokens:      conn.enableSingleUseRefreshTokens,
       workloadIdentityProvider:          conn.workloadIdentityProvider,
       workloadIdentityEntraResource:     conn.workloadIdentityEntraResource,
       workloadIdentityImpersonationPath: conn.workloadIdentityImpersonationPath,
@@ -252,6 +253,7 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
       oauthAuthorizationUrl:             values.oauthAuthorizationUrl || "",
       oauthRedirectUri:                  values.oauthRedirectUri || "",
       oauthScope:                        values.oauthScope || "",
+      enableSingleUseRefreshTokens:      values.enableSingleUseRefreshTokens || false,
       workloadIdentityProvider:          values.workloadIdentityProvider || "",
       workloadIdentityEntraResource:     values.workloadIdentityEntraResource || "",
       workloadIdentityImpersonationPath: values.workloadIdentityImpersonationPath || "",
@@ -635,12 +637,20 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
               </>
             )}
 
-            {/* Token-based: PAT and OAuth token pass-through */}
+            {/* Token-based: PAT and OAuth token pass-through. The driver requires
+                at least one of token / tokenFilePath, so validate one-of here. */}
             {(auth === "programmatic_access_token" || auth === "oauth") && (
               <>
                 <Form.Item
                   name="token"
                   label={auth === "oauth" ? "OAuth token" : "Programmatic access token"}
+                  dependencies={["tokenFilePath"]}
+                  rules={[({ getFieldValue }) => ({
+                    validator(_, value) {
+                      if (value || getFieldValue("tokenFilePath")) return Promise.resolve();
+                      return Promise.reject(new Error("Provide a token or a token file path"));
+                    },
+                  })]}
                 >
                   <Input.Password autoComplete="off" placeholder="Paste token, or use a token file below" />
                 </Form.Item>

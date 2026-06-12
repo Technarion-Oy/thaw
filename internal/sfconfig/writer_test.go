@@ -700,6 +700,7 @@ func TestRoundTrip_AuthFields(t *testing.T) {
 		OAuthAuthorizationURL:             "https://idp.example.com/oauth/authorize",
 		OAuthRedirectURI:                  "http://127.0.0.1:8080",
 		OAuthScope:                        "session:role:ANALYST",
+		EnableSingleUseRefreshTokens:      true,
 		WorkloadIdentityProvider:          "AWS",
 		WorkloadIdentityEntraResource:     "api://snowflake",
 		WorkloadIdentityImpersonationPath: "arn:aws:iam::111:role/a,arn:aws:iam::222:role/b",
@@ -721,6 +722,10 @@ func TestRoundTrip_AuthFields(t *testing.T) {
 			t.Errorf("expected TOML key %q in output:\n%s", key, out)
 		}
 	}
+	// The bool field must be written as an unquoted TOML boolean.
+	if !strings.Contains(out, "enable_single_use_refresh_tokens = true") {
+		t.Errorf("expected unquoted bool key in output:\n%s", out)
+	}
 
 	cfg, err := Load(path)
 	if err != nil {
@@ -735,6 +740,7 @@ func TestRoundTrip_AuthFields(t *testing.T) {
 		c.OAuthTokenRequestURL != profile.OAuthTokenRequestURL ||
 		c.OAuthAuthorizationURL != profile.OAuthAuthorizationURL ||
 		c.OAuthRedirectURI != profile.OAuthRedirectURI || c.OAuthScope != profile.OAuthScope ||
+		c.EnableSingleUseRefreshTokens != profile.EnableSingleUseRefreshTokens ||
 		c.WorkloadIdentityProvider != profile.WorkloadIdentityProvider ||
 		c.WorkloadIdentityEntraResource != profile.WorkloadIdentityEntraResource ||
 		c.WorkloadIdentityImpersonationPath != profile.WorkloadIdentityImpersonationPath {
