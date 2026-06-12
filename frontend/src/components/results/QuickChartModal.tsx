@@ -28,6 +28,7 @@ import {
 } from "recharts";
 import type { Row } from "@tanstack/react-table";
 import type { SelectionRange } from "../../store/gridStore";
+import { visualToOriginalIndex } from "./columnOrderUtils";
 
 type ChartType = "bar" | "line" | "scatter";
 
@@ -35,6 +36,10 @@ interface Props {
   tableRows: Row<unknown[]>[];
   columns: string[];
   selectionRange: SelectionRange;
+  /** Maps a visual column position to its original SELECT index. null = default
+   *  order. selectionRange columns are visual positions; chart data reads
+   *  result columns via this map so it follows the on-screen arrangement. */
+  visualToOriginal: number[] | null;
   onClose: () => void;
 }
 
@@ -55,7 +60,7 @@ const CHART_COLORS = [
   "#13c2c2", "#f5222d", "#faad14",
 ];
 
-export default function QuickChartModal({ tableRows, columns, selectionRange, onClose }: Props) {
+export default function QuickChartModal({ tableRows, columns, selectionRange, visualToOriginal, onClose }: Props) {
   const [chartType, setChartType] = useState<ChartType>("bar");
 
   const { data, xKey, valueKeys } = useMemo(() => {
@@ -64,8 +69,10 @@ export default function QuickChartModal({ tableRows, columns, selectionRange, on
     const minCol = Math.min(selectionRange.startCol, selectionRange.endCol);
     const maxCol = Math.max(selectionRange.startCol, selectionRange.endCol);
 
+    // selectionRange columns are visual positions; translate each to its
+    // original SELECT index (in visual, left-to-right order) for data reads.
     const colIndices: number[] = [];
-    for (let c = minCol; c <= maxCol; c++) colIndices.push(c);
+    for (let c = minCol; c <= maxCol; c++) colIndices.push(visualToOriginalIndex(visualToOriginal, c));
 
     const names = colIndices.map((c) => columns[c] ?? `Col ${c}`);
 
@@ -122,7 +129,7 @@ export default function QuickChartModal({ tableRows, columns, selectionRange, on
       xKey: xName,
       valueKeys: valCols.map((vc) => vc.name),
     };
-  }, [tableRows, columns, selectionRange]);
+  }, [tableRows, columns, selectionRange, visualToOriginal]);
 
   const renderChart = () => {
     if (valueKeys.length === 0) {

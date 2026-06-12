@@ -77,7 +77,10 @@ interface GridState {
   tableRows: Row<unknown[]>[] | null;
   setTableRows: (rows: Row<unknown[]>[]) => void;
 
-  // Range selection
+  // Range selection. NOTE: selectionRange.startCol/endCol are *visual* column
+  // positions (left-to-right on screen), not original SELECT indices — columns
+  // can be reordered (drag) or pinned. Translate to the original index via
+  // columnVisualOrder before reading result.columns / row.original.
   selectionRange: SelectionRange | null;
   selectionOrigin: SelectionOrigin | null;
   isSelecting: boolean;
@@ -85,6 +88,13 @@ interface GridState {
    *  cleared automatically when `range` is null. */
   setSelectionRange: (range: SelectionRange | null, origin?: SelectionOrigin) => void;
   setIsSelecting: (v: boolean) => void;
+
+  /** Maps a visual column position to its original SELECT index
+   *  (`columnVisualOrder[visualPos] = originalIndex`). null means default
+   *  order (visual position == original index). Set by ResultGrid; consumers
+   *  (StatusBar, CellDetailPanel) use it to translate selection columns. */
+  columnVisualOrder: number[] | null;
+  setColumnVisualOrder: (order: number[] | null) => void;
 
   // Search
   searchTerm: string;
@@ -116,6 +126,7 @@ const initialState = {
   tableRows: null as Row<unknown[]>[] | null,
   selectionRange: null as SelectionRange | null,
   selectionOrigin: null as SelectionOrigin | null,
+  columnVisualOrder: null as number[] | null,
   isSelecting: false,
   searchTerm: "",
   searchMatches: [] as CellCoord[],
@@ -134,6 +145,7 @@ export const useGridStore = create<GridState>((set, get) => ({
       selectionOrigin: range === null ? null : origin ?? s.selectionOrigin,
     })),
   setIsSelecting: (v) => set({ isSelecting: v }),
+  setColumnVisualOrder: (order) => set({ columnVisualOrder: order }),
 
   setSearchTerm: (term) => set({ searchTerm: term, currentMatchIndex: 0 }),
   setSearchMatches: (matches) => set({ searchMatches: matches }),
@@ -169,6 +181,7 @@ export const useGridStore = create<GridState>((set, get) => ({
     tableRows: null,
     selectionRange: null,
     selectionOrigin: null,
+    columnVisualOrder: null,
     isSelecting: false,
     searchTerm: "",
     searchMatches: [],

@@ -67,7 +67,7 @@ func ValidateSessionConfig(sc SessionConfig) SessionConfig
 
 - `Load()` returns a zero-value `AppConfig` when the file does not exist (fresh install); callers apply `DefaultFeatureFlags()` / `MigrateFlags()` from `internal/app/config.go`.
 - `FeatureFlags.Initialized` is a sentinel: a `false` value means the config file predates feature flags; `GetFeatureFlags()` in `internal/app/config.go` substitutes `DefaultFeatureFlags()` in that case.
-- `flagsVersion` (currently 15) is bumped each time a new flag is added, and a corresponding `setIfZero` call is added to `MigrateFlags` so existing users get the new flag enabled by default.
+- `flagsVersion` (currently 16) is bumped each time a new flag is added, and a corresponding `setIfZero` call is added to `MigrateFlags` so existing users get the new flag enabled by default.
 - Admin enforcement: `LoadAdminConfig` chains `loadAdminJSON` → `applyPlatformOverrides` → `mergeAdminOverrides`. Platform files are selected at compile time via build tags (`//go:build darwin`, `//go:build windows`, `//go:build !darwin && !windows`).
 - macOS platform override uses `plutil -convert json` (always available, no CGo) to parse plists.
 - Windows platform override uses `golang.org/x/sys/windows/registry`; registry DWORD `1` = disabled.

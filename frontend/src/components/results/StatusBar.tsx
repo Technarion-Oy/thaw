@@ -12,6 +12,7 @@
 
 import { useMemo } from "react";
 import { useGridStore } from "../../store/gridStore";
+import { visualToOriginalIndex } from "./columnOrderUtils";
 
 function formatNumber(n: number): string {
   if (Number.isInteger(n)) return n.toLocaleString();
@@ -21,6 +22,7 @@ function formatNumber(n: number): string {
 export default function StatusBar() {
   const selectionRange = useGridStore((s) => s.selectionRange);
   const tableRows = useGridStore((s) => s.tableRows);
+  const columnVisualOrder = useGridStore((s) => s.columnVisualOrder);
 
   const stats = useMemo(() => {
     if (!selectionRange || !tableRows) return null;
@@ -38,9 +40,12 @@ export default function StatusBar() {
       const row = tableRows[r];
       if (!row) continue;
       const orig = row.original;
+      // selectionRange columns are visual positions; translate to the original
+      // SELECT index before reading the row so aggregations cover the columns
+      // the user actually selected (reorder/pinning aware).
       for (let c = minCol; c <= maxCol; c++) {
         cellCount++;
-        const val = orig[c];
+        const val = orig[visualToOriginalIndex(columnVisualOrder, c)];
         if (val === null || val === undefined) continue;
         const num = Number(val);
         if (!isNaN(num) && val !== "" && val !== true && val !== false) {
@@ -64,7 +69,7 @@ export default function StatusBar() {
       min,
       max,
     };
-  }, [selectionRange, tableRows]);
+  }, [selectionRange, tableRows, columnVisualOrder]);
 
   if (!stats) return null;
 
