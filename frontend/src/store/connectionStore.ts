@@ -26,6 +26,19 @@ export interface ConnectionParams {
   oktaUrl: string;
   privateKeyPath: string;
   privateKeyPassphrase: string;
+  // Token-based, OAuth2, and Workload Identity Federation authenticators.
+  token: string;
+  tokenFilePath: string;
+  oauthClientId: string;
+  oauthClientSecret: string;
+  oauthTokenRequestUrl: string;
+  oauthAuthorizationUrl: string;
+  oauthRedirectUri: string;
+  oauthScope: string;
+  enableSingleUseRefreshTokens: boolean;
+  workloadIdentityProvider: string;
+  workloadIdentityEntraResource: string;
+  workloadIdentityImpersonationPath: string;
 }
 
 interface ConnectionState {
@@ -57,6 +70,8 @@ export const useConnectionStore = create<ConnectionState>()(
               password: "",
               passcode: "",
               privateKeyPassphrase: "",
+              token: "",
+              oauthClientSecret: "",
             }
           : null,
       }),

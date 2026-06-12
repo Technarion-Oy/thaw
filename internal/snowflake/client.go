@@ -38,11 +38,16 @@ import (
 // ConnectParams holds all fields needed to open a Snowflake connection.
 // Authenticator values:
 //
-//	"snowflake"            – password (+ optional TOTP passcode)
-//	"username_password_mfa" – password + MFA push notification
-//	"externalbrowser"      – browser-based SSO (no password needed)
-//	"okta"                 – Okta native SSO (requires OktaURL)
-//	"snowflake_jwt"        – key-pair / JWT (requires PrivateKeyPath)
+//	"snowflake"                 – password (+ optional TOTP passcode)
+//	"username_password_mfa"     – password + MFA push notification
+//	"externalbrowser"           – browser-based SSO (no password needed)
+//	"okta"                      – Okta native SSO (requires OktaURL)
+//	"snowflake_jwt"             – key-pair / JWT (requires PrivateKeyPath)
+//	"oauth"                     – external OAuth token pass-through (Token or TokenFilePath)
+//	"programmatic_access_token" – Snowflake PAT (Token or TokenFilePath; no user required)
+//	"oauth_authorization_code"  – browser-based OAuth2 authorization-code flow
+//	"oauth_client_credentials"  – non-interactive OAuth2 client-credentials flow
+//	"workload_identity"         – cloud-native CSP identity (AWS/Azure/GCP)
 type ConnectParams struct {
 	Account       string `json:"account"`
 	User          string `json:"user"`
@@ -60,6 +65,43 @@ type ConnectParams struct {
 	PrivateKeyPath string `json:"privateKeyPath"`
 	// PrivateKeyPassphrase decrypts the private key if it is encrypted.
 	PrivateKeyPassphrase string `json:"privateKeyPassphrase"`
+
+	// Token is an OAuth or programmatic access token; used with "oauth" and
+	// "programmatic_access_token" authenticators. Mutually exclusive with
+	// TokenFilePath (the driver rejects setting both).
+	Token string `json:"token"`
+	// TokenFilePath points to a file the driver reads the token from instead
+	// of Token. Mutually exclusive with Token.
+	TokenFilePath string `json:"tokenFilePath"`
+
+	// OAuthClientID is the OAuth2 client ID; required for the
+	// "oauth_authorization_code" and "oauth_client_credentials" flows.
+	OAuthClientID string `json:"oauthClientId"`
+	// OAuthClientSecret is the OAuth2 client secret for the same flows.
+	OAuthClientSecret string `json:"oauthClientSecret"`
+	// OAuthTokenRequestURL is the IdP token endpoint for the OAuth2 flows.
+	OAuthTokenRequestURL string `json:"oauthTokenRequestUrl"`
+	// OAuthAuthorizationURL is the IdP authorization endpoint; used by the
+	// "oauth_authorization_code" flow.
+	OAuthAuthorizationURL string `json:"oauthAuthorizationUrl"`
+	// OAuthRedirectURI is the redirect URI registered with the IdP. Optional;
+	// the driver defaults to http://127.0.0.1:<random port>.
+	OAuthRedirectURI string `json:"oauthRedirectUri"`
+	// OAuthScope is a comma-separated list of scopes. Optional; derived from
+	// the role when empty.
+	OAuthScope string `json:"oauthScope"`
+	// EnableSingleUseRefreshTokens enables single-use refresh tokens for the
+	// Snowflake IdP in the OAuth2 flows.
+	EnableSingleUseRefreshTokens bool `json:"enableSingleUseRefreshTokens"`
+
+	// WorkloadIdentityProvider selects the CSP identity provider for the
+	// "workload_identity" authenticator (e.g. "AWS", "AZURE", "GCP").
+	WorkloadIdentityProvider string `json:"workloadIdentityProvider"`
+	// WorkloadIdentityEntraResource is the Azure-only Entra resource for WIF.
+	WorkloadIdentityEntraResource string `json:"workloadIdentityEntraResource"`
+	// WorkloadIdentityImpersonationPath is a comma-separated impersonation
+	// chain for AWS/GCP WIF. Not supported on Azure (the driver rejects it).
+	WorkloadIdentityImpersonationPath string `json:"workloadIdentityImpersonationPath"`
 }
 
 // SnowflakeObject represents a database object (table, view, etc.).
@@ -261,10 +303,15 @@ const objectCacheTTL = 30 * time.Second
 // canceled to abort the login handshake (useful for MFA/browser flows).
 func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 	authMap := map[string]sf.AuthType{
-		"username_password_mfa": sf.AuthTypeUsernamePasswordMFA,
-		"externalbrowser":       sf.AuthTypeExternalBrowser,
-		"okta":                  sf.AuthTypeOkta,
-		"snowflake_jwt":         sf.AuthTypeJwt,
+		"username_password_mfa":     sf.AuthTypeUsernamePasswordMFA,
+		"externalbrowser":           sf.AuthTypeExternalBrowser,
+		"okta":                      sf.AuthTypeOkta,
+		"snowflake_jwt":             sf.AuthTypeJwt,
+		"oauth":                     sf.AuthTypeOAuth,
+		"programmatic_access_token": sf.AuthTypePat,
+		"oauth_authorization_code":  sf.AuthTypeOAuthAuthorizationCode,
+		"oauth_client_credentials":  sf.AuthTypeOAuthClientCredentials,
+		"workload_identity":         sf.AuthTypeWorkloadIdentityFederation,
 	}
 	auth, ok := authMap[strings.ToLower(p.Authenticator)]
 	if !ok {
@@ -274,11 +321,15 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 	// Interactive flows need more time; plain password should fail quickly.
 	// LoginTimeout is the gosnowflake-internal control — context cancellation
 	// alone is not reliable for aborting auth inside the driver.
+	// externalbrowser and oauth_authorization_code both open a browser and wait
+	// for the user to complete consent, so they share the long interactive
+	// timeout. okta and MFA-push are interactive on the device side.
 	authenticatorLower := strings.ToLower(p.Authenticator)
 	loginTimeout := 15 * time.Second
 	if authenticatorLower == "username_password_mfa" ||
 		authenticatorLower == "externalbrowser" ||
-		authenticatorLower == "okta" {
+		authenticatorLower == "okta" ||
+		authenticatorLower == "oauth_authorization_code" {
 		loginTimeout = 3 * time.Minute
 	}
 
@@ -325,6 +376,36 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 			return nil, fmt.Errorf("load private key: %w", err)
 		}
 		cfg.PrivateKey = key
+	}
+
+	// Token-based authenticators (oauth, programmatic_access_token). The driver
+	// rejects setting both Token and TokenFilePath, so surface a clear error
+	// before the login handshake.
+	if p.Token != "" && p.TokenFilePath != "" {
+		return nil, fmt.Errorf("token and tokenFilePath cannot both be set")
+	}
+	cfg.Token = p.Token
+	cfg.TokenFilePath = p.TokenFilePath
+
+	// OAuth2 flows (oauth_authorization_code, oauth_client_credentials).
+	cfg.OauthClientID = p.OAuthClientID
+	cfg.OauthClientSecret = p.OAuthClientSecret
+	cfg.OauthTokenRequestURL = p.OAuthTokenRequestURL
+	cfg.OauthAuthorizationURL = p.OAuthAuthorizationURL
+	cfg.OauthRedirectURI = p.OAuthRedirectURI
+	cfg.OauthScope = p.OAuthScope
+	cfg.EnableSingleUseRefreshTokens = p.EnableSingleUseRefreshTokens
+
+	// Workload Identity Federation. Impersonation path is a comma-separated
+	// chain split into the driver's []string; Azure does not support it (the
+	// driver rejects the combination, so reject it early with a clear message).
+	cfg.WorkloadIdentityProvider = p.WorkloadIdentityProvider
+	cfg.WorkloadIdentityEntraResource = p.WorkloadIdentityEntraResource
+	if path := splitCommaList(p.WorkloadIdentityImpersonationPath); len(path) > 0 {
+		if strings.EqualFold(strings.TrimSpace(p.WorkloadIdentityProvider), "azure") {
+			return nil, fmt.Errorf("impersonation path is not supported for the Azure workload identity provider")
+		}
+		cfg.WorkloadIdentityImpersonationPath = path
 	}
 
 	// Build the connector directly from the config (avoids the DSN round-trip
@@ -3239,6 +3320,18 @@ func (c *Client) GetDatabaseDDL(ctx context.Context, database string) (string, e
 
 // loadPrivateKey reads a PEM-encoded RSA private key from disk.
 // If passphrase is non-empty, the key is assumed to be encrypted.
+// splitCommaList splits a comma-separated string into a trimmed, non-empty
+// slice. Returns nil when the input contains no meaningful entries.
+func splitCommaList(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if v := strings.TrimSpace(part); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 func loadPrivateKey(path, passphrase string) (*rsa.PrivateKey, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

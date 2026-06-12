@@ -11,7 +11,7 @@
 // @thaw-domain: Core IPC & App Lifecycle
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Form, Input, Button, Alert, Space, Typography, Select, Divider, Tooltip, Modal, Popconfirm, message } from "antd";
+import { Form, Input, Button, Alert, Space, Typography, Select, Divider, Tooltip, Modal, Popconfirm, Switch, message } from "antd";
 import { CloudServerOutlined, FolderOpenOutlined, SaveOutlined, CopyOutlined, DeleteOutlined, StarOutlined, PlusOutlined, EditOutlined } from "@ant-design/icons";
 import UserAgreementModal from "./UserAgreementModal";
 import {
@@ -51,16 +51,77 @@ const AUTH_OPTIONS = [
     label: "Key pair (JWT)",
     description: "RSA private key — no password needed",
   },
+  {
+    value: "programmatic_access_token",
+    label: "Programmatic access token (PAT)",
+    description: "Snowflake-native token for automation / CI-CD",
+  },
+  {
+    value: "oauth",
+    label: "OAuth token",
+    description: "Pass an externally-issued OAuth access token",
+  },
+  {
+    value: "oauth_client_credentials",
+    label: "OAuth client credentials",
+    description: "Non-interactive OAuth2 flow for service accounts",
+  },
+  {
+    value: "oauth_authorization_code",
+    label: "OAuth authorization code",
+    description: "Browser-based OAuth2 authorization-code flow",
+  },
+  {
+    value: "workload_identity",
+    label: "Workload identity federation",
+    description: "Cloud-native identity (AWS / Azure / GCP)",
+  },
 ];
 
-const needsPassword = (auth: string) =>
-  auth !== "externalbrowser" && auth !== "snowflake_jwt";
+// Authenticators that require a password field. Token-based, key-pair, browser,
+// and OAuth/WIF flows do not (mirrors the driver's authRequiresPassword).
+const PASSWORDLESS_AUTH = new Set([
+  "externalbrowser",
+  "snowflake_jwt",
+  "programmatic_access_token",
+  "oauth",
+  "oauth_client_credentials",
+  "oauth_authorization_code",
+  "workload_identity",
+]);
+
+// Authenticators that do not require a username (mirrors the driver's
+// authRequiresUser): browser SSO, PAT, all OAuth flows, and WIF.
+const USERLESS_AUTH = new Set([
+  "externalbrowser",
+  "programmatic_access_token",
+  "oauth",
+  "oauth_client_credentials",
+  "oauth_authorization_code",
+  "workload_identity",
+]);
+
+// Auth-specific field names reset whenever the user switches authenticator, so
+// stale values from a previous selection are never submitted.
+const AUTH_SPECIFIC_FIELDS = [
+  "passcode", "oktaUrl", "privateKeyPath", "privateKeyPassphrase",
+  "token", "tokenFilePath", "oauthClientId", "oauthClientSecret",
+  "oauthTokenRequestUrl", "oauthAuthorizationUrl", "oauthRedirectUri",
+  "oauthScope", "enableSingleUseRefreshTokens", "workloadIdentityProvider",
+  "workloadIdentityEntraResource", "workloadIdentityImpersonationPath",
+] as const;
+
+const needsPassword = (auth: string) => !PASSWORDLESS_AUTH.has(auth);
+const needsUsername = (auth: string) => !USERLESS_AUTH.has(auth);
 
 export default function ConnectModal({ onClose }: { onClose?: () => void }) {
   const [form] = Form.useForm<ConnectionParams>();
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState<string | null>(null);
   const [auth, setAuth]         = useState("username_password_mfa");
+  // Drives conditional WIF sub-fields (Entra resource for Azure; impersonation
+  // path for AWS/GCP).
+  const wifProvider             = Form.useWatch("workloadIdentityProvider", form);
   const [agreementOpen, setAgreementOpen] = useState(false);
   const setConnected            = useConnectionStore((s) => s.setConnected);
   const profileManagerEnabled   = useFeatureFlagsStore((s) => s.flags.snowflakeCLIProfileManager);
@@ -125,18 +186,30 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
     setAuth(authValue);
 
     form.setFieldsValue({
-      account:              conn.account,
-      user:                 conn.user,
-      password:             conn.password,
-      role:                 conn.role,
-      warehouse:            conn.warehouse,
-      database:             conn.database,
-      schema:               conn.schema,
-      authenticator:        authValue,
-      passcode:             conn.passcode,
-      oktaUrl:              conn.oktaUrl,
-      privateKeyPath:       conn.privateKeyPath,
-      privateKeyPassphrase: conn.privateKeyPassphrase,
+      account:                           conn.account,
+      user:                              conn.user,
+      password:                          conn.password,
+      role:                              conn.role,
+      warehouse:                         conn.warehouse,
+      database:                          conn.database,
+      schema:                            conn.schema,
+      authenticator:                     authValue,
+      passcode:                          conn.passcode,
+      oktaUrl:                           conn.oktaUrl,
+      privateKeyPath:                    conn.privateKeyPath,
+      privateKeyPassphrase:              conn.privateKeyPassphrase,
+      token:                             conn.token,
+      tokenFilePath:                     conn.tokenFilePath,
+      oauthClientId:                     conn.oauthClientId,
+      oauthClientSecret:                 conn.oauthClientSecret,
+      oauthTokenRequestUrl:              conn.oauthTokenRequestUrl,
+      oauthAuthorizationUrl:             conn.oauthAuthorizationUrl,
+      oauthRedirectUri:                  conn.oauthRedirectUri,
+      oauthScope:                        conn.oauthScope,
+      enableSingleUseRefreshTokens:      conn.enableSingleUseRefreshTokens,
+      workloadIdentityProvider:          conn.workloadIdentityProvider,
+      workloadIdentityEntraResource:     conn.workloadIdentityEntraResource,
+      workloadIdentityImpersonationPath: conn.workloadIdentityImpersonationPath,
     });
   };
 
@@ -159,19 +232,31 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
   const buildConnectionFromForm = (profileName: string) => {
     const values = form.getFieldsValue(true);
     return new sfconfig.Connection({
-      name:                 profileName,
-      account:              values.account || "",
-      user:                 values.user || "",
-      password:             values.password || "",
-      role:                 values.role || "",
-      warehouse:            values.warehouse || "",
-      database:             values.database || "",
-      schema:               values.schema || "",
-      authenticator:        values.authenticator || "",
-      passcode:             values.passcode || "",
-      oktaUrl:              values.oktaUrl || "",
-      privateKeyPath:       values.privateKeyPath || "",
-      privateKeyPassphrase: values.privateKeyPassphrase || "",
+      name:                              profileName,
+      account:                           values.account || "",
+      user:                              values.user || "",
+      password:                          values.password || "",
+      role:                              values.role || "",
+      warehouse:                         values.warehouse || "",
+      database:                          values.database || "",
+      schema:                            values.schema || "",
+      authenticator:                     values.authenticator || "",
+      passcode:                          values.passcode || "",
+      oktaUrl:                           values.oktaUrl || "",
+      privateKeyPath:                    values.privateKeyPath || "",
+      privateKeyPassphrase:              values.privateKeyPassphrase || "",
+      token:                             values.token || "",
+      tokenFilePath:                     values.tokenFilePath || "",
+      oauthClientId:                     values.oauthClientId || "",
+      oauthClientSecret:                 values.oauthClientSecret || "",
+      oauthTokenRequestUrl:              values.oauthTokenRequestUrl || "",
+      oauthAuthorizationUrl:             values.oauthAuthorizationUrl || "",
+      oauthRedirectUri:                  values.oauthRedirectUri || "",
+      oauthScope:                        values.oauthScope || "",
+      enableSingleUseRefreshTokens:      values.enableSingleUseRefreshTokens || false,
+      workloadIdentityProvider:          values.workloadIdentityProvider || "",
+      workloadIdentityEntraResource:     values.workloadIdentityEntraResource || "",
+      workloadIdentityImpersonationPath: values.workloadIdentityImpersonationPath || "",
     });
   };
 
@@ -302,7 +387,9 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
             </Button>
           ) : (
             <Button type="primary" block onClick={() => form.submit()}>
-              {auth === "externalbrowser" ? "Connect (opens browser)" : "Connect"}
+              {auth === "externalbrowser" || auth === "oauth_authorization_code"
+                ? "Connect (opens browser)"
+                : "Connect"}
             </Button>
           )}
           <div style={{ textAlign: "center", marginTop: 12 }}>
@@ -485,7 +572,7 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
               <Select
                 onChange={(v) => {
                   setAuth(v);
-                  form.resetFields(["passcode", "oktaUrl", "privateKeyPath", "privateKeyPassphrase"]);
+                  form.resetFields([...AUTH_SPECIFIC_FIELDS]);
                 }}
                 options={AUTH_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
                 optionRender={(option) => {
@@ -503,7 +590,7 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
             </Form.Item>
 
             {/* Username */}
-            {auth !== "externalbrowser" && (
+            {needsUsername(auth) && (
               <Form.Item name="user" label="Username" rules={[{ required: true }]}>
                 <Input autoComplete="username" />
               </Form.Item>
@@ -547,6 +634,108 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
                 <Form.Item name="privateKeyPassphrase" label="Key passphrase (if encrypted)">
                   <Input.Password />
                 </Form.Item>
+              </>
+            )}
+
+            {/* Token-based: PAT and OAuth token pass-through. The driver requires
+                at least one of token / tokenFilePath, so validate one-of here. */}
+            {(auth === "programmatic_access_token" || auth === "oauth") && (
+              <>
+                <Form.Item
+                  name="token"
+                  label={auth === "oauth" ? "OAuth token" : "Programmatic access token"}
+                  dependencies={["tokenFilePath"]}
+                  rules={[({ getFieldValue }) => ({
+                    validator(_, value) {
+                      if (value || getFieldValue("tokenFilePath")) return Promise.resolve();
+                      return Promise.reject(new Error("Provide a token or a token file path"));
+                    },
+                  })]}
+                >
+                  <Input.Password autoComplete="off" placeholder="Paste token, or use a token file below" />
+                </Form.Item>
+                <Form.Item name="tokenFilePath" label="…or token file path">
+                  <Input placeholder="/path/to/token" />
+                </Form.Item>
+              </>
+            )}
+
+            {/* OAuth2 client-credentials and authorization-code flows */}
+            {(auth === "oauth_client_credentials" || auth === "oauth_authorization_code") && (
+              <>
+                <Form.Item name="oauthClientId" label="OAuth client ID" rules={[{ required: true }]}>
+                  <Input autoComplete="off" />
+                </Form.Item>
+                <Form.Item name="oauthClientSecret" label="OAuth client secret" rules={[{ required: true }]}>
+                  <Input.Password autoComplete="off" />
+                </Form.Item>
+                <Form.Item
+                  name="oauthTokenRequestUrl"
+                  label="Token request URL"
+                  rules={[{ required: true, type: "url" }]}
+                >
+                  <Input placeholder="https://idp.example.com/oauth/token" />
+                </Form.Item>
+                {auth === "oauth_authorization_code" && (
+                  <>
+                    <Form.Item
+                      name="oauthAuthorizationUrl"
+                      label="Authorization URL"
+                      rules={[{ required: true, type: "url" }]}
+                    >
+                      <Input placeholder="https://idp.example.com/oauth/authorize" />
+                    </Form.Item>
+                    <Form.Item name="oauthRedirectUri" label="Redirect URI (optional)">
+                      <Input placeholder="default: http://127.0.0.1:<random port>" />
+                    </Form.Item>
+                  </>
+                )}
+                <Form.Item name="oauthScope" label="Scope (optional)">
+                  <Input placeholder="comma-separated; derived from role if empty" />
+                </Form.Item>
+                <Form.Item
+                  name="enableSingleUseRefreshTokens"
+                  label="Single-use refresh tokens"
+                  valuePropName="checked"
+                >
+                  <Switch />
+                </Form.Item>
+              </>
+            )}
+
+            {/* Workload Identity Federation */}
+            {auth === "workload_identity" && (
+              <>
+                <Form.Item
+                  name="workloadIdentityProvider"
+                  label="Cloud provider"
+                  rules={[{ required: true }]}
+                >
+                  <Select
+                    placeholder="Select provider"
+                    options={[
+                      { value: "AWS", label: "AWS" },
+                      { value: "AZURE", label: "Azure" },
+                      { value: "GCP", label: "GCP" },
+                    ]}
+                  />
+                </Form.Item>
+                {wifProvider === "AZURE" && (
+                  <Form.Item
+                    name="workloadIdentityEntraResource"
+                    label="Entra resource (optional)"
+                  >
+                    <Input placeholder="api://<your-snowflake-app-id>" />
+                  </Form.Item>
+                )}
+                {(wifProvider === "AWS" || wifProvider === "GCP") && (
+                  <Form.Item
+                    name="workloadIdentityImpersonationPath"
+                    label="Impersonation path (optional)"
+                  >
+                    <Input placeholder="comma-separated (AWS: role ARNs; GCP: delegation chain → target SA)" />
+                  </Form.Item>
+                )}
               </>
             )}
 

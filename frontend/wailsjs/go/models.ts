@@ -2046,6 +2046,18 @@ export namespace sfconfig {
 	    oktaUrl: string;
 	    privateKeyPath: string;
 	    privateKeyPassphrase: string;
+	    token: string;
+	    tokenFilePath: string;
+	    oauthClientId: string;
+	    oauthClientSecret: string;
+	    oauthTokenRequestUrl: string;
+	    oauthAuthorizationUrl: string;
+	    oauthRedirectUri: string;
+	    oauthScope: string;
+	    enableSingleUseRefreshTokens: boolean;
+	    workloadIdentityProvider: string;
+	    workloadIdentityEntraResource: string;
+	    workloadIdentityImpersonationPath: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Connection(source);
@@ -2066,6 +2078,18 @@ export namespace sfconfig {
 	        this.oktaUrl = source["oktaUrl"];
 	        this.privateKeyPath = source["privateKeyPath"];
 	        this.privateKeyPassphrase = source["privateKeyPassphrase"];
+	        this.token = source["token"];
+	        this.tokenFilePath = source["tokenFilePath"];
+	        this.oauthClientId = source["oauthClientId"];
+	        this.oauthClientSecret = source["oauthClientSecret"];
+	        this.oauthTokenRequestUrl = source["oauthTokenRequestUrl"];
+	        this.oauthAuthorizationUrl = source["oauthAuthorizationUrl"];
+	        this.oauthRedirectUri = source["oauthRedirectUri"];
+	        this.oauthScope = source["oauthScope"];
+	        this.enableSingleUseRefreshTokens = source["enableSingleUseRefreshTokens"];
+	        this.workloadIdentityProvider = source["workloadIdentityProvider"];
+	        this.workloadIdentityEntraResource = source["workloadIdentityEntraResource"];
+	        this.workloadIdentityImpersonationPath = source["workloadIdentityImpersonationPath"];
 	    }
 	}
 	export class Config {
@@ -2218,6 +2242,18 @@ export namespace snowflake {
 	    oktaUrl: string;
 	    privateKeyPath: string;
 	    privateKeyPassphrase: string;
+	    token: string;
+	    tokenFilePath: string;
+	    oauthClientId: string;
+	    oauthClientSecret: string;
+	    oauthTokenRequestUrl: string;
+	    oauthAuthorizationUrl: string;
+	    oauthRedirectUri: string;
+	    oauthScope: string;
+	    enableSingleUseRefreshTokens: boolean;
+	    workloadIdentityProvider: string;
+	    workloadIdentityEntraResource: string;
+	    workloadIdentityImpersonationPath: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ConnectParams(source);
@@ -2237,6 +2273,18 @@ export namespace snowflake {
 	        this.oktaUrl = source["oktaUrl"];
 	        this.privateKeyPath = source["privateKeyPath"];
 	        this.privateKeyPassphrase = source["privateKeyPassphrase"];
+	        this.token = source["token"];
+	        this.tokenFilePath = source["tokenFilePath"];
+	        this.oauthClientId = source["oauthClientId"];
+	        this.oauthClientSecret = source["oauthClientSecret"];
+	        this.oauthTokenRequestUrl = source["oauthTokenRequestUrl"];
+	        this.oauthAuthorizationUrl = source["oauthAuthorizationUrl"];
+	        this.oauthRedirectUri = source["oauthRedirectUri"];
+	        this.oauthScope = source["oauthScope"];
+	        this.enableSingleUseRefreshTokens = source["enableSingleUseRefreshTokens"];
+	        this.workloadIdentityProvider = source["workloadIdentityProvider"];
+	        this.workloadIdentityEntraResource = source["workloadIdentityEntraResource"];
+	        this.workloadIdentityImpersonationPath = source["workloadIdentityImpersonationPath"];
 	    }
 	}
 	export class DataTypeInfo {

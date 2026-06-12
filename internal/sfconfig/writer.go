@@ -115,10 +115,31 @@ var connectionFieldOrder = []struct {
 	{"okta_url", func(c *Connection) string { return c.OktaURL }},
 	{"private_key_path", func(c *Connection) string { return c.PrivateKeyPath }},
 	{"private_key_passphrase", func(c *Connection) string { return c.PrivateKeyPassphrase }},
+	{"token", func(c *Connection) string { return c.Token }},
+	{"token_file_path", func(c *Connection) string { return c.TokenFilePath }},
+	{"oauth_client_id", func(c *Connection) string { return c.OAuthClientID }},
+	{"oauth_client_secret", func(c *Connection) string { return c.OAuthClientSecret }},
+	{"oauth_token_request_url", func(c *Connection) string { return c.OAuthTokenRequestURL }},
+	{"oauth_authorization_url", func(c *Connection) string { return c.OAuthAuthorizationURL }},
+	{"oauth_redirect_uri", func(c *Connection) string { return c.OAuthRedirectURI }},
+	{"oauth_scope", func(c *Connection) string { return c.OAuthScope }},
+	{"workload_identity_provider", func(c *Connection) string { return c.WorkloadIdentityProvider }},
+	{"workload_identity_entra_resource", func(c *Connection) string { return c.WorkloadIdentityEntraResource }},
+	{"workload_identity_impersonation_path", func(c *Connection) string { return c.WorkloadIdentityImpersonationPath }},
+}
+
+// connectionBoolFieldOrder defines the canonical order for boolean connection
+// fields. These render as unquoted TOML booleans (e.g. `key = true`) rather
+// than quoted strings, and are only emitted when true.
+var connectionBoolFieldOrder = []struct {
+	tomlKey string
+	getter  func(*Connection) bool
+}{
+	{"enable_single_use_refresh_tokens", func(c *Connection) bool { return c.EnableSingleUseRefreshTokens }},
 }
 
 // connectionToTOMLLines renders a Connection as TOML key=value lines (without
-// the section header). Only non-empty fields are included.
+// the section header). Only non-empty / true fields are included.
 func connectionToTOMLLines(c Connection) []string {
 	var out []string
 	for _, f := range connectionFieldOrder {
@@ -127,6 +148,11 @@ func connectionToTOMLLines(c Connection) []string {
 			continue
 		}
 		out = append(out, fmt.Sprintf(`%s = "%s"`, f.tomlKey, tomlEscape(v)))
+	}
+	for _, f := range connectionBoolFieldOrder {
+		if f.getter(&c) {
+			out = append(out, fmt.Sprintf("%s = true", f.tomlKey))
+		}
 	}
 	return out
 }
@@ -138,8 +164,11 @@ var kvLineRe = regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=`)
 var knownConnectionKeys map[string]bool
 
 func init() {
-	knownConnectionKeys = make(map[string]bool, len(connectionFieldOrder))
+	knownConnectionKeys = make(map[string]bool, len(connectionFieldOrder)+len(connectionBoolFieldOrder))
 	for _, f := range connectionFieldOrder {
+		knownConnectionKeys[f.tomlKey] = true
+	}
+	for _, f := range connectionBoolFieldOrder {
 		knownConnectionKeys[f.tomlKey] = true
 	}
 }

@@ -628,6 +628,17 @@ Right-click any warehouse in the Administration panel and choose **Properties** 
 ### Snowflake Connectivity
 
 - Connect with account / user / password / warehouse / role
+- **Authentication methods** — the connect dialog supports every interactive and non-interactive authenticator offered by the gosnowflake driver, with form fields that show/hide reactively based on the selection:
+  - **Password + MFA push** — password with a push notification approval
+  - **Browser SSO** (`externalbrowser`) — opens a browser window for federated SSO / MFA
+  - **Password only** — classic username + password, with an optional TOTP passcode
+  - **Okta native SSO** — authenticates directly against your Okta tenant URL
+  - **Key pair (JWT)** — RSA private key + optional passphrase; no password
+  - **Programmatic access token (PAT)** — Snowflake-native token for automation / CI-CD; paste the token or point to a token file; no username required
+  - **OAuth token** — pass an externally-issued OAuth access token (or token file) straight through
+  - **OAuth client credentials** — non-interactive OAuth2 flow for service accounts (client ID / secret / token request URL, optional scope, single-use refresh tokens toggle)
+  - **OAuth authorization code** — browser-based OAuth2 authorization-code flow (adds authorization URL and optional redirect URI; the driver runs the browser redirect + token exchange internally)
+  - **Workload identity federation** — cloud-native identity for AWS / Azure / GCP; provider-specific fields appear conditionally (Entra resource for Azure, impersonation path for AWS/GCP — the app blocks the unsupported Azure + impersonation combination)
 - **Snowflake CLI Profile Manager** — full CRUD management of Snowflake CLI profiles in `~/.snowflake/config.toml` (or a custom location) directly from the connection dialog:
   - **Auto-fill** — select a profile to populate the connection form; includes support for key-pair (`SNOWFLAKE_JWT`) profiles; the config file path can be changed during sign-in and is persisted as the new default location
   - **New** — create a new profile from the current form values; blocked if a profile with the same name already exists
