@@ -242,6 +242,7 @@ export namespace config {
 	    snowflakeCLIProfileManager: boolean;
 	    multiCellCopy: boolean;
 	    cellDetailPanel: boolean;
+	    columnReorder: boolean;
 	    crossTabSearch: boolean;
 	    fileWatcher: boolean;
 	    columnManagement: boolean;
@@ -289,6 +290,7 @@ export namespace config {
 	        this.snowflakeCLIProfileManager = source["snowflakeCLIProfileManager"];
 	        this.multiCellCopy = source["multiCellCopy"];
 	        this.cellDetailPanel = source["cellDetailPanel"];
+	        this.columnReorder = source["columnReorder"];
 	        this.crossTabSearch = source["crossTabSearch"];
 	        this.fileWatcher = source["fileWatcher"];
 	        this.columnManagement = source["columnManagement"];

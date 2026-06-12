@@ -33,6 +33,7 @@ import {
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Button, message } from "antd";
+import { HolderOutlined } from "@ant-design/icons";
 import type { QueryResult } from "../../store/queryStore";
 import { useThemeStore } from "../../store/themeStore";
 import { useGridStore, type ConditionalRule } from "../../store/gridStore";
@@ -262,6 +263,17 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
   const [containerWidth, setContainerWidth] = useState(0);
   const [columnPinning, setColumnPinning] = useState<ColumnPinningState>({ left: [], right: [] });
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
+  // Visual column order (TanStack column IDs). View-only — never touches result.columns/rows.
+  // Empty array means default SELECT order. Reset on schema change, preserved on re-run.
+  const [columnOrder, setColumnOrder] = useState<string[]>([]);
+  // Drag-to-reorder transient state. The id is tracked in a ref (not just state)
+  // so the dragover handler sees it synchronously — otherwise the first dragover
+  // events read a stale null, skip preventDefault(), and the header never becomes
+  // a valid drop target (so onDrop never fires). draggingColId state is kept only
+  // for the visual drag opacity.
+  const draggingColIdRef = useRef<string | null>(null);
+  const [draggingColId, setDraggingColId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ columnId: string; before: boolean } | null>(null);
 
   // Modal state
   const [filterDropdown, setFilterDropdown] = useState<{ columnId: string; position: { x: number; y: number } } | null>(null);
@@ -304,6 +316,7 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
       setSorting([]);
       setColumnPinning({ left: [], right: [] });
       setColumnFilters([]);
+      setColumnOrder(result.columns.map((col, i) => `${i}_${col}`));
       if (!standalone) resetGrid(); // full reset — clears formatting
     } else {
       // Same columns, new queryID (re-run) — preserve formatting
@@ -367,11 +380,12 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
   const table = useReactTable({
     data,
     columns,
-    state: { sorting, columnSizing, columnPinning, columnFilters },
+    state: { sorting, columnSizing, columnPinning, columnFilters, columnOrder },
     onSortingChange: setSorting,
     onColumnSizingChange: setColumnSizing,
     onColumnPinningChange: setColumnPinning,
     onColumnFiltersChange: setColumnFilters,
+    onColumnOrderChange: setColumnOrder,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
@@ -821,6 +835,90 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
     return (columnPinning.left ?? []).includes(columnId) || (columnPinning.right ?? []).includes(columnId);
   };
 
+  // ─── Column reordering (drag headers) ─────────────────────────────────────
+
+  const reorderEnabled = featureFlags.columnReorder;
+
+  const defaultColumnOrder = useCallback(
+    () => result.columns.map((col, i) => `${i}_${col}`),
+    [result.columns],
+  );
+
+  // Move draggedId to just before/after targetId in the visual column order.
+  // Operates on the stable {colIndex}_{NAME} IDs so formats/conditional rules
+  // (keyed by ID) stay valid — only the display position changes.
+  const moveColumn = useCallback(
+    (draggedId: string, targetId: string, before: boolean) => {
+      if (draggedId === targetId) return;
+      setColumnOrder((prev) => {
+        const order = prev.length ? [...prev] : defaultColumnOrder();
+        const from = order.indexOf(draggedId);
+        if (from < 0) return prev;
+        order.splice(from, 1);
+        let to = order.indexOf(targetId);
+        if (to < 0) return prev;
+        if (!before) to += 1;
+        order.splice(to, 0, draggedId);
+        return order;
+      });
+    },
+    [defaultColumnOrder],
+  );
+
+  const resetColumnOrder = useCallback(() => {
+    setColumnOrder(defaultColumnOrder());
+    setHeaderCtxMenu(null);
+  }, [defaultColumnOrder]);
+
+  // Header drag handlers. Reordering applies within the unpinned (center)
+  // region only; pinned-left/right groups keep their edges, so pinned headers
+  // are neither draggable nor valid drop targets.
+  const handleHeaderDragStart = useCallback((e: React.DragEvent, columnId: string) => {
+    e.dataTransfer.setData("text/plain", columnId);
+    e.dataTransfer.effectAllowed = "move";
+    draggingColIdRef.current = columnId;
+    setDraggingColId(columnId);
+  }, []);
+
+  const handleHeaderDragEnd = useCallback(() => {
+    draggingColIdRef.current = null;
+    setDraggingColId(null);
+    setDropTarget(null);
+  }, []);
+
+  const handleHeaderDragOver = useCallback((e: React.DragEvent, columnId: string) => {
+    const dragged = draggingColIdRef.current;
+    if (!dragged || dragged === columnId) return;
+    e.preventDefault(); // mark this header as a valid drop target
+    e.dataTransfer.dropEffect = "move";
+    const rect = e.currentTarget.getBoundingClientRect();
+    const before = e.clientX < rect.left + rect.width / 2;
+    setDropTarget((prev) =>
+      prev && prev.columnId === columnId && prev.before === before ? prev : { columnId, before },
+    );
+  }, []);
+
+  const handleHeaderDragLeave = useCallback((e: React.DragEvent, columnId: string) => {
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+    setDropTarget((prev) => (prev?.columnId === columnId ? null : prev));
+  }, []);
+
+  const handleHeaderDrop = useCallback(
+    (e: React.DragEvent, columnId: string) => {
+      e.preventDefault();
+      const dragged = draggingColIdRef.current;
+      if (dragged && dragged !== columnId) {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const before = e.clientX < rect.left + rect.width / 2;
+        moveColumn(dragged, columnId, before);
+      }
+      draggingColIdRef.current = null;
+      setDraggingColId(null);
+      setDropTarget(null);
+    },
+    [moveColumn],
+  );
+
   // ─── Layout calculations ──────────────────────────────────────────────────
 
   const totalColumnWidth = columnVirtualizer.getTotalSize();
@@ -915,6 +1013,10 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
     const column = header.column;
     const isSorted = column.getIsSorted();
     const isFiltered = columnFilters.some((f) => f.id === columnId);
+    // Reordering is confined to the unpinned (center) region.
+    const canReorder = reorderEnabled && !pinned;
+    const showDropBefore = dropTarget?.columnId === columnId && dropTarget.before;
+    const showDropAfter = dropTarget?.columnId === columnId && !dropTarget.before;
 
     return (
       <th
@@ -923,6 +1025,9 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
         onMouseDown={(e) => handleColumnMouseDown(e, colIndex)}
         onMouseEnter={() => handleColumnMouseEnter(colIndex)}
         onDoubleClick={column.getToggleSortingHandler()}
+        onDragOver={canReorder ? (e) => handleHeaderDragOver(e, columnId) : undefined}
+        onDragLeave={canReorder ? (e) => handleHeaderDragLeave(e, columnId) : undefined}
+        onDrop={canReorder ? (e) => handleHeaderDrop(e, columnId) : undefined}
         style={{
           height: headerHeight,
           padding: "0 8px",
@@ -943,9 +1048,46 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",
           width: column.getSize(),
+          opacity: draggingColId === columnId ? 0.4 : 1,
         }}
       >
+        {/* Drop-position indicators (shown while dragging another column over this one) */}
+        {showDropBefore && (
+          <div style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: 2, background: "var(--accent)", zIndex: 2, pointerEvents: "none" }} />
+        )}
+        {showDropAfter && (
+          <div style={{ position: "absolute", top: 0, bottom: 0, right: 0, width: 2, background: "var(--accent)", zIndex: 2, pointerEvents: "none" }} />
+        )}
         <div style={{ display: "flex", alignItems: "center", overflow: "hidden" }}>
+          {/* Drag handle — reorders the column on drag (unpinned columns only) */}
+          {canReorder && (
+            <span
+              className="col-drag-grip"
+              draggable
+              onDragStart={(e) => handleHeaderDragStart(e, columnId)}
+              onDragEnd={handleHeaderDragEnd}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              onDoubleClick={(e) => e.stopPropagation()}
+              title="Drag to reorder column"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                marginLeft: -4,
+                marginRight: 3,
+                padding: "0 2px",
+                flexShrink: 0,
+                cursor: "grab",
+                fontSize: 12,
+                color: "var(--text-muted)",
+                opacity: 0.35,
+                userSelect: "none",
+                WebkitUserSelect: "none",
+              }}
+            >
+              <HolderOutlined />
+            </span>
+          )}
           <span style={{ overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>
             {flexRender(column.columnDef.header, header.getContext())}
           </span>
@@ -961,13 +1103,13 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
             className={isSorted ? undefined : "sort-indicator-idle"}
             style={{
               marginLeft: 2,
-              fontSize: 9,
+              fontSize: 11,
               flexShrink: 0,
               width: 14,
               textAlign: "center",
               borderRadius: 3,
-              color: isSorted ? "var(--accent)" : "var(--text-faint)",
-              opacity: isSorted ? 1 : 0,
+              color: isSorted ? "var(--accent)" : "var(--text-muted)",
+              opacity: isSorted ? 1 : 0.4,
               cursor: "pointer",
             }}
           >
@@ -1103,7 +1245,11 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
   return (
     <div style={{ height: "100%", width: "100%", position: "relative", display: "flex", flexDirection: "column" }}>
       {/* Show sort indicator on header hover */}
-      <style>{`th:hover .sort-indicator-idle { opacity: 0.5 !important; }`}</style>
+      <style>{`th:hover .sort-indicator-idle { opacity: 0.85 !important; }
+        .sort-indicator-idle:hover { opacity: 1 !important; color: var(--accent) !important; }
+        th:hover .col-drag-grip { opacity: 0.8 !important; }
+        .col-drag-grip:hover { opacity: 1 !important; color: var(--accent) !important; }
+        .col-drag-grip:active { cursor: grabbing; }`}</style>
       <div
         ref={scrollContainerRef}
         className="thaw-grid"
@@ -1367,6 +1513,12 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
             autoSizeColumn(headerCtxMenu.columnId);
             setHeaderCtxMenu(null);
           })}
+          {reorderEnabled && (
+            <>
+              <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
+              {menuItemEl("Reset Column Order", resetColumnOrder)}
+            </>
+          )}
         </div>
       )}
 

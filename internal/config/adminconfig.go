@@ -102,6 +102,7 @@ type adminConnection struct {
 type adminResultsGrid struct {
 	MultiCellCopy   ptrBool `json:"multiCellCopy,omitempty"`
 	CellDetailPanel ptrBool `json:"cellDetailPanel,omitempty"`
+	ColumnReorder   ptrBool `json:"columnReorder,omitempty"`
 }
 
 // adminFileBrowser is the "fileBrowser" category.
@@ -248,6 +249,7 @@ func mergeAdminOverrides(user FeatureFlags, cfg adminConfigJSON) (effective Feat
 	// Results Grid
 	apply(&effective.MultiCellCopy, &locked.MultiCellCopy, cfg.ResultsGrid.MultiCellCopy)
 	apply(&effective.CellDetailPanel, &locked.CellDetailPanel, cfg.ResultsGrid.CellDetailPanel)
+	apply(&effective.ColumnReorder, &locked.ColumnReorder, cfg.ResultsGrid.ColumnReorder)
 
 	// File Browser
 	apply(&effective.FileWatcher, &locked.FileWatcher, cfg.FileBrowser.FileWatcher)

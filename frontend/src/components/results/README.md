@@ -13,7 +13,7 @@ with the `gridStore` singleton for shared selection/search/formatting state.
 
 | File | Purpose |
 |------|---------|
-| `ResultGrid.tsx` | Main grid component. Uses `@tanstack/react-table` + `@tanstack/react-virtual` for row virtualisation. Manages cell selection (range), right-click context menu (copy cell/row/CSV/JSON), column pinning, column sorting, per-column filtering via `ColumnFilterDropdown`, per-column formatting via `DataTypeFormatModal`, conditional formatting via `ConditionalFormattingModal`, and quick-chart via `QuickChartModal`. Exports `ResultGridHandle` (imperative `scrollToRow` and `scrollToCell` — the latter minimally scrolls so a cell is fully visible, accounting for the row-number gutter and pinned columns). Accepts a `standalone` prop. |
+| `ResultGrid.tsx` | Main grid component. Uses `@tanstack/react-table` + `@tanstack/react-virtual` for row virtualisation. Manages cell selection (range), right-click context menu (copy cell/row/CSV/JSON), column pinning, column sorting, **drag-to-reorder columns** (TanStack `columnOrder` state — view-only, gated by the `columnReorder` flag), per-column filtering via `ColumnFilterDropdown`, per-column formatting via `DataTypeFormatModal`, conditional formatting via `ConditionalFormattingModal`, and quick-chart via `QuickChartModal`. Exports `ResultGridHandle` (imperative `scrollToRow` and `scrollToCell` — the latter minimally scrolls so a cell is fully visible, accounting for the row-number gutter and pinned columns). Accepts a `standalone` prop. |
 | `StatusBar.tsx` | Reads `selectionRange` and `tableRows` from `gridStore`. Shows count, sum, avg, min, max over the selected numeric cells. |
 | `CellDetailPanel.tsx` | Side panel on the right edge of the results area showing the full content of the selected cell (the selection anchor — `selectionRange.startRow/startCol`). Opens only for cell-originated selections (`gridStore.selectionOrigin === "cell"`) — row-gutter, column-header, and select-all gestures don't trigger it. Column name, row number, scrollable/selectable monospace text, JSON pretty-printing with a Raw/Formatted toggle, copy via `ClipboardSetText`. Huge values are capped at `DISPLAY_CAP` (500 k chars) with a "show all" affordance, and JSON detection is skipped above `JSON_DETECT_CAP` (1 M chars); copy always uses the full raw value. Closes via ✕ or Escape and reopens when a different cell is selected. When it opens (or switches cells) it calls `onVisibleCellChange`, which QueryPage wires to `ResultGridHandle.scrollToCell` so the selected cell isn't covered by the panel. Width is persisted in `panelLayoutStore.cellDetailWidth` (drag the left edge to resize). Gated behind the `cellDetailPanel` feature flag; needs `multiCellCopy` for cell selection. |
 | `cellDetailUtils.ts` | Import-free pure helpers, unit-tested in `cellDetailUtils.test.ts`: `prettyPrintJson`, `truncateForDisplay`, `reconcileDismissedKey` (the panel's dismissal state machine), and `computeCellScrollLeft` (the horizontal scroll-into-view math used by `ResultGridHandle.scrollToCell`). |
@@ -52,6 +52,16 @@ cells to prevent contaminating the main query tab's `StatusBar` and `GridSearch`
 Conditional rules and format configs are keyed by this ID. The helper `colIdxFromId` extracts the
 0-based index. This means rules keyed on `0_ID` can match across tabs with identically-named
 columns — a known limitation of the singleton `gridStore`.
+
+**Column reordering:** Dragging a column header (the hover grip handle) reorders columns via
+TanStack's `columnOrder` state — a list of the stable `{colIndex}_{NAME}` IDs. It is **view-only**:
+`result.columns`/`result.rows` and the selection-range column indices are never touched, so sort,
+filter, format, conditional rules, and copy (all keyed off the stable ID / original index) follow
+each column to its new position. Reordering is confined to the unpinned (center) region — pinned
+headers are neither draggable nor drop targets, so pinned-left/right groups keep their edges. The
+order lives in local component state (like pinning/sizing): it resets to SELECT order on a column
+schema change but is preserved across a re-run of the same query. "Reset Column Order" in the
+header context menu restores SELECT order. Gated behind the `columnReorder` feature flag.
 
 **Column width measurement:** `computeColumnWidths` and `measureText` from `../../utils/gridMeasure`
 are called after data loads to auto-size columns based on header and sample cell content.

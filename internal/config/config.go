@@ -209,8 +209,8 @@ func DefaultNotebookPrefs() NotebookPrefs {
 //
 // Version tracks the schema revision so new flags introduced after an initial
 // save can be filled with their defaults rather than the zero value (false).
-// Current version: 15 (added CellDetailPanel).
-const flagsVersion = 15
+// Current version: 16 (added ColumnReorder).
+const flagsVersion = 16
 
 type FeatureFlags struct {
 	Initialized bool `json:"initialized"`
@@ -269,6 +269,7 @@ type FeatureFlags struct {
 	// Results Grid
 	MultiCellCopy   bool `json:"multiCellCopy"`   // Range selection and multi-cell copy in query results
 	CellDetailPanel bool `json:"cellDetailPanel"` // Side panel showing the full content of the selected cell
+	ColumnReorder   bool `json:"columnReorder"`   // Drag result-grid column headers to reorder them (view-only)
 
 	// Editor Productivity
 	CrossTabSearch bool `json:"crossTabSearch"` // Search and replace across all open tabs
@@ -322,6 +323,7 @@ func DefaultFeatureFlags() FeatureFlags {
 		SnowflakeCLIProfileManager: true,
 		MultiCellCopy:              true,
 		CellDetailPanel:            true,
+		ColumnReorder:              true,
 		CrossTabSearch:             true,
 		FileWatcher:                true,
 		ColumnManagement:           true,
@@ -398,6 +400,8 @@ func MigrateFlags(f FeatureFlags) FeatureFlags {
 	setIfZero(&f.QueryLog, defaults.QueryLog)
 	// Version 14 → 15: CellDetailPanel added; defaults to true.
 	setIfZero(&f.CellDetailPanel, defaults.CellDetailPanel)
+	// Version 15 → 16: ColumnReorder added; defaults to true.
+	setIfZero(&f.ColumnReorder, defaults.ColumnReorder)
 	f.Version = flagsVersion
 	return f
 }

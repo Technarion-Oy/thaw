@@ -418,6 +418,13 @@ export default function FeatureFlagsModal({ onClose }: Props) {
             locked={locked.cellDetailPanel}
             onChange={(v) => set("cellDetailPanel", v)}
           />
+          <FlagRow
+            label="Column Reordering"
+            description="Drag result-grid column headers to rearrange columns for scanning and comparison. View-only — the query, data, and column order are untouched."
+            checked={flags.columnReorder}
+            locked={locked.columnReorder}
+            onChange={(v) => set("columnReorder", v)}
+          />
         </Category>
 
         {/* ── SQL Editor ── */}

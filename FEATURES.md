@@ -615,6 +615,7 @@ Right-click any warehouse in the Administration panel and choose **Properties** 
 - Column sorting and horizontal scrolling
 - **Auto-Size Columns** — double-click a column resize handle to auto-fit the column width based on header text and data content (samples up to 500 rows)
 - **Column Pinning** — right-click any column header and choose **Pin to Left** or **Pin to Right** to freeze it during horizontal scrolling; pinned columns render as `position: sticky` and are excluded from column virtualisation
+- **Column Reordering** (feature-flagged) — hover a column header to reveal a grip handle, then drag it horizontally to a new position; a vertical accent line marks the insertion point and remaining columns shift to fill the gap. Purely visual — the query, data, and `SELECT` order are untouched, so sort, filter, format, conditional rules, and copy all follow each column. Reordering applies within the unpinned region (pinned-left/right groups keep their edges) and resets to `SELECT` order on a new column schema (preserved across re-runs of the same query); right-click a header → **Reset Column Order** to restore the original order at any time
 - **Global Grid Search** — press `⌘G` (or click the search icon) to open a search bar above the results grid; matches are highlighted in-cell and navigable with Enter/Shift+Enter
 - **Data Type Formatting** — right-click a column header → **Format Column…** to apply number, currency, percentage, or date/time formatting via `Intl` APIs; preview before applying
 - **Conditional Formatting** — right-click a column header → **Conditional Formatting…** to add colour-scale, data-bar, or text-match highlight rules
@@ -897,6 +898,7 @@ The following features are identified as feasible to be turned off via feature f
 **Results Grid**
 - **Multi-Cell Copy & Selection** (Range selection, multi-cell copy, selection aggregations, and quick charting)
 - **Cell Detail Panel** (Side panel for inspecting and copying the full content of the selected cell)
+- **Column Reordering** (Drag result-grid column headers to rearrange columns; view-only)
 
 **SQL Editor**
 - **Cross-Tab Search & Replace** (Search and replace text across all open query tabs and notebook cells)
