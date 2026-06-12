@@ -155,6 +155,20 @@ var connectionBoolFieldOrder = []struct {
 
 // connectionToTOMLLines renders a Connection as TOML key=value lines (without
 // the section header). Only non-empty / true fields are included.
+//
+// String fields are quoted and escaped, integer fields (proxy_port) are
+// emitted unquoted and only when non-zero, and boolean fields are emitted
+// unquoted and only when true. For example, a Connection with Account "acme",
+// User "alice", ProxyHost "proxy.local", ProxyPort 8080, and
+// EnableSingleUseRefreshTokens true renders as:
+//
+//	account = "acme"
+//	user = "alice"
+//	proxy_host = "proxy.local"
+//	proxy_port = 8080
+//	enable_single_use_refresh_tokens = true
+//
+// The caller (SaveProfile) prepends the [connections.<name>] section header.
 func connectionToTOMLLines(c Connection) []string {
 	var out []string
 	for _, f := range connectionFieldOrder {
