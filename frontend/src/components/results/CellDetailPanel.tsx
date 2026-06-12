@@ -17,12 +17,15 @@ import { useGridStore } from "../../store/gridStore";
 import { usePanelLayoutStore } from "../../store/panelLayoutStore";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { prettyPrintJson, truncateForDisplay, reconcileDismissedKey } from "./cellDetailUtils";
+import { visualToOriginalIndex } from "./columnOrderUtils";
 
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 700;
 
 interface Props {
-  /** Column names of the displayed result (original order, matching selection indices). */
+  /** Column names of the displayed result in original SELECT order. The
+   *  selection anchor column is a visual position; it is translated to an
+   *  original index via gridStore.columnVisualOrder before indexing this. */
   columns: string[];
   /** Called after the panel opens or switches to a different cell, so the
    *  parent can scroll the grid to keep that cell visible (the panel shrinks
@@ -46,6 +49,7 @@ export default function CellDetailPanel({ columns, onVisibleCellChange }: Props)
   const selectionRange = useGridStore((s) => s.selectionRange);
   const selectionOrigin = useGridStore((s) => s.selectionOrigin);
   const tableRows = useGridStore((s) => s.tableRows);
+  const columnVisualOrder = useGridStore((s) => s.columnVisualOrder);
   const width = usePanelLayoutStore((s) => s.cellDetailWidth);
   const setWidth = usePanelLayoutStore((s) => s.setCellDetailWidth);
 
@@ -80,14 +84,16 @@ export default function CellDetailPanel({ columns, onVisibleCellChange }: Props)
     if (!selectionRange || !tableRows) return null;
     const row = tableRows[selectionRange.startRow];
     if (!row) return null;
-    const colIdx = selectionRange.startCol;
+    // startCol is a visual position; translate to the original SELECT index so
+    // the inspected column name/value follow the on-screen arrangement.
+    const colIdx = visualToOriginalIndex(columnVisualOrder, selectionRange.startCol);
     if (colIdx < 0 || colIdx >= columns.length) return null;
     return {
       columnName: columns[colIdx],
       rowNumber: selectionRange.startRow + 1,
       value: row.original[colIdx],
     };
-  }, [selectionRange, tableRows, columns]);
+  }, [selectionRange, tableRows, columns, columnVisualOrder]);
 
   const rawText = cell == null || cell.value == null ? null : String(cell.value);
 
@@ -113,10 +119,14 @@ export default function CellDetailPanel({ columns, onVisibleCellChange }: Props)
   // so unrelated parent re-renders don't re-scroll and fight user scrolling.
   const onVisibleCellChangeRef = useRef(onVisibleCellChange);
   onVisibleCellChangeRef.current = onVisibleCellChange;
+  // anchorKey holds the visual column position; scrollToCell wants the original
+  // SELECT index. Translate via a ref so the effect can stay keyed on anchorKey.
+  const columnVisualOrderRef = useRef(columnVisualOrder);
+  columnVisualOrderRef.current = columnVisualOrder;
   useEffect(() => {
     if (!visible || !anchorKey) return;
     const [row, col] = anchorKey.split(":").map(Number);
-    onVisibleCellChangeRef.current?.(row, col);
+    onVisibleCellChangeRef.current?.(row, visualToOriginalIndex(columnVisualOrderRef.current, col));
   }, [visible, anchorKey]);
 
   // Close on Escape

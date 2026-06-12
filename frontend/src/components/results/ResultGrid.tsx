@@ -41,6 +41,7 @@ import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { computeColumnWidths, measureText } from "../../utils/gridMeasure";
 import { computeCellScrollLeft } from "./cellDetailUtils";
+import { defaultColumnOrder, reorderColumnOrder, visualToOriginalIndex } from "./columnOrderUtils";
 import { applyFormat } from "./DataTypeFormatModal";
 import { columnFilterFn, type ColumnFilterValue } from "./ColumnFilterDropdown";
 import ColumnFilterDropdown from "./ColumnFilterDropdown";
@@ -243,6 +244,7 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
   const setSelectionRange = useGridStore((s) => s.setSelectionRange);
   const isSelecting = useGridStore((s) => s.isSelecting);
   const setIsSelecting = useGridStore((s) => s.setIsSelecting);
+  const setColumnVisualOrder = useGridStore((s) => s.setColumnVisualOrder);
   const searchTerm = useGridStore((s) => s.searchTerm);
   const columnFormats = useGridStore((s) => s.columnFormats);
   const conditionalRules = useGridStore((s) => s.conditionalRules);
@@ -316,7 +318,7 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
       setSorting([]);
       setColumnPinning({ left: [], right: [] });
       setColumnFilters([]);
-      setColumnOrder(result.columns.map((col, i) => `${i}_${col}`));
+      setColumnOrder(defaultColumnOrder(result.columns));
       if (!standalone) resetGrid(); // full reset — clears formatting
     } else {
       // Same columns, new queryID (re-run) — preserve formatting
@@ -413,6 +415,31 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
   const rightPinned = table.getRightLeafColumns();
   const centerColumns = table.getCenterLeafColumns();
 
+  // Visual ⇄ original column index translation. Leaf columns in left-to-right
+  // screen order (pinned-left, center, pinned-right) — accounts for both
+  // reordering (columnOrder) and pinning. Range selection is tracked in this
+  // *visual* position space; data reads translate back to the original SELECT
+  // index via visualToOriginal so highlight/copy/aggregations stay correct
+  // (and copy emits in visual order) no matter how columns are arranged.
+  const visualLeafColumns = table.getVisibleLeafColumns();
+  const visualOrderKey = visualLeafColumns.map((c) => c.id).join("\0");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const visualToOriginal = useMemo(
+    () => visualLeafColumns.map((c) => colIdxFromColumnId(c.id)),
+    [visualOrderKey],
+  );
+  const originalToVisual = useMemo(() => {
+    const m: number[] = [];
+    visualToOriginal.forEach((orig, vis) => { m[orig] = vis; });
+    return m;
+  }, [visualToOriginal]);
+
+  // Publish the visual→original map so singleton consumers (StatusBar,
+  // CellDetailPanel) can translate selection columns. Standalone grids skip it.
+  useEffect(() => {
+    if (!standalone) setColumnVisualOrder(visualToOriginal);
+  }, [visualToOriginal, standalone, setColumnVisualOrder]);
+
   // Column virtualizer for center (unpinned) columns only
   const columnVirtualizer = useVirtualizer({
     horizontal: true,
@@ -473,6 +500,12 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
   );
 
   // ─── Range selection ──────────────────────────────────────────────────────
+  //
+  // Column arguments here (`colIndex`) and the stored selectionRange columns are
+  // *visual* positions (left-to-right on screen), not original SELECT indices —
+  // callers translate via originalToVisual. Full-row/select-all spans use
+  // 0..columns.length-1, which is identical in either space. Data reads
+  // translate back through visualToOriginal.
 
   const selectionStartRef = useRef<{ row: number; col: number } | null>(null);
   const selectionModeRef = useRef<"cell" | "row" | "column" | null>(null);
@@ -622,6 +655,10 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
   selectionRangeRef.current = selectionRange;
   const tableRowsRef = useRef(tableRows);
   tableRowsRef.current = tableRows;
+  // Visual→original column map for the copy handler — kept in a ref so a reorder
+  // doesn't force the keydown listener to re-register on every change.
+  const visualToOriginalRef = useRef(visualToOriginal);
+  visualToOriginalRef.current = visualToOriginal;
 
   useEffect(() => {
     if (!featureFlags.multiCellCopy) return;
@@ -655,12 +692,16 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
         v.includes("\t") || v.includes("\n") || v.includes("\r") || v.includes('"')
           ? `"${v.replace(/"/g, '""')}"` : v;
 
+      // selectionRange columns are *visual* positions; translate each to its
+      // original SELECT index so the copied data follows the on-screen column
+      // arrangement (reorder + pinning) and emits in left-to-right visual order.
+      const vmap = visualToOriginalRef.current;
+      const origCols: number[] = [];
+      for (let c = minCol; c <= maxCol; c++) origCols.push(visualToOriginalIndex(vmap, c));
+
       const lines: string[] = [];
-      // Add headers — selectionRange indices are original column indices (extracted from
-      // TanStack column IDs like "3_COL_NAME"), so result.columns[c] is correct even
-      // after visual reordering via column pinning.
       const headers: string[] = [];
-      for (let c = minCol; c <= maxCol; c++) headers.push(tsvEscape(result.columns[c] ?? ""));
+      for (const oc of origCols) headers.push(tsvEscape(result.columns[oc] ?? ""));
       lines.push(headers.join("\t"));
 
       const rows = tableRowsRef.current;
@@ -669,8 +710,8 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
         if (!row) continue;
         const orig = row.original;
         const cells: string[] = [];
-        for (let c = minCol; c <= maxCol; c++) {
-          cells.push(tsvEscape(orig[c] == null ? "" : String(orig[c])));
+        for (const oc of origCols) {
+          cells.push(tsvEscape(orig[oc] == null ? "" : String(orig[oc])));
         }
         lines.push(cells.join("\t"));
       }
@@ -801,11 +842,13 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
     };
   }, [selectionRange]);
 
+  // `visualCol` is the column's left-to-right screen position, matching the
+  // visual-position space the selection range is stored in.
   const isCellSelected = useCallback(
-    (rowIdx: number, colIdx: number): boolean => {
+    (rowIdx: number, visualCol: number): boolean => {
       if (!normalizedSelection) return false;
       return rowIdx >= normalizedSelection.minRow && rowIdx <= normalizedSelection.maxRow
-        && colIdx >= normalizedSelection.minCol && colIdx <= normalizedSelection.maxCol;
+        && visualCol >= normalizedSelection.minCol && visualCol <= normalizedSelection.maxCol;
     },
     [normalizedSelection],
   );
@@ -839,36 +882,44 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
 
   const reorderEnabled = featureFlags.columnReorder;
 
-  const defaultColumnOrder = useCallback(
-    () => result.columns.map((col, i) => `${i}_${col}`),
-    [result.columns],
-  );
-
   // Move draggedId to just before/after targetId in the visual column order.
   // Operates on the stable {colIndex}_{NAME} IDs so formats/conditional rules
   // (keyed by ID) stay valid — only the display position changes.
   const moveColumn = useCallback(
     (draggedId: string, targetId: string, before: boolean) => {
-      if (draggedId === targetId) return;
-      setColumnOrder((prev) => {
-        const order = prev.length ? [...prev] : defaultColumnOrder();
-        const from = order.indexOf(draggedId);
-        if (from < 0) return prev;
-        order.splice(from, 1);
-        let to = order.indexOf(targetId);
-        if (to < 0) return prev;
-        if (!before) to += 1;
-        order.splice(to, 0, draggedId);
-        return order;
-      });
+      setColumnOrder((prev) =>
+        reorderColumnOrder(prev.length ? prev : defaultColumnOrder(result.columns), draggedId, targetId, before),
+      );
     },
-    [defaultColumnOrder],
+    [result.columns],
   );
 
   const resetColumnOrder = useCallback(() => {
-    setColumnOrder(defaultColumnOrder());
+    setColumnOrder(defaultColumnOrder(result.columns));
     setHeaderCtxMenu(null);
-  }, [defaultColumnOrder]);
+  }, [result.columns]);
+
+  // Keyboard/menu-driven reorder: move a center column one position left/right
+  // among its center neighbours (accessible alternative to drag). Returns the
+  // neighbour id so callers can disable the action at the edges.
+  const centerNeighborId = useCallback(
+    (columnId: string, dir: -1 | 1): string | null => {
+      const i = centerColumns.findIndex((c) => c.id === columnId);
+      if (i < 0) return null;
+      const j = i + dir;
+      return j >= 0 && j < centerColumns.length ? centerColumns[j].id : null;
+    },
+    [centerColumns],
+  );
+
+  const moveColumnSideways = useCallback(
+    (columnId: string, dir: -1 | 1) => {
+      const neighbor = centerNeighborId(columnId, dir);
+      if (neighbor) moveColumn(columnId, neighbor, dir < 0); // before when moving left
+      setHeaderCtxMenu(null);
+    },
+    [centerNeighborId, moveColumn],
+  );
 
   // Header drag handlers. Reordering applies within the unpinned (center)
   // region only; pinned-left/right groups keep their edges, so pinned headers
@@ -1017,13 +1068,15 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
     const canReorder = reorderEnabled && !pinned;
     const showDropBefore = dropTarget?.columnId === columnId && dropTarget.before;
     const showDropAfter = dropTarget?.columnId === columnId && !dropTarget.before;
+    // Range selection works in visual-position space (see visualToOriginal).
+    const visualPos = originalToVisual[colIndex] ?? colIndex;
 
     return (
       <th
         key={columnId}
         onContextMenu={(e) => handleHeaderContextMenu(e, columnId, column.columnDef.header as string, colIndex)}
-        onMouseDown={(e) => handleColumnMouseDown(e, colIndex)}
-        onMouseEnter={() => handleColumnMouseEnter(colIndex)}
+        onMouseDown={(e) => handleColumnMouseDown(e, visualPos)}
+        onMouseEnter={() => handleColumnMouseEnter(visualPos)}
         onDoubleClick={column.getToggleSortingHandler()}
         onDragOver={canReorder ? (e) => handleHeaderDragOver(e, columnId) : undefined}
         onDragLeave={canReorder ? (e) => handleHeaderDragLeave(e, columnId) : undefined}
@@ -1143,18 +1196,20 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
   const renderBodyCell = (cell: Cell<unknown[], unknown>, rowOriginal: unknown[], rowIndex: number, pinned: boolean, stickyLeft?: number, stickyRight?: number) => {
     const columnId = cell.column.id;
     const colIdx = colIdxFromColumnId(columnId);
+    // Range selection is tracked in visual-position space (see visualToOriginal).
+    const visualPos = originalToVisual[colIdx] ?? colIdx;
     const value = cell.getValue();
     const rules = conditionalRules[columnId];
     const mm = columnMinMax[columnId];
     const condStyle = rules ? getConditionalStyle(value, rules, mm?.min ?? 0, mm?.max ?? 1) : {};
-    const selected = featureFlags.multiCellCopy && isCellSelected(rowIndex, colIdx);
+    const selected = featureFlags.multiCellCopy && isCellSelected(rowIndex, visualPos);
 
     return (
       <td
         key={cell.id}
         onContextMenu={(e) => handleCellContextMenu(e, rowOriginal, columnId, rowIndex)}
-        onMouseDown={(e) => handleCellMouseDown(e, rowIndex, colIdx)}
-        onMouseEnter={() => handleCellMouseEnter(rowIndex, colIdx)}
+        onMouseDown={(e) => handleCellMouseDown(e, rowIndex, visualPos)}
+        onMouseEnter={() => handleCellMouseEnter(rowIndex, visualPos)}
         onDoubleClick={(e) => {
           // Allow native text selection on double-click
           const td = e.currentTarget;
@@ -1516,6 +1571,16 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
           {reorderEnabled && (
             <>
               <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
+              {menuItemEl(
+                "Move Column Left",
+                () => moveColumnSideways(headerCtxMenu.columnId, -1),
+                isPinned(headerCtxMenu.columnId) || centerNeighborId(headerCtxMenu.columnId, -1) === null,
+              )}
+              {menuItemEl(
+                "Move Column Right",
+                () => moveColumnSideways(headerCtxMenu.columnId, 1),
+                isPinned(headerCtxMenu.columnId) || centerNeighborId(headerCtxMenu.columnId, 1) === null,
+              )}
               {menuItemEl("Reset Column Order", resetColumnOrder)}
             </>
           )}
@@ -1568,6 +1633,7 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
           tableRows={tableRows}
           columns={result.columns}
           selectionRange={selectionRange}
+          visualToOriginal={visualToOriginal}
           onClose={() => setChartModal(false)}
         />
       )}

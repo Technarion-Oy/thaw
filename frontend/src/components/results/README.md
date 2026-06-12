@@ -17,6 +17,7 @@ with the `gridStore` singleton for shared selection/search/formatting state.
 | `StatusBar.tsx` | Reads `selectionRange` and `tableRows` from `gridStore`. Shows count, sum, avg, min, max over the selected numeric cells. |
 | `CellDetailPanel.tsx` | Side panel on the right edge of the results area showing the full content of the selected cell (the selection anchor — `selectionRange.startRow/startCol`). Opens only for cell-originated selections (`gridStore.selectionOrigin === "cell"`) — row-gutter, column-header, and select-all gestures don't trigger it. Column name, row number, scrollable/selectable monospace text, JSON pretty-printing with a Raw/Formatted toggle, copy via `ClipboardSetText`. Huge values are capped at `DISPLAY_CAP` (500 k chars) with a "show all" affordance, and JSON detection is skipped above `JSON_DETECT_CAP` (1 M chars); copy always uses the full raw value. Closes via ✕ or Escape and reopens when a different cell is selected. When it opens (or switches cells) it calls `onVisibleCellChange`, which QueryPage wires to `ResultGridHandle.scrollToCell` so the selected cell isn't covered by the panel. Width is persisted in `panelLayoutStore.cellDetailWidth` (drag the left edge to resize). Gated behind the `cellDetailPanel` feature flag; needs `multiCellCopy` for cell selection. |
 | `cellDetailUtils.ts` | Import-free pure helpers, unit-tested in `cellDetailUtils.test.ts`: `prettyPrintJson`, `truncateForDisplay`, `reconcileDismissedKey` (the panel's dismissal state machine), and `computeCellScrollLeft` (the horizontal scroll-into-view math used by `ResultGridHandle.scrollToCell`). |
+| `columnOrderUtils.ts` | Import-free pure helpers for column reordering / visual⇄original translation, unit-tested in `columnOrderUtils.test.ts`: `defaultColumnOrder`, `reorderColumnOrder` (splice-based move before/after a target ID), `visualToOriginalIndex` (translate a visual column position to its original SELECT index), and `columnIdFor`. |
 | `GridSearch.tsx` | In-grid text search panel. Reads/writes `searchTerm`, `searchMatches`, `currentMatchIndex` in `gridStore`. Debounces search recomputation. Calls `onScrollToRow` to virtualise-scroll to the match. |
 | `ColumnFilterDropdown.tsx` | Per-column filter popover. Supports value checklist (up to 500 distinct values) and conditional operators (`contains`, `startsWith`, `endsWith`, `equals`, `gt`, `lt`, `gte`, `lte`). Exports `ColumnFilterValue` type and `columnFilterFn` (TanStack `FilterFn`). |
 | `ConditionalFormattingModal.tsx` | Modal for adding/removing per-column colour-scale rules. Reads/writes `conditionalRules` in `gridStore`. Preset colour palettes (Green→Red, Blue→Red, etc.). |
@@ -36,10 +37,12 @@ with the `gridStore` singleton for shared selection/search/formatting state.
 - `CellDetailPanel.tsx` — `ClipboardSetText` from `wailsjs/runtime/runtime` (copy button).
 
 **Stores used:**
-- `gridStore` — `selectionRange`, `tableRows`, `searchTerm`, `searchMatches`, `currentMatchIndex`,
+- `gridStore` — `selectionRange` (column bounds are **visual** positions), `columnVisualOrder`
+  (visual→original index map, set by `ResultGrid`, read by `StatusBar`/`CellDetailPanel`),
+  `tableRows`, `searchTerm`, `searchMatches`, `currentMatchIndex`,
   `conditionalRules`, `formatConfigs`, `nextMatch`, `prevMatch`, `setSearchTerm`,
-  `setSearchMatches`, `setTableRows`, `resetGrid`, `resetNavigation`, `setConditionalRules`,
-  `clearConditionalRules`, `setFormatConfig`.
+  `setSearchMatches`, `setTableRows`, `setColumnVisualOrder`, `resetGrid`, `resetNavigation`,
+  `setConditionalRules`, `clearConditionalRules`, `setFormatConfig`.
 - `themeStore` — dark/light theming for grid cell colours.
 - `featureFlagsStore` — gating of optional result features.
 - `panelLayoutStore` — `cellDetailWidth`/`setCellDetailWidth` (persisted width of `CellDetailPanel`).
@@ -55,13 +58,23 @@ columns — a known limitation of the singleton `gridStore`.
 
 **Column reordering:** Dragging a column header (the hover grip handle) reorders columns via
 TanStack's `columnOrder` state — a list of the stable `{colIndex}_{NAME}` IDs. It is **view-only**:
-`result.columns`/`result.rows` and the selection-range column indices are never touched, so sort,
-filter, format, conditional rules, and copy (all keyed off the stable ID / original index) follow
-each column to its new position. Reordering is confined to the unpinned (center) region — pinned
-headers are neither draggable nor drop targets, so pinned-left/right groups keep their edges. The
-order lives in local component state (like pinning/sizing): it resets to SELECT order on a column
-schema change but is preserved across a re-run of the same query. "Reset Column Order" in the
-header context menu restores SELECT order. Gated behind the `columnReorder` feature flag.
+`result.columns`/`result.rows` are never touched, so sort, filter, format, and conditional rules
+(all keyed off the stable column ID) follow each column to its new position. Reordering is confined
+to the unpinned (center) region — pinned headers are neither draggable nor drop targets, so
+pinned-left/right groups keep their edges. The order lives in local component state (like
+pinning/sizing): it resets to SELECT order on a column schema change but is preserved across a
+re-run of the same query. The header context menu offers **Move Column Left/Right** (a keyboard- and
+screenreader-reachable alternative to dragging) and **Reset Column Order**. Pure reorder logic lives
+in `columnOrderUtils.ts` (unit-tested). Gated behind the `columnReorder` feature flag.
+
+**Visual vs. original column indices:** Range selection (and therefore copy, the StatusBar
+aggregations, Quick Chart, and the Cell Detail Panel) is tracked in **visual** column positions
+(left-to-right on screen), because columns can be reordered *and* pinned — visual order ≠ SELECT
+order. `ResultGrid` builds a `visualToOriginal` map from `table.getVisibleLeafColumns()` and
+publishes it to `gridStore.columnVisualOrder`. Selection handlers convert original→visual via
+`originalToVisual`; every data read converts back with `visualToOriginalIndex(map, visualPos)` so
+highlight, aggregation, and copy cover exactly the columns the user swept, and copy emits in visual
+order. When no reorder/pinning is active the map is the identity, so behaviour is unchanged.
 
 **Column width measurement:** `computeColumnWidths` and `measureText` from `../../utils/gridMeasure`
 are called after data loads to auto-size columns based on header and sample cell content.
