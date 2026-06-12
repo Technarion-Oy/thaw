@@ -136,6 +136,14 @@ var connectionFieldOrder = []struct {
 // connectionIntFieldOrder defines the canonical order for integer connection
 // fields. These render as unquoted TOML integers (e.g. `key = 8080`) and are
 // only emitted when non-zero.
+//
+// A separate slice is needed because connectionFieldOrder's getters return
+// string and its values are quoted (`key = "value"`). proxy_port is a numeric
+// TOML value, so it needs an int getter and unquoted rendering — quoting it
+// (`proxy_port = "8080"`) would make the TOML decoder fail to unmarshal it into
+// the int field on rawConnection. The empty-value sentinel also differs: string
+// fields skip on "", int fields skip on 0 (same reason connectionBoolFieldOrder
+// is separate — bools render unquoted and skip on false).
 var connectionIntFieldOrder = []struct {
 	tomlKey string
 	getter  func(*Connection) int
