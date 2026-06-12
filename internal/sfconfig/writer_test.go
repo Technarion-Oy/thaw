@@ -682,6 +682,66 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
+// TestRoundTrip_AuthFields verifies the token/OAuth2/WIF authenticator fields
+// survive a SaveProfile → Load cycle with their snake_case TOML keys.
+func TestRoundTrip_AuthFields(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+
+	profile := Connection{
+		Name:                              "oauthcc",
+		Account:                           "myorg-test",
+		Authenticator:                     "oauth_client_credentials",
+		Token:                             "tok-123",
+		TokenFilePath:                     "/path/to/token",
+		OAuthClientID:                     "client-abc",
+		OAuthClientSecret:                 "secret-xyz",
+		OAuthTokenRequestURL:              "https://idp.example.com/oauth/token",
+		OAuthAuthorizationURL:             "https://idp.example.com/oauth/authorize",
+		OAuthRedirectURI:                  "http://127.0.0.1:8080",
+		OAuthScope:                        "session:role:ANALYST",
+		WorkloadIdentityProvider:          "AWS",
+		WorkloadIdentityEntraResource:     "api://snowflake",
+		WorkloadIdentityImpersonationPath: "arn:aws:iam::111:role/a,arn:aws:iam::222:role/b",
+	}
+
+	if err := SaveProfile(path, profile); err != nil {
+		t.Fatal(err)
+	}
+
+	// The serialized TOML must use snake_case keys.
+	out := readTestFile(t, path)
+	for _, key := range []string{
+		"token =", "token_file_path =", "oauth_client_id =", "oauth_client_secret =",
+		"oauth_token_request_url =", "oauth_authorization_url =", "oauth_redirect_uri =",
+		"oauth_scope =", "workload_identity_provider =",
+		"workload_identity_entra_resource =", "workload_identity_impersonation_path =",
+	} {
+		if !strings.Contains(out, key) {
+			t.Errorf("expected TOML key %q in output:\n%s", key, out)
+		}
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Connections) != 1 {
+		t.Fatalf("expected 1 connection, got %d", len(cfg.Connections))
+	}
+	c := cfg.Connections[0]
+	if c.Token != profile.Token || c.TokenFilePath != profile.TokenFilePath ||
+		c.OAuthClientID != profile.OAuthClientID || c.OAuthClientSecret != profile.OAuthClientSecret ||
+		c.OAuthTokenRequestURL != profile.OAuthTokenRequestURL ||
+		c.OAuthAuthorizationURL != profile.OAuthAuthorizationURL ||
+		c.OAuthRedirectURI != profile.OAuthRedirectURI || c.OAuthScope != profile.OAuthScope ||
+		c.WorkloadIdentityProvider != profile.WorkloadIdentityProvider ||
+		c.WorkloadIdentityEntraResource != profile.WorkloadIdentityEntraResource ||
+		c.WorkloadIdentityImpersonationPath != profile.WorkloadIdentityImpersonationPath {
+		t.Errorf("auth-field round-trip mismatch: got %+v", c)
+	}
+}
+
 func TestAtomicWrite_Permissions(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")

@@ -115,6 +115,17 @@ var connectionFieldOrder = []struct {
 	{"okta_url", func(c *Connection) string { return c.OktaURL }},
 	{"private_key_path", func(c *Connection) string { return c.PrivateKeyPath }},
 	{"private_key_passphrase", func(c *Connection) string { return c.PrivateKeyPassphrase }},
+	{"token", func(c *Connection) string { return c.Token }},
+	{"token_file_path", func(c *Connection) string { return c.TokenFilePath }},
+	{"oauth_client_id", func(c *Connection) string { return c.OAuthClientID }},
+	{"oauth_client_secret", func(c *Connection) string { return c.OAuthClientSecret }},
+	{"oauth_token_request_url", func(c *Connection) string { return c.OAuthTokenRequestURL }},
+	{"oauth_authorization_url", func(c *Connection) string { return c.OAuthAuthorizationURL }},
+	{"oauth_redirect_uri", func(c *Connection) string { return c.OAuthRedirectURI }},
+	{"oauth_scope", func(c *Connection) string { return c.OAuthScope }},
+	{"workload_identity_provider", func(c *Connection) string { return c.WorkloadIdentityProvider }},
+	{"workload_identity_entra_resource", func(c *Connection) string { return c.WorkloadIdentityEntraResource }},
+	{"workload_identity_impersonation_path", func(c *Connection) string { return c.WorkloadIdentityImpersonationPath }},
 }
 
 // connectionToTOMLLines renders a Connection as TOML key=value lines (without
