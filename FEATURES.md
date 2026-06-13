@@ -139,7 +139,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Refresh** — right-click an external table for **Refresh…** to synchronize the file-level metadata (`ALTER EXTERNAL TABLE … REFRESH`); prompts a confirmation dialog
   - **Select Top 1000 Rows** — query an external table like a regular table directly from the context menu
   - **DDL Export** — `GET_DDL('EXTERNAL_TABLE', …)` powers the hover DDL preview, View Definition, and database DDL export
-  - **Drop / Rename** — standard danger-confirmation dialog executes `DROP EXTERNAL TABLE`; **Rename…** issues `ALTER EXTERNAL TABLE … RENAME TO`
+  - **Drop** — standard danger-confirmation dialog executes `DROP EXTERNAL TABLE` (external tables cannot be renamed — Snowflake has no `ALTER EXTERNAL TABLE … RENAME` — so Rename is not offered for them)
 - **Snowpipe Management** — right-click any schema and choose **Create Object** → **Pipe…**, or right-click an existing pipe to access pipe-specific operations:
   - **Create** — dynamic form with name, OR REPLACE / IF NOT EXISTS options, Auto Ingest toggle, Error Integration, AWS SNS Topic, Integration, Comment, and an embedded Monaco editor for the `COPY INTO` statement; live SQL preview shows the full `CREATE PIPE` statement
   - **Properties** — right-click a pipe and choose **Properties…** to view `SHOW PIPES` metadata plus inline-editable **Pipe Execution Paused** (toggle), **Comment** (inline edit / UNSET), and **Tags** (add/remove key-value pairs); changes are applied immediately via `ALTER PIPE … SET / UNSET`

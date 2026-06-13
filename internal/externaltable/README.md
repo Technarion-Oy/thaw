@@ -5,10 +5,12 @@
 ## Responsibility
 
 Builds the `CREATE EXTERNAL TABLE` DDL from a structured config. The lifecycle
-commands (`REFRESH`, `SET AUTO_REFRESH`, `SET`/`UNSET`, `RENAME TO`) are simple
-enough that they are issued as free-form `ALTER EXTERNAL TABLE <fqn> <clause>`
-statements directly from `internal/app/externaltable.go`
-(`App.AlterExternalTable`) without a dedicated builder.
+commands (`REFRESH`, `SET AUTO_REFRESH`) are simple enough that they are issued
+as free-form `ALTER EXTERNAL TABLE <fqn> <clause>` statements directly from
+`internal/app/externaltable.go` (`App.AlterExternalTable`) without a dedicated
+builder. The `ALTER EXTERNAL TABLE` grammar has no `SET`/`UNSET COMMENT` or
+`RENAME TO`, so comment edits go through `COMMENT ON TABLE … IS '…'` and external
+tables are not renamable.
 
 ## Key files
 

@@ -128,10 +128,11 @@ interface SelectEditRowProps {
   label: string;
   value: string;
   options: { value: string; label: string }[];
+  hint?: string;
   onSave: (val: string) => Promise<void>;
 }
 
-function SelectEditRow({ label, value, options, onSave }: SelectEditRowProps) {
+function SelectEditRow({ label, value, options, hint, onSave }: SelectEditRowProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
@@ -167,6 +168,7 @@ function SelectEditRow({ label, value, options, onSave }: SelectEditRowProps) {
         ) : (
           <Space>
             <span style={{ color: "var(--text)" }}>{value || <Text type="secondary">(not set)</Text>}</span>
+            {hint && <Text type="secondary" style={{ fontSize: 11 }}>{hint}</Text>}
             <Tooltip title="Edit">
               <Button type="text" size="small" icon={<EditOutlined style={{ fontSize: 11 }} />} onClick={() => { setDraft(value); setEditing(true); }} style={{ color: "var(--text-muted)" }} />
             </Tooltip>
@@ -244,10 +246,11 @@ export default function ExternalTablePropertiesModal({ db, schema, name, onClose
   // unaffected either way.
   const autoRefreshRaw = find("auto_refresh");
   const notificationChannel = find("notification_channel");
+  const autoRefreshInferred = autoRefreshRaw === "" && notificationChannel.trim() !== "";
   const autoRefresh =
     autoRefreshRaw !== ""
       ? normBool(autoRefreshRaw)
-      : notificationChannel.trim() !== ""
+      : autoRefreshInferred
         ? "TRUE"
         : "";
   const invalid = find("invalid");
@@ -302,6 +305,7 @@ export default function ExternalTablePropertiesModal({ db, schema, name, onClose
               <SelectEditRow
                 label="Auto Refresh"
                 value={autoRefresh}
+                hint={autoRefreshInferred ? "(inferred from notification channel)" : undefined}
                 options={[{ value: "TRUE", label: "TRUE" }, { value: "FALSE", label: "FALSE" }]}
                 onSave={saveAutoRefresh}
               />

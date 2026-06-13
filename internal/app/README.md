@@ -36,7 +36,7 @@ nil-check → delegate → return.
 | `dbtproject.go` | DBT PROJECT create/alter/execute builders; delegates to `internal/dbtproject`. |
 | `pipe.go` | Pipe SQL builders and COPY_HISTORY; delegates to `internal/pipe`. |
 | `dynamictable.go` | `AlterDynamicTable` (free-form `ALTER DYNAMIC TABLE … <clause>` for SUSPEND/RESUME/REFRESH/SET/UNSET); CREATE builder in `builders.go` delegates to `internal/dynamictable`. |
-| `externaltable.go` | `AlterExternalTable` (free-form `ALTER EXTERNAL TABLE … <clause>` for REFRESH/SET AUTO_REFRESH/SET/UNSET); CREATE builder in `builders.go` delegates to `internal/externaltable`. |
+| `externaltable.go` | `AlterExternalTable` (free-form `ALTER EXTERNAL TABLE … <clause>` for REFRESH / SET AUTO_REFRESH; the grammar has no SET/UNSET COMMENT or RENAME — comments go through `COMMENT ON TABLE`); CREATE builder in `builders.go` delegates to `internal/externaltable`. |
 | `git.go` | Git repository browsing, filtering, and config persistence; delegates to `internal/gitrepo`. |
 | `filesystem.go` | File read/write/rename/delete, `StartFileWatcher`/`StopFileWatcher`, reveal in Finder; delegates to `internal/filesystem`. |
 | `profiles.go` | Snowflake CLI profile CRUD (save, delete, clone, rename, set default); delegates to `internal/sfconfig`. |
