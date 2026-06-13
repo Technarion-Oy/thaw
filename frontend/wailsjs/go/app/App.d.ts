@@ -6,6 +6,7 @@ import {dbtproject} from '../models';
 import {stage} from '../models';
 import {integrations} from '../models';
 import {procedure} from '../models';
+import {dynamictable} from '../models';
 import {fileformat} from '../models';
 import {snowgitrepo} from '../models';
 import {pipe} from '../models';
@@ -37,6 +38,8 @@ export function AddBackup(arg1:string,arg2:string,arg3:string):Promise<void>;
 export function AlterBackupPolicy(arg1:string,arg2:string):Promise<void>;
 
 export function AlterBackupSet(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterDynamicTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterPipe(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -73,6 +76,8 @@ export function BuildCallStatement(arg1:string,arg2:string,arg3:string,arg4:Arra
 export function BuildChangeColumnTypeSql(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<string>;
 
 export function BuildCreateDbtProjectSql(arg1:string,arg2:string,arg3:dbtproject.CreateConfig):Promise<string>;
+
+export function BuildCreateDynamicTableSql(arg1:string,arg2:string,arg3:dynamictable.DynamicTableConfig):Promise<string>;
 
 export function BuildCreateFileFormatSql(arg1:string,arg2:string,arg3:fileformat.FileFormatConfig):Promise<string>;
 

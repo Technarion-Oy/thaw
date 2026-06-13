@@ -584,6 +584,45 @@ export namespace ddl {
 
 }
 
+export namespace dynamictable {
+	
+	export class DynamicTableConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    transient: boolean;
+	    targetLag: string;
+	    warehouse: string;
+	    refreshMode: string;
+	    initialize: string;
+	    clusterBy: string;
+	    comment: string;
+	    query: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DynamicTableConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.transient = source["transient"];
+	        this.targetLag = source["targetLag"];
+	        this.warehouse = source["warehouse"];
+	        this.refreshMode = source["refreshMode"];
+	        this.initialize = source["initialize"];
+	        this.clusterBy = source["clusterBy"];
+	        this.comment = source["comment"];
+	        this.query = source["query"];
+	    }
+	}
+
+}
+
 export namespace erdesigner {
 	
 	export class FKColRef {

@@ -13,6 +13,7 @@ package app
 import (
 	"thaw/internal/column"
 	"thaw/internal/dbtproject"
+	"thaw/internal/dynamictable"
 	"thaw/internal/fileformat"
 	"thaw/internal/pipe"
 	"thaw/internal/procedure"
@@ -105,6 +106,11 @@ func (a *App) BuildCreatePipeSql(database, schema string, cfg pipe.PipeConfig) (
 // BuildRefreshPipeSql returns the SQL for an ALTER PIPE ... REFRESH statement.
 func (a *App) BuildRefreshPipeSql(database, schema, name string, cfg pipe.RefreshPipeConfig) (string, error) {
 	return pipe.BuildRefreshPipeSql(database, schema, name, cfg)
+}
+
+// BuildCreateDynamicTableSql returns the SQL for creating a Snowflake DYNAMIC TABLE.
+func (a *App) BuildCreateDynamicTableSql(database, schema string, cfg dynamictable.DynamicTableConfig) (string, error) {
+	return dynamictable.BuildCreateDynamicTableSql(database, schema, cfg)
 }
 
 // BuildCreateStageSql returns the CREATE STAGE SQL statement.

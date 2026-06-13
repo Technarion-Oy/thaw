@@ -31,6 +31,7 @@ import {
   FolderOutlined,
   // Snowflake object kinds
   TableOutlined,
+  RetweetOutlined,
   EyeOutlined,
   FunctionOutlined,
   CodeOutlined,
@@ -59,6 +60,7 @@ import {
 const KIND_VAR: Record<string, string> = {
   TABLE:             "--icon-table",
   VIEW:              "--icon-view",
+  "DYNAMIC TABLE":   "--icon-dynamictable",
   FUNCTION:          "--icon-function",
   PROCEDURE:         "--icon-procedure",
   SEQUENCE:          "--icon-sequence",
@@ -77,6 +79,7 @@ const KIND_VAR: Record<string, string> = {
 const KIND_ICON: Record<string, React.ComponentType<{ style?: React.CSSProperties }>> = {
   TABLE:            TableOutlined,
   VIEW:             EyeOutlined,
+  "DYNAMIC TABLE":  RetweetOutlined,
   FUNCTION:         FunctionOutlined,
   PROCEDURE:        CodeOutlined,
   SEQUENCE:         NumberOutlined,
