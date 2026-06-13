@@ -84,7 +84,7 @@ export default function CreateExternalTableModal({ db, schema, onClose, onSucces
   const [pickerSchema, setPickerSchema] = useState(schema);
   const [dbOptions, setDbOptions] = useState<string[]>([]);
   const [schemaOptions, setSchemaOptions] = useState<string[]>([]);
-  const [stageOptions, setStageOptions] = useState<string[]>([]);
+  const [stageOptions, setStageOptions] = useState<{ name: string; url: string }[]>([]);
   const [formatOptions, setFormatOptions] = useState<string[]>([]);
   const [pickerStage, setPickerStage] = useState("");
   const [loadingSchemas, setLoadingSchemas] = useState(false);
@@ -153,7 +153,7 @@ export default function CreateExternalTableModal({ db, schema, onClose, onSucces
       .then(([stages, objs]) => {
         // External tables may only reference an EXTERNAL stage, so filter out
         // INTERNAL stages from the picker.
-        setStageOptions((stages ?? []).filter((s) => s.type === "EXTERNAL").map((s) => s.name));
+        setStageOptions((stages ?? []).filter((s) => s.type === "EXTERNAL").map((s) => ({ name: s.name, url: s.url })));
         setFormatOptions((objs ?? []).filter((o) => o.kind === "FILE FORMAT").map((o) => o.name));
       })
       .finally(() => setLoadingObjects(false));
@@ -253,7 +253,8 @@ export default function CreateExternalTableModal({ db, schema, onClose, onSucces
     setCreateError(null);
     try {
       // Build the statement from the current cfg at submit time rather than
-      // trusting the debounced `preview` state, which lags a keystroke behind.
+      // reusing the `preview` state, which is refreshed by an async effect and
+      // can lag a keystroke behind the latest cfg.
       const sql = await BuildCreateExternalTableSql(db, schema, cfg as any);
       await ExecDDL(sql);
       onSuccess?.();
@@ -502,7 +503,16 @@ export default function CreateExternalTableModal({ db, schema, onClose, onSucces
               size="small" showSearch placeholder="Stage" style={{ width: 150 }}
               value={pickerStage || undefined} onChange={onPickStage}
               disabled={!pickerSchema} loading={loadingObjects}
-              options={stageOptions.map((n) => ({ value: n, label: n }))}
+              options={stageOptions.map((s) => ({ value: s.name, label: s.name, url: s.url }))}
+              // Surface each external stage's storage URL in the dropdown so two
+              // stages pointing at different buckets are distinguishable; the
+              // selected control still shows just the name.
+              optionRender={(opt) => (
+                <Space direction="vertical" size={0}>
+                  <span>{opt.data.value}</span>
+                  {opt.data.url && <Text type="secondary" style={{ fontSize: 11 }}>{opt.data.url}</Text>}
+                </Space>
+              )}
               notFoundContent={loadingObjects ? "Loading…" : "No external stages"}
             />
             {pickerStage && (

@@ -3270,7 +3270,11 @@ func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]Sn
 	// is_external=Y column when present; drop any remaining (schema, name)
 	// collision as a fallback for editions that omit that column.
 	basic = dedupeExternalTables(basic, extended)
-	all := append(basic, extended...)
+	// slices.Concat allocates a fresh backing array rather than appending into
+	// basic's spare capacity: when neither dedupe reallocated, basic can still be
+	// the "basic"-cache backing slice, and appending into it would alias that
+	// cached entry's storage with this "full"-cache entry.
+	all := slices.Concat(basic, extended)
 	c.putObjectCache(cacheKey, all)
 	return all, nil
 }
