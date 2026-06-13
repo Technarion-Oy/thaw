@@ -40,6 +40,9 @@ sidebar context menu in `layout/Sidebar.tsx` via `App.AlterMaterializedView`.
 - `BuildCreateMaterializedViewSql` runs on every `cfg` change without an explicit
   debounce; rapid typing in the query editor generates frequent IPC calls (same
   tradeoff as `CreateDynamicTableModal`).
+- **Create** stays disabled until the defining query is edited away from the seeded
+  `DEFAULT_QUERY` placeholder — submitting the untouched template would `CREATE …
+  AS SELECT * FROM my_source_table` and fail server-side.
 - The properties panel reads the defining query from the `text` column of `SHOW
   MATERIALIZED VIEWS`; `comment`, `is_secure`, and `text` are excluded from the
   generic Properties table because they are surfaced in dedicated sections.

@@ -189,9 +189,13 @@ export default function CreateMaterializedViewModal({ db, schema, onClose, onSuc
     }
   };
 
+  // The query editor seeds DEFAULT_QUERY as a template; treat the untouched
+  // placeholder as "not ready" so Create can't fire a statement that references
+  // the obviously-fake `my_source_table` and fails server-side.
   const canSubmit =
     cfg.name.trim().length > 0 &&
-    cfg.query.trim().length > 0;
+    cfg.query.trim().length > 0 &&
+    cfg.query.trim() !== DEFAULT_QUERY.trim();
 
   const handleRun = async () => {
     if (!canSubmit) return;
