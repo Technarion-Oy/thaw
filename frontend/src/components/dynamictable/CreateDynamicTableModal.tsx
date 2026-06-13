@@ -10,13 +10,17 @@
 //
 // @thaw-domain: Object Browser & Administration
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Modal, Form, Input, InputNumber, Checkbox, Select, Space,
   Typography, Button, Alert, Collapse, Tag, Radio,
 } from "antd";
 import { RetweetOutlined, PlusOutlined } from "@ant-design/icons";
-import { BuildCreateDynamicTableSql, ExecDDL, GetQuotedIdentifiersIgnoreCase, ListWarehouses } from "../../../wailsjs/go/app/App";
+import {
+  BuildCreateDynamicTableSql, ExecDDL, GetQuotedIdentifiersIgnoreCase, ListWarehouses,
+  ListDatabases, ListSchemas, ListBasicObjects, GetTableColumns,
+} from "../../../wailsjs/go/app/App";
+import type * as monaco from "monaco-editor";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import type { dynamictable } from "../../../wailsjs/go/models";
 import Editor from "@monaco-editor/react";
@@ -87,6 +91,19 @@ export default function CreateDynamicTableModal({ db, schema, onClose, onSuccess
   const [warehouses, setWarehouses] = useState<string[]>([]);
   const [loadingWarehouses, setLoadingWarehouses] = useState(false);
 
+  // "Insert from table" picker — generates the same SELECT as a drag-and-drop
+  // from the object store, inserted at the cursor in the query editor.
+  const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+  const [pickerDb, setPickerDb] = useState(db);
+  const [pickerSchema, setPickerSchema] = useState(schema);
+  const [pickerTable, setPickerTable] = useState("");
+  const [dbOptions, setDbOptions] = useState<string[]>([]);
+  const [schemaOptions, setSchemaOptions] = useState<string[]>([]);
+  const [tableOptions, setTableOptions] = useState<string[]>([]);
+  const [loadingSchemas, setLoadingSchemas] = useState(false);
+  const [loadingTables, setLoadingTables] = useState(false);
+  const [inserting, setInserting] = useState(false);
+
   useEffect(() => {
     GetQuotedIdentifiersIgnoreCase()
       .then((v) => setQuotedIdentifiersIgnoreCase(v ?? false))
@@ -122,6 +139,84 @@ export default function CreateDynamicTableModal({ db, schema, onClose, onSuccess
   };
 
   const removeTag = (name: string) => set("tags", (cfg.tags ?? []).filter((t) => t.name !== name));
+
+  // Load databases once; schemas/tables react to the current picker selection.
+  useEffect(() => {
+    ListDatabases().then((d) => setDbOptions(d ?? [])).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!pickerDb) { setSchemaOptions([]); return; }
+    setLoadingSchemas(true);
+    ListSchemas(pickerDb)
+      .then((s) => setSchemaOptions(s ?? []))
+      .catch(() => setSchemaOptions([]))
+      .finally(() => setLoadingSchemas(false));
+  }, [pickerDb]);
+
+  useEffect(() => {
+    if (!pickerDb || !pickerSchema) { setTableOptions([]); return; }
+    setLoadingTables(true);
+    ListBasicObjects(pickerDb, pickerSchema)
+      .then((objs) => setTableOptions(
+        (objs ?? []).filter((o) => o.kind === "TABLE" || o.kind === "VIEW").map((o) => o.name),
+      ))
+      .catch(() => setTableOptions([]))
+      .finally(() => setLoadingTables(false));
+  }, [pickerDb, pickerSchema]);
+
+  const onPickDb = (v?: string) => {
+    setPickerDb(v ?? "");
+    setPickerSchema("");
+    setPickerTable("");
+  };
+  const onPickSchema = (v?: string) => {
+    setPickerSchema(v ?? "");
+    setPickerTable("");
+  };
+
+  // Builds the same SELECT a table drag-and-drop into the SQL editor produces:
+  // every column double-quoted (one per line) from the 3-part FQN, falling back
+  // to SELECT * if the column list can't be fetched.
+  const insertSelect = async () => {
+    if (!pickerDb || !pickerSchema || !pickerTable) return;
+    setInserting(true);
+    try {
+      const esc = (s: string) => s.replace(/"/g, '""');
+      const fqn = `"${esc(pickerDb)}"."${esc(pickerSchema)}"."${esc(pickerTable)}"`;
+      let snippet: string;
+      try {
+        const cols = await GetTableColumns(pickerDb, pickerSchema, pickerTable);
+        const colList = (cols ?? []).map((c) => `    "${esc(c)}"`).join(",\n");
+        snippet = colList ? `SELECT\n${colList}\nFROM ${fqn}` : `SELECT *\nFROM ${fqn}`;
+      } catch {
+        snippet = `SELECT *\nFROM ${fqn}`;
+      }
+
+      const ed = editorRef.current;
+      const current = (ed?.getValue() ?? cfg.query).trim();
+      // Replace the whole body when it's empty or still the placeholder;
+      // otherwise insert at the cursor so multi-table queries can be assembled.
+      if (!current || current === DEFAULT_QUERY.trim()) {
+        // Controlled `value` prop pushes this into the editor model on re-render.
+        set("query", snippet);
+      } else if (ed) {
+        const sel = ed.getSelection();
+        const pos = ed.getPosition() ?? { lineNumber: 1, column: 1 };
+        const range = sel ?? {
+          startLineNumber: pos.lineNumber, startColumn: pos.column,
+          endLineNumber: pos.lineNumber, endColumn: pos.column,
+        };
+        ed.executeEdits("insert-select", [{ range, text: snippet, forceMoveMarkers: true }]);
+        ed.pushUndoStop();
+        ed.focus();
+      } else {
+        set("query", `${cfg.query}\n${snippet}`);
+      }
+    } finally {
+      setInserting(false);
+    }
+  };
 
   const canSubmit =
     cfg.name.trim().length > 0 &&
@@ -454,6 +549,50 @@ export default function CreateDynamicTableModal({ db, schema, onClose, onSuccess
         />
 
         <Form.Item label="Defining Query (AS)" required style={itemStyle}>
+          <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <Text type="secondary" style={{ fontSize: 11 }}>Insert from table:</Text>
+            <Select
+              size="small"
+              showSearch
+              placeholder="Database"
+              style={{ width: 150 }}
+              value={pickerDb || undefined}
+              onChange={onPickDb}
+              options={dbOptions.map((n) => ({ value: n, label: n }))}
+            />
+            <Select
+              size="small"
+              showSearch
+              placeholder="Schema"
+              style={{ width: 150 }}
+              value={pickerSchema || undefined}
+              onChange={onPickSchema}
+              disabled={!pickerDb}
+              loading={loadingSchemas}
+              options={schemaOptions.map((n) => ({ value: n, label: n }))}
+            />
+            <Select
+              size="small"
+              showSearch
+              placeholder="Table / View"
+              style={{ width: 180 }}
+              value={pickerTable || undefined}
+              onChange={(v) => setPickerTable(v ?? "")}
+              disabled={!pickerSchema}
+              loading={loadingTables}
+              options={tableOptions.map((n) => ({ value: n, label: n }))}
+              notFoundContent={loadingTables ? "Loading…" : "No tables/views"}
+            />
+            <Button
+              size="small"
+              icon={<PlusOutlined />}
+              onClick={insertSelect}
+              loading={inserting}
+              disabled={!pickerTable}
+            >
+              Insert SELECT
+            </Button>
+          </div>
           <div style={{ border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
             <Editor
               height={140}
@@ -461,7 +600,7 @@ export default function CreateDynamicTableModal({ db, schema, onClose, onSuccess
               theme={editorTheme}
               value={cfg.query}
               onChange={(v) => set("query", v ?? "")}
-              onMount={(editor) => patchMonacoClipboard(editor)}
+              onMount={(editor) => { editorRef.current = editor; patchMonacoClipboard(editor); }}
               options={{
                 minimap: { enabled: false },
                 lineNumbers: "off",
