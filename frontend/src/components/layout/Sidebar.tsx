@@ -53,6 +53,7 @@ import {
   SyncOutlined,
   RetweetOutlined,
   CloudServerOutlined,
+  BlockOutlined,
   KeyOutlined,
   DisconnectOutlined,
   BranchesOutlined,
@@ -68,7 +69,7 @@ import {
 import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, AlterDynamicTable, AlterExternalTable, UploadFileToStage, PickOpenFile, ExecDDL, ListStageEntries, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory, BuildDropColumnSql, BuildRenameColumnSql, BuildSetColumnNotNullSql, BuildDropColumnNotNullSql, BuildSetColumnCommentSql, BuildChangeColumnTypeSql } from "../../../wailsjs/go/app/App";
+import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, AlterDynamicTable, AlterExternalTable, AlterMaterializedView, UploadFileToStage, PickOpenFile, ExecDDL, ListStageEntries, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory, BuildDropColumnSql, BuildRenameColumnSql, BuildSetColumnNotNullSql, BuildDropColumnNotNullSql, BuildSetColumnCommentSql, BuildChangeColumnTypeSql } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl, { identToken, quoteIdent } from "../shared/ObjectNameCaseControl";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
@@ -112,6 +113,8 @@ import CreateDynamicTableModal from "../dynamictable/CreateDynamicTableModal";
 import DynamicTablePropertiesModal from "../dynamictable/DynamicTablePropertiesModal";
 import CreateExternalTableModal from "../externaltable/CreateExternalTableModal";
 import ExternalTablePropertiesModal from "../externaltable/ExternalTablePropertiesModal";
+import CreateMaterializedViewModal from "../materializedview/CreateMaterializedViewModal";
+import MaterializedViewPropertiesModal from "../materializedview/MaterializedViewPropertiesModal";
 import CreatePipeModal from "../pipe/CreatePipeModal";
 import PipePropertiesModal from "../pipe/PipePropertiesModal";
 import RefreshPipeModal from "../pipe/RefreshPipeModal";
@@ -133,6 +136,7 @@ const KIND_LABEL: Record<string, string> = {
   VIEW:          "Views",
   "DYNAMIC TABLE": "Dynamic Tables",
   "EXTERNAL TABLE": "External Tables",
+  "MATERIALIZED VIEW": "Materialized Views",
   FUNCTION:      "Functions",
   PROCEDURE:     "Procedures",
   SEQUENCE:      "Sequences",
@@ -147,7 +151,7 @@ const KIND_LABEL: Record<string, string> = {
   "DBT PROJECT": "DBT Projects",
 };
 
-const KIND_ORDER = ["TABLE", "VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT"];
+const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT"];
 
 const kindIcon = (kind: string) => objectIcon(kind);
 
@@ -514,6 +518,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [dynamicTablePropsModal, setDynamicTablePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createExternalTableModal, setCreateExternalTableModal] = useState<{ db: string; schema: string } | null>(null);
   const [externalTablePropsModal, setExternalTablePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [createMaterializedViewModal, setCreateMaterializedViewModal] = useState<{ db: string; schema: string } | null>(null);
+  const [materializedViewPropsModal, setMaterializedViewPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createPipeModal, setCreatePipeModal] = useState<{ db: string; schema: string } | null>(null);
   const [pipePropsModal, setPipePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [refreshPipeModal, setRefreshPipeModal] = useState<{ db: string; schema: string; name: string } | null>(null);
@@ -1761,6 +1767,70 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     });
   };
 
+  const openCreateMaterializedView = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    setCtxMenu(null);
+    setCreateMaterializedViewModal({ db, schema });
+  };
+
+  const openMaterializedViewProperties = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    setMaterializedViewPropsModal({ db, schema, name });
+  };
+
+  const suspendMaterializedView = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    modal.confirm({
+      title: "Suspend Materialized View",
+      content: `Suspend use and maintenance of "${name}"?`,
+      okText: "Suspend",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await AlterMaterializedView(db, schema, name, "SUSPEND");
+          contextMsg.success(`Materialized view "${name}" suspended.`);
+        } catch (e) {
+          contextMsg.error(`Failed to suspend materialized view: ${String(e)}`);
+        }
+      },
+    });
+  };
+
+  const resumeMaterializedView = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    modal.confirm({
+      title: "Resume Materialized View",
+      content: `Resume use and maintenance of "${name}"?`,
+      okText: "Resume",
+      onOk: async () => {
+        try {
+          await AlterMaterializedView(db, schema, name, "RESUME");
+          contextMsg.success(`Materialized view "${name}" resumed.`);
+        } catch (e) {
+          contextMsg.error(`Failed to resume materialized view: ${String(e)}`);
+        }
+      },
+    });
+  };
+
   const openCommitFilterModal = () => {
     if (!ctxMenu) return;
     const parts = ctxMenu.nodeKey.split(":");
@@ -2031,6 +2101,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       case "VIEW":        sql = `DROP VIEW ${fullName};`; break;
       case "DYNAMIC TABLE": sql = `DROP DYNAMIC TABLE ${fullName};`; break;
       case "EXTERNAL TABLE": sql = `DROP EXTERNAL TABLE ${fullName};`; break;
+      case "MATERIALIZED VIEW": sql = `DROP MATERIALIZED VIEW ${fullName};`; break;
       case "SEQUENCE":    sql = `DROP SEQUENCE ${fullName};`; break;
       case "STAGE":       sql = `DROP STAGE ${fullName};`; break;
       case "STREAM":      sql = `DROP STREAM ${fullName};`; break;
@@ -2220,6 +2291,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       case "TABLE":       sql = `ALTER TABLE ${fullOld} RENAME TO ${fullNew};`; break;
       case "VIEW":        sql = `ALTER VIEW ${fullOld} RENAME TO ${fullNew};`; break;
       case "DYNAMIC TABLE": sql = `ALTER DYNAMIC TABLE ${fullOld} RENAME TO ${fullNew};`; break;
+      case "MATERIALIZED VIEW": sql = `ALTER MATERIALIZED VIEW ${fullOld} RENAME TO ${fullNew};`; break;
       case "SEQUENCE":    sql = `ALTER SEQUENCE ${fullOld} RENAME TO ${fullNew};`; break;
       case "STAGE":       sql = `ALTER STAGE ${fullOld} RENAME TO ${fullNew};`; break;
       case "STREAM":      sql = `ALTER STREAM ${fullOld} RENAME TO ${fullNew};`; break;
@@ -2659,6 +2731,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         case "VIEW":        return `DROP VIEW ${fullName};`;
         case "DYNAMIC TABLE": return `DROP DYNAMIC TABLE ${fullName};`;
         case "EXTERNAL TABLE": return `DROP EXTERNAL TABLE ${fullName};`;
+        case "MATERIALIZED VIEW": return `DROP MATERIALIZED VIEW ${fullName};`;
         case "SEQUENCE":    return `DROP SEQUENCE ${fullName};`;
         case "STAGE":       return `DROP STAGE ${fullName};`;
         case "STREAM":      return `DROP STREAM ${fullName};`;
@@ -3134,6 +3207,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
               {menuItem("Table…", <TableOutlined style={{ fontSize: 12 }} />, openCreateTable)}
               {menuItem("Dynamic Table…", <RetweetOutlined style={{ fontSize: 12 }} />, openCreateDynamicTable)}
               {menuItem("External Table…", <CloudServerOutlined style={{ fontSize: 12 }} />, openCreateExternalTable)}
+              {menuItem("Materialized View…", <BlockOutlined style={{ fontSize: 12 }} />, openCreateMaterializedView)}
               {menuItem("Stage…", <InboxOutlined style={{ fontSize: 12 }} />, openCreateStage)}
               {menuItem("File Format…", <FileTextOutlined style={{ fontSize: 12 }} />, openCreateFileFormat, undefined, !featureFlags.fileFormatBuilder, "File Format Builder is disabled. Enable it under View → Enabled Features…")}
 
@@ -3161,6 +3235,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Create Dynamic Table…", <RetweetOutlined style={{ fontSize: 12 }} />, openCreateDynamicTable)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "EXTERNAL TABLE" &&
             menuItem("Create External Table…", <CloudServerOutlined style={{ fontSize: 12 }} />, openCreateExternalTable)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "MATERIALIZED VIEW" &&
+            menuItem("Create Materialized View…", <BlockOutlined style={{ fontSize: 12 }} />, openCreateMaterializedView)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "PIPE" &&
             menuItem("Create Pipe…", <ApiOutlined style={{ fontSize: 12 }} />, openCreatePipe)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "FILE FORMAT" &&
@@ -3189,6 +3265,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openExternalTableProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "EXTERNAL TABLE" &&
             menuItem("Refresh…", <SyncOutlined style={{ fontSize: 12 }} />, refreshExternalTable)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MATERIALIZED VIEW" &&
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openMaterializedViewProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MATERIALIZED VIEW" &&
+            menuItem("Suspend", <PauseCircleOutlined style={{ fontSize: 12 }} />, suspendMaterializedView)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MATERIALIZED VIEW" &&
+            menuItem("Resume", <PlayCircleOutlined style={{ fontSize: 12 }} />, resumeMaterializedView)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openPipeProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
@@ -3245,7 +3327,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {/* DBT Project version/directory/file context menu */}
           {(ctxMenu.nodeType === "dbtversion" || ctxMenu.nodeType === "dbtdir") && menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshTreeNode)}
 
-          {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW" || ctxMenu.objKind === "DYNAMIC TABLE" || ctxMenu.objKind === "EXTERNAL TABLE") &&
+          {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW" || ctxMenu.objKind === "DYNAMIC TABLE" || ctxMenu.objKind === "EXTERNAL TABLE" || ctxMenu.objKind === "MATERIALIZED VIEW") &&
             menuItem("Select Top 1000 Rows", <TableOutlined style={{ fontSize: 12 }} />, selectTop1000)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
             menuItem("Select for Insert Target", <SyncOutlined style={{ fontSize: 12 }} />, selectForInsertTarget, undefined, !featureFlags.insertMapping, "Insert Mapping is disabled. Enable it under View → Enabled Features…")}
@@ -3288,7 +3370,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Make Live", <CloudUploadOutlined style={{ fontSize: 12 }} />, makeNotebookLive, undefined, !featureFlags.snowparkNotebooks, "Snowpark & Notebooks is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "obj" && menuItem("View Definition", null, viewDefinition)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "MATERIALIZED VIEW" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" &&
             menuItem("Select for Comparison", <DiffOutlined style={{ fontSize: 12 }} />, selectObjForComparison)}
           {ctxMenu.nodeType === "obj" && pendingDiff !== null &&
@@ -3663,6 +3745,24 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={createExternalTableModal.schema}
           onClose={() => setCreateExternalTableModal(null)}
           onSuccess={() => refreshDatabaseByName(createExternalTableModal.db)}
+        />
+      )}
+
+      {createMaterializedViewModal && (
+        <CreateMaterializedViewModal
+          db={createMaterializedViewModal.db}
+          schema={createMaterializedViewModal.schema}
+          onClose={() => setCreateMaterializedViewModal(null)}
+          onSuccess={() => refreshDatabaseByName(createMaterializedViewModal.db)}
+        />
+      )}
+
+      {materializedViewPropsModal && (
+        <MaterializedViewPropertiesModal
+          db={materializedViewPropsModal.db}
+          schema={materializedViewPropsModal.schema}
+          name={materializedViewPropsModal.name}
+          onClose={() => setMaterializedViewPropsModal(null)}
         />
       )}
 

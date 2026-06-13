@@ -51,7 +51,7 @@ Provides object-property queries and column-comment helpers that are not specifi
 - `App.GetColumnComments(db, schema, table)` → `objects.GetColumnComments`
 - `App.SetColumnComment(db, schema, table, column, comment)` → `objects.SetColumnComment`
 
-`GetObjectProperties` is the single entry point for the Properties side-panel. It handles all 20 supported object kinds (DATABASE, SCHEMA, TABLE, VIEW, DYNAMIC TABLE, EXTERNAL TABLE, FUNCTION, PROCEDURE, SEQUENCE, STAGE, STREAM, TASK, FILE FORMAT, PIPE, SECRET, GIT REPOSITORY, DBT PROJECT, WAREHOUSE, ROLE, USER) through a `switch` on `kind`. STAGE additionally merges `DESCRIBE STAGE` rows (keyed as `parent.property`) to expose stage-specific configuration that `SHOW STAGES` omits.
+`GetObjectProperties` is the single entry point for the Properties side-panel. It handles all 21 supported object kinds (DATABASE, SCHEMA, TABLE, VIEW, DYNAMIC TABLE, EXTERNAL TABLE, MATERIALIZED VIEW, FUNCTION, PROCEDURE, SEQUENCE, STAGE, STREAM, TASK, FILE FORMAT, PIPE, SECRET, GIT REPOSITORY, DBT PROJECT, WAREHOUSE, ROLE, USER) through a `switch` on `kind`. STAGE additionally merges `DESCRIBE STAGE` rows (keyed as `parent.property`) to expose stage-specific configuration that `SHOW STAGES` omits.
 
 `snowflake.ResultToPairs` (from `internal/snowflake/result.go`) converts a `SHOW` result row into `[]PropertyPair{Key, Value}` by pairing column names with cell values. `objects` does not duplicate this logic.
 

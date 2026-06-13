@@ -16,6 +16,7 @@ import (
 	"thaw/internal/dynamictable"
 	"thaw/internal/externaltable"
 	"thaw/internal/fileformat"
+	"thaw/internal/materializedview"
 	"thaw/internal/pipe"
 	"thaw/internal/procedure"
 	"thaw/internal/secret"
@@ -117,6 +118,11 @@ func (a *App) BuildCreateDynamicTableSql(database, schema string, cfg dynamictab
 // BuildCreateExternalTableSql returns the SQL for creating a Snowflake EXTERNAL TABLE.
 func (a *App) BuildCreateExternalTableSql(database, schema string, cfg externaltable.ExternalTableConfig) (string, error) {
 	return externaltable.BuildCreateExternalTableSql(database, schema, cfg)
+}
+
+// BuildCreateMaterializedViewSql returns the SQL for creating a Snowflake MATERIALIZED VIEW.
+func (a *App) BuildCreateMaterializedViewSql(database, schema string, cfg materializedview.MaterializedViewConfig) (string, error) {
+	return materializedview.BuildCreateMaterializedViewSql(database, schema, cfg)
 }
 
 // BuildCreateStageSql returns the CREATE STAGE SQL statement.

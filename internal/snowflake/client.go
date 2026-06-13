@@ -3112,8 +3112,8 @@ func (c *Client) ListBasicObjects(ctx context.Context, database, schema string) 
 
 // ListExtendedObjects returns the "extended" objects inside a schema by running
 // dedicated SHOW commands for object types not covered by SHOW OBJECTS
-// (DYNAMIC TABLE, EXTERNAL TABLE, PROCEDURE, FUNCTION, TASK, STREAM, STAGE,
-// FILE FORMAT, PIPE, NOTEBOOK, SECRET, GIT REPOSITORY). Individual commands that
+// (DYNAMIC TABLE, EXTERNAL TABLE, MATERIALIZED VIEW, PROCEDURE, FUNCTION, TASK,
+// STREAM, STAGE, FILE FORMAT, PIPE, NOTEBOOK, SECRET, GIT REPOSITORY). Individual commands that
 // fail (e.g. due to missing privileges) are silently skipped. Includes the TASK
 // finalize enrichment logic.
 func (c *Client) ListExtendedObjects(ctx context.Context, database, schema string) ([]SnowflakeObject, error) {
@@ -3126,6 +3126,7 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 	commands := []showCmd{
 		{fmt.Sprintf("SHOW DYNAMIC TABLES IN SCHEMA %s", q), "DYNAMIC TABLE"},
 		{fmt.Sprintf("SHOW EXTERNAL TABLES IN SCHEMA %s", q), "EXTERNAL TABLE"},
+		{fmt.Sprintf("SHOW MATERIALIZED VIEWS IN SCHEMA %s", q), "MATERIALIZED VIEW"},
 		{fmt.Sprintf("SHOW PROCEDURES IN SCHEMA %s", q), "PROCEDURE"},
 		{fmt.Sprintf("SHOW FUNCTIONS IN SCHEMA %s", q), "FUNCTION"},
 		{fmt.Sprintf("SHOW TASKS IN SCHEMA %s", q), "TASK"},
@@ -3270,6 +3271,11 @@ func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]Sn
 	// is_external=Y column when present; drop any remaining (schema, name)
 	// collision as a fallback for editions that omit that column.
 	basic = dedupeExternalTables(basic, extended)
+	// Materialized views are listed explicitly by ListExtendedObjects (kind
+	// "MATERIALIZED VIEW"). They can also surface in SHOW OBJECTS (typically as a
+	// VIEW), so drop any (schema, name) collision to avoid duplicate tree entries
+	// — a regular view and a materialized view cannot share a name in one schema.
+	basic = dedupeMaterializedViews(basic, extended)
 	// slices.Concat allocates a fresh backing array rather than appending into
 	// basic's spare capacity: when neither dedupe reallocated, basic can still be
 	// the "basic"-cache backing slice, and appending into it would alias that
@@ -3315,6 +3321,12 @@ func dedupeExternalTables(basic, extended []SnowflakeObject) []SnowflakeObject {
 // an extended object of kind "DYNAMIC TABLE". See dedupeByExtendedKind.
 func dedupeDynamicTables(basic, extended []SnowflakeObject) []SnowflakeObject {
 	return dedupeByExtendedKind(basic, extended, "DYNAMIC TABLE")
+}
+
+// dedupeMaterializedViews removes from basic any object whose (schema, name)
+// matches an extended object of kind "MATERIALIZED VIEW". See dedupeByExtendedKind.
+func dedupeMaterializedViews(basic, extended []SnowflakeObject) []SnowflakeObject {
+	return dedupeByExtendedKind(basic, extended, "MATERIALIZED VIEW")
 }
 
 // getObjectCache returns a cached result if it exists and hasn't expired.
@@ -3441,6 +3453,10 @@ func buildGetDDLQuery(database, schema, kind, name, arguments string) (query, id
 		ddlKind = "DYNAMIC_TABLE"
 	case "EXTERNAL TABLE":
 		ddlKind = "EXTERNAL_TABLE"
+	case "MATERIALIZED VIEW":
+		// GET_DDL has no MATERIALIZED_VIEW object type — TABLE and VIEW are
+		// interchangeable and materialized views are retrieved via 'VIEW'.
+		ddlKind = "VIEW"
 	}
 	escapedKind := strings.ReplaceAll(ddlKind, "'", "''")
 	// The third argument (true) enables recursive DDL output for objects that

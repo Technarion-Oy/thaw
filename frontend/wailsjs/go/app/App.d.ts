@@ -10,6 +10,7 @@ import {dynamictable} from '../models';
 import {externaltable} from '../models';
 import {fileformat} from '../models';
 import {snowgitrepo} from '../models';
+import {materializedview} from '../models';
 import {pipe} from '../models';
 import {secret} from '../models';
 import {erdesigner} from '../models';
@@ -43,6 +44,8 @@ export function AlterBackupSet(arg1:string,arg2:string,arg3:string,arg4:string):
 export function AlterDynamicTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterExternalTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterMaterializedView(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterPipe(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -87,6 +90,8 @@ export function BuildCreateExternalTableSql(arg1:string,arg2:string,arg3:externa
 export function BuildCreateFileFormatSql(arg1:string,arg2:string,arg3:fileformat.FileFormatConfig):Promise<string>;
 
 export function BuildCreateGitRepositorySql(arg1:string,arg2:string,arg3:snowgitrepo.GitRepositoryConfig):Promise<string>;
+
+export function BuildCreateMaterializedViewSql(arg1:string,arg2:string,arg3:materializedview.MaterializedViewConfig):Promise<string>;
 
 export function BuildCreatePipeSql(arg1:string,arg2:string,arg3:pipe.PipeConfig):Promise<string>;
 
