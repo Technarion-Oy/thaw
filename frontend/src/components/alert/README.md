@@ -14,7 +14,9 @@
 - Both delegate to IPC: `BuildCreateAlertSql` / `ExecDDL` (create) and
   `GetObjectProperties` / `AlterAlert` (properties + lifecycle).
 - `AlterAlert(db, schema, name, clause)` runs free-form `ALTER ALERT … <clause>`
-  for `RESUME`, `SUSPEND`, `EXECUTE`, `SET`/`UNSET COMMENT`, etc.
+  for `RESUME`, `SUSPEND`, `SET`/`UNSET COMMENT`, etc. Manual execution is the
+  separate `ExecuteAlert` IPC method (the standalone `EXECUTE ALERT <fqn>`
+  statement — `EXECUTE` is not an `ALTER ALERT` clause).
 - Wired into the object tree from `components/layout/Sidebar.tsx` under the
   **Alerts** group (kind `"ALERT"`). Alerts are not queryable tables, so there is
   no **Select Top 1000 Rows**; `ALTER ALERT` has no `RENAME`, so **Rename** is
