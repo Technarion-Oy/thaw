@@ -17,7 +17,7 @@ import {
 import {
   CloudServerOutlined, EditOutlined, CheckOutlined, CloseOutlined, SyncOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterExternalTable } from "../../../wailsjs/go/app/App";
+import { GetObjectProperties, AlterExternalTable, ExecDDL } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -223,12 +223,11 @@ export default function ExternalTablePropertiesModal({ db, schema, name, onClose
     }
   };
 
+  // The ALTER EXTERNAL TABLE grammar does not accept SET/UNSET COMMENT, so use
+  // the general-purpose COMMENT ON TABLE statement (external tables are tables);
+  // clearing the comment is COMMENT … IS ''.
   const saveComment = async (comment: string) => {
-    if (comment.trim() === "") {
-      await AlterExternalTable(db, schema, name, "UNSET COMMENT");
-    } else {
-      await AlterExternalTable(db, schema, name, `SET COMMENT = ${q1(comment)}`);
-    }
+    await ExecDDL(`COMMENT ON TABLE ${tableRef} IS ${q1(comment.trim())}`);
     await reload();
   };
 

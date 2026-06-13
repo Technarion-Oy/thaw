@@ -34,8 +34,10 @@ statements directly from `internal/app/externaltable.go`
   the columns flagged `Partition` (in declared order); the partition columns must
   also appear in the column list, matching Snowflake's grammar.
 - `FILE_FORMAT` prefers a named format (`FORMAT_NAME = '<name>'`) over an inline
-  `TYPE`; when neither is supplied it falls back to `TYPE = CSV` (Snowflake's own
-  default) so the preview stays valid SQL.
+  `TYPE`; when a `TYPE` is set it is used directly, and when neither is supplied
+  the clause emits a completable `FORMAT_NAME = '<file_format>'` placeholder (the
+  UI always supplies a concrete `TYPE` in inline-type mode, so an empty type
+  means "named format, not yet chosen").
 - Required fields left empty emit obvious placeholders so the live SQL preview
   reads as a completable template — `LOCATION = @<stage>/<path>` and the
   `external_table_name` token.

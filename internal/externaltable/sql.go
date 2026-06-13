@@ -82,17 +82,19 @@ func tagClause(tags []TagPair) string {
 }
 
 // fileFormatClause renders the FILE_FORMAT clause. A named format takes
-// precedence over an inline TYPE; when neither is set the clause falls back to
-// Snowflake's own default of TYPE = CSV so the preview stays valid SQL.
+// precedence over an inline TYPE. When a TYPE is set it is used directly; when
+// neither a name nor a type is set the clause emits a completable
+// FORMAT_NAME placeholder so the preview reflects "named format, not yet chosen"
+// rather than silently defaulting to a TYPE (the UI always supplies a concrete
+// TYPE when the user is in inline-type mode).
 func fileFormatClause(cfg ExternalTableConfig) string {
 	if name := strings.TrimSpace(cfg.FileFormatName); name != "" {
 		return fmt.Sprintf("FILE_FORMAT = (FORMAT_NAME = '%s')", escLit(name))
 	}
-	typ := strings.TrimSpace(cfg.FileFormatType)
-	if typ == "" {
-		typ = "CSV"
+	if typ := strings.TrimSpace(cfg.FileFormatType); typ != "" {
+		return fmt.Sprintf("FILE_FORMAT = (TYPE = %s)", strings.ToUpper(typ))
 	}
-	return fmt.Sprintf("FILE_FORMAT = (TYPE = %s)", strings.ToUpper(typ))
+	return "FILE_FORMAT = (FORMAT_NAME = '<file_format>')"
 }
 
 // BuildCreateExternalTableSql constructs a CREATE EXTERNAL TABLE statement from

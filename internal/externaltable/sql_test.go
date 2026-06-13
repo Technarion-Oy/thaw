@@ -63,12 +63,22 @@ func TestBuildCreateExternalTableSql(t *testing.T) {
 			absent:   []string{"FORMAT_NAME"},
 		},
 		{
-			name: "default file format is CSV",
+			name: "explicit inline type is emitted",
+			cfg: ExternalTableConfig{
+				Name:           "ET",
+				Location:       "@s/p",
+				FileFormatType: "CSV",
+			},
+			contains: []string{"FILE_FORMAT = (TYPE = CSV)"},
+		},
+		{
+			name: "no name and no type emits a FORMAT_NAME placeholder",
 			cfg: ExternalTableConfig{
 				Name:     "ET",
 				Location: "@s/p",
 			},
-			contains: []string{"FILE_FORMAT = (TYPE = CSV)"},
+			contains: []string{"FILE_FORMAT = (FORMAT_NAME = '<file_format>')"},
+			absent:   []string{"TYPE ="},
 		},
 		{
 			name: "if not exists wins when not or replace",
@@ -146,7 +156,7 @@ func TestBuildCreateExternalTableSqlPlaceholders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	for _, want := range []string{"external_table_name", "LOCATION = @<stage>/<path>", "FILE_FORMAT = (TYPE = CSV)"} {
+	for _, want := range []string{"external_table_name", "LOCATION = @<stage>/<path>", "FILE_FORMAT = (FORMAT_NAME = '<file_format>')"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("expected placeholder %q in:\n%s", want, got)
 		}

@@ -211,9 +211,29 @@ export default function CreateExternalTableModal({ db, schema, onClose, onSucces
   const pathSegments = browsePath.split("/").filter(Boolean);
   const segmentPaths = pathSegments.map((_, i) => pathSegments.slice(0, i + 1).join("/") + "/");
 
+  // FORMAT_NAME is resolved relative to the external table's own schema
+  // (db.schema). When the picked format lives in a different schema, store the
+  // fully-qualified (quoted) name so creation references the right object.
   const useNamedFormat = (name: string) => {
-    set("fileFormatName", name);
+    const esc = (s: string) => s.replace(/"/g, '""');
+    const sameSchema = pickerDb === db && pickerSchema === schema;
+    set(
+      "fileFormatName",
+      sameSchema ? name : `"${esc(pickerDb)}"."${esc(pickerSchema)}"."${esc(name)}"`,
+    );
     setFmtMode("named");
+  };
+
+  // Switching to "named" clears the inline TYPE so the builder emits a
+  // FORMAT_NAME placeholder (instead of a contradictory TYPE) until a format is
+  // chosen; switching back restores a concrete default.
+  const changeFmtMode = (mode: "type" | "named") => {
+    setFmtMode(mode);
+    if (mode === "named") {
+      set("fileFormatType", "");
+    } else if (!cfg.fileFormatType.trim()) {
+      set("fileFormatType", "CSV");
+    }
   };
 
   const canSubmit =
@@ -566,7 +586,7 @@ export default function CreateExternalTableModal({ db, schema, onClose, onSucces
         <Form.Item label="File Format" required style={itemStyle}>
           <Radio.Group
             value={fmtMode}
-            onChange={(e) => setFmtMode(e.target.value)}
+            onChange={(e) => changeFmtMode(e.target.value)}
             optionType="button"
             buttonStyle="solid"
             size="small"
