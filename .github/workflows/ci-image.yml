@@ -14,6 +14,13 @@ on:
     paths:
       - ".github/docker/ci.Dockerfile"
       - ".github/workflows/ci-image.yml"
+  # TEMPORARY (PR #483): build & push the image from this PR so build-check can
+  # adopt it before merge. Remove this pull_request trigger before merging —
+  # keep only push-to-main, schedule, and workflow_dispatch.
+  pull_request:
+    paths:
+      - ".github/docker/ci.Dockerfile"
+      - ".github/workflows/ci-image.yml"
   schedule:
     - cron: "0 5 * * 1" # Every Monday at 05:00 UTC — refresh base-image patches
   workflow_dispatch:
