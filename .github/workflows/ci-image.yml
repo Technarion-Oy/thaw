@@ -1,0 +1,61 @@
+name: CI Image
+
+# Builds and pushes the prebuilt CI base image (.github/docker/ci.Dockerfile)
+# to GHCR. The self-hosted workflows pull this image instead of apt-installing
+# the toolchain on every run.
+#
+# Runs when the Dockerfile/this workflow changes, weekly to pick up base-image
+# security updates, and on manual dispatch. Trigger it manually once before the
+# consuming workflows can pull `:latest`.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/docker/ci.Dockerfile"
+      - ".github/workflows/ci-image.yml"
+  schedule:
+    - cron: "0 5 * * 1" # Every Monday at 05:00 UTC — refresh base-image patches
+  workflow_dispatch:
+
+concurrency:
+  group: ci-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-push:
+    name: Build & push CI image
+    # No container: this job runs directly on the self-hosted host so the
+    # Docker daemon is available to build and push the image.
+    runs-on: self-hosted
+    permissions:
+      contents: read
+      packages: write
+
+    env:
+      IMAGE: ghcr.io/technarion-oy/thaw-ci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify Docker is available
+        run: docker --version
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The Dockerfile copies nothing from the repo, so use a tiny build context
+      # (the docker dir) rather than the whole working tree.
+      - name: Build and push image
+        run: |
+          docker build \
+            -f .github/docker/ci.Dockerfile \
+            -t "$IMAGE:latest" \
+            -t "$IMAGE:${GITHUB_SHA}" \
+            .github/docker
+          docker push "$IMAGE:latest"
+          docker push "$IMAGE:${GITHUB_SHA}"
