@@ -32,9 +32,12 @@ concurrency:
 jobs:
   build-push:
     name: Build & push CI image
-    # No container: this job runs directly on the self-hosted host so the
-    # Docker daemon is available to build and push the image.
-    runs-on: self-hosted
+    # GitHub-hosted: ships Docker + a clean workspace. The self-hosted runners
+    # mix container and host jobs on a shared _work dir, which leaves root-owned
+    # files a host job can't clean (checkout fails on .git/index.lock). This is
+    # an infrequent image build that publishes to GHCR for the self-hosted jobs
+    # to pull, so a hosted runner is the right tool (matches build.yml).
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
