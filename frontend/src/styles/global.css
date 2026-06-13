@@ -53,6 +53,7 @@
   --icon-schema:      #a371f7;  /* violet                                   */
   --icon-table:       #79c0ff;  /* light blue                               */
   --icon-view:        #56d364;  /* green                                    */
+  --icon-dynamictable:#8b9bff;  /* periwinkle (auto-refreshing table)       */
   --icon-function:    #f0883e;  /* orange                                   */
   --icon-procedure:   #ff7b72;  /* coral                                    */
   --icon-sequence:    #d2a8ff;  /* lilac                                    */
@@ -113,6 +114,7 @@
   --icon-schema:      #8250df;
   --icon-table:       #1f6feb;
   --icon-view:        #1a7f37;
+  --icon-dynamictable:#3b4cca;
   --icon-function:    #bc4c00;
   --icon-procedure:   #cf222e;
   --icon-sequence:    #6f42c1;

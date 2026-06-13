@@ -96,7 +96,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
 
 ## Object Browser
 
-- Browse all databases → schemas → tables, views, functions, procedures, sequences, stages, streams, tasks, file formats, pipes, notebooks, secrets, and git repositories
+- Browse all databases → schemas → tables, views, dynamic tables, functions, procedures, sequences, stages, streams, tasks, file formats, pipes, notebooks, secrets, and git repositories
 - **Multi-selection** — hold `⌘` (macOS) or `Ctrl` (Windows/Linux) and click anywhere on an object row to select it; selected objects are highlighted across the full width of the sidebar; click any non-modifier area to clear the selection
 - **Batch deletion** — when multiple objects are selected, right-click any of them and choose **Delete N selected objects…** to drop all of them in one operation; a confirmation dialog lists all objects to be removed
 - **Secret Management** — right-click any schema and choose **Create Object** → **Secret…** or right-click an existing secret and choose **Modify…** to open the secret management dialog:
@@ -126,6 +126,13 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
     - **Native dialogs** — uses native OS folder pickers for selecting download targets
     - **Context menu** — right-click any file row in the grid for quick access to Download and Delete actions
   - **Quick Upload** — right-click any stage and choose **Upload File to Stage…** to immediately pick a local file and execute a `PUT` command (internal stages only)
+- **Dynamic Table Management** — right-click any schema and choose **Create Object** → **Dynamic Table…**, or right-click an existing dynamic table (listed under the **Dynamic Tables** group) for dynamic-table-specific operations:
+  - **Create** — dynamic form with name, OR REPLACE / IF NOT EXISTS / TRANSIENT options, **Target Lag** (an interval composer — number + seconds/minutes/hours/days — or the `DOWNSTREAM` keyword), **Warehouse** (selected from a live account-wide list), comment, and an embedded Monaco editor for the defining query with an **Insert from table** database→schema→table picker that drops in the same fully-qualified `SELECT <columns> FROM …` snippet as dragging a table from the object store. An **Advanced options** section covers every other table-level clause: **Refresh Mode** (AUTO/FULL/INCREMENTAL/ADAPTIVE/CUSTOM_INCREMENTAL), **Initialize** (ON_CREATE/ON_SCHEDULE), **Scheduler** (ENABLE/DISABLE), **Initialization Warehouse**, **Cluster By**, **Data Retention** / **Max Data Extension** days, **Row Timestamp** (TRUE/FALSE), **COPY GRANTS**, **REQUIRE USER**, and table-level **Tags**. Live SQL preview shows the full `CREATE DYNAMIC TABLE` statement. (Column-level definitions/policies, `BACKFILL FROM`, `START AT`, `EXECUTE AS USER`, and `REFRESH USING` remain raw-SQL only.)
+  - **Properties** — right-click a dynamic table and choose **Properties…** to view `SHOW DYNAMIC TABLES` metadata (refresh mode, scheduling state, rows, bytes, …) plus inline-editable **Target Lag**, **Warehouse**, and **Comment** (applied via `ALTER DYNAMIC TABLE … SET / UNSET`), header **Refresh / Suspend / Resume** actions, and the rendered **Defining Query**
+  - **Refresh / Suspend / Resume** — right-click a dynamic table for **Refresh…** (manual `ALTER DYNAMIC TABLE … REFRESH`), **Suspend**, or **Resume** to control automatic refreshes; each prompts a confirmation dialog
+  - **Select Top 1000 Rows** — query a dynamic table like a regular table directly from the context menu
+  - **DDL Export** — `GET_DDL('DYNAMIC_TABLE', …)` powers the hover DDL preview, View Definition, and database DDL export
+  - **Drop / Rename** — standard danger-confirmation dialog executes `DROP DYNAMIC TABLE`; **Rename…** issues `ALTER DYNAMIC TABLE … RENAME TO`
 - **Snowpipe Management** — right-click any schema and choose **Create Object** → **Pipe…**, or right-click an existing pipe to access pipe-specific operations:
   - **Create** — dynamic form with name, OR REPLACE / IF NOT EXISTS options, Auto Ingest toggle, Error Integration, AWS SNS Topic, Integration, Comment, and an embedded Monaco editor for the `COPY INTO` statement; live SQL preview shows the full `CREATE PIPE` statement
   - **Properties** — right-click a pipe and choose **Properties…** to view `SHOW PIPES` metadata plus inline-editable **Pipe Execution Paused** (toggle), **Comment** (inline edit / UNSET), and **Tags** (add/remove key-value pairs); changes are applied immediately via `ALTER PIPE … SET / UNSET`
