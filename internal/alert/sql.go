@@ -98,6 +98,12 @@ func BuildCreateAlertSql(db, schema string, cfg AlertConfig) (string, error) {
 		action = "INSERT INTO my_alert_log SELECT CURRENT_TIMESTAMP()"
 	}
 
+	// The IF (EXISTS (<condition>)) wrapper is the only documented CREATE ALERT
+	// form and is mandatory for every permitted condition command — SELECT, SHOW,
+	// and CALL all go inside EXISTS (per the CREATE ALERT grammar). The condition
+	// editor's "Insert CALL…" helper therefore correctly yields
+	// IF (EXISTS (CALL my_proc(...))); the wrapper is intentionally unconditional
+	// and is not special-cased per condition kind.
 	fmt.Fprintf(&sb, "\nIF (EXISTS (\n%s\n))\nTHEN\n%s", condition, action)
 
 	return sb.String() + ";", nil
