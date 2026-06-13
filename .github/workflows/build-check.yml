@@ -1,0 +1,77 @@
+name: Build Check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "frontend/**"
+      - "wails.json"
+      - ".github/workflows/build-check.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "frontend/**"
+      - "wails.json"
+      - ".github/workflows/build-check.yml"
+  workflow_dispatch:
+
+env:
+  PYTHONDONTWRITEBYTECODE: 1
+
+jobs:
+  # Verifies the Wails app compiles and links (Go backend + embedded frontend).
+  # Builds linux/amd64 only — the self-hosted runners are Linux containers.
+  # No -obfuscated/garble here: this is a build-verification check, not a
+  # release artifact, so we skip the slow obfuscation pass. Cross-platform
+  # release binaries are produced by build.yml / manual-release.yml.
+  build:
+    name: Wails build (linux/amd64)
+    runs-on: self-hosted
+    container: ubuntu:24.04
+    permissions:
+      contents: read
+
+    steps:
+      - name: Install base tools
+        run: |
+          apt-get update
+          apt-get install -y git curl wget gcc pkg-config
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install system dependencies
+        run: apt-get update && apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0
+
+      - name: Download Go dependencies
+        run: go mod download
+
+      # webkit2_41: Ubuntu 24.04 only ships libwebkit2gtk-4.1-dev; without this
+      # tag, Wails' CGO directives default to webkit2gtk-4.0 and pkg-config fails.
+      - name: Build Wails app
+        run: wails build -platform linux/amd64 -clean -tags webkit2_41
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+
+      - name: Unlock permissions for host runner agent
+        if: always()
+        run: chmod -R 777 $GITHUB_WORKSPACE/../../_actions || true
