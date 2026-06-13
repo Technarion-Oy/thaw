@@ -3201,9 +3201,43 @@ func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]Sn
 		// If extended objects fail, still return basic objects.
 		return basic, nil
 	}
+	// Dynamic tables are listed explicitly by ListExtendedObjects (kind
+	// "DYNAMIC TABLE"). They also surface in SHOW OBJECTS, where showInSchema
+	// drops them via the is_dynamic=Y column. As a belt-and-suspenders against
+	// Snowflake editions that don't expose that column (which would let a
+	// dynamic table appear under both Tables and Dynamic Tables), also drop any
+	// basic entry whose (schema, name) collides with an extended dynamic table —
+	// a real table and a dynamic table cannot share a name in one schema.
+	basic = dedupeDynamicTables(basic, extended)
 	all := append(basic, extended...)
 	c.putObjectCache(cacheKey, all)
 	return all, nil
+}
+
+// dedupeDynamicTables removes from basic any object whose (schema, name) matches
+// an extended object of kind "DYNAMIC TABLE", preventing duplicate tree nodes
+// when SHOW OBJECTS surfaces a dynamic table that ListExtendedObjects already
+// returned. Matching is case-insensitive.
+func dedupeDynamicTables(basic, extended []SnowflakeObject) []SnowflakeObject {
+	dynKeys := make(map[string]struct{})
+	for _, o := range extended {
+		if o.Kind == "DYNAMIC TABLE" {
+			dynKeys[strings.ToUpper(o.Schema)+"\x00"+strings.ToUpper(o.Name)] = struct{}{}
+		}
+	}
+	if len(dynKeys) == 0 {
+		return basic
+	}
+	// Allocate a fresh slice — basic may be the cached backing array from
+	// ListBasicObjects, so it must not be mutated in place.
+	out := make([]SnowflakeObject, 0, len(basic))
+	for _, o := range basic {
+		if _, dup := dynKeys[strings.ToUpper(o.Schema)+"\x00"+strings.ToUpper(o.Name)]; dup {
+			continue
+		}
+		out = append(out, o)
+	}
+	return out
 }
 
 // getObjectCache returns a cached result if it exists and hasn't expired.

@@ -12,13 +12,13 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Modal, Spin, Button, Input, Space, Typography, Alert, Tag, Tooltip,
+  Modal, Spin, Button, Input, Select, Space, Typography, Alert, Tag, Tooltip,
 } from "antd";
 import {
   RetweetOutlined, EditOutlined, CheckOutlined, CloseOutlined,
   PauseCircleOutlined, PlayCircleOutlined, SyncOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterDynamicTable } from "../../../wailsjs/go/app/App";
+import { GetObjectProperties, AlterDynamicTable, ListWarehouses } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -139,6 +139,85 @@ function EditRow({ label, value, canUnset, onSave, onUnset }: EditRowProps) {
   );
 }
 
+// ─── SelectEditRow ───────────────────────────────────────────────────────────
+// Like EditRow but edits via a Select sourced from a canonical option list, so
+// the saved value is always a valid (correctly-cased) identifier rather than
+// free-typed text.
+
+interface SelectEditRowProps {
+  label: string;
+  value: string;
+  options: string[];
+  loading?: boolean;
+  onSave: (val: string) => Promise<void>;
+}
+
+function SelectEditRow({ label, value, options, loading, onSave }: SelectEditRowProps) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const save = async () => {
+    if (!draft) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave(draft);
+      setEditing(false);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <tr>
+      <td style={LABEL_TD}>{label}</td>
+      <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
+        {editing ? (
+          <Space direction="vertical" size={4} style={{ width: "100%" }}>
+            <Space>
+              <Select
+                size="small"
+                showSearch
+                loading={loading}
+                value={draft || undefined}
+                onChange={(v) => setDraft(v ?? "")}
+                style={{ width: 280 }}
+                placeholder="Select warehouse…"
+                options={(options || []).map((n) => ({ value: n, label: n }))}
+                notFoundContent={loading ? "Loading…" : "No warehouses found"}
+              />
+              <Tooltip title="Save">
+                <Button size="small" icon={<CheckOutlined />} type="primary" onClick={save} loading={saving} disabled={!draft} />
+              </Tooltip>
+              <Tooltip title="Cancel">
+                <Button size="small" icon={<CloseOutlined />} onClick={() => { setEditing(false); setDraft(value); setError(null); }} />
+              </Tooltip>
+            </Space>
+            {error && <Text type="danger" style={{ fontSize: 11 }}>{error}</Text>}
+          </Space>
+        ) : (
+          <Space>
+            <span style={{ color: "var(--text)" }}>{value || <Text type="secondary">(not set)</Text>}</span>
+            <Tooltip title="Edit">
+              <Button
+                type="text"
+                size="small"
+                icon={<EditOutlined style={{ fontSize: 11 }} />}
+                onClick={() => { setDraft(value); setEditing(true); }}
+                style={{ color: "var(--text-muted)" }}
+              />
+            </Tooltip>
+          </Space>
+        )}
+      </td>
+    </tr>
+  );
+}
+
 // ─── Main component ──────────────────────────────────────────────────────────
 
 interface Props {
@@ -153,6 +232,16 @@ export default function DynamicTablePropertiesModal({ db, schema, name, onClose 
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [warehouses, setWarehouses] = useState<string[]>([]);
+  const [loadingWarehouses, setLoadingWarehouses] = useState(false);
+
+  useEffect(() => {
+    setLoadingWarehouses(true);
+    ListWarehouses()
+      .then((names) => setWarehouses(names ?? []))
+      .catch(() => {})
+      .finally(() => setLoadingWarehouses(false));
+  }, []);
 
   const reload = useCallback(async () => {
     setRows(null);
@@ -272,7 +361,13 @@ export default function DynamicTablePropertiesModal({ db, schema, name, onClose 
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
               <EditRow label="Target Lag" value={targetLag} onSave={saveTargetLag} />
-              <EditRow label="Warehouse" value={warehouse} onSave={saveWarehouse} />
+              <SelectEditRow
+                label="Warehouse"
+                value={warehouse}
+                options={warehouses}
+                loading={loadingWarehouses}
+                onSave={saveWarehouse}
+              />
               <EditRow
                 label="Comment"
                 value={comment}

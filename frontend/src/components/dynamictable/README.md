@@ -16,7 +16,7 @@ sidebar context menu in `layout/Sidebar.tsx` via `App.AlterDynamicTable`.
 | File | Purpose |
 |------|---------|
 | `CreateDynamicTableModal.tsx` | `CREATE DYNAMIC TABLE` form — name/options, Target Lag, Warehouse (from `ListWarehouses`), Refresh Mode, Initialize, Cluster By, comment, and an embedded Monaco editor for the defining query. Uses `BuildCreateDynamicTableSql` for live SQL preview. |
-| `DynamicTablePropertiesModal.tsx` | Loads `GetObjectProperties(db, schema, "DYNAMIC TABLE", name)`; renders header Refresh/Suspend/Resume buttons, inline-editable Target Lag / Warehouse / Comment (via `AlterDynamicTable … SET/UNSET`), the remaining `SHOW DYNAMIC TABLES` properties, and the rendered defining query (`text` column). |
+| `DynamicTablePropertiesModal.tsx` | Loads `GetObjectProperties(db, schema, "DYNAMIC TABLE", name)`; renders header Refresh/Suspend/Resume buttons, inline-editable Target Lag (text) / Warehouse (a `Select` sourced from `ListWarehouses` so the saved identifier is always canonically cased) / Comment (via `AlterDynamicTable … SET/UNSET`), the remaining `SHOW DYNAMIC TABLES` properties, and the rendered defining query (`text` column). |
 
 ## Patterns & integration
 
