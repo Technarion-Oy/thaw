@@ -1,6 +1,16 @@
 name: Unit Tests
 
 on:
+  push:
+    branches: ["main"]
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "frontend/src/**"
+      - "frontend/package*.json"
+      - "wails.json"
+      - ".github/workflows/unit-tests.yml"
   pull_request:
     branches: ["main"]
     paths:
