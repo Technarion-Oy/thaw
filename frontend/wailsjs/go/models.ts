@@ -3200,6 +3200,22 @@ export namespace snowflake {
 	        this.lastSuccessLogin = source["lastSuccessLogin"];
 	    }
 	}
+	export class StageSummary {
+	    name: string;
+	    type: string;
+	    url: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new StageSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.type = source["type"];
+	        this.url = source["url"];
+	    }
+	}
 	export class TableForeignKey {
 	    pkDatabase: string;
 	    pkSchema: string;

@@ -1002,6 +1002,10 @@ export function ListStageFiles(arg1, arg2) {
   return window['go']['app']['App']['ListStageFiles'](arg1, arg2);
 }
 
+export function ListStages(arg1, arg2) {
+  return window['go']['app']['App']['ListStages'](arg1, arg2);
+}
+
 export function ListSupportedDbtVersions() {
   return window['go']['app']['App']['ListSupportedDbtVersions']();
 }

@@ -15,7 +15,7 @@ inline-editable settings, and a Refresh action. The remaining operations
 
 | File | Purpose |
 |------|---------|
-| `CreateExternalTableModal.tsx` | `CREATE EXTERNAL TABLE` form — name/options (OR REPLACE / IF NOT EXISTS), a **Location** field with a database→schema→stage picker and an inline **stage browser** (breadcrumb + navigable directory listing backed by `ListStageEntries`/`LIST @stage`); navigating folders keeps the editable `@"db"."schema"."stage"/path` Location text field in sync, and the field can also be typed/edited directly. A **File Format** chooser (inline `TYPE` select or a named `FILE FORMAT` object, sourced from `ListObjects`), an editable **Columns** list (name / type / `AS` expression / partition flag → `PARTITION BY`), and an **Advanced options** `Collapse` (Refresh On Create, Auto Refresh, Pattern, AWS SNS Topic, COPY GRANTS, table-level Tags) plus a comment. Uses `BuildCreateExternalTableSql` for live SQL preview. |
+| `CreateExternalTableModal.tsx` | `CREATE EXTERNAL TABLE` form — name/options (OR REPLACE / IF NOT EXISTS), a **Location** field with a database→schema→stage picker (the stage list is `ListStages` filtered to `EXTERNAL`-type stages, since external tables can only reference an external stage) and an inline **stage browser** (breadcrumb + navigable directory listing backed by `ListStageEntries`/`LIST @stage`); navigating folders keeps the editable `@"db"."schema"."stage"/path` Location text field in sync, and the field can also be typed/edited directly. A **File Format** chooser (inline `TYPE` select or a named `FILE FORMAT` object, sourced from `ListObjects`), an editable **Columns** list (name / type / `AS` expression / partition flag → `PARTITION BY`), and an **Advanced options** `Collapse` (Refresh On Create, Auto Refresh, Pattern, AWS SNS Topic, COPY GRANTS, table-level Tags) plus a comment. Uses `BuildCreateExternalTableSql` for live SQL preview. |
 | `ExternalTablePropertiesModal.tsx` | Loads `GetObjectProperties(db, schema, "EXTERNAL TABLE", name)`; renders a header **Refresh** button and a validity tag, inline-editable **Auto Refresh** (`Select` TRUE/FALSE) and **Comment** (via `AlterExternalTable … SET/UNSET`), and the remaining `SHOW EXTERNAL TABLES` properties (location, file format, last refreshed, notification channel, pattern, …). |
 
 ## Patterns & integration
@@ -24,7 +24,9 @@ inline-editable settings, and a Refresh action. The remaining operations
 - `BuildCreateExternalTableSql(db, schema, cfg)` — live SQL preview (direct `useEffect` dependency, no explicit debounce timer)
 - `ExecDDL(preview)` — executes the CREATE DDL on submit
 - `GetQuotedIdentifiersIgnoreCase()` — feeds `ObjectNameCaseControl`
-- `ListDatabases()` / `ListSchemas(db)` / `ListObjects(db, schema)` — feed the cascading stage / file-format pickers (filtered to `STAGE` and `FILE FORMAT`)
+- `ListDatabases()` / `ListSchemas(db)` — feed the cascading database/schema selects
+- `ListStages(db, schema)` — stage picker options, filtered to `type === "EXTERNAL"`
+- `ListObjects(db, schema)` — file-format picker options (filtered to `FILE FORMAT`)
 - `ListStageEntries(db, schema, stage, dirPath)` — directory-aware listing for the inline stage browser; navigating folders composes the `@stage/path` Location
 - `GetObjectProperties(db, schema, "EXTERNAL TABLE", name)` — properties panel data
 - `AlterExternalTable(db, schema, name, clause)` — `REFRESH` / `SET AUTO_REFRESH = …` / `SET … ` / `UNSET …`

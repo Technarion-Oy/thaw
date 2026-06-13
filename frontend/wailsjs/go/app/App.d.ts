@@ -534,6 +534,8 @@ export function ListStageEntries(arg1:string,arg2:string,arg3:string,arg4:string
 
 export function ListStageFiles(arg1:string,arg2:string):Promise<Array<stage.StageFile>>;
 
+export function ListStages(arg1:string,arg2:string):Promise<Array<snowflake.StageSummary>>;
+
 export function ListSupportedDbtVersions():Promise<Array<dbtproject.DbtVersionInfo>>;
 
 export function ListSystemPythons():Promise<Array<snowpark.PythonInfo>>;

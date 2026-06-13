@@ -1332,6 +1332,49 @@ func (c *Client) ListStageEntries(ctx context.Context, database, schema, stageNa
 	return parseListEntries(res, stageName, dirPath), nil
 }
 
+// StageSummary is a single row from SHOW STAGES, carrying the fields needed to
+// distinguish and reference a stage in pickers.
+type StageSummary struct {
+	Name string `json:"name"`
+	Type string `json:"type"` // INTERNAL or EXTERNAL
+	URL  string `json:"url"`  // external storage URL (empty for internal stages)
+}
+
+// ListStages runs SHOW STAGES IN SCHEMA and returns each stage with its
+// INTERNAL/EXTERNAL type, so callers can filter (e.g. external tables may only
+// reference an EXTERNAL stage).
+func (c *Client) ListStages(ctx context.Context, database, schema string) ([]StageSummary, error) {
+	sql := fmt.Sprintf("SHOW STAGES IN SCHEMA %s.%s", QuoteIdent(database), QuoteIdent(schema))
+	res, err := c.Execute(ctx, sql)
+	if err != nil {
+		return nil, err
+	}
+
+	// SHOW STAGES columns: created_on, name, database_name, schema_name, url,
+	// has_credentials, has_encryption_key, owner, comment, region, type, cloud, …
+	nameIdx := ColIdx(res.Columns, "name")
+	typeIdx := ColIdx(res.Columns, "type")
+	urlIdx := ColIdx(res.Columns, "url")
+
+	stages := make([]StageSummary, 0, len(res.Rows))
+	for _, row := range res.Rows {
+		s := StageSummary{}
+		if nameIdx >= 0 && nameIdx < len(row) {
+			s.Name = CellString(row[nameIdx])
+		}
+		if typeIdx >= 0 && typeIdx < len(row) {
+			s.Type = strings.ToUpper(CellString(row[typeIdx]))
+		}
+		if urlIdx >= 0 && urlIdx < len(row) {
+			s.URL = CellString(row[urlIdx])
+		}
+		if s.Name != "" {
+			stages = append(stages, s)
+		}
+	}
+	return stages, nil
+}
+
 // DbtProjectVersion represents a version of a Snowflake-native DBT PROJECT.
 type DbtProjectVersion struct {
 	Version   string `json:"version"`

@@ -21,7 +21,7 @@ import {
 } from "@ant-design/icons";
 import {
   BuildCreateExternalTableSql, ExecDDL, GetQuotedIdentifiersIgnoreCase,
-  ListDatabases, ListSchemas, ListObjects, ListStageEntries,
+  ListDatabases, ListSchemas, ListObjects, ListStages, ListStageEntries,
 } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import type { externaltable, snowflake } from "../../../wailsjs/go/models";
@@ -149,12 +149,16 @@ export default function CreateExternalTableModal({ db, schema, onClose, onSucces
   useEffect(() => {
     if (!pickerDb || !pickerSchema) { setStageOptions([]); setFormatOptions([]); return; }
     setLoadingObjects(true);
-    ListObjects(pickerDb, pickerSchema)
-      .then((objs) => {
-        setStageOptions((objs ?? []).filter((o) => o.kind === "STAGE").map((o) => o.name));
+    Promise.all([
+      ListStages(pickerDb, pickerSchema).catch(() => []),
+      ListObjects(pickerDb, pickerSchema).catch(() => []),
+    ])
+      .then(([stages, objs]) => {
+        // External tables may only reference an EXTERNAL stage, so filter out
+        // INTERNAL stages from the picker.
+        setStageOptions((stages ?? []).filter((s) => s.type === "EXTERNAL").map((s) => s.name));
         setFormatOptions((objs ?? []).filter((o) => o.kind === "FILE FORMAT").map((o) => o.name));
       })
-      .catch(() => { setStageOptions([]); setFormatOptions([]); })
       .finally(() => setLoadingObjects(false));
   }, [pickerDb, pickerSchema]);
 
@@ -456,7 +460,7 @@ export default function CreateExternalTableModal({ db, schema, onClose, onSucces
               value={pickerStage || undefined} onChange={onPickStage}
               disabled={!pickerSchema} loading={loadingObjects}
               options={stageOptions.map((n) => ({ value: n, label: n }))}
-              notFoundContent={loadingObjects ? "Loading…" : "No stages"}
+              notFoundContent={loadingObjects ? "Loading…" : "No external stages"}
             />
             {pickerStage && (
               <Tooltip title="Reload entries">
