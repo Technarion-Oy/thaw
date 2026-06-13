@@ -6,6 +6,7 @@ import {dbtproject} from '../models';
 import {stage} from '../models';
 import {integrations} from '../models';
 import {procedure} from '../models';
+import {alert} from '../models';
 import {dynamictable} from '../models';
 import {externaltable} from '../models';
 import {fileformat} from '../models';
@@ -36,6 +37,8 @@ import {mcp} from '../models';
 import {sfconfig} from '../models';
 
 export function AddBackup(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function AlterAlert(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterBackupPolicy(arg1:string,arg2:string):Promise<void>;
 
@@ -80,6 +83,8 @@ export function BuildApiIntegrationPreviewSQL(arg1:integrations.ApiIntegrationPa
 export function BuildCallStatement(arg1:string,arg2:string,arg3:string,arg4:Array<procedure.Argument>):Promise<string>;
 
 export function BuildChangeColumnTypeSql(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<string>;
+
+export function BuildCreateAlertSql(arg1:string,arg2:string,arg3:alert.AlertConfig):Promise<string>;
 
 export function BuildCreateDbtProjectSql(arg1:string,arg2:string,arg3:dbtproject.CreateConfig):Promise<string>;
 
@@ -228,6 +233,8 @@ export function DuplicateFile(arg1:string):Promise<string>;
 export function EnableTaskDependents(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function ExecDDL(arg1:string):Promise<void>;
+
+export function ExecuteAlert(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function ExecuteGitFile(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 

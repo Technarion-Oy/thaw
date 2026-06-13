@@ -10,7 +10,7 @@
 
 import { useState, useEffect } from "react";
 import { Modal, Form, Input, Select, Button, Space, Typography, Tag, Spin } from "antd";
-import { PlayCircleOutlined } from "@ant-design/icons";
+import { PlayCircleOutlined, PlusOutlined } from "@ant-design/icons";
 import { GetProcedureParams, BuildCallStatement, IsBoolean, IsNumeric, NeedsQuotes } from "../../../wailsjs/go/app/App";
 import { useQueryStore } from "../../store/queryStore";
 
@@ -33,9 +33,13 @@ interface Props {
   name: string;
   rawArgs: string;
   onClose: () => void;
+  // When provided, the modal offers an "Insert" action that hands the built
+  // CALL statement back to the caller (e.g. to drop it into a SQL editor)
+  // instead of executing it in a new query tab.
+  onInsert?: (sql: string) => void;
 }
 
-export default function CallProcedureModal({ db, schema, name, rawArgs, onClose }: Props) {
+export default function CallProcedureModal({ db, schema, name, rawArgs, onClose, onInsert }: Props) {
   const [params, setParams] = useState<Param[] | null>(null);
   const [paramTypes, setParamTypes] = useState<ParamTypeInfo[]>([]);
   const [values, setValues] = useState<string[]>([]);
@@ -83,6 +87,15 @@ export default function CallProcedureModal({ db, schema, name, rawArgs, onClose 
     executeInNewTab(preview);
   };
 
+  const handleInsert = () => {
+    if (!params || !preview || !onInsert) return;
+    onInsert(preview);
+    onClose();
+  };
+
+  // In insert mode Enter inserts; otherwise it executes (preserves prior UX).
+  const handleSubmit = onInsert ? handleInsert : handleExecute;
+
   return (
     <Modal
       open
@@ -99,9 +112,15 @@ export default function CallProcedureModal({ db, schema, name, rawArgs, onClose 
       footer={
         <Space style={{ justifyContent: "flex-end", display: "flex" }}>
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleExecute} disabled={!params}>
-            Execute
-          </Button>
+          {onInsert ? (
+            <Button type="primary" icon={<PlusOutlined />} onClick={handleInsert} disabled={!params}>
+              Insert
+            </Button>
+          ) : (
+            <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleExecute} disabled={!params}>
+              Execute
+            </Button>
+          )}
         </Space>
       }
       width={540}
@@ -142,7 +161,7 @@ export default function CallProcedureModal({ db, schema, name, rawArgs, onClose 
                   value={values[i]}
                   onChange={(e) => setValue(i, e.target.value)}
                   placeholder={paramTypes[i]?.needsQuotes ? "text — quotes added automatically" : "numeric value"}
-                  onPressEnter={handleExecute}
+                  onPressEnter={handleSubmit}
                 />
               )}
             </Form.Item>

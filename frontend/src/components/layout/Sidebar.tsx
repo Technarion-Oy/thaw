@@ -54,6 +54,8 @@ import {
   RetweetOutlined,
   CloudServerOutlined,
   BlockOutlined,
+  AlertOutlined,
+  ThunderboltOutlined,
   KeyOutlined,
   DisconnectOutlined,
   BranchesOutlined,
@@ -69,7 +71,7 @@ import {
 import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, AlterDynamicTable, AlterExternalTable, AlterMaterializedView, UploadFileToStage, PickOpenFile, ExecDDL, ListStageEntries, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory, BuildDropColumnSql, BuildRenameColumnSql, BuildSetColumnNotNullSql, BuildDropColumnNotNullSql, BuildSetColumnCommentSql, BuildChangeColumnTypeSql } from "../../../wailsjs/go/app/App";
+import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, AlterDynamicTable, AlterExternalTable, AlterMaterializedView, AlterAlert, ExecuteAlert, UploadFileToStage, PickOpenFile, ExecDDL, ListStageEntries, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory, BuildDropColumnSql, BuildRenameColumnSql, BuildSetColumnNotNullSql, BuildDropColumnNotNullSql, BuildSetColumnCommentSql, BuildChangeColumnTypeSql } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl, { identToken, quoteIdent } from "../shared/ObjectNameCaseControl";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
@@ -115,6 +117,8 @@ import CreateExternalTableModal from "../externaltable/CreateExternalTableModal"
 import ExternalTablePropertiesModal from "../externaltable/ExternalTablePropertiesModal";
 import CreateMaterializedViewModal from "../materializedview/CreateMaterializedViewModal";
 import MaterializedViewPropertiesModal from "../materializedview/MaterializedViewPropertiesModal";
+import CreateAlertModal from "../alert/CreateAlertModal";
+import AlertPropertiesModal from "../alert/AlertPropertiesModal";
 import CreatePipeModal from "../pipe/CreatePipeModal";
 import PipePropertiesModal from "../pipe/PipePropertiesModal";
 import RefreshPipeModal from "../pipe/RefreshPipeModal";
@@ -137,6 +141,7 @@ const KIND_LABEL: Record<string, string> = {
   "DYNAMIC TABLE": "Dynamic Tables",
   "EXTERNAL TABLE": "External Tables",
   "MATERIALIZED VIEW": "Materialized Views",
+  ALERT:         "Alerts",
   FUNCTION:      "Functions",
   PROCEDURE:     "Procedures",
   SEQUENCE:      "Sequences",
@@ -151,7 +156,7 @@ const KIND_LABEL: Record<string, string> = {
   "DBT PROJECT": "DBT Projects",
 };
 
-const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT"];
+const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT"];
 
 const kindIcon = (kind: string) => objectIcon(kind);
 
@@ -520,6 +525,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [externalTablePropsModal, setExternalTablePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createMaterializedViewModal, setCreateMaterializedViewModal] = useState<{ db: string; schema: string } | null>(null);
   const [materializedViewPropsModal, setMaterializedViewPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [createAlertModal, setCreateAlertModal] = useState<{ db: string; schema: string } | null>(null);
+  const [alertPropsModal, setAlertPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createPipeModal, setCreatePipeModal] = useState<{ db: string; schema: string } | null>(null);
   const [pipePropsModal, setPipePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [refreshPipeModal, setRefreshPipeModal] = useState<{ db: string; schema: string; name: string } | null>(null);
@@ -1831,6 +1838,92 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     });
   };
 
+  const openCreateAlert = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    setCtxMenu(null);
+    setCreateAlertModal({ db, schema });
+  };
+
+  const openAlertProperties = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    setAlertPropsModal({ db, schema, name });
+  };
+
+  const suspendAlert = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    modal.confirm({
+      title: "Suspend Alert",
+      content: `Suspend scheduled evaluation of "${name}"?`,
+      okText: "Suspend",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await AlterAlert(db, schema, name, "SUSPEND");
+          contextMsg.success(`Alert "${name}" suspended.`);
+        } catch (e) {
+          contextMsg.error(`Failed to suspend alert: ${String(e)}`);
+        }
+      },
+    });
+  };
+
+  const resumeAlert = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    modal.confirm({
+      title: "Resume Alert",
+      content: `Resume scheduled evaluation of "${name}"?`,
+      okText: "Resume",
+      onOk: async () => {
+        try {
+          await AlterAlert(db, schema, name, "RESUME");
+          contextMsg.success(`Alert "${name}" resumed.`);
+        } catch (e) {
+          contextMsg.error(`Failed to resume alert: ${String(e)}`);
+        }
+      },
+    });
+  };
+
+  const executeAlert = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    modal.confirm({
+      title: "Execute Alert",
+      content: `Run an immediate evaluation of "${name}" now?`,
+      okText: "Execute",
+      onOk: async () => {
+        try {
+          await ExecuteAlert(db, schema, name);
+          contextMsg.success(`Alert "${name}" executed.`);
+        } catch (e) {
+          contextMsg.error(`Failed to execute alert: ${String(e)}`);
+        }
+      },
+    });
+  };
+
   const openCommitFilterModal = () => {
     if (!ctxMenu) return;
     const parts = ctxMenu.nodeKey.split(":");
@@ -2102,6 +2195,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       case "DYNAMIC TABLE": sql = `DROP DYNAMIC TABLE ${fullName};`; break;
       case "EXTERNAL TABLE": sql = `DROP EXTERNAL TABLE ${fullName};`; break;
       case "MATERIALIZED VIEW": sql = `DROP MATERIALIZED VIEW ${fullName};`; break;
+      case "ALERT":       sql = `DROP ALERT ${fullName};`; break;
       case "SEQUENCE":    sql = `DROP SEQUENCE ${fullName};`; break;
       case "STAGE":       sql = `DROP STAGE ${fullName};`; break;
       case "STREAM":      sql = `DROP STREAM ${fullName};`; break;
@@ -2732,6 +2826,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         case "DYNAMIC TABLE": return `DROP DYNAMIC TABLE ${fullName};`;
         case "EXTERNAL TABLE": return `DROP EXTERNAL TABLE ${fullName};`;
         case "MATERIALIZED VIEW": return `DROP MATERIALIZED VIEW ${fullName};`;
+        case "ALERT":       return `DROP ALERT ${fullName};`;
         case "SEQUENCE":    return `DROP SEQUENCE ${fullName};`;
         case "STAGE":       return `DROP STAGE ${fullName};`;
         case "STREAM":      return `DROP STREAM ${fullName};`;
@@ -3212,6 +3307,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
               {menuItem("File Format…", <FileTextOutlined style={{ fontSize: 12 }} />, openCreateFileFormat, undefined, !featureFlags.fileFormatBuilder, "File Format Builder is disabled. Enable it under View → Enabled Features…")}
 
               {menuItem("Task…", <ClockCircleOutlined style={{ fontSize: 12 }} />, openCreateTask)}
+              {menuItem("Alert…", <AlertOutlined style={{ fontSize: 12 }} />, openCreateAlert)}
               {menuItem("Pipe…", <ApiOutlined style={{ fontSize: 12 }} />, openCreatePipe)}
               {menuItem("Secret…", <KeyOutlined style={{ fontSize: 12 }} />, openCreateSecret)}
               {menuItem("Git Repository…", <BranchesOutlined style={{ fontSize: 12 }} />, openCreateGitRepository)}
@@ -3237,6 +3333,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Create External Table…", <CloudServerOutlined style={{ fontSize: 12 }} />, openCreateExternalTable)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "MATERIALIZED VIEW" &&
             menuItem("Create Materialized View…", <BlockOutlined style={{ fontSize: 12 }} />, openCreateMaterializedView)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "ALERT" &&
+            menuItem("Create Alert…", <AlertOutlined style={{ fontSize: 12 }} />, openCreateAlert)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "PIPE" &&
             menuItem("Create Pipe…", <ApiOutlined style={{ fontSize: 12 }} />, openCreatePipe)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "FILE FORMAT" &&
@@ -3271,6 +3369,14 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Suspend", <PauseCircleOutlined style={{ fontSize: 12 }} />, suspendMaterializedView)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MATERIALIZED VIEW" &&
             menuItem("Resume", <PlayCircleOutlined style={{ fontSize: 12 }} />, resumeMaterializedView)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "ALERT" &&
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openAlertProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "ALERT" &&
+            menuItem("Suspend", <PauseCircleOutlined style={{ fontSize: 12 }} />, suspendAlert)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "ALERT" &&
+            menuItem("Resume", <PlayCircleOutlined style={{ fontSize: 12 }} />, resumeAlert)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "ALERT" &&
+            menuItem("Execute", <ThunderboltOutlined style={{ fontSize: 12 }} />, executeAlert)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openPipeProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
@@ -3370,7 +3476,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Make Live", <CloudUploadOutlined style={{ fontSize: 12 }} />, makeNotebookLive, undefined, !featureFlags.snowparkNotebooks, "Snowpark & Notebooks is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "obj" && menuItem("View Definition", null, viewDefinition)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "MATERIALIZED VIEW" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" &&
             menuItem("Select for Comparison", <DiffOutlined style={{ fontSize: 12 }} />, selectObjForComparison)}
           {ctxMenu.nodeType === "obj" && pendingDiff !== null &&
@@ -3378,7 +3484,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "obj" &&
             (ctxMenu.objKind === "VIEW" || ctxMenu.objKind === "PROCEDURE" || ctxMenu.objKind === "FUNCTION") &&
             menuItem("View Dependencies…", <ShareAltOutlined style={{ fontSize: 12 }} />, viewDependencies)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && ctxMenu.objKind !== "EXTERNAL TABLE" &&
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ALERT" &&
             menuItem("Rename…", <EditOutlined style={{ fontSize: 12 }} />, renameObject)}
           {ctxMenu.nodeType === "obj" && <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />}
           {ctxMenu.nodeType === "obj" && menuItem("Delete…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, deleteObject, "#f85149")}
@@ -3763,6 +3869,24 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={materializedViewPropsModal.schema}
           name={materializedViewPropsModal.name}
           onClose={() => setMaterializedViewPropsModal(null)}
+        />
+      )}
+
+      {createAlertModal && (
+        <CreateAlertModal
+          db={createAlertModal.db}
+          schema={createAlertModal.schema}
+          onClose={() => setCreateAlertModal(null)}
+          onSuccess={() => refreshDatabaseByName(createAlertModal.db)}
+        />
+      )}
+
+      {alertPropsModal && (
+        <AlertPropertiesModal
+          db={alertPropsModal.db}
+          schema={alertPropsModal.schema}
+          name={alertPropsModal.name}
+          onClose={() => setAlertPropsModal(null)}
         />
       )}
 

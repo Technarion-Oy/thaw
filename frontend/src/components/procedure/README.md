@@ -23,6 +23,8 @@ preview, and executes it in a new SQL tab on submit.
 
 **Execution:** On submit, `executeInNewTab(preview)` from `queryStore` opens the generated `CALL` statement in a new SQL editor tab and immediately executes it. The modal closes before the tab is activated.
 
+**Insert mode:** When the optional `onInsert?: (sql: string) => void` prop is supplied, the primary button becomes **Insert** and hands the built `CALL` statement back to the caller instead of executing it — used by the Alert builder (`components/alert/CreateAlertModal.tsx`) to drop a `CALL` into the condition editor without duplicating the parameter UI or the `BuildCallStatement` logic.
+
 **Input rendering:** Parameter type info (fetched from the backend) drives the control:
 - `isBoolean` → `<Select>` with TRUE/FALSE options
 - otherwise → `<Input>` with a placeholder that reflects whether the value needs quotes (`needsQuotes`) or is numeric

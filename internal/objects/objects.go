@@ -26,7 +26,7 @@ type ColumnComment struct {
 
 // BuildObjectPropertiesQuery returns the SHOW/DESCRIBE query that fetches the
 // metadata for a single Snowflake object. kind is one of: DATABASE, SCHEMA,
-// TABLE, VIEW, DYNAMIC TABLE, EXTERNAL TABLE, MATERIALIZED VIEW, FUNCTION,
+// TABLE, VIEW, DYNAMIC TABLE, EXTERNAL TABLE, MATERIALIZED VIEW, ALERT, FUNCTION,
 // PROCEDURE, SEQUENCE, STAGE, STREAM, TASK, FILE FORMAT, PIPE, SECRET,
 // GIT REPOSITORY, DBT PROJECT, WAREHOUSE, ROLE, USER.
 func BuildObjectPropertiesQuery(database, schema, kind, name string) (string, error) {
@@ -42,6 +42,8 @@ func BuildObjectPropertiesQuery(database, schema, kind, name string) (string, er
 		return fmt.Sprintf("SHOW EXTERNAL TABLES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
 	case "MATERIALIZED VIEW":
 		return fmt.Sprintf("SHOW MATERIALIZED VIEWS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+	case "ALERT":
+		return fmt.Sprintf("SHOW ALERTS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
 	case "SCHEMA":
 		return fmt.Sprintf("SHOW SCHEMAS LIKE '%s' IN DATABASE %s", like, snowflake.QuoteIdent(database)), nil
 	case "TABLE":

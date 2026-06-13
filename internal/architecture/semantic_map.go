@@ -66,6 +66,7 @@ func GetCodebaseSemanticMap() string {
     {
       "name": "Object Browser \u0026 Administration",
       "backend_paths": [
+        "internal/alert/",
         "internal/backup/",
         "internal/column/",
         "internal/dbtproject/",
@@ -88,6 +89,8 @@ func GetCodebaseSemanticMap() string {
       ],
       "frontend_paths": [
         "frontend/src/components/account/AccountPanel.tsx",
+        "frontend/src/components/alert/AlertPropertiesModal.tsx",
+        "frontend/src/components/alert/CreateAlertModal.tsx",
         "frontend/src/components/database/CreateStageModal.tsx",
         "frontend/src/components/database/StagePropertiesModal.tsx",
         "frontend/src/components/dbtproject/AddDbtProjectVersionModal.tsx",

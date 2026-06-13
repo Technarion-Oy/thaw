@@ -6,6 +6,10 @@ export function AddBackup(arg1, arg2, arg3) {
   return window['go']['app']['App']['AddBackup'](arg1, arg2, arg3);
 }
 
+export function AlterAlert(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterAlert'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterBackupPolicy(arg1, arg2) {
   return window['go']['app']['App']['AlterBackupPolicy'](arg1, arg2);
 }
@@ -92,6 +96,10 @@ export function BuildCallStatement(arg1, arg2, arg3, arg4) {
 
 export function BuildChangeColumnTypeSql(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['BuildChangeColumnTypeSql'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function BuildCreateAlertSql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateAlertSql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateDbtProjectSql(arg1, arg2, arg3) {
@@ -388,6 +396,10 @@ export function EnableTaskDependents(arg1, arg2, arg3) {
 
 export function ExecDDL(arg1) {
   return window['go']['app']['App']['ExecDDL'](arg1);
+}
+
+export function ExecuteAlert(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ExecuteAlert'](arg1, arg2, arg3);
 }
 
 export function ExecuteGitFile(arg1, arg2, arg3, arg4) {

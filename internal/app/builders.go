@@ -11,6 +11,7 @@
 package app
 
 import (
+	"thaw/internal/alert"
 	"thaw/internal/column"
 	"thaw/internal/dbtproject"
 	"thaw/internal/dynamictable"
@@ -123,6 +124,11 @@ func (a *App) BuildCreateExternalTableSql(database, schema string, cfg externalt
 // BuildCreateMaterializedViewSql returns the SQL for creating a Snowflake MATERIALIZED VIEW.
 func (a *App) BuildCreateMaterializedViewSql(database, schema string, cfg materializedview.MaterializedViewConfig) (string, error) {
 	return materializedview.BuildCreateMaterializedViewSql(database, schema, cfg)
+}
+
+// BuildCreateAlertSql returns the SQL for creating a Snowflake ALERT.
+func (a *App) BuildCreateAlertSql(database, schema string, cfg alert.AlertConfig) (string, error) {
+	return alert.BuildCreateAlertSql(database, schema, cfg)
 }
 
 // BuildCreateStageSql returns the CREATE STAGE SQL statement.

@@ -1,0 +1,132 @@
+// Copyright (c) 2026 Technarion Oy. All rights reserved.
+//
+// This software and its source code are proprietary and confidential.
+// Unauthorized copying, distribution, modification, or use of this software,
+// in whole or in part, is strictly prohibited without prior written permission
+// from Technarion Oy.
+//
+// Commercial use of this software is restricted to parties holding a valid
+// license agreement with Technarion Oy.
+
+package alert
+
+import (
+	"fmt"
+	"strings"
+
+	"thaw/internal/snowflake"
+)
+
+// TagPair is a single tag name/value pair used in the alert-level TAG clause.
+type TagPair struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+// AlertConfig holds the parameters for creating a Snowflake ALERT object. The
+// condition (Condition) is wrapped in the mandatory IF (EXISTS (...)) clause and
+// the action (Action) follows the THEN keyword; the remaining fields map to the
+// alert-level CREATE ALERT options in the order Snowflake documents them.
+//
+// Warehouse is optional: an empty value produces a serverless alert (Snowflake
+// supplies the compute). When set, the alert runs on the named user-managed
+// warehouse. CONFIG, RUNBOOK, and SUSPEND_ALERT_AFTER_NUM_FAILURES are
+// intentionally out of scope for the visual builder and are left to raw SQL.
+type AlertConfig struct {
+	Name          string    `json:"name"`
+	CaseSensitive bool      `json:"caseSensitive"`
+	OrReplace     bool      `json:"orReplace"`
+	IfNotExists   bool      `json:"ifNotExists"`
+	Warehouse     string    `json:"warehouse"` // user-managed warehouse, or "" for a serverless alert
+	Schedule      string    `json:"schedule"`  // e.g. "60 MINUTE" or "USING CRON 0 9 * * * UTC"
+	Comment       string    `json:"comment"`
+	Tags          []TagPair `json:"tags"`      // alert-level TAG (name = 'value', ...)
+	Condition     string    `json:"condition"` // the query inside IF (EXISTS (...))
+	Action        string    `json:"action"`    // the statement after THEN
+}
+
+func escLit(s string) string {
+	return strings.ReplaceAll(s, "'", "''")
+}
+
+// tagClause renders an alert-level WITH TAG (...) clause from the non-empty tag
+// pairs, or "" when there are none. Tag names are identifiers; values are string
+// literals.
+func tagClause(tags []TagPair) string {
+	parts := make([]string, 0, len(tags))
+	for _, t := range tags {
+		name := strings.TrimSpace(t.Name)
+		if name == "" {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s = '%s'", snowflake.QuoteIdent(name), escLit(t.Value)))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "WITH TAG (" + strings.Join(parts, ", ") + ")"
+}
+
+// trimStmt strips surrounding whitespace and any trailing semicolons from a
+// user-supplied SQL fragment so the builder controls statement termination.
+func trimStmt(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimRight(s, ";")
+	return strings.TrimSpace(s)
+}
+
+// BuildCreateAlertSql constructs a CREATE ALERT statement from the given config.
+// A schedule, a condition, and an action are required by Snowflake; when any is
+// empty the builder emits a placeholder so the preview remains a syntactically
+// obvious template the user can complete. Optional clauses are emitted only when
+// set, in the order Snowflake documents them: TAG, SCHEDULE, WAREHOUSE, COMMENT,
+// then the mandatory IF (EXISTS (<condition>)) THEN <action>.
+func BuildCreateAlertSql(db, schema string, cfg AlertConfig) (string, error) {
+	var sb strings.Builder
+
+	createClause := "CREATE"
+	if cfg.OrReplace {
+		createClause += " OR REPLACE"
+	}
+	createClause += " ALERT"
+	if cfg.IfNotExists && !cfg.OrReplace {
+		createClause += " IF NOT EXISTS"
+	}
+
+	nameToken := snowflake.QuoteOrBare(cfg.Name, cfg.CaseSensitive)
+	if cfg.Name == "" {
+		nameToken = "alert_name"
+	}
+
+	fmt.Fprintf(&sb, "%s %s.%s.%s", createClause, snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), nameToken)
+
+	if tc := tagClause(cfg.Tags); tc != "" {
+		fmt.Fprintf(&sb, "\n  %s", tc)
+	}
+
+	schedule := strings.TrimSpace(cfg.Schedule)
+	if schedule == "" {
+		schedule = "60 MINUTE"
+	}
+	fmt.Fprintf(&sb, "\n  SCHEDULE = '%s'", escLit(schedule))
+
+	if wh := strings.TrimSpace(cfg.Warehouse); wh != "" {
+		fmt.Fprintf(&sb, "\n  WAREHOUSE = %s", snowflake.QuoteIdent(wh))
+	}
+	if cfg.Comment != "" {
+		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", escLit(cfg.Comment))
+	}
+
+	condition := trimStmt(cfg.Condition)
+	if condition == "" {
+		condition = "SELECT 1 FROM my_table WHERE <condition>"
+	}
+	action := trimStmt(cfg.Action)
+	if action == "" {
+		action = "INSERT INTO my_alert_log SELECT CURRENT_TIMESTAMP()"
+	}
+
+	fmt.Fprintf(&sb, "\nIF (EXISTS (\n%s\n))\nTHEN\n%s", condition, action)
+
+	return sb.String() + ";", nil
+}
