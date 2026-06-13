@@ -3308,29 +3308,9 @@ func dedupeExternalTables(basic, extended []SnowflakeObject) []SnowflakeObject {
 }
 
 // dedupeDynamicTables removes from basic any object whose (schema, name) matches
-// an extended object of kind "DYNAMIC TABLE", preventing duplicate tree nodes
-// when SHOW OBJECTS surfaces a dynamic table that ListExtendedObjects already
-// returned. Matching is case-insensitive.
+// an extended object of kind "DYNAMIC TABLE". See dedupeByExtendedKind.
 func dedupeDynamicTables(basic, extended []SnowflakeObject) []SnowflakeObject {
-	dynKeys := make(map[string]struct{})
-	for _, o := range extended {
-		if o.Kind == "DYNAMIC TABLE" {
-			dynKeys[strings.ToUpper(o.Schema)+"\x00"+strings.ToUpper(o.Name)] = struct{}{}
-		}
-	}
-	if len(dynKeys) == 0 {
-		return basic
-	}
-	// Allocate a fresh slice — basic may be the cached backing array from
-	// ListBasicObjects, so it must not be mutated in place.
-	out := make([]SnowflakeObject, 0, len(basic))
-	for _, o := range basic {
-		if _, dup := dynKeys[strings.ToUpper(o.Schema)+"\x00"+strings.ToUpper(o.Name)]; dup {
-			continue
-		}
-		out = append(out, o)
-	}
-	return out
+	return dedupeByExtendedKind(basic, extended, "DYNAMIC TABLE")
 }
 
 // getObjectCache returns a cached result if it exists and hasn't expired.

@@ -221,12 +221,21 @@ export default function CreateExternalTableModal({ db, schema, onClose, onSucces
     cfg.location.trim().length > 0 &&
     (fmtMode === "type" ? true : cfg.fileFormatName.trim().length > 0);
 
+  // Partition columns must carry a metadata-derived expression; an empty one
+  // makes the builder emit `AS (value)`, which Snowflake rejects in PARTITION BY.
+  const partitionColsMissingExpr = cfg.columns.filter(
+    (c) => c.partition && c.name.trim() !== "" && c.expression.trim() === "",
+  );
+
   const handleRun = async () => {
     if (!canSubmit) return;
     setCreating(true);
     setCreateError(null);
     try {
-      await ExecDDL(preview);
+      // Build the statement from the current cfg at submit time rather than
+      // trusting the debounced `preview` state, which lags a keystroke behind.
+      const sql = await BuildCreateExternalTableSql(db, schema, cfg as any);
+      await ExecDDL(sql);
       onSuccess?.();
       onClose();
     } catch (err) {
@@ -280,6 +289,20 @@ export default function CreateExternalTableModal({ db, schema, onClose, onSucces
           <Button size="small" type="text" icon={<DeleteOutlined />} onClick={() => removeColumn(i)} />
         </Space>
       ))}
+      {partitionColsMissingExpr.length > 0 && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ padding: "4px 10px" }}
+          message={
+            <span style={{ fontSize: 11 }}>
+              Partition {partitionColsMissingExpr.length === 1 ? "column" : "columns"}{" "}
+              {partitionColsMissingExpr.map((c) => c.name.trim()).join(", ")} {partitionColsMissingExpr.length === 1 ? "needs" : "need"} an
+              expression (e.g. <code>metadata$filename</code>-derived) — Snowflake rejects a partition column defined as <code>AS (value)</code>.
+            </span>
+          }
+        />
+      )}
       <Button size="small" icon={<PlusOutlined />} onClick={addColumn}>Add column</Button>
     </Space>
   );

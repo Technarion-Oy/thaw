@@ -238,10 +238,23 @@ export default function ExternalTablePropertiesModal({ db, schema, name, onClose
   };
 
   const comment = find("comment");
-  const autoRefresh = normBool(find("auto_refresh"));
+  // SHOW EXTERNAL TABLES does not reliably expose an `auto_refresh` column on
+  // all editions. When it's present, use it; otherwise infer the state from
+  // `notification_channel` — a non-empty channel means the auto-refresh event
+  // notification pipe is wired up. The `SET AUTO_REFRESH = …` write is
+  // unaffected either way.
+  const autoRefreshRaw = find("auto_refresh");
+  const notificationChannel = find("notification_channel");
+  const autoRefresh =
+    autoRefreshRaw !== ""
+      ? normBool(autoRefreshRaw)
+      : notificationChannel.trim() !== ""
+        ? "TRUE"
+        : "";
   const invalid = find("invalid");
 
-  // Keys handled by the editable Settings section.
+  // Keys handled by the editable Settings section. `notification_channel` is
+  // left in the Properties table so the inferred Auto Refresh state is auditable.
   const handledKeys = new Set(["comment", "auto_refresh"]);
 
   return (

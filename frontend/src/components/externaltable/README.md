@@ -22,7 +22,7 @@ inline-editable settings, and a Refresh action. The remaining operations
 
 **IPC calls:**
 - `BuildCreateExternalTableSql(db, schema, cfg)` — live SQL preview (direct `useEffect` dependency, no explicit debounce timer)
-- `ExecDDL(preview)` — executes the CREATE DDL on submit
+- `ExecDDL(sql)` — executes the CREATE DDL on submit; the statement is rebuilt fresh via `BuildCreateExternalTableSql(db, schema, cfg)` at submit time rather than reusing the debounced `preview` state (which lags a keystroke behind)
 - `GetQuotedIdentifiersIgnoreCase()` — feeds `ObjectNameCaseControl`
 - `ListDatabases()` / `ListSchemas(db)` — feed the cascading database/schema selects
 - `ListStages(db, schema)` — stage picker options, filtered to `type === "EXTERNAL"`
@@ -37,6 +37,6 @@ inline-editable settings, and a Refresh action. The remaining operations
 
 ## Gotchas
 
-- `BuildCreateExternalTableSql` runs on every `cfg` change without an explicit debounce; rapid typing generates frequent IPC calls (same tradeoff as `CreatePipeModal` / `CreateDynamicTableModal`).
-- External-table columns must each carry an `AS (<expr>)` transformation referencing the staged data (e.g. `value:c1::varchar`, `metadata$filename`); the modal does not validate these — Snowflake reports errors at execution time.
-- `auto_refresh` is normalized from the assorted representations `SHOW EXTERNAL TABLES` may return (`true`/`false`, `Y`/`N`) into `TRUE`/`FALSE` for the Select editor; `comment` and `auto_refresh` are excluded from the generic Properties table because they are surfaced in the editable Settings section.
+- `BuildCreateExternalTableSql` runs on every `cfg` change without an explicit debounce for the live preview; rapid typing generates frequent IPC calls (same tradeoff as `CreatePipeModal` / `CreateDynamicTableModal`). Submitting rebuilds the statement from the current `cfg` rather than trusting that preview state.
+- External-table columns must each carry an `AS (<expr>)` transformation referencing the staged data (e.g. `value:c1::varchar`, `metadata$filename`); the modal does not validate the general case — Snowflake reports errors at execution time. As a targeted guard, a **partition**-flagged column with an empty expression shows an inline warning, since the builder would otherwise emit `AS (value)`, which Snowflake rejects in `PARTITION BY`.
+- `auto_refresh` is normalized from the assorted representations `SHOW EXTERNAL TABLES` may return (`true`/`false`, `Y`/`N`) into `TRUE`/`FALSE` for the Select editor. Because that column is not exposed on every Snowflake edition, the properties modal falls back to inferring the state from a non-empty `notification_channel` when `auto_refresh` is absent. `comment` and `auto_refresh` are excluded from the generic Properties table because they are surfaced in the editable Settings section (`notification_channel` is kept visible so the inferred state is auditable).
