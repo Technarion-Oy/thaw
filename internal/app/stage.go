@@ -27,6 +27,15 @@ func (a *App) ListStageEntries(database, schema, stageName, dirPath string) ([]s
 	return a.client.ListStageEntries(a.ctx, database, schema, stageName, dirPath)
 }
 
+// ListStages returns the stages in a schema with their INTERNAL/EXTERNAL type,
+// so callers can filter (e.g. external tables may only reference an EXTERNAL stage).
+func (a *App) ListStages(database, schema string) ([]snowflake.StageSummary, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return a.client.ListStages(a.ctx, database, schema)
+}
+
 // ListWorkspaces returns all workspaces visible to the current user.
 func (a *App) ListWorkspaces() ([]snowflake.WorkspaceInfo, error) {
 	if a.client == nil {

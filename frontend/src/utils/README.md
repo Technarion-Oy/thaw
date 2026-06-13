@@ -16,6 +16,7 @@ Provides pure utility functions and small shared data structures that do not bel
 | `sqlFormatter.ts` | Two-pass SQL formatter: structural pass via `sql-formatter` (Snowflake dialect) for indentation, line breaks, CTE layout, and operator/comma placement; then a casing pass via the `sqleditor.Service.ApplySqlCasing` IPC method for keyword, identifier, and function casing. Exports `EditorPrefs`, `DEFAULT_EDITOR_PREFS`, and `formatSQL(sql, prefs)`. |
 | `gridMeasure.ts` | Canvas-based text measurement and column auto-sizing. `measureText(text, font)` caches `CanvasRenderingContext2D` instances by font string (up to 10 entries). `computeColumnWidths(columns, rows, opts)` samples the first N rows and returns pixel-clamped widths for each column. Used by `ResultGrid` and `PipeCopyHistoryModal`. |
 | `sqlFormatter.test.ts` | Vitest unit tests for `sqlFormatter.ts`, covering keyword/identifier/function casing, indent style, comma position, operator position, Snowflake `::` cast and `:` variant path operators, CTEs, string literal and comment passthrough, and idempotency. Mocks `ApplySqlCasing` inline to avoid a live Wails runtime. |
+| `formatBytes.ts` | `formatBytes(bytes)` → human-readable size string with binary (1024) units and one decimal place (e.g. `1.5 KB`). Used by the stage browsers (`StageBrowserModal`, the External Table location picker). Components needing different rounding/zero-handling (e.g. `ExplainModal`, `ObjectSummariesModal`) keep their own variants by design. |
 
 ## Patterns & integration
 

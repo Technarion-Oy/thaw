@@ -96,7 +96,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
 
 ## Object Browser
 
-- Browse all databases → schemas → tables, views, dynamic tables, functions, procedures, sequences, stages, streams, tasks, file formats, pipes, notebooks, secrets, and git repositories
+- Browse all databases → schemas → tables, views, dynamic tables, external tables, functions, procedures, sequences, stages, streams, tasks, file formats, pipes, notebooks, secrets, and git repositories
 - **Multi-selection** — hold `⌘` (macOS) or `Ctrl` (Windows/Linux) and click anywhere on an object row to select it; selected objects are highlighted across the full width of the sidebar; click any non-modifier area to clear the selection
 - **Batch deletion** — when multiple objects are selected, right-click any of them and choose **Delete N selected objects…** to drop all of them in one operation; a confirmation dialog lists all objects to be removed
 - **Secret Management** — right-click any schema and choose **Create Object** → **Secret…** or right-click an existing secret and choose **Modify…** to open the secret management dialog:
@@ -133,6 +133,13 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Select Top 1000 Rows** — query a dynamic table like a regular table directly from the context menu
   - **DDL Export** — `GET_DDL('DYNAMIC_TABLE', …)` powers the hover DDL preview, View Definition, and database DDL export
   - **Drop / Rename** — standard danger-confirmation dialog executes `DROP DYNAMIC TABLE`; **Rename…** issues `ALTER DYNAMIC TABLE … RENAME TO`
+- **External Table Management** — right-click any schema and choose **Create Object** → **External Table…**, or right-click an existing external table (listed under the **External Tables** group) for external-table-specific operations:
+  - **Create** — dynamic form with name, OR REPLACE / IF NOT EXISTS options, a **Location** field with a database→schema→stage picker (only **external** stages are listed, since external tables can only reference an external stage) and an inline **stage browser** (breadcrumb + navigable folder listing) for pointing at a path inside the stage — navigating keeps the editable `@stage/path` reference in sync, and it can also be typed/edited directly, a **File Format** chooser (an inline `TYPE` — CSV/JSON/AVRO/ORC/PARQUET — or an existing named `FILE FORMAT` object), an editable **Columns** list (name, type, an `AS` expression such as `value:c1::varchar`, and a partition flag that feeds `PARTITION BY`), and an **Advanced options** section covering **Refresh On Create**, **Auto Refresh**, **Pattern**, **AWS SNS Topic**, **COPY GRANTS**, and table-level **Tags**. Live SQL preview shows the full `CREATE EXTERNAL TABLE` statement. (Column-level constraints, Delta Lake / Iceberg table formats, and policy attachments remain raw-SQL only.)
+  - **Properties** — right-click an external table and choose **Properties…** to view `SHOW EXTERNAL TABLES` metadata (location, file format, last refreshed, notification channel, pattern, …) plus inline-editable **Auto Refresh** and **Comment** (applied via `ALTER EXTERNAL TABLE … SET / UNSET`) and a header **Refresh** action
+  - **Refresh** — right-click an external table for **Refresh…** to synchronize the file-level metadata (`ALTER EXTERNAL TABLE … REFRESH`); prompts a confirmation dialog
+  - **Select Top 1000 Rows** — query an external table like a regular table directly from the context menu
+  - **DDL Export** — `GET_DDL('EXTERNAL_TABLE', …)` powers the hover DDL preview, View Definition, and database DDL export
+  - **Drop** — standard danger-confirmation dialog executes `DROP EXTERNAL TABLE` (external tables cannot be renamed — Snowflake has no `ALTER EXTERNAL TABLE … RENAME` — so Rename is not offered for them)
 - **Snowpipe Management** — right-click any schema and choose **Create Object** → **Pipe…**, or right-click an existing pipe to access pipe-specific operations:
   - **Create** — dynamic form with name, OR REPLACE / IF NOT EXISTS options, Auto Ingest toggle, Error Integration, AWS SNS Topic, Integration, Comment, and an embedded Monaco editor for the `COPY INTO` statement; live SQL preview shows the full `CREATE PIPE` statement
   - **Properties** — right-click a pipe and choose **Properties…** to view `SHOW PIPES` metadata plus inline-editable **Pipe Execution Paused** (toggle), **Comment** (inline edit / UNSET), and **Tags** (add/remove key-value pairs); changes are applied immediately via `ALTER PIPE … SET / UNSET`

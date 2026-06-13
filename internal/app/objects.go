@@ -287,8 +287,8 @@ func (a *App) GetFunctionInfo(database, schema, name, argTypes string) (*snowfla
 
 // GetObjectDDL returns the definition of a single schema object using
 // Snowflake's GET_DDL function. kind should be one of: TABLE, VIEW,
-// DYNAMIC TABLE, FUNCTION, PROCEDURE, SEQUENCE, STAGE, STREAM, TASK,
-// FILE FORMAT, PIPE.
+// DYNAMIC TABLE, EXTERNAL TABLE, FUNCTION, PROCEDURE, SEQUENCE, STAGE, STREAM,
+// TASK, FILE FORMAT, PIPE.
 // For procedures and functions, arguments must be the parameter type list
 // (e.g. "NUMBER, VARCHAR") so Snowflake can resolve the correct overload.
 // Pass an empty string for all other object kinds.
@@ -313,9 +313,9 @@ func (a *App) GetObjectDependencies(database, schema, kind, name, arguments stri
 
 // GetObjectProperties returns structured metadata for any Snowflake object by
 // running the appropriate SHOW or DESCRIBE command and returning the result as
-// key/value pairs. kind is one of: TABLE, VIEW, DYNAMIC TABLE, FUNCTION,
-// PROCEDURE, SEQUENCE, STAGE, STREAM, TASK, FILE FORMAT, PIPE, WAREHOUSE,
-// ROLE, USER.
+// key/value pairs. kind is one of: TABLE, VIEW, DYNAMIC TABLE, EXTERNAL TABLE,
+// FUNCTION, PROCEDURE, SEQUENCE, STAGE, STREAM, TASK, FILE FORMAT, PIPE,
+// WAREHOUSE, ROLE, USER.
 func (a *App) GetObjectProperties(database, schema, kind, name string) ([]snowflake.PropertyPair, error) {
 	if a.client == nil {
 		return nil, apperrors.ErrNotConnected
