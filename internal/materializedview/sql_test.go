@@ -13,6 +13,8 @@ package materializedview
 import (
 	"strings"
 	"testing"
+
+	"thaw/internal/snowflake"
 )
 
 func TestBuildCreateMaterializedViewSql(t *testing.T) {
@@ -74,7 +76,7 @@ func TestBuildCreateMaterializedViewSql(t *testing.T) {
 			cfg: MaterializedViewConfig{
 				Name:       "MV",
 				CopyGrants: true,
-				Tags:       []TagPair{{Name: "env", Value: "prod"}, {Name: "team", Value: "data's"}},
+				Tags:       []snowflake.TagPair{{Name: "env", Value: "prod"}, {Name: "team", Value: "data's"}},
 				Query:      "SELECT 1",
 			},
 			contains: []string{
@@ -86,7 +88,7 @@ func TestBuildCreateMaterializedViewSql(t *testing.T) {
 			name: "empty tags emit nothing",
 			cfg: MaterializedViewConfig{
 				Name:  "MV",
-				Tags:  []TagPair{{Name: "  ", Value: "ignored"}},
+				Tags:  []snowflake.TagPair{{Name: "  ", Value: "ignored"}},
 				Query: "SELECT 1",
 			},
 			absent: []string{"TAG (", "CLUSTER BY", "COPY GRANTS", "SECURE", "COMMENT"},
@@ -139,7 +141,7 @@ func TestBuildCreateMaterializedViewSqlClauseOrder(t *testing.T) {
 		CopyGrants: true,
 		Comment:    "c",
 		ClusterBy:  "c1",
-		Tags:       []TagPair{{Name: "env", Value: "prod"}},
+		Tags:       []snowflake.TagPair{{Name: "env", Value: "prod"}},
 		Query:      "SELECT 1",
 	})
 	if err != nil {

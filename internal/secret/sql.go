@@ -29,36 +29,32 @@ const (
 	SecretTypeCloudProviderToken SecretType = "CLOUD_PROVIDER_TOKEN"
 	SecretTypePassword           SecretType = "PASSWORD"
 	// #nosec G101 -- False positive: these are Snowflake Secret TYPE enum values, not actual secrets.
-	SecretTypeGenericString      SecretType = "GENERIC_STRING"
+	SecretTypeGenericString SecretType = "GENERIC_STRING"
 	// #nosec G101 -- False positive: these are Snowflake Secret TYPE enum values, not actual secrets.
-	SecretTypeSymmetricKey       SecretType = "SYMMETRIC_KEY"
+	SecretTypeSymmetricKey SecretType = "SYMMETRIC_KEY"
 )
 
 type SecretConfig struct {
-	Name                    string     `json:"name"`
-	CaseSensitive           bool       `json:"caseSensitive"`
-	OrReplace               bool       `json:"orReplace"`
-	IfNotExists             bool       `json:"ifNotExists"`
-	Type                    SecretType `json:"type"`
+	Name          string     `json:"name"`
+	CaseSensitive bool       `json:"caseSensitive"`
+	OrReplace     bool       `json:"orReplace"`
+	IfNotExists   bool       `json:"ifNotExists"`
+	Type          SecretType `json:"type"`
 	// OAUTH2
-	OAuthFlow               string     `json:"oauthFlow"` // CLIENT_CREDENTIALS or AUTHORIZATION_CODE
-	ApiAuthentication       string     `json:"apiAuthentication"`
-	OAuthScopes             string     `json:"oauthScopes"`
-	OAuthRefreshToken       string     `json:"oauthRefreshToken"`
-	OAuthRefreshTokenExpiry string     `json:"oauthRefreshTokenExpiry"` // ISO string from frontend
+	OAuthFlow               string `json:"oauthFlow"` // CLIENT_CREDENTIALS or AUTHORIZATION_CODE
+	ApiAuthentication       string `json:"apiAuthentication"`
+	OAuthScopes             string `json:"oauthScopes"`
+	OAuthRefreshToken       string `json:"oauthRefreshToken"`
+	OAuthRefreshTokenExpiry string `json:"oauthRefreshTokenExpiry"` // ISO string from frontend
 	// CLOUD_PROVIDER_TOKEN
-	Enabled                 bool       `json:"enabled"`
+	Enabled bool `json:"enabled"`
 	// PASSWORD
-	Username                string     `json:"username"`
-	Password                string     `json:"password"`
+	Username string `json:"username"`
+	Password string `json:"password"`
 	// GENERIC_STRING
-	SecretString            string     `json:"secretString"`
+	SecretString string `json:"secretString"`
 	// Common
-	Comment                 string     `json:"comment"`
-}
-
-func escLit(s string) string {
-	return strings.ReplaceAll(s, "'", "''")
+	Comment string `json:"comment"`
 }
 
 // BuildCreateSecretSql constructs a CREATE SECRET SQL statement.
@@ -95,35 +91,35 @@ func BuildCreateSecretSql(db, schema string, cfg SecretConfig) (string, error) {
 				parts := strings.Split(cfg.OAuthScopes, ",")
 				var quoted []string
 				for _, p := range parts {
-					quoted = append(quoted, fmt.Sprintf("'%s'", escLit(strings.TrimSpace(p))))
+					quoted = append(quoted, fmt.Sprintf("'%s'", snowflake.EscapeStringLit(strings.TrimSpace(p))))
 				}
 				fmt.Fprintf(&sb, "\n  OAUTH_SCOPES = (%s)", strings.Join(quoted, ", "))
 			}
 		} else {
-			fmt.Fprintf(&sb, "\n  OAUTH_REFRESH_TOKEN = '%s'", escLit(cfg.OAuthRefreshToken))
+			fmt.Fprintf(&sb, "\n  OAUTH_REFRESH_TOKEN = '%s'", snowflake.EscapeStringLit(cfg.OAuthRefreshToken))
 			if cfg.OAuthRefreshTokenExpiry != "" {
 				// Snowflake accepts ISO8601/RFC3339
-				fmt.Fprintf(&sb, "\n  OAUTH_REFRESH_TOKEN_EXPIRY_TIME = '%s'", escLit(cfg.OAuthRefreshTokenExpiry))
+				fmt.Fprintf(&sb, "\n  OAUTH_REFRESH_TOKEN_EXPIRY_TIME = '%s'", snowflake.EscapeStringLit(cfg.OAuthRefreshTokenExpiry))
 			}
 		}
 	case SecretTypeCloudProviderToken:
-		fmt.Fprintf(&sb, "\n  API_AUTHENTICATION = '%s'", escLit(cfg.ApiAuthentication))
+		fmt.Fprintf(&sb, "\n  API_AUTHENTICATION = '%s'", snowflake.EscapeStringLit(cfg.ApiAuthentication))
 		enabled := "TRUE"
 		if !cfg.Enabled {
 			enabled = "FALSE"
 		}
 		fmt.Fprintf(&sb, "\n  ENABLED = %s", enabled)
 	case SecretTypePassword:
-		fmt.Fprintf(&sb, "\n  USERNAME = '%s'", escLit(cfg.Username))
-		fmt.Fprintf(&sb, "\n  PASSWORD = '%s'", escLit(cfg.Password))
+		fmt.Fprintf(&sb, "\n  USERNAME = '%s'", snowflake.EscapeStringLit(cfg.Username))
+		fmt.Fprintf(&sb, "\n  PASSWORD = '%s'", snowflake.EscapeStringLit(cfg.Password))
 	case SecretTypeGenericString:
-		fmt.Fprintf(&sb, "\n  SECRET_STRING = '%s'", escLit(cfg.SecretString))
+		fmt.Fprintf(&sb, "\n  SECRET_STRING = '%s'", snowflake.EscapeStringLit(cfg.SecretString))
 	case SecretTypeSymmetricKey:
 		fmt.Fprintf(&sb, "\n  ALGORITHM = GENERIC")
 	}
 
 	if cfg.Comment != "" {
-		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", escLit(cfg.Comment))
+		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment))
 	}
 
 	return sb.String() + ";", nil
@@ -147,37 +143,37 @@ func BuildModifySecretSql(db, schema, name string, cfg SecretConfig, originalCom
 				parts := strings.Split(cfg.OAuthScopes, ",")
 				var quoted []string
 				for _, p := range parts {
-					quoted = append(quoted, fmt.Sprintf("'%s'", escLit(strings.TrimSpace(p))))
+					quoted = append(quoted, fmt.Sprintf("'%s'", snowflake.EscapeStringLit(strings.TrimSpace(p))))
 				}
 				setClauses = append(setClauses, fmt.Sprintf("OAUTH_SCOPES = (%s)", strings.Join(quoted, ", ")))
 			}
 		} else {
 			if cfg.OAuthRefreshToken != "" {
-				setClauses = append(setClauses, fmt.Sprintf("OAUTH_REFRESH_TOKEN = '%s'", escLit(cfg.OAuthRefreshToken)))
+				setClauses = append(setClauses, fmt.Sprintf("OAUTH_REFRESH_TOKEN = '%s'", snowflake.EscapeStringLit(cfg.OAuthRefreshToken)))
 			}
 			if cfg.OAuthRefreshTokenExpiry != "" {
-				setClauses = append(setClauses, fmt.Sprintf("OAUTH_REFRESH_TOKEN_EXPIRY_TIME = '%s'", escLit(cfg.OAuthRefreshTokenExpiry)))
+				setClauses = append(setClauses, fmt.Sprintf("OAUTH_REFRESH_TOKEN_EXPIRY_TIME = '%s'", snowflake.EscapeStringLit(cfg.OAuthRefreshTokenExpiry)))
 			}
 		}
 	case SecretTypeCloudProviderToken:
 		if cfg.ApiAuthentication != "" {
-			setClauses = append(setClauses, fmt.Sprintf("API_AUTHENTICATION = '%s'", escLit(cfg.ApiAuthentication)))
+			setClauses = append(setClauses, fmt.Sprintf("API_AUTHENTICATION = '%s'", snowflake.EscapeStringLit(cfg.ApiAuthentication)))
 		}
 	case SecretTypePassword:
 		if cfg.Username != "" {
-			setClauses = append(setClauses, fmt.Sprintf("USERNAME = '%s'", escLit(cfg.Username)))
+			setClauses = append(setClauses, fmt.Sprintf("USERNAME = '%s'", snowflake.EscapeStringLit(cfg.Username)))
 		}
 		if cfg.Password != "" {
-			setClauses = append(setClauses, fmt.Sprintf("PASSWORD = '%s'", escLit(cfg.Password)))
+			setClauses = append(setClauses, fmt.Sprintf("PASSWORD = '%s'", snowflake.EscapeStringLit(cfg.Password)))
 		}
 	case SecretTypeGenericString:
 		if cfg.SecretString != "" {
-			setClauses = append(setClauses, fmt.Sprintf("SECRET_STRING = '%s'", escLit(cfg.SecretString)))
+			setClauses = append(setClauses, fmt.Sprintf("SECRET_STRING = '%s'", snowflake.EscapeStringLit(cfg.SecretString)))
 		}
 	}
 
 	if cfg.Comment != "" {
-		setClauses = append(setClauses, fmt.Sprintf("COMMENT = '%s'", escLit(cfg.Comment)))
+		setClauses = append(setClauses, fmt.Sprintf("COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment)))
 	}
 
 	if len(setClauses) > 0 {

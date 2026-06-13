@@ -13,6 +13,8 @@ package dynamictable
 import (
 	"strings"
 	"testing"
+
+	"thaw/internal/snowflake"
 )
 
 func TestBuildCreateDynamicTableSql(t *testing.T) {
@@ -107,7 +109,7 @@ func TestBuildCreateDynamicTableSql(t *testing.T) {
 				CopyGrants:                 true,
 				RequireUser:                true,
 				RowTimestamp:               "true",
-				Tags:                       []TagPair{{Name: "env", Value: "prod"}, {Name: "team", Value: "data's"}},
+				Tags:                       []snowflake.TagPair{{Name: "env", Value: "prod"}, {Name: "team", Value: "data's"}},
 				Query:                      "SELECT 1",
 			},
 			contains: []string{
@@ -129,7 +131,7 @@ func TestBuildCreateDynamicTableSql(t *testing.T) {
 				Name:      "DT",
 				TargetLag: "1 hour",
 				Warehouse: "WH",
-				Tags:      []TagPair{{Name: "  ", Value: "ignored"}},
+				Tags:      []snowflake.TagPair{{Name: "  ", Value: "ignored"}},
 				Query:     "SELECT 1",
 			},
 			absent: []string{"TAG (", "DATA_RETENTION_TIME_IN_DAYS", "MAX_DATA_EXTENSION_TIME_IN_DAYS", "SCHEDULER", "COPY GRANTS", "REQUIRE USER", "ROW_TIMESTAMP", "INITIALIZATION_WAREHOUSE"},

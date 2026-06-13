@@ -17,12 +17,6 @@ import (
 	"thaw/internal/snowflake"
 )
 
-// TagPair is a single tag name/value pair used in the table-level TAG clause.
-type TagPair struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
-}
-
 // ExternalTableColumn is one column of an external table. Snowflake derives
 // every external-table column from the staged file via an expression, so each
 // column carries a transformation: <name> <type> AS (<expression>). Columns
@@ -56,29 +50,7 @@ type ExternalTableConfig struct {
 	AwsSnsTopic     string                `json:"awsSnsTopic"`     // AWS_SNS_TOPIC for S3 auto-refresh
 	CopyGrants      bool                  `json:"copyGrants"`      // COPY GRANTS (meaningful with OR REPLACE)
 	Comment         string                `json:"comment"`
-	Tags            []TagPair             `json:"tags"` // table-level TAG (name = 'value', ...)
-}
-
-func escLit(s string) string {
-	return strings.ReplaceAll(s, "'", "''")
-}
-
-// tagClause renders a table-level TAG (...) clause from the non-empty tag pairs,
-// or "" when there are none. Tag names are identifiers; values are string
-// literals.
-func tagClause(tags []TagPair) string {
-	parts := make([]string, 0, len(tags))
-	for _, t := range tags {
-		name := strings.TrimSpace(t.Name)
-		if name == "" {
-			continue
-		}
-		parts = append(parts, fmt.Sprintf("%s = '%s'", snowflake.QuoteIdent(name), escLit(t.Value)))
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return "TAG (" + strings.Join(parts, ", ") + ")"
+	Tags            []snowflake.TagPair   `json:"tags"` // table-level TAG (name = 'value', ...)
 }
 
 // fileFormatClause renders the FILE_FORMAT clause. A named format takes
@@ -89,7 +61,7 @@ func tagClause(tags []TagPair) string {
 // TYPE when the user is in inline-type mode).
 func fileFormatClause(cfg ExternalTableConfig) string {
 	if name := strings.TrimSpace(cfg.FileFormatName); name != "" {
-		return fmt.Sprintf("FILE_FORMAT = (FORMAT_NAME = '%s')", escLit(name))
+		return fmt.Sprintf("FILE_FORMAT = (FORMAT_NAME = '%s')", snowflake.EscapeStringLit(name))
 	}
 	if typ := strings.TrimSpace(cfg.FileFormatType); typ != "" {
 		return fmt.Sprintf("FILE_FORMAT = (TYPE = %s)", strings.ToUpper(typ))
@@ -171,21 +143,21 @@ func BuildCreateExternalTableSql(db, schema string, cfg ExternalTableConfig) (st
 		fmt.Fprintf(&sb, "\n  AUTO_REFRESH = %s", strings.ToUpper(ar))
 	}
 	if p := strings.TrimSpace(cfg.Pattern); p != "" {
-		fmt.Fprintf(&sb, "\n  PATTERN = '%s'", escLit(p))
+		fmt.Fprintf(&sb, "\n  PATTERN = '%s'", snowflake.EscapeStringLit(p))
 	}
 
 	fmt.Fprintf(&sb, "\n  %s", fileFormatClause(cfg))
 
 	if topic := strings.TrimSpace(cfg.AwsSnsTopic); topic != "" {
-		fmt.Fprintf(&sb, "\n  AWS_SNS_TOPIC = '%s'", escLit(topic))
+		fmt.Fprintf(&sb, "\n  AWS_SNS_TOPIC = '%s'", snowflake.EscapeStringLit(topic))
 	}
 	if cfg.CopyGrants {
 		fmt.Fprintf(&sb, "\n  COPY GRANTS")
 	}
 	if cfg.Comment != "" {
-		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", escLit(cfg.Comment))
+		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment))
 	}
-	if tc := tagClause(cfg.Tags); tc != "" {
+	if tc := snowflake.TagClause(cfg.Tags); tc != "" {
 		fmt.Fprintf(&sb, "\n  %s", tc)
 	}
 

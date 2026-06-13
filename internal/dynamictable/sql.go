@@ -17,12 +17,6 @@ import (
 	"thaw/internal/snowflake"
 )
 
-// TagPair is a single tag name/value pair used in the table-level TAG clause.
-type TagPair struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
-}
-
 // DynamicTableConfig holds the parameters for creating a Snowflake DYNAMIC TABLE
 // object. The defining query (Query) is appended verbatim after the AS keyword;
 // the remaining fields map to the table-level CREATE DYNAMIC TABLE options in
@@ -31,30 +25,26 @@ type TagPair struct {
 // START AT, EXECUTE AS USER, and REFRESH USING are intentionally out of scope
 // for the visual builder and are left to raw SQL.
 type DynamicTableConfig struct {
-	Name                       string    `json:"name"`
-	CaseSensitive              bool      `json:"caseSensitive"`
-	OrReplace                  bool      `json:"orReplace"`
-	IfNotExists                bool      `json:"ifNotExists"`
-	Transient                  bool      `json:"transient"`
-	TargetLag                  string    `json:"targetLag"`     // e.g. "1 minute", "2 hours", or "DOWNSTREAM"
-	Scheduler                  string    `json:"scheduler"`     // ENABLE | DISABLE (or "" for default)
-	Warehouse                  string    `json:"warehouse"`     // warehouse used to refresh the table
-	InitializationWarehouse    string    `json:"initializationWarehouse"` // warehouse used for the initial refresh (or "")
-	RefreshMode                string    `json:"refreshMode"`   // AUTO | FULL | INCREMENTAL | ADAPTIVE | CUSTOM_INCREMENTAL (or "")
-	Initialize                 string    `json:"initialize"`    // ON_CREATE | ON_SCHEDULE (or "")
-	ClusterBy                  string    `json:"clusterBy"`     // comma-separated clustering expressions or ""
-	DataRetentionTimeInDays    string    `json:"dataRetentionTimeInDays"`    // integer string or ""
-	MaxDataExtensionTimeInDays string    `json:"maxDataExtensionTimeInDays"` // integer string or ""
-	Comment                    string    `json:"comment"`
-	CopyGrants                 bool      `json:"copyGrants"`   // COPY GRANTS (meaningful with OR REPLACE)
-	RequireUser                bool      `json:"requireUser"`  // REQUIRE USER
-	RowTimestamp               string    `json:"rowTimestamp"` // TRUE | FALSE (or "" for default)
-	Tags                       []TagPair `json:"tags"`         // table-level TAG (name = 'value', ...)
-	Query                      string    `json:"query"`        // AS <select statement>
-}
-
-func escLit(s string) string {
-	return strings.ReplaceAll(s, "'", "''")
+	Name                       string              `json:"name"`
+	CaseSensitive              bool                `json:"caseSensitive"`
+	OrReplace                  bool                `json:"orReplace"`
+	IfNotExists                bool                `json:"ifNotExists"`
+	Transient                  bool                `json:"transient"`
+	TargetLag                  string              `json:"targetLag"`                  // e.g. "1 minute", "2 hours", or "DOWNSTREAM"
+	Scheduler                  string              `json:"scheduler"`                  // ENABLE | DISABLE (or "" for default)
+	Warehouse                  string              `json:"warehouse"`                  // warehouse used to refresh the table
+	InitializationWarehouse    string              `json:"initializationWarehouse"`    // warehouse used for the initial refresh (or "")
+	RefreshMode                string              `json:"refreshMode"`                // AUTO | FULL | INCREMENTAL | ADAPTIVE | CUSTOM_INCREMENTAL (or "")
+	Initialize                 string              `json:"initialize"`                 // ON_CREATE | ON_SCHEDULE (or "")
+	ClusterBy                  string              `json:"clusterBy"`                  // comma-separated clustering expressions or ""
+	DataRetentionTimeInDays    string              `json:"dataRetentionTimeInDays"`    // integer string or ""
+	MaxDataExtensionTimeInDays string              `json:"maxDataExtensionTimeInDays"` // integer string or ""
+	Comment                    string              `json:"comment"`
+	CopyGrants                 bool                `json:"copyGrants"`   // COPY GRANTS (meaningful with OR REPLACE)
+	RequireUser                bool                `json:"requireUser"`  // REQUIRE USER
+	RowTimestamp               string              `json:"rowTimestamp"` // TRUE | FALSE (or "" for default)
+	Tags                       []snowflake.TagPair `json:"tags"`         // table-level TAG (name = 'value', ...)
+	Query                      string              `json:"query"`        // AS <select statement>
 }
 
 // targetLagClause renders the TARGET_LAG assignment. The special value
@@ -65,25 +55,7 @@ func targetLagClause(lag string) string {
 	if strings.EqualFold(lag, "DOWNSTREAM") {
 		return "TARGET_LAG = DOWNSTREAM"
 	}
-	return fmt.Sprintf("TARGET_LAG = '%s'", escLit(lag))
-}
-
-// tagClause renders a table-level TAG (...) clause from the non-empty tag pairs,
-// or "" when there are none. Tag names are identifiers; values are string
-// literals.
-func tagClause(tags []TagPair) string {
-	parts := make([]string, 0, len(tags))
-	for _, t := range tags {
-		name := strings.TrimSpace(t.Name)
-		if name == "" {
-			continue
-		}
-		parts = append(parts, fmt.Sprintf("%s = '%s'", snowflake.QuoteIdent(name), escLit(t.Value)))
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return "TAG (" + strings.Join(parts, ", ") + ")"
+	return fmt.Sprintf("TARGET_LAG = '%s'", snowflake.EscapeStringLit(lag))
 }
 
 // BuildCreateDynamicTableSql constructs a CREATE DYNAMIC TABLE statement from the
@@ -149,12 +121,12 @@ func BuildCreateDynamicTableSql(db, schema string, cfg DynamicTableConfig) (stri
 		fmt.Fprintf(&sb, "\n  MAX_DATA_EXTENSION_TIME_IN_DAYS = %s", mde)
 	}
 	if cfg.Comment != "" {
-		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", escLit(cfg.Comment))
+		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment))
 	}
 	if cfg.CopyGrants {
 		fmt.Fprintf(&sb, "\n  COPY GRANTS")
 	}
-	if tc := tagClause(cfg.Tags); tc != "" {
+	if tc := snowflake.TagClause(cfg.Tags); tc != "" {
 		fmt.Fprintf(&sb, "\n  %s", tc)
 	}
 	if cfg.RequireUser {

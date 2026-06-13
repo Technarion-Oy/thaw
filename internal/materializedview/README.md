@@ -23,8 +23,8 @@ dedicated builder.
 
 | Type / Function | Purpose |
 |---|---|
-| `MaterializedViewConfig` | CREATE parameters: name, case sensitivity, `OrReplace`, `Secure`, `IfNotExists`, `CopyGrants`, comment, `ClusterBy`, `Tags` (`[]TagPair`), and the defining `Query` |
-| `TagPair` | `Name` / `Value` for the view-level `TAG (...)` clause |
+| `MaterializedViewConfig` | CREATE parameters: name, case sensitivity, `OrReplace`, `Secure`, `IfNotExists`, `CopyGrants`, comment, `ClusterBy`, `Tags` (`[]snowflake.TagPair`), and the defining `Query` |
+| `snowflake.TagPair` / `snowflake.TagClause` | Shared tag type and `TAG (...)` clause builder (in `internal/snowflake`) |
 | `BuildCreateMaterializedViewSql(db, schema, cfg)` | Emits `CREATE [OR REPLACE] [SECURE] MATERIALIZED VIEW [IF NOT EXISTS] <fqn> [COPY GRANTS] [COMMENT='…'] [CLUSTER BY (…)] [TAG (…)] AS <query>;` — optional clauses emitted only when set, in documented order |
 
 ## Patterns & integration

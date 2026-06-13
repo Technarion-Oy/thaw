@@ -24,8 +24,8 @@ statement (`App.ExecuteAlert`) — `EXECUTE` is its own SQL command, not an
 
 | Type / Function | Purpose |
 |---|---|
-| `AlertConfig` | CREATE parameters: name, case sensitivity, `OrReplace`, `IfNotExists`, `Warehouse` (empty ⇒ serverless), `Schedule`, comment, `Tags` (`[]TagPair`), the `Condition` query, and the `Action` statement |
-| `TagPair` | `Name` / `Value` for the alert-level `WITH TAG (...)` clause |
+| `AlertConfig` | CREATE parameters: name, case sensitivity, `OrReplace`, `IfNotExists`, `Warehouse` (empty ⇒ serverless), `Schedule`, comment, `Tags` (`[]snowflake.TagPair`), the `Condition` query, and the `Action` statement |
+| `snowflake.TagClause` | Shared `TAG (...)` clause builder (in `internal/snowflake`); the alert grammar uses the `WITH TAG (...)` form, so the builder prepends `WITH ` to a non-empty result |
 | `BuildCreateAlertSql(db, schema, cfg)` | Emits `CREATE [OR REPLACE] ALERT [IF NOT EXISTS] <fqn> [WITH TAG (…)] SCHEDULE='…' [WAREHOUSE=…] [COMMENT='…'] IF (EXISTS (<condition>)) THEN <action>;` — optional clauses emitted only when set, in documented order |
 
 ## Patterns & integration

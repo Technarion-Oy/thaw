@@ -14,7 +14,7 @@ Owns three distinct concerns that are tied together by the pipe object lifecycle
 
 | File | Purpose |
 |---|---|
-| `sql.go` | `PipeConfig`, `RefreshPipeConfig`, `TagPair`, `BuildCreatePipeSql`, `BuildRefreshPipeSql` |
+| `sql.go` | `PipeConfig`, `RefreshPipeConfig`, `BuildCreatePipeSql`, `BuildRefreshPipeSql` |
 | `parse.go` | `FQNPart`, `ParseCopyIntoTargetParts`, `ParseCopyIntoTarget`, internal identifier parsers |
 | `copyhistory.go` | `GetCopyHistory(ctx, client, ...)` — fetches and filters copy history rows |
 | `sql_test.go` | Unit tests for the SQL builders |
@@ -29,7 +29,6 @@ Owns three distinct concerns that are tied together by the pipe object lifecycle
 |---|---|
 | `PipeConfig` | CREATE PIPE parameters: name, `AutoIngest`, `ErrorIntegration`, `AwsSnsTopic`, `Integration`, comment, `CopyStatement` |
 | `RefreshPipeConfig` | ALTER PIPE REFRESH parameters: optional `Prefix` path and `ModifiedAfter` ISO timestamp |
-| `TagPair` | Name/value pair used in SET TAG / UNSET TAG clauses (declaration only; callers build the full clause) |
 
 ### SQL builders
 

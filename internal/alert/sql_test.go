@@ -13,6 +13,8 @@ package alert
 import (
 	"strings"
 	"testing"
+
+	"thaw/internal/snowflake"
 )
 
 func TestBuildCreateAlertSql(t *testing.T) {
@@ -90,7 +92,7 @@ func TestBuildCreateAlertSql(t *testing.T) {
 			name: "tags emit WITH TAG clause",
 			cfg: AlertConfig{
 				Name:      "A",
-				Tags:      []TagPair{{Name: "env", Value: "prod"}, {Name: "team", Value: "data's"}},
+				Tags:      []snowflake.TagPair{{Name: "env", Value: "prod"}, {Name: "team", Value: "data's"}},
 				Condition: "SELECT 1",
 				Action:    "SELECT 1",
 			},
@@ -100,7 +102,7 @@ func TestBuildCreateAlertSql(t *testing.T) {
 			name: "empty tags emit nothing",
 			cfg: AlertConfig{
 				Name:      "A",
-				Tags:      []TagPair{{Name: "  ", Value: "ignored"}},
+				Tags:      []snowflake.TagPair{{Name: "  ", Value: "ignored"}},
 				Condition: "SELECT 1",
 				Action:    "SELECT 1",
 			},
@@ -159,7 +161,7 @@ func TestBuildCreateAlertSqlClauseOrder(t *testing.T) {
 		Warehouse: "WH",
 		Schedule:  "1 MINUTE",
 		Comment:   "c",
-		Tags:      []TagPair{{Name: "env", Value: "prod"}},
+		Tags:      []snowflake.TagPair{{Name: "env", Value: "prod"}},
 		Condition: "SELECT 1",
 		Action:    "SELECT 2",
 	})

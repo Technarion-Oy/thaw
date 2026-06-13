@@ -16,7 +16,7 @@ tables are not renamable.
 
 | File | Purpose |
 |---|---|
-| `sql.go` | `ExternalTableConfig`, `ExternalTableColumn`, `TagPair`, `BuildCreateExternalTableSql` |
+| `sql.go` | `ExternalTableConfig`, `ExternalTableColumn`, `BuildCreateExternalTableSql` |
 | `sql_test.go` | Unit tests for the SQL builder |
 | `doc.go` | Package doc + `thaw:domain: Object Browser & Administration` annotation |
 
@@ -24,9 +24,9 @@ tables are not renamable.
 
 | Type / Function | Purpose |
 |---|---|
-| `ExternalTableConfig` | CREATE parameters: name, case sensitivity, `OrReplace`, `IfNotExists`, `Columns` (`[]ExternalTableColumn`), `Location`, `RefreshOnCreate`, `AutoRefresh`, `Pattern`, `FileFormatName`, `FileFormatType`, `AwsSnsTopic`, `CopyGrants`, comment, `Tags` (`[]TagPair`) |
+| `ExternalTableConfig` | CREATE parameters: name, case sensitivity, `OrReplace`, `IfNotExists`, `Columns` (`[]ExternalTableColumn`), `Location`, `RefreshOnCreate`, `AutoRefresh`, `Pattern`, `FileFormatName`, `FileFormatType`, `AwsSnsTopic`, `CopyGrants`, comment, `Tags` (`[]snowflake.TagPair`) |
 | `ExternalTableColumn` | One column derived from the staged file: `Name`, `Type`, `Expression` (emitted as `AS (<expr>)`), and `Partition` (whether to include it in `PARTITION BY`) |
-| `TagPair` | `Name` / `Value` for the table-level `TAG (...)` clause |
+| `snowflake.TagPair` / `snowflake.TagClause` | Shared tag type and `TAG (...)` clause builder (in `internal/snowflake`) |
 | `BuildCreateExternalTableSql(db, schema, cfg)` | Emits `CREATE [OR REPLACE] EXTERNAL TABLE [IF NOT EXISTS] <fqn> [( <cols> )] [PARTITION BY (…)] LOCATION=… [REFRESH_ON_CREATE=…] [AUTO_REFRESH=…] [PATTERN='…'] FILE_FORMAT=(…) [AWS_SNS_TOPIC='…'] [COPY GRANTS] [COMMENT='…'] [TAG (…)];` — optional clauses emitted only when set, in the order Snowflake documents them |
 
 ## Patterns & integration

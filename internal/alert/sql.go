@@ -17,12 +17,6 @@ import (
 	"thaw/internal/snowflake"
 )
 
-// TagPair is a single tag name/value pair used in the alert-level TAG clause.
-type TagPair struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
-}
-
 // AlertConfig holds the parameters for creating a Snowflake ALERT object. The
 // condition (Condition) is wrapped in the mandatory IF (EXISTS (...)) clause and
 // the action (Action) follows the THEN keyword; the remaining fields map to the
@@ -33,38 +27,16 @@ type TagPair struct {
 // warehouse. CONFIG, RUNBOOK, and SUSPEND_ALERT_AFTER_NUM_FAILURES are
 // intentionally out of scope for the visual builder and are left to raw SQL.
 type AlertConfig struct {
-	Name          string    `json:"name"`
-	CaseSensitive bool      `json:"caseSensitive"`
-	OrReplace     bool      `json:"orReplace"`
-	IfNotExists   bool      `json:"ifNotExists"`
-	Warehouse     string    `json:"warehouse"` // user-managed warehouse, or "" for a serverless alert
-	Schedule      string    `json:"schedule"`  // e.g. "60 MINUTE" or "USING CRON 0 9 * * * UTC"
-	Comment       string    `json:"comment"`
-	Tags          []TagPair `json:"tags"`      // alert-level TAG (name = 'value', ...)
-	Condition     string    `json:"condition"` // the query inside IF (EXISTS (...))
-	Action        string    `json:"action"`    // the statement after THEN
-}
-
-func escLit(s string) string {
-	return strings.ReplaceAll(s, "'", "''")
-}
-
-// tagClause renders an alert-level WITH TAG (...) clause from the non-empty tag
-// pairs, or "" when there are none. Tag names are identifiers; values are string
-// literals.
-func tagClause(tags []TagPair) string {
-	parts := make([]string, 0, len(tags))
-	for _, t := range tags {
-		name := strings.TrimSpace(t.Name)
-		if name == "" {
-			continue
-		}
-		parts = append(parts, fmt.Sprintf("%s = '%s'", snowflake.QuoteIdent(name), escLit(t.Value)))
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return "WITH TAG (" + strings.Join(parts, ", ") + ")"
+	Name          string              `json:"name"`
+	CaseSensitive bool                `json:"caseSensitive"`
+	OrReplace     bool                `json:"orReplace"`
+	IfNotExists   bool                `json:"ifNotExists"`
+	Warehouse     string              `json:"warehouse"` // user-managed warehouse, or "" for a serverless alert
+	Schedule      string              `json:"schedule"`  // e.g. "60 MINUTE" or "USING CRON 0 9 * * * UTC"
+	Comment       string              `json:"comment"`
+	Tags          []snowflake.TagPair `json:"tags"`      // alert-level WITH TAG (name = 'value', ...)
+	Condition     string              `json:"condition"` // the query inside IF (EXISTS (...))
+	Action        string              `json:"action"`    // the statement after THEN
 }
 
 // trimStmt strips surrounding whitespace and any trailing semicolons from a
@@ -100,21 +72,21 @@ func BuildCreateAlertSql(db, schema string, cfg AlertConfig) (string, error) {
 
 	fmt.Fprintf(&sb, "%s %s.%s.%s", createClause, snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), nameToken)
 
-	if tc := tagClause(cfg.Tags); tc != "" {
-		fmt.Fprintf(&sb, "\n  %s", tc)
+	if tc := snowflake.TagClause(cfg.Tags); tc != "" {
+		fmt.Fprintf(&sb, "\n  WITH %s", tc)
 	}
 
 	schedule := strings.TrimSpace(cfg.Schedule)
 	if schedule == "" {
 		schedule = "60 MINUTE"
 	}
-	fmt.Fprintf(&sb, "\n  SCHEDULE = '%s'", escLit(schedule))
+	fmt.Fprintf(&sb, "\n  SCHEDULE = '%s'", snowflake.EscapeStringLit(schedule))
 
 	if wh := strings.TrimSpace(cfg.Warehouse); wh != "" {
 		fmt.Fprintf(&sb, "\n  WAREHOUSE = %s", snowflake.QuoteIdent(wh))
 	}
 	if cfg.Comment != "" {
-		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", escLit(cfg.Comment))
+		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment))
 	}
 
 	condition := trimStmt(cfg.Condition)
