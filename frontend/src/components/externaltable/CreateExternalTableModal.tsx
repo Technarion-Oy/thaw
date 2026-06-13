@@ -103,6 +103,9 @@ export default function CreateExternalTableModal({ db, schema, onClose, onSucces
   const [entries, setEntries] = useState<snowflake.GitRepoEntry[]>([]);
   const [loadingEntries, setLoadingEntries] = useState(false);
   const [browseError, setBrowseError] = useState<string | null>(null);
+  // Bumped to force a re-fetch of the current directory even when browsePath is
+  // unchanged (the "Reload entries" button).
+  const [reloadTick, setReloadTick] = useState(0);
 
   useEffect(() => {
     GetQuotedIdentifiersIgnoreCase()
@@ -204,7 +207,7 @@ export default function CreateExternalTableModal({ db, schema, onClose, onSucces
       .catch((err) => { if (!cancelled) { setEntries([]); setBrowseError(String(err)); } })
       .finally(() => { if (!cancelled) setLoadingEntries(false); });
     return () => { cancelled = true; };
-  }, [pickerDb, pickerSchema, pickerStage, browsePath]);
+  }, [pickerDb, pickerSchema, pickerStage, browsePath, reloadTick]);
 
   // Breadcrumb segments for the current browse path (each carries the cumulative
   // path to navigate to when clicked).
@@ -507,7 +510,7 @@ export default function CreateExternalTableModal({ db, schema, onClose, onSucces
             />
             {pickerStage && (
               <Tooltip title="Reload entries">
-                <Button size="small" icon={<ReloadOutlined />} loading={loadingEntries} onClick={() => navigateTo(browsePath)} />
+                <Button size="small" icon={<ReloadOutlined />} loading={loadingEntries} onClick={() => setReloadTick((t) => t + 1)} />
               </Tooltip>
             )}
           </div>
