@@ -96,7 +96,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
 
 ## Object Browser
 
-- Browse all databases → schemas → tables, views, dynamic tables, external tables, functions, procedures, sequences, stages, streams, tasks, file formats, pipes, notebooks, secrets, and git repositories
+- Browse all databases → schemas → tables, views, materialized views, dynamic tables, external tables, functions, procedures, sequences, stages, streams, tasks, file formats, pipes, notebooks, secrets, and git repositories
 - **Multi-selection** — hold `⌘` (macOS) or `Ctrl` (Windows/Linux) and click anywhere on an object row to select it; selected objects are highlighted across the full width of the sidebar; click any non-modifier area to clear the selection
 - **Batch deletion** — when multiple objects are selected, right-click any of them and choose **Delete N selected objects…** to drop all of them in one operation; a confirmation dialog lists all objects to be removed
 - **Secret Management** — right-click any schema and choose **Create Object** → **Secret…** or right-click an existing secret and choose **Modify…** to open the secret management dialog:
@@ -140,6 +140,13 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Select Top 1000 Rows** — query an external table like a regular table directly from the context menu
   - **DDL Export** — `GET_DDL('EXTERNAL_TABLE', …)` powers the hover DDL preview, View Definition, and database DDL export
   - **Drop** — standard danger-confirmation dialog executes `DROP EXTERNAL TABLE` (external tables cannot be renamed — Snowflake has no `ALTER EXTERNAL TABLE … RENAME` — so Rename is not offered for them)
+- **Materialized View Management** — right-click any schema and choose **Create Object** → **Materialized View…**, or right-click an existing materialized view (listed under the **Materialized Views** group) for materialized-view-specific operations:
+  - **Create** — dynamic form with name, OR REPLACE / IF NOT EXISTS options, comment, and an embedded Monaco editor for the defining query with an **Insert from table** database→schema→table picker that drops in the same fully-qualified `SELECT <columns> FROM …` snippet as dragging a table from the object store. An **Advanced options** section covers **Cluster By**, **SECURE**, **COPY GRANTS**, and view-level **Tags**. Live SQL preview shows the full `CREATE MATERIALIZED VIEW` statement. (Per-column masking policies, row-access / aggregation policies, and CONTACT remain raw-SQL only.)
+  - **Properties** — right-click a materialized view and choose **Properties…** to view `SHOW MATERIALIZED VIEWS` metadata (cluster key, rows, bytes, source table, refreshed-on, behind-by lag, …) plus a Valid/Invalid status tag, inline-editable **Comment**, and a **SECURE** toggle (applied via `ALTER MATERIALIZED VIEW … SET / UNSET`), and the rendered **Defining Query**
+  - **Suspend / Resume** — right-click a materialized view for **Suspend** or **Resume** to halt or restore its use and automatic maintenance; each prompts a confirmation dialog. (Materialized views have no manual refresh — Snowflake maintains them automatically.)
+  - **Select Top 1000 Rows** — query a materialized view like a regular table directly from the context menu
+  - **DDL Export** — `GET_DDL('VIEW', …)` powers the hover DDL preview, View Definition, and database DDL export (Snowflake has no separate `MATERIALIZED_VIEW` `GET_DDL` object type — `TABLE` and `VIEW` are interchangeable)
+  - **Drop / Rename** — standard danger-confirmation dialog executes `DROP MATERIALIZED VIEW`; **Rename…** issues `ALTER MATERIALIZED VIEW … RENAME TO`
 - **Snowpipe Management** — right-click any schema and choose **Create Object** → **Pipe…**, or right-click an existing pipe to access pipe-specific operations:
   - **Create** — dynamic form with name, OR REPLACE / IF NOT EXISTS options, Auto Ingest toggle, Error Integration, AWS SNS Topic, Integration, Comment, and an embedded Monaco editor for the `COPY INTO` statement; live SQL preview shows the full `CREATE PIPE` statement
   - **Properties** — right-click a pipe and choose **Properties…** to view `SHOW PIPES` metadata plus inline-editable **Pipe Execution Paused** (toggle), **Comment** (inline edit / UNSET), and **Tags** (add/remove key-value pairs); changes are applied immediately via `ALTER PIPE … SET / UNSET`
