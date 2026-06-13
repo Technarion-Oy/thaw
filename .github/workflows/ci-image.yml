@@ -1,21 +1,15 @@
 name: CI Image
 
 # Builds and pushes the prebuilt CI base image (.github/docker/ci.Dockerfile)
-# to GHCR. The self-hosted workflows pull this image instead of apt-installing
-# the toolchain on every run.
+# to GHCR, for self-hosted workflows that want to pull a baked toolchain
+# instead of apt-installing it on every run.
 #
-# Runs when the Dockerfile/this workflow changes, weekly to pick up base-image
-# security updates, and on manual dispatch. Trigger it manually once before the
-# consuming workflows can pull `:latest`.
+# Manual dispatch only: this is the one workflow that needs a GitHub-hosted
+# runner (Docker + a clean workspace), which costs hosted minutes — so it is
+# never run automatically. Trigger it by hand when the Dockerfile changes or to
+# refresh the base image; rebuild `:latest` only when you actually need to.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/docker/ci.Dockerfile"
-      - ".github/workflows/ci-image.yml"
-  schedule:
-    - cron: "0 5 * * 1" # Every Monday at 05:00 UTC — refresh base-image patches
   workflow_dispatch:
 
 concurrency:
