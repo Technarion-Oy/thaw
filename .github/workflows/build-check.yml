@@ -36,6 +36,17 @@ jobs:
   # No -obfuscated/garble here: this is a build-verification check, not a
   # release artifact, so we skip the slow obfuscation pass. Cross-platform
   # release binaries are produced by build.yml / manual-release.yml.
+  #
+  # The "Install base tools" + "Install system dependencies" + "Install Wails
+  # CLI" steps below re-run on every build (~3-7 min total). These could be
+  # baked into a prebuilt CI image (GTK/WebKit dev libs + Wails CLI) pulled via
+  # `container:` to cut that to a fast image pull. We had this working but
+  # reverted it: building/pushing the image needs a GitHub-hosted runner (the
+  # self-hosted runners mix root container jobs and host jobs on a shared _work
+  # dir, so a host-run `docker build` fails checkout on a root-owned .git), and
+  # hosted runners cost money. Revisit if a cost-free self-hosted image build
+  # becomes worthwhile (e.g. docker build in a socket-mounted container, or an
+  # ephemeral-workspace runner). See PR #483 history.
   build:
     name: Wails build (linux/amd64)
     runs-on: self-hosted

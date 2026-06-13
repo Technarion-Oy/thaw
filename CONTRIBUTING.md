@@ -173,7 +173,7 @@ gosec -exclude=G104,G115,G122,G201,G204,G301,G304,G306,G703 \
       -exclude-dir=frontend -exclude-dir=internal/integration ./...
 ```
 
-These also run in CI on every pull request and on pushes to `main` (plus a weekly cron). A Wails build check (`build-check.yml`) likewise verifies the app compiles, links, and bundles on each PR and `main` push — it builds `linux/amd64` on the self-hosted runners with the frontend obfuscation/minify passes skipped (`THAW_FAST_BUILD=1`) for speed. An optional prebuilt CI image (`.github/docker/ci.Dockerfile`) that bakes in the GTK/WebKit dev libs and the Wails CLI can be built and pushed to GHCR by manually dispatching `ci-image.yml` (it needs a GitHub-hosted runner, so it is not wired into the checks). The Snowflake integration tests run weekly or on manual dispatch only. See `.github/workflows/`.
+These also run in CI on every pull request and on pushes to `main` (plus a weekly cron). A Wails build check (`build-check.yml`) likewise verifies the app compiles, links, and bundles on each PR and `main` push — it builds `linux/amd64` on the self-hosted runners with the frontend obfuscation/minify passes skipped (`THAW_FAST_BUILD=1`) for speed. The Snowflake integration tests run weekly or on manual dispatch only. See `.github/workflows/`.
 
 ---
 
