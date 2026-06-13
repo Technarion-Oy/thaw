@@ -138,9 +138,21 @@ function restoreGitkeepPlugin(): Plugin {
   };
 }
 
+// THAW_FAST_BUILD=1 skips the production-only minify/obfuscation passes
+// (Terser multi-pass + javascript-obfuscator).  Used by the CI build-check
+// workflow, which only needs to verify the app compiles, links, and bundles —
+// not produce a shipping artifact.  Release builds leave it unset.
+const fastBuild = process.env.THAW_FAST_BUILD === "1";
+
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react(), appObfuscatorPlugin(), restoreGitkeepPlugin()],
+  plugins: [
+    react(),
+    // Obfuscation is the slowest, most memory-hungry pass — skip it entirely
+    // in the fast CI build-check (its output is never shipped).
+    ...(fastBuild ? [] : [appObfuscatorPlugin()]),
+    restoreGitkeepPlugin(),
+  ],
 
   resolve: {
     alias: {
@@ -162,8 +174,9 @@ export default defineConfig({
 
     // Switch to Terser for aggressive, multi-pass minification.  esbuild (the
     // Vite default) is faster but does not support multiple compression passes
-    // or fine-grained compress/mangle control.
-    minify: "terser",
+    // or fine-grained compress/mangle control.  The fast CI build-check falls
+    // back to esbuild — it only needs to confirm the bundle builds, not ship it.
+    minify: fastBuild ? "esbuild" : "terser",
     terserOptions: {
       compress: {
         // Strip all console calls and debugger statements so no internal

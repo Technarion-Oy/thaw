@@ -1,0 +1,101 @@
+name: Build Check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "frontend/**"
+      - "wails.json"
+      - ".github/workflows/build-check.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "frontend/**"
+      - "wails.json"
+      - ".github/workflows/build-check.yml"
+  workflow_dispatch:
+
+# Cancel an in-progress run when a new commit is pushed to the same ref, so
+# rapid PR pushes don't queue up redundant builds on the self-hosted runners.
+concurrency:
+  group: build-check-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONDONTWRITEBYTECODE: 1
+
+jobs:
+  # Verifies the Wails app compiles and links (Go backend + embedded frontend).
+  # Builds linux/amd64 only — the self-hosted runners are Linux containers.
+  # No -obfuscated/garble here: this is a build-verification check, not a
+  # release artifact, so we skip the slow obfuscation pass. Cross-platform
+  # release binaries are produced by build.yml / manual-release.yml.
+  #
+  # The "Install base tools" + "Install system dependencies" + "Install Wails
+  # CLI" steps below re-run on every build (~3-7 min total). These could be
+  # baked into a prebuilt CI image (GTK/WebKit dev libs + Wails CLI) pulled via
+  # `container:` to cut that to a fast image pull. We had this working but
+  # reverted it: building/pushing the image needs a GitHub-hosted runner (the
+  # self-hosted runners mix root container jobs and host jobs on a shared _work
+  # dir, so a host-run `docker build` fails checkout on a root-owned .git), and
+  # hosted runners cost money. Revisit if a cost-free self-hosted image build
+  # becomes worthwhile (e.g. docker build in a socket-mounted container, or an
+  # ephemeral-workspace runner). See PR #483 history.
+  build:
+    name: Wails build (linux/amd64)
+    runs-on: self-hosted
+    container: ubuntu:24.04
+    permissions:
+      contents: read
+
+    steps:
+      - name: Install base tools
+        run: |
+          apt-get update
+          apt-get install -y git curl wget gcc pkg-config
+
+      - uses: actions/checkout@v4
+
+      # cache: false — the self-hosted runners' cache backend is slow for large
+      # caches: enabling it added ~6 min of cache-save overhead (Go build+module
+      # cache) with no restore benefit, doubling the job. Matches every other
+      # workflow in this repo, which all use cache: false for the same reason.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install system dependencies
+        run: apt-get update && apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0
+
+      - name: Download Go dependencies
+        run: go mod download
+
+      # webkit2_41: Ubuntu 24.04 only ships libwebkit2gtk-4.1-dev; without this
+      # tag, Wails' CGO directives default to webkit2gtk-4.0 and pkg-config fails.
+      # THAW_FAST_BUILD skips the slow Terser/obfuscator frontend passes (~2 min
+      # saved) — this check verifies compile+link+bundle, not shipping artifacts.
+      - name: Build Wails app
+        run: wails build -platform linux/amd64 -tags webkit2_41
+        env:
+          THAW_FAST_BUILD: "1"
+          NODE_OPTIONS: --max-old-space-size=6144
+
+      - name: Unlock permissions for host runner agent
+        if: always()
+        run: chmod -R 777 $GITHUB_WORKSPACE/../../_actions || true
