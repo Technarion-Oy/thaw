@@ -14,6 +14,7 @@ import (
 	"thaw/internal/column"
 	"thaw/internal/dbtproject"
 	"thaw/internal/dynamictable"
+	"thaw/internal/externaltable"
 	"thaw/internal/fileformat"
 	"thaw/internal/pipe"
 	"thaw/internal/procedure"
@@ -111,6 +112,11 @@ func (a *App) BuildRefreshPipeSql(database, schema, name string, cfg pipe.Refres
 // BuildCreateDynamicTableSql returns the SQL for creating a Snowflake DYNAMIC TABLE.
 func (a *App) BuildCreateDynamicTableSql(database, schema string, cfg dynamictable.DynamicTableConfig) (string, error) {
 	return dynamictable.BuildCreateDynamicTableSql(database, schema, cfg)
+}
+
+// BuildCreateExternalTableSql returns the SQL for creating a Snowflake EXTERNAL TABLE.
+func (a *App) BuildCreateExternalTableSql(database, schema string, cfg externaltable.ExternalTableConfig) (string, error) {
+	return externaltable.BuildCreateExternalTableSql(database, schema, cfg)
 }
 
 // BuildCreateStageSql returns the CREATE STAGE SQL statement.

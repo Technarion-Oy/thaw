@@ -2853,7 +2853,7 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 	defer rows.Close() //nolint:errcheck
 
 	cols, _ := rows.Columns()
-	nameIdx, kindIdx, argsIdx, builtinIdx, rowsIdx, predsIdx, taskRelIdx, finalizeColIdx, isDynamicIdx := -1, -1, -1, -1, -1, -1, -1, -1, -1
+	nameIdx, kindIdx, argsIdx, builtinIdx, rowsIdx, predsIdx, taskRelIdx, finalizeColIdx, isDynamicIdx, isExternalIdx := -1, -1, -1, -1, -1, -1, -1, -1, -1, -1
 	for i, col := range cols {
 		switch strings.ToLower(col) {
 		case "name":
@@ -2874,6 +2874,8 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 			finalizeColIdx = i
 		case "is_dynamic":
 			isDynamicIdx = i
+		case "is_external":
+			isExternalIdx = i
 		}
 	}
 	if nameIdx < 0 {
@@ -2911,6 +2913,15 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 		// TABLE"), so skip them here on the generic-kind path to avoid duplicate
 		// tree entries (one under Tables, one under Dynamic Tables).
 		if fixedKind == "" && isDynamicIdx >= 0 && strings.EqualFold(fmt.Sprintf("%v", vals[isDynamicIdx]), "Y") {
+			continue
+		}
+		// External tables surface in SHOW OBJECTS with is_external=Y on editions
+		// that expose the column. They are listed separately via SHOW EXTERNAL
+		// TABLES (kind "EXTERNAL TABLE"), so skip them here on the generic-kind
+		// path to avoid duplicate tree entries (one under Tables, one under
+		// External Tables). dedupeExternalTables in ListObjects is the
+		// belt-and-suspenders fallback when this column is absent.
+		if fixedKind == "" && isExternalIdx >= 0 && strings.EqualFold(fmt.Sprintf("%v", vals[isExternalIdx]), "Y") {
 			continue
 		}
 		kind := fixedKind
@@ -3058,9 +3069,10 @@ func (c *Client) ListBasicObjects(ctx context.Context, database, schema string) 
 
 // ListExtendedObjects returns the "extended" objects inside a schema by running
 // dedicated SHOW commands for object types not covered by SHOW OBJECTS
-// (DYNAMIC TABLE, PROCEDURE, FUNCTION, TASK, STREAM, STAGE, FILE FORMAT, PIPE,
-// NOTEBOOK, SECRET, GIT REPOSITORY). Individual commands that fail (e.g. due to missing
-// privileges) are silently skipped. Includes the TASK finalize enrichment logic.
+// (DYNAMIC TABLE, EXTERNAL TABLE, PROCEDURE, FUNCTION, TASK, STREAM, STAGE,
+// FILE FORMAT, PIPE, NOTEBOOK, SECRET, GIT REPOSITORY). Individual commands that
+// fail (e.g. due to missing privileges) are silently skipped. Includes the TASK
+// finalize enrichment logic.
 func (c *Client) ListExtendedObjects(ctx context.Context, database, schema string) ([]SnowflakeObject, error) {
 	q := fmt.Sprintf("%s.%s", QuoteIdent(database), QuoteIdent(schema))
 
@@ -3070,6 +3082,7 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 	}
 	commands := []showCmd{
 		{fmt.Sprintf("SHOW DYNAMIC TABLES IN SCHEMA %s", q), "DYNAMIC TABLE"},
+		{fmt.Sprintf("SHOW EXTERNAL TABLES IN SCHEMA %s", q), "EXTERNAL TABLE"},
 		{fmt.Sprintf("SHOW PROCEDURES IN SCHEMA %s", q), "PROCEDURE"},
 		{fmt.Sprintf("SHOW FUNCTIONS IN SCHEMA %s", q), "FUNCTION"},
 		{fmt.Sprintf("SHOW TASKS IN SCHEMA %s", q), "TASK"},
@@ -3209,9 +3222,46 @@ func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]Sn
 	// basic entry whose (schema, name) collides with an extended dynamic table —
 	// a real table and a dynamic table cannot share a name in one schema.
 	basic = dedupeDynamicTables(basic, extended)
+	// External tables are listed explicitly by ListExtendedObjects (kind
+	// "EXTERNAL TABLE") and are dropped from the generic SHOW OBJECTS path by the
+	// is_external=Y column when present; drop any remaining (schema, name)
+	// collision as a fallback for editions that omit that column.
+	basic = dedupeExternalTables(basic, extended)
 	all := append(basic, extended...)
 	c.putObjectCache(cacheKey, all)
 	return all, nil
+}
+
+// dedupeByExtendedKind removes from basic any object whose (schema, name)
+// matches an extended object of the given kind, preventing duplicate tree nodes
+// when SHOW OBJECTS surfaces an object that ListExtendedObjects already returned
+// under a dedicated kind. Matching is case-insensitive.
+func dedupeByExtendedKind(basic, extended []SnowflakeObject, kind string) []SnowflakeObject {
+	keys := make(map[string]struct{})
+	for _, o := range extended {
+		if o.Kind == kind {
+			keys[strings.ToUpper(o.Schema)+"\x00"+strings.ToUpper(o.Name)] = struct{}{}
+		}
+	}
+	if len(keys) == 0 {
+		return basic
+	}
+	// Allocate a fresh slice — basic may be the cached backing array from
+	// ListBasicObjects, so it must not be mutated in place.
+	out := make([]SnowflakeObject, 0, len(basic))
+	for _, o := range basic {
+		if _, dup := keys[strings.ToUpper(o.Schema)+"\x00"+strings.ToUpper(o.Name)]; dup {
+			continue
+		}
+		out = append(out, o)
+	}
+	return out
+}
+
+// dedupeExternalTables removes from basic any object whose (schema, name) matches
+// an extended object of kind "EXTERNAL TABLE". See dedupeByExtendedKind.
+func dedupeExternalTables(basic, extended []SnowflakeObject) []SnowflakeObject {
+	return dedupeByExtendedKind(basic, extended, "EXTERNAL TABLE")
 }
 
 // dedupeDynamicTables removes from basic any object whose (schema, name) matches
@@ -3354,12 +3404,16 @@ func buildGetDDLQuery(database, schema, kind, name, arguments string) (query, id
 		}
 		identifier = strings.ReplaceAll(identifier, "'", "''")
 	}
-	// GET_DDL expects the underscore form 'DYNAMIC_TABLE' as the object_type,
-	// whereas the rest of the app uses the space-separated SHOW kind
-	// "DYNAMIC TABLE". Normalize it here so DDL export works for dynamic tables.
+	// GET_DDL expects the underscore form (e.g. 'DYNAMIC_TABLE',
+	// 'EXTERNAL_TABLE') as the object_type, whereas the rest of the app uses the
+	// space-separated SHOW kind ("DYNAMIC TABLE", "EXTERNAL TABLE"). Normalize it
+	// here so DDL export works for these object kinds.
 	ddlKind := kind
-	if strings.EqualFold(strings.TrimSpace(kind), "DYNAMIC TABLE") {
+	switch strings.ToUpper(strings.TrimSpace(kind)) {
+	case "DYNAMIC TABLE":
 		ddlKind = "DYNAMIC_TABLE"
+	case "EXTERNAL TABLE":
+		ddlKind = "EXTERNAL_TABLE"
 	}
 	escapedKind := strings.ReplaceAll(ddlKind, "'", "''")
 	// The third argument (true) enables recursive DDL output for objects that

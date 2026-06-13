@@ -50,8 +50,8 @@ No business logic belongs here — callers pass SQL strings or high-level parame
 
 ### Object listing & cache
 - `ListObjects(ctx, db, schema)` — `ListBasicObjects` + `ListExtendedObjects`; result is cached per-schema (30 s TTL, key `"DB\x00SCHEMA"`)
-- `ListBasicObjects(ctx, db, schema)` — tables, views, sequences from a single `SHOW OBJECTS` query; cached with key `"basic\x00DB\x00SCHEMA"`. Rows with `is_dynamic=Y` are skipped here — dynamic tables are surfaced by `ListExtendedObjects` instead (kind `"DYNAMIC TABLE"`) to avoid duplicate tree entries
-- `ListExtendedObjects(ctx, db, schema)` — runs the per-type SHOW commands not covered by `SHOW OBJECTS` (DYNAMIC TABLE, PROCEDURE, FUNCTION, TASK, STREAM, STAGE, FILE FORMAT, PIPE, NOTEBOOK, SECRET, GIT REPOSITORY, DBT PROJECT) concurrently; failures per-type are silently skipped
+- `ListBasicObjects(ctx, db, schema)` — tables, views, sequences from a single `SHOW OBJECTS` query; cached with key `"basic\x00DB\x00SCHEMA"`. Rows with `is_dynamic=Y` (or `is_external=Y`) are skipped here — dynamic tables and external tables are surfaced by `ListExtendedObjects` instead (kinds `"DYNAMIC TABLE"` / `"EXTERNAL TABLE"`) to avoid duplicate tree entries; `dedupeDynamicTables`/`dedupeExternalTables` in `ListObjects` are the belt-and-suspenders fallback (drop by `(schema, name)`) for editions that omit those columns
+- `ListExtendedObjects(ctx, db, schema)` — runs the per-type SHOW commands not covered by `SHOW OBJECTS` (DYNAMIC TABLE, EXTERNAL TABLE, PROCEDURE, FUNCTION, TASK, STREAM, STAGE, FILE FORMAT, PIPE, NOTEBOOK, SECRET, GIT REPOSITORY, DBT PROJECT) concurrently; failures per-type are silently skipped
 - `getObjectCache(key)` — returns `slices.Clone()` of the cached slice (prevents append corruption)
 - `ClearObjectCache()` / `ClearObjectCacheForDatabase(db)` — IPC-exposed cache invalidation
 - `ClearObjectCacheForSchema(db, schema)` — internal use only, not exposed as IPC

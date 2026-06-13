@@ -54,6 +54,7 @@
   --icon-table:       #79c0ff;  /* light blue                               */
   --icon-view:        #56d364;  /* green                                    */
   --icon-dynamictable:#8b9bff;  /* periwinkle (auto-refreshing table)       */
+  --icon-externaltable:#d4a373; /* tan (external/data-lake storage)         */
   --icon-function:    #f0883e;  /* orange                                   */
   --icon-procedure:   #ff7b72;  /* coral                                    */
   --icon-sequence:    #d2a8ff;  /* lilac                                    */
@@ -115,6 +116,7 @@
   --icon-table:       #1f6feb;
   --icon-view:        #1a7f37;
   --icon-dynamictable:#3b4cca;
+  --icon-externaltable:#8a5a2b;
   --icon-function:    #bc4c00;
   --icon-procedure:   #cf222e;
   --icon-sequence:    #6f42c1;

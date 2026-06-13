@@ -18,6 +18,10 @@ export function AlterDynamicTable(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterDynamicTable'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterExternalTable(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterExternalTable'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterPipe(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterPipe'](arg1, arg2, arg3, arg4);
 }
@@ -92,6 +96,10 @@ export function BuildCreateDbtProjectSql(arg1, arg2, arg3) {
 
 export function BuildCreateDynamicTableSql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateDynamicTableSql'](arg1, arg2, arg3);
+}
+
+export function BuildCreateExternalTableSql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateExternalTableSql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateFileFormatSql(arg1, arg2, arg3) {

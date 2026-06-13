@@ -32,6 +32,7 @@ import {
   // Snowflake object kinds
   TableOutlined,
   RetweetOutlined,
+  CloudServerOutlined,
   EyeOutlined,
   FunctionOutlined,
   CodeOutlined,
@@ -61,6 +62,7 @@ const KIND_VAR: Record<string, string> = {
   TABLE:             "--icon-table",
   VIEW:              "--icon-view",
   "DYNAMIC TABLE":   "--icon-dynamictable",
+  "EXTERNAL TABLE":  "--icon-externaltable",
   FUNCTION:          "--icon-function",
   PROCEDURE:         "--icon-procedure",
   SEQUENCE:          "--icon-sequence",
@@ -80,6 +82,7 @@ const KIND_ICON: Record<string, React.ComponentType<{ style?: React.CSSPropertie
   TABLE:            TableOutlined,
   VIEW:             EyeOutlined,
   "DYNAMIC TABLE":  RetweetOutlined,
+  "EXTERNAL TABLE": CloudServerOutlined,
   FUNCTION:         FunctionOutlined,
   PROCEDURE:        CodeOutlined,
   SEQUENCE:         NumberOutlined,
