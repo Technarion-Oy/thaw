@@ -24,16 +24,10 @@ import {
   ListDatabases, ListSchemas, ListObjects, ListStages, ListStageEntries,
 } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
+import { formatBytes } from "../../utils/formatBytes";
 import type { externaltable, snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-}
 
 interface Props {
   db: string;
@@ -239,16 +233,19 @@ export default function CreateExternalTableModal({ db, schema, onClose, onSucces
     }
   };
 
-  const canSubmit =
-    cfg.name.trim().length > 0 &&
-    cfg.location.trim().length > 0 &&
-    (fmtMode === "type" ? true : cfg.fileFormatName.trim().length > 0);
-
   // Partition columns must carry a metadata-derived expression; an empty one
   // makes the builder emit `AS (value)`, which Snowflake rejects in PARTITION BY.
+  // Surfaced as an inline warning AND a hard block on submit, since it's a
+  // guaranteed-fail DDL the UI already knows about.
   const partitionColsMissingExpr = cfg.columns.filter(
     (c) => c.partition && c.name.trim() !== "" && c.expression.trim() === "",
   );
+
+  const canSubmit =
+    cfg.name.trim().length > 0 &&
+    cfg.location.trim().length > 0 &&
+    (fmtMode === "type" ? true : cfg.fileFormatName.trim().length > 0) &&
+    partitionColsMissingExpr.length === 0;
 
   const handleRun = async () => {
     if (!canSubmit) return;

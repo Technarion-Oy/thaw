@@ -26,6 +26,7 @@ import {
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ListStageFiles, RemoveStageFiles, DownloadFileFromStage, PickDirectory } from "../../../wailsjs/go/app/App";
+import { formatBytes } from "../../utils/formatBytes";
 import type { stage } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -39,10 +40,7 @@ interface Props {
 
 function formatSize(bytes: number | null | undefined): string {
   if (bytes === undefined || bytes === null) return "-";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  return formatBytes(bytes);
 }
 
 export default function StageBrowserModal({ db, schema, name, onClose }: Props) {
