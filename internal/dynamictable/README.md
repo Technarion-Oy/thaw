@@ -22,8 +22,9 @@ without a dedicated builder.
 
 | Type / Function | Purpose |
 |---|---|
-| `DynamicTableConfig` | CREATE parameters: name, case sensitivity, `OrReplace`, `IfNotExists`, `Transient`, `TargetLag`, `Warehouse`, `RefreshMode`, `Initialize`, `ClusterBy`, comment, and the defining `Query` |
-| `BuildCreateDynamicTableSql(db, schema, cfg)` | Emits `CREATE [OR REPLACE] [TRANSIENT] DYNAMIC TABLE [IF NOT EXISTS] <fqn> TARGET_LAG=… WAREHOUSE=… [REFRESH_MODE=…] [INITIALIZE=…] [CLUSTER BY (…)] [COMMENT='…'] AS <query>;` |
+| `DynamicTableConfig` | CREATE parameters: name, case sensitivity, `OrReplace`, `IfNotExists`, `Transient`, `TargetLag`, `Scheduler`, `Warehouse`, `InitializationWarehouse`, `RefreshMode`, `Initialize`, `ClusterBy`, `DataRetentionTimeInDays`, `MaxDataExtensionTimeInDays`, comment, `CopyGrants`, `RequireUser`, `RowTimestamp`, `Tags` (`[]TagPair`), and the defining `Query` |
+| `TagPair` | `Name` / `Value` for the table-level `TAG (...)` clause |
+| `BuildCreateDynamicTableSql(db, schema, cfg)` | Emits `CREATE [OR REPLACE] [TRANSIENT] DYNAMIC TABLE [IF NOT EXISTS] <fqn> TARGET_LAG=… [SCHEDULER=…] WAREHOUSE=… [INITIALIZATION_WAREHOUSE=…] [REFRESH_MODE=…] [INITIALIZE=…] [CLUSTER BY (…)] [DATA_RETENTION_TIME_IN_DAYS=…] [MAX_DATA_EXTENSION_TIME_IN_DAYS=…] [COMMENT='…'] [COPY GRANTS] [TAG (…)] [REQUIRE USER] [ROW_TIMESTAMP=…] AS <query>;` — optional clauses emitted only when set, in documented order |
 
 ## Patterns & integration
 

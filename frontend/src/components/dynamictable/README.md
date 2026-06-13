@@ -15,7 +15,7 @@ sidebar context menu in `layout/Sidebar.tsx` via `App.AlterDynamicTable`.
 
 | File | Purpose |
 |------|---------|
-| `CreateDynamicTableModal.tsx` | `CREATE DYNAMIC TABLE` form — name/options, Target Lag, Warehouse (from `ListWarehouses`), Refresh Mode, Initialize, Cluster By, comment, and an embedded Monaco editor for the defining query. Uses `BuildCreateDynamicTableSql` for live SQL preview. |
+| `CreateDynamicTableModal.tsx` | `CREATE DYNAMIC TABLE` form — name/options (OR REPLACE / IF NOT EXISTS / TRANSIENT), a Target Lag composer (number + unit, or DOWNSTREAM), Warehouse (from `ListWarehouses`), comment, and an embedded Monaco editor for the defining query; an **Advanced options** `Collapse` covers every other table-level clause (Refresh Mode incl. ADAPTIVE/CUSTOM_INCREMENTAL, Initialize, Scheduler, Initialization Warehouse, Cluster By, Data Retention / Max Data Extension days, Row Timestamp, COPY GRANTS, REQUIRE USER, and table-level Tags). Uses `BuildCreateDynamicTableSql` for live SQL preview. |
 | `DynamicTablePropertiesModal.tsx` | Loads `GetObjectProperties(db, schema, "DYNAMIC TABLE", name)`; renders header Refresh/Suspend/Resume buttons, inline-editable Target Lag (text) / Warehouse (a `Select` sourced from `ListWarehouses` so the saved identifier is always canonically cased) / Comment (via `AlterDynamicTable … SET/UNSET`), the remaining `SHOW DYNAMIC TABLES` properties, and the rendered defining query (`text` column). |
 
 ## Patterns & integration
@@ -28,9 +28,9 @@ sidebar context menu in `layout/Sidebar.tsx` via `App.AlterDynamicTable`.
 - `GetObjectProperties(db, schema, "DYNAMIC TABLE", name)` — properties panel data
 - `AlterDynamicTable(db, schema, name, clause)` — `SUSPEND` / `RESUME` / `REFRESH` / `SET …` / `UNSET …`
 
-**`dynamictable.DynamicTableConfig` type** from `wailsjs/go/models`: `name`, `caseSensitive`, `orReplace`, `ifNotExists`, `transient`, `targetLag`, `warehouse`, `refreshMode`, `initialize`, `clusterBy`, `comment`, `query`.
+**`dynamictable.DynamicTableConfig` type** from `wailsjs/go/models`: `name`, `caseSensitive`, `orReplace`, `ifNotExists`, `transient`, `targetLag`, `scheduler`, `warehouse`, `initializationWarehouse`, `refreshMode`, `initialize`, `clusterBy`, `dataRetentionTimeInDays`, `maxDataExtensionTimeInDays`, `comment`, `copyGrants`, `requireUser`, `rowTimestamp`, `tags` (`{name, value}[]`), `query`. The Create modal keeps form state in a local `DTConfig` (the generated class carries a `convertValues` method — see Gotchas — that a plain literal can't satisfy) and casts to the generated type only at the IPC boundary.
 
-**Target Lag:** accepts a duration string (`1 minute`) or the bare `DOWNSTREAM` keyword; `targetLagAssign` in the properties modal renders the correct `SET TARGET_LAG` clause (quoted literal vs. bare keyword).
+**Target Lag:** the create form composes `targetLag` from an interval (number + `seconds|minutes|hours|days`) or the bare `DOWNSTREAM` keyword; the Go builder and the properties modal's `targetLagAssign` each render the correct quoted-literal-vs-keyword form.
 
 **Shared components:** `ObjectNameCaseControl` for case-sensitivity; inline SQL preview block. **Stores used:** `themeStore` (Monaco editor theme).
 
