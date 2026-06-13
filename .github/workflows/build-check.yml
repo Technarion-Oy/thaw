@@ -21,6 +21,12 @@ on:
       - ".github/workflows/build-check.yml"
   workflow_dispatch:
 
+# Cancel an in-progress run when a new commit is pushed to the same ref, so
+# rapid PR pushes don't queue up redundant builds on the self-hosted runners.
+concurrency:
+  group: build-check-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   PYTHONDONTWRITEBYTECODE: 1
 
@@ -45,16 +51,29 @@ jobs:
 
       - uses: actions/checkout@v4
 
+      # cache: true caches the Go module + build cache (keyed on go.sum), so
+      # incremental runs skip recompiling the dependency graph and the Wails
+      # CLI. No-ops gracefully if the self-hosted runners lack a cache backend.
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: false
+          cache: true
 
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+
+      # Restore node_modules so `wails build`'s internal `npm install` is a
+      # fast no-op when the lockfile is unchanged.
+      - name: Cache frontend node_modules
+        uses: actions/cache@v4
+        with:
+          path: frontend/node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('frontend/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-modules-
 
       - name: Install system dependencies
         run: apt-get update && apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
@@ -67,9 +86,13 @@ jobs:
 
       # webkit2_41: Ubuntu 24.04 only ships libwebkit2gtk-4.1-dev; without this
       # tag, Wails' CGO directives default to webkit2gtk-4.0 and pkg-config fails.
+      # No -clean: preserving build output lets the cached Go build cache speed
+      # up incremental compiles. THAW_FAST_BUILD skips the slow Terser/obfuscator
+      # frontend passes — this check verifies compile+link+bundle, not artifacts.
       - name: Build Wails app
-        run: wails build -platform linux/amd64 -clean -tags webkit2_41
+        run: wails build -platform linux/amd64 -tags webkit2_41
         env:
+          THAW_FAST_BUILD: "1"
           NODE_OPTIONS: --max-old-space-size=6144
 
       - name: Unlock permissions for host runner agent
