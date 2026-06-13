@@ -127,3 +127,36 @@ func TestBuildCreateMaterializedViewSqlPlaceholders(t *testing.T) {
 		}
 	}
 }
+
+// TestBuildCreateMaterializedViewSqlClauseOrder pins the view-level clause order
+// to the order Snowflake documents for CREATE MATERIALIZED VIEW — COPY GRANTS →
+// COMMENT → CLUSTER BY → TAG → AS. Snowflake's CREATE parser is order-sensitive,
+// so a config that combines several optional clauses (the case most likely to be
+// rejected) must emit them in exactly this sequence.
+func TestBuildCreateMaterializedViewSqlClauseOrder(t *testing.T) {
+	got, err := BuildCreateMaterializedViewSql("DB", "SC", MaterializedViewConfig{
+		Name:       "MV",
+		CopyGrants: true,
+		Comment:    "c",
+		ClusterBy:  "c1",
+		Tags:       []TagPair{{Name: "env", Value: "prod"}},
+		Query:      "SELECT 1",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Each clause must appear, and in the documented relative order.
+	order := []string{"COPY GRANTS", "COMMENT = ", "CLUSTER BY (", "TAG (", "AS"}
+	prev := -1
+	for _, marker := range order {
+		idx := strings.Index(got, marker)
+		if idx < 0 {
+			t.Fatalf("expected clause %q in:\n%s", marker, got)
+		}
+		if idx <= prev {
+			t.Errorf("clause %q is out of order (index %d ≤ previous %d) in:\n%s", marker, idx, prev, got)
+		}
+		prev = idx
+	}
+}
