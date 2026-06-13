@@ -13,17 +13,27 @@
 import { useState, useEffect } from "react";
 import {
   Modal, Form, Input, Checkbox, Select, Space,
-  Typography, Button, Alert, Collapse, Tag, Radio, Tooltip,
+  Typography, Button, Alert, Collapse, Tag, Radio, Tooltip, Breadcrumb, Spin, Empty,
 } from "antd";
-import { CloudServerOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
+import {
+  CloudServerOutlined, PlusOutlined, DeleteOutlined,
+  FolderOutlined, FileOutlined, DatabaseOutlined, ReloadOutlined,
+} from "@ant-design/icons";
 import {
   BuildCreateExternalTableSql, ExecDDL, GetQuotedIdentifiersIgnoreCase,
-  ListDatabases, ListSchemas, ListObjects,
+  ListDatabases, ListSchemas, ListObjects, ListStageEntries,
 } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
-import type { externaltable } from "../../../wailsjs/go/models";
+import type { externaltable, snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
 
 interface Props {
   db: string;
@@ -83,9 +93,16 @@ export default function CreateExternalTableModal({ db, schema, onClose, onSucces
   const [stageOptions, setStageOptions] = useState<string[]>([]);
   const [formatOptions, setFormatOptions] = useState<string[]>([]);
   const [pickerStage, setPickerStage] = useState("");
-  const [stagePath, setStagePath] = useState("");
   const [loadingSchemas, setLoadingSchemas] = useState(false);
   const [loadingObjects, setLoadingObjects] = useState(false);
+
+  // Stage browser: the directory currently being browsed (relative to the stage
+  // root, "" = root) and its immediate entries. Navigating keeps the editable
+  // Location field in sync.
+  const [browsePath, setBrowsePath] = useState("");
+  const [entries, setEntries] = useState<snowflake.GitRepoEntry[]>([]);
+  const [loadingEntries, setLoadingEntries] = useState(false);
+  const [browseError, setBrowseError] = useState<string | null>(null);
 
   useEffect(() => {
     GetQuotedIdentifiersIgnoreCase()
@@ -141,17 +158,54 @@ export default function CreateExternalTableModal({ db, schema, onClose, onSucces
       .finally(() => setLoadingObjects(false));
   }, [pickerDb, pickerSchema]);
 
-  const onPickDb = (v?: string) => { setPickerDb(v ?? ""); setPickerSchema(""); setPickerStage(""); };
-  const onPickSchema = (v?: string) => { setPickerSchema(v ?? ""); setPickerStage(""); };
+  const resetBrowse = () => { setBrowsePath(""); setEntries([]); setBrowseError(null); };
+  const onPickDb = (v?: string) => { setPickerDb(v ?? ""); setPickerSchema(""); setPickerStage(""); resetBrowse(); };
+  const onPickSchema = (v?: string) => { setPickerSchema(v ?? ""); setPickerStage(""); resetBrowse(); };
 
-  // Compose @"db"."schema"."stage"[/path] from the stage picker into LOCATION.
-  const useStageLocation = () => {
-    if (!pickerDb || !pickerSchema || !pickerStage) return;
+  // Compose @"db"."schema"."stage"[/path] for the given directory path.
+  const composeLocation = (path: string) => {
     const esc = (s: string) => s.replace(/"/g, '""');
-    const path = stagePath.trim().replace(/^\/+/, "");
     const base = `@"${esc(pickerDb)}"."${esc(pickerSchema)}"."${esc(pickerStage)}"`;
-    set("location", path ? `${base}/${path}` : base);
+    const p = path.replace(/^\/+/, "").replace(/\/+$/, "");
+    return p ? `${base}/${p}` : base;
   };
+
+  // Selecting a stage starts a browse session at its root and points LOCATION at
+  // the stage root.
+  const onPickStage = (v?: string) => {
+    const stage = v ?? "";
+    setPickerStage(stage);
+    setBrowsePath("");
+    setBrowseError(null);
+    if (stage) {
+      const esc = (s: string) => s.replace(/"/g, '""');
+      set("location", `@"${esc(pickerDb)}"."${esc(pickerSchema)}"."${esc(stage)}"`);
+    }
+  };
+
+  // Navigate to a directory inside the browsed stage; keeps LOCATION in sync.
+  const navigateTo = (path: string) => {
+    setBrowsePath(path);
+    set("location", composeLocation(path));
+  };
+
+  // Load the immediate entries of the current browse path whenever it changes.
+  useEffect(() => {
+    if (!pickerDb || !pickerSchema || !pickerStage) { setEntries([]); return; }
+    let cancelled = false;
+    setLoadingEntries(true);
+    setBrowseError(null);
+    ListStageEntries(pickerDb, pickerSchema, pickerStage, browsePath)
+      .then((e) => { if (!cancelled) setEntries(e ?? []); })
+      .catch((err) => { if (!cancelled) { setEntries([]); setBrowseError(String(err)); } })
+      .finally(() => { if (!cancelled) setLoadingEntries(false); });
+    return () => { cancelled = true; };
+  }, [pickerDb, pickerSchema, pickerStage, browsePath]);
+
+  // Breadcrumb segments for the current browse path (each carries the cumulative
+  // path to navigate to when clicked).
+  const pathSegments = browsePath.split("/").filter(Boolean);
+  const segmentPaths = pathSegments.map((_, i) => pathSegments.slice(0, i + 1).join("/") + "/");
 
   const useNamedFormat = (name: string) => {
     set("fileFormatName", name);
@@ -378,14 +432,14 @@ export default function CreateExternalTableModal({ db, schema, onClose, onSucces
         </Form.Item>
 
         {/* Location */}
-        <Form.Item label="Location" required style={itemStyle} help="External stage and optional path holding the data files">
+        <Form.Item label="Location" required style={itemStyle} help="External stage and optional path holding the data files — browse below or edit directly">
           <Input
             value={cfg.location}
             onChange={(e) => set("location", e.target.value)}
             placeholder="@my_stage/path/"
           />
           <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
-            <Text type="secondary" style={{ fontSize: 11 }}>Pick a stage:</Text>
+            <Text type="secondary" style={{ fontSize: 11 }}>Browse a stage:</Text>
             <Select
               size="small" showSearch placeholder="Database" style={{ width: 140 }}
               value={pickerDb || undefined} onChange={onPickDb}
@@ -399,17 +453,86 @@ export default function CreateExternalTableModal({ db, schema, onClose, onSucces
             />
             <Select
               size="small" showSearch placeholder="Stage" style={{ width: 150 }}
-              value={pickerStage || undefined} onChange={(v) => setPickerStage(v ?? "")}
+              value={pickerStage || undefined} onChange={onPickStage}
               disabled={!pickerSchema} loading={loadingObjects}
               options={stageOptions.map((n) => ({ value: n, label: n }))}
               notFoundContent={loadingObjects ? "Loading…" : "No stages"}
             />
-            <Input
-              size="small" placeholder="path/" style={{ width: 120 }}
-              value={stagePath} onChange={(e) => setStagePath(e.target.value)}
-            />
-            <Button size="small" onClick={useStageLocation} disabled={!pickerStage}>Use stage</Button>
+            {pickerStage && (
+              <Tooltip title="Reload entries">
+                <Button size="small" icon={<ReloadOutlined />} loading={loadingEntries} onClick={() => navigateTo(browsePath)} />
+              </Tooltip>
+            )}
           </div>
+
+          {pickerStage && (
+            <div
+              style={{
+                marginTop: 8,
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                overflow: "hidden",
+              }}
+            >
+              {/* Breadcrumb */}
+              <div style={{ padding: "6px 10px", background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>
+                <Breadcrumb
+                  separator="/"
+                  items={[
+                    {
+                      title: (
+                        <a onClick={(e) => { e.preventDefault(); navigateTo(""); }}>
+                          <DatabaseOutlined style={{ marginRight: 4 }} />{pickerStage}
+                        </a>
+                      ),
+                    },
+                    ...pathSegments.map((seg, i) => ({
+                      title:
+                        i === pathSegments.length - 1
+                          ? <span>{seg}</span>
+                          : <a onClick={(e) => { e.preventDefault(); navigateTo(segmentPaths[i]); }}>{seg}</a>,
+                    })),
+                  ]}
+                />
+              </div>
+
+              {/* Entry list */}
+              <div style={{ maxHeight: 180, overflowY: "auto", padding: "4px 0" }}>
+                {loadingEntries ? (
+                  <div style={{ textAlign: "center", padding: 20 }}><Spin size="small" /></div>
+                ) : browseError ? (
+                  <div style={{ padding: "8px 12px" }}>
+                    <Text type="danger" style={{ fontSize: 11 }}>{browseError}</Text>
+                  </div>
+                ) : entries.length === 0 ? (
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Empty folder" style={{ margin: "12px 0" }} />
+                ) : (
+                  entries.map((en) => (
+                    <div
+                      key={en.path}
+                      onClick={() => { if (en.isDir) navigateTo(en.path); }}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 8,
+                        padding: "4px 12px", fontSize: 12,
+                        cursor: en.isDir ? "pointer" : "default",
+                        color: en.isDir ? "var(--text)" : "var(--text-muted)",
+                      }}
+                      onMouseEnter={(e) => { if (en.isDir) (e.currentTarget.style.background = "var(--bg-hover)"); }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                    >
+                      {en.isDir
+                        ? <FolderOutlined style={{ color: "var(--icon-stage)" }} />
+                        : <FileOutlined style={{ color: "var(--text-muted)" }} />}
+                      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{en.name}</span>
+                      {!en.isDir && (en.size ?? 0) > 0 && (
+                        <Text type="secondary" style={{ fontSize: 11 }}>{formatBytes(en.size ?? 0)}</Text>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
         </Form.Item>
 
         {/* File format */}
