@@ -18,7 +18,7 @@ import {
 import { RetweetOutlined, PlusOutlined } from "@ant-design/icons";
 import {
   BuildCreateDynamicTableSql, ExecDDL, GetQuotedIdentifiersIgnoreCase, ListWarehouses,
-  ListDatabases, ListSchemas, ListBasicObjects, GetTableColumns,
+  ListDatabases, ListSchemas, ListObjects, GetTableColumns,
 } from "../../../wailsjs/go/app/App";
 import type * as monaco from "monaco-editor";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
@@ -157,9 +157,13 @@ export default function CreateDynamicTableModal({ db, schema, onClose, onSuccess
   useEffect(() => {
     if (!pickerDb || !pickerSchema) { setTableOptions([]); return; }
     setLoadingTables(true);
-    ListBasicObjects(pickerDb, pickerSchema)
+    // ListObjects (not ListBasicObjects) so dynamic tables — a valid source for
+    // another dynamic table — appear alongside tables and views.
+    ListObjects(pickerDb, pickerSchema)
       .then((objs) => setTableOptions(
-        (objs ?? []).filter((o) => o.kind === "TABLE" || o.kind === "VIEW").map((o) => o.name),
+        (objs ?? [])
+          .filter((o) => o.kind === "TABLE" || o.kind === "VIEW" || o.kind === "DYNAMIC TABLE")
+          .map((o) => o.name),
       ))
       .catch(() => setTableOptions([]))
       .finally(() => setLoadingTables(false));
@@ -500,14 +504,22 @@ export default function CreateDynamicTableModal({ db, schema, onClose, onSuccess
             {lagMode === "interval" && (
               <Space style={{ marginTop: 8 }}>
                 <InputNumber
-                  min={1}
+                  // Snowflake enforces a 1-minute minimum target lag, so seconds
+                  // must be >= 60.
+                  min={lagUnit === "seconds" ? 60 : 1}
                   value={lagNum}
-                  onChange={(v) => setLagNum(v ?? 1)}
+                  onChange={(v) => {
+                    const floor = lagUnit === "seconds" ? 60 : 1;
+                    setLagNum(v == null ? floor : Math.max(v, floor));
+                  }}
                   style={{ width: 90 }}
                 />
                 <Select
                   value={lagUnit}
-                  onChange={(v) => setLagUnit(v)}
+                  onChange={(u) => {
+                    setLagUnit(u);
+                    if (u === "seconds" && lagNum < 60) setLagNum(60);
+                  }}
                   style={{ width: 120 }}
                   options={[
                     { value: "seconds", label: "seconds" },
@@ -574,14 +586,14 @@ export default function CreateDynamicTableModal({ db, schema, onClose, onSuccess
             <Select
               size="small"
               showSearch
-              placeholder="Table / View"
+              placeholder="Table / view"
               style={{ width: 180 }}
               value={pickerTable || undefined}
               onChange={(v) => setPickerTable(v ?? "")}
               disabled={!pickerSchema}
               loading={loadingTables}
               options={tableOptions.map((n) => ({ value: n, label: n }))}
-              notFoundContent={loadingTables ? "Loading…" : "No tables/views"}
+              notFoundContent={loadingTables ? "Loading…" : "No tables, views, or dynamic tables"}
             />
             <Button
               size="small"

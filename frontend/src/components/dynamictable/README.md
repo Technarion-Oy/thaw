@@ -25,7 +25,7 @@ sidebar context menu in `layout/Sidebar.tsx` via `App.AlterDynamicTable`.
 - `ExecDDL(preview)` — executes the CREATE DDL on submit
 - `GetQuotedIdentifiersIgnoreCase()` — feeds `ObjectNameCaseControl`
 - `ListWarehouses()` — populates the Warehouse select
-- `ListDatabases()` / `ListSchemas(db)` / `ListBasicObjects(db, schema)` — feed the **Insert from table** cascading picker (objects filtered to `TABLE`/`VIEW`)
+- `ListDatabases()` / `ListSchemas(db)` / `ListObjects(db, schema)` — feed the **Insert from table** cascading picker (objects filtered to `TABLE`/`VIEW`/`DYNAMIC TABLE`, since a dynamic table is a valid source for another)
 - `GetTableColumns(db, schema, table)` — column list for the inserted `SELECT` (mirrors the SQL-editor drag-and-drop); inserts at the cursor via the captured Monaco editor ref, or replaces the body when it's empty/placeholder
 - `GetObjectProperties(db, schema, "DYNAMIC TABLE", name)` — properties panel data
 - `AlterDynamicTable(db, schema, name, clause)` — `SUSPEND` / `RESUME` / `REFRESH` / `SET …` / `UNSET …`
