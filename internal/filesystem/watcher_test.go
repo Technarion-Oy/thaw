@@ -217,6 +217,60 @@ func TestWatcher_NewDirectoryAutoWatched(t *testing.T) {
 	}
 }
 
+// TestWatcher_DeepTreeNoFDExhaustion is the regression test for issue #485:
+// opening a folder with a large/deep tree (e.g. a venv or node_modules) used to
+// register one kqueue watch per directory and exhaust the macOS FD limit
+// (commonly 256). With a single recursive watch this must succeed and still
+// detect changes deep in the tree.
+func TestWatcher_DeepTreeNoFDExhaustion(t *testing.T) {
+	root := t.TempDir()
+
+	// Create many sibling directories — comfortably above the macOS default
+	// soft FD limit of 256 — plus a deeper nested path.
+	const numDirs = 400
+	for i := 0; i < numDirs; i++ {
+		if err := os.Mkdir(filepath.Join(root, fmt.Sprintf("d%03d", i)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deep := filepath.Join(root, "a", "b", "c", "d", "e")
+	if err := os.MkdirAll(deep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var mu sync.Mutex
+	var events []FSChangeEvent
+
+	w, err := NewWatcher(root, func(evt FSChangeEvent) {
+		mu.Lock()
+		events = append(events, evt)
+		mu.Unlock()
+	})
+	if err != nil {
+		t.Fatalf("NewWatcher on deep tree: %v", err)
+	}
+	defer w.Close()
+
+	// A change deep in the tree must still be reported.
+	if err := os.WriteFile(filepath.Join(deep, "inner.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ok := waitFor(t, 2*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, e := range events {
+			if e.Dir == deep {
+				return true
+			}
+		}
+		return false
+	})
+	if !ok {
+		t.Errorf("expected event for deep directory %q", deep)
+	}
+}
+
 func TestIsHidden(t *testing.T) {
 	tests := []struct {
 		name   string

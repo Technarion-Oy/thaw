@@ -16,8 +16,8 @@ require (
 )
 
 require (
-	github.com/fsnotify/fsnotify v1.9.0
 	github.com/modelcontextprotocol/go-sdk v1.6.1
+	github.com/rjeczalik/notify v0.9.3
 	github.com/valyala/fastjson v1.6.10
 )
 
