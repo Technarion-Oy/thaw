@@ -12,18 +12,23 @@
 
 import { useState, useEffect } from "react";
 import {
-  Modal, Form, Input, Checkbox, Select, Space,
-  Typography, Button, Alert, Collapse, Tag, Radio, Tooltip, Breadcrumb, Spin, Empty,
+  Form, Input, Checkbox, Select, Space,
+  Typography, Button, Alert, Collapse, Radio, Tooltip, Breadcrumb, Spin, Empty,
 } from "antd";
 import {
   CloudServerOutlined, PlusOutlined, DeleteOutlined,
   FolderOutlined, FileOutlined, DatabaseOutlined, ReloadOutlined,
 } from "@ant-design/icons";
 import {
-  BuildCreateExternalTableSql, ExecDDL, GetQuotedIdentifiersIgnoreCase,
+  BuildCreateExternalTableSql, ExecDDL,
   ListDatabases, ListSchemas, ListObjects, ListStages, ListStageEntries,
 } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
+import CreateModalShell from "../shared/CreateModalShell";
+import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
+import TagInput from "../shared/TagInput";
+import SqlPreview from "../shared/SqlPreview";
+import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
 import { formatBytes } from "../../utils/formatBytes";
 import type { externaltable, snowflake } from "../../../wailsjs/go/models";
 
@@ -70,14 +75,12 @@ export default function CreateExternalTableModal({ db, schema, onClose, onSucces
   // File-format mode: a named FILE FORMAT object or an inline TYPE.
   const [fmtMode, setFmtMode] = useState<"type" | "named">("type");
 
-  // New-tag draft inputs.
-  const [tagName, setTagName] = useState("");
-  const [tagValue, setTagValue] = useState("");
-
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [quotedIdentifiersIgnoreCase, setQuotedIdentifiersIgnoreCase] = useState(false);
-  const [preview, setPreview] = useState("");
+  const quotedIdentifiersIgnoreCase = useQuotedIdentifiers();
+  const preview = useSqlPreview(
+    () => BuildCreateExternalTableSql(db, schema, cfg as any),
+    [db, schema, cfg],
+  );
+  const { creating, error, setError, submit } = useCreateSubmit();
 
   // Stage / file-format pickers (database → schema → object).
   const [pickerDb, setPickerDb] = useState(db);
@@ -102,15 +105,8 @@ export default function CreateExternalTableModal({ db, schema, onClose, onSucces
   const [reloadTick, setReloadTick] = useState(0);
 
   useEffect(() => {
-    GetQuotedIdentifiersIgnoreCase()
-      .then((v) => setQuotedIdentifiersIgnoreCase(v ?? false))
-      .catch(() => {});
     ListDatabases().then((d) => setDbOptions(d ?? [])).catch(() => {});
   }, []);
-
-  useEffect(() => {
-    BuildCreateExternalTableSql(db, schema, cfg as any).then(setPreview).catch(() => {});
-  }, [db, schema, cfg]);
 
   const set = <K extends keyof ETConfig>(key: K, value: ETConfig[K]) =>
     setCfg((prev) => ({ ...prev, [key]: value }));
@@ -122,16 +118,6 @@ export default function CreateExternalTableModal({ db, schema, onClose, onSucces
     set("columns", cfg.columns.map((c, idx) => (idx === i ? { ...c, ...patch } : c)));
   const removeColumn = (i: number) =>
     set("columns", cfg.columns.filter((_, idx) => idx !== i));
-
-  // ── Tags ────────────────────────────────────────────────────────────────
-  const addTag = () => {
-    const name = tagName.trim();
-    if (!name) return;
-    set("tags", [...(cfg.tags ?? []).filter((t) => t.name !== name), { name, value: tagValue.trim() }]);
-    setTagName("");
-    setTagValue("");
-  };
-  const removeTag = (name: string) => set("tags", (cfg.tags ?? []).filter((t) => t.name !== name));
 
   // ── Stage / file-format pickers ─────────────────────────────────────────
   useEffect(() => {
@@ -247,24 +233,15 @@ export default function CreateExternalTableModal({ db, schema, onClose, onSucces
     (fmtMode === "type" ? true : cfg.fileFormatName.trim().length > 0) &&
     partitionColsMissingExpr.length === 0;
 
-  const handleRun = async () => {
-    if (!canSubmit) return;
-    setCreating(true);
-    setCreateError(null);
-    try {
-      // Build the statement from the current cfg at submit time rather than
-      // reusing the `preview` state, which is refreshed by an async effect and
-      // can lag a keystroke behind the latest cfg.
-      const sql = await BuildCreateExternalTableSql(db, schema, cfg as any);
-      await ExecDDL(sql);
-      onSuccess?.();
-      onClose();
-    } catch (err) {
-      setCreateError(String(err));
-    } finally {
-      setCreating(false);
-    }
-  };
+  const handleRun = () => submit(async () => {
+    // Build the statement from the current cfg at submit time rather than
+    // reusing the `preview` state, which is refreshed by an async effect and
+    // can lag a keystroke behind the latest cfg.
+    const sql = await BuildCreateExternalTableSql(db, schema, cfg as any);
+    await ExecDDL(sql);
+    onSuccess?.();
+    onClose();
+  });
 
   const itemStyle: React.CSSProperties = { marginBottom: 12 };
 
@@ -376,99 +353,40 @@ export default function CreateExternalTableModal({ db, schema, onClose, onSucces
         </Checkbox>
       </Form.Item>
 
-      <Form.Item label="Tags" style={itemStyle} help="Table-level tags applied at creation">
-        <Space direction="vertical" size={6} style={{ width: "100%" }}>
-          {(cfg.tags ?? []).length > 0 && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {(cfg.tags ?? []).map((t) => (
-                <Tag key={t.name} closable onClose={(e) => { e.preventDefault(); removeTag(t.name); }}>
-                  {t.name}{t.value ? `: ${t.value}` : ""}
-                </Tag>
-              ))}
-            </div>
-          )}
-          <Space>
-            <Input size="small" value={tagName} onChange={(e) => setTagName(e.target.value)} placeholder="Tag name" style={{ width: 160 }} />
-            <Input size="small" value={tagValue} onChange={(e) => setTagValue(e.target.value)} placeholder="Tag value" style={{ width: 180 }} onPressEnter={addTag} />
-            <Button size="small" icon={<PlusOutlined />} onClick={addTag} disabled={!tagName.trim()}>Add</Button>
-          </Space>
-        </Space>
-      </Form.Item>
+      <TagInput
+        tags={cfg.tags}
+        onChange={(tags) => set("tags", tags)}
+        help="Table-level tags applied at creation"
+        itemStyle={itemStyle}
+      />
     </>
   );
 
   return (
-    <Modal
-      open
-      title={
-        <Space size={6}>
-          <CloudServerOutlined style={{ color: "var(--link)" }} />
-          <span>Create External Table</span>
-          <Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
-            {db}.{schema}
-          </Text>
-        </Space>
-      }
-      onCancel={onClose}
-      footer={
-        <Space style={{ justifyContent: "flex-end", display: "flex" }}>
-          <Button onClick={onClose} disabled={creating}>Cancel</Button>
-          <Button
-            type="primary"
-            icon={<CloudServerOutlined />}
-            onClick={handleRun}
-            disabled={!canSubmit}
-            loading={creating}
-          >
-            Create
-          </Button>
-        </Space>
-      }
+    <CreateModalShell
+      icon={<CloudServerOutlined />}
+      title="Create External Table"
+      subtitle={`${db}.${schema}`}
       width={760}
-      styles={{ body: { paddingTop: 16, maxHeight: "80vh", overflowY: "auto" } }}
+      error={error}
+      errorTitle="External table creation failed"
+      onErrorClose={() => setError(null)}
+      creating={creating}
+      canSubmit={canSubmit}
+      onClose={onClose}
+      onSubmit={handleRun}
     >
-      {createError && (
-        <Alert
-          type="error"
-          message="External table creation failed"
-          description={createError}
-          showIcon
-          closable
-          onClose={() => setCreateError(null)}
-          style={{ marginBottom: 16 }}
-        />
-      )}
-
       <Form layout="vertical" size="small">
-        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "0 16px", alignItems: "end" }}>
-          <Form.Item label="External table name" required style={{ marginBottom: 4 }}>
-            <Input
-              value={cfg.name}
-              onChange={(e) => set("name", e.target.value)}
-              placeholder="MY_EXTERNAL_TABLE"
-            />
-          </Form.Item>
-          <Form.Item style={{ marginBottom: 4 }}>
-            <Space direction="vertical" size={4}>
-              <Checkbox
-                checked={cfg.orReplace}
-                onChange={(e) => {
-                  set("orReplace", e.target.checked);
-                  if (e.target.checked) set("ifNotExists", false);
-                }}
-              >
-                OR REPLACE
-              </Checkbox>
-              <Checkbox
-                checked={cfg.ifNotExists}
-                disabled={cfg.orReplace}
-                onChange={(e) => set("ifNotExists", e.target.checked)}
-              >
-                IF NOT EXISTS
-              </Checkbox>
-            </Space>
-          </Form.Item>
-        </div>
+        <NameWithReplaceOptions
+          label="External table name"
+          placeholder="MY_EXTERNAL_TABLE"
+          name={cfg.name}
+          onNameChange={(v) => set("name", v)}
+          orReplace={cfg.orReplace}
+          ifNotExists={cfg.ifNotExists}
+          onOrReplaceChange={(v) => set("orReplace", v)}
+          onIfNotExistsChange={(v) => set("ifNotExists", v)}
+        />
 
         <Form.Item style={itemStyle}>
           <ObjectNameCaseControl
@@ -649,32 +567,8 @@ export default function CreateExternalTableModal({ db, schema, onClose, onSucces
           />
         </Form.Item>
 
-        <div
-          style={{
-            padding: "10px 12px",
-            background: "var(--bg)",
-            borderRadius: 6,
-            border: "1px solid var(--border)",
-            marginTop: 4,
-          }}
-        >
-          <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 4 }}>
-            SQL Preview
-          </Text>
-          <pre
-            style={{
-              margin: 0,
-              color: "var(--text)",
-              fontSize: 11,
-              fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace",
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-all",
-            }}
-          >
-            {preview}
-          </pre>
-        </div>
+        <SqlPreview sql={preview} />
       </Form>
-    </Modal>
+    </CreateModalShell>
   );
 }

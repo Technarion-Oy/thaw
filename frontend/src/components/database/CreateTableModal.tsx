@@ -8,18 +8,20 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import {
-  Modal, Form, Input, Checkbox, Radio, Space,
-  Typography, Divider, InputNumber, Button, Table, Tooltip, Alert,
+  Form, Input, Checkbox, Radio, Space,
+  Divider, InputNumber, Button, Table, Tooltip,
 } from "antd";
 import { TableOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { ExecDDL, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/app/App";
+import { ExecDDL } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 import DataTypeSelect from "../shared/DataTypeSelect";
-
-const { Text } = Typography;
+import CreateModalShell from "../shared/CreateModalShell";
+import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
+import SqlPreview from "../shared/SqlPreview";
+import { useQuotedIdentifiers, useCreateSubmit } from "../shared/createModalHooks";
 
 interface ColumnDef {
   key: string;
@@ -117,16 +119,8 @@ interface Props {
 
 export default function CreateTableModal({ db, schema, onClose, onSuccess }: Props) {
   const [cfg, setCfg] = useState<TableConfig>(DEFAULTS);
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [quotedIdentifiersIgnoreCase, setQuotedIdentifiersIgnoreCase] = useState(false);
-
-  useEffect(() => {
-    Promise.resolve()
-      .then(() => GetQuotedIdentifiersIgnoreCase())
-      .then((v) => setQuotedIdentifiersIgnoreCase(v ?? false))
-      .catch(() => {});
-  }, []);
+  const quotedIdentifiersIgnoreCase = useQuotedIdentifiers();
+  const { creating, error: createError, setError: setCreateError, submit } = useCreateSubmit();
 
   const set = <K extends keyof TableConfig>(key: K, value: TableConfig[K]) =>
     setCfg((prev) => ({ ...prev, [key]: value }));
@@ -149,20 +143,14 @@ export default function CreateTableModal({ db, schema, onClose, onSuccess }: Pro
 
   const canSubmit = cfg.name.trim() !== "" && cfg.columns.length > 0 && cfg.columns.every(c => c.name.trim() !== "" && c.type.trim() !== "");
 
-  const handleCreate = async () => {
+  const handleCreate = () => {
     if (!canSubmit) return;
     const sql = buildSql(db, schema, cfg);
-    setCreating(true);
-    setCreateError(null);
-    try {
+    submit(async () => {
       await ExecDDL(sql);
       onSuccess?.();
       onClose();
-    } catch (err) {
-      setCreateError(String(err));
-    } finally {
-      setCreating(false);
-    }
+    });
   };
 
   const preview = buildSql(db, schema, cfg);
@@ -255,77 +243,31 @@ export default function CreateTableModal({ db, schema, onClose, onSuccess }: Pro
   );
 
   return (
-    <Modal
-      open
-      title={
-        <Space size={6}>
-          <TableOutlined style={{ color: "var(--link)" }} />
-          <span>Create table</span>
-          <Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
-            {db}.{schema}
-          </Text>
-        </Space>
-      }
-      onCancel={onClose}
-      footer={
-        <Space style={{ justifyContent: "flex-end", display: "flex" }}>
-          <Button onClick={onClose} disabled={creating}>Cancel</Button>
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={handleCreate}
-            disabled={!canSubmit}
-            loading={creating}
-          >
-            Create
-          </Button>
-        </Space>
-      }
+    <CreateModalShell
+      icon={<TableOutlined />}
+      okIcon={<PlusOutlined />}
+      title="Create table"
+      subtitle={`${db}.${schema}`}
       width={800}
-      styles={{ body: { paddingTop: 16, maxHeight: "80vh", overflowY: "auto" } }}
+      error={createError}
+      errorTitle="Table creation failed"
+      onErrorClose={() => setCreateError(null)}
+      creating={creating}
+      canSubmit={canSubmit}
+      onClose={onClose}
+      onSubmit={handleCreate}
     >
-      {createError && (
-        <Alert
-          type="error"
-          message="Table creation failed"
-          description={createError}
-          showIcon
-          closable
-          onClose={() => setCreateError(null)}
-          style={{ marginBottom: 16 }}
-        />
-      )}
-
       <Form layout="vertical" size="small">
-        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "0 16px", alignItems: "end" }}>
-          <Form.Item label="Table name" required style={{ marginBottom: 4 }}>
-            <Input
-              value={cfg.name}
-              onChange={(e) => set("name", e.target.value)}
-              placeholder="MY_TABLE"
-            />
-          </Form.Item>
-          <Form.Item style={{ marginBottom: 4 }}>
-            <Space direction="vertical" size={4}>
-              <Checkbox
-                checked={cfg.orReplace}
-                onChange={(e) => {
-                  set("orReplace", e.target.checked);
-                  if (e.target.checked) set("ifNotExists", false);
-                }}
-              >
-                OR REPLACE
-              </Checkbox>
-              <Checkbox
-                checked={cfg.ifNotExists}
-                disabled={cfg.orReplace}
-                onChange={(e) => set("ifNotExists", e.target.checked)}
-              >
-                IF NOT EXISTS
-              </Checkbox>
-            </Space>
-          </Form.Item>
-        </div>
+        <NameWithReplaceOptions
+          label="Table name"
+          placeholder="MY_TABLE"
+          name={cfg.name}
+          onNameChange={(v) => set("name", v)}
+          orReplace={cfg.orReplace}
+          ifNotExists={cfg.ifNotExists}
+          onOrReplaceChange={(v) => set("orReplace", v)}
+          onIfNotExistsChange={(v) => set("ifNotExists", v)}
+        />
         <Form.Item style={{ marginBottom: 12 }}>
           <ObjectNameCaseControl
             name={cfg.name}
@@ -407,32 +349,8 @@ export default function CreateTableModal({ db, schema, onClose, onSuccess }: Pro
           </Checkbox>
         </Space>
 
-        <div
-          style={{
-            padding: "10px 12px",
-            background: "var(--bg)",
-            borderRadius: 6,
-            border: "1px solid var(--border)",
-            marginTop: 4,
-          }}
-        >
-          <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 4 }}>
-            SQL Preview
-          </Text>
-          <pre
-            style={{
-              margin: 0,
-              color: "var(--text)",
-              fontSize: 11,
-              fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace",
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-all",
-            }}
-          >
-            {preview}
-          </pre>
-        </div>
+        <SqlPreview sql={preview} />
       </Form>
-    </Modal>
+    </CreateModalShell>
   );
 }

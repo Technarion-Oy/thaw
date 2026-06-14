@@ -10,18 +10,21 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
-  Modal, Space, Typography, Button, Alert, Radio, Tooltip, Input,
+  Space, Typography, Button, Alert, Radio, Tooltip, Input,
 } from "antd";
 import {
   FileTextOutlined, PlusOutlined, FileSearchOutlined,
   CloudOutlined, FileOutlined, InfoCircleOutlined,
 } from "@ant-design/icons";
 import {
-  ExecDDL, GetQuotedIdentifiersIgnoreCase, BuildCreateFileFormatSql,
+  ExecDDL, BuildCreateFileFormatSql,
   PickFileForFormatPreview, GetLocalFilePreview, GetStageFilePreview,
 } from "../../../wailsjs/go/app/App";
 import type { fileformat } from "../../../wailsjs/go/models";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
+import CreateModalShell from "../shared/CreateModalShell";
+import SqlPreview from "../shared/SqlPreview";
+import { useQuotedIdentifiers } from "../shared/createModalHooks";
 import FormatPreviewTable from "./FormatPreviewTable";
 import FileFormatFields, { BASE_DEFAULTS } from "./FileFormatFields";
 
@@ -41,7 +44,7 @@ export default function CreateFileFormatModal({ db, schema, onClose, onSuccess }
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sqlPreview, setSqlPreview] = useState("");
-  const [quotedIdentifiersIgnoreCase, setQuotedIdentifiersIgnoreCase] = useState(false);
+  const quotedIdentifiersIgnoreCase = useQuotedIdentifiers();
 
   // Preview state
   const [previewSource, setPreviewSource] = useState<"LOCAL" | "STAGE">("LOCAL");
@@ -52,12 +55,6 @@ export default function CreateFileFormatModal({ db, schema, onClose, onSuccess }
   const [previewError, setPreviewError] = useState<string | null>(null);
   // tracks whether the user has triggered at least one preview (enables auto-refresh)
   const hasPreviewRef = useRef(false);
-
-  useEffect(() => {
-    GetQuotedIdentifiersIgnoreCase()
-      .then(setQuotedIdentifiersIgnoreCase)
-      .catch(() => {});
-  }, []);
 
   useEffect(() => {
     BuildCreateFileFormatSql(db, schema, cfg as any).then(setSqlPreview).catch(() => {});
@@ -140,47 +137,21 @@ export default function CreateFileFormatModal({ db, schema, onClose, onSuccess }
   };
 
   return (
-    <Modal
-      open
-      title={
-        <Space size={6}>
-          <FileTextOutlined style={{ color: "var(--link)" }} />
-          <span>Create File Format</span>
-          <Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
-            {db}.{schema}
-          </Text>
-        </Space>
-      }
-      onCancel={onClose}
-      footer={
-        <Space style={{ justifyContent: "flex-end", display: "flex" }}>
-          <Button onClick={onClose} disabled={creating}>Cancel</Button>
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={handleCreate}
-            disabled={!cfg.name.trim()}
-            loading={creating}
-          >
-            Create
-          </Button>
-        </Space>
-      }
+    <CreateModalShell
+      icon={<FileTextOutlined />}
+      okIcon={<PlusOutlined />}
+      title="Create File Format"
+      subtitle={`${db}.${schema}`}
       width={1040}
-      styles={{ body: { paddingTop: 16, maxHeight: "85vh", overflowY: "auto" } }}
+      bodyMaxHeight="85vh"
+      error={error}
+      errorTitle="Action failed"
+      onErrorClose={() => setError(null)}
+      creating={creating}
+      canSubmit={!!cfg.name.trim()}
+      onClose={onClose}
+      onSubmit={handleCreate}
     >
-      {error && (
-        <Alert
-          type="error"
-          message="Action failed"
-          description={error}
-          showIcon
-          closable
-          onClose={() => setError(null)}
-          style={{ marginBottom: 16 }}
-        />
-      )}
-
       <div style={{ display: "grid", gridTemplateColumns: "380px minmax(0, 1fr)", gap: 24 }}>
         {/* ── Left: Configuration ─────────────────────────────────────── */}
         <div>
@@ -271,35 +242,9 @@ export default function CreateFileFormatModal({ db, schema, onClose, onSuccess }
           </div>
 
           {/* Generated SQL */}
-          <div style={{
-            padding: "12px 14px",
-            background: "var(--bg)",
-            borderRadius: 8,
-            border: "1px solid var(--border)",
-            flexGrow: 1,
-          }}>
-            <Text
-              type="secondary"
-              style={{ fontSize: 11, display: "block", marginBottom: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}
-            >
-              Generated SQL
-            </Text>
-            <pre
-              style={{
-                margin: 0,
-                color: "var(--text)",
-                fontSize: 12,
-                fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace",
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-all",
-                lineHeight: 1.6,
-              }}
-            >
-              {sqlPreview}
-            </pre>
-          </div>
+          <SqlPreview sql={sqlPreview} label="Generated SQL" variant="prominent" style={{ flexGrow: 1 }} />
         </div>
       </div>
-    </Modal>
+    </CreateModalShell>
   );
 }

@@ -10,16 +10,17 @@
 
 import { useState, useEffect } from "react";
 import {
-  Modal, Form, Input, Select, Checkbox, Radio, Space,
-  Typography, Button, Alert, Switch, DatePicker,
+  Form, Input, Select, Radio, Switch, DatePicker,
 } from "antd";
 import { KeyOutlined } from "@ant-design/icons";
-import { ListSecurityIntegrations, ExecDDL, GetQuotedIdentifiersIgnoreCase, BuildCreateSecretSql } from "../../../wailsjs/go/app/App";
+import { ListSecurityIntegrations, ExecDDL, BuildCreateSecretSql } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
+import CreateModalShell from "../shared/CreateModalShell";
+import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
+import SqlPreview from "../shared/SqlPreview";
+import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
 import type { snowflake, secret } from "../../../wailsjs/go/models";
 import dayjs from "dayjs";
-
-const { Text } = Typography;
 
 interface Props {
   db: string;
@@ -48,10 +49,10 @@ export default function CreateSecretModal({ db, schema, onClose, onSuccess }: Pr
   });
   const [integrations, setIntegrations] = useState<snowflake.SecurityIntegration[]>([]);
   const [loadingIntegrations, setLoadingIntegrations] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [quotedIdentifiersIgnoreCase, setQuotedIdentifiersIgnoreCase] = useState(false);
-  const [preview, setPreview] = useState("");
+
+  const quotedIdentifiersIgnoreCase = useQuotedIdentifiers();
+  const preview = useSqlPreview(() => BuildCreateSecretSql(db, schema, cfg), [db, schema, cfg]);
+  const { creating, error, setError, submit } = useCreateSubmit();
 
   useEffect(() => {
     setLoadingIntegrations(true);
@@ -59,15 +60,7 @@ export default function CreateSecretModal({ db, schema, onClose, onSuccess }: Pr
       .then((ints) => setIntegrations(ints ?? []))
       .catch(() => {})
       .finally(() => setLoadingIntegrations(false));
-
-    GetQuotedIdentifiersIgnoreCase()
-      .then((v) => setQuotedIdentifiersIgnoreCase(v ?? false))
-      .catch(() => {});
   }, []);
-
-  useEffect(() => {
-    BuildCreateSecretSql(db, schema, cfg).then(setPreview).catch(() => {});
-  }, [db, schema, cfg]);
 
   const set = <K extends keyof secret.SecretConfig>(key: K, value: secret.SecretConfig[K]) =>
     setCfg((prev) => ({ ...prev, [key]: value }));
@@ -94,98 +87,44 @@ export default function CreateSecretModal({ db, schema, onClose, onSuccess }: Pr
 
   const canSubmit = validate();
 
-  const handleRun = async () => {
-    if (!canSubmit) return;
-    setCreating(true);
-    setCreateError(null);
-    try {
-      await ExecDDL(preview);
-      // Snowflake uppercases unquoted identifiers; match the casing that
-      // ListSecretsInAccount will return so the dropdown auto-selects correctly.
-      const effectiveName = cfg.caseSensitive ? cfg.name : cfg.name.toUpperCase();
-      const fqn = `"${db}"."${schema}"."${effectiveName}"`;
-      onSuccess?.(fqn);
-      onClose();
-    } catch (err) {
-      setCreateError(String(err));
-    } finally {
-      setCreating(false);
-    }
-  };
+  const handleRun = () => submit(async () => {
+    await ExecDDL(preview);
+    // Snowflake uppercases unquoted identifiers; match the casing that
+    // ListSecretsInAccount will return so the dropdown auto-selects correctly.
+    const effectiveName = cfg.caseSensitive ? cfg.name : cfg.name.toUpperCase();
+    const fqn = `"${db}"."${schema}"."${effectiveName}"`;
+    onSuccess?.(fqn);
+    onClose();
+  });
 
   const itemStyle: React.CSSProperties = { marginBottom: 12 };
 
   return (
-    <Modal
-      open
-      title={
-        <Space size={6}>
-          <KeyOutlined style={{ color: "var(--link)" }} />
-          <span>Create Secret</span>
-          <Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
-            {db}.{schema}
-          </Text>
-        </Space>
-      }
-      onCancel={onClose}
-      footer={
-        <Space style={{ justifyContent: "flex-end", display: "flex" }}>
-          <Button onClick={onClose} disabled={creating}>Cancel</Button>
-          <Button
-            type="primary"
-            icon={<KeyOutlined />}
-            onClick={handleRun}
-            disabled={!canSubmit}
-            loading={creating}
-          >
-            Create
-          </Button>
-        </Space>
-      }
+    <CreateModalShell
+      icon={<KeyOutlined />}
+      title="Create Secret"
+      subtitle={`${db}.${schema}`}
       width={600}
-      styles={{ body: { paddingTop: 16, maxHeight: "72vh", overflowY: "auto" } }}
+      bodyMaxHeight="72vh"
+      error={error}
+      errorTitle="Secret creation failed"
+      onErrorClose={() => setError(null)}
+      creating={creating}
+      canSubmit={canSubmit}
+      onClose={onClose}
+      onSubmit={handleRun}
     >
-      {createError && (
-        <Alert
-          type="error"
-          message="Secret creation failed"
-          description={createError}
-          showIcon
-          closable
-          onClose={() => setCreateError(null)}
-          style={{ marginBottom: 16 }}
-        />
-      )}
       <Form layout="vertical" size="small">
-        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "0 16px", alignItems: "end" }}>
-          <Form.Item label="Secret name" required style={{ marginBottom: 4 }}>
-            <Input
-              value={cfg.name}
-              onChange={(e) => set("name", e.target.value)}
-              placeholder="MY_SECRET"
-            />
-          </Form.Item>
-          <Form.Item style={{ marginBottom: 4 }}>
-            <Space direction="vertical" size={4}>
-              <Checkbox
-                checked={cfg.orReplace}
-                onChange={(e) => {
-                  set("orReplace", e.target.checked);
-                  if (e.target.checked) set("ifNotExists", false);
-                }}
-              >
-                OR REPLACE
-              </Checkbox>
-              <Checkbox
-                checked={cfg.ifNotExists}
-                disabled={cfg.orReplace}
-                onChange={(e) => set("ifNotExists", e.target.checked)}
-              >
-                IF NOT EXISTS
-              </Checkbox>
-            </Space>
-          </Form.Item>
-        </div>
+        <NameWithReplaceOptions
+          label="Secret name"
+          placeholder="MY_SECRET"
+          name={cfg.name}
+          onNameChange={(v) => set("name", v)}
+          orReplace={cfg.orReplace}
+          ifNotExists={cfg.ifNotExists}
+          onOrReplaceChange={(v) => set("orReplace", v)}
+          onIfNotExistsChange={(v) => set("ifNotExists", v)}
+        />
         <Form.Item style={itemStyle}>
           <ObjectNameCaseControl
             name={cfg.name}
@@ -317,32 +256,8 @@ export default function CreateSecretModal({ db, schema, onClose, onSuccess }: Pr
           />
         </Form.Item>
 
-        <div
-          style={{
-            padding: "10px 12px",
-            background: "var(--bg)",
-            borderRadius: 6,
-            border: "1px solid var(--border)",
-            marginTop: 4,
-          }}
-        >
-          <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 4 }}>
-            SQL Preview
-          </Text>
-          <pre
-            style={{
-              margin: 0,
-              color: "var(--text)",
-              fontSize: 11,
-              fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace",
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-all",
-            }}
-          >
-            {preview}
-          </pre>
-        </div>
+        <SqlPreview sql={preview} />
       </Form>
-    </Modal>
+    </CreateModalShell>
   );
 }

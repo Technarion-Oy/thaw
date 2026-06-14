@@ -105,7 +105,12 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/layout/Sidebar.tsx",
         "frontend/src/components/materializedview/CreateMaterializedViewModal.tsx",
         "frontend/src/components/materializedview/MaterializedViewPropertiesModal.tsx",
+        "frontend/src/components/shared/CreateModalShell.tsx",
+        "frontend/src/components/shared/MonacoSqlField.tsx",
+        "frontend/src/components/shared/NameWithReplaceOptions.tsx",
         "frontend/src/components/shared/SqlPreview.tsx",
+        "frontend/src/components/shared/TagInput.tsx",
+        "frontend/src/components/shared/createModalHooks.ts",
         "frontend/src/components/sidebar/objectIcons.tsx",
         "frontend/src/components/task/TaskHistoryModal.tsx",
         "frontend/src/store/objectStore.ts"

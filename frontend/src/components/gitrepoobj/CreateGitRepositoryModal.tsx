@@ -10,22 +10,22 @@
 
 import { useState, useEffect } from "react";
 import {
-  Modal, Form, Input, Select, Checkbox, Space,
-  Typography, Button, Alert, Tooltip,
+  Form, Input, Select, Space, Button, Tooltip,
 } from "antd";
 import { BranchesOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
 import CreateSecretModal from "../secret/CreateSecretModal";
 import {
   BuildCreateGitRepositorySql,
   ExecDDL,
-  GetQuotedIdentifiersIgnoreCase,
   ListApiIntegrations,
   ListSecretsInAccount,
 } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
+import CreateModalShell from "../shared/CreateModalShell";
+import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
+import SqlPreview from "../shared/SqlPreview";
+import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
 import type { snowflake } from "../../../wailsjs/go/models";
-
-const { Text } = Typography;
 
 interface TagPair {
   name: string;
@@ -68,11 +68,14 @@ export default function CreateGitRepositoryModal({ db, schema, onClose, onSucces
   const [accountSecrets, setAccountSecrets] = useState<snowflake.AccountSecret[]>([]);
   const [loadingInts, setLoadingInts] = useState(false);
   const [loadingSecrets, setLoadingSecrets] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [quotedIdentifiersIgnoreCase, setQuotedIdentifiersIgnoreCase] = useState(false);
-  const [preview, setPreview] = useState("");
   const [showCreateSecret, setShowCreateSecret] = useState(false);
+
+  const quotedIdentifiersIgnoreCase = useQuotedIdentifiers();
+  const preview = useSqlPreview(
+    () => BuildCreateGitRepositorySql(db, schema, cfg as any),
+    [db, schema, cfg],
+  );
+  const { creating, error, setError, submit } = useCreateSubmit();
 
   useEffect(() => {
     setLoadingInts(true);
@@ -86,20 +89,12 @@ export default function CreateGitRepositoryModal({ db, schema, onClose, onSucces
       .then((secrets) => setAccountSecrets(secrets ?? []))
       .catch(() => {})
       .finally(() => setLoadingSecrets(false));
-
-    GetQuotedIdentifiersIgnoreCase()
-      .then((v) => setQuotedIdentifiersIgnoreCase(v ?? false))
-      .catch(() => {});
   }, []);
 
   // Keep tags in cfg in sync
   useEffect(() => {
     setCfg((prev) => ({ ...prev, tags: tags.map((t) => ({ name: t.name, value: t.value })) }));
   }, [tags]);
-
-  useEffect(() => {
-    BuildCreateGitRepositorySql(db, schema, cfg as any).then(setPreview).catch(() => setPreview(""));
-  }, [db, schema, cfg]);
 
   const set = <K extends keyof GitRepoConfig>(key: K, value: GitRepoConfig[K]) =>
     setCfg((prev) => ({ ...prev, [key]: value }));
@@ -120,20 +115,11 @@ export default function CreateGitRepositoryModal({ db, schema, onClose, onSucces
 
   const canSubmit = cfg.name.trim() !== "" && cfg.originUrl.trim() !== "" && cfg.apiIntegration !== "";
 
-  const handleRun = async () => {
-    if (!canSubmit || !preview) return;
-    setCreating(true);
-    setCreateError(null);
-    try {
-      await ExecDDL(preview);
-      onSuccess?.();
-      onClose();
-    } catch (err) {
-      setCreateError(String(err));
-    } finally {
-      setCreating(false);
-    }
-  };
+  const handleRun = () => submit(async () => {
+    await ExecDDL(preview);
+    onSuccess?.();
+    onClose();
+  });
 
   const itemStyle: React.CSSProperties = { marginBottom: 12 };
 
@@ -148,77 +134,32 @@ export default function CreateGitRepositoryModal({ db, schema, onClose, onSucces
 
   return (
     <>
-    <Modal
-      open
-      title={
-        <Space size={6}>
-          <BranchesOutlined style={{ color: "var(--link)" }} />
-          <span>Create Git Repository</span>
-          <Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
-            {db}.{schema}
-          </Text>
-        </Space>
-      }
-      onCancel={onClose}
-      footer={
-        <Space style={{ justifyContent: "flex-end", display: "flex" }}>
-          <Button onClick={onClose} disabled={creating}>Cancel</Button>
-          <Button
-            type="primary"
-            icon={<BranchesOutlined />}
-            onClick={handleRun}
-            disabled={!canSubmit}
-            loading={creating}
-          >
-            Create
-          </Button>
-        </Space>
-      }
+    <CreateModalShell
+      icon={<BranchesOutlined />}
+      title="Create Git Repository"
+      subtitle={`${db}.${schema}`}
       width={620}
-      styles={{ body: { paddingTop: 16, maxHeight: "72vh", overflowY: "auto" } }}
+      bodyMaxHeight="72vh"
+      error={error}
+      errorTitle="Creation failed"
+      onErrorClose={() => setError(null)}
+      creating={creating}
+      canSubmit={canSubmit}
+      onClose={onClose}
+      onSubmit={handleRun}
     >
-      {createError && (
-        <Alert
-          type="error"
-          message="Creation failed"
-          description={createError}
-          showIcon
-          closable
-          onClose={() => setCreateError(null)}
-          style={{ marginBottom: 16 }}
-        />
-      )}
       <Form layout="vertical" size="small">
         {/* Name row */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "0 16px", alignItems: "end" }}>
-          <Form.Item label="Repository name" required style={{ marginBottom: 4 }}>
-            <Input
-              value={cfg.name}
-              onChange={(e) => set("name", e.target.value)}
-              placeholder="MY_REPO"
-            />
-          </Form.Item>
-          <Form.Item style={{ marginBottom: 4 }}>
-            <Space direction="vertical" size={4}>
-              <Checkbox
-                checked={cfg.orReplace}
-                onChange={(e) => {
-                  set("orReplace", e.target.checked);
-                  if (e.target.checked) set("ifNotExists", false);
-                }}
-              >
-                OR REPLACE
-              </Checkbox>
-              <Checkbox
-                checked={cfg.ifNotExists}
-                disabled={cfg.orReplace}
-                onChange={(e) => set("ifNotExists", e.target.checked)}
-              >
-                IF NOT EXISTS
-              </Checkbox>
-            </Space>
-          </Form.Item>
-        </div>
+        <NameWithReplaceOptions
+          label="Repository name"
+          placeholder="MY_REPO"
+          name={cfg.name}
+          onNameChange={(v) => set("name", v)}
+          orReplace={cfg.orReplace}
+          ifNotExists={cfg.ifNotExists}
+          onOrReplaceChange={(v) => set("orReplace", v)}
+          onIfNotExistsChange={(v) => set("ifNotExists", v)}
+        />
         <Form.Item style={itemStyle}>
           <ObjectNameCaseControl
             name={cfg.name}
@@ -310,33 +251,9 @@ export default function CreateGitRepositoryModal({ db, schema, onClose, onSucces
         </Form.Item>
 
         {/* SQL Preview */}
-        <div
-          style={{
-            padding: "10px 12px",
-            background: "var(--bg)",
-            borderRadius: 6,
-            border: "1px solid var(--border)",
-            marginTop: 4,
-          }}
-        >
-          <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 4 }}>
-            SQL Preview
-          </Text>
-          <pre
-            style={{
-              margin: 0,
-              color: "var(--text)",
-              fontSize: 11,
-              fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace",
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-all",
-            }}
-          >
-            {preview || "-- Fill in required fields"}
-          </pre>
-        </div>
+        <SqlPreview sql={preview} />
       </Form>
-    </Modal>
+    </CreateModalShell>
     {showCreateSecret && (
       <CreateSecretModal
         db={db}

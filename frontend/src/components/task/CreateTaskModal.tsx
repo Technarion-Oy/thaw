@@ -10,16 +10,19 @@
 
 import { useState, useEffect } from "react";
 import {
-  Modal, Form, Input, Select, Checkbox, Radio, Space,
-  Typography, Divider, InputNumber, Button, Tag, Alert,
+  Form, Input, Select, Radio, Space,
+  Divider, InputNumber, Button, Tag,
 } from "antd";
 import { ClockCircleOutlined, PlusOutlined, InfoCircleOutlined } from "@ant-design/icons";
-import { ListWarehouses, ListNotificationIntegrations, ListObjects, ExecDDL, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/app/App";
+import { ListWarehouses, ListNotificationIntegrations, ListObjects, ExecDDL } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
+import CreateModalShell from "../shared/CreateModalShell";
+import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
+import SqlPreview from "../shared/SqlPreview";
+import { useQuotedIdentifiers, useCreateSubmit } from "../shared/createModalHooks";
 import ScheduleEditor from "./ScheduleEditor";
 import WhenConditionBuilder from "./WhenConditionBuilder";
 
-const { Text } = Typography;
 const { TextArea } = Input;
 
 const SERVERLESS_SIZES = ["XSMALL", "SMALL", "MEDIUM", "LARGE", "XLARGE", "XXLARGE"];
@@ -193,9 +196,8 @@ export default function CreateTaskModal({
   const [integrations,  setIntegrations]  = useState<string[]>([]);
   const [availableTasks, setAvailableTasks] = useState<string[]>([]);
   const [taskSearchVal, setTaskSearchVal] = useState<string | undefined>(undefined);
-  const [creating,        setCreating]        = useState(false);
-  const [createError,     setCreateError]     = useState<string | null>(null);
-  const [quotedIdentifiersIgnoreCase, setQuotedIdentifiersIgnoreCase] = useState(false);
+  const quotedIdentifiersIgnoreCase = useQuotedIdentifiers();
+  const { creating, error, setError, submit } = useCreateSubmit();
   // Show warehouse validation error only after the user has touched the field
   // or attempted to submit — avoids red border on fresh dialog open.
   const [warehouseTouched, setWarehouseTouched] = useState(false);
@@ -203,10 +205,6 @@ export default function CreateTaskModal({
   useEffect(() => {
     ListWarehouses().then((whs) => setWarehouses(whs ?? [])).catch(() => {});
     ListNotificationIntegrations().then((ints) => setIntegrations(ints ?? [])).catch(() => {});
-    Promise.resolve()
-      .then(() => GetQuotedIdentifiersIgnoreCase())
-      .then((v) => setQuotedIdentifiersIgnoreCase(v ?? false))
-      .catch(() => {});
     ListObjects(db, schema)
       .then((objs) => {
         const tasks = (objs ?? [])
@@ -224,25 +222,23 @@ export default function CreateTaskModal({
   const warehouseMissing = cfg.computeType === "warehouse" && cfg.warehouse.trim() === "";
   const canSubmit = cfg.name.trim() !== "" && cfg.sql.trim() !== "" && !warehouseMissing;
 
-  const handleRun = async () => {
+  const handleRun = () => {
     // Mark warehouse as touched so validation UI appears if it's missing.
     setWarehouseTouched(true);
     if (!canSubmit) return;
     const sql = buildSql(db, schema, cfg);
-    setCreating(true);
-    setCreateError(null);
-    try {
+    submit(async () => {
       await ExecDDL(sql);
       onSuccess?.();
       onClose();
-    } catch (err) {
-      setCreateError(String(err));
-    } finally {
-      setCreating(false);
-    }
+    });
   };
 
   const preview = buildSql(db, schema, cfg);
+  const title =
+    mode === "child" ? "Create child task" :
+    mode === "finalizer" ? "Create finalizer task" :
+    "Create task";
 
   const itemStyle: React.CSSProperties = { marginBottom: 12 };
 
@@ -258,82 +254,33 @@ export default function CreateTaskModal({
   );
 
   return (
-    <Modal
-      open
-      title={
-        <Space size={6}>
-          <ClockCircleOutlined style={{ color: "var(--link)" }} />
-          <span>
-            {mode === "child" ? "Create child task" :
-             mode === "finalizer" ? "Create finalizer task" :
-             "Create task"}
-          </span>
-          <Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
-            {db}.{schema}
-          </Text>
-        </Space>
-      }
-      onCancel={onClose}
-      footer={
-        <Space style={{ justifyContent: "flex-end", display: "flex" }}>
-          <Button onClick={onClose} disabled={creating}>Cancel</Button>
-          <Button
-            type="primary"
-            icon={<ClockCircleOutlined />}
-            onClick={handleRun}
-            disabled={!canSubmit}
-            loading={creating}
-          >
-            Create
-          </Button>
-        </Space>
-      }
+    <CreateModalShell
+      icon={<ClockCircleOutlined />}
+      title={title}
+      subtitle={`${db}.${schema}`}
       width={700}
-      styles={{ body: { paddingTop: 16, maxHeight: "72vh", overflowY: "auto" } }}
+      bodyMaxHeight="72vh"
+      error={error}
+      errorTitle="Task creation failed"
+      onErrorClose={() => setError(null)}
+      creating={creating}
+      canSubmit={canSubmit}
+      onClose={onClose}
+      onSubmit={handleRun}
     >
-      {createError && (
-        <Alert
-          type="error"
-          message="Task creation failed"
-          description={createError}
-          showIcon
-          closable
-          onClose={() => setCreateError(null)}
-          style={{ marginBottom: 16 }}
-        />
-      )}
       <Form layout="vertical" size="small">
 
         {/* Task name + create options */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "0 16px", alignItems: "end" }}>
-          <Form.Item label="Task name" required style={{ marginBottom: 4 }}>
-            <Input
-              value={cfg.name}
-              onChange={(e) => set("name", e.target.value)}
-              placeholder="MY_TASK"
-            />
-          </Form.Item>
-          <Form.Item style={{ marginBottom: 4 }}>
-            <Space direction="vertical" size={4}>
-              <Checkbox
-                checked={cfg.orReplace}
-                onChange={(e) => {
-                  set("orReplace", e.target.checked);
-                  if (e.target.checked) set("ifNotExists", false);
-                }}
-              >
-                OR REPLACE
-              </Checkbox>
-              <Checkbox
-                checked={cfg.ifNotExists}
-                disabled={cfg.orReplace}
-                onChange={(e) => set("ifNotExists", e.target.checked)}
-              >
-                IF NOT EXISTS
-              </Checkbox>
-            </Space>
-          </Form.Item>
-        </div>
+        <NameWithReplaceOptions
+          label="Task name"
+          placeholder="MY_TASK"
+          name={cfg.name}
+          onNameChange={(v) => set("name", v)}
+          orReplace={cfg.orReplace}
+          ifNotExists={cfg.ifNotExists}
+          onOrReplaceChange={(v) => set("orReplace", v)}
+          onIfNotExistsChange={(v) => set("ifNotExists", v)}
+        />
         <Form.Item style={itemStyle}>
           <ObjectNameCaseControl
             name={cfg.name}
@@ -716,33 +663,9 @@ export default function CreateTaskModal({
         </Form.Item>
 
         {/* Live preview */}
-        <div
-          style={{
-            padding: "10px 12px",
-            background: "var(--bg)",
-            borderRadius: 6,
-            border: "1px solid var(--border)",
-            marginTop: 4,
-          }}
-        >
-          <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 4 }}>
-            Preview
-          </Text>
-          <pre
-            style={{
-              margin: 0,
-              color: "var(--text)",
-              fontSize: 11,
-              fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace",
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-all",
-            }}
-          >
-            {preview}
-          </pre>
-        </div>
+        <SqlPreview sql={preview} label="Preview" />
 
       </Form>
-    </Modal>
+    </CreateModalShell>
   );
 }

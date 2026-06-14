@@ -9,19 +9,18 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect } from "react";
-import {
-  Modal, Form, Input, Switch, Checkbox, Select, Space,
-  Typography, Button, Alert,
-} from "antd";
+import { Form, Input, Switch, Select } from "antd";
 import { ApiOutlined } from "@ant-design/icons";
-import { BuildCreatePipeSql, ExecDDL, GetQuotedIdentifiersIgnoreCase, ListNotificationIntegrations } from "../../../wailsjs/go/app/App";
+import { BuildCreatePipeSql, ExecDDL, ListNotificationIntegrations } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
+import CreateModalShell from "../shared/CreateModalShell";
+import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
+import SqlPreview from "../shared/SqlPreview";
+import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
 import type { pipe } from "../../../wailsjs/go/models";
 import Editor from "@monaco-editor/react";
 import { useThemeStore } from "../../store/themeStore";
 import { patchMonacoClipboard } from "../../utils/monacoClipboard";
-
-const { Text } = Typography;
 
 interface Props {
   db: string;
@@ -48,18 +47,14 @@ export default function CreatePipeModal({ db, schema, onClose, onSuccess }: Prop
     comment: "",
     copyStatement: DEFAULT_COPY,
   });
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [quotedIdentifiersIgnoreCase, setQuotedIdentifiersIgnoreCase] = useState(false);
-  const [preview, setPreview] = useState("");
   const [notifIntegrations, setNotifIntegrations] = useState<string[]>([]);
   const [loadingIntegrations, setLoadingIntegrations] = useState(false);
 
-  useEffect(() => {
-    GetQuotedIdentifiersIgnoreCase()
-      .then((v) => setQuotedIdentifiersIgnoreCase(v ?? false))
-      .catch(() => {});
+  const quotedIdentifiersIgnoreCase = useQuotedIdentifiers();
+  const preview = useSqlPreview(() => BuildCreatePipeSql(db, schema, cfg as any), [db, schema, cfg]);
+  const { creating, error, setError, submit } = useCreateSubmit();
 
+  useEffect(() => {
     setLoadingIntegrations(true);
     ListNotificationIntegrations()
       .then((names) => setNotifIntegrations(names ?? []))
@@ -67,105 +62,45 @@ export default function CreatePipeModal({ db, schema, onClose, onSuccess }: Prop
       .finally(() => setLoadingIntegrations(false));
   }, []);
 
-  useEffect(() => {
-    BuildCreatePipeSql(db, schema, cfg as any).then(setPreview).catch(() => {});
-  }, [db, schema, cfg]);
-
   const set = <K extends keyof pipe.PipeConfig>(key: K, value: pipe.PipeConfig[K]) =>
     setCfg((prev) => ({ ...prev, [key]: value }));
 
   const canSubmit = cfg.name.trim().length > 0;
 
-  const handleRun = async () => {
-    if (!canSubmit) return;
-    setCreating(true);
-    setCreateError(null);
-    try {
-      await ExecDDL(preview);
-      onSuccess?.();
-      onClose();
-    } catch (err) {
-      setCreateError(String(err));
-    } finally {
-      setCreating(false);
-    }
-  };
+  const handleRun = () => submit(async () => {
+    await ExecDDL(preview);
+    onSuccess?.();
+    onClose();
+  });
 
   const integrationOptions = (notifIntegrations || []).map((n) => ({ value: n, label: n }));
   const itemStyle: React.CSSProperties = { marginBottom: 12 };
 
   return (
-    <Modal
-      open
-      title={
-        <Space size={6}>
-          <ApiOutlined style={{ color: "var(--link)" }} />
-          <span>Create Pipe</span>
-          <Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
-            {db}.{schema}
-          </Text>
-        </Space>
-      }
-      onCancel={onClose}
-      footer={
-        <Space style={{ justifyContent: "flex-end", display: "flex" }}>
-          <Button onClick={onClose} disabled={creating}>Cancel</Button>
-          <Button
-            type="primary"
-            icon={<ApiOutlined />}
-            onClick={handleRun}
-            disabled={!canSubmit}
-            loading={creating}
-          >
-            Create
-          </Button>
-        </Space>
-      }
+    <CreateModalShell
+      icon={<ApiOutlined />}
+      title="Create Pipe"
+      subtitle={`${db}.${schema}`}
       width={720}
-      styles={{ body: { paddingTop: 16, maxHeight: "80vh", overflowY: "auto" } }}
+      error={error}
+      errorTitle="Pipe creation failed"
+      onErrorClose={() => setError(null)}
+      creating={creating}
+      canSubmit={canSubmit}
+      onClose={onClose}
+      onSubmit={handleRun}
     >
-      {createError && (
-        <Alert
-          type="error"
-          message="Pipe creation failed"
-          description={createError}
-          showIcon
-          closable
-          onClose={() => setCreateError(null)}
-          style={{ marginBottom: 16 }}
-        />
-      )}
-
       <Form layout="vertical" size="small">
-        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "0 16px", alignItems: "end" }}>
-          <Form.Item label="Pipe name" required style={{ marginBottom: 4 }}>
-            <Input
-              value={cfg.name}
-              onChange={(e) => set("name", e.target.value)}
-              placeholder="MY_PIPE"
-            />
-          </Form.Item>
-          <Form.Item style={{ marginBottom: 4 }}>
-            <Space direction="vertical" size={4}>
-              <Checkbox
-                checked={cfg.orReplace}
-                onChange={(e) => {
-                  set("orReplace", e.target.checked);
-                  if (e.target.checked) set("ifNotExists", false);
-                }}
-              >
-                OR REPLACE
-              </Checkbox>
-              <Checkbox
-                checked={cfg.ifNotExists}
-                disabled={cfg.orReplace}
-                onChange={(e) => set("ifNotExists", e.target.checked)}
-              >
-                IF NOT EXISTS
-              </Checkbox>
-            </Space>
-          </Form.Item>
-        </div>
+        <NameWithReplaceOptions
+          label="Pipe name"
+          placeholder="MY_PIPE"
+          name={cfg.name}
+          onNameChange={(v) => set("name", v)}
+          orReplace={cfg.orReplace}
+          ifNotExists={cfg.ifNotExists}
+          onOrReplaceChange={(v) => set("orReplace", v)}
+          onIfNotExistsChange={(v) => set("ifNotExists", v)}
+        />
 
         <Form.Item style={itemStyle}>
           <ObjectNameCaseControl
@@ -250,32 +185,8 @@ export default function CreatePipeModal({ db, schema, onClose, onSuccess }: Prop
           </div>
         </Form.Item>
 
-        <div
-          style={{
-            padding: "10px 12px",
-            background: "var(--bg)",
-            borderRadius: 6,
-            border: "1px solid var(--border)",
-            marginTop: 4,
-          }}
-        >
-          <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 4 }}>
-            SQL Preview
-          </Text>
-          <pre
-            style={{
-              margin: 0,
-              color: "var(--text)",
-              fontSize: 11,
-              fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace",
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-all",
-            }}
-          >
-            {preview}
-          </pre>
-        </div>
+        <SqlPreview sql={preview} />
       </Form>
-    </Modal>
+    </CreateModalShell>
   );
 }

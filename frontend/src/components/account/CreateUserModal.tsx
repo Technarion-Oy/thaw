@@ -10,15 +10,16 @@
 
 import { useState, useEffect } from "react";
 import {
-  Modal, Form, Input, Select, Checkbox, Space, Typography,
+  Form, Input, Select, Checkbox, Space,
   Divider, InputNumber, Button, message,
 } from "antd";
 import { UserAddOutlined, KeyOutlined } from "@ant-design/icons";
-import { ListWarehouses, ListRoles, ExecuteQuery, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/app/App";
+import { ListWarehouses, ListRoles, ExecuteQuery } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
+import CreateModalShell from "../shared/CreateModalShell";
+import SqlPreview from "../shared/SqlPreview";
+import { useQuotedIdentifiers } from "../shared/createModalHooks";
 import KeyPairAuthModal from "./KeyPairAuthModal";
-
-const { Text } = Typography;
 
 interface FormState {
   name: string;
@@ -93,15 +94,11 @@ export default function CreateUserModal({ onClose, onSuccess }: Props) {
   const [roles, setRoles]           = useState<string[]>([]);
   const [saving, setSaving]         = useState(false);
   const [showKeyPair, setShowKeyPair] = useState(false);
-  const [quotedIdentifiersIgnoreCase, setQuotedIdentifiersIgnoreCase] = useState(false);
+  const quotedIdentifiersIgnoreCase = useQuotedIdentifiers();
 
   useEffect(() => {
     ListWarehouses().then((w) => setWarehouses(w ?? [])).catch(() => {});
     ListRoles().then((r)      => setRoles(r ?? [])).catch(() => {});
-    Promise.resolve()
-      .then(() => GetQuotedIdentifiersIgnoreCase())
-      .then((v) => setQuotedIdentifiersIgnoreCase(v ?? false))
-      .catch(() => {});
   }, []);
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
@@ -125,25 +122,15 @@ export default function CreateUserModal({ onClose, onSuccess }: Props) {
   const itemStyle: React.CSSProperties = { marginBottom: 10 };
 
   return (
-    <Modal
-      open
-      title={
-        <Space size={6}>
-          <UserAddOutlined style={{ color: "var(--link)" }} />
-          <span>Create user</span>
-        </Space>
-      }
-      onCancel={onClose}
-      footer={
-        <Space style={{ justifyContent: "flex-end", display: "flex" }}>
-          <Button onClick={onClose}>Cancel</Button>
-          <Button type="primary" icon={<UserAddOutlined />} onClick={handleCreate} loading={saving} disabled={!canCreate}>
-            Create
-          </Button>
-        </Space>
-      }
+    <CreateModalShell
+      icon={<UserAddOutlined />}
+      title="Create user"
       width={640}
-      styles={{ body: { paddingTop: 16, maxHeight: "72vh", overflowY: "auto" } }}
+      bodyMaxHeight="72vh"
+      creating={saving}
+      canSubmit={canCreate}
+      onClose={onClose}
+      onSubmit={handleCreate}
     >
       <Form layout="vertical" size="small">
 
@@ -292,12 +279,7 @@ export default function CreateUserModal({ onClose, onSuccess }: Props) {
         </Form.Item>
 
         {/* Live preview */}
-        <div style={{ padding: "10px 12px", background: "var(--bg)", borderRadius: 6, border: "1px solid var(--border)", marginTop: 4 }}>
-          <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 4 }}>Preview</Text>
-          <pre style={{ margin: 0, color: "var(--text)", fontSize: 11, fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
-            {buildCreateSql(form)}
-          </pre>
-        </div>
+        <SqlPreview sql={buildCreateSql(form)} label="Preview" />
 
       </Form>
 
@@ -307,6 +289,6 @@ export default function CreateUserModal({ onClose, onSuccess }: Props) {
           onClose={() => setShowKeyPair(false)}
         />
       )}
-    </Modal>
+    </CreateModalShell>
   );
 }
