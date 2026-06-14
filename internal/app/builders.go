@@ -17,6 +17,7 @@ import (
 	"thaw/internal/dynamictable"
 	"thaw/internal/externaltable"
 	"thaw/internal/fileformat"
+	"thaw/internal/maskingpolicy"
 	"thaw/internal/materializedview"
 	"thaw/internal/pipe"
 	"thaw/internal/procedure"
@@ -135,6 +136,11 @@ func (a *App) BuildCreateAlertSql(database, schema string, cfg alert.AlertConfig
 // BuildCreateTagSql returns the SQL for creating a Snowflake TAG.
 func (a *App) BuildCreateTagSql(database, schema string, cfg tag.TagConfig) (string, error) {
 	return tag.BuildCreateTagSql(database, schema, cfg)
+}
+
+// BuildCreateMaskingPolicySql returns the SQL for creating a Snowflake MASKING POLICY.
+func (a *App) BuildCreateMaskingPolicySql(database, schema string, cfg maskingpolicy.MaskingPolicyConfig) (string, error) {
+	return maskingpolicy.BuildCreateMaskingPolicySql(database, schema, cfg)
 }
 
 // BuildCreateStageSql returns the CREATE STAGE SQL statement.

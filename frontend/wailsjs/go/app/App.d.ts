@@ -11,6 +11,7 @@ import {dynamictable} from '../models';
 import {externaltable} from '../models';
 import {fileformat} from '../models';
 import {snowgitrepo} from '../models';
+import {maskingpolicy} from '../models';
 import {materializedview} from '../models';
 import {pipe} from '../models';
 import {secret} from '../models';
@@ -48,6 +49,8 @@ export function AlterBackupSet(arg1:string,arg2:string,arg3:string,arg4:string):
 export function AlterDynamicTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterExternalTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterMaskingPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterMaterializedView(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -98,6 +101,8 @@ export function BuildCreateExternalTableSql(arg1:string,arg2:string,arg3:externa
 export function BuildCreateFileFormatSql(arg1:string,arg2:string,arg3:fileformat.FileFormatConfig):Promise<string>;
 
 export function BuildCreateGitRepositorySql(arg1:string,arg2:string,arg3:snowgitrepo.GitRepositoryConfig):Promise<string>;
+
+export function BuildCreateMaskingPolicySql(arg1:string,arg2:string,arg3:maskingpolicy.MaskingPolicyConfig):Promise<string>;
 
 export function BuildCreateMaterializedViewSql(arg1:string,arg2:string,arg3:materializedview.MaterializedViewConfig):Promise<string>;
 
@@ -330,6 +335,8 @@ export function GetKernelPythonVersion(arg1:string):Promise<string>;
 export function GetLocalFilePreview(arg1:string,arg2:fileformat.FileFormatConfig):Promise<fileformat.PreviewResult>;
 
 export function GetMCPSessionConfig(arg1:string):Promise<string>;
+
+export function GetMaskingPolicyReferences(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function GetNotebookCompletions(arg1:string,arg2:string,arg3:number,arg4:number):Promise<Array<snowpark.NotebookCompletion>>;
 
