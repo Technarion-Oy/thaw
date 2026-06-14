@@ -210,6 +210,9 @@ export default function CreateAlertModal({ db, schema, onClose, onSuccess }: Pro
           defaultDb={db}
           defaultSchema={schema}
           notFoundText="No tables or views"
+          // Clear the procedure selection when the source db/schema changes, so a
+          // stale index can't point at a different procedure (or out of range).
+          onSourceChange={() => setPickerProcIdx("")}
           extraPickerRow={({ db: pickerDb, schema: pickerSchema, objects, loading, insert }) => {
             const procOptions = objects
               .filter((o) => o.kind === "PROCEDURE")

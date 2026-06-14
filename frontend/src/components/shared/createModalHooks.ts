@@ -31,8 +31,10 @@ export function useQuotedIdentifiers(): boolean {
 /**
  * Keeps a live SQL preview string in sync with form state. `build` produces the
  * preview (sync or async — backend builders return a Promise); it re-runs
- * whenever `deps` change. Errors are swallowed so a transient build failure
- * never crashes the modal.
+ * whenever `deps` change. Build errors are swallowed and the *last good* preview
+ * is retained (never blanked) so a transient build failure never crashes the
+ * modal — callers that gate submit on the preview should also guard on
+ * `canSubmit` so a stale/empty preview can't be executed.
  */
 export function useSqlPreview(build: () => string | Promise<string>, deps: DependencyList): string {
   const [preview, setPreview] = useState("");

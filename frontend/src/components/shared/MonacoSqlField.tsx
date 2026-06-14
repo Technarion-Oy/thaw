@@ -53,6 +53,12 @@ interface Props {
   notFoundText?: string;
   /** Render extra picker rows (e.g. an "Insert CALL procedure" row). */
   extraPickerRow?: (ctx: ExtraPickerCtx) => ReactNode;
+  /**
+   * Fired when the picker's source database or schema changes — lets the parent
+   * reset any selection state it owns that depends on the source (e.g. an
+   * `extraPickerRow` procedure index).
+   */
+  onSourceChange?: () => void;
   itemStyle?: React.CSSProperties;
 }
 
@@ -81,6 +87,7 @@ export default function MonacoSqlField({
   tablePlaceholder = "Table / view",
   notFoundText = "No tables or views",
   extraPickerRow,
+  onSourceChange,
   itemStyle,
 }: Props) {
   const resolved = useThemeStore((s) => s.resolved);
@@ -128,10 +135,12 @@ export default function MonacoSqlField({
     setPickerDb(v ?? "");
     setPickerSchema("");
     setPickerTable("");
+    onSourceChange?.();
   };
   const onPickSchema = (v?: string) => {
     setPickerSchema(v ?? "");
     setPickerTable("");
+    onSourceChange?.();
   };
 
   // Replace the whole body when it's empty or still the placeholder; otherwise

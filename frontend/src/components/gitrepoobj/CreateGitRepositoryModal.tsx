@@ -144,7 +144,7 @@ export default function CreateGitRepositoryModal({ db, schema, onClose, onSucces
       errorTitle="Creation failed"
       onErrorClose={() => setError(null)}
       creating={creating}
-      canSubmit={canSubmit}
+      canSubmit={canSubmit && !!preview}
       onClose={onClose}
       onSubmit={handleRun}
     >
