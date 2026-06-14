@@ -12,24 +12,23 @@
 
 import { useState, useEffect, useRef } from "react";
 import {
-  Modal, Form, Input, Select, Checkbox, Space,
-  Typography, Button, Alert,
+  Form, Input, Select, Space,
 } from "antd";
 import { BuildOutlined } from "@ant-design/icons";
 import {
   BuildCreateDbtProjectSql,
   ExecDDL,
-  GetQuotedIdentifiersIgnoreCase,
   ListExternalAccessIntegrations,
   ListSupportedDbtVersions,
 } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
+import CreateModalShell from "../shared/CreateModalShell";
+import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
 import SqlPreview from "../shared/SqlPreview";
+import { useQuotedIdentifiers, useCreateSubmit } from "../shared/createModalHooks";
 import SourceLocationPicker from "./SourceLocationPicker";
 import { dbtproject } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
-
-const { Text } = Typography;
 
 interface Props {
   db: string;
@@ -54,11 +53,11 @@ export default function CreateDbtProjectModal({ db, schema, onClose, onSuccess }
   const [dbtVersions, setDbtVersions] = useState<dbtproject.DbtVersionInfo[]>([]);
   const [loadingVersions, setLoadingVersions] = useState(false);
   const [loadingEai, setLoadingEai] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [quotedIdentifiersIgnoreCase, setQuotedIdentifiersIgnoreCase] = useState(false);
   const [preview, setPreview] = useState("");
   const previewTimer = useRef<ReturnType<typeof setTimeout>>();
+
+  const quotedIdentifiersIgnoreCase = useQuotedIdentifiers();
+  const { creating, error, setError, submit } = useCreateSubmit();
 
   useEffect(() => {
     setLoadingEai(true);
@@ -72,10 +71,6 @@ export default function CreateDbtProjectModal({ db, schema, onClose, onSuccess }
       .then((v) => setDbtVersions(v ?? []))
       .catch((err) => console.warn("ListSupportedDbtVersions failed:", err))
       .finally(() => setLoadingVersions(false));
-
-    GetQuotedIdentifiersIgnoreCase()
-      .then((v) => setQuotedIdentifiersIgnoreCase(v ?? false))
-      .catch((err) => console.warn("GetQuotedIdentifiersIgnoreCase failed:", err));
   }, []);
 
   useEffect(() => {
@@ -96,95 +91,43 @@ export default function CreateDbtProjectModal({ db, schema, onClose, onSuccess }
 
   const canSubmit = cfg.name.trim() !== "" && cfg.sourceLocation.trim() !== "";
 
-  const handleRun = async () => {
+  const handleRun = () => {
     if (!canSubmit || !preview) return;
-    setCreating(true);
-    setCreateError(null);
-    try {
+    submit(async () => {
       await ExecDDL(preview);
       onSuccess?.();
       onClose();
-    } catch (err) {
-      setCreateError(String(err));
-    } finally {
-      setCreating(false);
-    }
+    });
   };
 
   const itemStyle: React.CSSProperties = { marginBottom: 12 };
 
   return (
-    <Modal
-      open
-      title={
-        <Space size={6}>
-          <BuildOutlined style={{ color: "var(--link)" }} />
-          <span>Create DBT Project</span>
-          <Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
-            {db}.{schema}
-          </Text>
-        </Space>
-      }
-      onCancel={onClose}
-      footer={
-        <Space style={{ justifyContent: "flex-end", display: "flex" }}>
-          <Button onClick={onClose} disabled={creating}>Cancel</Button>
-          <Button
-            type="primary"
-            icon={<BuildOutlined />}
-            onClick={handleRun}
-            disabled={!canSubmit || !preview}
-            loading={creating}
-          >
-            Create
-          </Button>
-        </Space>
-      }
+    <CreateModalShell
+      icon={<BuildOutlined />}
+      title="Create DBT Project"
+      subtitle={`${db}.${schema}`}
       width={620}
-      styles={{ body: { paddingTop: 16, maxHeight: "72vh", overflowY: "auto" } }}
+      bodyMaxHeight="72vh"
+      error={error}
+      errorTitle="Creation failed"
+      onErrorClose={() => setError(null)}
+      creating={creating}
+      canSubmit={canSubmit && !!preview}
+      onClose={onClose}
+      onSubmit={handleRun}
     >
-      {createError && (
-        <Alert
-          type="error"
-          message="Creation failed"
-          description={createError}
-          showIcon
-          closable
-          onClose={() => setCreateError(null)}
-          style={{ marginBottom: 16 }}
-        />
-      )}
       <Form layout="vertical" size="small">
-        {/* Name row */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "0 16px", alignItems: "end" }}>
-          <Form.Item label="Project name" required style={{ marginBottom: 4 }}>
-            <Input
-              value={cfg.name}
-              onChange={(e) => set("name", e.target.value)}
-              placeholder="MY_DBT_PROJECT"
-            />
-          </Form.Item>
-          <Form.Item style={{ marginBottom: 4 }}>
-            <Space direction="vertical" size={4}>
-              <Checkbox
-                checked={cfg.orReplace}
-                onChange={(e) => {
-                  set("orReplace", e.target.checked);
-                  if (e.target.checked) set("ifNotExists", false);
-                }}
-              >
-                OR REPLACE
-              </Checkbox>
-              <Checkbox
-                checked={cfg.ifNotExists}
-                disabled={cfg.orReplace}
-                onChange={(e) => set("ifNotExists", e.target.checked)}
-              >
-                IF NOT EXISTS
-              </Checkbox>
-            </Space>
-          </Form.Item>
-        </div>
+        <NameWithReplaceOptions
+          label="Project name"
+          placeholder="MY_DBT_PROJECT"
+          name={cfg.name}
+          onNameChange={(v) => set("name", v)}
+          orReplace={cfg.orReplace}
+          ifNotExists={cfg.ifNotExists}
+          onOrReplaceChange={(v) => set("orReplace", v)}
+          onIfNotExistsChange={(v) => set("ifNotExists", v)}
+        />
         <Form.Item style={itemStyle}>
           <ObjectNameCaseControl
             name={cfg.name}
@@ -257,6 +200,6 @@ export default function CreateDbtProjectModal({ db, schema, onClose, onSuccess }
 
         <SqlPreview sql={preview} />
       </Form>
-    </Modal>
+    </CreateModalShell>
   );
 }
