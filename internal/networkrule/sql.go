@@ -70,8 +70,11 @@ func BuildCreateNetworkRuleSql(db, schema string, cfg NetworkRuleConfig) (string
 	}
 	fmt.Fprintf(&sb, "\n  TYPE = %s", ruleType)
 
-	// VALUE_LIST: emit each non-blank entry as a quoted, escaped literal. An empty
-	// list is valid SQL (the rule can be populated later) and renders as ().
+	// VALUE_LIST: emit each non-blank entry as a quoted, escaped literal.
+	// VALUE_LIST is required by Snowflake on CREATE; an empty list renders as ()
+	// only so the live preview stays well-formed while the user is still typing
+	// (the create modal blocks submitting with zero values). An existing rule's
+	// list can be emptied later via ALTER … UNSET VALUE_LIST.
 	vals := make([]string, 0, len(cfg.ValueList))
 	for _, v := range cfg.ValueList {
 		v = strings.TrimSpace(v)

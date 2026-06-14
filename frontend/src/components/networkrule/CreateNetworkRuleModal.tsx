@@ -12,7 +12,7 @@
 
 import { useState } from "react";
 import {
-  Form, Input, Select, Checkbox, Button, Space, Typography,
+  Form, Input, Select, Checkbox, Button, Space,
 } from "antd";
 import { GlobalOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
 import { BuildCreateNetworkRuleSql, ExecDDL } from "../../../wailsjs/go/app/App";
@@ -21,8 +21,6 @@ import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
 import type { networkrule as nrModels } from "../../../wailsjs/go/models";
-
-const { Text } = Typography;
 
 interface Props {
   db: string;
@@ -96,10 +94,14 @@ export default function CreateNetworkRuleModal({ db, schema, onClose, onSuccess 
 
   const removeValue = (i: number) => set("valueList", cfg.valueList.filter((_, idx) => idx !== i));
 
+  // VALUE_LIST is a required parameter on CREATE NETWORK RULE, so at least one
+  // non-blank identifier must be supplied. (An existing rule's list can later be
+  // emptied via ALTER … UNSET VALUE_LIST from the properties panel.)
   const canSubmit =
     cfg.name.trim().length > 0 &&
     cfg.type.trim().length > 0 &&
-    cfg.mode.trim().length > 0;
+    cfg.mode.trim().length > 0 &&
+    cfg.valueList.some((v) => v.trim() !== "");
 
   const handleRun = () => {
     if (!canSubmit) return;
@@ -174,8 +176,9 @@ export default function CreateNetworkRuleModal({ db, schema, onClose, onSuccess 
 
         <Form.Item
           label="Value list"
+          required
           style={itemStyle}
-          help="Network identifiers for this rule. The expected format depends on the chosen type."
+          help="Network identifiers for this rule (at least one is required). The expected format depends on the chosen type."
         >
           <Space direction="vertical" size={6} style={{ width: "100%" }}>
             {cfg.valueList.map((v, i) => (
@@ -200,9 +203,6 @@ export default function CreateNetworkRuleModal({ db, schema, onClose, onSuccess 
             <Button size="small" icon={<PlusOutlined />} onClick={addValue}>
               Add value
             </Button>
-            <Text type="secondary" style={{ fontSize: 11 }}>
-              An empty list is allowed — you can add identifiers later.
-            </Text>
           </Space>
         </Form.Item>
 

@@ -204,9 +204,20 @@ export default function NetworkRulePropertiesModal({ db, schema, name, onClose }
 
   const values = parseValueList(find("value_list"));
 
+  // `find` returns "" both when the value list is genuinely empty and when the
+  // DESCRIBE NETWORK RULE enrichment was omitted (e.g. insufficient privileges).
+  // Distinguish the two so a populated rule whose list couldn't be loaded isn't
+  // shown as empty (and isn't editable, since SET VALUE_LIST would clobber it).
+  const valueListLoaded = rows ? rows.some((r) => r.key.toLowerCase() === "value_list") : false;
+  const entriesCount = Number.parseInt(find("entries_in_valuelist"), 10) || 0;
+  const valueListUnavailable = !valueListLoaded && entriesCount > 0;
+
   const addValue = async () => {
     const v = newValue.trim();
     if (v === "") return;
+    // De-dupe: SET VALUE_LIST replaces the whole list, and a duplicate would
+    // collide on the React key and make removeValue drop both copies.
+    if (values.includes(v)) { setNewValue(""); return; }
     await runAlter(setValueListClause([...values, v]), "Add value");
     setNewValue("");
   };
@@ -281,45 +292,61 @@ export default function NetworkRulePropertiesModal({ db, schema, name, onClose }
           </table>
 
           <div style={SECTION_HEAD}>Value list</div>
-          <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 8 }}>
-            {values.length === 0
-              ? "No network identifiers defined."
-              : "Network identifiers this rule matches."}
-          </Text>
-          <Space wrap size={[4, 8]} style={{ marginBottom: 8 }}>
-            {values.map((v) => (
-              <Tag
-                key={v}
-                closable
-                onClose={(e) => {
-                  e.preventDefault();
-                  removeValue(v);
-                }}
-                style={{ fontSize: 12, fontFamily: "var(--font-mono)" }}
-              >
-                {v}
-              </Tag>
-            ))}
-          </Space>
-          <Space>
-            <Input
-              size="small"
-              value={newValue}
-              onChange={(e) => setNewValue(e.target.value)}
-              onPressEnter={addValue}
-              placeholder="Add value…"
-              style={{ width: 280 }}
-              disabled={busy}
+          {valueListUnavailable ? (
+            // DESCRIBE NETWORK RULE didn't return the identifiers (likely a
+            // privilege issue), but SHOW reports a non-zero count — surface that
+            // rather than misrepresent the rule as empty, and disable editing so
+            // SET VALUE_LIST can't overwrite values we can't see.
+            <Alert
+              type="warning"
+              showIcon
+              message={`Value list unavailable (${entriesCount} ${entriesCount === 1 ? "entry" : "entries"})`}
+              description="DESCRIBE NETWORK RULE did not return the identifiers — this usually means insufficient privileges. Editing is disabled to avoid overwriting the existing values."
+              style={{ marginBottom: 8 }}
             />
-            <Button size="small" icon={<PlusOutlined />} onClick={addValue} loading={busy} disabled={newValue.trim() === ""}>
-              Add
-            </Button>
-            {values.length > 0 && (
-              <Button size="small" onClick={() => runAlter("UNSET VALUE_LIST", "Clear value list")} loading={busy}>
-                Clear all
-              </Button>
-            )}
-          </Space>
+          ) : (
+            <>
+              <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 8 }}>
+                {values.length === 0
+                  ? "No network identifiers defined."
+                  : "Network identifiers this rule matches."}
+              </Text>
+              <Space wrap size={[4, 8]} style={{ marginBottom: 8 }}>
+                {values.map((v) => (
+                  <Tag
+                    key={v}
+                    closable
+                    onClose={(e) => {
+                      e.preventDefault();
+                      removeValue(v);
+                    }}
+                    style={{ fontSize: 12, fontFamily: "var(--font-mono)" }}
+                  >
+                    {v}
+                  </Tag>
+                ))}
+              </Space>
+              <Space>
+                <Input
+                  size="small"
+                  value={newValue}
+                  onChange={(e) => setNewValue(e.target.value)}
+                  onPressEnter={addValue}
+                  placeholder="Add value…"
+                  style={{ width: 280 }}
+                  disabled={busy}
+                />
+                <Button size="small" icon={<PlusOutlined />} onClick={addValue} loading={busy} disabled={newValue.trim() === ""}>
+                  Add
+                </Button>
+                {values.length > 0 && (
+                  <Button size="small" onClick={() => runAlter("UNSET VALUE_LIST", "Clear value list")} loading={busy}>
+                    Clear all
+                  </Button>
+                )}
+              </Space>
+            </>
+          )}
 
           <div style={SECTION_HEAD}>Settings</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>

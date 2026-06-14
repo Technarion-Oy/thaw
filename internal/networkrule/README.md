@@ -37,7 +37,10 @@ VALUE_LIST`, `SET`/`UNSET COMMENT`) are issued as free-form `ALTER NETWORK RULE
 - Blank required parts get placeholders so the live SQL preview reads as a
   completable template: an empty name emits `network_rule_name`, an empty type
   defaults to `IPV4`, an empty mode defaults to `INGRESS`, and an empty value
-  list renders as `()` (a valid, later-populatable rule).
+  list renders as `()`. `VALUE_LIST` is **required** by Snowflake on CREATE, so
+  the `()` form exists only to keep the preview well-formed while the user is
+  still typing — the create modal blocks submitting with zero values. An existing
+  rule's list can be emptied later via `ALTER … UNSET VALUE_LIST`.
 - There is **no `IF NOT EXISTS`** form for `CREATE NETWORK RULE`, so only
   `OrReplace` is modelled.
 - `App.BuildCreateNetworkRuleSql` (in `internal/app/builders.go`) is the thin IPC

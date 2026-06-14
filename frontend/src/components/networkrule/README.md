@@ -6,8 +6,8 @@
 
 | File | Purpose |
 |---|---|
-| `CreateNetworkRuleModal.tsx` | Create form with a live `CREATE NETWORK RULE` SQL preview. Fields: name, OR REPLACE (network rules have **no** `IF NOT EXISTS`), a **Type** select (IPV4 / IPV6 / AWSVPCEID / AZURELINKID / GCPPSCID / HOST_PORT / PRIVATE_HOST_PORT / COMPUTE_POOL), a **Mode** select (INGRESS / EGRESS / INTERNAL_STAGE / SNOWFLAKE_MANAGED_STORAGE_VOLUME), a repeatable **Value list** (rows of identifiers, with a per-type placeholder), and a comment. |
-| `NetworkRulePropertiesModal.tsx` | `SHOW`/`DESCRIBE NETWORK RULE` metadata: a read-only **Definition** (type + mode), an editable **Value list** (removable `Tag`s + add input + clear all), an inline-editable **Comment**, and the generic property rows. |
+| `CreateNetworkRuleModal.tsx` | Create form with a live `CREATE NETWORK RULE` SQL preview. Fields: name, OR REPLACE (network rules have **no** `IF NOT EXISTS`), a **Type** select (IPV4 / IPV6 / AWSVPCEID / AZURELINKID / GCPPSCID / HOST_PORT / PRIVATE_HOST_PORT / COMPUTE_POOL), a **Mode** select (INGRESS / EGRESS / INTERNAL_STAGE / SNOWFLAKE_MANAGED_STORAGE_VOLUME), a repeatable **Value list** (rows of identifiers, with a per-type placeholder), and a comment. `VALUE_LIST` is required by Snowflake on CREATE, so submit is blocked until at least one identifier is entered. |
+| `NetworkRulePropertiesModal.tsx` | `SHOW`/`DESCRIBE NETWORK RULE` metadata: a read-only **Definition** (type + mode), an editable **Value list** (removable `Tag`s + add input + clear all), an inline-editable **Comment**, and the generic property rows. When `DESCRIBE` can't return the identifiers but `SHOW`'s `entries_in_valuelist` count is non-zero, the value list shows a "value list unavailable" warning and disables editing instead of misreporting the rule as empty. |
 
 ## Integration
 
