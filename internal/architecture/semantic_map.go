@@ -84,6 +84,7 @@ func GetCodebaseSemanticMap() string {
         "internal/sqlutil/",
         "internal/stage/",
         "internal/table/",
+        "internal/tag/",
         "internal/tasks/",
         "internal/warehouse/"
       ],
@@ -112,6 +113,8 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/shared/TagInput.tsx",
         "frontend/src/components/shared/createModalHooks.ts",
         "frontend/src/components/sidebar/objectIcons.tsx",
+        "frontend/src/components/tag/CreateTagModal.tsx",
+        "frontend/src/components/tag/TagPropertiesModal.tsx",
         "frontend/src/components/task/TaskHistoryModal.tsx",
         "frontend/src/store/objectStore.ts"
       ],

@@ -24,6 +24,7 @@ import (
 	"thaw/internal/snowflake"
 	"thaw/internal/snowgitrepo"
 	"thaw/internal/stage"
+	"thaw/internal/tag"
 )
 
 // BuildCreateSecretSql returns the SQL for creating a secret.
@@ -129,6 +130,11 @@ func (a *App) BuildCreateMaterializedViewSql(database, schema string, cfg materi
 // BuildCreateAlertSql returns the SQL for creating a Snowflake ALERT.
 func (a *App) BuildCreateAlertSql(database, schema string, cfg alert.AlertConfig) (string, error) {
 	return alert.BuildCreateAlertSql(database, schema, cfg)
+}
+
+// BuildCreateTagSql returns the SQL for creating a Snowflake TAG.
+func (a *App) BuildCreateTagSql(database, schema string, cfg tag.TagConfig) (string, error) {
+	return tag.BuildCreateTagSql(database, schema, cfg)
 }
 
 // BuildCreateStageSql returns the CREATE STAGE SQL statement.

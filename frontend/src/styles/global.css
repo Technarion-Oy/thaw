@@ -57,6 +57,7 @@
   --icon-externaltable:#d4a373; /* tan (external/data-lake storage)         */
   --icon-materializedview:#e673c4; /* orchid (precomputed/stored view)      */
   --icon-alert:       #f85149;  /* red (alert/alarm — attention)            */
+  --icon-tag:         #2dd4bf;  /* teal (governance metadata label)         */
   --icon-function:    #f0883e;  /* orange                                   */
   --icon-procedure:   #ff7b72;  /* coral                                    */
   --icon-sequence:    #d2a8ff;  /* lilac                                    */
@@ -121,6 +122,7 @@
   --icon-externaltable:#8a5a2b;
   --icon-materializedview:#a21caf;
   --icon-alert:       #d1242f;
+  --icon-tag:         #0f766e;
   --icon-function:    #bc4c00;
   --icon-procedure:   #cf222e;
   --icon-sequence:    #6f42c1;

@@ -4421,6 +4421,37 @@ export namespace table {
 
 }
 
+export namespace tag {
+	
+	export class TagConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    allowedValues: string[];
+	    propagate: string;
+	    onConflict: string;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TagConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.allowedValues = source["allowedValues"];
+	        this.propagate = source["propagate"];
+	        this.onConflict = source["onConflict"];
+	        this.comment = source["comment"];
+	    }
+	}
+
+}
+
 export namespace tasks {
 	
 	export class ExportGraphDDLResult {
