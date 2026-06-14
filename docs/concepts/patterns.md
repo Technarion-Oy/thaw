@@ -101,7 +101,7 @@ Loading state lives in the shared `loadingGitNodes` Set (namespaced keys). `buil
 
 ## File system watcher
 
-`internal/filesystem/watcher.go` (`Watcher`) wraps `fsnotify`, recursively watches non-hidden dirs, debounces 200 ms per directory, and auto-adds new dirs. `StartFileWatcher(dir)`/`StopFileWatcher()` IPC emit `"fs:changed"` events. `FileBrowser.tsx` starts/stops on `exportDir` change and incrementally refreshes; in-app mutations mark dirs in a `selfChangedDirs` Set (500 ms) to suppress double-refresh. Gated behind `fileWatcher`.
+`internal/filesystem/watcher.go` (`Watcher`) installs a single recursive watch (`rjeczalik/notify`: FSEvents/macOS, `ReadDirectoryChangesW`/Windows, inotify/Linux) over the whole tree, filters out hidden dirs per-event, and debounces 200 ms per directory. The recursive watch avoids the per-directory file-descriptor exhaustion that broke opening large trees (e.g. a `venv`) on macOS (issue #485). `StartFileWatcher(dir)`/`StopFileWatcher()` IPC emit `"fs:changed"` events. `FileBrowser.tsx` starts/stops on `exportDir` change and incrementally refreshes; in-app mutations mark dirs in a `selfChangedDirs` Set (500 ms) to suppress double-refresh. Gated behind `fileWatcher`.
 
 ## Snowflake CLI profile management
 

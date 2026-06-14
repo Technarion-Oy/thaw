@@ -11,15 +11,12 @@
 package filesystem
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
-
-	"thaw/internal/logger"
+	"github.com/rjeczalik/notify"
 )
 
 // FSChangeEvent is emitted to the frontend when files in a directory change.
@@ -30,8 +27,9 @@ type FSChangeEvent struct {
 // Watcher monitors a directory tree for file system changes and emits
 // debounced per-directory events via the provided callback.
 type Watcher struct {
-	watcher   *fsnotify.Watcher
-	root      string
+	events    chan notify.EventInfo
+	root      string // path as supplied by the caller; the emitted namespace
+	watchRoot string // symlink-resolved root that the backend reports paths under
 	emit      func(FSChangeEvent)
 	stopCh    chan struct{}
 	wg        sync.WaitGroup
@@ -43,43 +41,44 @@ type Watcher struct {
 
 const debounceDelay = 200 * time.Millisecond
 
-// NewWatcher creates a file system watcher rooted at dir. It recursively
-// watches all non-hidden subdirectories and calls emit with debounced
-// change events. The caller must call Close to release resources.
+// eventBufferSize is the capacity of the channel buffering events from the
+// notify library. A generous buffer absorbs the burst that arrives when a
+// large tree is first touched, so events are not dropped while debouncing.
+const eventBufferSize = 1024
+
+// NewWatcher creates a file system watcher rooted at dir and calls emit with
+// debounced change events. The caller must call Close to release resources.
+//
+// It installs a single recursive watch on the whole tree. On macOS this maps
+// to one FSEvents stream covering the entire subtree (no per-directory file
+// descriptor, so deep dependency trees such as venv/node_modules no longer
+// exhaust the process FD limit), on Windows to a recursive
+// ReadDirectoryChangesW handle, and on Linux to inotify (still per-directory,
+// managed internally by the library). Events inside hidden directories are
+// filtered out after the fact rather than excluded from the watch.
 func NewWatcher(dir string, emit func(FSChangeEvent)) (*Watcher, error) {
-	fsw, err := fsnotify.NewWatcher()
-	if err != nil {
+	// Buffered so the library's internal goroutine never blocks on us.
+	events := make(chan notify.EventInfo, eventBufferSize)
+
+	// macOS FSEvents reports canonical paths (e.g. /private/var/… for /var/…),
+	// so resolve the root up front to keep event paths comparable to it.
+	watchRoot := dir
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		watchRoot = resolved
+	}
+
+	// The "/..." suffix requests a recursive watch of the entire subtree.
+	if err := notify.Watch(filepath.Join(watchRoot, "..."), events, notify.All); err != nil {
 		return nil, err
 	}
 
 	w := &Watcher{
-		watcher: fsw,
-		root:    dir,
-		emit:    emit,
-		stopCh:  make(chan struct{}),
-		timers:  make(map[string]*time.Timer),
-	}
-
-	// Recursively add all non-hidden directories.
-	err = filepath.WalkDir(dir, func(path string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return nil // skip unreadable entries
-		}
-		if d.IsDir() {
-			if path != dir && isHidden(d.Name()) {
-				return filepath.SkipDir
-			}
-			if addErr := fsw.Add(path); addErr != nil {
-				// Non-fatal — on Linux this typically means the inotify watch limit is hit.
-				logger.L.Warn("file watcher: failed to watch directory", "path", path, "error", addErr)
-				return nil
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		fsw.Close() //nolint:errcheck
-		return nil, err
+		events:    events,
+		root:      dir,
+		watchRoot: watchRoot,
+		emit:      emit,
+		stopCh:    make(chan struct{}),
+		timers:    make(map[string]*time.Timer),
 	}
 
 	w.wg.Add(1)
@@ -92,6 +91,7 @@ func NewWatcher(dir string, emit func(FSChangeEvent)) (*Watcher, error) {
 // multiple times.
 func (w *Watcher) Close() {
 	w.closeOnce.Do(func() {
+		notify.Stop(w.events)
 		close(w.stopCh)
 		w.wg.Wait()
 
@@ -101,8 +101,6 @@ func (w *Watcher) Close() {
 		}
 		w.timers = nil
 		w.mu.Unlock()
-
-		w.watcher.Close() //nolint:errcheck
 	})
 }
 
@@ -114,72 +112,40 @@ func (w *Watcher) run() {
 		select {
 		case <-w.stopCh:
 			return
-
-		case ev, ok := <-w.watcher.Events:
-			if !ok {
-				return
-			}
+		case ev := <-w.events:
 			w.handleEvent(ev)
-
-		case err, ok := <-w.watcher.Errors:
-			if !ok {
-				return
-			}
-			logger.L.Warn("file watcher error", "error", err)
 		}
 	}
 }
 
-// handleEvent processes a single fsnotify event.
-func (w *Watcher) handleEvent(ev fsnotify.Event) {
-	name := filepath.Base(ev.Name)
-	if isHidden(name) {
+// handleEvent processes a single file system event.
+func (w *Watcher) handleEvent(ev notify.EventInfo) {
+	rel, err := filepath.Rel(w.watchRoot, ev.Path())
+	if err != nil {
 		return
 	}
 
-	// For new directories, start watching them recursively.
-	if ev.Has(fsnotify.Create) {
-		if info, err := os.Stat(ev.Name); err == nil && info.IsDir() {
-			w.addRecursive(ev.Name)
+	// The recursive watch reports events for the whole tree, so filter here:
+	// drop anything outside the root and anything within a hidden directory or
+	// a hidden file (a path component starting with a dot).
+	for part := range strings.SplitSeq(rel, string(filepath.Separator)) {
+		if part == ".." {
+			return // outside the watched tree
 		}
-	}
-
-	// Clean up watches for removed paths. Remove is a no-op for non-watched
-	// paths, so calling it unconditionally is safe and avoids tracking which
-	// paths are directories.
-	if ev.Has(fsnotify.Remove) || ev.Has(fsnotify.Rename) {
-		w.watcher.Remove(ev.Name) //nolint:errcheck
+		if isHidden(part) {
+			return // hidden file or directory (also covers the root itself, ".")
+		}
 	}
 
 	// Write-only events on existing files don't change the directory listing
 	// (no files added or removed), so skip them to avoid unnecessary IPC calls.
-	if ev.Op == fsnotify.Write {
+	if ev.Event() == notify.Write {
 		return
 	}
 
-	// Determine the parent directory that changed.
-	parentDir := filepath.Dir(ev.Name)
-
-	w.scheduleEmit(parentDir)
-}
-
-// addRecursive adds a newly created directory and all its non-hidden
-// subdirectories to the watch list.
-func (w *Watcher) addRecursive(dir string) {
-	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() {
-			if path != dir && isHidden(d.Name()) {
-				return filepath.SkipDir
-			}
-			if addErr := w.watcher.Add(path); addErr != nil {
-				logger.L.Warn("file watcher: failed to watch new directory", "path", path, "error", addErr)
-			}
-		}
-		return nil
-	})
+	// Map the canonical path back into the caller's namespace and emit for the
+	// parent directory that changed.
+	w.scheduleEmit(filepath.Dir(filepath.Join(w.root, rel)))
 }
 
 // scheduleEmit debounces change events per directory.
