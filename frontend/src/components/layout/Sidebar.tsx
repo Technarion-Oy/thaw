@@ -57,6 +57,7 @@ import {
   AlertOutlined,
   TagsOutlined,
   EyeInvisibleOutlined,
+  SafetyOutlined,
   GlobalOutlined,
   ThunderboltOutlined,
   KeyOutlined,
@@ -126,6 +127,8 @@ import CreateTagModal from "../tag/CreateTagModal";
 import TagPropertiesModal from "../tag/TagPropertiesModal";
 import CreateMaskingPolicyModal from "../maskingpolicy/CreateMaskingPolicyModal";
 import MaskingPolicyPropertiesModal from "../maskingpolicy/MaskingPolicyPropertiesModal";
+import CreateRowAccessPolicyModal from "../rowaccesspolicy/CreateRowAccessPolicyModal";
+import RowAccessPolicyPropertiesModal from "../rowaccesspolicy/RowAccessPolicyPropertiesModal";
 import CreateNetworkRuleModal from "../networkrule/CreateNetworkRuleModal";
 import NetworkRulePropertiesModal from "../networkrule/NetworkRulePropertiesModal";
 import CreatePipeModal from "../pipe/CreatePipeModal";
@@ -153,6 +156,7 @@ const KIND_LABEL: Record<string, string> = {
   ALERT:         "Alerts",
   TAG:           "Tags",
   "MASKING POLICY": "Masking Policies",
+  "ROW ACCESS POLICY": "Row Access Policies",
   "NETWORK RULE": "Network Rules",
   FUNCTION:      "Functions",
   PROCEDURE:     "Procedures",
@@ -168,7 +172,7 @@ const KIND_LABEL: Record<string, string> = {
   "DBT PROJECT": "DBT Projects",
 };
 
-const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "NETWORK RULE", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT"];
+const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "NETWORK RULE", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT"];
 
 const kindIcon = (kind: string) => objectIcon(kind);
 
@@ -592,6 +596,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [tagPropsModal, setTagPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createMaskingPolicyModal, setCreateMaskingPolicyModal] = useState<{ db: string; schema: string } | null>(null);
   const [maskingPolicyPropsModal, setMaskingPolicyPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [createRowAccessPolicyModal, setCreateRowAccessPolicyModal] = useState<{ db: string; schema: string } | null>(null);
+  const [rowAccessPolicyPropsModal, setRowAccessPolicyPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createNetworkRuleModal, setCreateNetworkRuleModal] = useState<{ db: string; schema: string } | null>(null);
   const [networkRulePropsModal, setNetworkRulePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createPipeModal, setCreatePipeModal] = useState<{ db: string; schema: string } | null>(null);
@@ -2047,6 +2053,25 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setMaskingPolicyPropsModal({ db, schema, name });
   };
 
+  const openCreateRowAccessPolicy = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    setCtxMenu(null);
+    setCreateRowAccessPolicyModal({ db, schema });
+  };
+
+  const openRowAccessPolicyProperties = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    setRowAccessPolicyPropsModal({ db, schema, name });
+  };
+
   const openCreateNetworkRule = () => {
     if (!ctxMenu) return;
     const parts = ctxMenu.nodeKey.split(":");
@@ -2407,6 +2432,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       case "ALERT":       sql = `DROP ALERT ${fullName};`; break;
       case "TAG":         sql = `DROP TAG ${fullName};`; break;
       case "MASKING POLICY": sql = `DROP MASKING POLICY ${fullName};`; break;
+      case "ROW ACCESS POLICY": sql = `DROP ROW ACCESS POLICY ${fullName};`; break;
       case "NETWORK RULE": sql = `DROP NETWORK RULE ${fullName};`; break;
       case "SEQUENCE":    sql = `DROP SEQUENCE ${fullName};`; break;
       case "STAGE":       sql = `DROP STAGE ${fullName};`; break;
@@ -3041,6 +3067,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         case "ALERT":       return `DROP ALERT ${fullName};`;
         case "TAG":         return `DROP TAG ${fullName};`;
         case "MASKING POLICY": return `DROP MASKING POLICY ${fullName};`;
+        case "ROW ACCESS POLICY": return `DROP ROW ACCESS POLICY ${fullName};`;
         case "NETWORK RULE": return `DROP NETWORK RULE ${fullName};`;
         case "SEQUENCE":    return `DROP SEQUENCE ${fullName};`;
         case "STAGE":       return `DROP STAGE ${fullName};`;
@@ -3567,6 +3594,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
               {menuItemSub("Security & Governance", <EyeInvisibleOutlined style={{ fontSize: 12 }} />, "create-governance", (
                 <>
                   {menuItem("Masking Policy…", <EyeInvisibleOutlined style={{ fontSize: 12 }} />, openCreateMaskingPolicy)}
+                  {menuItem("Row Access Policy…", <SafetyOutlined style={{ fontSize: 12 }} />, openCreateRowAccessPolicy)}
                   {menuItem("Network Rule…", <GlobalOutlined style={{ fontSize: 12 }} />, openCreateNetworkRule)}
                   {menuItem("Tag…", <TagsOutlined style={{ fontSize: 12 }} />, openCreateTag)}
                   {menuItem("Secret…", <KeyOutlined style={{ fontSize: 12 }} />, openCreateSecret)}
@@ -3606,6 +3634,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Create Tag…", <TagsOutlined style={{ fontSize: 12 }} />, openCreateTag)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "MASKING POLICY" &&
             menuItem("Create Masking Policy…", <EyeInvisibleOutlined style={{ fontSize: 12 }} />, openCreateMaskingPolicy)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "ROW ACCESS POLICY" &&
+            menuItem("Create Row Access Policy…", <SafetyOutlined style={{ fontSize: 12 }} />, openCreateRowAccessPolicy)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "NETWORK RULE" &&
             menuItem("Create Network Rule…", <GlobalOutlined style={{ fontSize: 12 }} />, openCreateNetworkRule)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "PIPE" &&
@@ -3654,6 +3684,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openTagProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MASKING POLICY" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openMaskingPolicyProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "ROW ACCESS POLICY" &&
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openRowAccessPolicyProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "NETWORK RULE" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openNetworkRuleProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
@@ -3755,7 +3787,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Make Live", <CloudUploadOutlined style={{ fontSize: 12 }} />, makeNotebookLive, undefined, !featureFlags.snowparkNotebooks, "Snowpark & Notebooks is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "obj" && menuItem("View Definition", null, viewDefinition)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "NETWORK RULE" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "NETWORK RULE" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" &&
             menuItem("Select for Comparison", <DiffOutlined style={{ fontSize: 12 }} />, selectObjForComparison)}
           {ctxMenu.nodeType === "obj" && pendingDiff !== null &&
@@ -4202,6 +4234,24 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={maskingPolicyPropsModal.schema}
           name={maskingPolicyPropsModal.name}
           onClose={() => setMaskingPolicyPropsModal(null)}
+        />
+      )}
+
+      {createRowAccessPolicyModal && (
+        <CreateRowAccessPolicyModal
+          db={createRowAccessPolicyModal.db}
+          schema={createRowAccessPolicyModal.schema}
+          onClose={() => setCreateRowAccessPolicyModal(null)}
+          onSuccess={() => refreshDatabaseByName(createRowAccessPolicyModal.db, { schema: createRowAccessPolicyModal.schema, kind: "ROW ACCESS POLICY" })}
+        />
+      )}
+
+      {rowAccessPolicyPropsModal && (
+        <RowAccessPolicyPropertiesModal
+          db={rowAccessPolicyPropsModal.db}
+          schema={rowAccessPolicyPropsModal.schema}
+          name={rowAccessPolicyPropsModal.name}
+          onClose={() => setRowAccessPolicyPropsModal(null)}
         />
       )}
 

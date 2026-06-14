@@ -28,6 +28,7 @@ Provides object-property queries and column-comment helpers that are not specifi
 | `BuildObjectPropertiesQuery(db, schema, kind, name)` | `SHOW <OBJECTS> LIKE '<name>' IN [SCHEMA/DATABASE] <fqn>` — supports 20 object kinds |
 | `BuildDescribeStageQuery(db, schema, name)` | `DESCRIBE STAGE <fqn>` — used to supplement SHOW STAGES output |
 | `BuildDescribeMaskingPolicyQuery(db, schema, name)` | `DESCRIBE MASKING POLICY <fqn>` — used to supplement SHOW MASKING POLICIES with the signature, return type, and body |
+| `BuildDescribeRowAccessPolicyQuery(db, schema, name)` | `DESCRIBE ROW ACCESS POLICY <fqn>` — used to supplement SHOW ROW ACCESS POLICIES with the signature, return type, and body |
 | `BuildDescribeNetworkRuleQuery(db, schema, name)` | `DESCRIBE NETWORK RULE <fqn>` — used to supplement SHOW NETWORK RULES with the value_list (SHOW reports only a count) |
 | `BuildGetColumnCommentsQuery(db, schema, table)` | `SELECT COLUMN_NAME, COALESCE(COMMENT,'') FROM <db>.INFORMATION_SCHEMA.COLUMNS WHERE ...` |
 | `BuildSetColumnCommentSql(db, schema, table, column, comment)` | `ALTER TABLE ... MODIFY COLUMN ... COMMENT '...'` |
@@ -42,7 +43,7 @@ Provides object-property queries and column-comment helpers that are not specifi
 
 | Function | Description |
 |---|---|
-| `GetObjectProperties(ctx, client, db, schema, kind, name)` | Runs `BuildObjectPropertiesQuery`, calls `snowflake.ResultToPairs`; for STAGE also runs `BuildDescribeStageQuery`, for MASKING POLICY also runs `BuildDescribeMaskingPolicyQuery`, and for NETWORK RULE also runs `BuildDescribeNetworkRuleQuery`, appending the additional properties |
+| `GetObjectProperties(ctx, client, db, schema, kind, name)` | Runs `BuildObjectPropertiesQuery`, calls `snowflake.ResultToPairs`; for STAGE also runs `BuildDescribeStageQuery`, for MASKING POLICY also runs `BuildDescribeMaskingPolicyQuery`, for ROW ACCESS POLICY also runs `BuildDescribeRowAccessPolicyQuery`, and for NETWORK RULE also runs `BuildDescribeNetworkRuleQuery`, appending the additional properties |
 | `GetColumnComments(ctx, client, db, schema, table)` | Runs `BuildGetColumnCommentsQuery`, calls `ParseColumnComments` |
 | `SetColumnComment(ctx, client, db, schema, table, column, comment)` | Runs `BuildSetColumnCommentSql` via `client.Execute` |
 
@@ -53,7 +54,7 @@ Provides object-property queries and column-comment helpers that are not specifi
 - `App.GetColumnComments(db, schema, table)` → `objects.GetColumnComments`
 - `App.SetColumnComment(db, schema, table, column, comment)` → `objects.SetColumnComment`
 
-`GetObjectProperties` is the single entry point for the Properties side-panel. It handles all 25 supported object kinds (DATABASE, SCHEMA, TABLE, VIEW, DYNAMIC TABLE, EXTERNAL TABLE, MATERIALIZED VIEW, ALERT, TAG, MASKING POLICY, NETWORK RULE, FUNCTION, PROCEDURE, SEQUENCE, STAGE, STREAM, TASK, FILE FORMAT, PIPE, SECRET, GIT REPOSITORY, DBT PROJECT, WAREHOUSE, ROLE, USER) through a `switch` on `kind`. STAGE additionally merges `DESCRIBE STAGE` rows (keyed as `parent.property`), MASKING POLICY merges the `DESCRIBE MASKING POLICY` signature / return type / body, and NETWORK RULE merges the `DESCRIBE NETWORK RULE` value_list, to expose configuration the corresponding `SHOW` omits.
+`GetObjectProperties` is the single entry point for the Properties side-panel. It handles all 26 supported object kinds (DATABASE, SCHEMA, TABLE, VIEW, DYNAMIC TABLE, EXTERNAL TABLE, MATERIALIZED VIEW, ALERT, TAG, MASKING POLICY, ROW ACCESS POLICY, NETWORK RULE, FUNCTION, PROCEDURE, SEQUENCE, STAGE, STREAM, TASK, FILE FORMAT, PIPE, SECRET, GIT REPOSITORY, DBT PROJECT, WAREHOUSE, ROLE, USER) through a `switch` on `kind`. STAGE additionally merges `DESCRIBE STAGE` rows (keyed as `parent.property`), MASKING POLICY and ROW ACCESS POLICY merge the corresponding `DESCRIBE` signature / return type / body, and NETWORK RULE merges the `DESCRIBE NETWORK RULE` value_list, to expose configuration the corresponding `SHOW` omits.
 
 `snowflake.ResultToPairs` (from `internal/snowflake/result.go`) converts a `SHOW` result row into `[]PropertyPair{Key, Value}` by pairing column names with cell values. `objects` does not duplicate this logic.
 

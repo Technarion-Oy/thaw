@@ -42,6 +42,10 @@ export function AlterPipe(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterPipe'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterRowAccessPolicy(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterRowAccessPolicy'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterStage(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterStage'](arg1, arg2, arg3, arg4);
 }
@@ -148,6 +152,10 @@ export function BuildCreateNetworkRuleSql(arg1, arg2, arg3) {
 
 export function BuildCreatePipeSql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreatePipeSql'](arg1, arg2, arg3);
+}
+
+export function BuildCreateRowAccessPolicySql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateRowAccessPolicySql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateSecretSql(arg1, arg2, arg3) {
@@ -676,6 +684,10 @@ export function GetQuotedIdentifiersIgnoreCase() {
 
 export function GetRoleDDL(arg1) {
   return window['go']['app']['App']['GetRoleDDL'](arg1);
+}
+
+export function GetRowAccessPolicyReferences(arg1, arg2, arg3) {
+  return window['go']['app']['App']['GetRowAccessPolicyReferences'](arg1, arg2, arg3);
 }
 
 export function GetSchemaCrossDeps(arg1, arg2) {

@@ -27,7 +27,7 @@ type ColumnComment struct {
 // BuildObjectPropertiesQuery returns the SHOW/DESCRIBE query that fetches the
 // metadata for a single Snowflake object. kind is one of: DATABASE, SCHEMA,
 // TABLE, VIEW, DYNAMIC TABLE, EXTERNAL TABLE, MATERIALIZED VIEW, ALERT, TAG,
-// MASKING POLICY, NETWORK RULE, FUNCTION, PROCEDURE, SEQUENCE, STAGE, STREAM,
+// MASKING POLICY, ROW ACCESS POLICY, NETWORK RULE, FUNCTION, PROCEDURE, SEQUENCE, STAGE, STREAM,
 // TASK, FILE FORMAT, PIPE, SECRET, GIT REPOSITORY, DBT PROJECT, WAREHOUSE, ROLE,
 // USER.
 func BuildObjectPropertiesQuery(database, schema, kind, name string) (string, error) {
@@ -49,6 +49,8 @@ func BuildObjectPropertiesQuery(database, schema, kind, name string) (string, er
 		return fmt.Sprintf("SHOW TAGS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
 	case "MASKING POLICY":
 		return fmt.Sprintf("SHOW MASKING POLICIES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+	case "ROW ACCESS POLICY":
+		return fmt.Sprintf("SHOW ROW ACCESS POLICIES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
 	case "NETWORK RULE":
 		return fmt.Sprintf("SHOW NETWORK RULES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
 	case "SCHEMA":
@@ -105,6 +107,15 @@ func BuildDescribeMaskingPolicyQuery(database, schema, name string) string {
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
 }
 
+// BuildDescribeRowAccessPolicyQuery returns the DESCRIBE ROW ACCESS POLICY query
+// used to enrich the SHOW ROW ACCESS POLICIES result with the policy's
+// signature, return type, and body — none of which SHOW ROW ACCESS POLICIES
+// reports.
+func BuildDescribeRowAccessPolicyQuery(database, schema, name string) string {
+	return fmt.Sprintf("DESCRIBE ROW ACCESS POLICY %s.%s.%s",
+		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
+}
+
 // BuildDescribeNetworkRuleQuery returns the DESCRIBE NETWORK RULE query used to
 // enrich the SHOW NETWORK RULES result with the rule's value_list — which SHOW
 // NETWORK RULES reports only as a count (entries_in_valuelist), not the actual
@@ -117,9 +128,9 @@ func BuildDescribeNetworkRuleQuery(database, schema, name string) string {
 // GetObjectProperties returns structured metadata for any Snowflake object by
 // running the appropriate SHOW or DESCRIBE command and returning the result as
 // key/value pairs. For STAGE objects it also appends DESCRIBE STAGE properties;
-// for MASKING POLICY objects it appends the DESCRIBE MASKING POLICY signature,
-// return type, and body; for NETWORK RULE objects it appends the DESCRIBE
-// NETWORK RULE value_list.
+// for MASKING POLICY and ROW ACCESS POLICY objects it appends the DESCRIBE
+// signature, return type, and body; for NETWORK RULE objects it appends the
+// DESCRIBE NETWORK RULE value_list.
 func GetObjectProperties(ctx context.Context, client *snowflake.Client, database, schema, kind, name string) ([]snowflake.PropertyPair, error) {
 	query, err := BuildObjectPropertiesQuery(database, schema, kind, name)
 	if err != nil {
@@ -136,6 +147,32 @@ func GetObjectProperties(ctx context.Context, client *snowflake.Client, database
 		descRes, err := client.Execute(ctx, BuildDescribeMaskingPolicyQuery(database, schema, name))
 		if err == nil && len(descRes.Rows) > 0 {
 			// DESCRIBE MASKING POLICY returns one row whose columns include
+			// signature, return_type, and body. Map by column name so a column
+			// reordering on Snowflake's side doesn't mislabel the values.
+			row := descRes.Rows[0]
+			for ci, col := range descRes.Columns {
+				if ci >= len(row) {
+					break
+				}
+				switch strings.ToLower(col) {
+				case "signature", "return_type", "body":
+					// Guard against a SQL NULL rendering as the literal "<nil>";
+					// emit an empty string instead, matching how the references
+					// table renders nulls.
+					val := ""
+					if row[ci] != nil {
+						val = fmt.Sprintf("%v", row[ci])
+					}
+					pairs = append(pairs, snowflake.PropertyPair{Key: col, Value: val})
+				}
+			}
+		}
+	}
+
+	if strings.ToUpper(kind) == "ROW ACCESS POLICY" {
+		descRes, err := client.Execute(ctx, BuildDescribeRowAccessPolicyQuery(database, schema, name))
+		if err == nil && len(descRes.Rows) > 0 {
+			// DESCRIBE ROW ACCESS POLICY returns one row whose columns include
 			// signature, return_type, and body. Map by column name so a column
 			// reordering on Snowflake's side doesn't mislabel the values.
 			row := descRes.Rows[0]
