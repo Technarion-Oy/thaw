@@ -547,6 +547,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [submenuPath, setSubmenuPath] = useState<string[]>([]);
   const [submenuDirs, setSubmenuDirs] = useState<("left" | "right")[]>([]);
   const submenuTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Collapse any open cascading submenus whenever the context menu opens or
+  // closes, so it never reappears pre-expanded on the next right-click.
+  useEffect(() => {
+    setSubmenuPath([]);
+    setSubmenuDirs([]);
+  }, [ctxMenu]);
   const [ddlModal, setDdlModal]   = useState<ObjectDDL | null>(null);
   const [callModal, setCallModal] = useState<{ db: string; schema: string; name: string; rawArgs: string } | null>(null);
   const [selectFunctionModal, setSelectFunctionModal] = useState<{ db: string; schema: string; name: string; rawArgs: string } | null>(null);
@@ -3119,6 +3125,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setSubmenuDirs((d) => { const nd = d.slice(0, depth); nd[depth] = dir; return nd; });
   };
   const hideSub = (depth: number) => {
+    if (submenuTimer.current) clearTimeout(submenuTimer.current);
     submenuTimer.current = setTimeout(() => setSubmenuPath((p) => p.slice(0, depth)), 150);
   };
   const cancelHide = () => {
