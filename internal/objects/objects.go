@@ -27,8 +27,9 @@ type ColumnComment struct {
 // BuildObjectPropertiesQuery returns the SHOW/DESCRIBE query that fetches the
 // metadata for a single Snowflake object. kind is one of: DATABASE, SCHEMA,
 // TABLE, VIEW, DYNAMIC TABLE, EXTERNAL TABLE, MATERIALIZED VIEW, ALERT, TAG,
-// MASKING POLICY, FUNCTION, PROCEDURE, SEQUENCE, STAGE, STREAM, TASK,
-// FILE FORMAT, PIPE, SECRET, GIT REPOSITORY, DBT PROJECT, WAREHOUSE, ROLE, USER.
+// MASKING POLICY, NETWORK RULE, FUNCTION, PROCEDURE, SEQUENCE, STAGE, STREAM,
+// TASK, FILE FORMAT, PIPE, SECRET, GIT REPOSITORY, DBT PROJECT, WAREHOUSE, ROLE,
+// USER.
 func BuildObjectPropertiesQuery(database, schema, kind, name string) (string, error) {
 	like := strings.ReplaceAll(name, `\`, `\\`)
 	like = strings.ReplaceAll(like, "'", "''")
@@ -48,6 +49,8 @@ func BuildObjectPropertiesQuery(database, schema, kind, name string) (string, er
 		return fmt.Sprintf("SHOW TAGS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
 	case "MASKING POLICY":
 		return fmt.Sprintf("SHOW MASKING POLICIES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+	case "NETWORK RULE":
+		return fmt.Sprintf("SHOW NETWORK RULES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
 	case "SCHEMA":
 		return fmt.Sprintf("SHOW SCHEMAS LIKE '%s' IN DATABASE %s", like, snowflake.QuoteIdent(database)), nil
 	case "TABLE":
@@ -102,11 +105,21 @@ func BuildDescribeMaskingPolicyQuery(database, schema, name string) string {
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
 }
 
+// BuildDescribeNetworkRuleQuery returns the DESCRIBE NETWORK RULE query used to
+// enrich the SHOW NETWORK RULES result with the rule's value_list — which SHOW
+// NETWORK RULES reports only as a count (entries_in_valuelist), not the actual
+// identifiers.
+func BuildDescribeNetworkRuleQuery(database, schema, name string) string {
+	return fmt.Sprintf("DESCRIBE NETWORK RULE %s.%s.%s",
+		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
+}
+
 // GetObjectProperties returns structured metadata for any Snowflake object by
 // running the appropriate SHOW or DESCRIBE command and returning the result as
 // key/value pairs. For STAGE objects it also appends DESCRIBE STAGE properties;
 // for MASKING POLICY objects it appends the DESCRIBE MASKING POLICY signature,
-// return type, and body.
+// return type, and body; for NETWORK RULE objects it appends the DESCRIBE
+// NETWORK RULE value_list.
 func GetObjectProperties(ctx context.Context, client *snowflake.Client, database, schema, kind, name string) ([]snowflake.PropertyPair, error) {
 	query, err := BuildObjectPropertiesQuery(database, schema, kind, name)
 	if err != nil {
@@ -135,6 +148,28 @@ func GetObjectProperties(ctx context.Context, client *snowflake.Client, database
 					// Guard against a SQL NULL rendering as the literal "<nil>";
 					// emit an empty string instead, matching how the references
 					// table renders nulls.
+					val := ""
+					if row[ci] != nil {
+						val = fmt.Sprintf("%v", row[ci])
+					}
+					pairs = append(pairs, snowflake.PropertyPair{Key: col, Value: val})
+				}
+			}
+		}
+	}
+
+	if strings.ToUpper(kind) == "NETWORK RULE" {
+		descRes, err := client.Execute(ctx, BuildDescribeNetworkRuleQuery(database, schema, name))
+		if err == nil && len(descRes.Rows) > 0 {
+			// DESCRIBE NETWORK RULE returns one row whose columns include
+			// value_list (the actual identifiers). Map by column name so a column
+			// reordering on Snowflake's side doesn't mislabel the value.
+			row := descRes.Rows[0]
+			for ci, col := range descRes.Columns {
+				if ci >= len(row) {
+					break
+				}
+				if strings.ToLower(col) == "value_list" {
 					val := ""
 					if row[ci] != nil {
 						val = fmt.Sprintf("%v", row[ci])

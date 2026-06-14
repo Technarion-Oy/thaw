@@ -34,6 +34,10 @@ export function AlterMaterializedView(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterMaterializedView'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterNetworkRule(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterNetworkRule'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterPipe(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterPipe'](arg1, arg2, arg3, arg4);
 }
@@ -136,6 +140,10 @@ export function BuildCreateMaskingPolicySql(arg1, arg2, arg3) {
 
 export function BuildCreateMaterializedViewSql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateMaterializedViewSql'](arg1, arg2, arg3);
+}
+
+export function BuildCreateNetworkRuleSql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateNetworkRuleSql'](arg1, arg2, arg3);
 }
 
 export function BuildCreatePipeSql(arg1, arg2, arg3) {

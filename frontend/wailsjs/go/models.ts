@@ -1923,6 +1923,35 @@ export namespace migration {
 
 }
 
+export namespace networkrule {
+	
+	export class NetworkRuleConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    type: string;
+	    mode: string;
+	    valueList: string[];
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new NetworkRuleConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.type = source["type"];
+	        this.mode = source["mode"];
+	        this.valueList = source["valueList"];
+	        this.comment = source["comment"];
+	    }
+	}
+
+}
+
 export namespace objects {
 	
 	export class ColumnComment {

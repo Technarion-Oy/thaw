@@ -3130,6 +3130,7 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 		{fmt.Sprintf("SHOW ALERTS IN SCHEMA %s", q), "ALERT"},
 		{fmt.Sprintf("SHOW TAGS IN SCHEMA %s", q), "TAG"},
 		{fmt.Sprintf("SHOW MASKING POLICIES IN SCHEMA %s", q), "MASKING POLICY"},
+		{fmt.Sprintf("SHOW NETWORK RULES IN SCHEMA %s", q), "NETWORK RULE"},
 		{fmt.Sprintf("SHOW PROCEDURES IN SCHEMA %s", q), "PROCEDURE"},
 		{fmt.Sprintf("SHOW FUNCTIONS IN SCHEMA %s", q), "FUNCTION"},
 		{fmt.Sprintf("SHOW TASKS IN SCHEMA %s", q), "TASK"},
@@ -3464,6 +3465,8 @@ func buildGetDDLQuery(database, schema, kind, name, arguments string) (query, id
 		// GET_DDL exposes a single 'POLICY' object type covering all policy
 		// kinds (masking, row access, etc.), not a per-kind type.
 		ddlKind = "POLICY"
+	case "NETWORK RULE":
+		ddlKind = "NETWORK_RULE"
 	}
 	escapedKind := strings.ReplaceAll(ddlKind, "'", "''")
 	// The third argument (true) enables recursive DDL output for objects that
