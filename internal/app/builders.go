@@ -22,6 +22,7 @@ import (
 	"thaw/internal/networkrule"
 	"thaw/internal/pipe"
 	"thaw/internal/procedure"
+	"thaw/internal/rowaccesspolicy"
 	"thaw/internal/secret"
 	"thaw/internal/snowflake"
 	"thaw/internal/snowgitrepo"
@@ -142,6 +143,11 @@ func (a *App) BuildCreateTagSql(database, schema string, cfg tag.TagConfig) (str
 // BuildCreateMaskingPolicySql returns the SQL for creating a Snowflake MASKING POLICY.
 func (a *App) BuildCreateMaskingPolicySql(database, schema string, cfg maskingpolicy.MaskingPolicyConfig) (string, error) {
 	return maskingpolicy.BuildCreateMaskingPolicySql(database, schema, cfg)
+}
+
+// BuildCreateRowAccessPolicySql returns the SQL for creating a Snowflake ROW ACCESS POLICY.
+func (a *App) BuildCreateRowAccessPolicySql(database, schema string, cfg rowaccesspolicy.RowAccessPolicyConfig) (string, error) {
+	return rowaccesspolicy.BuildCreateRowAccessPolicySql(database, schema, cfg)
 }
 
 // BuildCreateNetworkRuleSql returns the SQL for creating a Snowflake NETWORK RULE.

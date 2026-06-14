@@ -15,6 +15,7 @@ import {maskingpolicy} from '../models';
 import {materializedview} from '../models';
 import {networkrule} from '../models';
 import {pipe} from '../models';
+import {rowaccesspolicy} from '../models';
 import {secret} from '../models';
 import {tag} from '../models';
 import {erdesigner} from '../models';
@@ -58,6 +59,8 @@ export function AlterMaterializedView(arg1:string,arg2:string,arg3:string,arg4:s
 export function AlterNetworkRule(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterPipe(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterRowAccessPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterStage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -112,6 +115,8 @@ export function BuildCreateMaterializedViewSql(arg1:string,arg2:string,arg3:mate
 export function BuildCreateNetworkRuleSql(arg1:string,arg2:string,arg3:networkrule.NetworkRuleConfig):Promise<string>;
 
 export function BuildCreatePipeSql(arg1:string,arg2:string,arg3:pipe.PipeConfig):Promise<string>;
+
+export function BuildCreateRowAccessPolicySql(arg1:string,arg2:string,arg3:rowaccesspolicy.RowAccessPolicyConfig):Promise<string>;
 
 export function BuildCreateSecretSql(arg1:string,arg2:string,arg3:secret.SecretConfig):Promise<string>;
 
@@ -376,6 +381,8 @@ export function GetQueryOperatorStats(arg1:string):Promise<Array<queryprofile.Op
 export function GetQuotedIdentifiersIgnoreCase():Promise<boolean>;
 
 export function GetRoleDDL(arg1:string):Promise<string>;
+
+export function GetRowAccessPolicyReferences(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function GetSchemaCrossDeps(arg1:string,arg2:string):Promise<Array<snowflake.SchemaRef>>;
 
