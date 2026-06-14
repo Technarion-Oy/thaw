@@ -19,6 +19,7 @@ import (
 	"thaw/internal/fileformat"
 	"thaw/internal/maskingpolicy"
 	"thaw/internal/materializedview"
+	"thaw/internal/networkrule"
 	"thaw/internal/pipe"
 	"thaw/internal/procedure"
 	"thaw/internal/secret"
@@ -141,6 +142,11 @@ func (a *App) BuildCreateTagSql(database, schema string, cfg tag.TagConfig) (str
 // BuildCreateMaskingPolicySql returns the SQL for creating a Snowflake MASKING POLICY.
 func (a *App) BuildCreateMaskingPolicySql(database, schema string, cfg maskingpolicy.MaskingPolicyConfig) (string, error) {
 	return maskingpolicy.BuildCreateMaskingPolicySql(database, schema, cfg)
+}
+
+// BuildCreateNetworkRuleSql returns the SQL for creating a Snowflake NETWORK RULE.
+func (a *App) BuildCreateNetworkRuleSql(database, schema string, cfg networkrule.NetworkRuleConfig) (string, error) {
+	return networkrule.BuildCreateNetworkRuleSql(database, schema, cfg)
 }
 
 // BuildCreateStageSql returns the CREATE STAGE SQL statement.

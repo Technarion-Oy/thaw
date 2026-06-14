@@ -59,6 +59,7 @@
   --icon-alert:       #f85149;  /* red (alert/alarm — attention)            */
   --icon-tag:         #2dd4bf;  /* teal (governance metadata label)         */
   --icon-maskingpolicy:#facc15; /* amber (data masking / sensitive)         */
+  --icon-networkrule: #38bdf8;  /* sky blue (network / connectivity)        */
   --icon-function:    #f0883e;  /* orange                                   */
   --icon-procedure:   #ff7b72;  /* coral                                    */
   --icon-sequence:    #d2a8ff;  /* lilac                                    */
@@ -125,6 +126,7 @@
   --icon-alert:       #d1242f;
   --icon-tag:         #0f766e;
   --icon-maskingpolicy:#9a6700;
+  --icon-networkrule: #0a6e9e;
   --icon-function:    #bc4c00;
   --icon-procedure:   #cf222e;
   --icon-sequence:    #6f42c1;

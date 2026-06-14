@@ -13,6 +13,7 @@ import {fileformat} from '../models';
 import {snowgitrepo} from '../models';
 import {maskingpolicy} from '../models';
 import {materializedview} from '../models';
+import {networkrule} from '../models';
 import {pipe} from '../models';
 import {secret} from '../models';
 import {tag} from '../models';
@@ -53,6 +54,8 @@ export function AlterExternalTable(arg1:string,arg2:string,arg3:string,arg4:stri
 export function AlterMaskingPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterMaterializedView(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterNetworkRule(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterPipe(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -105,6 +108,8 @@ export function BuildCreateGitRepositorySql(arg1:string,arg2:string,arg3:snowgit
 export function BuildCreateMaskingPolicySql(arg1:string,arg2:string,arg3:maskingpolicy.MaskingPolicyConfig):Promise<string>;
 
 export function BuildCreateMaterializedViewSql(arg1:string,arg2:string,arg3:materializedview.MaterializedViewConfig):Promise<string>;
+
+export function BuildCreateNetworkRuleSql(arg1:string,arg2:string,arg3:networkrule.NetworkRuleConfig):Promise<string>;
 
 export function BuildCreatePipeSql(arg1:string,arg2:string,arg3:pipe.PipeConfig):Promise<string>;
 
