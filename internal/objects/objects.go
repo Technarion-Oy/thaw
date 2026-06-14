@@ -132,7 +132,14 @@ func GetObjectProperties(ctx context.Context, client *snowflake.Client, database
 				}
 				switch strings.ToLower(col) {
 				case "signature", "return_type", "body":
-					pairs = append(pairs, snowflake.PropertyPair{Key: col, Value: fmt.Sprintf("%v", row[ci])})
+					// Guard against a SQL NULL rendering as the literal "<nil>";
+					// emit an empty string instead, matching how the references
+					// table renders nulls.
+					val := ""
+					if row[ci] != nil {
+						val = fmt.Sprintf("%v", row[ci])
+					}
+					pairs = append(pairs, snowflake.PropertyPair{Key: col, Value: val})
 				}
 			}
 		}

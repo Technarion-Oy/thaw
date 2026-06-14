@@ -82,11 +82,16 @@ export default function CreateMaskingPolicyModal({ db, schema, onClose, onSucces
   const set = <K extends keyof MaskingCfg>(key: K, value: MaskingCfg[K]) =>
     setCfg((prev) => ({ ...prev, [key]: value }));
 
-  // The return type must match the first argument's type, so keep it pinned to
-  // the first column as the signature changes rather than asking the user to
-  // re-enter (and risk mismatching) it.
+  // The return type must match the first emitted argument's type, so keep it
+  // pinned to the first *valid* row (name + type both set) as the signature
+  // changes rather than asking the user to re-enter (and risk mismatching) it.
+  // The Go builder skips blank rows, so pinning to the first valid row — not the
+  // literal args[0] — keeps RETURNS aligned with the argument it actually emits.
+  const firstValidType = (args: MaskingArg[]) =>
+    args.find((a) => a.name.trim() !== "" && a.type.trim() !== "")?.type ?? "";
+
   const setArgs = (args: MaskingArg[]) =>
-    setCfg((prev) => ({ ...prev, args, returnType: args[0]?.type ?? "" }));
+    setCfg((prev) => ({ ...prev, args, returnType: firstValidType(args) }));
 
   const updateArg = (i: number, patch: Partial<MaskingArg>) =>
     setArgs(cfg.args.map((a, idx) => (idx === i ? { ...a, ...patch } : a)));
