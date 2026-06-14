@@ -42,7 +42,7 @@ VALUE_LIST`, `SET`/`UNSET COMMENT`) are issued as free-form `ALTER NETWORK RULE
   still typing — the create modal blocks submitting with zero values. An existing
   rule's list can be emptied later via `ALTER … UNSET VALUE_LIST`.
 - There is **no `IF NOT EXISTS`** form for `CREATE NETWORK RULE`, so only
-  `OrReplace` is modelled.
+  `OrReplace` is modeled.
 - `App.BuildCreateNetworkRuleSql` (in `internal/app/builders.go`) is the thin IPC
   delegator; `App.AlterNetworkRule` (in `internal/app/networkrule.go`) runs the
   edit clauses.

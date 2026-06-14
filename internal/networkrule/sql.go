@@ -20,7 +20,7 @@ import (
 // NetworkRuleConfig holds the parameters for creating a Snowflake NETWORK RULE
 // object. The fields map to the CREATE NETWORK RULE options in the order
 // Snowflake documents them: TYPE, VALUE_LIST, MODE, then COMMENT. NETWORK RULE
-// has no IF NOT EXISTS form, so only OrReplace is modelled.
+// has no IF NOT EXISTS form, so only OrReplace is modeled.
 type NetworkRuleConfig struct {
 	Name          string `json:"name"`
 	CaseSensitive bool   `json:"caseSensitive"`
