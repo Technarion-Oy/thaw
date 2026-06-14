@@ -3129,6 +3129,7 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 		{fmt.Sprintf("SHOW MATERIALIZED VIEWS IN SCHEMA %s", q), "MATERIALIZED VIEW"},
 		{fmt.Sprintf("SHOW ALERTS IN SCHEMA %s", q), "ALERT"},
 		{fmt.Sprintf("SHOW TAGS IN SCHEMA %s", q), "TAG"},
+		{fmt.Sprintf("SHOW MASKING POLICIES IN SCHEMA %s", q), "MASKING POLICY"},
 		{fmt.Sprintf("SHOW PROCEDURES IN SCHEMA %s", q), "PROCEDURE"},
 		{fmt.Sprintf("SHOW FUNCTIONS IN SCHEMA %s", q), "FUNCTION"},
 		{fmt.Sprintf("SHOW TASKS IN SCHEMA %s", q), "TASK"},
@@ -3459,6 +3460,10 @@ func buildGetDDLQuery(database, schema, kind, name, arguments string) (query, id
 		// GET_DDL has no MATERIALIZED_VIEW object type — TABLE and VIEW are
 		// interchangeable and materialized views are retrieved via 'VIEW'.
 		ddlKind = "VIEW"
+	case "MASKING POLICY":
+		// GET_DDL exposes a single 'POLICY' object type covering all policy
+		// kinds (masking, row access, etc.), not a per-kind type.
+		ddlKind = "POLICY"
 	}
 	escapedKind := strings.ReplaceAll(ddlKind, "'", "''")
 	// The third argument (true) enables recursive DDL output for objects that

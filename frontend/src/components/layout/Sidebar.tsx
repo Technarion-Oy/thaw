@@ -56,6 +56,7 @@ import {
   BlockOutlined,
   AlertOutlined,
   TagsOutlined,
+  EyeInvisibleOutlined,
   ThunderboltOutlined,
   KeyOutlined,
   DisconnectOutlined,
@@ -122,6 +123,8 @@ import CreateAlertModal from "../alert/CreateAlertModal";
 import AlertPropertiesModal from "../alert/AlertPropertiesModal";
 import CreateTagModal from "../tag/CreateTagModal";
 import TagPropertiesModal from "../tag/TagPropertiesModal";
+import CreateMaskingPolicyModal from "../maskingpolicy/CreateMaskingPolicyModal";
+import MaskingPolicyPropertiesModal from "../maskingpolicy/MaskingPolicyPropertiesModal";
 import CreatePipeModal from "../pipe/CreatePipeModal";
 import PipePropertiesModal from "../pipe/PipePropertiesModal";
 import RefreshPipeModal from "../pipe/RefreshPipeModal";
@@ -146,6 +149,7 @@ const KIND_LABEL: Record<string, string> = {
   "MATERIALIZED VIEW": "Materialized Views",
   ALERT:         "Alerts",
   TAG:           "Tags",
+  "MASKING POLICY": "Masking Policies",
   FUNCTION:      "Functions",
   PROCEDURE:     "Procedures",
   SEQUENCE:      "Sequences",
@@ -160,7 +164,7 @@ const KIND_LABEL: Record<string, string> = {
   "DBT PROJECT": "DBT Projects",
 };
 
-const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT"];
+const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT"];
 
 const kindIcon = (kind: string) => objectIcon(kind);
 
@@ -571,6 +575,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [alertPropsModal, setAlertPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createTagModal, setCreateTagModal] = useState<{ db: string; schema: string } | null>(null);
   const [tagPropsModal, setTagPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [createMaskingPolicyModal, setCreateMaskingPolicyModal] = useState<{ db: string; schema: string } | null>(null);
+  const [maskingPolicyPropsModal, setMaskingPolicyPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createPipeModal, setCreatePipeModal] = useState<{ db: string; schema: string } | null>(null);
   const [pipePropsModal, setPipePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [refreshPipeModal, setRefreshPipeModal] = useState<{ db: string; schema: string; name: string } | null>(null);
@@ -2005,6 +2011,25 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setTagPropsModal({ db, schema, name });
   };
 
+  const openCreateMaskingPolicy = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    setCtxMenu(null);
+    setCreateMaskingPolicyModal({ db, schema });
+  };
+
+  const openMaskingPolicyProperties = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    setMaskingPolicyPropsModal({ db, schema, name });
+  };
+
   const suspendAlert = () => {
     if (!ctxMenu) return;
     const parts = ctxMenu.nodeKey.split(":");
@@ -2345,6 +2370,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       case "MATERIALIZED VIEW": sql = `DROP MATERIALIZED VIEW ${fullName};`; break;
       case "ALERT":       sql = `DROP ALERT ${fullName};`; break;
       case "TAG":         sql = `DROP TAG ${fullName};`; break;
+      case "MASKING POLICY": sql = `DROP MASKING POLICY ${fullName};`; break;
       case "SEQUENCE":    sql = `DROP SEQUENCE ${fullName};`; break;
       case "STAGE":       sql = `DROP STAGE ${fullName};`; break;
       case "STREAM":      sql = `DROP STREAM ${fullName};`; break;
@@ -2977,6 +3003,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         case "MATERIALIZED VIEW": return `DROP MATERIALIZED VIEW ${fullName};`;
         case "ALERT":       return `DROP ALERT ${fullName};`;
         case "TAG":         return `DROP TAG ${fullName};`;
+        case "MASKING POLICY": return `DROP MASKING POLICY ${fullName};`;
         case "SEQUENCE":    return `DROP SEQUENCE ${fullName};`;
         case "STAGE":       return `DROP STAGE ${fullName};`;
         case "STREAM":      return `DROP STREAM ${fullName};`;
@@ -3459,6 +3486,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
               {menuItem("Task…", <ClockCircleOutlined style={{ fontSize: 12 }} />, openCreateTask)}
               {menuItem("Alert…", <AlertOutlined style={{ fontSize: 12 }} />, openCreateAlert)}
               {menuItem("Tag…", <TagsOutlined style={{ fontSize: 12 }} />, openCreateTag)}
+              {menuItem("Masking Policy…", <EyeInvisibleOutlined style={{ fontSize: 12 }} />, openCreateMaskingPolicy)}
               {menuItem("Pipe…", <ApiOutlined style={{ fontSize: 12 }} />, openCreatePipe)}
               {menuItem("Secret…", <KeyOutlined style={{ fontSize: 12 }} />, openCreateSecret)}
               {menuItem("Git Repository…", <BranchesOutlined style={{ fontSize: 12 }} />, openCreateGitRepository)}
@@ -3488,6 +3516,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Create Alert…", <AlertOutlined style={{ fontSize: 12 }} />, openCreateAlert)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "TAG" &&
             menuItem("Create Tag…", <TagsOutlined style={{ fontSize: 12 }} />, openCreateTag)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "MASKING POLICY" &&
+            menuItem("Create Masking Policy…", <EyeInvisibleOutlined style={{ fontSize: 12 }} />, openCreateMaskingPolicy)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "PIPE" &&
             menuItem("Create Pipe…", <ApiOutlined style={{ fontSize: 12 }} />, openCreatePipe)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "FILE FORMAT" &&
@@ -3532,6 +3562,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Execute", <ThunderboltOutlined style={{ fontSize: 12 }} />, executeAlert)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TAG" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openTagProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MASKING POLICY" &&
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openMaskingPolicyProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openPipeProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
@@ -3631,7 +3663,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Make Live", <CloudUploadOutlined style={{ fontSize: 12 }} />, makeNotebookLive, undefined, !featureFlags.snowparkNotebooks, "Snowpark & Notebooks is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "obj" && menuItem("View Definition", null, viewDefinition)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" &&
             menuItem("Select for Comparison", <DiffOutlined style={{ fontSize: 12 }} />, selectObjForComparison)}
           {ctxMenu.nodeType === "obj" && pendingDiff !== null &&
@@ -4060,6 +4092,24 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={tagPropsModal.schema}
           name={tagPropsModal.name}
           onClose={() => setTagPropsModal(null)}
+        />
+      )}
+
+      {createMaskingPolicyModal && (
+        <CreateMaskingPolicyModal
+          db={createMaskingPolicyModal.db}
+          schema={createMaskingPolicyModal.schema}
+          onClose={() => setCreateMaskingPolicyModal(null)}
+          onSuccess={() => refreshDatabaseByName(createMaskingPolicyModal.db, { schema: createMaskingPolicyModal.schema, kind: "MASKING POLICY" })}
+        />
+      )}
+
+      {maskingPolicyPropsModal && (
+        <MaskingPolicyPropertiesModal
+          db={maskingPolicyPropsModal.db}
+          schema={maskingPolicyPropsModal.schema}
+          name={maskingPolicyPropsModal.name}
+          onClose={() => setMaskingPolicyPropsModal(null)}
         />
       )}
 
