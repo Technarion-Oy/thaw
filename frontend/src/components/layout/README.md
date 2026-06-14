@@ -101,17 +101,20 @@ repeated IPC calls on tree hover.
   stripping the whole `db:` subtree drops every descendant `schema:`/`type:`/`obj:` node from
   `treeData` while their keys linger in `expandedKeys`, so Ant Design renders the previously-open
   path collapsed; the tree also briefly shrinks to nothing, resetting the scroll container to the
-  top (issue #493). Instead, it reloads **each expanded schema's objects in place** — passing a
-  synthesized childless node so `onLoadData` skips its early-return and replaces that schema's
-  children via `updateNode` in one atomic update, so the tree never collapses. Scroll is captured
-  before the reload and restored in a `requestAnimationFrame` after React commits the rebuilt rows
-  (via `treeScrollRef`). The optional `reveal: { schema, kind }` (passed by create/rename handlers)
-  force-expands the object's `schema → type` path so a brand-new type group opens automatically.
-  Notes: it does **not** reload the `db:` node (the schema list is unchanged for object-level ops;
-  CREATE DATABASE/SCHEMA go through `refreshAllDatabases`), and it deliberately does **not**
-  `clearDatabase()` the `objectStore` — that would wipe the schema list feeding SQL-editor
-  autocomplete without repopulating it; per-schema `addObjects` keeps reloaded schemas fresh.
-  `expandedKeys` is component-local state — the `objectStore` does not track expansion.
+  top (issue #493). Instead it re-fetches the schema list (`ListSchemas`) and rebuilds the db node's
+  children via **`syncDatabaseSchemas`**, which keeps the loaded children of currently-open schemas
+  intact (no collapse, no flicker) while picking up new / `UNDROP`-restored schemas, dropping
+  removed ones, and resetting collapsed schemas to childless nodes so their objects re-fetch on the
+  next expand. It then reloads each open schema's objects in place. Scroll is captured before the
+  rebuild and restored in a `requestAnimationFrame` afterwards (via `treeScrollRef`). The optional
+  `reveal: { schema, kind }` (passed by create/rename handlers) force-expands the object's
+  `schema → type` path so a brand-new type group opens automatically — and because `syncDatabaseSchemas`
+  materialises the target schema node first, the reveal works even when that schema wasn't in the
+  tree before. When the db node itself is collapsed (and there's no reveal) it falls back to
+  `clearDatabase` + `clearNodeChildren` so the next expand re-fetches everything. **Pitfall:** do
+  not "optimise" this by skipping the `ListSchemas` re-fetch — without it `UNDROP SCHEMA`, externally
+  created schemas, and stale collapsed-schema caches are all missed. `expandedKeys` is
+  component-local state — the `objectStore` does not track expansion.
 - Panel resize widths are clamped to 160–600 px by `useResize`. Committed widths are persisted
   via `panelLayoutStore` to `session.json`.
 - The macOS title bar offset (`TITLEBAR_HEIGHT = 40`) is applied only when `IS_MAC` is true;

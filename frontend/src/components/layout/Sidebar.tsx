@@ -235,6 +235,44 @@ function clearNodeChildren(nodes: DataNode[], targetKey: string): DataNode[] {
   });
 }
 
+// Rebuild a database node's schema children from a fresh `ListSchemas` result
+// without collapsing the tree. Schemas that are currently expanded keep their
+// already-loaded children (so the open path and scroll position survive and the
+// tree never flickers); every other schema — collapsed, newly created, or just
+// restored via UNDROP — becomes a fresh childless node so its objects re-fetch
+// on the next expand. New schemas appear and dropped ones disappear because the
+// children are driven entirely by `schemaNames`. See issue #493.
+function syncDatabaseSchemas(
+  nodes: DataNode[],
+  dbKey: string,
+  db: string,
+  schemaNames: string[],
+  keepLoadedSchemaKeys: Set<string>,
+): DataNode[] {
+  return nodes.map((node) => {
+    if (node.key === dbKey) {
+      const existing = new Map(
+        (((node as any).children ?? []) as DataNode[]).map((c) => [String(c.key), c]),
+      );
+      const children: DataNode[] = schemaNames.map((name) => {
+        const schemaKey = `schema:${db}:${name}`;
+        const prev = existing.get(schemaKey);
+        // Preserve loaded children only for schemas we keep open and refresh;
+        // anything else is reset to a childless node so it reloads on expand.
+        if (prev && keepLoadedSchemaKeys.has(schemaKey) && (prev as any).children) {
+          return prev;
+        }
+        return { title: name, key: schemaKey, icon: schemaIcon(), isLeaf: false };
+      });
+      return { ...node, children };
+    }
+    if ((node as any).children) {
+      return { ...node, children: syncDatabaseSchemas((node as any).children, dbKey, db, schemaNames, keepLoadedSchemaKeys) };
+    }
+    return node;
+  });
+}
+
 // Remove a node by key from the tree (used after DROP DATABASE / DROP SCHEMA).
 function removeNode(nodes: DataNode[], targetKey: string): DataNode[] {
   return nodes
@@ -1216,8 +1254,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     }
   };
 
-  // Refresh a database's objects in place, preserving the open tree path AND
-  // the scroll position.
+  // Refresh a database's objects, preserving the open tree path AND the scroll
+  // position.
   //
   // The naive approach — stripping the whole `db:` subtree — drops every
   // descendant `schema:`/`type:`/`obj:` node from treeData while their keys
@@ -1225,10 +1263,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   // collapsed; the tree also briefly shrinks to nothing, which resets the
   // scroll container to the top (issue #493).
   //
-  // Instead, reload each expanded schema's objects in place. Passing a
-  // synthesized childless node makes onLoadData skip its early-return and
-  // replace that schema's children via updateNode in a single atomic update —
-  // the tree never collapses, so the open path and scroll position survive and
+  // Instead, re-fetch the schema list and rebuild the db node's children with
+  // `syncDatabaseSchemas`, which keeps the loaded children of currently-open
+  // schemas intact (no collapse, no flicker) while picking up new / restored
+  // schemas and dropping removed ones, and resets collapsed schemas to childless
+  // so they re-fetch on next expand. Then reload each open schema's objects in
+  // place. The tree never collapses, so the open path and scroll survive and
   // created / renamed / dropped objects appear where the user is looking.
   //
   // `reveal` (used after a create) force-expands the new object's
@@ -1237,16 +1277,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     db: string,
     reveal?: { schema: string; kind?: string },
   ) => {
-    // Invalidate the backend object cache so the reloads below return fresh
-    // data. We deliberately do NOT clearDatabase() the objectStore here: that
-    // would wipe the schema list (which feeds SQL-editor autocomplete) without
-    // the db-node reload that used to repopulate it. Each reloaded schema's
-    // objects are replaced in place by onLoadData → addObjects instead.
     await ClearObjectCacheForDatabase(db);
     const dbKey = `db:${db}`;
 
-    // Schemas to reload: every one currently expanded under this db, plus the
-    // reveal target (which may not have been expanded before the create).
+    // Schemas whose loaded children we keep and refresh: every one currently
+    // expanded under this db, plus the reveal target (which may not have been
+    // expanded before the create).
     const openSchemaKeys = new Set(
       expandedKeys.map(String).filter((k) => k.startsWith(`schema:${db}:`)),
     );
@@ -1262,9 +1298,11 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       });
     }
 
-    // Nothing open and nothing to reveal — strip the db's children so the next
-    // expand re-fetches, and we're done.
-    if (openSchemaKeys.size === 0) {
+    // If the database node itself isn't open (and we're not revealing into it),
+    // nothing is visible to preserve — strip its children so the next expand
+    // re-fetches everything, and we're done.
+    if (!expandedKeys.includes(dbKey) && !reveal) {
+      useObjectStore.getState().clearDatabase(db);
       setTreeData((prev) => clearNodeChildren(prev, dbKey));
       return;
     }
@@ -1272,7 +1310,23 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     // Capture scroll so we can pin it back if a row-count change nudges it.
     const savedScrollTop = treeScrollRef.current?.scrollTop ?? 0;
 
+    // Re-fetch the schema list so new / restored / dropped schemas are reflected,
+    // then rebuild the db node's children without collapsing the open ones.
+    let schemaNames: string[];
+    try {
+      schemaNames = await ListSchemas(db);
+    } catch {
+      // Shared / restricted databases (e.g. SNOWFLAKE) don't support SHOW
+      // SCHEMAS — treat as empty, matching onLoadData's db branch.
+      schemaNames = [];
+    }
+    useObjectStore.getState().addSchemas(db, schemaNames);
+    setTreeData((prev) => syncDatabaseSchemas(prev, dbKey, db, schemaNames, openSchemaKeys));
+
+    // Reload the objects of each open schema in place (fresh data). After the
+    // sync above, the reveal target exists as a node, so onLoadData populates it.
     for (const schemaKey of openSchemaKeys) {
+      if (!schemaNames.includes(schemaKey.slice(`schema:${db}:`.length))) continue;
       await onLoadData({ key: schemaKey } as DataNode & { children?: DataNode[] });
     }
 
