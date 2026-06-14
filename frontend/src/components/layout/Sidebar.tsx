@@ -1213,13 +1213,43 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     }
   };
 
+  // Refresh a database's objects in place, preserving the open tree path.
+  //
+  // The naive approach — stripping the whole `db:` subtree — drops every
+  // descendant `schema:`/`type:`/`obj:` node from treeData while their keys
+  // linger in `expandedKeys`, so Ant Design renders the previously-open path
+  // collapsed and the user has to re-navigate by hand (issue #493).
+  //
+  // Instead, reload the database's schema list and then re-populate every
+  // schema that was expanded, so created / renamed / dropped objects appear
+  // without collapsing the tree. The surviving db/schema/type keys stay in
+  // `expandedKeys` and re-open as soon as their children are restored.
   const refreshDatabaseByName = async (db: string) => {
     await ClearObjectCacheForDatabase(db);
     const dbKey = `db:${db}`;
     useObjectStore.getState().clearDatabase(db);
-    // Stripping the children array is enough: onExpand will re-trigger
-    // onLoadData when the user next expands this database.
+
+    // Nothing is open under a collapsed database — just strip its children so
+    // the next expand re-fetches.
+    if (!expandedKeys.includes(dbKey)) {
+      setTreeData((prev) => clearNodeChildren(prev, dbKey));
+      return;
+    }
+
+    // Snapshot which schemas were expanded before we rebuild the subtree.
+    const openSchemaKeys = expandedKeys
+      .map(String)
+      .filter((k) => k.startsWith(`schema:${db}:`));
+
+    // Reload the schema list first (picks up new/dropped schemas), then each
+    // previously-open schema's objects. onLoadData ignores the synthesized
+    // childless node's identity and rebuilds children via updateNode, so the
+    // sequential awaits guarantee each parent exists before its children load.
     setTreeData((prev) => clearNodeChildren(prev, dbKey));
+    await onLoadData({ key: dbKey } as DataNode & { children?: DataNode[] });
+    for (const schemaKey of openSchemaKeys) {
+      await onLoadData({ key: schemaKey } as DataNode & { children?: DataNode[] });
+    }
   };
 
   const refreshDatabase = () => {
@@ -2425,7 +2455,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     try {
       await ExecDDL(sql);
       message.success(`Renamed "${oldName}" to "${trimmed}"`);
-      refreshDatabaseByName(db);
+      await refreshDatabaseByName(db);
     } catch (e) {
       message.error(String(e));
     }

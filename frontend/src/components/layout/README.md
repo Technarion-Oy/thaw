@@ -97,6 +97,16 @@ repeated IPC calls on tree hover.
   are all gated behind the `columnManagement` feature flag. "Insert Column Name" is never gated.
 - **`removeNode`** surgically deletes a file/object node from the tree after DROP so the parent
   directory stays expanded without a full refresh.
+- **`refreshDatabaseByName(db)` preserves the open tree path.** Naively stripping the whole `db:`
+  subtree drops every descendant `schema:`/`type:`/`obj:` node from `treeData` while their keys
+  linger in `expandedKeys`, so Ant Design renders the previously-open path collapsed and the user
+  must re-navigate by hand. Instead, it reloads the database's schema list and then re-populates
+  every schema that was expanded (snapshotting `expandedKeys` before the rebuild), so objects
+  created / renamed / dropped via any handler appear in place without collapsing the tree
+  (issue #493). When the database node itself is collapsed it falls back to a plain
+  `clearNodeChildren`. `expandedKeys` is component-local state — the `objectStore` does not track
+  expansion, so any refresh that drops a node's children must leave the surviving ancestor keys
+  intact and reload them.
 - Panel resize widths are clamped to 160–600 px by `useResize`. Committed widths are persisted
   via `panelLayoutStore` to `session.json`.
 - The macOS title bar offset (`TITLEBAR_HEIGHT = 40`) is applied only when `IS_MAC` is true;
