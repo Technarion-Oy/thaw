@@ -547,9 +547,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [submenuPath, setSubmenuPath] = useState<string[]>([]);
   const [submenuDirs, setSubmenuDirs] = useState<("left" | "right")[]>([]);
   const submenuTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const submenuOpenTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Collapse any open cascading submenus whenever the context menu opens or
   // closes, so it never reappears pre-expanded on the next right-click.
   useEffect(() => {
+    if (submenuTimer.current) clearTimeout(submenuTimer.current);
+    if (submenuOpenTimer.current) clearTimeout(submenuOpenTimer.current);
     setSubmenuPath([]);
     setSubmenuDirs([]);
   }, [ctxMenu]);
@@ -3109,27 +3112,45 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         {label}
       </div>
     );
+    // A disabled item's tooltip lives inside the deepest open panel; when that
+    // panel opened leftward (near the screen edge) a right-placed tooltip would
+    // point back over the menu, so mirror it to the panel's direction.
+    const tooltipPlacement = submenuDirs[submenuDirs.length - 1] === "left" ? "left" : "right";
     return disabled && disabledReason
-      ? <Tooltip title={disabledReason} placement="right" mouseEnterDelay={0.4}>{el}</Tooltip>
+      ? <Tooltip title={disabledReason} placement={tooltipPlacement} mouseEnterDelay={0.4}>{el}</Tooltip>
       : el;
   };
 
   // A menu item that reveals a cascading submenu on hover.
   // Uses a 150 ms hide-delay so the mouse can travel into the submenu panel
   // without it disappearing.
-  const showSub = (depth: number, key: string, triggerEl: HTMLElement) => {
-    if (submenuTimer.current) clearTimeout(submenuTimer.current);
-    const rect = triggerEl.getBoundingClientRect();
-    const dir: "left" | "right" = window.innerWidth - rect.right >= 160 ? "right" : "left";
+  const applyOpenSub = (depth: number, key: string, dir: "left" | "right") => {
     setSubmenuPath((p) => [...p.slice(0, depth), key]);
     setSubmenuDirs((d) => { const nd = d.slice(0, depth); nd[depth] = dir; return nd; });
   };
+  const showSub = (depth: number, key: string, triggerEl: HTMLElement) => {
+    if (submenuTimer.current) clearTimeout(submenuTimer.current);
+    if (submenuOpenTimer.current) clearTimeout(submenuOpenTimer.current);
+    const rect = triggerEl.getBoundingClientRect();
+    const dir: "left" | "right" = window.innerWidth - rect.right >= 160 ? "right" : "left";
+    // If a different sibling is already open at this depth, defer the swap so a
+    // diagonal cursor path into the open sub-panel (passing over sibling rows)
+    // doesn't collapse it out from under the cursor. Entering the open panel
+    // cancels this pending swap via cancelHide.
+    if (submenuPath[depth] !== undefined && submenuPath[depth] !== key) {
+      submenuOpenTimer.current = setTimeout(() => applyOpenSub(depth, key, dir), 220);
+    } else {
+      applyOpenSub(depth, key, dir);
+    }
+  };
   const hideSub = (depth: number) => {
     if (submenuTimer.current) clearTimeout(submenuTimer.current);
+    if (submenuOpenTimer.current) clearTimeout(submenuOpenTimer.current);
     submenuTimer.current = setTimeout(() => setSubmenuPath((p) => p.slice(0, depth)), 150);
   };
   const cancelHide = () => {
     if (submenuTimer.current) clearTimeout(submenuTimer.current);
+    if (submenuOpenTimer.current) clearTimeout(submenuOpenTimer.current);
   };
 
   const menuItemSub = (label: string, icon: React.ReactNode, subKey: string, children: React.ReactNode, depth: number = 0) => {
@@ -3517,15 +3538,11 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "schema" && menuItem("Insert Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "schema" && menuItemSub("Create Object", <PlusSquareOutlined style={{ fontSize: 12 }} />, "create-object", (
             <>
-              {menuItemSub("Tables", <TableOutlined style={{ fontSize: 12 }} />, "create-tables", (
+              {menuItemSub("Tables & Views", <TableOutlined style={{ fontSize: 12 }} />, "create-tables", (
                 <>
                   {menuItem("Table…", <TableOutlined style={{ fontSize: 12 }} />, openCreateTable)}
                   {menuItem("Dynamic Table…", <RetweetOutlined style={{ fontSize: 12 }} />, openCreateDynamicTable)}
                   {menuItem("External Table…", <CloudServerOutlined style={{ fontSize: 12 }} />, openCreateExternalTable)}
-                </>
-              ), 1)}
-              {menuItemSub("Views", <BlockOutlined style={{ fontSize: 12 }} />, "create-views", (
-                <>
                   {menuItem("Materialized View…", <BlockOutlined style={{ fontSize: 12 }} />, openCreateMaterializedView)}
                 </>
               ), 1)}
