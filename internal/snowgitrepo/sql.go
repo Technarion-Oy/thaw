@@ -13,27 +13,17 @@ import (
 	"thaw/internal/snowflake"
 )
 
-// TagPair is a single tag name/value pair used in WITH TAG clauses.
-type TagPair struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
-}
-
 // GitRepositoryConfig holds the parameters for creating a Snowflake GIT REPOSITORY object.
 type GitRepositoryConfig struct {
-	Name           string    `json:"name"`
-	CaseSensitive  bool      `json:"caseSensitive"`
-	OrReplace      bool      `json:"orReplace"`
-	IfNotExists    bool      `json:"ifNotExists"`
-	OriginUrl      string    `json:"originUrl"`
-	ApiIntegration string    `json:"apiIntegration"`
-	GitCredentials string    `json:"gitCredentials"` // fully qualified "db"."schema"."secret" or ""
-	Comment        string    `json:"comment"`
-	Tags           []TagPair `json:"tags"`
-}
-
-func escLit(s string) string {
-	return strings.ReplaceAll(s, "'", "''")
+	Name           string              `json:"name"`
+	CaseSensitive  bool                `json:"caseSensitive"`
+	OrReplace      bool                `json:"orReplace"`
+	IfNotExists    bool                `json:"ifNotExists"`
+	OriginUrl      string              `json:"originUrl"`
+	ApiIntegration string              `json:"apiIntegration"`
+	GitCredentials string              `json:"gitCredentials"` // fully qualified "db"."schema"."secret" or ""
+	Comment        string              `json:"comment"`
+	Tags           []snowflake.TagPair `json:"tags"`
 }
 
 // BuildCreateGitRepositorySql constructs a CREATE GIT REPOSITORY SQL statement.
@@ -62,7 +52,7 @@ func BuildCreateGitRepositorySql(db, schema string, cfg GitRepositoryConfig) (st
 	}
 
 	fmt.Fprintf(&sb, "%s %s.%s.%s\n", createClause, snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), nameToken)
-	fmt.Fprintf(&sb, "  ORIGIN = '%s'", escLit(cfg.OriginUrl))
+	fmt.Fprintf(&sb, "  ORIGIN = '%s'", snowflake.EscapeStringLit(cfg.OriginUrl))
 	fmt.Fprintf(&sb, "\n  API_INTEGRATION = %s", snowflake.QuoteIdent(cfg.ApiIntegration))
 
 	if cfg.GitCredentials != "" {
@@ -70,21 +60,11 @@ func BuildCreateGitRepositorySql(db, schema string, cfg GitRepositoryConfig) (st
 	}
 
 	if cfg.Comment != "" {
-		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", escLit(cfg.Comment))
+		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment))
 	}
 
-	var validTags []TagPair
-	for _, t := range cfg.Tags {
-		if t.Name != "" {
-			validTags = append(validTags, t)
-		}
-	}
-	if len(validTags) > 0 {
-		parts := make([]string, len(validTags))
-		for i, t := range validTags {
-			parts[i] = fmt.Sprintf("%s = '%s'", snowflake.QuoteIdent(t.Name), escLit(t.Value))
-		}
-		fmt.Fprintf(&sb, "\n  WITH TAG (%s)", strings.Join(parts, ", "))
+	if tc := snowflake.TagClause(cfg.Tags); tc != "" {
+		fmt.Fprintf(&sb, "\n  WITH %s", tc)
 	}
 
 	return sb.String() + ";", nil
@@ -110,7 +90,7 @@ func BuildModifyGitRepositorySql(db, schema, name string, cfg GitRepositoryConfi
 
 	// COMMENT: set if non-empty
 	if cfg.Comment != "" {
-		setClauses = append(setClauses, fmt.Sprintf("COMMENT = '%s'", escLit(cfg.Comment)))
+		setClauses = append(setClauses, fmt.Sprintf("COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment)))
 	}
 
 	if len(setClauses) > 0 {

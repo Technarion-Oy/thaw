@@ -25,7 +25,7 @@ type FileFormatConfig struct {
 	CaseSensitive bool   `json:"caseSensitive"`
 	OrReplace     bool   `json:"orReplace"`
 	IfNotExists   bool   `json:"ifNotExists"`
-	Type          string `json:"type"`    // CSV | JSON | AVRO | ORC | PARQUET | XML
+	Type          string `json:"type"` // CSV | JSON | AVRO | ORC | PARQUET | XML
 	Comment       string `json:"comment"`
 
 	// ── Common ──────────────────────────────────────────────────────────────
@@ -85,10 +85,6 @@ type PreviewResult struct {
 
 // ── SQL helpers ─────────────────────────────────────────────────────────────
 
-func escLit(s string) string {
-	return strings.ReplaceAll(s, "'", "''")
-}
-
 // boolParam emits "  NAME = TRUE/FALSE" only when val differs from def.
 func boolParam(sb *strings.Builder, name string, val, def bool) {
 	if val == def {
@@ -108,9 +104,9 @@ func identParam(sb *strings.Builder, name, val, def string) {
 	if val == "" || strings.EqualFold(val, def) {
 		return
 	}
-	
+
 	valUpper := strings.ToUpper(val)
-	
+
 	// Strict allowlist for unquoted parameters to prevent SQL injection
 	allowed := false
 	switch valUpper {
@@ -134,7 +130,7 @@ func noneOrStrParam(sb *strings.Builder, name, val, def string) {
 	if strings.EqualFold(val, "NONE") {
 		fmt.Fprintf(sb, "\n  %s = NONE", name)
 	} else {
-		fmt.Fprintf(sb, "\n  %s = '%s'", name, escLit(val))
+		fmt.Fprintf(sb, "\n  %s = '%s'", name, snowflake.EscapeStringLit(val))
 	}
 }
 
@@ -147,7 +143,7 @@ func dateTimeParam(sb *strings.Builder, name, val, def string) {
 	if strings.EqualFold(val, "AUTO") {
 		fmt.Fprintf(sb, "\n  %s = AUTO", name)
 	} else {
-		fmt.Fprintf(sb, "\n  %s = '%s'", name, escLit(val))
+		fmt.Fprintf(sb, "\n  %s = '%s'", name, snowflake.EscapeStringLit(val))
 	}
 }
 
@@ -158,7 +154,7 @@ func nullIfParam(sb *strings.Builder, vals []string) {
 	}
 	quoted := make([]string, len(vals))
 	for i, v := range vals {
-		quoted[i] = "'" + escLit(v) + "'"
+		quoted[i] = "'" + snowflake.EscapeStringLit(v) + "'"
 	}
 	fmt.Fprintf(sb, "\n  NULL_IF = (%s)", strings.Join(quoted, ", "))
 }
@@ -202,7 +198,7 @@ func BuildCreateFileFormatSql(db, schema string, cfg FileFormatConfig) string {
 	emitFormatParams(&sb, t, cfg)
 
 	if cfg.Comment != "" {
-		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", escLit(cfg.Comment))
+		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment))
 	}
 
 	sb.WriteString(";")
@@ -258,7 +254,7 @@ func emitCSVParams(sb *strings.Builder, cfg FileFormatConfig) {
 	noneOrStrParam(sb, "FIELD_DELIMITER", cfg.FieldDelimiter, ",")
 	boolParam(sb, "MULTI_LINE", cfg.MultiLine, false)
 	if cfg.FileExtension != "" {
-		fmt.Fprintf(sb, "\n  FILE_EXTENSION = '%s'", escLit(cfg.FileExtension))
+		fmt.Fprintf(sb, "\n  FILE_EXTENSION = '%s'", snowflake.EscapeStringLit(cfg.FileExtension))
 	}
 	boolParam(sb, "PARSE_HEADER", cfg.ParseHeader, false)
 	if cfg.SkipHeader > 0 {
@@ -284,7 +280,7 @@ func emitCSVParams(sb *strings.Builder, cfg FileFormatConfig) {
 func emitJSONParams(sb *strings.Builder, cfg FileFormatConfig) {
 	identParam(sb, "COMPRESSION", cfg.Compression, "AUTO")
 	if cfg.FileExtension != "" {
-		fmt.Fprintf(sb, "\n  FILE_EXTENSION = '%s'", escLit(cfg.FileExtension))
+		fmt.Fprintf(sb, "\n  FILE_EXTENSION = '%s'", snowflake.EscapeStringLit(cfg.FileExtension))
 	}
 	dateTimeParam(sb, "DATE_FORMAT", cfg.DateFormat, "AUTO")
 	dateTimeParam(sb, "TIME_FORMAT", cfg.TimeFormat, "AUTO")

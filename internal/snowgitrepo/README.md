@@ -13,15 +13,15 @@ objects (stored in a Snowflake database schema), not local filesystem Git operat
 
 | File | Purpose |
 |---|---|
-| `sql.go` | `GitRepositoryConfig`, `TagPair`, `BuildCreateGitRepositorySql`, `BuildModifyGitRepositorySql`. |
+| `sql.go` | `GitRepositoryConfig`, `BuildCreateGitRepositorySql`, `BuildModifyGitRepositorySql`. |
 | `sql_test.go` | Unit tests for both builders. |
 
 ## Key types & functions
 
 | Symbol | Description |
 |---|---|
-| `TagPair` | `{ name, value string }` — a single `WITH TAG (name = 'value')` entry. |
-| `GitRepositoryConfig` | Parameters for create/alter: `name`, `caseSensitive`, `orReplace`, `ifNotExists`, `originUrl`, `apiIntegration`, `gitCredentials`, `comment`, `tags`. |
+| `GitRepositoryConfig` | Parameters for create/alter: `name`, `caseSensitive`, `orReplace`, `ifNotExists`, `originUrl`, `apiIntegration`, `gitCredentials`, `comment`, `tags` (`[]snowflake.TagPair`). |
+| `snowflake.TagClause` | Shared `TAG (...)` clause builder (in `internal/snowflake`); git repositories use the `WITH TAG (...)` form, so the builder prepends `WITH `. |
 | `BuildCreateGitRepositorySql(db, schema, cfg)` | Returns a fully-qualified `CREATE [OR REPLACE] GIT REPOSITORY` statement. Validates that `originUrl` and `apiIntegration` are non-empty. |
 | `BuildModifyGitRepositorySql(db, schema, name, cfg, originalComment, originalIntegration, originalCredentials)` | Returns a slice of `ALTER GIT REPOSITORY … SET …` and/or `… UNSET …` statements (one per change type). Returns empty slice if nothing changed. |
 

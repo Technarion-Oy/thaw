@@ -13,6 +13,8 @@ package externaltable
 import (
 	"strings"
 	"testing"
+
+	"thaw/internal/snowflake"
 )
 
 func TestBuildCreateExternalTableSql(t *testing.T) {
@@ -108,7 +110,7 @@ func TestBuildCreateExternalTableSql(t *testing.T) {
 				AwsSnsTopic: "arn:aws:sns:topic",
 				CopyGrants:  true,
 				Comment:     "it's fine",
-				Tags:        []TagPair{{Name: "env", Value: "prod"}, {Name: "team", Value: "data's"}},
+				Tags:        []snowflake.TagPair{{Name: "env", Value: "prod"}, {Name: "team", Value: "data's"}},
 			},
 			contains: []string{
 				"AWS_SNS_TOPIC = 'arn:aws:sns:topic'",
@@ -122,7 +124,7 @@ func TestBuildCreateExternalTableSql(t *testing.T) {
 			cfg: ExternalTableConfig{
 				Name:     "ET",
 				Location: "@s/p",
-				Tags:     []TagPair{{Name: "  ", Value: "ignored"}},
+				Tags:     []snowflake.TagPair{{Name: "  ", Value: "ignored"}},
 			},
 			absent: []string{"PARTITION BY", "TAG (", "(\n"},
 		},

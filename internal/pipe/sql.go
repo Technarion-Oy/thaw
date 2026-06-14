@@ -18,12 +18,6 @@ import (
 	"thaw/internal/sqltok"
 )
 
-// TagPair is a single tag name/value pair used in SET TAG / UNSET TAG clauses.
-type TagPair struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
-}
-
 // PipeConfig holds the parameters for creating a Snowflake PIPE object.
 type PipeConfig struct {
 	Name             string `json:"name"`
@@ -42,10 +36,6 @@ type PipeConfig struct {
 type RefreshPipeConfig struct {
 	Prefix        string `json:"prefix"`        // optional PREFIX path
 	ModifiedAfter string `json:"modifiedAfter"` // optional ISO timestamp
-}
-
-func escLit(s string) string {
-	return strings.ReplaceAll(s, "'", "''")
 }
 
 // validateCopyStatement ensures rawStmt contains exactly one SQL statement and
@@ -89,13 +79,13 @@ func BuildCreatePipeSql(db, schema string, cfg PipeConfig) (string, error) {
 		fmt.Fprintf(&sb, "\n  ERROR_INTEGRATION = %s", snowflake.QuoteIdent(cfg.ErrorIntegration))
 	}
 	if cfg.AwsSnsTopic != "" {
-		fmt.Fprintf(&sb, "\n  AWS_SNS_TOPIC = '%s'", escLit(cfg.AwsSnsTopic))
+		fmt.Fprintf(&sb, "\n  AWS_SNS_TOPIC = '%s'", snowflake.EscapeStringLit(cfg.AwsSnsTopic))
 	}
 	if cfg.Integration != "" {
-		fmt.Fprintf(&sb, "\n  INTEGRATION = '%s'", escLit(cfg.Integration))
+		fmt.Fprintf(&sb, "\n  INTEGRATION = '%s'", snowflake.EscapeStringLit(cfg.Integration))
 	}
 	if cfg.Comment != "" {
-		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", escLit(cfg.Comment))
+		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment))
 	}
 
 	copyStmt := strings.TrimSpace(cfg.CopyStatement)
@@ -122,12 +112,12 @@ func BuildRefreshPipeSql(db, schema, name string, cfg RefreshPipeConfig) (string
 
 	prefix := strings.TrimSpace(cfg.Prefix)
 	if prefix != "" {
-		fmt.Fprintf(&sb, "\n  PREFIX = '%s'", escLit(prefix))
+		fmt.Fprintf(&sb, "\n  PREFIX = '%s'", snowflake.EscapeStringLit(prefix))
 	}
 
 	modifiedAfter := strings.TrimSpace(cfg.ModifiedAfter)
 	if modifiedAfter != "" {
-		fmt.Fprintf(&sb, "\n  MODIFIED_AFTER = '%s'", escLit(modifiedAfter))
+		fmt.Fprintf(&sb, "\n  MODIFIED_AFTER = '%s'", snowflake.EscapeStringLit(modifiedAfter))
 	}
 
 	return sb.String() + ";", nil

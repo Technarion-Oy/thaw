@@ -10,6 +10,8 @@ package snowgitrepo
 import (
 	"strings"
 	"testing"
+
+	"thaw/internal/snowflake"
 )
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -104,7 +106,7 @@ func TestBuildCreateGitRepositorySql_WithCredentialsCommentTags(t *testing.T) {
 		ApiIntegration: "MY_API_INT",
 		GitCredentials: `"DB"."SC"."MY_SECRET"`,
 		Comment:        "repo comment",
-		Tags: []TagPair{
+		Tags: []snowflake.TagPair{
 			{Name: "env", Value: "prod"},
 			{Name: "team", Value: "data"},
 		},
@@ -125,7 +127,7 @@ func TestBuildCreateGitRepositorySql_EmptyTags_Skipped(t *testing.T) {
 		Name:           "MY_REPO",
 		OriginUrl:      "https://github.com/org/repo.git",
 		ApiIntegration: "MY_API_INT",
-		Tags:           []TagPair{{Name: "", Value: "ignored"}},
+		Tags:           []snowflake.TagPair{{Name: "", Value: "ignored"}},
 	}
 	sql, err := BuildCreateGitRepositorySql("DB", "SC", cfg)
 	if err != nil {
