@@ -39,6 +39,7 @@ nil-check → delegate → return.
 | `externaltable.go` | `AlterExternalTable` (free-form `ALTER EXTERNAL TABLE … <clause>` for REFRESH / SET AUTO_REFRESH; the grammar has no SET/UNSET COMMENT or RENAME — comments go through `COMMENT ON TABLE`); CREATE builder in `builders.go` delegates to `internal/externaltable`. |
 | `materializedview.go` | `AlterMaterializedView` (free-form `ALTER MATERIALIZED VIEW … <clause>` for SUSPEND/RESUME/RECLUSTER/CLUSTER BY/SET/UNSET; materialized views have no manual REFRESH); CREATE builder in `builders.go` delegates to `internal/materializedview`. |
 | `alert.go` | `AlterAlert` (free-form `ALTER ALERT … <clause>` for RESUME/SUSPEND/SET/UNSET/MODIFY CONDITION/MODIFY ACTION; alerts have no RENAME) and `ExecuteAlert` (the standalone `EXECUTE ALERT <fqn>` statement, not an ALTER clause); CREATE builder in `builders.go` delegates to `internal/alert`. |
+| `tag.go` | `AlterTag` (free-form `ALTER TAG … <clause>` for RENAME/SET/UNSET COMMENT/ADD/DROP/UNSET ALLOWED_VALUES/SET/UNSET MASKING POLICY) and `GetTagReferences` (lists where the tag is applied via `SNOWFLAKE.ACCOUNT_USAGE.TAG_REFERENCES`); CREATE builder in `builders.go` delegates to `internal/tag`. |
 | `git.go` | Git repository browsing, filtering, and config persistence; delegates to `internal/gitrepo`. |
 | `filesystem.go` | File read/write/rename/delete, `StartFileWatcher`/`StopFileWatcher`, reveal in Finder; delegates to `internal/filesystem`. |
 | `profiles.go` | Snowflake CLI profile CRUD (save, delete, clone, rename, set default); delegates to `internal/sfconfig`. |

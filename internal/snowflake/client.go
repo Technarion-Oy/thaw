@@ -3112,8 +3112,8 @@ func (c *Client) ListBasicObjects(ctx context.Context, database, schema string) 
 
 // ListExtendedObjects returns the "extended" objects inside a schema by running
 // dedicated SHOW commands for object types not covered by SHOW OBJECTS
-// (DYNAMIC TABLE, EXTERNAL TABLE, MATERIALIZED VIEW, ALERT, PROCEDURE, FUNCTION,
-// TASK, STREAM, STAGE, FILE FORMAT, PIPE, NOTEBOOK, SECRET, GIT REPOSITORY). Individual commands that
+// (DYNAMIC TABLE, EXTERNAL TABLE, MATERIALIZED VIEW, ALERT, TAG, PROCEDURE,
+// FUNCTION, TASK, STREAM, STAGE, FILE FORMAT, PIPE, NOTEBOOK, SECRET, GIT REPOSITORY). Individual commands that
 // fail (e.g. due to missing privileges) are silently skipped. Includes the TASK
 // finalize enrichment logic.
 func (c *Client) ListExtendedObjects(ctx context.Context, database, schema string) ([]SnowflakeObject, error) {
@@ -3128,6 +3128,7 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 		{fmt.Sprintf("SHOW EXTERNAL TABLES IN SCHEMA %s", q), "EXTERNAL TABLE"},
 		{fmt.Sprintf("SHOW MATERIALIZED VIEWS IN SCHEMA %s", q), "MATERIALIZED VIEW"},
 		{fmt.Sprintf("SHOW ALERTS IN SCHEMA %s", q), "ALERT"},
+		{fmt.Sprintf("SHOW TAGS IN SCHEMA %s", q), "TAG"},
 		{fmt.Sprintf("SHOW PROCEDURES IN SCHEMA %s", q), "PROCEDURE"},
 		{fmt.Sprintf("SHOW FUNCTIONS IN SCHEMA %s", q), "FUNCTION"},
 		{fmt.Sprintf("SHOW TASKS IN SCHEMA %s", q), "TASK"},

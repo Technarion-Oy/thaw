@@ -42,6 +42,10 @@ export function AlterTableProperty(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['AlterTableProperty'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function AlterTag(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterTag'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterTask(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterTask'](arg1, arg2, arg3, arg4);
 }
@@ -136,6 +140,10 @@ export function BuildCreateSecretSql(arg1, arg2, arg3) {
 
 export function BuildCreateStageSql(arg1) {
   return window['go']['app']['App']['BuildCreateStageSql'](arg1);
+}
+
+export function BuildCreateTagSql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateTagSql'](arg1, arg2, arg3);
 }
 
 export function BuildDropColumnNotNullSql(arg1, arg2, arg3, arg4) {
@@ -724,6 +732,10 @@ export function GetTableRetentionDays(arg1, arg2, arg3) {
 
 export function GetTableSettings(arg1, arg2, arg3) {
   return window['go']['app']['App']['GetTableSettings'](arg1, arg2, arg3);
+}
+
+export function GetTagReferences(arg1, arg2, arg3) {
+  return window['go']['app']['App']['GetTagReferences'](arg1, arg2, arg3);
 }
 
 export function GetTaskRunHistory(arg1, arg2, arg3, arg4, arg5) {

@@ -14,6 +14,7 @@ import {snowgitrepo} from '../models';
 import {materializedview} from '../models';
 import {pipe} from '../models';
 import {secret} from '../models';
+import {tag} from '../models';
 import {erdesigner} from '../models';
 import {snowpark} from '../models';
 import {snowflake} from '../models';
@@ -55,6 +56,8 @@ export function AlterPipe(arg1:string,arg2:string,arg3:string,arg4:string):Promi
 export function AlterStage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterTableProperty(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
+
+export function AlterTag(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterTask(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -103,6 +106,8 @@ export function BuildCreatePipeSql(arg1:string,arg2:string,arg3:pipe.PipeConfig)
 export function BuildCreateSecretSql(arg1:string,arg2:string,arg3:secret.SecretConfig):Promise<string>;
 
 export function BuildCreateStageSql(arg1:stage.StageConfig):Promise<string>;
+
+export function BuildCreateTagSql(arg1:string,arg2:string,arg3:tag.TagConfig):Promise<string>;
 
 export function BuildDropColumnNotNullSql(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
 
@@ -397,6 +402,8 @@ export function GetTableForeignKeys(arg1:string,arg2:string,arg3:string):Promise
 export function GetTableRetentionDays(arg1:string,arg2:string,arg3:string):Promise<number>;
 
 export function GetTableSettings(arg1:string,arg2:string,arg3:string):Promise<table.TableSettings>;
+
+export function GetTagReferences(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function GetTaskRunHistory(arg1:string,arg2:string,arg3:string,arg4:boolean,arg5:number):Promise<Array<tasks.TaskHistoryRow>>;
 
