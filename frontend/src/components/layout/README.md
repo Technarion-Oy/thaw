@@ -97,16 +97,21 @@ repeated IPC calls on tree hover.
   are all gated behind the `columnManagement` feature flag. "Insert Column Name" is never gated.
 - **`removeNode`** surgically deletes a file/object node from the tree after DROP so the parent
   directory stays expanded without a full refresh.
-- **`refreshDatabaseByName(db)` preserves the open tree path.** Naively stripping the whole `db:`
-  subtree drops every descendant `schema:`/`type:`/`obj:` node from `treeData` while their keys
-  linger in `expandedKeys`, so Ant Design renders the previously-open path collapsed and the user
-  must re-navigate by hand. Instead, it reloads the database's schema list and then re-populates
-  every schema that was expanded (snapshotting `expandedKeys` before the rebuild), so objects
-  created / renamed / dropped via any handler appear in place without collapsing the tree
-  (issue #493). When the database node itself is collapsed it falls back to a plain
-  `clearNodeChildren`. `expandedKeys` is component-local state — the `objectStore` does not track
-  expansion, so any refresh that drops a node's children must leave the surviving ancestor keys
-  intact and reload them.
+- **`refreshDatabaseByName(db, reveal?)` preserves the open path AND scroll position.** Naively
+  stripping the whole `db:` subtree drops every descendant `schema:`/`type:`/`obj:` node from
+  `treeData` while their keys linger in `expandedKeys`, so Ant Design renders the previously-open
+  path collapsed; the tree also briefly shrinks to nothing, resetting the scroll container to the
+  top (issue #493). Instead, it reloads **each expanded schema's objects in place** — passing a
+  synthesized childless node so `onLoadData` skips its early-return and replaces that schema's
+  children via `updateNode` in one atomic update, so the tree never collapses. Scroll is captured
+  before the reload and restored in a `requestAnimationFrame` after React commits the rebuilt rows
+  (via `treeScrollRef`). The optional `reveal: { schema, kind }` (passed by create/rename handlers)
+  force-expands the object's `schema → type` path so a brand-new type group opens automatically.
+  Notes: it does **not** reload the `db:` node (the schema list is unchanged for object-level ops;
+  CREATE DATABASE/SCHEMA go through `refreshAllDatabases`), and it deliberately does **not**
+  `clearDatabase()` the `objectStore` — that would wipe the schema list feeding SQL-editor
+  autocomplete without repopulating it; per-schema `addObjects` keeps reloaded schemas fresh.
+  `expandedKeys` is component-local state — the `objectStore` does not track expansion.
 - Panel resize widths are clamped to 160–600 px by `useResize`. Committed widths are persisted
   via `panelLayoutStore` to `session.json`.
 - The macOS title bar offset (`TITLEBAR_HEIGHT = 40`) is applied only when `IS_MAC` is true;

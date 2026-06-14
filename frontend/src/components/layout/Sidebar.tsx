@@ -579,6 +579,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [loadingTreeNodes, setLoadingTreeNodes] = useState<Set<string>>(new Set());
   const searchWasActive = useRef(false);
   const ctxRef = useRef<HTMLDivElement>(null);
+  // Scroll container around the object tree; used to preserve scroll position
+  // across in-place refreshes (issue #493 follow-up).
+  const treeScrollRef = useRef<HTMLDivElement>(null);
 
   const pendingDiff   = useDiffStore((s) => s.pending);
   const selectForComp = useDiffStore((s) => s.selectForComparison);
@@ -1213,43 +1216,70 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     }
   };
 
-  // Refresh a database's objects in place, preserving the open tree path.
+  // Refresh a database's objects in place, preserving the open tree path AND
+  // the scroll position.
   //
   // The naive approach — stripping the whole `db:` subtree — drops every
   // descendant `schema:`/`type:`/`obj:` node from treeData while their keys
   // linger in `expandedKeys`, so Ant Design renders the previously-open path
-  // collapsed and the user has to re-navigate by hand (issue #493).
+  // collapsed; the tree also briefly shrinks to nothing, which resets the
+  // scroll container to the top (issue #493).
   //
-  // Instead, reload the database's schema list and then re-populate every
-  // schema that was expanded, so created / renamed / dropped objects appear
-  // without collapsing the tree. The surviving db/schema/type keys stay in
-  // `expandedKeys` and re-open as soon as their children are restored.
-  const refreshDatabaseByName = async (db: string) => {
+  // Instead, reload each expanded schema's objects in place. Passing a
+  // synthesized childless node makes onLoadData skip its early-return and
+  // replace that schema's children via updateNode in a single atomic update —
+  // the tree never collapses, so the open path and scroll position survive and
+  // created / renamed / dropped objects appear where the user is looking.
+  //
+  // `reveal` (used after a create) force-expands the new object's
+  // schema → type path so a brand-new type group opens automatically.
+  const refreshDatabaseByName = async (
+    db: string,
+    reveal?: { schema: string; kind?: string },
+  ) => {
+    // Invalidate the backend object cache so the reloads below return fresh
+    // data. We deliberately do NOT clearDatabase() the objectStore here: that
+    // would wipe the schema list (which feeds SQL-editor autocomplete) without
+    // the db-node reload that used to repopulate it. Each reloaded schema's
+    // objects are replaced in place by onLoadData → addObjects instead.
     await ClearObjectCacheForDatabase(db);
     const dbKey = `db:${db}`;
-    useObjectStore.getState().clearDatabase(db);
 
-    // Nothing is open under a collapsed database — just strip its children so
-    // the next expand re-fetches.
-    if (!expandedKeys.includes(dbKey)) {
+    // Schemas to reload: every one currently expanded under this db, plus the
+    // reveal target (which may not have been expanded before the create).
+    const openSchemaKeys = new Set(
+      expandedKeys.map(String).filter((k) => k.startsWith(`schema:${db}:`)),
+    );
+    if (reveal) {
+      const revealSchemaKey = `schema:${db}:${reveal.schema}`;
+      openSchemaKeys.add(revealSchemaKey);
+      const newlyOpen = [dbKey, revealSchemaKey];
+      if (reveal.kind) newlyOpen.push(`type:${db}:${reveal.schema}:${reveal.kind}`);
+      setExpandedKeys((prev) => {
+        const set = new Set(prev.map(String));
+        newlyOpen.forEach((k) => set.add(k));
+        return Array.from(set) as Key[];
+      });
+    }
+
+    // Nothing open and nothing to reveal — strip the db's children so the next
+    // expand re-fetches, and we're done.
+    if (openSchemaKeys.size === 0) {
       setTreeData((prev) => clearNodeChildren(prev, dbKey));
       return;
     }
 
-    // Snapshot which schemas were expanded before we rebuild the subtree.
-    const openSchemaKeys = expandedKeys
-      .map(String)
-      .filter((k) => k.startsWith(`schema:${db}:`));
+    // Capture scroll so we can pin it back if a row-count change nudges it.
+    const savedScrollTop = treeScrollRef.current?.scrollTop ?? 0;
 
-    // Reload the schema list first (picks up new/dropped schemas), then each
-    // previously-open schema's objects. onLoadData ignores the synthesized
-    // childless node's identity and rebuilds children via updateNode, so the
-    // sequential awaits guarantee each parent exists before its children load.
-    setTreeData((prev) => clearNodeChildren(prev, dbKey));
-    await onLoadData({ key: dbKey } as DataNode & { children?: DataNode[] });
     for (const schemaKey of openSchemaKeys) {
       await onLoadData({ key: schemaKey } as DataNode & { children?: DataNode[] });
     }
+
+    // Restore scroll after React commits the rebuilt rows.
+    requestAnimationFrame(() => {
+      if (treeScrollRef.current) treeScrollRef.current.scrollTop = savedScrollTop;
+    });
   };
 
   const refreshDatabase = () => {
@@ -2455,7 +2485,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     try {
       await ExecDDL(sql);
       message.success(`Renamed "${oldName}" to "${trimmed}"`);
-      await refreshDatabaseByName(db);
+      await refreshDatabaseByName(db, { schema, kind });
     } catch (e) {
       message.error(String(e));
     }
@@ -3055,7 +3085,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       )}
 
       {!treeCollapsed && isConnected && (
-        <div style={{ height: treeHeight, overflow: "auto" }}>
+        <div ref={treeScrollRef} style={{ height: treeHeight, overflow: "auto" }}>
           <div style={{ padding: "0 8px 8px" }}>
             <Input
               ref={searchInputRef}
@@ -3745,7 +3775,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           db={createTableModal.db}
           schema={createTableModal.schema}
           onClose={() => setCreateTableModal(null)}
-          onSuccess={() => refreshDatabaseByName(createTableModal.db)}
+          onSuccess={() => refreshDatabaseByName(createTableModal.db, { schema: createTableModal.schema, kind: "TABLE" })}
         />
       )}
       {createStageModal && (
@@ -3753,7 +3783,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           db={createStageModal.db}
           schema={createStageModal.schema}
           onClose={() => setCreateStageModal(null)}
-          onSuccess={() => refreshDatabaseByName(createStageModal.db)}
+          onSuccess={() => refreshDatabaseByName(createStageModal.db, { schema: createStageModal.schema, kind: "STAGE" })}
         />
       )}
       {stagePropertiesModal && (
@@ -3781,7 +3811,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           db={createFileFormatModal.db}
           schema={createFileFormatModal.schema}
           onClose={() => setCreateFileFormatModal(null)}
-          onSuccess={() => refreshDatabaseByName(createFileFormatModal.db)}
+          onSuccess={() => refreshDatabaseByName(createFileFormatModal.db, { schema: createFileFormatModal.schema, kind: "FILE FORMAT" })}
         />
       )}
 
@@ -3799,7 +3829,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           db={createTaskModal.db}
           schema={createTaskModal.schema}
           onClose={() => setCreateTaskModal(null)}
-          onSuccess={() => refreshDatabaseByName(createTaskModal.db)}
+          onSuccess={() => refreshDatabaseByName(createTaskModal.db, { schema: createTaskModal.schema, kind: "TASK" })}
         />
       )}
 
@@ -3808,7 +3838,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           db={createSecretModal.db}
           schema={createSecretModal.schema}
           onClose={() => setCreateSecretModal(null)}
-          onSuccess={() => refreshDatabaseByName(createSecretModal.db)}
+          onSuccess={() => refreshDatabaseByName(createSecretModal.db, { schema: createSecretModal.schema, kind: "SECRET" })}
         />
       )}
 
@@ -3827,7 +3857,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           db={createGitRepoModal.db}
           schema={createGitRepoModal.schema}
           onClose={() => setCreateGitRepoModal(null)}
-          onSuccess={() => refreshDatabaseByName(createGitRepoModal.db)}
+          onSuccess={() => refreshDatabaseByName(createGitRepoModal.db, { schema: createGitRepoModal.schema, kind: "GIT REPOSITORY" })}
         />
       )}
 
@@ -3856,7 +3886,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           db={createDbtProjectModal.db}
           schema={createDbtProjectModal.schema}
           onClose={() => setCreateDbtProjectModal(null)}
-          onSuccess={() => refreshDatabaseByName(createDbtProjectModal.db)}
+          onSuccess={() => refreshDatabaseByName(createDbtProjectModal.db, { schema: createDbtProjectModal.schema, kind: "DBT PROJECT" })}
         />
       )}
 
@@ -3894,7 +3924,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           db={createDynamicTableModal.db}
           schema={createDynamicTableModal.schema}
           onClose={() => setCreateDynamicTableModal(null)}
-          onSuccess={() => refreshDatabaseByName(createDynamicTableModal.db)}
+          onSuccess={() => refreshDatabaseByName(createDynamicTableModal.db, { schema: createDynamicTableModal.schema, kind: "DYNAMIC TABLE" })}
         />
       )}
 
@@ -3912,7 +3942,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           db={createExternalTableModal.db}
           schema={createExternalTableModal.schema}
           onClose={() => setCreateExternalTableModal(null)}
-          onSuccess={() => refreshDatabaseByName(createExternalTableModal.db)}
+          onSuccess={() => refreshDatabaseByName(createExternalTableModal.db, { schema: createExternalTableModal.schema, kind: "EXTERNAL TABLE" })}
         />
       )}
 
@@ -3921,7 +3951,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           db={createMaterializedViewModal.db}
           schema={createMaterializedViewModal.schema}
           onClose={() => setCreateMaterializedViewModal(null)}
-          onSuccess={() => refreshDatabaseByName(createMaterializedViewModal.db)}
+          onSuccess={() => refreshDatabaseByName(createMaterializedViewModal.db, { schema: createMaterializedViewModal.schema, kind: "MATERIALIZED VIEW" })}
         />
       )}
 
@@ -3939,7 +3969,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           db={createAlertModal.db}
           schema={createAlertModal.schema}
           onClose={() => setCreateAlertModal(null)}
-          onSuccess={() => refreshDatabaseByName(createAlertModal.db)}
+          onSuccess={() => refreshDatabaseByName(createAlertModal.db, { schema: createAlertModal.schema, kind: "ALERT" })}
         />
       )}
 
@@ -3957,7 +3987,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           db={createTagModal.db}
           schema={createTagModal.schema}
           onClose={() => setCreateTagModal(null)}
-          onSuccess={() => refreshDatabaseByName(createTagModal.db)}
+          onSuccess={() => refreshDatabaseByName(createTagModal.db, { schema: createTagModal.schema, kind: "TAG" })}
         />
       )}
 
@@ -3984,7 +4014,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           db={createPipeModal.db}
           schema={createPipeModal.schema}
           onClose={() => setCreatePipeModal(null)}
-          onSuccess={() => refreshDatabaseByName(createPipeModal.db)}
+          onSuccess={() => refreshDatabaseByName(createPipeModal.db, { schema: createPipeModal.schema, kind: "PIPE" })}
         />
       )}
 
