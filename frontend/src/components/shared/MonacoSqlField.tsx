@@ -94,6 +94,9 @@ export default function MonacoSqlField({
   const editorTheme = resolved === "dark" ? "vs-dark" : "vs";
 
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+  // `defaultDb`/`defaultSchema` seed the picker once on mount; the picker does
+  // not follow later prop changes. Fine today (db/schema are fixed per modal
+  // instance) — lift to a controlled prop if ever reused where the source moves.
   const [pickerDb, setPickerDb] = useState(defaultDb);
   const [pickerSchema, setPickerSchema] = useState(defaultSchema);
   const [pickerTable, setPickerTable] = useState("");

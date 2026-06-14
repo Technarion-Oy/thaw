@@ -67,11 +67,14 @@ export default function CreatePipeModal({ db, schema, onClose, onSuccess }: Prop
 
   const canSubmit = cfg.name.trim().length > 0;
 
-  const handleRun = () => submit(async () => {
-    await ExecDDL(preview);
-    onSuccess?.();
-    onClose();
-  });
+  const handleRun = () => {
+    if (!canSubmit) return;
+    submit(async () => {
+      await ExecDDL(preview);
+      onSuccess?.();
+      onClose();
+    });
+  };
 
   const integrationOptions = (notifIntegrations || []).map((n) => ({ value: n, label: n }));
   const itemStyle: React.CSSProperties = { marginBottom: 12 };

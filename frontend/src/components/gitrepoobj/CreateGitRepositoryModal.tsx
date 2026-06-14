@@ -115,11 +115,14 @@ export default function CreateGitRepositoryModal({ db, schema, onClose, onSucces
 
   const canSubmit = cfg.name.trim() !== "" && cfg.originUrl.trim() !== "" && cfg.apiIntegration !== "";
 
-  const handleRun = () => submit(async () => {
-    await ExecDDL(preview);
-    onSuccess?.();
-    onClose();
-  });
+  const handleRun = () => {
+    if (!canSubmit || !preview) return;
+    submit(async () => {
+      await ExecDDL(preview);
+      onSuccess?.();
+      onClose();
+    });
+  };
 
   const itemStyle: React.CSSProperties = { marginBottom: 12 };
 

@@ -101,11 +101,14 @@ export default function CreateAlertModal({ db, schema, onClose, onSuccess }: Pro
     cfg.action.trim().length > 0 &&
     cfg.action.trim() !== DEFAULT_ACTION.trim();
 
-  const handleRun = () => submit(async () => {
-    await ExecDDL(preview);
-    onSuccess?.();
-    onClose();
-  });
+  const handleRun = () => {
+    if (!canSubmit) return;
+    submit(async () => {
+      await ExecDDL(preview);
+      onSuccess?.();
+      onClose();
+    });
+  };
 
   const itemStyle: React.CSSProperties = { marginBottom: 12 };
 

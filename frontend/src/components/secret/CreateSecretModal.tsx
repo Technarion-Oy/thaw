@@ -87,15 +87,18 @@ export default function CreateSecretModal({ db, schema, onClose, onSuccess }: Pr
 
   const canSubmit = validate();
 
-  const handleRun = () => submit(async () => {
-    await ExecDDL(preview);
-    // Snowflake uppercases unquoted identifiers; match the casing that
-    // ListSecretsInAccount will return so the dropdown auto-selects correctly.
-    const effectiveName = cfg.caseSensitive ? cfg.name : cfg.name.toUpperCase();
-    const fqn = `"${db}"."${schema}"."${effectiveName}"`;
-    onSuccess?.(fqn);
-    onClose();
-  });
+  const handleRun = () => {
+    if (!canSubmit) return;
+    submit(async () => {
+      await ExecDDL(preview);
+      // Snowflake uppercases unquoted identifiers; match the casing that
+      // ListSecretsInAccount will return so the dropdown auto-selects correctly.
+      const effectiveName = cfg.caseSensitive ? cfg.name : cfg.name.toUpperCase();
+      const fqn = `"${db}"."${schema}"."${effectiveName}"`;
+      onSuccess?.(fqn);
+      onClose();
+    });
+  };
 
   const itemStyle: React.CSSProperties = { marginBottom: 12 };
 

@@ -233,15 +233,18 @@ export default function CreateExternalTableModal({ db, schema, onClose, onSucces
     (fmtMode === "type" ? true : cfg.fileFormatName.trim().length > 0) &&
     partitionColsMissingExpr.length === 0;
 
-  const handleRun = () => submit(async () => {
-    // Build the statement from the current cfg at submit time rather than
-    // reusing the `preview` state, which is refreshed by an async effect and
-    // can lag a keystroke behind the latest cfg.
-    const sql = await BuildCreateExternalTableSql(db, schema, cfg as any);
-    await ExecDDL(sql);
-    onSuccess?.();
-    onClose();
-  });
+  const handleRun = () => {
+    if (!canSubmit) return;
+    submit(async () => {
+      // Build the statement from the current cfg at submit time rather than
+      // reusing the `preview` state, which is refreshed by an async effect and
+      // can lag a keystroke behind the latest cfg.
+      const sql = await BuildCreateExternalTableSql(db, schema, cfg as any);
+      await ExecDDL(sql);
+      onSuccess?.();
+      onClose();
+    });
+  };
 
   const itemStyle: React.CSSProperties = { marginBottom: 12 };
 

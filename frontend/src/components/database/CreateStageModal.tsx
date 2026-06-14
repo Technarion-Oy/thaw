@@ -144,12 +144,15 @@ export default function CreateStageModal({ db, schema, onClose, onSuccess }: Pro
 
   const canSubmit = cfg.name.trim() !== "" && (cfg.type === "INTERNAL" || cfg.url.trim() !== "");
 
-  const handleCreate = () => submit(async () => {
-    const sql = await BuildCreateStageSql(cfg as stage.StageConfig);
-    await ExecDDL(sql);
-    onSuccess?.();
-    onClose();
-  });
+  const handleCreate = () => {
+    if (!canSubmit) return;
+    submit(async () => {
+      const sql = await BuildCreateStageSql(cfg as stage.StageConfig);
+      await ExecDDL(sql);
+      onSuccess?.();
+      onClose();
+    });
+  };
 
   const divider = (label: string) => (
     <Divider orientation="left" orientationMargin={0} style={{ fontSize: 11, color: "var(--text-muted)", margin: "16px 0 8px" }}>

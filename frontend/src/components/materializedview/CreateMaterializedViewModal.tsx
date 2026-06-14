@@ -74,11 +74,14 @@ export default function CreateMaterializedViewModal({ db, schema, onClose, onSuc
     cfg.query.trim().length > 0 &&
     cfg.query.trim() !== DEFAULT_QUERY.trim();
 
-  const handleRun = () => submit(async () => {
-    await ExecDDL(preview);
-    onSuccess?.();
-    onClose();
-  });
+  const handleRun = () => {
+    if (!canSubmit) return;
+    submit(async () => {
+      await ExecDDL(preview);
+      onSuccess?.();
+      onClose();
+    });
+  };
 
   const itemStyle: React.CSSProperties = { marginBottom: 12 };
 

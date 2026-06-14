@@ -109,11 +109,14 @@ export default function CreateDynamicTableModal({ db, schema, onClose, onSuccess
     cfg.targetLag.trim().length > 0 &&
     cfg.query.trim().length > 0;
 
-  const handleRun = () => submit(async () => {
-    await ExecDDL(preview);
-    onSuccess?.();
-    onClose();
-  });
+  const handleRun = () => {
+    if (!canSubmit) return;
+    submit(async () => {
+      await ExecDDL(preview);
+      onSuccess?.();
+      onClose();
+    });
+  };
 
   const warehouseOptions = (warehouses || []).map((n) => ({ value: n, label: n }));
   const itemStyle: React.CSSProperties = { marginBottom: 12 };

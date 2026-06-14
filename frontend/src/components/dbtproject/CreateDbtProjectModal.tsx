@@ -91,11 +91,14 @@ export default function CreateDbtProjectModal({ db, schema, onClose, onSuccess }
 
   const canSubmit = cfg.name.trim() !== "" && cfg.sourceLocation.trim() !== "";
 
-  const handleRun = () => submit(async () => {
-    await ExecDDL(preview);
-    onSuccess?.();
-    onClose();
-  });
+  const handleRun = () => {
+    if (!canSubmit || !preview) return;
+    submit(async () => {
+      await ExecDDL(preview);
+      onSuccess?.();
+      onClose();
+    });
+  };
 
   const itemStyle: React.CSSProperties = { marginBottom: 12 };
 
