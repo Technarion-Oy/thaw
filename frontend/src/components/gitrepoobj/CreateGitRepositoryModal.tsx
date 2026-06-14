@@ -71,9 +71,13 @@ export default function CreateGitRepositoryModal({ db, schema, onClose, onSucces
   const [showCreateSecret, setShowCreateSecret] = useState(false);
 
   const quotedIdentifiersIgnoreCase = useQuotedIdentifiers();
+  // blankOnError: submit is gated on a non-empty preview, so a failed build must
+  // clear it (matching the pre-refactor `.catch(() => setPreview(""))`) rather
+  // than leave stale SQL that Create could execute.
   const preview = useSqlPreview(
     () => BuildCreateGitRepositorySql(db, schema, cfg as any),
     [db, schema, cfg],
+    { blankOnError: true },
   );
   const { creating, error, setError, submit } = useCreateSubmit();
 

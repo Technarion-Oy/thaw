@@ -28,20 +28,40 @@ export function useQuotedIdentifiers(): boolean {
   return v;
 }
 
+interface SqlPreviewOptions {
+  /**
+   * When true, a failed build blanks the preview instead of keeping the last
+   * good value. Use for modals that gate submit on a non-empty preview and would
+   * otherwise risk executing stale SQL after a build error (e.g. git repository).
+   */
+  blankOnError?: boolean;
+}
+
 /**
  * Keeps a live SQL preview string in sync with form state. `build` produces the
  * preview (sync or async — backend builders return a Promise); it re-runs
- * whenever `deps` change. Build errors are swallowed and the *last good* preview
- * is retained (never blanked) so a transient build failure never crashes the
- * modal — callers that gate submit on the preview should also guard on
- * `canSubmit` so a stale/empty preview can't be executed.
+ * whenever `deps` change.
+ *
+ * An out-of-order async build can't clobber a newer one: each run is invalidated
+ * on cleanup, so only the latest in-flight build updates the preview. By default
+ * a build error is swallowed and the *last good* preview is retained so a
+ * transient failure never crashes the modal — callers that gate submit on the
+ * preview should also guard on `canSubmit`. Pass `{ blankOnError: true }` to
+ * blank the preview on error instead.
  */
-export function useSqlPreview(build: () => string | Promise<string>, deps: DependencyList): string {
+export function useSqlPreview(
+  build: () => string | Promise<string>,
+  deps: DependencyList,
+  options?: SqlPreviewOptions,
+): string {
   const [preview, setPreview] = useState("");
+  const blankOnError = options?.blankOnError ?? false;
   useEffect(() => {
+    let cancelled = false;
     Promise.resolve(build())
-      .then(setPreview)
-      .catch(() => {});
+      .then((sql) => { if (!cancelled) setPreview(sql); })
+      .catch(() => { if (!cancelled && blankOnError) setPreview(""); });
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
   return preview;
