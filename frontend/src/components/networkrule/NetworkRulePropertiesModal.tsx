@@ -19,6 +19,7 @@ import {
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterNetworkRule } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
+import { parseValueList, setValueListClause, q1 } from "./valueList";
 
 const { Text } = Typography;
 
@@ -35,26 +36,6 @@ const LABEL_TD: React.CSSProperties = {
   fontSize: 12, whiteSpace: "nowrap", verticalAlign: "middle",
   width: 200,
 };
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function q1(s: string) { return "'" + s.replace(/'/g, "''") + "'"; }
-
-// DESCRIBE NETWORK RULE reports value_list as a comma-separated string of
-// identifiers (e.g. "example.com:443,api.example.com:443"). Parse defensively so
-// an unexpected format degrades to "no values" rather than throwing.
-function parseValueList(raw: string): string[] {
-  const s = (raw ?? "").trim();
-  if (s === "" || s.toLowerCase() === "null") return [];
-  return s.split(",").map((v) => v.trim()).filter((v) => v !== "");
-}
-
-// SET VALUE_LIST replaces the whole list (it is not additive), so every edit
-// resends the full list. An empty list maps to UNSET VALUE_LIST.
-function setValueListClause(values: string[]): string {
-  if (values.length === 0) return "UNSET VALUE_LIST";
-  return `SET VALUE_LIST = (${values.map(q1).join(", ")})`;
-}
 
 // ─── EditRow (single-line settings, e.g. comment) ────────────────────────────
 

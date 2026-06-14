@@ -112,6 +112,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/materializedview/MaterializedViewPropertiesModal.tsx",
         "frontend/src/components/networkrule/CreateNetworkRuleModal.tsx",
         "frontend/src/components/networkrule/NetworkRulePropertiesModal.tsx",
+        "frontend/src/components/networkrule/valueList.ts",
         "frontend/src/components/shared/CreateModalShell.tsx",
         "frontend/src/components/shared/MonacoSqlField.tsx",
         "frontend/src/components/shared/NameWithReplaceOptions.tsx",
