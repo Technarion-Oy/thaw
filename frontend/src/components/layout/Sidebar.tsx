@@ -1324,15 +1324,24 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setTreeData((prev) => syncDatabaseSchemas(prev, dbKey, db, schemaNames, openSchemaKeys));
 
     // Reload the objects of each open schema in place (fresh data). After the
-    // sync above, the reveal target exists as a node, so onLoadData populates it.
-    for (const schemaKey of openSchemaKeys) {
-      if (!schemaNames.includes(schemaKey.slice(`schema:${db}:`.length))) continue;
-      await onLoadData({ key: schemaKey } as DataNode & { children?: DataNode[] });
-    }
+    // sync above the reveal target exists as a node, so onLoadData populates it.
+    // The per-schema reloads are independent (each does its own functional
+    // setData) and order-insensitive, so fan the IPCs out in parallel rather
+    // than serializing one ListObjects round-trip per open schema.
+    const schemaPrefix = `schema:${db}:`;
+    await Promise.all(
+      Array.from(openSchemaKeys)
+        .filter((schemaKey) => schemaNames.includes(schemaKey.slice(schemaPrefix.length)))
+        .map((schemaKey) => onLoadData({ key: schemaKey } as DataNode & { children?: DataNode[] })),
+    );
 
-    // Restore scroll after React commits the rebuilt rows.
+    // Restore scroll after React commits the rebuilt rows. A double rAF makes
+    // this deterministic: the first frame lets React flush the batched setData
+    // commits, the second runs after layout so scrollTop sticks.
     requestAnimationFrame(() => {
-      if (treeScrollRef.current) treeScrollRef.current.scrollTop = savedScrollTop;
+      requestAnimationFrame(() => {
+        if (treeScrollRef.current) treeScrollRef.current.scrollTop = savedScrollTop;
+      });
     });
   };
 

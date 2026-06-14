@@ -105,8 +105,11 @@ repeated IPC calls on tree hover.
   children via **`syncDatabaseSchemas`**, which keeps the loaded children of currently-open schemas
   intact (no collapse, no flicker) while picking up new / `UNDROP`-restored schemas, dropping
   removed ones, and resetting collapsed schemas to childless nodes so their objects re-fetch on the
-  next expand. It then reloads each open schema's objects in place. Scroll is captured before the
-  rebuild and restored in a `requestAnimationFrame` afterwards (via `treeScrollRef`). The optional
+  next expand. It then reloads each open schema's objects in place — fanned out with `Promise.all`
+  (the per-schema `setData`s are independent and order-insensitive, so there's no reason to serialize
+  the `ListObjects` round-trips). Scroll is captured before the rebuild and restored via a double
+  `requestAnimationFrame` afterwards (via `treeScrollRef`): the first frame lets React flush the
+  batched commits, the second runs after layout so `scrollTop` sticks. The optional
   `reveal: { schema, kind }` (passed by create/rename handlers) force-expands the object's
   `schema → type` path so a brand-new type group opens automatically — and because `syncDatabaseSchemas`
   materialises the target schema node first, the reveal works even when that schema wasn't in the
