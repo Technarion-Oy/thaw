@@ -3132,7 +3132,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     if (submenuTimer.current) clearTimeout(submenuTimer.current);
     if (submenuOpenTimer.current) clearTimeout(submenuOpenTimer.current);
     const rect = triggerEl.getBoundingClientRect();
-    const dir: "left" | "right" = window.innerWidth - rect.right >= 160 ? "right" : "left";
+    let dir: "left" | "right" = window.innerWidth - rect.right >= 160 ? "right" : "left";
+    // Once a parent panel has flipped left (near the right screen edge), keep
+    // deeper levels opening left too — otherwise a nested panel computed purely
+    // from its own (now left-shifted) trigger would open right, back over the
+    // parent panel and overlap it.
+    if (depth > 0 && submenuDirs[depth - 1] === "left") dir = "left";
     // If a different sibling is already open at this depth, defer the swap so a
     // diagonal cursor path into the open sub-panel (passing over sibling rows)
     // doesn't collapse it out from under the cursor. Entering the open panel
