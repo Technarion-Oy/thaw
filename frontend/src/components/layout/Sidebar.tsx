@@ -542,9 +542,20 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [ctxMenu, setCtxMenu]     = useState<ContextMenu | null>(null);
   const [selectedNodeKeys, setSelectedNodeKeys] = useState<Set<string>>(new Set());
   const [selectedNodeArgs, setSelectedNodeArgs] = useState<Map<string, string>>(new Map());
-  const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
-  const [submenuDir, setSubmenuDir] = useState<"left" | "right">("right");
+  // Path of currently-open submenu keys, indexed by nesting depth (0 = first
+  // level off the context menu, 1 = a submenu nested inside that one, …).
+  const [submenuPath, setSubmenuPath] = useState<string[]>([]);
+  const [submenuDirs, setSubmenuDirs] = useState<("left" | "right")[]>([]);
   const submenuTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const submenuOpenTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Collapse any open cascading submenus whenever the context menu opens or
+  // closes, so it never reappears pre-expanded on the next right-click.
+  useEffect(() => {
+    if (submenuTimer.current) clearTimeout(submenuTimer.current);
+    if (submenuOpenTimer.current) clearTimeout(submenuOpenTimer.current);
+    setSubmenuPath([]);
+    setSubmenuDirs([]);
+  }, [ctxMenu]);
   const [ddlModal, setDdlModal]   = useState<ObjectDDL | null>(null);
   const [callModal, setCallModal] = useState<{ db: string; schema: string; name: string; rawArgs: string } | null>(null);
   const [selectFunctionModal, setSelectFunctionModal] = useState<{ db: string; schema: string; name: string; rawArgs: string } | null>(null);
@@ -3101,48 +3112,77 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         {label}
       </div>
     );
+    // A disabled item's tooltip lives inside the deepest open panel; when that
+    // panel opened leftward (near the screen edge) a right-placed tooltip would
+    // point back over the menu, so mirror it to the panel's direction.
+    const tooltipPlacement = submenuDirs[submenuDirs.length - 1] === "left" ? "left" : "right";
     return disabled && disabledReason
-      ? <Tooltip title={disabledReason} placement="right" mouseEnterDelay={0.4}>{el}</Tooltip>
+      ? <Tooltip title={disabledReason} placement={tooltipPlacement} mouseEnterDelay={0.4}>{el}</Tooltip>
       : el;
   };
 
   // A menu item that reveals a cascading submenu on hover.
   // Uses a 150 ms hide-delay so the mouse can travel into the submenu panel
   // without it disappearing.
-  const showSub = (key: string, triggerEl: HTMLElement) => {
-    if (submenuTimer.current) clearTimeout(submenuTimer.current);
-    const rect = triggerEl.getBoundingClientRect();
-    setSubmenuDir(window.innerWidth - rect.right >= 160 ? "right" : "left");
-    setActiveSubmenu(key);
+  const applyOpenSub = (depth: number, key: string, dir: "left" | "right") => {
+    setSubmenuPath((p) => [...p.slice(0, depth), key]);
+    setSubmenuDirs((d) => { const nd = d.slice(0, depth); nd[depth] = dir; return nd; });
   };
-  const hideSub = () => {
-    submenuTimer.current = setTimeout(() => setActiveSubmenu(null), 150);
+  const showSub = (depth: number, key: string, triggerEl: HTMLElement) => {
+    if (submenuTimer.current) clearTimeout(submenuTimer.current);
+    if (submenuOpenTimer.current) clearTimeout(submenuOpenTimer.current);
+    const rect = triggerEl.getBoundingClientRect();
+    let dir: "left" | "right" = window.innerWidth - rect.right >= 160 ? "right" : "left";
+    // Once a parent panel has flipped left (near the right screen edge), keep
+    // deeper levels opening left too — otherwise a nested panel computed purely
+    // from its own (now left-shifted) trigger would open right, back over the
+    // parent panel and overlap it.
+    if (depth > 0 && submenuDirs[depth - 1] === "left") dir = "left";
+    // If a different sibling is already open at this depth, defer the swap so a
+    // diagonal cursor path into the open sub-panel (passing over sibling rows)
+    // doesn't collapse it out from under the cursor. Entering the open panel
+    // cancels this pending swap via cancelHide.
+    if (submenuPath[depth] !== undefined && submenuPath[depth] !== key) {
+      submenuOpenTimer.current = setTimeout(() => applyOpenSub(depth, key, dir), 220);
+    } else {
+      applyOpenSub(depth, key, dir);
+    }
+  };
+  const hideSub = (depth: number) => {
+    if (submenuTimer.current) clearTimeout(submenuTimer.current);
+    if (submenuOpenTimer.current) clearTimeout(submenuOpenTimer.current);
+    submenuTimer.current = setTimeout(() => setSubmenuPath((p) => p.slice(0, depth)), 150);
   };
   const cancelHide = () => {
     if (submenuTimer.current) clearTimeout(submenuTimer.current);
+    if (submenuOpenTimer.current) clearTimeout(submenuOpenTimer.current);
   };
 
-  const menuItemSub = (label: string, icon: React.ReactNode, subKey: string, children: React.ReactNode) => (
-    <div style={{ position: "relative" }} onMouseEnter={(e) => showSub(subKey, e.currentTarget)} onMouseLeave={hideSub}>
-      <div
-        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 14px", fontSize: 13, cursor: "default", color: "var(--text)", background: activeSubmenu === subKey ? "var(--border)" : "transparent" }}
-        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
-        onMouseLeave={(e) => (e.currentTarget.style.background = activeSubmenu === subKey ? "var(--border)" : "transparent")}
-      >
-        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>{icon}{label}</span>
-        <RightOutlined style={{ fontSize: 9, opacity: 0.5, marginLeft: 12 }} />
-      </div>
-      {activeSubmenu === subKey && (
+  const menuItemSub = (label: string, icon: React.ReactNode, subKey: string, children: React.ReactNode, depth: number = 0) => {
+    const open = submenuPath[depth] === subKey;
+    const dir = submenuDirs[depth] ?? "right";
+    return (
+      <div style={{ position: "relative" }} onMouseEnter={(e) => showSub(depth, subKey, e.currentTarget)} onMouseLeave={() => hideSub(depth)}>
         <div
-          style={{ position: "absolute", top: 0, ...(submenuDir === "right" ? { left: "100%" } : { right: "100%" }), background: "var(--bg-overlay)", border: "1px solid var(--border)", borderRadius: 6, boxShadow: "0 4px 16px rgba(0,0,0,0.5)", minWidth: 160, zIndex: 10000 }}
-          onMouseEnter={cancelHide}
-          onMouseLeave={hideSub}
+          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 14px", fontSize: 13, cursor: "default", color: "var(--text)", background: open ? "var(--border)" : "transparent" }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
+          onMouseLeave={(e) => (e.currentTarget.style.background = open ? "var(--border)" : "transparent")}
         >
-          {children}
+          <span style={{ display: "flex", alignItems: "center", gap: 8 }}>{icon}{label}</span>
+          <RightOutlined style={{ fontSize: 9, opacity: 0.5, marginLeft: 12 }} />
         </div>
-      )}
-    </div>
-  );
+        {open && (
+          <div
+            style={{ position: "absolute", top: 0, ...(dir === "right" ? { left: "100%" } : { right: "100%" }), background: "var(--bg-overlay)", border: "1px solid var(--border)", borderRadius: 6, boxShadow: "0 4px 16px rgba(0,0,0,0.5)", minWidth: 160, zIndex: 10000 }}
+            onMouseEnter={cancelHide}
+            onMouseLeave={() => hideSub(depth)}
+          >
+            {children}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div style={{ padding: "8px 4px" }}>
@@ -3503,24 +3543,44 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "schema" && menuItem("Insert Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "schema" && menuItemSub("Create Object", <PlusSquareOutlined style={{ fontSize: 12 }} />, "create-object", (
             <>
-              {menuItem("Table…", <TableOutlined style={{ fontSize: 12 }} />, openCreateTable)}
-              {menuItem("Dynamic Table…", <RetweetOutlined style={{ fontSize: 12 }} />, openCreateDynamicTable)}
-              {menuItem("External Table…", <CloudServerOutlined style={{ fontSize: 12 }} />, openCreateExternalTable)}
-              {menuItem("Materialized View…", <BlockOutlined style={{ fontSize: 12 }} />, openCreateMaterializedView)}
-              {menuItem("Stage…", <InboxOutlined style={{ fontSize: 12 }} />, openCreateStage)}
-              {menuItem("File Format…", <FileTextOutlined style={{ fontSize: 12 }} />, openCreateFileFormat, undefined, !featureFlags.fileFormatBuilder, "File Format Builder is disabled. Enable it under View → Enabled Features…")}
-
-              {menuItem("Task…", <ClockCircleOutlined style={{ fontSize: 12 }} />, openCreateTask)}
-              {menuItem("Alert…", <AlertOutlined style={{ fontSize: 12 }} />, openCreateAlert)}
-              {menuItem("Tag…", <TagsOutlined style={{ fontSize: 12 }} />, openCreateTag)}
-              {menuItem("Masking Policy…", <EyeInvisibleOutlined style={{ fontSize: 12 }} />, openCreateMaskingPolicy)}
-              {menuItem("Network Rule…", <GlobalOutlined style={{ fontSize: 12 }} />, openCreateNetworkRule)}
-              {menuItem("Pipe…", <ApiOutlined style={{ fontSize: 12 }} />, openCreatePipe)}
-              {menuItem("Secret…", <KeyOutlined style={{ fontSize: 12 }} />, openCreateSecret)}
-              {menuItem("Git Repository…", <BranchesOutlined style={{ fontSize: 12 }} />, openCreateGitRepository)}
-              {menuItem("DBT Project…", <BuildOutlined style={{ fontSize: 12 }} />, openCreateDbtProject, undefined, !featureFlags.dbtProjectBrowser, "DBT Project Browser is disabled. Enable it under View → Enabled Features…")}
-</>
-              ))}          {ctxMenu.nodeType === "schema" && menuItem("Show Dropped Tables…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedTables)}
+              {menuItemSub("Tables & Views", <TableOutlined style={{ fontSize: 12 }} />, "create-tables", (
+                <>
+                  {menuItem("Table…", <TableOutlined style={{ fontSize: 12 }} />, openCreateTable)}
+                  {menuItem("Dynamic Table…", <RetweetOutlined style={{ fontSize: 12 }} />, openCreateDynamicTable)}
+                  {menuItem("External Table…", <CloudServerOutlined style={{ fontSize: 12 }} />, openCreateExternalTable)}
+                  {menuItem("Materialized View…", <BlockOutlined style={{ fontSize: 12 }} />, openCreateMaterializedView)}
+                </>
+              ), 1)}
+              {menuItemSub("Data Loading", <InboxOutlined style={{ fontSize: 12 }} />, "create-data-loading", (
+                <>
+                  {menuItem("Stage…", <InboxOutlined style={{ fontSize: 12 }} />, openCreateStage)}
+                  {menuItem("File Format…", <FileTextOutlined style={{ fontSize: 12 }} />, openCreateFileFormat, undefined, !featureFlags.fileFormatBuilder, "File Format Builder is disabled. Enable it under View → Enabled Features…")}
+                  {menuItem("Pipe…", <ApiOutlined style={{ fontSize: 12 }} />, openCreatePipe)}
+                </>
+              ), 1)}
+              {menuItemSub("Automation", <ClockCircleOutlined style={{ fontSize: 12 }} />, "create-automation", (
+                <>
+                  {menuItem("Task…", <ClockCircleOutlined style={{ fontSize: 12 }} />, openCreateTask)}
+                  {menuItem("Alert…", <AlertOutlined style={{ fontSize: 12 }} />, openCreateAlert)}
+                </>
+              ), 1)}
+              {menuItemSub("Security & Governance", <EyeInvisibleOutlined style={{ fontSize: 12 }} />, "create-governance", (
+                <>
+                  {menuItem("Masking Policy…", <EyeInvisibleOutlined style={{ fontSize: 12 }} />, openCreateMaskingPolicy)}
+                  {menuItem("Network Rule…", <GlobalOutlined style={{ fontSize: 12 }} />, openCreateNetworkRule)}
+                  {menuItem("Tag…", <TagsOutlined style={{ fontSize: 12 }} />, openCreateTag)}
+                  {menuItem("Secret…", <KeyOutlined style={{ fontSize: 12 }} />, openCreateSecret)}
+                </>
+              ), 1)}
+              {menuItemSub("Projects", <BranchesOutlined style={{ fontSize: 12 }} />, "create-projects", (
+                <>
+                  {menuItem("Git Repository…", <BranchesOutlined style={{ fontSize: 12 }} />, openCreateGitRepository)}
+                  {menuItem("DBT Project…", <BuildOutlined style={{ fontSize: 12 }} />, openCreateDbtProject, undefined, !featureFlags.dbtProjectBrowser, "DBT Project Browser is disabled. Enable it under View → Enabled Features…")}
+                </>
+              ), 1)}
+            </>
+          ))}
+          {ctxMenu.nodeType === "schema" && menuItem("Show Dropped Tables…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedTables)}
           {ctxMenu.nodeType === "schema" && menuItem("Export Data…", <DownloadOutlined style={{ fontSize: 12 }} />, openSchemaExportModal, undefined, !featureFlags.exportTableData, "Table Data Export is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "schema" && menuItem("Import Data…", <UploadOutlined style={{ fontSize: 12 }} />, openSchemaImportModal, undefined, !featureFlags.tableDataImport, "Table Data Import is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "schema" && menuItem("Backup Sets…", <SaveOutlined style={{ fontSize: 12 }} />, openBackupSets, undefined, !featureFlags.backupPoliciesAndSets, "Backup Policies & Sets is disabled. Enable it under View → Enabled Features…")}
