@@ -2472,6 +2472,85 @@ export namespace secret {
 
 }
 
+export namespace service {
+	
+	export class TemplateVar {
+	    key: string;
+	    value: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TemplateVar(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.key = source["key"];
+	        this.value = source["value"];
+	    }
+	}
+	export class ServiceConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    ifNotExists: boolean;
+	    computePool: string;
+	    specSource: string;
+	    template: boolean;
+	    specInline: string;
+	    specStage: string;
+	    specFile: string;
+	    templateVars: TemplateVar[];
+	    externalAccessIntegrations: string;
+	    autoResume: string;
+	    minInstances: string;
+	    maxInstances: string;
+	    queryWarehouse: string;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ServiceConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.computePool = source["computePool"];
+	        this.specSource = source["specSource"];
+	        this.template = source["template"];
+	        this.specInline = source["specInline"];
+	        this.specStage = source["specStage"];
+	        this.specFile = source["specFile"];
+	        this.templateVars = this.convertValues(source["templateVars"], TemplateVar);
+	        this.externalAccessIntegrations = source["externalAccessIntegrations"];
+	        this.autoResume = source["autoResume"];
+	        this.minInstances = source["minInstances"];
+	        this.maxInstances = source["maxInstances"];
+	        this.queryWarehouse = source["queryWarehouse"];
+	        this.comment = source["comment"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
 export namespace sfconfig {
 	
 	export class Connection {

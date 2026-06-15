@@ -25,6 +25,7 @@ import (
 	"thaw/internal/procedure"
 	"thaw/internal/rowaccesspolicy"
 	"thaw/internal/secret"
+	"thaw/internal/service"
 	"thaw/internal/snowflake"
 	"thaw/internal/snowgitrepo"
 	"thaw/internal/stage"
@@ -159,6 +160,11 @@ func (a *App) BuildCreateNetworkRuleSql(database, schema string, cfg networkrule
 // BuildCreateImageRepositorySql returns the SQL for creating a Snowflake IMAGE REPOSITORY.
 func (a *App) BuildCreateImageRepositorySql(database, schema string, cfg imagerepository.ImageRepositoryConfig) (string, error) {
 	return imagerepository.BuildCreateImageRepositorySql(database, schema, cfg)
+}
+
+// BuildCreateServiceSql returns the SQL for creating a Snowflake SERVICE (SPCS).
+func (a *App) BuildCreateServiceSql(database, schema string, cfg service.ServiceConfig) (string, error) {
+	return service.BuildCreateServiceSql(database, schema, cfg)
 }
 
 // BuildCreateStageSql returns the CREATE STAGE SQL statement.

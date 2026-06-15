@@ -50,6 +50,10 @@ export function AlterRowAccessPolicy(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterRowAccessPolicy'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterService(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterService'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterStage(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterStage'](arg1, arg2, arg3, arg4);
 }
@@ -168,6 +172,10 @@ export function BuildCreateRowAccessPolicySql(arg1, arg2, arg3) {
 
 export function BuildCreateSecretSql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateSecretSql'](arg1, arg2, arg3);
+}
+
+export function BuildCreateServiceSql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateServiceSql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateStageSql(arg1) {
@@ -710,6 +718,14 @@ export function GetSchemaRetentionDays(arg1, arg2) {
   return window['go']['app']['App']['GetSchemaRetentionDays'](arg1, arg2);
 }
 
+export function GetServiceContainers(arg1, arg2, arg3) {
+  return window['go']['app']['App']['GetServiceContainers'](arg1, arg2, arg3);
+}
+
+export function GetServiceLogs(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['app']['App']['GetServiceLogs'](arg1, arg2, arg3, arg4, arg5, arg6);
+}
+
 export function GetSessionConfig() {
   return window['go']['app']['App']['GetSessionConfig']();
 }
@@ -966,6 +982,10 @@ export function ListBasicObjects(arg1, arg2) {
   return window['go']['app']['App']['ListBasicObjects'](arg1, arg2);
 }
 
+export function ListComputePools() {
+  return window['go']['app']['App']['ListComputePools']();
+}
+
 export function ListDatabases() {
   return window['go']['app']['App']['ListDatabases']();
 }
@@ -1068,6 +1088,10 @@ export function ListSecretsInAccount() {
 
 export function ListSecurityIntegrations() {
   return window['go']['app']['App']['ListSecurityIntegrations']();
+}
+
+export function ListServiceEndpoints(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ListServiceEndpoints'](arg1, arg2, arg3);
 }
 
 export function ListStageEntries(arg1, arg2, arg3, arg4) {

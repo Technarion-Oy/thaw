@@ -18,6 +18,7 @@ import {networkrule} from '../models';
 import {pipe} from '../models';
 import {rowaccesspolicy} from '../models';
 import {secret} from '../models';
+import {service} from '../models';
 import {tag} from '../models';
 import {erdesigner} from '../models';
 import {snowpark} from '../models';
@@ -64,6 +65,8 @@ export function AlterNetworkRule(arg1:string,arg2:string,arg3:string,arg4:string
 export function AlterPipe(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterRowAccessPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterService(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterStage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -124,6 +127,8 @@ export function BuildCreatePipeSql(arg1:string,arg2:string,arg3:pipe.PipeConfig)
 export function BuildCreateRowAccessPolicySql(arg1:string,arg2:string,arg3:rowaccesspolicy.RowAccessPolicyConfig):Promise<string>;
 
 export function BuildCreateSecretSql(arg1:string,arg2:string,arg3:secret.SecretConfig):Promise<string>;
+
+export function BuildCreateServiceSql(arg1:string,arg2:string,arg3:service.ServiceConfig):Promise<string>;
 
 export function BuildCreateStageSql(arg1:stage.StageConfig):Promise<string>;
 
@@ -395,6 +400,10 @@ export function GetSchemaForeignKeys(arg1:string,arg2:string):Promise<Array<snow
 
 export function GetSchemaRetentionDays(arg1:string,arg2:string):Promise<number>;
 
+export function GetServiceContainers(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
+
+export function GetServiceLogs(arg1:string,arg2:string,arg3:string,arg4:string,arg5:number,arg6:number):Promise<string>;
+
 export function GetSessionConfig():Promise<config.SessionConfig>;
 
 export function GetSessionContext(arg1:string):Promise<snowflake.SessionContext>;
@@ -523,6 +532,8 @@ export function ListBackups(arg1:string,arg2:string,arg3:string):Promise<Array<b
 
 export function ListBasicObjects(arg1:string,arg2:string):Promise<Array<snowflake.SnowflakeObject>>;
 
+export function ListComputePools():Promise<Array<string>>;
+
 export function ListDatabases():Promise<Array<string>>;
 
 export function ListDbtProjectEntries(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<snowflake.GitRepoEntry>>;
@@ -574,6 +585,8 @@ export function ListSchemas(arg1:string):Promise<Array<string>>;
 export function ListSecretsInAccount():Promise<Array<snowflake.AccountSecret>>;
 
 export function ListSecurityIntegrations():Promise<Array<snowflake.SecurityIntegration>>;
+
+export function ListServiceEndpoints(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function ListStageEntries(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<snowflake.GitRepoEntry>>;
 

@@ -61,6 +61,7 @@ import {
   BarChartOutlined,
   LinkOutlined,
   ContainerOutlined,
+  DeploymentUnitOutlined,
 } from "@ant-design/icons";
 
 // ── CSS variable name per kind ─────────────────────────────────────────────
@@ -76,6 +77,7 @@ const KIND_VAR: Record<string, string> = {
   "ROW ACCESS POLICY": "--icon-rowaccesspolicy",
   "NETWORK RULE":    "--icon-networkrule",
   "IMAGE REPOSITORY": "--icon-imagerepository",
+  SERVICE:           "--icon-service",
   FUNCTION:          "--icon-function",
   PROCEDURE:         "--icon-procedure",
   SEQUENCE:          "--icon-sequence",
@@ -103,6 +105,7 @@ const KIND_ICON: Record<string, React.ComponentType<{ style?: React.CSSPropertie
   "ROW ACCESS POLICY": SafetyOutlined,
   "NETWORK RULE":   GlobalOutlined,
   "IMAGE REPOSITORY": ContainerOutlined,
+  SERVICE:          DeploymentUnitOutlined,
   FUNCTION:         FunctionOutlined,
   PROCEDURE:        CodeOutlined,
   SEQUENCE:         NumberOutlined,
