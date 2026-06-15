@@ -27,7 +27,7 @@ type ColumnComment struct {
 // BuildObjectPropertiesQuery returns the SHOW/DESCRIBE query that fetches the
 // metadata for a single Snowflake object. kind is one of: DATABASE, SCHEMA,
 // TABLE, VIEW, DYNAMIC TABLE, EXTERNAL TABLE, MATERIALIZED VIEW, ALERT, TAG,
-// MASKING POLICY, ROW ACCESS POLICY, NETWORK RULE, IMAGE REPOSITORY, FUNCTION, PROCEDURE, SEQUENCE, STAGE, STREAM,
+// MASKING POLICY, ROW ACCESS POLICY, NETWORK RULE, IMAGE REPOSITORY, SERVICE, FUNCTION, PROCEDURE, SEQUENCE, STAGE, STREAM,
 // TASK, FILE FORMAT, PIPE, SECRET, GIT REPOSITORY, DBT PROJECT, WAREHOUSE, ROLE,
 // USER.
 func BuildObjectPropertiesQuery(database, schema, kind, name string) (string, error) {
@@ -55,6 +55,8 @@ func BuildObjectPropertiesQuery(database, schema, kind, name string) (string, er
 		return fmt.Sprintf("SHOW NETWORK RULES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
 	case "IMAGE REPOSITORY":
 		return fmt.Sprintf("SHOW IMAGE REPOSITORIES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+	case "SERVICE":
+		return fmt.Sprintf("SHOW SERVICES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
 	case "SCHEMA":
 		return fmt.Sprintf("SHOW SCHEMAS LIKE '%s' IN DATABASE %s", like, snowflake.QuoteIdent(database)), nil
 	case "TABLE":
@@ -124,6 +126,14 @@ func BuildDescribeRowAccessPolicyQuery(database, schema, name string) string {
 // identifiers.
 func BuildDescribeNetworkRuleQuery(database, schema, name string) string {
 	return fmt.Sprintf("DESCRIBE NETWORK RULE %s.%s.%s",
+		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
+}
+
+// BuildDescribeServiceQuery returns the DESCRIBE SERVICE query used to enrich the
+// SHOW SERVICES result with the service's YAML spec — which SHOW SERVICES does
+// not report.
+func BuildDescribeServiceQuery(database, schema, name string) string {
+	return fmt.Sprintf("DESCRIBE SERVICE %s.%s.%s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
 }
 
@@ -209,6 +219,31 @@ func GetObjectProperties(ctx context.Context, client *snowflake.Client, database
 					break
 				}
 				if strings.ToLower(col) == "value_list" {
+					val := ""
+					if row[ci] != nil {
+						val = fmt.Sprintf("%v", row[ci])
+					}
+					pairs = append(pairs, snowflake.PropertyPair{Key: col, Value: val})
+				}
+			}
+		}
+	}
+
+	if strings.ToUpper(kind) == "SERVICE" {
+		descRes, err := client.Execute(ctx, BuildDescribeServiceQuery(database, schema, name))
+		if err == nil && len(descRes.Rows) > 0 {
+			// DESCRIBE SERVICE returns one row whose columns include spec (the
+			// YAML specification) and dns_name. Map by column name so a column
+			// reordering on Snowflake's side doesn't mislabel the values.
+			row := descRes.Rows[0]
+			for ci, col := range descRes.Columns {
+				if ci >= len(row) {
+					break
+				}
+				switch strings.ToLower(col) {
+				case "spec", "dns_name":
+					// Guard against a SQL NULL rendering as the literal "<nil>";
+					// emit an empty string instead.
 					val := ""
 					if row[ci] != nil {
 						val = fmt.Sprintf("%v", row[ci])

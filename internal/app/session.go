@@ -91,6 +91,15 @@ func (a *App) ListWarehouses() ([]string, error) {
 	return a.client.ListWarehouses(a.ctx)
 }
 
+// ListComputePools returns all compute pools visible to the current role. Used
+// by the Create Service modal to populate the compute-pool picker.
+func (a *App) ListComputePools() ([]string, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return a.client.ListComputePools(a.ctx)
+}
+
 // UseRole switches the given tab's isolated session to the specified role.
 func (a *App) UseRole(tabId string, role string) error {
 	ts, err := a.getOrInitTabSession(tabId)
