@@ -27,7 +27,7 @@ type ColumnComment struct {
 // BuildObjectPropertiesQuery returns the SHOW/DESCRIBE query that fetches the
 // metadata for a single Snowflake object. kind is one of: DATABASE, SCHEMA,
 // TABLE, VIEW, DYNAMIC TABLE, EXTERNAL TABLE, MATERIALIZED VIEW, ALERT, TAG,
-// MASKING POLICY, ROW ACCESS POLICY, NETWORK RULE, IMAGE REPOSITORY, SERVICE, FUNCTION, PROCEDURE, SEQUENCE, STAGE, STREAM,
+// MASKING POLICY, ROW ACCESS POLICY, NETWORK RULE, IMAGE REPOSITORY, SERVICE, STREAMLIT, FUNCTION, PROCEDURE, SEQUENCE, STAGE, STREAM,
 // TASK, FILE FORMAT, PIPE, SECRET, GIT REPOSITORY, DBT PROJECT, WAREHOUSE, ROLE,
 // USER.
 func BuildObjectPropertiesQuery(database, schema, kind, name string) (string, error) {
@@ -57,6 +57,8 @@ func BuildObjectPropertiesQuery(database, schema, kind, name string) (string, er
 		return fmt.Sprintf("SHOW IMAGE REPOSITORIES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
 	case "SERVICE":
 		return fmt.Sprintf("SHOW SERVICES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+	case "STREAMLIT":
+		return fmt.Sprintf("SHOW STREAMLITS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
 	case "SCHEMA":
 		return fmt.Sprintf("SHOW SCHEMAS LIKE '%s' IN DATABASE %s", like, snowflake.QuoteIdent(database)), nil
 	case "TABLE":
@@ -137,12 +139,22 @@ func BuildDescribeServiceQuery(database, schema, name string) string {
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
 }
 
+// BuildDescribeStreamlitQuery returns the DESCRIBE STREAMLIT query used to enrich
+// the SHOW STREAMLITS result with the app's root_location and main_file — which
+// SHOW STREAMLITS does not report.
+func BuildDescribeStreamlitQuery(database, schema, name string) string {
+	return fmt.Sprintf("DESCRIBE STREAMLIT %s.%s.%s",
+		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
+}
+
 // GetObjectProperties returns structured metadata for any Snowflake object by
 // running the appropriate SHOW or DESCRIBE command and returning the result as
 // key/value pairs. For STAGE objects it also appends DESCRIBE STAGE properties;
 // for MASKING POLICY and ROW ACCESS POLICY objects it appends the DESCRIBE
 // signature, return type, and body; for NETWORK RULE objects it appends the
-// DESCRIBE NETWORK RULE value_list.
+// DESCRIBE NETWORK RULE value_list; for SERVICE objects the DESCRIBE SERVICE spec
+// and dns_name; for STREAMLIT objects the DESCRIBE STREAMLIT root_location and
+// main_file.
 func GetObjectProperties(ctx context.Context, client *snowflake.Client, database, schema, kind, name string) ([]snowflake.PropertyPair, error) {
 	query, err := BuildObjectPropertiesQuery(database, schema, kind, name)
 	if err != nil {
@@ -242,6 +254,32 @@ func GetObjectProperties(ctx context.Context, client *snowflake.Client, database
 				}
 				switch strings.ToLower(col) {
 				case "spec", "dns_name":
+					// Guard against a SQL NULL rendering as the literal "<nil>";
+					// emit an empty string instead.
+					val := ""
+					if row[ci] != nil {
+						val = fmt.Sprintf("%v", row[ci])
+					}
+					pairs = append(pairs, snowflake.PropertyPair{Key: col, Value: val})
+				}
+			}
+		}
+	}
+
+	if strings.ToUpper(kind) == "STREAMLIT" {
+		descRes, err := client.Execute(ctx, BuildDescribeStreamlitQuery(database, schema, name))
+		if err == nil && len(descRes.Rows) > 0 {
+			// DESCRIBE STREAMLIT returns one row whose columns include
+			// root_location and main_file (the app's source), which SHOW
+			// STREAMLITS omits. Map by column name so a column reordering on
+			// Snowflake's side doesn't mislabel the values.
+			row := descRes.Rows[0]
+			for ci, col := range descRes.Columns {
+				if ci >= len(row) {
+					break
+				}
+				switch strings.ToLower(col) {
+				case "root_location", "main_file":
 					// Guard against a SQL NULL rendering as the literal "<nil>";
 					// emit an empty string instead.
 					val := ""

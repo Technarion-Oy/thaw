@@ -61,6 +61,7 @@ import {
   GlobalOutlined,
   ContainerOutlined,
   DeploymentUnitOutlined,
+  AppstoreOutlined,
   ThunderboltOutlined,
   KeyOutlined,
   DisconnectOutlined,
@@ -137,6 +138,8 @@ import CreateImageRepositoryModal from "../imagerepository/CreateImageRepository
 import ImageRepositoryPropertiesModal from "../imagerepository/ImageRepositoryPropertiesModal";
 import CreateServiceModal from "../service/CreateServiceModal";
 import ServicePropertiesModal from "../service/ServicePropertiesModal";
+import CreateStreamlitModal from "../streamlit/CreateStreamlitModal";
+import StreamlitPropertiesModal from "../streamlit/StreamlitPropertiesModal";
 import CreatePipeModal from "../pipe/CreatePipeModal";
 import PipePropertiesModal from "../pipe/PipePropertiesModal";
 import RefreshPipeModal from "../pipe/RefreshPipeModal";
@@ -166,6 +169,7 @@ const KIND_LABEL: Record<string, string> = {
   "NETWORK RULE": "Network Rules",
   "IMAGE REPOSITORY": "Image Repositories",
   SERVICE:       "Services",
+  STREAMLIT:     "Streamlits",
   FUNCTION:      "Functions",
   PROCEDURE:     "Procedures",
   SEQUENCE:      "Sequences",
@@ -180,7 +184,7 @@ const KIND_LABEL: Record<string, string> = {
   "DBT PROJECT": "DBT Projects",
 };
 
-const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "NETWORK RULE", "IMAGE REPOSITORY", "SERVICE", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT"];
+const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "NETWORK RULE", "IMAGE REPOSITORY", "SERVICE", "STREAMLIT", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT"];
 
 const kindIcon = (kind: string) => objectIcon(kind);
 
@@ -617,6 +621,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [imageRepositoryPropsModal, setImageRepositoryPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createServiceModal, setCreateServiceModal] = useState<{ db: string; schema: string } | null>(null);
   const [servicePropsModal, setServicePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [createStreamlitModal, setCreateStreamlitModal] = useState<{ db: string; schema: string } | null>(null);
+  const [streamlitPropsModal, setStreamlitPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createPipeModal, setCreatePipeModal] = useState<{ db: string; schema: string } | null>(null);
   const [pipePropsModal, setPipePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [refreshPipeModal, setRefreshPipeModal] = useState<{ db: string; schema: string; name: string } | null>(null);
@@ -2146,6 +2152,25 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setServicePropsModal({ db, schema, name });
   };
 
+  const openCreateStreamlit = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    setCtxMenu(null);
+    setCreateStreamlitModal({ db, schema });
+  };
+
+  const openStreamlitProperties = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    setStreamlitPropsModal({ db, schema, name });
+  };
+
   const suspendService = () => {
     if (!ctxMenu) return;
     const parts = ctxMenu.nodeKey.split(":");
@@ -2536,6 +2561,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       case "NETWORK RULE": sql = `DROP NETWORK RULE ${fullName};`; break;
       case "IMAGE REPOSITORY": sql = `DROP IMAGE REPOSITORY ${fullName};`; break;
       case "SERVICE":     sql = `DROP SERVICE ${fullName};`; break;
+      case "STREAMLIT":   sql = `DROP STREAMLIT ${fullName};`; break;
       case "SEQUENCE":    sql = `DROP SEQUENCE ${fullName};`; break;
       case "STAGE":       sql = `DROP STAGE ${fullName};`; break;
       case "STREAM":      sql = `DROP STREAM ${fullName};`; break;
@@ -3173,6 +3199,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         case "NETWORK RULE": return `DROP NETWORK RULE ${fullName};`;
         case "IMAGE REPOSITORY": return `DROP IMAGE REPOSITORY ${fullName};`;
         case "SERVICE":     return `DROP SERVICE ${fullName};`;
+        case "STREAMLIT":   return `DROP STREAMLIT ${fullName};`;
         case "SEQUENCE":    return `DROP SEQUENCE ${fullName};`;
         case "STAGE":       return `DROP STAGE ${fullName};`;
         case "STREAM":      return `DROP STREAM ${fullName};`;
@@ -3710,6 +3737,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                   {menuItem("DBT Project…", <BuildOutlined style={{ fontSize: 12 }} />, openCreateDbtProject, undefined, !featureFlags.dbtProjectBrowser, "DBT Project Browser is disabled. Enable it under View → Enabled Features…")}
                   {menuItem("Image Repository…", <ContainerOutlined style={{ fontSize: 12 }} />, openCreateImageRepository)}
                   {menuItem("Service…", <DeploymentUnitOutlined style={{ fontSize: 12 }} />, openCreateService)}
+                  {menuItem("Streamlit…", <AppstoreOutlined style={{ fontSize: 12 }} />, openCreateStreamlit)}
                 </>
               ), 1)}
             </>
@@ -3748,6 +3776,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Create Image Repository…", <ContainerOutlined style={{ fontSize: 12 }} />, openCreateImageRepository)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "SERVICE" &&
             menuItem("Create Service…", <DeploymentUnitOutlined style={{ fontSize: 12 }} />, openCreateService)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "STREAMLIT" &&
+            menuItem("Create Streamlit…", <AppstoreOutlined style={{ fontSize: 12 }} />, openCreateStreamlit)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "PIPE" &&
             menuItem("Create Pipe…", <ApiOutlined style={{ fontSize: 12 }} />, openCreatePipe)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "FILE FORMAT" &&
@@ -3806,6 +3836,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Suspend", <PauseCircleOutlined style={{ fontSize: 12 }} />, suspendService)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "SERVICE" &&
             menuItem("Resume", <PlayCircleOutlined style={{ fontSize: 12 }} />, resumeService)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STREAMLIT" &&
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openStreamlitProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openPipeProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
@@ -3905,7 +3937,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Make Live", <CloudUploadOutlined style={{ fontSize: 12 }} />, makeNotebookLive, undefined, !featureFlags.snowparkNotebooks, "Snowpark & Notebooks is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && menuItem("View Definition", null, viewDefinition)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "STREAMLIT" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {/* Comparison diffs via GET_DDL, which image repositories and services
               don't support — exclude them so the diff view can't surface a
               GET_DDL error for a kind that has no DDL. */}
@@ -4427,6 +4459,24 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={servicePropsModal.schema}
           name={servicePropsModal.name}
           onClose={() => setServicePropsModal(null)}
+        />
+      )}
+
+      {createStreamlitModal && (
+        <CreateStreamlitModal
+          db={createStreamlitModal.db}
+          schema={createStreamlitModal.schema}
+          onClose={() => setCreateStreamlitModal(null)}
+          onSuccess={() => refreshDatabaseByName(createStreamlitModal.db, { schema: createStreamlitModal.schema, kind: "STREAMLIT" })}
+        />
+      )}
+
+      {streamlitPropsModal && (
+        <StreamlitPropertiesModal
+          db={streamlitPropsModal.db}
+          schema={streamlitPropsModal.schema}
+          name={streamlitPropsModal.name}
+          onClose={() => setStreamlitPropsModal(null)}
         />
       )}
 

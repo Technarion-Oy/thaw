@@ -63,6 +63,7 @@
   --icon-networkrule: #38bdf8;  /* sky blue (network / connectivity)        */
   --icon-imagerepository:#f472b6; /* pink (container images / SPCS)         */
   --icon-service:     #5eead4;  /* aqua (running SPCS container service)    */
+  --icon-streamlit:   #ff6b6b;  /* coral red (Streamlit brand)              */
   --icon-function:    #f0883e;  /* orange                                   */
   --icon-procedure:   #ff7b72;  /* coral                                    */
   --icon-sequence:    #d2a8ff;  /* lilac                                    */
@@ -133,6 +134,7 @@
   --icon-networkrule: #0a6e9e;
   --icon-imagerepository:#be185d;
   --icon-service:     #0e7490;
+  --icon-streamlit:   #d92b2b;
   --icon-function:    #bc4c00;
   --icon-procedure:   #cf222e;
   --icon-sequence:    #6f42c1;

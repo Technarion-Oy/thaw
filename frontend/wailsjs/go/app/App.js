@@ -58,6 +58,10 @@ export function AlterStage(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterStage'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterStreamlit(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterStreamlit'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterTableProperty(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['AlterTableProperty'](arg1, arg2, arg3, arg4, arg5);
 }
@@ -180,6 +184,10 @@ export function BuildCreateServiceSql(arg1, arg2, arg3) {
 
 export function BuildCreateStageSql(arg1) {
   return window['go']['app']['App']['BuildCreateStageSql'](arg1);
+}
+
+export function BuildCreateStreamlitSql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateStreamlitSql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateTagSql(arg1, arg2, arg3) {

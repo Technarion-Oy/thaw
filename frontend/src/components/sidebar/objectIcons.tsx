@@ -62,6 +62,7 @@ import {
   LinkOutlined,
   ContainerOutlined,
   DeploymentUnitOutlined,
+  AppstoreOutlined,
 } from "@ant-design/icons";
 
 // ── CSS variable name per kind ─────────────────────────────────────────────
@@ -78,6 +79,7 @@ const KIND_VAR: Record<string, string> = {
   "NETWORK RULE":    "--icon-networkrule",
   "IMAGE REPOSITORY": "--icon-imagerepository",
   SERVICE:           "--icon-service",
+  STREAMLIT:         "--icon-streamlit",
   FUNCTION:          "--icon-function",
   PROCEDURE:         "--icon-procedure",
   SEQUENCE:          "--icon-sequence",
@@ -106,6 +108,7 @@ const KIND_ICON: Record<string, React.ComponentType<{ style?: React.CSSPropertie
   "NETWORK RULE":   GlobalOutlined,
   "IMAGE REPOSITORY": ContainerOutlined,
   SERVICE:          DeploymentUnitOutlined,
+  STREAMLIT:        AppstoreOutlined,
   FUNCTION:         FunctionOutlined,
   PROCEDURE:        CodeOutlined,
   SEQUENCE:         NumberOutlined,

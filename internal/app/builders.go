@@ -29,6 +29,7 @@ import (
 	"thaw/internal/snowflake"
 	"thaw/internal/snowgitrepo"
 	"thaw/internal/stage"
+	"thaw/internal/streamlit"
 	"thaw/internal/tag"
 )
 
@@ -165,6 +166,11 @@ func (a *App) BuildCreateImageRepositorySql(database, schema string, cfg imagere
 // BuildCreateServiceSql returns the SQL for creating a Snowflake SERVICE (SPCS).
 func (a *App) BuildCreateServiceSql(database, schema string, cfg service.ServiceConfig) (string, error) {
 	return service.BuildCreateServiceSql(database, schema, cfg)
+}
+
+// BuildCreateStreamlitSql returns the SQL for creating a Snowflake STREAMLIT app.
+func (a *App) BuildCreateStreamlitSql(database, schema string, cfg streamlit.StreamlitConfig) (string, error) {
+	return streamlit.BuildCreateStreamlitSql(database, schema, cfg)
 }
 
 // BuildCreateStageSql returns the CREATE STAGE SQL statement.
