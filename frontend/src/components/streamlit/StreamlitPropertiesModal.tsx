@@ -19,6 +19,7 @@ import {
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterStreamlit, GetSnowsightURL } from "../../../wailsjs/go/app/App";
 import { ClipboardSetText, BrowserOpenURL } from "../../../wailsjs/runtime/runtime";
+import { quoteIdent } from "../shared/ObjectNameCaseControl";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -190,12 +191,18 @@ export default function StreamlitPropertiesModal({ db, schema, name, onClose }: 
   const saveComment = (v: string) =>
     v.trim() === "" ? runAlter("UNSET COMMENT", "Update comment failed")
                     : runAlter(`SET COMMENT = ${q1(v)}`, "Update comment failed");
+  // Quote the warehouse identifier (matching BuildCreateStreamlitSql) so a
+  // case-sensitive / quoted-created warehouse name resolves instead of being
+  // upper-cased by Snowflake. The stored SHOW value preserves the exact case.
   const saveWarehouse = (v: string) =>
     v.trim() === "" ? runAlter("UNSET QUERY_WAREHOUSE", "Update query warehouse failed")
-                    : runAlter(`SET QUERY_WAREHOUSE = ${v.trim()}`, "Update query warehouse failed");
-  // MAIN_FILE has no UNSET form (it's required), so only SET is offered.
-  const saveMainFile = (v: string) =>
-    runAlter(`SET MAIN_FILE = ${q1(v.trim())}`, "Update main file failed");
+                    : runAlter(`SET QUERY_WAREHOUSE = ${quoteIdent(v.trim())}`, "Update query warehouse failed");
+  // MAIN_FILE has no UNSET form (it's required) and Snowflake rejects an empty
+  // value, so guard against clearing it rather than issuing invalid SQL.
+  const saveMainFile = (v: string) => {
+    if (v.trim() === "") return Promise.reject(new Error("Main file cannot be empty."));
+    return runAlter(`SET MAIN_FILE = ${q1(v.trim())}`, "Update main file failed");
+  };
 
   const title = find("title");
   const comment = find("comment");

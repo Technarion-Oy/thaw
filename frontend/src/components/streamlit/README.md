@@ -20,7 +20,9 @@ object browser.
   open (`BrowserOpenURL`) and copy buttons, plus the raw `url_id` as a secondary
   line — and inline-editable **title**, **main file**, **query warehouse**, and
   **comment** via `AlterStreamlit` `SET`/`UNSET` clauses; the rest is shown in a
-  generic properties table.
+  generic properties table. **External access integrations** are settable at
+  create time only; the properties modal does not edit them (change them via raw
+  `ALTER STREAMLIT … SET/UNSET EXTERNAL_ACCESS_INTEGRATIONS` in the SQL editor).
 
 ## Wiring
 
