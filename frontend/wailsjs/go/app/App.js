@@ -26,6 +26,10 @@ export function AlterExternalTable(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterExternalTable'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterImageRepository(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterImageRepository'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterMaskingPolicy(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterMaskingPolicy'](arg1, arg2, arg3, arg4);
 }
@@ -136,6 +140,10 @@ export function BuildCreateFileFormatSql(arg1, arg2, arg3) {
 
 export function BuildCreateGitRepositorySql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateGitRepositorySql'](arg1, arg2, arg3);
+}
+
+export function BuildCreateImageRepositorySql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateImageRepositorySql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateMaskingPolicySql(arg1, arg2, arg3) {
@@ -1020,6 +1028,10 @@ export function ListGitRepoEntries(arg1, arg2, arg3, arg4) {
 
 export function ListGitTags(arg1, arg2, arg3) {
   return window['go']['app']['App']['ListGitTags'](arg1, arg2, arg3);
+}
+
+export function ListImagesInRepository(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ListImagesInRepository'](arg1, arg2, arg3);
 }
 
 export function ListIntegrations(arg1) {

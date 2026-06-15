@@ -11,6 +11,7 @@ import {dynamictable} from '../models';
 import {externaltable} from '../models';
 import {fileformat} from '../models';
 import {snowgitrepo} from '../models';
+import {imagerepository} from '../models';
 import {maskingpolicy} from '../models';
 import {materializedview} from '../models';
 import {networkrule} from '../models';
@@ -51,6 +52,8 @@ export function AlterBackupSet(arg1:string,arg2:string,arg3:string,arg4:string):
 export function AlterDynamicTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterExternalTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterImageRepository(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterMaskingPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -107,6 +110,8 @@ export function BuildCreateExternalTableSql(arg1:string,arg2:string,arg3:externa
 export function BuildCreateFileFormatSql(arg1:string,arg2:string,arg3:fileformat.FileFormatConfig):Promise<string>;
 
 export function BuildCreateGitRepositorySql(arg1:string,arg2:string,arg3:snowgitrepo.GitRepositoryConfig):Promise<string>;
+
+export function BuildCreateImageRepositorySql(arg1:string,arg2:string,arg3:imagerepository.ImageRepositoryConfig):Promise<string>;
 
 export function BuildCreateMaskingPolicySql(arg1:string,arg2:string,arg3:maskingpolicy.MaskingPolicyConfig):Promise<string>;
 
@@ -549,6 +554,8 @@ export function ListGitBranches(arg1:string,arg2:string,arg3:string):Promise<Arr
 export function ListGitRepoEntries(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<snowflake.GitRepoEntry>>;
 
 export function ListGitTags(arg1:string,arg2:string,arg3:string):Promise<Array<snowflake.GitTag>>;
+
+export function ListImagesInRepository(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function ListIntegrations(arg1:string):Promise<Array<snowflake.IntegrationRow>>;
 

@@ -59,6 +59,7 @@ import {
   EyeInvisibleOutlined,
   SafetyOutlined,
   GlobalOutlined,
+  ContainerOutlined,
   ThunderboltOutlined,
   KeyOutlined,
   DisconnectOutlined,
@@ -131,6 +132,8 @@ import CreateRowAccessPolicyModal from "../rowaccesspolicy/CreateRowAccessPolicy
 import RowAccessPolicyPropertiesModal from "../rowaccesspolicy/RowAccessPolicyPropertiesModal";
 import CreateNetworkRuleModal from "../networkrule/CreateNetworkRuleModal";
 import NetworkRulePropertiesModal from "../networkrule/NetworkRulePropertiesModal";
+import CreateImageRepositoryModal from "../imagerepository/CreateImageRepositoryModal";
+import ImageRepositoryPropertiesModal from "../imagerepository/ImageRepositoryPropertiesModal";
 import CreatePipeModal from "../pipe/CreatePipeModal";
 import PipePropertiesModal from "../pipe/PipePropertiesModal";
 import RefreshPipeModal from "../pipe/RefreshPipeModal";
@@ -158,6 +161,7 @@ const KIND_LABEL: Record<string, string> = {
   "MASKING POLICY": "Masking Policies",
   "ROW ACCESS POLICY": "Row Access Policies",
   "NETWORK RULE": "Network Rules",
+  "IMAGE REPOSITORY": "Image Repositories",
   FUNCTION:      "Functions",
   PROCEDURE:     "Procedures",
   SEQUENCE:      "Sequences",
@@ -172,7 +176,7 @@ const KIND_LABEL: Record<string, string> = {
   "DBT PROJECT": "DBT Projects",
 };
 
-const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "NETWORK RULE", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT"];
+const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "NETWORK RULE", "IMAGE REPOSITORY", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT"];
 
 const kindIcon = (kind: string) => objectIcon(kind);
 
@@ -600,6 +604,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [rowAccessPolicyPropsModal, setRowAccessPolicyPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createNetworkRuleModal, setCreateNetworkRuleModal] = useState<{ db: string; schema: string } | null>(null);
   const [networkRulePropsModal, setNetworkRulePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [createImageRepositoryModal, setCreateImageRepositoryModal] = useState<{ db: string; schema: string } | null>(null);
+  const [imageRepositoryPropsModal, setImageRepositoryPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createPipeModal, setCreatePipeModal] = useState<{ db: string; schema: string } | null>(null);
   const [pipePropsModal, setPipePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [refreshPipeModal, setRefreshPipeModal] = useState<{ db: string; schema: string; name: string } | null>(null);
@@ -2091,6 +2097,25 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setNetworkRulePropsModal({ db, schema, name });
   };
 
+  const openCreateImageRepository = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    setCtxMenu(null);
+    setCreateImageRepositoryModal({ db, schema });
+  };
+
+  const openImageRepositoryProperties = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    setImageRepositoryPropsModal({ db, schema, name });
+  };
+
   const suspendAlert = () => {
     if (!ctxMenu) return;
     const parts = ctxMenu.nodeKey.split(":");
@@ -2434,6 +2459,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       case "MASKING POLICY": sql = `DROP MASKING POLICY ${fullName};`; break;
       case "ROW ACCESS POLICY": sql = `DROP ROW ACCESS POLICY ${fullName};`; break;
       case "NETWORK RULE": sql = `DROP NETWORK RULE ${fullName};`; break;
+      case "IMAGE REPOSITORY": sql = `DROP IMAGE REPOSITORY ${fullName};`; break;
       case "SEQUENCE":    sql = `DROP SEQUENCE ${fullName};`; break;
       case "STAGE":       sql = `DROP STAGE ${fullName};`; break;
       case "STREAM":      sql = `DROP STREAM ${fullName};`; break;
@@ -3069,6 +3095,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         case "MASKING POLICY": return `DROP MASKING POLICY ${fullName};`;
         case "ROW ACCESS POLICY": return `DROP ROW ACCESS POLICY ${fullName};`;
         case "NETWORK RULE": return `DROP NETWORK RULE ${fullName};`;
+        case "IMAGE REPOSITORY": return `DROP IMAGE REPOSITORY ${fullName};`;
         case "SEQUENCE":    return `DROP SEQUENCE ${fullName};`;
         case "STAGE":       return `DROP STAGE ${fullName};`;
         case "STREAM":      return `DROP STREAM ${fullName};`;
@@ -3604,6 +3631,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                 <>
                   {menuItem("Git Repository…", <BranchesOutlined style={{ fontSize: 12 }} />, openCreateGitRepository)}
                   {menuItem("DBT Project…", <BuildOutlined style={{ fontSize: 12 }} />, openCreateDbtProject, undefined, !featureFlags.dbtProjectBrowser, "DBT Project Browser is disabled. Enable it under View → Enabled Features…")}
+                  {menuItem("Image Repository…", <ContainerOutlined style={{ fontSize: 12 }} />, openCreateImageRepository)}
                 </>
               ), 1)}
             </>
@@ -3638,6 +3666,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Create Row Access Policy…", <SafetyOutlined style={{ fontSize: 12 }} />, openCreateRowAccessPolicy)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "NETWORK RULE" &&
             menuItem("Create Network Rule…", <GlobalOutlined style={{ fontSize: 12 }} />, openCreateNetworkRule)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "IMAGE REPOSITORY" &&
+            menuItem("Create Image Repository…", <ContainerOutlined style={{ fontSize: 12 }} />, openCreateImageRepository)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "PIPE" &&
             menuItem("Create Pipe…", <ApiOutlined style={{ fontSize: 12 }} />, openCreatePipe)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "FILE FORMAT" &&
@@ -3688,6 +3718,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openRowAccessPolicyProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "NETWORK RULE" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openNetworkRuleProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "IMAGE REPOSITORY" &&
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openImageRepositoryProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openPipeProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
@@ -3787,7 +3819,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Make Live", <CloudUploadOutlined style={{ fontSize: 12 }} />, makeNotebookLive, undefined, !featureFlags.snowparkNotebooks, "Snowpark & Notebooks is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "obj" && menuItem("View Definition", null, viewDefinition)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "NETWORK RULE" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" &&
             menuItem("Select for Comparison", <DiffOutlined style={{ fontSize: 12 }} />, selectObjForComparison)}
           {ctxMenu.nodeType === "obj" && pendingDiff !== null &&
@@ -3795,7 +3827,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "obj" &&
             (ctxMenu.objKind === "VIEW" || ctxMenu.objKind === "PROCEDURE" || ctxMenu.objKind === "FUNCTION") &&
             menuItem("View Dependencies…", <ShareAltOutlined style={{ fontSize: 12 }} />, viewDependencies)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "NETWORK RULE" &&
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" &&
             menuItem("Rename…", <EditOutlined style={{ fontSize: 12 }} />, renameObject)}
           {ctxMenu.nodeType === "obj" && <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />}
           {ctxMenu.nodeType === "obj" && menuItem("Delete…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, deleteObject, "#f85149")}
@@ -4270,6 +4302,24 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={networkRulePropsModal.schema}
           name={networkRulePropsModal.name}
           onClose={() => setNetworkRulePropsModal(null)}
+        />
+      )}
+
+      {createImageRepositoryModal && (
+        <CreateImageRepositoryModal
+          db={createImageRepositoryModal.db}
+          schema={createImageRepositoryModal.schema}
+          onClose={() => setCreateImageRepositoryModal(null)}
+          onSuccess={() => refreshDatabaseByName(createImageRepositoryModal.db, { schema: createImageRepositoryModal.schema, kind: "IMAGE REPOSITORY" })}
+        />
+      )}
+
+      {imageRepositoryPropsModal && (
+        <ImageRepositoryPropertiesModal
+          db={imageRepositoryPropsModal.db}
+          schema={imageRepositoryPropsModal.schema}
+          name={imageRepositoryPropsModal.name}
+          onClose={() => setImageRepositoryPropsModal(null)}
         />
       )}
 

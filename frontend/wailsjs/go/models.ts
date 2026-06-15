@@ -1309,6 +1309,31 @@ export namespace gitrepo {
 
 }
 
+export namespace imagerepository {
+	
+	export class ImageRepositoryConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ImageRepositoryConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.comment = source["comment"];
+	    }
+	}
+
+}
+
 export namespace integrations {
 	
 	export class ApiIntegrationParams {

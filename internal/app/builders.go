@@ -17,6 +17,7 @@ import (
 	"thaw/internal/dynamictable"
 	"thaw/internal/externaltable"
 	"thaw/internal/fileformat"
+	"thaw/internal/imagerepository"
 	"thaw/internal/maskingpolicy"
 	"thaw/internal/materializedview"
 	"thaw/internal/networkrule"
@@ -153,6 +154,11 @@ func (a *App) BuildCreateRowAccessPolicySql(database, schema string, cfg rowacce
 // BuildCreateNetworkRuleSql returns the SQL for creating a Snowflake NETWORK RULE.
 func (a *App) BuildCreateNetworkRuleSql(database, schema string, cfg networkrule.NetworkRuleConfig) (string, error) {
 	return networkrule.BuildCreateNetworkRuleSql(database, schema, cfg)
+}
+
+// BuildCreateImageRepositorySql returns the SQL for creating a Snowflake IMAGE REPOSITORY.
+func (a *App) BuildCreateImageRepositorySql(database, schema string, cfg imagerepository.ImageRepositoryConfig) (string, error) {
+	return imagerepository.BuildCreateImageRepositorySql(database, schema, cfg)
 }
 
 // BuildCreateStageSql returns the CREATE STAGE SQL statement.
