@@ -39,7 +39,10 @@ func TestBuildCreateStreamlitSql(t *testing.T) {
 				"FROM @db.sc.app_stage/dashboard",
 				"MAIN_FILE = 'main.py'",
 				"QUERY_WAREHOUSE = \"MY_WH\"",
-				"EXTERNAL_ACCESS_INTEGRATIONS = (\"EAI_ONE\", \"EAI_TWO\")",
+				// Free-text EAI names are quoted only when needed: plain
+				// upper-case identifiers stay bare so they resolve the same way
+				// as in hand-written SQL.
+				"EXTERNAL_ACCESS_INTEGRATIONS = (EAI_ONE, EAI_TWO)",
 				"TITLE = 'My Dashboard'",
 				"COMMENT = 'sales app'",
 			},
@@ -96,6 +99,18 @@ func TestBuildCreateStreamlitSql(t *testing.T) {
 				Name: "APP4",
 			},
 			contains: []string{"FROM @<stage>"},
+		},
+		{
+			name: "eai names are quoted only when they need it",
+			cfg: StreamlitConfig{
+				Name:                       "APP5",
+				StageLocation:              "@stg",
+				MainFile:                   "app.py",
+				ExternalAccessIntegrations: "plain_eai, needs space",
+			},
+			// "plain_eai" is a valid bare identifier → stays bare (case-
+			// insensitive, like SQL); "needs space" must be quoted.
+			contains: []string{"EXTERNAL_ACCESS_INTEGRATIONS = (plain_eai, \"needs space\")"},
 		},
 	}
 

@@ -19,7 +19,7 @@ import {
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterStreamlit, GetSnowsightURL } from "../../../wailsjs/go/app/App";
 import { ClipboardSetText, BrowserOpenURL } from "../../../wailsjs/runtime/runtime";
-import { quoteIdent } from "../shared/ObjectNameCaseControl";
+import { quoteIdent, identToken } from "../shared/ObjectNameCaseControl";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -212,9 +212,15 @@ export default function StreamlitPropertiesModal({ db, schema, name, onClose }: 
 
   // The Snowsight deep-link is name-based (org / account / DB.SCHEMA.NAME), not
   // built from url_id. The #/streamlit-apps/<fqn> fragment routes to the app on
-  // the Snowsight host. Only available once the account base has resolved.
+  // the Snowsight host. Each identifier is referenced the way it would be in SQL
+  // — quoted when it isn't a plain upper-case bare identifier (mixed-case,
+  // special chars, or reserved word) so case-sensitive names resolve — and then
+  // URL-encoded so any quotes/special chars can't break the URL. Only available
+  // once the account base has resolved.
+  const fqnSegment = (id: string) =>
+    encodeURIComponent(identToken(id, id !== id.toUpperCase()));
   const appUrl = snowsightBase
-    ? `${snowsightBase}/#/streamlit-apps/${db}.${schema}.${name}`
+    ? `${snowsightBase}/#/streamlit-apps/${fqnSegment(db)}.${fqnSegment(schema)}.${fqnSegment(name)}`
     : "";
 
   // Keys handled by the dedicated sections above the generic Properties table.

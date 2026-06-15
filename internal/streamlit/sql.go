@@ -112,13 +112,18 @@ func normalizeStagePath(s string) string {
 	return v
 }
 
-// splitIdentList splits a comma-separated string into a trimmed, double-quoted
-// identifier slice, dropping empty entries. Used for EXTERNAL_ACCESS_INTEGRATIONS.
+// splitIdentList splits a comma-separated string into a trimmed identifier
+// slice, dropping empty entries. Used for EXTERNAL_ACCESS_INTEGRATIONS, whose
+// names are free-text input. Each name is quoted only when it can't be expressed
+// as a bare identifier (QuoteOrBare with caseSensitive=false) so that unquoted
+// input resolves case-insensitively exactly as it would in plain SQL — rather
+// than being force-quoted into a case-sensitive lookup that fails against the
+// normally upper-cased stored object.
 func splitIdentList(s string) []string {
 	var out []string
 	for _, part := range strings.Split(s, ",") {
 		if v := strings.TrimSpace(part); v != "" {
-			out = append(out, snowflake.QuoteIdent(v))
+			out = append(out, snowflake.QuoteOrBare(v, false))
 		}
 	}
 	return out
