@@ -442,6 +442,10 @@ function ObjTooltip({ cacheKey, db, schema, kind, name, args, children }: {
 
   const onOpenChange = (open: boolean) => {
     if (!open || loading) return;
+    // GET_DDL does not support image repositories, so the call would always
+    // fail and emit gosnowflake driver error-log noise on every hover. Skip the
+    // fetch entirely — with content left null the tooltip simply doesn't show.
+    if (kind === "IMAGE REPOSITORY") return;
     const fresh = getCached();
     if (fresh !== null) {
       if (content !== fresh) setContent(fresh);
@@ -3820,9 +3824,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "obj" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && menuItem("View Definition", null, viewDefinition)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
-          {ctxMenu.nodeType === "obj" &&
+          {/* Comparison diffs via GET_DDL, which image repositories don't
+              support — exclude them so the diff view can't surface a GET_DDL
+              error for a kind that has no DDL. */}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" &&
             menuItem("Select for Comparison", <DiffOutlined style={{ fontSize: 12 }} />, selectObjForComparison)}
-          {ctxMenu.nodeType === "obj" && pendingDiff !== null &&
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && pendingDiff !== null &&
             menuItem(`Compare with: ${pendingDiff.label}`, <DiffOutlined style={{ fontSize: 12, color: "var(--accent)" }} />, compareObjWith)}
           {ctxMenu.nodeType === "obj" &&
             (ctxMenu.objKind === "VIEW" || ctxMenu.objKind === "PROCEDURE" || ctxMenu.objKind === "FUNCTION") &&
