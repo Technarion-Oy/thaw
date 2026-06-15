@@ -2904,7 +2904,7 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 	defer rows.Close() //nolint:errcheck
 
 	cols, _ := rows.Columns()
-	nameIdx, kindIdx, argsIdx, builtinIdx, rowsIdx, predsIdx, taskRelIdx, finalizeColIdx, isDynamicIdx, isExternalIdx := -1, -1, -1, -1, -1, -1, -1, -1, -1, -1
+	nameIdx, kindIdx, argsIdx, builtinIdx, rowsIdx, predsIdx, taskRelIdx, finalizeColIdx, isDynamicIdx, isExternalIdx, isIcebergIdx := -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1
 	for i, col := range cols {
 		switch strings.ToLower(col) {
 		case "name":
@@ -2927,6 +2927,8 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 			isDynamicIdx = i
 		case "is_external":
 			isExternalIdx = i
+		case "is_iceberg":
+			isIcebergIdx = i
 		}
 	}
 	if nameIdx < 0 {
@@ -2973,6 +2975,15 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 		// External Tables). dedupeExternalTables in ListObjects is the
 		// belt-and-suspenders fallback when this column is absent.
 		if fixedKind == "" && isExternalIdx >= 0 && strings.EqualFold(fmt.Sprintf("%v", vals[isExternalIdx]), "Y") {
+			continue
+		}
+		// Iceberg tables surface in SHOW OBJECTS with is_iceberg=Y. They are
+		// listed separately via SHOW ICEBERG TABLES (kind "ICEBERG TABLE"), so
+		// skip them here on the generic-kind path to avoid duplicate tree entries
+		// (one under Tables, one under Iceberg Tables). dedupeIcebergTables in
+		// ListObjects is the belt-and-suspenders fallback when this column is
+		// absent.
+		if fixedKind == "" && isIcebergIdx >= 0 && strings.EqualFold(fmt.Sprintf("%v", vals[isIcebergIdx]), "Y") {
 			continue
 		}
 		kind := fixedKind
@@ -3136,6 +3147,7 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 	commands := []showCmd{
 		{fmt.Sprintf("SHOW DYNAMIC TABLES IN SCHEMA %s", q), "DYNAMIC TABLE"},
 		{fmt.Sprintf("SHOW EXTERNAL TABLES IN SCHEMA %s", q), "EXTERNAL TABLE"},
+		{fmt.Sprintf("SHOW ICEBERG TABLES IN SCHEMA %s", q), "ICEBERG TABLE"},
 		{fmt.Sprintf("SHOW MATERIALIZED VIEWS IN SCHEMA %s", q), "MATERIALIZED VIEW"},
 		{fmt.Sprintf("SHOW ALERTS IN SCHEMA %s", q), "ALERT"},
 		{fmt.Sprintf("SHOW TAGS IN SCHEMA %s", q), "TAG"},
@@ -3289,6 +3301,11 @@ func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]Sn
 	// is_external=Y column when present; drop any remaining (schema, name)
 	// collision as a fallback for editions that omit that column.
 	basic = dedupeExternalTables(basic, extended)
+	// Iceberg tables are listed explicitly by ListExtendedObjects (kind "ICEBERG
+	// TABLE") and are dropped from the generic SHOW OBJECTS path by the
+	// is_iceberg=Y column when present; drop any remaining (schema, name)
+	// collision as a fallback for editions that omit that column.
+	basic = dedupeIcebergTables(basic, extended)
 	// Materialized views are listed explicitly by ListExtendedObjects (kind
 	// "MATERIALIZED VIEW"). They can also surface in SHOW OBJECTS (typically as a
 	// VIEW), so drop any (schema, name) collision to avoid duplicate tree entries
@@ -3345,6 +3362,12 @@ func dedupeDynamicTables(basic, extended []SnowflakeObject) []SnowflakeObject {
 // matches an extended object of kind "MATERIALIZED VIEW". See dedupeByExtendedKind.
 func dedupeMaterializedViews(basic, extended []SnowflakeObject) []SnowflakeObject {
 	return dedupeByExtendedKind(basic, extended, "MATERIALIZED VIEW")
+}
+
+// dedupeIcebergTables removes from basic any object whose (schema, name) matches
+// an extended object of kind "ICEBERG TABLE". See dedupeByExtendedKind.
+func dedupeIcebergTables(basic, extended []SnowflakeObject) []SnowflakeObject {
+	return dedupeByExtendedKind(basic, extended, "ICEBERG TABLE")
 }
 
 // getObjectCache returns a cached result if it exists and hasn't expired.
@@ -3471,6 +3494,10 @@ func buildGetDDLQuery(database, schema, kind, name, arguments string) (query, id
 		ddlKind = "DYNAMIC_TABLE"
 	case "EXTERNAL TABLE":
 		ddlKind = "EXTERNAL_TABLE"
+	case "ICEBERG TABLE":
+		// GET_DDL has no ICEBERG_TABLE object type — Iceberg tables are
+		// retrieved via the 'TABLE' type.
+		ddlKind = "TABLE"
 	case "MATERIALIZED VIEW":
 		// GET_DDL has no MATERIALIZED_VIEW object type — TABLE and VIEW are
 		// interchangeable and materialized views are retrieved via 'VIEW'.

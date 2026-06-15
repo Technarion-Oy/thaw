@@ -62,6 +62,7 @@ import {
   ContainerOutlined,
   DeploymentUnitOutlined,
   AppstoreOutlined,
+  GoldOutlined,
   ThunderboltOutlined,
   KeyOutlined,
   DisconnectOutlined,
@@ -78,7 +79,7 @@ import {
 import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, AlterDynamicTable, AlterExternalTable, AlterMaterializedView, AlterAlert, ExecuteAlert, AlterService, UploadFileToStage, PickOpenFile, ExecDDL, ListStageEntries, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory, BuildDropColumnSql, BuildRenameColumnSql, BuildSetColumnNotNullSql, BuildDropColumnNotNullSql, BuildSetColumnCommentSql, BuildChangeColumnTypeSql } from "../../../wailsjs/go/app/App";
+import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, AlterDynamicTable, AlterExternalTable, AlterIcebergTable, AlterMaterializedView, AlterAlert, ExecuteAlert, AlterService, UploadFileToStage, PickOpenFile, ExecDDL, ListStageEntries, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory, BuildDropColumnSql, BuildRenameColumnSql, BuildSetColumnNotNullSql, BuildDropColumnNotNullSql, BuildSetColumnCommentSql, BuildChangeColumnTypeSql } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl, { identToken, quoteIdent } from "../shared/ObjectNameCaseControl";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
@@ -122,6 +123,8 @@ import CreateDynamicTableModal from "../dynamictable/CreateDynamicTableModal";
 import DynamicTablePropertiesModal from "../dynamictable/DynamicTablePropertiesModal";
 import CreateExternalTableModal from "../externaltable/CreateExternalTableModal";
 import ExternalTablePropertiesModal from "../externaltable/ExternalTablePropertiesModal";
+import CreateIcebergTableModal from "../icebergtable/CreateIcebergTableModal";
+import IcebergTablePropertiesModal from "../icebergtable/IcebergTablePropertiesModal";
 import CreateMaterializedViewModal from "../materializedview/CreateMaterializedViewModal";
 import MaterializedViewPropertiesModal from "../materializedview/MaterializedViewPropertiesModal";
 import CreateAlertModal from "../alert/CreateAlertModal";
@@ -161,6 +164,7 @@ const KIND_LABEL: Record<string, string> = {
   VIEW:          "Views",
   "DYNAMIC TABLE": "Dynamic Tables",
   "EXTERNAL TABLE": "External Tables",
+  "ICEBERG TABLE": "Iceberg Tables",
   "MATERIALIZED VIEW": "Materialized Views",
   ALERT:         "Alerts",
   TAG:           "Tags",
@@ -184,7 +188,7 @@ const KIND_LABEL: Record<string, string> = {
   "DBT PROJECT": "DBT Projects",
 };
 
-const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "NETWORK RULE", "IMAGE REPOSITORY", "SERVICE", "STREAMLIT", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT"];
+const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "ICEBERG TABLE", "FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "NETWORK RULE", "IMAGE REPOSITORY", "SERVICE", "STREAMLIT", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT"];
 
 const kindIcon = (kind: string) => objectIcon(kind);
 
@@ -605,6 +609,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [dynamicTablePropsModal, setDynamicTablePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createExternalTableModal, setCreateExternalTableModal] = useState<{ db: string; schema: string } | null>(null);
   const [externalTablePropsModal, setExternalTablePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [createIcebergTableModal, setCreateIcebergTableModal] = useState<{ db: string; schema: string } | null>(null);
+  const [icebergTablePropsModal, setIcebergTablePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createMaterializedViewModal, setCreateMaterializedViewModal] = useState<{ db: string; schema: string } | null>(null);
   const [materializedViewPropsModal, setMaterializedViewPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createAlertModal, setCreateAlertModal] = useState<{ db: string; schema: string } | null>(null);
@@ -1955,6 +1961,47 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     });
   };
 
+  const openCreateIcebergTable = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    setCtxMenu(null);
+    setCreateIcebergTableModal({ db, schema });
+  };
+
+  const openIcebergTableProperties = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    setIcebergTablePropsModal({ db, schema, name });
+  };
+
+  const refreshIcebergTable = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    modal.confirm({
+      title: "Refresh Iceberg Table",
+      content: `Re-sync the metadata of "${name}" from its catalog now? Applies to externally-managed Iceberg tables.`,
+      okText: "Refresh",
+      onOk: async () => {
+        try {
+          await AlterIcebergTable(db, schema, name, "REFRESH");
+          contextMsg.success(`Iceberg table "${name}" refresh triggered.`);
+        } catch (e) {
+          contextMsg.error(`Failed to refresh iceberg table: ${String(e)}`);
+        }
+      },
+    });
+  };
+
   const openCreateMaterializedView = () => {
     if (!ctxMenu) return;
     const parts = ctxMenu.nodeKey.split(":");
@@ -2553,6 +2600,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       case "VIEW":        sql = `DROP VIEW ${fullName};`; break;
       case "DYNAMIC TABLE": sql = `DROP DYNAMIC TABLE ${fullName};`; break;
       case "EXTERNAL TABLE": sql = `DROP EXTERNAL TABLE ${fullName};`; break;
+      case "ICEBERG TABLE": sql = `DROP ICEBERG TABLE ${fullName};`; break;
       case "MATERIALIZED VIEW": sql = `DROP MATERIALIZED VIEW ${fullName};`; break;
       case "ALERT":       sql = `DROP ALERT ${fullName};`; break;
       case "TAG":         sql = `DROP TAG ${fullName};`; break;
@@ -2751,6 +2799,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       case "TABLE":       sql = `ALTER TABLE ${fullOld} RENAME TO ${fullNew};`; break;
       case "VIEW":        sql = `ALTER VIEW ${fullOld} RENAME TO ${fullNew};`; break;
       case "DYNAMIC TABLE": sql = `ALTER DYNAMIC TABLE ${fullOld} RENAME TO ${fullNew};`; break;
+      case "ICEBERG TABLE": sql = `ALTER ICEBERG TABLE ${fullOld} RENAME TO ${fullNew};`; break;
       case "MATERIALIZED VIEW": sql = `ALTER MATERIALIZED VIEW ${fullOld} RENAME TO ${fullNew};`; break;
       case "SEQUENCE":    sql = `ALTER SEQUENCE ${fullOld} RENAME TO ${fullNew};`; break;
       case "STAGE":       sql = `ALTER STAGE ${fullOld} RENAME TO ${fullNew};`; break;
@@ -3191,6 +3240,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         case "VIEW":        return `DROP VIEW ${fullName};`;
         case "DYNAMIC TABLE": return `DROP DYNAMIC TABLE ${fullName};`;
         case "EXTERNAL TABLE": return `DROP EXTERNAL TABLE ${fullName};`;
+        case "ICEBERG TABLE": return `DROP ICEBERG TABLE ${fullName};`;
         case "MATERIALIZED VIEW": return `DROP MATERIALIZED VIEW ${fullName};`;
         case "ALERT":       return `DROP ALERT ${fullName};`;
         case "TAG":         return `DROP TAG ${fullName};`;
@@ -3706,6 +3756,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                   {menuItem("Table…", <TableOutlined style={{ fontSize: 12 }} />, openCreateTable)}
                   {menuItem("Dynamic Table…", <RetweetOutlined style={{ fontSize: 12 }} />, openCreateDynamicTable)}
                   {menuItem("External Table…", <CloudServerOutlined style={{ fontSize: 12 }} />, openCreateExternalTable)}
+                  {menuItem("Iceberg Table…", <GoldOutlined style={{ fontSize: 12 }} />, openCreateIcebergTable)}
                   {menuItem("Materialized View…", <BlockOutlined style={{ fontSize: 12 }} />, openCreateMaterializedView)}
                 </>
               ), 1)}
@@ -3760,6 +3811,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Create Dynamic Table…", <RetweetOutlined style={{ fontSize: 12 }} />, openCreateDynamicTable)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "EXTERNAL TABLE" &&
             menuItem("Create External Table…", <CloudServerOutlined style={{ fontSize: 12 }} />, openCreateExternalTable)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "ICEBERG TABLE" &&
+            menuItem("Create Iceberg Table…", <GoldOutlined style={{ fontSize: 12 }} />, openCreateIcebergTable)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "MATERIALIZED VIEW" &&
             menuItem("Create Materialized View…", <BlockOutlined style={{ fontSize: 12 }} />, openCreateMaterializedView)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "ALERT" &&
@@ -3806,6 +3859,10 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openExternalTableProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "EXTERNAL TABLE" &&
             menuItem("Refresh…", <SyncOutlined style={{ fontSize: 12 }} />, refreshExternalTable)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "ICEBERG TABLE" &&
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openIcebergTableProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "ICEBERG TABLE" &&
+            menuItem("Refresh…", <SyncOutlined style={{ fontSize: 12 }} />, refreshIcebergTable)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MATERIALIZED VIEW" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openMaterializedViewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MATERIALIZED VIEW" &&
@@ -3894,7 +3951,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {/* DBT Project version/directory/file context menu */}
           {(ctxMenu.nodeType === "dbtversion" || ctxMenu.nodeType === "dbtdir") && menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshTreeNode)}
 
-          {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW" || ctxMenu.objKind === "DYNAMIC TABLE" || ctxMenu.objKind === "EXTERNAL TABLE" || ctxMenu.objKind === "MATERIALIZED VIEW") &&
+          {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW" || ctxMenu.objKind === "DYNAMIC TABLE" || ctxMenu.objKind === "EXTERNAL TABLE" || ctxMenu.objKind === "ICEBERG TABLE" || ctxMenu.objKind === "MATERIALIZED VIEW") &&
             menuItem("Select Top 1000 Rows", <TableOutlined style={{ fontSize: 12 }} />, selectTop1000)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
             menuItem("Select for Insert Target", <SyncOutlined style={{ fontSize: 12 }} />, selectForInsertTarget, undefined, !featureFlags.insertMapping, "Insert Mapping is disabled. Enable it under View → Enabled Features…")}
@@ -3937,7 +3994,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Make Live", <CloudUploadOutlined style={{ fontSize: 12 }} />, makeNotebookLive, undefined, !featureFlags.snowparkNotebooks, "Snowpark & Notebooks is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && menuItem("View Definition", null, viewDefinition)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "STREAMLIT" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ICEBERG TABLE" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "STREAMLIT" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {/* Comparison diffs via GET_DDL, which image repositories and services
               don't support — exclude them so the diff view can't surface a
               GET_DDL error for a kind that has no DDL. */}
@@ -4486,6 +4543,24 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={externalTablePropsModal.schema}
           name={externalTablePropsModal.name}
           onClose={() => setExternalTablePropsModal(null)}
+        />
+      )}
+
+      {createIcebergTableModal && (
+        <CreateIcebergTableModal
+          db={createIcebergTableModal.db}
+          schema={createIcebergTableModal.schema}
+          onClose={() => setCreateIcebergTableModal(null)}
+          onSuccess={() => refreshDatabaseByName(createIcebergTableModal.db, { schema: createIcebergTableModal.schema, kind: "ICEBERG TABLE" })}
+        />
+      )}
+
+      {icebergTablePropsModal && (
+        <IcebergTablePropertiesModal
+          db={icebergTablePropsModal.db}
+          schema={icebergTablePropsModal.schema}
+          name={icebergTablePropsModal.name}
+          onClose={() => setIcebergTablePropsModal(null)}
         />
       )}
 

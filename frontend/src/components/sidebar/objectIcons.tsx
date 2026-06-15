@@ -63,6 +63,7 @@ import {
   ContainerOutlined,
   DeploymentUnitOutlined,
   AppstoreOutlined,
+  GoldOutlined,
 } from "@ant-design/icons";
 
 // ── CSS variable name per kind ─────────────────────────────────────────────
@@ -71,6 +72,7 @@ const KIND_VAR: Record<string, string> = {
   VIEW:              "--icon-view",
   "DYNAMIC TABLE":   "--icon-dynamictable",
   "EXTERNAL TABLE":  "--icon-externaltable",
+  "ICEBERG TABLE":   "--icon-icebergtable",
   "MATERIALIZED VIEW": "--icon-materializedview",
   ALERT:             "--icon-alert",
   TAG:               "--icon-tag",
@@ -100,6 +102,7 @@ const KIND_ICON: Record<string, React.ComponentType<{ style?: React.CSSPropertie
   VIEW:             EyeOutlined,
   "DYNAMIC TABLE":  RetweetOutlined,
   "EXTERNAL TABLE": CloudServerOutlined,
+  "ICEBERG TABLE":  GoldOutlined,
   "MATERIALIZED VIEW": BlockOutlined,
   ALERT:            AlertOutlined,
   TAG:              TagsOutlined,

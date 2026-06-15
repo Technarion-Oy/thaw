@@ -11,6 +11,7 @@ import {dynamictable} from '../models';
 import {externaltable} from '../models';
 import {fileformat} from '../models';
 import {snowgitrepo} from '../models';
+import {icebergtable} from '../models';
 import {imagerepository} from '../models';
 import {maskingpolicy} from '../models';
 import {materializedview} from '../models';
@@ -54,6 +55,8 @@ export function AlterBackupSet(arg1:string,arg2:string,arg3:string,arg4:string):
 export function AlterDynamicTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterExternalTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterIcebergTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterImageRepository(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -116,6 +119,8 @@ export function BuildCreateExternalTableSql(arg1:string,arg2:string,arg3:externa
 export function BuildCreateFileFormatSql(arg1:string,arg2:string,arg3:fileformat.FileFormatConfig):Promise<string>;
 
 export function BuildCreateGitRepositorySql(arg1:string,arg2:string,arg3:snowgitrepo.GitRepositoryConfig):Promise<string>;
+
+export function BuildCreateIcebergTableSql(arg1:string,arg2:string,arg3:icebergtable.IcebergTableConfig):Promise<string>;
 
 export function BuildCreateImageRepositorySql(arg1:string,arg2:string,arg3:imagerepository.ImageRepositoryConfig):Promise<string>;
 
