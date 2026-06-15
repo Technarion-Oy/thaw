@@ -3122,7 +3122,7 @@ func (c *Client) ListBasicObjects(ctx context.Context, database, schema string) 
 // dedicated SHOW commands for object types not covered by SHOW OBJECTS (the
 // authoritative list is the command slice below: DYNAMIC TABLE, EXTERNAL TABLE,
 // MATERIALIZED VIEW, ALERT, TAG, MASKING POLICY, ROW ACCESS POLICY, NETWORK
-// RULE, IMAGE REPOSITORY, SERVICE, PROCEDURE, FUNCTION, TASK, STREAM, STAGE, FILE FORMAT,
+// RULE, IMAGE REPOSITORY, SERVICE, STREAMLIT, PROCEDURE, FUNCTION, TASK, STREAM, STAGE, FILE FORMAT,
 // PIPE, NOTEBOOK, SECRET, GIT REPOSITORY, DBT PROJECT). Individual commands that
 // fail (e.g. due to missing privileges) are silently skipped. Includes the TASK
 // finalize enrichment logic.
@@ -3144,6 +3144,7 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 		{fmt.Sprintf("SHOW NETWORK RULES IN SCHEMA %s", q), "NETWORK RULE"},
 		{fmt.Sprintf("SHOW IMAGE REPOSITORIES IN SCHEMA %s", q), "IMAGE REPOSITORY"},
 		{fmt.Sprintf("SHOW SERVICES IN SCHEMA %s", q), "SERVICE"},
+		{fmt.Sprintf("SHOW STREAMLITS IN SCHEMA %s", q), "STREAMLIT"},
 		{fmt.Sprintf("SHOW PROCEDURES IN SCHEMA %s", q), "PROCEDURE"},
 		{fmt.Sprintf("SHOW FUNCTIONS IN SCHEMA %s", q), "FUNCTION"},
 		{fmt.Sprintf("SHOW TASKS IN SCHEMA %s", q), "TASK"},

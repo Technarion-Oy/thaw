@@ -161,14 +161,19 @@ func (a *App) GetCurrentRegion() (string, error) {
 	return "", nil
 }
 
-// GetSnowsightURL returns the Snowsight login page URL for the current account,
-// formed as https://<org>-<account>.snowflakecomputing.com using
-// CURRENT_ORGANIZATION_NAME() and CURRENT_ACCOUNT_NAME().
+// GetSnowsightURL returns the Snowsight URL for the current account in the
+// canonical new-style form https://app.snowflake.com/<org>/<account> using
+// CURRENT_ORGANIZATION_NAME() and CURRENT_ACCOUNT_NAME(). The older
+// https://<org>-<account>.snowflakecomputing.com host simply redirects here, so
+// emitting the new form directly avoids the redirect hop and yields URLs that
+// concatenate cleanly with Snowsight route fragments (e.g. the Streamlit
+// deep-link "/#/streamlit-apps/<DB>.<SCHEMA>.<NAME>"). No trailing slash is
+// appended so callers can suffix a "/#/…" fragment without doubling the slash.
 func (a *App) GetSnowsightURL() (string, error) {
 	if a.client == nil {
 		return "", apperrors.ErrNotConnected
 	}
-	qr, err := a.client.Execute(a.ctx, `SELECT 'https://' || LOWER(CURRENT_ORGANIZATION_NAME()) || '-' || LOWER(CURRENT_ACCOUNT_NAME()) || '.snowflakecomputing.com'`)
+	qr, err := a.client.Execute(a.ctx, `SELECT 'https://app.snowflake.com/' || LOWER(CURRENT_ORGANIZATION_NAME()) || '/' || LOWER(CURRENT_ACCOUNT_NAME())`)
 	if err != nil {
 		return "", err
 	}

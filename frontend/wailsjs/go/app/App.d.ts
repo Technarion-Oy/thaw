@@ -19,6 +19,7 @@ import {pipe} from '../models';
 import {rowaccesspolicy} from '../models';
 import {secret} from '../models';
 import {service} from '../models';
+import {streamlit} from '../models';
 import {tag} from '../models';
 import {erdesigner} from '../models';
 import {snowpark} from '../models';
@@ -69,6 +70,8 @@ export function AlterRowAccessPolicy(arg1:string,arg2:string,arg3:string,arg4:st
 export function AlterService(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterStage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterStreamlit(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterTableProperty(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
@@ -131,6 +134,8 @@ export function BuildCreateSecretSql(arg1:string,arg2:string,arg3:secret.SecretC
 export function BuildCreateServiceSql(arg1:string,arg2:string,arg3:service.ServiceConfig):Promise<string>;
 
 export function BuildCreateStageSql(arg1:stage.StageConfig):Promise<string>;
+
+export function BuildCreateStreamlitSql(arg1:string,arg2:string,arg3:streamlit.StreamlitConfig):Promise<string>;
 
 export function BuildCreateTagSql(arg1:string,arg2:string,arg3:tag.TagConfig):Promise<string>;
 
