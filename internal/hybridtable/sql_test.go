@@ -125,7 +125,23 @@ func TestBuildCreateIndexSql(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := `CREATE INDEX "IDX_CUST" ON "DB"."SC"."ORDERS" (CUSTOMER_ID, STATUS) INCLUDE (TOTAL);`
+	// Columns are always double-quoted (catalog-canonical names).
+	want := `CREATE INDEX "IDX_CUST" ON "DB"."SC"."ORDERS" ("CUSTOMER_ID", "STATUS") INCLUDE ("TOTAL");`
+	if sql != want {
+		t.Errorf("got:\n%s\nwant:\n%s", sql, want)
+	}
+}
+
+func TestBuildCreateIndexSql_MixedCaseColumns(t *testing.T) {
+	// Mixed-case catalog columns must be quoted verbatim, never folded.
+	sql, err := BuildCreateIndexSql("DB", "SC", "ORDERS", HybridIndex{
+		Name:    "IDX_MIXED",
+		Columns: []string{"MixedCase"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := `CREATE INDEX "IDX_MIXED" ON "DB"."SC"."ORDERS" ("MixedCase");`
 	if sql != want {
 		t.Errorf("got:\n%s\nwant:\n%s", sql, want)
 	}

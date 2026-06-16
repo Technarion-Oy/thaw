@@ -257,7 +257,9 @@ export default function HybridTablePropertiesModal({ db, schema, name, onClose }
   const owner = find("owner");
   const rowCount = find("rows");
   const bytes = find("bytes");
-  const handledKeys = new Set(["comment"]);
+  // Keys rendered in the Overview / Settings sections, hidden from the generic
+  // Properties dump below.
+  const handledKeys = new Set(["comment", "owner", "rows", "bytes"]);
 
   // Add-index column choices, filtered by the datatypes Snowflake allows for
   // hybrid-table index keys vs. INCLUDE columns. A column cannot be both a key
@@ -310,7 +312,10 @@ export default function HybridTablePropertiesModal({ db, schema, name, onClose }
     },
     {
       title: "", key: "actions", width: 44,
-      render: (_: unknown, r: typeof indexData[number]) => (
+      // The primary key surfaces here as the (only) UNIQUE index, and Snowflake
+      // won't let you DROP INDEX the enforcing PK index — so offer Drop only on
+      // secondary (non-unique) indexes.
+      render: (_: unknown, r: typeof indexData[number]) => isUnique(r.unique) ? null : (
         <Popconfirm
           title="Drop this index?"
           description={`DROP INDEX ${r.idxName}`}
