@@ -21,9 +21,12 @@ import (
 // AlterHybridTable runs an ALTER TABLE statement for the given hybrid table.
 // Hybrid tables have no dedicated ALTER HYBRID TABLE statement — they are
 // altered through the plain TABLE grammar — so clause is everything that
-// follows the table name, e.g. "SET COMMENT = 'note'", "UNSET COMMENT", or
-// "RENAME TO \"DB\".\"SC\".NEW_NAME". The caller is responsible for correct SQL
-// quoting inside the clause; this method only double-quotes the table identifier.
+// follows the table name. It accepts any valid ALTER TABLE clause, but the
+// properties panel currently uses it only for comment changes
+// ("SET COMMENT = 'note'" / "UNSET COMMENT"); RENAME goes through the Sidebar's
+// own inline "ALTER TABLE … RENAME TO" path. The caller is responsible for
+// correct SQL quoting inside the clause; this method only double-quotes the
+// table identifier.
 func (a *App) AlterHybridTable(database, schema, name, clause string) error {
 	if a.client == nil {
 		return apperrors.ErrNotConnected

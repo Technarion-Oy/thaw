@@ -11,12 +11,8 @@
 // @thaw-domain: Object Browser & Administration
 //
 // Shared helpers for the hybrid-table index editors (create modal + properties
-// dialog): comma-list splitting and the column-type eligibility rules Snowflake
-// enforces for hybrid-table indexes.
-
-/** Split a comma-separated identifier list into trimmed, non-empty entries. */
-export const splitCols = (s: string) =>
-  s.split(",").map((c) => c.trim()).filter((c) => c !== "");
+// dialog): the column-type eligibility rules Snowflake enforces for
+// hybrid-table indexes.
 
 /**
  * Reduce a Snowflake data-type string to its bare base type, upper-cased:

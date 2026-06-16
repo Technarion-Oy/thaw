@@ -22,11 +22,10 @@ enforced primary key and secondary indexes) in the object browser.
   (`CreateHybridTableIndex` → `CREATE INDEX`, with key / `INCLUDE` columns picked
   from dropdowns fetched via `GetTableColumnsWithTypes`) and dropping
   (`DropHybridTableIndex` → `DROP INDEX`) secondary indexes.
-- **`indexColumns.ts`** — shared helpers: `splitCols`, and the index-eligibility
-  filters (`isIndexableType` / `isIncludableType`) that hide column types
-  Snowflake forbids in hybrid-table indexes (semi-structured / geospatial /
-  VECTOR / `TIMESTAMP_TZ` for key columns; semi-structured / geospatial for
-  `INCLUDE`).
+- **`indexColumns.ts`** — shared index-eligibility filters
+  (`isIndexableType` / `isIncludableType`) that hide column types Snowflake
+  forbids in hybrid-table indexes (semi-structured / geospatial / VECTOR /
+  `TIMESTAMP_TZ` for key columns; semi-structured / geospatial for `INCLUDE`).
 
 ## Wiring
 

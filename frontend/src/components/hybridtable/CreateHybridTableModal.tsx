@@ -10,7 +10,7 @@
 //
 // @thaw-domain: Object Browser & Administration
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Form, Input, Select, Space, Typography, Button, Checkbox, Collapse,
 } from "antd";
@@ -99,6 +99,30 @@ export default function CreateHybridTableModal({ db, schema, onClose, onSuccess 
   const includeColumnOptions = namedColumns
     .filter((c) => isIncludableType(c.type))
     .map((c) => ({ value: c.name, label: c.name }));
+
+  // Reconcile index selections whenever the columns change: drop any key /
+  // INCLUDE column that no longer exists or is no longer type-eligible (renamed,
+  // removed, or retyped to a barred type), so a stale selection can't leak into
+  // the generated DDL.
+  useEffect(() => {
+    const keyValid = new Set(namedColumns.filter((c) => isIndexableType(c.type)).map((c) => c.name));
+    const incValid = new Set(namedColumns.filter((c) => isIncludableType(c.type)).map((c) => c.name));
+    setIndexes((prev) => {
+      let changed = false;
+      const next = prev.map((idx) => {
+        const cols = idx.columns.filter((c) => keyValid.has(c));
+        const inc = idx.include.filter((c) => incValid.has(c));
+        if (cols.length !== idx.columns.length || inc.length !== idx.include.length) {
+          changed = true;
+          return { ...idx, columns: cols, include: inc };
+        }
+        return idx;
+      });
+      return changed ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [columns]);
+
   const hasPrimaryKey = namedColumns.some((c) => c.primaryKey);
   // A hybrid table requires a name, at least one column, and a PRIMARY KEY.
   const canSubmit = name.trim().length > 0 && namedColumns.length > 0 && hasPrimaryKey;
