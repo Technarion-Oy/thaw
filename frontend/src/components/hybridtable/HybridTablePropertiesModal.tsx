@@ -21,9 +21,9 @@ import {
 import {
   GetObjectProperties, AlterHybridTable, ListHybridTableIndexes,
   CreateHybridTableIndex, DropHybridTableIndex, GetTableColumnsWithTypes,
+  HybridIndexColumnOptions,
 } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
-import { isIndexableType, isIncludableType } from "./indexColumns";
 
 const { Text } = Typography;
 
@@ -165,8 +165,11 @@ export default function HybridTablePropertiesModal({ db, schema, name, onClose }
   const [indexesLoading, setIndexesLoading] = useState(false);
   const [indexesError, setIndexesError] = useState<string | null>(null);
 
-  // Table columns (with datatypes), for the add-index column dropdowns.
-  const [tableColumns, setTableColumns] = useState<snowflake.ColumnInfo[]>([]);
+  // Index-eligible column names for the add-index dropdowns, computed by the
+  // backend from the table's columns (datatype rules live in
+  // internal/hybridtable, surfaced via HybridIndexColumnOptions).
+  const [keyEligible, setKeyEligible] = useState<string[]>([]);
+  const [includeEligible, setIncludeEligible] = useState<string[]>([]);
 
   // Add-index inline form.
   const [adding, setAdding] = useState(false);
@@ -203,10 +206,15 @@ export default function HybridTablePropertiesModal({ db, schema, name, onClose }
   const loadColumns = useCallback(async () => {
     try {
       const cols = await GetTableColumnsWithTypes(db, schema, name);
-      setTableColumns(cols ?? []);
+      const opts = await HybridIndexColumnOptions(
+        (cols ?? []).map((c) => ({ name: c.name, type: c.dataType })) as any,
+      );
+      setKeyEligible(opts?.keyColumns ?? []);
+      setIncludeEligible(opts?.includeColumns ?? []);
     } catch {
       // Non-fatal: the add-index dropdowns simply stay empty.
-      setTableColumns([]);
+      setKeyEligible([]);
+      setIncludeEligible([]);
     }
   }, [db, schema, name]);
 
@@ -262,16 +270,16 @@ export default function HybridTablePropertiesModal({ db, schema, name, onClose }
   // Properties dump below.
   const handledKeys = new Set(["comment", "owner", "rows", "bytes"]);
 
-  // Add-index column choices, filtered by the datatypes Snowflake allows for
-  // hybrid-table index keys vs. INCLUDE columns. A column cannot be both a key
-  // and an INCLUDE column of the same index (Snowflake rejects it as a
-  // duplicate), so each dropdown also hides what the other has already selected.
-  const keyColumnOptions = tableColumns
-    .filter((c) => isIndexableType(c.dataType) && !newIdxInclude.includes(c.name))
-    .map((c) => ({ value: c.name, label: c.name }));
-  const includeColumnOptions = tableColumns
-    .filter((c) => isIncludableType(c.dataType) && !newIdxCols.includes(c.name))
-    .map((c) => ({ value: c.name, label: c.name }));
+  // Add-index column choices come from the backend-computed eligible sets. A
+  // column cannot be both a key and an INCLUDE column of the same index
+  // (Snowflake rejects it as a duplicate), so each dropdown also hides what the
+  // other has already selected.
+  const keyColumnOptions = keyEligible
+    .filter((n) => !newIdxInclude.includes(n))
+    .map((n) => ({ value: n, label: n }));
+  const includeColumnOptions = includeEligible
+    .filter((n) => !newIdxCols.includes(n))
+    .map((n) => ({ value: n, label: n }));
 
   // ── Index table ───────────────────────────────────────────────────────────
   const cols = indexes?.columns ?? [];

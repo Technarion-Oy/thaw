@@ -15,12 +15,11 @@ import {
   Form, Input, Select, Space, Typography, Button, Checkbox, Collapse, Alert,
 } from "antd";
 import { MergeCellsOutlined, PlusOutlined, DeleteOutlined, KeyOutlined } from "@ant-design/icons";
-import { BuildCreateHybridTableSql, ExecDDL } from "../../../wailsjs/go/app/App";
+import { BuildCreateHybridTableSql, ExecDDL, HybridIndexColumnOptions } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
-import { isIndexableType, isIncludableType } from "./indexColumns";
 
 const { Text } = Typography;
 
@@ -48,6 +47,11 @@ export default function CreateHybridTableModal({ db, schema, onClose, onSuccess 
   // Columns auto-removed from an index by the reconcile effect (renamed / deleted
   // / retyped to a barred datatype), surfaced as a dismissible hint.
   const [prunedNote, setPrunedNote] = useState<string[]>([]);
+  // Index-eligible column names, computed by the backend from the form's columns
+  // (the datatype rules live in internal/hybridtable, surfaced via
+  // HybridIndexColumnOptions).
+  const [keyEligible, setKeyEligible] = useState<string[]>([]);
+  const [includeEligible, setIncludeEligible] = useState<string[]>([]);
 
   const quotedIdentifiersIgnoreCase = useQuotedIdentifiers();
 
@@ -92,41 +96,47 @@ export default function CreateHybridTableModal({ db, schema, onClose, onSuccess 
   const removeIndex = (i: number) => setIndexes(indexes.filter((_, idx) => idx !== i));
 
   const namedColumns = columns.filter((c) => c.name.trim() !== "");
-  // Index key / INCLUDE column choices come from the form's columns, filtered by
-  // the datatypes Snowflake allows for each (semi-structured / geospatial /
-  // VECTOR / TIMESTAMP_TZ are barred from index keys; semi-structured /
-  // geospatial from INCLUDE).
-  const keyColumnOptions = namedColumns
-    .filter((c) => isIndexableType(c.type))
-    .map((c) => ({ value: c.name, label: c.name }));
-  const includeColumnOptions = namedColumns
-    .filter((c) => isIncludableType(c.type))
-    .map((c) => ({ value: c.name, label: c.name }));
+  // Index key / INCLUDE column choices come from the backend-computed eligible
+  // sets (the datatype rules — semi-structured / geospatial / VECTOR /
+  // TIMESTAMP_TZ for keys; semi-structured / geospatial for INCLUDE — live in
+  // internal/hybridtable).
+  const keyColumnOptions = keyEligible.map((n) => ({ value: n, label: n }));
+  const includeColumnOptions = includeEligible.map((n) => ({ value: n, label: n }));
 
-  // Reconcile index selections whenever the columns change: drop any key /
-  // INCLUDE column that no longer exists or is no longer type-eligible (renamed,
-  // removed, or retyped to a barred type), so a stale selection can't leak into
-  // the generated DDL.
+  // Whenever the columns change, recompute eligibility via the backend and
+  // reconcile index selections: drop any key / INCLUDE column that no longer
+  // exists or is no longer type-eligible (renamed, removed, or retyped to a
+  // barred type), so a stale selection can't leak into the generated DDL.
   useEffect(() => {
-    const keyValid = new Set(namedColumns.filter((c) => isIndexableType(c.type)).map((c) => c.name));
-    const incValid = new Set(namedColumns.filter((c) => isIncludableType(c.type)).map((c) => c.name));
-    const removed = new Set<string>();
-    setIndexes((prev) => {
-      let changed = false;
-      const next = prev.map((idx) => {
-        const cols = idx.columns.filter((c) => keyValid.has(c));
-        const inc = idx.include.filter((c) => incValid.has(c));
-        if (cols.length !== idx.columns.length || inc.length !== idx.include.length) {
-          changed = true;
-          idx.columns.filter((c) => !keyValid.has(c)).forEach((c) => removed.add(c));
-          idx.include.filter((c) => !incValid.has(c)).forEach((c) => removed.add(c));
-          return { ...idx, columns: cols, include: inc };
-        }
-        return idx;
+    let cancelled = false;
+    const cols = namedColumns.map((c) => ({ name: c.name, type: c.type }));
+    HybridIndexColumnOptions(cols as any).then((opts) => {
+      if (cancelled) return;
+      const keyCols = opts?.keyColumns ?? [];
+      const incCols = opts?.includeColumns ?? [];
+      setKeyEligible(keyCols);
+      setIncludeEligible(incCols);
+      const keyValid = new Set(keyCols);
+      const incValid = new Set(incCols);
+      const removed = new Set<string>();
+      setIndexes((prev) => {
+        let changed = false;
+        const next = prev.map((idx) => {
+          const c2 = idx.columns.filter((c) => keyValid.has(c));
+          const i2 = idx.include.filter((c) => incValid.has(c));
+          if (c2.length !== idx.columns.length || i2.length !== idx.include.length) {
+            changed = true;
+            idx.columns.filter((c) => !keyValid.has(c)).forEach((c) => removed.add(c));
+            idx.include.filter((c) => !incValid.has(c)).forEach((c) => removed.add(c));
+            return { ...idx, columns: c2, include: i2 };
+          }
+          return idx;
+        });
+        return changed ? next : prev;
       });
-      return changed ? next : prev;
-    });
-    if (removed.size > 0) setPrunedNote([...removed]);
+      if (removed.size > 0) setPrunedNote([...removed]);
+    }).catch(() => { /* eligibility is advisory; leave prior options on error */ });
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [columns]);
 

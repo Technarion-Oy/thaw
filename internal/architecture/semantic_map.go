@@ -113,7 +113,6 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/externaltable/ExternalTablePropertiesModal.tsx",
         "frontend/src/components/hybridtable/CreateHybridTableModal.tsx",
         "frontend/src/components/hybridtable/HybridTablePropertiesModal.tsx",
-        "frontend/src/components/hybridtable/indexColumns.ts",
         "frontend/src/components/icebergtable/CreateIcebergTableModal.tsx",
         "frontend/src/components/icebergtable/IcebergTablePropertiesModal.tsx",
         "frontend/src/components/imagerepository/CreateImageRepositoryModal.tsx",

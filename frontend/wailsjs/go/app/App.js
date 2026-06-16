@@ -930,6 +930,10 @@ export function GitUpdateRemoteURL(arg1, arg2) {
   return window['go']['app']['App']['GitUpdateRemoteURL'](arg1, arg2);
 }
 
+export function HybridIndexColumnOptions(arg1) {
+  return window['go']['app']['App']['HybridIndexColumnOptions'](arg1);
+}
+
 export function ImportTableData(arg1) {
   return window['go']['app']['App']['ImportTableData'](arg1);
 }

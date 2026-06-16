@@ -509,6 +509,8 @@ export function GitStatus(arg1:string):Promise<gitrepo.RepoStatus>;
 
 export function GitUpdateRemoteURL(arg1:string,arg2:string):Promise<void>;
 
+export function HybridIndexColumnOptions(arg1:Array<hybridtable.IndexColumn>):Promise<hybridtable.IndexColumnOptions>;
+
 export function ImportTableData(arg1:snowflake.ImportTableParams):Promise<snowflake.ImportTableResult>;
 
 export function InitTabSession(arg1:string):Promise<void>;

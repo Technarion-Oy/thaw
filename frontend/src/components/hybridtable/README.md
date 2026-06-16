@@ -24,10 +24,12 @@ enforced primary key and secondary indexes) in the object browser.
   name toggle) and dropping (`DropHybridTableIndex` → `DROP INDEX`) secondary
   indexes. Drop is offered only on non-unique indexes — the primary key surfaces
   as the lone UNIQUE index and cannot be dropped directly.
-- **`indexColumns.ts`** — shared index-eligibility filters
-  (`isIndexableType` / `isIncludableType`) that hide column types Snowflake
-  forbids in hybrid-table indexes (semi-structured / geospatial / VECTOR /
-  `TIMESTAMP_TZ` for key columns; semi-structured / geospatial for `INCLUDE`).
+Both index editors get their eligible key / `INCLUDE` column lists from the
+backend via `HybridIndexColumnOptions` (the datatype rules — semi-structured /
+geospatial / VECTOR / `TIMESTAMP_TZ` barred from keys; semi-structured /
+geospatial barred from `INCLUDE` — live in `internal/hybridtable`, built on
+`snowflake.BaseType`), so the create modal and the properties dialog share one
+source of truth with the SQL builder.
 
 ## Wiring
 

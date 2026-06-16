@@ -186,7 +186,7 @@ func BuildCreateServiceSql(db, schema string, cfg ServiceConfig) (string, error)
 
 	fmt.Fprintf(&sb, "\n  %s", specClause(cfg))
 
-	if eai := splitIdentList(cfg.ExternalAccessIntegrations); len(eai) > 0 {
+	if eai := snowflake.SplitIdentList(cfg.ExternalAccessIntegrations, true); len(eai) > 0 {
 		fmt.Fprintf(&sb, "\n  EXTERNAL_ACCESS_INTEGRATIONS = (%s)", strings.Join(eai, ", "))
 	}
 	if ar := strings.TrimSpace(cfg.AutoResume); ar != "" {
@@ -206,16 +206,4 @@ func BuildCreateServiceSql(db, schema string, cfg ServiceConfig) (string, error)
 	}
 
 	return sb.String() + ";", nil
-}
-
-// splitIdentList splits a comma-separated string into a trimmed, double-quoted
-// identifier slice, dropping empty entries. Used for EXTERNAL_ACCESS_INTEGRATIONS.
-func splitIdentList(s string) []string {
-	var out []string
-	for _, part := range strings.Split(s, ",") {
-		if v := strings.TrimSpace(part); v != "" {
-			out = append(out, snowflake.QuoteIdent(v))
-		}
-	}
-	return out
 }

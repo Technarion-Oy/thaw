@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"thaw/internal/snowflake"
 )
 
 // ── Parameter structs ─────────────────────────────────────────────────────────
@@ -267,17 +269,6 @@ func identToken(name string, caseSensitive bool) string {
 	return qident(strings.ToUpper(name))
 }
 
-// splitValues splits a newline-and/or-comma-separated string into trimmed non-empty tokens.
-func splitValues(s string) []string {
-	var out []string
-	for _, part := range strings.FieldsFunc(s, func(r rune) bool { return r == '\n' || r == ',' }) {
-		if t := strings.TrimSpace(part); t != "" {
-			out = append(out, t)
-		}
-	}
-	return out
-}
-
 // squotedTuple returns a parenthesised, single-quoted list: ('a', 'b', 'c')
 func squotedTuple(vals []string) string {
 	quoted := make([]string, len(vals))
@@ -290,7 +281,7 @@ func squotedTuple(vals []string) string {
 // squotedTupleFromString splits s and returns squotedTuple for the result.
 // Returns "" when s is empty (caller should check and skip).
 func squotedTupleFromString(s string) string {
-	parts := splitValues(s)
+	parts := snowflake.SplitValues(s)
 	if len(parts) == 0 {
 		return ""
 	}
@@ -302,7 +293,7 @@ func squotedTupleFromString(s string) string {
 // bare identifiers (e.g. ALLOWED_NETWORK_RULES).
 // Each token is validated to contain only safe identifier characters.
 func identListFromString(s string) (string, error) {
-	parts := splitValues(s)
+	parts := snowflake.SplitValues(s)
 	for _, p := range parts {
 		if _, err := validateIdentRef(p); err != nil {
 			return "", err
@@ -568,7 +559,7 @@ func buildGitHttpsApiSQL(p ApiIntegrationParams) (string, error) {
 		}
 		if p.OauthScopes != "" {
 			var scopeQuoted []string
-			for _, s := range splitValues(p.OauthScopes) {
+			for _, s := range snowflake.SplitValues(p.OauthScopes) {
 				scopeQuoted = append(scopeQuoted, sq(s))
 			}
 			if len(scopeQuoted) > 0 {

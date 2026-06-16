@@ -69,6 +69,15 @@ func (a *App) CreateHybridTableIndex(database, schema, table string, idx hybridt
 	return err
 }
 
+// HybridIndexColumnOptions partitions the given columns into those eligible as
+// hybrid-table index key columns vs. INCLUDE columns, applying Snowflake's
+// per-role datatype restrictions (semi-structured / geospatial barred from both;
+// VECTOR / TIMESTAMP_TZ additionally barred from keys). It is a pure helper (no
+// connection required) that the index editors call to populate their dropdowns.
+func (a *App) HybridIndexColumnOptions(columns []hybridtable.IndexColumn) hybridtable.IndexColumnOptions {
+	return hybridtable.EligibleIndexColumns(columns)
+}
+
 // DropHybridTableIndex removes a secondary index from a hybrid table by running
 // DROP INDEX IF EXISTS <db>.<schema>.<table>.<index>.
 func (a *App) DropHybridTableIndex(database, schema, table, index string) error {

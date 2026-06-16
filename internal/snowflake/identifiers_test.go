@@ -21,12 +21,12 @@ func TestTableKey(t *testing.T) {
 		want   string
 	}{
 		{"PUBLIC", "USERS", "PUBLIC.USERS"},
-		{"public", "users", "public.users"},         // preserves lowercase (quoted identifiers)
-		{"Public", "Orders", "Public.Orders"},        // preserves mixed case
-		{" sales ", " orders ", "sales.orders"},      // trims whitespace, preserves case
+		{"public", "users", "public.users"},     // preserves lowercase (quoted identifiers)
+		{"Public", "Orders", "Public.Orders"},   // preserves mixed case
+		{" sales ", " orders ", "sales.orders"}, // trims whitespace, preserves case
 		{"", "T", ".T"},
 		{"S", "", "S."},
-		{"PUBLIC", "my_table", "PUBLIC.my_table"},    // case-sensitive table in PUBLIC schema
+		{"PUBLIC", "my_table", "PUBLIC.my_table"}, // case-sensitive table in PUBLIC schema
 	}
 	for _, tc := range tests {
 		t.Run(tc.schema+"_"+tc.name, func(t *testing.T) {
@@ -197,5 +197,64 @@ func TestQuoteIdent(t *testing.T) {
 				t.Errorf("QuoteIdent(%q) = %v, want %v", tc.name, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestSplitValues(t *testing.T) {
+	cases := []struct {
+		in   string
+		want []string
+	}{
+		{"", nil},
+		{"  ", nil},
+		{"a,b,c", []string{"a", "b", "c"}},
+		{" a , b ,, c ", []string{"a", "b", "c"}},
+		{"a\nb,c\n", []string{"a", "b", "c"}}, // commas and newlines both split
+	}
+	for _, tc := range cases {
+		got := SplitValues(tc.in)
+		if len(got) != len(tc.want) {
+			t.Fatalf("SplitValues(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Errorf("SplitValues(%q)[%d] = %q, want %q", tc.in, i, got[i], tc.want[i])
+			}
+		}
+	}
+}
+
+func TestQuoteIdentList(t *testing.T) {
+	// caseSensitive=false: simple names stay bare, mixed/reserved get quoted.
+	got := QuoteIdentList([]string{" ID ", "", "MixedCase"}, false)
+	want := []string{"ID", "MixedCase"} // "MixedCase" is a valid bare identifier → stays bare
+	if len(got) != len(want) {
+		t.Fatalf("QuoteIdentList = %v, want %v", got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("QuoteIdentList[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+	// caseSensitive=true: every entry double-quoted.
+	gotCS := QuoteIdentList([]string{"a", "b"}, true)
+	if gotCS[0] != `"a"` || gotCS[1] != `"b"` {
+		t.Errorf("QuoteIdentList(caseSensitive) = %v, want quoted", gotCS)
+	}
+}
+
+func TestSplitIdentList(t *testing.T) {
+	got := SplitIdentList("a, b\nc", true)
+	want := []string{`"a"`, `"b"`, `"c"`}
+	if len(got) != len(want) {
+		t.Fatalf("SplitIdentList = %v, want %v", got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("SplitIdentList[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+	if got := SplitIdentList("", false); len(got) != 0 {
+		t.Errorf("SplitIdentList(\"\") = %v, want empty", got)
 	}
 }

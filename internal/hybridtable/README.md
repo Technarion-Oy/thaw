@@ -31,6 +31,12 @@ invalid SQL.
 table exists (the properties panel calls these via `App.CreateHybridTableIndex`
 / `App.DropHybridTableIndex`).
 
+`index.go` holds the column-eligibility rules (`IsIndexableType` /
+`IsIncludableType`, built on `snowflake.BaseType`) and `EligibleIndexColumns`,
+which partitions a `[]IndexColumn` into the names valid as index key columns vs.
+`INCLUDE` columns. The index editors call this via `App.HybridIndexColumnOptions`
+so the dropdown filtering shares one source of truth with the builder.
+
 ## Types & builders
 
 - `HybridTableConfig` — name + case sensitivity, `IfNotExists`, `Columns`,
@@ -40,7 +46,12 @@ table exists (the properties panel calls these via `App.CreateHybridTableIndex`
   and forced to `NOT NULL` (Snowflake requires PK columns to be `NOT NULL`).
 - `HybridIndex` — `Name`, `Columns` (key columns), `Include` (non-key INCLUDE
   columns). Used both inline (in `CREATE HYBRID TABLE`) and by `BuildCreateIndexSql`.
+- `IndexColumn` / `IndexColumnOptions` — input/output of `EligibleIndexColumns`.
 - `BuildCreateHybridTableSql`, `BuildCreateIndexSql`, `BuildDropIndexSql`.
+- `IsIndexableType`, `IsIncludableType`, `EligibleIndexColumns` (`index.go`).
+
+Identifier-list quoting reuses the shared `snowflake.QuoteIdentList` helper
+rather than a package-local copy.
 
 ## Gotchas
 

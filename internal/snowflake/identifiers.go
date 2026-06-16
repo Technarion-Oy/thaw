@@ -91,6 +91,41 @@ func QuoteOrBare(name string, caseSensitive bool) string {
 	return name
 }
 
+// SplitValues splits s into trimmed, non-empty tokens on commas and newlines.
+// It performs no quoting or validation — it is the raw tokenizer behind the
+// identifier-list helpers and is also handy when a caller needs the bare values
+// (e.g. to validate each before emitting).
+func SplitValues(s string) []string {
+	var out []string
+	for _, part := range strings.FieldsFunc(s, func(r rune) bool { return r == '\n' || r == ',' }) {
+		if t := strings.TrimSpace(part); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// QuoteIdentList trims and drops empty entries from names and quotes each via
+// QuoteOrBare(name, caseSensitive). Use it when the values already arrive as a
+// slice (e.g. multi-select input); for a delimited string use SplitIdentList.
+func QuoteIdentList(names []string, caseSensitive bool) []string {
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		if v := strings.TrimSpace(n); v != "" {
+			out = append(out, QuoteOrBare(v, caseSensitive))
+		}
+	}
+	return out
+}
+
+// SplitIdentList splits a comma/newline-separated string into trimmed, non-empty
+// identifiers, each quoted via QuoteOrBare(value, caseSensitive). Pass
+// caseSensitive=true to force double-quoting (equivalent to QuoteIdent on every
+// entry).
+func SplitIdentList(s string, caseSensitive bool) []string {
+	return QuoteIdentList(SplitValues(s), caseSensitive)
+}
+
 // GetQuotedIdentifiersIgnoreCase returns the current session value of the
 // QUOTED_IDENTIFIERS_IGNORE_CASE parameter. When true, Snowflake treats
 // identifiers as case-insensitive regardless of whether they are quoted,

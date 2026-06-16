@@ -109,3 +109,21 @@ func TestValidateDataType(t *testing.T) {
 		})
 	}
 }
+
+func TestBaseType(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"VARCHAR(256)", "VARCHAR"},
+		{"number(38,0)", "NUMBER"},
+		{"TIMESTAMP_TZ(9)", "TIMESTAMP_TZ"},
+		{"timestamptz", "TIMESTAMP_TZ"},
+		{"VECTOR(FLOAT, 256)", "VECTOR"},
+		{"  variant  ", "VARIANT"},
+		{"TIMESTAMP_NTZ", "TIMESTAMP_NTZ"},
+		{"", ""},
+	}
+	for _, tc := range cases {
+		if got := BaseType(tc.in); got != tc.want {
+			t.Errorf("BaseType(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

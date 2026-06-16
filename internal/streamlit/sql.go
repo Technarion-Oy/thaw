@@ -84,7 +84,10 @@ func BuildCreateStreamlitSql(db, schema string, cfg StreamlitConfig) (string, er
 	if qw := strings.TrimSpace(cfg.QueryWarehouse); qw != "" {
 		fmt.Fprintf(&sb, "\n  QUERY_WAREHOUSE = %s", snowflake.QuoteIdent(qw))
 	}
-	if eai := splitIdentList(cfg.ExternalAccessIntegrations); len(eai) > 0 {
+	// EXTERNAL_ACCESS_INTEGRATIONS names are free-text; quote each only when it
+	// can't be a bare identifier (caseSensitive=false) so unquoted input resolves
+	// case-insensitively as it would in plain SQL.
+	if eai := snowflake.SplitIdentList(cfg.ExternalAccessIntegrations, false); len(eai) > 0 {
 		fmt.Fprintf(&sb, "\n  EXTERNAL_ACCESS_INTEGRATIONS = (%s)", strings.Join(eai, ", "))
 	}
 	if t := strings.TrimSpace(cfg.Title); t != "" {
@@ -110,21 +113,4 @@ func normalizeStagePath(s string) string {
 		v = "@" + v
 	}
 	return v
-}
-
-// splitIdentList splits a comma-separated string into a trimmed identifier
-// slice, dropping empty entries. Used for EXTERNAL_ACCESS_INTEGRATIONS, whose
-// names are free-text input. Each name is quoted only when it can't be expressed
-// as a bare identifier (QuoteOrBare with caseSensitive=false) so that unquoted
-// input resolves case-insensitively exactly as it would in plain SQL — rather
-// than being force-quoted into a case-sensitive lookup that fails against the
-// normally upper-cased stored object.
-func splitIdentList(s string) []string {
-	var out []string
-	for _, part := range strings.Split(s, ",") {
-		if v := strings.TrimSpace(part); v != "" {
-			out = append(out, snowflake.QuoteOrBare(v, false))
-		}
-	}
-	return out
 }

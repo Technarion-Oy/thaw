@@ -120,13 +120,13 @@ func BuildCreateHybridTableSql(db, schema string, cfg HybridTableConfig) (string
 		if strings.TrimSpace(idx.Name) == "" {
 			continue
 		}
-		cols := cleanIdentList(idx.Columns, cfg.CaseSensitive)
+		cols := snowflake.QuoteIdentList(idx.Columns, cfg.CaseSensitive)
 		if len(cols) == 0 {
 			continue
 		}
 		line := fmt.Sprintf("  INDEX %s (%s)",
 			snowflake.QuoteOrBare(idx.Name, cfg.CaseSensitive), strings.Join(cols, ", "))
-		if inc := cleanIdentList(idx.Include, cfg.CaseSensitive); len(inc) > 0 {
+		if inc := snowflake.QuoteIdentList(idx.Include, cfg.CaseSensitive); len(inc) > 0 {
 			line += fmt.Sprintf(" INCLUDE (%s)", strings.Join(inc, ", "))
 		}
 		lines = append(lines, line)
@@ -159,7 +159,7 @@ func BuildCreateIndexSql(db, schema, table string, idx HybridIndex, caseSensitiv
 	if strings.TrimSpace(idx.Name) == "" {
 		return "", fmt.Errorf("index name is required")
 	}
-	cols := cleanIdentList(idx.Columns, true)
+	cols := snowflake.QuoteIdentList(idx.Columns, true)
 	if len(cols) == 0 {
 		return "", fmt.Errorf("at least one indexed column is required")
 	}
@@ -168,7 +168,7 @@ func BuildCreateIndexSql(db, schema, table string, idx HybridIndex, caseSensitiv
 		snowflake.QuoteOrBare(idx.Name, caseSensitive),
 		snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(table),
 		strings.Join(cols, ", "))
-	if inc := cleanIdentList(idx.Include, true); len(inc) > 0 {
+	if inc := snowflake.QuoteIdentList(idx.Include, true); len(inc) > 0 {
 		fmt.Fprintf(&sb, " INCLUDE (%s)", strings.Join(inc, ", "))
 	}
 	return sb.String() + ";", nil
@@ -184,18 +184,4 @@ func BuildDropIndexSql(db, schema, table, index string) (string, error) {
 	return fmt.Sprintf("DROP INDEX IF EXISTS %s.%s.%s.%s;",
 		snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema),
 		snowflake.QuoteIdent(table), snowflake.QuoteIdent(index)), nil
-}
-
-// cleanIdentList trims, drops empty entries, and quotes each identifier in the
-// list (bare when simple, double-quoted otherwise per caseSensitive).
-func cleanIdentList(names []string, caseSensitive bool) []string {
-	out := make([]string, 0, len(names))
-	for _, n := range names {
-		n = strings.TrimSpace(n)
-		if n == "" {
-			continue
-		}
-		out = append(out, snowflake.QuoteOrBare(n, caseSensitive))
-	}
-	return out
 }
