@@ -2904,7 +2904,7 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 	defer rows.Close() //nolint:errcheck
 
 	cols, _ := rows.Columns()
-	nameIdx, kindIdx, argsIdx, builtinIdx, rowsIdx, predsIdx, taskRelIdx, finalizeColIdx, isDynamicIdx, isExternalIdx, isIcebergIdx := -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1
+	nameIdx, kindIdx, argsIdx, builtinIdx, rowsIdx, predsIdx, taskRelIdx, finalizeColIdx, isDynamicIdx, isExternalIdx, isIcebergIdx, isHybridIdx := -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1
 	for i, col := range cols {
 		switch strings.ToLower(col) {
 		case "name":
@@ -2929,6 +2929,8 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 			isExternalIdx = i
 		case "is_iceberg":
 			isIcebergIdx = i
+		case "is_hybrid":
+			isHybridIdx = i
 		}
 	}
 	if nameIdx < 0 {
@@ -2984,6 +2986,15 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 		// ListObjects is the belt-and-suspenders fallback when this column is
 		// absent.
 		if fixedKind == "" && isIcebergIdx >= 0 && strings.EqualFold(fmt.Sprintf("%v", vals[isIcebergIdx]), "Y") {
+			continue
+		}
+		// Hybrid tables surface in SHOW OBJECTS / SHOW TABLES with is_hybrid=Y.
+		// They are listed separately via SHOW HYBRID TABLES (kind "HYBRID
+		// TABLE"), so skip them here on the generic-kind path to avoid duplicate
+		// tree entries (one under Tables, one under Hybrid Tables).
+		// dedupeHybridTables in ListObjects is the belt-and-suspenders fallback
+		// when this column is absent.
+		if fixedKind == "" && isHybridIdx >= 0 && strings.EqualFold(fmt.Sprintf("%v", vals[isHybridIdx]), "Y") {
 			continue
 		}
 		kind := fixedKind
@@ -3132,6 +3143,7 @@ func (c *Client) ListBasicObjects(ctx context.Context, database, schema string) 
 // ListExtendedObjects returns the "extended" objects inside a schema by running
 // dedicated SHOW commands for object types not covered by SHOW OBJECTS (the
 // authoritative list is the command slice below: DYNAMIC TABLE, EXTERNAL TABLE,
+// ICEBERG TABLE, HYBRID TABLE,
 // MATERIALIZED VIEW, ALERT, TAG, MASKING POLICY, ROW ACCESS POLICY, NETWORK
 // RULE, IMAGE REPOSITORY, SERVICE, STREAMLIT, PROCEDURE, FUNCTION, TASK, STREAM, STAGE, FILE FORMAT,
 // PIPE, NOTEBOOK, SECRET, GIT REPOSITORY, DBT PROJECT). Individual commands that
@@ -3148,6 +3160,7 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 		{fmt.Sprintf("SHOW DYNAMIC TABLES IN SCHEMA %s", q), "DYNAMIC TABLE"},
 		{fmt.Sprintf("SHOW EXTERNAL TABLES IN SCHEMA %s", q), "EXTERNAL TABLE"},
 		{fmt.Sprintf("SHOW ICEBERG TABLES IN SCHEMA %s", q), "ICEBERG TABLE"},
+		{fmt.Sprintf("SHOW HYBRID TABLES IN SCHEMA %s", q), "HYBRID TABLE"},
 		{fmt.Sprintf("SHOW MATERIALIZED VIEWS IN SCHEMA %s", q), "MATERIALIZED VIEW"},
 		{fmt.Sprintf("SHOW ALERTS IN SCHEMA %s", q), "ALERT"},
 		{fmt.Sprintf("SHOW TAGS IN SCHEMA %s", q), "TAG"},
@@ -3306,6 +3319,11 @@ func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]Sn
 	// is_iceberg=Y column when present; drop any remaining (schema, name)
 	// collision as a fallback for editions that omit that column.
 	basic = dedupeIcebergTables(basic, extended)
+	// Hybrid tables are listed explicitly by ListExtendedObjects (kind "HYBRID
+	// TABLE") and are dropped from the generic SHOW OBJECTS path by the
+	// is_hybrid=Y column when present; drop any remaining (schema, name)
+	// collision as a fallback for editions that omit that column.
+	basic = dedupeHybridTables(basic, extended)
 	// Materialized views are listed explicitly by ListExtendedObjects (kind
 	// "MATERIALIZED VIEW"). They can also surface in SHOW OBJECTS (typically as a
 	// VIEW), so drop any (schema, name) collision to avoid duplicate tree entries
@@ -3368,6 +3386,12 @@ func dedupeMaterializedViews(basic, extended []SnowflakeObject) []SnowflakeObjec
 // an extended object of kind "ICEBERG TABLE". See dedupeByExtendedKind.
 func dedupeIcebergTables(basic, extended []SnowflakeObject) []SnowflakeObject {
 	return dedupeByExtendedKind(basic, extended, "ICEBERG TABLE")
+}
+
+// dedupeHybridTables removes from basic any object whose (schema, name) matches
+// an extended object of kind "HYBRID TABLE". See dedupeByExtendedKind.
+func dedupeHybridTables(basic, extended []SnowflakeObject) []SnowflakeObject {
+	return dedupeByExtendedKind(basic, extended, "HYBRID TABLE")
 }
 
 // getObjectCache returns a cached result if it exists and hasn't expired.
@@ -3496,6 +3520,10 @@ func buildGetDDLQuery(database, schema, kind, name, arguments string) (query, id
 		ddlKind = "EXTERNAL_TABLE"
 	case "ICEBERG TABLE":
 		// GET_DDL has no ICEBERG_TABLE object type — Iceberg tables are
+		// retrieved via the 'TABLE' type.
+		ddlKind = "TABLE"
+	case "HYBRID TABLE":
+		// GET_DDL has no HYBRID_TABLE object type — hybrid tables are
 		// retrieved via the 'TABLE' type.
 		ddlKind = "TABLE"
 	case "MATERIALIZED VIEW":

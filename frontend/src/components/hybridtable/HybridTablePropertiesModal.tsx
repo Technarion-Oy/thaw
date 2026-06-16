@@ -1,0 +1,421 @@
+// Copyright (c) 2026 Technarion Oy. All rights reserved.
+//
+// This software and its source code are proprietary and confidential.
+// Unauthorized copying, distribution, modification, or use of this software,
+// in whole or in part, is strictly prohibited without prior written permission
+// from Technarion Oy.
+//
+// Commercial use of this software is restricted to parties holding a valid
+// license agreement with Technarion Oy.
+//
+// @thaw-domain: Object Browser & Administration
+
+import { useState, useEffect, useCallback } from "react";
+import {
+  Modal, Spin, Button, Input, Space, Typography, Alert, Tooltip, Table, Tag, Popconfirm,
+} from "antd";
+import {
+  MergeCellsOutlined, EditOutlined, CheckOutlined, CloseOutlined, ReloadOutlined,
+  PlusOutlined, DeleteOutlined, KeyOutlined,
+} from "@ant-design/icons";
+import {
+  GetObjectProperties, AlterHybridTable, ListHybridTableIndexes,
+  CreateHybridTableIndex, DropHybridTableIndex,
+} from "../../../wailsjs/go/app/App";
+import type { snowflake } from "../../../wailsjs/go/models";
+
+const { Text } = Typography;
+
+// ─── Styles ──────────────────────────────────────────────────────────────────
+
+const SECTION_HEAD: React.CSSProperties = {
+  fontSize: 11, fontWeight: 600, color: "var(--text-muted)",
+  letterSpacing: "0.05em", textTransform: "uppercase",
+  margin: "20px 0 8px",
+};
+
+const LABEL_TD: React.CSSProperties = {
+  padding: "6px 12px 6px 0", color: "var(--text-muted)",
+  fontSize: 12, whiteSpace: "nowrap", verticalAlign: "middle",
+  width: 220,
+};
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function q1(s: string) { return "'" + s.replace(/'/g, "''") + "'"; }
+const splitCols = (s: string) => s.split(",").map((c) => c.trim()).filter((c) => c !== "");
+
+// ─── EditRow (inline comment editor) ─────────────────────────────────────────
+
+interface EditRowProps {
+  label: string;
+  value: string;
+  canUnset?: boolean;
+  onSave: (val: string) => Promise<void>;
+  onUnset?: () => Promise<void>;
+}
+
+function EditRow({ label, value, canUnset, onSave, onUnset }: EditRowProps) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const save = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave(draft);
+      setEditing(false);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const unset = async () => {
+    if (!onUnset) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onUnset();
+      setEditing(false);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <tr>
+      <td style={LABEL_TD}>{label}</td>
+      <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
+        {editing ? (
+          <Space direction="vertical" size={4} style={{ width: "100%" }}>
+            <Space>
+              <Input
+                size="small"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                style={{ width: 280 }}
+                onPressEnter={save}
+              />
+              <Tooltip title="Save">
+                <Button size="small" icon={<CheckOutlined />} type="primary" onClick={save} loading={saving} />
+              </Tooltip>
+              {canUnset && onUnset && (
+                <Tooltip title="Unset (remove)">
+                  <Button size="small" onClick={unset} loading={saving}>Unset</Button>
+                </Tooltip>
+              )}
+              <Tooltip title="Cancel">
+                <Button size="small" icon={<CloseOutlined />} onClick={() => { setEditing(false); setDraft(value); setError(null); }} />
+              </Tooltip>
+            </Space>
+            {error && <Text type="danger" style={{ fontSize: 11 }}>{error}</Text>}
+          </Space>
+        ) : (
+          <Space>
+            <span style={{ color: "var(--text)" }}>{value || <Text type="secondary">(not set)</Text>}</span>
+            <Tooltip title="Edit">
+              <Button
+                type="text"
+                size="small"
+                icon={<EditOutlined style={{ fontSize: 11 }} />}
+                onClick={() => { setDraft(value); setEditing(true); }}
+                style={{ color: "var(--text-muted)" }}
+              />
+            </Tooltip>
+          </Space>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <tr>
+      <td style={LABEL_TD}>{label}</td>
+      <td style={{ padding: "6px 0", fontSize: 12, color: "var(--text)", wordBreak: "break-word" }}>
+        {value || <Text type="secondary">(empty)</Text>}
+      </td>
+    </tr>
+  );
+}
+
+// ─── Main component ──────────────────────────────────────────────────────────
+
+interface Props {
+  db: string;
+  schema: string;
+  name: string;
+  onClose: () => void;
+}
+
+export default function HybridTablePropertiesModal({ db, schema, name, onClose }: Props) {
+  const [rows, setRows] = useState<snowflake.PropertyPair[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  // Indexes (including the primary key, which surfaces here as an index).
+  const [indexes, setIndexes] = useState<snowflake.QueryResult | null>(null);
+  const [indexesLoading, setIndexesLoading] = useState(false);
+  const [indexesError, setIndexesError] = useState<string | null>(null);
+
+  // Add-index inline form.
+  const [adding, setAdding] = useState(false);
+  const [newIdxName, setNewIdxName] = useState("");
+  const [newIdxCols, setNewIdxCols] = useState("");
+  const [newIdxInclude, setNewIdxInclude] = useState("");
+  const [creatingIdx, setCreatingIdx] = useState(false);
+
+  const reload = useCallback(async () => {
+    setRows(null);
+    setError(null);
+    try {
+      const props = await GetObjectProperties(db, schema, "HYBRID TABLE", name);
+      setRows(props ?? []);
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [db, schema, name]);
+
+  const loadIndexes = useCallback(async () => {
+    setIndexesLoading(true);
+    setIndexesError(null);
+    try {
+      const res = await ListHybridTableIndexes(db, schema, name);
+      setIndexes(res ?? null);
+    } catch (e) {
+      setIndexesError(String(e));
+    } finally {
+      setIndexesLoading(false);
+    }
+  }, [db, schema, name]);
+
+  useEffect(() => { reload(); loadIndexes(); }, [reload, loadIndexes]);
+
+  const tableRef = `"${db}"."${schema}"."${name}"`;
+
+  const find = (key: string) =>
+    rows ? (rows.find((r) => r.key.toLowerCase() === key.toLowerCase())?.value ?? "") : "";
+
+  const saveComment = async (comment: string) => {
+    if (comment.trim() === "") {
+      await AlterHybridTable(db, schema, name, "UNSET COMMENT");
+    } else {
+      await AlterHybridTable(db, schema, name, `SET COMMENT = ${q1(comment)}`);
+    }
+    await reload();
+  };
+
+  const createIndex = async () => {
+    setCreatingIdx(true);
+    setActionError(null);
+    try {
+      await CreateHybridTableIndex(db, schema, name, {
+        name: newIdxName,
+        columns: splitCols(newIdxCols),
+        include: splitCols(newIdxInclude),
+      } as any);
+      setNewIdxName(""); setNewIdxCols(""); setNewIdxInclude(""); setAdding(false);
+      await loadIndexes();
+    } catch (e) {
+      setActionError(`Create index failed: ${String(e)}`);
+    } finally {
+      setCreatingIdx(false);
+    }
+  };
+
+  const dropIndex = async (indexName: string) => {
+    setActionError(null);
+    try {
+      await DropHybridTableIndex(db, schema, name, indexName);
+      await loadIndexes();
+    } catch (e) {
+      setActionError(`Drop index failed: ${String(e)}`);
+    }
+  };
+
+  const comment = find("comment");
+  const owner = find("owner");
+  const rowCount = find("rows");
+  const bytes = find("bytes");
+  const handledKeys = new Set(["comment"]);
+
+  // ── Index table ───────────────────────────────────────────────────────────
+  const cols = indexes?.columns ?? [];
+  const lower = cols.map((c) => c.toLowerCase());
+  const nameCi = lower.indexOf("name");
+  const colsCi = lower.indexOf("columns");
+  const inclCi = lower.indexOf("included_columns");
+  const uniqCi = lower.indexOf("is_unique");
+  const indexData = (indexes?.rows ?? []).map((row, ri) => ({
+    key: ri,
+    idxName: nameCi >= 0 ? String(row[nameCi] ?? "") : "",
+    columns: colsCi >= 0 ? String(row[colsCi] ?? "") : "",
+    included: inclCi >= 0 ? String(row[inclCi] ?? "") : "",
+    unique: uniqCi >= 0 ? String(row[uniqCi] ?? "") : "",
+  }));
+  const isUnique = (v: string) => v.toLowerCase() === "true" || v.toLowerCase() === "y";
+
+  const indexColumns = [
+    {
+      title: "Index", dataIndex: "idxName", key: "idxName",
+      render: (v: string, r: typeof indexData[number]) => (
+        <Space size={4}>
+          {isUnique(r.unique) && <KeyOutlined style={{ color: "var(--icon-hybridtable)", fontSize: 11 }} />}
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>{v}</span>
+        </Space>
+      ),
+    },
+    {
+      title: "Columns", dataIndex: "columns", key: "columns",
+      render: (v: string) => <span style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>{v}</span>,
+    },
+    {
+      title: "Include", dataIndex: "included", key: "included",
+      render: (v: string) => <span style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>{v}</span>,
+    },
+    {
+      title: "Unique", dataIndex: "unique", key: "unique",
+      render: (v: string) => isUnique(v) ? <Tag color="blue">UNIQUE</Tag> : null,
+    },
+    {
+      title: "", key: "actions", width: 44,
+      render: (_: unknown, r: typeof indexData[number]) => (
+        <Popconfirm
+          title="Drop this index?"
+          description={`DROP INDEX ${r.idxName}`}
+          okText="Drop"
+          okButtonProps={{ danger: true }}
+          onConfirm={() => dropIndex(r.idxName)}
+        >
+          <Tooltip title="Drop index">
+            <Button type="text" size="small" danger icon={<DeleteOutlined style={{ fontSize: 11 }} />} />
+          </Tooltip>
+        </Popconfirm>
+      ),
+    },
+  ];
+
+  return (
+    <Modal
+      open
+      title={
+        <Space size={6}>
+          <MergeCellsOutlined style={{ color: "var(--icon-hybridtable)" }} />
+          <span>Hybrid Table Properties</span>
+          <Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
+            {tableRef}
+          </Text>
+        </Space>
+      }
+      onCancel={onClose}
+      footer={<Button onClick={onClose}>Close</Button>}
+      width={780}
+      styles={{ body: { maxHeight: "74vh", overflowY: "auto", paddingTop: 16 } }}
+    >
+      {!rows && !error && (
+        <div style={{ textAlign: "center", padding: 32 }}>
+          <Spin />
+        </div>
+      )}
+      {error && (
+        <Alert type="error" message="Failed to load properties" description={error} showIcon />
+      )}
+      {rows && (
+        <>
+          {actionError && (
+            <Alert
+              type="error"
+              message={actionError}
+              showIcon
+              closable
+              onClose={() => setActionError(null)}
+              style={{ marginBottom: 12 }}
+            />
+          )}
+
+          <div style={SECTION_HEAD}>Overview</div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>
+              <InfoRow label="Owner" value={owner} />
+              <InfoRow label="Rows" value={rowCount} />
+              <InfoRow label="Bytes" value={bytes} />
+            </tbody>
+          </table>
+
+          <div style={SECTION_HEAD}>Settings</div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>
+              <EditRow
+                label="Comment"
+                value={comment}
+                canUnset={comment !== ""}
+                onSave={saveComment}
+                onUnset={() => saveComment("")}
+              />
+            </tbody>
+          </table>
+
+          <div style={SECTION_HEAD}>Indexes & Primary Key</div>
+          <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 8 }}>
+            The primary key is enforced as a unique index. Add secondary indexes to speed up point
+            lookups on other columns.
+          </Text>
+          {indexesError && (
+            <Alert type="error" message="Failed to load indexes" description={indexesError} showIcon style={{ marginBottom: 8 }} />
+          )}
+          <Space style={{ marginBottom: 8 }}>
+            <Button size="small" icon={<ReloadOutlined />} onClick={loadIndexes} loading={indexesLoading}>
+              Refresh
+            </Button>
+            <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => setAdding((a) => !a)}>
+              Add index
+            </Button>
+          </Space>
+          {adding && (
+            <Space align="start" style={{ width: "100%", marginBottom: 8 }} wrap>
+              <Input size="small" placeholder="Index name" value={newIdxName} onChange={(e) => setNewIdxName(e.target.value)} style={{ width: 150 }} />
+              <Input size="small" placeholder="Columns (comma-separated)" value={newIdxCols} onChange={(e) => setNewIdxCols(e.target.value)} style={{ width: 200 }} />
+              <Input size="small" placeholder="Include (optional)" value={newIdxInclude} onChange={(e) => setNewIdxInclude(e.target.value)} style={{ width: 160 }} />
+              <Button
+                size="small"
+                type="primary"
+                loading={creatingIdx}
+                disabled={newIdxName.trim() === "" || splitCols(newIdxCols).length === 0}
+                onClick={createIndex}
+              >
+                Create
+              </Button>
+            </Space>
+          )}
+          {indexes && (
+            <Table
+              size="small"
+              columns={indexColumns}
+              dataSource={indexData}
+              pagination={false}
+              locale={{ emptyText: "No indexes found." }}
+            />
+          )}
+
+          <div style={SECTION_HEAD}>Properties</div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>
+              {rows
+                .filter((r) => !handledKeys.has(r.key.toLowerCase()))
+                .map((r) => (
+                  <InfoRow key={r.key} label={r.key} value={r.value} />
+                ))}
+            </tbody>
+          </table>
+        </>
+      )}
+    </Modal>
+  );
+}

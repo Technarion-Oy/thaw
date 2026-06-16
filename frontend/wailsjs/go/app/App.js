@@ -26,6 +26,10 @@ export function AlterExternalTable(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterExternalTable'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterHybridTable(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterHybridTable'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterIcebergTable(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterIcebergTable'](arg1, arg2, arg3, arg4);
 }
@@ -152,6 +156,10 @@ export function BuildCreateFileFormatSql(arg1, arg2, arg3) {
 
 export function BuildCreateGitRepositorySql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateGitRepositorySql'](arg1, arg2, arg3);
+}
+
+export function BuildCreateHybridTableSql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateHybridTableSql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateIcebergTableSql(arg1, arg2, arg3) {
@@ -370,6 +378,10 @@ export function CreateFile(arg1) {
   return window['go']['app']['App']['CreateFile'](arg1);
 }
 
+export function CreateHybridTableIndex(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['CreateHybridTableIndex'](arg1, arg2, arg3, arg4);
+}
+
 export function CreateMigrationSnapshot(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
   return window['go']['app']['App']['CreateMigrationSnapshot'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
 }
@@ -436,6 +448,10 @@ export function DropBackupSet(arg1, arg2, arg3) {
 
 export function DropDatabase(arg1, arg2) {
   return window['go']['app']['App']['DropDatabase'](arg1, arg2);
+}
+
+export function DropHybridTableIndex(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['DropHybridTableIndex'](arg1, arg2, arg3, arg4);
 }
 
 export function DropIntegration(arg1) {
@@ -1064,6 +1080,10 @@ export function ListGitRepoEntries(arg1, arg2, arg3, arg4) {
 
 export function ListGitTags(arg1, arg2, arg3) {
   return window['go']['app']['App']['ListGitTags'](arg1, arg2, arg3);
+}
+
+export function ListHybridTableIndexes(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ListHybridTableIndexes'](arg1, arg2, arg3);
 }
 
 export function ListImagesInRepository(arg1, arg2, arg3) {

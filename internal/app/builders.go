@@ -17,6 +17,7 @@ import (
 	"thaw/internal/dynamictable"
 	"thaw/internal/externaltable"
 	"thaw/internal/fileformat"
+	"thaw/internal/hybridtable"
 	"thaw/internal/icebergtable"
 	"thaw/internal/imagerepository"
 	"thaw/internal/maskingpolicy"
@@ -132,6 +133,11 @@ func (a *App) BuildCreateExternalTableSql(database, schema string, cfg externalt
 // BuildCreateIcebergTableSql returns the SQL for creating a Snowflake ICEBERG TABLE.
 func (a *App) BuildCreateIcebergTableSql(database, schema string, cfg icebergtable.IcebergTableConfig) (string, error) {
 	return icebergtable.BuildCreateIcebergTableSql(database, schema, cfg)
+}
+
+// BuildCreateHybridTableSql returns the SQL for creating a Snowflake HYBRID TABLE.
+func (a *App) BuildCreateHybridTableSql(database, schema string, cfg hybridtable.HybridTableConfig) (string, error) {
+	return hybridtable.BuildCreateHybridTableSql(database, schema, cfg)
 }
 
 // BuildCreateMaterializedViewSql returns the SQL for creating a Snowflake MATERIALIZED VIEW.
