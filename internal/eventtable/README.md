@@ -41,9 +41,12 @@ CREATE [OR REPLACE] EVENT TABLE [IF NOT EXISTS] <fqn>
   change tracking, etc.) and `RENAME TO` are issued as free-form `ALTER TABLE`
   statements via `App.AlterEventTable` in `internal/app/eventtable.go`; the
   Sidebar drops them with `DROP TABLE`.
-- Event tables are **not** returned by `SHOW OBJECTS`, so no de-duplication is
-  needed; they are listed via `SHOW EVENT TABLES` in `internal/snowflake`
-  (`ListExtendedObjects`).
+- Event tables are **not** expected to be returned by `SHOW OBJECTS`; they are
+  listed via `SHOW EVENT TABLES` in `internal/snowflake` (`ListExtendedObjects`).
+  A `dedupeEventTables` pass still runs in `ListObjects` for consistency with the
+  other extended table-like kinds — a cheap belt-and-suspenders that drops any
+  `(schema, name)` collision should an edition ever surface an event table as a
+  plain `TABLE`.
 - `GET_DDL` exposes a dedicated `EVENT_TABLE` object type. The
   `"EVENT TABLE"` → `EVENT_TABLE` normalization lives in `internal/snowflake`
   (`buildGetDDLQuery`), not here.

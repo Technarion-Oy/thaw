@@ -3325,6 +3325,13 @@ func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]Sn
 	// is_hybrid=Y column when present; drop any remaining (schema, name)
 	// collision as a fallback for editions that omit that column.
 	basic = dedupeHybridTables(basic, extended)
+	// Event tables are listed explicitly by ListExtendedObjects (kind "EVENT
+	// TABLE"). SHOW OBJECTS is not expected to surface them (there is no is_event
+	// column), but as a belt-and-suspenders against editions that might return one
+	// as a plain TABLE, drop any (schema, name) collision so it can't appear under
+	// both Tables and Event Tables — a real table and an event table cannot share
+	// a name in one schema.
+	basic = dedupeEventTables(basic, extended)
 	// Materialized views are listed explicitly by ListExtendedObjects (kind
 	// "MATERIALIZED VIEW"). They can also surface in SHOW OBJECTS (typically as a
 	// VIEW), so drop any (schema, name) collision to avoid duplicate tree entries
@@ -3393,6 +3400,12 @@ func dedupeIcebergTables(basic, extended []SnowflakeObject) []SnowflakeObject {
 // an extended object of kind "HYBRID TABLE". See dedupeByExtendedKind.
 func dedupeHybridTables(basic, extended []SnowflakeObject) []SnowflakeObject {
 	return dedupeByExtendedKind(basic, extended, "HYBRID TABLE")
+}
+
+// dedupeEventTables removes from basic any object whose (schema, name) matches
+// an extended object of kind "EVENT TABLE". See dedupeByExtendedKind.
+func dedupeEventTables(basic, extended []SnowflakeObject) []SnowflakeObject {
+	return dedupeByExtendedKind(basic, extended, "EVENT TABLE")
 }
 
 // getObjectCache returns a cached result if it exists and hasn't expired.

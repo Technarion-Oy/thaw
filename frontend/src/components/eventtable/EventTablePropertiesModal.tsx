@@ -273,14 +273,17 @@ export default function EventTablePropertiesModal({ db, schema, name, onClose }:
                 label="Change tracking"
                 value={
                   <Space>
-                    <Tag color={ctOn ? "green" : "default"}>{changeTracking || "OFF"}</Tag>
+                    {/* Snowflake reports change tracking as ON/OFF; keep that
+                        vocabulary in the dropdown too (the value still drives
+                        SET CHANGE_TRACKING = TRUE/FALSE under the hood). */}
+                    <Tag color={ctOn ? "green" : "default"}>{ctOn ? "ON" : "OFF"}</Tag>
                     <Select
                       size="small"
                       value={ctOn ? "TRUE" : "FALSE"}
                       onChange={setChangeTracking}
                       loading={changeTrackingBusy}
                       style={{ width: 100 }}
-                      options={[{ value: "TRUE", label: "TRUE" }, { value: "FALSE", label: "FALSE" }]}
+                      options={[{ value: "TRUE", label: "On" }, { value: "FALSE", label: "Off" }]}
                     />
                   </Space>
                 }

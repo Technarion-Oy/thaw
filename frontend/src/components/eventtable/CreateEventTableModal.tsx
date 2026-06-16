@@ -136,11 +136,19 @@ export default function CreateEventTableModal({ db, schema, onClose, onSuccess }
         </Form.Item>
       </div>
       <Form.Item style={itemStyle}>
-        <Checkbox checked={cfg.copyGrants} onChange={(e) => set("copyGrants", e.target.checked)}>
+        {/* COPY GRANTS only has an effect when an existing object is replaced,
+            so it's gated on OR REPLACE — disabled (and force-cleared) otherwise. */}
+        <Checkbox
+          checked={cfg.copyGrants}
+          disabled={!cfg.orReplace}
+          onChange={(e) => set("copyGrants", e.target.checked)}
+        >
           Copy grants
         </Checkbox>
         <Text type="secondary" style={{ fontSize: 12, display: "block" }}>
-          Retain access privileges from an object replaced via OR REPLACE.
+          {cfg.orReplace
+            ? "Retain access privileges from the object replaced via OR REPLACE."
+            : "Enable OR REPLACE to retain access privileges from the replaced object."}
         </Text>
       </Form.Item>
       <TagInput
@@ -174,7 +182,9 @@ export default function CreateEventTableModal({ db, schema, onClose, onSuccess }
           onNameChange={(v) => set("name", v)}
           orReplace={cfg.orReplace}
           ifNotExists={cfg.ifNotExists}
-          onOrReplaceChange={(v) => set("orReplace", v)}
+          // COPY GRANTS only applies with a replace, so clear it when OR REPLACE
+          // is turned off to keep the generated SQL honest.
+          onOrReplaceChange={(v) => setCfg((prev) => ({ ...prev, orReplace: v, copyGrants: v ? prev.copyGrants : false }))}
           onIfNotExistsChange={(v) => set("ifNotExists", v)}
         />
 
