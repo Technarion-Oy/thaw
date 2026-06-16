@@ -233,7 +233,7 @@ export function CreateExternalAccessIntegration(arg1:integrations.ExternalAccess
 
 export function CreateFile(arg1:string):Promise<void>;
 
-export function CreateHybridTableIndex(arg1:string,arg2:string,arg3:string,arg4:hybridtable.HybridIndex):Promise<void>;
+export function CreateHybridTableIndex(arg1:string,arg2:string,arg3:string,arg4:hybridtable.HybridIndex,arg5:boolean):Promise<void>;
 
 export function CreateMigrationSnapshot(arg1:string,arg2:string,arg3:string,arg4:string,arg5:boolean,arg6:string,arg7:boolean):Promise<void>;
 

@@ -20,8 +20,10 @@ enforced primary key and secondary indexes) in the object browser.
   **Indexes & Primary Key** section lists `SHOW INDEXES IN TABLE` output
   (the PK surfaces here as a unique index) and supports adding
   (`CreateHybridTableIndex` → `CREATE INDEX`, with key / `INCLUDE` columns picked
-  from dropdowns fetched via `GetTableColumnsWithTypes`) and dropping
-  (`DropHybridTableIndex` → `DROP INDEX`) secondary indexes.
+  from dropdowns fetched via `GetTableColumnsWithTypes`, plus a case-sensitive
+  name toggle) and dropping (`DropHybridTableIndex` → `DROP INDEX`) secondary
+  indexes. Drop is offered only on non-unique indexes — the primary key surfaces
+  as the lone UNIQUE index and cannot be dropped directly.
 - **`indexColumns.ts`** — shared index-eligibility filters
   (`isIndexableType` / `isIncludableType`) that hide column types Snowflake
   forbids in hybrid-table indexes (semi-structured / geospatial / VECTOR /

@@ -53,12 +53,15 @@ func (a *App) ListHybridTableIndexes(database, schema, name string) (*snowflake.
 }
 
 // CreateHybridTableIndex adds a secondary index to an existing hybrid table by
-// running CREATE INDEX <name> ON <fqn> (<cols>) [INCLUDE (<cols>)].
-func (a *App) CreateHybridTableIndex(database, schema, table string, idx hybridtable.HybridIndex) error {
+// running CREATE INDEX <name> ON <fqn> (<cols>) [INCLUDE (<cols>)]. caseSensitive
+// controls how the index name is quoted (the columns are always double-quoted as
+// catalog-canonical names), mirroring the inline-index path so the same typed
+// name produces the same stored identifier at create time and afterwards.
+func (a *App) CreateHybridTableIndex(database, schema, table string, idx hybridtable.HybridIndex, caseSensitive bool) error {
 	if a.client == nil {
 		return apperrors.ErrNotConnected
 	}
-	sql, err := hybridtable.BuildCreateIndexSql(database, schema, table, idx)
+	sql, err := hybridtable.BuildCreateIndexSql(database, schema, table, idx, caseSensitive)
 	if err != nil {
 		return err
 	}

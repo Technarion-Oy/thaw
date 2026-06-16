@@ -147,12 +147,15 @@ func BuildCreateHybridTableSql(db, schema string, cfg HybridTableConfig) (string
 //
 //	CREATE INDEX <name> ON <db>.<schema>.<table> (<cols>) [INCLUDE (<cols>)]
 //
-// The index name and every column are always double-quoted: this builder runs
-// after the table exists, so the columns come from the catalog already in their
-// canonical case (e.g. via GetTableColumnsWithTypes). Emitting a mixed-case name
-// bare would let Snowflake upper-case it and fail with "invalid identifier", and
-// double-quoting an all-upper name still resolves correctly.
-func BuildCreateIndexSql(db, schema, table string, idx HybridIndex) (string, error) {
+// The index NAME is quoted via QuoteOrBare(idx.Name, caseSensitive), matching
+// how the inline INDEX clause in BuildCreateHybridTableSql quotes it — so the
+// same typed name yields the same stored identifier whether the index is added
+// at create time or afterwards. The columns are always double-quoted: this
+// builder runs after the table exists, so they come from the catalog already in
+// their canonical case (e.g. via GetTableColumnsWithTypes); emitting a mixed-case
+// column bare would let Snowflake fold it and fail with "invalid identifier",
+// while double-quoting an all-upper name still resolves correctly.
+func BuildCreateIndexSql(db, schema, table string, idx HybridIndex, caseSensitive bool) (string, error) {
 	if strings.TrimSpace(idx.Name) == "" {
 		return "", fmt.Errorf("index name is required")
 	}
@@ -162,7 +165,7 @@ func BuildCreateIndexSql(db, schema, table string, idx HybridIndex) (string, err
 	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "CREATE INDEX %s ON %s.%s.%s (%s)",
-		snowflake.QuoteIdent(idx.Name),
+		snowflake.QuoteOrBare(idx.Name, caseSensitive),
 		snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(table),
 		strings.Join(cols, ", "))
 	if inc := cleanIdentList(idx.Include, true); len(inc) > 0 {

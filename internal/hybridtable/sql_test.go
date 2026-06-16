@@ -121,12 +121,28 @@ func TestBuildCreateIndexSql(t *testing.T) {
 		Name:    "IDX_CUST",
 		Columns: []string{"CUSTOMER_ID", "STATUS"},
 		Include: []string{"TOTAL"},
-	})
+	}, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Columns are always double-quoted (catalog-canonical names).
-	want := `CREATE INDEX "IDX_CUST" ON "DB"."SC"."ORDERS" ("CUSTOMER_ID", "STATUS") INCLUDE ("TOTAL");`
+	// Index name follows caseSensitive (bare here); columns are always
+	// double-quoted (catalog-canonical names).
+	want := `CREATE INDEX IDX_CUST ON "DB"."SC"."ORDERS" ("CUSTOMER_ID", "STATUS") INCLUDE ("TOTAL");`
+	if sql != want {
+		t.Errorf("got:\n%s\nwant:\n%s", sql, want)
+	}
+}
+
+func TestBuildCreateIndexSql_CaseSensitiveName(t *testing.T) {
+	// A case-sensitive index name is quoted verbatim, matching the inline path.
+	sql, err := BuildCreateIndexSql("DB", "SC", "ORDERS", HybridIndex{
+		Name:    "MyIdx",
+		Columns: []string{"STATUS"},
+	}, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := `CREATE INDEX "MyIdx" ON "DB"."SC"."ORDERS" ("STATUS");`
 	if sql != want {
 		t.Errorf("got:\n%s\nwant:\n%s", sql, want)
 	}
@@ -137,21 +153,21 @@ func TestBuildCreateIndexSql_MixedCaseColumns(t *testing.T) {
 	sql, err := BuildCreateIndexSql("DB", "SC", "ORDERS", HybridIndex{
 		Name:    "IDX_MIXED",
 		Columns: []string{"MixedCase"},
-	})
+	}, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := `CREATE INDEX "IDX_MIXED" ON "DB"."SC"."ORDERS" ("MixedCase");`
+	want := `CREATE INDEX IDX_MIXED ON "DB"."SC"."ORDERS" ("MixedCase");`
 	if sql != want {
 		t.Errorf("got:\n%s\nwant:\n%s", sql, want)
 	}
 }
 
 func TestBuildCreateIndexSql_Errors(t *testing.T) {
-	if _, err := BuildCreateIndexSql("DB", "SC", "T", HybridIndex{Name: "", Columns: []string{"C"}}); err == nil {
+	if _, err := BuildCreateIndexSql("DB", "SC", "T", HybridIndex{Name: "", Columns: []string{"C"}}, false); err == nil {
 		t.Error("expected error for empty index name")
 	}
-	if _, err := BuildCreateIndexSql("DB", "SC", "T", HybridIndex{Name: "I", Columns: nil}); err == nil {
+	if _, err := BuildCreateIndexSql("DB", "SC", "T", HybridIndex{Name: "I", Columns: nil}, false); err == nil {
 		t.Error("expected error for empty column list")
 	}
 }

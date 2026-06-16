@@ -12,7 +12,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Modal, Spin, Button, Input, Select, Space, Typography, Alert, Tooltip, Table, Tag, Popconfirm,
+  Modal, Spin, Button, Input, Select, Space, Typography, Alert, Tooltip, Table, Tag, Popconfirm, Checkbox,
 } from "antd";
 import {
   MergeCellsOutlined, EditOutlined, CheckOutlined, CloseOutlined, ReloadOutlined,
@@ -173,6 +173,7 @@ export default function HybridTablePropertiesModal({ db, schema, name, onClose }
   const [newIdxName, setNewIdxName] = useState("");
   const [newIdxCols, setNewIdxCols] = useState<string[]>([]);
   const [newIdxInclude, setNewIdxInclude] = useState<string[]>([]);
+  const [newIdxCaseSensitive, setNewIdxCaseSensitive] = useState(false);
   const [creatingIdx, setCreatingIdx] = useState(false);
 
   const reload = useCallback(async () => {
@@ -233,8 +234,8 @@ export default function HybridTablePropertiesModal({ db, schema, name, onClose }
         name: newIdxName,
         columns: newIdxCols,
         include: newIdxInclude,
-      } as any);
-      setNewIdxName(""); setNewIdxCols([]); setNewIdxInclude([]); setAdding(false);
+      } as any, newIdxCaseSensitive);
+      setNewIdxName(""); setNewIdxCols([]); setNewIdxInclude([]); setNewIdxCaseSensitive(false); setAdding(false);
       await loadIndexes();
     } catch (e) {
       setActionError(`Create index failed: ${String(e)}`);
@@ -430,6 +431,12 @@ export default function HybridTablePropertiesModal({ db, schema, name, onClose }
                 style={{ width: 200 }}
                 notFoundContent="No eligible columns"
               />
+              <Checkbox
+                checked={newIdxCaseSensitive}
+                onChange={(e) => setNewIdxCaseSensitive(e.target.checked)}
+              >
+                <span style={{ fontSize: 12 }}>Case-sensitive name</span>
+              </Checkbox>
               <Button
                 size="small"
                 type="primary"

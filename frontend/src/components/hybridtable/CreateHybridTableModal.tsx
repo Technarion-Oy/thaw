@@ -12,7 +12,7 @@
 
 import { useState, useEffect } from "react";
 import {
-  Form, Input, Select, Space, Typography, Button, Checkbox, Collapse,
+  Form, Input, Select, Space, Typography, Button, Checkbox, Collapse, Alert,
 } from "antd";
 import { MergeCellsOutlined, PlusOutlined, DeleteOutlined, KeyOutlined } from "@ant-design/icons";
 import { BuildCreateHybridTableSql, ExecDDL } from "../../../wailsjs/go/app/App";
@@ -45,6 +45,9 @@ export default function CreateHybridTableModal({ db, schema, onClose, onSuccess 
     { name: "ID", type: "NUMBER", notNull: true, primaryKey: true, default: "" },
   ]);
   const [indexes, setIndexes] = useState<HTIndex[]>([]);
+  // Columns auto-removed from an index by the reconcile effect (renamed / deleted
+  // / retyped to a barred datatype), surfaced as a dismissible hint.
+  const [prunedNote, setPrunedNote] = useState<string[]>([]);
 
   const quotedIdentifiersIgnoreCase = useQuotedIdentifiers();
 
@@ -107,6 +110,7 @@ export default function CreateHybridTableModal({ db, schema, onClose, onSuccess 
   useEffect(() => {
     const keyValid = new Set(namedColumns.filter((c) => isIndexableType(c.type)).map((c) => c.name));
     const incValid = new Set(namedColumns.filter((c) => isIncludableType(c.type)).map((c) => c.name));
+    const removed = new Set<string>();
     setIndexes((prev) => {
       let changed = false;
       const next = prev.map((idx) => {
@@ -114,12 +118,15 @@ export default function CreateHybridTableModal({ db, schema, onClose, onSuccess 
         const inc = idx.include.filter((c) => incValid.has(c));
         if (cols.length !== idx.columns.length || inc.length !== idx.include.length) {
           changed = true;
+          idx.columns.filter((c) => !keyValid.has(c)).forEach((c) => removed.add(c));
+          idx.include.filter((c) => !incValid.has(c)).forEach((c) => removed.add(c));
           return { ...idx, columns: cols, include: inc };
         }
         return idx;
       });
       return changed ? next : prev;
     });
+    if (removed.size > 0) setPrunedNote([...removed]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [columns]);
 
@@ -145,6 +152,15 @@ export default function CreateHybridTableModal({ db, schema, onClose, onSuccess 
         Secondary indexes speed up point lookups on non-primary-key columns. INCLUDE columns are
         returned by the index without an extra table lookup.
       </Text>
+      {prunedNote.length > 0 && (
+        <Alert
+          type="warning"
+          showIcon
+          closable
+          onClose={() => setPrunedNote([])}
+          message={`Removed from indexes: ${prunedNote.join(", ")} (column renamed, removed, or no longer an eligible type).`}
+        />
+      )}
       {indexes.map((idx, i) => {
         // A column cannot be both a key and an INCLUDE column of the same index
         // (Snowflake rejects it as a duplicate), so each dropdown hides what the
