@@ -15,10 +15,16 @@ stored procedures, and Snowpark Container Services) in the object browser.
   a comment. **No column editor** — event tables have a fixed schema. Live
   SQL preview via `BuildCreateEventTableSql`; runs through `ExecDDL`.
 - **`EventTablePropertiesModal.tsx`** — `GetObjectProperties("EVENT TABLE", …)`
-  (SHOW EVENT TABLES). Overview (owner / rows / bytes), inline-editable
-  **comment** via `AlterEventTable` `SET`/`UNSET COMMENT`, a **change tracking**
-  toggle (`SET CHANGE_TRACKING = TRUE|FALSE`), and the remaining columns in a
-  generic properties table.
+  (SHOW EVENT TABLES) for the overview (owner / created-on) plus
+  `GetEventTableParameters` (`SHOW PARAMETERS IN TABLE`) for the configurable
+  parameters that `SHOW EVENT TABLES` omits. Editable **Settings** routed through
+  `AlterEventTable`: inline **comment** (`SET`/`UNSET COMMENT`), a **change
+  tracking** toggle (`SET CHANGE_TRACKING = TRUE|FALSE`), **data retention** and
+  **max data extension** day counts (`SET`/`UNSET …_TIME_IN_DAYS`, integer
+  validated), and **search optimization** add/drop buttons (`ADD`/`DROP SEARCH
+  OPTIMIZATION`). Row access policies, tags, contacts, and clustering keys are
+  left to the SQL editor. The remaining columns render in a generic properties
+  table.
 
 ## Wiring
 

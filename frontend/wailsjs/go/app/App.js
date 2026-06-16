@@ -626,6 +626,10 @@ export function GetEditorPrefs() {
   return window['go']['app']['App']['GetEditorPrefs']();
 }
 
+export function GetEventTableParameters(arg1, arg2, arg3) {
+  return window['go']['app']['App']['GetEventTableParameters'](arg1, arg2, arg3);
+}
+
 export function GetFeatureFlags() {
   return window['go']['app']['App']['GetFeatureFlags']();
 }

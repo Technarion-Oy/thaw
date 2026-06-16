@@ -12,12 +12,12 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Modal, Spin, Button, Input, Select, Space, Typography, Alert, Tooltip, Tag,
+  Modal, Spin, Button, Input, Select, Space, Typography, Alert, Tooltip, Tag, Popconfirm,
 } from "antd";
 import {
-  AuditOutlined, EditOutlined, CheckOutlined, CloseOutlined,
+  AuditOutlined, EditOutlined, CheckOutlined, CloseOutlined, ThunderboltOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterEventTable } from "../../../wailsjs/go/app/App";
+import { GetObjectProperties, AlterEventTable, GetEventTableParameters } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -152,9 +152,11 @@ interface Props {
 
 export default function EventTablePropertiesModal({ db, schema, name, onClose }: Props) {
   const [rows, setRows] = useState<snowflake.PropertyPair[] | null>(null);
+  const [params, setParams] = useState<snowflake.QueryResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [changeTrackingBusy, setChangeTrackingBusy] = useState(false);
+  const [searchOptBusy, setSearchOptBusy] = useState(false);
 
   const reload = useCallback(async () => {
     setRows(null);
@@ -165,6 +167,15 @@ export default function EventTablePropertiesModal({ db, schema, name, onClose }:
     } catch (e) {
       setError(String(e));
     }
+    // SHOW EVENT TABLES omits the configurable parameters; pull them from
+    // SHOW PARAMETERS. Failure here is non-fatal — the settings rows just show
+    // their defaults.
+    try {
+      const p = await GetEventTableParameters(db, schema, name);
+      setParams(p ?? null);
+    } catch {
+      setParams(null);
+    }
   }, [db, schema, name]);
 
   useEffect(() => { reload(); }, [reload]);
@@ -174,11 +185,37 @@ export default function EventTablePropertiesModal({ db, schema, name, onClose }:
   const find = (key: string) =>
     rows ? (rows.find((r) => r.key.toLowerCase() === key.toLowerCase())?.value ?? "") : "";
 
+  // Pull a parameter's current value out of the SHOW PARAMETERS result (columns
+  // are key / value / default / …; we want the row whose key matches and its
+  // value column).
+  const paramVal = (key: string): string => {
+    if (!params) return "";
+    const cols = (params.columns ?? []).map((c) => c.toLowerCase());
+    const keyCi = cols.indexOf("key");
+    const valCi = cols.indexOf("value");
+    if (keyCi < 0 || valCi < 0) return "";
+    const row = (params.rows ?? []).find((r) => String(r[keyCi] ?? "").toLowerCase() === key.toLowerCase());
+    return row ? String(row[valCi] ?? "") : "";
+  };
+
   const saveComment = async (comment: string) => {
     if (comment.trim() === "") {
       await AlterEventTable(db, schema, name, "UNSET COMMENT");
     } else {
       await AlterEventTable(db, schema, name, `SET COMMENT = ${q1(comment)}`);
+    }
+    await reload();
+  };
+
+  // SET/UNSET a non-negative-integer parameter (DATA_RETENTION_TIME_IN_DAYS /
+  // MAX_DATA_EXTENSION_TIME_IN_DAYS). EditRow surfaces a thrown error inline.
+  const saveIntParam = (param: string) => async (val: string) => {
+    const v = val.trim();
+    if (v === "") {
+      await AlterEventTable(db, schema, name, `UNSET ${param}`);
+    } else {
+      if (!/^\d+$/.test(v)) throw new Error("Must be a non-negative integer.");
+      await AlterEventTable(db, schema, name, `SET ${param} = ${v}`);
     }
     await reload();
   };
@@ -196,14 +233,30 @@ export default function EventTablePropertiesModal({ db, schema, name, onClose }:
     }
   };
 
+  const setSearchOptimization = async (enable: boolean) => {
+    setSearchOptBusy(true);
+    setActionError(null);
+    try {
+      await AlterEventTable(db, schema, name, enable ? "ADD SEARCH OPTIMIZATION" : "DROP SEARCH OPTIMIZATION");
+      await reload();
+    } catch (e) {
+      setActionError(`Search optimization update failed: ${String(e)}`);
+    } finally {
+      setSearchOptBusy(false);
+    }
+  };
+
   const comment = find("comment");
   const owner = find("owner");
-  const rowCount = find("rows");
-  const bytes = find("bytes");
-  const changeTracking = find("change_tracking");
+  const createdOn = find("created_on");
+  // Configurable parameters come from SHOW PARAMETERS (SHOW EVENT TABLES omits
+  // them).
+  const changeTracking = paramVal("CHANGE_TRACKING");
+  const retention = paramVal("DATA_RETENTION_TIME_IN_DAYS");
+  const maxExtension = paramVal("MAX_DATA_EXTENSION_TIME_IN_DAYS");
   // Keys rendered in the dedicated sections, hidden from the generic Properties
   // dump below.
-  const handledKeys = new Set(["comment", "owner", "rows", "bytes", "change_tracking"]);
+  const handledKeys = new Set(["comment", "owner", "created_on"]);
 
   const ctOn = changeTracking.toUpperCase() === "ON" || changeTracking.toUpperCase() === "TRUE";
 
@@ -254,8 +307,7 @@ export default function EventTablePropertiesModal({ db, schema, name, onClose }:
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
               <InfoRow label="Owner" value={owner} />
-              <InfoRow label="Rows" value={rowCount} />
-              <InfoRow label="Bytes" value={bytes} />
+              <InfoRow label="Created on" value={createdOn} />
             </tbody>
           </table>
 
@@ -288,8 +340,55 @@ export default function EventTablePropertiesModal({ db, schema, name, onClose }:
                   </Space>
                 }
               />
+              <EditRow
+                label="Data retention (days)"
+                value={retention}
+                canUnset={retention !== ""}
+                onSave={saveIntParam("DATA_RETENTION_TIME_IN_DAYS")}
+                onUnset={() => saveIntParam("DATA_RETENTION_TIME_IN_DAYS")("")}
+              />
+              <EditRow
+                label="Max data extension (days)"
+                value={maxExtension}
+                canUnset={maxExtension !== ""}
+                onSave={saveIntParam("MAX_DATA_EXTENSION_TIME_IN_DAYS")}
+                onUnset={() => saveIntParam("MAX_DATA_EXTENSION_TIME_IN_DAYS")("")}
+              />
             </tbody>
           </table>
+
+          <div style={SECTION_HEAD}>Search Optimization</div>
+          <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 8 }}>
+            Speeds up selective point-lookup queries against the event table.
+          </Text>
+          <Space>
+            <Popconfirm
+              title="Enable search optimization?"
+              description="ADD SEARCH OPTIMIZATION — this may incur additional storage and maintenance cost."
+              okText="Enable"
+              onConfirm={() => setSearchOptimization(true)}
+            >
+              <Button size="small" icon={<ThunderboltOutlined />} loading={searchOptBusy}>
+                Add search optimization
+              </Button>
+            </Popconfirm>
+            <Popconfirm
+              title="Disable search optimization?"
+              description="DROP SEARCH OPTIMIZATION removes the search access path from the whole table."
+              okText="Disable"
+              okButtonProps={{ danger: true }}
+              onConfirm={() => setSearchOptimization(false)}
+            >
+              <Button size="small" danger loading={searchOptBusy}>
+                Drop search optimization
+              </Button>
+            </Popconfirm>
+          </Space>
+
+          <Text type="secondary" style={{ fontSize: 11, display: "block", margin: "16px 0 0" }}>
+            Row access policies, tags, contacts, and clustering keys are managed via
+            the SQL editor (<code>ALTER TABLE … ADD ROW ACCESS POLICY / SET TAG / SET CONTACT / CLUSTER BY</code>).
+          </Text>
 
           <div style={SECTION_HEAD}>Properties</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>

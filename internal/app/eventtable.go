@@ -33,3 +33,20 @@ func (a *App) AlterEventTable(database, schema, name, clause string) error {
 	_, err := a.client.Execute(a.ctx, sql)
 	return err
 }
+
+// GetEventTableParameters returns the table-level parameters for an event table
+// via SHOW PARAMETERS IN TABLE. SHOW EVENT TABLES reports only a minimal column
+// set (owner, comment, …) and omits the configurable parameters, so the
+// properties panel reads the current DATA_RETENTION_TIME_IN_DAYS,
+// MAX_DATA_EXTENSION_TIME_IN_DAYS, and CHANGE_TRACKING values from here instead.
+// The raw QueryResult is returned (key / value / default / level / … columns) so
+// the caller can pick out the parameters it cares about without the backend
+// pinning a fixed shape.
+func (a *App) GetEventTableParameters(database, schema, name string) (*snowflake.QueryResult, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	sql := fmt.Sprintf("SHOW PARAMETERS IN TABLE %s.%s.%s",
+		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
+	return a.client.Execute(a.ctx, sql)
+}
