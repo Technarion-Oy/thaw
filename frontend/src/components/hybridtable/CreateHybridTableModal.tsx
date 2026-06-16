@@ -12,7 +12,7 @@
 
 import { useState } from "react";
 import {
-  Form, Input, Space, Typography, Button, Checkbox, Collapse,
+  Form, Input, Select, Space, Typography, Button, Checkbox, Collapse,
 } from "antd";
 import { MergeCellsOutlined, PlusOutlined, DeleteOutlined, KeyOutlined } from "@ant-design/icons";
 import { BuildCreateHybridTableSql, ExecDDL } from "../../../wailsjs/go/app/App";
@@ -20,6 +20,7 @@ import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
+import { isIndexableType, isIncludableType } from "./indexColumns";
 
 const { Text } = Typography;
 
@@ -30,12 +31,10 @@ interface Props {
   onSuccess?: () => void;
 }
 
-// UI-side shapes. Index column lists are edited as comma-separated text and
-// split into arrays only when the config is handed to the builder.
+// UI-side shapes. Index key / INCLUDE columns are selected from the form's
+// columns and stored as identifier lists.
 type HTColumn = { name: string; type: string; notNull: boolean; primaryKey: boolean; default: string };
-type HTIndex = { name: string; columns: string; include: string };
-
-const splitCols = (s: string) => s.split(",").map((c) => c.trim()).filter((c) => c !== "");
+type HTIndex = { name: string; columns: string[]; include: string[] };
 
 export default function CreateHybridTableModal({ db, schema, onClose, onSuccess }: Props) {
   const [name, setName] = useState("");
@@ -50,7 +49,7 @@ export default function CreateHybridTableModal({ db, schema, onClose, onSuccess 
   const quotedIdentifiersIgnoreCase = useQuotedIdentifiers();
 
   // The builder takes the Wails-generated config shape; we map the UI state into
-  // it (splitting index column text into arrays) only at the IPC boundary.
+  // it only at the IPC boundary.
   const toBuilderCfg = () => ({
     name,
     caseSensitive,
@@ -65,8 +64,8 @@ export default function CreateHybridTableModal({ db, schema, onClose, onSuccess 
     })),
     indexes: indexes.map((i) => ({
       name: i.name,
-      columns: splitCols(i.columns),
-      include: splitCols(i.include),
+      columns: i.columns,
+      include: i.include,
     })),
   });
 
@@ -84,12 +83,22 @@ export default function CreateHybridTableModal({ db, schema, onClose, onSuccess 
   const removeColumn = (i: number) => setColumns(columns.filter((_, idx) => idx !== i));
 
   // ── Index editing ──────────────────────────────────────────────────────────
-  const addIndex = () => setIndexes([...indexes, { name: "", columns: "", include: "" }]);
+  const addIndex = () => setIndexes([...indexes, { name: "", columns: [], include: [] }]);
   const updateIndex = (i: number, patch: Partial<HTIndex>) =>
     setIndexes(indexes.map((x, idx) => (idx === i ? { ...x, ...patch } : x)));
   const removeIndex = (i: number) => setIndexes(indexes.filter((_, idx) => idx !== i));
 
   const namedColumns = columns.filter((c) => c.name.trim() !== "");
+  // Index key / INCLUDE column choices come from the form's columns, filtered by
+  // the datatypes Snowflake allows for each (semi-structured / geospatial /
+  // VECTOR / TIMESTAMP_TZ are barred from index keys; semi-structured /
+  // geospatial from INCLUDE).
+  const keyColumnOptions = namedColumns
+    .filter((c) => isIndexableType(c.type))
+    .map((c) => ({ value: c.name, label: c.name }));
+  const includeColumnOptions = namedColumns
+    .filter((c) => isIncludableType(c.type))
+    .map((c) => ({ value: c.name, label: c.name }));
   const hasPrimaryKey = namedColumns.some((c) => c.primaryKey);
   // A hybrid table requires a name, at least one column, and a PRIMARY KEY.
   const canSubmit = name.trim().length > 0 && namedColumns.length > 0 && hasPrimaryKey;
@@ -121,19 +130,25 @@ export default function CreateHybridTableModal({ db, schema, onClose, onSuccess 
             onChange={(e) => updateIndex(i, { name: e.target.value })}
             style={{ width: 150 }}
           />
-          <Input
+          <Select
             size="small"
-            placeholder="Columns (comma-separated)"
+            mode="multiple"
+            placeholder="Key columns"
             value={idx.columns}
-            onChange={(e) => updateIndex(i, { columns: e.target.value })}
-            style={{ width: 200 }}
+            onChange={(v) => updateIndex(i, { columns: v })}
+            options={keyColumnOptions}
+            style={{ width: 220 }}
+            notFoundContent="No eligible columns"
           />
-          <Input
+          <Select
             size="small"
+            mode="multiple"
             placeholder="Include (optional)"
             value={idx.include}
-            onChange={(e) => updateIndex(i, { include: e.target.value })}
-            style={{ width: 160 }}
+            onChange={(v) => updateIndex(i, { include: v })}
+            options={includeColumnOptions}
+            style={{ width: 200 }}
+            notFoundContent="No eligible columns"
           />
           <Button size="small" type="text" icon={<DeleteOutlined />} onClick={() => removeIndex(i)} />
         </Space>
@@ -221,9 +236,12 @@ export default function CreateHybridTableModal({ db, schema, onClose, onSuccess 
                 >
                   <span style={{ fontSize: 12 }}>NOT NULL</span>
                 </Checkbox>
+                {/* PK forces NOT NULL via the derived `checked` above; the
+                    column's own notNull value is left untouched so un-ticking PK
+                    restores it. */}
                 <Checkbox
                   checked={c.primaryKey}
-                  onChange={(e) => updateColumn(i, { primaryKey: e.target.checked, notNull: e.target.checked ? true : c.notNull })}
+                  onChange={(e) => updateColumn(i, { primaryKey: e.target.checked })}
                 >
                   <span style={{ fontSize: 12 }}><KeyOutlined /> PK</span>
                 </Checkbox>

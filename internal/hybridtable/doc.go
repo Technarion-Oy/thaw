@@ -22,7 +22,7 @@
 // and forces every primary-key column to NOT NULL, which Snowflake requires.
 // Hybrid tables do NOT support OR REPLACE, TRANSIENT, CLUSTER BY,
 // DATA_RETENTION_TIME_IN_DAYS, CHANGE_TRACKING, or COPY GRANTS, so none of those
-// are modelled.
+// are modeled.
 //
 // CREATE HYBRID TABLE skeleton (the subset the visual builder covers):
 //

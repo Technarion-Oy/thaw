@@ -45,7 +45,7 @@ type HybridIndex struct {
 // PRIMARY KEY clause derived from the columns flagged PrimaryKey (a placeholder
 // is emitted when none are flagged). Hybrid tables do NOT support OR REPLACE
 // (only IF NOT EXISTS), TRANSIENT, CLUSTER BY, DATA_RETENTION_TIME_IN_DAYS,
-// CHANGE_TRACKING, or COPY GRANTS — none of those are modelled here.
+// CHANGE_TRACKING, or COPY GRANTS — none of those are modeled here.
 type HybridTableConfig struct {
 	Name          string         `json:"name"`
 	CaseSensitive bool           `json:"caseSensitive"`

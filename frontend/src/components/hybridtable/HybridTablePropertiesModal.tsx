@@ -12,7 +12,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Modal, Spin, Button, Input, Space, Typography, Alert, Tooltip, Table, Tag, Popconfirm,
+  Modal, Spin, Button, Input, Select, Space, Typography, Alert, Tooltip, Table, Tag, Popconfirm,
 } from "antd";
 import {
   MergeCellsOutlined, EditOutlined, CheckOutlined, CloseOutlined, ReloadOutlined,
@@ -20,9 +20,10 @@ import {
 } from "@ant-design/icons";
 import {
   GetObjectProperties, AlterHybridTable, ListHybridTableIndexes,
-  CreateHybridTableIndex, DropHybridTableIndex,
+  CreateHybridTableIndex, DropHybridTableIndex, GetTableColumnsWithTypes,
 } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
+import { isIndexableType, isIncludableType } from "./indexColumns";
 
 const { Text } = Typography;
 
@@ -43,7 +44,6 @@ const LABEL_TD: React.CSSProperties = {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function q1(s: string) { return "'" + s.replace(/'/g, "''") + "'"; }
-const splitCols = (s: string) => s.split(",").map((c) => c.trim()).filter((c) => c !== "");
 
 // ─── EditRow (inline comment editor) ─────────────────────────────────────────
 
@@ -165,11 +165,14 @@ export default function HybridTablePropertiesModal({ db, schema, name, onClose }
   const [indexesLoading, setIndexesLoading] = useState(false);
   const [indexesError, setIndexesError] = useState<string | null>(null);
 
+  // Table columns (with datatypes), for the add-index column dropdowns.
+  const [tableColumns, setTableColumns] = useState<snowflake.ColumnInfo[]>([]);
+
   // Add-index inline form.
   const [adding, setAdding] = useState(false);
   const [newIdxName, setNewIdxName] = useState("");
-  const [newIdxCols, setNewIdxCols] = useState("");
-  const [newIdxInclude, setNewIdxInclude] = useState("");
+  const [newIdxCols, setNewIdxCols] = useState<string[]>([]);
+  const [newIdxInclude, setNewIdxInclude] = useState<string[]>([]);
   const [creatingIdx, setCreatingIdx] = useState(false);
 
   const reload = useCallback(async () => {
@@ -196,7 +199,17 @@ export default function HybridTablePropertiesModal({ db, schema, name, onClose }
     }
   }, [db, schema, name]);
 
-  useEffect(() => { reload(); loadIndexes(); }, [reload, loadIndexes]);
+  const loadColumns = useCallback(async () => {
+    try {
+      const cols = await GetTableColumnsWithTypes(db, schema, name);
+      setTableColumns(cols ?? []);
+    } catch {
+      // Non-fatal: the add-index dropdowns simply stay empty.
+      setTableColumns([]);
+    }
+  }, [db, schema, name]);
+
+  useEffect(() => { reload(); loadIndexes(); loadColumns(); }, [reload, loadIndexes, loadColumns]);
 
   const tableRef = `"${db}"."${schema}"."${name}"`;
 
@@ -218,10 +231,10 @@ export default function HybridTablePropertiesModal({ db, schema, name, onClose }
     try {
       await CreateHybridTableIndex(db, schema, name, {
         name: newIdxName,
-        columns: splitCols(newIdxCols),
-        include: splitCols(newIdxInclude),
+        columns: newIdxCols,
+        include: newIdxInclude,
       } as any);
-      setNewIdxName(""); setNewIdxCols(""); setNewIdxInclude(""); setAdding(false);
+      setNewIdxName(""); setNewIdxCols([]); setNewIdxInclude([]); setAdding(false);
       await loadIndexes();
     } catch (e) {
       setActionError(`Create index failed: ${String(e)}`);
@@ -245,6 +258,15 @@ export default function HybridTablePropertiesModal({ db, schema, name, onClose }
   const rowCount = find("rows");
   const bytes = find("bytes");
   const handledKeys = new Set(["comment"]);
+
+  // Add-index column choices, filtered by the datatypes Snowflake allows for
+  // hybrid-table index keys vs. INCLUDE columns.
+  const keyColumnOptions = tableColumns
+    .filter((c) => isIndexableType(c.dataType))
+    .map((c) => ({ value: c.name, label: c.name }));
+  const includeColumnOptions = tableColumns
+    .filter((c) => isIncludableType(c.dataType))
+    .map((c) => ({ value: c.name, label: c.name }));
 
   // ── Index table ───────────────────────────────────────────────────────────
   const cols = indexes?.columns ?? [];
@@ -381,13 +403,31 @@ export default function HybridTablePropertiesModal({ db, schema, name, onClose }
           {adding && (
             <Space align="start" style={{ width: "100%", marginBottom: 8 }} wrap>
               <Input size="small" placeholder="Index name" value={newIdxName} onChange={(e) => setNewIdxName(e.target.value)} style={{ width: 150 }} />
-              <Input size="small" placeholder="Columns (comma-separated)" value={newIdxCols} onChange={(e) => setNewIdxCols(e.target.value)} style={{ width: 200 }} />
-              <Input size="small" placeholder="Include (optional)" value={newIdxInclude} onChange={(e) => setNewIdxInclude(e.target.value)} style={{ width: 160 }} />
+              <Select
+                size="small"
+                mode="multiple"
+                placeholder="Key columns"
+                value={newIdxCols}
+                onChange={setNewIdxCols}
+                options={keyColumnOptions}
+                style={{ width: 220 }}
+                notFoundContent="No eligible columns"
+              />
+              <Select
+                size="small"
+                mode="multiple"
+                placeholder="Include (optional)"
+                value={newIdxInclude}
+                onChange={setNewIdxInclude}
+                options={includeColumnOptions}
+                style={{ width: 200 }}
+                notFoundContent="No eligible columns"
+              />
               <Button
                 size="small"
                 type="primary"
                 loading={creatingIdx}
-                disabled={newIdxName.trim() === "" || splitCols(newIdxCols).length === 0}
+                disabled={newIdxName.trim() === "" || newIdxCols.length === 0}
                 onClick={createIndex}
               >
                 Create
