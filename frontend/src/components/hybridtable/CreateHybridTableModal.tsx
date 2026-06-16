@@ -121,38 +121,45 @@ export default function CreateHybridTableModal({ db, schema, onClose, onSuccess 
         Secondary indexes speed up point lookups on non-primary-key columns. INCLUDE columns are
         returned by the index without an extra table lookup.
       </Text>
-      {indexes.map((idx, i) => (
-        <Space key={i} align="start" style={{ width: "100%" }} wrap={false}>
-          <Input
-            size="small"
-            placeholder="Index name"
-            value={idx.name}
-            onChange={(e) => updateIndex(i, { name: e.target.value })}
-            style={{ width: 150 }}
-          />
-          <Select
-            size="small"
-            mode="multiple"
-            placeholder="Key columns"
-            value={idx.columns}
-            onChange={(v) => updateIndex(i, { columns: v })}
-            options={keyColumnOptions}
-            style={{ width: 220 }}
-            notFoundContent="No eligible columns"
-          />
-          <Select
-            size="small"
-            mode="multiple"
-            placeholder="Include (optional)"
-            value={idx.include}
-            onChange={(v) => updateIndex(i, { include: v })}
-            options={includeColumnOptions}
-            style={{ width: 200 }}
-            notFoundContent="No eligible columns"
-          />
-          <Button size="small" type="text" icon={<DeleteOutlined />} onClick={() => removeIndex(i)} />
-        </Space>
-      ))}
+      {indexes.map((idx, i) => {
+        // A column cannot be both a key and an INCLUDE column of the same index
+        // (Snowflake rejects it as a duplicate), so each dropdown hides what the
+        // other has already selected.
+        const keyOpts = keyColumnOptions.filter((o) => !idx.include.includes(o.value));
+        const includeOpts = includeColumnOptions.filter((o) => !idx.columns.includes(o.value));
+        return (
+          <Space key={i} align="start" style={{ width: "100%" }} wrap={false}>
+            <Input
+              size="small"
+              placeholder="Index name"
+              value={idx.name}
+              onChange={(e) => updateIndex(i, { name: e.target.value })}
+              style={{ width: 150 }}
+            />
+            <Select
+              size="small"
+              mode="multiple"
+              placeholder="Key columns"
+              value={idx.columns}
+              onChange={(v) => updateIndex(i, { columns: v })}
+              options={keyOpts}
+              style={{ width: 220 }}
+              notFoundContent="No eligible columns"
+            />
+            <Select
+              size="small"
+              mode="multiple"
+              placeholder="Include (optional)"
+              value={idx.include}
+              onChange={(v) => updateIndex(i, { include: v })}
+              options={includeOpts}
+              style={{ width: 200 }}
+              notFoundContent="No eligible columns"
+            />
+            <Button size="small" type="text" icon={<DeleteOutlined />} onClick={() => removeIndex(i)} />
+          </Space>
+        );
+      })}
       <Button size="small" icon={<PlusOutlined />} onClick={addIndex}>Add index</Button>
     </Space>
   );

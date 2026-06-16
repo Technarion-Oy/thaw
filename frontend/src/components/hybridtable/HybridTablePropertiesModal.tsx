@@ -260,12 +260,14 @@ export default function HybridTablePropertiesModal({ db, schema, name, onClose }
   const handledKeys = new Set(["comment"]);
 
   // Add-index column choices, filtered by the datatypes Snowflake allows for
-  // hybrid-table index keys vs. INCLUDE columns.
+  // hybrid-table index keys vs. INCLUDE columns. A column cannot be both a key
+  // and an INCLUDE column of the same index (Snowflake rejects it as a
+  // duplicate), so each dropdown also hides what the other has already selected.
   const keyColumnOptions = tableColumns
-    .filter((c) => isIndexableType(c.dataType))
+    .filter((c) => isIndexableType(c.dataType) && !newIdxInclude.includes(c.name))
     .map((c) => ({ value: c.name, label: c.name }));
   const includeColumnOptions = tableColumns
-    .filter((c) => isIncludableType(c.dataType))
+    .filter((c) => isIncludableType(c.dataType) && !newIdxCols.includes(c.name))
     .map((c) => ({ value: c.name, label: c.name }));
 
   // ── Index table ───────────────────────────────────────────────────────────
