@@ -25,7 +25,7 @@ Provides object-property queries and column-comment helpers that are not specifi
 
 | Function | Emits |
 |---|---|
-| `BuildObjectPropertiesQuery(db, schema, kind, name)` | `SHOW <OBJECTS> LIKE '<name>' IN [SCHEMA/DATABASE] <fqn>` — supports 23 object kinds |
+| `BuildObjectPropertiesQuery(db, schema, kind, name)` | `SHOW <OBJECTS> LIKE '<name>' IN [SCHEMA/DATABASE] <fqn>` — supports 24 object kinds |
 | `BuildDescribeStageQuery(db, schema, name)` | `DESCRIBE STAGE <fqn>` — used to supplement SHOW STAGES output |
 | `BuildDescribeMaskingPolicyQuery(db, schema, name)` | `DESCRIBE MASKING POLICY <fqn>` — used to supplement SHOW MASKING POLICIES with the signature, return type, and body |
 | `BuildDescribeRowAccessPolicyQuery(db, schema, name)` | `DESCRIBE ROW ACCESS POLICY <fqn>` — used to supplement SHOW ROW ACCESS POLICIES with the signature, return type, and body |
@@ -56,7 +56,7 @@ Provides object-property queries and column-comment helpers that are not specifi
 - `App.GetColumnComments(db, schema, table)` → `objects.GetColumnComments`
 - `App.SetColumnComment(db, schema, table, column, comment)` → `objects.SetColumnComment`
 
-`GetObjectProperties` is the single entry point for the Properties side-panel. It handles all 29 supported object kinds (DATABASE, SCHEMA, TABLE, VIEW, DYNAMIC TABLE, EXTERNAL TABLE, MATERIALIZED VIEW, ALERT, TAG, MASKING POLICY, ROW ACCESS POLICY, NETWORK RULE, IMAGE REPOSITORY, SERVICE, STREAMLIT, FUNCTION, PROCEDURE, SEQUENCE, STAGE, STREAM, TASK, FILE FORMAT, PIPE, SECRET, GIT REPOSITORY, DBT PROJECT, WAREHOUSE, ROLE, USER) through a `switch` on `kind`. STAGE additionally merges `DESCRIBE STAGE` rows (keyed as `parent.property`), MASKING POLICY and ROW ACCESS POLICY merge the corresponding `DESCRIBE` signature / return type / body, NETWORK RULE merges the `DESCRIBE NETWORK RULE` value_list, SERVICE merges the `DESCRIBE SERVICE` spec / dns_name, and STREAMLIT merges the `DESCRIBE STREAMLIT` root_location / main_file, to expose configuration the corresponding `SHOW` omits.
+`GetObjectProperties` is the single entry point for the Properties side-panel. It handles all 30 supported object kinds (DATABASE, SCHEMA, TABLE, VIEW, DYNAMIC TABLE, EXTERNAL TABLE, ICEBERG TABLE, MATERIALIZED VIEW, ALERT, TAG, MASKING POLICY, ROW ACCESS POLICY, NETWORK RULE, IMAGE REPOSITORY, SERVICE, STREAMLIT, FUNCTION, PROCEDURE, SEQUENCE, STAGE, STREAM, TASK, FILE FORMAT, PIPE, SECRET, GIT REPOSITORY, DBT PROJECT, WAREHOUSE, ROLE, USER) through a `switch` on `kind`. STAGE additionally merges `DESCRIBE STAGE` rows (keyed as `parent.property`), MASKING POLICY and ROW ACCESS POLICY merge the corresponding `DESCRIBE` signature / return type / body, NETWORK RULE merges the `DESCRIBE NETWORK RULE` value_list, SERVICE merges the `DESCRIBE SERVICE` spec / dns_name, and STREAMLIT merges the `DESCRIBE STREAMLIT` root_location / main_file, to expose configuration the corresponding `SHOW` omits.
 
 `snowflake.ResultToPairs` (from `internal/snowflake/result.go`) converts a `SHOW` result row into `[]PropertyPair{Key, Value}` by pairing column names with cell values. `objects` does not duplicate this logic.
 

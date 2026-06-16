@@ -17,6 +17,7 @@ import (
 	"thaw/internal/dynamictable"
 	"thaw/internal/externaltable"
 	"thaw/internal/fileformat"
+	"thaw/internal/icebergtable"
 	"thaw/internal/imagerepository"
 	"thaw/internal/maskingpolicy"
 	"thaw/internal/materializedview"
@@ -126,6 +127,11 @@ func (a *App) BuildCreateDynamicTableSql(database, schema string, cfg dynamictab
 // BuildCreateExternalTableSql returns the SQL for creating a Snowflake EXTERNAL TABLE.
 func (a *App) BuildCreateExternalTableSql(database, schema string, cfg externaltable.ExternalTableConfig) (string, error) {
 	return externaltable.BuildCreateExternalTableSql(database, schema, cfg)
+}
+
+// BuildCreateIcebergTableSql returns the SQL for creating a Snowflake ICEBERG TABLE.
+func (a *App) BuildCreateIcebergTableSql(database, schema string, cfg icebergtable.IcebergTableConfig) (string, error) {
+	return icebergtable.BuildCreateIcebergTableSql(database, schema, cfg)
 }
 
 // BuildCreateMaterializedViewSql returns the SQL for creating a Snowflake MATERIALIZED VIEW.

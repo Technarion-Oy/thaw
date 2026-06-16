@@ -26,6 +26,10 @@ export function AlterExternalTable(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterExternalTable'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterIcebergTable(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterIcebergTable'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterImageRepository(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterImageRepository'](arg1, arg2, arg3, arg4);
 }
@@ -148,6 +152,10 @@ export function BuildCreateFileFormatSql(arg1, arg2, arg3) {
 
 export function BuildCreateGitRepositorySql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateGitRepositorySql'](arg1, arg2, arg3);
+}
+
+export function BuildCreateIcebergTableSql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateIcebergTableSql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateImageRepositorySql(arg1, arg2, arg3) {

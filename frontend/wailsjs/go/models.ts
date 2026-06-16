@@ -1309,6 +1309,87 @@ export namespace gitrepo {
 
 }
 
+export namespace icebergtable {
+	
+	export class IcebergColumn {
+	    name: string;
+	    type: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new IcebergColumn(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.type = source["type"];
+	    }
+	}
+	export class IcebergTableConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    tableType: string;
+	    columns: IcebergColumn[];
+	    externalVolume: string;
+	    catalog: string;
+	    baseLocation: string;
+	    catalogTableName: string;
+	    catalogNamespace: string;
+	    metadataFilePath: string;
+	    replaceInvalidCharacters: string;
+	    autoRefresh: string;
+	    clusterBy: string;
+	    comment: string;
+	    tags: snowflake.TagPair[];
+	
+	    static createFrom(source: any = {}) {
+	        return new IcebergTableConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.tableType = source["tableType"];
+	        this.columns = this.convertValues(source["columns"], IcebergColumn);
+	        this.externalVolume = source["externalVolume"];
+	        this.catalog = source["catalog"];
+	        this.baseLocation = source["baseLocation"];
+	        this.catalogTableName = source["catalogTableName"];
+	        this.catalogNamespace = source["catalogNamespace"];
+	        this.metadataFilePath = source["metadataFilePath"];
+	        this.replaceInvalidCharacters = source["replaceInvalidCharacters"];
+	        this.autoRefresh = source["autoRefresh"];
+	        this.clusterBy = source["clusterBy"];
+	        this.comment = source["comment"];
+	        this.tags = this.convertValues(source["tags"], snowflake.TagPair);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
 export namespace imagerepository {
 	
 	export class ImageRepositoryConfig {
