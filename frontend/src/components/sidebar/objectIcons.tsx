@@ -65,6 +65,7 @@ import {
   AppstoreOutlined,
   GoldOutlined,
   MergeCellsOutlined,
+  AuditOutlined,
 } from "@ant-design/icons";
 
 // ── CSS variable name per kind ─────────────────────────────────────────────
@@ -75,6 +76,7 @@ const KIND_VAR: Record<string, string> = {
   "EXTERNAL TABLE":  "--icon-externaltable",
   "ICEBERG TABLE":   "--icon-icebergtable",
   "HYBRID TABLE":    "--icon-hybridtable",
+  "EVENT TABLE":     "--icon-eventtable",
   "MATERIALIZED VIEW": "--icon-materializedview",
   ALERT:             "--icon-alert",
   TAG:               "--icon-tag",
@@ -106,6 +108,7 @@ const KIND_ICON: Record<string, React.ComponentType<{ style?: React.CSSPropertie
   "EXTERNAL TABLE": CloudServerOutlined,
   "ICEBERG TABLE":  GoldOutlined,
   "HYBRID TABLE":   MergeCellsOutlined,
+  "EVENT TABLE":    AuditOutlined,
   "MATERIALIZED VIEW": BlockOutlined,
   ALERT:            AlertOutlined,
   TAG:              TagsOutlined,

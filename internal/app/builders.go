@@ -15,6 +15,7 @@ import (
 	"thaw/internal/column"
 	"thaw/internal/dbtproject"
 	"thaw/internal/dynamictable"
+	"thaw/internal/eventtable"
 	"thaw/internal/externaltable"
 	"thaw/internal/fileformat"
 	"thaw/internal/hybridtable"
@@ -133,6 +134,11 @@ func (a *App) BuildCreateExternalTableSql(database, schema string, cfg externalt
 // BuildCreateIcebergTableSql returns the SQL for creating a Snowflake ICEBERG TABLE.
 func (a *App) BuildCreateIcebergTableSql(database, schema string, cfg icebergtable.IcebergTableConfig) (string, error) {
 	return icebergtable.BuildCreateIcebergTableSql(database, schema, cfg)
+}
+
+// BuildCreateEventTableSql returns the SQL for creating a Snowflake EVENT TABLE.
+func (a *App) BuildCreateEventTableSql(database, schema string, cfg eventtable.EventTableConfig) (string, error) {
+	return eventtable.BuildCreateEventTableSql(database, schema, cfg)
 }
 
 // BuildCreateHybridTableSql returns the SQL for creating a Snowflake HYBRID TABLE.

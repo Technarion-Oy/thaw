@@ -916,6 +916,61 @@ export namespace erdesigner {
 
 }
 
+export namespace eventtable {
+	
+	export class EventTableConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    dataRetentionTimeInDays: string;
+	    maxDataExtensionTimeInDays: string;
+	    changeTracking: string;
+	    defaultDdlCollation: string;
+	    copyGrants: boolean;
+	    comment: string;
+	    tags: snowflake.TagPair[];
+	
+	    static createFrom(source: any = {}) {
+	        return new EventTableConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.dataRetentionTimeInDays = source["dataRetentionTimeInDays"];
+	        this.maxDataExtensionTimeInDays = source["maxDataExtensionTimeInDays"];
+	        this.changeTracking = source["changeTracking"];
+	        this.defaultDdlCollation = source["defaultDdlCollation"];
+	        this.copyGrants = source["copyGrants"];
+	        this.comment = source["comment"];
+	        this.tags = this.convertValues(source["tags"], snowflake.TagPair);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
 export namespace externaltable {
 	
 	export class ExternalTableColumn {

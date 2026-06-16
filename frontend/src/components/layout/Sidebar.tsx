@@ -64,6 +64,7 @@ import {
   AppstoreOutlined,
   GoldOutlined,
   MergeCellsOutlined,
+  AuditOutlined,
   ThunderboltOutlined,
   KeyOutlined,
   DisconnectOutlined,
@@ -128,6 +129,8 @@ import CreateIcebergTableModal from "../icebergtable/CreateIcebergTableModal";
 import IcebergTablePropertiesModal from "../icebergtable/IcebergTablePropertiesModal";
 import CreateHybridTableModal from "../hybridtable/CreateHybridTableModal";
 import HybridTablePropertiesModal from "../hybridtable/HybridTablePropertiesModal";
+import CreateEventTableModal from "../eventtable/CreateEventTableModal";
+import EventTablePropertiesModal from "../eventtable/EventTablePropertiesModal";
 import CreateMaterializedViewModal from "../materializedview/CreateMaterializedViewModal";
 import MaterializedViewPropertiesModal from "../materializedview/MaterializedViewPropertiesModal";
 import CreateAlertModal from "../alert/CreateAlertModal";
@@ -169,6 +172,7 @@ const KIND_LABEL: Record<string, string> = {
   "EXTERNAL TABLE": "External Tables",
   "ICEBERG TABLE": "Iceberg Tables",
   "HYBRID TABLE": "Hybrid Tables",
+  "EVENT TABLE": "Event Tables",
   "MATERIALIZED VIEW": "Materialized Views",
   ALERT:         "Alerts",
   TAG:           "Tags",
@@ -192,7 +196,7 @@ const KIND_LABEL: Record<string, string> = {
   "DBT PROJECT": "DBT Projects",
 };
 
-const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "ICEBERG TABLE", "HYBRID TABLE", "FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "NETWORK RULE", "IMAGE REPOSITORY", "SERVICE", "STREAMLIT", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT"];
+const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE", "FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "NETWORK RULE", "IMAGE REPOSITORY", "SERVICE", "STREAMLIT", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT"];
 
 const kindIcon = (kind: string) => objectIcon(kind);
 
@@ -617,6 +621,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [icebergTablePropsModal, setIcebergTablePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createHybridTableModal, setCreateHybridTableModal] = useState<{ db: string; schema: string } | null>(null);
   const [hybridTablePropsModal, setHybridTablePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [createEventTableModal, setCreateEventTableModal] = useState<{ db: string; schema: string } | null>(null);
+  const [eventTablePropsModal, setEventTablePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createMaterializedViewModal, setCreateMaterializedViewModal] = useState<{ db: string; schema: string } | null>(null);
   const [materializedViewPropsModal, setMaterializedViewPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createAlertModal, setCreateAlertModal] = useState<{ db: string; schema: string } | null>(null);
@@ -2027,6 +2033,25 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setHybridTablePropsModal({ db, schema, name });
   };
 
+  const openCreateEventTable = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    setCtxMenu(null);
+    setCreateEventTableModal({ db, schema });
+  };
+
+  const openEventTableProperties = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    setEventTablePropsModal({ db, schema, name });
+  };
+
   const openCreateMaterializedView = () => {
     if (!ctxMenu) return;
     const parts = ctxMenu.nodeKey.split(":");
@@ -2629,6 +2654,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       // Hybrid tables have no DROP HYBRID TABLE statement — they are dropped via
       // DROP TABLE (which defaults to RESTRICT for hybrid tables).
       case "HYBRID TABLE": sql = `DROP TABLE ${fullName};`; break;
+      // Event tables share the standard TABLE commands — there is no
+      // DROP EVENT TABLE statement, so they are dropped via DROP TABLE.
+      case "EVENT TABLE": sql = `DROP TABLE ${fullName};`; break;
       case "MATERIALIZED VIEW": sql = `DROP MATERIALIZED VIEW ${fullName};`; break;
       case "ALERT":       sql = `DROP ALERT ${fullName};`; break;
       case "TAG":         sql = `DROP TAG ${fullName};`; break;
@@ -2831,6 +2859,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       // Hybrid tables are renamed through the plain TABLE grammar (no ALTER
       // HYBRID TABLE statement).
       case "HYBRID TABLE": sql = `ALTER TABLE ${fullOld} RENAME TO ${fullNew};`; break;
+      // Event tables are renamed through the plain TABLE grammar (no ALTER
+      // EVENT TABLE statement).
+      case "EVENT TABLE": sql = `ALTER TABLE ${fullOld} RENAME TO ${fullNew};`; break;
       case "MATERIALIZED VIEW": sql = `ALTER MATERIALIZED VIEW ${fullOld} RENAME TO ${fullNew};`; break;
       case "SEQUENCE":    sql = `ALTER SEQUENCE ${fullOld} RENAME TO ${fullNew};`; break;
       case "STAGE":       sql = `ALTER STAGE ${fullOld} RENAME TO ${fullNew};`; break;
@@ -3273,6 +3304,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         case "EXTERNAL TABLE": return `DROP EXTERNAL TABLE ${fullName};`;
         case "ICEBERG TABLE": return `DROP ICEBERG TABLE ${fullName};`;
         case "HYBRID TABLE": return `DROP TABLE ${fullName};`;
+        case "EVENT TABLE": return `DROP TABLE ${fullName};`;
         case "MATERIALIZED VIEW": return `DROP MATERIALIZED VIEW ${fullName};`;
         case "ALERT":       return `DROP ALERT ${fullName};`;
         case "TAG":         return `DROP TAG ${fullName};`;
@@ -3790,6 +3822,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                   {menuItem("External Table…", <CloudServerOutlined style={{ fontSize: 12 }} />, openCreateExternalTable)}
                   {menuItem("Iceberg Table…", <GoldOutlined style={{ fontSize: 12 }} />, openCreateIcebergTable)}
                   {menuItem("Hybrid Table…", <MergeCellsOutlined style={{ fontSize: 12 }} />, openCreateHybridTable)}
+                  {menuItem("Event Table…", <AuditOutlined style={{ fontSize: 12 }} />, openCreateEventTable)}
                   {menuItem("Materialized View…", <BlockOutlined style={{ fontSize: 12 }} />, openCreateMaterializedView)}
                 </>
               ), 1)}
@@ -3848,6 +3881,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Create Iceberg Table…", <GoldOutlined style={{ fontSize: 12 }} />, openCreateIcebergTable)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "HYBRID TABLE" &&
             menuItem("Create Hybrid Table…", <MergeCellsOutlined style={{ fontSize: 12 }} />, openCreateHybridTable)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "EVENT TABLE" &&
+            menuItem("Create Event Table…", <AuditOutlined style={{ fontSize: 12 }} />, openCreateEventTable)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "MATERIALIZED VIEW" &&
             menuItem("Create Materialized View…", <BlockOutlined style={{ fontSize: 12 }} />, openCreateMaterializedView)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "ALERT" &&
@@ -3900,6 +3935,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Refresh…", <SyncOutlined style={{ fontSize: 12 }} />, refreshIcebergTable)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "HYBRID TABLE" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openHybridTableProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "EVENT TABLE" &&
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openEventTableProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MATERIALIZED VIEW" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openMaterializedViewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MATERIALIZED VIEW" &&
@@ -3988,7 +4025,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {/* DBT Project version/directory/file context menu */}
           {(ctxMenu.nodeType === "dbtversion" || ctxMenu.nodeType === "dbtdir") && menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshTreeNode)}
 
-          {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW" || ctxMenu.objKind === "DYNAMIC TABLE" || ctxMenu.objKind === "EXTERNAL TABLE" || ctxMenu.objKind === "ICEBERG TABLE" || ctxMenu.objKind === "HYBRID TABLE" || ctxMenu.objKind === "MATERIALIZED VIEW") &&
+          {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW" || ctxMenu.objKind === "DYNAMIC TABLE" || ctxMenu.objKind === "EXTERNAL TABLE" || ctxMenu.objKind === "ICEBERG TABLE" || ctxMenu.objKind === "HYBRID TABLE" || ctxMenu.objKind === "EVENT TABLE" || ctxMenu.objKind === "MATERIALIZED VIEW") &&
             menuItem("Select Top 1000 Rows", <TableOutlined style={{ fontSize: 12 }} />, selectTop1000)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
             menuItem("Select for Insert Target", <SyncOutlined style={{ fontSize: 12 }} />, selectForInsertTarget, undefined, !featureFlags.insertMapping, "Insert Mapping is disabled. Enable it under View → Enabled Features…")}
@@ -4031,7 +4068,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Make Live", <CloudUploadOutlined style={{ fontSize: 12 }} />, makeNotebookLive, undefined, !featureFlags.snowparkNotebooks, "Snowpark & Notebooks is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && menuItem("View Definition", null, viewDefinition)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ICEBERG TABLE" && ctxMenu.objKind !== "HYBRID TABLE" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "STREAMLIT" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ICEBERG TABLE" && ctxMenu.objKind !== "HYBRID TABLE" && ctxMenu.objKind !== "EVENT TABLE" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "STREAMLIT" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {/* Comparison diffs via GET_DDL, which image repositories and services
               don't support — exclude them so the diff view can't surface a
               GET_DDL error for a kind that has no DDL. */}
@@ -4616,6 +4653,24 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={hybridTablePropsModal.schema}
           name={hybridTablePropsModal.name}
           onClose={() => setHybridTablePropsModal(null)}
+        />
+      )}
+
+      {createEventTableModal && (
+        <CreateEventTableModal
+          db={createEventTableModal.db}
+          schema={createEventTableModal.schema}
+          onClose={() => setCreateEventTableModal(null)}
+          onSuccess={() => refreshDatabaseByName(createEventTableModal.db, { schema: createEventTableModal.schema, kind: "EVENT TABLE" })}
+        />
+      )}
+
+      {eventTablePropsModal && (
+        <EventTablePropertiesModal
+          db={eventTablePropsModal.db}
+          schema={eventTablePropsModal.schema}
+          name={eventTablePropsModal.name}
+          onClose={() => setEventTablePropsModal(null)}
         />
       )}
 

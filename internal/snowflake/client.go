@@ -3143,7 +3143,7 @@ func (c *Client) ListBasicObjects(ctx context.Context, database, schema string) 
 // ListExtendedObjects returns the "extended" objects inside a schema by running
 // dedicated SHOW commands for object types not covered by SHOW OBJECTS (the
 // authoritative list is the command slice below: DYNAMIC TABLE, EXTERNAL TABLE,
-// ICEBERG TABLE, HYBRID TABLE,
+// ICEBERG TABLE, HYBRID TABLE, EVENT TABLE,
 // MATERIALIZED VIEW, ALERT, TAG, MASKING POLICY, ROW ACCESS POLICY, NETWORK
 // RULE, IMAGE REPOSITORY, SERVICE, STREAMLIT, PROCEDURE, FUNCTION, TASK, STREAM, STAGE, FILE FORMAT,
 // PIPE, NOTEBOOK, SECRET, GIT REPOSITORY, DBT PROJECT). Individual commands that
@@ -3161,6 +3161,7 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 		{fmt.Sprintf("SHOW EXTERNAL TABLES IN SCHEMA %s", q), "EXTERNAL TABLE"},
 		{fmt.Sprintf("SHOW ICEBERG TABLES IN SCHEMA %s", q), "ICEBERG TABLE"},
 		{fmt.Sprintf("SHOW HYBRID TABLES IN SCHEMA %s", q), "HYBRID TABLE"},
+		{fmt.Sprintf("SHOW EVENT TABLES IN SCHEMA %s", q), "EVENT TABLE"},
 		{fmt.Sprintf("SHOW MATERIALIZED VIEWS IN SCHEMA %s", q), "MATERIALIZED VIEW"},
 		{fmt.Sprintf("SHOW ALERTS IN SCHEMA %s", q), "ALERT"},
 		{fmt.Sprintf("SHOW TAGS IN SCHEMA %s", q), "TAG"},
@@ -3526,6 +3527,10 @@ func buildGetDDLQuery(database, schema, kind, name, arguments string) (query, id
 		// GET_DDL has no HYBRID_TABLE object type — hybrid tables are
 		// retrieved via the 'TABLE' type.
 		ddlKind = "TABLE"
+	case "EVENT TABLE":
+		// GET_DDL exposes a dedicated EVENT_TABLE object type (the SHOW kind
+		// is space-separated; the GET_DDL object_type uses the underscore form).
+		ddlKind = "EVENT_TABLE"
 	case "MATERIALIZED VIEW":
 		// GET_DDL has no MATERIALIZED_VIEW object type — TABLE and VIEW are
 		// interchangeable and materialized views are retrieved via 'VIEW'.
