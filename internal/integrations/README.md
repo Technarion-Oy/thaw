@@ -17,7 +17,7 @@ Note: this package (`internal/integrations`) is distinct from `internal/integrat
 
 | File | Purpose |
 |---|---|
-| `builder.go` | All parameter structs and `Build*SQL` functions; internal helpers `sq`, `qident`, `boolKw`, `identToken`, `splitValues`, `squotedTuple`, `identListFromString`, `validateIdentRef`, `mustBeOneOf`, `secretsTuple`. |
+| `builder.go` | All parameter structs and `Build*SQL` functions; internal helpers `sq`, `qident`, `boolKw`, `identToken`, `squotedTuple`, `identListFromString`, `validateIdentRef`, `mustBeOneOf`, `secretsTuple` (value splitting uses the shared `snowflake.SplitValues`). |
 | `builder_test.go` | Unit tests for the builder functions. |
 
 ## Key types & functions
