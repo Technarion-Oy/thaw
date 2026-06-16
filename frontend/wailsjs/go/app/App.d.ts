@@ -11,6 +11,7 @@ import {dynamictable} from '../models';
 import {externaltable} from '../models';
 import {fileformat} from '../models';
 import {snowgitrepo} from '../models';
+import {hybridtable} from '../models';
 import {icebergtable} from '../models';
 import {imagerepository} from '../models';
 import {maskingpolicy} from '../models';
@@ -55,6 +56,8 @@ export function AlterBackupSet(arg1:string,arg2:string,arg3:string,arg4:string):
 export function AlterDynamicTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterExternalTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterHybridTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterIcebergTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -119,6 +122,8 @@ export function BuildCreateExternalTableSql(arg1:string,arg2:string,arg3:externa
 export function BuildCreateFileFormatSql(arg1:string,arg2:string,arg3:fileformat.FileFormatConfig):Promise<string>;
 
 export function BuildCreateGitRepositorySql(arg1:string,arg2:string,arg3:snowgitrepo.GitRepositoryConfig):Promise<string>;
+
+export function BuildCreateHybridTableSql(arg1:string,arg2:string,arg3:hybridtable.HybridTableConfig):Promise<string>;
 
 export function BuildCreateIcebergTableSql(arg1:string,arg2:string,arg3:icebergtable.IcebergTableConfig):Promise<string>;
 
@@ -228,6 +233,8 @@ export function CreateExternalAccessIntegration(arg1:integrations.ExternalAccess
 
 export function CreateFile(arg1:string):Promise<void>;
 
+export function CreateHybridTableIndex(arg1:string,arg2:string,arg3:string,arg4:hybridtable.HybridIndex,arg5:boolean):Promise<void>;
+
 export function CreateMigrationSnapshot(arg1:string,arg2:string,arg3:string,arg4:string,arg5:boolean,arg6:string,arg7:boolean):Promise<void>;
 
 export function CreateNotificationIntegration(arg1:integrations.NotificationIntegrationParams):Promise<void>;
@@ -261,6 +268,8 @@ export function DropBackupPolicy(arg1:string):Promise<void>;
 export function DropBackupSet(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function DropDatabase(arg1:string,arg2:string):Promise<void>;
+
+export function DropHybridTableIndex(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function DropIntegration(arg1:string):Promise<void>;
 
@@ -500,6 +509,8 @@ export function GitStatus(arg1:string):Promise<gitrepo.RepoStatus>;
 
 export function GitUpdateRemoteURL(arg1:string,arg2:string):Promise<void>;
 
+export function HybridIndexColumnOptions(arg1:Array<hybridtable.IndexColumn>):Promise<hybridtable.IndexColumnOptions>;
+
 export function ImportTableData(arg1:snowflake.ImportTableParams):Promise<snowflake.ImportTableResult>;
 
 export function InitTabSession(arg1:string):Promise<void>;
@@ -575,6 +586,8 @@ export function ListGitBranches(arg1:string,arg2:string,arg3:string):Promise<Arr
 export function ListGitRepoEntries(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<snowflake.GitRepoEntry>>;
 
 export function ListGitTags(arg1:string,arg2:string,arg3:string):Promise<Array<snowflake.GitTag>>;
+
+export function ListHybridTableIndexes(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function ListImagesInRepository(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 

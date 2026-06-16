@@ -56,6 +56,7 @@
   --icon-dynamictable:#8b9bff;  /* periwinkle (auto-refreshing table)       */
   --icon-externaltable:#d4a373; /* tan (external/data-lake storage)         */
   --icon-icebergtable:#7dd3fc; /* icy blue (Apache Iceberg open format)     */
+  --icon-hybridtable: #c084fc; /* violet (Unistore HTAP — OLTP + OLAP)      */
   --icon-materializedview:#e673c4; /* orchid (precomputed/stored view)      */
   --icon-alert:       #f85149;  /* red (alert/alarm — attention)            */
   --icon-tag:         #2dd4bf;  /* teal (governance metadata label)         */
@@ -128,6 +129,7 @@
   --icon-dynamictable:#3b4cca;
   --icon-externaltable:#8a5a2b;
   --icon-icebergtable:#0369a1;
+  --icon-hybridtable: #7c3aed;
   --icon-materializedview:#a21caf;
   --icon-alert:       #d1242f;
   --icon-tag:         #0f766e;

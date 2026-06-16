@@ -133,6 +133,28 @@ func AllDataTypes() []DataTypeInfo {
 	return result
 }
 
+// BaseType reduces a Snowflake data-type string to its bare, upper-cased base
+// type name, dropping any parameter list and normalizing the TIMESTAMPTZ
+// synonym to TIMESTAMP_TZ:
+//
+//	"VARCHAR(256)"        → "VARCHAR"
+//	"NUMBER(38,0)"        → "NUMBER"
+//	"TIMESTAMP_TZ(9)"     → "TIMESTAMP_TZ"
+//	"VECTOR(FLOAT, 256)"  → "VECTOR"
+//	"timestamptz"         → "TIMESTAMP_TZ"
+//
+// It is a lenient, best-effort classifier (it never errors and ignores trailing
+// tokens) intended for type-family checks such as index-eligibility filters; use
+// ValidateDataType when strict validation/normalization is required.
+func BaseType(dataType string) string {
+	base, _, _ := strings.Cut(strings.TrimSpace(dataType), "(")
+	base = strings.ToUpper(strings.TrimSpace(base))
+	if base == "TIMESTAMPTZ" {
+		return "TIMESTAMP_TZ"
+	}
+	return base
+}
+
 // ── DataTypeError ─────────────────────────────────────────────────────────────
 
 // DataTypeError is returned by ValidateDataType when the input is not a
