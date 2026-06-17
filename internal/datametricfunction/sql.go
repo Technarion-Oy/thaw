@@ -76,14 +76,14 @@ func BuildCreateDataMetricFunctionSql(db, schema string, cfg DataMetricFunctionC
 		createClause += " IF NOT EXISTS"
 	}
 
-	nameToken := snowflake.QuoteOrBare(cfg.Name, cfg.CaseSensitive)
+	nameIdent := snowflake.QuoteOrBare(cfg.Name, cfg.CaseSensitive)
 	if cfg.Name == "" {
-		nameToken = "data_metric_function_name"
+		nameIdent = "data_metric_function_name"
 	}
 
 	argList, firstArgName := buildTableArgs(cfg.Args)
 	fmt.Fprintf(&sb, "%s %s.%s.%s(%s)", createClause,
-		snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), nameToken, argList)
+		snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), nameIdent, argList)
 
 	sb.WriteString("\n  RETURNS NUMBER")
 	if cfg.NotNull {
