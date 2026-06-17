@@ -18,6 +18,10 @@ export function AlterBackupSet(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterBackupSet'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterDataMetricFunction(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['app']['App']['AlterDataMetricFunction'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function AlterDynamicTable(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterDynamicTable'](arg1, arg2, arg3, arg4);
 }
@@ -144,6 +148,10 @@ export function BuildChangeColumnTypeSql(arg1, arg2, arg3, arg4, arg5) {
 
 export function BuildCreateAlertSql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateAlertSql'](arg1, arg2, arg3);
+}
+
+export function BuildCreateDataMetricFunctionSql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateDataMetricFunctionSql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateDbtProjectSql(arg1, arg2, arg3) {
@@ -442,6 +450,10 @@ export function DeployNotebook(arg1) {
   return window['go']['app']['App']['DeployNotebook'](arg1);
 }
 
+export function DescribeDataMetricFunction(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['DescribeDataMetricFunction'](arg1, arg2, arg3, arg4);
+}
+
 export function DescribeDbtProject(arg1, arg2, arg3) {
   return window['go']['app']['App']['DescribeDbtProject'](arg1, arg2, arg3);
 }
@@ -612,6 +624,14 @@ export function GetCurrentRegion() {
 
 export function GetCurrentUser() {
   return window['go']['app']['App']['GetCurrentUser']();
+}
+
+export function GetDataMetricFunctionReferences(arg1, arg2, arg3) {
+  return window['go']['app']['App']['GetDataMetricFunctionReferences'](arg1, arg2, arg3);
+}
+
+export function GetDataMetricFunctionTags(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['GetDataMetricFunctionTags'](arg1, arg2, arg3, arg4);
 }
 
 export function GetDatabaseCrossDeps(arg1, arg2) {

@@ -7,6 +7,7 @@ import {stage} from '../models';
 import {integrations} from '../models';
 import {procedure} from '../models';
 import {alert} from '../models';
+import {datametricfunction} from '../models';
 import {dynamictable} from '../models';
 import {eventtable} from '../models';
 import {externalfunction} from '../models';
@@ -54,6 +55,8 @@ export function AlterAlert(arg1:string,arg2:string,arg3:string,arg4:string):Prom
 export function AlterBackupPolicy(arg1:string,arg2:string):Promise<void>;
 
 export function AlterBackupSet(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterDataMetricFunction(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
 export function AlterDynamicTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -118,6 +121,8 @@ export function BuildCallStatement(arg1:string,arg2:string,arg3:string,arg4:Arra
 export function BuildChangeColumnTypeSql(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<string>;
 
 export function BuildCreateAlertSql(arg1:string,arg2:string,arg3:alert.AlertConfig):Promise<string>;
+
+export function BuildCreateDataMetricFunctionSql(arg1:string,arg2:string,arg3:datametricfunction.DataMetricFunctionConfig):Promise<string>;
 
 export function BuildCreateDbtProjectSql(arg1:string,arg2:string,arg3:dbtproject.CreateConfig):Promise<string>;
 
@@ -267,6 +272,8 @@ export function DeleteVenvFolder():Promise<void>;
 
 export function DeployNotebook(arg1:snowflake.DeployNotebookParams):Promise<void>;
 
+export function DescribeDataMetricFunction(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.QueryResult>;
+
 export function DescribeDbtProject(arg1:string,arg2:string,arg3:string):Promise<Array<snowflake.PropertyPair>>;
 
 export function DescribeExternalFunction(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.QueryResult>;
@@ -352,6 +359,10 @@ export function GetColumnComments(arg1:string,arg2:string,arg3:string):Promise<A
 export function GetCurrentRegion():Promise<string>;
 
 export function GetCurrentUser():Promise<string>;
+
+export function GetDataMetricFunctionReferences(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
+
+export function GetDataMetricFunctionTags(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.QueryResult>;
 
 export function GetDatabaseCrossDeps(arg1:string,arg2:Array<string>):Promise<Array<snowflake.SchemaRef>>;
 
