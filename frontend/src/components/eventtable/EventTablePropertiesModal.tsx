@@ -160,6 +160,7 @@ export default function EventTablePropertiesModal({ db, schema, name, onClose }:
 
   const reload = useCallback(async () => {
     setRows(null);
+    setParams(null);
     setError(null);
     try {
       const props = await GetObjectProperties(db, schema, "EVENT TABLE", name);
@@ -167,9 +168,10 @@ export default function EventTablePropertiesModal({ db, schema, name, onClose }:
     } catch (e) {
       setError(String(e));
     }
-    // SHOW EVENT TABLES omits the configurable parameters; pull them from
-    // SHOW PARAMETERS. Failure here is non-fatal — the settings rows just show
-    // their defaults.
+    // SHOW EVENT TABLES may omit some configurable values; SHOW PARAMETERS is
+    // the fallback source for the object parameters (retention / max-extension).
+    // Failure here is non-fatal — the settings rows just fall back to the SHOW
+    // dump or show their defaults.
     try {
       const p = await GetEventTableParameters(db, schema, name);
       setParams(p ?? null);
@@ -249,14 +251,21 @@ export default function EventTablePropertiesModal({ db, schema, name, onClose }:
   const comment = find("comment");
   const owner = find("owner");
   const createdOn = find("created_on");
-  // Configurable parameters come from SHOW PARAMETERS (SHOW EVENT TABLES omits
-  // them).
-  const changeTracking = paramVal("CHANGE_TRACKING");
-  const retention = paramVal("DATA_RETENTION_TIME_IN_DAYS");
-  const maxExtension = paramVal("MAX_DATA_EXTENSION_TIME_IN_DAYS");
+  // Prefer the value from the SHOW dump (mirrors the proven regular-table path
+  // in internal/table, where change_tracking / retention are read straight from
+  // SHOW). CHANGE_TRACKING is a table *property*, not an object parameter, so it
+  // may not appear in SHOW PARAMETERS at all; the object parameters (retention /
+  // max-extension) do, and serve as the fallback when the SHOW dump omits them.
+  const setting = (showKey: string, paramKey: string) => find(showKey) || paramVal(paramKey);
+  const changeTracking = setting("change_tracking", "CHANGE_TRACKING");
+  const retention = setting("retention_time", "DATA_RETENTION_TIME_IN_DAYS");
+  const maxExtension = setting("max_data_extension_time_in_days", "MAX_DATA_EXTENSION_TIME_IN_DAYS");
   // Keys rendered in the dedicated sections, hidden from the generic Properties
-  // dump below.
-  const handledKeys = new Set(["comment", "owner", "created_on"]);
+  // dump below (in case the SHOW dump does include them on some editions).
+  const handledKeys = new Set([
+    "comment", "owner", "created_on",
+    "change_tracking", "retention_time", "max_data_extension_time_in_days",
+  ]);
 
   const ctOn = changeTracking.toUpperCase() === "ON" || changeTracking.toUpperCase() === "TRUE";
 
@@ -321,9 +330,11 @@ export default function EventTablePropertiesModal({ db, schema, name, onClose }:
                 onSave={saveComment}
                 onUnset={() => saveComment("")}
               />
-              <InfoRow
-                label="Change tracking"
-                value={
+              {/* Editable row (not InfoRow, which reads as read-only): the Tag
+                  shows the current state and the Select applies the change. */}
+              <tr>
+                <td style={LABEL_TD}>Change tracking</td>
+                <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
                   <Space>
                     {/* Snowflake reports change tracking as ON/OFF; keep that
                         vocabulary in the dropdown too (the value still drives
@@ -338,8 +349,8 @@ export default function EventTablePropertiesModal({ db, schema, name, onClose }:
                       options={[{ value: "TRUE", label: "On" }, { value: "FALSE", label: "Off" }]}
                     />
                   </Space>
-                }
-              />
+                </td>
+              </tr>
               <EditRow
                 label="Data retention (days)"
                 value={retention}

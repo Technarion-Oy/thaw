@@ -7,13 +7,13 @@ stored procedures, and Snowpark Container Services) in the object browser.
 ## Components
 
 - **`CreateEventTableModal.tsx`** — `CREATE EVENT TABLE` builder. Name +
-  case-sensitivity, mutually-exclusive `OR REPLACE` / `IF NOT EXISTS`, and the
-  supported table-level properties (under **Advanced options**):
-  `DATA_RETENTION_TIME_IN_DAYS`, `MAX_DATA_EXTENSION_TIME_IN_DAYS`,
+  case-sensitivity, mutually-exclusive `OR REPLACE` / `IF NOT EXISTS`, a
+  top-level comment, and the supported table-level properties (under **Advanced
+  options**): `DATA_RETENTION_TIME_IN_DAYS`, `MAX_DATA_EXTENSION_TIME_IN_DAYS`,
   `CHANGE_TRACKING`, `DEFAULT_DDL_COLLATION` (searchable dropdown sourced from
-  `GetCollations` / `internal/snowflake`), `COPY GRANTS`, tags (`TagInput`), and
-  a comment. **No column editor** — event tables have a fixed schema. Live
-  SQL preview via `BuildCreateEventTableSql`; runs through `ExecDDL`.
+  `GetCollations` / `internal/snowflake`), `COPY GRANTS`, and tags (`TagInput`).
+  **No column editor** — event tables have a fixed schema. Live SQL preview via
+  `BuildCreateEventTableSql`; runs through `ExecDDL`.
 - **`EventTablePropertiesModal.tsx`** — `GetObjectProperties("EVENT TABLE", …)`
   (SHOW EVENT TABLES) for the overview (owner / created-on) plus
   `GetEventTableParameters` (`SHOW PARAMETERS IN TABLE`) for the configurable
