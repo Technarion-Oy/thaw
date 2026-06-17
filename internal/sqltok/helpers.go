@@ -70,6 +70,18 @@ func StripStrings(sql string) string {
 	return sb.String()
 }
 
+// SkipTrivia returns the index of the first non-trivia token at or after i,
+// skipping whitespace, newlines, and comments (see TokenKind.IsTrivia). When
+// only trivia remains it returns the index of the terminating EOF token (or
+// len(tokens) if the slice has no EOF), so callers should bounds- or EOF-check
+// the result before use.
+func SkipTrivia(tokens []Token, i int) int {
+	for i < len(tokens) && tokens[i].Kind.IsTrivia() {
+		i++
+	}
+	return i
+}
+
 // FirstToken returns the first keyword or identifier token in sql,
 // uppercased. Returns "" if none found. Comments and whitespace are skipped.
 func FirstToken(sql string) string {
@@ -79,16 +91,13 @@ func FirstToken(sql string) string {
 		if !ok {
 			return ""
 		}
-		switch tok.Kind {
-		case Keyword, Identifier:
-			return strings.ToUpper(tok.Text(sql))
-		case Whitespace, Newline, LineComment, BlockComment:
+		if tok.Kind.IsTrivia() {
 			continue
-		case EOF:
-			return ""
-		default:
-			return ""
 		}
+		if tok.Kind == Keyword || tok.Kind == Identifier {
+			return strings.ToUpper(tok.Text(sql))
+		}
+		return ""
 	}
 }
 

@@ -319,8 +319,7 @@ func parseFirstIdentAsCol(def string, ic bool) (ColInfo, bool) {
 		if tok.Kind == sqltok.EOF {
 			break
 		}
-		if tok.Kind == sqltok.Whitespace || tok.Kind == sqltok.Newline ||
-			tok.Kind == sqltok.LineComment || tok.Kind == sqltok.BlockComment {
+		if tok.Kind.IsTrivia() {
 			continue
 		}
 		if isIdent(tok) {

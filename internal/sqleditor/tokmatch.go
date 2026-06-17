@@ -27,12 +27,10 @@ import (
 func sigToks(tokens []sqltok.Token) []sqltok.Token {
 	out := make([]sqltok.Token, 0, len(tokens)/2)
 	for _, t := range tokens {
-		switch t.Kind {
-		case sqltok.Whitespace, sqltok.Newline, sqltok.LineComment, sqltok.BlockComment, sqltok.EOF:
-			// skip
-		default:
-			out = append(out, t)
+		if t.Kind.IsTrivia() || t.Kind == sqltok.EOF {
+			continue
 		}
+		out = append(out, t)
 	}
 	return out
 }
@@ -56,7 +54,7 @@ func tokUpper(tok sqltok.Token, sql string) string {
 // isIdent reports whether tok is a keyword, identifier, or quoted identifier —
 // i.e. something that can appear in a qualified name.
 func isIdent(tok sqltok.Token) bool {
-	return tok.Kind == sqltok.Keyword || tok.Kind == sqltok.Identifier || tok.Kind == sqltok.QuotedIdent
+	return tok.Kind.IsIdentLike()
 }
 
 // isAliasTok reports whether tok can be a table alias: an unquoted identifier or
@@ -1291,17 +1289,9 @@ func checkOptionValue(toks []sqltok.Token, sql string, r StatementRange, optionK
 		if (t.Kind == sqltok.Keyword || t.Kind == sqltok.Identifier) &&
 			strings.EqualFold(t.Text(sql), optionKW) {
 			// Look for = then value token.
-			j := i + 1
-			// Skip whitespace/newlines.
-			for j < len(toks) && (toks[j].Kind == sqltok.Whitespace || toks[j].Kind == sqltok.Newline) {
-				j++
-			}
+			j := sqltok.SkipTrivia(toks, i+1)
 			if j < len(toks) && toks[j].Kind == sqltok.Operator && toks[j].Text(sql) == "=" {
-				j++
-				// Skip whitespace.
-				for j < len(toks) && (toks[j].Kind == sqltok.Whitespace || toks[j].Kind == sqltok.Newline) {
-					j++
-				}
+				j = sqltok.SkipTrivia(toks, j+1)
 				if j < len(toks) {
 					val := toks[j].Text(sql)
 					if msg := validate(val); msg != "" {

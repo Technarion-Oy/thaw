@@ -71,6 +71,32 @@ func (k TokenKind) String() string {
 	return "Unknown"
 }
 
+// IsTrivia reports whether a token of this kind carries no syntactic meaning —
+// whitespace, newlines, line comments, and block comments. EOF is not trivia.
+// Use it (with SkipTrivia) to scan from one significant token to the next.
+func (k TokenKind) IsTrivia() bool {
+	switch k {
+	case Whitespace, Newline, LineComment, BlockComment:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsIdentLike reports whether a token of this kind can form part of a (possibly
+// qualified) name: a bare identifier, a "quoted" identifier, or a keyword.
+// Keywords are included because they are syntactically valid in identifier
+// position (e.g. a column named VALUE, or FROM TABLE(...)); callers that must
+// reject reserved words filter them separately.
+func (k TokenKind) IsIdentLike() bool {
+	switch k {
+	case Identifier, QuotedIdent, Keyword:
+		return true
+	default:
+		return false
+	}
+}
+
 // Token represents a single lexical token in a SQL string.
 type Token struct {
 	Kind  TokenKind

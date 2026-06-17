@@ -51,9 +51,22 @@ func IsBuiltinFunction(upper string) bool // built-in function names
 func StripComments(sql string) string         // replace comments with spaces
 func StripStrings(sql string) string          // replace string literals with space
 func FirstToken(sql string) string            // first keyword/identifier, uppercased
+func SkipTrivia(tokens []Token, i int) int    // index of next non-trivia token at/after i
 func InertRegions(sql string) [][2]int        // comment/string/dollar-quote byte ranges
 func IsInert(regions [][2]int, offset int) bool // binary search offset check
 ```
+
+### Token-kind predicates
+
+```go
+func (k TokenKind) IsTrivia() bool     // whitespace, newline, line/block comment (not EOF)
+func (k TokenKind) IsIdentLike() bool  // identifier, quoted identifier, or keyword
+```
+
+`IsTrivia` + `SkipTrivia` are the shared way to scan from one significant token
+to the next (used by the lineage parser and the SQL-editor validators).
+`IsIdentLike` reports whether a token can sit in a (possibly qualified) name —
+keywords included, since callers filter reserved words themselves.
 
 ## Design decisions
 

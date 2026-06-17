@@ -1718,3 +1718,56 @@ $$;`
 	// it doesn't directly follow FROM/JOIN, so the regex engine misses it entirely.
 	assertNotContainsRef(t, refs, sqlRef{db: "PROD", schema: "UTILS", name: "PARSE_JSON_FUNC"})
 }
+
+// ── tokenizer-backed correctness (regressions the old regexes failed) ─────────
+
+// TestParseSQLReferences_NestedBlockComment verifies that Snowflake's nested
+// block comments are stripped as a whole. The previous non-greedy /\*.*?\*/
+// regex stopped at the first "*/", leaking the tail of a nested comment back
+// into the scanned SQL and producing a phantom FROM reference.
+func TestParseSQLReferences_NestedBlockComment(t *testing.T) {
+	sql := `SELECT * FROM real_table
+/* comment /* nested */ FROM fake_table still_comment */
+WHERE 1 = 1`
+	refs := parseSQLReferences(sql, "DB", "SC")
+	assertContainsRef(t, refs, sqlRef{db: "DB", schema: "SC", name: "real_table"})
+	for _, r := range refs {
+		if r.name == "fake_table" {
+			t.Errorf("table inside a nested block comment must not appear as a reference")
+		}
+	}
+}
+
+// TestParseSQLReferences_KeywordInStringLiteral verifies that a SQL keyword
+// embedded in a string literal does not yield a spurious reference. The old
+// parser stripped comments but not strings, so 'FROM secret_table' matched.
+func TestParseSQLReferences_KeywordInStringLiteral(t *testing.T) {
+	sql := `SELECT 'FROM secret_table' AS note FROM real_table`
+	refs := parseSQLReferences(sql, "DB", "SC")
+	assertContainsRef(t, refs, sqlRef{db: "DB", schema: "SC", name: "real_table"})
+	for _, r := range refs {
+		if r.name == "secret_table" {
+			t.Errorf("identifier inside a string literal must not appear as a reference")
+		}
+	}
+}
+
+// TestExtractDDLBody_Procedure_TaggedDollarQuote verifies that a $tag$-delimited
+// body is extracted. The old reProcBodyDouble only matched $$ and returned an
+// empty body (no references) for tagged dollar quotes.
+func TestExtractDDLBody_Procedure_TaggedDollarQuote(t *testing.T) {
+	ddl := `CREATE OR REPLACE PROCEDURE "DB"."SC"."TAGGED"()
+RETURNS VARCHAR
+LANGUAGE SQL
+AS $proc$
+BEGIN
+  SELECT * FROM "DB"."SC"."TAGGED_SOURCE";
+END;
+$proc$;`
+	body := ExtractDDLBody(ddl, "PROCEDURE")
+	if !containsWord(body, "TAGGED_SOURCE") {
+		t.Errorf("body should contain TAGGED_SOURCE; got:\n%s", body)
+	}
+	refs := parseSQLReferences(body, "DB", "SC")
+	assertContainsRef(t, refs, sqlRef{db: "DB", schema: "SC", name: "TAGGED_SOURCE"})
+}

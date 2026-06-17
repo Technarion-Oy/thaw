@@ -224,6 +224,60 @@ func TestIsInertEmptyRegions(t *testing.T) {
 	}
 }
 
+func TestIsTrivia(t *testing.T) {
+	trivia := []TokenKind{Whitespace, Newline, LineComment, BlockComment}
+	for _, k := range trivia {
+		if !k.IsTrivia() {
+			t.Errorf("%v should be trivia", k)
+		}
+	}
+	notTrivia := []TokenKind{Keyword, Identifier, QuotedIdent, StringLit, DollarQuoted, NumberLit, Operator, Dot, Comma, Semicolon, LParen, RParen, At, EOF}
+	for _, k := range notTrivia {
+		if k.IsTrivia() {
+			t.Errorf("%v should not be trivia", k)
+		}
+	}
+}
+
+func TestIsIdentLike(t *testing.T) {
+	identLike := []TokenKind{Identifier, QuotedIdent, Keyword}
+	for _, k := range identLike {
+		if !k.IsIdentLike() {
+			t.Errorf("%v should be ident-like", k)
+		}
+	}
+	notIdentLike := []TokenKind{Whitespace, Newline, LineComment, BlockComment, StringLit, DollarQuoted, NumberLit, Operator, Dot, Comma, At, EOF}
+	for _, k := range notIdentLike {
+		if k.IsIdentLike() {
+			t.Errorf("%v should not be ident-like", k)
+		}
+	}
+}
+
+func TestSkipTrivia(t *testing.T) {
+	sql := "  /* c */\n-- line\nFROM t"
+	tokens := Tokenize(sql)
+	// From index 0, the first significant token is the FROM keyword.
+	i := SkipTrivia(tokens, 0)
+	if i >= len(tokens) || tokens[i].Kind != Keyword || tokens[i].Text(sql) != "FROM" {
+		t.Fatalf("SkipTrivia did not land on FROM; got index %d", i)
+	}
+	// Skipping from an already-significant token returns it unchanged.
+	if got := SkipTrivia(tokens, i); got != i {
+		t.Errorf("SkipTrivia on a significant token = %d; want %d", got, i)
+	}
+	// All-trivia input lands on the terminating EOF token.
+	ws := Tokenize("   \n  ")
+	j := SkipTrivia(ws, 0)
+	if j >= len(ws) || ws[j].Kind != EOF {
+		t.Errorf("SkipTrivia over all-trivia should reach EOF; got index %d", j)
+	}
+	// Out-of-range / empty inputs are safe.
+	if got := SkipTrivia(nil, 0); got != 0 {
+		t.Errorf("SkipTrivia(nil,0) = %d; want 0", got)
+	}
+}
+
 func TestStripCommentsEmpty(t *testing.T) {
 	if got := StripComments(""); got != "" {
 		t.Errorf("StripComments empty: got %q", got)
