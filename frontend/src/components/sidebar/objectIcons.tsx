@@ -67,6 +67,7 @@ import {
   MergeCellsOutlined,
   AuditOutlined,
   ApiOutlined,
+  FundOutlined,
 } from "@ant-design/icons";
 
 // ── CSS variable name per kind ─────────────────────────────────────────────
@@ -89,6 +90,7 @@ const KIND_VAR: Record<string, string> = {
   STREAMLIT:         "--icon-streamlit",
   FUNCTION:          "--icon-function",
   "EXTERNAL FUNCTION": "--icon-externalfunction",
+  "DATA METRIC FUNCTION": "--icon-datametricfunction",
   PROCEDURE:         "--icon-procedure",
   SEQUENCE:          "--icon-sequence",
   STAGE:             "--icon-stage",
@@ -122,6 +124,7 @@ const KIND_ICON: Record<string, React.ComponentType<{ style?: React.CSSPropertie
   STREAMLIT:        AppstoreOutlined,
   FUNCTION:         FunctionOutlined,
   "EXTERNAL FUNCTION": ApiOutlined,
+  "DATA METRIC FUNCTION": FundOutlined,
   PROCEDURE:        CodeOutlined,
   SEQUENCE:         NumberOutlined,
   STAGE:            InboxOutlined,

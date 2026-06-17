@@ -13,6 +13,7 @@ package app
 import (
 	"thaw/internal/alert"
 	"thaw/internal/column"
+	"thaw/internal/datametricfunction"
 	"thaw/internal/dbtproject"
 	"thaw/internal/dynamictable"
 	"thaw/internal/eventtable"
@@ -146,6 +147,12 @@ func (a *App) BuildCreateEventTableSql(database, schema string, cfg eventtable.E
 // EXTERNAL FUNCTION.
 func (a *App) BuildCreateExternalFunctionSql(database, schema string, cfg externalfunction.ExternalFunctionConfig) (string, error) {
 	return externalfunction.BuildCreateExternalFunctionSql(database, schema, cfg)
+}
+
+// BuildCreateDataMetricFunctionSql returns the SQL for creating a Snowflake DATA
+// METRIC FUNCTION.
+func (a *App) BuildCreateDataMetricFunctionSql(database, schema string, cfg datametricfunction.DataMetricFunctionConfig) (string, error) {
+	return datametricfunction.BuildCreateDataMetricFunctionSql(database, schema, cfg)
 }
 
 // BuildCreateHybridTableSql returns the SQL for creating a Snowflake HYBRID TABLE.

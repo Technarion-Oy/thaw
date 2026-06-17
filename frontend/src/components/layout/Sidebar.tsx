@@ -20,6 +20,7 @@ import {
   CodeOutlined,
   InboxOutlined,
   ApiOutlined,
+  FundOutlined,
   ClockCircleOutlined,
   FileTextOutlined,
   FileOutlined,
@@ -133,6 +134,8 @@ import CreateEventTableModal from "../eventtable/CreateEventTableModal";
 import EventTablePropertiesModal from "../eventtable/EventTablePropertiesModal";
 import CreateExternalFunctionModal from "../externalfunction/CreateExternalFunctionModal";
 import ExternalFunctionPropertiesModal from "../externalfunction/ExternalFunctionPropertiesModal";
+import CreateDataMetricFunctionModal from "../datametricfunction/CreateDataMetricFunctionModal";
+import DataMetricFunctionPropertiesModal from "../datametricfunction/DataMetricFunctionPropertiesModal";
 import CreateMaterializedViewModal from "../materializedview/CreateMaterializedViewModal";
 import MaterializedViewPropertiesModal from "../materializedview/MaterializedViewPropertiesModal";
 import CreateAlertModal from "../alert/CreateAlertModal";
@@ -186,6 +189,7 @@ const KIND_LABEL: Record<string, string> = {
   STREAMLIT:     "Streamlits",
   FUNCTION:      "Functions",
   "EXTERNAL FUNCTION": "External Functions",
+  "DATA METRIC FUNCTION": "Data Metric Functions",
   PROCEDURE:     "Procedures",
   SEQUENCE:      "Sequences",
   STAGE:         "Stages",
@@ -199,7 +203,7 @@ const KIND_LABEL: Record<string, string> = {
   "DBT PROJECT": "DBT Projects",
 };
 
-const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE", "FUNCTION", "EXTERNAL FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "NETWORK RULE", "IMAGE REPOSITORY", "SERVICE", "STREAMLIT", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT"];
+const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE", "FUNCTION", "EXTERNAL FUNCTION", "DATA METRIC FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "NETWORK RULE", "IMAGE REPOSITORY", "SERVICE", "STREAMLIT", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT"];
 
 const kindIcon = (kind: string) => objectIcon(kind);
 
@@ -628,6 +632,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [eventTablePropsModal, setEventTablePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createExternalFunctionModal, setCreateExternalFunctionModal] = useState<{ db: string; schema: string } | null>(null);
   const [externalFunctionPropsModal, setExternalFunctionPropsModal] = useState<{ db: string; schema: string; name: string; args: string } | null>(null);
+  const [createDataMetricFunctionModal, setCreateDataMetricFunctionModal] = useState<{ db: string; schema: string } | null>(null);
+  const [dataMetricFunctionPropsModal, setDataMetricFunctionPropsModal] = useState<{ db: string; schema: string; name: string; args: string } | null>(null);
   const [createMaterializedViewModal, setCreateMaterializedViewModal] = useState<{ db: string; schema: string } | null>(null);
   const [materializedViewPropsModal, setMaterializedViewPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createAlertModal, setCreateAlertModal] = useState<{ db: string; schema: string } | null>(null);
@@ -2078,6 +2084,27 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setExternalFunctionPropsModal({ db, schema, name, args });
   };
 
+  const openCreateDataMetricFunction = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    setCtxMenu(null);
+    setCreateDataMetricFunctionModal({ db, schema });
+  };
+
+  const openDataMetricFunctionProperties = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    // The TABLE argument signature resolves the overload for DESCRIBE / ALTER FUNCTION.
+    const args = ctxMenu.objArgs ?? "";
+    setCtxMenu(null);
+    setDataMetricFunctionPropsModal({ db, schema, name, args });
+  };
+
   const openCreateMaterializedView = () => {
     if (!ctxMenu) return;
     const parts = ctxMenu.nodeKey.split(":");
@@ -2702,6 +2729,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       // External functions have no DROP EXTERNAL FUNCTION statement — they are
       // dropped via DROP FUNCTION with the argument signature.
       case "EXTERNAL FUNCTION": sql = `DROP FUNCTION ${fullName}(${objArgs});`; break;
+      // Data metric functions have no DROP DATA METRIC FUNCTION statement — they
+      // are dropped via DROP FUNCTION with the TABLE argument signature.
+      case "DATA METRIC FUNCTION": sql = `DROP FUNCTION ${fullName}(${objArgs});`; break;
       case "PROCEDURE":   sql = `DROP PROCEDURE ${fullName}(${objArgs});`; break;
       default:            sql = `DROP ${objKind} ${fullName};`;
     }
@@ -3351,6 +3381,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         case "PIPE":        return `DROP PIPE ${fullName};`;
         case "FUNCTION":    return `DROP FUNCTION ${fullName}(${args});`;
         case "EXTERNAL FUNCTION": return `DROP FUNCTION ${fullName}(${args});`;
+        case "DATA METRIC FUNCTION": return `DROP FUNCTION ${fullName}(${args});`;
         case "PROCEDURE":   return `DROP PROCEDURE ${fullName}(${args});`;
         default:            return `DROP ${kind} ${fullName};`;
       }
@@ -3887,7 +3918,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                   {menuItem("Streamlit…", <AppstoreOutlined style={{ fontSize: 12 }} />, openCreateStreamlit)}
                 </>
               ), 1)}
-              {menuItem("External Function…", <ApiOutlined style={{ fontSize: 12 }} />, openCreateExternalFunction)}
+              {menuItemSub("Functions", <FunctionOutlined style={{ fontSize: 12 }} />, "create-functions", (
+                <>
+                  {menuItem("External Function…", <ApiOutlined style={{ fontSize: 12 }} />, openCreateExternalFunction)}
+                  {menuItem("Data Metric Function…", <FundOutlined style={{ fontSize: 12 }} />, openCreateDataMetricFunction)}
+                </>
+              ), 1)}
             </>
           ))}
           {ctxMenu.nodeType === "schema" && menuItem("Show Dropped Tables…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedTables)}
@@ -3940,6 +3976,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Create Secret…", <KeyOutlined style={{ fontSize: 12 }} />, openCreateSecret)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "EXTERNAL FUNCTION" &&
             menuItem("Create External Function…", <ApiOutlined style={{ fontSize: 12 }} />, openCreateExternalFunction)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "DATA METRIC FUNCTION" &&
+            menuItem("Create Data Metric Function…", <FundOutlined style={{ fontSize: 12 }} />, openCreateDataMetricFunction)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "FILE FORMAT" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STAGE" &&
@@ -3972,6 +4010,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openEventTableProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "EXTERNAL FUNCTION" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openExternalFunctionProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "DATA METRIC FUNCTION" &&
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openDataMetricFunctionProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MATERIALIZED VIEW" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openMaterializedViewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MATERIALIZED VIEW" &&
@@ -4103,7 +4143,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Make Live", <CloudUploadOutlined style={{ fontSize: 12 }} />, makeNotebookLive, undefined, !featureFlags.snowparkNotebooks, "Snowpark & Notebooks is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && menuItem("View Definition", null, viewDefinition)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ICEBERG TABLE" && ctxMenu.objKind !== "HYBRID TABLE" && ctxMenu.objKind !== "EVENT TABLE" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "STREAMLIT" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ICEBERG TABLE" && ctxMenu.objKind !== "HYBRID TABLE" && ctxMenu.objKind !== "EVENT TABLE" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "STREAMLIT" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {/* Comparison diffs via GET_DDL, which image repositories and services
               don't support — exclude them so the diff view can't surface a
               GET_DDL error for a kind that has no DDL. */}
@@ -4114,7 +4154,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "obj" &&
             (ctxMenu.objKind === "VIEW" || ctxMenu.objKind === "PROCEDURE" || ctxMenu.objKind === "FUNCTION" || ctxMenu.objKind === "EXTERNAL FUNCTION") &&
             menuItem("View Dependencies…", <ShareAltOutlined style={{ fontSize: 12 }} />, viewDependencies)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" &&
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" &&
             menuItem("Rename…", <EditOutlined style={{ fontSize: 12 }} />, renameObject)}
           {ctxMenu.nodeType === "obj" && <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />}
           {ctxMenu.nodeType === "obj" && menuItem("Delete…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, deleteObject, "#f85149")}
@@ -4725,6 +4765,26 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           name={externalFunctionPropsModal.name}
           args={externalFunctionPropsModal.args}
           onClose={() => setExternalFunctionPropsModal(null)}
+        />
+      )}
+
+      {createDataMetricFunctionModal && (
+        <CreateDataMetricFunctionModal
+          db={createDataMetricFunctionModal.db}
+          schema={createDataMetricFunctionModal.schema}
+          onClose={() => setCreateDataMetricFunctionModal(null)}
+          onSuccess={() => refreshDatabaseByName(createDataMetricFunctionModal.db, { schema: createDataMetricFunctionModal.schema, kind: "DATA METRIC FUNCTION" })}
+        />
+      )}
+
+      {dataMetricFunctionPropsModal && (
+        <DataMetricFunctionPropertiesModal
+          db={dataMetricFunctionPropsModal.db}
+          schema={dataMetricFunctionPropsModal.schema}
+          name={dataMetricFunctionPropsModal.name}
+          args={dataMetricFunctionPropsModal.args}
+          onClose={() => setDataMetricFunctionPropsModal(null)}
+          onChanged={() => refreshDatabaseByName(dataMetricFunctionPropsModal.db, { schema: dataMetricFunctionPropsModal.schema, kind: "DATA METRIC FUNCTION" })}
         />
       )}
 

@@ -2351,19 +2351,34 @@ func (c *Client) ListSchemas(ctx context.Context, database string) ([]string, er
 }
 
 // extractArgTypes parses the "arguments" column returned by SHOW PROCEDURES /
-// SHOW FUNCTIONS. The format is "<name>(<types>) RETURN <return_type>", e.g.
+// SHOW FUNCTIONS / SHOW DATA METRIC FUNCTIONS. The format is
+// "<name>(<types>) RETURN <return_type>", e.g.
 // "GET_EMPLOYEE_STATUS(NUMBER) RETURN VARIANT". Returns just the types string,
 // e.g. "NUMBER", or an empty string when there are no parameters.
+//
+// The argument list of the outermost parentheses is matched by paren depth so
+// that nested type expressions survive intact — data metric functions take a
+// TABLE argument whose type is itself parenthesized (e.g.
+// "MY_DMF(TABLE(NUMBER)) RETURN NUMBER" → "TABLE(NUMBER)"). A naive first-")"
+// scan would truncate that to "TABLE(NUMBER".
 func extractArgTypes(arguments string) string {
 	start := strings.Index(arguments, "(")
 	if start < 0 {
 		return ""
 	}
-	end := strings.Index(arguments[start:], ")")
-	if end < 0 {
-		return ""
+	depth := 0
+	for i := start; i < len(arguments); i++ {
+		switch arguments[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return strings.TrimSpace(arguments[start+1 : i])
+			}
+		}
 	}
-	return strings.TrimSpace(arguments[start+1 : start+end])
+	return strings.TrimSpace(arguments[start+1:])
 }
 
 // DroppedTable represents a table that has been dropped but is still within
@@ -2992,7 +3007,7 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 	defer rows.Close() //nolint:errcheck
 
 	cols, _ := rows.Columns()
-	nameIdx, kindIdx, argsIdx, builtinIdx, rowsIdx, predsIdx, taskRelIdx, finalizeColIdx, isDynamicIdx, isExternalIdx, isIcebergIdx, isHybridIdx, isExternalFnIdx := -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1
+	nameIdx, kindIdx, argsIdx, builtinIdx, rowsIdx, predsIdx, taskRelIdx, finalizeColIdx, isDynamicIdx, isExternalIdx, isIcebergIdx, isHybridIdx, isExternalFnIdx, isDataMetricIdx := -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1
 	for i, col := range cols {
 		switch strings.ToLower(col) {
 		case "name":
@@ -3021,6 +3036,8 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 			isHybridIdx = i
 		case "is_external_function":
 			isExternalFnIdx = i
+		case "is_data_metric":
+			isDataMetricIdx = i
 		}
 	}
 	if nameIdx < 0 {
@@ -3030,7 +3047,7 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 		return nil, fmt.Errorf("no 'kind' column in: %s cols=%v", query, cols)
 	}
 
-	captureArgs := fixedKind == "PROCEDURE" || fixedKind == "FUNCTION" || fixedKind == "EXTERNAL FUNCTION"
+	captureArgs := fixedKind == "PROCEDURE" || fixedKind == "FUNCTION" || fixedKind == "EXTERNAL FUNCTION" || fixedKind == "DATA METRIC FUNCTION"
 
 	var objects []SnowflakeObject
 	for rows.Next() {
@@ -3098,12 +3115,22 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 		// EXTERNAL FUNCTION entries; on the column-absent edition it instead drops
 		// the plain FUNCTION entry that collides with an EXTERNAL FUNCTION.
 		externalFn := fixedKind == "FUNCTION" && isExternalFnIdx >= 0 && strings.EqualFold(fmt.Sprintf("%v", vals[isExternalFnIdx]), "Y")
+		// Data metric functions surface in SHOW FUNCTIONS with is_data_metric=Y.
+		// As with external functions, relabel them to kind "DATA METRIC FUNCTION"
+		// so they group under Data Metric Functions even if the dedicated SHOW
+		// DATA METRIC FUNCTIONS command failed for this schema; dedupeDataMetricFunctions
+		// collapses the resulting duplicates (or drops the plain FUNCTION collision
+		// on editions without the column).
+		dataMetricFn := fixedKind == "FUNCTION" && isDataMetricIdx >= 0 && strings.EqualFold(fmt.Sprintf("%v", vals[isDataMetricIdx]), "Y")
 		kind := fixedKind
 		if kind == "" {
 			kind = fmt.Sprintf("%v", vals[kindIdx])
 		}
 		if externalFn {
 			kind = "EXTERNAL FUNCTION"
+		}
+		if dataMetricFn {
+			kind = "DATA METRIC FUNCTION"
 		}
 		var argTypes string
 		if captureArgs && argsIdx >= 0 {
@@ -3250,7 +3277,7 @@ func (c *Client) ListBasicObjects(ctx context.Context, database, schema string) 
 // ICEBERG TABLE, HYBRID TABLE, EVENT TABLE,
 // MATERIALIZED VIEW, ALERT, TAG, MASKING POLICY, ROW ACCESS POLICY, NETWORK
 // RULE, IMAGE REPOSITORY, SERVICE, STREAMLIT, PROCEDURE, FUNCTION,
-// EXTERNAL FUNCTION, TASK, STREAM, STAGE, FILE FORMAT,
+// EXTERNAL FUNCTION, DATA METRIC FUNCTION, TASK, STREAM, STAGE, FILE FORMAT,
 // PIPE, NOTEBOOK, SECRET, GIT REPOSITORY, DBT PROJECT). Individual commands that
 // fail (e.g. due to missing privileges) are silently skipped. Includes the TASK
 // finalize enrichment logic.
@@ -3279,6 +3306,7 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 		{fmt.Sprintf("SHOW PROCEDURES IN SCHEMA %s", q), "PROCEDURE"},
 		{fmt.Sprintf("SHOW FUNCTIONS IN SCHEMA %s", q), "FUNCTION"},
 		{fmt.Sprintf("SHOW EXTERNAL FUNCTIONS IN SCHEMA %s", q), "EXTERNAL FUNCTION"},
+		{fmt.Sprintf("SHOW DATA METRIC FUNCTIONS IN SCHEMA %s", q), "DATA METRIC FUNCTION"},
 		{fmt.Sprintf("SHOW TASKS IN SCHEMA %s", q), "TASK"},
 		{fmt.Sprintf("SHOW STREAMS IN SCHEMA %s", q), "STREAM"},
 		{fmt.Sprintf("SHOW STAGES IN SCHEMA %s", q), "STAGE"},
@@ -3334,6 +3362,13 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 	// "FUNCTION" that collides with one, so each external function appears exactly
 	// once under External Functions — even if one of the two SHOW commands fails.
 	all = dedupeExternalFunctions(all)
+
+	// Data metric functions reach this slice the same two ways external functions
+	// do: SHOW DATA METRIC FUNCTIONS (kind "DATA METRIC FUNCTION") and SHOW
+	// FUNCTIONS (where showInSchema relabels is_data_metric=Y rows). Collapse the
+	// duplicate "DATA METRIC FUNCTION" entries and drop any plain "FUNCTION" that
+	// collides with one.
+	all = dedupeDataMetricFunctions(all)
 
 	// GET_DDL fallback: for Snowflake editions that don't expose the FINALIZE
 	// relationship via SHOW TASKS columns (task_relations / finalize), call
@@ -3391,6 +3426,44 @@ func dedupeExternalFunctions(objs []SnowflakeObject) []SnowflakeObject {
 // key used to match a FUNCTION against an EXTERNAL FUNCTION.
 func externalFunctionDedupeKey(o SnowflakeObject) string {
 	return strings.ToUpper(o.Schema) + "\x00" + strings.ToUpper(o.Name) + "\x00" + strings.ToUpper(strings.TrimSpace(o.Arguments))
+}
+
+// dedupeDataMetricFunctions reconciles the two ways data metric functions reach
+// the extended-object list, mirroring dedupeExternalFunctions. SHOW DATA METRIC
+// FUNCTIONS returns them as kind "DATA METRIC FUNCTION"; SHOW FUNCTIONS returns
+// them too (with is_data_metric=Y), where showInSchema relabels them to "DATA
+// METRIC FUNCTION" when that column is present or leaves them as plain "FUNCTION"
+// when it is absent. This pass therefore collapses duplicate "DATA METRIC
+// FUNCTION" entries and drops any plain "FUNCTION" entry whose
+// (schema, name, arguments) collides with one. The input slice is not mutated.
+func dedupeDataMetricFunctions(objs []SnowflakeObject) []SnowflakeObject {
+	dmfKeys := make(map[string]struct{})
+	for _, o := range objs {
+		if o.Kind == "DATA METRIC FUNCTION" {
+			dmfKeys[externalFunctionDedupeKey(o)] = struct{}{}
+		}
+	}
+	if len(dmfKeys) == 0 {
+		return objs
+	}
+	out := make([]SnowflakeObject, 0, len(objs))
+	seen := make(map[string]struct{})
+	for _, o := range objs {
+		key := externalFunctionDedupeKey(o)
+		switch o.Kind {
+		case "DATA METRIC FUNCTION":
+			if _, dup := seen[key]; dup {
+				continue // already emitted from the other SHOW command
+			}
+			seen[key] = struct{}{}
+		case "FUNCTION":
+			if _, dup := dmfKeys[key]; dup {
+				continue // a plain FUNCTION that is really a DMF (column absent)
+			}
+		}
+		out = append(out, o)
+	}
+	return out
 }
 
 // enrichTaskFinalize enriches TASK objects with FINALIZE metadata by calling
@@ -3681,7 +3754,7 @@ func buildGetDDLQuery(database, schema, kind, name, arguments string) (query, id
 		// breakout from the SQL string context. If this code is refactored,
 		// ensure arguments still passes through the same single-quote escaping.
 		upperKind := strings.ToUpper(kind)
-		if upperKind == "PROCEDURE" || upperKind == "FUNCTION" || upperKind == "EXTERNAL FUNCTION" {
+		if upperKind == "PROCEDURE" || upperKind == "FUNCTION" || upperKind == "EXTERNAL FUNCTION" || upperKind == "DATA METRIC FUNCTION" {
 			identifier += fmt.Sprintf("(%s)", arguments)
 		}
 		identifier = strings.ReplaceAll(identifier, "'", "''")
@@ -3722,6 +3795,11 @@ func buildGetDDLQuery(database, schema, kind, name, arguments string) (query, id
 		// GET_DDL has no EXTERNAL_FUNCTION object type — external functions are
 		// retrieved via the 'FUNCTION' type (with the argument signature appended
 		// to the identifier above).
+		ddlKind = "FUNCTION"
+	case "DATA METRIC FUNCTION":
+		// GET_DDL has no DATA_METRIC_FUNCTION object type — data metric functions
+		// are retrieved via the 'FUNCTION' type (with the TABLE argument signature
+		// appended to the identifier above).
 		ddlKind = "FUNCTION"
 	}
 	escapedKind := strings.ReplaceAll(ddlKind, "'", "''")
