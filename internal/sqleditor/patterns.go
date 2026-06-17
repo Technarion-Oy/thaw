@@ -6011,7 +6011,7 @@ func validateRemove(parseText string, r StatementRange) []DiagMarker {
 // CREATE [OR REPLACE] EVENT TABLE statements:
 //   - OR REPLACE and IF NOT EXISTS are mutually exclusive.
 //   - Event tables have a fixed schema — column definitions are not allowed.
-//   - CLUSTER BY is not supported.
+//     (CLUSTER BY on the predefined columns is allowed and is not flagged.)
 //   - DATA_RETENTION_TIME_IN_DAYS must be a non-negative integer.
 //   - MAX_DATA_EXTENSION_TIME_IN_DAYS must be a non-negative integer.
 //   - CHANGE_TRACKING must be TRUE or FALSE.
@@ -6048,25 +6048,21 @@ func validateCreateEventTable(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// 4. Column definitions are not allowed — event tables have a fixed schema.
-	// Check if a LParen immediately follows the name path (not after TAG or
-	// other keywords). Walk past the name path and check the next token.
+	// A column list is a LParen that immediately follows the (possibly
+	// dot-qualified) table name. Advance only over the name itself — ident
+	// (.ident)* — and stop at the first token that isn't part of it, so a
+	// trailing CLUSTER BY ( ... ) or TAG ( ... ) paren (which follows a keyword,
+	// not the name) isn't mistaken for a column-definition list.
 	afterName := nameIdx
-	for afterName < len(sig) && (isIdent(sig[afterName]) || sig[afterName].Kind == sqltok.Dot) {
+	if afterName < len(sig) && isIdent(sig[afterName]) {
 		afterName++
-	}
-	if afterName < len(sig) && sig[afterName].Kind == sqltok.LParen {
-		// Only flag if the token before LParen is NOT TAG (which takes a paren block).
-		prevUpper := tokUpper(sig[afterName-1], stripped)
-		if prevUpper != "TAG" {
-			markers = append(markers, diagMarkerSpan(r,
-				"Event tables have a fixed schema and do not support column definitions."))
+		for afterName+1 < len(sig) && sig[afterName].Kind == sqltok.Dot && isIdent(sig[afterName+1]) {
+			afterName += 2
 		}
 	}
-
-	// 5. CLUSTER BY is not supported for event tables.
-	if hasKWPair(sig, stripped, "CLUSTER", "BY") {
+	if afterName < len(sig) && sig[afterName].Kind == sqltok.LParen {
 		markers = append(markers, diagMarkerSpan(r,
-			"CLUSTER BY is not supported for EVENT TABLE."))
+			"Event tables have a fixed schema and do not support column definitions."))
 	}
 
 	// 5. Validate property values.

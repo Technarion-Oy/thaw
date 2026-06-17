@@ -22,6 +22,10 @@ export function AlterDynamicTable(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterDynamicTable'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterEventTable(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterEventTable'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterExternalTable(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterExternalTable'](arg1, arg2, arg3, arg4);
 }
@@ -144,6 +148,10 @@ export function BuildCreateDbtProjectSql(arg1, arg2, arg3) {
 
 export function BuildCreateDynamicTableSql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateDynamicTableSql'](arg1, arg2, arg3);
+}
+
+export function BuildCreateEventTableSql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateEventTableSql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateExternalTableSql(arg1, arg2, arg3) {
@@ -616,6 +624,10 @@ export function GetERDiagramData(arg1) {
 
 export function GetEditorPrefs() {
   return window['go']['app']['App']['GetEditorPrefs']();
+}
+
+export function GetEventTableParameters(arg1, arg2, arg3) {
+  return window['go']['app']['App']['GetEventTableParameters'](arg1, arg2, arg3);
 }
 
 export function GetFeatureFlags() {

@@ -8,6 +8,7 @@ import {integrations} from '../models';
 import {procedure} from '../models';
 import {alert} from '../models';
 import {dynamictable} from '../models';
+import {eventtable} from '../models';
 import {externaltable} from '../models';
 import {fileformat} from '../models';
 import {snowgitrepo} from '../models';
@@ -54,6 +55,8 @@ export function AlterBackupPolicy(arg1:string,arg2:string):Promise<void>;
 export function AlterBackupSet(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterDynamicTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterEventTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterExternalTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -116,6 +119,8 @@ export function BuildCreateAlertSql(arg1:string,arg2:string,arg3:alert.AlertConf
 export function BuildCreateDbtProjectSql(arg1:string,arg2:string,arg3:dbtproject.CreateConfig):Promise<string>;
 
 export function BuildCreateDynamicTableSql(arg1:string,arg2:string,arg3:dynamictable.DynamicTableConfig):Promise<string>;
+
+export function BuildCreateEventTableSql(arg1:string,arg2:string,arg3:eventtable.EventTableConfig):Promise<string>;
 
 export function BuildCreateExternalTableSql(arg1:string,arg2:string,arg3:externaltable.ExternalTableConfig):Promise<string>;
 
@@ -352,6 +357,8 @@ export function GetDefaultSessionConfig():Promise<config.SessionConfig>;
 export function GetERDiagramData(arg1:string):Promise<snowflake.ERDiagramData>;
 
 export function GetEditorPrefs():Promise<config.EditorPrefs>;
+
+export function GetEventTableParameters(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function GetFeatureFlags():Promise<config.FeatureFlags>;
 
