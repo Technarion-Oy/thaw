@@ -136,7 +136,7 @@ func TestBuildCreateExternalFunctionSql_EscapesLiterals(t *testing.T) {
 	}
 	// Sanity: the escaping helpers used here are the shared snowflake ones.
 	if snowflake.EscapeStringLit("a'b") != "a''b" {
-		t.Fatalf("unexpected EscapeStringLit behaviour")
+		t.Fatalf("unexpected EscapeStringLit behavior")
 	}
 }
 
