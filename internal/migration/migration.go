@@ -107,18 +107,6 @@ const (
 // inside string literals) and shares one tokenization per statement. Column
 // parsing is likewise token-based — see parseLocalTableColumns / parseColumnSegment.
 
-// stmtSigTokens returns the significant (non-trivia, non-EOF) tokens of stmt.
-func stmtSigTokens(stmt string) []sqltok.Token {
-	var sig []sqltok.Token
-	for _, t := range sqltok.Tokenize(stmt) {
-		if t.Kind.IsTrivia() || t.Kind == sqltok.EOF {
-			continue
-		}
-		sig = append(sig, t)
-	}
-	return sig
-}
-
 // useContext detects a "USE DATABASE <name>" or "USE SCHEMA <name>" statement,
 // returning the keyword ("DATABASE"/"SCHEMA") and the upper-cased, unquoted
 // target name. ok is false for any other statement.
@@ -144,11 +132,7 @@ func isCreateOrReplace(sig []sqltok.Token, stmt string) bool {
 // identUpper returns the upper-cased text of an identifier token, stripping a
 // surrounding pair of double quotes from a quoted identifier.
 func identUpper(t sqltok.Token, src string) string {
-	s := t.Text(src)
-	if t.Kind == sqltok.QuotedIdent && len(s) >= 2 {
-		s = s[1 : len(s)-1]
-	}
-	return strings.ToUpper(s)
+	return strings.ToUpper(sqltok.StripQuotePair(t.Text(src)))
 }
 
 // ─── column helpers ──────────────────────────────────────────────────────────
@@ -207,7 +191,7 @@ func (s *Service) ScanSource(dir string) ([]MigrationObject, error) {
 		var ctxDB, ctxSch string
 
 		for _, stmt := range stmts {
-			sig := stmtSigTokens(stmt)
+			sig := sqltok.SignificantTokens(stmt)
 
 			// Track USE DATABASE / USE SCHEMA context.
 			if kw, name, ok := useContext(sig, stmt); ok {

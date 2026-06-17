@@ -358,6 +358,69 @@ func TestReadIdentParts(t *testing.T) {
 	}
 }
 
+func TestSignificant(t *testing.T) {
+	sql := "  SELECT /* c */ 1\n-- trailing\nFROM t ;"
+	got := Significant(Tokenize(sql))
+	var kinds []TokenKind
+	for _, tok := range got {
+		kinds = append(kinds, tok.Kind)
+		if tok.Kind.IsTrivia() || tok.Kind == EOF {
+			t.Errorf("Significant retained a trivia/EOF token: %v", tok.Kind)
+		}
+	}
+	// SELECT 1 FROM t ;
+	want := []TokenKind{Keyword, NumberLit, Keyword, Identifier, Semicolon}
+	if len(kinds) != len(want) {
+		t.Fatalf("Significant kinds = %v; want %v", kinds, want)
+	}
+	for i := range want {
+		if kinds[i] != want[i] {
+			t.Errorf("token %d = %v; want %v", i, kinds[i], want[i])
+		}
+	}
+	// SignificantTokens is the string shorthand.
+	if len(SignificantTokens(sql)) != len(got) {
+		t.Errorf("SignificantTokens length mismatch")
+	}
+	if len(Significant(Tokenize(""))) != 0 {
+		t.Errorf("Significant of empty input should be empty")
+	}
+}
+
+func TestStripQuotePair(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{`"NAME"`, "NAME"},
+		{"NAME", "NAME"},
+		{`"My Table"`, "My Table"},
+		{`""`, ""},
+		{`"`, `"`},                       // single quote — not a pair
+		{`"a""b"`, `a""b`},               // inner quotes NOT unescaped
+		{`unquoted"trailing`, `unquoted"trailing`},
+		{"", ""},
+	}
+	for _, tc := range cases {
+		if got := StripQuotePair(tc.in); got != tc.want {
+			t.Errorf("StripQuotePair(%q) = %q; want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestUnquote(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{`"NAME"`, "NAME"},
+		{"NAME", "NAME"},
+		{`"my""id"`, `my"id`},   // strip pair + unescape
+		{`""`, ""},
+		{`a""b`, `a"b`},          // unescape even without surrounding pair
+		{`"a""""b"`, `a""b`},
+	}
+	for _, tc := range cases {
+		if got := Unquote(tc.in); got != tc.want {
+			t.Errorf("Unquote(%q) = %q; want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestStripCommentsEmpty(t *testing.T) {
 	if got := StripComments(""); got != "" {
 		t.Errorf("StripComments empty: got %q", got)

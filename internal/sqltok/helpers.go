@@ -82,6 +82,44 @@ func SkipTrivia(tokens []Token, i int) int {
 	return i
 }
 
+// Significant returns the tokens with all trivia (whitespace, newlines,
+// comments) and the terminating EOF removed — i.e. the syntactically meaningful
+// tokens, preserving their original positions. It is the shared basis for
+// statement-level pattern matching.
+func Significant(tokens []Token) []Token {
+	out := make([]Token, 0, len(tokens)/2+1)
+	for _, t := range tokens {
+		if t.Kind.IsTrivia() || t.Kind == EOF {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+// SignificantTokens tokenizes sql and returns only its significant tokens — the
+// string-input shorthand for Significant(Tokenize(sql)).
+func SignificantTokens(sql string) []Token {
+	return Significant(Tokenize(sql))
+}
+
+// StripQuotePair removes a single surrounding pair of double quotes from a
+// Snowflake identifier (`"NAME"` → `NAME`). It does NOT unescape doubled quotes
+// (see Unquote for that). A value without a surrounding pair is returned as-is.
+func StripQuotePair(s string) string {
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		return s[1 : len(s)-1]
+	}
+	return s
+}
+
+// Unquote returns the logical name of a quoted Snowflake identifier: it strips a
+// surrounding double-quote pair and unescapes internal "" → " (`"my""id"` →
+// `my"id`). Bare identifiers pass through unchanged.
+func Unquote(s string) string {
+	return strings.ReplaceAll(StripQuotePair(s), `""`, `"`)
+}
+
 // FirstToken returns the first keyword or identifier token in sql,
 // uppercased. Returns "" if none found. Comments and whitespace are skipped.
 func FirstToken(sql string) string {

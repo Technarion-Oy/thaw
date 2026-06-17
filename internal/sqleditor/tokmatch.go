@@ -25,21 +25,14 @@ import (
 // sigToks returns only significant tokens (everything except whitespace,
 // newlines, comments, and EOF), preserving their original positions.
 func sigToks(tokens []sqltok.Token) []sqltok.Token {
-	out := make([]sqltok.Token, 0, len(tokens)/2)
-	for _, t := range tokens {
-		if t.Kind.IsTrivia() || t.Kind == sqltok.EOF {
-			continue
-		}
-		out = append(out, t)
-	}
-	return out
+	return sqltok.Significant(tokens)
 }
 
 // sigTokens tokenizes sql and returns only its significant tokens. It is the
 // string-input shorthand for sigToks(sqltok.Tokenize(sql)) — the setup used by
 // nearly every validator.
 func sigTokens(sql string) []sqltok.Token {
-	return sigToks(sqltok.Tokenize(sql))
+	return sqltok.SignificantTokens(sql)
 }
 
 // tokUpper returns the uppercased text of a keyword/identifier token.

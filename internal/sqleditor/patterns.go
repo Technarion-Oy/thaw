@@ -9713,8 +9713,8 @@ func normalizeSnowflakeIdent(s string) []string {
 	normalized := make([]string, len(rawParts))
 	for i, p := range rawParts {
 		p = strings.TrimSpace(p)
-		if len(p) >= 2 && p[0] == '"' && p[len(p)-1] == '"' {
-			inner := p[1 : len(p)-1]
+		if inner := sqltok.StripQuotePair(p); inner != p {
+			// Quoted part: unescape "" and preserve case.
 			normalized[i] = strings.ReplaceAll(inner, `""`, `"`)
 		} else {
 			normalized[i] = strings.ToUpper(p)

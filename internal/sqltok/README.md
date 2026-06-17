@@ -52,8 +52,12 @@ func StripComments(sql string) string         // replace comments with spaces
 func StripStrings(sql string) string          // replace string literals with space
 func FirstToken(sql string) string            // first keyword/identifier, uppercased
 func SkipTrivia(tokens []Token, i int) int    // index of next non-trivia token at/after i
+func Significant(tokens []Token) []Token      // drop trivia + EOF → meaningful tokens
+func SignificantTokens(sql string) []Token    // Significant(Tokenize(sql))
 func ReadIdentPath(tokens []Token, src string, i, maxParts int) (string, int, bool)  // dot-joined name → raw substring
 func ReadIdentParts(tokens []Token, src string, i, maxParts int) ([]string, int)     // dot-joined name → part texts
+func StripQuotePair(s string) string          // "NAME" → NAME (no unescape)
+func Unquote(s string) string                 // "my""id" → my"id (strip pair + unescape)
 func InertRegions(sql string) [][2]int        // comment/string/dollar-quote byte ranges
 func IsInert(regions [][2]int, offset int) bool // binary search offset check
 ```
