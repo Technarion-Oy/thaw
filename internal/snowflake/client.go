@@ -2695,6 +2695,81 @@ type FunctionInfo struct {
 	IsTableFunction bool        `json:"isTableFunction"`
 }
 
+// UserFunction describes a user-defined function returned by SHOW USER FUNCTIONS.
+// It is used to populate the request/response translator pickers in the external
+// function builder. Qualified is the fully double-quoted identifier
+// ("DB"."SCHEMA"."NAME") suitable for embedding directly in a
+// REQUEST_TRANSLATOR / RESPONSE_TRANSLATOR clause; Arguments is the raw signature
+// string (e.g. "MYFN(VARCHAR) RETURN VARCHAR") for display only.
+type UserFunction struct {
+	Name      string `json:"name"`
+	Schema    string `json:"schema"`
+	Database  string `json:"database"`
+	Qualified string `json:"qualified"`
+	Arguments string `json:"arguments"`
+}
+
+// ListUserFunctions runs SHOW USER FUNCTIONS (scoped to database when non-empty)
+// and returns the accessible UDFs. Built-in functions are excluded — SHOW USER
+// FUNCTIONS already returns only user-defined functions. Columns are located by
+// name (case-insensitive) so column-order changes on Snowflake's side don't
+// break parsing.
+func (c *Client) ListUserFunctions(ctx context.Context, database string) ([]UserFunction, error) {
+	query := "SHOW USER FUNCTIONS"
+	if database != "" {
+		query += fmt.Sprintf(" IN DATABASE %s", QuoteIdent(database))
+	}
+	res, err := c.Execute(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	nameIdx, schemaIdx, dbIdx, argsIdx := -1, -1, -1, -1
+	for i, col := range res.Columns {
+		switch strings.ToLower(col) {
+		case "name":
+			nameIdx = i
+		case "schema_name":
+			schemaIdx = i
+		case "catalog_name":
+			dbIdx = i
+		case "arguments":
+			argsIdx = i
+		}
+	}
+	if nameIdx < 0 {
+		return nil, fmt.Errorf("no 'name' column in SHOW USER FUNCTIONS result")
+	}
+	out := make([]UserFunction, 0, len(res.Rows))
+	for _, row := range res.Rows {
+		cell := func(idx int) string {
+			if idx < 0 || idx >= len(row) || row[idx] == nil {
+				return ""
+			}
+			return fmt.Sprintf("%v", row[idx])
+		}
+		uf := UserFunction{
+			Name:      cell(nameIdx),
+			Schema:    cell(schemaIdx),
+			Database:  cell(dbIdx),
+			Arguments: cell(argsIdx),
+		}
+		if uf.Name == "" {
+			continue
+		}
+		parts := make([]string, 0, 3)
+		if uf.Database != "" {
+			parts = append(parts, QuoteIdent(uf.Database))
+		}
+		if uf.Schema != "" {
+			parts = append(parts, QuoteIdent(uf.Schema))
+		}
+		parts = append(parts, QuoteIdent(uf.Name))
+		uf.Qualified = strings.Join(parts, ".")
+		out = append(out, uf)
+	}
+	return out, nil
+}
+
 // GetTableColumns returns the ordered list of column names for a table or view
 // by running DESCRIBE TABLE (which works for both base tables and views in Snowflake).
 func (c *Client) GetTableColumns(ctx context.Context, database, schema, name string) ([]string, error) {
@@ -2904,7 +2979,7 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 	defer rows.Close() //nolint:errcheck
 
 	cols, _ := rows.Columns()
-	nameIdx, kindIdx, argsIdx, builtinIdx, rowsIdx, predsIdx, taskRelIdx, finalizeColIdx, isDynamicIdx, isExternalIdx, isIcebergIdx, isHybridIdx := -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1
+	nameIdx, kindIdx, argsIdx, builtinIdx, rowsIdx, predsIdx, taskRelIdx, finalizeColIdx, isDynamicIdx, isExternalIdx, isIcebergIdx, isHybridIdx, isExternalFnIdx := -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1
 	for i, col := range cols {
 		switch strings.ToLower(col) {
 		case "name":
@@ -2931,6 +3006,8 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 			isIcebergIdx = i
 		case "is_hybrid":
 			isHybridIdx = i
+		case "is_external_function":
+			isExternalFnIdx = i
 		}
 	}
 	if nameIdx < 0 {
@@ -2940,7 +3017,7 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 		return nil, fmt.Errorf("no 'kind' column in: %s cols=%v", query, cols)
 	}
 
-	captureArgs := fixedKind == "PROCEDURE" || fixedKind == "FUNCTION"
+	captureArgs := fixedKind == "PROCEDURE" || fixedKind == "FUNCTION" || fixedKind == "EXTERNAL FUNCTION"
 
 	var objects []SnowflakeObject
 	for rows.Next() {
@@ -2995,6 +3072,15 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 		// dedupeHybridTables in ListObjects is the belt-and-suspenders fallback
 		// when this column is absent.
 		if fixedKind == "" && isHybridIdx >= 0 && strings.EqualFold(fmt.Sprintf("%v", vals[isHybridIdx]), "Y") {
+			continue
+		}
+		// External functions surface in SHOW FUNCTIONS with
+		// is_external_function=Y. They are listed separately via SHOW EXTERNAL
+		// FUNCTIONS (kind "EXTERNAL FUNCTION"), so skip them here on the FUNCTION
+		// path to avoid duplicate tree entries (one under Functions, one under
+		// External Functions). dedupeExternalFunctions in ListExtendedObjects is
+		// the belt-and-suspenders fallback when this column is absent.
+		if fixedKind == "FUNCTION" && isExternalFnIdx >= 0 && strings.EqualFold(fmt.Sprintf("%v", vals[isExternalFnIdx]), "Y") {
 			continue
 		}
 		kind := fixedKind
@@ -3145,7 +3231,8 @@ func (c *Client) ListBasicObjects(ctx context.Context, database, schema string) 
 // authoritative list is the command slice below: DYNAMIC TABLE, EXTERNAL TABLE,
 // ICEBERG TABLE, HYBRID TABLE, EVENT TABLE,
 // MATERIALIZED VIEW, ALERT, TAG, MASKING POLICY, ROW ACCESS POLICY, NETWORK
-// RULE, IMAGE REPOSITORY, SERVICE, STREAMLIT, PROCEDURE, FUNCTION, TASK, STREAM, STAGE, FILE FORMAT,
+// RULE, IMAGE REPOSITORY, SERVICE, STREAMLIT, PROCEDURE, FUNCTION,
+// EXTERNAL FUNCTION, TASK, STREAM, STAGE, FILE FORMAT,
 // PIPE, NOTEBOOK, SECRET, GIT REPOSITORY, DBT PROJECT). Individual commands that
 // fail (e.g. due to missing privileges) are silently skipped. Includes the TASK
 // finalize enrichment logic.
@@ -3173,6 +3260,7 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 		{fmt.Sprintf("SHOW STREAMLITS IN SCHEMA %s", q), "STREAMLIT"},
 		{fmt.Sprintf("SHOW PROCEDURES IN SCHEMA %s", q), "PROCEDURE"},
 		{fmt.Sprintf("SHOW FUNCTIONS IN SCHEMA %s", q), "FUNCTION"},
+		{fmt.Sprintf("SHOW EXTERNAL FUNCTIONS IN SCHEMA %s", q), "EXTERNAL FUNCTION"},
 		{fmt.Sprintf("SHOW TASKS IN SCHEMA %s", q), "TASK"},
 		{fmt.Sprintf("SHOW STREAMS IN SCHEMA %s", q), "STREAM"},
 		{fmt.Sprintf("SHOW STAGES IN SCHEMA %s", q), "STAGE"},
@@ -3220,6 +3308,14 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 		all = append(all, r.objs...)
 	}
 
+	// External functions also surface in SHOW FUNCTIONS with
+	// is_external_function=Y, which showInSchema skips on the generic FUNCTION
+	// path. As a belt-and-suspenders against editions that omit that column (which
+	// would let an external function appear under both Functions and External
+	// Functions), drop any FUNCTION entry whose (schema, name, arguments) collides
+	// with an EXTERNAL FUNCTION entry already returned by SHOW EXTERNAL FUNCTIONS.
+	all = dedupeExternalFunctions(all)
+
 	// GET_DDL fallback: for Snowflake editions that don't expose the FINALIZE
 	// relationship via SHOW TASKS columns (task_relations / finalize), call
 	// GET_DDL on standalone TASK objects to detect finalizer tasks.
@@ -3227,6 +3323,42 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 	enrichTaskFinalize(ctx, c, database, schema, all)
 
 	return all, nil
+}
+
+// dedupeExternalFunctions removes any FUNCTION object whose (schema, name,
+// arguments) matches an EXTERNAL FUNCTION object in the same slice. External
+// functions are returned by both SHOW EXTERNAL FUNCTIONS (kind "EXTERNAL
+// FUNCTION") and SHOW FUNCTIONS (kind "FUNCTION", with is_external_function=Y);
+// showInSchema already drops them on the FUNCTION path when that column is
+// present, and this is the fallback for editions that omit it. Matching is
+// case-insensitive and includes the argument signature because functions overload
+// by signature. The input slice is not mutated.
+func dedupeExternalFunctions(objs []SnowflakeObject) []SnowflakeObject {
+	keys := make(map[string]struct{})
+	for _, o := range objs {
+		if o.Kind == "EXTERNAL FUNCTION" {
+			keys[externalFunctionDedupeKey(o)] = struct{}{}
+		}
+	}
+	if len(keys) == 0 {
+		return objs
+	}
+	out := make([]SnowflakeObject, 0, len(objs))
+	for _, o := range objs {
+		if o.Kind == "FUNCTION" {
+			if _, dup := keys[externalFunctionDedupeKey(o)]; dup {
+				continue
+			}
+		}
+		out = append(out, o)
+	}
+	return out
+}
+
+// externalFunctionDedupeKey builds the case-insensitive (schema, name, arguments)
+// key used to match a FUNCTION against an EXTERNAL FUNCTION.
+func externalFunctionDedupeKey(o SnowflakeObject) string {
+	return strings.ToUpper(o.Schema) + "\x00" + strings.ToUpper(o.Name) + "\x00" + strings.ToUpper(strings.TrimSpace(o.Arguments))
 }
 
 // enrichTaskFinalize enriches TASK objects with FINALIZE metadata by calling
@@ -3517,7 +3649,7 @@ func buildGetDDLQuery(database, schema, kind, name, arguments string) (query, id
 		// breakout from the SQL string context. If this code is refactored,
 		// ensure arguments still passes through the same single-quote escaping.
 		upperKind := strings.ToUpper(kind)
-		if upperKind == "PROCEDURE" || upperKind == "FUNCTION" {
+		if upperKind == "PROCEDURE" || upperKind == "FUNCTION" || upperKind == "EXTERNAL FUNCTION" {
 			identifier += fmt.Sprintf("(%s)", arguments)
 		}
 		identifier = strings.ReplaceAll(identifier, "'", "''")
@@ -3554,6 +3686,11 @@ func buildGetDDLQuery(database, schema, kind, name, arguments string) (query, id
 		ddlKind = "POLICY"
 	case "NETWORK RULE":
 		ddlKind = "NETWORK_RULE"
+	case "EXTERNAL FUNCTION":
+		// GET_DDL has no EXTERNAL_FUNCTION object type — external functions are
+		// retrieved via the 'FUNCTION' type (with the argument signature appended
+		// to the identifier above).
+		ddlKind = "FUNCTION"
 	}
 	escapedKind := strings.ReplaceAll(ddlKind, "'", "''")
 	// The third argument (true) enables recursive DDL output for objects that

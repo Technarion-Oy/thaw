@@ -9,6 +9,7 @@ import {procedure} from '../models';
 import {alert} from '../models';
 import {dynamictable} from '../models';
 import {eventtable} from '../models';
+import {externalfunction} from '../models';
 import {externaltable} from '../models';
 import {fileformat} from '../models';
 import {snowgitrepo} from '../models';
@@ -57,6 +58,8 @@ export function AlterBackupSet(arg1:string,arg2:string,arg3:string,arg4:string):
 export function AlterDynamicTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterEventTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterExternalFunction(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
 export function AlterExternalTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -121,6 +124,8 @@ export function BuildCreateDbtProjectSql(arg1:string,arg2:string,arg3:dbtproject
 export function BuildCreateDynamicTableSql(arg1:string,arg2:string,arg3:dynamictable.DynamicTableConfig):Promise<string>;
 
 export function BuildCreateEventTableSql(arg1:string,arg2:string,arg3:eventtable.EventTableConfig):Promise<string>;
+
+export function BuildCreateExternalFunctionSql(arg1:string,arg2:string,arg3:externalfunction.ExternalFunctionConfig):Promise<string>;
 
 export function BuildCreateExternalTableSql(arg1:string,arg2:string,arg3:externaltable.ExternalTableConfig):Promise<string>;
 
@@ -264,6 +269,8 @@ export function DeployNotebook(arg1:snowflake.DeployNotebookParams):Promise<void
 
 export function DescribeDbtProject(arg1:string,arg2:string,arg3:string):Promise<Array<snowflake.PropertyPair>>;
 
+export function DescribeExternalFunction(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.QueryResult>;
+
 export function Disconnect():Promise<void>;
 
 export function DownloadFileFromStage(arg1:string,arg2:string,arg3:number,arg4:string):Promise<void>;
@@ -359,6 +366,8 @@ export function GetERDiagramData(arg1:string):Promise<snowflake.ERDiagramData>;
 export function GetEditorPrefs():Promise<config.EditorPrefs>;
 
 export function GetEventTableParameters(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
+
+export function GetExternalFunctionOptions():Promise<externalfunction.BuilderOptions>;
 
 export function GetFeatureFlags():Promise<config.FeatureFlags>;
 
@@ -627,6 +636,8 @@ export function ListStages(arg1:string,arg2:string):Promise<Array<snowflake.Stag
 export function ListSupportedDbtVersions():Promise<Array<dbtproject.DbtVersionInfo>>;
 
 export function ListSystemPythons():Promise<Array<snowpark.PythonInfo>>;
+
+export function ListUserFunctions(arg1:string):Promise<Array<snowflake.UserFunction>>;
 
 export function ListUsers():Promise<Array<snowflake.SnowflakeUser>>;
 
