@@ -81,14 +81,18 @@ export default function CreateDataMetricFunctionModal({ db, schema, onClose, onS
   const setIfNotExists = (v: boolean) =>
     setCfg((prev) => ({ ...prev, ifNotExists: v, orReplace: v ? false : prev.orReplace }));
 
+  // A column with a type but no name is silently dropped by the builder, so flag
+  // it: every column row must be named.
+  const hasUnnamedColumn = cfg.args.some((a) => a.columns.some((c) => c.name.trim().length === 0));
+
   // Required: name and a body expression. Every table argument must contribute at
-  // least one named column, so a fully-blank argument can't slip through and emit
-  // a placeholder column in the generated DDL.
+  // least one column, and every column row must be named — so neither a fully-
+  // blank argument nor a type-only column can slip through into the generated DDL.
   const canSubmit =
     cfg.name.trim().length > 0 &&
     cfg.body.trim().length > 0 &&
     cfg.args.length > 0 &&
-    cfg.args.every((a) => a.columns.some((c) => c.name.trim().length > 0));
+    cfg.args.every((a) => a.columns.length > 0 && a.columns.every((c) => c.name.trim().length > 0));
 
   const handleRun = () => {
     if (!canSubmit) return;
@@ -170,7 +174,12 @@ export default function CreateDataMetricFunctionModal({ db, schema, onClose, onS
           label="Table arguments"
           required
           style={itemStyle}
-          help="Each TABLE argument is a named set of typed columns the body measures over. Most DMFs use one; Snowflake allows several. A blank column type defaults to VARCHAR."
+          validateStatus={hasUnnamedColumn ? "warning" : undefined}
+          help={
+            hasUnnamedColumn
+              ? "Every column needs a name — unnamed columns are dropped. A blank column type defaults to VARCHAR."
+              : "Each TABLE argument is a named set of typed columns the body measures over. Most DMFs use one; Snowflake allows several. A blank column type defaults to VARCHAR."
+          }
         >
           <Space direction="vertical" size={10} style={{ width: "100%" }}>
             {cfg.args.map((a, ai) => (
