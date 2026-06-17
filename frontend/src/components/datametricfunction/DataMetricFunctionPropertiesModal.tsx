@@ -10,7 +10,7 @@
 //
 // @thaw-domain: Object Browser & Administration
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Modal, Spin, Button, Input, Space, Typography, Alert, Tooltip, Tag, Select, Table, Popconfirm,
 } from "antd";
@@ -39,6 +39,9 @@ const LABEL_TD: React.CSSProperties = {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function q1(s: string) { return "'" + s.replace(/'/g, "''") + "'"; }
+// Double-quote an identifier, doubling embedded quotes — mirrors the Go side's
+// QuoteIdent so a name/identifier containing `"` can't break out of the quoting.
+function quoteIdent(s: string) { return '"' + s.replace(/"/g, '""') + '"'; }
 
 // The DESCRIBE FUNCTION property names that carry the DMF detail, rendered first
 // (in this order) under a dedicated section. "body" is the SQL expression SHOW
@@ -60,17 +63,21 @@ function EditRow({ label, value, canUnset, onSave, onUnset }: EditRowProps) {
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A successful save may unmount the modal (e.g. rename closes it), so skip the
+  // post-await state updates once unmounted.
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
 
   const save = async () => {
     setSaving(true);
     setError(null);
     try {
       await onSave(draft);
-      setEditing(false);
+      if (mounted.current) setEditing(false);
     } catch (e) {
-      setError(String(e));
+      if (mounted.current) setError(String(e));
     } finally {
-      setSaving(false);
+      if (mounted.current) setSaving(false);
     }
   };
 
@@ -80,11 +87,11 @@ function EditRow({ label, value, canUnset, onSave, onUnset }: EditRowProps) {
     setError(null);
     try {
       await onUnset();
-      setEditing(false);
+      if (mounted.current) setEditing(false);
     } catch (e) {
-      setError(String(e));
+      if (mounted.current) setError(String(e));
     } finally {
-      setSaving(false);
+      if (mounted.current) setSaving(false);
     }
   };
 
@@ -211,7 +218,7 @@ export default function DataMetricFunctionPropertiesModal({ db, schema, name, ar
         const tsc = String(r[si] ?? "");
         const tnm = String(r[ni] ?? "");
         return {
-          qualified: `"${tdb}"."${tsc}"."${tnm}"`,
+          qualified: `${quoteIdent(tdb)}.${quoteIdent(tsc)}.${quoteIdent(tnm)}`,
           label: `${tdb}.${tsc}.${tnm}`,
           value: String(r[vi] ?? ""),
         };
@@ -296,7 +303,7 @@ export default function DataMetricFunctionPropertiesModal({ db, schema, name, ar
   const doRename = async (next: string) => {
     const trimmed = next.trim();
     if (trimmed === "" || trimmed === name) return;
-    await AlterDataMetricFunction(db, schema, name, args, `RENAME TO "${db}"."${schema}"."${trimmed}"`);
+    await AlterDataMetricFunction(db, schema, name, args, `RENAME TO ${quoteIdent(db)}.${quoteIdent(schema)}.${quoteIdent(trimmed)}`);
     onChanged?.();
     onClose();
   };

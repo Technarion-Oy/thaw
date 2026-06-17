@@ -31,8 +31,17 @@ interface Props {
   onSuccess?: () => void;
 }
 
-type Column = { name: string; type: string };
-type TableArg = { name: string; columns: Column[] };
+// Stable row ids so React keys survive insert/remove (using the array index as a
+// key shifts focus when a non-last row is removed). The id is local-only; the
+// backend struct ignores the extra field.
+let rowUid = 0;
+const nextId = () => ++rowUid;
+
+type Column = { id: number; name: string; type: string };
+type TableArg = { id: number; name: string; columns: Column[] };
+
+const newColumn = (): Column => ({ id: nextId(), name: "", type: "VARCHAR" });
+const newArg = (name: string): TableArg => ({ id: nextId(), name, columns: [newColumn()] });
 
 // Plain data shape for form state. The Wails-generated `DataMetricFunctionConfig`
 // class carries a `convertValues` method (it has a nested `args` array of nested
@@ -49,7 +58,7 @@ export default function CreateDataMetricFunctionModal({ db, schema, onClose, onS
     orReplace: false,
     ifNotExists: false,
     secure: false,
-    args: [{ name: "table_data", columns: [{ name: "", type: "VARCHAR" }] }],
+    args: [newArg("table_data")],
     notNull: false,
     comment: "",
     body: "",
@@ -94,13 +103,13 @@ export default function CreateDataMetricFunctionModal({ db, schema, onClose, onS
   // ── Table-argument + column editing ────────────────────────────────────────
   const updateArgs = (next: TableArg[]) => set("args", next);
   const addArg = () =>
-    updateArgs([...cfg.args, { name: `table_data_${cfg.args.length + 1}`, columns: [{ name: "", type: "VARCHAR" }] }]);
+    updateArgs([...cfg.args, newArg(`table_data_${cfg.args.length + 1}`)]);
   const removeArg = (ai: number) => updateArgs(cfg.args.filter((_, idx) => idx !== ai));
   const setArgName = (ai: number, value: string) =>
     updateArgs(cfg.args.map((a, idx) => (idx === ai ? { ...a, name: value } : a)));
 
   const addColumn = (ai: number) =>
-    updateArgs(cfg.args.map((a, idx) => (idx === ai ? { ...a, columns: [...a.columns, { name: "", type: "VARCHAR" }] } : a)));
+    updateArgs(cfg.args.map((a, idx) => (idx === ai ? { ...a, columns: [...a.columns, newColumn()] } : a)));
   const updateColumn = (ai: number, ci: number, patch: Partial<Column>) =>
     updateArgs(cfg.args.map((a, idx) =>
       idx === ai ? { ...a, columns: a.columns.map((c, j) => (j === ci ? { ...c, ...patch } : c)) } : a));
@@ -164,7 +173,7 @@ export default function CreateDataMetricFunctionModal({ db, schema, onClose, onS
           <Space direction="vertical" size={10} style={{ width: "100%" }}>
             {cfg.args.map((a, ai) => (
               <div
-                key={ai}
+                key={a.id}
                 style={{ border: "1px solid var(--border)", borderRadius: 6, padding: 10 }}
               >
                 <Space align="center" style={{ marginBottom: 8, width: "100%", justifyContent: "space-between" }}>
@@ -190,7 +199,7 @@ export default function CreateDataMetricFunctionModal({ db, schema, onClose, onS
                 </Space>
                 <Space direction="vertical" size={6} style={{ width: "100%" }}>
                   {a.columns.map((c, ci) => (
-                    <Space key={ci} align="start">
+                    <Space key={c.id} align="start">
                       <Input
                         placeholder="column"
                         value={c.name}
