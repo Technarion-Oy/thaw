@@ -19,15 +19,17 @@ import (
 
 // EventTableConfig holds the parameters for creating a Snowflake EVENT TABLE
 // object. Event tables have a fixed, predefined schema, so there are no column
-// definitions and no CLUSTER BY clause; only the table-level properties below
-// are configurable. Every property is optional — an empty/zero value means the
-// corresponding clause is omitted and Snowflake's default applies.
+// definitions; CLUSTER BY (on the predefined columns) and the table-level
+// properties below are the configurable knobs. Every field is optional — an
+// empty/zero value means the corresponding clause is omitted and Snowflake's
+// default applies.
 type EventTableConfig struct {
 	Name          string `json:"name"`
 	CaseSensitive bool   `json:"caseSensitive"`
 	OrReplace     bool   `json:"orReplace"`
 	IfNotExists   bool   `json:"ifNotExists"`
 
+	ClusterBy                  string              `json:"clusterBy"`                  // CLUSTER BY ( <expr>, ... ) — comma-separated expressions (or "")
 	DataRetentionTimeInDays    string              `json:"dataRetentionTimeInDays"`    // DATA_RETENTION_TIME_IN_DAYS = <int> (or "")
 	MaxDataExtensionTimeInDays string              `json:"maxDataExtensionTimeInDays"` // MAX_DATA_EXTENSION_TIME_IN_DAYS = <int> (or "")
 	ChangeTracking             string              `json:"changeTracking"`             // TRUE | FALSE (or "")
@@ -45,6 +47,7 @@ type EventTableConfig struct {
 // are set OR REPLACE wins.
 //
 //	CREATE [OR REPLACE] EVENT TABLE [IF NOT EXISTS] <fqn>
+//	  [CLUSTER BY ( <expr>, ... )]
 //	  [DATA_RETENTION_TIME_IN_DAYS = <int>]
 //	  [MAX_DATA_EXTENSION_TIME_IN_DAYS = <int>]
 //	  [CHANGE_TRACKING = { TRUE | FALSE }]
@@ -71,6 +74,11 @@ func BuildCreateEventTableSql(db, schema string, cfg EventTableConfig) (string, 
 
 	fmt.Fprintf(&sb, "%s %s.%s.%s", createClause, snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), nameToken)
 
+	// CLUSTER BY clusters the event table on its predefined columns (e.g. the
+	// timestamp column); it comes first after the name in the documented grammar.
+	if cb := strings.TrimSpace(cfg.ClusterBy); cb != "" {
+		fmt.Fprintf(&sb, "\n  CLUSTER BY (%s)", cb)
+	}
 	if v := strings.TrimSpace(cfg.DataRetentionTimeInDays); v != "" {
 		fmt.Fprintf(&sb, "\n  DATA_RETENTION_TIME_IN_DAYS = %s", v)
 	}

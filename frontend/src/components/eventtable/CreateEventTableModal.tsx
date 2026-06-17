@@ -47,6 +47,7 @@ export default function CreateEventTableModal({ db, schema, onClose, onSuccess }
     caseSensitive: false,
     orReplace: false,
     ifNotExists: false,
+    clusterBy: "",
     dataRetentionTimeInDays: "",
     maxDataExtensionTimeInDays: "",
     changeTracking: "",
@@ -93,6 +94,13 @@ export default function CreateEventTableModal({ db, schema, onClose, onSuccess }
 
   const advancedBody = (
     <>
+      <Form.Item label="Cluster by" style={itemStyle} help="Comma-separated clustering expressions on the predefined columns, e.g. timestamp, resource_attributes:service.name.">
+        <Input
+          value={cfg.clusterBy}
+          onChange={(e) => set("clusterBy", e.target.value)}
+          placeholder="(optional)"
+        />
+      </Form.Item>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
         <Form.Item label="Data retention (days)" style={itemStyle} help="Time Travel retention period (DATA_RETENTION_TIME_IN_DAYS).">
           <InputNumber

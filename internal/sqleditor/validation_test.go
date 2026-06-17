@@ -776,7 +776,6 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		// Invalid CREATE EVENT TABLE
 		{"Create Event Table OR REPLACE and IF NOT EXISTS", "CREATE OR REPLACE EVENT TABLE IF NOT EXISTS my_events", "Conflict between OR REPLACE and IF NOT EXISTS"},
 		{"Create Event Table column definitions", "CREATE EVENT TABLE my_events (col1 VARCHAR)", "Event tables have a fixed schema"},
-		{"Create Event Table CLUSTER BY", "CREATE EVENT TABLE my_events CLUSTER BY (ts)", "CLUSTER BY is not supported for EVENT TABLE"},
 		{"Create Event Table invalid property", "CREATE EVENT TABLE my_events AUTO_REFRESH = TRUE", "Unexpected property 'AUTO_REFRESH'"},
 		{"Create Event Table missing name", "CREATE EVENT TABLE", "Unexpected syntax"},
 

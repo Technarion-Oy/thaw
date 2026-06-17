@@ -159,24 +159,28 @@ export default function EventTablePropertiesModal({ db, schema, name, onClose }:
   const [searchOptBusy, setSearchOptBusy] = useState(false);
 
   const reload = useCallback(async () => {
-    setRows(null);
-    setParams(null);
+    // Don't null rows/params here: keep the previous data rendered while the
+    // refetch is in flight so an inline edit doesn't collapse the modal to a
+    // spinner (and reset the inline editors). The centered spinner shows only
+    // on first load, when rows is still its initial null. rows and params are
+    // swapped together at the end to avoid a transient mixed-source state.
     setError(null);
     try {
       const props = await GetObjectProperties(db, schema, "EVENT TABLE", name);
+      // SHOW EVENT TABLES may omit some configurable values; SHOW PARAMETERS is
+      // the fallback source for the object parameters (retention / max-extension).
+      // Failure here is non-fatal — the settings rows fall back to the SHOW dump
+      // or show their defaults.
+      let p: snowflake.QueryResult | null = null;
+      try {
+        p = (await GetEventTableParameters(db, schema, name)) ?? null;
+      } catch {
+        p = null;
+      }
       setRows(props ?? []);
+      setParams(p);
     } catch (e) {
       setError(String(e));
-    }
-    // SHOW EVENT TABLES may omit some configurable values; SHOW PARAMETERS is
-    // the fallback source for the object parameters (retention / max-extension).
-    // Failure here is non-fatal — the settings rows just fall back to the SHOW
-    // dump or show their defaults.
-    try {
-      const p = await GetEventTableParameters(db, schema, name);
-      setParams(p ?? null);
-    } catch {
-      setParams(null);
     }
   }, [db, schema, name]);
 

@@ -16,11 +16,12 @@
 // telemetry and is essential for debugging and observability.
 //
 // Because event tables have a fixed column layout, CREATE EVENT TABLE accepts no
-// column definitions and no CLUSTER BY clause (the visual builder and the SQL
-// editor's validateCreateEventTable both enforce this). The builder therefore
-// only emits the supported table-level properties: DATA_RETENTION_TIME_IN_DAYS,
+// column definitions (the visual builder and the SQL editor's
+// validateCreateEventTable both enforce this). It does, however, accept a
+// CLUSTER BY clause on the predefined columns (e.g. the timestamp column), plus
+// the supported table-level properties: DATA_RETENTION_TIME_IN_DAYS,
 // MAX_DATA_EXTENSION_TIME_IN_DAYS, CHANGE_TRACKING, DEFAULT_DDL_COLLATION,
-// COPY GRANTS, COMMENT, and TAG.
+// COPY GRANTS, COMMENT, and TAG — all of which the builder emits.
 //
 // Event tables share the standard TABLE management commands rather than having
 // EVENT-specific variants: they are altered, dropped, and renamed through the

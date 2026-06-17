@@ -258,6 +258,8 @@ func TestValidateSnowflakePatterns_CreateEventTable(t *testing.T) {
 		"CREATE EVENT TABLE my_events\n-- CLUSTER BY (ts)\nCOMMENT = 'test'",
 		// Keywords inside a block comment must not trigger false positive
 		"CREATE EVENT TABLE my_events /* AUTO_REFRESH = TRUE */ COMMENT = 'test'",
+		// CLUSTER BY on the predefined columns is valid for event tables
+		"CREATE EVENT TABLE my_events CLUSTER BY (timestamp)",
 		// TAG property
 		"CREATE EVENT TABLE my_events TAG (cost_center = 'finance')",
 		// COPY GRANTS combined with IF NOT EXISTS (both valid)
@@ -290,11 +292,6 @@ func TestValidateSnowflakePatterns_CreateEventTable(t *testing.T) {
 			"Column definitions not allowed",
 			"CREATE EVENT TABLE my_events (col1 VARCHAR, col2 INT)",
 			[]string{"Event tables have a fixed schema and do not support column definitions"},
-		},
-		{
-			"CLUSTER BY not supported",
-			"CREATE EVENT TABLE my_events CLUSTER BY (timestamp)",
-			[]string{"CLUSTER BY is not supported for EVENT TABLE"},
 		},
 		{
 			"Invalid DATA_RETENTION_TIME_IN_DAYS",
@@ -342,9 +339,9 @@ func TestValidateSnowflakePatterns_CreateEventTable(t *testing.T) {
 			[]string{"Unexpected property"},
 		},
 		{
-			"CLUSTER BY and column defs combined",
+			"Column defs flagged even with CLUSTER BY present",
 			"CREATE EVENT TABLE my_events (col1 INT) CLUSTER BY (col1)",
-			[]string{"Event tables have a fixed schema and do not support column definitions", "CLUSTER BY is not supported for EVENT TABLE"},
+			[]string{"Event tables have a fixed schema and do not support column definitions"},
 		},
 		{
 			"Multiple unexpected properties each warned",

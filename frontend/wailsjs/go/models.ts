@@ -923,6 +923,7 @@ export namespace eventtable {
 	    caseSensitive: boolean;
 	    orReplace: boolean;
 	    ifNotExists: boolean;
+	    clusterBy: string;
 	    dataRetentionTimeInDays: string;
 	    maxDataExtensionTimeInDays: string;
 	    changeTracking: string;
@@ -941,6 +942,7 @@ export namespace eventtable {
 	        this.caseSensitive = source["caseSensitive"];
 	        this.orReplace = source["orReplace"];
 	        this.ifNotExists = source["ifNotExists"];
+	        this.clusterBy = source["clusterBy"];
 	        this.dataRetentionTimeInDays = source["dataRetentionTimeInDays"];
 	        this.maxDataExtensionTimeInDays = source["maxDataExtensionTimeInDays"];
 	        this.changeTracking = source["changeTracking"];

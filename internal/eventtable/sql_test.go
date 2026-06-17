@@ -71,12 +71,24 @@ func TestBuildCreateEventTableSql(t *testing.T) {
 			absent:   []string{"IF NOT EXISTS"},
 		},
 		{
-			name: "no columns or cluster by ever emitted",
+			name: "no column list ever emitted (fixed schema)",
 			cfg: EventTableConfig{
 				Name:    "FIXED",
 				Comment: "fixed schema",
 			},
+			// No CLUSTER BY here → no parens at all, and never a column list.
 			absent: []string{"(", "CLUSTER BY", "<column>"},
+		},
+		{
+			name: "cluster by on predefined columns",
+			cfg: EventTableConfig{
+				Name:      "CLUSTERED",
+				ClusterBy: "timestamp",
+			},
+			contains: []string{
+				`CREATE EVENT TABLE "DB"."SC".CLUSTERED`,
+				"CLUSTER BY (timestamp)",
+			},
 		},
 		{
 			name:     "empty name emits placeholder",
