@@ -12,7 +12,6 @@ package app
 
 import (
 	"fmt"
-	"strings"
 
 	"thaw/internal/apperrors"
 	"thaw/internal/snowflake"
@@ -67,13 +66,12 @@ func (a *App) GetDataMetricFunctionReferences(database, schema, name string) (*s
 	if a.client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	esc := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
 	sql := fmt.Sprintf(
 		"SELECT ref_database_name, ref_schema_name, ref_entity_name, ref_entity_domain, schedule "+
 			"FROM SNOWFLAKE.ACCOUNT_USAGE.DATA_METRIC_FUNCTION_REFERENCES "+
 			"WHERE metric_database_name = '%s' AND metric_schema_name = '%s' AND metric_name = '%s' "+
 			"ORDER BY ref_database_name, ref_schema_name, ref_entity_name",
-		esc(database), esc(schema), esc(name))
+		snowflake.EscapeStringLit(database), snowflake.EscapeStringLit(schema), snowflake.EscapeStringLit(name))
 	return a.client.Execute(a.ctx, sql)
 }
 

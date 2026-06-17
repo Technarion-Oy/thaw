@@ -81,12 +81,14 @@ export default function CreateDataMetricFunctionModal({ db, schema, onClose, onS
   const setIfNotExists = (v: boolean) =>
     setCfg((prev) => ({ ...prev, ifNotExists: v, orReplace: v ? false : prev.orReplace }));
 
-  // Required: name and a body expression. At least one table argument must have
-  // at least one named column.
+  // Required: name and a body expression. Every table argument must contribute at
+  // least one named column, so a fully-blank argument can't slip through and emit
+  // a placeholder column in the generated DDL.
   const canSubmit =
     cfg.name.trim().length > 0 &&
     cfg.body.trim().length > 0 &&
-    cfg.args.some((a) => a.columns.some((c) => c.name.trim().length > 0));
+    cfg.args.length > 0 &&
+    cfg.args.every((a) => a.columns.some((c) => c.name.trim().length > 0));
 
   const handleRun = () => {
     if (!canSubmit) return;
