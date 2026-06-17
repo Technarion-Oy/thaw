@@ -70,6 +70,56 @@ func StripStrings(sql string) string {
 	return sb.String()
 }
 
+// SkipTrivia returns the index of the first non-trivia token at or after i,
+// skipping whitespace, newlines, and comments (see TokenKind.IsTrivia). When
+// only trivia remains it returns the index of the terminating EOF token (or
+// len(tokens) if the slice has no EOF), so callers should bounds- or EOF-check
+// the result before use.
+func SkipTrivia(tokens []Token, i int) int {
+	for i < len(tokens) && tokens[i].Kind.IsTrivia() {
+		i++
+	}
+	return i
+}
+
+// Significant returns the tokens with all trivia (whitespace, newlines,
+// comments) and the terminating EOF removed — i.e. the syntactically meaningful
+// tokens, preserving their original positions. It is the shared basis for
+// statement-level pattern matching.
+func Significant(tokens []Token) []Token {
+	out := make([]Token, 0, len(tokens)/2+1)
+	for _, t := range tokens {
+		if t.Kind.IsTrivia() || t.Kind == EOF {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+// SignificantTokens tokenizes sql and returns only its significant tokens — the
+// string-input shorthand for Significant(Tokenize(sql)).
+func SignificantTokens(sql string) []Token {
+	return Significant(Tokenize(sql))
+}
+
+// StripQuotePair removes a single surrounding pair of double quotes from a
+// Snowflake identifier (`"NAME"` → `NAME`). It does NOT unescape doubled quotes
+// (see Unquote for that). A value without a surrounding pair is returned as-is.
+func StripQuotePair(s string) string {
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		return s[1 : len(s)-1]
+	}
+	return s
+}
+
+// Unquote returns the logical name of a quoted Snowflake identifier: it strips a
+// surrounding double-quote pair and unescapes internal "" → " (`"my""id"` →
+// `my"id`). Bare identifiers pass through unchanged.
+func Unquote(s string) string {
+	return strings.ReplaceAll(StripQuotePair(s), `""`, `"`)
+}
+
 // FirstToken returns the first keyword or identifier token in sql,
 // uppercased. Returns "" if none found. Comments and whitespace are skipped.
 func FirstToken(sql string) string {
@@ -79,17 +129,64 @@ func FirstToken(sql string) string {
 		if !ok {
 			return ""
 		}
-		switch tok.Kind {
-		case Keyword, Identifier:
-			return strings.ToUpper(tok.Text(sql))
-		case Whitespace, Newline, LineComment, BlockComment:
+		if tok.Kind.IsTrivia() {
 			continue
-		case EOF:
-			return ""
-		default:
-			return ""
 		}
+		if tok.Kind == Keyword || tok.Kind == Identifier {
+			return strings.ToUpper(tok.Text(sql))
+		}
+		return ""
 	}
+}
+
+// identPathEnd returns the index of the last token of a dot-joined identifier
+// path starting at tokens[i], and whether one was found (tokens[i] must be
+// ident-like). Parts extend only across a Dot that is immediately adjacent in
+// the slice followed by another ident-like token — so on a raw token stream a
+// space around the dot ends the path, while on a pre-filtered significant-token
+// slice (trivia already removed) the parts join across the original whitespace.
+// maxParts caps the number of parts; maxParts <= 0 means unbounded.
+func identPathEnd(tokens []Token, i, maxParts int) (last int, ok bool) {
+	if i < 0 || i >= len(tokens) || !tokens[i].Kind.IsIdentLike() {
+		return i, false
+	}
+	last = i
+	for parts := 1; maxParts <= 0 || parts < maxParts; parts++ {
+		if last+2 < len(tokens) && tokens[last+1].Kind == Dot && tokens[last+2].Kind.IsIdentLike() {
+			last += 2
+			continue
+		}
+		break
+	}
+	return last, true
+}
+
+// ReadIdentPath reads a dot-joined identifier path (e.g. DB.SCHEMA."My Table")
+// starting at tokens[i]. It returns the raw source substring spanning the path,
+// the index just past the last consumed token, and whether a path was found.
+// When none is found it returns ("", i, false). See identPathEnd for the
+// adjacency and maxParts (<= 0 = unbounded) semantics.
+func ReadIdentPath(tokens []Token, src string, i, maxParts int) (string, int, bool) {
+	last, ok := identPathEnd(tokens, i, maxParts)
+	if !ok {
+		return "", i, false
+	}
+	return src[tokens[i].Start:tokens[last].End], last + 1, true
+}
+
+// ReadIdentParts is like ReadIdentPath but returns the individual part texts
+// (un-normalised, quotes preserved) rather than the joined raw substring. It
+// returns (nil, i) when no path is found.
+func ReadIdentParts(tokens []Token, src string, i, maxParts int) ([]string, int) {
+	last, ok := identPathEnd(tokens, i, maxParts)
+	if !ok {
+		return nil, i
+	}
+	parts := make([]string, 0, (last-i)/2+1)
+	for k := i; k <= last; k += 2 {
+		parts = append(parts, tokens[k].Text(src))
+	}
+	return parts, last + 1
 }
 
 // InertRegions returns [start,end) byte ranges for tokens that are "inert" —

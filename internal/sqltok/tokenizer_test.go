@@ -284,6 +284,53 @@ func TestTokenizeUnterminatedDollarQuote(t *testing.T) {
 	}
 }
 
+func TestTokenizeUnterminatedFlag(t *testing.T) {
+	// kind under test → the one token of that kind we check.
+	cases := []struct {
+		name            string
+		sql             string
+		kind            TokenKind
+		wantUnterminated bool
+	}{
+		{"closed string", "'abc'", StringLit, false},
+		{"unclosed string", "'abc", StringLit, true},
+		{"lone quote", "'", StringLit, true},
+		{"escaped-then-unclosed string", "'a''", StringLit, true},
+		{"closed ident", `"abc"`, QuotedIdent, false},
+		{"unclosed ident", `"abc`, QuotedIdent, true},
+		{"closed block comment", "/* x */", BlockComment, false},
+		{"unclosed block comment", "/* x", BlockComment, true},
+		{"closed dollar", "$$x$$", DollarQuoted, false},
+		{"unclosed dollar", "$$x", DollarQuoted, true},
+		{"closed tagged dollar", "$t$x$t$", DollarQuoted, false},
+		{"unclosed tagged dollar", "$t$x", DollarQuoted, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var tok Token
+			found := false
+			for _, tk := range Tokenize(tc.sql) {
+				if tk.Kind == tc.kind {
+					tok, found = tk, true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("no %v token in %q", tc.kind, tc.sql)
+			}
+			if tok.Unterminated != tc.wantUnterminated {
+				t.Errorf("Unterminated = %v; want %v", tok.Unterminated, tc.wantUnterminated)
+			}
+		})
+	}
+	// Non-delimited kinds are never flagged.
+	for _, tk := range Tokenize("SELECT a + 1") {
+		if tk.Unterminated {
+			t.Errorf("token %v should not be Unterminated", tk.Kind)
+		}
+	}
+}
+
 func TestTokenizeUnicodeInStrings(t *testing.T) {
 	sql := "SELECT 'café résumé'"
 	tokens := Tokenize(sql)

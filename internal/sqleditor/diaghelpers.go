@@ -130,8 +130,8 @@ func findTokensLocally(stmtText string, targets []string, baseLine int, ignoreCa
 // normIdent normalises a SQL identifier: strips double-quotes if present and
 // upper-cases the result (unless it is a quoted identifier with ignoreCase=false).
 func normIdent(s string, ignoreCase bool) string {
-	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
-		inner := s[1 : len(s)-1]
+	if inner := sqltok.StripQuotePair(s); inner != s {
+		// s was a "quoted" identifier; case is significant unless ignoreCase.
 		if ignoreCase {
 			return strings.ToUpper(inner)
 		}

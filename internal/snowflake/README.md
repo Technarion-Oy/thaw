@@ -19,7 +19,7 @@ No business logic belongs here — callers pass SQL strings or high-level parame
 | `tags.go` | `TagPair` (shared `{Name, Value}` tag DTO) and `TagClause` — the single `TAG (name = 'value', ...)` clause builder reused by every object CREATE builder that supports tags (dynamic/external tables, materialized views, alerts, git repositories). Callers whose grammar uses `WITH TAG (...)` prepend `WITH ` to a non-empty result. |
 | `collations.go` | `CollationOption`, `CollationLocale`, `CollationSpecifier`; `Collations()`, `CollationLocales()`, `CollationSpecifiers()` — single source of truth for the collation registry surfaced in the UI |
 | `helpers.go` | `IsBoolean`, `IsNumeric`, `NeedsQuotes` — data-type predicate helpers used by column DDL builders |
-| `lineage.go` | `DependencyNode`, `SchemaRef`, `GetObjectDependencies`, `GetSchemaCrossDeps` — recursive DDL-parsing dependency tree (capped at depth 8 by `maxDependencyDepth`) |
+| `lineage.go` | `DependencyNode`, `SchemaRef`, `GetObjectDependencies`, `GetSchemaCrossDeps`, `ExtractDDLBody`, `RewriteSQLReferences` — recursive DDL-parsing dependency tree (capped at depth 8 by `maxDependencyDepth`). Object references are extracted with the `internal/sqltok` lexer (not regexes), so nested block comments, `""`/`''` escapes, and `$tag$` dollar-quoting are handled correctly |
 | `explain.go` | `ExplainFormat`, `Explain`, `ExplainOnConn` — format-parameterised EXPLAIN execution helpers |
 | `datatypes.go` | Snowflake data type normalisation and validation (`ValidateDataType`, `AllDataTypes`) plus `BaseType` (lenient base-type extractor for type-family checks) |
 | `doc.go` | Package doc + `thaw:domain` annotation |

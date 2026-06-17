@@ -224,6 +224,203 @@ func TestIsInertEmptyRegions(t *testing.T) {
 	}
 }
 
+func TestIsTrivia(t *testing.T) {
+	trivia := []TokenKind{Whitespace, Newline, LineComment, BlockComment}
+	for _, k := range trivia {
+		if !k.IsTrivia() {
+			t.Errorf("%v should be trivia", k)
+		}
+	}
+	notTrivia := []TokenKind{Keyword, Identifier, QuotedIdent, StringLit, DollarQuoted, NumberLit, Operator, Dot, Comma, Semicolon, LParen, RParen, At, EOF}
+	for _, k := range notTrivia {
+		if k.IsTrivia() {
+			t.Errorf("%v should not be trivia", k)
+		}
+	}
+}
+
+func TestIsIdentLike(t *testing.T) {
+	identLike := []TokenKind{Identifier, QuotedIdent, Keyword}
+	for _, k := range identLike {
+		if !k.IsIdentLike() {
+			t.Errorf("%v should be ident-like", k)
+		}
+	}
+	notIdentLike := []TokenKind{Whitespace, Newline, LineComment, BlockComment, StringLit, DollarQuoted, NumberLit, Operator, Dot, Comma, At, EOF}
+	for _, k := range notIdentLike {
+		if k.IsIdentLike() {
+			t.Errorf("%v should not be ident-like", k)
+		}
+	}
+}
+
+func TestSkipTrivia(t *testing.T) {
+	sql := "  /* c */\n-- line\nFROM t"
+	tokens := Tokenize(sql)
+	// From index 0, the first significant token is the FROM keyword.
+	i := SkipTrivia(tokens, 0)
+	if i >= len(tokens) || tokens[i].Kind != Keyword || tokens[i].Text(sql) != "FROM" {
+		t.Fatalf("SkipTrivia did not land on FROM; got index %d", i)
+	}
+	// Skipping from an already-significant token returns it unchanged.
+	if got := SkipTrivia(tokens, i); got != i {
+		t.Errorf("SkipTrivia on a significant token = %d; want %d", got, i)
+	}
+	// All-trivia input lands on the terminating EOF token.
+	ws := Tokenize("   \n  ")
+	j := SkipTrivia(ws, 0)
+	if j >= len(ws) || ws[j].Kind != EOF {
+		t.Errorf("SkipTrivia over all-trivia should reach EOF; got index %d", j)
+	}
+	// Out-of-range / empty inputs are safe.
+	if got := SkipTrivia(nil, 0); got != 0 {
+		t.Errorf("SkipTrivia(nil,0) = %d; want 0", got)
+	}
+}
+
+func TestReadIdentPath(t *testing.T) {
+	cases := []struct {
+		name     string
+		sql      string
+		maxParts int
+		wantRaw  string
+	}{
+		{"single part", "TBL x", 3, "TBL"},
+		{"two parts", "SC.TBL x", 3, "SC.TBL"},
+		{"three parts", "DB.SC.TBL x", 3, "DB.SC.TBL"},
+		{"quoted parts", `"My DB"."My Tbl" x`, 3, `"My DB"."My Tbl"`},
+		{"capped at three", "A.B.C.D", 3, "A.B.C"},
+		{"unbounded reads four", "A.B.C.D", 0, "A.B.C.D"},
+		// On a raw token stream a space around the dot ends the path: the
+		// whitespace token between "A" and "." breaks slice-adjacency.
+		{"spaced dot stops on raw stream", `A . B`, 3, "A"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tokens := Tokenize(tc.sql)
+			raw, next, ok := ReadIdentPath(tokens, tc.sql, 0, tc.maxParts)
+			if !ok {
+				t.Fatalf("ReadIdentPath(%q) returned ok=false", tc.sql)
+			}
+			if raw != tc.wantRaw {
+				t.Errorf("ReadIdentPath(%q) raw = %q; want %q", tc.sql, raw, tc.wantRaw)
+			}
+			if next <= 0 || next > len(tokens) {
+				t.Errorf("ReadIdentPath(%q) next = %d out of range", tc.sql, next)
+			}
+		})
+	}
+}
+
+func TestReadIdentPathNotFound(t *testing.T) {
+	tokens := Tokenize(", FROM")
+	if raw, next, ok := ReadIdentPath(tokens, ", FROM", 0, 3); ok || raw != "" || next != 0 {
+		t.Errorf("ReadIdentPath on a non-ident token = (%q, %d, %v); want (\"\", 0, false)", raw, next, ok)
+	}
+}
+
+// TestReadIdentPathJoinsAcrossWhitespaceOnSigSlice documents that a
+// significant-token slice (trivia removed) joins parts across the original
+// whitespace, since slice-adjacency no longer reflects source-adjacency.
+func TestReadIdentPathJoinsAcrossWhitespaceOnSigSlice(t *testing.T) {
+	sql := `A . B . C`
+	var sig []Token
+	for _, tok := range Tokenize(sql) {
+		if tok.Kind.IsTrivia() || tok.Kind == EOF {
+			continue
+		}
+		sig = append(sig, tok)
+	}
+	raw, _, ok := ReadIdentPath(sig, sql, 0, 3)
+	if !ok || raw != "A . B . C" {
+		t.Errorf("ReadIdentPath over sig = (%q, %v); want (%q, true)", raw, ok, "A . B . C")
+	}
+}
+
+func TestReadIdentParts(t *testing.T) {
+	sql := `DB."My Schema".TBL`
+	tokens := Tokenize(sql)
+	parts, next := ReadIdentParts(tokens, sql, 0, 3)
+	want := []string{"DB", `"My Schema"`, "TBL"}
+	if len(parts) != len(want) {
+		t.Fatalf("ReadIdentParts = %v; want %v", parts, want)
+	}
+	for i := range want {
+		if parts[i] != want[i] {
+			t.Errorf("part %d = %q; want %q", i, parts[i], want[i])
+		}
+	}
+	if next != 5 { // DB Dot "My Schema" Dot TBL → 5 tokens consumed
+		t.Errorf("next = %d; want 5", next)
+	}
+	if got, n := ReadIdentParts(Tokenize("(x)"), "(x)", 0, 0); got != nil || n != 0 {
+		t.Errorf("ReadIdentParts on non-ident = (%v, %d); want (nil, 0)", got, n)
+	}
+}
+
+func TestSignificant(t *testing.T) {
+	sql := "  SELECT /* c */ 1\n-- trailing\nFROM t ;"
+	got := Significant(Tokenize(sql))
+	var kinds []TokenKind
+	for _, tok := range got {
+		kinds = append(kinds, tok.Kind)
+		if tok.Kind.IsTrivia() || tok.Kind == EOF {
+			t.Errorf("Significant retained a trivia/EOF token: %v", tok.Kind)
+		}
+	}
+	// SELECT 1 FROM t ;
+	want := []TokenKind{Keyword, NumberLit, Keyword, Identifier, Semicolon}
+	if len(kinds) != len(want) {
+		t.Fatalf("Significant kinds = %v; want %v", kinds, want)
+	}
+	for i := range want {
+		if kinds[i] != want[i] {
+			t.Errorf("token %d = %v; want %v", i, kinds[i], want[i])
+		}
+	}
+	// SignificantTokens is the string shorthand.
+	if len(SignificantTokens(sql)) != len(got) {
+		t.Errorf("SignificantTokens length mismatch")
+	}
+	if len(Significant(Tokenize(""))) != 0 {
+		t.Errorf("Significant of empty input should be empty")
+	}
+}
+
+func TestStripQuotePair(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{`"NAME"`, "NAME"},
+		{"NAME", "NAME"},
+		{`"My Table"`, "My Table"},
+		{`""`, ""},
+		{`"`, `"`},                       // single quote — not a pair
+		{`"a""b"`, `a""b`},               // inner quotes NOT unescaped
+		{`unquoted"trailing`, `unquoted"trailing`},
+		{"", ""},
+	}
+	for _, tc := range cases {
+		if got := StripQuotePair(tc.in); got != tc.want {
+			t.Errorf("StripQuotePair(%q) = %q; want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestUnquote(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{`"NAME"`, "NAME"},
+		{"NAME", "NAME"},
+		{`"my""id"`, `my"id`},   // strip pair + unescape
+		{`""`, ""},
+		{`a""b`, `a"b`},          // unescape even without surrounding pair
+		{`"a""""b"`, `a""b`},
+	}
+	for _, tc := range cases {
+		if got := Unquote(tc.in); got != tc.want {
+			t.Errorf("Unquote(%q) = %q; want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestStripCommentsEmpty(t *testing.T) {
 	if got := StripComments(""); got != "" {
 		t.Errorf("StripComments empty: got %q", got)

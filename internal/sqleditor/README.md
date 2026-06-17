@@ -33,7 +33,7 @@ Key capabilities:
 `Service` (`service.go`) is registered in `internal/app/run.go`'s `Bind` array. The frontend imports its methods from `wailsjs/go/sqleditor/Service` — **not** from `wailsjs/go/app/App`. Every method is a one-liner that calls the corresponding package-level function.
 
 ### Syntax & semantic validation
-- `ValidateSyntax(sql) []DiagMarker` — character-by-character tokenizer; flags unclosed strings/parens, bad `$$` scripting syntax, placeholder tokens, wrong `:=`/`=` assignments
+- `ValidateSyntax(sql) []DiagMarker` — walks the `internal/sqltok` token stream (recursing into `$$` scripting bodies and rebasing line/col); flags unclosed strings/parens/comments, bad `$$` scripting syntax, placeholder tokens, wrong `:=`/`=` assignments, undeclared variables
 - `ValidateSemantics(sql, resolvedRefs, colEntries) []DiagMarker` — alias.column reference validator
 - `ValidateSnowflakePatterns(sql, stmtRanges) []DiagMarker` — anti-pattern checks, preamble validation
 - `ValidateDataTypes(sql, stmtRanges) []DiagMarker` — unrecognised Snowflake type names in CREATE TABLE, CAST, `::`

@@ -76,6 +76,20 @@ func TestNormalizeDDL(t *testing.T) {
 			input: "-- just a comment",
 			want:  "",
 		},
+		{
+			// The old non-greedy /\*.*?\*/ regex stopped at the first "*/",
+			// leaking "OUTER */"; the tokenizer strips nested comments whole.
+			name:  "nested_block_comment",
+			input: "CREATE /* outer /* inner */ outer */ TABLE foo (id NUMBER)",
+			want:  "CREATE TABLE FOO (ID NUMBER)",
+		},
+		{
+			// A comment-like sequence inside a string literal must be preserved;
+			// the old --[^\n]* regex would have eaten it.
+			name:  "comment_marker_inside_string",
+			input: "SELECT '-- not a comment'",
+			want:  "SELECT '-- NOT A COMMENT'",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

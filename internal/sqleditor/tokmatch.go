@@ -25,23 +25,14 @@ import (
 // sigToks returns only significant tokens (everything except whitespace,
 // newlines, comments, and EOF), preserving their original positions.
 func sigToks(tokens []sqltok.Token) []sqltok.Token {
-	out := make([]sqltok.Token, 0, len(tokens)/2)
-	for _, t := range tokens {
-		switch t.Kind {
-		case sqltok.Whitespace, sqltok.Newline, sqltok.LineComment, sqltok.BlockComment, sqltok.EOF:
-			// skip
-		default:
-			out = append(out, t)
-		}
-	}
-	return out
+	return sqltok.Significant(tokens)
 }
 
 // sigTokens tokenizes sql and returns only its significant tokens. It is the
 // string-input shorthand for sigToks(sqltok.Tokenize(sql)) — the setup used by
 // nearly every validator.
 func sigTokens(sql string) []sqltok.Token {
-	return sigToks(sqltok.Tokenize(sql))
+	return sqltok.SignificantTokens(sql)
 }
 
 // tokUpper returns the uppercased text of a keyword/identifier token.
@@ -56,7 +47,7 @@ func tokUpper(tok sqltok.Token, sql string) string {
 // isIdent reports whether tok is a keyword, identifier, or quoted identifier —
 // i.e. something that can appear in a qualified name.
 func isIdent(tok sqltok.Token) bool {
-	return tok.Kind == sqltok.Keyword || tok.Kind == sqltok.Identifier || tok.Kind == sqltok.QuotedIdent
+	return tok.Kind.IsIdentLike()
 }
 
 // isAliasTok reports whether tok can be a table alias: an unquoted identifier or
@@ -165,36 +156,19 @@ func findCreateTablePreambleEnd(sig []sqltok.Token, sql string) int {
 	return sig[nextPos-1].End
 }
 
-// readIdentPath reads a dot-separated identifier path (1–3 parts) from
-// sig[pos:] and returns the raw substring and the position after the last
-// consumed token. The raw substring can be passed to extractIdentParts.
+// readIdentPath reads a dot-separated identifier path from sig[pos:] and returns
+// the raw substring and the position after the last consumed token. sig is a
+// significant-token slice (trivia removed), so parts join across original
+// whitespace. The raw substring can be passed to extractIdentParts.
 func readIdentPath(sig []sqltok.Token, sql string, pos int) (string, int) {
-	if pos >= len(sig) || !isIdent(sig[pos]) {
-		return "", pos
-	}
-	start := sig[pos].Start
-	end := sig[pos].End
-	pos++
-	for pos+1 < len(sig) && sig[pos].Kind == sqltok.Dot && isIdent(sig[pos+1]) {
-		end = sig[pos+1].End
-		pos += 2
-	}
-	return sql[start:end], pos
+	raw, next, _ := sqltok.ReadIdentPath(sig, sql, pos, 0)
+	return raw, next
 }
 
 // readIdentParts reads a dot-separated identifier path and returns the
 // individual raw token texts (un-normalised).
 func readIdentParts(sig []sqltok.Token, sql string, pos int) ([]string, int) {
-	if pos >= len(sig) || !isIdent(sig[pos]) {
-		return nil, pos
-	}
-	parts := []string{sig[pos].Text(sql)}
-	pos++
-	for pos+1 < len(sig) && sig[pos].Kind == sqltok.Dot && isIdent(sig[pos+1]) {
-		parts = append(parts, sig[pos+1].Text(sql))
-		pos += 2
-	}
-	return parts, pos
+	return sqltok.ReadIdentParts(sig, sql, pos, 0)
 }
 
 // kwAt checks if sig[pos] is a keyword/identifier matching kw (case-insensitive).
@@ -1291,17 +1265,9 @@ func checkOptionValue(toks []sqltok.Token, sql string, r StatementRange, optionK
 		if (t.Kind == sqltok.Keyword || t.Kind == sqltok.Identifier) &&
 			strings.EqualFold(t.Text(sql), optionKW) {
 			// Look for = then value token.
-			j := i + 1
-			// Skip whitespace/newlines.
-			for j < len(toks) && (toks[j].Kind == sqltok.Whitespace || toks[j].Kind == sqltok.Newline) {
-				j++
-			}
+			j := sqltok.SkipTrivia(toks, i+1)
 			if j < len(toks) && toks[j].Kind == sqltok.Operator && toks[j].Text(sql) == "=" {
-				j++
-				// Skip whitespace.
-				for j < len(toks) && (toks[j].Kind == sqltok.Whitespace || toks[j].Kind == sqltok.Newline) {
-					j++
-				}
+				j = sqltok.SkipTrivia(toks, j+1)
 				if j < len(toks) {
 					val := toks[j].Text(sql)
 					if msg := validate(val); msg != "" {

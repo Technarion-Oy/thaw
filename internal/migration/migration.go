@@ -16,7 +16,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -100,18 +99,41 @@ const (
 	StrategyDestructiveRebuild TableMigrationStrategy = "destructive_rebuild"
 )
 
-// ─── module-level compiled regexps ───────────────────────────────────────────
+// ─── statement classification (token-based) ──────────────────────────────────
+//
+// Comment stripping, USE DATABASE/SCHEMA context tracking, and CREATE OR REPLACE
+// detection are done over the sqltok token stream rather than regexes. This is
+// more robust (nested block comments, "" / '' escapes, comment-like sequences
+// inside string literals) and shares one tokenization per statement. Column
+// parsing is likewise token-based — see parseLocalTableColumns / parseColumnSegment.
 
-var (
-	blockCommentRE = regexp.MustCompile(`(?s)/\*.*?\*/`)
-	lineCommentRE  = regexp.MustCompile(`--[^\n]*`)
-	whitespaceRE   = regexp.MustCompile(`\s+`)
-	useDatabaseRE  = regexp.MustCompile(`(?i)^\s*USE\s+DATABASE\s+"?([^"\s;]+)"?`)
-	useSchemaRE    = regexp.MustCompile(`(?i)^\s*USE\s+SCHEMA\s+"?([^"\s;]+)"?`)
-	isReplaceRE    = regexp.MustCompile(`(?i)^\s*CREATE\s+OR\s+REPLACE\b`)
-	// Column parsing (constraint prefixes, column names, type expressions) is
-	// token-based — see parseLocalTableColumns / parseColumnSegment.
-)
+// useContext detects a "USE DATABASE <name>" or "USE SCHEMA <name>" statement,
+// returning the keyword ("DATABASE"/"SCHEMA") and the upper-cased, unquoted
+// target name. ok is false for any other statement.
+func useContext(sig []sqltok.Token, stmt string) (kind, name string, ok bool) {
+	if len(sig) < 3 || !strings.EqualFold(sig[0].Text(stmt), "USE") {
+		return "", "", false
+	}
+	kw := strings.ToUpper(sig[1].Text(stmt))
+	if (kw != "DATABASE" && kw != "SCHEMA") || !sig[2].Kind.IsIdentLike() {
+		return "", "", false
+	}
+	return kw, identUpper(sig[2], stmt), true
+}
+
+// isCreateOrReplace reports whether the statement begins with CREATE OR REPLACE.
+func isCreateOrReplace(sig []sqltok.Token, stmt string) bool {
+	return len(sig) >= 3 &&
+		strings.EqualFold(sig[0].Text(stmt), "CREATE") &&
+		strings.EqualFold(sig[1].Text(stmt), "OR") &&
+		strings.EqualFold(sig[2].Text(stmt), "REPLACE")
+}
+
+// identUpper returns the upper-cased text of an identifier token, stripping a
+// surrounding pair of double quotes from a quoted identifier.
+func identUpper(t sqltok.Token, src string) string {
+	return strings.ToUpper(sqltok.StripQuotePair(t.Text(src)))
+}
 
 // ─── column helpers ──────────────────────────────────────────────────────────
 
@@ -169,15 +191,16 @@ func (s *Service) ScanSource(dir string) ([]MigrationObject, error) {
 		var ctxDB, ctxSch string
 
 		for _, stmt := range stmts {
-			// Track USE DATABASE context
-			if m := useDatabaseRE.FindStringSubmatch(stmt); m != nil {
-				ctxDB = strings.ToUpper(m[1])
-				ctxSch = "" // switching DB resets schema context
-				continue
-			}
-			// Track USE SCHEMA context
-			if m := useSchemaRE.FindStringSubmatch(stmt); m != nil {
-				ctxSch = strings.ToUpper(m[1])
+			sig := sqltok.SignificantTokens(stmt)
+
+			// Track USE DATABASE / USE SCHEMA context.
+			if kw, name, ok := useContext(sig, stmt); ok {
+				if kw == "DATABASE" {
+					ctxDB = name
+					ctxSch = "" // switching DB resets schema context
+				} else {
+					ctxSch = name
+				}
 				continue
 			}
 
@@ -192,7 +215,7 @@ func (s *Service) ScanSource(dir string) ([]MigrationObject, error) {
 				ObjectName: obj.Name,
 				ArgSig:     obj.ArgSig,
 				DDL:        obj.SQL,
-				IsReplace:  isReplaceRE.MatchString(stmt),
+				IsReplace:  isCreateOrReplace(sig, stmt),
 			}
 
 			// Resolve database/schema from object ident, falling back to USE context
@@ -634,10 +657,11 @@ func remoteKey(db, schema, kind, name, argSig string) string {
 // any trailing semicolon so that cosmetic formatting differences don't register
 // as spurious changes.
 func normalizeDDL(sql string) string {
-	s := blockCommentRE.ReplaceAllString(sql, " ")
-	s = lineCommentRE.ReplaceAllString(s, " ")
-	s = whitespaceRE.ReplaceAllString(s, " ")
-	s = strings.ToUpper(strings.TrimSpace(s))
+	// StripComments drops comments (handling nested block comments and leaving
+	// string literals intact); Fields+Join collapses every whitespace run to a
+	// single space and trims the ends.
+	s := strings.Join(strings.Fields(sqltok.StripComments(sql)), " ")
+	s = strings.ToUpper(s)
 	s = strings.TrimRight(s, ";")
 	s = strings.TrimSpace(s)
 	return s

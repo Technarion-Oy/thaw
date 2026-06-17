@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"thaw/internal/snowflake"
+	"thaw/internal/sqltok"
 	"time"
 )
 
@@ -184,10 +185,7 @@ func toString(v interface{}) string {
 // identifier segment and unescapes any internal "" → ".
 // Input examples: `"MY_TASK"` → `MY_TASK`, `"my""task"` → `my"task`.
 func bareIdent(s string) string {
-	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
-		s = s[1 : len(s)-1]
-	}
-	return strings.ReplaceAll(s, `""`, `"`)
+	return sqltok.Unquote(s)
 }
 
 // CloneChildTask clones a task and replaces its predecessors.
