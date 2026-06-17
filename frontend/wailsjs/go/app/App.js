@@ -26,6 +26,10 @@ export function AlterEventTable(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterEventTable'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterExternalFunction(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['app']['App']['AlterExternalFunction'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function AlterExternalTable(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterExternalTable'](arg1, arg2, arg3, arg4);
 }
@@ -152,6 +156,10 @@ export function BuildCreateDynamicTableSql(arg1, arg2, arg3) {
 
 export function BuildCreateEventTableSql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateEventTableSql'](arg1, arg2, arg3);
+}
+
+export function BuildCreateExternalFunctionSql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateExternalFunctionSql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateExternalTableSql(arg1, arg2, arg3) {
@@ -438,6 +446,10 @@ export function DescribeDbtProject(arg1, arg2, arg3) {
   return window['go']['app']['App']['DescribeDbtProject'](arg1, arg2, arg3);
 }
 
+export function DescribeExternalFunction(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['DescribeExternalFunction'](arg1, arg2, arg3, arg4);
+}
+
 export function Disconnect() {
   return window['go']['app']['App']['Disconnect']();
 }
@@ -628,6 +640,10 @@ export function GetEditorPrefs() {
 
 export function GetEventTableParameters(arg1, arg2, arg3) {
   return window['go']['app']['App']['GetEventTableParameters'](arg1, arg2, arg3);
+}
+
+export function GetExternalFunctionOptions() {
+  return window['go']['app']['App']['GetExternalFunctionOptions']();
 }
 
 export function GetFeatureFlags() {
@@ -1164,6 +1180,10 @@ export function ListSupportedDbtVersions() {
 
 export function ListSystemPythons() {
   return window['go']['app']['App']['ListSystemPythons']();
+}
+
+export function ListUserFunctions(arg1) {
+  return window['go']['app']['App']['ListUserFunctions'](arg1);
 }
 
 export function ListUsers() {

@@ -66,6 +66,7 @@ import {
   GoldOutlined,
   MergeCellsOutlined,
   AuditOutlined,
+  ApiOutlined,
 } from "@ant-design/icons";
 
 // ── CSS variable name per kind ─────────────────────────────────────────────
@@ -87,6 +88,7 @@ const KIND_VAR: Record<string, string> = {
   SERVICE:           "--icon-service",
   STREAMLIT:         "--icon-streamlit",
   FUNCTION:          "--icon-function",
+  "EXTERNAL FUNCTION": "--icon-externalfunction",
   PROCEDURE:         "--icon-procedure",
   SEQUENCE:          "--icon-sequence",
   STAGE:             "--icon-stage",
@@ -119,6 +121,7 @@ const KIND_ICON: Record<string, React.ComponentType<{ style?: React.CSSPropertie
   SERVICE:          DeploymentUnitOutlined,
   STREAMLIT:        AppstoreOutlined,
   FUNCTION:         FunctionOutlined,
+  "EXTERNAL FUNCTION": ApiOutlined,
   PROCEDURE:        CodeOutlined,
   SEQUENCE:         NumberOutlined,
   STAGE:            InboxOutlined,

@@ -131,6 +131,8 @@ import CreateHybridTableModal from "../hybridtable/CreateHybridTableModal";
 import HybridTablePropertiesModal from "../hybridtable/HybridTablePropertiesModal";
 import CreateEventTableModal from "../eventtable/CreateEventTableModal";
 import EventTablePropertiesModal from "../eventtable/EventTablePropertiesModal";
+import CreateExternalFunctionModal from "../externalfunction/CreateExternalFunctionModal";
+import ExternalFunctionPropertiesModal from "../externalfunction/ExternalFunctionPropertiesModal";
 import CreateMaterializedViewModal from "../materializedview/CreateMaterializedViewModal";
 import MaterializedViewPropertiesModal from "../materializedview/MaterializedViewPropertiesModal";
 import CreateAlertModal from "../alert/CreateAlertModal";
@@ -183,6 +185,7 @@ const KIND_LABEL: Record<string, string> = {
   SERVICE:       "Services",
   STREAMLIT:     "Streamlits",
   FUNCTION:      "Functions",
+  "EXTERNAL FUNCTION": "External Functions",
   PROCEDURE:     "Procedures",
   SEQUENCE:      "Sequences",
   STAGE:         "Stages",
@@ -196,7 +199,7 @@ const KIND_LABEL: Record<string, string> = {
   "DBT PROJECT": "DBT Projects",
 };
 
-const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE", "FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "NETWORK RULE", "IMAGE REPOSITORY", "SERVICE", "STREAMLIT", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT"];
+const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE", "FUNCTION", "EXTERNAL FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "NETWORK RULE", "IMAGE REPOSITORY", "SERVICE", "STREAMLIT", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT"];
 
 const kindIcon = (kind: string) => objectIcon(kind);
 
@@ -623,6 +626,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [hybridTablePropsModal, setHybridTablePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createEventTableModal, setCreateEventTableModal] = useState<{ db: string; schema: string } | null>(null);
   const [eventTablePropsModal, setEventTablePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [createExternalFunctionModal, setCreateExternalFunctionModal] = useState<{ db: string; schema: string } | null>(null);
+  const [externalFunctionPropsModal, setExternalFunctionPropsModal] = useState<{ db: string; schema: string; name: string; args: string } | null>(null);
   const [createMaterializedViewModal, setCreateMaterializedViewModal] = useState<{ db: string; schema: string } | null>(null);
   const [materializedViewPropsModal, setMaterializedViewPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createAlertModal, setCreateAlertModal] = useState<{ db: string; schema: string } | null>(null);
@@ -2052,6 +2057,27 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setEventTablePropsModal({ db, schema, name });
   };
 
+  const openCreateExternalFunction = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    setCtxMenu(null);
+    setCreateExternalFunctionModal({ db, schema });
+  };
+
+  const openExternalFunctionProperties = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    // The argument signature resolves the overload for DESCRIBE / ALTER FUNCTION.
+    const args = ctxMenu.objArgs ?? "";
+    setCtxMenu(null);
+    setExternalFunctionPropsModal({ db, schema, name, args });
+  };
+
   const openCreateMaterializedView = () => {
     if (!ctxMenu) return;
     const parts = ctxMenu.nodeKey.split(":");
@@ -2673,6 +2699,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       case "FILE FORMAT": sql = `DROP FILE FORMAT ${fullName};`; break;
       case "PIPE":        sql = `DROP PIPE ${fullName};`; break;
       case "FUNCTION":    sql = `DROP FUNCTION ${fullName}(${objArgs});`; break;
+      // External functions have no DROP EXTERNAL FUNCTION statement — they are
+      // dropped via DROP FUNCTION with the argument signature.
+      case "EXTERNAL FUNCTION": sql = `DROP FUNCTION ${fullName}(${objArgs});`; break;
       case "PROCEDURE":   sql = `DROP PROCEDURE ${fullName}(${objArgs});`; break;
       default:            sql = `DROP ${objKind} ${fullName};`;
     }
@@ -3321,6 +3350,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         case "FILE FORMAT": return `DROP FILE FORMAT ${fullName};`;
         case "PIPE":        return `DROP PIPE ${fullName};`;
         case "FUNCTION":    return `DROP FUNCTION ${fullName}(${args});`;
+        case "EXTERNAL FUNCTION": return `DROP FUNCTION ${fullName}(${args});`;
         case "PROCEDURE":   return `DROP PROCEDURE ${fullName}(${args});`;
         default:            return `DROP ${kind} ${fullName};`;
       }
@@ -3857,6 +3887,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                   {menuItem("Streamlit…", <AppstoreOutlined style={{ fontSize: 12 }} />, openCreateStreamlit)}
                 </>
               ), 1)}
+              {menuItem("External Function…", <ApiOutlined style={{ fontSize: 12 }} />, openCreateExternalFunction)}
             </>
           ))}
           {ctxMenu.nodeType === "schema" && menuItem("Show Dropped Tables…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedTables)}
@@ -3907,6 +3938,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Create File Format…", <FileTextOutlined style={{ fontSize: 12 }} />, openCreateFileFormat)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "SECRET" &&
             menuItem("Create Secret…", <KeyOutlined style={{ fontSize: 12 }} />, openCreateSecret)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "EXTERNAL FUNCTION" &&
+            menuItem("Create External Function…", <ApiOutlined style={{ fontSize: 12 }} />, openCreateExternalFunction)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "FILE FORMAT" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STAGE" &&
@@ -3937,6 +3970,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openHybridTableProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "EVENT TABLE" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openEventTableProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "EXTERNAL FUNCTION" &&
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openExternalFunctionProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MATERIALIZED VIEW" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openMaterializedViewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MATERIALIZED VIEW" &&
@@ -4068,7 +4103,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Make Live", <CloudUploadOutlined style={{ fontSize: 12 }} />, makeNotebookLive, undefined, !featureFlags.snowparkNotebooks, "Snowpark & Notebooks is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && menuItem("View Definition", null, viewDefinition)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ICEBERG TABLE" && ctxMenu.objKind !== "HYBRID TABLE" && ctxMenu.objKind !== "EVENT TABLE" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "STREAMLIT" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ICEBERG TABLE" && ctxMenu.objKind !== "HYBRID TABLE" && ctxMenu.objKind !== "EVENT TABLE" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "STREAMLIT" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {/* Comparison diffs via GET_DDL, which image repositories and services
               don't support — exclude them so the diff view can't surface a
               GET_DDL error for a kind that has no DDL. */}
@@ -4077,9 +4112,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && pendingDiff !== null &&
             menuItem(`Compare with: ${pendingDiff.label}`, <DiffOutlined style={{ fontSize: 12, color: "var(--accent)" }} />, compareObjWith)}
           {ctxMenu.nodeType === "obj" &&
-            (ctxMenu.objKind === "VIEW" || ctxMenu.objKind === "PROCEDURE" || ctxMenu.objKind === "FUNCTION") &&
+            (ctxMenu.objKind === "VIEW" || ctxMenu.objKind === "PROCEDURE" || ctxMenu.objKind === "FUNCTION" || ctxMenu.objKind === "EXTERNAL FUNCTION") &&
             menuItem("View Dependencies…", <ShareAltOutlined style={{ fontSize: 12 }} />, viewDependencies)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" &&
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" &&
             menuItem("Rename…", <EditOutlined style={{ fontSize: 12 }} />, renameObject)}
           {ctxMenu.nodeType === "obj" && <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />}
           {ctxMenu.nodeType === "obj" && menuItem("Delete…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, deleteObject, "#f85149")}
@@ -4671,6 +4706,25 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={eventTablePropsModal.schema}
           name={eventTablePropsModal.name}
           onClose={() => setEventTablePropsModal(null)}
+        />
+      )}
+
+      {createExternalFunctionModal && (
+        <CreateExternalFunctionModal
+          db={createExternalFunctionModal.db}
+          schema={createExternalFunctionModal.schema}
+          onClose={() => setCreateExternalFunctionModal(null)}
+          onSuccess={() => refreshDatabaseByName(createExternalFunctionModal.db, { schema: createExternalFunctionModal.schema, kind: "EXTERNAL FUNCTION" })}
+        />
+      )}
+
+      {externalFunctionPropsModal && (
+        <ExternalFunctionPropertiesModal
+          db={externalFunctionPropsModal.db}
+          schema={externalFunctionPropsModal.schema}
+          name={externalFunctionPropsModal.name}
+          args={externalFunctionPropsModal.args}
+          onClose={() => setExternalFunctionPropsModal(null)}
         />
       )}
 

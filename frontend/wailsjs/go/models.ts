@@ -973,6 +973,121 @@ export namespace eventtable {
 
 }
 
+export namespace externalfunction {
+	
+	export class BuilderOptions {
+	    compression: string[];
+	    nullHandling: string[];
+	    volatility: string[];
+	    contextHeaders: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new BuilderOptions(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.compression = source["compression"];
+	        this.nullHandling = source["nullHandling"];
+	        this.volatility = source["volatility"];
+	        this.contextHeaders = source["contextHeaders"];
+	    }
+	}
+	export class ExternalFunctionArg {
+	    name: string;
+	    type: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExternalFunctionArg(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.type = source["type"];
+	    }
+	}
+	export class HeaderPair {
+	    name: string;
+	    value: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new HeaderPair(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.value = source["value"];
+	    }
+	}
+	export class ExternalFunctionConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    secure: boolean;
+	    args: ExternalFunctionArg[];
+	    returns: string;
+	    notNull: boolean;
+	    nullHandling: string;
+	    volatility: string;
+	    comment: string;
+	    apiIntegration: string;
+	    headers: HeaderPair[];
+	    contextHeaders: string[];
+	    maxBatchRows: string;
+	    compression: string;
+	    requestTranslator: string;
+	    responseTranslator: string;
+	    url: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExternalFunctionConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.secure = source["secure"];
+	        this.args = this.convertValues(source["args"], ExternalFunctionArg);
+	        this.returns = source["returns"];
+	        this.notNull = source["notNull"];
+	        this.nullHandling = source["nullHandling"];
+	        this.volatility = source["volatility"];
+	        this.comment = source["comment"];
+	        this.apiIntegration = source["apiIntegration"];
+	        this.headers = this.convertValues(source["headers"], HeaderPair);
+	        this.contextHeaders = source["contextHeaders"];
+	        this.maxBatchRows = source["maxBatchRows"];
+	        this.compression = source["compression"];
+	        this.requestTranslator = source["requestTranslator"];
+	        this.responseTranslator = source["responseTranslator"];
+	        this.url = source["url"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
 export namespace externaltable {
 	
 	export class ExternalTableColumn {
@@ -3842,6 +3957,26 @@ export namespace snowflake {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
 	        this.value = source["value"];
+	    }
+	}
+	export class UserFunction {
+	    name: string;
+	    schema: string;
+	    database: string;
+	    qualified: string;
+	    arguments: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UserFunction(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.schema = source["schema"];
+	        this.database = source["database"];
+	        this.qualified = source["qualified"];
+	        this.arguments = source["arguments"];
 	    }
 	}
 	export class WorkspaceInfo {
