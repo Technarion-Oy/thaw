@@ -52,6 +52,8 @@ func StripComments(sql string) string         // replace comments with spaces
 func StripStrings(sql string) string          // replace string literals with space
 func FirstToken(sql string) string            // first keyword/identifier, uppercased
 func SkipTrivia(tokens []Token, i int) int    // index of next non-trivia token at/after i
+func ReadIdentPath(tokens []Token, src string, i, maxParts int) (string, int, bool)  // dot-joined name → raw substring
+func ReadIdentParts(tokens []Token, src string, i, maxParts int) ([]string, int)     // dot-joined name → part texts
 func InertRegions(sql string) [][2]int        // comment/string/dollar-quote byte ranges
 func IsInert(regions [][2]int, offset int) bool // binary search offset check
 ```
@@ -67,6 +69,12 @@ func (k TokenKind) IsIdentLike() bool  // identifier, quoted identifier, or keyw
 to the next (used by the lineage parser and the SQL-editor validators).
 `IsIdentLike` reports whether a token can sit in a (possibly qualified) name —
 keywords included, since callers filter reserved words themselves.
+
+`ReadIdentPath`/`ReadIdentParts` read a dot-joined identifier (`DB.SCHEMA."Tbl"`).
+Parts join only across a `Dot` that is **immediately adjacent in the slice**: on
+a raw token stream a space around the dot ends the path; on a significant-token
+slice (trivia already removed) the parts join across the original whitespace.
+`maxParts` caps the number of parts (`<= 0` = unbounded).
 
 ## Design decisions
 

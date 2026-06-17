@@ -1738,13 +1738,11 @@ func isValidCreateViewPreamble(sig []sqltok.Token, sql string) bool {
 		i += 3
 	}
 	// View name: a 1–3 part identifier path.
-	if i >= len(sig) || !isIdent(sig[i]) {
+	_, next, ok := sqltok.ReadIdentPath(sig, sql, i, 3)
+	if !ok {
 		return false
 	}
-	i++
-	for parts := 1; parts < 3 && i+1 < len(sig) && sig[i].Kind == sqltok.Dot && isIdent(sig[i+1]); parts++ {
-		i += 2
-	}
+	i = next
 	// Optional column list "( … )".
 	if i < len(sig) && sig[i].Kind == sqltok.LParen {
 		next, ok := skipParenGroup(sig, i)
@@ -6895,11 +6893,8 @@ func consumeShowScopePath(sig []sqltok.Token, sql string, i int) int {
 	if sig[i].Kind != sqltok.QuotedIdent && showClauseKeywords[strings.ToUpper(sig[i].Text(sql))] {
 		return i
 	}
-	j := i + 1
-	for parts := 1; parts < 3 && j+1 < len(sig) && sig[j].Kind == sqltok.Dot && isIdent(sig[j+1]); parts++ {
-		j += 2
-	}
-	return j
+	_, next, _ := sqltok.ReadIdentPath(sig, sql, i, 3)
+	return next
 }
 
 // validateDescribe validates a DESCRIBE / DESC statement:
@@ -6989,12 +6984,7 @@ func validateDescribe(parseText string, r StatementRange) []DiagMarker {
 			fmt.Sprintf("Expected an object name after DESCRIBE %s.", objType)))
 		return markers
 	}
-	pathStart := sig[i].Start
-	nextPos := i + 1
-	for parts := 1; parts < 3 && nextPos+1 < len(sig) && sig[nextPos].Kind == sqltok.Dot && isIdent(sig[nextPos+1]); parts++ {
-		nextPos += 2
-	}
-	m := s[pathStart:sig[nextPos-1].End]
+	m, nextPos, _ := sqltok.ReadIdentPath(sig, s, i, 3)
 
 	// ── Account-level objects: warn on db/schema prefix ──────────────────
 	if describeAccountLevel[objType] && countIdentParts(m) > 1 {

@@ -278,6 +278,86 @@ func TestSkipTrivia(t *testing.T) {
 	}
 }
 
+func TestReadIdentPath(t *testing.T) {
+	cases := []struct {
+		name     string
+		sql      string
+		maxParts int
+		wantRaw  string
+	}{
+		{"single part", "TBL x", 3, "TBL"},
+		{"two parts", "SC.TBL x", 3, "SC.TBL"},
+		{"three parts", "DB.SC.TBL x", 3, "DB.SC.TBL"},
+		{"quoted parts", `"My DB"."My Tbl" x`, 3, `"My DB"."My Tbl"`},
+		{"capped at three", "A.B.C.D", 3, "A.B.C"},
+		{"unbounded reads four", "A.B.C.D", 0, "A.B.C.D"},
+		// On a raw token stream a space around the dot ends the path: the
+		// whitespace token between "A" and "." breaks slice-adjacency.
+		{"spaced dot stops on raw stream", `A . B`, 3, "A"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tokens := Tokenize(tc.sql)
+			raw, next, ok := ReadIdentPath(tokens, tc.sql, 0, tc.maxParts)
+			if !ok {
+				t.Fatalf("ReadIdentPath(%q) returned ok=false", tc.sql)
+			}
+			if raw != tc.wantRaw {
+				t.Errorf("ReadIdentPath(%q) raw = %q; want %q", tc.sql, raw, tc.wantRaw)
+			}
+			if next <= 0 || next > len(tokens) {
+				t.Errorf("ReadIdentPath(%q) next = %d out of range", tc.sql, next)
+			}
+		})
+	}
+}
+
+func TestReadIdentPathNotFound(t *testing.T) {
+	tokens := Tokenize(", FROM")
+	if raw, next, ok := ReadIdentPath(tokens, ", FROM", 0, 3); ok || raw != "" || next != 0 {
+		t.Errorf("ReadIdentPath on a non-ident token = (%q, %d, %v); want (\"\", 0, false)", raw, next, ok)
+	}
+}
+
+// TestReadIdentPathJoinsAcrossWhitespaceOnSigSlice documents that a
+// significant-token slice (trivia removed) joins parts across the original
+// whitespace, since slice-adjacency no longer reflects source-adjacency.
+func TestReadIdentPathJoinsAcrossWhitespaceOnSigSlice(t *testing.T) {
+	sql := `A . B . C`
+	var sig []Token
+	for _, tok := range Tokenize(sql) {
+		if tok.Kind.IsTrivia() || tok.Kind == EOF {
+			continue
+		}
+		sig = append(sig, tok)
+	}
+	raw, _, ok := ReadIdentPath(sig, sql, 0, 3)
+	if !ok || raw != "A . B . C" {
+		t.Errorf("ReadIdentPath over sig = (%q, %v); want (%q, true)", raw, ok, "A . B . C")
+	}
+}
+
+func TestReadIdentParts(t *testing.T) {
+	sql := `DB."My Schema".TBL`
+	tokens := Tokenize(sql)
+	parts, next := ReadIdentParts(tokens, sql, 0, 3)
+	want := []string{"DB", `"My Schema"`, "TBL"}
+	if len(parts) != len(want) {
+		t.Fatalf("ReadIdentParts = %v; want %v", parts, want)
+	}
+	for i := range want {
+		if parts[i] != want[i] {
+			t.Errorf("part %d = %q; want %q", i, parts[i], want[i])
+		}
+	}
+	if next != 5 { // DB Dot "My Schema" Dot TBL → 5 tokens consumed
+		t.Errorf("next = %d; want 5", next)
+	}
+	if got, n := ReadIdentParts(Tokenize("(x)"), "(x)", 0, 0); got != nil || n != 0 {
+		t.Errorf("ReadIdentParts on non-ident = (%v, %d); want (nil, 0)", got, n)
+	}
+}
+
 func TestStripCommentsEmpty(t *testing.T) {
 	if got := StripComments(""); got != "" {
 		t.Errorf("StripComments empty: got %q", got)

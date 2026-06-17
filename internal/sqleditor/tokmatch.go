@@ -163,36 +163,19 @@ func findCreateTablePreambleEnd(sig []sqltok.Token, sql string) int {
 	return sig[nextPos-1].End
 }
 
-// readIdentPath reads a dot-separated identifier path (1–3 parts) from
-// sig[pos:] and returns the raw substring and the position after the last
-// consumed token. The raw substring can be passed to extractIdentParts.
+// readIdentPath reads a dot-separated identifier path from sig[pos:] and returns
+// the raw substring and the position after the last consumed token. sig is a
+// significant-token slice (trivia removed), so parts join across original
+// whitespace. The raw substring can be passed to extractIdentParts.
 func readIdentPath(sig []sqltok.Token, sql string, pos int) (string, int) {
-	if pos >= len(sig) || !isIdent(sig[pos]) {
-		return "", pos
-	}
-	start := sig[pos].Start
-	end := sig[pos].End
-	pos++
-	for pos+1 < len(sig) && sig[pos].Kind == sqltok.Dot && isIdent(sig[pos+1]) {
-		end = sig[pos+1].End
-		pos += 2
-	}
-	return sql[start:end], pos
+	raw, next, _ := sqltok.ReadIdentPath(sig, sql, pos, 0)
+	return raw, next
 }
 
 // readIdentParts reads a dot-separated identifier path and returns the
 // individual raw token texts (un-normalised).
 func readIdentParts(sig []sqltok.Token, sql string, pos int) ([]string, int) {
-	if pos >= len(sig) || !isIdent(sig[pos]) {
-		return nil, pos
-	}
-	parts := []string{sig[pos].Text(sql)}
-	pos++
-	for pos+1 < len(sig) && sig[pos].Kind == sqltok.Dot && isIdent(sig[pos+1]) {
-		parts = append(parts, sig[pos+1].Text(sql))
-		pos += 2
-	}
-	return parts, pos
+	return sqltok.ReadIdentParts(sig, sql, pos, 0)
 }
 
 // kwAt checks if sig[pos] is a keyword/identifier matching kw (case-insensitive).

@@ -115,24 +115,12 @@ func tokKeywordIs(t sqltok.Token, src, kw string) bool {
 	return t.Kind == sqltok.Keyword && strings.EqualFold(t.Text(src), kw)
 }
 
-// scanIdentRun reads an identifier starting at tokens[i] and returns its raw
-// source text, the index just past it, and whether one was found. It consumes
-// up to three dot-joined word parts; dots must be immediately adjacent (a
-// whitespace or comment token before the dot ends the identifier).
+// scanIdentRun reads an identifier (up to three dot-joined parts) starting at
+// tokens[i], returning its raw source text, the index just past it, and whether
+// one was found. Dots must be immediately adjacent — a whitespace or comment
+// token before the dot ends the identifier (see sqltok.ReadIdentPath).
 func scanIdentRun(tokens []sqltok.Token, src string, i int) (string, int, bool) {
-	if i >= len(tokens) || !tokens[i].Kind.IsIdentLike() {
-		return "", i, false
-	}
-	start := tokens[i].Start
-	last := i
-	for parts := 1; parts < 3; parts++ {
-		if last+2 < len(tokens) && tokens[last+1].Kind == sqltok.Dot && tokens[last+2].Kind.IsIdentLike() {
-			last += 2
-			continue
-		}
-		break
-	}
-	return src[start:tokens[last].End], last + 1, true
+	return sqltok.ReadIdentPath(tokens, src, i, 3)
 }
 
 // extractObjectRefs walks the token stream and returns every table/view/proc
