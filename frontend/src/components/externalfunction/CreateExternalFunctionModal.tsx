@@ -295,7 +295,7 @@ export default function CreateExternalFunctionModal({ db, schema, onClose, onSuc
           />
         </Form.Item>
 
-        <Form.Item label="Arguments" style={itemStyle} help="Function parameters passed to the remote service.">
+        <Form.Item label="Arguments" style={itemStyle} help="Function parameters passed to the remote service. A blank type defaults to VARIANT.">
           <Space direction="vertical" size={6} style={{ width: "100%" }}>
             {cfg.args.map((a, i) => (
               <Space key={i} align="start">

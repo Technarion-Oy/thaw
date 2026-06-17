@@ -61,9 +61,11 @@ CREATE [OR REPLACE] [SECURE] EXTERNAL FUNCTION <fqn> ( [ <arg> <type> [, ...] ] 
   headers, translators, compression). `App.DescribeExternalFunction` runs
   `DESCRIBE FUNCTION <fqn>(<args>)` to supply it for the properties panel.
 - External functions also surface in `SHOW FUNCTIONS` with
-  `is_external_function = Y`; `internal/snowflake` (`showInSchema`) skips those on
-  the generic `FUNCTION` path so they appear only under **External Functions**,
-  with `dedupeExternalFunctions` as a belt-and-suspenders fallback.
+  `is_external_function = Y`; `internal/snowflake` (`showInSchema`) **relabels**
+  those to kind `"EXTERNAL FUNCTION"` so they group under **External Functions**
+  even when the dedicated `SHOW EXTERNAL FUNCTIONS` command fails, and
+  `dedupeExternalFunctions` collapses the resulting duplicates (and drops a plain
+  `FUNCTION` that collides with an `EXTERNAL FUNCTION` on column-absent editions).
 - `GET_DDL` has **no `EXTERNAL_FUNCTION` object type** — external functions are
   retrieved via the `'FUNCTION'` type with the argument signature appended. The
   `"EXTERNAL FUNCTION"` → `FUNCTION` normalization lives in `internal/snowflake`

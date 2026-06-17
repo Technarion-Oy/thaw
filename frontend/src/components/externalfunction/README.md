@@ -15,7 +15,8 @@ Functions) by proxying an HTTPS request through an **API integration**.
   `HEADERS`, `CONTEXT_HEADERS` (a multi-select of the supported Snowflake context
   functions — `CURRENT_TIMESTAMP`, `CURRENT_USER`, …), `MAX_BATCH_ROWS`,
   `COMPRESSION`, and the request/response translators (an `AutoComplete` of the
-  database's UDFs from `ListUserFunctions` / `SHOW USER FUNCTIONS`, free-typing
+  database's scalar UDFs from `ListUserFunctions` / `SHOW USER FUNCTIONS` (table
+  and external functions are filtered out), free-typing
   allowed). Live SQL preview; submission is gated on
   name + return type + API integration + URL all being present. SQL is built by
   `BuildCreateExternalFunctionSql` (`internal/externalfunction`).

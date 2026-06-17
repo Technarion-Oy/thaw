@@ -2710,10 +2710,12 @@ type UserFunction struct {
 }
 
 // ListUserFunctions runs SHOW USER FUNCTIONS (scoped to database when non-empty)
-// and returns the accessible UDFs. Built-in functions are excluded — SHOW USER
-// FUNCTIONS already returns only user-defined functions. Columns are located by
-// name (case-insensitive) so column-order changes on Snowflake's side don't
-// break parsing.
+// and returns the accessible scalar UDFs. Built-in functions are excluded — SHOW
+// USER FUNCTIONS already returns only user-defined functions — and so are table
+// functions (is_table_function=Y) and external functions (is_external_function=Y),
+// since the request/response translator slots that consume this list require a
+// scalar UDF. Columns are located by name (case-insensitive) so column-order
+// changes on Snowflake's side don't break parsing.
 func (c *Client) ListUserFunctions(ctx context.Context, database string) ([]UserFunction, error) {
 	query := "SHOW USER FUNCTIONS"
 	if database != "" {
@@ -2723,7 +2725,7 @@ func (c *Client) ListUserFunctions(ctx context.Context, database string) ([]User
 	if err != nil {
 		return nil, err
 	}
-	nameIdx, schemaIdx, dbIdx, argsIdx := -1, -1, -1, -1
+	nameIdx, schemaIdx, dbIdx, argsIdx, isTableFnIdx, isExternalFnIdx := -1, -1, -1, -1, -1, -1
 	for i, col := range res.Columns {
 		switch strings.ToLower(col) {
 		case "name":
@@ -2734,6 +2736,10 @@ func (c *Client) ListUserFunctions(ctx context.Context, database string) ([]User
 			dbIdx = i
 		case "arguments":
 			argsIdx = i
+		case "is_table_function":
+			isTableFnIdx = i
+		case "is_external_function":
+			isExternalFnIdx = i
 		}
 	}
 	if nameIdx < 0 {
@@ -2746,6 +2752,13 @@ func (c *Client) ListUserFunctions(ctx context.Context, database string) ([]User
 				return ""
 			}
 			return fmt.Sprintf("%v", row[idx])
+		}
+		// Translators must be scalar UDFs — skip table and external functions.
+		if isTableFnIdx >= 0 && strings.EqualFold(cell(isTableFnIdx), "Y") {
+			continue
+		}
+		if isExternalFnIdx >= 0 && strings.EqualFold(cell(isExternalFnIdx), "Y") {
+			continue
 		}
 		uf := UserFunction{
 			Name:      cell(nameIdx),
@@ -3075,17 +3088,22 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 			continue
 		}
 		// External functions surface in SHOW FUNCTIONS with
-		// is_external_function=Y. They are listed separately via SHOW EXTERNAL
-		// FUNCTIONS (kind "EXTERNAL FUNCTION"), so skip them here on the FUNCTION
-		// path to avoid duplicate tree entries (one under Functions, one under
-		// External Functions). dedupeExternalFunctions in ListExtendedObjects is
-		// the belt-and-suspenders fallback when this column is absent.
-		if fixedKind == "FUNCTION" && isExternalFnIdx >= 0 && strings.EqualFold(fmt.Sprintf("%v", vals[isExternalFnIdx]), "Y") {
-			continue
-		}
+		// is_external_function=Y. Rather than dropping them here on the FUNCTION
+		// path, relabel them to kind "EXTERNAL FUNCTION" so they still group under
+		// External Functions even if the dedicated SHOW EXTERNAL FUNCTIONS command
+		// fails for this schema (its per-type failure is silently swallowed in
+		// ListExtendedObjects) — dropping here would make them vanish from the tree
+		// entirely. The dedicated command also returns them, so
+		// dedupeExternalFunctions collapses the resulting duplicate
+		// EXTERNAL FUNCTION entries; on the column-absent edition it instead drops
+		// the plain FUNCTION entry that collides with an EXTERNAL FUNCTION.
+		externalFn := fixedKind == "FUNCTION" && isExternalFnIdx >= 0 && strings.EqualFold(fmt.Sprintf("%v", vals[isExternalFnIdx]), "Y")
 		kind := fixedKind
 		if kind == "" {
 			kind = fmt.Sprintf("%v", vals[kindIdx])
+		}
+		if externalFn {
+			kind = "EXTERNAL FUNCTION"
 		}
 		var argTypes string
 		if captureArgs && argsIdx >= 0 {
@@ -3308,12 +3326,13 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 		all = append(all, r.objs...)
 	}
 
-	// External functions also surface in SHOW FUNCTIONS with
-	// is_external_function=Y, which showInSchema skips on the generic FUNCTION
-	// path. As a belt-and-suspenders against editions that omit that column (which
-	// would let an external function appear under both Functions and External
-	// Functions), drop any FUNCTION entry whose (schema, name, arguments) collides
-	// with an EXTERNAL FUNCTION entry already returned by SHOW EXTERNAL FUNCTIONS.
+	// External functions reach this slice from two SHOW commands: SHOW EXTERNAL
+	// FUNCTIONS (kind "EXTERNAL FUNCTION") and SHOW FUNCTIONS (where showInSchema
+	// relabels is_external_function=Y rows to "EXTERNAL FUNCTION", or leaves them
+	// as plain "FUNCTION" on editions without that column). dedupeExternalFunctions
+	// collapses the duplicate "EXTERNAL FUNCTION" entries and drops any plain
+	// "FUNCTION" that collides with one, so each external function appears exactly
+	// once under External Functions — even if one of the two SHOW commands fails.
 	all = dedupeExternalFunctions(all)
 
 	// GET_DDL fallback: for Snowflake editions that don't expose the FINALIZE
@@ -3325,29 +3344,42 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 	return all, nil
 }
 
-// dedupeExternalFunctions removes any FUNCTION object whose (schema, name,
-// arguments) matches an EXTERNAL FUNCTION object in the same slice. External
-// functions are returned by both SHOW EXTERNAL FUNCTIONS (kind "EXTERNAL
-// FUNCTION") and SHOW FUNCTIONS (kind "FUNCTION", with is_external_function=Y);
-// showInSchema already drops them on the FUNCTION path when that column is
-// present, and this is the fallback for editions that omit it. Matching is
-// case-insensitive and includes the argument signature because functions overload
-// by signature. The input slice is not mutated.
+// dedupeExternalFunctions reconciles the two ways external functions reach the
+// extended-object list. SHOW EXTERNAL FUNCTIONS returns them as kind "EXTERNAL
+// FUNCTION"; SHOW FUNCTIONS returns them too (with is_external_function=Y), where
+// showInSchema relabels them to "EXTERNAL FUNCTION" when that column is present or
+// leaves them as plain "FUNCTION" when it is absent. This pass therefore:
+//
+//   - collapses duplicate "EXTERNAL FUNCTION" entries (one from each SHOW command)
+//     to a single entry, and
+//   - drops any plain "FUNCTION" entry whose (schema, name, arguments) collides
+//     with an "EXTERNAL FUNCTION" (the column-absent edition).
+//
+// Matching is case-insensitive and includes the argument signature because
+// functions overload by signature. The input slice is not mutated.
 func dedupeExternalFunctions(objs []SnowflakeObject) []SnowflakeObject {
-	keys := make(map[string]struct{})
+	extKeys := make(map[string]struct{})
 	for _, o := range objs {
 		if o.Kind == "EXTERNAL FUNCTION" {
-			keys[externalFunctionDedupeKey(o)] = struct{}{}
+			extKeys[externalFunctionDedupeKey(o)] = struct{}{}
 		}
 	}
-	if len(keys) == 0 {
+	if len(extKeys) == 0 {
 		return objs
 	}
 	out := make([]SnowflakeObject, 0, len(objs))
+	seenExt := make(map[string]struct{})
 	for _, o := range objs {
-		if o.Kind == "FUNCTION" {
-			if _, dup := keys[externalFunctionDedupeKey(o)]; dup {
-				continue
+		key := externalFunctionDedupeKey(o)
+		switch o.Kind {
+		case "EXTERNAL FUNCTION":
+			if _, dup := seenExt[key]; dup {
+				continue // already emitted from the other SHOW command
+			}
+			seenExt[key] = struct{}{}
+		case "FUNCTION":
+			if _, dup := extKeys[key]; dup {
+				continue // a plain FUNCTION that is really external (column absent)
 			}
 		}
 		out = append(out, o)

@@ -22,7 +22,11 @@ func TestDedupeExternalFunctions(t *testing.T) {
 		// External function that ALSO leaked onto the FUNCTION path (column-absent
 		// edition); case-insensitive schema match — must be dropped.
 		{Name: "CALL_API", Kind: "FUNCTION", Schema: "public", Arguments: "NUMBER"},
-		// The authoritative EXTERNAL FUNCTION entry (NUMBER signature).
+		// The authoritative EXTERNAL FUNCTION entry (NUMBER signature), from
+		// SHOW EXTERNAL FUNCTIONS.
+		{Name: "CALL_API", Kind: "EXTERNAL FUNCTION", Schema: "PUBLIC", Arguments: "NUMBER"},
+		// The same external function relabeled from the SHOW FUNCTIONS path
+		// (is_external_function=Y) — a duplicate that must collapse into one.
 		{Name: "CALL_API", Kind: "EXTERNAL FUNCTION", Schema: "PUBLIC", Arguments: "NUMBER"},
 	}
 
@@ -34,8 +38,9 @@ func TestDedupeExternalFunctions(t *testing.T) {
 	}
 
 	// The FUNCTION CALL_API(NUMBER) collides with EXTERNAL FUNCTION
-	// CALL_API(NUMBER) and is dropped. The FUNCTION CALL_API(VARCHAR) overload has
-	// no external counterpart, so it survives.
+	// CALL_API(NUMBER) and is dropped; the two EXTERNAL FUNCTION CALL_API(NUMBER)
+	// entries collapse to one. The FUNCTION CALL_API(VARCHAR) overload has no
+	// external counterpart, so it survives.
 	want := map[string]bool{
 		"PUBLIC.ADD_ONE(NUMBER):FUNCTION":           true,
 		"PUBLIC.CALL_API(VARCHAR):FUNCTION":         true,
