@@ -717,593 +717,401 @@ func ApplyCasing(sql, keywordCase, identifierCase, functionCase string) string {
 	return sb.String()
 }
 
-// ValidateSyntax is a character-by-character Snowflake SQL tokenizer that catches
-// structural errors:
-//   - Unclosed single-quoted strings
-//   - Unclosed double-quoted identifiers
-//   - Unclosed dollar-quoted strings
-//   - Unclosed block comments
-//   - Unmatched / extra closing parens and brackets
-//   - Unclosed opening parens and brackets
+// ValidateSyntax catches structural Snowflake SQL errors by walking the
+// [sqltok] token stream:
+//   - Unclosed single-quoted strings, double-quoted identifiers, dollar-quoted
+//     strings, and block comments
+//   - Unmatched / extra closing parens and brackets, and unclosed opening ones
 //   - Missing ':' in scripting assignments (var = expr → var := expr)
+//   - Missing right-hand expression after an assignment
+//   - Undeclared variables referenced in RETURN / FOR / assignment
+//   - Unexpected token at a statement start
+//
+// Snowflake Scripting lives inside dollar-quoted bodies, which the tokenizer
+// surfaces as a single opaque DollarQuoted token. validateSyntaxScope therefore
+// recurses into each body (re-tokenizing it) and rebases the inner token
+// positions back to absolute line/column via the baseLine/baseCol offsets.
 func ValidateSyntax(sql string) []DiagMarker {
 	var markers []DiagMarker
-
-	runes := []rune(sql)
-	n := len(runes)
-
-	line, col := 1, 1
-	atStmtStart := true
-	atScriptStmtStart := false
-	inDeclareBlock := false
-
-	var parenStack []parenEntry
-	var dollarStack []string
-	declaredVars := map[string]bool{}
-
-	addError := func(msg string, sl, sc, el, ec int) {
+	add := func(msg string, sl, sc, el, ec int) {
 		markers = append(markers, DiagMarker{
 			StartLineNumber: sl, StartColumn: sc,
 			EndLineNumber: el, EndColumn: ec,
 			Message: msg, Severity: 8,
 		})
 	}
+	validateSyntaxScope(sql, 1, 1, false, add)
+	return markers
+}
+
+// missingExprKeywords are statement keywords whose appearance immediately after
+// an assignment operator means the right-hand expression is missing.
+var missingExprKeywords = map[string]bool{
+	"LET": true, "DECLARE": true, "BEGIN": true, "RETURN": true,
+	"FOR": true, "WHILE": true, "LOOP": true, "IF": true,
+}
+
+// validateSyntaxScope validates one lexical scope (the whole input, or the body
+// of a dollar-quoted block when inScript is true). baseLine/baseCol give the
+// absolute position of this scope's first character so emitted markers use
+// absolute coordinates.
+func validateSyntaxScope(src string, baseLine, baseCol int, inScript bool, add func(string, int, int, int, int)) {
+	toks := sqltok.Tokenize(src)
+
+	// abs converts an intra-scope (line,col) to absolute coordinates. Only the
+	// first line of the scope is horizontally offset by baseCol.
+	abs := func(line, col int) (int, int) {
+		if line == 1 {
+			return baseLine, baseCol + col - 1
+		}
+		return baseLine + line - 1, col
+	}
+	absT := func(t sqltok.Token) (int, int) { return abs(t.Line, t.Col) }
+
+	isBareWord := func(t sqltok.Token) bool {
+		return t.Kind == sqltok.Keyword || t.Kind == sqltok.Identifier
+	}
+	// skipWS advances over whitespace only (stops at a newline, comment, or any
+	// other token) — used by peeks that must stay on the current line.
+	skipWS := func(k int) int {
+		for k < len(toks) && toks[k].Kind == sqltok.Whitespace {
+			k++
+		}
+		return k
+	}
+	// skipWSNL advances over whitespace and newlines, but stops at comments (a
+	// comment is treated as "something is there", mirroring the original
+	// character scanner which never skipped comments during look-ahead).
+	skipWSNL := func(k int) int {
+		for k < len(toks) && (toks[k].Kind == sqltok.Whitespace || toks[k].Kind == sqltok.Newline) {
+			k++
+		}
+		return k
+	}
+	// skipParens skips a balanced (...) group starting at an LParen token and
+	// returns the index just past the matching ')'.
+	skipParens := func(k int) int {
+		depth := 0
+		for k < len(toks) {
+			switch toks[k].Kind {
+			case sqltok.LParen:
+				depth++
+			case sqltok.RParen:
+				depth--
+				if depth == 0 {
+					return k + 1
+				}
+			}
+			k++
+		}
+		return k
+	}
+
+	// detectAssign reports the assignment operator at toks[k], if any: "colon"
+	// for ':=' (Colon immediately followed by '='), "bare" for a lone '=' (an
+	// error). opTok is the operator's first token (for positioning) and after is
+	// the index just past the operator.
+	detectAssign := func(k int) (kind string, opTok sqltok.Token, after int) {
+		if k >= len(toks) {
+			return "", sqltok.Token{}, k
+		}
+		t := toks[k]
+		if t.Kind == sqltok.Colon && k+1 < len(toks) &&
+			toks[k+1].Kind == sqltok.Operator && toks[k+1].Text(src) == "=" &&
+			t.End == toks[k+1].Start {
+			return "colon", t, k + 2
+		}
+		if t.Kind == sqltok.Operator && t.Text(src) == "=" {
+			return "bare", t, k + 1
+		}
+		return "", sqltok.Token{}, k
+	}
+
+	// checkMissingExpr emits "Missing expression after assignment" when the
+	// operator (first token opTok, length opLen) is followed only by ';', EOF,
+	// or a statement keyword.
+	checkMissingExpr := func(after int, opTok sqltok.Token, opLen int) {
+		k := skipWSNL(after)
+		missing := false
+		if k >= len(toks) || toks[k].Kind == sqltok.EOF || toks[k].Kind == sqltok.Semicolon {
+			missing = true
+		} else if isBareWord(toks[k]) && missingExprKeywords[strings.ToUpper(toks[k].Text(src))] {
+			missing = true
+		}
+		if missing {
+			l, c := absT(opTok)
+			add("Missing expression after assignment", l, c, l, c+opLen)
+		}
+	}
+
+	var parenStack []parenEntry
+	declaredVars := map[string]bool{}
+	inDeclareBlock := false
+	atStart := true
 
 	i := 0
-	for i < n {
-		ch := runes[i]
-
-		// Newline
-		if ch == '\n' {
-			line++
-			col = 1
+	for i < len(toks) {
+		t := toks[i]
+		switch t.Kind {
+		case sqltok.EOF:
 			i++
-			continue
-		}
 
-		// Whitespace
-		if ch == ' ' || ch == '\t' || ch == '\r' || ch == '\u00a0' {
+		case sqltok.Whitespace, sqltok.Newline, sqltok.LineComment:
+			// Trivia; never resets statement start (a line comment can't be
+			// unterminated).
 			i++
-			col++
-			continue
-		}
 
-		// Line comment --
-		if ch == '-' && i+1 < n && runes[i+1] == '-' {
-			i += 2
-			col += 2
-			for i < n && runes[i] != '\n' {
-				i++
-				col++
+		case sqltok.BlockComment:
+			if t.Unterminated {
+				l, c := absT(t)
+				add("Unclosed block comment", l, c, l, c+2)
 			}
-			continue
-		}
-
-		// Block comment /* */
-		if ch == '/' && i+1 < n && runes[i+1] == '*' {
-			openLine, openCol := line, col
-			i += 2
-			col += 2
-			closed := false
-			for i < n {
-				if runes[i] == '\n' {
-					line++
-					col = 1
-					i++
-				} else if runes[i] == '*' && i+1 < n && runes[i+1] == '/' {
-					i += 2
-					col += 2
-					closed = true
-					break
-				} else {
-					i++
-					col++
-				}
-			}
-			if !closed {
-				addError("Unclosed block comment", openLine, openCol, openLine, openCol+2)
-			}
-			continue
-		}
-
-		// Single-quoted string '...' ('' escapes a literal quote)
-		if ch == '\'' {
-			openLine, openCol := line, col
 			i++
-			col++
-			closed := false
-			for i < n {
-				if runes[i] == '\n' {
-					line++
-					col = 1
-					i++
-				} else if runes[i] == '\'' && i+1 < n && runes[i+1] == '\'' {
-					i += 2
-					col += 2
-				} else if runes[i] == '\'' {
-					i++
-					col++
-					closed = true
-					break
-				} else {
-					i++
-					col++
-				}
-			}
-			if !closed {
-				addError("Unclosed string literal", openLine, openCol, openLine, openCol+1)
-			}
-			atStmtStart = false
-			atScriptStmtStart = false
-			continue
-		}
 
-		// Double-quoted identifier "..." ("" escapes a literal quote)
-		if ch == '"' {
-			openLine, openCol := line, col
+		case sqltok.StringLit:
+			if t.Unterminated {
+				l, c := absT(t)
+				add("Unclosed string literal", l, c, l, c+1)
+			}
+			atStart = false
 			i++
-			col++
-			closed := false
-			for i < n {
-				if runes[i] == '\n' {
-					line++
-					col = 1
-					i++
-				} else if runes[i] == '"' && i+1 < n && runes[i+1] == '"' {
-					i += 2
-					col += 2
-				} else if runes[i] == '"' {
-					i++
-					col++
-					closed = true
-					break
-				} else {
-					i++
-					col++
+
+		case sqltok.QuotedIdent:
+			if t.Unterminated {
+				l, c := absT(t)
+				add("Unclosed quoted identifier", l, c, l, c+1)
+			} else if inScript && atStart {
+				// A quoted identifier at a script statement start followed by a
+				// bare '=' is a mis-typed assignment.
+				if k := skipWS(i + 1); k < len(toks) &&
+					toks[k].Kind == sqltok.Operator && toks[k].Text(src) == "=" {
+					l, c := absT(toks[k])
+					add("Expected ':=' for assignment", l, c, l, c+1)
 				}
 			}
-			if !closed {
-				addError("Unclosed quoted identifier", openLine, openCol, openLine, openCol+1)
-			}
-
-			// In script context after a statement start, look for bare '=' (should be ':=')
-			if len(dollarStack) > 0 && atScriptStmtStart && closed {
-				j, jCol := i, col
-				for j < n && (runes[j] == ' ' || runes[j] == '\t' || runes[j] == '\r' || runes[j] == '\u00a0') {
-					if runes[j] == '\n' {
-						break
-					}
-					j++
-					jCol++
-				}
-				if j < n && runes[j] == '=' {
-					prev := rune(0)
-					if j > 0 {
-						prev = runes[j-1]
-					}
-					next := rune(0)
-					if j+1 < n {
-						next = runes[j+1]
-					}
-					if prev != ':' && prev != '<' && prev != '>' && prev != '!' && next != '=' {
-						addError("Expected ':=' for assignment", line, jCol, line, jCol+1)
-					}
-				}
-			}
-
-			atStmtStart = false
-			atScriptStmtStart = false
-			continue
-		}
-
-		// Dollar-quoted marker $tag$...$tag$
-		if ch == '$' {
-			tag := extractDollarTag(runes, i)
-			if tag != "" {
-				if len(dollarStack) > 0 && dollarStack[len(dollarStack)-1] == tag {
-					dollarStack = dollarStack[:len(dollarStack)-1]
-					atScriptStmtStart = false
-					atStmtStart = true // After a $$ block, we are ready for the next SQL statement
-					inDeclareBlock = false
-					declaredVars = map[string]bool{}
-				} else {
-					dollarStack = append(dollarStack, tag)
-					atScriptStmtStart = true
-					atStmtStart = false // Inside $$, we are in scripting context
-					declaredVars = map[string]bool{}
-				}
-				i += len([]rune(tag))
-				col += len([]rune(tag))
-				continue
-			}
-		}
-
-		// Opening paren or bracket
-		if ch == '(' || ch == '[' {
-			parenStack = append(parenStack, parenEntry{string(ch), line, col})
+			atStart = false
 			i++
-			col++
-			atStmtStart = false
-			atScriptStmtStart = false
-			continue
-		}
 
-		// Closing paren or bracket
-		if ch == ')' || ch == ']' {
-			expected := "("
-			if ch == ']' {
-				expected = "["
+		case sqltok.DollarQuoted:
+			// Recurse into the body, which is Snowflake Scripting. The body
+			// starts len(tag) columns after the token, on the same line.
+			tag := t.Tag
+			text := t.Text(src)
+			var inner string
+			if t.Unterminated {
+				inner = text[len(tag):]
+			} else {
+				inner = text[len(tag) : len(text)-len(tag)]
+			}
+			sl, sc := absT(t)
+			validateSyntaxScope(inner, sl, sc+len(tag), true, add)
+			atStart = true
+			i++
+
+		case sqltok.LParen, sqltok.LBracket:
+			ch := "("
+			if t.Kind == sqltok.LBracket {
+				ch = "["
+			}
+			l, c := absT(t)
+			parenStack = append(parenStack, parenEntry{ch, l, c})
+			atStart = false
+			i++
+
+		case sqltok.RParen, sqltok.RBracket:
+			ch, expected := ")", "("
+			if t.Kind == sqltok.RBracket {
+				ch, expected = "]", "["
 			}
 			if len(parenStack) == 0 || parenStack[len(parenStack)-1].char != expected {
-				addError("Unmatched '"+string(ch)+"'", line, col, line, col+1)
+				l, c := absT(t)
+				add("Unmatched '"+ch+"'", l, c, l, c+1)
 			} else {
 				parenStack = parenStack[:len(parenStack)-1]
 			}
+			atStart = false
 			i++
-			col++
-			atStmtStart = false
-			atScriptStmtStart = false
-			continue
-		}
 
-		// Semicolon marks end of statement
-		if ch == ';' {
-			if len(dollarStack) == 0 {
-				atStmtStart = true
-			} else {
-				atScriptStmtStart = true
-			}
+		case sqltok.Semicolon:
+			atStart = true
 			i++
-			col++
-			continue
-		}
 
-		// Word token at a statement start position
-		if (atStmtStart || atScriptStmtStart) && isAlpha(ch) {
-			wordLine, wordCol := line, col
-			wordStart := i
-			for i < n && isWordChar(runes[i]) {
+		case sqltok.Keyword, sqltok.Identifier:
+			if !atStart {
 				i++
-				col++
+				break
 			}
-			wordRaw := string(runes[wordStart:i])
-			word := strings.ToUpper(wordRaw)
-
-			if atStmtStart {
-				atStmtStart = false
+			if !inScript {
+				word := strings.ToUpper(t.Text(src))
+				atStart = false
 				if !sqlStmtKeywords[word] {
-					addError("Unexpected token '"+wordRaw+"'",
-						wordLine, wordCol, wordLine, wordCol+len(wordRaw))
+					l, c := absT(t)
+					add("Unexpected token '"+t.Text(src)+"'", l, c, l, c+(t.End-t.Start))
 				}
-			} else if atScriptStmtStart {
-				atScriptStmtStart = false
+				i++
+				break
+			}
+			i = validateScriptWord(toks, src, i, absT, isBareWord, skipWS, skipWSNL,
+				skipParens, detectAssign, checkMissingExpr, add, declaredVars,
+				&inDeclareBlock, &atStart)
 
-				switch word {
-				case "DECLARE":
-					inDeclareBlock = true
-					atScriptStmtStart = true
-				case "BEGIN":
-					inDeclareBlock = false
-					atScriptStmtStart = true
-				case "THEN", "ELSE", "DO", "EXCEPTION":
-					atScriptStmtStart = true
-				case "RETURN", "FOR":
-					// Peek ahead for variable usage
-					j := i
-					jCol := col
-					// Skip whitespace/newlines
-					for j < n && (runes[j] == ' ' || runes[j] == '\t' ||
-						runes[j] == '\n' || runes[j] == '\r' || runes[j] == '\u00a0') {
-						if runes[j] == '\n' {
-							line++
-							jCol = 1
-						} else {
-							jCol++
-						}
-						j++
-					}
-					if j < n && isAlpha(runes[j]) {
-						varStart := j
-						for j < n && isWordChar(runes[j]) {
-							j++
-							jCol++
-						}
-						varNameRaw := string(runes[varStart:j])
-						varName := strings.ToUpper(varNameRaw)
-
-						if word == "FOR" {
-							// FOR record IN cursor DO
-							declaredVars[varName] = true
-							// Skip IN
-							for j < n && (runes[j] == ' ' || runes[j] == '\t' ||
-								runes[j] == '\n' || runes[j] == '\r' || runes[j] == '\u00a0') {
-								if runes[j] == '\n' {
-									line++
-									jCol = 1
-								} else {
-									jCol++
-								}
-								j++
-							}
-							if j+2 < n && strings.ToUpper(string(runes[j:j+2])) == "IN" {
-								j += 2
-								jCol += 2
-								// Skip whitespace to cursor name
-								for j < n && (runes[j] == ' ' || runes[j] == '\t' ||
-									runes[j] == '\n' || runes[j] == '\r' || runes[j] == '\u00a0') {
-									if runes[j] == '\n' {
-										line++
-										jCol = 1
-									} else {
-										jCol++
-									}
-									j++
-								}
-								if j < n && isAlpha(runes[j]) {
-									curStart := j
-									for j < n && isWordChar(runes[j]) {
-										j++
-										jCol++
-									}
-									curNameRaw := string(runes[curStart:j])
-									curName := strings.ToUpper(curNameRaw)
-									if !scriptStmtKeywords[curName] && !declaredVars[curName] {
-										addError("Variable '"+curNameRaw+"' is not declared", line, jCol-len(curNameRaw), line, jCol)
-									}
-								}
-							}
-						} else {
-							// RETURN expr
-							// If it's a known keyword, it's not a variable usage (e.g. RETURN SELECT ...)
-							if !scriptStmtKeywords[varName] && !declaredVars[varName] {
-								addError("Variable '"+varNameRaw+"' is not declared", line, jCol-len(varNameRaw), line, jCol)
-							}
-						}
-						// Advance main loop counters to where we peeked
-						i = j
-						col = jCol
-					}
-					// FOR and RETURN themselves don't start a new statement, but they consume the start position
-					atScriptStmtStart = false
-				case "LET", "VAR":
-					// Peek ahead for the variable name being declared
-					j := i
-					jCol := col
-					for j < n && (runes[j] == ' ' || runes[j] == '\t' ||
-						runes[j] == '\n' || runes[j] == '\r' || runes[j] == '\u00a0') {
-						if runes[j] == '\n' {
-							line++
-							jCol = 1
-						} else {
-							jCol++
-						}
-						j++
-					}
-					if j < n && isAlpha(runes[j]) {
-						varStart := j
-						for j < n && isWordChar(runes[j]) {
-							j++
-							jCol++
-						}
-						varNameRaw := string(runes[varStart:j])
-						varName := strings.ToUpper(varNameRaw)
-						declaredVars[varName] = true
-
-						// Skip whitespace after the variable name.
-						for j < n && (runes[j] == ' ' || runes[j] == '\t' ||
-							runes[j] == '\n' || runes[j] == '\r' || runes[j] == '\u00a0') {
-							if runes[j] == '\n' {
-								line++
-								jCol = 1
-							} else {
-								jCol++
-							}
-							j++
-						}
-
-						// Skip optional type annotation (e.g. FLOAT, VARCHAR(100))
-						// that may appear between the variable name and ':' or '='.
-						if j < n && isAlpha(runes[j]) {
-							typeStart := j
-							for j < n && isWordChar(runes[j]) {
-								j++
-								jCol++
-							}
-							typeWord := strings.ToUpper(string(runes[typeStart:j]))
-							if typeWord != "DEFAULT" {
-								// Skip optional parenthesised type parameters: VARCHAR(100), NUMBER(10,2)
-								for j < n && (runes[j] == ' ' || runes[j] == '\t' || runes[j] == '\u00a0') {
-									j++
-									jCol++
-								}
-								if j < n && runes[j] == '(' {
-									depth := 1
-									j++
-									jCol++
-									for j < n && depth > 0 {
-										switch runes[j] {
-										case '(':
-											depth++
-										case ')':
-											depth--
-										}
-										if runes[j] == '\n' {
-											line++
-											jCol = 1
-										} else {
-											jCol++
-										}
-										j++
-									}
-								}
-								// Skip whitespace before the assignment operator.
-								for j < n && (runes[j] == ' ' || runes[j] == '\t' ||
-									runes[j] == '\n' || runes[j] == '\r' || runes[j] == '\u00a0') {
-									if runes[j] == '\n' {
-										line++
-										jCol = 1
-									} else {
-										jCol++
-									}
-									j++
-								}
-							}
-						}
-
-						// Check for := (valid) or bare = (error) and detect missing expression.
-						isLetColon := j < n && runes[j] == ':' && j+1 < n && runes[j+1] == '='
-						isLetBareEq := j < n && runes[j] == '=' && (j == 0 || runes[j-1] != ':')
-						if isLetColon || isLetBareEq {
-							if isLetBareEq {
-								addError("Expected ':=' for assignment", line, jCol, line, jCol+1)
-							}
-
-							// --- Missing expression check ---
-							opEnd := j + 1
-							if isLetColon {
-								opEnd = j + 2 // skip both : and =
-							}
-							k := opEnd
-							for k < n && (runes[k] == ' ' || runes[k] == '\t' || runes[k] == '\n' || runes[k] == '\r' || runes[k] == '\u00a0') {
-								k++
-							}
-
-							missingExpr := false
-							if k >= n || runes[k] == ';' {
-								missingExpr = true
-							} else if isAlpha(runes[k]) {
-								wordStart := k
-								for k < n && isWordChar(runes[k]) {
-									k++
-								}
-								firstWord := strings.ToUpper(string(runes[wordStart:k]))
-								switch firstWord {
-								case "LET", "DECLARE", "BEGIN", "RETURN", "FOR", "WHILE", "LOOP", "IF":
-									missingExpr = true
-								}
-							}
-
-							if missingExpr {
-								addError("Missing expression after assignment", line, jCol, line, jCol+(opEnd-j))
-							}
-						}
-						// Advance main loop counters to where we peeked
-						i = j
-						col = jCol
-					}
-
-				default:
-					if inDeclareBlock {
-						// Inside DECLARE every non-keyword identifier is a variable declaration
-						if !scriptStmtKeywords[word] {
-							declaredVars[word] = true
-						}
-						atScriptStmtStart = true // Each line in DECLARE is a new start
-					} else if !scriptStmtKeywords[word] {
-						// Look ahead for assignment operator
-						j, jCol := i, col
-						for j < n && (runes[j] == ' ' || runes[j] == '\t' || runes[j] == '\r' || runes[j] == '\u00a0') {
-							if runes[j] == '\n' {
-								break
-							}
-							j++
-							jCol++
-						}
-						isColonAssign := j < n && runes[j] == ':' && j+1 < n && runes[j+1] == '='
-						isBareEq := false
-						if j < n && runes[j] == '=' {
-							prev := rune(0)
-							if j > 0 {
-								prev = runes[j-1]
-							}
-							next := rune(0)
-							if j+1 < n {
-								next = runes[j+1]
-							}
-							isBareEq = prev != ':' && prev != '<' && prev != '>' && prev != '!' && next != '='
-						}
-						isAssignment := isColonAssign || isBareEq
-
-						if isAssignment {
-							if isBareEq {
-								addError("Expected ':=' for assignment",
-									line, jCol, line, jCol+1)
-							}
-							if !declaredVars[word] {
-								addError("Variable '"+wordRaw+"' is not declared",
-									wordLine, wordCol, wordLine, wordCol+len(wordRaw))
-							}
-
-							// --- Missing expression check ---
-							opEnd := j
-							if isColonAssign {
-								opEnd += 2
-							} else {
-								opEnd += 1
-							}
-
-							k := opEnd
-							for k < n && (runes[k] == ' ' || runes[k] == '\t' || runes[k] == '\n' || runes[k] == '\r' || runes[k] == '\u00a0') {
-								k++
-							}
-
-							missingExpr := false
-							if k >= n || runes[k] == ';' {
-								missingExpr = true
-							} else if isAlpha(runes[k]) {
-								wordStart := k
-								for k < n && isWordChar(runes[k]) {
-									k++
-								}
-								firstWord := strings.ToUpper(string(runes[wordStart:k]))
-								switch firstWord {
-								case "LET", "DECLARE", "BEGIN", "RETURN", "FOR", "WHILE", "LOOP", "IF":
-									missingExpr = true
-								}
-							}
-
-							if missingExpr {
-								addError("Missing expression after assignment", line, jCol, line, jCol+(opEnd-j))
-							}
-
-						} else {
-							// Not a scripting keyword and not an assignment —
-							// bare unrecognized identifier at statement start.
-							addError("Unexpected token '"+wordRaw+"'",
-								wordLine, wordCol, wordLine, wordCol+len(wordRaw))
-						}
-					}
+		case sqltok.Operator:
+			// '<' / '>' at a statement start is invalid in both outer SQL and
+			// scripting (catches template/placeholder text like <foo>).
+			if atStart {
+				if txt := t.Text(src); len(txt) > 0 && (txt[0] == '<' || txt[0] == '>') {
+					l, c := absT(t)
+					add("Unexpected token '"+string(txt[0])+"'", l, c, l, c+1)
 				}
 			}
-			continue
-		}
+			atStart = false
+			i++
 
-		// Any other character resets statement-start flags.
-		// If we are at a statement-start position and encounter a character that
-		// can never open a SQL or Snowflake Scripting statement, flag it as an
-		// error.  This catches placeholder/template text like <wrong_text> or
-		// {placeholder} that is accidentally left inside a script body.
-		//
-		// Angle brackets and curly braces are chosen because they are
-		// syntactically invalid at statement level in both outer SQL and
-		// Snowflake Scripting, yet common in template/placeholder patterns.
-		if (atStmtStart || atScriptStmtStart) &&
-			(ch == '<' || ch == '>' || ch == '{' || ch == '}') {
-			addError("Unexpected token '"+string(ch)+"'",
-				line, col, line, col+1)
+		case sqltok.Other:
+			if atStart {
+				if txt := t.Text(src); txt == "{" || txt == "}" {
+					l, c := absT(t)
+					add("Unexpected token '"+txt+"'", l, c, l, c+1)
+				}
+			}
+			atStart = false
+			i++
+
+		default:
+			// NumberLit, Dot, Comma, Colon, At, etc. reset statement start.
+			atStart = false
+			i++
 		}
-		atStmtStart = false
-		atScriptStmtStart = false
-		i++
-		col++
 	}
 
-	// Report unclosed opening parens/brackets
+	// Report unclosed opening parens/brackets in push order.
 	for _, open := range parenStack {
-		addError("Unclosed '"+open.char+"'", open.line, open.col, open.line, open.col+1)
+		add("Unclosed '"+open.char+"'", open.line, open.col, open.line, open.col+1)
 	}
+}
 
-	return markers
+// validateScriptWord handles a keyword/identifier token at a Snowflake Scripting
+// statement start (toks[i]) and returns the index to resume scanning from.
+// declaredVars, inDeclareBlock, and atStart are updated in place.
+func validateScriptWord(
+	toks []sqltok.Token, src string, i int,
+	absT func(sqltok.Token) (int, int),
+	isBareWord func(sqltok.Token) bool,
+	skipWS, skipWSNL, skipParens func(int) int,
+	detectAssign func(int) (string, sqltok.Token, int),
+	checkMissingExpr func(int, sqltok.Token, int),
+	add func(string, int, int, int, int),
+	declaredVars map[string]bool, inDeclareBlock, atStart *bool,
+) int {
+	t := toks[i]
+	word := strings.ToUpper(t.Text(src))
+	*atStart = false // default; specific keywords below re-arm a statement start
+
+	switch word {
+	case "DECLARE":
+		*inDeclareBlock = true
+		*atStart = true
+		return i + 1
+	case "BEGIN":
+		*inDeclareBlock = false
+		*atStart = true
+		return i + 1
+	case "THEN", "ELSE", "DO", "EXCEPTION":
+		*atStart = true
+		return i + 1
+
+	case "RETURN", "FOR":
+		k := skipWSNL(i + 1)
+		if k >= len(toks) || !isBareWord(toks[k]) {
+			return i + 1
+		}
+		varTok := toks[k]
+		if word == "FOR" {
+			declaredVars[strings.ToUpper(varTok.Text(src))] = true // loop variable
+			// FOR <var> IN <cursor> DO
+			k = skipWSNL(k + 1)
+			if k < len(toks) && isBareWord(toks[k]) && strings.ToUpper(toks[k].Text(src)) == "IN" {
+				k = skipWSNL(k + 1)
+				if k < len(toks) && isBareWord(toks[k]) {
+					curTok := toks[k]
+					curName := strings.ToUpper(curTok.Text(src))
+					if !scriptStmtKeywords[curName] && !declaredVars[curName] {
+						l, c := absT(curTok)
+						add("Variable '"+curTok.Text(src)+"' is not declared", l, c, l, c+(curTok.End-curTok.Start))
+					}
+					return k + 1
+				}
+			}
+			return k
+		}
+		// RETURN <var> — flag an undeclared, non-keyword identifier.
+		varName := strings.ToUpper(varTok.Text(src))
+		if !scriptStmtKeywords[varName] && !declaredVars[varName] {
+			l, c := absT(varTok)
+			add("Variable '"+varTok.Text(src)+"' is not declared", l, c, l, c+(varTok.End-varTok.Start))
+		}
+		return k + 1
+
+	case "LET", "VAR":
+		k := skipWSNL(i + 1)
+		if k >= len(toks) || !isBareWord(toks[k]) {
+			return i + 1
+		}
+		declaredVars[strings.ToUpper(toks[k].Text(src))] = true // the declared variable
+		k = skipWSNL(k + 1)
+		// Optional type annotation (FLOAT, VARCHAR(100), NUMBER(10,2), …).
+		if k < len(toks) && isBareWord(toks[k]) {
+			k = skipWS(k + 1)
+			if k < len(toks) && toks[k].Kind == sqltok.LParen {
+				k = skipParens(k)
+			}
+			k = skipWSNL(k)
+		}
+		if kind, opTok, after := detectAssign(k); kind != "" {
+			opLen := 1
+			if kind == "colon" {
+				opLen = 2
+			} else { // bare '='
+				l, c := absT(opTok)
+				add("Expected ':=' for assignment", l, c, l, c+1)
+			}
+			checkMissingExpr(after, opTok, opLen)
+		}
+		return k
+
+	default:
+		if *inDeclareBlock {
+			// Inside DECLARE, every non-keyword identifier declares a variable.
+			if !scriptStmtKeywords[word] {
+				declaredVars[word] = true
+			}
+			*atStart = true
+			return i + 1
+		}
+		if !scriptStmtKeywords[word] {
+			// A non-keyword word at a statement start is an assignment target,
+			// otherwise an unexpected token. The assignment operator must be on
+			// the same line (skipWS, not skipWSNL).
+			if kind, opTok, after := detectAssign(skipWS(i + 1)); kind != "" {
+				opLen := 1
+				if kind == "colon" {
+					opLen = 2
+				} else {
+					l, c := absT(opTok)
+					add("Expected ':=' for assignment", l, c, l, c+1)
+				}
+				if !declaredVars[word] {
+					l, c := absT(t)
+					add("Variable '"+t.Text(src)+"' is not declared", l, c, l, c+(t.End-t.Start))
+				}
+				checkMissingExpr(after, opTok, opLen)
+			} else {
+				l, c := absT(t)
+				add("Unexpected token '"+t.Text(src)+"'", l, c, l, c+(t.End-t.Start))
+			}
+		}
+		return i + 1
+	}
 }
 
 // ── ParseJoinTables ───────────────────────────────────────────────────────────

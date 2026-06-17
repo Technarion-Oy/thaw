@@ -30,6 +30,8 @@ func TokenizeIter(sql string) func() (Token, bool)
 
 `TokenKind` enum: `Whitespace`, `Newline`, `LineComment`, `BlockComment`, `Keyword`, `Identifier`, `QuotedIdent`, `StringLit`, `DollarQuoted`, `NumberLit`, `Operator`, `Dot`, `Comma`, `Semicolon`, `LParen`, `RParen`, `LBracket`, `RBracket`, `Colon`, `At`, `Other`, `EOF`.
 
+`Token.Unterminated` is `true` when a `StringLit`, `QuotedIdent`, `BlockComment`, or `DollarQuoted` token reached end-of-input without its closing delimiter (the token still spans to EOF). Always `false` for other kinds.
+
 ### Statement splitting
 
 ```go

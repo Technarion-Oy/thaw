@@ -107,11 +107,13 @@ func scan(src string, n int, pos, line, col *int) Token {
 	// `*/` opens an inner comment that must be closed first.
 	case c == '/' && start+1 < n && src[start+1] == '*':
 		i := start + 2
+		unterminated := false
 		for depth := 1; depth > 0; {
 			openIdx := strings.Index(src[i:], "/*")
 			closeIdx := strings.Index(src[i:], "*/")
 			if closeIdx < 0 {
 				i = n // unterminated — consume to end of input
+				unterminated = true
 				break
 			}
 			if openIdx >= 0 && openIdx < closeIdx {
@@ -133,11 +135,12 @@ func scan(src string, n int, pos, line, col *int) Token {
 			*col += i - start
 		}
 		*pos = i
-		return Token{Kind: BlockComment, Start: start, End: i, Line: startLine, Col: startCol}
+		return Token{Kind: BlockComment, Start: start, End: i, Line: startLine, Col: startCol, Unterminated: unterminated}
 
 	// ── Single-quoted string '...' ──────────────────────────────────────
 	case c == '\'':
 		i := start + 1
+		terminated := false
 		for i < n {
 			j := strings.IndexByte(src[i:], '\'')
 			if j < 0 {
@@ -148,6 +151,7 @@ func scan(src string, n int, pos, line, col *int) Token {
 			if i < n && src[i] == '\'' {
 				i++ // '' escape
 			} else {
+				terminated = true
 				break
 			}
 		}
@@ -161,11 +165,12 @@ func scan(src string, n int, pos, line, col *int) Token {
 			*col += i - start
 		}
 		*pos = i
-		return Token{Kind: StringLit, Start: start, End: i, Line: startLine, Col: startCol}
+		return Token{Kind: StringLit, Start: start, End: i, Line: startLine, Col: startCol, Unterminated: !terminated}
 
 	// ── Double-quoted identifier "..." ───────────────────────────────────
 	case c == '"':
 		i := start + 1
+		terminated := false
 		for i < n {
 			j := strings.IndexByte(src[i:], '"')
 			if j < 0 {
@@ -176,6 +181,7 @@ func scan(src string, n int, pos, line, col *int) Token {
 			if i < n && src[i] == '"' {
 				i++ // "" escape
 			} else {
+				terminated = true
 				break
 			}
 		}
@@ -189,7 +195,7 @@ func scan(src string, n int, pos, line, col *int) Token {
 			*col += i - start
 		}
 		*pos = i
-		return Token{Kind: QuotedIdent, Start: start, End: i, Line: startLine, Col: startCol}
+		return Token{Kind: QuotedIdent, Start: start, End: i, Line: startLine, Col: startCol, Unterminated: !terminated}
 
 	// ── Dollar-quoted $$...$$ or $tag$...$tag$ ──────────────────────────
 	case c == '$':
@@ -201,8 +207,10 @@ func scan(src string, n int, pos, line, col *int) Token {
 		if j < n && src[j] == '$' {
 			tag := src[start : j+1]
 			i := j + 1
+			unterminated := false
 			if end := strings.Index(src[i:], tag); end < 0 {
 				i = n
+				unterminated = true
 			} else {
 				i += end + len(tag)
 			}
@@ -216,7 +224,7 @@ func scan(src string, n int, pos, line, col *int) Token {
 				*col += i - start
 			}
 			*pos = i
-			return Token{Kind: DollarQuoted, Start: start, End: i, Line: startLine, Col: startCol, Tag: tag}
+			return Token{Kind: DollarQuoted, Start: start, End: i, Line: startLine, Col: startCol, Tag: tag, Unterminated: unterminated}
 		}
 		// Not a dollar-quote — emit as Other.
 		*pos++

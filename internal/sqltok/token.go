@@ -105,6 +105,10 @@ type Token struct {
 	Line  int    // 1-based line number
 	Col   int    // 1-based byte-column
 	Tag   string // non-empty only for DollarQuoted
+	// Unterminated is true when a StringLit, QuotedIdent, BlockComment, or
+	// DollarQuoted token reached end-of-input without its closing delimiter
+	// (the token still spans to EOF). It is always false for other kinds.
+	Unterminated bool
 }
 
 // Text returns the source text of the token.
