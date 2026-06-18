@@ -49,6 +49,26 @@ func (a *App) DescribeSessionPolicy(database, schema, name string) (*snowflake.Q
 	return a.client.QuerySingle(a.ctx, query)
 }
 
+// FormatSecondaryRoles renders a secondary-role list into the
+// `( 'ALL' | <role>, … )` SQL grammar via snowflake.FormatSecondaryRoles — the
+// "ALL" token becomes the 'ALL' literal and every other entry is quoted only when
+// it needs it (reserved keyword or non-identifier). Exposed so the Session Policy
+// properties modal builds its ALTER … SET ALLOWED/BLOCKED_SECONDARY_ROLES clause
+// (and renders the current value) through the same serializer the CREATE builder
+// uses. Pure string handling — no Snowflake connection required.
+func (a *App) FormatSecondaryRoles(roles []string) string {
+	return snowflake.FormatSecondaryRoles(roles)
+}
+
+// ReconcileSecondaryRoles enforces the secondary-role grammar's ALL-vs-role-list
+// mutual exclusivity via snowflake.ReconcileSecondaryRoles, keeping whichever kind
+// the user picked last. Exposed so the create / properties modals can clean a tag
+// selection as it changes and never emit the invalid ('ALL', R1) shape. Pure
+// string handling — no Snowflake connection required.
+func (a *App) ReconcileSecondaryRoles(roles []string) []string {
+	return snowflake.ReconcileSecondaryRoles(roles)
+}
+
 // ParseSecondaryRoles parses a secondary-role list cell as returned by
 // DESCRIBE SESSION POLICY (e.g. ('ALL'), (R1, "my role"), or a JSON-style
 // ["R1","R2"]) into its individual role tokens. It is the inverse of the

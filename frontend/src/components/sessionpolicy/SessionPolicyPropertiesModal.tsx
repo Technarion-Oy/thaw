@@ -19,11 +19,9 @@ import {
 } from "@ant-design/icons";
 import {
   GetObjectProperties, DescribeSessionPolicy, AlterSessionPolicy, GetSessionPolicyReferences,
-  ParseSecondaryRoles,
+  ParseSecondaryRoles, FormatSecondaryRoles, ReconcileSecondaryRoles,
 } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
-import { needsQuoting } from "../shared/ObjectNameCaseControl";
-import { formatRoles, reconcileAll } from "./secondaryRoles";
 
 const { Text } = Typography;
 
@@ -45,9 +43,10 @@ const LABEL_TD: React.CSSProperties = {
 // snowflake.EscapeTextLit (backslash doubled, single-quotes doubled).
 function q1(s: string) { return "'" + s.replace(/\\/g, "\\\\").replace(/'/g, "''") + "'"; }
 
-// formatRoles (serialize) lives in secondaryRoles.ts; the inverse parse is the
-// Go snowflake.ParseSecondaryRoles, reached via the App.ParseSecondaryRoles IPC
-// in reload(), so the round-trip has a single shared implementation.
+// All secondary-role handling lives in Go and is reached over IPC, so parse,
+// serialize, and ALL-reconciliation share one implementation: ParseSecondaryRoles
+// (DESCRIBE cell → tokens, in reload()), FormatSecondaryRoles (tokens → SQL list,
+// for display and the ALTER clause), and ReconcileSecondaryRoles (tag-edit cleanup).
 
 // The four session-policy timeout parameters, in Snowflake's documented order,
 // paired with their ALTER keyword, valid range, and default. The current value
@@ -159,6 +158,10 @@ function ParamRow({ meta, value, onSet, onUnset }: ParamRowProps) {
 interface RoleRowProps {
   label: string;
   value: string[];
+  // The current value pre-rendered as a SQL list (e.g. ('ALL') or (R1, R2)) by
+  // the backend FormatSecondaryRoles, since formatting is async and the display
+  // is synchronous. Only shown when value is non-empty.
+  displayText: string;
   // When set, the current value could not be read from DESCRIBE (the column is
   // absent) — shown as a caveat so the user knows the editor operates blind.
   unknownNote?: string;
@@ -166,7 +169,7 @@ interface RoleRowProps {
   onUnset: () => Promise<void>;
 }
 
-function RoleRow({ label, value, unknownNote, onSet, onUnset }: RoleRowProps) {
+function RoleRow({ label, value, displayText, unknownNote, onSet, onUnset }: RoleRowProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<string[]>(value);
   const [saving, setSaving] = useState(false);
@@ -213,7 +216,7 @@ function RoleRow({ label, value, unknownNote, onSet, onUnset }: RoleRowProps) {
                 size="small"
                 mode="tags"
                 value={draft}
-                onChange={(v) => setDraft(reconcileAll(v))}
+                onChange={async (v) => setDraft((await ReconcileSecondaryRoles(v)) ?? [])}
                 placeholder="ALL or role names"
                 tokenSeparators={[","]}
                 style={{ width: 280 }}
@@ -242,7 +245,7 @@ function RoleRow({ label, value, unknownNote, onSet, onUnset }: RoleRowProps) {
             <Space>
               <span style={{ color: "var(--text)", fontFamily: "var(--font-mono)" }}>
                 {value.length > 0
-                  ? formatRoles(value, needsQuoting)
+                  ? displayText
                   : <Text type="secondary">{unknownNote ? "(unknown)" : "(default)"}</Text>}
               </span>
               <Tooltip title="Edit">
@@ -378,6 +381,10 @@ export default function SessionPolicyPropertiesModal({ db, schema, name, onClose
   // truth rather than a re-implementation here.
   const [allowedRoles, setAllowedRoles] = useState<string[]>([]);
   const [blockedRoles, setBlockedRoles] = useState<string[]>([]);
+  // The same lists pre-rendered as SQL via FormatSecondaryRoles (formatting is an
+  // async IPC call; the row display is synchronous).
+  const [allowedDisplay, setAllowedDisplay] = useState("");
+  const [blockedDisplay, setBlockedDisplay] = useState("");
 
   // References (users/account the policy is attached to) — loaded on demand
   // because the ACCOUNT_USAGE view is slow and may be restricted.
@@ -408,8 +415,17 @@ export default function SessionPolicyPropertiesModal({ db, schema, name, onClose
         ParseSecondaryRoles(rawCell("allowed_secondary_roles")),
         ParseSecondaryRoles(rawCell("blocked_secondary_roles")),
       ]);
-      setAllowedRoles(allowed ?? []);
-      setBlockedRoles(blocked ?? []);
+      const allowedList = allowed ?? [];
+      const blockedList = blocked ?? [];
+      setAllowedRoles(allowedList);
+      setBlockedRoles(blockedList);
+      // Pre-render each list as a SQL value for the (synchronous) row display.
+      const [aDisp, bDisp] = await Promise.all([
+        FormatSecondaryRoles(allowedList),
+        FormatSecondaryRoles(blockedList),
+      ]);
+      setAllowedDisplay(aDisp);
+      setBlockedDisplay(bDisp);
     } catch (e) {
       setError(String(e));
     }
@@ -441,7 +457,7 @@ export default function SessionPolicyPropertiesModal({ db, schema, name, onClose
   };
 
   const setRoles = async (keyword: string, roles: string[]) => {
-    await AlterSessionPolicy(db, schema, name, `SET ${keyword} = ${formatRoles(roles, needsQuoting)}`);
+    await AlterSessionPolicy(db, schema, name, `SET ${keyword} = ${await FormatSecondaryRoles(roles)}`);
     await reload();
   };
 
@@ -555,12 +571,14 @@ export default function SessionPolicyPropertiesModal({ db, schema, name, onClose
               <RoleRow
                 label="Allowed"
                 value={allowedRoles}
+                displayText={allowedDisplay}
                 onSet={(r) => setRoles("ALLOWED_SECONDARY_ROLES", r)}
                 onUnset={() => unsetRoles("ALLOWED_SECONDARY_ROLES")}
               />
               <RoleRow
                 label="Blocked"
                 value={blockedRoles}
+                displayText={blockedDisplay}
                 unknownNote={blockedUnknownNote}
                 onSet={(r) => setRoles("BLOCKED_SECONDARY_ROLES", r)}
                 onUnset={() => unsetRoles("BLOCKED_SECONDARY_ROLES")}

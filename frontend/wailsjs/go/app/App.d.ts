@@ -344,6 +344,8 @@ export function FetchNotebookContent(arg1:string,arg2:string,arg3:string):Promis
 
 export function FindJoinPaths(arg1:Array<erdesigner.TableRef>,arg2:Array<snowflake.ERForeignKey>):Promise<Array<erdesigner.JoinPath>>;
 
+export function FormatSecondaryRoles(arg1:Array<string>):Promise<string>;
+
 export function GenerateKeyPair(arg1:string,arg2:string,arg3:string):Promise<keypair.KeyPairResult>;
 
 export function GenerateMigrationScript(arg1:Array<migration.MigrationDiffItem>,arg2:string,arg3:migration.TableMigrationStrategy):Promise<string>;
@@ -719,6 +721,8 @@ export function ReadFile(arg1:string):Promise<string>;
 export function ReadFileHead(arg1:string,arg2:number):Promise<string>;
 
 export function ReadNotebook(arg1:string):Promise<string>;
+
+export function ReconcileSecondaryRoles(arg1:Array<string>):Promise<Array<string>>;
 
 export function RemoveEditorTab(arg1:string):Promise<void>;
 

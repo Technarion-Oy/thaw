@@ -389,3 +389,33 @@ func TestSecondaryRolesRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestReconcileSecondaryRoles(t *testing.T) {
+	tests := []struct {
+		name  string
+		roles []string
+		want  []string
+	}{
+		{"collapses to ALL when ALL added last", []string{"R1", "R2", "ALL"}, []string{"ALL"}},
+		{"drops ALL when a named role added after it", []string{"ALL", "R1"}, []string{"R1"}},
+		{"drops ALL keeping all later roles", []string{"ALL", "R1", "R2"}, []string{"R1", "R2"}},
+		{"sole ALL untouched", []string{"ALL"}, []string{"ALL"}},
+		{"named-only list untouched", []string{"R1", "R2"}, []string{"R1", "R2"}},
+		{"empty list untouched", []string{}, []string{}},
+		{"lowercase all added last collapses to canonical ALL", []string{"r1", "all"}, []string{"ALL"}},
+		{"role after lowercase all still drops it", []string{"all", "r1"}, []string{"r1"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ReconcileSecondaryRoles(tt.roles)
+			if len(got) != len(tt.want) {
+				t.Fatalf("ReconcileSecondaryRoles(%v) = %v, want %v", tt.roles, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("ReconcileSecondaryRoles(%v)[%d] = %q, want %q", tt.roles, i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}

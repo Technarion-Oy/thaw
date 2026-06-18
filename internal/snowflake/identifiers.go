@@ -13,6 +13,7 @@ package snowflake
 import (
 	"context"
 	"regexp"
+	"slices"
 	"strings"
 
 	"thaw/internal/sqltok"
@@ -170,6 +171,31 @@ func FormatSecondaryRoles(roles []string) string {
 		}
 	}
 	return "(" + strings.Join(parts, ", ") + ")"
+}
+
+// ReconcileSecondaryRoles enforces the secondary-role grammar's mutual
+// exclusivity — `( { 'ALL' | <role_name> [, ...] } )`, where the ALL token cannot
+// be mixed with named roles. Given a tag selection in selection order (as the UI's
+// tag picker reports it), it keeps whichever kind was chosen last: if ALL was just
+// added it collapses to ["ALL"]; if a named role was added while ALL was already
+// present it drops ALL. Lists without ALL, or with a single entry, pass through
+// unchanged. It prevents the invalid ('ALL', R1) clause that Snowflake would
+// otherwise reject only at execution time.
+func ReconcileSecondaryRoles(roles []string) []string {
+	isAll := func(r string) bool { return strings.EqualFold(strings.TrimSpace(r), "ALL") }
+	if len(roles) <= 1 || !slices.ContainsFunc(roles, isAll) {
+		return roles
+	}
+	if isAll(roles[len(roles)-1]) {
+		return []string{"ALL"}
+	}
+	out := make([]string, 0, len(roles))
+	for _, r := range roles {
+		if !isAll(r) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // unquoteSQLToken returns the value of a quoted token text whose quote character

@@ -590,6 +590,10 @@ export function FindJoinPaths(arg1, arg2) {
   return window['go']['app']['App']['FindJoinPaths'](arg1, arg2);
 }
 
+export function FormatSecondaryRoles(arg1) {
+  return window['go']['app']['App']['FormatSecondaryRoles'](arg1);
+}
+
 export function GenerateKeyPair(arg1, arg2, arg3) {
   return window['go']['app']['App']['GenerateKeyPair'](arg1, arg2, arg3);
 }
@@ -1340,6 +1344,10 @@ export function ReadFileHead(arg1, arg2) {
 
 export function ReadNotebook(arg1) {
   return window['go']['app']['App']['ReadNotebook'](arg1);
+}
+
+export function ReconcileSecondaryRoles(arg1) {
+  return window['go']['app']['App']['ReconcileSecondaryRoles'](arg1);
 }
 
 export function RemoveEditorTab(arg1) {

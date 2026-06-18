@@ -13,14 +13,13 @@
 import { useState } from "react";
 import { Form, Input, InputNumber, Select, Typography, Row, Col } from "antd";
 import { FieldTimeOutlined } from "@ant-design/icons";
-import { BuildCreateSessionPolicySql, ExecDDL } from "../../../wailsjs/go/app/App";
+import { BuildCreateSessionPolicySql, ExecDDL, ReconcileSecondaryRoles } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
 import type { sessionpolicy as spModels } from "../../../wailsjs/go/models";
-import { reconcileAll } from "./secondaryRoles";
 
 const { Text } = Typography;
 
@@ -96,6 +95,14 @@ export default function CreateSessionPolicyModal({ db, schema, onClose, onSucces
 
   const set = <K extends keyof SessionCfg>(key: K, value: SessionCfg[K]) =>
     setCfg((prev) => ({ ...prev, [key]: value }));
+
+  // Tag-select onChange: run the new selection through the backend
+  // ReconcileSecondaryRoles so ALL and named roles can't coexist (the invalid
+  // ('ALL', R1) shape) before it reaches the live SQL preview.
+  const setRolesReconciled = async (
+    key: "allowedSecondaryRoles" | "blockedSecondaryRoles",
+    v: string[],
+  ) => set(key, (await ReconcileSecondaryRoles(v)) ?? []);
 
   const canSubmit = cfg.name.trim().length > 0;
 
@@ -184,7 +191,7 @@ export default function CreateSessionPolicyModal({ db, schema, onClose, onSucces
               size="small"
               mode="tags"
               value={cfg.allowedSecondaryRoles}
-              onChange={(v) => set("allowedSecondaryRoles", reconcileAll(v))}
+              onChange={(v) => setRolesReconciled("allowedSecondaryRoles", v)}
               placeholder="default ('ALL')"
               tokenSeparators={[","]}
               style={{ width: "100%" }}
@@ -197,7 +204,7 @@ export default function CreateSessionPolicyModal({ db, schema, onClose, onSucces
               size="small"
               mode="tags"
               value={cfg.blockedSecondaryRoles}
-              onChange={(v) => set("blockedSecondaryRoles", reconcileAll(v))}
+              onChange={(v) => setRolesReconciled("blockedSecondaryRoles", v)}
               placeholder="role names"
               tokenSeparators={[","]}
               style={{ width: "100%" }}
