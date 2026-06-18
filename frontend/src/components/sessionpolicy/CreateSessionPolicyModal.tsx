@@ -200,21 +200,24 @@ export default function CreateSessionPolicyModal({ db, schema, onClose, onSucces
           </Col>
           <Col span={12} style={{ marginBottom: 12 }}>
             <Text style={{ fontSize: 12, display: "block", marginBottom: 2 }}>Blocked</Text>
+            {/* BLOCKED_SECONDARY_ROLES accepts only a role list — 'ALL' is valid
+                solely for the allowed list — so no ALL option and no reconcile. */}
             <Select
               size="small"
               mode="tags"
               value={cfg.blockedSecondaryRoles}
-              onChange={(v) => setRolesReconciled("blockedSecondaryRoles", v)}
+              onChange={(v) => set("blockedSecondaryRoles", v)}
               placeholder="role names"
               tokenSeparators={[","]}
               style={{ width: "100%" }}
-              options={[{ value: "ALL", label: "ALL" }]}
             />
           </Col>
         </Row>
         <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 12 }}>
-          Enter <code>ALL</code> for every secondary role, or type role names. Leave
-          empty to inherit the default (allowed: <code>('ALL')</code>, blocked: none).
+          For <strong>Allowed</strong>, enter <code>ALL</code> for every secondary
+          role or type role names; <strong>Blocked</strong> takes role names only.
+          Leave empty to inherit the default (allowed: <code>('ALL')</code>, blocked:
+          none).
         </Text>
 
         <Form.Item label="Comment" style={{ ...itemStyle, marginTop: 8 }}>

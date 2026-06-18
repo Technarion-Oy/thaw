@@ -8,9 +8,11 @@ Object-browser UI for Snowflake **SESSION POLICY** objects.
   `OR REPLACE` / `IF NOT EXISTS` (via the shared `NameWithReplaceOptions`), then
   the four timeout parameters grouped into **Idle timeout** and **Maximum
   lifespan** sections, plus a **Secondary roles** section (allowed/blocked
-  `Select mode="tags"` — type `ALL` or role names; `App.ReconcileSecondaryRoles`
-  enforces the grammar's `ALL`-vs-role-list exclusivity as you type so the preview
-  can't produce the invalid `('ALL', R1)`). Each timeout is an
+  `Select mode="tags"`). `ALL` is offered only on the **Allowed** list — the
+  grammar accepts `'ALL'` only for `ALLOWED_SECONDARY_ROLES`, not for blocked — and
+  there `App.ReconcileSecondaryRoles` enforces the `ALL`-vs-role-list exclusivity as
+  you type so the preview can't produce the invalid `('ALL', R1)`; the **Blocked**
+  list takes role names only. Each timeout is an
   `InputNumber` bounded to its documented range; leaving it empty inherits
   Snowflake's default (shown as the placeholder) and omits it from the generated
   SQL. A live `SqlPreview` reflects `App.BuildCreateSessionPolicySql`; submit runs
@@ -21,11 +23,13 @@ Object-browser UI for Snowflake **SESSION POLICY** objects.
   values) together. The **Parameters** section renders every timeout with inline
   edit — *Save* issues `ALTER SESSION POLICY … SET <param> = N`, *Unset* issues
   `UNSET <param>` to restore the default. **Secondary roles** edits the
-  allowed/blocked lists (`SET … = ('ALL')` / `(R1, …)` or `UNSET`; the tag editor
-  also applies `App.ReconcileSecondaryRoles`). Snowflake's `DESCRIBE SESSION POLICY`
-  documents only `allowed_secondary_roles`; if the `blocked_secondary_roles` column
-  is absent from the result the **Blocked** row shows `(unknown)` with a caveat that
-  editing sets it blind, rather than misleadingly rendering `(default)`. All
+  allowed/blocked lists (`SET … = ('ALL')` / `(R1, …)` or `UNSET`; the **Allowed**
+  tag editor offers `ALL` and applies `App.ReconcileSecondaryRoles`, the **Blocked**
+  one takes role names only). Snowflake's `DESCRIBE SESSION POLICY` documents only
+  `allowed_secondary_roles`; if the `blocked_secondary_roles` column is absent from
+  the result the **Blocked** row shows `(unknown)` with a caveat that editing sets it
+  blind, rather than misleadingly rendering `(default)` — and if DESCRIBE fails
+  outright both role rows read `(unknown)`, matching the timeout rows. All
   secondary-role logic lives in Go and is reached over IPC, so parse, serialize, and
   ALL-reconciliation share one implementation: `App.ParseSecondaryRoles`
   (DESCRIBE cell → tokens, on load), `App.FormatSecondaryRoles` (tokens → the

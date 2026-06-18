@@ -157,6 +157,13 @@ func SplitIdentList(s string, caseSensitive bool) []string {
 // only when it needs quoting (special characters or a reserved keyword). Blank
 // entries are skipped. The result is parenthesized, e.g. ('ALL'), (R1, R2),
 // ("my role"), or ().
+//
+// Limitation: a role whose name is a valid bare identifier is emitted unquoted
+// even if it was created case-sensitively in lower/mixed case (e.g. a role named
+// "analyst"). Snowflake uppercases the bare form, so such a role round-trips to
+// ANALYST — a different role. This is inherent to the QuoteOrBare (and Snowflake)
+// bare-identifier convention; case-sensitive role names are rare, but for them the
+// parse → format round-trip is not strictly lossless.
 func FormatSecondaryRoles(roles []string) string {
 	parts := make([]string, 0, len(roles))
 	for _, r := range roles {
@@ -228,6 +235,11 @@ func unquoteSQLToken(s string, q byte) string {
 // come straight from the tokenizer, so a quoted role containing a comma or an
 // embedded quote survives intact. The "ALL" literal is returned verbatim (as the
 // token "ALL"). An empty / null cell yields nil.
+//
+// Note: the JSON-array shape is handled only insofar as JSON double-quotes scan
+// as QuotedIdent tokens; a JSON backslash escape (e.g. \") would be un-escaped the
+// SQL way (doubled quotes), not the JSON way. Role names never contain such
+// characters in practice, so this does not arise for real DESCRIBE output.
 func ParseSecondaryRoles(raw string) []string {
 	if s := strings.TrimSpace(raw); s == "" || strings.EqualFold(s, "null") {
 		return nil

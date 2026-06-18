@@ -162,6 +162,10 @@ interface RoleRowProps {
   // the backend FormatSecondaryRoles, since formatting is async and the display
   // is synchronous. Only shown when value is non-empty.
   displayText: string;
+  // Whether the ALL token is valid for this list: true for ALLOWED_SECONDARY_ROLES
+  // (accepts 'ALL' or a role list), false for BLOCKED_SECONDARY_ROLES (role list
+  // only). When false, no ALL option is offered and no reconcile is applied.
+  allowAll: boolean;
   // When set, the current value could not be read from DESCRIBE (the column is
   // absent) — shown as a caveat so the user knows the editor operates blind.
   unknownNote?: string;
@@ -169,7 +173,7 @@ interface RoleRowProps {
   onUnset: () => Promise<void>;
 }
 
-function RoleRow({ label, value, displayText, unknownNote, onSet, onUnset }: RoleRowProps) {
+function RoleRow({ label, value, displayText, allowAll, unknownNote, onSet, onUnset }: RoleRowProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<string[]>(value);
   const [saving, setSaving] = useState(false);
@@ -216,11 +220,13 @@ function RoleRow({ label, value, displayText, unknownNote, onSet, onUnset }: Rol
                 size="small"
                 mode="tags"
                 value={draft}
-                onChange={async (v) => setDraft((await ReconcileSecondaryRoles(v)) ?? [])}
-                placeholder="ALL or role names"
+                onChange={allowAll
+                  ? async (v) => setDraft((await ReconcileSecondaryRoles(v)) ?? [])
+                  : (v) => setDraft(v)}
+                placeholder={allowAll ? "ALL or role names" : "role names"}
                 tokenSeparators={[","]}
                 style={{ width: 280 }}
-                options={[{ value: "ALL", label: "ALL" }]}
+                options={allowAll ? [{ value: "ALL", label: "ALL" }] : undefined}
               />
               <Tooltip title={draftEmpty ? "Use Unset to clear — an empty list is not valid SQL" : "Save"}>
                 {/* Disable Save on an empty draft: SET … = () is rejected by
@@ -497,15 +503,24 @@ export default function SessionPolicyPropertiesModal({ db, schema, name, onClose
   // back to the SHOW SESSION POLICIES row if DESCRIBE failed / omitted it.
   const comment = descCols.has("comment") ? descByCol["comment"] : find("comment");
 
-  // Snowflake's DESCRIBE SESSION POLICY may omit blocked_secondary_roles entirely
-  // (only allowed_secondary_roles is documented). When the column is absent we
-  // can't show the current Blocked list — flag that the editor operates blind
-  // rather than misleadingly rendering "(default)". SHOW doesn't expose it either,
-  // so DESCRIBE is the only possible source.
+  // When DESCRIBE failed outright (caught to null in reload) we couldn't read any
+  // current value, so both role rows should read "(unknown)" — mirroring the
+  // ParamRows — rather than a misleading "(default)".
+  const descFailedNote = desc === null
+    ? "DESCRIBE failed — current value unknown; editing sets it directly."
+    : undefined;
+
+  const allowedUnknownNote = descFailedNote;
+
+  // Snowflake's DESCRIBE SESSION POLICY may also omit blocked_secondary_roles
+  // entirely (only allowed_secondary_roles is documented). When the column is
+  // absent we likewise can't show the current Blocked list. SHOW doesn't expose it
+  // either, so DESCRIBE is the only possible source.
   const blockedUnknownNote =
-    desc && !descCols.has("blocked_secondary_roles")
+    descFailedNote ??
+    (!descCols.has("blocked_secondary_roles")
       ? "DESCRIBE does not report this — current value unknown; editing sets it directly."
-      : undefined;
+      : undefined);
 
   // Keys surfaced through dedicated sections above the generic Properties table.
   const handledKeys = new Set(["comment"]);
@@ -572,6 +587,8 @@ export default function SessionPolicyPropertiesModal({ db, schema, name, onClose
                 label="Allowed"
                 value={allowedRoles}
                 displayText={allowedDisplay}
+                allowAll
+                unknownNote={allowedUnknownNote}
                 onSet={(r) => setRoles("ALLOWED_SECONDARY_ROLES", r)}
                 onUnset={() => unsetRoles("ALLOWED_SECONDARY_ROLES")}
               />
@@ -579,6 +596,7 @@ export default function SessionPolicyPropertiesModal({ db, schema, name, onClose
                 label="Blocked"
                 value={blockedRoles}
                 displayText={blockedDisplay}
+                allowAll={false}
                 unknownNote={blockedUnknownNote}
                 onSet={(r) => setRoles("BLOCKED_SECONDARY_ROLES", r)}
                 onUnset={() => unsetRoles("BLOCKED_SECONDARY_ROLES")}
