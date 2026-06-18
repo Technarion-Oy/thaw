@@ -104,6 +104,14 @@ func TestBuildCreatePasswordPolicySql(t *testing.T) {
 			contains: []string{"COMMENT = 'it''s strict'"},
 		},
 		{
+			name: "comment backslash is doubled (Snowflake escape char)",
+			cfg: PasswordPolicyConfig{
+				Name:    "BS",
+				Comment: `path C:\temp`,
+			},
+			contains: []string{`COMMENT = 'path C:\\temp'`},
+		},
+		{
 			name: "blank name yields placeholder",
 			cfg:  PasswordPolicyConfig{},
 			contains: []string{

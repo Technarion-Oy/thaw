@@ -38,7 +38,11 @@ const LABEL_TD: React.CSSProperties = {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function q1(s: string) { return "'" + s.replace(/'/g, "''") + "'"; }
+// Quote a free-text value as a single-quoted SQL literal. Snowflake treats the
+// backslash as an escape character inside single-quoted literals, so a literal
+// backslash must be doubled (else "C:\temp" is read as "C:temp"); single-quotes
+// are doubled too. Mirrors the backend snowflake.EscapeTextLit.
+function q1(s: string) { return "'" + s.replace(/\\/g, "\\\\").replace(/'/g, "''") + "'"; }
 
 // The 11 password-policy parameters, in Snowflake's documented order, paired
 // with their ALTER keyword and valid range. The current value/default is read

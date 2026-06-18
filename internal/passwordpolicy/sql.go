@@ -46,7 +46,7 @@ type PasswordPolicyConfig struct {
 	Comment string `json:"comment"`
 }
 
-// param pairs a CREATE PASSWORD POLICY keyword with the config pointer that
+// params pairs each CREATE PASSWORD POLICY keyword with the config pointer that
 // backs it, so BuildCreatePasswordPolicySql can emit them uniformly in
 // Snowflake's documented order.
 func (cfg PasswordPolicyConfig) params() []struct {
@@ -110,7 +110,7 @@ func BuildCreatePasswordPolicySql(db, schema string, cfg PasswordPolicyConfig) (
 	}
 
 	if cfg.Comment != "" {
-		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment))
+		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", snowflake.EscapeTextLit(cfg.Comment))
 	}
 
 	return sb.String() + ";", nil
