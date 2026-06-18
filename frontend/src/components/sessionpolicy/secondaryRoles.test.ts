@@ -11,34 +11,45 @@
 import { describe, expect, it } from "vitest";
 import { formatRoles, parseRoles } from "./secondaryRoles";
 
+// Char-only stand-in for the shared needsQuoting the modal injects at runtime:
+// quote anything that isn't a valid bare identifier, plus a sample reserved word
+// (ORDER) so the reserved-keyword branch is exercised without a Wails runtime.
+const SIMPLE_IDENT = /^[A-Za-z_][A-Za-z0-9_$]*$/;
+const RESERVED = new Set(["ORDER", "SELECT"]);
+const needsQuoting = (n: string) => !SIMPLE_IDENT.test(n) || RESERVED.has(n.toUpperCase());
+
 describe("formatRoles", () => {
   it("renders ALL as the quoted literal (case-insensitive)", () => {
-    expect(formatRoles(["ALL"])).toBe("('ALL')");
-    expect(formatRoles(["all"])).toBe("('ALL')");
+    expect(formatRoles(["ALL"], needsQuoting)).toBe("('ALL')");
+    expect(formatRoles(["all"], needsQuoting)).toBe("('ALL')");
   });
 
   it("emits simple identifiers bare", () => {
-    expect(formatRoles(["R1", "R2"])).toBe("(R1, R2)");
+    expect(formatRoles(["R1", "R2"], needsQuoting)).toBe("(R1, R2)");
   });
 
   it("emits lowercase bare (Snowflake uppercases on resolution)", () => {
-    expect(formatRoles(["analyst"])).toBe("(analyst)");
+    expect(formatRoles(["analyst"], needsQuoting)).toBe("(analyst)");
   });
 
   it("double-quotes a role needing quoting", () => {
-    expect(formatRoles(["my role"])).toBe('("my role")');
+    expect(formatRoles(["my role"], needsQuoting)).toBe('("my role")');
+  });
+
+  it("double-quotes a reserved-keyword role (mirrors the backend)", () => {
+    expect(formatRoles(["ORDER"], needsQuoting)).toBe('("ORDER")');
   });
 
   it("escapes embedded double-quotes", () => {
-    expect(formatRoles(['we"ird'])).toBe('("we""ird")');
+    expect(formatRoles(['we"ird'], needsQuoting)).toBe('("we""ird")');
   });
 
   it("skips blank entries and trims", () => {
-    expect(formatRoles(["", "  ", " R1 "])).toBe("(R1)");
+    expect(formatRoles(["", "  ", " R1 "], needsQuoting)).toBe("(R1)");
   });
 
   it("renders an empty list as ()", () => {
-    expect(formatRoles([])).toBe("()");
+    expect(formatRoles([], needsQuoting)).toBe("()");
   });
 });
 
@@ -69,7 +80,7 @@ describe("parseRoles", () => {
 
   it("round-trips formatRoles output", () => {
     for (const roles of [["ALL"], ["R1", "R2"], ["analyst"]]) {
-      expect(parseRoles(formatRoles(roles))).toEqual(
+      expect(parseRoles(formatRoles(roles, needsQuoting))).toEqual(
         roles.map((r) => (r.toUpperCase() === "ALL" ? "ALL" : r)),
       );
     }

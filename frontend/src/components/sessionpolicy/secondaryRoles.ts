@@ -13,26 +13,34 @@
 // Parsing / serialization for a session policy's ALLOWED_SECONDARY_ROLES and
 // BLOCKED_SECONDARY_ROLES lists, shared by the properties modal and unit-tested
 // in secondaryRoles.test.ts. Mirrors the backend sessionpolicy.FormatSecondaryRoles.
+//
+// This module is deliberately dependency-free so it stays unit-testable without a
+// Wails runtime: the reserved-keyword-aware quoting decision is injected as a
+// `needsQuoting` predicate. The properties modal passes the shared
+// `needsQuoting` from ../shared/ObjectNameCaseControl (which loads Snowflake's
+// reserved-keyword list from the backend, matching the Go snowflake.NeedsQuoting),
+// so the ALTER serialization here and the CREATE builder in internal/sessionpolicy
+// quote identically — including reserved words such as ORDER.
 
-// A valid Snowflake unquoted identifier: a letter/underscore followed by
-// letters, digits, underscores, or dollar signs. Such names can be emitted bare
-// (Snowflake uppercases them on resolution); anything else must be double-quoted.
-const SIMPLE_IDENT = /^[A-Za-z_][A-Za-z0-9_$]*$/;
+// quoteIdent wraps name in double-quotes, doubling embedded quotes (Snowflake
+// convention). Inlined here to keep the module free of heavier imports.
+function quoteIdent(name: string): string {
+  return '"' + name.replace(/"/g, '""') + '"';
+}
 
 // formatRoles renders a SECONDARY_ROLES list value for an ALTER SESSION POLICY
-// clause, mirroring the backend sessionpolicy.FormatSecondaryRoles: the special
-// token "ALL" (case-insensitive) becomes the quoted literal 'ALL'; every other
-// entry is a role identifier emitted bare when it is a valid unquoted identifier
-// (so "analyst" resolves to role ANALYST) and double-quoted only when it needs
-// quoting. Blank entries are skipped. The result is parenthesized, e.g.
-// ('ALL') or (R1, R2) or ("my role") or ().
-export function formatRoles(roles: string[]): string {
+// clause: the special token "ALL" (case-insensitive) becomes the quoted literal
+// 'ALL'; every other entry is a role identifier emitted bare when it is a valid
+// unquoted identifier (so "analyst" resolves to role ANALYST) and double-quoted
+// only when `needsQuoting` says so. Blank entries are skipped. The result is
+// parenthesized, e.g. ('ALL') or (R1, R2) or ("my role") or ().
+export function formatRoles(roles: string[], needsQuoting: (name: string) => boolean): string {
   const parts = roles
     .map((r) => r.trim())
     .filter((r) => r !== "")
     .map((r) => {
       if (r.toUpperCase() === "ALL") return "'ALL'";
-      return SIMPLE_IDENT.test(r) ? r : `"${r.replace(/"/g, '""')}"`;
+      return needsQuoting(r) ? quoteIdent(r) : r;
     });
   return "(" + parts.join(", ") + ")";
 }

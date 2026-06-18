@@ -22,7 +22,11 @@ Object-browser UI for Snowflake **SESSION POLICY** objects.
   allowed/blocked lists (`SET … = ('ALL')` / `(R1, …)` or `UNSET`). The
   parse/serialize helpers (`secondaryRoles.ts`, unit-tested in
   `secondaryRoles.test.ts`) handle both the SQL-tuple and JSON-array shapes
-  `DESCRIBE` may return, and emit role names bare unless they need quoting.
+  `DESCRIBE` may return, and emit role names bare unless they need quoting. The
+  quoting decision is the shared `needsQuoting` (from `shared/ObjectNameCaseControl`,
+  injected so `secondaryRoles.ts` stays runtime-free for tests), which — like the
+  Go `snowflake.NeedsQuoting` the CREATE builder uses — double-quotes reserved
+  keywords too, keeping the ALTER and CREATE paths in sync.
   **Settings** edits the comment. **References** lazily loads
   `GetSessionPolicyReferences` (the users/account the policy is attached to, from
   `ACCOUNT_USAGE.POLICY_REFERENCES`).

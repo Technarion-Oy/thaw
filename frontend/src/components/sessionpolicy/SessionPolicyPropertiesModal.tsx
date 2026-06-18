@@ -21,6 +21,7 @@ import {
   GetObjectProperties, DescribeSessionPolicy, AlterSessionPolicy, GetSessionPolicyReferences,
 } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
+import { needsQuoting } from "../shared/ObjectNameCaseControl";
 import { formatRoles, parseRoles } from "./secondaryRoles";
 
 const { Text } = Typography;
@@ -224,7 +225,7 @@ function RoleRow({ label, value, onSet, onUnset }: RoleRowProps) {
         ) : (
           <Space>
             <span style={{ color: "var(--text)", fontFamily: "var(--font-mono)" }}>
-              {value.length > 0 ? formatRoles(value) : <Text type="secondary">(default)</Text>}
+              {value.length > 0 ? formatRoles(value, needsQuoting) : <Text type="secondary">(default)</Text>}
             </span>
             <Tooltip title="Edit">
               <Button
@@ -396,7 +397,7 @@ export default function SessionPolicyPropertiesModal({ db, schema, name, onClose
   };
 
   const setRoles = async (keyword: string, roles: string[]) => {
-    await AlterSessionPolicy(db, schema, name, `SET ${keyword} = ${formatRoles(roles)}`);
+    await AlterSessionPolicy(db, schema, name, `SET ${keyword} = ${formatRoles(roles, needsQuoting)}`);
     await reload();
   };
 
