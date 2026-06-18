@@ -2455,6 +2455,53 @@ export namespace objects {
 
 }
 
+export namespace passwordpolicy {
+	
+	export class PasswordPolicyConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    minLength?: number;
+	    maxLength?: number;
+	    minUpperCaseChars?: number;
+	    minLowerCaseChars?: number;
+	    minNumericChars?: number;
+	    minSpecialChars?: number;
+	    minAgeDays?: number;
+	    maxAgeDays?: number;
+	    maxRetries?: number;
+	    lockoutTimeMins?: number;
+	    history?: number;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PasswordPolicyConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.minLength = source["minLength"];
+	        this.maxLength = source["maxLength"];
+	        this.minUpperCaseChars = source["minUpperCaseChars"];
+	        this.minLowerCaseChars = source["minLowerCaseChars"];
+	        this.minNumericChars = source["minNumericChars"];
+	        this.minSpecialChars = source["minSpecialChars"];
+	        this.minAgeDays = source["minAgeDays"];
+	        this.maxAgeDays = source["maxAgeDays"];
+	        this.maxRetries = source["maxRetries"];
+	        this.lockoutTimeMins = source["lockoutTimeMins"];
+	        this.history = source["history"];
+	        this.comment = source["comment"];
+	    }
+	}
+
+}
+
 export namespace pipe {
 	
 	export class PipeConfig {

@@ -60,8 +60,27 @@ func QuoteIdent(name string) string {
 }
 
 // EscapeStringLit escapes single-quotes within a SQL string literal value by
-// doubling them. It does not add surrounding single-quote delimiters.
+// doubling them. It deliberately leaves backslashes untouched so that callers
+// emitting delimiter/control values (e.g. a file format's RECORD_DELIMITER =
+// '\n') keep Snowflake's backslash escape sequences intact. For free-text
+// values such as comments — where a backslash should appear literally — use
+// EscapeTextLit instead. It does not add the surrounding single-quote
+// delimiters.
 func EscapeStringLit(s string) string {
+	return strings.ReplaceAll(s, `'`, `''`)
+}
+
+// EscapeTextLit escapes a free-text value for use inside a single-quoted SQL
+// string literal. Snowflake treats the backslash as an escape character within
+// single-quoted literals, so a lone backslash must be doubled or it is
+// swallowed (e.g. "C:\temp" would otherwise be read as "C:temp"). Single-quotes
+// are doubled as well. Backslashes are escaped first so the doubled quotes are
+// not themselves mistaken for an escape sequence. It does not add the
+// surrounding single-quote delimiters. Use this for human-entered text
+// (comments, descriptions); use EscapeStringLit for delimiter/control values
+// where backslash escapes are intentional.
+func EscapeTextLit(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
 	return strings.ReplaceAll(s, `'`, `''`)
 }
 

@@ -20,6 +20,7 @@ import {imagerepository} from '../models';
 import {maskingpolicy} from '../models';
 import {materializedview} from '../models';
 import {networkrule} from '../models';
+import {passwordpolicy} from '../models';
 import {pipe} from '../models';
 import {rowaccesspolicy} from '../models';
 import {secret} from '../models';
@@ -77,6 +78,8 @@ export function AlterMaskingPolicy(arg1:string,arg2:string,arg3:string,arg4:stri
 export function AlterMaterializedView(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterNetworkRule(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterPasswordPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterPipe(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -149,6 +152,8 @@ export function BuildCreateMaskingPolicySql(arg1:string,arg2:string,arg3:masking
 export function BuildCreateMaterializedViewSql(arg1:string,arg2:string,arg3:materializedview.MaterializedViewConfig):Promise<string>;
 
 export function BuildCreateNetworkRuleSql(arg1:string,arg2:string,arg3:networkrule.NetworkRuleConfig):Promise<string>;
+
+export function BuildCreatePasswordPolicySql(arg1:string,arg2:string,arg3:passwordpolicy.PasswordPolicyConfig):Promise<string>;
 
 export function BuildCreatePipeSql(arg1:string,arg2:string,arg3:pipe.PipeConfig):Promise<string>;
 
@@ -277,6 +282,8 @@ export function DescribeDataMetricFunction(arg1:string,arg2:string,arg3:string,a
 export function DescribeDbtProject(arg1:string,arg2:string,arg3:string):Promise<Array<snowflake.PropertyPair>>;
 
 export function DescribeExternalFunction(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.QueryResult>;
+
+export function DescribePasswordPolicy(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function Disconnect():Promise<void>;
 
@@ -417,6 +424,8 @@ export function GetObjectDDL(arg1:string,arg2:string,arg3:string,arg4:string,arg
 export function GetObjectDependencies(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<snowflake.DependencyNode>;
 
 export function GetObjectProperties(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<snowflake.PropertyPair>>;
+
+export function GetPasswordPolicyReferences(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function GetPipRegistryConfig():Promise<config.PipRegistryConfig>;
 

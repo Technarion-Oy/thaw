@@ -14,6 +14,44 @@ import (
 	"testing"
 )
 
+func TestEscapeStringLit(t *testing.T) {
+	// EscapeStringLit doubles quotes but leaves backslashes intact so delimiter
+	// values (e.g. RECORD_DELIMITER = '\n') keep their escape sequences.
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"plain", "plain"},
+		{"it's", "it''s"},
+		{`\n`, `\n`}, // backslash escape sequence preserved verbatim
+	}
+	for _, tt := range tests {
+		if got := EscapeStringLit(tt.in); got != tt.want {
+			t.Errorf("EscapeStringLit(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestEscapeTextLit(t *testing.T) {
+	// EscapeTextLit doubles both quotes and backslashes so free-text (comments)
+	// containing a literal backslash survives Snowflake's escape processing.
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"plain", "plain"},
+		{"it's", "it''s"},
+		{`C:\temp`, `C:\\temp`},              // lone backslash is doubled (Snowflake escape char)
+		{`a\'b`, `a\\''b`},                   // backslash and quote both escaped
+		{`already\\done`, `already\\\\done`}, // each backslash is doubled independently
+	}
+	for _, tt := range tests {
+		if got := EscapeTextLit(tt.in); got != tt.want {
+			t.Errorf("EscapeTextLit(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
 func TestTableKey(t *testing.T) {
 	tests := []struct {
 		schema string
