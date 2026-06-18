@@ -172,28 +172,19 @@ func FormatSecondaryRoles(roles []string) string {
 	return "(" + strings.Join(parts, ", ") + ")"
 }
 
-// splitOnUnquotedCommas splits a comma-separated list while ignoring commas that
-// fall inside a single- or double-quoted segment, so a quoted identifier such as
-// "a,b" is kept whole. It defers to the shared SQL tokenizer: a single-quoted
-// string or double-quoted identifier — including any embedded doubled-quote
-// escapes — scans as one token, so only top-level Comma tokens become split
-// points. The raw source span between split points is returned verbatim — quotes
-// and whitespace intact — for ParseSecondaryRoles to trim and unquote. (This
-// differs from the paren-depth-based splitTopLevelCommas in datatypes.go, which
-// is quote-blind.)
-func splitOnUnquotedCommas(s string) []string {
-	var out []string
-	last := 0
-	for _, tok := range sqltok.Tokenize(s) {
-		switch tok.Kind {
-		case sqltok.Comma:
-			out = append(out, s[last:tok.Start])
-			last = tok.End
-		case sqltok.EOF:
-			out = append(out, s[last:tok.End]) // trailing segment (Start==End==len(s))
-		}
+// unquoteSQLToken returns the value of a quoted token text whose quote character
+// is q — a single quote for a StringLit, a double quote for a QuotedIdent. The
+// surrounding quotes are stripped and any doubled quote (the SQL escape) is
+// collapsed to one. The tokenizer guarantees a leading quote; the trailing quote
+// is absent only for an unterminated token, so it is stripped defensively.
+func unquoteSQLToken(s string, q byte) string {
+	if len(s) > 0 && s[0] == q {
+		s = s[1:]
 	}
-	return out
+	if len(s) > 0 && s[len(s)-1] == q {
+		s = s[:len(s)-1]
+	}
+	return strings.ReplaceAll(s, string([]byte{q, q}), string(q))
 }
 
 // ParseSecondaryRoles is the inverse of FormatSecondaryRoles: it parses a
@@ -204,34 +195,32 @@ func splitOnUnquotedCommas(s string) []string {
 //   - a SQL tuple, e.g. ('ALL') or (R1, "my role"); and
 //   - a JSON-style array, e.g. ["ALL"] or ["R1","R2"].
 //
-// The outer (...) / [...] wrapper is stripped, the body is split on top-level
-// commas (commas inside quotes are preserved), and each entry's surrounding
-// single/double quotes are removed with doubled quotes un-escaped. The "ALL"
-// literal is returned verbatim (as the token "ALL"). An empty / null cell yields
-// nil.
+// It runs the shared SQL tokenizer over the cell and keeps only the value tokens
+// — 'single-quoted' literals and "double-quoted" identifiers (unquoted, with
+// doubled quotes collapsed) plus bare words/numbers — discarding the (), [], and
+// comma punctuation and any whitespace. Quoting and escape handling therefore
+// come straight from the tokenizer, so a quoted role containing a comma or an
+// embedded quote survives intact. The "ALL" literal is returned verbatim (as the
+// token "ALL"). An empty / null cell yields nil.
 func ParseSecondaryRoles(raw string) []string {
-	s := strings.TrimSpace(raw)
-	if s == "" || strings.EqualFold(s, "null") {
-		return nil
-	}
-	if (strings.HasPrefix(s, "(") && strings.HasSuffix(s, ")")) ||
-		(strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]")) {
-		s = s[1 : len(s)-1]
-	}
-	if strings.TrimSpace(s) == "" {
+	if s := strings.TrimSpace(raw); s == "" || strings.EqualFold(s, "null") {
 		return nil
 	}
 	var out []string
-	for _, part := range splitOnUnquotedCommas(s) {
-		p := strings.TrimSpace(part)
-		switch {
-		case len(p) >= 2 && strings.HasPrefix(p, "'") && strings.HasSuffix(p, "'"):
-			p = strings.ReplaceAll(p[1:len(p)-1], "''", "'")
-		case len(p) >= 2 && strings.HasPrefix(p, `"`) && strings.HasSuffix(p, `"`):
-			p = strings.ReplaceAll(p[1:len(p)-1], `""`, `"`)
+	for _, tok := range sqltok.Tokenize(raw) {
+		var v string
+		switch tok.Kind {
+		case sqltok.StringLit:
+			v = unquoteSQLToken(tok.Text(raw), '\'')
+		case sqltok.QuotedIdent:
+			v = unquoteSQLToken(tok.Text(raw), '"')
+		case sqltok.Identifier, sqltok.Keyword, sqltok.NumberLit:
+			v = tok.Text(raw)
+		default:
+			continue // (, ), [, ], comma, whitespace, EOF, …
 		}
-		if p = strings.TrimSpace(p); p != "" {
-			out = append(out, p)
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
 		}
 	}
 	return out
