@@ -63,6 +63,7 @@
   --icon-tag:         #2dd4bf;  /* teal (governance metadata label)         */
   --icon-maskingpolicy:#facc15; /* amber (data masking / sensitive)         */
   --icon-rowaccesspolicy:#a78bfa; /* violet (row-level security)            */
+  --icon-passwordpolicy:#fb7185; /* rose (password / credential rules)      */
   --icon-networkrule: #38bdf8;  /* sky blue (network / connectivity)        */
   --icon-imagerepository:#f472b6; /* pink (container images / SPCS)         */
   --icon-service:     #5eead4;  /* aqua (running SPCS container service)    */
@@ -139,6 +140,7 @@
   --icon-tag:         #0f766e;
   --icon-maskingpolicy:#9a6700;
   --icon-rowaccesspolicy:#7c3aed;
+  --icon-passwordpolicy:#be123c;
   --icon-networkrule: #0a6e9e;
   --icon-imagerepository:#be185d;
   --icon-service:     #0e7490;

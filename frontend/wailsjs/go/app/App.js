@@ -62,6 +62,10 @@ export function AlterNetworkRule(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterNetworkRule'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterPasswordPolicy(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterPasswordPolicy'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterPipe(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterPipe'](arg1, arg2, arg3, arg4);
 }
@@ -204,6 +208,10 @@ export function BuildCreateMaterializedViewSql(arg1, arg2, arg3) {
 
 export function BuildCreateNetworkRuleSql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateNetworkRuleSql'](arg1, arg2, arg3);
+}
+
+export function BuildCreatePasswordPolicySql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreatePasswordPolicySql'](arg1, arg2, arg3);
 }
 
 export function BuildCreatePipeSql(arg1, arg2, arg3) {
@@ -460,6 +468,10 @@ export function DescribeDbtProject(arg1, arg2, arg3) {
 
 export function DescribeExternalFunction(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['DescribeExternalFunction'](arg1, arg2, arg3, arg4);
+}
+
+export function DescribePasswordPolicy(arg1, arg2, arg3) {
+  return window['go']['app']['App']['DescribePasswordPolicy'](arg1, arg2, arg3);
 }
 
 export function Disconnect() {
@@ -740,6 +752,10 @@ export function GetObjectDependencies(arg1, arg2, arg3, arg4, arg5) {
 
 export function GetObjectProperties(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['GetObjectProperties'](arg1, arg2, arg3, arg4);
+}
+
+export function GetPasswordPolicyReferences(arg1, arg2, arg3) {
+  return window['go']['app']['App']['GetPasswordPolicyReferences'](arg1, arg2, arg3);
 }
 
 export function GetPipRegistryConfig() {

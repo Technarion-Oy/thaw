@@ -26,6 +26,7 @@ import (
 	"thaw/internal/maskingpolicy"
 	"thaw/internal/materializedview"
 	"thaw/internal/networkrule"
+	"thaw/internal/passwordpolicy"
 	"thaw/internal/pipe"
 	"thaw/internal/procedure"
 	"thaw/internal/rowaccesspolicy"
@@ -183,6 +184,11 @@ func (a *App) BuildCreateMaskingPolicySql(database, schema string, cfg maskingpo
 // BuildCreateRowAccessPolicySql returns the SQL for creating a Snowflake ROW ACCESS POLICY.
 func (a *App) BuildCreateRowAccessPolicySql(database, schema string, cfg rowaccesspolicy.RowAccessPolicyConfig) (string, error) {
 	return rowaccesspolicy.BuildCreateRowAccessPolicySql(database, schema, cfg)
+}
+
+// BuildCreatePasswordPolicySql returns the SQL for creating a Snowflake PASSWORD POLICY.
+func (a *App) BuildCreatePasswordPolicySql(database, schema string, cfg passwordpolicy.PasswordPolicyConfig) (string, error) {
+	return passwordpolicy.BuildCreatePasswordPolicySql(database, schema, cfg)
 }
 
 // BuildCreateNetworkRuleSql returns the SQL for creating a Snowflake NETWORK RULE.
