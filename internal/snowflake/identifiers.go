@@ -174,39 +174,25 @@ func FormatSecondaryRoles(roles []string) string {
 
 // splitOnUnquotedCommas splits a comma-separated list while ignoring commas that
 // fall inside a single- or double-quoted segment, so a quoted identifier such as
-// "a,b" is kept whole. A doubled quote ("" or ”) inside a quoted segment is the
-// SQL escape for a literal quote and does not end the segment. (This differs from
-// the paren-depth-based splitTopLevelCommas in datatypes.go, which is quote-blind.)
+// "a,b" is kept whole. It defers to the shared SQL tokenizer: a single-quoted
+// string or double-quoted identifier — including any embedded doubled-quote
+// escapes — scans as one token, so only top-level Comma tokens become split
+// points. The raw source span between split points is returned verbatim — quotes
+// and whitespace intact — for ParseSecondaryRoles to trim and unquote. (This
+// differs from the paren-depth-based splitTopLevelCommas in datatypes.go, which
+// is quote-blind.)
 func splitOnUnquotedCommas(s string) []string {
 	var out []string
-	var cur strings.Builder
-	var quote rune // 0 when not inside a quoted segment
-	runes := []rune(s)
-	for i := 0; i < len(runes); i++ {
-		ch := runes[i]
-		switch {
-		case quote != 0:
-			if ch == quote {
-				if i+1 < len(runes) && runes[i+1] == quote { // doubled → escaped quote
-					cur.WriteRune(ch)
-					cur.WriteRune(ch)
-					i++
-					continue
-				}
-				quote = 0
-			}
-			cur.WriteRune(ch)
-		case ch == '"' || ch == '\'':
-			quote = ch
-			cur.WriteRune(ch)
-		case ch == ',':
-			out = append(out, cur.String())
-			cur.Reset()
-		default:
-			cur.WriteRune(ch)
+	last := 0
+	for _, tok := range sqltok.Tokenize(s) {
+		switch tok.Kind {
+		case sqltok.Comma:
+			out = append(out, s[last:tok.Start])
+			last = tok.End
+		case sqltok.EOF:
+			out = append(out, s[last:tok.End]) // trailing segment (Start==End==len(s))
 		}
 	}
-	out = append(out, cur.String())
 	return out
 }
 

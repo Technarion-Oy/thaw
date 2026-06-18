@@ -333,6 +333,7 @@ func TestParseSecondaryRoles(t *testing.T) {
 		{"sql tuple mixing bare and quoted", `(R1, "my role")`, []string{"R1", "my role"}},
 		{"json-style array", `["R1","R2"]`, []string{"R1", "R2"}},
 		{"comma inside a quoted identifier", `(R1, "a,b")`, []string{"R1", "a,b"}},
+		{"comma inside a single-quoted entry", `(R1, 'a,b')`, []string{"R1", "a,b"}},
 		{"escaped doubled double-quote", `("we""ird")`, []string{`we"ird`}},
 		{"empty cell", "", nil},
 		{"null cell", "null", nil},
