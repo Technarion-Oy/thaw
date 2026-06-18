@@ -172,6 +172,85 @@ func FormatSecondaryRoles(roles []string) string {
 	return "(" + strings.Join(parts, ", ") + ")"
 }
 
+// splitOnUnquotedCommas splits a comma-separated list while ignoring commas that
+// fall inside a single- or double-quoted segment, so a quoted identifier such as
+// "a,b" is kept whole. A doubled quote ("" or ”) inside a quoted segment is the
+// SQL escape for a literal quote and does not end the segment. (This differs from
+// the paren-depth-based splitTopLevelCommas in datatypes.go, which is quote-blind.)
+func splitOnUnquotedCommas(s string) []string {
+	var out []string
+	var cur strings.Builder
+	var quote rune // 0 when not inside a quoted segment
+	runes := []rune(s)
+	for i := 0; i < len(runes); i++ {
+		ch := runes[i]
+		switch {
+		case quote != 0:
+			if ch == quote {
+				if i+1 < len(runes) && runes[i+1] == quote { // doubled → escaped quote
+					cur.WriteRune(ch)
+					cur.WriteRune(ch)
+					i++
+					continue
+				}
+				quote = 0
+			}
+			cur.WriteRune(ch)
+		case ch == '"' || ch == '\'':
+			quote = ch
+			cur.WriteRune(ch)
+		case ch == ',':
+			out = append(out, cur.String())
+			cur.Reset()
+		default:
+			cur.WriteRune(ch)
+		}
+	}
+	out = append(out, cur.String())
+	return out
+}
+
+// ParseSecondaryRoles is the inverse of FormatSecondaryRoles: it parses a
+// secondary-role list cell — as returned by DESCRIBE SESSION POLICY — into its
+// individual role tokens. Snowflake does not document the cell's exact format,
+// so two shapes are accepted so a parse → edit → re-serialize round-trip never
+// corrupts the list:
+//   - a SQL tuple, e.g. ('ALL') or (R1, "my role"); and
+//   - a JSON-style array, e.g. ["ALL"] or ["R1","R2"].
+//
+// The outer (...) / [...] wrapper is stripped, the body is split on top-level
+// commas (commas inside quotes are preserved), and each entry's surrounding
+// single/double quotes are removed with doubled quotes un-escaped. The "ALL"
+// literal is returned verbatim (as the token "ALL"). An empty / null cell yields
+// nil.
+func ParseSecondaryRoles(raw string) []string {
+	s := strings.TrimSpace(raw)
+	if s == "" || strings.EqualFold(s, "null") {
+		return nil
+	}
+	if (strings.HasPrefix(s, "(") && strings.HasSuffix(s, ")")) ||
+		(strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]")) {
+		s = s[1 : len(s)-1]
+	}
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range splitOnUnquotedCommas(s) {
+		p := strings.TrimSpace(part)
+		switch {
+		case len(p) >= 2 && strings.HasPrefix(p, "'") && strings.HasSuffix(p, "'"):
+			p = strings.ReplaceAll(p[1:len(p)-1], "''", "'")
+		case len(p) >= 2 && strings.HasPrefix(p, `"`) && strings.HasSuffix(p, `"`):
+			p = strings.ReplaceAll(p[1:len(p)-1], `""`, `"`)
+		}
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // GetQuotedIdentifiersIgnoreCase returns the current session value of the
 // QUOTED_IDENTIFIERS_IGNORE_CASE parameter. When true, Snowflake treats
 // identifiers as case-insensitive regardless of whether they are quoted,

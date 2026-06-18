@@ -1278,6 +1278,10 @@ export function NotebookUseContext(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['NotebookUseContext'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function ParseSecondaryRoles(arg1) {
+  return window['go']['app']['App']['ParseSecondaryRoles'](arg1);
+}
+
 export function PickCACertFile() {
   return window['go']['app']['App']['PickCACertFile']();
 }

@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { describe, expect, it } from "vitest";
-import { formatRoles, parseRoles, reconcileAll } from "./secondaryRoles";
+import { formatRoles, reconcileAll } from "./secondaryRoles";
 
 // Char-only stand-in for the shared needsQuoting the modal injects at runtime:
 // quote anything that isn't a valid bare identifier, plus a sample reserved word
@@ -53,47 +53,9 @@ describe("formatRoles", () => {
   });
 });
 
-describe("parseRoles", () => {
-  it("parses a SQL tuple with the ALL literal", () => {
-    expect(parseRoles("('ALL')")).toEqual(["ALL"]);
-  });
-
-  it("parses a SQL tuple of bare identifiers", () => {
-    expect(parseRoles("(R1, R2)")).toEqual(["R1", "R2"]);
-  });
-
-  it("parses a SQL tuple mixing bare and quoted entries", () => {
-    expect(parseRoles('(R1, "my role")')).toEqual(["R1", "my role"]);
-  });
-
-  it("parses a JSON-style array (the form many list columns use)", () => {
-    expect(parseRoles('["ALL"]')).toEqual(["ALL"]);
-    expect(parseRoles('["R1","R2"]')).toEqual(["R1", "R2"]);
-  });
-
-  it("treats empty / null / empty-tuple as no roles", () => {
-    expect(parseRoles("")).toEqual([]);
-    expect(parseRoles("null")).toEqual([]);
-    expect(parseRoles("()")).toEqual([]);
-    expect(parseRoles("[]")).toEqual([]);
-  });
-
-  it("keeps a comma inside a quoted identifier", () => {
-    expect(parseRoles('(R1, "a,b")')).toEqual(["R1", "a,b"]);
-  });
-
-  it("un-doubles an escaped double-quote in a quoted identifier", () => {
-    expect(parseRoles('("we""ird")')).toEqual(['we"ird']);
-  });
-
-  it("round-trips formatRoles output", () => {
-    for (const roles of [["ALL"], ["R1", "R2"], ["analyst"], ["a,b"], ['we"ird']]) {
-      expect(parseRoles(formatRoles(roles, needsQuoting))).toEqual(
-        roles.map((r) => (r.toUpperCase() === "ALL" ? "ALL" : r)),
-      );
-    }
-  });
-});
+// The inverse parse (DESCRIBE cell → role tokens) now lives in Go as
+// snowflake.ParseSecondaryRoles and is covered by TestParseSecondaryRoles /
+// TestSecondaryRolesRoundTrip in internal/snowflake/identifiers_test.go.
 
 describe("reconcileAll", () => {
   it("collapses to ALL when ALL is added last", () => {

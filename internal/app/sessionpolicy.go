@@ -49,6 +49,17 @@ func (a *App) DescribeSessionPolicy(database, schema, name string) (*snowflake.Q
 	return a.client.QuerySingle(a.ctx, query)
 }
 
+// ParseSecondaryRoles parses a secondary-role list cell as returned by
+// DESCRIBE SESSION POLICY (e.g. ('ALL'), (R1, "my role"), or a JSON-style
+// ["R1","R2"]) into its individual role tokens. It is the inverse of the
+// snowflake.FormatSecondaryRoles serializer used by the CREATE/ALTER builders,
+// exposed so the Session Policy properties modal round-trips the allowed/blocked
+// lists through one shared, quote-aware implementation rather than re-deriving
+// the parse in TypeScript. Pure string handling — no Snowflake connection needed.
+func (a *App) ParseSecondaryRoles(raw string) []string {
+	return snowflake.ParseSecondaryRoles(raw)
+}
+
 // GetSessionPolicyReferences returns the users (and/or the account) to which the
 // given session policy is currently attached, by querying
 // SNOWFLAKE.ACCOUNT_USAGE.POLICY_REFERENCES filtered to POLICY_KIND =

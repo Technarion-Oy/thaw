@@ -11,6 +11,7 @@
 package snowflake
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -318,5 +319,67 @@ func TestFormatSecondaryRoles(t *testing.T) {
 				t.Errorf("FormatSecondaryRoles(%v) = %q, want %q", tt.roles, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestParseSecondaryRoles(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want []string
+	}{
+		{"sql tuple with ALL literal", "('ALL')", []string{"ALL"}},
+		{"sql tuple of bare identifiers", "(R1, R2)", []string{"R1", "R2"}},
+		{"sql tuple mixing bare and quoted", `(R1, "my role")`, []string{"R1", "my role"}},
+		{"json-style array", `["R1","R2"]`, []string{"R1", "R2"}},
+		{"comma inside a quoted identifier", `(R1, "a,b")`, []string{"R1", "a,b"}},
+		{"escaped doubled double-quote", `("we""ird")`, []string{`we"ird`}},
+		{"empty cell", "", nil},
+		{"null cell", "null", nil},
+		{"empty tuple", "()", nil},
+		{"empty array", "[]", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseSecondaryRoles(tt.raw)
+			if len(got) != len(tt.want) {
+				t.Fatalf("ParseSecondaryRoles(%q) = %v, want %v", tt.raw, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("ParseSecondaryRoles(%q)[%d] = %q, want %q", tt.raw, i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+// TestSecondaryRolesRoundTrip verifies FormatSecondaryRoles → ParseSecondaryRoles
+// recovers the original role tokens (with ALL normalized to its canonical form),
+// including names that need quoting or contain a comma / embedded quote.
+func TestSecondaryRolesRoundTrip(t *testing.T) {
+	cases := [][]string{
+		{"ALL"},
+		{"R1", "R2"},
+		{"analyst"},
+		{"my role"},
+		{"a,b"},
+		{`we"ird`},
+		{"ORDER"},
+	}
+	for _, roles := range cases {
+		got := ParseSecondaryRoles(FormatSecondaryRoles(roles))
+		if len(got) != len(roles) {
+			t.Fatalf("round-trip %v = %v, length mismatch", roles, got)
+		}
+		for i := range roles {
+			want := roles[i]
+			if strings.EqualFold(want, "ALL") {
+				want = "ALL"
+			}
+			if got[i] != want {
+				t.Errorf("round-trip %v: got[%d] = %q, want %q", roles, i, got[i], want)
+			}
+		}
 	}
 }

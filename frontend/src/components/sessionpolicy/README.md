@@ -25,13 +25,17 @@ Object-browser UI for Snowflake **SESSION POLICY** objects.
   also applies `reconcileAll`). Snowflake's `DESCRIBE SESSION POLICY` documents
   only `allowed_secondary_roles`; if the `blocked_secondary_roles` column is
   absent from the result the **Blocked** row shows `(unknown)` with a caveat that
-  editing sets it blind, rather than misleadingly rendering `(default)`. The
-  parse/serialize helpers (`secondaryRoles.ts`, unit-tested in
-  `secondaryRoles.test.ts`) handle both the SQL-tuple and JSON-array shapes
-  `DESCRIBE` may return, and emit role names bare unless they need quoting. The
-  quoting decision is the shared `needsQuoting` (from `shared/ObjectNameCaseControl`,
-  injected so `secondaryRoles.ts` stays runtime-free for tests), which — like the
-  Go `snowflake.NeedsQuoting` the CREATE builder uses — double-quotes reserved
+  editing sets it blind, rather than misleadingly rendering `(default)`. Each
+  DESCRIBE cell is parsed back into role tokens server-side via
+  `App.ParseSecondaryRoles` (the Go `snowflake.ParseSecondaryRoles`, inverse of
+  `FormatSecondaryRoles` — quote-aware, handling both the SQL-tuple and
+  JSON-array shapes), so the parse/serialize round-trip has a single source of
+  truth. The frontend `secondaryRoles.ts` (unit-tested in `secondaryRoles.test.ts`)
+  keeps only `formatRoles` (the ALTER serializer) and `reconcileAll`, emitting
+  role names bare unless they need quoting. The quoting decision is the shared
+  `needsQuoting` (from `shared/ObjectNameCaseControl`, injected so
+  `secondaryRoles.ts` stays runtime-free for tests), which — like the Go
+  `snowflake.NeedsQuoting` the CREATE builder uses — double-quotes reserved
   keywords too, keeping the ALTER and CREATE paths in sync.
   **Settings** edits the comment. **References** lazily loads
   `GetSessionPolicyReferences` (the users/account the policy is attached to, from

@@ -19,10 +19,11 @@ import {
 } from "@ant-design/icons";
 import {
   GetObjectProperties, DescribeSessionPolicy, AlterSessionPolicy, GetSessionPolicyReferences,
+  ParseSecondaryRoles,
 } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { needsQuoting } from "../shared/ObjectNameCaseControl";
-import { formatRoles, parseRoles, reconcileAll } from "./secondaryRoles";
+import { formatRoles, reconcileAll } from "./secondaryRoles";
 
 const { Text } = Typography;
 
@@ -44,8 +45,9 @@ const LABEL_TD: React.CSSProperties = {
 // snowflake.EscapeTextLit (backslash doubled, single-quotes doubled).
 function q1(s: string) { return "'" + s.replace(/\\/g, "\\\\").replace(/'/g, "''") + "'"; }
 
-// formatRoles / parseRoles live in secondaryRoles.ts (unit-tested) so the
-// parse → edit → re-serialize round-trip is covered.
+// formatRoles (serialize) lives in secondaryRoles.ts; the inverse parse is the
+// Go snowflake.ParseSecondaryRoles, reached via the App.ParseSecondaryRoles IPC
+// in reload(), so the round-trip has a single shared implementation.
 
 // The four session-policy timeout parameters, in Snowflake's documented order,
 // paired with their ALTER keyword, valid range, and default. The current value
@@ -370,6 +372,13 @@ export default function SessionPolicyPropertiesModal({ db, schema, name, onClose
   // DESCRIBE SESSION POLICY result (single row, one column per property).
   const [desc, setDesc] = useState<snowflake.QueryResult | null>(null);
 
+  // Allowed/Blocked secondary-role lists parsed from the DESCRIBE cells. Parsing
+  // is done in the backend (App.ParseSecondaryRoles, the inverse of the Go
+  // FormatSecondaryRoles serializer) so the round-trip has a single source of
+  // truth rather than a re-implementation here.
+  const [allowedRoles, setAllowedRoles] = useState<string[]>([]);
+  const [blockedRoles, setBlockedRoles] = useState<string[]>([]);
+
   // References (users/account the policy is attached to) — loaded on demand
   // because the ACCOUNT_USAGE view is slow and may be restricted.
   const [refs, setRefs] = useState<snowflake.QueryResult | null>(null);
@@ -386,6 +395,21 @@ export default function SessionPolicyPropertiesModal({ db, schema, name, onClose
       ]);
       setRows(props ?? []);
       setDesc(d);
+
+      // Pull the raw role cells out of the single DESCRIBE row by column name and
+      // parse them server-side. Columns may be absent (blocked in particular).
+      const cols = (d?.columns ?? []).map((c) => c.toLowerCase());
+      const rawCell = (col: string) => {
+        const ci = cols.indexOf(col);
+        const cell = ci >= 0 && d?.rows?.[0] ? d.rows[0][ci] : null;
+        return cell == null ? "" : String(cell);
+      };
+      const [allowed, blocked] = await Promise.all([
+        ParseSecondaryRoles(rawCell("allowed_secondary_roles")),
+        ParseSecondaryRoles(rawCell("blocked_secondary_roles")),
+      ]);
+      setAllowedRoles(allowed ?? []);
+      setBlockedRoles(blocked ?? []);
     } catch (e) {
       setError(String(e));
     }
@@ -456,8 +480,6 @@ export default function SessionPolicyPropertiesModal({ db, schema, name, onClose
   // Comment is read from DESCRIBE for consistency with every other field, falling
   // back to the SHOW SESSION POLICIES row if DESCRIBE failed / omitted it.
   const comment = descCols.has("comment") ? descByCol["comment"] : find("comment");
-  const allowedRoles = parseRoles(descByCol["allowed_secondary_roles"] ?? "");
-  const blockedRoles = parseRoles(descByCol["blocked_secondary_roles"] ?? "");
 
   // Snowflake's DESCRIBE SESSION POLICY may omit blocked_secondary_roles entirely
   // (only allowed_secondary_roles is documented). When the column is absent we
