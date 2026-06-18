@@ -25,6 +25,7 @@ import {pipe} from '../models';
 import {rowaccesspolicy} from '../models';
 import {secret} from '../models';
 import {service} from '../models';
+import {sessionpolicy} from '../models';
 import {streamlit} from '../models';
 import {tag} from '../models';
 import {erdesigner} from '../models';
@@ -86,6 +87,8 @@ export function AlterPipe(arg1:string,arg2:string,arg3:string,arg4:string):Promi
 export function AlterRowAccessPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterService(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterSessionPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterStage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -162,6 +165,8 @@ export function BuildCreateRowAccessPolicySql(arg1:string,arg2:string,arg3:rowac
 export function BuildCreateSecretSql(arg1:string,arg2:string,arg3:secret.SecretConfig):Promise<string>;
 
 export function BuildCreateServiceSql(arg1:string,arg2:string,arg3:service.ServiceConfig):Promise<string>;
+
+export function BuildCreateSessionPolicySql(arg1:string,arg2:string,arg3:sessionpolicy.SessionPolicyConfig):Promise<string>;
 
 export function BuildCreateStageSql(arg1:stage.StageConfig):Promise<string>;
 
@@ -285,6 +290,8 @@ export function DescribeExternalFunction(arg1:string,arg2:string,arg3:string,arg
 
 export function DescribePasswordPolicy(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
+export function DescribeSessionPolicy(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
+
 export function Disconnect():Promise<void>;
 
 export function DownloadFileFromStage(arg1:string,arg2:string,arg3:number,arg4:string):Promise<void>;
@@ -336,6 +343,8 @@ export function ExportTableData(arg1:snowflake.ExportTableParams):Promise<snowfl
 export function FetchNotebookContent(arg1:string,arg2:string,arg3:string):Promise<string>;
 
 export function FindJoinPaths(arg1:Array<erdesigner.TableRef>,arg2:Array<snowflake.ERForeignKey>):Promise<Array<erdesigner.JoinPath>>;
+
+export function FormatSecondaryRoles(arg1:Array<string>):Promise<string>;
 
 export function GenerateKeyPair(arg1:string,arg2:string,arg3:string):Promise<keypair.KeyPairResult>;
 
@@ -466,6 +475,8 @@ export function GetSessionContext(arg1:string):Promise<snowflake.SessionContext>
 export function GetSessionInitMode():Promise<string>;
 
 export function GetSessionParameters():Promise<Array<snowflake.SessionParam>>;
+
+export function GetSessionPolicyReferences(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function GetSessionVariables():Promise<Array<snowflake.SessionVar>>;
 
@@ -679,6 +690,8 @@ export function NewNotebook():Promise<string>;
 
 export function NotebookUseContext(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
+export function ParseSecondaryRoles(arg1:string):Promise<Array<string>>;
+
 export function PickCACertFile():Promise<string>;
 
 export function PickDataFile():Promise<string>;
@@ -708,6 +721,8 @@ export function ReadFile(arg1:string):Promise<string>;
 export function ReadFileHead(arg1:string,arg2:number):Promise<string>;
 
 export function ReadNotebook(arg1:string):Promise<string>;
+
+export function ReconcileSecondaryRoles(arg1:Array<string>):Promise<Array<string>>;
 
 export function RemoveEditorTab(arg1:string):Promise<void>;
 

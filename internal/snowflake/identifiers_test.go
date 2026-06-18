@@ -11,6 +11,7 @@
 package snowflake
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -294,5 +295,127 @@ func TestSplitIdentList(t *testing.T) {
 	}
 	if got := SplitIdentList("", false); len(got) != 0 {
 		t.Errorf("SplitIdentList(\"\") = %v, want empty", got)
+	}
+}
+
+func TestFormatSecondaryRoles(t *testing.T) {
+	tests := []struct {
+		name  string
+		roles []string
+		want  string
+	}{
+		{"all literal", []string{"ALL"}, "('ALL')"},
+		{"all case-insensitive", []string{"all"}, "('ALL')"},
+		{"simple roles emitted bare", []string{"R1", "R2"}, "(R1, R2)"},
+		{"lowercase emitted bare (Snowflake uppercases)", []string{"analyst"}, "(analyst)"},
+		{"role needing quoting is double-quoted", []string{"my role"}, `("my role")`},
+		{"reserved keyword is double-quoted", []string{"ORDER"}, `("ORDER")`},
+		{"blank entries skipped", []string{"", "  ", "R1"}, "(R1)"},
+		{"empty list", []string{}, "()"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := FormatSecondaryRoles(tt.roles); got != tt.want {
+				t.Errorf("FormatSecondaryRoles(%v) = %q, want %q", tt.roles, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseSecondaryRoles(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want []string
+	}{
+		{"sql tuple with ALL literal", "('ALL')", []string{"ALL"}},
+		{"sql tuple of bare identifiers", "(R1, R2)", []string{"R1", "R2"}},
+		{"sql tuple mixing bare and quoted", `(R1, "my role")`, []string{"R1", "my role"}},
+		{"json-style array", `["R1","R2"]`, []string{"R1", "R2"}},
+		{"comma inside a quoted identifier", `(R1, "a,b")`, []string{"R1", "a,b"}},
+		{"comma inside a single-quoted entry", `(R1, 'a,b')`, []string{"R1", "a,b"}},
+		{"escaped doubled double-quote", `("we""ird")`, []string{`we"ird`}},
+		{"escaped doubled single-quote", `('o''brien')`, []string{"o'brien"}},
+		{"blank entries between commas are skipped", "(R1, , R2)", []string{"R1", "R2"}},
+		{"surrounding whitespace is trimmed", "  ( R1 , R2 )  ", []string{"R1", "R2"}},
+		{"bare unquoted ALL keyword", "(ALL)", []string{"ALL"}},
+		{"empty cell", "", nil},
+		{"whitespace-only cell", "   ", nil},
+		{"null cell", "null", nil},
+		{"empty tuple", "()", nil},
+		{"empty array", "[]", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseSecondaryRoles(tt.raw)
+			if len(got) != len(tt.want) {
+				t.Fatalf("ParseSecondaryRoles(%q) = %v, want %v", tt.raw, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("ParseSecondaryRoles(%q)[%d] = %q, want %q", tt.raw, i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+// TestSecondaryRolesRoundTrip verifies FormatSecondaryRoles → ParseSecondaryRoles
+// recovers the original role tokens (with ALL normalized to its canonical form),
+// including names that need quoting or contain a comma / embedded quote.
+func TestSecondaryRolesRoundTrip(t *testing.T) {
+	cases := [][]string{
+		{"ALL"},
+		{"R1", "R2"},
+		{"analyst"},
+		{"my role"},
+		{"a,b"},
+		{`we"ird`},
+		{"ORDER"},
+	}
+	for _, roles := range cases {
+		got := ParseSecondaryRoles(FormatSecondaryRoles(roles))
+		if len(got) != len(roles) {
+			t.Fatalf("round-trip %v = %v, length mismatch", roles, got)
+		}
+		for i := range roles {
+			want := roles[i]
+			if strings.EqualFold(want, "ALL") {
+				want = "ALL"
+			}
+			if got[i] != want {
+				t.Errorf("round-trip %v: got[%d] = %q, want %q", roles, i, got[i], want)
+			}
+		}
+	}
+}
+
+func TestReconcileSecondaryRoles(t *testing.T) {
+	tests := []struct {
+		name  string
+		roles []string
+		want  []string
+	}{
+		{"collapses to ALL when ALL added last", []string{"R1", "R2", "ALL"}, []string{"ALL"}},
+		{"drops ALL when a named role added after it", []string{"ALL", "R1"}, []string{"R1"}},
+		{"drops ALL keeping all later roles", []string{"ALL", "R1", "R2"}, []string{"R1", "R2"}},
+		{"sole ALL untouched", []string{"ALL"}, []string{"ALL"}},
+		{"named-only list untouched", []string{"R1", "R2"}, []string{"R1", "R2"}},
+		{"empty list untouched", []string{}, []string{}},
+		{"lowercase all added last collapses to canonical ALL", []string{"r1", "all"}, []string{"ALL"}},
+		{"role after lowercase all still drops it", []string{"all", "r1"}, []string{"r1"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ReconcileSecondaryRoles(tt.roles)
+			if len(got) != len(tt.want) {
+				t.Fatalf("ReconcileSecondaryRoles(%v) = %v, want %v", tt.roles, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("ReconcileSecondaryRoles(%v)[%d] = %q, want %q", tt.roles, i, got[i], tt.want[i])
+				}
+			}
+		})
 	}
 }

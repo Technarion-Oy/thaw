@@ -3057,6 +3057,43 @@ export namespace service {
 
 }
 
+export namespace sessionpolicy {
+	
+	export class SessionPolicyConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    idleTimeoutMins?: number;
+	    uiIdleTimeoutMins?: number;
+	    maxLifespanMins?: number;
+	    uiMaxLifespanMins?: number;
+	    allowedSecondaryRoles: string[];
+	    blockedSecondaryRoles: string[];
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SessionPolicyConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.idleTimeoutMins = source["idleTimeoutMins"];
+	        this.uiIdleTimeoutMins = source["uiIdleTimeoutMins"];
+	        this.maxLifespanMins = source["maxLifespanMins"];
+	        this.uiMaxLifespanMins = source["uiMaxLifespanMins"];
+	        this.allowedSecondaryRoles = source["allowedSecondaryRoles"];
+	        this.blockedSecondaryRoles = source["blockedSecondaryRoles"];
+	        this.comment = source["comment"];
+	    }
+	}
+
+}
+
 export namespace sfconfig {
 	
 	export class Connection {

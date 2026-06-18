@@ -78,6 +78,10 @@ export function AlterService(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterService'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterSessionPolicy(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterSessionPolicy'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterStage(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterStage'](arg1, arg2, arg3, arg4);
 }
@@ -228,6 +232,10 @@ export function BuildCreateSecretSql(arg1, arg2, arg3) {
 
 export function BuildCreateServiceSql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateServiceSql'](arg1, arg2, arg3);
+}
+
+export function BuildCreateSessionPolicySql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateSessionPolicySql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateStageSql(arg1) {
@@ -474,6 +482,10 @@ export function DescribePasswordPolicy(arg1, arg2, arg3) {
   return window['go']['app']['App']['DescribePasswordPolicy'](arg1, arg2, arg3);
 }
 
+export function DescribeSessionPolicy(arg1, arg2, arg3) {
+  return window['go']['app']['App']['DescribeSessionPolicy'](arg1, arg2, arg3);
+}
+
 export function Disconnect() {
   return window['go']['app']['App']['Disconnect']();
 }
@@ -576,6 +588,10 @@ export function FetchNotebookContent(arg1, arg2, arg3) {
 
 export function FindJoinPaths(arg1, arg2) {
   return window['go']['app']['App']['FindJoinPaths'](arg1, arg2);
+}
+
+export function FormatSecondaryRoles(arg1) {
+  return window['go']['app']['App']['FormatSecondaryRoles'](arg1);
 }
 
 export function GenerateKeyPair(arg1, arg2, arg3) {
@@ -836,6 +852,10 @@ export function GetSessionInitMode() {
 
 export function GetSessionParameters() {
   return window['go']['app']['App']['GetSessionParameters']();
+}
+
+export function GetSessionPolicyReferences(arg1, arg2, arg3) {
+  return window['go']['app']['App']['GetSessionPolicyReferences'](arg1, arg2, arg3);
 }
 
 export function GetSessionVariables() {
@@ -1262,6 +1282,10 @@ export function NotebookUseContext(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['NotebookUseContext'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function ParseSecondaryRoles(arg1) {
+  return window['go']['app']['App']['ParseSecondaryRoles'](arg1);
+}
+
 export function PickCACertFile() {
   return window['go']['app']['App']['PickCACertFile']();
 }
@@ -1320,6 +1344,10 @@ export function ReadFileHead(arg1, arg2) {
 
 export function ReadNotebook(arg1) {
   return window['go']['app']['App']['ReadNotebook'](arg1);
+}
+
+export function ReconcileSecondaryRoles(arg1) {
+  return window['go']['app']['App']['ReconcileSecondaryRoles'](arg1);
 }
 
 export function RemoveEditorTab(arg1) {

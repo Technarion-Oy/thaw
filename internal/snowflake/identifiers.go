@@ -13,6 +13,7 @@ package snowflake
 import (
 	"context"
 	"regexp"
+	"slices"
 	"strings"
 
 	"thaw/internal/sqltok"
@@ -143,6 +144,124 @@ func QuoteIdentList(names []string, caseSensitive bool) []string {
 // entry).
 func SplitIdentList(s string, caseSensitive bool) []string {
 	return QuoteIdentList(SplitValues(s), caseSensitive)
+}
+
+// FormatSecondaryRoles renders a Snowflake secondary-role list value — the
+// ( 'ALL' | <role> [, <role> ...] ) grammar shared by ALLOWED_SECONDARY_ROLES /
+// BLOCKED_SECONDARY_ROLES (session and authentication policies) and
+// DEFAULT_SECONDARY_ROLES (ALTER USER). The special token "ALL"
+// (case-insensitive) becomes the quoted string literal 'ALL'; every other entry
+// is treated as a role identifier and emitted via QuoteOrBare(role, false) —
+// bare when it is a valid unquoted identifier (so "analyst" resolves to role
+// ANALYST, matching Snowflake's uppercasing of unquoted names) and double-quoted
+// only when it needs quoting (special characters or a reserved keyword). Blank
+// entries are skipped. The result is parenthesized, e.g. ('ALL'), (R1, R2),
+// ("my role"), or ().
+//
+// Limitation: a role whose name is a valid bare identifier is emitted unquoted
+// even if it was created case-sensitively in lower/mixed case (e.g. a role named
+// "analyst"). Snowflake uppercases the bare form, so such a role round-trips to
+// ANALYST — a different role. This is inherent to the QuoteOrBare (and Snowflake)
+// bare-identifier convention; case-sensitive role names are rare, but for them the
+// parse → format round-trip is not strictly lossless.
+func FormatSecondaryRoles(roles []string) string {
+	parts := make([]string, 0, len(roles))
+	for _, r := range roles {
+		r = strings.TrimSpace(r)
+		if r == "" {
+			continue
+		}
+		if strings.EqualFold(r, "ALL") {
+			parts = append(parts, "'ALL'")
+		} else {
+			parts = append(parts, QuoteOrBare(r, false))
+		}
+	}
+	return "(" + strings.Join(parts, ", ") + ")"
+}
+
+// ReconcileSecondaryRoles enforces the secondary-role grammar's mutual
+// exclusivity — `( { 'ALL' | <role_name> [, ...] } )`, where the ALL token cannot
+// be mixed with named roles. Given a tag selection in selection order (as the UI's
+// tag picker reports it), it keeps whichever kind was chosen last: if ALL was just
+// added it collapses to ["ALL"]; if a named role was added while ALL was already
+// present it drops ALL. Lists without ALL, or with a single entry, pass through
+// unchanged. It prevents the invalid ('ALL', R1) clause that Snowflake would
+// otherwise reject only at execution time.
+func ReconcileSecondaryRoles(roles []string) []string {
+	isAll := func(r string) bool { return strings.EqualFold(strings.TrimSpace(r), "ALL") }
+	if len(roles) <= 1 || !slices.ContainsFunc(roles, isAll) {
+		return roles
+	}
+	if isAll(roles[len(roles)-1]) {
+		return []string{"ALL"}
+	}
+	out := make([]string, 0, len(roles))
+	for _, r := range roles {
+		if !isAll(r) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// unquoteSQLToken returns the value of a quoted token text whose quote character
+// is q — a single quote for a StringLit, a double quote for a QuotedIdent. The
+// surrounding quotes are stripped and any doubled quote (the SQL escape) is
+// collapsed to one. The tokenizer guarantees a leading quote; the trailing quote
+// is absent only for an unterminated token, so it is stripped defensively.
+func unquoteSQLToken(s string, q byte) string {
+	if len(s) > 0 && s[0] == q {
+		s = s[1:]
+	}
+	if len(s) > 0 && s[len(s)-1] == q {
+		s = s[:len(s)-1]
+	}
+	return strings.ReplaceAll(s, string([]byte{q, q}), string(q))
+}
+
+// ParseSecondaryRoles is the inverse of FormatSecondaryRoles: it parses a
+// secondary-role list cell — as returned by DESCRIBE SESSION POLICY — into its
+// individual role tokens. Snowflake does not document the cell's exact format,
+// so two shapes are accepted so a parse → edit → re-serialize round-trip never
+// corrupts the list:
+//   - a SQL tuple, e.g. ('ALL') or (R1, "my role"); and
+//   - a JSON-style array, e.g. ["ALL"] or ["R1","R2"].
+//
+// It runs the shared SQL tokenizer over the cell and keeps only the value tokens
+// — 'single-quoted' literals and "double-quoted" identifiers (unquoted, with
+// doubled quotes collapsed) plus bare words/numbers — discarding the (), [], and
+// comma punctuation and any whitespace. Quoting and escape handling therefore
+// come straight from the tokenizer, so a quoted role containing a comma or an
+// embedded quote survives intact. The "ALL" literal is returned verbatim (as the
+// token "ALL"). An empty / null cell yields nil.
+//
+// Note: the JSON-array shape is handled only insofar as JSON double-quotes scan
+// as QuotedIdent tokens; a JSON backslash escape (e.g. \") would be un-escaped the
+// SQL way (doubled quotes), not the JSON way. Role names never contain such
+// characters in practice, so this does not arise for real DESCRIBE output.
+func ParseSecondaryRoles(raw string) []string {
+	if s := strings.TrimSpace(raw); s == "" || strings.EqualFold(s, "null") {
+		return nil
+	}
+	var out []string
+	for _, tok := range sqltok.Tokenize(raw) {
+		var v string
+		switch tok.Kind {
+		case sqltok.StringLit:
+			v = unquoteSQLToken(tok.Text(raw), '\'')
+		case sqltok.QuotedIdent:
+			v = unquoteSQLToken(tok.Text(raw), '"')
+		case sqltok.Identifier, sqltok.Keyword, sqltok.NumberLit:
+			v = tok.Text(raw)
+		default:
+			continue // (, ), [, ], comma, whitespace, EOF, …
+		}
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // GetQuotedIdentifiersIgnoreCase returns the current session value of the

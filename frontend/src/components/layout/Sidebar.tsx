@@ -60,6 +60,7 @@ import {
   EyeInvisibleOutlined,
   SafetyOutlined,
   SafetyCertificateOutlined,
+  FieldTimeOutlined,
   GlobalOutlined,
   ContainerOutlined,
   DeploymentUnitOutlined,
@@ -147,6 +148,8 @@ import CreateMaskingPolicyModal from "../maskingpolicy/CreateMaskingPolicyModal"
 import MaskingPolicyPropertiesModal from "../maskingpolicy/MaskingPolicyPropertiesModal";
 import CreatePasswordPolicyModal from "../passwordpolicy/CreatePasswordPolicyModal";
 import PasswordPolicyPropertiesModal from "../passwordpolicy/PasswordPolicyPropertiesModal";
+import CreateSessionPolicyModal from "../sessionpolicy/CreateSessionPolicyModal";
+import SessionPolicyPropertiesModal from "../sessionpolicy/SessionPolicyPropertiesModal";
 import CreateRowAccessPolicyModal from "../rowaccesspolicy/CreateRowAccessPolicyModal";
 import RowAccessPolicyPropertiesModal from "../rowaccesspolicy/RowAccessPolicyPropertiesModal";
 import CreateNetworkRuleModal from "../networkrule/CreateNetworkRuleModal";
@@ -187,6 +190,7 @@ const KIND_LABEL: Record<string, string> = {
   "MASKING POLICY": "Masking Policies",
   "ROW ACCESS POLICY": "Row Access Policies",
   "PASSWORD POLICY": "Password Policies",
+  "SESSION POLICY": "Session Policies",
   "NETWORK RULE": "Network Rules",
   "IMAGE REPOSITORY": "Image Repositories",
   SERVICE:       "Services",
@@ -207,7 +211,7 @@ const KIND_LABEL: Record<string, string> = {
   "DBT PROJECT": "DBT Projects",
 };
 
-const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE", "FUNCTION", "EXTERNAL FUNCTION", "DATA METRIC FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "PASSWORD POLICY", "NETWORK RULE", "IMAGE REPOSITORY", "SERVICE", "STREAMLIT", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT"];
+const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE", "FUNCTION", "EXTERNAL FUNCTION", "DATA METRIC FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "PASSWORD POLICY", "SESSION POLICY", "NETWORK RULE", "IMAGE REPOSITORY", "SERVICE", "STREAMLIT", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT"];
 
 const kindIcon = (kind: string) => objectIcon(kind);
 
@@ -648,6 +652,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [maskingPolicyPropsModal, setMaskingPolicyPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createPasswordPolicyModal, setCreatePasswordPolicyModal] = useState<{ db: string; schema: string } | null>(null);
   const [passwordPolicyPropsModal, setPasswordPolicyPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [createSessionPolicyModal, setCreateSessionPolicyModal] = useState<{ db: string; schema: string } | null>(null);
+  const [sessionPolicyPropsModal, setSessionPolicyPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createRowAccessPolicyModal, setCreateRowAccessPolicyModal] = useState<{ db: string; schema: string } | null>(null);
   const [rowAccessPolicyPropsModal, setRowAccessPolicyPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createNetworkRuleModal, setCreateNetworkRuleModal] = useState<{ db: string; schema: string } | null>(null);
@@ -2251,6 +2257,25 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setPasswordPolicyPropsModal({ db, schema, name });
   };
 
+  const openCreateSessionPolicy = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    setCtxMenu(null);
+    setCreateSessionPolicyModal({ db, schema });
+  };
+
+  const openSessionPolicyProperties = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    setSessionPolicyPropsModal({ db, schema, name });
+  };
+
   const openCreateRowAccessPolicy = () => {
     if (!ctxMenu) return;
     const parts = ctxMenu.nodeKey.split(":");
@@ -2741,6 +2766,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       case "MASKING POLICY": sql = `DROP MASKING POLICY ${fullName};`; break;
       case "ROW ACCESS POLICY": sql = `DROP ROW ACCESS POLICY ${fullName};`; break;
       case "PASSWORD POLICY": sql = `DROP PASSWORD POLICY ${fullName};`; break;
+      case "SESSION POLICY": sql = `DROP SESSION POLICY ${fullName};`; break;
       case "NETWORK RULE": sql = `DROP NETWORK RULE ${fullName};`; break;
       case "IMAGE REPOSITORY": sql = `DROP IMAGE REPOSITORY ${fullName};`; break;
       case "SERVICE":     sql = `DROP SERVICE ${fullName};`; break;
@@ -3396,6 +3422,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         case "MASKING POLICY": return `DROP MASKING POLICY ${fullName};`;
         case "ROW ACCESS POLICY": return `DROP ROW ACCESS POLICY ${fullName};`;
         case "PASSWORD POLICY": return `DROP PASSWORD POLICY ${fullName};`;
+        case "SESSION POLICY": return `DROP SESSION POLICY ${fullName};`;
         case "NETWORK RULE": return `DROP NETWORK RULE ${fullName};`;
         case "IMAGE REPOSITORY": return `DROP IMAGE REPOSITORY ${fullName};`;
         case "SERVICE":     return `DROP SERVICE ${fullName};`;
@@ -3932,6 +3959,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                   {menuItem("Masking Policy…", <EyeInvisibleOutlined style={{ fontSize: 12 }} />, openCreateMaskingPolicy)}
                   {menuItem("Row Access Policy…", <SafetyOutlined style={{ fontSize: 12 }} />, openCreateRowAccessPolicy)}
                   {menuItem("Password Policy…", <SafetyCertificateOutlined style={{ fontSize: 12 }} />, openCreatePasswordPolicy)}
+                  {menuItem("Session Policy…", <FieldTimeOutlined style={{ fontSize: 12 }} />, openCreateSessionPolicy)}
                   {menuItem("Network Rule…", <GlobalOutlined style={{ fontSize: 12 }} />, openCreateNetworkRule)}
                   {menuItem("Tag…", <TagsOutlined style={{ fontSize: 12 }} />, openCreateTag)}
                   {menuItem("Secret…", <KeyOutlined style={{ fontSize: 12 }} />, openCreateSecret)}
@@ -3990,6 +4018,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Create Row Access Policy…", <SafetyOutlined style={{ fontSize: 12 }} />, openCreateRowAccessPolicy)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "PASSWORD POLICY" &&
             menuItem("Create Password Policy…", <SafetyCertificateOutlined style={{ fontSize: 12 }} />, openCreatePasswordPolicy)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "SESSION POLICY" &&
+            menuItem("Create Session Policy…", <FieldTimeOutlined style={{ fontSize: 12 }} />, openCreateSessionPolicy)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "NETWORK RULE" &&
             menuItem("Create Network Rule…", <GlobalOutlined style={{ fontSize: 12 }} />, openCreateNetworkRule)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "IMAGE REPOSITORY" &&
@@ -4064,6 +4094,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openRowAccessPolicyProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PASSWORD POLICY" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openPasswordPolicyProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "SESSION POLICY" &&
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openSessionPolicyProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "NETWORK RULE" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openNetworkRuleProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "IMAGE REPOSITORY" &&
@@ -4175,7 +4207,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Make Live", <CloudUploadOutlined style={{ fontSize: 12 }} />, makeNotebookLive, undefined, !featureFlags.snowparkNotebooks, "Snowpark & Notebooks is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && menuItem("View Definition", null, viewDefinition)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ICEBERG TABLE" && ctxMenu.objKind !== "HYBRID TABLE" && ctxMenu.objKind !== "EVENT TABLE" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "PASSWORD POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "STREAMLIT" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ICEBERG TABLE" && ctxMenu.objKind !== "HYBRID TABLE" && ctxMenu.objKind !== "EVENT TABLE" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "PASSWORD POLICY" && ctxMenu.objKind !== "SESSION POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "STREAMLIT" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {/* Comparison diffs via GET_DDL, which image repositories and services
               don't support — exclude them so the diff view can't surface a
               GET_DDL error for a kind that has no DDL. */}
@@ -4643,6 +4675,24 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={passwordPolicyPropsModal.schema}
           name={passwordPolicyPropsModal.name}
           onClose={() => setPasswordPolicyPropsModal(null)}
+        />
+      )}
+
+      {createSessionPolicyModal && (
+        <CreateSessionPolicyModal
+          db={createSessionPolicyModal.db}
+          schema={createSessionPolicyModal.schema}
+          onClose={() => setCreateSessionPolicyModal(null)}
+          onSuccess={() => refreshDatabaseByName(createSessionPolicyModal.db, { schema: createSessionPolicyModal.schema, kind: "SESSION POLICY" })}
+        />
+      )}
+
+      {sessionPolicyPropsModal && (
+        <SessionPolicyPropertiesModal
+          db={sessionPolicyPropsModal.db}
+          schema={sessionPolicyPropsModal.schema}
+          name={sessionPolicyPropsModal.name}
+          onClose={() => setSessionPolicyPropsModal(null)}
         />
       )}
 
