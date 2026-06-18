@@ -115,6 +115,8 @@ function ParamRow({ meta, value, onSet, onUnset }: ParamRowProps) {
                 value={draft}
                 min={meta.min}
                 max={meta.max}
+                step={1}
+                precision={0}
                 onChange={(v) => setDraft(v ?? null)}
                 style={{ width: 120 }}
                 onPressEnter={save}
@@ -222,7 +224,8 @@ function RoleRow({ label, value, displayText, allowAll, unknownNote, onSet, onUn
                 value={draft}
                 onChange={allowAll
                   ? async (v) => setDraft((await ReconcileSecondaryRoles(v)) ?? [])
-                  : (v) => setDraft(v)}
+                  // 'ALL' is not valid for the blocked list — drop it if typed.
+                  : (v) => setDraft(v.filter((r) => r.trim().toUpperCase() !== "ALL"))}
                 placeholder={allowAll ? "ALL or role names" : "role names"}
                 tokenSeparators={[","]}
                 style={{ width: 280 }}

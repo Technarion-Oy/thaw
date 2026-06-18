@@ -96,13 +96,16 @@ export default function CreateSessionPolicyModal({ db, schema, onClose, onSucces
   const set = <K extends keyof SessionCfg>(key: K, value: SessionCfg[K]) =>
     setCfg((prev) => ({ ...prev, [key]: value }));
 
-  // Tag-select onChange: run the new selection through the backend
+  // Allowed tag-select onChange: run the new selection through the backend
   // ReconcileSecondaryRoles so ALL and named roles can't coexist (the invalid
   // ('ALL', R1) shape) before it reaches the live SQL preview.
-  const setRolesReconciled = async (
-    key: "allowedSecondaryRoles" | "blockedSecondaryRoles",
-    v: string[],
-  ) => set(key, (await ReconcileSecondaryRoles(v)) ?? []);
+  const setAllowedReconciled = async (v: string[]) =>
+    set("allowedSecondaryRoles", (await ReconcileSecondaryRoles(v)) ?? []);
+
+  // Blocked tag-select onChange: 'ALL' is not valid for BLOCKED_SECONDARY_ROLES,
+  // so drop it even if the user types it free-form (the option isn't offered).
+  const setBlocked = (v: string[]) =>
+    set("blockedSecondaryRoles", v.filter((r) => r.trim().toUpperCase() !== "ALL"));
 
   const canSubmit = cfg.name.trim().length > 0;
 
@@ -127,6 +130,8 @@ export default function CreateSessionPolicyModal({ db, schema, onClose, onSucces
             value={cfg[m.key]}
             min={m.min}
             max={m.max}
+            step={1}
+            precision={0}
             placeholder={`default ${m.def}`}
             onChange={(v) => set(m.key, v ?? null)}
             style={{ width: "100%" }}
@@ -191,7 +196,7 @@ export default function CreateSessionPolicyModal({ db, schema, onClose, onSucces
               size="small"
               mode="tags"
               value={cfg.allowedSecondaryRoles}
-              onChange={(v) => setRolesReconciled("allowedSecondaryRoles", v)}
+              onChange={setAllowedReconciled}
               placeholder="default ('ALL')"
               tokenSeparators={[","]}
               style={{ width: "100%" }}
@@ -206,7 +211,7 @@ export default function CreateSessionPolicyModal({ db, schema, onClose, onSucces
               size="small"
               mode="tags"
               value={cfg.blockedSecondaryRoles}
-              onChange={(v) => set("blockedSecondaryRoles", v)}
+              onChange={setBlocked}
               placeholder="role names"
               tokenSeparators={[","]}
               style={{ width: "100%" }}
