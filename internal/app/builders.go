@@ -32,6 +32,7 @@ import (
 	"thaw/internal/rowaccesspolicy"
 	"thaw/internal/secret"
 	"thaw/internal/service"
+	"thaw/internal/sessionpolicy"
 	"thaw/internal/snowflake"
 	"thaw/internal/snowgitrepo"
 	"thaw/internal/stage"
@@ -189,6 +190,11 @@ func (a *App) BuildCreateRowAccessPolicySql(database, schema string, cfg rowacce
 // BuildCreatePasswordPolicySql returns the SQL for creating a Snowflake PASSWORD POLICY.
 func (a *App) BuildCreatePasswordPolicySql(database, schema string, cfg passwordpolicy.PasswordPolicyConfig) (string, error) {
 	return passwordpolicy.BuildCreatePasswordPolicySql(database, schema, cfg)
+}
+
+// BuildCreateSessionPolicySql returns the SQL for creating a Snowflake SESSION POLICY.
+func (a *App) BuildCreateSessionPolicySql(database, schema string, cfg sessionpolicy.SessionPolicyConfig) (string, error) {
+	return sessionpolicy.BuildCreateSessionPolicySql(database, schema, cfg)
 }
 
 // BuildCreateNetworkRuleSql returns the SQL for creating a Snowflake NETWORK RULE.

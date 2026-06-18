@@ -25,6 +25,7 @@ import {pipe} from '../models';
 import {rowaccesspolicy} from '../models';
 import {secret} from '../models';
 import {service} from '../models';
+import {sessionpolicy} from '../models';
 import {streamlit} from '../models';
 import {tag} from '../models';
 import {erdesigner} from '../models';
@@ -86,6 +87,8 @@ export function AlterPipe(arg1:string,arg2:string,arg3:string,arg4:string):Promi
 export function AlterRowAccessPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterService(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterSessionPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterStage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -162,6 +165,8 @@ export function BuildCreateRowAccessPolicySql(arg1:string,arg2:string,arg3:rowac
 export function BuildCreateSecretSql(arg1:string,arg2:string,arg3:secret.SecretConfig):Promise<string>;
 
 export function BuildCreateServiceSql(arg1:string,arg2:string,arg3:service.ServiceConfig):Promise<string>;
+
+export function BuildCreateSessionPolicySql(arg1:string,arg2:string,arg3:sessionpolicy.SessionPolicyConfig):Promise<string>;
 
 export function BuildCreateStageSql(arg1:stage.StageConfig):Promise<string>;
 
@@ -284,6 +289,8 @@ export function DescribeDbtProject(arg1:string,arg2:string,arg3:string):Promise<
 export function DescribeExternalFunction(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.QueryResult>;
 
 export function DescribePasswordPolicy(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
+
+export function DescribeSessionPolicy(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function Disconnect():Promise<void>;
 
@@ -466,6 +473,8 @@ export function GetSessionContext(arg1:string):Promise<snowflake.SessionContext>
 export function GetSessionInitMode():Promise<string>;
 
 export function GetSessionParameters():Promise<Array<snowflake.SessionParam>>;
+
+export function GetSessionPolicyReferences(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function GetSessionVariables():Promise<Array<snowflake.SessionVar>>;
 

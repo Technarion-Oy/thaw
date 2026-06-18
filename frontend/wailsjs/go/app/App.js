@@ -78,6 +78,10 @@ export function AlterService(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterService'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterSessionPolicy(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterSessionPolicy'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterStage(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterStage'](arg1, arg2, arg3, arg4);
 }
@@ -228,6 +232,10 @@ export function BuildCreateSecretSql(arg1, arg2, arg3) {
 
 export function BuildCreateServiceSql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateServiceSql'](arg1, arg2, arg3);
+}
+
+export function BuildCreateSessionPolicySql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateSessionPolicySql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateStageSql(arg1) {
@@ -472,6 +480,10 @@ export function DescribeExternalFunction(arg1, arg2, arg3, arg4) {
 
 export function DescribePasswordPolicy(arg1, arg2, arg3) {
   return window['go']['app']['App']['DescribePasswordPolicy'](arg1, arg2, arg3);
+}
+
+export function DescribeSessionPolicy(arg1, arg2, arg3) {
+  return window['go']['app']['App']['DescribeSessionPolicy'](arg1, arg2, arg3);
 }
 
 export function Disconnect() {
@@ -836,6 +848,10 @@ export function GetSessionInitMode() {
 
 export function GetSessionParameters() {
   return window['go']['app']['App']['GetSessionParameters']();
+}
+
+export function GetSessionPolicyReferences(arg1, arg2, arg3) {
+  return window['go']['app']['App']['GetSessionPolicyReferences'](arg1, arg2, arg3);
 }
 
 export function GetSessionVariables() {
