@@ -170,6 +170,10 @@ function RoleRow({ label, value, unknownNote, onSet, onUnset }: RoleRowProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // A draft with no non-blank entries would serialize to SET … = (), which
+  // Snowflake rejects — Save is disabled and the user is steered to Unset.
+  const draftEmpty = draft.filter((r) => r.trim() !== "").length === 0;
+
   const save = async () => {
     setSaving(true);
     setError(null);
@@ -213,8 +217,11 @@ function RoleRow({ label, value, unknownNote, onSet, onUnset }: RoleRowProps) {
                 style={{ width: 280 }}
                 options={[{ value: "ALL", label: "ALL" }]}
               />
-              <Tooltip title="Save">
-                <Button size="small" icon={<CheckOutlined />} type="primary" onClick={save} loading={saving} />
+              <Tooltip title={draftEmpty ? "Use Unset to clear — an empty list is not valid SQL" : "Save"}>
+                {/* Disable Save on an empty draft: SET … = () is rejected by
+                    Snowflake; clearing the list is done via Unset (restores the
+                    default — ('ALL') for allowed, none for blocked). */}
+                <Button size="small" icon={<CheckOutlined />} type="primary" onClick={save} loading={saving} disabled={draftEmpty} />
               </Tooltip>
               <Tooltip title="Reset to Snowflake default">
                 <Button size="small" onClick={unset} loading={saving}>Unset</Button>
@@ -223,6 +230,9 @@ function RoleRow({ label, value, unknownNote, onSet, onUnset }: RoleRowProps) {
                 <Button size="small" icon={<CloseOutlined />} onClick={() => { setEditing(false); setDraft(value); setError(null); }} />
               </Tooltip>
             </Space>
+            {draftEmpty && (
+              <Text type="secondary" style={{ fontSize: 11 }}>Empty list — use <em>Unset</em> to restore the default.</Text>
+            )}
             {error && <Text type="danger" style={{ fontSize: 11 }}>{error}</Text>}
           </Space>
         ) : (

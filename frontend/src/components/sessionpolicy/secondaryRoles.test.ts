@@ -78,8 +78,16 @@ describe("parseRoles", () => {
     expect(parseRoles("[]")).toEqual([]);
   });
 
+  it("keeps a comma inside a quoted identifier", () => {
+    expect(parseRoles('(R1, "a,b")')).toEqual(["R1", "a,b"]);
+  });
+
+  it("un-doubles an escaped double-quote in a quoted identifier", () => {
+    expect(parseRoles('("we""ird")')).toEqual(['we"ird']);
+  });
+
   it("round-trips formatRoles output", () => {
-    for (const roles of [["ALL"], ["R1", "R2"], ["analyst"]]) {
+    for (const roles of [["ALL"], ["R1", "R2"], ["analyst"], ["a,b"], ['we"ird']]) {
       expect(parseRoles(formatRoles(roles, needsQuoting))).toEqual(
         roles.map((r) => (r.toUpperCase() === "ALL" ? "ALL" : r)),
       );
