@@ -21,6 +21,7 @@ import {
   GetObjectProperties, DescribeSessionPolicy, AlterSessionPolicy, GetSessionPolicyReferences,
 } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
+import { formatRoles, parseRoles } from "./secondaryRoles";
 
 const { Text } = Typography;
 
@@ -42,31 +43,8 @@ const LABEL_TD: React.CSSProperties = {
 // snowflake.EscapeTextLit (backslash doubled, single-quotes doubled).
 function q1(s: string) { return "'" + s.replace(/\\/g, "\\\\").replace(/'/g, "''") + "'"; }
 
-// Render a SECONDARY_ROLES list value, mirroring the backend
-// sessionpolicy.FormatSecondaryRoles: the special token "ALL" becomes the quoted
-// literal 'ALL'; every other entry is a role identifier (double-quoted). Blank
-// entries are skipped.
-function formatRoles(roles: string[]): string {
-  const parts = roles
-    .map((r) => r.trim())
-    .filter((r) => r !== "")
-    .map((r) => (r.toUpperCase() === "ALL" ? "'ALL'" : `"${r.replace(/"/g, '""')}"`));
-  return "(" + parts.join(", ") + ")";
-}
-
-// Parse a DESCRIBE value like ('ALL') or ("R1", "R2") back into a string list.
-function parseRoles(raw: string): string[] {
-  let s = raw.trim();
-  if (s.startsWith("(") && s.endsWith(")")) s = s.slice(1, -1);
-  if (s.trim() === "") return [];
-  return s.split(",").map((part) => {
-    let p = part.trim();
-    if ((p.startsWith("'") && p.endsWith("'")) || (p.startsWith('"') && p.endsWith('"'))) {
-      p = p.slice(1, -1);
-    }
-    return p;
-  }).filter((p) => p !== "");
-}
+// formatRoles / parseRoles live in secondaryRoles.ts (unit-tested) so the
+// parse → edit → re-serialize round-trip is covered.
 
 // The four session-policy timeout parameters, in Snowflake's documented order,
 // paired with their ALTER keyword, valid range, and default. The current value

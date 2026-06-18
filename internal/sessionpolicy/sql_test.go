@@ -84,12 +84,12 @@ func TestBuildCreateSessionPolicySql(t *testing.T) {
 			contains: []string{"SESSION_MAX_LIFESPAN_MINS = 0"},
 		},
 		{
-			name: "blocked roles render named identifiers",
+			name: "blocked roles render bare identifiers",
 			cfg: SessionPolicyConfig{
 				Name:                  "BLK",
 				BlockedSecondaryRoles: []string{"R1", "R2"},
 			},
-			contains: []string{`BLOCKED_SECONDARY_ROLES = ("R1", "R2")`},
+			contains: []string{`BLOCKED_SECONDARY_ROLES = (R1, R2)`},
 			absent:   []string{"ALLOWED_SECONDARY_ROLES"},
 		},
 		{
@@ -137,8 +137,10 @@ func TestFormatSecondaryRoles(t *testing.T) {
 	}{
 		{"all literal", []string{"ALL"}, "('ALL')"},
 		{"all case-insensitive", []string{"all"}, "('ALL')"},
-		{"named roles", []string{"R1", "R2"}, `("R1", "R2")`},
-		{"blank entries skipped", []string{"", "  ", "R1"}, `("R1")`},
+		{"simple roles emitted bare", []string{"R1", "R2"}, `(R1, R2)`},
+		{"lowercase emitted bare (Snowflake uppercases)", []string{"analyst"}, `(analyst)`},
+		{"role needing quoting is double-quoted", []string{"my role"}, `("my role")`},
+		{"blank entries skipped", []string{"", "  ", "R1"}, `(R1)`},
 		{"empty list", []string{}, "()"},
 	}
 	for _, tt := range tests {

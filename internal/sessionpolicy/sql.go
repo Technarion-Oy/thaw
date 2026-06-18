@@ -64,8 +64,11 @@ func (cfg SessionPolicyConfig) timeoutParams() []struct {
 
 // FormatSecondaryRoles renders a SECONDARY_ROLES list value: the special token
 // "ALL" (case-insensitive) becomes the quoted literal 'ALL'; every other entry
-// is treated as a role identifier and double-quoted as needed. Blank entries are
-// skipped. The result is parenthesized, e.g. ('ALL') or ("R1", "R2") or ().
+// is treated as a role identifier emitted bare when it is a valid unquoted
+// identifier (so a user typing "analyst" resolves to role ANALYST, matching
+// Snowflake's uppercasing of unquoted names) and double-quoted only when it
+// needs quoting. Blank entries are skipped. The result is parenthesized, e.g.
+// ('ALL') or (R1, R2) or ("my role") or ().
 func FormatSecondaryRoles(roles []string) string {
 	parts := make([]string, 0, len(roles))
 	for _, r := range roles {
@@ -76,7 +79,7 @@ func FormatSecondaryRoles(roles []string) string {
 		if strings.EqualFold(r, "ALL") {
 			parts = append(parts, "'ALL'")
 		} else {
-			parts = append(parts, snowflake.QuoteIdent(r))
+			parts = append(parts, snowflake.QuoteOrBare(r, false))
 		}
 	}
 	return "(" + strings.Join(parts, ", ") + ")"

@@ -27,7 +27,9 @@ policy is attached to the account or to individual users via
   mutually exclusive (`OR REPLACE` wins). A blank name becomes a
   `session_policy_name` placeholder so the live preview stays a valid template.
 - **`FormatSecondaryRoles(roles)`** — renders a parenthesized SECONDARY_ROLES
-  list value (`('ALL')`, `("R1", "R2")`, or `()`).
+  list value: `'ALL'` for the special token, role identifiers bare when valid
+  unquoted names (so `analyst` resolves to `ANALYST`) and double-quoted only when
+  they need it — e.g. `('ALL')`, `(R1, R2)`, `("my role")`, or `()`.
 
 ## Parameters (range / Snowflake default)
 

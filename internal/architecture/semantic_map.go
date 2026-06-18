@@ -145,6 +145,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/service/StageFilePicker.tsx",
         "frontend/src/components/sessionpolicy/CreateSessionPolicyModal.tsx",
         "frontend/src/components/sessionpolicy/SessionPolicyPropertiesModal.tsx",
+        "frontend/src/components/sessionpolicy/secondaryRoles.ts",
         "frontend/src/components/shared/CreateModalShell.tsx",
         "frontend/src/components/shared/MonacoSqlField.tsx",
         "frontend/src/components/shared/NameWithReplaceOptions.tsx",

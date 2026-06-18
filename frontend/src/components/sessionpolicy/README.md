@@ -19,9 +19,12 @@ Object-browser UI for Snowflake **SESSION POLICY** objects.
   values) together. The **Parameters** section renders every timeout with inline
   edit — *Save* issues `ALTER SESSION POLICY … SET <param> = N`, *Unset* issues
   `UNSET <param>` to restore the default. **Secondary roles** edits the
-  allowed/blocked lists (`SET … = ('ALL')` / `("R1", …)` or `UNSET`). **Settings**
-  edits the comment. **References** lazily loads `GetSessionPolicyReferences` (the
-  users/account the policy is attached to, from
+  allowed/blocked lists (`SET … = ('ALL')` / `(R1, …)` or `UNSET`). The
+  parse/serialize helpers (`secondaryRoles.ts`, unit-tested in
+  `secondaryRoles.test.ts`) handle both the SQL-tuple and JSON-array shapes
+  `DESCRIBE` may return, and emit role names bare unless they need quoting.
+  **Settings** edits the comment. **References** lazily loads
+  `GetSessionPolicyReferences` (the users/account the policy is attached to, from
   `ACCOUNT_USAGE.POLICY_REFERENCES`).
 
 Both modals are wired into the sidebar context menu in
