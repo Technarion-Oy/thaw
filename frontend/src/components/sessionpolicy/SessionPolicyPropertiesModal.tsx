@@ -22,7 +22,7 @@ import {
 } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { needsQuoting } from "../shared/ObjectNameCaseControl";
-import { formatRoles, parseRoles } from "./secondaryRoles";
+import { formatRoles, parseRoles, reconcileAll } from "./secondaryRoles";
 
 const { Text } = Typography;
 
@@ -157,11 +157,14 @@ function ParamRow({ meta, value, onSet, onUnset }: ParamRowProps) {
 interface RoleRowProps {
   label: string;
   value: string[];
+  // When set, the current value could not be read from DESCRIBE (the column is
+  // absent) — shown as a caveat so the user knows the editor operates blind.
+  unknownNote?: string;
   onSet: (roles: string[]) => Promise<void>;
   onUnset: () => Promise<void>;
 }
 
-function RoleRow({ label, value, onSet, onUnset }: RoleRowProps) {
+function RoleRow({ label, value, unknownNote, onSet, onUnset }: RoleRowProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<string[]>(value);
   const [saving, setSaving] = useState(false);
@@ -204,7 +207,7 @@ function RoleRow({ label, value, onSet, onUnset }: RoleRowProps) {
                 size="small"
                 mode="tags"
                 value={draft}
-                onChange={setDraft}
+                onChange={(v) => setDraft(reconcileAll(v))}
                 placeholder="ALL or role names"
                 tokenSeparators={[","]}
                 style={{ width: 280 }}
@@ -223,19 +226,26 @@ function RoleRow({ label, value, onSet, onUnset }: RoleRowProps) {
             {error && <Text type="danger" style={{ fontSize: 11 }}>{error}</Text>}
           </Space>
         ) : (
-          <Space>
-            <span style={{ color: "var(--text)", fontFamily: "var(--font-mono)" }}>
-              {value.length > 0 ? formatRoles(value, needsQuoting) : <Text type="secondary">(default)</Text>}
-            </span>
-            <Tooltip title="Edit">
-              <Button
-                type="text"
-                size="small"
-                icon={<EditOutlined style={{ fontSize: 11 }} />}
-                onClick={() => { setDraft(value); setEditing(true); }}
-                style={{ color: "var(--text-muted)" }}
-              />
-            </Tooltip>
+          <Space direction="vertical" size={2}>
+            <Space>
+              <span style={{ color: "var(--text)", fontFamily: "var(--font-mono)" }}>
+                {value.length > 0
+                  ? formatRoles(value, needsQuoting)
+                  : <Text type="secondary">{unknownNote ? "(unknown)" : "(default)"}</Text>}
+              </span>
+              <Tooltip title="Edit">
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<EditOutlined style={{ fontSize: 11 }} />}
+                  onClick={() => { setDraft(value); setEditing(true); }}
+                  style={{ color: "var(--text-muted)" }}
+                />
+              </Tooltip>
+            </Space>
+            {unknownNote && value.length === 0 && (
+              <Text type="secondary" style={{ fontSize: 11 }}>{unknownNote}</Text>
+            )}
           </Space>
         )}
       </td>
@@ -428,10 +438,26 @@ export default function SessionPolicyPropertiesModal({ db, schema, name, onClose
     }
   };
 
+  // Which columns DESCRIBE SESSION POLICY actually returned (lowercased). Used to
+  // tell "column present but empty" apart from "column not in the output".
+  const descCols = new Set((desc?.columns ?? []).map((c) => c.toLowerCase()));
+
   const policyRef = `"${db}"."${schema}"."${name}"`;
-  const comment = find("comment");
+  // Comment is read from DESCRIBE for consistency with every other field, falling
+  // back to the SHOW SESSION POLICIES row if DESCRIBE failed / omitted it.
+  const comment = descCols.has("comment") ? descByCol["comment"] : find("comment");
   const allowedRoles = parseRoles(descByCol["allowed_secondary_roles"] ?? "");
   const blockedRoles = parseRoles(descByCol["blocked_secondary_roles"] ?? "");
+
+  // Snowflake's DESCRIBE SESSION POLICY may omit blocked_secondary_roles entirely
+  // (only allowed_secondary_roles is documented). When the column is absent we
+  // can't show the current Blocked list — flag that the editor operates blind
+  // rather than misleadingly rendering "(default)". SHOW doesn't expose it either,
+  // so DESCRIBE is the only possible source.
+  const blockedUnknownNote =
+    desc && !descCols.has("blocked_secondary_roles")
+      ? "DESCRIBE does not report this — current value unknown; editing sets it directly."
+      : undefined;
 
   // Keys surfaced through dedicated sections above the generic Properties table.
   const handledKeys = new Set(["comment"]);
@@ -503,6 +529,7 @@ export default function SessionPolicyPropertiesModal({ db, schema, name, onClose
               <RoleRow
                 label="Blocked"
                 value={blockedRoles}
+                unknownNote={blockedUnknownNote}
                 onSet={(r) => setRoles("BLOCKED_SECONDARY_ROLES", r)}
                 onUnset={() => unsetRoles("BLOCKED_SECONDARY_ROLES")}
               />

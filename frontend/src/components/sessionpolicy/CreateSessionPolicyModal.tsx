@@ -20,6 +20,7 @@ import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
 import type { sessionpolicy as spModels } from "../../../wailsjs/go/models";
+import { reconcileAll } from "./secondaryRoles";
 
 const { Text } = Typography;
 
@@ -183,7 +184,7 @@ export default function CreateSessionPolicyModal({ db, schema, onClose, onSucces
               size="small"
               mode="tags"
               value={cfg.allowedSecondaryRoles}
-              onChange={(v) => set("allowedSecondaryRoles", v)}
+              onChange={(v) => set("allowedSecondaryRoles", reconcileAll(v))}
               placeholder="default ('ALL')"
               tokenSeparators={[","]}
               style={{ width: "100%" }}
@@ -196,7 +197,7 @@ export default function CreateSessionPolicyModal({ db, schema, onClose, onSucces
               size="small"
               mode="tags"
               value={cfg.blockedSecondaryRoles}
-              onChange={(v) => set("blockedSecondaryRoles", v)}
+              onChange={(v) => set("blockedSecondaryRoles", reconcileAll(v))}
               placeholder="role names"
               tokenSeparators={[","]}
               style={{ width: "100%" }}

@@ -45,6 +45,21 @@ export function formatRoles(roles: string[], needsQuoting: (name: string) => boo
   return "(" + parts.join(", ") + ")";
 }
 
+// reconcileAll enforces the grammar's mutual exclusivity for a secondary-role
+// list: `( { 'ALL' | <role_name> [, ...] } )` — the `ALL` token cannot be mixed
+// with named roles. Given the new tag selection (in selection order, as antd's
+// tag Select reports it), it keeps whichever kind was chosen last: if `ALL` was
+// just added it collapses to `["ALL"]`; if a named role was added while `ALL`
+// was already present it drops `ALL`. Lists without `ALL`, or with one entry,
+// pass through unchanged. Prevents the invalid `('ALL', R1)` clause that
+// Snowflake would otherwise reject only at execution time.
+export function reconcileAll(next: string[]): string[] {
+  const hasAll = next.some((r) => r.trim().toUpperCase() === "ALL");
+  if (!hasAll || next.length <= 1) return next;
+  const lastIsAll = next[next.length - 1].trim().toUpperCase() === "ALL";
+  return lastIsAll ? ["ALL"] : next.filter((r) => r.trim().toUpperCase() !== "ALL");
+}
+
 // parseRoles parses a secondary-roles cell from DESCRIBE SESSION POLICY into a
 // list of role tokens.
 //

@@ -8,7 +8,9 @@ Object-browser UI for Snowflake **SESSION POLICY** objects.
   `OR REPLACE` / `IF NOT EXISTS` (via the shared `NameWithReplaceOptions`), then
   the four timeout parameters grouped into **Idle timeout** and **Maximum
   lifespan** sections, plus a **Secondary roles** section (allowed/blocked
-  `Select mode="tags"` — type `ALL` or role names). Each timeout is an
+  `Select mode="tags"` — type `ALL` or role names; `reconcileAll` enforces the
+  grammar's `ALL`-vs-role-list exclusivity as you type so the preview can't
+  produce the invalid `('ALL', R1)`). Each timeout is an
   `InputNumber` bounded to its documented range; leaving it empty inherits
   Snowflake's default (shown as the placeholder) and omits it from the generated
   SQL. A live `SqlPreview` reflects `App.BuildCreateSessionPolicySql`; submit runs
@@ -19,7 +21,11 @@ Object-browser UI for Snowflake **SESSION POLICY** objects.
   values) together. The **Parameters** section renders every timeout with inline
   edit — *Save* issues `ALTER SESSION POLICY … SET <param> = N`, *Unset* issues
   `UNSET <param>` to restore the default. **Secondary roles** edits the
-  allowed/blocked lists (`SET … = ('ALL')` / `(R1, …)` or `UNSET`). The
+  allowed/blocked lists (`SET … = ('ALL')` / `(R1, …)` or `UNSET`; the tag editor
+  also applies `reconcileAll`). Snowflake's `DESCRIBE SESSION POLICY` documents
+  only `allowed_secondary_roles`; if the `blocked_secondary_roles` column is
+  absent from the result the **Blocked** row shows `(unknown)` with a caveat that
+  editing sets it blind, rather than misleadingly rendering `(default)`. The
   parse/serialize helpers (`secondaryRoles.ts`, unit-tested in
   `secondaryRoles.test.ts`) handle both the SQL-tuple and JSON-array shapes
   `DESCRIBE` may return, and emit role names bare unless they need quoting. The
