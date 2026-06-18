@@ -145,6 +145,33 @@ func SplitIdentList(s string, caseSensitive bool) []string {
 	return QuoteIdentList(SplitValues(s), caseSensitive)
 }
 
+// FormatSecondaryRoles renders a Snowflake secondary-role list value — the
+// ( 'ALL' | <role> [, <role> ...] ) grammar shared by ALLOWED_SECONDARY_ROLES /
+// BLOCKED_SECONDARY_ROLES (session and authentication policies) and
+// DEFAULT_SECONDARY_ROLES (ALTER USER). The special token "ALL"
+// (case-insensitive) becomes the quoted string literal 'ALL'; every other entry
+// is treated as a role identifier and emitted via QuoteOrBare(role, false) —
+// bare when it is a valid unquoted identifier (so "analyst" resolves to role
+// ANALYST, matching Snowflake's uppercasing of unquoted names) and double-quoted
+// only when it needs quoting (special characters or a reserved keyword). Blank
+// entries are skipped. The result is parenthesized, e.g. ('ALL'), (R1, R2),
+// ("my role"), or ().
+func FormatSecondaryRoles(roles []string) string {
+	parts := make([]string, 0, len(roles))
+	for _, r := range roles {
+		r = strings.TrimSpace(r)
+		if r == "" {
+			continue
+		}
+		if strings.EqualFold(r, "ALL") {
+			parts = append(parts, "'ALL'")
+		} else {
+			parts = append(parts, QuoteOrBare(r, false))
+		}
+	}
+	return "(" + strings.Join(parts, ", ") + ")"
+}
+
 // GetQuotedIdentifiersIgnoreCase returns the current session value of the
 // QUOTED_IDENTIFIERS_IGNORE_CASE parameter. When true, Snowflake treats
 // identifiers as case-insensitive regardless of whether they are quoted,

@@ -26,10 +26,14 @@ policy is attached to the account or to individual users via
   parameters the caller set, then `COMMENT`. `OR REPLACE` and `IF NOT EXISTS` are
   mutually exclusive (`OR REPLACE` wins). A blank name becomes a
   `session_policy_name` placeholder so the live preview stays a valid template.
-- **`FormatSecondaryRoles(roles)`** — renders a parenthesized SECONDARY_ROLES
-  list value: `'ALL'` for the special token, role identifiers bare when valid
-  unquoted names (so `analyst` resolves to `ANALYST`) and double-quoted only when
-  they need it — e.g. `('ALL')`, `(R1, R2)`, `("my role")`, or `()`.
+
+The secondary-role list values are rendered by **`snowflake.FormatSecondaryRoles`**
+(in `internal/snowflake/identifiers.go`) — a general helper for the
+`( 'ALL' | <role>, … )` grammar shared by session/authentication policies and
+`ALTER USER … DEFAULT_SECONDARY_ROLES`. It emits `'ALL'` for the special token and
+role identifiers bare when valid unquoted names (so `analyst` resolves to
+`ANALYST`), double-quoting only when needed — e.g. `('ALL')`, `(R1, R2)`,
+`("my role")`, or `()`.
 
 ## Parameters (range / Snowflake default)
 

@@ -12,7 +12,7 @@
 //
 // Parsing / serialization for a session policy's ALLOWED_SECONDARY_ROLES and
 // BLOCKED_SECONDARY_ROLES lists, shared by the properties modal and unit-tested
-// in secondaryRoles.test.ts. Mirrors the backend sessionpolicy.FormatSecondaryRoles.
+// in secondaryRoles.test.ts. Mirrors the backend snowflake.FormatSecondaryRoles.
 //
 // This module is deliberately dependency-free so it stays unit-testable without a
 // Wails runtime: the reserved-keyword-aware quoting decision is injected as a

@@ -62,29 +62,6 @@ func (cfg SessionPolicyConfig) timeoutParams() []struct {
 	}
 }
 
-// FormatSecondaryRoles renders a SECONDARY_ROLES list value: the special token
-// "ALL" (case-insensitive) becomes the quoted literal 'ALL'; every other entry
-// is treated as a role identifier emitted bare when it is a valid unquoted
-// identifier (so a user typing "analyst" resolves to role ANALYST, matching
-// Snowflake's uppercasing of unquoted names) and double-quoted only when it
-// needs quoting. Blank entries are skipped. The result is parenthesized, e.g.
-// ('ALL') or (R1, R2) or ("my role") or ().
-func FormatSecondaryRoles(roles []string) string {
-	parts := make([]string, 0, len(roles))
-	for _, r := range roles {
-		r = strings.TrimSpace(r)
-		if r == "" {
-			continue
-		}
-		if strings.EqualFold(r, "ALL") {
-			parts = append(parts, "'ALL'")
-		} else {
-			parts = append(parts, snowflake.QuoteOrBare(r, false))
-		}
-	}
-	return "(" + strings.Join(parts, ", ") + ")"
-}
-
 // BuildCreateSessionPolicySql constructs a CREATE SESSION POLICY statement from
 // the given config. Only parameters the caller explicitly set (non-nil pointers
 // / non-empty role lists) are emitted; the rest inherit Snowflake's documented
@@ -127,10 +104,10 @@ func BuildCreateSessionPolicySql(db, schema string, cfg SessionPolicyConfig) (st
 	}
 
 	if len(cfg.AllowedSecondaryRoles) > 0 {
-		fmt.Fprintf(&sb, "\n  ALLOWED_SECONDARY_ROLES = %s", FormatSecondaryRoles(cfg.AllowedSecondaryRoles))
+		fmt.Fprintf(&sb, "\n  ALLOWED_SECONDARY_ROLES = %s", snowflake.FormatSecondaryRoles(cfg.AllowedSecondaryRoles))
 	}
 	if len(cfg.BlockedSecondaryRoles) > 0 {
-		fmt.Fprintf(&sb, "\n  BLOCKED_SECONDARY_ROLES = %s", FormatSecondaryRoles(cfg.BlockedSecondaryRoles))
+		fmt.Fprintf(&sb, "\n  BLOCKED_SECONDARY_ROLES = %s", snowflake.FormatSecondaryRoles(cfg.BlockedSecondaryRoles))
 	}
 
 	if cfg.Comment != "" {

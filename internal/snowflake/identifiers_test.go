@@ -296,3 +296,27 @@ func TestSplitIdentList(t *testing.T) {
 		t.Errorf("SplitIdentList(\"\") = %v, want empty", got)
 	}
 }
+
+func TestFormatSecondaryRoles(t *testing.T) {
+	tests := []struct {
+		name  string
+		roles []string
+		want  string
+	}{
+		{"all literal", []string{"ALL"}, "('ALL')"},
+		{"all case-insensitive", []string{"all"}, "('ALL')"},
+		{"simple roles emitted bare", []string{"R1", "R2"}, "(R1, R2)"},
+		{"lowercase emitted bare (Snowflake uppercases)", []string{"analyst"}, "(analyst)"},
+		{"role needing quoting is double-quoted", []string{"my role"}, `("my role")`},
+		{"reserved keyword is double-quoted", []string{"ORDER"}, `("ORDER")`},
+		{"blank entries skipped", []string{"", "  ", "R1"}, "(R1)"},
+		{"empty list", []string{}, "()"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := FormatSecondaryRoles(tt.roles); got != tt.want {
+				t.Errorf("FormatSecondaryRoles(%v) = %q, want %q", tt.roles, got, tt.want)
+			}
+		})
+	}
+}
