@@ -20,11 +20,11 @@ import {
 import {
   GetObjectProperties, DescribeAuthenticationPolicy, AlterAuthenticationPolicy,
   GetAuthenticationPolicyReferences, FormatAuthPolicyList,
-  ParseSqlList, NormalizeSqlScalar, QuoteSqlText, ReconcileAllExclusiveList,
+  ParseSqlList, NormalizeSqlScalar, QuoteSqlText,
   AuthenticationPolicyListParams, AuthenticationPolicyMFAEnrollmentOptions,
 } from "../../../wailsjs/go/app/App";
 import type { snowflake, authenticationpolicy } from "../../../wailsjs/go/models";
-import { MFAPolicyRow, PATPolicyRow, WorkloadIdentityPolicyRow, ClientPolicyRow } from "./PolicyBagRows";
+import { MFAPolicyRow, PATPolicyRow, WorkloadIdentityPolicyRow, ClientPolicyRow, useReconciledSelection } from "./PolicyBagRows";
 
 const { Text } = Typography;
 
@@ -64,6 +64,9 @@ function ListRow({ meta, rawValue, onSet, onUnset }: ListRowProps) {
   const [draft, setDraft] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Commit the pick immediately, then collapse ALL-vs-specific exclusivity in the
+  // backend — avoids dropping a token when picks come faster than the IPC.
+  const onDraftChange = useReconciledSelection(setDraft);
 
   // DESCRIBE renders the list cell in a SQL/bracket form the backend tokenizer
   // owns — parse it there rather than in the UI. Re-runs when rawValue changes
@@ -118,7 +121,7 @@ function ListRow({ meta, rawValue, onSet, onUnset }: ListRowProps) {
                 // ALL is mutually exclusive with specific values — reconcile in
                 // the backend (keeps whichever kind was chosen last) so an invalid
                 // ('ALL', X) list can't be submitted.
-                onChange={async (v) => setDraft((await ReconcileAllExclusiveList(v)) ?? [])}
+                onChange={onDraftChange}
                 placeholder={meta.freeform ? "ALL or integration names" : "select methods"}
                 tokenSeparators={[","]}
                 style={{ width: 320 }}

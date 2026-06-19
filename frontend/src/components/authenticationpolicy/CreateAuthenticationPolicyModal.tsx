@@ -13,7 +13,7 @@
 import { useState } from "react";
 import { Collapse, Form, Input, Select, Space, Typography } from "antd";
 import { LoginOutlined } from "@ant-design/icons";
-import { BuildCreateAuthenticationPolicySql, ExecDDL, ReconcileAllExclusiveList } from "../../../wailsjs/go/app/App";
+import { BuildCreateAuthenticationPolicySql, ExecDDL } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
@@ -22,6 +22,7 @@ import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/
 import {
   MFAPolicyFields, PATPolicyFields, WorkloadIdentityPolicyFields, ClientPolicyFields,
   emptyMFAPolicy, emptyPATPolicy, emptyWorkloadIdentityPolicy, emptyClientPolicy, clientPolicyError,
+  useReconciledSelection,
   type MFAPolicyValue, type PATPolicyValue, type WorkloadIdentityPolicyValue, type ClientPolicyValue,
 } from "./PolicyBagRows";
 
@@ -96,11 +97,11 @@ export default function CreateAuthenticationPolicyModal({ db, schema, onClose, o
 
   // ALL is mutually exclusive with specific values — reconcile the list params in
   // the backend (keeps whichever kind was chosen last) so CREATE can't emit an
-  // invalid ('ALL', <specific>) list, matching the Properties modal.
-  const setList = async (
-    key: "authenticationMethods" | "clientTypes" | "securityIntegrations",
-    v: string[],
-  ) => set(key, (await ReconcileAllExclusiveList(v)) ?? []);
+  // invalid ('ALL', <specific>) list. The hook commits the pick first, then
+  // reconciles, so a fast multi-select never drops a token (matching Properties).
+  const onAuthMethods = useReconciledSelection((v) => set("authenticationMethods", v));
+  const onClientTypes = useReconciledSelection((v) => set("clientTypes", v));
+  const onSecurityIntegrations = useReconciledSelection((v) => set("securityIntegrations", v));
 
   // A half-filled / duplicate CLIENT_POLICY row would corrupt the bag — block
   // submit until it's resolved (the editor shows the reason), same as Properties.
@@ -162,7 +163,7 @@ export default function CreateAuthenticationPolicyModal({ db, schema, onClose, o
           <Select
             mode="multiple"
             value={cfg.authenticationMethods}
-            onChange={(v) => setList("authenticationMethods", v)}
+            onChange={onAuthMethods}
             placeholder="default (ALL)"
             options={AUTH_METHOD_OPTIONS}
             style={{ width: "100%" }}
@@ -173,7 +174,7 @@ export default function CreateAuthenticationPolicyModal({ db, schema, onClose, o
           <Select
             mode="multiple"
             value={cfg.clientTypes}
-            onChange={(v) => setList("clientTypes", v)}
+            onChange={onClientTypes}
             placeholder="default (ALL)"
             options={CLIENT_TYPE_OPTIONS}
             style={{ width: "100%" }}
@@ -188,7 +189,7 @@ export default function CreateAuthenticationPolicyModal({ db, schema, onClose, o
           <Select
             mode="tags"
             value={cfg.securityIntegrations}
-            onChange={(v) => setList("securityIntegrations", v)}
+            onChange={onSecurityIntegrations}
             placeholder="default (ALL)"
             tokenSeparators={[","]}
             options={[{ value: "ALL", label: "ALL" }]}

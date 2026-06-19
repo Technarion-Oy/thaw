@@ -19,7 +19,7 @@
 // Save). No SQL serialization or DESCRIBE parsing happens here — the `( … )`
 // grammar lives entirely in the Go `authenticationpolicy` package.
 
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, useEffect, useRef, useCallback, type ReactNode } from "react";
 import { Alert, AutoComplete, Button, InputNumber, Select, Space, Tooltip, Typography } from "antd";
 import { EditOutlined, CheckOutlined, CloseOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
 import {
@@ -97,6 +97,26 @@ export const clientPolicyValidCount = (value: ClientPolicyValue) =>
 
 const opts = (vals: string[]) => vals.map((v) => ({ value: v, label: v }));
 
+// useReconciledSelection returns a multi-select onChange handler that commits the
+// new selection *immediately* (so a rapid second pick is computed from the fresh
+// value and never drops a token), then collapses ALL-vs-specific exclusivity in
+// the backend and applies only the most recent result (a generation guard, so
+// out-of-order IPC resolutions can't revert to a stale list). `commit` is read
+// through a ref, so the async update always targets the latest surrounding state
+// (no clobbering a sibling field that changed during the round-trip).
+export function useReconciledSelection(commit: (list: string[]) => void) {
+  const gen = useRef(0);
+  const commitRef = useRef(commit);
+  commitRef.current = commit;
+  return useCallback((v: string[]) => {
+    const g = ++gen.current;
+    commitRef.current(v);
+    ReconcileAllExclusiveList(v).then((r) => {
+      if (gen.current === g) commitRef.current(r ?? v);
+    });
+  }, []);
+}
+
 const FIELD_LABEL: React.CSSProperties = { fontSize: 11, color: "var(--text-muted)", display: "block", marginBottom: 2 };
 
 // Whether the DESCRIBE value carries real content (so a parse that yields an
@@ -116,12 +136,13 @@ const rawHasContent = (raw: string) => {
 const BAG_FIELDS: React.CSSProperties = { display: "flex", width: "100%" };
 
 export function MFAPolicyFields({ value, onChange }: { value: MFAPolicyValue; onChange: (v: MFAPolicyValue) => void }) {
+  const onMethods = useReconciledSelection((v) => onChange({ ...value, allowedMethods: v }));
   return (
     <Space direction="vertical" size={6} style={BAG_FIELDS}>
       <div style={{ width: "100%" }}>
         <Text style={FIELD_LABEL}>Allowed methods</Text>
         <Select mode="multiple" size="small" value={value.allowedMethods}
-          onChange={async (v) => onChange({ ...value, allowedMethods: (await ReconcileAllExclusiveList(v)) ?? [] })}
+          onChange={onMethods}
           placeholder="default (ALL)"
           options={opts(["ALL", "PASSKEY", "TOTP", "OTP", "DUO"])} style={{ width: 360 }} />
       </div>
@@ -168,12 +189,13 @@ export function PATPolicyFields({ value, onChange }: { value: PATPolicyValue; on
 }
 
 export function WorkloadIdentityPolicyFields({ value, onChange }: { value: WorkloadIdentityPolicyValue; onChange: (v: WorkloadIdentityPolicyValue) => void }) {
+  const onProviders = useReconciledSelection((v) => onChange({ ...value, allowedProviders: v }));
   return (
     <Space direction="vertical" size={6} style={BAG_FIELDS}>
       <div>
         <Text style={FIELD_LABEL}>Allowed providers</Text>
         <Select mode="multiple" size="small" value={value.allowedProviders}
-          onChange={async (v) => onChange({ ...value, allowedProviders: (await ReconcileAllExclusiveList(v)) ?? [] })}
+          onChange={onProviders}
           placeholder="ALL / AWS / AZURE / GCP / OIDC"
           options={opts(["ALL", "AWS", "AZURE", "GCP", "OIDC"])} style={{ width: 360 }} />
       </div>

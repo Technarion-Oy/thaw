@@ -41,8 +41,10 @@ Object-browser UI for Snowflake **AUTHENTICATION POLICY** objects.
   quoting/parsing logic; if DESCRIBE fails, a caveat notes that editing sets
   values blind. The multi-selects reconcile `ALL`-vs-specific exclusivity through
   `App.ReconcileAllExclusiveList` (also used by the bag `ALLOWED_METHODS` /
-  `ALLOWED_PROVIDERS` selects), so a redundant `('ALL', X)` list can't be
-  submitted. An **Advanced policies** section (`PolicyBagRows.tsx`) provides
+  `ALLOWED_PROVIDERS` selects, and the Create modal), so a redundant `('ALL', X)`
+  list can't be submitted. The shared `useReconciledSelection` hook commits the
+  pick first and reconciles after (applying only the latest result), so a fast
+  multi-select never drops a token to the IPC round-trip. An **Advanced policies** section (`PolicyBagRows.tsx`) provides
   structured editors for the four nested property bags — `MFA_POLICY`,
   `PAT_POLICY`, `WORKLOAD_IDENTITY_POLICY`, `CLIENT_POLICY` — as selects /
   numbers / toggles / per-driver version rows. The editing UI for each bag is a
