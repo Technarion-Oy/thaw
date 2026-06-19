@@ -259,9 +259,10 @@ func ParseClientPolicy(raw string) ClientPolicy {
 		var ver string
 		for ik, iv := range obj {
 			if strings.EqualFold(ik, "MINIMUM_VERSION") {
-				if s, ok := iv.(string); ok {
-					ver = s
-				}
+				// Coerce via jsonScalarString so a numeric version in the strict-JSON
+				// fallback (e.g. MINIMUM_VERSION: 3.14) isn't dropped — the structured
+				// path always yields strings, but this matches the AWS-account path.
+				ver = jsonScalarString(iv)
 			}
 		}
 		if ver != "" {

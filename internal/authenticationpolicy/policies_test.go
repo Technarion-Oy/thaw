@@ -227,6 +227,16 @@ func TestParseClientPolicyStructuredQuoted(t *testing.T) {
 	}
 }
 
+// A numeric MINIMUM_VERSION in the strict-JSON fallback must be coerced, not
+// dropped (mirrors the numeric-AWS-account coercion).
+func TestParseClientPolicyJSONNumericVersion(t *testing.T) {
+	got := ParseClientPolicy(`{"GO_DRIVER":{"MINIMUM_VERSION":3.14}}`)
+	want := ClientPolicy{Entries: []ClientPolicyEntry{{Driver: "GO_DRIVER", MinimumVersion: "3.14"}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %+v want %+v", got, want)
+	}
+}
+
 // If DESCRIBE ever returns the parenthesized SQL-grammar form instead of the
 // brace form, the parsers must still populate the bags (otherwise a real,
 // populated bag would render blank and a Set from it would wipe the policy).
