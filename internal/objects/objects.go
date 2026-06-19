@@ -27,7 +27,7 @@ type ColumnComment struct {
 // BuildObjectPropertiesQuery returns the SHOW/DESCRIBE query that fetches the
 // metadata for a single Snowflake object. kind is one of: DATABASE, SCHEMA,
 // TABLE, VIEW, DYNAMIC TABLE, EXTERNAL TABLE, ICEBERG TABLE, HYBRID TABLE, EVENT TABLE, MATERIALIZED VIEW, ALERT, TAG,
-// MASKING POLICY, ROW ACCESS POLICY, PASSWORD POLICY, SESSION POLICY, AGGREGATION POLICY, NETWORK RULE, IMAGE REPOSITORY, SERVICE, STREAMLIT, FUNCTION, EXTERNAL FUNCTION, DATA METRIC FUNCTION, PROCEDURE, SEQUENCE, STAGE, STREAM,
+// MASKING POLICY, ROW ACCESS POLICY, PASSWORD POLICY, SESSION POLICY, AGGREGATION POLICY, PROJECTION POLICY, NETWORK RULE, IMAGE REPOSITORY, SERVICE, STREAMLIT, FUNCTION, EXTERNAL FUNCTION, DATA METRIC FUNCTION, PROCEDURE, SEQUENCE, STAGE, STREAM,
 // TASK, FILE FORMAT, PIPE, SECRET, GIT REPOSITORY, DBT PROJECT, WAREHOUSE, ROLE,
 // USER.
 func BuildObjectPropertiesQuery(database, schema, kind, name string) (string, error) {
@@ -63,6 +63,8 @@ func BuildObjectPropertiesQuery(database, schema, kind, name string) (string, er
 		return fmt.Sprintf("SHOW SESSION POLICIES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
 	case "AGGREGATION POLICY":
 		return fmt.Sprintf("SHOW AGGREGATION POLICIES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+	case "PROJECTION POLICY":
+		return fmt.Sprintf("SHOW PROJECTION POLICIES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
 	case "NETWORK RULE":
 		return fmt.Sprintf("SHOW NETWORK RULES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
 	case "IMAGE REPOSITORY":
@@ -147,6 +149,15 @@ func BuildDescribeAggregationPolicyQuery(database, schema, name string) string {
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
 }
 
+// BuildDescribeProjectionPolicyQuery returns the DESCRIBE PROJECTION POLICY
+// query used to enrich the SHOW PROJECTION POLICIES result with the policy's
+// signature, return type, and body — none of which SHOW PROJECTION POLICIES
+// reports.
+func BuildDescribeProjectionPolicyQuery(database, schema, name string) string {
+	return fmt.Sprintf("DESCRIBE PROJECTION POLICY %s.%s.%s",
+		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
+}
+
 // BuildDescribeNetworkRuleQuery returns the DESCRIBE NETWORK RULE query used to
 // enrich the SHOW NETWORK RULES result with the rule's value_list — which SHOW
 // NETWORK RULES reports only as a count (entries_in_valuelist), not the actual
@@ -175,7 +186,8 @@ func BuildDescribeStreamlitQuery(database, schema, name string) string {
 // GetObjectProperties returns structured metadata for any Snowflake object by
 // running the appropriate SHOW or DESCRIBE command and returning the result as
 // key/value pairs. For STAGE objects it also appends DESCRIBE STAGE properties;
-// for MASKING POLICY, ROW ACCESS POLICY, and AGGREGATION POLICY objects it
+// for MASKING POLICY, ROW ACCESS POLICY, AGGREGATION POLICY, and PROJECTION
+// POLICY objects it
 // appends the DESCRIBE signature, return type, and body; for NETWORK RULE objects it appends the
 // DESCRIBE NETWORK RULE value_list; for SERVICE objects the DESCRIBE SERVICE spec
 // and dns_name; for STREAMLIT objects the DESCRIBE STREAMLIT root_location and
@@ -248,6 +260,32 @@ func GetObjectProperties(ctx context.Context, client *snowflake.Client, database
 		descRes, err := client.Execute(ctx, BuildDescribeAggregationPolicyQuery(database, schema, name))
 		if err == nil && len(descRes.Rows) > 0 {
 			// DESCRIBE AGGREGATION POLICY returns one row whose columns include
+			// signature, return_type, and body. Map by column name so a column
+			// reordering on Snowflake's side doesn't mislabel the values.
+			row := descRes.Rows[0]
+			for ci, col := range descRes.Columns {
+				if ci >= len(row) {
+					break
+				}
+				switch strings.ToLower(col) {
+				case "signature", "return_type", "body":
+					// Guard against a SQL NULL rendering as the literal "<nil>";
+					// emit an empty string instead, matching how the references
+					// table renders nulls.
+					val := ""
+					if row[ci] != nil {
+						val = fmt.Sprintf("%v", row[ci])
+					}
+					pairs = append(pairs, snowflake.PropertyPair{Key: col, Value: val})
+				}
+			}
+		}
+	}
+
+	if strings.ToUpper(kind) == "PROJECTION POLICY" {
+		descRes, err := client.Execute(ctx, BuildDescribeProjectionPolicyQuery(database, schema, name))
+		if err == nil && len(descRes.Rows) > 0 {
+			// DESCRIBE PROJECTION POLICY returns one row whose columns include
 			// signature, return_type, and body. Map by column name so a column
 			// reordering on Snowflake's side doesn't mislabel the values.
 			row := descRes.Rows[0]

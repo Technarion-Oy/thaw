@@ -66,6 +66,7 @@
   --icon-passwordpolicy:#fb7185; /* rose (password / credential rules)      */
   --icon-sessionpolicy:#818cf8; /* indigo (session lifetime / timeouts)     */
   --icon-aggregationpolicy:#34d399; /* emerald (group-size aggregation)     */
+  --icon-projectionpolicy:#fb923c; /* orange (column projection control)    */
   --icon-networkrule: #38bdf8;  /* sky blue (network / connectivity)        */
   --icon-imagerepository:#f472b6; /* pink (container images / SPCS)         */
   --icon-service:     #5eead4;  /* aqua (running SPCS container service)    */
@@ -145,6 +146,7 @@
   --icon-passwordpolicy:#be123c;
   --icon-sessionpolicy:#4338ca;
   --icon-aggregationpolicy:#047857;
+  --icon-projectionpolicy:#c2410c;
   --icon-networkrule: #0a6e9e;
   --icon-imagerepository:#be185d;
   --icon-service:     #0e7490;

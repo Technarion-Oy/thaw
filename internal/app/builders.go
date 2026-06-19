@@ -30,6 +30,7 @@ import (
 	"thaw/internal/passwordpolicy"
 	"thaw/internal/pipe"
 	"thaw/internal/procedure"
+	"thaw/internal/projectionpolicy"
 	"thaw/internal/rowaccesspolicy"
 	"thaw/internal/secret"
 	"thaw/internal/service"
@@ -181,6 +182,11 @@ func (a *App) BuildCreateTagSql(database, schema string, cfg tag.TagConfig) (str
 // BuildCreateAggregationPolicySql returns the SQL for creating a Snowflake AGGREGATION POLICY.
 func (a *App) BuildCreateAggregationPolicySql(database, schema string, cfg aggregationpolicy.AggregationPolicyConfig) (string, error) {
 	return aggregationpolicy.BuildCreateAggregationPolicySql(database, schema, cfg)
+}
+
+// BuildCreateProjectionPolicySql returns the SQL for creating a Snowflake PROJECTION POLICY.
+func (a *App) BuildCreateProjectionPolicySql(database, schema string, cfg projectionpolicy.ProjectionPolicyConfig) (string, error) {
+	return projectionpolicy.BuildCreateProjectionPolicySql(database, schema, cfg)
 }
 
 // BuildCreateMaskingPolicySql returns the SQL for creating a Snowflake MASKING POLICY.

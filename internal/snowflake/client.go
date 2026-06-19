@@ -3276,7 +3276,7 @@ func (c *Client) ListBasicObjects(ctx context.Context, database, schema string) 
 // authoritative list is the command slice below: DYNAMIC TABLE, EXTERNAL TABLE,
 // ICEBERG TABLE, HYBRID TABLE, EVENT TABLE,
 // MATERIALIZED VIEW, ALERT, TAG, MASKING POLICY, ROW ACCESS POLICY,
-// PASSWORD POLICY, SESSION POLICY, AGGREGATION POLICY, NETWORK
+// PASSWORD POLICY, SESSION POLICY, AGGREGATION POLICY, PROJECTION POLICY, NETWORK
 // RULE, IMAGE REPOSITORY, SERVICE, STREAMLIT, PROCEDURE, FUNCTION,
 // EXTERNAL FUNCTION, DATA METRIC FUNCTION, TASK, STREAM, STAGE, FILE FORMAT,
 // PIPE, NOTEBOOK, SECRET, GIT REPOSITORY, DBT PROJECT). Individual commands that
@@ -3303,6 +3303,7 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 		{fmt.Sprintf("SHOW PASSWORD POLICIES IN SCHEMA %s", q), "PASSWORD POLICY"},
 		{fmt.Sprintf("SHOW SESSION POLICIES IN SCHEMA %s", q), "SESSION POLICY"},
 		{fmt.Sprintf("SHOW AGGREGATION POLICIES IN SCHEMA %s", q), "AGGREGATION POLICY"},
+		{fmt.Sprintf("SHOW PROJECTION POLICIES IN SCHEMA %s", q), "PROJECTION POLICY"},
 		{fmt.Sprintf("SHOW NETWORK RULES IN SCHEMA %s", q), "NETWORK RULE"},
 		{fmt.Sprintf("SHOW IMAGE REPOSITORIES IN SCHEMA %s", q), "IMAGE REPOSITORY"},
 		{fmt.Sprintf("SHOW SERVICES IN SCHEMA %s", q), "SERVICE"},
@@ -3789,10 +3790,10 @@ func buildGetDDLQuery(database, schema, kind, name, arguments string) (query, id
 		// GET_DDL has no MATERIALIZED_VIEW object type — TABLE and VIEW are
 		// interchangeable and materialized views are retrieved via 'VIEW'.
 		ddlKind = "VIEW"
-	case "MASKING POLICY", "ROW ACCESS POLICY", "PASSWORD POLICY", "SESSION POLICY", "AGGREGATION POLICY":
+	case "MASKING POLICY", "ROW ACCESS POLICY", "PASSWORD POLICY", "SESSION POLICY", "AGGREGATION POLICY", "PROJECTION POLICY":
 		// GET_DDL exposes a single 'POLICY' object type covering all policy
-		// kinds (masking, row access, password, session, aggregation, etc.), not a
-		// per-kind type.
+		// kinds (masking, row access, password, session, aggregation, projection,
+		// etc.), not a per-kind type.
 		ddlKind = "POLICY"
 	case "NETWORK RULE":
 		ddlKind = "NETWORK_RULE"
