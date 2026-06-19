@@ -318,8 +318,13 @@ func parseDescribeBag(raw string) map[string]any {
 	}
 	// Some editions may emit strict JSON; the structured notation never parses as
 	// JSON (unquoted keys, '=' instead of ':'), so a successful unmarshal is JSON.
+	// Decode numbers as json.Number (not float64) so a numeric value keeps its
+	// original token — a version like 3.10 must not collapse to 3.1, and a 12-digit
+	// account ID must not round-trip through a float.
+	dec := json.NewDecoder(strings.NewReader(raw))
+	dec.UseNumber()
 	var jm map[string]any
-	if json.Unmarshal([]byte(raw), &jm) == nil {
+	if dec.Decode(&jm) == nil {
 		return upperKeys(jm)
 	}
 	s := &structScanner{s: raw}
@@ -528,14 +533,17 @@ func jsonString(m map[string]any, key string) string {
 	return ""
 }
 
-// jsonScalarString renders a JSON scalar (as encoding/json decodes it: string,
-// float64, bool) into string form. A whole-number float64 is rendered without a
-// decimal point or exponent so a large account/ID number (e.g. 123456789012)
-// survives intact rather than becoming "1.23e+11". Non-scalars yield "".
+// jsonScalarString renders a JSON scalar into string form. Numbers decoded with
+// UseNumber arrive as json.Number, so the original token is returned verbatim — a
+// large account/ID number survives intact and a version keeps its trailing zero
+// (3.10 stays "3.10", not "3.1"). A bare float64 (no UseNumber) is rendered
+// without an exponent as a fallback. Non-scalars yield "".
 func jsonScalarString(v any) string {
 	switch n := v.(type) {
 	case string:
 		return n
+	case json.Number:
+		return n.String()
 	case float64:
 		if i := int64(n); float64(i) == n {
 			return strconv.FormatInt(i, 10)
@@ -583,6 +591,10 @@ func jsonIntPtr(m map[string]any, key string) *int {
 		return nil
 	}
 	switch n := v.(type) {
+	case json.Number:
+		if iv, err := strconv.Atoi(strings.TrimSpace(n.String())); err == nil {
+			return &iv
+		}
 	case float64:
 		i := int(n)
 		return &i

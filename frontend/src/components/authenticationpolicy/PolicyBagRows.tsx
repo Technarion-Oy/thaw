@@ -28,7 +28,7 @@ import {
   BuildWorkloadIdentityPolicyValue, ParseWorkloadIdentityPolicy,
   BuildClientPolicyValue, ParseClientPolicy,
   ReconcileAllExclusiveList, AuthenticationPolicyClientDrivers,
-  AuthenticationPolicyClientDriverVersions,
+  AuthenticationPolicyClientDriverVersions, AuthenticationPolicyBagOptions,
 } from "../../../wailsjs/go/app/App";
 import type { authenticationpolicy } from "../../../wailsjs/go/models";
 
@@ -97,13 +97,40 @@ export const clientPolicyValidCount = (value: ClientPolicyValue) =>
 
 const opts = (vals: string[]) => vals.map((v) => ({ value: v, label: v }));
 
+// The bag enum options (allowed methods, providers, network-policy evaluation, …)
+// are static grammar data sourced from the Go backend so the editors aren't a
+// second copy of the grammar. Fetched once per session via a module-level cache
+// shared across every field editor; the cache is cleared on failure so a later
+// mount retries.
+let bagOptionsPromise: Promise<authenticationpolicy.BagParamOptions> | null = null;
+function useBagOptions(): authenticationpolicy.BagParamOptions | null {
+  const [o, setO] = useState<authenticationpolicy.BagParamOptions | null>(null);
+  useEffect(() => {
+    if (!bagOptionsPromise) bagOptionsPromise = AuthenticationPolicyBagOptions();
+    bagOptionsPromise.then((r) => setO(r ?? null)).catch(() => { bagOptionsPromise = null; setO(null); });
+  }, []);
+  return o;
+}
+
+// reconcileAllExclusiveLocal mirrors snowflake.ReconcileAllExclusive: ALL is
+// mutually exclusive with named items, keeping whichever kind was chosen last
+// (the selection arrives in selection order). Used only as a fallback when the
+// backend IPC is unavailable so an invalid ('ALL', X) is never left committed.
+function reconcileAllExclusiveLocal(v: string[]): string[] {
+  const isAll = (s: string) => s.trim().toUpperCase() === "ALL";
+  if (v.length <= 1 || !v.some(isAll)) return v;
+  return isAll(v[v.length - 1]) ? ["ALL"] : v.filter((s) => !isAll(s));
+}
+
 // useReconciledSelection returns a multi-select onChange handler that commits the
 // new selection *immediately* (so a rapid second pick is computed from the fresh
 // value and never drops a token), then collapses ALL-vs-specific exclusivity in
 // the backend and applies only the most recent result (a generation guard, so
 // out-of-order IPC resolutions can't revert to a stale list). `commit` is read
 // through a ref, so the async update always targets the latest surrounding state
-// (no clobbering a sibling field that changed during the round-trip).
+// (no clobbering a sibling field that changed during the round-trip). If the IPC
+// rejects (e.g. not connected), it falls back to the local reconcile so an
+// invalid ('ALL', X) is never left committed.
 export function useReconciledSelection(commit: (list: string[]) => void) {
   const gen = useRef(0);
   const commitRef = useRef(commit);
@@ -111,9 +138,9 @@ export function useReconciledSelection(commit: (list: string[]) => void) {
   return useCallback((v: string[]) => {
     const g = ++gen.current;
     commitRef.current(v);
-    ReconcileAllExclusiveList(v).then((r) => {
-      if (gen.current === g) commitRef.current(r ?? v);
-    });
+    ReconcileAllExclusiveList(v)
+      .then((r) => { if (gen.current === g) commitRef.current(r ?? v); })
+      .catch(() => { if (gen.current === g) commitRef.current(reconcileAllExclusiveLocal(v)); });
   }, []);
 }
 
@@ -137,6 +164,7 @@ const BAG_FIELDS: React.CSSProperties = { display: "flex", width: "100%" };
 
 export function MFAPolicyFields({ value, onChange }: { value: MFAPolicyValue; onChange: (v: MFAPolicyValue) => void }) {
   const onMethods = useReconciledSelection((v) => onChange({ ...value, allowedMethods: v }));
+  const bo = useBagOptions();
   return (
     <Space direction="vertical" size={6} style={BAG_FIELDS}>
       <div style={{ width: "100%" }}>
@@ -144,19 +172,20 @@ export function MFAPolicyFields({ value, onChange }: { value: MFAPolicyValue; on
         <Select mode="multiple" size="small" value={value.allowedMethods}
           onChange={onMethods}
           placeholder="default (ALL)"
-          options={opts(["ALL", "PASSKEY", "TOTP", "OTP", "DUO"])} style={{ width: 360 }} />
+          options={opts(bo?.mfaAllowedMethods ?? [])} style={{ width: 360 }} />
       </div>
       <div>
         <Text style={FIELD_LABEL}>Enforce MFA on external authentication</Text>
         <Select allowClear size="small" value={value.enforceMfaOnExternalAuthentication || undefined}
           onChange={(v) => onChange({ ...value, enforceMfaOnExternalAuthentication: v ?? "" })}
-          placeholder="default (NONE)" options={opts(["ALL", "NONE"])} style={{ width: 200 }} />
+          placeholder="default (NONE)" options={opts(bo?.mfaEnforceExternal ?? [])} style={{ width: 200 }} />
       </div>
     </Space>
   );
 }
 
 export function PATPolicyFields({ value, onChange }: { value: PATPolicyValue; onChange: (v: PATPolicyValue) => void }) {
+  const bo = useBagOptions();
   return (
     <Space direction="vertical" size={6} style={BAG_FIELDS}>
       <Space wrap>
@@ -175,14 +204,14 @@ export function PATPolicyFields({ value, onChange }: { value: PATPolicyValue; on
         <Text style={FIELD_LABEL}>Network policy evaluation</Text>
         <Select allowClear size="small" value={value.networkPolicyEvaluation || undefined}
           onChange={(v) => onChange({ ...value, networkPolicyEvaluation: v ?? "" })} placeholder="default (ENFORCED_REQUIRED)"
-          options={opts(["ENFORCED_REQUIRED", "ENFORCED_NOT_REQUIRED", "NOT_ENFORCED"])} style={{ width: 280 }} />
+          options={opts(bo?.patNetworkPolicyEvaluation ?? [])} style={{ width: 280 }} />
       </div>
       <div>
         <Text style={FIELD_LABEL}>Require role restriction for service users</Text>
         <Select allowClear size="small"
           value={value.requireRoleRestrictionForServiceUsers === null ? undefined : value.requireRoleRestrictionForServiceUsers ? "TRUE" : "FALSE"}
           onChange={(v) => onChange({ ...value, requireRoleRestrictionForServiceUsers: v === undefined ? null : v === "TRUE" })}
-          placeholder="default (TRUE)" options={opts(["TRUE", "FALSE"])} style={{ width: 200 }} />
+          placeholder="default (TRUE)" options={opts(bo?.patRequireRoleRestriction ?? [])} style={{ width: 200 }} />
       </div>
     </Space>
   );
@@ -190,6 +219,7 @@ export function PATPolicyFields({ value, onChange }: { value: PATPolicyValue; on
 
 export function WorkloadIdentityPolicyFields({ value, onChange }: { value: WorkloadIdentityPolicyValue; onChange: (v: WorkloadIdentityPolicyValue) => void }) {
   const onProviders = useReconciledSelection((v) => onChange({ ...value, allowedProviders: v }));
+  const bo = useBagOptions();
   return (
     <Space direction="vertical" size={6} style={BAG_FIELDS}>
       <div>
@@ -197,7 +227,7 @@ export function WorkloadIdentityPolicyFields({ value, onChange }: { value: Workl
         <Select mode="multiple" size="small" value={value.allowedProviders}
           onChange={onProviders}
           placeholder="ALL / AWS / AZURE / GCP / OIDC"
-          options={opts(["ALL", "AWS", "AZURE", "GCP", "OIDC"])} style={{ width: 360 }} />
+          options={opts(bo?.workloadAllowedProviders ?? [])} style={{ width: 360 }} />
       </div>
       <div>
         <Text style={FIELD_LABEL}>Allowed AWS accounts (12-digit IDs)</Text>

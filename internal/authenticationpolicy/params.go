@@ -59,6 +59,30 @@ func MFAEnrollmentOptions() []string {
 	return []string{"REQUIRED", "REQUIRED_PASSWORD_ONLY", "OPTIONAL"}
 }
 
+// BagParamOptions holds the fixed enumerations the nested property-bag editors
+// offer. Like ListParams / MFAEnrollmentOptions, these allowed-value sets live in
+// Go next to the builders so the Create / Properties editors render from one
+// source of truth rather than duplicating the grammar in TypeScript — when
+// Snowflake adds e.g. a new MFA method, updating it here updates both editors.
+type BagParamOptions struct {
+	MFAAllowedMethods          []string `json:"mfaAllowedMethods"`          // MFA_POLICY.ALLOWED_METHODS
+	MFAEnforceExternal         []string `json:"mfaEnforceExternal"`         // MFA_POLICY.ENFORCE_MFA_ON_EXTERNAL_AUTHENTICATION
+	PATNetworkPolicyEvaluation []string `json:"patNetworkPolicyEvaluation"` // PAT_POLICY.NETWORK_POLICY_EVALUATION
+	PATRequireRoleRestriction  []string `json:"patRequireRoleRestriction"`  // PAT_POLICY.REQUIRE_ROLE_RESTRICTION_FOR_SERVICE_USERS
+	WorkloadAllowedProviders   []string `json:"workloadAllowedProviders"`   // WORKLOAD_IDENTITY_POLICY.ALLOWED_PROVIDERS
+}
+
+// BagOptions returns the property-bag enumerations for the editors.
+func BagOptions() BagParamOptions {
+	return BagParamOptions{
+		MFAAllowedMethods:          []string{"ALL", "PASSKEY", "TOTP", "OTP", "DUO"},
+		MFAEnforceExternal:         []string{"ALL", "NONE"},
+		PATNetworkPolicyEvaluation: []string{"ENFORCED_REQUIRED", "ENFORCED_NOT_REQUIRED", "NOT_ENFORCED"},
+		PATRequireRoleRestriction:  []string{"TRUE", "FALSE"},
+		WorkloadAllowedProviders:   []string{"ALL", "AWS", "AZURE", "GCP", "OIDC"},
+	}
+}
+
 // ClientPolicyDrivers returns the driver/client tokens selectable in a
 // CLIENT_POLICY bag — the version-governed subset of the general
 // snowflake.ClientDrivers catalog. CLI/interactive clients (governed via

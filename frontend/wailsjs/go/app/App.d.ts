@@ -121,6 +121,8 @@ export function AlterWarehouseSuspend(arg1:string):Promise<void>;
 
 export function AnalyzeMigration(arg1:Array<migration.MigrationObject>,arg2:string):Promise<Array<migration.MigrationDiffItem>>;
 
+export function AuthenticationPolicyBagOptions():Promise<authenticationpolicy.BagParamOptions>;
+
 export function AuthenticationPolicyClientDriverVersions():Promise<Array<authenticationpolicy.DriverVersionHint>>;
 
 export function AuthenticationPolicyClientDrivers():Promise<Array<string>>;

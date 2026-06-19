@@ -237,6 +237,16 @@ func TestParseClientPolicyJSONNumericVersion(t *testing.T) {
 	}
 }
 
+// A numeric version's trailing zero is significant (3.10 ≠ 3.1) and must survive
+// the strict-JSON fallback — UseNumber keeps the original token.
+func TestParseClientPolicyJSONNumericVersionPrecision(t *testing.T) {
+	got := ParseClientPolicy(`{"GO_DRIVER":{"MINIMUM_VERSION":3.10}}`)
+	want := ClientPolicy{Entries: []ClientPolicyEntry{{Driver: "GO_DRIVER", MinimumVersion: "3.10"}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %+v want %+v", got, want)
+	}
+}
+
 // A doubled quote inside a structured-notation string is the SQL escape for a
 // literal quote and must survive — the scanner must not split the string there.
 func TestParseStructuredDoubledQuoteEscape(t *testing.T) {

@@ -49,6 +49,11 @@ to the account or to individual users via
   The modal parses DESCRIBE list/scalar cells back through the general
   `App.ParseSqlList` / `App.NormalizeSqlScalar` helpers (over `internal/snowflake`),
   so no SQL parsing lives in TypeScript.
+- **`BagOptions()`** / **`BagParamOptions`** — the fixed enumerations the four
+  nested-bag editors offer (MFA allowed methods & external-auth enforcement, PAT
+  network-policy evaluation & require-role, workload allowed providers). Like the
+  list params, these live in Go so the Create / Properties bag editors don't keep
+  a second copy of the grammar (exposed via `App.AuthenticationPolicyBagOptions`).
 - **`ClientPolicyDrivers()`** — the driver/client tokens selectable in a
   `CLIENT_POLICY` bag, filtered from the general `snowflake.ClientDrivers()`
   catalog to the version-governed subset (CLI clients like SnowSQL / Snowflake CLI

@@ -253,6 +253,26 @@ export namespace authenticationpolicy {
 		    return a;
 		}
 	}
+	export class BagParamOptions {
+	    mfaAllowedMethods: string[];
+	    mfaEnforceExternal: string[];
+	    patNetworkPolicyEvaluation: string[];
+	    patRequireRoleRestriction: string[];
+	    workloadAllowedProviders: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new BagParamOptions(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.mfaAllowedMethods = source["mfaAllowedMethods"];
+	        this.mfaEnforceExternal = source["mfaEnforceExternal"];
+	        this.patNetworkPolicyEvaluation = source["patNetworkPolicyEvaluation"];
+	        this.patRequireRoleRestriction = source["patRequireRoleRestriction"];
+	        this.workloadAllowedProviders = source["workloadAllowedProviders"];
+	    }
+	}
 	
 	
 	export class DriverVersionHint {

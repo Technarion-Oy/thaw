@@ -53,7 +53,10 @@ Object-browser UI for Snowflake **AUTHENTICATION POLICY** objects.
   lifecycle. These editors hold only widget state: pre-fill goes through
   `App.Parse<Bag>` and Save through
   `App.Build<Bag>Value` (which returns the `( … )` clause), so no SQL grammar
-  lives in TypeScript; the `CLIENT_POLICY` driver picker is populated from
+  lives in TypeScript; their enum option sets (MFA methods/enforce, PAT
+  network-policy-evaluation/require-role, workload providers) come from
+  `App.AuthenticationPolicyBagOptions` (cached via the `useBagOptions` hook), not
+  hard-coded TS lists; the `CLIENT_POLICY` driver picker is populated from
   `App.AuthenticationPolicyClientDrivers` (the shared backend catalog) rather than
   a hard-coded list, and the version field is an `AutoComplete` whose
   minimum-supported / recommended suggestions come from

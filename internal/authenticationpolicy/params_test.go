@@ -46,6 +46,24 @@ func TestClientPolicyDrivers(t *testing.T) {
 	}
 }
 
+func TestBagOptions(t *testing.T) {
+	o := BagOptions()
+	for name, got := range map[string][]string{
+		"MFAAllowedMethods":          o.MFAAllowedMethods,
+		"MFAEnforceExternal":         o.MFAEnforceExternal,
+		"PATNetworkPolicyEvaluation": o.PATNetworkPolicyEvaluation,
+		"PATRequireRoleRestriction":  o.PATRequireRoleRestriction,
+		"WorkloadAllowedProviders":   o.WorkloadAllowedProviders,
+	} {
+		if len(got) == 0 {
+			t.Errorf("%s is empty", name)
+		}
+	}
+	if o.MFAAllowedMethods[0] != "ALL" || o.WorkloadAllowedProviders[0] != "ALL" {
+		t.Errorf("expected ALL first in the ALL-exclusive sets: %+v", o)
+	}
+}
+
 func TestClientPolicyDriverVersions(t *testing.T) {
 	info := []snowflake.ClientVersionInfo{
 		{ClientID: "JDBC", ClientAppID: "JDBC", MinimumSupportedVersion: "3.13.0", RecommendedVersion: "3.25.0"},

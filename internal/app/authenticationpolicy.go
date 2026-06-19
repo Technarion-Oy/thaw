@@ -79,6 +79,15 @@ func (a *App) AuthenticationPolicyMFAEnrollmentOptions() []string {
 	return authenticationpolicy.MFAEnrollmentOptions()
 }
 
+// AuthenticationPolicyBagOptions returns the fixed enumerations the nested
+// property-bag editors offer (MFA methods / enforce, PAT network-policy
+// evaluation & require-role, workload providers), so the bag editors render their
+// allowed-value sets from the Go grammar rather than hardcoding them in
+// TypeScript. Pure data.
+func (a *App) AuthenticationPolicyBagOptions() authenticationpolicy.BagParamOptions {
+	return authenticationpolicy.BagOptions()
+}
+
 // AuthenticationPolicyClientDrivers returns the driver/client tokens selectable
 // in a CLIENT_POLICY bag — the version-governed subset of the general
 // snowflake.ClientDrivers catalog — so the modal's driver picker draws from one
