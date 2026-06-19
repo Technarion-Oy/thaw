@@ -16,6 +16,17 @@ import (
 	"thaw/internal/snowflake"
 )
 
+// GetClientVersionInfo returns Snowflake's supported / recommended client &
+// driver versions by running SELECT SYSTEM$CLIENT_VERSION_INFO(). General
+// account-level info exposed for reuse — any feature needing client version data
+// (e.g. the authentication-policy CLIENT_POLICY editor) can call it.
+func (a *App) GetClientVersionInfo() ([]snowflake.ClientVersionInfo, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return a.client.GetClientVersionInfo(a.ctx)
+}
+
 // GetSessionContext returns the currently active role, warehouse, database and
 // schema for the given tab's isolated session.
 // Fast path: if the tab session hasn't been created yet but the shared client

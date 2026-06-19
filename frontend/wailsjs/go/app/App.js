@@ -14,6 +14,10 @@ export function AlterAlert(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterAlert'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterAuthenticationPolicy(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterAuthenticationPolicy'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterBackupPolicy(arg1, arg2) {
   return window['go']['app']['App']['AlterBackupPolicy'](arg1, arg2);
 }
@@ -134,6 +138,26 @@ export function AnalyzeMigration(arg1, arg2) {
   return window['go']['app']['App']['AnalyzeMigration'](arg1, arg2);
 }
 
+export function AuthenticationPolicyBagOptions() {
+  return window['go']['app']['App']['AuthenticationPolicyBagOptions']();
+}
+
+export function AuthenticationPolicyClientDriverVersions() {
+  return window['go']['app']['App']['AuthenticationPolicyClientDriverVersions']();
+}
+
+export function AuthenticationPolicyClientDrivers() {
+  return window['go']['app']['App']['AuthenticationPolicyClientDrivers']();
+}
+
+export function AuthenticationPolicyListParams() {
+  return window['go']['app']['App']['AuthenticationPolicyListParams']();
+}
+
+export function AuthenticationPolicyMFAEnrollmentOptions() {
+  return window['go']['app']['App']['AuthenticationPolicyMFAEnrollmentOptions']();
+}
+
 export function BuildAddColumnSql(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['BuildAddColumnSql'](arg1, arg2, arg3, arg4);
 }
@@ -162,12 +186,20 @@ export function BuildChangeColumnTypeSql(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['BuildChangeColumnTypeSql'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function BuildClientPolicyValue(arg1) {
+  return window['go']['app']['App']['BuildClientPolicyValue'](arg1);
+}
+
 export function BuildCreateAggregationPolicySql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateAggregationPolicySql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateAlertSql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateAlertSql'](arg1, arg2, arg3);
+}
+
+export function BuildCreateAuthenticationPolicySql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateAuthenticationPolicySql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateDataMetricFunctionSql(arg1, arg2, arg3) {
@@ -290,12 +322,20 @@ export function BuildJoinState(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildJoinState'](arg1, arg2, arg3);
 }
 
+export function BuildMFAPolicyValue(arg1) {
+  return window['go']['app']['App']['BuildMFAPolicyValue'](arg1);
+}
+
 export function BuildModifyGitRepositorySql(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
   return window['go']['app']['App']['BuildModifyGitRepositorySql'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
 }
 
 export function BuildModifySecretSql(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['BuildModifySecretSql'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function BuildPATPolicyValue(arg1) {
+  return window['go']['app']['App']['BuildPATPolicyValue'](arg1);
 }
 
 export function BuildRefreshPipeSql(arg1, arg2, arg3, arg4) {
@@ -312,6 +352,10 @@ export function BuildSetColumnCommentSql(arg1, arg2, arg3, arg4, arg5) {
 
 export function BuildSetColumnNotNullSql(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['BuildSetColumnNotNullSql'](arg1, arg2, arg3, arg4);
+}
+
+export function BuildWorkloadIdentityPolicyValue(arg1) {
+  return window['go']['app']['App']['BuildWorkloadIdentityPolicyValue'](arg1);
 }
 
 export function CanCreateIntegration(arg1) {
@@ -482,6 +526,10 @@ export function DeployNotebook(arg1) {
   return window['go']['app']['App']['DeployNotebook'](arg1);
 }
 
+export function DescribeAuthenticationPolicy(arg1, arg2, arg3) {
+  return window['go']['app']['App']['DescribeAuthenticationPolicy'](arg1, arg2, arg3);
+}
+
 export function DescribeDataMetricFunction(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['DescribeDataMetricFunction'](arg1, arg2, arg3, arg4);
 }
@@ -606,6 +654,10 @@ export function FindJoinPaths(arg1, arg2) {
   return window['go']['app']['App']['FindJoinPaths'](arg1, arg2);
 }
 
+export function FormatAuthPolicyList(arg1) {
+  return window['go']['app']['App']['FormatAuthPolicyList'](arg1);
+}
+
 export function FormatSecondaryRoles(arg1) {
   return window['go']['app']['App']['FormatSecondaryRoles'](arg1);
 }
@@ -646,8 +698,16 @@ export function GetAppInfo() {
   return window['go']['app']['App']['GetAppInfo']();
 }
 
+export function GetAuthenticationPolicyReferences(arg1, arg2, arg3) {
+  return window['go']['app']['App']['GetAuthenticationPolicyReferences'](arg1, arg2, arg3);
+}
+
 export function GetAvailableShells() {
   return window['go']['app']['App']['GetAvailableShells']();
+}
+
+export function GetClientVersionInfo() {
+  return window['go']['app']['App']['GetClientVersionInfo']();
 }
 
 export function GetCollationLocales() {
@@ -1302,12 +1362,36 @@ export function NewNotebook() {
   return window['go']['app']['App']['NewNotebook']();
 }
 
+export function NormalizeSqlScalar(arg1) {
+  return window['go']['app']['App']['NormalizeSqlScalar'](arg1);
+}
+
 export function NotebookUseContext(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['NotebookUseContext'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function ParseClientPolicy(arg1) {
+  return window['go']['app']['App']['ParseClientPolicy'](arg1);
+}
+
+export function ParseMFAPolicy(arg1) {
+  return window['go']['app']['App']['ParseMFAPolicy'](arg1);
+}
+
+export function ParsePATPolicy(arg1) {
+  return window['go']['app']['App']['ParsePATPolicy'](arg1);
+}
+
 export function ParseSecondaryRoles(arg1) {
   return window['go']['app']['App']['ParseSecondaryRoles'](arg1);
+}
+
+export function ParseSqlList(arg1) {
+  return window['go']['app']['App']['ParseSqlList'](arg1);
+}
+
+export function ParseWorkloadIdentityPolicy(arg1) {
+  return window['go']['app']['App']['ParseWorkloadIdentityPolicy'](arg1);
 }
 
 export function PickCACertFile() {
@@ -1358,6 +1442,10 @@ export function PickSnowflakeCLIConfigPath() {
   return window['go']['app']['App']['PickSnowflakeCLIConfigPath']();
 }
 
+export function QuoteSqlText(arg1) {
+  return window['go']['app']['App']['QuoteSqlText'](arg1);
+}
+
 export function ReadFile(arg1) {
   return window['go']['app']['App']['ReadFile'](arg1);
 }
@@ -1368,6 +1456,10 @@ export function ReadFileHead(arg1, arg2) {
 
 export function ReadNotebook(arg1) {
   return window['go']['app']['App']['ReadNotebook'](arg1);
+}
+
+export function ReconcileAllExclusiveList(arg1) {
+  return window['go']['app']['App']['ReconcileAllExclusiveList'](arg1);
 }
 
 export function ReconcileSecondaryRoles(arg1) {

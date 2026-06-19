@@ -103,6 +103,217 @@ export namespace app {
 
 }
 
+export namespace authenticationpolicy {
+	
+	export class ClientPolicyEntry {
+	    driver: string;
+	    minimumVersion: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ClientPolicyEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.driver = source["driver"];
+	        this.minimumVersion = source["minimumVersion"];
+	    }
+	}
+	export class ClientPolicy {
+	    entries: ClientPolicyEntry[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ClientPolicy(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.entries = this.convertValues(source["entries"], ClientPolicyEntry);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class WorkloadIdentityPolicy {
+	    allowedProviders: string[];
+	    allowedAwsAccounts: string[];
+	    allowedAzureIssuers: string[];
+	    allowedOidcIssuers: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new WorkloadIdentityPolicy(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.allowedProviders = source["allowedProviders"];
+	        this.allowedAwsAccounts = source["allowedAwsAccounts"];
+	        this.allowedAzureIssuers = source["allowedAzureIssuers"];
+	        this.allowedOidcIssuers = source["allowedOidcIssuers"];
+	    }
+	}
+	export class PATPolicy {
+	    defaultExpiryInDays?: number;
+	    maxExpiryInDays?: number;
+	    networkPolicyEvaluation: string;
+	    requireRoleRestrictionForServiceUsers?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new PATPolicy(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.defaultExpiryInDays = source["defaultExpiryInDays"];
+	        this.maxExpiryInDays = source["maxExpiryInDays"];
+	        this.networkPolicyEvaluation = source["networkPolicyEvaluation"];
+	        this.requireRoleRestrictionForServiceUsers = source["requireRoleRestrictionForServiceUsers"];
+	    }
+	}
+	export class MFAPolicy {
+	    allowedMethods: string[];
+	    enforceMfaOnExternalAuthentication: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new MFAPolicy(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.allowedMethods = source["allowedMethods"];
+	        this.enforceMfaOnExternalAuthentication = source["enforceMfaOnExternalAuthentication"];
+	    }
+	}
+	export class AuthenticationPolicyConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    authenticationMethods: string[];
+	    clientTypes: string[];
+	    securityIntegrations: string[];
+	    mfaEnrollment: string;
+	    mfaPolicy: MFAPolicy;
+	    patPolicy: PATPolicy;
+	    workloadIdentityPolicy: WorkloadIdentityPolicy;
+	    clientPolicy: ClientPolicy;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AuthenticationPolicyConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.authenticationMethods = source["authenticationMethods"];
+	        this.clientTypes = source["clientTypes"];
+	        this.securityIntegrations = source["securityIntegrations"];
+	        this.mfaEnrollment = source["mfaEnrollment"];
+	        this.mfaPolicy = this.convertValues(source["mfaPolicy"], MFAPolicy);
+	        this.patPolicy = this.convertValues(source["patPolicy"], PATPolicy);
+	        this.workloadIdentityPolicy = this.convertValues(source["workloadIdentityPolicy"], WorkloadIdentityPolicy);
+	        this.clientPolicy = this.convertValues(source["clientPolicy"], ClientPolicy);
+	        this.comment = source["comment"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class BagParamOptions {
+	    mfaAllowedMethods: string[];
+	    mfaEnforceExternal: string[];
+	    patNetworkPolicyEvaluation: string[];
+	    patRequireRoleRestriction: string[];
+	    workloadAllowedProviders: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new BagParamOptions(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.mfaAllowedMethods = source["mfaAllowedMethods"];
+	        this.mfaEnforceExternal = source["mfaEnforceExternal"];
+	        this.patNetworkPolicyEvaluation = source["patNetworkPolicyEvaluation"];
+	        this.patRequireRoleRestriction = source["patRequireRoleRestriction"];
+	        this.workloadAllowedProviders = source["workloadAllowedProviders"];
+	    }
+	}
+	
+	
+	export class DriverVersionHint {
+	    driver: string;
+	    minimumSupported: string;
+	    recommended: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DriverVersionHint(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.driver = source["driver"];
+	        this.minimumSupported = source["minimumSupported"];
+	        this.recommended = source["recommended"];
+	    }
+	}
+	export class ListParamMeta {
+	    keyword: string;
+	    label: string;
+	    options: string[];
+	    freeform: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ListParamMeta(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.keyword = source["keyword"];
+	        this.label = source["label"];
+	        this.options = source["options"];
+	        this.freeform = source["freeform"];
+	    }
+	}
+	
+	
+
+}
+
 export namespace backup {
 	
 	export class BackupPolicyRow {
@@ -3291,6 +3502,28 @@ export namespace snowflake {
 	        this.type = source["type"];
 	        this.enabled = source["enabled"];
 	        this.comment = source["comment"];
+	    }
+	}
+	export class ClientVersionInfo {
+	    clientId: string;
+	    clientAppId: string;
+	    minimumSupportedVersion: string;
+	    minimumNearingEndOfSupportVersion: string;
+	    recommendedVersion: string;
+	    deprecatedVersions: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ClientVersionInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.clientId = source["clientId"];
+	        this.clientAppId = source["clientAppId"];
+	        this.minimumSupportedVersion = source["minimumSupportedVersion"];
+	        this.minimumNearingEndOfSupportVersion = source["minimumNearingEndOfSupportVersion"];
+	        this.recommendedVersion = source["recommendedVersion"];
+	        this.deprecatedVersions = source["deprecatedVersions"];
 	    }
 	}
 	export class CollationLocale {

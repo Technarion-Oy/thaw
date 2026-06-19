@@ -13,6 +13,7 @@ package app
 import (
 	"thaw/internal/aggregationpolicy"
 	"thaw/internal/alert"
+	"thaw/internal/authenticationpolicy"
 	"thaw/internal/column"
 	"thaw/internal/datametricfunction"
 	"thaw/internal/dbtproject"
@@ -182,6 +183,11 @@ func (a *App) BuildCreateTagSql(database, schema string, cfg tag.TagConfig) (str
 // BuildCreateAggregationPolicySql returns the SQL for creating a Snowflake AGGREGATION POLICY.
 func (a *App) BuildCreateAggregationPolicySql(database, schema string, cfg aggregationpolicy.AggregationPolicyConfig) (string, error) {
 	return aggregationpolicy.BuildCreateAggregationPolicySql(database, schema, cfg)
+}
+
+// BuildCreateAuthenticationPolicySql returns the SQL for creating a Snowflake AUTHENTICATION POLICY.
+func (a *App) BuildCreateAuthenticationPolicySql(database, schema string, cfg authenticationpolicy.AuthenticationPolicyConfig) (string, error) {
+	return authenticationpolicy.BuildCreateAuthenticationPolicySql(database, schema, cfg)
 }
 
 // BuildCreateProjectionPolicySql returns the SQL for creating a Snowflake PROJECTION POLICY.
