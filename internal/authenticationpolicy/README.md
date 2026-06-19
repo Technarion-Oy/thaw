@@ -51,6 +51,12 @@ to the account or to individual users via
   are dropped as inapplicable). Exposed via `App.AuthenticationPolicyClientDrivers`
   so the bag editor's driver picker draws from the shared catalog instead of a
   hard-coded frontend list.
+- **`ClientPolicyDriverVersions(info)`** / **`DriverVersionHint`** — maps those
+  drivers to Snowflake's minimum-supported / recommended versions from
+  `SYSTEM$CLIENT_VERSION_INFO()` (via `snowflake.MatchClientVersions`), so the bag
+  editor can suggest a version instead of the user looking it up. Exposed via
+  `App.AuthenticationPolicyClientDriverVersions` (which runs the query) — drivers
+  the function doesn't report are omitted, and a failure degrades to manual entry.
 
 ### Nested property bags (`policies.go`)
 

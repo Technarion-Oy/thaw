@@ -82,6 +82,22 @@ func (a *App) AuthenticationPolicyClientDrivers() []string {
 	return authenticationpolicy.ClientPolicyDrivers()
 }
 
+// AuthenticationPolicyClientDriverVersions runs SYSTEM$CLIENT_VERSION_INFO() and
+// returns Snowflake's minimum-supported / recommended versions for the
+// CLIENT_POLICY drivers, so the editor can suggest a version instead of the user
+// looking it up. Requires a connection; drivers the function doesn't report are
+// omitted.
+func (a *App) AuthenticationPolicyClientDriverVersions() ([]authenticationpolicy.DriverVersionHint, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	info, err := a.client.GetClientVersionInfo(a.ctx)
+	if err != nil {
+		return nil, err
+	}
+	return authenticationpolicy.ClientPolicyDriverVersions(info), nil
+}
+
 // The Build*Value / Parse* methods below convert the four nested property-bag
 // parameters (MFA_POLICY, PAT_POLICY, WORKLOAD_IDENTITY_POLICY, CLIENT_POLICY)
 // between their structured form and SQL, so the properties modal keeps no SQL

@@ -10,7 +10,11 @@
 
 package authenticationpolicy
 
-import "thaw/internal/snowflake"
+import (
+	"sort"
+
+	"thaw/internal/snowflake"
+)
 
 // ListParamMeta describes one of the policy's top-level list parameters for the
 // properties editor: its ALTER keyword, the field label, the fixed enumeration of
@@ -66,5 +70,39 @@ func ClientPolicyDrivers() []string {
 			out = append(out, d.Token)
 		}
 	}
+	return out
+}
+
+// DriverVersionHint suggests Snowflake's minimum-supported and recommended
+// versions for a CLIENT_POLICY driver (sourced from SYSTEM$CLIENT_VERSION_INFO),
+// so the editor can offer them instead of the user looking the number up.
+type DriverVersionHint struct {
+	Driver           string `json:"driver"`
+	MinimumSupported string `json:"minimumSupported"`
+	Recommended      string `json:"recommended"`
+}
+
+// ClientPolicyDriverVersions maps the version-governed CLIENT_POLICY drivers to
+// the hints Snowflake reports for them, given SYSTEM$CLIENT_VERSION_INFO output.
+// Drivers the function doesn't report (or that carry neither version) are omitted;
+// the result is sorted by driver for a deterministic editor.
+func ClientPolicyDriverVersions(info []snowflake.ClientVersionInfo) []DriverVersionHint {
+	matched := snowflake.MatchClientVersions(info)
+	governed := make(map[string]bool)
+	for _, t := range ClientPolicyDrivers() {
+		governed[t] = true
+	}
+	var out []DriverVersionHint
+	for token, e := range matched {
+		if !governed[token] || (e.MinimumSupportedVersion == "" && e.RecommendedVersion == "") {
+			continue
+		}
+		out = append(out, DriverVersionHint{
+			Driver:           token,
+			MinimumSupported: e.MinimumSupportedVersion,
+			Recommended:      e.RecommendedVersion,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Driver < out[j].Driver })
 	return out
 }

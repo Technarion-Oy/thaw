@@ -121,6 +121,8 @@ export function AlterWarehouseSuspend(arg1:string):Promise<void>;
 
 export function AnalyzeMigration(arg1:Array<migration.MigrationObject>,arg2:string):Promise<Array<migration.MigrationDiffItem>>;
 
+export function AuthenticationPolicyClientDriverVersions():Promise<Array<authenticationpolicy.DriverVersionHint>>;
+
 export function AuthenticationPolicyClientDrivers():Promise<Array<string>>;
 
 export function AuthenticationPolicyListParams():Promise<Array<authenticationpolicy.ListParamMeta>>;
@@ -400,6 +402,8 @@ export function GetAppInfo():Promise<app.AppInfo>;
 export function GetAuthenticationPolicyReferences(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function GetAvailableShells():Promise<Array<string>>;
+
+export function GetClientVersionInfo():Promise<Array<snowflake.ClientVersionInfo>>;
 
 export function GetCollationLocales():Promise<Array<snowflake.CollationLocale>>;
 

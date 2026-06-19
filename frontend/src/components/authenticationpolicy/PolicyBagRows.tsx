@@ -20,7 +20,7 @@
 // `ALTER … SET <BAG> = <value>`.
 
 import { useState, useEffect, type ReactNode } from "react";
-import { Alert, Button, Input, InputNumber, Select, Space, Tooltip, Typography } from "antd";
+import { Alert, AutoComplete, Button, InputNumber, Select, Space, Tooltip, Typography } from "antd";
 import { EditOutlined, CheckOutlined, CloseOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
 import {
   BuildMFAPolicyValue, ParseMFAPolicy,
@@ -28,7 +28,9 @@ import {
   BuildWorkloadIdentityPolicyValue, ParseWorkloadIdentityPolicy,
   BuildClientPolicyValue, ParseClientPolicy,
   ReconcileAllExclusiveList, AuthenticationPolicyClientDrivers,
+  AuthenticationPolicyClientDriverVersions,
 } from "../../../wailsjs/go/app/App";
+import type { authenticationpolicy } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
 
@@ -49,9 +51,11 @@ const opts = (vals: string[]) => vals.map((v) => ({ value: v, label: v }));
 
 // Whether the DESCRIBE value carries real content (so a parse that yields an
 // empty struct means the format wasn't understood, not that the bag is unset).
+// An unset/empty bag renders as "", "()", or "{}" (Snowflake's empty-object
+// form) — possibly with inner whitespace — so none of those count as content.
 const rawHasContent = (raw: string) => {
   const t = raw.trim();
-  return t !== "" && t !== "()";
+  return t !== "" && !/^\(\s*\)$/.test(t) && !/^\{\s*\}$/.test(t);
 };
 
 // ── Shared row chrome ────────────────────────────────────────────────────────
@@ -132,7 +136,7 @@ function BagShell({ label, rawValue, canSave, parseFailed, onBeginEdit, onSave, 
         ) : (
           <Space>
             <span style={{ color: "var(--text)", fontFamily: "var(--font-mono)", wordBreak: "break-word" }}>
-              {rawValue ? rawValue : <Text type="secondary">(default)</Text>}
+              {rawHasContent(rawValue) ? rawValue : <Text type="secondary">(default)</Text>}
             </span>
             <Tooltip title="Edit">
               <Button type="text" size="small" icon={<EditOutlined style={{ fontSize: 11 }} />} onClick={begin} style={{ color: "var(--text-muted)" }} />
@@ -312,6 +316,9 @@ export function ClientPolicyRow({ rawValue, onSet, onUnset }: RowProps) {
   // The selectable drivers come from the backend (the version-governed subset of
   // the shared snowflake.ClientDrivers catalog) — static data fetched once.
   const [driverOptions, setDriverOptions] = useState<string[]>([]);
+  // Per-driver version hints (minimum supported / recommended) from
+  // SYSTEM$CLIENT_VERSION_INFO(), keyed by driver token, used to suggest versions.
+  const [versions, setVersions] = useState<Record<string, authenticationpolicy.DriverVersionHint>>({});
   useEffect(() => {
     AuthenticationPolicyClientDrivers().then((d) => setDriverOptions(d ?? []));
   }, []);
@@ -321,6 +328,16 @@ export function ClientPolicyRow({ rawValue, onSet, onUnset }: RowProps) {
     const es = (p?.entries ?? []).map((e) => ({ driver: e.driver, minimumVersion: e.minimumVersion }));
     setEntries(es);
     setParseFailed(rawHasContent(rawValue) && es.length === 0);
+    // Version hints are best-effort — a failure (e.g. no connection) just means
+    // the user types the version manually, as before.
+    try {
+      const hints = await AuthenticationPolicyClientDriverVersions();
+      const map: Record<string, authenticationpolicy.DriverVersionHint> = {};
+      (hints ?? []).forEach((h) => { map[h.driver] = h; });
+      setVersions(map);
+    } catch {
+      setVersions({});
+    }
   };
   const valid = entries.filter((e) => e.driver?.trim() && e.minimumVersion?.trim());
   // A half-filled row (driver xor version) would be silently dropped by the
@@ -350,14 +367,29 @@ export function ClientPolicyRow({ rawValue, onSet, onUnset }: RowProps) {
     <BagShell label="Client policy" rawValue={rawValue} canSave={canSave} parseFailed={parseFailed} onBeginEdit={begin} onSave={save} onUnset={onUnset}>
       <Text style={FIELD_LABEL}>Minimum driver/client versions</Text>
       <Space direction="vertical" size={4} style={{ width: "100%" }}>
-        {entries.map((e, i) => (
-          <Space key={i}>
-            <Select size="small" showSearch value={e.driver || undefined} onChange={(v) => update(i, { driver: v })}
-              placeholder="driver" options={opts(driverOptions)} style={{ width: 240 }} />
-            <Input size="small" value={e.minimumVersion} onChange={(ev) => update(i, { minimumVersion: ev.target.value })} placeholder="3.13.0" style={{ width: 120 }} />
-            <Tooltip title="Remove"><Button size="small" type="text" icon={<DeleteOutlined />} onClick={() => remove(i)} /></Tooltip>
-          </Space>
-        ))}
+        {entries.map((e, i) => {
+          const hint = versions[(e.driver ?? "").toUpperCase()];
+          // Recommended first, then minimum supported; drop blanks/duplicates.
+          const verOptions = hint
+            ? [
+                hint.recommended && { value: hint.recommended, label: `${hint.recommended} · recommended` },
+                hint.minimumSupported && hint.minimumSupported !== hint.recommended
+                  && { value: hint.minimumSupported, label: `${hint.minimumSupported} · minimum supported` },
+              ].filter(Boolean) as { value: string; label: string }[]
+            : [];
+          return (
+            <Space key={i}>
+              <Select size="small" showSearch value={e.driver || undefined} onChange={(v) => update(i, { driver: v })}
+                placeholder="driver" options={opts(driverOptions)} style={{ width: 240 }} />
+              <Tooltip title={hint ? `Supported: ${hint.minimumSupported || "—"} … recommended ${hint.recommended || "—"}` : ""}>
+                <AutoComplete size="small" value={e.minimumVersion} options={verOptions} filterOption={false}
+                  onChange={(val) => update(i, { minimumVersion: val })}
+                  placeholder={hint?.recommended || "3.13.0"} style={{ width: 170 }} />
+              </Tooltip>
+              <Tooltip title="Remove"><Button size="small" type="text" icon={<DeleteOutlined />} onClick={() => remove(i)} /></Tooltip>
+            </Space>
+          );
+        })}
         <Button size="small" icon={<PlusOutlined />} onClick={add}>Add driver</Button>
         {hasPartial && (
           <Text type="warning" style={{ fontSize: 11 }}>

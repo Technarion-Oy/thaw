@@ -178,6 +178,22 @@ export namespace authenticationpolicy {
 		}
 	}
 	
+	export class DriverVersionHint {
+	    driver: string;
+	    minimumSupported: string;
+	    recommended: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DriverVersionHint(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.driver = source["driver"];
+	        this.minimumSupported = source["minimumSupported"];
+	        this.recommended = source["recommended"];
+	    }
+	}
 	export class ListParamMeta {
 	    keyword: string;
 	    label: string;
@@ -3437,6 +3453,28 @@ export namespace snowflake {
 	        this.type = source["type"];
 	        this.enabled = source["enabled"];
 	        this.comment = source["comment"];
+	    }
+	}
+	export class ClientVersionInfo {
+	    clientId: string;
+	    clientAppId: string;
+	    minimumSupportedVersion: string;
+	    minimumNearingEndOfSupportVersion: string;
+	    recommendedVersion: string;
+	    deprecatedVersions: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ClientVersionInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.clientId = source["clientId"];
+	        this.clientAppId = source["clientAppId"];
+	        this.minimumSupportedVersion = source["minimumSupportedVersion"];
+	        this.minimumNearingEndOfSupportVersion = source["minimumNearingEndOfSupportVersion"];
+	        this.recommendedVersion = source["recommendedVersion"];
+	        this.deprecatedVersions = source["deprecatedVersions"];
 	    }
 	}
 	export class CollationLocale {

@@ -138,6 +138,10 @@ export function AnalyzeMigration(arg1, arg2) {
   return window['go']['app']['App']['AnalyzeMigration'](arg1, arg2);
 }
 
+export function AuthenticationPolicyClientDriverVersions() {
+  return window['go']['app']['App']['AuthenticationPolicyClientDriverVersions']();
+}
+
 export function AuthenticationPolicyClientDrivers() {
   return window['go']['app']['App']['AuthenticationPolicyClientDrivers']();
 }
@@ -696,6 +700,10 @@ export function GetAuthenticationPolicyReferences(arg1, arg2, arg3) {
 
 export function GetAvailableShells() {
   return window['go']['app']['App']['GetAvailableShells']();
+}
+
+export function GetClientVersionInfo() {
+  return window['go']['app']['App']['GetClientVersionInfo']();
 }
 
 export function GetCollationLocales() {

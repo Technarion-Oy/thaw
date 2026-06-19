@@ -37,3 +37,31 @@ func TestClientDrivers(t *testing.T) {
 		t.Errorf("SNOWSQL should be present and NOT version-governed, got %+v (present=%v)", d, ok)
 	}
 }
+
+func TestMatchClientVersions(t *testing.T) {
+	// clientId / clientAppId shapes mirror SYSTEM$CLIENT_VERSION_INFO() — different
+	// separators/casing from the policy tokens — to exercise the normalized match.
+	info := []ClientVersionInfo{
+		{ClientID: "DOTNETDriver", ClientAppID: ".NET", MinimumSupportedVersion: "2.0.9", RecommendedVersion: "2.1.5"},
+		{ClientID: "GoDriver", ClientAppID: "Go", MinimumSupportedVersion: "1.7.0", RecommendedVersion: "1.14.1"},
+		{ClientID: "JDBC", ClientAppID: "JDBC", MinimumSupportedVersion: "3.13.0", RecommendedVersion: "3.25.0"},
+		{ClientID: "PythonConnector", ClientAppID: "Python Connector", MinimumSupportedVersion: "3.0.0", RecommendedVersion: "3.12.0"},
+		{ClientID: "Mystery", ClientAppID: "Mystery", RecommendedVersion: "9.9.9"}, // no catalog alias → ignored
+	}
+	got := MatchClientVersions(info)
+
+	for token, wantRec := range map[string]string{
+		"DOTNET_DRIVER": "2.1.5",
+		"GO_DRIVER":     "1.14.1",
+		"JDBC_DRIVER":   "3.25.0",
+		"PYTHON_DRIVER": "3.12.0",
+	} {
+		if e, ok := got[token]; !ok || e.RecommendedVersion != wantRec {
+			t.Errorf("%s: got %+v (present=%v), want recommended %q", token, e, ok, wantRec)
+		}
+	}
+	// An entry with no matching alias must not invent a token.
+	if _, ok := got["MYSTERY"]; ok {
+		t.Error("unmatched client should not appear in the result")
+	}
+}
