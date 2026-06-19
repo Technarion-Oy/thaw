@@ -74,6 +74,10 @@ export function AlterPipe(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterPipe'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterProjectionPolicy(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterProjectionPolicy'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterRowAccessPolicy(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterRowAccessPolicy'](arg1, arg2, arg3, arg4);
 }
@@ -228,6 +232,10 @@ export function BuildCreatePasswordPolicySql(arg1, arg2, arg3) {
 
 export function BuildCreatePipeSql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreatePipeSql'](arg1, arg2, arg3);
+}
+
+export function BuildCreateProjectionPolicySql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateProjectionPolicySql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateRowAccessPolicySql(arg1, arg2, arg3) {
@@ -804,6 +812,10 @@ export function GetPlatformOS() {
 
 export function GetProcedureParams(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['GetProcedureParams'](arg1, arg2, arg3, arg4);
+}
+
+export function GetProjectionPolicyReferences(arg1, arg2, arg3) {
+  return window['go']['app']['App']['GetProjectionPolicyReferences'](arg1, arg2, arg3);
 }
 
 export function GetQueryHistory(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) {

@@ -23,6 +23,7 @@ import {materializedview} from '../models';
 import {networkrule} from '../models';
 import {passwordpolicy} from '../models';
 import {pipe} from '../models';
+import {projectionpolicy} from '../models';
 import {rowaccesspolicy} from '../models';
 import {secret} from '../models';
 import {service} from '../models';
@@ -86,6 +87,8 @@ export function AlterNetworkRule(arg1:string,arg2:string,arg3:string,arg4:string
 export function AlterPasswordPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterPipe(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterProjectionPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterRowAccessPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -164,6 +167,8 @@ export function BuildCreateNetworkRuleSql(arg1:string,arg2:string,arg3:networkru
 export function BuildCreatePasswordPolicySql(arg1:string,arg2:string,arg3:passwordpolicy.PasswordPolicyConfig):Promise<string>;
 
 export function BuildCreatePipeSql(arg1:string,arg2:string,arg3:pipe.PipeConfig):Promise<string>;
+
+export function BuildCreateProjectionPolicySql(arg1:string,arg2:string,arg3:projectionpolicy.ProjectionPolicyConfig):Promise<string>;
 
 export function BuildCreateRowAccessPolicySql(arg1:string,arg2:string,arg3:rowaccesspolicy.RowAccessPolicyConfig):Promise<string>;
 
@@ -452,6 +457,8 @@ export function GetPipeStatus(arg1:string,arg2:string,arg3:string):Promise<strin
 export function GetPlatformOS():Promise<string>;
 
 export function GetProcedureParams(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<snowflake.ProcParam>>;
+
+export function GetProjectionPolicyReferences(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function GetQueryHistory(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:number,arg8:boolean):Promise<Array<queryhistory.QueryHistoryRow>>;
 
