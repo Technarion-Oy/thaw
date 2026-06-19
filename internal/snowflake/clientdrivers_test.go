@@ -65,3 +65,43 @@ func TestMatchClientVersions(t *testing.T) {
 		t.Error("unmatched client should not appear in the result")
 	}
 }
+
+// TestMatchClientVersionsLiveSample pins the mapping against the real
+// SYSTEM$CLIENT_VERSION_INFO() clientId values observed from a live account, so a
+// driver silently losing its version suggestion is caught.
+func TestMatchClientVersionsLiveSample(t *testing.T) {
+	// (clientId, clientAppId) pairs exactly as the function reports them.
+	sample := []struct{ id, app string }{
+		{"DOTNETDriver", ".NET"},
+		{"GO", "Go"},
+		{"JDBC", "JDBC"},
+		{"JSDriver", "JavaScript"},
+		{"ODBC", "ODBC"},
+		{"PHP_PDO", "PDO"},
+		{"PyCore", "PyCore"},
+		{"PythonConnector", "PythonConnector"},
+		{"PythonSnowpark", "PythonSnowpark"},
+		{"SQLAPI", "SQLAPI"},
+		{"SnowSQL", "SnowSQL"},
+		{"SnowflakeSQLAlchemy", "SnowflakeSQLAlchemy"},
+		{"Snowflake_CLI", "Snowflake_CLI"},
+		{"Snowpark", "Snowpark"},
+	}
+	info := make([]ClientVersionInfo, len(sample))
+	for i, s := range sample {
+		info[i] = ClientVersionInfo{ClientID: s.id, ClientAppID: s.app, RecommendedVersion: "1.0.0"}
+	}
+	got := MatchClientVersions(info)
+
+	// Every driver the function reports must resolve to its policy token.
+	wantTokens := []string{
+		"DOTNET_DRIVER", "GO_DRIVER", "JDBC_DRIVER", "JAVASCRIPT_DRIVER", "ODBC_DRIVER",
+		"PHP_DRIVER", "PY_CORE", "PYTHON_DRIVER", "PYTHON_SNOWPARK", "SQL_API",
+		"SNOWSQL", "SQL_ALCHEMY", "SNOWFLAKE_CLI", "SNOWPARK",
+	}
+	for _, token := range wantTokens {
+		if _, ok := got[token]; !ok {
+			t.Errorf("%s did not resolve from the live sample", token)
+		}
+	}
+}
