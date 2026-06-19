@@ -32,7 +32,7 @@ nil-check → delegate → return.
 | `table.go` | Table settings queries and column DDL builders; delegates to `internal/table` and `internal/column`. |
 | `backup.go` | Backup set/policy CRUD; delegates to `internal/backup`. |
 | `builders.go` | Miscellaneous SQL-builder IPC methods (key-pair generation via `internal/keypair`, query-history builder via `internal/queryhistory`, etc.). |
-| `sqlformat.go` | General connection-free SQL string-formatting delegators over `internal/snowflake`: `ParseSqlList` (parse a DESCRIBE list cell into value tokens), `NormalizeSqlScalar` (strip wrapping brackets/quotes from a DESCRIBE scalar), `QuoteSqlText` (single-quote a free-text literal). Used by the policy property modals so the frontend keeps no SQL-quoting/parsing logic. |
+| `sqlformat.go` | General connection-free SQL string-formatting delegators over `internal/snowflake`: `ParseSqlList` (parse a DESCRIBE list cell into value tokens), `NormalizeSqlScalar` (strip wrapping brackets/quotes from a DESCRIBE scalar), `QuoteSqlText` (single-quote a free-text literal), `ReconcileAllExclusiveList` (collapse a mixed `('ALL', X)` selection to the kind chosen last). Used by the policy property modals so the frontend keeps no SQL-quoting/parsing logic. |
 | `stage.go` | Stage listing, file management, and `ExecuteStageFile`; delegates to `internal/snowflake`. |
 | `dbtproject.go` | DBT PROJECT create/alter/execute builders; delegates to `internal/dbtproject`. |
 | `pipe.go` | Pipe SQL builders and COPY_HISTORY; delegates to `internal/pipe`. |

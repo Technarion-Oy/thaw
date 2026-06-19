@@ -61,8 +61,13 @@ KEY={NESTED=VALUE}}`, e.g. `CLIENT_POLICY` → `{GO_DRIVER={MINIMUM_VERSION=3.14
 ([reference](https://docs.snowflake.com/en/sql-reference/sql/desc-authentication-policy)),
 **not** JSON — so the parsers run that grammar through `parseDescribeBag` (strict
 JSON is accepted as a fallback) and never error: an unrecognized/empty value
-yields a zero struct (the editor starts blank). All of this lives in Go (exposed
-via `App.Build<Bag>Value` /
+yields a zero struct (the editor starts blank). The `structScanner` also accepts
+the parenthesized SQL form (`( KEY = VALUE … )` → object, `('A', 'B')` → list) so
+a paren-style DESCRIBE rendering still pre-fills the editor rather than blanking
+it (which would risk a Set wiping the bag). `BuildPATPolicyValue` range-checks the
+expiry day counts against the documented 1–365 bound as defense-in-depth (the
+exported IPC method can't rely on the UI's input clamps). All of this lives in Go
+(exposed via `App.Build<Bag>Value` /
 `App.Parse<Bag>`) so the properties modal carries no SQL-serialization or
 DESCRIBE-parsing logic. `UNSET DCM PROJECT` (detach from a Declarative Change
 Management project) is issued as a plain `AlterAuthenticationPolicy` clause.

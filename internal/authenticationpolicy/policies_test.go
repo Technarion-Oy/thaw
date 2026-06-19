@@ -47,6 +47,16 @@ func TestBuildPATPolicyValue(t *testing.T) {
 	if v := BuildPATPolicyValue(PATPolicy{RequireRoleRestrictionForServiceUsers: boolp(true)}); v != "( REQUIRE_ROLE_RESTRICTION_FOR_SERVICE_USERS = TRUE )" {
 		t.Errorf("bool-only = %q", v)
 	}
+	// Out-of-range expiry days (defense-in-depth) are dropped: 0, negative, and
+	// >365 are all rejected; the documented bounds (1 and 365) pass.
+	for _, days := range []int{0, -5, 366, 1000} {
+		if v := BuildPATPolicyValue(PATPolicy{DefaultExpiryInDays: intp(days), MaxExpiryInDays: intp(days)}); v != "()" {
+			t.Errorf("out-of-range %d expiry should be dropped, got %q", days, v)
+		}
+	}
+	if v := BuildPATPolicyValue(PATPolicy{DefaultExpiryInDays: intp(1), MaxExpiryInDays: intp(365)}); v != "( DEFAULT_EXPIRY_IN_DAYS = 1 MAX_EXPIRY_IN_DAYS = 365 )" {
+		t.Errorf("boundary days = %q", v)
+	}
 }
 
 func TestBuildWorkloadIdentityPolicyValue(t *testing.T) {
@@ -205,5 +215,55 @@ func TestParseClientPolicyStructuredQuoted(t *testing.T) {
 	want := ClientPolicy{Entries: []ClientPolicyEntry{{Driver: "PYTHON_DRIVER", MinimumVersion: "3.0.0"}}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %+v want %+v", got, want)
+	}
+}
+
+// If DESCRIBE ever returns the parenthesized SQL-grammar form instead of the
+// brace form, the parsers must still populate the bags (otherwise a real,
+// populated bag would render blank and a Set from it would wipe the policy).
+// `( KEY = VALUE )` parses as an object; `('A', 'B')` as a value list.
+
+func TestParseMFAPolicyParenForm(t *testing.T) {
+	got := ParseMFAPolicy(`( ALLOWED_METHODS = ('TOTP', 'DUO') ENFORCE_MFA_ON_EXTERNAL_AUTHENTICATION = 'NONE' )`)
+	want := MFAPolicy{AllowedMethods: []string{"TOTP", "DUO"}, EnforceMFAOnExternalAuthentication: "NONE"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %+v want %+v", got, want)
+	}
+}
+
+func TestParsePATPolicyParenForm(t *testing.T) {
+	got := ParsePATPolicy(`( DEFAULT_EXPIRY_IN_DAYS = 15 MAX_EXPIRY_IN_DAYS = 90 NETWORK_POLICY_EVALUATION = ENFORCED_REQUIRED REQUIRE_ROLE_RESTRICTION_FOR_SERVICE_USERS = TRUE )`)
+	if got.DefaultExpiryInDays == nil || *got.DefaultExpiryInDays != 15 {
+		t.Errorf("default expiry = %v", got.DefaultExpiryInDays)
+	}
+	if got.MaxExpiryInDays == nil || *got.MaxExpiryInDays != 90 {
+		t.Errorf("max expiry = %v", got.MaxExpiryInDays)
+	}
+	if got.NetworkPolicyEvaluation != "ENFORCED_REQUIRED" {
+		t.Errorf("eval = %q", got.NetworkPolicyEvaluation)
+	}
+	if got.RequireRoleRestrictionForServiceUsers == nil || !*got.RequireRoleRestrictionForServiceUsers {
+		t.Errorf("require role restriction = %v", got.RequireRoleRestrictionForServiceUsers)
+	}
+}
+
+func TestParseClientPolicyParenForm(t *testing.T) {
+	got := ParseClientPolicy(`( GO_DRIVER = ( MINIMUM_VERSION = '3.14.1' ), JDBC_DRIVER = ( MINIMUM_VERSION = '3.25.0' ) )`)
+	want := ClientPolicy{Entries: []ClientPolicyEntry{
+		{Driver: "GO_DRIVER", MinimumVersion: "3.14.1"},
+		{Driver: "JDBC_DRIVER", MinimumVersion: "3.25.0"},
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %+v want %+v", got, want)
+	}
+}
+
+func TestParseWorkloadIdentityPolicyParenForm(t *testing.T) {
+	got := ParseWorkloadIdentityPolicy(`( ALLOWED_PROVIDERS = (AWS, AZURE) ALLOWED_AWS_ACCOUNTS = ('123456789012') )`)
+	if !reflect.DeepEqual(got.AllowedProviders, []string{"AWS", "AZURE"}) {
+		t.Errorf("providers = %v", got.AllowedProviders)
+	}
+	if !reflect.DeepEqual(got.AllowedAWSAccounts, []string{"123456789012"}) {
+		t.Errorf("aws accounts = %v", got.AllowedAWSAccounts)
 	}
 }

@@ -131,11 +131,14 @@ func (a *App) GetAuthenticationPolicyReferences(database, schema, name string) (
 	if a.client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
+	// EscapeTextLit (not EscapeStringLit) for these literal comparisons: Snowflake
+	// treats '\' as an escape char inside a string literal, so a name containing a
+	// backslash must have it doubled or the WHERE silently matches nothing.
 	query := fmt.Sprintf(
 		"SELECT REF_ENTITY_NAME, REF_ENTITY_DOMAIN, POLICY_STATUS "+
 			"FROM SNOWFLAKE.ACCOUNT_USAGE.POLICY_REFERENCES "+
 			"WHERE POLICY_DB = '%s' AND POLICY_SCHEMA = '%s' AND POLICY_NAME = '%s' AND POLICY_KIND = 'AUTHENTICATION_POLICY' "+
 			"ORDER BY REF_ENTITY_DOMAIN, REF_ENTITY_NAME",
-		snowflake.EscapeStringLit(database), snowflake.EscapeStringLit(schema), snowflake.EscapeStringLit(name))
+		snowflake.EscapeTextLit(database), snowflake.EscapeTextLit(schema), snowflake.EscapeTextLit(name))
 	return a.client.QuerySingle(a.ctx, query)
 }

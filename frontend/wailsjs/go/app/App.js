@@ -1442,6 +1442,10 @@ export function ReadNotebook(arg1) {
   return window['go']['app']['App']['ReadNotebook'](arg1);
 }
 
+export function ReconcileAllExclusiveList(arg1) {
+  return window['go']['app']['App']['ReconcileAllExclusiveList'](arg1);
+}
+
 export function ReconcileSecondaryRoles(arg1) {
   return window['go']['app']['App']['ReconcileSecondaryRoles'](arg1);
 }

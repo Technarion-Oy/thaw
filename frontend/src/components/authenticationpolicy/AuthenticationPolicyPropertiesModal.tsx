@@ -20,7 +20,7 @@ import {
 import {
   GetObjectProperties, DescribeAuthenticationPolicy, AlterAuthenticationPolicy,
   GetAuthenticationPolicyReferences, FormatAuthPolicyList,
-  ParseSqlList, NormalizeSqlScalar, QuoteSqlText,
+  ParseSqlList, NormalizeSqlScalar, QuoteSqlText, ReconcileAllExclusiveList,
   AuthenticationPolicyListParams, AuthenticationPolicyMFAEnrollmentOptions,
 } from "../../../wailsjs/go/app/App";
 import type { snowflake, authenticationpolicy } from "../../../wailsjs/go/models";
@@ -115,7 +115,10 @@ function ListRow({ meta, rawValue, onSet, onUnset }: ListRowProps) {
                 size="small"
                 mode={meta.freeform ? "tags" : "multiple"}
                 value={draft}
-                onChange={setDraft}
+                // ALL is mutually exclusive with specific values — reconcile in
+                // the backend (keeps whichever kind was chosen last) so an invalid
+                // ('ALL', X) list can't be submitted.
+                onChange={async (v) => setDraft((await ReconcileAllExclusiveList(v)) ?? [])}
                 placeholder={meta.freeform ? "ALL or integration names" : "select methods"}
                 tokenSeparators={[","]}
                 style={{ width: 320 }}

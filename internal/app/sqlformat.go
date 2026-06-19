@@ -36,3 +36,11 @@ func (a *App) NormalizeSqlScalar(raw string) string {
 func (a *App) QuoteSqlText(s string) string {
 	return snowflake.QuoteTextLit(s)
 }
+
+// ReconcileAllExclusiveList enforces the `( 'ALL' | <item>, … )` grammar's
+// mutual exclusivity for a tag-picker selection (in selection order): an ALL token
+// can't coexist with named items, so it keeps whichever kind was chosen last. Used
+// by the policy list editors to stop an invalid mixed selection being submitted.
+func (a *App) ReconcileAllExclusiveList(items []string) []string {
+	return snowflake.ReconcileAllExclusive(items)
+}

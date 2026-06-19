@@ -106,6 +106,13 @@ func ParseMFAPolicy(raw string) MFAPolicy {
 
 // ── PAT_POLICY ───────────────────────────────────────────────────────────────
 
+// PAT token-lifetime bounds, per the CREATE AUTHENTICATION POLICY reference:
+// DEFAULT_EXPIRY_IN_DAYS and MAX_EXPIRY_IN_DAYS both accept 1 to 365 days.
+const (
+	patExpiryMinDays = 1
+	patExpiryMaxDays = 365
+)
+
 // PATPolicy models the PAT_POLICY bag governing programmatic access tokens.
 // The two day counts are *int and the boolean a *bool so the builder can tell
 // "leave unset" (nil) apart from a deliberate value (including 0 / false).
@@ -117,12 +124,15 @@ type PATPolicy struct {
 }
 
 // BuildPATPolicyValue serializes p into the `( … )` value for SET PAT_POLICY.
+// The expiry day counts are range-checked against the documented 1–365 bound and
+// dropped when out of range — defense-in-depth on this exported IPC method (the
+// UI already clamps the inputs), matching the bare-token guards elsewhere here.
 func BuildPATPolicyValue(p PATPolicy) string {
 	var props []string
-	if p.DefaultExpiryInDays != nil {
+	if p.DefaultExpiryInDays != nil && inPATExpiryRange(*p.DefaultExpiryInDays) {
 		props = append(props, fmt.Sprintf("DEFAULT_EXPIRY_IN_DAYS = %d", *p.DefaultExpiryInDays))
 	}
-	if p.MaxExpiryInDays != nil {
+	if p.MaxExpiryInDays != nil && inPATExpiryRange(*p.MaxExpiryInDays) {
 		props = append(props, fmt.Sprintf("MAX_EXPIRY_IN_DAYS = %d", *p.MaxExpiryInDays))
 	}
 	if v := strings.ToUpper(strings.TrimSpace(p.NetworkPolicyEvaluation)); v != "" && isBareToken(v) {
@@ -136,6 +146,10 @@ func BuildPATPolicyValue(p PATPolicy) string {
 		props = append(props, "REQUIRE_ROLE_RESTRICTION_FOR_SERVICE_USERS = "+b)
 	}
 	return wrapProps(props)
+}
+
+func inPATExpiryRange(days int) bool {
+	return days >= patExpiryMinDays && days <= patExpiryMaxDays
 }
 
 // ParsePATPolicy reads a DESCRIBE PAT_POLICY value back into the struct.
@@ -324,10 +338,13 @@ func upperKeys(m map[string]any) map[string]any {
 
 // structScanner parses Snowflake's structured-object string rendering into Go
 // values: `{...}` → map[string]any, `[...]` → []any, and any bare/quoted run → a
-// trimmed string scalar. Keys and values are separated by '='; entries by ',' or
-// whitespace, so both the comma-delimited DESCRIBE rendering and the grammar's
-// space-delimited form parse. A surrounding single/double-quote pair is unwrapped
-// so a quoted value may contain a delimiter.
+// trimmed string scalar. A `(...)` group is parsed too — it maps to an object when
+// its entries carry `=` (the SQL bag grammar, `( KEY = VALUE … )`) or to a list
+// otherwise (a value tuple, `('TOTP', 'DUO')`) — so a parenthesized DESCRIBE
+// rendering parses as well as the documented brace form. Keys and values are
+// separated by '='; entries by ',' or whitespace, so both the comma-delimited
+// DESCRIBE rendering and the grammar's space-delimited form parse. A surrounding
+// single/double-quote pair is unwrapped so a quoted value may contain a delimiter.
 type structScanner struct {
 	s   string
 	pos int
@@ -343,9 +360,55 @@ func (p *structScanner) parseValue() any {
 		return p.parseObject()
 	case '[':
 		return p.parseArray()
+	case '(':
+		return p.parseGroup()
 	default:
 		return p.parseToken()
 	}
+}
+
+// parseGroup parses a `(...)` group, disambiguating the two shapes Snowflake's
+// paren grammar uses: a property bag `( KEY = VALUE … )` becomes a map, while a
+// value tuple `('A', 'B')` becomes a list. An entry whose first token is followed
+// by '=' is a key/value pair; any other entry is a list element. If any pair is
+// seen the group is an object (stray bare elements are dropped); otherwise it is
+// the collected list.
+func (p *structScanner) parseGroup() any {
+	obj := map[string]any{}
+	var list []any
+	sawPair := false
+	p.pos++ // consume '('
+	for p.pos < len(p.s) {
+		start := p.pos
+		p.skipSpace()
+		if p.pos < len(p.s) && p.s[p.pos] == ')' {
+			p.pos++
+			break
+		}
+		first := p.parseValue()
+		p.skipSpace()
+		if p.pos < len(p.s) && p.s[p.pos] == '=' {
+			p.pos++ // consume '='
+			val := p.parseValue()
+			if key, ok := first.(string); ok && key != "" {
+				obj[key] = val
+				sawPair = true
+			}
+		} else {
+			list = append(list, first)
+		}
+		p.skipSpace()
+		if p.pos < len(p.s) && p.s[p.pos] == ',' {
+			p.pos++ // consume entry separator
+		}
+		if p.pos == start { // guarantee forward progress on malformed input
+			p.pos++
+		}
+	}
+	if sawPair {
+		return obj
+	}
+	return list
 }
 
 func (p *structScanner) parseObject() map[string]any {
@@ -401,8 +464,8 @@ func (p *structScanner) parseArray() []any {
 }
 
 // parseToken reads a bare scalar (or quoted string) up to the next structural
-// delimiter — whitespace, '=', ',', or a brace/bracket — unwrapping a surrounding
-// single/double-quote pair.
+// delimiter — whitespace, '=', ',', or a brace/bracket/paren — unwrapping a
+// surrounding single/double-quote pair.
 func (p *structScanner) parseToken() string {
 	p.skipSpace()
 	var sb strings.Builder
@@ -420,7 +483,8 @@ func (p *structScanner) parseToken() string {
 			continue
 		}
 		if c == ' ' || c == '\t' || c == '\n' || c == '\r' ||
-			c == '=' || c == ',' || c == '{' || c == '}' || c == '[' || c == ']' {
+			c == '=' || c == ',' || c == '{' || c == '}' || c == '[' || c == ']' ||
+			c == '(' || c == ')' {
 			break
 		}
 		sb.WriteByte(c)

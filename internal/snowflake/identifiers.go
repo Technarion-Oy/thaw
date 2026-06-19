@@ -189,29 +189,37 @@ func FormatSecondaryRoles(roles []string) string {
 	return "(" + strings.Join(parts, ", ") + ")"
 }
 
-// ReconcileSecondaryRoles enforces the secondary-role grammar's mutual
-// exclusivity — `( { 'ALL' | <role_name> [, ...] } )`, where the ALL token cannot
-// be mixed with named roles. Given a tag selection in selection order (as the UI's
-// tag picker reports it), it keeps whichever kind was chosen last: if ALL was just
-// added it collapses to ["ALL"]; if a named role was added while ALL was already
-// present it drops ALL. Lists without ALL, or with a single entry, pass through
-// unchanged. It prevents the invalid ('ALL', R1) clause that Snowflake would
-// otherwise reject only at execution time.
-func ReconcileSecondaryRoles(roles []string) []string {
+// ReconcileAllExclusive enforces the `( { 'ALL' | <item> [, ...] } )` grammar's
+// mutual exclusivity — the ALL token cannot be mixed with named items. Given a tag
+// selection in selection order (as the UI's tag picker reports it), it keeps
+// whichever kind was chosen last: if ALL was just added it collapses to ["ALL"];
+// if a named item was added while ALL was already present it drops ALL. Lists
+// without ALL, or with a single entry, pass through unchanged. It prevents the
+// invalid ('ALL', X) clause that Snowflake would otherwise reject only at
+// execution time. This is the general reader behind ReconcileSecondaryRoles and
+// the authentication-policy list editors; the ALL match is case-insensitive.
+func ReconcileAllExclusive(items []string) []string {
 	isAll := func(r string) bool { return strings.EqualFold(strings.TrimSpace(r), "ALL") }
-	if len(roles) <= 1 || !slices.ContainsFunc(roles, isAll) {
-		return roles
+	if len(items) <= 1 || !slices.ContainsFunc(items, isAll) {
+		return items
 	}
-	if isAll(roles[len(roles)-1]) {
+	if isAll(items[len(items)-1]) {
 		return []string{"ALL"}
 	}
-	out := make([]string, 0, len(roles))
-	for _, r := range roles {
+	out := make([]string, 0, len(items))
+	for _, r := range items {
 		if !isAll(r) {
 			out = append(out, r)
 		}
 	}
 	return out
+}
+
+// ReconcileSecondaryRoles enforces the secondary-role grammar's `( 'ALL' |
+// <role>, … )` mutual exclusivity — a thin alias over ReconcileAllExclusive
+// (the ALL-vs-named-item rule is identical) kept for the session-policy callers.
+func ReconcileSecondaryRoles(roles []string) []string {
+	return ReconcileAllExclusive(roles)
 }
 
 // unquoteSQLToken returns the value of a quoted token text whose quote character

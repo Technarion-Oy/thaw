@@ -31,7 +31,10 @@ Object-browser UI for Snowflake **AUTHENTICATION POLICY** objects.
   via `App.ParseSqlList` and the scalar normalized via `App.NormalizeSqlScalar`
   (the comment is quoted through `App.QuoteSqlText`), so the modal carries no SQL
   quoting/parsing logic; if DESCRIBE fails, a caveat notes that editing sets
-  values blind. An **Advanced policies** section (`PolicyBagRows.tsx`) provides
+  values blind. The multi-selects reconcile `ALL`-vs-specific exclusivity through
+  `App.ReconcileAllExclusiveList` (also used by the bag `ALLOWED_METHODS` /
+  `ALLOWED_PROVIDERS` selects), so a redundant `('ALL', X)` list can't be
+  submitted. An **Advanced policies** section (`PolicyBagRows.tsx`) provides
   structured editors for the four nested property bags — `MFA_POLICY`,
   `PAT_POLICY`, `WORKLOAD_IDENTITY_POLICY`, `CLIENT_POLICY` — as selects /
   numbers / toggles / per-driver version rows. These editors hold only widget

@@ -27,6 +27,7 @@ import {
   BuildPATPolicyValue, ParsePATPolicy,
   BuildWorkloadIdentityPolicyValue, ParseWorkloadIdentityPolicy,
   BuildClientPolicyValue, ParseClientPolicy,
+  ReconcileAllExclusiveList,
 } from "../../../wailsjs/go/app/App";
 
 const { Text } = Typography;
@@ -176,7 +177,9 @@ export function MFAPolicyRow({ rawValue, onSet, onUnset }: RowProps) {
     <BagShell label="MFA policy" rawValue={rawValue} canSave={canSave} parseFailed={parseFailed} onBeginEdit={begin} onSave={save} onUnset={onUnset}>
       <div style={{ width: "100%" }}>
         <Text style={FIELD_LABEL}>Allowed methods</Text>
-        <Select mode="multiple" size="small" value={methods} onChange={setMethods} placeholder="default (ALL)"
+        <Select mode="multiple" size="small" value={methods}
+          onChange={async (v) => setMethods((await ReconcileAllExclusiveList(v)) ?? [])}
+          placeholder="default (ALL)"
           options={opts(["ALL", "PASSKEY", "TOTP", "OTP", "DUO"])} style={{ width: 360 }} />
       </div>
       <div>
@@ -280,7 +283,9 @@ export function WorkloadIdentityPolicyRow({ rawValue, onSet, onUnset }: RowProps
     <BagShell label="Workload identity policy" rawValue={rawValue} canSave={canSave} parseFailed={parseFailed} onBeginEdit={begin} onSave={save} onUnset={onUnset}>
       <div>
         <Text style={FIELD_LABEL}>Allowed providers</Text>
-        <Select mode="multiple" size="small" value={providers} onChange={setProviders} placeholder="ALL / AWS / AZURE / GCP / OIDC"
+        <Select mode="multiple" size="small" value={providers}
+          onChange={async (v) => setProviders((await ReconcileAllExclusiveList(v)) ?? [])}
+          placeholder="ALL / AWS / AZURE / GCP / OIDC"
           options={opts(["ALL", "AWS", "AZURE", "GCP", "OIDC"])} style={{ width: 360 }} />
       </div>
       <div>

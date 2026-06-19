@@ -773,6 +773,8 @@ export function ReadFileHead(arg1:string,arg2:number):Promise<string>;
 
 export function ReadNotebook(arg1:string):Promise<string>;
 
+export function ReconcileAllExclusiveList(arg1:Array<string>):Promise<Array<string>>;
+
 export function ReconcileSecondaryRoles(arg1:Array<string>):Promise<Array<string>>;
 
 export function RemoveEditorTab(arg1:string):Promise<void>;
