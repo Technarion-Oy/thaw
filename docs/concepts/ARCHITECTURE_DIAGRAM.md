@@ -1,6 +1,6 @@
 # Thaw Architecture Diagram — Agent Maintenance Guide
 
-This document tells an LLM agent exactly how to keep `thaw_architecture.drawio` in sync with the codebase.
+This document tells an LLM agent exactly how to keep `docs/concepts/thaw_architecture.drawio` in sync with the codebase.
 
 ---
 
@@ -88,7 +88,7 @@ grep -n '"github.com\|"golang.org\|openai\|google\|azure' app.go | head -40
 ### 2. Read the current diagram
 
 ```python
-with open("thaw_architecture.drawio") as f:
+with open("docs/concepts/thaw_architecture.drawio") as f:
     xml = f.read()
 ```
 
@@ -165,7 +165,7 @@ Follow the project branching convention from `CLAUDE.md`:
 
 ```bash
 git checkout -b docs/update-architecture-diagram
-git add thaw_architecture.drawio
+git add docs/concepts/thaw_architecture.drawio
 git commit -m "docs: Update system architecture diagram — <brief reason>"
 git push -u origin docs/update-architecture-diagram
 gh pr create --repo Technarion-Oy/thaw --base main \

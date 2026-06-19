@@ -29,7 +29,7 @@ export default {
     [
       "@semantic-release/changelog",
       {
-        changelogFile: "CHANGELOG.md",
+        changelogFile: "release/CHANGELOG.md",
       },
     ],
     [
@@ -41,7 +41,7 @@ export default {
     [
       "@semantic-release/git",
       {
-        assets: ["wails.json", "CHANGELOG.md"],
+        assets: ["wails.json", "release/CHANGELOG.md"],
         message:
           "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}",
       },
