@@ -19,7 +19,7 @@
 // row's `onSet` receives the built value string; the parent issues
 // `ALTER … SET <BAG> = <value>`.
 
-import { useState, type ReactNode } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { Alert, Button, Input, InputNumber, Select, Space, Tooltip, Typography } from "antd";
 import { EditOutlined, CheckOutlined, CloseOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
 import {
@@ -27,7 +27,7 @@ import {
   BuildPATPolicyValue, ParsePATPolicy,
   BuildWorkloadIdentityPolicyValue, ParseWorkloadIdentityPolicy,
   BuildClientPolicyValue, ParseClientPolicy,
-  ReconcileAllExclusiveList,
+  ReconcileAllExclusiveList, AuthenticationPolicyClientDrivers,
 } from "../../../wailsjs/go/app/App";
 
 const { Text } = Typography;
@@ -306,15 +306,15 @@ export function WorkloadIdentityPolicyRow({ rawValue, onSet, onUnset }: RowProps
 
 // ── CLIENT_POLICY ────────────────────────────────────────────────────────────
 
-const CLIENT_DRIVERS = [
-  "JDBC_DRIVER", "ODBC_DRIVER", "PYTHON_DRIVER", "JAVASCRIPT_DRIVER", "C_DRIVER", "GO_DRIVER",
-  "PHP_DRIVER", "DOTNET_DRIVER", "SQL_API", "SNOWPIPE_STREAMING_CLIENT_SDK", "PY_CORE",
-  "SPROC_PYTHON", "PYTHON_SNOWPARK", "SQL_ALCHEMY", "SNOWPARK", "SNOWFLAKE_CLIENT",
-];
-
 export function ClientPolicyRow({ rawValue, onSet, onUnset }: RowProps) {
   const [entries, setEntries] = useState<ClientEntry[]>([]);
   const [parseFailed, setParseFailed] = useState(false);
+  // The selectable drivers come from the backend (the version-governed subset of
+  // the shared snowflake.ClientDrivers catalog) — static data fetched once.
+  const [driverOptions, setDriverOptions] = useState<string[]>([]);
+  useEffect(() => {
+    AuthenticationPolicyClientDrivers().then((d) => setDriverOptions(d ?? []));
+  }, []);
 
   const begin = async () => {
     const p = await ParseClientPolicy(rawValue);
@@ -353,7 +353,7 @@ export function ClientPolicyRow({ rawValue, onSet, onUnset }: RowProps) {
         {entries.map((e, i) => (
           <Space key={i}>
             <Select size="small" showSearch value={e.driver || undefined} onChange={(v) => update(i, { driver: v })}
-              placeholder="driver" options={opts(CLIENT_DRIVERS)} style={{ width: 240 }} />
+              placeholder="driver" options={opts(driverOptions)} style={{ width: 240 }} />
             <Input size="small" value={e.minimumVersion} onChange={(ev) => update(i, { minimumVersion: ev.target.value })} placeholder="3.13.0" style={{ width: 120 }} />
             <Tooltip title="Remove"><Button size="small" type="text" icon={<DeleteOutlined />} onClick={() => remove(i)} /></Tooltip>
           </Space>

@@ -45,6 +45,12 @@ to the account or to individual users via
   The modal parses DESCRIBE list/scalar cells back through the general
   `App.ParseSqlList` / `App.NormalizeSqlScalar` helpers (over `internal/snowflake`),
   so no SQL parsing lives in TypeScript.
+- **`ClientPolicyDrivers()`** — the driver/client tokens selectable in a
+  `CLIENT_POLICY` bag, filtered from the general `snowflake.ClientDrivers()`
+  catalog to the version-governed subset (CLI clients like SnowSQL / Snowflake CLI
+  are dropped as inapplicable). Exposed via `App.AuthenticationPolicyClientDrivers`
+  so the bag editor's driver picker draws from the shared catalog instead of a
+  hard-coded frontend list.
 
 ### Nested property bags (`policies.go`)
 

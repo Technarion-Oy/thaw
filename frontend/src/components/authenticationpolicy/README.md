@@ -43,7 +43,9 @@ Object-browser UI for Snowflake **AUTHENTICATION POLICY** objects.
   numbers / toggles / per-driver version rows. These editors hold only widget
   state: pre-fill goes through `App.Parse<Bag>` and Save through
   `App.Build<Bag>Value` (which returns the `( … )` clause), so no SQL grammar
-  lives in TypeScript; the row then issues `ALTER … SET <BAG> = <value>` /
+  lives in TypeScript; the `CLIENT_POLICY` driver picker is populated from
+  `App.AuthenticationPolicyClientDrivers` (the shared backend catalog) rather than
+  a hard-coded list. The row then issues `ALTER … SET <BAG> = <value>` /
   `UNSET <BAG>`. A **Settings** section edits the comment and exposes
   **Detach from DCM project** (`UNSET DCM PROJECT`), and **References** loads the
   users/account the policy is attached to on demand via

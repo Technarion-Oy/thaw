@@ -74,6 +74,14 @@ func (a *App) AuthenticationPolicyMFAEnrollmentOptions() []string {
 	return authenticationpolicy.MFAEnrollmentOptions()
 }
 
+// AuthenticationPolicyClientDrivers returns the driver/client tokens selectable
+// in a CLIENT_POLICY bag — the version-governed subset of the general
+// snowflake.ClientDrivers catalog — so the modal's driver picker draws from one
+// shared source. Pure data.
+func (a *App) AuthenticationPolicyClientDrivers() []string {
+	return authenticationpolicy.ClientPolicyDrivers()
+}
+
 // The Build*Value / Parse* methods below convert the four nested property-bag
 // parameters (MFA_POLICY, PAT_POLICY, WORKLOAD_IDENTITY_POLICY, CLIENT_POLICY)
 // between their structured form and SQL, so the properties modal keeps no SQL

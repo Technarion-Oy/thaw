@@ -138,6 +138,10 @@ export function AnalyzeMigration(arg1, arg2) {
   return window['go']['app']['App']['AnalyzeMigration'](arg1, arg2);
 }
 
+export function AuthenticationPolicyClientDrivers() {
+  return window['go']['app']['App']['AuthenticationPolicyClientDrivers']();
+}
+
 export function AuthenticationPolicyListParams() {
   return window['go']['app']['App']['AuthenticationPolicyListParams']();
 }

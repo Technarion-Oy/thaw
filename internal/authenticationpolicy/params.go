@@ -10,6 +10,8 @@
 
 package authenticationpolicy
 
+import "thaw/internal/snowflake"
+
 // ListParamMeta describes one of the policy's top-level list parameters for the
 // properties editor: its ALTER keyword, the field label, the fixed enumeration of
 // values offered (nil for a free-form list), and whether the editor accepts
@@ -51,4 +53,18 @@ func ListParams() []ListParamMeta {
 // parameter. The Snowflake default is OPTIONAL.
 func MFAEnrollmentOptions() []string {
 	return []string{"REQUIRED", "REQUIRED_PASSWORD_ONLY", "OPTIONAL"}
+}
+
+// ClientPolicyDrivers returns the driver/client tokens selectable in a
+// CLIENT_POLICY bag — the version-governed subset of the general
+// snowflake.ClientDrivers catalog. CLI/interactive clients (governed via
+// CLIENT_TYPES, not a minimum version) are filtered out as inapplicable here.
+func ClientPolicyDrivers() []string {
+	var out []string
+	for _, d := range snowflake.ClientDrivers() {
+		if d.VersionGoverned {
+			out = append(out, d.Token)
+		}
+	}
+	return out
 }
