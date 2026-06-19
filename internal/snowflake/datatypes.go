@@ -15,6 +15,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"thaw/internal/sqltok"
 )
 
 // reIdent matches a bare SQL identifier (letters, digits, underscore, dollar).
@@ -47,6 +49,34 @@ const (
 	KindVector
 )
 
+// ── DataTypeCategory ──────────────────────────────────────────────────────────
+
+// DataTypeCategory is the broad semantic family a Snowflake type belongs to.
+// It is the single source of truth for category-driven logic such as
+// IsNumeric (helpers.go) and the JOIN-compatibility buckets in sqleditor.
+type DataTypeCategory string
+
+const (
+	// CategoryNumeric — exact and approximate numeric types (INT, NUMBER, FLOAT…).
+	CategoryNumeric DataTypeCategory = "numeric"
+	// CategoryString — character/text types (VARCHAR, CHAR, STRING, TEXT…).
+	CategoryString DataTypeCategory = "string"
+	// CategoryBinary — BINARY and VARBINARY.
+	CategoryBinary DataTypeCategory = "binary"
+	// CategoryBoolean — BOOLEAN.
+	CategoryBoolean DataTypeCategory = "boolean"
+	// CategoryDatetime — DATE/TIME/TIMESTAMP family.
+	CategoryDatetime DataTypeCategory = "datetime"
+	// CategorySemiStructured — VARIANT, OBJECT, ARRAY.
+	CategorySemiStructured DataTypeCategory = "semi_structured"
+	// CategoryStructured — MAP (and other strongly-typed structured types).
+	CategoryStructured DataTypeCategory = "structured"
+	// CategoryGeospatial — GEOGRAPHY, GEOMETRY.
+	CategoryGeospatial DataTypeCategory = "geospatial"
+	// CategoryVector — VECTOR.
+	CategoryVector DataTypeCategory = "vector"
+)
+
 // ── DataTypeInfo ──────────────────────────────────────────────────────────────
 
 // DataTypeInfo describes a single Snowflake data type.
@@ -56,6 +86,8 @@ type DataTypeInfo struct {
 	Name string
 	// Kind determines which parameter syntax and constraints apply.
 	Kind DataTypeKind
+	// Category is the broad semantic family used by category-driven consumers.
+	Category DataTypeCategory
 	// ParamHint is a human-readable parameter synopsis shown in autocompletion
 	// (e.g. "(precision, scale)").  Empty for types that take no parameters.
 	ParamHint string
@@ -66,52 +98,52 @@ type DataTypeInfo struct {
 // dispatches via dataTypeMap which is built from this slice at init time.
 var snowflakeDataTypes = []DataTypeInfo{
 	// ── Numeric — exact ──────────────────────────────────────────────────
-	{Name: "NUMBER", Kind: KindPrecisionScale, ParamHint: "(precision, scale)"},
-	{Name: "DECIMAL", Kind: KindPrecisionScale, ParamHint: "(precision, scale)"},
-	{Name: "NUMERIC", Kind: KindPrecisionScale, ParamHint: "(precision, scale)"},
-	{Name: "INT", Kind: KindNoParams},
-	{Name: "INTEGER", Kind: KindNoParams},
-	{Name: "BIGINT", Kind: KindNoParams},
-	{Name: "SMALLINT", Kind: KindNoParams},
-	{Name: "TINYINT", Kind: KindNoParams},
-	{Name: "BYTEINT", Kind: KindNoParams},
+	{Name: "NUMBER", Kind: KindPrecisionScale, Category: CategoryNumeric, ParamHint: "(precision, scale)"},
+	{Name: "DECIMAL", Kind: KindPrecisionScale, Category: CategoryNumeric, ParamHint: "(precision, scale)"},
+	{Name: "NUMERIC", Kind: KindPrecisionScale, Category: CategoryNumeric, ParamHint: "(precision, scale)"},
+	{Name: "INT", Kind: KindNoParams, Category: CategoryNumeric},
+	{Name: "INTEGER", Kind: KindNoParams, Category: CategoryNumeric},
+	{Name: "BIGINT", Kind: KindNoParams, Category: CategoryNumeric},
+	{Name: "SMALLINT", Kind: KindNoParams, Category: CategoryNumeric},
+	{Name: "TINYINT", Kind: KindNoParams, Category: CategoryNumeric},
+	{Name: "BYTEINT", Kind: KindNoParams, Category: CategoryNumeric},
 	// ── Numeric — approximate ────────────────────────────────────────────
-	{Name: "FLOAT", Kind: KindNoParams},
-	{Name: "FLOAT4", Kind: KindNoParams},
-	{Name: "FLOAT8", Kind: KindNoParams},
-	{Name: "DOUBLE", Kind: KindNoParams},
-	{Name: "DOUBLE PRECISION", Kind: KindNoParams},
-	{Name: "REAL", Kind: KindNoParams},
+	{Name: "FLOAT", Kind: KindNoParams, Category: CategoryNumeric},
+	{Name: "FLOAT4", Kind: KindNoParams, Category: CategoryNumeric},
+	{Name: "FLOAT8", Kind: KindNoParams, Category: CategoryNumeric},
+	{Name: "DOUBLE", Kind: KindNoParams, Category: CategoryNumeric},
+	{Name: "DOUBLE PRECISION", Kind: KindNoParams, Category: CategoryNumeric},
+	{Name: "REAL", Kind: KindNoParams, Category: CategoryNumeric},
 	// ── String ───────────────────────────────────────────────────────────
-	{Name: "VARCHAR", Kind: KindLength, ParamHint: "(length)"},
-	{Name: "CHAR", Kind: KindLength, ParamHint: "(length)"},
-	{Name: "CHARACTER", Kind: KindLength, ParamHint: "(length)"},
-	{Name: "STRING", Kind: KindNoParams},
-	{Name: "TEXT", Kind: KindNoParams},
+	{Name: "VARCHAR", Kind: KindLength, Category: CategoryString, ParamHint: "(length)"},
+	{Name: "CHAR", Kind: KindLength, Category: CategoryString, ParamHint: "(length)"},
+	{Name: "CHARACTER", Kind: KindLength, Category: CategoryString, ParamHint: "(length)"},
+	{Name: "STRING", Kind: KindNoParams, Category: CategoryString},
+	{Name: "TEXT", Kind: KindNoParams, Category: CategoryString},
 	// ── Binary ───────────────────────────────────────────────────────────
-	{Name: "BINARY", Kind: KindLengthBinary, ParamHint: "(length)"},
-	{Name: "VARBINARY", Kind: KindLengthBinary, ParamHint: "(length)"},
+	{Name: "BINARY", Kind: KindLengthBinary, Category: CategoryBinary, ParamHint: "(length)"},
+	{Name: "VARBINARY", Kind: KindLengthBinary, Category: CategoryBinary, ParamHint: "(length)"},
 	// ── Logical ──────────────────────────────────────────────────────────
-	{Name: "BOOLEAN", Kind: KindNoParams},
+	{Name: "BOOLEAN", Kind: KindNoParams, Category: CategoryBoolean},
 	// ── Date & Time ──────────────────────────────────────────────────────
-	{Name: "DATE", Kind: KindNoParams},
-	{Name: "DATETIME", Kind: KindNoParams},
-	{Name: "TIME", Kind: KindFracSeconds, ParamHint: "(scale)"},
-	{Name: "TIMESTAMP", Kind: KindFracSeconds, ParamHint: "(scale)"},
-	{Name: "TIMESTAMP_LTZ", Kind: KindFracSeconds, ParamHint: "(scale)"},
-	{Name: "TIMESTAMP_NTZ", Kind: KindFracSeconds, ParamHint: "(scale)"},
-	{Name: "TIMESTAMP_TZ", Kind: KindFracSeconds, ParamHint: "(scale)"},
+	{Name: "DATE", Kind: KindNoParams, Category: CategoryDatetime},
+	{Name: "DATETIME", Kind: KindNoParams, Category: CategoryDatetime},
+	{Name: "TIME", Kind: KindFracSeconds, Category: CategoryDatetime, ParamHint: "(scale)"},
+	{Name: "TIMESTAMP", Kind: KindFracSeconds, Category: CategoryDatetime, ParamHint: "(scale)"},
+	{Name: "TIMESTAMP_LTZ", Kind: KindFracSeconds, Category: CategoryDatetime, ParamHint: "(scale)"},
+	{Name: "TIMESTAMP_NTZ", Kind: KindFracSeconds, Category: CategoryDatetime, ParamHint: "(scale)"},
+	{Name: "TIMESTAMP_TZ", Kind: KindFracSeconds, Category: CategoryDatetime, ParamHint: "(scale)"},
 	// ── Semi-structured ──────────────────────────────────────────────────
-	{Name: "VARIANT", Kind: KindNoParams},
-	{Name: "OBJECT", Kind: KindStructuredObject, ParamHint: "(name type, ...)"},
-	{Name: "ARRAY", Kind: KindStructuredArray, ParamHint: "(element_type)"},
+	{Name: "VARIANT", Kind: KindNoParams, Category: CategorySemiStructured},
+	{Name: "OBJECT", Kind: KindStructuredObject, Category: CategorySemiStructured, ParamHint: "(name type, ...)"},
+	{Name: "ARRAY", Kind: KindStructuredArray, Category: CategorySemiStructured, ParamHint: "(element_type)"},
 	// ── Structured ───────────────────────────────────────────────────────
-	{Name: "MAP", Kind: KindMap, ParamHint: "(key_type, value_type)"},
+	{Name: "MAP", Kind: KindMap, Category: CategoryStructured, ParamHint: "(key_type, value_type)"},
 	// ── Geospatial ───────────────────────────────────────────────────────
-	{Name: "GEOGRAPHY", Kind: KindNoParams},
-	{Name: "GEOMETRY", Kind: KindNoParams},
+	{Name: "GEOGRAPHY", Kind: KindNoParams, Category: CategoryGeospatial},
+	{Name: "GEOMETRY", Kind: KindNoParams, Category: CategoryGeospatial},
 	// ── Vector ───────────────────────────────────────────────────────────
-	{Name: "VECTOR", Kind: KindVector, ParamHint: "(element_type, dimension)"},
+	{Name: "VECTOR", Kind: KindVector, Category: CategoryVector, ParamHint: "(element_type, dimension)"},
 }
 
 // dataTypeMap is a fast lookup by canonical upper-case name, built once at init.
@@ -119,9 +151,18 @@ var dataTypeMap map[string]DataTypeInfo
 
 func init() {
 	dataTypeMap = make(map[string]DataTypeInfo, len(snowflakeDataTypes))
+	names := make([]string, 0, len(snowflakeDataTypes))
 	for _, dt := range snowflakeDataTypes {
 		dataTypeMap[dt.Name] = dt
+		names = append(names, dt.Name)
 	}
+	// Inject the authoritative type names into the lower-level tokenizer's
+	// keyword set so it classifies data types as keywords without duplicating
+	// the list.  snowflake → sqltok is the only allowed direction (sqltok is a
+	// leaf), so registration via init keeps datatypes.go the single source of
+	// truth.  Go guarantees this init runs before any snowflake-importing
+	// package's code, so consumers observe the registered names.
+	sqltok.RegisterDataTypeKeywords(names)
 }
 
 // AllDataTypes returns a copy of the complete list of supported Snowflake data

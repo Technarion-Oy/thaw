@@ -45,6 +45,13 @@ func SplitRanges(sql string) []StatementRange // per-statement byte ranges + lin
 func IsReserved(upper string) bool       // Snowflake reserved keywords
 func IsKeyword(upper string) bool        // all SQL keywords
 func IsBuiltinFunction(upper string) bool // built-in function names
+
+// RegisterDataTypeKeywords injects the authoritative data-type names so the
+// tokenizer treats them as keywords. The data-type list is NOT hardcoded here —
+// the snowflake package (the single source of truth, internal/snowflake/
+// datatypes.go) calls this from its init. sqltok is a leaf package, so it
+// cannot import snowflake; this dependency-injection keeps the list in one place.
+func RegisterDataTypeKeywords(names []string)
 ```
 
 ### Helpers
@@ -95,7 +102,7 @@ slice (trivia already removed) the parts join across the original whitespace.
 |------|----------|
 | `doc.go` | Package doc, domain annotation |
 | `token.go` | `TokenKind` enum, `Token` struct |
-| `keywords.go` | Keyword, reserved, and builtin-function maps |
+| `keywords.go` | Keyword, reserved, and builtin-function maps. Data-type names are injected at init via `RegisterDataTypeKeywords` from `internal/snowflake` rather than duplicated here. |
 | `tokenizer.go` | Core `scan()` state machine, `Tokenize`, `TokenizeIter` |
 | `split.go` | `Split`, `SplitRanges`, `StatementRange` |
 | `helpers.go` | `StripComments`, `StripStrings`, `FirstToken`, `InertRegions`, `IsInert` |

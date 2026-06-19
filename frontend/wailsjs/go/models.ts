@@ -3662,22 +3662,6 @@ export namespace snowflake {
 	        this.noProxy = source["noProxy"];
 	    }
 	}
-	export class DataTypeInfo {
-	    Name: string;
-	    Kind: number;
-	    ParamHint: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new DataTypeInfo(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.Name = source["Name"];
-	        this.Kind = source["Kind"];
-	        this.ParamHint = source["ParamHint"];
-	    }
-	}
 	export class DbtProjectVersion {
 	    version: string;
 	    alias: string;

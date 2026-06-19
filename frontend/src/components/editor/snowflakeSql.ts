@@ -8,6 +8,8 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
+import { SNOWFLAKE_DATA_TYPE_NAMES } from "../../generated/snowflakeDataTypes";
+
 // ─── Monarch tokenizer ────────────────────────────────────────────────────────
 // Produces granular token types so the custom themes below can assign distinct
 // colours to DML, DDL, clause, control-flow, functions, types, etc.
@@ -80,14 +82,11 @@ export const snowflakeMonarchLanguage = {
     "SYSDATE", "NOW", "LOCALTIME", "LOCALTIMESTAMP",
   ],
 
-  datatypes: [
-    "NUMBER", "DECIMAL", "NUMERIC", "INT", "INTEGER", "BIGINT", "SMALLINT",
-    "TINYINT", "BYTEINT", "FLOAT", "FLOAT4", "FLOAT8", "DOUBLE", "REAL",
-    "PRECISION", "VARCHAR", "CHAR", "CHARACTER", "NCHAR", "NVARCHAR",
-    "STRING", "TEXT", "BINARY", "VARBINARY", "BOOLEAN", "DATE", "DATETIME",
-    "TIME", "TIMESTAMP", "TIMESTAMP_NTZ", "TIMESTAMP_LTZ", "TIMESTAMP_TZ",
-    "VARIANT", "OBJECT", "ARRAY", "GEOGRAPHY", "GEOMETRY",
-  ],
+  // Data types sourced from the generated registry artifact (single source of
+  // truth: internal/snowflake/datatypes.go).  Multi-word entries such as
+  // "DOUBLE PRECISION" never match the single-word tokenizer rule, so they are
+  // harmless; "PRECISION" alone is intentionally no longer highlighted.
+  datatypes: [...SNOWFLAKE_DATA_TYPE_NAMES],
 
   builtins: [
     // Aggregates

@@ -12,10 +12,20 @@ import (
 	"strings"
 )
 
-var (
-	reScale = regexp.MustCompile(`\(.*\)$`)
-	reNumeric = regexp.MustCompile(`^(NUMBER|INT|INTEGER|BIGINT|SMALLINT|TINYINT|BYTEINT|FLOAT|DOUBLE|DECIMAL|NUMERIC|REAL)$`)
-)
+var reScale = regexp.MustCompile(`\(.*\)$`)
+
+// numericTypeNames is the set of canonical numeric type names, derived from the
+// authoritative registry (CategoryNumeric) so adding a numeric type to
+// snowflakeDataTypes automatically makes it numeric here too.
+var numericTypeNames = func() map[string]struct{} {
+	m := make(map[string]struct{})
+	for _, dt := range snowflakeDataTypes {
+		if dt.Category == CategoryNumeric {
+			m[dt.Name] = struct{}{}
+		}
+	}
+	return m
+}()
 
 // IsBoolean reports whether the given Snowflake data type is a boolean.
 func IsBoolean(dataType string) bool {
@@ -26,7 +36,8 @@ func IsBoolean(dataType string) bool {
 // IsNumeric reports whether the given Snowflake data type is a numeric type.
 func IsNumeric(dataType string) bool {
 	base := strings.ToUpper(strings.TrimSpace(reScale.ReplaceAllString(dataType, "")))
-	return reNumeric.MatchString(base)
+	_, ok := numericTypeNames[base]
+	return ok
 }
 
 // NeedsQuotes reports whether a value of the given data type should be quoted in SQL.
