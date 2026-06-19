@@ -105,34 +105,6 @@ export namespace app {
 
 export namespace authenticationpolicy {
 	
-	export class AuthenticationPolicyConfig {
-	    name: string;
-	    caseSensitive: boolean;
-	    orReplace: boolean;
-	    ifNotExists: boolean;
-	    authenticationMethods: string[];
-	    clientTypes: string[];
-	    securityIntegrations: string[];
-	    mfaEnrollment: string;
-	    comment: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new AuthenticationPolicyConfig(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.name = source["name"];
-	        this.caseSensitive = source["caseSensitive"];
-	        this.orReplace = source["orReplace"];
-	        this.ifNotExists = source["ifNotExists"];
-	        this.authenticationMethods = source["authenticationMethods"];
-	        this.clientTypes = source["clientTypes"];
-	        this.securityIntegrations = source["securityIntegrations"];
-	        this.mfaEnrollment = source["mfaEnrollment"];
-	        this.comment = source["comment"];
-	    }
-	}
 	export class ClientPolicyEntry {
 	    driver: string;
 	    minimumVersion: string;
@@ -177,6 +149,111 @@ export namespace authenticationpolicy {
 		    return a;
 		}
 	}
+	export class WorkloadIdentityPolicy {
+	    allowedProviders: string[];
+	    allowedAwsAccounts: string[];
+	    allowedAzureIssuers: string[];
+	    allowedOidcIssuers: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new WorkloadIdentityPolicy(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.allowedProviders = source["allowedProviders"];
+	        this.allowedAwsAccounts = source["allowedAwsAccounts"];
+	        this.allowedAzureIssuers = source["allowedAzureIssuers"];
+	        this.allowedOidcIssuers = source["allowedOidcIssuers"];
+	    }
+	}
+	export class PATPolicy {
+	    defaultExpiryInDays?: number;
+	    maxExpiryInDays?: number;
+	    networkPolicyEvaluation: string;
+	    requireRoleRestrictionForServiceUsers?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new PATPolicy(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.defaultExpiryInDays = source["defaultExpiryInDays"];
+	        this.maxExpiryInDays = source["maxExpiryInDays"];
+	        this.networkPolicyEvaluation = source["networkPolicyEvaluation"];
+	        this.requireRoleRestrictionForServiceUsers = source["requireRoleRestrictionForServiceUsers"];
+	    }
+	}
+	export class MFAPolicy {
+	    allowedMethods: string[];
+	    enforceMfaOnExternalAuthentication: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new MFAPolicy(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.allowedMethods = source["allowedMethods"];
+	        this.enforceMfaOnExternalAuthentication = source["enforceMfaOnExternalAuthentication"];
+	    }
+	}
+	export class AuthenticationPolicyConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    authenticationMethods: string[];
+	    clientTypes: string[];
+	    securityIntegrations: string[];
+	    mfaEnrollment: string;
+	    mfaPolicy: MFAPolicy;
+	    patPolicy: PATPolicy;
+	    workloadIdentityPolicy: WorkloadIdentityPolicy;
+	    clientPolicy: ClientPolicy;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AuthenticationPolicyConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.authenticationMethods = source["authenticationMethods"];
+	        this.clientTypes = source["clientTypes"];
+	        this.securityIntegrations = source["securityIntegrations"];
+	        this.mfaEnrollment = source["mfaEnrollment"];
+	        this.mfaPolicy = this.convertValues(source["mfaPolicy"], MFAPolicy);
+	        this.patPolicy = this.convertValues(source["patPolicy"], PATPolicy);
+	        this.workloadIdentityPolicy = this.convertValues(source["workloadIdentityPolicy"], WorkloadIdentityPolicy);
+	        this.clientPolicy = this.convertValues(source["clientPolicy"], ClientPolicy);
+	        this.comment = source["comment"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
 	
 	export class DriverVersionHint {
 	    driver: string;
@@ -212,56 +289,8 @@ export namespace authenticationpolicy {
 	        this.freeform = source["freeform"];
 	    }
 	}
-	export class MFAPolicy {
-	    allowedMethods: string[];
-	    enforceMfaOnExternalAuthentication: string;
 	
-	    static createFrom(source: any = {}) {
-	        return new MFAPolicy(source);
-	    }
 	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.allowedMethods = source["allowedMethods"];
-	        this.enforceMfaOnExternalAuthentication = source["enforceMfaOnExternalAuthentication"];
-	    }
-	}
-	export class PATPolicy {
-	    defaultExpiryInDays?: number;
-	    maxExpiryInDays?: number;
-	    networkPolicyEvaluation: string;
-	    requireRoleRestrictionForServiceUsers?: boolean;
-	
-	    static createFrom(source: any = {}) {
-	        return new PATPolicy(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.defaultExpiryInDays = source["defaultExpiryInDays"];
-	        this.maxExpiryInDays = source["maxExpiryInDays"];
-	        this.networkPolicyEvaluation = source["networkPolicyEvaluation"];
-	        this.requireRoleRestrictionForServiceUsers = source["requireRoleRestrictionForServiceUsers"];
-	    }
-	}
-	export class WorkloadIdentityPolicy {
-	    allowedProviders: string[];
-	    allowedAwsAccounts: string[];
-	    allowedAzureIssuers: string[];
-	    allowedOidcIssuers: string[];
-	
-	    static createFrom(source: any = {}) {
-	        return new WorkloadIdentityPolicy(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.allowedProviders = source["allowedProviders"];
-	        this.allowedAwsAccounts = source["allowedAwsAccounts"];
-	        this.allowedAzureIssuers = source["allowedAzureIssuers"];
-	        this.allowedOidcIssuers = source["allowedOidcIssuers"];
-	    }
-	}
 
 }
 

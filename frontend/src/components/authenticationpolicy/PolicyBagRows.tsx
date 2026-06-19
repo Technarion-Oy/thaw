@@ -12,12 +12,12 @@
 
 // Structured editors for the four nested "property-bag" parameters of an
 // authentication policy (MFA_POLICY, PAT_POLICY, WORKLOAD_IDENTITY_POLICY,
-// CLIENT_POLICY). Each editor renders the sub-properties as selects / numbers /
-// toggles, but performs NO SQL serialization or DESCRIBE parsing of its own:
-// pre-fill goes through `App.Parse*` and Save through `App.Build*Value`, so the
-// `( … )` grammar lives entirely in the Go `authenticationpolicy` package. Each
-// row's `onSet` receives the built value string; the parent issues
-// `ALTER … SET <BAG> = <value>`.
+// CLIENT_POLICY). The editing UI for each bag is a controlled `<Bag>Fields`
+// component (value + onChange) reused by BOTH the Create modal and the Properties
+// modal. The `<Bag>Row` wrappers add the Properties-only Set/Unset lifecycle
+// (parse the current DESCRIBE value on Edit, serialize via `App.Build*Value` on
+// Save). No SQL serialization or DESCRIBE parsing happens here — the `( … )`
+// grammar lives entirely in the Go `authenticationpolicy` package.
 
 import { useState, useEffect, type ReactNode } from "react";
 import { Alert, AutoComplete, Button, InputNumber, Select, Space, Tooltip, Typography } from "antd";
@@ -38,16 +38,66 @@ const { Text } = Typography;
 // Wails-generated model classes here: those carry a `convertValues` method a
 // plain object literal can't satisfy, and they type optional pointers as
 // `field?: number` (undefined) whereas our editors use `number | null`. The
-// structs are reconstructed as plain objects and cast (`cfg as any`) at the IPC
+// structs are reconstructed as plain objects and cast (`value as any`) at the IPC
 // boundary, where Wails marshals null → a nil Go pointer.
 interface ClientEntry { driver: string; minimumVersion: string }
 
-const LABEL_TD: React.CSSProperties = {
-  padding: "6px 12px 6px 0", color: "var(--text-muted)",
-  fontSize: 12, whiteSpace: "nowrap", verticalAlign: "top", width: 220,
-};
+// Controlled value shapes — plain objects matching each bag's Go struct json
+// tags, so they pass straight to `Build<Bag>Value` and into the create config.
+export interface MFAPolicyValue { allowedMethods: string[]; enforceMfaOnExternalAuthentication: string }
+export interface PATPolicyValue {
+  defaultExpiryInDays: number | null;
+  maxExpiryInDays: number | null;
+  networkPolicyEvaluation: string;
+  requireRoleRestrictionForServiceUsers: boolean | null;
+}
+export interface WorkloadIdentityPolicyValue {
+  allowedProviders: string[];
+  allowedAwsAccounts: string[];
+  allowedAzureIssuers: string[];
+  allowedOidcIssuers: string[];
+}
+export interface ClientPolicyValue { entries: ClientEntry[] }
+
+export const emptyMFAPolicy = (): MFAPolicyValue => ({ allowedMethods: [], enforceMfaOnExternalAuthentication: "" });
+export const emptyPATPolicy = (): PATPolicyValue => ({
+  defaultExpiryInDays: null, maxExpiryInDays: null, networkPolicyEvaluation: "", requireRoleRestrictionForServiceUsers: null,
+});
+export const emptyWorkloadIdentityPolicy = (): WorkloadIdentityPolicyValue => ({
+  allowedProviders: [], allowedAwsAccounts: [], allowedAzureIssuers: [], allowedOidcIssuers: [],
+});
+export const emptyClientPolicy = (): ClientPolicyValue => ({ entries: [] });
+
+// Whether each bag carries any set sub-property (used to gate Set in the
+// Properties modal — a Set of an empty bag would serialize to the invalid `()`).
+export const mfaPolicyHasContent = (v: MFAPolicyValue) => v.allowedMethods.length > 0 || v.enforceMfaOnExternalAuthentication !== "";
+export const patPolicyHasContent = (v: PATPolicyValue) =>
+  v.defaultExpiryInDays !== null || v.maxExpiryInDays !== null || v.networkPolicyEvaluation !== "" || v.requireRoleRestrictionForServiceUsers !== null;
+export const workloadIdentityPolicyHasContent = (v: WorkloadIdentityPolicyValue) =>
+  v.allowedProviders.length > 0 || v.allowedAwsAccounts.length > 0 || v.allowedAzureIssuers.length > 0 || v.allowedOidcIssuers.length > 0;
+
+// clientPolicyError reports a blocking problem with the CLIENT_POLICY entries (a
+// half-filled row, or a repeated driver) as a user message, or null when valid.
+// Shared by both modals so the same rules gate Save and Create-submit.
+export function clientPolicyError(value: ClientPolicyValue): string | null {
+  const hasPartial = value.entries.some((e) => {
+    const d = !!e.driver?.trim();
+    const v = !!e.minimumVersion?.trim();
+    return (d || v) && !(d && v);
+  });
+  if (hasPartial) return "Every row needs both a driver and a version — complete or remove the incomplete row.";
+  const drivers = value.entries.filter((e) => e.driver?.trim()).map((e) => e.driver.trim().toUpperCase());
+  if (new Set(drivers).size !== drivers.length) return "Each driver can appear only once — remove the duplicate row.";
+  return null;
+}
+
+// Count of fully-filled CLIENT_POLICY rows (a Set needs at least one).
+export const clientPolicyValidCount = (value: ClientPolicyValue) =>
+  value.entries.filter((e) => e.driver?.trim() && e.minimumVersion?.trim()).length;
 
 const opts = (vals: string[]) => vals.map((v) => ({ value: v, label: v }));
+
+const FIELD_LABEL: React.CSSProperties = { fontSize: 11, color: "var(--text-muted)", display: "block", marginBottom: 2 };
 
 // Whether the DESCRIBE value carries real content (so a parse that yields an
 // empty struct means the format wasn't understood, not that the bag is unset).
@@ -58,11 +108,163 @@ const rawHasContent = (raw: string) => {
   return t !== "" && !/^\(\s*\)$/.test(t) && !/^\{\s*\}$/.test(t);
 };
 
-// ── Shared row chrome ────────────────────────────────────────────────────────
+// ── Controlled field editors (shared by Create + Properties) ─────────────────
+
+// BAG_FIELDS wraps each editor's sub-fields so they carry their own vertical
+// spacing — the editors are used both standalone (Create) and inside BagShell,
+// neither of which spaces the inner fields for them.
+const BAG_FIELDS: React.CSSProperties = { display: "flex", width: "100%" };
+
+export function MFAPolicyFields({ value, onChange }: { value: MFAPolicyValue; onChange: (v: MFAPolicyValue) => void }) {
+  return (
+    <Space direction="vertical" size={6} style={BAG_FIELDS}>
+      <div style={{ width: "100%" }}>
+        <Text style={FIELD_LABEL}>Allowed methods</Text>
+        <Select mode="multiple" size="small" value={value.allowedMethods}
+          onChange={async (v) => onChange({ ...value, allowedMethods: (await ReconcileAllExclusiveList(v)) ?? [] })}
+          placeholder="default (ALL)"
+          options={opts(["ALL", "PASSKEY", "TOTP", "OTP", "DUO"])} style={{ width: 360 }} />
+      </div>
+      <div>
+        <Text style={FIELD_LABEL}>Enforce MFA on external authentication</Text>
+        <Select allowClear size="small" value={value.enforceMfaOnExternalAuthentication || undefined}
+          onChange={(v) => onChange({ ...value, enforceMfaOnExternalAuthentication: v ?? "" })}
+          placeholder="default (NONE)" options={opts(["ALL", "NONE"])} style={{ width: 200 }} />
+      </div>
+    </Space>
+  );
+}
+
+export function PATPolicyFields({ value, onChange }: { value: PATPolicyValue; onChange: (v: PATPolicyValue) => void }) {
+  return (
+    <Space direction="vertical" size={6} style={BAG_FIELDS}>
+      <Space wrap>
+        <div>
+          <Text style={FIELD_LABEL}>Default expiry (days)</Text>
+          <InputNumber size="small" min={1} max={365} precision={0} value={value.defaultExpiryInDays}
+            onChange={(v) => onChange({ ...value, defaultExpiryInDays: v ?? null })} placeholder="15" style={{ width: 140 }} />
+        </div>
+        <div>
+          <Text style={FIELD_LABEL}>Max expiry (days)</Text>
+          <InputNumber size="small" min={1} max={365} precision={0} value={value.maxExpiryInDays}
+            onChange={(v) => onChange({ ...value, maxExpiryInDays: v ?? null })} placeholder="365" style={{ width: 140 }} />
+        </div>
+      </Space>
+      <div>
+        <Text style={FIELD_LABEL}>Network policy evaluation</Text>
+        <Select allowClear size="small" value={value.networkPolicyEvaluation || undefined}
+          onChange={(v) => onChange({ ...value, networkPolicyEvaluation: v ?? "" })} placeholder="default (ENFORCED_REQUIRED)"
+          options={opts(["ENFORCED_REQUIRED", "ENFORCED_NOT_REQUIRED", "NOT_ENFORCED"])} style={{ width: 280 }} />
+      </div>
+      <div>
+        <Text style={FIELD_LABEL}>Require role restriction for service users</Text>
+        <Select allowClear size="small"
+          value={value.requireRoleRestrictionForServiceUsers === null ? undefined : value.requireRoleRestrictionForServiceUsers ? "TRUE" : "FALSE"}
+          onChange={(v) => onChange({ ...value, requireRoleRestrictionForServiceUsers: v === undefined ? null : v === "TRUE" })}
+          placeholder="default (TRUE)" options={opts(["TRUE", "FALSE"])} style={{ width: 200 }} />
+      </div>
+    </Space>
+  );
+}
+
+export function WorkloadIdentityPolicyFields({ value, onChange }: { value: WorkloadIdentityPolicyValue; onChange: (v: WorkloadIdentityPolicyValue) => void }) {
+  return (
+    <Space direction="vertical" size={6} style={BAG_FIELDS}>
+      <div>
+        <Text style={FIELD_LABEL}>Allowed providers</Text>
+        <Select mode="multiple" size="small" value={value.allowedProviders}
+          onChange={async (v) => onChange({ ...value, allowedProviders: (await ReconcileAllExclusiveList(v)) ?? [] })}
+          placeholder="ALL / AWS / AZURE / GCP / OIDC"
+          options={opts(["ALL", "AWS", "AZURE", "GCP", "OIDC"])} style={{ width: 360 }} />
+      </div>
+      <div>
+        <Text style={FIELD_LABEL}>Allowed AWS accounts (12-digit IDs)</Text>
+        <Select mode="tags" size="small" value={value.allowedAwsAccounts}
+          onChange={(v) => onChange({ ...value, allowedAwsAccounts: v })} placeholder="123456789012" tokenSeparators={[","]} style={{ width: 360 }} />
+      </div>
+      <div>
+        <Text style={FIELD_LABEL}>Allowed Azure issuers</Text>
+        <Select mode="tags" size="small" value={value.allowedAzureIssuers}
+          onChange={(v) => onChange({ ...value, allowedAzureIssuers: v })} placeholder="authority URLs" tokenSeparators={[","]} style={{ width: 360 }} />
+      </div>
+      <div>
+        <Text style={FIELD_LABEL}>Allowed OIDC issuers</Text>
+        <Select mode="tags" size="small" value={value.allowedOidcIssuers}
+          onChange={(v) => onChange({ ...value, allowedOidcIssuers: v })} placeholder="https://issuer…" tokenSeparators={[","]} style={{ width: 360 }} />
+      </div>
+    </Space>
+  );
+}
+
+export function ClientPolicyFields({ value, onChange }: { value: ClientPolicyValue; onChange: (v: ClientPolicyValue) => void }) {
+  // The selectable drivers come from the backend (the version-governed subset of
+  // the shared snowflake.ClientDrivers catalog), and the per-driver version hints
+  // from SYSTEM$CLIENT_VERSION_INFO(). Both are session-static — fetched once.
+  // Best-effort: a failure (e.g. no connection) just means manual entry.
+  const [driverOptions, setDriverOptions] = useState<string[]>([]);
+  const [versions, setVersions] = useState<Record<string, authenticationpolicy.DriverVersionHint>>({});
+  useEffect(() => {
+    AuthenticationPolicyClientDrivers().then((d) => setDriverOptions(d ?? []));
+    AuthenticationPolicyClientDriverVersions()
+      .then((hints) => {
+        const map: Record<string, authenticationpolicy.DriverVersionHint> = {};
+        (hints ?? []).forEach((h) => { map[h.driver] = h; });
+        setVersions(map);
+      })
+      .catch(() => setVersions({}));
+  }, []);
+
+  const entries = value.entries;
+  const update = (i: number, patch: Partial<ClientEntry>) =>
+    onChange({ entries: entries.map((e, idx) => (idx === i ? { ...e, ...patch } : e)) });
+  const remove = (i: number) => onChange({ entries: entries.filter((_, idx) => idx !== i) });
+  const add = () => onChange({ entries: [...entries, { driver: "", minimumVersion: "" }] });
+  const error = clientPolicyError(value);
+
+  return (
+    <Space direction="vertical" size={6} style={BAG_FIELDS}>
+      <Text style={FIELD_LABEL}>Minimum driver/client versions</Text>
+      <Space direction="vertical" size={4} style={{ width: "100%" }}>
+        {entries.map((e, i) => {
+          const hint = versions[(e.driver ?? "").toUpperCase()];
+          // Recommended first, then minimum supported; drop blanks/duplicates.
+          const verOptions = hint
+            ? [
+                hint.recommended && { value: hint.recommended, label: `${hint.recommended} · recommended` },
+                hint.minimumSupported && hint.minimumSupported !== hint.recommended
+                  && { value: hint.minimumSupported, label: `${hint.minimumSupported} · minimum supported` },
+              ].filter(Boolean) as { value: string; label: string }[]
+            : [];
+          return (
+            <Space key={i}>
+              <Select size="small" showSearch value={e.driver || undefined} onChange={(v) => update(i, { driver: v })}
+                placeholder="driver" options={opts(driverOptions)} style={{ width: 240 }} />
+              <Tooltip title={hint ? `Supported: ${hint.minimumSupported || "—"} … recommended ${hint.recommended || "—"}` : ""}>
+                <AutoComplete size="small" value={e.minimumVersion} options={verOptions} filterOption={false}
+                  onChange={(val) => update(i, { minimumVersion: val })}
+                  placeholder={hint?.recommended || "3.13.0"} style={{ width: 170 }} />
+              </Tooltip>
+              <Tooltip title="Remove"><Button size="small" type="text" icon={<DeleteOutlined />} onClick={() => remove(i)} /></Tooltip>
+            </Space>
+          );
+        })}
+        <Button size="small" icon={<PlusOutlined />} onClick={add}>Add driver</Button>
+        {error && <Text type="warning" style={{ fontSize: 11 }}>{error}</Text>}
+      </Space>
+    </Space>
+  );
+}
+
+// ── Shared row chrome (Properties modal Set/Unset lifecycle) ─────────────────
 // Renders the label + either the read-only current value (with an Edit pencil)
 // or the structured form (`children`) plus Save / Unset / Cancel. The per-bag
 // components own the struct state and the build/parse calls; this only handles
 // layout, the editing/saving/error lifecycle, and the buttons.
+
+const LABEL_TD: React.CSSProperties = {
+  padding: "6px 12px 6px 0", color: "var(--text-muted)",
+  fontSize: 12, whiteSpace: "nowrap", verticalAlign: "top", width: 220,
+};
 
 interface BagShellProps {
   label: string;
@@ -148,260 +350,97 @@ function BagShell({ label, rawValue, canSave, parseFailed, onBeginEdit, onSave, 
   );
 }
 
-const FIELD_LABEL: React.CSSProperties = { fontSize: 11, color: "var(--text-muted)", display: "block", marginBottom: 2 };
-
 interface RowProps {
   rawValue: string;
   onSet: (value: string) => Promise<void>;
   onUnset: () => Promise<void>;
 }
 
-// ── MFA_POLICY ───────────────────────────────────────────────────────────────
-
 export function MFAPolicyRow({ rawValue, onSet, onUnset }: RowProps) {
-  const [methods, setMethods] = useState<string[]>([]);
-  const [enforce, setEnforce] = useState<string>("");
+  const [value, setValue] = useState<MFAPolicyValue>(emptyMFAPolicy());
   const [parseFailed, setParseFailed] = useState(false);
 
   const begin = async () => {
     const p = await ParseMFAPolicy(rawValue);
-    const m = p?.allowedMethods ?? [];
-    const e = p?.enforceMfaOnExternalAuthentication ?? "";
-    setMethods(m);
-    setEnforce(e);
-    setParseFailed(rawHasContent(rawValue) && m.length === 0 && e === "");
+    const v: MFAPolicyValue = { allowedMethods: p?.allowedMethods ?? [], enforceMfaOnExternalAuthentication: p?.enforceMfaOnExternalAuthentication ?? "" };
+    setValue(v);
+    setParseFailed(rawHasContent(rawValue) && !mfaPolicyHasContent(v));
   };
-  const canSave = methods.length > 0 || enforce !== "";
-  const save = async () => {
-    const cfg = { allowedMethods: methods, enforceMfaOnExternalAuthentication: enforce };
-    await onSet(await BuildMFAPolicyValue(cfg as any));
-  };
+  const save = async () => { await onSet(await BuildMFAPolicyValue(value as any)); };
 
   return (
-    <BagShell label="MFA policy" rawValue={rawValue} canSave={canSave} parseFailed={parseFailed} onBeginEdit={begin} onSave={save} onUnset={onUnset}>
-      <div style={{ width: "100%" }}>
-        <Text style={FIELD_LABEL}>Allowed methods</Text>
-        <Select mode="multiple" size="small" value={methods}
-          onChange={async (v) => setMethods((await ReconcileAllExclusiveList(v)) ?? [])}
-          placeholder="default (ALL)"
-          options={opts(["ALL", "PASSKEY", "TOTP", "OTP", "DUO"])} style={{ width: 360 }} />
-      </div>
-      <div>
-        <Text style={FIELD_LABEL}>Enforce MFA on external authentication</Text>
-        <Select allowClear size="small" value={enforce || undefined} onChange={(v) => setEnforce(v ?? "")}
-          placeholder="default (NONE)" options={opts(["ALL", "NONE"])} style={{ width: 200 }} />
-      </div>
+    <BagShell label="MFA policy" rawValue={rawValue} canSave={mfaPolicyHasContent(value)} parseFailed={parseFailed} onBeginEdit={begin} onSave={save} onUnset={onUnset}>
+      <MFAPolicyFields value={value} onChange={setValue} />
     </BagShell>
   );
 }
 
-// ── PAT_POLICY ───────────────────────────────────────────────────────────────
-
 export function PATPolicyRow({ rawValue, onSet, onUnset }: RowProps) {
-  const [defExpiry, setDefExpiry] = useState<number | null>(null);
-  const [maxExpiry, setMaxExpiry] = useState<number | null>(null);
-  const [netEval, setNetEval] = useState<string>("");
-  const [requireRole, setRequireRole] = useState<boolean | null>(null);
+  const [value, setValue] = useState<PATPolicyValue>(emptyPATPolicy());
   const [parseFailed, setParseFailed] = useState(false);
 
   const begin = async () => {
     const p = await ParsePATPolicy(rawValue);
-    const de = p?.defaultExpiryInDays ?? null;
-    const me = p?.maxExpiryInDays ?? null;
-    const ne = p?.networkPolicyEvaluation ?? "";
-    const rr = p?.requireRoleRestrictionForServiceUsers ?? null;
-    setDefExpiry(de);
-    setMaxExpiry(me);
-    setNetEval(ne);
-    setRequireRole(rr);
-    setParseFailed(rawHasContent(rawValue) && de === null && me === null && ne === "" && rr === null);
-  };
-  const canSave = defExpiry !== null || maxExpiry !== null || netEval !== "" || requireRole !== null;
-  const save = async () => {
-    const cfg = {
-      defaultExpiryInDays: defExpiry, maxExpiryInDays: maxExpiry,
-      networkPolicyEvaluation: netEval, requireRoleRestrictionForServiceUsers: requireRole,
+    const v: PATPolicyValue = {
+      defaultExpiryInDays: p?.defaultExpiryInDays ?? null,
+      maxExpiryInDays: p?.maxExpiryInDays ?? null,
+      networkPolicyEvaluation: p?.networkPolicyEvaluation ?? "",
+      requireRoleRestrictionForServiceUsers: p?.requireRoleRestrictionForServiceUsers ?? null,
     };
-    await onSet(await BuildPATPolicyValue(cfg as any));
+    setValue(v);
+    setParseFailed(rawHasContent(rawValue) && !patPolicyHasContent(v));
   };
+  const save = async () => { await onSet(await BuildPATPolicyValue(value as any)); };
 
   return (
-    <BagShell label="PAT policy" rawValue={rawValue} canSave={canSave} parseFailed={parseFailed} onBeginEdit={begin} onSave={save} onUnset={onUnset}>
-      <Space wrap>
-        <div>
-          <Text style={FIELD_LABEL}>Default expiry (days)</Text>
-          <InputNumber size="small" min={1} max={365} precision={0} value={defExpiry} onChange={(v) => setDefExpiry(v ?? null)} placeholder="15" style={{ width: 140 }} />
-        </div>
-        <div>
-          <Text style={FIELD_LABEL}>Max expiry (days)</Text>
-          <InputNumber size="small" min={1} max={365} precision={0} value={maxExpiry} onChange={(v) => setMaxExpiry(v ?? null)} placeholder="365" style={{ width: 140 }} />
-        </div>
-      </Space>
-      <div>
-        <Text style={FIELD_LABEL}>Network policy evaluation</Text>
-        <Select allowClear size="small" value={netEval || undefined} onChange={(v) => setNetEval(v ?? "")} placeholder="default (ENFORCED_REQUIRED)"
-          options={opts(["ENFORCED_REQUIRED", "ENFORCED_NOT_REQUIRED", "NOT_ENFORCED"])} style={{ width: 280 }} />
-      </div>
-      <div>
-        <Text style={FIELD_LABEL}>Require role restriction for service users</Text>
-        <Select allowClear size="small"
-          value={requireRole === null ? undefined : requireRole ? "TRUE" : "FALSE"}
-          onChange={(v) => setRequireRole(v === undefined ? null : v === "TRUE")}
-          placeholder="default (TRUE)" options={opts(["TRUE", "FALSE"])} style={{ width: 200 }} />
-      </div>
+    <BagShell label="PAT policy" rawValue={rawValue} canSave={patPolicyHasContent(value)} parseFailed={parseFailed} onBeginEdit={begin} onSave={save} onUnset={onUnset}>
+      <PATPolicyFields value={value} onChange={setValue} />
     </BagShell>
   );
 }
 
-// ── WORKLOAD_IDENTITY_POLICY ─────────────────────────────────────────────────
-
 export function WorkloadIdentityPolicyRow({ rawValue, onSet, onUnset }: RowProps) {
-  const [providers, setProviders] = useState<string[]>([]);
-  const [awsAccounts, setAwsAccounts] = useState<string[]>([]);
-  const [azureIssuers, setAzureIssuers] = useState<string[]>([]);
-  const [oidcIssuers, setOidcIssuers] = useState<string[]>([]);
+  const [value, setValue] = useState<WorkloadIdentityPolicyValue>(emptyWorkloadIdentityPolicy());
   const [parseFailed, setParseFailed] = useState(false);
 
   const begin = async () => {
     const p = await ParseWorkloadIdentityPolicy(rawValue);
-    const pr = p?.allowedProviders ?? [];
-    const aws = p?.allowedAwsAccounts ?? [];
-    const az = p?.allowedAzureIssuers ?? [];
-    const oidc = p?.allowedOidcIssuers ?? [];
-    setProviders(pr);
-    setAwsAccounts(aws);
-    setAzureIssuers(az);
-    setOidcIssuers(oidc);
-    setParseFailed(rawHasContent(rawValue) && pr.length === 0 && aws.length === 0 && az.length === 0 && oidc.length === 0);
-  };
-  const canSave = providers.length > 0 || awsAccounts.length > 0 || azureIssuers.length > 0 || oidcIssuers.length > 0;
-  const save = async () => {
-    const cfg = {
-      allowedProviders: providers, allowedAwsAccounts: awsAccounts,
-      allowedAzureIssuers: azureIssuers, allowedOidcIssuers: oidcIssuers,
+    const v: WorkloadIdentityPolicyValue = {
+      allowedProviders: p?.allowedProviders ?? [],
+      allowedAwsAccounts: p?.allowedAwsAccounts ?? [],
+      allowedAzureIssuers: p?.allowedAzureIssuers ?? [],
+      allowedOidcIssuers: p?.allowedOidcIssuers ?? [],
     };
-    await onSet(await BuildWorkloadIdentityPolicyValue(cfg as any));
+    setValue(v);
+    setParseFailed(rawHasContent(rawValue) && !workloadIdentityPolicyHasContent(v));
   };
+  const save = async () => { await onSet(await BuildWorkloadIdentityPolicyValue(value as any)); };
 
   return (
-    <BagShell label="Workload identity policy" rawValue={rawValue} canSave={canSave} parseFailed={parseFailed} onBeginEdit={begin} onSave={save} onUnset={onUnset}>
-      <div>
-        <Text style={FIELD_LABEL}>Allowed providers</Text>
-        <Select mode="multiple" size="small" value={providers}
-          onChange={async (v) => setProviders((await ReconcileAllExclusiveList(v)) ?? [])}
-          placeholder="ALL / AWS / AZURE / GCP / OIDC"
-          options={opts(["ALL", "AWS", "AZURE", "GCP", "OIDC"])} style={{ width: 360 }} />
-      </div>
-      <div>
-        <Text style={FIELD_LABEL}>Allowed AWS accounts (12-digit IDs)</Text>
-        <Select mode="tags" size="small" value={awsAccounts} onChange={setAwsAccounts} placeholder="123456789012" tokenSeparators={[","]} style={{ width: 360 }} />
-      </div>
-      <div>
-        <Text style={FIELD_LABEL}>Allowed Azure issuers</Text>
-        <Select mode="tags" size="small" value={azureIssuers} onChange={setAzureIssuers} placeholder="authority URLs" tokenSeparators={[","]} style={{ width: 360 }} />
-      </div>
-      <div>
-        <Text style={FIELD_LABEL}>Allowed OIDC issuers</Text>
-        <Select mode="tags" size="small" value={oidcIssuers} onChange={setOidcIssuers} placeholder="https://issuer…" tokenSeparators={[","]} style={{ width: 360 }} />
-      </div>
+    <BagShell label="Workload identity policy" rawValue={rawValue} canSave={workloadIdentityPolicyHasContent(value)} parseFailed={parseFailed} onBeginEdit={begin} onSave={save} onUnset={onUnset}>
+      <WorkloadIdentityPolicyFields value={value} onChange={setValue} />
     </BagShell>
   );
 }
 
-// ── CLIENT_POLICY ────────────────────────────────────────────────────────────
-
 export function ClientPolicyRow({ rawValue, onSet, onUnset }: RowProps) {
-  const [entries, setEntries] = useState<ClientEntry[]>([]);
+  const [value, setValue] = useState<ClientPolicyValue>(emptyClientPolicy());
   const [parseFailed, setParseFailed] = useState(false);
-  // The selectable drivers come from the backend (the version-governed subset of
-  // the shared snowflake.ClientDrivers catalog) — static data fetched once.
-  const [driverOptions, setDriverOptions] = useState<string[]>([]);
-  // Per-driver version hints (minimum supported / recommended) from
-  // SYSTEM$CLIENT_VERSION_INFO(), keyed by driver token, used to suggest versions.
-  // The result is session-static, so fetch it once on mount alongside the driver
-  // list rather than re-querying Snowflake on every Edit click. Best-effort — a
-  // failure (e.g. no connection) just means the user types the version manually.
-  const [versions, setVersions] = useState<Record<string, authenticationpolicy.DriverVersionHint>>({});
-  useEffect(() => {
-    AuthenticationPolicyClientDrivers().then((d) => setDriverOptions(d ?? []));
-    AuthenticationPolicyClientDriverVersions()
-      .then((hints) => {
-        const map: Record<string, authenticationpolicy.DriverVersionHint> = {};
-        (hints ?? []).forEach((h) => { map[h.driver] = h; });
-        setVersions(map);
-      })
-      .catch(() => setVersions({}));
-  }, []);
 
   const begin = async () => {
     const p = await ParseClientPolicy(rawValue);
-    const es = (p?.entries ?? []).map((e) => ({ driver: e.driver, minimumVersion: e.minimumVersion }));
-    setEntries(es);
-    setParseFailed(rawHasContent(rawValue) && es.length === 0);
+    const v: ClientPolicyValue = { entries: (p?.entries ?? []).map((e) => ({ driver: e.driver, minimumVersion: e.minimumVersion })) };
+    setValue(v);
+    setParseFailed(rawHasContent(rawValue) && v.entries.length === 0);
   };
-  const valid = entries.filter((e) => e.driver?.trim() && e.minimumVersion?.trim());
-  // A half-filled row (driver xor version) would be silently dropped by the
-  // builder, which reads as "it saved everything" — so block Save until every
-  // started row is complete (or removed), rather than dropping it on save.
-  const hasPartial = entries.some((e) => {
-    const hasDriver = !!e.driver?.trim();
-    const hasVersion = !!e.minimumVersion?.trim();
-    return (hasDriver || hasVersion) && !(hasDriver && hasVersion);
-  });
-  // Two rows for the same driver would build a bag with a repeated key — block
-  // Save and warn rather than silently dropping one (the backend dedupes too).
-  const drivers = valid.map((e) => e.driver.trim().toUpperCase());
-  const hasDuplicate = new Set(drivers).size !== drivers.length;
-  const canSave = valid.length > 0 && !hasPartial && !hasDuplicate;
-  const save = async () => {
-    const cfg = { entries };
-    await onSet(await BuildClientPolicyValue(cfg as any));
-  };
-
-  const update = (i: number, patch: Partial<ClientEntry>) =>
-    setEntries((prev) => prev.map((e, idx) => (idx === i ? { ...e, ...patch } : e)));
-  const remove = (i: number) => setEntries((prev) => prev.filter((_, idx) => idx !== i));
-  const add = () => setEntries((prev) => [...prev, { driver: "", minimumVersion: "" }]);
+  // A half-filled or duplicate row would corrupt the bag, so block Save (the
+  // editor surfaces the reason); a Set also needs at least one complete row.
+  const canSave = clientPolicyValidCount(value) > 0 && clientPolicyError(value) === null;
+  const save = async () => { await onSet(await BuildClientPolicyValue(value as any)); };
 
   return (
     <BagShell label="Client policy" rawValue={rawValue} canSave={canSave} parseFailed={parseFailed} onBeginEdit={begin} onSave={save} onUnset={onUnset}>
-      <Text style={FIELD_LABEL}>Minimum driver/client versions</Text>
-      <Space direction="vertical" size={4} style={{ width: "100%" }}>
-        {entries.map((e, i) => {
-          const hint = versions[(e.driver ?? "").toUpperCase()];
-          // Recommended first, then minimum supported; drop blanks/duplicates.
-          const verOptions = hint
-            ? [
-                hint.recommended && { value: hint.recommended, label: `${hint.recommended} · recommended` },
-                hint.minimumSupported && hint.minimumSupported !== hint.recommended
-                  && { value: hint.minimumSupported, label: `${hint.minimumSupported} · minimum supported` },
-              ].filter(Boolean) as { value: string; label: string }[]
-            : [];
-          return (
-            <Space key={i}>
-              <Select size="small" showSearch value={e.driver || undefined} onChange={(v) => update(i, { driver: v })}
-                placeholder="driver" options={opts(driverOptions)} style={{ width: 240 }} />
-              <Tooltip title={hint ? `Supported: ${hint.minimumSupported || "—"} … recommended ${hint.recommended || "—"}` : ""}>
-                <AutoComplete size="small" value={e.minimumVersion} options={verOptions} filterOption={false}
-                  onChange={(val) => update(i, { minimumVersion: val })}
-                  placeholder={hint?.recommended || "3.13.0"} style={{ width: 170 }} />
-              </Tooltip>
-              <Tooltip title="Remove"><Button size="small" type="text" icon={<DeleteOutlined />} onClick={() => remove(i)} /></Tooltip>
-            </Space>
-          );
-        })}
-        <Button size="small" icon={<PlusOutlined />} onClick={add}>Add driver</Button>
-        {hasPartial && (
-          <Text type="warning" style={{ fontSize: 11 }}>
-            Every row needs both a driver and a version — complete or remove the incomplete row to save.
-          </Text>
-        )}
-        {hasDuplicate && (
-          <Text type="warning" style={{ fontSize: 11 }}>
-            Each driver can appear only once — remove the duplicate row to save.
-          </Text>
-        )}
-      </Space>
+      <ClientPolicyFields value={value} onChange={setValue} />
     </BagShell>
   );
 }

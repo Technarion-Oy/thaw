@@ -45,6 +45,14 @@ type AuthenticationPolicyConfig struct {
 	// REQUIRED_PASSWORD_ONLY, OPTIONAL. Empty leaves it at the default (OPTIONAL).
 	MFAEnrollment string `json:"mfaEnrollment"`
 
+	// The four nested property bags. Each is serialized through its own
+	// Build<Bag>Value serializer; an empty bag builds to "()" and is omitted, so
+	// the CREATE inherits the Snowflake default just like the list parameters.
+	MFAPolicy              MFAPolicy              `json:"mfaPolicy"`
+	PATPolicy              PATPolicy              `json:"patPolicy"`
+	WorkloadIdentityPolicy WorkloadIdentityPolicy `json:"workloadIdentityPolicy"`
+	ClientPolicy           ClientPolicy           `json:"clientPolicy"`
+
 	Comment string `json:"comment"`
 }
 
@@ -83,6 +91,8 @@ func FormatStringList(tokens []string) string { return formatStringList(tokens) 
 //	  [CLIENT_TYPES = (…)]
 //	  [SECURITY_INTEGRATIONS = (…)]
 //	  [MFA_ENROLLMENT = {REQUIRED | REQUIRED_PASSWORD_ONLY | OPTIONAL}]
+//	  [MFA_POLICY = (…)] [PAT_POLICY = (…)]
+//	  [WORKLOAD_IDENTITY_POLICY = (…)] [CLIENT_POLICY = (…)]
 //	  [COMMENT = '…'];
 func BuildCreateAuthenticationPolicySql(db, schema string, cfg AuthenticationPolicyConfig) (string, error) {
 	var sb strings.Builder
@@ -119,6 +129,21 @@ func BuildCreateAuthenticationPolicySql(db, schema string, cfg AuthenticationPol
 	// ')'/';'/whitespace from an IPC caller is dropped rather than emitted.
 	if v := strings.ToUpper(strings.TrimSpace(cfg.MFAEnrollment)); v != "" && isBareToken(v) {
 		fmt.Fprintf(&sb, "\n  MFA_ENROLLMENT = %s", v)
+	}
+
+	// Nested property bags — emit each only when it serializes to a non-empty
+	// value (an unset bag builds to "()", which Snowflake rejects, so it's omitted
+	// and the policy inherits the default). Serialization reuses the same
+	// Build<Bag>Value functions the ALTER path uses.
+	for _, bag := range []struct{ keyword, value string }{
+		{"MFA_POLICY", BuildMFAPolicyValue(cfg.MFAPolicy)},
+		{"PAT_POLICY", BuildPATPolicyValue(cfg.PATPolicy)},
+		{"WORKLOAD_IDENTITY_POLICY", BuildWorkloadIdentityPolicyValue(cfg.WorkloadIdentityPolicy)},
+		{"CLIENT_POLICY", BuildClientPolicyValue(cfg.ClientPolicy)},
+	} {
+		if bag.value != "()" {
+			fmt.Fprintf(&sb, "\n  %s = %s", bag.keyword, bag.value)
+		}
 	}
 
 	if cfg.Comment != "" {

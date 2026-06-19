@@ -15,8 +15,12 @@ Object-browser UI for Snowflake **AUTHENTICATION POLICY** objects.
   to `OPTIONAL`) and omits it from the generated SQL. The three list selects
   reconcile `ALL`-vs-specific exclusivity through `App.ReconcileAllExclusiveList`
   (same as the Properties modal) so an invalid `('ALL', X)` list can't be built.
-  A live `SqlPreview` reflects `App.BuildCreateAuthenticationPolicySql`; submit
-  runs it via `ExecDDL`.
+  An **Advanced policies (optional)** collapse (collapsed by default to keep the
+  form lean) holds the four nested property bags — `MFA_POLICY`, `PAT_POLICY`,
+  `WORKLOAD_IDENTITY_POLICY`, `CLIENT_POLICY` — using the same `<Bag>Fields`
+  editors as the Properties modal; an empty bag is omitted by the Go builder, and
+  a half-filled/duplicate `CLIENT_POLICY` row blocks submit. A live `SqlPreview`
+  reflects `App.BuildCreateAuthenticationPolicySql`; submit runs it via `ExecDDL`.
 - **`AuthenticationPolicyPropertiesModal.tsx`** — the properties panel. Loads
   `GetObjectProperties("AUTHENTICATION POLICY")` (SHOW-level metadata) and
   `DescribeAuthenticationPolicy` (already projected to `property`/`value` pairs by
@@ -41,8 +45,11 @@ Object-browser UI for Snowflake **AUTHENTICATION POLICY** objects.
   submitted. An **Advanced policies** section (`PolicyBagRows.tsx`) provides
   structured editors for the four nested property bags — `MFA_POLICY`,
   `PAT_POLICY`, `WORKLOAD_IDENTITY_POLICY`, `CLIENT_POLICY` — as selects /
-  numbers / toggles / per-driver version rows. These editors hold only widget
-  state: pre-fill goes through `App.Parse<Bag>` and Save through
+  numbers / toggles / per-driver version rows. The editing UI for each bag is a
+  controlled `<Bag>Fields` component (value + onChange) **shared with the Create
+  modal**; the `<Bag>Row` wrappers here add the Properties-only Set/Unset
+  lifecycle. These editors hold only widget state: pre-fill goes through
+  `App.Parse<Bag>` and Save through
   `App.Build<Bag>Value` (which returns the `( … )` clause), so no SQL grammar
   lives in TypeScript; the `CLIENT_POLICY` driver picker is populated from
   `App.AuthenticationPolicyClientDrivers` (the shared backend catalog) rather than

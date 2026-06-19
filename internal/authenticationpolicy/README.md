@@ -21,14 +21,18 @@ to the account or to individual users via
   list-valued parameters (`AuthenticationMethods`, `ClientTypes`,
   `SecurityIntegrations`) are `[]string` slices of bare tokens which the builder
   renders as single-quoted string literals; `MFAEnrollment` is a single
-  enumerated keyword. Identifier-casing, `OR REPLACE`, and `IF NOT EXISTS`
-  follow the usual create-modal conventions.
+  enumerated keyword. The four nested property bags (`MFAPolicy`, `PATPolicy`,
+  `WorkloadIdentityPolicy`, `ClientPolicy`) are embedded too, so they can be set
+  at creation as well as via ALTER. Identifier-casing, `OR REPLACE`, and
+  `IF NOT EXISTS` follow the usual create-modal conventions.
 - **`BuildCreateAuthenticationPolicySql(db, schema, cfg)`** — emits
   `CREATE [OR REPLACE] AUTHENTICATION POLICY [IF NOT EXISTS] <fqn>` followed by
-  only the parameters the caller set, then `COMMENT`. `OR REPLACE` and `IF NOT
-  EXISTS` are mutually exclusive (`OR REPLACE` wins). A blank name becomes an
-  `authentication_policy_name` placeholder so the live preview stays a valid
-  template. A list whose only entries are blank is omitted (never emits `()`).
+  only the parameters the caller set, then `COMMENT`. The nested bags are
+  serialized through the same `Build<Bag>Value` functions the ALTER path uses;
+  an empty bag builds to `()` and is omitted (so it inherits the default), just
+  like a blank list. `OR REPLACE` and `IF NOT EXISTS` are mutually exclusive
+  (`OR REPLACE` wins). A blank name becomes an `authentication_policy_name`
+  placeholder so the live preview stays a valid template.
 - **`FormatStringList(tokens)`** — renders a token slice into the
   `('A', 'B')` single-quoted-literal list grammar shared by the list
   parameters; exposed so the app layer / properties modal builds

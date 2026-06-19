@@ -11,7 +11,7 @@
 // @thaw-domain: Object Browser & Administration
 
 import { useState } from "react";
-import { Form, Input, Select, Typography } from "antd";
+import { Collapse, Form, Input, Select, Space, Typography } from "antd";
 import { LoginOutlined } from "@ant-design/icons";
 import { BuildCreateAuthenticationPolicySql, ExecDDL, ReconcileAllExclusiveList } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
@@ -19,6 +19,11 @@ import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
+import {
+  MFAPolicyFields, PATPolicyFields, WorkloadIdentityPolicyFields, ClientPolicyFields,
+  emptyMFAPolicy, emptyPATPolicy, emptyWorkloadIdentityPolicy, emptyClientPolicy, clientPolicyError,
+  type MFAPolicyValue, type PATPolicyValue, type WorkloadIdentityPolicyValue, type ClientPolicyValue,
+} from "./PolicyBagRows";
 
 const { Text } = Typography;
 
@@ -46,6 +51,12 @@ type AuthCfg = {
   clientTypes: string[];
   securityIntegrations: string[];
   mfaEnrollment: string;
+  // The four nested property bags — optional at creation; an empty bag is omitted
+  // by the Go builder. The same controlled field editors the Properties modal uses.
+  mfaPolicy: MFAPolicyValue;
+  patPolicy: PATPolicyValue;
+  workloadIdentityPolicy: WorkloadIdentityPolicyValue;
+  clientPolicy: ClientPolicyValue;
   comment: string;
 };
 
@@ -66,6 +77,10 @@ export default function CreateAuthenticationPolicyModal({ db, schema, onClose, o
     clientTypes: [],
     securityIntegrations: [],
     mfaEnrollment: "",
+    mfaPolicy: emptyMFAPolicy(),
+    patPolicy: emptyPATPolicy(),
+    workloadIdentityPolicy: emptyWorkloadIdentityPolicy(),
+    clientPolicy: emptyClientPolicy(),
     comment: "",
   });
 
@@ -87,7 +102,9 @@ export default function CreateAuthenticationPolicyModal({ db, schema, onClose, o
     v: string[],
   ) => set(key, (await ReconcileAllExclusiveList(v)) ?? []);
 
-  const canSubmit = cfg.name.trim().length > 0;
+  // A half-filled / duplicate CLIENT_POLICY row would corrupt the bag — block
+  // submit until it's resolved (the editor shows the reason), same as Properties.
+  const canSubmit = cfg.name.trim().length > 0 && clientPolicyError(cfg.clientPolicy) === null;
 
   const handleRun = () => {
     if (!canSubmit) return;
@@ -189,6 +206,48 @@ export default function CreateAuthenticationPolicyModal({ db, schema, onClose, o
             style={{ width: "100%" }}
           />
         </Form.Item>
+
+        <Collapse
+          size="small"
+          ghost
+          style={{ marginBottom: 12 }}
+          items={[{
+            key: "advanced",
+            label: "Advanced policies (optional)",
+            children: (
+              <Space direction="vertical" size={16} style={{ display: "flex" }}>
+                <Text type="secondary" style={{ fontSize: 11 }}>
+                  The nested MFA / PAT / workload-identity / client property bags. Leave a bag empty to
+                  inherit Snowflake's default; only sub-properties you set are written.
+                </Text>
+                <div>
+                  <Text strong style={{ fontSize: 12 }}>MFA policy</Text>
+                  <Space direction="vertical" size={6} style={{ display: "flex", marginTop: 4 }}>
+                    <MFAPolicyFields value={cfg.mfaPolicy} onChange={(v) => set("mfaPolicy", v)} />
+                  </Space>
+                </div>
+                <div>
+                  <Text strong style={{ fontSize: 12 }}>PAT policy</Text>
+                  <Space direction="vertical" size={6} style={{ display: "flex", marginTop: 4 }}>
+                    <PATPolicyFields value={cfg.patPolicy} onChange={(v) => set("patPolicy", v)} />
+                  </Space>
+                </div>
+                <div>
+                  <Text strong style={{ fontSize: 12 }}>Workload identity policy</Text>
+                  <Space direction="vertical" size={6} style={{ display: "flex", marginTop: 4 }}>
+                    <WorkloadIdentityPolicyFields value={cfg.workloadIdentityPolicy} onChange={(v) => set("workloadIdentityPolicy", v)} />
+                  </Space>
+                </div>
+                <div>
+                  <Text strong style={{ fontSize: 12 }}>Client policy</Text>
+                  <Space direction="vertical" size={6} style={{ display: "flex", marginTop: 4 }}>
+                    <ClientPolicyFields value={cfg.clientPolicy} onChange={(v) => set("clientPolicy", v)} />
+                  </Space>
+                </div>
+              </Space>
+            ),
+          }]}
+        />
 
         <Form.Item label="Comment" style={itemStyle}>
           <Input

@@ -110,6 +110,27 @@ func TestBuildCreateAuthenticationPolicySql(t *testing.T) {
 			cfg:      AuthenticationPolicyConfig{},
 			contains: []string{"authentication_policy_name"},
 		},
+		{
+			name: "nested bags are emitted when set",
+			cfg: AuthenticationPolicyConfig{
+				Name:                   "BAGS",
+				MFAPolicy:              MFAPolicy{AllowedMethods: []string{"TOTP", "DUO"}},
+				PATPolicy:              PATPolicy{DefaultExpiryInDays: intp(30)},
+				WorkloadIdentityPolicy: WorkloadIdentityPolicy{AllowedProviders: []string{"AWS"}},
+				ClientPolicy:           ClientPolicy{Entries: []ClientPolicyEntry{{Driver: "JDBC_DRIVER", MinimumVersion: "3.13.0"}}},
+			},
+			contains: []string{
+				"MFA_POLICY = ( ALLOWED_METHODS = ('TOTP', 'DUO') )",
+				"PAT_POLICY = ( DEFAULT_EXPIRY_IN_DAYS = 30 )",
+				"WORKLOAD_IDENTITY_POLICY = ( ALLOWED_PROVIDERS = (AWS) )",
+				"CLIENT_POLICY = ( JDBC_DRIVER = ( MINIMUM_VERSION = '3.13.0' ) )",
+			},
+		},
+		{
+			name:   "empty nested bags are omitted",
+			cfg:    AuthenticationPolicyConfig{Name: "EMPTYBAGS"},
+			absent: []string{"MFA_POLICY", "PAT_POLICY", "WORKLOAD_IDENTITY_POLICY", "CLIENT_POLICY"},
+		},
 	}
 
 	for _, tt := range tests {
