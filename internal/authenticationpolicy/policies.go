@@ -37,6 +37,26 @@ import (
 // JSON objects, so the parsers are JSON-driven and tolerant — an unrecognized /
 // empty value yields a zero struct (the editor simply starts blank) rather than
 // an error.
+//
+// The quoting / delimiter rules below are NOT uniform across the bags — each
+// builder follows its own sub-grammar, verified verbatim against the
+// CREATE AUTHENTICATION POLICY reference
+// (https://docs.snowflake.com/en/sql-reference/sql/create-authentication-policy):
+//
+//	MFA_POLICY = ( ALLOWED_METHODS = ('TOTP', 'DUO')              -- list quoted, space-delimited props
+//	               ENFORCE_MFA_ON_EXTERNAL_AUTHENTICATION = 'NONE' )   -- enum quoted
+//	PAT_POLICY = ( DEFAULT_EXPIRY_IN_DAYS = 30                    -- numbers bare, space-delimited props
+//	               NETWORK_POLICY_EVALUATION = ENFORCED_NOT_REQUIRED   -- enum BARE (unlike MFA's enum)
+//	               REQUIRE_ROLE_RESTRICTION_FOR_SERVICE_USERS = FALSE ) -- bool bare
+//	WORKLOAD_IDENTITY_POLICY = ( ALLOWED_PROVIDERS = (AWS, AZURE)  -- providers BARE (unlike ALLOWED_METHODS)
+//	               ALLOWED_AWS_ACCOUNTS = ('123456789012') )      -- account/issuer lists quoted
+//	CLIENT_POLICY = ( GO_DRIVER = (MINIMUM_VERSION = '1.14.1'),   -- entries COMMA-delimited (unlike the others)
+//	               JDBC_DRIVER = (MINIMUM_VERSION = '3.25.0') )   -- version quoted, driver bare
+//
+// So: do not "normalize" these into a single quoting/delimiter rule — the
+// asymmetry is the grammar. (The exact DESCRIBE *rendering* the parsers consume
+// is the one piece not yet confirmed against a live account; the serializers are
+// grammar-confirmed.)
 
 // ── MFA_POLICY ───────────────────────────────────────────────────────────────
 
