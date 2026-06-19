@@ -6,6 +6,7 @@ import {dbtproject} from '../models';
 import {stage} from '../models';
 import {integrations} from '../models';
 import {procedure} from '../models';
+import {authenticationpolicy} from '../models';
 import {aggregationpolicy} from '../models';
 import {alert} from '../models';
 import {datametricfunction} from '../models';
@@ -57,6 +58,8 @@ export function AddBackup(arg1:string,arg2:string,arg3:string):Promise<void>;
 export function AlterAggregationPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterAlert(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterAuthenticationPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterBackupPolicy(arg1:string,arg2:string):Promise<void>;
 
@@ -132,9 +135,13 @@ export function BuildCallStatement(arg1:string,arg2:string,arg3:string,arg4:Arra
 
 export function BuildChangeColumnTypeSql(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<string>;
 
+export function BuildClientPolicyValue(arg1:authenticationpolicy.ClientPolicy):Promise<string>;
+
 export function BuildCreateAggregationPolicySql(arg1:string,arg2:string,arg3:aggregationpolicy.AggregationPolicyConfig):Promise<string>;
 
 export function BuildCreateAlertSql(arg1:string,arg2:string,arg3:alert.AlertConfig):Promise<string>;
+
+export function BuildCreateAuthenticationPolicySql(arg1:string,arg2:string,arg3:authenticationpolicy.AuthenticationPolicyConfig):Promise<string>;
 
 export function BuildCreateDataMetricFunctionSql(arg1:string,arg2:string,arg3:datametricfunction.DataMetricFunctionConfig):Promise<string>;
 
@@ -196,9 +203,13 @@ export function BuildJoinSQL(arg1:erdesigner.JoinQueryState):Promise<string>;
 
 export function BuildJoinState(arg1:erdesigner.JoinPath,arg2:Array<erdesigner.TableRef>,arg3:string):Promise<erdesigner.JoinQueryState>;
 
+export function BuildMFAPolicyValue(arg1:authenticationpolicy.MFAPolicy):Promise<string>;
+
 export function BuildModifyGitRepositorySql(arg1:string,arg2:string,arg3:string,arg4:snowgitrepo.GitRepositoryConfig,arg5:string,arg6:string,arg7:string):Promise<Array<string>>;
 
 export function BuildModifySecretSql(arg1:string,arg2:string,arg3:string,arg4:secret.SecretConfig,arg5:string):Promise<Array<string>>;
+
+export function BuildPATPolicyValue(arg1:authenticationpolicy.PATPolicy):Promise<string>;
 
 export function BuildRefreshPipeSql(arg1:string,arg2:string,arg3:string,arg4:pipe.RefreshPipeConfig):Promise<string>;
 
@@ -207,6 +218,8 @@ export function BuildRenameColumnSql(arg1:string,arg2:string,arg3:string,arg4:st
 export function BuildSetColumnCommentSql(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<string>;
 
 export function BuildSetColumnNotNullSql(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
+
+export function BuildWorkloadIdentityPolicyValue(arg1:authenticationpolicy.WorkloadIdentityPolicy):Promise<string>;
 
 export function CanCreateIntegration(arg1:string):Promise<boolean>;
 
@@ -292,6 +305,8 @@ export function DeleteVenvFolder():Promise<void>;
 
 export function DeployNotebook(arg1:snowflake.DeployNotebookParams):Promise<void>;
 
+export function DescribeAuthenticationPolicy(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
+
 export function DescribeDataMetricFunction(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.QueryResult>;
 
 export function DescribeDbtProject(arg1:string,arg2:string,arg3:string):Promise<Array<snowflake.PropertyPair>>;
@@ -354,6 +369,8 @@ export function FetchNotebookContent(arg1:string,arg2:string,arg3:string):Promis
 
 export function FindJoinPaths(arg1:Array<erdesigner.TableRef>,arg2:Array<snowflake.ERForeignKey>):Promise<Array<erdesigner.JoinPath>>;
 
+export function FormatAuthPolicyList(arg1:Array<string>):Promise<string>;
+
 export function FormatSecondaryRoles(arg1:Array<string>):Promise<string>;
 
 export function GenerateKeyPair(arg1:string,arg2:string,arg3:string):Promise<keypair.KeyPairResult>;
@@ -373,6 +390,8 @@ export function GetAllDataTypes():Promise<Array<snowflake.DataTypeInfo>>;
 export function GetAllFunctionNames():Promise<Array<fnmeta.FunctionMeta>>;
 
 export function GetAppInfo():Promise<app.AppInfo>;
+
+export function GetAuthenticationPolicyReferences(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function GetAvailableShells():Promise<Array<string>>;
 
@@ -704,7 +723,15 @@ export function NewNotebook():Promise<string>;
 
 export function NotebookUseContext(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
+export function ParseClientPolicy(arg1:string):Promise<authenticationpolicy.ClientPolicy>;
+
+export function ParseMFAPolicy(arg1:string):Promise<authenticationpolicy.MFAPolicy>;
+
+export function ParsePATPolicy(arg1:string):Promise<authenticationpolicy.PATPolicy>;
+
 export function ParseSecondaryRoles(arg1:string):Promise<Array<string>>;
+
+export function ParseWorkloadIdentityPolicy(arg1:string):Promise<authenticationpolicy.WorkloadIdentityPolicy>;
 
 export function PickCACertFile():Promise<string>;
 

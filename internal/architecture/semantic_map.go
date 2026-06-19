@@ -68,6 +68,7 @@ func GetCodebaseSemanticMap() string {
       "backend_paths": [
         "internal/aggregationpolicy/",
         "internal/alert/",
+        "internal/authenticationpolicy/",
         "internal/backup/",
         "internal/column/",
         "internal/datametricfunction/",
@@ -109,6 +110,9 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/aggregationpolicy/CreateAggregationPolicyModal.tsx",
         "frontend/src/components/alert/AlertPropertiesModal.tsx",
         "frontend/src/components/alert/CreateAlertModal.tsx",
+        "frontend/src/components/authenticationpolicy/AuthenticationPolicyPropertiesModal.tsx",
+        "frontend/src/components/authenticationpolicy/CreateAuthenticationPolicyModal.tsx",
+        "frontend/src/components/authenticationpolicy/PolicyBagRows.tsx",
         "frontend/src/components/database/CreateStageModal.tsx",
         "frontend/src/components/database/StagePropertiesModal.tsx",
         "frontend/src/components/datametricfunction/CreateDataMetricFunctionModal.tsx",

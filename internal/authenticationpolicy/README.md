@@ -1,0 +1,77 @@
+# internal/authenticationpolicy
+
+Builds SQL for Snowflake **AUTHENTICATION POLICY** objects and backs the
+object-browser create flow.
+
+## What an authentication policy is
+
+An authentication policy is a schema-level governance object that restricts how
+users (or the entire account) may authenticate. It controls which
+**authentication methods** are permitted (`PASSWORD`, `SAML`, `OAUTH`,
+`KEYPAIR`, `PROGRAMMATIC_ACCESS_TOKEN`, `WORKLOAD_IDENTITY`), which **client
+types** may connect (`SNOWFLAKE_UI`, `DRIVERS`, `SNOWFLAKE_CLI`, `SNOWSQL`),
+which **security integrations** are allowed, and whether multi-factor
+authentication enrollment is required (`MFA_ENROLLMENT`). A policy is attached
+to the account or to individual users via
+`ALTER ACCOUNT … SET AUTHENTICATION POLICY` / `ALTER USER … SET AUTHENTICATION POLICY`.
+
+## Types & builders
+
+- **`AuthenticationPolicyConfig`** — the structured create config. The
+  list-valued parameters (`AuthenticationMethods`, `ClientTypes`,
+  `SecurityIntegrations`) are `[]string` slices of bare tokens which the builder
+  renders as single-quoted string literals; `MFAEnrollment` is a single
+  enumerated keyword. Identifier-casing, `OR REPLACE`, and `IF NOT EXISTS`
+  follow the usual create-modal conventions.
+- **`BuildCreateAuthenticationPolicySql(db, schema, cfg)`** — emits
+  `CREATE [OR REPLACE] AUTHENTICATION POLICY [IF NOT EXISTS] <fqn>` followed by
+  only the parameters the caller set, then `COMMENT`. `OR REPLACE` and `IF NOT
+  EXISTS` are mutually exclusive (`OR REPLACE` wins). A blank name becomes an
+  `authentication_policy_name` placeholder so the live preview stays a valid
+  template. A list whose only entries are blank is omitted (never emits `()`).
+- **`FormatStringList(tokens)`** — renders a token slice into the
+  `('A', 'B')` single-quoted-literal list grammar shared by the list
+  parameters; exposed so the app layer / properties modal builds
+  `ALTER … SET <list> = (…)` clauses through the same serializer.
+
+### Nested property bags (`policies.go`)
+
+The four nested parameters — `MFA_POLICY`, `PAT_POLICY`,
+`WORKLOAD_IDENTITY_POLICY`, `CLIENT_POLICY` — are each a parenthesized list of
+sub-properties with their own grammar. Each is modeled as a struct
+(`MFAPolicy`, `PATPolicy`, `WorkloadIdentityPolicy`, `ClientPolicy` /
+`ClientPolicyEntry`) with a matching **`Build<Bag>Value(p)`** serializer (emits
+the `( … )` value for an `ALTER … SET <BAG> = <value>` clause — only the
+sub-properties the caller set; `*int`/`*bool` distinguish unset from `0`/`false`)
+and a tolerant **`Parse<Bag>(raw)`** reader. `DESCRIBE AUTHENTICATION POLICY`
+renders these bags as JSON objects, so the parsers are JSON-driven and never
+error — an unrecognized/empty value yields a zero struct (the editor starts
+blank). All of this lives in Go (exposed via `App.Build<Bag>Value` /
+`App.Parse<Bag>`) so the properties modal carries no SQL-serialization or
+DESCRIBE-parsing logic. `UNSET DCM PROJECT` (detach from a Declarative Change
+Management project) is issued as a plain `AlterAuthenticationPolicy` clause.
+
+## Parameters (allowed values / Snowflake default)
+
+| Parameter | Allowed values | Default |
+|-----------|----------------|---------|
+| `AUTHENTICATION_METHODS` | `ALL`, `SAML`, `PASSWORD`, `OAUTH`, `KEYPAIR`, `PROGRAMMATIC_ACCESS_TOKEN`, `WORKLOAD_IDENTITY` | `('ALL')` |
+| `CLIENT_TYPES` | `ALL`, `SNOWFLAKE_UI`, `DRIVERS`, `SNOWFLAKE_CLI`, `SNOWSQL` | `('ALL')` |
+| `SECURITY_INTEGRATIONS` | `ALL` or integration names | `('ALL')` |
+| `MFA_ENROLLMENT` | `REQUIRED`, `REQUIRED_PASSWORD_ONLY`, `OPTIONAL` | `OPTIONAL` |
+| `COMMENT` | string literal | — |
+
+## ALTER / DESCRIBE / references
+
+`ALTER AUTHENTICATION POLICY` (RENAME, `SET`/`UNSET` each parameter,
+`SET`/`UNSET COMMENT`) is issued as a free-form statement by
+`App.AlterAuthenticationPolicy` (`internal/app/authenticationpolicy.go`). The
+current parameter values are read with `App.DescribeAuthenticationPolicy`
+(`DESCRIBE AUTHENTICATION POLICY` returns one row per property with the columns
+`property` / `value` — `SHOW AUTHENTICATION POLICIES` reports only the comment
+and metadata). The users/account the policy is attached to are read with
+`App.GetAuthenticationPolicyReferences` (`POLICY_REFERENCES` filtered to
+`POLICY_KIND = 'AUTHENTICATION_POLICY'`).
+
+DDL export uses `GET_DDL('POLICY', …)`, the generic policy object type
+(`internal/snowflake/client.go`).

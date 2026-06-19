@@ -72,6 +72,7 @@ import {
   FundOutlined,
   GroupOutlined,
   ColumnWidthOutlined,
+  LoginOutlined,
 } from "@ant-design/icons";
 
 // ── CSS variable name per kind ─────────────────────────────────────────────
@@ -92,6 +93,7 @@ const KIND_VAR: Record<string, string> = {
   "SESSION POLICY": "--icon-sessionpolicy",
   "AGGREGATION POLICY": "--icon-aggregationpolicy",
   "PROJECTION POLICY": "--icon-projectionpolicy",
+  "AUTHENTICATION POLICY": "--icon-authenticationpolicy",
   "NETWORK RULE":    "--icon-networkrule",
   "IMAGE REPOSITORY": "--icon-imagerepository",
   SERVICE:           "--icon-service",
@@ -130,6 +132,7 @@ const KIND_ICON: Record<string, React.ComponentType<{ style?: React.CSSPropertie
   "SESSION POLICY": FieldTimeOutlined,
   "AGGREGATION POLICY": GroupOutlined,
   "PROJECTION POLICY": ColumnWidthOutlined,
+  "AUTHENTICATION POLICY": LoginOutlined,
   "NETWORK RULE":   GlobalOutlined,
   "IMAGE REPOSITORY": ContainerOutlined,
   SERVICE:          DeploymentUnitOutlined,
