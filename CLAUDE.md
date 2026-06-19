@@ -37,36 +37,6 @@ The map in `internal/architecture/semantic_map.go` is **generated** — do not e
 - **TypeScript / TSX**: add `// @thaw-domain: <Domain Name>` → generator outputs the file path.
 - **Regenerate**: `go generate ./internal/architecture/` (or `go run scripts/gen_semantic_map.go`). CI's `TestSemanticMapAccuracy` fails if an annotated path no longer exists.
 
-## Codebase Vector Database
-
-A ChromaDB vector index of all `.go`, `.ts`, and `.tsx` files lives at `.chroma_db/` (not committed; see `.gitignore`). Collection `thaw_codebase`, model `models/gemini-embedding-2` @ 768 dims, cosine. **Before writing code for a non-trivial task, query it** to locate relevant existing files/functions and avoid duplicate implementations.
-
-Query from Python:
-```python
-import chromadb, os
-from google import genai
-from google.genai import types
-
-client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-col = chromadb.PersistentClient(path=".chroma_db").get_collection("thaw_codebase")
-
-def search(query: str, n: int = 8):
-    vec = client.models.embed_content(
-        model="models/gemini-embedding-2", contents=query,
-        config=types.EmbedContentConfig(task_type="RETRIEVAL_QUERY", output_dimensionality=768),
-    ).embeddings[0].values
-    r = col.query(query_embeddings=[vec], n_results=n)
-    return [{"file": m["file_path"], "text": d} for m, d in zip(r["metadatas"][0], r["documents"][0])]
-```
-
-Refresh after significant code changes:
-```bash
-cd scripts && GEMINI_API_KEY=... .venv/bin/python embed_codebase.py --reset
-```
-`--reset` rebuilds from scratch (preferred; UUID IDs mean appends don't dedupe).
-
----
-
 ## Build & test commands
 
 ```bash

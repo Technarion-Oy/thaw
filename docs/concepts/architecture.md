@@ -76,4 +76,4 @@ See `README.md` → Configuration for exact paths per platform.
 ## Related
 
 - [Patterns](patterns.md) · [Gotchas](gotchas.md) · [Onboarding](onboarding.md)
-- The Draw.io system diagram and its maintenance rules: [`ARCHITECTURE_DIAGRAM.md`](../../ARCHITECTURE_DIAGRAM.md).
+- The Draw.io system diagram and its maintenance rules: [`ARCHITECTURE_DIAGRAM.md`](ARCHITECTURE_DIAGRAM.md).

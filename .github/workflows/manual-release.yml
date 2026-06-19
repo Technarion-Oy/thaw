@@ -49,7 +49,7 @@ jobs:
         run: npm ci
 
       - name: Run semantic-release
-        run: npx semantic-release ${{ inputs.dry_run && '--dry-run' || '' }}
+        run: npx semantic-release --extends ./release/release.config.js ${{ inputs.dry_run && '--dry-run' || '' }}
         env:
           GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
 
@@ -79,7 +79,7 @@ jobs:
         run: |
           echo "v${{ steps.check-version.outputs.version }}" > version.txt
           aws s3 cp version.txt s3://thaw-s3-bucket-for-website/release/version.txt
-          aws s3 cp CHANGELOG.md s3://thaw-s3-bucket-for-website/release/CHANGELOG.md
+          aws s3 cp release/CHANGELOG.md s3://thaw-s3-bucket-for-website/release/CHANGELOG.md
 
   build:
     name: Build — ${{ matrix.platform }}-${{ matrix.arch }}

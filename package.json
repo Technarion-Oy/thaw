@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Release toolchain for Thaw (semantic-release)",
   "scripts": {
-    "release": "semantic-release"
+    "release": "semantic-release --extends ./release/release.config.js"
   },
   "devDependencies": {
     "semantic-release": "^24.0.0",
