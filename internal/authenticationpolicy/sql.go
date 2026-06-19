@@ -51,8 +51,8 @@ type AuthenticationPolicyConfig struct {
 // formatStringList renders a token slice into the SQL list grammar used by the
 // authentication-policy list parameters — each token becomes a single-quoted
 // string literal, e.g. []string{"PASSWORD","SAML"} → "('PASSWORD', 'SAML')".
-// Blank tokens are skipped. Exported so the app layer / properties modal can
-// build ALTER … SET clauses through the same serializer the CREATE builder uses.
+// Blank tokens are skipped. Unexported; the CREATE builder and FormatStringList
+// (the exported IPC-facing wrapper below) both serialize lists through it.
 func formatStringList(tokens []string) string {
 	parts := make([]string, 0, len(tokens))
 	for _, t := range tokens {

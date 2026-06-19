@@ -45,10 +45,12 @@ func isBareToken(s string) bool { return bareTokenRe.MatchString(s) }
 // comma-delimited entry list). Only sub-properties the caller set are emitted.
 //
 // Parsers read the value DESCRIBE AUTHENTICATION POLICY reports for a bag back
-// into the struct so the editor can pre-fill. DESCRIBE renders these bags as
-// JSON objects, so the parsers are JSON-driven and tolerant — an unrecognized /
-// empty value yields a zero struct (the editor simply starts blank) rather than
-// an error.
+// into the struct so the editor can pre-fill. DESCRIBE renders these bags in
+// Snowflake's structured-object notation — `{KEY=VALUE, KEY={NESTED=VALUE}}`,
+// e.g. CLIENT_POLICY → `{GO_DRIVER={MINIMUM_VERSION=3.14.1}}` — NOT JSON, so the
+// parsers run that grammar through parseDescribeBag (strict JSON is still accepted
+// as a fallback). They are tolerant — an unrecognized / empty value yields a zero
+// struct (the editor simply starts blank) rather than an error.
 //
 // The quoting / delimiter rules below are NOT uniform across the bags — each
 // builder follows its own sub-grammar, verified verbatim against the
@@ -66,9 +68,9 @@ func isBareToken(s string) bool { return bareTokenRe.MatchString(s) }
 //	               JDBC_DRIVER = (MINIMUM_VERSION = '3.25.0') )   -- version quoted, driver bare
 //
 // So: do not "normalize" these into a single quoting/delimiter rule — the
-// asymmetry is the grammar. (The exact DESCRIBE *rendering* the parsers consume
-// is the one piece not yet confirmed against a live account; the serializers are
-// grammar-confirmed.)
+// asymmetry is the grammar. (That asymmetry is on the *serializer* side; the
+// parsers read DESCRIBE's uniform structured-object rendering, so a single
+// parseDescribeBag scanner handles all four.)
 
 // ── MFA_POLICY ───────────────────────────────────────────────────────────────
 
@@ -95,7 +97,7 @@ func BuildMFAPolicyValue(p MFAPolicy) string {
 
 // ParseMFAPolicy reads a DESCRIBE MFA_POLICY value back into the struct.
 func ParseMFAPolicy(raw string) MFAPolicy {
-	m := parseJSONObject(raw)
+	m := parseDescribeBag(raw)
 	return MFAPolicy{
 		AllowedMethods:                     jsonStringList(m, "ALLOWED_METHODS"),
 		EnforceMFAOnExternalAuthentication: jsonString(m, "ENFORCE_MFA_ON_EXTERNAL_AUTHENTICATION"),
@@ -138,7 +140,7 @@ func BuildPATPolicyValue(p PATPolicy) string {
 
 // ParsePATPolicy reads a DESCRIBE PAT_POLICY value back into the struct.
 func ParsePATPolicy(raw string) PATPolicy {
-	m := parseJSONObject(raw)
+	m := parseDescribeBag(raw)
 	return PATPolicy{
 		DefaultExpiryInDays:                   jsonIntPtr(m, "DEFAULT_EXPIRY_IN_DAYS"),
 		MaxExpiryInDays:                       jsonIntPtr(m, "MAX_EXPIRY_IN_DAYS"),
@@ -181,7 +183,7 @@ func BuildWorkloadIdentityPolicyValue(p WorkloadIdentityPolicy) string {
 // ParseWorkloadIdentityPolicy reads a DESCRIBE WORKLOAD_IDENTITY_POLICY value
 // back into the struct.
 func ParseWorkloadIdentityPolicy(raw string) WorkloadIdentityPolicy {
-	m := parseJSONObject(raw)
+	m := parseDescribeBag(raw)
 	return WorkloadIdentityPolicy{
 		AllowedProviders:    jsonStringList(m, "ALLOWED_PROVIDERS"),
 		AllowedAWSAccounts:  jsonStringList(m, "ALLOWED_AWS_ACCOUNTS"),
@@ -228,7 +230,7 @@ func BuildClientPolicyValue(p ClientPolicy) string {
 // driver name, each holding a MINIMUM_VERSION) back into the struct. Entries are
 // sorted by driver so the editor renders deterministically.
 func ParseClientPolicy(raw string) ClientPolicy {
-	m := parseJSONObject(raw)
+	m := parseDescribeBag(raw)
 	var cp ClientPolicy
 	for driver, v := range m {
 		obj, ok := v.(map[string]any)
@@ -278,16 +280,39 @@ func formatBareList(tokens []string) string {
 	return "(" + strings.Join(parts, ", ") + ")"
 }
 
-// parseJSONObject parses raw as a JSON object, normalizing top-level keys to
-// upper-case. Returns nil on empty / non-object input (reads from a nil map
-// return zero values, so callers need no special-casing).
-func parseJSONObject(raw string) map[string]any {
+// parseDescribeBag parses the value DESCRIBE AUTHENTICATION POLICY reports for a
+// nested property bag into a generic map keyed by upper-cased top-level property.
+// DESCRIBE renders these bags in Snowflake's structured-object notation — '='
+// between key and value, unquoted keys/scalars, and nested `{}` / `[]` groups,
+// e.g. CLIENT_POLICY → `{GO_DRIVER={MINIMUM_VERSION=3.14.1}}` — NOT JSON. (Format
+// confirmed against the DESCRIBE AUTHENTICATION POLICY reference:
+// https://docs.snowflake.com/en/sql-reference/sql/desc-authentication-policy.)
+// A strict-JSON rendering is accepted as a fallback. Scalars come back as strings;
+// the jsonIntPtr / jsonBoolPtr / jsonStringList helpers coerce them. Empty or
+// unparseable input yields a nil map (reads from a nil map return zero values, so
+// callers need no special-casing).
+func parseDescribeBag(raw string) map[string]any {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil
 	}
-	var m map[string]any
-	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+	// Some editions may emit strict JSON; the structured notation never parses as
+	// JSON (unquoted keys, '=' instead of ':'), so a successful unmarshal is JSON.
+	var jm map[string]any
+	if json.Unmarshal([]byte(raw), &jm) == nil {
+		return upperKeys(jm)
+	}
+	s := &structScanner{s: raw}
+	if obj, ok := s.parseValue().(map[string]any); ok {
+		return upperKeys(obj)
+	}
+	return nil
+}
+
+// upperKeys returns m with its top-level keys upper-cased, or nil when empty so
+// downstream reads fall through to zero values.
+func upperKeys(m map[string]any) map[string]any {
+	if len(m) == 0 {
 		return nil
 	}
 	out := make(map[string]any, len(m))
@@ -295,6 +320,124 @@ func parseJSONObject(raw string) map[string]any {
 		out[strings.ToUpper(k)] = v
 	}
 	return out
+}
+
+// structScanner parses Snowflake's structured-object string rendering into Go
+// values: `{...}` → map[string]any, `[...]` → []any, and any bare/quoted run → a
+// trimmed string scalar. Keys and values are separated by '='; entries by ',' or
+// whitespace, so both the comma-delimited DESCRIBE rendering and the grammar's
+// space-delimited form parse. A surrounding single/double-quote pair is unwrapped
+// so a quoted value may contain a delimiter.
+type structScanner struct {
+	s   string
+	pos int
+}
+
+func (p *structScanner) parseValue() any {
+	p.skipSpace()
+	if p.pos >= len(p.s) {
+		return ""
+	}
+	switch p.s[p.pos] {
+	case '{':
+		return p.parseObject()
+	case '[':
+		return p.parseArray()
+	default:
+		return p.parseToken()
+	}
+}
+
+func (p *structScanner) parseObject() map[string]any {
+	out := map[string]any{}
+	p.pos++ // consume '{'
+	for p.pos < len(p.s) {
+		start := p.pos
+		p.skipSpace()
+		if p.pos < len(p.s) && p.s[p.pos] == '}' {
+			p.pos++
+			break
+		}
+		key := p.parseToken()
+		p.skipSpace()
+		if p.pos < len(p.s) && p.s[p.pos] == '=' {
+			p.pos++ // consume '='
+			val := p.parseValue()
+			if key != "" {
+				out[key] = val
+			}
+		}
+		p.skipSpace()
+		if p.pos < len(p.s) && p.s[p.pos] == ',' {
+			p.pos++ // consume entry separator
+		}
+		if p.pos == start { // guarantee forward progress on malformed input
+			p.pos++
+		}
+	}
+	return out
+}
+
+func (p *structScanner) parseArray() []any {
+	var out []any
+	p.pos++ // consume '['
+	for p.pos < len(p.s) {
+		start := p.pos
+		p.skipSpace()
+		if p.pos < len(p.s) && p.s[p.pos] == ']' {
+			p.pos++
+			break
+		}
+		out = append(out, p.parseValue())
+		p.skipSpace()
+		if p.pos < len(p.s) && p.s[p.pos] == ',' {
+			p.pos++ // consume element separator
+		}
+		if p.pos == start { // guarantee forward progress on malformed input
+			p.pos++
+		}
+	}
+	return out
+}
+
+// parseToken reads a bare scalar (or quoted string) up to the next structural
+// delimiter — whitespace, '=', ',', or a brace/bracket — unwrapping a surrounding
+// single/double-quote pair.
+func (p *structScanner) parseToken() string {
+	p.skipSpace()
+	var sb strings.Builder
+	for p.pos < len(p.s) {
+		c := p.s[p.pos]
+		if c == '\'' || c == '"' {
+			p.pos++
+			for p.pos < len(p.s) && p.s[p.pos] != c {
+				sb.WriteByte(p.s[p.pos])
+				p.pos++
+			}
+			if p.pos < len(p.s) {
+				p.pos++ // consume closing quote
+			}
+			continue
+		}
+		if c == ' ' || c == '\t' || c == '\n' || c == '\r' ||
+			c == '=' || c == ',' || c == '{' || c == '}' || c == '[' || c == ']' {
+			break
+		}
+		sb.WriteByte(c)
+		p.pos++
+	}
+	return strings.TrimSpace(sb.String())
+}
+
+func (p *structScanner) skipSpace() {
+	for p.pos < len(p.s) {
+		switch p.s[p.pos] {
+		case ' ', '\t', '\n', '\r':
+			p.pos++
+		default:
+			return
+		}
+	}
 }
 
 func jsonString(m map[string]any, key string) string {

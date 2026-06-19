@@ -20,8 +20,10 @@ import {
 import {
   GetObjectProperties, DescribeAuthenticationPolicy, AlterAuthenticationPolicy,
   GetAuthenticationPolicyReferences, FormatAuthPolicyList,
+  ParseSqlList, NormalizeSqlScalar, QuoteSqlText,
+  AuthenticationPolicyListParams, AuthenticationPolicyMFAEnrollmentOptions,
 } from "../../../wailsjs/go/app/App";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type { snowflake, authenticationpolicy } from "../../../wailsjs/go/models";
 import { MFAPolicyRow, PATPolicyRow, WorkloadIdentityPolicyRow, ClientPolicyRow } from "./PolicyBagRows";
 
 const { Text } = Typography;
@@ -39,68 +41,38 @@ const LABEL_TD: React.CSSProperties = {
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-// Quote a free-text value as a single-quoted SQL literal. Mirrors the backend
-// snowflake.EscapeTextLit (backslash doubled, single-quotes doubled).
-function q1(s: string) { return "'" + s.replace(/\\/g, "\\\\").replace(/'/g, "''") + "'"; }
-
-// Parse a DESCRIBE list cell into individual tokens. DESCRIBE AUTHENTICATION
-// POLICY renders the list parameters as e.g. "[ALL]", "[PASSWORD, SAML]", or a
-// bare value — strip the surrounding brackets/quotes, split on commas, drop blanks.
-function parseList(raw: string): string[] {
-  if (!raw) return [];
-  let s = raw.trim();
-  if (s.startsWith("[") && s.endsWith("]")) s = s.slice(1, -1);
-  return s
-    .split(",")
-    .map((t) => t.trim().replace(/^['"]|['"]$/g, "").trim())
-    .filter((t) => t !== "");
-}
-
-// Normalize a DESCRIBE scalar (e.g. MFA_ENROLLMENT) for comparison against the
-// bare option strings. The exact DESCRIBE rendering isn't confirmed against a
-// live account; if it comes back JSON-encoded the value carries surrounding
-// quotes (and possibly brackets), which would match no option and show stray
-// quotes — so strip them defensively.
-function cleanScalar(raw: string): string {
-  let s = raw.trim();
-  if (s.startsWith("[") && s.endsWith("]")) s = s.slice(1, -1).trim();
-  return s.replace(/^['"]|['"]$/g, "").trim();
-}
-
-// The list parameters, each paired with its ALTER keyword and (for the fixed
-// enumerations) the option set offered in the tag editor. SECURITY_INTEGRATIONS
-// is free-form (integration names) plus the ALL token.
-interface ListMeta { keyword: string; label: string; options?: string[]; freeform?: boolean; }
-
-const LISTS: ListMeta[] = [
-  {
-    keyword: "AUTHENTICATION_METHODS", label: "Authentication methods",
-    options: ["ALL", "SAML", "PASSWORD", "OAUTH", "KEYPAIR", "PROGRAMMATIC_ACCESS_TOKEN", "WORKLOAD_IDENTITY"],
-  },
-  {
-    keyword: "CLIENT_TYPES", label: "Client types",
-    options: ["ALL", "SNOWFLAKE_UI", "DRIVERS", "SNOWFLAKE_CLI", "SNOWSQL"],
-  },
-  { keyword: "SECURITY_INTEGRATIONS", label: "Security integrations", options: ["ALL"], freeform: true },
-];
-
-const MFA_ENROLLMENT_OPTIONS = ["REQUIRED", "REQUIRED_PASSWORD_ONLY", "OPTIONAL"];
+//
+// The SQL-quoting (q1), DESCRIBE list/scalar parsing (parseList, cleanScalar) and
+// the list-parameter metadata (LISTS, MFA_ENROLLMENT_OPTIONS) all moved to the Go
+// backend so this modal carries no SQL or grammar knowledge: quoting is
+// QuoteSqlText, list parsing is ParseSqlList, scalar normalization is
+// NormalizeSqlScalar, and the parameter metadata comes from
+// AuthenticationPolicyListParams / AuthenticationPolicyMFAEnrollmentOptions.
 
 // ─── ListRow (token-list setting with Set / Unset) ───────────────────────────
 
 interface ListRowProps {
-  meta: ListMeta;
-  value: string[];
+  meta: authenticationpolicy.ListParamMeta;
+  rawValue: string;
   onSet: (tokens: string[]) => Promise<void>;
   onUnset: () => Promise<void>;
 }
 
-function ListRow({ meta, value, onSet, onUnset }: ListRowProps) {
+function ListRow({ meta, rawValue, onSet, onUnset }: ListRowProps) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState<string[]>(value);
+  const [value, setValue] = useState<string[]>([]);
+  const [draft, setDraft] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // DESCRIBE renders the list cell in a SQL/bracket form the backend tokenizer
+  // owns — parse it there rather than in the UI. Re-runs when rawValue changes
+  // (e.g. after a Set/Unset reload) so the displayed tokens stay in sync.
+  useEffect(() => {
+    let alive = true;
+    ParseSqlList(rawValue).then((t) => { if (alive) setValue(t ?? []); });
+    return () => { alive = false; };
+  }, [rawValue]);
 
   // An all-blank draft would serialize to SET … = (), which Snowflake rejects —
   // Save is disabled and the user is steered to Unset.
@@ -189,18 +161,27 @@ function ListRow({ meta, value, onSet, onUnset }: ListRowProps) {
 
 interface EnumRowProps {
   label: string;
-  value: string;
+  rawValue: string;
   options: string[];
   def: string;
   onSet: (val: string) => Promise<void>;
   onUnset: () => Promise<void>;
 }
 
-function EnumRow({ label, value, options, def, onSet, onUnset }: EnumRowProps) {
+function EnumRow({ label, rawValue, options, def, onSet, onUnset }: EnumRowProps) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState<string>(value);
+  const [value, setValue] = useState<string>("");
+  const [draft, setDraft] = useState<string>("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Strip the brackets/quotes DESCRIBE may wrap the scalar in via the backend
+  // normalizer so the value matches a bare option; re-runs on rawValue change.
+  useEffect(() => {
+    let alive = true;
+    NormalizeSqlScalar(rawValue).then((v) => { if (alive) setValue(v ?? ""); });
+    return () => { alive = false; };
+  }, [rawValue]);
 
   const save = async () => {
     if (!draft) return;
@@ -390,6 +371,15 @@ export default function AuthenticationPolicyPropertiesModal({ db, schema, name, 
   const [refsError, setRefsError] = useState<string | null>(null);
   const [refsLoading, setRefsLoading] = useState(false);
 
+  // List-parameter metadata (keyword, label, allowed values) and the MFA
+  // enrollment options come from the backend — static grammar data fetched once.
+  const [listParams, setListParams] = useState<authenticationpolicy.ListParamMeta[]>([]);
+  const [mfaOptions, setMfaOptions] = useState<string[]>([]);
+  useEffect(() => {
+    AuthenticationPolicyListParams().then((p) => setListParams(p ?? []));
+    AuthenticationPolicyMFAEnrollmentOptions().then((o) => setMfaOptions(o ?? []));
+  }, []);
+
   const reload = useCallback(async () => {
     setRows(null);
     setError(null);
@@ -440,7 +430,7 @@ export default function AuthenticationPolicyPropertiesModal({ db, schema, name, 
   // restricted to the known keywords before it reaches the SQL — the EnumRow
   // Select only offers these, this is defense-in-depth against an unexpected value.
   const setEnum = async (keyword: string, val: string) => {
-    if (!MFA_ENROLLMENT_OPTIONS.includes(val)) return;
+    if (!mfaOptions.includes(val)) return;
     await AlterAuthenticationPolicy(db, schema, name, `SET ${keyword} = ${val}`);
     await reload();
   };
@@ -455,7 +445,7 @@ export default function AuthenticationPolicyPropertiesModal({ db, schema, name, 
     if (comment.trim() === "") {
       await AlterAuthenticationPolicy(db, schema, name, "UNSET COMMENT");
     } else {
-      await AlterAuthenticationPolicy(db, schema, name, `SET COMMENT = ${q1(comment)}`);
+      await AlterAuthenticationPolicy(db, schema, name, `SET COMMENT = ${await QuoteSqlText(comment)}`);
     }
     await reload();
   };
@@ -545,19 +535,19 @@ export default function AuthenticationPolicyPropertiesModal({ db, schema, name, 
           </Text>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
-              {LISTS.map((m) => (
+              {listParams.map((m) => (
                 <ListRow
                   key={m.keyword}
                   meta={m}
-                  value={parseList(descByProp[m.keyword.toLowerCase()] ?? "")}
+                  rawValue={descByProp[m.keyword.toLowerCase()] ?? ""}
                   onSet={(t) => setList(m.keyword, t)}
                   onUnset={() => unsetParam(m.keyword)}
                 />
               ))}
               <EnumRow
                 label="MFA enrollment"
-                value={cleanScalar(descByProp["mfa_enrollment"] ?? "")}
-                options={MFA_ENROLLMENT_OPTIONS}
+                rawValue={descByProp["mfa_enrollment"] ?? ""}
+                options={mfaOptions}
                 def="OPTIONAL"
                 onSet={(v) => setEnum("MFA_ENROLLMENT", v)}
                 onUnset={() => unsetParam("MFA_ENROLLMENT")}

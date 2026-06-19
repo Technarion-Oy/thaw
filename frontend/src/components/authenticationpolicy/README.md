@@ -19,14 +19,19 @@ Object-browser UI for Snowflake **AUTHENTICATION POLICY** objects.
   `DescribeAuthenticationPolicy` (one row per property: `property`/`value`)
   together. The **Parameters** section renders each list parameter
   (`AUTHENTICATION_METHODS`, `CLIENT_TYPES`, `SECURITY_INTEGRATIONS`) with an
-  inline tag editor — *Save* issues
+  inline tag editor — the parameter descriptors (keyword/label/allowed values/
+  free-form flag) and the MFA-enrollment options come from
+  `App.AuthenticationPolicyListParams` / `App.AuthenticationPolicyMFAEnrollmentOptions`,
+  so the allowed values are not duplicated in TypeScript. *Save* issues
   `ALTER AUTHENTICATION POLICY … SET <param> = (…)` (the list is serialized by
   `App.FormatAuthPolicyList`, the same `('A', 'B')` serializer the CREATE builder
   uses), *Unset* issues `UNSET <param>` to restore the `ALL` default — plus an
   **MFA enrollment** single-choice row (`SET MFA_ENROLLMENT = <kw>` / `UNSET`).
   The DESCRIBE list cells (e.g. `[PASSWORD, SAML]`) are parsed back into tokens
-  for the editors; if DESCRIBE fails, a caveat notes that editing sets values
-  blind. An **Advanced policies** section (`PolicyBagRows.tsx`) provides
+  via `App.ParseSqlList` and the scalar normalized via `App.NormalizeSqlScalar`
+  (the comment is quoted through `App.QuoteSqlText`), so the modal carries no SQL
+  quoting/parsing logic; if DESCRIBE fails, a caveat notes that editing sets
+  values blind. An **Advanced policies** section (`PolicyBagRows.tsx`) provides
   structured editors for the four nested property bags — `MFA_POLICY`,
   `PAT_POLICY`, `WORKLOAD_IDENTITY_POLICY`, `CLIENT_POLICY` — as selects /
   numbers / toggles / per-driver version rows. These editors hold only widget

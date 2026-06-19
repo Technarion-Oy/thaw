@@ -178,6 +178,24 @@ export namespace authenticationpolicy {
 		}
 	}
 	
+	export class ListParamMeta {
+	    keyword: string;
+	    label: string;
+	    options: string[];
+	    freeform: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ListParamMeta(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.keyword = source["keyword"];
+	        this.label = source["label"];
+	        this.options = source["options"];
+	        this.freeform = source["freeform"];
+	    }
+	}
 	export class MFAPolicy {
 	    allowedMethods: string[];
 	    enforceMfaOnExternalAuthentication: string;

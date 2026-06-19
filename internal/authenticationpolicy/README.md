@@ -34,6 +34,18 @@ to the account or to individual users via
   parameters; exposed so the app layer / properties modal builds
   `ALTER … SET <list> = (…)` clauses through the same serializer.
 
+### Editor metadata (`params.go`)
+
+- **`ListParams()`** — returns the `ListParamMeta` descriptors (ALTER keyword,
+  label, allowed-value enumeration, free-form flag) for the three top-level list
+  parameters, and **`MFAEnrollmentOptions()`** returns the `MFA_ENROLLMENT`
+  values. These keep the grammar's allowed values in Go so the properties modal
+  renders its editors from one source of truth (exposed via
+  `App.AuthenticationPolicyListParams` / `App.AuthenticationPolicyMFAEnrollmentOptions`).
+  The modal parses DESCRIBE list/scalar cells back through the general
+  `App.ParseSqlList` / `App.NormalizeSqlScalar` helpers (over `internal/snowflake`),
+  so no SQL parsing lives in TypeScript.
+
 ### Nested property bags (`policies.go`)
 
 The four nested parameters — `MFA_POLICY`, `PAT_POLICY`,
@@ -44,9 +56,13 @@ sub-properties with their own grammar. Each is modeled as a struct
 the `( … )` value for an `ALTER … SET <BAG> = <value>` clause — only the
 sub-properties the caller set; `*int`/`*bool` distinguish unset from `0`/`false`)
 and a tolerant **`Parse<Bag>(raw)`** reader. `DESCRIBE AUTHENTICATION POLICY`
-renders these bags as JSON objects, so the parsers are JSON-driven and never
-error — an unrecognized/empty value yields a zero struct (the editor starts
-blank). All of this lives in Go (exposed via `App.Build<Bag>Value` /
+renders these bags in Snowflake's structured-object notation — `{KEY=VALUE,
+KEY={NESTED=VALUE}}`, e.g. `CLIENT_POLICY` → `{GO_DRIVER={MINIMUM_VERSION=3.14.1}}`
+([reference](https://docs.snowflake.com/en/sql-reference/sql/desc-authentication-policy)),
+**not** JSON — so the parsers run that grammar through `parseDescribeBag` (strict
+JSON is accepted as a fallback) and never error: an unrecognized/empty value
+yields a zero struct (the editor starts blank). All of this lives in Go (exposed
+via `App.Build<Bag>Value` /
 `App.Parse<Bag>`) so the properties modal carries no SQL-serialization or
 DESCRIBE-parsing logic. `UNSET DCM PROJECT` (detach from a Declarative Change
 Management project) is issued as a plain `AlterAuthenticationPolicy` clause.

@@ -90,6 +90,15 @@ func QuoteStringLit(s string) string {
 	return `'` + EscapeStringLit(s) + `'`
 }
 
+// QuoteTextLit wraps s in single-quotes for use as a free-text SQL string literal,
+// escaping via EscapeTextLit (backslashes and single-quotes doubled). Use it for
+// human-entered text such as comments — it is the quoting counterpart of
+// EscapeTextLit. Use QuoteStringLit for delimiter/control values where backslash
+// escape sequences are intentional.
+func QuoteTextLit(s string) string {
+	return `'` + EscapeTextLit(s) + `'`
+}
+
 // EscapeLikePattern escapes LIKE-special characters (% and _) in s so that
 // the string matches literally when used in a SHOW … LIKE '<pattern>' clause.
 // Single-quotes are also doubled (same as EscapeStringLit).
@@ -241,6 +250,25 @@ func unquoteSQLToken(s string, q byte) string {
 // SQL way (doubled quotes), not the JSON way. Role names never contain such
 // characters in practice, so this does not arise for real DESCRIBE output.
 func ParseSecondaryRoles(raw string) []string {
+	return ParseSqlList(raw)
+}
+
+// ParseSqlList parses a DESCRIBE list-cell value into its individual value tokens.
+// Snowflake does not document a single uniform rendering for these cells, so the
+// SQL/bracket and JSON-array shapes are all accepted so a parse → edit →
+// re-serialize round-trip never corrupts the list:
+//   - a SQL tuple, e.g. ('PASSWORD', 'SAML') or ('ALL');
+//   - a bracketed list, e.g. [PASSWORD, SAML] or [ALL]; and
+//   - a JSON-style array, e.g. ["ALL"] or ["R1","R2"].
+//
+// It runs the shared SQL tokenizer over the cell and keeps only the value tokens
+// — 'single-quoted' literals and "double-quoted" identifiers (unquoted, with
+// doubled quotes collapsed) plus bare words/numbers — discarding the (), [], and
+// comma punctuation and any whitespace. Quoting and escape handling therefore come
+// straight from the tokenizer, so a quoted entry containing a comma or an embedded
+// quote survives intact. An empty / null cell yields nil. This is the general
+// reader behind ParseSecondaryRoles and the authentication-policy list parameters.
+func ParseSqlList(raw string) []string {
 	if s := strings.TrimSpace(raw); s == "" || strings.EqualFold(s, "null") {
 		return nil
 	}
@@ -262,6 +290,19 @@ func ParseSecondaryRoles(raw string) []string {
 		}
 	}
 	return out
+}
+
+// NormalizeScalar reduces a DESCRIBE scalar cell to its bare value, stripping any
+// surrounding brackets/quotes Snowflake may wrap it in — "[OPTIONAL]", "'OPTIONAL'"
+// and "OPTIONAL" all yield "OPTIONAL". It reuses the ParseSqlList tokenizer and
+// returns the first value token (scalar cells carry exactly one), or "" when the
+// cell is empty / null.
+func NormalizeScalar(raw string) string {
+	toks := ParseSqlList(raw)
+	if len(toks) == 0 {
+		return ""
+	}
+	return toks[0]
 }
 
 // GetQuotedIdentifiersIgnoreCase returns the current session value of the

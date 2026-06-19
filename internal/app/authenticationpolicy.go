@@ -59,6 +59,21 @@ func (a *App) FormatAuthPolicyList(tokens []string) string {
 	return authenticationpolicy.FormatStringList(tokens)
 }
 
+// AuthenticationPolicyListParams returns the metadata (ALTER keyword, label,
+// allowed-value enumeration, free-form flag) for the policy's top-level list
+// parameters, so the properties modal renders the editors from one source of
+// truth instead of duplicating the grammar's allowed values in TypeScript. Pure
+// data — no Snowflake connection required.
+func (a *App) AuthenticationPolicyListParams() []authenticationpolicy.ListParamMeta {
+	return authenticationpolicy.ListParams()
+}
+
+// AuthenticationPolicyMFAEnrollmentOptions returns the allowed values for the
+// MFA_ENROLLMENT scalar parameter (Snowflake default OPTIONAL). Pure data.
+func (a *App) AuthenticationPolicyMFAEnrollmentOptions() []string {
+	return authenticationpolicy.MFAEnrollmentOptions()
+}
+
 // The Build*Value / Parse* methods below convert the four nested property-bag
 // parameters (MFA_POLICY, PAT_POLICY, WORKLOAD_IDENTITY_POLICY, CLIENT_POLICY)
 // between their structured form and SQL, so the properties modal keeps no SQL

@@ -138,6 +138,14 @@ export function AnalyzeMigration(arg1, arg2) {
   return window['go']['app']['App']['AnalyzeMigration'](arg1, arg2);
 }
 
+export function AuthenticationPolicyListParams() {
+  return window['go']['app']['App']['AuthenticationPolicyListParams']();
+}
+
+export function AuthenticationPolicyMFAEnrollmentOptions() {
+  return window['go']['app']['App']['AuthenticationPolicyMFAEnrollmentOptions']();
+}
+
 export function BuildAddColumnSql(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['BuildAddColumnSql'](arg1, arg2, arg3, arg4);
 }
@@ -1338,6 +1346,10 @@ export function NewNotebook() {
   return window['go']['app']['App']['NewNotebook']();
 }
 
+export function NormalizeSqlScalar(arg1) {
+  return window['go']['app']['App']['NormalizeSqlScalar'](arg1);
+}
+
 export function NotebookUseContext(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['NotebookUseContext'](arg1, arg2, arg3, arg4, arg5);
 }
@@ -1356,6 +1368,10 @@ export function ParsePATPolicy(arg1) {
 
 export function ParseSecondaryRoles(arg1) {
   return window['go']['app']['App']['ParseSecondaryRoles'](arg1);
+}
+
+export function ParseSqlList(arg1) {
+  return window['go']['app']['App']['ParseSqlList'](arg1);
 }
 
 export function ParseWorkloadIdentityPolicy(arg1) {
@@ -1408,6 +1424,10 @@ export function PickSaveFile(arg1) {
 
 export function PickSnowflakeCLIConfigPath() {
   return window['go']['app']['App']['PickSnowflakeCLIConfigPath']();
+}
+
+export function QuoteSqlText(arg1) {
+  return window['go']['app']['App']['QuoteSqlText'](arg1);
 }
 
 export function ReadFile(arg1) {

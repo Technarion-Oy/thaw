@@ -360,6 +360,67 @@ func TestParseSecondaryRoles(t *testing.T) {
 	}
 }
 
+func TestParseSqlList(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want []string
+	}{
+		{"bracketed bare list", "[PASSWORD, SAML]", []string{"PASSWORD", "SAML"}},
+		{"bracketed single value", "[ALL]", []string{"ALL"}},
+		{"sql tuple of quoted literals", "('PASSWORD', 'SAML')", []string{"PASSWORD", "SAML"}},
+		{"json array", `["ALL"]`, []string{"ALL"}},
+		{"bare value", "ALL", []string{"ALL"}},
+		{"keyword with underscores", "[PROGRAMMATIC_ACCESS_TOKEN]", []string{"PROGRAMMATIC_ACCESS_TOKEN"}},
+		{"empty cell", "", nil},
+		{"empty brackets", "[]", nil},
+		{"null cell", "null", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseSqlList(tt.raw)
+			if len(got) != len(tt.want) {
+				t.Fatalf("ParseSqlList(%q) = %v, want %v", tt.raw, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("ParseSqlList(%q)[%d] = %q, want %q", tt.raw, i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestNormalizeScalar(t *testing.T) {
+	tests := []struct{ raw, want string }{
+		{"[OPTIONAL]", "OPTIONAL"},
+		{"'OPTIONAL'", "OPTIONAL"},
+		{"OPTIONAL", "OPTIONAL"},
+		{"REQUIRED_PASSWORD_ONLY", "REQUIRED_PASSWORD_ONLY"},
+		{"", ""},
+		{"null", ""},
+	}
+	for _, tt := range tests {
+		if got := NormalizeScalar(tt.raw); got != tt.want {
+			t.Errorf("NormalizeScalar(%q) = %q, want %q", tt.raw, got, tt.want)
+		}
+	}
+}
+
+func TestQuoteTextLit(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"hello", "'hello'"},
+		{"o'brien", "'o''brien'"},
+		{`C:\temp`, `'C:\\temp'`},
+		{"", "''"},
+	}
+	for _, tt := range tests {
+		if got := QuoteTextLit(tt.in); got != tt.want {
+			t.Errorf("QuoteTextLit(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
 // TestSecondaryRolesRoundTrip verifies FormatSecondaryRoles → ParseSecondaryRoles
 // recovers the original role tokens (with ALL normalized to its canonical form),
 // including names that need quoting or contain a comma / embedded quote.

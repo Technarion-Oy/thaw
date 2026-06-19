@@ -141,3 +141,60 @@ func TestParseWorkloadIdentityPolicy(t *testing.T) {
 		t.Errorf("aws accounts = %v", got.AllowedAWSAccounts)
 	}
 }
+
+// DESCRIBE AUTHENTICATION POLICY renders the bags in Snowflake's structured-
+// object notation (`{KEY=VALUE, KEY={NESTED=VALUE}}`), NOT JSON — e.g. the docs'
+// `{GO_DRIVER={MINIMUM_VERSION=3.14.1}}`. These cover the parsers against that
+// real rendering, the path JSON-only tests above never exercised.
+
+func TestParseMFAPolicyStructured(t *testing.T) {
+	got := ParseMFAPolicy(`{ALLOWED_METHODS=[TOTP, DUO], ENFORCE_MFA_ON_EXTERNAL_AUTHENTICATION=NONE}`)
+	want := MFAPolicy{AllowedMethods: []string{"TOTP", "DUO"}, EnforceMFAOnExternalAuthentication: "NONE"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %+v want %+v", got, want)
+	}
+}
+
+func TestParsePATPolicyStructured(t *testing.T) {
+	got := ParsePATPolicy(`{DEFAULT_EXPIRY_IN_DAYS=15, NETWORK_POLICY_EVALUATION=ENFORCED_REQUIRED, REQUIRE_ROLE_RESTRICTION_FOR_SERVICE_USERS=FALSE}`)
+	if got.DefaultExpiryInDays == nil || *got.DefaultExpiryInDays != 15 {
+		t.Errorf("default expiry = %v", got.DefaultExpiryInDays)
+	}
+	if got.NetworkPolicyEvaluation != "ENFORCED_REQUIRED" {
+		t.Errorf("eval = %q", got.NetworkPolicyEvaluation)
+	}
+	if got.RequireRoleRestrictionForServiceUsers == nil || *got.RequireRoleRestrictionForServiceUsers {
+		t.Errorf("require role restriction = %v", got.RequireRoleRestrictionForServiceUsers)
+	}
+}
+
+func TestParseClientPolicyStructured(t *testing.T) {
+	// Exactly the rendering shown in the DESCRIBE reference, plus a second entry.
+	got := ParseClientPolicy(`{GO_DRIVER={MINIMUM_VERSION=3.14.1}, JDBC_DRIVER={MINIMUM_VERSION=3.25.0}}`)
+	want := ClientPolicy{Entries: []ClientPolicyEntry{
+		{Driver: "GO_DRIVER", MinimumVersion: "3.14.1"},
+		{Driver: "JDBC_DRIVER", MinimumVersion: "3.25.0"},
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %+v want %+v", got, want)
+	}
+}
+
+func TestParseWorkloadIdentityPolicyStructured(t *testing.T) {
+	got := ParseWorkloadIdentityPolicy(`{ALLOWED_PROVIDERS=[AWS, AZURE], ALLOWED_AWS_ACCOUNTS=[123456789012]}`)
+	if !reflect.DeepEqual(got.AllowedProviders, []string{"AWS", "AZURE"}) {
+		t.Errorf("providers = %v", got.AllowedProviders)
+	}
+	if !reflect.DeepEqual(got.AllowedAWSAccounts, []string{"123456789012"}) {
+		t.Errorf("aws accounts = %v", got.AllowedAWSAccounts)
+	}
+}
+
+// A quoted version string in the structured rendering must survive intact.
+func TestParseClientPolicyStructuredQuoted(t *testing.T) {
+	got := ParseClientPolicy(`{PYTHON_DRIVER={MINIMUM_VERSION='3.0.0'}}`)
+	want := ClientPolicy{Entries: []ClientPolicyEntry{{Driver: "PYTHON_DRIVER", MinimumVersion: "3.0.0"}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %+v want %+v", got, want)
+	}
+}
