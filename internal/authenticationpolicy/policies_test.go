@@ -76,6 +76,26 @@ func TestBuildClientPolicyValue(t *testing.T) {
 	}
 }
 
+func TestBuildBagsRejectBareTokenInjection(t *testing.T) {
+	// Driver / provider / enum values are interpolated bare; anything that isn't
+	// a plain identifier (e.g. contains ')' or ';') must be dropped, not emitted,
+	// so an IPC caller can't break out of the bag's parentheses.
+	if v := BuildClientPolicyValue(ClientPolicy{Entries: []ClientPolicyEntry{
+		{Driver: "JDBC_DRIVER) ; DROP POLICY X --", MinimumVersion: "1.0"},
+		{Driver: "GO_DRIVER", MinimumVersion: "1.14.1"},
+	}}); v != "( GO_DRIVER = ( MINIMUM_VERSION = '1.14.1' ) )" {
+		t.Errorf("client policy did not drop injected driver: %q", v)
+	}
+	if v := BuildWorkloadIdentityPolicyValue(WorkloadIdentityPolicy{
+		AllowedProviders: []string{"AWS", "AZURE) UNSET COMMENT"},
+	}); v != "( ALLOWED_PROVIDERS = (AWS) )" {
+		t.Errorf("workload identity policy did not drop injected provider: %q", v)
+	}
+	if v := BuildPATPolicyValue(PATPolicy{NetworkPolicyEvaluation: "NOT_ENFORCED)"}); v != "()" {
+		t.Errorf("PAT policy did not drop injected network-policy-evaluation: %q", v)
+	}
+}
+
 func TestParseMFAPolicy(t *testing.T) {
 	got := ParseMFAPolicy(`{"ALLOWED_METHODS":["TOTP","DUO"],"ENFORCE_MFA_ON_EXTERNAL_AUTHENTICATION":"NONE"}`)
 	want := MFAPolicy{AllowedMethods: []string{"TOTP", "DUO"}, EnforceMFAOnExternalAuthentication: "NONE"}

@@ -20,7 +20,7 @@
 // `ALTER … SET <BAG> = <value>`.
 
 import { useState, type ReactNode } from "react";
-import { Button, Input, InputNumber, Select, Space, Tooltip, Typography } from "antd";
+import { Alert, Button, Input, InputNumber, Select, Space, Tooltip, Typography } from "antd";
 import { EditOutlined, CheckOutlined, CloseOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
 import {
   BuildMFAPolicyValue, ParseMFAPolicy,
@@ -46,6 +46,13 @@ const LABEL_TD: React.CSSProperties = {
 
 const opts = (vals: string[]) => vals.map((v) => ({ value: v, label: v }));
 
+// Whether the DESCRIBE value carries real content (so a parse that yields an
+// empty struct means the format wasn't understood, not that the bag is unset).
+const rawHasContent = (raw: string) => {
+  const t = raw.trim();
+  return t !== "" && t !== "()";
+};
+
 // ── Shared row chrome ────────────────────────────────────────────────────────
 // Renders the label + either the read-only current value (with an Edit pencil)
 // or the structured form (`children`) plus Save / Unset / Cancel. The per-bag
@@ -56,13 +63,19 @@ interface BagShellProps {
   label: string;
   rawValue: string;
   canSave: boolean;
+  // True when the current value couldn't be parsed for pre-fill (raw was
+  // non-empty but yielded an empty struct). Because Set replaces the WHOLE bag,
+  // saving from a blank editor would wipe the unreadable config — so the fields
+  // are hidden, a warning is shown, and Set is disabled (Unset still clears it
+  // deliberately).
+  parseFailed: boolean;
   onBeginEdit: () => Promise<void> | void;
   onSave: () => Promise<void>;
   onUnset: () => Promise<void>;
   children: ReactNode;
 }
 
-function BagShell({ label, rawValue, canSave, onBeginEdit, onSave, onUnset, children }: BagShellProps) {
+function BagShell({ label, rawValue, canSave, parseFailed, onBeginEdit, onSave, onUnset, children }: BagShellProps) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -91,11 +104,21 @@ function BagShell({ label, rawValue, canSave, onBeginEdit, onSave, onUnset, chil
       <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
         {editing ? (
           <Space direction="vertical" size={6} style={{ width: "100%" }}>
-            {children}
+            {parseFailed ? (
+              <Alert
+                type="warning"
+                showIcon
+                style={{ maxWidth: 420 }}
+                message="Current value can't be shown"
+                description="Thaw couldn't read the current setting, so editing here would replace the whole policy and wipe it. Edit it in a SQL worksheet, or use Unset to clear it deliberately."
+              />
+            ) : children}
             <Space>
-              <Tooltip title={canSave ? "Save" : "Set at least one property, or use Unset to clear"}>
-                <Button size="small" icon={<CheckOutlined />} type="primary" onClick={() => run(onSave)} loading={saving} disabled={!canSave}>Set</Button>
-              </Tooltip>
+              {!parseFailed && (
+                <Tooltip title={canSave ? "Save" : "Set at least one property, or use Unset to clear"}>
+                  <Button size="small" icon={<CheckOutlined />} type="primary" onClick={() => run(onSave)} loading={saving} disabled={!canSave}>Set</Button>
+                </Tooltip>
+              )}
               <Tooltip title="Reset to Snowflake default">
                 <Button size="small" onClick={() => run(onUnset)} loading={saving}>Unset</Button>
               </Tooltip>
@@ -133,11 +156,15 @@ interface RowProps {
 export function MFAPolicyRow({ rawValue, onSet, onUnset }: RowProps) {
   const [methods, setMethods] = useState<string[]>([]);
   const [enforce, setEnforce] = useState<string>("");
+  const [parseFailed, setParseFailed] = useState(false);
 
   const begin = async () => {
     const p = await ParseMFAPolicy(rawValue);
-    setMethods(p?.allowedMethods ?? []);
-    setEnforce(p?.enforceMfaOnExternalAuthentication ?? "");
+    const m = p?.allowedMethods ?? [];
+    const e = p?.enforceMfaOnExternalAuthentication ?? "";
+    setMethods(m);
+    setEnforce(e);
+    setParseFailed(rawHasContent(rawValue) && m.length === 0 && e === "");
   };
   const canSave = methods.length > 0 || enforce !== "";
   const save = async () => {
@@ -146,7 +173,7 @@ export function MFAPolicyRow({ rawValue, onSet, onUnset }: RowProps) {
   };
 
   return (
-    <BagShell label="MFA policy" rawValue={rawValue} canSave={canSave} onBeginEdit={begin} onSave={save} onUnset={onUnset}>
+    <BagShell label="MFA policy" rawValue={rawValue} canSave={canSave} parseFailed={parseFailed} onBeginEdit={begin} onSave={save} onUnset={onUnset}>
       <div style={{ width: "100%" }}>
         <Text style={FIELD_LABEL}>Allowed methods</Text>
         <Select mode="multiple" size="small" value={methods} onChange={setMethods} placeholder="default (ALL)"
@@ -168,13 +195,19 @@ export function PATPolicyRow({ rawValue, onSet, onUnset }: RowProps) {
   const [maxExpiry, setMaxExpiry] = useState<number | null>(null);
   const [netEval, setNetEval] = useState<string>("");
   const [requireRole, setRequireRole] = useState<boolean | null>(null);
+  const [parseFailed, setParseFailed] = useState(false);
 
   const begin = async () => {
     const p = await ParsePATPolicy(rawValue);
-    setDefExpiry(p?.defaultExpiryInDays ?? null);
-    setMaxExpiry(p?.maxExpiryInDays ?? null);
-    setNetEval(p?.networkPolicyEvaluation ?? "");
-    setRequireRole(p?.requireRoleRestrictionForServiceUsers ?? null);
+    const de = p?.defaultExpiryInDays ?? null;
+    const me = p?.maxExpiryInDays ?? null;
+    const ne = p?.networkPolicyEvaluation ?? "";
+    const rr = p?.requireRoleRestrictionForServiceUsers ?? null;
+    setDefExpiry(de);
+    setMaxExpiry(me);
+    setNetEval(ne);
+    setRequireRole(rr);
+    setParseFailed(rawHasContent(rawValue) && de === null && me === null && ne === "" && rr === null);
   };
   const canSave = defExpiry !== null || maxExpiry !== null || netEval !== "" || requireRole !== null;
   const save = async () => {
@@ -186,7 +219,7 @@ export function PATPolicyRow({ rawValue, onSet, onUnset }: RowProps) {
   };
 
   return (
-    <BagShell label="PAT policy" rawValue={rawValue} canSave={canSave} onBeginEdit={begin} onSave={save} onUnset={onUnset}>
+    <BagShell label="PAT policy" rawValue={rawValue} canSave={canSave} parseFailed={parseFailed} onBeginEdit={begin} onSave={save} onUnset={onUnset}>
       <Space wrap>
         <div>
           <Text style={FIELD_LABEL}>Default expiry (days)</Text>
@@ -220,13 +253,19 @@ export function WorkloadIdentityPolicyRow({ rawValue, onSet, onUnset }: RowProps
   const [awsAccounts, setAwsAccounts] = useState<string[]>([]);
   const [azureIssuers, setAzureIssuers] = useState<string[]>([]);
   const [oidcIssuers, setOidcIssuers] = useState<string[]>([]);
+  const [parseFailed, setParseFailed] = useState(false);
 
   const begin = async () => {
     const p = await ParseWorkloadIdentityPolicy(rawValue);
-    setProviders(p?.allowedProviders ?? []);
-    setAwsAccounts(p?.allowedAwsAccounts ?? []);
-    setAzureIssuers(p?.allowedAzureIssuers ?? []);
-    setOidcIssuers(p?.allowedOidcIssuers ?? []);
+    const pr = p?.allowedProviders ?? [];
+    const aws = p?.allowedAwsAccounts ?? [];
+    const az = p?.allowedAzureIssuers ?? [];
+    const oidc = p?.allowedOidcIssuers ?? [];
+    setProviders(pr);
+    setAwsAccounts(aws);
+    setAzureIssuers(az);
+    setOidcIssuers(oidc);
+    setParseFailed(rawHasContent(rawValue) && pr.length === 0 && aws.length === 0 && az.length === 0 && oidc.length === 0);
   };
   const canSave = providers.length > 0 || awsAccounts.length > 0 || azureIssuers.length > 0 || oidcIssuers.length > 0;
   const save = async () => {
@@ -238,7 +277,7 @@ export function WorkloadIdentityPolicyRow({ rawValue, onSet, onUnset }: RowProps
   };
 
   return (
-    <BagShell label="Workload identity policy" rawValue={rawValue} canSave={canSave} onBeginEdit={begin} onSave={save} onUnset={onUnset}>
+    <BagShell label="Workload identity policy" rawValue={rawValue} canSave={canSave} parseFailed={parseFailed} onBeginEdit={begin} onSave={save} onUnset={onUnset}>
       <div>
         <Text style={FIELD_LABEL}>Allowed providers</Text>
         <Select mode="multiple" size="small" value={providers} onChange={setProviders} placeholder="ALL / AWS / AZURE / GCP / OIDC"
@@ -270,10 +309,13 @@ const CLIENT_DRIVERS = [
 
 export function ClientPolicyRow({ rawValue, onSet, onUnset }: RowProps) {
   const [entries, setEntries] = useState<ClientEntry[]>([]);
+  const [parseFailed, setParseFailed] = useState(false);
 
   const begin = async () => {
     const p = await ParseClientPolicy(rawValue);
-    setEntries((p?.entries ?? []).map((e) => ({ driver: e.driver, minimumVersion: e.minimumVersion })));
+    const es = (p?.entries ?? []).map((e) => ({ driver: e.driver, minimumVersion: e.minimumVersion }));
+    setEntries(es);
+    setParseFailed(rawHasContent(rawValue) && es.length === 0);
   };
   const valid = entries.filter((e) => e.driver?.trim() && e.minimumVersion?.trim());
   const canSave = valid.length > 0;
@@ -288,7 +330,7 @@ export function ClientPolicyRow({ rawValue, onSet, onUnset }: RowProps) {
   const add = () => setEntries((prev) => [...prev, { driver: "", minimumVersion: "" }]);
 
   return (
-    <BagShell label="Client policy" rawValue={rawValue} canSave={canSave} onBeginEdit={begin} onSave={save} onUnset={onUnset}>
+    <BagShell label="Client policy" rawValue={rawValue} canSave={canSave} parseFailed={parseFailed} onBeginEdit={begin} onSave={save} onUnset={onUnset}>
       <Text style={FIELD_LABEL}>Minimum driver/client versions</Text>
       <Space direction="vertical" size={4} style={{ width: "100%" }}>
         {entries.map((e, i) => (

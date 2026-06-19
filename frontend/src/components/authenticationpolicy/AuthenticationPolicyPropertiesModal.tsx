@@ -57,6 +57,17 @@ function parseList(raw: string): string[] {
     .filter((t) => t !== "");
 }
 
+// Normalize a DESCRIBE scalar (e.g. MFA_ENROLLMENT) for comparison against the
+// bare option strings. The exact DESCRIBE rendering isn't confirmed against a
+// live account; if it comes back JSON-encoded the value carries surrounding
+// quotes (and possibly brackets), which would match no option and show stray
+// quotes — so strip them defensively.
+function cleanScalar(raw: string): string {
+  let s = raw.trim();
+  if (s.startsWith("[") && s.endsWith("]")) s = s.slice(1, -1).trim();
+  return s.replace(/^['"]|['"]$/g, "").trim();
+}
+
 // The list parameters, each paired with its ALTER keyword and (for the fixed
 // enumerations) the option set offered in the tag editor. SECURITY_INTEGRATIONS
 // is free-form (integration names) plus the ALL token.
@@ -541,7 +552,7 @@ export default function AuthenticationPolicyPropertiesModal({ db, schema, name, 
               ))}
               <EnumRow
                 label="MFA enrollment"
-                value={descByProp["mfa_enrollment"] ?? ""}
+                value={cleanScalar(descByProp["mfa_enrollment"] ?? "")}
                 options={MFA_ENROLLMENT_OPTIONS}
                 def="OPTIONAL"
                 onSet={(v) => setEnum("MFA_ENROLLMENT", v)}

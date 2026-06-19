@@ -13,12 +13,24 @@ package authenticationpolicy
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
 	"thaw/internal/snowflake"
 )
+
+// bareTokenRe matches a safe bare SQL keyword/identifier — letters, digits, and
+// underscores only. The builders interpolate enum keywords, provider names, and
+// driver names UNQUOTED (that is the grammar), so a value containing ')' or ';'
+// could break out of a bag's parentheses. These values come from fixed Selects
+// in the UI, but App.Build*Value are exported bound IPC methods that accept
+// arbitrary input, so each bare token is validated here as defense-in-depth —
+// a token that isn't a plain identifier is dropped rather than emitted.
+var bareTokenRe = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
+
+func isBareToken(s string) bool { return bareTokenRe.MatchString(s) }
 
 // This file models the four nested "property-bag" parameters of an
 // authentication policy — MFA_POLICY, PAT_POLICY, WORKLOAD_IDENTITY_POLICY, and
@@ -111,8 +123,8 @@ func BuildPATPolicyValue(p PATPolicy) string {
 	if p.MaxExpiryInDays != nil {
 		props = append(props, fmt.Sprintf("MAX_EXPIRY_IN_DAYS = %d", *p.MaxExpiryInDays))
 	}
-	if v := strings.TrimSpace(p.NetworkPolicyEvaluation); v != "" {
-		props = append(props, "NETWORK_POLICY_EVALUATION = "+strings.ToUpper(v))
+	if v := strings.ToUpper(strings.TrimSpace(p.NetworkPolicyEvaluation)); v != "" && isBareToken(v) {
+		props = append(props, "NETWORK_POLICY_EVALUATION = "+v)
 	}
 	if p.RequireRoleRestrictionForServiceUsers != nil {
 		b := "FALSE"
@@ -199,7 +211,9 @@ func BuildClientPolicyValue(p ClientPolicy) string {
 	for _, e := range p.Entries {
 		d := strings.ToUpper(strings.TrimSpace(e.Driver))
 		v := strings.TrimSpace(e.MinimumVersion)
-		if d == "" || v == "" {
+		// The driver name is interpolated bare, so it must be a plain identifier;
+		// the version is quoted/escaped below so it needs no such guard.
+		if d == "" || v == "" || !isBareToken(d) {
 			continue
 		}
 		entries = append(entries, fmt.Sprintf("%s = ( MINIMUM_VERSION = '%s' )", d, snowflake.EscapeTextLit(v)))
@@ -253,11 +267,13 @@ func wrapProps(props []string) string {
 func formatBareList(tokens []string) string {
 	parts := make([]string, 0, len(tokens))
 	for _, t := range tokens {
-		t = strings.TrimSpace(t)
-		if t == "" {
+		t = strings.ToUpper(strings.TrimSpace(t))
+		// Providers are emitted bare, so drop anything that isn't a plain
+		// identifier (defense-in-depth — the UI only offers fixed keywords).
+		if t == "" || !isBareToken(t) {
 			continue
 		}
-		parts = append(parts, strings.ToUpper(t))
+		parts = append(parts, t)
 	}
 	return "(" + strings.Join(parts, ", ") + ")"
 }
