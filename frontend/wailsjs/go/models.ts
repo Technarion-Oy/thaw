@@ -1,3 +1,30 @@
+export namespace aggregationpolicy {
+	
+	export class AggregationPolicyConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    body: string;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AggregationPolicyConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.body = source["body"];
+	        this.comment = source["comment"];
+	    }
+	}
+
+}
+
 export namespace alert {
 	
 	export class AlertConfig {

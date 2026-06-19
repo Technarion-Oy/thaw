@@ -6,6 +6,7 @@ import {dbtproject} from '../models';
 import {stage} from '../models';
 import {integrations} from '../models';
 import {procedure} from '../models';
+import {aggregationpolicy} from '../models';
 import {alert} from '../models';
 import {datametricfunction} from '../models';
 import {dynamictable} from '../models';
@@ -51,6 +52,8 @@ import {mcp} from '../models';
 import {sfconfig} from '../models';
 
 export function AddBackup(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function AlterAggregationPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterAlert(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -125,6 +128,8 @@ export function BuildApiIntegrationPreviewSQL(arg1:integrations.ApiIntegrationPa
 export function BuildCallStatement(arg1:string,arg2:string,arg3:string,arg4:Array<procedure.Argument>):Promise<string>;
 
 export function BuildChangeColumnTypeSql(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<string>;
+
+export function BuildCreateAggregationPolicySql(arg1:string,arg2:string,arg3:aggregationpolicy.AggregationPolicyConfig):Promise<string>;
 
 export function BuildCreateAlertSql(arg1:string,arg2:string,arg3:alert.AlertConfig):Promise<string>;
 
@@ -355,6 +360,8 @@ export function GetAIConfig():Promise<config.AIConfig>;
 export function GetAISuggestion(arg1:string):Promise<string>;
 
 export function GetAdminLockedFlags():Promise<config.FeatureFlags>;
+
+export function GetAggregationPolicyReferences(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function GetAllDataTypes():Promise<Array<snowflake.DataTypeInfo>>;
 

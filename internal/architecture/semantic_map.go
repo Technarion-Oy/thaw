@@ -66,6 +66,7 @@ func GetCodebaseSemanticMap() string {
     {
       "name": "Object Browser \u0026 Administration",
       "backend_paths": [
+        "internal/aggregationpolicy/",
         "internal/alert/",
         "internal/backup/",
         "internal/column/",
@@ -103,6 +104,8 @@ func GetCodebaseSemanticMap() string {
       ],
       "frontend_paths": [
         "frontend/src/components/account/AccountPanel.tsx",
+        "frontend/src/components/aggregationpolicy/AggregationPolicyPropertiesModal.tsx",
+        "frontend/src/components/aggregationpolicy/CreateAggregationPolicyModal.tsx",
         "frontend/src/components/alert/AlertPropertiesModal.tsx",
         "frontend/src/components/alert/CreateAlertModal.tsx",
         "frontend/src/components/database/CreateStageModal.tsx",

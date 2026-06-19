@@ -6,6 +6,10 @@ export function AddBackup(arg1, arg2, arg3) {
   return window['go']['app']['App']['AddBackup'](arg1, arg2, arg3);
 }
 
+export function AlterAggregationPolicy(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterAggregationPolicy'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterAlert(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterAlert'](arg1, arg2, arg3, arg4);
 }
@@ -152,6 +156,10 @@ export function BuildCallStatement(arg1, arg2, arg3, arg4) {
 
 export function BuildChangeColumnTypeSql(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['BuildChangeColumnTypeSql'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function BuildCreateAggregationPolicySql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateAggregationPolicySql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateAlertSql(arg1, arg2, arg3) {
@@ -612,6 +620,10 @@ export function GetAISuggestion(arg1) {
 
 export function GetAdminLockedFlags() {
   return window['go']['app']['App']['GetAdminLockedFlags']();
+}
+
+export function GetAggregationPolicyReferences(arg1, arg2, arg3) {
+  return window['go']['app']['App']['GetAggregationPolicyReferences'](arg1, arg2, arg3);
 }
 
 export function GetAllDataTypes() {

@@ -61,6 +61,7 @@ import {
   SafetyOutlined,
   SafetyCertificateOutlined,
   FieldTimeOutlined,
+  GroupOutlined,
   GlobalOutlined,
   ContainerOutlined,
   DeploymentUnitOutlined,
@@ -150,6 +151,8 @@ import CreatePasswordPolicyModal from "../passwordpolicy/CreatePasswordPolicyMod
 import PasswordPolicyPropertiesModal from "../passwordpolicy/PasswordPolicyPropertiesModal";
 import CreateSessionPolicyModal from "../sessionpolicy/CreateSessionPolicyModal";
 import SessionPolicyPropertiesModal from "../sessionpolicy/SessionPolicyPropertiesModal";
+import CreateAggregationPolicyModal from "../aggregationpolicy/CreateAggregationPolicyModal";
+import AggregationPolicyPropertiesModal from "../aggregationpolicy/AggregationPolicyPropertiesModal";
 import CreateRowAccessPolicyModal from "../rowaccesspolicy/CreateRowAccessPolicyModal";
 import RowAccessPolicyPropertiesModal from "../rowaccesspolicy/RowAccessPolicyPropertiesModal";
 import CreateNetworkRuleModal from "../networkrule/CreateNetworkRuleModal";
@@ -191,6 +194,7 @@ const KIND_LABEL: Record<string, string> = {
   "ROW ACCESS POLICY": "Row Access Policies",
   "PASSWORD POLICY": "Password Policies",
   "SESSION POLICY": "Session Policies",
+  "AGGREGATION POLICY": "Aggregation Policies",
   "NETWORK RULE": "Network Rules",
   "IMAGE REPOSITORY": "Image Repositories",
   SERVICE:       "Services",
@@ -211,7 +215,7 @@ const KIND_LABEL: Record<string, string> = {
   "DBT PROJECT": "DBT Projects",
 };
 
-const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE", "FUNCTION", "EXTERNAL FUNCTION", "DATA METRIC FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "PASSWORD POLICY", "SESSION POLICY", "NETWORK RULE", "IMAGE REPOSITORY", "SERVICE", "STREAMLIT", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT"];
+const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE", "FUNCTION", "EXTERNAL FUNCTION", "DATA METRIC FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "PASSWORD POLICY", "SESSION POLICY", "AGGREGATION POLICY", "NETWORK RULE", "IMAGE REPOSITORY", "SERVICE", "STREAMLIT", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT"];
 
 const kindIcon = (kind: string) => objectIcon(kind);
 
@@ -654,6 +658,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [passwordPolicyPropsModal, setPasswordPolicyPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createSessionPolicyModal, setCreateSessionPolicyModal] = useState<{ db: string; schema: string } | null>(null);
   const [sessionPolicyPropsModal, setSessionPolicyPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [createAggregationPolicyModal, setCreateAggregationPolicyModal] = useState<{ db: string; schema: string } | null>(null);
+  const [aggregationPolicyPropsModal, setAggregationPolicyPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createRowAccessPolicyModal, setCreateRowAccessPolicyModal] = useState<{ db: string; schema: string } | null>(null);
   const [rowAccessPolicyPropsModal, setRowAccessPolicyPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createNetworkRuleModal, setCreateNetworkRuleModal] = useState<{ db: string; schema: string } | null>(null);
@@ -2276,6 +2282,25 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setSessionPolicyPropsModal({ db, schema, name });
   };
 
+  const openCreateAggregationPolicy = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    setCtxMenu(null);
+    setCreateAggregationPolicyModal({ db, schema });
+  };
+
+  const openAggregationPolicyProperties = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    setAggregationPolicyPropsModal({ db, schema, name });
+  };
+
   const openCreateRowAccessPolicy = () => {
     if (!ctxMenu) return;
     const parts = ctxMenu.nodeKey.split(":");
@@ -2767,6 +2792,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       case "ROW ACCESS POLICY": sql = `DROP ROW ACCESS POLICY ${fullName};`; break;
       case "PASSWORD POLICY": sql = `DROP PASSWORD POLICY ${fullName};`; break;
       case "SESSION POLICY": sql = `DROP SESSION POLICY ${fullName};`; break;
+      case "AGGREGATION POLICY": sql = `DROP AGGREGATION POLICY ${fullName};`; break;
       case "NETWORK RULE": sql = `DROP NETWORK RULE ${fullName};`; break;
       case "IMAGE REPOSITORY": sql = `DROP IMAGE REPOSITORY ${fullName};`; break;
       case "SERVICE":     sql = `DROP SERVICE ${fullName};`; break;
@@ -3423,6 +3449,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         case "ROW ACCESS POLICY": return `DROP ROW ACCESS POLICY ${fullName};`;
         case "PASSWORD POLICY": return `DROP PASSWORD POLICY ${fullName};`;
         case "SESSION POLICY": return `DROP SESSION POLICY ${fullName};`;
+        case "AGGREGATION POLICY": return `DROP AGGREGATION POLICY ${fullName};`;
         case "NETWORK RULE": return `DROP NETWORK RULE ${fullName};`;
         case "IMAGE REPOSITORY": return `DROP IMAGE REPOSITORY ${fullName};`;
         case "SERVICE":     return `DROP SERVICE ${fullName};`;
@@ -3960,6 +3987,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                   {menuItem("Row Access Policy…", <SafetyOutlined style={{ fontSize: 12 }} />, openCreateRowAccessPolicy)}
                   {menuItem("Password Policy…", <SafetyCertificateOutlined style={{ fontSize: 12 }} />, openCreatePasswordPolicy)}
                   {menuItem("Session Policy…", <FieldTimeOutlined style={{ fontSize: 12 }} />, openCreateSessionPolicy)}
+                  {menuItem("Aggregation Policy…", <GroupOutlined style={{ fontSize: 12 }} />, openCreateAggregationPolicy)}
                   {menuItem("Network Rule…", <GlobalOutlined style={{ fontSize: 12 }} />, openCreateNetworkRule)}
                   {menuItem("Tag…", <TagsOutlined style={{ fontSize: 12 }} />, openCreateTag)}
                   {menuItem("Secret…", <KeyOutlined style={{ fontSize: 12 }} />, openCreateSecret)}
@@ -4020,6 +4048,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Create Password Policy…", <SafetyCertificateOutlined style={{ fontSize: 12 }} />, openCreatePasswordPolicy)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "SESSION POLICY" &&
             menuItem("Create Session Policy…", <FieldTimeOutlined style={{ fontSize: 12 }} />, openCreateSessionPolicy)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "AGGREGATION POLICY" &&
+            menuItem("Create Aggregation Policy…", <GroupOutlined style={{ fontSize: 12 }} />, openCreateAggregationPolicy)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "NETWORK RULE" &&
             menuItem("Create Network Rule…", <GlobalOutlined style={{ fontSize: 12 }} />, openCreateNetworkRule)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "IMAGE REPOSITORY" &&
@@ -4096,6 +4126,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openPasswordPolicyProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "SESSION POLICY" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openSessionPolicyProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "AGGREGATION POLICY" &&
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openAggregationPolicyProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "NETWORK RULE" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openNetworkRuleProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "IMAGE REPOSITORY" &&
@@ -4207,7 +4239,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Make Live", <CloudUploadOutlined style={{ fontSize: 12 }} />, makeNotebookLive, undefined, !featureFlags.snowparkNotebooks, "Snowpark & Notebooks is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && menuItem("View Definition", null, viewDefinition)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ICEBERG TABLE" && ctxMenu.objKind !== "HYBRID TABLE" && ctxMenu.objKind !== "EVENT TABLE" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "PASSWORD POLICY" && ctxMenu.objKind !== "SESSION POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "STREAMLIT" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ICEBERG TABLE" && ctxMenu.objKind !== "HYBRID TABLE" && ctxMenu.objKind !== "EVENT TABLE" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "PASSWORD POLICY" && ctxMenu.objKind !== "SESSION POLICY" && ctxMenu.objKind !== "AGGREGATION POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "STREAMLIT" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {/* Comparison diffs via GET_DDL, which image repositories and services
               don't support — exclude them so the diff view can't surface a
               GET_DDL error for a kind that has no DDL. */}
@@ -4693,6 +4725,24 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={sessionPolicyPropsModal.schema}
           name={sessionPolicyPropsModal.name}
           onClose={() => setSessionPolicyPropsModal(null)}
+        />
+      )}
+
+      {createAggregationPolicyModal && (
+        <CreateAggregationPolicyModal
+          db={createAggregationPolicyModal.db}
+          schema={createAggregationPolicyModal.schema}
+          onClose={() => setCreateAggregationPolicyModal(null)}
+          onSuccess={() => refreshDatabaseByName(createAggregationPolicyModal.db, { schema: createAggregationPolicyModal.schema, kind: "AGGREGATION POLICY" })}
+        />
+      )}
+
+      {aggregationPolicyPropsModal && (
+        <AggregationPolicyPropertiesModal
+          db={aggregationPolicyPropsModal.db}
+          schema={aggregationPolicyPropsModal.schema}
+          name={aggregationPolicyPropsModal.name}
+          onClose={() => setAggregationPolicyPropsModal(null)}
         />
       )}
 
