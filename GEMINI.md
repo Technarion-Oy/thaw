@@ -34,55 +34,6 @@ The map in `internal/architecture/semantic_map.go` is **generated** — do not e
 - **Authentication**: Authentication is handled by parsing connection parameters from the **Snowflake CLI configuration file** (defaults to `~/.snowflake/config.toml` or `connections.toml`). Users can select a custom path during sign-in, which is persisted in the app configuration. Profiles can be **created, saved, renamed, cloned, set as default, and deleted** directly from the connection dialog via `internal/sfconfig/writer.go` (text-level TOML manipulation that preserves comments and unknown keys). The profile management UI is gated behind the `snowflakeCLIProfileManager` feature flag (toggleable via **View → Enabled Features…**).
 - **Tech Stack**: Go 1.22, Wails v2, React 18, TypeScript 5.6, Monaco Editor, Ant Design 5, Zustand 5, TanStack Table v8.
 
-## 🗄 Codebase Vector Database
-
-A ChromaDB vector index of all `.go`, `.ts`, and `.tsx` source files lives at `.chroma_db/` in the repo root. It is **not committed to git**.
-
-**Collection details:**
-- Name: `thaw_codebase`
-- Model: `models/gemini-embedding-2` at 768 dimensions
-- Distance: cosine
-- Contents: 190 source files → ~3 069 chunks (1 500 char / 150 overlap, language-aware splits)
-
-**When to query it:**
-Before writing code for a non-trivial task, query the vector DB to locate the most relevant existing files and functions. This avoids duplicate implementations and surfaces patterns you might not find with a plain `grep`.
-
-**Querying from Python:**
-```python
-import chromadb, os
-from google import genai
-from google.genai import types
-
-client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-db = chromadb.PersistentClient(path=".chroma_db")
-col = db.get_collection("thaw_codebase")
-
-def search(query: str, n: int = 8) -> list[dict]:
-    vec = client.models.embed_content(
-        model="models/gemini-embedding-2",
-        contents=query,
-        config=types.EmbedContentConfig(
-            task_type="RETRIEVAL_QUERY",
-            output_dimensionality=768,
-        ),
-    ).embeddings[0].values
-    results = col.query(query_embeddings=[vec], n_results=n)
-    return [
-        {"file": m["file_path"], "language": m["language"], "text": d}
-        for m, d in zip(results["metadatas"][0], results["documents"][0])
-    ]
-```
-
-**Refreshing the index** (run after significant code changes):
-```bash
-cd scripts
-GEMINI_API_KEY=... .venv/bin/python embed_codebase.py --reset
-```
-
-- The `--reset` flag drops and rebuilds the collection from scratch.
-- Omit `--reset` to append (but prefer `--reset` since chunk IDs are UUIDs and duplicates won't be detected).
-- The venv and all dependencies are already installed at `scripts/.venv/`.
-
 ## 🏗 Architecture Overview
 - **Go Backend**: Wails IPC bindings (all on `*App`, `package app`) live in `internal/app/`, split across `app.go` (struct, lifecycle, session management), `run.go` (`Run(assets)` entry point + wails.Run wiring), `menu.go` (native menu), and per-domain files (e.g. `query.go`, `objects.go`, `backup.go`); business logic lives in the other `internal/` packages. The root `main.go` is a thin entry point that owns `//go:embed all:frontend/dist` and calls `app.Run(assets)`.
 - **Thin-delegator pattern**: Most `*App` methods are thin delegators — a nil-check (`apperrors.ErrNotConnected`), a single call into a domain package, then return. SQL building, `snowflake.QueryResult` parsing, validation, and key generation live in `internal/<domain>` packages (e.g. `backup`, `objects`, `warehouse`, `table`, `keypair`, `queryhistory`), where they are independently unit-testable without a live connection. Domain funcs take `(ctx, *snowflake.Client, …)` and return **domain types** (types belong to their domain package, not `internal/app`); pure `Build*Sql`/`Parse*` helpers are split out for fixture-based tests. Shared result-parsing helpers (`ColIdx`, `Cell*`, `PropertyPair`, `SessionParam/SessionVar`) live in `internal/snowflake/result.go`. Methods coupled to `App` state / Wails events / goroutine orchestration stay in `internal/app` (`StartQuery`, `WaitForQueryResult`, `CancelQuery`, `RunExplain`, shell PTY, `ExportDatabaseDDL`). Frontend model refs use the new TS namespaces (`backup.`, `objects.`, `warehouse.`, `table.`, `keypair.`, `queryhistory.`, `snowflake.`); only `app.AppInfo` remains in `app`.
@@ -257,7 +208,7 @@ Do **not** create or push `v*` tags by hand. The `manual-release.yml` workflow r
 `semantic-release`, which:
 1. Analyses commits since the last tag.
 2. Determines the correct next version.
-3. Updates `wails.json` and `CHANGELOG.md`.
+3. Updates `wails.json` and `release/CHANGELOG.md`.
 4. Pushes a signed version-bump commit and the `vX.Y.Z` tag.
 5. Creates the GitHub Release.
 

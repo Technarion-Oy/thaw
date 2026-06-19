@@ -47,8 +47,7 @@ Read these, in order:
 ### Finding the right place to make a change
 
 1. **Consult the semantic map.** Read `GetCodebaseSemanticMap()` in `internal/architecture/semantic_map.go` (generated) to find the domain that owns the area you're changing. Restrict new files to that domain's directories.
-2. **Query the vector index** for non-trivial tasks. A ChromaDB index of all source files lives at `.chroma_db/` (not committed). It surfaces relevant existing files/functions you might miss with `grep`. See `CLAUDE.md` → "Codebase Vector Database" for the query snippet and refresh command.
-3. **Use the per-module READMEs** as your map of responsibilities.
+2. **Use the per-module READMEs** as your map of responsibilities.
 
 ## 6. Make your first change
 
