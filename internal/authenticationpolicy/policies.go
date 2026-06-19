@@ -471,20 +471,29 @@ func (p *structScanner) parseArray() []any {
 
 // parseToken reads a bare scalar (or quoted string) up to the next structural
 // delimiter — whitespace, '=', ',', or a brace/bracket/paren — unwrapping a
-// surrounding single/double-quote pair.
+// surrounding single/double-quote pair. A doubled quote inside the string (” or
+// "") is the SQL escape for a literal quote and is preserved as one (matching the
+// shared sqltok tokenizer used by ParseSqlList).
 func (p *structScanner) parseToken() string {
 	p.skipSpace()
 	var sb strings.Builder
 	for p.pos < len(p.s) {
 		c := p.s[p.pos]
 		if c == '\'' || c == '"' {
-			p.pos++
-			for p.pos < len(p.s) && p.s[p.pos] != c {
+			p.pos++ // opening quote
+			for p.pos < len(p.s) {
+				if p.s[p.pos] == c {
+					// A doubled quote is an escaped literal quote, not the close.
+					if p.pos+1 < len(p.s) && p.s[p.pos+1] == c {
+						sb.WriteByte(c)
+						p.pos += 2
+						continue
+					}
+					p.pos++ // closing quote
+					break
+				}
 				sb.WriteByte(p.s[p.pos])
 				p.pos++
-			}
-			if p.pos < len(p.s) {
-				p.pos++ // consume closing quote
 			}
 			continue
 		}

@@ -318,9 +318,19 @@ export function ClientPolicyRow({ rawValue, onSet, onUnset }: RowProps) {
   const [driverOptions, setDriverOptions] = useState<string[]>([]);
   // Per-driver version hints (minimum supported / recommended) from
   // SYSTEM$CLIENT_VERSION_INFO(), keyed by driver token, used to suggest versions.
+  // The result is session-static, so fetch it once on mount alongside the driver
+  // list rather than re-querying Snowflake on every Edit click. Best-effort — a
+  // failure (e.g. no connection) just means the user types the version manually.
   const [versions, setVersions] = useState<Record<string, authenticationpolicy.DriverVersionHint>>({});
   useEffect(() => {
     AuthenticationPolicyClientDrivers().then((d) => setDriverOptions(d ?? []));
+    AuthenticationPolicyClientDriverVersions()
+      .then((hints) => {
+        const map: Record<string, authenticationpolicy.DriverVersionHint> = {};
+        (hints ?? []).forEach((h) => { map[h.driver] = h; });
+        setVersions(map);
+      })
+      .catch(() => setVersions({}));
   }, []);
 
   const begin = async () => {
@@ -328,16 +338,6 @@ export function ClientPolicyRow({ rawValue, onSet, onUnset }: RowProps) {
     const es = (p?.entries ?? []).map((e) => ({ driver: e.driver, minimumVersion: e.minimumVersion }));
     setEntries(es);
     setParseFailed(rawHasContent(rawValue) && es.length === 0);
-    // Version hints are best-effort — a failure (e.g. no connection) just means
-    // the user types the version manually, as before.
-    try {
-      const hints = await AuthenticationPolicyClientDriverVersions();
-      const map: Record<string, authenticationpolicy.DriverVersionHint> = {};
-      (hints ?? []).forEach((h) => { map[h.driver] = h; });
-      setVersions(map);
-    } catch {
-      setVersions({});
-    }
   };
   const valid = entries.filter((e) => e.driver?.trim() && e.minimumVersion?.trim());
   // A half-filled row (driver xor version) would be silently dropped by the

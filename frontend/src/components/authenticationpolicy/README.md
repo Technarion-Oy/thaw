@@ -19,7 +19,8 @@ Object-browser UI for Snowflake **AUTHENTICATION POLICY** objects.
   runs it via `ExecDDL`.
 - **`AuthenticationPolicyPropertiesModal.tsx`** — the properties panel. Loads
   `GetObjectProperties("AUTHENTICATION POLICY")` (SHOW-level metadata) and
-  `DescribeAuthenticationPolicy` (one row per property: `property`/`value`)
+  `DescribeAuthenticationPolicy` (already projected to `property`/`value` pairs by
+  the backend; indexed into a `useMemo` map keyed by property name)
   together. The **Parameters** section renders each list parameter
   (`AUTHENTICATION_METHODS`, `CLIENT_TYPES`, `SECURITY_INTEGRATIONS`) with an
   inline tag editor — the parameter descriptors (keyword/label/allowed values/

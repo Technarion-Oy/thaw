@@ -118,3 +118,39 @@ func ResultToPairs(res *QueryResult) []PropertyPair {
 	}
 	return pairs
 }
+
+// ResultPropertyValueRows projects a property/value-shaped result — one row per
+// property with separate "property" and "value" columns, as DESCRIBE
+// <object> returns for many object types — into key/value pairs (one per row).
+// This is the multi-row counterpart of ResultToPairs (which projects a single
+// row's columns). Column matching is case-insensitive; it returns an empty
+// (non-nil) slice when res is nil, empty, or lacks the two columns.
+func ResultPropertyValueRows(res *QueryResult) []PropertyPair {
+	if res == nil || len(res.Rows) == 0 {
+		return []PropertyPair{}
+	}
+	pi, vi := -1, -1
+	for i, col := range res.Columns {
+		switch strings.ToLower(col) {
+		case "property":
+			pi = i
+		case "value":
+			vi = i
+		}
+	}
+	if pi < 0 || vi < 0 {
+		return []PropertyPair{}
+	}
+	pairs := make([]PropertyPair, 0, len(res.Rows))
+	for _, row := range res.Rows {
+		if pi >= len(row) {
+			continue
+		}
+		val := ""
+		if vi < len(row) {
+			val = CellString(row[vi])
+		}
+		pairs = append(pairs, PropertyPair{Key: CellString(row[pi]), Value: val})
+	}
+	return pairs
+}

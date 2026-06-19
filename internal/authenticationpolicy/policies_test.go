@@ -237,6 +237,15 @@ func TestParseClientPolicyJSONNumericVersion(t *testing.T) {
 	}
 }
 
+// A doubled quote inside a structured-notation string is the SQL escape for a
+// literal quote and must survive — the scanner must not split the string there.
+func TestParseStructuredDoubledQuoteEscape(t *testing.T) {
+	got := ParseWorkloadIdentityPolicy(`{ALLOWED_OIDC_ISSUERS=['https://issuer/a''b']}`)
+	if !reflect.DeepEqual(got.AllowedOIDCIssuers, []string{"https://issuer/a'b"}) {
+		t.Errorf("issuers = %#v, want [https://issuer/a'b]", got.AllowedOIDCIssuers)
+	}
+}
+
 // If DESCRIBE ever returns the parenthesized SQL-grammar form instead of the
 // brace form, the parsers must still populate the bags (otherwise a real,
 // populated bag would render blank and a Set from it would wipe the policy).

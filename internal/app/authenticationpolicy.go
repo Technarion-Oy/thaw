@@ -36,17 +36,22 @@ func (a *App) AlterAuthenticationPolicy(database, schema, name, clause string) e
 }
 
 // DescribeAuthenticationPolicy returns the configured parameter values for the
-// given authentication policy by running DESCRIBE AUTHENTICATION POLICY. The
-// result has one row per property with the columns property and value —
-// SHOW AUTHENTICATION POLICIES does not report the parameter values, so this is
-// how the properties panel reads the current settings.
-func (a *App) DescribeAuthenticationPolicy(database, schema, name string) (*snowflake.QueryResult, error) {
+// given authentication policy by running DESCRIBE AUTHENTICATION POLICY, projected
+// to property/value pairs (one per row) via snowflake.ResultPropertyValueRows so
+// the property/value column indexing stays in Go rather than the modal. SHOW
+// AUTHENTICATION POLICIES does not report the parameter values, so this is how the
+// properties panel reads the current settings.
+func (a *App) DescribeAuthenticationPolicy(database, schema, name string) ([]snowflake.PropertyPair, error) {
 	if a.client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	query := fmt.Sprintf("DESCRIBE AUTHENTICATION POLICY %s.%s.%s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
-	return a.client.QuerySingle(a.ctx, query)
+	res, err := a.client.QuerySingle(a.ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	return snowflake.ResultPropertyValueRows(res), nil
 }
 
 // FormatAuthPolicyList renders a token slice into the `('A', 'B')`

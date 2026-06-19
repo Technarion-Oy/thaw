@@ -313,7 +313,7 @@ export function DeleteVenvFolder():Promise<void>;
 
 export function DeployNotebook(arg1:snowflake.DeployNotebookParams):Promise<void>;
 
-export function DescribeAuthenticationPolicy(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
+export function DescribeAuthenticationPolicy(arg1:string,arg2:string,arg3:string):Promise<Array<snowflake.PropertyPair>>;
 
 export function DescribeDataMetricFunction(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.QueryResult>;
 

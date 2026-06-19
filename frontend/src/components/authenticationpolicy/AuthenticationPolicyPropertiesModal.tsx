@@ -10,7 +10,7 @@
 //
 // @thaw-domain: Object Browser & Administration
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Modal, Spin, Button, Input, Select, Space, Typography, Alert, Tooltip, Table, Empty,
 } from "antd";
@@ -365,8 +365,9 @@ export default function AuthenticationPolicyPropertiesModal({ db, schema, name, 
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  // DESCRIBE AUTHENTICATION POLICY result (one row per property: property/value).
-  const [desc, setDesc] = useState<snowflake.QueryResult | null>(null);
+  // DESCRIBE AUTHENTICATION POLICY result, already projected to property/value
+  // pairs by the backend (null while loading or if the DESCRIBE failed).
+  const [desc, setDesc] = useState<snowflake.PropertyPair[] | null>(null);
 
   // References (users/account the policy is attached to) — loaded on demand
   // because the ACCOUNT_USAGE view is slow and may be restricted.
@@ -403,21 +404,13 @@ export default function AuthenticationPolicyPropertiesModal({ db, schema, name, 
   const find = (key: string) =>
     rows ? (rows.find((r) => r.key.toLowerCase() === key.toLowerCase())?.value ?? "") : "";
 
-  // Index the DESCRIBE rows by the `property` column (lowercased) → value string.
-  // DESCRIBE returns one row per property with property/value columns.
-  const descByProp: Record<string, string> = {};
-  if (desc && desc.columns && desc.rows) {
-    const cols = desc.columns.map((c) => c.toLowerCase());
-    const pi = cols.indexOf("property");
-    const vi = cols.indexOf("value");
-    if (pi >= 0 && vi >= 0) {
-      desc.rows.forEach((row) => {
-        const prop = pi < row.length && row[pi] != null ? String(row[pi]) : "";
-        const val = vi < row.length && row[vi] != null ? String(row[vi]) : "";
-        if (prop) descByProp[prop.toLowerCase()] = val;
-      });
-    }
-  }
+  // Index the backend's property/value pairs by lowercased property name. Only
+  // recomputed when the DESCRIBE data changes, not on every child-row re-render.
+  const descByProp = useMemo(() => {
+    const map: Record<string, string> = {};
+    (desc ?? []).forEach((p) => { if (p.key) map[p.key.toLowerCase()] = p.value; });
+    return map;
+  }, [desc]);
 
   const descFailed = desc === null;
 
