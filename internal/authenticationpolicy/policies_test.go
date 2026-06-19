@@ -84,6 +84,15 @@ func TestBuildClientPolicyValue(t *testing.T) {
 	if v := BuildClientPolicyValue(ClientPolicy{}); v != "()" {
 		t.Errorf("empty client policy = %q", v)
 	}
+	// A repeated driver (case-insensitive) is deduped first-wins so the bag never
+	// has a duplicate key.
+	dup := BuildClientPolicyValue(ClientPolicy{Entries: []ClientPolicyEntry{
+		{Driver: "GO_DRIVER", MinimumVersion: "1.14.1"},
+		{Driver: "go_driver", MinimumVersion: "9.9.9"},
+	}})
+	if dup != "( GO_DRIVER = ( MINIMUM_VERSION = '1.14.1' ) )" {
+		t.Errorf("duplicate driver not deduped: %q", dup)
+	}
 }
 
 func TestBuildBagsRejectBareTokenInjection(t *testing.T) {

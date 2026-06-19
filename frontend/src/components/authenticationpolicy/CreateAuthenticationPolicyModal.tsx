@@ -13,7 +13,7 @@
 import { useState } from "react";
 import { Form, Input, Select, Typography } from "antd";
 import { LoginOutlined } from "@ant-design/icons";
-import { BuildCreateAuthenticationPolicySql, ExecDDL } from "../../../wailsjs/go/app/App";
+import { BuildCreateAuthenticationPolicySql, ExecDDL, ReconcileAllExclusiveList } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
@@ -79,6 +79,14 @@ export default function CreateAuthenticationPolicyModal({ db, schema, onClose, o
   const set = <K extends keyof AuthCfg>(key: K, value: AuthCfg[K]) =>
     setCfg((prev) => ({ ...prev, [key]: value }));
 
+  // ALL is mutually exclusive with specific values — reconcile the list params in
+  // the backend (keeps whichever kind was chosen last) so CREATE can't emit an
+  // invalid ('ALL', <specific>) list, matching the Properties modal.
+  const setList = async (
+    key: "authenticationMethods" | "clientTypes" | "securityIntegrations",
+    v: string[],
+  ) => set(key, (await ReconcileAllExclusiveList(v)) ?? []);
+
   const canSubmit = cfg.name.trim().length > 0;
 
   const handleRun = () => {
@@ -137,7 +145,7 @@ export default function CreateAuthenticationPolicyModal({ db, schema, onClose, o
           <Select
             mode="multiple"
             value={cfg.authenticationMethods}
-            onChange={(v) => set("authenticationMethods", v)}
+            onChange={(v) => setList("authenticationMethods", v)}
             placeholder="default (ALL)"
             options={AUTH_METHOD_OPTIONS}
             style={{ width: "100%" }}
@@ -148,7 +156,7 @@ export default function CreateAuthenticationPolicyModal({ db, schema, onClose, o
           <Select
             mode="multiple"
             value={cfg.clientTypes}
-            onChange={(v) => set("clientTypes", v)}
+            onChange={(v) => setList("clientTypes", v)}
             placeholder="default (ALL)"
             options={CLIENT_TYPE_OPTIONS}
             style={{ width: "100%" }}
@@ -163,7 +171,7 @@ export default function CreateAuthenticationPolicyModal({ db, schema, onClose, o
           <Select
             mode="tags"
             value={cfg.securityIntegrations}
-            onChange={(v) => set("securityIntegrations", v)}
+            onChange={(v) => setList("securityIntegrations", v)}
             placeholder="default (ALL)"
             tokenSeparators={[","]}
             options={[{ value: "ALL", label: "ALL" }]}

@@ -331,7 +331,11 @@ export function ClientPolicyRow({ rawValue, onSet, onUnset }: RowProps) {
     const hasVersion = !!e.minimumVersion?.trim();
     return (hasDriver || hasVersion) && !(hasDriver && hasVersion);
   });
-  const canSave = valid.length > 0 && !hasPartial;
+  // Two rows for the same driver would build a bag with a repeated key — block
+  // Save and warn rather than silently dropping one (the backend dedupes too).
+  const drivers = valid.map((e) => e.driver.trim().toUpperCase());
+  const hasDuplicate = new Set(drivers).size !== drivers.length;
+  const canSave = valid.length > 0 && !hasPartial && !hasDuplicate;
   const save = async () => {
     const cfg = { entries };
     await onSet(await BuildClientPolicyValue(cfg as any));
@@ -358,6 +362,11 @@ export function ClientPolicyRow({ rawValue, onSet, onUnset }: RowProps) {
         {hasPartial && (
           <Text type="warning" style={{ fontSize: 11 }}>
             Every row needs both a driver and a version — complete or remove the incomplete row to save.
+          </Text>
+        )}
+        {hasDuplicate && (
+          <Text type="warning" style={{ fontSize: 11 }}>
+            Each driver can appear only once — remove the duplicate row to save.
           </Text>
         )}
       </Space>

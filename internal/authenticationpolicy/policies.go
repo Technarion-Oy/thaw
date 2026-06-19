@@ -221,17 +221,22 @@ type ClientPolicy struct {
 }
 
 // BuildClientPolicyValue serializes p into the `( … )` value for
-// SET CLIENT_POLICY. Entries missing a driver or version are skipped.
+// SET CLIENT_POLICY. Entries missing a driver or version are skipped, as is a
+// repeated driver (first occurrence wins) — a duplicate key would make an invalid
+// bag; the UI also blocks duplicates, so this is defense-in-depth on the exported
+// method.
 func BuildClientPolicyValue(p ClientPolicy) string {
 	var entries []string
+	seen := make(map[string]bool)
 	for _, e := range p.Entries {
 		d := strings.ToUpper(strings.TrimSpace(e.Driver))
 		v := strings.TrimSpace(e.MinimumVersion)
 		// The driver name is interpolated bare, so it must be a plain identifier;
 		// the version is quoted/escaped below so it needs no such guard.
-		if d == "" || v == "" || !isBareToken(d) {
+		if d == "" || v == "" || !isBareToken(d) || seen[d] {
 			continue
 		}
+		seen[d] = true
 		entries = append(entries, fmt.Sprintf("%s = ( MINIMUM_VERSION = '%s' )", d, snowflake.EscapeTextLit(v)))
 	}
 	if len(entries) == 0 {

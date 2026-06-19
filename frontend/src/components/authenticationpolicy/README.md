@@ -12,8 +12,11 @@ Object-browser UI for Snowflake **AUTHENTICATION POLICY** objects.
   **MFA enrollment** as a single-choice `Select` (`REQUIRED` /
   `REQUIRED_PASSWORD_ONLY` / `OPTIONAL`), plus a comment. Leaving a parameter
   empty inherits Snowflake's default (the lists default to `ALL`, MFA enrollment
-  to `OPTIONAL`) and omits it from the generated SQL. A live `SqlPreview`
-  reflects `App.BuildCreateAuthenticationPolicySql`; submit runs it via `ExecDDL`.
+  to `OPTIONAL`) and omits it from the generated SQL. The three list selects
+  reconcile `ALL`-vs-specific exclusivity through `App.ReconcileAllExclusiveList`
+  (same as the Properties modal) so an invalid `('ALL', X)` list can't be built.
+  A live `SqlPreview` reflects `App.BuildCreateAuthenticationPolicySql`; submit
+  runs it via `ExecDDL`.
 - **`AuthenticationPolicyPropertiesModal.tsx`** — the properties panel. Loads
   `GetObjectProperties("AUTHENTICATION POLICY")` (SHOW-level metadata) and
   `DescribeAuthenticationPolicy` (one row per property: `property`/`value`)

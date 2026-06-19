@@ -66,7 +66,9 @@ the parenthesized SQL form (`( KEY = VALUE … )` → object, `('A', 'B')` → l
 a paren-style DESCRIBE rendering still pre-fills the editor rather than blanking
 it (which would risk a Set wiping the bag). `BuildPATPolicyValue` range-checks the
 expiry day counts against the documented 1–365 bound as defense-in-depth (the
-exported IPC method can't rely on the UI's input clamps). All of this lives in Go
+exported IPC method can't rely on the UI's input clamps), and
+`BuildClientPolicyValue` drops a repeated driver (first-wins) so the bag can't
+carry a duplicate key (the editor also blocks duplicates). All of this lives in Go
 (exposed via `App.Build<Bag>Value` /
 `App.Parse<Bag>`) so the properties modal carries no SQL-serialization or
 DESCRIBE-parsing logic. `UNSET DCM PROJECT` (detach from a Declarative Change
