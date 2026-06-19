@@ -318,7 +318,15 @@ export function ClientPolicyRow({ rawValue, onSet, onUnset }: RowProps) {
     setParseFailed(rawHasContent(rawValue) && es.length === 0);
   };
   const valid = entries.filter((e) => e.driver?.trim() && e.minimumVersion?.trim());
-  const canSave = valid.length > 0;
+  // A half-filled row (driver xor version) would be silently dropped by the
+  // builder, which reads as "it saved everything" — so block Save until every
+  // started row is complete (or removed), rather than dropping it on save.
+  const hasPartial = entries.some((e) => {
+    const hasDriver = !!e.driver?.trim();
+    const hasVersion = !!e.minimumVersion?.trim();
+    return (hasDriver || hasVersion) && !(hasDriver && hasVersion);
+  });
+  const canSave = valid.length > 0 && !hasPartial;
   const save = async () => {
     const cfg = { entries };
     await onSet(await BuildClientPolicyValue(cfg as any));
@@ -342,6 +350,11 @@ export function ClientPolicyRow({ rawValue, onSet, onUnset }: RowProps) {
           </Space>
         ))}
         <Button size="small" icon={<PlusOutlined />} onClick={add}>Add driver</Button>
+        {hasPartial && (
+          <Text type="warning" style={{ fontSize: 11 }}>
+            Every row needs both a driver and a version — complete or remove the incomplete row to save.
+          </Text>
+        )}
       </Space>
     </BagShell>
   );

@@ -436,7 +436,11 @@ export default function AuthenticationPolicyPropertiesModal({ db, schema, name, 
     await AlterAuthenticationPolicy(db, schema, name, `UNSET ${keyword}`);
     await reload();
   };
+  // MFA_ENROLLMENT is interpolated bare into the ALTER clause, so the value is
+  // restricted to the known keywords before it reaches the SQL — the EnumRow
+  // Select only offers these, this is defense-in-depth against an unexpected value.
   const setEnum = async (keyword: string, val: string) => {
+    if (!MFA_ENROLLMENT_OPTIONS.includes(val)) return;
     await AlterAuthenticationPolicy(db, schema, name, `SET ${keyword} = ${val}`);
     await reload();
   };

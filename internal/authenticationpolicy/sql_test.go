@@ -89,6 +89,15 @@ func TestBuildCreateAuthenticationPolicySql(t *testing.T) {
 			absent:   []string{"CLIENT_TYPES"},
 		},
 		{
+			name: "mfa enrollment with breakout chars is dropped (bare-token guard)",
+			cfg: AuthenticationPolicyConfig{
+				Name:          "INJ",
+				MFAEnrollment: "OPTIONAL) ; DROP",
+			},
+			contains: []string{`CREATE AUTHENTICATION POLICY "DB"."SC".INJ;`},
+			absent:   []string{"MFA_ENROLLMENT"},
+		},
+		{
 			name: "comment is escaped",
 			cfg: AuthenticationPolicyConfig{
 				Name:    "Q",

@@ -114,8 +114,11 @@ func BuildCreateAuthenticationPolicySql(db, schema string, cfg AuthenticationPol
 	if hasToken(cfg.SecurityIntegrations) {
 		fmt.Fprintf(&sb, "\n  SECURITY_INTEGRATIONS = %s", formatStringList(cfg.SecurityIntegrations))
 	}
-	if strings.TrimSpace(cfg.MFAEnrollment) != "" {
-		fmt.Fprintf(&sb, "\n  MFA_ENROLLMENT = %s", strings.ToUpper(strings.TrimSpace(cfg.MFAEnrollment)))
+	// MFA_ENROLLMENT is interpolated bare (an enum keyword), so it gets the same
+	// isBareToken guard as the other bare tokens in this package — a value with
+	// ')'/';'/whitespace from an IPC caller is dropped rather than emitted.
+	if v := strings.ToUpper(strings.TrimSpace(cfg.MFAEnrollment)); v != "" && isBareToken(v) {
+		fmt.Fprintf(&sb, "\n  MFA_ENROLLMENT = %s", v)
 	}
 
 	if cfg.Comment != "" {
