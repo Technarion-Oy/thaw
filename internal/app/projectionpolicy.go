@@ -47,7 +47,10 @@ func (a *App) GetProjectionPolicyReferences(database, schema, name string) (*sno
 		"SELECT REF_DATABASE_NAME, REF_SCHEMA_NAME, REF_ENTITY_NAME, REF_ENTITY_DOMAIN, REF_COLUMN_NAME, POLICY_STATUS "+
 			"FROM SNOWFLAKE.ACCOUNT_USAGE.POLICY_REFERENCES "+
 			"WHERE POLICY_DB = '%s' AND POLICY_SCHEMA = '%s' AND POLICY_NAME = '%s' AND POLICY_KIND = 'PROJECTION_POLICY' "+
-			"ORDER BY REF_DATABASE_NAME, REF_SCHEMA_NAME, REF_ENTITY_NAME",
+			// Projection policies attach at the column level, so order by the
+			// referenced column too — otherwise rows for several columns of the
+			// same table sort in an unspecified order.
+			"ORDER BY REF_DATABASE_NAME, REF_SCHEMA_NAME, REF_ENTITY_NAME, REF_COLUMN_NAME",
 		snowflake.EscapeStringLit(database), snowflake.EscapeStringLit(schema), snowflake.EscapeStringLit(name))
 	return a.client.QuerySingle(a.ctx, query)
 }
