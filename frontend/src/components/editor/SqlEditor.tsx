@@ -32,7 +32,8 @@ import { useThemeStore } from "../../store/themeStore";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import { patchMonacoClipboard } from "../../utils/monacoClipboard";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, GetAllDataTypes, GitGetHeadFileContent } from "../../../wailsjs/go/app/App";
+import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, GitGetHeadFileContent } from "../../../wailsjs/go/app/App";
+import { SNOWFLAKE_DATA_TYPES } from "../../generated/snowflakeDataTypes";
 import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateSnowflakePatterns, ValidateDataTypes, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContextFull, ResolveTableRefs, ComputeGitLineDiff } from "../../../wailsjs/go/sqleditor/Service";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { UC, quoteIfNecessary, getFKs, getFKsCached, setFKCache, FKEntry, buildVariableSuggestions } from "./sqlEditorUtils";
@@ -103,20 +104,11 @@ const MAX_DIFF_LINES = 3000;
 
 // computeGitLineDiff — moved to Go backend (sqleditor.ComputeGitLineDiff).
 
-// ── Datatype completion cache ──────────────────────────────────────────────────
-// Fetched once from the Go registry (snowflake.AllDataTypes) so the editor and
-// the backend validator always share the same type list.
-type DataTypeEntry = { Name: string; Kind: number; ParamHint: string };
-let cachedDataTypes: DataTypeEntry[] | null = null;
-let dataTypesFetchPromise: Promise<void> | null = null;
-function ensureDataTypesLoaded(): Promise<void> {
-  if (cachedDataTypes !== null) return Promise.resolve();
-  if (dataTypesFetchPromise) return dataTypesFetchPromise;
-  dataTypesFetchPromise = GetAllDataTypes()
-    .then((dts) => { cachedDataTypes = (dts as DataTypeEntry[]) ?? []; })
-    .catch(() => { cachedDataTypes = []; dataTypesFetchPromise = null; });
-  return dataTypesFetchPromise;
-}
+// ── Datatype completion source ──────────────────────────────────────────────────
+// The type list is static, so it is imported synchronously from the generated
+// artifact (SNOWFLAKE_DATA_TYPES) whose single source of truth is the Go
+// registry (snowflake.AllDataTypes).  No IPC call is needed — the editor and the
+// backend validator share the same list at build time.
 
 let snowflakeKeywords: Set<string> | null = null;
 let snowflakeKeywordsArray: string[] = [];
@@ -1120,25 +1112,22 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
         // ── Datatype context (computed by backend) ────────────────────────
         if (ctx?.isDatatypeContext) {
-          await ensureDataTypesLoaded();
-          if (cachedDataTypes && cachedDataTypes.length > 0) {
-            return {
-              suggestions: cachedDataTypes.map((dt, i) => {
-                const hasParams = dt.ParamHint !== "";
-                return {
-                  label:      dt.Name,
-                  kind:       monaco.languages.CompletionItemKind.TypeParameter,
-                  insertText: hasParams ? `${dt.Name}($1)` : dt.Name,
-                  insertTextRules: hasParams
-                    ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
-                    : 0,
-                  detail:    hasParams ? `Type ${dt.ParamHint}` : "Type",
-                  sortText:  "00_dt_" + String(i).padStart(3, "0"),
-                  range,
-                };
-              }),
-            };
-          }
+          return {
+            suggestions: SNOWFLAKE_DATA_TYPES.map((dt, i) => {
+              const hasParams = dt.paramHint !== "";
+              return {
+                label:      dt.name,
+                kind:       monaco.languages.CompletionItemKind.TypeParameter,
+                insertText: hasParams ? `${dt.name}($1)` : dt.name,
+                insertTextRules: hasParams
+                  ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
+                  : 0,
+                detail:    hasParams ? `Type ${dt.paramHint}` : "Type",
+                sortText:  "00_dt_" + String(i).padStart(3, "0"),
+                range,
+              };
+            }),
+          };
         }
 
         // ── JOIN ON clause completion (computed by backend) ────────────────

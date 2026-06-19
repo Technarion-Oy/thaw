@@ -395,8 +395,6 @@ export function GetAdminLockedFlags():Promise<config.FeatureFlags>;
 
 export function GetAggregationPolicyReferences(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
-export function GetAllDataTypes():Promise<Array<snowflake.DataTypeInfo>>;
-
 export function GetAllFunctionNames():Promise<Array<fnmeta.FunctionMeta>>;
 
 export function GetAppInfo():Promise<app.AppInfo>;

@@ -16,7 +16,7 @@ git gutter decorations, the tab bar, editor preferences, and the cross-tab searc
 | `sqlEditorUtils.ts` | Pure helpers: `UC`, `quoteIfNecessary`, `FKEntry`, `getFKs` (async, deduped), `getFKsCached`, `setFKCache`, `buildVariableSuggestions`, `getQualifiedIdent`, `getStatementLineRanges`. No React. |
 | `editorRef.ts` | Singleton ref to the active `IStandaloneCodeEditor`. Exports `setEditorInstance`, `getEditorInstance`, `insertAtCursor`. Kept separate from `SqlEditor.tsx` so Vite Fast Refresh is not broken by mixing component and non-component exports. |
 | `monacoSetup.ts` | One-time Monaco initialisation: Snowflake Monarch language, Python Monarch grammar (inlined to avoid side-effect imports), YAML worker wiring, `thawDarkTheme`/`thawLightTheme` registration. Called via `ensureMonacoSetup()` guard. |
-| `snowflakeSql.ts` | Snowflake Monarch tokenizer (`snowflakeMonarchLanguage`) and custom Monaco theme definitions (`thawDarkTheme`, `thawLightTheme`). |
+| `snowflakeSql.ts` | Snowflake Monarch tokenizer (`snowflakeMonarchLanguage`) and custom Monaco theme definitions (`thawDarkTheme`, `thawLightTheme`). The tokenizer's `datatypes` list is sourced from the generated artifact `src/generated/snowflakeDataTypes.ts` (source of truth: `internal/snowflake/datatypes.go`) rather than hand-maintained. |
 | `snowflakeSnippets.ts` | Snowflake Scripting snippet definitions (`getSnowflakeSnippets`) and `SNIPPET_CATEGORIES` for the cascading context-menu submenu. Snippets are applied through `applyPrefsToSnippet` at insertion time (keyword casing, indent style). |
 | `CrossTabSearch.tsx` | Search/replace panel triggered by `⌘⇧H` / `Ctrl+Shift+H`. Searches all tabs (SQL, YAML, Python) and notebook cell sources. Navigates via `thaw:scroll-to-line` / `thaw:editor-ready` events. Supports regex with back-references, case-sensitive toggle, and match counter. Gated behind the `crossTabSearch` feature flag. |
 | `CrossTabSearch.test.ts` | Unit tests for `getNotebookCellSources` and related helpers in `CrossTabSearch.tsx`. |
@@ -29,8 +29,9 @@ git gutter decorations, the tab bar, editor preferences, and the cross-tab searc
 **IPC calls (from `wailsjs/go/app/App`):**
 `GetObjectDDL`, `ListObjects`, `ListSchemas`, `GetTableColumns`, `GetTableColumnsWithTypes`,
 `GetSchemaForeignKeys`, `GetUserDDL`, `GetAISuggestion`, `GetFunctionSuggestions`,
-`GetFunctionTooltip`, `GetAllFunctionNames`, `GetEditorPrefs`, `GetAllDataTypes`,
-`GitGetHeadFileContent`.
+`GetFunctionTooltip`, `GetAllFunctionNames`, `GetEditorPrefs`,
+`GitGetHeadFileContent`. (Data types are not fetched over IPC — they come from
+the bundled artifact `src/generated/snowflakeDataTypes.ts`.)
 
 **IPC calls (from `wailsjs/go/sqleditor/Service`):**
 `AnalyzeSqlSyntax`, `ParseJoinTableRefs`, `ComputeJoinOnConditions`, `AnalyzeSqlSemantics`,

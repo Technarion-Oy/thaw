@@ -1484,32 +1484,28 @@ func scriptingNeedsColon(sql string, offset int) bool {
 
 // ── TypeCategory ──────────────────────────────────────────────────────────────
 
+// registryCategoryToJoinBucket maps a registry DataTypeCategory to the broad
+// JOIN-suggestion compatibility bucket used by ComputeJoinOnConditions.
+// Categories without an entry fall through to "other" (e.g. structured,
+// geospatial, vector).  Note BINARY collapses into "text" for JOIN purposes.
+var registryCategoryToJoinBucket = map[sf.DataTypeCategory]string{
+	sf.CategoryNumeric:        "numeric",
+	sf.CategoryString:         "text",
+	sf.CategoryBinary:         "text",
+	sf.CategoryBoolean:        "boolean",
+	sf.CategoryDatetime:       "datetime",
+	sf.CategorySemiStructured: "semi",
+}
+
 // typeCategoryMap maps canonical upper-case Snowflake type names to the broad
-// JOIN-suggestion compatibility category used by ComputeJoinOnConditions.
-// It is built once from snowflake.AllDataTypes so that any type added to the
-// authoritative registry is automatically visible here (defaulting to "other").
+// JOIN-suggestion compatibility bucket.  It is built once from
+// snowflake.AllDataTypes using each type's authoritative Category, so any type
+// added to the registry is automatically visible here (defaulting to "other").
 var typeCategoryMap = func() map[string]string {
-	// Category assignment is sqleditor-specific (JOIN compatibility buckets).
-	// Types absent from this map fall through to "other".
-	explicit := map[string]string{
-		"NUMBER": "numeric", "DECIMAL": "numeric", "NUMERIC": "numeric",
-		"INT": "numeric", "INTEGER": "numeric", "BIGINT": "numeric",
-		"SMALLINT": "numeric", "TINYINT": "numeric", "BYTEINT": "numeric",
-		"FLOAT": "numeric", "FLOAT4": "numeric", "FLOAT8": "numeric",
-		"DOUBLE": "numeric", "DOUBLE PRECISION": "numeric", "REAL": "numeric",
-		"VARCHAR": "text", "CHAR": "text", "CHARACTER": "text",
-		"STRING": "text", "TEXT": "text",
-		"BINARY": "text", "VARBINARY": "text",
-		"BOOLEAN": "boolean",
-		"DATE":    "datetime", "DATETIME": "datetime", "TIME": "datetime",
-		"TIMESTAMP": "datetime", "TIMESTAMP_LTZ": "datetime",
-		"TIMESTAMP_NTZ": "datetime", "TIMESTAMP_TZ": "datetime",
-		"VARIANT": "semi", "OBJECT": "semi", "ARRAY": "semi",
-	}
 	m := make(map[string]string, len(sf.AllDataTypes()))
 	for _, dt := range sf.AllDataTypes() {
-		if cat, ok := explicit[dt.Name]; ok {
-			m[dt.Name] = cat
+		if bucket, ok := registryCategoryToJoinBucket[dt.Category]; ok {
+			m[dt.Name] = bucket
 		} else {
 			m[dt.Name] = "other"
 		}

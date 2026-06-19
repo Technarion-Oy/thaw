@@ -252,14 +252,6 @@ func (a *App) BuildCreateFileFormatSql(database, schema string, cfg fileformat.F
 	return fileformat.BuildCreateFileFormatSql(database, schema, cfg)
 }
 
-// GetAllDataTypes returns the complete list of supported Snowflake data types
-// with their canonical names and autocompletion hints.  The list is static and
-// derived from the same registry that ValidateDataType uses, so the editor
-// completion list and the validator always agree.
-func (a *App) GetAllDataTypes() []snowflake.DataTypeInfo {
-	return snowflake.AllDataTypes()
-}
-
 // BuildCallStatement constructs a CALL SQL statement for a stored procedure.
 func (a *App) BuildCallStatement(db, schema, name string, args []procedure.Argument) string {
 	return procedure.BuildCallStatement(db, schema, name, args)

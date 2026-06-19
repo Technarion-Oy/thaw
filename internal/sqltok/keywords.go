@@ -10,7 +10,10 @@
 
 package sqltok
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 // reservedKeywords is the Snowflake reserved-keyword set from the official spec.
 // An unquoted identifier matching one of these is always a keyword.
@@ -86,12 +89,9 @@ var keywords = map[string]struct{}{
 	"STORAGE": {}, "INTEGRATION": {}, "SECRET": {}, "GIT": {}, "REPOSITORY": {}, "NOTEBOOK": {},
 	// Cortex
 	"SNOWFLAKE": {}, "CORTEX": {}, "MATCH_CONDITION": {},
-	// Data types
-	"INT": {}, "INTEGER": {}, "BIGINT": {}, "SMALLINT": {}, "TINYINT": {}, "BYTEINT": {},
-	"NUMBER": {}, "DECIMAL": {}, "NUMERIC": {}, "DOUBLE": {}, "FLOAT": {}, "REAL": {},
-	"VARCHAR": {}, "STRING": {}, "TEXT": {}, "CHAR": {}, "CHARACTER": {}, "BINARY": {}, "VARBINARY": {},
-	"BOOLEAN": {}, "DATE": {}, "DATETIME": {}, "TIME": {}, "TIMESTAMP": {}, "TIMESTAMP_NTZ": {}, "TIMESTAMP_LTZ": {}, "TIMESTAMP_TZ": {},
-	"VARIANT": {}, "OBJECT": {}, "ARRAY": {}, "GEOGRAPHY": {}, "GEOMETRY": {},
+	// Data types are NOT listed here — they are injected via
+	// RegisterDataTypeKeywords from the snowflake package's authoritative
+	// registry (internal/snowflake/datatypes.go) to avoid duplicating the list.
 
 	// From sqlFormatterKeywords (additions not in sqlAllKeywords)
 	"ANY": {}, "AT": {}, "BEFORE": {},
@@ -268,6 +268,19 @@ func ReservedKeywordList() []string {
 func IsReserved(upper string) bool {
 	_, ok := reservedKeywords[upper]
 	return ok
+}
+
+// RegisterDataTypeKeywords adds the given (canonical, upper-case) Snowflake
+// data-type names to the tokenizer's keyword set.  It exists so the data-type
+// list lives in exactly one place — the snowflake package's authoritative
+// registry — without sqltok (a leaf package) importing snowflake and creating
+// an import cycle.  The snowflake package calls this once from its init, so by
+// the time any snowflake-importing consumer tokenizes SQL the types are present.
+// Not safe for concurrent use; intended to be called only during package init.
+func RegisterDataTypeKeywords(names []string) {
+	for _, n := range names {
+		keywords[strings.ToUpper(n)] = struct{}{}
+	}
 }
 
 // IsKeyword reports whether upper is any SQL keyword recognized by the tokenizer.

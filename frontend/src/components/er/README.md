@@ -10,7 +10,7 @@ Renders an interactive ER diagram using `@xyflow/react` from Snowflake table/col
 
 | File | Purpose |
 |------|---------|
-| `erTypes.ts` | Shared types (`DesignerColumn`, `DesignerTable`, `JoinQueryState`, etc.), `SF_TYPES` constant, and node dimension constants (`ER_NODE_WIDTH`, etc.). |
+| `erTypes.ts` | Shared types (`DesignerColumn`, `DesignerTable`, `JoinQueryState`, etc.), the `SF_DATA_TYPES` / `SF_TYPES` constants (re-derived from the generated artifact `src/generated/snowflakeDataTypes.ts`, whose source of truth is the Go registry `internal/snowflake/datatypes.go` — not hand-maintained here), and node dimension constants (`ER_NODE_WIDTH`, etc.). |
 | `erCanvasLayout.ts` | Pure layout utilities: `tablesToNodesAndEdges()`, `applyERLayout()` (dagre), `initFromERData()`, `normalizeDataType()`, `mergeAITablesIntoDesigner()`. No React imports. |
 | `erLayoutStore.ts` | localStorage persistence for node positions, keyed by `thaw-er-layout:{DATABASE}` and `SCHEMA.TABLE`. Debounced writes. |
 | `ERTableNode.tsx` | Custom XYFlow node component. Renders table header + column rows with per-column source/target handles, PK/NN/FK badges, and inline rename on double-click (edit mode). Wrapped in `React.memo`. |
