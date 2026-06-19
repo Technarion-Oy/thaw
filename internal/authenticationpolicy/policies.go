@@ -449,6 +449,28 @@ func jsonString(m map[string]any, key string) string {
 	return ""
 }
 
+// jsonScalarString renders a JSON scalar (as encoding/json decodes it: string,
+// float64, bool) into string form. A whole-number float64 is rendered without a
+// decimal point or exponent so a large account/ID number (e.g. 123456789012)
+// survives intact rather than becoming "1.23e+11". Non-scalars yield "".
+func jsonScalarString(v any) string {
+	switch n := v.(type) {
+	case string:
+		return n
+	case float64:
+		if i := int64(n); float64(i) == n {
+			return strconv.FormatInt(i, 10)
+		}
+		return strconv.FormatFloat(n, 'f', -1, 64)
+	case bool:
+		if n {
+			return "TRUE"
+		}
+		return "FALSE"
+	}
+	return ""
+}
+
 func jsonStringList(m map[string]any, key string) []string {
 	v, ok := m[key]
 	if !ok {
@@ -458,7 +480,11 @@ func jsonStringList(m map[string]any, key string) []string {
 	case []any:
 		out := make([]string, 0, len(t))
 		for _, e := range t {
-			if s, ok := e.(string); ok && strings.TrimSpace(s) != "" {
+			// The structScanner always yields string scalars, but a strict-JSON
+			// DESCRIBE rendering could emit a bare number (e.g. a 12-digit AWS
+			// account as a JSON number). Coerce any non-string scalar via
+			// jsonScalarString rather than dropping it.
+			if s := jsonScalarString(e); strings.TrimSpace(s) != "" {
 				out = append(out, s)
 			}
 		}

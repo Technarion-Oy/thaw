@@ -142,6 +142,15 @@ func TestParseWorkloadIdentityPolicy(t *testing.T) {
 	}
 }
 
+// A strict-JSON rendering could emit a bare numeric AWS account; it must be
+// coerced to its digits, not dropped or rendered in exponent form.
+func TestParseWorkloadIdentityPolicyNumericAccount(t *testing.T) {
+	got := ParseWorkloadIdentityPolicy(`{"ALLOWED_AWS_ACCOUNTS":[123456789012, "210987654321"]}`)
+	if !reflect.DeepEqual(got.AllowedAWSAccounts, []string{"123456789012", "210987654321"}) {
+		t.Errorf("aws accounts = %v", got.AllowedAWSAccounts)
+	}
+}
+
 // DESCRIBE AUTHENTICATION POLICY renders the bags in Snowflake's structured-
 // object notation (`{KEY=VALUE, KEY={NESTED=VALUE}}`), NOT JSON — e.g. the docs'
 // `{GO_DRIVER={MINIMUM_VERSION=3.14.1}}`. These cover the parsers against that
