@@ -22,6 +22,7 @@ import type { snowflake } from "../../../wailsjs/go/models";
 import Editor from "@monaco-editor/react";
 import { useThemeStore } from "../../store/themeStore";
 import { patchMonacoClipboard } from "../../utils/monacoClipboard";
+import { setActiveSnippetEditor } from "../editor/SqlEditor";
 
 const { Text } = Typography;
 
@@ -285,7 +286,14 @@ export default function AggregationPolicyPropertiesModal({ db, schema, name, onC
               theme={editorTheme}
               value={editingBody ? bodyDraft : body}
               onChange={(v) => setBodyDraft(v ?? "")}
-              onMount={(editor) => { patchMonacoClipboard(editor); }}
+              onMount={(editor) => {
+                patchMonacoClipboard(editor);
+                // Register this editor as the active snippet target so the global
+                // "SQL Snippets" context-menu commands insert here, not into the
+                // main SQL editor behind the modal.
+                editor.onContextMenu(() => setActiveSnippetEditor(editor));
+                editor.onDidDispose(() => setActiveSnippetEditor(null));
+              }}
               options={{
                 readOnly: !editingBody,
                 minimap: { enabled: false },

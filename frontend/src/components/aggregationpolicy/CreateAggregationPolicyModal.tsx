@@ -23,6 +23,7 @@ import type { aggregationpolicy as apModels } from "../../../wailsjs/go/models";
 import Editor from "@monaco-editor/react";
 import { useThemeStore } from "../../store/themeStore";
 import { patchMonacoClipboard } from "../../utils/monacoClipboard";
+import { setActiveSnippetEditor } from "../editor/SqlEditor";
 
 const { Text } = Typography;
 
@@ -124,7 +125,16 @@ export default function CreateAggregationPolicyModal({ db, schema, onClose, onSu
               theme={editorTheme}
               value={cfg.body}
               onChange={(v) => set("body", v ?? "")}
-              onMount={(editor) => { patchMonacoClipboard(editor); }}
+              onMount={(editor) => {
+                patchMonacoClipboard(editor);
+                // The "SQL Snippets" context-menu submenu is registered globally
+                // for any SQL editor, but its commands insert into the shared
+                // _activeSnippetEditor. Register this editor on right-click (and
+                // clear on dispose) so picking a snippet lands here, not in the
+                // main SQL editor behind the modal.
+                editor.onContextMenu(() => setActiveSnippetEditor(editor));
+                editor.onDidDispose(() => setActiveSnippetEditor(null));
+              }}
               options={{
                 minimap: { enabled: false },
                 lineNumbers: "off",
