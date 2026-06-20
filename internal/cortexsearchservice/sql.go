@@ -31,7 +31,7 @@ const (
 // the AS keyword; the remaining fields map to the CREATE CORTEX SEARCH SERVICE
 // options in the order Snowflake documents them.
 //
-// Both documented shapes are modelled, selected by IndexMode:
+// Both documented shapes are modeled, selected by IndexMode:
 //   - "single": ON <search_column> (+ optional EMBEDDING_MODEL).
 //   - "multi":  TEXT INDEXES … / VECTOR INDEXES … (no EMBEDDING_MODEL / no
 //     IF NOT EXISTS, which Snowflake does not allow for this form).

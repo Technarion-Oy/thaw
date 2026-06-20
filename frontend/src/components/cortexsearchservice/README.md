@@ -49,7 +49,7 @@
   is in the sidebar's Rename-exclusion and gets a dedicated **Properties…** item.
 - **`EMBEDDING_MODEL` is immutable** after creation, so the properties modal shows
   it read-only.
-- Both CREATE shapes are modelled — the single-index (`ON <column>`) form and the
+- Both CREATE shapes are modeled — the single-index (`ON <column>`) form and the
   multi-index (`TEXT INDEXES` / `VECTOR INDEXES`) form — chosen via the Index mode
   toggle. The multi-index form drops `EMBEDDING_MODEL` and `IF NOT EXISTS` (not
   allowed by Snowflake there). Scoring profiles are not part of CREATE but **are**

@@ -9,7 +9,7 @@ Search Service is a schema-level object that indexes a text column over the rows
 of a source query to provide low-latency hybrid (keyword + semantic) search and
 retrieval — the backbone of Snowflake RAG applications.
 
-Both documented CREATE shapes are modelled by the visual builder, selected by
+Both documented CREATE shapes are modeled by the visual builder, selected by
 `IndexMode`:
 
 - **Single-index** (`IndexMode = "single"`): `ON <search_column>` plus an optional
