@@ -60,6 +60,21 @@ func QuoteIdent(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
+// Qualify builds a dotted, fully-qualified Snowflake object reference from its
+// name parts, double-quoting each part via QuoteIdent — Qualify("DB", "S", "T")
+// yields `"DB"."S"."T"`. It is the shared builder behind the database.schema.name
+// and schema.name references that pepper the DDL/SHOW builders. Every part is
+// quoted unconditionally; for a reference whose final component is already
+// quoted (a generated stage name) or only conditionally quoted (QuoteOrBare),
+// build the dotted name inline instead.
+func Qualify(parts ...string) string {
+	quoted := make([]string, len(parts))
+	for i, p := range parts {
+		quoted[i] = QuoteIdent(p)
+	}
+	return strings.Join(quoted, ".")
+}
+
 // EscapeStringLit escapes single-quotes within a SQL string literal value by
 // doubling them. It deliberately leaves backslashes untouched so that callers
 // emitting delimiter/control values (e.g. a file format's RECORD_DELIMITER =

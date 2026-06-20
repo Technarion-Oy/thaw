@@ -203,7 +203,7 @@ func (sc *sessionConnector) Connect(ctx context.Context) (driver.Conn, error) {
 		// Use fully qualified name to be robust against database switches
 		// resetting the schema context.
 		if db != "" {
-			connExec(conn, fmt.Sprintf(`USE SCHEMA %s.%s`, QuoteIdent(db), QuoteIdent(schema)))
+			connExec(conn, fmt.Sprintf(`USE SCHEMA %s`, Qualify(db, schema)))
 		} else {
 			connExec(conn, fmt.Sprintf(`USE SCHEMA %s`, QuoteIdent(schema)))
 		}
@@ -1238,7 +1238,7 @@ func normalizeDirPath(dirPath string) string {
 func (c *Client) ListGitRepoEntries(ctx context.Context, database, schema, repoName, dirPath string) ([]GitRepoEntry, error) {
 	dirPath = normalizeDirPath(dirPath)
 
-	sql := fmt.Sprintf(`LIST @%s.%s.%s/%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(repoName), dirPath)
+	sql := fmt.Sprintf(`LIST @%s/%s`, Qualify(database, schema, repoName), dirPath)
 
 	res, err := c.Execute(ctx, sql)
 	if err != nil {
@@ -1255,7 +1255,7 @@ func (c *Client) ListGitRepoEntries(ctx context.Context, database, schema, repoN
 func (c *Client) ListStageEntries(ctx context.Context, database, schema, stageName, dirPath string) ([]StageEntry, error) {
 	dirPath = normalizeDirPath(dirPath)
 
-	sql := fmt.Sprintf(`LIST @%s.%s.%s/%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(stageName), dirPath)
+	sql := fmt.Sprintf(`LIST @%s/%s`, Qualify(database, schema, stageName), dirPath)
 
 	res, err := c.Execute(ctx, sql)
 	if err != nil {
@@ -1277,7 +1277,7 @@ type StageSummary struct {
 // INTERNAL/EXTERNAL type, so callers can filter (e.g. external tables may only
 // reference an EXTERNAL stage).
 func (c *Client) ListStages(ctx context.Context, database, schema string) ([]StageSummary, error) {
-	sql := fmt.Sprintf("SHOW STAGES IN SCHEMA %s.%s", QuoteIdent(database), QuoteIdent(schema))
+	sql := fmt.Sprintf("SHOW STAGES IN SCHEMA %s", Qualify(database, schema))
 	res, err := c.Execute(ctx, sql)
 	if err != nil {
 		return nil, err
@@ -1317,7 +1317,7 @@ type DbtProjectVersion struct {
 
 // ListDbtProjectVersions returns all versions of the given DBT PROJECT.
 func (c *Client) ListDbtProjectVersions(ctx context.Context, database, schema, name string) ([]DbtProjectVersion, error) {
-	sql := fmt.Sprintf(`SHOW VERSIONS IN DBT PROJECT %s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(name))
+	sql := fmt.Sprintf(`SHOW VERSIONS IN DBT PROJECT %s`, Qualify(database, schema, name))
 
 	res, err := c.Execute(ctx, sql)
 	if err != nil {
@@ -1447,7 +1447,7 @@ func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
 func (c *Client) ListWorkspaceEntries(ctx context.Context, database, schema, workspaceName, dirPath string) ([]WorkspaceEntry, error) {
 	dirPath = normalizeDirPath(dirPath)
 
-	sql := fmt.Sprintf(`LIST @%s.%s.%s/%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(workspaceName), dirPath)
+	sql := fmt.Sprintf(`LIST @%s/%s`, Qualify(database, schema, workspaceName), dirPath)
 
 	res, err := c.Execute(ctx, sql)
 	if err != nil {
@@ -1459,7 +1459,7 @@ func (c *Client) ListWorkspaceEntries(ctx context.Context, database, schema, wor
 
 // ListGitBranches returns all branches in the given git repository.
 func (c *Client) ListGitBranches(ctx context.Context, database, schema, repoName string) ([]GitBranch, error) {
-	sql := fmt.Sprintf(`SHOW GIT BRANCHES IN GIT REPOSITORY %s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(repoName))
+	sql := fmt.Sprintf(`SHOW GIT BRANCHES IN GIT REPOSITORY %s`, Qualify(database, schema, repoName))
 
 	res, err := c.Execute(ctx, sql)
 	if err != nil {
@@ -1488,7 +1488,7 @@ func (c *Client) ListGitBranches(ctx context.Context, database, schema, repoName
 
 // ListGitTags returns all tags in the given git repository.
 func (c *Client) ListGitTags(ctx context.Context, database, schema, repoName string) ([]GitTag, error) {
-	sql := fmt.Sprintf(`SHOW GIT TAGS IN GIT REPOSITORY %s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(repoName))
+	sql := fmt.Sprintf(`SHOW GIT TAGS IN GIT REPOSITORY %s`, Qualify(database, schema, repoName))
 
 	res, err := c.Execute(ctx, sql)
 	if err != nil {
@@ -1517,7 +1517,7 @@ func (c *Client) ListGitTags(ctx context.Context, database, schema, repoName str
 
 // GetGitFileContent reads a file from a git repository and returns its content.
 func (c *Client) GetGitFileContent(ctx context.Context, database, schema, repoName, filePath string) (string, error) {
-	sql := fmt.Sprintf(`SELECT $1 FROM @%s.%s.%s/%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(repoName), filePath)
+	sql := fmt.Sprintf(`SELECT $1 FROM @%s/%s`, Qualify(database, schema, repoName), filePath)
 
 	res, err := c.Execute(ctx, sql)
 	if err != nil {
@@ -1537,7 +1537,7 @@ func (c *Client) GetGitFileContent(ctx context.Context, database, schema, repoNa
 // ExecuteGitFile executes a SQL file via EXECUTE IMMEDIATE FROM @db.schema.name/path.
 // Also used for stage files (via App.ExecuteStageFile) since the SQL pattern is identical.
 func (c *Client) ExecuteGitFile(ctx context.Context, database, schema, repoName, filePath string) error {
-	sql := fmt.Sprintf(`EXECUTE IMMEDIATE FROM @%s.%s.%s/%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(repoName), filePath)
+	sql := fmt.Sprintf(`EXECUTE IMMEDIATE FROM @%s/%s`, Qualify(database, schema, repoName), filePath)
 
 	_, err := c.Execute(ctx, sql)
 	return err
@@ -1635,7 +1635,7 @@ func (c *Client) DropSchema(ctx context.Context, database, schema string, mode s
 	if mode != "CASCADE" && mode != "RESTRICT" {
 		mode = "CASCADE"
 	}
-	_, err := c.execCtx(ctx, fmt.Sprintf(`DROP SCHEMA %s.%s %s`, QuoteIdent(database), QuoteIdent(schema), mode))
+	_, err := c.execCtx(ctx, fmt.Sprintf(`DROP SCHEMA %s %s`, Qualify(database, schema), mode))
 	return err
 }
 
@@ -2202,7 +2202,7 @@ func (c *Client) UseSchema(ctx context.Context, schema string) error {
 
 	var query string
 	if db != "" {
-		query = fmt.Sprintf(`USE SCHEMA %s.%s`, QuoteIdent(db), QuoteIdent(schema))
+		query = fmt.Sprintf(`USE SCHEMA %s`, Qualify(db, schema))
 	} else {
 		query = fmt.Sprintf(`USE SCHEMA %s`, QuoteIdent(schema))
 	}
@@ -2311,7 +2311,7 @@ type DroppedTable struct {
 // returns only rows where dropped_on is non-empty.
 func (c *Client) ListDroppedTables(ctx context.Context, database, schema string) ([]DroppedTable, error) {
 	return c.listDroppedHistory(ctx,
-		fmt.Sprintf(`SHOW TABLES HISTORY IN SCHEMA %s.%s`, QuoteIdent(database), QuoteIdent(schema)))
+		fmt.Sprintf(`SHOW TABLES HISTORY IN SCHEMA %s`, Qualify(database, schema)))
 }
 
 // listDroppedHistory is the shared helper for SHOW * HISTORY queries.
@@ -2370,7 +2370,7 @@ func (c *Client) GetDatabaseRetentionDays(ctx context.Context, dbName string) (i
 // GetSchemaRetentionDays returns the DATA_RETENTION_TIME_IN_DAYS parameter
 // for the given schema. Returns 1 if the value cannot be determined.
 func (c *Client) GetSchemaRetentionDays(ctx context.Context, database, schema string) (int, error) {
-	query := fmt.Sprintf(`SHOW PARAMETERS LIKE 'DATA_RETENTION_TIME_IN_DAYS' IN SCHEMA %s.%s`, QuoteIdent(database), QuoteIdent(schema))
+	query := fmt.Sprintf(`SHOW PARAMETERS LIKE 'DATA_RETENTION_TIME_IN_DAYS' IN SCHEMA %s`, Qualify(database, schema))
 	return c.queryIntCell(ctx, query, "value", 1)
 }
 
@@ -2379,8 +2379,8 @@ func (c *Client) GetSchemaRetentionDays(ctx context.Context, database, schema st
 // column. Returns 1 (Snowflake's Standard-edition default) when the value
 // cannot be determined.
 func (c *Client) GetTableRetentionDays(ctx context.Context, database, schema, name string) (int, error) {
-	query := fmt.Sprintf(`SHOW TABLES LIKE '%s' IN SCHEMA %s.%s`,
-		EscapeStringLit(name), QuoteIdent(database), QuoteIdent(schema))
+	query := fmt.Sprintf(`SHOW TABLES LIKE '%s' IN SCHEMA %s`,
+		EscapeStringLit(name), Qualify(database, schema))
 	return c.queryIntCell(ctx, query, "retention_time", 1)
 }
 
@@ -2684,7 +2684,7 @@ func (c *Client) ListUserFunctions(ctx context.Context, database string) ([]User
 // GetTableColumns returns the ordered list of column names for a table or view
 // by running DESCRIBE TABLE (which works for both base tables and views in Snowflake).
 func (c *Client) GetTableColumns(ctx context.Context, database, schema, name string) ([]string, error) {
-	query := fmt.Sprintf(`DESCRIBE TABLE %s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(name))
+	query := fmt.Sprintf(`DESCRIBE TABLE %s`, Qualify(database, schema, name))
 	rows, err := c.queryCtx(ctx, query)
 	if err != nil {
 		return nil, err
@@ -2735,7 +2735,7 @@ type TableForeignKey struct {
 // referencing (child / FK) side. It runs SHOW IMPORTED KEYS IN TABLE and maps
 // the pk_*/fk_* columns into TableForeignKey values.
 func (c *Client) GetTableForeignKeys(ctx context.Context, database, schema, table string) ([]TableForeignKey, error) {
-	query := fmt.Sprintf(`SHOW IMPORTED KEYS IN TABLE %s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(table))
+	query := fmt.Sprintf(`SHOW IMPORTED KEYS IN TABLE %s`, Qualify(database, schema, table))
 	rows, err := c.queryCtx(ctx, query)
 	if err != nil {
 		return nil, err
@@ -2787,7 +2787,7 @@ type ColumnInfo struct {
 // GetTableColumnsWithTypes returns the ordered column list for a table or view
 // together with their data types by running DESCRIBE TABLE.
 func (c *Client) GetTableColumnsWithTypes(ctx context.Context, database, schema, name string) ([]ColumnInfo, error) {
-	query := fmt.Sprintf(`DESCRIBE TABLE %s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(name))
+	query := fmt.Sprintf(`DESCRIBE TABLE %s`, Qualify(database, schema, name))
 	rows, err := c.queryCtx(ctx, query)
 	if err != nil {
 		return nil, err
@@ -2824,7 +2824,7 @@ func (c *Client) GetTableColumnsWithTypes(ctx context.Context, database, schema,
 // IMPORTED KEYS when the editor needs to warm up FK data for many tables at once.
 // The result set columns are identical to SHOW IMPORTED KEYS IN TABLE.
 func (c *Client) GetSchemaForeignKeys(ctx context.Context, database, schema string) ([]TableForeignKey, error) {
-	query := fmt.Sprintf(`SHOW IMPORTED KEYS IN SCHEMA %s.%s`, QuoteIdent(database), QuoteIdent(schema))
+	query := fmt.Sprintf(`SHOW IMPORTED KEYS IN SCHEMA %s`, Qualify(database, schema))
 	rows, err := c.queryCtx(ctx, query)
 	if err != nil {
 		return nil, err
@@ -3145,7 +3145,7 @@ func (c *Client) ListBasicObjects(ctx context.Context, database, schema string) 
 		return cached, nil
 	}
 
-	q := fmt.Sprintf("%s.%s", QuoteIdent(database), QuoteIdent(schema))
+	q := Qualify(database, schema)
 	objs, err := c.showInSchema(ctx, fmt.Sprintf("SHOW OBJECTS IN SCHEMA %s", q), "", schema)
 	if err != nil {
 		return nil, err
@@ -3167,7 +3167,7 @@ func (c *Client) ListBasicObjects(ctx context.Context, database, schema string) 
 // fail (e.g. due to missing privileges) are silently skipped. Includes the TASK
 // finalize enrichment logic.
 func (c *Client) ListExtendedObjects(ctx context.Context, database, schema string) ([]SnowflakeObject, error) {
-	q := fmt.Sprintf("%s.%s", QuoteIdent(database), QuoteIdent(schema))
+	q := Qualify(database, schema)
 
 	type showCmd struct {
 		query string
@@ -3600,7 +3600,7 @@ func (c *Client) ClearObjectCacheForSchema(database, schema string) {
 
 // ListFileFormats returns the names of all file formats in the specified schema.
 func (c *Client) ListFileFormats(ctx context.Context, database, schema string) ([]string, error) {
-	q := fmt.Sprintf("%s.%s", QuoteIdent(database), QuoteIdent(schema))
+	q := Qualify(database, schema)
 	return c.queryStringSlice(ctx, fmt.Sprintf("SHOW FILE FORMATS IN SCHEMA %s", q), 1)
 }
 
@@ -3644,7 +3644,7 @@ func buildGetDDLQuery(database, schema, kind, name, arguments string) (query, id
 	if database == "" && schema == "" {
 		identifier = EscapeStringLit(name)
 	} else {
-		identifier = fmt.Sprintf(`%s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(name))
+		identifier = Qualify(database, schema, name)
 		// Procedures and functions require the argument type list (which may be
 		// empty for zero-arg procedures) appended so Snowflake can resolve the
 		// overload.  Omitting the parentheses entirely causes GET_DDL to return
@@ -4057,7 +4057,7 @@ func (c *Client) ExportTableData(ctx context.Context, params ExportTableParams) 
 	stageName := fmt.Sprintf("THAW_EXPORT_%d", time.Now().UnixNano())
 	stageRef := fmt.Sprintf(`%s.%s.%s`, QuoteIdent(params.Database), QuoteIdent(params.Schema), stageName)
 	stageAt := "@" + stageRef
-	tableRef := fmt.Sprintf(`%s.%s.%s`, QuoteIdent(params.Database), QuoteIdent(params.Schema), QuoteIdent(params.Table))
+	tableRef := Qualify(params.Database, params.Schema, params.Table)
 
 	// Create a temporary stage (auto-dropped when the session ends)
 	if _, err := c.execCtx(ctx, "CREATE TEMPORARY STAGE "+stageRef); err != nil {
@@ -4290,7 +4290,7 @@ func (c *Client) ImportTableData(ctx context.Context, params ImportTableParams) 
 	stageName := fmt.Sprintf("THAW_IMPORT_%d", time.Now().UnixNano())
 	stageRef := fmt.Sprintf(`%s.%s.%s`, QuoteIdent(params.Database), QuoteIdent(params.Schema), stageName)
 	stageAt := "@" + stageRef
-	tableRef := fmt.Sprintf(`%s.%s.%s`, QuoteIdent(params.Database), QuoteIdent(params.Schema), QuoteIdent(params.Table))
+	tableRef := Qualify(params.Database, params.Schema, params.Table)
 
 	if _, err := c.execCtx(ctx, "CREATE TEMPORARY STAGE "+stageRef); err != nil {
 		return ImportTableResult{}, fmt.Errorf("create import stage: %w", err)
@@ -4578,7 +4578,7 @@ func buildImportCopySQL(stageAt, tableRef string, p ImportTableParams) string {
 //  3. Read the downloaded .ipynb file
 //  4. Clean up the temp directory
 func (c *Client) FetchNotebookContent(ctx context.Context, database, schema, name string) (string, error) {
-	notebookRef := fmt.Sprintf(`%s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(name))
+	notebookRef := Qualify(database, schema, name)
 
 	// DESC NOTEBOOK to find the stage URI of the latest version.
 	descRows, err := c.queryCtx(ctx, "DESC NOTEBOOK "+notebookRef)
@@ -4677,7 +4677,7 @@ func (c *Client) FetchNotebookContent(ctx context.Context, database, schema, nam
 // single-quote escaped and wrapped in quotes before being embedded in the SQL.
 // Pass an empty slice to execute with no parameters.
 func (c *Client) ExecuteNotebook(ctx context.Context, database, schema, name string, params []string) (string, error) {
-	notebookRef := fmt.Sprintf(`%s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(name))
+	notebookRef := Qualify(database, schema, name)
 
 	args := make([]string, len(params))
 	for i, p := range params {
@@ -4709,7 +4709,7 @@ func (c *Client) ExecuteNotebook(ctx context.Context, database, schema, name str
 //
 // Otherwise a plain EXECUTE TASK <ref> is issued.
 func (c *Client) ExecuteTask(ctx context.Context, database, schema, name, config string, retryLast bool) error {
-	ref := fmt.Sprintf("%s.%s.%s", QuoteIdent(database), QuoteIdent(schema), QuoteIdent(name))
+	ref := Qualify(database, schema, name)
 
 	var sql string
 	switch {
@@ -4728,7 +4728,7 @@ func (c *Client) ExecuteTask(ctx context.Context, database, schema, name, config
 // Snowflake Notebook object, or an empty string if none is configured.
 func (c *Client) GetNotebookQueryWarehouse(ctx context.Context, database, schema, name string) (string, error) {
 	like := EscapeStringLit(name)
-	sql := fmt.Sprintf("SHOW NOTEBOOKS LIKE '%s' IN SCHEMA %s.%s", like, QuoteIdent(database), QuoteIdent(schema))
+	sql := fmt.Sprintf("SHOW NOTEBOOKS LIKE '%s' IN SCHEMA %s", like, Qualify(database, schema))
 	res, err := c.Execute(ctx, sql)
 	if err != nil {
 		return "", err
@@ -4758,7 +4758,7 @@ func (c *Client) GetNotebookQueryWarehouse(ctx context.Context, database, schema
 // SetNotebookQueryWarehouse issues ALTER NOTEBOOK … SET QUERY_WAREHOUSE on the
 // given notebook object.
 func (c *Client) SetNotebookQueryWarehouse(ctx context.Context, database, schema, name, warehouse string) error {
-	notebookRef := fmt.Sprintf(`%s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(name))
+	notebookRef := Qualify(database, schema, name)
 	sql := fmt.Sprintf(`ALTER NOTEBOOK %s SET QUERY_WAREHOUSE = %s`, notebookRef, QuoteIdent(warehouse))
 	_, err := c.Execute(ctx, sql)
 	return err

@@ -239,6 +239,28 @@ func TestQuoteIdent(t *testing.T) {
 	}
 }
 
+func TestQualify(t *testing.T) {
+	tests := []struct {
+		name  string
+		parts []string
+		want  string
+	}{
+		{"three parts", []string{"DB", "S", "T"}, `"DB"."S"."T"`},
+		{"two parts", []string{"DB", "S"}, `"DB"."S"`},
+		{"single part", []string{"T"}, `"T"`},
+		{"mixed case preserved", []string{"Db", "Schema", "MyTable"}, `"Db"."Schema"."MyTable"`},
+		{"embedded quote escaped", []string{"DB", `we"ird`}, `"DB"."we""ird"`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Qualify(tc.parts...)
+			if got != tc.want {
+				t.Errorf("Qualify(%q) = %v, want %v", tc.parts, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestSplitValues(t *testing.T) {
 	cases := []struct {
 		in   string

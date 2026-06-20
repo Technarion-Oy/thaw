@@ -276,7 +276,7 @@ func (c *Client) GetObjectDependencies(ctx context.Context, database, schema, ki
 // scan it with parseSQLReferences without any additional Snowflake calls.
 // An empty schema returns immediately with zero rows.
 func (c *Client) GetSchemaCrossDeps(ctx context.Context, db, schema string) ([]SchemaRef, error) {
-	q := fmt.Sprintf(`SHOW VIEWS IN SCHEMA %s.%s`, QuoteIdent(db), QuoteIdent(schema))
+	q := fmt.Sprintf(`SHOW VIEWS IN SCHEMA %s`, Qualify(db, schema))
 
 	rows, err := c.queryCtx(ctx, q)
 	if err != nil {
@@ -466,10 +466,9 @@ func (c *Client) resolveProcedureRef(ctx context.Context, ref sqlRef, vis depVis
 	// SHOW PROCEDURES returns all overloads; we need the argument signature to
 	// call GET_DDL for each one.
 	query := fmt.Sprintf(
-		`SHOW PROCEDURES LIKE '%s' IN SCHEMA %s.%s`,
+		`SHOW PROCEDURES LIKE '%s' IN SCHEMA %s`,
 		EscapeStringLit(ref.name),
-		QuoteIdent(ref.db),
-		QuoteIdent(ref.schema),
+		Qualify(ref.db, ref.schema),
 	)
 	rows, err := c.queryCtx(ctx, query)
 	if err != nil {
