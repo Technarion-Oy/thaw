@@ -675,12 +675,20 @@ export default function CortexSearchServicePropertiesModal({ db, schema, name, o
 
   const addScoringProfile = async () => {
     const pn = profileName.trim();
-    const def = profileDef.trim();
+    let def = profileDef.trim();
     if (pn === "" || def === "") return;
+    // The scoring-profile body is a single-quoted JSON string literal, e.g.
+    // ADD SCORING PROFILE <name> '{ "functions": { … } }'. Accept either a bare
+    // JSON object (wrap + escape it via q1, which doubles backslashes so JSON
+    // escapes survive Snowflake's string-literal parsing) or an already-quoted
+    // literal (use verbatim).
+    if (!def.startsWith("'")) {
+      def = q1(def);
+    }
     setBusy(true);
     setActionError(null);
     try {
-      await AlterCortexSearchService(db, schema, name, `ADD SCORING PROFILE "${pn.replace(/"/g, '""')}"\n${def}`);
+      await AlterCortexSearchService(db, schema, name, `ADD SCORING PROFILE ${qId(pn)} ${def}`);
       setProfileName("");
       setProfileDef("");
       await reload();
@@ -697,7 +705,7 @@ export default function CortexSearchServicePropertiesModal({ db, schema, name, o
     setBusy(true);
     setActionError(null);
     try {
-      await AlterCortexSearchService(db, schema, name, `DROP SCORING PROFILE IF EXISTS "${pn.replace(/"/g, '""')}"`);
+      await AlterCortexSearchService(db, schema, name, `DROP SCORING PROFILE IF EXISTS ${qId(pn)}`);
       setDropProfileName("");
       await reload();
     } catch (e) {
@@ -932,6 +940,9 @@ export default function CortexSearchServicePropertiesModal({ db, schema, name, o
 
           <div style={SECTION_HEAD}>Scoring Profiles</div>
           <Space direction="vertical" size={8} style={{ width: "100%" }}>
+            <Text type="secondary" style={{ fontSize: 11 }}>
+              The profile body is a JSON scoring config (numeric boosts / time decays). Enter the JSON object — it is quoted as a string literal automatically.
+            </Text>
             <Input
               size="small"
               placeholder="profile name"
@@ -942,8 +953,8 @@ export default function CortexSearchServicePropertiesModal({ db, schema, name, o
             <Input.TextArea
               value={profileDef}
               onChange={(e) => setProfileDef(e.target.value)}
-              placeholder={"functions = (\n  numeric_boosts = [ { column = 'POPULARITY' } ]\n)"}
-              autoSize={{ minRows: 3, maxRows: 8 }}
+              placeholder={'{\n  "functions": {\n    "numeric_boosts": [ { "column": "LIKES", "weight": 2 } ],\n    "time_decays": [ { "column": "CREATED_AT", "weight": 1, "limit_hours": 120 } ]\n  }\n}'}
+              autoSize={{ minRows: 4, maxRows: 10 }}
               style={{ fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace", fontSize: 11 }}
             />
             <Space>
