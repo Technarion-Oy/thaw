@@ -66,24 +66,18 @@ func targetLagClause(lag string) string {
 func BuildCreateDynamicTableSql(db, schema string, cfg DynamicTableConfig) (string, error) {
 	var sb strings.Builder
 
-	createClause := "CREATE"
-	if cfg.OrReplace {
-		createClause += " OR REPLACE"
-	}
+	body := "DYNAMIC TABLE"
 	if cfg.Transient {
-		createClause += " TRANSIENT"
+		body = "TRANSIENT " + body
 	}
-	createClause += " DYNAMIC TABLE"
-	if cfg.IfNotExists && !cfg.OrReplace {
-		createClause += " IF NOT EXISTS"
+	createClause := snowflake.CreateClause(body, cfg.OrReplace, cfg.IfNotExists)
+
+	name := cfg.Name
+	if name == "" {
+		name = "dynamic_table_name"
 	}
 
-	nameToken := snowflake.QuoteOrBare(cfg.Name, cfg.CaseSensitive)
-	if cfg.Name == "" {
-		nameToken = "dynamic_table_name"
-	}
-
-	fmt.Fprintf(&sb, "%s %s.%s.%s", createClause, snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), nameToken)
+	fmt.Fprintf(&sb, "%s %s", createClause, snowflake.QualifyOrBare(db, schema, name, cfg.CaseSensitive))
 
 	lag := strings.TrimSpace(cfg.TargetLag)
 	if lag == "" {
@@ -120,9 +114,7 @@ func BuildCreateDynamicTableSql(db, schema string, cfg DynamicTableConfig) (stri
 	if mde := strings.TrimSpace(cfg.MaxDataExtensionTimeInDays); mde != "" {
 		fmt.Fprintf(&sb, "\n  MAX_DATA_EXTENSION_TIME_IN_DAYS = %s", mde)
 	}
-	if cfg.Comment != "" {
-		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment))
-	}
+	sb.WriteString(snowflake.CommentClause(cfg.Comment))
 	if cfg.CopyGrants {
 		fmt.Fprintf(&sb, "\n  COPY GRANTS")
 	}

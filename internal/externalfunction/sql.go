@@ -74,22 +74,19 @@ type ExternalFunctionConfig struct {
 func BuildCreateExternalFunctionSql(db, schema string, cfg ExternalFunctionConfig) (string, error) {
 	var sb strings.Builder
 
-	createClause := "CREATE"
-	if cfg.OrReplace {
-		createClause += " OR REPLACE"
-	}
+	body := "EXTERNAL FUNCTION"
 	if cfg.Secure {
-		createClause += " SECURE"
+		body = "SECURE " + body
 	}
-	createClause += " EXTERNAL FUNCTION"
+	createClause := snowflake.CreateClause(body, cfg.OrReplace, false)
 
-	nameToken := snowflake.QuoteOrBare(cfg.Name, cfg.CaseSensitive)
-	if cfg.Name == "" {
-		nameToken = "external_function_name"
+	name := cfg.Name
+	if name == "" {
+		name = "external_function_name"
 	}
 
-	fmt.Fprintf(&sb, "%s %s.%s.%s(%s)", createClause,
-		snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), nameToken, buildArgList(cfg.Args))
+	fmt.Fprintf(&sb, "%s %s(%s)", createClause,
+		snowflake.QualifyOrBare(db, schema, name, cfg.CaseSensitive), buildArgList(cfg.Args))
 
 	returns := strings.TrimSpace(cfg.Returns)
 	if returns == "" {
@@ -106,9 +103,7 @@ func BuildCreateExternalFunctionSql(db, schema string, cfg ExternalFunctionConfi
 	if vol := strings.TrimSpace(cfg.Volatility); vol != "" {
 		fmt.Fprintf(&sb, "\n  %s", strings.ToUpper(vol))
 	}
-	if cfg.Comment != "" {
-		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment))
-	}
+	sb.WriteString(snowflake.CommentClause(cfg.Comment))
 
 	api := strings.TrimSpace(cfg.ApiIntegration)
 	if api == "" {

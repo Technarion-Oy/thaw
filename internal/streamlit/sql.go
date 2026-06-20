@@ -52,24 +52,15 @@ type StreamlitConfig struct {
 func BuildCreateStreamlitSql(db, schema string, cfg StreamlitConfig) (string, error) {
 	var sb strings.Builder
 
-	createClause := "CREATE"
-	if cfg.OrReplace {
-		createClause += " OR REPLACE"
-	}
-	createClause += " STREAMLIT"
-	// IF NOT EXISTS is incompatible with OR REPLACE; only emit it when OR
-	// REPLACE is not set.
-	if cfg.IfNotExists && !cfg.OrReplace {
-		createClause += " IF NOT EXISTS"
+	createClause := snowflake.CreateClause("STREAMLIT", cfg.OrReplace, cfg.IfNotExists)
+
+	name := cfg.Name
+	if name == "" {
+		name = "streamlit_name"
 	}
 
-	nameToken := snowflake.QuoteOrBare(cfg.Name, cfg.CaseSensitive)
-	if cfg.Name == "" {
-		nameToken = "streamlit_name"
-	}
-
-	fmt.Fprintf(&sb, "%s %s.%s.%s", createClause,
-		snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), nameToken)
+	fmt.Fprintf(&sb, "%s %s", createClause,
+		snowflake.QualifyOrBare(db, schema, name, cfg.CaseSensitive))
 
 	// FROM <stage location> is a bare stage-path reference (the modern form),
 	// not a quoted string literal. The legacy ROOT_LOCATION grammar is not used.
@@ -93,9 +84,7 @@ func BuildCreateStreamlitSql(db, schema string, cfg StreamlitConfig) (string, er
 	if t := strings.TrimSpace(cfg.Title); t != "" {
 		fmt.Fprintf(&sb, "\n  TITLE = '%s'", snowflake.EscapeStringLit(t))
 	}
-	if cfg.Comment != "" {
-		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment))
-	}
+	sb.WriteString(snowflake.CommentClause(cfg.Comment))
 
 	return sb.String() + ";", nil
 }

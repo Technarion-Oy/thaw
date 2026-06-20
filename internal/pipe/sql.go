@@ -56,21 +56,14 @@ func validateCopyStatement(rawStmt string) (string, error) {
 func BuildCreatePipeSql(db, schema string, cfg PipeConfig) (string, error) {
 	var sb strings.Builder
 
-	createClause := "CREATE"
-	if cfg.OrReplace {
-		createClause += " OR REPLACE"
-	}
-	createClause += " PIPE"
-	if cfg.IfNotExists && !cfg.OrReplace {
-		createClause += " IF NOT EXISTS"
+	createClause := snowflake.CreateClause("PIPE", cfg.OrReplace, cfg.IfNotExists)
+
+	name := cfg.Name
+	if name == "" {
+		name = "pipe_name"
 	}
 
-	nameToken := snowflake.QuoteOrBare(cfg.Name, cfg.CaseSensitive)
-	if cfg.Name == "" {
-		nameToken = "pipe_name"
-	}
-
-	fmt.Fprintf(&sb, "%s %s.%s.%s", createClause, snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), nameToken)
+	fmt.Fprintf(&sb, "%s %s", createClause, snowflake.QualifyOrBare(db, schema, name, cfg.CaseSensitive))
 
 	if cfg.AutoIngest {
 		fmt.Fprintf(&sb, "\n  AUTO_INGEST = TRUE")
@@ -84,9 +77,7 @@ func BuildCreatePipeSql(db, schema string, cfg PipeConfig) (string, error) {
 	if cfg.Integration != "" {
 		fmt.Fprintf(&sb, "\n  INTEGRATION = '%s'", snowflake.EscapeStringLit(cfg.Integration))
 	}
-	if cfg.Comment != "" {
-		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment))
-	}
+	sb.WriteString(snowflake.CommentClause(cfg.Comment))
 
 	copyStmt := strings.TrimSpace(cfg.CopyStatement)
 	if copyStmt == "" {

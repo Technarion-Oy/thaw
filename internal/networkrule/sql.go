@@ -50,19 +50,15 @@ type NetworkRuleConfig struct {
 func BuildCreateNetworkRuleSql(db, schema string, cfg NetworkRuleConfig) (string, error) {
 	var sb strings.Builder
 
-	createClause := "CREATE"
-	if cfg.OrReplace {
-		createClause += " OR REPLACE"
-	}
-	createClause += " NETWORK RULE"
+	createClause := snowflake.CreateClause("NETWORK RULE", cfg.OrReplace, false)
 
-	nameToken := snowflake.QuoteOrBare(cfg.Name, cfg.CaseSensitive)
-	if cfg.Name == "" {
-		nameToken = "network_rule_name"
+	name := cfg.Name
+	if name == "" {
+		name = "network_rule_name"
 	}
 
-	fmt.Fprintf(&sb, "%s %s.%s.%s", createClause,
-		snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), nameToken)
+	fmt.Fprintf(&sb, "%s %s", createClause,
+		snowflake.QualifyOrBare(db, schema, name, cfg.CaseSensitive))
 
 	ruleType := strings.TrimSpace(cfg.Type)
 	if ruleType == "" {
@@ -91,9 +87,7 @@ func BuildCreateNetworkRuleSql(db, schema string, cfg NetworkRuleConfig) (string
 	}
 	fmt.Fprintf(&sb, "\n  MODE = %s", mode)
 
-	if cfg.Comment != "" {
-		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment))
-	}
+	sb.WriteString(snowflake.CommentClause(cfg.Comment))
 
 	return sb.String() + ";", nil
 }

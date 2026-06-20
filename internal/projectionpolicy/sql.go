@@ -49,22 +49,15 @@ type ProjectionPolicyConfig struct {
 func BuildCreateProjectionPolicySql(db, schema string, cfg ProjectionPolicyConfig) (string, error) {
 	var sb strings.Builder
 
-	createClause := "CREATE"
-	if cfg.OrReplace {
-		createClause += " OR REPLACE"
-	}
-	createClause += " PROJECTION POLICY"
-	if cfg.IfNotExists && !cfg.OrReplace {
-		createClause += " IF NOT EXISTS"
+	createClause := snowflake.CreateClause("PROJECTION POLICY", cfg.OrReplace, cfg.IfNotExists)
+
+	name := cfg.Name
+	if name == "" {
+		name = "projection_policy_name"
 	}
 
-	nameToken := snowflake.QuoteOrBare(cfg.Name, cfg.CaseSensitive)
-	if cfg.Name == "" {
-		nameToken = "projection_policy_name"
-	}
-
-	fmt.Fprintf(&sb, "%s %s.%s.%s AS () RETURNS PROJECTION_CONSTRAINT ->", createClause,
-		snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), nameToken)
+	fmt.Fprintf(&sb, "%s %s AS () RETURNS PROJECTION_CONSTRAINT ->", createClause,
+		snowflake.QualifyOrBare(db, schema, name, cfg.CaseSensitive))
 
 	// The body is raw SQL (not a string literal), so it is emitted verbatim. A
 	// blank body becomes a sensible allow-projection constraint so the preview
@@ -75,9 +68,7 @@ func BuildCreateProjectionPolicySql(db, schema string, cfg ProjectionPolicyConfi
 	}
 	fmt.Fprintf(&sb, "\n  %s", body)
 
-	if cfg.Comment != "" {
-		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment))
-	}
+	sb.WriteString(snowflake.CommentClause(cfg.Comment))
 
 	return sb.String() + ";", nil
 }
