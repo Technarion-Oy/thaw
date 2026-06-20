@@ -941,7 +941,7 @@ export default function CortexSearchServicePropertiesModal({ db, schema, name, o
           <div style={SECTION_HEAD}>Scoring Profiles</div>
           <Space direction="vertical" size={8} style={{ width: "100%" }}>
             <Text type="secondary" style={{ fontSize: 11 }}>
-              The profile body is a JSON scoring config (numeric boosts / time decays). Enter the JSON object — it is quoted as a string literal automatically.
+              The profile body is a JSON scoring config (numeric boosts / time decays). Enter the JSON object — it is quoted as a string literal automatically. (If you wrap it in single quotes yourself, escape any internal single quotes.)
             </Text>
             <Input
               size="small"

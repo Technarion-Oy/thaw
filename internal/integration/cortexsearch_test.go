@@ -150,9 +150,10 @@ func TestCortexSearchServiceGrammar(t *testing.T) {
 	alter("unset_tag", fmt.Sprintf(`UNSET TAG %s`, tagFQN))
 
 	// Scoring profiles. The body is a single-quoted JSON scoring config (the form
-	// the properties modal now wraps for the user).
+	// the properties modal wraps for the user). The clauses mirror exactly what the
+	// modal emits: bare ADD (no IF NOT EXISTS) and DROP ... IF EXISTS.
 	profileBody := `'{ "functions": { "numeric_boosts": [ { "column": "LIKES", "weight": 2 } ], "time_decays": [ { "column": "CREATED_AT", "weight": 1, "limit_hours": 120 } ] } }'`
-	alter("add_scoring_profile", fmt.Sprintf(`ADD SCORING PROFILE IF NOT EXISTS "SP1" %s`, profileBody))
+	alter("add_scoring_profile", fmt.Sprintf(`ADD SCORING PROFILE "SP1" %s`, profileBody))
 	alter("drop_scoring_profile", `DROP SCORING PROFILE IF EXISTS "SP1"`)
 
 	// ── TAG_REFERENCES object domain used by GetCortexSearchServiceTags ───────
