@@ -90,7 +90,7 @@ func TestFormatRoleGrant(t *testing.T) {
 			priv:   "SELECT",
 			onType: "TABLE",
 			obj:    `"MY_TABLE"`,
-			role:   `MY""ROLE`,
+			role:   `MY"ROLE`,
 			want:   `GRANT SELECT ON TABLE "MY_TABLE" TO ROLE "MY""ROLE";`,
 		},
 		{

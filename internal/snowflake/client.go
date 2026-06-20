@@ -1972,7 +1972,7 @@ func (c *Client) CanManageUsers(ctx context.Context, role string) (bool, error) 
 //   - SHOW GRANTS ON ROLE "<name>"   → GRANT ROLE … TO ROLE/USER statements
 func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
 	escapedLike := EscapeStringLit(name)
-	escapedIdent := strings.ReplaceAll(name, `"`, `""`)
+	quotedIdent := QuoteIdent(name)
 
 	// ── Comment from SHOW ROLES LIKE ────────────────────────────────────────
 	var comment string
@@ -2005,7 +2005,7 @@ func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
 		sb.WriteString("-- cannot be executed. Do not run this script.\n\n")
 	}
 
-	sb.WriteString(fmt.Sprintf("CREATE ROLE IF NOT EXISTS \"%s\"", escapedIdent))
+	sb.WriteString(fmt.Sprintf("CREATE ROLE IF NOT EXISTS %s", quotedIdent))
 	if comment != "" {
 		sb.WriteString(fmt.Sprintf("\n  COMMENT = '%s'",
 			EscapeStringLit(comment)))
@@ -2014,7 +2014,7 @@ func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
 
 	// ── SHOW GRANTS TO ROLE → privileges granted to this role ────────────────
 	if rows, err := c.queryCtx(ctx,
-		fmt.Sprintf(`SHOW GRANTS TO ROLE "%s"`, escapedIdent)); err == nil {
+		fmt.Sprintf(`SHOW GRANTS TO ROLE %s`, quotedIdent)); err == nil {
 		cols, _ := rows.Columns()
 		idxs := colIndexMap(cols, "privilege", "granted_on", "name", "grant_option")
 		for rows.Next() {
@@ -2029,14 +2029,14 @@ func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
 			if priv == "" || onType == "" {
 				continue
 			}
-			sb.WriteString(FormatRoleGrant(priv, onType, obj, escapedIdent, opt) + "\n")
+			sb.WriteString(FormatRoleGrant(priv, onType, obj, name, opt) + "\n")
 		}
 		rows.Close() //nolint:errcheck
 	}
 
 	// ── SHOW GRANTS ON ROLE → who this role is granted to ────────────────────
 	if rows, err := c.queryCtx(ctx,
-		fmt.Sprintf(`SHOW GRANTS ON ROLE "%s"`, escapedIdent)); err == nil {
+		fmt.Sprintf(`SHOW GRANTS ON ROLE %s`, quotedIdent)); err == nil {
 		cols, _ := rows.Columns()
 		idxs := colIndexMap(cols, "granted_to", "grantee_name")
 		for rows.Next() {
@@ -2049,9 +2049,8 @@ func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
 			if grantedTo == "" || grantee == "" {
 				continue
 			}
-			sb.WriteString(fmt.Sprintf("GRANT ROLE \"%s\" TO %s \"%s\";\n",
-				escapedIdent, grantedTo,
-				strings.ReplaceAll(grantee, `"`, `""`)))
+			sb.WriteString(fmt.Sprintf("GRANT ROLE %s TO %s %s;\n",
+				quotedIdent, grantedTo, QuoteIdent(grantee)))
 		}
 		rows.Close() //nolint:errcheck
 	}
@@ -2062,29 +2061,32 @@ func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 // FormatRoleGrant builds a single GRANT statement line for a role DDL export.
-// Special cases handled:
+// role is the raw role name and is double-quoted via QuoteIdent; obj is the raw
+// object name only for the ON ROLE case (also quoted) and otherwise an
+// already-qualified reference inserted verbatim. Special cases handled:
 //   - ON ACCOUNT: object name is omitted (Snowflake requires bare ON ACCOUNT)
 //   - USAGE ON ROLE: converted to GRANT ROLE ... TO ROLE ... (the executable
 //     form of role membership); WITH GRANT OPTION is dropped because
 //     GRANT ROLE ... WITH GRANT OPTION is not valid Snowflake syntax
-func FormatRoleGrant(priv, onType, obj, escapedRole string, withGrantOption bool) string {
+func FormatRoleGrant(priv, onType, obj, role string, withGrantOption bool) string {
+	quotedRole := QuoteIdent(role)
 	var stmt string
 	switch {
 	case strings.EqualFold(onType, "ROLE"):
 		// Quote the child role name — SHOW GRANTS returns bare identifiers even
 		// for mixed-case roles (e.g. "My_Role" → My_Role in the name column).
-		escapedChild := strings.ReplaceAll(obj, `"`, `""`)
+		quotedChild := QuoteIdent(obj)
 		if strings.EqualFold(priv, "USAGE") {
 			// USAGE on ROLE is Snowflake's internal representation of role membership.
 			// The executable form is GRANT ROLE <name> TO ROLE <parent>.
 			// WITH GRANT OPTION is not valid for GRANT ROLE statements.
-			return fmt.Sprintf("GRANT ROLE \"%s\" TO ROLE \"%s\";", escapedChild, escapedRole)
+			return fmt.Sprintf("GRANT ROLE %s TO ROLE %s;", quotedChild, quotedRole)
 		}
-		stmt = fmt.Sprintf("GRANT %s ON ROLE \"%s\" TO ROLE \"%s\"", priv, escapedChild, escapedRole)
+		stmt = fmt.Sprintf("GRANT %s ON ROLE %s TO ROLE %s", priv, quotedChild, quotedRole)
 	case strings.EqualFold(onType, "ACCOUNT"):
-		stmt = fmt.Sprintf("GRANT %s ON ACCOUNT TO ROLE \"%s\"", priv, escapedRole)
+		stmt = fmt.Sprintf("GRANT %s ON ACCOUNT TO ROLE %s", priv, quotedRole)
 	default:
-		stmt = fmt.Sprintf("GRANT %s ON %s %s TO ROLE \"%s\"", priv, onType, obj, escapedRole)
+		stmt = fmt.Sprintf("GRANT %s ON %s %s TO ROLE %s", priv, onType, obj, quotedRole)
 	}
 	if withGrantOption {
 		stmt += " WITH GRANT OPTION"
@@ -4514,7 +4516,7 @@ func buildCreateTableSQL(stageAt, tableRef, fmtRef string, p ImportTableParams) 
 		ffClause = fmt.Sprintf("FILE_FORMAT=>'%s'", EscapeStringLit(fmtRef))
 	} else if p.NamedFormat != "" {
 		// User-selected existing named format.
-		qualifiedFmt := QuoteIdent(p.Database) + "." + QuoteIdent(p.Schema) + "." + QuoteIdent(p.NamedFormat)
+		qualifiedFmt := Qualify(p.Database, p.Schema, p.NamedFormat)
 		ffClause = fmt.Sprintf("FILE_FORMAT=>%s", qualifiedFmt)
 	} else {
 		// Inline options.
@@ -4531,7 +4533,7 @@ func buildCreateTableSQL(stageAt, tableRef, fmtRef string, p ImportTableParams) 
 // buildImportCopySQL returns the COPY INTO <table> FROM @stage statement.
 func buildImportCopySQL(stageAt, tableRef string, p ImportTableParams) string {
 	if p.NamedFormat != "" {
-		qualifiedFmt := QuoteIdent(p.Database) + "." + QuoteIdent(p.Schema) + "." + QuoteIdent(p.NamedFormat)
+		qualifiedFmt := Qualify(p.Database, p.Schema, p.NamedFormat)
 		return fmt.Sprintf(
 			"COPY INTO %s\nFROM %s\nFILE_FORMAT = (FORMAT_NAME = %s)\nMATCH_BY_COLUMN_NAME = CASE_INSENSITIVE\nFORCE = TRUE",
 			tableRef, stageAt, qualifiedFmt)
