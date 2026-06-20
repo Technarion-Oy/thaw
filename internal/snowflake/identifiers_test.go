@@ -391,6 +391,44 @@ func TestParseSqlList(t *testing.T) {
 	}
 }
 
+func TestParseSqlListVerbatim(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want []string
+	}{
+		{"sql tuple of quoted literals", "('numpy', 'pandas==2.*')", []string{"numpy", "pandas==2.*"}},
+		{"json array of quoted strings", `["numpy", "scipy>=1.0"]`, []string{"numpy", "scipy>=1.0"}},
+		// The key difference vs ParseSqlList: operators inside a BARE element survive.
+		{"bare bracketed compound element", "[numpy==1.26.4, pandas]", []string{"numpy==1.26.4", "pandas"}},
+		{"bare comma list", "numpy==1.26.4, pandas", []string{"numpy==1.26.4", "pandas"}},
+		{"bare wildcard", "(*)", []string{"*"}},
+		{"quoted wildcard", "('*')", []string{"*"}},
+		{"newline-pretty array", "[\n  \"numpy\",\n  \"scipy>=1.0\"\n]", []string{"numpy", "scipy>=1.0"}},
+		{"escaped single quote", "('it''s')", []string{"it's"}},
+		{"comma inside quoted literal is kept", "('a,b', 'c')", []string{"a,b", "c"}},
+		{"nested parens don't split", "(foo(1, 2), bar)", []string{"foo(1, 2)", "bar"}},
+		{"bare single token", "numpy", []string{"numpy"}},
+		{"empty cell", "", nil},
+		{"empty brackets", "[]", nil},
+		{"empty parens", "()", nil},
+		{"null cell", "null", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseSqlListVerbatim(tt.raw)
+			if len(got) != len(tt.want) {
+				t.Fatalf("ParseSqlListVerbatim(%q) = %#v, want %#v", tt.raw, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("ParseSqlListVerbatim(%q)[%d] = %q, want %q", tt.raw, i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
 func TestFormatStringLitList(t *testing.T) {
 	tests := []struct {
 		name   string

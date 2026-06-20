@@ -330,6 +330,100 @@ func ParseSqlList(raw string) []string {
 	return out
 }
 
+// ParseSqlListVerbatim parses a DESCRIBE list cell — a SQL tuple ('a', 'b'), a
+// bracketed list [a, b] or ["a","b"], or a bare comma-separated list — into its
+// elements, like ParseSqlList but PRESERVING each element's internal text.
+//
+// ParseSqlList runs the tokenizer and keeps only value tokens, discarding
+// operators — so a bare, unquoted compound element such as a package version
+// specifier "numpy==1.26.4" is split into "numpy" and "1.26.4". ParseSqlListVerbatim
+// instead groups the tokens between top-level commas and reconstructs each
+// element from the source span: a single quoted token (string literal or quoted
+// identifier) is unquoted (doubled quotes collapsed), and any other element is
+// returned verbatim, so its operators (==, >=, <=, <, >, ::, …) and internal
+// spacing survive. Nesting via ()/[] is tracked so a comma inside a nested group
+// does not split an element, and a comma inside a quoted literal is part of that
+// literal (the tokenizer keeps it). An empty / null cell yields nil.
+//
+// Use this for lists whose elements may be compound (package specs, expressions);
+// use ParseSqlList for lists of plain identifiers/literals where dropping
+// punctuation is desirable.
+func ParseSqlListVerbatim(raw string) []string {
+	if s := strings.TrimSpace(raw); s == "" || strings.EqualFold(s, "null") {
+		return nil
+	}
+	toks := sqltok.Significant(sqltok.Tokenize(raw))
+	if len(toks) == 0 {
+		return nil
+	}
+	// A wrapped list — ( … ) or [ … ] — separates its elements with commas one
+	// level deep; a bare list separates them at the top level. Pick the depth at
+	// which a comma is an element separator accordingly.
+	splitDepth := 0
+	if k := toks[0].Kind; k == sqltok.LParen || k == sqltok.LBracket {
+		splitDepth = 1
+	}
+
+	var out []string
+	var elem []sqltok.Token
+	flush := func() {
+		appendListElem(&out, elem, raw)
+		elem = nil
+	}
+
+	depth := 0
+	for _, tok := range toks {
+		switch tok.Kind {
+		case sqltok.LParen, sqltok.LBracket:
+			depth++
+			if depth == splitDepth {
+				continue // the wrapping bracket itself — not element content
+			}
+		case sqltok.RParen, sqltok.RBracket:
+			if depth == splitDepth {
+				depth--
+				continue // the closing wrapper bracket
+			}
+			depth--
+		case sqltok.Comma:
+			if depth == splitDepth {
+				flush()
+				continue
+			}
+		}
+		elem = append(elem, tok)
+	}
+	flush()
+	return out
+}
+
+// appendListElem reconstructs one element of a ParseSqlListVerbatim list from its
+// significant tokens and appends the (non-empty) result to out: a lone quoted
+// token is unquoted; anything else is taken as the verbatim source span from its
+// first to its last token, so internal operators survive.
+func appendListElem(out *[]string, elem []sqltok.Token, raw string) {
+	if len(elem) == 0 {
+		return
+	}
+	if len(elem) == 1 {
+		switch elem[0].Kind {
+		case sqltok.StringLit:
+			if v := strings.TrimSpace(unquoteSQLToken(elem[0].Text(raw), '\'')); v != "" {
+				*out = append(*out, v)
+			}
+			return
+		case sqltok.QuotedIdent:
+			if v := strings.TrimSpace(unquoteSQLToken(elem[0].Text(raw), '"')); v != "" {
+				*out = append(*out, v)
+			}
+			return
+		}
+	}
+	if v := strings.TrimSpace(raw[elem[0].Start:elem[len(elem)-1].End]); v != "" {
+		*out = append(*out, v)
+	}
+}
+
 // NormalizeScalar reduces a DESCRIBE scalar cell to its bare value, stripping any
 // surrounding brackets/quotes Snowflake may wrap it in — "[OPTIONAL]", "'OPTIONAL'"
 // and "OPTIONAL" all yield "OPTIONAL". It reuses the ParseSqlList tokenizer and

@@ -44,16 +44,15 @@ A packages policy is attached to the account with
   shared `snowflake.FormatStringLitList`), exposed over IPC via
   `App.FormatPackagesPolicyList` so the properties modal builds its
   `ALTER … SET <list> = (…)` clause through the same serializer the builder uses.
-- **`ParseList(raw)`** — the read counterpart: tokenizes a `DESCRIBE PACKAGES
-  POLICY` allow/block-list cell into its package-spec entries (exposed via
-  `App.ParsePackagesPolicyList`). It deliberately does **not** use the general
-  `snowflake.ParseSqlList` SQL tokenizer, which discards operator tokens and
-  would split a bare `numpy==1.26.4` into `numpy`/`1.26.4`. Package specs never
-  contain commas, so it splits on top-level commas/newlines (after stripping one
-  optional surrounding `[ ]`/`( )` layer) and strips one optional quote layer per
-  element — preserving the `==`/`>=`/`<=`/`<`/`>` version operators whether or not
-  Snowflake quotes the entries. Robust to `('a', 'b')`, `["a","b"]`,
-  `[a==1, b]`, and bare comma lists alike.
+- **`ParseList(raw)`** — the read counterpart (exposed via
+  `App.ParsePackagesPolicyList`): a thin delegator to the general
+  `snowflake.ParseSqlListVerbatim`, the tokenizer-driven list parser that
+  reconstructs each element's verbatim text. It is used instead of the general
+  `snowflake.ParseSqlList`, whose tokenizer discards operator tokens and would
+  split a bare `numpy==1.26.4` into `numpy`/`1.26.4` — `ParseSqlListVerbatim`
+  preserves the `==`/`>=`/`<=`/`<`/`>` version operators whether or not Snowflake
+  quotes the entries. Robust to `('a', 'b')`, `["a","b"]`, `[a==1, b]`, and bare
+  comma lists alike.
 
 ## ALTER / DESCRIBE
 

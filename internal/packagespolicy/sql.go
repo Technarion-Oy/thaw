@@ -56,53 +56,14 @@ type PackagesPolicyConfig struct {
 func FormatStringList(tokens []string) string { return snowflake.FormatStringLitList(tokens) }
 
 // ParseList tokenizes a DESCRIBE PACKAGES POLICY allow/block-list cell into its
-// individual package-spec entries. It is deliberately NOT the generic
-// snowflake.ParseSqlList: that runs a SQL tokenizer which discards operator
-// tokens, so a bare (unquoted) version specifier such as "numpy==1.26.4" would
-// be split into "numpy" and "1.26.4" and mangled. Package specs never contain
-// commas, so this instead splits on top-level commas/newlines (after stripping
-// one optional surrounding [ ] or ( ) layer) and strips one optional matching
-// quote layer per element — preserving the "==", ">=", "<=", "<", ">" operators
-// whether or not Snowflake quotes the entries. It is the read counterpart of
-// FormatStringList and is robust to every shape DESCRIBE might use:
-// ('a', 'b'), ["a","b"], [a==1, b], or a bare comma-separated list. An empty /
-// null cell yields nil.
-func ParseList(raw string) []string {
-	s := strings.TrimSpace(raw)
-	if s == "" || strings.EqualFold(s, "null") {
-		return nil
-	}
-	// Strip one surrounding bracket/paren layer if present.
-	if n := len(s); n >= 2 {
-		if (s[0] == '[' && s[n-1] == ']') || (s[0] == '(' && s[n-1] == ')') {
-			s = s[1 : n-1]
-		}
-	}
-	var out []string
-	for _, part := range snowflake.SplitValues(s) {
-		if v := unquoteSpec(part); v != "" {
-			out = append(out, v)
-		}
-	}
-	return out
-}
-
-// unquoteSpec strips one optional surrounding matching quote layer ('…' or "…")
-// from a single package-spec token, collapsing the SQL-doubled quote escape, and
-// trims surrounding whitespace. A bare (unquoted) token is returned trimmed and
-// otherwise verbatim, so its version-specifier operators are preserved.
-func unquoteSpec(s string) string {
-	s = strings.TrimSpace(s)
-	if n := len(s); n >= 2 {
-		switch {
-		case s[0] == '\'' && s[n-1] == '\'':
-			s = strings.ReplaceAll(s[1:n-1], "''", "'")
-		case s[0] == '"' && s[n-1] == '"':
-			s = strings.ReplaceAll(s[1:n-1], `""`, `"`)
-		}
-	}
-	return strings.TrimSpace(s)
-}
+// individual package-spec entries (exposed over IPC via App.ParsePackagesPolicyList).
+// It delegates to snowflake.ParseSqlListVerbatim — the tokenizer-driven list
+// parser that preserves each element's verbatim text — rather than the general
+// snowflake.ParseSqlList, whose tokenizer discards operator tokens and would split
+// a bare version specifier such as "numpy==1.26.4" into "numpy"/"1.26.4". This is
+// the read counterpart of FormatStringList and is robust to every shape DESCRIBE
+// might use: ('a', 'b'), ["a","b"], [a==1, b], or a bare comma list.
+func ParseList(raw string) []string { return snowflake.ParseSqlListVerbatim(raw) }
 
 // BuildCreatePackagesPolicySql constructs a CREATE PACKAGES POLICY statement
 // from the given config. LANGUAGE PYTHON is always emitted; only the list
