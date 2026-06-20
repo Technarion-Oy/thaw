@@ -1611,25 +1611,21 @@ func (c *Client) ListIntegrations(ctx context.Context, kind string) ([]Integrati
 
 // DropIntegration drops the named integration.
 func (c *Client) DropIntegration(ctx context.Context, name string) error {
-	_, err := c.execCtx(ctx, fmt.Sprintf(`DROP INTEGRATION %s`, QuoteIdent(name)))
+	_, err := c.execCtx(ctx, dropIntegrationStmt(name))
 	return err
 }
 
-// DropDatabase drops a database. mode must be "CASCADE" or "RESTRICT".
+// DropDatabase drops a database. mode should be "CASCADE" or "RESTRICT"; any
+// other value defaults to CASCADE (see normalizeDropMode).
 func (c *Client) DropDatabase(ctx context.Context, name string, mode string) error {
-	if mode != "CASCADE" && mode != "RESTRICT" {
-		mode = "CASCADE"
-	}
-	_, err := c.execCtx(ctx, fmt.Sprintf(`DROP DATABASE %s %s`, QuoteIdent(name), mode))
+	_, err := c.execCtx(ctx, dropDatabaseStmt(name, mode))
 	return err
 }
 
-// DropSchema drops a schema. mode must be "CASCADE" or "RESTRICT".
+// DropSchema drops a schema. mode should be "CASCADE" or "RESTRICT"; any other
+// value defaults to CASCADE (see normalizeDropMode).
 func (c *Client) DropSchema(ctx context.Context, database, schema string, mode string) error {
-	if mode != "CASCADE" && mode != "RESTRICT" {
-		mode = "CASCADE"
-	}
-	_, err := c.execCtx(ctx, fmt.Sprintf(`DROP SCHEMA %s %s`, Qualify(database, schema), mode))
+	_, err := c.execCtx(ctx, dropSchemaStmt(database, schema, mode))
 	return err
 }
 
@@ -1758,7 +1754,7 @@ func (c *Client) roleGrantsPrivilege(
 	role string,
 	acceptedPrivs map[string]bool,
 ) (bool, []string, error) {
-	rows, err := c.queryCtx(ctx, fmt.Sprintf(`SHOW GRANTS TO ROLE %s`, QuoteIdent(role)))
+	rows, err := c.queryCtx(ctx, showGrantsToRoleStmt(role))
 	if err != nil {
 		return false, nil, err
 	}
@@ -1838,7 +1834,7 @@ func (c *Client) collectRoleHierarchy(ctx context.Context, startRole string) (ma
 			continue
 		}
 		seen[upper] = true
-		rows, err := c.queryCtx(ctx, fmt.Sprintf(`SHOW GRANTS TO ROLE %s`, QuoteIdent(role)))
+		rows, err := c.queryCtx(ctx, showGrantsToRoleStmt(role))
 		if err != nil {
 			continue // restricted; skip this role
 		}
@@ -1891,7 +1887,7 @@ func (c *Client) CanModifyUserAuth(ctx context.Context, username string) (bool, 
 	}
 
 	// Check object-level grants on this specific user.
-	rows, err := c.queryCtx(ctx, fmt.Sprintf(`SHOW GRANTS ON USER %s`, QuoteIdent(username)))
+	rows, err := c.queryCtx(ctx, showGrantsOnUserStmt(username))
 	if err != nil {
 		return false, err
 	}
@@ -2007,8 +2003,7 @@ func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
 	sb.WriteString(";\n")
 
 	// ── SHOW GRANTS TO ROLE → privileges granted to this role ────────────────
-	if rows, err := c.queryCtx(ctx,
-		fmt.Sprintf(`SHOW GRANTS TO ROLE %s`, quotedIdent)); err == nil {
+	if rows, err := c.queryCtx(ctx, showGrantsToRoleStmt(name)); err == nil {
 		cols, _ := rows.Columns()
 		idxs := colIndexMap(cols, "privilege", "granted_on", "name", "grant_option")
 		for rows.Next() {
@@ -2029,8 +2024,7 @@ func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
 	}
 
 	// ── SHOW GRANTS ON ROLE → who this role is granted to ────────────────────
-	if rows, err := c.queryCtx(ctx,
-		fmt.Sprintf(`SHOW GRANTS ON ROLE %s`, quotedIdent)); err == nil {
+	if rows, err := c.queryCtx(ctx, showGrantsOnRoleStmt(name)); err == nil {
 		cols, _ := rows.Columns()
 		idxs := colIndexMap(cols, "granted_to", "grantee_name")
 		for rows.Next() {
@@ -2347,7 +2341,7 @@ func (c *Client) listDroppedHistory(ctx context.Context, query string) ([]Droppe
 // ListDroppedSchemas returns schemas in the given database that have been
 // dropped but are still within the Time Travel retention window.
 func (c *Client) ListDroppedSchemas(ctx context.Context, database string) ([]DroppedTable, error) {
-	return c.listDroppedHistory(ctx, fmt.Sprintf(`SHOW SCHEMAS HISTORY IN DATABASE %s`, QuoteIdent(database)))
+	return c.listDroppedHistory(ctx, showSchemasHistoryStmt(database))
 }
 
 // ListDroppedDatabases returns all databases that have been dropped but are

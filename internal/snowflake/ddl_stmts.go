@@ -1,0 +1,68 @@
+// Copyright (c) 2026 Technarion Oy. All rights reserved.
+//
+// This software and its source code are proprietary and confidential.
+// Unauthorized copying, distribution, modification, or use of this software,
+// in whole or in part, is strictly prohibited without prior written permission
+// from Technarion Oy.
+//
+// Commercial use of this software is restricted to parties holding a valid
+// license agreement with Technarion Oy.
+
+package snowflake
+
+// This file holds pure (no I/O) builders for the DROP and SHOW statements whose
+// object names must be quoted. They exist as a unit-testable seam: the executing
+// *Client methods (DropDatabase, GetRoleDDL, CanModifyUserAuth, …) delegate here,
+// so the quoting that guards against bare/reserved/case-sensitive identifiers is
+// asserted by tests rather than relying on a live connection. Every name is run
+// through QuoteIdent/Qualify, which both wrap and escape — never emit an
+// identifier into one of these statements unquoted.
+
+// normalizeDropMode coerces a DROP … drop mode to a valid keyword. RESTRICT is
+// honored; any other value (including the empty string) defaults to CASCADE, the
+// safer choice for the UI's "drop everything" intent.
+func normalizeDropMode(mode string) string {
+	if mode == "RESTRICT" {
+		return "RESTRICT"
+	}
+	return "CASCADE"
+}
+
+// dropIntegrationStmt builds `DROP INTEGRATION "<name>"`.
+func dropIntegrationStmt(name string) string {
+	return "DROP INTEGRATION " + QuoteIdent(name)
+}
+
+// dropDatabaseStmt builds `DROP DATABASE "<name>" <CASCADE|RESTRICT>`.
+func dropDatabaseStmt(name, mode string) string {
+	return "DROP DATABASE " + QuoteIdent(name) + " " + normalizeDropMode(mode)
+}
+
+// dropSchemaStmt builds `DROP SCHEMA "<db>"."<schema>" <CASCADE|RESTRICT>`.
+func dropSchemaStmt(database, schema, mode string) string {
+	return "DROP SCHEMA " + Qualify(database, schema) + " " + normalizeDropMode(mode)
+}
+
+// showGrantsToRoleStmt builds `SHOW GRANTS TO ROLE "<role>"` — the privileges
+// granted to the role. Shared by roleGrantsPrivilege, collectRoleHierarchy and
+// GetRoleDDL.
+func showGrantsToRoleStmt(role string) string {
+	return "SHOW GRANTS TO ROLE " + QuoteIdent(role)
+}
+
+// showGrantsOnRoleStmt builds `SHOW GRANTS ON ROLE "<role>"` — who the role is
+// granted to.
+func showGrantsOnRoleStmt(role string) string {
+	return "SHOW GRANTS ON ROLE " + QuoteIdent(role)
+}
+
+// showGrantsOnUserStmt builds `SHOW GRANTS ON USER "<user>"`.
+func showGrantsOnUserStmt(username string) string {
+	return "SHOW GRANTS ON USER " + QuoteIdent(username)
+}
+
+// showSchemasHistoryStmt builds `SHOW SCHEMAS HISTORY IN DATABASE "<db>"` — used
+// to list dropped (but still within Time Travel) schemas.
+func showSchemasHistoryStmt(database string) string {
+	return "SHOW SCHEMAS HISTORY IN DATABASE " + QuoteIdent(database)
+}
