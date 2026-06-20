@@ -171,6 +171,67 @@ func BuildDescribePackagesPolicyQuery(database, schema, name string) string {
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
 }
 
+// appendPackagesPolicyDesc appends the language and allow/block-list properties
+// from a DESCRIBE PACKAGES POLICY result to pairs. SHOW PACKAGES POLICIES reports
+// only metadata, so DESCRIBE is the only source for these. It handles both shapes
+// DESCRIBE may use, defensively (the exact shape isn't pinned by an integration
+// test): a row-per-property table (columns "property"/"value", like DESCRIBE
+// PASSWORD POLICY) or a single row whose columns are the property names (like
+// DESCRIBE MASKING POLICY). Only the four configuration properties are appended
+// (keys lowercased to match how the modal looks them up); everything else is left
+// to the generic SHOW pairs. A SQL NULL cell becomes an empty string rather than
+// the literal "<nil>". A nil/empty result appends nothing.
+func appendPackagesPolicyDesc(pairs []snowflake.PropertyPair, descRes *snowflake.QueryResult) []snowflake.PropertyPair {
+	if descRes == nil || len(descRes.Rows) == 0 {
+		return pairs
+	}
+	wanted := map[string]bool{
+		"language":                      true,
+		"allowlist":                     true,
+		"blocklist":                     true,
+		"additional_creation_blocklist": true,
+	}
+	cell := func(v any) string {
+		if v == nil {
+			return ""
+		}
+		return fmt.Sprintf("%v", v)
+	}
+	propIdx, valIdx := -1, -1
+	for ci, col := range descRes.Columns {
+		switch strings.ToLower(col) {
+		case "property":
+			propIdx = ci
+		case "value":
+			valIdx = ci
+		}
+	}
+	if propIdx >= 0 && valIdx >= 0 {
+		// Row-per-property shape.
+		for _, row := range descRes.Rows {
+			if propIdx >= len(row) || valIdx >= len(row) {
+				continue
+			}
+			key := strings.ToLower(strings.TrimSpace(cell(row[propIdx])))
+			if wanted[key] {
+				pairs = append(pairs, snowflake.PropertyPair{Key: key, Value: cell(row[valIdx])})
+			}
+		}
+		return pairs
+	}
+	// Single-row-with-columns shape.
+	row := descRes.Rows[0]
+	for ci, col := range descRes.Columns {
+		if ci >= len(row) {
+			break
+		}
+		if wanted[strings.ToLower(col)] {
+			pairs = append(pairs, snowflake.PropertyPair{Key: strings.ToLower(col), Value: cell(row[ci])})
+		}
+	}
+	return pairs
+}
+
 // BuildDescribeNetworkRuleQuery returns the DESCRIBE NETWORK RULE query used to
 // enrich the SHOW NETWORK RULES result with the rule's value_list — which SHOW
 // NETWORK RULES reports only as a count (entries_in_valuelist), not the actual
@@ -324,58 +385,8 @@ func GetObjectProperties(ctx context.Context, client *snowflake.Client, database
 
 	if strings.ToUpper(kind) == "PACKAGES POLICY" {
 		descRes, err := client.Execute(ctx, BuildDescribePackagesPolicyQuery(database, schema, name))
-		if err == nil && len(descRes.Rows) > 0 {
-			// SHOW PACKAGES POLICIES reports only metadata; DESCRIBE supplies the
-			// language and the allow/block lists. Handle both DESCRIBE shapes
-			// defensively: a single row whose columns are the property names, or a
-			// row-per-property table (columns "property"/"value"). Only the four
-			// configuration properties are appended; everything else is left to the
-			// generic SHOW pairs.
-			wanted := map[string]bool{
-				"language":                      true,
-				"allowlist":                     true,
-				"blocklist":                     true,
-				"additional_creation_blocklist": true,
-			}
-			cell := func(v any) string {
-				// Guard against a SQL NULL rendering as the literal "<nil>".
-				if v == nil {
-					return ""
-				}
-				return fmt.Sprintf("%v", v)
-			}
-			propIdx, valIdx := -1, -1
-			for ci, col := range descRes.Columns {
-				switch strings.ToLower(col) {
-				case "property":
-					propIdx = ci
-				case "value":
-					valIdx = ci
-				}
-			}
-			if propIdx >= 0 && valIdx >= 0 {
-				// Row-per-property shape (like DESCRIBE PASSWORD POLICY).
-				for _, row := range descRes.Rows {
-					if propIdx >= len(row) || valIdx >= len(row) {
-						continue
-					}
-					key := strings.ToLower(strings.TrimSpace(cell(row[propIdx])))
-					if wanted[key] {
-						pairs = append(pairs, snowflake.PropertyPair{Key: key, Value: cell(row[valIdx])})
-					}
-				}
-			} else {
-				// Single-row-with-columns shape (like DESCRIBE MASKING POLICY).
-				row := descRes.Rows[0]
-				for ci, col := range descRes.Columns {
-					if ci >= len(row) {
-						break
-					}
-					if wanted[strings.ToLower(col)] {
-						pairs = append(pairs, snowflake.PropertyPair{Key: strings.ToLower(col), Value: cell(row[ci])})
-					}
-				}
-			}
+		if err == nil {
+			pairs = appendPackagesPolicyDesc(pairs, descRes)
 		}
 	}
 
