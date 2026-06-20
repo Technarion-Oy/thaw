@@ -33,14 +33,17 @@ const q1 = (s: string) => `'${s.replace(/\\/g, "\\\\").replace(/'/g, "''")}'`;
 // Double-quote a SQL identifier (doubles embedded double quotes).
 const qId = (s: string) => `"${s.replace(/"/g, '""')}"`;
 
-// Version-name quoting is INTENTIONALLY split by clause, matching the ALTER MODEL
-// grammar (https://docs.snowflake.com/en/sql-reference/sql/alter-model):
-//   • SET DEFAULT_VERSION = '<name>'        → string literal  → q1
-//   • ADD/DROP/MODIFY VERSION <name>, VERSION <name> SET ALIAS → identifier → qId
+// Version-name quoting is split by clause, matching the ALTER MODEL grammar
+// (https://docs.snowflake.com/en/sql-reference/sql/alter-model):
+//   • SET DEFAULT_VERSION = '<name>'                    → string literal → q1
+//   • DROP/MODIFY VERSION <name>, VERSION <name> SET/UNSET ALIAS → identifier → qId
 // These can't be unified — DEFAULT_VERSION takes a literal, the rest take an
-// identifier. There's no case-sensitivity hazard between them because both paths
-// feed the name straight from Snowflake's own output (the default_version_name
-// property / the SHOW VERSIONS `name` column), not from re-typed user input.
+// identifier. The DROP/MODIFY/ALIAS paths feed qId the name from the SHOW VERSIONS
+// `name` column (Snowflake's stored name), so the quoted identifier always matches.
+// DEFAULT_VERSION is free-text user input (pre-filled with default_version_name);
+// q1 just escapes it safely — Snowflake matches the literal against the stored
+// name. New version names (ADD VERSION here, WITH VERSION in the create builder)
+// are emitted UNQUOTED so they fold to uppercase like the registry's V1/V2.
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
@@ -665,7 +668,11 @@ function AddVersionDialog({ open, db, schema, onCancel, onSubmit }: AddVersionDi
 
   const submit = async () => {
     if (!canSubmit) return;
-    let clause = `ADD VERSION ${qId(version.trim())} FROM `;
+    // Emit the new version name unquoted so Snowflake folds it to uppercase,
+    // matching the CREATE MODEL … WITH VERSION builder (internal/model/sql.go) and
+    // the registry's V1/V2 convention — otherwise typing `v2` here would create a
+    // case-sensitive "v2" that diverges from versions created elsewhere.
+    let clause = `ADD VERSION ${version.trim()} FROM `;
     if (source.sourceType === "stage") {
       clause += source.stageLocation.trim();
     } else {

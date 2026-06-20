@@ -40,13 +40,19 @@ interface Props {
   onPick: (stage: string, file: string) => void;
   /** Heading shown above the picker. Defaults to a generic instruction. */
   label?: string;
+  /**
+   * Offer the implicit user stage (@~) as a selectable entry. Off by default:
+   * Service / Streamlit require a *named* internal stage (their ROOT_LOCATION /
+   * spec can't live in @~), so only the Model flow opts in.
+   */
+  allowUserStage?: boolean;
 }
 
 // A reusable internal-stage file browser. External stages are filtered out
 // because every consumer (services, streamlits, models, …) references files in
 // an **internal** named stage. Lives in components/shared/ so all object-type
 // create modals can reuse one implementation instead of cloning a tree browser.
-export default function StageFilePicker({ db, schema, onPick, label }: Props) {
+export default function StageFilePicker({ db, schema, onPick, label, allowUserStage }: Props) {
   const [databases, setDatabases] = useState<string[]>([]);
   const [schemas, setSchemas] = useState<string[]>([]);
   const [pickerDb, setPickerDb] = useState(db);
@@ -189,8 +195,8 @@ export default function StageFilePicker({ db, schema, onPick, label }: Props) {
           size="small"
           style={{ width: "100%" }}
           options={[
-            // The user stage is always available and isn't tied to db/schema.
-            { value: USER_STAGE, label: "User Stage (@~)" },
+            // The user stage (when allowed) isn't tied to db/schema.
+            ...(allowUserStage ? [{ value: USER_STAGE, label: "User Stage (@~)" }] : []),
             ...stages.map((s) => ({ value: s.name, label: s.name })),
           ]}
           notFoundContent={loadingStages ? "Loading…" : "No internal stages found"}

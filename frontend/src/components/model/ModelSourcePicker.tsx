@@ -105,6 +105,7 @@ export default function ModelSourcePicker({ db, schema, value, onChange }: Props
             db={db}
             schema={schema}
             label="Browse internal stage — select a file in the model artifact directory"
+            allowUserStage
             onPick={(stage, file) => onChange({ stageLocation: `@${stage}/${file}` })}
           />
         </Form.Item>
