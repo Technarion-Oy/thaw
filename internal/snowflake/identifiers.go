@@ -160,6 +160,20 @@ func CommentClause(comment string) string {
 	return "\n  COMMENT = " + QuoteTextLit(comment)
 }
 
+// CleanList returns items with each entry trimmed of surrounding whitespace and
+// every blank entry dropped, preserving order. It is the slice-in / slice-out
+// counterpart of SplitValues (which tokenizes a delimited string) and underlies
+// the list helpers that quote or join an identifier/column slice.
+func CleanList(items []string) []string {
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		if t := strings.TrimSpace(it); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 // FormatStringLitList renders a token slice into the SQL `('A', 'B')` list
 // grammar — each non-blank token (trimmed) becomes a single-quoted string
 // literal with embedded backslashes/single-quotes escaped via EscapeTextLit.
@@ -167,12 +181,9 @@ func CommentClause(comment string) string {
 // serialization counterpart of ParseSqlList and is shared by the policy builders
 // (authentication / packages) that emit single-quoted-literal list parameters.
 func FormatStringLitList(tokens []string) string {
-	parts := make([]string, 0, len(tokens))
-	for _, t := range tokens {
-		t = strings.TrimSpace(t)
-		if t == "" {
-			continue
-		}
+	cleaned := CleanList(tokens)
+	parts := make([]string, 0, len(cleaned))
+	for _, t := range cleaned {
 		parts = append(parts, "'"+EscapeTextLit(t)+"'")
 	}
 	return "(" + strings.Join(parts, ", ") + ")"
@@ -229,11 +240,10 @@ func SplitValues(s string) []string {
 // QuoteOrBare(name, caseSensitive). Use it when the values already arrive as a
 // slice (e.g. multi-select input); for a delimited string use SplitIdentList.
 func QuoteIdentList(names []string, caseSensitive bool) []string {
-	out := make([]string, 0, len(names))
-	for _, n := range names {
-		if v := strings.TrimSpace(n); v != "" {
-			out = append(out, QuoteOrBare(v, caseSensitive))
-		}
+	cleaned := CleanList(names)
+	out := make([]string, 0, len(cleaned))
+	for _, n := range cleaned {
+		out = append(out, QuoteOrBare(n, caseSensitive))
 	}
 	return out
 }

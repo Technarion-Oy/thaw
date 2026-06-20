@@ -153,10 +153,10 @@ func BuildCreateCortexSearchServiceSql(db, schema string, cfg CortexSearchServic
 	// quoting of case-sensitive names (mirrors how CLUSTER BY expressions are
 	// handled) and so vector index specs like "BODY (model='…')" pass through.
 	if multi {
-		if texts := cleanList(cfg.TextIndexes); len(texts) > 0 {
+		if texts := snowflake.CleanList(cfg.TextIndexes); len(texts) > 0 {
 			fmt.Fprintf(&sb, "\n  TEXT INDEXES %s", strings.Join(texts, ", "))
 		}
-		vecs := cleanList(cfg.VectorIndexes)
+		vecs := snowflake.CleanList(cfg.VectorIndexes)
 		if len(vecs) == 0 {
 			// VECTOR INDEXES requires at least one column for a multi-index service.
 			vecs = []string{"<vector_column>"}
@@ -170,11 +170,11 @@ func BuildCreateCortexSearchServiceSql(db, schema string, cfg CortexSearchServic
 		fmt.Fprintf(&sb, "\n  ON %s", searchColumn)
 	}
 
-	if pk := cleanList(cfg.PrimaryKey); len(pk) > 0 {
+	if pk := snowflake.CleanList(cfg.PrimaryKey); len(pk) > 0 {
 		fmt.Fprintf(&sb, "\n  PRIMARY KEY ( %s )", strings.Join(pk, ", "))
 	}
 
-	if attrs := cleanList(cfg.Attributes); len(attrs) > 0 {
+	if attrs := snowflake.CleanList(cfg.Attributes); len(attrs) > 0 {
 		fmt.Fprintf(&sb, "\n  ATTRIBUTES %s", strings.Join(attrs, ", "))
 	}
 
@@ -229,22 +229,11 @@ func BuildCreateCortexSearchServiceSql(db, schema string, cfg CortexSearchServic
 	return sb.String() + ";", nil
 }
 
-// cleanList trims each entry and drops blanks, preserving order.
-func cleanList(items []string) []string {
-	out := make([]string, 0, len(items))
-	for _, it := range items {
-		if t := strings.TrimSpace(it); t != "" {
-			out = append(out, t)
-		}
-	}
-	return out
-}
-
 // FormatAttributes renders a comma-separated ATTRIBUTES column list (without the
 // surrounding parentheses) for the ALTER … SET ATTRIBUTES ( … ) clause. It is
 // exposed over IPC so the properties modal can build the clause without
 // duplicating the trim/skip-blank logic. Returns "" when no non-blank columns
 // remain.
 func FormatAttributes(columns []string) string {
-	return strings.Join(cleanList(columns), ", ")
+	return strings.Join(snowflake.CleanList(columns), ", ")
 }
