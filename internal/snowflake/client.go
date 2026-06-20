@@ -1292,15 +1292,9 @@ func (c *Client) ListStages(ctx context.Context, database, schema string) ([]Sta
 	stages := make([]StageSummary, 0, len(res.Rows))
 	for _, row := range res.Rows {
 		s := StageSummary{}
-		if nameIdx >= 0 && nameIdx < len(row) {
-			s.Name = CellString(row[nameIdx])
-		}
-		if typeIdx >= 0 && typeIdx < len(row) {
-			s.Type = strings.ToUpper(CellString(row[typeIdx]))
-		}
-		if urlIdx >= 0 && urlIdx < len(row) {
-			s.URL = CellString(row[urlIdx])
-		}
+		s.Name = Cell(row, nameIdx)
+		s.Type = strings.ToUpper(Cell(row, typeIdx))
+		s.URL = Cell(row, urlIdx)
 		if s.Name != "" {
 			stages = append(stages, s)
 		}

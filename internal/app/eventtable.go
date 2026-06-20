@@ -25,13 +25,7 @@ import (
 // is responsible for correct SQL quoting inside the clause; this method only
 // double-quotes the table identifier.
 func (a *App) AlterEventTable(database, schema, name, clause string) error {
-	if a.client == nil {
-		return apperrors.ErrNotConnected
-	}
-	sql := fmt.Sprintf("ALTER TABLE %s.%s.%s %s",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), clause)
-	_, err := a.client.Execute(a.ctx, sql)
-	return err
+	return a.alterObject("TABLE", database, schema, name, clause)
 }
 
 // GetEventTableParameters returns the table-level parameters for an event table

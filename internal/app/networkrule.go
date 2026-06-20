@@ -10,13 +10,6 @@
 
 package app
 
-import (
-	"fmt"
-
-	"thaw/internal/apperrors"
-	"thaw/internal/snowflake"
-)
-
 // AlterNetworkRule runs an ALTER NETWORK RULE statement for the given rule.
 // clause is everything that follows the rule name, e.g.
 // "SET VALUE_LIST = ('a', 'b')", "UNSET VALUE_LIST", "SET COMMENT = '...'", or
@@ -25,11 +18,5 @@ import (
 // responsible for correct SQL quoting inside the clause; this method only
 // double-quotes the rule identifier.
 func (a *App) AlterNetworkRule(database, schema, name, clause string) error {
-	if a.client == nil {
-		return apperrors.ErrNotConnected
-	}
-	sql := fmt.Sprintf("ALTER NETWORK RULE %s.%s.%s %s",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), clause)
-	_, err := a.client.Execute(a.ctx, sql)
-	return err
+	return a.alterObject("NETWORK RULE", database, schema, name, clause)
 }

@@ -17,7 +17,6 @@ package sfconfig
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 
 	"github.com/BurntSushi/toml"
@@ -71,8 +70,8 @@ type Config struct {
 // ── internal TOML shapes ──────────────────────────────────────────────────────
 
 type rawConfig struct {
-	DefaultConnectionName string                    `toml:"default_connection_name"`
-	Connections           map[string]rawConnection  `toml:"connections"`
+	DefaultConnectionName string                   `toml:"default_connection_name"`
+	Connections           map[string]rawConnection `toml:"connections"`
 }
 
 type rawConnection struct {
@@ -113,12 +112,9 @@ type rawConnection struct {
 // Load reads and parses the given Snowflake CLI configuration file.
 // Returns an empty Config (not an error) if the file does not exist.
 func Load(path string) (*Config, error) {
-	if path == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return &Config{}, nil
-		}
-		path = filepath.Join(home, ".snowflake", "config.toml")
+	path, err := resolvePath(path)
+	if err != nil {
+		return nil, err
 	}
 
 	data, err := os.ReadFile(path)

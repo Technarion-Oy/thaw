@@ -29,6 +29,18 @@ func ColIdx(cols []string, names ...string) int {
 	return -1
 }
 
+// Cell safely returns the string value of row[idx], or "" when idx is out of
+// range. It folds the recurring `idx >= 0 && idx < len(row)` bounds-guard (paired
+// with a ColIdx lookup that may return -1) and the CellString conversion into one
+// call, so a SHOW/DESCRIBE row reader can write `Cell(row, ColIdx(cols, "key"))`
+// without a separate guard.
+func Cell(row []any, idx int) string {
+	if idx < 0 || idx >= len(row) {
+		return ""
+	}
+	return CellString(row[idx])
+}
+
 // CellString converts a query-result cell value to a string. []byte is decoded
 // as UTF-8, time.Time is formatted as RFC3339, nil becomes "", and all other
 // types fall back to fmt.Sprintf("%v").

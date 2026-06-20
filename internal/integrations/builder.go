@@ -239,18 +239,6 @@ type SecurityIntegrationParams struct {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-// sq wraps s in single quotes, doubling any embedded single quotes.
-// This is the safe way to embed string literals in Snowflake SQL.
-func sq(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
-}
-
-// qident wraps s in double quotes, doubling any embedded double quotes.
-// Use for SQL identifiers.
-func qident(s string) string {
-	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
-}
-
 // boolKw returns "TRUE" or "FALSE".
 func boolKw(b bool) string {
 	if b {
@@ -264,16 +252,16 @@ func boolKw(b bool) string {
 // and double-quoted (which is equivalent to an unquoted identifier in Snowflake).
 func identToken(name string, caseSensitive bool) string {
 	if caseSensitive {
-		return qident(name)
+		return snowflake.QuoteIdent(name)
 	}
-	return qident(strings.ToUpper(name))
+	return snowflake.QuoteIdent(strings.ToUpper(name))
 }
 
 // squotedTuple returns a parenthesised, single-quoted list: ('a', 'b', 'c')
 func squotedTuple(vals []string) string {
 	quoted := make([]string, len(vals))
 	for i, v := range vals {
-		quoted[i] = sq(v)
+		quoted[i] = snowflake.QuoteStringLit(v)
 	}
 	return "(" + strings.Join(quoted, ", ") + ")"
 }
@@ -378,14 +366,14 @@ func BuildStorageIntegrationSQL(p StorageIntegrationParams) (string, error) {
 	lines := []string{
 		fmt.Sprintf("CREATE STORAGE INTEGRATION %s", name),
 		"  TYPE = EXTERNAL_STAGE",
-		fmt.Sprintf("  STORAGE_PROVIDER = %s", sq(provider)),
+		fmt.Sprintf("  STORAGE_PROVIDER = %s", snowflake.QuoteStringLit(provider)),
 		fmt.Sprintf("  ENABLED = %s", boolKw(p.Enabled)),
 	}
 
 	switch provider {
 	case "S3", "S3GOV":
 		if p.AwsRoleArn != "" {
-			lines = append(lines, fmt.Sprintf("  STORAGE_AWS_ROLE_ARN = %s", sq(p.AwsRoleArn)))
+			lines = append(lines, fmt.Sprintf("  STORAGE_AWS_ROLE_ARN = %s", snowflake.QuoteStringLit(p.AwsRoleArn)))
 		}
 		if t := squotedTupleFromString(p.AllowedLocations); t != "" {
 			lines = append(lines, fmt.Sprintf("  STORAGE_ALLOWED_LOCATIONS = %s", t))
@@ -394,7 +382,7 @@ func BuildStorageIntegrationSQL(p StorageIntegrationParams) (string, error) {
 			lines = append(lines, fmt.Sprintf("  STORAGE_BLOCKED_LOCATIONS = %s", t))
 		}
 		if p.AwsExternalId != "" {
-			lines = append(lines, fmt.Sprintf("  STORAGE_AWS_EXTERNAL_ID = %s", sq(p.AwsExternalId)))
+			lines = append(lines, fmt.Sprintf("  STORAGE_AWS_EXTERNAL_ID = %s", snowflake.QuoteStringLit(p.AwsExternalId)))
 		}
 		if p.UsePrivatelink {
 			lines = append(lines, "  USE_PRIVATELINK_ENDPOINT = TRUE")
@@ -408,7 +396,7 @@ func BuildStorageIntegrationSQL(p StorageIntegrationParams) (string, error) {
 		}
 	case "AZURE":
 		if p.AzureTenantId != "" {
-			lines = append(lines, fmt.Sprintf("  AZURE_TENANT_ID = %s", sq(p.AzureTenantId)))
+			lines = append(lines, fmt.Sprintf("  AZURE_TENANT_ID = %s", snowflake.QuoteStringLit(p.AzureTenantId)))
 		}
 		if t := squotedTupleFromString(p.AllowedLocations); t != "" {
 			lines = append(lines, fmt.Sprintf("  STORAGE_ALLOWED_LOCATIONS = %s", t))
@@ -422,7 +410,7 @@ func BuildStorageIntegrationSQL(p StorageIntegrationParams) (string, error) {
 	}
 
 	if p.Comment != "" {
-		lines = append(lines, fmt.Sprintf("  COMMENT = %s", sq(p.Comment)))
+		lines = append(lines, fmt.Sprintf("  COMMENT = %s", snowflake.QuoteStringLit(p.Comment)))
 	}
 	return strings.Join(lines, "\n"), nil
 }
@@ -461,29 +449,29 @@ func BuildApiIntegrationSQL(p ApiIntegrationParams) (string, error) {
 	switch provider {
 	case "aws_api_gateway", "aws_private_api_gateway":
 		if p.AwsRoleArn != "" {
-			lines = append(lines, fmt.Sprintf("  API_AWS_ROLE_ARN = %s", sq(p.AwsRoleArn)))
+			lines = append(lines, fmt.Sprintf("  API_AWS_ROLE_ARN = %s", snowflake.QuoteStringLit(p.AwsRoleArn)))
 		}
 		if p.ApiKey != "" {
-			lines = append(lines, fmt.Sprintf("  API_KEY = %s", sq(p.ApiKey)))
+			lines = append(lines, fmt.Sprintf("  API_KEY = %s", snowflake.QuoteStringLit(p.ApiKey)))
 		}
 	case "azure_api_management":
 		if p.AzureTenantId != "" {
-			lines = append(lines, fmt.Sprintf("  AZURE_TENANT_ID = %s", sq(p.AzureTenantId)))
+			lines = append(lines, fmt.Sprintf("  AZURE_TENANT_ID = %s", snowflake.QuoteStringLit(p.AzureTenantId)))
 		}
 		if p.AzureAdAppId != "" {
-			lines = append(lines, fmt.Sprintf("  AZURE_AD_APPLICATION_ID = %s", sq(p.AzureAdAppId)))
+			lines = append(lines, fmt.Sprintf("  AZURE_AD_APPLICATION_ID = %s", snowflake.QuoteStringLit(p.AzureAdAppId)))
 		}
 		if p.ApiKey != "" {
-			lines = append(lines, fmt.Sprintf("  API_KEY = %s", sq(p.ApiKey)))
+			lines = append(lines, fmt.Sprintf("  API_KEY = %s", snowflake.QuoteStringLit(p.ApiKey)))
 		}
 	case "google_api_gateway":
 		if p.GoogleAudience != "" {
-			lines = append(lines, fmt.Sprintf("  GOOGLE_AUDIENCE = %s", sq(p.GoogleAudience)))
+			lines = append(lines, fmt.Sprintf("  GOOGLE_AUDIENCE = %s", snowflake.QuoteStringLit(p.GoogleAudience)))
 		}
 	}
 
 	if p.Comment != "" {
-		lines = append(lines, fmt.Sprintf("  COMMENT = %s", sq(p.Comment)))
+		lines = append(lines, fmt.Sprintf("  COMMENT = %s", snowflake.QuoteStringLit(p.Comment)))
 	}
 	return strings.Join(lines, "\n"), nil
 }
@@ -517,7 +505,7 @@ func buildGitHttpsApiSQL(p ApiIntegrationParams) (string, error) {
 	// API_ALLOWED_PREFIXES
 	if mode == "GITHUB_APP" {
 		path := strings.TrimLeft(strings.TrimSpace(p.GithubAppPath), "/")
-		lines = append(lines, fmt.Sprintf("  API_ALLOWED_PREFIXES = (%s)", sq("https://github.com/"+path)))
+		lines = append(lines, fmt.Sprintf("  API_ALLOWED_PREFIXES = (%s)", snowflake.QuoteStringLit("https://github.com/"+path)))
 	} else {
 		if t := squotedTupleFromString(p.AllowedPrefixes); t != "" {
 			lines = append(lines, fmt.Sprintf("  API_ALLOWED_PREFIXES = %s", t))
@@ -549,18 +537,18 @@ func buildGitHttpsApiSQL(p ApiIntegrationParams) (string, error) {
 	case "OAUTH2":
 		oauthLines := []string{"    TYPE = OAUTH2"}
 		if p.OauthClientId != "" {
-			oauthLines = append(oauthLines, fmt.Sprintf("    OAUTH_CLIENT_ID = %s", sq(p.OauthClientId)))
+			oauthLines = append(oauthLines, fmt.Sprintf("    OAUTH_CLIENT_ID = %s", snowflake.QuoteStringLit(p.OauthClientId)))
 		}
 		if p.OauthClientSecret != "" {
-			oauthLines = append(oauthLines, fmt.Sprintf("    OAUTH_CLIENT_SECRET = %s", sq(p.OauthClientSecret)))
+			oauthLines = append(oauthLines, fmt.Sprintf("    OAUTH_CLIENT_SECRET = %s", snowflake.QuoteStringLit(p.OauthClientSecret)))
 		}
 		if p.OauthTokenEndpoint != "" {
-			oauthLines = append(oauthLines, fmt.Sprintf("    OAUTH_TOKEN_ENDPOINT = %s", sq(p.OauthTokenEndpoint)))
+			oauthLines = append(oauthLines, fmt.Sprintf("    OAUTH_TOKEN_ENDPOINT = %s", snowflake.QuoteStringLit(p.OauthTokenEndpoint)))
 		}
 		if p.OauthScopes != "" {
 			var scopeQuoted []string
 			for _, s := range snowflake.SplitValues(p.OauthScopes) {
-				scopeQuoted = append(scopeQuoted, sq(s))
+				scopeQuoted = append(scopeQuoted, snowflake.QuoteStringLit(s))
 			}
 			if len(scopeQuoted) > 0 {
 				oauthLines = append(oauthLines, fmt.Sprintf("    OAUTH_ALLOWED_SCOPES = (%s)", strings.Join(scopeQuoted, ", ")))
@@ -580,7 +568,7 @@ func buildGitHttpsApiSQL(p ApiIntegrationParams) (string, error) {
 
 	lines = append(lines, fmt.Sprintf("  ENABLED = %s", boolKw(p.Enabled)))
 	if p.Comment != "" {
-		lines = append(lines, fmt.Sprintf("  COMMENT = %s", sq(p.Comment)))
+		lines = append(lines, fmt.Sprintf("  COMMENT = %s", snowflake.QuoteStringLit(p.Comment)))
 	}
 	return strings.Join(lines, "\n"), nil
 }
@@ -603,16 +591,16 @@ func BuildCatalogIntegrationSQL(p CatalogIntegrationParams) (string, error) {
 	switch source {
 	case "GLUE":
 		if p.GlueAwsRoleArn != "" {
-			lines = append(lines, fmt.Sprintf("  GLUE_AWS_ROLE_ARN = %s", sq(p.GlueAwsRoleArn)))
+			lines = append(lines, fmt.Sprintf("  GLUE_AWS_ROLE_ARN = %s", snowflake.QuoteStringLit(p.GlueAwsRoleArn)))
 		}
 		if p.GlueCatalogId != "" {
-			lines = append(lines, fmt.Sprintf("  GLUE_CATALOG_ID = %s", sq(p.GlueCatalogId)))
+			lines = append(lines, fmt.Sprintf("  GLUE_CATALOG_ID = %s", snowflake.QuoteStringLit(p.GlueCatalogId)))
 		}
 		if p.GlueRegion != "" {
-			lines = append(lines, fmt.Sprintf("  GLUE_REGION = %s", sq(p.GlueRegion)))
+			lines = append(lines, fmt.Sprintf("  GLUE_REGION = %s", snowflake.QuoteStringLit(p.GlueRegion)))
 		}
 		if p.CatalogNamespace != "" {
-			lines = append(lines, fmt.Sprintf("  CATALOG_NAMESPACE = %s", sq(p.CatalogNamespace)))
+			lines = append(lines, fmt.Sprintf("  CATALOG_NAMESPACE = %s", snowflake.QuoteStringLit(p.CatalogNamespace)))
 		}
 	case "OBJECT_STORE":
 		if p.TableFormat != "" {
@@ -624,13 +612,13 @@ func BuildCatalogIntegrationSQL(p CatalogIntegrationParams) (string, error) {
 		}
 	case "POLARIS":
 		if p.CatalogUri != "" {
-			lines = append(lines, fmt.Sprintf("  CATALOG_URI = %s", sq(p.CatalogUri)))
+			lines = append(lines, fmt.Sprintf("  CATALOG_URI = %s", snowflake.QuoteStringLit(p.CatalogUri)))
 		}
 		if p.CatalogName != "" {
-			lines = append(lines, fmt.Sprintf("  CATALOG_NAME = %s", sq(p.CatalogName)))
+			lines = append(lines, fmt.Sprintf("  CATALOG_NAME = %s", snowflake.QuoteStringLit(p.CatalogName)))
 		}
 		if p.CatalogNamespace != "" {
-			lines = append(lines, fmt.Sprintf("  CATALOG_NAMESPACE = %s", sq(p.CatalogNamespace)))
+			lines = append(lines, fmt.Sprintf("  CATALOG_NAMESPACE = %s", snowflake.QuoteStringLit(p.CatalogNamespace)))
 		}
 		if p.CatalogApiType != "" {
 			at, err := mustBeOneOf("catalogApiType", p.CatalogApiType, "PUBLIC", "PRIVATE")
@@ -643,26 +631,26 @@ func BuildCatalogIntegrationSQL(p CatalogIntegrationParams) (string, error) {
 			lines = append(lines, fmt.Sprintf("  ACCESS_DELEGATION_MODE = %s", p.AccessDelegationMode))
 		}
 		if p.OauthTokenUri != "" {
-			lines = append(lines, fmt.Sprintf("  OAUTH_TOKEN_URI = %s", sq(p.OauthTokenUri)))
+			lines = append(lines, fmt.Sprintf("  OAUTH_TOKEN_URI = %s", snowflake.QuoteStringLit(p.OauthTokenUri)))
 		}
 		if p.OauthClientId != "" {
-			lines = append(lines, fmt.Sprintf("  OAUTH_CLIENT_ID = %s", sq(p.OauthClientId)))
+			lines = append(lines, fmt.Sprintf("  OAUTH_CLIENT_ID = %s", snowflake.QuoteStringLit(p.OauthClientId)))
 		}
 		if p.OauthClientSecret != "" {
-			lines = append(lines, fmt.Sprintf("  OAUTH_CLIENT_SECRET = %s", sq(p.OauthClientSecret)))
+			lines = append(lines, fmt.Sprintf("  OAUTH_CLIENT_SECRET = %s", snowflake.QuoteStringLit(p.OauthClientSecret)))
 		}
 		if p.OauthScopes != "" {
 			lines = append(lines, fmt.Sprintf("  OAUTH_ALLOWED_SCOPES = %s", squotedTupleFromString(p.OauthScopes)))
 		}
 	case "ICEBERG_REST":
 		if p.CatalogUri != "" {
-			lines = append(lines, fmt.Sprintf("  CATALOG_URI = %s", sq(p.CatalogUri)))
+			lines = append(lines, fmt.Sprintf("  CATALOG_URI = %s", snowflake.QuoteStringLit(p.CatalogUri)))
 		}
 		if p.CatalogName != "" {
-			lines = append(lines, fmt.Sprintf("  CATALOG_NAME = %s", sq(p.CatalogName)))
+			lines = append(lines, fmt.Sprintf("  CATALOG_NAME = %s", snowflake.QuoteStringLit(p.CatalogName)))
 		}
 		if p.CatalogNamespace != "" {
-			lines = append(lines, fmt.Sprintf("  CATALOG_NAMESPACE = %s", sq(p.CatalogNamespace)))
+			lines = append(lines, fmt.Sprintf("  CATALOG_NAMESPACE = %s", snowflake.QuoteStringLit(p.CatalogNamespace)))
 		}
 		if p.CatalogApiType != "" {
 			at, err := mustBeOneOf("catalogApiType", p.CatalogApiType,
@@ -688,29 +676,29 @@ func BuildCatalogIntegrationSQL(p CatalogIntegrationParams) (string, error) {
 		switch authType {
 		case "OAUTH":
 			if p.OauthTokenUri != "" {
-				lines = append(lines, fmt.Sprintf("  OAUTH_TOKEN_URI = %s", sq(p.OauthTokenUri)))
+				lines = append(lines, fmt.Sprintf("  OAUTH_TOKEN_URI = %s", snowflake.QuoteStringLit(p.OauthTokenUri)))
 			}
 			if p.OauthClientId != "" {
-				lines = append(lines, fmt.Sprintf("  OAUTH_CLIENT_ID = %s", sq(p.OauthClientId)))
+				lines = append(lines, fmt.Sprintf("  OAUTH_CLIENT_ID = %s", snowflake.QuoteStringLit(p.OauthClientId)))
 			}
 			if p.OauthClientSecret != "" {
-				lines = append(lines, fmt.Sprintf("  OAUTH_CLIENT_SECRET = %s", sq(p.OauthClientSecret)))
+				lines = append(lines, fmt.Sprintf("  OAUTH_CLIENT_SECRET = %s", snowflake.QuoteStringLit(p.OauthClientSecret)))
 			}
 			if p.OauthScopes != "" {
 				lines = append(lines, fmt.Sprintf("  OAUTH_ALLOWED_SCOPES = %s", squotedTupleFromString(p.OauthScopes)))
 			}
 		case "BEARER":
 			if p.BearerToken != "" {
-				lines = append(lines, fmt.Sprintf("  BEARER_TOKEN = %s", sq(p.BearerToken)))
+				lines = append(lines, fmt.Sprintf("  BEARER_TOKEN = %s", snowflake.QuoteStringLit(p.BearerToken)))
 			}
 		}
 
 		if p.Prefix != "" {
-			lines = append(lines, fmt.Sprintf("  PREFIX = %s", sq(p.Prefix)))
+			lines = append(lines, fmt.Sprintf("  PREFIX = %s", snowflake.QuoteStringLit(p.Prefix)))
 		}
 	case "SAP_BDC":
 		if p.SapInvitationLink != "" {
-			lines = append(lines, fmt.Sprintf("  SAP_BDC_INVITATION_LINK = %s", sq(p.SapInvitationLink)))
+			lines = append(lines, fmt.Sprintf("  SAP_BDC_INVITATION_LINK = %s", snowflake.QuoteStringLit(p.SapInvitationLink)))
 		}
 		if p.AccessDelegationMode != "" {
 			lines = append(lines, fmt.Sprintf("  ACCESS_DELEGATION_MODE = %s", p.AccessDelegationMode))
@@ -721,7 +709,7 @@ func BuildCatalogIntegrationSQL(p CatalogIntegrationParams) (string, error) {
 		lines = append(lines, fmt.Sprintf("  REFRESH_INTERVAL_SECONDS = %d", p.RefreshInterval))
 	}
 	if p.Comment != "" {
-		lines = append(lines, fmt.Sprintf("  COMMENT = %s", sq(p.Comment)))
+		lines = append(lines, fmt.Sprintf("  COMMENT = %s", snowflake.QuoteStringLit(p.Comment)))
 	}
 	return strings.Join(lines, "\n"), nil
 }
@@ -763,7 +751,7 @@ func BuildExternalAccessIntegrationSQL(p ExternalAccessIntegrationParams) (strin
 
 	lines = append(lines, fmt.Sprintf("  ENABLED = %s", boolKw(p.Enabled)))
 	if p.Comment != "" {
-		lines = append(lines, fmt.Sprintf("  COMMENT = %s", sq(p.Comment)))
+		lines = append(lines, fmt.Sprintf("  COMMENT = %s", snowflake.QuoteStringLit(p.Comment)))
 	}
 	return strings.Join(lines, "\n"), nil
 }
@@ -791,10 +779,10 @@ func BuildNotificationIntegrationSQL(p NotificationIntegrationParams) (string, e
 			"  DIRECTION = INBOUND",
 		)
 		if p.AzureQueueUri != "" {
-			lines = append(lines, fmt.Sprintf("  AZURE_STORAGE_QUEUE_PRIMARY_URI = %s", sq(p.AzureQueueUri)))
+			lines = append(lines, fmt.Sprintf("  AZURE_STORAGE_QUEUE_PRIMARY_URI = %s", snowflake.QuoteStringLit(p.AzureQueueUri)))
 		}
 		if p.AzureTenantId != "" {
-			lines = append(lines, fmt.Sprintf("  AZURE_TENANT_ID = %s", sq(p.AzureTenantId)))
+			lines = append(lines, fmt.Sprintf("  AZURE_TENANT_ID = %s", snowflake.QuoteStringLit(p.AzureTenantId)))
 		}
 		if p.UsePrivatelink {
 			lines = append(lines, "  USE_PRIVATELINK_ENDPOINT = TRUE")
@@ -806,7 +794,7 @@ func BuildNotificationIntegrationSQL(p NotificationIntegrationParams) (string, e
 			"  DIRECTION = INBOUND",
 		)
 		if p.GcpSubName != "" {
-			lines = append(lines, fmt.Sprintf("  GCP_PUBSUB_SUBSCRIPTION_NAME = %s", sq(p.GcpSubName)))
+			lines = append(lines, fmt.Sprintf("  GCP_PUBSUB_SUBSCRIPTION_NAME = %s", snowflake.QuoteStringLit(p.GcpSubName)))
 		}
 	case "AWS_SNS_OUTBOUND":
 		lines = append(lines,
@@ -815,10 +803,10 @@ func BuildNotificationIntegrationSQL(p NotificationIntegrationParams) (string, e
 			"  DIRECTION = OUTBOUND",
 		)
 		if p.AwsSnsTopicArn != "" {
-			lines = append(lines, fmt.Sprintf("  AWS_SNS_TOPIC_ARN = %s", sq(p.AwsSnsTopicArn)))
+			lines = append(lines, fmt.Sprintf("  AWS_SNS_TOPIC_ARN = %s", snowflake.QuoteStringLit(p.AwsSnsTopicArn)))
 		}
 		if p.AwsSnsRoleArn != "" {
-			lines = append(lines, fmt.Sprintf("  AWS_SNS_ROLE_ARN = %s", sq(p.AwsSnsRoleArn)))
+			lines = append(lines, fmt.Sprintf("  AWS_SNS_ROLE_ARN = %s", snowflake.QuoteStringLit(p.AwsSnsRoleArn)))
 		}
 	case "AZURE_EVENT_GRID_OUTBOUND":
 		lines = append(lines,
@@ -827,10 +815,10 @@ func BuildNotificationIntegrationSQL(p NotificationIntegrationParams) (string, e
 			"  DIRECTION = OUTBOUND",
 		)
 		if p.AzureTopicEndpoint != "" {
-			lines = append(lines, fmt.Sprintf("  AZURE_EVENT_GRID_TOPIC_ENDPOINT = %s", sq(p.AzureTopicEndpoint)))
+			lines = append(lines, fmt.Sprintf("  AZURE_EVENT_GRID_TOPIC_ENDPOINT = %s", snowflake.QuoteStringLit(p.AzureTopicEndpoint)))
 		}
 		if p.AzureTenantId != "" {
-			lines = append(lines, fmt.Sprintf("  AZURE_TENANT_ID = %s", sq(p.AzureTenantId)))
+			lines = append(lines, fmt.Sprintf("  AZURE_TENANT_ID = %s", snowflake.QuoteStringLit(p.AzureTenantId)))
 		}
 	case "GCP_PUBSUB_OUTBOUND":
 		lines = append(lines,
@@ -839,7 +827,7 @@ func BuildNotificationIntegrationSQL(p NotificationIntegrationParams) (string, e
 			"  DIRECTION = OUTBOUND",
 		)
 		if p.GcpTopicName != "" {
-			lines = append(lines, fmt.Sprintf("  GCP_PUBSUB_TOPIC_NAME = %s", sq(p.GcpTopicName)))
+			lines = append(lines, fmt.Sprintf("  GCP_PUBSUB_TOPIC_NAME = %s", snowflake.QuoteStringLit(p.GcpTopicName)))
 		}
 	case "EMAIL":
 		lines = append(lines, "  TYPE = EMAIL")
@@ -850,18 +838,18 @@ func BuildNotificationIntegrationSQL(p NotificationIntegrationParams) (string, e
 			lines = append(lines, fmt.Sprintf("  DEFAULT_RECIPIENTS = %s", t))
 		}
 		if p.DefaultSubject != "" {
-			lines = append(lines, fmt.Sprintf("  DEFAULT_SUBJECT = %s", sq(p.DefaultSubject)))
+			lines = append(lines, fmt.Sprintf("  DEFAULT_SUBJECT = %s", snowflake.QuoteStringLit(p.DefaultSubject)))
 		}
 	case "WEBHOOK":
 		lines = append(lines, "  TYPE = WEBHOOK")
 		if p.WebhookUrl != "" {
-			lines = append(lines, fmt.Sprintf("  WEBHOOK_URL = %s", sq(p.WebhookUrl)))
+			lines = append(lines, fmt.Sprintf("  WEBHOOK_URL = %s", snowflake.QuoteStringLit(p.WebhookUrl)))
 		}
 		if p.WebhookSecret != "" {
-			lines = append(lines, fmt.Sprintf("  WEBHOOK_SECRET = %s", sq(p.WebhookSecret)))
+			lines = append(lines, fmt.Sprintf("  WEBHOOK_SECRET = %s", snowflake.QuoteStringLit(p.WebhookSecret)))
 		}
 		if p.WebhookBodyTemplate != "" {
-			lines = append(lines, fmt.Sprintf("  WEBHOOK_BODY_TEMPLATE = %s", sq(p.WebhookBodyTemplate)))
+			lines = append(lines, fmt.Sprintf("  WEBHOOK_BODY_TEMPLATE = %s", snowflake.QuoteStringLit(p.WebhookBodyTemplate)))
 		}
 		if p.WebhookHeaders != "" {
 			lines = append(lines, fmt.Sprintf("  WEBHOOK_HEADERS = (%s)", p.WebhookHeaders))
@@ -870,7 +858,7 @@ func BuildNotificationIntegrationSQL(p NotificationIntegrationParams) (string, e
 
 	lines = append(lines, fmt.Sprintf("  ENABLED = %s", boolKw(p.Enabled)))
 	if p.Comment != "" {
-		lines = append(lines, fmt.Sprintf("  COMMENT = %s", sq(p.Comment)))
+		lines = append(lines, fmt.Sprintf("  COMMENT = %s", snowflake.QuoteStringLit(p.Comment)))
 	}
 	return strings.Join(lines, "\n"), nil
 }
@@ -899,7 +887,7 @@ func BuildSecurityIntegrationSQL(p SecurityIntegrationParams) (string, error) {
 		lines = append(lines, fmt.Sprintf("  AUTH_TYPE = %s", authType))
 		if authType == "AWS_IAM" {
 			if p.AwsRoleArn != "" {
-				lines = append(lines, fmt.Sprintf("  AWS_ROLE_ARN = %s", sq(p.AwsRoleArn)))
+				lines = append(lines, fmt.Sprintf("  AWS_ROLE_ARN = %s", snowflake.QuoteStringLit(p.AwsRoleArn)))
 			}
 		} else {
 			grant := "CLIENT_CREDENTIALS"
@@ -911,13 +899,13 @@ func BuildSecurityIntegrationSQL(p SecurityIntegrationParams) (string, error) {
 			}
 			lines = append(lines, fmt.Sprintf("  OAUTH_GRANT = %s", grant))
 			if p.OauthTokenEndpoint != "" {
-				lines = append(lines, fmt.Sprintf("  OAUTH_TOKEN_ENDPOINT = %s", sq(p.OauthTokenEndpoint)))
+				lines = append(lines, fmt.Sprintf("  OAUTH_TOKEN_ENDPOINT = %s", snowflake.QuoteStringLit(p.OauthTokenEndpoint)))
 			}
 			if p.OauthClientId != "" {
-				lines = append(lines, fmt.Sprintf("  OAUTH_CLIENT_ID = %s", sq(p.OauthClientId)))
+				lines = append(lines, fmt.Sprintf("  OAUTH_CLIENT_ID = %s", snowflake.QuoteStringLit(p.OauthClientId)))
 			}
 			if p.OauthClientSecret != "" {
-				lines = append(lines, fmt.Sprintf("  OAUTH_CLIENT_SECRET = %s", sq(p.OauthClientSecret)))
+				lines = append(lines, fmt.Sprintf("  OAUTH_CLIENT_SECRET = %s", snowflake.QuoteStringLit(p.OauthClientSecret)))
 			}
 			if p.OauthScopes != "" {
 				lines = append(lines, fmt.Sprintf("  OAUTH_ALLOWED_SCOPES = %s", squotedTupleFromString(p.OauthScopes)))
@@ -934,20 +922,20 @@ func BuildSecurityIntegrationSQL(p SecurityIntegrationParams) (string, error) {
 			lines = append(lines, fmt.Sprintf("  EXTERNAL_OAUTH_TYPE = %s", ot))
 		}
 		if p.Issuer != "" {
-			lines = append(lines, fmt.Sprintf("  EXTERNAL_OAUTH_ISSUER = %s", sq(p.Issuer)))
+			lines = append(lines, fmt.Sprintf("  EXTERNAL_OAUTH_ISSUER = %s", snowflake.QuoteStringLit(p.Issuer)))
 		}
 		if p.TokenUserMappingClaim != "" {
-			lines = append(lines, fmt.Sprintf("  EXTERNAL_OAUTH_TOKEN_USER_MAPPING_CLAIM = %s", sq(p.TokenUserMappingClaim)))
+			lines = append(lines, fmt.Sprintf("  EXTERNAL_OAUTH_TOKEN_USER_MAPPING_CLAIM = %s", snowflake.QuoteStringLit(p.TokenUserMappingClaim)))
 		}
 		if p.SnowflakeUserMappingAttr != "" {
 			uma, err := mustBeOneOf("snowflakeUserMappingAttr", p.SnowflakeUserMappingAttr, "LOGIN_NAME", "EMAIL_ADDRESS")
 			if err != nil {
 				return "", err
 			}
-			lines = append(lines, fmt.Sprintf("  EXTERNAL_OAUTH_SNOWFLAKE_USER_MAPPING_ATTRIBUTE = %s", sq(uma)))
+			lines = append(lines, fmt.Sprintf("  EXTERNAL_OAUTH_SNOWFLAKE_USER_MAPPING_ATTRIBUTE = %s", snowflake.QuoteStringLit(uma)))
 		}
 		if p.JwsKeysUrl != "" {
-			lines = append(lines, fmt.Sprintf("  EXTERNAL_OAUTH_JWS_KEYS_URL = %s", sq(p.JwsKeysUrl)))
+			lines = append(lines, fmt.Sprintf("  EXTERNAL_OAUTH_JWS_KEYS_URL = %s", snowflake.QuoteStringLit(p.JwsKeysUrl)))
 		}
 		if p.AudienceList != "" {
 			lines = append(lines, fmt.Sprintf("  EXTERNAL_OAUTH_AUDIENCE_LIST = %s", squotedTupleFromString(p.AudienceList)))
@@ -960,7 +948,7 @@ func BuildSecurityIntegrationSQL(p SecurityIntegrationParams) (string, error) {
 			lines = append(lines, fmt.Sprintf("  EXTERNAL_OAUTH_ANY_ROLE_MODE = %s", arm))
 		}
 		if p.NetworkPolicy != "" {
-			lines = append(lines, fmt.Sprintf("  NETWORK_POLICY = %s", qident(p.NetworkPolicy)))
+			lines = append(lines, fmt.Sprintf("  NETWORK_POLICY = %s", snowflake.QuoteIdent(p.NetworkPolicy)))
 		}
 
 	case "OAUTH_PARTNER":
@@ -973,7 +961,7 @@ func BuildSecurityIntegrationSQL(p SecurityIntegrationParams) (string, error) {
 			lines = append(lines, fmt.Sprintf("  OAUTH_CLIENT = %s", oc))
 		}
 		if p.OauthRedirectUri != "" {
-			lines = append(lines, fmt.Sprintf("  OAUTH_REDIRECT_URI = %s", sq(p.OauthRedirectUri)))
+			lines = append(lines, fmt.Sprintf("  OAUTH_REDIRECT_URI = %s", snowflake.QuoteStringLit(p.OauthRedirectUri)))
 		}
 		lines = append(lines, fmt.Sprintf("  OAUTH_ISSUE_REFRESH_TOKENS = %s", boolKw(p.OauthIssueRefreshTokens)))
 		if p.OauthRefreshTokenValidity > 0 {
@@ -990,29 +978,29 @@ func BuildSecurityIntegrationSQL(p SecurityIntegrationParams) (string, error) {
 			lines = append(lines, fmt.Sprintf("  OAUTH_CLIENT_TYPE = %s", ct))
 		}
 		if p.OauthRedirectUri != "" {
-			lines = append(lines, fmt.Sprintf("  OAUTH_REDIRECT_URI = %s", sq(p.OauthRedirectUri)))
+			lines = append(lines, fmt.Sprintf("  OAUTH_REDIRECT_URI = %s", snowflake.QuoteStringLit(p.OauthRedirectUri)))
 		}
 		lines = append(lines, fmt.Sprintf("  OAUTH_ISSUE_REFRESH_TOKENS = %s", boolKw(p.OauthIssueRefreshTokens)))
 		if p.OauthRefreshTokenValidity > 0 {
 			lines = append(lines, fmt.Sprintf("  OAUTH_REFRESH_TOKEN_VALIDITY = %d", p.OauthRefreshTokenValidity))
 		}
 		if p.NetworkPolicy != "" {
-			lines = append(lines, fmt.Sprintf("  NETWORK_POLICY = %s", qident(p.NetworkPolicy)))
+			lines = append(lines, fmt.Sprintf("  NETWORK_POLICY = %s", snowflake.QuoteIdent(p.NetworkPolicy)))
 		}
 
 	case "SAML2":
 		lines = append(lines, "  TYPE = SAML2")
 		if p.SamlIdpMetadataUrl != "" {
-			lines = append(lines, fmt.Sprintf("  SAML2_IDP_METADATA_URL = %s", sq(p.SamlIdpMetadataUrl)))
+			lines = append(lines, fmt.Sprintf("  SAML2_IDP_METADATA_URL = %s", snowflake.QuoteStringLit(p.SamlIdpMetadataUrl)))
 		} else {
 			if p.SamlIdpEntityId != "" {
-				lines = append(lines, fmt.Sprintf("  SAML2_IDP_ENTITY_ID = %s", sq(p.SamlIdpEntityId)))
+				lines = append(lines, fmt.Sprintf("  SAML2_IDP_ENTITY_ID = %s", snowflake.QuoteStringLit(p.SamlIdpEntityId)))
 			}
 			if p.SamlIdpSsoUrl != "" {
-				lines = append(lines, fmt.Sprintf("  SAML2_IDP_SSO_URL = %s", sq(p.SamlIdpSsoUrl)))
+				lines = append(lines, fmt.Sprintf("  SAML2_IDP_SSO_URL = %s", snowflake.QuoteStringLit(p.SamlIdpSsoUrl)))
 			}
 			if p.SamlIdpCert != "" {
-				lines = append(lines, fmt.Sprintf("  SAML2_IDP_CERTIFICATE = %s", sq(p.SamlIdpCert)))
+				lines = append(lines, fmt.Sprintf("  SAML2_IDP_CERTIFICATE = %s", snowflake.QuoteStringLit(p.SamlIdpCert)))
 			}
 		}
 		if p.SamlAllowedUserDomains != "" {
@@ -1028,20 +1016,20 @@ func BuildSecurityIntegrationSQL(p SecurityIntegrationParams) (string, error) {
 			if err != nil {
 				return "", err
 			}
-			lines = append(lines, fmt.Sprintf("  SCIM_CLIENT = %s", sq(sc)))
+			lines = append(lines, fmt.Sprintf("  SCIM_CLIENT = %s", snowflake.QuoteStringLit(sc)))
 		}
 		if p.RunAsRole != "" {
-			lines = append(lines, fmt.Sprintf("  RUN_AS_SERVICE_USER = %s", qident(p.RunAsRole)))
+			lines = append(lines, fmt.Sprintf("  RUN_AS_SERVICE_USER = %s", snowflake.QuoteIdent(p.RunAsRole)))
 		}
 		if p.NetworkPolicy != "" {
-			lines = append(lines, fmt.Sprintf("  NETWORK_POLICY = %s", qident(p.NetworkPolicy)))
+			lines = append(lines, fmt.Sprintf("  NETWORK_POLICY = %s", snowflake.QuoteIdent(p.NetworkPolicy)))
 		}
 		lines = append(lines, fmt.Sprintf("  SYNC_PASSWORD = %s", boolKw(p.SyncPassword)))
 	}
 
 	lines = append(lines, fmt.Sprintf("  ENABLED = %s", boolKw(p.Enabled)))
 	if p.Comment != "" {
-		lines = append(lines, fmt.Sprintf("  COMMENT = %s", sq(p.Comment)))
+		lines = append(lines, fmt.Sprintf("  COMMENT = %s", snowflake.QuoteStringLit(p.Comment)))
 	}
 	return strings.Join(lines, "\n"), nil
 }

@@ -206,7 +206,7 @@ func CloneChildTask(ctx context.Context, client *snowflake.Client, database, sch
 		return strings.Join(quotedParts, ".")
 	}
 
-	fqnOld := fmt.Sprintf("%s.%s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(oldName))
+	fqnOld := snowflake.Qualify(database, schema, oldName)
 	fqnNew := fmt.Sprintf("%s.%s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteOrBare(newName, caseSensitive))
 
 	showSQL := fmt.Sprintf("SHOW TASKS LIKE '%s' IN SCHEMA %s.%s", snowflake.EscapeLikePattern(oldName), snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
@@ -290,7 +290,7 @@ func suspendIfRunning(ctx context.Context, client *snowflake.Client, database, s
 			continue
 		}
 		if strings.ToUpper(toString(row[stateIdx])) == "STARTED" {
-			fqn := fmt.Sprintf("%s.%s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(taskName))
+			fqn := snowflake.Qualify(database, schema, taskName)
 			if _, err := client.Execute(ctx, fmt.Sprintf("ALTER TASK IF EXISTS %s SUSPEND", fqn)); err != nil {
 				return fmt.Errorf("failed to suspend task %q: %w", taskName, err)
 			}
@@ -307,13 +307,13 @@ func RemoveParents(ctx context.Context, client *snowflake.Client, database, sche
 	if len(parents) == 0 {
 		return nil
 	}
-	fqn := fmt.Sprintf("%s.%s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(taskName))
+	fqn := snowflake.Qualify(database, schema, taskName)
 	if err := suspendIfRunning(ctx, client, database, schema, taskName); err != nil {
 		return err
 	}
 	preds := make([]string, 0, len(parents))
 	for _, p := range parents {
-		preds = append(preds, fmt.Sprintf("%s.%s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(p)))
+		preds = append(preds, snowflake.Qualify(database, schema, p))
 	}
 	if _, err := client.Execute(ctx, fmt.Sprintf("ALTER TASK %s REMOVE AFTER %s", fqn, strings.Join(preds, ", "))); err != nil {
 		return fmt.Errorf("failed to remove predecessors from task %q: %w", taskName, err)
@@ -328,13 +328,13 @@ func AddParents(ctx context.Context, client *snowflake.Client, database, schema,
 	if len(parents) == 0 {
 		return nil
 	}
-	fqn := fmt.Sprintf("%s.%s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(taskName))
+	fqn := snowflake.Qualify(database, schema, taskName)
 	if err := suspendIfRunning(ctx, client, database, schema, taskName); err != nil {
 		return err
 	}
 	preds := make([]string, 0, len(parents))
 	for _, p := range parents {
-		preds = append(preds, fmt.Sprintf("%s.%s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(p)))
+		preds = append(preds, snowflake.Qualify(database, schema, p))
 	}
 	if _, err := client.Execute(ctx, fmt.Sprintf("ALTER TASK %s ADD AFTER %s", fqn, strings.Join(preds, ", "))); err != nil {
 		return fmt.Errorf("failed to add predecessors to task %q: %w", taskName, err)
@@ -345,7 +345,7 @@ func AddParents(ctx context.Context, client *snowflake.Client, database, schema,
 // SuspendGraph suspends the root task first (to stop new run scheduling), then
 // suspends every descendant found via BFS over SHOW TASKS.
 func SuspendGraph(ctx context.Context, client *snowflake.Client, database, schema, taskName string) error {
-	fqn := fmt.Sprintf("%s.%s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(taskName))
+	fqn := snowflake.Qualify(database, schema, taskName)
 	if _, err := client.Execute(ctx, fmt.Sprintf("ALTER TASK IF EXISTS %s SUSPEND", fqn)); err != nil {
 		return err
 	}
@@ -735,8 +735,8 @@ func GetTopologicalOrder(rows []StatusRow, rootName string) TopologicalOrder {
 	}
 	rootUpper := strings.ToUpper(rootName)
 
-	byName := make(map[string]string)       // UPPER → original name
-	childrenOf := make(map[string][]string)  // UPPER(parent) → [UPPER(child)]
+	byName := make(map[string]string)           // UPPER → original name
+	childrenOf := make(map[string][]string)     // UPPER(parent) → [UPPER(child)]
 	predecessorsOf := make(map[string][]string) // UPPER(child) → [UPPER(parent)]
 	var finalizerNames []string
 
@@ -874,7 +874,7 @@ type ExportGraphDDLResult struct {
 // the output but counted in FailedTasks).
 func BuildGraphDDL(order TopologicalOrder, ddlByName map[string]string, database, schema string, includeSuspendResume bool) ExportGraphDDLResult {
 	fqn := func(name string) string {
-		return snowflake.QuoteIdent(database) + "." + snowflake.QuoteIdent(schema) + "." + snowflake.QuoteIdent(name)
+		return snowflake.Qualify(database, schema, name)
 	}
 
 	// Partition suspend-order tasks into succeeded / failed based on DDL presence.

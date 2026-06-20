@@ -23,12 +23,7 @@ import (
 // "MODIFY AS SELECT 1". The caller is responsible for correct SQL quoting
 // inside the clause; this method only double-quotes the task identifier.
 func (a *App) AlterTask(database, schema, name, clause string) error {
-	if a.client == nil {
-		return apperrors.ErrNotConnected
-	}
-	sql := fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s %s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), clause)
-	_, err := a.client.Execute(a.ctx, sql)
-	return err
+	return a.alterObject("TASK IF EXISTS", database, schema, name, clause)
 }
 
 // ListFinalizableTasks returns every task in the schema along with an eligibility verdict.

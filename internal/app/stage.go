@@ -133,10 +133,5 @@ func (a *App) ExecuteStageFile(database, schema, stageName, filePath string) err
 // AlterStage runs an ALTER STAGE IF EXISTS statement on the given stage.
 // clause is everything that follows the stage name in the ALTER statement.
 func (a *App) AlterStage(database, schema, name, clause string) error {
-	if a.client == nil {
-		return apperrors.ErrNotConnected
-	}
-	sql := fmt.Sprintf("ALTER STAGE IF EXISTS %s.%s.%s %s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), clause)
-	_, err := a.client.Execute(a.ctx, sql)
-	return err
+	return a.alterObject("STAGE IF EXISTS", database, schema, name, clause)
 }

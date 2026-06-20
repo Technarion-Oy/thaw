@@ -22,12 +22,7 @@ import (
 // or "SET COMMENT = 'hello'". The caller is responsible for correct SQL quoting
 // inside the clause; this method only double-quotes the pipe identifier.
 func (a *App) AlterPipe(database, schema, name, clause string) error {
-	if a.client == nil {
-		return apperrors.ErrNotConnected
-	}
-	sql := fmt.Sprintf("ALTER PIPE %s.%s.%s %s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), clause)
-	_, err := a.client.Execute(a.ctx, sql)
-	return err
+	return a.alterObject("PIPE", database, schema, name, clause)
 }
 
 // GetPipeStatus returns the JSON string produced by SYSTEM$PIPE_STATUS for the given pipe.

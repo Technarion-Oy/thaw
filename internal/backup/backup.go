@@ -55,10 +55,10 @@ type BackupSetRow struct {
 // bsFQN builds a (possibly fully-qualified) backup set identifier.
 func bsFQN(name, bsDb, bsSchema string) string {
 	if bsDb != "" && bsSchema != "" {
-		return snowflake.QuoteIdent(bsDb) + "." + snowflake.QuoteIdent(bsSchema) + "." + snowflake.QuoteIdent(name)
+		return snowflake.Qualify(bsDb, bsSchema, name)
 	}
 	if bsDb != "" {
-		return snowflake.QuoteIdent(bsDb) + "." + snowflake.QuoteIdent(name)
+		return snowflake.Qualify(bsDb, name)
 	}
 	return snowflake.QuoteIdent(name)
 }
@@ -76,7 +76,7 @@ func BuildListBackupSetsSql(nameFilter string) string {
 	var sb strings.Builder
 	sb.WriteString("SHOW BACKUP SETS")
 	if strings.TrimSpace(nameFilter) != "" {
-		escapedFilter := strings.ReplaceAll(nameFilter, "'", "''")
+		escapedFilter := snowflake.EscapeStringLit(nameFilter)
 		sb.WriteString(fmt.Sprintf(" LIKE '%%%s%%'", escapedFilter))
 	}
 	sb.WriteString(" IN ACCOUNT")
@@ -330,7 +330,7 @@ func BuildRestoreFromBackupSql(objectType, targetName, backupSetName, bsDb, bsSc
 	sb.WriteString(" FROM BACKUP SET ")
 	sb.WriteString(fqn)
 	sb.WriteString(" IDENTIFIER '")
-	sb.WriteString(strings.ReplaceAll(backupID, "'", "''"))
+	sb.WriteString(snowflake.EscapeStringLit(backupID))
 	sb.WriteString("'")
 	return sb.String(), nil
 }
@@ -340,7 +340,7 @@ func BuildRestoreFromBackupSql(objectType, targetName, backupSetName, bsDb, bsSc
 func BuildDeleteOldestBackupSql(name, bsDb, bsSchema, backupID string) string {
 	return fmt.Sprintf(
 		"ALTER BACKUP SET %s DELETE BACKUP IDENTIFIER '%s'",
-		bsFQN(name, bsDb, bsSchema), strings.ReplaceAll(backupID, "'", "''"),
+		bsFQN(name, bsDb, bsSchema), snowflake.EscapeStringLit(backupID),
 	)
 }
 

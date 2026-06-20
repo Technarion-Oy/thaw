@@ -25,13 +25,7 @@ import (
 // quoting inside the clause; this method only double-quotes the service
 // identifier.
 func (a *App) AlterService(database, schema, name, clause string) error {
-	if a.client == nil {
-		return apperrors.ErrNotConnected
-	}
-	sql := fmt.Sprintf("ALTER SERVICE %s.%s.%s %s",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), clause)
-	_, err := a.client.Execute(a.ctx, sql)
-	return err
+	return a.alterObject("SERVICE", database, schema, name, clause)
 }
 
 // ListServiceEndpoints returns the ingress endpoints exposed by the given

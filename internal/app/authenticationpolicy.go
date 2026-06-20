@@ -26,13 +26,7 @@ import (
 // correct SQL quoting inside the clause; this method only double-quotes the
 // policy identifier.
 func (a *App) AlterAuthenticationPolicy(database, schema, name, clause string) error {
-	if a.client == nil {
-		return apperrors.ErrNotConnected
-	}
-	sql := fmt.Sprintf("ALTER AUTHENTICATION POLICY %s.%s.%s %s",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), clause)
-	_, err := a.client.Execute(a.ctx, sql)
-	return err
+	return a.alterObject("AUTHENTICATION POLICY", database, schema, name, clause)
 }
 
 // DescribeAuthenticationPolicy returns the configured parameter values for the

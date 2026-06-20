@@ -32,83 +32,83 @@ type ColumnComment struct {
 // USER.
 func BuildObjectPropertiesQuery(database, schema, kind, name string) (string, error) {
 	like := strings.ReplaceAll(name, `\`, `\\`)
-	like = strings.ReplaceAll(like, "'", "''")
+	like = snowflake.EscapeStringLit(like)
 
 	switch strings.ToUpper(kind) {
 	case "DATABASE":
 		return fmt.Sprintf("SHOW DATABASES LIKE '%s'", like), nil
 	case "DYNAMIC TABLE":
-		return fmt.Sprintf("SHOW DYNAMIC TABLES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW DYNAMIC TABLES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "EXTERNAL TABLE":
-		return fmt.Sprintf("SHOW EXTERNAL TABLES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW EXTERNAL TABLES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "ICEBERG TABLE":
-		return fmt.Sprintf("SHOW ICEBERG TABLES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW ICEBERG TABLES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "HYBRID TABLE":
-		return fmt.Sprintf("SHOW HYBRID TABLES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW HYBRID TABLES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "EVENT TABLE":
-		return fmt.Sprintf("SHOW EVENT TABLES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW EVENT TABLES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "MATERIALIZED VIEW":
-		return fmt.Sprintf("SHOW MATERIALIZED VIEWS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW MATERIALIZED VIEWS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "ALERT":
-		return fmt.Sprintf("SHOW ALERTS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW ALERTS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "TAG":
-		return fmt.Sprintf("SHOW TAGS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW TAGS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "MASKING POLICY":
-		return fmt.Sprintf("SHOW MASKING POLICIES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW MASKING POLICIES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "ROW ACCESS POLICY":
-		return fmt.Sprintf("SHOW ROW ACCESS POLICIES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW ROW ACCESS POLICIES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "PASSWORD POLICY":
-		return fmt.Sprintf("SHOW PASSWORD POLICIES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW PASSWORD POLICIES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "SESSION POLICY":
-		return fmt.Sprintf("SHOW SESSION POLICIES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW SESSION POLICIES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "AGGREGATION POLICY":
-		return fmt.Sprintf("SHOW AGGREGATION POLICIES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW AGGREGATION POLICIES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "PROJECTION POLICY":
-		return fmt.Sprintf("SHOW PROJECTION POLICIES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW PROJECTION POLICIES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "AUTHENTICATION POLICY":
-		return fmt.Sprintf("SHOW AUTHENTICATION POLICIES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW AUTHENTICATION POLICIES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "PACKAGES POLICY":
-		return fmt.Sprintf("SHOW PACKAGES POLICIES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW PACKAGES POLICIES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "NETWORK RULE":
-		return fmt.Sprintf("SHOW NETWORK RULES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW NETWORK RULES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "IMAGE REPOSITORY":
-		return fmt.Sprintf("SHOW IMAGE REPOSITORIES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW IMAGE REPOSITORIES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "SERVICE":
-		return fmt.Sprintf("SHOW SERVICES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW SERVICES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "STREAMLIT":
-		return fmt.Sprintf("SHOW STREAMLITS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW STREAMLITS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "SCHEMA":
 		return fmt.Sprintf("SHOW SCHEMAS LIKE '%s' IN DATABASE %s", like, snowflake.QuoteIdent(database)), nil
 	case "TABLE":
-		return fmt.Sprintf("SHOW TABLES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW TABLES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "VIEW":
-		return fmt.Sprintf("SHOW VIEWS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW VIEWS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "FUNCTION":
-		return fmt.Sprintf("SHOW FUNCTIONS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW FUNCTIONS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "EXTERNAL FUNCTION":
-		return fmt.Sprintf("SHOW EXTERNAL FUNCTIONS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW EXTERNAL FUNCTIONS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "DATA METRIC FUNCTION":
-		return fmt.Sprintf("SHOW DATA METRIC FUNCTIONS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW DATA METRIC FUNCTIONS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "PROCEDURE":
-		return fmt.Sprintf("SHOW PROCEDURES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW PROCEDURES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "SEQUENCE":
-		return fmt.Sprintf("SHOW SEQUENCES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW SEQUENCES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "STAGE":
-		return fmt.Sprintf("SHOW STAGES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW STAGES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "STREAM":
-		return fmt.Sprintf("SHOW STREAMS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW STREAMS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "TASK":
-		return fmt.Sprintf("SHOW TASKS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW TASKS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "FILE FORMAT":
-		return fmt.Sprintf("SHOW FILE FORMATS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW FILE FORMATS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "PIPE":
-		return fmt.Sprintf("SHOW PIPES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW PIPES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "SECRET":
-		return fmt.Sprintf("SHOW SECRETS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW SECRETS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "GIT REPOSITORY":
-		return fmt.Sprintf("SHOW GIT REPOSITORIES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW GIT REPOSITORIES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "DBT PROJECT":
-		return fmt.Sprintf("SHOW DBT PROJECTS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+		return fmt.Sprintf("SHOW DBT PROJECTS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "WAREHOUSE":
 		return fmt.Sprintf("SHOW WAREHOUSES LIKE '%s'", like), nil
 	case "ROLE":
@@ -123,16 +123,14 @@ func BuildObjectPropertiesQuery(database, schema, kind, name string) (string, er
 // BuildDescribeStageQuery returns the DESCRIBE STAGE query used to enrich the
 // SHOW STAGES result with stage-specific properties.
 func BuildDescribeStageQuery(database, schema, name string) string {
-	return fmt.Sprintf("DESCRIBE STAGE %s.%s.%s",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
+	return fmt.Sprintf("DESCRIBE STAGE %s", snowflake.Qualify(database, schema, name))
 }
 
 // BuildDescribeMaskingPolicyQuery returns the DESCRIBE MASKING POLICY query used
 // to enrich the SHOW MASKING POLICIES result with the policy's signature, return
 // type, and body — none of which SHOW MASKING POLICIES reports.
 func BuildDescribeMaskingPolicyQuery(database, schema, name string) string {
-	return fmt.Sprintf("DESCRIBE MASKING POLICY %s.%s.%s",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
+	return fmt.Sprintf("DESCRIBE MASKING POLICY %s", snowflake.Qualify(database, schema, name))
 }
 
 // BuildDescribeRowAccessPolicyQuery returns the DESCRIBE ROW ACCESS POLICY query
@@ -140,8 +138,7 @@ func BuildDescribeMaskingPolicyQuery(database, schema, name string) string {
 // signature, return type, and body — none of which SHOW ROW ACCESS POLICIES
 // reports.
 func BuildDescribeRowAccessPolicyQuery(database, schema, name string) string {
-	return fmt.Sprintf("DESCRIBE ROW ACCESS POLICY %s.%s.%s",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
+	return fmt.Sprintf("DESCRIBE ROW ACCESS POLICY %s", snowflake.Qualify(database, schema, name))
 }
 
 // BuildDescribeAggregationPolicyQuery returns the DESCRIBE AGGREGATION POLICY
@@ -149,8 +146,7 @@ func BuildDescribeRowAccessPolicyQuery(database, schema, name string) string {
 // signature, return type, and body — none of which SHOW AGGREGATION POLICIES
 // reports.
 func BuildDescribeAggregationPolicyQuery(database, schema, name string) string {
-	return fmt.Sprintf("DESCRIBE AGGREGATION POLICY %s.%s.%s",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
+	return fmt.Sprintf("DESCRIBE AGGREGATION POLICY %s", snowflake.Qualify(database, schema, name))
 }
 
 // BuildDescribeProjectionPolicyQuery returns the DESCRIBE PROJECTION POLICY
@@ -158,8 +154,7 @@ func BuildDescribeAggregationPolicyQuery(database, schema, name string) string {
 // signature, return type, and body — none of which SHOW PROJECTION POLICIES
 // reports.
 func BuildDescribeProjectionPolicyQuery(database, schema, name string) string {
-	return fmt.Sprintf("DESCRIBE PROJECTION POLICY %s.%s.%s",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
+	return fmt.Sprintf("DESCRIBE PROJECTION POLICY %s", snowflake.Qualify(database, schema, name))
 }
 
 // BuildDescribePackagesPolicyQuery returns the DESCRIBE PACKAGES POLICY query
@@ -167,8 +162,7 @@ func BuildDescribeProjectionPolicyQuery(database, schema, name string) string {
 // allowlist, blocklist, and additional_creation_blocklist — none of which SHOW
 // PACKAGES POLICIES reports (it returns only metadata).
 func BuildDescribePackagesPolicyQuery(database, schema, name string) string {
-	return fmt.Sprintf("DESCRIBE PACKAGES POLICY %s.%s.%s",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
+	return fmt.Sprintf("DESCRIBE PACKAGES POLICY %s", snowflake.Qualify(database, schema, name))
 }
 
 // appendPackagesPolicyDesc appends the language and allow/block-list properties
@@ -237,24 +231,21 @@ func appendPackagesPolicyDesc(pairs []snowflake.PropertyPair, descRes *snowflake
 // NETWORK RULES reports only as a count (entries_in_valuelist), not the actual
 // identifiers.
 func BuildDescribeNetworkRuleQuery(database, schema, name string) string {
-	return fmt.Sprintf("DESCRIBE NETWORK RULE %s.%s.%s",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
+	return fmt.Sprintf("DESCRIBE NETWORK RULE %s", snowflake.Qualify(database, schema, name))
 }
 
 // BuildDescribeServiceQuery returns the DESCRIBE SERVICE query used to enrich the
 // SHOW SERVICES result with the service's YAML spec — which SHOW SERVICES does
 // not report.
 func BuildDescribeServiceQuery(database, schema, name string) string {
-	return fmt.Sprintf("DESCRIBE SERVICE %s.%s.%s",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
+	return fmt.Sprintf("DESCRIBE SERVICE %s", snowflake.Qualify(database, schema, name))
 }
 
 // BuildDescribeStreamlitQuery returns the DESCRIBE STREAMLIT query used to enrich
 // the SHOW STREAMLITS result with the app's root_location and main_file — which
 // SHOW STREAMLITS does not report.
 func BuildDescribeStreamlitQuery(database, schema, name string) string {
-	return fmt.Sprintf("DESCRIBE STREAMLIT %s.%s.%s",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
+	return fmt.Sprintf("DESCRIBE STREAMLIT %s", snowflake.Qualify(database, schema, name))
 }
 
 // GetObjectProperties returns structured metadata for any Snowflake object by
@@ -529,8 +520,8 @@ func GetColumnComments(ctx context.Context, client *snowflake.Client, database, 
 // BuildSetColumnCommentSql returns the ALTER TABLE ... MODIFY COLUMN ... COMMENT
 // statement that sets (or clears) the comment on a single table column.
 func BuildSetColumnCommentSql(database, schema, table, column, comment string) string {
-	return fmt.Sprintf("ALTER TABLE %s.%s.%s MODIFY COLUMN %s COMMENT '%s'",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(table),
+	return fmt.Sprintf("ALTER TABLE %s MODIFY COLUMN %s COMMENT '%s'",
+		snowflake.Qualify(database, schema, table),
 		snowflake.QuoteIdent(column), snowflake.EscapeStringLit(comment),
 	)
 }
