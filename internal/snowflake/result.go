@@ -33,7 +33,7 @@ func ColIdx(cols []string, names ...string) int {
 // range. It folds the recurring `idx >= 0 && idx < len(row)` bounds-guard (paired
 // with a ColIdx lookup that may return -1) and the CellString conversion into one
 // call, so a SHOW/DESCRIBE row reader can write `Cell(row, ColIdx(cols, "key"))`
-// without a separate guard.
+// without a separate guard — a missing column (ColIdx returns -1) safely yields "".
 func Cell(row []any, idx int) string {
 	if idx < 0 || idx >= len(row) {
 		return ""
