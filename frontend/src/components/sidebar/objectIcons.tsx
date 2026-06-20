@@ -74,6 +74,7 @@ import {
   ColumnWidthOutlined,
   LoginOutlined,
   RobotOutlined,
+  FileSearchOutlined,
 } from "@ant-design/icons";
 
 // ── CSS variable name per kind ─────────────────────────────────────────────
@@ -115,6 +116,7 @@ const KIND_VAR: Record<string, string> = {
   "GIT REPOSITORY":  "--icon-gitrepo",
   "DBT PROJECT":     "--icon-dbtproject",
   MODEL:             "--icon-model",
+  "CORTEX SEARCH SERVICE": "--icon-cortexsearchservice",
 };
 
 // ── Icon component per kind ────────────────────────────────────────────────
@@ -156,6 +158,7 @@ const KIND_ICON: Record<string, React.ComponentType<{ style?: React.CSSPropertie
   "GIT REPOSITORY": BranchesOutlined,
   "DBT PROJECT":    BuildOutlined,
   MODEL:            RobotOutlined,
+  "CORTEX SEARCH SERVICE": FileSearchOutlined,
 };
 
 // ── Public API ────────────────────────────────────────────────────────────

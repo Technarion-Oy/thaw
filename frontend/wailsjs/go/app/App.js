@@ -26,6 +26,10 @@ export function AlterBackupSet(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterBackupSet'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterCortexSearchService(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterCortexSearchService'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterDataMetricFunction(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['AlterDataMetricFunction'](arg1, arg2, arg3, arg4, arg5);
 }
@@ -208,6 +212,10 @@ export function BuildCreateAlertSql(arg1, arg2, arg3) {
 
 export function BuildCreateAuthenticationPolicySql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateAuthenticationPolicySql'](arg1, arg2, arg3);
+}
+
+export function BuildCreateCortexSearchServiceSql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateCortexSearchServiceSql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateDataMetricFunctionSql(arg1, arg2, arg3) {
@@ -674,6 +682,10 @@ export function FormatAuthPolicyList(arg1) {
   return window['go']['app']['App']['FormatAuthPolicyList'](arg1);
 }
 
+export function FormatCortexSearchAttributes(arg1) {
+  return window['go']['app']['App']['FormatCortexSearchAttributes'](arg1);
+}
+
 export function FormatPackagesPolicyList(arg1) {
   return window['go']['app']['App']['FormatPackagesPolicyList'](arg1);
 }
@@ -740,6 +752,10 @@ export function GetCollations() {
 
 export function GetColumnComments(arg1, arg2, arg3) {
   return window['go']['app']['App']['GetColumnComments'](arg1, arg2, arg3);
+}
+
+export function GetCortexSearchServiceTags(arg1, arg2, arg3) {
+  return window['go']['app']['App']['GetCortexSearchServiceTags'](arg1, arg2, arg3);
 }
 
 export function GetCurrentRegion() {

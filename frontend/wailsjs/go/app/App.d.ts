@@ -9,6 +9,7 @@ import {integrations} from '../models';
 import {procedure} from '../models';
 import {aggregationpolicy} from '../models';
 import {alert} from '../models';
+import {cortexsearchservice} from '../models';
 import {datametricfunction} from '../models';
 import {dynamictable} from '../models';
 import {eventtable} from '../models';
@@ -66,6 +67,8 @@ export function AlterAuthenticationPolicy(arg1:string,arg2:string,arg3:string,ar
 export function AlterBackupPolicy(arg1:string,arg2:string):Promise<void>;
 
 export function AlterBackupSet(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterCortexSearchService(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterDataMetricFunction(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
@@ -158,6 +161,8 @@ export function BuildCreateAggregationPolicySql(arg1:string,arg2:string,arg3:agg
 export function BuildCreateAlertSql(arg1:string,arg2:string,arg3:alert.AlertConfig):Promise<string>;
 
 export function BuildCreateAuthenticationPolicySql(arg1:string,arg2:string,arg3:authenticationpolicy.AuthenticationPolicyConfig):Promise<string>;
+
+export function BuildCreateCortexSearchServiceSql(arg1:string,arg2:string,arg3:cortexsearchservice.CortexSearchServiceConfig):Promise<string>;
 
 export function BuildCreateDataMetricFunctionSql(arg1:string,arg2:string,arg3:datametricfunction.DataMetricFunctionConfig):Promise<string>;
 
@@ -391,6 +396,8 @@ export function FindJoinPaths(arg1:Array<erdesigner.TableRef>,arg2:Array<snowfla
 
 export function FormatAuthPolicyList(arg1:Array<string>):Promise<string>;
 
+export function FormatCortexSearchAttributes(arg1:Array<string>):Promise<string>;
+
 export function FormatPackagesPolicyList(arg1:Array<string>):Promise<string>;
 
 export function FormatSecondaryRoles(arg1:Array<string>):Promise<string>;
@@ -424,6 +431,8 @@ export function GetCollationSpecifiers():Promise<Array<snowflake.CollationSpecif
 export function GetCollations():Promise<Array<snowflake.CollationOption>>;
 
 export function GetColumnComments(arg1:string,arg2:string,arg3:string):Promise<Array<objects.ColumnComment>>;
+
+export function GetCortexSearchServiceTags(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function GetCurrentRegion():Promise<string>;
 

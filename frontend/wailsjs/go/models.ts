@@ -712,6 +712,61 @@ export namespace config {
 
 }
 
+export namespace cortexsearchservice {
+	
+	export class CortexSearchServiceConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    indexMode: string;
+	    searchColumn: string;
+	    textIndexes: string[];
+	    vectorIndexes: string[];
+	    primaryKey: string[];
+	    attributes: string[];
+	    warehouse: string;
+	    targetLag: string;
+	    embeddingModel: string;
+	    refreshMode: string;
+	    initialize: string;
+	    fullIndexBuildIntervalDays: number;
+	    requestLogging: boolean;
+	    autoSuspend: number;
+	    comment: string;
+	    query: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CortexSearchServiceConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.indexMode = source["indexMode"];
+	        this.searchColumn = source["searchColumn"];
+	        this.textIndexes = source["textIndexes"];
+	        this.vectorIndexes = source["vectorIndexes"];
+	        this.primaryKey = source["primaryKey"];
+	        this.attributes = source["attributes"];
+	        this.warehouse = source["warehouse"];
+	        this.targetLag = source["targetLag"];
+	        this.embeddingModel = source["embeddingModel"];
+	        this.refreshMode = source["refreshMode"];
+	        this.initialize = source["initialize"];
+	        this.fullIndexBuildIntervalDays = source["fullIndexBuildIntervalDays"];
+	        this.requestLogging = source["requestLogging"];
+	        this.autoSuspend = source["autoSuspend"];
+	        this.comment = source["comment"];
+	        this.query = source["query"];
+	    }
+	}
+
+}
+
 export namespace datametricfunction {
 	
 	export class DataMetricFunctionColumn {
