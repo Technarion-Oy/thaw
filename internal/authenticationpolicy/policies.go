@@ -86,8 +86,8 @@ type MFAPolicy struct {
 // BuildMFAPolicyValue serializes p into the `( … )` value for SET MFA_POLICY.
 func BuildMFAPolicyValue(p MFAPolicy) string {
 	var props []string
-	if hasToken(p.AllowedMethods) {
-		props = append(props, "ALLOWED_METHODS = "+formatStringList(p.AllowedMethods))
+	if snowflake.HasNonBlankToken(p.AllowedMethods) {
+		props = append(props, "ALLOWED_METHODS = "+snowflake.FormatStringLitList(p.AllowedMethods))
 	}
 	if v := strings.TrimSpace(p.EnforceMFAOnExternalAuthentication); v != "" {
 		props = append(props, "ENFORCE_MFA_ON_EXTERNAL_AUTHENTICATION = '"+snowflake.EscapeTextLit(strings.ToUpper(v))+"'")
@@ -179,17 +179,17 @@ type WorkloadIdentityPolicy struct {
 // SET WORKLOAD_IDENTITY_POLICY.
 func BuildWorkloadIdentityPolicyValue(p WorkloadIdentityPolicy) string {
 	var props []string
-	if hasToken(p.AllowedProviders) {
+	if snowflake.HasNonBlankToken(p.AllowedProviders) {
 		props = append(props, "ALLOWED_PROVIDERS = "+formatBareList(p.AllowedProviders))
 	}
-	if hasToken(p.AllowedAWSAccounts) {
-		props = append(props, "ALLOWED_AWS_ACCOUNTS = "+formatStringList(p.AllowedAWSAccounts))
+	if snowflake.HasNonBlankToken(p.AllowedAWSAccounts) {
+		props = append(props, "ALLOWED_AWS_ACCOUNTS = "+snowflake.FormatStringLitList(p.AllowedAWSAccounts))
 	}
-	if hasToken(p.AllowedAzureIssuers) {
-		props = append(props, "ALLOWED_AZURE_ISSUERS = "+formatStringList(p.AllowedAzureIssuers))
+	if snowflake.HasNonBlankToken(p.AllowedAzureIssuers) {
+		props = append(props, "ALLOWED_AZURE_ISSUERS = "+snowflake.FormatStringLitList(p.AllowedAzureIssuers))
 	}
-	if hasToken(p.AllowedOIDCIssuers) {
-		props = append(props, "ALLOWED_OIDC_ISSUERS = "+formatStringList(p.AllowedOIDCIssuers))
+	if snowflake.HasNonBlankToken(p.AllowedOIDCIssuers) {
+		props = append(props, "ALLOWED_OIDC_ISSUERS = "+snowflake.FormatStringLitList(p.AllowedOIDCIssuers))
 	}
 	return wrapProps(props)
 }

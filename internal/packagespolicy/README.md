@@ -40,9 +40,10 @@ A packages policy is attached to the account with
   inherit Snowflake's defaults. A blank name becomes a `packages_policy_name`
   placeholder so the live preview stays a valid template.
 - **`FormatStringList(tokens)`** — renders a token slice into the
-  `('a', 'b')` single-quoted-literal list grammar (exposed over IPC via
+  `('a', 'b')` single-quoted-literal list grammar (a thin delegator to the
+  shared `snowflake.FormatStringLitList`), exposed over IPC via
   `App.FormatPackagesPolicyList` so the properties modal builds its
-  `ALTER … SET <list> = (…)` clause through the same serializer).
+  `ALTER … SET <list> = (…)` clause through the same serializer the builder uses.
 
 ## ALTER / DESCRIBE
 

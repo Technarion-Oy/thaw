@@ -56,28 +56,14 @@ type AuthenticationPolicyConfig struct {
 	Comment string `json:"comment"`
 }
 
-// formatStringList renders a token slice into the SQL list grammar used by the
+// FormatStringList renders a token slice into the SQL list grammar used by the
 // authentication-policy list parameters — each token becomes a single-quoted
 // string literal, e.g. []string{"PASSWORD","SAML"} → "('PASSWORD', 'SAML')".
-// Blank tokens are skipped. Unexported; the CREATE builder and FormatStringList
-// (the exported IPC-facing wrapper below) both serialize lists through it.
-func formatStringList(tokens []string) string {
-	parts := make([]string, 0, len(tokens))
-	for _, t := range tokens {
-		t = strings.TrimSpace(t)
-		if t == "" {
-			continue
-		}
-		parts = append(parts, "'"+snowflake.EscapeTextLit(t)+"'")
-	}
-	return "(" + strings.Join(parts, ", ") + ")"
-}
-
-// FormatStringList is the exported wrapper around formatStringList so the
-// authentication-policy properties modal renders / builds list values through
-// the same quote-aware serializer the CREATE builder uses (reached over IPC via
-// App.FormatAuthPolicyList). Pure string handling — no connection required.
-func FormatStringList(tokens []string) string { return formatStringList(tokens) }
+// Blank tokens are skipped. It delegates to the shared snowflake.FormatStringLitList
+// so the CREATE builder, the nested property-bag serializers, and the properties
+// modal (which reaches this over IPC via App.FormatAuthPolicyList) serialize
+// lists through one implementation. Pure string handling — no connection required.
+func FormatStringList(tokens []string) string { return snowflake.FormatStringLitList(tokens) }
 
 // BuildCreateAuthenticationPolicySql constructs a CREATE AUTHENTICATION POLICY
 // statement from the given config. Only parameters the caller explicitly set
@@ -115,14 +101,14 @@ func BuildCreateAuthenticationPolicySql(db, schema string, cfg AuthenticationPol
 	fmt.Fprintf(&sb, "%s %s.%s.%s", createClause,
 		snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), nameToken)
 
-	if hasToken(cfg.AuthenticationMethods) {
-		fmt.Fprintf(&sb, "\n  AUTHENTICATION_METHODS = %s", formatStringList(cfg.AuthenticationMethods))
+	if snowflake.HasNonBlankToken(cfg.AuthenticationMethods) {
+		fmt.Fprintf(&sb, "\n  AUTHENTICATION_METHODS = %s", snowflake.FormatStringLitList(cfg.AuthenticationMethods))
 	}
-	if hasToken(cfg.ClientTypes) {
-		fmt.Fprintf(&sb, "\n  CLIENT_TYPES = %s", formatStringList(cfg.ClientTypes))
+	if snowflake.HasNonBlankToken(cfg.ClientTypes) {
+		fmt.Fprintf(&sb, "\n  CLIENT_TYPES = %s", snowflake.FormatStringLitList(cfg.ClientTypes))
 	}
-	if hasToken(cfg.SecurityIntegrations) {
-		fmt.Fprintf(&sb, "\n  SECURITY_INTEGRATIONS = %s", formatStringList(cfg.SecurityIntegrations))
+	if snowflake.HasNonBlankToken(cfg.SecurityIntegrations) {
+		fmt.Fprintf(&sb, "\n  SECURITY_INTEGRATIONS = %s", snowflake.FormatStringLitList(cfg.SecurityIntegrations))
 	}
 	// MFA_ENROLLMENT is interpolated bare (an enum keyword), so it gets the same
 	// isBareToken guard as the other bare tokens in this package — a value with
@@ -151,16 +137,4 @@ func BuildCreateAuthenticationPolicySql(db, schema string, cfg AuthenticationPol
 	}
 
 	return sb.String() + ";", nil
-}
-
-// hasToken reports whether the slice contains at least one non-blank token, so
-// the builder omits a parameter whose only entries are empty strings (which
-// would serialize to the invalid empty list `()`).
-func hasToken(tokens []string) bool {
-	for _, t := range tokens {
-		if strings.TrimSpace(t) != "" {
-			return true
-		}
-	}
-	return false
 }

@@ -99,6 +99,36 @@ func QuoteTextLit(s string) string {
 	return `'` + EscapeTextLit(s) + `'`
 }
 
+// FormatStringLitList renders a token slice into the SQL `('A', 'B')` list
+// grammar — each non-blank token (trimmed) becomes a single-quoted string
+// literal with embedded backslashes/single-quotes escaped via EscapeTextLit.
+// Blank tokens are skipped, so an empty or all-blank slice yields "()". It is the
+// serialization counterpart of ParseSqlList and is shared by the policy builders
+// (authentication / packages) that emit single-quoted-literal list parameters.
+func FormatStringLitList(tokens []string) string {
+	parts := make([]string, 0, len(tokens))
+	for _, t := range tokens {
+		t = strings.TrimSpace(t)
+		if t == "" {
+			continue
+		}
+		parts = append(parts, "'"+EscapeTextLit(t)+"'")
+	}
+	return "(" + strings.Join(parts, ", ") + ")"
+}
+
+// HasNonBlankToken reports whether tokens contains at least one non-blank entry,
+// so a caller can omit a list parameter whose only entries are empty strings
+// (which would otherwise serialize to the invalid empty list "()").
+func HasNonBlankToken(tokens []string) bool {
+	for _, t := range tokens {
+		if strings.TrimSpace(t) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // EscapeLikePattern escapes LIKE-special characters (% and _) in s so that
 // the string matches literally when used in a SHOW … LIKE '<pattern>' clause.
 // Single-quotes are also doubled (same as EscapeStringLit).

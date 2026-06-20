@@ -35,8 +35,9 @@ to the account or to individual users via
   placeholder so the live preview stays a valid template.
 - **`FormatStringList(tokens)`** — renders a token slice into the
   `('A', 'B')` single-quoted-literal list grammar shared by the list
-  parameters; exposed so the app layer / properties modal builds
-  `ALTER … SET <list> = (…)` clauses through the same serializer.
+  parameters and the nested property bags (a thin delegator to the shared
+  `snowflake.FormatStringLitList`); exposed so the app layer / properties modal
+  builds `ALTER … SET <list> = (…)` clauses through the same serializer.
 
 ### Editor metadata (`params.go`)
 

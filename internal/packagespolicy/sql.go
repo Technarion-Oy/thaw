@@ -46,40 +46,14 @@ type PackagesPolicyConfig struct {
 	Comment string `json:"comment"`
 }
 
-// formatStringList renders a token slice into the SQL list grammar used by the
+// FormatStringList renders a token slice into the SQL list grammar used by the
 // packages-policy list parameters — each token becomes a single-quoted string
 // literal, e.g. []string{"numpy", "pandas"} → "('numpy', 'pandas')". Blank
-// tokens are skipped. Unexported; the CREATE builder and FormatStringList (the
-// exported IPC-facing wrapper below) both serialize lists through it.
-func formatStringList(tokens []string) string {
-	parts := make([]string, 0, len(tokens))
-	for _, t := range tokens {
-		t = strings.TrimSpace(t)
-		if t == "" {
-			continue
-		}
-		parts = append(parts, "'"+snowflake.EscapeTextLit(t)+"'")
-	}
-	return "(" + strings.Join(parts, ", ") + ")"
-}
-
-// FormatStringList is the exported wrapper around formatStringList so the
-// packages-policy properties modal renders / builds list values through the same
-// quote-aware serializer the CREATE builder uses (reached over IPC via
-// App.FormatPackagesPolicyList). Pure string handling — no connection required.
-func FormatStringList(tokens []string) string { return formatStringList(tokens) }
-
-// hasToken reports whether the slice contains at least one non-blank token, so
-// the builder omits a parameter whose only entries are empty strings (which
-// would serialize to the invalid empty list `()`).
-func hasToken(tokens []string) bool {
-	for _, t := range tokens {
-		if strings.TrimSpace(t) != "" {
-			return true
-		}
-	}
-	return false
-}
+// tokens are skipped. It delegates to the shared snowflake.FormatStringLitList so
+// the CREATE builder and the properties modal (which reaches this over IPC via
+// App.FormatPackagesPolicyList) serialize lists through one implementation. Pure
+// string handling — no connection required.
+func FormatStringList(tokens []string) string { return snowflake.FormatStringLitList(tokens) }
 
 // BuildCreatePackagesPolicySql constructs a CREATE PACKAGES POLICY statement
 // from the given config. LANGUAGE PYTHON is always emitted; only the list
@@ -119,14 +93,14 @@ func BuildCreatePackagesPolicySql(db, schema string, cfg PackagesPolicyConfig) (
 	// LANGUAGE PYTHON is required by the grammar and is the only supported value.
 	fmt.Fprint(&sb, "\n  LANGUAGE PYTHON")
 
-	if hasToken(cfg.Allowlist) {
-		fmt.Fprintf(&sb, "\n  ALLOWLIST = %s", formatStringList(cfg.Allowlist))
+	if snowflake.HasNonBlankToken(cfg.Allowlist) {
+		fmt.Fprintf(&sb, "\n  ALLOWLIST = %s", snowflake.FormatStringLitList(cfg.Allowlist))
 	}
-	if hasToken(cfg.Blocklist) {
-		fmt.Fprintf(&sb, "\n  BLOCKLIST = %s", formatStringList(cfg.Blocklist))
+	if snowflake.HasNonBlankToken(cfg.Blocklist) {
+		fmt.Fprintf(&sb, "\n  BLOCKLIST = %s", snowflake.FormatStringLitList(cfg.Blocklist))
 	}
-	if hasToken(cfg.AdditionalCreationBlocklist) {
-		fmt.Fprintf(&sb, "\n  ADDITIONAL_CREATION_BLOCKLIST = %s", formatStringList(cfg.AdditionalCreationBlocklist))
+	if snowflake.HasNonBlankToken(cfg.AdditionalCreationBlocklist) {
+		fmt.Fprintf(&sb, "\n  ADDITIONAL_CREATION_BLOCKLIST = %s", snowflake.FormatStringLitList(cfg.AdditionalCreationBlocklist))
 	}
 
 	if cfg.Comment != "" {

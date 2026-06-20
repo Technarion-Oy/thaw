@@ -13,6 +13,8 @@ package packagespolicy
 import (
 	"strings"
 	"testing"
+
+	"thaw/internal/snowflake"
 )
 
 func TestBuildCreatePackagesPolicySql(t *testing.T) {
@@ -128,5 +130,28 @@ func TestFormatStringList(t *testing.T) {
 	want := "('numpy', 'pandas')"
 	if got != want {
 		t.Errorf("FormatStringList = %q, want %q", got, want)
+	}
+}
+
+// TestListRoundTrip covers the properties-modal path: a list serialized for
+// ALTER … SET <list> = (…) via FormatStringList must read back identically when
+// the resulting (quoted) value is tokenized by ParseSqlList — the same tokenizer
+// the modal applies to the DESCRIBE PACKAGES POLICY allowlist/blocklist cells.
+// The wildcard default-allowlist token is the case worth pinning down.
+func TestListRoundTrip(t *testing.T) {
+	cases := [][]string{
+		{"*"},
+		{"numpy", "pandas==2.*", "scipy>=1.0"},
+	}
+	for _, tokens := range cases {
+		got := snowflake.ParseSqlList(FormatStringList(tokens))
+		if len(got) != len(tokens) {
+			t.Fatalf("round-trip of %v = %v (len mismatch)", tokens, got)
+		}
+		for i := range tokens {
+			if got[i] != tokens[i] {
+				t.Errorf("round-trip of %v: [%d] = %q, want %q", tokens, i, got[i], tokens[i])
+			}
+		}
 	}
 }
