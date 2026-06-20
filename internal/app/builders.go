@@ -28,6 +28,7 @@ import (
 	"thaw/internal/maskingpolicy"
 	"thaw/internal/materializedview"
 	"thaw/internal/networkrule"
+	"thaw/internal/packagespolicy"
 	"thaw/internal/passwordpolicy"
 	"thaw/internal/pipe"
 	"thaw/internal/procedure"
@@ -193,6 +194,11 @@ func (a *App) BuildCreateAuthenticationPolicySql(database, schema string, cfg au
 // BuildCreateProjectionPolicySql returns the SQL for creating a Snowflake PROJECTION POLICY.
 func (a *App) BuildCreateProjectionPolicySql(database, schema string, cfg projectionpolicy.ProjectionPolicyConfig) (string, error) {
 	return projectionpolicy.BuildCreateProjectionPolicySql(database, schema, cfg)
+}
+
+// BuildCreatePackagesPolicySql returns the SQL for creating a Snowflake PACKAGES POLICY.
+func (a *App) BuildCreatePackagesPolicySql(database, schema string, cfg packagespolicy.PackagesPolicyConfig) (string, error) {
+	return packagespolicy.BuildCreatePackagesPolicySql(database, schema, cfg)
 }
 
 // BuildCreateMaskingPolicySql returns the SQL for creating a Snowflake MASKING POLICY.

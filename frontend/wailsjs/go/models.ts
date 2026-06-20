@@ -2693,6 +2693,37 @@ export namespace objects {
 
 }
 
+export namespace packagespolicy {
+	
+	export class PackagesPolicyConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    allowlist: string[];
+	    blocklist: string[];
+	    additionalCreationBlocklist: string[];
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PackagesPolicyConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.allowlist = source["allowlist"];
+	        this.blocklist = source["blocklist"];
+	        this.additionalCreationBlocklist = source["additionalCreationBlocklist"];
+	        this.comment = source["comment"];
+	    }
+	}
+
+}
+
 export namespace passwordpolicy {
 	
 	export class PasswordPolicyConfig {
