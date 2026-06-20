@@ -10,7 +10,7 @@
 //
 // @thaw-domain: Object Browser & Administration
 
-import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, lazy, Suspense } from "react";
 import { App as AntApp, Tree, Typography, Spin, Empty, Divider, Modal, Button, Input, Tooltip, Slider, Tag, Space, message, Select, type InputRef } from "antd";
 import {
   DatabaseOutlined,
@@ -113,7 +113,8 @@ import DataTypeSelect from "../shared/DataTypeSelect";
 import CreateFileFormatModal from "../database/CreateFileFormatModal";
 import ObjectSummariesModal from "../database/ObjectSummariesModal";
 import ExecuteTaskModal from "../task/ExecuteTaskModal";
-import TaskGraphModal from "../task/TaskGraphModal";
+// Lazy — pulls in @xyflow/@dagrejs (the graph renderer) only when opened.
+const TaskGraphModal = lazy(() => import("../task/TaskGraphModal"));
 import TaskHistoryModal from "../task/TaskHistoryModal";
 import TaskPropertiesModal from "../task/TaskPropertiesModal";
 import TaskStatusesModal from "../task/TaskStatusesModal";
@@ -4529,12 +4530,14 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
 
       {/* Task Graph modal */}
       {taskGraphModal && (
-        <TaskGraphModal
-          db={taskGraphModal.db}
-          schema={taskGraphModal.schema}
-          taskName={taskGraphModal.name}
-          onClose={() => setTaskGraphModal(null)}
-        />
+        <Suspense fallback={null}>
+          <TaskGraphModal
+            db={taskGraphModal.db}
+            schema={taskGraphModal.schema}
+            taskName={taskGraphModal.name}
+            onClose={() => setTaskGraphModal(null)}
+          />
+        </Suspense>
       )}
 
       {/* Task History modal */}

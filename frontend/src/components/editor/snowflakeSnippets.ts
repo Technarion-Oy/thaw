@@ -8,7 +8,9 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import type * as monacoLib from "monaco-editor";
+// Slim editor API type — matches the `monaco-editor/esm/vs/editor/editor.api`
+// value actually passed in (the full barrel type would not be assignable).
+import type * as monacoLib from "monaco-editor/esm/vs/editor/editor.api.js";
 
 export function getSnowflakeSnippets(monaco: typeof monacoLib): monacoLib.languages.CompletionItem[] {
   const range = { startLineNumber: 0, startColumn: 0, endLineNumber: 0, endColumn: 0 }; // Placeholder, Monaco fills it

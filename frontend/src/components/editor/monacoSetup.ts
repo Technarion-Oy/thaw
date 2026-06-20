@@ -14,7 +14,22 @@ import { configureMonacoYaml } from "monaco-yaml";
 import YamlWorker from "./yamlWorker?worker";
 import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import { loader } from "@monaco-editor/react";
-import * as monacoLib from "monaco-editor";
+// ── Targeted Monaco imports (NOT the full "monaco-editor" barrel) ─────────────
+// `monaco-editor` (editor.main.js) eagerly pulls every language service
+// (TypeScript/HTML/CSS/JSON) plus ~80 basic-languages, each referencing a web
+// worker.  We only use SQL (custom Monarch), an inline Python grammar, and YAML
+// (via monaco-yaml's own worker) — so the TS/CSS/HTML/JSON worker bundles
+// (~9 MB) and the basic-language grammars are dead weight embedded in the binary.
+//
+//   • editor.api → the Monaco namespace (editor, languages, KeyMod, Range, …)
+//   • editor.all → all editor *features* (find, folding, comment, suggest,
+//                  hover, multicursor, …) WITHOUT any language service.
+//
+// This is exactly editor.main minus the language contributions.  All three
+// Monaco value-importers (this file, SqlEditor, NotebookTab) must import from
+// editor.api so Vite never resolves the full barrel.
+import * as monacoLib from "monaco-editor/esm/vs/editor/editor.api.js";
+import "monaco-editor/esm/vs/editor/editor.all.js";
 
 // ── Inline Python Monarch grammar ─────────────────────────────────────────────
 // Defined inline instead of importing from monaco-editor/esm/vs/basic-languages/python/python.js
@@ -230,6 +245,19 @@ export function ensureMonacoSetup(monaco: unknown): void {
   const m = monaco as any;
   if (registered) return;
   registered = true;
+
+  // ── Register the languages we use ─────────────────────────────────────────
+  // The slim Monaco import (editor.api + editor.all, see top of file) drops the
+  // basic-language contributions, so `sql` and `python` are no longer
+  // auto-registered.  They MUST be registered before setMonarchTokensProvider /
+  // setLanguageConfiguration, otherwise Monaco throws "Cannot set configuration
+  // for unknown language sql" and takes down the whole editor.  (`yaml` is
+  // registered by monaco-yaml's configureMonacoYaml below, so it is omitted.)
+  for (const id of ["sql", "python"]) {
+    if (!m.languages.getLanguages().some((l: { id: string }) => l.id === id)) {
+      m.languages.register({ id });
+    }
+  }
 
   // ── SQL tokenizer & language configuration ────────────────────────────────
   m.languages.setMonarchTokensProvider("sql", snowflakeMonarchLanguage as any);

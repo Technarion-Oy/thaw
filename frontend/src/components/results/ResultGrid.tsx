@@ -17,6 +17,8 @@ import React, {
   useState,
   useEffect,
   useLayoutEffect,
+  lazy,
+  Suspense,
 } from "react";
 import {
   useReactTable,
@@ -47,7 +49,8 @@ import { columnFilterFn, type ColumnFilterValue } from "./ColumnFilterDropdown";
 import ColumnFilterDropdown from "./ColumnFilterDropdown";
 import ConditionalFormattingModal from "./ConditionalFormattingModal";
 import DataTypeFormatModal from "./DataTypeFormatModal";
-import QuickChartModal from "./QuickChartModal";
+// Lazy — pulls in recharts (+ its d3 deps) only when the Quick Chart dialog opens.
+const QuickChartModal = lazy(() => import("./QuickChartModal"));
 
 export interface ResultGridHandle {
   scrollToRow: (rowIndex: number) => void;
@@ -1629,13 +1632,15 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
 
       {/* Quick chart modal */}
       {chartModal && selectionRange && (
-        <QuickChartModal
-          tableRows={tableRows}
-          columns={result.columns}
-          selectionRange={selectionRange}
-          visualToOriginal={visualToOriginal}
-          onClose={() => setChartModal(false)}
-        />
+        <Suspense fallback={null}>
+          <QuickChartModal
+            tableRows={tableRows}
+            columns={result.columns}
+            selectionRange={selectionRange}
+            visualToOriginal={visualToOriginal}
+            onClose={() => setChartModal(false)}
+          />
+        </Suspense>
       )}
     </div>
   );

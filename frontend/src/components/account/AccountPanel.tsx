@@ -10,7 +10,7 @@
 //
 // @thaw-domain: Object Browser & Administration
 
-import { useState, useEffect, useLayoutEffect, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, lazy, Suspense } from "react";
 import { Button, Typography, Tree, Spin, Modal, message } from "antd";
 import {
   TeamOutlined,
@@ -46,7 +46,8 @@ import UserManagementPanel from "./UserManagementPanel";
 import PropertiesModal from "../common/PropertiesModal";
 import WarehousePropertiesModal from "./WarehousePropertiesModal";
 import QueryHistoryModal from "./QueryHistoryModal";
-import WarehouseMeteringModal from "./WarehouseMeteringModal";
+// Lazy — pulls in recharts (+ its d3 deps) only when the metering chart opens.
+const WarehouseMeteringModal = lazy(() => import("./WarehouseMeteringModal"));
 import BackupPoliciesPanel from "../backup/BackupPoliciesPanel";
 import IntegrationsPanel from "./IntegrationsPanel";
 import type { snowflake } from "../../../wailsjs/go/models";
@@ -437,7 +438,11 @@ export default function AccountPanel() {
       {historyOpen && <QueryHistoryModal onClose={() => setHistoryOpen(false)} />}
 
       {/* Warehouse metering modal */}
-      {meteringOpen && <WarehouseMeteringModal onClose={() => setMeteringOpen(false)} />}
+      {meteringOpen && (
+        <Suspense fallback={null}>
+          <WarehouseMeteringModal onClose={() => setMeteringOpen(false)} />
+        </Suspense>
+      )}
 
       {/* Warehouse properties modal (editable) */}
       {whPropsName && (

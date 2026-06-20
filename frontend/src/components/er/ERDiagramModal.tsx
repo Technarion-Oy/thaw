@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Technarion Oy. All rights reserved.
 // @thaw-domain: ER Designer
 
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspense } from "react";
 import { Modal, Button, Checkbox, message } from "antd";
 import { CopyOutlined, EditOutlined } from "@ant-design/icons";
 import { ListSchemas, FindJoinPaths, BuildJoinState } from "../../../wailsjs/go/app/App";
@@ -10,7 +10,8 @@ import type { snowflake, erdesigner } from "../../../wailsjs/go/models";
 import { tableKey, type JoinQueryState, type JoinPath, type DesignerTable } from "./erTypes";
 import { buildMermaid } from "./buildMermaid";
 import ERDesigner from "./ERDesigner";
-import ERCanvas from "./ERCanvas";
+// Lazy — pulls in @xyflow/@dagrejs (the canvas renderer) only when shown.
+const ERCanvas = lazy(() => import("./ERCanvas"));
 import { initFromERData } from "./erCanvasLayout";
 import JoinQueryPanel, { JoinPathDisambiguation } from "./JoinQueryPanel";
 import { useQueryStore } from "../../store/queryStore";
@@ -298,18 +299,20 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
 
       {/* Canvas area — shrinks when join panel is open */}
       <div style={{ height: joinPanelOpen ? "45vh" : "70vh", transition: "height 0.2s ease" }}>
-        <ERCanvas
-          key={database}
-          tables={designerTables}
-          mode="readonly"
-          database={database}
-          visibleSchemas={visibleSchemas}
-          selectedTableIds={selectedTableIds}
-          onSelectionChange={setSelectedTableIds}
-          onBuildQuery={handleBuildQuery}
-          highlightedEdgeIds={highlightedEdgeIds}
-          highlightedNodeIds={highlightedNodeIds}
-        />
+        <Suspense fallback={<div style={{ height: "100%" }} />}>
+          <ERCanvas
+            key={database}
+            tables={designerTables}
+            mode="readonly"
+            database={database}
+            visibleSchemas={visibleSchemas}
+            selectedTableIds={selectedTableIds}
+            onSelectionChange={setSelectedTableIds}
+            onBuildQuery={handleBuildQuery}
+            highlightedEdgeIds={highlightedEdgeIds}
+            highlightedNodeIds={highlightedNodeIds}
+          />
+        </Suspense>
       </div>
 
       {/* Join query builder panel */}

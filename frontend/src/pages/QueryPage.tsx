@@ -8,28 +8,18 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, lazy, Suspense } from "react";
 import { flushSync } from "react-dom";
 import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message, Modal, type MenuProps } from "antd";
 import { CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined, SearchOutlined, CloudUploadOutlined } from "@ant-design/icons";
-import * as XLSX from "xlsx";
 import { ClipboardSetText, BrowserOpenURL } from "../../wailsjs/runtime/runtime";
 import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, CloseTabSession, GetSessionInitMode, InitTabSession, SetQueryLogEnabled } from "../../wailsjs/go/app/App";
 import { GetSqlStatementRanges } from "../../wailsjs/go/sqleditor/Service";
 import type { snowflake } from "../../wailsjs/go/models";
-import SessionPropertiesModal from "../components/common/SessionPropertiesModal";
-import SnippetsModal from "../components/snippets/SnippetsModal";
-import ExportPathFormatModal from "../components/export/ExportPathFormatModal";
-import MigrationModal from "../components/migration/MigrationModal";
-import DbtProjectModal from "../components/dbt/DbtProjectModal";
-import FunctionCatalogModal from "../components/fnmeta/FunctionCatalogModal";
-import KeyboardShortcutsModal from "../components/help/KeyboardShortcutsModal";
-import AboutModal from "../components/help/AboutModal";
 import { usePanelLayoutStore } from "../store/panelLayoutStore";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import SqlEditor, { type DiagMarker, pendingMcpMarkers } from "../components/editor/SqlEditor";
 import TabBar from "../components/editor/TabBar";
-import CrossTabSearch from "../components/editor/CrossTabSearch";
 import { DiffEditor } from "@monaco-editor/react";
 import { ensureMonacoSetup } from "../components/editor/monacoSetup";
 import { useThemeStore } from "../store/themeStore";
@@ -37,10 +27,26 @@ import ResultGrid, { type ResultGridHandle } from "../components/results/ResultG
 import GridSearch from "../components/results/GridSearch";
 import StatusBar from "../components/results/StatusBar";
 import CellDetailPanel from "../components/results/CellDetailPanel";
-import QueryProfileModal from "../components/results/QueryProfileModal";
-import TerminalPanel from "../components/terminal/TerminalPanel";
 import QueryLogPane from "../components/results/QueryLogPane";
-import NotebookTab from "../components/notebook/NotebookTab";
+
+// ── Lazy-loaded panels & modals ───────────────────────────────────────────────
+// None of these are on the initial render path — they mount only when the user
+// opens a notebook, the terminal, or a specific dialog.  React.lazy keeps their
+// code (and heavy deps: xterm for the terminal, the notebook kernel UI, the
+// migration / dbt / function-catalog modules) out of the eager boot bundle, so
+// they download on first use instead of at cold start.
+const SessionPropertiesModal = lazy(() => import("../components/common/SessionPropertiesModal"));
+const SnippetsModal          = lazy(() => import("../components/snippets/SnippetsModal"));
+const ExportPathFormatModal  = lazy(() => import("../components/export/ExportPathFormatModal"));
+const MigrationModal         = lazy(() => import("../components/migration/MigrationModal"));
+const DbtProjectModal        = lazy(() => import("../components/dbt/DbtProjectModal"));
+const FunctionCatalogModal   = lazy(() => import("../components/fnmeta/FunctionCatalogModal"));
+const KeyboardShortcutsModal = lazy(() => import("../components/help/KeyboardShortcutsModal"));
+const AboutModal             = lazy(() => import("../components/help/AboutModal"));
+const CrossTabSearch         = lazy(() => import("../components/editor/CrossTabSearch"));
+const QueryProfileModal      = lazy(() => import("../components/results/QueryProfileModal"));
+const TerminalPanel          = lazy(() => import("../components/terminal/TerminalPanel"));
+const NotebookTab            = lazy(() => import("../components/notebook/NotebookTab"));
 import { useQueryStore, type QueryResult, EXECUTE_IN_TAB_EVENT } from "../store/queryStore";
 import { useConnectionStore } from "../store/connectionStore";
 import { useSessionStore } from "../store/sessionStore";
@@ -539,6 +545,9 @@ export default function QueryPage() {
 
   const exportExcel = async () => {
     if (!displayedResult) return;
+    // Load the ~17 MB xlsx library on demand — Excel export is rarely the first
+    // thing a user does, so it must not sit in the eager boot bundle.
+    const XLSX = await import("xlsx");
     const ws = XLSX.utils.aoa_to_sheet([displayedResult.columns, ...displayedResult.rows]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Results");
@@ -1045,7 +1054,11 @@ export default function QueryPage() {
       <TabBar />
 
       {/* Cross-tab search/replace panel */}
-      {crossTabSearchOpen && <CrossTabSearch onClose={() => setCrossTabSearchOpen(false)} />}
+      {crossTabSearchOpen && (
+        <Suspense fallback={null}>
+          <CrossTabSearch onClose={() => setCrossTabSearchOpen(false)} />
+        </Suspense>
+      )}
 
       {/* Diff view — replaces editor + results when the active tab is a diff tab */}
       {activeDiff && (
@@ -1096,7 +1109,9 @@ export default function QueryPage() {
       {/* Notebook view — replaces editor + results when the active tab is a notebook */}
       {!activeDiff && isNotebookTab && (
         <div style={{ flex: 1, overflow: "hidden" }}>
-          <NotebookTab tabId={activeTabId} />
+          <Suspense fallback={null}>
+            <NotebookTab tabId={activeTabId} />
+          </Suspense>
         </div>
       )}
 
@@ -1546,7 +1561,9 @@ export default function QueryPage() {
 
           {terminalOpen && (
             <div style={{ flex: 1, overflow: "hidden", display: resultPane === "terminal" ? "flex" : "none", flexDirection: "column" }}>
-              <TerminalPanel onClose={() => { setTerminalOpen(false); setResultPane("results"); }} />
+              <Suspense fallback={null}>
+                <TerminalPanel onClose={() => { setTerminalOpen(false); setResultPane("results"); }} />
+              </Suspense>
             </div>
           )}
 
@@ -1557,24 +1574,26 @@ export default function QueryPage() {
           )}
       </div>}
 
-      {snippetsOpen && <SnippetsModal onClose={() => setSnippetsOpen(false)} />}
-      {exportPathFormatOpen && <ExportPathFormatModal onClose={() => setExportPathFormatOpen(false)} />}
-      {migrationOpen && <MigrationModal onClose={() => setMigrationOpen(false)} />}
-      {dbtCreateOpen && <DbtProjectModal onClose={() => setDbtCreateOpen(false)} />}
-      {fnCatalogOpen && <FunctionCatalogModal onClose={() => setFnCatalogOpen(false)} />}
-      {kbShortcutsOpen && <KeyboardShortcutsModal onClose={() => setKbShortcutsOpen(false)} />}
-      {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
+      <Suspense fallback={null}>
+        {snippetsOpen && <SnippetsModal onClose={() => setSnippetsOpen(false)} />}
+        {exportPathFormatOpen && <ExportPathFormatModal onClose={() => setExportPathFormatOpen(false)} />}
+        {migrationOpen && <MigrationModal onClose={() => setMigrationOpen(false)} />}
+        {dbtCreateOpen && <DbtProjectModal onClose={() => setDbtCreateOpen(false)} />}
+        {fnCatalogOpen && <FunctionCatalogModal onClose={() => setFnCatalogOpen(false)} />}
+        {kbShortcutsOpen && <KeyboardShortcutsModal onClose={() => setKbShortcutsOpen(false)} />}
+        {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
 
-      {sessionPropsOpen && (
-        <SessionPropertiesModal
-          parameters={sessionParams}
-          variables={sessionVars}
-          error={sessionPropsError}
-          onClose={() => setSessionPropsOpen(false)}
-          onParamChange={handleParamChange}
-          onVarChange={handleVarChange}
-        />
-      )}
+        {sessionPropsOpen && (
+          <SessionPropertiesModal
+            parameters={sessionParams}
+            variables={sessionVars}
+            error={sessionPropsError}
+            onClose={() => setSessionPropsOpen(false)}
+            onParamChange={handleParamChange}
+            onVarChange={handleVarChange}
+          />
+        )}
+      </Suspense>
 
       <Modal
         open={snowsightModalOpen}
@@ -1600,11 +1619,13 @@ export default function QueryPage() {
       </Modal>
 
       {profileQueryId && (
-        <QueryProfileModal
-          queryId={profileQueryId}
-          onClose={() => setProfileQueryId(null)}
-          liveRefresh={profileIsLive && isRunning}
-        />
+        <Suspense fallback={null}>
+          <QueryProfileModal
+            queryId={profileQueryId}
+            onClose={() => setProfileQueryId(null)}
+            liveRefresh={profileIsLive && isRunning}
+          />
+        </Suspense>
       )}
 
       <Modal
