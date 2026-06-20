@@ -446,22 +446,34 @@ func GetObjectProperties(ctx context.Context, client *snowflake.Client, database
 			// DESCRIBE CORTEX SEARCH SERVICE returns one row with the rich columns
 			// SHOW omits. Map by column name so a column reordering on Snowflake's
 			// side doesn't mislabel the values.
+			//
+			// Some columns whitelisted below (e.g. target_lag / warehouse / comment)
+			// may also be returned by SHOW CORTEX SEARCH SERVICES depending on the
+			// edition; skip any key already present so the enrichment never produces a
+			// duplicate PropertyPair regardless of SHOW's exact column set.
+			seen := make(map[string]struct{}, len(pairs))
+			for _, p := range pairs {
+				seen[strings.ToLower(p.Key)] = struct{}{}
+			}
 			row := descRes.Rows[0]
 			for ci, col := range descRes.Columns {
 				if ci >= len(row) {
 					break
 				}
-				switch strings.ToLower(col) {
+				lc := strings.ToLower(col)
+				switch lc {
 				case "search_column", "attribute_columns", "columns", "definition",
 					"target_lag", "warehouse", "embedding_model", "service_query_url",
 					"source_data_num_rows", "indexing_state", "indexing_error",
 					"serving_state", "data_timestamp",
 					// Mutable properties surfaced so the properties modal can show the
-					// current value next to the ALTER … SET editor for each. ("comment"
-					// is intentionally omitted — SHOW CORTEX SEARCH SERVICES already
-					// returns it, so re-appending it here would duplicate the key.)
+					// current value next to the ALTER … SET editor for each.
 					"primary_key", "auto_suspend", "request_logging",
-					"full_index_build_interval_days":
+					"full_index_build_interval_days", "comment":
+					if _, dup := seen[lc]; dup {
+						continue
+					}
+					seen[lc] = struct{}{}
 					// Guard against a SQL NULL rendering as the literal "<nil>";
 					// emit an empty string instead.
 					val := ""

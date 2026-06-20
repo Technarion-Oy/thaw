@@ -60,9 +60,18 @@ function q1(s: string) { return "'" + s.replace(/\\/g, "\\\\").replace(/'/g, "''
 // the fully-qualified tag name for UNSET TAG.
 const qId = (s: string) => `"${s.replace(/"/g, '""')}"`;
 
-// Split a DESCRIBE comma list ("CAT, AUTHOR") into trimmed, non-blank tokens.
+// Split a DESCRIBE comma list into trimmed, non-blank tokens. DESCRIBE CORTEX
+// SEARCH SERVICE renders these cells as a plain "CAT, AUTHOR" list, but be
+// defensive about an edition that wraps the list in brackets/parentheses or
+// quotes each token (e.g. `[CAT, AUTHOR]` or `'CAT', 'AUTHOR'`), so the chips and
+// the round-tripped SET clause don't carry stray brackets/quotes.
 function splitList(s: string): string[] {
-  return s.split(",").map((t) => t.trim()).filter((t) => t.length > 0);
+  return s
+    .replace(/^\s*[[(]\s*/, "")
+    .replace(/\s*[)\]]\s*$/, "")
+    .split(",")
+    .map((t) => t.trim().replace(/^["']|["']$/g, "").trim())
+    .filter((t) => t.length > 0);
 }
 
 // ─── EditRow (text) ──────────────────────────────────────────────────────────
@@ -599,7 +608,10 @@ export default function CortexSearchServicePropertiesModal({ db, schema, name, o
   const savePrimaryKey = async (cols: string[]) => {
     const list = await FormatCortexSearchAttributes(cols);
     if (!list) return;
-    await AlterCortexSearchService(db, schema, name, `SET PRIMARY KEY ( ${list} )`);
+    // ALTER's SET PRIMARY KEY is part of the SET property bag and takes an equals
+    // sign: SET PRIMARY KEY = ( … ). (CREATE's PRIMARY KEY ( … ) has no equals,
+    // and SET ATTRIBUTES ( … ) has no equals — per the documented grammar.)
+    await AlterCortexSearchService(db, schema, name, `SET PRIMARY KEY = ( ${list} )`);
     await reload();
   };
 
