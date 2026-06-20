@@ -439,14 +439,13 @@ func (c *Client) resolveRef(ctx context.Context, ref sqlRef, vis depVisited, dep
 // INFORMATION_SCHEMA (e.g. procedures, functions, or objects the current role
 // cannot access).
 func (c *Client) isViewInSchema(ctx context.Context, db, schema, name string) bool {
-	escVal := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
 	q := fmt.Sprintf(
 		`SELECT TABLE_TYPE FROM %s.INFORMATION_SCHEMA.TABLES`+
 			` WHERE TABLE_CATALOG = '%s' AND TABLE_SCHEMA = '%s' AND TABLE_NAME = '%s'`,
-		strings.ReplaceAll(db, `"`, `""`),
-		escVal(strings.ToUpper(db)),
-		escVal(strings.ToUpper(schema)),
-		escVal(strings.ToUpper(name)),
+		QuoteIdent(db),
+		EscapeStringLit(strings.ToUpper(db)),
+		EscapeStringLit(strings.ToUpper(schema)),
+		EscapeStringLit(strings.ToUpper(name)),
 	)
 	row := c.queryRowCtx(ctx, q)
 	var typ string
@@ -468,9 +467,9 @@ func (c *Client) resolveProcedureRef(ctx context.Context, ref sqlRef, vis depVis
 	// call GET_DDL for each one.
 	query := fmt.Sprintf(
 		`SHOW PROCEDURES LIKE '%s' IN SCHEMA %s.%s`,
-		strings.ReplaceAll(ref.name, "'", "''"),
-		strings.ReplaceAll(ref.db, `"`, `""`),
-		strings.ReplaceAll(ref.schema, `"`, `""`),
+		EscapeStringLit(ref.name),
+		QuoteIdent(ref.db),
+		QuoteIdent(ref.schema),
 	)
 	rows, err := c.queryCtx(ctx, query)
 	if err != nil {

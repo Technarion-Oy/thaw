@@ -111,6 +111,6 @@ func QuoteSessionParamValue(value, paramType string) string {
 	case "BOOLEAN", "NUMBER", "FIXED", "FLOAT":
 		return value
 	default:
-		return "'" + strings.ReplaceAll(value, "'", "''") + "'"
+		return QuoteStringLit(value)
 	}
 }
