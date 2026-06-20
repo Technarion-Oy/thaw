@@ -33,6 +33,15 @@ const q1 = (s: string) => `'${s.replace(/\\/g, "\\\\").replace(/'/g, "''")}'`;
 // Double-quote a SQL identifier (doubles embedded double quotes).
 const qId = (s: string) => `"${s.replace(/"/g, '""')}"`;
 
+// Version-name quoting is INTENTIONALLY split by clause, matching the ALTER MODEL
+// grammar (https://docs.snowflake.com/en/sql-reference/sql/alter-model):
+//   • SET DEFAULT_VERSION = '<name>'        → string literal  → q1
+//   • ADD/DROP/MODIFY VERSION <name>, VERSION <name> SET ALIAS → identifier → qId
+// These can't be unified — DEFAULT_VERSION takes a literal, the rest take an
+// identifier. There's no case-sensitivity hazard between them because both paths
+// feed the name straight from Snowflake's own output (the default_version_name
+// property / the SHOW VERSIONS `name` column), not from re-typed user input.
+
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
 const SECTION_HEAD: React.CSSProperties = {
@@ -320,8 +329,10 @@ export default function ModelPropertiesModal({ db, schema, name, onClose }: Prop
   const modelType = find("model_type");
   const aliases = find("aliases");
 
-  // Keys handled by dedicated sections above the generic Properties table.
-  const handledKeys = new Set(["comment", "default_version_name"]);
+  // Keys surfaced by dedicated sections above the generic Properties table
+  // (Overview: model_type/aliases; Settings: default_version_name/comment) — so
+  // they aren't duplicated in the raw SHOW MODELS dump at the bottom.
+  const handledKeys = new Set(["comment", "default_version_name", "model_type", "aliases"]);
 
   // ── Tags → chips ──────────────────────────────────────────────────────────
   const tagChips = (tags?.rows ?? []).map((row) => {

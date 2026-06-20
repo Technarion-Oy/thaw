@@ -21,6 +21,7 @@ import {
 } from "../../../wailsjs/go/app/App";
 import { sfconfig } from "../../../wailsjs/go/models";
 import { useConnectionStore, type ConnectionParams } from "../../store/connectionStore";
+import { invalidateModelsCache } from "../model/ModelSourcePicker";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 
 const { Title, Text } = Typography;
@@ -379,6 +380,9 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
     setError(null);
     try {
       await Connect(values);
+      // The model picker caches SHOW MODELS IN ACCOUNT at module scope; drop it so
+      // a new connection doesn't keep offering the previous account's models.
+      invalidateModelsCache();
       setConnected(values);
     } catch (e) {
       setError(String(e));

@@ -55,7 +55,10 @@ func (a *App) GetModelTags(database, schema, name string) (*snowflake.QueryResul
 		"SELECT TAG_DATABASE, TAG_SCHEMA, TAG_NAME, TAG_VALUE "+
 			"FROM TABLE(%s.INFORMATION_SCHEMA.TAG_REFERENCES('%s', 'MODEL')) "+
 			"ORDER BY TAG_DATABASE, TAG_SCHEMA, TAG_NAME",
-		snowflake.QuoteIdent(database), snowflake.EscapeStringLit(fqn))
+		// EscapeTextLit (not EscapeStringLit): QuoteIdent doubles " but not \, so a
+		// backslash in an identifier must be doubled to survive the single-quoted
+		// literal rather than being read as a Snowflake escape sequence.
+		snowflake.QuoteIdent(database), snowflake.EscapeTextLit(fqn))
 	return a.client.Execute(a.ctx, sql)
 }
 

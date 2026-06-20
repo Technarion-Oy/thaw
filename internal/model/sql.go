@@ -90,6 +90,11 @@ func BuildCreateModelSql(db, schema string, cfg ModelConfig) (string, error) {
 	fmt.Fprintf(&sb, "%s %s", createClause,
 		snowflake.QualifyOrBare(db, schema, name, cfg.CaseSensitive))
 
+	// Version names (WITH VERSION here, and FROM MODEL … VERSION below) are emitted
+	// unquoted so Snowflake's standard identifier resolution applies — folding to
+	// uppercase, which matches how the registry stores version names (V1, V2, …).
+	// Quoting the SourceVersion would make the lookup case-sensitive and break it
+	// when the user types a different case than the stored name.
 	if v := strings.TrimSpace(cfg.VersionName); v != "" {
 		fmt.Fprintf(&sb, " WITH VERSION %s", v)
 	}
