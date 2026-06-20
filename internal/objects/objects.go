@@ -111,6 +111,8 @@ func BuildObjectPropertiesQuery(database, schema, kind, name string) (string, er
 		return fmt.Sprintf("SHOW DBT PROJECTS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "MODEL":
 		return fmt.Sprintf("SHOW MODELS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
+	case "CORTEX SEARCH SERVICE":
+		return fmt.Sprintf("SHOW CORTEX SEARCH SERVICES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "WAREHOUSE":
 		return fmt.Sprintf("SHOW WAREHOUSES LIKE '%s'", like), nil
 	case "ROLE":
@@ -234,6 +236,14 @@ func appendPackagesPolicyDesc(pairs []snowflake.PropertyPair, descRes *snowflake
 // identifiers.
 func BuildDescribeNetworkRuleQuery(database, schema, name string) string {
 	return fmt.Sprintf("DESCRIBE NETWORK RULE %s", snowflake.Qualify(database, schema, name))
+}
+
+// BuildDescribeCortexSearchServiceQuery returns the DESCRIBE CORTEX SEARCH
+// SERVICE query used to enrich the SHOW CORTEX SEARCH SERVICES result with the
+// rich properties SHOW omits (search column, attributes, embedding model,
+// definition, target lag, warehouse, and serving/indexing state).
+func BuildDescribeCortexSearchServiceQuery(database, schema, name string) string {
+	return fmt.Sprintf("DESCRIBE CORTEX SEARCH SERVICE %s", snowflake.Qualify(database, schema, name))
 }
 
 // BuildDescribeServiceQuery returns the DESCRIBE SERVICE query used to enrich the
@@ -418,6 +428,52 @@ func GetObjectProperties(ctx context.Context, client *snowflake.Client, database
 				}
 				switch strings.ToLower(col) {
 				case "spec", "dns_name":
+					// Guard against a SQL NULL rendering as the literal "<nil>";
+					// emit an empty string instead.
+					val := ""
+					if row[ci] != nil {
+						val = fmt.Sprintf("%v", row[ci])
+					}
+					pairs = append(pairs, snowflake.PropertyPair{Key: col, Value: val})
+				}
+			}
+		}
+	}
+
+	if strings.ToUpper(kind) == "CORTEX SEARCH SERVICE" {
+		descRes, err := client.Execute(ctx, BuildDescribeCortexSearchServiceQuery(database, schema, name))
+		if err == nil && len(descRes.Rows) > 0 {
+			// DESCRIBE CORTEX SEARCH SERVICE returns one row with the rich columns
+			// SHOW omits. Map by column name so a column reordering on Snowflake's
+			// side doesn't mislabel the values.
+			//
+			// Some columns whitelisted below (e.g. target_lag / warehouse / comment)
+			// may also be returned by SHOW CORTEX SEARCH SERVICES depending on the
+			// edition; skip any key already present so the enrichment never produces a
+			// duplicate PropertyPair regardless of SHOW's exact column set.
+			seen := make(map[string]struct{}, len(pairs))
+			for _, p := range pairs {
+				seen[strings.ToLower(p.Key)] = struct{}{}
+			}
+			row := descRes.Rows[0]
+			for ci, col := range descRes.Columns {
+				if ci >= len(row) {
+					break
+				}
+				lc := strings.ToLower(col)
+				switch lc {
+				case "search_column", "attribute_columns", "columns", "definition",
+					"target_lag", "warehouse", "embedding_model", "service_query_url",
+					"source_data_num_rows", "indexing_state", "indexing_error",
+					"serving_state", "data_timestamp",
+					// Mutable properties surfaced so the properties modal can show the
+					// current value next to the ALTER … SET editor for each.
+					"primary_key", "auto_suspend", "request_logging",
+					"full_index_build_interval_days", "comment":
+					if _, dup := seen[lc]; dup {
+						continue
+					}
+					seen[lc] = struct{}{}
 					// Guard against a SQL NULL rendering as the literal "<nil>";
 					// emit an empty string instead.
 					val := ""

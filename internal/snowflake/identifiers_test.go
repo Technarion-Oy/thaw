@@ -590,6 +590,41 @@ func TestHasNonBlankToken(t *testing.T) {
 	}
 }
 
+func TestCleanList(t *testing.T) {
+	tests := []struct {
+		name  string
+		items []string
+		want  []string
+	}{
+		{"nil", nil, []string{}},
+		{"all blank", []string{"", "  ", "\t"}, []string{}},
+		{"trims and drops blanks, preserves order", []string{" a ", "", "b", "  ", "c"}, []string{"a", "b", "c"}},
+		{"already clean", []string{"x", "y"}, []string{"x", "y"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := CleanList(tt.items)
+			if len(got) != len(tt.want) {
+				t.Fatalf("CleanList(%v) = %v, want %v", tt.items, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("CleanList(%v)[%d] = %q, want %q", tt.items, i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestJoinCleanList(t *testing.T) {
+	if got := JoinCleanList([]string{" a ", "", "b"}, ", "); got != "a, b" {
+		t.Errorf("JoinCleanList = %q, want %q", got, "a, b")
+	}
+	if got := JoinCleanList([]string{"", "  "}, ", "); got != "" {
+		t.Errorf("JoinCleanList of blanks = %q, want empty", got)
+	}
+}
+
 func TestNormalizeScalar(t *testing.T) {
 	tests := []struct{ raw, want string }{
 		{"[OPTIONAL]", "OPTIONAL"},

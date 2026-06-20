@@ -88,6 +88,7 @@
   --icon-gitrepo:     #ff9248;  /* warm orange (git family)                 */
   --icon-dbtproject:  #7ee787;  /* mint green (dbt build/deploy)            */
   --icon-model:       #f472b6;  /* pink (ML model registry)                 */
+  --icon-cortexsearchservice: #22d3ee;  /* cyan (Cortex AI / vector search) */
 
   /* Column icons */
   --col-text:         #8b949e;
@@ -171,6 +172,7 @@
   --icon-gitrepo:     #bc4c00;
   --icon-dbtproject:  #116329;
   --icon-model:       #c2185b;
+  --icon-cortexsearchservice: #0e7490;
 
   /* Column icons */
   --col-text:         #6e7681;

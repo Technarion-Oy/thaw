@@ -15,6 +15,7 @@ import (
 	"thaw/internal/alert"
 	"thaw/internal/authenticationpolicy"
 	"thaw/internal/column"
+	"thaw/internal/cortexsearchservice"
 	"thaw/internal/datametricfunction"
 	"thaw/internal/dbtproject"
 	"thaw/internal/dynamictable"
@@ -235,6 +236,12 @@ func (a *App) BuildCreateImageRepositorySql(database, schema string, cfg imagere
 // BuildCreateModelSql returns the SQL for creating a Snowflake MODEL.
 func (a *App) BuildCreateModelSql(database, schema string, cfg model.ModelConfig) (string, error) {
 	return model.BuildCreateModelSql(database, schema, cfg)
+}
+
+// BuildCreateCortexSearchServiceSql returns the SQL for creating a Snowflake
+// CORTEX SEARCH SERVICE.
+func (a *App) BuildCreateCortexSearchServiceSql(database, schema string, cfg cortexsearchservice.CortexSearchServiceConfig) (string, error) {
+	return cortexsearchservice.BuildCreateCortexSearchServiceSql(database, schema, cfg)
 }
 
 // BuildCreateServiceSql returns the SQL for creating a Snowflake SERVICE (SPCS).

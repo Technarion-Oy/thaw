@@ -17,6 +17,7 @@ formatting. They are opt-in only and are never run in normal CI without explicit
 | `dbt_test.go` | DBT project SQL builder tests against a live account. |
 | `migration_test.go` | Schema migration engine tests. |
 | `formatter_test.go` | SQL formatter round-trip tests. |
+| `cortexsearch_test.go` | Cortex Search Service CREATE/ALTER grammar smoke test — exercises every clause the UI emits (single- and multi-index CREATE, all SET/UNSET, lifecycle, tags, scoring profiles) and asserts the `DESCRIBE` column names the properties modal reads. |
 
 ## Patterns & integration
 
