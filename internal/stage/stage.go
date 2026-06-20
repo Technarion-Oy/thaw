@@ -33,7 +33,7 @@ type StageConfig struct {
 	Url                    string `json:"url"`
 	StorageIntegration     string `json:"storageIntegration"`
 	UsePrivatelinkEndpoint bool   `json:"usePrivatelinkEndpoint"`
-	// Note: Credentials like AWS_KEY_ID are intentionally omitted from UI config payload 
+	// Note: Credentials like AWS_KEY_ID are intentionally omitted from UI config payload
 	// for now unless explicitly requested due to security, but structure can be expanded.
 
 	// Encryption
@@ -41,14 +41,14 @@ type StageConfig struct {
 	KmsKeyId       string `json:"kmsKeyId"`
 
 	// Directory Table
-	DirectoryEnabled             bool   `json:"directoryEnabled"`
-	DirectoryAutoRefresh         bool   `json:"directoryAutoRefresh"`
-	DirectoryRefreshOnCreate     bool   `json:"directoryRefreshOnCreate"`
+	DirectoryEnabled                 bool   `json:"directoryEnabled"`
+	DirectoryAutoRefresh             bool   `json:"directoryAutoRefresh"`
+	DirectoryRefreshOnCreate         bool   `json:"directoryRefreshOnCreate"`
 	DirectoryNotificationIntegration string `json:"directoryNotificationIntegration"`
 
 	// File Format
-	FileFormatName string                        `json:"fileFormatName"`
-	FileFormat     fileformat.FileFormatConfig   `json:"fileFormat"`
+	FileFormatName string                      `json:"fileFormatName"`
+	FileFormat     fileformat.FileFormatConfig `json:"fileFormat"`
 
 	Comment string `json:"comment"`
 	Tags    string `json:"tags"` // JSON string map, or parsed later
@@ -77,7 +77,7 @@ func BuildCreateStageSql(cfg StageConfig) string {
 
 	if cfg.Type == "EXTERNAL" {
 		if strings.TrimSpace(cfg.Url) != "" {
-			fmt.Fprintf(&sb, "\n  URL = '%s'", strings.ReplaceAll(cfg.Url, "'", "''"))
+			fmt.Fprintf(&sb, "\n  URL = '%s'", snowflake.EscapeStringLit(cfg.Url))
 		}
 		if strings.TrimSpace(cfg.StorageIntegration) != "" {
 			fmt.Fprintf(&sb, "\n  STORAGE_INTEGRATION = %s", snowflake.QuoteIdent(cfg.StorageIntegration))
@@ -115,16 +115,16 @@ func BuildCreateStageSql(cfg StageConfig) string {
 
 	// Encryption
 	if cfg.EncryptionType != "" && cfg.EncryptionType != "NONE" {
-		fmt.Fprintf(&sb, "\n  ENCRYPTION = (TYPE = '%s'", strings.ReplaceAll(cfg.EncryptionType, "'", "''"))
+		fmt.Fprintf(&sb, "\n  ENCRYPTION = (TYPE = '%s'", snowflake.EscapeStringLit(cfg.EncryptionType))
 		if strings.TrimSpace(cfg.KmsKeyId) != "" {
-			fmt.Fprintf(&sb, " KMS_KEY_ID = '%s'", strings.ReplaceAll(cfg.KmsKeyId, "'", "''"))
+			fmt.Fprintf(&sb, " KMS_KEY_ID = '%s'", snowflake.EscapeStringLit(cfg.KmsKeyId))
 		}
 		sb.WriteString(")")
 	}
 
 	// Comment
 	if strings.TrimSpace(cfg.Comment) != "" {
-		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", strings.ReplaceAll(cfg.Comment, "'", "''"))
+		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment))
 	}
 
 	sb.WriteString(";")
@@ -133,78 +133,88 @@ func BuildCreateStageSql(cfg StageConfig) string {
 
 // AlterStageConfig defines parameters that can be changed on an existing stage.
 type AlterStageConfig struct {
-	Name          string `json:"name"`
-	Database      string `json:"database"`
-	Schema        string `json:"schema"`
-	
-	Action        string `json:"action"` // RENAME, SET, UNSET, REFRESH
-	
+	Name     string `json:"name"`
+	Database string `json:"database"`
+	Schema   string `json:"schema"`
+
+	Action string `json:"action"` // RENAME, SET, UNSET, REFRESH
+
 	NewName       string `json:"newName"`
 	CaseSensitive bool   `json:"caseSensitive"`
 
 	// Set/Unset parameters
-	Comment       *string `json:"comment"`
-	Url           *string `json:"url"`
+	Comment            *string `json:"comment"`
+	Url                *string `json:"url"`
 	StorageIntegration *string `json:"storageIntegration"`
-	DirectoryEnabled *bool `json:"directoryEnabled"`
+	DirectoryEnabled   *bool   `json:"directoryEnabled"`
 }
 
 // BuildAlterStageSql generates an ALTER STAGE statement.
 func BuildAlterStageSql(cfg AlterStageConfig) string {
-	target := fmt.Sprintf("%s.%s.%s", snowflake.QuoteIdent(cfg.Database), snowflake.QuoteIdent(cfg.Schema), snowflake.QuoteIdent(cfg.Name))
-	
+	target := snowflake.Qualify(cfg.Database, cfg.Schema, cfg.Name)
+
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "ALTER STAGE %s", target)
-	
+
 	switch cfg.Action {
 	case "RENAME":
 		newName := snowflake.QuoteOrBare(cfg.NewName, cfg.CaseSensitive)
 		fmt.Fprintf(&sb, " RENAME TO %s", newName)
-	
+
 	case "REFRESH":
 		sb.WriteString(" REFRESH")
-		
+
 	case "SET":
 		sb.WriteString(" SET")
 		first := true
-		
+
 		if cfg.Comment != nil {
-			if !first { sb.WriteString(",") }
-			fmt.Fprintf(&sb, " COMMENT = '%s'", strings.ReplaceAll(*cfg.Comment, "'", "''"))
+			if !first {
+				sb.WriteString(",")
+			}
+			fmt.Fprintf(&sb, " COMMENT = '%s'", snowflake.EscapeStringLit(*cfg.Comment))
 			first = false
 		}
-		
+
 		if cfg.Url != nil {
-			if !first { sb.WriteString(",") }
-			fmt.Fprintf(&sb, " URL = '%s'", strings.ReplaceAll(*cfg.Url, "'", "''"))
+			if !first {
+				sb.WriteString(",")
+			}
+			fmt.Fprintf(&sb, " URL = '%s'", snowflake.EscapeStringLit(*cfg.Url))
 			first = false
 		}
-		
+
 		if cfg.StorageIntegration != nil {
-			if !first { sb.WriteString(",") }
+			if !first {
+				sb.WriteString(",")
+			}
 			fmt.Fprintf(&sb, " STORAGE_INTEGRATION = %s", snowflake.QuoteIdent(*cfg.StorageIntegration))
 			first = false
 		}
-		
+
 		if cfg.DirectoryEnabled != nil {
-			if !first { sb.WriteString(",") }
+			if !first {
+				sb.WriteString(",")
+			}
 			if *cfg.DirectoryEnabled {
 				sb.WriteString(" DIRECTORY = (ENABLE = TRUE)")
 			} else {
 				sb.WriteString(" DIRECTORY = (ENABLE = FALSE)")
 			}
 		}
-		
+
 	case "UNSET":
 		sb.WriteString(" UNSET")
 		first := true
-		
+
 		if cfg.Comment != nil {
-			if !first { sb.WriteString(",") }
+			if !first {
+				sb.WriteString(",")
+			}
 			sb.WriteString(" COMMENT")
 		}
 	}
-	
+
 	sb.WriteString(";")
 	return sb.String()
 }

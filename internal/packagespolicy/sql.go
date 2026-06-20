@@ -82,23 +82,15 @@ func ParseList(raw string) []string { return snowflake.ParseSqlListVerbatim(raw)
 func BuildCreatePackagesPolicySql(db, schema string, cfg PackagesPolicyConfig) (string, error) {
 	var sb strings.Builder
 
-	createClause := "CREATE"
-	if cfg.OrReplace {
-		createClause += " OR REPLACE"
-	}
-	createClause += " PACKAGES POLICY"
-	// OR REPLACE and IF NOT EXISTS are mutually exclusive; OR REPLACE wins.
-	if cfg.IfNotExists && !cfg.OrReplace {
-		createClause += " IF NOT EXISTS"
+	createClause := snowflake.CreateClause("PACKAGES POLICY", cfg.OrReplace, cfg.IfNotExists)
+
+	name := cfg.Name
+	if name == "" {
+		name = "packages_policy_name"
 	}
 
-	nameToken := snowflake.QuoteOrBare(cfg.Name, cfg.CaseSensitive)
-	if cfg.Name == "" {
-		nameToken = "packages_policy_name"
-	}
-
-	fmt.Fprintf(&sb, "%s %s.%s.%s", createClause,
-		snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), nameToken)
+	fmt.Fprintf(&sb, "%s %s", createClause,
+		snowflake.QualifyOrBare(db, schema, name, cfg.CaseSensitive))
 
 	// LANGUAGE PYTHON is required by the grammar and is the only supported value.
 	fmt.Fprint(&sb, "\n  LANGUAGE PYTHON")
@@ -113,9 +105,7 @@ func BuildCreatePackagesPolicySql(db, schema string, cfg PackagesPolicyConfig) (
 		fmt.Fprintf(&sb, "\n  ADDITIONAL_CREATION_BLOCKLIST = %s", snowflake.FormatStringLitList(cfg.AdditionalCreationBlocklist))
 	}
 
-	if cfg.Comment != "" {
-		fmt.Fprintf(&sb, "\n  COMMENT = %s", snowflake.QuoteTextLit(cfg.Comment))
-	}
+	sb.WriteString(snowflake.CommentClause(cfg.Comment))
 
 	return sb.String() + ";", nil
 }

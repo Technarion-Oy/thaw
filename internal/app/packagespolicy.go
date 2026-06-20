@@ -11,11 +11,7 @@
 package app
 
 import (
-	"fmt"
-
-	"thaw/internal/apperrors"
 	"thaw/internal/packagespolicy"
-	"thaw/internal/snowflake"
 )
 
 // AlterPackagesPolicy runs an ALTER PACKAGES POLICY statement for the given
@@ -25,13 +21,7 @@ import (
 // responsible for correct SQL quoting inside the clause; this method only
 // double-quotes the policy identifier.
 func (a *App) AlterPackagesPolicy(database, schema, name, clause string) error {
-	if a.client == nil {
-		return apperrors.ErrNotConnected
-	}
-	sql := fmt.Sprintf("ALTER PACKAGES POLICY %s.%s.%s %s",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), clause)
-	_, err := a.client.Execute(a.ctx, sql)
-	return err
+	return a.alterObject("PACKAGES POLICY", database, schema, name, clause)
 }
 
 // FormatPackagesPolicyList renders a token slice into the `('A', 'B')`

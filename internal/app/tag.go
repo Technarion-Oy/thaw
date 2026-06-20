@@ -24,13 +24,7 @@ import (
 // POLICY <policy>". The caller is responsible for correct SQL quoting inside the
 // clause; this method only double-quotes the tag identifier.
 func (a *App) AlterTag(database, schema, name, clause string) error {
-	if a.client == nil {
-		return apperrors.ErrNotConnected
-	}
-	sql := fmt.Sprintf("ALTER TAG %s.%s.%s %s",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), clause)
-	_, err := a.client.Execute(a.ctx, sql)
-	return err
+	return a.alterObject("TAG", database, schema, name, clause)
 }
 
 // GetTagReferences returns the objects and columns to which the given tag is

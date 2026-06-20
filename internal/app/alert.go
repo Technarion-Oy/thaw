@@ -25,13 +25,7 @@ import (
 // the clause; this method only double-quotes the alert identifier. ALTER ALERT
 // has no RENAME variant, and EXECUTE is a separate statement (see ExecuteAlert).
 func (a *App) AlterAlert(database, schema, name, clause string) error {
-	if a.client == nil {
-		return apperrors.ErrNotConnected
-	}
-	sql := fmt.Sprintf("ALTER ALERT %s.%s.%s %s",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), clause)
-	_, err := a.client.Execute(a.ctx, sql)
-	return err
+	return a.alterObject("ALERT", database, schema, name, clause)
 }
 
 // ExecuteAlert manually triggers an immediate evaluation of the given alert via

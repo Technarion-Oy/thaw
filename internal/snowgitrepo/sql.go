@@ -37,21 +37,14 @@ func BuildCreateGitRepositorySql(db, schema string, cfg GitRepositoryConfig) (st
 
 	var sb strings.Builder
 
-	createClause := "CREATE"
-	if cfg.OrReplace {
-		createClause += " OR REPLACE"
-	}
-	createClause += " GIT REPOSITORY"
-	if cfg.IfNotExists && !cfg.OrReplace {
-		createClause += " IF NOT EXISTS"
+	createClause := snowflake.CreateClause("GIT REPOSITORY", cfg.OrReplace, cfg.IfNotExists)
+
+	name := cfg.Name
+	if name == "" {
+		name = "repo_name"
 	}
 
-	nameToken := snowflake.QuoteOrBare(cfg.Name, cfg.CaseSensitive)
-	if cfg.Name == "" {
-		nameToken = "repo_name"
-	}
-
-	fmt.Fprintf(&sb, "%s %s.%s.%s\n", createClause, snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), nameToken)
+	fmt.Fprintf(&sb, "%s %s\n", createClause, snowflake.QualifyOrBare(db, schema, name, cfg.CaseSensitive))
 	fmt.Fprintf(&sb, "  ORIGIN = '%s'", snowflake.EscapeStringLit(cfg.OriginUrl))
 	fmt.Fprintf(&sb, "\n  API_INTEGRATION = %s", snowflake.QuoteIdent(cfg.ApiIntegration))
 
@@ -59,9 +52,7 @@ func BuildCreateGitRepositorySql(db, schema string, cfg GitRepositoryConfig) (st
 		fmt.Fprintf(&sb, "\n  GIT_CREDENTIALS = %s", cfg.GitCredentials)
 	}
 
-	if cfg.Comment != "" {
-		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment))
-	}
+	sb.WriteString(snowflake.CommentClause(cfg.Comment))
 
 	if tc := snowflake.TagClause(cfg.Tags); tc != "" {
 		fmt.Fprintf(&sb, "\n  WITH %s", tc)
@@ -90,7 +81,7 @@ func BuildModifyGitRepositorySql(db, schema, name string, cfg GitRepositoryConfi
 
 	// COMMENT: set if non-empty
 	if cfg.Comment != "" {
-		setClauses = append(setClauses, fmt.Sprintf("COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment)))
+		setClauses = append(setClauses, "COMMENT = "+snowflake.QuoteTextLit(cfg.Comment))
 	}
 
 	if len(setClauses) > 0 {

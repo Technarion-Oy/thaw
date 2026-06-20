@@ -78,11 +78,11 @@ func BuildQueryHistorySql(
 		}
 	case "user":
 		if userName != "" {
-			args = append(args, fmt.Sprintf("USER_NAME => '%s'", strings.ReplaceAll(userName, "'", "''")))
+			args = append(args, fmt.Sprintf("USER_NAME => %s", snowflake.QuoteStringLit(userName)))
 		}
 	case "warehouse":
 		if warehouseName != "" {
-			args = append(args, fmt.Sprintf("WAREHOUSE_NAME => '%s'", strings.ReplaceAll(warehouseName, "'", "''")))
+			args = append(args, fmt.Sprintf("WAREHOUSE_NAME => %s", snowflake.QuoteStringLit(warehouseName)))
 		}
 	}
 	if endTimeStart != "" {

@@ -24,13 +24,7 @@ import (
 // properties panel issues. The caller is responsible for correct SQL quoting
 // inside the clause; this method only double-quotes the repository identifier.
 func (a *App) AlterImageRepository(database, schema, name, clause string) error {
-	if a.client == nil {
-		return apperrors.ErrNotConnected
-	}
-	sql := fmt.Sprintf("ALTER IMAGE REPOSITORY %s.%s.%s %s",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), clause)
-	_, err := a.client.Execute(a.ctx, sql)
-	return err
+	return a.alterObject("IMAGE REPOSITORY", database, schema, name, clause)
 }
 
 // ListImagesInRepository returns the images stored in the given image

@@ -205,7 +205,7 @@ func GetTableSettings(ctx context.Context, client *snowflake.Client, database, s
 // dataRetentionDays, maxDataExtensionDays, changeTracking, defaultDDLCollation,
 // comment.
 func BuildAlterTablePropertySQL(database, schema, tbl, property, value string) (string, error) {
-	t := snowflake.QuoteIdent(database) + "." + snowflake.QuoteIdent(schema) + "." + snowflake.QuoteIdent(tbl)
+	t := snowflake.Qualify(database, schema, tbl)
 
 	switch property {
 	case "clusterBy":

@@ -218,7 +218,7 @@ func GetParameters(ctx context.Context, client *snowflake.Client, name string) (
 func BuildMeteringHistoryQuery(warehouse, startDate, endDate string) string {
 	var conds []string
 	if warehouse != "" {
-		conds = append(conds, fmt.Sprintf("WAREHOUSE_NAME = '%s'", strings.ReplaceAll(warehouse, "'", "''")))
+		conds = append(conds, fmt.Sprintf("WAREHOUSE_NAME = %s", snowflake.QuoteStringLit(warehouse)))
 	}
 	if startDate != "" {
 		conds = append(conds, fmt.Sprintf("START_TIME >= '%s'::TIMESTAMP_LTZ", startDate))

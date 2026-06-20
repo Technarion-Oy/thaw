@@ -24,13 +24,7 @@ import (
 // responsible for correct SQL quoting inside the clause; this method only
 // double-quotes the policy identifier.
 func (a *App) AlterMaskingPolicy(database, schema, name, clause string) error {
-	if a.client == nil {
-		return apperrors.ErrNotConnected
-	}
-	sql := fmt.Sprintf("ALTER MASKING POLICY %s.%s.%s %s",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), clause)
-	_, err := a.client.Execute(a.ctx, sql)
-	return err
+	return a.alterObject("MASKING POLICY", database, schema, name, clause)
 }
 
 // GetMaskingPolicyReferences returns the columns to which the given masking

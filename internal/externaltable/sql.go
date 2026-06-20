@@ -77,21 +77,14 @@ func fileFormatClause(cfg ExternalTableConfig) string {
 func BuildCreateExternalTableSql(db, schema string, cfg ExternalTableConfig) (string, error) {
 	var sb strings.Builder
 
-	createClause := "CREATE"
-	if cfg.OrReplace {
-		createClause += " OR REPLACE"
-	}
-	createClause += " EXTERNAL TABLE"
-	if cfg.IfNotExists && !cfg.OrReplace {
-		createClause += " IF NOT EXISTS"
+	createClause := snowflake.CreateClause("EXTERNAL TABLE", cfg.OrReplace, cfg.IfNotExists)
+
+	name := cfg.Name
+	if name == "" {
+		name = "external_table_name"
 	}
 
-	nameToken := snowflake.QuoteOrBare(cfg.Name, cfg.CaseSensitive)
-	if cfg.Name == "" {
-		nameToken = "external_table_name"
-	}
-
-	fmt.Fprintf(&sb, "%s %s.%s.%s", createClause, snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), nameToken)
+	fmt.Fprintf(&sb, "%s %s", createClause, snowflake.QualifyOrBare(db, schema, name, cfg.CaseSensitive))
 
 	// Column definitions (optional). Each column is derived from the staged file
 	// via an expression: <name> <type> AS (<expr>).
@@ -154,9 +147,7 @@ func BuildCreateExternalTableSql(db, schema string, cfg ExternalTableConfig) (st
 	if cfg.CopyGrants {
 		fmt.Fprintf(&sb, "\n  COPY GRANTS")
 	}
-	if cfg.Comment != "" {
-		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment))
-	}
+	sb.WriteString(snowflake.CommentClause(cfg.Comment))
 	if tc := snowflake.TagClause(cfg.Tags); tc != "" {
 		fmt.Fprintf(&sb, "\n  %s", tc)
 	}

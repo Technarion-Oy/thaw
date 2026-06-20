@@ -62,23 +62,16 @@ func BuildCreateDbtProjectSql(db, schema string, cfg CreateConfig) (string, erro
 
 	var sb strings.Builder
 
-	createClause := "CREATE"
-	if cfg.OrReplace {
-		createClause += " OR REPLACE"
-	}
-	createClause += " DBT PROJECT"
-	if cfg.IfNotExists && !cfg.OrReplace {
-		createClause += " IF NOT EXISTS"
-	}
+	createClause := snowflake.CreateClause("DBT PROJECT", cfg.OrReplace, cfg.IfNotExists)
 
-	nameToken := snowflake.QuoteOrBare(cfg.Name, cfg.CaseSensitive)
-	if cfg.Name == "" {
+	name := cfg.Name
+	if name == "" {
 		// Placeholder for live SQL preview before the user types a name.
 		// The frontend gates submission with canSubmit (name must be non-empty).
-		nameToken = "project_name"
+		name = "project_name"
 	}
 
-	fmt.Fprintf(&sb, "%s %s.%s.%s\n", createClause, snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), nameToken)
+	fmt.Fprintf(&sb, "%s %s\n", createClause, snowflake.QualifyOrBare(db, schema, name, cfg.CaseSensitive))
 	fmt.Fprintf(&sb, "  FROM '%s'", snowflake.EscapeStringLit(cfg.SourceLocation))
 
 	if cfg.DbtVersion != "" {
@@ -97,9 +90,7 @@ func BuildCreateDbtProjectSql(db, schema string, cfg CreateConfig) (string, erro
 		fmt.Fprintf(&sb, "\n  EXTERNAL_ACCESS_INTEGRATIONS = (%s)", strings.Join(quoted, ", "))
 	}
 
-	if cfg.Comment != "" {
-		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment))
-	}
+	sb.WriteString(snowflake.CommentClause(cfg.Comment))
 
 	return sb.String() + ";", nil
 }
@@ -121,7 +112,7 @@ func BuildAlterDbtProjectSetSql(db, schema, name string, cfg AlterSetConfig, ori
 	}
 
 	if cfg.Comment != "" && cfg.Comment != origComment {
-		setClauses = append(setClauses, fmt.Sprintf("COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment)))
+		setClauses = append(setClauses, "COMMENT = "+snowflake.QuoteTextLit(cfg.Comment))
 	}
 
 	// Check if integrations changed (case-insensitive: Snowflake identifiers

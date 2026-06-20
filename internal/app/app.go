@@ -697,3 +697,15 @@ func (a *App) GetAppInfo() AppInfo {
 		Comments:       "Snowflake Manager",
 	}
 }
+
+// alterObject issues `ALTER <objectType> <db>.<schema>.<name> <clause>`, the shared
+// body behind the per-object Alter* IPC delegators. objectType carries any trailing
+// modifier such as "IF EXISTS" (e.g. "TASK IF EXISTS").
+func (a *App) alterObject(objectType, database, schema, name, clause string) error {
+	if a.client == nil {
+		return apperrors.ErrNotConnected
+	}
+	sql := fmt.Sprintf("ALTER %s %s %s", objectType, snowflake.Qualify(database, schema, name), clause)
+	_, err := a.client.Execute(a.ctx, sql)
+	return err
+}

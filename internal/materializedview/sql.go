@@ -45,31 +45,23 @@ type MaterializedViewConfig struct {
 func BuildCreateMaterializedViewSql(db, schema string, cfg MaterializedViewConfig) (string, error) {
 	var sb strings.Builder
 
-	createClause := "CREATE"
-	if cfg.OrReplace {
-		createClause += " OR REPLACE"
-	}
+	body := "MATERIALIZED VIEW"
 	if cfg.Secure {
-		createClause += " SECURE"
+		body = "SECURE " + body
 	}
-	createClause += " MATERIALIZED VIEW"
-	if cfg.IfNotExists && !cfg.OrReplace {
-		createClause += " IF NOT EXISTS"
+	createClause := snowflake.CreateClause(body, cfg.OrReplace, cfg.IfNotExists)
+
+	name := cfg.Name
+	if name == "" {
+		name = "materialized_view_name"
 	}
 
-	nameToken := snowflake.QuoteOrBare(cfg.Name, cfg.CaseSensitive)
-	if cfg.Name == "" {
-		nameToken = "materialized_view_name"
-	}
-
-	fmt.Fprintf(&sb, "%s %s.%s.%s", createClause, snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), nameToken)
+	fmt.Fprintf(&sb, "%s %s", createClause, snowflake.QualifyOrBare(db, schema, name, cfg.CaseSensitive))
 
 	if cfg.CopyGrants {
 		fmt.Fprintf(&sb, "\n  COPY GRANTS")
 	}
-	if cfg.Comment != "" {
-		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment))
-	}
+	sb.WriteString(snowflake.CommentClause(cfg.Comment))
 	if cb := strings.TrimSpace(cfg.ClusterBy); cb != "" {
 		fmt.Fprintf(&sb, "\n  CLUSTER BY (%s)", cb)
 	}

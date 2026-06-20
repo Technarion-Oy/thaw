@@ -85,23 +85,15 @@ func (cfg PasswordPolicyConfig) params() []struct {
 func BuildCreatePasswordPolicySql(db, schema string, cfg PasswordPolicyConfig) (string, error) {
 	var sb strings.Builder
 
-	createClause := "CREATE"
-	if cfg.OrReplace {
-		createClause += " OR REPLACE"
-	}
-	createClause += " PASSWORD POLICY"
-	// OR REPLACE and IF NOT EXISTS are mutually exclusive; OR REPLACE wins.
-	if cfg.IfNotExists && !cfg.OrReplace {
-		createClause += " IF NOT EXISTS"
+	createClause := snowflake.CreateClause("PASSWORD POLICY", cfg.OrReplace, cfg.IfNotExists)
+
+	name := cfg.Name
+	if name == "" {
+		name = "password_policy_name"
 	}
 
-	nameToken := snowflake.QuoteOrBare(cfg.Name, cfg.CaseSensitive)
-	if cfg.Name == "" {
-		nameToken = "password_policy_name"
-	}
-
-	fmt.Fprintf(&sb, "%s %s.%s.%s", createClause,
-		snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), nameToken)
+	fmt.Fprintf(&sb, "%s %s", createClause,
+		snowflake.QualifyOrBare(db, schema, name, cfg.CaseSensitive))
 
 	for _, p := range cfg.params() {
 		if p.value != nil {
@@ -109,9 +101,7 @@ func BuildCreatePasswordPolicySql(db, schema string, cfg PasswordPolicyConfig) (
 		}
 	}
 
-	if cfg.Comment != "" {
-		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", snowflake.EscapeTextLit(cfg.Comment))
-	}
+	sb.WriteString(snowflake.CommentClause(cfg.Comment))
 
 	return sb.String() + ";", nil
 }

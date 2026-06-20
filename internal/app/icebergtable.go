@@ -10,13 +10,6 @@
 
 package app
 
-import (
-	"fmt"
-
-	"thaw/internal/apperrors"
-	"thaw/internal/snowflake"
-)
-
 // AlterIcebergTable runs an ALTER ICEBERG TABLE statement for the given table.
 // clause is everything that follows the table name, e.g. "REFRESH",
 // "SET COMMENT = 'note'", "UNSET COMMENT", or
@@ -24,11 +17,5 @@ import (
 // quoting inside the clause; this method only double-quotes the table
 // identifier.
 func (a *App) AlterIcebergTable(database, schema, name, clause string) error {
-	if a.client == nil {
-		return apperrors.ErrNotConnected
-	}
-	sql := fmt.Sprintf("ALTER ICEBERG TABLE %s.%s.%s %s",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), clause)
-	_, err := a.client.Execute(a.ctx, sql)
-	return err
+	return a.alterObject("ICEBERG TABLE", database, schema, name, clause)
 }

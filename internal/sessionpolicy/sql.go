@@ -79,23 +79,15 @@ func (cfg SessionPolicyConfig) timeoutParams() []struct {
 func BuildCreateSessionPolicySql(db, schema string, cfg SessionPolicyConfig) (string, error) {
 	var sb strings.Builder
 
-	createClause := "CREATE"
-	if cfg.OrReplace {
-		createClause += " OR REPLACE"
-	}
-	createClause += " SESSION POLICY"
-	// OR REPLACE and IF NOT EXISTS are mutually exclusive; OR REPLACE wins.
-	if cfg.IfNotExists && !cfg.OrReplace {
-		createClause += " IF NOT EXISTS"
+	createClause := snowflake.CreateClause("SESSION POLICY", cfg.OrReplace, cfg.IfNotExists)
+
+	name := cfg.Name
+	if name == "" {
+		name = "session_policy_name"
 	}
 
-	nameToken := snowflake.QuoteOrBare(cfg.Name, cfg.CaseSensitive)
-	if cfg.Name == "" {
-		nameToken = "session_policy_name"
-	}
-
-	fmt.Fprintf(&sb, "%s %s.%s.%s", createClause,
-		snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), nameToken)
+	fmt.Fprintf(&sb, "%s %s", createClause,
+		snowflake.QualifyOrBare(db, schema, name, cfg.CaseSensitive))
 
 	for _, p := range cfg.timeoutParams() {
 		if p.value != nil {
@@ -110,9 +102,7 @@ func BuildCreateSessionPolicySql(db, schema string, cfg SessionPolicyConfig) (st
 		fmt.Fprintf(&sb, "\n  BLOCKED_SECONDARY_ROLES = %s", snowflake.FormatSecondaryRoles(cfg.BlockedSecondaryRoles))
 	}
 
-	if cfg.Comment != "" {
-		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", snowflake.EscapeTextLit(cfg.Comment))
-	}
+	sb.WriteString(snowflake.CommentClause(cfg.Comment))
 
 	return sb.String() + ";", nil
 }

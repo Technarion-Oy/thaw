@@ -203,7 +203,7 @@ func (sc *sessionConnector) Connect(ctx context.Context) (driver.Conn, error) {
 		// Use fully qualified name to be robust against database switches
 		// resetting the schema context.
 		if db != "" {
-			connExec(conn, fmt.Sprintf(`USE SCHEMA %s.%s`, QuoteIdent(db), QuoteIdent(schema)))
+			connExec(conn, fmt.Sprintf(`USE SCHEMA %s`, Qualify(db, schema)))
 		} else {
 			connExec(conn, fmt.Sprintf(`USE SCHEMA %s`, QuoteIdent(schema)))
 		}
@@ -856,7 +856,7 @@ func quotePutFilePath(stmt string) string {
 // CancelSnowflakeQuery asks Snowflake to abort the query with the given ID.
 // This is a best-effort call; the caller may ignore errors.
 func (c *Client) CancelSnowflakeQuery(ctx context.Context, queryID string) error {
-	escaped := strings.ReplaceAll(queryID, "'", "''")
+	escaped := EscapeStringLit(queryID)
 	_, err := c.execCtx(ctx, fmt.Sprintf("SELECT SYSTEM$CANCEL_QUERY('%s')", escaped))
 	return err
 }
@@ -1000,46 +1000,16 @@ func (c *Client) ListSecurityIntegrations(ctx context.Context) ([]SecurityIntegr
 		return nil, err
 	}
 
-	nameIdx := -1
-	typeIdx := -1
-	catIdx := -1
-	enabledIdx := -1
-	commentIdx := -1
-
-	for i, col := range res.Columns {
-		switch strings.ToUpper(col) {
-		case "NAME":
-			nameIdx = i
-		case "TYPE":
-			typeIdx = i
-		case "CATEGORY":
-			catIdx = i
-		case "ENABLED":
-			enabledIdx = i
-		case "COMMENT":
-			commentIdx = i
-		}
-	}
-
+	idxs := colIndexMap(res.Columns, "name", "type", "category", "enabled", "comment")
 	var ints []SecurityIntegration
 	for _, row := range res.Rows {
-		s := SecurityIntegration{}
-		if nameIdx != -1 {
-			s.Name = strVal(row, nameIdx)
-		}
-		if typeIdx != -1 {
-			s.Type = strVal(row, typeIdx)
-		}
-		if catIdx != -1 {
-			s.Category = strVal(row, catIdx)
-		}
-		if enabledIdx != -1 {
-			s.Enabled = strVal(row, enabledIdx) == "true"
-		}
-		if commentIdx != -1 {
-			s.Comment = strVal(row, commentIdx)
-		}
-		ints = append(ints, s)
+		ints = append(ints, SecurityIntegration{
+			Name:     strVal(row, idxs["name"]),
+			Type:     strVal(row, idxs["type"]),
+			Category: strVal(row, idxs["category"]),
+			Enabled:  strVal(row, idxs["enabled"]) == "true",
+			Comment:  strVal(row, idxs["comment"]),
+		})
 	}
 	return ints, nil
 }
@@ -1086,40 +1056,15 @@ func (c *Client) ListApiIntegrations(ctx context.Context) ([]ApiIntegration, err
 		return nil, err
 	}
 
-	nameIdx := -1
-	typeIdx := -1
-	enabledIdx := -1
-	commentIdx := -1
-
-	for i, col := range res.Columns {
-		switch strings.ToUpper(col) {
-		case "NAME":
-			nameIdx = i
-		case "TYPE":
-			typeIdx = i
-		case "ENABLED":
-			enabledIdx = i
-		case "COMMENT":
-			commentIdx = i
-		}
-	}
-
+	idxs := colIndexMap(res.Columns, "name", "type", "enabled", "comment")
 	var ints []ApiIntegration
 	for _, row := range res.Rows {
-		a := ApiIntegration{}
-		if nameIdx != -1 {
-			a.Name = strVal(row, nameIdx)
-		}
-		if typeIdx != -1 {
-			a.Type = strVal(row, typeIdx)
-		}
-		if enabledIdx != -1 {
-			a.Enabled = strVal(row, enabledIdx) == "true"
-		}
-		if commentIdx != -1 {
-			a.Comment = strVal(row, commentIdx)
-		}
-		ints = append(ints, a)
+		ints = append(ints, ApiIntegration{
+			Name:    strVal(row, idxs["name"]),
+			Type:    strVal(row, idxs["type"]),
+			Enabled: strVal(row, idxs["enabled"]) == "true",
+			Comment: strVal(row, idxs["comment"]),
+		})
 	}
 	return ints, nil
 }
@@ -1138,34 +1083,14 @@ func (c *Client) ListSecretsInAccount(ctx context.Context) ([]AccountSecret, err
 		return nil, err
 	}
 
-	nameIdx := -1
-	dbIdx := -1
-	schemaIdx := -1
-
-	for i, col := range res.Columns {
-		switch strings.ToUpper(col) {
-		case "NAME":
-			nameIdx = i
-		case "DATABASE_NAME":
-			dbIdx = i
-		case "SCHEMA_NAME":
-			schemaIdx = i
-		}
-	}
-
+	idxs := colIndexMap(res.Columns, "name", "database_name", "schema_name")
 	var secrets []AccountSecret
 	for _, row := range res.Rows {
-		s := AccountSecret{}
-		if nameIdx != -1 {
-			s.Name = strVal(row, nameIdx)
-		}
-		if dbIdx != -1 {
-			s.DatabaseName = strVal(row, dbIdx)
-		}
-		if schemaIdx != -1 {
-			s.SchemaName = strVal(row, schemaIdx)
-		}
-		secrets = append(secrets, s)
+		secrets = append(secrets, AccountSecret{
+			Name:         strVal(row, idxs["name"]),
+			DatabaseName: strVal(row, idxs["database_name"]),
+			SchemaName:   strVal(row, idxs["schema_name"]),
+		})
 	}
 	return secrets, nil
 }
@@ -1313,7 +1238,7 @@ func normalizeDirPath(dirPath string) string {
 func (c *Client) ListGitRepoEntries(ctx context.Context, database, schema, repoName, dirPath string) ([]GitRepoEntry, error) {
 	dirPath = normalizeDirPath(dirPath)
 
-	sql := fmt.Sprintf(`LIST @%s.%s.%s/%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(repoName), dirPath)
+	sql := fmt.Sprintf(`LIST @%s/%s`, Qualify(database, schema, repoName), dirPath)
 
 	res, err := c.Execute(ctx, sql)
 	if err != nil {
@@ -1330,7 +1255,7 @@ func (c *Client) ListGitRepoEntries(ctx context.Context, database, schema, repoN
 func (c *Client) ListStageEntries(ctx context.Context, database, schema, stageName, dirPath string) ([]StageEntry, error) {
 	dirPath = normalizeDirPath(dirPath)
 
-	sql := fmt.Sprintf(`LIST @%s.%s.%s/%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(stageName), dirPath)
+	sql := fmt.Sprintf(`LIST @%s/%s`, Qualify(database, schema, stageName), dirPath)
 
 	res, err := c.Execute(ctx, sql)
 	if err != nil {
@@ -1352,7 +1277,7 @@ type StageSummary struct {
 // INTERNAL/EXTERNAL type, so callers can filter (e.g. external tables may only
 // reference an EXTERNAL stage).
 func (c *Client) ListStages(ctx context.Context, database, schema string) ([]StageSummary, error) {
-	sql := fmt.Sprintf("SHOW STAGES IN SCHEMA %s.%s", QuoteIdent(database), QuoteIdent(schema))
+	sql := fmt.Sprintf("SHOW STAGES IN SCHEMA %s", Qualify(database, schema))
 	res, err := c.Execute(ctx, sql)
 	if err != nil {
 		return nil, err
@@ -1367,15 +1292,9 @@ func (c *Client) ListStages(ctx context.Context, database, schema string) ([]Sta
 	stages := make([]StageSummary, 0, len(res.Rows))
 	for _, row := range res.Rows {
 		s := StageSummary{}
-		if nameIdx >= 0 && nameIdx < len(row) {
-			s.Name = CellString(row[nameIdx])
-		}
-		if typeIdx >= 0 && typeIdx < len(row) {
-			s.Type = strings.ToUpper(CellString(row[typeIdx]))
-		}
-		if urlIdx >= 0 && urlIdx < len(row) {
-			s.URL = CellString(row[urlIdx])
-		}
+		s.Name = Cell(row, nameIdx)
+		s.Type = strings.ToUpper(Cell(row, typeIdx))
+		s.URL = Cell(row, urlIdx)
 		if s.Name != "" {
 			stages = append(stages, s)
 		}
@@ -1392,7 +1311,7 @@ type DbtProjectVersion struct {
 
 // ListDbtProjectVersions returns all versions of the given DBT PROJECT.
 func (c *Client) ListDbtProjectVersions(ctx context.Context, database, schema, name string) ([]DbtProjectVersion, error) {
-	sql := fmt.Sprintf(`SHOW VERSIONS IN DBT PROJECT %s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(name))
+	sql := fmt.Sprintf(`SHOW VERSIONS IN DBT PROJECT %s`, Qualify(database, schema, name))
 
 	res, err := c.Execute(ctx, sql)
 	if err != nil {
@@ -1522,7 +1441,7 @@ func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
 func (c *Client) ListWorkspaceEntries(ctx context.Context, database, schema, workspaceName, dirPath string) ([]WorkspaceEntry, error) {
 	dirPath = normalizeDirPath(dirPath)
 
-	sql := fmt.Sprintf(`LIST @%s.%s.%s/%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(workspaceName), dirPath)
+	sql := fmt.Sprintf(`LIST @%s/%s`, Qualify(database, schema, workspaceName), dirPath)
 
 	res, err := c.Execute(ctx, sql)
 	if err != nil {
@@ -1534,7 +1453,7 @@ func (c *Client) ListWorkspaceEntries(ctx context.Context, database, schema, wor
 
 // ListGitBranches returns all branches in the given git repository.
 func (c *Client) ListGitBranches(ctx context.Context, database, schema, repoName string) ([]GitBranch, error) {
-	sql := fmt.Sprintf(`SHOW GIT BRANCHES IN GIT REPOSITORY %s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(repoName))
+	sql := fmt.Sprintf(`SHOW GIT BRANCHES IN GIT REPOSITORY %s`, Qualify(database, schema, repoName))
 
 	res, err := c.Execute(ctx, sql)
 	if err != nil {
@@ -1563,7 +1482,7 @@ func (c *Client) ListGitBranches(ctx context.Context, database, schema, repoName
 
 // ListGitTags returns all tags in the given git repository.
 func (c *Client) ListGitTags(ctx context.Context, database, schema, repoName string) ([]GitTag, error) {
-	sql := fmt.Sprintf(`SHOW GIT TAGS IN GIT REPOSITORY %s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(repoName))
+	sql := fmt.Sprintf(`SHOW GIT TAGS IN GIT REPOSITORY %s`, Qualify(database, schema, repoName))
 
 	res, err := c.Execute(ctx, sql)
 	if err != nil {
@@ -1592,7 +1511,7 @@ func (c *Client) ListGitTags(ctx context.Context, database, schema, repoName str
 
 // GetGitFileContent reads a file from a git repository and returns its content.
 func (c *Client) GetGitFileContent(ctx context.Context, database, schema, repoName, filePath string) (string, error) {
-	sql := fmt.Sprintf(`SELECT $1 FROM @%s.%s.%s/%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(repoName), filePath)
+	sql := fmt.Sprintf(`SELECT $1 FROM @%s/%s`, Qualify(database, schema, repoName), filePath)
 
 	res, err := c.Execute(ctx, sql)
 	if err != nil {
@@ -1612,7 +1531,7 @@ func (c *Client) GetGitFileContent(ctx context.Context, database, schema, repoNa
 // ExecuteGitFile executes a SQL file via EXECUTE IMMEDIATE FROM @db.schema.name/path.
 // Also used for stage files (via App.ExecuteStageFile) since the SQL pattern is identical.
 func (c *Client) ExecuteGitFile(ctx context.Context, database, schema, repoName, filePath string) error {
-	sql := fmt.Sprintf(`EXECUTE IMMEDIATE FROM @%s.%s.%s/%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(repoName), filePath)
+	sql := fmt.Sprintf(`EXECUTE IMMEDIATE FROM @%s/%s`, Qualify(database, schema, repoName), filePath)
 
 	_, err := c.Execute(ctx, sql)
 	return err
@@ -1692,29 +1611,21 @@ func (c *Client) ListIntegrations(ctx context.Context, kind string) ([]Integrati
 
 // DropIntegration drops the named integration.
 func (c *Client) DropIntegration(ctx context.Context, name string) error {
-	esc := strings.ReplaceAll(name, `"`, `""`)
-	_, err := c.execCtx(ctx, fmt.Sprintf(`DROP INTEGRATION %s`, esc))
+	_, err := c.execCtx(ctx, dropIntegrationStmt(name))
 	return err
 }
 
-// DropDatabase drops a database. mode must be "CASCADE" or "RESTRICT".
+// DropDatabase drops a database. mode should be "CASCADE" or "RESTRICT"; any
+// other value defaults to CASCADE (see normalizeDropMode).
 func (c *Client) DropDatabase(ctx context.Context, name string, mode string) error {
-	if mode != "CASCADE" && mode != "RESTRICT" {
-		mode = "CASCADE"
-	}
-	esc := strings.ReplaceAll(name, `"`, `""`)
-	_, err := c.execCtx(ctx, fmt.Sprintf(`DROP DATABASE %s %s`, esc, mode))
+	_, err := c.execCtx(ctx, dropDatabaseStmt(name, mode))
 	return err
 }
 
-// DropSchema drops a schema. mode must be "CASCADE" or "RESTRICT".
+// DropSchema drops a schema. mode should be "CASCADE" or "RESTRICT"; any other
+// value defaults to CASCADE (see normalizeDropMode).
 func (c *Client) DropSchema(ctx context.Context, database, schema string, mode string) error {
-	if mode != "CASCADE" && mode != "RESTRICT" {
-		mode = "CASCADE"
-	}
-	escDb := strings.ReplaceAll(database, `"`, `""`)
-	escSch := strings.ReplaceAll(schema, `"`, `""`)
-	_, err := c.execCtx(ctx, fmt.Sprintf(`DROP SCHEMA %s.%s %s`, escDb, escSch, mode))
+	_, err := c.execCtx(ctx, dropSchemaStmt(database, schema, mode))
 	return err
 }
 
@@ -1843,8 +1754,7 @@ func (c *Client) roleGrantsPrivilege(
 	role string,
 	acceptedPrivs map[string]bool,
 ) (bool, []string, error) {
-	esc := strings.ReplaceAll(role, `"`, `""`)
-	rows, err := c.queryCtx(ctx, fmt.Sprintf(`SHOW GRANTS TO ROLE %s`, esc))
+	rows, err := c.queryCtx(ctx, showGrantsToRoleStmt(role))
 	if err != nil {
 		return false, nil, err
 	}
@@ -1924,8 +1834,7 @@ func (c *Client) collectRoleHierarchy(ctx context.Context, startRole string) (ma
 			continue
 		}
 		seen[upper] = true
-		esc := strings.ReplaceAll(role, `"`, `""`)
-		rows, err := c.queryCtx(ctx, fmt.Sprintf(`SHOW GRANTS TO ROLE %s`, esc))
+		rows, err := c.queryCtx(ctx, showGrantsToRoleStmt(role))
 		if err != nil {
 			continue // restricted; skip this role
 		}
@@ -1978,8 +1887,7 @@ func (c *Client) CanModifyUserAuth(ctx context.Context, username string) (bool, 
 	}
 
 	// Check object-level grants on this specific user.
-	esc := strings.ReplaceAll(username, `"`, `""`)
-	rows, err := c.queryCtx(ctx, fmt.Sprintf(`SHOW GRANTS ON USER %s`, esc))
+	rows, err := c.queryCtx(ctx, showGrantsOnUserStmt(username))
 	if err != nil {
 		return false, err
 	}
@@ -2053,8 +1961,8 @@ func (c *Client) CanManageUsers(ctx context.Context, role string) (bool, error) 
 //   - SHOW GRANTS TO ROLE "<name>"   → GRANT <priv> ON … TO ROLE statements
 //   - SHOW GRANTS ON ROLE "<name>"   → GRANT ROLE … TO ROLE/USER statements
 func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
-	escapedLike := strings.ReplaceAll(name, "'", "''")
-	escapedIdent := strings.ReplaceAll(name, `"`, `""`)
+	escapedLike := EscapeStringLit(name)
+	quotedIdent := QuoteIdent(name)
 
 	// ── Comment from SHOW ROLES LIKE ────────────────────────────────────────
 	var comment string
@@ -2087,16 +1995,15 @@ func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
 		sb.WriteString("-- cannot be executed. Do not run this script.\n\n")
 	}
 
-	sb.WriteString(fmt.Sprintf("CREATE ROLE IF NOT EXISTS \"%s\"", escapedIdent))
+	sb.WriteString(fmt.Sprintf("CREATE ROLE IF NOT EXISTS %s", quotedIdent))
 	if comment != "" {
 		sb.WriteString(fmt.Sprintf("\n  COMMENT = '%s'",
-			strings.ReplaceAll(comment, "'", "''")))
+			EscapeStringLit(comment)))
 	}
 	sb.WriteString(";\n")
 
 	// ── SHOW GRANTS TO ROLE → privileges granted to this role ────────────────
-	if rows, err := c.queryCtx(ctx,
-		fmt.Sprintf(`SHOW GRANTS TO ROLE %s`, escapedIdent)); err == nil {
+	if rows, err := c.queryCtx(ctx, showGrantsToRoleStmt(name)); err == nil {
 		cols, _ := rows.Columns()
 		idxs := colIndexMap(cols, "privilege", "granted_on", "name", "grant_option")
 		for rows.Next() {
@@ -2111,14 +2018,13 @@ func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
 			if priv == "" || onType == "" {
 				continue
 			}
-			sb.WriteString(FormatRoleGrant(priv, onType, obj, escapedIdent, opt) + "\n")
+			sb.WriteString(FormatRoleGrant(priv, onType, obj, name, opt) + "\n")
 		}
 		rows.Close() //nolint:errcheck
 	}
 
 	// ── SHOW GRANTS ON ROLE → who this role is granted to ────────────────────
-	if rows, err := c.queryCtx(ctx,
-		fmt.Sprintf(`SHOW GRANTS ON ROLE %s`, escapedIdent)); err == nil {
+	if rows, err := c.queryCtx(ctx, showGrantsOnRoleStmt(name)); err == nil {
 		cols, _ := rows.Columns()
 		idxs := colIndexMap(cols, "granted_to", "grantee_name")
 		for rows.Next() {
@@ -2131,9 +2037,8 @@ func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
 			if grantedTo == "" || grantee == "" {
 				continue
 			}
-			sb.WriteString(fmt.Sprintf("GRANT ROLE \"%s\" TO %s \"%s\";\n",
-				escapedIdent, grantedTo,
-				strings.ReplaceAll(grantee, `"`, `""`)))
+			sb.WriteString(fmt.Sprintf("GRANT ROLE %s TO %s %s;\n",
+				quotedIdent, grantedTo, QuoteIdent(grantee)))
 		}
 		rows.Close() //nolint:errcheck
 	}
@@ -2144,29 +2049,32 @@ func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 // FormatRoleGrant builds a single GRANT statement line for a role DDL export.
-// Special cases handled:
+// role is the raw role name and is double-quoted via QuoteIdent; obj is the raw
+// object name only for the ON ROLE case (also quoted) and otherwise an
+// already-qualified reference inserted verbatim. Special cases handled:
 //   - ON ACCOUNT: object name is omitted (Snowflake requires bare ON ACCOUNT)
 //   - USAGE ON ROLE: converted to GRANT ROLE ... TO ROLE ... (the executable
 //     form of role membership); WITH GRANT OPTION is dropped because
 //     GRANT ROLE ... WITH GRANT OPTION is not valid Snowflake syntax
-func FormatRoleGrant(priv, onType, obj, escapedRole string, withGrantOption bool) string {
+func FormatRoleGrant(priv, onType, obj, role string, withGrantOption bool) string {
+	quotedRole := QuoteIdent(role)
 	var stmt string
 	switch {
 	case strings.EqualFold(onType, "ROLE"):
 		// Quote the child role name — SHOW GRANTS returns bare identifiers even
 		// for mixed-case roles (e.g. "My_Role" → My_Role in the name column).
-		escapedChild := strings.ReplaceAll(obj, `"`, `""`)
+		quotedChild := QuoteIdent(obj)
 		if strings.EqualFold(priv, "USAGE") {
 			// USAGE on ROLE is Snowflake's internal representation of role membership.
 			// The executable form is GRANT ROLE <name> TO ROLE <parent>.
 			// WITH GRANT OPTION is not valid for GRANT ROLE statements.
-			return fmt.Sprintf("GRANT ROLE \"%s\" TO ROLE \"%s\";", escapedChild, escapedRole)
+			return fmt.Sprintf("GRANT ROLE %s TO ROLE %s;", quotedChild, quotedRole)
 		}
-		stmt = fmt.Sprintf("GRANT %s ON ROLE \"%s\" TO ROLE \"%s\"", priv, escapedChild, escapedRole)
+		stmt = fmt.Sprintf("GRANT %s ON ROLE %s TO ROLE %s", priv, quotedChild, quotedRole)
 	case strings.EqualFold(onType, "ACCOUNT"):
-		stmt = fmt.Sprintf("GRANT %s ON ACCOUNT TO ROLE \"%s\"", priv, escapedRole)
+		stmt = fmt.Sprintf("GRANT %s ON ACCOUNT TO ROLE %s", priv, quotedRole)
 	default:
-		stmt = fmt.Sprintf("GRANT %s ON %s %s TO ROLE \"%s\"", priv, onType, obj, escapedRole)
+		stmt = fmt.Sprintf("GRANT %s ON %s %s TO ROLE %s", priv, onType, obj, quotedRole)
 	}
 	if withGrantOption {
 		stmt += " WITH GRANT OPTION"
@@ -2284,7 +2192,7 @@ func (c *Client) UseSchema(ctx context.Context, schema string) error {
 
 	var query string
 	if db != "" {
-		query = fmt.Sprintf(`USE SCHEMA %s.%s`, QuoteIdent(db), QuoteIdent(schema))
+		query = fmt.Sprintf(`USE SCHEMA %s`, Qualify(db, schema))
 	} else {
 		query = fmt.Sprintf(`USE SCHEMA %s`, QuoteIdent(schema))
 	}
@@ -2393,7 +2301,7 @@ type DroppedTable struct {
 // returns only rows where dropped_on is non-empty.
 func (c *Client) ListDroppedTables(ctx context.Context, database, schema string) ([]DroppedTable, error) {
 	return c.listDroppedHistory(ctx,
-		fmt.Sprintf(`SHOW TABLES HISTORY IN SCHEMA %s.%s`, QuoteIdent(database), QuoteIdent(schema)))
+		fmt.Sprintf(`SHOW TABLES HISTORY IN SCHEMA %s`, Qualify(database, schema)))
 }
 
 // listDroppedHistory is the shared helper for SHOW * HISTORY queries.
@@ -2433,8 +2341,7 @@ func (c *Client) listDroppedHistory(ctx context.Context, query string) ([]Droppe
 // ListDroppedSchemas returns schemas in the given database that have been
 // dropped but are still within the Time Travel retention window.
 func (c *Client) ListDroppedSchemas(ctx context.Context, database string) ([]DroppedTable, error) {
-	esc := strings.ReplaceAll(database, `"`, `""`)
-	return c.listDroppedHistory(ctx, fmt.Sprintf(`SHOW SCHEMAS HISTORY IN DATABASE %s`, esc))
+	return c.listDroppedHistory(ctx, showSchemasHistoryStmt(database))
 }
 
 // ListDroppedDatabases returns all databases that have been dropped but are
@@ -2447,54 +2354,14 @@ func (c *Client) ListDroppedDatabases(ctx context.Context) ([]DroppedTable, erro
 // for the given database. Returns 1 if the value cannot be determined.
 func (c *Client) GetDatabaseRetentionDays(ctx context.Context, dbName string) (int, error) {
 	query := fmt.Sprintf(`SHOW PARAMETERS LIKE 'DATA_RETENTION_TIME_IN_DAYS' IN DATABASE %s`, QuoteIdent(dbName))
-	rows, err := c.queryCtx(ctx, query)
-	if err != nil {
-		return 1, err
-	}
-	defer rows.Close() //nolint:errcheck
-
-	cols, _ := rows.Columns()
-	idxs := colIndexMap(cols, "key", "value")
-
-	if rows.Next() {
-		vals, ptrs := makeValPtrs(len(cols))
-		if err := rows.Scan(ptrs...); err != nil {
-			return 1, err
-		}
-		if s := strVal(vals, idxs["value"]); s != "" {
-			if n, err := strconv.Atoi(s); err == nil {
-				return n, nil
-			}
-		}
-	}
-	return 1, nil // default: 1 day
+	return c.queryIntCell(ctx, query, "value", 1)
 }
 
 // GetSchemaRetentionDays returns the DATA_RETENTION_TIME_IN_DAYS parameter
 // for the given schema. Returns 1 if the value cannot be determined.
 func (c *Client) GetSchemaRetentionDays(ctx context.Context, database, schema string) (int, error) {
-	query := fmt.Sprintf(`SHOW PARAMETERS LIKE 'DATA_RETENTION_TIME_IN_DAYS' IN SCHEMA %s.%s`, QuoteIdent(database), QuoteIdent(schema))
-	rows, err := c.queryCtx(ctx, query)
-	if err != nil {
-		return 1, err
-	}
-	defer rows.Close() //nolint:errcheck
-
-	cols, _ := rows.Columns()
-	idxs := colIndexMap(cols, "key", "value")
-
-	if rows.Next() {
-		vals, ptrs := makeValPtrs(len(cols))
-		if err := rows.Scan(ptrs...); err != nil {
-			return 1, err
-		}
-		if s := strVal(vals, idxs["value"]); s != "" {
-			if n, err := strconv.Atoi(s); err == nil {
-				return n, nil
-			}
-		}
-	}
-	return 1, nil // default: 1 day
+	query := fmt.Sprintf(`SHOW PARAMETERS LIKE 'DATA_RETENTION_TIME_IN_DAYS' IN SCHEMA %s`, Qualify(database, schema))
+	return c.queryIntCell(ctx, query, "value", 1)
 }
 
 // GetTableRetentionDays returns the Time Travel data-retention period in days
@@ -2502,30 +2369,36 @@ func (c *Client) GetSchemaRetentionDays(ctx context.Context, database, schema st
 // column. Returns 1 (Snowflake's Standard-edition default) when the value
 // cannot be determined.
 func (c *Client) GetTableRetentionDays(ctx context.Context, database, schema, name string) (int, error) {
-	query := fmt.Sprintf(`SHOW TABLES LIKE '%s' IN SCHEMA %s.%s`,
-		strings.ReplaceAll(name, "'", "''"), QuoteIdent(database), QuoteIdent(schema))
+	query := fmt.Sprintf(`SHOW TABLES LIKE '%s' IN SCHEMA %s`,
+		EscapeStringLit(name), Qualify(database, schema))
+	return c.queryIntCell(ctx, query, "retention_time", 1)
+}
 
+// queryIntCell runs query and parses the named column of the first result row as
+// an int. It returns def when the query returns no rows, the cell is empty, or
+// the value is non-numeric; a query or scan error is returned alongside def. It
+// is the shared reader behind the Get*RetentionDays helpers.
+func (c *Client) queryIntCell(ctx context.Context, query, col string, def int) (int, error) {
 	rows, err := c.queryCtx(ctx, query)
 	if err != nil {
-		return 0, err
+		return def, err
 	}
 	defer rows.Close() //nolint:errcheck
 
 	cols, _ := rows.Columns()
-	idxs := colIndexMap(cols, "retention_time")
-
+	idxs := colIndexMap(cols, col)
 	if rows.Next() {
 		vals, ptrs := makeValPtrs(len(cols))
 		if err := rows.Scan(ptrs...); err != nil {
-			return 0, err
+			return def, err
 		}
-		if s := strVal(vals, idxs["retention_time"]); s != "" {
+		if s := strVal(vals, idxs[col]); s != "" {
 			if n, err := strconv.Atoi(s); err == nil {
 				return n, nil
 			}
 		}
 	}
-	return 1, nil // default: 1 day
+	return def, nil
 }
 
 // SnowflakeUser holds the key properties of a Snowflake user account returned
@@ -2801,7 +2674,7 @@ func (c *Client) ListUserFunctions(ctx context.Context, database string) ([]User
 // GetTableColumns returns the ordered list of column names for a table or view
 // by running DESCRIBE TABLE (which works for both base tables and views in Snowflake).
 func (c *Client) GetTableColumns(ctx context.Context, database, schema, name string) ([]string, error) {
-	query := fmt.Sprintf(`DESCRIBE TABLE %s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(name))
+	query := fmt.Sprintf(`DESCRIBE TABLE %s`, Qualify(database, schema, name))
 	rows, err := c.queryCtx(ctx, query)
 	if err != nil {
 		return nil, err
@@ -2852,7 +2725,7 @@ type TableForeignKey struct {
 // referencing (child / FK) side. It runs SHOW IMPORTED KEYS IN TABLE and maps
 // the pk_*/fk_* columns into TableForeignKey values.
 func (c *Client) GetTableForeignKeys(ctx context.Context, database, schema, table string) ([]TableForeignKey, error) {
-	query := fmt.Sprintf(`SHOW IMPORTED KEYS IN TABLE %s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(table))
+	query := fmt.Sprintf(`SHOW IMPORTED KEYS IN TABLE %s`, Qualify(database, schema, table))
 	rows, err := c.queryCtx(ctx, query)
 	if err != nil {
 		return nil, err
@@ -2904,7 +2777,7 @@ type ColumnInfo struct {
 // GetTableColumnsWithTypes returns the ordered column list for a table or view
 // together with their data types by running DESCRIBE TABLE.
 func (c *Client) GetTableColumnsWithTypes(ctx context.Context, database, schema, name string) ([]ColumnInfo, error) {
-	query := fmt.Sprintf(`DESCRIBE TABLE %s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(name))
+	query := fmt.Sprintf(`DESCRIBE TABLE %s`, Qualify(database, schema, name))
 	rows, err := c.queryCtx(ctx, query)
 	if err != nil {
 		return nil, err
@@ -2941,7 +2814,7 @@ func (c *Client) GetTableColumnsWithTypes(ctx context.Context, database, schema,
 // IMPORTED KEYS when the editor needs to warm up FK data for many tables at once.
 // The result set columns are identical to SHOW IMPORTED KEYS IN TABLE.
 func (c *Client) GetSchemaForeignKeys(ctx context.Context, database, schema string) ([]TableForeignKey, error) {
-	query := fmt.Sprintf(`SHOW IMPORTED KEYS IN SCHEMA %s.%s`, QuoteIdent(database), QuoteIdent(schema))
+	query := fmt.Sprintf(`SHOW IMPORTED KEYS IN SCHEMA %s`, Qualify(database, schema))
 	rows, err := c.queryCtx(ctx, query)
 	if err != nil {
 		return nil, err
@@ -3262,7 +3135,7 @@ func (c *Client) ListBasicObjects(ctx context.Context, database, schema string) 
 		return cached, nil
 	}
 
-	q := fmt.Sprintf("%s.%s", QuoteIdent(database), QuoteIdent(schema))
+	q := Qualify(database, schema)
 	objs, err := c.showInSchema(ctx, fmt.Sprintf("SHOW OBJECTS IN SCHEMA %s", q), "", schema)
 	if err != nil {
 		return nil, err
@@ -3284,7 +3157,7 @@ func (c *Client) ListBasicObjects(ctx context.Context, database, schema string) 
 // fail (e.g. due to missing privileges) are silently skipped. Includes the TASK
 // finalize enrichment logic.
 func (c *Client) ListExtendedObjects(ctx context.Context, database, schema string) ([]SnowflakeObject, error) {
-	q := fmt.Sprintf("%s.%s", QuoteIdent(database), QuoteIdent(schema))
+	q := Qualify(database, schema)
 
 	type showCmd struct {
 		query string
@@ -3717,7 +3590,7 @@ func (c *Client) ClearObjectCacheForSchema(database, schema string) {
 
 // ListFileFormats returns the names of all file formats in the specified schema.
 func (c *Client) ListFileFormats(ctx context.Context, database, schema string) ([]string, error) {
-	q := fmt.Sprintf("%s.%s", QuoteIdent(database), QuoteIdent(schema))
+	q := Qualify(database, schema)
 	return c.queryStringSlice(ctx, fmt.Sprintf("SHOW FILE FORMATS IN SCHEMA %s", q), 1)
 }
 
@@ -3759,9 +3632,9 @@ func buildGetDDLQuery(database, schema, kind, name, arguments string) (query, id
 	// Account-level objects (warehouses, databases, etc.) use an unqualified
 	// name; schema-scoped objects use a fully qualified database.schema.name.
 	if database == "" && schema == "" {
-		identifier = strings.ReplaceAll(name, "'", "''")
+		identifier = EscapeStringLit(name)
 	} else {
-		identifier = fmt.Sprintf(`%s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(name))
+		identifier = Qualify(database, schema, name)
 		// Procedures and functions require the argument type list (which may be
 		// empty for zero-arg procedures) appended so Snowflake can resolve the
 		// overload.  Omitting the parentheses entirely causes GET_DDL to return
@@ -3776,7 +3649,7 @@ func buildGetDDLQuery(database, schema, kind, name, arguments string) (query, id
 		if upperKind == "PROCEDURE" || upperKind == "FUNCTION" || upperKind == "EXTERNAL FUNCTION" || upperKind == "DATA METRIC FUNCTION" {
 			identifier += fmt.Sprintf("(%s)", arguments)
 		}
-		identifier = strings.ReplaceAll(identifier, "'", "''")
+		identifier = EscapeStringLit(identifier)
 	}
 	// GET_DDL expects the underscore form (e.g. 'DYNAMIC_TABLE',
 	// 'EXTERNAL_TABLE') as the object_type, whereas the rest of the app uses the
@@ -3827,7 +3700,7 @@ func buildGetDDLQuery(database, schema, kind, name, arguments string) (query, id
 		// appended to the identifier above).
 		ddlKind = "FUNCTION"
 	}
-	escapedKind := strings.ReplaceAll(ddlKind, "'", "''")
+	escapedKind := EscapeStringLit(ddlKind)
 	// The third argument (true) enables recursive DDL output for objects that
 	// contain dependents (e.g. databases → schemas → tables).  For object types
 	// without dependents (e.g. warehouses) Snowflake silently ignores it, so
@@ -4174,7 +4047,7 @@ func (c *Client) ExportTableData(ctx context.Context, params ExportTableParams) 
 	stageName := fmt.Sprintf("THAW_EXPORT_%d", time.Now().UnixNano())
 	stageRef := fmt.Sprintf(`%s.%s.%s`, QuoteIdent(params.Database), QuoteIdent(params.Schema), stageName)
 	stageAt := "@" + stageRef
-	tableRef := fmt.Sprintf(`%s.%s.%s`, QuoteIdent(params.Database), QuoteIdent(params.Schema), QuoteIdent(params.Table))
+	tableRef := Qualify(params.Database, params.Schema, params.Table)
 
 	// Create a temporary stage (auto-dropped when the session ends)
 	if _, err := c.execCtx(ctx, "CREATE TEMPORARY STAGE "+stageRef); err != nil {
@@ -4407,7 +4280,7 @@ func (c *Client) ImportTableData(ctx context.Context, params ImportTableParams) 
 	stageName := fmt.Sprintf("THAW_IMPORT_%d", time.Now().UnixNano())
 	stageRef := fmt.Sprintf(`%s.%s.%s`, QuoteIdent(params.Database), QuoteIdent(params.Schema), stageName)
 	stageAt := "@" + stageRef
-	tableRef := fmt.Sprintf(`%s.%s.%s`, QuoteIdent(params.Database), QuoteIdent(params.Schema), QuoteIdent(params.Table))
+	tableRef := Qualify(params.Database, params.Schema, params.Table)
 
 	if _, err := c.execCtx(ctx, "CREATE TEMPORARY STAGE "+stageRef); err != nil {
 		return ImportTableResult{}, fmt.Errorf("create import stage: %w", err)
@@ -4628,10 +4501,10 @@ func buildCreateTableSQL(stageAt, tableRef, fmtRef string, p ImportTableParams) 
 	var ffClause string
 	if fmtRef != "" {
 		// Temporary/inferred format created by ImportTableData.
-		ffClause = fmt.Sprintf("FILE_FORMAT=>'%s'", strings.ReplaceAll(fmtRef, "'", "''"))
+		ffClause = fmt.Sprintf("FILE_FORMAT=>'%s'", EscapeStringLit(fmtRef))
 	} else if p.NamedFormat != "" {
 		// User-selected existing named format.
-		qualifiedFmt := QuoteIdent(p.Database) + "." + QuoteIdent(p.Schema) + "." + QuoteIdent(p.NamedFormat)
+		qualifiedFmt := Qualify(p.Database, p.Schema, p.NamedFormat)
 		ffClause = fmt.Sprintf("FILE_FORMAT=>%s", qualifiedFmt)
 	} else {
 		// Inline options.
@@ -4648,7 +4521,7 @@ func buildCreateTableSQL(stageAt, tableRef, fmtRef string, p ImportTableParams) 
 // buildImportCopySQL returns the COPY INTO <table> FROM @stage statement.
 func buildImportCopySQL(stageAt, tableRef string, p ImportTableParams) string {
 	if p.NamedFormat != "" {
-		qualifiedFmt := QuoteIdent(p.Database) + "." + QuoteIdent(p.Schema) + "." + QuoteIdent(p.NamedFormat)
+		qualifiedFmt := Qualify(p.Database, p.Schema, p.NamedFormat)
 		return fmt.Sprintf(
 			"COPY INTO %s\nFROM %s\nFILE_FORMAT = (FORMAT_NAME = %s)\nMATCH_BY_COLUMN_NAME = CASE_INSENSITIVE\nFORCE = TRUE",
 			tableRef, stageAt, qualifiedFmt)
@@ -4695,7 +4568,7 @@ func buildImportCopySQL(stageAt, tableRef string, p ImportTableParams) string {
 //  3. Read the downloaded .ipynb file
 //  4. Clean up the temp directory
 func (c *Client) FetchNotebookContent(ctx context.Context, database, schema, name string) (string, error) {
-	notebookRef := fmt.Sprintf(`%s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(name))
+	notebookRef := Qualify(database, schema, name)
 
 	// DESC NOTEBOOK to find the stage URI of the latest version.
 	descRows, err := c.queryCtx(ctx, "DESC NOTEBOOK "+notebookRef)
@@ -4794,11 +4667,11 @@ func (c *Client) FetchNotebookContent(ctx context.Context, database, schema, nam
 // single-quote escaped and wrapped in quotes before being embedded in the SQL.
 // Pass an empty slice to execute with no parameters.
 func (c *Client) ExecuteNotebook(ctx context.Context, database, schema, name string, params []string) (string, error) {
-	notebookRef := fmt.Sprintf(`%s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(name))
+	notebookRef := Qualify(database, schema, name)
 
 	args := make([]string, len(params))
 	for i, p := range params {
-		args[i] = "'" + strings.ReplaceAll(p, "'", "''") + "'"
+		args[i] = QuoteStringLit(p)
 	}
 	sql := fmt.Sprintf("EXECUTE NOTEBOOK %s(%s)", notebookRef, strings.Join(args, ", "))
 
@@ -4826,7 +4699,7 @@ func (c *Client) ExecuteNotebook(ctx context.Context, database, schema, name str
 //
 // Otherwise a plain EXECUTE TASK <ref> is issued.
 func (c *Client) ExecuteTask(ctx context.Context, database, schema, name, config string, retryLast bool) error {
-	ref := fmt.Sprintf("%s.%s.%s", QuoteIdent(database), QuoteIdent(schema), QuoteIdent(name))
+	ref := Qualify(database, schema, name)
 
 	var sql string
 	switch {
@@ -4844,8 +4717,8 @@ func (c *Client) ExecuteTask(ctx context.Context, database, schema, name, config
 // GetNotebookQueryWarehouse returns the QUERY_WAREHOUSE currently set on a
 // Snowflake Notebook object, or an empty string if none is configured.
 func (c *Client) GetNotebookQueryWarehouse(ctx context.Context, database, schema, name string) (string, error) {
-	like := strings.ReplaceAll(name, "'", "''")
-	sql := fmt.Sprintf("SHOW NOTEBOOKS LIKE '%s' IN SCHEMA %s.%s", like, QuoteIdent(database), QuoteIdent(schema))
+	like := EscapeStringLit(name)
+	sql := fmt.Sprintf("SHOW NOTEBOOKS LIKE '%s' IN SCHEMA %s", like, Qualify(database, schema))
 	res, err := c.Execute(ctx, sql)
 	if err != nil {
 		return "", err
@@ -4875,7 +4748,7 @@ func (c *Client) GetNotebookQueryWarehouse(ctx context.Context, database, schema
 // SetNotebookQueryWarehouse issues ALTER NOTEBOOK … SET QUERY_WAREHOUSE on the
 // given notebook object.
 func (c *Client) SetNotebookQueryWarehouse(ctx context.Context, database, schema, name, warehouse string) error {
-	notebookRef := fmt.Sprintf(`%s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(name))
+	notebookRef := Qualify(database, schema, name)
 	sql := fmt.Sprintf(`ALTER NOTEBOOK %s SET QUERY_WAREHOUSE = %s`, notebookRef, QuoteIdent(warehouse))
 	_, err := c.Execute(ctx, sql)
 	return err
@@ -4909,7 +4782,6 @@ type DeployNotebookParams struct {
 //  3. CREATE [OR REPLACE] NOTEBOOK … FROM '<stage>' MAIN_FILE = '<file>'
 //  4. DROP STAGE (deferred – also fires on error)
 func (c *Client) DeployNotebook(ctx context.Context, params DeployNotebookParams) error {
-	escapeLit := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
 
 	// If no file path was given, write the in-memory content to a temp file so
 	// the rest of the function can treat both cases identically.
@@ -4969,9 +4841,9 @@ func (c *Client) DeployNotebook(ctx context.Context, params DeployNotebookParams
 	}
 	sb.WriteString(notebookRef)
 	sb.WriteString(fmt.Sprintf("\n  FROM '%s'", stageAt))
-	sb.WriteString(fmt.Sprintf("\n  MAIN_FILE = '%s'", escapeLit(mainFile)))
+	sb.WriteString(fmt.Sprintf("\n  MAIN_FILE = '%s'", EscapeStringLit(mainFile)))
 	if params.Comment != "" {
-		sb.WriteString(fmt.Sprintf("\n  COMMENT = '%s'", escapeLit(params.Comment)))
+		sb.WriteString(fmt.Sprintf("\n  COMMENT = '%s'", EscapeStringLit(params.Comment)))
 	}
 	if params.QueryWarehouse != "" {
 		sb.WriteString(fmt.Sprintf("\n  QUERY_WAREHOUSE = %s", params.QueryWarehouse))
@@ -4980,10 +4852,10 @@ func (c *Client) DeployNotebook(ctx context.Context, params DeployNotebookParams
 		sb.WriteString(fmt.Sprintf("\n  IDLE_AUTO_SHUTDOWN_TIME_SECONDS = %d", params.IdleAutoShutdownSeconds))
 	}
 	if params.RuntimeName != "" {
-		sb.WriteString(fmt.Sprintf("\n  RUNTIME_NAME = '%s'", escapeLit(params.RuntimeName)))
+		sb.WriteString(fmt.Sprintf("\n  RUNTIME_NAME = '%s'", EscapeStringLit(params.RuntimeName)))
 	}
 	if params.ComputePool != "" {
-		sb.WriteString(fmt.Sprintf("\n  COMPUTE_POOL = '%s'", escapeLit(params.ComputePool)))
+		sb.WriteString(fmt.Sprintf("\n  COMPUTE_POOL = '%s'", EscapeStringLit(params.ComputePool)))
 	}
 	if params.Warehouse != "" {
 		sb.WriteString(fmt.Sprintf("\n  WAREHOUSE = %s", params.Warehouse))

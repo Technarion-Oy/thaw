@@ -66,21 +66,14 @@ func BuildCreateSecretSql(db, schema string, cfg SecretConfig) (string, error) {
 
 	var sb strings.Builder
 
-	createClause := "CREATE"
-	if cfg.OrReplace {
-		createClause += " OR REPLACE"
-	}
-	createClause += " SECRET"
-	if cfg.IfNotExists && !cfg.OrReplace {
-		createClause += " IF NOT EXISTS"
+	createClause := snowflake.CreateClause("SECRET", cfg.OrReplace, cfg.IfNotExists)
+
+	name := cfg.Name
+	if name == "" {
+		name = "secret_name"
 	}
 
-	nameToken := snowflake.QuoteOrBare(cfg.Name, cfg.CaseSensitive)
-	if cfg.Name == "" {
-		nameToken = "secret_name"
-	}
-
-	fmt.Fprintf(&sb, "%s %s.%s.%s\n", createClause, snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), nameToken)
+	fmt.Fprintf(&sb, "%s %s\n", createClause, snowflake.QualifyOrBare(db, schema, name, cfg.CaseSensitive))
 	fmt.Fprintf(&sb, "  TYPE = %s", cfg.Type)
 
 	switch cfg.Type {
@@ -118,9 +111,7 @@ func BuildCreateSecretSql(db, schema string, cfg SecretConfig) (string, error) {
 		fmt.Fprintf(&sb, "\n  ALGORITHM = GENERIC")
 	}
 
-	if cfg.Comment != "" {
-		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment))
-	}
+	sb.WriteString(snowflake.CommentClause(cfg.Comment))
 
 	return sb.String() + ";", nil
 }
@@ -173,7 +164,7 @@ func BuildModifySecretSql(db, schema, name string, cfg SecretConfig, originalCom
 	}
 
 	if cfg.Comment != "" {
-		setClauses = append(setClauses, fmt.Sprintf("COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment)))
+		setClauses = append(setClauses, "COMMENT = "+snowflake.QuoteTextLit(cfg.Comment))
 	}
 
 	if len(setClauses) > 0 {

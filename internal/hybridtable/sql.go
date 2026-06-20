@@ -65,18 +65,15 @@ func BuildCreateHybridTableSql(db, schema string, cfg HybridTableConfig) (string
 	var sb strings.Builder
 
 	// Hybrid tables do not support OR REPLACE — only IF NOT EXISTS.
-	createClause := "CREATE HYBRID TABLE"
-	if cfg.IfNotExists {
-		createClause += " IF NOT EXISTS"
+	createClause := snowflake.CreateClause("HYBRID TABLE", false, cfg.IfNotExists)
+
+	name := cfg.Name
+	if name == "" {
+		name = "hybrid_table_name"
 	}
 
-	nameToken := snowflake.QuoteOrBare(cfg.Name, cfg.CaseSensitive)
-	if cfg.Name == "" {
-		nameToken = "hybrid_table_name"
-	}
-
-	fmt.Fprintf(&sb, "%s %s.%s.%s (\n", createClause,
-		snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), nameToken)
+	fmt.Fprintf(&sb, "%s %s (\n", createClause,
+		snowflake.QualifyOrBare(db, schema, name, cfg.CaseSensitive))
 
 	// Body lines: columns, then the PRIMARY KEY clause, then any inline indexes.
 	var lines []string
@@ -135,9 +132,7 @@ func BuildCreateHybridTableSql(db, schema string, cfg HybridTableConfig) (string
 	sb.WriteString(strings.Join(lines, ",\n"))
 	sb.WriteString("\n)")
 
-	if cfg.Comment != "" {
-		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment))
-	}
+	sb.WriteString(snowflake.CommentClause(cfg.Comment))
 
 	return sb.String() + ";", nil
 }

@@ -10,24 +10,11 @@
 
 package app
 
-import (
-	"fmt"
-
-	"thaw/internal/apperrors"
-	"thaw/internal/snowflake"
-)
-
 // AlterDynamicTable runs an ALTER DYNAMIC TABLE statement for the given table.
 // clause is everything that follows the table name, e.g. "SUSPEND", "RESUME",
 // "REFRESH", "SET TARGET_LAG = '5 minutes'", or "SET WAREHOUSE = my_wh". The
 // caller is responsible for correct SQL quoting inside the clause; this method
 // only double-quotes the table identifier.
 func (a *App) AlterDynamicTable(database, schema, name, clause string) error {
-	if a.client == nil {
-		return apperrors.ErrNotConnected
-	}
-	sql := fmt.Sprintf("ALTER DYNAMIC TABLE %s.%s.%s %s",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), clause)
-	_, err := a.client.Execute(a.ctx, sql)
-	return err
+	return a.alterObject("DYNAMIC TABLE", database, schema, name, clause)
 }

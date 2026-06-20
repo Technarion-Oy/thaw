@@ -10,24 +10,11 @@
 
 package app
 
-import (
-	"fmt"
-
-	"thaw/internal/apperrors"
-	"thaw/internal/snowflake"
-)
-
 // AlterStreamlit runs an ALTER STREAMLIT statement for the given app. clause is
 // everything that follows the streamlit name, e.g. "SET QUERY_WAREHOUSE = MY_WH",
 // "UNSET TITLE", or "RENAME TO \"DB\".\"SC\".NEW_NAME". The caller is responsible
 // for correct SQL quoting inside the clause; this method only double-quotes the
 // streamlit identifier.
 func (a *App) AlterStreamlit(database, schema, name, clause string) error {
-	if a.client == nil {
-		return apperrors.ErrNotConnected
-	}
-	sql := fmt.Sprintf("ALTER STREAMLIT %s.%s.%s %s",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), clause)
-	_, err := a.client.Execute(a.ctx, sql)
-	return err
+	return a.alterObject("STREAMLIT", database, schema, name, clause)
 }

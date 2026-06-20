@@ -46,19 +46,10 @@ func (c *Client) GetSessionParameters(ctx context.Context) ([]SessionParam, erro
 
 	var params []SessionParam
 	for _, row := range res.Rows {
-		key, val, typ, desc := "", "", "", ""
-		if keyIdx >= 0 && keyIdx < len(row) {
-			key = CellString(row[keyIdx])
-		}
-		if valIdx >= 0 && valIdx < len(row) {
-			val = CellString(row[valIdx])
-		}
-		if typIdx >= 0 && typIdx < len(row) {
-			typ = CellString(row[typIdx])
-		}
-		if descIdx >= 0 && descIdx < len(row) {
-			desc = CellString(row[descIdx])
-		}
+		key := Cell(row, keyIdx)
+		val := Cell(row, valIdx)
+		typ := Cell(row, typIdx)
+		desc := Cell(row, descIdx)
 		if key != "" {
 			params = append(params, SessionParam{Key: key, Value: val, Type: typ, Description: desc})
 		}
@@ -83,16 +74,9 @@ func (c *Client) GetSessionVariables(ctx context.Context) ([]SessionVar, error) 
 
 	var vars []SessionVar
 	for _, row := range res.Rows {
-		name, val, typ := "", "", ""
-		if nameIdx >= 0 && nameIdx < len(row) {
-			name = CellString(row[nameIdx])
-		}
-		if valIdx >= 0 && valIdx < len(row) {
-			val = CellString(row[valIdx])
-		}
-		if typIdx >= 0 && typIdx < len(row) {
-			typ = CellString(row[typIdx])
-		}
+		name := Cell(row, nameIdx)
+		val := Cell(row, valIdx)
+		typ := Cell(row, typIdx)
 		if name != "" {
 			vars = append(vars, SessionVar{Key: name, Value: val, Type: typ})
 		}
@@ -111,6 +95,6 @@ func QuoteSessionParamValue(value, paramType string) string {
 	case "BOOLEAN", "NUMBER", "FIXED", "FLOAT":
 		return value
 	default:
-		return "'" + strings.ReplaceAll(value, "'", "''") + "'"
+		return QuoteStringLit(value)
 	}
 }

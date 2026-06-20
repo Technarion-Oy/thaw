@@ -59,22 +59,15 @@ type MaskingPolicyConfig struct {
 func BuildCreateMaskingPolicySql(db, schema string, cfg MaskingPolicyConfig) (string, error) {
 	var sb strings.Builder
 
-	createClause := "CREATE"
-	if cfg.OrReplace {
-		createClause += " OR REPLACE"
-	}
-	createClause += " MASKING POLICY"
-	if cfg.IfNotExists && !cfg.OrReplace {
-		createClause += " IF NOT EXISTS"
+	createClause := snowflake.CreateClause("MASKING POLICY", cfg.OrReplace, cfg.IfNotExists)
+
+	name := cfg.Name
+	if name == "" {
+		name = "masking_policy_name"
 	}
 
-	nameToken := snowflake.QuoteOrBare(cfg.Name, cfg.CaseSensitive)
-	if cfg.Name == "" {
-		nameToken = "masking_policy_name"
-	}
-
-	fmt.Fprintf(&sb, "%s %s.%s.%s AS", createClause,
-		snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), nameToken)
+	fmt.Fprintf(&sb, "%s %s AS", createClause,
+		snowflake.QualifyOrBare(db, schema, name, cfg.CaseSensitive))
 
 	// Signature: drop entries missing a name or type so a stray empty input row
 	// does not emit "( VARCHAR)". If nothing valid remains, emit a placeholder so
@@ -107,9 +100,7 @@ func BuildCreateMaskingPolicySql(db, schema string, cfg MaskingPolicyConfig) (st
 	}
 	fmt.Fprintf(&sb, "\n  %s", body)
 
-	if cfg.Comment != "" {
-		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment))
-	}
+	sb.WriteString(snowflake.CommentClause(cfg.Comment))
 
 	if cfg.ExemptOtherPolicies {
 		sb.WriteString("\n  EXEMPT_OTHER_POLICIES = TRUE")

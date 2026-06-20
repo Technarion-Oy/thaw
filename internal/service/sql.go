@@ -164,18 +164,15 @@ func renderUsingValue(v string) string {
 func BuildCreateServiceSql(db, schema string, cfg ServiceConfig) (string, error) {
 	var sb strings.Builder
 
-	createClause := "CREATE SERVICE"
-	if cfg.IfNotExists {
-		createClause += " IF NOT EXISTS"
+	createClause := snowflake.CreateClause("SERVICE", false, cfg.IfNotExists)
+
+	name := cfg.Name
+	if name == "" {
+		name = "service_name"
 	}
 
-	nameToken := snowflake.QuoteOrBare(cfg.Name, cfg.CaseSensitive)
-	if cfg.Name == "" {
-		nameToken = "service_name"
-	}
-
-	fmt.Fprintf(&sb, "%s %s.%s.%s", createClause,
-		snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), nameToken)
+	fmt.Fprintf(&sb, "%s %s", createClause,
+		snowflake.QualifyOrBare(db, schema, name, cfg.CaseSensitive))
 
 	pool := strings.TrimSpace(cfg.ComputePool)
 	if pool == "" {
@@ -201,9 +198,7 @@ func BuildCreateServiceSql(db, schema string, cfg ServiceConfig) (string, error)
 	if qw := strings.TrimSpace(cfg.QueryWarehouse); qw != "" {
 		fmt.Fprintf(&sb, "\n  QUERY_WAREHOUSE = %s", snowflake.QuoteIdent(qw))
 	}
-	if cfg.Comment != "" {
-		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment))
-	}
+	sb.WriteString(snowflake.CommentClause(cfg.Comment))
 
 	return sb.String() + ";", nil
 }

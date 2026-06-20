@@ -63,36 +63,27 @@ type DataMetricFunctionConfig struct {
 func BuildCreateDataMetricFunctionSql(db, schema string, cfg DataMetricFunctionConfig) (string, error) {
 	var sb strings.Builder
 
-	createClause := "CREATE"
-	if cfg.OrReplace {
-		createClause += " OR REPLACE"
-	}
+	createBody := "DATA METRIC FUNCTION"
 	if cfg.Secure {
-		createClause += " SECURE"
+		createBody = "SECURE " + createBody
 	}
-	createClause += " DATA METRIC FUNCTION"
-	// OR REPLACE and IF NOT EXISTS are mutually exclusive; OR REPLACE wins.
-	if cfg.IfNotExists && !cfg.OrReplace {
-		createClause += " IF NOT EXISTS"
-	}
+	createClause := snowflake.CreateClause(createBody, cfg.OrReplace, cfg.IfNotExists)
 
-	nameIdent := snowflake.QuoteOrBare(cfg.Name, cfg.CaseSensitive)
-	if cfg.Name == "" {
-		nameIdent = "data_metric_function_name"
+	name := cfg.Name
+	if name == "" {
+		name = "data_metric_function_name"
 	}
 
 	argList, firstArgName := buildTableArgs(cfg.Args)
-	fmt.Fprintf(&sb, "%s %s.%s.%s(%s)", createClause,
-		snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), nameIdent, argList)
+	fmt.Fprintf(&sb, "%s %s(%s)", createClause,
+		snowflake.QualifyOrBare(db, schema, name, cfg.CaseSensitive), argList)
 
 	sb.WriteString("\n  RETURNS NUMBER")
 	if cfg.NotNull {
 		sb.WriteString(" NOT NULL")
 	}
 
-	if cfg.Comment != "" {
-		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment))
-	}
+	sb.WriteString(snowflake.CommentClause(cfg.Comment))
 
 	body := strings.TrimSpace(cfg.Body)
 	if body == "" {

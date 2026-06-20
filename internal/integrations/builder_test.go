@@ -13,6 +13,8 @@ package integrations
 import (
 	"strings"
 	"testing"
+
+	"thaw/internal/snowflake"
 )
 
 // ── Assertion helpers ─────────────────────────────────────────────────────────
@@ -46,7 +48,7 @@ func requireSQL(t *testing.T) func(string, error) string {
 	}
 }
 
-// ── sq / qident helpers ───────────────────────────────────────────────────────
+// ── string-literal / identifier quoting helpers ───────────────────────────────
 
 func TestSq(t *testing.T) {
 	cases := []struct{ in, want string }{
@@ -57,9 +59,9 @@ func TestSq(t *testing.T) {
 		{"'; DROP TABLE foo; --", "'''; DROP TABLE foo; --'"},
 	}
 	for _, tc := range cases {
-		got := sq(tc.in)
+		got := snowflake.QuoteStringLit(tc.in)
 		if got != tc.want {
-			t.Errorf("sq(%q) = %q, want %q", tc.in, got, tc.want)
+			t.Errorf("QuoteStringLit(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }
@@ -71,9 +73,9 @@ func TestQident(t *testing.T) {
 		{"", `""`},
 	}
 	for _, tc := range cases {
-		got := qident(tc.in)
+		got := snowflake.QuoteIdent(tc.in)
 		if got != tc.want {
-			t.Errorf("qident(%q) = %q, want %q", tc.in, got, tc.want)
+			t.Errorf("QuoteIdent(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }

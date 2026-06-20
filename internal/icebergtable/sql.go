@@ -114,21 +114,14 @@ type IcebergTableConfig struct {
 func BuildCreateIcebergTableSql(db, schema string, cfg IcebergTableConfig) (string, error) {
 	var sb strings.Builder
 
-	createClause := "CREATE"
-	if cfg.OrReplace {
-		createClause += " OR REPLACE"
-	}
-	createClause += " ICEBERG TABLE"
-	if cfg.IfNotExists && !cfg.OrReplace {
-		createClause += " IF NOT EXISTS"
+	createClause := snowflake.CreateClause("ICEBERG TABLE", cfg.OrReplace, cfg.IfNotExists)
+
+	name := cfg.Name
+	if name == "" {
+		name = "iceberg_table_name"
 	}
 
-	nameToken := snowflake.QuoteOrBare(cfg.Name, cfg.CaseSensitive)
-	if cfg.Name == "" {
-		nameToken = "iceberg_table_name"
-	}
-
-	fmt.Fprintf(&sb, "%s %s.%s.%s", createClause, snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), nameToken)
+	fmt.Fprintf(&sb, "%s %s", createClause, snowflake.QualifyOrBare(db, schema, name, cfg.CaseSensitive))
 
 	tableType := strings.TrimSpace(cfg.TableType)
 	if tableType == "" {
@@ -222,9 +215,7 @@ func BuildCreateIcebergTableSql(db, schema string, cfg IcebergTableConfig) (stri
 			fmt.Fprintf(&sb, "\n  CLUSTER BY (%s)", cb)
 		}
 	}
-	if cfg.Comment != "" {
-		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment))
-	}
+	sb.WriteString(snowflake.CommentClause(cfg.Comment))
 	if tc := snowflake.TagClause(cfg.Tags); tc != "" {
 		fmt.Fprintf(&sb, "\n  %s", tc)
 	}

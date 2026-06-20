@@ -239,6 +239,96 @@ func TestQuoteIdent(t *testing.T) {
 	}
 }
 
+func TestQualify(t *testing.T) {
+	tests := []struct {
+		name  string
+		parts []string
+		want  string
+	}{
+		{"three parts", []string{"DB", "S", "T"}, `"DB"."S"."T"`},
+		{"two parts", []string{"DB", "S"}, `"DB"."S"`},
+		{"single part", []string{"T"}, `"T"`},
+		{"mixed case preserved", []string{"Db", "Schema", "MyTable"}, `"Db"."Schema"."MyTable"`},
+		{"embedded quote escaped", []string{"DB", `we"ird`}, `"DB"."we""ird"`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Qualify(tc.parts...)
+			if got != tc.want {
+				t.Errorf("Qualify(%q) = %v, want %v", tc.parts, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestQualifyOrBare(t *testing.T) {
+	tests := []struct {
+		name          string
+		db, schema, n string
+		caseSensitive bool
+		want          string
+	}{
+		{"bare name uppercased by snowflake", "DB", "S", "T", false, `"DB"."S".T`},
+		{"reserved name quoted even when not case-sensitive", "DB", "S", "select", false, `"DB"."S"."select"`},
+		{"invalid bare name quoted", "DB", "S", "my table", false, `"DB"."S"."my table"`},
+		{"case-sensitive forces quoting", "DB", "S", "Mixed", true, `"DB"."S"."Mixed"`},
+		{"db and schema always quoted", "Db", "Sch", "name", false, `"Db"."Sch".name`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := QualifyOrBare(tc.db, tc.schema, tc.n, tc.caseSensitive)
+			if got != tc.want {
+				t.Errorf("QualifyOrBare(%q,%q,%q,%v) = %q, want %q", tc.db, tc.schema, tc.n, tc.caseSensitive, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCreateClause(t *testing.T) {
+	tests := []struct {
+		name        string
+		body        string
+		orReplace   bool
+		ifNotExists bool
+		want        string
+	}{
+		{"plain", "MASKING POLICY", false, false, "CREATE MASKING POLICY"},
+		{"or replace", "MASKING POLICY", true, false, "CREATE OR REPLACE MASKING POLICY"},
+		{"if not exists", "SERVICE", false, true, "CREATE SERVICE IF NOT EXISTS"},
+		{"or replace wins over if not exists", "TAG", true, true, "CREATE OR REPLACE TAG"},
+		{"folded modifier", "SECURE EXTERNAL FUNCTION", true, false, "CREATE OR REPLACE SECURE EXTERNAL FUNCTION"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := CreateClause(tc.body, tc.orReplace, tc.ifNotExists)
+			if got != tc.want {
+				t.Errorf("CreateClause(%q,%v,%v) = %q, want %q", tc.body, tc.orReplace, tc.ifNotExists, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCommentClause(t *testing.T) {
+	tests := []struct {
+		name    string
+		comment string
+		want    string
+	}{
+		{"empty", "", ""},
+		{"plain", "hello", "\n  COMMENT = 'hello'"},
+		{"single quote doubled", "it's", "\n  COMMENT = 'it''s'"},
+		{"backslash preserved", `C:\temp`, "\n  COMMENT = 'C:\\\\temp'"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := CommentClause(tc.comment)
+			if got != tc.want {
+				t.Errorf("CommentClause(%q) = %q, want %q", tc.comment, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestSplitValues(t *testing.T) {
 	cases := []struct {
 		in   string

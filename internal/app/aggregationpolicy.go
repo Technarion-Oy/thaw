@@ -24,13 +24,7 @@ import (
 // responsible for correct SQL quoting inside the clause; this method only
 // double-quotes the policy identifier.
 func (a *App) AlterAggregationPolicy(database, schema, name, clause string) error {
-	if a.client == nil {
-		return apperrors.ErrNotConnected
-	}
-	sql := fmt.Sprintf("ALTER AGGREGATION POLICY %s.%s.%s %s",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), clause)
-	_, err := a.client.Execute(a.ctx, sql)
-	return err
+	return a.alterObject("AGGREGATION POLICY", database, schema, name, clause)
 }
 
 // GetAggregationPolicyReferences returns the tables and views to which the given

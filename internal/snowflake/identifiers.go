@@ -60,6 +60,53 @@ func QuoteIdent(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
+// Qualify builds a dotted, fully-qualified Snowflake object reference from its
+// name parts, double-quoting each part via QuoteIdent — Qualify("DB", "S", "T")
+// yields `"DB"."S"."T"`. It is the shared builder behind the database.schema.name
+// and schema.name references that pepper the DDL/SHOW builders. Every part is
+// quoted unconditionally; for a reference whose final component is already
+// quoted (a generated stage name) or only conditionally quoted (QuoteOrBare),
+// build the dotted name inline instead.
+func Qualify(parts ...string) string {
+	quoted := make([]string, len(parts))
+	for i, p := range parts {
+		quoted[i] = QuoteIdent(p)
+	}
+	return strings.Join(quoted, ".")
+}
+
+// QualifyOrBare builds a three-part `"db"."schema".name` reference in which db
+// and schema are always double-quoted (QuoteIdent) while the trailing name is
+// quoted only when required — QuoteOrBare(name, caseSensitive) leaves a valid,
+// non-reserved identifier bare so Snowflake applies its uppercasing. It is the
+// FQN builder shared by the CREATE/ALTER builders whose final component is an
+// authored object name; use Qualify when every part should be quoted
+// unconditionally.
+func QualifyOrBare(db, schema, name string, caseSensitive bool) string {
+	return QuoteIdent(db) + "." + QuoteIdent(schema) + "." + QuoteOrBare(name, caseSensitive)
+}
+
+// CreateClause assembles the `CREATE [OR REPLACE] <body> [IF NOT EXISTS]` prefix
+// of a DDL statement, enforcing the OR REPLACE / IF NOT EXISTS mutual exclusivity
+// Snowflake requires: the two may not appear together, and OR REPLACE wins when
+// both are requested. body is the object-type phrase that follows the optional
+// OR REPLACE — callers fold any leading SECURE/TRANSIENT modifiers into it (e.g.
+// "MASKING POLICY", "SECURE EXTERNAL FUNCTION", "TRANSIENT DYNAMIC TABLE"). The
+// result carries no trailing space; the fully-qualified name follows it.
+func CreateClause(body string, orReplace, ifNotExists bool) string {
+	var sb strings.Builder
+	sb.WriteString("CREATE")
+	if orReplace {
+		sb.WriteString(" OR REPLACE")
+	}
+	sb.WriteByte(' ')
+	sb.WriteString(body)
+	if ifNotExists && !orReplace {
+		sb.WriteString(" IF NOT EXISTS")
+	}
+	return sb.String()
+}
+
 // EscapeStringLit escapes single-quotes within a SQL string literal value by
 // doubling them. It deliberately leaves backslashes untouched so that callers
 // emitting delimiter/control values (e.g. a file format's RECORD_DELIMITER =
@@ -97,6 +144,20 @@ func QuoteStringLit(s string) string {
 // escape sequences are intentional.
 func QuoteTextLit(s string) string {
 	return `'` + EscapeTextLit(s) + `'`
+}
+
+// CommentClause returns the optional COMMENT clause appended by the CREATE/ALTER
+// builders: "\n  COMMENT = '<escaped>'" when comment is non-blank, or "" when it
+// is empty. The value is escaped as free text via QuoteTextLit (EscapeTextLit),
+// so a backslash in a user-entered comment is preserved rather than swallowed as
+// a Snowflake string-literal escape. The leading newline and two-space indent
+// match the builders' clause layout; for an ALTER … SET comment assembled into a
+// comma-joined SET list, emit `COMMENT = ` + QuoteTextLit(comment) directly.
+func CommentClause(comment string) string {
+	if comment == "" {
+		return ""
+	}
+	return "\n  COMMENT = " + QuoteTextLit(comment)
 }
 
 // FormatStringLitList renders a token slice into the SQL `('A', 'B')` list
