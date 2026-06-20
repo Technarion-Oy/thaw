@@ -56,6 +56,10 @@ const VALUE_TD: React.CSSProperties = {
 // for COMMENT / TARGET_LAG / TAG values.
 function q1(s: string) { return "'" + s.replace(/\\/g, "\\\\").replace(/'/g, "''") + "'"; }
 
+// Quote a SQL identifier (double-quoted, embedded quotes doubled). Used to build
+// the fully-qualified tag name for UNSET TAG.
+const qId = (s: string) => `"${s.replace(/"/g, '""')}"`;
+
 // Split a DESCRIBE comma list ("CAT, AUTHOR") into trimmed, non-blank tokens.
 function splitList(s: string): string[] {
   return s.split(",").map((t) => t.trim()).filter((t) => t.length > 0);
@@ -485,7 +489,9 @@ export default function CortexSearchServicePropertiesModal({ db, schema, name, o
   const [loadingWarehouses, setLoadingWarehouses] = useState(false);
 
   // Tags currently applied (best-effort; TAG_REFERENCES needs privileges).
-  const [tags, setTags] = useState<{ name: string; value: string }[]>([]);
+  // `qualified` is the fully-qualified, quoted FQN used for UNSET TAG; `label` is
+  // the human-readable "name = value" rendered on the chip.
+  const [tags, setTags] = useState<{ qualified: string; label: string }[]>([]);
   const [newTagName, setNewTagName] = useState("");
   const [newTagValue, setNewTagValue] = useState("");
 
@@ -506,16 +512,22 @@ export default function CortexSearchServicePropertiesModal({ db, schema, name, o
     try {
       const res = await GetCortexSearchServiceTags(db, schema, name);
       const cols = (res?.columns ?? []).map((c) => c.toLowerCase());
-      const ni = cols.indexOf("tag_name");
-      const vi = cols.indexOf("tag_value");
-      const out: { name: string; value: string }[] = [];
-      for (const row of res?.rows ?? []) {
-        out.push({
-          name: ni >= 0 ? String(row[ni] ?? "") : "",
-          value: vi >= 0 ? String(row[vi] ?? "") : "",
-        });
-      }
-      setTags(out.filter((t) => t.name !== ""));
+      const cell = (row: unknown[], label: string) => {
+        const idx = cols.indexOf(label);
+        return idx >= 0 ? String(row[idx] ?? "") : "";
+      };
+      const out = (res?.rows ?? []).map((row) => {
+        const tdb = cell(row, "tag_database");
+        const tsc = cell(row, "tag_schema");
+        const tnm = cell(row, "tag_name");
+        const tval = cell(row, "tag_value");
+        // Qualify with database/schema so UNSET resolves the correct tag even when
+        // it lives in a central governance schema; quote every part so names that
+        // need quoting round-trip. Mirrors the Model modal.
+        const qualified = [tdb, tsc, tnm].filter(Boolean).map(qId).join(".");
+        return { qualified, label: `${tnm}${tval ? ` = ${tval}` : ""}` };
+      }).filter((t) => t.qualified);
+      setTags(out);
     } catch {
       // No governance privilege / unsupported domain — SET/UNSET still work.
       setTags([]);
@@ -635,11 +647,12 @@ export default function CortexSearchServicePropertiesModal({ db, schema, name, o
     }
   };
 
-  const unsetTag = async (tagName: string) => {
+  // qualifiedName is the quoted, db/schema-qualified FQN built in reloadTags.
+  const unsetTag = async (qualifiedName: string) => {
     setBusy(true);
     setActionError(null);
     try {
-      await AlterCortexSearchService(db, schema, name, `UNSET TAG ${tagName}`);
+      await AlterCortexSearchService(db, schema, name, `UNSET TAG ${qualifiedName}`);
       await reloadTags();
     } catch (e) {
       setActionError(`Unset tag failed: ${String(e)}`);
@@ -870,14 +883,14 @@ export default function CortexSearchServicePropertiesModal({ db, schema, name, o
               {tags.length > 0
                 ? tags.map((t) => (
                     <Popconfirm
-                      key={`${t.name}=${t.value}`}
-                      title={`Unset tag ${t.name}?`}
-                      onConfirm={() => unsetTag(t.name)}
+                      key={t.qualified}
+                      title={`Unset tag ${t.label}?`}
+                      onConfirm={() => unsetTag(t.qualified)}
                       okText="Unset"
                       cancelText="Cancel"
                     >
                       <Tag closable onClose={(e) => e.preventDefault()} style={{ cursor: "pointer" }}>
-                        {t.name}{t.value ? ` = ${t.value}` : ""}
+                        {t.label}
                       </Tag>
                     </Popconfirm>
                   ))

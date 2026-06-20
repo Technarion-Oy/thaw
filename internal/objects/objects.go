@@ -457,9 +457,11 @@ func GetObjectProperties(ctx context.Context, client *snowflake.Client, database
 					"source_data_num_rows", "indexing_state", "indexing_error",
 					"serving_state", "data_timestamp",
 					// Mutable properties surfaced so the properties modal can show the
-					// current value next to the ALTER … SET editor for each.
+					// current value next to the ALTER … SET editor for each. ("comment"
+					// is intentionally omitted — SHOW CORTEX SEARCH SERVICES already
+					// returns it, so re-appending it here would duplicate the key.)
 					"primary_key", "auto_suspend", "request_logging",
-					"full_index_build_interval_days", "comment":
+					"full_index_build_interval_days":
 					// Guard against a SQL NULL rendering as the literal "<nil>";
 					// emit an empty string instead.
 					val := ""
