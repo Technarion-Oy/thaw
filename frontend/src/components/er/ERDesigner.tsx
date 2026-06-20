@@ -1,14 +1,15 @@
 // Copyright (c) 2026 Technarion Oy. All rights reserved.
 // @thaw-domain: ER Designer
 
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from "react";
 import { App as AntApp, Modal, Button, Input, Select, Checkbox, AutoComplete } from "antd";
 import { PlusOutlined, DeleteOutlined, CopyOutlined, LinkOutlined, SwapOutlined } from "@ant-design/icons";
 import { ExecuteQuery, ListSchemas, UpdateERDesignerState, ClearERDesignerState } from "../../../wailsjs/go/app/App";
 import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { mcp } from "../../../wailsjs/go/models";
-import ERCanvas from "./ERCanvas";
+// Lazy — pulls in @xyflow/@dagrejs (the canvas renderer) only when shown.
+const ERCanvas = lazy(() => import("./ERCanvas"));
 import { initFromERData, normalizeDataType, mergeAITablesIntoDesigner } from "./erCanvasLayout";
 import type { AITableIn } from "./erCanvasLayout";
 import { buildMermaid } from "./buildMermaid";
@@ -1045,23 +1046,25 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
               </Button>
             </div>
 
-            <ERCanvas
-              key={database}
-              tables={tables}
-              mode="edit"
-              database={database}
-              visibleSchemas={effectiveVisibleSchemas}
-              selectedTableIds={selectedTableIds}
-              onSelectionChange={setSelectedTableIds}
-              onConnect={handleFKConnect}
-              onTableRename={handleTableRename}
-              onColumnRename={handleColumnRename}
-              onColumnRemove={removeColumn}
-              onDuplicateTable={handleDuplicateTable}
-              onDeleteTable={confirmRemoveTable}
-              onAddFK={handleAddFK}
-              onRemoveFKs={handleRemoveFKs}
-            />
+            <Suspense fallback={<div style={{ height: "100%" }} />}>
+              <ERCanvas
+                key={database}
+                tables={tables}
+                mode="edit"
+                database={database}
+                visibleSchemas={effectiveVisibleSchemas}
+                selectedTableIds={selectedTableIds}
+                onSelectionChange={setSelectedTableIds}
+                onConnect={handleFKConnect}
+                onTableRename={handleTableRename}
+                onColumnRename={handleColumnRename}
+                onColumnRemove={removeColumn}
+                onDuplicateTable={handleDuplicateTable}
+                onDeleteTable={confirmRemoveTable}
+                onAddFK={handleAddFK}
+                onRemoveFKs={handleRemoveFKs}
+              />
+            </Suspense>
           </div>
         </div>
       </Modal>

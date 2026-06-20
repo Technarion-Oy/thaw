@@ -13,7 +13,8 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Button } from "antd";
 import Editor, { type BeforeMount, type OnMount } from "@monaco-editor/react";
-import * as monacoLib from "monaco-editor";
+// Slim editor API only (no language services) — see monacoSetup.ts for why.
+import * as monacoLib from "monaco-editor/esm/vs/editor/editor.api.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore – internal Monaco paths; no public type declarations
 import { MenuRegistry, MenuId } from "monaco-editor/esm/vs/platform/actions/common/actions.js";

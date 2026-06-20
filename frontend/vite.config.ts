@@ -27,14 +27,22 @@ function appObfuscatorPlugin(): Plugin {
       for (const [, chunk] of Object.entries(bundle)) {
         if (chunk.type !== "chunk") continue;
 
+        // chunk.fileName includes the output dir (e.g. "assets/vendor-xlsx-….js"),
+        // so the skip tests must run against the *basename* — an earlier "^vendor"
+        // test silently never matched and every vendor chunk was being obfuscated
+        // (inflating each ~5×, e.g. xlsx 0.4 MB → 2.4 MB in the binary).
+        const base = chunk.fileName.split("/").pop() ?? chunk.fileName;
+
         // Skip vendor chunks — manualChunks ensures all node_modules output
-        // files start with "vendor".
-        if (/^vendor/.test(chunk.fileName)) continue;
+        // files start with "vendor".  Obfuscating third-party code yields no
+        // IP-protection benefit, balloons the binary, and risks breaking libs
+        // that rely on stable property names.
+        if (base.startsWith("vendor")) continue;
 
         // Skip worker bundles — Vite derives the output filename from the
         // source module name, so yamlWorker → yamlWorker-[hash].js and
         // editor.worker → editor.worker-[hash].js.
-        if (/[Ww]orker/.test(chunk.fileName)) continue;
+        if (/[Ww]orker/.test(base)) continue;
 
         // Belt-and-suspenders: skip any chunk that still contains Monaco
         // modules regardless of filename (e.g. dynamic imports that escaped
@@ -144,6 +152,36 @@ function restoreGitkeepPlugin(): Plugin {
 // not produce a shipping artifact.  Release builds leave it unset.
 const fastBuild = process.env.THAW_FAST_BUILD === "1";
 
+// Packages reached only through lazy-loaded visualization modals (recharts'
+// charts and @xyflow/@dagrejs graphs) plus their shared d3/victory transitive
+// deps.  Grouped into a single on-demand "vendor-viz" chunk so none of them sit
+// in the eager boot bundle.  Listed explicitly (rather than a broad /d3/ regex)
+// so an unrelated future dependency can't accidentally land in this chunk.
+const VIZ_DEPS = [
+  "recharts",
+  "victory-vendor",
+  "internmap",
+  "decimal.js-light",
+  "d3-array",
+  "d3-color",
+  "d3-dispatch",
+  "d3-drag",
+  "d3-ease",
+  "d3-format",
+  "d3-interpolate",
+  "d3-path",
+  "d3-scale",
+  "d3-selection",
+  "d3-shape",
+  "d3-time",
+  "d3-time-format",
+  "d3-timer",
+  "d3-transition",
+  "d3-zoom",
+  "@xyflow",
+  "@dagrejs",
+];
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
@@ -161,9 +199,16 @@ export default defineConfig({
   },
 
   // Pre-bundle Monaco and its YAML plugin so Vite doesn't transform thousands
-  // of ESM files on first request in dev mode.
+  // of ESM files on first request in dev mode.  We import the *slim* editor
+  // (editor.api + editor.all) rather than the full "monaco-editor" barrel, so
+  // pre-bundling only the subpaths we actually use keeps `wails dev` cold start
+  // fast and avoids a mid-session re-optimize page reload.
   optimizeDeps: {
-    include: ["monaco-editor", "monaco-yaml"],
+    include: [
+      "monaco-editor/esm/vs/editor/editor.api.js",
+      "monaco-editor/esm/vs/editor/editor.all.js",
+      "monaco-yaml",
+    ],
   },
 
   build: {
@@ -201,15 +246,36 @@ export default defineConfig({
       output: {
         // Explicit chunk groups give the obfuscator plugin reliable, stable
         // filenames to test against when deciding what to skip.
+        //
+        // Every node_modules chunk is named "vendor*", which (a) lets the
+        // obfuscator skip it by filename and (b) lets Rollup load it only when
+        // first reached.  Peeling the on-demand-only ecosystems into their own
+        // "vendor-*" chunks means they are NOT pulled into the eager boot chunk:
+        // combined with the React.lazy boundaries (terminal, notebook, chart /
+        // ER / task-graph modals, Excel export) they load only when used.
         manualChunks(id) {
           if (!id.includes("node_modules")) return undefined;
-          // Isolate Monaco and its YAML worker in their own named chunk so
-          // the skip pattern (/^vendor/) catches them by filename prefix.
+          // Isolate Monaco and its YAML plugin in their own named chunk —
+          // Monaco's postMessage protocols break under obfuscation, and the
+          // /^vendor/ filename prefix keeps the obfuscator off it.
           if (
             id.includes("monaco-editor") ||
-            id.includes("monaco-yaml")
+            id.includes("monaco-yaml") ||
+            id.includes("monaco-worker-manager") ||
+            id.includes("monaco-marker-data-provider") ||
+            id.includes("monaco-languageserver-types")
           ) {
             return "vendor-monaco";
+          }
+          // xlsx — only needed for Excel export (lazy dynamic import).
+          if (id.includes("/xlsx/")) return "vendor-xlsx";
+          // xterm — only when the embedded terminal panel opens.
+          if (id.includes("/@xterm/")) return "vendor-xterm";
+          // Visualization stack: recharts (Quick Chart / Warehouse Metering)
+          // and @xyflow/@dagrejs (ER diagram / task graph), plus their shared
+          // d3 / victory dependencies.  All reached only via lazy modals.
+          if (VIZ_DEPS.some((p) => id.includes(`/node_modules/${p}/`))) {
+            return "vendor-viz";
           }
           return "vendor";
         },

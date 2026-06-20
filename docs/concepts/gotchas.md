@@ -50,3 +50,22 @@ Formatting, search state, selection range, conditional-formatting rules, and the
 ## Frontend bundle obfuscation
 
 The production build runs `javascript-obfuscator` after Terser (`vite.config.ts`); vendor and Monaco chunks are skipped. The build passes `--max-old-space-size=6144` to Node to avoid V8 OOM. `controlFlowFlattening` and `deadCodeInjection` are disabled to keep peak memory in budget; RC4 string-array encoding is the primary IP protection.
+
+The vendor-skip test runs against the chunk's **basename**, not `chunk.fileName` — the latter is `assets/vendor-….js`, so a `/^vendor/` test silently never matches and every vendor chunk gets obfuscated anyway (each inflates ~5× in the binary). `manualChunks` names every `node_modules` output `vendor-*` so the skip catches it by prefix; a Monaco `moduleIds` fallback is the belt-and-suspenders for Monaco specifically.
+
+## Monaco: import the slim editor API, never the `monaco-editor` barrel
+
+`import … from "monaco-editor"` resolves to `editor.main.js`, which eagerly pulls every language service (TS/HTML/CSS/JSON) **and ~80 basic-language grammars**, each referencing a web worker — embedding ~9 MB of worker bundles (`ts.worker` alone is 6.9 MB) that are never executed (the `getWorker` switch in `monacoSetup.ts` only ever returns the YAML or base editor worker). Always import the slim API instead:
+
+```ts
+import * as monacoLib from "monaco-editor/esm/vs/editor/editor.api.js"; // namespace, no languages
+import "monaco-editor/esm/vs/editor/editor.all.js";                     // all editor features, no languages
+```
+
+`editor.all.js` is exactly `editor.main` minus the language contributions (find, folding, comment, suggest, multicursor, … all present). We register SQL (custom Monarch), Python (inline Monarch), and YAML (via monaco-yaml's own worker) ourselves, so no built-in language service is needed. The `.js` extension is **required** for TS `bundler` resolution to find the sibling `.d.ts` (monaco's `exports` map is `"./*": "./*"`). All three Monaco value-importers (`monacoSetup.ts`, `SqlEditor.tsx`, `NotebookTab.tsx`) must use this path or Vite re-resolves the full barrel. Type-only importers that get the slim value passed in (e.g. `snowflakeSnippets.ts`) must also type against `editor.api.js`, else the full-barrel type is not assignable.
+
+**Critical:** dropping the basic-language contributions also drops their `languages.register({ id })` calls, so `ensureMonacoSetup` must register `sql` and `python` itself **before** calling `setMonarchTokensProvider` / `setLanguageConfiguration` — otherwise Monaco throws `Cannot set configuration for unknown language sql`, which crashes the editor (white screen in dev; a swallowed unhandled-rejection in the obfuscated prod build, where the editor silently loses SQL config). `yaml` is registered by monaco-yaml's `configureMonacoYaml`, so it is not registered manually.
+
+## Lazy-load heavy panels/modals to protect cold start
+
+`manualChunks` previously lumped **all** of `node_modules` into one eager `vendor` chunk, forcing on-demand-only libraries (xlsx, recharts + d3, xterm, @xyflow/@dagrejs) to load at boot. They are now split into `vendor-xlsx`/`vendor-xterm`/`vendor-viz` and reached only through `React.lazy` boundaries (terminal, notebook, and the chart / ER / task-graph / migration / dbt / function-catalog modals), plus a dynamic `import("xlsx")` for Excel export. When adding a feature that pulls a heavy dependency used only by a modal/panel, `React.lazy` it (wrap the render site in `<Suspense>`) and, if the dep is new, add it to `VIZ_DEPS` or its own `vendor-*` chunk so it stays out of the boot bundle.

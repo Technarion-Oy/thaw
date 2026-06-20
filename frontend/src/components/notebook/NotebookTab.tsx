@@ -24,7 +24,8 @@ import { CommandsRegistry } from "monaco-editor/esm/vs/platform/commands/common/
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
 import { ContextKeyExpr } from "monaco-editor/esm/vs/platform/contextkey/common/contextkey.js";
-import * as monacoLib from "monaco-editor";
+// Slim editor API only (no language services) — see monacoSetup.ts for why.
+import * as monacoLib from "monaco-editor/esm/vs/editor/editor.api.js";
 import { Button, Dropdown, Modal, Space, Spin, Tooltip, Typography, Select, message, Tag } from "antd";
 import type { MenuProps } from "antd";
 import {
