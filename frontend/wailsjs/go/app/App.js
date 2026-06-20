@@ -70,6 +70,10 @@ export function AlterNetworkRule(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterNetworkRule'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterPackagesPolicy(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterPackagesPolicy'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterPasswordPolicy(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterPasswordPolicy'](arg1, arg2, arg3, arg4);
 }
@@ -256,6 +260,10 @@ export function BuildCreateMaterializedViewSql(arg1, arg2, arg3) {
 
 export function BuildCreateNetworkRuleSql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateNetworkRuleSql'](arg1, arg2, arg3);
+}
+
+export function BuildCreatePackagesPolicySql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreatePackagesPolicySql'](arg1, arg2, arg3);
 }
 
 export function BuildCreatePasswordPolicySql(arg1, arg2, arg3) {
@@ -656,6 +664,10 @@ export function FindJoinPaths(arg1, arg2) {
 
 export function FormatAuthPolicyList(arg1) {
   return window['go']['app']['App']['FormatAuthPolicyList'](arg1);
+}
+
+export function FormatPackagesPolicyList(arg1) {
+  return window['go']['app']['App']['FormatPackagesPolicyList'](arg1);
 }
 
 export function FormatSecondaryRoles(arg1) {
@@ -1376,6 +1388,10 @@ export function ParseMFAPolicy(arg1) {
 
 export function ParsePATPolicy(arg1) {
   return window['go']['app']['App']['ParsePATPolicy'](arg1);
+}
+
+export function ParsePackagesPolicyList(arg1) {
+  return window['go']['app']['App']['ParsePackagesPolicyList'](arg1);
 }
 
 export function ParseSecondaryRoles(arg1) {

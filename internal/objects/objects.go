@@ -27,7 +27,7 @@ type ColumnComment struct {
 // BuildObjectPropertiesQuery returns the SHOW/DESCRIBE query that fetches the
 // metadata for a single Snowflake object. kind is one of: DATABASE, SCHEMA,
 // TABLE, VIEW, DYNAMIC TABLE, EXTERNAL TABLE, ICEBERG TABLE, HYBRID TABLE, EVENT TABLE, MATERIALIZED VIEW, ALERT, TAG,
-// MASKING POLICY, ROW ACCESS POLICY, PASSWORD POLICY, SESSION POLICY, AGGREGATION POLICY, PROJECTION POLICY, AUTHENTICATION POLICY, NETWORK RULE, IMAGE REPOSITORY, SERVICE, STREAMLIT, FUNCTION, EXTERNAL FUNCTION, DATA METRIC FUNCTION, PROCEDURE, SEQUENCE, STAGE, STREAM,
+// MASKING POLICY, ROW ACCESS POLICY, PASSWORD POLICY, SESSION POLICY, AGGREGATION POLICY, PROJECTION POLICY, AUTHENTICATION POLICY, PACKAGES POLICY, NETWORK RULE, IMAGE REPOSITORY, SERVICE, STREAMLIT, FUNCTION, EXTERNAL FUNCTION, DATA METRIC FUNCTION, PROCEDURE, SEQUENCE, STAGE, STREAM,
 // TASK, FILE FORMAT, PIPE, SECRET, GIT REPOSITORY, DBT PROJECT, WAREHOUSE, ROLE,
 // USER.
 func BuildObjectPropertiesQuery(database, schema, kind, name string) (string, error) {
@@ -67,6 +67,8 @@ func BuildObjectPropertiesQuery(database, schema, kind, name string) (string, er
 		return fmt.Sprintf("SHOW PROJECTION POLICIES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
 	case "AUTHENTICATION POLICY":
 		return fmt.Sprintf("SHOW AUTHENTICATION POLICIES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
+	case "PACKAGES POLICY":
+		return fmt.Sprintf("SHOW PACKAGES POLICIES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
 	case "NETWORK RULE":
 		return fmt.Sprintf("SHOW NETWORK RULES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)), nil
 	case "IMAGE REPOSITORY":
@@ -160,6 +162,76 @@ func BuildDescribeProjectionPolicyQuery(database, schema, name string) string {
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
 }
 
+// BuildDescribePackagesPolicyQuery returns the DESCRIBE PACKAGES POLICY query
+// used to enrich the SHOW PACKAGES POLICIES result with the policy's language,
+// allowlist, blocklist, and additional_creation_blocklist — none of which SHOW
+// PACKAGES POLICIES reports (it returns only metadata).
+func BuildDescribePackagesPolicyQuery(database, schema, name string) string {
+	return fmt.Sprintf("DESCRIBE PACKAGES POLICY %s.%s.%s",
+		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
+}
+
+// appendPackagesPolicyDesc appends the language and allow/block-list properties
+// from a DESCRIBE PACKAGES POLICY result to pairs. SHOW PACKAGES POLICIES reports
+// only metadata, so DESCRIBE is the only source for these. It handles both shapes
+// DESCRIBE may use, defensively (the exact shape isn't pinned by an integration
+// test): a row-per-property table (columns "property"/"value", like DESCRIBE
+// PASSWORD POLICY) or a single row whose columns are the property names (like
+// DESCRIBE MASKING POLICY). Only the four configuration properties are appended
+// (keys lowercased to match how the modal looks them up); everything else is left
+// to the generic SHOW pairs. A SQL NULL cell becomes an empty string rather than
+// the literal "<nil>". A nil/empty result appends nothing.
+func appendPackagesPolicyDesc(pairs []snowflake.PropertyPair, descRes *snowflake.QueryResult) []snowflake.PropertyPair {
+	if descRes == nil || len(descRes.Rows) == 0 {
+		return pairs
+	}
+	wanted := map[string]bool{
+		"language":                      true,
+		"allowlist":                     true,
+		"blocklist":                     true,
+		"additional_creation_blocklist": true,
+	}
+	cell := func(v any) string {
+		if v == nil {
+			return ""
+		}
+		return fmt.Sprintf("%v", v)
+	}
+	propIdx, valIdx := -1, -1
+	for ci, col := range descRes.Columns {
+		switch strings.ToLower(col) {
+		case "property":
+			propIdx = ci
+		case "value":
+			valIdx = ci
+		}
+	}
+	if propIdx >= 0 && valIdx >= 0 {
+		// Row-per-property shape.
+		for _, row := range descRes.Rows {
+			if propIdx >= len(row) || valIdx >= len(row) {
+				continue
+			}
+			key := strings.ToLower(strings.TrimSpace(cell(row[propIdx])))
+			if wanted[key] {
+				pairs = append(pairs, snowflake.PropertyPair{Key: key, Value: cell(row[valIdx])})
+			}
+		}
+		return pairs
+	}
+	// Single-row-with-columns shape.
+	row := descRes.Rows[0]
+	for ci, col := range descRes.Columns {
+		if ci >= len(row) {
+			break
+		}
+		if wanted[strings.ToLower(col)] {
+			pairs = append(pairs, snowflake.PropertyPair{Key: strings.ToLower(col), Value: cell(row[ci])})
+		}
+	}
+	return pairs
+}
+
 // BuildDescribeNetworkRuleQuery returns the DESCRIBE NETWORK RULE query used to
 // enrich the SHOW NETWORK RULES result with the rule's value_list — which SHOW
 // NETWORK RULES reports only as a count (entries_in_valuelist), not the actual
@@ -190,7 +262,8 @@ func BuildDescribeStreamlitQuery(database, schema, name string) string {
 // key/value pairs. For STAGE objects it also appends DESCRIBE STAGE properties;
 // for MASKING POLICY, ROW ACCESS POLICY, AGGREGATION POLICY, and PROJECTION
 // POLICY objects it
-// appends the DESCRIBE signature, return type, and body; for NETWORK RULE objects it appends the
+// appends the DESCRIBE signature, return type, and body; for PACKAGES POLICY
+// objects it appends the DESCRIBE language and allow/block lists; for NETWORK RULE objects it appends the
 // DESCRIBE NETWORK RULE value_list; for SERVICE objects the DESCRIBE SERVICE spec
 // and dns_name; for STREAMLIT objects the DESCRIBE STREAMLIT root_location and
 // main_file.
@@ -307,6 +380,13 @@ func GetObjectProperties(ctx context.Context, client *snowflake.Client, database
 					pairs = append(pairs, snowflake.PropertyPair{Key: col, Value: val})
 				}
 			}
+		}
+	}
+
+	if strings.ToUpper(kind) == "PACKAGES POLICY" {
+		descRes, err := client.Execute(ctx, BuildDescribePackagesPolicyQuery(database, schema, name))
+		if err == nil {
+			pairs = appendPackagesPolicyDesc(pairs, descRes)
 		}
 	}
 

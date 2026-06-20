@@ -391,6 +391,115 @@ func TestParseSqlList(t *testing.T) {
 	}
 }
 
+func TestParseSqlListVerbatim(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want []string
+	}{
+		{"sql tuple of quoted literals", "('numpy', 'pandas==2.*')", []string{"numpy", "pandas==2.*"}},
+		{"json array of quoted strings", `["numpy", "scipy>=1.0"]`, []string{"numpy", "scipy>=1.0"}},
+		// The key difference vs ParseSqlList: operators inside a BARE element survive.
+		{"bare bracketed compound element", "[numpy==1.26.4, pandas]", []string{"numpy==1.26.4", "pandas"}},
+		{"bare comma list", "numpy==1.26.4, pandas", []string{"numpy==1.26.4", "pandas"}},
+		{"bare wildcard", "(*)", []string{"*"}},
+		{"quoted wildcard", "('*')", []string{"*"}},
+		{"newline-pretty array", "[\n  \"numpy\",\n  \"scipy>=1.0\"\n]", []string{"numpy", "scipy>=1.0"}},
+		{"escaped single quote", "('it''s')", []string{"it's"}},
+		{"comma inside quoted literal is kept", "('a,b', 'c')", []string{"a,b", "c"}},
+		{"nested parens don't split", "(foo(1, 2), bar)", []string{"foo(1, 2)", "bar"}},
+		{"bare single token", "numpy", []string{"numpy"}},
+		{"empty cell", "", nil},
+		{"empty brackets", "[]", nil},
+		{"empty parens", "()", nil},
+		{"null cell", "null", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseSqlListVerbatim(tt.raw)
+			if len(got) != len(tt.want) {
+				t.Fatalf("ParseSqlListVerbatim(%q) = %#v, want %#v", tt.raw, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("ParseSqlListVerbatim(%q)[%d] = %q, want %q", tt.raw, i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestFormatStringLitList(t *testing.T) {
+	tests := []struct {
+		name   string
+		tokens []string
+		want   string
+	}{
+		{"two tokens", []string{"PASSWORD", "SAML"}, "('PASSWORD', 'SAML')"},
+		{"blanks skipped", []string{"numpy", "", "  ", "pandas"}, "('numpy', 'pandas')"},
+		{"all blank yields empty list", []string{"", "   "}, "()"},
+		{"nil yields empty list", nil, "()"},
+		{"single-quote escaped", []string{"it's"}, "('it''s')"},
+		{"backslash escaped", []string{`a\b`}, `('a\\b')`},
+		{"version specifier kept verbatim", []string{"numpy==1.26.4"}, "('numpy==1.26.4')"},
+		{"wildcard kept", []string{"*"}, "('*')"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := FormatStringLitList(tt.tokens); got != tt.want {
+				t.Errorf("FormatStringLitList(%v) = %q, want %q", tt.tokens, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestFormatStringLitListParseRoundTrip locks in that anything FormatStringLitList
+// emits is recovered intact by ParseSqlList — the modal path (build a SET list,
+// read it back from DESCRIBE) relies on this. The wildcard and version-specifier
+// cases matter most: because FormatStringLitList always single-quotes its tokens,
+// even a bare "*" survives (a *bare*, unquoted "(*)" would be dropped by the
+// tokenizer, but neither the builder nor Snowflake's DESCRIBE ever produces that).
+func TestFormatStringLitListParseRoundTrip(t *testing.T) {
+	// Note: backslashes are intentionally excluded — FormatStringLitList doubles
+	// them (EscapeTextLit) but ParseSqlList does not un-double, an asymmetry that
+	// never bites in practice (package specs, auth methods, and integration names
+	// contain no backslashes). Single-quotes do round-trip.
+	cases := [][]string{
+		{"*"},
+		{"numpy", "pandas==2.*", "scipy>=1.0"},
+		{"it's"},
+	}
+	for _, tokens := range cases {
+		got := ParseSqlList(FormatStringLitList(tokens))
+		if len(got) != len(tokens) {
+			t.Fatalf("round-trip of %v = %v (len mismatch)", tokens, got)
+		}
+		for i := range tokens {
+			if got[i] != tokens[i] {
+				t.Errorf("round-trip of %v: [%d] = %q, want %q", tokens, i, got[i], tokens[i])
+			}
+		}
+	}
+}
+
+func TestHasNonBlankToken(t *testing.T) {
+	tests := []struct {
+		tokens []string
+		want   bool
+	}{
+		{nil, false},
+		{[]string{}, false},
+		{[]string{"", "   "}, false},
+		{[]string{"", "x"}, true},
+		{[]string{"numpy"}, true},
+	}
+	for _, tt := range tests {
+		if got := HasNonBlankToken(tt.tokens); got != tt.want {
+			t.Errorf("HasNonBlankToken(%v) = %v, want %v", tt.tokens, got, tt.want)
+		}
+	}
+}
+
 func TestNormalizeScalar(t *testing.T) {
 	tests := []struct{ raw, want string }{
 		{"[OPTIONAL]", "OPTIONAL"},

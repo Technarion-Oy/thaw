@@ -22,6 +22,7 @@ import {imagerepository} from '../models';
 import {maskingpolicy} from '../models';
 import {materializedview} from '../models';
 import {networkrule} from '../models';
+import {packagespolicy} from '../models';
 import {passwordpolicy} from '../models';
 import {pipe} from '../models';
 import {projectionpolicy} from '../models';
@@ -86,6 +87,8 @@ export function AlterMaskingPolicy(arg1:string,arg2:string,arg3:string,arg4:stri
 export function AlterMaterializedView(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterNetworkRule(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterPackagesPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterPasswordPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -180,6 +183,8 @@ export function BuildCreateMaskingPolicySql(arg1:string,arg2:string,arg3:masking
 export function BuildCreateMaterializedViewSql(arg1:string,arg2:string,arg3:materializedview.MaterializedViewConfig):Promise<string>;
 
 export function BuildCreateNetworkRuleSql(arg1:string,arg2:string,arg3:networkrule.NetworkRuleConfig):Promise<string>;
+
+export function BuildCreatePackagesPolicySql(arg1:string,arg2:string,arg3:packagespolicy.PackagesPolicyConfig):Promise<string>;
 
 export function BuildCreatePasswordPolicySql(arg1:string,arg2:string,arg3:passwordpolicy.PasswordPolicyConfig):Promise<string>;
 
@@ -380,6 +385,8 @@ export function FetchNotebookContent(arg1:string,arg2:string,arg3:string):Promis
 export function FindJoinPaths(arg1:Array<erdesigner.TableRef>,arg2:Array<snowflake.ERForeignKey>):Promise<Array<erdesigner.JoinPath>>;
 
 export function FormatAuthPolicyList(arg1:Array<string>):Promise<string>;
+
+export function FormatPackagesPolicyList(arg1:Array<string>):Promise<string>;
 
 export function FormatSecondaryRoles(arg1:Array<string>):Promise<string>;
 
@@ -740,6 +747,8 @@ export function ParseClientPolicy(arg1:string):Promise<authenticationpolicy.Clie
 export function ParseMFAPolicy(arg1:string):Promise<authenticationpolicy.MFAPolicy>;
 
 export function ParsePATPolicy(arg1:string):Promise<authenticationpolicy.PATPolicy>;
+
+export function ParsePackagesPolicyList(arg1:string):Promise<Array<string>>;
 
 export function ParseSecondaryRoles(arg1:string):Promise<Array<string>>;
 

@@ -3277,7 +3277,7 @@ func (c *Client) ListBasicObjects(ctx context.Context, database, schema string) 
 // ICEBERG TABLE, HYBRID TABLE, EVENT TABLE,
 // MATERIALIZED VIEW, ALERT, TAG, MASKING POLICY, ROW ACCESS POLICY,
 // PASSWORD POLICY, SESSION POLICY, AGGREGATION POLICY, PROJECTION POLICY,
-// AUTHENTICATION POLICY, NETWORK
+// AUTHENTICATION POLICY, PACKAGES POLICY, NETWORK
 // RULE, IMAGE REPOSITORY, SERVICE, STREAMLIT, PROCEDURE, FUNCTION,
 // EXTERNAL FUNCTION, DATA METRIC FUNCTION, TASK, STREAM, STAGE, FILE FORMAT,
 // PIPE, NOTEBOOK, SECRET, GIT REPOSITORY, DBT PROJECT). Individual commands that
@@ -3306,6 +3306,7 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 		{fmt.Sprintf("SHOW AGGREGATION POLICIES IN SCHEMA %s", q), "AGGREGATION POLICY"},
 		{fmt.Sprintf("SHOW PROJECTION POLICIES IN SCHEMA %s", q), "PROJECTION POLICY"},
 		{fmt.Sprintf("SHOW AUTHENTICATION POLICIES IN SCHEMA %s", q), "AUTHENTICATION POLICY"},
+		{fmt.Sprintf("SHOW PACKAGES POLICIES IN SCHEMA %s", q), "PACKAGES POLICY"},
 		{fmt.Sprintf("SHOW NETWORK RULES IN SCHEMA %s", q), "NETWORK RULE"},
 		{fmt.Sprintf("SHOW IMAGE REPOSITORIES IN SCHEMA %s", q), "IMAGE REPOSITORY"},
 		{fmt.Sprintf("SHOW SERVICES IN SCHEMA %s", q), "SERVICE"},
@@ -3731,6 +3732,17 @@ func (c *Client) ListFileFormats(ctx context.Context, database, schema string) (
 // parameter type list (e.g. "NUMBER, VARCHAR") so that Snowflake can resolve
 // the correct overload. Pass an empty string for all other object kinds.
 func (c *Client) GetObjectDDL(ctx context.Context, database, schema, kind, name, arguments string) (string, error) {
+	// GET_DDL has no object type for these kinds: buildGetDDLQuery would fall
+	// through to ddlKind := kind and emit an invalid GET_DDL('<kind>', …). They
+	// are already excluded at every frontend entry point (hover DDL, View
+	// Definition, comparison); guard here too so a future caller can't trip the
+	// invalid query (a packages-policy GET_DDL fails with "Cannot initialize
+	// Snowflake Metadata. Dictionary unavailable").
+	switch strings.ToUpper(strings.TrimSpace(kind)) {
+	case "IMAGE REPOSITORY", "SERVICE", "PACKAGES POLICY":
+		return "", fmt.Errorf("GET_DDL does not support %s objects", kind)
+	}
+
 	query, identifier := buildGetDDLQuery(database, schema, kind, name, arguments)
 
 	row := c.queryRowCtx(ctx, query)
@@ -3793,9 +3805,14 @@ func buildGetDDLQuery(database, schema, kind, name, arguments string) (query, id
 		// interchangeable and materialized views are retrieved via 'VIEW'.
 		ddlKind = "VIEW"
 	case "MASKING POLICY", "ROW ACCESS POLICY", "PASSWORD POLICY", "SESSION POLICY", "AGGREGATION POLICY", "PROJECTION POLICY", "AUTHENTICATION POLICY":
-		// GET_DDL exposes a single 'POLICY' object type covering all policy
+		// GET_DDL exposes a single 'POLICY' object type covering most policy
 		// kinds (masking, row access, password, session, aggregation, projection,
-		// authentication, etc.), not a per-kind type.
+		// authentication, etc.), not a per-kind type. NOTE: packages policies are
+		// deliberately NOT here — GET_DDL supports neither the 'POLICY' nor a
+		// 'PACKAGES POLICY' object type for them (the call fails with "Cannot
+		// initialize Snowflake Metadata. Dictionary unavailable"), so packages
+		// policies have no GET_DDL mapping at all, handled like image repositories
+		// and services.
 		ddlKind = "POLICY"
 	case "NETWORK RULE":
 		ddlKind = "NETWORK_RULE"

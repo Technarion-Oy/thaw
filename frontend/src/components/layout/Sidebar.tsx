@@ -64,6 +64,7 @@ import {
   GroupOutlined,
   ColumnWidthOutlined,
   LoginOutlined,
+  CodeSandboxOutlined,
   GlobalOutlined,
   ContainerOutlined,
   DeploymentUnitOutlined,
@@ -159,6 +160,8 @@ import CreateProjectionPolicyModal from "../projectionpolicy/CreateProjectionPol
 import ProjectionPolicyPropertiesModal from "../projectionpolicy/ProjectionPolicyPropertiesModal";
 import CreateAuthenticationPolicyModal from "../authenticationpolicy/CreateAuthenticationPolicyModal";
 import AuthenticationPolicyPropertiesModal from "../authenticationpolicy/AuthenticationPolicyPropertiesModal";
+import CreatePackagesPolicyModal from "../packagespolicy/CreatePackagesPolicyModal";
+import PackagesPolicyPropertiesModal from "../packagespolicy/PackagesPolicyPropertiesModal";
 import CreateRowAccessPolicyModal from "../rowaccesspolicy/CreateRowAccessPolicyModal";
 import RowAccessPolicyPropertiesModal from "../rowaccesspolicy/RowAccessPolicyPropertiesModal";
 import CreateNetworkRuleModal from "../networkrule/CreateNetworkRuleModal";
@@ -203,6 +206,7 @@ const KIND_LABEL: Record<string, string> = {
   "AGGREGATION POLICY": "Aggregation Policies",
   "PROJECTION POLICY": "Projection Policies",
   "AUTHENTICATION POLICY": "Authentication Policies",
+  "PACKAGES POLICY": "Packages Policies",
   "NETWORK RULE": "Network Rules",
   "IMAGE REPOSITORY": "Image Repositories",
   SERVICE:       "Services",
@@ -223,7 +227,7 @@ const KIND_LABEL: Record<string, string> = {
   "DBT PROJECT": "DBT Projects",
 };
 
-const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE", "FUNCTION", "EXTERNAL FUNCTION", "DATA METRIC FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "PASSWORD POLICY", "SESSION POLICY", "AGGREGATION POLICY", "PROJECTION POLICY", "AUTHENTICATION POLICY", "NETWORK RULE", "IMAGE REPOSITORY", "SERVICE", "STREAMLIT", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT"];
+const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE", "FUNCTION", "EXTERNAL FUNCTION", "DATA METRIC FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "PASSWORD POLICY", "SESSION POLICY", "AGGREGATION POLICY", "PROJECTION POLICY", "AUTHENTICATION POLICY", "PACKAGES POLICY", "NETWORK RULE", "IMAGE REPOSITORY", "SERVICE", "STREAMLIT", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT"];
 
 const kindIcon = (kind: string) => objectIcon(kind);
 
@@ -489,11 +493,11 @@ function ObjTooltip({ cacheKey, db, schema, kind, name, args, children }: {
 
   const onOpenChange = (open: boolean) => {
     if (!open || loading) return;
-    // GET_DDL does not support image repositories or services, so the call would
-    // always fail and emit gosnowflake driver error-log noise on every hover.
-    // Skip the fetch entirely — with content left null the tooltip simply
-    // doesn't show.
-    if (kind === "IMAGE REPOSITORY" || kind === "SERVICE") return;
+    // GET_DDL does not support image repositories, services, or packages
+    // policies, so the call would always fail and emit gosnowflake driver
+    // error-log noise on every hover. Skip the fetch entirely — with content
+    // left null the tooltip simply doesn't show.
+    if (kind === "IMAGE REPOSITORY" || kind === "SERVICE" || kind === "PACKAGES POLICY") return;
     const fresh = getCached();
     if (fresh !== null) {
       if (content !== fresh) setContent(fresh);
@@ -672,6 +676,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [projectionPolicyPropsModal, setProjectionPolicyPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createAuthenticationPolicyModal, setCreateAuthenticationPolicyModal] = useState<{ db: string; schema: string } | null>(null);
   const [authenticationPolicyPropsModal, setAuthenticationPolicyPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [createPackagesPolicyModal, setCreatePackagesPolicyModal] = useState<{ db: string; schema: string } | null>(null);
+  const [packagesPolicyPropsModal, setPackagesPolicyPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createRowAccessPolicyModal, setCreateRowAccessPolicyModal] = useState<{ db: string; schema: string } | null>(null);
   const [rowAccessPolicyPropsModal, setRowAccessPolicyPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createNetworkRuleModal, setCreateNetworkRuleModal] = useState<{ db: string; schema: string } | null>(null);
@@ -2351,6 +2357,25 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setAuthenticationPolicyPropsModal({ db, schema, name });
   };
 
+  const openCreatePackagesPolicy = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    setCtxMenu(null);
+    setCreatePackagesPolicyModal({ db, schema });
+  };
+
+  const openPackagesPolicyProperties = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    setPackagesPolicyPropsModal({ db, schema, name });
+  };
+
   const openCreateRowAccessPolicy = () => {
     if (!ctxMenu) return;
     const parts = ctxMenu.nodeKey.split(":");
@@ -2845,6 +2870,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       case "AGGREGATION POLICY": sql = `DROP AGGREGATION POLICY ${fullName};`; break;
       case "PROJECTION POLICY": sql = `DROP PROJECTION POLICY ${fullName};`; break;
       case "AUTHENTICATION POLICY": sql = `DROP AUTHENTICATION POLICY ${fullName};`; break;
+      case "PACKAGES POLICY": sql = `DROP PACKAGES POLICY ${fullName};`; break;
       case "NETWORK RULE": sql = `DROP NETWORK RULE ${fullName};`; break;
       case "IMAGE REPOSITORY": sql = `DROP IMAGE REPOSITORY ${fullName};`; break;
       case "SERVICE":     sql = `DROP SERVICE ${fullName};`; break;
@@ -3504,6 +3530,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         case "AGGREGATION POLICY": return `DROP AGGREGATION POLICY ${fullName};`;
         case "PROJECTION POLICY": return `DROP PROJECTION POLICY ${fullName};`;
         case "AUTHENTICATION POLICY": return `DROP AUTHENTICATION POLICY ${fullName};`;
+        case "PACKAGES POLICY": return `DROP PACKAGES POLICY ${fullName};`;
         case "NETWORK RULE": return `DROP NETWORK RULE ${fullName};`;
         case "IMAGE REPOSITORY": return `DROP IMAGE REPOSITORY ${fullName};`;
         case "SERVICE":     return `DROP SERVICE ${fullName};`;
@@ -4044,6 +4071,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                   {menuItem("Aggregation Policy…", <GroupOutlined style={{ fontSize: 12 }} />, openCreateAggregationPolicy)}
                   {menuItem("Projection Policy…", <ColumnWidthOutlined style={{ fontSize: 12 }} />, openCreateProjectionPolicy)}
                   {menuItem("Authentication Policy…", <LoginOutlined style={{ fontSize: 12 }} />, openCreateAuthenticationPolicy)}
+                  {menuItem("Packages Policy…", <CodeSandboxOutlined style={{ fontSize: 12 }} />, openCreatePackagesPolicy)}
                   {menuItem("Network Rule…", <GlobalOutlined style={{ fontSize: 12 }} />, openCreateNetworkRule)}
                   {menuItem("Tag…", <TagsOutlined style={{ fontSize: 12 }} />, openCreateTag)}
                   {menuItem("Secret…", <KeyOutlined style={{ fontSize: 12 }} />, openCreateSecret)}
@@ -4110,6 +4138,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Create Projection Policy…", <ColumnWidthOutlined style={{ fontSize: 12 }} />, openCreateProjectionPolicy)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "AUTHENTICATION POLICY" &&
             menuItem("Create Authentication Policy…", <LoginOutlined style={{ fontSize: 12 }} />, openCreateAuthenticationPolicy)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "PACKAGES POLICY" &&
+            menuItem("Create Packages Policy…", <CodeSandboxOutlined style={{ fontSize: 12 }} />, openCreatePackagesPolicy)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "NETWORK RULE" &&
             menuItem("Create Network Rule…", <GlobalOutlined style={{ fontSize: 12 }} />, openCreateNetworkRule)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "IMAGE REPOSITORY" &&
@@ -4192,6 +4222,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openProjectionPolicyProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "AUTHENTICATION POLICY" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openAuthenticationPolicyProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PACKAGES POLICY" &&
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openPackagesPolicyProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "NETWORK RULE" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openNetworkRuleProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "IMAGE REPOSITORY" &&
@@ -4302,19 +4334,19 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "NOTEBOOK" &&
             menuItem("Make Live", <CloudUploadOutlined style={{ fontSize: 12 }} />, makeNotebookLive, undefined, !featureFlags.snowparkNotebooks, "Snowpark & Notebooks is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && menuItem("View Definition", null, viewDefinition)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ICEBERG TABLE" && ctxMenu.objKind !== "HYBRID TABLE" && ctxMenu.objKind !== "EVENT TABLE" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "PASSWORD POLICY" && ctxMenu.objKind !== "SESSION POLICY" && ctxMenu.objKind !== "AGGREGATION POLICY" && ctxMenu.objKind !== "PROJECTION POLICY" && ctxMenu.objKind !== "AUTHENTICATION POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "STREAMLIT" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
-          {/* Comparison diffs via GET_DDL, which image repositories and services
-              don't support — exclude them so the diff view can't surface a
-              GET_DDL error for a kind that has no DDL. */}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" &&
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" && menuItem("View Definition", null, viewDefinition)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ICEBERG TABLE" && ctxMenu.objKind !== "HYBRID TABLE" && ctxMenu.objKind !== "EVENT TABLE" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "PASSWORD POLICY" && ctxMenu.objKind !== "SESSION POLICY" && ctxMenu.objKind !== "AGGREGATION POLICY" && ctxMenu.objKind !== "PROJECTION POLICY" && ctxMenu.objKind !== "AUTHENTICATION POLICY" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "STREAMLIT" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
+          {/* Comparison diffs via GET_DDL, which image repositories, services,
+              and packages policies don't support — exclude them so the diff view
+              can't surface a GET_DDL error for a kind that has no DDL. */}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" &&
             menuItem("Select for Comparison", <DiffOutlined style={{ fontSize: 12 }} />, selectObjForComparison)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && pendingDiff !== null &&
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" && pendingDiff !== null &&
             menuItem(`Compare with: ${pendingDiff.label}`, <DiffOutlined style={{ fontSize: 12, color: "var(--accent)" }} />, compareObjWith)}
           {ctxMenu.nodeType === "obj" &&
             (ctxMenu.objKind === "VIEW" || ctxMenu.objKind === "PROCEDURE" || ctxMenu.objKind === "FUNCTION" || ctxMenu.objKind === "EXTERNAL FUNCTION") &&
             menuItem("View Dependencies…", <ShareAltOutlined style={{ fontSize: 12 }} />, viewDependencies)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" &&
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" &&
             menuItem("Rename…", <EditOutlined style={{ fontSize: 12 }} />, renameObject)}
           {ctxMenu.nodeType === "obj" && <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />}
           {ctxMenu.nodeType === "obj" && menuItem("Delete…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, deleteObject, "#f85149")}
@@ -4843,6 +4875,24 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={authenticationPolicyPropsModal.schema}
           name={authenticationPolicyPropsModal.name}
           onClose={() => setAuthenticationPolicyPropsModal(null)}
+        />
+      )}
+
+      {createPackagesPolicyModal && (
+        <CreatePackagesPolicyModal
+          db={createPackagesPolicyModal.db}
+          schema={createPackagesPolicyModal.schema}
+          onClose={() => setCreatePackagesPolicyModal(null)}
+          onSuccess={() => refreshDatabaseByName(createPackagesPolicyModal.db, { schema: createPackagesPolicyModal.schema, kind: "PACKAGES POLICY" })}
+        />
+      )}
+
+      {packagesPolicyPropsModal && (
+        <PackagesPolicyPropertiesModal
+          db={packagesPolicyPropsModal.db}
+          schema={packagesPolicyPropsModal.schema}
+          name={packagesPolicyPropsModal.name}
+          onClose={() => setPackagesPolicyPropsModal(null)}
         />
       )}
 
