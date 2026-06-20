@@ -1255,7 +1255,13 @@ func (c *Client) ListGitRepoEntries(ctx context.Context, database, schema, repoN
 func (c *Client) ListStageEntries(ctx context.Context, database, schema, stageName, dirPath string) ([]StageEntry, error) {
 	dirPath = normalizeDirPath(dirPath)
 
-	sql := fmt.Sprintf(`LIST @%s/%s`, Qualify(database, schema, stageName), dirPath)
+	// The user stage (@~) is implicit and not database/schema-scoped, so it must
+	// not be qualified; every other (named) stage is @database.schema.name.
+	ref := Qualify(database, schema, stageName)
+	if stageName == "~" {
+		ref = "~"
+	}
+	sql := fmt.Sprintf(`LIST @%s/%s`, ref, dirPath)
 
 	res, err := c.Execute(ctx, sql)
 	if err != nil {
@@ -1300,6 +1306,41 @@ func (c *Client) ListStages(ctx context.Context, database, schema string) ([]Sta
 		}
 	}
 	return stages, nil
+}
+
+// ListModels runs SHOW MODELS IN ACCOUNT and returns each model as a
+// fully-qualified, quoted identifier (e.g. "DB"."SCHEMA"."NAME"), so a picker can
+// offer every model the current role can see as a copy source for CREATE MODEL or
+// ALTER MODEL … ADD VERSION. Models the role cannot access are simply absent.
+func (c *Client) ListModels(ctx context.Context) ([]string, error) {
+	res, err := c.Execute(ctx, "SHOW MODELS IN ACCOUNT")
+	if err != nil {
+		return nil, err
+	}
+
+	// SHOW MODELS columns: created_on, name, model_type, database_name,
+	// schema_name, owner, comment, versions, default_version_name, aliases.
+	nameIdx := ColIdx(res.Columns, "name")
+	dbIdx := ColIdx(res.Columns, "database_name")
+	scIdx := ColIdx(res.Columns, "schema_name")
+
+	out := make([]string, 0, len(res.Rows))
+	for _, row := range res.Rows {
+		name := Cell(row, nameIdx)
+		if name == "" {
+			continue
+		}
+		parts := make([]string, 0, 3)
+		if db := Cell(row, dbIdx); db != "" {
+			parts = append(parts, QuoteIdent(db))
+		}
+		if sc := Cell(row, scIdx); sc != "" {
+			parts = append(parts, QuoteIdent(sc))
+		}
+		parts = append(parts, QuoteIdent(name))
+		out = append(out, strings.Join(parts, "."))
+	}
+	return out, nil
 }
 
 // DbtProjectVersion represents a version of a Snowflake-native DBT PROJECT.
@@ -3153,7 +3194,7 @@ func (c *Client) ListBasicObjects(ctx context.Context, database, schema string) 
 // AUTHENTICATION POLICY, PACKAGES POLICY, NETWORK
 // RULE, IMAGE REPOSITORY, SERVICE, STREAMLIT, PROCEDURE, FUNCTION,
 // EXTERNAL FUNCTION, DATA METRIC FUNCTION, TASK, STREAM, STAGE, FILE FORMAT,
-// PIPE, NOTEBOOK, SECRET, GIT REPOSITORY, DBT PROJECT). Individual commands that
+// PIPE, NOTEBOOK, SECRET, GIT REPOSITORY, DBT PROJECT, MODEL). Individual commands that
 // fail (e.g. due to missing privileges) are silently skipped. Includes the TASK
 // finalize enrichment logic.
 func (c *Client) ListExtendedObjects(ctx context.Context, database, schema string) ([]SnowflakeObject, error) {
@@ -3197,6 +3238,7 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 		{fmt.Sprintf("SHOW SECRETS IN SCHEMA %s", q), "SECRET"},
 		{fmt.Sprintf("SHOW GIT REPOSITORIES IN SCHEMA %s", q), "GIT REPOSITORY"},
 		{fmt.Sprintf("SHOW DBT PROJECTS IN SCHEMA %s", q), "DBT PROJECT"},
+		{fmt.Sprintf("SHOW MODELS IN SCHEMA %s", q), "MODEL"},
 	}
 
 	// Filter out disabled object kinds (set via SetExcludedExtendedKinds).
@@ -3612,7 +3654,7 @@ func (c *Client) GetObjectDDL(ctx context.Context, database, schema, kind, name,
 	// invalid query (a packages-policy GET_DDL fails with "Cannot initialize
 	// Snowflake Metadata. Dictionary unavailable").
 	switch strings.ToUpper(strings.TrimSpace(kind)) {
-	case "IMAGE REPOSITORY", "SERVICE", "PACKAGES POLICY":
+	case "IMAGE REPOSITORY", "SERVICE", "PACKAGES POLICY", "MODEL":
 		return "", fmt.Errorf("GET_DDL does not support %s objects", kind)
 	}
 

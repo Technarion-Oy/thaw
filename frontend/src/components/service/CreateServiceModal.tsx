@@ -20,7 +20,7 @@ import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
-import StageFilePicker from "./StageFilePicker";
+import StageFilePicker from "../shared/StageFilePicker";
 import type { service as svcModels } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -206,6 +206,7 @@ export default function CreateServiceModal({ db, schema, onClose, onSuccess }: P
               <StageFilePicker
                 db={db}
                 schema={schema}
+                label="Browse internal stage — select the specification file"
                 onPick={(stage, file) => setCfg((prev) => ({ ...prev, specStage: stage, specFile: file }))}
               />
             </Form.Item>

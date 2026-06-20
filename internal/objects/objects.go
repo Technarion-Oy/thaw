@@ -28,7 +28,7 @@ type ColumnComment struct {
 // metadata for a single Snowflake object. kind is one of: DATABASE, SCHEMA,
 // TABLE, VIEW, DYNAMIC TABLE, EXTERNAL TABLE, ICEBERG TABLE, HYBRID TABLE, EVENT TABLE, MATERIALIZED VIEW, ALERT, TAG,
 // MASKING POLICY, ROW ACCESS POLICY, PASSWORD POLICY, SESSION POLICY, AGGREGATION POLICY, PROJECTION POLICY, AUTHENTICATION POLICY, PACKAGES POLICY, NETWORK RULE, IMAGE REPOSITORY, SERVICE, STREAMLIT, FUNCTION, EXTERNAL FUNCTION, DATA METRIC FUNCTION, PROCEDURE, SEQUENCE, STAGE, STREAM,
-// TASK, FILE FORMAT, PIPE, SECRET, GIT REPOSITORY, DBT PROJECT, WAREHOUSE, ROLE,
+// TASK, FILE FORMAT, PIPE, SECRET, GIT REPOSITORY, DBT PROJECT, MODEL, WAREHOUSE, ROLE,
 // USER.
 func BuildObjectPropertiesQuery(database, schema, kind, name string) (string, error) {
 	like := strings.ReplaceAll(name, `\`, `\\`)
@@ -109,6 +109,8 @@ func BuildObjectPropertiesQuery(database, schema, kind, name string) (string, er
 		return fmt.Sprintf("SHOW GIT REPOSITORIES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "DBT PROJECT":
 		return fmt.Sprintf("SHOW DBT PROJECTS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
+	case "MODEL":
+		return fmt.Sprintf("SHOW MODELS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "WAREHOUSE":
 		return fmt.Sprintf("SHOW WAREHOUSES LIKE '%s'", like), nil
 	case "ROLE":

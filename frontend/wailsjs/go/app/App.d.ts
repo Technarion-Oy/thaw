@@ -21,6 +21,7 @@ import {icebergtable} from '../models';
 import {imagerepository} from '../models';
 import {maskingpolicy} from '../models';
 import {materializedview} from '../models';
+import {model} from '../models';
 import {networkrule} from '../models';
 import {packagespolicy} from '../models';
 import {passwordpolicy} from '../models';
@@ -85,6 +86,8 @@ export function AlterImageRepository(arg1:string,arg2:string,arg3:string,arg4:st
 export function AlterMaskingPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterMaterializedView(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterModel(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterNetworkRule(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -181,6 +184,8 @@ export function BuildCreateImageRepositorySql(arg1:string,arg2:string,arg3:image
 export function BuildCreateMaskingPolicySql(arg1:string,arg2:string,arg3:maskingpolicy.MaskingPolicyConfig):Promise<string>;
 
 export function BuildCreateMaterializedViewSql(arg1:string,arg2:string,arg3:materializedview.MaterializedViewConfig):Promise<string>;
+
+export function BuildCreateModelSql(arg1:string,arg2:string,arg3:model.ModelConfig):Promise<string>;
 
 export function BuildCreateNetworkRuleSql(arg1:string,arg2:string,arg3:networkrule.NetworkRuleConfig):Promise<string>;
 
@@ -468,6 +473,8 @@ export function GetMCPSessionConfig(arg1:string):Promise<string>;
 
 export function GetMaskingPolicyReferences(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
+export function GetModelTags(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
+
 export function GetNotebookCompletions(arg1:string,arg2:string,arg3:number,arg4:number):Promise<Array<snowpark.NotebookCompletion>>;
 
 export function GetNotebookHover(arg1:string,arg2:string,arg3:number,arg4:number):Promise<string>;
@@ -691,6 +698,10 @@ export function ListImagesInRepository(arg1:string,arg2:string,arg3:string):Prom
 export function ListIntegrations(arg1:string):Promise<Array<snowflake.IntegrationRow>>;
 
 export function ListMCPSessions():Promise<Array<mcp.SessionInfo>>;
+
+export function ListModelVersions(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
+
+export function ListModels():Promise<Array<string>>;
 
 export function ListNotificationIntegrations():Promise<Array<string>>;
 
