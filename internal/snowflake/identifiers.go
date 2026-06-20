@@ -174,6 +174,15 @@ func CleanList(items []string) []string {
 	return out
 }
 
+// JoinCleanList joins items with sep after trimming each entry and dropping
+// blanks (via CleanList). Unlike FormatStringLitList it adds no quoting or
+// surrounding parentheses — it is the bare comma-list builder for clauses that
+// take an unquoted, unparenthesized column list (e.g. ATTRIBUTES col, …). An
+// empty or all-blank slice yields "".
+func JoinCleanList(items []string, sep string) string {
+	return strings.Join(CleanList(items), sep)
+}
+
 // FormatStringLitList renders a token slice into the SQL `('A', 'B')` list
 // grammar — each non-blank token (trimmed) becomes a single-quoted string
 // literal with embedded backslashes/single-quotes escaped via EscapeTextLit.

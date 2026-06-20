@@ -46,7 +46,7 @@ dedicated builder, and is reachable from the properties modal:
 
 | File | Purpose |
 |---|---|
-| `sql.go` | `CortexSearchServiceConfig`, `BuildCreateCortexSearchServiceSql`, `FormatAttributes` |
+| `sql.go` | `CortexSearchServiceConfig`, `BuildCreateCortexSearchServiceSql` |
 | `sql_test.go` | Unit tests for the SQL builder |
 | `doc.go` | Package doc + `thaw:domain: Object Browser & Administration` annotation |
 
@@ -57,8 +57,12 @@ dedicated builder, and is reachable from the properties modal:
 | `CortexSearchServiceConfig` | CREATE parameters: name, case sensitivity, `OrReplace`, `IfNotExists`, `IndexMode` (`"single"`/`"multi"`), `SearchColumn` (ON, single), `TextIndexes` / `VectorIndexes` (multi), `PrimaryKey`, `Attributes`, `Warehouse`, `TargetLag`, `EmbeddingModel` (single), `RefreshMode`, `Initialize`, `FullIndexBuildIntervalDays`, `RequestLogging`, `AutoSuspend`, `Comment`, `Query` (AS) |
 | `IndexModeSingle` / `IndexModeMulti` | String constants for `IndexMode` |
 | `BuildCreateCortexSearchServiceSql(db, schema, cfg)` | Emits `CREATE [OR REPLACE] CORTEX SEARCH SERVICE [IF NOT EXISTS] <fqn> ON <col> [ATTRIBUTES …] WAREHOUSE = … TARGET_LAG = '…' [EMBEDDING_MODEL = '…'] [COMMENT = '…'] AS <query>;` |
-| `FormatAttributes(columns)` | Joins non-blank columns for the `SET ATTRIBUTES ( … )` / `SET PRIMARY KEY ( … )` ALTER clauses (exposed over IPC) |
 | `App.GetCortexSearchServiceTags(db, schema, name)` | Reads currently applied tags via `INFORMATION_SCHEMA.TAG_REFERENCES` for the properties modal's tag chips (best-effort; needs privileges) |
+
+The column-list joining for the `SET ATTRIBUTES ( … )` / `SET PRIMARY KEY ( … )`
+ALTER clauses is exposed over IPC by `App.FormatCortexSearchAttributes`, which
+delegates to the shared `snowflake.JoinCleanList(cols, ", ")` helper (trim, drop
+blanks, comma-join).
 
 ## Patterns & integration
 

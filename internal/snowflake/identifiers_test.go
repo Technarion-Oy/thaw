@@ -616,6 +616,15 @@ func TestCleanList(t *testing.T) {
 	}
 }
 
+func TestJoinCleanList(t *testing.T) {
+	if got := JoinCleanList([]string{" a ", "", "b"}, ", "); got != "a, b" {
+		t.Errorf("JoinCleanList = %q, want %q", got, "a, b")
+	}
+	if got := JoinCleanList([]string{"", "  "}, ", "); got != "" {
+		t.Errorf("JoinCleanList of blanks = %q, want empty", got)
+	}
+}
+
 func TestNormalizeScalar(t *testing.T) {
 	tests := []struct{ raw, want string }{
 		{"[OPTIONAL]", "OPTIONAL"},

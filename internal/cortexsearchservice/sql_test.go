@@ -283,12 +283,3 @@ func TestClauseOrder(t *testing.T) {
 		})
 	}
 }
-
-func TestFormatAttributes(t *testing.T) {
-	if got := FormatAttributes([]string{" a ", "", "b"}); got != "a, b" {
-		t.Errorf("FormatAttributes = %q, want %q", got, "a, b")
-	}
-	if got := FormatAttributes([]string{"", "  "}); got != "" {
-		t.Errorf("FormatAttributes of blanks = %q, want empty", got)
-	}
-}

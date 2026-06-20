@@ -14,7 +14,6 @@ import (
 	"fmt"
 
 	"thaw/internal/apperrors"
-	"thaw/internal/cortexsearchservice"
 	"thaw/internal/snowflake"
 )
 
@@ -31,11 +30,12 @@ func (a *App) AlterCortexSearchService(database, schema, name, clause string) er
 }
 
 // FormatCortexSearchAttributes joins the given column names into a comma-separated
-// ATTRIBUTES list (without the surrounding parentheses) for the properties
-// modal's "SET ATTRIBUTES ( … )" clause, dropping blank entries. Exposed over IPC
-// so the frontend doesn't duplicate the trim/skip-blank logic.
+// list (without the surrounding parentheses) for the properties modal's
+// "SET ATTRIBUTES ( … )" / "SET PRIMARY KEY ( … )" clauses, dropping blank
+// entries. Exposed over IPC so the frontend doesn't duplicate the trim/skip-blank
+// logic.
 func (a *App) FormatCortexSearchAttributes(columns []string) string {
-	return cortexsearchservice.FormatAttributes(columns)
+	return snowflake.JoinCleanList(columns, ", ")
 }
 
 // GetCortexSearchServiceTags returns the tags currently applied to the given

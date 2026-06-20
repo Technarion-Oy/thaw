@@ -228,12 +228,3 @@ func BuildCreateCortexSearchServiceSql(db, schema string, cfg CortexSearchServic
 
 	return sb.String() + ";", nil
 }
-
-// FormatAttributes renders a comma-separated ATTRIBUTES column list (without the
-// surrounding parentheses) for the ALTER … SET ATTRIBUTES ( … ) clause. It is
-// exposed over IPC so the properties modal can build the clause without
-// duplicating the trim/skip-blank logic. Returns "" when no non-blank columns
-// remain.
-func FormatAttributes(columns []string) string {
-	return strings.Join(snowflake.CleanList(columns), ", ")
-}
