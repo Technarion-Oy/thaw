@@ -10,7 +10,7 @@
 //
 // @thaw-domain: Object Browser & Administration
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Select, Tree, Space, Typography, Spin } from "antd";
 import { FolderOutlined, FileOutlined } from "@ant-design/icons";
 import {
@@ -89,12 +89,20 @@ export default function StageFilePicker({ db, schema, onPick, label, allowUserSt
       .finally(() => setLoadingSchemas(false));
   }, [pickerDb]);
 
-  // Load internal stages when db/schema changes.
+  // Mirror the current selection into a ref so the db/schema effect can read it
+  // without depending on it (which would re-fetch the stage list on every pick).
+  const selectedStageRef = useRef(selectedStage);
+  useEffect(() => { selectedStageRef.current = selectedStage; }, [selectedStage]);
+
+  // Reload the named-stage list when db/schema changes. The user stage (@~) is
+  // not db/schema-scoped, so leave it selected (and its tree intact) when chosen.
   useEffect(() => {
     setStages([]);
-    setSelectedStage(undefined);
-    setTreeData([]);
-    setSelectedPath("");
+    if (selectedStageRef.current !== USER_STAGE) {
+      setSelectedStage(undefined);
+      setTreeData([]);
+      setSelectedPath("");
+    }
     if (!pickerDb || !pickerSchema) return;
     setLoadingStages(true);
     ListStages(pickerDb, pickerSchema)

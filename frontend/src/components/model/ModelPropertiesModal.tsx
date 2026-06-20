@@ -308,6 +308,9 @@ export default function ModelPropertiesModal({ db, schema, name, onClose }: Prop
     let clause = "";
     if (versionInput.kind === "alias") {
       if (draft === "") { setVersionInputError("Alias is required."); return; }
+      // Aliases are arbitrary user-chosen labels, so qId preserves the exact
+      // casing typed (a case-sensitive "prod") — intentionally unlike version
+      // names, which are emitted unquoted to fold to the registry's V1/V2.
       clause = `VERSION ${v} SET ALIAS = ${qId(draft)}`;
     } else if (versionInput.kind === "comment") {
       clause = `MODIFY VERSION ${v} SET COMMENT = ${q1(versionInputDraft)}`;
