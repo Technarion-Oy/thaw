@@ -66,7 +66,7 @@ export default function CreateCortexSearchServiceModal({ db, schema, onClose, on
     primaryKey: [],
     attributes: [],
     warehouse: "",
-    targetLag: "1 hours",
+    targetLag: "1 hour",
     embeddingModel: "",
     refreshMode: "",
     initialize: "",
@@ -104,9 +104,12 @@ export default function CreateCortexSearchServiceModal({ db, schema, onClose, on
   const set = <K extends keyof CSSConfig>(key: K, value: CSSConfig[K]) =>
     setCfg((prev) => ({ ...prev, [key]: value }));
 
-  // Recompose the TARGET_LAG string whenever the composer inputs change.
+  // Recompose the TARGET_LAG string whenever the composer inputs change. Use the
+  // singular unit for a value of 1 (e.g. "1 hour", not "1 hours") — Snowflake
+  // accepts both, but the singular reads correctly.
   useEffect(() => {
-    set("targetLag", `${lagNum} ${lagUnit}`);
+    const unit = lagNum === 1 ? lagUnit.replace(/s$/, "") : lagUnit;
+    set("targetLag", `${lagNum} ${unit}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lagNum, lagUnit]);
 
@@ -291,7 +294,7 @@ export default function CreateCortexSearchServiceModal({ db, schema, onClose, on
                 showSearch
                 value={cfg.embeddingModel || undefined}
                 onChange={(v) => set("embeddingModel", v ?? "")}
-                placeholder="default (snowflake-arctic-embed-m-v1.5)"
+                placeholder="default (Snowflake-selected model)"
                 options={EMBEDDING_MODELS.map((m) => ({ value: m, label: m }))}
                 style={{ width: "100%" }}
               />

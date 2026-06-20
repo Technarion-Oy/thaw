@@ -49,7 +49,12 @@ const VALUE_TD: React.CSSProperties = {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function q1(s: string) { return "'" + s.replace(/'/g, "''") + "'"; }
+// Quote a human-entered value as a SQL string literal. Snowflake treats the
+// backslash as an escape character inside single-quoted literals, so backslashes
+// must be doubled (first, so the doubled quotes aren't themselves read as an
+// escape) as well as single-quotes — mirroring the backend's EscapeTextLit. Used
+// for COMMENT / TARGET_LAG / TAG values.
+function q1(s: string) { return "'" + s.replace(/\\/g, "\\\\").replace(/'/g, "''") + "'"; }
 
 // Split a DESCRIBE comma list ("CAT, AUTHOR") into trimmed, non-blank tokens.
 function splitList(s: string): string[] {

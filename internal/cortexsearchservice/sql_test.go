@@ -201,6 +201,89 @@ func TestBuildCreateCortexSearchServiceSql(t *testing.T) {
 	}
 }
 
+// TestClauseOrder pins the emitted clause order to the order Snowflake documents
+// for each shape. The grammar is order-sensitive, so this guards against a future
+// reordering of the builder that the substring-only assertions above would miss.
+func TestClauseOrder(t *testing.T) {
+	tests := []struct {
+		name  string
+		cfg   CortexSearchServiceConfig
+		order []string
+	}{
+		{
+			name: "single-index",
+			cfg: CortexSearchServiceConfig{
+				Name:                       "S",
+				SearchColumn:               "BODY",
+				PrimaryKey:                 []string{"ID"},
+				Attributes:                 []string{"CAT"},
+				Warehouse:                  "WH",
+				TargetLag:                  "1 hour",
+				EmbeddingModel:             "snowflake-arctic-embed-m-v1.5",
+				RefreshMode:                "FULL",
+				Initialize:                 "ON_CREATE",
+				FullIndexBuildIntervalDays: 7,
+				RequestLogging:             true,
+				AutoSuspend:                3600,
+				Comment:                    "c",
+				Query:                      "SELECT id, body, cat FROM t",
+			},
+			order: []string{
+				"ON ", "PRIMARY KEY", "ATTRIBUTES", "WAREHOUSE", "TARGET_LAG",
+				"EMBEDDING_MODEL", "REFRESH_MODE", "INITIALIZE",
+				"FULL_INDEX_BUILD_INTERVAL_DAYS", "REQUEST_LOGGING", "AUTO_SUSPEND",
+				"COMMENT", "AS",
+			},
+		},
+		{
+			name: "multi-index",
+			cfg: CortexSearchServiceConfig{
+				Name:                       "M",
+				IndexMode:                  IndexModeMulti,
+				TextIndexes:                []string{"TITLE"},
+				VectorIndexes:              []string{"BODY (model='snowflake-arctic-embed-m')"},
+				PrimaryKey:                 []string{"ID"},
+				Attributes:                 []string{"CAT"},
+				Warehouse:                  "WH",
+				TargetLag:                  "1 hour",
+				RefreshMode:                "INCREMENTAL",
+				Initialize:                 "ON_SCHEDULE",
+				FullIndexBuildIntervalDays: 7,
+				RequestLogging:             true,
+				AutoSuspend:                3600,
+				Comment:                    "c",
+				Query:                      "SELECT id, title, body, cat FROM t",
+			},
+			order: []string{
+				"TEXT INDEXES", "VECTOR INDEXES", "PRIMARY KEY", "ATTRIBUTES",
+				"WAREHOUSE", "TARGET_LAG", "REFRESH_MODE", "INITIALIZE",
+				"FULL_INDEX_BUILD_INTERVAL_DAYS", "REQUEST_LOGGING", "AUTO_SUSPEND",
+				"COMMENT", "AS",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sql, err := BuildCreateCortexSearchServiceSql("DB", "SC", tt.cfg)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			prev := -1
+			for _, clause := range tt.order {
+				idx := strings.Index(sql, clause)
+				if idx < 0 {
+					t.Fatalf("expected SQL to contain %q, got:\n%s", clause, sql)
+				}
+				if idx < prev {
+					t.Errorf("clause %q out of order, got:\n%s", clause, sql)
+				}
+				prev = idx
+			}
+		})
+	}
+}
+
 func TestFormatAttributes(t *testing.T) {
 	if got := FormatAttributes([]string{" a ", "", "b"}); got != "a, b" {
 		t.Errorf("FormatAttributes = %q, want %q", got, "a, b")
