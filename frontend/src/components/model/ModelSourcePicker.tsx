@@ -15,6 +15,21 @@ import { Form, Input, Select } from "antd";
 import { ListModels } from "../../../wailsjs/go/app/App";
 import StageFilePicker from "../shared/StageFilePicker";
 
+// `SHOW MODELS IN ACCOUNT` is an account-wide scan, and this picker remounts on
+// every create-modal / add-version open (the latter via destroyOnClose). Cache
+// the in-flight/resolved promise at module scope so the scan runs at most once
+// per session; consumers that need a fresh list can call invalidateModelsCache().
+let modelsCache: Promise<string[]> | null = null;
+function loadModelsCached(): Promise<string[]> {
+  if (!modelsCache) {
+    modelsCache = ListModels()
+      .then((names) => names ?? [])
+      .catch((e) => { modelsCache = null; throw e; }); // don't cache failures
+  }
+  return modelsCache;
+}
+export function invalidateModelsCache() { modelsCache = null; }
+
 // The FROM-clause source shared by CREATE MODEL and ALTER MODEL … ADD VERSION:
 // either a copy of an existing model (optionally a specific version) or a load
 // from an internal stage path. Both flows reuse this component so the model
@@ -41,11 +56,13 @@ export default function ModelSourcePicker({ db, schema, value, onChange }: Props
   const [loadingModels, setLoadingModels] = useState(false);
 
   useEffect(() => {
+    let alive = true;
     setLoadingModels(true);
-    ListModels()
-      .then((names) => setModels(names ?? []))
-      .catch(() => setModels([]))
-      .finally(() => setLoadingModels(false));
+    loadModelsCached()
+      .then((names) => { if (alive) setModels(names); })
+      .catch(() => { if (alive) setModels([]); })
+      .finally(() => { if (alive) setLoadingModels(false); });
+    return () => { alive = false; };
   }, []);
 
   const isStage = value.sourceType === "stage";

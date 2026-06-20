@@ -1255,7 +1255,13 @@ func (c *Client) ListGitRepoEntries(ctx context.Context, database, schema, repoN
 func (c *Client) ListStageEntries(ctx context.Context, database, schema, stageName, dirPath string) ([]StageEntry, error) {
 	dirPath = normalizeDirPath(dirPath)
 
-	sql := fmt.Sprintf(`LIST @%s/%s`, Qualify(database, schema, stageName), dirPath)
+	// The user stage (@~) is implicit and not database/schema-scoped, so it must
+	// not be qualified; every other (named) stage is @database.schema.name.
+	ref := Qualify(database, schema, stageName)
+	if stageName == "~" {
+		ref = "~"
+	}
+	sql := fmt.Sprintf(`LIST @%s/%s`, ref, dirPath)
 
 	res, err := c.Execute(ctx, sql)
 	if err != nil {

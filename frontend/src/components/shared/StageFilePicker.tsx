@@ -22,6 +22,12 @@ import { quoteIdent } from "./ObjectNameCaseControl";
 
 const { Text } = Typography;
 
+// Sentinel stage value for the implicit user stage (@~). Stage names can never be
+// "~", so it can't collide with a real named stage. When selected, the database/
+// schema selectors are irrelevant (the user stage is account-/user-scoped); the
+// backend's ListStageEntries detects this value and lists @~ unqualified.
+const USER_STAGE = "~";
+
 interface Props {
   /** Default database/schema to browse (the owning object's location). */
   db: string;
@@ -86,7 +92,10 @@ export default function StageFilePicker({ db, schema, onPick, label }: Props) {
     if (!pickerDb || !pickerSchema) return;
     setLoadingStages(true);
     ListStages(pickerDb, pickerSchema)
-      .then((all) => setStages((all ?? []).filter((s) => (s.type ?? "").toUpperCase() === "INTERNAL")))
+      // Keep all internal stages: SHOW STAGES reports the type as "INTERNAL" but
+      // also encryption-qualified variants like "INTERNAL NO CSE", so match by
+      // prefix rather than exact equality (external stages report "EXTERNAL").
+      .then((all) => setStages((all ?? []).filter((s) => (s.type ?? "").toUpperCase().startsWith("INTERNAL"))))
       .catch(() => setStages([]))
       .finally(() => setLoadingStages(false));
   }, [pickerDb, pickerSchema]);
@@ -179,7 +188,11 @@ export default function StageFilePicker({ db, schema, onPick, label }: Props) {
           optionFilterProp="label"
           size="small"
           style={{ width: "100%" }}
-          options={stages.map((s) => ({ value: s.name, label: s.name }))}
+          options={[
+            // The user stage is always available and isn't tied to db/schema.
+            { value: USER_STAGE, label: "User Stage (@~)" },
+            ...stages.map((s) => ({ value: s.name, label: s.name })),
+          ]}
           notFoundContent={loadingStages ? "Loading…" : "No internal stages found"}
           allowClear
         />
@@ -202,7 +215,11 @@ export default function StageFilePicker({ db, schema, onPick, label }: Props) {
                   // Only files are valid targets; ignore folder clicks.
                   if (!key || (info.node as DataNode).isLeaf === false) return;
                   setSelectedPath(key);
-                  const qualified = `${quoteIdent(pickerDb)}.${quoteIdent(pickerSchema)}.${quoteIdent(selectedStage)}`;
+                  // The user stage is referenced bare as @~; named stages are
+                  // fully qualified. Consumers always prepend the leading @.
+                  const qualified = selectedStage === USER_STAGE
+                    ? USER_STAGE
+                    : `${quoteIdent(pickerDb)}.${quoteIdent(pickerSchema)}.${quoteIdent(selectedStage)}`;
                   onPick(qualified, key);
                 }}
                 style={{ fontSize: 12 }}

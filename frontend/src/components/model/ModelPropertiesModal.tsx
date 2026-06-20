@@ -25,8 +25,11 @@ import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
 
-// Single-quote-escape a SQL string literal (doubles embedded single quotes).
-const q1 = (s: string) => `'${s.replace(/'/g, "''")}'`;
+// Single-quote-escape a SQL string literal. Snowflake processes backslash escape
+// sequences inside single-quoted literals, so backslashes must be doubled too
+// (escape backslashes first, then single quotes) — matters for JSON METADATA and
+// Windows-style paths in comments. Mirrors passwordpolicy/sessionpolicy.
+const q1 = (s: string) => `'${s.replace(/\\/g, "\\\\").replace(/'/g, "''")}'`;
 // Double-quote a SQL identifier (doubles embedded double quotes).
 const qId = (s: string) => `"${s.replace(/"/g, '""')}"`;
 

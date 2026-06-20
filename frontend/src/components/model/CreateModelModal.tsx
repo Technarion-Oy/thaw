@@ -18,7 +18,7 @@ import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
-import ModelSourcePicker from "./ModelSourcePicker";
+import ModelSourcePicker, { invalidateModelsCache } from "./ModelSourcePicker";
 import type { model as modelModels } from "../../../wailsjs/go/models";
 
 interface Props {
@@ -65,6 +65,7 @@ export default function CreateModelModal({ db, schema, onClose, onSuccess }: Pro
     if (!canSubmit) return;
     submit(async () => {
       await ExecDDL(preview);
+      invalidateModelsCache(); // a new model is now a possible copy source
       onSuccess?.();
       onClose();
     });

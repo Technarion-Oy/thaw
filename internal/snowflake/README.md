@@ -62,7 +62,7 @@ No business logic belongs here — callers pass SQL strings or high-level parame
 - `ClearObjectCache()` / `ClearObjectCacheForDatabase(db)` — IPC-exposed cache invalidation
 - `ClearObjectCacheForSchema(db, schema)` — internal use only, not exposed as IPC
 - `ListStages(ctx, db, schema)` — `SHOW STAGES IN SCHEMA` → `[]StageSummary{Name, Type, URL}`; the `Type` column distinguishes `INTERNAL`/`EXTERNAL` so callers can filter (e.g. external tables may only reference an `EXTERNAL` stage)
-- `ListStageEntries(ctx, db, schema, stage, dirPath)` — directory-aware listing via `LIST @stage/dirPath` (internal or external stages)
+- `ListStageEntries(ctx, db, schema, stage, dirPath)` — directory-aware listing via `LIST @stage/dirPath` (internal or external stages). Pass `stage == "~"` to list the implicit, non-scoped user stage (`LIST @~/dirPath`; db/schema ignored)
 
 ### Session management
 - `UseRole/UseWarehouse/UseDatabase/UseSchema` — execute the USE statement then call `refreshConnectorState`, which flushes idle connections on role/warehouse/database changes
