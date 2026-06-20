@@ -66,6 +66,10 @@ export function AlterMaterializedView(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterMaterializedView'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterModel(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterModel'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterNetworkRule(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterNetworkRule'](arg1, arg2, arg3, arg4);
 }
@@ -256,6 +260,10 @@ export function BuildCreateMaskingPolicySql(arg1, arg2, arg3) {
 
 export function BuildCreateMaterializedViewSql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateMaterializedViewSql'](arg1, arg2, arg3);
+}
+
+export function BuildCreateModelSql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateModelSql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateNetworkRuleSql(arg1, arg2, arg3) {
@@ -830,6 +838,10 @@ export function GetMaskingPolicyReferences(arg1, arg2, arg3) {
   return window['go']['app']['App']['GetMaskingPolicyReferences'](arg1, arg2, arg3);
 }
 
+export function GetModelTags(arg1, arg2, arg3) {
+  return window['go']['app']['App']['GetModelTags'](arg1, arg2, arg3);
+}
+
 export function GetNotebookCompletions(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['GetNotebookCompletions'](arg1, arg2, arg3, arg4);
 }
@@ -1276,6 +1288,14 @@ export function ListIntegrations(arg1) {
 
 export function ListMCPSessions() {
   return window['go']['app']['App']['ListMCPSessions']();
+}
+
+export function ListModelVersions(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ListModelVersions'](arg1, arg2, arg3);
+}
+
+export function ListModels() {
+  return window['go']['app']['App']['ListModels']();
 }
 
 export function ListNotificationIntegrations() {

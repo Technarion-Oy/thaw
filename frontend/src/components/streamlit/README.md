@@ -7,8 +7,8 @@ object browser.
 
 - **`CreateStreamlitModal.tsx`** — `CREATE STREAMLIT` builder. Name +
   case-sensitivity, mutually-exclusive `OR REPLACE` / `IF NOT EXISTS`, a stage
-  browser (reused `service/StageFilePicker`) that fills the **source location**
-  (`FROM`) and **main file** when a Python file is picked, a query-warehouse
+  browser (the shared `components/shared/StageFilePicker`) that fills the **source
+  location** (`FROM`) and **main file** when a Python file is picked, a query-warehouse
   picker (`ListWarehouses`), title, external-access integrations, and comment.
   Live SQL preview via `BuildCreateStreamlitSql`; runs through `ExecDDL`. Only
   the modern `FROM <stage location>` grammar is emitted (no legacy

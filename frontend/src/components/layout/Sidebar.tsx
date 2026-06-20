@@ -49,6 +49,7 @@ import {
   RightOutlined,
   ShareAltOutlined,
   ExperimentOutlined,
+  RobotOutlined,
   BuildOutlined,
   DashboardOutlined,
   SyncOutlined,
@@ -168,6 +169,8 @@ import CreateNetworkRuleModal from "../networkrule/CreateNetworkRuleModal";
 import NetworkRulePropertiesModal from "../networkrule/NetworkRulePropertiesModal";
 import CreateImageRepositoryModal from "../imagerepository/CreateImageRepositoryModal";
 import ImageRepositoryPropertiesModal from "../imagerepository/ImageRepositoryPropertiesModal";
+import CreateModelModal from "../model/CreateModelModal";
+import ModelPropertiesModal from "../model/ModelPropertiesModal";
 import CreateServiceModal from "../service/CreateServiceModal";
 import ServicePropertiesModal from "../service/ServicePropertiesModal";
 import CreateStreamlitModal from "../streamlit/CreateStreamlitModal";
@@ -225,9 +228,10 @@ const KIND_LABEL: Record<string, string> = {
   SECRET:        "Secrets",
   "GIT REPOSITORY": "Git Repositories",
   "DBT PROJECT": "DBT Projects",
+  MODEL:         "Models",
 };
 
-const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE", "FUNCTION", "EXTERNAL FUNCTION", "DATA METRIC FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "PASSWORD POLICY", "SESSION POLICY", "AGGREGATION POLICY", "PROJECTION POLICY", "AUTHENTICATION POLICY", "PACKAGES POLICY", "NETWORK RULE", "IMAGE REPOSITORY", "SERVICE", "STREAMLIT", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT"];
+const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE", "FUNCTION", "EXTERNAL FUNCTION", "DATA METRIC FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "PASSWORD POLICY", "SESSION POLICY", "AGGREGATION POLICY", "PROJECTION POLICY", "AUTHENTICATION POLICY", "PACKAGES POLICY", "NETWORK RULE", "IMAGE REPOSITORY", "SERVICE", "STREAMLIT", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT", "MODEL"];
 
 const kindIcon = (kind: string) => objectIcon(kind);
 
@@ -497,7 +501,7 @@ function ObjTooltip({ cacheKey, db, schema, kind, name, args, children }: {
     // policies, so the call would always fail and emit gosnowflake driver
     // error-log noise on every hover. Skip the fetch entirely — with content
     // left null the tooltip simply doesn't show.
-    if (kind === "IMAGE REPOSITORY" || kind === "SERVICE" || kind === "PACKAGES POLICY") return;
+    if (kind === "IMAGE REPOSITORY" || kind === "SERVICE" || kind === "PACKAGES POLICY" || kind === "MODEL") return;
     const fresh = getCached();
     if (fresh !== null) {
       if (content !== fresh) setContent(fresh);
@@ -684,6 +688,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [networkRulePropsModal, setNetworkRulePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createImageRepositoryModal, setCreateImageRepositoryModal] = useState<{ db: string; schema: string } | null>(null);
   const [imageRepositoryPropsModal, setImageRepositoryPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [createModelModal, setCreateModelModal] = useState<{ db: string; schema: string } | null>(null);
+  const [modelPropsModal, setModelPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createServiceModal, setCreateServiceModal] = useState<{ db: string; schema: string } | null>(null);
   const [servicePropsModal, setServicePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createStreamlitModal, setCreateStreamlitModal] = useState<{ db: string; schema: string } | null>(null);
@@ -2433,6 +2439,25 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setImageRepositoryPropsModal({ db, schema, name });
   };
 
+  const openCreateModel = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    setCtxMenu(null);
+    setCreateModelModal({ db, schema });
+  };
+
+  const openModelProperties = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    setModelPropsModal({ db, schema, name });
+  };
+
   const openCreateService = () => {
     if (!ctxMenu) return;
     const parts = ctxMenu.nodeKey.split(":");
@@ -2873,6 +2898,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       case "PACKAGES POLICY": sql = `DROP PACKAGES POLICY ${fullName};`; break;
       case "NETWORK RULE": sql = `DROP NETWORK RULE ${fullName};`; break;
       case "IMAGE REPOSITORY": sql = `DROP IMAGE REPOSITORY ${fullName};`; break;
+      case "MODEL":       sql = `DROP MODEL ${fullName};`; break;
       case "SERVICE":     sql = `DROP SERVICE ${fullName};`; break;
       case "STREAMLIT":   sql = `DROP STREAMLIT ${fullName};`; break;
       case "SEQUENCE":    sql = `DROP SEQUENCE ${fullName};`; break;
@@ -3533,6 +3559,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         case "PACKAGES POLICY": return `DROP PACKAGES POLICY ${fullName};`;
         case "NETWORK RULE": return `DROP NETWORK RULE ${fullName};`;
         case "IMAGE REPOSITORY": return `DROP IMAGE REPOSITORY ${fullName};`;
+        case "MODEL":       return `DROP MODEL ${fullName};`;
         case "SERVICE":     return `DROP SERVICE ${fullName};`;
         case "STREAMLIT":   return `DROP STREAMLIT ${fullName};`;
         case "SEQUENCE":    return `DROP SEQUENCE ${fullName};`;
@@ -4092,6 +4119,11 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                   {menuItem("Data Metric Function…", <FundOutlined style={{ fontSize: 12 }} />, openCreateDataMetricFunction)}
                 </>
               ), 1)}
+              {menuItemSub("Machine Learning", <RobotOutlined style={{ fontSize: 12 }} />, "create-ml", (
+                <>
+                  {menuItem("Model…", <RobotOutlined style={{ fontSize: 12 }} />, openCreateModel)}
+                </>
+              ), 1)}
             </>
           ))}
           {ctxMenu.nodeType === "schema" && menuItem("Show Dropped Tables…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedTables)}
@@ -4158,6 +4190,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Create External Function…", <ApiOutlined style={{ fontSize: 12 }} />, openCreateExternalFunction)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "DATA METRIC FUNCTION" &&
             menuItem("Create Data Metric Function…", <FundOutlined style={{ fontSize: 12 }} />, openCreateDataMetricFunction)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "MODEL" &&
+            menuItem("Create Model…", <RobotOutlined style={{ fontSize: 12 }} />, openCreateModel)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "FILE FORMAT" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STAGE" &&
@@ -4228,6 +4262,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openNetworkRuleProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "IMAGE REPOSITORY" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openImageRepositoryProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MODEL" &&
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openModelProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "SERVICE" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openServiceProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "SERVICE" &&
@@ -4334,14 +4370,14 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "NOTEBOOK" &&
             menuItem("Make Live", <CloudUploadOutlined style={{ fontSize: 12 }} />, makeNotebookLive, undefined, !featureFlags.snowparkNotebooks, "Snowpark & Notebooks is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" && menuItem("View Definition", null, viewDefinition)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ICEBERG TABLE" && ctxMenu.objKind !== "HYBRID TABLE" && ctxMenu.objKind !== "EVENT TABLE" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "PASSWORD POLICY" && ctxMenu.objKind !== "SESSION POLICY" && ctxMenu.objKind !== "AGGREGATION POLICY" && ctxMenu.objKind !== "PROJECTION POLICY" && ctxMenu.objKind !== "AUTHENTICATION POLICY" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "STREAMLIT" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "MODEL" && menuItem("View Definition", null, viewDefinition)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ICEBERG TABLE" && ctxMenu.objKind !== "HYBRID TABLE" && ctxMenu.objKind !== "EVENT TABLE" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "PASSWORD POLICY" && ctxMenu.objKind !== "SESSION POLICY" && ctxMenu.objKind !== "AGGREGATION POLICY" && ctxMenu.objKind !== "PROJECTION POLICY" && ctxMenu.objKind !== "AUTHENTICATION POLICY" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "STREAMLIT" && ctxMenu.objKind !== "MODEL" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {/* Comparison diffs via GET_DDL, which image repositories, services,
-              and packages policies don't support — exclude them so the diff view
-              can't surface a GET_DDL error for a kind that has no DDL. */}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" &&
+              packages policies, and models don't support — exclude them so the
+              diff view can't surface a GET_DDL error for a kind that has no DDL. */}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "MODEL" &&
             menuItem("Select for Comparison", <DiffOutlined style={{ fontSize: 12 }} />, selectObjForComparison)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" && pendingDiff !== null &&
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "MODEL" && pendingDiff !== null &&
             menuItem(`Compare with: ${pendingDiff.label}`, <DiffOutlined style={{ fontSize: 12, color: "var(--accent)" }} />, compareObjWith)}
           {ctxMenu.nodeType === "obj" &&
             (ctxMenu.objKind === "VIEW" || ctxMenu.objKind === "PROCEDURE" || ctxMenu.objKind === "FUNCTION" || ctxMenu.objKind === "EXTERNAL FUNCTION") &&
@@ -4947,6 +4983,24 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={imageRepositoryPropsModal.schema}
           name={imageRepositoryPropsModal.name}
           onClose={() => setImageRepositoryPropsModal(null)}
+        />
+      )}
+
+      {createModelModal && (
+        <CreateModelModal
+          db={createModelModal.db}
+          schema={createModelModal.schema}
+          onClose={() => setCreateModelModal(null)}
+          onSuccess={() => refreshDatabaseByName(createModelModal.db, { schema: createModelModal.schema, kind: "MODEL" })}
+        />
+      )}
+
+      {modelPropsModal && (
+        <ModelPropertiesModal
+          db={modelPropsModal.db}
+          schema={modelPropsModal.schema}
+          name={modelPropsModal.name}
+          onClose={() => setModelPropsModal(null)}
         />
       )}
 

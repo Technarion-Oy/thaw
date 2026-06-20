@@ -27,6 +27,7 @@ import (
 	"thaw/internal/imagerepository"
 	"thaw/internal/maskingpolicy"
 	"thaw/internal/materializedview"
+	"thaw/internal/model"
 	"thaw/internal/networkrule"
 	"thaw/internal/packagespolicy"
 	"thaw/internal/passwordpolicy"
@@ -229,6 +230,11 @@ func (a *App) BuildCreateNetworkRuleSql(database, schema string, cfg networkrule
 // BuildCreateImageRepositorySql returns the SQL for creating a Snowflake IMAGE REPOSITORY.
 func (a *App) BuildCreateImageRepositorySql(database, schema string, cfg imagerepository.ImageRepositoryConfig) (string, error) {
 	return imagerepository.BuildCreateImageRepositorySql(database, schema, cfg)
+}
+
+// BuildCreateModelSql returns the SQL for creating a Snowflake MODEL.
+func (a *App) BuildCreateModelSql(database, schema string, cfg model.ModelConfig) (string, error) {
+	return model.BuildCreateModelSql(database, schema, cfg)
 }
 
 // BuildCreateServiceSql returns the SQL for creating a Snowflake SERVICE (SPCS).

@@ -73,6 +73,7 @@ import {
   GroupOutlined,
   ColumnWidthOutlined,
   LoginOutlined,
+  RobotOutlined,
 } from "@ant-design/icons";
 
 // ── CSS variable name per kind ─────────────────────────────────────────────
@@ -113,6 +114,7 @@ const KIND_VAR: Record<string, string> = {
   SECRET:            "--icon-secret",
   "GIT REPOSITORY":  "--icon-gitrepo",
   "DBT PROJECT":     "--icon-dbtproject",
+  MODEL:             "--icon-model",
 };
 
 // ── Icon component per kind ────────────────────────────────────────────────
@@ -153,6 +155,7 @@ const KIND_ICON: Record<string, React.ComponentType<{ style?: React.CSSPropertie
   SECRET:           LockOutlined,
   "GIT REPOSITORY": BranchesOutlined,
   "DBT PROJECT":    BuildOutlined,
+  MODEL:            RobotOutlined,
 };
 
 // ── Public API ────────────────────────────────────────────────────────────

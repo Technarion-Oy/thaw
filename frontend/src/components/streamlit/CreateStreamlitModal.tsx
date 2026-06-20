@@ -18,7 +18,7 @@ import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
-import StageFilePicker from "../service/StageFilePicker";
+import StageFilePicker from "../shared/StageFilePicker";
 import type { streamlit as stModels } from "../../../wailsjs/go/models";
 
 interface Props {
@@ -154,7 +154,7 @@ export default function CreateStreamlitModal({ db, schema, onClose, onSuccess }:
           style={{ marginBottom: 8 }}
           help="Browse a stage and select the main Python file — the directory and file name fill in below."
         >
-          <StageFilePicker db={db} schema={schema} onPick={onPickFile} />
+          <StageFilePicker db={db} schema={schema} label="Browse internal stage — select the app's main Python file" onPick={onPickFile} />
         </Form.Item>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
