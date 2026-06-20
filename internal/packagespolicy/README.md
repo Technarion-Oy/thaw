@@ -53,5 +53,9 @@ ADDITIONAL_CREATION_BLOCKLIST | COMMENT`) is issued as a free-form statement by
 are read via the `DESCRIBE PACKAGES POLICY` enrichment in `internal/objects`
 (`SHOW PACKAGES POLICIES` reports only metadata, not the allowlist/blocklist).
 
-DDL export uses `GET_DDL('POLICY', …)`, the generic policy object type
-(`internal/snowflake/client.go`).
+`GET_DDL` does **not** support packages policies — `GET_DDL('POLICY', …)` fails
+with *"Cannot initialize Snowflake Metadata. Dictionary unavailable"* and there
+is no `'PACKAGES POLICY'` object type — so (like image repositories and services)
+there is no DDL export, View Definition, or object comparison for this kind. The
+full configuration is reconstructable from `DESCRIBE` and is surfaced in the
+properties modal instead.

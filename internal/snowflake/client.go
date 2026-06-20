@@ -3793,10 +3793,15 @@ func buildGetDDLQuery(database, schema, kind, name, arguments string) (query, id
 		// GET_DDL has no MATERIALIZED_VIEW object type — TABLE and VIEW are
 		// interchangeable and materialized views are retrieved via 'VIEW'.
 		ddlKind = "VIEW"
-	case "MASKING POLICY", "ROW ACCESS POLICY", "PASSWORD POLICY", "SESSION POLICY", "AGGREGATION POLICY", "PROJECTION POLICY", "AUTHENTICATION POLICY", "PACKAGES POLICY":
-		// GET_DDL exposes a single 'POLICY' object type covering all policy
+	case "MASKING POLICY", "ROW ACCESS POLICY", "PASSWORD POLICY", "SESSION POLICY", "AGGREGATION POLICY", "PROJECTION POLICY", "AUTHENTICATION POLICY":
+		// GET_DDL exposes a single 'POLICY' object type covering most policy
 		// kinds (masking, row access, password, session, aggregation, projection,
-		// authentication, packages, etc.), not a per-kind type.
+		// authentication, etc.), not a per-kind type. NOTE: packages policies are
+		// deliberately NOT here — GET_DDL supports neither the 'POLICY' nor a
+		// 'PACKAGES POLICY' object type for them (the call fails with "Cannot
+		// initialize Snowflake Metadata. Dictionary unavailable"), so packages
+		// policies have no GET_DDL mapping at all, handled like image repositories
+		// and services.
 		ddlKind = "POLICY"
 	case "NETWORK RULE":
 		ddlKind = "NETWORK_RULE"
