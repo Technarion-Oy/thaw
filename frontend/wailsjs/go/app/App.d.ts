@@ -748,6 +748,8 @@ export function ParseMFAPolicy(arg1:string):Promise<authenticationpolicy.MFAPoli
 
 export function ParsePATPolicy(arg1:string):Promise<authenticationpolicy.PATPolicy>;
 
+export function ParsePackagesPolicyList(arg1:string):Promise<Array<string>>;
+
 export function ParseSecondaryRoles(arg1:string):Promise<Array<string>>;
 
 export function ParseSqlList(arg1:string):Promise<Array<string>>;

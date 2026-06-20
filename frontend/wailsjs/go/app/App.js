@@ -1390,6 +1390,10 @@ export function ParsePATPolicy(arg1) {
   return window['go']['app']['App']['ParsePATPolicy'](arg1);
 }
 
+export function ParsePackagesPolicyList(arg1) {
+  return window['go']['app']['App']['ParsePackagesPolicyList'](arg1);
+}
+
 export function ParseSecondaryRoles(arg1) {
   return window['go']['app']['App']['ParseSecondaryRoles'](arg1);
 }

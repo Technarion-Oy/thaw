@@ -18,7 +18,7 @@ import {
   CodeSandboxOutlined, EditOutlined, CheckOutlined, CloseOutlined,
 } from "@ant-design/icons";
 import {
-  GetObjectProperties, AlterPackagesPolicy, FormatPackagesPolicyList, ParseSqlList, QuoteSqlText,
+  GetObjectProperties, AlterPackagesPolicy, FormatPackagesPolicyList, ParsePackagesPolicyList, QuoteSqlText,
 } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 
@@ -58,11 +58,14 @@ function ListRow({ label, rawValue, defaultHint, onSet, onUnset }: ListRowProps)
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // DESCRIBE renders the list cell in a SQL/bracket form the backend tokenizer
-  // owns — parse it there. Re-runs when rawValue changes (e.g. after a reload).
+  // DESCRIBE renders the list cell in a SQL/bracket form the backend parser owns
+  // — parse it there. ParsePackagesPolicyList (not the generic ParseSqlList)
+  // preserves package version specifiers like "numpy==1.26.4" whether or not
+  // Snowflake quotes the entries. Re-runs when rawValue changes (e.g. after a
+  // Set/Unset reload).
   useEffect(() => {
     let alive = true;
-    ParseSqlList(rawValue).then((t) => { if (alive) setValue(t ?? []); });
+    ParsePackagesPolicyList(rawValue).then((t) => { if (alive) setValue(t ?? []); });
     return () => { alive = false; };
   }, [rawValue]);
 

@@ -43,3 +43,13 @@ func (a *App) AlterPackagesPolicy(database, schema, name, clause string) error {
 func (a *App) FormatPackagesPolicyList(tokens []string) string {
 	return packagespolicy.FormatStringList(tokens)
 }
+
+// ParsePackagesPolicyList tokenizes a DESCRIBE PACKAGES POLICY allow/block-list
+// cell into its individual package-spec entries via packagespolicy.ParseList.
+// Unlike the general App.ParseSqlList, it preserves version-specifier operators
+// (e.g. "numpy==1.26.4") whether or not Snowflake quotes the list entries, so the
+// properties modal can't mangle a spec when reading the current value back. Pure
+// string handling — no Snowflake connection required.
+func (a *App) ParsePackagesPolicyList(raw string) []string {
+	return packagespolicy.ParseList(raw)
+}

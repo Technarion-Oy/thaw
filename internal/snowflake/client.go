@@ -3732,6 +3732,17 @@ func (c *Client) ListFileFormats(ctx context.Context, database, schema string) (
 // parameter type list (e.g. "NUMBER, VARCHAR") so that Snowflake can resolve
 // the correct overload. Pass an empty string for all other object kinds.
 func (c *Client) GetObjectDDL(ctx context.Context, database, schema, kind, name, arguments string) (string, error) {
+	// GET_DDL has no object type for these kinds: buildGetDDLQuery would fall
+	// through to ddlKind := kind and emit an invalid GET_DDL('<kind>', …). They
+	// are already excluded at every frontend entry point (hover DDL, View
+	// Definition, comparison); guard here too so a future caller can't trip the
+	// invalid query (a packages-policy GET_DDL fails with "Cannot initialize
+	// Snowflake Metadata. Dictionary unavailable").
+	switch strings.ToUpper(strings.TrimSpace(kind)) {
+	case "IMAGE REPOSITORY", "SERVICE", "PACKAGES POLICY":
+		return "", fmt.Errorf("GET_DDL does not support %s objects", kind)
+	}
+
 	query, identifier := buildGetDDLQuery(database, schema, kind, name, arguments)
 
 	row := c.queryRowCtx(ctx, query)

@@ -13,8 +13,6 @@ package packagespolicy
 import (
 	"strings"
 	"testing"
-
-	"thaw/internal/snowflake"
 )
 
 func TestBuildCreatePackagesPolicySql(t *testing.T) {
@@ -133,18 +131,53 @@ func TestFormatStringList(t *testing.T) {
 	}
 }
 
+func TestParseList(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want []string
+	}{
+		// The form our own builder / FormatStringList emits.
+		{"sql tuple of quoted literals", "('numpy', 'pandas==2.*')", []string{"numpy", "pandas==2.*"}},
+		// Shapes Snowflake's DESCRIBE might use — all must preserve version specifiers.
+		{"json array of quoted strings", `["numpy", "pandas==2.*"]`, []string{"numpy", "pandas==2.*"}},
+		{"bare bracketed list keeps the operator", "[numpy==1.26.4, pandas]", []string{"numpy==1.26.4", "pandas"}},
+		{"newline-separated pretty array", "[\n  \"numpy\",\n  \"scipy>=1.0\"\n]", []string{"numpy", "scipy>=1.0"}},
+		{"bare comma list", "numpy==1.26.4, pandas", []string{"numpy==1.26.4", "pandas"}},
+		{"wildcard", "('*')", []string{"*"}},
+		{"single bare token", "numpy", []string{"numpy"}},
+		{"embedded escaped quote", "('it''s')", []string{"it's"}},
+		{"empty cell", "", nil},
+		{"empty brackets", "[]", nil},
+		{"null cell", "null", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseList(tt.raw)
+			if len(got) != len(tt.want) {
+				t.Fatalf("ParseList(%q) = %#v, want %#v", tt.raw, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("ParseList(%q)[%d] = %q, want %q", tt.raw, i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
 // TestListRoundTrip covers the properties-modal path: a list serialized for
 // ALTER … SET <list> = (…) via FormatStringList must read back identically when
-// the resulting (quoted) value is tokenized by ParseSqlList — the same tokenizer
-// the modal applies to the DESCRIBE PACKAGES POLICY allowlist/blocklist cells.
-// The wildcard default-allowlist token is the case worth pinning down.
+// the resulting value is tokenized by ParseList — the same parser the modal
+// applies to the DESCRIBE PACKAGES POLICY allowlist/blocklist cells. The wildcard
+// and version-specifier tokens are the cases worth pinning down.
 func TestListRoundTrip(t *testing.T) {
 	cases := [][]string{
 		{"*"},
 		{"numpy", "pandas==2.*", "scipy>=1.0"},
 	}
 	for _, tokens := range cases {
-		got := snowflake.ParseSqlList(FormatStringList(tokens))
+		got := ParseList(FormatStringList(tokens))
 		if len(got) != len(tokens) {
 			t.Fatalf("round-trip of %v = %v (len mismatch)", tokens, got)
 		}

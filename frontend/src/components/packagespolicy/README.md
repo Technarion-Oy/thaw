@@ -28,5 +28,6 @@ UDFs and stored procedures may import.
   allow/block lists and comment.
 - The list serialization (`('a', 'b')`) is built in Go
   (`App.FormatPackagesPolicyList`) and the DESCRIBE list cells are tokenized by
-  the shared backend tokenizer (`App.ParseSqlList`), so this folder carries no SQL
-  quoting logic of its own.
+  the package-spec-aware backend parser (`App.ParsePackagesPolicyList`, which
+  preserves version specifiers like `numpy==1.26.4`), so this folder carries no
+  SQL quoting or parsing logic of its own.
