@@ -118,6 +118,10 @@ export function AlterStage(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterStage'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterStorageLifecyclePolicy(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterStorageLifecyclePolicy'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterStreamlit(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterStreamlit'](arg1, arg2, arg3, arg4);
 }
@@ -328,6 +332,10 @@ export function BuildCreateSessionPolicySql(arg1, arg2, arg3) {
 
 export function BuildCreateStageSql(arg1) {
   return window['go']['app']['App']['BuildCreateStageSql'](arg1);
+}
+
+export function BuildCreateStorageLifecyclePolicySql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateStorageLifecyclePolicySql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateStreamlitSql(arg1, arg2, arg3) {
@@ -1028,6 +1036,14 @@ export function GetSnowsightURL() {
 
 export function GetStageFilePreview(arg1, arg2) {
   return window['go']['app']['App']['GetStageFilePreview'](arg1, arg2);
+}
+
+export function GetStorageLifecyclePolicyReferences(arg1, arg2, arg3) {
+  return window['go']['app']['App']['GetStorageLifecyclePolicyReferences'](arg1, arg2, arg3);
+}
+
+export function GetStorageLifecyclePolicyTags(arg1, arg2, arg3) {
+  return window['go']['app']['App']['GetStorageLifecyclePolicyTags'](arg1, arg2, arg3);
 }
 
 export function GetSystemRAMGB() {

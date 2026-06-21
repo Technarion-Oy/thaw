@@ -34,6 +34,7 @@ import {rowaccesspolicy} from '../models';
 import {secret} from '../models';
 import {service} from '../models';
 import {sessionpolicy} from '../models';
+import {storagelifecyclepolicy} from '../models';
 import {streamlit} from '../models';
 import {tag} from '../models';
 import {erdesigner} from '../models';
@@ -115,6 +116,8 @@ export function AlterService(arg1:string,arg2:string,arg3:string,arg4:string):Pr
 export function AlterSessionPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterStage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterStorageLifecyclePolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterStreamlit(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -221,6 +224,8 @@ export function BuildCreateServiceSql(arg1:string,arg2:string,arg3:service.Servi
 export function BuildCreateSessionPolicySql(arg1:string,arg2:string,arg3:sessionpolicy.SessionPolicyConfig):Promise<string>;
 
 export function BuildCreateStageSql(arg1:stage.StageConfig):Promise<string>;
+
+export function BuildCreateStorageLifecyclePolicySql(arg1:string,arg2:string,arg3:storagelifecyclepolicy.StorageLifecyclePolicyConfig):Promise<string>;
 
 export function BuildCreateStreamlitSql(arg1:string,arg2:string,arg3:streamlit.StreamlitConfig):Promise<string>;
 
@@ -571,6 +576,10 @@ export function GetSnowparkConfig():Promise<snowpark.SnowparkConfigResult>;
 export function GetSnowsightURL():Promise<string>;
 
 export function GetStageFilePreview(arg1:string,arg2:fileformat.FileFormatConfig):Promise<fileformat.PreviewResult>;
+
+export function GetStorageLifecyclePolicyReferences(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
+
+export function GetStorageLifecyclePolicyTags(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function GetSystemRAMGB():Promise<number>;
 

@@ -5628,6 +5628,71 @@ export namespace stage {
 
 }
 
+export namespace storagelifecyclepolicy {
+	
+	export class StorageLifecycleArg {
+	    name: string;
+	    type: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new StorageLifecycleArg(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.type = source["type"];
+	    }
+	}
+	export class StorageLifecyclePolicyConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    args: StorageLifecycleArg[];
+	    body: string;
+	    archiveTier: string;
+	    archiveForDays: number;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new StorageLifecyclePolicyConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.args = this.convertValues(source["args"], StorageLifecycleArg);
+	        this.body = source["body"];
+	        this.archiveTier = source["archiveTier"];
+	        this.archiveForDays = source["archiveForDays"];
+	        this.comment = source["comment"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
 export namespace streamlit {
 	
 	export class StreamlitConfig {
