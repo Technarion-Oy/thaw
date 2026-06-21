@@ -175,14 +175,24 @@ export default function CreateModelMonitorModal({ db, schema, onClose, onSuccess
   }, [db, schema, cfg.model]);
 
   // ── Columns of the selected source table ──────────────────────────────────
-  const [sourceColumns, setSourceColumns] = useState<string[]>([]);
+  const [sourceCols, setSourceCols] = useState<{ name: string; dataType: string }[]>([]);
 
   useEffect(() => {
-    if (!cfg.source.trim()) { setSourceColumns([]); return; }
+    if (!cfg.source.trim()) { setSourceCols([]); return; }
     GetTableColumnsWithTypes(db, schema, cfg.source)
-      .then((cols) => setSourceColumns((cols ?? []).map((c) => c.name)))
-      .catch(() => setSourceColumns([]));
+      .then((cols) => setSourceCols((cols ?? []).map((c) => ({ name: c.name, dataType: c.dataType }))))
+      .catch(() => setSourceCols([]));
   }, [db, schema, cfg.source]);
+
+  // Every column feeds the prediction/actual/id/segment/custom tag pickers.
+  const sourceColumns = useMemo(() => sourceCols.map((c) => c.name), [sourceCols]);
+  // TIMESTAMP_COLUMN must be a TIMESTAMP_NTZ column (Snowflake requirement), so the
+  // timestamp picker only suggests those — the AutoComplete stays free-typeable as
+  // a fallback if the type can't be matched.
+  const timestampColumns = useMemo(
+    () => sourceCols.filter((c) => /^TIMESTAMP_NTZ\b/i.test(c.dataType.trim())).map((c) => c.name),
+    [sourceCols],
+  );
 
   // ── Composers → cfg ───────────────────────────────────────────────────────
   // Use the singular unit for a quantity of 1 ("1 hour", not "1 hours") so the
@@ -360,17 +370,18 @@ export default function CreateModelMonitorModal({ db, schema, onClose, onSuccess
               notFoundContent={loadingWarehouses ? "Loading…" : "No warehouses found"}
             />
           </Form.Item>
-          <Form.Item label="Timestamp column" required style={itemStyle} help="TIMESTAMP_NTZ column in the source">
+          <Form.Item label="Timestamp column" required style={itemStyle} help="Must be a TIMESTAMP_NTZ column in the source">
             {/* AutoComplete (not a plain Select) so a column name can still be
                 typed when DESCRIBE returns nothing — keeps this required field
-                satisfiable, consistent with the free-typeable column tags below. */}
+                satisfiable, consistent with the free-typeable column tags below.
+                Only TIMESTAMP_NTZ columns are suggested (Snowflake requirement). */}
             <AutoComplete
               allowClear
               disabled={!cfg.source}
               value={cfg.timestampColumn}
               onChange={(v) => set("timestampColumn", v ?? "")}
-              placeholder={cfg.source ? "Select or type column…" : "Select a source first"}
-              options={sourceColumns.map((c) => ({ value: c }))}
+              placeholder={cfg.source ? "Select or type TIMESTAMP_NTZ column…" : "Select a source first"}
+              options={timestampColumns.map((c) => ({ value: c }))}
               filterOption={(input, option) =>
                 (option?.value ?? "").toLowerCase().includes(input.toLowerCase())
               }
