@@ -131,7 +131,10 @@ func BuildCreateFunctionSql(db, schema string, cfg FunctionConfig) (string, erro
 	if b == "" {
 		b = "<function_body>"
 	}
-	fmt.Fprintf(&sb, "\n  AS $$\n%s\n$$", b)
+	// Use a dollar-quote tag guaranteed not to occur in the body, so a body that
+	// itself contains "$$" can't terminate the literal early.
+	tag := snowflake.DollarQuoteTag(b)
+	fmt.Fprintf(&sb, "\n  AS %s\n%s\n%s", tag, b, tag)
 
 	return sb.String() + ";", nil
 }

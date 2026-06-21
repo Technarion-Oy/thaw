@@ -131,13 +131,35 @@ func TestBuildCreateStreamSql(t *testing.T) {
 			contains: []string{"SHOW_INITIAL_ROWS = TRUE"},
 		},
 		{
-			name: "insert only",
+			name: "insert only (external table source)",
 			cfg: StreamConfig{
 				Name:       "S",
+				SourceType: "EXTERNAL TABLE",
 				Source:     "T",
 				InsertOnly: true,
 			},
 			contains: []string{"INSERT_ONLY = TRUE"},
+		},
+		{
+			name: "insert only dropped for non-external source",
+			cfg: StreamConfig{
+				Name:       "S",
+				SourceType: "TABLE",
+				Source:     "T",
+				InsertOnly: true,
+			},
+			absent: []string{"INSERT_ONLY"},
+		},
+		{
+			name: "append only dropped for external table source",
+			cfg: StreamConfig{
+				Name:            "S",
+				SourceType:      "EXTERNAL TABLE",
+				Source:          "T",
+				AppendOnly:      true,
+				ShowInitialRows: true,
+			},
+			absent: []string{"APPEND_ONLY", "SHOW_INITIAL_ROWS"},
 		},
 		{
 			name: "comment escaped",
@@ -166,7 +188,9 @@ func TestBuildCreateStreamSql(t *testing.T) {
 			contains: []string{"\"DB\".\"SC\".\"MyStream\""},
 		},
 		{
-			name: "all options together",
+			// A TABLE source emits APPEND_ONLY / SHOW_INITIAL_ROWS; INSERT_ONLY is
+			// gated out (external-table only) even though the config sets it.
+			name: "all options together (table source gates out INSERT_ONLY)",
 			cfg: StreamConfig{
 				Name:            "S",
 				OrReplace:       true,
@@ -180,8 +204,9 @@ func TestBuildCreateStreamSql(t *testing.T) {
 			},
 			contains: []string{
 				"COPY GRANTS", "ON TABLE", "APPEND_ONLY = TRUE",
-				"SHOW_INITIAL_ROWS = TRUE", "INSERT_ONLY = TRUE", "COMMENT = 'c'",
+				"SHOW_INITIAL_ROWS = TRUE", "COMMENT = 'c'",
 			},
+			absent: []string{"INSERT_ONLY"},
 		},
 	}
 
@@ -222,9 +247,10 @@ func TestBuildCreateStreamSqlPlaceholders(t *testing.T) {
 
 // TestBuildCreateStreamSqlClauseOrder pins the clause order to the order
 // Snowflake documents for CREATE STREAM — COPY GRANTS → ON → APPEND_ONLY →
-// SHOW_INITIAL_ROWS → INSERT_ONLY → COMMENT. Snowflake's CREATE parser is
-// order-sensitive, so a config combining several optional clauses must emit them
-// in exactly this sequence.
+// SHOW_INITIAL_ROWS → COMMENT. Snowflake's CREATE parser is order-sensitive, so a
+// config combining several optional clauses must emit them in exactly this
+// sequence. (A TABLE source is used, so INSERT_ONLY — external-table only — is
+// not part of this ordering check.)
 func TestBuildCreateStreamSqlClauseOrder(t *testing.T) {
 	got, err := BuildCreateStreamSql("DB", "SC", StreamConfig{
 		Name:            "S",
@@ -232,14 +258,13 @@ func TestBuildCreateStreamSqlClauseOrder(t *testing.T) {
 		Source:          "T",
 		AppendOnly:      true,
 		ShowInitialRows: true,
-		InsertOnly:      true,
 		Comment:         "c",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	order := []string{"COPY GRANTS", "ON TABLE", "APPEND_ONLY = TRUE", "SHOW_INITIAL_ROWS = TRUE", "INSERT_ONLY = TRUE", "COMMENT = "}
+	order := []string{"COPY GRANTS", "ON TABLE", "APPEND_ONLY = TRUE", "SHOW_INITIAL_ROWS = TRUE", "COMMENT = "}
 	prev := -1
 	for _, marker := range order {
 		idx := strings.Index(got, marker)

@@ -78,13 +78,23 @@ func BuildCreateStreamSql(db, schema string, cfg StreamConfig) (string, error) {
 
 	fmt.Fprintf(&sb, "\n  ON %s %s", sourceType, sourceIdent)
 
-	if cfg.AppendOnly {
+	// The CDC flags are source-type-specific: APPEND_ONLY / SHOW_INITIAL_ROWS
+	// apply to streams on tables, views and dynamic tables; INSERT_ONLY applies
+	// only to streams on external tables. The create modal already gates the
+	// checkboxes this way, but enforce it here too so a flag can never leak into a
+	// CREATE STREAM for a source type that rejects it (defense-in-depth for any
+	// caller that drives the builder directly).
+	st := strings.ToUpper(sourceType)
+	rowChangeSource := st == "TABLE" || st == "VIEW" || st == "DYNAMIC TABLE"
+	externalSource := st == "EXTERNAL TABLE"
+
+	if cfg.AppendOnly && rowChangeSource {
 		fmt.Fprintf(&sb, "\n  APPEND_ONLY = TRUE")
 	}
-	if cfg.ShowInitialRows {
+	if cfg.ShowInitialRows && rowChangeSource {
 		fmt.Fprintf(&sb, "\n  SHOW_INITIAL_ROWS = TRUE")
 	}
-	if cfg.InsertOnly {
+	if cfg.InsertOnly && externalSource {
 		fmt.Fprintf(&sb, "\n  INSERT_ONLY = TRUE")
 	}
 

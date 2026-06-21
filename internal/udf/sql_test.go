@@ -163,6 +163,16 @@ func TestBuildCreateFunctionSql(t *testing.T) {
 			absent:   []string{"RUNTIME_VERSION", "PACKAGES", "IMPORTS", "HANDLER"},
 		},
 		{
+			name: "body containing $$ uses an alternate dollar-quote tag",
+			cfg: FunctionConfig{
+				Name:       "FN",
+				ReturnType: "STRING",
+				Body:       "select '$$' as x",
+			},
+			contains: []string{"AS $thaw$\nselect '$$' as x\n$thaw$;"},
+			absent:   []string{"AS $$"},
+		},
+		{
 			name: "comment escaped",
 			cfg: FunctionConfig{
 				Name:       "FN",

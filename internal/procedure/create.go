@@ -152,7 +152,10 @@ func BuildCreateProcedureSql(db, schema string, cfg ProcedureConfig) (string, er
 			procBody = "# procedure body"
 		}
 	}
-	fmt.Fprintf(&sb, "\n  AS $$\n%s\n$$", procBody)
+	// Use a dollar-quote tag guaranteed not to occur in the body, so a body that
+	// itself contains "$$" can't terminate the literal early.
+	tag := snowflake.DollarQuoteTag(procBody)
+	fmt.Fprintf(&sb, "\n  AS %s\n%s\n%s", tag, procBody, tag)
 
 	return sb.String() + ";", nil
 }

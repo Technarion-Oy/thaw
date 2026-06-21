@@ -63,7 +63,9 @@ export default function CreateSequenceModal({ db, schema, onClose, onSuccess }: 
   const set = <K extends keyof SeqConfig>(key: K, value: SeqConfig[K]) =>
     setCfg((prev) => ({ ...prev, [key]: value }));
 
-  const canSubmit = cfg.name.trim().length > 0;
+  // INCREMENT BY must be non-zero (it may be negative for a descending
+  // sequence); Snowflake rejects 0, so block submission on it.
+  const canSubmit = cfg.name.trim().length > 0 && cfg.increment !== 0;
 
   const handleRun = () => {
     if (!canSubmit) return;
@@ -119,7 +121,12 @@ export default function CreateSequenceModal({ db, schema, onClose, onSuccess }: 
           />
         </Form.Item>
 
-        <Form.Item label="Increment By" style={itemStyle}>
+        <Form.Item
+          label="Increment By"
+          style={itemStyle}
+          validateStatus={cfg.increment === 0 ? "error" : undefined}
+          help={cfg.increment === 0 ? "Increment must be non-zero (use a negative value for a descending sequence)." : undefined}
+        >
           <InputNumber
             value={cfg.increment}
             onChange={(v) => set("increment", (v ?? 1) as number)}

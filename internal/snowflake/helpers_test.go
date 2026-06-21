@@ -8,6 +8,7 @@
 package snowflake
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -79,6 +80,28 @@ func TestNeedsQuotes(t *testing.T) {
 	for _, tt := range tests {
 		if got := NeedsQuotes(tt.dataType); got != tt.expected {
 			t.Errorf("NeedsQuotes(%q) = %v, want %v", tt.dataType, got, tt.expected)
+		}
+	}
+}
+
+func TestDollarQuoteTag(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"no dollar quote", "select 1", "$$"},
+		{"contains $$", "select '$$'", "$thaw$"},
+		{"contains $$ and $thaw$", "a $$ b $thaw$ c", "$thaw_body$"},
+		{"contains all named tags", "$$ $thaw$ $thaw_body$", "$thaw_0$"},
+	}
+	for _, tt := range tests {
+		if got := DollarQuoteTag(tt.body); got != tt.want {
+			t.Errorf("DollarQuoteTag(%q) = %q, want %q", tt.body, got, tt.want)
+		}
+		// The chosen tag must never occur in the body.
+		if strings.Contains(tt.body, DollarQuoteTag(tt.body)) {
+			t.Errorf("DollarQuoteTag(%q) returned a tag present in the body", tt.body)
 		}
 	}
 }

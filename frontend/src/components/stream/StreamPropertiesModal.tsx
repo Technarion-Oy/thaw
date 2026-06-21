@@ -38,7 +38,10 @@ const LABEL_TD: React.CSSProperties = {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function q1(s: string) { return "'" + s.replace(/'/g, "''") + "'"; }
+// Escape a SQL text literal the way the backend's EscapeTextLit does — double
+// backslashes (Snowflake interprets backslash escapes in string literals) then
+// single quotes — so a comment like C:\temp round-trips intact.
+function q1(s: string) { return "'" + s.replace(/\\/g, "\\\\").replace(/'/g, "''") + "'"; }
 
 // ─── EditRow ─────────────────────────────────────────────────────────────────
 

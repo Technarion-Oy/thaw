@@ -184,6 +184,15 @@ func TestBuildCreateProcedureSql(t *testing.T) {
 			cfg:  ProcedureConfig{Name: "myProc", CaseSensitive: true},
 			want: []string{`"myProc"`},
 		},
+		{
+			name: "body containing $$ uses an alternate dollar-quote tag",
+			cfg: ProcedureConfig{
+				Name: "P",
+				Body: "BEGIN\n  LET x := '$$';\n  RETURN x;\nEND",
+			},
+			want:    []string{"AS $thaw$\n", "\n$thaw$;"},
+			notWant: []string{"AS $$"},
+		},
 	}
 
 	// COMMENT must precede EXECUTE AS per the CREATE PROCEDURE grammar.
