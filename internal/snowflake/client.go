@@ -3247,6 +3247,7 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 		{fmt.Sprintf("SHOW AGENTS IN SCHEMA %s", q), "AGENT"},
 		{fmt.Sprintf("SHOW EXTERNAL AGENTS IN SCHEMA %s", q), "EXTERNAL AGENT"},
 		{fmt.Sprintf("SHOW MCP SERVERS IN SCHEMA %s", q), "MCP SERVER"},
+		{fmt.Sprintf("SHOW SEMANTIC VIEWS IN SCHEMA %s", q), "SEMANTIC VIEW"},
 	}
 
 	// Filter out disabled object kinds (set via SetExcludedExtendedKinds).

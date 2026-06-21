@@ -58,6 +58,10 @@ export function AlterExternalTable(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterExternalTable'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterFunction(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['app']['App']['AlterFunction'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function AlterHybridTable(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterHybridTable'](arg1, arg2, arg3, arg4);
 }
@@ -106,12 +110,24 @@ export function AlterPrivacyPolicy(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterPrivacyPolicy'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterProcedure(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['app']['App']['AlterProcedure'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function AlterProjectionPolicy(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterProjectionPolicy'](arg1, arg2, arg3, arg4);
 }
 
 export function AlterRowAccessPolicy(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterRowAccessPolicy'](arg1, arg2, arg3, arg4);
+}
+
+export function AlterSemanticView(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterSemanticView'](arg1, arg2, arg3, arg4);
+}
+
+export function AlterSequence(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterSequence'](arg1, arg2, arg3, arg4);
 }
 
 export function AlterService(arg1, arg2, arg3, arg4) {
@@ -130,6 +146,10 @@ export function AlterStorageLifecyclePolicy(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterStorageLifecyclePolicy'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterStream(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterStream'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterStreamlit(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterStreamlit'](arg1, arg2, arg3, arg4);
 }
@@ -144,6 +164,10 @@ export function AlterTag(arg1, arg2, arg3, arg4) {
 
 export function AlterTask(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterTask'](arg1, arg2, arg3, arg4);
+}
+
+export function AlterView(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterView'](arg1, arg2, arg3, arg4);
 }
 
 export function AlterWarehouseAbortAllQueries(arg1) {
@@ -274,6 +298,10 @@ export function BuildCreateFileFormatSql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateFileFormatSql'](arg1, arg2, arg3);
 }
 
+export function BuildCreateFunctionSql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateFunctionSql'](arg1, arg2, arg3);
+}
+
 export function BuildCreateGitRepositorySql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateGitRepositorySql'](arg1, arg2, arg3);
 }
@@ -330,6 +358,10 @@ export function BuildCreatePrivacyPolicySql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreatePrivacyPolicySql'](arg1, arg2, arg3);
 }
 
+export function BuildCreateProcedureSql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateProcedureSql'](arg1, arg2, arg3);
+}
+
 export function BuildCreateProjectionPolicySql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateProjectionPolicySql'](arg1, arg2, arg3);
 }
@@ -340,6 +372,14 @@ export function BuildCreateRowAccessPolicySql(arg1, arg2, arg3) {
 
 export function BuildCreateSecretSql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateSecretSql'](arg1, arg2, arg3);
+}
+
+export function BuildCreateSemanticViewSql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateSemanticViewSql'](arg1, arg2, arg3);
+}
+
+export function BuildCreateSequenceSql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateSequenceSql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateServiceSql(arg1, arg2, arg3) {
@@ -358,12 +398,20 @@ export function BuildCreateStorageLifecyclePolicySql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateStorageLifecyclePolicySql'](arg1, arg2, arg3);
 }
 
+export function BuildCreateStreamSql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateStreamSql'](arg1, arg2, arg3);
+}
+
 export function BuildCreateStreamlitSql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateStreamlitSql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateTagSql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateTagSql'](arg1, arg2, arg3);
+}
+
+export function BuildCreateViewSql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateViewSql'](arg1, arg2, arg3);
 }
 
 export function BuildDropColumnNotNullSql(arg1, arg2, arg3, arg4) {
@@ -620,6 +668,10 @@ export function DescribeMCPServer(arg1, arg2, arg3) {
 
 export function DescribePasswordPolicy(arg1, arg2, arg3) {
   return window['go']['app']['App']['DescribePasswordPolicy'](arg1, arg2, arg3);
+}
+
+export function DescribeSemanticView(arg1, arg2, arg3) {
+  return window['go']['app']['App']['DescribeSemanticView'](arg1, arg2, arg3);
 }
 
 export function DescribeSessionPolicy(arg1, arg2, arg3) {
@@ -1016,6 +1068,10 @@ export function GetSchemaForeignKeys(arg1, arg2) {
 
 export function GetSchemaRetentionDays(arg1, arg2) {
   return window['go']['app']['App']['GetSchemaRetentionDays'](arg1, arg2);
+}
+
+export function GetSemanticViewTags(arg1, arg2, arg3) {
+  return window['go']['app']['App']['GetSemanticViewTags'](arg1, arg2, arg3);
 }
 
 export function GetServiceContainers(arg1, arg2, arg3) {
@@ -1416,6 +1472,22 @@ export function ListSecretsInAccount() {
 
 export function ListSecurityIntegrations() {
   return window['go']['app']['App']['ListSecurityIntegrations']();
+}
+
+export function ListSemanticDimensions(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ListSemanticDimensions'](arg1, arg2, arg3);
+}
+
+export function ListSemanticDimensionsForMetric(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['ListSemanticDimensionsForMetric'](arg1, arg2, arg3, arg4);
+}
+
+export function ListSemanticFacts(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ListSemanticFacts'](arg1, arg2, arg3);
+}
+
+export function ListSemanticMetrics(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ListSemanticMetrics'](arg1, arg2, arg3);
 }
 
 export function ListServiceEndpoints(arg1, arg2, arg3) {

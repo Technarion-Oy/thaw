@@ -42,14 +42,19 @@ import (
 	"thaw/internal/projectionpolicy"
 	"thaw/internal/rowaccesspolicy"
 	"thaw/internal/secret"
+	"thaw/internal/semanticview"
+	"thaw/internal/sequence"
 	"thaw/internal/service"
 	"thaw/internal/sessionpolicy"
 	"thaw/internal/snowflake"
 	"thaw/internal/snowgitrepo"
 	"thaw/internal/stage"
 	"thaw/internal/storagelifecyclepolicy"
+	"thaw/internal/stream"
 	"thaw/internal/streamlit"
 	"thaw/internal/tag"
+	"thaw/internal/udf"
+	"thaw/internal/view"
 )
 
 // BuildCreateSecretSql returns the SQL for creating a secret.
@@ -274,6 +279,12 @@ func (a *App) BuildCreateMCPServerSql(database, schema string, cfg mcpserver.MCP
 	return mcpserver.BuildCreateMCPServerSql(database, schema, cfg)
 }
 
+// BuildCreateSemanticViewSql returns the SQL for creating a Snowflake SEMANTIC
+// VIEW.
+func (a *App) BuildCreateSemanticViewSql(database, schema string, cfg semanticview.SemanticViewConfig) (string, error) {
+	return semanticview.BuildCreateSemanticViewSql(database, schema, cfg)
+}
+
 // BuildCreateCortexSearchServiceSql returns the SQL for creating a Snowflake
 // CORTEX SEARCH SERVICE.
 func (a *App) BuildCreateCortexSearchServiceSql(database, schema string, cfg cortexsearchservice.CortexSearchServiceConfig) (string, error) {
@@ -305,6 +316,31 @@ func (a *App) BuildAlterStageSql(cfg stage.AlterStageConfig) string {
 // included, keeping the output concise.
 func (a *App) BuildCreateFileFormatSql(database, schema string, cfg fileformat.FileFormatConfig) string {
 	return fileformat.BuildCreateFileFormatSql(database, schema, cfg)
+}
+
+// BuildCreateViewSql returns the SQL for creating a Snowflake VIEW.
+func (a *App) BuildCreateViewSql(database, schema string, cfg view.ViewConfig) (string, error) {
+	return view.BuildCreateViewSql(database, schema, cfg)
+}
+
+// BuildCreateSequenceSql returns the SQL for creating a Snowflake SEQUENCE.
+func (a *App) BuildCreateSequenceSql(database, schema string, cfg sequence.SequenceConfig) (string, error) {
+	return sequence.BuildCreateSequenceSql(database, schema, cfg)
+}
+
+// BuildCreateStreamSql returns the SQL for creating a Snowflake STREAM.
+func (a *App) BuildCreateStreamSql(database, schema string, cfg stream.StreamConfig) (string, error) {
+	return stream.BuildCreateStreamSql(database, schema, cfg)
+}
+
+// BuildCreateFunctionSql returns the SQL for creating a Snowflake user-defined FUNCTION.
+func (a *App) BuildCreateFunctionSql(database, schema string, cfg udf.FunctionConfig) (string, error) {
+	return udf.BuildCreateFunctionSql(database, schema, cfg)
+}
+
+// BuildCreateProcedureSql returns the SQL for creating a Snowflake stored PROCEDURE.
+func (a *App) BuildCreateProcedureSql(database, schema string, cfg procedure.ProcedureConfig) (string, error) {
+	return procedure.BuildCreateProcedureSql(database, schema, cfg)
 }
 
 // BuildCallStatement constructs a CALL SQL statement for a stored procedure.

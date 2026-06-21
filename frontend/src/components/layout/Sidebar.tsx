@@ -18,6 +18,7 @@ import {
   EyeOutlined,
   FunctionOutlined,
   CodeOutlined,
+  NumberOutlined,
   InboxOutlined,
   ApiOutlined,
   FundOutlined,
@@ -150,6 +151,16 @@ import CreateDataMetricFunctionModal from "../datametricfunction/CreateDataMetri
 import DataMetricFunctionPropertiesModal from "../datametricfunction/DataMetricFunctionPropertiesModal";
 import CreateMaterializedViewModal from "../materializedview/CreateMaterializedViewModal";
 import MaterializedViewPropertiesModal from "../materializedview/MaterializedViewPropertiesModal";
+import CreateViewModal from "../view/CreateViewModal";
+import ViewPropertiesModal from "../view/ViewPropertiesModal";
+import CreateSequenceModal from "../sequence/CreateSequenceModal";
+import SequencePropertiesModal from "../sequence/SequencePropertiesModal";
+import CreateStreamModal from "../stream/CreateStreamModal";
+import StreamPropertiesModal from "../stream/StreamPropertiesModal";
+import CreateFunctionModal from "../function/CreateFunctionModal";
+import FunctionPropertiesModal from "../function/FunctionPropertiesModal";
+import CreateProcedureModal from "../procedure/CreateProcedureModal";
+import ProcedurePropertiesModal from "../procedure/ProcedurePropertiesModal";
 import CreateAlertModal from "../alert/CreateAlertModal";
 import AlertPropertiesModal from "../alert/AlertPropertiesModal";
 import CreateTagModal from "../tag/CreateTagModal";
@@ -190,6 +201,8 @@ import CreateExternalAgentModal from "../externalagent/CreateExternalAgentModal"
 import ExternalAgentPropertiesModal from "../externalagent/ExternalAgentPropertiesModal";
 import CreateMCPServerModal from "../mcpserver/CreateMCPServerModal";
 import MCPServerPropertiesModal from "../mcpserver/MCPServerPropertiesModal";
+import CreateSemanticViewModal from "../semanticview/CreateSemanticViewModal";
+import SemanticViewPropertiesModal from "../semanticview/SemanticViewPropertiesModal";
 import CreateServiceModal from "../service/CreateServiceModal";
 import ServicePropertiesModal from "../service/ServicePropertiesModal";
 import CreateStreamlitModal from "../streamlit/CreateStreamlitModal";
@@ -255,9 +268,10 @@ const KIND_LABEL: Record<string, string> = {
   AGENT:         "Agents",
   "EXTERNAL AGENT": "External Agents",
   "MCP SERVER":  "MCP Servers",
+  "SEMANTIC VIEW": "Semantic Views",
 };
 
-const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE", "FUNCTION", "EXTERNAL FUNCTION", "DATA METRIC FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "JOIN POLICY", "PRIVACY POLICY", "STORAGE LIFECYCLE POLICY", "PASSWORD POLICY", "SESSION POLICY", "AGGREGATION POLICY", "PROJECTION POLICY", "AUTHENTICATION POLICY", "PACKAGES POLICY", "NETWORK RULE", "IMAGE REPOSITORY", "SERVICE", "STREAMLIT", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT", "MODEL", "CORTEX SEARCH SERVICE", "AGENT", "EXTERNAL AGENT", "MCP SERVER"];
+const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE", "FUNCTION", "EXTERNAL FUNCTION", "DATA METRIC FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "JOIN POLICY", "PRIVACY POLICY", "STORAGE LIFECYCLE POLICY", "PASSWORD POLICY", "SESSION POLICY", "AGGREGATION POLICY", "PROJECTION POLICY", "AUTHENTICATION POLICY", "PACKAGES POLICY", "NETWORK RULE", "IMAGE REPOSITORY", "SERVICE", "STREAMLIT", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT", "MODEL", "CORTEX SEARCH SERVICE", "AGENT", "EXTERNAL AGENT", "MCP SERVER", "SEMANTIC VIEW"];
 
 const kindIcon = (kind: string) => objectIcon(kind);
 
@@ -690,6 +704,16 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [dataMetricFunctionPropsModal, setDataMetricFunctionPropsModal] = useState<{ db: string; schema: string; name: string; args: string } | null>(null);
   const [createMaterializedViewModal, setCreateMaterializedViewModal] = useState<{ db: string; schema: string } | null>(null);
   const [materializedViewPropsModal, setMaterializedViewPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [createViewModal, setCreateViewModal] = useState<{ db: string; schema: string } | null>(null);
+  const [viewPropsModal, setViewPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [createSequenceModal, setCreateSequenceModal] = useState<{ db: string; schema: string } | null>(null);
+  const [sequencePropsModal, setSequencePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [createStreamModal, setCreateStreamModal] = useState<{ db: string; schema: string } | null>(null);
+  const [streamPropsModal, setStreamPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [createFunctionModal, setCreateFunctionModal] = useState<{ db: string; schema: string } | null>(null);
+  const [functionPropsModal, setFunctionPropsModal] = useState<{ db: string; schema: string; name: string; args: string } | null>(null);
+  const [createProcedureModal, setCreateProcedureModal] = useState<{ db: string; schema: string } | null>(null);
+  const [procedurePropsModal, setProcedurePropsModal] = useState<{ db: string; schema: string; name: string; args: string } | null>(null);
   const [createAlertModal, setCreateAlertModal] = useState<{ db: string; schema: string } | null>(null);
   const [alertPropsModal, setAlertPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createTagModal, setCreateTagModal] = useState<{ db: string; schema: string } | null>(null);
@@ -730,6 +754,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [externalAgentPropsModal, setExternalAgentPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createMCPServerModal, setCreateMCPServerModal] = useState<{ db: string; schema: string } | null>(null);
   const [mcpServerPropsModal, setMCPServerPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [createSemanticViewModal, setCreateSemanticViewModal] = useState<{ db: string; schema: string } | null>(null);
+  const [semanticViewPropsModal, setSemanticViewPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createServiceModal, setCreateServiceModal] = useState<{ db: string; schema: string } | null>(null);
   const [servicePropsModal, setServicePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createStreamlitModal, setCreateStreamlitModal] = useState<{ db: string; schema: string } | null>(null);
@@ -2206,6 +2232,78 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setMaterializedViewPropsModal({ db, schema, name });
   };
 
+  const openCreateView = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    setCtxMenu(null);
+    setCreateViewModal({ db: parts[1], schema: parts[2] });
+  };
+
+  const openViewProperties = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    setCtxMenu(null);
+    setViewPropsModal({ db: parts[1], schema: parts[2], name: parts.slice(4).join(":") });
+  };
+
+  const openCreateSequence = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    setCtxMenu(null);
+    setCreateSequenceModal({ db: parts[1], schema: parts[2] });
+  };
+
+  const openSequenceProperties = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    setCtxMenu(null);
+    setSequencePropsModal({ db: parts[1], schema: parts[2], name: parts.slice(4).join(":") });
+  };
+
+  const openCreateStream = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    setCtxMenu(null);
+    setCreateStreamModal({ db: parts[1], schema: parts[2] });
+  };
+
+  const openStreamProperties = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    setCtxMenu(null);
+    setStreamPropsModal({ db: parts[1], schema: parts[2], name: parts.slice(4).join(":") });
+  };
+
+  const openCreateFunction = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    setCtxMenu(null);
+    setCreateFunctionModal({ db: parts[1], schema: parts[2] });
+  };
+
+  const openFunctionProperties = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const args = ctxMenu.objArgs ?? "";
+    setCtxMenu(null);
+    setFunctionPropsModal({ db: parts[1], schema: parts[2], name: parts.slice(4).join(":"), args });
+  };
+
+  const openCreateProcedure = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    setCtxMenu(null);
+    setCreateProcedureModal({ db: parts[1], schema: parts[2] });
+  };
+
+  const openProcedureProperties = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const args = ctxMenu.objArgs ?? "";
+    setCtxMenu(null);
+    setProcedurePropsModal({ db: parts[1], schema: parts[2], name: parts.slice(4).join(":"), args });
+  };
+
   const suspendMaterializedView = () => {
     if (!ctxMenu) return;
     const parts = ctxMenu.nodeKey.split(":");
@@ -2629,6 +2727,25 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const name = parts.slice(4).join(":");
     setCtxMenu(null);
     setMCPServerPropsModal({ db, schema, name });
+  };
+
+  const openCreateSemanticView = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    setCtxMenu(null);
+    setCreateSemanticViewModal({ db, schema });
+  };
+
+  const openSemanticViewProperties = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    setSemanticViewPropsModal({ db, schema, name });
   };
 
   const openCreateService = () => {
@@ -3079,6 +3196,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       case "AGENT":       sql = `DROP AGENT ${fullName};`; break;
       case "EXTERNAL AGENT": sql = `DROP EXTERNAL AGENT ${fullName};`; break;
       case "MCP SERVER":  sql = `DROP MCP SERVER ${fullName};`; break;
+      case "SEMANTIC VIEW": sql = `DROP SEMANTIC VIEW ${fullName};`; break;
       case "SERVICE":     sql = `DROP SERVICE ${fullName};`; break;
       case "STREAMLIT":   sql = `DROP STREAMLIT ${fullName};`; break;
       case "SEQUENCE":    sql = `DROP SEQUENCE ${fullName};`; break;
@@ -3747,6 +3865,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         case "AGENT":       return `DROP AGENT ${fullName};`;
         case "EXTERNAL AGENT": return `DROP EXTERNAL AGENT ${fullName};`;
         case "MCP SERVER":  return `DROP MCP SERVER ${fullName};`;
+        case "SEMANTIC VIEW": return `DROP SEMANTIC VIEW ${fullName};`;
         case "SERVICE":     return `DROP SERVICE ${fullName};`;
         case "STREAMLIT":   return `DROP STREAMLIT ${fullName};`;
         case "SEQUENCE":    return `DROP SEQUENCE ${fullName};`;
@@ -4255,6 +4374,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
               {menuItemSub("Tables & Views", <TableOutlined style={{ fontSize: 12 }} />, "create-tables", (
                 <>
                   {menuItem("Table…", <TableOutlined style={{ fontSize: 12 }} />, openCreateTable)}
+                  {menuItem("View…", <EyeOutlined style={{ fontSize: 12 }} />, openCreateView)}
                   {menuItem("Dynamic Table…", <RetweetOutlined style={{ fontSize: 12 }} />, openCreateDynamicTable)}
                   {menuItem("External Table…", <CloudServerOutlined style={{ fontSize: 12 }} />, openCreateExternalTable)}
                   {menuItem("Iceberg Table…", <GoldOutlined style={{ fontSize: 12 }} />, openCreateIcebergTable)}
@@ -4303,10 +4423,18 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                   {menuItem("Streamlit…", <AppstoreOutlined style={{ fontSize: 12 }} />, openCreateStreamlit)}
                 </>
               ), 1)}
-              {menuItemSub("Functions", <FunctionOutlined style={{ fontSize: 12 }} />, "create-functions", (
+              {menuItemSub("Functions & Procedures", <FunctionOutlined style={{ fontSize: 12 }} />, "create-functions", (
                 <>
+                  {menuItem("Function…", <FunctionOutlined style={{ fontSize: 12 }} />, openCreateFunction)}
+                  {menuItem("Procedure…", <CodeOutlined style={{ fontSize: 12 }} />, openCreateProcedure)}
                   {menuItem("External Function…", <ApiOutlined style={{ fontSize: 12 }} />, openCreateExternalFunction)}
                   {menuItem("Data Metric Function…", <FundOutlined style={{ fontSize: 12 }} />, openCreateDataMetricFunction)}
+                </>
+              ), 1)}
+              {menuItemSub("Sequences & Streams", <NumberOutlined style={{ fontSize: 12 }} />, "create-seq-stream", (
+                <>
+                  {menuItem("Sequence…", <NumberOutlined style={{ fontSize: 12 }} />, openCreateSequence)}
+                  {menuItem("Stream…", <ThunderboltOutlined style={{ fontSize: 12 }} />, openCreateStream)}
                 </>
               ), 1)}
               {menuItemSub("Machine Learning", <RobotOutlined style={{ fontSize: 12 }} />, "create-ml", (
@@ -4316,6 +4444,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                   {menuItem("Agent…", <ApiOutlined style={{ fontSize: 12 }} />, openCreateAgent)}
                   {menuItem("External Agent…", <GlobalOutlined style={{ fontSize: 12 }} />, openCreateExternalAgent)}
                   {menuItem("MCP Server…", <PartitionOutlined style={{ fontSize: 12 }} />, openCreateMCPServer)}
+                  {menuItem("Semantic View…", <ApartmentOutlined style={{ fontSize: 12 }} />, openCreateSemanticView)}
                 </>
               ), 1)}
             </>
@@ -4346,6 +4475,16 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Create Event Table…", <AuditOutlined style={{ fontSize: 12 }} />, openCreateEventTable)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "MATERIALIZED VIEW" &&
             menuItem("Create Materialized View…", <BlockOutlined style={{ fontSize: 12 }} />, openCreateMaterializedView)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "VIEW" &&
+            menuItem("Create View…", <EyeOutlined style={{ fontSize: 12 }} />, openCreateView)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "SEQUENCE" &&
+            menuItem("Create Sequence…", <NumberOutlined style={{ fontSize: 12 }} />, openCreateSequence)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "STREAM" &&
+            menuItem("Create Stream…", <ThunderboltOutlined style={{ fontSize: 12 }} />, openCreateStream)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "FUNCTION" &&
+            menuItem("Create Function…", <FunctionOutlined style={{ fontSize: 12 }} />, openCreateFunction)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "PROCEDURE" &&
+            menuItem("Create Procedure…", <CodeOutlined style={{ fontSize: 12 }} />, openCreateProcedure)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "ALERT" &&
             menuItem("Create Alert…", <AlertOutlined style={{ fontSize: 12 }} />, openCreateAlert)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "TAG" &&
@@ -4400,6 +4539,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Create External Agent…", <GlobalOutlined style={{ fontSize: 12 }} />, openCreateExternalAgent)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "MCP SERVER" &&
             menuItem("Create MCP Server…", <PartitionOutlined style={{ fontSize: 12 }} />, openCreateMCPServer)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "SEMANTIC VIEW" &&
+            menuItem("Create Semantic View…", <ApartmentOutlined style={{ fontSize: 12 }} />, openCreateSemanticView)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "FILE FORMAT" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STAGE" &&
@@ -4440,6 +4581,16 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Suspend", <PauseCircleOutlined style={{ fontSize: 12 }} />, suspendMaterializedView)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MATERIALIZED VIEW" &&
             menuItem("Resume", <PlayCircleOutlined style={{ fontSize: 12 }} />, resumeMaterializedView)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "VIEW" &&
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openViewProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "SEQUENCE" &&
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openSequenceProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STREAM" &&
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openStreamProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "FUNCTION" &&
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openFunctionProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PROCEDURE" &&
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openProcedureProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "ALERT" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openAlertProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "ALERT" &&
@@ -4486,6 +4637,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openExternalAgentProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MCP SERVER" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openMCPServerProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "SEMANTIC VIEW" &&
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openSemanticViewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "SERVICE" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openServiceProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "SERVICE" &&
@@ -4593,7 +4746,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Make Live", <CloudUploadOutlined style={{ fontSize: 12 }} />, makeNotebookLive, undefined, !featureFlags.snowparkNotebooks, "Snowpark & Notebooks is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && menuItem("View Definition", null, viewDefinition)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ICEBERG TABLE" && ctxMenu.objKind !== "HYBRID TABLE" && ctxMenu.objKind !== "EVENT TABLE" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "JOIN POLICY" && ctxMenu.objKind !== "PRIVACY POLICY" && ctxMenu.objKind !== "STORAGE LIFECYCLE POLICY" && ctxMenu.objKind !== "PASSWORD POLICY" && ctxMenu.objKind !== "SESSION POLICY" && ctxMenu.objKind !== "AGGREGATION POLICY" && ctxMenu.objKind !== "PROJECTION POLICY" && ctxMenu.objKind !== "AUTHENTICATION POLICY" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "STREAMLIT" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "AGENT" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ICEBERG TABLE" && ctxMenu.objKind !== "HYBRID TABLE" && ctxMenu.objKind !== "EVENT TABLE" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "JOIN POLICY" && ctxMenu.objKind !== "PRIVACY POLICY" && ctxMenu.objKind !== "STORAGE LIFECYCLE POLICY" && ctxMenu.objKind !== "PASSWORD POLICY" && ctxMenu.objKind !== "SESSION POLICY" && ctxMenu.objKind !== "AGGREGATION POLICY" && ctxMenu.objKind !== "PROJECTION POLICY" && ctxMenu.objKind !== "AUTHENTICATION POLICY" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "STREAMLIT" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "AGENT" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && ctxMenu.objKind !== "SEMANTIC VIEW" && ctxMenu.objKind !== "VIEW" && ctxMenu.objKind !== "SEQUENCE" && ctxMenu.objKind !== "STREAM" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {/* Comparison diffs via GET_DDL, which image repositories, services,
               packages policies, and models don't support — exclude them so the
               diff view can't surface a GET_DDL error for a kind that has no DDL. */}
@@ -4994,6 +5147,98 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         />
       )}
 
+      {createViewModal && (
+        <CreateViewModal
+          db={createViewModal.db}
+          schema={createViewModal.schema}
+          onClose={() => setCreateViewModal(null)}
+          onSuccess={() => refreshDatabaseByName(createViewModal.db, { schema: createViewModal.schema, kind: "VIEW" })}
+        />
+      )}
+
+      {viewPropsModal && (
+        <ViewPropertiesModal
+          db={viewPropsModal.db}
+          schema={viewPropsModal.schema}
+          name={viewPropsModal.name}
+          onClose={() => setViewPropsModal(null)}
+        />
+      )}
+
+      {createSequenceModal && (
+        <CreateSequenceModal
+          db={createSequenceModal.db}
+          schema={createSequenceModal.schema}
+          onClose={() => setCreateSequenceModal(null)}
+          onSuccess={() => refreshDatabaseByName(createSequenceModal.db, { schema: createSequenceModal.schema, kind: "SEQUENCE" })}
+        />
+      )}
+
+      {sequencePropsModal && (
+        <SequencePropertiesModal
+          db={sequencePropsModal.db}
+          schema={sequencePropsModal.schema}
+          name={sequencePropsModal.name}
+          onClose={() => setSequencePropsModal(null)}
+        />
+      )}
+
+      {createStreamModal && (
+        <CreateStreamModal
+          db={createStreamModal.db}
+          schema={createStreamModal.schema}
+          onClose={() => setCreateStreamModal(null)}
+          onSuccess={() => refreshDatabaseByName(createStreamModal.db, { schema: createStreamModal.schema, kind: "STREAM" })}
+        />
+      )}
+
+      {streamPropsModal && (
+        <StreamPropertiesModal
+          db={streamPropsModal.db}
+          schema={streamPropsModal.schema}
+          name={streamPropsModal.name}
+          onClose={() => setStreamPropsModal(null)}
+        />
+      )}
+
+      {createFunctionModal && (
+        <CreateFunctionModal
+          db={createFunctionModal.db}
+          schema={createFunctionModal.schema}
+          onClose={() => setCreateFunctionModal(null)}
+          onSuccess={() => refreshDatabaseByName(createFunctionModal.db, { schema: createFunctionModal.schema, kind: "FUNCTION" })}
+        />
+      )}
+
+      {functionPropsModal && (
+        <FunctionPropertiesModal
+          db={functionPropsModal.db}
+          schema={functionPropsModal.schema}
+          name={functionPropsModal.name}
+          args={functionPropsModal.args}
+          onClose={() => setFunctionPropsModal(null)}
+        />
+      )}
+
+      {createProcedureModal && (
+        <CreateProcedureModal
+          db={createProcedureModal.db}
+          schema={createProcedureModal.schema}
+          onClose={() => setCreateProcedureModal(null)}
+          onSuccess={() => refreshDatabaseByName(createProcedureModal.db, { schema: createProcedureModal.schema, kind: "PROCEDURE" })}
+        />
+      )}
+
+      {procedurePropsModal && (
+        <ProcedurePropertiesModal
+          db={procedurePropsModal.db}
+          schema={procedurePropsModal.schema}
+          name={procedurePropsModal.name}
+          args={procedurePropsModal.args}
+          onClose={() => setProcedurePropsModal(null)}
+        />
+      )}
+
       {createAlertModal && (
         <CreateAlertModal
           db={createAlertModal.db}
@@ -5351,6 +5596,24 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={mcpServerPropsModal.schema}
           name={mcpServerPropsModal.name}
           onClose={() => setMCPServerPropsModal(null)}
+        />
+      )}
+
+      {createSemanticViewModal && (
+        <CreateSemanticViewModal
+          db={createSemanticViewModal.db}
+          schema={createSemanticViewModal.schema}
+          onClose={() => setCreateSemanticViewModal(null)}
+          onSuccess={() => refreshDatabaseByName(createSemanticViewModal.db, { schema: createSemanticViewModal.schema, kind: "SEMANTIC VIEW" })}
+        />
+      )}
+
+      {semanticViewPropsModal && (
+        <SemanticViewPropertiesModal
+          db={semanticViewPropsModal.db}
+          schema={semanticViewPropsModal.schema}
+          name={semanticViewPropsModal.name}
+          onClose={() => setSemanticViewPropsModal(null)}
         />
       )}
 

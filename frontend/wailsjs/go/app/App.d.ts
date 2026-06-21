@@ -18,6 +18,7 @@ import {externalagent} from '../models';
 import {externalfunction} from '../models';
 import {externaltable} from '../models';
 import {fileformat} from '../models';
+import {udf} from '../models';
 import {snowgitrepo} from '../models';
 import {hybridtable} from '../models';
 import {icebergtable} from '../models';
@@ -35,11 +36,15 @@ import {privacypolicy} from '../models';
 import {projectionpolicy} from '../models';
 import {rowaccesspolicy} from '../models';
 import {secret} from '../models';
+import {semanticview} from '../models';
+import {sequence} from '../models';
 import {service} from '../models';
 import {sessionpolicy} from '../models';
 import {storagelifecyclepolicy} from '../models';
+import {stream} from '../models';
 import {streamlit} from '../models';
 import {tag} from '../models';
+import {view} from '../models';
 import {erdesigner} from '../models';
 import {snowpark} from '../models';
 import {snowflake} from '../models';
@@ -90,6 +95,8 @@ export function AlterExternalFunction(arg1:string,arg2:string,arg3:string,arg4:s
 
 export function AlterExternalTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
+export function AlterFunction(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
+
 export function AlterHybridTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterIcebergTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
@@ -114,9 +121,15 @@ export function AlterPipe(arg1:string,arg2:string,arg3:string,arg4:string):Promi
 
 export function AlterPrivacyPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
+export function AlterProcedure(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
+
 export function AlterProjectionPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterRowAccessPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterSemanticView(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterSequence(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterService(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -126,6 +139,8 @@ export function AlterStage(arg1:string,arg2:string,arg3:string,arg4:string):Prom
 
 export function AlterStorageLifecyclePolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
+export function AlterStream(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
 export function AlterStreamlit(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterTableProperty(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
@@ -133,6 +148,8 @@ export function AlterTableProperty(arg1:string,arg2:string,arg3:string,arg4:stri
 export function AlterTag(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterTask(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterView(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterWarehouseAbortAllQueries(arg1:string):Promise<void>;
 
@@ -198,6 +215,8 @@ export function BuildCreateExternalTableSql(arg1:string,arg2:string,arg3:externa
 
 export function BuildCreateFileFormatSql(arg1:string,arg2:string,arg3:fileformat.FileFormatConfig):Promise<string>;
 
+export function BuildCreateFunctionSql(arg1:string,arg2:string,arg3:udf.FunctionConfig):Promise<string>;
+
 export function BuildCreateGitRepositorySql(arg1:string,arg2:string,arg3:snowgitrepo.GitRepositoryConfig):Promise<string>;
 
 export function BuildCreateHybridTableSql(arg1:string,arg2:string,arg3:hybridtable.HybridTableConfig):Promise<string>;
@@ -226,11 +245,17 @@ export function BuildCreatePipeSql(arg1:string,arg2:string,arg3:pipe.PipeConfig)
 
 export function BuildCreatePrivacyPolicySql(arg1:string,arg2:string,arg3:privacypolicy.PrivacyPolicyConfig):Promise<string>;
 
+export function BuildCreateProcedureSql(arg1:string,arg2:string,arg3:procedure.ProcedureConfig):Promise<string>;
+
 export function BuildCreateProjectionPolicySql(arg1:string,arg2:string,arg3:projectionpolicy.ProjectionPolicyConfig):Promise<string>;
 
 export function BuildCreateRowAccessPolicySql(arg1:string,arg2:string,arg3:rowaccesspolicy.RowAccessPolicyConfig):Promise<string>;
 
 export function BuildCreateSecretSql(arg1:string,arg2:string,arg3:secret.SecretConfig):Promise<string>;
+
+export function BuildCreateSemanticViewSql(arg1:string,arg2:string,arg3:semanticview.SemanticViewConfig):Promise<string>;
+
+export function BuildCreateSequenceSql(arg1:string,arg2:string,arg3:sequence.SequenceConfig):Promise<string>;
 
 export function BuildCreateServiceSql(arg1:string,arg2:string,arg3:service.ServiceConfig):Promise<string>;
 
@@ -240,9 +265,13 @@ export function BuildCreateStageSql(arg1:stage.StageConfig):Promise<string>;
 
 export function BuildCreateStorageLifecyclePolicySql(arg1:string,arg2:string,arg3:storagelifecyclepolicy.StorageLifecyclePolicyConfig):Promise<string>;
 
+export function BuildCreateStreamSql(arg1:string,arg2:string,arg3:stream.StreamConfig):Promise<string>;
+
 export function BuildCreateStreamlitSql(arg1:string,arg2:string,arg3:streamlit.StreamlitConfig):Promise<string>;
 
 export function BuildCreateTagSql(arg1:string,arg2:string,arg3:tag.TagConfig):Promise<string>;
+
+export function BuildCreateViewSql(arg1:string,arg2:string,arg3:view.ViewConfig):Promise<string>;
 
 export function BuildDropColumnNotNullSql(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
 
@@ -371,6 +400,8 @@ export function DescribeExternalFunction(arg1:string,arg2:string,arg3:string,arg
 export function DescribeMCPServer(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function DescribePasswordPolicy(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
+
+export function DescribeSemanticView(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function DescribeSessionPolicy(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
@@ -569,6 +600,8 @@ export function GetSchemaCrossDeps(arg1:string,arg2:string):Promise<Array<snowfl
 export function GetSchemaForeignKeys(arg1:string,arg2:string):Promise<Array<snowflake.TableForeignKey>>;
 
 export function GetSchemaRetentionDays(arg1:string,arg2:string):Promise<number>;
+
+export function GetSemanticViewTags(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function GetServiceContainers(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
@@ -769,6 +802,14 @@ export function ListSchemas(arg1:string):Promise<Array<string>>;
 export function ListSecretsInAccount():Promise<Array<snowflake.AccountSecret>>;
 
 export function ListSecurityIntegrations():Promise<Array<snowflake.SecurityIntegration>>;
+
+export function ListSemanticDimensions(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
+
+export function ListSemanticDimensionsForMetric(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.QueryResult>;
+
+export function ListSemanticFacts(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
+
+export function ListSemanticMetrics(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function ListServiceEndpoints(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 

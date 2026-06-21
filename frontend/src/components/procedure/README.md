@@ -1,18 +1,34 @@
 # frontend/src/components/procedure
 
-> Modal for interactively calling a Snowflake stored procedure with typed parameter inputs.
+> Modals for creating, inspecting, and interactively calling Snowflake stored procedures.
 
 ## Responsibility
 
-Fetches a procedure's parameter list from the backend, renders an appropriate input
-control for each parameter (boolean Select or text Input), builds a live `CALL` statement
-preview, and executes it in a new SQL tab on submit.
+Create a stored procedure (with a live `CREATE PROCEDURE` preview), inspect and edit an
+existing procedure's properties, and interactively call a procedure with typed parameter
+inputs.
 
 ## Files
 
 | File | Purpose |
 |------|---------|
 | `CallProcedureModal.tsx` | Full call-procedure modal: parameter loading, type-based input rendering, CALL statement preview, and new-tab execution. |
+| `CreateProcedureModal.tsx` | Create-procedure modal: name + OR REPLACE / IF NOT EXISTS, case control, an arguments editor, a Language select (SQL/PYTHON/JAVA/JAVASCRIPT/SCALA), a RETURNS-TABLE switch (scalar return type vs. a table-columns editor), an Advanced collapse (SECURE, RUNTIME_VERSION, PACKAGES, IMPORTS, HANDLER, null handling, volatility, EXECUTE AS), a comment, and a Monaco-backed procedure body. Builds the DDL via `BuildCreateProcedureSql` and runs it via `ExecDDL`. |
+| `ProcedurePropertiesModal.tsx` | Procedure properties modal: an editable Comment row and a SECURE toggle (via `AlterProcedure` `SET`/`UNSET COMMENT` and `SET`/`UNSET SECURE`), plus a generic table of the remaining `SHOW PROCEDURES` rows. Procedures have no lifecycle and no DDL/defining-query fetch. |
+
+## Create / Properties patterns
+
+**`CreateProcedureModal`** follows the shared create-modal convention: `CreateModalShell`
+chrome, `NameWithReplaceOptions` + `ObjectNameCaseControl` for the name, `useSqlPreview`
+for the live preview (built backend-side by `procedure.BuildCreateProcedureSql`), and
+`useCreateSubmit` for submit plumbing. The form state is a plain object cast to the
+generated `procedure.ProcedureConfig` only at the IPC boundary (`cfg as any`), because the
+generated class carries a `convertValues` method that a literal can't satisfy. `canSubmit`
+requires a non-empty name and body. Packages / imports use `Select mode="tags"`.
+
+**`ProcedurePropertiesModal`** mirrors the materialized-view properties modal but drops the
+lifecycle controls and the DDL fetch: it loads `GetObjectProperties(db, schema, "PROCEDURE",
+name)` and edits via `AlterProcedure(db, schema, name, clause)`.
 
 ## Patterns & integration
 

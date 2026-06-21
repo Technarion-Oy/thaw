@@ -3061,6 +3061,86 @@ export namespace procedure {
 	        this.value = source["value"];
 	    }
 	}
+	export class ProcArg {
+	    name: string;
+	    dataType: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProcArg(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.dataType = source["dataType"];
+	    }
+	}
+	export class ProcedureConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    secure: boolean;
+	    ifNotExists: boolean;
+	    args: ProcArg[];
+	    returnType: string;
+	    returnsTable: boolean;
+	    tableColumns: ProcArg[];
+	    language: string;
+	    runtimeVersion: string;
+	    packages: string[];
+	    imports: string[];
+	    handler: string;
+	    nullHandling: string;
+	    volatility: string;
+	    executeAs: string;
+	    comment: string;
+	    body: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProcedureConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.secure = source["secure"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.args = this.convertValues(source["args"], ProcArg);
+	        this.returnType = source["returnType"];
+	        this.returnsTable = source["returnsTable"];
+	        this.tableColumns = this.convertValues(source["tableColumns"], ProcArg);
+	        this.language = source["language"];
+	        this.runtimeVersion = source["runtimeVersion"];
+	        this.packages = source["packages"];
+	        this.imports = source["imports"];
+	        this.handler = source["handler"];
+	        this.nullHandling = source["nullHandling"];
+	        this.volatility = source["volatility"];
+	        this.executeAs = source["executeAs"];
+	        this.comment = source["comment"];
+	        this.body = source["body"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 
 }
 
@@ -3491,6 +3571,66 @@ export namespace secret {
 	        this.username = source["username"];
 	        this.password = source["password"];
 	        this.secretString = source["secretString"];
+	        this.comment = source["comment"];
+	    }
+	}
+
+}
+
+export namespace semanticview {
+	
+	export class SemanticViewConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    body: string;
+	    comment: string;
+	    copyGrants: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new SemanticViewConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.body = source["body"];
+	        this.comment = source["comment"];
+	        this.copyGrants = source["copyGrants"];
+	    }
+	}
+
+}
+
+export namespace sequence {
+	
+	export class SequenceConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    start: number;
+	    increment: number;
+	    ordered: string;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SequenceConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.start = source["start"];
+	        this.increment = source["increment"];
+	        this.ordered = source["ordered"];
 	        this.comment = source["comment"];
 	    }
 	}
@@ -5774,6 +5914,43 @@ export namespace storagelifecyclepolicy {
 
 }
 
+export namespace stream {
+	
+	export class StreamConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    copyGrants: boolean;
+	    sourceType: string;
+	    source: string;
+	    appendOnly: boolean;
+	    showInitialRows: boolean;
+	    insertOnly: boolean;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new StreamConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.copyGrants = source["copyGrants"];
+	        this.sourceType = source["sourceType"];
+	        this.source = source["source"];
+	        this.appendOnly = source["appendOnly"];
+	        this.showInitialRows = source["showInitialRows"];
+	        this.insertOnly = source["insertOnly"];
+	        this.comment = source["comment"];
+	    }
+	}
+
+}
+
 export namespace streamlit {
 	
 	export class StreamlitConfig {
@@ -6034,6 +6211,144 @@ export namespace tasks {
 	        this.suspendOrder = source["suspendOrder"];
 	        this.resumeOrder = source["resumeOrder"];
 	    }
+	}
+
+}
+
+export namespace udf {
+	
+	export class FuncArg {
+	    name: string;
+	    dataType: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FuncArg(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.dataType = source["dataType"];
+	    }
+	}
+	export class FunctionConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    secure: boolean;
+	    ifNotExists: boolean;
+	    args: FuncArg[];
+	    returnType: string;
+	    returnsTable: boolean;
+	    tableColumns: FuncArg[];
+	    language: string;
+	    nullHandling: string;
+	    volatility: string;
+	    runtimeVersion: string;
+	    packages: string[];
+	    imports: string[];
+	    handler: string;
+	    comment: string;
+	    body: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FunctionConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.secure = source["secure"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.args = this.convertValues(source["args"], FuncArg);
+	        this.returnType = source["returnType"];
+	        this.returnsTable = source["returnsTable"];
+	        this.tableColumns = this.convertValues(source["tableColumns"], FuncArg);
+	        this.language = source["language"];
+	        this.nullHandling = source["nullHandling"];
+	        this.volatility = source["volatility"];
+	        this.runtimeVersion = source["runtimeVersion"];
+	        this.packages = source["packages"];
+	        this.imports = source["imports"];
+	        this.handler = source["handler"];
+	        this.comment = source["comment"];
+	        this.body = source["body"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
+export namespace view {
+	
+	export class ViewConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    secure: boolean;
+	    recursive: boolean;
+	    ifNotExists: boolean;
+	    copyGrants: boolean;
+	    comment: string;
+	    columns: string;
+	    tags: snowflake.TagPair[];
+	    query: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ViewConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.secure = source["secure"];
+	        this.recursive = source["recursive"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.copyGrants = source["copyGrants"];
+	        this.comment = source["comment"];
+	        this.columns = source["columns"];
+	        this.tags = this.convertValues(source["tags"], snowflake.TagPair);
+	        this.query = source["query"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }
