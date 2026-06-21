@@ -27,6 +27,7 @@ import {joinpolicy} from '../models';
 import {mcpserver} from '../models';
 import {maskingpolicy} from '../models';
 import {materializedview} from '../models';
+import {modelmonitor} from '../models';
 import {model} from '../models';
 import {networkrule} from '../models';
 import {packagespolicy} from '../models';
@@ -110,6 +111,8 @@ export function AlterMaskingPolicy(arg1:string,arg2:string,arg3:string,arg4:stri
 export function AlterMaterializedView(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterModel(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterModelMonitor(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterNetworkRule(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -232,6 +235,8 @@ export function BuildCreateMCPServerSql(arg1:string,arg2:string,arg3:mcpserver.M
 export function BuildCreateMaskingPolicySql(arg1:string,arg2:string,arg3:maskingpolicy.MaskingPolicyConfig):Promise<string>;
 
 export function BuildCreateMaterializedViewSql(arg1:string,arg2:string,arg3:materializedview.MaterializedViewConfig):Promise<string>;
+
+export function BuildCreateModelMonitorSql(arg1:string,arg2:string,arg3:modelmonitor.ModelMonitorConfig):Promise<string>;
 
 export function BuildCreateModelSql(arg1:string,arg2:string,arg3:model.ModelConfig):Promise<string>;
 

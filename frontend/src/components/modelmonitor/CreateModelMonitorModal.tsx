@@ -1,0 +1,429 @@
+// Copyright (c) 2026 Technarion Oy. All rights reserved.
+//
+// This software and its source code are proprietary and confidential.
+// Unauthorized copying, distribution, modification, or use of this software,
+// in whole or in part, is strictly prohibited without prior written permission
+// from Technarion Oy.
+//
+// Commercial use of this software is restricted to parties holding a valid
+// license agreement with Technarion Oy.
+//
+// @thaw-domain: Object Browser & Administration
+
+import { useState, useEffect, useMemo } from "react";
+import { Form, Input, InputNumber, Checkbox, Select, Alert, Divider, Space } from "antd";
+import { LineChartOutlined } from "@ant-design/icons";
+import {
+  BuildCreateModelMonitorSql, ExecDDL, ListWarehouses, ListObjects,
+  ListModelVersions, GetTableColumnsWithTypes,
+} from "../../../wailsjs/go/app/App";
+import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
+import CreateModalShell from "../shared/CreateModalShell";
+import SqlPreview from "../shared/SqlPreview";
+import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
+
+interface Props {
+  db: string;
+  schema: string;
+  onClose: () => void;
+  onSuccess?: () => void;
+}
+
+// Object kinds that can serve as a monitor SOURCE or BASELINE (table-like).
+const SOURCE_KINDS = new Set([
+  "TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE",
+  "EXTERNAL TABLE", "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE",
+]);
+
+type RefreshUnit = "seconds" | "minutes" | "hours" | "days";
+
+// Plain data shape for form state, mirroring modelmonitor.ModelMonitorConfig.
+// The Wails-generated config class carries a `convertValues` method (it has
+// nested string arrays) that a plain object literal can't satisfy; we cast to the
+// generated type only at the IPC boundary (`cfg as any`).
+interface MMConfig {
+  name: string;
+  caseSensitive: boolean;
+  orReplace: boolean;
+  ifNotExists: boolean;
+  model: string;
+  version: string;
+  function: string;
+  source: string;
+  warehouse: string;
+  refreshInterval: string;
+  aggregationWindow: string;
+  timestampColumn: string;
+  baseline: string;
+  idColumns: string[];
+  predictionClassColumns: string[];
+  predictionScoreColumns: string[];
+  actualClassColumns: string[];
+  actualScoreColumns: string[];
+  segmentColumns: string[];
+  customMetricColumns: string[];
+}
+
+// A tags-mode Select for the column-array parameters. When the source columns are
+// known they are offered as a dropdown; the user can still type a name that isn't
+// listed (e.g. for a cross-schema source) — tags mode keeps both behaviours.
+function ColumnTags({
+  value, onChange, placeholder, options,
+}: { value: string[]; onChange: (v: string[]) => void; placeholder: string; options: string[] }) {
+  return (
+    <Select
+      mode="tags"
+      size="small"
+      style={{ width: "100%" }}
+      value={value}
+      onChange={onChange}
+      tokenSeparators={[",", " "]}
+      options={options.map((c) => ({ value: c, label: c }))}
+      placeholder={placeholder}
+    />
+  );
+}
+
+export default function CreateModelMonitorModal({ db, schema, onClose, onSuccess }: Props) {
+  const [cfg, setCfg] = useState<MMConfig>({
+    name: "",
+    caseSensitive: false,
+    orReplace: false,
+    ifNotExists: false,
+    model: "",
+    version: "",
+    function: "",
+    source: "",
+    warehouse: "",
+    refreshInterval: "1 hours",
+    aggregationWindow: "1 days",
+    timestampColumn: "",
+    baseline: "",
+    idColumns: [],
+    predictionClassColumns: [],
+    predictionScoreColumns: [],
+    actualClassColumns: [],
+    actualScoreColumns: [],
+    segmentColumns: [],
+    customMetricColumns: [],
+  });
+
+  // Refresh-interval and aggregation-window composers. The composed strings live
+  // in cfg.refreshInterval / cfg.aggregationWindow (which the builder consumes).
+  const [refreshNum, setRefreshNum] = useState<number>(1);
+  const [refreshUnit, setRefreshUnit] = useState<RefreshUnit>("hours");
+  const [aggNum, setAggNum] = useState<number>(1);
+
+  const quotedIdentifiersIgnoreCase = useQuotedIdentifiers();
+  const preview = useSqlPreview(
+    () => BuildCreateModelMonitorSql(db, schema, cfg as any),
+    [db, schema, cfg],
+  );
+  const { creating, error, setError, submit } = useCreateSubmit();
+
+  const set = <K extends keyof MMConfig>(key: K, value: MMConfig[K]) =>
+    setCfg((prev) => ({ ...prev, [key]: value }));
+
+  // ── Schema objects (models + table-like sources) ──────────────────────────
+  const [warehouses, setWarehouses] = useState<string[]>([]);
+  const [loadingWarehouses, setLoadingWarehouses] = useState(false);
+  const [schemaObjects, setSchemaObjects] = useState<{ name: string; kind: string }[]>([]);
+  const [loadingObjects, setLoadingObjects] = useState(false);
+
+  useEffect(() => {
+    setLoadingWarehouses(true);
+    ListWarehouses()
+      .then((names) => setWarehouses(names ?? []))
+      .catch(() => {})
+      .finally(() => setLoadingWarehouses(false));
+  }, []);
+
+  useEffect(() => {
+    setLoadingObjects(true);
+    ListObjects(db, schema)
+      .then((objs) => setSchemaObjects((objs ?? []).map((o) => ({ name: o.name, kind: o.kind }))))
+      .catch(() => {})
+      .finally(() => setLoadingObjects(false));
+  }, [db, schema]);
+
+  const models = useMemo(
+    () => schemaObjects.filter((o) => o.kind === "MODEL").map((o) => o.name).sort(),
+    [schemaObjects],
+  );
+  const tablesViews = useMemo(
+    () => schemaObjects.filter((o) => SOURCE_KINDS.has(o.kind)).map((o) => o.name).sort(),
+    [schemaObjects],
+  );
+
+  // ── Versions of the selected model ────────────────────────────────────────
+  const [versions, setVersions] = useState<string[]>([]);
+  const [loadingVersions, setLoadingVersions] = useState(false);
+
+  useEffect(() => {
+    if (!cfg.model.trim()) { setVersions([]); return; }
+    setLoadingVersions(true);
+    ListModelVersions(db, schema, cfg.model)
+      .then((res) => {
+        const cols = res?.columns ?? [];
+        const idx = cols.findIndex((c) => c.toLowerCase() === "name");
+        const rows = res?.rows ?? [];
+        setVersions(idx >= 0 ? rows.map((r) => String(r[idx])).filter(Boolean) : []);
+      })
+      .catch(() => setVersions([]))
+      .finally(() => setLoadingVersions(false));
+  }, [db, schema, cfg.model]);
+
+  // ── Columns of the selected source table ──────────────────────────────────
+  const [sourceColumns, setSourceColumns] = useState<string[]>([]);
+  const [loadingColumns, setLoadingColumns] = useState(false);
+
+  useEffect(() => {
+    if (!cfg.source.trim()) { setSourceColumns([]); return; }
+    setLoadingColumns(true);
+    GetTableColumnsWithTypes(db, schema, cfg.source)
+      .then((cols) => setSourceColumns((cols ?? []).map((c) => c.name)))
+      .catch(() => setSourceColumns([]))
+      .finally(() => setLoadingColumns(false));
+  }, [db, schema, cfg.source]);
+
+  // ── Composers → cfg ───────────────────────────────────────────────────────
+  useEffect(() => {
+    if (refreshNum && refreshNum > 0) set("refreshInterval", `${refreshNum} ${refreshUnit}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshNum, refreshUnit]);
+
+  useEffect(() => {
+    if (aggNum && aggNum > 0) set("aggregationWindow", `${aggNum} days`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aggNum]);
+
+  // At least one prediction column (score or class) is mandatory.
+  const hasPrediction =
+    cfg.predictionScoreColumns.length > 0 || cfg.predictionClassColumns.length > 0;
+  const canSubmit =
+    cfg.name.trim().length > 0 &&
+    cfg.model.trim().length > 0 &&
+    cfg.version.trim().length > 0 &&
+    cfg.function.trim().length > 0 &&
+    cfg.source.trim().length > 0 &&
+    cfg.warehouse.trim().length > 0 &&
+    cfg.refreshInterval.trim().length > 0 &&
+    cfg.aggregationWindow.trim().length > 0 &&
+    cfg.timestampColumn.trim().length > 0 &&
+    hasPrediction;
+
+  const handleRun = () => {
+    if (!canSubmit) return;
+    submit(async () => {
+      await ExecDDL(preview);
+      onSuccess?.();
+      onClose();
+    });
+  };
+
+  const itemStyle: React.CSSProperties = { marginBottom: 12 };
+  const colsPlaceholder = cfg.source ? "Select or type columns" : "Select a source first";
+
+  return (
+    <CreateModalShell
+      icon={<LineChartOutlined />}
+      title="Create Model Monitor"
+      subtitle={`${db}.${schema}`}
+      width={720}
+      error={error}
+      errorTitle="Model monitor creation failed"
+      onErrorClose={() => setError(null)}
+      creating={creating}
+      canSubmit={canSubmit}
+      onClose={onClose}
+      onSubmit={handleRun}
+    >
+      <Form layout="vertical" size="small">
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="A model monitor tracks performance, prediction quality, and data drift for a registered model by aggregating a source table/view on a refresh schedule. At least one prediction column (score or class) is required."
+        />
+
+        {/* OR REPLACE and IF NOT EXISTS are mutually exclusive in Snowflake;
+            selecting one clears the other. */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: "0 16px", alignItems: "end" }}>
+          <Form.Item label="Monitor name" required style={{ marginBottom: 4 }}>
+            <Input
+              value={cfg.name}
+              onChange={(e) => set("name", e.target.value)}
+              placeholder="MY_MONITOR"
+            />
+          </Form.Item>
+          <Form.Item style={{ marginBottom: 4 }}>
+            <Checkbox
+              checked={cfg.orReplace}
+              onChange={(e) => setCfg((prev) => ({ ...prev, orReplace: e.target.checked, ifNotExists: e.target.checked ? false : prev.ifNotExists }))}
+            >
+              OR REPLACE
+            </Checkbox>
+          </Form.Item>
+          <Form.Item style={{ marginBottom: 4 }}>
+            <Checkbox
+              checked={cfg.ifNotExists}
+              onChange={(e) => setCfg((prev) => ({ ...prev, ifNotExists: e.target.checked, orReplace: e.target.checked ? false : prev.orReplace }))}
+            >
+              IF NOT EXISTS
+            </Checkbox>
+          </Form.Item>
+        </div>
+
+        <Form.Item style={itemStyle}>
+          <ObjectNameCaseControl
+            name={cfg.name}
+            caseSensitive={cfg.caseSensitive}
+            onCaseSensitiveChange={(v) => set("caseSensitive", v)}
+            quotedIdentifiersIgnoreCase={quotedIdentifiersIgnoreCase}
+          />
+        </Form.Item>
+
+        <Divider orientation="left" style={{ margin: "4px 0 12px", fontSize: 12 }}>Model</Divider>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0 12px" }}>
+          <Form.Item label="Model" required style={itemStyle} help="Model in this schema">
+            <Select
+              showSearch
+              loading={loadingObjects}
+              value={cfg.model || undefined}
+              onChange={(v) => setCfg((prev) => ({ ...prev, model: v ?? "", version: "" }))}
+              placeholder="Select model…"
+              options={models.map((m) => ({ value: m, label: m }))}
+              notFoundContent={loadingObjects ? "Loading…" : "No models in schema"}
+            />
+          </Form.Item>
+          <Form.Item label="Version" required style={itemStyle}>
+            <Select
+              showSearch
+              loading={loadingVersions}
+              disabled={!cfg.model}
+              value={cfg.version || undefined}
+              onChange={(v) => set("version", v ?? "")}
+              placeholder={cfg.model ? "Select version…" : "Select a model first"}
+              options={versions.map((v) => ({ value: v, label: v }))}
+              notFoundContent={loadingVersions ? "Loading…" : "No versions found"}
+            />
+          </Form.Item>
+          <Form.Item label="Function" required style={itemStyle} help="Model method, e.g. predict">
+            <Input value={cfg.function} onChange={(e) => set("function", e.target.value)} placeholder="predict" />
+          </Form.Item>
+        </div>
+
+        <Divider orientation="left" style={{ margin: "4px 0 12px", fontSize: 12 }}>Source & schedule</Divider>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 12px" }}>
+          <Form.Item label="Source table / view" required style={itemStyle}>
+            <Select
+              showSearch
+              allowClear
+              loading={loadingObjects}
+              value={cfg.source || undefined}
+              onChange={(v) => set("source", v ?? "")}
+              placeholder="Select source…"
+              options={tablesViews.map((t) => ({ value: t, label: t }))}
+              notFoundContent={loadingObjects ? "Loading…" : "No tables / views in schema"}
+            />
+          </Form.Item>
+          <Form.Item label="Baseline table" style={itemStyle} help="Optional — used for drift computation">
+            <Select
+              showSearch
+              allowClear
+              loading={loadingObjects}
+              value={cfg.baseline || undefined}
+              onChange={(v) => set("baseline", v ?? "")}
+              placeholder="Select baseline…"
+              options={tablesViews.map((t) => ({ value: t, label: t }))}
+              notFoundContent={loadingObjects ? "Loading…" : "No tables / views in schema"}
+            />
+          </Form.Item>
+          <Form.Item label="Warehouse" required style={itemStyle}>
+            <Select
+              showSearch
+              loading={loadingWarehouses}
+              value={cfg.warehouse || undefined}
+              onChange={(v) => set("warehouse", v ?? "")}
+              placeholder="Select warehouse…"
+              options={warehouses.map((n) => ({ value: n, label: n }))}
+              notFoundContent={loadingWarehouses ? "Loading…" : "No warehouses found"}
+            />
+          </Form.Item>
+          <Form.Item label="Timestamp column" required style={itemStyle} help="TIMESTAMP_NTZ column in the source">
+            <Select
+              showSearch
+              loading={loadingColumns}
+              disabled={!cfg.source}
+              value={cfg.timestampColumn || undefined}
+              onChange={(v) => set("timestampColumn", v ?? "")}
+              placeholder={cfg.source ? "Select column…" : "Select a source first"}
+              options={sourceColumns.map((c) => ({ value: c, label: c }))}
+              notFoundContent={loadingColumns ? "Loading…" : "No columns found"}
+            />
+          </Form.Item>
+          <Form.Item label="Refresh interval" required style={itemStyle}>
+            <Space.Compact block>
+              <InputNumber
+                min={1}
+                value={refreshNum}
+                onChange={(v) => setRefreshNum(v ?? 1)}
+                style={{ width: "45%" }}
+              />
+              <Select
+                value={refreshUnit}
+                onChange={(v) => setRefreshUnit(v)}
+                style={{ width: "55%" }}
+                options={[
+                  { value: "seconds", label: "seconds" },
+                  { value: "minutes", label: "minutes" },
+                  { value: "hours", label: "hours" },
+                  { value: "days", label: "days" },
+                ]}
+              />
+            </Space.Compact>
+          </Form.Item>
+          <Form.Item label="Aggregation window" required style={itemStyle} help="Days only">
+            <InputNumber
+              min={1}
+              value={aggNum}
+              onChange={(v) => setAggNum(v ?? 1)}
+              addonAfter="days"
+              style={{ width: "100%" }}
+            />
+          </Form.Item>
+        </div>
+
+        <Divider orientation="left" style={{ margin: "4px 0 12px", fontSize: 12 }}>Columns</Divider>
+
+        <Form.Item label="Prediction score columns" style={itemStyle} required={!hasPrediction}
+          help="At least one prediction column (score or class) is required">
+          <ColumnTags value={cfg.predictionScoreColumns} onChange={(v) => set("predictionScoreColumns", v)} options={sourceColumns} placeholder={colsPlaceholder} />
+        </Form.Item>
+        <Form.Item label="Prediction class columns" style={itemStyle}>
+          <ColumnTags value={cfg.predictionClassColumns} onChange={(v) => set("predictionClassColumns", v)} options={sourceColumns} placeholder={colsPlaceholder} />
+        </Form.Item>
+        <Form.Item label="Actual score columns" style={itemStyle}>
+          <ColumnTags value={cfg.actualScoreColumns} onChange={(v) => set("actualScoreColumns", v)} options={sourceColumns} placeholder={colsPlaceholder} />
+        </Form.Item>
+        <Form.Item label="Actual class columns" style={itemStyle}>
+          <ColumnTags value={cfg.actualClassColumns} onChange={(v) => set("actualClassColumns", v)} options={sourceColumns} placeholder={colsPlaceholder} />
+        </Form.Item>
+        <Form.Item label="ID columns" style={itemStyle} help="Columns that uniquely identify a row">
+          <ColumnTags value={cfg.idColumns} onChange={(v) => set("idColumns", v)} options={sourceColumns} placeholder={colsPlaceholder} />
+        </Form.Item>
+        <Form.Item label="Segment columns" style={itemStyle} help="Up to 5 STRING columns for segmentation">
+          <ColumnTags value={cfg.segmentColumns} onChange={(v) => set("segmentColumns", v)} options={sourceColumns} placeholder={colsPlaceholder} />
+        </Form.Item>
+        <Form.Item label="Custom metric columns" style={itemStyle}>
+          <ColumnTags value={cfg.customMetricColumns} onChange={(v) => set("customMetricColumns", v)} options={sourceColumns} placeholder={colsPlaceholder} />
+        </Form.Item>
+
+        <div style={{ height: 12 }} />
+        <SqlPreview sql={preview} />
+      </Form>
+    </CreateModalShell>
+  );
+}
