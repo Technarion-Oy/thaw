@@ -98,12 +98,17 @@ export default function DatasetPropertiesModal({ db, schema, name, onClose }: Pr
 
   // ── Versions → table ──────────────────────────────────────────────────────
   const versionCols = versions?.columns ?? [];
-  // SHOW VERSIONS reports the version name in a "version" or "name" column; prefer
-  // "version" (dataset-specific), falling back to "name".
+  // SHOW VERSIONS reports the version name in a column whose exact label isn't
+  // contractually fixed across Snowflake editions. Probe in priority order with
+  // exact matches first ("version" / "version_name" / "name"), then fall back to
+  // any column containing "version" (e.g. a future "dataset_version") so the
+  // per-row Drop action keeps working rather than silently disappearing.
   const versionNameIdx = (() => {
-    const v = versionCols.findIndex((c) => c.toLowerCase() === "version");
-    if (v >= 0) return v;
-    return versionCols.findIndex((c) => c.toLowerCase() === "name");
+    for (const want of ["version", "version_name", "name"]) {
+      const i = versionCols.findIndex((c) => c.toLowerCase() === want);
+      if (i >= 0) return i;
+    }
+    return versionCols.findIndex((c) => c.toLowerCase().includes("version"));
   })();
   const versionColumns = versionCols.map((col, idx) => ({
     title: col,
