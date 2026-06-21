@@ -267,7 +267,7 @@ export default function AgentPropertiesModal({ db, schema, name, onClose }: Prop
                   />
                 }
               />
-              <Input addonBefore="color" size="small" value={color} onChange={(e) => setColor(e.target.value)} placeholder="#2563EB" />
+              <Input addonBefore="color" size="small" value={color} onChange={(e) => setColor(e.target.value)} placeholder="color theme (e.g. blue)" />
               <Space>
                 <Button size="small" type="primary" icon={<CheckOutlined />} onClick={saveProfile} loading={savingProfile}>Save profile</Button>
                 <Button size="small" icon={<CloseOutlined />} onClick={() => setEditingProfile(false)}>Cancel</Button>

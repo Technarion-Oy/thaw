@@ -202,7 +202,7 @@ export default function CreateAgentModal({ db, schema, onClose, onSuccess }: Pro
                 />
               }
             />
-            <Input value={color} onChange={(e) => setColor(e.target.value)} placeholder="color (e.g. #2563EB)" />
+            <Input value={color} onChange={(e) => setColor(e.target.value)} placeholder="color theme (e.g. blue)" />
           </div>
         </Form.Item>
 
