@@ -28,9 +28,12 @@ import (
 // statement is run.
 //
 // Quoting differs per field and follows the published grammar exactly:
-//   - Warehouse (account-level) and TimestampColumn (a column of the source) are
-//     single identifiers, double-quoted when set so a case-sensitive name
-//     round-trips (matching the sibling builders and the ALTER path).
+//   - Warehouse is a single identifier from the (non-free-typed) picker, so it is
+//     double-quoted when set — a case-sensitive name round-trips (matching the
+//     sibling builders and the ALTER path).
+//   - TimestampColumn (a column of the source) may be typed freely, so it is
+//     emitted via QuoteOrBare: a plain identifier stays bare and Snowflake
+//     case-folds it; only names that genuinely require quoting are quoted.
 //   - Model, Source, and Baseline are schema-level object references; they are
 //     fully qualified with the monitor's own database & schema (the create modal
 //     only offers objects from db.schema, and Snowflake requires the model to
@@ -54,7 +57,7 @@ type ModelMonitorConfig struct {
 	Warehouse         string `json:"warehouse"`         // WAREHOUSE = "<ident>"
 	RefreshInterval   string `json:"refreshInterval"`   // REFRESH_INTERVAL = '<lit>'
 	AggregationWindow string `json:"aggregationWindow"` // AGGREGATION_WINDOW = '<lit>'
-	TimestampColumn   string `json:"timestampColumn"`   // TIMESTAMP_COLUMN = "<ident>"
+	TimestampColumn   string `json:"timestampColumn"`   // TIMESTAMP_COLUMN = <ident> (QuoteOrBare)
 
 	// Optional WITH-clause parameters.
 	Baseline               string   `json:"baseline"`               // BASELINE = <db.schema.ident>
@@ -167,14 +170,21 @@ func BuildCreateModelMonitorSql(db, schema string, cfg ModelMonitorConfig) (stri
 	} else {
 		fmt.Fprint(&sb, "\n  SOURCE = source_table")
 	}
-	// WAREHOUSE (account-level) and TIMESTAMP_COLUMN (a column of the source) are
-	// single identifiers; double-quote them when set so a case-sensitive / quoted
-	// name round-trips, matching the sibling CREATE builders and this object's
-	// ALTER path (SET WAREHOUSE = "<wh>").
+	// WAREHOUSE is chosen from the warehouse picker (never free-typed), so its case
+	// is exact — double-quote it so a case-sensitive name round-trips, matching the
+	// sibling CREATE builders and this object's ALTER path (SET WAREHOUSE = "<wh>").
 	fmt.Fprintf(&sb, "\n  WAREHOUSE = %s", quotedOrPlaceholder(cfg.Warehouse, "warehouse_name"))
 	fmt.Fprintf(&sb, "\n  REFRESH_INTERVAL = '%s'", snowflake.EscapeTextLit(orPlaceholder(cfg.RefreshInterval, "1 day")))
 	fmt.Fprintf(&sb, "\n  AGGREGATION_WINDOW = '%s'", snowflake.EscapeTextLit(orPlaceholder(cfg.AggregationWindow, "1 day")))
-	fmt.Fprintf(&sb, "\n  TIMESTAMP_COLUMN = %s", quotedOrPlaceholder(cfg.TimestampColumn, "timestamp_column"))
+	// TIMESTAMP_COLUMN may be typed freely (the modal field is an AutoComplete), so
+	// emit it via QuoteOrBare: a plain identifier stays bare and Snowflake
+	// case-folds it (so a typed "event_ts" matches an EVENT_TS column), and only a
+	// name that genuinely needs quoting (special chars / reserved word) is quoted.
+	if ts := strings.TrimSpace(cfg.TimestampColumn); ts != "" {
+		fmt.Fprintf(&sb, "\n  TIMESTAMP_COLUMN = %s", snowflake.QuoteOrBare(ts, false))
+	} else {
+		fmt.Fprint(&sb, "\n  TIMESTAMP_COLUMN = timestamp_column")
+	}
 
 	// Optional parameters — emitted only when set. BASELINE is a table reference;
 	// like SOURCE it is qualified with the monitor's database & schema.

@@ -45,11 +45,14 @@ dedicated builder.
 - A blank name emits the placeholder `model_monitor_name`; blank required fields
   emit per-field placeholders (`model_name`, `version_name`, `source_table`, …)
   so the live SQL preview reads as a completable template while the user types.
-- Quoting follows the published grammar exactly: `WAREHOUSE` (account-level) and
-  `TIMESTAMP_COLUMN` (a column of the source) are single identifiers, double-quoted
-  when set so a case-sensitive name round-trips (matching the sibling builders and
-  the `SET WAREHOUSE = "<wh>"` ALTER path); `MODEL`, `SOURCE`, and `BASELINE` are
-  schema-level object references and are
+- Quoting follows the published grammar exactly: `WAREHOUSE` (from the
+  non-free-typed picker) is double-quoted when set so a case-sensitive name
+  round-trips (matching the sibling builders and the `SET WAREHOUSE = "<wh>"` ALTER
+  path); `TIMESTAMP_COLUMN` (a column of the source, typed freely via an
+  AutoComplete) is emitted via `QuoteOrBare` so a plain identifier stays bare and
+  Snowflake case-folds it — a typed `event_ts` matches an `EVENT_TS` column — while
+  a name that genuinely needs quoting (special chars / reserved word) is quoted;
+  `MODEL`, `SOURCE`, and `BASELINE` are schema-level object references and are
   fully qualified with the monitor's own database & schema (the create modal only
   offers objects from `db.schema`, and Snowflake requires the model to live in
   the monitor's schema, so creation works even when the session's current schema

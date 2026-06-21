@@ -341,7 +341,21 @@ export default function CreateModelMonitorModal({ db, schema, onClose, onSuccess
               allowClear
               loading={loadingObjects}
               value={cfg.source || undefined}
-              onChange={(v) => set("source", v ?? "")}
+              onChange={(v) => setCfg((prev) => ({
+                ...prev,
+                source: v ?? "",
+                // The timestamp + column-array selections belong to the previous
+                // source's columns; clear them so a switched source can't submit
+                // references to columns that don't exist in the new table.
+                timestampColumn: "",
+                idColumns: [],
+                predictionClassColumns: [],
+                predictionScoreColumns: [],
+                actualClassColumns: [],
+                actualScoreColumns: [],
+                segmentColumns: [],
+                customMetricColumns: [],
+              }))}
               placeholder="Select source…"
               options={tablesViews.map((t) => ({ value: t, label: t }))}
               notFoundContent={loadingObjects ? "Loading…" : "No tables / views in schema"}

@@ -45,7 +45,7 @@ func TestBuildCreateModelMonitorSql(t *testing.T) {
 				"WAREHOUSE = \"MY_WH\"",
 				"REFRESH_INTERVAL = '1 hour'",
 				"AGGREGATION_WINDOW = '1 day'",
-				"TIMESTAMP_COLUMN = \"TS\"",
+				"TIMESTAMP_COLUMN = TS",
 				"PREDICTION_SCORE_COLUMNS = ('PRED_SCORE')",
 			},
 			absent: []string{
@@ -159,6 +159,22 @@ func TestBuildCreateModelMonitorSql(t *testing.T) {
 				PredictionScoreColumns: []string{"od'd", "plain"},
 			},
 			contains: []string{"PREDICTION_SCORE_COLUMNS = ('od''d', 'plain')"},
+		},
+		{
+			name: "timestamp column stays bare for a plain identifier",
+			cfg: ModelMonitorConfig{
+				Name:            "B",
+				TimestampColumn: "event_ts",
+			},
+			contains: []string{"TIMESTAMP_COLUMN = event_ts"},
+		},
+		{
+			name: "timestamp column is quoted only when it needs quoting",
+			cfg: ModelMonitorConfig{
+				Name:            "R",
+				TimestampColumn: "select",
+			},
+			contains: []string{"TIMESTAMP_COLUMN = \"select\""},
 		},
 	}
 
