@@ -27,9 +27,16 @@ to `TRUE` for them.
 - The config's nested `args` array means the Wails-generated class carries a
   `convertValues` method a plain object literal can't satisfy; the create modal
   keeps plain local state and casts `cfg as any` only at the IPC boundary. The
-  `archiveForDays` field is sent as `0` for "unset" (the builder omits
-  `ARCHIVE_FOR_DAYS` when `<= 0`). Snowflake requires at least one signature
-  argument, so the last arg row can't be removed.
+  `archiveForDays` field is sent as `0` for "unset"; the builder emits the
+  `ARCHIVE_TIER` / `ARCHIVE_FOR_DAYS` pair both-or-neither. Snowflake requires at
+  least one signature argument, so the last arg row can't be removed.
+- The signature **type** suggestions come from the backend type registry
+  (`snowflake.AllDataTypes`, surfaced via the generated
+  `frontend/src/generated/snowflakeDataTypes.ts` — `SNOWFLAKE_DATA_TYPES` /
+  `SNOWFLAKE_DATA_TYPE_NAMES`), not a hand-maintained list, so they stay in sync
+  with the types Snowflake supports. The `AutoComplete` still accepts free-form
+  text (e.g. `NUMBER(38,0)`); its `filterOption` shows the full list when the
+  field already holds a complete recognised type so the user can switch types.
 - The body is raw SQL (a boolean expression), interpolated verbatim into `SET
   BODY -> …` — not a quoted string literal.
 - **Archive tier is immutable once set** — the properties modal still offers `SET

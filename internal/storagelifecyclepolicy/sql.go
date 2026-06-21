@@ -35,8 +35,10 @@ type StorageLifecycleArg struct {
 // the (always BOOLEAN) RETURNS, the body expression, then the archival options
 // and COMMENT. ArchiveTier is the empty string (rows expire without archiving),
 // "COOL", or "COLD". ArchiveForDays is the number of days rows remain in the
-// archive tier; a value <= 0 omits the clause (it is only meaningful alongside a
-// tier, and the documented minimums are 90 days for COOL and 180 for COLD).
+// archive tier. The two are a coupled pair — Snowflake rejects a half-set
+// combination — so the builder emits both or neither: the archive clauses appear
+// only when ArchiveTier is set AND ArchiveForDays > 0 (the documented minimums
+// are 90 days for COOL and 180 for COLD).
 type StorageLifecyclePolicyConfig struct {
 	Name           string                `json:"name"`
 	CaseSensitive  bool                  `json:"caseSensitive"`
@@ -100,14 +102,13 @@ func BuildCreateStorageLifecyclePolicySql(db, schema string, cfg StorageLifecycl
 	}
 	fmt.Fprintf(&sb, "\n  %s", body)
 
-	// ARCHIVE_TIER is an unquoted keyword (COOL | COLD). When unset the rows
-	// simply expire without being archived.
-	if tier := strings.ToUpper(strings.TrimSpace(cfg.ArchiveTier)); tier != "" {
+	// ARCHIVE_TIER (an unquoted COOL | COLD keyword) and ARCHIVE_FOR_DAYS are a
+	// coupled pair: Snowflake validates their combined state and rejects a
+	// half-set pair ("invalid property combination"). So emit both or neither —
+	// only when a tier is set AND a positive day count is given. When unset the
+	// rows simply expire without being archived.
+	if tier := strings.ToUpper(strings.TrimSpace(cfg.ArchiveTier)); tier != "" && cfg.ArchiveForDays > 0 {
 		fmt.Fprintf(&sb, "\n  ARCHIVE_TIER = %s", tier)
-	}
-
-	// ARCHIVE_FOR_DAYS is only meaningful when archiving; omit when unset (<= 0).
-	if cfg.ArchiveForDays > 0 {
 		fmt.Fprintf(&sb, "\n  ARCHIVE_FOR_DAYS = %d", cfg.ArchiveForDays)
 	}
 

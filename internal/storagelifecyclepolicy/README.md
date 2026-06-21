@@ -42,10 +42,12 @@ without a dedicated builder.
   completable template: an empty name emits `storage_lifecycle_policy_name`, an
   empty signature emits `(val TIMESTAMP_NTZ)` (Snowflake requires at least one
   argument), and an empty body emits `TRUE`.
-- `ARCHIVE_TIER` is emitted as an unquoted keyword (upper-cased); when unset, rows
-  expire without being archived. `ARCHIVE_FOR_DAYS` is omitted when `<= 0` (it is
-  only meaningful alongside a tier, and the documented minimums are 90 days for
-  `COOL` and 180 for `COLD`).
+- `ARCHIVE_TIER` (an unquoted, upper-cased keyword) and `ARCHIVE_FOR_DAYS` are a
+  **coupled pair** — Snowflake rejects a half-set combination — so the builder
+  emits **both or neither**: the archive clauses appear only when a tier is set
+  **and** a positive day count is given; otherwise rows expire without being
+  archived. The documented minimums are 90 days for `COOL` and 180 for `COLD`
+  (enforced by the create modal before submission).
 - `App.BuildCreateStorageLifecyclePolicySql` (in `internal/app/builders.go`) is
   the thin IPC delegator; `App.AlterStorageLifecyclePolicy` (in
   `internal/app/storagelifecyclepolicy.go`) runs the edit clauses,

@@ -21,6 +21,7 @@ import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
+import { SNOWFLAKE_DATA_TYPES, SNOWFLAKE_DATA_TYPE_NAMES } from "../../generated/snowflakeDataTypes";
 import Editor from "@monaco-editor/react";
 import { setActiveSnippetEditor } from "../editor/SqlEditor";
 import { useThemeStore } from "../../store/themeStore";
@@ -28,14 +29,19 @@ import { patchMonacoClipboard } from "../../utils/monacoClipboard";
 
 const { Text } = Typography;
 
-// Common Snowflake data types offered as type suggestions; AutoComplete still
-// accepts any free-form text so the list is a convenience, not a constraint. The
-// lifecycle body usually keys off a timestamp/date column, so those lead.
-const TYPE_OPTIONS = [
-  "TIMESTAMP_NTZ", "TIMESTAMP_LTZ", "TIMESTAMP_TZ", "DATE", "TIME",
-  "VARCHAR", "STRING", "NUMBER", "NUMBER(38,0)", "FLOAT", "BOOLEAN",
-  "VARIANT", "OBJECT", "ARRAY",
-].map((v) => ({ value: v }));
+// Data-type suggestions come from the backend registry (snowflake.AllDataTypes,
+// surfaced via the generated snowflakeDataTypes.ts) so the list stays in sync
+// with Snowflake's supported types rather than being hand-maintained here. The
+// AutoComplete still accepts any free-form text (e.g. NUMBER(38,0)), so the list
+// is a convenience, not a constraint.
+const TYPE_OPTIONS = SNOWFLAKE_DATA_TYPES.map((dt) => ({
+  value: dt.name,
+  label: dt.paramHint ? `${dt.name} ${dt.paramHint}` : dt.name,
+}));
+
+// Set of canonical type names used to decide when to show the full suggestion
+// list (see filterOption below).
+const TYPE_NAME_SET = new Set(SNOWFLAKE_DATA_TYPE_NAMES);
 
 const DEFAULT_BODY = "created_at < DATEADD('day', -365, CURRENT_TIMESTAMP())";
 
@@ -105,9 +111,17 @@ export default function CreateStorageLifecyclePolicyModal({ db, schema, onClose,
   const removeArg = (i: number) => setArgs(cfg.args.filter((_, idx) => idx !== i));
 
   const validArgs = cfg.args.filter((a) => a.name.trim() !== "" && a.type.trim() !== "");
-  // ARCHIVE_TIER and ARCHIVE_FOR_DAYS must be set together — a tier with no days
-  // is rejected by Snowflake, so require the days whenever a tier is chosen.
-  const archiveOk = cfg.archiveTier === "" || (cfg.archiveForDays !== null && cfg.archiveForDays > 0);
+
+  // ARCHIVE_FOR_DAYS only makes sense when a tier is set (rows are archived
+  // before expiring); the documented minimums are 90 days for COOL and 180 for
+  // COLD. Disable the field — and clear it — when no tier is chosen.
+  const archiveEnabled = cfg.archiveTier !== "";
+  const minDays = cfg.archiveTier === "COLD" ? 180 : 90;
+
+  // ARCHIVE_TIER and ARCHIVE_FOR_DAYS must be set together and the days must meet
+  // the per-tier minimum — Snowflake rejects a half-set pair or a below-minimum
+  // value, so block submission rather than letting the CREATE fail server-side.
+  const archiveOk = !archiveEnabled || (cfg.archiveForDays !== null && cfg.archiveForDays >= minDays);
   const canSubmit =
     cfg.name.trim().length > 0 &&
     validArgs.length > 0 &&
@@ -124,12 +138,6 @@ export default function CreateStorageLifecyclePolicyModal({ db, schema, onClose,
   };
 
   const itemStyle: React.CSSProperties = { marginBottom: 12 };
-
-  // ARCHIVE_FOR_DAYS only makes sense when a tier is set (rows are archived
-  // before expiring); the documented minimums are 90 days for COOL and 180 for
-  // COLD. Disable the field — and clear it — when no tier is chosen.
-  const archiveEnabled = cfg.archiveTier !== "";
-  const minDays = cfg.archiveTier === "COLD" ? 180 : 90;
 
   return (
     <CreateModalShell
@@ -186,10 +194,17 @@ export default function CreateStorageLifecyclePolicyModal({ db, schema, onClose,
                   value={a.type}
                   options={TYPE_OPTIONS}
                   onChange={(v) => updateArg(i, { type: v })}
-                  filterOption={(input, option) =>
-                    (option?.value ?? "").toUpperCase().includes(input.toUpperCase())
-                  }
-                  style={{ width: 200 }}
+                  // Show the full type list when the field already holds a
+                  // complete, recognised type (so the user can switch to another);
+                  // otherwise filter by substring as they type. Without this, the
+                  // current value (e.g. "TIMESTAMP_NTZ") filters the dropdown down
+                  // to a single matching option.
+                  filterOption={(input, option) => {
+                    const inp = input.toUpperCase();
+                    if (TYPE_NAME_SET.has(inp)) return true;
+                    return (option?.value ?? "").toUpperCase().includes(inp);
+                  }}
+                  style={{ width: 240 }}
                 />
                 {cfg.args.length > 1 && (
                   <Button
@@ -246,15 +261,16 @@ export default function CreateStorageLifecyclePolicyModal({ db, schema, onClose,
             placeholder="None (expire without archiving)"
             allowClear
             style={{ width: 320 }}
-            onChange={(v) => setCfg((prev) => ({
-              ...prev,
-              archiveTier: v ?? "",
-              // Tier and days must be set together: default the days to the
-              // per-tier minimum when enabling, and clear them when disabling.
-              archiveForDays: v
-                ? (prev.archiveForDays ?? (v === "COLD" ? 180 : 90))
-                : null,
-            }))}
+            onChange={(v) => setCfg((prev) => {
+              const tier = v ?? "";
+              if (tier === "") return { ...prev, archiveTier: "", archiveForDays: null };
+              // Tier and days must be set together and meet the per-tier minimum.
+              // Default to the minimum when enabling, and clamp an existing value
+              // up to the new minimum when switching COOL → COLD (90 → 180).
+              const min = tier === "COLD" ? 180 : 90;
+              const days = prev.archiveForDays == null ? min : Math.max(prev.archiveForDays, min);
+              return { ...prev, archiveTier: tier, archiveForDays: days };
+            })}
             options={[
               { value: "COOL", label: "COOL (min 90 days)" },
               { value: "COLD", label: "COLD (min 180 days)" },

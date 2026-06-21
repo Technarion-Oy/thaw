@@ -66,18 +66,27 @@ func TestBuildCreateStorageLifecyclePolicySql(t *testing.T) {
 		{
 			name: "archive tier lowercased input is upper-cased",
 			cfg: StorageLifecyclePolicyConfig{
-				Name:        "A",
-				ArchiveTier: "cool",
+				Name:           "A",
+				ArchiveTier:    "cool",
+				ArchiveForDays: 90,
 			},
-			contains: []string{"ARCHIVE_TIER = COOL"},
+			contains: []string{"ARCHIVE_TIER = COOL", "ARCHIVE_FOR_DAYS = 90"},
 		},
 		{
-			name: "archive for days omitted when not positive",
+			name: "tier without days emits neither (both-or-neither)",
+			cfg: StorageLifecyclePolicyConfig{
+				Name:        "A",
+				ArchiveTier: "COLD",
+			},
+			absent: []string{"ARCHIVE_TIER", "ARCHIVE_FOR_DAYS"},
+		},
+		{
+			name: "days without tier emits neither (both-or-neither)",
 			cfg: StorageLifecyclePolicyConfig{
 				Name:           "A",
-				ArchiveForDays: 0,
+				ArchiveForDays: 90,
 			},
-			absent: []string{"ARCHIVE_FOR_DAYS"},
+			absent: []string{"ARCHIVE_TIER", "ARCHIVE_FOR_DAYS"},
 		},
 		{
 			name: "or replace suppresses if not exists",
