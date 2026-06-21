@@ -6,6 +6,10 @@ export function AddBackup(arg1, arg2, arg3) {
   return window['go']['app']['App']['AddBackup'](arg1, arg2, arg3);
 }
 
+export function AlterAgent(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterAgent'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterAggregationPolicy(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterAggregationPolicy'](arg1, arg2, arg3, arg4);
 }
@@ -40,6 +44,10 @@ export function AlterDynamicTable(arg1, arg2, arg3, arg4) {
 
 export function AlterEventTable(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterEventTable'](arg1, arg2, arg3, arg4);
+}
+
+export function AlterExternalAgent(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterExternalAgent'](arg1, arg2, arg3, arg4);
 }
 
 export function AlterExternalFunction(arg1, arg2, arg3, arg4, arg5) {
@@ -214,6 +222,10 @@ export function BuildClientPolicyValue(arg1) {
   return window['go']['app']['App']['BuildClientPolicyValue'](arg1);
 }
 
+export function BuildCreateAgentSql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateAgentSql'](arg1, arg2, arg3);
+}
+
 export function BuildCreateAggregationPolicySql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateAggregationPolicySql'](arg1, arg2, arg3);
 }
@@ -244,6 +256,10 @@ export function BuildCreateDynamicTableSql(arg1, arg2, arg3) {
 
 export function BuildCreateEventTableSql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateEventTableSql'](arg1, arg2, arg3);
+}
+
+export function BuildCreateExternalAgentSql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateExternalAgentSql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateExternalFunctionSql(arg1, arg2, arg3) {
@@ -572,6 +588,10 @@ export function DeleteVenvFolder() {
 
 export function DeployNotebook(arg1) {
   return window['go']['app']['App']['DeployNotebook'](arg1);
+}
+
+export function DescribeAgent(arg1, arg2, arg3) {
+  return window['go']['app']['App']['DescribeAgent'](arg1, arg2, arg3);
 }
 
 export function DescribeAuthenticationPolicy(arg1, arg2, arg3) {

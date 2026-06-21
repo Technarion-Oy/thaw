@@ -119,6 +119,10 @@ func BuildObjectPropertiesQuery(database, schema, kind, name string) (string, er
 		return fmt.Sprintf("SHOW MODELS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "CORTEX SEARCH SERVICE":
 		return fmt.Sprintf("SHOW CORTEX SEARCH SERVICES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
+	case "AGENT":
+		return fmt.Sprintf("SHOW AGENTS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
+	case "EXTERNAL AGENT":
+		return fmt.Sprintf("SHOW EXTERNAL AGENTS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "WAREHOUSE":
 		return fmt.Sprintf("SHOW WAREHOUSES LIKE '%s'", like), nil
 	case "ROLE":

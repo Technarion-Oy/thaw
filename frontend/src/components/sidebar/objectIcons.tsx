@@ -123,6 +123,8 @@ const KIND_VAR: Record<string, string> = {
   "DBT PROJECT":     "--icon-dbtproject",
   MODEL:             "--icon-model",
   "CORTEX SEARCH SERVICE": "--icon-cortexsearchservice",
+  AGENT:             "--icon-agent",
+  "EXTERNAL AGENT":  "--icon-externalagent",
 };
 
 // ── Icon component per kind ────────────────────────────────────────────────
@@ -168,6 +170,8 @@ const KIND_ICON: Record<string, React.ComponentType<{ style?: React.CSSPropertie
   "DBT PROJECT":    BuildOutlined,
   MODEL:            RobotOutlined,
   "CORTEX SEARCH SERVICE": FileSearchOutlined,
+  AGENT:            ApiOutlined,
+  "EXTERNAL AGENT": GlobalOutlined,
 };
 
 // ── Public API ────────────────────────────────────────────────────────────

@@ -3244,6 +3244,8 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 		{fmt.Sprintf("SHOW DBT PROJECTS IN SCHEMA %s", q), "DBT PROJECT"},
 		{fmt.Sprintf("SHOW MODELS IN SCHEMA %s", q), "MODEL"},
 		{fmt.Sprintf("SHOW CORTEX SEARCH SERVICES IN SCHEMA %s", q), "CORTEX SEARCH SERVICE"},
+		{fmt.Sprintf("SHOW AGENTS IN SCHEMA %s", q), "AGENT"},
+		{fmt.Sprintf("SHOW EXTERNAL AGENTS IN SCHEMA %s", q), "EXTERNAL AGENT"},
 	}
 
 	// Filter out disabled object kinds (set via SetExcludedExtendedKinds).
@@ -3659,7 +3661,7 @@ func (c *Client) GetObjectDDL(ctx context.Context, database, schema, kind, name,
 	// invalid query (a packages-policy GET_DDL fails with "Cannot initialize
 	// Snowflake Metadata. Dictionary unavailable").
 	switch strings.ToUpper(strings.TrimSpace(kind)) {
-	case "IMAGE REPOSITORY", "SERVICE", "PACKAGES POLICY", "MODEL", "CORTEX SEARCH SERVICE":
+	case "IMAGE REPOSITORY", "SERVICE", "PACKAGES POLICY", "MODEL", "CORTEX SEARCH SERVICE", "EXTERNAL AGENT":
 		return "", fmt.Errorf("GET_DDL does not support %s objects", kind)
 	}
 
@@ -3736,6 +3738,11 @@ func buildGetDDLQuery(database, schema, kind, name, arguments string) (query, id
 		ddlKind = "POLICY"
 	case "NETWORK RULE":
 		ddlKind = "NETWORK_RULE"
+	case "AGENT":
+		// GET_DDL exposes Cortex agents under the CORTEX_AGENT object type (the
+		// SHOW kind is "AGENT"). External agents have no GET_DDL object type and
+		// are excluded in GetObjectDDL.
+		ddlKind = "CORTEX_AGENT"
 	case "EXTERNAL FUNCTION":
 		// GET_DDL has no EXTERNAL_FUNCTION object type — external functions are
 		// retrieved via the 'FUNCTION' type (with the argument signature appended

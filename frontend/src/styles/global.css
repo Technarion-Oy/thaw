@@ -92,6 +92,8 @@
   --icon-dbtproject:  #7ee787;  /* mint green (dbt build/deploy)            */
   --icon-model:       #f472b6;  /* pink (ML model registry)                 */
   --icon-cortexsearchservice: #22d3ee;  /* cyan (Cortex AI / vector search) */
+  --icon-agent:       #c084fc;  /* purple (Cortex AI agent — reasoning)     */
+  --icon-externalagent:#67e8f9; /* light cyan (external / third-party agent)*/
 
   /* Column icons */
   --col-text:         #8b949e;
@@ -179,6 +181,8 @@
   --icon-dbtproject:  #116329;
   --icon-model:       #c2185b;
   --icon-cortexsearchservice: #0e7490;
+  --icon-agent:       #7c3aed;
+  --icon-externalagent:#0891b2;
 
   /* Column icons */
   --col-text:         #6e7681;

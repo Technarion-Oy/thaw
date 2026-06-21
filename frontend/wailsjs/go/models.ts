@@ -1,3 +1,32 @@
+export namespace agent {
+	
+	export class AgentConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    comment: string;
+	    profile: string;
+	    specification: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AgentConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.comment = source["comment"];
+	        this.profile = source["profile"];
+	        this.specification = source["specification"];
+	    }
+	}
+
+}
+
 export namespace aggregationpolicy {
 	
 	export class AggregationPolicyConfig {
@@ -1359,6 +1388,33 @@ export namespace eventtable {
 		    }
 		    return a;
 		}
+	}
+
+}
+
+export namespace externalagent {
+	
+	export class ExternalAgentConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    versionName: string;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExternalAgentConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.versionName = source["versionName"];
+	        this.comment = source["comment"];
+	    }
 	}
 
 }
