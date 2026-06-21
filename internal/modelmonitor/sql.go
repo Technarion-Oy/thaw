@@ -28,8 +28,11 @@ import (
 // statement is run.
 //
 // Quoting differs per field and follows the published grammar exactly:
-//   - Model, Source, Warehouse, Baseline, TimestampColumn are identifiers
-//     (emitted verbatim — they may be qualified, e.g. db.schema.table).
+//   - Model, Warehouse, TimestampColumn are identifiers (emitted verbatim).
+//   - Source and Baseline are table/view references; they are fully qualified
+//     with the monitor's own database & schema (the create modal only offers
+//     objects from db.schema) so creation works even when the session's current
+//     schema differs from the monitor's target schema.
 //   - Version, Function, RefreshInterval, AggregationWindow are string literals
 //     (single-quoted).
 //   - The column arrays are parenthesised, comma-separated identifier lists.
@@ -43,14 +46,14 @@ type ModelMonitorConfig struct {
 	Model             string `json:"model"`             // MODEL = <ident>
 	Version           string `json:"version"`           // VERSION = '<lit>'
 	Function          string `json:"function"`          // FUNCTION = '<lit>'
-	Source            string `json:"source"`            // SOURCE = <ident>
+	Source            string `json:"source"`            // SOURCE = <db.schema.ident>
 	Warehouse         string `json:"warehouse"`         // WAREHOUSE = <ident>
 	RefreshInterval   string `json:"refreshInterval"`   // REFRESH_INTERVAL = '<lit>'
 	AggregationWindow string `json:"aggregationWindow"` // AGGREGATION_WINDOW = '<lit>'
 	TimestampColumn   string `json:"timestampColumn"`   // TIMESTAMP_COLUMN = <ident>
 
 	// Optional WITH-clause parameters.
-	Baseline               string   `json:"baseline"`               // BASELINE = <ident>
+	Baseline               string   `json:"baseline"`               // BASELINE = <db.schema.ident>
 	IDColumns              []string `json:"idColumns"`              // ID_COLUMNS = (cols)
 	PredictionClassColumns []string `json:"predictionClassColumns"` // PREDICTION_CLASS_COLUMNS = (cols)
 	PredictionScoreColumns []string `json:"predictionScoreColumns"` // PREDICTION_SCORE_COLUMNS = (cols)
@@ -88,12 +91,12 @@ func columnArray(cols []string) string {
 //	  MODEL = <model>
 //	  VERSION = '<version>'
 //	  FUNCTION = '<function>'
-//	  SOURCE = <source>
+//	  SOURCE = <db.schema.source>
 //	  WAREHOUSE = <warehouse>
 //	  REFRESH_INTERVAL = '<refresh_interval>'
 //	  AGGREGATION_WINDOW = '<aggregation_window>'
 //	  TIMESTAMP_COLUMN = <timestamp_column>
-//	  [ BASELINE = <baseline> ]
+//	  [ BASELINE = <db.schema.baseline> ]
 //	  [ ID_COLUMNS = (cols) ]
 //	  [ PREDICTION_CLASS_COLUMNS = (cols) ]
 //	  [ PREDICTION_SCORE_COLUMNS = (cols) ]
@@ -128,15 +131,25 @@ func BuildCreateModelMonitorSql(db, schema string, cfg ModelMonitorConfig) (stri
 	// Required string-literal parameters.
 	fmt.Fprintf(&sb, "\n  VERSION = '%s'", snowflake.EscapeTextLit(orPlaceholder(cfg.Version, "version_name")))
 	fmt.Fprintf(&sb, "\n  FUNCTION = '%s'", snowflake.EscapeTextLit(orPlaceholder(cfg.Function, "function_name")))
-	fmt.Fprintf(&sb, "\n  SOURCE = %s", orPlaceholder(cfg.Source, "source_table"))
+	// SOURCE is a table/view reference. It is fully qualified with the monitor's
+	// own database & schema (the create modal's source picker only offers objects
+	// from db.schema) so creation succeeds even when the session's current schema
+	// differs from the monitor's target schema. A blank value emits the bare
+	// placeholder so the live preview reads as a template.
+	if src := strings.TrimSpace(cfg.Source); src != "" {
+		fmt.Fprintf(&sb, "\n  SOURCE = %s", snowflake.Qualify(db, schema, src))
+	} else {
+		fmt.Fprint(&sb, "\n  SOURCE = source_table")
+	}
 	fmt.Fprintf(&sb, "\n  WAREHOUSE = %s", orPlaceholder(cfg.Warehouse, "warehouse_name"))
 	fmt.Fprintf(&sb, "\n  REFRESH_INTERVAL = '%s'", snowflake.EscapeTextLit(orPlaceholder(cfg.RefreshInterval, "1 day")))
 	fmt.Fprintf(&sb, "\n  AGGREGATION_WINDOW = '%s'", snowflake.EscapeTextLit(orPlaceholder(cfg.AggregationWindow, "1 day")))
 	fmt.Fprintf(&sb, "\n  TIMESTAMP_COLUMN = %s", orPlaceholder(cfg.TimestampColumn, "timestamp_column"))
 
-	// Optional parameters — emitted only when set.
+	// Optional parameters — emitted only when set. BASELINE is a table reference;
+	// like SOURCE it is qualified with the monitor's database & schema.
 	if b := strings.TrimSpace(cfg.Baseline); b != "" {
-		fmt.Fprintf(&sb, "\n  BASELINE = %s", b)
+		fmt.Fprintf(&sb, "\n  BASELINE = %s", snowflake.Qualify(db, schema, b))
 	}
 	for _, p := range []struct {
 		kw   string

@@ -45,11 +45,14 @@ dedicated builder.
 - A blank name emits the placeholder `model_monitor_name`; blank required fields
   emit per-field placeholders (`model_name`, `version_name`, `source_table`, …)
   so the live SQL preview reads as a completable template while the user types.
-- Quoting follows the published grammar exactly: `MODEL`, `SOURCE`, `WAREHOUSE`,
-  `BASELINE`, `TIMESTAMP_COLUMN` are identifiers (emitted verbatim, may be
-  qualified); `VERSION`, `FUNCTION`, `REFRESH_INTERVAL`, `AGGREGATION_WINDOW` are
-  single-quoted string literals; the column arrays are parenthesised
-  comma-separated identifier lists.
+- Quoting follows the published grammar exactly: `MODEL`, `WAREHOUSE`,
+  `TIMESTAMP_COLUMN` are identifiers (emitted verbatim); `SOURCE` and `BASELINE`
+  are table/view references and are fully qualified with the monitor's own
+  database & schema (the create modal only offers objects from `db.schema`, so
+  creation works even when the session's current schema differs from the
+  monitor's target schema); `VERSION`, `FUNCTION`, `REFRESH_INTERVAL`,
+  `AGGREGATION_WINDOW` are single-quoted string literals; the column arrays are
+  parenthesised comma-separated identifier lists.
 - `OR REPLACE` and `IF NOT EXISTS` are mutually exclusive in Snowflake; the
   builder drops `IF NOT EXISTS` when `OrReplace` is also set (and the create
   modal prevents selecting both).

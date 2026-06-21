@@ -11,7 +11,7 @@
 // @thaw-domain: Object Browser & Administration
 
 import { useState, useEffect, useMemo } from "react";
-import { Form, Input, InputNumber, Checkbox, Select, Alert, Divider, Space } from "antd";
+import { Form, Input, InputNumber, Checkbox, Select, AutoComplete, Alert, Divider, Space } from "antd";
 import { LineChartOutlined } from "@ant-design/icons";
 import {
   BuildCreateModelMonitorSql, ExecDDL, ListWarehouses, ListObjects,
@@ -68,15 +68,17 @@ interface MMConfig {
 // known they are offered as a dropdown; the user can still type a name that isn't
 // listed (e.g. for a cross-schema source) — tags mode keeps both behaviours.
 function ColumnTags({
-  value, onChange, placeholder, options,
-}: { value: string[]; onChange: (v: string[]) => void; placeholder: string; options: string[] }) {
+  value, onChange, placeholder, options, maxCount,
+}: { value: string[]; onChange: (v: string[]) => void; placeholder: string; options: string[]; maxCount?: number }) {
   return (
     <Select
       mode="tags"
       size="small"
       style={{ width: "100%" }}
       value={value}
-      onChange={onChange}
+      // Cap at maxCount when set (e.g. SEGMENT_COLUMNS allows at most 5) so the
+      // form can't build a statement Snowflake will reject.
+      onChange={(v) => onChange(maxCount && v.length > maxCount ? v.slice(0, maxCount) : v)}
       tokenSeparators={[",", " "]}
       options={options.map((c) => ({ value: c, label: c }))}
       placeholder={placeholder}
@@ -113,6 +115,8 @@ export default function CreateModelMonitorModal({ db, schema, onClose, onSuccess
   const [refreshNum, setRefreshNum] = useState<number>(1);
   const [refreshUnit, setRefreshUnit] = useState<RefreshUnit>("hours");
   const [aggNum, setAggNum] = useState<number>(1);
+  // Snowflake's minimum refresh interval is 60 seconds.
+  const refreshMin = refreshUnit === "seconds" ? 60 : 1;
 
   const quotedIdentifiersIgnoreCase = useQuotedIdentifiers();
   const preview = useSqlPreview(
@@ -175,15 +179,12 @@ export default function CreateModelMonitorModal({ db, schema, onClose, onSuccess
 
   // ── Columns of the selected source table ──────────────────────────────────
   const [sourceColumns, setSourceColumns] = useState<string[]>([]);
-  const [loadingColumns, setLoadingColumns] = useState(false);
 
   useEffect(() => {
     if (!cfg.source.trim()) { setSourceColumns([]); return; }
-    setLoadingColumns(true);
     GetTableColumnsWithTypes(db, schema, cfg.source)
       .then((cols) => setSourceColumns((cols ?? []).map((c) => c.name)))
-      .catch(() => setSourceColumns([]))
-      .finally(() => setLoadingColumns(false));
+      .catch(() => setSourceColumns([]));
   }, [db, schema, cfg.source]);
 
   // ── Composers → cfg ───────────────────────────────────────────────────────
@@ -353,28 +354,39 @@ export default function CreateModelMonitorModal({ db, schema, onClose, onSuccess
             />
           </Form.Item>
           <Form.Item label="Timestamp column" required style={itemStyle} help="TIMESTAMP_NTZ column in the source">
-            <Select
-              showSearch
-              loading={loadingColumns}
+            {/* AutoComplete (not a plain Select) so a column name can still be
+                typed when DESCRIBE returns nothing — keeps this required field
+                satisfiable, consistent with the free-typeable column tags below. */}
+            <AutoComplete
+              allowClear
               disabled={!cfg.source}
-              value={cfg.timestampColumn || undefined}
+              value={cfg.timestampColumn}
               onChange={(v) => set("timestampColumn", v ?? "")}
-              placeholder={cfg.source ? "Select column…" : "Select a source first"}
-              options={sourceColumns.map((c) => ({ value: c, label: c }))}
-              notFoundContent={loadingColumns ? "Loading…" : "No columns found"}
+              placeholder={cfg.source ? "Select or type column…" : "Select a source first"}
+              options={sourceColumns.map((c) => ({ value: c }))}
+              filterOption={(input, option) =>
+                (option?.value ?? "").toLowerCase().includes(input.toLowerCase())
+              }
+              style={{ width: "100%" }}
             />
           </Form.Item>
-          <Form.Item label="Refresh interval" required style={itemStyle}>
+          {/* Snowflake enforces a 60-second minimum refresh interval, so when
+              the unit is "seconds" the number is floored (and clamped on unit
+              switch) at 60 rather than letting the value be rejected at run. */}
+          <Form.Item label="Refresh interval" required style={itemStyle} help="Minimum 60 seconds">
             <Space.Compact block>
               <InputNumber
-                min={1}
+                min={refreshMin}
                 value={refreshNum}
-                onChange={(v) => setRefreshNum(v ?? 1)}
+                onChange={(v) => setRefreshNum(Math.max(refreshMin, v ?? refreshMin))}
                 style={{ width: "45%" }}
               />
               <Select
                 value={refreshUnit}
-                onChange={(v) => setRefreshUnit(v)}
+                onChange={(v) => {
+                  setRefreshUnit(v);
+                  if (v === "seconds") setRefreshNum((n) => Math.max(60, n));
+                }}
                 style={{ width: "55%" }}
                 options={[
                   { value: "seconds", label: "seconds" },
@@ -415,7 +427,7 @@ export default function CreateModelMonitorModal({ db, schema, onClose, onSuccess
           <ColumnTags value={cfg.idColumns} onChange={(v) => set("idColumns", v)} options={sourceColumns} placeholder={colsPlaceholder} />
         </Form.Item>
         <Form.Item label="Segment columns" style={itemStyle} help="Up to 5 STRING columns for segmentation">
-          <ColumnTags value={cfg.segmentColumns} onChange={(v) => set("segmentColumns", v)} options={sourceColumns} placeholder={colsPlaceholder} />
+          <ColumnTags value={cfg.segmentColumns} onChange={(v) => set("segmentColumns", v)} options={sourceColumns} placeholder={colsPlaceholder} maxCount={5} />
         </Form.Item>
         <Form.Item label="Custom metric columns" style={itemStyle}>
           <ColumnTags value={cfg.customMetricColumns} onChange={(v) => set("customMetricColumns", v)} options={sourceColumns} placeholder={colsPlaceholder} />
