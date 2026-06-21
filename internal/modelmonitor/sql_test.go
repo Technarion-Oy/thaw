@@ -42,10 +42,10 @@ func TestBuildCreateModelMonitorSql(t *testing.T) {
 				"VERSION = 'V1'",
 				"FUNCTION = 'predict'",
 				"SOURCE = \"DB\".\"SC\".\"INFERENCE_TBL\"",
-				"WAREHOUSE = MY_WH",
+				"WAREHOUSE = \"MY_WH\"",
 				"REFRESH_INTERVAL = '1 hour'",
 				"AGGREGATION_WINDOW = '1 day'",
-				"TIMESTAMP_COLUMN = TS",
+				"TIMESTAMP_COLUMN = \"TS\"",
 				"PREDICTION_SCORE_COLUMNS = ('PRED_SCORE')",
 			},
 			absent: []string{

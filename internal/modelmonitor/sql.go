@@ -29,7 +29,8 @@ import (
 //
 // Quoting differs per field and follows the published grammar exactly:
 //   - Warehouse (account-level) and TimestampColumn (a column of the source) are
-//     identifiers emitted verbatim.
+//     single identifiers, double-quoted when set so a case-sensitive name
+//     round-trips (matching the sibling builders and the ALTER path).
 //   - Model, Source, and Baseline are schema-level object references; they are
 //     fully qualified with the monitor's own database & schema (the create modal
 //     only offers objects from db.schema, and Snowflake requires the model to
@@ -50,10 +51,10 @@ type ModelMonitorConfig struct {
 	Version           string `json:"version"`           // VERSION = '<lit>'
 	Function          string `json:"function"`          // FUNCTION = '<lit>'
 	Source            string `json:"source"`            // SOURCE = <db.schema.ident>
-	Warehouse         string `json:"warehouse"`         // WAREHOUSE = <ident>
+	Warehouse         string `json:"warehouse"`         // WAREHOUSE = "<ident>"
 	RefreshInterval   string `json:"refreshInterval"`   // REFRESH_INTERVAL = '<lit>'
 	AggregationWindow string `json:"aggregationWindow"` // AGGREGATION_WINDOW = '<lit>'
-	TimestampColumn   string `json:"timestampColumn"`   // TIMESTAMP_COLUMN = <ident>
+	TimestampColumn   string `json:"timestampColumn"`   // TIMESTAMP_COLUMN = "<ident>"
 
 	// Optional WITH-clause parameters.
 	Baseline               string   `json:"baseline"`               // BASELINE = <db.schema.ident>
@@ -132,6 +133,16 @@ func BuildCreateModelMonitorSql(db, schema string, cfg ModelMonitorConfig) (stri
 		return placeholder
 	}
 
+	// quotedOrPlaceholder double-quotes a single identifier when set (so a
+	// case-sensitive / quoted name round-trips), or emits the bare placeholder
+	// when blank so the live preview reads as a template.
+	quotedOrPlaceholder := func(v, placeholder string) string {
+		if t := strings.TrimSpace(v); t != "" {
+			return snowflake.QuoteIdent(t)
+		}
+		return placeholder
+	}
+
 	// MODEL is a schema-level object reference. Like SOURCE/BASELINE it is fully
 	// qualified with the monitor's own database & schema (the create modal's model
 	// picker only offers models from db.schema, and Snowflake requires the model
@@ -156,10 +167,14 @@ func BuildCreateModelMonitorSql(db, schema string, cfg ModelMonitorConfig) (stri
 	} else {
 		fmt.Fprint(&sb, "\n  SOURCE = source_table")
 	}
-	fmt.Fprintf(&sb, "\n  WAREHOUSE = %s", orPlaceholder(cfg.Warehouse, "warehouse_name"))
+	// WAREHOUSE (account-level) and TIMESTAMP_COLUMN (a column of the source) are
+	// single identifiers; double-quote them when set so a case-sensitive / quoted
+	// name round-trips, matching the sibling CREATE builders and this object's
+	// ALTER path (SET WAREHOUSE = "<wh>").
+	fmt.Fprintf(&sb, "\n  WAREHOUSE = %s", quotedOrPlaceholder(cfg.Warehouse, "warehouse_name"))
 	fmt.Fprintf(&sb, "\n  REFRESH_INTERVAL = '%s'", snowflake.EscapeTextLit(orPlaceholder(cfg.RefreshInterval, "1 day")))
 	fmt.Fprintf(&sb, "\n  AGGREGATION_WINDOW = '%s'", snowflake.EscapeTextLit(orPlaceholder(cfg.AggregationWindow, "1 day")))
-	fmt.Fprintf(&sb, "\n  TIMESTAMP_COLUMN = %s", orPlaceholder(cfg.TimestampColumn, "timestamp_column"))
+	fmt.Fprintf(&sb, "\n  TIMESTAMP_COLUMN = %s", quotedOrPlaceholder(cfg.TimestampColumn, "timestamp_column"))
 
 	// Optional parameters — emitted only when set. BASELINE is a table reference;
 	// like SOURCE it is qualified with the monitor's database & schema.

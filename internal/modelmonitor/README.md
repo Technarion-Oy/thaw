@@ -46,8 +46,10 @@ dedicated builder.
   emit per-field placeholders (`model_name`, `version_name`, `source_table`, …)
   so the live SQL preview reads as a completable template while the user types.
 - Quoting follows the published grammar exactly: `WAREHOUSE` (account-level) and
-  `TIMESTAMP_COLUMN` (a column of the source) are identifiers emitted verbatim;
-  `MODEL`, `SOURCE`, and `BASELINE` are schema-level object references and are
+  `TIMESTAMP_COLUMN` (a column of the source) are single identifiers, double-quoted
+  when set so a case-sensitive name round-trips (matching the sibling builders and
+  the `SET WAREHOUSE = "<wh>"` ALTER path); `MODEL`, `SOURCE`, and `BASELINE` are
+  schema-level object references and are
   fully qualified with the monitor's own database & schema (the create modal only
   offers objects from `db.schema`, and Snowflake requires the model to live in
   the monitor's schema, so creation works even when the session's current schema
