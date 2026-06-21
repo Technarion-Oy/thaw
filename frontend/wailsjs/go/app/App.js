@@ -62,6 +62,10 @@ export function AlterImageRepository(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterImageRepository'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterJoinPolicy(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterJoinPolicy'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterMaskingPolicy(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterMaskingPolicy'](arg1, arg2, arg3, arg4);
 }
@@ -260,6 +264,10 @@ export function BuildCreateIcebergTableSql(arg1, arg2, arg3) {
 
 export function BuildCreateImageRepositorySql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateImageRepositorySql'](arg1, arg2, arg3);
+}
+
+export function BuildCreateJoinPolicySql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateJoinPolicySql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateMaskingPolicySql(arg1, arg2, arg3) {
@@ -836,6 +844,14 @@ export function GetGitFileContent(arg1, arg2, arg3, arg4) {
 
 export function GetIntegrationProperties(arg1) {
   return window['go']['app']['App']['GetIntegrationProperties'](arg1);
+}
+
+export function GetJoinPolicyReferences(arg1, arg2, arg3) {
+  return window['go']['app']['App']['GetJoinPolicyReferences'](arg1, arg2, arg3);
+}
+
+export function GetJoinPolicyTags(arg1, arg2, arg3) {
+  return window['go']['app']['App']['GetJoinPolicyTags'](arg1, arg2, arg3);
 }
 
 export function GetKernelPythonVersion(arg1) {

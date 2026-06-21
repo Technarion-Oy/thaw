@@ -26,6 +26,7 @@ import (
 	"thaw/internal/hybridtable"
 	"thaw/internal/icebergtable"
 	"thaw/internal/imagerepository"
+	"thaw/internal/joinpolicy"
 	"thaw/internal/maskingpolicy"
 	"thaw/internal/materializedview"
 	"thaw/internal/model"
@@ -211,6 +212,11 @@ func (a *App) BuildCreateMaskingPolicySql(database, schema string, cfg maskingpo
 // BuildCreateRowAccessPolicySql returns the SQL for creating a Snowflake ROW ACCESS POLICY.
 func (a *App) BuildCreateRowAccessPolicySql(database, schema string, cfg rowaccesspolicy.RowAccessPolicyConfig) (string, error) {
 	return rowaccesspolicy.BuildCreateRowAccessPolicySql(database, schema, cfg)
+}
+
+// BuildCreateJoinPolicySql returns the SQL for creating a Snowflake JOIN POLICY.
+func (a *App) BuildCreateJoinPolicySql(database, schema string, cfg joinpolicy.JoinPolicyConfig) (string, error) {
+	return joinpolicy.BuildCreateJoinPolicySql(database, schema, cfg)
 }
 
 // BuildCreatePasswordPolicySql returns the SQL for creating a Snowflake PASSWORD POLICY.

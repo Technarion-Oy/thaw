@@ -20,6 +20,7 @@ import {snowgitrepo} from '../models';
 import {hybridtable} from '../models';
 import {icebergtable} from '../models';
 import {imagerepository} from '../models';
+import {joinpolicy} from '../models';
 import {maskingpolicy} from '../models';
 import {materializedview} from '../models';
 import {model} from '../models';
@@ -85,6 +86,8 @@ export function AlterHybridTable(arg1:string,arg2:string,arg3:string,arg4:string
 export function AlterIcebergTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterImageRepository(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterJoinPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterMaskingPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -185,6 +188,8 @@ export function BuildCreateHybridTableSql(arg1:string,arg2:string,arg3:hybridtab
 export function BuildCreateIcebergTableSql(arg1:string,arg2:string,arg3:icebergtable.IcebergTableConfig):Promise<string>;
 
 export function BuildCreateImageRepositorySql(arg1:string,arg2:string,arg3:imagerepository.ImageRepositoryConfig):Promise<string>;
+
+export function BuildCreateJoinPolicySql(arg1:string,arg2:string,arg3:joinpolicy.JoinPolicyConfig):Promise<string>;
 
 export function BuildCreateMaskingPolicySql(arg1:string,arg2:string,arg3:maskingpolicy.MaskingPolicyConfig):Promise<string>;
 
@@ -473,6 +478,10 @@ export function GetGitConfig():Promise<config.GitConfig>;
 export function GetGitFileContent(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
 
 export function GetIntegrationProperties(arg1:string):Promise<Array<snowflake.PropertyPair>>;
+
+export function GetJoinPolicyReferences(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
+
+export function GetJoinPolicyTags(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function GetKernelPythonVersion(arg1:string):Promise<string>;
 

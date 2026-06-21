@@ -63,6 +63,7 @@
   --icon-tag:         #2dd4bf;  /* teal (governance metadata label)         */
   --icon-maskingpolicy:#facc15; /* amber (data masking / sensitive)         */
   --icon-rowaccesspolicy:#a78bfa; /* violet (row-level security)            */
+  --icon-joinpolicy:  #fda4af;  /* salmon (join governance / correlation)   */
   --icon-passwordpolicy:#fb7185; /* rose (password / credential rules)      */
   --icon-sessionpolicy:#818cf8; /* indigo (session lifetime / timeouts)     */
   --icon-aggregationpolicy:#34d399; /* emerald (group-size aggregation)     */
@@ -147,6 +148,7 @@
   --icon-tag:         #0f766e;
   --icon-maskingpolicy:#9a6700;
   --icon-rowaccesspolicy:#7c3aed;
+  --icon-joinpolicy:  #db2777;
   --icon-passwordpolicy:#be123c;
   --icon-sessionpolicy:#4338ca;
   --icon-aggregationpolicy:#047857;
