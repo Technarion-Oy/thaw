@@ -37,7 +37,8 @@ import (
 //     current schema differs from the monitor's target schema.
 //   - Version, Function, RefreshInterval, AggregationWindow are string literals
 //     (single-quoted).
-//   - The column arrays are parenthesised, comma-separated identifier lists.
+//   - The column arrays are ARRAY constants — parenthesised, comma-separated
+//     lists of single-quoted string literals, e.g. ('id', 'region').
 type ModelMonitorConfig struct {
 	Name          string `json:"name"`
 	CaseSensitive bool   `json:"caseSensitive"`
@@ -56,24 +57,27 @@ type ModelMonitorConfig struct {
 
 	// Optional WITH-clause parameters.
 	Baseline               string   `json:"baseline"`               // BASELINE = <db.schema.ident>
-	IDColumns              []string `json:"idColumns"`              // ID_COLUMNS = (cols)
-	PredictionClassColumns []string `json:"predictionClassColumns"` // PREDICTION_CLASS_COLUMNS = (cols)
-	PredictionScoreColumns []string `json:"predictionScoreColumns"` // PREDICTION_SCORE_COLUMNS = (cols)
-	ActualClassColumns     []string `json:"actualClassColumns"`     // ACTUAL_CLASS_COLUMNS = (cols)
-	ActualScoreColumns     []string `json:"actualScoreColumns"`     // ACTUAL_SCORE_COLUMNS = (cols)
-	SegmentColumns         []string `json:"segmentColumns"`         // SEGMENT_COLUMNS = (cols)
-	CustomMetricColumns    []string `json:"customMetricColumns"`    // CUSTOM_METRIC_COLUMNS = (cols)
+	IDColumns              []string `json:"idColumns"`              // ID_COLUMNS = ('col', …)
+	PredictionClassColumns []string `json:"predictionClassColumns"` // PREDICTION_CLASS_COLUMNS = ('col', …)
+	PredictionScoreColumns []string `json:"predictionScoreColumns"` // PREDICTION_SCORE_COLUMNS = ('col', …)
+	ActualClassColumns     []string `json:"actualClassColumns"`     // ACTUAL_CLASS_COLUMNS = ('col', …)
+	ActualScoreColumns     []string `json:"actualScoreColumns"`     // ACTUAL_SCORE_COLUMNS = ('col', …)
+	SegmentColumns         []string `json:"segmentColumns"`         // SEGMENT_COLUMNS = ('col', …)
+	CustomMetricColumns    []string `json:"customMetricColumns"`    // CUSTOM_METRIC_COLUMNS = ('col', …)
 }
 
-// columnArray renders a parenthesised, comma-separated identifier list for the
-// column-array parameters, e.g. "(ID, REGION)". Blank tokens are skipped; an
-// all-blank list yields "" so the caller omits the parameter entirely.
+// columnArray renders the parenthesised ARRAY-constant value for the column-array
+// parameters, e.g. "('ID', 'REGION')". Snowflake specifies these as arrays of
+// single-quoted string literals (not bare identifiers), and the ALTER path quotes
+// segment_column the same way. Each element is single-quoted with embedded quotes
+// doubled (EscapeStringLit). Blank tokens are skipped; an all-blank list yields ""
+// so the caller omits the parameter entirely.
 func columnArray(cols []string) string {
 	out := make([]string, 0, len(cols))
 	for _, c := range cols {
 		c = strings.TrimSpace(c)
 		if c != "" {
-			out = append(out, c)
+			out = append(out, "'"+snowflake.EscapeStringLit(c)+"'")
 		}
 	}
 	if len(out) == 0 {
@@ -99,13 +103,13 @@ func columnArray(cols []string) string {
 //	  AGGREGATION_WINDOW = '<aggregation_window>'
 //	  TIMESTAMP_COLUMN = <timestamp_column>
 //	  [ BASELINE = <db.schema.baseline> ]
-//	  [ ID_COLUMNS = (cols) ]
-//	  [ PREDICTION_CLASS_COLUMNS = (cols) ]
-//	  [ PREDICTION_SCORE_COLUMNS = (cols) ]
-//	  [ ACTUAL_CLASS_COLUMNS = (cols) ]
-//	  [ ACTUAL_SCORE_COLUMNS = (cols) ]
-//	  [ SEGMENT_COLUMNS = (cols) ]
-//	  [ CUSTOM_METRIC_COLUMNS = (cols) ];
+//	  [ ID_COLUMNS = ('col', …) ]
+//	  [ PREDICTION_CLASS_COLUMNS = ('col', …) ]
+//	  [ PREDICTION_SCORE_COLUMNS = ('col', …) ]
+//	  [ ACTUAL_CLASS_COLUMNS = ('col', …) ]
+//	  [ ACTUAL_SCORE_COLUMNS = ('col', …) ]
+//	  [ SEGMENT_COLUMNS = ('col', …) ]
+//	  [ CUSTOM_METRIC_COLUMNS = ('col', …) ];
 func BuildCreateModelMonitorSql(db, schema string, cfg ModelMonitorConfig) (string, error) {
 	var sb strings.Builder
 

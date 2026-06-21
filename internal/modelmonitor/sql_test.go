@@ -46,7 +46,7 @@ func TestBuildCreateModelMonitorSql(t *testing.T) {
 				"REFRESH_INTERVAL = '1 hour'",
 				"AGGREGATION_WINDOW = '1 day'",
 				"TIMESTAMP_COLUMN = TS",
-				"PREDICTION_SCORE_COLUMNS = (PRED_SCORE)",
+				"PREDICTION_SCORE_COLUMNS = ('PRED_SCORE')",
 			},
 			absent: []string{
 				"OR REPLACE", "IF NOT EXISTS", "BASELINE", "ID_COLUMNS",
@@ -81,13 +81,13 @@ func TestBuildCreateModelMonitorSql(t *testing.T) {
 				"MODEL = \"DB\".\"SC\".\"M\"",
 				"SOURCE = \"DB\".\"SC\".\"SRC\"",
 				"BASELINE = \"DB\".\"SC\".\"BASE_TBL\"",
-				"ID_COLUMNS = (ID, REGION)",
-				"PREDICTION_CLASS_COLUMNS = (PRED_CLASS)",
-				"PREDICTION_SCORE_COLUMNS = (PRED_SCORE)",
-				"ACTUAL_CLASS_COLUMNS = (ACTUAL_CLASS)",
-				"ACTUAL_SCORE_COLUMNS = (ACTUAL_SCORE)",
-				"SEGMENT_COLUMNS = (SEG_A, SEG_B)",
-				"CUSTOM_METRIC_COLUMNS = (CUSTOM_1)",
+				"ID_COLUMNS = ('ID', 'REGION')",
+				"PREDICTION_CLASS_COLUMNS = ('PRED_CLASS')",
+				"PREDICTION_SCORE_COLUMNS = ('PRED_SCORE')",
+				"ACTUAL_CLASS_COLUMNS = ('ACTUAL_CLASS')",
+				"ACTUAL_SCORE_COLUMNS = ('ACTUAL_SCORE')",
+				"SEGMENT_COLUMNS = ('SEG_A', 'SEG_B')",
+				"CUSTOM_METRIC_COLUMNS = ('CUSTOM_1')",
 			},
 			absent: []string{"IF NOT EXISTS"},
 		},
@@ -141,7 +141,7 @@ func TestBuildCreateModelMonitorSql(t *testing.T) {
 				SegmentColumns:         []string{"", "   "},
 				PredictionScoreColumns: []string{"PS"},
 			},
-			contains: []string{"ID_COLUMNS = (ONLY_ONE)"},
+			contains: []string{"ID_COLUMNS = ('ONLY_ONE')"},
 			absent:   []string{"SEGMENT_COLUMNS"},
 		},
 		{
@@ -151,6 +151,14 @@ func TestBuildCreateModelMonitorSql(t *testing.T) {
 				Version: "v'1",
 			},
 			contains: []string{"VERSION = 'v''1'"},
+		},
+		{
+			name: "column-array elements escape single quotes",
+			cfg: ModelMonitorConfig{
+				Name:                   "E",
+				PredictionScoreColumns: []string{"od'd", "plain"},
+			},
+			contains: []string{"PREDICTION_SCORE_COLUMNS = ('od''d', 'plain')"},
 		},
 	}
 

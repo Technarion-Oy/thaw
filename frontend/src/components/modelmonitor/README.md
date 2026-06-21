@@ -33,3 +33,7 @@ table/view (and optionally a baseline) on a refresh schedule.
 - **Limited ALTER** — only Suspend/Resume, SET Baseline/Refresh interval/Warehouse,
   and ADD/DROP segment_column are editable; everything else is fixed at creation
   (use Create with OR REPLACE to change it).
+- **Source / Baseline are scoped to the monitor's own schema** — the create
+  modal's pickers only list objects from `db.schema` and the builder hard-qualifies
+  them with `db.schema`. Snowflake permits a source in another schema/database;
+  lifting that would mean making these fields free-typeable. Reasonable v1 limit.

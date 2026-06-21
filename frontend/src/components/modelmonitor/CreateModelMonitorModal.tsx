@@ -161,11 +161,9 @@ export default function CreateModelMonitorModal({ db, schema, onClose, onSuccess
 
   // ── Versions of the selected model ────────────────────────────────────────
   const [versions, setVersions] = useState<string[]>([]);
-  const [loadingVersions, setLoadingVersions] = useState(false);
 
   useEffect(() => {
     if (!cfg.model.trim()) { setVersions([]); return; }
-    setLoadingVersions(true);
     ListModelVersions(db, schema, cfg.model)
       .then((res) => {
         const cols = res?.columns ?? [];
@@ -173,8 +171,7 @@ export default function CreateModelMonitorModal({ db, schema, onClose, onSuccess
         const rows = res?.rows ?? [];
         setVersions(idx >= 0 ? rows.map((r) => String(r[idx])).filter(Boolean) : []);
       })
-      .catch(() => setVersions([]))
-      .finally(() => setLoadingVersions(false));
+      .catch(() => setVersions([]));
   }, [db, schema, cfg.model]);
 
   // ── Columns of the selected source table ──────────────────────────────────
@@ -304,15 +301,20 @@ export default function CreateModelMonitorModal({ db, schema, onClose, onSuccess
             />
           </Form.Item>
           <Form.Item label="Version" required style={itemStyle}>
-            <Select
-              showSearch
-              loading={loadingVersions}
+            {/* AutoComplete (not a plain Select) so a version can still be typed
+                when SHOW VERSIONS returns nothing — keeps this required field
+                satisfiable, consistent with the source/timestamp/column fields. */}
+            <AutoComplete
+              allowClear
               disabled={!cfg.model}
-              value={cfg.version || undefined}
+              value={cfg.version}
               onChange={(v) => set("version", v ?? "")}
-              placeholder={cfg.model ? "Select version…" : "Select a model first"}
-              options={versions.map((v) => ({ value: v, label: v }))}
-              notFoundContent={loadingVersions ? "Loading…" : "No versions found"}
+              placeholder={cfg.model ? "Select or type version…" : "Select a model first"}
+              options={versions.map((v) => ({ value: v }))}
+              filterOption={(input, option) =>
+                (option?.value ?? "").toLowerCase().includes(input.toLowerCase())
+              }
+              style={{ width: "100%" }}
             />
           </Form.Item>
           <Form.Item label="Function" required style={itemStyle} help="Model method, e.g. predict">

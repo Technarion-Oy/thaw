@@ -53,10 +53,13 @@ dedicated builder.
   the monitor's schema, so creation works even when the session's current schema
   differs from the monitor's target schema); `VERSION`, `FUNCTION`,
   `REFRESH_INTERVAL`, `AGGREGATION_WINDOW` are single-quoted string literals; the
-  column arrays are parenthesised comma-separated identifier lists. Note the
-  CREATE↔ALTER asymmetry that matches Snowflake's own grammar: `BASELINE` and the
-  segment columns are **identifiers** in `CREATE` but **string literals** in
-  `ALTER` (`SET BASELINE='…'`, `ADD/DROP segment_column='…'`).
+  column arrays are ARRAY constants — parenthesised, comma-separated lists of
+  single-quoted string literals, e.g. `('id', 'region')`. Note the CREATE↔ALTER
+  asymmetry for **`BASELINE`** that matches Snowflake's own grammar: it is an
+  **identifier** in `CREATE` (`BASELINE = <db.schema.tbl>`) but a **string
+  literal** in `ALTER` (`SET BASELINE='…'`). Segment columns are string literals
+  in both (`SEGMENT_COLUMNS = ('a','b')` in CREATE, `ADD/DROP segment_column='a'`
+  in ALTER).
 - `OR REPLACE` and `IF NOT EXISTS` are mutually exclusive in Snowflake; the
   builder drops `IF NOT EXISTS` when `OrReplace` is also set (and the create
   modal prevents selecting both).
