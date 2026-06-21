@@ -90,6 +90,10 @@ export function AlterModel(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterModel'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterModelMonitor(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterModelMonitor'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterNetworkRule(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterNetworkRule'](arg1, arg2, arg3, arg4);
 }
@@ -332,6 +336,10 @@ export function BuildCreateMaskingPolicySql(arg1, arg2, arg3) {
 
 export function BuildCreateMaterializedViewSql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateMaterializedViewSql'](arg1, arg2, arg3);
+}
+
+export function BuildCreateModelMonitorSql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateModelMonitorSql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateModelSql(arg1, arg2, arg3) {

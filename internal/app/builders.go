@@ -33,6 +33,7 @@ import (
 	"thaw/internal/materializedview"
 	"thaw/internal/mcpserver"
 	"thaw/internal/model"
+	"thaw/internal/modelmonitor"
 	"thaw/internal/networkrule"
 	"thaw/internal/packagespolicy"
 	"thaw/internal/passwordpolicy"
@@ -262,6 +263,12 @@ func (a *App) BuildCreateImageRepositorySql(database, schema string, cfg imagere
 // BuildCreateModelSql returns the SQL for creating a Snowflake MODEL.
 func (a *App) BuildCreateModelSql(database, schema string, cfg model.ModelConfig) (string, error) {
 	return model.BuildCreateModelSql(database, schema, cfg)
+}
+
+// BuildCreateModelMonitorSql returns the SQL for creating a Snowflake MODEL
+// MONITOR.
+func (a *App) BuildCreateModelMonitorSql(database, schema string, cfg modelmonitor.ModelMonitorConfig) (string, error) {
+	return modelmonitor.BuildCreateModelMonitorSql(database, schema, cfg)
 }
 
 // BuildCreateAgentSql returns the SQL for creating a Snowflake AGENT (Cortex AI).

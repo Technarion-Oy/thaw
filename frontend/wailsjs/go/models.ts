@@ -2841,6 +2841,61 @@ export namespace model {
 
 }
 
+export namespace modelmonitor {
+	
+	export class ModelMonitorConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    model: string;
+	    version: string;
+	    function: string;
+	    source: string;
+	    warehouse: string;
+	    refreshInterval: string;
+	    aggregationWindow: string;
+	    timestampColumn: string;
+	    baseline: string;
+	    idColumns: string[];
+	    predictionClassColumns: string[];
+	    predictionScoreColumns: string[];
+	    actualClassColumns: string[];
+	    actualScoreColumns: string[];
+	    segmentColumns: string[];
+	    customMetricColumns: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ModelMonitorConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.model = source["model"];
+	        this.version = source["version"];
+	        this.function = source["function"];
+	        this.source = source["source"];
+	        this.warehouse = source["warehouse"];
+	        this.refreshInterval = source["refreshInterval"];
+	        this.aggregationWindow = source["aggregationWindow"];
+	        this.timestampColumn = source["timestampColumn"];
+	        this.baseline = source["baseline"];
+	        this.idColumns = source["idColumns"];
+	        this.predictionClassColumns = source["predictionClassColumns"];
+	        this.predictionScoreColumns = source["predictionScoreColumns"];
+	        this.actualClassColumns = source["actualClassColumns"];
+	        this.actualScoreColumns = source["actualScoreColumns"];
+	        this.segmentColumns = source["segmentColumns"];
+	        this.customMetricColumns = source["customMetricColumns"];
+	    }
+	}
+
+}
+
 export namespace networkrule {
 	
 	export class NetworkRuleConfig {

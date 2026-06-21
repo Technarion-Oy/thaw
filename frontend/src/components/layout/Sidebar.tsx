@@ -51,6 +51,7 @@ import {
   ShareAltOutlined,
   ExperimentOutlined,
   RobotOutlined,
+  LineChartOutlined,
   FileSearchOutlined,
   BuildOutlined,
   DashboardOutlined,
@@ -94,7 +95,7 @@ import {
 import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, AlterDynamicTable, AlterExternalTable, AlterIcebergTable, AlterMaterializedView, AlterAlert, ExecuteAlert, AlterService, UploadFileToStage, PickOpenFile, ExecDDL, ListStageEntries, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory, BuildDropColumnSql, BuildRenameColumnSql, BuildSetColumnNotNullSql, BuildDropColumnNotNullSql, BuildSetColumnCommentSql, BuildChangeColumnTypeSql } from "../../../wailsjs/go/app/App";
+import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, AlterDynamicTable, AlterExternalTable, AlterIcebergTable, AlterMaterializedView, AlterAlert, ExecuteAlert, AlterService, AlterModelMonitor, UploadFileToStage, PickOpenFile, ExecDDL, ListStageEntries, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory, BuildDropColumnSql, BuildRenameColumnSql, BuildSetColumnNotNullSql, BuildDropColumnNotNullSql, BuildSetColumnCommentSql, BuildChangeColumnTypeSql } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl, { identToken, quoteIdent } from "../shared/ObjectNameCaseControl";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
@@ -193,6 +194,8 @@ import CreateImageRepositoryModal from "../imagerepository/CreateImageRepository
 import ImageRepositoryPropertiesModal from "../imagerepository/ImageRepositoryPropertiesModal";
 import CreateModelModal from "../model/CreateModelModal";
 import ModelPropertiesModal from "../model/ModelPropertiesModal";
+import CreateModelMonitorModal from "../modelmonitor/CreateModelMonitorModal";
+import ModelMonitorPropertiesModal from "../modelmonitor/ModelMonitorPropertiesModal";
 import CreateCortexSearchServiceModal from "../cortexsearchservice/CreateCortexSearchServiceModal";
 import CortexSearchServicePropertiesModal from "../cortexsearchservice/CortexSearchServicePropertiesModal";
 import CreateAgentModal from "../agent/CreateAgentModal";
@@ -264,6 +267,7 @@ const KIND_LABEL: Record<string, string> = {
   "GIT REPOSITORY": "Git Repositories",
   "DBT PROJECT": "DBT Projects",
   MODEL:         "Models",
+  "MODEL MONITOR": "Model Monitors",
   "CORTEX SEARCH SERVICE": "Cortex Search Services",
   AGENT:         "Agents",
   "EXTERNAL AGENT": "External Agents",
@@ -271,7 +275,7 @@ const KIND_LABEL: Record<string, string> = {
   "SEMANTIC VIEW": "Semantic Views",
 };
 
-const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE", "FUNCTION", "EXTERNAL FUNCTION", "DATA METRIC FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "JOIN POLICY", "PRIVACY POLICY", "STORAGE LIFECYCLE POLICY", "PASSWORD POLICY", "SESSION POLICY", "AGGREGATION POLICY", "PROJECTION POLICY", "AUTHENTICATION POLICY", "PACKAGES POLICY", "NETWORK RULE", "IMAGE REPOSITORY", "SERVICE", "STREAMLIT", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT", "MODEL", "CORTEX SEARCH SERVICE", "AGENT", "EXTERNAL AGENT", "MCP SERVER", "SEMANTIC VIEW"];
+const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE", "FUNCTION", "EXTERNAL FUNCTION", "DATA METRIC FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "JOIN POLICY", "PRIVACY POLICY", "STORAGE LIFECYCLE POLICY", "PASSWORD POLICY", "SESSION POLICY", "AGGREGATION POLICY", "PROJECTION POLICY", "AUTHENTICATION POLICY", "PACKAGES POLICY", "NETWORK RULE", "IMAGE REPOSITORY", "SERVICE", "STREAMLIT", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT", "MODEL", "MODEL MONITOR", "CORTEX SEARCH SERVICE", "AGENT", "EXTERNAL AGENT", "MCP SERVER", "SEMANTIC VIEW"];
 
 const kindIcon = (kind: string) => objectIcon(kind);
 
@@ -541,7 +545,7 @@ function ObjTooltip({ cacheKey, db, schema, kind, name, args, children }: {
     // policies, so the call would always fail and emit gosnowflake driver
     // error-log noise on every hover. Skip the fetch entirely — with content
     // left null the tooltip simply doesn't show.
-    if (kind === "IMAGE REPOSITORY" || kind === "SERVICE" || kind === "PACKAGES POLICY" || kind === "MODEL" || kind === "CORTEX SEARCH SERVICE" || kind === "EXTERNAL AGENT" || kind === "MCP SERVER") return;
+    if (kind === "IMAGE REPOSITORY" || kind === "SERVICE" || kind === "PACKAGES POLICY" || kind === "MODEL" || kind === "MODEL MONITOR" || kind === "CORTEX SEARCH SERVICE" || kind === "EXTERNAL AGENT" || kind === "MCP SERVER") return;
     const fresh = getCached();
     if (fresh !== null) {
       if (content !== fresh) setContent(fresh);
@@ -746,6 +750,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [imageRepositoryPropsModal, setImageRepositoryPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createModelModal, setCreateModelModal] = useState<{ db: string; schema: string } | null>(null);
   const [modelPropsModal, setModelPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [createModelMonitorModal, setCreateModelMonitorModal] = useState<{ db: string; schema: string } | null>(null);
+  const [modelMonitorPropsModal, setModelMonitorPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createCortexSearchModal, setCreateCortexSearchModal] = useState<{ db: string; schema: string } | null>(null);
   const [cortexSearchPropsModal, setCortexSearchPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createAgentModal, setCreateAgentModal] = useState<{ db: string; schema: string } | null>(null);
@@ -2653,6 +2659,70 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setModelPropsModal({ db, schema, name });
   };
 
+  const openCreateModelMonitor = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    setCtxMenu(null);
+    setCreateModelMonitorModal({ db, schema });
+  };
+
+  const openModelMonitorProperties = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    setModelMonitorPropsModal({ db, schema, name });
+  };
+
+  const suspendModelMonitor = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    modal.confirm({
+      title: "Suspend Model Monitor",
+      content: `Suspend monitoring for "${name}"?`,
+      okText: "Suspend",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await AlterModelMonitor(db, schema, name, "SUSPEND");
+          contextMsg.success(`Model monitor "${name}" suspended.`);
+        } catch (e) {
+          contextMsg.error(`Failed to suspend model monitor: ${String(e)}`);
+        }
+      },
+    });
+  };
+
+  const resumeModelMonitor = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    modal.confirm({
+      title: "Resume Model Monitor",
+      content: `Resume monitoring for "${name}"?`,
+      okText: "Resume",
+      onOk: async () => {
+        try {
+          await AlterModelMonitor(db, schema, name, "RESUME");
+          contextMsg.success(`Model monitor "${name}" resumed.`);
+        } catch (e) {
+          contextMsg.error(`Failed to resume model monitor: ${String(e)}`);
+        }
+      },
+    });
+  };
+
   const openCreateCortexSearchService = () => {
     if (!ctxMenu) return;
     const parts = ctxMenu.nodeKey.split(":");
@@ -3192,6 +3262,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       case "NETWORK RULE": sql = `DROP NETWORK RULE ${fullName};`; break;
       case "IMAGE REPOSITORY": sql = `DROP IMAGE REPOSITORY ${fullName};`; break;
       case "MODEL":       sql = `DROP MODEL ${fullName};`; break;
+      case "MODEL MONITOR": sql = `DROP MODEL MONITOR ${fullName};`; break;
       case "CORTEX SEARCH SERVICE": sql = `DROP CORTEX SEARCH SERVICE ${fullName};`; break;
       case "AGENT":       sql = `DROP AGENT ${fullName};`; break;
       case "EXTERNAL AGENT": sql = `DROP EXTERNAL AGENT ${fullName};`; break;
@@ -3861,6 +3932,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         case "NETWORK RULE": return `DROP NETWORK RULE ${fullName};`;
         case "IMAGE REPOSITORY": return `DROP IMAGE REPOSITORY ${fullName};`;
         case "MODEL":       return `DROP MODEL ${fullName};`;
+        case "MODEL MONITOR": return `DROP MODEL MONITOR ${fullName};`;
         case "CORTEX SEARCH SERVICE": return `DROP CORTEX SEARCH SERVICE ${fullName};`;
         case "AGENT":       return `DROP AGENT ${fullName};`;
         case "EXTERNAL AGENT": return `DROP EXTERNAL AGENT ${fullName};`;
@@ -4440,6 +4512,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
               {menuItemSub("Machine Learning", <RobotOutlined style={{ fontSize: 12 }} />, "create-ml", (
                 <>
                   {menuItem("Model…", <RobotOutlined style={{ fontSize: 12 }} />, openCreateModel)}
+                  {menuItem("Model Monitor…", <LineChartOutlined style={{ fontSize: 12 }} />, openCreateModelMonitor)}
                   {menuItem("Cortex Search Service…", <FileSearchOutlined style={{ fontSize: 12 }} />, openCreateCortexSearchService)}
                   {menuItem("Agent…", <ApiOutlined style={{ fontSize: 12 }} />, openCreateAgent)}
                   {menuItem("External Agent…", <GlobalOutlined style={{ fontSize: 12 }} />, openCreateExternalAgent)}
@@ -4531,6 +4604,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Create Data Metric Function…", <FundOutlined style={{ fontSize: 12 }} />, openCreateDataMetricFunction)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "MODEL" &&
             menuItem("Create Model…", <RobotOutlined style={{ fontSize: 12 }} />, openCreateModel)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "MODEL MONITOR" &&
+            menuItem("Create Model Monitor…", <LineChartOutlined style={{ fontSize: 12 }} />, openCreateModelMonitor)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "CORTEX SEARCH SERVICE" &&
             menuItem("Create Cortex Search Service…", <FileSearchOutlined style={{ fontSize: 12 }} />, openCreateCortexSearchService)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "AGENT" &&
@@ -4629,6 +4704,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openImageRepositoryProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MODEL" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openModelProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MODEL MONITOR" &&
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openModelMonitorProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MODEL MONITOR" &&
+            menuItem("Suspend", <PauseCircleOutlined style={{ fontSize: 12 }} />, suspendModelMonitor)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MODEL MONITOR" &&
+            menuItem("Resume", <PlayCircleOutlined style={{ fontSize: 12 }} />, resumeModelMonitor)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "CORTEX SEARCH SERVICE" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openCortexSearchServiceProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "AGENT" &&
@@ -4745,19 +4826,19 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "NOTEBOOK" &&
             menuItem("Make Live", <CloudUploadOutlined style={{ fontSize: 12 }} />, makeNotebookLive, undefined, !featureFlags.snowparkNotebooks, "Snowpark & Notebooks is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && menuItem("View Definition", null, viewDefinition)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ICEBERG TABLE" && ctxMenu.objKind !== "HYBRID TABLE" && ctxMenu.objKind !== "EVENT TABLE" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "JOIN POLICY" && ctxMenu.objKind !== "PRIVACY POLICY" && ctxMenu.objKind !== "STORAGE LIFECYCLE POLICY" && ctxMenu.objKind !== "PASSWORD POLICY" && ctxMenu.objKind !== "SESSION POLICY" && ctxMenu.objKind !== "AGGREGATION POLICY" && ctxMenu.objKind !== "PROJECTION POLICY" && ctxMenu.objKind !== "AUTHENTICATION POLICY" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "STREAMLIT" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "AGENT" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && ctxMenu.objKind !== "SEMANTIC VIEW" && ctxMenu.objKind !== "VIEW" && ctxMenu.objKind !== "SEQUENCE" && ctxMenu.objKind !== "STREAM" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "MODEL MONITOR" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && menuItem("View Definition", null, viewDefinition)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ICEBERG TABLE" && ctxMenu.objKind !== "HYBRID TABLE" && ctxMenu.objKind !== "EVENT TABLE" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "JOIN POLICY" && ctxMenu.objKind !== "PRIVACY POLICY" && ctxMenu.objKind !== "STORAGE LIFECYCLE POLICY" && ctxMenu.objKind !== "PASSWORD POLICY" && ctxMenu.objKind !== "SESSION POLICY" && ctxMenu.objKind !== "AGGREGATION POLICY" && ctxMenu.objKind !== "PROJECTION POLICY" && ctxMenu.objKind !== "AUTHENTICATION POLICY" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "STREAMLIT" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "MODEL MONITOR" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "AGENT" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && ctxMenu.objKind !== "SEMANTIC VIEW" && ctxMenu.objKind !== "VIEW" && ctxMenu.objKind !== "SEQUENCE" && ctxMenu.objKind !== "STREAM" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {/* Comparison diffs via GET_DDL, which image repositories, services,
               packages policies, and models don't support — exclude them so the
               diff view can't surface a GET_DDL error for a kind that has no DDL. */}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" &&
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "MODEL MONITOR" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" &&
             menuItem("Select for Comparison", <DiffOutlined style={{ fontSize: 12 }} />, selectObjForComparison)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && pendingDiff !== null &&
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "MODEL MONITOR" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && pendingDiff !== null &&
             menuItem(`Compare with: ${pendingDiff.label}`, <DiffOutlined style={{ fontSize: 12, color: "var(--accent)" }} />, compareObjWith)}
           {ctxMenu.nodeType === "obj" &&
             (ctxMenu.objKind === "VIEW" || ctxMenu.objKind === "PROCEDURE" || ctxMenu.objKind === "FUNCTION" || ctxMenu.objKind === "EXTERNAL FUNCTION") &&
             menuItem("View Dependencies…", <ShareAltOutlined style={{ fontSize: 12 }} />, viewDependencies)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "AGENT" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" &&
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "AGENT" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && ctxMenu.objKind !== "MODEL MONITOR" &&
             menuItem("Rename…", <EditOutlined style={{ fontSize: 12 }} />, renameObject)}
           {ctxMenu.nodeType === "obj" && <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />}
           {ctxMenu.nodeType === "obj" && menuItem("Delete…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, deleteObject, "#f85149")}
@@ -5524,6 +5605,24 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={modelPropsModal.schema}
           name={modelPropsModal.name}
           onClose={() => setModelPropsModal(null)}
+        />
+      )}
+
+      {createModelMonitorModal && (
+        <CreateModelMonitorModal
+          db={createModelMonitorModal.db}
+          schema={createModelMonitorModal.schema}
+          onClose={() => setCreateModelMonitorModal(null)}
+          onSuccess={() => refreshDatabaseByName(createModelMonitorModal.db, { schema: createModelMonitorModal.schema, kind: "MODEL MONITOR" })}
+        />
+      )}
+
+      {modelMonitorPropsModal && (
+        <ModelMonitorPropertiesModal
+          db={modelMonitorPropsModal.db}
+          schema={modelMonitorPropsModal.schema}
+          name={modelMonitorPropsModal.name}
+          onClose={() => setModelMonitorPropsModal(null)}
         />
       )}
 
