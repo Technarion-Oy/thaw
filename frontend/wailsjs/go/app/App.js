@@ -1054,6 +1054,10 @@ export function GetRoleDDL(arg1) {
   return window['go']['app']['App']['GetRoleDDL'](arg1);
 }
 
+export function GetRoutineProperties(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['app']['App']['GetRoutineProperties'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function GetRowAccessPolicyReferences(arg1, arg2, arg3) {
   return window['go']['app']['App']['GetRowAccessPolicyReferences'](arg1, arg2, arg3);
 }

@@ -2330,6 +2330,14 @@ func extractArgTypes(arguments string) string {
 	return strings.TrimSpace(arguments[start+1:])
 }
 
+// ExtractArgTypes is the exported form of extractArgTypes: it parses the
+// parameter type list out of a SHOW FUNCTIONS / SHOW PROCEDURES "arguments" cell
+// (e.g. "FOO(NUMBER, VARCHAR) RETURN NUMBER" → "NUMBER, VARCHAR"). It is used to
+// match a specific overload's SHOW row against a threaded argument signature.
+func ExtractArgTypes(arguments string) string {
+	return extractArgTypes(arguments)
+}
+
 // DroppedTable represents a table that has been dropped but is still within
 // the Snowflake Time Travel retention window and can be recovered with UNDROP.
 type DroppedTable struct {

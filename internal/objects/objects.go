@@ -649,6 +649,69 @@ func GetObjectProperties(ctx context.Context, client *snowflake.Client, database
 	return pairs, nil
 }
 
+// normalizeArgTypes canonicalizes a parameter type list for overload matching by
+// uppercasing and stripping all spaces, so "NUMBER, VARCHAR" and "number,varchar"
+// compare equal.
+func normalizeArgTypes(s string) string {
+	return strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(s), " ", ""))
+}
+
+// GetRoutineProperties returns the SHOW metadata for one specific overload of a
+// FUNCTION or PROCEDURE. SHOW FUNCTIONS / SHOW PROCEDURES return one row per
+// overloaded signature; the generic GetObjectProperties keeps only Rows[0], so an
+// overloaded routine would always show the first overload's comment / is_secure
+// regardless of which one was selected. This selects the row whose argument-type
+// signature (parsed from the "arguments" column) matches argTypes — the same
+// signature threaded into the Alter* edit actions — falling back to the first row
+// when no column or match is found (e.g. a non-overloaded routine).
+func GetRoutineProperties(ctx context.Context, client *snowflake.Client, database, schema, kind, name, argTypes string) ([]snowflake.PropertyPair, error) {
+	query, err := BuildObjectPropertiesQuery(database, schema, kind, name)
+	if err != nil {
+		return nil, err
+	}
+	res, err := client.Execute(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	if res == nil || len(res.Rows) == 0 {
+		return []snowflake.PropertyPair{}, nil
+	}
+
+	argsIdx := -1
+	for i, col := range res.Columns {
+		if strings.EqualFold(col, "arguments") {
+			argsIdx = i
+			break
+		}
+	}
+
+	rowIdx := 0
+	if argsIdx >= 0 {
+		target := normalizeArgTypes(argTypes)
+		for i, row := range res.Rows {
+			if argsIdx >= len(row) {
+				continue
+			}
+			got := normalizeArgTypes(snowflake.ExtractArgTypes(snowflake.CellString(row[argsIdx])))
+			if got == target {
+				rowIdx = i
+				break
+			}
+		}
+	}
+
+	row := res.Rows[rowIdx]
+	pairs := make([]snowflake.PropertyPair, 0, len(res.Columns))
+	for i, col := range res.Columns {
+		val := ""
+		if i < len(row) {
+			val = snowflake.CellString(row[i])
+		}
+		pairs = append(pairs, snowflake.PropertyPair{Key: col, Value: val})
+	}
+	return pairs, nil
+}
+
 // BuildGetColumnCommentsQuery returns the INFORMATION_SCHEMA query that selects
 // each column name and its comment, ordered by ordinal position.
 func BuildGetColumnCommentsQuery(database, schema, table string) string {

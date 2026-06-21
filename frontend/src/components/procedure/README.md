@@ -27,8 +27,10 @@ generated class carries a `convertValues` method that a literal can't satisfy. `
 requires a non-empty name and body. Packages / imports use `Select mode="tags"`.
 
 **`ProcedurePropertiesModal`** mirrors the materialized-view properties modal but drops the
-lifecycle controls and the DDL fetch: it loads `GetObjectProperties(db, schema, "PROCEDURE",
-name)` and edits via `AlterProcedure(db, schema, name, clause)`.
+lifecycle controls and the DDL fetch: it loads `GetRoutineProperties(db, schema, "PROCEDURE",
+name, args)` — passing the argument signature so the correct overload's row is shown (`SHOW
+PROCEDURES` returns one row per overload) — and edits via `AlterProcedure(db, schema, name,
+args, clause)` targeting the same signature.
 
 ## Patterns & integration
 

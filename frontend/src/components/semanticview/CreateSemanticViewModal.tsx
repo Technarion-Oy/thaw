@@ -89,7 +89,13 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
   );
   const { creating, error, setError, submit } = useCreateSubmit();
 
-  const canSubmit = name.trim().length > 0 && body.trim().length > 0;
+  // Block the untouched placeholder body (it contains literal <database>.<schema>
+  // tokens that would fail server-side), mirroring CreateViewModal's DEFAULT_QUERY
+  // guard.
+  const canSubmit =
+    name.trim().length > 0 &&
+    body.trim().length > 0 &&
+    body.trim() !== DEFAULT_BODY.trim();
 
   const handleRun = () => {
     if (!canSubmit) return;

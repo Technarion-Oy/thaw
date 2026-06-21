@@ -17,7 +17,7 @@ import {
 import {
   CodeOutlined, EditOutlined, CheckOutlined, CloseOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterProcedure } from "../../../wailsjs/go/app/App";
+import { GetRoutineProperties, AlterProcedure } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -157,12 +157,12 @@ export default function ProcedurePropertiesModal({ db, schema, name, args, onClo
     setRows(null);
     setError(null);
     try {
-      const props = await GetObjectProperties(db, schema, "PROCEDURE", name);
+      const props = await GetRoutineProperties(db, schema, "PROCEDURE", name, args);
       setRows(props ?? []);
     } catch (e) {
       setError(String(e));
     }
-  }, [db, schema, name]);
+  }, [db, schema, name, args]);
 
   useEffect(() => { reload(); }, [reload]);
 

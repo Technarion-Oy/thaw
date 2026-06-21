@@ -17,7 +17,7 @@ import {
 import {
   FunctionOutlined, EditOutlined, CheckOutlined, CloseOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterFunction } from "../../../wailsjs/go/app/App";
+import { GetRoutineProperties, AlterFunction } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -157,12 +157,12 @@ export default function FunctionPropertiesModal({ db, schema, name, args, onClos
     setRows(null);
     setError(null);
     try {
-      const props = await GetObjectProperties(db, schema, "FUNCTION", name);
+      const props = await GetRoutineProperties(db, schema, "FUNCTION", name, args);
       setRows(props ?? []);
     } catch (e) {
       setError(String(e));
     }
-  }, [db, schema, name]);
+  }, [db, schema, name, args]);
 
   useEffect(() => { reload(); }, [reload]);
 

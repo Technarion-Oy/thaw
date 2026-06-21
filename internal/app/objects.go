@@ -323,6 +323,19 @@ func (a *App) GetObjectProperties(database, schema, kind, name string) ([]snowfl
 	return objects.GetObjectProperties(a.ctx, a.client, database, schema, kind, name)
 }
 
+// GetRoutineProperties returns SHOW metadata for one specific overload of a
+// FUNCTION or PROCEDURE, selected by its argument-type signature (args, e.g.
+// "NUMBER, VARCHAR"). Overloaded routines return one SHOW row per signature;
+// this picks the matching one so the properties panel reflects the overload the
+// user acted on rather than always the first. Pass the same signature threaded
+// into AlterFunction / AlterProcedure.
+func (a *App) GetRoutineProperties(database, schema, kind, name, args string) ([]snowflake.PropertyPair, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return objects.GetRoutineProperties(a.ctx, a.client, database, schema, kind, name, args)
+}
+
 // GetColumnComments returns the comment for every column in a table, ordered
 // by ordinal position.
 func (a *App) GetColumnComments(database, schema, table string) ([]objects.ColumnComment, error) {

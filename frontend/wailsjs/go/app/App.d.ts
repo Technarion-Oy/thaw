@@ -593,6 +593,8 @@ export function GetQuotedIdentifiersIgnoreCase():Promise<boolean>;
 
 export function GetRoleDDL(arg1:string):Promise<string>;
 
+export function GetRoutineProperties(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<Array<snowflake.PropertyPair>>;
+
 export function GetRowAccessPolicyReferences(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function GetSchemaCrossDeps(arg1:string,arg2:string):Promise<Array<snowflake.SchemaRef>>;

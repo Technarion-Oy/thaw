@@ -131,3 +131,26 @@ func TestAppendPackagesPolicyDescPreservesExisting(t *testing.T) {
 		t.Errorf("appendPackagesPolicyDesc() = %#v, want %#v", got, want)
 	}
 }
+
+func TestNormalizeArgTypes(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"NUMBER, VARCHAR", "NUMBER,VARCHAR"},
+		{"number, varchar", "NUMBER,VARCHAR"},
+		{"  NUMBER ,  VARCHAR  ", "NUMBER,VARCHAR"},
+		{"VARCHAR(100)", "VARCHAR(100)"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		if got := normalizeArgTypes(tt.in); got != tt.want {
+			t.Errorf("normalizeArgTypes(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+	// Two signatures that differ only by spacing/case must normalize equal, so
+	// overload matching is robust to how SHOW vs the threaded args format them.
+	if normalizeArgTypes("NUMBER, VARCHAR") != normalizeArgTypes("number,varchar") {
+		t.Errorf("equivalent signatures did not normalize equal")
+	}
+}
