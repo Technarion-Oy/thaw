@@ -8,6 +8,7 @@
 package snowflake
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -44,4 +45,38 @@ func IsNumeric(dataType string) bool {
 // Boolean and numeric values are typically not quoted.
 func NeedsQuotes(dataType string) bool {
 	return !IsBoolean(dataType) && !IsNumeric(dataType)
+}
+
+// DollarQuoteTag returns a dollar-quote delimiter (e.g. "$$" or "$thaw$") that is
+// guaranteed not to appear inside body, so wrapping a UDF / procedure body as
+// `AS <tag>\n<body>\n<tag>` can never be terminated early by a literal delimiter
+// in the body itself. It prefers the bare "$$" when the body doesn't contain it,
+// then a small set of named tags, and finally falls back to a numbered tag.
+func DollarQuoteTag(body string) string {
+	for _, tag := range []string{"$$", "$thaw$", "$thaw_body$"} {
+		if !strings.Contains(body, tag) {
+			return tag
+		}
+	}
+	for i := 0; ; i++ {
+		tag := fmt.Sprintf("$thaw_%d$", i)
+		if !strings.Contains(body, tag) {
+			return tag
+		}
+	}
+}
+
+// IsHandlerLanguage reports whether the given UDF / stored-procedure language is
+// one of the handler languages (Python, Java, Scala) that carry their logic in a
+// separate handler and therefore accept the RUNTIME_VERSION / PACKAGES / IMPORTS
+// / HANDLER clauses. SQL and JavaScript (and the empty default, which is SQL)
+// embed their logic inline in the body and do not. The comparison is
+// case-insensitive. Shared by the CREATE FUNCTION and CREATE PROCEDURE builders.
+func IsHandlerLanguage(language string) bool {
+	switch strings.ToUpper(strings.TrimSpace(language)) {
+	case "PYTHON", "JAVA", "SCALA":
+		return true
+	default:
+		return false
+	}
 }

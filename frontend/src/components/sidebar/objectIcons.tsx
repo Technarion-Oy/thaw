@@ -79,6 +79,7 @@ import {
   RobotOutlined,
   FileSearchOutlined,
   PartitionOutlined,
+  ApartmentOutlined,
 } from "@ant-design/icons";
 
 // ── CSS variable name per kind ─────────────────────────────────────────────
@@ -127,6 +128,7 @@ const KIND_VAR: Record<string, string> = {
   AGENT:             "--icon-agent",
   "EXTERNAL AGENT":  "--icon-externalagent",
   "MCP SERVER":      "--icon-mcpserver",
+  "SEMANTIC VIEW":   "--icon-semanticview",
 };
 
 // ── Icon component per kind ────────────────────────────────────────────────
@@ -175,6 +177,7 @@ const KIND_ICON: Record<string, React.ComponentType<{ style?: React.CSSPropertie
   AGENT:            ApiOutlined,
   "EXTERNAL AGENT": GlobalOutlined,
   "MCP SERVER":     PartitionOutlined,
+  "SEMANTIC VIEW":  ApartmentOutlined,
 };
 
 // ── Public API ────────────────────────────────────────────────────────────
