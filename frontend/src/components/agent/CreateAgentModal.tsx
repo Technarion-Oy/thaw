@@ -147,7 +147,7 @@ export default function CreateAgentModal({ db, schema, onClose, onSuccess }: Pro
           type="info"
           showIcon
           style={{ marginBottom: 12 }}
-          message="A Cortex AI agent pairs an orchestration model with a set of tools. Its behaviour is defined by the YAML/JSON specification below (models, orchestration, instructions, tools, tool_resources)."
+          message="A Cortex AI agent pairs an orchestration model with a set of tools. Its behavior is defined by the YAML/JSON specification below (models, orchestration, instructions, tools, tool_resources)."
         />
 
         {/* OR REPLACE and IF NOT EXISTS are mutually exclusive in Snowflake;

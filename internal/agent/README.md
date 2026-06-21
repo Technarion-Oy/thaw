@@ -4,7 +4,7 @@ Builds SQL for Snowflake **AGENT** objects (Cortex AI agents).
 
 An agent is a schema-level Cortex object that pairs an orchestration LLM with a
 set of tools (Cortex Analyst, Cortex Search, custom SQL/procedures, …). Its
-behaviour is described by a YAML/JSON **specification** (models, orchestration
+behavior is described by a YAML/JSON **specification** (models, orchestration
 budget, instructions, tools, tool_resources) supplied via `FROM SPECIFICATION
 $THAW$ … $THAW$`, plus an optional `PROFILE` JSON object holding display metadata
 (`display_name`, `avatar`, `color`).

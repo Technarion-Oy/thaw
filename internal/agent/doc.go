@@ -11,7 +11,7 @@
 // Package agent builds SQL for Snowflake AGENT objects — CREATE AGENT statements
 // and the structured config behind them. An agent is a schema-level Cortex AI
 // object that combines LLM reasoning with tool use (Cortex Analyst, Cortex
-// Search, custom SQL/procedures, …). Its behaviour — orchestration model,
+// Search, custom SQL/procedures, …). Its behavior — orchestration model,
 // instructions, tools, and tool resources — is supplied as a YAML or JSON
 // specification (max 100,000 bytes) via FROM SPECIFICATION $THAW$ … $THAW$; an optional
 // PROFILE JSON object carries display metadata (display_name, avatar, color).
