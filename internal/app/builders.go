@@ -34,6 +34,7 @@ import (
 	"thaw/internal/packagespolicy"
 	"thaw/internal/passwordpolicy"
 	"thaw/internal/pipe"
+	"thaw/internal/privacypolicy"
 	"thaw/internal/procedure"
 	"thaw/internal/projectionpolicy"
 	"thaw/internal/rowaccesspolicy"
@@ -217,6 +218,11 @@ func (a *App) BuildCreateRowAccessPolicySql(database, schema string, cfg rowacce
 // BuildCreateJoinPolicySql returns the SQL for creating a Snowflake JOIN POLICY.
 func (a *App) BuildCreateJoinPolicySql(database, schema string, cfg joinpolicy.JoinPolicyConfig) (string, error) {
 	return joinpolicy.BuildCreateJoinPolicySql(database, schema, cfg)
+}
+
+// BuildCreatePrivacyPolicySql returns the SQL for creating a Snowflake PRIVACY POLICY.
+func (a *App) BuildCreatePrivacyPolicySql(database, schema string, cfg privacypolicy.PrivacyPolicyConfig) (string, error) {
+	return privacypolicy.BuildCreatePrivacyPolicySql(database, schema, cfg)
 }
 
 // BuildCreatePasswordPolicySql returns the SQL for creating a Snowflake PASSWORD POLICY.

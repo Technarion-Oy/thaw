@@ -94,6 +94,10 @@ export function AlterPipe(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterPipe'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterPrivacyPolicy(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterPrivacyPolicy'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterProjectionPolicy(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterProjectionPolicy'](arg1, arg2, arg3, arg4);
 }
@@ -296,6 +300,10 @@ export function BuildCreatePasswordPolicySql(arg1, arg2, arg3) {
 
 export function BuildCreatePipeSql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreatePipeSql'](arg1, arg2, arg3);
+}
+
+export function BuildCreatePrivacyPolicySql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreatePrivacyPolicySql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateProjectionPolicySql(arg1, arg2, arg3) {
@@ -920,6 +928,14 @@ export function GetPipeStatus(arg1, arg2, arg3) {
 
 export function GetPlatformOS() {
   return window['go']['app']['App']['GetPlatformOS']();
+}
+
+export function GetPrivacyPolicyReferences(arg1, arg2, arg3) {
+  return window['go']['app']['App']['GetPrivacyPolicyReferences'](arg1, arg2, arg3);
+}
+
+export function GetPrivacyPolicyTags(arg1, arg2, arg3) {
+  return window['go']['app']['App']['GetPrivacyPolicyTags'](arg1, arg2, arg3);
 }
 
 export function GetProcedureParams(arg1, arg2, arg3, arg4) {
