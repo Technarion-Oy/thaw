@@ -311,10 +311,11 @@ export default function CreateFunctionModal({ db, schema, onClose, onSuccess }: 
           </Form.Item>
         ) : (
           <Form.Item label="Return type" style={itemStyle} help="Scalar result data type.">
-            <Input
+            <DataTypeAutoComplete
               value={cfg.returnType}
-              onChange={(e) => set("returnType", e.target.value)}
+              onChange={(v) => set("returnType", v)}
               placeholder="VARIANT"
+              style={{ width: "100%" }}
             />
           </Form.Item>
         )}
