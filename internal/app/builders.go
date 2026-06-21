@@ -44,6 +44,7 @@ import (
 	"thaw/internal/snowflake"
 	"thaw/internal/snowgitrepo"
 	"thaw/internal/stage"
+	"thaw/internal/storagelifecyclepolicy"
 	"thaw/internal/streamlit"
 	"thaw/internal/tag"
 )
@@ -223,6 +224,11 @@ func (a *App) BuildCreateJoinPolicySql(database, schema string, cfg joinpolicy.J
 // BuildCreatePrivacyPolicySql returns the SQL for creating a Snowflake PRIVACY POLICY.
 func (a *App) BuildCreatePrivacyPolicySql(database, schema string, cfg privacypolicy.PrivacyPolicyConfig) (string, error) {
 	return privacypolicy.BuildCreatePrivacyPolicySql(database, schema, cfg)
+}
+
+// BuildCreateStorageLifecyclePolicySql returns the SQL for creating a Snowflake STORAGE LIFECYCLE POLICY.
+func (a *App) BuildCreateStorageLifecyclePolicySql(database, schema string, cfg storagelifecyclepolicy.StorageLifecyclePolicyConfig) (string, error) {
+	return storagelifecyclepolicy.BuildCreateStorageLifecyclePolicySql(database, schema, cfg)
 }
 
 // BuildCreatePasswordPolicySql returns the SQL for creating a Snowflake PASSWORD POLICY.

@@ -65,6 +65,7 @@
   --icon-rowaccesspolicy:#a78bfa; /* violet (row-level security)            */
   --icon-joinpolicy:  #fda4af;  /* salmon (join governance / correlation)   */
   --icon-privacypolicy:#38bdf8; /* sky (differential privacy budget)        */
+  --icon-storagelifecyclepolicy:#fb923c; /* orange (storage tier / archival)*/
   --icon-passwordpolicy:#fb7185; /* rose (password / credential rules)      */
   --icon-sessionpolicy:#818cf8; /* indigo (session lifetime / timeouts)     */
   --icon-aggregationpolicy:#34d399; /* emerald (group-size aggregation)     */
@@ -151,6 +152,7 @@
   --icon-rowaccesspolicy:#7c3aed;
   --icon-joinpolicy:  #db2777;
   --icon-privacypolicy:#0284c7;
+  --icon-storagelifecyclepolicy:#c2410c;
   --icon-passwordpolicy:#be123c;
   --icon-sessionpolicy:#4338ca;
   --icon-aggregationpolicy:#047857;
