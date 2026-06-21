@@ -18,7 +18,7 @@ import {
   LineChartOutlined, EditOutlined, CheckOutlined, CloseOutlined,
   PauseCircleOutlined, PlayCircleOutlined, PlusOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterModelMonitor, ListWarehouses } from "../../../wailsjs/go/app/App";
+import { GetObjectProperties, AlterModelMonitor, ListWarehouses, ParseSqlList } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -40,18 +40,6 @@ const LABEL_TD: React.CSSProperties = {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function q1(s: string) { return "'" + s.replace(/'/g, "''") + "'"; }
-
-// parseList tolerantly reads a SHOW value that may be a JSON array (["a","b"]),
-// a bracketed list ([a, b]), or a comma-separated string, into trimmed tokens.
-function parseList(raw: string): string[] {
-  const t = (raw || "").trim();
-  if (t === "" || t === "[]") return [];
-  try {
-    const parsed = JSON.parse(t);
-    if (Array.isArray(parsed)) return parsed.map((x) => String(x).trim()).filter(Boolean);
-  } catch { /* not JSON — fall through */ }
-  return t.replace(/^\[|\]$/g, "").split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
-}
 
 // ─── EditRow ─────────────────────────────────────────────────────────────────
 
@@ -199,6 +187,7 @@ export default function ModelMonitorPropertiesModal({ db, schema, name, onClose 
   const [loadingWarehouses, setLoadingWarehouses] = useState(false);
   const [newSegment, setNewSegment] = useState("");
   const [addingSegment, setAddingSegment] = useState(false);
+  const [segments, setSegments] = useState<string[]>([]);
 
   useEffect(() => {
     setLoadingWarehouses(true);
@@ -220,6 +209,21 @@ export default function ModelMonitorPropertiesModal({ db, schema, name, onClose 
   }, [db, schema, name]);
 
   useEffect(() => { reload(); }, [reload]);
+
+  // Parse the segment-column list from the (variably-shaped) SHOW cell via the
+  // shared backend tokenizer (App.ParseSqlList handles SQL tuples, bracketed
+  // lists, and JSON arrays — quote/comma-safe). It is async, so the result lives
+  // in state rather than being computed inline during render.
+  useEffect(() => {
+    const get = (key: string) => rows?.find((r) => r.key.toLowerCase() === key)?.value ?? "";
+    const raw = get("segment_columns") || get("segment_column");
+    if (!raw.trim()) { setSegments([]); return; }
+    let cancelled = false;
+    ParseSqlList(raw)
+      .then((toks) => { if (!cancelled) setSegments(toks ?? []); })
+      .catch(() => { if (!cancelled) setSegments([]); });
+    return () => { cancelled = true; };
+  }, [rows]);
 
   const monitorRef = `"${db}"."${schema}"."${name}"`;
 
@@ -268,7 +272,6 @@ export default function ModelMonitorPropertiesModal({ db, schema, name, onClose 
   const refreshInterval = find("refresh_interval");
   const warehouse = find("warehouse");
   const state = find("state") || find("status") || find("scheduling_state");
-  const segments = parseList(find("segment_columns") || find("segment_column"));
 
   // Keys handled by the editable Settings section (rendered above the raw table).
   const handledKeys = new Set([
