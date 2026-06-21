@@ -16,9 +16,11 @@ import {
 } from "antd";
 import {
   ApiOutlined, EditOutlined, CheckOutlined, CloseOutlined, ReloadOutlined, SaveOutlined,
+  FolderOpenOutlined,
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterAgent, DescribeAgent } from "../../../wailsjs/go/app/App";
 import Editor from "@monaco-editor/react";
+import StageFilePicker from "../shared/StageFilePicker";
 import { useThemeStore } from "../../store/themeStore";
 import { patchMonacoClipboard } from "../../utils/monacoClipboard";
 import { buildProfileJson, parseProfileJson } from "./profile";
@@ -112,6 +114,7 @@ export default function AgentPropertiesModal({ db, schema, name, onClose }: Prop
   const [avatar, setAvatar] = useState("");
   const [color, setColor] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
+  const [avatarBrowse, setAvatarBrowse] = useState(false);
 
   // Specification (DESCRIBE AGENT agent_spec) editor state.
   const [spec, setSpec] = useState<string | null>(null);
@@ -169,6 +172,11 @@ export default function AgentPropertiesModal({ db, schema, name, onClose }: Prop
     const p = parseProfileJson(profileRaw);
     setDisplayName(p.display_name); setAvatar(p.avatar); setColor(p.color);
     setEditingProfile(true);
+  };
+
+  const onPickAvatar = (stage: string, file: string) => {
+    setAvatar(`@${stage}/${file}`);
+    setAvatarBrowse(false);
   };
 
   const saveProfile = async () => {
@@ -246,7 +254,19 @@ export default function AgentPropertiesModal({ db, schema, name, onClose }: Prop
           {editingProfile ? (
             <Space direction="vertical" size={8} style={{ width: "100%", maxWidth: 560 }}>
               <Input addonBefore="display_name" size="small" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
-              <Input addonBefore="avatar" size="small" value={avatar} onChange={(e) => setAvatar(e.target.value)} />
+              <Input
+                addonBefore="avatar"
+                size="small"
+                value={avatar}
+                onChange={(e) => setAvatar(e.target.value)}
+                addonAfter={
+                  <FolderOpenOutlined
+                    title="Browse internal stage for an image"
+                    style={{ cursor: "pointer" }}
+                    onClick={() => setAvatarBrowse(true)}
+                  />
+                }
+              />
               <Input addonBefore="color" size="small" value={color} onChange={(e) => setColor(e.target.value)} placeholder="#2563EB" />
               <Space>
                 <Button size="small" type="primary" icon={<CheckOutlined />} onClick={saveProfile} loading={savingProfile}>Save profile</Button>
@@ -315,6 +335,22 @@ export default function AgentPropertiesModal({ db, schema, name, onClose }: Prop
           </table>
         </>
       )}
+
+      <Modal
+        open={avatarBrowse}
+        title="Select avatar image from an internal stage"
+        onCancel={() => setAvatarBrowse(false)}
+        footer={<Button onClick={() => setAvatarBrowse(false)}>Cancel</Button>}
+        width={640}
+        destroyOnClose
+      >
+        <StageFilePicker
+          db={db}
+          schema={schema}
+          label="Browse internal stage — select the avatar image file"
+          onPick={onPickAvatar}
+        />
+      </Modal>
     </Modal>
   );
 }

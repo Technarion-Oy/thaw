@@ -11,12 +11,13 @@
 // @thaw-domain: Object Browser & Administration
 
 import { useState } from "react";
-import { Form, Input, Checkbox, Alert, Typography } from "antd";
-import { ApiOutlined } from "@ant-design/icons";
+import { Form, Input, Checkbox, Alert, Typography, Button, Modal } from "antd";
+import { ApiOutlined, FolderOpenOutlined } from "@ant-design/icons";
 import { BuildCreateAgentSql, ExecDDL } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";
+import StageFilePicker from "../shared/StageFilePicker";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
 import Editor from "@monaco-editor/react";
 import { useThemeStore } from "../../store/themeStore";
@@ -86,6 +87,16 @@ export default function CreateAgentModal({ db, schema, onClose, onSuccess }: Pro
   const [displayName, setDisplayName] = useState("");
   const [avatar, setAvatar] = useState("");
   const [color, setColor] = useState("");
+  // Optional stage-file browser for the avatar image. The PROFILE avatar is
+  // documented only as an "image file name or identifier", so the field stays
+  // free-text; the browser is a convenience that fills it with a @stage/file
+  // reference.
+  const [avatarBrowse, setAvatarBrowse] = useState(false);
+
+  const onPickAvatar = (stage: string, file: string) => {
+    setAvatar(`@${stage}/${file}`);
+    setAvatarBrowse(false);
+  };
 
   const quotedIdentifiersIgnoreCase = useQuotedIdentifiers();
   const profile = buildProfileJson({ display_name: displayName, avatar, color });
@@ -176,13 +187,40 @@ export default function CreateAgentModal({ db, schema, onClose, onSuccess }: Pro
           <Input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="optional comment" />
         </Form.Item>
 
-        <Form.Item label="Profile (optional display metadata)" style={itemStyle} help="Assembled into the PROFILE JSON object. Leave blank to omit.">
+        <Form.Item label="Profile (optional display metadata)" style={itemStyle} help="Assembled into the PROFILE JSON object. Leave blank to omit. The avatar is an image file name or identifier — use Browse to reference an image in an internal stage.">
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
             <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="display_name" />
-            <Input value={avatar} onChange={(e) => setAvatar(e.target.value)} placeholder="avatar" />
+            <Input
+              value={avatar}
+              onChange={(e) => setAvatar(e.target.value)}
+              placeholder="avatar"
+              addonAfter={
+                <FolderOpenOutlined
+                  title="Browse internal stage for an image"
+                  style={{ cursor: "pointer" }}
+                  onClick={() => setAvatarBrowse(true)}
+                />
+              }
+            />
             <Input value={color} onChange={(e) => setColor(e.target.value)} placeholder="color (e.g. #2563EB)" />
           </div>
         </Form.Item>
+
+        <Modal
+          open={avatarBrowse}
+          title="Select avatar image from an internal stage"
+          onCancel={() => setAvatarBrowse(false)}
+          footer={<Button onClick={() => setAvatarBrowse(false)}>Cancel</Button>}
+          width={640}
+          destroyOnClose
+        >
+          <StageFilePicker
+            db={db}
+            schema={schema}
+            label="Browse internal stage — select the avatar image file"
+            onPick={onPickAvatar}
+          />
+        </Modal>
 
         <Form.Item label="Specification" required style={itemStyle} help="YAML or JSON (max 100,000 bytes). Sent via FROM SPECIFICATION $$ … $$.">
           <div style={{ border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
