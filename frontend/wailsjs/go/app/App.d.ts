@@ -7,12 +7,14 @@ import {dbtproject} from '../models';
 import {stage} from '../models';
 import {integrations} from '../models';
 import {procedure} from '../models';
+import {agent} from '../models';
 import {aggregationpolicy} from '../models';
 import {alert} from '../models';
 import {cortexsearchservice} from '../models';
 import {datametricfunction} from '../models';
 import {dynamictable} from '../models';
 import {eventtable} from '../models';
+import {externalagent} from '../models';
 import {externalfunction} from '../models';
 import {externaltable} from '../models';
 import {fileformat} from '../models';
@@ -61,6 +63,8 @@ import {sfconfig} from '../models';
 
 export function AddBackup(arg1:string,arg2:string,arg3:string):Promise<void>;
 
+export function AlterAgent(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
 export function AlterAggregationPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterAlert(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
@@ -78,6 +82,8 @@ export function AlterDataMetricFunction(arg1:string,arg2:string,arg3:string,arg4
 export function AlterDynamicTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterEventTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterExternalAgent(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterExternalFunction(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
@@ -165,6 +171,8 @@ export function BuildChangeColumnTypeSql(arg1:string,arg2:string,arg3:string,arg
 
 export function BuildClientPolicyValue(arg1:authenticationpolicy.ClientPolicy):Promise<string>;
 
+export function BuildCreateAgentSql(arg1:string,arg2:string,arg3:agent.AgentConfig):Promise<string>;
+
 export function BuildCreateAggregationPolicySql(arg1:string,arg2:string,arg3:aggregationpolicy.AggregationPolicyConfig):Promise<string>;
 
 export function BuildCreateAlertSql(arg1:string,arg2:string,arg3:alert.AlertConfig):Promise<string>;
@@ -180,6 +188,8 @@ export function BuildCreateDbtProjectSql(arg1:string,arg2:string,arg3:dbtproject
 export function BuildCreateDynamicTableSql(arg1:string,arg2:string,arg3:dynamictable.DynamicTableConfig):Promise<string>;
 
 export function BuildCreateEventTableSql(arg1:string,arg2:string,arg3:eventtable.EventTableConfig):Promise<string>;
+
+export function BuildCreateExternalAgentSql(arg1:string,arg2:string,arg3:externalagent.ExternalAgentConfig):Promise<string>;
 
 export function BuildCreateExternalFunctionSql(arg1:string,arg2:string,arg3:externalfunction.ExternalFunctionConfig):Promise<string>;
 
@@ -344,6 +354,8 @@ export function DeleteProfile(arg1:string):Promise<void>;
 export function DeleteVenvFolder():Promise<void>;
 
 export function DeployNotebook(arg1:snowflake.DeployNotebookParams):Promise<void>;
+
+export function DescribeAgent(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function DescribeAuthenticationPolicy(arg1:string,arg2:string,arg3:string):Promise<Array<snowflake.PropertyPair>>;
 

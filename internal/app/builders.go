@@ -11,6 +11,7 @@
 package app
 
 import (
+	"thaw/internal/agent"
 	"thaw/internal/aggregationpolicy"
 	"thaw/internal/alert"
 	"thaw/internal/authenticationpolicy"
@@ -20,6 +21,7 @@ import (
 	"thaw/internal/dbtproject"
 	"thaw/internal/dynamictable"
 	"thaw/internal/eventtable"
+	"thaw/internal/externalagent"
 	"thaw/internal/externalfunction"
 	"thaw/internal/externaltable"
 	"thaw/internal/fileformat"
@@ -254,6 +256,16 @@ func (a *App) BuildCreateImageRepositorySql(database, schema string, cfg imagere
 // BuildCreateModelSql returns the SQL for creating a Snowflake MODEL.
 func (a *App) BuildCreateModelSql(database, schema string, cfg model.ModelConfig) (string, error) {
 	return model.BuildCreateModelSql(database, schema, cfg)
+}
+
+// BuildCreateAgentSql returns the SQL for creating a Snowflake AGENT (Cortex AI).
+func (a *App) BuildCreateAgentSql(database, schema string, cfg agent.AgentConfig) (string, error) {
+	return agent.BuildCreateAgentSql(database, schema, cfg)
+}
+
+// BuildCreateExternalAgentSql returns the SQL for creating a Snowflake EXTERNAL AGENT.
+func (a *App) BuildCreateExternalAgentSql(database, schema string, cfg externalagent.ExternalAgentConfig) (string, error) {
+	return externalagent.BuildCreateExternalAgentSql(database, schema, cfg)
 }
 
 // BuildCreateCortexSearchServiceSql returns the SQL for creating a Snowflake

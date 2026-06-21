@@ -66,6 +66,7 @@ func GetCodebaseSemanticMap() string {
     {
       "name": "Object Browser \u0026 Administration",
       "backend_paths": [
+        "internal/agent/",
         "internal/aggregationpolicy/",
         "internal/alert/",
         "internal/authenticationpolicy/",
@@ -76,6 +77,7 @@ func GetCodebaseSemanticMap() string {
         "internal/dbtproject/",
         "internal/dynamictable/",
         "internal/eventtable/",
+        "internal/externalagent/",
         "internal/externalfunction/",
         "internal/externaltable/",
         "internal/fnmeta/",
@@ -112,6 +114,9 @@ func GetCodebaseSemanticMap() string {
       ],
       "frontend_paths": [
         "frontend/src/components/account/AccountPanel.tsx",
+        "frontend/src/components/agent/AgentPropertiesModal.tsx",
+        "frontend/src/components/agent/CreateAgentModal.tsx",
+        "frontend/src/components/agent/profile.ts",
         "frontend/src/components/aggregationpolicy/AggregationPolicyPropertiesModal.tsx",
         "frontend/src/components/aggregationpolicy/CreateAggregationPolicyModal.tsx",
         "frontend/src/components/alert/AlertPropertiesModal.tsx",
@@ -134,6 +139,8 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/dynamictable/DynamicTablePropertiesModal.tsx",
         "frontend/src/components/eventtable/CreateEventTableModal.tsx",
         "frontend/src/components/eventtable/EventTablePropertiesModal.tsx",
+        "frontend/src/components/externalagent/CreateExternalAgentModal.tsx",
+        "frontend/src/components/externalagent/ExternalAgentPropertiesModal.tsx",
         "frontend/src/components/externalfunction/CreateExternalFunctionModal.tsx",
         "frontend/src/components/externalfunction/ExternalFunctionPropertiesModal.tsx",
         "frontend/src/components/externaltable/CreateExternalTableModal.tsx",
