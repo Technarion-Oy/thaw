@@ -7,7 +7,7 @@ UI for Snowflake **AGENT** objects (Cortex AI agents).
   assembled into the `PROFILE` JSON object — the avatar field has a **Browse…**
   button that opens the shared `StageFilePicker` and fills it with a `@stage/file`
   image reference), and a Monaco **Specification** editor (YAML/JSON, sent via
-  `FROM SPECIFICATION $$ … $$`). Renders a live SQL preview via
+  `FROM SPECIFICATION $THAW$ … $THAW$`). Renders a live SQL preview via
   `BuildCreateAgentSql`. The PROFILE avatar is documented only as an "image file
   name or identifier", so the field stays free-text — the stage browser is a
   convenience, not the only accepted form.
@@ -16,7 +16,7 @@ UI for Snowflake **AGENT** objects (Cortex AI agents).
   - **Profile** → `SET PROFILE = '<json>'` (edited as three fields; the avatar
     field has the same internal-stage **Browse…** picker).
   - **Specification (live version)** → `MODIFY LIVE VERSION SET SPECIFICATION =
-    $$ … $$`, loaded via `DescribeAgent` (the `agent_spec` column, which `SHOW
+    $THAW$ … $THAW$`, loaded via `DescribeAgent` (the `agent_spec` column, which `SHOW
     AGENTS` omits) and edited in a Monaco editor. Saving replaces the whole spec.
   - A raw `SHOW AGENTS` Properties dump for the remaining columns.
 

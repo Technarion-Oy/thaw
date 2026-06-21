@@ -45,9 +45,9 @@ type AgentConfig struct {
 //	  [COMMENT = '…']
 //	  [PROFILE = '<json>']
 //	  FROM SPECIFICATION
-//	  $$
+//	  $THAW$
 //	  <spec>
-//	  $$;
+//	  $THAW$;
 func BuildCreateAgentSql(db, schema string, cfg AgentConfig) (string, error) {
 	var sb strings.Builder
 
@@ -63,21 +63,24 @@ func BuildCreateAgentSql(db, schema string, cfg AgentConfig) (string, error) {
 
 	sb.WriteString(snowflake.CommentClause(cfg.Comment))
 
-	// PROFILE is a JSON object string. Escape as free text (backslashes preserved)
-	// since JSON may contain backslash escape sequences that must survive the
-	// single-quoted SQL literal verbatim.
+	// PROFILE is a JSON object string. QuoteTextLit doubles any backslashes (and
+	// single quotes) so they survive the single-quoted SQL literal: the frontend's
+	// JSON.stringify already emits `\\` for a literal backslash, and doubling that
+	// to `\\\\` is what Snowflake parses back to a single `\` inside the JSON.
 	if p := strings.TrimSpace(cfg.Profile); p != "" {
 		fmt.Fprintf(&sb, "\n  PROFILE = %s", snowflake.QuoteTextLit(p))
 	}
 
-	// The specification is required by CREATE AGENT. Wrap it in $$ … $$ so the
-	// multi-line YAML/JSON needs no escaping. Fall back to a minimal placeholder
-	// spec so the preview stays a completable template.
+	// The specification is required by CREATE AGENT. Wrap it in a tagged
+	// $THAW$ … $THAW$ dollar-quote so the multi-line YAML/JSON needs no escaping
+	// and a literal `$$` inside a tool description / instruction string can't
+	// prematurely close the block. Fall back to a minimal placeholder spec so the
+	// preview stays a completable template.
 	spec := strings.TrimSpace(cfg.Specification)
 	if spec == "" {
 		spec = "models:\n  orchestration: auto"
 	}
-	fmt.Fprintf(&sb, "\n  FROM SPECIFICATION\n  $$\n%s\n  $$", spec)
+	fmt.Fprintf(&sb, "\n  FROM SPECIFICATION\n  $THAW$\n%s\n  $THAW$", spec)
 
 	return sb.String() + ";", nil
 }

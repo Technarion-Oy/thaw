@@ -194,9 +194,10 @@ export default function AgentPropertiesModal({ db, schema, name, onClose }: Prop
   const saveSpec = async () => {
     setSavingSpec(true); setActionError(null);
     try {
-      // Dollar-quote the spec so multi-line YAML/JSON needs no escaping. The new
-      // specification completely replaces the existing live version.
-      await alterAgent(`MODIFY LIVE VERSION SET SPECIFICATION = $$\n${specDraft}\n$$`);
+      // Tagged $THAW$ dollar-quote so multi-line YAML/JSON needs no escaping and a
+      // literal `$$` inside an instruction / tool description can't prematurely
+      // close the block. The new specification completely replaces the live one.
+      await alterAgent(`MODIFY LIVE VERSION SET SPECIFICATION = $THAW$\n${specDraft}\n$THAW$`);
       await loadSpec();
     } catch (e) { setActionError(`Update specification failed: ${String(e)}`); }
     finally { setSavingSpec(false); }

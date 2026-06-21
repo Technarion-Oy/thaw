@@ -6,7 +6,7 @@ An agent is a schema-level Cortex object that pairs an orchestration LLM with a
 set of tools (Cortex Analyst, Cortex Search, custom SQL/procedures, …). Its
 behaviour is described by a YAML/JSON **specification** (models, orchestration
 budget, instructions, tools, tool_resources) supplied via `FROM SPECIFICATION
-$$ … $$`, plus an optional `PROFILE` JSON object holding display metadata
+$THAW$ … $THAW$`, plus an optional `PROFILE` JSON object holding display metadata
 (`display_name`, `avatar`, `color`).
 
 ## Types & functions
@@ -20,12 +20,12 @@ $$ … $$`, plus an optional `PROFILE` JSON object holding display metadata
     [COMMENT = '…']
     [PROFILE = '<json>']
     FROM SPECIFICATION
-    $$
+    $THAW$
     <spec>
-    $$;
+    $THAW$;
   ```
 
-  The spec is emitted inside `$$ … $$` so multi-line YAML needs no escaping;
+  The spec is emitted inside `$THAW$ … $THAW$` so multi-line YAML needs no escaping;
   blank required parts fall back to placeholders so the create-modal preview
   stays a completable template.
 
@@ -35,7 +35,7 @@ There is no `ALTER AGENT … RENAME`, `UNSET`, or `TAG`. Mutations go through th
 free-form `App.AlterAgent(db, schema, name, clause)` in `internal/app/agent.go`:
 
 - `SET COMMENT = '…'` / `SET PROFILE = '…'`
-- `MODIFY LIVE VERSION SET SPECIFICATION = $$ … $$` — replaces the live spec
+- `MODIFY LIVE VERSION SET SPECIFICATION = $THAW$ … $THAW$` — replaces the live spec
   wholesale (omitted fields are removed).
 
 `SHOW AGENTS` omits the spec, so `DESCRIBE AGENT` (`App.DescribeAgent`) supplies
