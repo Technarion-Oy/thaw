@@ -45,3 +45,18 @@ func IsNumeric(dataType string) bool {
 func NeedsQuotes(dataType string) bool {
 	return !IsBoolean(dataType) && !IsNumeric(dataType)
 }
+
+// IsHandlerLanguage reports whether the given UDF / stored-procedure language is
+// one of the handler languages (Python, Java, Scala) that carry their logic in a
+// separate handler and therefore accept the RUNTIME_VERSION / PACKAGES / IMPORTS
+// / HANDLER clauses. SQL and JavaScript (and the empty default, which is SQL)
+// embed their logic inline in the body and do not. The comparison is
+// case-insensitive. Shared by the CREATE FUNCTION and CREATE PROCEDURE builders.
+func IsHandlerLanguage(language string) bool {
+	switch strings.ToUpper(strings.TrimSpace(language)) {
+	case "PYTHON", "JAVA", "SCALA":
+		return true
+	default:
+		return false
+	}
+}

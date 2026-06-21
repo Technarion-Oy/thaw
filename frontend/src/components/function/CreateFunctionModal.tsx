@@ -127,8 +127,7 @@ export default function CreateFunctionModal({ db, schema, onClose, onSuccess }: 
   const handleRun = () => {
     if (!canSubmit) return;
     submit(async () => {
-      const sql = await BuildCreateFunctionSql(db, schema, cfg as any);
-      await ExecDDL(sql);
+      await ExecDDL(preview);
       onSuccess?.();
       onClose();
     });

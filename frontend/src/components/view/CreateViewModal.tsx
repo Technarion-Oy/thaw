@@ -88,7 +88,7 @@ export default function CreateViewModal({ db, schema, onClose, onSuccess }: Prop
 
   const advancedBody = (
     <>
-      <Form.Item label="Columns" style={itemStyle} help="Optional comma-separated explicit column names">
+      <Form.Item label="Columns" style={itemStyle} help="Optional comma-separated column list, inserted verbatim — double-quote any name that needs it (reserved word, mixed case, special chars)">
         <Input
           value={cfg.columns}
           onChange={(e) => set("columns", e.target.value)}

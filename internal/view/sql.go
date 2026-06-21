@@ -61,6 +61,10 @@ func BuildCreateViewSql(db, schema string, cfg ViewConfig) (string, error) {
 
 	fmt.Fprintf(&sb, "%s %s", createClause, snowflake.QualifyOrBare(db, schema, name, cfg.CaseSensitive))
 
+	// The explicit column list is emitted verbatim (like the defining Query):
+	// the CREATE VIEW column-list grammar allows per-column extras such as
+	// `<col> COMMENT '...'`, so the builder cannot naively quote each token. The
+	// create modal's help text tells the user to double-quote names that need it.
 	if cols := strings.TrimSpace(cfg.Columns); cols != "" {
 		fmt.Fprintf(&sb, "\n  (%s)", cols)
 	}

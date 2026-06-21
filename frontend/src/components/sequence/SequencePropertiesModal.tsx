@@ -142,7 +142,6 @@ interface Props {
 export default function SequencePropertiesModal({ db, schema, name, onClose }: Props) {
   const [rows, setRows] = useState<snowflake.PropertyPair[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     setRows(null);
@@ -162,19 +161,15 @@ export default function SequencePropertiesModal({ db, schema, name, onClose }: P
   const find = (key: string) =>
     rows ? (rows.find((r) => r.key.toLowerCase() === key.toLowerCase())?.value ?? "") : "";
 
+  // Errors propagate to EditRow, which catches and renders them inline (matching
+  // the View / Stream properties modals); no modal-level error Alert is needed.
   const saveComment = async (comment: string) => {
-    setActionError(null);
-    try {
-      if (comment.trim() === "") {
-        await AlterSequence(db, schema, name, "UNSET COMMENT");
-      } else {
-        await AlterSequence(db, schema, name, `SET COMMENT = ${q1(comment)}`);
-      }
-      await reload();
-    } catch (e) {
-      setActionError(`Update comment failed: ${String(e)}`);
-      throw e;
+    if (comment.trim() === "") {
+      await AlterSequence(db, schema, name, "UNSET COMMENT");
+    } else {
+      await AlterSequence(db, schema, name, `SET COMMENT = ${q1(comment)}`);
     }
+    await reload();
   };
 
   const comment = find("comment");
@@ -209,17 +204,6 @@ export default function SequencePropertiesModal({ db, schema, name, onClose }: P
       )}
       {rows && (
         <>
-          {actionError && (
-            <Alert
-              type="error"
-              message={actionError}
-              showIcon
-              closable
-              onClose={() => setActionError(null)}
-              style={{ marginBottom: 12 }}
-            />
-          )}
-
           <div style={SECTION_HEAD}>Settings</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>

@@ -102,6 +102,18 @@ func TestBuildCreateViewSql(t *testing.T) {
 			contains: []string{"(a, b, c)"},
 		},
 		{
+			// The column list is emitted verbatim — it supports the richer
+			// CREATE VIEW grammar (per-column COMMENT, quoted names), so the
+			// builder must not quote/mangle the tokens.
+			name: "columns list passed through verbatim (per-column COMMENT, quoted name)",
+			cfg: ViewConfig{
+				Name:    "V",
+				Columns: `"My Col" COMMENT 'c', plain`,
+				Query:   "SELECT 1, 2",
+			},
+			contains: []string{`("My Col" COMMENT 'c', plain)`},
+		},
+		{
 			name: "comment with single quote is escaped",
 			cfg: ViewConfig{
 				Name:    "V",
