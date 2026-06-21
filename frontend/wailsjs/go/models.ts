@@ -2694,6 +2694,31 @@ export namespace mcp {
 
 }
 
+export namespace mcpserver {
+	
+	export class MCPServerConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    specification: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new MCPServerConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.specification = source["specification"];
+	    }
+	}
+
+}
+
 export namespace migration {
 	
 	export class MigrationObject {

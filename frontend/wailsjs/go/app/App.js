@@ -294,6 +294,10 @@ export function BuildCreateJoinPolicySql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateJoinPolicySql'](arg1, arg2, arg3);
 }
 
+export function BuildCreateMCPServerSql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateMCPServerSql'](arg1, arg2, arg3);
+}
+
 export function BuildCreateMaskingPolicySql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateMaskingPolicySql'](arg1, arg2, arg3);
 }
@@ -608,6 +612,10 @@ export function DescribeDbtProject(arg1, arg2, arg3) {
 
 export function DescribeExternalFunction(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['DescribeExternalFunction'](arg1, arg2, arg3, arg4);
+}
+
+export function DescribeMCPServer(arg1, arg2, arg3) {
+  return window['go']['app']['App']['DescribeMCPServer'](arg1, arg2, arg3);
 }
 
 export function DescribePasswordPolicy(arg1, arg2, arg3) {

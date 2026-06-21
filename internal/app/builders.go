@@ -31,6 +31,7 @@ import (
 	"thaw/internal/joinpolicy"
 	"thaw/internal/maskingpolicy"
 	"thaw/internal/materializedview"
+	"thaw/internal/mcpserver"
 	"thaw/internal/model"
 	"thaw/internal/networkrule"
 	"thaw/internal/packagespolicy"
@@ -266,6 +267,11 @@ func (a *App) BuildCreateAgentSql(database, schema string, cfg agent.AgentConfig
 // BuildCreateExternalAgentSql returns the SQL for creating a Snowflake EXTERNAL AGENT.
 func (a *App) BuildCreateExternalAgentSql(database, schema string, cfg externalagent.ExternalAgentConfig) (string, error) {
 	return externalagent.BuildCreateExternalAgentSql(database, schema, cfg)
+}
+
+// BuildCreateMCPServerSql returns the SQL for creating a Snowflake MCP SERVER.
+func (a *App) BuildCreateMCPServerSql(database, schema string, cfg mcpserver.MCPServerConfig) (string, error) {
+	return mcpserver.BuildCreateMCPServerSql(database, schema, cfg)
 }
 
 // BuildCreateCortexSearchServiceSql returns the SQL for creating a Snowflake
