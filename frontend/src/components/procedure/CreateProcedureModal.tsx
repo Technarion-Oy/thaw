@@ -21,6 +21,7 @@ import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";
 import MonacoSqlField from "../shared/MonacoSqlField";
+import DataTypeAutoComplete from "../shared/DataTypeAutoComplete";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
 import type { procedure } from "../../../wailsjs/go/models";
 
@@ -145,10 +146,9 @@ export default function CreateProcedureModal({ db, schema, onClose, onSuccess }:
             onChange={(e) => update(i, { name: e.target.value })}
             style={{ width: 180 }}
           />
-          <Input
-            placeholder="TYPE (e.g. NUMBER)"
+          <DataTypeAutoComplete
             value={a.dataType}
-            onChange={(e) => update(i, { dataType: e.target.value })}
+            onChange={(v) => update(i, { dataType: v })}
             style={{ width: 220 }}
           />
           <Button icon={<DeleteOutlined />} onClick={() => remove(i)} />

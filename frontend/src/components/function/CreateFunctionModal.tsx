@@ -21,6 +21,7 @@ import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";
 import MonacoSqlField from "../shared/MonacoSqlField";
+import DataTypeAutoComplete from "../shared/DataTypeAutoComplete";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
 
 interface Props {
@@ -164,10 +165,9 @@ export default function CreateFunctionModal({ db, schema, onClose, onSuccess }: 
             onChange={(e) => onUpdate(i, { name: e.target.value })}
             style={{ width: 180 }}
           />
-          <Input
-            placeholder="TYPE (e.g. NUMBER)"
+          <DataTypeAutoComplete
             value={a.dataType}
-            onChange={(e) => onUpdate(i, { dataType: e.target.value })}
+            onChange={(v) => onUpdate(i, { dataType: v })}
             style={{ width: 220 }}
           />
           <Button icon={<DeleteOutlined />} onClick={() => onRemove(i)} />
