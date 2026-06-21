@@ -124,6 +124,32 @@ func TestBuildCreateProcedureSql(t *testing.T) {
 			},
 		},
 		{
+			name: "SQL procedure drops handler-only clauses even when set",
+			cfg: ProcedureConfig{
+				Name:           "P",
+				Language:       "SQL",
+				RuntimeVersion: "3.10",
+				Packages:       []string{"snowflake-snowpark-python"},
+				Imports:        []string{"@stage/h.py"},
+				Handler:        "main.run",
+				Body:           "BEGIN\n  RETURN 1;\nEND",
+			},
+			notWant: []string{"RUNTIME_VERSION", "PACKAGES", "IMPORTS", "HANDLER", "LANGUAGE"},
+		},
+		{
+			name: "JavaScript procedure drops handler-only clauses",
+			cfg: ProcedureConfig{
+				Name:           "P",
+				Language:       "javascript",
+				RuntimeVersion: "ignored",
+				Packages:       []string{"ignored"},
+				Handler:        "ignored",
+				Body:           "return 1;",
+			},
+			want:    []string{"\n  LANGUAGE JAVASCRIPT"},
+			notWant: []string{"RUNTIME_VERSION", "PACKAGES", "IMPORTS", "HANDLER"},
+		},
+		{
 			name: "EXECUTE AS CALLER",
 			cfg:  ProcedureConfig{Name: "P", ExecuteAs: "caller"},
 			want: []string{"\n  EXECUTE AS CALLER"},

@@ -82,6 +82,12 @@ export default function CreateProcedureModal({ db, schema, onClose, onSuccess }:
   const set = <K extends keyof PConfig>(key: K, value: PConfig[K]) =>
     setCfg((prev) => ({ ...prev, [key]: value }));
 
+  // RUNTIME_VERSION / HANDLER / PACKAGES / IMPORTS apply only to the handler
+  // languages (Python / Java / Scala). SQL (Snowflake Scripting) and JavaScript
+  // procedures carry their logic inline in the body, so those fields are hidden
+  // for them (and the Go builder drops any stale values too).
+  const isHandlerLang = ["PYTHON", "JAVA", "SCALA"].includes(cfg.language.toUpperCase());
+
   const canSubmit = cfg.name.trim().length > 0 && cfg.body.trim().length > 0;
 
   const handleRun = () => {
@@ -145,46 +151,50 @@ export default function CreateProcedureModal({ db, schema, onClose, onSuccess }:
         </Checkbox>
       </Form.Item>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
-        <Form.Item label="Runtime version" style={itemStyle} help="RUNTIME_VERSION for non-SQL handlers, e.g. 3.10.">
-          <Input
-            value={cfg.runtimeVersion}
-            onChange={(e) => set("runtimeVersion", e.target.value)}
-            placeholder="3.10"
-          />
-        </Form.Item>
-        <Form.Item label="Handler" style={itemStyle} help="Entry point, e.g. module.function or Class.method.">
-          <Input
-            value={cfg.handler}
-            onChange={(e) => set("handler", e.target.value)}
-            placeholder="main.run"
-          />
-        </Form.Item>
-      </div>
+      {isHandlerLang && (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
+            <Form.Item label="Runtime version" style={itemStyle} help="RUNTIME_VERSION for Python / Java / Scala handlers, e.g. 3.10.">
+              <Input
+                value={cfg.runtimeVersion}
+                onChange={(e) => set("runtimeVersion", e.target.value)}
+                placeholder="3.10"
+              />
+            </Form.Item>
+            <Form.Item label="Handler" style={itemStyle} help="Entry point, e.g. module.function or Class.method.">
+              <Input
+                value={cfg.handler}
+                onChange={(e) => set("handler", e.target.value)}
+                placeholder="main.run"
+              />
+            </Form.Item>
+          </div>
 
-      <Form.Item label="Packages" style={itemStyle} help="PACKAGES for non-SQL handlers (e.g. snowflake-snowpark-python).">
-        <Select
-          mode="tags"
-          value={cfg.packages}
-          onChange={(v) => set("packages", v)}
-          placeholder="snowflake-snowpark-python, pandas"
-          style={{ width: "100%" }}
-          tokenSeparators={[",", " "]}
-          open={false}
-        />
-      </Form.Item>
+          <Form.Item label="Packages" style={itemStyle} help="PACKAGES for Python / Java / Scala handlers (e.g. snowflake-snowpark-python).">
+            <Select
+              mode="tags"
+              value={cfg.packages}
+              onChange={(v) => set("packages", v)}
+              placeholder="snowflake-snowpark-python, pandas"
+              style={{ width: "100%" }}
+              tokenSeparators={[",", " "]}
+              open={false}
+            />
+          </Form.Item>
 
-      <Form.Item label="Imports" style={itemStyle} help="IMPORTS — staged files (e.g. @stage/handler.py).">
-        <Select
-          mode="tags"
-          value={cfg.imports}
-          onChange={(v) => set("imports", v)}
-          placeholder="@my_stage/handler.py"
-          style={{ width: "100%" }}
-          tokenSeparators={[",", " "]}
-          open={false}
-        />
-      </Form.Item>
+          <Form.Item label="Imports" style={itemStyle} help="IMPORTS — staged files (e.g. @stage/handler.py).">
+            <Select
+              mode="tags"
+              value={cfg.imports}
+              onChange={(v) => set("imports", v)}
+              placeholder="@my_stage/handler.py"
+              style={{ width: "100%" }}
+              tokenSeparators={[",", " "]}
+              open={false}
+            />
+          </Form.Item>
+        </>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0 16px" }}>
         <Form.Item label="Null handling" style={itemStyle}>

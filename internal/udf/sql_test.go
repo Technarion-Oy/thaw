@@ -135,6 +135,34 @@ func TestBuildCreateFunctionSql(t *testing.T) {
 			},
 		},
 		{
+			name: "SQL UDF drops handler-only clauses even when set",
+			cfg: FunctionConfig{
+				Name:           "FN",
+				ReturnType:     "NUMBER",
+				Language:       "SQL",
+				RuntimeVersion: "3.10",
+				Packages:       []string{"numpy"},
+				Imports:        []string{"@stage/x.py"},
+				Handler:        "compute",
+				Body:           "1",
+			},
+			absent: []string{"RUNTIME_VERSION", "PACKAGES", "IMPORTS", "HANDLER", "LANGUAGE"},
+		},
+		{
+			name: "JavaScript UDF drops handler-only clauses",
+			cfg: FunctionConfig{
+				Name:           "FN",
+				ReturnType:     "STRING",
+				Language:       "javascript",
+				RuntimeVersion: "ignored",
+				Packages:       []string{"ignored"},
+				Handler:        "ignored",
+				Body:           "return 'x';",
+			},
+			contains: []string{"\n  LANGUAGE JAVASCRIPT"},
+			absent:   []string{"RUNTIME_VERSION", "PACKAGES", "IMPORTS", "HANDLER"},
+		},
+		{
 			name: "comment escaped",
 			cfg: FunctionConfig{
 				Name:       "FN",

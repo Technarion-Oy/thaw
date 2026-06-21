@@ -100,6 +100,12 @@ export default function CreateFunctionModal({ db, schema, onClose, onSuccess }: 
   const set = <K extends keyof FnConfig>(key: K, value: FnConfig[K]) =>
     setCfg((prev) => ({ ...prev, [key]: value }));
 
+  // RUNTIME_VERSION / PACKAGES / IMPORTS / HANDLER apply only to the handler
+  // languages (Python / Java / Scala). SQL and JavaScript functions carry their
+  // logic inline in the body, so those fields are hidden for them (and the Go
+  // builder drops any stale values too).
+  const isHandlerLang = ["PYTHON", "JAVA", "SCALA"].includes(cfg.language.toUpperCase());
+
   // Required: name and a function body.
   const canSubmit = cfg.name.trim().length > 0 && cfg.body.trim().length > 0;
 
@@ -186,43 +192,47 @@ export default function CreateFunctionModal({ db, schema, onClose, onSuccess }: 
         </Form.Item>
       </div>
 
-      <Form.Item label="Runtime version" style={itemStyle} help="RUNTIME_VERSION — required for Python / Java / Scala handlers.">
-        <Input
-          value={cfg.runtimeVersion}
-          onChange={(e) => set("runtimeVersion", e.target.value)}
-          placeholder="e.g. 3.10"
-        />
-      </Form.Item>
+      {isHandlerLang && (
+        <>
+          <Form.Item label="Runtime version" style={itemStyle} help="RUNTIME_VERSION — required for Python / Java / Scala handlers.">
+            <Input
+              value={cfg.runtimeVersion}
+              onChange={(e) => set("runtimeVersion", e.target.value)}
+              placeholder="e.g. 3.10"
+            />
+          </Form.Item>
 
-      <Form.Item label="Packages" style={itemStyle} help="PACKAGES — Snowflake-provided libraries the handler imports.">
-        <Select
-          mode="tags"
-          value={cfg.packages}
-          onChange={(v) => set("packages", v)}
-          placeholder="numpy, pandas, …"
-          open={false}
-          style={{ width: "100%" }}
-        />
-      </Form.Item>
+          <Form.Item label="Packages" style={itemStyle} help="PACKAGES — Snowflake-provided libraries the handler imports.">
+            <Select
+              mode="tags"
+              value={cfg.packages}
+              onChange={(v) => set("packages", v)}
+              placeholder="numpy, pandas, …"
+              open={false}
+              style={{ width: "100%" }}
+            />
+          </Form.Item>
 
-      <Form.Item label="Imports" style={itemStyle} help="IMPORTS — stage paths to files the handler loads (e.g. @stage/lib.jar).">
-        <Select
-          mode="tags"
-          value={cfg.imports}
-          onChange={(v) => set("imports", v)}
-          placeholder="@stage/lib.jar, …"
-          open={false}
-          style={{ width: "100%" }}
-        />
-      </Form.Item>
+          <Form.Item label="Imports" style={itemStyle} help="IMPORTS — stage paths to files the handler loads (e.g. @stage/lib.jar).">
+            <Select
+              mode="tags"
+              value={cfg.imports}
+              onChange={(v) => set("imports", v)}
+              placeholder="@stage/lib.jar, …"
+              open={false}
+              style={{ width: "100%" }}
+            />
+          </Form.Item>
 
-      <Form.Item label="Handler" style={itemStyle} help="HANDLER — entry point for non-SQL languages (e.g. function or Class.method).">
-        <Input
-          value={cfg.handler}
-          onChange={(e) => set("handler", e.target.value)}
-          placeholder="my_func"
-        />
-      </Form.Item>
+          <Form.Item label="Handler" style={itemStyle} help="HANDLER — entry point for Python / Java / Scala (e.g. function or Class.method).">
+            <Input
+              value={cfg.handler}
+              onChange={(e) => set("handler", e.target.value)}
+              placeholder="my_func"
+            />
+          </Form.Item>
+        </>
+      )}
     </>
   );
 

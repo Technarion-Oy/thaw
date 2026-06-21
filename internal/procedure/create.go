@@ -102,17 +102,24 @@ func BuildCreateProcedureSql(db, schema string, cfg ProcedureConfig) (string, er
 		fmt.Fprintf(&sb, "\n  LANGUAGE %s", lang)
 	}
 
-	if rv := strings.TrimSpace(cfg.RuntimeVersion); rv != "" {
-		fmt.Fprintf(&sb, "\n  RUNTIME_VERSION = '%s'", snowflake.EscapeStringLit(rv))
-	}
-	if pkgs := quoteList(cfg.Packages); pkgs != "" {
-		fmt.Fprintf(&sb, "\n  PACKAGES = (%s)", pkgs)
-	}
-	if imps := quoteList(cfg.Imports); imps != "" {
-		fmt.Fprintf(&sb, "\n  IMPORTS = (%s)", imps)
-	}
-	if h := strings.TrimSpace(cfg.Handler); h != "" {
-		fmt.Fprintf(&sb, "\n  HANDLER = '%s'", snowflake.EscapeStringLit(h))
+	// RUNTIME_VERSION / PACKAGES / IMPORTS / HANDLER apply only to the handler
+	// languages (Python, Java, Scala). SQL (Snowflake Scripting) and JavaScript
+	// procedures carry their logic inline in the body, so these clauses are
+	// skipped regardless of any stale values left over from a previous language
+	// selection.
+	if isHandlerLanguage(lang) {
+		if rv := strings.TrimSpace(cfg.RuntimeVersion); rv != "" {
+			fmt.Fprintf(&sb, "\n  RUNTIME_VERSION = '%s'", snowflake.EscapeStringLit(rv))
+		}
+		if pkgs := quoteList(cfg.Packages); pkgs != "" {
+			fmt.Fprintf(&sb, "\n  PACKAGES = (%s)", pkgs)
+		}
+		if imps := quoteList(cfg.Imports); imps != "" {
+			fmt.Fprintf(&sb, "\n  IMPORTS = (%s)", imps)
+		}
+		if h := strings.TrimSpace(cfg.Handler); h != "" {
+			fmt.Fprintf(&sb, "\n  HANDLER = '%s'", snowflake.EscapeStringLit(h))
+		}
 	}
 
 	if nh := strings.TrimSpace(cfg.NullHandling); nh != "" {
@@ -138,6 +145,20 @@ func BuildCreateProcedureSql(db, schema string, cfg ProcedureConfig) (string, er
 	fmt.Fprintf(&sb, "\n  AS $$\n%s\n$$", procBody)
 
 	return sb.String() + ";", nil
+}
+
+// isHandlerLanguage reports whether the given (already case-normalized) language
+// is one of the handler languages (Python, Java, Scala) that accept the
+// RUNTIME_VERSION / PACKAGES / IMPORTS / HANDLER clauses. SQL and JavaScript (and
+// the empty default, which is SQL) embed their logic inline in the body and do
+// not.
+func isHandlerLanguage(language string) bool {
+	switch strings.ToUpper(strings.TrimSpace(language)) {
+	case "PYTHON", "JAVA", "SCALA":
+		return true
+	default:
+		return false
+	}
 }
 
 // buildProcArgList renders the comma-separated "<name> <type>" list used for both

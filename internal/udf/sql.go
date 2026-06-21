@@ -100,17 +100,23 @@ func BuildCreateFunctionSql(db, schema string, cfg FunctionConfig) (string, erro
 		fmt.Fprintf(&sb, "\n  %s", strings.ToUpper(vol))
 	}
 
-	if rv := strings.TrimSpace(cfg.RuntimeVersion); rv != "" {
-		fmt.Fprintf(&sb, "\n  RUNTIME_VERSION = '%s'", snowflake.EscapeStringLit(rv))
-	}
-	if pkgs := buildQuotedList(cfg.Packages); pkgs != "" {
-		fmt.Fprintf(&sb, "\n  PACKAGES = (%s)", pkgs)
-	}
-	if imports := buildQuotedList(cfg.Imports); imports != "" {
-		fmt.Fprintf(&sb, "\n  IMPORTS = (%s)", imports)
-	}
-	if h := strings.TrimSpace(cfg.Handler); h != "" {
-		fmt.Fprintf(&sb, "\n  HANDLER = '%s'", snowflake.EscapeStringLit(h))
+	// RUNTIME_VERSION / PACKAGES / IMPORTS / HANDLER apply only to the handler
+	// languages (Python, Java, Scala). SQL and JavaScript UDFs carry their logic
+	// inline in the body, so these clauses are skipped regardless of any stale
+	// values the caller may still hold from a previous language selection.
+	if IsHandlerLanguage(cfg.Language) {
+		if rv := strings.TrimSpace(cfg.RuntimeVersion); rv != "" {
+			fmt.Fprintf(&sb, "\n  RUNTIME_VERSION = '%s'", snowflake.EscapeStringLit(rv))
+		}
+		if pkgs := buildQuotedList(cfg.Packages); pkgs != "" {
+			fmt.Fprintf(&sb, "\n  PACKAGES = (%s)", pkgs)
+		}
+		if imports := buildQuotedList(cfg.Imports); imports != "" {
+			fmt.Fprintf(&sb, "\n  IMPORTS = (%s)", imports)
+		}
+		if h := strings.TrimSpace(cfg.Handler); h != "" {
+			fmt.Fprintf(&sb, "\n  HANDLER = '%s'", snowflake.EscapeStringLit(h))
+		}
 	}
 
 	sb.WriteString(snowflake.CommentClause(cfg.Comment))
@@ -124,6 +130,20 @@ func BuildCreateFunctionSql(db, schema string, cfg FunctionConfig) (string, erro
 	fmt.Fprintf(&sb, "\n  AS $$\n%s\n$$", b)
 
 	return sb.String() + ";", nil
+}
+
+// IsHandlerLanguage reports whether the given language is one of the handler
+// languages (Python, Java, Scala) that carry their logic in a separate handler
+// and therefore accept the RUNTIME_VERSION / PACKAGES / IMPORTS / HANDLER
+// clauses. SQL and JavaScript (and the empty default, which is SQL) embed their
+// logic inline in the body and do not. The comparison is case-insensitive.
+func IsHandlerLanguage(language string) bool {
+	switch strings.ToUpper(strings.TrimSpace(language)) {
+	case "PYTHON", "JAVA", "SCALA":
+		return true
+	default:
+		return false
+	}
 }
 
 // buildArgList renders the comma-separated "<name> <dataType>" list used by both
