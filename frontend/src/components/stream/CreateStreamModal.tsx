@@ -111,8 +111,18 @@ export default function CreateStreamModal({ db, schema, onClose, onSuccess }: Pr
   };
   const pickSourceType = (t: string) => {
     // The object list is type-specific, so any prior pick is no longer valid.
+    // The CDC flags are also source-type-specific, so reset them — otherwise a
+    // flag valid for the previous type (e.g. APPEND_ONLY for a table) could leak
+    // into a CREATE STREAM for a type that rejects it (e.g. an external table).
     setSrcObject("");
-    setCfg((prev) => ({ ...prev, sourceType: t, source: "" }));
+    setCfg((prev) => ({
+      ...prev,
+      sourceType: t,
+      source: "",
+      appendOnly: false,
+      showInitialRows: false,
+      insertOnly: false,
+    }));
   };
   const pickSrcDb = (v?: string) => {
     setSrcDb(v ?? "");
@@ -137,18 +147,31 @@ export default function CreateStreamModal({ db, schema, onClose, onSuccess }: Pr
 
   const itemStyle: React.CSSProperties = { marginBottom: 12 };
 
+  // CDC flags are source-type-specific: APPEND_ONLY / SHOW_INITIAL_ROWS apply to
+  // streams on tables, views and dynamic tables; INSERT_ONLY applies only to
+  // streams on external tables; stage (directory-table) streams take none of
+  // them. COPY GRANTS is valid for any source.
+  const rowChangeSource = ["TABLE", "VIEW", "DYNAMIC TABLE"].includes(cfg.sourceType);
+  const externalSource = cfg.sourceType === "EXTERNAL TABLE";
+
   const advancedBody = (
     <Form.Item style={{ marginBottom: 8 }}>
       <Space size={16} wrap>
-        <Checkbox checked={cfg.appendOnly} onChange={(e) => set("appendOnly", e.target.checked)}>
-          APPEND_ONLY
-        </Checkbox>
-        <Checkbox checked={cfg.showInitialRows} onChange={(e) => set("showInitialRows", e.target.checked)}>
-          SHOW_INITIAL_ROWS
-        </Checkbox>
-        <Checkbox checked={cfg.insertOnly} onChange={(e) => set("insertOnly", e.target.checked)}>
-          INSERT_ONLY
-        </Checkbox>
+        {rowChangeSource && (
+          <Checkbox checked={cfg.appendOnly} onChange={(e) => set("appendOnly", e.target.checked)}>
+            APPEND_ONLY
+          </Checkbox>
+        )}
+        {rowChangeSource && (
+          <Checkbox checked={cfg.showInitialRows} onChange={(e) => set("showInitialRows", e.target.checked)}>
+            SHOW_INITIAL_ROWS
+          </Checkbox>
+        )}
+        {externalSource && (
+          <Checkbox checked={cfg.insertOnly} onChange={(e) => set("insertOnly", e.target.checked)}>
+            INSERT_ONLY
+          </Checkbox>
+        )}
         <Checkbox checked={cfg.copyGrants} onChange={(e) => set("copyGrants", e.target.checked)}>
           COPY GRANTS
         </Checkbox>

@@ -93,6 +93,10 @@ func BuildCreateFunctionSql(db, schema string, cfg FunctionConfig) (string, erro
 		fmt.Fprintf(&sb, "\n  LANGUAGE %s", lang)
 	}
 
+	// Null-handling / volatility precede RUNTIME_VERSION/PACKAGES/IMPORTS/HANDLER
+	// in the CREATE FUNCTION grammar. This is the reverse of CREATE PROCEDURE
+	// (where they follow the handler clauses) — the asymmetry is intentional and
+	// matches Snowflake's two separate, order-sensitive grammars, so keep it.
 	if nh := strings.TrimSpace(cfg.NullHandling); nh != "" {
 		fmt.Fprintf(&sb, "\n  %s", strings.ToUpper(nh))
 	}

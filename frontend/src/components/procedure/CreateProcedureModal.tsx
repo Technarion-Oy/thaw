@@ -98,7 +98,13 @@ export default function CreateProcedureModal({ db, schema, onClose, onSuccess }:
   const isHandlerLang = ["PYTHON", "JAVA", "SCALA"].includes(cfg.language.toUpperCase());
   const hints = LANG_HINTS[cfg.language.toUpperCase()] ?? LANG_HINTS.PYTHON;
 
-  const canSubmit = cfg.name.trim().length > 0 && cfg.body.trim().length > 0;
+  // Handler languages (Python/Java/Scala) additionally require RUNTIME_VERSION
+  // and HANDLER — Snowflake rejects the CREATE otherwise, so block submission
+  // until they're filled.
+  const canSubmit =
+    cfg.name.trim().length > 0 &&
+    cfg.body.trim().length > 0 &&
+    (!isHandlerLang || (cfg.runtimeVersion.trim().length > 0 && cfg.handler.trim().length > 0));
 
   const handleRun = () => {
     if (!canSubmit) return;
@@ -164,14 +170,14 @@ export default function CreateProcedureModal({ db, schema, onClose, onSuccess }:
       {isHandlerLang && (
         <>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
-            <Form.Item label="Runtime version" style={itemStyle} help={`RUNTIME_VERSION for the ${cfg.language.toUpperCase()} handler.`}>
+            <Form.Item label="Runtime version" required style={itemStyle} help={`RUNTIME_VERSION for the ${cfg.language.toUpperCase()} handler.`}>
               <Input
                 value={cfg.runtimeVersion}
                 onChange={(e) => set("runtimeVersion", e.target.value)}
                 placeholder={hints.runtime}
               />
             </Form.Item>
-            <Form.Item label="Handler" style={itemStyle} help={`Entry point for the ${cfg.language.toUpperCase()} handler (e.g. ${hints.handler}).`}>
+            <Form.Item label="Handler" required style={itemStyle} help={`Entry point for the ${cfg.language.toUpperCase()} handler (e.g. ${hints.handler}).`}>
               <Input
                 value={cfg.handler}
                 onChange={(e) => set("handler", e.target.value)}

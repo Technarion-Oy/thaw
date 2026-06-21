@@ -126,6 +126,10 @@ func BuildCreateProcedureSql(db, schema string, cfg ProcedureConfig) (string, er
 		}
 	}
 
+	// Null-handling / volatility follow the handler clauses (RUNTIME_VERSION/…/
+	// HANDLER) in the CREATE PROCEDURE grammar. This is the reverse of CREATE
+	// FUNCTION (where they precede the handler clauses) — the asymmetry is
+	// intentional and matches Snowflake's two separate, order-sensitive grammars.
 	if nh := strings.TrimSpace(cfg.NullHandling); nh != "" {
 		fmt.Fprintf(&sb, "\n  %s", strings.ToUpper(nh))
 	}
