@@ -14,7 +14,7 @@ context menu in `layout/Sidebar.tsx` via `App.AlterStream`.
 
 | File | Purpose |
 |------|---------|
-| `CreateStreamModal.tsx` | `CREATE STREAM` form — name/options (OR REPLACE / IF NOT EXISTS), a source-type `Select` (TABLE / VIEW / EXTERNAL TABLE / STAGE / DYNAMIC TABLE), a source object input, comment, and an **Advanced options** `Collapse` covering APPEND_ONLY / SHOW_INITIAL_ROWS / INSERT_ONLY / COPY GRANTS. Uses `BuildCreateStreamSql` for live SQL preview. |
+| `CreateStreamModal.tsx` | `CREATE STREAM` form — name/options (OR REPLACE / IF NOT EXISTS), a source-type `Select` (TABLE / VIEW / EXTERNAL TABLE / STAGE / DYNAMIC TABLE), a **database → schema → object picker** for the source (`ListDatabases`/`ListSchemas`/`ListObjects`, the object dropdown filtered to the chosen source type; the picked object's quoted FQN becomes `source`), comment, and an **Advanced options** `Collapse` covering APPEND_ONLY / SHOW_INITIAL_ROWS / INSERT_ONLY / COPY GRANTS. Uses `BuildCreateStreamSql` for live SQL preview. |
 | `StreamPropertiesModal.tsx` | Loads `GetObjectProperties(db, schema, "STREAM", name)`; renders an inline-editable Comment (via `AlterStream … SET/UNSET COMMENT`) and the remaining `SHOW STREAMS` properties (source_type, mode, stale, etc.). |
 
 ## Patterns & integration
@@ -41,5 +41,7 @@ boundary (`cfg as any`).
 - Streams have no lifecycle (suspend/resume) and no secure / defining-query
   surface; the properties panel only exposes an editable comment plus the raw
   `SHOW STREAMS` metadata.
-- A bare `source` is qualified with the active db/schema by the Go builder; a
-  dotted name is passed through verbatim.
+- The create modal sets `source` to the picked object's fully-qualified quoted
+  name (`"db"."schema"."object"`); the Go builder passes a dotted name through
+  verbatim and only qualifies a bare (dot-less) `source` with the active
+  db/schema.
