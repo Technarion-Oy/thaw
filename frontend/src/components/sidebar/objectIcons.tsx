@@ -78,6 +78,7 @@ import {
   LoginOutlined,
   RobotOutlined,
   FileSearchOutlined,
+  PartitionOutlined,
 } from "@ant-design/icons";
 
 // ── CSS variable name per kind ─────────────────────────────────────────────
@@ -125,6 +126,7 @@ const KIND_VAR: Record<string, string> = {
   "CORTEX SEARCH SERVICE": "--icon-cortexsearchservice",
   AGENT:             "--icon-agent",
   "EXTERNAL AGENT":  "--icon-externalagent",
+  "MCP SERVER":      "--icon-mcpserver",
 };
 
 // ── Icon component per kind ────────────────────────────────────────────────
@@ -172,6 +174,7 @@ const KIND_ICON: Record<string, React.ComponentType<{ style?: React.CSSPropertie
   "CORTEX SEARCH SERVICE": FileSearchOutlined,
   AGENT:            ApiOutlined,
   "EXTERNAL AGENT": GlobalOutlined,
+  "MCP SERVER":     PartitionOutlined,
 };
 
 // ── Public API ────────────────────────────────────────────────────────────

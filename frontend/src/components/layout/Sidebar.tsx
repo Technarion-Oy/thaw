@@ -81,6 +81,7 @@ import {
   HddOutlined,
   BranchesOutlined,
   CloseOutlined,
+  PartitionOutlined,
 } from "@ant-design/icons";
 import {
   objectIcon,
@@ -187,6 +188,8 @@ import CreateAgentModal from "../agent/CreateAgentModal";
 import AgentPropertiesModal from "../agent/AgentPropertiesModal";
 import CreateExternalAgentModal from "../externalagent/CreateExternalAgentModal";
 import ExternalAgentPropertiesModal from "../externalagent/ExternalAgentPropertiesModal";
+import CreateMCPServerModal from "../mcpserver/CreateMCPServerModal";
+import MCPServerPropertiesModal from "../mcpserver/MCPServerPropertiesModal";
 import CreateServiceModal from "../service/CreateServiceModal";
 import ServicePropertiesModal from "../service/ServicePropertiesModal";
 import CreateStreamlitModal from "../streamlit/CreateStreamlitModal";
@@ -251,9 +254,10 @@ const KIND_LABEL: Record<string, string> = {
   "CORTEX SEARCH SERVICE": "Cortex Search Services",
   AGENT:         "Agents",
   "EXTERNAL AGENT": "External Agents",
+  "MCP SERVER":  "MCP Servers",
 };
 
-const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE", "FUNCTION", "EXTERNAL FUNCTION", "DATA METRIC FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "JOIN POLICY", "PRIVACY POLICY", "STORAGE LIFECYCLE POLICY", "PASSWORD POLICY", "SESSION POLICY", "AGGREGATION POLICY", "PROJECTION POLICY", "AUTHENTICATION POLICY", "PACKAGES POLICY", "NETWORK RULE", "IMAGE REPOSITORY", "SERVICE", "STREAMLIT", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT", "MODEL", "CORTEX SEARCH SERVICE", "AGENT", "EXTERNAL AGENT"];
+const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE", "FUNCTION", "EXTERNAL FUNCTION", "DATA METRIC FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "JOIN POLICY", "PRIVACY POLICY", "STORAGE LIFECYCLE POLICY", "PASSWORD POLICY", "SESSION POLICY", "AGGREGATION POLICY", "PROJECTION POLICY", "AUTHENTICATION POLICY", "PACKAGES POLICY", "NETWORK RULE", "IMAGE REPOSITORY", "SERVICE", "STREAMLIT", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT", "MODEL", "CORTEX SEARCH SERVICE", "AGENT", "EXTERNAL AGENT", "MCP SERVER"];
 
 const kindIcon = (kind: string) => objectIcon(kind);
 
@@ -523,7 +527,7 @@ function ObjTooltip({ cacheKey, db, schema, kind, name, args, children }: {
     // policies, so the call would always fail and emit gosnowflake driver
     // error-log noise on every hover. Skip the fetch entirely — with content
     // left null the tooltip simply doesn't show.
-    if (kind === "IMAGE REPOSITORY" || kind === "SERVICE" || kind === "PACKAGES POLICY" || kind === "MODEL" || kind === "CORTEX SEARCH SERVICE" || kind === "EXTERNAL AGENT") return;
+    if (kind === "IMAGE REPOSITORY" || kind === "SERVICE" || kind === "PACKAGES POLICY" || kind === "MODEL" || kind === "CORTEX SEARCH SERVICE" || kind === "EXTERNAL AGENT" || kind === "MCP SERVER") return;
     const fresh = getCached();
     if (fresh !== null) {
       if (content !== fresh) setContent(fresh);
@@ -724,6 +728,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [agentPropsModal, setAgentPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createExternalAgentModal, setCreateExternalAgentModal] = useState<{ db: string; schema: string } | null>(null);
   const [externalAgentPropsModal, setExternalAgentPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [createMCPServerModal, setCreateMCPServerModal] = useState<{ db: string; schema: string } | null>(null);
+  const [mcpServerPropsModal, setMCPServerPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createServiceModal, setCreateServiceModal] = useState<{ db: string; schema: string } | null>(null);
   const [servicePropsModal, setServicePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createStreamlitModal, setCreateStreamlitModal] = useState<{ db: string; schema: string } | null>(null);
@@ -2606,6 +2612,25 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setExternalAgentPropsModal({ db, schema, name });
   };
 
+  const openCreateMCPServer = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    setCtxMenu(null);
+    setCreateMCPServerModal({ db, schema });
+  };
+
+  const openMCPServerProperties = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    setMCPServerPropsModal({ db, schema, name });
+  };
+
   const openCreateService = () => {
     if (!ctxMenu) return;
     const parts = ctxMenu.nodeKey.split(":");
@@ -3053,6 +3078,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       case "CORTEX SEARCH SERVICE": sql = `DROP CORTEX SEARCH SERVICE ${fullName};`; break;
       case "AGENT":       sql = `DROP AGENT ${fullName};`; break;
       case "EXTERNAL AGENT": sql = `DROP EXTERNAL AGENT ${fullName};`; break;
+      case "MCP SERVER":  sql = `DROP MCP SERVER ${fullName};`; break;
       case "SERVICE":     sql = `DROP SERVICE ${fullName};`; break;
       case "STREAMLIT":   sql = `DROP STREAMLIT ${fullName};`; break;
       case "SEQUENCE":    sql = `DROP SEQUENCE ${fullName};`; break;
@@ -3720,6 +3746,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         case "CORTEX SEARCH SERVICE": return `DROP CORTEX SEARCH SERVICE ${fullName};`;
         case "AGENT":       return `DROP AGENT ${fullName};`;
         case "EXTERNAL AGENT": return `DROP EXTERNAL AGENT ${fullName};`;
+        case "MCP SERVER":  return `DROP MCP SERVER ${fullName};`;
         case "SERVICE":     return `DROP SERVICE ${fullName};`;
         case "STREAMLIT":   return `DROP STREAMLIT ${fullName};`;
         case "SEQUENCE":    return `DROP SEQUENCE ${fullName};`;
@@ -4288,6 +4315,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                   {menuItem("Cortex Search Service…", <FileSearchOutlined style={{ fontSize: 12 }} />, openCreateCortexSearchService)}
                   {menuItem("Agent…", <ApiOutlined style={{ fontSize: 12 }} />, openCreateAgent)}
                   {menuItem("External Agent…", <GlobalOutlined style={{ fontSize: 12 }} />, openCreateExternalAgent)}
+                  {menuItem("MCP Server…", <PartitionOutlined style={{ fontSize: 12 }} />, openCreateMCPServer)}
                 </>
               ), 1)}
             </>
@@ -4370,6 +4398,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Create Agent…", <ApiOutlined style={{ fontSize: 12 }} />, openCreateAgent)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "EXTERNAL AGENT" &&
             menuItem("Create External Agent…", <GlobalOutlined style={{ fontSize: 12 }} />, openCreateExternalAgent)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "MCP SERVER" &&
+            menuItem("Create MCP Server…", <PartitionOutlined style={{ fontSize: 12 }} />, openCreateMCPServer)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "FILE FORMAT" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STAGE" &&
@@ -4454,6 +4484,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openAgentProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "EXTERNAL AGENT" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openExternalAgentProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MCP SERVER" &&
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openMCPServerProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "SERVICE" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openServiceProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "SERVICE" &&
@@ -4560,19 +4592,19 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "NOTEBOOK" &&
             menuItem("Make Live", <CloudUploadOutlined style={{ fontSize: 12 }} />, makeNotebookLive, undefined, !featureFlags.snowparkNotebooks, "Snowpark & Notebooks is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "EXTERNAL AGENT" && menuItem("View Definition", null, viewDefinition)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ICEBERG TABLE" && ctxMenu.objKind !== "HYBRID TABLE" && ctxMenu.objKind !== "EVENT TABLE" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "JOIN POLICY" && ctxMenu.objKind !== "PRIVACY POLICY" && ctxMenu.objKind !== "STORAGE LIFECYCLE POLICY" && ctxMenu.objKind !== "PASSWORD POLICY" && ctxMenu.objKind !== "SESSION POLICY" && ctxMenu.objKind !== "AGGREGATION POLICY" && ctxMenu.objKind !== "PROJECTION POLICY" && ctxMenu.objKind !== "AUTHENTICATION POLICY" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "STREAMLIT" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "AGENT" && ctxMenu.objKind !== "EXTERNAL AGENT" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && menuItem("View Definition", null, viewDefinition)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ICEBERG TABLE" && ctxMenu.objKind !== "HYBRID TABLE" && ctxMenu.objKind !== "EVENT TABLE" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "JOIN POLICY" && ctxMenu.objKind !== "PRIVACY POLICY" && ctxMenu.objKind !== "STORAGE LIFECYCLE POLICY" && ctxMenu.objKind !== "PASSWORD POLICY" && ctxMenu.objKind !== "SESSION POLICY" && ctxMenu.objKind !== "AGGREGATION POLICY" && ctxMenu.objKind !== "PROJECTION POLICY" && ctxMenu.objKind !== "AUTHENTICATION POLICY" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "STREAMLIT" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "AGENT" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {/* Comparison diffs via GET_DDL, which image repositories, services,
               packages policies, and models don't support — exclude them so the
               diff view can't surface a GET_DDL error for a kind that has no DDL. */}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "EXTERNAL AGENT" &&
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" &&
             menuItem("Select for Comparison", <DiffOutlined style={{ fontSize: 12 }} />, selectObjForComparison)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "EXTERNAL AGENT" && pendingDiff !== null &&
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && pendingDiff !== null &&
             menuItem(`Compare with: ${pendingDiff.label}`, <DiffOutlined style={{ fontSize: 12, color: "var(--accent)" }} />, compareObjWith)}
           {ctxMenu.nodeType === "obj" &&
             (ctxMenu.objKind === "VIEW" || ctxMenu.objKind === "PROCEDURE" || ctxMenu.objKind === "FUNCTION" || ctxMenu.objKind === "EXTERNAL FUNCTION") &&
             menuItem("View Dependencies…", <ShareAltOutlined style={{ fontSize: 12 }} />, viewDependencies)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "AGENT" && ctxMenu.objKind !== "EXTERNAL AGENT" &&
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "AGENT" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" &&
             menuItem("Rename…", <EditOutlined style={{ fontSize: 12 }} />, renameObject)}
           {ctxMenu.nodeType === "obj" && <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />}
           {ctxMenu.nodeType === "obj" && menuItem("Delete…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, deleteObject, "#f85149")}
@@ -5301,6 +5333,24 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={externalAgentPropsModal.schema}
           name={externalAgentPropsModal.name}
           onClose={() => setExternalAgentPropsModal(null)}
+        />
+      )}
+
+      {createMCPServerModal && (
+        <CreateMCPServerModal
+          db={createMCPServerModal.db}
+          schema={createMCPServerModal.schema}
+          onClose={() => setCreateMCPServerModal(null)}
+          onSuccess={() => refreshDatabaseByName(createMCPServerModal.db, { schema: createMCPServerModal.schema, kind: "MCP SERVER" })}
+        />
+      )}
+
+      {mcpServerPropsModal && (
+        <MCPServerPropertiesModal
+          db={mcpServerPropsModal.db}
+          schema={mcpServerPropsModal.schema}
+          name={mcpServerPropsModal.name}
+          onClose={() => setMCPServerPropsModal(null)}
         />
       )}
 

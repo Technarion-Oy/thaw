@@ -23,6 +23,7 @@ import {hybridtable} from '../models';
 import {icebergtable} from '../models';
 import {imagerepository} from '../models';
 import {joinpolicy} from '../models';
+import {mcpserver} from '../models';
 import {maskingpolicy} from '../models';
 import {materializedview} from '../models';
 import {model} from '../models';
@@ -207,6 +208,8 @@ export function BuildCreateImageRepositorySql(arg1:string,arg2:string,arg3:image
 
 export function BuildCreateJoinPolicySql(arg1:string,arg2:string,arg3:joinpolicy.JoinPolicyConfig):Promise<string>;
 
+export function BuildCreateMCPServerSql(arg1:string,arg2:string,arg3:mcpserver.MCPServerConfig):Promise<string>;
+
 export function BuildCreateMaskingPolicySql(arg1:string,arg2:string,arg3:maskingpolicy.MaskingPolicyConfig):Promise<string>;
 
 export function BuildCreateMaterializedViewSql(arg1:string,arg2:string,arg3:materializedview.MaterializedViewConfig):Promise<string>;
@@ -364,6 +367,8 @@ export function DescribeDataMetricFunction(arg1:string,arg2:string,arg3:string,a
 export function DescribeDbtProject(arg1:string,arg2:string,arg3:string):Promise<Array<snowflake.PropertyPair>>;
 
 export function DescribeExternalFunction(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.QueryResult>;
+
+export function DescribeMCPServer(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function DescribePasswordPolicy(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
