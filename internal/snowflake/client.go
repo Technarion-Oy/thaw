@@ -3189,7 +3189,7 @@ func (c *Client) ListBasicObjects(ctx context.Context, database, schema string) 
 // dedicated SHOW commands for object types not covered by SHOW OBJECTS (the
 // authoritative list is the command slice below: DYNAMIC TABLE, EXTERNAL TABLE,
 // ICEBERG TABLE, HYBRID TABLE, EVENT TABLE,
-// MATERIALIZED VIEW, ALERT, TAG, MASKING POLICY, ROW ACCESS POLICY,
+// MATERIALIZED VIEW, ALERT, TAG, MASKING POLICY, ROW ACCESS POLICY, JOIN POLICY,
 // PASSWORD POLICY, SESSION POLICY, AGGREGATION POLICY, PROJECTION POLICY,
 // AUTHENTICATION POLICY, PACKAGES POLICY, NETWORK
 // RULE, IMAGE REPOSITORY, SERVICE, STREAMLIT, PROCEDURE, FUNCTION,
@@ -3215,6 +3215,7 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 		{fmt.Sprintf("SHOW TAGS IN SCHEMA %s", q), "TAG"},
 		{fmt.Sprintf("SHOW MASKING POLICIES IN SCHEMA %s", q), "MASKING POLICY"},
 		{fmt.Sprintf("SHOW ROW ACCESS POLICIES IN SCHEMA %s", q), "ROW ACCESS POLICY"},
+		{fmt.Sprintf("SHOW JOIN POLICIES IN SCHEMA %s", q), "JOIN POLICY"},
 		{fmt.Sprintf("SHOW PASSWORD POLICIES IN SCHEMA %s", q), "PASSWORD POLICY"},
 		{fmt.Sprintf("SHOW SESSION POLICIES IN SCHEMA %s", q), "SESSION POLICY"},
 		{fmt.Sprintf("SHOW AGGREGATION POLICIES IN SCHEMA %s", q), "AGGREGATION POLICY"},
@@ -3720,10 +3721,10 @@ func buildGetDDLQuery(database, schema, kind, name, arguments string) (query, id
 		// GET_DDL has no MATERIALIZED_VIEW object type — TABLE and VIEW are
 		// interchangeable and materialized views are retrieved via 'VIEW'.
 		ddlKind = "VIEW"
-	case "MASKING POLICY", "ROW ACCESS POLICY", "PASSWORD POLICY", "SESSION POLICY", "AGGREGATION POLICY", "PROJECTION POLICY", "AUTHENTICATION POLICY":
+	case "MASKING POLICY", "ROW ACCESS POLICY", "JOIN POLICY", "PASSWORD POLICY", "SESSION POLICY", "AGGREGATION POLICY", "PROJECTION POLICY", "AUTHENTICATION POLICY":
 		// GET_DDL exposes a single 'POLICY' object type covering most policy
-		// kinds (masking, row access, password, session, aggregation, projection,
-		// authentication, etc.), not a per-kind type. NOTE: packages policies are
+		// kinds (masking, row access, join, password, session, aggregation,
+		// projection, authentication, etc.), not a per-kind type. NOTE: packages policies are
 		// deliberately NOT here — GET_DDL supports neither the 'POLICY' nor a
 		// 'PACKAGES POLICY' object type for them (the call fails with "Cannot
 		// initialize Snowflake Metadata. Dictionary unavailable"), so packages

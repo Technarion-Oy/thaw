@@ -2389,6 +2389,33 @@ export namespace integrations {
 
 }
 
+export namespace joinpolicy {
+	
+	export class JoinPolicyConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    body: string;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new JoinPolicyConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.body = source["body"];
+	        this.comment = source["comment"];
+	    }
+	}
+
+}
+
 export namespace keypair {
 	
 	export class KeyPairResult {
