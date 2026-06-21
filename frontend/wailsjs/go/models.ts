@@ -893,6 +893,29 @@ export namespace datametricfunction {
 
 }
 
+export namespace dataset {
+	
+	export class DatasetConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new DatasetConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	    }
+	}
+
+}
+
 export namespace dbt {
 	
 	export class CreateRequest {

@@ -119,6 +119,8 @@ func BuildObjectPropertiesQuery(database, schema, kind, name string) (string, er
 		return fmt.Sprintf("SHOW MODELS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "MODEL MONITOR":
 		return fmt.Sprintf("SHOW MODEL MONITORS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
+	case "DATASET":
+		return fmt.Sprintf("SHOW DATASETS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "CORTEX SEARCH SERVICE":
 		return fmt.Sprintf("SHOW CORTEX SEARCH SERVICES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "AGENT":
