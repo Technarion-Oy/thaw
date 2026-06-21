@@ -28,6 +28,7 @@ import {networkrule} from '../models';
 import {packagespolicy} from '../models';
 import {passwordpolicy} from '../models';
 import {pipe} from '../models';
+import {privacypolicy} from '../models';
 import {projectionpolicy} from '../models';
 import {rowaccesspolicy} from '../models';
 import {secret} from '../models';
@@ -102,6 +103,8 @@ export function AlterPackagesPolicy(arg1:string,arg2:string,arg3:string,arg4:str
 export function AlterPasswordPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterPipe(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterPrivacyPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterProjectionPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -204,6 +207,8 @@ export function BuildCreatePackagesPolicySql(arg1:string,arg2:string,arg3:packag
 export function BuildCreatePasswordPolicySql(arg1:string,arg2:string,arg3:passwordpolicy.PasswordPolicyConfig):Promise<string>;
 
 export function BuildCreatePipeSql(arg1:string,arg2:string,arg3:pipe.PipeConfig):Promise<string>;
+
+export function BuildCreatePrivacyPolicySql(arg1:string,arg2:string,arg3:privacypolicy.PrivacyPolicyConfig):Promise<string>;
 
 export function BuildCreateProjectionPolicySql(arg1:string,arg2:string,arg3:projectionpolicy.ProjectionPolicyConfig):Promise<string>;
 
@@ -516,6 +521,10 @@ export function GetPipeCopyHistory(arg1:string,arg2:string,arg3:string,arg4:stri
 export function GetPipeStatus(arg1:string,arg2:string,arg3:string):Promise<string>;
 
 export function GetPlatformOS():Promise<string>;
+
+export function GetPrivacyPolicyReferences(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
+
+export function GetPrivacyPolicyTags(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function GetProcedureParams(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<snowflake.ProcParam>>;
 

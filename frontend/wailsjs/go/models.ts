@@ -2935,6 +2935,33 @@ export namespace pipe {
 
 }
 
+export namespace privacypolicy {
+	
+	export class PrivacyPolicyConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    body: string;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PrivacyPolicyConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.body = source["body"];
+	        this.comment = source["comment"];
+	    }
+	}
+
+}
+
 export namespace procedure {
 	
 	export class Argument {

@@ -27,7 +27,7 @@ type ColumnComment struct {
 // BuildObjectPropertiesQuery returns the SHOW/DESCRIBE query that fetches the
 // metadata for a single Snowflake object. kind is one of: DATABASE, SCHEMA,
 // TABLE, VIEW, DYNAMIC TABLE, EXTERNAL TABLE, ICEBERG TABLE, HYBRID TABLE, EVENT TABLE, MATERIALIZED VIEW, ALERT, TAG,
-// MASKING POLICY, ROW ACCESS POLICY, JOIN POLICY, PASSWORD POLICY, SESSION POLICY, AGGREGATION POLICY, PROJECTION POLICY, AUTHENTICATION POLICY, PACKAGES POLICY, NETWORK RULE, IMAGE REPOSITORY, SERVICE, STREAMLIT, FUNCTION, EXTERNAL FUNCTION, DATA METRIC FUNCTION, PROCEDURE, SEQUENCE, STAGE, STREAM,
+// MASKING POLICY, ROW ACCESS POLICY, JOIN POLICY, PRIVACY POLICY, PASSWORD POLICY, SESSION POLICY, AGGREGATION POLICY, PROJECTION POLICY, AUTHENTICATION POLICY, PACKAGES POLICY, NETWORK RULE, IMAGE REPOSITORY, SERVICE, STREAMLIT, FUNCTION, EXTERNAL FUNCTION, DATA METRIC FUNCTION, PROCEDURE, SEQUENCE, STAGE, STREAM,
 // TASK, FILE FORMAT, PIPE, SECRET, GIT REPOSITORY, DBT PROJECT, MODEL, WAREHOUSE, ROLE,
 // USER.
 func BuildObjectPropertiesQuery(database, schema, kind, name string) (string, error) {
@@ -59,6 +59,8 @@ func BuildObjectPropertiesQuery(database, schema, kind, name string) (string, er
 		return fmt.Sprintf("SHOW ROW ACCESS POLICIES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "JOIN POLICY":
 		return fmt.Sprintf("SHOW JOIN POLICIES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
+	case "PRIVACY POLICY":
+		return fmt.Sprintf("SHOW PRIVACY POLICIES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "PASSWORD POLICY":
 		return fmt.Sprintf("SHOW PASSWORD POLICIES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "SESSION POLICY":
@@ -152,6 +154,13 @@ func BuildDescribeRowAccessPolicyQuery(database, schema, name string) string {
 // and body — none of which SHOW JOIN POLICIES reports.
 func BuildDescribeJoinPolicyQuery(database, schema, name string) string {
 	return fmt.Sprintf("DESCRIBE JOIN POLICY %s", snowflake.Qualify(database, schema, name))
+}
+
+// BuildDescribePrivacyPolicyQuery returns the DESCRIBE PRIVACY POLICY query used
+// to enrich the SHOW PRIVACY POLICIES result with the policy's signature, return
+// type, and body — none of which SHOW PRIVACY POLICIES reports.
+func BuildDescribePrivacyPolicyQuery(database, schema, name string) string {
+	return fmt.Sprintf("DESCRIBE PRIVACY POLICY %s", snowflake.Qualify(database, schema, name))
 }
 
 // BuildDescribeAggregationPolicyQuery returns the DESCRIBE AGGREGATION POLICY
@@ -272,8 +281,8 @@ func BuildDescribeStreamlitQuery(database, schema, name string) string {
 // GetObjectProperties returns structured metadata for any Snowflake object by
 // running the appropriate SHOW or DESCRIBE command and returning the result as
 // key/value pairs. For STAGE objects it also appends DESCRIBE STAGE properties;
-// for MASKING POLICY, ROW ACCESS POLICY, JOIN POLICY, AGGREGATION POLICY, and
-// PROJECTION POLICY objects it
+// for MASKING POLICY, ROW ACCESS POLICY, JOIN POLICY, PRIVACY POLICY,
+// AGGREGATION POLICY, and PROJECTION POLICY objects it
 // appends the DESCRIBE signature, return type, and body; for PACKAGES POLICY
 // objects it appends the DESCRIBE language and allow/block lists; for NETWORK RULE objects it appends the
 // DESCRIBE NETWORK RULE value_list; for SERVICE objects the DESCRIBE SERVICE spec
@@ -347,6 +356,32 @@ func GetObjectProperties(ctx context.Context, client *snowflake.Client, database
 		descRes, err := client.Execute(ctx, BuildDescribeJoinPolicyQuery(database, schema, name))
 		if err == nil && len(descRes.Rows) > 0 {
 			// DESCRIBE JOIN POLICY returns one row whose columns include
+			// signature, return_type, and body. Map by column name so a column
+			// reordering on Snowflake's side doesn't mislabel the values.
+			row := descRes.Rows[0]
+			for ci, col := range descRes.Columns {
+				if ci >= len(row) {
+					break
+				}
+				switch strings.ToLower(col) {
+				case "signature", "return_type", "body":
+					// Guard against a SQL NULL rendering as the literal "<nil>";
+					// emit an empty string instead, matching how the references
+					// table renders nulls.
+					val := ""
+					if row[ci] != nil {
+						val = fmt.Sprintf("%v", row[ci])
+					}
+					pairs = append(pairs, snowflake.PropertyPair{Key: col, Value: val})
+				}
+			}
+		}
+	}
+
+	if strings.ToUpper(kind) == "PRIVACY POLICY" {
+		descRes, err := client.Execute(ctx, BuildDescribePrivacyPolicyQuery(database, schema, name))
+		if err == nil && len(descRes.Rows) > 0 {
+			// DESCRIBE PRIVACY POLICY returns one row whose columns include
 			// signature, return_type, and body. Map by column name so a column
 			// reordering on Snowflake's side doesn't mislabel the values.
 			row := descRes.Rows[0]
