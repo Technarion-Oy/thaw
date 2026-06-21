@@ -38,7 +38,7 @@ func TestBuildCreateModelMonitorSql(t *testing.T) {
 			},
 			contains: []string{
 				"CREATE MODEL MONITOR \"DB\".\"SC\".MY_MONITOR WITH",
-				"MODEL = MY_MODEL",
+				"MODEL = \"DB\".\"SC\".\"MY_MODEL\"",
 				"VERSION = 'V1'",
 				"FUNCTION = 'predict'",
 				"SOURCE = \"DB\".\"SC\".\"INFERENCE_TBL\"",
@@ -78,6 +78,7 @@ func TestBuildCreateModelMonitorSql(t *testing.T) {
 			},
 			contains: []string{
 				"CREATE OR REPLACE MODEL MONITOR \"DB\".\"SC\".EVERYTHING WITH",
+				"MODEL = \"DB\".\"SC\".\"M\"",
 				"SOURCE = \"DB\".\"SC\".\"SRC\"",
 				"BASELINE = \"DB\".\"SC\".\"BASE_TBL\"",
 				"ID_COLUMNS = (ID, REGION)",

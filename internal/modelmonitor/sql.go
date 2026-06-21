@@ -28,11 +28,13 @@ import (
 // statement is run.
 //
 // Quoting differs per field and follows the published grammar exactly:
-//   - Model, Warehouse, TimestampColumn are identifiers (emitted verbatim).
-//   - Source and Baseline are table/view references; they are fully qualified
-//     with the monitor's own database & schema (the create modal only offers
-//     objects from db.schema) so creation works even when the session's current
-//     schema differs from the monitor's target schema.
+//   - Warehouse (account-level) and TimestampColumn (a column of the source) are
+//     identifiers emitted verbatim.
+//   - Model, Source, and Baseline are schema-level object references; they are
+//     fully qualified with the monitor's own database & schema (the create modal
+//     only offers objects from db.schema, and Snowflake requires the model to
+//     live in the monitor's schema) so creation works even when the session's
+//     current schema differs from the monitor's target schema.
 //   - Version, Function, RefreshInterval, AggregationWindow are string literals
 //     (single-quoted).
 //   - The column arrays are parenthesised, comma-separated identifier lists.
@@ -43,7 +45,7 @@ type ModelMonitorConfig struct {
 	IfNotExists   bool   `json:"ifNotExists"`
 
 	// Required WITH-clause parameters.
-	Model             string `json:"model"`             // MODEL = <ident>
+	Model             string `json:"model"`             // MODEL = <db.schema.ident>
 	Version           string `json:"version"`           // VERSION = '<lit>'
 	Function          string `json:"function"`          // FUNCTION = '<lit>'
 	Source            string `json:"source"`            // SOURCE = <db.schema.ident>
@@ -88,7 +90,7 @@ func columnArray(cols []string) string {
 // wins (IF NOT EXISTS is dropped).
 //
 //	CREATE [OR REPLACE] MODEL MONITOR [IF NOT EXISTS] <fqn> WITH
-//	  MODEL = <model>
+//	  MODEL = <db.schema.model>
 //	  VERSION = '<version>'
 //	  FUNCTION = '<function>'
 //	  SOURCE = <db.schema.source>
@@ -126,8 +128,17 @@ func BuildCreateModelMonitorSql(db, schema string, cfg ModelMonitorConfig) (stri
 		return placeholder
 	}
 
-	// Required identifier parameters (emitted verbatim).
-	fmt.Fprintf(&sb, "\n  MODEL = %s", orPlaceholder(cfg.Model, "model_name"))
+	// MODEL is a schema-level object reference. Like SOURCE/BASELINE it is fully
+	// qualified with the monitor's own database & schema (the create modal's model
+	// picker only offers models from db.schema, and Snowflake requires the model
+	// to live in the monitor's schema) so creation succeeds even when the
+	// session's current schema differs from the monitor's target schema. A blank
+	// value emits the bare placeholder so the live preview reads as a template.
+	if m := strings.TrimSpace(cfg.Model); m != "" {
+		fmt.Fprintf(&sb, "\n  MODEL = %s", snowflake.Qualify(db, schema, m))
+	} else {
+		fmt.Fprint(&sb, "\n  MODEL = model_name")
+	}
 	// Required string-literal parameters.
 	fmt.Fprintf(&sb, "\n  VERSION = '%s'", snowflake.EscapeTextLit(orPlaceholder(cfg.Version, "version_name")))
 	fmt.Fprintf(&sb, "\n  FUNCTION = '%s'", snowflake.EscapeTextLit(orPlaceholder(cfg.Function, "function_name")))

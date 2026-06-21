@@ -97,8 +97,8 @@ export default function CreateModelMonitorModal({ db, schema, onClose, onSuccess
     function: "",
     source: "",
     warehouse: "",
-    refreshInterval: "1 hours",
-    aggregationWindow: "1 days",
+    refreshInterval: "1 hour",
+    aggregationWindow: "1 day",
     timestampColumn: "",
     baseline: "",
     idColumns: [],
@@ -188,13 +188,18 @@ export default function CreateModelMonitorModal({ db, schema, onClose, onSuccess
   }, [db, schema, cfg.source]);
 
   // ── Composers → cfg ───────────────────────────────────────────────────────
+  // Use the singular unit for a quantity of 1 ("1 hour", not "1 hours") so the
+  // emitted duration is unambiguously grammatical.
+  const durationLabel = (n: number, plural: string) =>
+    `${n} ${n === 1 ? plural.replace(/s$/, "") : plural}`;
+
   useEffect(() => {
-    if (refreshNum && refreshNum > 0) set("refreshInterval", `${refreshNum} ${refreshUnit}`);
+    if (refreshNum && refreshNum > 0) set("refreshInterval", durationLabel(refreshNum, refreshUnit));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshNum, refreshUnit]);
 
   useEffect(() => {
-    if (aggNum && aggNum > 0) set("aggregationWindow", `${aggNum} days`);
+    if (aggNum && aggNum > 0) set("aggregationWindow", durationLabel(aggNum, "days"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aggNum]);
 

@@ -247,6 +247,12 @@ export default function ModelMonitorPropertiesModal({ db, schema, name, onClose 
   const addSegment = async () => {
     const seg = newSegment.trim();
     if (!seg) return;
+    // Snowflake allows at most 5 segment columns per monitor; match the create
+    // modal's cap so both surfaces are consistent.
+    if (segments.length >= 5) {
+      setActionError("A model monitor can have at most 5 segment columns.");
+      return;
+    }
     setAddingSegment(true);
     try {
       await runAlter(`ADD segment_column = ${q1(seg)}`, "Add segment column");
@@ -342,11 +348,12 @@ export default function ModelMonitorPropertiesModal({ db, schema, name, onClose 
               placeholder="Segment column name"
               style={{ width: 240 }}
               onPressEnter={addSegment}
-              disabled={addingSegment}
+              disabled={addingSegment || segments.length >= 5}
             />
-            <Button size="small" icon={<PlusOutlined />} onClick={addSegment} loading={addingSegment} disabled={!newSegment.trim()}>
+            <Button size="small" icon={<PlusOutlined />} onClick={addSegment} loading={addingSegment} disabled={!newSegment.trim() || segments.length >= 5}>
               Add
             </Button>
+            {segments.length >= 5 && <Text type="secondary" style={{ fontSize: 11 }}>Maximum 5 reached</Text>}
           </Space>
 
           <div style={SECTION_HEAD}>Properties</div>
