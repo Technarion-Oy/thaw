@@ -97,10 +97,14 @@ func BuildCreateProcedureSql(db, schema string, cfg ProcedureConfig) (string, er
 		fmt.Fprintf(&sb, "\n  RETURNS %s", ret)
 	}
 
+	// LANGUAGE is REQUIRED for CREATE PROCEDURE — unlike a UDF, there is no
+	// implicit default, so a SQL procedure must still emit `LANGUAGE SQL`
+	// (omitting it is a syntax error before AS). Default an empty language to SQL.
 	lang := strings.ToUpper(strings.TrimSpace(cfg.Language))
-	if lang != "" && lang != "SQL" {
-		fmt.Fprintf(&sb, "\n  LANGUAGE %s", lang)
+	if lang == "" {
+		lang = "SQL"
 	}
+	fmt.Fprintf(&sb, "\n  LANGUAGE %s", lang)
 
 	// RUNTIME_VERSION / PACKAGES / IMPORTS / HANDLER apply only to the handler
 	// languages (Python, Java, Scala). SQL (Snowflake Scripting) and JavaScript
@@ -128,15 +132,17 @@ func BuildCreateProcedureSql(db, schema string, cfg ProcedureConfig) (string, er
 	if vol := strings.TrimSpace(cfg.Volatility); vol != "" {
 		fmt.Fprintf(&sb, "\n  %s", strings.ToUpper(vol))
 	}
+
+	// COMMENT precedes EXECUTE AS in the documented CREATE PROCEDURE grammar.
+	sb.WriteString(snowflake.CommentClause(cfg.Comment))
+
 	if ea := strings.TrimSpace(cfg.ExecuteAs); ea != "" {
 		fmt.Fprintf(&sb, "\n  EXECUTE AS %s", strings.ToUpper(ea))
 	}
 
-	sb.WriteString(snowflake.CommentClause(cfg.Comment))
-
 	procBody := strings.TrimSpace(cfg.Body)
 	if procBody == "" {
-		if lang == "" || lang == "SQL" {
+		if lang == "SQL" {
 			procBody = "BEGIN\n  RETURN 1;\nEND"
 		} else {
 			procBody = "# procedure body"

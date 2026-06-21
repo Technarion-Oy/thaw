@@ -68,6 +68,15 @@ const NULL_HANDLING_OPTIONS = ["CALLED ON NULL INPUT", "RETURNS NULL ON NULL INP
 }));
 const VOLATILITY_OPTIONS = ["VOLATILE", "IMMUTABLE"].map((v) => ({ value: v, label: v }));
 
+// Per-language example hints for the handler-only fields, so the ghost
+// placeholders match the selected runtime (Python / Java / Scala) instead of
+// always showing Python examples.
+const LANG_HINTS: Record<string, { runtime: string; handler: string; packages: string; imports: string }> = {
+  PYTHON: { runtime: "e.g. 3.11", handler: "my_module.my_func", packages: "numpy, pandas, …", imports: "@stage/handler.py, …" },
+  JAVA:   { runtime: "e.g. 17",   handler: "MyClass.myMethod",  packages: "com.example:my-lib:1.0, …", imports: "@stage/lib.jar, …" },
+  SCALA:  { runtime: "e.g. 2.12", handler: "MyObject.myFunc",   packages: "com.example:my-lib:1.0, …", imports: "@stage/lib.jar, …" },
+};
+
 export default function CreateFunctionModal({ db, schema, onClose, onSuccess }: Props) {
   const [cfg, setCfg] = useState<FnConfig>({
     name: "",
@@ -105,6 +114,7 @@ export default function CreateFunctionModal({ db, schema, onClose, onSuccess }: 
   // logic inline in the body, so those fields are hidden for them (and the Go
   // builder drops any stale values too).
   const isHandlerLang = ["PYTHON", "JAVA", "SCALA"].includes(cfg.language.toUpperCase());
+  const hints = LANG_HINTS[cfg.language.toUpperCase()] ?? LANG_HINTS.PYTHON;
 
   // Required: name and a function body.
   const canSubmit = cfg.name.trim().length > 0 && cfg.body.trim().length > 0;
@@ -194,11 +204,11 @@ export default function CreateFunctionModal({ db, schema, onClose, onSuccess }: 
 
       {isHandlerLang && (
         <>
-          <Form.Item label="Runtime version" style={itemStyle} help="RUNTIME_VERSION — required for Python / Java / Scala handlers.">
+          <Form.Item label="Runtime version" style={itemStyle} help={`RUNTIME_VERSION — required for the ${cfg.language.toUpperCase()} handler.`}>
             <Input
               value={cfg.runtimeVersion}
               onChange={(e) => set("runtimeVersion", e.target.value)}
-              placeholder="e.g. 3.10"
+              placeholder={hints.runtime}
             />
           </Form.Item>
 
@@ -207,28 +217,28 @@ export default function CreateFunctionModal({ db, schema, onClose, onSuccess }: 
               mode="tags"
               value={cfg.packages}
               onChange={(v) => set("packages", v)}
-              placeholder="numpy, pandas, …"
+              placeholder={hints.packages}
               open={false}
               style={{ width: "100%" }}
             />
           </Form.Item>
 
-          <Form.Item label="Imports" style={itemStyle} help="IMPORTS — stage paths to files the handler loads (e.g. @stage/lib.jar).">
+          <Form.Item label="Imports" style={itemStyle} help={`IMPORTS — stage paths to files the handler loads (e.g. ${hints.imports.split(",")[0]}).`}>
             <Select
               mode="tags"
               value={cfg.imports}
               onChange={(v) => set("imports", v)}
-              placeholder="@stage/lib.jar, …"
+              placeholder={hints.imports}
               open={false}
               style={{ width: "100%" }}
             />
           </Form.Item>
 
-          <Form.Item label="Handler" style={itemStyle} help="HANDLER — entry point for Python / Java / Scala (e.g. function or Class.method).">
+          <Form.Item label="Handler" style={itemStyle} help={`HANDLER — entry point for the ${cfg.language.toUpperCase()} handler (e.g. ${hints.handler}).`}>
             <Input
               value={cfg.handler}
               onChange={(e) => set("handler", e.target.value)}
-              placeholder="my_func"
+              placeholder={hints.handler}
             />
           </Form.Item>
         </>

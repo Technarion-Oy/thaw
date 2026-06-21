@@ -32,9 +32,10 @@ func TestBuildCreateProcedureSql(t *testing.T) {
 			want: []string{
 				`CREATE PROCEDURE "DB"."SC".MY_PROC()`,
 				"\n  RETURNS VARCHAR",
+				"\n  LANGUAGE SQL", // required for CREATE PROCEDURE (no implicit default)
 				"\n  AS $$\nBEGIN\n  RETURN 'hi';\nEND\n$$;",
 			},
-			notWant: []string{"LANGUAGE", "EXECUTE AS", "COMMENT"},
+			notWant: []string{"EXECUTE AS", "COMMENT"},
 		},
 		{
 			name: "default body and return when empty",
@@ -117,11 +118,14 @@ func TestBuildCreateProcedureSql(t *testing.T) {
 			},
 		},
 		{
-			name: "SQL language omitted",
+			name: "SQL language always emitted (required for procedures)",
 			cfg:  ProcedureConfig{Name: "P", Language: "SQL"},
-			notWant: []string{
-				"LANGUAGE",
-			},
+			want: []string{"\n  LANGUAGE SQL"},
+		},
+		{
+			name: "empty language defaults to LANGUAGE SQL",
+			cfg:  ProcedureConfig{Name: "P"},
+			want: []string{"\n  LANGUAGE SQL"},
 		},
 		{
 			name: "SQL procedure drops handler-only clauses even when set",
@@ -134,7 +138,8 @@ func TestBuildCreateProcedureSql(t *testing.T) {
 				Handler:        "main.run",
 				Body:           "BEGIN\n  RETURN 1;\nEND",
 			},
-			notWant: []string{"RUNTIME_VERSION", "PACKAGES", "IMPORTS", "HANDLER", "LANGUAGE"},
+			want:    []string{"\n  LANGUAGE SQL"},
+			notWant: []string{"RUNTIME_VERSION", "PACKAGES", "IMPORTS", "HANDLER"},
 		},
 		{
 			name: "JavaScript procedure drops handler-only clauses",
@@ -180,6 +185,24 @@ func TestBuildCreateProcedureSql(t *testing.T) {
 			want: []string{`"myProc"`},
 		},
 	}
+
+	// COMMENT must precede EXECUTE AS per the CREATE PROCEDURE grammar.
+	t.Run("COMMENT precedes EXECUTE AS", func(t *testing.T) {
+		sql, err := BuildCreateProcedureSql("DB", "SC", ProcedureConfig{
+			Name: "P", Comment: "note", ExecuteAs: "OWNER",
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		ci := strings.Index(sql, "COMMENT =")
+		ei := strings.Index(sql, "EXECUTE AS")
+		if ci < 0 || ei < 0 {
+			t.Fatalf("expected both COMMENT and EXECUTE AS in:\n%s", sql)
+		}
+		if ci > ei {
+			t.Errorf("COMMENT must precede EXECUTE AS\nfull SQL:\n%s", sql)
+		}
+	})
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

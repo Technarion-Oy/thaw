@@ -179,9 +179,9 @@ func TestBuildCreateViewSqlPlaceholders(t *testing.T) {
 }
 
 // TestBuildCreateViewSqlClauseOrder pins the view-level clause order to the order
-// Snowflake documents for CREATE VIEW — (columns) → COPY GRANTS → COMMENT → TAG →
-// AS. Snowflake's CREATE parser is order-sensitive, so a config that combines
-// several optional clauses must emit them in exactly this sequence.
+// Snowflake documents for CREATE VIEW — (columns) → [WITH] TAG → COPY GRANTS →
+// COMMENT → AS. Snowflake's CREATE parser is order-sensitive, so a config that
+// combines several optional clauses must emit them in exactly this sequence.
 func TestBuildCreateViewSqlClauseOrder(t *testing.T) {
 	got, err := BuildCreateViewSql("DB", "SC", ViewConfig{
 		Name:       "V",
@@ -195,7 +195,7 @@ func TestBuildCreateViewSqlClauseOrder(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	order := []string{"(a, b)", "COPY GRANTS", "COMMENT = ", "TAG (", "AS"}
+	order := []string{"(a, b)", "TAG (", "COPY GRANTS", "COMMENT = ", "AS"}
 	prev := -1
 	for _, marker := range order {
 		idx := strings.Index(got, marker)

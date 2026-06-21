@@ -28,6 +28,15 @@ const LANGUAGES = ["SQL", "PYTHON", "JAVA", "JAVASCRIPT", "SCALA"];
 const NULL_HANDLING = ["CALLED ON NULL INPUT", "RETURNS NULL ON NULL INPUT"];
 const VOLATILITY = ["VOLATILE", "IMMUTABLE"];
 
+// Per-language example hints for the handler-only fields, so the ghost
+// placeholders match the selected runtime (Python / Java / Scala) instead of
+// always showing Python examples.
+const LANG_HINTS: Record<string, { runtime: string; handler: string; packages: string; imports: string }> = {
+  PYTHON: { runtime: "3.11", handler: "main.run",        packages: "snowflake-snowpark-python, pandas", imports: "@my_stage/handler.py" },
+  JAVA:   { runtime: "17",   handler: "MyClass.myMethod", packages: "com.example:my-lib:1.0",           imports: "@my_stage/lib.jar" },
+  SCALA:  { runtime: "2.12", handler: "MyObject.run",     packages: "com.example:my-lib:1.0",           imports: "@my_stage/lib.jar" },
+};
+
 // Plain data shape for form state. The Wails-generated `ProcedureConfig` class
 // carries a `convertValues` method (it has nested `args` / `tableColumns`
 // arrays), which a plain object literal can't satisfy; we cast to the generated
@@ -87,6 +96,7 @@ export default function CreateProcedureModal({ db, schema, onClose, onSuccess }:
   // procedures carry their logic inline in the body, so those fields are hidden
   // for them (and the Go builder drops any stale values too).
   const isHandlerLang = ["PYTHON", "JAVA", "SCALA"].includes(cfg.language.toUpperCase());
+  const hints = LANG_HINTS[cfg.language.toUpperCase()] ?? LANG_HINTS.PYTHON;
 
   const canSubmit = cfg.name.trim().length > 0 && cfg.body.trim().length > 0;
 
@@ -154,40 +164,40 @@ export default function CreateProcedureModal({ db, schema, onClose, onSuccess }:
       {isHandlerLang && (
         <>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
-            <Form.Item label="Runtime version" style={itemStyle} help="RUNTIME_VERSION for Python / Java / Scala handlers, e.g. 3.10.">
+            <Form.Item label="Runtime version" style={itemStyle} help={`RUNTIME_VERSION for the ${cfg.language.toUpperCase()} handler.`}>
               <Input
                 value={cfg.runtimeVersion}
                 onChange={(e) => set("runtimeVersion", e.target.value)}
-                placeholder="3.10"
+                placeholder={hints.runtime}
               />
             </Form.Item>
-            <Form.Item label="Handler" style={itemStyle} help="Entry point, e.g. module.function or Class.method.">
+            <Form.Item label="Handler" style={itemStyle} help={`Entry point for the ${cfg.language.toUpperCase()} handler (e.g. ${hints.handler}).`}>
               <Input
                 value={cfg.handler}
                 onChange={(e) => set("handler", e.target.value)}
-                placeholder="main.run"
+                placeholder={hints.handler}
               />
             </Form.Item>
           </div>
 
-          <Form.Item label="Packages" style={itemStyle} help="PACKAGES for Python / Java / Scala handlers (e.g. snowflake-snowpark-python).">
+          <Form.Item label="Packages" style={itemStyle} help={`PACKAGES for the ${cfg.language.toUpperCase()} handler (e.g. ${hints.packages.split(",")[0]}).`}>
             <Select
               mode="tags"
               value={cfg.packages}
               onChange={(v) => set("packages", v)}
-              placeholder="snowflake-snowpark-python, pandas"
+              placeholder={hints.packages}
               style={{ width: "100%" }}
               tokenSeparators={[",", " "]}
               open={false}
             />
           </Form.Item>
 
-          <Form.Item label="Imports" style={itemStyle} help="IMPORTS — staged files (e.g. @stage/handler.py).">
+          <Form.Item label="Imports" style={itemStyle} help={`IMPORTS — staged files (e.g. ${hints.imports}).`}>
             <Select
               mode="tags"
               value={cfg.imports}
               onChange={(v) => set("imports", v)}
-              placeholder="@my_stage/handler.py"
+              placeholder={hints.imports}
               style={{ width: "100%" }}
               tokenSeparators={[",", " "]}
               open={false}

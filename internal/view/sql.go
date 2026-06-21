@@ -64,13 +64,16 @@ func BuildCreateViewSql(db, schema string, cfg ViewConfig) (string, error) {
 	if cols := strings.TrimSpace(cfg.Columns); cols != "" {
 		fmt.Fprintf(&sb, "\n  (%s)", cols)
 	}
+	// Clause order per the CREATE VIEW grammar: [WITH] TAG → COPY GRANTS →
+	// COMMENT (CREATE VIEW's parser is order-sensitive, and this order differs
+	// from the dynamic-table builder's COMMENT → COPY GRANTS → TAG).
+	if tc := snowflake.TagClause(cfg.Tags); tc != "" {
+		fmt.Fprintf(&sb, "\n  %s", tc)
+	}
 	if cfg.CopyGrants {
 		fmt.Fprintf(&sb, "\n  COPY GRANTS")
 	}
 	sb.WriteString(snowflake.CommentClause(cfg.Comment))
-	if tc := snowflake.TagClause(cfg.Tags); tc != "" {
-		fmt.Fprintf(&sb, "\n  %s", tc)
-	}
 
 	query := strings.TrimSpace(cfg.Query)
 	query = strings.TrimRight(query, ";")
