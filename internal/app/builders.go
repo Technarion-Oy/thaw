@@ -26,6 +26,7 @@ import (
 	"thaw/internal/externalfunction"
 	"thaw/internal/externaltable"
 	"thaw/internal/fileformat"
+	"thaw/internal/gateway"
 	"thaw/internal/hybridtable"
 	"thaw/internal/icebergtable"
 	"thaw/internal/imagerepository"
@@ -269,6 +270,11 @@ func (a *App) BuildCreateModelSql(database, schema string, cfg model.ModelConfig
 // BuildCreateDatasetSql returns the SQL for creating a Snowflake DATASET.
 func (a *App) BuildCreateDatasetSql(database, schema string, cfg dataset.DatasetConfig) (string, error) {
 	return dataset.BuildCreateDatasetSql(database, schema, cfg)
+}
+
+// BuildCreateGatewaySql returns the SQL for creating a Snowflake GATEWAY.
+func (a *App) BuildCreateGatewaySql(database, schema string, cfg gateway.GatewayConfig) (string, error) {
+	return gateway.BuildCreateGatewaySql(database, schema, cfg)
 }
 
 // BuildCreateModelMonitorSql returns the SQL for creating a Snowflake MODEL
