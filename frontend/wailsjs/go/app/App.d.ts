@@ -10,6 +10,7 @@ import {procedure} from '../models';
 import {agent} from '../models';
 import {aggregationpolicy} from '../models';
 import {alert} from '../models';
+import {contact} from '../models';
 import {cortexsearchservice} from '../models';
 import {datametricfunction} from '../models';
 import {dataset} from '../models';
@@ -83,6 +84,8 @@ export function AlterAuthenticationPolicy(arg1:string,arg2:string,arg3:string,ar
 export function AlterBackupPolicy(arg1:string,arg2:string):Promise<void>;
 
 export function AlterBackupSet(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterContact(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterCortexSearchService(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -205,6 +208,8 @@ export function BuildCreateAggregationPolicySql(arg1:string,arg2:string,arg3:agg
 export function BuildCreateAlertSql(arg1:string,arg2:string,arg3:alert.AlertConfig):Promise<string>;
 
 export function BuildCreateAuthenticationPolicySql(arg1:string,arg2:string,arg3:authenticationpolicy.AuthenticationPolicyConfig):Promise<string>;
+
+export function BuildCreateContactSql(arg1:string,arg2:string,arg3:contact.ContactConfig):Promise<string>;
 
 export function BuildCreateCortexSearchServiceSql(arg1:string,arg2:string,arg3:cortexsearchservice.CortexSearchServiceConfig):Promise<string>;
 
@@ -475,6 +480,8 @@ export function FetchNotebookContent(arg1:string,arg2:string,arg3:string):Promis
 export function FindJoinPaths(arg1:Array<erdesigner.TableRef>,arg2:Array<snowflake.ERForeignKey>):Promise<Array<erdesigner.JoinPath>>;
 
 export function FormatAuthPolicyList(arg1:Array<string>):Promise<string>;
+
+export function FormatContactUsers(arg1:Array<string>):Promise<string>;
 
 export function FormatCortexSearchAttributes(arg1:Array<string>):Promise<string>;
 

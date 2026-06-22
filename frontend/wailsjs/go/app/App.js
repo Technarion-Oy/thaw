@@ -30,6 +30,10 @@ export function AlterBackupSet(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterBackupSet'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterContact(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterContact'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterCortexSearchService(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterCortexSearchService'](arg1, arg2, arg3, arg4);
 }
@@ -272,6 +276,10 @@ export function BuildCreateAlertSql(arg1, arg2, arg3) {
 
 export function BuildCreateAuthenticationPolicySql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateAuthenticationPolicySql'](arg1, arg2, arg3);
+}
+
+export function BuildCreateContactSql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateContactSql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateCortexSearchServiceSql(arg1, arg2, arg3) {
@@ -812,6 +820,10 @@ export function FindJoinPaths(arg1, arg2) {
 
 export function FormatAuthPolicyList(arg1) {
   return window['go']['app']['App']['FormatAuthPolicyList'](arg1);
+}
+
+export function FormatContactUsers(arg1) {
+  return window['go']['app']['App']['FormatContactUsers'](arg1);
 }
 
 export function FormatCortexSearchAttributes(arg1) {

@@ -74,6 +74,7 @@ import {
   ContainerOutlined,
   DeploymentUnitOutlined,
   NodeIndexOutlined,
+  ContactsOutlined,
   AppstoreOutlined,
   GoldOutlined,
   MergeCellsOutlined,
@@ -214,6 +215,8 @@ import CreateServiceModal from "../service/CreateServiceModal";
 import ServicePropertiesModal from "../service/ServicePropertiesModal";
 import CreateGatewayModal from "../gateway/CreateGatewayModal";
 import GatewayPropertiesModal from "../gateway/GatewayPropertiesModal";
+import CreateContactModal from "../contact/CreateContactModal";
+import ContactPropertiesModal from "../contact/ContactPropertiesModal";
 import CreateStreamlitModal from "../streamlit/CreateStreamlitModal";
 import StreamlitPropertiesModal from "../streamlit/StreamlitPropertiesModal";
 import CreatePipeModal from "../pipe/CreatePipeModal";
@@ -258,6 +261,7 @@ const KIND_LABEL: Record<string, string> = {
   "IMAGE REPOSITORY": "Image Repositories",
   SERVICE:       "Services",
   GATEWAY:       "Gateways",
+  CONTACT:       "Contacts",
   STREAMLIT:     "Streamlits",
   FUNCTION:      "Functions",
   "EXTERNAL FUNCTION": "External Functions",
@@ -283,7 +287,7 @@ const KIND_LABEL: Record<string, string> = {
   "SEMANTIC VIEW": "Semantic Views",
 };
 
-const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE", "FUNCTION", "EXTERNAL FUNCTION", "DATA METRIC FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "JOIN POLICY", "PRIVACY POLICY", "STORAGE LIFECYCLE POLICY", "PASSWORD POLICY", "SESSION POLICY", "AGGREGATION POLICY", "PROJECTION POLICY", "AUTHENTICATION POLICY", "PACKAGES POLICY", "NETWORK RULE", "IMAGE REPOSITORY", "SERVICE", "GATEWAY", "STREAMLIT", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT", "MODEL", "MODEL MONITOR", "DATASET", "CORTEX SEARCH SERVICE", "AGENT", "EXTERNAL AGENT", "MCP SERVER", "SEMANTIC VIEW"];
+const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE", "FUNCTION", "EXTERNAL FUNCTION", "DATA METRIC FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "JOIN POLICY", "PRIVACY POLICY", "STORAGE LIFECYCLE POLICY", "PASSWORD POLICY", "SESSION POLICY", "AGGREGATION POLICY", "PROJECTION POLICY", "AUTHENTICATION POLICY", "PACKAGES POLICY", "NETWORK RULE", "IMAGE REPOSITORY", "SERVICE", "GATEWAY", "CONTACT", "STREAMLIT", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT", "MODEL", "MODEL MONITOR", "DATASET", "CORTEX SEARCH SERVICE", "AGENT", "EXTERNAL AGENT", "MCP SERVER", "SEMANTIC VIEW"];
 
 const kindIcon = (kind: string) => objectIcon(kind);
 
@@ -776,6 +780,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [servicePropsModal, setServicePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createGatewayModal, setCreateGatewayModal] = useState<{ db: string; schema: string } | null>(null);
   const [gatewayPropsModal, setGatewayPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [createContactModal, setCreateContactModal] = useState<{ db: string; schema: string } | null>(null);
+  const [contactPropsModal, setContactPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createStreamlitModal, setCreateStreamlitModal] = useState<{ db: string; schema: string } | null>(null);
   const [streamlitPropsModal, setStreamlitPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createPipeModal, setCreatePipeModal] = useState<{ db: string; schema: string } | null>(null);
@@ -2887,6 +2893,25 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setGatewayPropsModal({ db, schema, name });
   };
 
+  const openCreateContact = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    setCtxMenu(null);
+    setCreateContactModal({ db, schema });
+  };
+
+  const openContactProperties = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    setContactPropsModal({ db, schema, name });
+  };
+
   const openCreateStreamlit = () => {
     if (!ctxMenu) return;
     const parts = ctxMenu.nodeKey.split(":");
@@ -3321,6 +3346,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       case "SEMANTIC VIEW": sql = `DROP SEMANTIC VIEW ${fullName};`; break;
       case "SERVICE":     sql = `DROP SERVICE ${fullName};`; break;
       case "GATEWAY":     sql = `DROP GATEWAY ${fullName};`; break;
+      case "CONTACT":     sql = `DROP CONTACT ${fullName};`; break;
       case "STREAMLIT":   sql = `DROP STREAMLIT ${fullName};`; break;
       case "SEQUENCE":    sql = `DROP SEQUENCE ${fullName};`; break;
       case "STAGE":       sql = `DROP STAGE ${fullName};`; break;
@@ -3993,6 +4019,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         case "SEMANTIC VIEW": return `DROP SEMANTIC VIEW ${fullName};`;
         case "SERVICE":     return `DROP SERVICE ${fullName};`;
         case "GATEWAY":     return `DROP GATEWAY ${fullName};`;
+        case "CONTACT":     return `DROP CONTACT ${fullName};`;
         case "STREAMLIT":   return `DROP STREAMLIT ${fullName};`;
         case "SEQUENCE":    return `DROP SEQUENCE ${fullName};`;
         case "STAGE":       return `DROP STAGE ${fullName};`;
@@ -4536,6 +4563,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                   {menuItem("Authentication Policy…", <LoginOutlined style={{ fontSize: 12 }} />, openCreateAuthenticationPolicy)}
                   {menuItem("Packages Policy…", <CodeSandboxOutlined style={{ fontSize: 12 }} />, openCreatePackagesPolicy)}
                   {menuItem("Network Rule…", <GlobalOutlined style={{ fontSize: 12 }} />, openCreateNetworkRule)}
+                  {menuItem("Contact…", <ContactsOutlined style={{ fontSize: 12 }} />, openCreateContact)}
                   {menuItem("Tag…", <TagsOutlined style={{ fontSize: 12 }} />, openCreateTag)}
                   {menuItem("Secret…", <KeyOutlined style={{ fontSize: 12 }} />, openCreateSecret)}
                 </>
@@ -4648,6 +4676,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Create Service…", <DeploymentUnitOutlined style={{ fontSize: 12 }} />, openCreateService)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "GATEWAY" &&
             menuItem("Create Gateway…", <NodeIndexOutlined style={{ fontSize: 12 }} />, openCreateGateway)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "CONTACT" &&
+            menuItem("Create Contact…", <ContactsOutlined style={{ fontSize: 12 }} />, openCreateContact)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "STREAMLIT" &&
             menuItem("Create Streamlit…", <AppstoreOutlined style={{ fontSize: 12 }} />, openCreateStreamlit)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "PIPE" &&
@@ -4790,6 +4820,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Resume", <PlayCircleOutlined style={{ fontSize: 12 }} />, resumeService)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "GATEWAY" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openGatewayProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "CONTACT" &&
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openContactProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STREAMLIT" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openStreamlitProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
@@ -4891,7 +4923,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Make Live", <CloudUploadOutlined style={{ fontSize: 12 }} />, makeNotebookLive, undefined, !featureFlags.snowparkNotebooks, "Snowpark & Notebooks is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "GATEWAY" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "MODEL MONITOR" && ctxMenu.objKind !== "DATASET" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && menuItem("View Definition", null, viewDefinition)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ICEBERG TABLE" && ctxMenu.objKind !== "HYBRID TABLE" && ctxMenu.objKind !== "EVENT TABLE" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "JOIN POLICY" && ctxMenu.objKind !== "PRIVACY POLICY" && ctxMenu.objKind !== "STORAGE LIFECYCLE POLICY" && ctxMenu.objKind !== "PASSWORD POLICY" && ctxMenu.objKind !== "SESSION POLICY" && ctxMenu.objKind !== "AGGREGATION POLICY" && ctxMenu.objKind !== "PROJECTION POLICY" && ctxMenu.objKind !== "AUTHENTICATION POLICY" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "GATEWAY" && ctxMenu.objKind !== "STREAMLIT" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "MODEL MONITOR" && ctxMenu.objKind !== "DATASET" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "AGENT" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && ctxMenu.objKind !== "SEMANTIC VIEW" && ctxMenu.objKind !== "VIEW" && ctxMenu.objKind !== "SEQUENCE" && ctxMenu.objKind !== "STREAM" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ICEBERG TABLE" && ctxMenu.objKind !== "HYBRID TABLE" && ctxMenu.objKind !== "EVENT TABLE" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "JOIN POLICY" && ctxMenu.objKind !== "PRIVACY POLICY" && ctxMenu.objKind !== "STORAGE LIFECYCLE POLICY" && ctxMenu.objKind !== "PASSWORD POLICY" && ctxMenu.objKind !== "SESSION POLICY" && ctxMenu.objKind !== "AGGREGATION POLICY" && ctxMenu.objKind !== "PROJECTION POLICY" && ctxMenu.objKind !== "AUTHENTICATION POLICY" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "GATEWAY" && ctxMenu.objKind !== "CONTACT" && ctxMenu.objKind !== "STREAMLIT" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "MODEL MONITOR" && ctxMenu.objKind !== "DATASET" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "AGENT" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && ctxMenu.objKind !== "SEMANTIC VIEW" && ctxMenu.objKind !== "VIEW" && ctxMenu.objKind !== "SEQUENCE" && ctxMenu.objKind !== "STREAM" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {/* Comparison diffs via GET_DDL, which image repositories, services,
               packages policies, and models don't support — exclude them so the
               diff view can't surface a GET_DDL error for a kind that has no DDL. */}
@@ -5831,6 +5863,24 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={gatewayPropsModal.schema}
           name={gatewayPropsModal.name}
           onClose={() => setGatewayPropsModal(null)}
+        />
+      )}
+
+      {createContactModal && (
+        <CreateContactModal
+          db={createContactModal.db}
+          schema={createContactModal.schema}
+          onClose={() => setCreateContactModal(null)}
+          onSuccess={() => refreshDatabaseByName(createContactModal.db, { schema: createContactModal.schema, kind: "CONTACT" })}
+        />
+      )}
+
+      {contactPropsModal && (
+        <ContactPropertiesModal
+          db={contactPropsModal.db}
+          schema={contactPropsModal.schema}
+          name={contactPropsModal.name}
+          onClose={() => setContactPropsModal(null)}
         />
       )}
 

@@ -16,6 +16,7 @@ import (
 	"thaw/internal/alert"
 	"thaw/internal/authenticationpolicy"
 	"thaw/internal/column"
+	"thaw/internal/contact"
 	"thaw/internal/cortexsearchservice"
 	"thaw/internal/datametricfunction"
 	"thaw/internal/dataset"
@@ -275,6 +276,18 @@ func (a *App) BuildCreateDatasetSql(database, schema string, cfg dataset.Dataset
 // BuildCreateGatewaySql returns the SQL for creating a Snowflake GATEWAY.
 func (a *App) BuildCreateGatewaySql(database, schema string, cfg gateway.GatewayConfig) (string, error) {
 	return gateway.BuildCreateGatewaySql(database, schema, cfg)
+}
+
+// BuildCreateContactSql returns the SQL for creating a Snowflake CONTACT.
+func (a *App) BuildCreateContactSql(database, schema string, cfg contact.ContactConfig) (string, error) {
+	return contact.BuildCreateContactSql(database, schema, cfg)
+}
+
+// FormatContactUsers renders the parenthesised, single-quoted USERS value list
+// `('u1', 'u2')` for a contact, exposed so the properties panel can build the
+// SET USERS clause without duplicating the quoting rules.
+func (a *App) FormatContactUsers(users []string) string {
+	return contact.FormatContactUsers(users)
 }
 
 // BuildCreateModelMonitorSql returns the SQL for creating a Snowflake MODEL

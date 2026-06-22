@@ -3237,6 +3237,7 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 		{fmt.Sprintf("SHOW IMAGE REPOSITORIES IN SCHEMA %s", q), "IMAGE REPOSITORY"},
 		{fmt.Sprintf("SHOW SERVICES IN SCHEMA %s", q), "SERVICE"},
 		{fmt.Sprintf("SHOW GATEWAYS IN SCHEMA %s", q), "GATEWAY"},
+		{fmt.Sprintf("SHOW CONTACTS IN SCHEMA %s", q), "CONTACT"},
 		{fmt.Sprintf("SHOW STREAMLITS IN SCHEMA %s", q), "STREAMLIT"},
 		{fmt.Sprintf("SHOW PROCEDURES IN SCHEMA %s", q), "PROCEDURE"},
 		{fmt.Sprintf("SHOW FUNCTIONS IN SCHEMA %s", q), "FUNCTION"},
