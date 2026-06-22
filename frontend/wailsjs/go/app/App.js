@@ -866,6 +866,10 @@ export function GetAllFunctionNames() {
   return window['go']['app']['App']['GetAllFunctionNames']();
 }
 
+export function GetAllTagReferences() {
+  return window['go']['app']['App']['GetAllTagReferences']();
+}
+
 export function GetAppInfo() {
   return window['go']['app']['App']['GetAppInfo']();
 }
@@ -896,6 +900,10 @@ export function GetCollations() {
 
 export function GetColumnComments(arg1, arg2, arg3) {
   return window['go']['app']['App']['GetColumnComments'](arg1, arg2, arg3);
+}
+
+export function GetColumnTagReferences(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['GetColumnTagReferences'](arg1, arg2, arg3, arg4);
 }
 
 export function GetCortexSearchServiceTags(arg1, arg2, arg3) {
@@ -1036,6 +1044,10 @@ export function GetObjectDependencies(arg1, arg2, arg3, arg4, arg5) {
 
 export function GetObjectProperties(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['GetObjectProperties'](arg1, arg2, arg3, arg4);
+}
+
+export function GetObjectTagReferences(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['app']['App']['GetObjectTagReferences'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function GetPasswordPolicyReferences(arg1, arg2, arg3) {
@@ -1374,6 +1386,10 @@ export function ListAIModels(arg1, arg2, arg3) {
   return window['go']['app']['App']['ListAIModels'](arg1, arg2, arg3);
 }
 
+export function ListAccountTags() {
+  return window['go']['app']['App']['ListAccountTags']();
+}
+
 export function ListApiIntegrations() {
   return window['go']['app']['App']['ListApiIntegrations']();
 }
@@ -1564,6 +1580,10 @@ export function ListSystemPythons() {
 
 export function ListUserFunctions(arg1) {
   return window['go']['app']['App']['ListUserFunctions'](arg1);
+}
+
+export function ListUserSchemas(arg1) {
+  return window['go']['app']['App']['ListUserSchemas'](arg1);
 }
 
 export function ListUsers() {
@@ -1846,6 +1866,10 @@ export function SetNotebookQueryWarehouse(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['SetNotebookQueryWarehouse'](arg1, arg2, arg3, arg4);
 }
 
+export function SetObjectTag(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['app']['App']['SetObjectTag'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function SetQueryLogEnabled(arg1) {
   return window['go']['app']['App']['SetQueryLogEnabled'](arg1);
 }
@@ -1924,6 +1948,10 @@ export function TestAIModel(arg1, arg2, arg3, arg4, arg5) {
 
 export function UninstallEnvPackage(arg1) {
   return window['go']['app']['App']['UninstallEnvPackage'](arg1);
+}
+
+export function UnsetObjectTag(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['UnsetObjectTag'](arg1, arg2, arg3, arg4);
 }
 
 export function UpdateERDesignerState(arg1, arg2) {

@@ -2299,6 +2299,47 @@ func (c *Client) ListSchemas(ctx context.Context, database string) ([]string, er
 	return c.queryStringSlice(ctx, fmt.Sprintf(`SHOW SCHEMAS IN DATABASE %s`, QuoteIdent(database)), 1)
 }
 
+// ListUserSchemas returns the user-managed schemas inside a database — i.e.
+// ListSchemas minus the per-database INFORMATION_SCHEMA, whose objects are
+// read-only system views that cannot be created, altered, dropped, or tagged.
+// Use this wherever the UI offers schemas as targets for object / DDL /
+// governance operations rather than as a raw catalog listing.
+func (c *Client) ListUserSchemas(ctx context.Context, database string) ([]string, error) {
+	schemas, err := c.ListSchemas(ctx, database)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]string, 0, len(schemas))
+	for _, s := range schemas {
+		if strings.EqualFold(s, "INFORMATION_SCHEMA") {
+			continue
+		}
+		filtered = append(filtered, s)
+	}
+	return filtered, nil
+}
+
+// GetObjectTableType returns the TABLE_TYPE of a relational object from
+// <database>.INFORMATION_SCHEMA.TABLES — e.g. "BASE TABLE", "VIEW",
+// "MATERIALIZED VIEW", "EXTERNAL TABLE". It is used to distinguish a view from a
+// table when an operation needs the right ALTER keyword (notably column tagging,
+// where a view column requires ALTER VIEW … ALTER COLUMN). Returns "" when the
+// object isn't found in INFORMATION_SCHEMA.TABLES.
+func (c *Client) GetObjectTableType(ctx context.Context, database, schema, name string) (string, error) {
+	query := fmt.Sprintf(
+		"SELECT TABLE_TYPE FROM %s.INFORMATION_SCHEMA.TABLES "+
+			"WHERE TABLE_SCHEMA = '%s' AND TABLE_NAME = '%s'",
+		QuoteIdent(database), EscapeStringLit(schema), EscapeStringLit(name))
+	vals, err := c.queryStringSlice(ctx, query, 0)
+	if err != nil {
+		return "", err
+	}
+	if len(vals) == 0 {
+		return "", nil
+	}
+	return vals[0], nil
+}
+
 // extractArgTypes parses the "arguments" column returned by SHOW PROCEDURES /
 // SHOW FUNCTIONS / SHOW DATA METRIC FUNCTIONS. The format is
 // "<name>(<types>) RETURN <return_type>", e.g.

@@ -19,6 +19,7 @@ import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
+import TagPropagationFields from "./TagPropagationFields";
 import type { tag as tagModels } from "../../../wailsjs/go/models";
 
 interface Props {
@@ -33,19 +34,6 @@ interface Props {
 // to the generated type only at the IPC boundary (`cfg as any`).
 type TagCfg = Omit<tagModels.TagConfig, "convertValues">;
 
-const ALLOWED_VALUES_SEQUENCE = "ALLOWED_VALUES_SEQUENCE";
-
-const PROPAGATE_OPTIONS = [
-  { value: "", label: "Disabled (no propagation)" },
-  { value: "ON_DEPENDENCY_AND_DATA_MOVEMENT", label: "On dependency and data movement" },
-  { value: "ON_DEPENDENCY", label: "On dependency only" },
-  { value: "ON_DATA_MOVEMENT", label: "On data movement only" },
-];
-
-// How ON_CONFLICT is expressed: omit it, use the ALLOWED_VALUES_SEQUENCE
-// keyword, or pin a fixed string value.
-type ConflictMode = "none" | "sequence" | "value";
-
 export default function CreateTagModal({ db, schema, onClose, onSuccess }: Props) {
   const [cfg, setCfg] = useState<TagCfg>({
     name: "",
@@ -57,18 +45,6 @@ export default function CreateTagModal({ db, schema, onClose, onSuccess }: Props
     onConflict: "",
     comment: "",
   });
-
-  // ON_CONFLICT mode drives the UI; the resulting cfg.onConflict is "" (none),
-  // the ALLOWED_VALUES_SEQUENCE keyword, or the free-form fixed value.
-  const [conflictMode, setConflictMode] = useState<ConflictMode>("none");
-  const [conflictValue, setConflictValue] = useState("");
-
-  const applyConflict = (mode: ConflictMode, value: string) => {
-    setConflictMode(mode);
-    setConflictValue(value);
-    const oc = mode === "sequence" ? ALLOWED_VALUES_SEQUENCE : mode === "value" ? value : "";
-    set("onConflict", oc);
-  };
 
   const quotedIdentifiersIgnoreCase = useQuotedIdentifiers();
   const preview = useSqlPreview(
@@ -160,50 +136,13 @@ export default function CreateTagModal({ db, schema, onClose, onSuccess }: Props
             key: "propagation",
             label: "Propagation (tag lineage)",
             children: (
-              <>
-                <Form.Item
-                  label="Propagate"
-                  style={itemStyle}
-                  help="Automatically propagate this tag from source objects to target objects."
-                >
-                  <Select
-                    value={cfg.propagate}
-                    onChange={(v) => {
-                      set("propagate", v);
-                      // ON_CONFLICT only applies alongside PROPAGATE — reset it
-                      // when propagation is disabled.
-                      if (!v) applyConflict("none", "");
-                    }}
-                    options={PROPAGATE_OPTIONS}
-                  />
-                </Form.Item>
-
-                {cfg.propagate && (
-                  <Form.Item
-                    label="On conflict"
-                    style={itemStyle}
-                    help="How to resolve conflicts between propagated tag values."
-                  >
-                    <Select
-                      value={conflictMode}
-                      onChange={(m) => applyConflict(m, conflictValue)}
-                      options={[
-                        { value: "none", label: "Default (no override)" },
-                        { value: "sequence", label: "By allowed-values order (ALLOWED_VALUES_SEQUENCE)" },
-                        { value: "value", label: "Fixed value…" },
-                      ]}
-                    />
-                    {conflictMode === "value" && (
-                      <Input
-                        style={{ marginTop: 8 }}
-                        value={conflictValue}
-                        onChange={(e) => applyConflict("value", e.target.value)}
-                        placeholder="conflict value"
-                      />
-                    )}
-                  </Form.Item>
-                )}
-              </>
+              <TagPropagationFields
+                propagate={cfg.propagate}
+                onConflict={cfg.onConflict}
+                onChange={({ propagate, onConflict }) =>
+                  setCfg((prev) => ({ ...prev, propagate, onConflict }))}
+                itemStyle={itemStyle}
+              />
             ),
           }]}
         />

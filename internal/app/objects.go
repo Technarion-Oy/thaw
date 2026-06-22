@@ -50,6 +50,17 @@ func (a *App) ListSchemas(database string) ([]string, error) {
 	return a.client.ListSchemas(a.ctx, database)
 }
 
+// ListUserSchemas returns the user-managed schemas in the given database — all
+// schemas except the read-only INFORMATION_SCHEMA. Use it when offering schemas
+// as targets for object / DDL / governance operations (e.g. the Apply-tag
+// picker) rather than as a raw catalog list.
+func (a *App) ListUserSchemas(database string) ([]string, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return a.client.ListUserSchemas(a.ctx, database)
+}
+
 // ListFileFormats returns all file formats in the given schema.
 func (a *App) ListFileFormats(database, schema string) ([]string, error) {
 	if a.client == nil {

@@ -167,3 +167,106 @@ func TestBuildCreateTagSqlPlaceholder(t *testing.T) {
 		t.Errorf("expected placeholder name, got:\n%s", got)
 	}
 }
+
+func TestBuildAlterObjectTagSql(t *testing.T) {
+	const tagFQN = `"DB"."SC"."PII"`
+	tests := []struct {
+		name  string
+		ref   ObjectTagRef
+		value string
+		unset bool
+		want  string
+	}{
+		{
+			name:  "table set",
+			ref:   ObjectTagRef{Domain: "TABLE", Database: "DB", Schema: "SC", Name: "T"},
+			value: "true",
+			want:  `ALTER TABLE "DB"."SC"."T" SET TAG "DB"."SC"."PII" = 'true';`,
+		},
+		{
+			name:  "table unset",
+			ref:   ObjectTagRef{Domain: "TABLE", Database: "DB", Schema: "SC", Name: "T"},
+			unset: true,
+			want:  `ALTER TABLE "DB"."SC"."T" UNSET TAG "DB"."SC"."PII";`,
+		},
+		{
+			name:  "column set (table parent, default)",
+			ref:   ObjectTagRef{Domain: "COLUMN", Database: "DB", Schema: "SC", Name: "T", Column: "EMAIL"},
+			value: "high",
+			want:  `ALTER TABLE "DB"."SC"."T" ALTER COLUMN "EMAIL" SET TAG "DB"."SC"."PII" = 'high';`,
+		},
+		{
+			name:  "column set (explicit table parent)",
+			ref:   ObjectTagRef{Domain: "COLUMN", Database: "DB", Schema: "SC", Name: "T", Column: "EMAIL", ParentKind: "TABLE"},
+			value: "high",
+			want:  `ALTER TABLE "DB"."SC"."T" ALTER COLUMN "EMAIL" SET TAG "DB"."SC"."PII" = 'high';`,
+		},
+		{
+			name:  "column set (view parent → ALTER VIEW)",
+			ref:   ObjectTagRef{Domain: "COLUMN", Database: "DB", Schema: "SC", Name: "V", Column: "EMAIL", ParentKind: "view"},
+			value: "high",
+			want:  `ALTER VIEW "DB"."SC"."V" ALTER COLUMN "EMAIL" SET TAG "DB"."SC"."PII" = 'high';`,
+		},
+		{
+			name:  "warehouse set (account-level)",
+			ref:   ObjectTagRef{Domain: "WAREHOUSE", Name: "WH"},
+			value: "eng",
+			want:  `ALTER WAREHOUSE "WH" SET TAG "DB"."SC"."PII" = 'eng';`,
+		},
+		{
+			name:  "database set",
+			ref:   ObjectTagRef{Domain: "DATABASE", Database: "DB", Name: "DB"},
+			value: "prod",
+			want:  `ALTER DATABASE "DB" SET TAG "DB"."SC"."PII" = 'prod';`,
+		},
+		{
+			name:  "schema set",
+			ref:   ObjectTagRef{Domain: "SCHEMA", Database: "DB", Name: "SC"},
+			value: "x",
+			want:  `ALTER SCHEMA "DB"."SC" SET TAG "DB"."SC"."PII" = 'x';`,
+		},
+		{
+			name:  "account set",
+			ref:   ObjectTagRef{Domain: "ACCOUNT"},
+			value: "y",
+			want:  `ALTER ACCOUNT SET TAG "DB"."SC"."PII" = 'y';`,
+		},
+		{
+			name:  "value with quote is escaped",
+			ref:   ObjectTagRef{Domain: "TABLE", Database: "DB", Schema: "SC", Name: "T"},
+			value: "o'brien",
+			want:  `ALTER TABLE "DB"."SC"."T" SET TAG "DB"."SC"."PII" = 'o''brien';`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := BuildAlterObjectTagSql(tt.ref, tagFQN, tt.value, tt.unset)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("got:\n%s\nwant:\n%s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildAlterObjectTagSqlErrors(t *testing.T) {
+	cases := []struct {
+		name string
+		ref  ObjectTagRef
+		fqn  string
+	}{
+		{"missing domain", ObjectTagRef{Name: "T"}, `"DB"."SC"."PII"`},
+		{"missing tag", ObjectTagRef{Domain: "TABLE", Name: "T"}, ""},
+		{"column without column name", ObjectTagRef{Domain: "COLUMN", Database: "DB", Schema: "SC", Name: "T"}, `"DB"."SC"."PII"`},
+		{"table without name", ObjectTagRef{Domain: "TABLE"}, `"DB"."SC"."PII"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := BuildAlterObjectTagSql(tc.ref, tc.fqn, "v", false); err == nil {
+				t.Errorf("expected an error, got nil")
+			}
+		})
+	}
+}

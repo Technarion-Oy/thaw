@@ -12,12 +12,13 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Modal, Spin, Button, Input, Space, Typography, Alert, Tag, Tooltip, Table, Empty,
+  Modal, Spin, Button, Input, Space, Typography, Alert, Tag, Tooltip, Table, Empty, Form,
 } from "antd";
 import {
   TagsOutlined, EditOutlined, CheckOutlined, CloseOutlined, PlusOutlined, ReloadOutlined,
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterTag, GetTagReferences } from "../../../wailsjs/go/app/App";
+import TagPropagationFields, { ALLOWED_VALUES_SEQUENCE } from "./TagPropagationFields";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -161,6 +162,13 @@ export default function TagPropertiesModal({ db, schema, name, onClose }: Props)
   const [busy, setBusy] = useState(false);
   const [newValue, setNewValue] = useState("");
 
+  // Propagation drafts (PROPAGATE / ON_CONFLICT). Initialized from the loaded
+  // SHOW TAGS values and resynced on every reload; Apply is enabled only when a
+  // draft differs from what is currently set, so the user can't accidentally
+  // clobber propagation by clicking Apply without making a change.
+  const [propDraft, setPropDraft] = useState("");
+  const [conflictDraft, setConflictDraft] = useState("");
+
   // References (where the tag is applied) — loaded on demand because the
   // ACCOUNT_USAGE view is slow and may be restricted.
   const [refs, setRefs] = useState<snowflake.QueryResult | null>(null);
@@ -230,8 +238,44 @@ export default function TagPropertiesModal({ db, schema, name, onClose }: Props)
   const comment = find("comment");
   const allowedValues = parseAllowedValues(find("allowed_values"));
 
+  // Current propagation settings, as reported by SHOW TAGS. The propagate column
+  // is only meaningful when it names one of the three modes; anything else (or a
+  // missing column on older accounts) is treated as disabled. ON_CONFLICT is
+  // reported as a bare keyword (ALLOWED_VALUES_SEQUENCE) or a quoted value.
+  const propModes = ["ON_DEPENDENCY_AND_DATA_MOVEMENT", "ON_DEPENDENCY", "ON_DATA_MOVEMENT"];
+  const rawPropagate = find("propagate").trim().toUpperCase();
+  const currentPropagate = propModes.includes(rawPropagate) ? rawPropagate : "";
+  const currentConflict = currentPropagate ? find("on_conflict").trim() : "";
+
+  // Resync the propagation drafts whenever the loaded properties change.
+  useEffect(() => {
+    setPropDraft(currentPropagate);
+    setConflictDraft(currentConflict);
+  }, [currentPropagate, currentConflict]);
+
+  const propagationDirty = propDraft !== currentPropagate || conflictDraft !== currentConflict;
+
+  const applyPropagation = async () => {
+    if (propDraft === "") {
+      // UNSET PROPAGATE also clears any ON_CONFLICT.
+      await runAlter("UNSET PROPAGATE", "Set propagation");
+      return;
+    }
+    let clause = `SET PROPAGATE = ${propDraft}`;
+    if (conflictDraft !== "") {
+      clause += conflictDraft === ALLOWED_VALUES_SEQUENCE
+        ? ` ON_CONFLICT = ${ALLOWED_VALUES_SEQUENCE}`
+        : ` ON_CONFLICT = ${q1(conflictDraft)}`;
+    }
+    await runAlter(clause, "Set propagation");
+    // Clear a previously-set ON_CONFLICT the user removed while keeping PROPAGATE.
+    if (conflictDraft === "" && currentConflict !== "") {
+      await runAlter("UNSET ON_CONFLICT", "Clear on-conflict");
+    }
+  };
+
   // Keys handled by dedicated sections above the generic Properties table.
-  const handledKeys = new Set(["comment", "allowed_values"]);
+  const handledKeys = new Set(["comment", "allowed_values", "propagate", "on_conflict"]);
 
   return (
     <Modal
@@ -321,6 +365,41 @@ export default function TagPropertiesModal({ db, schema, name, onClose }: Props)
             {allowedValues.length > 0 && (
               <Button size="small" onClick={() => runAlter("UNSET ALLOWED_VALUES", "Unset allowed values")} loading={busy}>
                 Clear all
+              </Button>
+            )}
+          </Space>
+
+          <div style={SECTION_HEAD}>Propagation (tag lineage)</div>
+          <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 8 }}>
+            Automatically propagate this tag from source objects to target objects, and choose
+            how to resolve conflicts between propagated values.
+          </Text>
+          <Form layout="vertical" size="small" component="div">
+            <TagPropagationFields
+              propagate={propDraft}
+              onConflict={conflictDraft}
+              onChange={({ propagate, onConflict }) => { setPropDraft(propagate); setConflictDraft(onConflict); }}
+              itemStyle={{ marginBottom: 12 }}
+              disabled={busy}
+            />
+          </Form>
+          <Space>
+            <Button
+              size="small"
+              type="primary"
+              onClick={applyPropagation}
+              loading={busy}
+              disabled={!propagationDirty}
+            >
+              Apply
+            </Button>
+            {propagationDirty && (
+              <Button
+                size="small"
+                onClick={() => { setPropDraft(currentPropagate); setConflictDraft(currentConflict); }}
+                disabled={busy}
+              >
+                Reset
               </Button>
             )}
           </Space>

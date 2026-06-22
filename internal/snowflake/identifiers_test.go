@@ -33,6 +33,27 @@ func TestEscapeStringLit(t *testing.T) {
 	}
 }
 
+func TestFirstNonEmpty(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []string
+		want string
+	}{
+		{"first wins", []string{"a", "b"}, "a"},
+		{"skips empty", []string{"", "b"}, "b"},
+		{"skips whitespace-only", []string{"  ", "\t", "x"}, "x"},
+		{"all blank", []string{"", "  "}, ""},
+		{"none", nil, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := FirstNonEmpty(tt.in...); got != tt.want {
+				t.Errorf("FirstNonEmpty(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestEscapeTextLit(t *testing.T) {
 	// EscapeTextLit doubles both quotes and backslashes so free-text (comments)
 	// containing a literal backslash survives Snowflake's escape processing.

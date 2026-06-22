@@ -210,6 +210,18 @@ func HasNonBlankToken(tokens []string) bool {
 	return false
 }
 
+// FirstNonEmpty returns the first argument that is non-empty after trimming, or
+// "" when every argument is blank. It is the SQL-builder analog of a COALESCE
+// over identifier/name parts.
+func FirstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 // EscapeLikePattern escapes LIKE-special characters (% and _) in s so that
 // the string matches literally when used in a SHOW … LIKE '<pattern>' clause.
 // Single-quotes are also doubled (same as EscapeStringLit).
