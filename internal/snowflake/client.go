@@ -3236,6 +3236,7 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 		{fmt.Sprintf("SHOW NETWORK RULES IN SCHEMA %s", q), "NETWORK RULE"},
 		{fmt.Sprintf("SHOW IMAGE REPOSITORIES IN SCHEMA %s", q), "IMAGE REPOSITORY"},
 		{fmt.Sprintf("SHOW SERVICES IN SCHEMA %s", q), "SERVICE"},
+		{fmt.Sprintf("SHOW GATEWAYS IN SCHEMA %s", q), "GATEWAY"},
 		{fmt.Sprintf("SHOW STREAMLITS IN SCHEMA %s", q), "STREAMLIT"},
 		{fmt.Sprintf("SHOW PROCEDURES IN SCHEMA %s", q), "PROCEDURE"},
 		{fmt.Sprintf("SHOW FUNCTIONS IN SCHEMA %s", q), "FUNCTION"},
@@ -3673,7 +3674,7 @@ func (c *Client) GetObjectDDL(ctx context.Context, database, schema, kind, name,
 	// invalid query (a packages-policy GET_DDL fails with "Cannot initialize
 	// Snowflake Metadata. Dictionary unavailable").
 	switch strings.ToUpper(strings.TrimSpace(kind)) {
-	case "IMAGE REPOSITORY", "SERVICE", "PACKAGES POLICY", "MODEL", "MODEL MONITOR", "DATASET", "CORTEX SEARCH SERVICE", "EXTERNAL AGENT", "MCP SERVER":
+	case "IMAGE REPOSITORY", "SERVICE", "GATEWAY", "PACKAGES POLICY", "MODEL", "MODEL MONITOR", "DATASET", "CORTEX SEARCH SERVICE", "EXTERNAL AGENT", "MCP SERVER":
 		return "", fmt.Errorf("GET_DDL does not support %s objects", kind)
 	}
 

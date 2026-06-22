@@ -1819,6 +1819,31 @@ export namespace fnmeta {
 
 }
 
+export namespace gateway {
+	
+	export class GatewayConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    specification: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new GatewayConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.specification = source["specification"];
+	    }
+	}
+
+}
+
 export namespace gitrepo {
 	
 	export class BranchInfo {

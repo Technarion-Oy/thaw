@@ -66,6 +66,10 @@ export function AlterFunction(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['AlterFunction'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function AlterGateway(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterGateway'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterHybridTable(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterHybridTable'](arg1, arg2, arg3, arg4);
 }
@@ -312,6 +316,10 @@ export function BuildCreateFileFormatSql(arg1, arg2, arg3) {
 
 export function BuildCreateFunctionSql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateFunctionSql'](arg1, arg2, arg3);
+}
+
+export function BuildCreateGatewaySql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateGatewaySql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateGitRepositorySql(arg1, arg2, arg3) {
@@ -676,6 +684,10 @@ export function DescribeDbtProject(arg1, arg2, arg3) {
 
 export function DescribeExternalFunction(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['DescribeExternalFunction'](arg1, arg2, arg3, arg4);
+}
+
+export function DescribeGateway(arg1, arg2, arg3) {
+  return window['go']['app']['App']['DescribeGateway'](arg1, arg2, arg3);
 }
 
 export function DescribeMCPServer(arg1, arg2, arg3) {

@@ -73,6 +73,7 @@ import {
   GlobalOutlined,
   ContainerOutlined,
   DeploymentUnitOutlined,
+  NodeIndexOutlined,
   AppstoreOutlined,
   GoldOutlined,
   MergeCellsOutlined,
@@ -211,6 +212,8 @@ import CreateSemanticViewModal from "../semanticview/CreateSemanticViewModal";
 import SemanticViewPropertiesModal from "../semanticview/SemanticViewPropertiesModal";
 import CreateServiceModal from "../service/CreateServiceModal";
 import ServicePropertiesModal from "../service/ServicePropertiesModal";
+import CreateGatewayModal from "../gateway/CreateGatewayModal";
+import GatewayPropertiesModal from "../gateway/GatewayPropertiesModal";
 import CreateStreamlitModal from "../streamlit/CreateStreamlitModal";
 import StreamlitPropertiesModal from "../streamlit/StreamlitPropertiesModal";
 import CreatePipeModal from "../pipe/CreatePipeModal";
@@ -254,6 +257,7 @@ const KIND_LABEL: Record<string, string> = {
   "NETWORK RULE": "Network Rules",
   "IMAGE REPOSITORY": "Image Repositories",
   SERVICE:       "Services",
+  GATEWAY:       "Gateways",
   STREAMLIT:     "Streamlits",
   FUNCTION:      "Functions",
   "EXTERNAL FUNCTION": "External Functions",
@@ -279,7 +283,7 @@ const KIND_LABEL: Record<string, string> = {
   "SEMANTIC VIEW": "Semantic Views",
 };
 
-const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE", "FUNCTION", "EXTERNAL FUNCTION", "DATA METRIC FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "JOIN POLICY", "PRIVACY POLICY", "STORAGE LIFECYCLE POLICY", "PASSWORD POLICY", "SESSION POLICY", "AGGREGATION POLICY", "PROJECTION POLICY", "AUTHENTICATION POLICY", "PACKAGES POLICY", "NETWORK RULE", "IMAGE REPOSITORY", "SERVICE", "STREAMLIT", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT", "MODEL", "MODEL MONITOR", "DATASET", "CORTEX SEARCH SERVICE", "AGENT", "EXTERNAL AGENT", "MCP SERVER", "SEMANTIC VIEW"];
+const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE", "FUNCTION", "EXTERNAL FUNCTION", "DATA METRIC FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "JOIN POLICY", "PRIVACY POLICY", "STORAGE LIFECYCLE POLICY", "PASSWORD POLICY", "SESSION POLICY", "AGGREGATION POLICY", "PROJECTION POLICY", "AUTHENTICATION POLICY", "PACKAGES POLICY", "NETWORK RULE", "IMAGE REPOSITORY", "SERVICE", "GATEWAY", "STREAMLIT", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT", "MODEL", "MODEL MONITOR", "DATASET", "CORTEX SEARCH SERVICE", "AGENT", "EXTERNAL AGENT", "MCP SERVER", "SEMANTIC VIEW"];
 
 const kindIcon = (kind: string) => objectIcon(kind);
 
@@ -549,7 +553,7 @@ function ObjTooltip({ cacheKey, db, schema, kind, name, args, children }: {
     // policies, so the call would always fail and emit gosnowflake driver
     // error-log noise on every hover. Skip the fetch entirely — with content
     // left null the tooltip simply doesn't show.
-    if (kind === "IMAGE REPOSITORY" || kind === "SERVICE" || kind === "PACKAGES POLICY" || kind === "MODEL" || kind === "MODEL MONITOR" || kind === "DATASET" || kind === "CORTEX SEARCH SERVICE" || kind === "EXTERNAL AGENT" || kind === "MCP SERVER") return;
+    if (kind === "IMAGE REPOSITORY" || kind === "SERVICE" || kind === "GATEWAY" || kind === "PACKAGES POLICY" || kind === "MODEL" || kind === "MODEL MONITOR" || kind === "DATASET" || kind === "CORTEX SEARCH SERVICE" || kind === "EXTERNAL AGENT" || kind === "MCP SERVER") return;
     const fresh = getCached();
     if (fresh !== null) {
       if (content !== fresh) setContent(fresh);
@@ -770,6 +774,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [semanticViewPropsModal, setSemanticViewPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createServiceModal, setCreateServiceModal] = useState<{ db: string; schema: string } | null>(null);
   const [servicePropsModal, setServicePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [createGatewayModal, setCreateGatewayModal] = useState<{ db: string; schema: string } | null>(null);
+  const [gatewayPropsModal, setGatewayPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createStreamlitModal, setCreateStreamlitModal] = useState<{ db: string; schema: string } | null>(null);
   const [streamlitPropsModal, setStreamlitPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createPipeModal, setCreatePipeModal] = useState<{ db: string; schema: string } | null>(null);
@@ -2862,6 +2868,25 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setServicePropsModal({ db, schema, name });
   };
 
+  const openCreateGateway = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    setCtxMenu(null);
+    setCreateGatewayModal({ db, schema });
+  };
+
+  const openGatewayProperties = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    setGatewayPropsModal({ db, schema, name });
+  };
+
   const openCreateStreamlit = () => {
     if (!ctxMenu) return;
     const parts = ctxMenu.nodeKey.split(":");
@@ -3295,6 +3320,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       case "MCP SERVER":  sql = `DROP MCP SERVER ${fullName};`; break;
       case "SEMANTIC VIEW": sql = `DROP SEMANTIC VIEW ${fullName};`; break;
       case "SERVICE":     sql = `DROP SERVICE ${fullName};`; break;
+      case "GATEWAY":     sql = `DROP GATEWAY ${fullName};`; break;
       case "STREAMLIT":   sql = `DROP STREAMLIT ${fullName};`; break;
       case "SEQUENCE":    sql = `DROP SEQUENCE ${fullName};`; break;
       case "STAGE":       sql = `DROP STAGE ${fullName};`; break;
@@ -3966,6 +3992,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         case "MCP SERVER":  return `DROP MCP SERVER ${fullName};`;
         case "SEMANTIC VIEW": return `DROP SEMANTIC VIEW ${fullName};`;
         case "SERVICE":     return `DROP SERVICE ${fullName};`;
+        case "GATEWAY":     return `DROP GATEWAY ${fullName};`;
         case "STREAMLIT":   return `DROP STREAMLIT ${fullName};`;
         case "SEQUENCE":    return `DROP SEQUENCE ${fullName};`;
         case "STAGE":       return `DROP STAGE ${fullName};`;
@@ -4519,6 +4546,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                   {menuItem("DBT Project…", <BuildOutlined style={{ fontSize: 12 }} />, openCreateDbtProject, undefined, !featureFlags.dbtProjectBrowser, "DBT Project Browser is disabled. Enable it under View → Enabled Features…")}
                   {menuItem("Image Repository…", <ContainerOutlined style={{ fontSize: 12 }} />, openCreateImageRepository)}
                   {menuItem("Service…", <DeploymentUnitOutlined style={{ fontSize: 12 }} />, openCreateService)}
+                  {menuItem("Gateway…", <NodeIndexOutlined style={{ fontSize: 12 }} />, openCreateGateway)}
                   {menuItem("Streamlit…", <AppstoreOutlined style={{ fontSize: 12 }} />, openCreateStreamlit)}
                 </>
               ), 1)}
@@ -4618,6 +4646,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Create Image Repository…", <ContainerOutlined style={{ fontSize: 12 }} />, openCreateImageRepository)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "SERVICE" &&
             menuItem("Create Service…", <DeploymentUnitOutlined style={{ fontSize: 12 }} />, openCreateService)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "GATEWAY" &&
+            menuItem("Create Gateway…", <NodeIndexOutlined style={{ fontSize: 12 }} />, openCreateGateway)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "STREAMLIT" &&
             menuItem("Create Streamlit…", <AppstoreOutlined style={{ fontSize: 12 }} />, openCreateStreamlit)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "PIPE" &&
@@ -4758,6 +4788,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Suspend", <PauseCircleOutlined style={{ fontSize: 12 }} />, suspendService)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "SERVICE" &&
             menuItem("Resume", <PlayCircleOutlined style={{ fontSize: 12 }} />, resumeService)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "GATEWAY" &&
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openGatewayProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STREAMLIT" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openStreamlitProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
@@ -4858,19 +4890,19 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "NOTEBOOK" &&
             menuItem("Make Live", <CloudUploadOutlined style={{ fontSize: 12 }} />, makeNotebookLive, undefined, !featureFlags.snowparkNotebooks, "Snowpark & Notebooks is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "MODEL MONITOR" && ctxMenu.objKind !== "DATASET" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && menuItem("View Definition", null, viewDefinition)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ICEBERG TABLE" && ctxMenu.objKind !== "HYBRID TABLE" && ctxMenu.objKind !== "EVENT TABLE" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "JOIN POLICY" && ctxMenu.objKind !== "PRIVACY POLICY" && ctxMenu.objKind !== "STORAGE LIFECYCLE POLICY" && ctxMenu.objKind !== "PASSWORD POLICY" && ctxMenu.objKind !== "SESSION POLICY" && ctxMenu.objKind !== "AGGREGATION POLICY" && ctxMenu.objKind !== "PROJECTION POLICY" && ctxMenu.objKind !== "AUTHENTICATION POLICY" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "STREAMLIT" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "MODEL MONITOR" && ctxMenu.objKind !== "DATASET" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "AGENT" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && ctxMenu.objKind !== "SEMANTIC VIEW" && ctxMenu.objKind !== "VIEW" && ctxMenu.objKind !== "SEQUENCE" && ctxMenu.objKind !== "STREAM" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "GATEWAY" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "MODEL MONITOR" && ctxMenu.objKind !== "DATASET" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && menuItem("View Definition", null, viewDefinition)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ICEBERG TABLE" && ctxMenu.objKind !== "HYBRID TABLE" && ctxMenu.objKind !== "EVENT TABLE" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "JOIN POLICY" && ctxMenu.objKind !== "PRIVACY POLICY" && ctxMenu.objKind !== "STORAGE LIFECYCLE POLICY" && ctxMenu.objKind !== "PASSWORD POLICY" && ctxMenu.objKind !== "SESSION POLICY" && ctxMenu.objKind !== "AGGREGATION POLICY" && ctxMenu.objKind !== "PROJECTION POLICY" && ctxMenu.objKind !== "AUTHENTICATION POLICY" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "GATEWAY" && ctxMenu.objKind !== "STREAMLIT" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "MODEL MONITOR" && ctxMenu.objKind !== "DATASET" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "AGENT" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && ctxMenu.objKind !== "SEMANTIC VIEW" && ctxMenu.objKind !== "VIEW" && ctxMenu.objKind !== "SEQUENCE" && ctxMenu.objKind !== "STREAM" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {/* Comparison diffs via GET_DDL, which image repositories, services,
               packages policies, and models don't support — exclude them so the
               diff view can't surface a GET_DDL error for a kind that has no DDL. */}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "MODEL MONITOR" && ctxMenu.objKind !== "DATASET" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" &&
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "GATEWAY" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "MODEL MONITOR" && ctxMenu.objKind !== "DATASET" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" &&
             menuItem("Select for Comparison", <DiffOutlined style={{ fontSize: 12 }} />, selectObjForComparison)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "MODEL MONITOR" && ctxMenu.objKind !== "DATASET" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && pendingDiff !== null &&
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "GATEWAY" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "MODEL MONITOR" && ctxMenu.objKind !== "DATASET" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && pendingDiff !== null &&
             menuItem(`Compare with: ${pendingDiff.label}`, <DiffOutlined style={{ fontSize: 12, color: "var(--accent)" }} />, compareObjWith)}
           {ctxMenu.nodeType === "obj" &&
             (ctxMenu.objKind === "VIEW" || ctxMenu.objKind === "PROCEDURE" || ctxMenu.objKind === "FUNCTION" || ctxMenu.objKind === "EXTERNAL FUNCTION") &&
             menuItem("View Dependencies…", <ShareAltOutlined style={{ fontSize: 12 }} />, viewDependencies)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "AGENT" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && ctxMenu.objKind !== "MODEL MONITOR" && ctxMenu.objKind !== "DATASET" &&
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "GATEWAY" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "AGENT" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && ctxMenu.objKind !== "MODEL MONITOR" && ctxMenu.objKind !== "DATASET" &&
             menuItem("Rename…", <EditOutlined style={{ fontSize: 12 }} />, renameObject)}
           {ctxMenu.nodeType === "obj" && <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />}
           {ctxMenu.nodeType === "obj" && menuItem("Delete…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, deleteObject, "#f85149")}
@@ -5781,6 +5813,24 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={servicePropsModal.schema}
           name={servicePropsModal.name}
           onClose={() => setServicePropsModal(null)}
+        />
+      )}
+
+      {createGatewayModal && (
+        <CreateGatewayModal
+          db={createGatewayModal.db}
+          schema={createGatewayModal.schema}
+          onClose={() => setCreateGatewayModal(null)}
+          onSuccess={() => refreshDatabaseByName(createGatewayModal.db, { schema: createGatewayModal.schema, kind: "GATEWAY" })}
+        />
+      )}
+
+      {gatewayPropsModal && (
+        <GatewayPropertiesModal
+          db={gatewayPropsModal.db}
+          schema={gatewayPropsModal.schema}
+          name={gatewayPropsModal.name}
+          onClose={() => setGatewayPropsModal(null)}
         />
       )}
 

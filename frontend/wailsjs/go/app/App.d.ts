@@ -20,6 +20,7 @@ import {externalfunction} from '../models';
 import {externaltable} from '../models';
 import {fileformat} from '../models';
 import {udf} from '../models';
+import {gateway} from '../models';
 import {snowgitrepo} from '../models';
 import {hybridtable} from '../models';
 import {icebergtable} from '../models';
@@ -100,6 +101,8 @@ export function AlterExternalFunction(arg1:string,arg2:string,arg3:string,arg4:s
 export function AlterExternalTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterFunction(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
+
+export function AlterGateway(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterHybridTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -224,6 +227,8 @@ export function BuildCreateExternalTableSql(arg1:string,arg2:string,arg3:externa
 export function BuildCreateFileFormatSql(arg1:string,arg2:string,arg3:fileformat.FileFormatConfig):Promise<string>;
 
 export function BuildCreateFunctionSql(arg1:string,arg2:string,arg3:udf.FunctionConfig):Promise<string>;
+
+export function BuildCreateGatewaySql(arg1:string,arg2:string,arg3:gateway.GatewayConfig):Promise<string>;
 
 export function BuildCreateGitRepositorySql(arg1:string,arg2:string,arg3:snowgitrepo.GitRepositoryConfig):Promise<string>;
 
@@ -406,6 +411,8 @@ export function DescribeDataMetricFunction(arg1:string,arg2:string,arg3:string,a
 export function DescribeDbtProject(arg1:string,arg2:string,arg3:string):Promise<Array<snowflake.PropertyPair>>;
 
 export function DescribeExternalFunction(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.QueryResult>;
+
+export function DescribeGateway(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function DescribeMCPServer(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
