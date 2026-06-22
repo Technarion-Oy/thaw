@@ -741,6 +741,39 @@ export namespace config {
 
 }
 
+export namespace contact {
+	
+	export class ContactConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    method: string;
+	    users: string[];
+	    email: string;
+	    url: string;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ContactConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.method = source["method"];
+	        this.users = source["users"];
+	        this.email = source["email"];
+	        this.url = source["url"];
+	        this.comment = source["comment"];
+	    }
+	}
+
+}
+
 export namespace cortexsearchservice {
 	
 	export class CortexSearchServiceConfig {

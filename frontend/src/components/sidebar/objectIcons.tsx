@@ -83,6 +83,7 @@ import {
   FileSearchOutlined,
   PartitionOutlined,
   ApartmentOutlined,
+  ContactsOutlined,
 } from "@ant-design/icons";
 
 // ── CSS variable name per kind ─────────────────────────────────────────────
@@ -112,6 +113,7 @@ const KIND_VAR: Record<string, string> = {
   "IMAGE REPOSITORY": "--icon-imagerepository",
   SERVICE:           "--icon-service",
   GATEWAY:           "--icon-gateway",
+  CONTACT:           "--icon-contact",
   STREAMLIT:         "--icon-streamlit",
   FUNCTION:          "--icon-function",
   "EXTERNAL FUNCTION": "--icon-externalfunction",
@@ -164,6 +166,7 @@ const KIND_ICON: Record<string, React.ComponentType<{ style?: React.CSSPropertie
   "IMAGE REPOSITORY": ContainerOutlined,
   SERVICE:          DeploymentUnitOutlined,
   GATEWAY:          NodeIndexOutlined,
+  CONTACT:          ContactsOutlined,
   STREAMLIT:        AppstoreOutlined,
   FUNCTION:         FunctionOutlined,
   "EXTERNAL FUNCTION": ApiOutlined,
