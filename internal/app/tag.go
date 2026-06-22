@@ -74,6 +74,12 @@ func (a *App) ListAccountTags() (*snowflake.QueryResult, error) {
 // governance privileges and has propagation latency, so very recent changes may
 // be missing. The scan is capped at maxTagReferenceRows; QueryResult.Truncated
 // reflects whether more references exist than were returned.
+//
+// The query asks for one row beyond the cap (LIMIT maxTagReferenceRows+1): if
+// that extra row comes back, the result is trimmed to the cap and marked
+// Truncated. This is needed because QueryResult.Truncated is only set by the
+// driver's own row-scan limit (maxQueryRows, far above this cap), so the
+// server-side LIMIT alone would never flag truncation.
 func (a *App) GetAllTagReferences() (*snowflake.QueryResult, error) {
 	if a.client == nil {
 		return nil, apperrors.ErrNotConnected
@@ -85,8 +91,16 @@ func (a *App) GetAllTagReferences() (*snowflake.QueryResult, error) {
 			"WHERE OBJECT_DELETED IS NULL "+
 			"ORDER BY TAG_NAME, OBJECT_DATABASE, OBJECT_SCHEMA, OBJECT_NAME, COLUMN_NAME "+
 			"LIMIT %d",
-		maxTagReferenceRows)
-	return a.client.QuerySingle(a.ctx, query)
+		maxTagReferenceRows+1)
+	res, err := a.client.QuerySingle(a.ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	if res != nil && len(res.Rows) > maxTagReferenceRows {
+		res.Rows = res.Rows[:maxTagReferenceRows]
+		res.Truncated = true
+	}
+	return res, nil
 }
 
 // SetObjectTag applies (or retags, with a new value) the tag identified by
@@ -135,9 +149,9 @@ func (a *App) alterObjectTag(ref tag.ObjectTagRef, tagDatabase, tagSchema, tagNa
 // args is the comma-separated parameter type list for callable objects
 // (procedures and functions, e.g. "NUMBER, VARCHAR"); it is required there
 // because the object name must carry the argument signature to resolve the
-// overload, and is ignored for every other domain. The EXTERNAL FUNCTION and
-// DATA METRIC FUNCTION kinds are normalized to the FUNCTION domain the table
-// function expects.
+// overload, and is ignored for every other domain. The object-browser kind is
+// folded onto the narrow domain set the table function accepts via
+// tagReferenceDomain (e.g. EXTERNAL FUNCTION → FUNCTION, ICEBERG TABLE → TABLE).
 //
 // The table function lives in the object database's INFORMATION_SCHEMA and takes
 // the object name as a string literal; the fully-qualified, double-quoted name is
@@ -147,13 +161,9 @@ func (a *App) GetObjectTagReferences(domain, database, schema, name, args string
 		return nil, apperrors.ErrNotConnected
 	}
 	fqn := snowflake.Qualify(database, schema, name)
-	d := strings.ToUpper(strings.TrimSpace(domain))
-	switch d {
-	case "FUNCTION", "EXTERNAL FUNCTION", "DATA METRIC FUNCTION":
-		// All function variants share the FUNCTION domain and need a signature.
-		fqn += "(" + args + ")"
-		d = "FUNCTION"
-	case "PROCEDURE":
+	d, callable := tagReferenceDomain(domain)
+	if callable {
+		// Procedures / functions need the argument signature to resolve the overload.
 		fqn += "(" + args + ")"
 	}
 	query := fmt.Sprintf(
@@ -169,19 +179,45 @@ func (a *App) GetObjectTagReferences(domain, database, schema, name, args string
 // GetColumnTagReferences returns the tags applied to every column of a table or
 // view via the INFORMATION_SCHEMA.TAG_REFERENCES_ALL_COLUMNS table function — the
 // no-latency, per-table companion to GetObjectTagReferences for column-level
-// tags. domain is the parent object's domain (TABLE or VIEW, and the other
-// column-bearing kinds Snowflake accepts). One row is returned per (column, tag).
+// tags. domain is the parent object's browser kind; tagReferenceDomain folds the
+// specialized table / view kinds (DYNAMIC TABLE, ICEBERG TABLE, MATERIALIZED
+// VIEW, …) onto the TABLE / VIEW domains the function accepts. One row is
+// returned per (column, tag).
 func (a *App) GetColumnTagReferences(domain, database, schema, name string) (*snowflake.QueryResult, error) {
 	if a.client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	fqn := snowflake.Qualify(database, schema, name)
+	d, _ := tagReferenceDomain(domain)
 	query := fmt.Sprintf(
 		"SELECT COLUMN_NAME, TAG_DATABASE, TAG_SCHEMA, TAG_NAME, TAG_VALUE "+
 			"FROM TABLE(%s.INFORMATION_SCHEMA.TAG_REFERENCES_ALL_COLUMNS('%s', '%s')) "+
 			"ORDER BY COLUMN_NAME, TAG_NAME",
 		snowflake.QuoteIdent(database),
 		snowflake.EscapeStringLit(fqn),
-		snowflake.EscapeStringLit(strings.ToUpper(domain)))
+		snowflake.EscapeStringLit(d))
 	return a.client.QuerySingle(a.ctx, query)
+}
+
+// tagReferenceDomain maps an object-browser SHOW kind to the object_domain that
+// the INFORMATION_SCHEMA.TAG_REFERENCES / TAG_REFERENCES_ALL_COLUMNS table
+// functions accept, which is a narrow set. The specialized table kinds (dynamic,
+// iceberg, hybrid, event, external) fold onto TABLE and the materialized view
+// onto VIEW, since the table functions don't recognize the SHOW kinds directly;
+// the function variants fold onto FUNCTION. callable reports whether the domain
+// is a procedure / function whose object name needs an argument signature. Any
+// other kind is passed through uppercased.
+func tagReferenceDomain(kind string) (domain string, callable bool) {
+	switch strings.ToUpper(strings.TrimSpace(kind)) {
+	case "TABLE", "DYNAMIC TABLE", "EXTERNAL TABLE", "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE":
+		return "TABLE", false
+	case "VIEW", "MATERIALIZED VIEW":
+		return "VIEW", false
+	case "FUNCTION", "EXTERNAL FUNCTION", "DATA METRIC FUNCTION":
+		return "FUNCTION", true
+	case "PROCEDURE":
+		return "PROCEDURE", true
+	default:
+		return strings.ToUpper(strings.TrimSpace(kind)), false
+	}
 }

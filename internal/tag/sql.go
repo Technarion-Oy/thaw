@@ -186,10 +186,10 @@ func BuildAlterObjectTagSql(ref ObjectTagRef, tagFQN, value string, unset bool) 
 		objectType = "DATABASE"
 		// TAG_REFERENCES reports the database in OBJECT_NAME (and may repeat it in
 		// OBJECT_DATABASE); the reference is a single bare identifier.
-		refClause = snowflake.QuoteIdent(firstNonEmpty(ref.Name, ref.Database))
+		refClause = snowflake.QuoteIdent(snowflake.FirstNonEmpty(ref.Name, ref.Database))
 	case "SCHEMA":
 		objectType = "SCHEMA"
-		refClause = qualifyNonEmpty(ref.Database, firstNonEmpty(ref.Name, ref.Schema))
+		refClause = qualifyNonEmpty(ref.Database, snowflake.FirstNonEmpty(ref.Name, ref.Schema))
 	default:
 		objectType = domain
 		refClause = qualifyNonEmpty(ref.Database, ref.Schema, ref.Name)
@@ -203,15 +203,4 @@ func BuildAlterObjectTagSql(ref ObjectTagRef, tagFQN, value string, unset bool) 
 		return fmt.Sprintf("ALTER %s %s;", objectType, action), nil
 	}
 	return fmt.Sprintf("ALTER %s %s %s;", objectType, refClause, action), nil
-}
-
-// firstNonEmpty returns the first argument that is non-empty after trimming, or
-// "" when all are blank.
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
 }

@@ -258,8 +258,9 @@ function ApplyTagModal({ catalog, onClose, onApplied }: ApplyTagModalProps) {
     setColumn("");
   };
 
-  // Every identifying field shown for the chosen domain must be filled.
+  // A value and every identifying field shown for the chosen domain must be set.
   const canApply = !!selectedTag
+    && !!value.trim()
     && (!showDatabase || !!database.trim())
     && (!showSchema || !!schema.trim())
     && (!showName || !!objName.trim())
@@ -376,6 +377,7 @@ function ApplyTagModal({ catalog, onClose, onApplied }: ApplyTagModalProps) {
 
         <Form.Item
           label="Value"
+          required
           help={allowedValues.length > 0
             ? "This tag restricts values to its allowed list."
             : "The tag value to assign."}
