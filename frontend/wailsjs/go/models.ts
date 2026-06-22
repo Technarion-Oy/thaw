@@ -6183,6 +6183,26 @@ export namespace table {
 
 export namespace tag {
 	
+	export class ObjectTagRef {
+	    domain: string;
+	    database: string;
+	    schema: string;
+	    name: string;
+	    column: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ObjectTagRef(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.domain = source["domain"];
+	        this.database = source["database"];
+	        this.schema = source["schema"];
+	        this.name = source["name"];
+	        this.column = source["column"];
+	    }
+	}
 	export class TagConfig {
 	    name: string;
 	    caseSensitive: boolean;

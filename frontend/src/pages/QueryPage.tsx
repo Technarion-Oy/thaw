@@ -41,6 +41,7 @@ const ExportPathFormatModal  = lazy(() => import("../components/export/ExportPat
 const MigrationModal         = lazy(() => import("../components/migration/MigrationModal"));
 const DbtProjectModal        = lazy(() => import("../components/dbt/DbtProjectModal"));
 const FunctionCatalogModal   = lazy(() => import("../components/fnmeta/FunctionCatalogModal"));
+const TagManagementModal     = lazy(() => import("../components/tag/TagManagementModal"));
 const KeyboardShortcutsModal = lazy(() => import("../components/help/KeyboardShortcutsModal"));
 const AboutModal             = lazy(() => import("../components/help/AboutModal"));
 const CrossTabSearch         = lazy(() => import("../components/editor/CrossTabSearch"));
@@ -51,6 +52,7 @@ import { useQueryStore, type QueryResult, EXECUTE_IN_TAB_EVENT } from "../store/
 import { useConnectionStore } from "../store/connectionStore";
 import { useSessionStore } from "../store/sessionStore";
 import { useFeatureFlagsStore } from "../store/featureFlagsStore";
+import { useTagManagementStore } from "../store/tagManagementStore";
 import { useNotebookToolbarStore } from "../store/notebookToolbarStore";
 import { useGridStore } from "../store/gridStore";
 import Toolbar from "../components/toolbar/Toolbar";
@@ -104,6 +106,9 @@ export default function QueryPage() {
   const [resultPane, setResultPane] = useState<"results" | "terminal" | "querylog">("results");
   const [terminalOpen, setTerminalOpen] = useState(false);
   const featureFlags = useFeatureFlagsStore((s) => s.flags);
+  const tagMgmtOpen = useTagManagementStore((s) => s.open);
+  const openTagMgmt = useTagManagementStore((s) => s.openView);
+  const closeTagMgmt = useTagManagementStore((s) => s.closeView);
 
   // Sync editor state to the MCP EditorContextStore so external AI clients
   // can read the active SQL and query results.
@@ -914,6 +919,11 @@ export default function QueryPage() {
   }, []);
 
   useEffect(() => {
+    const off = EventsOn("menu:tag-management", () => openTagMgmt());
+    return () => off();
+  }, [openTagMgmt]);
+
+  useEffect(() => {
     const off = EventsOn("menu:keyboard-shortcuts", () => setKbShortcutsOpen(true));
     return () => off();
   }, []);
@@ -1580,6 +1590,7 @@ export default function QueryPage() {
         {migrationOpen && <MigrationModal onClose={() => setMigrationOpen(false)} />}
         {dbtCreateOpen && <DbtProjectModal onClose={() => setDbtCreateOpen(false)} />}
         {fnCatalogOpen && <FunctionCatalogModal onClose={() => setFnCatalogOpen(false)} />}
+        {tagMgmtOpen && <TagManagementModal onClose={closeTagMgmt} />}
         {kbShortcutsOpen && <KeyboardShortcutsModal onClose={() => setKbShortcutsOpen(false)} />}
         {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
 

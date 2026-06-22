@@ -109,6 +109,7 @@ import { useGitStore } from "../../store/gitStore";
 import { useDiffStore } from "../../store/diffStore";
 import { useInsertMappingStore } from "../../store/insertMappingStore";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
+import { useTagManagementStore } from "../../store/tagManagementStore";
 import AccountPanel from "../account/AccountPanel";
 import CallProcedureModal from "../procedure/CallProcedureModal";
 import ExecuteNotebookModal from "../notebook/ExecuteNotebookModal";
@@ -169,6 +170,7 @@ import CreateAlertModal from "../alert/CreateAlertModal";
 import AlertPropertiesModal from "../alert/AlertPropertiesModal";
 import CreateTagModal from "../tag/CreateTagModal";
 import TagPropertiesModal from "../tag/TagPropertiesModal";
+import TagReferencesModal from "../tag/TagReferencesModal";
 import CreateMaskingPolicyModal from "../maskingpolicy/CreateMaskingPolicyModal";
 import MaskingPolicyPropertiesModal from "../maskingpolicy/MaskingPolicyPropertiesModal";
 import CreatePasswordPolicyModal from "../passwordpolicy/CreatePasswordPolicyModal";
@@ -734,6 +736,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [alertPropsModal, setAlertPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createTagModal, setCreateTagModal] = useState<{ db: string; schema: string } | null>(null);
   const [tagPropsModal, setTagPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [tagRefsModal, setTagRefsModal] = useState<{ db: string; schema: string; name: string; kind: string; args?: string; column?: string } | null>(null);
   const [createMaskingPolicyModal, setCreateMaskingPolicyModal] = useState<{ db: string; schema: string } | null>(null);
   const [maskingPolicyPropsModal, setMaskingPolicyPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createPasswordPolicyModal, setCreatePasswordPolicyModal] = useState<{ db: string; schema: string } | null>(null);
@@ -834,6 +837,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   // across in-place refreshes (issue #493 follow-up).
   const treeScrollRef = useRef<HTMLDivElement>(null);
 
+  const openTagManagementView = useTagManagementStore((s) => s.openView);
   const pendingDiff   = useDiffStore((s) => s.pending);
   const selectForComp = useDiffStore((s) => s.selectForComparison);
   const compareWith   = useDiffStore((s) => s.compareWith);
@@ -2409,6 +2413,31 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const name = parts.slice(4).join(":");
     setCtxMenu(null);
     setTagPropsModal({ db, schema, name });
+  };
+
+  const openTagManagement = () => {
+    setCtxMenu(null);
+    openTagManagementView();
+  };
+
+  const openTagReferences = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    const kind = ctxMenu.objKind ?? "";
+    const args = ctxMenu.objArgs ?? "";
+    setCtxMenu(null);
+    setTagRefsModal({ db, schema, name, kind, args });
+  };
+
+  const openColumnTagReferences = () => {
+    if (!ctxMenu) return;
+    const { db, schema, table, column } = parseColKey(ctxMenu.nodeKey);
+    const kind = ctxMenu.colMeta?.parentKind ?? "TABLE";
+    setCtxMenu(null);
+    setTagRefsModal({ db, schema, name: table, kind, column });
   };
 
   const openCreateMaskingPolicy = () => {
@@ -4646,6 +4675,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Create Alert…", <AlertOutlined style={{ fontSize: 12 }} />, openCreateAlert)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "TAG" &&
             menuItem("Create Tag…", <TagsOutlined style={{ fontSize: 12 }} />, openCreateTag)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "TAG" &&
+            menuItem("Manage Tags…", <TagsOutlined style={{ fontSize: 12 }} />, openTagManagement)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "MASKING POLICY" &&
             menuItem("Create Masking Policy…", <EyeInvisibleOutlined style={{ fontSize: 12 }} />, openCreateMaskingPolicy)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "ROW ACCESS POLICY" &&
@@ -4921,6 +4952,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Execute Notebook…", <PlayCircleOutlined style={{ fontSize: 12 }} />, executeNotebook, undefined, !featureFlags.snowparkNotebooks, "Snowpark & Notebooks is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "NOTEBOOK" &&
             menuItem("Make Live", <CloudUploadOutlined style={{ fontSize: 12 }} />, makeNotebookLive, undefined, !featureFlags.snowparkNotebooks, "Snowpark & Notebooks is disabled. Enable it under View → Enabled Features…")}
+          {ctxMenu.nodeType === "obj" && menuItem("Tag References…", <TagsOutlined style={{ fontSize: 12 }} />, openTagReferences)}
           {ctxMenu.nodeType === "obj" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "GATEWAY" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "MODEL MONITOR" && ctxMenu.objKind !== "DATASET" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && menuItem("View Definition", null, viewDefinition)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ICEBERG TABLE" && ctxMenu.objKind !== "HYBRID TABLE" && ctxMenu.objKind !== "EVENT TABLE" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "JOIN POLICY" && ctxMenu.objKind !== "PRIVACY POLICY" && ctxMenu.objKind !== "STORAGE LIFECYCLE POLICY" && ctxMenu.objKind !== "PASSWORD POLICY" && ctxMenu.objKind !== "SESSION POLICY" && ctxMenu.objKind !== "AGGREGATION POLICY" && ctxMenu.objKind !== "PROJECTION POLICY" && ctxMenu.objKind !== "AUTHENTICATION POLICY" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "GATEWAY" && ctxMenu.objKind !== "CONTACT" && ctxMenu.objKind !== "STREAMLIT" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "MODEL MONITOR" && ctxMenu.objKind !== "DATASET" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "AGENT" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && ctxMenu.objKind !== "SEMANTIC VIEW" && ctxMenu.objKind !== "VIEW" && ctxMenu.objKind !== "SEQUENCE" && ctxMenu.objKind !== "STREAM" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
@@ -4953,6 +4985,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {/* Column context menu */}
           {ctxMenu.nodeType === "col" &&
             menuItem("Insert Column Name", <CodeOutlined style={{ fontSize: 12 }} />, insertColumnName)}
+          {ctxMenu.nodeType === "col" &&
+            menuItem("Tag References…", <TagsOutlined style={{ fontSize: 12 }} />, openColumnTagReferences)}
           {ctxMenu.nodeType === "col" && ctxMenu.colMeta?.parentKind === "TABLE" && (() => {
             const disabled = !featureFlags.columnManagement;
             const reason = "Column Management is disabled. Enable it under View → Enabled Features…";
@@ -5449,6 +5483,18 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={tagPropsModal.schema}
           name={tagPropsModal.name}
           onClose={() => setTagPropsModal(null)}
+        />
+      )}
+
+      {tagRefsModal && (
+        <TagReferencesModal
+          db={tagRefsModal.db}
+          schema={tagRefsModal.schema}
+          name={tagRefsModal.name}
+          kind={tagRefsModal.kind}
+          args={tagRefsModal.args}
+          column={tagRefsModal.column}
+          onClose={() => setTagRefsModal(null)}
         />
       )}
 

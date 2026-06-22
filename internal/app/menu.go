@@ -158,6 +158,10 @@ func buildMenu(app *App) *menu.Menu {
 		wailsruntime.EventsEmit(app.ctx, "menu:code-snippets")
 	})
 	toolsMenu.AddSeparator()
+	toolsMenu.AddText("Tag Management…", nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:tag-management")
+	})
+	toolsMenu.AddSeparator()
 	toolsMenu.AddText("Export Path Format…", nil, func(_ *menu.CallbackData) {
 		wailsruntime.EventsEmit(app.ctx, "menu:export-path-format")
 	})

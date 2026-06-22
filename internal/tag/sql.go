@@ -104,3 +104,114 @@ func BuildCreateTagSql(db, schema string, cfg TagConfig) (string, error) {
 
 	return sb.String() + ";", nil
 }
+
+// ObjectTagRef identifies an object (or a column on an object) to which a tag is
+// applied, mirroring a row of SNOWFLAKE.ACCOUNT_USAGE.TAG_REFERENCES. Domain is
+// the object kind (e.g. TABLE, VIEW, SCHEMA, DATABASE, WAREHOUSE, COLUMN, …) as
+// reported in the TAG_REFERENCES DOMAIN column. Database/Schema/Name are the
+// object's name parts (some are empty for account-level objects); Column is set
+// only when Domain is COLUMN.
+type ObjectTagRef struct {
+	Domain   string `json:"domain"`
+	Database string `json:"database"`
+	Schema   string `json:"schema"`
+	Name     string `json:"name"`
+	Column   string `json:"column"`
+}
+
+// qualifyNonEmpty joins the non-empty parts into a dotted, double-quoted
+// reference, skipping blanks. qualifyNonEmpty("DB", "", "T") yields `"DB"."T"`.
+func qualifyNonEmpty(parts ...string) string {
+	quoted := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if strings.TrimSpace(p) == "" {
+			continue
+		}
+		quoted = append(quoted, snowflake.QuoteIdent(p))
+	}
+	return strings.Join(quoted, ".")
+}
+
+// BuildAlterObjectTagSql constructs an `ALTER <object> SET/UNSET TAG` statement
+// that applies (SET, with value), retags (SET, new value), or removes (UNSET) a
+// tag on the object described by ref. tagFQN is the fully-qualified, quoted tag
+// name (e.g. `"DB"."S"."COST_CENTER"`); value is the tag value for SET and is
+// ignored when unset is true.
+//
+// The object reference is derived from ref.Domain:
+//
+//   - ACCOUNT             → `ALTER ACCOUNT …` (no name)
+//
+//   - DATABASE            → `ALTER DATABASE "<name>" …`
+//
+//   - SCHEMA              → `ALTER SCHEMA "<db>"."<name>" …`
+//
+//   - COLUMN              → `ALTER TABLE "<db>"."<sc>"."<tbl>" ALTER COLUMN "<col>" …`
+//
+//   - everything else     → `ALTER <DOMAIN> <qualified-name> …` where the name is
+//     built from whichever of database/schema/name are present (so schema-level
+//     objects get a three-part name and account-level objects a bare name).
+//
+//     ALTER TABLE "DB"."SC"."T"   SET TAG "DB"."SC"."PII" = 'true'
+//     ALTER WAREHOUSE "WH"        UNSET TAG "DB"."SC"."COST_CENTER"
+//     ALTER TABLE "DB"."SC"."T" ALTER COLUMN "EMAIL" SET TAG "DB"."SC"."PII" = 'true'
+func BuildAlterObjectTagSql(ref ObjectTagRef, tagFQN, value string, unset bool) (string, error) {
+	domain := strings.ToUpper(strings.TrimSpace(ref.Domain))
+	if domain == "" {
+		return "", fmt.Errorf("tag reference is missing an object domain")
+	}
+	if strings.TrimSpace(tagFQN) == "" {
+		return "", fmt.Errorf("tag reference is missing a tag name")
+	}
+
+	var action string
+	if unset {
+		action = fmt.Sprintf("UNSET TAG %s", tagFQN)
+	} else {
+		action = fmt.Sprintf("SET TAG %s = '%s'", tagFQN, snowflake.EscapeStringLit(value))
+	}
+
+	var objectType, refClause string
+	switch domain {
+	case "ACCOUNT":
+		objectType = "ACCOUNT"
+	case "COLUMN":
+		if strings.TrimSpace(ref.Column) == "" {
+			return "", fmt.Errorf("column tag reference is missing a column name")
+		}
+		objectType = "TABLE"
+		refClause = qualifyNonEmpty(ref.Database, ref.Schema, ref.Name) +
+			" ALTER COLUMN " + snowflake.QuoteIdent(ref.Column)
+	case "DATABASE":
+		objectType = "DATABASE"
+		// TAG_REFERENCES reports the database in OBJECT_NAME (and may repeat it in
+		// OBJECT_DATABASE); the reference is a single bare identifier.
+		refClause = snowflake.QuoteIdent(firstNonEmpty(ref.Name, ref.Database))
+	case "SCHEMA":
+		objectType = "SCHEMA"
+		refClause = qualifyNonEmpty(ref.Database, firstNonEmpty(ref.Name, ref.Schema))
+	default:
+		objectType = domain
+		refClause = qualifyNonEmpty(ref.Database, ref.Schema, ref.Name)
+	}
+
+	if domain != "ACCOUNT" && refClause == "" {
+		return "", fmt.Errorf("tag reference for domain %s is missing an object name", domain)
+	}
+
+	if refClause == "" {
+		return fmt.Sprintf("ALTER %s %s;", objectType, action), nil
+	}
+	return fmt.Sprintf("ALTER %s %s %s;", objectType, refClause, action), nil
+}
+
+// firstNonEmpty returns the first argument that is non-empty after trimming, or
+// "" when all are blank.
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}

@@ -4,19 +4,22 @@
 
 ## Responsibility
 
-Builds the `CREATE TAG` DDL from a structured config. Tags are part of
-Snowflake's governance framework — named metadata that is attached to other
-objects and columns for classification, lineage, and policy enforcement. The
-lifecycle / edit commands (`RENAME TO`, `SET`/`UNSET COMMENT`,
-`ADD`/`DROP`/`UNSET ALLOWED_VALUES`, `SET`/`UNSET MASKING POLICY`) are simple
-enough that they are issued as free-form `ALTER TAG <fqn> <clause>` statements
-directly from `internal/app/tag.go` (`App.AlterTag`) without a dedicated builder.
+Builds the `CREATE TAG` DDL from a structured config, plus the
+`ALTER <object> SET/UNSET TAG` statements that apply or remove a tag on another
+object. Tags are part of Snowflake's governance framework — named metadata that
+is attached to other objects and columns for classification, lineage, and policy
+enforcement. The tag's own lifecycle / edit commands (`RENAME TO`,
+`SET`/`UNSET COMMENT`, `ADD`/`DROP`/`UNSET ALLOWED_VALUES`,
+`SET`/`UNSET PROPAGATE`, `UNSET ON_CONFLICT`, `SET`/`UNSET MASKING POLICY`) are
+simple enough that they are issued as free-form `ALTER TAG <fqn> <clause>`
+statements directly from `internal/app/tag.go` (`App.AlterTag`) without a
+dedicated builder.
 
 ## Key files
 
 | File | Purpose |
 |---|---|
-| `sql.go` | `TagConfig`, `BuildCreateTagSql` |
+| `sql.go` | `TagConfig`, `BuildCreateTagSql`, `ObjectTagRef`, `BuildAlterObjectTagSql` |
 | `sql_test.go` | Unit tests for the SQL builder |
 | `doc.go` | Package doc + `thaw:domain: Object Browser & Administration` annotation |
 
@@ -27,6 +30,8 @@ directly from `internal/app/tag.go` (`App.AlterTag`) without a dedicated builder
 | `TagConfig` | CREATE parameters: name, case sensitivity, `OrReplace`, `IfNotExists`, `AllowedValues` (optional whitelist), `Propagate` (tag-lineage mode) + `OnConflict` (conflict resolution), and comment |
 | `BuildCreateTagSql(db, schema, cfg)` | Emits `CREATE [OR REPLACE] TAG [IF NOT EXISTS] <fqn> [ALLOWED_VALUES 'v1', …] [PROPAGATE = <mode> [ON_CONFLICT = {'…' \| ALLOWED_VALUES_SEQUENCE}]] [COMMENT='…'];` — optional clauses emitted only when set, in documented order |
 | `AllowedValuesSequence` | The `ON_CONFLICT` sentinel emitted as the bare keyword `ALLOWED_VALUES_SEQUENCE` (rather than a quoted string) to resolve conflicts by allowed-values order |
+| `ObjectTagRef` | Identifies an object (or a column) a tag is applied to — `Domain` (TABLE/VIEW/SCHEMA/DATABASE/WAREHOUSE/COLUMN/…) plus the object's name parts and optional column — mirroring a `TAG_REFERENCES` row |
+| `BuildAlterObjectTagSql(ref, tagFQN, value, unset)` | Emits `ALTER <object> SET TAG <fqn> = '<value>'` (or `UNSET TAG <fqn>`) for the object in `ref`; the `Domain` selects the ALTER keyword and how the name is qualified (ACCOUNT → no name, DATABASE/SCHEMA special-cased, COLUMN → `ALTER TABLE … ALTER COLUMN …`, everything else → the present name parts) |
 
 ## Patterns & integration
 
@@ -37,6 +42,11 @@ directly from `internal/app/tag.go` (`App.AlterTag`) without a dedicated builder
 - `App.BuildCreateTagSql` (in `internal/app/builders.go`) is the thin IPC
   delegator; `App.AlterTag` (in `internal/app/tag.go`) runs the edit clauses and
   `App.GetTagReferences` lists where a tag is applied.
+- Centralized Tag Management (the account-wide browse/filter/edit view) is backed
+  by `App.ListAccountTags` (`SHOW TAGS IN ACCOUNT`), `App.GetAllTagReferences`
+  (account-wide `TAG_REFERENCES`, capped at 10 000 rows), and
+  `App.SetObjectTag` / `App.UnsetObjectTag`, which build their statements via
+  `BuildAlterObjectTagSql`.
 - Discovery: `Client.ListExtendedObjects` runs `SHOW TAGS IN SCHEMA` with the
   fixed kind `"TAG"`. Tags are not surfaced by `SHOW OBJECTS`, so — unlike
   dynamic / external tables and materialized views — no dedupe pass is needed.

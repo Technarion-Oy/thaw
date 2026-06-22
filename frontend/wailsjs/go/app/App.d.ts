@@ -503,6 +503,8 @@ export function GetAggregationPolicyReferences(arg1:string,arg2:string,arg3:stri
 
 export function GetAllFunctionNames():Promise<Array<fnmeta.FunctionMeta>>;
 
+export function GetAllTagReferences():Promise<snowflake.QueryResult>;
+
 export function GetAppInfo():Promise<app.AppInfo>;
 
 export function GetAuthenticationPolicyReferences(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
@@ -518,6 +520,8 @@ export function GetCollationSpecifiers():Promise<Array<snowflake.CollationSpecif
 export function GetCollations():Promise<Array<snowflake.CollationOption>>;
 
 export function GetColumnComments(arg1:string,arg2:string,arg3:string):Promise<Array<objects.ColumnComment>>;
+
+export function GetColumnTagReferences(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.QueryResult>;
 
 export function GetCortexSearchServiceTags(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
@@ -588,6 +592,8 @@ export function GetObjectDDL(arg1:string,arg2:string,arg3:string,arg4:string,arg
 export function GetObjectDependencies(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<snowflake.DependencyNode>;
 
 export function GetObjectProperties(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<snowflake.PropertyPair>>;
+
+export function GetObjectTagReferences(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<snowflake.QueryResult>;
 
 export function GetPasswordPolicyReferences(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
@@ -757,6 +763,8 @@ export function IsQueryLogEnabled():Promise<boolean>;
 
 export function ListAIModels(arg1:string,arg2:string,arg3:number):Promise<Array<string>>;
 
+export function ListAccountTags():Promise<snowflake.QueryResult>;
+
 export function ListApiIntegrations():Promise<Array<snowflake.ApiIntegration>>;
 
 export function ListAvailableRoles():Promise<Array<string>>;
@@ -852,6 +860,8 @@ export function ListSupportedDbtVersions():Promise<Array<dbtproject.DbtVersionIn
 export function ListSystemPythons():Promise<Array<snowpark.PythonInfo>>;
 
 export function ListUserFunctions(arg1:string):Promise<Array<snowflake.UserFunction>>;
+
+export function ListUserSchemas(arg1:string):Promise<Array<string>>;
 
 export function ListUsers():Promise<Array<snowflake.SnowflakeUser>>;
 
@@ -993,6 +1003,8 @@ export function SetGitCommitFilter(arg1:string,arg2:string,arg3:string,arg4:stri
 
 export function SetNotebookQueryWarehouse(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
+export function SetObjectTag(arg1:tag.ObjectTagRef,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
+
 export function SetQueryLogEnabled(arg1:boolean):Promise<void>;
 
 export function SetSessionParameter(arg1:string,arg2:string,arg3:string):Promise<void>;
@@ -1032,6 +1044,8 @@ export function TaskHasChildren(arg1:string,arg2:string,arg3:string):Promise<boo
 export function TestAIModel(arg1:string,arg2:string,arg3:string,arg4:number,arg5:number):Promise<string>;
 
 export function UninstallEnvPackage(arg1:string):Promise<void>;
+
+export function UnsetObjectTag(arg1:tag.ObjectTagRef,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function UpdateERDesignerState(arg1:string,arg2:Array<mcp.ERDesignerTableOut>):Promise<void>;
 
