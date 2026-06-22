@@ -211,7 +211,7 @@ func HasNonBlankToken(tokens []string) bool {
 }
 
 // FirstNonEmpty returns the first argument that is non-empty after trimming, or
-// "" when every argument is blank. It is the SQL-builder analogue of a COALESCE
+// "" when every argument is blank. It is the SQL-builder analog of a COALESCE
 // over identifier/name parts.
 func FirstNonEmpty(vals ...string) string {
 	for _, v := range vals {
