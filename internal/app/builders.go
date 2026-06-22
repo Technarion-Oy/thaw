@@ -18,6 +18,7 @@ import (
 	"thaw/internal/column"
 	"thaw/internal/cortexsearchservice"
 	"thaw/internal/datametricfunction"
+	"thaw/internal/dataset"
 	"thaw/internal/dbtproject"
 	"thaw/internal/dynamictable"
 	"thaw/internal/eventtable"
@@ -263,6 +264,11 @@ func (a *App) BuildCreateImageRepositorySql(database, schema string, cfg imagere
 // BuildCreateModelSql returns the SQL for creating a Snowflake MODEL.
 func (a *App) BuildCreateModelSql(database, schema string, cfg model.ModelConfig) (string, error) {
 	return model.BuildCreateModelSql(database, schema, cfg)
+}
+
+// BuildCreateDatasetSql returns the SQL for creating a Snowflake DATASET.
+func (a *App) BuildCreateDatasetSql(database, schema string, cfg dataset.DatasetConfig) (string, error) {
+	return dataset.BuildCreateDatasetSql(database, schema, cfg)
 }
 
 // BuildCreateModelMonitorSql returns the SQL for creating a Snowflake MODEL

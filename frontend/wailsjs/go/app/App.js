@@ -38,6 +38,10 @@ export function AlterDataMetricFunction(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['AlterDataMetricFunction'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function AlterDataset(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterDataset'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterDynamicTable(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterDynamicTable'](arg1, arg2, arg3, arg4);
 }
@@ -272,6 +276,10 @@ export function BuildCreateCortexSearchServiceSql(arg1, arg2, arg3) {
 
 export function BuildCreateDataMetricFunctionSql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateDataMetricFunctionSql'](arg1, arg2, arg3);
+}
+
+export function BuildCreateDatasetSql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateDatasetSql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateDbtProjectSql(arg1, arg2, arg3) {
@@ -1372,6 +1380,10 @@ export function ListComputePools() {
 
 export function ListDatabases() {
   return window['go']['app']['App']['ListDatabases']();
+}
+
+export function ListDatasetVersions(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ListDatasetVersions'](arg1, arg2, arg3);
 }
 
 export function ListDbtProjectEntries(arg1, arg2, arg3, arg4) {

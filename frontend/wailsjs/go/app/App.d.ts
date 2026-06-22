@@ -12,6 +12,7 @@ import {aggregationpolicy} from '../models';
 import {alert} from '../models';
 import {cortexsearchservice} from '../models';
 import {datametricfunction} from '../models';
+import {dataset} from '../models';
 import {dynamictable} from '../models';
 import {eventtable} from '../models';
 import {externalagent} from '../models';
@@ -85,6 +86,8 @@ export function AlterBackupSet(arg1:string,arg2:string,arg3:string,arg4:string):
 export function AlterCortexSearchService(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterDataMetricFunction(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
+
+export function AlterDataset(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterDynamicTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -203,6 +206,8 @@ export function BuildCreateAuthenticationPolicySql(arg1:string,arg2:string,arg3:
 export function BuildCreateCortexSearchServiceSql(arg1:string,arg2:string,arg3:cortexsearchservice.CortexSearchServiceConfig):Promise<string>;
 
 export function BuildCreateDataMetricFunctionSql(arg1:string,arg2:string,arg3:datametricfunction.DataMetricFunctionConfig):Promise<string>;
+
+export function BuildCreateDatasetSql(arg1:string,arg2:string,arg3:dataset.DatasetConfig):Promise<string>;
 
 export function BuildCreateDbtProjectSql(arg1:string,arg2:string,arg3:dbtproject.CreateConfig):Promise<string>;
 
@@ -753,6 +758,8 @@ export function ListBasicObjects(arg1:string,arg2:string):Promise<Array<snowflak
 export function ListComputePools():Promise<Array<string>>;
 
 export function ListDatabases():Promise<Array<string>>;
+
+export function ListDatasetVersions(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function ListDbtProjectEntries(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<snowflake.GitRepoEntry>>;
 
