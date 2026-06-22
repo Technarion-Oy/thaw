@@ -152,6 +152,9 @@ func (a *App) alterObjectTag(ref tag.ObjectTagRef, tagDatabase, tagSchema, tagNa
 // overload, and is ignored for every other domain. The object-browser kind is
 // folded onto the narrow domain set the table function accepts via
 // tagReferenceDomain (e.g. EXTERNAL FUNCTION → FUNCTION, ICEBERG TABLE → TABLE).
+// Container domains use fewer name parts — DATABASE is a bare `"db"` and SCHEMA
+// is `"db"."schema"` — so the object browser can offer this view on database and
+// schema nodes as well as individual objects.
 //
 // The table function lives in the object database's INFORMATION_SCHEMA and takes
 // the object name as a string literal; the fully-qualified, double-quoted name is
@@ -160,20 +163,38 @@ func (a *App) GetObjectTagReferences(domain, database, schema, name, args string
 	if a.client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	fqn := snowflake.Qualify(database, schema, name)
-	d, callable := tagReferenceDomain(domain)
-	if callable {
-		// Procedures / functions need the argument signature to resolve the overload.
-		fqn += "(" + args + ")"
-	}
+	d, _ := tagReferenceDomain(domain)
+	objName := tagReferenceObjectName(domain, database, schema, name, args)
 	query := fmt.Sprintf(
 		"SELECT TAG_DATABASE, TAG_SCHEMA, TAG_NAME, TAG_VALUE, LEVEL "+
 			"FROM TABLE(%s.INFORMATION_SCHEMA.TAG_REFERENCES('%s', '%s')) "+
 			"ORDER BY TAG_NAME",
 		snowflake.QuoteIdent(database),
-		snowflake.EscapeStringLit(fqn),
+		snowflake.EscapeStringLit(objName),
 		snowflake.EscapeStringLit(d))
 	return a.client.QuerySingle(a.ctx, query)
+}
+
+// tagReferenceObjectName builds the object-name string literal passed to the
+// TAG_REFERENCES table function for the given browser kind. Container domains
+// carry fewer name parts than a regular object: DATABASE is the bare database
+// identifier and SCHEMA is `"db"."schema"`. Callable objects (procedures /
+// functions) append their argument signature so the overload resolves; every
+// other object is the standard three-part `"db"."schema"."name"`.
+func tagReferenceObjectName(domain, database, schema, name, args string) string {
+	d, callable := tagReferenceDomain(domain)
+	switch d {
+	case "DATABASE":
+		return snowflake.QuoteIdent(database)
+	case "SCHEMA":
+		return snowflake.Qualify(database, schema)
+	default:
+		fqn := snowflake.Qualify(database, schema, name)
+		if callable {
+			fqn += "(" + args + ")"
+		}
+		return fqn
+	}
 }
 
 // GetColumnTagReferences returns the tags applied to every column of a table or

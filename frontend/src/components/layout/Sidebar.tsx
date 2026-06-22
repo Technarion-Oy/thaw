@@ -2440,6 +2440,20 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setTagRefsModal({ db, schema, name: table, kind, column });
   };
 
+  const openSchemaTagReferences = () => {
+    if (!ctxMenu) return;
+    const [, db, schema] = ctxMenu.nodeKey.split(":");
+    setCtxMenu(null);
+    setTagRefsModal({ db, schema, name: schema, kind: "SCHEMA" });
+  };
+
+  const openDatabaseTagReferences = () => {
+    if (!ctxMenu) return;
+    const db = ctxMenu.nodeKey.slice("db:".length);
+    setCtxMenu(null);
+    setTagRefsModal({ db, schema: "", name: db, kind: "DATABASE" });
+  };
+
   const openCreateMaskingPolicy = () => {
     if (!ctxMenu) return;
     const parts = ctxMenu.nodeKey.split(":");
@@ -4547,6 +4561,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             </>
           ))}
           {ctxMenu.nodeType === "db" && menuItem("Backup Sets…", <SaveOutlined style={{ fontSize: 12 }} />, openBackupSets, undefined, !featureFlags.backupPoliciesAndSets, "Backup Policies & Sets is disabled. Enable it under View → Enabled Features…")}
+          {ctxMenu.nodeType === "db" && menuItem("Tag References…", <TagsOutlined style={{ fontSize: 12 }} />, openDatabaseTagReferences)}
           {ctxMenu.nodeType === "db" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "db" && <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />}
           {ctxMenu.nodeType === "db" && menuItem("Drop Database…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, dropDatabaseNode, "#f85149")}
@@ -4639,6 +4654,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "schema" && menuItem("Export Data…", <DownloadOutlined style={{ fontSize: 12 }} />, openSchemaExportModal, undefined, !featureFlags.exportTableData, "Table Data Export is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "schema" && menuItem("Import Data…", <UploadOutlined style={{ fontSize: 12 }} />, openSchemaImportModal, undefined, !featureFlags.tableDataImport, "Table Data Import is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "schema" && menuItem("Backup Sets…", <SaveOutlined style={{ fontSize: 12 }} />, openBackupSets, undefined, !featureFlags.backupPoliciesAndSets, "Backup Policies & Sets is disabled. Enable it under View → Enabled Features…")}
+          {ctxMenu.nodeType === "schema" && menuItem("Tag References…", <TagsOutlined style={{ fontSize: 12 }} />, openSchemaTagReferences)}
           {ctxMenu.nodeType === "schema" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "schema" && ctxMenu.nodeKey.split(":")[2] !== "INFORMATION_SCHEMA" && <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />}
           {ctxMenu.nodeType === "schema" && ctxMenu.nodeKey.split(":")[2] !== "INFORMATION_SCHEMA" && menuItem("Drop Schema…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, dropSchemaNode, "#f85149")}

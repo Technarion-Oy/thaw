@@ -118,9 +118,13 @@ export default function TagReferencesModal({ db, schema, name, kind, args, colum
   useEffect(() => { load(); }, [load]);
 
   const objectRef = useMemo(() => {
+    const k = kind.toUpperCase();
+    // Container kinds carry fewer name parts than a regular object.
+    if (k === "DATABASE") return `"${db}"`;
+    if (k === "SCHEMA") return `"${db}"."${schema}"`;
     const base = `"${db}"."${schema}"."${name}"`;
     return column ? `${base}."${column}"` : base;
-  }, [db, schema, name, column]);
+  }, [db, schema, name, kind, column]);
 
   return (
     <Modal

@@ -49,3 +49,28 @@ func TestTagReferenceDomain(t *testing.T) {
 		})
 	}
 }
+
+func TestTagReferenceObjectName(t *testing.T) {
+	tests := []struct {
+		name                  string
+		kind, db, schema, obj string
+		args                  string
+		want                  string
+	}{
+		{"table", "TABLE", "DB", "SC", "T", "", `"DB"."SC"."T"`},
+		{"view variant", "MATERIALIZED VIEW", "DB", "SC", "MV", "", `"DB"."SC"."MV"`},
+		{"database is bare", "DATABASE", "DB", "", "DB", "", `"DB"`},
+		{"schema is two parts", "SCHEMA", "DB", "SC", "SC", "", `"DB"."SC"`},
+		{"procedure carries signature", "PROCEDURE", "DB", "SC", "P", "NUMBER, VARCHAR", `"DB"."SC"."P"(NUMBER, VARCHAR)`},
+		{"function variant carries signature", "DATA METRIC FUNCTION", "DB", "SC", "F", "TABLE(NUMBER)", `"DB"."SC"."F"(TABLE(NUMBER))`},
+		{"no-arg procedure still has parens", "PROCEDURE", "DB", "SC", "P", "", `"DB"."SC"."P"()`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tagReferenceObjectName(tt.kind, tt.db, tt.schema, tt.obj, tt.args); got != tt.want {
+				t.Errorf("tagReferenceObjectName(%q, %q, %q, %q, %q) = %q, want %q",
+					tt.kind, tt.db, tt.schema, tt.obj, tt.args, got, tt.want)
+			}
+		})
+	}
+}
