@@ -111,12 +111,32 @@ func BuildCreateTagSql(db, schema string, cfg TagConfig) (string, error) {
 // reported in the TAG_REFERENCES DOMAIN column. Database/Schema/Name are the
 // object's name parts (some are empty for account-level objects); Column is set
 // only when Domain is COLUMN.
+//
+// ParentKind is the kind of the object that owns a tagged column (TABLE or VIEW)
+// and is consulted only when Domain is COLUMN, to pick the correct ALTER keyword
+// — a column tag on a view needs `ALTER VIEW … ALTER COLUMN`, not `ALTER TABLE`.
+// An empty ParentKind defaults to TABLE; callers that can't determine it (e.g.
+// the ACCOUNT_USAGE references browser, where the parent kind isn't reported)
+// resolve it before building the statement.
 type ObjectTagRef struct {
-	Domain   string `json:"domain"`
-	Database string `json:"database"`
-	Schema   string `json:"schema"`
-	Name     string `json:"name"`
-	Column   string `json:"column"`
+	Domain     string `json:"domain"`
+	Database   string `json:"database"`
+	Schema     string `json:"schema"`
+	Name       string `json:"name"`
+	Column     string `json:"column"`
+	ParentKind string `json:"parentKind"`
+}
+
+// columnParentAlterType returns the ALTER object-type keyword for setting or
+// unsetting a tag on a column, based on the kind of the object that owns the
+// column. Snowflake exposes column tags via `ALTER TABLE … ALTER COLUMN` and
+// `ALTER VIEW … ALTER COLUMN`; a VIEW parent yields VIEW, and any other (or an
+// empty/unknown) kind defaults to TABLE.
+func columnParentAlterType(parentKind string) string {
+	if strings.EqualFold(strings.TrimSpace(parentKind), "VIEW") {
+		return "VIEW"
+	}
+	return "TABLE"
 }
 
 // qualifyNonEmpty joins the non-empty parts into a dotted, double-quoted
@@ -146,7 +166,8 @@ func qualifyNonEmpty(parts ...string) string {
 //
 //   - SCHEMA              → `ALTER SCHEMA "<db>"."<name>" …`
 //
-//   - COLUMN              → `ALTER TABLE "<db>"."<sc>"."<tbl>" ALTER COLUMN "<col>" …`
+//   - COLUMN              → `ALTER <TABLE|VIEW> "<db>"."<sc>"."<obj>" ALTER COLUMN "<col>" …`
+//     (VIEW when ref.ParentKind is VIEW, else TABLE)
 //
 //   - everything else     → `ALTER <DOMAIN> <qualified-name> …` where the name is
 //     built from whichever of database/schema/name are present (so schema-level
@@ -179,7 +200,7 @@ func BuildAlterObjectTagSql(ref ObjectTagRef, tagFQN, value string, unset bool) 
 		if strings.TrimSpace(ref.Column) == "" {
 			return "", fmt.Errorf("column tag reference is missing a column name")
 		}
-		objectType = "TABLE"
+		objectType = columnParentAlterType(ref.ParentKind)
 		refClause = qualifyNonEmpty(ref.Database, ref.Schema, ref.Name) +
 			" ALTER COLUMN " + snowflake.QuoteIdent(ref.Column)
 	case "DATABASE":

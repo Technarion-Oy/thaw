@@ -30,8 +30,8 @@ dedicated builder.
 | `TagConfig` | CREATE parameters: name, case sensitivity, `OrReplace`, `IfNotExists`, `AllowedValues` (optional whitelist), `Propagate` (tag-lineage mode) + `OnConflict` (conflict resolution), and comment |
 | `BuildCreateTagSql(db, schema, cfg)` | Emits `CREATE [OR REPLACE] TAG [IF NOT EXISTS] <fqn> [ALLOWED_VALUES 'v1', …] [PROPAGATE = <mode> [ON_CONFLICT = {'…' \| ALLOWED_VALUES_SEQUENCE}]] [COMMENT='…'];` — optional clauses emitted only when set, in documented order |
 | `AllowedValuesSequence` | The `ON_CONFLICT` sentinel emitted as the bare keyword `ALLOWED_VALUES_SEQUENCE` (rather than a quoted string) to resolve conflicts by allowed-values order |
-| `ObjectTagRef` | Identifies an object (or a column) a tag is applied to — `Domain` (TABLE/VIEW/SCHEMA/DATABASE/WAREHOUSE/COLUMN/…) plus the object's name parts and optional column — mirroring a `TAG_REFERENCES` row |
-| `BuildAlterObjectTagSql(ref, tagFQN, value, unset)` | Emits `ALTER <object> SET TAG <fqn> = '<value>'` (or `UNSET TAG <fqn>`) for the object in `ref`; the `Domain` selects the ALTER keyword and how the name is qualified (ACCOUNT → no name, DATABASE/SCHEMA special-cased, COLUMN → `ALTER TABLE … ALTER COLUMN …`, everything else → the present name parts) |
+| `ObjectTagRef` | Identifies an object (or a column) a tag is applied to — `Domain` (TABLE/VIEW/SCHEMA/DATABASE/WAREHOUSE/COLUMN/…) plus the object's name parts, optional `Column`, and `ParentKind` (the owning object's kind, consulted only for `COLUMN` to pick TABLE vs VIEW) — mirroring a `TAG_REFERENCES` row |
+| `BuildAlterObjectTagSql(ref, tagFQN, value, unset)` | Emits `ALTER <object> SET TAG <fqn> = '<value>'` (or `UNSET TAG <fqn>`) for the object in `ref`; the `Domain` selects the ALTER keyword and how the name is qualified (ACCOUNT → no name, DATABASE/SCHEMA special-cased, COLUMN → `ALTER <TABLE\|VIEW> … ALTER COLUMN …` per `ParentKind`, everything else → the present name parts) |
 
 ## Patterns & integration
 

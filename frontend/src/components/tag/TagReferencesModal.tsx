@@ -70,10 +70,13 @@ interface Props {
 }
 
 // Keeps only the rows of an all-columns result that belong to the given column.
+// The comparison is case-insensitive so a node key whose case differs from the
+// stored column name (e.g. a quoted mixed-case column) still matches.
 function filterToColumn(result: snowflake.QueryResult, column: string): snowflake.QueryResult {
   const idx = (result.columns ?? []).findIndex((c) => c.toUpperCase() === "COLUMN_NAME");
   if (idx < 0) return result;
-  const rows = (result.rows ?? []).filter((r) => String(r[idx] ?? "") === column);
+  const want = column.toLowerCase();
+  const rows = (result.rows ?? []).filter((r) => String(r[idx] ?? "").toLowerCase() === want);
   return { ...result, rows } as snowflake.QueryResult;
 }
 

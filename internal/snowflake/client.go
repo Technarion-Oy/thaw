@@ -2319,6 +2319,27 @@ func (c *Client) ListUserSchemas(ctx context.Context, database string) ([]string
 	return filtered, nil
 }
 
+// GetObjectTableType returns the TABLE_TYPE of a relational object from
+// <database>.INFORMATION_SCHEMA.TABLES — e.g. "BASE TABLE", "VIEW",
+// "MATERIALIZED VIEW", "EXTERNAL TABLE". It is used to distinguish a view from a
+// table when an operation needs the right ALTER keyword (notably column tagging,
+// where a view column requires ALTER VIEW … ALTER COLUMN). Returns "" when the
+// object isn't found in INFORMATION_SCHEMA.TABLES.
+func (c *Client) GetObjectTableType(ctx context.Context, database, schema, name string) (string, error) {
+	query := fmt.Sprintf(
+		"SELECT TABLE_TYPE FROM %s.INFORMATION_SCHEMA.TABLES "+
+			"WHERE TABLE_SCHEMA = '%s' AND TABLE_NAME = '%s'",
+		QuoteIdent(database), EscapeStringLit(schema), EscapeStringLit(name))
+	vals, err := c.queryStringSlice(ctx, query, 0)
+	if err != nil {
+		return "", err
+	}
+	if len(vals) == 0 {
+		return "", nil
+	}
+	return vals[0], nil
+}
+
 // extractArgTypes parses the "arguments" column returned by SHOW PROCEDURES /
 // SHOW FUNCTIONS / SHOW DATA METRIC FUNCTIONS. The format is
 // "<name>(<types>) RETURN <return_type>", e.g.

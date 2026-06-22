@@ -67,9 +67,12 @@ func TestTagReferenceObjectName(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tagReferenceObjectName(tt.kind, tt.db, tt.schema, tt.obj, tt.args); got != tt.want {
-				t.Errorf("tagReferenceObjectName(%q, %q, %q, %q, %q) = %q, want %q",
-					tt.kind, tt.db, tt.schema, tt.obj, tt.args, got, tt.want)
+			// Compose with tagReferenceDomain exactly as GetObjectTagReferences does,
+			// so the test exercises the real fold-then-build path.
+			d, callable := tagReferenceDomain(tt.kind)
+			if got := tagReferenceObjectName(d, callable, tt.db, tt.schema, tt.obj, tt.args); got != tt.want {
+				t.Errorf("tagReferenceObjectName(%q→%q, callable=%v, %q, %q, %q, %q) = %q, want %q",
+					tt.kind, d, callable, tt.db, tt.schema, tt.obj, tt.args, got, tt.want)
 			}
 		})
 	}

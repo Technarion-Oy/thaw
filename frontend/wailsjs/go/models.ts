@@ -6189,6 +6189,7 @@ export namespace tag {
 	    schema: string;
 	    name: string;
 	    column: string;
+	    parentKind: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ObjectTagRef(source);
@@ -6201,6 +6202,7 @@ export namespace tag {
 	        this.schema = source["schema"];
 	        this.name = source["name"];
 	        this.column = source["column"];
+	        this.parentKind = source["parentKind"];
 	    }
 	}
 	export class TagConfig {

@@ -123,9 +123,20 @@ func (a *App) UnsetObjectTag(ref tag.ObjectTagRef, tagDatabase, tagSchema, tagNa
 // alterObjectTag is the shared body behind SetObjectTag / UnsetObjectTag: it
 // builds the fully-qualified tag name, delegates the ALTER statement to
 // tag.BuildAlterObjectTagSql, and executes it.
+//
+// For a column whose parent kind is unknown (the ACCOUNT_USAGE references browser
+// reports DOMAIN = COLUMN but not whether the parent is a table or a view), it
+// resolves the parent kind from INFORMATION_SCHEMA so a view column emits
+// `ALTER VIEW … ALTER COLUMN` rather than a rejected `ALTER TABLE`. A failed or
+// empty lookup leaves ParentKind blank, which the builder treats as TABLE.
 func (a *App) alterObjectTag(ref tag.ObjectTagRef, tagDatabase, tagSchema, tagName, value string, unset bool) error {
 	if a.client == nil {
 		return apperrors.ErrNotConnected
+	}
+	if strings.EqualFold(strings.TrimSpace(ref.Domain), "COLUMN") && strings.TrimSpace(ref.ParentKind) == "" {
+		if t, err := a.client.GetObjectTableType(a.ctx, ref.Database, ref.Schema, ref.Name); err == nil {
+			ref.ParentKind = t
+		}
 	}
 	tagFQN := snowflake.Qualify(tagDatabase, tagSchema, tagName)
 	sql, err := tag.BuildAlterObjectTagSql(ref, tagFQN, value, unset)
@@ -163,8 +174,8 @@ func (a *App) GetObjectTagReferences(domain, database, schema, name, args string
 	if a.client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	d, _ := tagReferenceDomain(domain)
-	objName := tagReferenceObjectName(domain, database, schema, name, args)
+	d, callable := tagReferenceDomain(domain)
+	objName := tagReferenceObjectName(d, callable, database, schema, name, args)
 	query := fmt.Sprintf(
 		"SELECT TAG_DATABASE, TAG_SCHEMA, TAG_NAME, TAG_VALUE, LEVEL "+
 			"FROM TABLE(%s.INFORMATION_SCHEMA.TAG_REFERENCES('%s', '%s')) "+
@@ -176,14 +187,14 @@ func (a *App) GetObjectTagReferences(domain, database, schema, name, args string
 }
 
 // tagReferenceObjectName builds the object-name string literal passed to the
-// TAG_REFERENCES table function for the given browser kind. Container domains
-// carry fewer name parts than a regular object: DATABASE is the bare database
-// identifier and SCHEMA is `"db"."schema"`. Callable objects (procedures /
-// functions) append their argument signature so the overload resolves; every
-// other object is the standard three-part `"db"."schema"."name"`.
-func tagReferenceObjectName(domain, database, schema, name, args string) string {
-	d, callable := tagReferenceDomain(domain)
-	switch d {
+// TAG_REFERENCES table function, given the already-resolved domain and its
+// callable flag (from tagReferenceDomain). Container domains carry fewer name
+// parts than a regular object: DATABASE is the bare database identifier and
+// SCHEMA is `"db"."schema"`. Callable objects (procedures / functions) append
+// their argument signature so the overload resolves; every other object is the
+// standard three-part `"db"."schema"."name"`.
+func tagReferenceObjectName(domain string, callable bool, database, schema, name, args string) string {
+	switch domain {
 	case "DATABASE":
 		return snowflake.QuoteIdent(database)
 	case "SCHEMA":

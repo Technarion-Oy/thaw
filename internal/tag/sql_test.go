@@ -190,10 +190,22 @@ func TestBuildAlterObjectTagSql(t *testing.T) {
 			want:  `ALTER TABLE "DB"."SC"."T" UNSET TAG "DB"."SC"."PII";`,
 		},
 		{
-			name:  "column set",
+			name:  "column set (table parent, default)",
 			ref:   ObjectTagRef{Domain: "COLUMN", Database: "DB", Schema: "SC", Name: "T", Column: "EMAIL"},
 			value: "high",
 			want:  `ALTER TABLE "DB"."SC"."T" ALTER COLUMN "EMAIL" SET TAG "DB"."SC"."PII" = 'high';`,
+		},
+		{
+			name:  "column set (explicit table parent)",
+			ref:   ObjectTagRef{Domain: "COLUMN", Database: "DB", Schema: "SC", Name: "T", Column: "EMAIL", ParentKind: "TABLE"},
+			value: "high",
+			want:  `ALTER TABLE "DB"."SC"."T" ALTER COLUMN "EMAIL" SET TAG "DB"."SC"."PII" = 'high';`,
+		},
+		{
+			name:  "column set (view parent → ALTER VIEW)",
+			ref:   ObjectTagRef{Domain: "COLUMN", Database: "DB", Schema: "SC", Name: "V", Column: "EMAIL", ParentKind: "view"},
+			value: "high",
+			want:  `ALTER VIEW "DB"."SC"."V" ALTER COLUMN "EMAIL" SET TAG "DB"."SC"."PII" = 'high';`,
 		},
 		{
 			name:  "warehouse set (account-level)",

@@ -70,12 +70,12 @@ const COMMON_DOMAINS = [
 // Account-level domains have no database/schema qualification.
 const ACCOUNT_LEVEL = new Set(["WAREHOUSE", "ROLE", "USER", "INTEGRATION", "ACCOUNT", "DATABASE"]);
 
-// Object kinds that carry columns — the parent objects offered when tagging a
-// COLUMN. The strings match the `kind` reported by ListObjects.
-const COLUMN_PARENT_KINDS = new Set([
-  "TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE",
-  "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE",
-]);
+// Parent objects offered when tagging a COLUMN. Restricted to the kinds whose
+// columns Snowflake lets you tag via `ALTER … ALTER COLUMN SET TAG` — tables and
+// views. The selected parent's kind is carried into ObjectTagRef.parentKind so
+// the backend emits ALTER VIEW vs ALTER TABLE correctly. The strings match the
+// `kind` reported by ListObjects.
+const COLUMN_PARENT_KINDS = new Set(["TABLE", "VIEW"]);
 
 // ─── Reference rows ──────────────────────────────────────────────────────────
 
@@ -169,7 +169,7 @@ function ApplyTagModal({ catalog, onClose, onApplied }: ApplyTagModalProps) {
   const showDatabase = domain !== "ACCOUNT" && (schemaLevel || domain === "DATABASE" || domain === "SCHEMA");
   const showSchema = schemaLevel;
   const showName = domain !== "ACCOUNT" && domain !== "DATABASE";
-  const nameLabel = domain === "SCHEMA" ? "Schema name" : isColumn ? "Table" : "Object name";
+  const nameLabel = domain === "SCHEMA" ? "Schema name" : isColumn ? "Table or view" : "Object name";
   // For SCHEMA the name is itself a schema, so its dropdown reuses the schema
   // list; account-level objects (WAREHOUSE/ROLE/USER/INTEGRATION) have no cheap
   // listing, so their name is typed free-form.
@@ -185,6 +185,13 @@ function ApplyTagModal({ catalog, onClose, onApplied }: ApplyTagModalProps) {
       isColumn ? COLUMN_PARENT_KINDS.has(o.kind) : o.kind === domain);
     return matches.map((o) => o.name).sort();
   }, [objects, domain, isColumn]);
+
+  // The kind of the chosen parent object, carried into ObjectTagRef.parentKind so
+  // a column on a view tags via ALTER VIEW rather than ALTER TABLE.
+  const selectedParentKind = useMemo(
+    () => objects.find((o) => o.name === objName)?.kind ?? "",
+    [objects, objName],
+  );
 
   const selectedTag = useMemo(
     () => catalog.find((c) => `${c.database}.${c.schema}.${c.name}` === tagKey) ?? null,
@@ -277,6 +284,7 @@ function ApplyTagModal({ catalog, onClose, onApplied }: ApplyTagModalProps) {
         schema: showSchema ? schema : "",
         name: domain === "DATABASE" ? database : (showName ? objName : ""),
         column: isColumn ? column : "",
+        parentKind: isColumn ? selectedParentKind : "",
       });
       await SetObjectTag(ref, selectedTag.database, selectedTag.schema, selectedTag.name, value);
       message.success("Tag applied");
@@ -456,7 +464,7 @@ export default function TagManagementModal({ onClose }: Props) {
   const [refs, setRefs] = useState<snowflake.QueryResult | null>(null);
   const [refsErr, setRefsErr] = useState<string | null>(null);
   const [refsLoading, setRefsLoading] = useState(false);
-  const [rowBusy, setRowBusy] = useState(false);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
 
   // Reference filters
   const [fTag, setFTag] = useState<string | null>(null);
@@ -550,7 +558,7 @@ export default function TagManagementModal({ onClose }: Props) {
   const anyFilter = fTag || fValue || fDatabase || fDomain || fSearch;
 
   const saveValue = async (r: RefRow, v: string) => {
-    setRowBusy(true);
+    setBusyKey(r.key);
     try {
       await SetObjectTag(refObjectRef(r), r.tagDatabase, r.tagSchema, r.tagName, v);
       message.success("Tag value updated — references may take a moment to refresh.");
@@ -558,12 +566,12 @@ export default function TagManagementModal({ onClose }: Props) {
     } catch (e) {
       message.error(String(e));
     } finally {
-      setRowBusy(false);
+      setBusyKey(null);
     }
   };
 
   const removeTag = async (r: RefRow) => {
-    setRowBusy(true);
+    setBusyKey(r.key);
     try {
       await UnsetObjectTag(refObjectRef(r), r.tagDatabase, r.tagSchema, r.tagName);
       message.success("Tag removed — references may take a moment to refresh.");
@@ -571,7 +579,7 @@ export default function TagManagementModal({ onClose }: Props) {
     } catch (e) {
       message.error(String(e));
     } finally {
-      setRowBusy(false);
+      setBusyKey(null);
     }
   };
 
@@ -583,13 +591,22 @@ export default function TagManagementModal({ onClose }: Props) {
   const filteredCatalog = useMemo(() => {
     if (!catalog?.rows) return [];
     const s = catalogSearch.trim().toLowerCase();
+    const colCount = catalog.columns?.length ?? 0;
     const rows = catalog.rows.map((row, n) => {
       const obj: Record<string, unknown> = { __k: n };
       row.forEach((c, ci) => { obj[ci] = c; });
       return obj;
     });
     if (!s) return rows;
-    return rows.filter((o) => Object.values(o).some((v) => v !== null && v !== undefined && String(v).toLowerCase().includes(s)));
+    // Match data columns only (skip the synthetic __k row-index key, which would
+    // otherwise let a digit search hit rows by their position).
+    return rows.filter((o) => {
+      for (let ci = 0; ci < colCount; ci++) {
+        const v = o[ci];
+        if (v !== null && v !== undefined && String(v).toLowerCase().includes(s)) return true;
+      }
+      return false;
+    });
   }, [catalog, catalogSearch]);
 
   const catalogTab = (
@@ -633,7 +650,7 @@ export default function TagManagementModal({ onClose }: Props) {
           row={r}
           allowedValues={allowedValuesByTag.get(`${r.tagDatabase}.${r.tagSchema}.${r.tagName}`) ?? []}
           onSave={saveValue}
-          busy={rowBusy}
+          busy={busyKey === r.key}
         />
       ),
     },
