@@ -161,13 +161,16 @@ export default function CreateContactModal({ db, schema, onClose, onSuccess }: P
 
         {method === "users" && (
           <Form.Item label="Snowflake users" required style={itemStyle} help="One or more Snowflake users to notify.">
+            {/* mode="tags" (not "multiple") so a user name can still be typed
+                manually when SHOW USERS is unavailable (insufficient privileges
+                leaves the options list empty). */}
             <Select
-              mode="multiple"
+              mode="tags"
               showSearch
               loading={loadingUsers}
               value={users}
               onChange={(v) => setUsers(v)}
-              placeholder="Select users…"
+              placeholder="Select or type users…"
               options={userOptions.map((u) => ({ value: u, label: u }))}
               notFoundContent={loadingUsers ? "Loading…" : "No users found"}
               style={{ width: "100%" }}

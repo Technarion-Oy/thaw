@@ -208,9 +208,12 @@ export default function ContactPropertiesModal({ db, schema, name, onClose }: Pr
 
   const contactRef = `"${db}"."${schema}"."${name}"`;
 
-  // Keys rendered by the dedicated sections above the raw table.
+  // Keys rendered by the dedicated sections above the raw table. The contact
+  // method columns and comment are surfaced in the Contact Method / Settings
+  // sections; everything else — including entries_in_users — falls through to
+  // the raw Properties table below.
   const handledKeys = new Set([
-    "email_distribution_list", "url", "users", "entries_in_users", "comment",
+    "email_distribution_list", "url", "users", "comment",
   ]);
 
   const methodLabel = currentMethod === "email" ? "Email distribution list" : currentMethod === "url" ? "URL" : "Snowflake users";
@@ -262,15 +265,17 @@ export default function ContactPropertiesModal({ db, schema, name, onClose }: Pr
               {method === "url" && (
                 <Input size="small" value={draftUrl} onChange={(e) => setDraftUrl(e.target.value)} placeholder="https://example.com/oncall" style={{ width: 360 }} />
               )}
+              {/* mode="tags" (not "multiple") so a user name can still be typed
+                  manually when SHOW USERS is unavailable. */}
               {method === "users" && (
                 <Select
-                  mode="multiple"
+                  mode="tags"
                   size="small"
                   showSearch
                   loading={loadingUsers}
                   value={draftUsers}
                   onChange={(v) => setDraftUsers(v)}
-                  placeholder="Select users…"
+                  placeholder="Select or type users…"
                   options={userOptions.map((u) => ({ value: u, label: u }))}
                   notFoundContent={loadingUsers ? "Loading…" : "No users found"}
                   style={{ width: 360 }}
