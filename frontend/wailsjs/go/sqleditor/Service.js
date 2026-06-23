@@ -82,6 +82,10 @@ export function ValidateDataTypes(arg1, arg2) {
   return window['go']['sqleditor']['Service']['ValidateDataTypes'](arg1, arg2);
 }
 
+export function ValidateGrammar(arg1, arg2) {
+  return window['go']['sqleditor']['Service']['ValidateGrammar'](arg1, arg2);
+}
+
 export function ValidateSnowflakePatterns(arg1, arg2) {
   return window['go']['sqleditor']['Service']['ValidateSnowflakePatterns'](arg1, arg2);
 }

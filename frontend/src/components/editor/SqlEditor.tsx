@@ -35,7 +35,7 @@ import { patchMonacoClipboard } from "../../utils/monacoClipboard";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, GitGetHeadFileContent } from "../../../wailsjs/go/app/App";
 import { SNOWFLAKE_DATA_TYPES } from "../../generated/snowflakeDataTypes";
-import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateSnowflakePatterns, ValidateDataTypes, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContextFull, ResolveTableRefs, ComputeGitLineDiff } from "../../../wailsjs/go/sqleditor/Service";
+import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateSnowflakePatterns, ValidateDataTypes, ValidateGrammar, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContextFull, ResolveTableRefs, ComputeGitLineDiff } from "../../../wailsjs/go/sqleditor/Service";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { UC, quoteIfNecessary, getFKs, getFKsCached, setFKCache, FKEntry, buildVariableSuggestions } from "./sqlEditorUtils";
 import ExplainModal from "../results/ExplainModal";
@@ -637,6 +637,13 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const dataTypeMarkers = await ValidateDataTypes(diagSql, stmtRanges);
         if (model.getVersionId() !== diagVersion) return;
         diagMarkers.push(...((dataTypeMarkers || []) as DiagMarker[]));
+
+        // Grammar check: recursive-descent Snowflake grammar (internal/sqlgrammar).
+        // Flags recognized-but-malformed statements (missing names, dangling
+        // keywords, …) as Warnings; skips unmodelled statements entirely.
+        const grammarMarkers = await ValidateGrammar(diagSql, stmtRanges);
+        if (model.getVersionId() !== diagVersion) return;
+        diagMarkers.push(...((grammarMarkers || []) as DiagMarker[]));
 
         const rawRefs = await ParseJoinTableRefs(diagSql);
         if (model.getVersionId() !== diagVersion) return;

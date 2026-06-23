@@ -42,6 +42,8 @@ export function ValidateBareColumnRefs(arg1:sqleditor.ValidateBareColsRequest):P
 
 export function ValidateDataTypes(arg1:string,arg2:Array<sqleditor.StatementRange>):Promise<Array<sqleditor.DiagMarker>>;
 
+export function ValidateGrammar(arg1:string,arg2:Array<sqleditor.StatementRange>):Promise<Array<sqleditor.DiagMarker>>;
+
 export function ValidateSnowflakePatterns(arg1:string,arg2:Array<sqleditor.StatementRange>):Promise<Array<sqleditor.DiagMarker>>;
 
 export function ValidateTablesExist(arg1:sqleditor.ValidateTablesExistRequest):Promise<Array<sqleditor.DiagMarker>>;
