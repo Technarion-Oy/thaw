@@ -13,6 +13,18 @@ func (v *Validator) ParseSet() bool {
 	return true
 }
 
+// ParseUnset validates the Snowflake `UNSET` command (drops a session variable).
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/unset
+func (v *Validator) ParseUnset() bool {
+	return true
+}
+
+// ParseUse validates the Snowflake `USE` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/use
+func (v *Validator) ParseUse() bool {
+	return true
+}
+
 // ParseUseDatabase validates the Snowflake `USE DATABASE` command.
 // Reference: https://docs.snowflake.com/en/sql-reference/sql/use-database
 func (v *Validator) ParseUseDatabase() bool {
@@ -28,6 +40,12 @@ func (v *Validator) ParseUseRole() bool {
 // ParseUseSchema validates the Snowflake `USE SCHEMA` command.
 // Reference: https://docs.snowflake.com/en/sql-reference/sql/use-schema
 func (v *Validator) ParseUseSchema() bool {
+	return true
+}
+
+// ParseUseSecondaryRoles validates the Snowflake `USE SECONDARY ROLES` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/use-secondary-roles
+func (v *Validator) ParseUseSecondaryRoles() bool {
 	return true
 }
 

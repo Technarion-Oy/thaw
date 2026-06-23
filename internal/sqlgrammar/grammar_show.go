@@ -469,6 +469,12 @@ func (v *Validator) ParseShowNetworkRules() bool {
 	return true
 }
 
+// ParseShowNotebookProjects validates the Snowflake `SHOW NOTEBOOK PROJECTS` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-notebook-projects
+func (v *Validator) ParseShowNotebookProjects() bool {
+	return true
+}
+
 // ParseShowNotebooks validates the Snowflake `SHOW NOTEBOOKS` command.
 // Reference: https://docs.snowflake.com/en/sql-reference/sql/show-notebooks
 func (v *Validator) ParseShowNotebooks() bool {
@@ -595,9 +601,21 @@ func (v *Validator) ParseShowQueries() bool {
 	return true
 }
 
+// ParseShowRegions validates the Snowflake `SHOW REGIONS` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-regions
+func (v *Validator) ParseShowRegions() bool {
+	return true
+}
+
 // ParseShowReplicatedDatabases validates the Snowflake `SHOW REPLICATED DATABASES` command.
 // Reference: https://docs.snowflake.com/en/sql-reference/sql/show-replicated-databases
 func (v *Validator) ParseShowReplicatedDatabases() bool {
+	return true
+}
+
+// ParseShowReplicationAccounts validates the Snowflake `SHOW REPLICATION ACCOUNTS` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-replication-accounts
+func (v *Validator) ParseShowReplicationAccounts() bool {
 	return true
 }
 
@@ -784,6 +802,12 @@ func (v *Validator) ParseShowTypes() bool {
 // ParseShowUniqueKeys validates the Snowflake `SHOW UNIQUE KEYS` command.
 // Reference: https://docs.snowflake.com/en/sql-reference/sql/show-unique-keys
 func (v *Validator) ParseShowUniqueKeys() bool {
+	return true
+}
+
+// ParseShowUserFunctions validates the Snowflake `SHOW USER FUNCTIONS` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-user-functions
+func (v *Validator) ParseShowUserFunctions() bool {
 	return true
 }
 
