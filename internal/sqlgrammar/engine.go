@@ -280,3 +280,59 @@ func (v *Validator) wordsValue(words ...string) Rule {
 		return v.Choice(alts...)
 	}
 }
+
+// parseString matches a single-quoted string literal.
+func (v *Validator) parseString() bool { return v.Match(sqltok.StringLit) }
+
+// parseNumber matches a numeric literal (optionally signed).
+func (v *Validator) parseNumber() bool {
+	v.Optional(func() bool {
+		return v.Choice(
+			func() bool { return v.MatchOp("+") },
+			func() bool { return v.MatchOp("-") },
+		)
+	})
+	return v.Match(sqltok.NumberLit)
+}
+
+// phrase matches the given words in order (case-insensitive, kind-agnostic),
+// e.g. phrase("IF","NOT","EXISTS"). It backtracks fully on any miss.
+func (v *Validator) phrase(words ...string) bool {
+	rules := make([]Rule, len(words))
+	for i, w := range words {
+		rules[i] = func() bool { return v.MatchWord(w) }
+	}
+	return v.Sequence(rules...)
+}
+
+// orReplace matches the optional `OR REPLACE` modifier.
+func (v *Validator) orReplace() bool {
+	return v.Optional(func() bool { return v.phrase("OR", "REPLACE") })
+}
+
+// ifNotExists matches the optional `IF NOT EXISTS` clause.
+func (v *Validator) ifNotExists() bool {
+	return v.Optional(func() bool { return v.phrase("IF", "NOT", "EXISTS") })
+}
+
+// ifExists matches the optional `IF EXISTS` clause.
+func (v *Validator) ifExists() bool {
+	return v.Optional(func() bool { return v.phrase("IF", "EXISTS") })
+}
+
+// commentOption returns a rule matching `COMMENT = '<string>'`.
+func (v *Validator) commentOption() Rule {
+	return v.option("COMMENT", v.parseString)
+}
+
+// tagClause matches the standard `[ WITH ] TAG ( <name> = '<value>' [ , ... ] )`
+// clause shared by many CREATE commands.
+func (v *Validator) tagClause() bool {
+	return v.Sequence(
+		func() bool { return v.Optional(func() bool { return v.MatchWord("WITH") }) },
+		func() bool { return v.MatchWord("TAG") },
+		func() bool {
+			return v.parseParenList(v.option2(v.parseIdentPath, v.parseString))
+		},
+	)
+}
