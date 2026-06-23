@@ -48,12 +48,6 @@ func (s *Service) AnalyzeSqlSemantics(sql string, resolvedRefs []ResolvedRef, co
 	return ValidateSemantics(sql, resolvedRefs, colEntries)
 }
 
-// ValidateSnowflakePatterns runs custom Snowflake anti-pattern checks and
-// statement preamble validation.
-func (s *Service) ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMarker {
-	return ValidateSnowflakePatterns(sql, stmtRanges)
-}
-
 // ValidateDataTypes checks CREATE TABLE, ALTER TABLE ADD COLUMN, CAST(), and
 // shorthand cast (::) expressions for unrecognized Snowflake data type names.
 func (s *Service) ValidateDataTypes(sql string, stmtRanges []StatementRange) []DiagMarker {
