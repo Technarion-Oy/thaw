@@ -40,6 +40,28 @@ var prefixFamilies = []struct {
 	{"ParseRevoke", []string{"REVOKE"}},
 }
 
+// dispatchExclude lists the generic "CREATE/ALTER/DROP/… <object>" index-page
+// rules. They are deliberately kept OUT of top-level dispatch: each accepts
+// almost any leader + name + arbitrary tail, which would mask real errors
+// (missing column lists, malformed column defs, unknown object types). The
+// specific per-command rules — which now also accept the CREATE OR ALTER form
+// via orReplace — govern validation instead. The functions still exist (and are
+// covered by the reflection meta-test); they are just not dispatch entry points.
+var dispatchExclude = map[string]bool{
+	"ParseCreateObj":        true,
+	"ParseCreateObjClone":   true,
+	"ParseCreateOrAlterObj": true,
+	"ParseAlterObj":         true,
+	"ParseDropObj":          true,
+	"ParseShowObjs":         true,
+	"ParseDescribeObj":      true,
+	"ParseUndropObj":        true,
+	// Lenient duplicate of ParseCreateTable for the CREATE-TABLE-with-constraint
+	// doc page; its CREATE form (balanced-paren body) masks malformed column
+	// lists, and its ALTER form is unreachable here (ALTER routes to ParseAlter*).
+	"ParseCreateAlterTableConstraint": true,
+}
+
 func buildRegistry() map[string][]ruleFn {
 	reg := map[string][]ruleFn{}
 
@@ -47,6 +69,9 @@ func buildRegistry() map[string][]ruleFn {
 	vt := reflect.TypeFor[*Validator]()
 	for i := 0; i < vt.NumMethod(); i++ {
 		m := vt.Method(i)
+		if dispatchExclude[m.Name] {
+			continue
+		}
 		fn, ok := m.Func.Interface().(ruleFn)
 		if !ok {
 			continue

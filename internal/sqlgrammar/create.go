@@ -7934,17 +7934,93 @@ func (v *Validator) ParseCreateTable() bool {
 			v.tagClause,
 		)
 	}
+	// colItemEnd consumes the remainder of one column/constraint entry up to the
+	// next top-level comma or the column list's closing paren (nested parens are
+	// balanced). It always succeeds — it swallows DEFAULT / NOT NULL / COLLATE /
+	// inline constraints / etc. that we don't model in detail.
+	colItemEnd := func() bool {
+		depth := 0
+		for !v.AtEnd() {
+			k := v.Peek().Kind
+			if depth == 0 && (k == sqltok.Comma || k == sqltok.RParen) {
+				return true
+			}
+			switch k {
+			case sqltok.LParen:
+				depth++
+			case sqltok.RParen:
+				depth--
+			}
+			v.advance()
+		}
+		return true
+	}
+	// constraintClause matches an out-of-line table constraint entry.
+	constraintClause := func() bool {
+		return v.Sequence(
+			func() bool {
+				return v.Choice(
+					func() bool { return v.MatchWord("CONSTRAINT") },
+					func() bool { return v.phrase("PRIMARY", "KEY") },
+					func() bool { return v.phrase("FOREIGN", "KEY") },
+					func() bool { return v.MatchWord("UNIQUE") },
+					func() bool { return v.MatchWord("CHECK") },
+				)
+			},
+			colItemEnd,
+		)
+	}
+	// columnDef matches a column definition: a name followed by a (required) data
+	// type token — this is what rejects `(dsdfssf)`, a name with no type — then
+	// optional type args and the rest of the column spec. The data-type *name* is
+	// validated separately by sqleditor.ValidateDataTypes, so it is not re-checked
+	// here (avoids double-reporting).
+	columnDef := func() bool {
+		return v.Sequence(
+			v.parseIdentPath,
+			func() bool {
+				if t := v.Peek(); t.Kind.IsIdentLike() {
+					v.advance()
+					return true
+				}
+				v.expect("data type")
+				return false
+			},
+			func() bool { return v.Optional(v.consumeBalancedParens) },
+			colItemEnd,
+		)
+	}
+	colItem := func() bool { return v.Choice(constraintClause, columnDef) }
+	// colList is the full `( <col-def> [ , <col-def> ]* )` definition list — at
+	// least one well-formed entry is required.
+	colList := func() bool {
+		return v.Sequence(
+			func() bool { return v.Match(sqltok.LParen) },
+			colItem,
+			func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, colItem)
+				})
+			},
+			func() bool { return v.Match(sqltok.RParen) },
+		)
+	}
+	// nameList is a bare `( <name> [ , <name> ]* )` list — only valid as the
+	// column-alias list of a CTAS, so it must be followed by AS <query>.
+	nameList := func() bool { return v.parseParenList(v.parseIdentPath) }
+
 	body := func() bool {
 		return v.Choice(
-			// CREATE TABLE ... ( cols ) [ options ]
+			// CREATE TABLE ... ( col defs ) [ options ] [ AS <query> ]
 			func() bool {
 				return v.Sequence(
-					balanced,
+					colList,
 					func() bool { return v.ZeroOrMore(opt) },
-					// optional AS <query> after a defined column list.
 					func() bool { return v.Optional(asQuery) },
 				)
 			},
+			// CREATE TABLE ... ( col names ) AS <query>   (CTAS column aliases)
+			func() bool { return v.Sequence(nameList, asQuery) },
 			// CREATE TABLE ... AS <query>
 			asQuery,
 			// CREATE TABLE ... USING TEMPLATE <query>
@@ -7952,8 +8028,6 @@ func (v *Validator) ParseCreateTable() bool {
 			likeClause,
 			cloneClause,
 			fromArchive,
-			// bare CREATE TABLE <name> [ options ]
-			func() bool { return v.ZeroOrMore(opt) },
 		)
 	}
 	return v.Sequence(

@@ -305,9 +305,15 @@ func (v *Validator) phrase(words ...string) bool {
 	return v.Sequence(rules...)
 }
 
-// orReplace matches the optional `OR REPLACE` modifier.
+// orReplace matches the optional `OR { REPLACE | ALTER }` modifier (CREATE OR
+// REPLACE and the CREATE OR ALTER convergence form).
 func (v *Validator) orReplace() bool {
-	return v.Optional(func() bool { return v.phrase("OR", "REPLACE") })
+	return v.Optional(func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchKeyword("OR") },
+			v.wordsValue("REPLACE", "ALTER"),
+		)
+	})
 }
 
 // ifNotExists matches the optional `IF NOT EXISTS` clause.

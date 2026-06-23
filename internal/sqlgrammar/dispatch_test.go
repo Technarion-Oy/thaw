@@ -72,21 +72,39 @@ func TestParseTopLevel_Malformed(t *testing.T) {
 	}
 }
 
-// TestParseTopLevel_CatchAllLeniency documents the deliberate conservatism of the
-// dispatcher: the generic "CREATE/ALTER/DROP/… <object>" index rules accept any
-// roughly-well-formed statement (leader + name + arbitrary tail). The grammar
-// diagnostic therefore never flags valid-but-imperfectly-modelled SQL — it only
-// fires on the clearly-broken cases above. If these begin to be rejected (e.g.
-// after removing the catch-alls), that is a deliberate tightening, not a bug.
-func TestParseTopLevel_CatchAllLeniency(t *testing.T) {
-	lenient := []string{
-		`ALTER TABLE t`,
-		`DROP DATABASE d`,
-		`CREATE WIDGET w FOO BAR`, // unknown object type, accepted by ParseCreateObj
+// TestParseTopLevel_NoCatchAllLeniency documents that the generic
+// "CREATE/ALTER/DROP/… <object>" index rules are excluded from dispatch
+// (see dispatchExclude): the specific per-command rules govern, so statements
+// for unknown object types or with a missing required action/body are flagged
+// rather than silently accepted by a catch-all.
+func TestParseTopLevel_NoCatchAllLeniency(t *testing.T) {
+	flagged := []string{
+		`CREATE WIDGET w FOO BAR`,  // unknown object type
+		`DROP FROBNICATE x`,        // unknown object type
+		`SHOW WIDGETS`,             // unknown object type
+		`ALTER TABLE t`,            // missing action
+		`CREATE TABLE t`,           // missing column list / AS / LIKE / CLONE
+		`CREATE TABLE t (dsdfssf)`, // column without a data type
+		`CREATE TABLE t ()`,        // empty column list
 	}
-	for _, sql := range lenient {
+	for _, sql := range flagged {
+		if topLevelOK(sql) {
+			t.Errorf("expected %q to be flagged (no catch-all), but it parsed", sql)
+		}
+	}
+	// Well-formed statements for modelled objects are still accepted.
+	valid := []string{
+		`DROP DATABASE d`,
+		`ALTER TABLE t RENAME TO t2`,
+		`CREATE TABLE t (id INT)`,
+		`CREATE OR ALTER TABLE t (id INT)`,
+		`CREATE TABLE t (a, b) AS SELECT 1, 2`,
+	}
+	for _, sql := range valid {
 		if !topLevelOK(sql) {
-			t.Errorf("expected catch-all to ACCEPT %q (conservative design)", sql)
+			v := New(sql)
+			v.ParseTopLevel()
+			t.Errorf("expected %q to be accepted: %s", sql, v.Failure().Message())
 		}
 	}
 }

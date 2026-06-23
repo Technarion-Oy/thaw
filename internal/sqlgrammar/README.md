@@ -55,12 +55,20 @@ statement if any rule consumes it to the end (a single trailing `;` is tolerated
 so overlapping variants (`CREATE DATABASE` vs `CREATE DATABASE ROLE`, the several
 `CREATE TABLE` forms) disambiguate by longest full match.
 
-The grammar is **deliberately lenient**: free-form spans (column/constraint lists,
-`AS <query>`, procedure bodies, policy expressions, ALTER actions) are accepted via
-`consumeBalancedParens`/`consumeRest`, and generic `CREATE/ALTER/DROP/… <object>`
-catch-all rules accept any roughly-well-formed statement. The validator therefore
-only flags clearly-broken statements (missing names, dangling keywords, unbalanced
-parens) and never flags valid-but-unmodelled SQL.
+The grammar is lenient about **free-form spans** — `AS <query>`, procedure bodies,
+policy expressions, ALTER actions are consumed via `consumeBalancedParens`/
+`consumeRest` rather than modelled token-for-token. But it is **strict about
+statement skeletons**: the generic `CREATE/ALTER/DROP/… <object>` index-page rules
+(`ParseCreateObj`, `ParseAlterObj`, …) are excluded from dispatch (see
+`dispatchExclude` in `dispatch.go`) so the specific per-command rules govern.
+Consequently the validator flags unknown object types, missing required
+actions/bodies, and malformed column lists — e.g. `CREATE TABLE t` (no body),
+`CREATE TABLE t (dsdfssf)` (column with no data type), and `CREATE WIDGET w` are all
+reported. `CREATE TABLE` requires a real column-definition list (each column
+`<name> <datatype>`, the data-type *name* validated by `sqleditor.ValidateDataTypes`),
+a CTAS column-alias list followed by `AS <query>`, or `AS`/`LIKE`/`CLONE`/
+`USING TEMPLATE`/`FROM ARCHIVE`. The `CREATE OR ALTER` form is accepted everywhere
+via `orReplace`.
 
 ## Tests
 
