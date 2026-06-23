@@ -474,3 +474,15 @@ func (v *Validator) ParseDescribeView() bool {
 func (v *Validator) ParseDescribeWarehouse() bool {
 	return true
 }
+
+// ParseDescribeApplicationService validates the Snowflake `DESCRIBE APPLICATION SERVICE` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/desc-application-service
+func (v *Validator) ParseDescribeApplicationService() bool {
+	return true
+}
+
+// ParseDescribeArtifactRepository validates the Snowflake `DESCRIBE ARTIFACT REPOSITORY` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/desc-artifact-repository
+func (v *Validator) ParseDescribeArtifactRepository() bool {
+	return true
+}

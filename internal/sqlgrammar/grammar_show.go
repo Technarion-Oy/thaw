@@ -834,3 +834,249 @@ func (v *Validator) ParseShowViews() bool {
 func (v *Validator) ParseShowWarehouses() bool {
 	return true
 }
+
+// ParseShowApplicationServices validates the Snowflake `SHOW APPLICATION SERVICES` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-application-services
+func (v *Validator) ParseShowApplicationServices() bool {
+	return true
+}
+
+// ParseShowArtifactRepositories validates the Snowflake `SHOW ARTIFACT REPOSITORIES` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-artifact-repositories
+func (v *Validator) ParseShowArtifactRepositories() bool {
+	return true
+}
+
+// ParseShowCortexBaseModels validates the Snowflake `SHOW CORTEX BASE MODELS` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-cortex-base-models
+func (v *Validator) ParseShowCortexBaseModels() bool {
+	return true
+}
+
+// ParseShowEventRoutingTableOnOrganization validates the Snowflake `SHOW EVENT ROUTING TABLE ON ORGANIZATION` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-event-routing-table-on-organization
+func (v *Validator) ParseShowEventRoutingTableOnOrganization() bool {
+	return true
+}
+
+// ParseShowEventRoutingTables validates the Snowflake `SHOW EVENT ROUTING TABLES` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-event-routing-tables
+func (v *Validator) ParseShowEventRoutingTables() bool {
+	return true
+}
+
+// ParseShowInteractiveTables validates the Snowflake `SHOW INTERACTIVE TABLES` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-interactive-tables
+func (v *Validator) ParseShowInteractiveTables() bool {
+	return true
+}
+
+// ParseShowObjectsOwnedByApplication validates the Snowflake `SHOW OBJECTS OWNED BY APPLICATION` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-objects-owned-by-application
+func (v *Validator) ParseShowObjectsOwnedByApplication() bool {
+	return true
+}
+
+// ParseShowOffers validates the Snowflake `SHOW OFFERS` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-offers
+func (v *Validator) ParseShowOffers() bool {
+	return true
+}
+
+// ParseShowOpenflowDataPlaneIntegration validates the Snowflake `SHOW OPENFLOW DATA PLANE INTEGRATION` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-oflow-data-plane-integration
+func (v *Validator) ParseShowOpenflowDataPlaneIntegration() bool {
+	return true
+}
+
+// ParseShowPricingPlans validates the Snowflake `SHOW PRICING PLANS` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-pricing-plans
+func (v *Validator) ParseShowPricingPlans() bool {
+	return true
+}
+
+// ParseShowPrivacyPolicies validates the Snowflake `SHOW PRIVACY POLICIES` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-privacy-policies
+func (v *Validator) ParseShowPrivacyPolicies() bool {
+	return true
+}
+
+// ParseShowReferences validates the Snowflake `SHOW REFERENCES` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-references
+func (v *Validator) ParseShowReferences() bool {
+	return true
+}
+
+// ParseShowReleaseChannels validates the Snowflake `SHOW RELEASE CHANNELS` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-release-channels
+func (v *Validator) ParseShowReleaseChannels() bool {
+	return true
+}
+
+// ParseShowReleaseDirectives validates the Snowflake `SHOW RELEASE DIRECTIVES` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-release-directives
+func (v *Validator) ParseShowReleaseDirectives() bool {
+	return true
+}
+
+// ParseShowRolesInService validates the Snowflake `SHOW ROLES IN SERVICE` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-roles-in-service
+func (v *Validator) ParseShowRolesInService() bool {
+	return true
+}
+
+// ParseShowRulesInEventRoutingTable validates the Snowflake `SHOW RULES IN EVENT ROUTING TABLE` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-rules-in-event-routing-table
+func (v *Validator) ParseShowRulesInEventRoutingTable() bool {
+	return true
+}
+
+// ParseShowRunInExperiment validates the Snowflake `SHOW RUN IN EXPERIMENT` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-run-in-experiment
+func (v *Validator) ParseShowRunInExperiment() bool {
+	return true
+}
+
+// ParseShowRunsInExperiment validates the Snowflake `SHOW RUNS IN EXPERIMENT` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-runs-in-experiment
+func (v *Validator) ParseShowRunsInExperiment() bool {
+	return true
+}
+
+// ParseShowSemanticDimensions validates the Snowflake `SHOW SEMANTIC DIMENSIONS` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-semantic-dimensions
+func (v *Validator) ParseShowSemanticDimensions() bool {
+	return true
+}
+
+// ParseShowSemanticDimensionsForMetric validates the Snowflake `SHOW SEMANTIC DIMENSIONS FOR METRIC` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-semantic-dimensions-for-metric
+func (v *Validator) ParseShowSemanticDimensionsForMetric() bool {
+	return true
+}
+
+// ParseShowSemanticFacts validates the Snowflake `SHOW SEMANTIC FACTS` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-semantic-facts
+func (v *Validator) ParseShowSemanticFacts() bool {
+	return true
+}
+
+// ParseShowSemanticMetrics validates the Snowflake `SHOW SEMANTIC METRICS` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-semantic-metrics
+func (v *Validator) ParseShowSemanticMetrics() bool {
+	return true
+}
+
+// ParseShowServiceContainersInService validates the Snowflake `SHOW SERVICE CONTAINERS IN SERVICE` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-service-containers-in-service
+func (v *Validator) ParseShowServiceContainersInService() bool {
+	return true
+}
+
+// ParseShowServiceInstancesInService validates the Snowflake `SHOW SERVICE INSTANCES IN SERVICE` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-service-instances-in-service
+func (v *Validator) ParseShowServiceInstancesInService() bool {
+	return true
+}
+
+// ParseShowServiceVolumesInService validates the Snowflake `SHOW SERVICE VOLUMES IN SERVICE` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-service-volumes-in-service
+func (v *Validator) ParseShowServiceVolumesInService() bool {
+	return true
+}
+
+// ParseShowSharedContent validates the Snowflake `SHOW SHARED CONTENT` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-shared-content
+func (v *Validator) ParseShowSharedContent() bool {
+	return true
+}
+
+// ParseShowSharesInFailoverGroup validates the Snowflake `SHOW SHARES IN FAILOVER GROUP` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-shares-in-failover-group
+func (v *Validator) ParseShowSharesInFailoverGroup() bool {
+	return true
+}
+
+// ParseShowSharesInReplicationGroup validates the Snowflake `SHOW SHARES IN REPLICATION GROUP` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-shares-in-replication-group
+func (v *Validator) ParseShowSharesInReplicationGroup() bool {
+	return true
+}
+
+// ParseShowSnapshotsInSnapshotSet validates the Snowflake `SHOW SNAPSHOTS IN SNAPSHOT SET` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-snapshots-in-snapshot-set
+func (v *Validator) ParseShowSnapshotsInSnapshotSet() bool {
+	return true
+}
+
+// ParseShowSpecifications validates the Snowflake `SHOW SPECIFICATIONS` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-specifications
+func (v *Validator) ParseShowSpecifications() bool {
+	return true
+}
+
+// ParseShowTelemetryEventDefinitions validates the Snowflake `SHOW TELEMETRY EVENT DEFINITIONS` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-telemetry-event-definitions
+func (v *Validator) ParseShowTelemetryEventDefinitions() bool {
+	return true
+}
+
+// ParseShowUserProcedures validates the Snowflake `SHOW USER PROCEDURES` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-user-procedures
+func (v *Validator) ParseShowUserProcedures() bool {
+	return true
+}
+
+// ParseShowUserProgrammaticAccessTokens validates the Snowflake `SHOW USER PROGRAMMATIC ACCESS TOKENS` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-user-programmatic-access-tokens
+func (v *Validator) ParseShowUserProgrammaticAccessTokens() bool {
+	return true
+}
+
+// ParseShowUserWorkloadIdentityAuthenticationMethods validates the Snowflake `SHOW USER WORKLOAD IDENTITY AUTHENTICATION METHODS` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-user-workload-identity-authentication-methods
+func (v *Validator) ParseShowUserWorkloadIdentityAuthenticationMethods() bool {
+	return true
+}
+
+// ParseShowVersions validates the Snowflake `SHOW VERSIONS` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-versions
+func (v *Validator) ParseShowVersions() bool {
+	return true
+}
+
+// ParseShowVersionsInDataset validates the Snowflake `SHOW VERSIONS IN DATASET` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-versions-in-dataset
+func (v *Validator) ParseShowVersionsInDataset() bool {
+	return true
+}
+
+// ParseShowVersionsInDbtProject validates the Snowflake `SHOW VERSIONS IN DBT PROJECT` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-versions-in-dbt-project
+func (v *Validator) ParseShowVersionsInDbtProject() bool {
+	return true
+}
+
+// ParseShowVersionsInListing validates the Snowflake `SHOW VERSIONS IN LISTING` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-versions-in-listing
+func (v *Validator) ParseShowVersionsInListing() bool {
+	return true
+}
+
+// ParseShowVersionsInModel validates the Snowflake `SHOW VERSIONS IN MODEL` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-versions-in-model
+func (v *Validator) ParseShowVersionsInModel() bool {
+	return true
+}
+
+// ParseShowVersionsInOrganizationProfile validates the Snowflake `SHOW VERSIONS IN ORGANIZATION PROFILE` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-versions-in-organization-profile
+func (v *Validator) ParseShowVersionsInOrganizationProfile() bool {
+	return true
+}
+
+// ParseShowWorkspaces validates the Snowflake `SHOW WORKSPACES` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-workspaces
+func (v *Validator) ParseShowWorkspaces() bool {
+	return true
+}

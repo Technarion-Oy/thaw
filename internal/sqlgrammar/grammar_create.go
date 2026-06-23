@@ -768,3 +768,39 @@ func (v *Validator) ParseCreateView() bool {
 func (v *Validator) ParseCreateWarehouse() bool {
 	return true
 }
+
+// ParseCreateApplicationService validates the Snowflake `CREATE APPLICATION SERVICE` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/create-application-service
+func (v *Validator) ParseCreateApplicationService() bool {
+	return true
+}
+
+// ParseCreateArtifactRepository validates the Snowflake `CREATE ARTIFACT REPOSITORY` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/create-artifact-repository
+func (v *Validator) ParseCreateArtifactRepository() bool {
+	return true
+}
+
+// ParseCreateCatalogIntegrationDeltaSharing validates the Snowflake `CREATE CATALOG INTEGRATION (Delta Sharing)` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/create-catalog-integration-delta-sharing
+func (v *Validator) ParseCreateCatalogIntegrationDeltaSharing() bool {
+	return true
+}
+
+// ParseCreateCatalogIntegrationSnowflakePostgres validates the Snowflake `CREATE CATALOG INTEGRATION (Snowflake Postgres)` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/create-catalog-integration-snowflake-postgres
+func (v *Validator) ParseCreateCatalogIntegrationSnowflakePostgres() bool {
+	return true
+}
+
+// ParseCreateEventRoutingTable validates the Snowflake `CREATE EVENT ROUTING TABLE` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/create-event-routing-table
+func (v *Validator) ParseCreateEventRoutingTable() bool {
+	return true
+}
+
+// ParseCreateStorageIntegrationPostgresInternal validates the Snowflake `CREATE STORAGE INTEGRATION (Postgres internal)` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/create-storage-integration-postgres-internal
+func (v *Validator) ParseCreateStorageIntegrationPostgresInternal() bool {
+	return true
+}

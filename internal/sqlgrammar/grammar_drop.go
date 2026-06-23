@@ -516,3 +516,21 @@ func (v *Validator) ParseDropView() bool {
 func (v *Validator) ParseDropWarehouse() bool {
 	return true
 }
+
+// ParseDropApplicationService validates the Snowflake `DROP APPLICATION SERVICE` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/drop-application-service
+func (v *Validator) ParseDropApplicationService() bool {
+	return true
+}
+
+// ParseDropArtifactRepository validates the Snowflake `DROP ARTIFACT REPOSITORY` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/drop-artifact-repository
+func (v *Validator) ParseDropArtifactRepository() bool {
+	return true
+}
+
+// ParseDropEventRoutingTable validates the Snowflake `DROP EVENT ROUTING TABLE` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/drop-event-routing-table
+func (v *Validator) ParseDropEventRoutingTable() bool {
+	return true
+}

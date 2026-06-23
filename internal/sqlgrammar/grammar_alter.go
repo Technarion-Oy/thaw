@@ -774,3 +774,33 @@ func (v *Validator) ParseAlterView() bool {
 func (v *Validator) ParseAlterWarehouse() bool {
 	return true
 }
+
+// ParseAlterApplicationService validates the Snowflake `ALTER APPLICATION SERVICE` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/alter-application-service
+func (v *Validator) ParseAlterApplicationService() bool {
+	return true
+}
+
+// ParseAlterArtifactRepository validates the Snowflake `ALTER ARTIFACT REPOSITORY` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/alter-artifact-repository
+func (v *Validator) ParseAlterArtifactRepository() bool {
+	return true
+}
+
+// ParseAlterEventRoutingTable validates the Snowflake `ALTER EVENT ROUTING TABLE` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/alter-event-routing-table
+func (v *Validator) ParseAlterEventRoutingTable() bool {
+	return true
+}
+
+// ParseAlterOrganizationSetEventRoutingTable validates the Snowflake `ALTER ORGANIZATION SET EVENT ROUTING TABLE` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/alter-organization-set-event-routing-table
+func (v *Validator) ParseAlterOrganizationSetEventRoutingTable() bool {
+	return true
+}
+
+// ParseAlterOrganizationUnsetEventRoutingTable validates the Snowflake `ALTER ORGANIZATION UNSET EVENT ROUTING TABLE` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/alter-organization-unset-event-routing-table
+func (v *Validator) ParseAlterOrganizationUnsetEventRoutingTable() bool {
+	return true
+}

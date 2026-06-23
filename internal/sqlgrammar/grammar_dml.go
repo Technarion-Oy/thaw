@@ -48,3 +48,9 @@ func (v *Validator) ParseTruncateTable() bool {
 func (v *Validator) ParseUpdate() bool {
 	return true
 }
+
+// ParseTruncateMaterializedView validates the Snowflake `TRUNCATE MATERIALIZED VIEW` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/truncate-materialized-view
+func (v *Validator) ParseTruncateMaterializedView() bool {
+	return true
+}

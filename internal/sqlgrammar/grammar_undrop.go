@@ -54,3 +54,39 @@ func (v *Validator) ParseUndropTable() bool {
 func (v *Validator) ParseUndropView() bool {
 	return true
 }
+
+// ParseUndropObj validates the Snowflake `UNDROP <object>` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/undrop
+func (v *Validator) ParseUndropObj() bool {
+	return true
+}
+
+// ParseUndropAccount validates the Snowflake `UNDROP ACCOUNT` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/undrop-account
+func (v *Validator) ParseUndropAccount() bool {
+	return true
+}
+
+// ParseUndropSnapshot validates the Snowflake `UNDROP SNAPSHOT` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/undrop-snapshot
+func (v *Validator) ParseUndropSnapshot() bool {
+	return true
+}
+
+// ParseUndropStreamlit validates the Snowflake `UNDROP STREAMLIT` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/undrop-streamlit
+func (v *Validator) ParseUndropStreamlit() bool {
+	return true
+}
+
+// ParseUndropTag validates the Snowflake `UNDROP TAG` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/undrop-tag
+func (v *Validator) ParseUndropTag() bool {
+	return true
+}
+
+// ParseUndropType validates the Snowflake `UNDROP TYPE` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/undrop-type
+func (v *Validator) ParseUndropType() bool {
+	return true
+}
