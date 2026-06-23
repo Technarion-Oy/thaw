@@ -16,7 +16,13 @@ package sqlgrammar
 //	            [ USING <additional_table_or_query> [, <additional_table_or_query> ] ]
 //	            [ WHERE <condition> ]
 func (v *Validator) ParseDelete() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("DELETE") },
+		func() bool { return v.MatchWord("FROM") },
+		v.parseIdentPath,
+		// [ USING <tables> ] [ WHERE <condition> ] — free-form tail.
+		func() bool { return v.consumeRest() },
+	)
 }
 
 // ParseInsert validates the Snowflake `INSERT` command.
@@ -30,7 +36,24 @@ func (v *Validator) ParseDelete() bool {
 //	         | <query>
 //	       }
 func (v *Validator) ParseInsert() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("INSERT") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("OVERWRITE") }) },
+		func() bool { return v.MatchWord("INTO") },
+		v.parseIdentPath,
+		// optional ( <target_col_name> [ , ... ] )
+		func() bool {
+			return v.Optional(func() bool { return v.consumeBalancedParens() })
+		},
+		// VALUES (...) [, (...)] | <query> — require at least one more token.
+		func() bool {
+			if v.AtEnd() {
+				v.expect("VALUES or query")
+				return false
+			}
+			return v.consumeRest()
+		},
+	)
 }
 
 // ParseInsertMultiTable validates the Snowflake `INSERT (multi-table)` command.
@@ -55,7 +78,20 @@ func (v *Validator) ParseInsert() bool {
 //	intoClause ::=
 //	  INTO <target_table> [ ( <target_col_name> [ , ... ] ) ] [ VALUES ( { <source_col_name> | DEFAULT | NULL } [ , ... ] ) ]
 func (v *Validator) ParseInsertMultiTable() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("INSERT") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("OVERWRITE") }) },
+		// { ALL | FIRST | ALL } — require the multi-table selector.
+		v.wordsValue("ALL", "FIRST"),
+		// The WHEN/THEN/ELSE intoClauses and the trailing <subquery>: free-form.
+		func() bool {
+			if v.AtEnd() {
+				v.expect("intoClause or subquery")
+				return false
+			}
+			return v.consumeRest()
+		},
+	)
 }
 
 // ParseMerge validates the Snowflake `MERGE` command.
@@ -80,7 +116,31 @@ func (v *Validator) ParseInsertMultiTable() bool {
 //	     [ AND <case_predicate> ]
 //	     THEN INSERT { ALL BY NAME | [ ( <col_name> [ , ... ] ) ] VALUES ( <expr> [ , ... ] ) }
 func (v *Validator) ParseMerge() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("MERGE") },
+		func() bool { return v.MatchWord("INTO") },
+		v.parseIdentPath,
+		func() bool { return v.MatchWord("USING") },
+		// <source> may be a table name or a parenthesized subquery.
+		func() bool {
+			return v.Choice(
+				func() bool { return v.consumeBalancedParens() },
+				v.parseIdentPath,
+			)
+		},
+		// [ [AS] <alias> ] ON <join_expr> { matched | notMatched } [ ... ] —
+		// free-form, but require the ON keyword somewhere ahead.
+		func() bool {
+			for !v.AtEnd() {
+				if v.MatchWord("ON") {
+					return v.consumeRest()
+				}
+				v.advance()
+			}
+			v.expect("ON")
+			return false
+		},
+	)
 }
 
 // ParseSelect validates the Snowflake `SELECT` command.
@@ -126,7 +186,12 @@ func (v *Validator) ParseMerge() bool {
 //	       [ , ... ]
 //	[ ... ]
 func (v *Validator) ParseSelect() bool {
-	return true
+	return v.Sequence(
+		// Require the SELECT keyword; the projection list, FROM/WHERE/GROUP BY/
+		// etc. clause soup is free-form.
+		func() bool { return v.MatchWord("SELECT") },
+		func() bool { return v.consumeRest() },
+	)
 }
 
 // ParseTruncateTable validates the Snowflake `TRUNCATE TABLE` command.
@@ -138,7 +203,23 @@ func (v *Validator) ParseSelect() bool {
 //
 //	TRUNCATE [ TABLE ] [ IF EXISTS ] ERROR_TABLE( <base_table_name> )
 func (v *Validator) ParseTruncateTable() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("TRUNCATE") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("TABLE") }) },
+		v.ifExists,
+		// <name>  |  ERROR_TABLE( <base_table_name> )
+		func() bool {
+			return v.Choice(
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("ERROR_TABLE") },
+						func() bool { return v.consumeBalancedParens() },
+					)
+				},
+				v.parseIdentPath,
+			)
+		},
+	)
 }
 
 // ParseUpdate validates the Snowflake `UPDATE` command.
@@ -151,7 +232,20 @@ func (v *Validator) ParseTruncateTable() bool {
 //	        [ FROM <additional_tables> ]
 //	        [ WHERE <condition> ]
 func (v *Validator) ParseUpdate() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("UPDATE") },
+		v.parseIdentPath,
+		func() bool { return v.MatchWord("SET") },
+		// SET <col> = <value> [, ...] [ FROM ... ] [ WHERE ... ] — free-form, but
+		// require at least one token (the first assignment) after SET.
+		func() bool {
+			if v.AtEnd() {
+				v.expect("column assignment")
+				return false
+			}
+			return v.consumeRest()
+		},
+	)
 }
 
 // ParseTruncateMaterializedView validates the Snowflake `TRUNCATE MATERIALIZED VIEW` command.
@@ -161,5 +255,10 @@ func (v *Validator) ParseUpdate() bool {
 //
 //	TRUNCATE MATERIALIZED VIEW <name>
 func (v *Validator) ParseTruncateMaterializedView() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("TRUNCATE") },
+		func() bool { return v.MatchWord("MATERIALIZED") },
+		func() bool { return v.MatchWord("VIEW") },
+		v.parseIdentPath,
+	)
 }

@@ -1,5 +1,11 @@
 package sqlgrammar
 
+import (
+	"strings"
+
+	"thaw/internal/sqltok"
+)
+
 // GRANT / REVOKE commands — grammar-rule stubs for issue #556.
 //
 // Each function corresponds to one Snowflake command reference (see the per-
@@ -14,7 +20,26 @@ package sqlgrammar
 //
 //	GRANT APPLICATION ROLE <name> TO  { ROLE <parent_role_name> | APPLICATION ROLE <application_role> | APPLICATION <application_name> | USER <user_name> }
 func (v *Validator) ParseGrantApplicationRole() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("GRANT") },
+		func() bool { return v.phrase("APPLICATION", "ROLE") },
+		v.parseIdentPath,
+		func() bool { return v.MatchWord("TO") },
+		// { ROLE | APPLICATION ROLE | APPLICATION | USER } <name>
+		func() bool {
+			return v.Sequence(
+				func() bool {
+					return v.Choice(
+						func() bool { return v.phrase("APPLICATION", "ROLE") },
+						func() bool { return v.MatchWord("APPLICATION") },
+						func() bool { return v.MatchWord("ROLE") },
+						func() bool { return v.MatchWord("USER") },
+					)
+				},
+				v.parseIdentPath,
+			)
+		},
+	)
 }
 
 // ParseGrantCaller validates the Snowflake `GRANT CALLER` command.
@@ -40,7 +65,49 @@ func (v *Validator) ParseGrantApplicationRole() bool {
 //	  IN { ACCOUNT | DATABASE <db_name> | SCHEMA <schema_name> | APPLICATION <app_name> | APPLICATION PACKAGE <app_pkg_name> }
 //	  TO { ROLE | DATABASE ROLE | APPLICATION } <grantee_name>
 func (v *Validator) ParseGrantCaller() bool {
-	return true
+	// Consume the privilege/securable span up to (but not including) the TO
+	// boundary keyword, which must appear at paren-depth 0.
+	consumeToBoundary := func(boundary string) bool {
+		depth := 0
+		for !v.AtEnd() {
+			t := v.Peek()
+			if depth == 0 && t.Kind.IsIdentLike() && strings.EqualFold(t.Text(v.src), boundary) {
+				return true
+			}
+			switch t.Kind {
+			case sqltok.LParen:
+				depth++
+			case sqltok.RParen:
+				if depth > 0 {
+					depth--
+				}
+			}
+			v.advance()
+		}
+		v.expect(boundary)
+		return false
+	}
+	return v.Sequence(
+		func() bool { return v.MatchWord("GRANT") },
+		// GRANT [ALL] [INHERITED] CALLER ... — require the CALLER keyword.
+		func() bool { return v.Optional(func() bool { return v.MatchWord("ALL") }) },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("INHERITED") }) },
+		func() bool { return v.MatchWord("CALLER") },
+		func() bool { return consumeToBoundary("TO") },
+		func() bool { return v.MatchWord("TO") },
+		func() bool {
+			return v.Sequence(
+				func() bool {
+					return v.Choice(
+						func() bool { return v.phrase("DATABASE", "ROLE") },
+						func() bool { return v.MatchWord("ROLE") },
+						func() bool { return v.MatchWord("APPLICATION") },
+					)
+				},
+				v.parseIdentPath,
+			)
+		},
+	)
 }
 
 // ParseGrantDatabaseRole validates the Snowflake `GRANT DATABASE ROLE` command.
@@ -52,7 +119,26 @@ func (v *Validator) ParseGrantCaller() bool {
 //
 //	GRANT DATABASE ROLE <name> TO APPLICATION <app_name>
 func (v *Validator) ParseGrantDatabaseRole() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("GRANT") },
+		func() bool { return v.phrase("DATABASE", "ROLE") },
+		v.parseIdentPath,
+		func() bool { return v.MatchWord("TO") },
+		// { DATABASE ROLE | ROLE | USER | APPLICATION } <name>
+		func() bool {
+			return v.Sequence(
+				func() bool {
+					return v.Choice(
+						func() bool { return v.phrase("DATABASE", "ROLE") },
+						func() bool { return v.MatchWord("ROLE") },
+						func() bool { return v.MatchWord("USER") },
+						func() bool { return v.MatchWord("APPLICATION") },
+					)
+				},
+				v.parseIdentPath,
+			)
+		},
+	)
 }
 
 // ParseGrantDatabaseRoleToShare validates the Snowflake `GRANT DATABASE ROLE TO SHARE` command.
@@ -63,7 +149,14 @@ func (v *Validator) ParseGrantDatabaseRole() bool {
 //	GRANT DATABASE ROLE <name>
 //	  TO SHARE <share_name>
 func (v *Validator) ParseGrantDatabaseRoleToShare() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("GRANT") },
+		func() bool { return v.phrase("DATABASE", "ROLE") },
+		v.parseIdentPath,
+		func() bool { return v.MatchWord("TO") },
+		func() bool { return v.MatchWord("SHARE") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseGrantOwnership validates the Snowflake `GRANT OWNERSHIP` command.
@@ -86,7 +179,55 @@ func (v *Validator) ParseGrantDatabaseRoleToShare() bool {
 //	  TO { ROLE <role_name> | DATABASE ROLE <database_role_name> }
 //	  [ { REVOKE | COPY } CURRENT GRANTS ]
 func (v *Validator) ParseGrantOwnership() bool {
-	return true
+	consumeToBoundary := func(boundary string) bool {
+		depth := 0
+		for !v.AtEnd() {
+			t := v.Peek()
+			if depth == 0 && t.Kind.IsIdentLike() && strings.EqualFold(t.Text(v.src), boundary) {
+				return true
+			}
+			switch t.Kind {
+			case sqltok.LParen:
+				depth++
+			case sqltok.RParen:
+				if depth > 0 {
+					depth--
+				}
+			}
+			v.advance()
+		}
+		v.expect(boundary)
+		return false
+	}
+	return v.Sequence(
+		func() bool { return v.MatchWord("GRANT") },
+		func() bool { return v.MatchWord("OWNERSHIP") },
+		func() bool { return v.MatchWord("ON") },
+		// securable span up to TO — free-form.
+		func() bool { return consumeToBoundary("TO") },
+		func() bool { return v.MatchWord("TO") },
+		// { ROLE | DATABASE ROLE } <name>
+		func() bool {
+			return v.Sequence(
+				func() bool {
+					return v.Choice(
+						func() bool { return v.phrase("DATABASE", "ROLE") },
+						func() bool { return v.MatchWord("ROLE") },
+					)
+				},
+				v.parseIdentPath,
+			)
+		},
+		// [ { REVOKE | COPY } CURRENT GRANTS ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					v.wordsValue("REVOKE", "COPY"),
+					func() bool { return v.phrase("CURRENT", "GRANTS") },
+				)
+			})
+		},
+	)
 }
 
 // ParseGrantPrivsToRole validates the Snowflake `GRANT <privileges> TO ROLE` command.
@@ -113,7 +254,57 @@ func (v *Validator) ParseGrantOwnership() bool {
 //	      }
 //	  TO DATABASE ROLE <database_role_name> [ WITH GRANT OPTION ]
 func (v *Validator) ParseGrantPrivsToRole() bool {
-	return true
+	consumeToBoundary := func(boundary string) bool {
+		depth := 0
+		for !v.AtEnd() {
+			t := v.Peek()
+			if depth == 0 && t.Kind.IsIdentLike() && strings.EqualFold(t.Text(v.src), boundary) {
+				return true
+			}
+			switch t.Kind {
+			case sqltok.LParen:
+				depth++
+			case sqltok.RParen:
+				if depth > 0 {
+					depth--
+				}
+			}
+			v.advance()
+		}
+		v.expect(boundary)
+		return false
+	}
+	return v.Sequence(
+		func() bool { return v.MatchWord("GRANT") },
+		// require at least one token of privilege span before TO.
+		func() bool {
+			if v.AtEnd() || strings.EqualFold(v.Peek().Text(v.src), "TO") {
+				v.expect("privileges")
+				return false
+			}
+			return true
+		},
+		func() bool { return consumeToBoundary("TO") },
+		func() bool { return v.MatchWord("TO") },
+		// TO [ ROLE ] <name>  |  TO DATABASE ROLE <name>
+		func() bool {
+			return v.Sequence(
+				func() bool {
+					return v.Optional(func() bool {
+						return v.Choice(
+							func() bool { return v.phrase("DATABASE", "ROLE") },
+							func() bool { return v.MatchWord("ROLE") },
+						)
+					})
+				},
+				v.parseIdentPath,
+			)
+		},
+		// [ WITH GRANT OPTION ]
+		func() bool {
+			return v.Optional(func() bool { return v.phrase("WITH", "GRANT", "OPTION") })
+		},
+	)
 }
 
 // ParseGrantPrivsToApplication validates the Snowflake `GRANT <privileges> TO APPLICATION` command.
@@ -156,7 +347,47 @@ func (v *Validator) ParseGrantPrivsToRole() bool {
 //	schemaObjectPrivileges ::=
 //	  -- per object type, e.g. SELECT / INSERT / USAGE / REFERENCES / APPLY / READ / WRITE / OPERATE / MONITOR / etc.
 func (v *Validator) ParseGrantPrivsToApplication() bool {
-	return true
+	consumeToBoundary := func(boundary string) bool {
+		depth := 0
+		for !v.AtEnd() {
+			t := v.Peek()
+			if depth == 0 && t.Kind.IsIdentLike() && strings.EqualFold(t.Text(v.src), boundary) {
+				return true
+			}
+			switch t.Kind {
+			case sqltok.LParen:
+				depth++
+			case sqltok.RParen:
+				if depth > 0 {
+					depth--
+				}
+			}
+			v.advance()
+		}
+		v.expect(boundary)
+		return false
+	}
+	return v.Sequence(
+		func() bool { return v.MatchWord("GRANT") },
+		func() bool {
+			if v.AtEnd() || strings.EqualFold(v.Peek().Text(v.src), "TO") {
+				v.expect("privileges")
+				return false
+			}
+			return true
+		},
+		func() bool { return consumeToBoundary("TO") },
+		func() bool { return v.MatchWord("TO") },
+		// TO APPLICATION <name>  (the APPLICATION ROLE form is a separate command)
+		func() bool { return v.MatchWord("APPLICATION") },
+		func() bool {
+			return v.Optional(func() bool { return v.MatchWord("ROLE") })
+		},
+		v.parseIdentPath,
+		func() bool {
+			return v.Optional(func() bool { return v.phrase("WITH", "GRANT", "OPTION") })
+		},
+	)
 }
 
 // ParseGrantPrivsToApplicationRole validates the Snowflake `GRANT <privileges> TO APPLICATION ROLE` command.
@@ -186,7 +417,43 @@ func (v *Validator) ParseGrantPrivsToApplication() bool {
 //	schemaObjectPrivileges ::=
 //	  -- per object type, e.g. SELECT / INSERT / USAGE / REFERENCES / APPLY / READ / WRITE / OPERATE / MONITOR / etc.
 func (v *Validator) ParseGrantPrivsToApplicationRole() bool {
-	return true
+	consumeToBoundary := func(boundary string) bool {
+		depth := 0
+		for !v.AtEnd() {
+			t := v.Peek()
+			if depth == 0 && t.Kind.IsIdentLike() && strings.EqualFold(t.Text(v.src), boundary) {
+				return true
+			}
+			switch t.Kind {
+			case sqltok.LParen:
+				depth++
+			case sqltok.RParen:
+				if depth > 0 {
+					depth--
+				}
+			}
+			v.advance()
+		}
+		v.expect(boundary)
+		return false
+	}
+	return v.Sequence(
+		func() bool { return v.MatchWord("GRANT") },
+		func() bool {
+			if v.AtEnd() || strings.EqualFold(v.Peek().Text(v.src), "TO") {
+				v.expect("privileges")
+				return false
+			}
+			return true
+		},
+		func() bool { return consumeToBoundary("TO") },
+		func() bool { return v.MatchWord("TO") },
+		func() bool { return v.phrase("APPLICATION", "ROLE") },
+		v.parseIdentPath,
+		func() bool {
+			return v.Optional(func() bool { return v.phrase("WITH", "GRANT", "OPTION") })
+		},
+	)
 }
 
 // ParseGrantPrivToShare validates the Snowflake `GRANT <privilege> TO SHARE` command.
@@ -223,7 +490,41 @@ func (v *Validator) ParseGrantPrivsToApplicationRole() bool {
 //	-- For TAG
 //	   READ
 func (v *Validator) ParseGrantPrivToShare() bool {
-	return true
+	consumeToBoundary := func(boundary string) bool {
+		depth := 0
+		for !v.AtEnd() {
+			t := v.Peek()
+			if depth == 0 && t.Kind.IsIdentLike() && strings.EqualFold(t.Text(v.src), boundary) {
+				return true
+			}
+			switch t.Kind {
+			case sqltok.LParen:
+				depth++
+			case sqltok.RParen:
+				if depth > 0 {
+					depth--
+				}
+			}
+			v.advance()
+		}
+		v.expect(boundary)
+		return false
+	}
+	return v.Sequence(
+		func() bool { return v.MatchWord("GRANT") },
+		// objectPrivilege ON ... up to the TO SHARE boundary.
+		func() bool {
+			if v.AtEnd() || strings.EqualFold(v.Peek().Text(v.src), "TO") {
+				v.expect("privilege")
+				return false
+			}
+			return true
+		},
+		func() bool { return consumeToBoundary("TO") },
+		func() bool { return v.MatchWord("TO") },
+		func() bool { return v.MatchWord("SHARE") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseGrantPrivsToUser validates the Snowflake `GRANT <privileges> TO USER` command.
@@ -260,7 +561,44 @@ func (v *Validator) ParseGrantPrivToShare() bool {
 //	schemaObjectPrivileges ::=
 //	  -- per object type, e.g. SELECT / INSERT / USAGE / REFERENCES / APPLY / READ / WRITE / OPERATE / MONITOR / DELETE / UPDATE / TRUNCATE / etc.
 func (v *Validator) ParseGrantPrivsToUser() bool {
-	return true
+	consumeToBoundary := func(boundary string) bool {
+		depth := 0
+		for !v.AtEnd() {
+			t := v.Peek()
+			if depth == 0 && t.Kind.IsIdentLike() && strings.EqualFold(t.Text(v.src), boundary) {
+				return true
+			}
+			switch t.Kind {
+			case sqltok.LParen:
+				depth++
+			case sqltok.RParen:
+				if depth > 0 {
+					depth--
+				}
+			}
+			v.advance()
+		}
+		v.expect(boundary)
+		return false
+	}
+	return v.Sequence(
+		func() bool { return v.MatchWord("GRANT") },
+		func() bool {
+			if v.AtEnd() || strings.EqualFold(v.Peek().Text(v.src), "TO") {
+				v.expect("privileges")
+				return false
+			}
+			return true
+		},
+		func() bool { return consumeToBoundary("TO") },
+		func() bool { return v.MatchWord("TO") },
+		// TO [ USER ] <name>
+		func() bool { return v.Optional(func() bool { return v.MatchWord("USER") }) },
+		v.parseIdentPath,
+		func() bool {
+			return v.Optional(func() bool { return v.phrase("WITH", "GRANT", "OPTION") })
+		},
+	)
 }
 
 // ParseGrantRole validates the Snowflake `GRANT ROLE` command.
@@ -270,7 +608,19 @@ func (v *Validator) ParseGrantPrivsToUser() bool {
 //
 //	GRANT ROLE <name> TO { ROLE <parent_role_name> | USER <user_name> }
 func (v *Validator) ParseGrantRole() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("GRANT") },
+		func() bool { return v.MatchWord("ROLE") },
+		v.parseIdentPath,
+		func() bool { return v.MatchWord("TO") },
+		// { ROLE <name> | USER <name> }
+		func() bool {
+			return v.Sequence(
+				v.wordsValue("ROLE", "USER"),
+				v.parseIdentPath,
+			)
+		},
+	)
 }
 
 // ParseGrantServiceRole validates the Snowflake `GRANT SERVICE ROLE` command.
@@ -285,7 +635,25 @@ func (v *Validator) ParseGrantRole() bool {
 //	  DATABASE ROLE <database_role_name>
 //	}
 func (v *Validator) ParseGrantServiceRole() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("GRANT") },
+		func() bool { return v.phrase("SERVICE", "ROLE") },
+		v.parseIdentPath,
+		func() bool { return v.MatchWord("TO") },
+		// { ROLE | APPLICATION ROLE | DATABASE ROLE } <name>
+		func() bool {
+			return v.Sequence(
+				func() bool {
+					return v.Choice(
+						func() bool { return v.phrase("APPLICATION", "ROLE") },
+						func() bool { return v.phrase("DATABASE", "ROLE") },
+						func() bool { return v.MatchWord("ROLE") },
+					)
+				},
+				v.parseIdentPath,
+			)
+		},
+	)
 }
 
 // ParseRevokeApplicationRole validates the Snowflake `REVOKE APPLICATION ROLE` command.
@@ -295,7 +663,25 @@ func (v *Validator) ParseGrantServiceRole() bool {
 //
 //	REVOKE APPLICATION ROLE <name> FROM { ROLE <parent_role_name> | APPLICATION ROLE <application_role> | APPLICATION <application> }
 func (v *Validator) ParseRevokeApplicationRole() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("REVOKE") },
+		func() bool { return v.phrase("APPLICATION", "ROLE") },
+		v.parseIdentPath,
+		func() bool { return v.MatchWord("FROM") },
+		// { ROLE | APPLICATION ROLE | APPLICATION } <name>
+		func() bool {
+			return v.Sequence(
+				func() bool {
+					return v.Choice(
+						func() bool { return v.phrase("APPLICATION", "ROLE") },
+						func() bool { return v.MatchWord("APPLICATION") },
+						func() bool { return v.MatchWord("ROLE") },
+					)
+				},
+				v.parseIdentPath,
+			)
+		},
+	)
 }
 
 // ParseRevokeCaller validates the Snowflake `REVOKE CALLER` command.
@@ -321,7 +707,45 @@ func (v *Validator) ParseRevokeApplicationRole() bool {
 //	  IN { ACCOUNT | DATABASE <db_name> | SCHEMA <schema_name> | APPLICATION <app_name> | APPLICATION PACKAGE <app_pkg_name> }
 //	  FROM { ROLE | DATABASE ROLE } <grantee_name>
 func (v *Validator) ParseRevokeCaller() bool {
-	return true
+	consumeToBoundary := func(boundary string) bool {
+		depth := 0
+		for !v.AtEnd() {
+			t := v.Peek()
+			if depth == 0 && t.Kind.IsIdentLike() && strings.EqualFold(t.Text(v.src), boundary) {
+				return true
+			}
+			switch t.Kind {
+			case sqltok.LParen:
+				depth++
+			case sqltok.RParen:
+				if depth > 0 {
+					depth--
+				}
+			}
+			v.advance()
+		}
+		v.expect(boundary)
+		return false
+	}
+	return v.Sequence(
+		func() bool { return v.MatchWord("REVOKE") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("ALL") }) },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("INHERITED") }) },
+		func() bool { return v.MatchWord("CALLER") },
+		func() bool { return consumeToBoundary("FROM") },
+		func() bool { return v.MatchWord("FROM") },
+		func() bool {
+			return v.Sequence(
+				func() bool {
+					return v.Choice(
+						func() bool { return v.phrase("DATABASE", "ROLE") },
+						func() bool { return v.MatchWord("ROLE") },
+					)
+				},
+				v.parseIdentPath,
+			)
+		},
+	)
 }
 
 // ParseRevokeDatabaseRole validates the Snowflake `REVOKE DATABASE ROLE` command.
@@ -333,7 +757,25 @@ func (v *Validator) ParseRevokeCaller() bool {
 //
 //	REVOKE DATABASE ROLE <name> FROM APPLICATION <app_name>
 func (v *Validator) ParseRevokeDatabaseRole() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("REVOKE") },
+		func() bool { return v.phrase("DATABASE", "ROLE") },
+		v.parseIdentPath,
+		func() bool { return v.MatchWord("FROM") },
+		// { ROLE | DATABASE ROLE | APPLICATION } <name>
+		func() bool {
+			return v.Sequence(
+				func() bool {
+					return v.Choice(
+						func() bool { return v.phrase("DATABASE", "ROLE") },
+						func() bool { return v.MatchWord("ROLE") },
+						func() bool { return v.MatchWord("APPLICATION") },
+					)
+				},
+				v.parseIdentPath,
+			)
+		},
+	)
 }
 
 // ParseRevokeDatabaseRoleFromShare validates the Snowflake `REVOKE DATABASE ROLE FROM SHARE` command.
@@ -344,7 +786,14 @@ func (v *Validator) ParseRevokeDatabaseRole() bool {
 //	REVOKE DATABASE ROLE <name>
 //	  FROM SHARE <share_name>
 func (v *Validator) ParseRevokeDatabaseRoleFromShare() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("REVOKE") },
+		func() bool { return v.phrase("DATABASE", "ROLE") },
+		v.parseIdentPath,
+		func() bool { return v.MatchWord("FROM") },
+		func() bool { return v.MatchWord("SHARE") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseRevokePrivsFromRole validates the Snowflake `REVOKE <privileges> FROM ROLE` command.
@@ -377,7 +826,60 @@ func (v *Validator) ParseRevokeDatabaseRoleFromShare() bool {
 //	    }
 //	  FROM DATABASE ROLE <database_role_name> [ RESTRICT | CASCADE ]
 func (v *Validator) ParseRevokePrivsFromRole() bool {
-	return true
+	consumeToBoundary := func(boundary string) bool {
+		depth := 0
+		for !v.AtEnd() {
+			t := v.Peek()
+			if depth == 0 && t.Kind.IsIdentLike() && strings.EqualFold(t.Text(v.src), boundary) {
+				return true
+			}
+			switch t.Kind {
+			case sqltok.LParen:
+				depth++
+			case sqltok.RParen:
+				if depth > 0 {
+					depth--
+				}
+			}
+			v.advance()
+		}
+		v.expect(boundary)
+		return false
+	}
+	return v.Sequence(
+		func() bool { return v.MatchWord("REVOKE") },
+		// [ GRANT OPTION FOR ]
+		func() bool {
+			return v.Optional(func() bool { return v.phrase("GRANT", "OPTION", "FOR") })
+		},
+		func() bool {
+			if v.AtEnd() || strings.EqualFold(v.Peek().Text(v.src), "FROM") {
+				v.expect("privileges")
+				return false
+			}
+			return true
+		},
+		func() bool { return consumeToBoundary("FROM") },
+		func() bool { return v.MatchWord("FROM") },
+		// FROM [ ROLE ] <name>  |  FROM DATABASE ROLE <name>
+		func() bool {
+			return v.Sequence(
+				func() bool {
+					return v.Optional(func() bool {
+						return v.Choice(
+							func() bool { return v.phrase("DATABASE", "ROLE") },
+							func() bool { return v.MatchWord("ROLE") },
+						)
+					})
+				},
+				v.parseIdentPath,
+			)
+		},
+		// [ RESTRICT | CASCADE ]
+		func() bool {
+			return v.Optional(v.wordsValue("RESTRICT", "CASCADE"))
+		},
+	)
 }
 
 // ParseRevokePrivsFromApplication validates the Snowflake `REVOKE <privileges> FROM APPLICATION` command.
@@ -411,7 +913,47 @@ func (v *Validator) ParseRevokePrivsFromRole() bool {
 //	schemaObjectPrivileges ::=
 //	  -- per object type, e.g. SELECT / INSERT / USAGE / REFERENCES / APPLY / READ / WRITE / OPERATE / MONITOR / etc.
 func (v *Validator) ParseRevokePrivsFromApplication() bool {
-	return true
+	consumeToBoundary := func(boundary string) bool {
+		depth := 0
+		for !v.AtEnd() {
+			t := v.Peek()
+			if depth == 0 && t.Kind.IsIdentLike() && strings.EqualFold(t.Text(v.src), boundary) {
+				return true
+			}
+			switch t.Kind {
+			case sqltok.LParen:
+				depth++
+			case sqltok.RParen:
+				if depth > 0 {
+					depth--
+				}
+			}
+			v.advance()
+		}
+		v.expect(boundary)
+		return false
+	}
+	return v.Sequence(
+		func() bool { return v.MatchWord("REVOKE") },
+		func() bool {
+			return v.Optional(func() bool { return v.phrase("GRANT", "OPTION", "FOR") })
+		},
+		func() bool {
+			if v.AtEnd() || strings.EqualFold(v.Peek().Text(v.src), "FROM") {
+				v.expect("privileges")
+				return false
+			}
+			return true
+		},
+		func() bool { return consumeToBoundary("FROM") },
+		func() bool { return v.MatchWord("FROM") },
+		func() bool { return v.MatchWord("APPLICATION") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("ROLE") }) },
+		v.parseIdentPath,
+		func() bool {
+			return v.Optional(v.wordsValue("RESTRICT", "CASCADE"))
+		},
+	)
 }
 
 // ParseRevokePrivsFromApplicationRole validates the Snowflake `REVOKE <privileges> FROM APPLICATION ROLE` command.
@@ -443,7 +985,46 @@ func (v *Validator) ParseRevokePrivsFromApplication() bool {
 //	schemaObjectPrivileges ::=
 //	  -- per object type, e.g. SELECT / INSERT / USAGE / REFERENCES / APPLY / READ / WRITE / OPERATE / MONITOR / etc.
 func (v *Validator) ParseRevokePrivsFromApplicationRole() bool {
-	return true
+	consumeToBoundary := func(boundary string) bool {
+		depth := 0
+		for !v.AtEnd() {
+			t := v.Peek()
+			if depth == 0 && t.Kind.IsIdentLike() && strings.EqualFold(t.Text(v.src), boundary) {
+				return true
+			}
+			switch t.Kind {
+			case sqltok.LParen:
+				depth++
+			case sqltok.RParen:
+				if depth > 0 {
+					depth--
+				}
+			}
+			v.advance()
+		}
+		v.expect(boundary)
+		return false
+	}
+	return v.Sequence(
+		func() bool { return v.MatchWord("REVOKE") },
+		func() bool {
+			return v.Optional(func() bool { return v.phrase("GRANT", "OPTION", "FOR") })
+		},
+		func() bool {
+			if v.AtEnd() || strings.EqualFold(v.Peek().Text(v.src), "FROM") {
+				v.expect("privileges")
+				return false
+			}
+			return true
+		},
+		func() bool { return consumeToBoundary("FROM") },
+		func() bool { return v.MatchWord("FROM") },
+		func() bool { return v.phrase("APPLICATION", "ROLE") },
+		v.parseIdentPath,
+		func() bool {
+			return v.Optional(v.wordsValue("RESTRICT", "CASCADE"))
+		},
+	)
 }
 
 // ParseRevokePrivFromShare validates the Snowflake `REVOKE <privilege> FROM SHARE` command.
@@ -478,7 +1059,40 @@ func (v *Validator) ParseRevokePrivsFromApplicationRole() bool {
 //	-- For TAG
 //	   READ
 func (v *Validator) ParseRevokePrivFromShare() bool {
-	return true
+	consumeToBoundary := func(boundary string) bool {
+		depth := 0
+		for !v.AtEnd() {
+			t := v.Peek()
+			if depth == 0 && t.Kind.IsIdentLike() && strings.EqualFold(t.Text(v.src), boundary) {
+				return true
+			}
+			switch t.Kind {
+			case sqltok.LParen:
+				depth++
+			case sqltok.RParen:
+				if depth > 0 {
+					depth--
+				}
+			}
+			v.advance()
+		}
+		v.expect(boundary)
+		return false
+	}
+	return v.Sequence(
+		func() bool { return v.MatchWord("REVOKE") },
+		func() bool {
+			if v.AtEnd() || strings.EqualFold(v.Peek().Text(v.src), "FROM") {
+				v.expect("privilege")
+				return false
+			}
+			return true
+		},
+		func() bool { return consumeToBoundary("FROM") },
+		func() bool { return v.MatchWord("FROM") },
+		func() bool { return v.MatchWord("SHARE") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseRevokePrivsFromUser validates the Snowflake `REVOKE <privileges> FROM USER` command.
@@ -517,7 +1131,47 @@ func (v *Validator) ParseRevokePrivFromShare() bool {
 //	schemaObjectPrivileges ::=
 //	  -- per object type, e.g. SELECT / INSERT / USAGE / REFERENCES / APPLY / READ / WRITE / OPERATE / MONITOR / DELETE / UPDATE / TRUNCATE / etc.
 func (v *Validator) ParseRevokePrivsFromUser() bool {
-	return true
+	consumeToBoundary := func(boundary string) bool {
+		depth := 0
+		for !v.AtEnd() {
+			t := v.Peek()
+			if depth == 0 && t.Kind.IsIdentLike() && strings.EqualFold(t.Text(v.src), boundary) {
+				return true
+			}
+			switch t.Kind {
+			case sqltok.LParen:
+				depth++
+			case sqltok.RParen:
+				if depth > 0 {
+					depth--
+				}
+			}
+			v.advance()
+		}
+		v.expect(boundary)
+		return false
+	}
+	return v.Sequence(
+		func() bool { return v.MatchWord("REVOKE") },
+		func() bool {
+			return v.Optional(func() bool { return v.phrase("GRANT", "OPTION", "FOR") })
+		},
+		func() bool {
+			if v.AtEnd() || strings.EqualFold(v.Peek().Text(v.src), "FROM") {
+				v.expect("privileges")
+				return false
+			}
+			return true
+		},
+		func() bool { return consumeToBoundary("FROM") },
+		func() bool { return v.MatchWord("FROM") },
+		// FROM [ USER ] <name>
+		func() bool { return v.Optional(func() bool { return v.MatchWord("USER") }) },
+		v.parseIdentPath,
+		func() bool {
+			return v.Optional(v.wordsValue("RESTRICT", "CASCADE"))
+		},
+	)
 }
 
 // ParseRevokeRole validates the Snowflake `REVOKE ROLE` command.
@@ -527,7 +1181,19 @@ func (v *Validator) ParseRevokePrivsFromUser() bool {
 //
 //	REVOKE ROLE <name> FROM { ROLE <parent_role_name> | USER <user_name> }
 func (v *Validator) ParseRevokeRole() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("REVOKE") },
+		func() bool { return v.MatchWord("ROLE") },
+		v.parseIdentPath,
+		func() bool { return v.MatchWord("FROM") },
+		// { ROLE <name> | USER <name> }
+		func() bool {
+			return v.Sequence(
+				v.wordsValue("ROLE", "USER"),
+				v.parseIdentPath,
+			)
+		},
+	)
 }
 
 // ParseRevokeServiceRole validates the Snowflake `REVOKE SERVICE ROLE` command.
@@ -542,5 +1208,23 @@ func (v *Validator) ParseRevokeRole() bool {
 //	  DATABASE ROLE <database_role_name>
 //	}
 func (v *Validator) ParseRevokeServiceRole() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("REVOKE") },
+		func() bool { return v.phrase("SERVICE", "ROLE") },
+		v.parseIdentPath,
+		func() bool { return v.MatchWord("FROM") },
+		// { ROLE | APPLICATION ROLE | DATABASE ROLE } <name>
+		func() bool {
+			return v.Sequence(
+				func() bool {
+					return v.Choice(
+						func() bool { return v.phrase("APPLICATION", "ROLE") },
+						func() bool { return v.phrase("DATABASE", "ROLE") },
+						func() bool { return v.MatchWord("ROLE") },
+					)
+				},
+				v.parseIdentPath,
+			)
+		},
+	)
 }

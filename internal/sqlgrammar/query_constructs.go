@@ -1,5 +1,11 @@
 package sqlgrammar
 
+import (
+	"strings"
+
+	"thaw/internal/sqltok"
+)
+
 // Query syntax constructs (SELECT sub-clauses) — grammar-rule stubs for issue #556.
 //
 // Each function corresponds to one Snowflake command reference (see the per-
@@ -32,7 +38,26 @@ package sqlgrammar
 //	recursiveClause ::=
 //	    SELECT <recursive_column_list> FROM ... [ JOIN ... ]
 func (v *Validator) ParseWith() bool {
-	return true
+	// WITH [ RECURSIVE ] cte [ , cte ]* <query>
+	cte := func() bool {
+		return v.Sequence(
+			v.parseIdentPath,
+			func() bool { return v.Optional(v.consumeBalancedParens) }, // ( col_list )
+			func() bool { return v.MatchWord("AS") },
+			v.consumeBalancedParens, // ( SELECT ... )
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("WITH") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("RECURSIVE") }) },
+		cte,
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, cte)
+			})
+		},
+		v.consumeRest, // trailing SELECT ...
+	)
 }
 
 // ParseTopN validates the Snowflake `TOP_N` command.
@@ -47,7 +72,19 @@ func (v *Validator) ParseWith() bool {
 //	[ ORDER BY ... ]
 //	[ ... ]
 func (v *Validator) ParseTopN() bool {
-	return true
+	// SELECT [ TOP <n> ] ... — model the leading SELECT [ TOP <n> ] skeleton.
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("SELECT") },
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("TOP") },
+					func() bool { return v.Match(sqltok.NumberLit) },
+				)
+			})
+		},
+		v.consumeRest,
+	)
 }
 
 // ParseInto validates the Snowflake `INTO` command.
@@ -65,7 +102,46 @@ func (v *Validator) ParseTopN() bool {
 //	WHERE ...
 //	[ ... ]
 func (v *Validator) ParseInto() bool {
-	return true
+	// SELECT <expr> [, ...] INTO :<var> [, :<var> ]* FROM ...
+	// Model: SELECT <something> INTO :var [, :var]* then free-form FROM/WHERE tail.
+	// We require the SELECT lead, a non-empty select list (consumed leniently up to
+	// INTO), the INTO keyword, and at least one :variable.
+	intoVar := func() bool {
+		return v.Sequence(
+			func() bool { return v.Match(sqltok.Colon) },
+			v.parseIdentPath,
+		)
+	}
+	// Consume select-list tokens up to (but not including) the INTO keyword.
+	selectItem := func() bool {
+		if v.AtEnd() {
+			return false
+		}
+		t := v.Peek()
+		if t.Kind.IsIdentLike() && strings.EqualFold(t.Text(v.src), "INTO") {
+			return false
+		}
+		switch t.Kind {
+		case sqltok.LParen:
+			return v.consumeBalancedParens()
+		case sqltok.RParen:
+			return false
+		}
+		v.advance()
+		return true
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("SELECT") },
+		func() bool { return v.ZeroOrMore(selectItem) },
+		func() bool { return v.MatchWord("INTO") },
+		intoVar,
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, intoVar)
+			})
+		},
+		v.consumeRest,
+	)
 }
 
 // ParseFrom validates the Snowflake `FROM` command.
@@ -106,7 +182,40 @@ func (v *Validator) ParseInto() bool {
 //	           [ [ AS ] <alias_name> ]
 //	   }
 func (v *Validator) ParseFrom() bool {
-	return true
+	// FROM <objectReference> [ , <objectReference> | JOIN ... ]* — model the FROM
+	// keyword followed by at least one object reference, then a permissive tail
+	// for joins / additional refs / clauses.
+	objectRef := func() bool {
+		return v.Choice(
+			// LATERAL ( subquery ) | ( VALUES ... ) | ( subquery )
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.Optional(func() bool { return v.MatchWord("LATERAL") }) },
+					v.consumeBalancedParens,
+				)
+			},
+			// @stage[/path] [ ( ... ) ]
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.Match(sqltok.At) },
+					v.parseIdentPath,
+					func() bool { return v.Optional(v.consumeBalancedParens) },
+				)
+			},
+			// table function / DIRECTORY(...) / SEMANTIC_VIEW(...) / <name>
+			func() bool {
+				return v.Sequence(
+					v.parseIdentPath,
+					func() bool { return v.Optional(v.consumeBalancedParens) },
+				)
+			},
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("FROM") },
+		objectRef,
+		v.consumeRest,
+	)
 }
 
 // ParseAtBefore validates the Snowflake `AT_BEFORE` command.
@@ -125,7 +234,12 @@ func (v *Validator) ParseFrom() bool {
 //	  )
 //	[ ... ]
 func (v *Validator) ParseAtBefore() bool {
-	return true
+	// { AT | BEFORE } ( { TIMESTAMP => .. | OFFSET => .. | STATEMENT => .. | STREAM => '..' } )
+	return v.Sequence(
+		v.wordsValue("AT", "BEFORE"),
+		v.consumeBalancedParens,
+		v.consumeRest,
+	)
 }
 
 // ParseChanges validates the Snowflake `CHANGES` command.
@@ -140,7 +254,24 @@ func (v *Validator) ParseAtBefore() bool {
 //	   [ END( { TIMESTAMP => <timestamp> | OFFSET => <time_difference> | STATEMENT => <id> } ) ]
 //	[ ... ]
 func (v *Validator) ParseChanges() bool {
-	return true
+	// CHANGES ( INFORMATION => { DEFAULT | APPEND_ONLY } )
+	//   { AT ( ... ) | BEFORE ( ... ) }
+	//   [ END ( ... ) ]
+	return v.Sequence(
+		func() bool { return v.MatchWord("CHANGES") },
+		v.consumeBalancedParens, // ( INFORMATION => ... )
+		v.wordsValue("AT", "BEFORE"),
+		v.consumeBalancedParens, // ( STATEMENT => ... etc )
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("END") },
+					v.consumeBalancedParens,
+				)
+			})
+		},
+		v.consumeRest,
+	)
 }
 
 // ParseConnectBy validates the Snowflake `CONNECT_BY` command.
@@ -156,7 +287,28 @@ func (v *Validator) ParseChanges() bool {
 //	           ...
 //	  ...
 func (v *Validator) ParseConnectBy() bool {
-	return true
+	// SELECT ... FROM <src> START WITH <pred> CONNECT BY [PRIOR] <c> = [PRIOR] <c> ...
+	// Consume tokens up to START WITH, then model the START WITH / CONNECT BY skeleton.
+	upToStart := func() bool {
+		if v.AtEnd() {
+			return false
+		}
+		t := v.Peek()
+		if t.Kind.IsIdentLike() && strings.EqualFold(t.Text(v.src), "START") {
+			return false
+		}
+		if t.Kind == sqltok.LParen {
+			return v.consumeBalancedParens()
+		}
+		v.advance()
+		return true
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("SELECT") },
+		func() bool { return v.ZeroOrMore(upToStart) },
+		func() bool { return v.phrase("START", "WITH") },
+		v.consumeRest, // <predicate> CONNECT BY ...
+	)
 }
 
 // ParseJoin validates the Snowflake `JOIN` command.
@@ -204,7 +356,82 @@ func (v *Validator) ParseConnectBy() bool {
 //	                   JOIN <object_ref2>
 //	[ ... ]
 func (v *Validator) ParseJoin() bool {
-	return true
+	// FROM <ref1> [ <join-type> ] JOIN <ref2> [ ON <cond> | USING ( <cols> ) ]
+	ref := func() bool {
+		return v.Sequence(
+			v.parseIdentPath,
+			func() bool { return v.Optional(v.consumeBalancedParens) },
+			func() bool { return v.Optional(func() bool { return v.MatchWord("AS") }) },
+			func() bool {
+				return v.Optional(func() bool {
+					// optional alias, but not the join keywords
+					t := v.Peek()
+					if t.Kind.IsIdentLike() {
+						w := t.Text(v.src)
+						for _, kw := range []string{"INNER", "LEFT", "RIGHT", "FULL", "NATURAL", "CROSS", "JOIN", "ON", "USING"} {
+							if strings.EqualFold(w, kw) {
+								return false
+							}
+						}
+					}
+					return v.parseIdentPath()
+				})
+			},
+		)
+	}
+	joinType := func() bool {
+		return v.Optional(func() bool {
+			return v.Choice(
+				func() bool { return v.MatchWord("INNER") },
+				func() bool {
+					return v.Sequence(
+						v.wordsValue("LEFT", "RIGHT", "FULL"),
+						func() bool { return v.Optional(func() bool { return v.MatchWord("OUTER") }) },
+					)
+				},
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("NATURAL") },
+						func() bool {
+							return v.Optional(func() bool {
+								return v.Choice(
+									func() bool { return v.MatchWord("INNER") },
+									func() bool {
+										return v.Sequence(
+											v.wordsValue("LEFT", "RIGHT", "FULL"),
+											func() bool { return v.Optional(func() bool { return v.MatchWord("OUTER") }) },
+										)
+									},
+								)
+							})
+						},
+					)
+				},
+				func() bool { return v.MatchWord("CROSS") },
+			)
+		})
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("FROM") },
+		ref,
+		joinType,
+		func() bool { return v.Optional(func() bool { return v.MatchWord("DIRECTED") }) },
+		func() bool { return v.MatchWord("JOIN") },
+		ref,
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Choice(
+					func() bool {
+						return v.Sequence(func() bool { return v.MatchWord("ON") }, v.consumeRest)
+					},
+					func() bool {
+						return v.Sequence(func() bool { return v.MatchWord("USING") }, v.consumeBalancedParens)
+					},
+				)
+			})
+		},
+		v.consumeRest,
+	)
 }
 
 // ParseAsofJoin validates the Snowflake `ASOF_JOIN` command.
@@ -216,7 +443,29 @@ func (v *Validator) ParseJoin() bool {
 //	  MATCH_CONDITION ( <left_table.timecol> <comparison_operator> <right_table.timecol> )
 //	  [ ON <table.col> = <table.col> [ AND ... ] | USING ( <column_list> ) ]
 func (v *Validator) ParseAsofJoin() bool {
-	return true
+	// FROM <left> ASOF JOIN <right> MATCH_CONDITION ( ... ) [ ON ... | USING (...) ]
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("FROM") },
+		v.parseIdentPath,
+		func() bool { return v.MatchWord("ASOF") },
+		func() bool { return v.MatchWord("JOIN") },
+		v.parseIdentPath,
+		func() bool { return v.MatchWord("MATCH_CONDITION") },
+		v.consumeBalancedParens,
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Choice(
+					func() bool {
+						return v.Sequence(func() bool { return v.MatchWord("ON") }, v.consumeRest)
+					},
+					func() bool {
+						return v.Sequence(func() bool { return v.MatchWord("USING") }, v.consumeBalancedParens)
+					},
+				)
+			})
+		},
+		v.consumeRest,
+	)
 }
 
 // ParseLateral validates the Snowflake `LATERAL` command.
@@ -228,7 +477,25 @@ func (v *Validator) ParseAsofJoin() bool {
 //	  FROM <left_hand_table_expression>, LATERAL ( <inline_view> )
 //	...
 func (v *Validator) ParseLateral() bool {
-	return true
+	// FROM <left_expr>, LATERAL ( <inline_view> ) — model FROM <ref> , LATERAL ( ... ).
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("FROM") },
+		v.parseIdentPath,
+		func() bool { return v.Optional(v.consumeBalancedParens) },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("AS") }) },
+		func() bool {
+			return v.Optional(func() bool {
+				if v.Peek().Kind == sqltok.Comma {
+					return false
+				}
+				return v.parseIdentPath()
+			})
+		},
+		func() bool { return v.Match(sqltok.Comma) },
+		func() bool { return v.MatchWord("LATERAL") },
+		v.consumeBalancedParens,
+		v.consumeRest,
+	)
 }
 
 // ParseMatchRecognize validates the Snowflake `MATCH_RECOGNIZE` command.
@@ -254,7 +521,12 @@ func (v *Validator) ParseLateral() bool {
 //	    DEFINE <symbol> AS <expr> [, ... ]
 //	)
 func (v *Validator) ParseMatchRecognize() bool {
-	return true
+	// MATCH_RECOGNIZE ( ... ) — the body is too detailed to model token-for-token.
+	return v.Sequence(
+		func() bool { return v.MatchWord("MATCH_RECOGNIZE") },
+		v.consumeBalancedParens,
+		v.consumeRest,
+	)
 }
 
 // ParsePivot validates the Snowflake `PIVOT` command.
@@ -275,7 +547,12 @@ func (v *Validator) ParseMatchRecognize() bool {
 //
 //	[ ... ]
 func (v *Validator) ParsePivot() bool {
-	return true
+	// PIVOT ( <agg>(<col>) FOR <col> IN ( ... ) [ DEFAULT ON NULL (<v>) ] )
+	return v.Sequence(
+		func() bool { return v.MatchWord("PIVOT") },
+		v.consumeBalancedParens,
+		v.consumeRest,
+	)
 }
 
 // ParseUnpivot validates the Snowflake `UNPIVOT` command.
@@ -295,7 +572,20 @@ func (v *Validator) ParsePivot() bool {
 //
 //	[ ... ]
 func (v *Validator) ParseUnpivot() bool {
-	return true
+	// UNPIVOT [ { INCLUDE | EXCLUDE } NULLS ] ( <value_col> FOR <name_col> IN ( ... ) )
+	return v.Sequence(
+		func() bool { return v.MatchWord("UNPIVOT") },
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					v.wordsValue("INCLUDE", "EXCLUDE"),
+					func() bool { return v.MatchWord("NULLS") },
+				)
+			})
+		},
+		v.consumeBalancedParens,
+		v.consumeRest,
+	)
 }
 
 // ParseValues validates the Snowflake `VALUES` command.
@@ -308,7 +598,20 @@ func (v *Validator) ParseUnpivot() bool {
 //	  [ [ AS ] <table_alias> [ ( <column_alias> [ , ... ] ) ] ]
 //	[ ... ]
 func (v *Validator) ParseValues() bool {
-	return true
+	// FROM ( VALUES ( <expr> [, ...] ) [ , ( ... ) ]* ) [ [AS] alias [(cols)] ]
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("FROM") },
+		func() bool { return v.Match(sqltok.LParen) },
+		func() bool { return v.MatchWord("VALUES") },
+		v.consumeBalancedParens, // ( <expr> [, ...] )
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, v.consumeBalancedParens)
+			})
+		},
+		func() bool { return v.Match(sqltok.RParen) },
+		v.consumeRest, // optional alias / column list
+	)
 }
 
 // ParseSample validates the Snowflake `SAMPLE` command.
@@ -324,7 +627,24 @@ func (v *Validator) ParseValues() bool {
 //	samplingMethod ::= { { BERNOULLI | ROW } ( { <probability> | <num> ROWS } ) |
 //	                     { SYSTEM | BLOCK } ( <probability> ) [ { REPEATABLE | SEED } ( <seed> ) ] }
 func (v *Validator) ParseSample() bool {
-	return true
+	// { SAMPLE | TABLESAMPLE } [ { BERNOULLI | ROW | SYSTEM | BLOCK } ] ( ... )
+	//   [ { REPEATABLE | SEED } ( <seed> ) ]
+	return v.Sequence(
+		v.wordsValue("SAMPLE", "TABLESAMPLE"),
+		func() bool {
+			return v.Optional(v.wordsValue("BERNOULLI", "ROW", "SYSTEM", "BLOCK"))
+		},
+		v.consumeBalancedParens, // ( <probability> | <num> ROWS )
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					v.wordsValue("REPEATABLE", "SEED"),
+					v.consumeBalancedParens,
+				)
+			})
+		},
+		v.consumeRest,
+	)
 }
 
 // ParseResample validates the Snowflake `RESAMPLE` command.
@@ -341,7 +661,23 @@ func (v *Validator) ParseSample() bool {
 //	        { IS_GENERATED() | BUCKET_START() } [ [ AS ] <alias_name> ] [ , ... ] ]
 //	    )
 func (v *Validator) ParseResample() bool {
-	return true
+	// FROM <ref> [ [AS] alias ] RESAMPLE ( USING ... INCREMENT BY ... [ ... ] )
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("FROM") },
+		v.parseIdentPath,
+		func() bool { return v.Optional(func() bool { return v.MatchWord("AS") }) },
+		func() bool {
+			return v.Optional(func() bool {
+				if v.Peek().Kind.IsIdentLike() && strings.EqualFold(v.Peek().Text(v.src), "RESAMPLE") {
+					return false
+				}
+				return v.parseIdentPath()
+			})
+		},
+		func() bool { return v.MatchWord("RESAMPLE") },
+		v.consumeBalancedParens,
+		v.consumeRest,
+	)
 }
 
 // ParseSemanticView validates the Snowflake `SEMANTIC_VIEW` command.
@@ -361,7 +697,12 @@ func (v *Validator) ParseResample() bool {
 //	  [ WHERE <predicate> ]
 //	)
 func (v *Validator) ParseSemanticView() bool {
-	return true
+	// SEMANTIC_VIEW ( <name> [ METRICS .. | FACTS .. ] [ DIMENSIONS .. ] [ WHERE .. ] )
+	return v.Sequence(
+		func() bool { return v.MatchWord("SEMANTIC_VIEW") },
+		v.consumeBalancedParens,
+		v.consumeRest,
+	)
 }
 
 // ParseWhere validates the Snowflake `WHERE` command.
@@ -373,7 +714,12 @@ func (v *Validator) ParseSemanticView() bool {
 //	WHERE <predicate>
 //	[ ... ]
 func (v *Validator) ParseWhere() bool {
-	return true
+	// WHERE <predicate>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("WHERE") },
+		func() bool { return !v.AtEnd() }, // require at least one predicate token
+		v.consumeRest,
+	)
 }
 
 // ParseGroupBy validates the Snowflake `GROUP_BY` command.
@@ -395,7 +741,17 @@ func (v *Validator) ParseWhere() bool {
 //
 //	groupItem ::= { <column_alias> | <position> | <expr> }
 func (v *Validator) ParseGroupBy() bool {
-	return true
+	// GROUP BY { ALL | groupItem [ , groupItem ]* }
+	return v.Sequence(
+		func() bool { return v.phrase("GROUP", "BY") },
+		func() bool {
+			return v.Choice(
+				func() bool { return v.MatchWord("ALL") },
+				func() bool { return !v.AtEnd() }, // at least one group item token
+			)
+		},
+		v.consumeRest,
+	)
 }
 
 // ParseGroupByCube validates the Snowflake `GROUP_BY_CUBE` command.
@@ -411,7 +767,28 @@ func (v *Validator) ParseGroupBy() bool {
 //
 //	groupItem ::= { <column_alias> | <position> | <expr> }
 func (v *Validator) ParseGroupByCube() bool {
-	return true
+	// GROUP BY [ groupItem [, ...] , ] CUBE ( groupItem [, ...] )
+	upTo := func() bool {
+		if v.AtEnd() {
+			return false
+		}
+		t := v.Peek()
+		if t.Kind.IsIdentLike() && strings.EqualFold(t.Text(v.src), "CUBE") {
+			return false
+		}
+		if t.Kind == sqltok.LParen {
+			return v.consumeBalancedParens()
+		}
+		v.advance()
+		return true
+	}
+	return v.Sequence(
+		func() bool { return v.phrase("GROUP", "BY") },
+		func() bool { return v.ZeroOrMore(upTo) },
+		func() bool { return v.MatchWord("CUBE") },
+		v.consumeBalancedParens,
+		v.consumeRest,
+	)
 }
 
 // ParseGroupByGroupingSets validates the Snowflake `GROUP_BY_GROUPING_SETS` command.
@@ -429,7 +806,28 @@ func (v *Validator) ParseGroupByCube() bool {
 //
 //	groupSet ::= groupItem | ( groupItem [ , groupItem [ , ... ] ] )
 func (v *Validator) ParseGroupByGroupingSets() bool {
-	return true
+	// GROUP BY [ groupItem [, ...] , ] GROUPING SETS ( groupSet [, ...] )
+	upTo := func() bool {
+		if v.AtEnd() {
+			return false
+		}
+		t := v.Peek()
+		if t.Kind.IsIdentLike() && strings.EqualFold(t.Text(v.src), "GROUPING") {
+			return false
+		}
+		if t.Kind == sqltok.LParen {
+			return v.consumeBalancedParens()
+		}
+		v.advance()
+		return true
+	}
+	return v.Sequence(
+		func() bool { return v.phrase("GROUP", "BY") },
+		func() bool { return v.ZeroOrMore(upTo) },
+		func() bool { return v.phrase("GROUPING", "SETS") },
+		v.consumeBalancedParens,
+		v.consumeRest,
+	)
 }
 
 // ParseGroupByRollup validates the Snowflake `GROUP_BY_ROLLUP` command.
@@ -445,7 +843,28 @@ func (v *Validator) ParseGroupByGroupingSets() bool {
 //
 //	groupItem ::= { <column_alias> | <position> | <expr> }
 func (v *Validator) ParseGroupByRollup() bool {
-	return true
+	// GROUP BY [ groupItem [, ...] , ] ROLLUP ( groupItem [, ...] )
+	upTo := func() bool {
+		if v.AtEnd() {
+			return false
+		}
+		t := v.Peek()
+		if t.Kind.IsIdentLike() && strings.EqualFold(t.Text(v.src), "ROLLUP") {
+			return false
+		}
+		if t.Kind == sqltok.LParen {
+			return v.consumeBalancedParens()
+		}
+		v.advance()
+		return true
+	}
+	return v.Sequence(
+		func() bool { return v.phrase("GROUP", "BY") },
+		func() bool { return v.ZeroOrMore(upTo) },
+		func() bool { return v.MatchWord("ROLLUP") },
+		v.consumeBalancedParens,
+		v.consumeRest,
+	)
 }
 
 // ParseHaving validates the Snowflake `HAVING` command.
@@ -459,7 +878,12 @@ func (v *Validator) ParseGroupByRollup() bool {
 //	HAVING <predicate>
 //	[ ... ]
 func (v *Validator) ParseHaving() bool {
-	return true
+	// HAVING <predicate>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("HAVING") },
+		func() bool { return !v.AtEnd() },
+		v.consumeRest,
+	)
 }
 
 // ParseQualify validates the Snowflake `QUALIFY` command.
@@ -476,7 +900,12 @@ func (v *Validator) ParseHaving() bool {
 //	  QUALIFY <predicate>
 //	  [ ... ]
 func (v *Validator) ParseQualify() bool {
-	return true
+	// QUALIFY <predicate>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("QUALIFY") },
+		func() bool { return !v.AtEnd() },
+		v.consumeRest,
+	)
 }
 
 // ParseOrderBy validates the Snowflake `ORDER_BY` command.
@@ -496,7 +925,13 @@ func (v *Validator) ParseQualify() bool {
 //	  ORDER BY ALL [ { ASC | DESC } ] [ NULLS { FIRST | LAST } ]
 //	  [ ... ]
 func (v *Validator) ParseOrderBy() bool {
-	return true
+	// ORDER BY { ALL | orderItem [ , orderItem ]* }
+	//   orderItem ::= <expr> [ ASC | DESC ] [ NULLS { FIRST | LAST } ]
+	return v.Sequence(
+		func() bool { return v.phrase("ORDER", "BY") },
+		func() bool { return !v.AtEnd() }, // ALL or first order item
+		v.consumeRest,
+	)
 }
 
 // ParseLimitFetch validates the Snowflake `LIMIT_FETCH` command.
@@ -516,7 +951,46 @@ func (v *Validator) ParseOrderBy() bool {
 //	[ OFFSET <start> ] [ { ROW | ROWS } ] FETCH [ { FIRST | NEXT } ] <count> [ { ROW | ROWS } ] [ ONLY ]
 //	[ ... ]
 func (v *Validator) ParseLimitFetch() bool {
-	return true
+	// Form 1: LIMIT <count> [ OFFSET <start> ]
+	// Form 2: [ OFFSET <start> ] [ ROW | ROWS ] FETCH [ FIRST | NEXT ] <count>
+	//         [ ROW | ROWS ] [ ONLY ]
+	rowOrRows := func() bool { return v.Optional(v.wordsValue("ROW", "ROWS")) }
+	limitForm := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchKeyword("LIMIT") },
+			func() bool { return v.Match(sqltok.NumberLit) },
+			func() bool {
+				return v.Optional(func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("OFFSET") },
+						func() bool { return v.Match(sqltok.NumberLit) },
+					)
+				})
+			},
+		)
+	}
+	fetchForm := func() bool {
+		return v.Sequence(
+			func() bool {
+				return v.Optional(func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("OFFSET") },
+						func() bool { return v.Match(sqltok.NumberLit) },
+						rowOrRows,
+					)
+				})
+			},
+			func() bool { return v.MatchWord("FETCH") },
+			func() bool { return v.Optional(v.wordsValue("FIRST", "NEXT")) },
+			func() bool { return v.Match(sqltok.NumberLit) },
+			rowOrRows,
+			func() bool { return v.Optional(func() bool { return v.MatchWord("ONLY") }) },
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.Choice(limitForm, fetchForm) },
+		v.consumeRest,
+	)
 }
 
 // ParseForUpdate validates the Snowflake `FOR_UPDATE` command.
@@ -529,5 +1003,21 @@ func (v *Validator) ParseLimitFetch() bool {
 //	  [ ... ]
 //	  FOR UPDATE [ NOWAIT | WAIT <wait_time> ]
 func (v *Validator) ParseForUpdate() bool {
-	return true
+	// FOR UPDATE [ NOWAIT | WAIT <wait_time> ]
+	return v.Sequence(
+		func() bool { return v.phrase("FOR", "UPDATE") },
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Choice(
+					func() bool { return v.MatchWord("NOWAIT") },
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchWord("WAIT") },
+							func() bool { return v.Match(sqltok.NumberLit) },
+						)
+					},
+				)
+			})
+		},
+	)
 }

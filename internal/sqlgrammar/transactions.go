@@ -16,7 +16,32 @@ package sqlgrammar
 //
 //	START TRANSACTION [ NAME <name> ]
 func (v *Validator) ParseBegin() bool {
-	return true
+	nameClause := func() bool {
+		return v.Optional(func() bool {
+			return v.Sequence(
+				func() bool { return v.MatchWord("NAME") },
+				v.parseIdentPath,
+			)
+		})
+	}
+	return v.Choice(
+		// BEGIN [ { WORK | TRANSACTION } ] [ NAME <name> ]
+		func() bool {
+			return v.Sequence(
+				func() bool { return v.MatchKeyword("BEGIN") },
+				func() bool { return v.Optional(v.wordsValue("WORK", "TRANSACTION")) },
+				nameClause,
+			)
+		},
+		// START TRANSACTION [ NAME <name> ]
+		func() bool {
+			return v.Sequence(
+				func() bool { return v.MatchWord("START") },
+				func() bool { return v.MatchWord("TRANSACTION") },
+				nameClause,
+			)
+		},
+	)
 }
 
 // ParseCommit validates the Snowflake `COMMIT` command.
@@ -26,7 +51,10 @@ func (v *Validator) ParseBegin() bool {
 //
 //	COMMIT [ WORK ]
 func (v *Validator) ParseCommit() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("COMMIT") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("WORK") }) },
+	)
 }
 
 // ParseRollback validates the Snowflake `ROLLBACK` command.
@@ -36,5 +64,8 @@ func (v *Validator) ParseCommit() bool {
 //
 //	ROLLBACK [ WORK ]
 func (v *Validator) ParseRollback() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("ROLLBACK") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("WORK") }) },
+	)
 }

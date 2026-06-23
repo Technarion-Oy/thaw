@@ -1,5 +1,11 @@
 package sqlgrammar
 
+import (
+	"strings"
+
+	"thaw/internal/sqltok"
+)
+
 // CALL / EXECUTE / EXPLAIN / COMMENT — grammar-rule stubs for issue #556.
 //
 // Each function corresponds to one Snowflake command reference (see the per-
@@ -15,7 +21,24 @@ package sqlgrammar
 //	CALL <procedure_name> ( [ [ <arg_name> => ] <arg> , ... ] )
 //	  [ INTO :<snowflake_scripting_variable> ]
 func (v *Validator) ParseCall() bool {
-	return true
+	// scriptingVar: :<identifier> bind target.
+	scriptingVar := func() bool {
+		return v.Sequence(
+			func() bool { return v.Match(sqltok.Colon) },
+			v.parseIdentPath,
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CALL") },
+		v.parseIdentPath,
+		// argument list — free-form ( [ name => ] arg, … ).
+		v.consumeBalancedParens,
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(func() bool { return v.MatchWord("INTO") }, scriptingVar)
+			})
+		},
+	)
 }
 
 // ParseCallWithAnonymousProcedure validates the Snowflake `CALL (with anonymous procedure)` command.
@@ -40,7 +63,47 @@ func (v *Validator) ParseCall() bool {
 //	WITH <name> AS PROCEDURE (...) ... CALL <name> (...) shape with a language-
 //	specific procedure definition.)
 func (v *Validator) ParseCallWithAnonymousProcedure() bool {
-	return true
+	scriptingVar := func() bool {
+		return v.Sequence(
+			func() bool { return v.Match(sqltok.Colon) },
+			v.parseIdentPath,
+		)
+	}
+	// WITH <name> AS PROCEDURE — the required leading skeleton.
+	if !v.Sequence(
+		func() bool { return v.MatchKeyword("WITH") },
+		v.parseIdentPath,
+		func() bool { return v.MatchWord("AS") },
+		func() bool { return v.MatchWord("PROCEDURE") },
+	) {
+		return false
+	}
+	// The procedure definition (signature, RETURNS, LANGUAGE, body, optional extra
+	// CTEs) is too free-form to model; consume tokens until the trailing CALL
+	// keyword that begins the invocation.
+	foundCall := false
+	for !v.AtEnd() {
+		t := v.Peek()
+		if t.Kind.IsIdentLike() && strings.EqualFold(t.Text(v.src), "CALL") {
+			foundCall = true
+			break
+		}
+		v.advance()
+	}
+	if !foundCall {
+		v.expect("CALL")
+		return false
+	}
+	return v.Sequence(
+		func() bool { return v.MatchWord("CALL") },
+		v.parseIdentPath,
+		v.consumeBalancedParens,
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(func() bool { return v.MatchWord("INTO") }, scriptingVar)
+			})
+		},
+	)
 }
 
 // ParseComment validates the Snowflake `COMMENT` command.
@@ -52,7 +115,25 @@ func (v *Validator) ParseCallWithAnonymousProcedure() bool {
 //
 //	COMMENT [ IF EXISTS ] ON COLUMN <table_name>.<column_name> IS '<string_literal>';
 func (v *Validator) ParseComment() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("COMMENT") },
+		func() bool { return v.ifExists() },
+		func() bool { return v.MatchWord("ON") },
+		// <object_type> <object_name> (object_type is a single word such as TABLE,
+		// VIEW, COLUMN; the name may be dot-qualified).
+		func() bool {
+			t := v.Peek()
+			if !t.Kind.IsIdentLike() {
+				v.expect("object type")
+				return false
+			}
+			v.advance()
+			return true
+		},
+		v.parseIdentPath,
+		func() bool { return v.MatchWord("IS") },
+		v.parseString,
+	)
 }
 
 // ParseExecuteAlert validates the Snowflake `EXECUTE ALERT` command.
@@ -62,7 +143,11 @@ func (v *Validator) ParseComment() bool {
 //
 //	EXECUTE ALERT <name>
 func (v *Validator) ParseExecuteAlert() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("EXECUTE") },
+		func() bool { return v.MatchWord("ALERT") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseExecuteDbtProject validates the Snowflake `EXECUTE DBT PROJECT` command.
@@ -79,7 +164,37 @@ func (v *Validator) ParseExecuteAlert() bool {
 //	  [ DBT_VERSION = 'version_number' ]
 //	  [ PROJECT_ROOT = '<subdirectory_path>' ]
 func (v *Validator) ParseExecuteDbtProject() bool {
-	return true
+	options := func() bool {
+		return v.ZeroOrMore(func() bool {
+			return v.Choice(
+				v.option("ARGS", v.parseString),
+				v.option("DBT_VERSION", v.parseString),
+				v.option("PROJECT_ROOT", v.parseString),
+			)
+		})
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("EXECUTE") },
+		func() bool { return v.MatchWord("DBT") },
+		func() bool { return v.MatchWord("PROJECT") },
+		func() bool { return v.ifExists() },
+		// either <name> or [ FROM WORKSPACE <name> ].
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Choice(
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchWord("FROM") },
+							func() bool { return v.MatchWord("WORKSPACE") },
+							v.parseIdentPath,
+						)
+					},
+					v.parseIdentPath,
+				)
+			})
+		},
+		options,
+	)
 }
 
 // ParseExecuteDcmProject validates the Snowflake `EXECUTE DCM PROJECT` command.
@@ -111,7 +226,17 @@ func (v *Validator) ParseExecuteDbtProject() bool {
 //	EXECUTE DCM PROJECT <name>
 //	  PURGE [ AS "<deployment_name_alias>" ]
 func (v *Validator) ParseExecuteDcmProject() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("EXECUTE") },
+		func() bool { return v.MatchWord("DCM") },
+		func() bool { return v.MatchWord("PROJECT") },
+		v.parseIdentPath,
+		// the action keyword (PLAN | DEPLOY | REFRESH | TEST | PREVIEW | PURGE).
+		v.wordsValue("PLAN", "DEPLOY", "REFRESH", "TEST", "PREVIEW", "PURGE"),
+		// the remaining action-specific clauses (USING, FROM, AS, ALL, …) are
+		// free-form; accept them all.
+		v.consumeRest,
+	)
 }
 
 // ParseExecuteImmediate validates the Snowflake `EXECUTE IMMEDIATE` command.
@@ -128,7 +253,38 @@ func (v *Validator) ParseExecuteDcmProject() bool {
 //	EXECUTE IMMEDIATE $<session_variable>
 //	    [ USING ( <bind_variable> [ , <bind_variable> ... ] ) ]
 func (v *Validator) ParseExecuteImmediate() bool {
-	return true
+	// the body: a '<string>' literal, a $<session_variable>, or a bare <variable>.
+	body := func() bool {
+		return v.Choice(
+			v.parseString,
+			func() bool {
+				return v.Sequence(
+					func() bool {
+						t := v.Peek()
+						if t.Kind == sqltok.Other && t.Text(v.src) == "$" {
+							v.advance()
+							return true
+						}
+						v.expect("$")
+						return false
+					},
+					v.parseScalar,
+				)
+			},
+			v.parseIdentPath,
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("EXECUTE") },
+		func() bool { return v.MatchWord("IMMEDIATE") },
+		body,
+		// optional USING ( <bind>, … ).
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(func() bool { return v.MatchWord("USING") }, v.consumeBalancedParens)
+			})
+		},
+	)
 }
 
 // ParseExecuteImmediateFrom validates the Snowflake `EXECUTE IMMEDIATE FROM` command.
@@ -149,7 +305,46 @@ func (v *Validator) ParseExecuteImmediate() bool {
 //	relativeFilePath ::=
 //	   '[ / | ./ | ../ ]<path>/<filename>'
 func (v *Validator) ParseExecuteImmediateFrom() bool {
-	return true
+	stageRef := func() bool {
+		at := v.Peek()
+		if !v.Match(sqltok.At) {
+			return false
+		}
+		// Only consume tokens directly adjacent to the previous one (no
+		// intervening whitespace), so the stage path stops before the next
+		// clause word (FROM, PATTERN, …).
+		lastEnd := at.End
+		matched := false
+		for !v.AtEnd() {
+			t := v.Peek()
+			if t.Start != lastEnd {
+				break
+			}
+			ok := t.Kind.IsIdentLike() || t.Kind == sqltok.Dot || t.Kind == sqltok.NumberLit ||
+				(t.Kind == sqltok.Operator && (t.Text(v.src) == "/" || t.Text(v.src) == "%")) ||
+				(t.Kind == sqltok.Other && t.Text(v.src) == "~")
+			if !ok {
+				break
+			}
+			lastEnd = t.End
+			v.advance()
+			matched = true
+		}
+		return matched
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("EXECUTE") },
+		func() bool { return v.MatchWord("IMMEDIATE") },
+		func() bool { return v.MatchWord("FROM") },
+		// absolute (@stage/path) or relative ('…') file path.
+		func() bool { return v.Choice(stageRef, v.parseString) },
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(func() bool { return v.MatchWord("USING") }, v.consumeBalancedParens)
+			})
+		},
+		func() bool { return v.Optional(v.option("DRY_RUN", v.parseBool)) },
+	)
 }
 
 // ParseExecuteJobService validates the Snowflake `EXECUTE JOB SERVICE` command.
@@ -185,7 +380,19 @@ func (v *Validator) ParseExecuteImmediateFrom() bool {
 //	  }
 //	  USING ( <key> => <value> [ , <key> => <value> [ , ... ] ]  )
 func (v *Validator) ParseExecuteJobService() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("EXECUTE") },
+		func() bool { return v.MatchWord("JOB") },
+		func() bool { return v.MatchWord("SERVICE") },
+		func() bool { return v.MatchWord("IN") },
+		func() bool { return v.MatchWord("COMPUTE") },
+		func() bool { return v.MatchWord("POOL") },
+		v.parseIdentPath,
+		// the FROM specification + options block is free-form; require at least the
+		// FROM keyword then accept the remainder.
+		func() bool { return v.MatchWord("FROM") },
+		v.consumeRest,
+	)
 }
 
 // ParseExecuteNotebook validates the Snowflake `EXECUTE NOTEBOOK` command.
@@ -195,7 +402,13 @@ func (v *Validator) ParseExecuteJobService() bool {
 //
 //	EXECUTE NOTEBOOK <name>([ <parameter_string> [ , ... ] ]);
 func (v *Validator) ParseExecuteNotebook() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("EXECUTE") },
+		func() bool { return v.MatchWord("NOTEBOOK") },
+		v.parseIdentPath,
+		// ( [ <parameter_string> [, …] ] ) — possibly-empty arg list.
+		v.consumeBalancedParens,
+	)
 }
 
 // ParseExecuteNotebookProject validates the Snowflake `EXECUTE NOTEBOOK PROJECT` command.
@@ -213,7 +426,27 @@ func (v *Validator) ParseExecuteNotebook() bool {
 //	  [ EXTERNAL_ACCESS_INTEGRATIONS = ( <integration_name> [ , ... ] ) ]
 //	  [ SECRETS = ( <database_name>.<schema_name>.<secret_name> [ , ... ] ) ];
 func (v *Validator) ParseExecuteNotebookProject() bool {
-	return true
+	options := func() bool {
+		return v.ZeroOrMore(func() bool {
+			return v.Choice(
+				v.option("MAIN_FILE", v.parseString),
+				v.option("COMPUTE_POOL", v.parseScalar),
+				v.option("QUERY_WAREHOUSE", v.parseScalar),
+				v.option("RUNTIME", v.parseString),
+				v.option("ARGUMENTS", v.parseString),
+				v.option("REQUIREMENTS_FILE", v.parseString),
+				v.option("EXTERNAL_ACCESS_INTEGRATIONS", v.consumeBalancedParens),
+				v.option("SECRETS", v.consumeBalancedParens),
+			)
+		})
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("EXECUTE") },
+		func() bool { return v.MatchWord("NOTEBOOK") },
+		func() bool { return v.MatchWord("PROJECT") },
+		v.parseIdentPath,
+		options,
+	)
 }
 
 // ParseExecuteTask validates the Snowflake `EXECUTE TASK` command.
@@ -228,7 +461,34 @@ func (v *Validator) ParseExecuteNotebookProject() bool {
 //
 //	EXECUTE TASK <name> RETRY GRAPH RUN GROUP '<graph_run_group_id>'
 func (v *Validator) ParseExecuteTask() bool {
-	return true
+	tail := func() bool {
+		return v.Optional(func() bool {
+			return v.Choice(
+				// USING CONFIG = <configuration_string>
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("USING") },
+						v.option("CONFIG", v.parseScalar),
+					)
+				},
+				// RETRY LAST
+				func() bool { return v.phrase("RETRY", "LAST") },
+				// RETRY GRAPH RUN GROUP '<id>'
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.phrase("RETRY", "GRAPH", "RUN", "GROUP") },
+						v.parseString,
+					)
+				},
+			)
+		})
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("EXECUTE") },
+		func() bool { return v.MatchWord("TASK") },
+		v.parseIdentPath,
+		tail,
+	)
 }
 
 // ParseExplain validates the Snowflake `EXPLAIN` command.
@@ -238,5 +498,24 @@ func (v *Validator) ParseExecuteTask() bool {
 //
 //	EXPLAIN [ USING { TABULAR | JSON | TEXT } ] <statement>
 func (v *Validator) ParseExplain() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("EXPLAIN") },
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("USING") },
+					v.wordsValue("TABULAR", "JSON", "TEXT"),
+				)
+			})
+		},
+		// the inner statement is free-form; require at least one token then accept
+		// the remainder.
+		func() bool {
+			if v.AtEnd() {
+				v.expect("statement")
+				return false
+			}
+			return v.consumeRest()
+		},
+	)
 }

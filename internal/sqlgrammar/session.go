@@ -1,5 +1,7 @@
 package sqlgrammar
 
+import "thaw/internal/sqltok"
+
 // Sessions & context (USE, SET) — grammar-rule stubs for issue #556.
 //
 // Each function corresponds to one Snowflake command reference (see the per-
@@ -16,7 +18,29 @@ package sqlgrammar
 //
 //	SET ( <var> [ , <var> ... ] ) = ( <expr> [ , <expr> ... ] )
 func (v *Validator) ParseSet() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("SET") },
+		func() bool {
+			return v.Choice(
+				// SET ( <var>, ... ) = ( <expr>, ... )
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.parseParenList(v.parseIdentPath) },
+						func() bool { return v.MatchOp("=") },
+						v.consumeBalancedParens,
+					)
+				},
+				// SET <var> = <expr>
+				func() bool {
+					return v.Sequence(
+						v.parseIdentPath,
+						func() bool { return v.MatchOp("=") },
+						v.consumeRest,
+					)
+				},
+			)
+		},
+	)
 }
 
 // ParseUnset validates the Snowflake `UNSET` command (drops a session variable).
@@ -28,7 +52,17 @@ func (v *Validator) ParseSet() bool {
 //
 //	UNSET ( <var> [ , <var> ... ] )
 func (v *Validator) ParseUnset() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("UNSET") },
+		func() bool {
+			return v.Choice(
+				// UNSET ( <var>, ... )
+				func() bool { return v.parseParenList(v.parseIdentPath) },
+				// UNSET <var>
+				v.parseIdentPath,
+			)
+		},
+	)
 }
 
 // ParseUse validates the Snowflake `USE` command.
@@ -38,7 +72,48 @@ func (v *Validator) ParseUnset() bool {
 //
 //	USE <object>
 func (v *Validator) ParseUse() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("USE") },
+		func() bool {
+			return v.Choice(
+				// USE SECONDARY ROLES { ALL | NONE | <role> [, ...] }
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("SECONDARY") },
+						func() bool { return v.MatchWord("ROLES") },
+						func() bool {
+							return v.Choice(
+								func() bool { return v.MatchWord("ALL") },
+								func() bool { return v.MatchWord("NONE") },
+								func() bool {
+									return v.Sequence(
+										v.parseIdentPath,
+										func() bool {
+											return v.ZeroOrMore(func() bool {
+												return v.Sequence(
+													func() bool { return v.Match(sqltok.Comma) },
+													v.parseIdentPath,
+												)
+											})
+										},
+									)
+								},
+							)
+						},
+					)
+				},
+				// USE { ROLE | WAREHOUSE | DATABASE | SCHEMA } <name>
+				func() bool {
+					return v.Sequence(
+						v.wordsValue("ROLE", "WAREHOUSE", "DATABASE", "SCHEMA"),
+						v.parseIdentPath,
+					)
+				},
+				// USE <name>
+				v.parseIdentPath,
+			)
+		},
+	)
 }
 
 // ParseUseDatabase validates the Snowflake `USE DATABASE` command.
@@ -48,7 +123,11 @@ func (v *Validator) ParseUse() bool {
 //
 //	USE [ DATABASE ] <name>
 func (v *Validator) ParseUseDatabase() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("USE") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("DATABASE") }) },
+		v.parseIdentPath,
+	)
 }
 
 // ParseUseRole validates the Snowflake `USE ROLE` command.
@@ -58,7 +137,11 @@ func (v *Validator) ParseUseDatabase() bool {
 //
 //	USE ROLE <name>
 func (v *Validator) ParseUseRole() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("USE") },
+		func() bool { return v.MatchWord("ROLE") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseUseSchema validates the Snowflake `USE SCHEMA` command.
@@ -68,7 +151,11 @@ func (v *Validator) ParseUseRole() bool {
 //
 //	USE [ SCHEMA ] [<db_name>.]<name>
 func (v *Validator) ParseUseSchema() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("USE") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("SCHEMA") }) },
+		v.parseIdentPath,
+	)
 }
 
 // ParseUseSecondaryRoles validates the Snowflake `USE SECONDARY ROLES` command.
@@ -82,7 +169,30 @@ func (v *Validator) ParseUseSchema() bool {
 //	    | <role_name> [ , <role_name> ... ]
 //	  }
 func (v *Validator) ParseUseSecondaryRoles() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("USE") },
+		func() bool { return v.MatchWord("SECONDARY") },
+		func() bool { return v.MatchWord("ROLES") },
+		func() bool {
+			return v.Choice(
+				func() bool { return v.MatchWord("ALL") },
+				func() bool { return v.MatchWord("NONE") },
+				func() bool {
+					return v.Sequence(
+						v.parseIdentPath,
+						func() bool {
+							return v.ZeroOrMore(func() bool {
+								return v.Sequence(
+									func() bool { return v.Match(sqltok.Comma) },
+									v.parseIdentPath,
+								)
+							})
+						},
+					)
+				},
+			)
+		},
+	)
 }
 
 // ParseUseWarehouse validates the Snowflake `USE WAREHOUSE` command.
@@ -92,5 +202,9 @@ func (v *Validator) ParseUseSecondaryRoles() bool {
 //
 //	USE WAREHOUSE <name>
 func (v *Validator) ParseUseWarehouse() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("USE") },
+		func() bool { return v.MatchWord("WAREHOUSE") },
+		v.parseIdentPath,
+	)
 }

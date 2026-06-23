@@ -14,7 +14,11 @@ package sqlgrammar
 //
 //	UNDROP DATABASE <name>
 func (v *Validator) ParseUndropDatabase() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("UNDROP") },
+		func() bool { return v.MatchWord("DATABASE") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseUndropDynamicTable validates the Snowflake `UNDROP DYNAMIC TABLE` command.
@@ -24,7 +28,11 @@ func (v *Validator) ParseUndropDatabase() bool {
 //
 //	UNDROP DYNAMIC TABLE <name>
 func (v *Validator) ParseUndropDynamicTable() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("UNDROP") },
+		func() bool { return v.phrase("DYNAMIC", "TABLE") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseUndropExternalVolume validates the Snowflake `UNDROP EXTERNAL VOLUME` command.
@@ -34,7 +42,11 @@ func (v *Validator) ParseUndropDynamicTable() bool {
 //
 //	UNDROP EXTERNAL VOLUME <name>
 func (v *Validator) ParseUndropExternalVolume() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("UNDROP") },
+		func() bool { return v.phrase("EXTERNAL", "VOLUME") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseUndropIcebergTable validates the Snowflake `UNDROP ICEBERG TABLE` command.
@@ -44,7 +56,11 @@ func (v *Validator) ParseUndropExternalVolume() bool {
 //
 //	UNDROP ICEBERG TABLE <name>
 func (v *Validator) ParseUndropIcebergTable() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("UNDROP") },
+		func() bool { return v.phrase("ICEBERG", "TABLE") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseUndropNotebook validates the Snowflake `UNDROP NOTEBOOK` command.
@@ -54,7 +70,11 @@ func (v *Validator) ParseUndropIcebergTable() bool {
 //
 //	UNDROP NOTEBOOK <name>
 func (v *Validator) ParseUndropNotebook() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("UNDROP") },
+		func() bool { return v.MatchWord("NOTEBOOK") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseUndropSchema validates the Snowflake `UNDROP SCHEMA` command.
@@ -64,7 +84,11 @@ func (v *Validator) ParseUndropNotebook() bool {
 //
 //	UNDROP SCHEMA <name>
 func (v *Validator) ParseUndropSchema() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("UNDROP") },
+		func() bool { return v.MatchWord("SCHEMA") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseUndropTable validates the Snowflake `UNDROP TABLE` command.
@@ -74,23 +98,42 @@ func (v *Validator) ParseUndropSchema() bool {
 //
 //	UNDROP TABLE <name>
 func (v *Validator) ParseUndropTable() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("UNDROP") },
+		func() bool { return v.MatchWord("TABLE") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseUndropView validates the Snowflake `UNDROP VIEW` command.
 // Reference: https://docs.snowflake.com/en/sql-reference/sql/undrop-view
 //
 // Syntax: (unavailable — see Reference URL)
+//
+//	UNDROP VIEW <name>
 func (v *Validator) ParseUndropView() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("UNDROP") },
+		func() bool { return v.MatchWord("VIEW") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseUndropObj validates the Snowflake `UNDROP <object>` command.
 // Reference: https://docs.snowflake.com/en/sql-reference/sql/undrop
 //
 // Syntax: (unavailable — see Reference URL)
+//
+//	UNDROP <object-type> <name>
 func (v *Validator) ParseUndropObj() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("UNDROP") },
+		// at least one object-type word, e.g. TABLE / DYNAMIC TABLE / SCHEMA …
+		v.parseIdentPath,
+		// the object name (and any remaining object-type words)
+		v.parseIdentPath,
+		func() bool { return v.consumeRest() },
+	)
 }
 
 // ParseUndropAccount validates the Snowflake `UNDROP ACCOUNT` command.
@@ -100,7 +143,11 @@ func (v *Validator) ParseUndropObj() bool {
 //
 //	UNDROP ACCOUNT <name>
 func (v *Validator) ParseUndropAccount() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("UNDROP") },
+		func() bool { return v.MatchWord("ACCOUNT") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseUndropSnapshot validates the Snowflake `UNDROP SNAPSHOT` command.
@@ -111,7 +158,32 @@ func (v *Validator) ParseUndropAccount() bool {
 //	UNDROP SNAPSHOT { <name> | IDENTIFIER( <id> ) }
 //	 [ RENAME TO <new_snapshot_name> ];
 func (v *Validator) ParseUndropSnapshot() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("UNDROP") },
+		func() bool { return v.MatchWord("SNAPSHOT") },
+		func() bool {
+			return v.Choice(
+				// IDENTIFIER( <id> )
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("IDENTIFIER") },
+						v.consumeBalancedParens,
+					)
+				},
+				// <name>
+				v.parseIdentPath,
+			)
+		},
+		// [ RENAME TO <new_snapshot_name> ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.phrase("RENAME", "TO") },
+					v.parseIdentPath,
+				)
+			})
+		},
+	)
 }
 
 // ParseUndropStreamlit validates the Snowflake `UNDROP STREAMLIT` command.
@@ -121,7 +193,11 @@ func (v *Validator) ParseUndropSnapshot() bool {
 //
 //	UNDROP STREAMLIT <name>
 func (v *Validator) ParseUndropStreamlit() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("UNDROP") },
+		func() bool { return v.MatchWord("STREAMLIT") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseUndropTag validates the Snowflake `UNDROP TAG` command.
@@ -131,7 +207,11 @@ func (v *Validator) ParseUndropStreamlit() bool {
 //
 //	UNDROP TAG <name>
 func (v *Validator) ParseUndropTag() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("UNDROP") },
+		func() bool { return v.MatchWord("TAG") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseUndropType validates the Snowflake `UNDROP TYPE` command.
@@ -141,5 +221,9 @@ func (v *Validator) ParseUndropTag() bool {
 //
 //	UNDROP TYPE <name>
 func (v *Validator) ParseUndropType() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("UNDROP") },
+		func() bool { return v.MatchWord("TYPE") },
+		v.parseIdentPath,
+	)
 }
