@@ -13,9 +13,9 @@ func TestParseCopyFiles(t *testing.T) {
 	)
 	assertInvalid(t, (*Validator).ParseCopyFiles,
 		``,
-		`COPY FILES INTO @dest`,                // missing FROM
-		`SELECT * FROM @src`,                   // wrong leading keyword
-		`COPY FILES FROM @src INTO @dest`,      // INTO/FROM out of order
+		`COPY FILES INTO @dest`,           // missing FROM
+		`SELECT * FROM @src`,              // wrong leading keyword
+		`COPY FILES FROM @src INTO @dest`, // INTO/FROM out of order
 	)
 }
 
@@ -27,8 +27,8 @@ func TestParseCopyIntoLocation(t *testing.T) {
 	)
 	assertInvalid(t, (*Validator).ParseCopyIntoLocation,
 		``,
-		`COPY INTO @stage`,            // missing FROM <source>
-		`DROP INTO @stage FROM t`,     // wrong leading keyword
+		`COPY INTO @stage`,        // missing FROM <source>
+		`DROP INTO @stage FROM t`, // wrong leading keyword
 	)
 }
 
@@ -40,7 +40,7 @@ func TestParseCopyIntoTable(t *testing.T) {
 	)
 	assertInvalid(t, (*Validator).ParseCopyIntoTable,
 		``,
-		`COPY INTO mytable`,         // missing FROM
+		`COPY INTO mytable`, // missing FROM
 		`SELECT INTO mytable FROM @s`,
 	)
 }
@@ -53,8 +53,8 @@ func TestParseGet(t *testing.T) {
 	)
 	assertInvalid(t, (*Validator).ParseGet,
 		``,
-		`GET file:///tmp/ @stage`,   // stage/file order wrong
-		`PUT @stage file:///tmp/`,   // wrong leading keyword
+		`GET file:///tmp/ @stage`, // stage/file order wrong
+		`PUT @stage file:///tmp/`, // wrong leading keyword
 	)
 }
 
@@ -66,8 +66,8 @@ func TestParseList(t *testing.T) {
 	)
 	assertInvalid(t, (*Validator).ParseList,
 		``,
-		`LIST mystage`,        // no @ stage ref
-		`SHOW @mystage`,       // wrong leading keyword
+		`LIST mystage`,  // no @ stage ref
+		`SHOW @mystage`, // wrong leading keyword
 	)
 }
 
@@ -92,8 +92,8 @@ func TestParseRemove(t *testing.T) {
 	)
 	assertInvalid(t, (*Validator).ParseRemove,
 		``,
-		`REMOVE mystage`,    // no @ stage ref
-		`LIST @mystage X`,   // wrong leading keyword + trailing
+		`REMOVE mystage`,  // no @ stage ref
+		`LIST @mystage X`, // wrong leading keyword + trailing
 	)
 }
 
@@ -105,8 +105,8 @@ func TestParseCall(t *testing.T) {
 	)
 	assertInvalid(t, (*Validator).ParseCall,
 		``,
-		`CALL myproc`,         // missing arg list parens
-		`SELECT myproc()`,     // wrong leading keyword
+		`CALL myproc`,     // missing arg list parens
+		`SELECT myproc()`, // wrong leading keyword
 	)
 }
 
@@ -131,8 +131,8 @@ func TestParseComment(t *testing.T) {
 	)
 	assertInvalid(t, (*Validator).ParseComment,
 		``,
-		`COMMENT ON TABLE mytable`,        // missing IS '...'
-		`ALTER ON TABLE mytable IS 'x'`,   // wrong leading keyword
+		`COMMENT ON TABLE mytable`,      // missing IS '...'
+		`ALTER ON TABLE mytable IS 'x'`, // wrong leading keyword
 	)
 }
 
@@ -157,8 +157,8 @@ func TestParseExecuteDbtProject(t *testing.T) {
 	)
 	assertInvalid(t, (*Validator).ParseExecuteDbtProject,
 		``,
-		`EXECUTE DBT myproject`,            // missing PROJECT
-		`EXECUTE PIPELINE PROJECT myproj`,  // wrong object word
+		`EXECUTE DBT myproject`,           // missing PROJECT
+		`EXECUTE PIPELINE PROJECT myproj`, // wrong object word
 	)
 }
 
@@ -183,8 +183,8 @@ func TestParseExecuteImmediate(t *testing.T) {
 	)
 	assertInvalid(t, (*Validator).ParseExecuteImmediate,
 		``,
-		`EXECUTE IMMEDIATE`,            // missing body
-		`EXECUTE 'SELECT 1'`,          // missing IMMEDIATE
+		`EXECUTE IMMEDIATE`,  // missing body
+		`EXECUTE 'SELECT 1'`, // missing IMMEDIATE
 	)
 }
 
@@ -196,8 +196,8 @@ func TestParseExecuteImmediateFrom(t *testing.T) {
 	)
 	assertInvalid(t, (*Validator).ParseExecuteImmediateFrom,
 		``,
-		`EXECUTE IMMEDIATE FROM`,        // missing path
-		`EXECUTE IMMEDIATE @stage/x`,    // missing FROM
+		`EXECUTE IMMEDIATE FROM`,     // missing path
+		`EXECUTE IMMEDIATE @stage/x`, // missing FROM
 	)
 }
 
@@ -222,8 +222,8 @@ func TestParseExecuteNotebook(t *testing.T) {
 	)
 	assertInvalid(t, (*Validator).ParseExecuteNotebook,
 		``,
-		`EXECUTE NOTEBOOK mynb`,    // missing arg-list parens
-		`EXECUTE TASK mynb()`,     // wrong object word
+		`EXECUTE NOTEBOOK mynb`, // missing arg-list parens
+		`EXECUTE TASK mynb()`,   // wrong object word
 	)
 }
 
@@ -235,8 +235,8 @@ func TestParseExecuteNotebookProject(t *testing.T) {
 	)
 	assertInvalid(t, (*Validator).ParseExecuteNotebookProject,
 		``,
-		`EXECUTE NOTEBOOK db.sch.proj`,      // missing PROJECT
-		`EXECUTE PROJECT NOTEBOOK myproj`,   // words swapped
+		`EXECUTE NOTEBOOK db.sch.proj`,    // missing PROJECT
+		`EXECUTE PROJECT NOTEBOOK myproj`, // words swapped
 	)
 }
 
@@ -248,8 +248,8 @@ func TestParseExecuteTask(t *testing.T) {
 	)
 	assertInvalid(t, (*Validator).ParseExecuteTask,
 		``,
-		`EXECUTE TASK`,            // missing name
-		`EXECUTE ALERT mytask`,    // wrong object word
+		`EXECUTE TASK`,         // missing name
+		`EXECUTE ALERT mytask`, // wrong object word
 	)
 }
 
@@ -261,7 +261,7 @@ func TestParseExplain(t *testing.T) {
 	)
 	assertInvalid(t, (*Validator).ParseExplain,
 		``,
-		`EXPLAIN`,                  // missing inner statement
-		`EXPLAIN USING JSON`,       // USING form still needs a statement
+		`EXPLAIN`,            // missing inner statement
+		`EXPLAIN USING JSON`, // USING form still needs a statement
 	)
 }

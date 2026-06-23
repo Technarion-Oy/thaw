@@ -1,5 +1,7 @@
 package sqlgrammar
 
+import "thaw/internal/sqltok"
+
 // ALTER commands — grammar-rule stubs for issue #556.
 //
 // Each function corresponds to one Snowflake command reference (see the per-
@@ -12,7 +14,12 @@ package sqlgrammar
 //
 // Syntax: (unavailable — see Reference URL)
 func (v *Validator) ParseAlterObj() bool {
-	return true
+	// Generic `ALTER <object-words> [IF EXISTS] <name> <action>`.
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		v.parseIdentPath, // object kind word(s) / name
+		v.consumeRest,
+	)
 }
 
 // ParseAlterAccount validates the Snowflake `ALTER ACCOUNT` command.
@@ -63,7 +70,26 @@ func (v *Validator) ParseAlterObj() bool {
 //
 //	ALTER ACCOUNT <name> DROP OLD ORGANIZATION URL
 func (v *Validator) ParseAlterAccount() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("ACCOUNT") },
+		// Either an action directly (account-level forms) or `<name> <action>`
+		// (per-account forms: RENAME TO, DROP OLD URL, SET IS_ORG_ADMIN, …).
+		func() bool {
+			action := func() bool {
+				return v.Choice(
+					func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() && v.consumeRest() },
+					func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+					func() bool { return v.Sequence(v.wordsValue("ADD", "REMOVE"), v.consumeRest) },
+					func() bool { return v.Sequence(func() bool { return v.MatchWord("DROP") }, v.consumeRest) },
+				)
+			}
+			return v.Choice(
+				action,
+				func() bool { return v.Sequence(v.parseIdentPath, action) },
+			)
+		},
+	)
 }
 
 // ParseAlterAgent validates the Snowflake `ALTER AGENT` command.
@@ -77,7 +103,36 @@ func (v *Validator) ParseAlterAccount() bool {
 //
 //	ALTER AGENT <name> MODIFY LIVE VERSION SET SPECIFICATION = <specification>
 func (v *Validator) ParseAlterAgent() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("AGENT") },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				// SET [ COMMENT = … ] [ PROFILE = … ]
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("SET") },
+						func() bool {
+							return v.ZeroOrMore(func() bool {
+								return v.Choice(
+									v.commentOption(),
+									v.option("PROFILE", v.parseString),
+								)
+							})
+						},
+					)
+				},
+				// MODIFY LIVE VERSION SET SPECIFICATION = <spec>
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.phrase("MODIFY", "LIVE", "VERSION", "SET") },
+						v.option("SPECIFICATION", v.parseScalar),
+					)
+				},
+			)
+		},
+	)
 }
 
 // ParseAlterAggregationPolicy validates the Snowflake `ALTER AGGREGATION POLICY` command.
@@ -97,7 +152,21 @@ func (v *Validator) ParseAlterAgent() bool {
 //
 //	ALTER AGGREGATION POLICY [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterAggregationPolicy() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("AGGREGATION", "POLICY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				// SET / UNSET … (BODY -> expr, TAG, COMMENT) — free-form remainder.
+				func() bool {
+					return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest)
+				},
+			)
+		},
+	)
 }
 
 // ParseAlterAlert validates the Snowflake `ALTER ALERT` command.
@@ -130,7 +199,25 @@ func (v *Validator) ParseAlterAggregationPolicy() bool {
 //
 //	ALTER ALERT [ IF EXISTS ] <name> MODIFY ACTION <action>
 func (v *Validator) ParseAlterAlert() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("ALERT") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				// RESUME | SUSPEND
+				v.wordsValue("RESUME", "SUSPEND"),
+				// SET / UNSET <options…> ; MODIFY CONDITION/ACTION … — free-form.
+				func() bool {
+					return v.Sequence(
+						v.wordsValue("SET", "UNSET", "MODIFY"),
+						v.consumeRest,
+					)
+				},
+			)
+		},
+	)
 }
 
 // ParseAlterApiIntegration validates the Snowflake `ALTER API INTEGRATION` command.
@@ -160,7 +247,18 @@ func (v *Validator) ParseAlterAlert() bool {
 //	                                                      }
 //	                                                      [ , ... ]
 func (v *Validator) ParseAlterApiIntegration() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		// [ API ] INTEGRATION
+		func() bool { return v.Optional(func() bool { return v.MatchWord("API") }) },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		// SET … | UNSET …  (options, TAG list) — free-form remainder.
+		func() bool {
+			return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest)
+		},
+	)
 }
 
 // ParseAlterApplication validates the Snowflake `ALTER APPLICATION` command.
@@ -204,7 +302,22 @@ func (v *Validator) ParseAlterApiIntegration() bool {
 //
 //	ALTER APPLICATION <name> UPGRADE USING <path_to_stage>
 func (v *Validator) ParseAlterApplication() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("APPLICATION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.MatchWord("UPGRADE") && v.consumeRest() },
+				// SET / UNSET <options/policies/tags>; one or more trailing tokens.
+				func() bool {
+					return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest)
+				},
+			)
+		},
+	)
 }
 
 // ParseAlterApplicationDropSpecification validates the Snowflake `ALTER APPLICATION DROP SPECIFICATION` command.
@@ -214,7 +327,12 @@ func (v *Validator) ParseAlterApplication() bool {
 //
 //	ALTER APPLICATION DROP SPECIFICATION <app_spec_name>;
 func (v *Validator) ParseAlterApplicationDropSpecification() bool {
-	return true
+	// ALTER APPLICATION DROP SPECIFICATION <app_spec_name>
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("APPLICATION", "DROP", "SPECIFICATION") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseAlterApplicationDropConfigurationDefinition validates the Snowflake `ALTER APPLICATION DROP CONFIGURATION DEFINITION` command.
@@ -224,7 +342,12 @@ func (v *Validator) ParseAlterApplicationDropSpecification() bool {
 //
 //	ALTER APPLICATION DROP CONFIGURATION DEFINITION {config};
 func (v *Validator) ParseAlterApplicationDropConfigurationDefinition() bool {
-	return true
+	// ALTER APPLICATION DROP CONFIGURATION DEFINITION <config>
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("APPLICATION", "DROP", "CONFIGURATION", "DEFINITION") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseAlterApplicationPackage validates the Snowflake `ALTER APPLICATION PACKAGE` command.
@@ -254,7 +377,16 @@ func (v *Validator) ParseAlterApplicationDropConfigurationDefinition() bool {
 //
 //	ALTER APPLICATION PACKAGE <name> UNSET TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterApplicationPackage() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("APPLICATION", "PACKAGE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		// SET / UNSET <options or TAG list>.
+		func() bool {
+			return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest)
+		},
+	)
 }
 
 // ParseAlterApplicationPackageModifyReleaseChannel validates the Snowflake `ALTER APPLICATION PACKAGE MODIFY RELEASE CHANNEL` command.
@@ -294,7 +426,19 @@ func (v *Validator) ParseAlterApplicationPackage() bool {
 //	  MODIFY RELEASE CHANNEL <release_channel>
 //	  UNSET RELEASE DIRECTIVE <release_directive>
 func (v *Validator) ParseAlterApplicationPackageModifyReleaseChannel() bool {
-	return true
+	// ALTER APPLICATION PACKAGE <name> MODIFY RELEASE CHANNEL <rc> { SET|MODIFY|UNSET } …
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("APPLICATION", "PACKAGE") },
+		v.parseIdentPath,
+		func() bool { return v.phrase("MODIFY", "RELEASE", "CHANNEL") },
+		v.parseIdentPath,
+		// SET DEFAULT RELEASE DIRECTIVE … | SET RELEASE DIRECTIVE … |
+		// MODIFY RELEASE DIRECTIVE … | UNSET RELEASE DIRECTIVE … — free-form.
+		func() bool {
+			return v.Sequence(v.wordsValue("SET", "MODIFY", "UNSET"), v.consumeRest)
+		},
+	)
 }
 
 // ParseAlterApplicationPackageReleaseDirective validates the Snowflake `ALTER APPLICATION PACKAGE RELEASE DIRECTIVE` command.
@@ -343,7 +487,32 @@ func (v *Validator) ParseAlterApplicationPackageModifyReleaseChannel() bool {
 //
 //	ALTER APPLICATION PACKAGE <name> UNSET RELEASE DIRECTIVE <release_directive>
 func (v *Validator) ParseAlterApplicationPackageReleaseDirective() bool {
-	return true
+	// ALTER APPLICATION PACKAGE <name> [MODIFY RELEASE CHANNEL <rc>]
+	//   { MODIFY RELEASE DIRECTIVE … | SET [DEFAULT] RELEASE DIRECTIVE … | UNSET RELEASE DIRECTIVE … }
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("APPLICATION", "PACKAGE") },
+		v.parseIdentPath,
+		// optional MODIFY RELEASE CHANNEL <name>
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.phrase("MODIFY", "RELEASE", "CHANNEL") },
+					v.parseIdentPath,
+				)
+			})
+		},
+		func() bool {
+			return v.Choice(
+				func() bool {
+					return v.Sequence(func() bool { return v.phrase("MODIFY", "RELEASE", "DIRECTIVE") }, v.consumeRest)
+				},
+				func() bool {
+					return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest)
+				},
+			)
+		},
+	)
 }
 
 // ParseAlterApplicationPackageVersion validates the Snowflake `ALTER APPLICATION PACKAGE VERSION` command.
@@ -359,7 +528,25 @@ func (v *Validator) ParseAlterApplicationPackageReleaseDirective() bool {
 //	ALTER APPLICATION PACKAGE <name> ADD PATCH [<patch_number>] FOR VERSION [<version_identifier>]
 //	  USING <path_to_version_directory> [ LABEL = '<display_label>' ]
 func (v *Validator) ParseAlterApplicationPackageVersion() bool {
-	return true
+	// ALTER APPLICATION PACKAGE <name> { ADD VERSION … | DROP VERSION … | ADD PATCH … }
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("APPLICATION", "PACKAGE") },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool {
+					return v.Sequence(func() bool { return v.phrase("ADD", "VERSION") }, v.consumeRest)
+				},
+				func() bool {
+					return v.Sequence(func() bool { return v.phrase("DROP", "VERSION") }, v.parseIdentPath)
+				},
+				func() bool {
+					return v.Sequence(func() bool { return v.phrase("ADD", "PATCH") }, v.consumeRest)
+				},
+			)
+		},
+	)
 }
 
 // ParseAlterApplicationRole validates the Snowflake `ALTER APPLICATION ROLE` command.
@@ -373,7 +560,19 @@ func (v *Validator) ParseAlterApplicationPackageVersion() bool {
 //
 //	ALTER APPLICATION ROLE [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterApplicationRole() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("APPLICATION", "ROLE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("SET") }, v.commentOption()) },
+				func() bool { return v.phrase("UNSET", "COMMENT") },
+			)
+		},
+	)
 }
 
 // ParseAlterApplicationApproveDeclineSpecification validates the Snowflake `ALTER APPLICATION APPROVE DECLINE SPECIFICATION` command.
@@ -385,7 +584,16 @@ func (v *Validator) ParseAlterApplicationRole() bool {
 //	  { APPROVE | DECLINE } SPECIFICATION <spec_name>
 //	  SEQUENCE_NUMBER = <sequence_num>;
 func (v *Validator) ParseAlterApplicationApproveDeclineSpecification() bool {
-	return true
+	// ALTER APPLICATION <app> { APPROVE | DECLINE } SPECIFICATION <spec> SEQUENCE_NUMBER = <num>
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("APPLICATION") },
+		v.parseIdentPath,
+		v.wordsValue("APPROVE", "DECLINE"),
+		func() bool { return v.MatchWord("SPECIFICATION") },
+		v.parseIdentPath,
+		v.option("SEQUENCE_NUMBER", v.parseNumber),
+	)
 }
 
 // ParseAlterApplicationSetSpecification validates the Snowflake `ALTER APPLICATION SET SPECIFICATION` command.
@@ -447,7 +655,16 @@ func (v *Validator) ParseAlterApplicationApproveDeclineSpecification() bool {
 //	  SETTING = <setting_name>
 //	  [ VALUE = '<value>' ]
 func (v *Validator) ParseAlterApplicationSetSpecification() bool {
-	return true
+	// ALTER APPLICATION SET SPECIFICATION <app_spec_name> <option list…>
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("APPLICATION", "SET", "SPECIFICATION") },
+		v.parseIdentPath,
+		// At least one option follows (TYPE = …, LABEL = …, etc.) — free-form.
+		func() bool { return v.MatchWord("TYPE") },
+		func() bool { return v.MatchOp("=") },
+		v.consumeRest,
+	)
 }
 
 // ParseAlterApplicationSetConfigurationDefinition validates the Snowflake `ALTER APPLICATION SET CONFIGURATION DEFINITION` command.
@@ -481,7 +698,15 @@ func (v *Validator) ParseAlterApplicationSetSpecification() bool {
 //	  DESCRIPTION = '<description>'
 //	  APPLICATION_ROLES = ( <app_role1> [ , <app_role2> ... ] );
 func (v *Validator) ParseAlterApplicationSetConfigurationDefinition() bool {
-	return true
+	// ALTER APPLICATION SET CONFIGURATION DEFINITION <config> <option list…>
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("APPLICATION", "SET", "CONFIGURATION", "DEFINITION") },
+		v.parseIdentPath,
+		func() bool { return v.MatchWord("TYPE") },
+		func() bool { return v.MatchOp("=") },
+		v.consumeRest,
+	)
 }
 
 // ParseAlterApplicationSetConfigurationValue validates the Snowflake `ALTER APPLICATION SET CONFIGURATION VALUE` command.
@@ -491,7 +716,15 @@ func (v *Validator) ParseAlterApplicationSetConfigurationDefinition() bool {
 //
 //	ALTER APPLICATION <app> SET CONFIGURATION <config> VALUE = '<value>';
 func (v *Validator) ParseAlterApplicationSetConfigurationValue() bool {
-	return true
+	// ALTER APPLICATION <app> SET CONFIGURATION <config> VALUE = '<value>'
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("APPLICATION") },
+		v.parseIdentPath,
+		func() bool { return v.phrase("SET", "CONFIGURATION") },
+		v.parseIdentPath,
+		v.option("VALUE", v.parseString),
+	)
 }
 
 // ParseAlterApplicationUnsetConfiguration validates the Snowflake `ALTER APPLICATION UNSET CONFIGURATION` command.
@@ -501,7 +734,14 @@ func (v *Validator) ParseAlterApplicationSetConfigurationValue() bool {
 //
 //	ALTER APPLICATION <app> UNSET CONFIGURATION <config>;
 func (v *Validator) ParseAlterApplicationUnsetConfiguration() bool {
-	return true
+	// ALTER APPLICATION <app> UNSET CONFIGURATION <config>
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("APPLICATION") },
+		v.parseIdentPath,
+		func() bool { return v.phrase("UNSET", "CONFIGURATION") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseAlterAuthenticationPolicy validates the Snowflake `ALTER AUTHENTICATION POLICY` command.
@@ -534,7 +774,18 @@ func (v *Validator) ParseAlterApplicationUnsetConfiguration() bool {
 //	  [ COMMENT ]
 //	  [ DCM PROJECT ]
 func (v *Validator) ParseAlterAuthenticationPolicy() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("AUTHENTICATION", "POLICY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterBackupPolicy validates the Snowflake `ALTER BACKUP POLICY` command.
@@ -555,7 +806,17 @@ func (v *Validator) ParseAlterAuthenticationPolicy() bool {
 //
 //	ALTER BACKUP POLICY <name> UNSET TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterBackupPolicy() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("BACKUP", "POLICY") },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterBackupSet validates the Snowflake `ALTER BACKUP SET` command.
@@ -589,7 +850,24 @@ func (v *Validator) ParseAlterBackupPolicy() bool {
 //
 //	ALTER BACKUP SET <name> UNSET TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterBackupSet() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("BACKUP", "SET") },
+		v.parseIdentPath,
+		// One of many actions (ADD/APPLY/SUSPEND/RESUME/DELETE/MODIFY/RENAME/SET/UNSET);
+		// require at least the action verb then consume the free-form remainder.
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool {
+					return v.Sequence(
+						v.wordsValue("ADD", "APPLY", "SUSPEND", "RESUME", "DELETE", "MODIFY", "SET", "UNSET"),
+						v.consumeRest,
+					)
+				},
+			)
+		},
+	)
 }
 
 // ParseAlterCatalogIntegration validates the Snowflake `ALTER CATALOG INTEGRATION` command.
@@ -612,7 +890,15 @@ func (v *Validator) ParseAlterBackupSet() bool {
 //
 //	  BEARER_TOKEN = '<bearer_token>'
 func (v *Validator) ParseAlterCatalogIntegration() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("CATALOG", "INTEGRATION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		// SET REST_AUTHENTICATION = ( … ) [ … ] — free-form remainder.
+		func() bool { return v.MatchWord("SET") },
+		v.consumeRest,
+	)
 }
 
 // ParseAlterComputePool validates the Snowflake `ALTER COMPUTE POOL` command.
@@ -640,7 +926,21 @@ func (v *Validator) ParseAlterCatalogIntegration() bool {
 //	                                              }
 //	                                              [ , ... ]
 func (v *Validator) ParseAlterComputePool() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("COMPUTE", "POOL") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				v.wordsValue("SUSPEND", "RESUME"),
+				// STOP ALL [ OF TYPE … ]
+				func() bool { return v.phrase("STOP", "ALL") && v.consumeRest() },
+				// SET … | UNSET …
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterConnection validates the Snowflake `ALTER CONNECTION` command.
@@ -659,7 +959,23 @@ func (v *Validator) ParseAlterComputePool() bool {
 //
 //	ALTER CONNECTION [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterConnection() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("CONNECTION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				// ENABLE FAILOVER TO ACCOUNTS … [ IGNORE EDITION CHECK ]
+				func() bool { return v.phrase("ENABLE", "FAILOVER") && v.consumeRest() },
+				// DISABLE FAILOVER [ TO ACCOUNTS … ]
+				func() bool { return v.phrase("DISABLE", "FAILOVER") && v.consumeRest() },
+				func() bool { return v.MatchWord("PRIMARY") },
+				// SET COMMENT = … | UNSET COMMENT
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterContact validates the Snowflake `ALTER CONTACT` command.
@@ -677,7 +993,18 @@ func (v *Validator) ParseAlterConnection() bool {
 //	    } ]
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseAlterContact() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("CONTACT") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("SET") }, v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterCortexSearchService validates the Snowflake `ALTER CORTEX SEARCH SERVICE` command.
@@ -717,7 +1044,28 @@ func (v *Validator) ParseAlterContact() bool {
 //
 //	ALTER CORTEX SEARCH SERVICE [ IF EXISTS ] <name> UNSET TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterCortexSearchService() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("CORTEX", "SEARCH", "SERVICE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				// { SUSPEND | RESUME } [ { INDEXING | SERVING } ]
+				func() bool {
+					return v.Sequence(
+						v.wordsValue("SUSPEND", "RESUME"),
+						func() bool { return v.Optional(v.wordsValue("INDEXING", "SERVING")) },
+					)
+				},
+				func() bool { return v.MatchWord("REFRESH") },
+				// ADD/DROP SCORING PROFILE … ; SET/UNSET [ATTRIBUTES|TAG|options]
+				func() bool {
+					return v.Sequence(v.wordsValue("ADD", "DROP", "SET", "UNSET"), v.consumeRest)
+				},
+			)
+		},
+	)
 }
 
 // ParseAlterDatabase validates the Snowflake `ALTER DATABASE` command.
@@ -797,7 +1145,24 @@ func (v *Validator) ParseAlterCortexSearchService() bool {
 //
 //	ALTER DATABASE <name> PRIMARY
 func (v *Validator) ParseAlterDatabase() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("DATABASE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.phrase("SWAP", "WITH") && v.parseIdentPath() },
+				func() bool { return v.MatchWord("REFRESH") },
+				func() bool { return v.MatchWord("PRIMARY") },
+				// ENABLE/DISABLE { REPLICATION | FAILOVER } … TO ACCOUNTS …
+				func() bool { return v.Sequence(v.wordsValue("ENABLE", "DISABLE"), v.consumeRest) },
+				// SET <options/TAG> | UNSET <options/TAG>
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterDatabaseCatalogLinked validates the Snowflake `ALTER DATABASE (catalog-linked)` command.
@@ -850,7 +1215,24 @@ func (v *Validator) ParseAlterDatabase() bool {
 //	                                            ENABLE_ICEBERG_MERGE_ON_READ
 //	                                          }
 func (v *Validator) ParseAlterDatabaseCatalogLinked() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("DATABASE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				// SUSPEND/RESUME DISCOVERY
+				func() bool {
+					return v.Sequence(v.wordsValue("SUSPEND", "RESUME"), func() bool { return v.MatchWord("DISCOVERY") })
+				},
+				// UPDATE LINKED_CATALOG <add/remove/unset/set …>
+				func() bool { return v.phrase("UPDATE", "LINKED_CATALOG") && v.consumeRest() },
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterDatabaseRole validates the Snowflake `ALTER DATABASE ROLE` command.
@@ -870,7 +1252,18 @@ func (v *Validator) ParseAlterDatabaseCatalogLinked() bool {
 //
 //	ALTER DATABASE ROLE [ IF EXISTS ] <name> UNSET DCM PROJECT
 func (v *Validator) ParseAlterDatabaseRole() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("DATABASE", "ROLE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterDataset validates the Snowflake `ALTER DATASET` command.
@@ -878,7 +1271,16 @@ func (v *Validator) ParseAlterDatabaseRole() bool {
 //
 // Syntax: (unavailable — see Reference URL)
 func (v *Validator) ParseAlterDataset() bool {
-	return true
+	// Syntax unavailable: permissive `ALTER DATASET [IF EXISTS] <name> <action…>`.
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("DATASET") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		// Require at least one action token, then consume the remainder.
+		func() bool { return !v.AtEnd() },
+		v.consumeRest,
+	)
 }
 
 // ParseAlterDatasetAddVersion validates the Snowflake `ALTER DATASET ADD VERSION` command.
@@ -892,7 +1294,16 @@ func (v *Validator) ParseAlterDataset() bool {
 //	  [ COMMENT = <string_literal> ]
 //	  [ METADATA = <json_string_literal> ]
 func (v *Validator) ParseAlterDatasetAddVersion() bool {
-	return true
+	// ALTER DATASET <name> ADD VERSION <version_name> FROM <select_statement> [ … ]
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("DATASET") },
+		v.parseIdentPath,
+		func() bool { return v.phrase("ADD", "VERSION") },
+		v.parseIdentPath,
+		func() bool { return v.MatchWord("FROM") },
+		v.consumeRest,
+	)
 }
 
 // ParseAlterDatasetDropVersion validates the Snowflake `ALTER DATASET DROP VERSION` command.
@@ -902,7 +1313,15 @@ func (v *Validator) ParseAlterDatasetAddVersion() bool {
 //
 //	ALTER DATASET [ IF EXISTS ] <name> DROP VERSION <version_name>
 func (v *Validator) ParseAlterDatasetDropVersion() bool {
-	return true
+	// ALTER DATASET [ IF EXISTS ] <name> DROP VERSION <version_name>
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("DATASET") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.phrase("DROP", "VERSION") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseAlterDbtProject validates the Snowflake `ALTER DBT PROJECT` command.
@@ -927,7 +1346,20 @@ func (v *Validator) ParseAlterDatasetDropVersion() bool {
 //	  [ EXTERNAL_ACCESS_INTEGRATIONS ]
 //	  [ COMMENT ]
 func (v *Validator) ParseAlterDbtProject() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("DBT", "PROJECT") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				// ADD VERSION [ <alias> ] FROM '<source>'
+				func() bool { return v.phrase("ADD", "VERSION") && v.consumeRest() },
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterDcmProject validates the Snowflake `ALTER DCM PROJECT` command.
@@ -943,7 +1375,13 @@ func (v *Validator) ParseAlterDbtProject() bool {
 //	  [ LOG_LEVEL ]
 //	  [ COMMENT ]
 func (v *Validator) ParseAlterDcmProject() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("DCM", "PROJECT") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+	)
 }
 
 // ParseAlterDynamicTable validates the Snowflake `ALTER DYNAMIC TABLE` command.
@@ -999,7 +1437,30 @@ func (v *Validator) ParseAlterDcmProject() bool {
 //	  [ ROW_TIMESTAMP ],
 //	  [ DCM PROJECT ]
 func (v *Validator) ParseAlterDynamicTable() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("DYNAMIC", "TABLE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				v.wordsValue("SUSPEND", "RESUME"),
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.phrase("SWAP", "WITH") && v.parseIdentPath() },
+				func() bool {
+					return v.MatchWord("REFRESH") &&
+						v.Optional(func() bool { return v.phrase("COPY", "SESSION") })
+				},
+				// SET / UNSET and all object-specific actions: require >=1 token, consume rest.
+				func() bool {
+					if v.AtEnd() {
+						return false
+					}
+					return v.consumeRest()
+				},
+			)
+		},
+	)
 }
 
 // ParseAlterExperiment validates the Snowflake `ALTER EXPERIMENT` command.
@@ -1013,7 +1474,14 @@ func (v *Validator) ParseAlterDynamicTable() bool {
 //
 //	ALTER EXPERIMENT <experiment_name> DROP RUN <run_name>
 func (v *Validator) ParseAlterExperiment() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("EXPERIMENT") },
+		v.parseIdentPath,
+		v.wordsValue("ADD", "COMMIT", "DROP"),
+		func() bool { return v.MatchWord("RUN") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseAlterExternalAgent validates the Snowflake `ALTER EXTERNAL AGENT` command.
@@ -1026,7 +1494,18 @@ func (v *Validator) ParseAlterExperiment() bool {
 //
 //	ALTER EXTERNAL AGENT [ IF EXISTS ] <name> ADD VERSION <version_name>
 func (v *Validator) ParseAlterExternalAgent() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("EXTERNAL", "AGENT") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.MatchWord("SET") && v.consumeRest() },
+				func() bool { return v.phrase("ADD", "VERSION") && v.parseIdentPath() },
+			)
+		},
+	)
 }
 
 // ParseAlterExternalAccessIntegration validates the Snowflake `ALTER EXTERNAL ACCESS INTEGRATION` command.
@@ -1050,7 +1529,13 @@ func (v *Validator) ParseAlterExternalAgent() bool {
 //	  TAG <tag_name> }
 //	  [ , ... ]
 func (v *Validator) ParseAlterExternalAccessIntegration() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("EXTERNAL", "ACCESS", "INTEGRATION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+	)
 }
 
 // ParseAlterExternalTable validates the Snowflake `ALTER EXTERNAL TABLE` command.
@@ -1071,7 +1556,49 @@ func (v *Validator) ParseAlterExternalAccessIntegration() bool {
 //
 //	ALTER EXTERNAL TABLE <name> [ IF EXISTS ] DROP PARTITION LOCATION '<path>'
 func (v *Validator) ParseAlterExternalTable() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("EXTERNAL", "TABLE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		// The IF EXISTS can also appear after the name in some forms.
+		func() bool { return v.Optional(func() bool { return v.ifExists() }) },
+		func() bool {
+			return v.Choice(
+				// REFRESH [ '<path>' ]
+				func() bool {
+					return v.MatchWord("REFRESH") &&
+						v.Optional(func() bool { return v.parseString() })
+				},
+				// ADD FILES (...) / REMOVE FILES (...)
+				func() bool {
+					return v.Sequence(
+						v.wordsValue("ADD", "REMOVE"),
+						func() bool { return v.MatchWord("FILES") },
+						v.consumeBalancedParens,
+					)
+				},
+				// SET [ AUTO_REFRESH = ... ]
+				func() bool { return v.MatchWord("SET") && v.consumeRest() },
+				// ADD PARTITION (...) LOCATION '<path>'
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.phrase("ADD", "PARTITION") },
+						v.consumeBalancedParens,
+						func() bool { return v.MatchWord("LOCATION") },
+						func() bool { return v.parseString() },
+					)
+				},
+				// DROP PARTITION LOCATION '<path>'
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.phrase("DROP", "PARTITION", "LOCATION") },
+						func() bool { return v.parseString() },
+					)
+				},
+			)
+		},
+	)
 }
 
 // ParseAlterExternalVolume validates the Snowflake `ALTER EXTERNAL VOLUME` command.
@@ -1098,7 +1625,28 @@ func (v *Validator) ParseAlterExternalTable() bool {
 //
 //	ALTER EXTERNAL VOLUME [ IF EXISTS ] <name> SET COMMENT = '<string_literal>'
 func (v *Validator) ParseAlterExternalVolume() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("EXTERNAL", "VOLUME") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				// REMOVE STORAGE_LOCATION '<name>'
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("REMOVE") },
+						func() bool { return v.MatchWord("STORAGE_LOCATION") },
+						func() bool { return v.parseString() },
+					)
+				},
+				// ADD / UPDATE / SET — free-form trailing options.
+				func() bool {
+					return v.Sequence(v.wordsValue("ADD", "UPDATE", "SET"), v.consumeRest)
+				},
+			)
+		},
+	)
 }
 
 // ParseAlterFailoverGroup validates the Snowflake `ALTER FAILOVER GROUP` command.
@@ -1172,7 +1720,31 @@ func (v *Validator) ParseAlterExternalVolume() bool {
 //
 //	ALTER FAILOVER GROUP [ IF EXISTS ] <name> RESUME
 func (v *Validator) ParseAlterFailoverGroup() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("FAILOVER", "GROUP") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.MatchWord("REFRESH") },
+				func() bool { return v.MatchWord("PRIMARY") },
+				func() bool { return v.MatchWord("RESUME") },
+				func() bool {
+					return v.MatchWord("SUSPEND") &&
+						v.Optional(func() bool { return v.MatchWord("IMMEDIATE") })
+				},
+				// SET / UNSET / ADD / MOVE / REMOVE — free-form trailing actions.
+				func() bool {
+					if v.AtEnd() {
+						return false
+					}
+					return v.consumeRest()
+				},
+			)
+		},
+	)
 }
 
 // ParseAlterFeaturePolicy validates the Snowflake `ALTER FEATURE POLICY` command.
@@ -1194,7 +1766,18 @@ func (v *Validator) ParseAlterFailoverGroup() bool {
 //
 //	ALTER FEATURE POLICY [ IF EXISTS ] <name> UNSET TAG <tag_name> [ , ... ]
 func (v *Validator) ParseAlterFeaturePolicy() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("FEATURE", "POLICY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterFileFormat validates the Snowflake `ALTER FILE FORMAT` command.
@@ -1206,7 +1789,18 @@ func (v *Validator) ParseAlterFeaturePolicy() bool {
 //
 //	ALTER FILE FORMAT [ IF EXISTS ] <name> SET { [ formatTypeOptions ] [ COMMENT = '<string_literal>' ] }
 func (v *Validator) ParseAlterFileFormat() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("FILE", "FORMAT") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.MatchWord("SET") && v.consumeRest() },
+			)
+		},
+	)
 }
 
 // ParseAlterFunction validates the Snowflake `ALTER FUNCTION` command.
@@ -1248,7 +1842,20 @@ func (v *Validator) ParseAlterFileFormat() bool {
 //	ALTER FUNCTION [ IF EXISTS ] <name> ( [ <arg_data_type> , ... ] ) UNSET
 //	              { COMMENT | HEADERS | CONTEXT_HEADERS | MAX_BATCH_ROWS | COMPRESSION | SECURE | REQUEST_TRANSLATOR | RESPONSE_TRANSLATOR }
 func (v *Validator) ParseAlterFunction() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("FUNCTION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		// ( [ <arg_data_type> , ... ] )
+		v.consumeBalancedParens,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterFunctionDmf validates the Snowflake `ALTER FUNCTION (DMF)` command.
@@ -1277,7 +1884,20 @@ func (v *Validator) ParseAlterFunction() bool {
 //	ALTER FUNCTION [ IF EXISTS ] <name> ( TABLE(  <arg_data_type> [ , ... ] ) [ , TABLE( <arg_data_type> [ , ... ] ) ] )
 //	  UNSET TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterFunctionDmf() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("FUNCTION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		// ( TABLE( <arg_data_type> [ , ... ] ) [ , TABLE(...) ] )
+		v.consumeBalancedParens,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterFunctionSnowparkContainerServices validates the Snowflake `ALTER FUNCTION (Snowpark Container Services)` command.
@@ -1312,7 +1932,20 @@ func (v *Validator) ParseAlterFunctionDmf() bool {
 //	ALTER FUNCTION [ IF EXISTS ] <name> ( [ <arg_data_type> , ... ] )
 //	  UNSET { CONTEXT_HEADERS | MAX_BATCH_ROWS | MAX_BATCH_RETRIES | ON_BATCH_FAILURE | BATCH_TIMEOUT_SECS | COMMENT }
 func (v *Validator) ParseAlterFunctionSnowparkContainerServices() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("FUNCTION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		// ( [ <arg_data_type> , ... ] )
+		v.consumeBalancedParens,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterGateway validates the Snowflake `ALTER GATEWAY` command.
@@ -1323,7 +1956,20 @@ func (v *Validator) ParseAlterFunctionSnowparkContainerServices() bool {
 //	ALTER GATEWAY [ IF EXISTS ] <name>
 //	  FROM SPECIFICATION <specification_text>
 func (v *Validator) ParseAlterGateway() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("GATEWAY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.phrase("FROM", "SPECIFICATION") },
+		// <specification_text> — free-form.
+		func() bool {
+			if v.AtEnd() {
+				return false
+			}
+			return v.consumeRest()
+		},
+	)
 }
 
 // ParseAlterGitRepository validates the Snowflake `ALTER GIT REPOSITORY` command.
@@ -1347,7 +1993,18 @@ func (v *Validator) ParseAlterGateway() bool {
 //
 //	ALTER GIT REPOSITORY [ IF EXISTS ] <name> FETCH
 func (v *Validator) ParseAlterGitRepository() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("GIT", "REPOSITORY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.MatchWord("FETCH") },
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterIcebergTable validates the Snowflake `ALTER ICEBERG TABLE` command.
@@ -1389,7 +2046,34 @@ func (v *Validator) ParseAlterGitRepository() bool {
 //	    | DROP CLUSTERING KEY
 //	  }
 func (v *Validator) ParseAlterIcebergTable() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("ICEBERG", "TABLE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				// clusteringAction
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.phrase("CLUSTER", "BY") },
+						v.consumeBalancedParens,
+					)
+				},
+				func() bool {
+					return v.Sequence(v.wordsValue("SUSPEND", "RESUME"), func() bool { return v.MatchWord("RECLUSTER") })
+				},
+				func() bool { return v.phrase("DROP", "CLUSTERING", "KEY") },
+				// SET / UNSET option lists and tableColumnAction / governance / search optimization.
+				func() bool {
+					if v.AtEnd() {
+						return false
+					}
+					return v.consumeRest()
+				},
+			)
+		},
+	)
 }
 
 // ParseAlterIcebergTableAlterColumnSetDataType validates the Snowflake `ALTER ICEBERG TABLE ALTER COLUMN SET DATA TYPE` command.
@@ -1404,7 +2088,22 @@ func (v *Validator) ParseAlterIcebergTable() bool {
 //	  SET DATA TYPE <new_structured_type>
 //	  RENAME FIELDS
 func (v *Validator) ParseAlterIcebergTableAlterColumnSetDataType() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("ICEBERG", "TABLE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.phrase("ALTER", "COLUMN") },
+		v.parseIdentPath,
+		func() bool { return v.phrase("SET", "DATA", "TYPE") },
+		// <new_structured_type>
+		func() bool {
+			if v.AtEnd() {
+				return false
+			}
+			return v.consumeRest()
+		},
+	)
 }
 
 // ParseAlterIcebergTableConvertToManaged validates the Snowflake `ALTER ICEBERG TABLE CONVERT TO MANAGED` command.
@@ -1416,7 +2115,21 @@ func (v *Validator) ParseAlterIcebergTableAlterColumnSetDataType() bool {
 //	  [ BASE_LOCATION = '<directory_for_table_files>' ]
 //	  [ STORAGE_SERIALIZATION_POLICY = { COMPATIBLE | OPTIMIZED } ]
 func (v *Validator) ParseAlterIcebergTableConvertToManaged() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("ICEBERG", "TABLE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.phrase("CONVERT", "TO", "MANAGED") },
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.option("BASE_LOCATION", v.parseString),
+					v.option("STORAGE_SERIALIZATION_POLICY", v.wordsValue("COMPATIBLE", "OPTIMIZED")),
+				)
+			})
+		},
+	)
 }
 
 // ParseAlterIcebergTableRefresh validates the Snowflake `ALTER ICEBERG TABLE REFRESH` command.
@@ -1426,7 +2139,14 @@ func (v *Validator) ParseAlterIcebergTableConvertToManaged() bool {
 //
 //	ALTER ICEBERG TABLE [ IF EXISTS ] <table_name> REFRESH [ '<metadata_file_relative_path>' ]
 func (v *Validator) ParseAlterIcebergTableRefresh() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("ICEBERG", "TABLE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.MatchWord("REFRESH") },
+		func() bool { return v.Optional(func() bool { return v.parseString() }) },
+	)
 }
 
 // ParseAlterIntegration validates the Snowflake `ALTER INTEGRATION` command.
@@ -1438,7 +2158,32 @@ func (v *Validator) ParseAlterIcebergTableRefresh() bool {
 //
 //	Where <actions> are specific to the object type.
 func (v *Validator) ParseAlterIntegration() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		// [ <integration_type> ] INTEGRATION
+		func() bool {
+			return v.Choice(
+				// <integration_type> INTEGRATION (the type is a single leading word)
+				func() bool {
+					return v.Sequence(
+						v.parseIdentPath,
+						func() bool { return v.MatchWord("INTEGRATION") },
+					)
+				},
+				// INTEGRATION
+				func() bool { return v.MatchWord("INTEGRATION") },
+			)
+		},
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		// <actions> — object-type-specific, free-form.
+		func() bool {
+			if v.AtEnd() {
+				return false
+			}
+			return v.consumeRest()
+		},
+	)
 }
 
 // ParseAlterJoinPolicy validates the Snowflake `ALTER JOIN POLICY` command.
@@ -1458,7 +2203,27 @@ func (v *Validator) ParseAlterIntegration() bool {
 //
 //	ALTER JOIN POLICY [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterJoinPolicy() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("JOIN", "POLICY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				// SET BODY -> <expression>
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.phrase("SET", "BODY") },
+						func() bool { return v.MatchOp("-") },
+						func() bool { return v.MatchOp(">") },
+						v.consumeRest,
+					)
+				},
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterListing validates the Snowflake `ALTER LISTING` command.
@@ -1483,7 +2248,41 @@ func (v *Validator) ParseAlterJoinPolicy() bool {
 //
 //	ALTER LISTING [ IF EXISTS ] <name> SET COMMENT = '<string>'
 func (v *Validator) ParseAlterListing() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("LISTING") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				// [ { PUBLISH | UNPUBLISH | REVIEW } ]
+				v.wordsValue("PUBLISH", "UNPUBLISH", "REVIEW"),
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				// AS '<manifest>' [ options ]
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("AS") },
+						func() bool { return v.parseString() },
+						v.consumeRest,
+					)
+				},
+				// ADD VERSION ... FROM ...
+				func() bool { return v.phrase("ADD", "VERSION") && v.consumeRest() },
+				// { ADD | REMOVE } TARGETS <manifest>
+				func() bool {
+					return v.Sequence(
+						v.wordsValue("ADD", "REMOVE"),
+						func() bool { return v.MatchWord("TARGETS") },
+						v.consumeRest,
+					)
+				},
+				// SET COMMENT = ...
+				func() bool { return v.MatchWord("SET") && v.consumeRest() },
+				// Bare listing (no action).
+				func() bool { return v.AtEnd() },
+			)
+		},
+	)
 }
 
 // ParseAlterMaintenancePolicy validates the Snowflake `ALTER MAINTENANCE POLICY` command.
@@ -1500,7 +2299,18 @@ func (v *Validator) ParseAlterListing() bool {
 //
 //	ALTER MAINTENANCE POLICY [ IF EXISTS ] <name> RENAME TO <new_name>
 func (v *Validator) ParseAlterMaintenancePolicy() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("MAINTENANCE", "POLICY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterMaskingPolicy validates the Snowflake `ALTER MASKING POLICY` command.
@@ -1520,7 +2330,27 @@ func (v *Validator) ParseAlterMaintenancePolicy() bool {
 //
 //	ALTER MASKING POLICY [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterMaskingPolicy() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("MASKING", "POLICY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				// SET BODY -> <expression>
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.phrase("SET", "BODY") },
+						func() bool { return v.MatchOp("-") },
+						func() bool { return v.MatchOp(">") },
+						v.consumeRest,
+					)
+				},
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterMaterializedView validates the Snowflake `ALTER MATERIALIZED VIEW` command.
@@ -1557,7 +2387,29 @@ func (v *Validator) ParseAlterMaskingPolicy() bool {
 //
 //	ALTER MATERIALIZED VIEW UNSET DATA_METRIC_SCHEDULE
 func (v *Validator) ParseAlterMaterializedView() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("MATERIALIZED", "VIEW") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.phrase("CLUSTER", "BY") },
+						v.consumeBalancedParens,
+					)
+				},
+				func() bool { return v.phrase("DROP", "CLUSTERING", "KEY") },
+				func() bool {
+					return v.Sequence(v.wordsValue("SUSPEND", "RESUME"), func() bool { return v.MatchWord("RECLUSTER") })
+				},
+				v.wordsValue("SUSPEND", "RESUME"),
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterModel validates the Snowflake `ALTER MODEL` command.
@@ -1579,7 +2431,26 @@ func (v *Validator) ParseAlterMaterializedView() bool {
 //
 //	ALTER MODEL <model_name> RENAME TO <new_name>
 func (v *Validator) ParseAlterModel() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("MODEL") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				// VERSION <name> { SET ALIAS = <name> | UNSET ALIAS }
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("VERSION") },
+						v.parseIdentPath,
+						func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+					)
+				},
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterModelAddVersion validates the Snowflake `ALTER MODEL ADD VERSION` command.
@@ -1599,7 +2470,22 @@ func (v *Validator) ParseAlterModel() bool {
 //	| @[<namespace>.]%<table_name>[/<path>]
 //	| @~[/<path>]
 func (v *Validator) ParseAlterModelAddVersion() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("MODEL") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.phrase("ADD", "VERSION") },
+		v.parseIdentPath,
+		func() bool { return v.MatchWord("FROM") },
+		// FROM MODEL <name> [ VERSION <name> ] | internalStage (@...)
+		func() bool {
+			if v.AtEnd() {
+				return false
+			}
+			return v.consumeRest()
+		},
+	)
 }
 
 // ParseAlterModelDropVersion validates the Snowflake `ALTER MODEL DROP VERSION` command.
@@ -1609,7 +2495,14 @@ func (v *Validator) ParseAlterModelAddVersion() bool {
 //
 //	ALTER MODEL [ IF EXISTS ] <name> DROP VERSION <version_name>
 func (v *Validator) ParseAlterModelDropVersion() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("MODEL") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.phrase("DROP", "VERSION") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseAlterModelModifyVersion validates the Snowflake `ALTER MODEL MODIFY VERSION` command.
@@ -1621,7 +2514,24 @@ func (v *Validator) ParseAlterModelDropVersion() bool {
 //	  [ COMMENT = '<string_literal>' ]
 //	  [ METADATA = '<json_metadata>']
 func (v *Validator) ParseAlterModelModifyVersion() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("MODEL") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.phrase("MODIFY", "VERSION") },
+		v.parseIdentPath,
+		func() bool { return v.MatchWord("SET") },
+		// [ COMMENT = ... ] [ METADATA = ... ]
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.option("COMMENT", v.parseString),
+					v.option("METADATA", v.parseString),
+				)
+			})
+		},
+	)
 }
 
 // ParseAlterModelMonitor validates the Snowflake `ALTER MODEL MONITOR` command.
@@ -1640,7 +2550,27 @@ func (v *Validator) ParseAlterModelModifyVersion() bool {
 //
 //	ALTER MODEL MONITOR [ IF EXISTS ] <monitor_name> DROP segment_column = '<segment_column_name>'
 func (v *Validator) ParseAlterModelMonitor() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("MODEL", "MONITOR") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				v.wordsValue("SUSPEND", "RESUME"),
+				func() bool { return v.MatchWord("SET") && v.consumeRest() },
+				// ADD / DROP segment_column = '<name>'
+				func() bool {
+					return v.Sequence(
+						v.wordsValue("ADD", "DROP"),
+						func() bool { return v.MatchWord("SEGMENT_COLUMN") },
+						func() bool { return v.MatchOp("=") },
+						func() bool { return v.parseString() },
+					)
+				},
+			)
+		},
+	)
 }
 
 // ParseAlterNetworkPolicy validates the Snowflake `ALTER NETWORK POLICY` command.
@@ -1667,7 +2597,25 @@ func (v *Validator) ParseAlterModelMonitor() bool {
 //
 //	ALTER NETWORK POLICY <name> UNSET TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterNetworkPolicy() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("NETWORK", "POLICY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				// ADD / REMOVE { ALLOWED_NETWORK_RULE_LIST | BLOCKED_NETWORK_RULE_LIST } = '<rule>'
+				func() bool {
+					return v.Sequence(
+						v.wordsValue("ADD", "REMOVE"),
+						v.consumeRest,
+					)
+				},
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterNetworkRule validates the Snowflake `ALTER NETWORK RULE` command.
@@ -1681,7 +2629,13 @@ func (v *Validator) ParseAlterNetworkPolicy() bool {
 //
 //	ALTER NETWORK RULE [ IF EXISTS ] <name> UNSET { VALUE_LIST | COMMENT }
 func (v *Validator) ParseAlterNetworkRule() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("NETWORK", "RULE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+	)
 }
 
 // ParseAlterNotebook validates the Snowflake `ALTER NOTEBOOK` command.
@@ -1697,7 +2651,18 @@ func (v *Validator) ParseAlterNetworkRule() bool {
 //	  [ IDLE_AUTO_SHUTDOWN_TIME_SECONDS = <number_of_seconds> ]
 //	  [ SECRETS = ('<secret_variable_name>' = <secret_name>) [ , ... ] ]
 func (v *Validator) ParseAlterNotebook() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("NOTEBOOK") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterNotificationIntegration validates the Snowflake `ALTER NOTIFICATION INTEGRATION` command.
@@ -1705,7 +2670,20 @@ func (v *Validator) ParseAlterNotebook() bool {
 //
 // Syntax: (unavailable — see Reference URL)
 func (v *Validator) ParseAlterNotificationIntegration() bool {
-	return true
+	// Syntax unavailable upstream: require the leading skeleton, accept the rest.
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("NOTIFICATION") }) },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			if v.AtEnd() {
+				return false
+			}
+			return v.consumeRest()
+		},
+	)
 }
 
 // ParseAlterNotificationIntegrationEmail validates the Snowflake `ALTER NOTIFICATION INTEGRATION (email)` command.
@@ -1731,7 +2709,14 @@ func (v *Validator) ParseAlterNotificationIntegration() bool {
 //	  DEFAULT_SUBJECT    |
 //	  COMMENT
 func (v *Validator) ParseAlterNotificationIntegrationEmail() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("NOTIFICATION") }) },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+	)
 }
 
 // ParseAlterNotificationIntegrationInboundAzureEventGrid validates the Snowflake `ALTER NOTIFICATION INTEGRATION (inbound Azure Event Grid)` command.
@@ -1749,7 +2734,14 @@ func (v *Validator) ParseAlterNotificationIntegrationEmail() bool {
 //
 //	ALTER [ NOTIFICATION ] INTEGRATION [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterNotificationIntegrationInboundAzureEventGrid() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("NOTIFICATION") }) },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+	)
 }
 
 // ParseAlterNotificationIntegrationInboundGooglePubSub validates the Snowflake `ALTER NOTIFICATION INTEGRATION (inbound Google Pub/Sub)` command.
@@ -1767,7 +2759,14 @@ func (v *Validator) ParseAlterNotificationIntegrationInboundAzureEventGrid() boo
 //
 //	ALTER [ NOTIFICATION ] INTEGRATION [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterNotificationIntegrationInboundGooglePubSub() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("NOTIFICATION") }) },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+	)
 }
 
 // ParseAlterNotificationIntegrationOutboundAmazonSns validates the Snowflake `ALTER NOTIFICATION INTEGRATION (outbound Amazon SNS)` command.
@@ -1787,7 +2786,14 @@ func (v *Validator) ParseAlterNotificationIntegrationInboundGooglePubSub() bool 
 //
 //	ALTER [ NOTIFICATION ] INTEGRATION [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterNotificationIntegrationOutboundAmazonSns() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("NOTIFICATION") }) },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+	)
 }
 
 // ParseAlterNotificationIntegrationOutboundAzureEventGrid validates the Snowflake `ALTER NOTIFICATION INTEGRATION (outbound Azure Event Grid)` command.
@@ -1807,7 +2813,14 @@ func (v *Validator) ParseAlterNotificationIntegrationOutboundAmazonSns() bool {
 //
 //	ALTER [ NOTIFICATION ] INTEGRATION [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterNotificationIntegrationOutboundAzureEventGrid() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("NOTIFICATION") }) },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+	)
 }
 
 // ParseAlterNotificationIntegrationOutboundGooglePubSub validates the Snowflake `ALTER NOTIFICATION INTEGRATION (outbound Google Pub/Sub)` command.
@@ -1826,7 +2839,14 @@ func (v *Validator) ParseAlterNotificationIntegrationOutboundAzureEventGrid() bo
 //
 //	ALTER [ NOTIFICATION ] INTEGRATION [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterNotificationIntegrationOutboundGooglePubSub() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("NOTIFICATION") }) },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+	)
 }
 
 // ParseAlterNotificationIntegrationWebhooks validates the Snowflake `ALTER NOTIFICATION INTEGRATION (webhooks)` command.
@@ -1850,7 +2870,14 @@ func (v *Validator) ParseAlterNotificationIntegrationOutboundGooglePubSub() bool
 //	  COMMENT
 //	}
 func (v *Validator) ParseAlterNotificationIntegrationWebhooks() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("NOTIFICATION") }) },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+	)
 }
 
 // ParseAlterOpenflowDataPlane validates the Snowflake `ALTER OPENFLOW DATA PLANE` command.
@@ -1861,7 +2888,13 @@ func (v *Validator) ParseAlterNotificationIntegrationWebhooks() bool {
 //	ALTER OPENFLOW DATA PLANE INTEGRATION <name>
 //	    SET EVENT_TABLE = '<database>.<schema>.<tablename>';
 func (v *Validator) ParseAlterOpenflowDataPlane() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("OPENFLOW", "DATA", "PLANE", "INTEGRATION") },
+		v.parseIdentPath,
+		func() bool { return v.MatchWord("SET") },
+		v.option("EVENT_TABLE", v.parseScalar),
+	)
 }
 
 // ParseAlterOnlineFeatureTable validates the Snowflake `ALTER ONLINE FEATURE TABLE` command.
@@ -1883,7 +2916,26 @@ func (v *Validator) ParseAlterOpenflowDataPlane() bool {
 //
 //	ALTER ONLINE FEATURE TABLE [ IF EXISTS ] <name> <tagAction>
 func (v *Validator) ParseAlterOnlineFeatureTable() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("ONLINE", "FEATURE", "TABLE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				v.wordsValue("SUSPEND", "RESUME", "REFRESH"),
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				// tag action / other object-specific forms
+				func() bool {
+					if v.AtEnd() {
+						return false
+					}
+					return v.consumeRest()
+				},
+			)
+		},
+	)
 }
 
 // ParseAlterOrganizationAccount validates the Snowflake `ALTER ORGANIZATION ACCOUNT` command.
@@ -1905,7 +2957,11 @@ func (v *Validator) ParseAlterOnlineFeatureTable() bool {
 //
 //	ALTER ORGANIZATION ACCOUNT UNSET TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterOrganizationAccount() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("ORGANIZATION", "ACCOUNT") },
+		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+	)
 }
 
 // ParseAlterOrganizationProfile validates the Snowflake `ALTER ORGANIZATION PROFILE` command.
@@ -1929,7 +2985,21 @@ func (v *Validator) ParseAlterOrganizationAccount() bool {
 //
 //	ALTER ORGANIZATION PROFILE <name> ABORT
 func (v *Validator) ParseAlterOrganizationProfile() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("ORGANIZATION", "PROFILE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.MatchWord("AS") && v.parseString() },
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				v.wordsValue("PUBLISH", "COMMIT", "ABORT"),
+				// ADD [ LIVE ] VERSION ... FROM ...
+				func() bool { return v.MatchWord("ADD") && v.consumeRest() },
+			)
+		},
+	)
 }
 
 // ParseAlterOrganizationUser validates the Snowflake `ALTER ORGANIZATION USER` command.
@@ -1951,7 +3021,13 @@ func (v *Validator) ParseAlterOrganizationProfile() bool {
 //	  LAST_NAME = '<string>'
 //	  COMMENT = '<string>'
 func (v *Validator) ParseAlterOrganizationUser() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("ORGANIZATION", "USER") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+	)
 }
 
 // ParseAlterOrganizationUserGroup validates the Snowflake `ALTER ORGANIZATION USER GROUP` command.
@@ -1971,7 +3047,18 @@ func (v *Validator) ParseAlterOrganizationUser() bool {
 //
 //	ALTER ORGANIZATION USER GROUP [ IF EXISTS ] <name> SET IS_GRANTABLE = { TRUE | FALSE }
 func (v *Validator) ParseAlterOrganizationUserGroup() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("ORGANIZATION", "USER", "GROUP") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.wordsValue("ADD", "REMOVE")() && v.consumeRest() },
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterPackagesPolicy validates the Snowflake `ALTER PACKAGES POLICY` command.
@@ -1991,7 +3078,13 @@ func (v *Validator) ParseAlterOrganizationUserGroup() bool {
 //	  [ ADDITIONAL_CREATION_BLOCKLIST ]
 //	  [ COMMENT ]
 func (v *Validator) ParseAlterPackagesPolicy() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("PACKAGES", "POLICY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+	)
 }
 
 // ParseAlterPasswordPolicy validates the Snowflake `ALTER PASSWORD POLICY` command.
@@ -2031,7 +3124,18 @@ func (v *Validator) ParseAlterPackagesPolicy() bool {
 //	                                                 [ PASSWORD_HISTORY ]
 //	                                                 [ COMMENT ]
 func (v *Validator) ParseAlterPasswordPolicy() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("PASSWORD", "POLICY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterPipe validates the Snowflake `ALTER PIPE` command.
@@ -2055,7 +3159,18 @@ func (v *Validator) ParseAlterPasswordPolicy() bool {
 //	objectProperties ::=
 //	  PIPE_EXECUTION_PAUSED = TRUE | FALSE
 func (v *Validator) ParseAlterPipe() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("PIPE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.MatchWord("REFRESH") && v.consumeRest() },
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterPostgresInstance validates the Snowflake `ALTER POSTGRES INSTANCE` command.
@@ -2096,7 +3211,20 @@ func (v *Validator) ParseAlterPipe() bool {
 //	ALTER POSTGRES INSTANCE [ IF EXISTS ] <name> UNSET TAG <tag_name>
 //	  [ , <tag_name> ... ]
 func (v *Validator) ParseAlterPostgresInstance() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("POSTGRES", "INSTANCE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				v.wordsValue("SUSPEND", "RESUME"),
+				func() bool { return v.phrase("RESET", "ACCESS") && v.consumeRest() },
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterPrivacyPolicy validates the Snowflake `ALTER PRIVACY POLICY` command.
@@ -2116,7 +3244,28 @@ func (v *Validator) ParseAlterPostgresInstance() bool {
 //
 //	ALTER PRIVACY POLICY [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterPrivacyPolicy() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("PRIVACY", "POLICY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				// SET BODY -> <expression>
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("SET") },
+						func() bool { return v.MatchWord("BODY") },
+						func() bool { return v.MatchOp("-") },
+						func() bool { return v.MatchOp(">") },
+						v.consumeRest,
+					)
+				},
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterProcedure validates the Snowflake `ALTER PROCEDURE` command.
@@ -2146,7 +3295,21 @@ func (v *Validator) ParseAlterPrivacyPolicy() bool {
 //	-- JavaScript / Snowflake Scripting handlers omit EXTERNAL_ACCESS_INTEGRATIONS and SECRETS in the SET block
 //	-- (Snowflake Scripting additionally supports AUTO_EVENT_LOGGING = '<option>').
 func (v *Validator) ParseAlterProcedure() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("PROCEDURE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		// ( [ <arg_data_type> , ... ] )
+		v.consumeBalancedParens,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.phrase("EXECUTE", "AS") && v.consumeRest() },
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterProjectionPolicy validates the Snowflake `ALTER PROJECTION POLICY` command.
@@ -2166,7 +3329,28 @@ func (v *Validator) ParseAlterProcedure() bool {
 //
 //	ALTER PROJECTION POLICY [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterProjectionPolicy() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("PROJECTION", "POLICY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				// SET BODY -> <expression>
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("SET") },
+						func() bool { return v.MatchWord("BODY") },
+						func() bool { return v.MatchOp("-") },
+						func() bool { return v.MatchOp(">") },
+						v.consumeRest,
+					)
+				},
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterReplicationGroup validates the Snowflake `ALTER REPLICATION GROUP` command.
@@ -2235,7 +3419,23 @@ func (v *Validator) ParseAlterProjectionPolicy() bool {
 //
 //	ALTER REPLICATION GROUP [ IF EXISTS ] <name> RESUME
 func (v *Validator) ParseAlterReplicationGroup() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("REPLICATION", "GROUP") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				v.wordsValue("REFRESH", "RESUME"),
+				func() bool {
+					return v.MatchWord("SUSPEND") && v.Optional(func() bool { return v.MatchWord("IMMEDIATE") })
+				},
+				func() bool { return v.wordsValue("ADD", "MOVE", "REMOVE")() && v.consumeRest() },
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterResourceMonitor validates the Snowflake `ALTER RESOURCE MONITOR` command.
@@ -2255,7 +3455,21 @@ func (v *Validator) ParseAlterReplicationGroup() bool {
 //	triggerDefinition ::=
 //	   ON <threshold> PERCENT DO { SUSPEND | SUSPEND_IMMEDIATE | NOTIFY }
 func (v *Validator) ParseAlterResourceMonitor() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("RESOURCE", "MONITOR") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		// [ SET <opts> ] [ TRIGGERS <triggerDefinition> ... ] — both optional.
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Choice(
+					func() bool { return v.MatchWord("SET") && v.consumeRest() },
+					func() bool { return v.MatchWord("TRIGGERS") && v.consumeRest() },
+				)
+			})
+		},
+	)
 }
 
 // ParseAlterRole validates the Snowflake `ALTER ROLE` command.
@@ -2275,7 +3489,18 @@ func (v *Validator) ParseAlterResourceMonitor() bool {
 //
 //	ALTER ROLE [ IF EXISTS ] <name> UNSET DCM PROJECT
 func (v *Validator) ParseAlterRole() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("ROLE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterRowAccessPolicy validates the Snowflake `ALTER ROW ACCESS POLICY` command.
@@ -2295,7 +3520,28 @@ func (v *Validator) ParseAlterRole() bool {
 //
 //	ALTER ROW ACCESS POLICY [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterRowAccessPolicy() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("ROW", "ACCESS", "POLICY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				// SET BODY -> <expression>
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("SET") },
+						func() bool { return v.MatchWord("BODY") },
+						func() bool { return v.MatchOp("-") },
+						func() bool { return v.MatchOp(">") },
+						v.consumeRest,
+					)
+				},
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterSchema validates the Snowflake `ALTER SCHEMA` command.
@@ -2365,7 +3611,21 @@ func (v *Validator) ParseAlterRowAccessPolicy() bool {
 //
 //	ALTER SCHEMA [ IF EXISTS ] <name> { ENABLE | DISABLE } MANAGED ACCESS
 func (v *Validator) ParseAlterSchema() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("SCHEMA") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.phrase("SWAP", "WITH") && v.parseIdentPath() },
+				// { ENABLE | DISABLE } MANAGED ACCESS
+				func() bool { return v.wordsValue("ENABLE", "DISABLE")() && v.phrase("MANAGED", "ACCESS") },
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterSecret validates the Snowflake `ALTER SECRET` command.
@@ -2392,7 +3652,13 @@ func (v *Validator) ParseAlterSchema() bool {
 //	ALTER SECRET [ IF EXISTS ] <name> SET [ SECRET_STRING = '<string_literal>' ]
 //	                                      [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseAlterSecret() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("SECRET") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+	)
 }
 
 // ParseAlterSecurityIntegration validates the Snowflake `ALTER SECURITY INTEGRATION` command.
@@ -2408,7 +3674,14 @@ func (v *Validator) ParseAlterSecret() bool {
 //
 //	ALTER [ SECURITY ] INTEGRATION <name> UNSET TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterSecurityIntegration() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("SECURITY") }) },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+	)
 }
 
 // ParseAlterSecurityIntegrationExternalApiAuthentication validates the Snowflake `ALTER SECURITY INTEGRATION (External API Authentication)` command.
@@ -2463,7 +3736,14 @@ func (v *Validator) ParseAlterSecurityIntegration() bool {
 //
 //	ALTER [ SECURITY ] INTEGRATION [ IF EXISTS ] <name> UNSET { ENABLED | [ , ... ] }
 func (v *Validator) ParseAlterSecurityIntegrationExternalApiAuthentication() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("SECURITY") }) },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+	)
 }
 
 // ParseAlterSecurityIntegrationAwsIamAuthentication validates the Snowflake `ALTER SECURITY INTEGRATION (AWS IAM Authentication)` command.
@@ -2481,7 +3761,14 @@ func (v *Validator) ParseAlterSecurityIntegrationExternalApiAuthentication() boo
 //
 //	ALTER [ SECURITY ] INTEGRATION <name> UNSET TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterSecurityIntegrationAwsIamAuthentication() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("SECURITY") }) },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+	)
 }
 
 // ParseAlterSecurityIntegrationExternalOauth validates the Snowflake `ALTER SECURITY INTEGRATION (External OAuth)` command.
@@ -2518,7 +3805,14 @@ func (v *Validator) ParseAlterSecurityIntegrationAwsIamAuthentication() bool {
 //
 //	ALTER [ SECURITY ] INTEGRATION <name> UNSET TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterSecurityIntegrationExternalOauth() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("SECURITY") }) },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+	)
 }
 
 // ParseAlterSecurityIntegrationSnowflakeOauth validates the Snowflake `ALTER SECURITY INTEGRATION (Snowflake OAuth)` command.
@@ -2569,7 +3863,22 @@ func (v *Validator) ParseAlterSecurityIntegrationExternalOauth() bool {
 //
 //	ALTER [ SECURITY ] INTEGRATION <name> UNSET TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterSecurityIntegrationSnowflakeOauth() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("SECURITY") }) },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				// REFRESH { OAUTH_CLIENT_SECRET | OAUTH_CLIENT_SECRET_2 }
+				func() bool {
+					return v.MatchWord("REFRESH") && v.wordsValue("OAUTH_CLIENT_SECRET", "OAUTH_CLIENT_SECRET_2")()
+				},
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterSecurityIntegrationSaml2 validates the Snowflake `ALTER SECURITY INTEGRATION (SAML2)` command.
@@ -2611,7 +3920,26 @@ func (v *Validator) ParseAlterSecurityIntegrationSnowflakeOauth() bool {
 //
 //	ALTER [ SECURITY ] INTEGRATION <name> UNSET TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterSecurityIntegrationSaml2() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("SECURITY") }) },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				// REFRESH [ SAML2_SNOWFLAKE_PRIVATE_KEY ] [ METADATA_URL ]
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("REFRESH") },
+						func() bool { return v.Optional(func() bool { return v.MatchWord("SAML2_SNOWFLAKE_PRIVATE_KEY") }) },
+						func() bool { return v.Optional(func() bool { return v.MatchWord("METADATA_URL") }) },
+					)
+				},
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterSecurityIntegrationScim validates the Snowflake `ALTER SECURITY INTEGRATION (SCIM)` command.
@@ -2636,7 +3964,14 @@ func (v *Validator) ParseAlterSecurityIntegrationSaml2() bool {
 //
 //	ALTER [ SECURITY ] INTEGRATION <name> UNSET TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterSecurityIntegrationScim() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("SECURITY") }) },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+	)
 }
 
 // ParseAlterSemanticView validates the Snowflake `ALTER SEMANTIC VIEW` command.
@@ -2656,7 +3991,18 @@ func (v *Validator) ParseAlterSecurityIntegrationScim() bool {
 //
 //	ALTER SEMANTIC VIEW <name> UNSET TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterSemanticView() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("SEMANTIC", "VIEW") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterSequence validates the Snowflake `ALTER SEQUENCE` command.
@@ -2674,7 +4020,36 @@ func (v *Validator) ParseAlterSemanticView() bool {
 //
 //	ALTER SEQUENCE [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterSequence() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("SEQUENCE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				// RENAME TO <new_name>
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				// [ SET ] [ INCREMENT [ BY ] [ = ] <interval> ] / SET <opts> / UNSET COMMENT
+				func() bool {
+					v.Optional(func() bool { return v.MatchWord("SET") })
+					return v.Sequence(
+						func() bool {
+							return v.Optional(func() bool {
+								return v.Sequence(
+									func() bool { return v.MatchWord("INCREMENT") },
+									func() bool { return v.Optional(func() bool { return v.MatchWord("BY") }) },
+									func() bool { return v.Optional(func() bool { return v.MatchOp("=") }) },
+									func() bool { return v.Match(sqltok.NumberLit) },
+								)
+							})
+						},
+						func() bool { return v.Optional(v.consumeRest) },
+					)
+				},
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterService validates the Snowflake `ALTER SERVICE` command.
@@ -2735,7 +4110,35 @@ func (v *Validator) ParseAlterSequence() bool {
 //	  }
 //	  USING ( <key> => <value> [ , <key> => <value> [ , ... ] ]  )
 func (v *Validator) ParseAlterService() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("SERVICE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				// SUSPEND | RESUME
+				v.wordsValue("SUSPEND", "RESUME"),
+				// RESTORE VOLUME ... INSTANCES ... FROM SNAPSHOT ...
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("RESTORE") },
+						func() bool { return v.MatchWord("VOLUME") },
+						func() bool { return v.consumeRest() },
+					)
+				},
+				// FROM SPECIFICATION[_TEMPLATE][_FILE] ... (free-form)
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("FROM") },
+						func() bool { return v.consumeRest() },
+					)
+				},
+				// SET <opts> | SET TAG ... | UNSET ...
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterSession validates the Snowflake `ALTER SESSION` command.
@@ -2792,7 +4195,44 @@ func (v *Validator) ParseAlterService() bool {
 //	  WEEK_OF_YEAR_POLICY = <num>
 //	  WEEK_START = <num>
 func (v *Validator) ParseAlterSession() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("SESSION") },
+		func() bool {
+			return v.Choice(
+				// SET sessionParams ( <param> = <value> [ ... ] )
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("SET") },
+						v.option2(v.parseIdentPath, v.parseScalar),
+						func() bool {
+							return v.ZeroOrMore(func() bool {
+								return v.Sequence(
+									func() bool { return v.Optional(func() bool { return v.Match(sqltok.Comma) }) },
+									v.option2(v.parseIdentPath, v.parseScalar),
+								)
+							})
+						},
+					)
+				},
+				// UNSET <param> [ , <param> ... ]
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("UNSET") },
+						v.parseIdentPath,
+						func() bool {
+							return v.ZeroOrMore(func() bool {
+								return v.Sequence(
+									func() bool { return v.Match(sqltok.Comma) },
+									v.parseIdentPath,
+								)
+							})
+						},
+					)
+				},
+			)
+		},
+	)
 }
 
 // ParseAlterSessionPolicy validates the Snowflake `ALTER SESSION POLICY` command.
@@ -2825,7 +4265,18 @@ func (v *Validator) ParseAlterSession() bool {
 //	  [ BLOCKED_SECONDARY_ROLES ]
 //	  [ COMMENT ]
 func (v *Validator) ParseAlterSessionPolicy() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("SESSION", "POLICY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterShare validates the Snowflake `ALTER SHARE` command.
@@ -2845,7 +4296,25 @@ func (v *Validator) ParseAlterSessionPolicy() bool {
 //
 //	ALTER SHARE [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterShare() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("SHARE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				// { ADD | REMOVE } ACCOUNTS = ...
+				func() bool {
+					return v.Sequence(
+						v.wordsValue("ADD", "REMOVE"),
+						func() bool { return v.MatchWord("ACCOUNTS") },
+						func() bool { return v.consumeRest() },
+					)
+				},
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterSnapshot validates the Snowflake `ALTER SNAPSHOT` command.
@@ -2855,7 +4324,15 @@ func (v *Validator) ParseAlterShare() bool {
 //
 //	ALTER SNAPSHOT [ IF EXISTS ] <name> SET COMMENT = '<string_literal>'
 func (v *Validator) ParseAlterSnapshot() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("SNAPSHOT") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		// SET COMMENT = '<string>'
+		func() bool { return v.MatchWord("SET") },
+		v.commentOption(),
+	)
 }
 
 // ParseAlterSnapshotPolicy validates the Snowflake `ALTER SNAPSHOT POLICY` command.
@@ -2876,7 +4353,17 @@ func (v *Validator) ParseAlterSnapshot() bool {
 //
 //	ALTER SNAPSHOT POLICY <name> UNSET TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterSnapshotPolicy() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("SNAPSHOT", "POLICY") },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterSnapshotSet validates the Snowflake `ALTER SNAPSHOT SET` command.
@@ -2908,7 +4395,46 @@ func (v *Validator) ParseAlterSnapshotPolicy() bool {
 //
 //	ALTER SNAPSHOT SET <name> UNSET TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterSnapshotSet() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("SNAPSHOT", "SET") },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				// ADD SNAPSHOT
+				func() bool { return v.phrase("ADD", "SNAPSHOT") },
+				// APPLY SNAPSHOT POLICY <name> [ FORCE ]
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.phrase("APPLY", "SNAPSHOT", "POLICY") },
+						v.parseIdentPath,
+						func() bool { return v.Optional(func() bool { return v.MatchWord("FORCE") }) },
+					)
+				},
+				// { SUSPEND | RESUME } SNAPSHOT [ { CREATION | EXPIRATION } ] POLICY
+				func() bool {
+					return v.Sequence(
+						v.wordsValue("SUSPEND", "RESUME"),
+						func() bool { return v.MatchWord("SNAPSHOT") },
+						func() bool { return v.Optional(v.wordsValue("CREATION", "EXPIRATION")) },
+						func() bool { return v.MatchWord("POLICY") },
+					)
+				},
+				// DELETE / MODIFY SNAPSHOT IDENTIFIER '<id>' ...
+				func() bool {
+					return v.Sequence(
+						v.wordsValue("DELETE", "MODIFY"),
+						func() bool { return v.MatchWord("SNAPSHOT") },
+						func() bool { return v.MatchWord("IDENTIFIER") },
+						v.parseString,
+						func() bool { return v.Optional(v.consumeRest) },
+					)
+				},
+				// SET COMMENT/TAG ... | UNSET COMMENT/TAG ...
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterStage validates the Snowflake `ALTER STAGE` command.
@@ -2940,7 +4466,25 @@ func (v *Validator) ParseAlterSnapshotSet() bool {
 //
 //	ALTER STAGE [ IF EXISTS ] <name> REFRESH [ SUBPATH = '<relative-path>' ]
 func (v *Validator) ParseAlterStage() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("STAGE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				// REFRESH [ SUBPATH = '<path>' ]
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("REFRESH") },
+						func() bool { return v.Optional(v.option("SUBPATH", v.parseString)) },
+					)
+				},
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterStorageIntegration validates the Snowflake `ALTER STORAGE INTEGRATION` command.
@@ -2978,7 +4522,14 @@ func (v *Validator) ParseAlterStage() bool {
 //	  AZURE_TENANT_ID = '<tenant_id>'
 //	  [ USE_PRIVATELINK_ENDPOINT = { TRUE | FALSE } ]
 func (v *Validator) ParseAlterStorageIntegration() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("STORAGE") }) },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+	)
 }
 
 // ParseAlterStorageLifecyclePolicy validates the Snowflake `ALTER STORAGE LIFECYCLE POLICY` command.
@@ -3001,7 +4552,19 @@ func (v *Validator) ParseAlterStorageIntegration() bool {
 //	  | COMMENT
 //	  | TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterStorageLifecyclePolicy() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("STORAGE", "LIFECYCLE", "POLICY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				// SET ( BODY -> <expr> | <opt> = <val> | TAG ... ) / UNSET <opt>
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterStream validates the Snowflake `ALTER STREAM` command.
@@ -3017,7 +4580,14 @@ func (v *Validator) ParseAlterStorageLifecyclePolicy() bool {
 //
 //	ALTER STREAM [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterStream() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("STREAM") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		// SET COMMENT/TAG ... | UNSET COMMENT/TAG ...
+		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+	)
 }
 
 // ParseAlterStreamlit validates the Snowflake `ALTER STREAMLIT` command.
@@ -3065,7 +4635,30 @@ func (v *Validator) ParseAlterStream() bool {
 //
 //	ALTER STREAMLIT <name> ADD LIVE VERSION FROM LAST
 func (v *Validator) ParseAlterStreamlit() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("STREAMLIT") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.MatchWord("COMMIT") },
+				func() bool { return v.MatchWord("ABORT") },
+				func() bool { return v.MatchWord("PULL") },
+				// ADD LIVE VERSION FROM LAST
+				func() bool { return v.phrase("ADD", "LIVE", "VERSION", "FROM", "LAST") },
+				// PUSH [ TO <uri> ] [ ... ]
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("PUSH") },
+						func() bool { return v.Optional(v.consumeRest) },
+					)
+				},
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterTable validates the Snowflake `ALTER TABLE` command.
@@ -3117,7 +4710,29 @@ func (v *Validator) ParseAlterStreamlit() bool {
 //	                                        }
 //	                                        [ , ... ]
 func (v *Validator) ParseAlterTable() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("TABLE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.phrase("SWAP", "WITH") && v.parseIdentPath() },
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				// ADD / DROP / clusteringAction / tableColumnAction / constraintAction /
+				// dataMetricFunctionAction / searchOptimizationAction etc. — require a verb
+				// word then accept the free-form remainder.
+				func() bool {
+					if v.AtEnd() {
+						return false
+					}
+					v.advance()
+					return v.consumeRest()
+				},
+			)
+		},
+	)
 }
 
 // ParseAlterTableAlterColumn validates the Snowflake `ALTER TABLE ALTER COLUMN` command.
@@ -3138,7 +4753,20 @@ func (v *Validator) ParseAlterTable() bool {
 //
 //	ALTER TABLE <name> { ALTER | MODIFY } [ COLUMN ] dataGovnPolicyTagAction
 func (v *Validator) ParseAlterTableAlterColumn() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("TABLE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		// { ALTER | MODIFY } <column actions> — free-form remainder.
+		v.wordsValue("ALTER", "MODIFY"),
+		func() bool {
+			if v.AtEnd() {
+				return false
+			}
+			return v.consumeRest()
+		},
+	)
 }
 
 // ParseAlterTableEventTables validates the Snowflake `ALTER TABLE (event tables)` command.
@@ -3178,7 +4806,26 @@ func (v *Validator) ParseAlterTableAlterColumn() bool {
 //	   | DROP CLUSTERING KEY
 //	  }
 func (v *Validator) ParseAlterTableEventTables() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("TABLE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				// clusteringAction / dataGovnPolicyTagAction / searchOptimizationAction
+				func() bool {
+					if v.AtEnd() {
+						return false
+					}
+					v.advance()
+					return v.consumeRest()
+				},
+			)
+		},
+	)
 }
 
 // ParseAlterTag validates the Snowflake `ALTER TAG` command.
@@ -3205,7 +4852,31 @@ func (v *Validator) ParseAlterTableEventTables() bool {
 //
 //	ALTER TAG [ IF EXISTS ] <name> UNSET DCM PROJECT
 func (v *Validator) ParseAlterTag() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("TAG") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				// { ADD | DROP } ALLOWED_VALUES '<v1>' [ , '<v2>' ... ]
+				func() bool {
+					return v.Sequence(
+						v.wordsValue("ADD", "DROP"),
+						func() bool { return v.MatchWord("ALLOWED_VALUES") },
+						v.parseString,
+						func() bool {
+							return v.ZeroOrMore(func() bool {
+								return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, v.parseString)
+							})
+						},
+					)
+				},
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterTask validates the Snowflake `ALTER TASK` command.
@@ -3275,7 +4946,36 @@ func (v *Validator) ParseAlterTag() bool {
 //
 //	ALTER TASK [ IF EXISTS ] <name> REMOVE WHEN
 func (v *Validator) ParseAlterTask() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("TASK") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				v.wordsValue("RESUME", "SUSPEND"),
+				// { REMOVE | ADD } AFTER <str> [ , <str> ... ]
+				func() bool {
+					return v.Sequence(
+						v.wordsValue("REMOVE", "ADD"),
+						func() bool { return v.MatchWord("AFTER") },
+						func() bool { return v.consumeRest() },
+					)
+				},
+				// REMOVE WHEN
+				func() bool { return v.phrase("REMOVE", "WHEN") },
+				// MODIFY { AS <sql> | WHEN <expr> }
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("MODIFY") },
+						v.wordsValue("AS", "WHEN"),
+						func() bool { return v.consumeRest() },
+					)
+				},
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterType validates the Snowflake `ALTER TYPE` command.
@@ -3288,7 +4988,22 @@ func (v *Validator) ParseAlterTask() bool {
 //
 //	ALTER TYPE [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterType() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("TYPE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				// SET COMMENT = '<string>'
+				func() bool {
+					return v.Sequence(func() bool { return v.MatchWord("SET") }, v.commentOption())
+				},
+				// UNSET COMMENT
+				func() bool { return v.phrase("UNSET", "COMMENT") },
+			)
+		},
+	)
 }
 
 // ParseAlterUser validates the Snowflake `ALTER USER` command.
@@ -3320,7 +5035,46 @@ func (v *Validator) ParseAlterType() bool {
 //
 //	ALTER USER [ IF EXISTS ] [ <name> ] UNSET { <object_property_name> | <object_param_name> | <session_param_name> } [ , ... ]
 func (v *Validator) ParseAlterUser() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("USER") },
+		func() bool { return v.ifExists() },
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.phrase("RESET", "PASSWORD") },
+				func() bool { return v.phrase("ABORT", "ALL", "QUERIES") },
+				// [ <name> ] <action> — name then a required action.
+				func() bool {
+					return v.Sequence(
+						v.parseIdentPath,
+						func() bool {
+							return v.Choice(
+								func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+								func() bool { return v.phrase("RESET", "PASSWORD") },
+								func() bool { return v.phrase("ABORT", "ALL", "QUERIES") },
+								func() bool {
+									if v.AtEnd() {
+										return false
+									}
+									v.advance()
+									return v.consumeRest()
+								},
+							)
+						},
+					)
+				},
+				// nameless mfa / delegated actions
+				func() bool {
+					if v.AtEnd() {
+						return false
+					}
+					v.advance()
+					return v.consumeRest()
+				},
+			)
+		},
+	)
 }
 
 // ParseAlterUserAddProgrammaticAccessToken validates the Snowflake `ALTER USER ADD PROGRAMMATIC ACCESS TOKEN` command.
@@ -3334,7 +5088,40 @@ func (v *Validator) ParseAlterUser() bool {
 //	  [ MINS_TO_BYPASS_NETWORK_POLICY_REQUIREMENT = <integer> ]
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseAlterUserAddProgrammaticAccessToken() bool {
-	return true
+	patToken := func() bool {
+		return v.Sequence(
+			func() bool {
+				return v.Choice(
+					func() bool { return v.phrase("PROGRAMMATIC", "ACCESS", "TOKEN") },
+					func() bool { return v.MatchWord("PAT") },
+				)
+			},
+			v.parseIdentPath, // <token_name>
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("USER") },
+		func() bool { return v.ifExists() },
+		func() bool {
+			return v.Choice(
+				// ADD PAT ... directly (no username)
+				func() bool {
+					return v.Sequence(func() bool { return v.MatchWord("ADD") }, patToken)
+				},
+				// <username> ADD PAT ...
+				func() bool {
+					return v.Sequence(
+						v.parseIdentPath,
+						func() bool { return v.MatchWord("ADD") },
+						patToken,
+					)
+				},
+			)
+		},
+		// [ option list ]
+		func() bool { return v.Optional(v.consumeRest) },
+	)
 }
 
 // ParseAlterUserModifyProgrammaticAccessToken validates the Snowflake `ALTER USER MODIFY PROGRAMMATIC ACCESS TOKEN` command.
@@ -3355,7 +5142,43 @@ func (v *Validator) ParseAlterUserAddProgrammaticAccessToken() bool {
 //	  [ MINS_TO_BYPASS_NETWORK_POLICY_REQUIREMENT ]
 //	  [ COMMENT ]
 func (v *Validator) ParseAlterUserModifyProgrammaticAccessToken() bool {
-	return true
+	patToken := func() bool {
+		return v.Sequence(
+			func() bool {
+				return v.Choice(
+					func() bool { return v.phrase("PROGRAMMATIC", "ACCESS", "TOKEN") },
+					func() bool { return v.MatchWord("PAT") },
+				)
+			},
+			v.parseIdentPath,
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("USER") },
+		func() bool { return v.ifExists() },
+		func() bool {
+			return v.Choice(
+				func() bool {
+					return v.Sequence(func() bool { return v.MatchWord("MODIFY") }, patToken)
+				},
+				func() bool {
+					return v.Sequence(
+						v.parseIdentPath,
+						func() bool { return v.MatchWord("MODIFY") },
+						patToken,
+					)
+				},
+			)
+		},
+		// RENAME TO <new_name> | SET <opts> | UNSET <opts>
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterUserRemoveProgrammaticAccessToken validates the Snowflake `ALTER USER REMOVE PROGRAMMATIC ACCESS TOKEN` command.
@@ -3365,7 +5188,36 @@ func (v *Validator) ParseAlterUserModifyProgrammaticAccessToken() bool {
 //
 //	ALTER USER [ IF EXISTS ] [ <username> ] REMOVE { PROGRAMMATIC ACCESS TOKEN | PAT } <token_name>
 func (v *Validator) ParseAlterUserRemoveProgrammaticAccessToken() bool {
-	return true
+	patToken := func() bool {
+		return v.Sequence(
+			func() bool {
+				return v.Choice(
+					func() bool { return v.phrase("PROGRAMMATIC", "ACCESS", "TOKEN") },
+					func() bool { return v.MatchWord("PAT") },
+				)
+			},
+			v.parseIdentPath,
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("USER") },
+		func() bool { return v.ifExists() },
+		func() bool {
+			return v.Choice(
+				func() bool {
+					return v.Sequence(func() bool { return v.MatchWord("REMOVE") }, patToken)
+				},
+				func() bool {
+					return v.Sequence(
+						v.parseIdentPath,
+						func() bool { return v.MatchWord("REMOVE") },
+						patToken,
+					)
+				},
+			)
+		},
+	)
 }
 
 // ParseAlterUserRotateProgrammaticAccessToken validates the Snowflake `ALTER USER ROTATE PROGRAMMATIC ACCESS TOKEN` command.
@@ -3376,7 +5228,41 @@ func (v *Validator) ParseAlterUserRemoveProgrammaticAccessToken() bool {
 //	ALTER USER [ IF EXISTS ] [ <username> ] ROTATE { PROGRAMMATIC ACCESS TOKEN | PAT } <token_name>
 //	  [ EXPIRE_ROTATED_TOKEN_AFTER_HOURS = <integer> ]
 func (v *Validator) ParseAlterUserRotateProgrammaticAccessToken() bool {
-	return true
+	patToken := func() bool {
+		return v.Sequence(
+			func() bool {
+				return v.Choice(
+					func() bool { return v.phrase("PROGRAMMATIC", "ACCESS", "TOKEN") },
+					func() bool { return v.MatchWord("PAT") },
+				)
+			},
+			v.parseIdentPath,
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("USER") },
+		func() bool { return v.ifExists() },
+		func() bool {
+			return v.Choice(
+				func() bool {
+					return v.Sequence(func() bool { return v.MatchWord("ROTATE") }, patToken)
+				},
+				func() bool {
+					return v.Sequence(
+						v.parseIdentPath,
+						func() bool { return v.MatchWord("ROTATE") },
+						patToken,
+					)
+				},
+			)
+		},
+		// [ EXPIRE_ROTATED_TOKEN_AFTER_HOURS = <integer> ]
+		func() bool {
+			return v.Optional(v.option("EXPIRE_ROTATED_TOKEN_AFTER_HOURS",
+				func() bool { return v.Match(sqltok.NumberLit) }))
+		},
+	)
 }
 
 // ParseAlterView validates the Snowflake `ALTER VIEW` command.
@@ -3402,7 +5288,26 @@ func (v *Validator) ParseAlterUserRotateProgrammaticAccessToken() bool {
 //
 //	ALTER VIEW [ IF EXISTS ] <name> dataGovnPolicyTagAction
 func (v *Validator) ParseAlterView() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("VIEW") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				// dataMetricFunctionAction / dataGovnPolicyTagAction (ADD/DROP/MODIFY ...)
+				func() bool {
+					if v.AtEnd() {
+						return false
+					}
+					v.advance()
+					return v.consumeRest()
+				},
+			)
+		},
+	)
 }
 
 // ParseAlterWarehouse validates the Snowflake `ALTER WAREHOUSE` command.
@@ -3456,7 +5361,52 @@ func (v *Validator) ParseAlterView() bool {
 //	  STATEMENT_QUEUED_TIMEOUT_IN_SECONDS = <num>
 //	  STATEMENT_TIMEOUT_IN_SECONDS = <num>
 func (v *Validator) ParseAlterWarehouse() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("WAREHOUSE") },
+		func() bool { return v.ifExists() },
+		func() bool {
+			return v.Choice(
+				// Nameless forms: { SUSPEND | RESUME [ IF SUSPENDED ] } | ABORT ALL QUERIES
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("RESUME") },
+						func() bool { return v.Optional(func() bool { return v.phrase("IF", "SUSPENDED") }) },
+					)
+				},
+				func() bool { return v.MatchWord("SUSPEND") },
+				func() bool { return v.phrase("ABORT", "ALL", "QUERIES") },
+				// <name> <action>
+				func() bool {
+					return v.Sequence(
+						v.parseIdentPath,
+						func() bool {
+							return v.Choice(
+								func() bool {
+									return v.Sequence(
+										func() bool { return v.MatchWord("RESUME") },
+										func() bool { return v.Optional(func() bool { return v.phrase("IF", "SUSPENDED") }) },
+									)
+								},
+								v.wordsValue("SUSPEND", "ENABLE", "DISABLE"),
+								func() bool { return v.phrase("ABORT", "ALL", "QUERIES") },
+								func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+								// { ADD | DROP } TABLES ( ... )
+								func() bool {
+									return v.Sequence(
+										v.wordsValue("ADD", "DROP"),
+										func() bool { return v.MatchWord("TABLES") },
+										v.consumeBalancedParens,
+									)
+								},
+								func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+							)
+						},
+					)
+				},
+			)
+		},
+	)
 }
 
 // ParseAlterApplicationService validates the Snowflake `ALTER APPLICATION SERVICE` command.
@@ -3486,7 +5436,29 @@ func (v *Validator) ParseAlterWarehouse() bool {
 //	  }
 //	  [ , ... ]
 func (v *Validator) ParseAlterApplicationService() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("APPLICATION", "SERVICE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				v.wordsValue("SUSPEND", "RESUME"),
+				// UPGRADE [ TO VERSION <version_alias> ]
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("UPGRADE") },
+						func() bool {
+							return v.Optional(func() bool {
+								return v.Sequence(func() bool { return v.phrase("TO", "VERSION") }, v.parseIdentPath)
+							})
+						},
+					)
+				},
+				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+			)
+		},
+	)
 }
 
 // ParseAlterArtifactRepository validates the Snowflake `ALTER ARTIFACT REPOSITORY` command.
@@ -3506,7 +5478,14 @@ func (v *Validator) ParseAlterApplicationService() bool {
 //	ALTER ARTIFACT REPOSITORY [ IF EXISTS ] <name> UNSET
 //	  TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterArtifactRepository() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("ARTIFACT", "REPOSITORY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		// SET ( COMMENT | TAG ... ) | UNSET ( COMMENT | TAG ... )
+		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+	)
 }
 
 // ParseAlterEventRoutingTable validates the Snowflake `ALTER EVENT ROUTING TABLE` command.
@@ -3532,7 +5511,36 @@ func (v *Validator) ParseAlterArtifactRepository() bool {
 //	ALTER EVENT ROUTING TABLE <table_name>
 //	  RENAME TO <new_table_name>
 func (v *Validator) ParseAlterEventRoutingTable() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("EVENT", "ROUTING", "TABLE") },
+		v.parseIdentPath,
+		func() bool { return v.Optional(func() bool { return v.MatchWord("FORCE") }) },
+		func() bool {
+			return v.Choice(
+				// RENAME TO <new_table_name>
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				// SET { RULES | RULE } ... | UNSET RULE <name>
+				func() bool {
+					return v.Sequence(
+						v.wordsValue("SET", "UNSET"),
+						v.wordsValue("RULES", "RULE"),
+						func() bool { return v.consumeRest() },
+					)
+				},
+				// MODIFY RULE <name> RENAME TO <new_rule_name>
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("MODIFY") },
+						func() bool { return v.MatchWord("RULE") },
+						v.parseIdentPath,
+						func() bool { return v.phrase("RENAME", "TO") },
+						v.parseIdentPath,
+					)
+				},
+			)
+		},
+	)
 }
 
 // ParseAlterOrganizationSetEventRoutingTable validates the Snowflake `ALTER ORGANIZATION SET EVENT ROUTING TABLE` command.
@@ -3542,7 +5550,15 @@ func (v *Validator) ParseAlterEventRoutingTable() bool {
 //
 //	ALTER ORGANIZATION SET EVENT ROUTING TABLE <table_name> FOR ALL APPLICATION LISTINGS
 func (v *Validator) ParseAlterOrganizationSetEventRoutingTable() bool {
-	return true
+	// ALTER ORGANIZATION SET EVENT ROUTING TABLE <name> FOR ALL APPLICATION LISTINGS
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("ORGANIZATION") },
+		func() bool { return v.MatchWord("SET") },
+		func() bool { return v.phrase("EVENT", "ROUTING", "TABLE") },
+		v.parseIdentPath,
+		func() bool { return v.phrase("FOR", "ALL", "APPLICATION", "LISTINGS") },
+	)
 }
 
 // ParseAlterOrganizationUnsetEventRoutingTable validates the Snowflake `ALTER ORGANIZATION UNSET EVENT ROUTING TABLE` command.
@@ -3552,5 +5568,12 @@ func (v *Validator) ParseAlterOrganizationSetEventRoutingTable() bool {
 //
 //	ALTER ORGANIZATION UNSET EVENT ROUTING TABLE FOR ALL APPLICATION LISTINGS
 func (v *Validator) ParseAlterOrganizationUnsetEventRoutingTable() bool {
-	return true
+	// ALTER ORGANIZATION UNSET EVENT ROUTING TABLE FOR ALL APPLICATION LISTINGS
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("ORGANIZATION") },
+		func() bool { return v.MatchWord("UNSET") },
+		func() bool { return v.phrase("EVENT", "ROUTING", "TABLE") },
+		func() bool { return v.phrase("FOR", "ALL", "APPLICATION", "LISTINGS") },
+	)
 }

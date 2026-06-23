@@ -451,7 +451,9 @@ func (v *Validator) ParseList() bool {
 	}
 	return v.Sequence(
 		// LIST has the synonym LS.
-		func() bool { return v.Choice(func() bool { return v.MatchWord("LIST") }, func() bool { return v.MatchWord("LS") }) },
+		func() bool {
+			return v.Choice(func() bool { return v.MatchWord("LIST") }, func() bool { return v.MatchWord("LS") })
+		},
 		stageRef,
 		func() bool { return v.Optional(v.option("PATTERN", v.parseString)) },
 	)
@@ -599,7 +601,9 @@ func (v *Validator) ParseRemove() bool {
 	}
 	return v.Sequence(
 		// REMOVE has the synonym RM.
-		func() bool { return v.Choice(func() bool { return v.MatchWord("REMOVE") }, func() bool { return v.MatchWord("RM") }) },
+		func() bool {
+			return v.Choice(func() bool { return v.MatchWord("REMOVE") }, func() bool { return v.MatchWord("RM") })
+		},
 		stageRef,
 		func() bool { return v.Optional(v.option("PATTERN", v.parseString)) },
 	)
