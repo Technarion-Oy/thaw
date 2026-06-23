@@ -60,6 +60,13 @@ func (s *Service) ValidateDataTypes(sql string, stmtRanges []StatementRange) []D
 	return ValidateDataTypes(sql, stmtRanges)
 }
 
+// ValidateGrammar validates each statement against the recursive-descent
+// Snowflake grammar (internal/sqlgrammar): recognized statements that don't
+// conform yield a Warning marker at the furthest position the grammar reached.
+func (s *Service) ValidateGrammar(sql string, stmtRanges []StatementRange) []DiagMarker {
+	return ValidateGrammar(sql, stmtRanges)
+}
+
 // ValidateTablesExist checks SELECT/CREATE/ALTER/DROP/UNDROP statements for
 // references to databases, schemas, or tables that are absent from the resolved
 // references or known catalogs.
