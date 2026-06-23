@@ -22,6 +22,7 @@ Key capabilities:
 | `service.go` | `Service` struct (Wails-bound, stateless); thin delegators to package-level functions |
 | `sqleditor.go` | Core types (`DiagMarker`, `JoinTableRef`, `ResolvedRef`, `ColInfo`, `ColEntry`, `JoinCondition`, `AutocompleteContext`, `UseContext`, `LineDiff`, etc.) and main analysis functions |
 | `patterns.go` | `ValidateSnowflakePatterns`, `ValidateDataTypes`; regex constants `ReIdentifier`, `_ident`, `_identPath`; `ApplyCasing` |
+| `grammar.go` | `ValidateGrammar` — per-statement check against the recursive-descent grammar in `internal/sqlgrammar`; rebases failure positions to absolute doc coordinates |
 | `barecolrefs.go` | `ValidateBareColumnRefs`, `ExtractInEditorTableDefs` — validates INSERT column lists and CREATE TABLE REFERENCES; extracts in-editor table columns for pre-execution autocomplete |
 | `tableexist.go` | `ValidateTablesExist` — checks SELECT/CREATE/ALTER/DROP/UNDROP for unresolvable table/schema/database references; emits quick-fix `Code` JSON when a table exists in another schema |
 | `diaghelpers.go` | Shared internal helpers: `stripCommentsSQL`, `stripStringLiterals`, `getFirstSQLToken` |
@@ -37,6 +38,7 @@ Key capabilities:
 - `ValidateSemantics(sql, resolvedRefs, colEntries) []DiagMarker` — alias.column reference validator
 - `ValidateSnowflakePatterns(sql, stmtRanges) []DiagMarker` — anti-pattern checks, preamble validation
 - `ValidateDataTypes(sql, stmtRanges) []DiagMarker` — unrecognised Snowflake type names in CREATE TABLE, CAST, `::`
+- `ValidateGrammar(sql, stmtRanges) []DiagMarker` — validates each statement against the recursive-descent Snowflake grammar in [`internal/sqlgrammar`](../sqlgrammar/README.md). Only statements whose leading keyword maps to an implemented grammar (`sqlgrammar.Validator.Recognized`) are checked; a non-conforming one yields a single **Warning** at the furthest position the grammar reached (with its `expected …` message). Deliberately conservative — fires on clearly-broken statements (missing names, dangling keywords), never on valid-but-unmodelled SQL
 - `ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker` — checks tables/schemas/databases against resolved refs; populates `DiagMarker.Code` with JSON quick-fix metadata (`{"kind":"qualify-table","original":"FOO","suggestions":["DB.SCHEMA.FOO"]}`)
 - `ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker` — validates INSERT and CREATE TABLE REFERENCES column lists
 

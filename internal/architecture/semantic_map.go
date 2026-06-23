@@ -41,6 +41,7 @@ func GetCodebaseSemanticMap() string {
         "internal/querylog/",
         "internal/queryprofile/",
         "internal/sqleditor/",
+        "internal/sqlgrammar/",
         "internal/sqltok/"
       ],
       "frontend_paths": [
