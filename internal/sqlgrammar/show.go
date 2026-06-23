@@ -1,5 +1,7 @@
 package sqlgrammar
 
+import "thaw/internal/sqltok"
+
 // SHOW commands — grammar-rule stubs for issue #556.
 //
 // Each function corresponds to one Snowflake command reference (see the per-
@@ -12,7 +14,12 @@ package sqlgrammar
 //
 // Syntax: (unavailable — see Reference URL)
 func (v *Validator) ParseShowObjs() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("TERSE") }) },
+		func() bool { return v.MatchWord("OBJECTS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowAccounts validates the Snowflake `SHOW ACCOUNTS` command.
@@ -22,7 +29,11 @@ func (v *Validator) ParseShowObjs() bool {
 //
 //	SHOW ACCOUNTS [ HISTORY ] [ LIKE '<pattern>' ]
 func (v *Validator) ParseShowAccounts() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("ACCOUNTS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowAgents validates the Snowflake `SHOW AGENTS` command.
@@ -36,7 +47,11 @@ func (v *Validator) ParseShowAccounts() bool {
 //	  [ STARTS WITH '<string>' ]
 //	  [ LIMIT <rows> [ FROM '<string_from>' ] ]
 func (v *Validator) ParseShowAgents() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("AGENTS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowAggregationPolicies validates the Snowflake `SHOW AGGREGATION POLICIES` command.
@@ -55,7 +70,11 @@ func (v *Validator) ParseShowAgents() bool {
 //	                               }
 //	                           ]
 func (v *Validator) ParseShowAggregationPolicies() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("AGGREGATION", "POLICIES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowAlerts validates the Snowflake `SHOW ALERTS` command.
@@ -82,7 +101,12 @@ func (v *Validator) ParseShowAggregationPolicies() bool {
 //	                      [ STARTS WITH '<name_string>' ]
 //	                      [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowAlerts() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("TERSE") }) },
+		func() bool { return v.MatchWord("ALERTS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowApplicationPackages validates the Snowflake `SHOW APPLICATION PACKAGES` command.
@@ -94,7 +118,11 @@ func (v *Validator) ParseShowAlerts() bool {
 //	  [ STARTS WITH '<name_string>' ]
 //	  [ LIMIT <rows> [ FROM '<name_string>' ] ];
 func (v *Validator) ParseShowApplicationPackages() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("APPLICATION", "PACKAGES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowApplicationRoles validates the Snowflake `SHOW APPLICATION ROLES` command.
@@ -105,7 +133,11 @@ func (v *Validator) ParseShowApplicationPackages() bool {
 //	SHOW APPLICATION ROLES [ LIKE <pattern> ] IN APPLICATION <name>
 //	  [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowApplicationRoles() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("APPLICATION", "ROLES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowApplications validates the Snowflake `SHOW APPLICATIONS` command.
@@ -117,7 +149,11 @@ func (v *Validator) ParseShowApplicationRoles() bool {
 //	  [ STARTS WITH '<name_string>' ]
 //	  [ LIMIT <rows> [ FROM '<name_string>' ] ];
 func (v *Validator) ParseShowApplications() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("APPLICATIONS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowAuthenticationPolicies validates the Snowflake `SHOW AUTHENTICATION POLICIES` command.
@@ -150,7 +186,36 @@ func (v *Validator) ParseShowApplications() bool {
 //	  [ STARTS WITH '<name_string>' ]
 //	  [ LIMIT <rows> ]
 func (v *Validator) ParseShowAuthenticationPolicies() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("AUTHENTICATION", "POLICIES") },
+		func() bool { return v.Optional(v.likeClause) },
+		// [ IN <scope> | ON { ACCOUNT | USER <name> } ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Choice(
+					v.inScopeClause,
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchWord("ON") },
+							func() bool {
+								return v.Choice(
+									func() bool { return v.MatchWord("ACCOUNT") },
+									func() bool {
+										return v.Sequence(
+											func() bool { return v.MatchWord("USER") },
+											v.parseIdentPath,
+										)
+									},
+								)
+							},
+						)
+					},
+				)
+			})
+		},
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowAvailableListings validates the Snowflake `SHOW AVAILABLE LISTINGS` command.
@@ -164,7 +229,22 @@ func (v *Validator) ParseShowAuthenticationPolicies() bool {
 //	    [ IS_ORGANIZATION = TRUE ]
 //	    [ IS_SHARED_WITH_ME = TRUE ]
 func (v *Validator) ParseShowAvailableListings() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("TERSE") }) },
+		func() bool { return v.phrase("AVAILABLE", "LISTINGS") },
+		// [ LIMIT <rows> ] and the IS_* = TRUE options, in any order.
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.limitFromClause,
+					v.option("IS_IMPORTED", v.parseBool),
+					v.option("IS_ORGANIZATION", v.parseBool),
+					v.option("IS_SHARED_WITH_ME", v.parseBool),
+				)
+			})
+		},
+	)
 }
 
 // ParseShowAvailableOffers validates the Snowflake `SHOW AVAILABLE OFFERS` command.
@@ -174,7 +254,14 @@ func (v *Validator) ParseShowAvailableListings() bool {
 //
 //	SHOW AVAILABLE OFFERS [ LIKE '<pattern>' ] IN LISTING <listing>
 func (v *Validator) ParseShowAvailableOffers() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("AVAILABLE", "OFFERS") },
+		func() bool { return v.Optional(v.likeClause) },
+		func() bool { return v.MatchWord("IN") },
+		func() bool { return v.MatchWord("LISTING") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseShowAvailableOrganizationProfiles validates the Snowflake `SHOW AVAILABLE ORGANIZATION PROFILES` command.
@@ -184,7 +271,10 @@ func (v *Validator) ParseShowAvailableOffers() bool {
 //
 //	SHOW AVAILABLE ORGANIZATION PROFILES
 func (v *Validator) ParseShowAvailableOrganizationProfiles() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("AVAILABLE", "ORGANIZATION", "PROFILES") },
+	)
 }
 
 // ParseShowBackupPolicies validates the Snowflake `SHOW BACKUP POLICIES` command.
@@ -199,7 +289,11 @@ func (v *Validator) ParseShowAvailableOrganizationProfiles() bool {
 //	     [ LIMIT <rows> ]
 //	   ]
 func (v *Validator) ParseShowBackupPolicies() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("BACKUP", "POLICIES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowBackupSets validates the Snowflake `SHOW BACKUP SETS` command.
@@ -214,7 +308,11 @@ func (v *Validator) ParseShowBackupPolicies() bool {
 //	     [ LIMIT <rows> ]
 //	   ]
 func (v *Validator) ParseShowBackupSets() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("BACKUP", "SETS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowBackupsInBackupSet validates the Snowflake `SHOW BACKUPS IN BACKUP SET` command.
@@ -225,7 +323,15 @@ func (v *Validator) ParseShowBackupSets() bool {
 //	SHOW BACKUPS IN BACKUP SET <name>
 //	  [ LIMIT <rows> ]
 func (v *Validator) ParseShowBackupsInBackupSet() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("BACKUPS") },
+		func() bool { return v.MatchWord("IN") },
+		func() bool { return v.MatchWord("BACKUP") },
+		func() bool { return v.MatchWord("SET") },
+		v.parseIdentPath,
+		func() bool { return v.Optional(v.limitFromClause) },
+	)
 }
 
 // ParseShowCallerGrants validates the Snowflake `SHOW CALLER GRANTS` command.
@@ -239,7 +345,39 @@ func (v *Validator) ParseShowBackupsInBackupSet() bool {
 //	| TO { ROLE | DATABASE ROLE }  <owner_name>
 //	}
 func (v *Validator) ParseShowCallerGrants() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("CALLER") },
+		func() bool { return v.MatchWord("GRANTS") },
+		func() bool {
+			return v.Choice(
+				// ON ACCOUNT
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("ON") },
+						func() bool { return v.MatchWord("ACCOUNT") },
+					)
+				},
+				// ON <object_type> <object_name>
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("ON") },
+						func() bool { return v.Match(sqltok.Identifier) || v.Match(sqltok.Keyword) },
+						v.parseIdentPath,
+					)
+				},
+				// TO { ROLE | DATABASE ROLE } <owner_name>
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("TO") },
+						func() bool { return v.Optional(func() bool { return v.MatchWord("DATABASE") }) },
+						func() bool { return v.MatchWord("ROLE") },
+						v.parseIdentPath,
+					)
+				},
+			)
+		},
+	)
 }
 
 // ParseShowCatalogIntegrations validates the Snowflake `SHOW CATALOG INTEGRATIONS` command.
@@ -249,7 +387,11 @@ func (v *Validator) ParseShowCallerGrants() bool {
 //
 //	SHOW CATALOG INTEGRATIONS [ LIKE '<pattern>' ]
 func (v *Validator) ParseShowCatalogIntegrations() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("CATALOG", "INTEGRATIONS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowChannels validates the Snowflake `SHOW CHANNELS` command.
@@ -277,7 +419,32 @@ func (v *Validator) ParseShowCatalogIntegrations() bool {
 //	                }
 //	           ]
 func (v *Validator) ParseShowChannels() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("CHANNELS") },
+		func() bool { return v.Optional(v.likeClause) },
+		// [ IN { ACCOUNT | DATABASE [name] | SCHEMA [name] | <name>
+		//        | TABLE [name] | PIPE [name] } ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("IN") },
+					func() bool {
+						return v.Choice(
+							func() bool { return v.MatchWord("ACCOUNT") },
+							func() bool {
+								return v.Sequence(
+									v.wordsValue("DATABASE", "SCHEMA", "TABLE", "PIPE"),
+									func() bool { return v.Optional(v.parseIdentPath) },
+								)
+							},
+							v.parseIdentPath,
+						)
+					},
+				)
+			})
+		},
+	)
 }
 
 // ParseShowClasses validates the Snowflake `SHOW CLASSES` command.
@@ -289,7 +456,11 @@ func (v *Validator) ParseShowChannels() bool {
 //	             [ IN DATABASE [ <db_name> ] ]
 //	             [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowClasses() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("CLASSES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowColumns validates the Snowflake `SHOW COLUMNS` command.
@@ -300,7 +471,11 @@ func (v *Validator) ParseShowClasses() bool {
 //	SHOW COLUMNS [ LIKE '<pattern>' ]
 //	             [ IN { ACCOUNT | DATABASE [ <database_name> ] | SCHEMA [ <schema_name> ] | TABLE | [ TABLE ] <table_name> | VIEW | [ VIEW ] <view_name> } | APPLICATION <application_name> | APPLICATION PACKAGE <application_package_name> ]
 func (v *Validator) ParseShowColumns() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("COLUMNS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowComputePoolInstanceFamilies validates the Snowflake `SHOW COMPUTE POOL INSTANCE FAMILIES` command.
@@ -310,7 +485,10 @@ func (v *Validator) ParseShowColumns() bool {
 //
 //	SHOW COMPUTE POOL INSTANCE FAMILIES
 func (v *Validator) ParseShowComputePoolInstanceFamilies() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("COMPUTE", "POOL", "INSTANCE", "FAMILIES") },
+	)
 }
 
 // ParseShowComputePools validates the Snowflake `SHOW COMPUTE POOLS` command.
@@ -322,7 +500,11 @@ func (v *Validator) ParseShowComputePoolInstanceFamilies() bool {
 //	                   [ STARTS WITH '<name_string>' ]
 //	                   [ LIMIT <ROWS> [ FROM '<name-string>' ] ]
 func (v *Validator) ParseShowComputePools() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("COMPUTE", "POOLS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowConfigurations validates the Snowflake `SHOW CONFIGURATIONS` command.
@@ -332,7 +514,11 @@ func (v *Validator) ParseShowComputePools() bool {
 //
 //	SHOW CONFIGURATIONS [ IN APPLICATION <app> ]
 func (v *Validator) ParseShowConfigurations() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("CONFIGURATIONS") },
+		func() bool { return v.Optional(v.inScopeClause) },
+	)
 }
 
 // ParseShowConnections validates the Snowflake `SHOW CONNECTIONS` command.
@@ -342,7 +528,11 @@ func (v *Validator) ParseShowConfigurations() bool {
 //
 //	SHOW CONNECTIONS [ LIKE '<pattern>' ]
 func (v *Validator) ParseShowConnections() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("CONNECTIONS") },
+		func() bool { return v.Optional(v.likeClause) },
+	)
 }
 
 // ParseShowContacts validates the Snowflake `SHOW CONTACTS` command.
@@ -367,7 +557,11 @@ func (v *Validator) ParseShowConnections() bool {
 //	          [ LIMIT <rows> ]
 //	          [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowContacts() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("CONTACTS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowCortexSearchServices validates the Snowflake `SHOW CORTEX SEARCH SERVICES` command.
@@ -380,7 +574,22 @@ func (v *Validator) ParseShowContacts() bool {
 //	  [ STARTS WITH '<name_string>' ]
 //	  [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowCortexSearchServices() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("CORTEX", "SEARCH", "SERVICES") },
+		// [ LIKE [ PATTERN ] '<pattern>' ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("LIKE") },
+					func() bool { return v.Optional(func() bool { return v.MatchWord("PATTERN") }) },
+					v.parseString,
+				)
+			})
+		},
+		func() bool { return v.Optional(v.startsWithClause) },
+		func() bool { return v.Optional(v.limitFromClause) },
+	)
 }
 
 // ParseShowDataMetricFunctions validates the Snowflake `SHOW DATA METRIC FUNCTIONS` command.
@@ -404,7 +613,11 @@ func (v *Validator) ParseShowCortexSearchServices() bool {
 //	  ]
 //	  [ STARTS WITH '<name_string>' ]
 func (v *Validator) ParseShowDataMetricFunctions() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("DATA", "METRIC", "FUNCTIONS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowDatabaseRoles validates the Snowflake `SHOW DATABASE ROLES` command.
@@ -415,7 +628,12 @@ func (v *Validator) ParseShowDataMetricFunctions() bool {
 //	SHOW DATABASE ROLES IN DATABASE <name>
 //	  [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowDatabaseRoles() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("DATABASE") },
+		func() bool { return v.MatchWord("ROLES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowDatabases validates the Snowflake `SHOW DATABASES` command.
@@ -428,7 +646,30 @@ func (v *Validator) ParseShowDatabaseRoles() bool {
 //	                                     [ LIMIT <rows> [ FROM '<name_string>' ] ]
 //	                                     [ WITH PRIVILEGES <object_privilege> [ , <object_privilege> [ , ... ] ] ]
 func (v *Validator) ParseShowDatabases() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("TERSE") }) },
+		func() bool { return v.MatchWord("DATABASES") },
+		func() bool { return v.showTrailers() },
+		// [ WITH PRIVILEGES <object_privilege> [ , ... ] ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("WITH") },
+					func() bool { return v.MatchWord("PRIVILEGES") },
+					func() bool { return v.Match(sqltok.Identifier) || v.Match(sqltok.Keyword) },
+					func() bool {
+						return v.ZeroOrMore(func() bool {
+							return v.Sequence(
+								func() bool { return v.Match(sqltok.Comma) },
+								func() bool { return v.Match(sqltok.Identifier) || v.Match(sqltok.Keyword) },
+							)
+						})
+					},
+				)
+			})
+		},
+	)
 }
 
 // ParseShowDatabasesInFailoverGroup validates the Snowflake `SHOW DATABASES IN FAILOVER GROUP` command.
@@ -438,7 +679,14 @@ func (v *Validator) ParseShowDatabases() bool {
 //
 //	SHOW DATABASES IN FAILOVER GROUP <name>
 func (v *Validator) ParseShowDatabasesInFailoverGroup() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("DATABASES") },
+		func() bool { return v.MatchWord("IN") },
+		func() bool { return v.MatchWord("FAILOVER") },
+		func() bool { return v.MatchWord("GROUP") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseShowDatabasesInReplicationGroup validates the Snowflake `SHOW DATABASES IN REPLICATION GROUP` command.
@@ -448,7 +696,14 @@ func (v *Validator) ParseShowDatabasesInFailoverGroup() bool {
 //
 //	SHOW DATABASES IN REPLICATION GROUP <name>
 func (v *Validator) ParseShowDatabasesInReplicationGroup() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("DATABASES") },
+		func() bool { return v.MatchWord("IN") },
+		func() bool { return v.MatchWord("REPLICATION") },
+		func() bool { return v.MatchWord("GROUP") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseShowDatasets validates the Snowflake `SHOW DATASETS` command.
@@ -462,7 +717,11 @@ func (v *Validator) ParseShowDatabasesInReplicationGroup() bool {
 //	  [ STARTS WITH '<name_string>' ]
 //	  [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowDatasets() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("DATASETS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowDbtProjects validates the Snowflake `SHOW DBT PROJECTS` command.
@@ -487,7 +746,11 @@ func (v *Validator) ParseShowDatasets() bool {
 //	           [ LIMIT <rows> ]
 //	           [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowDbtProjects() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("DBT", "PROJECTS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowDcmProjects validates the Snowflake `SHOW DCM PROJECTS` command.
@@ -510,7 +773,12 @@ func (v *Validator) ParseShowDbtProjects() bool {
 //	           ]
 //	           [ LIMIT <rows> ]
 func (v *Validator) ParseShowDcmProjects() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("TERSE") }) },
+		func() bool { return v.phrase("DCM", "PROJECTS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowDelegatedAuthorizations validates the Snowflake `SHOW DELEGATED AUTHORIZATIONS` command.
@@ -524,7 +792,33 @@ func (v *Validator) ParseShowDcmProjects() bool {
 //
 //	SHOW DELEGATED AUTHORIZATIONS TO SECURITY INTEGRATION <integration_name>
 func (v *Validator) ParseShowDelegatedAuthorizations() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("DELEGATED") },
+		func() bool { return v.MatchWord("AUTHORIZATIONS") },
+		// [ BY USER <username> | TO SECURITY INTEGRATION <integration_name> ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Choice(
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchWord("BY") },
+							func() bool { return v.MatchWord("USER") },
+							v.parseIdentPath,
+						)
+					},
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchWord("TO") },
+							func() bool { return v.MatchWord("SECURITY") },
+							func() bool { return v.MatchWord("INTEGRATION") },
+							v.parseIdentPath,
+						)
+					},
+				)
+			})
+		},
+	)
 }
 
 // ParseShowDeploymentsInDcmProject validates the Snowflake `SHOW DEPLOYMENTS IN DCM PROJECT` command.
@@ -534,7 +828,15 @@ func (v *Validator) ParseShowDelegatedAuthorizations() bool {
 //
 //	SHOW DEPLOYMENTS IN DCM PROJECT <name> [ LIMIT <rows> ]
 func (v *Validator) ParseShowDeploymentsInDcmProject() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("DEPLOYMENTS") },
+		func() bool { return v.MatchWord("IN") },
+		func() bool { return v.MatchWord("DCM") },
+		func() bool { return v.MatchWord("PROJECT") },
+		v.parseIdentPath,
+		func() bool { return v.Optional(v.limitFromClause) },
+	)
 }
 
 // ParseShowDynamicTables validates the Snowflake `SHOW DYNAMIC TABLES` command.
@@ -558,7 +860,11 @@ func (v *Validator) ParseShowDeploymentsInDcmProject() bool {
 //	                    [ STARTS WITH '<name_string>' ]
 //	                    [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowDynamicTables() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("DYNAMIC", "TABLES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowEndpoints validates the Snowflake `SHOW ENDPOINTS` command.
@@ -568,7 +874,13 @@ func (v *Validator) ParseShowDynamicTables() bool {
 //
 //	SHOW ENDPOINTS IN SERVICE <name>
 func (v *Validator) ParseShowEndpoints() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("ENDPOINTS") },
+		func() bool { return v.MatchWord("IN") },
+		func() bool { return v.MatchWord("SERVICE") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseShowEntitiesInDcmProject validates the Snowflake `SHOW ENTITIES IN DCM PROJECT` command.
@@ -584,7 +896,49 @@ func (v *Validator) ParseShowEndpoints() bool {
 //
 //	SHOW ENTITIES IN DCM PROJECT <name> LIMIT <n> FROM <cursor>;
 func (v *Validator) ParseShowEntitiesInDcmProject() bool {
-	return true
+	// LIKE <pattern> here may use a bare identifier/scalar, not just a string.
+	likeAny := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchWord("LIKE") },
+			v.parseScalar,
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("ENTITIES") },
+		func() bool { return v.Optional(likeAny) },
+		func() bool { return v.MatchWord("IN") },
+		func() bool { return v.MatchWord("DCM") },
+		func() bool { return v.MatchWord("PROJECT") },
+		v.parseIdentPath,
+		// [ STARTS WITH <prefix> ] and [ LIMIT <n> [ FROM <cursor> ] ], any order.
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.phrase("STARTS", "WITH") },
+							v.parseScalar,
+						)
+					},
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchWord("LIMIT") },
+							func() bool { return v.Match(sqltok.NumberLit) },
+							func() bool {
+								return v.Optional(func() bool {
+									return v.Sequence(
+										func() bool { return v.MatchWord("FROM") },
+										v.parseScalar,
+									)
+								})
+							},
+						)
+					},
+				)
+			})
+		},
+	)
 }
 
 // ParseShowEventTables validates the Snowflake `SHOW EVENT TABLES` command.
@@ -597,7 +951,12 @@ func (v *Validator) ParseShowEntitiesInDcmProject() bool {
 //	  [ STARTS WITH '<name_string>' ]
 //	  [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowEventTables() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("TERSE") }) },
+		func() bool { return v.phrase("EVENT", "TABLES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowExperiments validates the Snowflake `SHOW EXPERIMENTS` command.
@@ -614,7 +973,11 @@ func (v *Validator) ParseShowEventTables() bool {
 //	                }
 //	           ]
 func (v *Validator) ParseShowExperiments() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("EXPERIMENTS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowExternalAgents validates the Snowflake `SHOW EXTERNAL AGENTS` command.
@@ -625,7 +988,11 @@ func (v *Validator) ParseShowExperiments() bool {
 //	SHOW EXTERNAL AGENTS [ LIKE '<pattern>' ]
 //	                     [ IN { ACCOUNT | DATABASE [ <db_name> ] | SCHEMA [ <schema_name> ] } ]
 func (v *Validator) ParseShowExternalAgents() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("EXTERNAL", "AGENTS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowExternalFunctions validates the Snowflake `SHOW EXTERNAL FUNCTIONS` command.
@@ -636,7 +1003,11 @@ func (v *Validator) ParseShowExternalAgents() bool {
 //	SHOW EXTERNAL FUNCTIONS [ LIKE '<pattern>' ]
 //	           [ IN { APPLICATION <application_name> | APPLICATION PACKAGE <application_package_name> }  ]
 func (v *Validator) ParseShowExternalFunctions() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("EXTERNAL", "FUNCTIONS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowExternalTables validates the Snowflake `SHOW EXTERNAL TABLES` command.
@@ -663,7 +1034,12 @@ func (v *Validator) ParseShowExternalFunctions() bool {
 //	                               [ STARTS WITH '<name_string>' ]
 //	                               [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowExternalTables() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("TERSE") }) },
+		func() bool { return v.phrase("EXTERNAL", "TABLES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowExternalVolumes validates the Snowflake `SHOW EXTERNAL VOLUMES` command.
@@ -673,7 +1049,11 @@ func (v *Validator) ParseShowExternalTables() bool {
 //
 //	SHOW EXTERNAL VOLUMES [ LIKE '<pattern>' ]
 func (v *Validator) ParseShowExternalVolumes() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("EXTERNAL", "VOLUMES") },
+		func() bool { return v.Optional(v.likeClause) },
+	)
 }
 
 // ParseShowFailoverGroups validates the Snowflake `SHOW FAILOVER GROUPS` command.
@@ -683,7 +1063,18 @@ func (v *Validator) ParseShowExternalVolumes() bool {
 //
 //	SHOW FAILOVER GROUPS [ IN ACCOUNT <account> ]
 func (v *Validator) ParseShowFailoverGroups() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("FAILOVER", "GROUPS") },
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.phrase("IN", "ACCOUNT") },
+					func() bool { return v.Optional(v.parseIdentPath) },
+				)
+			})
+		},
+	)
 }
 
 // ParseShowFeaturePolicies validates the Snowflake `SHOW FEATURE POLICIES` command.
@@ -706,7 +1097,29 @@ func (v *Validator) ParseShowFailoverGroups() bool {
 //
 //	SHOW FEATURE POLICIES ON APPLICATION <application_name>
 func (v *Validator) ParseShowFeaturePolicies() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("FEATURE", "POLICIES") },
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					v.wordsValue("IN", "ON"),
+					func() bool {
+						return v.Choice(
+							func() bool { return v.MatchWord("ACCOUNT") },
+							func() bool {
+								return v.Sequence(
+									v.wordsValue("APPLICATION", "DATABASE", "SCHEMA"),
+									func() bool { return v.Optional(func() bool { return v.MatchWord("PACKAGE") }) },
+									func() bool { return v.Optional(v.parseIdentPath) },
+								)
+							},
+						)
+					},
+				)
+			})
+		},
+	)
 }
 
 // ParseShowFileFormats validates the Snowflake `SHOW FILE FORMATS` command.
@@ -731,7 +1144,11 @@ func (v *Validator) ParseShowFeaturePolicies() bool {
 //	                       }
 //	                  ]
 func (v *Validator) ParseShowFileFormats() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("FILE", "FORMATS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowFunctions validates the Snowflake `SHOW FUNCTIONS` command.
@@ -755,7 +1172,11 @@ func (v *Validator) ParseShowFileFormats() bool {
 //	    }
 //	  ]
 func (v *Validator) ParseShowFunctions() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("FUNCTIONS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowFunctionsInModel validates the Snowflake `SHOW FUNCTIONS IN MODEL` command.
@@ -766,7 +1187,18 @@ func (v *Validator) ParseShowFunctions() bool {
 //	SHOW FUNCTIONS [ LIKE '<pattern>' ] IN MODEL <model_name>
 //	               [ VERSION <version_name> ]
 func (v *Validator) ParseShowFunctionsInModel() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("FUNCTIONS") },
+		func() bool { return v.Optional(v.likeClause) },
+		func() bool { return v.phrase("IN", "MODEL") },
+		v.parseIdentPath,
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(func() bool { return v.MatchWord("VERSION") }, v.parseIdentPath)
+			})
+		},
+	)
 }
 
 // ParseShowGateways validates the Snowflake `SHOW GATEWAYS` command.
@@ -790,7 +1222,11 @@ func (v *Validator) ParseShowFunctionsInModel() bool {
 //	           [ STARTS WITH '<name_string>' ]
 //	           [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowGateways() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("GATEWAYS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowGitBranches validates the Snowflake `SHOW GIT BRANCHES` command.
@@ -800,7 +1236,14 @@ func (v *Validator) ParseShowGateways() bool {
 //
 //	SHOW GIT BRANCHES [ LIKE '<pattern>' ] IN [ GIT REPOSITORY ] <repository_name>
 func (v *Validator) ParseShowGitBranches() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("GIT", "BRANCHES") },
+		func() bool { return v.Optional(v.likeClause) },
+		func() bool { return v.MatchWord("IN") },
+		func() bool { return v.Optional(func() bool { return v.phrase("GIT", "REPOSITORY") }) },
+		v.parseIdentPath,
+	)
 }
 
 // ParseShowGitRepositories validates the Snowflake `SHOW GIT REPOSITORIES` command.
@@ -823,7 +1266,11 @@ func (v *Validator) ParseShowGitBranches() bool {
 //	  ]
 //	  [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowGitRepositories() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("GIT", "REPOSITORIES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowGitTags validates the Snowflake `SHOW GIT TAGS` command.
@@ -833,7 +1280,14 @@ func (v *Validator) ParseShowGitRepositories() bool {
 //
 //	SHOW GIT TAGS [ LIKE '<pattern>' ] IN [ GIT REPOSITORY ] <repository_name>
 func (v *Validator) ParseShowGitTags() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("GIT", "TAGS") },
+		func() bool { return v.Optional(v.likeClause) },
+		func() bool { return v.MatchWord("IN") },
+		func() bool { return v.Optional(func() bool { return v.phrase("GIT", "REPOSITORY") }) },
+		v.parseIdentPath,
+	)
 }
 
 // ParseShowGlobalAccounts validates the Snowflake `SHOW GLOBAL ACCOUNTS` command.
@@ -843,7 +1297,11 @@ func (v *Validator) ParseShowGitTags() bool {
 //
 //	SHOW GLOBAL ACCOUNTS [ LIKE '<pattern>' ]
 func (v *Validator) ParseShowGlobalAccounts() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("GLOBAL", "ACCOUNTS") },
+		func() bool { return v.Optional(v.likeClause) },
+	)
 }
 
 // ParseShowGrants validates the Snowflake `SHOW GRANTS` command.
@@ -883,7 +1341,31 @@ func (v *Validator) ParseShowGlobalAccounts() bool {
 //
 //	SHOW FUTURE GRANTS TO DATABASE ROLE <database_role_name>
 func (v *Validator) ParseShowGrants() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("FUTURE") }) },
+		func() bool { return v.MatchWord("GRANTS") },
+		func() bool {
+			// Optional ON / TO / OF / IN <discriminator> ... — too many object and
+			// role shapes (plus an optional trailing LIMIT) to model exactly; require
+			// the discriminator keyword then accept the free-form remainder.
+			return v.Optional(func() bool {
+				return v.Sequence(
+					v.wordsValue("ON", "TO", "OF", "IN"),
+					v.consumeRest,
+				)
+			})
+		},
+		func() bool {
+			// Bare `SHOW GRANTS [ LIMIT <rows> ]`.
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("LIMIT") },
+					func() bool { return v.Match(sqltok.NumberLit) },
+				)
+			})
+		},
+	)
 }
 
 // ParseShowGrantsInDcmProject validates the Snowflake `SHOW GRANTS IN DCM PROJECT` command.
@@ -895,7 +1377,21 @@ func (v *Validator) ParseShowGrants() bool {
 //
 //	SHOW FUTURE GRANTS IN DCM PROJECT <name> [ LIMIT <rows> ]
 func (v *Validator) ParseShowGrantsInDcmProject() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("FUTURE") }) },
+		func() bool { return v.MatchWord("GRANTS") },
+		func() bool { return v.phrase("IN", "DCM", "PROJECT") },
+		v.parseIdentPath,
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("LIMIT") },
+					func() bool { return v.Match(sqltok.NumberLit) },
+				)
+			})
+		},
+	)
 }
 
 // ParseShowHybridTables validates the Snowflake `SHOW HYBRID TABLES` command.
@@ -908,7 +1404,13 @@ func (v *Validator) ParseShowGrantsInDcmProject() bool {
 //	                                 [ STARTS WITH '<name_string>' ]
 //	                                 [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowHybridTables() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("TERSE") }) },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("HYBRID") }) },
+		func() bool { return v.MatchWord("TABLES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowIcebergTables validates the Snowflake `SHOW ICEBERG TABLES` command.
@@ -932,7 +1434,13 @@ func (v *Validator) ParseShowHybridTables() bool {
 //	                                  [ STARTS WITH '<name_string>' ]
 //	                                  [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowIcebergTables() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("TERSE") }) },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("ICEBERG") }) },
+		func() bool { return v.MatchWord("TABLES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowImageRepositories validates the Snowflake `SHOW IMAGE REPOSITORIES` command.
@@ -954,7 +1462,11 @@ func (v *Validator) ParseShowIcebergTables() bool {
 //	                }
 //	           ]
 func (v *Validator) ParseShowImageRepositories() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("IMAGE", "REPOSITORIES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowImagesInImageRepository validates the Snowflake `SHOW IMAGES IN IMAGE REPOSITORY` command.
@@ -964,7 +1476,12 @@ func (v *Validator) ParseShowImageRepositories() bool {
 //
 //	SHOW IMAGES IN IMAGE REPOSITORY <name>
 func (v *Validator) ParseShowImagesInImageRepository() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("IMAGES") },
+		func() bool { return v.phrase("IN", "IMAGE", "REPOSITORY") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseShowIndexes validates the Snowflake `SHOW INDEXES` command.
@@ -978,7 +1495,12 @@ func (v *Validator) ParseShowImagesInImageRepository() bool {
 //	  [ STARTS WITH '<name_string>' ]
 //	  [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowIndexes() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("TERSE") }) },
+		func() bool { return v.MatchWord("INDEXES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowIntegrations validates the Snowflake `SHOW INTEGRATIONS` command.
@@ -988,7 +1510,19 @@ func (v *Validator) ParseShowIndexes() bool {
 //
 //	SHOW [ { API | CATALOG | EXTERNAL ACCESS | NOTIFICATION | SECURITY | STORAGE } ] INTEGRATIONS [ LIKE '<pattern>' ]
 func (v *Validator) ParseShowIntegrations() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Choice(
+					func() bool { return v.phrase("EXTERNAL", "ACCESS") },
+					v.wordsValue("API", "CATALOG", "NOTIFICATION", "SECURITY", "STORAGE"),
+				)
+			})
+		},
+		func() bool { return v.MatchWord("INTEGRATIONS") },
+		func() bool { return v.Optional(v.likeClause) },
+	)
 }
 
 // ParseShowJoinPolicies validates the Snowflake `SHOW JOIN POLICIES` command.
@@ -1005,7 +1539,11 @@ func (v *Validator) ParseShowIntegrations() bool {
 //	                               }
 //	                           ]
 func (v *Validator) ParseShowJoinPolicies() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("JOIN", "POLICIES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowListings validates the Snowflake `SHOW LISTINGS` command.
@@ -1017,7 +1555,11 @@ func (v *Validator) ParseShowJoinPolicies() bool {
 //	              [ STARTS WITH '<name_string>' ]
 //	              [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowListings() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("LISTINGS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowListingsInFailoverGroup validates the Snowflake `SHOW LISTINGS IN FAILOVER GROUP` command.
@@ -1027,7 +1569,12 @@ func (v *Validator) ParseShowListings() bool {
 //
 //	SHOW LISTINGS IN FAILOVER GROUP <name>
 func (v *Validator) ParseShowListingsInFailoverGroup() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("LISTINGS") },
+		func() bool { return v.phrase("IN", "FAILOVER", "GROUP") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseShowLocks validates the Snowflake `SHOW LOCKS` command.
@@ -1037,7 +1584,11 @@ func (v *Validator) ParseShowListingsInFailoverGroup() bool {
 //
 //	SHOW LOCKS [ IN ACCOUNT ]
 func (v *Validator) ParseShowLocks() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("LOCKS") },
+		func() bool { return v.Optional(func() bool { return v.phrase("IN", "ACCOUNT") }) },
+	)
 }
 
 // ParseShowMaintenancePolicies validates the Snowflake `SHOW MAINTENANCE POLICIES` command.
@@ -1047,7 +1598,31 @@ func (v *Validator) ParseShowLocks() bool {
 //
 //	SHOW MAINTENANCE POLICIES { ON | IN } { ACCOUNT | APPLICATION <app_name> | <entity_type> <entity_name> }
 func (v *Validator) ParseShowMaintenancePolicies() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("MAINTENANCE", "POLICIES") },
+		v.wordsValue("ON", "IN"),
+		func() bool {
+			return v.Choice(
+				// ACCOUNT takes no name.
+				func() bool { return v.MatchWord("ACCOUNT") },
+				// APPLICATION <app_name> or <entity_type> <entity_name>: one
+				// entity-type word followed by a name.
+				func() bool {
+					return v.Sequence(
+						func() bool {
+							if !v.Peek().Kind.IsIdentLike() {
+								return false
+							}
+							v.advance()
+							return true
+						},
+						v.parseIdentPath,
+					)
+				},
+			)
+		},
+	)
 }
 
 // ParseShowManagedAccounts validates the Snowflake `SHOW MANAGED ACCOUNTS` command.
@@ -1057,7 +1632,11 @@ func (v *Validator) ParseShowMaintenancePolicies() bool {
 //
 //	SHOW MANAGED ACCOUNTS [ LIKE '<pattern>' ]
 func (v *Validator) ParseShowManagedAccounts() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("MANAGED", "ACCOUNTS") },
+		func() bool { return v.Optional(v.likeClause) },
+	)
 }
 
 // ParseShowMaskingPolicies validates the Snowflake `SHOW MASKING POLICIES` command.
@@ -1082,7 +1661,11 @@ func (v *Validator) ParseShowManagedAccounts() bool {
 //	                            }
 //	                       ]
 func (v *Validator) ParseShowMaskingPolicies() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("MASKING", "POLICIES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowMaterializedViews validates the Snowflake `SHOW MATERIALIZED VIEWS` command.
@@ -1107,7 +1690,11 @@ func (v *Validator) ParseShowMaskingPolicies() bool {
 //	                             }
 //	                        ]
 func (v *Validator) ParseShowMaterializedViews() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("MATERIALIZED", "VIEWS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowMcpServers validates the Snowflake `SHOW MCP SERVERS` command.
@@ -1127,7 +1714,11 @@ func (v *Validator) ParseShowMaterializedViews() bool {
 //	                }
 //	           ]
 func (v *Validator) ParseShowMcpServers() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("MCP", "SERVERS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowMfaMethods validates the Snowflake `SHOW MFA METHODS` command.
@@ -1137,7 +1728,15 @@ func (v *Validator) ParseShowMcpServers() bool {
 //
 //	SHOW MFA METHODS [ FOR USER <user> ]
 func (v *Validator) ParseShowMfaMethods() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("MFA", "METHODS") },
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(func() bool { return v.phrase("FOR", "USER") }, v.parseIdentPath)
+			})
+		},
+	)
 }
 
 // ParseShowModelMonitors validates the Snowflake `SHOW MODEL MONITORS` command.
@@ -1160,7 +1759,11 @@ func (v *Validator) ParseShowMfaMethods() bool {
 //	    }
 //	 ]
 func (v *Validator) ParseShowModelMonitors() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("MODEL", "MONITORS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowModels validates the Snowflake `SHOW MODELS` command.
@@ -1171,7 +1774,11 @@ func (v *Validator) ParseShowModelMonitors() bool {
 //	SHOW MODELS [ LIKE '<pattern>' ]
 //	            [ IN { DATABASE [ <db_name> ] | SCHEMA [ <schema_name> ] } ]
 func (v *Validator) ParseShowModels() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("MODELS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowNetworkPolicies validates the Snowflake `SHOW NETWORK POLICIES` command.
@@ -1181,7 +1788,10 @@ func (v *Validator) ParseShowModels() bool {
 //
 //	SHOW NETWORK POLICIES
 func (v *Validator) ParseShowNetworkPolicies() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("NETWORK", "POLICIES") },
+	)
 }
 
 // ParseShowNetworkRules validates the Snowflake `SHOW NETWORK RULES` command.
@@ -1194,7 +1804,11 @@ func (v *Validator) ParseShowNetworkPolicies() bool {
 //	                   [ STARTS WITH '<name_string>' ]
 //	                   [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowNetworkRules() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("NETWORK", "RULES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowNotebookProjects validates the Snowflake `SHOW NOTEBOOK PROJECTS` command.
@@ -1210,7 +1824,11 @@ func (v *Validator) ParseShowNetworkRules() bool {
 //
 //	SHOW NOTEBOOK PROJECTS IN ACCOUNT;
 func (v *Validator) ParseShowNotebookProjects() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("NOTEBOOK", "PROJECTS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowNotebooks validates the Snowflake `SHOW NOTEBOOKS` command.
@@ -1235,7 +1853,11 @@ func (v *Validator) ParseShowNotebookProjects() bool {
 //	               [ LIMIT <rows> ]
 //	               [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowNotebooks() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("NOTEBOOKS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowNotificationIntegrations validates the Snowflake `SHOW NOTIFICATION INTEGRATIONS` command.
@@ -1245,7 +1867,11 @@ func (v *Validator) ParseShowNotebooks() bool {
 //
 //	SHOW NOTIFICATION INTEGRATIONS [ LIKE '<pattern>' ]
 func (v *Validator) ParseShowNotificationIntegrations() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("NOTIFICATION", "INTEGRATIONS") },
+		func() bool { return v.Optional(v.likeClause) },
+	)
 }
 
 // ParseShowObjects validates the Snowflake `SHOW OBJECTS` command.
@@ -1272,7 +1898,12 @@ func (v *Validator) ParseShowNotificationIntegrations() bool {
 //	                       [ STARTS WITH '<name_string>' ]
 //	                       [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowObjects() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("TERSE") }) },
+		func() bool { return v.MatchWord("OBJECTS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowOnlineFeatureTables validates the Snowflake `SHOW ONLINE FEATURE TABLES` command.
@@ -1294,7 +1925,11 @@ func (v *Validator) ParseShowObjects() bool {
 //	                            [ STARTS WITH '<name_string>' ]
 //	                            [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowOnlineFeatureTables() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("ONLINE", "FEATURE", "TABLES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowOpenListingProviders validates the Snowflake `SHOW OPEN LISTING PROVIDERS` command.
@@ -1302,7 +1937,12 @@ func (v *Validator) ParseShowOnlineFeatureTables() bool {
 //
 // Syntax: (unavailable — see Reference URL)
 func (v *Validator) ParseShowOpenListingProviders() bool {
-	return true
+	// Syntax unavailable in docs: require the command skeleton, accept any tail.
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("OPEN", "LISTING", "PROVIDERS") },
+		v.consumeRest,
+	)
 }
 
 // ParseShowOrganizationAccounts validates the Snowflake `SHOW ORGANIZATION ACCOUNTS` command.
@@ -1312,7 +1952,11 @@ func (v *Validator) ParseShowOpenListingProviders() bool {
 //
 //	SHOW ORGANIZATION ACCOUNTS [ LIKE '<pattern>' ]
 func (v *Validator) ParseShowOrganizationAccounts() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("ORGANIZATION", "ACCOUNTS") },
+		func() bool { return v.Optional(v.likeClause) },
+	)
 }
 
 // ParseShowOrganizationProfiles validates the Snowflake `SHOW ORGANIZATION PROFILES` command.
@@ -1322,7 +1966,10 @@ func (v *Validator) ParseShowOrganizationAccounts() bool {
 //
 //	SHOW ORGANIZATION PROFILES
 func (v *Validator) ParseShowOrganizationProfiles() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("ORGANIZATION", "PROFILES") },
+	)
 }
 
 // ParseShowOrganizationUsers validates the Snowflake `SHOW ORGANIZATION USERS` command.
@@ -1332,7 +1979,18 @@ func (v *Validator) ParseShowOrganizationProfiles() bool {
 //
 //	SHOW ORGANIZATION USERS [ IN ORGANIZATION USER GROUP <org_user_group> ]
 func (v *Validator) ParseShowOrganizationUsers() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("ORGANIZATION", "USERS") },
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.phrase("IN", "ORGANIZATION", "USER", "GROUP") },
+					v.parseIdentPath,
+				)
+			})
+		},
+	)
 }
 
 // ParseShowOrganizationUserGroups validates the Snowflake `SHOW ORGANIZATION USER GROUPS` command.
@@ -1342,7 +2000,10 @@ func (v *Validator) ParseShowOrganizationUsers() bool {
 //
 //	SHOW ORGANIZATION USER GROUPS
 func (v *Validator) ParseShowOrganizationUserGroups() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("ORGANIZATION", "USER", "GROUPS") },
+	)
 }
 
 // ParseShowOrganizations validates the Snowflake `SHOW ORGANIZATIONS` command.
@@ -1350,7 +2011,12 @@ func (v *Validator) ParseShowOrganizationUserGroups() bool {
 //
 // Syntax: (unavailable — see Reference URL)
 func (v *Validator) ParseShowOrganizations() bool {
-	return true
+	// Syntax unavailable in docs: require the command skeleton, accept any tail.
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("ORGANIZATIONS") },
+		v.consumeRest,
+	)
 }
 
 // ParseShowPackagesPolicies validates the Snowflake `SHOW PACKAGES POLICIES` command.
@@ -1366,7 +2032,11 @@ func (v *Validator) ParseShowOrganizations() bool {
 //	                            }
 //	                       ]
 func (v *Validator) ParseShowPackagesPolicies() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("PACKAGES", "POLICIES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowPasswordPolicies validates the Snowflake `SHOW PASSWORD POLICIES` command.
@@ -1398,7 +2068,41 @@ func (v *Validator) ParseShowPackagesPolicies() bool {
 //	                       [ STARTS WITH '<name_string>' ]
 //	                       [ LIMIT <rows> ]
 func (v *Validator) ParseShowPasswordPolicies() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("PASSWORD", "POLICIES") },
+		func() bool { return v.Optional(v.likeClause) },
+		// IN <scope> (handled by inScopeClause) or ON { ACCOUNT | USER <name> }.
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Choice(
+					v.inScopeClause,
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchWord("ON") },
+							func() bool {
+								return v.Choice(
+									func() bool { return v.MatchWord("ACCOUNT") },
+									func() bool {
+										return v.Sequence(func() bool { return v.MatchWord("USER") }, v.parseIdentPath)
+									},
+								)
+							},
+						)
+					},
+				)
+			})
+		},
+		func() bool { return v.Optional(v.startsWithClause) },
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("LIMIT") },
+					func() bool { return v.Match(sqltok.NumberLit) },
+				)
+			})
+		},
+	)
 }
 
 // ParseShowParameters validates the Snowflake `SHOW PARAMETERS` command.
@@ -1414,7 +2118,31 @@ func (v *Validator) ParseShowPasswordPolicies() bool {
 //	      | TABLE [ <table_or_view_name> ]
 //	    } ]
 func (v *Validator) ParseShowParameters() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("PARAMETERS") },
+		func() bool { return v.Optional(v.likeClause) },
+		// [ { IN | FOR } { SESSION | ACCOUNT | <object-words> [ <name> ] } ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					v.wordsValue("IN", "FOR"),
+					func() bool {
+						return v.Choice(
+							func() bool { return v.MatchWord("SESSION") },
+							func() bool { return v.MatchWord("ACCOUNT") },
+							func() bool {
+								return v.Sequence(
+									v.wordsValue("USER", "WAREHOUSE", "DATABASE", "SCHEMA", "TASK", "TABLE"),
+									func() bool { return v.Optional(v.parseIdentPath) },
+								)
+							},
+						)
+					},
+				)
+			})
+		},
+	)
 }
 
 // ParseShowPipes validates the Snowflake `SHOW PIPES` command.
@@ -1439,7 +2167,11 @@ func (v *Validator) ParseShowParameters() bool {
 //	                }
 //	           ]
 func (v *Validator) ParseShowPipes() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("PIPES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowPostgresInstances validates the Snowflake `SHOW POSTGRES INSTANCES` command.
@@ -1451,7 +2183,12 @@ func (v *Validator) ParseShowPipes() bool {
 //	                        [ STARTS WITH '<name_string>' ]
 //	                        [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowPostgresInstances() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("POSTGRES") },
+		func() bool { return v.MatchWord("INSTANCES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowPrimaryKeys validates the Snowflake `SHOW PRIMARY KEYS` command.
@@ -1462,7 +2199,13 @@ func (v *Validator) ParseShowPostgresInstances() bool {
 //	SHOW [ TERSE ] PRIMARY KEYS
 //	    [ IN { ACCOUNT | DATABASE [ <database_name> ] | SCHEMA [ <schema_name> ] | TABLE | [ TABLE ] <table_name> } ]
 func (v *Validator) ParseShowPrimaryKeys() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("TERSE") }) },
+		func() bool { return v.MatchWord("PRIMARY") },
+		func() bool { return v.MatchWord("KEYS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowPrivileges validates the Snowflake `SHOW PRIVILEGES` command.
@@ -1472,7 +2215,13 @@ func (v *Validator) ParseShowPrimaryKeys() bool {
 //
 //	SHOW PRIVILEGES IN APPLICATION <name>
 func (v *Validator) ParseShowPrivileges() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("PRIVILEGES") },
+		func() bool { return v.MatchWord("IN") },
+		func() bool { return v.MatchWord("APPLICATION") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseShowProcedures validates the Snowflake `SHOW PROCEDURES` command.
@@ -1499,7 +2248,11 @@ func (v *Validator) ParseShowPrivileges() bool {
 //	    }
 //	  ]
 func (v *Validator) ParseShowProcedures() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("PROCEDURES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowProvisionedThroughput validates the Snowflake `SHOW PROVISIONED THROUGHPUT` command.
@@ -1507,7 +2260,13 @@ func (v *Validator) ParseShowProcedures() bool {
 //
 // Syntax: (unavailable — see Reference URL)
 func (v *Validator) ParseShowProvisionedThroughput() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("PROVISIONED") },
+		func() bool { return v.MatchWord("THROUGHPUT") },
+		func() bool { return v.showTrailers() },
+		func() bool { return v.consumeRest() },
+	)
 }
 
 // ParseShowProjectionPolicies validates the Snowflake `SHOW PROJECTION POLICIES` command.
@@ -1526,7 +2285,12 @@ func (v *Validator) ParseShowProvisionedThroughput() bool {
 //	                              }
 //	                         ]
 func (v *Validator) ParseShowProjectionPolicies() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("PROJECTION") },
+		func() bool { return v.MatchWord("POLICIES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowQueries validates the Snowflake `SHOW QUERIES` command.
@@ -1534,7 +2298,12 @@ func (v *Validator) ParseShowProjectionPolicies() bool {
 //
 // Syntax: (unavailable — see Reference URL)
 func (v *Validator) ParseShowQueries() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("QUERIES") },
+		func() bool { return v.showTrailers() },
+		func() bool { return v.consumeRest() },
+	)
 }
 
 // ParseShowRegions validates the Snowflake `SHOW REGIONS` command.
@@ -1544,7 +2313,11 @@ func (v *Validator) ParseShowQueries() bool {
 //
 //	SHOW REGIONS [ LIKE '<pattern>' ]
 func (v *Validator) ParseShowRegions() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("REGIONS") },
+		func() bool { return v.Optional(v.likeClause) },
+	)
 }
 
 // ParseShowReplicatedDatabases validates the Snowflake `SHOW REPLICATED DATABASES` command.
@@ -1552,7 +2325,13 @@ func (v *Validator) ParseShowRegions() bool {
 //
 // Syntax: (unavailable — see Reference URL)
 func (v *Validator) ParseShowReplicatedDatabases() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("REPLICATED") },
+		func() bool { return v.MatchWord("DATABASES") },
+		func() bool { return v.showTrailers() },
+		func() bool { return v.consumeRest() },
+	)
 }
 
 // ParseShowReplicationAccounts validates the Snowflake `SHOW REPLICATION ACCOUNTS` command.
@@ -1562,7 +2341,12 @@ func (v *Validator) ParseShowReplicatedDatabases() bool {
 //
 //	SHOW REPLICATION ACCOUNTS [ LIKE '<pattern>' ]
 func (v *Validator) ParseShowReplicationAccounts() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("REPLICATION") },
+		func() bool { return v.MatchWord("ACCOUNTS") },
+		func() bool { return v.Optional(v.likeClause) },
+	)
 }
 
 // ParseShowReplicationDatabases validates the Snowflake `SHOW REPLICATION DATABASES` command.
@@ -1573,7 +2357,22 @@ func (v *Validator) ParseShowReplicationAccounts() bool {
 //	SHOW REPLICATION DATABASES [ LIKE '<pattern>' ]
 //	                           [ WITH PRIMARY <account_identifier>.<primary_db_name> ]
 func (v *Validator) ParseShowReplicationDatabases() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("REPLICATION") },
+		func() bool { return v.MatchWord("DATABASES") },
+		func() bool { return v.Optional(v.likeClause) },
+		// [ WITH PRIMARY <account_identifier>.<primary_db_name> ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("WITH") },
+					func() bool { return v.MatchWord("PRIMARY") },
+					v.parseIdentPath,
+				)
+			})
+		},
+	)
 }
 
 // ParseShowReplicationGroups validates the Snowflake `SHOW REPLICATION GROUPS` command.
@@ -1583,7 +2382,21 @@ func (v *Validator) ParseShowReplicationDatabases() bool {
 //
 //	SHOW REPLICATION GROUPS [ IN ACCOUNT <account> ]
 func (v *Validator) ParseShowReplicationGroups() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("REPLICATION") },
+		func() bool { return v.MatchWord("GROUPS") },
+		// [ IN ACCOUNT <account> ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("IN") },
+					func() bool { return v.MatchWord("ACCOUNT") },
+					v.parseIdentPath,
+				)
+			})
+		},
+	)
 }
 
 // ParseShowResourceMonitors validates the Snowflake `SHOW RESOURCE MONITORS` command.
@@ -1593,7 +2406,12 @@ func (v *Validator) ParseShowReplicationGroups() bool {
 //
 //	SHOW RESOURCE MONITORS [ LIKE '<pattern>' ]
 func (v *Validator) ParseShowResourceMonitors() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("RESOURCE") },
+		func() bool { return v.MatchWord("MONITORS") },
+		func() bool { return v.Optional(v.likeClause) },
+	)
 }
 
 // ParseShowRoles validates the Snowflake `SHOW ROLES` command.
@@ -1607,7 +2425,12 @@ func (v *Validator) ParseShowResourceMonitors() bool {
 //	  [ STARTS WITH '<name_string>']
 //	  [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowRoles() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("TERSE") }) },
+		func() bool { return v.MatchWord("ROLES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowRowAccessPolicies validates the Snowflake `SHOW ROW ACCESS POLICIES` command.
@@ -1633,7 +2456,13 @@ func (v *Validator) ParseShowRoles() bool {
 //	                              }
 //	                         ]
 func (v *Validator) ParseShowRowAccessPolicies() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("ROW") },
+		func() bool { return v.MatchWord("ACCESS") },
+		func() bool { return v.MatchWord("POLICIES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowSchemas validates the Snowflake `SHOW SCHEMAS` command.
@@ -1649,7 +2478,30 @@ func (v *Validator) ParseShowRowAccessPolicies() bool {
 //	  [ LIMIT <rows> [ FROM '<name_string>' ] ]
 //	  [ WITH PRIVILEGES <object_privilege> [ , <object_privilege> [ , ... ] ] ]
 func (v *Validator) ParseShowSchemas() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("TERSE") }) },
+		func() bool { return v.MatchWord("SCHEMAS") },
+		func() bool { return v.showTrailers() },
+		// [ WITH PRIVILEGES <object_privilege> [ , ... ] ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("WITH") },
+					func() bool { return v.MatchWord("PRIVILEGES") },
+					v.parseIdentPath,
+					func() bool {
+						return v.ZeroOrMore(func() bool {
+							return v.Sequence(
+								func() bool { return v.Match(sqltok.Comma) },
+								v.parseIdentPath,
+							)
+						})
+					},
+				)
+			})
+		},
+	)
 }
 
 // ParseShowSearchIndexes validates the Snowflake `SHOW SEARCH INDEXES` command.
@@ -1657,7 +2509,13 @@ func (v *Validator) ParseShowSchemas() bool {
 //
 // Syntax: (unavailable — see Reference URL)
 func (v *Validator) ParseShowSearchIndexes() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("SEARCH") },
+		func() bool { return v.MatchWord("INDEXES") },
+		func() bool { return v.showTrailers() },
+		func() bool { return v.consumeRest() },
+	)
 }
 
 // ParseShowSecrets validates the Snowflake `SHOW SECRETS` command.
@@ -1668,7 +2526,11 @@ func (v *Validator) ParseShowSearchIndexes() bool {
 //	SHOW SECRETS [ LIKE '<pattern>' ]
 //	             [ IN { ACCOUNT | [ DATABASE ] <db_name> | [ SCHEMA ] <schema_name> | APPLICATION <application_name> | APPLICATION PACKAGE <application_package_name> } ]
 func (v *Validator) ParseShowSecrets() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("SECRETS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowSecurityIntegrations validates the Snowflake `SHOW SECURITY INTEGRATIONS` command.
@@ -1676,7 +2538,13 @@ func (v *Validator) ParseShowSecrets() bool {
 //
 // Syntax: (unavailable — see Reference URL)
 func (v *Validator) ParseShowSecurityIntegrations() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("SECURITY") },
+		func() bool { return v.MatchWord("INTEGRATIONS") },
+		func() bool { return v.showTrailers() },
+		func() bool { return v.consumeRest() },
+	)
 }
 
 // ParseShowSemanticViews validates the Snowflake `SHOW SEMANTIC VIEWS` command.
@@ -1700,7 +2568,13 @@ func (v *Validator) ParseShowSecurityIntegrations() bool {
 //	  [ STARTS WITH '<name_string>' ]
 //	  [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowSemanticViews() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("TERSE") }) },
+		func() bool { return v.MatchWord("SEMANTIC") },
+		func() bool { return v.MatchWord("VIEWS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowSequences validates the Snowflake `SHOW SEQUENCES` command.
@@ -1725,7 +2599,11 @@ func (v *Validator) ParseShowSemanticViews() bool {
 //	                    }
 //	               ]
 func (v *Validator) ParseShowSequences() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("SEQUENCES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowServiceRoles validates the Snowflake `SHOW SERVICE ROLES` command.
@@ -1733,7 +2611,13 @@ func (v *Validator) ParseShowSequences() bool {
 //
 // Syntax: (unavailable — see Reference URL)
 func (v *Validator) ParseShowServiceRoles() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("SERVICE") },
+		func() bool { return v.MatchWord("ROLES") },
+		func() bool { return v.showTrailers() },
+		func() bool { return v.consumeRest() },
+	)
 }
 
 // ParseShowServices validates the Snowflake `SHOW SERVICES` command.
@@ -1760,7 +2644,51 @@ func (v *Validator) ParseShowServiceRoles() bool {
 //	           [ LIMIT <rows> [ FROM '<name_string>' ] ]
 //	           [ OF TYPE <workload_type> [ , ... ] ]
 func (v *Validator) ParseShowServices() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("JOB") }) },
+		func() bool { return v.MatchWord("SERVICES") },
+		// [ EXCLUDE JOBS ]
+		func() bool {
+			return v.Optional(func() bool { return v.phrase("EXCLUDE", "JOBS") })
+		},
+		func() bool { return v.Optional(v.likeClause) },
+		// [ IN { <scope> | COMPUTE POOL <name> } ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Choice(
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchWord("IN") },
+							func() bool { return v.phrase("COMPUTE", "POOL") },
+							v.parseIdentPath,
+						)
+					},
+					v.inScopeClause,
+				)
+			})
+		},
+		func() bool { return v.Optional(v.startsWithClause) },
+		func() bool { return v.Optional(v.limitFromClause) },
+		// [ OF TYPE <workload_type> [ , ... ] ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("OF") },
+					func() bool { return v.MatchWord("TYPE") },
+					v.parseScalar,
+					func() bool {
+						return v.ZeroOrMore(func() bool {
+							return v.Sequence(
+								func() bool { return v.Match(sqltok.Comma) },
+								v.parseScalar,
+							)
+						})
+					},
+				)
+			})
+		},
+	)
 }
 
 // ParseShowSessionPolicies validates the Snowflake `SHOW SESSION POLICIES` command.
@@ -1793,7 +2721,45 @@ func (v *Validator) ParseShowServices() bool {
 //	  [ STARTS WITH '<name_string>' ]
 //	  [ LIMIT <rows> ]
 func (v *Validator) ParseShowSessionPolicies() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("SESSION") },
+		func() bool { return v.MatchWord("POLICIES") },
+		func() bool { return v.Optional(v.likeClause) },
+		// [ IN <scope> | ON { ACCOUNT | USER <name> } ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Choice(
+					v.inScopeClause,
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchWord("ON") },
+							func() bool {
+								return v.Choice(
+									func() bool { return v.MatchWord("ACCOUNT") },
+									func() bool {
+										return v.Sequence(
+											func() bool { return v.MatchWord("USER") },
+											v.parseIdentPath,
+										)
+									},
+								)
+							},
+						)
+					},
+				)
+			})
+		},
+		func() bool { return v.Optional(v.startsWithClause) },
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("LIMIT") },
+					func() bool { return v.Match(sqltok.NumberLit) },
+				)
+			})
+		},
+	)
 }
 
 // ParseShowSessions validates the Snowflake `SHOW SESSIONS` command.
@@ -1801,7 +2767,12 @@ func (v *Validator) ParseShowSessionPolicies() bool {
 //
 // Syntax: (unavailable — see Reference URL)
 func (v *Validator) ParseShowSessions() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("SESSIONS") },
+		func() bool { return v.showTrailers() },
+		func() bool { return v.consumeRest() },
+	)
 }
 
 // ParseShowShares validates the Snowflake `SHOW SHARES` command.
@@ -1812,7 +2783,12 @@ func (v *Validator) ParseShowSessions() bool {
 //	SHOW SHARES [ LIKE '<pattern>' ]
 //	            [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowShares() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("SHARES") },
+		func() bool { return v.Optional(v.likeClause) },
+		func() bool { return v.Optional(v.limitFromClause) },
+	)
 }
 
 // ParseShowSnapshots validates the Snowflake `SHOW SNAPSHOTS` command.
@@ -1836,7 +2812,11 @@ func (v *Validator) ParseShowShares() bool {
 //	               [ STARTS WITH '<name_string>' ]
 //	               [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowSnapshots() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("SNAPSHOTS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowSnapshotPolicies validates the Snowflake `SHOW SNAPSHOT POLICIES` command.
@@ -1851,7 +2831,12 @@ func (v *Validator) ParseShowSnapshots() bool {
 //	     [ LIMIT <rows> [ FROM '<name_string>' ]
 //	   ]
 func (v *Validator) ParseShowSnapshotPolicies() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("SNAPSHOT") },
+		func() bool { return v.MatchWord("POLICIES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowSnapshotSets validates the Snowflake `SHOW SNAPSHOT SETS` command.
@@ -1866,7 +2851,12 @@ func (v *Validator) ParseShowSnapshotPolicies() bool {
 //	     [ LIMIT <rows> [ FROM '<name_string>' ]
 //	   ]
 func (v *Validator) ParseShowSnapshotSets() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("SNAPSHOT") },
+		func() bool { return v.MatchWord("SETS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowStages validates the Snowflake `SHOW STAGES` command.
@@ -1891,7 +2881,11 @@ func (v *Validator) ParseShowSnapshotSets() bool {
 //	                 }
 //	            ]
 func (v *Validator) ParseShowStages() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("STAGES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowStorageIntegrations validates the Snowflake `SHOW STORAGE INTEGRATIONS` command.
@@ -1899,7 +2893,13 @@ func (v *Validator) ParseShowStages() bool {
 //
 // Syntax: (unavailable — see Reference URL)
 func (v *Validator) ParseShowStorageIntegrations() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("STORAGE") },
+		func() bool { return v.MatchWord("INTEGRATIONS") },
+		func() bool { return v.showTrailers() },
+		func() bool { return v.consumeRest() },
+	)
 }
 
 // ParseShowStorageLifecyclePolicies validates the Snowflake `SHOW STORAGE LIFECYCLE POLICIES` command.
@@ -1922,7 +2922,13 @@ func (v *Validator) ParseShowStorageIntegrations() bool {
 //	        }
 //	  ]
 func (v *Validator) ParseShowStorageLifecyclePolicies() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("STORAGE") },
+		func() bool { return v.MatchWord("LIFECYCLE") },
+		func() bool { return v.MatchWord("POLICIES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowStreams validates the Snowflake `SHOW STREAMS` command.
@@ -1935,7 +2941,12 @@ func (v *Validator) ParseShowStorageLifecyclePolicies() bool {
 //	                       [ STARTS WITH '<name_string>' ]
 //	                       [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowStreams() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("TERSE") }) },
+		func() bool { return v.MatchWord("STREAMS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowStreamlits validates the Snowflake `SHOW STREAMLITS` command.
@@ -1958,7 +2969,12 @@ func (v *Validator) ParseShowStreams() bool {
 //	                          ]
 //	                          [ LIMIT <rows> [ FROM '<name_string>' ]
 func (v *Validator) ParseShowStreamlits() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("TERSE") }) },
+		func() bool { return v.MatchWord("STREAMLITS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowTableFunctions validates the Snowflake `SHOW TABLE FUNCTIONS` command.
@@ -1966,7 +2982,13 @@ func (v *Validator) ParseShowStreamlits() bool {
 //
 // Syntax: (unavailable — see Reference URL)
 func (v *Validator) ParseShowTableFunctions() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("TABLE") },
+		func() bool { return v.MatchWord("FUNCTIONS") },
+		func() bool { return v.showTrailers() },
+		func() bool { return v.consumeRest() },
+	)
 }
 
 // ParseShowTables validates the Snowflake `SHOW TABLES` command.
@@ -1993,7 +3015,12 @@ func (v *Validator) ParseShowTableFunctions() bool {
 //	                                  [ STARTS WITH '<name_string>' ]
 //	                                  [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowTables() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("TERSE") }) },
+		func() bool { return v.MatchWord("TABLES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowTags validates the Snowflake `SHOW TAGS` command.
@@ -2018,7 +3045,11 @@ func (v *Validator) ParseShowTables() bool {
 //	               }
 //	          ]
 func (v *Validator) ParseShowTags() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("TAGS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowTasks validates the Snowflake `SHOW TASKS` command.
@@ -2032,7 +3063,19 @@ func (v *Validator) ParseShowTags() bool {
 //	                     [ ROOT ONLY ]
 //	                     [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowTasks() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("TERSE") }) },
+		func() bool { return v.MatchWord("TASKS") },
+		func() bool { return v.Optional(v.likeClause) },
+		func() bool { return v.Optional(v.inScopeClause) },
+		func() bool { return v.Optional(v.startsWithClause) },
+		// [ ROOT ONLY ]
+		func() bool {
+			return v.Optional(func() bool { return v.phrase("ROOT", "ONLY") })
+		},
+		func() bool { return v.Optional(v.limitFromClause) },
+	)
 }
 
 // ParseShowTransactions validates the Snowflake `SHOW TRANSACTIONS` command.
@@ -2042,7 +3085,14 @@ func (v *Validator) ParseShowTasks() bool {
 //
 //	SHOW TRANSACTIONS [ IN ACCOUNT ]
 func (v *Validator) ParseShowTransactions() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("TRANSACTIONS") },
+		// [ IN ACCOUNT ]
+		func() bool {
+			return v.Optional(func() bool { return v.phrase("IN", "ACCOUNT") })
+		},
+	)
 }
 
 // ParseShowTypes validates the Snowflake `SHOW TYPES` command.
@@ -2068,7 +3118,11 @@ func (v *Validator) ParseShowTransactions() bool {
 //	               ]
 //	           [ STARTS WITH '<name_string>' ]
 func (v *Validator) ParseShowTypes() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("TYPES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowUniqueKeys validates the Snowflake `SHOW UNIQUE KEYS` command.
@@ -2076,7 +3130,14 @@ func (v *Validator) ParseShowTypes() bool {
 //
 // Syntax: (unavailable — see Reference URL)
 func (v *Validator) ParseShowUniqueKeys() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("TERSE") }) },
+		func() bool { return v.MatchWord("UNIQUE") },
+		func() bool { return v.MatchWord("KEYS") },
+		func() bool { return v.showTrailers() },
+		func() bool { return v.consumeRest() },
+	)
 }
 
 // ParseShowUserFunctions validates the Snowflake `SHOW USER FUNCTIONS` command.
@@ -2101,7 +3162,12 @@ func (v *Validator) ParseShowUniqueKeys() bool {
 //	    }
 //	  ]
 func (v *Validator) ParseShowUserFunctions() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("USER") },
+		func() bool { return v.MatchWord("FUNCTIONS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowUsers validates the Snowflake `SHOW USERS` command.
@@ -2114,7 +3180,12 @@ func (v *Validator) ParseShowUserFunctions() bool {
 //	  [ STARTS WITH '<name_string>' ]
 //	  [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowUsers() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("TERSE") }) },
+		func() bool { return v.MatchWord("USERS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowVariables validates the Snowflake `SHOW VARIABLES` command.
@@ -2124,7 +3195,11 @@ func (v *Validator) ParseShowUsers() bool {
 //
 //	SHOW VARIABLES [ LIKE '<pattern>' ]
 func (v *Validator) ParseShowVariables() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("VARIABLES") },
+		func() bool { return v.Optional(v.likeClause) },
+	)
 }
 
 // ParseShowViews validates the Snowflake `SHOW VIEWS` command.
@@ -2137,7 +3212,12 @@ func (v *Validator) ParseShowVariables() bool {
 //	                     [ STARTS WITH '<name_string>' ]
 //	                     [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowViews() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("TERSE") }) },
+		func() bool { return v.MatchWord("VIEWS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowWarehouses validates the Snowflake `SHOW WAREHOUSES` command.
@@ -2149,7 +3229,29 @@ func (v *Validator) ParseShowViews() bool {
 //	  [ LIKE '<pattern>' ]
 //	  [ WITH PRIVILEGES <objectPrivilege> [ , <objectPrivilege> [ , ... ] ] ]
 func (v *Validator) ParseShowWarehouses() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("WAREHOUSES") },
+		func() bool { return v.Optional(v.likeClause) },
+		// [ WITH PRIVILEGES <objectPrivilege> [ , ... ] ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("WITH") },
+					func() bool { return v.MatchWord("PRIVILEGES") },
+					v.parseIdentPath,
+					func() bool {
+						return v.ZeroOrMore(func() bool {
+							return v.Sequence(
+								func() bool { return v.Match(sqltok.Comma) },
+								v.parseIdentPath,
+							)
+						})
+					},
+				)
+			})
+		},
+	)
 }
 
 // ParseShowApplicationServices validates the Snowflake `SHOW APPLICATION SERVICES` command.
@@ -2162,7 +3264,22 @@ func (v *Validator) ParseShowWarehouses() bool {
 //	  [ IN { ACCOUNT | DATABASE [ <database_name> ] | SCHEMA [ <schema_name> ] } ]
 //	  [ LIMIT <rows> ]
 func (v *Validator) ParseShowApplicationServices() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("APPLICATION") },
+		func() bool { return v.MatchWord("SERVICES") },
+		func() bool { return v.Optional(v.likeClause) },
+		func() bool { return v.Optional(v.inScopeClause) },
+		// [ LIMIT <rows> ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("LIMIT") },
+					func() bool { return v.Match(sqltok.NumberLit) },
+				)
+			})
+		},
+	)
 }
 
 // ParseShowArtifactRepositories validates the Snowflake `SHOW ARTIFACT REPOSITORIES` command.
@@ -2175,7 +3292,11 @@ func (v *Validator) ParseShowApplicationServices() bool {
 //	  [ IN { ACCOUNT | DATABASE [ <database_name> ] | SCHEMA [ <schema_name> ] } ]
 //	  [ LIMIT <rows> ]
 func (v *Validator) ParseShowArtifactRepositories() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("ARTIFACT", "REPOSITORIES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowCortexBaseModels validates the Snowflake `SHOW CORTEX BASE MODELS` command.
@@ -2187,7 +3308,15 @@ func (v *Validator) ParseShowArtifactRepositories() bool {
 //	  [ LIKE '<pattern>' ]
 //	  IN [ SCHEMA ] SNOWFLAKE.MODELS
 func (v *Validator) ParseShowCortexBaseModels() bool {
-	return true
+	// SHOW CORTEX BASE MODELS [ LIKE '<pattern>' ] IN [ SCHEMA ] SNOWFLAKE.MODELS
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("CORTEX", "BASE", "MODELS") },
+		func() bool { return v.Optional(v.likeClause) },
+		func() bool { return v.MatchWord("IN") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("SCHEMA") }) },
+		v.parseIdentPath,
+	)
 }
 
 // ParseShowEventRoutingTableOnOrganization validates the Snowflake `SHOW EVENT ROUTING TABLE ON ORGANIZATION` command.
@@ -2197,7 +3326,13 @@ func (v *Validator) ParseShowCortexBaseModels() bool {
 //
 //	SHOW EVENT ROUTING TABLE ON ORGANIZATION FOR ALL APPLICATION LISTINGS
 func (v *Validator) ParseShowEventRoutingTableOnOrganization() bool {
-	return true
+	// SHOW EVENT ROUTING TABLE ON ORGANIZATION FOR ALL APPLICATION LISTINGS
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("EVENT", "ROUTING", "TABLE") },
+		func() bool { return v.phrase("ON", "ORGANIZATION") },
+		func() bool { return v.phrase("FOR", "ALL", "APPLICATION", "LISTINGS") },
+	)
 }
 
 // ParseShowEventRoutingTables validates the Snowflake `SHOW EVENT ROUTING TABLES` command.
@@ -2207,7 +3342,12 @@ func (v *Validator) ParseShowEventRoutingTableOnOrganization() bool {
 //
 //	SHOW EVENT ROUTING TABLES
 func (v *Validator) ParseShowEventRoutingTables() bool {
-	return true
+	// SHOW EVENT ROUTING TABLES
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("EVENT", "ROUTING", "TABLES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowInteractiveTables validates the Snowflake `SHOW INTERACTIVE TABLES` command.
@@ -2231,7 +3371,11 @@ func (v *Validator) ParseShowEventRoutingTables() bool {
 //	                        [ STARTS WITH '<name_string>' ]
 //	                        [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowInteractiveTables() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("INTERACTIVE", "TABLES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowObjectsOwnedByApplication validates the Snowflake `SHOW OBJECTS OWNED BY APPLICATION` command.
@@ -2241,7 +3385,13 @@ func (v *Validator) ParseShowInteractiveTables() bool {
 //
 //	SHOW OBJECTS OWNED BY APPLICATION <app_name>
 func (v *Validator) ParseShowObjectsOwnedByApplication() bool {
-	return true
+	// SHOW OBJECTS OWNED BY APPLICATION <app_name>
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("OBJECTS") },
+		func() bool { return v.phrase("OWNED", "BY", "APPLICATION") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseShowOffers validates the Snowflake `SHOW OFFERS` command.
@@ -2251,7 +3401,14 @@ func (v *Validator) ParseShowObjectsOwnedByApplication() bool {
 //
 //	SHOW OFFERS [ LIKE '<pattern>' ] IN LISTING <listing>
 func (v *Validator) ParseShowOffers() bool {
-	return true
+	// SHOW OFFERS [ LIKE '<pattern>' ] IN LISTING <listing>
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("OFFERS") },
+		func() bool { return v.Optional(v.likeClause) },
+		func() bool { return v.phrase("IN", "LISTING") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseShowOpenflowDataPlaneIntegration validates the Snowflake `SHOW OPENFLOW DATA PLANE INTEGRATION` command.
@@ -2263,7 +3420,12 @@ func (v *Validator) ParseShowOffers() bool {
 //	              [ STARTS WITH '<name_string>' ]
 //	              [ LIMIT <rows> [ FROM '<name_string>' ] ]
 func (v *Validator) ParseShowOpenflowDataPlaneIntegration() bool {
-	return true
+	// SHOW OPENFLOW DATA PLANE INTEGRATIONS [ LIKE ] [ STARTS WITH ] [ LIMIT … ]
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("OPENFLOW", "DATA", "PLANE", "INTEGRATIONS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowPricingPlans validates the Snowflake `SHOW PRICING PLANS` command.
@@ -2273,7 +3435,14 @@ func (v *Validator) ParseShowOpenflowDataPlaneIntegration() bool {
 //
 //	SHOW PRICING PLANS [ LIKE '<pattern>' ] IN LISTING <listing>
 func (v *Validator) ParseShowPricingPlans() bool {
-	return true
+	// SHOW PRICING PLANS [ LIKE '<pattern>' ] IN LISTING <listing>
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("PRICING", "PLANS") },
+		func() bool { return v.Optional(v.likeClause) },
+		func() bool { return v.phrase("IN", "LISTING") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseShowPrivacyPolicies validates the Snowflake `SHOW PRIVACY POLICIES` command.
@@ -2290,7 +3459,11 @@ func (v *Validator) ParseShowPricingPlans() bool {
 //	                }
 //	           ]
 func (v *Validator) ParseShowPrivacyPolicies() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("PRIVACY", "POLICIES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowReferences validates the Snowflake `SHOW REFERENCES` command.
@@ -2300,7 +3473,13 @@ func (v *Validator) ParseShowPrivacyPolicies() bool {
 //
 //	SHOW REFERENCES IN APPLICATION <name>
 func (v *Validator) ParseShowReferences() bool {
-	return true
+	// SHOW REFERENCES IN APPLICATION <name>
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("REFERENCES") },
+		func() bool { return v.phrase("IN", "APPLICATION") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseShowReleaseChannels validates the Snowflake `SHOW RELEASE CHANNELS` command.
@@ -2312,7 +3491,19 @@ func (v *Validator) ParseShowReferences() bool {
 //
 //	SHOW RELEASE CHANNELS IN LISTING <listing_name>
 func (v *Validator) ParseShowReleaseChannels() bool {
-	return true
+	// SHOW RELEASE CHANNELS IN { APPLICATION PACKAGE <name> | LISTING <name> }
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("RELEASE", "CHANNELS") },
+		func() bool { return v.MatchWord("IN") },
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("APPLICATION", "PACKAGE") },
+				func() bool { return v.MatchWord("LISTING") },
+			)
+		},
+		v.parseIdentPath,
+	)
 }
 
 // ParseShowReleaseDirectives validates the Snowflake `SHOW RELEASE DIRECTIVES` command.
@@ -2324,7 +3515,23 @@ func (v *Validator) ParseShowReleaseChannels() bool {
 //	  IN APPLICATION PACKAGE <name>
 //	  [ FOR RELEASE CHANNEL <release_channel> ]
 func (v *Validator) ParseShowReleaseDirectives() bool {
-	return true
+	// SHOW RELEASE DIRECTIVES [ LIKE ] IN APPLICATION PACKAGE <name>
+	//   [ FOR RELEASE CHANNEL <release_channel> ]
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("RELEASE", "DIRECTIVES") },
+		func() bool { return v.Optional(v.likeClause) },
+		func() bool { return v.phrase("IN", "APPLICATION", "PACKAGE") },
+		v.parseIdentPath,
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.phrase("FOR", "RELEASE", "CHANNEL") },
+					v.parseIdentPath,
+				)
+			})
+		},
+	)
 }
 
 // ParseShowRolesInService validates the Snowflake `SHOW ROLES IN SERVICE` command.
@@ -2334,7 +3541,13 @@ func (v *Validator) ParseShowReleaseDirectives() bool {
 //
 //	SHOW ROLES IN SERVICE <name>
 func (v *Validator) ParseShowRolesInService() bool {
-	return true
+	// SHOW ROLES IN SERVICE <name>
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("ROLES") },
+		func() bool { return v.phrase("IN", "SERVICE") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseShowRulesInEventRoutingTable validates the Snowflake `SHOW RULES IN EVENT ROUTING TABLE` command.
@@ -2344,7 +3557,13 @@ func (v *Validator) ParseShowRolesInService() bool {
 //
 //	SHOW RULES IN EVENT ROUTING TABLE (<event_routing_table_name>)
 func (v *Validator) ParseShowRulesInEventRoutingTable() bool {
-	return true
+	// SHOW RULES IN EVENT ROUTING TABLE (<event_routing_table_name>)
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("RULES") },
+		func() bool { return v.phrase("IN", "EVENT", "ROUTING", "TABLE") },
+		v.consumeBalancedParens,
+	)
 }
 
 // ParseShowRunInExperiment validates the Snowflake `SHOW RUN IN EXPERIMENT` command.
@@ -2360,7 +3579,22 @@ func (v *Validator) ParseShowRulesInEventRoutingTable() bool {
 //	  IN EXPERIMENT <experiment_name> [ RUN <run_name> ]
 //	  [ LIMIT <rows> [ FROM <name_string> ] ]
 func (v *Validator) ParseShowRunInExperiment() bool {
-	return true
+	// SHOW RUN { METRICS | PARAMETERS } [ LIKE ] IN EXPERIMENT <name> [ RUN <name> ]
+	//   [ LIMIT <rows> [ FROM <name_string> ] ]
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("RUN") },
+		v.wordsValue("METRICS", "PARAMETERS"),
+		func() bool { return v.Optional(v.likeClause) },
+		func() bool { return v.phrase("IN", "EXPERIMENT") },
+		v.parseIdentPath,
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(func() bool { return v.MatchWord("RUN") }, v.parseIdentPath)
+			})
+		},
+		func() bool { return v.Optional(v.limitFromClause) },
+	)
 }
 
 // ParseShowRunsInExperiment validates the Snowflake `SHOW RUNS IN EXPERIMENT` command.
@@ -2370,7 +3604,14 @@ func (v *Validator) ParseShowRunInExperiment() bool {
 //
 //	SHOW RUNS [ LIKE '<pattern>' ] IN EXPERIMENT <name>
 func (v *Validator) ParseShowRunsInExperiment() bool {
-	return true
+	// SHOW RUNS [ LIKE '<pattern>' ] IN EXPERIMENT <name>
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("RUNS") },
+		func() bool { return v.Optional(v.likeClause) },
+		func() bool { return v.phrase("IN", "EXPERIMENT") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseShowSemanticDimensions validates the Snowflake `SHOW SEMANTIC DIMENSIONS` command.
@@ -2395,7 +3636,11 @@ func (v *Validator) ParseShowRunsInExperiment() bool {
 //	                         [ STARTS WITH '<name_string>' ]
 //	                         [ LIMIT <rows> ]
 func (v *Validator) ParseShowSemanticDimensions() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("SEMANTIC", "DIMENSIONS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowSemanticDimensionsForMetric validates the Snowflake `SHOW SEMANTIC DIMENSIONS FOR METRIC` command.
@@ -2409,7 +3654,19 @@ func (v *Validator) ParseShowSemanticDimensions() bool {
 //	                         [ STARTS WITH '<name_string>' ]
 //	                         [ LIMIT <rows> ]
 func (v *Validator) ParseShowSemanticDimensionsForMetric() bool {
-	return true
+	// SHOW SEMANTIC DIMENSIONS [ LIKE ] IN <semantic_view_name>
+	//   FOR METRIC <metric_name> [ STARTS WITH ] [ LIMIT <rows> ]
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("SEMANTIC", "DIMENSIONS") },
+		func() bool { return v.Optional(v.likeClause) },
+		func() bool { return v.MatchWord("IN") },
+		v.parseIdentPath,
+		func() bool { return v.phrase("FOR", "METRIC") },
+		v.parseIdentPath,
+		func() bool { return v.Optional(v.startsWithClause) },
+		func() bool { return v.Optional(v.limitFromClause) },
+	)
 }
 
 // ParseShowSemanticFacts validates the Snowflake `SHOW SEMANTIC FACTS` command.
@@ -2434,7 +3691,11 @@ func (v *Validator) ParseShowSemanticDimensionsForMetric() bool {
 //	                    [ STARTS WITH '<name_string>' ]
 //	                    [ LIMIT <rows> ]
 func (v *Validator) ParseShowSemanticFacts() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("SEMANTIC", "FACTS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowSemanticMetrics validates the Snowflake `SHOW SEMANTIC METRICS` command.
@@ -2459,7 +3720,11 @@ func (v *Validator) ParseShowSemanticFacts() bool {
 //	                      [ STARTS WITH '<name_string>' ]
 //	                      [ LIMIT <rows> ]
 func (v *Validator) ParseShowSemanticMetrics() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("SEMANTIC", "METRICS") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowServiceContainersInService validates the Snowflake `SHOW SERVICE CONTAINERS IN SERVICE` command.
@@ -2469,7 +3734,13 @@ func (v *Validator) ParseShowSemanticMetrics() bool {
 //
 //	SHOW SERVICE CONTAINERS IN SERVICE <name>
 func (v *Validator) ParseShowServiceContainersInService() bool {
-	return true
+	// SHOW SERVICE CONTAINERS IN SERVICE <name>
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("SERVICE", "CONTAINERS") },
+		func() bool { return v.phrase("IN", "SERVICE") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseShowServiceInstancesInService validates the Snowflake `SHOW SERVICE INSTANCES IN SERVICE` command.
@@ -2479,7 +3750,13 @@ func (v *Validator) ParseShowServiceContainersInService() bool {
 //
 //	SHOW SERVICE INSTANCES IN SERVICE <name>
 func (v *Validator) ParseShowServiceInstancesInService() bool {
-	return true
+	// SHOW SERVICE INSTANCES IN SERVICE <name>
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("SERVICE", "INSTANCES") },
+		func() bool { return v.phrase("IN", "SERVICE") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseShowServiceVolumesInService validates the Snowflake `SHOW SERVICE VOLUMES IN SERVICE` command.
@@ -2489,7 +3766,13 @@ func (v *Validator) ParseShowServiceInstancesInService() bool {
 //
 //	SHOW SERVICE VOLUMES IN SERVICE <name>
 func (v *Validator) ParseShowServiceVolumesInService() bool {
-	return true
+	// SHOW SERVICE VOLUMES IN SERVICE <name>
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("SERVICE", "VOLUMES") },
+		func() bool { return v.phrase("IN", "SERVICE") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseShowSharedContent validates the Snowflake `SHOW SHARED CONTENT` command.
@@ -2499,7 +3782,15 @@ func (v *Validator) ParseShowServiceVolumesInService() bool {
 //
 //	SHOW SHARED CONTENT IN APPLICATION PACKAGE <pkg_name> FOR VERSION <version_name>
 func (v *Validator) ParseShowSharedContent() bool {
-	return true
+	// SHOW SHARED CONTENT IN APPLICATION PACKAGE <pkg_name> FOR VERSION <version_name>
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("SHARED", "CONTENT") },
+		func() bool { return v.phrase("IN", "APPLICATION", "PACKAGE") },
+		v.parseIdentPath,
+		func() bool { return v.phrase("FOR", "VERSION") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseShowSharesInFailoverGroup validates the Snowflake `SHOW SHARES IN FAILOVER GROUP` command.
@@ -2509,7 +3800,13 @@ func (v *Validator) ParseShowSharedContent() bool {
 //
 //	SHOW SHARES IN FAILOVER GROUP <name>
 func (v *Validator) ParseShowSharesInFailoverGroup() bool {
-	return true
+	// SHOW SHARES IN FAILOVER GROUP <name>
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("SHARES") },
+		func() bool { return v.phrase("IN", "FAILOVER", "GROUP") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseShowSharesInReplicationGroup validates the Snowflake `SHOW SHARES IN REPLICATION GROUP` command.
@@ -2519,7 +3816,13 @@ func (v *Validator) ParseShowSharesInFailoverGroup() bool {
 //
 //	SHOW SHARES IN REPLICATION GROUP <name>
 func (v *Validator) ParseShowSharesInReplicationGroup() bool {
-	return true
+	// SHOW SHARES IN REPLICATION GROUP <name>
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("SHARES") },
+		func() bool { return v.phrase("IN", "REPLICATION", "GROUP") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseShowSnapshotsInSnapshotSet validates the Snowflake `SHOW SNAPSHOTS IN SNAPSHOT SET` command.
@@ -2529,7 +3832,13 @@ func (v *Validator) ParseShowSharesInReplicationGroup() bool {
 //
 //	SHOW SNAPSHOTS IN SNAPSHOT SET <name>
 func (v *Validator) ParseShowSnapshotsInSnapshotSet() bool {
-	return true
+	// SHOW SNAPSHOTS IN SNAPSHOT SET <name>
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("SNAPSHOTS") },
+		func() bool { return v.phrase("IN", "SNAPSHOT", "SET") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseShowSpecifications validates the Snowflake `SHOW SPECIFICATIONS` command.
@@ -2539,7 +3848,20 @@ func (v *Validator) ParseShowSnapshotsInSnapshotSet() bool {
 //
 //	SHOW [ { APPROVED | DECLINED | PENDING } ] SPECIFICATIONS [ IN APPLICATION <app_name> ];
 func (v *Validator) ParseShowSpecifications() bool {
-	return true
+	// SHOW [ { APPROVED | DECLINED | PENDING } ] SPECIFICATIONS [ IN APPLICATION <app_name> ]
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.Optional(v.wordsValue("APPROVED", "DECLINED", "PENDING")) },
+		func() bool { return v.MatchWord("SPECIFICATIONS") },
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.phrase("IN", "APPLICATION") },
+					v.parseIdentPath,
+				)
+			})
+		},
+	)
 }
 
 // ParseShowTelemetryEventDefinitions validates the Snowflake `SHOW TELEMETRY EVENT DEFINITIONS` command.
@@ -2549,7 +3871,13 @@ func (v *Validator) ParseShowSpecifications() bool {
 //
 //	SHOW TELEMETRY EVENT DEFINITIONS IN APPLICATION <name>
 func (v *Validator) ParseShowTelemetryEventDefinitions() bool {
-	return true
+	// SHOW TELEMETRY EVENT DEFINITIONS IN APPLICATION <name>
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("TELEMETRY", "EVENT", "DEFINITIONS") },
+		func() bool { return v.phrase("IN", "APPLICATION") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseShowUserProcedures validates the Snowflake `SHOW USER PROCEDURES` command.
@@ -2574,7 +3902,11 @@ func (v *Validator) ParseShowTelemetryEventDefinitions() bool {
 //	    }
 //	  ]
 func (v *Validator) ParseShowUserProcedures() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("USER", "PROCEDURES") },
+		func() bool { return v.showTrailers() },
+	)
 }
 
 // ParseShowUserProgrammaticAccessTokens validates the Snowflake `SHOW USER PROGRAMMATIC ACCESS TOKENS` command.
@@ -2584,7 +3916,22 @@ func (v *Validator) ParseShowUserProcedures() bool {
 //
 //	SHOW USER { PROGRAMMATIC ACCESS TOKENS | PATS } [ FOR USER <username> ]
 func (v *Validator) ParseShowUserProgrammaticAccessTokens() bool {
-	return true
+	// SHOW USER { PROGRAMMATIC ACCESS TOKENS | PATS } [ FOR USER <username> ]
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("USER") },
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("PROGRAMMATIC", "ACCESS", "TOKENS") },
+				func() bool { return v.MatchWord("PATS") },
+			)
+		},
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(func() bool { return v.phrase("FOR", "USER") }, v.parseIdentPath)
+			})
+		},
+	)
 }
 
 // ParseShowUserWorkloadIdentityAuthenticationMethods validates the Snowflake `SHOW USER WORKLOAD IDENTITY AUTHENTICATION METHODS` command.
@@ -2594,7 +3941,17 @@ func (v *Validator) ParseShowUserProgrammaticAccessTokens() bool {
 //
 //	SHOW USER WORKLOAD IDENTITY AUTHENTICATION METHODS [ FOR USER <username> ]
 func (v *Validator) ParseShowUserWorkloadIdentityAuthenticationMethods() bool {
-	return true
+	// SHOW USER WORKLOAD IDENTITY AUTHENTICATION METHODS [ FOR USER <username> ]
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("USER") },
+		func() bool { return v.phrase("WORKLOAD", "IDENTITY", "AUTHENTICATION", "METHODS") },
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(func() bool { return v.phrase("FOR", "USER") }, v.parseIdentPath)
+			})
+		},
+	)
 }
 
 // ParseShowVersions validates the Snowflake `SHOW VERSIONS` command.
@@ -2605,7 +3962,14 @@ func (v *Validator) ParseShowUserWorkloadIdentityAuthenticationMethods() bool {
 //	SHOW VERSIONS [ LIKE <pattern> ]
 //	  IN APPLICATION PACKAGE <name>;
 func (v *Validator) ParseShowVersions() bool {
-	return true
+	// SHOW VERSIONS [ LIKE <pattern> ] IN APPLICATION PACKAGE <name>
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("VERSIONS") },
+		func() bool { return v.Optional(v.likeClause) },
+		func() bool { return v.phrase("IN", "APPLICATION", "PACKAGE") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseShowVersionsInDataset validates the Snowflake `SHOW VERSIONS IN DATASET` command.
@@ -2616,7 +3980,15 @@ func (v *Validator) ParseShowVersions() bool {
 //	SHOW VERSIONS [ LIKE '<pattern>' ] IN DATASET <dataset_name>
 //	  [ LIMIT <rows>]
 func (v *Validator) ParseShowVersionsInDataset() bool {
-	return true
+	// SHOW VERSIONS [ LIKE '<pattern>' ] IN DATASET <dataset_name> [ LIMIT <rows> ]
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("VERSIONS") },
+		func() bool { return v.Optional(v.likeClause) },
+		func() bool { return v.phrase("IN", "DATASET") },
+		v.parseIdentPath,
+		func() bool { return v.Optional(v.limitFromClause) },
+	)
 }
 
 // ParseShowVersionsInDbtProject validates the Snowflake `SHOW VERSIONS IN DBT PROJECT` command.
@@ -2627,7 +3999,14 @@ func (v *Validator) ParseShowVersionsInDataset() bool {
 //	SHOW VERSIONS IN DBT PROJECT <name>
 //	  [ LIMIT <number> ]
 func (v *Validator) ParseShowVersionsInDbtProject() bool {
-	return true
+	// SHOW VERSIONS IN DBT PROJECT <name> [ LIMIT <number> ]
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("VERSIONS") },
+		func() bool { return v.phrase("IN", "DBT", "PROJECT") },
+		v.parseIdentPath,
+		func() bool { return v.Optional(v.limitFromClause) },
+	)
 }
 
 // ParseShowVersionsInListing validates the Snowflake `SHOW VERSIONS IN LISTING` command.
@@ -2638,7 +4017,14 @@ func (v *Validator) ParseShowVersionsInDbtProject() bool {
 //	SHOW VERSIONS IN LISTING <name>
 //	  [ LIMIT <rows> ]
 func (v *Validator) ParseShowVersionsInListing() bool {
-	return true
+	// SHOW VERSIONS IN LISTING <name> [ LIMIT <rows> ]
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("VERSIONS") },
+		func() bool { return v.phrase("IN", "LISTING") },
+		v.parseIdentPath,
+		func() bool { return v.Optional(v.limitFromClause) },
+	)
 }
 
 // ParseShowVersionsInModel validates the Snowflake `SHOW VERSIONS IN MODEL` command.
@@ -2648,7 +4034,14 @@ func (v *Validator) ParseShowVersionsInListing() bool {
 //
 //	SHOW VERSIONS [ LIKE '<pattern>' ] IN MODEL <model_name>
 func (v *Validator) ParseShowVersionsInModel() bool {
-	return true
+	// SHOW VERSIONS [ LIKE '<pattern>' ] IN MODEL <model_name>
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("VERSIONS") },
+		func() bool { return v.Optional(v.likeClause) },
+		func() bool { return v.phrase("IN", "MODEL") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseShowVersionsInOrganizationProfile validates the Snowflake `SHOW VERSIONS IN ORGANIZATION PROFILE` command.
@@ -2658,7 +4051,13 @@ func (v *Validator) ParseShowVersionsInModel() bool {
 //
 //	SHOW VERSIONS IN ORGANIZATION PROFILE <name>
 func (v *Validator) ParseShowVersionsInOrganizationProfile() bool {
-	return true
+	// SHOW VERSIONS IN ORGANIZATION PROFILE <name>
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("VERSIONS") },
+		func() bool { return v.phrase("IN", "ORGANIZATION", "PROFILE") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseShowWorkspaces validates the Snowflake `SHOW WORKSPACES` command.
@@ -2679,5 +4078,9 @@ func (v *Validator) ParseShowVersionsInOrganizationProfile() bool {
 //	                       <schema_name>
 //	                     }
 func (v *Validator) ParseShowWorkspaces() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.MatchWord("WORKSPACES") },
+		func() bool { return v.showTrailers() },
+	)
 }

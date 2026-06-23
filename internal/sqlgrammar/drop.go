@@ -12,7 +12,13 @@ package sqlgrammar
 //
 // Syntax: (unavailable — see Reference URL)
 func (v *Validator) ParseDropObj() bool {
-	return true
+	// "(unavailable)" generic syntax: require a leading DROP, then accept the
+	// remaining object-words/name/options permissively.
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		v.parseIdentPath,
+		func() bool { return v.consumeRest() },
+	)
 }
 
 // ParseDropAccount validates the Snowflake `DROP ACCOUNT` command.
@@ -22,7 +28,14 @@ func (v *Validator) ParseDropObj() bool {
 //
 //	DROP ACCOUNT [ IF EXISTS ] <name> GRACE_PERIOD_IN_DAYS = <integer>
 func (v *Validator) ParseDropAccount() bool {
-	return true
+	// DROP ACCOUNT [ IF EXISTS ] <name> GRACE_PERIOD_IN_DAYS = <integer>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("ACCOUNT") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		v.option("GRACE_PERIOD_IN_DAYS", v.parseNumber),
+	)
 }
 
 // ParseDropAgent validates the Snowflake `DROP AGENT` command.
@@ -32,7 +45,13 @@ func (v *Validator) ParseDropAccount() bool {
 //
 //	DROP AGENT [ IF EXISTS ] <name>
 func (v *Validator) ParseDropAgent() bool {
-	return true
+	// DROP AGENT [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("AGENT") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropAggregationPolicy validates the Snowflake `DROP AGGREGATION POLICY` command.
@@ -42,7 +61,13 @@ func (v *Validator) ParseDropAgent() bool {
 //
 //	DROP AGGREGATION POLICY <name>
 func (v *Validator) ParseDropAggregationPolicy() bool {
-	return true
+	// DROP AGGREGATION POLICY <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.phrase("AGGREGATION", "POLICY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropAlert validates the Snowflake `DROP ALERT` command.
@@ -52,7 +77,13 @@ func (v *Validator) ParseDropAggregationPolicy() bool {
 //
 //	DROP ALERT [ IF EXISTS ] <name>
 func (v *Validator) ParseDropAlert() bool {
-	return true
+	// DROP ALERT [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("ALERT") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropApplication validates the Snowflake `DROP APPLICATION` command.
@@ -62,7 +93,14 @@ func (v *Validator) ParseDropAlert() bool {
 //
 //	DROP APPLICATION [ IF EXISTS ] <name> [ CASCADE ]
 func (v *Validator) ParseDropApplication() bool {
-	return true
+	// DROP APPLICATION [ IF EXISTS ] <name> [ CASCADE ]
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("APPLICATION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.Optional(v.wordsValue("CASCADE")) },
+	)
 }
 
 // ParseDropApplicationPackage validates the Snowflake `DROP APPLICATION PACKAGE` command.
@@ -72,7 +110,13 @@ func (v *Validator) ParseDropApplication() bool {
 //
 //	DROP APPLICATION PACKAGE [ IF EXISTS ] <name>
 func (v *Validator) ParseDropApplicationPackage() bool {
-	return true
+	// DROP APPLICATION PACKAGE [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.phrase("APPLICATION", "PACKAGE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropApplicationRole validates the Snowflake `DROP APPLICATION ROLE` command.
@@ -82,7 +126,13 @@ func (v *Validator) ParseDropApplicationPackage() bool {
 //
 //	DROP APPLICATION ROLE [ IF EXISTS ] <name>
 func (v *Validator) ParseDropApplicationRole() bool {
-	return true
+	// DROP APPLICATION ROLE [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.phrase("APPLICATION", "ROLE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropAuthenticationPolicy validates the Snowflake `DROP AUTHENTICATION POLICY` command.
@@ -92,7 +142,13 @@ func (v *Validator) ParseDropApplicationRole() bool {
 //
 //	DROP AUTHENTICATION POLICY [ IF EXISTS ] <name>
 func (v *Validator) ParseDropAuthenticationPolicy() bool {
-	return true
+	// DROP AUTHENTICATION POLICY [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.phrase("AUTHENTICATION", "POLICY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropBackupPolicy validates the Snowflake `DROP BACKUP POLICY` command.
@@ -102,7 +158,13 @@ func (v *Validator) ParseDropAuthenticationPolicy() bool {
 //
 //	DROP BACKUP POLICY <name>
 func (v *Validator) ParseDropBackupPolicy() bool {
-	return true
+	// DROP BACKUP POLICY <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.phrase("BACKUP", "POLICY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropBackupSet validates the Snowflake `DROP BACKUP SET` command.
@@ -112,7 +174,13 @@ func (v *Validator) ParseDropBackupPolicy() bool {
 //
 //	DROP BACKUP SET <name>
 func (v *Validator) ParseDropBackupSet() bool {
-	return true
+	// DROP BACKUP SET <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.phrase("BACKUP", "SET") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropCatalogIntegration validates the Snowflake `DROP CATALOG INTEGRATION` command.
@@ -122,7 +190,13 @@ func (v *Validator) ParseDropBackupSet() bool {
 //
 //	DROP CATALOG INTEGRATION [ IF EXISTS ] <name>
 func (v *Validator) ParseDropCatalogIntegration() bool {
-	return true
+	// DROP CATALOG INTEGRATION [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.phrase("CATALOG", "INTEGRATION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropComputePool validates the Snowflake `DROP COMPUTE POOL` command.
@@ -132,7 +206,13 @@ func (v *Validator) ParseDropCatalogIntegration() bool {
 //
 //	DROP COMPUTE POOL [ IF EXISTS ] <name>
 func (v *Validator) ParseDropComputePool() bool {
-	return true
+	// DROP COMPUTE POOL [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.phrase("COMPUTE", "POOL") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropConnection validates the Snowflake `DROP CONNECTION` command.
@@ -142,7 +222,13 @@ func (v *Validator) ParseDropComputePool() bool {
 //
 //	DROP CONNECTION [ IF EXISTS ] <name>
 func (v *Validator) ParseDropConnection() bool {
-	return true
+	// DROP CONNECTION [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("CONNECTION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropContact validates the Snowflake `DROP CONTACT` command.
@@ -152,7 +238,13 @@ func (v *Validator) ParseDropConnection() bool {
 //
 //	DROP CONTACT <name>
 func (v *Validator) ParseDropContact() bool {
-	return true
+	// DROP CONTACT <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("CONTACT") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropCortexSearchService validates the Snowflake `DROP CORTEX SEARCH SERVICE` command.
@@ -162,7 +254,13 @@ func (v *Validator) ParseDropContact() bool {
 //
 //	DROP CORTEX SEARCH SERVICE <name>;
 func (v *Validator) ParseDropCortexSearchService() bool {
-	return true
+	// DROP CORTEX SEARCH SERVICE <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.phrase("CORTEX", "SEARCH", "SERVICE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropDatabase validates the Snowflake `DROP DATABASE` command.
@@ -172,7 +270,14 @@ func (v *Validator) ParseDropCortexSearchService() bool {
 //
 //	DROP DATABASE [ IF EXISTS ] <name> [ CASCADE | RESTRICT ]
 func (v *Validator) ParseDropDatabase() bool {
-	return true
+	// DROP DATABASE [ IF EXISTS ] <name> [ CASCADE | RESTRICT ]
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchKeyword("DATABASE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.Optional(v.wordsValue("CASCADE", "RESTRICT")) },
+	)
 }
 
 // ParseDropDatabaseRole validates the Snowflake `DROP DATABASE ROLE` command.
@@ -182,7 +287,13 @@ func (v *Validator) ParseDropDatabase() bool {
 //
 //	DROP DATABASE ROLE [ IF EXISTS ] <name>
 func (v *Validator) ParseDropDatabaseRole() bool {
-	return true
+	// DROP DATABASE ROLE [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.phrase("DATABASE", "ROLE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropDbtProject validates the Snowflake `DROP DBT PROJECT` command.
@@ -192,7 +303,13 @@ func (v *Validator) ParseDropDatabaseRole() bool {
 //
 //	DROP DBT PROJECT [ IF EXISTS ] <name>
 func (v *Validator) ParseDropDbtProject() bool {
-	return true
+	// DROP DBT PROJECT [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.phrase("DBT", "PROJECT") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropDcmProject validates the Snowflake `DROP DCM PROJECT` command.
@@ -202,7 +319,13 @@ func (v *Validator) ParseDropDbtProject() bool {
 //
 //	DROP DCM PROJECT [ IF EXISTS ] <name>
 func (v *Validator) ParseDropDcmProject() bool {
-	return true
+	// DROP DCM PROJECT [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.phrase("DCM", "PROJECT") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropDynamicTable validates the Snowflake `DROP DYNAMIC TABLE` command.
@@ -212,7 +335,13 @@ func (v *Validator) ParseDropDcmProject() bool {
 //
 //	DROP DYNAMIC TABLE [ IF EXISTS ] <name>
 func (v *Validator) ParseDropDynamicTable() bool {
-	return true
+	// DROP DYNAMIC TABLE [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.phrase("DYNAMIC", "TABLE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropExperiment validates the Snowflake `DROP EXPERIMENT` command.
@@ -222,7 +351,13 @@ func (v *Validator) ParseDropDynamicTable() bool {
 //
 //	DROP EXPERIMENT <name>;
 func (v *Validator) ParseDropExperiment() bool {
-	return true
+	// DROP EXPERIMENT <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("EXPERIMENT") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropExternalAgent validates the Snowflake `DROP EXTERNAL AGENT` command.
@@ -232,7 +367,13 @@ func (v *Validator) ParseDropExperiment() bool {
 //
 //	DROP EXTERNAL AGENT [ IF EXISTS ] <name>
 func (v *Validator) ParseDropExternalAgent() bool {
-	return true
+	// DROP EXTERNAL AGENT [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.phrase("EXTERNAL", "AGENT") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropExternalTable validates the Snowflake `DROP EXTERNAL TABLE` command.
@@ -242,7 +383,14 @@ func (v *Validator) ParseDropExternalAgent() bool {
 //
 //	DROP EXTERNAL TABLE [ IF EXISTS ] <name> [ CASCADE | RESTRICT ]
 func (v *Validator) ParseDropExternalTable() bool {
-	return true
+	// DROP EXTERNAL TABLE [ IF EXISTS ] <name> [ CASCADE | RESTRICT ]
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.phrase("EXTERNAL", "TABLE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.Optional(v.wordsValue("CASCADE", "RESTRICT")) },
+	)
 }
 
 // ParseDropExternalVolume validates the Snowflake `DROP EXTERNAL VOLUME` command.
@@ -252,7 +400,13 @@ func (v *Validator) ParseDropExternalTable() bool {
 //
 //	DROP EXTERNAL VOLUME [ IF EXISTS ] <name>
 func (v *Validator) ParseDropExternalVolume() bool {
-	return true
+	// DROP EXTERNAL VOLUME [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.phrase("EXTERNAL", "VOLUME") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropFailoverGroup validates the Snowflake `DROP FAILOVER GROUP` command.
@@ -262,7 +416,13 @@ func (v *Validator) ParseDropExternalVolume() bool {
 //
 //	DROP FAILOVER GROUP [ IF EXISTS ] <name>
 func (v *Validator) ParseDropFailoverGroup() bool {
-	return true
+	// DROP FAILOVER GROUP [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.phrase("FAILOVER", "GROUP") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropFeaturePolicy validates the Snowflake `DROP FEATURE POLICY` command.
@@ -272,7 +432,13 @@ func (v *Validator) ParseDropFailoverGroup() bool {
 //
 //	DROP FEATURE POLICY <name>
 func (v *Validator) ParseDropFeaturePolicy() bool {
-	return true
+	// DROP FEATURE POLICY <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.phrase("FEATURE", "POLICY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropFileFormat validates the Snowflake `DROP FILE FORMAT` command.
@@ -282,7 +448,13 @@ func (v *Validator) ParseDropFeaturePolicy() bool {
 //
 //	DROP FILE FORMAT [ IF EXISTS ] <name>
 func (v *Validator) ParseDropFileFormat() bool {
-	return true
+	// DROP FILE FORMAT [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.phrase("FILE", "FORMAT") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropFunction validates the Snowflake `DROP FUNCTION` command.
@@ -292,7 +464,15 @@ func (v *Validator) ParseDropFileFormat() bool {
 //
 //	DROP FUNCTION [ IF EXISTS ] <name> ( [ <arg_data_type> , ... ] )
 func (v *Validator) ParseDropFunction() bool {
-	return true
+	// DROP FUNCTION [ IF EXISTS ] <name> ( [ <arg_data_type> , ... ] )
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("FUNCTION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		// ( [ <arg_data_type> , ... ] ) — model the signature permissively.
+		func() bool { return v.consumeBalancedParens() },
+	)
 }
 
 // ParseDropFunctionDmf validates the Snowflake `DROP FUNCTION (DMF)` command.
@@ -304,7 +484,17 @@ func (v *Validator) ParseDropFunction() bool {
 //	TABLE(  <arg_data_type> [ , ... ] ) [ , TABLE( <arg_data_type> [ , ... ] ) ]
 //	)
 func (v *Validator) ParseDropFunctionDmf() bool {
-	return true
+	// DROP FUNCTION [ IF EXISTS ] <name>(
+	//   TABLE( <arg_data_type> [ , ... ] ) [ , TABLE( <arg_data_type> [ , ... ] ) ]
+	// )
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("FUNCTION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		// The whole TABLE(...)-list signature is a balanced-parens group.
+		func() bool { return v.consumeBalancedParens() },
+	)
 }
 
 // ParseDropFunctionSnowparkContainerServices validates the Snowflake `DROP FUNCTION (Snowpark Container Services)` command.
@@ -314,7 +504,14 @@ func (v *Validator) ParseDropFunctionDmf() bool {
 //
 //	DROP FUNCTION [ IF EXISTS ] <name> ( [ <arg_data_type> , ... ] )
 func (v *Validator) ParseDropFunctionSnowparkContainerServices() bool {
-	return true
+	// DROP FUNCTION [ IF EXISTS ] <name> ( [ <arg_data_type> , ... ] )
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("FUNCTION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.consumeBalancedParens() },
+	)
 }
 
 // ParseDropGateway validates the Snowflake `DROP GATEWAY` command.
@@ -324,7 +521,13 @@ func (v *Validator) ParseDropFunctionSnowparkContainerServices() bool {
 //
 //	DROP GATEWAY [ IF EXISTS ] <name>
 func (v *Validator) ParseDropGateway() bool {
-	return true
+	// DROP GATEWAY [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("GATEWAY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropGitRepository validates the Snowflake `DROP GIT REPOSITORY` command.
@@ -334,7 +537,13 @@ func (v *Validator) ParseDropGateway() bool {
 //
 //	DROP GIT REPOSITORY [ IF EXISTS ] <name>
 func (v *Validator) ParseDropGitRepository() bool {
-	return true
+	// DROP GIT REPOSITORY [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.phrase("GIT", "REPOSITORY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropIcebergTable validates the Snowflake `DROP ICEBERG TABLE` command.
@@ -344,7 +553,15 @@ func (v *Validator) ParseDropGitRepository() bool {
 //
 //	DROP [ ICEBERG ] TABLE [ IF EXISTS ] <name> [ CASCADE | RESTRICT ]
 func (v *Validator) ParseDropIcebergTable() bool {
-	return true
+	// DROP [ ICEBERG ] TABLE [ IF EXISTS ] <name> [ CASCADE | RESTRICT ]
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("ICEBERG") }) },
+		func() bool { return v.MatchKeyword("TABLE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.Optional(v.wordsValue("CASCADE", "RESTRICT")) },
+	)
 }
 
 // ParseDropImageRepository validates the Snowflake `DROP IMAGE REPOSITORY` command.
@@ -354,7 +571,13 @@ func (v *Validator) ParseDropIcebergTable() bool {
 //
 //	DROP IMAGE REPOSITORY [ IF EXISTS ] <name>
 func (v *Validator) ParseDropImageRepository() bool {
-	return true
+	// DROP IMAGE REPOSITORY [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.phrase("IMAGE", "REPOSITORY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropIndex validates the Snowflake `DROP INDEX` command.
@@ -364,7 +587,13 @@ func (v *Validator) ParseDropImageRepository() bool {
 //
 //	DROP INDEX [ IF EXISTS ] <table_name>.<index_name>
 func (v *Validator) ParseDropIndex() bool {
-	return true
+	// DROP INDEX [ IF EXISTS ] <table_name>.<index_name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("INDEX") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropIntegration validates the Snowflake `DROP INTEGRATION` command.
@@ -374,7 +603,22 @@ func (v *Validator) ParseDropIndex() bool {
 //
 //	DROP [ { API | CATALOG | EXTERNAL ACCESS | NOTIFICATION | SECURITY | STORAGE } ] INTEGRATION [ IF EXISTS ] <name>
 func (v *Validator) ParseDropIntegration() bool {
-	return true
+	// DROP [ { API | CATALOG | EXTERNAL ACCESS | NOTIFICATION | SECURITY | STORAGE } ]
+	//   INTEGRATION [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Choice(
+					func() bool { return v.phrase("EXTERNAL", "ACCESS") },
+					v.wordsValue("API", "CATALOG", "NOTIFICATION", "SECURITY", "STORAGE"),
+				)
+			})
+		},
+		func() bool { return v.MatchWord("INTEGRATION") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropJoinPolicy validates the Snowflake `DROP JOIN POLICY` command.
@@ -384,7 +628,13 @@ func (v *Validator) ParseDropIntegration() bool {
 //
 //	DROP JOIN POLICY <name>
 func (v *Validator) ParseDropJoinPolicy() bool {
-	return true
+	// DROP JOIN POLICY <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.phrase("JOIN", "POLICY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropListing validates the Snowflake `DROP LISTING` command.
@@ -394,7 +644,13 @@ func (v *Validator) ParseDropJoinPolicy() bool {
 //
 //	DROP LISTING <name>
 func (v *Validator) ParseDropListing() bool {
-	return true
+	// DROP LISTING <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("LISTING") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropMaintenancePolicy validates the Snowflake `DROP MAINTENANCE POLICY` command.
@@ -404,7 +660,13 @@ func (v *Validator) ParseDropListing() bool {
 //
 //	DROP MAINTENANCE POLICY [ IF EXISTS ] <name>
 func (v *Validator) ParseDropMaintenancePolicy() bool {
-	return true
+	// DROP MAINTENANCE POLICY [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.phrase("MAINTENANCE", "POLICY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropManagedAccount validates the Snowflake `DROP MANAGED ACCOUNT` command.
@@ -414,7 +676,13 @@ func (v *Validator) ParseDropMaintenancePolicy() bool {
 //
 //	DROP MANAGED ACCOUNT <name>
 func (v *Validator) ParseDropManagedAccount() bool {
-	return true
+	// DROP MANAGED ACCOUNT <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.phrase("MANAGED", "ACCOUNT") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropMaskingPolicy validates the Snowflake `DROP MASKING POLICY` command.
@@ -424,7 +692,13 @@ func (v *Validator) ParseDropManagedAccount() bool {
 //
 //	DROP MASKING POLICY <name>
 func (v *Validator) ParseDropMaskingPolicy() bool {
-	return true
+	// DROP MASKING POLICY <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.phrase("MASKING", "POLICY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropMaterializedView validates the Snowflake `DROP MATERIALIZED VIEW` command.
@@ -434,7 +708,14 @@ func (v *Validator) ParseDropMaskingPolicy() bool {
 //
 //	DROP MATERIALIZED VIEW [ IF EXISTS ] <view_name>
 func (v *Validator) ParseDropMaterializedView() bool {
-	return true
+	// DROP MATERIALIZED VIEW [ IF EXISTS ] <view_name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("MATERIALIZED") },
+		func() bool { return v.MatchWord("VIEW") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropMcpServer validates the Snowflake `DROP MCP SERVER` command.
@@ -444,7 +725,14 @@ func (v *Validator) ParseDropMaterializedView() bool {
 //
 //	DROP MCP SERVER [ IF EXISTS ] <name>
 func (v *Validator) ParseDropMcpServer() bool {
-	return true
+	// DROP MCP SERVER [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("MCP") },
+		func() bool { return v.MatchWord("SERVER") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropModel validates the Snowflake `DROP MODEL` command.
@@ -454,7 +742,13 @@ func (v *Validator) ParseDropMcpServer() bool {
 //
 //	DROP MODEL <name>
 func (v *Validator) ParseDropModel() bool {
-	return true
+	// DROP MODEL <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("MODEL") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropModelMonitor validates the Snowflake `DROP MODEL MONITOR` command.
@@ -464,7 +758,14 @@ func (v *Validator) ParseDropModel() bool {
 //
 //	DROP MODEL MONITOR [ IF EXISTS ] <monitor_name>;
 func (v *Validator) ParseDropModelMonitor() bool {
-	return true
+	// DROP MODEL MONITOR [ IF EXISTS ] <monitor_name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("MODEL") },
+		func() bool { return v.MatchWord("MONITOR") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropNetworkPolicy validates the Snowflake `DROP NETWORK POLICY` command.
@@ -474,7 +775,14 @@ func (v *Validator) ParseDropModelMonitor() bool {
 //
 //	DROP NETWORK POLICY [ IF EXISTS ] <name>
 func (v *Validator) ParseDropNetworkPolicy() bool {
-	return true
+	// DROP NETWORK POLICY [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("NETWORK") },
+		func() bool { return v.MatchWord("POLICY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropNetworkRule validates the Snowflake `DROP NETWORK RULE` command.
@@ -484,7 +792,14 @@ func (v *Validator) ParseDropNetworkPolicy() bool {
 //
 //	DROP NETWORK RULE [ IF EXISTS ] <name>
 func (v *Validator) ParseDropNetworkRule() bool {
-	return true
+	// DROP NETWORK RULE [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("NETWORK") },
+		func() bool { return v.MatchWord("RULE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropNotebook validates the Snowflake `DROP NOTEBOOK` command.
@@ -494,7 +809,13 @@ func (v *Validator) ParseDropNetworkRule() bool {
 //
 //	DROP NOTEBOOK <name>
 func (v *Validator) ParseDropNotebook() bool {
-	return true
+	// DROP NOTEBOOK <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("NOTEBOOK") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropOnlineFeatureTable validates the Snowflake `DROP ONLINE FEATURE TABLE` command.
@@ -504,7 +825,15 @@ func (v *Validator) ParseDropNotebook() bool {
 //
 //	DROP ONLINE FEATURE TABLE [ IF EXISTS ] <name>
 func (v *Validator) ParseDropOnlineFeatureTable() bool {
-	return true
+	// DROP ONLINE FEATURE TABLE [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("ONLINE") },
+		func() bool { return v.MatchWord("FEATURE") },
+		func() bool { return v.MatchWord("TABLE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropOrganizationProfile validates the Snowflake `DROP ORGANIZATION PROFILE` command.
@@ -514,7 +843,14 @@ func (v *Validator) ParseDropOnlineFeatureTable() bool {
 //
 //	DROP ORGANIZATION PROFILE <name>
 func (v *Validator) ParseDropOrganizationProfile() bool {
-	return true
+	// DROP ORGANIZATION PROFILE <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("ORGANIZATION") },
+		func() bool { return v.MatchWord("PROFILE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropOrganizationUser validates the Snowflake `DROP ORGANIZATION USER` command.
@@ -524,7 +860,14 @@ func (v *Validator) ParseDropOrganizationProfile() bool {
 //
 //	DROP ORGANIZATION USER [ IF EXISTS ] <name>
 func (v *Validator) ParseDropOrganizationUser() bool {
-	return true
+	// DROP ORGANIZATION USER [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("ORGANIZATION") },
+		func() bool { return v.MatchWord("USER") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropOrganizationUserGroup validates the Snowflake `DROP ORGANIZATION USER GROUP` command.
@@ -534,7 +877,15 @@ func (v *Validator) ParseDropOrganizationUser() bool {
 //
 //	DROP ORGANIZATION USER GROUP [ IF EXISTS ] <name>
 func (v *Validator) ParseDropOrganizationUserGroup() bool {
-	return true
+	// DROP ORGANIZATION USER GROUP [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("ORGANIZATION") },
+		func() bool { return v.MatchWord("USER") },
+		func() bool { return v.MatchWord("GROUP") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropPackagesPolicy validates the Snowflake `DROP PACKAGES POLICY` command.
@@ -544,7 +895,14 @@ func (v *Validator) ParseDropOrganizationUserGroup() bool {
 //
 //	DROP PACKAGES POLICY [ IF EXISTS ] <name>
 func (v *Validator) ParseDropPackagesPolicy() bool {
-	return true
+	// DROP PACKAGES POLICY [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("PACKAGES") },
+		func() bool { return v.MatchWord("POLICY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropPasswordPolicy validates the Snowflake `DROP PASSWORD POLICY` command.
@@ -554,7 +912,14 @@ func (v *Validator) ParseDropPackagesPolicy() bool {
 //
 //	DROP PASSWORD POLICY [ IF EXISTS ] <name>
 func (v *Validator) ParseDropPasswordPolicy() bool {
-	return true
+	// DROP PASSWORD POLICY [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("PASSWORD") },
+		func() bool { return v.MatchWord("POLICY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropPipe validates the Snowflake `DROP PIPE` command.
@@ -564,7 +929,13 @@ func (v *Validator) ParseDropPasswordPolicy() bool {
 //
 //	DROP PIPE [ IF EXISTS ] <name>
 func (v *Validator) ParseDropPipe() bool {
-	return true
+	// DROP PIPE [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("PIPE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropPostgresInstance validates the Snowflake `DROP POSTGRES INSTANCE` command.
@@ -574,7 +945,14 @@ func (v *Validator) ParseDropPipe() bool {
 //
 //	DROP POSTGRES INSTANCE [ IF EXISTS ] <name>
 func (v *Validator) ParseDropPostgresInstance() bool {
-	return true
+	// DROP POSTGRES INSTANCE [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("POSTGRES") },
+		func() bool { return v.MatchWord("INSTANCE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropPrivacyPolicy validates the Snowflake `DROP PRIVACY POLICY` command.
@@ -584,7 +962,14 @@ func (v *Validator) ParseDropPostgresInstance() bool {
 //
 //	DROP PRIVACY POLICY <name>
 func (v *Validator) ParseDropPrivacyPolicy() bool {
-	return true
+	// DROP PRIVACY POLICY <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("PRIVACY") },
+		func() bool { return v.MatchWord("POLICY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropProcedure validates the Snowflake `DROP PROCEDURE` command.
@@ -594,7 +979,14 @@ func (v *Validator) ParseDropPrivacyPolicy() bool {
 //
 //	DROP PROCEDURE [ IF EXISTS ] <procedure_name> ( [ <arg_data_type> , ... ] )
 func (v *Validator) ParseDropProcedure() bool {
-	return true
+	// DROP PROCEDURE [ IF EXISTS ] <procedure_name> ( [ <arg_data_type> , ... ] )
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("PROCEDURE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.consumeBalancedParens() },
+	)
 }
 
 // ParseDropProjectionPolicy validates the Snowflake `DROP PROJECTION POLICY` command.
@@ -604,7 +996,14 @@ func (v *Validator) ParseDropProcedure() bool {
 //
 //	DROP PROJECTION POLICY <name>
 func (v *Validator) ParseDropProjectionPolicy() bool {
-	return true
+	// DROP PROJECTION POLICY <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("PROJECTION") },
+		func() bool { return v.MatchWord("POLICY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropReplicationGroup validates the Snowflake `DROP REPLICATION GROUP` command.
@@ -614,7 +1013,14 @@ func (v *Validator) ParseDropProjectionPolicy() bool {
 //
 //	DROP REPLICATION GROUP [ IF EXISTS ] <name>
 func (v *Validator) ParseDropReplicationGroup() bool {
-	return true
+	// DROP REPLICATION GROUP [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("REPLICATION") },
+		func() bool { return v.MatchWord("GROUP") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropResourceMonitor validates the Snowflake `DROP RESOURCE MONITOR` command.
@@ -624,7 +1030,14 @@ func (v *Validator) ParseDropReplicationGroup() bool {
 //
 //	DROP RESOURCE MONITOR [ IF EXISTS ] <name>
 func (v *Validator) ParseDropResourceMonitor() bool {
-	return true
+	// DROP RESOURCE MONITOR [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("RESOURCE") },
+		func() bool { return v.MatchWord("MONITOR") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropRole validates the Snowflake `DROP ROLE` command.
@@ -634,7 +1047,13 @@ func (v *Validator) ParseDropResourceMonitor() bool {
 //
 //	DROP ROLE [ IF EXISTS ] <name>
 func (v *Validator) ParseDropRole() bool {
-	return true
+	// DROP ROLE [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("ROLE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropRowAccessPolicy validates the Snowflake `DROP ROW ACCESS POLICY` command.
@@ -644,7 +1063,15 @@ func (v *Validator) ParseDropRole() bool {
 //
 //	DROP ROW ACCESS POLICY [ IF EXISTS ] <name>
 func (v *Validator) ParseDropRowAccessPolicy() bool {
-	return true
+	// DROP ROW ACCESS POLICY [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("ROW") },
+		func() bool { return v.MatchWord("ACCESS") },
+		func() bool { return v.MatchWord("POLICY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropSchema validates the Snowflake `DROP SCHEMA` command.
@@ -654,7 +1081,14 @@ func (v *Validator) ParseDropRowAccessPolicy() bool {
 //
 //	DROP SCHEMA [ IF EXISTS ] <name> [ CASCADE | RESTRICT ]
 func (v *Validator) ParseDropSchema() bool {
-	return true
+	// DROP SCHEMA [ IF EXISTS ] <name> [ CASCADE | RESTRICT ]
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("SCHEMA") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.Optional(v.wordsValue("CASCADE", "RESTRICT")) },
+	)
 }
 
 // ParseDropSecret validates the Snowflake `DROP SECRET` command.
@@ -664,7 +1098,13 @@ func (v *Validator) ParseDropSchema() bool {
 //
 //	DROP SECRET [ IF EXISTS ] <name>
 func (v *Validator) ParseDropSecret() bool {
-	return true
+	// DROP SECRET [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("SECRET") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropSemanticView validates the Snowflake `DROP SEMANTIC VIEW` command.
@@ -674,7 +1114,14 @@ func (v *Validator) ParseDropSecret() bool {
 //
 //	DROP SEMANTIC VIEW [ IF EXISTS ] <name>
 func (v *Validator) ParseDropSemanticView() bool {
-	return true
+	// DROP SEMANTIC VIEW [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("SEMANTIC") },
+		func() bool { return v.MatchWord("VIEW") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropSequence validates the Snowflake `DROP SEQUENCE` command.
@@ -684,7 +1131,14 @@ func (v *Validator) ParseDropSemanticView() bool {
 //
 //	DROP SEQUENCE [ IF EXISTS ] <name> [ CASCADE | RESTRICT ]
 func (v *Validator) ParseDropSequence() bool {
-	return true
+	// DROP SEQUENCE [ IF EXISTS ] <name> [ CASCADE | RESTRICT ]
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("SEQUENCE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.Optional(v.wordsValue("CASCADE", "RESTRICT")) },
+	)
 }
 
 // ParseDropService validates the Snowflake `DROP SERVICE` command.
@@ -694,7 +1148,14 @@ func (v *Validator) ParseDropSequence() bool {
 //
 //	DROP SERVICE [ IF EXISTS ] <name> [ FORCE ]
 func (v *Validator) ParseDropService() bool {
-	return true
+	// DROP SERVICE [ IF EXISTS ] <name> [ FORCE ]
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("SERVICE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.Optional(func() bool { return v.MatchWord("FORCE") }) },
+	)
 }
 
 // ParseDropSessionPolicy validates the Snowflake `DROP SESSION POLICY` command.
@@ -704,7 +1165,14 @@ func (v *Validator) ParseDropService() bool {
 //
 //	DROP SESSION POLICY [ IF EXISTS ] <name>
 func (v *Validator) ParseDropSessionPolicy() bool {
-	return true
+	// DROP SESSION POLICY [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("SESSION") },
+		func() bool { return v.MatchWord("POLICY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropShare validates the Snowflake `DROP SHARE` command.
@@ -714,7 +1182,13 @@ func (v *Validator) ParseDropSessionPolicy() bool {
 //
 //	DROP SHARE <name>
 func (v *Validator) ParseDropShare() bool {
-	return true
+	// DROP SHARE <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("SHARE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropSnapshot validates the Snowflake `DROP SNAPSHOT` command.
@@ -724,7 +1198,13 @@ func (v *Validator) ParseDropShare() bool {
 //
 //	DROP SNAPSHOT [ IF EXISTS ] <name>;
 func (v *Validator) ParseDropSnapshot() bool {
-	return true
+	// DROP SNAPSHOT [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("SNAPSHOT") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropSnapshotPolicy validates the Snowflake `DROP SNAPSHOT POLICY` command.
@@ -734,7 +1214,14 @@ func (v *Validator) ParseDropSnapshot() bool {
 //
 //	DROP SNAPSHOT POLICY <name>
 func (v *Validator) ParseDropSnapshotPolicy() bool {
-	return true
+	// DROP SNAPSHOT POLICY <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("SNAPSHOT") },
+		func() bool { return v.MatchWord("POLICY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropSnapshotSet validates the Snowflake `DROP SNAPSHOT SET` command.
@@ -744,7 +1231,14 @@ func (v *Validator) ParseDropSnapshotPolicy() bool {
 //
 //	DROP SNAPSHOT SET <name>
 func (v *Validator) ParseDropSnapshotSet() bool {
-	return true
+	// DROP SNAPSHOT SET <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("SNAPSHOT") },
+		func() bool { return v.MatchWord("SET") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropStage validates the Snowflake `DROP STAGE` command.
@@ -754,7 +1248,13 @@ func (v *Validator) ParseDropSnapshotSet() bool {
 //
 //	DROP STAGE [ IF EXISTS ] <name>
 func (v *Validator) ParseDropStage() bool {
-	return true
+	// DROP STAGE [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("STAGE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropStorageLifecyclePolicy validates the Snowflake `DROP STORAGE LIFECYCLE POLICY` command.
@@ -764,7 +1264,15 @@ func (v *Validator) ParseDropStage() bool {
 //
 //	DROP STORAGE LIFECYCLE POLICY [ IF EXISTS ] <policy_name>
 func (v *Validator) ParseDropStorageLifecyclePolicy() bool {
-	return true
+	// DROP STORAGE LIFECYCLE POLICY [ IF EXISTS ] <policy_name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("STORAGE") },
+		func() bool { return v.MatchWord("LIFECYCLE") },
+		func() bool { return v.MatchWord("POLICY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropStream validates the Snowflake `DROP STREAM` command.
@@ -774,7 +1282,13 @@ func (v *Validator) ParseDropStorageLifecyclePolicy() bool {
 //
 //	DROP STREAM [ IF EXISTS ] <name>
 func (v *Validator) ParseDropStream() bool {
-	return true
+	// DROP STREAM [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("STREAM") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropStreamlit validates the Snowflake `DROP STREAMLIT` command.
@@ -784,7 +1298,13 @@ func (v *Validator) ParseDropStream() bool {
 //
 //	DROP STREAMLIT [IF EXISTS] <name>
 func (v *Validator) ParseDropStreamlit() bool {
-	return true
+	// DROP STREAMLIT [IF EXISTS] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("STREAMLIT") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropTable validates the Snowflake `DROP TABLE` command.
@@ -794,7 +1314,14 @@ func (v *Validator) ParseDropStreamlit() bool {
 //
 //	DROP TABLE [ IF EXISTS ] <name> [ CASCADE | RESTRICT ]
 func (v *Validator) ParseDropTable() bool {
-	return true
+	// DROP TABLE [ IF EXISTS ] <name> [ CASCADE | RESTRICT ]
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("TABLE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+		func() bool { return v.Optional(v.wordsValue("CASCADE", "RESTRICT")) },
+	)
 }
 
 // ParseDropTag validates the Snowflake `DROP TAG` command.
@@ -804,7 +1331,13 @@ func (v *Validator) ParseDropTable() bool {
 //
 //	DROP TAG [ IF EXISTS ] <name>
 func (v *Validator) ParseDropTag() bool {
-	return true
+	// DROP TAG [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("TAG") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropTask validates the Snowflake `DROP TASK` command.
@@ -814,7 +1347,13 @@ func (v *Validator) ParseDropTag() bool {
 //
 //	DROP TASK [ IF EXISTS ] <name>
 func (v *Validator) ParseDropTask() bool {
-	return true
+	// DROP TASK [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("TASK") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropType validates the Snowflake `DROP TYPE` command.
@@ -824,7 +1363,13 @@ func (v *Validator) ParseDropTask() bool {
 //
 //	DROP TYPE <name>
 func (v *Validator) ParseDropType() bool {
-	return true
+	// DROP TYPE <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("TYPE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropUser validates the Snowflake `DROP USER` command.
@@ -834,7 +1379,13 @@ func (v *Validator) ParseDropType() bool {
 //
 //	DROP USER [ IF EXISTS ] <name>
 func (v *Validator) ParseDropUser() bool {
-	return true
+	// DROP USER [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("USER") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropView validates the Snowflake `DROP VIEW` command.
@@ -844,7 +1395,13 @@ func (v *Validator) ParseDropUser() bool {
 //
 //	DROP VIEW [ IF EXISTS ] <name>
 func (v *Validator) ParseDropView() bool {
-	return true
+	// DROP VIEW [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("VIEW") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropWarehouse validates the Snowflake `DROP WAREHOUSE` command.
@@ -854,7 +1411,13 @@ func (v *Validator) ParseDropView() bool {
 //
 //	DROP WAREHOUSE [ IF EXISTS ] <name>
 func (v *Validator) ParseDropWarehouse() bool {
-	return true
+	// DROP WAREHOUSE [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("WAREHOUSE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropApplicationService validates the Snowflake `DROP APPLICATION SERVICE` command.
@@ -864,7 +1427,14 @@ func (v *Validator) ParseDropWarehouse() bool {
 //
 //	DROP APPLICATION SERVICE [ IF EXISTS ] <name>
 func (v *Validator) ParseDropApplicationService() bool {
-	return true
+	// DROP APPLICATION SERVICE [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("APPLICATION") },
+		func() bool { return v.MatchWord("SERVICE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropArtifactRepository validates the Snowflake `DROP ARTIFACT REPOSITORY` command.
@@ -874,7 +1444,14 @@ func (v *Validator) ParseDropApplicationService() bool {
 //
 //	DROP ARTIFACT REPOSITORY [ IF EXISTS ] <name>
 func (v *Validator) ParseDropArtifactRepository() bool {
-	return true
+	// DROP ARTIFACT REPOSITORY [ IF EXISTS ] <name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("ARTIFACT") },
+		func() bool { return v.MatchWord("REPOSITORY") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
 
 // ParseDropEventRoutingTable validates the Snowflake `DROP EVENT ROUTING TABLE` command.
@@ -884,5 +1461,13 @@ func (v *Validator) ParseDropArtifactRepository() bool {
 //
 //	DROP EVENT ROUTING TABLE <table_name>
 func (v *Validator) ParseDropEventRoutingTable() bool {
-	return true
+	// DROP EVENT ROUTING TABLE <table_name>
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("DROP") },
+		func() bool { return v.MatchWord("EVENT") },
+		func() bool { return v.MatchWord("ROUTING") },
+		func() bool { return v.MatchWord("TABLE") },
+		func() bool { return v.ifExists() },
+		v.parseIdentPath,
+	)
 }
