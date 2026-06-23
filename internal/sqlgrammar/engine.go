@@ -336,3 +336,103 @@ func (v *Validator) tagClause() bool {
 		},
 	)
 }
+
+// -- Permissive consumers (for spans too detailed to model fully) --
+
+// consumeBalancedParens matches a `( … )` group with arbitrary balanced content,
+// including nested parens. Use for option/column/constraint lists that are not
+// worth modelling token-for-token. Fails if there is no opening paren or the
+// parens are unbalanced before end-of-statement.
+func (v *Validator) consumeBalancedParens() bool {
+	if !v.Match(sqltok.LParen) {
+		return false
+	}
+	depth := 1
+	for depth > 0 {
+		if v.AtEnd() {
+			return false
+		}
+		switch v.Peek().Kind {
+		case sqltok.LParen:
+			depth++
+		case sqltok.RParen:
+			depth--
+		}
+		v.advance()
+	}
+	return true
+}
+
+// consumeRest consumes every remaining token and always succeeds (even on an
+// empty tail). Use for free-form trailing spans such as `AS <query>`, a stored
+// procedure body, or a policy expression.
+func (v *Validator) consumeRest() bool {
+	for !v.AtEnd() {
+		v.advance()
+	}
+	return true
+}
+
+// -- SHOW / DESCRIBE trailing-clause helpers (shared by ~180 SHOW commands) --
+
+// likeClause matches `LIKE '<pattern>'`.
+func (v *Validator) likeClause() bool {
+	return v.Sequence(func() bool { return v.MatchWord("LIKE") }, v.parseString)
+}
+
+// inScopeClause matches the common object-scope clause, leniently:
+//
+//	IN { ACCOUNT | ORGANIZATION | APPLICATION [ PACKAGE ] [ <name> ]
+//	     | DATABASE [ <name> ] | SCHEMA [ <name> ] | TABLE [ <name> ]
+//	     | VIEW [ <name> ] | CLASS [ <name> ] | <name> }
+func (v *Validator) inScopeClause() bool {
+	return v.Sequence(
+		func() bool { return v.MatchWord("IN") },
+		func() bool {
+			return v.Choice(
+				func() bool { return v.MatchWord("ACCOUNT") },
+				func() bool { return v.MatchWord("ORGANIZATION") },
+				func() bool {
+					return v.Sequence(
+						v.wordsValue("APPLICATION", "DATABASE", "SCHEMA", "TABLE", "VIEW", "CLASS", "MODEL"),
+						func() bool { return v.Optional(func() bool { return v.MatchWord("PACKAGE") }) },
+						func() bool { return v.Optional(v.parseIdentPath) },
+					)
+				},
+				v.parseIdentPath,
+			)
+		},
+	)
+}
+
+// startsWithClause matches `STARTS WITH '<string>'`.
+func (v *Validator) startsWithClause() bool {
+	return v.Sequence(func() bool { return v.phrase("STARTS", "WITH") }, v.parseString)
+}
+
+// limitFromClause matches `LIMIT <rows> [ FROM '<string>' ]`.
+func (v *Validator) limitFromClause() bool {
+	return v.Sequence(
+		func() bool { return v.MatchWord("LIMIT") },
+		func() bool { return v.Match(sqltok.NumberLit) },
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(func() bool { return v.MatchWord("FROM") }, v.parseString)
+			})
+		},
+	)
+}
+
+// showTrailers consumes any number of the common trailing SHOW clauses in any
+// order: LIKE, IN <scope>, STARTS WITH, LIMIT … FROM, and the bare HISTORY flag.
+func (v *Validator) showTrailers() bool {
+	return v.ZeroOrMore(func() bool {
+		return v.Choice(
+			v.likeClause,
+			v.inScopeClause,
+			v.startsWithClause,
+			v.limitFromClause,
+			func() bool { return v.MatchWord("HISTORY") },
+		)
+	})
+}
