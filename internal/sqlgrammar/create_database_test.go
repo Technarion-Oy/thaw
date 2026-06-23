@@ -35,9 +35,9 @@ func TestParseCreateDatabase_Valid(t *testing.T) {
 
 func TestParseCreateDatabase_Invalid(t *testing.T) {
 	assertInvalid(t, (*Validator).ParseCreateDatabase,
-		`CREATE DATABASE`,                                     // missing name
-		`CREATE my_db`,                                        // missing DATABASE keyword
-		`CREATE OR DATABASE my_db`,                            // OR without REPLACE/ALTER
+		`CREATE DATABASE`,          // missing name
+		`CREATE my_db`,             // missing DATABASE keyword
+		`CREATE OR DATABASE my_db`, // OR without REPLACE/ALTER
 		`CREATE DATABASE my_db DATA_RETENTION_TIME_IN_DAYS =`, // option missing value
 		`CREATE DATABASE my_db COMMENT 'x'`,                   // option missing '='
 		`CREATE DATABASE my_db FROM`,                          // FROM without source

@@ -17,8 +17,8 @@ import (
 //
 // The terminals (Match/MatchKeyword/MatchWord/MatchOp) and combinators
 // (Sequence/Choice/Optional/ZeroOrMore) are implemented per issue #556. The
-// per-command Parse* rules are filled in incrementally (ParseCreateDatabase is
-// the first); the remainder still stub to return true.
+// per-command Parse* rules are filled in incrementally: every CREATE rule
+// (create.go) is implemented; the other statement families still stub to true.
 type Validator struct {
 	src      string
 	tokens   []sqltok.Token // significant tokens only

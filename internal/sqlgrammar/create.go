@@ -14,7 +14,56 @@ import "thaw/internal/sqltok"
 //
 // Syntax: (unavailable — see Reference URL)
 func (v *Validator) ParseCreateObj() bool {
-	return true
+	// Lenient skeleton: CREATE [ OR REPLACE ] [ modifiers ] <OBJECT_KIND> [ IF NOT
+	// EXISTS ] <name> followed by a permissive run of the remaining tokens
+	// (balanced parens, scalars, operators) to EOF.
+	consumeToken := func() bool {
+		if v.AtEnd() {
+			return false
+		}
+		v.advance()
+		return true
+	}
+	var consumeBalanced func() bool
+	consumeBalanced = func() bool {
+		return v.ZeroOrMore(func() bool {
+			return v.Choice(
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.Match(sqltok.LParen) },
+						consumeBalanced,
+						func() bool { return v.Match(sqltok.RParen) },
+					)
+				},
+				func() bool {
+					if v.Peek().Kind == sqltok.RParen {
+						return false
+					}
+					return consumeToken()
+				},
+			)
+		})
+	}
+	// match one identifier-like token (the object-kind word)
+	kindWord := func() bool {
+		t := v.Peek()
+		if t.Kind.IsIdentLike() {
+			v.advance()
+			return true
+		}
+		v.expect("object kind")
+		return false
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		// at least one object-kind word, plus any further kind words before the
+		// name (e.g. APPLICATION ROLE). We stop greedily consuming via the name.
+		kindWord,
+		v.ifNotExists,
+		v.parseIdentPath,
+		consumeBalanced,
+	)
 }
 
 // ParseCreateAccount validates the Snowflake `CREATE ACCOUNT` command.
@@ -36,7 +85,32 @@ func (v *Validator) ParseCreateObj() bool {
 //	    [ COMMENT = '<string_literal>' ]
 //	    [ POLARIS = { TRUE | FALSE } ]
 func (v *Validator) ParseCreateAccount() bool {
-	return true
+	str := v.parseString
+	prop := func() bool {
+		return v.Choice(
+			v.option("ADMIN_NAME", str),
+			v.option("ADMIN_PASSWORD", str),
+			v.option("ADMIN_RSA_PUBLIC_KEY", str),
+			v.option("ADMIN_USER_TYPE", v.wordsValue("PERSON", "SERVICE", "LEGACY_SERVICE", "NULL")),
+			v.option("FIRST_NAME", str),
+			v.option("LAST_NAME", str),
+			v.option("EMAIL", str),
+			v.option("MUST_CHANGE_PASSWORD", v.parseBool),
+			v.option("EDITION", v.wordsValue("STANDARD", "ENTERPRISE", "BUSINESS_CRITICAL")),
+			v.option("REGION_GROUP", v.parseScalar),
+			v.option("REGION", v.parseScalar),
+			v.commentOption(),
+			v.option("POLARIS", v.parseBool),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		func() bool { return v.MatchWord("ACCOUNT") },
+		v.parseIdentPath,
+		// At minimum a single property must be present; the rest are order-independent.
+		prop,
+		func() bool { return v.ZeroOrMore(prop) },
+	)
 }
 
 // ParseCreateAgent validates the Snowflake `CREATE AGENT` command.
@@ -52,7 +126,29 @@ func (v *Validator) ParseCreateAccount() bool {
 //	  <specification_object>
 //	  $$;
 func (v *Validator) ParseCreateAgent() bool {
-	return true
+	prop := func() bool {
+		return v.Choice(
+			v.commentOption(),
+			v.option("PROFILE", v.parseString),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("AGENT") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.ZeroOrMore(prop) },
+		func() bool { return v.MatchKeyword("FROM") },
+		func() bool { return v.MatchWord("SPECIFICATION") },
+		// $$ <specification> $$  — a single DollarQuoted token, or a quoted string.
+		func() bool {
+			return v.Choice(
+				func() bool { return v.Match(sqltok.DollarQuoted) },
+				v.parseString,
+			)
+		},
+	)
 }
 
 // ParseCreateAggregationPolicy validates the Snowflake `CREATE AGGREGATION POLICY` command.
@@ -64,7 +160,62 @@ func (v *Validator) ParseCreateAgent() bool {
 //	  AS () RETURNS AGGREGATION_CONSTRAINT -> <body>
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateAggregationPolicy() bool {
-	return true
+	// Free-form policy body after `->`: consume a permissive, paren-balanced run
+	// until a trailing COMMENT option or EOF.
+	var balanced func() bool
+	balanced = func() bool {
+		return v.ZeroOrMore(func() bool {
+			return v.Choice(
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.Match(sqltok.LParen) },
+						balanced,
+						func() bool { return v.Match(sqltok.RParen) },
+					)
+				},
+				func() bool {
+					t := v.Peek()
+					if t.Kind == sqltok.EOF || t.Kind == sqltok.RParen {
+						return false
+					}
+					// stop at a top-level COMMENT = option
+					if t.Kind.IsIdentLike() {
+						p := v.save()
+						if v.commentOption()() {
+							v.restore(p)
+							return false
+						}
+						v.restore(p)
+					}
+					v.advance()
+					return true
+				},
+			)
+		})
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("AGGREGATION") },
+		func() bool { return v.MatchWord("POLICY") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.MatchKeyword("AS") },
+		func() bool { return v.Match(sqltok.LParen) },
+		func() bool { return v.Match(sqltok.RParen) },
+		func() bool { return v.MatchWord("RETURNS") },
+		func() bool { return v.MatchWord("AGGREGATION_CONSTRAINT") },
+		// -> (two operator tokens)
+		func() bool { return v.MatchOp("-") },
+		func() bool { return v.MatchOp(">") },
+		// body must consume at least one token
+		func() bool {
+			before := v.save()
+			balanced()
+			return v.pos > before
+		},
+		func() bool { return v.Optional(v.commentOption()) },
+	)
 }
 
 // ParseCreateAlert validates the Snowflake `CREATE ALERT` command.
@@ -86,7 +237,66 @@ func (v *Validator) ParseCreateAggregationPolicy() bool {
 //	  THEN
 //	    <action>
 func (v *Validator) ParseCreateAlert() bool {
-	return true
+	// balanced parenthesised group: ( ... ) with nested parens.
+	var parenGroup func() bool
+	parenGroup = func() bool {
+		return v.Sequence(
+			func() bool { return v.Match(sqltok.LParen) },
+			func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Choice(
+						parenGroup,
+						func() bool {
+							if v.Peek().Kind == sqltok.RParen || v.AtEnd() {
+								return false
+							}
+							v.advance()
+							return true
+						},
+					)
+				})
+			},
+			func() bool { return v.Match(sqltok.RParen) },
+		)
+	}
+	consumeRest := func() bool {
+		return v.ZeroOrMore(func() bool {
+			if v.AtEnd() {
+				return false
+			}
+			v.advance()
+			return true
+		})
+	}
+	prop := func() bool {
+		return v.Choice(
+			v.tagClause,
+			v.option("SCHEDULE", v.parseString),
+			v.option("WAREHOUSE", v.parseIdentPath),
+			v.commentOption(),
+			v.option("CONFIG", v.parseString),
+			v.option("RUNBOOK", v.parseString),
+			v.option("SUSPEND_ALERT_AFTER_NUM_FAILURES", v.parseNumber),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("ALERT") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.ZeroOrMore(prop) },
+		// IF ( EXISTS ( <condition> ) )
+		func() bool { return v.MatchKeyword("IF") },
+		parenGroup,
+		func() bool { return v.MatchWord("THEN") },
+		// <action> — free-form, must have at least one token.
+		func() bool {
+			before := v.save()
+			consumeRest()
+			return v.pos > before
+		},
+	)
 }
 
 // ParseCreateApiIntegration validates the Snowflake `CREATE API INTEGRATION` command.
@@ -132,7 +342,39 @@ func (v *Validator) ParseCreateAlert() bool {
 //	  [ COMMENT = '<string_literal>' ]
 //	  ;
 func (v *Validator) ParseCreateApiIntegration() bool {
-	return true
+	str := v.parseString
+	strList := func() bool { return v.parseParenList(str) }
+	prop := func() bool {
+		return v.Choice(
+			v.option("API_PROVIDER", v.parseScalar),
+			v.option("API_AWS_ROLE_ARN", str),
+			v.option("API_KEY", str),
+			v.option("API_ALLOWED_PREFIXES", strList),
+			v.option("API_BLOCKED_PREFIXES", strList),
+			v.option("AZURE_TENANT_ID", str),
+			v.option("AZURE_AD_APPLICATION_ID", str),
+			v.option("GOOGLE_AUDIENCE", str),
+			// ALLOWED_AUTHENTICATION_SECRETS = ( <secret> [, ...] ) | ALL | NONE
+			v.option("ALLOWED_AUTHENTICATION_SECRETS", func() bool {
+				return v.Choice(
+					func() bool { return v.parseParenList(v.parseIdentPath) },
+					v.wordsValue("ALL", "NONE"),
+				)
+			}),
+			v.option("ENABLED", v.parseBool),
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("API") },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		prop,
+		func() bool { return v.ZeroOrMore(prop) },
+	)
 }
 
 // ParseCreateApplication validates the Snowflake `CREATE APPLICATION` command.
@@ -171,7 +413,95 @@ func (v *Validator) ParseCreateApiIntegration() bool {
 //	   [ AUTHORIZE_TELEMETRY_EVENT_SHARING = { TRUE | FALSE } ]
 //	   [ WITH FEATURE POLICY = <policy_name> ]
 func (v *Validator) ParseCreateApplication() bool {
-	return true
+	// USING clause variants.
+	usingClause := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchKeyword("USING") },
+			func() bool {
+				return v.Choice(
+					// RELEASE CHANNEL { QA | ALPHA | DEFAULT }
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchWord("RELEASE") },
+							func() bool { return v.MatchWord("CHANNEL") },
+							v.wordsValue("QA", "ALPHA", "DEFAULT"),
+						)
+					},
+					// VERSION <version> [ PATCH <num> ]
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchWord("VERSION") },
+							v.parseIdentPath,
+							func() bool {
+								return v.Optional(func() bool {
+									return v.Sequence(
+										func() bool { return v.MatchWord("PATCH") },
+										v.parseScalar,
+									)
+								})
+							},
+						)
+					},
+					// <path_to_version_directory> — string or stage-style path
+					func() bool { return v.Match(sqltok.StringLit) },
+					v.parseIdentPath,
+				)
+			},
+		)
+	}
+	prop := func() bool {
+		return v.Choice(
+			v.option("DEBUG_MODE", v.parseBool),
+			v.commentOption(),
+			v.tagClause,
+			v.option("AUTHORIZE_TELEMETRY_EVENT_SHARING", v.parseBool),
+			v.option("BACKGROUND_INSTALL", v.parseBool),
+			// WITH FEATURE POLICY = <name>
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchKeyword("WITH") },
+					func() bool { return v.MatchWord("FEATURE") },
+					func() bool { return v.MatchWord("POLICY") },
+					func() bool { return v.MatchOp("=") },
+					v.parseIdentPath,
+				)
+			},
+		)
+	}
+	fromClause := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchKeyword("FROM") },
+			func() bool {
+				return v.Choice(
+					// APPLICATION PACKAGE <pkg> [ USING ... ]
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchWord("APPLICATION") },
+							func() bool { return v.MatchWord("PACKAGE") },
+							v.parseIdentPath,
+							func() bool { return v.Optional(usingClause) },
+						)
+					},
+					// LISTING <listing> [ USING RELEASE CHANNEL ... ]
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchWord("LISTING") },
+							v.parseIdentPath,
+							func() bool { return v.Optional(usingClause) },
+						)
+					},
+				)
+			},
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("APPLICATION") },
+		v.parseIdentPath,
+		fromClause,
+		func() bool { return v.ZeroOrMore(prop) },
+	)
 }
 
 // ParseCreateApplicationPackage validates the Snowflake `CREATE APPLICATION PACKAGE` command.
@@ -190,7 +520,28 @@ func (v *Validator) ParseCreateApplication() bool {
 //	  [ MULTIPLE_INSTANCES = TRUE ]
 //	  [ ENABLE_RELEASE_CHANNELS = TRUE ]
 func (v *Validator) ParseCreateApplicationPackage() bool {
-	return true
+	intLit := v.parseNumber
+	prop := func() bool {
+		return v.Choice(
+			v.option("DATA_RETENTION_TIME_IN_DAYS", intLit),
+			v.option("MAX_DATA_EXTENSION_TIME_IN_DAYS", intLit),
+			v.option("DEFAULT_DDL_COLLATION", v.parseString),
+			v.commentOption(),
+			v.tagClause,
+			v.option("DISTRIBUTION", v.wordsValue("INTERNAL", "EXTERNAL")),
+			v.option("LISTING_AUTO_REFRESH", v.parseBool),
+			v.option("MULTIPLE_INSTANCES", v.parseBool),
+			v.option("ENABLE_RELEASE_CHANNELS", v.parseBool),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		func() bool { return v.MatchWord("APPLICATION") },
+		func() bool { return v.MatchWord("PACKAGE") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.ZeroOrMore(prop) },
+	)
 }
 
 // ParseCreateApplicationRole validates the Snowflake `CREATE APPLICATION ROLE` command.
@@ -204,7 +555,23 @@ func (v *Validator) ParseCreateApplicationPackage() bool {
 //	CREATE OR ALTER APPLICATION ROLE <name>
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateApplicationRole() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		// [ OR { REPLACE | ALTER } ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchKeyword("OR") },
+					v.wordsValue("REPLACE", "ALTER"),
+				)
+			})
+		},
+		func() bool { return v.MatchWord("APPLICATION") },
+		func() bool { return v.MatchWord("ROLE") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.Optional(v.commentOption()) },
+	)
 }
 
 // ParseCreateAuthenticationPolicy validates the Snowflake `CREATE AUTHENTICATION POLICY` command.
@@ -226,7 +593,60 @@ func (v *Validator) ParseCreateApplicationRole() bool {
 //	CREATE OR ALTER AUTHENTICATION POLICY <name>
 //	  [ ... same properties as above ... ]
 func (v *Validator) ParseCreateAuthenticationPolicy() bool {
-	return true
+	str := v.parseString
+	strList := func() bool { return v.parseParenList(str) }
+	// A balanced parenthesised value (for the structured property lists).
+	var parenValue func() bool
+	parenValue = func() bool {
+		return v.Sequence(
+			func() bool { return v.Match(sqltok.LParen) },
+			func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Choice(
+						parenValue,
+						func() bool {
+							if v.Peek().Kind == sqltok.RParen || v.AtEnd() {
+								return false
+							}
+							v.advance()
+							return true
+						},
+					)
+				})
+			},
+			func() bool { return v.Match(sqltok.RParen) },
+		)
+	}
+	prop := func() bool {
+		return v.Choice(
+			v.option("AUTHENTICATION_METHODS", strList),
+			v.option("CLIENT_TYPES", strList),
+			v.option("SECURITY_INTEGRATIONS", strList),
+			v.option("MFA_ENROLLMENT", str),
+			v.option("CLIENT_POLICY", parenValue),
+			v.option("MFA_POLICY", parenValue),
+			v.option("PAT_POLICY", parenValue),
+			v.option("WORKLOAD_IDENTITY_POLICY", parenValue),
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		// [ OR { REPLACE | ALTER } ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchKeyword("OR") },
+					v.wordsValue("REPLACE", "ALTER"),
+				)
+			})
+		},
+		func() bool { return v.MatchWord("AUTHENTICATION") },
+		func() bool { return v.MatchWord("POLICY") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.ZeroOrMore(prop) },
+	)
 }
 
 // ParseCreateBackupPolicy validates the Snowflake `CREATE BACKUP POLICY` command.
@@ -241,7 +661,31 @@ func (v *Validator) ParseCreateAuthenticationPolicy() bool {
 //	   [ EXPIRE_AFTER_DAYS = <days_integer> ]
 //	   [ COMMENT = <string> ]
 func (v *Validator) ParseCreateBackupPolicy() bool {
-	return true
+	prop := func() bool {
+		return v.Choice(
+			v.tagClause,
+			// WITH RETENTION LOCK
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchKeyword("WITH") },
+					func() bool { return v.MatchWord("RETENTION") },
+					func() bool { return v.MatchWord("LOCK") },
+				)
+			},
+			v.option("SCHEDULE", v.parseString),
+			v.option("EXPIRE_AFTER_DAYS", v.parseNumber),
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("BACKUP") },
+		func() bool { return v.MatchWord("POLICY") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.ZeroOrMore(prop) },
+	)
 }
 
 // ParseCreateBackupSet validates the Snowflake `CREATE BACKUP SET` command.
@@ -267,7 +711,60 @@ func (v *Validator) ParseCreateBackupPolicy() bool {
 //	   [ WITH BACKUP POLICY <policy_name> ]
 //	   [ COMMENT = <string> ]
 func (v *Validator) ParseCreateBackupSet() bool {
-	return true
+	forClause := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchWord("FOR") },
+			func() bool {
+				return v.Choice(
+					// [ DYNAMIC ] TABLE <name>
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.Optional(func() bool { return v.MatchWord("DYNAMIC") }) },
+							func() bool { return v.MatchKeyword("TABLE") },
+							v.parseIdentPath,
+						)
+					},
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchKeyword("SCHEMA") },
+							v.parseIdentPath,
+						)
+					},
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchKeyword("DATABASE") },
+							v.parseIdentPath,
+						)
+					},
+				)
+			},
+		)
+	}
+	prop := func() bool {
+		return v.Choice(
+			v.tagClause,
+			// WITH BACKUP POLICY <policy_name>
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchKeyword("WITH") },
+					func() bool { return v.MatchWord("BACKUP") },
+					func() bool { return v.MatchWord("POLICY") },
+					v.parseIdentPath,
+				)
+			},
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("BACKUP") },
+		func() bool { return v.MatchKeyword("SET") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		forClause,
+		func() bool { return v.ZeroOrMore(prop) },
+	)
 }
 
 // ParseCreateCatalogIntegration validates the Snowflake `CREATE CATALOG INTEGRATION` command.
@@ -275,7 +772,43 @@ func (v *Validator) ParseCreateBackupSet() bool {
 //
 // Syntax: (unavailable — see Reference URL)
 func (v *Validator) ParseCreateCatalogIntegration() bool {
-	return true
+	// Lenient: CREATE [ OR REPLACE ] CATALOG INTEGRATION [ IF NOT EXISTS ] <name>
+	// followed by a permissive, paren-balanced run of options to EOF.
+	var balanced func() bool
+	balanced = func() bool {
+		return v.ZeroOrMore(func() bool {
+			return v.Choice(
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.Match(sqltok.LParen) },
+						balanced,
+						func() bool { return v.Match(sqltok.RParen) },
+					)
+				},
+				func() bool {
+					if v.Peek().Kind == sqltok.RParen || v.AtEnd() {
+						return false
+					}
+					v.advance()
+					return true
+				},
+			)
+		})
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("CATALOG") },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		// at least one option token must follow the name
+		func() bool {
+			before := v.save()
+			balanced()
+			return v.pos > before
+		},
+	)
 }
 
 // ParseCreateCatalogIntegrationAwsGlue validates the Snowflake `CREATE CATALOG INTEGRATION (AWS Glue)` command.
@@ -295,7 +828,30 @@ func (v *Validator) ParseCreateCatalogIntegration() bool {
 //	  [ REFRESH_INTERVAL_SECONDS = <value> ]
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateCatalogIntegrationAwsGlue() bool {
-	return true
+	str := v.parseString
+	prop := func() bool {
+		return v.Choice(
+			v.option("CATALOG_SOURCE", v.wordsValue("GLUE")),
+			v.option("TABLE_FORMAT", v.wordsValue("ICEBERG")),
+			v.option("GLUE_AWS_ROLE_ARN", str),
+			v.option("GLUE_CATALOG_ID", str),
+			v.option("GLUE_REGION", str),
+			v.option("CATALOG_NAMESPACE", str),
+			v.option("ENABLED", v.parseBool),
+			v.option("REFRESH_INTERVAL_SECONDS", v.parseNumber),
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("CATALOG") },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		prop,
+		func() bool { return v.ZeroOrMore(prop) },
+	)
 }
 
 // ParseCreateCatalogIntegrationObjectStorage validates the Snowflake `CREATE CATALOG INTEGRATION (Object storage)` command.
@@ -311,7 +867,25 @@ func (v *Validator) ParseCreateCatalogIntegrationAwsGlue() bool {
 //	  [ REFRESH_INTERVAL_SECONDS = <value> ]
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateCatalogIntegrationObjectStorage() bool {
-	return true
+	prop := func() bool {
+		return v.Choice(
+			v.option("CATALOG_SOURCE", v.wordsValue("OBJECT_STORE")),
+			v.option("TABLE_FORMAT", v.wordsValue("ICEBERG", "DELTA")),
+			v.option("ENABLED", v.parseBool),
+			v.option("REFRESH_INTERVAL_SECONDS", v.parseNumber),
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("CATALOG") },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		prop,
+		func() bool { return v.ZeroOrMore(prop) },
+	)
 }
 
 // ParseCreateCatalogIntegrationSnowflakeOpenCatalog validates the Snowflake `CREATE CATALOG INTEGRATION (Snowflake Open Catalog)` command.
@@ -341,7 +915,65 @@ func (v *Validator) ParseCreateCatalogIntegrationObjectStorage() bool {
 //	  [ REFRESH_INTERVAL_SECONDS = <value> ]
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateCatalogIntegrationSnowflakeOpenCatalog() bool {
-	return true
+	str := v.parseString
+	strList := func() bool { return v.parseParenList(str) }
+	// REST_CONFIG = ( <sub-options> )
+	restConfig := func() bool {
+		sub := func() bool {
+			return v.Choice(
+				v.option("CATALOG_URI", str),
+				v.option("CATALOG_API_TYPE", v.wordsValue("PUBLIC")),
+				v.option("CATALOG_NAME", str),
+				v.option("ACCESS_DELEGATION_MODE", v.wordsValue("VENDED_CREDENTIALS", "EXTERNAL_VOLUME_CREDENTIALS")),
+			)
+		}
+		return v.Sequence(
+			func() bool { return v.Match(sqltok.LParen) },
+			sub,
+			func() bool { return v.ZeroOrMore(sub) },
+			func() bool { return v.Match(sqltok.RParen) },
+		)
+	}
+	// REST_AUTHENTICATION = ( <sub-options> )
+	restAuth := func() bool {
+		sub := func() bool {
+			return v.Choice(
+				v.option("TYPE", v.wordsValue("OAUTH")),
+				v.option("OAUTH_TOKEN_URI", str),
+				v.option("OAUTH_CLIENT_ID", str),
+				v.option("OAUTH_CLIENT_SECRET", str),
+				v.option("OAUTH_ALLOWED_SCOPES", strList),
+			)
+		}
+		return v.Sequence(
+			func() bool { return v.Match(sqltok.LParen) },
+			sub,
+			func() bool { return v.ZeroOrMore(sub) },
+			func() bool { return v.Match(sqltok.RParen) },
+		)
+	}
+	prop := func() bool {
+		return v.Choice(
+			v.option("CATALOG_SOURCE", v.wordsValue("POLARIS")),
+			v.option("TABLE_FORMAT", v.wordsValue("ICEBERG")),
+			v.option("CATALOG_NAMESPACE", str),
+			v.option("REST_CONFIG", restConfig),
+			v.option("REST_AUTHENTICATION", restAuth),
+			v.option("ENABLED", v.parseBool),
+			v.option("REFRESH_INTERVAL_SECONDS", v.parseNumber),
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("CATALOG") },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		prop,
+		func() bool { return v.ZeroOrMore(prop) },
+	)
 }
 
 // ParseCreateCatalogIntegrationApacheIcebergRest validates the Snowflake `CREATE CATALOG INTEGRATION (Apache Iceberg REST)` command.
@@ -389,7 +1021,69 @@ func (v *Validator) ParseCreateCatalogIntegrationSnowflakeOpenCatalog() bool {
 //	  [ SIGV4_SIGNING_REGION = '<region>' ]
 //	  [ SIGV4_EXTERNAL_ID = '<external_id>' ]
 func (v *Validator) ParseCreateCatalogIntegrationApacheIcebergRest() bool {
-	return true
+	str := v.parseString
+	strList := func() bool { return v.parseParenList(str) }
+	restConfig := func() bool {
+		sub := func() bool {
+			return v.Choice(
+				v.option("CATALOG_URI", str),
+				v.option("PREFIX", str),
+				v.option("CATALOG_NAME", str),
+				v.option("CATALOG_API_TYPE", v.wordsValue("PUBLIC", "PRIVATE",
+					"AWS_API_GATEWAY", "AWS_PRIVATE_API_GATEWAY", "AWS_GLUE", "AWS_PRIVATE_GLUE")),
+				v.option("ACCESS_DELEGATION_MODE", v.wordsValue("VENDED_CREDENTIALS", "EXTERNAL_VOLUME_CREDENTIALS")),
+			)
+		}
+		return v.Sequence(
+			func() bool { return v.Match(sqltok.LParen) },
+			sub,
+			func() bool { return v.ZeroOrMore(sub) },
+			func() bool { return v.Match(sqltok.RParen) },
+		)
+	}
+	restAuth := func() bool {
+		sub := func() bool {
+			return v.Choice(
+				v.option("TYPE", v.wordsValue("OAUTH", "BEARER", "SIGV4")),
+				v.option("OAUTH_TOKEN_URI", str),
+				v.option("OAUTH_CLIENT_ID", str),
+				v.option("OAUTH_CLIENT_SECRET", str),
+				v.option("OAUTH_ALLOWED_SCOPES", strList),
+				v.option("BEARER_TOKEN", str),
+				v.option("SIGV4_IAM_ROLE", str),
+				v.option("SIGV4_SIGNING_REGION", str),
+				v.option("SIGV4_EXTERNAL_ID", str),
+			)
+		}
+		return v.Sequence(
+			func() bool { return v.Match(sqltok.LParen) },
+			sub,
+			func() bool { return v.ZeroOrMore(sub) },
+			func() bool { return v.Match(sqltok.RParen) },
+		)
+	}
+	prop := func() bool {
+		return v.Choice(
+			v.option("CATALOG_SOURCE", v.wordsValue("ICEBERG_REST")),
+			v.option("TABLE_FORMAT", v.wordsValue("ICEBERG")),
+			v.option("CATALOG_NAMESPACE", str),
+			v.option("REST_CONFIG", restConfig),
+			v.option("REST_AUTHENTICATION", restAuth),
+			v.option("ENABLED", v.parseBool),
+			v.option("REFRESH_INTERVAL_SECONDS", v.parseNumber),
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("CATALOG") },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		prop,
+		func() bool { return v.ZeroOrMore(prop) },
+	)
 }
 
 // ParseCreateObjClone validates the Snowflake `CREATE <object> CLONE` command.
@@ -436,7 +1130,61 @@ func (v *Validator) ParseCreateCatalogIntegrationApacheIcebergRest() bool {
 //	  CLONE <source_object_name>
 //	  ...
 func (v *Validator) ParseCreateObjClone() bool {
-	return true
+	// [ { AT | BEFORE } ( { TIMESTAMP => … | OFFSET => … | STATEMENT => … } ) ]
+	pointInTime := func() bool {
+		return v.Optional(func() bool {
+			return v.Sequence(
+				v.wordsValue("AT", "BEFORE"),
+				func() bool { return v.Match(sqltok.LParen) },
+				func() bool {
+					return v.Choice(
+						v.arrowOption("TIMESTAMP"),
+						v.arrowOption("OFFSET"),
+						v.arrowOption("STATEMENT"),
+					)
+				},
+				func() bool { return v.Match(sqltok.RParen) },
+			)
+		})
+	}
+	// The various object-type prefixes that may precede the name.
+	objKind := func() bool {
+		return v.Choice(
+			func() bool { return v.phrase("DATABASE", "ROLE") },
+			func() bool { return v.phrase("DYNAMIC", "TABLE") },
+			func() bool { return v.phrase("EVENT", "TABLE") },
+			func() bool { return v.phrase("ICEBERG", "TABLE") },
+			func() bool { return v.phrase("FILE", "FORMAT") },
+			v.wordsValue("DATABASE", "SCHEMA", "TABLE"),
+			v.wordsValue("ALERT", "SEQUENCE", "STAGE", "STREAM", "TASK"),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		objKind,
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.MatchKeyword("CLONE") },
+		v.parseIdentPath,
+		pointInTime,
+		// Permissive trailing options (TARGET_LAG/WAREHOUSE, COPY GRANTS,
+		// IGNORE … , INCLUDE INTERNAL STAGES, etc.).
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.option("TARGET_LAG", v.parseScalar),
+					v.option("WAREHOUSE", v.parseIdentPath),
+					func() bool { return v.phrase("COPY", "GRANTS") },
+					func() bool { return v.phrase("INCLUDE", "INTERNAL", "STAGES") },
+					func() bool { return v.phrase("IGNORE", "HYBRID", "TABLES") },
+					func() bool {
+						return v.phrase("IGNORE", "TABLES", "WITH", "INSUFFICIENT", "DATA", "RETENTION")
+					},
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateComputePool validates the Snowflake `CREATE COMPUTE POOL` command.
@@ -456,7 +1204,41 @@ func (v *Validator) ParseCreateObjClone() bool {
 //	  [ COMMENT = '<string_literal>' ]
 //	  [ PLACEMENT_GROUP = '<placement_group_name>' ]
 func (v *Validator) ParseCreateComputePool() bool {
-	return true
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		func() bool { return v.MatchWord("COMPUTE") },
+		func() bool { return v.MatchWord("POOL") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		// [ FOR APPLICATION <app-name> ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("FOR") },
+					func() bool { return v.MatchWord("APPLICATION") },
+					v.parseIdentPath,
+				)
+			})
+		},
+		// The remaining options may appear in any order (MIN_NODES / MAX_NODES /
+		// INSTANCE_FAMILY are required but order-independent in practice).
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.option("MIN_NODES", num),
+					v.option("MAX_NODES", num),
+					v.option("INSTANCE_FAMILY", v.parseIdentPath),
+					v.option("AUTO_RESUME", v.parseBool),
+					v.option("INITIALLY_SUSPENDED", v.parseBool),
+					v.option("AUTO_SUSPEND_SECS", num),
+					v.option("PLACEMENT_GROUP", v.parseString),
+					v.tagClause,
+					v.commentOption(),
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateConnection validates the Snowflake `CREATE CONNECTION` command.
@@ -473,7 +1255,24 @@ func (v *Validator) ParseCreateComputePool() bool {
 //	  AS REPLICA OF <organization_name>.<account_name>.<name>
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateConnection() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		func() bool { return v.MatchWord("CONNECTION") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		// [ AS REPLICA OF <org>.<account>.<name> ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchKeyword("AS") },
+					func() bool { return v.MatchWord("REPLICA") },
+					func() bool { return v.MatchKeyword("OF") },
+					v.parseIdentPath,
+				)
+			})
+		},
+		func() bool { return v.Optional(v.commentOption()) },
+	)
 }
 
 // ParseCreateContact validates the Snowflake `CREATE CONTACT` command.
@@ -489,7 +1288,24 @@ func (v *Validator) ParseCreateConnection() bool {
 //	    } ]
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateContact() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("CONTACT") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		// [ { USERS = ( ... ) | EMAIL_DISTRIBUTION_LIST = '...' | URL = '...' } ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Choice(
+					v.option("USERS", func() bool { return v.parseParenList(v.parseString) }),
+					v.option("EMAIL_DISTRIBUTION_LIST", v.parseString),
+					v.option("URL", v.parseString),
+				)
+			})
+		},
+		func() bool { return v.Optional(v.commentOption()) },
+	)
 }
 
 // ParseCreateCortexSearchService validates the Snowflake `CREATE CORTEX SEARCH SERVICE` command.
@@ -527,7 +1343,108 @@ func (v *Validator) ParseCreateContact() bool {
 //	  [ COMMENT = '<comment>' ]
 //	AS <query>;
 func (v *Validator) ParseCreateCortexSearchService() bool {
-	return true
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	// A comma-separated, unparenthesised list of items.
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(
+				item,
+				func() bool {
+					return v.ZeroOrMore(func() bool {
+						return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+					})
+				},
+			)
+		}
+	}
+	// [ PRIMARY KEY ( <col> [, ...] ) ]
+	primaryKey := func() bool {
+		return v.Optional(func() bool {
+			return v.Sequence(
+				func() bool { return v.MatchKeyword("PRIMARY") },
+				func() bool { return v.MatchKeyword("KEY") },
+				func() bool { return v.parseParenList(v.parseIdentPath) },
+			)
+		})
+	}
+	// ATTRIBUTES <col> [, ...]
+	attributes := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchWord("ATTRIBUTES") },
+			commaList(v.parseIdentPath),
+		)
+	}
+	// The shared trailing option list.
+	options := func() bool {
+		return v.ZeroOrMore(func() bool {
+			return v.Choice(
+				v.option("WAREHOUSE", v.parseIdentPath),
+				v.option("TARGET_LAG", v.parseString),
+				v.option("EMBEDDING_MODEL", v.parseIdentPath),
+				v.option("REFRESH_MODE", v.wordsValue("FULL", "INCREMENTAL")),
+				v.option("INITIALIZE", v.wordsValue("ON_CREATE", "ON_SCHEDULE")),
+				v.option("FULL_INDEX_BUILD_INTERVAL_DAYS", num),
+				v.option("REQUEST_LOGGING", v.parseBool),
+				v.option("AUTO_SUSPEND", num),
+				v.commentOption(),
+			)
+		})
+	}
+	// AS <query> — consume a permissive run of the remaining tokens.
+	asQuery := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchKeyword("AS") },
+			func() bool { return !v.AtEnd() },
+			func() bool {
+				return v.ZeroOrMore(func() bool {
+					if v.AtEnd() {
+						return false
+					}
+					v.advance()
+					return true
+				})
+			},
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("CORTEX") },
+		func() bool { return v.MatchWord("SEARCH") },
+		func() bool { return v.MatchWord("SERVICE") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				// Form 1: ON <col> [ PRIMARY KEY ] ATTRIBUTES … options AS …
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchKeyword("ON") },
+						v.parseIdentPath,
+						primaryKey,
+						attributes,
+						options,
+						asQuery,
+					)
+				},
+				// Form 2: TEXT INDEXES … VECTOR INDEXES … [ PRIMARY KEY ] ATTRIBUTES … options AS …
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("TEXT") },
+						func() bool { return v.MatchWord("INDEXES") },
+						commaList(v.parseIdentPath),
+						func() bool { return v.MatchWord("VECTOR") },
+						func() bool { return v.MatchWord("INDEXES") },
+						commaList(v.parseIdentPath),
+						primaryKey,
+						attributes,
+						options,
+						asQuery,
+					)
+				},
+			)
+		},
+	)
 }
 
 // ParseCreateDataMetricFunction validates the Snowflake `CREATE DATA METRIC FUNCTION` command.
@@ -544,7 +1461,73 @@ func (v *Validator) ParseCreateCortexSearchService() bool {
 //	  AS
 //	  '<expression>'
 func (v *Validator) ParseCreateDataMetricFunction() bool {
-	return true
+	// <col_arg> <data_type> — a name followed by a (permissive) type token path.
+	colArg := func() bool {
+		return v.Sequence(v.parseIdentPath, v.parseIdentPath)
+	}
+	// <table_arg> TABLE( <col_arg> <data_type> [ , ... ] )
+	tableArg := func() bool {
+		return v.Sequence(
+			v.parseIdentPath,
+			func() bool { return v.MatchWord("TABLE") },
+			func() bool { return v.parseParenList(colArg) },
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.Optional(func() bool { return v.MatchWord("SECURE") }) },
+		func() bool { return v.MatchWord("DATA") },
+		func() bool { return v.MatchWord("METRIC") },
+		func() bool { return v.MatchWord("FUNCTION") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		// ( <table_arg> TABLE(...) [ , <table_arg> TABLE(...) ] )
+		func() bool { return v.parseParenList(tableArg) },
+		// RETURNS NUMBER [ [ NOT ] NULL ]
+		func() bool { return v.MatchKeyword("RETURNS") },
+		func() bool { return v.MatchWord("NUMBER") },
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.Optional(func() bool { return v.MatchKeyword("NOT") }) },
+					func() bool { return v.MatchWord("NULL") },
+				)
+			})
+		},
+		// [ LANGUAGE SQL ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("LANGUAGE") },
+					func() bool { return v.MatchWord("SQL") },
+				)
+			})
+		},
+		func() bool { return v.Optional(v.commentOption()) },
+		// AS '<expression>'
+		func() bool { return v.MatchKeyword("AS") },
+		func() bool {
+			return v.Choice(
+				v.parseString,
+				// permissive run for an unquoted expression body
+				func() bool {
+					return v.Sequence(
+						func() bool { return !v.AtEnd() },
+						func() bool {
+							return v.ZeroOrMore(func() bool {
+								if v.AtEnd() {
+									return false
+								}
+								v.advance()
+								return true
+							})
+						},
+					)
+				},
+			)
+		},
+	)
 }
 
 // ParseCreateDatabase validates the Snowflake `CREATE DATABASE` command.
@@ -861,7 +1844,69 @@ func (v *Validator) parseParenList(item Rule) bool {
 //	  [ NAMESPACE_FLATTEN_DELIMITER = '<string_literal>' ]
 //	  [ SYNC_INTERVAL_SECONDS = <value> ]
 func (v *Validator) ParseCreateDatabaseCatalogLinked() bool {
-	return true
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	// catalogParams: a CATALOG = '...' plus optional namespace/operation params,
+	// each optionally separated by commas.
+	catalogParam := func() bool {
+		return v.Choice(
+			v.option("CATALOG", v.parseString),
+			v.option("ALLOWED_NAMESPACES", func() bool { return v.parseParenList(v.parseString) }),
+			v.option("BLOCKED_NAMESPACES", func() bool { return v.parseParenList(v.parseString) }),
+			v.option("ALLOWED_WRITE_OPERATIONS", v.wordsValue("NONE", "ALL")),
+			v.option("NAMESPACE_MODE", v.wordsValue("IGNORE_NESTED_NAMESPACE", "FLATTEN_NESTED_NAMESPACE")),
+			v.option("NAMESPACE_FLATTEN_DELIMITER", v.parseString),
+			v.option("SYNC_INTERVAL_SECONDS", num),
+		)
+	}
+	catalogParams := func() bool {
+		return v.Sequence(
+			catalogParam,
+			func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(
+						func() bool { return v.Optional(func() bool { return v.Match(sqltok.Comma) }) },
+						catalogParam,
+					)
+				})
+			},
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		func() bool { return v.MatchKeyword("DATABASE") },
+		v.parseIdentPath,
+		// LINKED_CATALOG = ( catalogParams )
+		func() bool { return v.MatchWord("LINKED_CATALOG") },
+		func() bool { return v.MatchOp("=") },
+		func() bool { return v.Match(sqltok.LParen) },
+		catalogParams,
+		func() bool { return v.Match(sqltok.RParen) },
+		// the trailing properties, comma-separated or not
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Sequence(
+					func() bool { return v.Optional(func() bool { return v.Match(sqltok.Comma) }) },
+					func() bool {
+						return v.Choice(
+							v.option("EXTERNAL_VOLUME", v.parseString),
+							v.option("CATALOG_CASE_SENSITIVITY", v.wordsValue("CASE_SENSITIVE", "CASE_INSENSITIVE")),
+							v.commentOption(),
+							v.tagClause,
+							func() bool {
+								return v.Sequence(
+									func() bool { return v.MatchKeyword("WITH") },
+									func() bool { return v.MatchWord("CONTACT") },
+									func() bool {
+										return v.parseParenList(v.option2(v.parseIdentPath, v.parseIdentPath))
+									},
+								)
+							},
+						)
+					},
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateDatabaseRole validates the Snowflake `CREATE DATABASE ROLE` command.
@@ -875,7 +1920,32 @@ func (v *Validator) ParseCreateDatabaseCatalogLinked() bool {
 //	CREATE OR ALTER DATABASE ROLE <name>
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateDatabaseRole() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		// [ OR { REPLACE | ALTER } ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchKeyword("OR") },
+					v.wordsValue("REPLACE", "ALTER"),
+				)
+			})
+		},
+		func() bool { return v.MatchKeyword("DATABASE") },
+		func() bool { return v.MatchWord("ROLE") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		// [ CLONE <source_database_role_name> ] or [ COMMENT = '...' ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchKeyword("CLONE") },
+					v.parseIdentPath,
+				)
+			})
+		},
+		func() bool { return v.Optional(v.commentOption()) },
+	)
 }
 
 // ParseCreateDataset validates the Snowflake `CREATE DATASET` command.
@@ -885,7 +1955,13 @@ func (v *Validator) ParseCreateDatabaseRole() bool {
 //
 //	CREATE [ OR REPLACE ] [ IF NOT EXISTS ] DATASET <name>
 func (v *Validator) ParseCreateDataset() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		v.ifNotExists,
+		func() bool { return v.MatchWord("DATASET") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseCreateDbtProject validates the Snowflake `CREATE DBT PROJECT` command.
@@ -900,7 +1976,33 @@ func (v *Validator) ParseCreateDataset() bool {
 //	  [ DEFAULT_TARGET = <default_target> ]
 //	  [ EXTERNAL_ACCESS_INTEGRATIONS = ( <integration_name> [ , ... ] ) ]
 func (v *Validator) ParseCreateDbtProject() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("DBT") },
+		func() bool { return v.MatchWord("PROJECT") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		// [ FROM '<source_location>' ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchKeyword("FROM") },
+					v.parseString,
+				)
+			})
+		},
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.commentOption(),
+					v.option("DBT_VERSION", v.parseScalar),
+					v.option("DEFAULT_TARGET", v.parseIdentPath),
+					v.option("EXTERNAL_ACCESS_INTEGRATIONS", func() bool { return v.parseParenList(v.parseIdentPath) }),
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateDcmProject validates the Snowflake `CREATE DCM PROJECT` command.
@@ -912,7 +2014,22 @@ func (v *Validator) ParseCreateDbtProject() bool {
 //	  [LOG_LEVEL = { DEBUG | INFO | WARN | ERROR }]
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateDcmProject() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("DCM") },
+		func() bool { return v.MatchWord("PROJECT") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.option("LOG_LEVEL", v.wordsValue("DEBUG", "INFO", "WARN", "ERROR")),
+					v.commentOption(),
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateDynamicTable validates the Snowflake `CREATE DYNAMIC TABLE` command.
@@ -958,7 +2075,163 @@ func (v *Validator) ParseCreateDcmProject() bool {
 //	  [ ROW_TIMESTAMP = { TRUE | FALSE } ]
 //	  { AS <query> | REFRESH USING ( <dml_statement> ) }
 func (v *Validator) ParseCreateDynamicTable() bool {
-	return true
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	// Permissive consumer for a balanced-paren span (column definition list,
+	// CLUSTER BY exprs, etc.). Assumes the opening LParen is the current token.
+	balancedParens := func() bool {
+		if !v.Match(sqltok.LParen) {
+			return false
+		}
+		depth := 1
+		for depth > 0 {
+			if v.AtEnd() {
+				return false
+			}
+			switch v.Peek().Kind {
+			case sqltok.LParen:
+				depth++
+			case sqltok.RParen:
+				depth--
+			}
+			v.advance()
+		}
+		return true
+	}
+	colList := func() bool { return v.Optional(balancedParens) }
+	policyOn := func(words ...string) Rule {
+		return func() bool {
+			return v.Sequence(
+				func() bool { return v.Optional(func() bool { return v.MatchKeyword("WITH") }) },
+				func() bool { return v.phrase(words...) },
+				v.parseIdentPath,
+				func() bool {
+					return v.Optional(func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchKeyword("ON") },
+							balancedParens,
+						)
+					})
+				},
+			)
+		}
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.Optional(func() bool { return v.MatchWord("TRANSIENT") }) },
+		func() bool { return v.MatchWord("DYNAMIC") },
+		func() bool { return v.MatchWord("TABLE") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		colList,
+		// Order-independent option list.
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.option("TARGET_LAG", func() bool { return v.Choice(v.parseString, v.wordsValue("DOWNSTREAM")) }),
+					v.option("SCHEDULER", v.wordsValue("DISABLE", "ENABLE")),
+					v.option("WAREHOUSE", v.parseIdentPath),
+					v.option("INITIALIZATION_WAREHOUSE", v.parseIdentPath),
+					v.option("REFRESH_MODE", v.wordsValue("AUTO", "FULL", "INCREMENTAL", "ADAPTIVE", "CUSTOM_INCREMENTAL")),
+					v.option("INITIALIZE", v.wordsValue("ON_CREATE", "ON_SCHEDULE")),
+					v.option("DATA_RETENTION_TIME_IN_DAYS", num),
+					v.option("MAX_DATA_EXTENSION_TIME_IN_DAYS", num),
+					v.option("ROW_TIMESTAMP", v.parseBool),
+					v.commentOption(),
+					func() bool { return v.phrase("CLUSTER", "BY") && balancedParens() },
+					func() bool { return v.phrase("COPY", "GRANTS") },
+					func() bool { return v.phrase("COPY", "TAGS") },
+					func() bool { return v.phrase("REQUIRE", "USER") },
+					policyOn("ROW", "ACCESS", "POLICY"),
+					policyOn("STORAGE", "LIFECYCLE", "POLICY"),
+					// [ WITH ] AGGREGATION POLICY <name> [ ENTITY KEY ( ... ) ]
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.Optional(func() bool { return v.MatchKeyword("WITH") }) },
+							func() bool { return v.phrase("AGGREGATION", "POLICY") },
+							v.parseIdentPath,
+							func() bool {
+								return v.Optional(func() bool {
+									return v.Sequence(func() bool { return v.phrase("ENTITY", "KEY") }, balancedParens)
+								})
+							},
+						)
+					},
+					v.tagClause,
+					// FROZEN WHERE ( <expr> )
+					func() bool { return v.phrase("FROZEN", "WHERE") && balancedParens() },
+					// BACKFILL FROM <table_name>
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchWord("BACKFILL") },
+							func() bool { return v.MatchKeyword("FROM") },
+							v.parseIdentPath,
+						)
+					},
+					// START AT ( ... )
+					func() bool { return v.phrase("START", "AT") && balancedParens() },
+					// EXECUTE AS USER <user> [ USE SECONDARY ROLES { ALL | NONE | <role> [, ...] } ]
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchWord("EXECUTE") },
+							func() bool { return v.MatchKeyword("AS") },
+							func() bool { return v.MatchWord("USER") },
+							v.parseIdentPath,
+							func() bool {
+								return v.Optional(func() bool {
+									return v.Sequence(
+										func() bool { return v.phrase("USE", "SECONDARY", "ROLES") },
+										func() bool {
+											return v.Choice(
+												v.wordsValue("ALL", "NONE"),
+												func() bool {
+													return v.Sequence(
+														v.parseIdentPath,
+														func() bool {
+															return v.ZeroOrMore(func() bool {
+																return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, v.parseIdentPath)
+															})
+														},
+													)
+												},
+											)
+										},
+									)
+								})
+							},
+						)
+					},
+				)
+			})
+		},
+		// { AS <query> | REFRESH USING ( <dml> ) }
+		func() bool {
+			return v.Choice(
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchKeyword("AS") },
+						func() bool { return !v.AtEnd() },
+						func() bool {
+							return v.ZeroOrMore(func() bool {
+								if v.AtEnd() {
+									return false
+								}
+								v.advance()
+								return true
+							})
+						},
+					)
+				},
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("REFRESH") },
+						func() bool { return v.MatchWord("USING") },
+						balancedParens,
+					)
+				},
+			)
+		},
+	)
 }
 
 // ParseCreateEventTable validates the Snowflake `CREATE EVENT TABLE` command.
@@ -984,7 +2257,107 @@ func (v *Validator) ParseCreateDynamicTable() bool {
 //	    [ COPY GRANTS ]
 //	    [ ... ]
 func (v *Validator) ParseCreateEventTable() bool {
-	return true
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	balancedParens := func() bool {
+		if !v.Match(sqltok.LParen) {
+			return false
+		}
+		depth := 1
+		for depth > 0 {
+			if v.AtEnd() {
+				return false
+			}
+			switch v.Peek().Kind {
+			case sqltok.LParen:
+				depth++
+			case sqltok.RParen:
+				depth--
+			}
+			v.advance()
+		}
+		return true
+	}
+	// [ { AT | BEFORE } ( … ) ]
+	pointInTime := func() bool {
+		return v.Optional(func() bool {
+			return v.Sequence(
+				v.wordsValue("AT", "BEFORE"),
+				func() bool { return v.Match(sqltok.LParen) },
+				func() bool {
+					return v.Choice(
+						v.arrowOption("TIMESTAMP"),
+						v.arrowOption("OFFSET"),
+						v.arrowOption("STATEMENT"),
+					)
+				},
+				func() bool { return v.Match(sqltok.RParen) },
+			)
+		})
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("EVENT") },
+		func() bool { return v.MatchWord("TABLE") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				// CLONE form
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchKeyword("CLONE") },
+						v.parseIdentPath,
+						pointInTime,
+						func() bool {
+							return v.Optional(func() bool { return v.phrase("COPY", "GRANTS") })
+						},
+					)
+				},
+				// property form
+				func() bool {
+					return v.ZeroOrMore(func() bool {
+						return v.Choice(
+							func() bool { return v.phrase("CLUSTER", "BY") && balancedParens() },
+							v.option("DATA_RETENTION_TIME_IN_DAYS", num),
+							v.option("MAX_DATA_EXTENSION_TIME_IN_DAYS", num),
+							v.option("CHANGE_TRACKING", v.parseBool),
+							v.option("DEFAULT_DDL_COLLATION", v.parseString),
+							func() bool { return v.phrase("COPY", "GRANTS") },
+							// [ WITH ] COMMENT = '...'
+							func() bool {
+								return v.Sequence(
+									func() bool { return v.Optional(func() bool { return v.MatchKeyword("WITH") }) },
+									v.commentOption(),
+								)
+							},
+							// [ WITH ] ROW ACCESS POLICY <name> ON ( ... )
+							func() bool {
+								return v.Sequence(
+									func() bool { return v.Optional(func() bool { return v.MatchKeyword("WITH") }) },
+									func() bool { return v.phrase("ROW", "ACCESS", "POLICY") },
+									v.parseIdentPath,
+									func() bool { return v.MatchKeyword("ON") },
+									balancedParens,
+								)
+							},
+							v.tagClause,
+							// WITH CONTACT ( ... )
+							func() bool {
+								return v.Sequence(
+									func() bool { return v.MatchKeyword("WITH") },
+									func() bool { return v.MatchWord("CONTACT") },
+									func() bool {
+										return v.parseParenList(v.option2(v.parseIdentPath, v.parseIdentPath))
+									},
+								)
+							},
+						)
+					})
+				},
+			)
+		},
+	)
 }
 
 // ParseCreateExperiment validates the Snowflake `CREATE EXPERIMENT` command.
@@ -994,7 +2367,13 @@ func (v *Validator) ParseCreateEventTable() bool {
 //
 //	CREATE [ OR REPLACE ] EXPERIMENT [ IF NOT EXISTS ] <name>
 func (v *Validator) ParseCreateExperiment() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("EXPERIMENT") },
+		v.ifNotExists,
+		v.parseIdentPath,
+	)
 }
 
 // ParseCreateExternalAgent validates the Snowflake `CREATE EXTERNAL AGENT` command.
@@ -1006,7 +2385,25 @@ func (v *Validator) ParseCreateExperiment() bool {
 //	  [ WITH VERSION <version_name> ]
 //	  [ COMMENT = '<comment>' ]
 func (v *Validator) ParseCreateExternalAgent() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("EXTERNAL") },
+		func() bool { return v.MatchWord("AGENT") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		// [ WITH VERSION <version_name> ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchKeyword("WITH") },
+					func() bool { return v.MatchWord("VERSION") },
+					v.parseIdentPath,
+				)
+			})
+		},
+		func() bool { return v.Optional(v.commentOption()) },
+	)
 }
 
 // ParseCreateExternalAccessIntegration validates the Snowflake `CREATE EXTERNAL ACCESS INTEGRATION` command.
@@ -1021,7 +2418,30 @@ func (v *Validator) ParseCreateExternalAgent() bool {
 //	  ENABLED = { TRUE | FALSE }
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateExternalAccessIntegration() bool {
-	return true
+	parenIdentList := func() bool { return v.parseParenList(v.parseIdentPath) }
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("EXTERNAL") },
+		func() bool { return v.MatchWord("ACCESS") },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		v.parseIdentPath,
+		// ALLOWED_NETWORK_RULES and ENABLED are required; the optional ones may
+		// be interleaved, so accept the whole set order-independently.
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.option("ALLOWED_NETWORK_RULES", parenIdentList),
+					v.option("ALLOWED_API_AUTHENTICATION_INTEGRATIONS",
+						func() bool { return v.Choice(parenIdentList, v.wordsValue("NONE")) }),
+					v.option("ALLOWED_AUTHENTICATION_SECRETS",
+						func() bool { return v.Choice(parenIdentList, v.wordsValue("ALL", "NONE")) }),
+					v.option("ENABLED", v.parseBool),
+					v.commentOption(),
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateExternalFunction validates the Snowflake `CREATE EXTERNAL FUNCTION` command.
@@ -1046,7 +2466,95 @@ func (v *Validator) ParseCreateExternalAccessIntegration() bool {
 //
 //	CREATE [ OR ALTER ] EXTERNAL FUNCTION ...
 func (v *Validator) ParseCreateExternalFunction() bool {
-	return true
+	// Permissive consumer for a balanced-paren span (the argument list / RETURNS
+	// TABLE column list). Assumes the opening LParen is the current token.
+	balancedParens := func() bool {
+		if !v.Match(sqltok.LParen) {
+			return false
+		}
+		depth := 1
+		for depth > 0 {
+			if v.AtEnd() {
+				return false
+			}
+			switch v.Peek().Kind {
+			case sqltok.LParen:
+				depth++
+			case sqltok.RParen:
+				depth--
+			}
+			v.advance()
+		}
+		return true
+	}
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	// <result_data_type> — a (possibly parameterised) type name.
+	dataType := func() bool {
+		return v.Sequence(
+			v.parseIdentPath,
+			func() bool { return v.Optional(balancedParens) },
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		// [ OR { REPLACE | ALTER } ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchKeyword("OR") },
+					v.wordsValue("REPLACE", "ALTER"),
+				)
+			})
+		},
+		func() bool { return v.Optional(func() bool { return v.MatchWord("SECURE") }) },
+		func() bool { return v.MatchWord("EXTERNAL") },
+		func() bool { return v.MatchWord("FUNCTION") },
+		v.parseIdentPath,
+		// ( [ <arg_name> <arg_data_type> ] [ , ... ] )
+		balancedParens,
+		func() bool { return v.MatchKeyword("RETURNS") },
+		dataType,
+		// [ [ NOT ] NULL ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.Optional(func() bool { return v.MatchWord("NOT") }) },
+					func() bool { return v.MatchWord("NULL") },
+				)
+			})
+		},
+		// [ { CALLED ON NULL INPUT | { RETURNS NULL ON NULL INPUT | STRICT } } ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Choice(
+					func() bool { return v.phrase("CALLED", "ON", "NULL", "INPUT") },
+					func() bool { return v.phrase("RETURNS", "NULL", "ON", "NULL", "INPUT") },
+					func() bool { return v.MatchWord("STRICT") },
+				)
+			})
+		},
+		// [ { VOLATILE | IMMUTABLE } ]
+		func() bool { return v.Optional(v.wordsValue("VOLATILE", "IMMUTABLE")) },
+		// Order-independent option list (API_INTEGRATION is required but accept
+		// any order). The trailing AS clause is matched after the loop.
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.commentOption(),
+					v.option("API_INTEGRATION", v.parseIdentPath),
+					v.option("HEADERS", balancedParens),
+					v.option("CONTEXT_HEADERS", balancedParens),
+					v.option("MAX_BATCH_ROWS", num),
+					v.option("COMPRESSION", v.parseScalar),
+					v.option("REQUEST_TRANSLATOR", v.parseIdentPath),
+					v.option("RESPONSE_TRANSLATOR", v.parseIdentPath),
+				)
+			})
+		},
+		// AS '<url_of_proxy_and_resource>'
+		func() bool { return v.MatchKeyword("AS") },
+		v.parseString,
+	)
 }
 
 // ParseCreateExternalTable validates the Snowflake `CREATE EXTERNAL TABLE` command.
@@ -1101,7 +2609,101 @@ func (v *Validator) ParseCreateExternalFunction() bool {
 //	  [ COMMENT = '<string_literal>' ]
 //	  [ ... ]
 func (v *Validator) ParseCreateExternalTable() bool {
-	return true
+	balancedParens := func() bool {
+		if !v.Match(sqltok.LParen) {
+			return false
+		}
+		depth := 1
+		for depth > 0 {
+			if v.AtEnd() {
+				return false
+			}
+			switch v.Peek().Kind {
+			case sqltok.LParen:
+				depth++
+			case sqltok.RParen:
+				depth--
+			}
+			v.advance()
+		}
+		return true
+	}
+	// externalStage value: @stage path or a string literal or identifier path.
+	stageValue := func() bool {
+		return v.Choice(
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.Match(sqltok.At) },
+					v.parseIdentPath,
+				)
+			},
+			v.parseString,
+			v.parseIdentPath,
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("EXTERNAL") },
+		func() bool { return v.MatchWord("TABLE") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		// ( column / partition definitions ) — permissive paren span.
+		func() bool { return v.Optional(balancedParens) },
+		// Order-independent option / clause list.
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					// [ PARTITION BY ( ... ) ]
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchKeyword("PARTITION") },
+							func() bool { return v.MatchKeyword("BY") },
+							balancedParens,
+						)
+					},
+					// [ WITH ] LOCATION = externalStage
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.Optional(func() bool { return v.MatchKeyword("WITH") }) },
+							func() bool { return v.MatchWord("LOCATION") },
+							func() bool { return v.MatchOp("=") },
+							stageValue,
+						)
+					},
+					v.option("REFRESH_ON_CREATE", v.parseBool),
+					v.option("AUTO_REFRESH", v.parseBool),
+					v.option("PATTERN", v.parseString),
+					v.option("PARTITION_TYPE", v.wordsValue("USER_SPECIFIED")),
+					v.option("FILE_FORMAT", balancedParens),
+					v.option("TABLE_FORMAT", v.wordsValue("DELTA")),
+					v.option("AWS_SNS_TOPIC", v.parseString),
+					// [ COPY GRANTS ]
+					func() bool { return v.phrase("COPY", "GRANTS") },
+					v.commentOption(),
+					// [ WITH ] ROW ACCESS POLICY <name> ON ( ... )
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.Optional(func() bool { return v.MatchKeyword("WITH") }) },
+							func() bool { return v.phrase("ROW", "ACCESS", "POLICY") },
+							v.parseIdentPath,
+							func() bool { return v.MatchKeyword("ON") },
+							balancedParens,
+						)
+					},
+					v.tagClause,
+					// WITH CONTACT ( ... )
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchKeyword("WITH") },
+							func() bool { return v.MatchWord("CONTACT") },
+							balancedParens,
+						)
+					},
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateExternalVolume validates the Snowflake `CREATE EXTERNAL VOLUME` command.
@@ -1153,7 +2755,46 @@ func (v *Validator) ParseCreateExternalTable() bool {
 //	  CREDENTIALS = ( AWS_KEY_ID = '<string>' AWS_SECRET_KEY = '<string>' )
 //	  STORAGE_ENDPOINT = '<s3_api_compatible_endpoint>'
 func (v *Validator) ParseCreateExternalVolume() bool {
-	return true
+	// STORAGE_LOCATIONS is an outer paren list whose entries are themselves
+	// parenthesised property blocks; consume the whole value permissively as a
+	// balanced-paren span.
+	balancedParens := func() bool {
+		if !v.Match(sqltok.LParen) {
+			return false
+		}
+		depth := 1
+		for depth > 0 {
+			if v.AtEnd() {
+				return false
+			}
+			switch v.Peek().Kind {
+			case sqltok.LParen:
+				depth++
+			case sqltok.RParen:
+				depth--
+			}
+			v.advance()
+		}
+		return true
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("EXTERNAL") },
+		func() bool { return v.MatchWord("VOLUME") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		// Order-independent: STORAGE_LOCATIONS (required) plus options.
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.option("STORAGE_LOCATIONS", balancedParens),
+					v.option("ALLOW_WRITES", v.parseBool),
+					v.commentOption(),
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateFailoverGroup validates the Snowflake `CREATE FAILOVER GROUP` command.
@@ -1177,7 +2818,55 @@ func (v *Validator) ParseCreateExternalVolume() bool {
 //	CREATE FAILOVER GROUP [ IF NOT EXISTS ] <secondary_name>
 //	    AS REPLICA OF <org_name>.<source_account_name>.<name>
 func (v *Validator) ParseCreateFailoverGroup() bool {
-	return true
+	// A bare comma list of identifier-like values: A [ , A ... ].
+	identList := func() bool {
+		return v.Sequence(
+			v.parseIdentPath,
+			func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, v.parseIdentPath)
+				})
+			},
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		func() bool { return v.MatchWord("FAILOVER") },
+		func() bool { return v.MatchWord("GROUP") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(
+				// AS REPLICA OF <org>.<account>.<name>
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchKeyword("AS") },
+						func() bool { return v.MatchWord("REPLICA") },
+						func() bool { return v.MatchKeyword("OF") },
+						v.parseIdentPath,
+					)
+				},
+				// Primary form: order-independent option list.
+				func() bool {
+					return v.ZeroOrMore(func() bool {
+						return v.Choice(
+							v.option("OBJECT_TYPES", identList),
+							v.option("ALLOWED_DATABASES", identList),
+							v.option("ALLOWED_EXTERNAL_VOLUMES", identList),
+							v.option("ALLOWED_SHARES", identList),
+							v.option("ALLOWED_INTEGRATION_TYPES", identList),
+							v.option("ALLOWED_ACCOUNTS", identList),
+							func() bool { return v.phrase("IGNORE", "EDITION", "CHECK") },
+							v.option("REPLICATION_SCHEDULE", v.parseString),
+							v.option("OPTIMIZED_REFRESH", v.parseBool),
+							v.tagClause,
+							v.option("ERROR_INTEGRATION", v.parseIdentPath),
+						)
+					})
+				},
+			)
+		},
+	)
 }
 
 // ParseCreateFeaturePolicy validates the Snowflake `CREATE FEATURE POLICY` command.
@@ -1189,7 +2878,17 @@ func (v *Validator) ParseCreateFailoverGroup() bool {
 //	  BLOCKED_OBJECT_TYPES_FOR_CREATION = ( <type> [ , ... ] )
 //	  [ COMMENT = '<string-literal>' ]
 func (v *Validator) ParseCreateFeaturePolicy() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("FEATURE") },
+		func() bool { return v.MatchWord("POLICY") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		v.option("BLOCKED_OBJECT_TYPES_FOR_CREATION",
+			func() bool { return v.parseParenList(v.parseIdentPath) }),
+		func() bool { return v.Optional(v.commentOption()) },
+	)
 }
 
 // ParseCreateFileFormat validates the Snowflake `CREATE FILE FORMAT` command.
@@ -1230,7 +2929,60 @@ func (v *Validator) ParseCreateFeaturePolicy() bool {
 //	-- If TYPE = JSON | AVRO | ORC | PARQUET | XML
 //	     ... (per-format options; see Reference URL for the full per-type lists)
 func (v *Validator) ParseCreateFileFormat() bool {
-	return true
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	// formatTypeOptions: an order-independent KEY = value list. The CSV options
+	// are modelled explicitly; other-format options are accepted via the generic
+	// fallthrough (any identifier KEY = value).
+	formatOption := func() bool {
+		return v.Choice(
+			v.option("COMPRESSION", v.parseScalar),
+			v.option("RECORD_DELIMITER", v.parseScalar),
+			v.option("FIELD_DELIMITER", v.parseScalar),
+			v.option("MULTI_LINE", v.parseBool),
+			v.option("FILE_EXTENSION", v.parseString),
+			v.option("PARSE_HEADER", v.parseBool),
+			v.option("SKIP_HEADER", num),
+			v.option("SKIP_BLANK_LINES", v.parseBool),
+			v.option("DATE_FORMAT", v.parseScalar),
+			v.option("TIME_FORMAT", v.parseScalar),
+			v.option("TIMESTAMP_FORMAT", v.parseScalar),
+			v.option("BINARY_FORMAT", v.parseScalar),
+			v.option("ESCAPE", v.parseScalar),
+			v.option("ESCAPE_UNENCLOSED_FIELD", v.parseScalar),
+			v.option("TRIM_SPACE", v.parseBool),
+			v.option("FIELD_OPTIONALLY_ENCLOSED_BY", v.parseScalar),
+			v.option("NULL_IF", func() bool { return v.parseParenList(v.parseString) }),
+			v.option("ERROR_ON_COLUMN_COUNT_MISMATCH", v.parseBool),
+			v.option("REPLACE_INVALID_CHARACTERS", v.parseBool),
+			v.option("EMPTY_FIELD_AS_NULL", v.parseBool),
+			v.option("SKIP_BYTE_ORDER_MARK", v.parseBool),
+			v.option("ENCODING", v.parseScalar),
+			// Generic fallthrough for per-format options not enumerated above.
+			func() bool { return v.option2(v.parseIdentPath, v.parseScalar)() },
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool {
+			return v.Optional(v.wordsValue("TEMP", "TEMPORARY", "VOLATILE"))
+		},
+		func() bool { return v.MatchWord("FILE") },
+		func() bool { return v.MatchWord("FORMAT") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		// [ TYPE = { ... } [ formatTypeOptions ] ] and [ COMMENT = '...' ],
+		// in any order.
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.option("TYPE", v.wordsValue("CSV", "JSON", "AVRO", "ORC", "PARQUET", "XML")),
+					v.commentOption(),
+					formatOption,
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateFunction validates the Snowflake `CREATE FUNCTION` command.
@@ -1271,7 +3023,128 @@ func (v *Validator) ParseCreateFileFormat() bool {
 //
 //	-- CREATE OR ALTER FUNCTION ... is also supported.
 func (v *Validator) ParseCreateFunction() bool {
-	return true
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	balancedParens := func() bool {
+		if !v.Match(sqltok.LParen) {
+			return false
+		}
+		depth := 1
+		for depth > 0 {
+			if v.AtEnd() {
+				return false
+			}
+			switch v.Peek().Kind {
+			case sqltok.LParen:
+				depth++
+			case sqltok.RParen:
+				depth--
+			}
+			v.advance()
+		}
+		return true
+	}
+	// RETURNS { <result_data_type> | TABLE ( ... ) }
+	returnsType := func() bool {
+		return v.Choice(
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("TABLE") },
+					func() bool { return v.Optional(balancedParens) },
+				)
+			},
+			func() bool {
+				return v.Sequence(
+					v.parseIdentPath,
+					func() bool { return v.Optional(balancedParens) },
+				)
+			},
+		)
+	}
+	parenIdentList := func() bool { return v.parseParenList(v.parseIdentPath) }
+	parenStringList := func() bool { return v.parseParenList(v.parseString) }
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		// [ OR { REPLACE | ALTER } ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchKeyword("OR") },
+					v.wordsValue("REPLACE", "ALTER"),
+				)
+			})
+		},
+		func() bool { return v.Optional(v.wordsValue("TEMP", "TEMPORARY")) },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("SECURE") }) },
+		func() bool { return v.MatchWord("FUNCTION") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		// argument list ( ... )
+		balancedParens,
+		// [ COPY GRANTS ]
+		func() bool { return v.Optional(func() bool { return v.phrase("COPY", "GRANTS") }) },
+		func() bool { return v.MatchKeyword("RETURNS") },
+		returnsType,
+		// [ [ NOT ] NULL ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.Optional(func() bool { return v.MatchWord("NOT") }) },
+					func() bool { return v.MatchWord("NULL") },
+				)
+			})
+		},
+		// Order-independent body of property clauses (LANGUAGE, HANDLER, etc.).
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchWord("LANGUAGE") },
+							v.parseIdentPath,
+						)
+					},
+					func() bool { return v.phrase("CALLED", "ON", "NULL", "INPUT") },
+					func() bool { return v.phrase("RETURNS", "NULL", "ON", "NULL", "INPUT") },
+					func() bool { return v.MatchWord("STRICT") },
+					v.wordsValue("VOLATILE", "IMMUTABLE"),
+					func() bool { return v.MatchWord("MEMOIZABLE") },
+					func() bool { return v.MatchWord("AGGREGATE") },
+					v.option("RUNTIME_VERSION", v.parseScalar),
+					v.option("ARTIFACT_REPOSITORY", v.parseIdentPath),
+					v.commentOption(),
+					v.option("IMPORTS", parenStringList),
+					v.option("PACKAGES", parenStringList),
+					v.option("HANDLER", v.parseString),
+					v.option("EXTERNAL_ACCESS_INTEGRATIONS", parenIdentList),
+					v.option("SECRETS", balancedParens),
+					v.option("TARGET_PATH", v.parseString),
+					v.option("MAX_BATCH_ROWS", num),
+				)
+			})
+		},
+		// AS '<function_definition>' — accept a string literal or a permissive
+		// balanced run / consume-to-EOF fallback for dollar-quoted-like bodies.
+		func() bool {
+			return v.Sequence(
+				func() bool { return v.MatchKeyword("AS") },
+				func() bool {
+					return v.Choice(
+						v.parseString,
+						func() bool {
+							// consume the remaining tokens as a free-form body
+							if v.AtEnd() {
+								return false
+							}
+							for !v.AtEnd() {
+								v.advance()
+							}
+							return true
+						},
+					)
+				},
+			)
+		},
+	)
 }
 
 // ParseCreateFunctionSnowparkContainerServices validates the Snowflake `CREATE FUNCTION (Snowpark Container Services)` command.
@@ -1296,7 +3169,83 @@ func (v *Validator) ParseCreateFunction() bool {
 //
 //	CREATE [ OR ALTER ] FUNCTION ...
 func (v *Validator) ParseCreateFunctionSnowparkContainerServices() bool {
-	return true
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	balancedParens := func() bool {
+		if !v.Match(sqltok.LParen) {
+			return false
+		}
+		depth := 1
+		for depth > 0 {
+			if v.AtEnd() {
+				return false
+			}
+			switch v.Peek().Kind {
+			case sqltok.LParen:
+				depth++
+			case sqltok.RParen:
+				depth--
+			}
+			v.advance()
+		}
+		return true
+	}
+	dataType := func() bool {
+		return v.Sequence(
+			v.parseIdentPath,
+			func() bool { return v.Optional(balancedParens) },
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchKeyword("OR") },
+					v.wordsValue("REPLACE", "ALTER"),
+				)
+			})
+		},
+		func() bool { return v.MatchWord("FUNCTION") },
+		v.parseIdentPath,
+		balancedParens,
+		func() bool { return v.MatchKeyword("RETURNS") },
+		dataType,
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.Optional(func() bool { return v.MatchWord("NOT") }) },
+					func() bool { return v.MatchWord("NULL") },
+				)
+			})
+		},
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Choice(
+					func() bool { return v.phrase("CALLED", "ON", "NULL", "INPUT") },
+					func() bool { return v.phrase("RETURNS", "NULL", "ON", "NULL", "INPUT") },
+					func() bool { return v.MatchWord("STRICT") },
+				)
+			})
+		},
+		func() bool { return v.Optional(v.wordsValue("VOLATILE", "IMMUTABLE")) },
+		// SERVICE and ENDPOINT are required; accept the whole set in any order.
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.option("SERVICE", v.parseIdentPath),
+					v.option("ENDPOINT", v.parseIdentPath),
+					v.commentOption(),
+					v.option("CONTEXT_HEADERS", balancedParens),
+					v.option("MAX_BATCH_ROWS", num),
+					v.option("MAX_BATCH_RETRIES", num),
+					v.option("ON_BATCH_FAILURE", v.wordsValue("ABORT", "RETURN_NULL")),
+					v.option("BATCH_TIMEOUT_SECS", num),
+				)
+			})
+		},
+		func() bool { return v.MatchKeyword("AS") },
+		v.parseString,
+	)
 }
 
 // ParseCreateGateway validates the Snowflake `CREATE GATEWAY` command.
@@ -1307,7 +3256,31 @@ func (v *Validator) ParseCreateFunctionSnowparkContainerServices() bool {
 //	CREATE [ OR REPLACE ] GATEWAY [ IF NOT EXISTS ] <name>
 //	  FROM SPECIFICATION <specification_text>
 func (v *Validator) ParseCreateGateway() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("GATEWAY") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.MatchKeyword("FROM") },
+		func() bool { return v.MatchWord("SPECIFICATION") },
+		// <specification_text> — free-form; accept a string literal or a
+		// permissive consume-to-EOF run.
+		func() bool {
+			return v.Choice(
+				v.parseString,
+				func() bool {
+					if v.AtEnd() {
+						return false
+					}
+					for !v.AtEnd() {
+						v.advance()
+					}
+					return true
+				},
+			)
+		},
+	)
 }
 
 // ParseCreateGitRepository validates the Snowflake `CREATE GIT REPOSITORY` command.
@@ -1322,7 +3295,26 @@ func (v *Validator) ParseCreateGateway() bool {
 //	  [ COMMENT = '<string_literal>' ]
 //	  [ [ WITH ] TAG ( <tag_name> = '<tag_value>' [ , <tag_name> = '<tag_value>' , ... ] ) ]
 func (v *Validator) ParseCreateGitRepository() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("GIT") },
+		func() bool { return v.MatchWord("REPOSITORY") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		// ORIGIN and API_INTEGRATION are required; accept the whole set in any order.
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.option("ORIGIN", v.parseString),
+					v.option("API_INTEGRATION", v.parseIdentPath),
+					v.option("GIT_CREDENTIALS", v.parseIdentPath),
+					v.commentOption(),
+					v.tagClause,
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateHybridTable validates the Snowflake `CREATE HYBRID TABLE` command.
@@ -1372,7 +3364,39 @@ func (v *Validator) ParseCreateGitRepository() bool {
 //	  INDEX <index_name> ( <col_name> [ , <col_name> , ... ] )
 //	    [ INCLUDE ( <col_name> [ , <col_name> , ... ] ) ]
 func (v *Validator) ParseCreateHybridTable() bool {
-	return true
+	// The column/constraint/index list is free-form; consume it as a balanced
+	// paren span.
+	balancedParens := func() bool {
+		if !v.Match(sqltok.LParen) {
+			return false
+		}
+		depth := 1
+		for depth > 0 {
+			if v.AtEnd() {
+				return false
+			}
+			switch v.Peek().Kind {
+			case sqltok.LParen:
+				depth++
+			case sqltok.RParen:
+				depth--
+			}
+			v.advance()
+		}
+		return true
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("HYBRID") },
+		func() bool { return v.MatchWord("TABLE") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		// ( column / constraint / index definitions )
+		balancedParens,
+		// [ COMMENT = '<string_literal>' ]
+		func() bool { return v.Optional(v.commentOption()) },
+	)
 }
 
 // ParseCreateIcebergTable validates the Snowflake `CREATE ICEBERG TABLE` command.
@@ -1414,7 +3438,146 @@ func (v *Validator) ParseCreateHybridTable() bool {
 //	-- Additional forms: CTAS (AS SELECT), LIKE, and create-from-catalog/files
 //	-- variants (CATALOG_TABLE_NAME / METADATA_FILE_PATH / BASE_LOCATION).
 func (v *Validator) ParseCreateIcebergTable() bool {
-	return true
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	balancedParens := func() bool {
+		if !v.Match(sqltok.LParen) {
+			return false
+		}
+		depth := 1
+		for depth > 0 {
+			if v.AtEnd() {
+				return false
+			}
+			switch v.Peek().Kind {
+			case sqltok.LParen:
+				depth++
+			case sqltok.RParen:
+				depth--
+			}
+			v.advance()
+		}
+		return true
+	}
+	// The order-independent body of Iceberg-table options.
+	optionList := func() bool {
+		return v.ZeroOrMore(func() bool {
+			return v.Choice(
+				// PARTITION BY ( ... )
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchKeyword("PARTITION") },
+						func() bool { return v.MatchKeyword("BY") },
+						balancedParens,
+					)
+				},
+				// CLUSTER BY ( ... )
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchKeyword("CLUSTER") },
+						func() bool { return v.MatchKeyword("BY") },
+						balancedParens,
+					)
+				},
+				v.option("PATH_LAYOUT", v.wordsValue("FLAT", "HIERARCHICAL")),
+				v.option("EXTERNAL_VOLUME", v.parseScalar),
+				v.option("CATALOG", v.parseScalar),
+				v.option("CATALOG_TABLE_NAME", v.parseString),
+				v.option("CATALOG_NAMESPACE", v.parseString),
+				v.option("METADATA_FILE_PATH", v.parseString),
+				v.option("BASE_LOCATION", v.parseString),
+				v.option("TARGET_FILE_SIZE", v.parseString),
+				v.option("CATALOG_SYNC", v.parseString),
+				v.option("STORAGE_SERIALIZATION_POLICY", v.wordsValue("COMPATIBLE", "OPTIMIZED")),
+				v.option("DATA_RETENTION_TIME_IN_DAYS", num),
+				v.option("MAX_DATA_EXTENSION_TIME_IN_DAYS", num),
+				v.option("CHANGE_TRACKING", v.parseBool),
+				v.option("REPLACE_INVALID_CHARACTERS", v.parseBool),
+				v.option("AUTO_REFRESH", v.parseBool),
+				func() bool { return v.phrase("COPY", "GRANTS") },
+				func() bool { return v.phrase("COPY", "TAGS") },
+				v.option("ERROR_LOGGING", v.parseBool),
+				v.commentOption(),
+				v.option("ICEBERG_VERSION", num),
+				v.option("ICEBERG_MERGE_ON_READ_BEHAVIOR", v.parseString),
+				v.option("ENABLE_ICEBERG_MERGE_ON_READ", v.parseBool),
+				v.tagClause,
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchKeyword("WITH") },
+						func() bool { return v.MatchWord("CONTACT") },
+						balancedParens,
+					)
+				},
+			)
+		})
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.Optional(func() bool { return v.MatchWord("TRANSIENT") }) },
+		func() bool { return v.MatchWord("ICEBERG") },
+		func() bool { return v.MatchWord("TABLE") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		// One of: column list + options, LIKE <src>, AS <query>, or just options.
+		func() bool {
+			return v.Choice(
+				// LIKE <source_table>
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchKeyword("LIKE") },
+						v.parseIdentPath,
+						optionList,
+					)
+				},
+				// ( column definitions ) [ options ] [ AS <query> ]
+				func() bool {
+					return v.Sequence(
+						balancedParens,
+						optionList,
+						func() bool {
+							return v.Optional(func() bool {
+								return v.Sequence(
+									func() bool { return v.MatchKeyword("AS") },
+									func() bool {
+										if v.AtEnd() {
+											return false
+										}
+										for !v.AtEnd() {
+											v.advance()
+										}
+										return true
+									},
+								)
+							})
+						},
+					)
+				},
+				// options only [ AS <query> ]
+				func() bool {
+					return v.Sequence(
+						optionList,
+						func() bool {
+							return v.Optional(func() bool {
+								return v.Sequence(
+									func() bool { return v.MatchKeyword("AS") },
+									func() bool {
+										if v.AtEnd() {
+											return false
+										}
+										for !v.AtEnd() {
+											v.advance()
+										}
+										return true
+									},
+								)
+							})
+						},
+					)
+				},
+			)
+		},
+	)
 }
 
 // ParseCreateIcebergTableAwsGlueCatalog validates the Snowflake `CREATE ICEBERG TABLE (AWS Glue catalog)` command.
@@ -1433,7 +3596,55 @@ func (v *Validator) ParseCreateIcebergTable() bool {
 //	  [ [ WITH ] TAG ( <tag_name> = '<tag_value>' [ , <tag_name> = '<tag_value>' , ... ] ) ]
 //	  [ WITH CONTACT ( <purpose> = <contact_name> [ , <purpose> = <contact_name> ... ] ) ]
 func (v *Validator) ParseCreateIcebergTableAwsGlueCatalog() bool {
-	return true
+	balancedParens := func() bool {
+		if !v.Match(sqltok.LParen) {
+			return false
+		}
+		depth := 1
+		for depth > 0 {
+			if v.AtEnd() {
+				return false
+			}
+			switch v.Peek().Kind {
+			case sqltok.LParen:
+				depth++
+			case sqltok.RParen:
+				depth--
+			}
+			v.advance()
+		}
+		return true
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("ICEBERG") },
+		func() bool { return v.MatchWord("TABLE") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		// CATALOG_TABLE_NAME is required; accept the whole set order-independently.
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.option("EXTERNAL_VOLUME", v.parseString),
+					v.option("CATALOG", v.parseString),
+					v.option("CATALOG_TABLE_NAME", v.parseString),
+					v.option("CATALOG_NAMESPACE", v.parseString),
+					v.option("REPLACE_INVALID_CHARACTERS", v.parseBool),
+					v.option("AUTO_REFRESH", v.parseBool),
+					v.commentOption(),
+					v.tagClause,
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchKeyword("WITH") },
+							func() bool { return v.MatchWord("CONTACT") },
+							balancedParens,
+						)
+					},
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateIcebergTableDeltaFiles validates the Snowflake `CREATE ICEBERG TABLE (Delta files)` command.
@@ -1451,7 +3662,54 @@ func (v *Validator) ParseCreateIcebergTableAwsGlueCatalog() bool {
 //	  [ [ WITH ] TAG ( <tag_name> = '<tag_value>' [ , <tag_name> = '<tag_value>' , ... ] ) ]
 //	  [ WITH CONTACT ( <purpose> = <contact_name> [ , <purpose> = <contact_name> ... ] ) ]
 func (v *Validator) ParseCreateIcebergTableDeltaFiles() bool {
-	return true
+	balancedParens := func() bool {
+		if !v.Match(sqltok.LParen) {
+			return false
+		}
+		depth := 1
+		for depth > 0 {
+			if v.AtEnd() {
+				return false
+			}
+			switch v.Peek().Kind {
+			case sqltok.LParen:
+				depth++
+			case sqltok.RParen:
+				depth--
+			}
+			v.advance()
+		}
+		return true
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("ICEBERG") },
+		func() bool { return v.MatchWord("TABLE") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		// BASE_LOCATION is required; accept the whole set order-independently.
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.option("EXTERNAL_VOLUME", v.parseString),
+					v.option("CATALOG", v.parseString),
+					v.option("BASE_LOCATION", v.parseString),
+					v.option("REPLACE_INVALID_CHARACTERS", v.parseBool),
+					v.option("AUTO_REFRESH", v.parseBool),
+					v.commentOption(),
+					v.tagClause,
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchKeyword("WITH") },
+							func() bool { return v.MatchWord("CONTACT") },
+							balancedParens,
+						)
+					},
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateIcebergTableIcebergFiles validates the Snowflake `CREATE ICEBERG TABLE (Iceberg files)` command.
@@ -1468,7 +3726,53 @@ func (v *Validator) ParseCreateIcebergTableDeltaFiles() bool {
 //	  [ [ WITH ] TAG ( <tag_name> = '<tag_value>' [ , <tag_name> = '<tag_value>' , ... ] ) ]
 //	  [ WITH CONTACT ( <purpose> = <contact_name> [ , <purpose> = <contact_name> ... ] ) ]
 func (v *Validator) ParseCreateIcebergTableIcebergFiles() bool {
-	return true
+	balancedParens := func() bool {
+		if !v.Match(sqltok.LParen) {
+			return false
+		}
+		depth := 1
+		for depth > 0 {
+			if v.AtEnd() {
+				return false
+			}
+			switch v.Peek().Kind {
+			case sqltok.LParen:
+				depth++
+			case sqltok.RParen:
+				depth--
+			}
+			v.advance()
+		}
+		return true
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("ICEBERG") },
+		func() bool { return v.MatchWord("TABLE") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		// METADATA_FILE_PATH is required; accept the whole set order-independently.
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.option("EXTERNAL_VOLUME", v.parseString),
+					v.option("CATALOG", v.parseString),
+					v.option("METADATA_FILE_PATH", v.parseString),
+					v.option("REPLACE_INVALID_CHARACTERS", v.parseBool),
+					v.commentOption(),
+					v.tagClause,
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchKeyword("WITH") },
+							func() bool { return v.MatchWord("CONTACT") },
+							balancedParens,
+						)
+					},
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateIcebergTableIcebergRestCatalog validates the Snowflake `CREATE ICEBERG TABLE (Iceberg REST catalog)` command.
@@ -1492,7 +3796,60 @@ func (v *Validator) ParseCreateIcebergTableIcebergFiles() bool {
 //	  [ [ WITH ] TAG ( <tag_name> = '<tag_value>' [ , <tag_name> = '<tag_value>' , ... ] ) ]
 //	  [ WITH CONTACT ( <purpose> = <contact_name> [ , <purpose> = <contact_name> ... ] ) ]
 func (v *Validator) ParseCreateIcebergTableIcebergRestCatalog() bool {
-	return true
+	balancedParens := func() bool {
+		if !v.Match(sqltok.LParen) {
+			return false
+		}
+		depth := 1
+		for depth > 0 {
+			if v.AtEnd() {
+				return false
+			}
+			switch v.Peek().Kind {
+			case sqltok.LParen:
+				depth++
+			case sqltok.RParen:
+				depth--
+			}
+			v.advance()
+		}
+		return true
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("ICEBERG") },
+		func() bool { return v.MatchWord("TABLE") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		// CATALOG_TABLE_NAME is required; accept the whole set order-independently.
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.option("EXTERNAL_VOLUME", v.parseString),
+					v.option("CATALOG", v.parseString),
+					v.option("CATALOG_TABLE_NAME", v.parseString),
+					v.option("CATALOG_NAMESPACE", v.parseString),
+					v.option("PATH_LAYOUT", v.wordsValue("FLAT", "HIERARCHICAL")),
+					v.option("TARGET_FILE_SIZE", v.parseString),
+					v.option("REPLACE_INVALID_CHARACTERS", v.parseBool),
+					v.option("AUTO_REFRESH", v.parseBool),
+					v.commentOption(),
+					v.option("STORAGE_SERIALIZATION_POLICY", v.wordsValue("COMPATIBLE", "OPTIMIZED")),
+					v.option("ICEBERG_MERGE_ON_READ_BEHAVIOR", v.parseString),
+					v.option("ENABLE_ICEBERG_MERGE_ON_READ", v.parseBool),
+					v.tagClause,
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchKeyword("WITH") },
+							func() bool { return v.MatchWord("CONTACT") },
+							balancedParens,
+						)
+					},
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateIcebergTableSnowflakeCatalog validates the Snowflake `CREATE ICEBERG TABLE (Snowflake catalog)` command.
@@ -1537,7 +3894,98 @@ func (v *Validator) ParseCreateIcebergTableIcebergRestCatalog() bool {
 //	  [ WITH CONTACT ( <purpose> = <contact_name> [ , <purpose> = <contact_name> ... ] ) ]
 //	  [ ENABLE_DATA_COMPACTION = { TRUE | FALSE } ]
 func (v *Validator) ParseCreateIcebergTableSnowflakeCatalog() bool {
-	return true
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	phraseRule := func(words ...string) Rule { return func() bool { return v.phrase(words...) } }
+	// The column-definition list is free-form; consume a balanced ( ... ) span.
+	var consumeBalanced func() bool
+	consumeBalanced = func() bool {
+		return v.ZeroOrMore(func() bool {
+			return v.Choice(
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.Match(sqltok.LParen) },
+						consumeBalanced,
+						func() bool { return v.Match(sqltok.RParen) },
+					)
+				},
+				func() bool {
+					if v.Peek().Kind == sqltok.RParen || v.AtEnd() {
+						return false
+					}
+					v.advance()
+					return true
+				},
+			)
+		})
+	}
+	parenSpan := func() bool {
+		return v.Sequence(
+			func() bool { return v.Match(sqltok.LParen) },
+			consumeBalanced,
+			func() bool { return v.Match(sqltok.RParen) },
+		)
+	}
+	policyPolicy := func(words ...string) Rule {
+		return func() bool {
+			return v.Sequence(
+				func() bool { return v.Optional(func() bool { return v.MatchWord("WITH") }) },
+				phraseRule(words...),
+				v.parseIdentPath,
+			)
+		}
+	}
+	prop := func() bool {
+		return v.Choice(
+			func() bool {
+				return v.Sequence(phraseRule("PARTITION", "BY"), parenSpan)
+			},
+			v.option("PATH_LAYOUT", v.wordsValue("FLAT", "HIERARCHICAL")),
+			func() bool {
+				return v.Sequence(phraseRule("CLUSTER", "BY"), parenSpan)
+			},
+			v.option("EXTERNAL_VOLUME", v.parseString),
+			v.option("CATALOG_SYNC", v.parseString),
+			v.option("CATALOG", v.parseString),
+			v.option("BASE_LOCATION", v.parseString),
+			v.option("TARGET_FILE_SIZE", v.parseString),
+			v.option("STORAGE_SERIALIZATION_POLICY", v.wordsValue("COMPATIBLE", "OPTIMIZED")),
+			v.option("DATA_RETENTION_TIME_IN_DAYS", num),
+			v.option("MAX_DATA_EXTENSION_TIME_IN_DAYS", num),
+			v.option("CHANGE_TRACKING", v.parseBool),
+			func() bool { return v.phrase("COPY", "GRANTS") },
+			func() bool { return v.phrase("COPY", "TAGS") },
+			v.option("ERROR_LOGGING", v.parseBool),
+			v.option("ICEBERG_VERSION", num),
+			v.option("ICEBERG_MERGE_ON_READ_BEHAVIOR", v.parseString),
+			v.option("ENABLE_ICEBERG_MERGE_ON_READ", v.parseBool),
+			v.option("ENABLE_DATA_COMPACTION", v.parseBool),
+			func() bool {
+				return v.Sequence(policyPolicy("ROW", "ACCESS", "POLICY"),
+					func() bool { return v.MatchWord("ON") }, parenSpan)
+			},
+			policyPolicy("AGGREGATION", "POLICY"),
+			v.tagClause,
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("WITH") },
+					func() bool { return v.MatchWord("CONTACT") },
+					parenSpan,
+				)
+			},
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.Optional(func() bool { return v.MatchWord("TRANSIENT") }) },
+		func() bool { return v.MatchWord("ICEBERG") },
+		func() bool { return v.MatchWord("TABLE") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		parenSpan,
+		func() bool { return v.ZeroOrMore(prop) },
+	)
 }
 
 // ParseCreateImageRepository validates the Snowflake `CREATE IMAGE REPOSITORY` command.
@@ -1550,7 +3998,25 @@ func (v *Validator) ParseCreateIcebergTableSnowflakeCatalog() bool {
 //	  [ COMMENT = '<string_literal>' ]
 //	  [ [ WITH ] TAG ( <tag_name> = '<tag_value>' [ , <tag_name> = '<tag_value>' , ... ] ) ]
 func (v *Validator) ParseCreateImageRepository() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("IMAGE") },
+		func() bool { return v.MatchWord("REPOSITORY") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.option("ENCRYPTION", func() bool {
+						return v.parseParenList(v.option("TYPE", v.parseString))
+					}),
+					v.commentOption(),
+					v.tagClause,
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateIndex validates the Snowflake `CREATE INDEX` command.
@@ -1563,7 +4029,24 @@ func (v *Validator) ParseCreateImageRepository() bool {
 //	    ( <col_name> [ , <col_name> , ... ] )
 //	    [ INCLUDE ( <col_name> [ , <col_name> , ... ] ) ]
 func (v *Validator) ParseCreateIndex() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("INDEX") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.MatchWord("ON") },
+		v.parseIdentPath,
+		func() bool { return v.parseParenList(v.parseIdentPath) },
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("INCLUDE") },
+					func() bool { return v.parseParenList(v.parseIdentPath) },
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateIntegration validates the Snowflake `CREATE INTEGRATION` command.
@@ -1575,7 +4058,59 @@ func (v *Validator) ParseCreateIndex() bool {
 //	  [ <integration_type_params> ]
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateIntegration() bool {
-	return true
+	// CREATE [ OR REPLACE ] <integration_type> INTEGRATION [ IF NOT EXISTS ]
+	// <name> <permissive parameter run>. The integration_type words and the
+	// type-specific parameter block are too varied to model strictly, so consume
+	// any identifier-like words before INTEGRATION and a balanced run afterward.
+	var consumeBalanced func() bool
+	consumeBalanced = func() bool {
+		return v.ZeroOrMore(func() bool {
+			return v.Choice(
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.Match(sqltok.LParen) },
+						consumeBalanced,
+						func() bool { return v.Match(sqltok.RParen) },
+					)
+				},
+				func() bool {
+					if v.Peek().Kind == sqltok.RParen || v.AtEnd() {
+						return false
+					}
+					v.advance()
+					return true
+				},
+			)
+		})
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		// at least one type word, then the INTEGRATION keyword. Consume any
+		// leading words (e.g. API, SECURITY, STORAGE, NOTIFICATION) up to it.
+		func() bool {
+			// a type word is any ident-like token that is NOT "INTEGRATION".
+			typeWord := func() bool {
+				saved := v.save()
+				if v.MatchWord("INTEGRATION") {
+					v.restore(saved)
+					return false
+				}
+				t := v.Peek()
+				if t.Kind.IsIdentLike() {
+					v.advance()
+					return true
+				}
+				v.expect("integration type")
+				return false
+			}
+			return v.Sequence(typeWord, func() bool { return v.ZeroOrMore(typeWord) })
+		},
+		func() bool { return v.MatchWord("INTEGRATION") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		consumeBalanced,
+	)
 }
 
 // ParseCreateInteractiveTable validates the Snowflake `CREATE INTERACTIVE TABLE` command.
@@ -1600,7 +4135,109 @@ func (v *Validator) ParseCreateIntegration() bool {
 //	  [ [ WITH ] STORAGE LIFECYCLE POLICY <policy_name> ON ( <col_name> [ , <col_name> ... ] ) ]
 //	  AS <query>
 func (v *Validator) ParseCreateInteractiveTable() bool {
-	return true
+	phraseRule := func(words ...string) Rule { return func() bool { return v.phrase(words...) } }
+	var consumeBalanced func() bool
+	consumeBalanced = func() bool {
+		return v.ZeroOrMore(func() bool {
+			return v.Choice(
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.Match(sqltok.LParen) },
+						consumeBalanced,
+						func() bool { return v.Match(sqltok.RParen) },
+					)
+				},
+				func() bool {
+					if v.Peek().Kind == sqltok.RParen || v.AtEnd() {
+						return false
+					}
+					v.advance()
+					return true
+				},
+			)
+		})
+	}
+	parenSpan := func() bool {
+		return v.Sequence(
+			func() bool { return v.Match(sqltok.LParen) },
+			consumeBalanced,
+			func() bool { return v.Match(sqltok.RParen) },
+		)
+	}
+	// AS <query>: consume everything to EOF.
+	consumeRest := func() bool {
+		return v.ZeroOrMore(func() bool {
+			if v.AtEnd() {
+				return false
+			}
+			v.advance()
+			return true
+		})
+	}
+	prop := func() bool {
+		return v.Choice(
+			v.option("TARGET_LAG", v.parseString),
+			v.option("WAREHOUSE", v.parseIdentPath),
+			v.commentOption(),
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.Optional(func() bool { return v.MatchWord("WITH") }) },
+					phraseRule("ROW", "ACCESS", "POLICY"),
+					v.parseIdentPath,
+					func() bool { return v.MatchWord("ON") },
+					parenSpan,
+				)
+			},
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.Optional(func() bool { return v.MatchWord("WITH") }) },
+					phraseRule("AGGREGATION", "POLICY"),
+					v.parseIdentPath,
+					func() bool {
+						return v.Optional(func() bool {
+							return v.Sequence(phraseRule("ENTITY", "KEY"), parenSpan)
+						})
+					},
+				)
+			},
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.Optional(func() bool { return v.MatchWord("WITH") }) },
+					phraseRule("JOIN", "POLICY"),
+					v.parseIdentPath,
+					func() bool {
+						return v.Optional(func() bool {
+							return v.Sequence(phraseRule("ALLOWED", "JOIN", "KEYS"), parenSpan)
+						})
+					},
+				)
+			},
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.Optional(func() bool { return v.MatchWord("WITH") }) },
+					phraseRule("STORAGE", "LIFECYCLE", "POLICY"),
+					v.parseIdentPath,
+					func() bool { return v.MatchWord("ON") },
+					parenSpan,
+				)
+			},
+			v.tagClause,
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("INTERACTIVE") },
+		func() bool { return v.MatchWord("TABLE") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		parenSpan,
+		phraseRule("CLUSTER", "BY"),
+		parenSpan,
+		func() bool { return v.ZeroOrMore(prop) },
+		func() bool { return v.MatchKeyword("AS") },
+		consumeRest,
+	)
 }
 
 // ParseCreateInteractiveWarehouse validates the Snowflake `CREATE INTERACTIVE WAREHOUSE` command.
@@ -1631,7 +4268,41 @@ func (v *Validator) ParseCreateInteractiveTable() bool {
 //	  STATEMENT_QUEUED_TIMEOUT_IN_SECONDS = <num>
 //	  STATEMENT_TIMEOUT_IN_SECONDS = <num>
 func (v *Validator) ParseCreateInteractiveWarehouse() bool {
-	return true
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	prop := func() bool {
+		return v.Choice(
+			v.option("WAREHOUSE_SIZE", v.parseScalar),
+			v.option("MAX_CLUSTER_COUNT", num),
+			v.option("MIN_CLUSTER_COUNT", num),
+			v.option("AUTO_SUSPEND", func() bool { return v.Choice(num, func() bool { return v.MatchWord("NULL") }) }),
+			v.option("AUTO_RESUME", v.parseBool),
+			v.option("INITIALLY_SUSPENDED", v.parseBool),
+			v.option("RESOURCE_MONITOR", v.parseIdentPath),
+			v.option("MAX_CONCURRENCY_LEVEL", num),
+			v.option("STATEMENT_QUEUED_TIMEOUT_IN_SECONDS", num),
+			v.option("STATEMENT_TIMEOUT_IN_SECONDS", num),
+			v.commentOption(),
+			v.tagClause,
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("INTERACTIVE") },
+		func() bool { return v.MatchWord("WAREHOUSE") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("TABLES") },
+					func() bool { return v.parseParenList(v.parseIdentPath) },
+				)
+			})
+		},
+		func() bool { return v.Optional(func() bool { return v.MatchWord("WITH") }) },
+		func() bool { return v.ZeroOrMore(prop) },
+	)
 }
 
 // ParseCreateJoinPolicy validates the Snowflake `CREATE JOIN POLICY` command.
@@ -1643,7 +4314,42 @@ func (v *Validator) ParseCreateInteractiveWarehouse() bool {
 //	  AS () RETURNS JOIN_CONSTRAINT -> <body>
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateJoinPolicy() bool {
-	return true
+	// The policy body after `->` is a free-form expression; consume it permissively
+	// up to an optional trailing COMMENT = '...' or EOF.
+	consumeBody := func() bool {
+		return v.ZeroOrMore(func() bool {
+			if v.AtEnd() {
+				return false
+			}
+			// stop at a trailing COMMENT option
+			saved := v.save()
+			if v.MatchWord("COMMENT") && v.MatchOp("=") {
+				v.restore(saved)
+				return false
+			}
+			v.restore(saved)
+			v.advance()
+			return true
+		})
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("JOIN") },
+		func() bool { return v.MatchWord("POLICY") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.MatchKeyword("AS") },
+		func() bool { return v.Match(sqltok.LParen) },
+		func() bool { return v.Match(sqltok.RParen) },
+		func() bool { return v.MatchWord("RETURNS") },
+		func() bool { return v.MatchWord("JOIN_CONSTRAINT") },
+		// `->` tokenizes as two operators "-" then ">".
+		func() bool { return v.MatchOp("-") },
+		func() bool { return v.MatchOp(">") },
+		consumeBody,
+		func() bool { return v.Optional(v.commentOption()) },
+	)
 }
 
 // ParseCreateListing validates the Snowflake `CREATE LISTING` command.
@@ -1664,7 +4370,49 @@ func (v *Validator) ParseCreateJoinPolicy() bool {
 //	  [ PUBLISH = { TRUE | FALSE } ]
 //	  [ REVIEW = { TRUE | FALSE } ]
 func (v *Validator) ParseCreateListing() bool {
-	return true
+	option := func() bool {
+		return v.Choice(
+			v.option("PUBLISH", v.parseBool),
+			v.option("REVIEW", v.parseBool),
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		func() bool { return v.MatchWord("EXTERNAL") },
+		func() bool { return v.MatchWord("LISTING") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		// [ { SHARE <share> | APPLICATION PACKAGE <package> } ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Choice(
+					func() bool {
+						return v.Sequence(func() bool { return v.MatchKeyword("SHARE") }, v.parseIdentPath)
+					},
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchWord("APPLICATION") },
+							func() bool { return v.MatchWord("PACKAGE") },
+							v.parseIdentPath,
+						)
+					},
+				)
+			})
+		},
+		// { AS '<manifest>' | FROM '<stage_location>' }
+		func() bool {
+			return v.Choice(
+				func() bool {
+					return v.Sequence(func() bool { return v.MatchKeyword("AS") }, v.parseString)
+				},
+				func() bool {
+					return v.Sequence(func() bool { return v.MatchKeyword("FROM") }, v.parseString)
+				},
+			)
+		},
+		func() bool { return v.ZeroOrMore(option) },
+	)
 }
 
 // ParseCreateMaintenancePolicy validates the Snowflake `CREATE MAINTENANCE POLICY` command.
@@ -1676,7 +4424,16 @@ func (v *Validator) ParseCreateListing() bool {
 //	  SCHEDULE = 'USING CRON <cron_spec> <timezone>'
 //	  [ COMMENT = '<comment>' ]
 func (v *Validator) ParseCreateMaintenancePolicy() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("MAINTENANCE") },
+		func() bool { return v.MatchWord("POLICY") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		v.option("SCHEDULE", v.parseString),
+		func() bool { return v.Optional(v.commentOption()) },
+	)
 }
 
 // ParseCreateManagedAccount validates the Snowflake `CREATE MANAGED ACCOUNT` command.
@@ -1689,7 +4446,30 @@ func (v *Validator) ParseCreateMaintenancePolicy() bool {
 //	    TYPE = READER ,
 //	    [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateManagedAccount() bool {
-	return true
+	// Params are comma-separated and order may vary; accept the documented set.
+	param := func() bool {
+		return v.Choice(
+			v.option("ADMIN_NAME", v.parseScalar),
+			v.option("ADMIN_PASSWORD", v.parseScalar),
+			v.option("TYPE", func() bool { return v.MatchWord("READER") }),
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		func() bool { return v.MatchWord("MANAGED") },
+		func() bool { return v.MatchWord("ACCOUNT") },
+		v.parseIdentPath,
+		param,
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Sequence(
+					func() bool { return v.Optional(func() bool { return v.Match(sqltok.Comma) }) },
+					param,
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateMaskingPolicy validates the Snowflake `CREATE MASKING POLICY` command.
@@ -1709,7 +4489,83 @@ func (v *Validator) ParseCreateManagedAccount() bool {
 //	[ COMMENT = '<string_literal>' ]
 //	[ EXEMPT_OTHER_POLICIES = { TRUE | FALSE } ]
 func (v *Validator) ParseCreateMaskingPolicy() bool {
-	return true
+	// arg list: ( <name> <type> [ , <name> <type> ... ] ) — consume balanced parens.
+	var consumeBalanced func() bool
+	consumeBalanced = func() bool {
+		return v.ZeroOrMore(func() bool {
+			return v.Choice(
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.Match(sqltok.LParen) },
+						consumeBalanced,
+						func() bool { return v.Match(sqltok.RParen) },
+					)
+				},
+				func() bool {
+					if v.Peek().Kind == sqltok.RParen || v.AtEnd() {
+						return false
+					}
+					v.advance()
+					return true
+				},
+			)
+		})
+	}
+	parenSpan := func() bool {
+		return v.Sequence(
+			func() bool { return v.Match(sqltok.LParen) },
+			consumeBalanced,
+			func() bool { return v.Match(sqltok.RParen) },
+		)
+	}
+	// body after `->`: free-form expression up to trailing COMMENT/EXEMPT or EOF.
+	consumeBody := func() bool {
+		return v.ZeroOrMore(func() bool {
+			if v.AtEnd() {
+				return false
+			}
+			saved := v.save()
+			stop := (v.MatchWord("COMMENT") || v.MatchWord("EXEMPT_OTHER_POLICIES")) && v.MatchOp("=")
+			v.restore(saved)
+			if stop {
+				return false
+			}
+			v.advance()
+			return true
+		})
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		// OR REPLACE | OR ALTER
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchKeyword("OR") },
+					v.wordsValue("REPLACE", "ALTER"),
+				)
+			})
+		},
+		func() bool { return v.MatchWord("MASKING") },
+		func() bool { return v.MatchWord("POLICY") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.MatchKeyword("AS") },
+		parenSpan,
+		func() bool { return v.MatchWord("RETURNS") },
+		v.parseIdentPath,
+		// `->` tokenizes as two operators "-" then ">".
+		func() bool { return v.MatchOp("-") },
+		func() bool { return v.MatchOp(">") },
+		consumeBody,
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.commentOption(),
+					v.option("EXEMPT_OTHER_POLICIES", v.parseBool),
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateMaterializedView validates the Snowflake `CREATE MATERIALIZED VIEW` command.
@@ -1732,7 +4588,97 @@ func (v *Validator) ParseCreateMaskingPolicy() bool {
 //	  [ WITH CONTACT ( <purpose> = <contact_name> [ , <purpose> = <contact_name> ... ] ) ]
 //	  AS <select_statement>
 func (v *Validator) ParseCreateMaterializedView() bool {
-	return true
+	phraseRule := func(words ...string) Rule { return func() bool { return v.phrase(words...) } }
+	var consumeBalanced func() bool
+	consumeBalanced = func() bool {
+		return v.ZeroOrMore(func() bool {
+			return v.Choice(
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.Match(sqltok.LParen) },
+						consumeBalanced,
+						func() bool { return v.Match(sqltok.RParen) },
+					)
+				},
+				func() bool {
+					if v.Peek().Kind == sqltok.RParen || v.AtEnd() {
+						return false
+					}
+					v.advance()
+					return true
+				},
+			)
+		})
+	}
+	parenSpan := func() bool {
+		return v.Sequence(
+			func() bool { return v.Match(sqltok.LParen) },
+			consumeBalanced,
+			func() bool { return v.Match(sqltok.RParen) },
+		)
+	}
+	consumeRest := func() bool {
+		return v.ZeroOrMore(func() bool {
+			if v.AtEnd() {
+				return false
+			}
+			v.advance()
+			return true
+		})
+	}
+	prop := func() bool {
+		return v.Choice(
+			v.commentOption(),
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.Optional(func() bool { return v.MatchWord("WITH") }) },
+					phraseRule("ROW", "ACCESS", "POLICY"),
+					v.parseIdentPath,
+					func() bool { return v.MatchWord("ON") },
+					parenSpan,
+				)
+			},
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.Optional(func() bool { return v.MatchWord("WITH") }) },
+					phraseRule("AGGREGATION", "POLICY"),
+					v.parseIdentPath,
+					func() bool {
+						return v.Optional(func() bool {
+							return v.Sequence(phraseRule("ENTITY", "KEY"), parenSpan)
+						})
+					},
+				)
+			},
+			func() bool {
+				return v.Sequence(phraseRule("CLUSTER", "BY"), parenSpan)
+			},
+			v.tagClause,
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("WITH") },
+					func() bool { return v.MatchWord("CONTACT") },
+					parenSpan,
+				)
+			},
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.Optional(func() bool { return v.MatchWord("SECURE") }) },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("INTERACTIVE") }) },
+		func() bool { return v.MatchWord("MATERIALIZED") },
+		func() bool { return v.MatchKeyword("VIEW") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.Optional(func() bool { return v.phrase("COPY", "GRANTS") }) },
+		// optional column list / per-column policy span
+		func() bool { return v.Optional(parenSpan) },
+		func() bool { return v.ZeroOrMore(prop) },
+		func() bool { return v.MatchKeyword("AS") },
+		consumeRest,
+	)
 }
 
 // ParseCreateMcpServer validates the Snowflake `CREATE MCP SERVER` command.
@@ -1743,7 +4689,23 @@ func (v *Validator) ParseCreateMaterializedView() bool {
 //	CREATE [ OR REPLACE ] MCP SERVER [ IF NOT EXISTS ] <name>
 //	  FROM SPECIFICATION $$<specification_yaml>$$
 func (v *Validator) ParseCreateMcpServer() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("MCP") },
+		func() bool { return v.MatchWord("SERVER") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.MatchKeyword("FROM") },
+		func() bool { return v.MatchWord("SPECIFICATION") },
+		// $$<specification_yaml>$$ — a dollar-quoted literal (or a plain string).
+		func() bool {
+			return v.Choice(
+				func() bool { return v.Match(sqltok.DollarQuoted) },
+				func() bool { return v.Match(sqltok.StringLit) },
+			)
+		},
+	)
 }
 
 // ParseCreateModel validates the Snowflake `CREATE MODEL` command.
@@ -1764,7 +4726,66 @@ func (v *Validator) ParseCreateMcpServer() bool {
 //	  | @[<namespace>.]%<table_name>[/<path>]
 //	  | @~[/<path>]
 func (v *Validator) ParseCreateModel() bool {
-	return true
+	// stage reference: @[ns.]name[/path] or @~[/path] or @[ns.]%table[/path].
+	// Consume the @ then a permissive run of path tokens (ident/%/dot/operators).
+	stageRef := func() bool {
+		return v.Sequence(
+			func() bool { return v.Match(sqltok.At) },
+			func() bool {
+				return v.ZeroOrMore(func() bool {
+					if v.AtEnd() {
+						return false
+					}
+					t := v.Peek()
+					switch t.Kind {
+					case sqltok.Identifier, sqltok.QuotedIdent, sqltok.Keyword,
+						sqltok.Dot, sqltok.Operator, sqltok.NumberLit:
+						v.advance()
+						return true
+					}
+					return false
+				})
+			},
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("MODEL") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		// [ WITH VERSION <version_name> ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("WITH") },
+					func() bool { return v.MatchWord("VERSION") },
+					v.parseIdentPath,
+				)
+			})
+		},
+		func() bool { return v.MatchKeyword("FROM") },
+		// { MODEL <source> [ VERSION <v> ] | <internalStage> }
+		func() bool {
+			return v.Choice(
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("MODEL") },
+						v.parseIdentPath,
+						func() bool {
+							return v.Optional(func() bool {
+								return v.Sequence(
+									func() bool { return v.MatchWord("VERSION") },
+									v.parseIdentPath,
+								)
+							})
+						},
+					)
+				},
+				stageRef,
+			)
+		},
+	)
 }
 
 // ParseCreateModelMonitor validates the Snowflake `CREATE MODEL MONITOR` command.
@@ -1790,7 +4811,67 @@ func (v *Validator) ParseCreateModel() bool {
 //	    [ SEGMENT_COLUMNS = <segment_column_name_array> ]
 //	    [ CUSTOM_METRIC_COLUMNS = <custom_metric_column_name_array> ]
 func (v *Validator) ParseCreateModelMonitor() bool {
-	return true
+	// Array RHS like [c1, c2] or a parenthesised/identifier value — accept a
+	// bracketed span, a parenthesised span, a string, or an ident path.
+	var consumeBalanced func(open, close sqltok.TokenKind) func() bool
+	consumeBalanced = func(open, closeK sqltok.TokenKind) func() bool {
+		var inner func() bool
+		inner = func() bool {
+			return v.Sequence(
+				func() bool { return v.Match(open) },
+				func() bool {
+					return v.ZeroOrMore(func() bool {
+						if v.Peek().Kind == closeK || v.AtEnd() {
+							return false
+						}
+						v.advance()
+						return true
+					})
+				},
+				func() bool { return v.Match(closeK) },
+			)
+		}
+		return inner
+	}
+	value := func() bool {
+		return v.Choice(
+			consumeBalanced(sqltok.LBracket, sqltok.RBracket),
+			consumeBalanced(sqltok.LParen, sqltok.RParen),
+			v.parseString,
+			v.parseIdentPath,
+		)
+	}
+	prop := func() bool {
+		return v.Choice(
+			v.option("MODEL", v.parseIdentPath),
+			v.option("VERSION", v.parseString),
+			v.option("FUNCTION", v.parseString),
+			v.option("SOURCE", v.parseIdentPath),
+			v.option("WAREHOUSE", v.parseIdentPath),
+			v.option("REFRESH_INTERVAL", v.parseString),
+			v.option("AGGREGATION_WINDOW", v.parseString),
+			v.option("TIMESTAMP_COLUMN", v.parseIdentPath),
+			v.option("BASELINE", v.parseIdentPath),
+			v.option("ID_COLUMNS", value),
+			v.option("PREDICTION_CLASS_COLUMNS", value),
+			v.option("PREDICTION_SCORE_COLUMNS", value),
+			v.option("ACTUAL_CLASS_COLUMNS", value),
+			v.option("ACTUAL_SCORE_COLUMNS", value),
+			v.option("SEGMENT_COLUMNS", value),
+			v.option("CUSTOM_METRIC_COLUMNS", value),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("MODEL") },
+		func() bool { return v.MatchWord("MONITOR") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.MatchWord("WITH") },
+		prop,
+		func() bool { return v.ZeroOrMore(prop) },
+	)
 }
 
 // ParseCreateNetworkPolicy validates the Snowflake `CREATE NETWORK POLICY` command.
@@ -1805,7 +4886,43 @@ func (v *Validator) ParseCreateModelMonitor() bool {
 //	  [ BLOCKED_IP_LIST = ( [ '<ip_address>' ] [ , '<ip_address>' , ... ] ) ]
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateNetworkPolicy() bool {
-	return true
+	// list of strings, possibly empty: ( [ '<s>' ] [ , '<s>' ... ] )
+	strList := func() bool {
+		return v.Sequence(
+			func() bool { return v.Match(sqltok.LParen) },
+			func() bool {
+				return v.Optional(func() bool {
+					return v.Sequence(
+						v.parseString,
+						func() bool {
+							return v.ZeroOrMore(func() bool {
+								return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, v.parseString)
+							})
+						},
+					)
+				})
+			},
+			func() bool { return v.Match(sqltok.RParen) },
+		)
+	}
+	prop := func() bool {
+		return v.Choice(
+			v.option("ALLOWED_NETWORK_RULE_LIST", strList),
+			v.option("BLOCKED_NETWORK_RULE_LIST", strList),
+			v.option("ALLOWED_IP_LIST", strList),
+			v.option("BLOCKED_IP_LIST", strList),
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("NETWORK") },
+		func() bool { return v.MatchWord("POLICY") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.ZeroOrMore(prop) },
+	)
 }
 
 // ParseCreateNetworkRule validates the Snowflake `CREATE NETWORK RULE` command.
@@ -1825,7 +4942,36 @@ func (v *Validator) ParseCreateNetworkPolicy() bool {
 //	   MODE = { INGRESS | INTERNAL_STAGE | SNOWFLAKE_MANAGED_STORAGE_VOLUME | EGRESS }
 //	   [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateNetworkRule() bool {
-	return true
+	typeValue := v.wordsValue("IPV4", "IPV6", "AWSVPCEID", "AZURELINKID",
+		"GCPPSCID", "HOST_PORT", "PRIVATE_HOST_PORT", "COMPUTE_POOL")
+	modeValue := v.wordsValue("INGRESS", "INTERNAL_STAGE",
+		"SNOWFLAKE_MANAGED_STORAGE_VOLUME", "EGRESS")
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		// [ OR REPLACE ] | [ OR ALTER ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchKeyword("OR") },
+					v.wordsValue("REPLACE", "ALTER"),
+				)
+			})
+		},
+		func() bool { return v.MatchWord("NETWORK") },
+		func() bool { return v.MatchWord("RULE") },
+		v.parseIdentPath,
+		// Order-independent options; TYPE/VALUE_LIST/MODE required, COMMENT optional.
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.option("TYPE", typeValue),
+					v.option("VALUE_LIST", func() bool { return v.parseParenList(v.parseString) }),
+					v.option("MODE", modeValue),
+					v.commentOption(),
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateNotebook validates the Snowflake `CREATE NOTEBOOK` command.
@@ -1843,7 +4989,35 @@ func (v *Validator) ParseCreateNetworkRule() bool {
 //	  [ COMPUTE_POOL = '<compute_pool_name>' ]
 //	  [ WAREHOUSE = <warehouse_to_run_notebook_python_runtime> ]
 func (v *Validator) ParseCreateNotebook() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("NOTEBOOK") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		// [ FROM '<source_location>' ] then order-independent options.
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchKeyword("FROM") },
+					v.parseString,
+				)
+			})
+		},
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.option("MAIN_FILE", v.parseString),
+					v.commentOption(),
+					v.option("QUERY_WAREHOUSE", v.parseIdentPath),
+					v.option("IDLE_AUTO_SHUTDOWN_TIME_SECONDS", v.parseNumber),
+					v.option("RUNTIME_NAME", v.parseString),
+					v.option("COMPUTE_POOL", v.parseScalar),
+					v.option("WAREHOUSE", v.parseIdentPath),
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateNotebookProject validates the Snowflake `CREATE NOTEBOOK PROJECT` command.
@@ -1859,7 +5033,17 @@ func (v *Validator) ParseCreateNotebook() bool {
 //	  FROM '@<database_name>.<schema_name>.<stage_name>'
 //	  [ COMMENT = '<string_literal>' ];
 func (v *Validator) ParseCreateNotebookProject() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		func() bool { return v.MatchWord("NOTEBOOK") },
+		func() bool { return v.MatchWord("PROJECT") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		// FROM '<location>' (workspace snow:// URI or @stage path — both string literals)
+		func() bool { return v.MatchKeyword("FROM") },
+		v.parseString,
+		func() bool { return v.Optional(v.commentOption()) },
+	)
 }
 
 // ParseCreateNotificationIntegration validates the Snowflake `CREATE NOTIFICATION INTEGRATION` command.
@@ -1867,7 +5051,30 @@ func (v *Validator) ParseCreateNotebookProject() bool {
 //
 // Syntax: (unavailable — see Reference URL)
 func (v *Validator) ParseCreateNotificationIntegration() bool {
-	return true
+	// Lenient dispatcher: require the CREATE NOTIFICATION INTEGRATION skeleton +
+	// name, then accept a permissive run of `KEY = value` options (any of the
+	// type-specific variants), plus paren-lists, COMMENT and TAG.
+	anyOption := func() bool {
+		return v.Choice(
+			v.option2(v.parseIdentPath, func() bool {
+				return v.Choice(
+					func() bool { return v.parseParenList(v.parseString) },
+					v.parseScalar,
+				)
+			}),
+			v.commentOption(),
+			v.tagClause,
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("NOTIFICATION") },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.ZeroOrMore(anyOption) },
+	)
 }
 
 // ParseCreateNotificationIntegrationEmail validates the Snowflake `CREATE NOTIFICATION INTEGRATION (email)` command.
@@ -1883,7 +5090,26 @@ func (v *Validator) ParseCreateNotificationIntegration() bool {
 //	  [ DEFAULT_SUBJECT = '<subject_line>' ]
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateNotificationIntegrationEmail() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("NOTIFICATION") },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.option("TYPE", v.wordsValue("EMAIL")),
+					v.option("ENABLED", v.parseBool),
+					v.option("ALLOWED_RECIPIENTS", func() bool { return v.parseParenList(v.parseString) }),
+					v.option("DEFAULT_RECIPIENTS", func() bool { return v.parseParenList(v.parseString) }),
+					v.option("DEFAULT_SUBJECT", v.parseString),
+					v.commentOption(),
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateNotificationIntegrationInboundAzureEventGrid validates the Snowflake `CREATE NOTIFICATION INTEGRATION (inbound Azure Event Grid)` command.
@@ -1900,7 +5126,27 @@ func (v *Validator) ParseCreateNotificationIntegrationEmail() bool {
 //	  [ USE_PRIVATELINK_ENDPOINT = { TRUE | FALSE } ]
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateNotificationIntegrationInboundAzureEventGrid() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("NOTIFICATION") },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.option("ENABLED", v.parseBool),
+					v.option("TYPE", v.wordsValue("QUEUE")),
+					v.option("NOTIFICATION_PROVIDER", v.wordsValue("AZURE_STORAGE_QUEUE")),
+					v.option("AZURE_STORAGE_QUEUE_PRIMARY_URI", v.parseString),
+					v.option("AZURE_TENANT_ID", v.parseString),
+					v.option("USE_PRIVATELINK_ENDPOINT", v.parseBool),
+					v.commentOption(),
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateNotificationIntegrationInboundGooglePubSub validates the Snowflake `CREATE NOTIFICATION INTEGRATION (inbound Google Pub/Sub)` command.
@@ -1915,7 +5161,25 @@ func (v *Validator) ParseCreateNotificationIntegrationInboundAzureEventGrid() bo
 //	  GCP_PUBSUB_SUBSCRIPTION_NAME = '<subscription_id>'
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateNotificationIntegrationInboundGooglePubSub() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("NOTIFICATION") },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.option("ENABLED", v.parseBool),
+					v.option("TYPE", v.wordsValue("QUEUE")),
+					v.option("NOTIFICATION_PROVIDER", v.wordsValue("GCP_PUBSUB")),
+					v.option("GCP_PUBSUB_SUBSCRIPTION_NAME", v.parseString),
+					v.commentOption(),
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateNotificationIntegrationOutboundAmazonSns validates the Snowflake `CREATE NOTIFICATION INTEGRATION (outbound Amazon SNS)` command.
@@ -1932,7 +5196,27 @@ func (v *Validator) ParseCreateNotificationIntegrationInboundGooglePubSub() bool
 //	  AWS_SNS_ROLE_ARN = '<iam_role_arn>'
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateNotificationIntegrationOutboundAmazonSns() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("NOTIFICATION") },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.option("ENABLED", v.parseBool),
+					v.option("TYPE", v.wordsValue("QUEUE")),
+					v.option("DIRECTION", v.wordsValue("OUTBOUND")),
+					v.option("NOTIFICATION_PROVIDER", v.wordsValue("AWS_SNS")),
+					v.option("AWS_SNS_TOPIC_ARN", v.parseString),
+					v.option("AWS_SNS_ROLE_ARN", v.parseString),
+					v.commentOption(),
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateNotificationIntegrationOutboundAzureEventGrid validates the Snowflake `CREATE NOTIFICATION INTEGRATION (outbound Azure Event Grid)` command.
@@ -1949,7 +5233,27 @@ func (v *Validator) ParseCreateNotificationIntegrationOutboundAmazonSns() bool {
 //	  AZURE_TENANT_ID = '<ad_directory_id>';
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateNotificationIntegrationOutboundAzureEventGrid() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("NOTIFICATION") },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.option("ENABLED", v.parseBool),
+					v.option("TYPE", v.wordsValue("QUEUE")),
+					v.option("DIRECTION", v.wordsValue("OUTBOUND")),
+					v.option("NOTIFICATION_PROVIDER", v.wordsValue("AZURE_EVENT_GRID")),
+					v.option("AZURE_EVENT_GRID_TOPIC_ENDPOINT", v.parseString),
+					v.option("AZURE_TENANT_ID", v.parseString),
+					v.commentOption(),
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateNotificationIntegrationOutboundGooglePubSub validates the Snowflake `CREATE NOTIFICATION INTEGRATION (outbound Google Pub/Sub)` command.
@@ -1965,7 +5269,26 @@ func (v *Validator) ParseCreateNotificationIntegrationOutboundAzureEventGrid() b
 //	  GCP_PUBSUB_TOPIC_NAME = '<topic_id>'
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateNotificationIntegrationOutboundGooglePubSub() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("NOTIFICATION") },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.option("ENABLED", v.parseBool),
+					v.option("TYPE", v.wordsValue("QUEUE")),
+					v.option("DIRECTION", v.wordsValue("OUTBOUND")),
+					v.option("NOTIFICATION_PROVIDER", v.wordsValue("GCP_PUBSUB")),
+					v.option("GCP_PUBSUB_TOPIC_NAME", v.parseString),
+					v.commentOption(),
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateNotificationIntegrationWebhooks validates the Snowflake `CREATE NOTIFICATION INTEGRATION (webhooks)` command.
@@ -1982,7 +5305,28 @@ func (v *Validator) ParseCreateNotificationIntegrationOutboundGooglePubSub() boo
 //	  [ WEBHOOK_HEADERS = ( '<header_1>'='<value_1>' [ , '<header_N>'='<value_N>', ... ] ) ]
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateNotificationIntegrationWebhooks() bool {
-	return true
+	headerItem := v.option2(v.parseString, v.parseString)
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("NOTIFICATION") },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.option("TYPE", v.wordsValue("WEBHOOK")),
+					v.option("ENABLED", v.parseBool),
+					v.option("WEBHOOK_URL", v.parseString),
+					v.option("WEBHOOK_SECRET", v.parseIdentPath),
+					v.option("WEBHOOK_BODY_TEMPLATE", v.parseString),
+					v.option("WEBHOOK_HEADERS", func() bool { return v.parseParenList(headerItem) }),
+					v.commentOption(),
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateOnlineFeatureTable validates the Snowflake `CREATE ONLINE FEATURE TABLE` command.
@@ -2000,7 +5344,43 @@ func (v *Validator) ParseCreateNotificationIntegrationWebhooks() bool {
 //	  [ [ WITH ] TAG ( <tag_name> = '<tag_value>' [ , <tag_name> = '<tag_value>' , ... ] ) ]
 //	FROM <source>
 func (v *Validator) ParseCreateOnlineFeatureTable() bool {
-	return true
+	primaryKey := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchKeyword("PRIMARY") },
+			func() bool { return v.MatchKeyword("KEY") },
+			func() bool { return v.parseParenList(v.parseIdentPath) },
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("ONLINE") },
+		func() bool { return v.MatchWord("FEATURE") },
+		func() bool { return v.MatchKeyword("TABLE") },
+		v.parseIdentPath,
+		// Order-independent body: PRIMARY KEY (...), TARGET_LAG/WAREHOUSE/etc.
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					primaryKey,
+					v.option("TARGET_LAG", v.parseString),
+					v.option("WAREHOUSE", v.parseIdentPath),
+					v.option("REFRESH_MODE", v.wordsValue("AUTO", "FULL", "INCREMENTAL")),
+					v.option("TIMESTAMP_COLUMN", v.parseIdentPath),
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.Optional(func() bool { return v.MatchWord("WITH") }) },
+							v.commentOption(),
+						)
+					},
+					v.tagClause,
+				)
+			})
+		},
+		// FROM <source>
+		func() bool { return v.MatchKeyword("FROM") },
+		v.parseIdentPath,
+	)
 }
 
 // ParseCreateOrAlterObj validates the Snowflake `CREATE OR ALTER <object>` command.
@@ -2008,7 +5388,33 @@ func (v *Validator) ParseCreateOnlineFeatureTable() bool {
 //
 // Syntax: (unavailable — see Reference URL)
 func (v *Validator) ParseCreateOrAlterObj() bool {
-	return true
+	// Lenient dispatcher for `CREATE OR ALTER <object-type> [IF NOT EXISTS] <name> ...`.
+	// Require the CREATE OR ALTER skeleton + an object-type word + name, then accept
+	// a permissive run of tokens (balanced-paren aware) for the object-specific body.
+	consumeOne := func() bool {
+		return v.Choice(
+			func() bool { return v.parseParenList(v.parseScalar) },
+			func() bool { return v.Match(sqltok.LParen) },
+			func() bool { return v.Match(sqltok.RParen) },
+			func() bool { return v.Match(sqltok.Comma) },
+			func() bool { return v.Match(sqltok.StringLit) },
+			func() bool { return v.Match(sqltok.NumberLit) },
+			func() bool { return v.MatchOp("=") },
+			func() bool { return v.MatchOp("=>") },
+			v.parseIdentPath,
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		func() bool { return v.MatchKeyword("OR") },
+		func() bool { return v.MatchWord("ALTER") },
+		// object type, e.g. TABLE / TASK / WAREHOUSE / NETWORK RULE — accept one or two words
+		v.parseIdentPath,
+		func() bool { return v.Optional(func() bool { return v.MatchWord("RULE") }) },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.ZeroOrMore(consumeOne) },
+	)
 }
 
 // ParseCreateOrganizationAccount validates the Snowflake `CREATE ORGANIZATION ACCOUNT` command.
@@ -2028,7 +5434,31 @@ func (v *Validator) ParseCreateOrAlterObj() bool {
 //	    [ REGION = <snowflake_region_id> ]
 //	    [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateOrganizationAccount() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		func() bool { return v.MatchWord("ORGANIZATION") },
+		func() bool { return v.MatchWord("ACCOUNT") },
+		v.parseIdentPath,
+		// Order-independent property list (ADMIN_NAME, EMAIL, EDITION required by doc;
+		// kept lenient as an option set).
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.option("ADMIN_NAME", v.parseScalar),
+					v.option("ADMIN_PASSWORD", v.parseString),
+					v.option("ADMIN_RSA_PUBLIC_KEY", v.parseScalar),
+					v.option("FIRST_NAME", v.parseScalar),
+					v.option("LAST_NAME", v.parseScalar),
+					v.option("EMAIL", v.parseString),
+					v.option("MUST_CHANGE_PASSWORD", v.parseBool),
+					v.option("EDITION", v.wordsValue("ENTERPRISE", "BUSINESS_CRITICAL")),
+					v.option("REGION_GROUP", v.parseScalar),
+					v.option("REGION", v.parseScalar),
+					v.commentOption(),
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateOrganizationListing validates the Snowflake `CREATE ORGANIZATION LISTING` command.
@@ -2046,7 +5476,51 @@ func (v *Validator) ParseCreateOrganizationAccount() bool {
 //	  FROM '<yaml_manifest_stage_location>'
 //	  [ PUBLISH = { TRUE | FALSE } ]
 func (v *Validator) ParseCreateOrganizationListing() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		func() bool { return v.MatchWord("ORGANIZATION") },
+		func() bool { return v.MatchWord("LISTING") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		// [ SHARE <name> | APPLICATION PACKAGE <name> ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Choice(
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchKeyword("SHARE") },
+							v.parseIdentPath,
+						)
+					},
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchWord("APPLICATION") },
+							func() bool { return v.MatchWord("PACKAGE") },
+							v.parseIdentPath,
+						)
+					},
+				)
+			})
+		},
+		// AS '<manifest>' | FROM '<stage_location>'
+		func() bool {
+			return v.Choice(
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchKeyword("AS") },
+						v.parseString,
+					)
+				},
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchKeyword("FROM") },
+						v.parseString,
+					)
+				},
+			)
+		},
+		func() bool { return v.Optional(v.option("PUBLISH", v.parseBool)) },
+	)
 }
 
 // ParseCreateOrganizationProfile validates the Snowflake `CREATE ORGANIZATION PROFILE` command.
@@ -2066,7 +5540,44 @@ func (v *Validator) ParseCreateOrganizationListing() bool {
 //	  [ VERSION <version_alias_name> ]
 //	  [ PUBLISH = { TRUE | FALSE } ]
 func (v *Validator) ParseCreateOrganizationProfile() bool {
-	return true
+	trailing := func() bool {
+		v.Optional(func() bool {
+			return v.Sequence(
+				func() bool { return v.MatchWord("VERSION") },
+				v.parseIdentPath,
+			)
+		})
+		return v.Optional(v.option("PUBLISH", v.parseBool))
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		func() bool { return v.MatchWord("ORGANIZATION") },
+		func() bool { return v.MatchWord("PROFILE") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		// Optional body: AS '<str>' ... | FROM @<stage> ... | (bare name)
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Choice(
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchKeyword("AS") },
+							v.parseString,
+							trailing,
+						)
+					},
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchKeyword("FROM") },
+							func() bool { return v.Optional(func() bool { return v.Match(sqltok.At) }) },
+							v.parseIdentPath,
+							trailing,
+						)
+					},
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateOrganizationUser validates the Snowflake `CREATE ORGANIZATION USER` command.
@@ -2088,7 +5599,25 @@ func (v *Validator) ParseCreateOrganizationProfile() bool {
 //	  LAST_NAME = '<string>'
 //	  COMMENT = '<string>'
 func (v *Validator) ParseCreateOrganizationUser() bool {
-	return true
+	prop := func() bool {
+		return v.Choice(
+			v.option("EMAIL", v.parseString),
+			v.option("LOGIN_NAME", v.parseString),
+			v.option("DISPLAY_NAME", v.parseString),
+			v.option("FIRST_NAME", v.parseString),
+			v.option("MIDDLE_NAME", v.parseString),
+			v.option("LAST_NAME", v.parseString),
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		func() bool { return v.MatchWord("ORGANIZATION") },
+		func() bool { return v.MatchWord("USER") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.ZeroOrMore(prop) },
+	)
 }
 
 // ParseCreateOrganizationUserGroup validates the Snowflake `CREATE ORGANIZATION USER GROUP` command.
@@ -2099,7 +5628,15 @@ func (v *Validator) ParseCreateOrganizationUser() bool {
 //	CREATE ORGANIZATION USER GROUP [ IF NOT EXISTS ] <name>
 //	  [ IS_GRANTABLE = { TRUE | FALSE } ]
 func (v *Validator) ParseCreateOrganizationUserGroup() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		func() bool { return v.MatchWord("ORGANIZATION") },
+		func() bool { return v.MatchWord("USER") },
+		func() bool { return v.MatchWord("GROUP") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.Optional(v.option("IS_GRANTABLE", v.parseBool)) },
+	)
 }
 
 // ParseCreatePackagesPolicy validates the Snowflake `CREATE PACKAGES POLICY` command.
@@ -2114,7 +5651,44 @@ func (v *Validator) ParseCreateOrganizationUserGroup() bool {
 //	  [ ADDITIONAL_CREATION_BLOCKLIST = ( [ '<packageSpec>' ] [ , '<packageSpec>' ... ] ) ]
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreatePackagesPolicy() bool {
-	return true
+	// A possibly-empty parenthesised list of string literals.
+	strList := func() bool {
+		return v.Sequence(
+			func() bool { return v.Match(sqltok.LParen) },
+			func() bool {
+				return v.Optional(func() bool {
+					return v.Sequence(
+						v.parseString,
+						func() bool {
+							return v.ZeroOrMore(func() bool {
+								return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, v.parseString)
+							})
+						},
+					)
+				})
+			},
+			func() bool { return v.Match(sqltok.RParen) },
+		)
+	}
+	prop := func() bool {
+		return v.Choice(
+			v.option("ALLOWLIST", strList),
+			v.option("BLOCKLIST", strList),
+			v.option("ADDITIONAL_CREATION_BLOCKLIST", strList),
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("PACKAGES") },
+		func() bool { return v.MatchWord("POLICY") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.MatchKeyword("LANGUAGE") },
+		func() bool { return v.MatchWord("PYTHON") },
+		func() bool { return v.ZeroOrMore(prop) },
+	)
 }
 
 // ParseCreatePasswordPolicy validates the Snowflake `CREATE PASSWORD POLICY` command.
@@ -2136,7 +5710,32 @@ func (v *Validator) ParseCreatePackagesPolicy() bool {
 //	  [ PASSWORD_HISTORY = <integer> ]
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreatePasswordPolicy() bool {
-	return true
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	prop := func() bool {
+		return v.Choice(
+			v.option("PASSWORD_MIN_LENGTH", num),
+			v.option("PASSWORD_MAX_LENGTH", num),
+			v.option("PASSWORD_MIN_UPPER_CASE_CHARS", num),
+			v.option("PASSWORD_MIN_LOWER_CASE_CHARS", num),
+			v.option("PASSWORD_MIN_NUMERIC_CHARS", num),
+			v.option("PASSWORD_MIN_SPECIAL_CHARS", num),
+			v.option("PASSWORD_MIN_AGE_DAYS", num),
+			v.option("PASSWORD_MAX_AGE_DAYS", num),
+			v.option("PASSWORD_MAX_RETRIES", num),
+			v.option("PASSWORD_LOCKOUT_TIME_MINS", num),
+			v.option("PASSWORD_HISTORY", num),
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("PASSWORD") },
+		func() bool { return v.MatchWord("POLICY") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.ZeroOrMore(prop) },
+	)
 }
 
 // ParseCreatePipe validates the Snowflake `CREATE PIPE` command.
@@ -2161,7 +5760,42 @@ func (v *Validator) ParseCreatePasswordPolicy() bool {
 //	  [ COMMENT = '<string_literal>' ]
 //	  AS <copy_statement>
 func (v *Validator) ParseCreatePipe() bool {
-	return true
+	// consumeRest greedily consumes every remaining token (the free-form
+	// <copy_statement> body following AS).
+	consumeRest := func() bool {
+		for !v.AtEnd() {
+			v.advance()
+		}
+		return true
+	}
+	prop := func() bool {
+		return v.Choice(
+			v.option("AUTO_INGEST", v.parseBool),
+			v.option("ERROR_INTEGRATION", v.parseIdentPath),
+			v.option("AWS_SNS_TOPIC", v.parseString),
+			v.option("INTEGRATION", v.parseString),
+			v.option("PIPE_EXECUTION_PAUSED", v.parseBool),
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		// [ OR { REPLACE | ALTER } ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchKeyword("OR") },
+					v.wordsValue("REPLACE", "ALTER"),
+				)
+			})
+		},
+		func() bool { return v.MatchKeyword("PIPE") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.ZeroOrMore(prop) },
+		func() bool { return v.MatchKeyword("AS") },
+		consumeRest,
+	)
 }
 
 // ParseCreatePostgresInstance validates the Snowflake `CREATE POSTGRES INSTANCE` command.
@@ -2191,7 +5825,48 @@ func (v *Validator) ParseCreatePipe() bool {
 //	  [ COMMENT = '<string_literal>' ]
 //	  [ [ WITH ] TAG ( <tag_name> = '<tag_value>' [ , ... ] ) ]
 func (v *Validator) ParseCreatePostgresInstance() bool {
-	return true
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	prop := func() bool {
+		return v.Choice(
+			v.option("COMPUTE_FAMILY", v.parseString),
+			v.option("STORAGE_SIZE_GB", num),
+			v.option("AUTHENTICATION_AUTHORITY", v.wordsValue("POSTGRES", "POSTGRES_OR_SNOWFLAKE")),
+			v.option("POSTGRES_VERSION", num),
+			v.option("NETWORK_POLICY", v.parseString),
+			v.option("HIGH_AVAILABILITY", v.parseBool),
+			v.option("STORAGE_INTEGRATION", v.parseString),
+			v.option("POSTGRES_SETTINGS", v.parseString),
+			v.commentOption(),
+			v.tagClause,
+		)
+	}
+	// FORK <source> [ { AT | BEFORE } ( { TIMESTAMP => ... | OFFSET => ... } ) ]
+	forkClause := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchWord("FORK") },
+			v.parseIdentPath,
+			func() bool {
+				return v.Optional(func() bool {
+					return v.Sequence(
+						v.wordsValue("AT", "BEFORE"),
+						func() bool { return v.Match(sqltok.LParen) },
+						func() bool {
+							return v.Choice(v.arrowOption("TIMESTAMP"), v.arrowOption("OFFSET"))
+						},
+						func() bool { return v.Match(sqltok.RParen) },
+					)
+				})
+			},
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		func() bool { return v.MatchWord("POSTGRES") },
+		func() bool { return v.MatchWord("INSTANCE") },
+		v.parseIdentPath,
+		func() bool { return v.Optional(forkClause) },
+		func() bool { return v.ZeroOrMore(prop) },
+	)
 }
 
 // ParseCreatePrivacyPolicy validates the Snowflake `CREATE PRIVACY POLICY` command.
@@ -2203,7 +5878,30 @@ func (v *Validator) ParseCreatePostgresInstance() bool {
 //	  AS () RETURNS PRIVACY_BUDGET -> <body>
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreatePrivacyPolicy() bool {
-	return true
+	// The policy <body> is an arbitrary SQL expression; consume the remaining
+	// tokens permissively after the `->` arrow.
+	consumeRest := func() bool {
+		for !v.AtEnd() {
+			v.advance()
+		}
+		return true
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("PRIVACY") },
+		func() bool { return v.MatchWord("POLICY") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.MatchKeyword("AS") },
+		func() bool { return v.Match(sqltok.LParen) },
+		func() bool { return v.Match(sqltok.RParen) },
+		func() bool { return v.MatchWord("RETURNS") },
+		func() bool { return v.MatchWord("PRIVACY_BUDGET") },
+		func() bool { return v.MatchOp("-") },
+		func() bool { return v.MatchOp(">") },
+		consumeRest,
+	)
 }
 
 // ParseCreateProcedure validates the Snowflake `CREATE PROCEDURE` command.
@@ -2245,7 +5943,56 @@ func (v *Validator) ParseCreatePrivacyPolicy() bool {
 //	  [ EXECUTE AS { OWNER | CALLER | RESTRICTED CALLER } ]
 //	  AS <procedure_definition>
 func (v *Validator) ParseCreateProcedure() bool {
-	return true
+	// balancedParens consumes a single ( ... ) span with nested parens — used
+	// for the free-form argument list which we don't model in detail.
+	var balancedParens func() bool
+	balancedParens = func() bool {
+		if !v.Match(sqltok.LParen) {
+			return false
+		}
+		for !v.AtEnd() {
+			if v.Peek().Kind == sqltok.LParen {
+				if !balancedParens() {
+					return false
+				}
+				continue
+			}
+			if v.Peek().Kind == sqltok.RParen {
+				v.advance()
+				return true
+			}
+			v.advance()
+		}
+		return false
+	}
+	// consumeRest greedily consumes the remaining tokens (RETURNS spec, option
+	// list, and the procedure body), which are too free-form to model.
+	consumeRest := func() bool {
+		for !v.AtEnd() {
+			v.advance()
+		}
+		return true
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.Optional(v.wordsValue("TEMP", "TEMPORARY")) },
+		func() bool { return v.Optional(func() bool { return v.MatchKeyword("SECURE") }) },
+		func() bool { return v.MatchKeyword("PROCEDURE") },
+		v.parseIdentPath,
+		balancedParens,
+		// [ COPY GRANTS ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchKeyword("COPY") },
+					func() bool { return v.MatchWord("GRANTS") },
+				)
+			})
+		},
+		func() bool { return v.MatchWord("RETURNS") },
+		consumeRest,
+	)
 }
 
 // ParseCreateProjectionPolicy validates the Snowflake `CREATE PROJECTION POLICY` command.
@@ -2257,7 +6004,28 @@ func (v *Validator) ParseCreateProcedure() bool {
 //	  AS () RETURNS PROJECTION_CONSTRAINT -> <body>
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateProjectionPolicy() bool {
-	return true
+	consumeRest := func() bool {
+		for !v.AtEnd() {
+			v.advance()
+		}
+		return true
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("PROJECTION") },
+		func() bool { return v.MatchWord("POLICY") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.MatchKeyword("AS") },
+		func() bool { return v.Match(sqltok.LParen) },
+		func() bool { return v.Match(sqltok.RParen) },
+		func() bool { return v.MatchWord("RETURNS") },
+		func() bool { return v.MatchWord("PROJECTION_CONSTRAINT") },
+		func() bool { return v.MatchOp("-") },
+		func() bool { return v.MatchOp(">") },
+		consumeRest,
+	)
 }
 
 // ParseCreateProvisionedThroughput validates the Snowflake `CREATE PROVISIONED THROUGHPUT` command.
@@ -2272,7 +6040,26 @@ func (v *Validator) ParseCreateProjectionPolicy() bool {
 //	    TERM_START = '<start_date>'
 //	    TERM_END = '<end_date>';
 func (v *Validator) ParseCreateProvisionedThroughput() bool {
-	return true
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	prop := func() bool {
+		return v.Choice(
+			v.option("CLOUD_PROVIDER", v.parseString),
+			v.option("MODEL", v.parseString),
+			v.option("PTUS", num),
+			v.option("TERM_START", v.parseString),
+			v.option("TERM_END", v.parseString),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("PROVISIONED") },
+		func() bool { return v.MatchWord("THROUGHPUT") },
+		v.parseIdentPath,
+		// At least one property required.
+		prop,
+		func() bool { return v.ZeroOrMore(prop) },
+	)
 }
 
 // ParseCreateReplicationGroup validates the Snowflake `CREATE REPLICATION GROUP` command.
@@ -2295,7 +6082,60 @@ func (v *Validator) ParseCreateProvisionedThroughput() bool {
 //	CREATE REPLICATION GROUP [ IF NOT EXISTS ] <secondary_name>
 //	    AS REPLICA OF <org_name>.<source_account_name>.<name>
 func (v *Validator) ParseCreateReplicationGroup() bool {
-	return true
+	// A bare comma-separated list of identifier-path items (no parens).
+	identList := func() bool {
+		return v.Sequence(
+			v.parseIdentPath,
+			func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, v.parseIdentPath)
+				})
+			},
+		)
+	}
+	prop := func() bool {
+		return v.Choice(
+			v.option("OBJECT_TYPES", identList),
+			v.option("ALLOWED_DATABASES", identList),
+			v.option("ALLOWED_EXTERNAL_VOLUMES", identList),
+			v.option("ALLOWED_SHARES", identList),
+			v.option("ALLOWED_INTEGRATION_TYPES", identList),
+			v.option("ALLOWED_ACCOUNTS", identList),
+			v.option("REPLICATION_SCHEDULE", v.parseString),
+			v.option("ERROR_INTEGRATION", v.parseIdentPath),
+			// IGNORE EDITION CHECK
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("IGNORE") },
+					func() bool { return v.MatchWord("EDITION") },
+					func() bool { return v.MatchWord("CHECK") },
+				)
+			},
+			v.tagClause,
+		)
+	}
+	// AS REPLICA OF <name>
+	replicaClause := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchKeyword("AS") },
+			func() bool { return v.MatchWord("REPLICA") },
+			func() bool { return v.MatchKeyword("OF") },
+			v.parseIdentPath,
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		func() bool { return v.MatchWord("REPLICATION") },
+		func() bool { return v.MatchWord("GROUP") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool {
+			return v.Choice(replicaClause, func() bool {
+				// At least one property in the primary form.
+				return v.Sequence(prop, func() bool { return v.ZeroOrMore(prop) })
+			})
+		},
+	)
 }
 
 // ParseCreateResourceMonitor validates the Snowflake `CREATE RESOURCE MONITOR` command.
@@ -2316,7 +6156,46 @@ func (v *Validator) ParseCreateReplicationGroup() bool {
 //	triggerDefinition ::=
 //	    ON <threshold> PERCENT DO { SUSPEND | SUSPEND_IMMEDIATE | NOTIFY }
 func (v *Validator) ParseCreateResourceMonitor() bool {
-	return true
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	// triggerDefinition: ON <threshold> PERCENT DO { SUSPEND | SUSPEND_IMMEDIATE | NOTIFY }
+	triggerDef := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchKeyword("ON") },
+			num,
+			func() bool { return v.MatchWord("PERCENT") },
+			func() bool { return v.MatchWord("DO") },
+			v.wordsValue("SUSPEND", "SUSPEND_IMMEDIATE", "NOTIFY"),
+		)
+	}
+	prop := func() bool {
+		return v.Choice(
+			v.option("CREDIT_QUOTA", num),
+			v.option("FREQUENCY", v.wordsValue("MONTHLY", "DAILY", "WEEKLY", "YEARLY", "NEVER")),
+			v.option("START_TIMESTAMP", func() bool {
+				return v.Choice(v.parseString, func() bool { return v.MatchWord("IMMEDIATELY") })
+			}),
+			v.option("END_TIMESTAMP", v.parseString),
+			v.option("NOTIFY_USERS", func() bool { return v.parseParenList(v.parseIdentPath) }),
+			// TRIGGERS triggerDefinition [ triggerDefinition ... ]
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("TRIGGERS") },
+					triggerDef,
+					func() bool { return v.ZeroOrMore(triggerDef) },
+				)
+			},
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("RESOURCE") },
+		func() bool { return v.MatchWord("MONITOR") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.MatchKeyword("WITH") },
+		func() bool { return v.ZeroOrMore(prop) },
+	)
 }
 
 // ParseCreateRole validates the Snowflake `CREATE ROLE` command.
@@ -2331,7 +6210,28 @@ func (v *Validator) ParseCreateResourceMonitor() bool {
 //	CREATE OR ALTER ROLE <name>
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateRole() bool {
-	return true
+	prop := func() bool {
+		return v.Choice(
+			v.commentOption(),
+			v.tagClause,
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		// [ OR { REPLACE | ALTER } ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchKeyword("OR") },
+					v.wordsValue("REPLACE", "ALTER"),
+				)
+			})
+		},
+		func() bool { return v.MatchKeyword("ROLE") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.ZeroOrMore(prop) },
+	)
 }
 
 // ParseCreateRowAccessPolicy validates the Snowflake `CREATE ROW ACCESS POLICY` command.
@@ -2343,7 +6243,50 @@ func (v *Validator) ParseCreateRole() bool {
 //	( <arg_name> <arg_type> [ , ... ] ) RETURNS BOOLEAN -> <body>
 //	[ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateRowAccessPolicy() bool {
-	return true
+	// The signature ( <arg> <type> [, ...] ) is consumed as a balanced-paren
+	// span; the trailing <body> is an arbitrary expression consumed permissively.
+	var balancedParens func() bool
+	balancedParens = func() bool {
+		if !v.Match(sqltok.LParen) {
+			return false
+		}
+		for !v.AtEnd() {
+			if v.Peek().Kind == sqltok.LParen {
+				if !balancedParens() {
+					return false
+				}
+				continue
+			}
+			if v.Peek().Kind == sqltok.RParen {
+				v.advance()
+				return true
+			}
+			v.advance()
+		}
+		return false
+	}
+	consumeRest := func() bool {
+		for !v.AtEnd() {
+			v.advance()
+		}
+		return true
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchKeyword("ROW") },
+		func() bool { return v.MatchWord("ACCESS") },
+		func() bool { return v.MatchWord("POLICY") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.MatchKeyword("AS") },
+		balancedParens,
+		func() bool { return v.MatchWord("RETURNS") },
+		func() bool { return v.MatchWord("BOOLEAN") },
+		func() bool { return v.MatchOp("-") },
+		func() bool { return v.MatchOp(">") },
+		consumeRest,
+	)
 }
 
 // ParseCreateSchema validates the Snowflake `CREATE SCHEMA` command.
@@ -2380,7 +6323,107 @@ func (v *Validator) ParseCreateRowAccessPolicy() bool {
 //	CREATE OR ALTER [ TRANSIENT ] SCHEMA <name>
 //	  [ ... schema properties ... ]
 func (v *Validator) ParseCreateSchema() bool {
-	return true
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	str := v.parseString
+	name := v.parseIdentPath
+
+	// CLONE <source> [ { AT | BEFORE } ( ... ) ] [ IGNORE ... ]
+	cloneClause := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchKeyword("CLONE") },
+			name,
+			func() bool {
+				return v.Optional(func() bool {
+					return v.Sequence(
+						v.wordsValue("AT", "BEFORE"),
+						func() bool { return v.Match(sqltok.LParen) },
+						func() bool {
+							return v.Choice(
+								v.arrowOption("TIMESTAMP"),
+								v.arrowOption("OFFSET"),
+								v.arrowOption("STATEMENT"),
+							)
+						},
+						func() bool { return v.Match(sqltok.RParen) },
+					)
+				})
+			},
+			func() bool {
+				return v.Optional(func() bool {
+					return v.phrase("IGNORE", "TABLES", "WITH", "INSUFFICIENT", "DATA", "RETENTION")
+				})
+			},
+			func() bool {
+				return v.Optional(func() bool { return v.phrase("IGNORE", "HYBRID", "TABLES") })
+			},
+		)
+	}
+	prop := func() bool {
+		return v.Choice(
+			// WITH MANAGED ACCESS
+			func() bool { return v.phrase("WITH", "MANAGED", "ACCESS") },
+			v.option("DATA_RETENTION_TIME_IN_DAYS", num),
+			v.option("MAX_DATA_EXTENSION_TIME_IN_DAYS", num),
+			v.option("EXTERNAL_VOLUME", name),
+			v.option("ICEBERG_VERSION_DEFAULT", num),
+			v.option("ICEBERG_MERGE_ON_READ_BEHAVIOR", str),
+			v.option("ENABLE_ICEBERG_MERGE_ON_READ", v.parseBool),
+			v.option("REPLACE_INVALID_CHARACTERS", v.parseBool),
+			v.option("DEFAULT_DDL_COLLATION", str),
+			v.option("STORAGE_SERIALIZATION_POLICY", v.wordsValue("COMPATIBLE", "OPTIMIZED")),
+			v.option("CLASSIFICATION_PROFILE", str),
+			v.option("CATALOG_SYNC", str),
+			v.option("CATALOG", name),
+			v.option("OBJECT_VISIBILITY", v.parseScalar),
+			v.option("ENABLE_DATA_COMPACTION", v.parseBool),
+			v.commentOption(),
+			// WITH CONTACT ( <purpose> = <contact> [, ...] )
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchKeyword("WITH") },
+					func() bool { return v.MatchWord("CONTACT") },
+					func() bool { return v.parseParenList(v.option2(name, name)) },
+				)
+			},
+			v.tagClause,
+		)
+	}
+	// FROM BACKUP SET <name> IDENTIFIER '<id>'
+	fromBackup := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchKeyword("FROM") },
+			func() bool { return v.MatchWord("BACKUP") },
+			func() bool { return v.MatchKeyword("SET") },
+			name,
+			func() bool { return v.MatchWord("IDENTIFIER") },
+			str,
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		// [ OR { REPLACE | ALTER } ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchKeyword("OR") },
+					v.wordsValue("REPLACE", "ALTER"),
+				)
+			})
+		},
+		func() bool { return v.Optional(func() bool { return v.MatchWord("TRANSIENT") }) },
+		func() bool { return v.MatchKeyword("SCHEMA") },
+		v.ifNotExists,
+		name,
+		func() bool {
+			return v.Choice(
+				fromBackup,
+				func() bool {
+					v.Optional(cloneClause)
+					return v.ZeroOrMore(prop)
+				},
+			)
+		},
+	)
 }
 
 // ParseCreateSecret validates the Snowflake `CREATE SECRET` command.
@@ -2422,7 +6465,35 @@ func (v *Validator) ParseCreateSchema() bool {
 //	  TYPE = SYMMETRIC_KEY
 //	  ALGORITHM = GENERIC
 func (v *Validator) ParseCreateSecret() bool {
-	return true
+	// Many TYPE variants share an option pool; accept them order-independently
+	// after the required TYPE = <type>.
+	prop := func() bool {
+		return v.Choice(
+			v.option("API_AUTHENTICATION", func() bool {
+				return v.Choice(v.parseString, v.parseIdentPath)
+			}),
+			v.option("OAUTH_SCOPES", func() bool { return v.parseParenList(v.parseString) }),
+			v.option("OAUTH_REFRESH_TOKEN", v.parseString),
+			v.option("OAUTH_REFRESH_TOKEN_EXPIRY_TIME", v.parseString),
+			v.option("ENABLED", v.parseBool),
+			v.option("USERNAME", v.parseString),
+			v.option("PASSWORD", v.parseString),
+			v.option("SECRET_STRING", v.parseString),
+			v.option("ALGORITHM", v.wordsValue("GENERIC")),
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchKeyword("SECRET") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		v.option("TYPE", v.wordsValue(
+			"OAUTH2", "CLOUD_PROVIDER_TOKEN", "PASSWORD", "GENERIC_STRING", "SYMMETRIC_KEY",
+		)),
+		func() bool { return v.ZeroOrMore(prop) },
+	)
 }
 
 // ParseCreateSecurityIntegration validates the Snowflake `CREATE SECURITY INTEGRATION` command.
@@ -2435,7 +6506,35 @@ func (v *Validator) ParseCreateSecret() bool {
 //	  TYPE = { API_AUTHENTICATION | EXTERNAL_OAUTH | OAUTH | SAML2 | SCIM }
 //	  ...
 func (v *Validator) ParseCreateSecurityIntegration() bool {
-	return true
+	// Lenient skeleton: the documented body is type-dependent (see the
+	// per-type variants). Require the CREATE … SECURITY INTEGRATION … <name>
+	// TYPE = <kind> header, then accept any run of order-independent options.
+	value := func() bool {
+		return v.Choice(
+			func() bool { return v.parseParenList(v.parseScalar) },
+			v.parseScalar,
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("SECURITY") },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		v.option("TYPE", v.wordsValue(
+			"API_AUTHENTICATION", "EXTERNAL_OAUTH", "OAUTH", "SAML2", "SCIM",
+		)),
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.tagClause,
+					v.commentOption(),
+					func() bool { return v.option2(v.parseIdentPath, value)() },
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateSecurityIntegrationExternalApiAuthentication validates the Snowflake `CREATE SECURITY INTEGRATION (External API Authentication)` command.
@@ -2459,7 +6558,34 @@ func (v *Validator) ParseCreateSecurityIntegration() bool {
 //	-- AUTHORIZATION_CODE and JWT_BEARER grant variants are also supported
 //	-- (with OAUTH_AUTHORIZATION_ENDPOINT and OAUTH_REFRESH_TOKEN_VALIDITY).
 func (v *Validator) ParseCreateSecurityIntegrationExternalApiAuthentication() bool {
-	return true
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	option := func() bool {
+		return v.Choice(
+			v.option("TYPE", v.wordsValue("API_AUTHENTICATION")),
+			v.option("AUTH_TYPE", v.wordsValue("OAUTH2")),
+			v.option("ENABLED", v.parseBool),
+			v.option("OAUTH_TOKEN_ENDPOINT", v.parseString),
+			v.option("OAUTH_CLIENT_AUTH_METHOD", v.wordsValue("CLIENT_SECRET_BASIC", "CLIENT_SECRET_POST")),
+			v.option("OAUTH_CLIENT_ID", v.parseString),
+			v.option("OAUTH_CLIENT_SECRET", v.parseString),
+			v.option("OAUTH_GRANT", v.parseString),
+			v.option("OAUTH_ACCESS_TOKEN_VALIDITY", num),
+			v.option("OAUTH_REFRESH_TOKEN_VALIDITY", num),
+			v.option("OAUTH_AUTHORIZATION_ENDPOINT", v.parseString),
+			v.option("OAUTH_ALLOWED_SCOPES", func() bool { return v.parseParenList(v.parseString) }),
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("SECURITY") },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		option,
+		func() bool { return v.ZeroOrMore(option) },
+	)
 }
 
 // ParseCreateSecurityIntegrationAwsIamAuthentication validates the Snowflake `CREATE SECURITY INTEGRATION (AWS IAM Authentication)` command.
@@ -2474,7 +6600,25 @@ func (v *Validator) ParseCreateSecurityIntegrationExternalApiAuthentication() bo
 //	  ENABLED = { TRUE | FALSE }
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateSecurityIntegrationAwsIamAuthentication() bool {
-	return true
+	option := func() bool {
+		return v.Choice(
+			v.option("TYPE", v.wordsValue("API_AUTHENTICATION")),
+			v.option("AUTH_TYPE", v.wordsValue("AWS_IAM")),
+			v.option("AWS_ROLE_ARN", v.parseString),
+			v.option("ENABLED", v.parseBool),
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("SECURITY") },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		option,
+		func() bool { return v.ZeroOrMore(option) },
+	)
 }
 
 // ParseCreateSecurityIntegrationExternalOauth validates the Snowflake `CREATE SECURITY INTEGRATION (External OAuth)` command.
@@ -2502,7 +6646,43 @@ func (v *Validator) ParseCreateSecurityIntegrationAwsIamAuthentication() bool {
 //	  [ NETWORK_POLICY = '<network_policy>' ]
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateSecurityIntegrationExternalOauth() bool {
-	return true
+	strOrList := func() bool {
+		return v.Choice(
+			func() bool { return v.parseParenList(v.parseString) },
+			v.parseString,
+		)
+	}
+	option := func() bool {
+		return v.Choice(
+			v.option("TYPE", v.wordsValue("EXTERNAL_OAUTH")),
+			v.option("ENABLED", v.parseBool),
+			v.option("EXTERNAL_OAUTH_TYPE", v.wordsValue("OKTA", "AZURE", "PING_FEDERATE", "CUSTOM")),
+			v.option("EXTERNAL_OAUTH_ISSUER", v.parseString),
+			v.option("EXTERNAL_OAUTH_TOKEN_USER_MAPPING_CLAIM", strOrList),
+			v.option("EXTERNAL_OAUTH_SNOWFLAKE_USER_MAPPING_ATTRIBUTE", v.parseString),
+			v.option("EXTERNAL_OAUTH_JWS_KEYS_URL", strOrList),
+			v.option("EXTERNAL_OAUTH_BLOCKED_ROLES_LIST", func() bool { return v.parseParenList(v.parseString) }),
+			v.option("EXTERNAL_OAUTH_ALLOWED_ROLES_LIST", func() bool { return v.parseParenList(v.parseString) }),
+			v.option("EXTERNAL_OAUTH_RSA_PUBLIC_KEY", v.parseScalar),
+			v.option("EXTERNAL_OAUTH_RSA_PUBLIC_KEY_2", v.parseScalar),
+			v.option("EXTERNAL_OAUTH_AUDIENCE_LIST", strOrList),
+			v.option("EXTERNAL_OAUTH_ANY_ROLE_MODE", v.wordsValue("DISABLE", "ENABLE", "ENABLE_FOR_PRIVILEGE")),
+			v.option("EXTERNAL_OAUTH_SCOPE_DELIMITER", v.parseString),
+			v.option("EXTERNAL_OAUTH_SCOPE_MAPPING_ATTRIBUTE", v.parseString),
+			v.option("NETWORK_POLICY", v.parseScalar),
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("SECURITY") },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		option,
+		func() bool { return v.ZeroOrMore(option) },
+	)
 }
 
 // ParseCreateSecurityIntegrationSnowflakeOauth validates the Snowflake `CREATE SECURITY INTEGRATION (Snowflake OAuth)` command.
@@ -2530,7 +6710,35 @@ func (v *Validator) ParseCreateSecurityIntegrationExternalOauth() bool {
 //	--   OAUTH_CLIENT = CUSTOM
 //	--   OAUTH_CLIENT_TYPE = 'CONFIDENTIAL' | 'PUBLIC'
 func (v *Validator) ParseCreateSecurityIntegrationSnowflakeOauth() bool {
-	return true
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	option := func() bool {
+		return v.Choice(
+			v.option("TYPE", v.wordsValue("OAUTH")),
+			v.option("OAUTH_CLIENT", v.parseScalar),
+			v.option("OAUTH_CLIENT_TYPE", v.parseString),
+			v.option("OAUTH_REDIRECT_URI", v.parseString),
+			v.option("ENABLED", v.parseBool),
+			v.option("OAUTH_ISSUE_REFRESH_TOKENS", v.parseBool),
+			v.option("OAUTH_REFRESH_TOKEN_VALIDITY", num),
+			v.option("OAUTH_SINGLE_USE_REFRESH_TOKENS_REQUIRED", v.parseBool),
+			v.option("OAUTH_USE_SECONDARY_ROLES", v.wordsValue("IMPLICIT", "NONE")),
+			v.option("NETWORK_POLICY", v.parseScalar),
+			v.option("ALLOWED_ROLES_LIST", func() bool { return v.parseParenList(v.parseString) }),
+			v.option("BLOCKED_ROLES_LIST", func() bool { return v.parseParenList(v.parseString) }),
+			v.option("USE_PRIVATELINK_FOR_AUTHORIZATION_ENDPOINT", v.parseBool),
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("SECURITY") },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		option,
+		func() bool { return v.ZeroOrMore(option) },
+	)
 }
 
 // ParseCreateSecurityIntegrationSaml2 validates the Snowflake `CREATE SECURITY INTEGRATION (SAML2)` command.
@@ -2556,7 +6764,39 @@ func (v *Validator) ParseCreateSecurityIntegrationSnowflakeOauth() bool {
 //	    [ SAML2_SNOWFLAKE_ACS_URL = '<string_literal>' ]
 //	    [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateSecurityIntegrationSaml2() bool {
-	return true
+	option := func() bool {
+		return v.Choice(
+			v.option("TYPE", v.wordsValue("SAML2")),
+			v.option("ENABLED", v.parseBool),
+			v.option("METADATA_URL", v.parseString),
+			v.option("ALLOWED_USER_DOMAINS", func() bool { return v.parseParenList(v.parseString) }),
+			v.option("ALLOWED_EMAIL_PATTERNS", func() bool { return v.parseParenList(v.parseString) }),
+			v.option("SAML2_ISSUER", v.parseString),
+			v.option("SAML2_SSO_URL", v.parseString),
+			v.option("SAML2_PROVIDER", v.parseString),
+			v.option("SAML2_X509_CERT", v.parseString),
+			v.option("SAML2_SP_INITIATED_LOGIN_PAGE_LABEL", v.parseString),
+			v.option("SAML2_ENABLE_SP_INITIATED", v.parseBool),
+			v.option("SAML2_SNOWFLAKE_X509_CERT", v.parseString),
+			v.option("SAML2_SIGN_REQUEST", v.parseBool),
+			v.option("SAML2_REQUESTED_NAMEID_FORMAT", v.parseString),
+			v.option("SAML2_POST_LOGOUT_REDIRECT_URL", v.parseString),
+			v.option("SAML2_FORCE_AUTHN", v.parseBool),
+			v.option("SAML2_SNOWFLAKE_ISSUER_URL", v.parseString),
+			v.option("SAML2_SNOWFLAKE_ACS_URL", v.parseString),
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("SECURITY") },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		option,
+		func() bool { return v.ZeroOrMore(option) },
+	)
 }
 
 // ParseCreateSecurityIntegrationScim validates the Snowflake `CREATE SECURITY INTEGRATION (SCIM)` command.
@@ -2574,7 +6814,27 @@ func (v *Validator) ParseCreateSecurityIntegrationSaml2() bool {
 //	    [ SYNC_PASSWORD = { TRUE | FALSE } ]
 //	    [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateSecurityIntegrationScim() bool {
-	return true
+	option := func() bool {
+		return v.Choice(
+			v.option("TYPE", v.wordsValue("SCIM")),
+			v.option("ENABLED", v.parseBool),
+			v.option("SCIM_CLIENT", v.parseString),
+			v.option("RUN_AS_ROLE", v.parseString),
+			v.option("NETWORK_POLICY", v.parseScalar),
+			v.option("SYNC_PASSWORD", v.parseBool),
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("SECURITY") },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		option,
+		func() bool { return v.ZeroOrMore(option) },
+	)
 }
 
 // ParseCreateSemanticView validates the Snowflake `CREATE SEMANTIC VIEW` command.
@@ -2599,7 +6859,67 @@ func (v *Validator) ParseCreateSecurityIntegrationScim() bool {
 //	-- dimensionExpression, metricExpression, windowFunctionMetricExpression,
 //	-- verifiedQuery (see Reference URL).
 func (v *Validator) ParseCreateSemanticView() bool {
-	return true
+	// balanced consumes a single ( ... ) group, including nested parens. The
+	// inner definitions (logicalTable, relationshipDef, expressions, …) are
+	// free-form, so accept any balanced span rather than modelling them.
+	var balanced func() bool
+	balanced = func() bool {
+		return v.Sequence(
+			func() bool { return v.Match(sqltok.LParen) },
+			func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Choice(
+						balanced,
+						func() bool {
+							t := v.Peek()
+							if t.Kind == sqltok.RParen || t.Kind == sqltok.EOF {
+								return false
+							}
+							v.advance()
+							return true
+						},
+					)
+				})
+			},
+			func() bool { return v.Match(sqltok.RParen) },
+		)
+	}
+	parenClause := func(word string) Rule {
+		return func() bool {
+			return v.Sequence(func() bool { return v.MatchWord(word) }, balanced)
+		}
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("SEMANTIC") },
+		func() bool { return v.MatchKeyword("VIEW") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		// TABLES ( ... ) is required.
+		parenClause("TABLES"),
+		// The remaining clauses may appear in any order.
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					parenClause("RELATIONSHIPS"),
+					parenClause("FACTS"),
+					parenClause("DIMENSIONS"),
+					parenClause("METRICS"),
+					parenClause("AI_VERIFIED_QUERIES"),
+					v.commentOption(),
+					func() bool {
+						return v.Sequence(func() bool { return v.MatchWord("AI_SQL_GENERATION") }, v.parseString)
+					},
+					func() bool {
+						return v.Sequence(func() bool { return v.MatchWord("AI_QUESTION_CATEGORIZATION") }, v.parseString)
+					},
+					v.tagClause,
+					func() bool { return v.phrase("COPY", "GRANTS") },
+				)
+			})
+		},
+	)
 }
 
 // ParseCreateSequence validates the Snowflake `CREATE SEQUENCE` command.
@@ -2621,7 +6941,51 @@ func (v *Validator) ParseCreateSemanticView() bool {
 //	  [ { ORDER | NOORDER } ]
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateSequence() bool {
-	return true
+	eqOpt := func() bool { return v.Optional(func() bool { return v.MatchOp("=") }) }
+	body := func() bool {
+		return v.ZeroOrMore(func() bool {
+			return v.Choice(
+				// START [ WITH ] [ = ] <initial_value>
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("START") },
+						func() bool { return v.Optional(func() bool { return v.MatchWord("WITH") }) },
+						eqOpt,
+						v.parseNumber,
+					)
+				},
+				// INCREMENT [ BY ] [ = ] <sequence_interval>
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("INCREMENT") },
+						func() bool { return v.Optional(func() bool { return v.MatchWord("BY") }) },
+						eqOpt,
+						v.parseNumber,
+					)
+				},
+				v.wordsValue("ORDER", "NOORDER"),
+				v.option("COMMENT", v.parseString),
+			)
+		})
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		// [ OR { REPLACE | ALTER } ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchKeyword("OR") },
+					v.wordsValue("REPLACE", "ALTER"),
+				)
+			})
+		},
+		func() bool { return v.MatchKeyword("SEQUENCE") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		// [ WITH ]
+		func() bool { return v.Optional(func() bool { return v.MatchWord("WITH") }) },
+		body,
+	)
 }
 
 // ParseCreateService validates the Snowflake `CREATE SERVICE` command.
@@ -2646,7 +7010,93 @@ func (v *Validator) ParseCreateSequence() bool {
 //	  [ [ WITH ] TAG ( <tag_name> = '<tag_value>' [ , <tag_name> = '<tag_value>' , ... ] ) ]
 //	  [ COMMENT = '{string_literal}']
 func (v *Validator) ParseCreateService() bool {
-	return true
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	// balanced consumes a single ( ... ) group, used for inline specs and lists.
+	var balanced func() bool
+	balanced = func() bool {
+		return v.Sequence(
+			func() bool { return v.Match(sqltok.LParen) },
+			func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Choice(
+						balanced,
+						func() bool {
+							t := v.Peek()
+							if t.Kind == sqltok.RParen || t.Kind == sqltok.EOF {
+								return false
+							}
+							v.advance()
+							return true
+						},
+					)
+				})
+			},
+			func() bool { return v.Match(sqltok.RParen) },
+		)
+	}
+	// fromSpecification / fromSpecificationTemplate are free-form bodies:
+	//   FROM { SPECIFICATION | SPECIFICATION_TEMPLATE } { $$...$$ | '<text>' }
+	//   FROM { SPECIFICATION_FILE | SPECIFICATION_TEMPLATE_FILE } = '<path>'
+	//   [ USING ( <key> => <value> [ , ... ] ) ]
+	fromSpec := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchKeyword("FROM") },
+			func() bool {
+				return v.Choice(
+					// SPECIFICATION_FILE = '<path>' (and template variant)
+					func() bool {
+						return v.Sequence(
+							v.wordsValue("SPECIFICATION_FILE", "SPECIFICATION_TEMPLATE_FILE"),
+							func() bool { return v.MatchOp("=") },
+							v.parseString,
+						)
+					},
+					// SPECIFICATION '<inline_text>' (and template variant)
+					func() bool {
+						return v.Sequence(
+							v.wordsValue("SPECIFICATION", "SPECIFICATION_TEMPLATE"),
+							func() bool { return v.Optional(func() bool { return v.MatchOp("=") }) },
+							v.parseString,
+						)
+					},
+				)
+			},
+			// [ USING ( <key> => <value> [ , ... ] ) ]
+			func() bool {
+				return v.Optional(func() bool {
+					return v.Sequence(func() bool { return v.MatchKeyword("USING") }, balanced)
+				})
+			},
+		)
+	}
+	option := func() bool {
+		return v.Choice(
+			v.option("AUTO_SUSPEND_SECS", num),
+			v.option("EXTERNAL_ACCESS_INTEGRATIONS", func() bool { return v.parseParenList(v.parseIdentPath) }),
+			v.option("AUTO_RESUME", v.parseBool),
+			v.option("MIN_INSTANCES", num),
+			v.option("MIN_READY_INSTANCES", num),
+			v.option("MAX_INSTANCES", num),
+			v.option("LOG_LEVEL", v.parseString),
+			v.option("QUERY_WAREHOUSE", v.parseIdentPath),
+			v.tagClause,
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("SERVICE") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		// IN COMPUTE POOL <compute_pool_name>
+		func() bool { return v.MatchKeyword("IN") },
+		func() bool { return v.MatchWord("COMPUTE") },
+		func() bool { return v.MatchWord("POOL") },
+		v.parseIdentPath,
+		fromSpec,
+		func() bool { return v.ZeroOrMore(option) },
+	)
 }
 
 // ParseCreateSessionPolicy validates the Snowflake `CREATE SESSION POLICY` command.
@@ -2663,7 +7113,30 @@ func (v *Validator) ParseCreateService() bool {
 //	  [ BLOCKED_SECONDARY_ROLES = ( [ { 'ALL' | <role_name> [ , <role_name> ... ] } ] ) ]
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateSessionPolicy() bool {
-	return true
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	roleItem := func() bool {
+		return v.Choice(v.parseString, v.parseIdentPath)
+	}
+	option := func() bool {
+		return v.Choice(
+			v.option("SESSION_IDLE_TIMEOUT_MINS", num),
+			v.option("SESSION_UI_IDLE_TIMEOUT_MINS", num),
+			v.option("SESSION_MAX_LIFESPAN_MINS", num),
+			v.option("SESSION_UI_MAX_LIFESPAN_MINS", num),
+			v.option("ALLOWED_SECONDARY_ROLES", func() bool { return v.parseParenList(roleItem) }),
+			v.option("BLOCKED_SECONDARY_ROLES", func() bool { return v.parseParenList(roleItem) }),
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("SESSION") },
+		func() bool { return v.MatchWord("POLICY") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.ZeroOrMore(option) },
+	)
 }
 
 // ParseCreateShare validates the Snowflake `CREATE SHARE` command.
@@ -2677,7 +7150,22 @@ func (v *Validator) ParseCreateSessionPolicy() bool {
 //	CREATE OR ALTER SHARE <name>
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateShare() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		// [ OR { REPLACE | ALTER } ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchKeyword("OR") },
+					v.wordsValue("REPLACE", "ALTER"),
+				)
+			})
+		},
+		func() bool { return v.MatchWord("SHARE") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.Optional(v.commentOption()) },
+	)
 }
 
 // ParseCreateSnapshot validates the Snowflake `CREATE SNAPSHOT` command.
@@ -2692,7 +7180,29 @@ func (v *Validator) ParseCreateShare() bool {
 //	  [ COMMENT = '<string_literal>']
 //	  [ [ WITH ] TAG ( <tag_name> = '<tag_value>' [ , ... ] ) ]
 func (v *Validator) ParseCreateSnapshot() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("SNAPSHOT") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		// FROM SERVICE <service_name>
+		func() bool { return v.MatchKeyword("FROM") },
+		func() bool { return v.MatchWord("SERVICE") },
+		v.parseIdentPath,
+		// VOLUME "<volume_name>"
+		func() bool { return v.MatchWord("VOLUME") },
+		v.parseIdentPath,
+		// INSTANCE <instance_id>
+		func() bool { return v.MatchWord("INSTANCE") },
+		v.parseScalar,
+		// [ COMMENT = ... ] and [ TAG ( ... ) ] in any order.
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(v.commentOption(), v.tagClause)
+			})
+		},
+	)
 }
 
 // ParseCreateSnapshotPolicy validates the Snowflake `CREATE SNAPSHOT POLICY` command.
@@ -2707,7 +7217,25 @@ func (v *Validator) ParseCreateSnapshot() bool {
 //	   [ EXPIRE_AFTER_DAYS = <days_integer> ]
 //	   [ COMMENT = <string> ]
 func (v *Validator) ParseCreateSnapshotPolicy() bool {
-	return true
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	option := func() bool {
+		return v.Choice(
+			v.tagClause,
+			func() bool { return v.phrase("WITH", "RETENTION", "LOCK") },
+			v.option("SCHEDULE", v.parseString),
+			v.option("EXPIRE_AFTER_DAYS", num),
+			v.option("COMMENT", v.parseString),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("SNAPSHOT") },
+		func() bool { return v.MatchWord("POLICY") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.ZeroOrMore(option) },
+	)
 }
 
 // ParseCreateSnapshotSet validates the Snowflake `CREATE SNAPSHOT SET` command.
@@ -2733,7 +7261,61 @@ func (v *Validator) ParseCreateSnapshotPolicy() bool {
 //	   [ WITH SNAPSHOT POLICY <policy_name> ]
 //	   [ COMMENT = <string> ]
 func (v *Validator) ParseCreateSnapshotSet() bool {
-	return true
+	forClause := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchWord("FOR") },
+			func() bool {
+				return v.Choice(
+					// [ DYNAMIC ] TABLE <table_name>
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.Optional(func() bool { return v.MatchWord("DYNAMIC") }) },
+							func() bool { return v.MatchWord("TABLE") },
+							v.parseIdentPath,
+						)
+					},
+					// SCHEMA <schema_name>
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchWord("SCHEMA") },
+							v.parseIdentPath,
+						)
+					},
+					// DATABASE <database_name>
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchWord("DATABASE") },
+							v.parseIdentPath,
+						)
+					},
+				)
+			},
+		)
+	}
+	option := func() bool {
+		return v.Choice(
+			v.tagClause,
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("WITH") },
+					func() bool { return v.MatchWord("SNAPSHOT") },
+					func() bool { return v.MatchWord("POLICY") },
+					v.parseIdentPath,
+				)
+			},
+			v.option("COMMENT", v.parseString),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("SNAPSHOT") },
+		func() bool { return v.MatchWord("SET") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		forClause,
+		func() bool { return v.ZeroOrMore(option) },
+	)
 }
 
 // ParseCreateStage validates the Snowflake `CREATE STAGE` command.
@@ -2757,7 +7339,78 @@ func (v *Validator) ParseCreateSnapshotSet() bool {
 //	  [ COMMENT = '<string_literal>' ]
 //	  [ [ WITH ] TAG ( <tag_name> = '<tag_value>' [ , <tag_name> = '<tag_value>' , ... ] ) ]
 func (v *Validator) ParseCreateStage() bool {
-	return true
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	// balanced consumes a single ( ... ) group, used for the nested option
+	// groups (FILE_FORMAT, COPY_OPTIONS, CREDENTIALS, ENCRYPTION, DIRECTORY),
+	// whose contents are themselves order-independent KEY = value lists.
+	var balanced func() bool
+	balanced = func() bool {
+		return v.Sequence(
+			func() bool { return v.Match(sqltok.LParen) },
+			func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Choice(
+						balanced,
+						func() bool {
+							t := v.Peek()
+							if t.Kind == sqltok.RParen || t.Kind == sqltok.EOF {
+								return false
+							}
+							v.advance()
+							return true
+						},
+					)
+				})
+			},
+			func() bool { return v.Match(sqltok.RParen) },
+		)
+	}
+	parenGroup := func(key string) Rule {
+		return func() bool {
+			return v.Sequence(
+				func() bool { return v.MatchWord(key) },
+				func() bool { return v.MatchOp("=") },
+				balanced,
+			)
+		}
+	}
+	// Order-independent stage options spanning internal/external/directory
+	// params plus the trailing FILE_FORMAT / COMMENT / TAG clauses.
+	option := func() bool {
+		return v.Choice(
+			// Nested ( ... ) option groups.
+			parenGroup("FILE_FORMAT"),
+			parenGroup("COPY_OPTIONS"),
+			parenGroup("CREDENTIALS"),
+			parenGroup("ENCRYPTION"),
+			parenGroup("DIRECTORY"),
+			// Scalar options.
+			v.option("URL", v.parseString),
+			v.option("STORAGE_INTEGRATION", v.parseIdentPath),
+			v.option("ENABLE", v.parseBool),
+			v.option("REFRESH_ON_CREATE", v.parseBool),
+			v.option("AUTO_REFRESH", v.parseBool),
+			v.option("NOTIFICATION_INTEGRATION", v.parseScalar),
+			v.option("SNOWFLAKE_FULL", v.parseScalar),
+			v.option("SNOWFLAKE_SSE", v.parseScalar),
+			v.option("FILE_FORMAT", v.parseScalar),
+			v.option("MAX_FILE_DOWNLOAD_BYTES", num),
+			v.tagClause,
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		// [ { TEMP | TEMPORARY } ]
+		func() bool {
+			return v.Optional(func() bool { return v.wordsValue("TEMP", "TEMPORARY")() })
+		},
+		func() bool { return v.MatchWord("STAGE") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.ZeroOrMore(option) },
+	)
 }
 
 // ParseCreateStorageIntegration validates the Snowflake `CREATE STORAGE INTEGRATION` command.
@@ -2791,7 +7444,32 @@ func (v *Validator) ParseCreateStage() bool {
 //	  AZURE_TENANT_ID = '<tenant_id>'
 //	  [ USE_PRIVATELINK_ENDPOINT = { TRUE | FALSE } ]
 func (v *Validator) ParseCreateStorageIntegration() bool {
-	return true
+	str := v.parseString
+	name := v.parseIdentPath
+	prop := func() bool {
+		return v.Choice(
+			v.option("TYPE", v.parseScalar),
+			v.option("ENABLED", v.parseBool),
+			v.option("STORAGE_PROVIDER", str),
+			v.option("STORAGE_AWS_ROLE_ARN", str),
+			v.option("STORAGE_AWS_EXTERNAL_ID", str),
+			v.option("STORAGE_AWS_OBJECT_ACL", str),
+			v.option("AZURE_TENANT_ID", str),
+			v.option("USE_PRIVATELINK_ENDPOINT", v.parseBool),
+			v.option("STORAGE_ALLOWED_LOCATIONS", func() bool { return v.parseParenList(str) }),
+			v.option("STORAGE_BLOCKED_LOCATIONS", func() bool { return v.parseParenList(str) }),
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("STORAGE") },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		v.ifNotExists,
+		name,
+		func() bool { return v.ZeroOrMore(prop) },
+	)
 }
 
 // ParseCreateStorageLifecyclePolicy validates the Snowflake `CREATE STORAGE LIFECYCLE POLICY` command.
@@ -2807,7 +7485,81 @@ func (v *Validator) ParseCreateStorageIntegration() bool {
 //	  [ COMMENT = '<string_literal>' ]
 //	  [ [ WITH ] TAG ( <tag_name> = '<tag_value>' [ , <tag_name> = '<tag_value>' , ... ] ) ]
 func (v *Validator) ParseCreateStorageLifecyclePolicy() bool {
-	return true
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	// arg list: ( <arg_name> <arg_type> [ , ... ] ) — consume a balanced paren run.
+	var balanced func() bool
+	balanced = func() bool {
+		return v.Sequence(
+			func() bool { return v.Match(sqltok.LParen) },
+			func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Choice(
+						balanced,
+						func() bool {
+							if v.AtEnd() || v.Peek().Kind == sqltok.RParen {
+								return false
+							}
+							v.advance()
+							return true
+						},
+					)
+				})
+			},
+			func() bool { return v.Match(sqltok.RParen) },
+		)
+	}
+	// peekWord reports (without consuming) whether the next token is one of words.
+	peekWord := func(words ...string) bool {
+		saved := v.save()
+		for _, w := range words {
+			if v.MatchWord(w) {
+				v.restore(saved)
+				return true
+			}
+			v.restore(saved)
+		}
+		return false
+	}
+	// RETURNS BOOLEAN -> <body>; consume body permissively until a known option
+	// keyword or EOF.
+	stop := func() bool {
+		return peekWord("ARCHIVE_TIER", "ARCHIVE_FOR_DAYS", "COMMENT", "WITH", "TAG")
+	}
+	body := func() bool {
+		return v.ZeroOrMore(func() bool {
+			if v.AtEnd() || stop() {
+				return false
+			}
+			v.advance()
+			return true
+		})
+	}
+	opt := func() bool {
+		return v.Choice(
+			v.option("ARCHIVE_TIER", v.wordsValue("COOL", "COLD")),
+			v.option("ARCHIVE_FOR_DAYS", num),
+			v.commentOption(),
+			v.tagClause,
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("STORAGE") },
+		func() bool { return v.MatchWord("LIFECYCLE") },
+		func() bool { return v.MatchWord("POLICY") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.MatchKeyword("AS") },
+		balanced,
+		func() bool { return v.MatchWord("RETURNS") },
+		func() bool { return v.MatchWord("BOOLEAN") },
+		func() bool { return v.MatchOp("-") },
+		func() bool { return v.MatchOp(">") },
+		func() bool { return !v.AtEnd() && !stop() },
+		body,
+		func() bool { return v.ZeroOrMore(opt) },
+	)
 }
 
 // ParseCreateStream validates the Snowflake `CREATE STREAM` command.
@@ -2847,7 +7599,64 @@ func (v *Validator) ParseCreateStorageLifecyclePolicy() bool {
 //
 //	-- Also supported: ON EVENT TABLE, ON STAGE, ON DYNAMIC TABLE.
 func (v *Validator) ParseCreateStream() bool {
-	return true
+	phraseRule := func(words ...string) Rule {
+		return func() bool { return v.phrase(words...) }
+	}
+	// [ { AT | BEFORE } ( { TIMESTAMP => ... | OFFSET => ... | STATEMENT => ... | STREAM => ... } ) ]
+	atBefore := func() bool {
+		return v.Optional(func() bool {
+			return v.Sequence(
+				v.wordsValue("AT", "BEFORE"),
+				func() bool { return v.Match(sqltok.LParen) },
+				func() bool {
+					return v.Choice(
+						v.arrowOption("TIMESTAMP"),
+						v.arrowOption("OFFSET"),
+						v.arrowOption("STATEMENT"),
+						v.arrowOption("STREAM"),
+					)
+				},
+				func() bool { return v.Match(sqltok.RParen) },
+			)
+		})
+	}
+	// ON { TABLE | EXTERNAL TABLE | VIEW | EVENT TABLE | STAGE | DYNAMIC TABLE } <name>
+	onSource := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchKeyword("ON") },
+			func() bool {
+				return v.Choice(
+					phraseRule("EXTERNAL", "TABLE"),
+					phraseRule("EVENT", "TABLE"),
+					phraseRule("DYNAMIC", "TABLE"),
+					func() bool { return v.MatchWord("TABLE") },
+					func() bool { return v.MatchWord("VIEW") },
+					func() bool { return v.MatchWord("STAGE") },
+				)
+			},
+			v.parseIdentPath,
+		)
+	}
+	opt := func() bool {
+		return v.Choice(
+			v.option("APPEND_ONLY", v.parseBool),
+			v.option("SHOW_INITIAL_ROWS", v.parseBool),
+			v.option("INSERT_ONLY", v.parseBool),
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("STREAM") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.Optional(v.tagClause) },
+		func() bool { return v.Optional(func() bool { return v.phrase("COPY", "GRANTS") }) },
+		onSource,
+		atBefore,
+		func() bool { return v.ZeroOrMore(opt) },
+	)
 }
 
 // ParseCreateStreamlit validates the Snowflake `CREATE STREAMLIT` command.
@@ -2876,7 +7685,40 @@ func (v *Validator) ParseCreateStream() bool {
 //	  [ IMPORTS = ( '<stage_path_and_directory_or_file_name_to_read>' [ , ... ] ) ]
 //	  [ EXTERNAL_ACCESS_INTEGRATIONS = ( <integration_name> [ , ... ] ) ]
 func (v *Validator) ParseCreateStreamlit() bool {
-	return true
+	str := v.parseString
+	name := v.parseIdentPath
+	opt := func() bool {
+		return v.Choice(
+			v.option("ROOT_LOCATION", str),
+			v.option("MAIN_FILE", str),
+			v.option("QUERY_WAREHOUSE", name),
+			v.option("RUNTIME_NAME", str),
+			v.option("COMPUTE_POOL", name),
+			v.option("TITLE", str),
+			v.option("IMPORTS", func() bool { return v.parseParenList(str) }),
+			v.option("EXTERNAL_ACCESS_INTEGRATIONS", func() bool { return v.parseParenList(name) }),
+			v.option("SECRETS", func() bool { return v.parseParenList(v.option2(str, v.parseScalar)) }),
+			v.commentOption(),
+		)
+	}
+	// FROM <source_location>
+	fromClause := func() bool {
+		return v.Optional(func() bool {
+			return v.Sequence(
+				func() bool { return v.MatchKeyword("FROM") },
+				func() bool { return v.Choice(str, name) },
+			)
+		})
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("STREAMLIT") },
+		v.ifNotExists,
+		name,
+		fromClause,
+		func() bool { return v.ZeroOrMore(opt) },
+	)
 }
 
 // ParseCreateTable validates the Snowflake `CREATE TABLE` command.
@@ -2932,7 +7774,214 @@ func (v *Validator) ParseCreateStreamlit() bool {
 //	-- CREATE TABLE <name> CLONE <source_table> [ { AT | BEFORE } ( ... ) ]
 //	-- CREATE [ TRANSIENT ] TABLE <name> FROM ARCHIVE OF <source_table> WHERE <expression>
 func (v *Validator) ParseCreateTable() bool {
-	return true
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	name := v.parseIdentPath
+	// Balanced parenthesised run — used for the column/constraint definition list
+	// and for CLUSTER BY / policy column lists. Validates only paren balance.
+	var balanced func() bool
+	balanced = func() bool {
+		return v.Sequence(
+			func() bool { return v.Match(sqltok.LParen) },
+			func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Choice(
+						balanced,
+						func() bool {
+							if v.AtEnd() || v.Peek().Kind == sqltok.RParen {
+								return false
+							}
+							v.advance()
+							return true
+						},
+					)
+				})
+			},
+			func() bool { return v.Match(sqltok.RParen) },
+		)
+	}
+	// AS <query> | USING TEMPLATE <query> — consume the remaining tokens.
+	consumeRest := func() bool {
+		return v.ZeroOrMore(func() bool {
+			if v.AtEnd() {
+				return false
+			}
+			v.advance()
+			return true
+		})
+	}
+	asQuery := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchKeyword("AS") },
+			func() bool { return !v.AtEnd() },
+			consumeRest,
+		)
+	}
+	usingTemplate := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchKeyword("USING") },
+			func() bool { return v.MatchWord("TEMPLATE") },
+			func() bool { return !v.AtEnd() },
+			consumeRest,
+		)
+	}
+	// LIKE <source_table>
+	likeClause := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchKeyword("LIKE") },
+			name,
+		)
+	}
+	// CLONE <source> [ { AT | BEFORE } ( ... ) ]
+	cloneClause := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchKeyword("CLONE") },
+			name,
+			func() bool {
+				return v.Optional(func() bool {
+					return v.Sequence(v.wordsValue("AT", "BEFORE"), balanced)
+				})
+			},
+		)
+	}
+	// FROM ARCHIVE OF <source> WHERE <expr>
+	fromArchive := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchKeyword("FROM") },
+			func() bool { return v.MatchWord("ARCHIVE") },
+			func() bool { return v.MatchKeyword("OF") },
+			name,
+			func() bool { return v.MatchKeyword("WHERE") },
+			func() bool { return !v.AtEnd() },
+			consumeRest,
+		)
+	}
+	// A trailing table option (order-independent).
+	opt := func() bool {
+		return v.Choice(
+			func() bool {
+				return v.Sequence(func() bool { return v.MatchWord("CLUSTER") }, func() bool { return v.MatchKeyword("BY") }, balanced)
+			},
+			v.option("ENABLE_SCHEMA_EVOLUTION", v.parseBool),
+			v.option("DATA_RETENTION_TIME_IN_DAYS", num),
+			v.option("MAX_DATA_EXTENSION_TIME_IN_DAYS", num),
+			v.option("CHANGE_TRACKING", v.parseBool),
+			v.option("DEFAULT_DDL_COLLATION", v.parseString),
+			v.option("ERROR_LOGGING", v.parseBool),
+			v.option("ROW_TIMESTAMP", v.parseBool),
+			func() bool { return v.phrase("COPY", "GRANTS") },
+			func() bool { return v.phrase("COPY", "TAGS") },
+			v.commentOption(),
+			// [ WITH ] ROW ACCESS POLICY <name> ON ( cols )
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.Optional(func() bool { return v.MatchKeyword("WITH") }) },
+					func() bool { return v.MatchWord("ROW") },
+					func() bool { return v.MatchWord("ACCESS") },
+					func() bool { return v.MatchWord("POLICY") },
+					name,
+					func() bool { return v.MatchKeyword("ON") },
+					balanced,
+				)
+			},
+			// [ WITH ] AGGREGATION POLICY <name> [ ENTITY KEY ( cols ) ]
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.Optional(func() bool { return v.MatchKeyword("WITH") }) },
+					func() bool { return v.MatchWord("AGGREGATION") },
+					func() bool { return v.MatchWord("POLICY") },
+					name,
+					func() bool {
+						return v.Optional(func() bool {
+							return v.Sequence(func() bool { return v.MatchWord("ENTITY") }, func() bool { return v.MatchKeyword("KEY") }, balanced)
+						})
+					},
+				)
+			},
+			// [ WITH ] JOIN POLICY <name> [ ALLOWED JOIN KEYS ( cols ) ]
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.Optional(func() bool { return v.MatchKeyword("WITH") }) },
+					func() bool { return v.MatchWord("JOIN") },
+					func() bool { return v.MatchWord("POLICY") },
+					name,
+					func() bool {
+						return v.Optional(func() bool {
+							return v.Sequence(func() bool { return v.MatchWord("ALLOWED") }, func() bool { return v.MatchWord("JOIN") }, func() bool { return v.MatchWord("KEYS") }, balanced)
+						})
+					},
+				)
+			},
+			// [ WITH ] STORAGE LIFECYCLE POLICY <name> ON ( cols )
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.Optional(func() bool { return v.MatchKeyword("WITH") }) },
+					func() bool { return v.MatchWord("STORAGE") },
+					func() bool { return v.MatchWord("LIFECYCLE") },
+					func() bool { return v.MatchWord("POLICY") },
+					name,
+					func() bool { return v.MatchKeyword("ON") },
+					balanced,
+				)
+			},
+			// WITH CONTACT ( purpose = contact [ , ... ] )
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchKeyword("WITH") },
+					func() bool { return v.MatchWord("CONTACT") },
+					func() bool { return v.parseParenList(v.option2(name, name)) },
+				)
+			},
+			v.tagClause,
+		)
+	}
+	body := func() bool {
+		return v.Choice(
+			// CREATE TABLE ... ( cols ) [ options ]
+			func() bool {
+				return v.Sequence(
+					balanced,
+					func() bool { return v.ZeroOrMore(opt) },
+					// optional AS <query> after a defined column list.
+					func() bool { return v.Optional(asQuery) },
+				)
+			},
+			// CREATE TABLE ... AS <query>
+			asQuery,
+			// CREATE TABLE ... USING TEMPLATE <query>
+			usingTemplate,
+			likeClause,
+			cloneClause,
+			fromArchive,
+			// bare CREATE TABLE <name> [ options ]
+			func() bool { return v.ZeroOrMore(opt) },
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		// [ { [ { LOCAL | GLOBAL } ] TEMP | TEMPORARY | VOLATILE | TRANSIENT } ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Choice(
+					func() bool {
+						return v.Sequence(
+							func() bool {
+								return v.Optional(func() bool { return v.wordsValue("LOCAL", "GLOBAL")() })
+							},
+							v.wordsValue("TEMP", "TEMPORARY"),
+						)
+					},
+					func() bool { return v.MatchWord("TEMPORARY") },
+					func() bool { return v.MatchWord("VOLATILE") },
+					func() bool { return v.MatchWord("TRANSIENT") },
+				)
+			})
+		},
+		func() bool { return v.MatchKeyword("TABLE") },
+		v.ifNotExists,
+		name,
+		body,
+	)
 }
 
 // ParseCreateAlterTableConstraint validates the Snowflake `CREATE | ALTER TABLE CONSTRAINT` command.
@@ -2994,7 +8043,61 @@ func (v *Validator) ParseCreateTable() bool {
 //	  [ CONSTRAINT <constraint_name> ] CHECK ( <expr> )
 //	  [ ENABLE { VALIDATE | NOVALIDATE } ]
 func (v *Validator) ParseCreateAlterTableConstraint() bool {
-	return true
+	name := v.parseIdentPath
+	var balanced func() bool
+	balanced = func() bool {
+		return v.Sequence(
+			func() bool { return v.Match(sqltok.LParen) },
+			func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Choice(
+						balanced,
+						func() bool {
+							if v.AtEnd() || v.Peek().Kind == sqltok.RParen {
+								return false
+							}
+							v.advance()
+							return true
+						},
+					)
+				})
+			},
+			func() bool { return v.Match(sqltok.RParen) },
+		)
+	}
+	consumeRest := func() bool {
+		before := v.save()
+		v.ZeroOrMore(func() bool {
+			if v.AtEnd() {
+				return false
+			}
+			v.advance()
+			return true
+		})
+		return v.pos > before
+	}
+	// CREATE TABLE <name> ( <col defs / constraints> )
+	createForm := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchKeyword("CREATE") },
+			func() bool { return v.MatchKeyword("TABLE") },
+			name,
+			balanced,
+		)
+	}
+	// ALTER TABLE <name> ADD COLUMN <col> <type> [ NOT NULL ] { inline constraint }
+	alterForm := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchKeyword("ALTER") },
+			func() bool { return v.MatchKeyword("TABLE") },
+			name,
+			func() bool { return v.MatchWord("ADD") },
+			func() bool { return v.MatchWord("COLUMN") },
+			// <col_name> <col_type> + inline constraint — consume the rest permissively.
+			consumeRest,
+		)
+	}
+	return v.Choice(createForm, alterForm)
 }
 
 // ParseCreateTag validates the Snowflake `CREATE TAG` command.
@@ -3008,7 +8111,40 @@ func (v *Validator) ParseCreateAlterTableConstraint() bool {
 //	      [ ON_CONFLICT = { '<string>' | ALLOWED_VALUES_SEQUENCE } ] ]
 //	    [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateTag() bool {
-	return true
+	str := v.parseString
+	// ALLOWED_VALUES '<v1>' [ , '<v2>' ... ]
+	allowedValues := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchWord("ALLOWED_VALUES") },
+			str,
+			func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, str)
+				})
+			},
+		)
+	}
+	// PROPAGATE = { ... } [ ON_CONFLICT = { '<string>' | ALLOWED_VALUES_SEQUENCE } ]
+	propagate := func() bool {
+		return v.Sequence(
+			v.option("PROPAGATE", v.wordsValue("ON_DEPENDENCY_AND_DATA_MOVEMENT", "ON_DEPENDENCY", "ON_DATA_MOVEMENT")),
+			func() bool {
+				return v.Optional(v.option("ON_CONFLICT", func() bool {
+					return v.Choice(str, func() bool { return v.MatchWord("ALLOWED_VALUES_SEQUENCE") })
+				}))
+			},
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("TAG") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.Optional(allowedValues) },
+		func() bool { return v.Optional(propagate) },
+		func() bool { return v.Optional(v.commentOption()) },
+	)
 }
 
 // ParseCreateTask validates the Snowflake `CREATE TASK` command.
@@ -3044,7 +8180,110 @@ func (v *Validator) ParseCreateTag() bool {
 //	  AS
 //	    <sql>
 func (v *Validator) ParseCreateTask() bool {
-	return true
+	str := v.parseString
+	name := v.parseIdentPath
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	// WITH CONTACT ( purpose = contact [ , ... ] )
+	contact := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchKeyword("WITH") },
+			func() bool { return v.MatchWord("CONTACT") },
+			func() bool { return v.parseParenList(v.option2(name, name)) },
+		)
+	}
+	// WITH TAG ( ... ) — tagClause already accepts optional WITH.
+	opt := func() bool {
+		return v.Choice(
+			v.tagClause,
+			contact,
+			v.option("WAREHOUSE", v.parseScalar),
+			v.option("USER_TASK_MANAGED_INITIAL_WAREHOUSE_SIZE", v.parseScalar),
+			v.option("SCHEDULE", str),
+			v.option("CONFIG", v.parseScalar),
+			v.option("OVERLAP_POLICY", v.wordsValue("NO_OVERLAP", "ALLOW_CHILD_OVERLAP", "ALLOW_ALL_OVERLAP")),
+			v.option("USER_TASK_TIMEOUT_MS", num),
+			v.option("SUSPEND_TASK_AFTER_NUM_FAILURES", num),
+			v.option("ERROR_INTEGRATION", name),
+			v.option("SUCCESS_INTEGRATION", name),
+			v.option("LOG_LEVEL", str),
+			v.commentOption(),
+			v.option("FINALIZE", v.parseScalar),
+			v.option("TASK_AUTO_RETRY_ATTEMPTS", num),
+			v.option("USER_TASK_MINIMUM_TRIGGER_INTERVAL_IN_SECONDS", num),
+			v.option("TARGET_COMPLETION_INTERVAL", str),
+			v.option("SERVERLESS_TASK_MIN_STATEMENT_SIZE", str),
+			v.option("SERVERLESS_TASK_MAX_STATEMENT_SIZE", str),
+			// generic <session_parameter> = <value> — keep this LAST so named
+			// options win first.
+			v.option2(name, v.parseScalar),
+		)
+	}
+	// AFTER <task> [ , <task> ... ]
+	after := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchWord("AFTER") },
+			func() bool { return v.Choice(str, name) },
+			func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, func() bool { return v.Choice(str, name) })
+				})
+			},
+		)
+	}
+	// WHEN <boolean_expr> — consume permissively up to AS.
+	whenClause := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchKeyword("WHEN") },
+			func() bool {
+				before := v.save()
+				v.ZeroOrMore(func() bool {
+					saved := v.save()
+					if v.MatchKeyword("AS") {
+						v.restore(saved)
+						return false
+					}
+					if v.AtEnd() {
+						return false
+					}
+					v.advance()
+					return true
+				})
+				return v.pos > before
+			},
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("TASK") },
+		v.ifNotExists,
+		name,
+		func() bool { return v.ZeroOrMore(opt) },
+		func() bool { return v.Optional(after) },
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("EXECUTE") },
+					func() bool { return v.MatchKeyword("AS") },
+					func() bool { return v.MatchWord("USER") },
+					name,
+				)
+			})
+		},
+		func() bool { return v.Optional(whenClause) },
+		func() bool { return v.MatchKeyword("AS") },
+		// <sql> body — consume the remaining tokens permissively.
+		func() bool { return !v.AtEnd() },
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				if v.AtEnd() {
+					return false
+				}
+				v.advance()
+				return true
+			})
+		},
+	)
 }
 
 // ParseCreateType validates the Snowflake `CREATE TYPE` command.
@@ -3055,7 +8294,35 @@ func (v *Validator) ParseCreateTask() bool {
 //	CREATE [ OR REPLACE ] TYPE [ IF NOT EXISTS ] <name> AS <type>
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateType() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("TYPE") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		func() bool { return v.MatchKeyword("AS") },
+		// <type> — accept an identifier/path or a parenthesised spec; consume a
+		// single type token (possibly dotted) plus an optional ( ... ) suffix.
+		v.parseIdentPath,
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.Match(sqltok.LParen) },
+					func() bool {
+						return v.ZeroOrMore(func() bool {
+							if v.AtEnd() || v.Peek().Kind == sqltok.RParen {
+								return false
+							}
+							v.advance()
+							return true
+						})
+					},
+					func() bool { return v.Match(sqltok.RParen) },
+				)
+			})
+		},
+		func() bool { return v.Optional(v.commentOption()) },
+	)
 }
 
 // ParseCreateUser validates the Snowflake `CREATE USER` command.
@@ -3069,7 +8336,23 @@ func (v *Validator) ParseCreateType() bool {
 //	  [ sessionParams ]
 //	  [ [ WITH ] TAG ( <tag_name> = '<tag_value>' [ , <tag_name> = '<tag_value>' , ... ] ) ]
 func (v *Validator) ParseCreateUser() bool {
-	return true
+	name := v.parseIdentPath
+	// User properties / params / session params are an open-ended set of
+	// `KEY = <value>` assignments; model them generically plus the TAG clause.
+	opt := func() bool {
+		return v.Choice(
+			v.tagClause,
+			v.option2(name, v.parseScalar),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("USER") },
+		v.ifNotExists,
+		name,
+		func() bool { return v.ZeroOrMore(opt) },
+	)
 }
 
 // ParseCreateOrAlterVersionedSchema validates the Snowflake `CREATE OR ALTER VERSIONED SCHEMA` command.
@@ -3084,7 +8367,25 @@ func (v *Validator) ParseCreateUser() bool {
 //	  [ DEFAULT_DDL_COLLATION = '<collation_specification>' ]
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateOrAlterVersionedSchema() bool {
-	return true
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	opt := func() bool {
+		return v.Choice(
+			func() bool { return v.phrase("WITH", "MANAGED", "ACCESS") },
+			v.option("DATA_RETENTION_TIME_IN_DAYS", num),
+			v.option("MAX_DATA_EXTENSION_TIME_IN_DAYS", num),
+			v.option("DEFAULT_DDL_COLLATION", v.parseString),
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		func() bool { return v.MatchKeyword("OR") },
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.MatchWord("VERSIONED") },
+		func() bool { return v.MatchWord("SCHEMA") },
+		v.parseIdentPath,
+		func() bool { return v.ZeroOrMore(opt) },
+	)
 }
 
 // ParseCreateView validates the Snowflake `CREATE VIEW` command.
@@ -3109,7 +8410,120 @@ func (v *Validator) ParseCreateOrAlterVersionedSchema() bool {
 //	  [ WITH CONTACT ( <purpose> = <contact_name> [ , <purpose> = <contact_name> ... ] ) ]
 //	  AS <select_statement>
 func (v *Validator) ParseCreateView() bool {
-	return true
+	name := v.parseIdentPath
+	var balanced func() bool
+	balanced = func() bool {
+		return v.Sequence(
+			func() bool { return v.Match(sqltok.LParen) },
+			func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Choice(
+						balanced,
+						func() bool {
+							if v.AtEnd() || v.Peek().Kind == sqltok.RParen {
+								return false
+							}
+							v.advance()
+							return true
+						},
+					)
+				})
+			},
+			func() bool { return v.Match(sqltok.RParen) },
+		)
+	}
+	// Trailing view options before AS — order-independent.
+	opt := func() bool {
+		return v.Choice(
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.Optional(func() bool { return v.MatchKeyword("WITH") }) },
+					func() bool { return v.MatchWord("ROW") },
+					func() bool { return v.MatchWord("ACCESS") },
+					func() bool { return v.MatchWord("POLICY") },
+					name,
+					func() bool { return v.MatchKeyword("ON") },
+					balanced,
+				)
+			},
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.Optional(func() bool { return v.MatchKeyword("WITH") }) },
+					func() bool { return v.MatchWord("AGGREGATION") },
+					func() bool { return v.MatchWord("POLICY") },
+					name,
+					func() bool {
+						return v.Optional(func() bool {
+							return v.Sequence(func() bool { return v.MatchWord("ENTITY") }, func() bool { return v.MatchKeyword("KEY") }, balanced)
+						})
+					},
+				)
+			},
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.Optional(func() bool { return v.MatchKeyword("WITH") }) },
+					func() bool { return v.MatchWord("JOIN") },
+					func() bool { return v.MatchWord("POLICY") },
+					name,
+					func() bool {
+						return v.Optional(func() bool {
+							return v.Sequence(func() bool { return v.MatchWord("ALLOWED") }, func() bool { return v.MatchWord("JOIN") }, func() bool { return v.MatchWord("KEYS") }, balanced)
+						})
+					},
+				)
+			},
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchKeyword("WITH") },
+					func() bool { return v.MatchWord("CONTACT") },
+					func() bool { return v.parseParenList(v.option2(name, name)) },
+				)
+			},
+			v.option("CHANGE_TRACKING", v.parseBool),
+			func() bool { return v.phrase("COPY", "GRANTS") },
+			func() bool { return v.phrase("COPY", "TAGS") },
+			v.commentOption(),
+			v.tagClause,
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.Optional(func() bool { return v.MatchWord("SECURE") }) },
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Choice(
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.Optional(func() bool { return v.wordsValue("LOCAL", "GLOBAL")() }) },
+							v.wordsValue("TEMP", "TEMPORARY"),
+						)
+					},
+					func() bool { return v.MatchWord("TEMPORARY") },
+					func() bool { return v.MatchWord("VOLATILE") },
+				)
+			})
+		},
+		func() bool { return v.Optional(func() bool { return v.MatchWord("RECURSIVE") }) },
+		func() bool { return v.MatchWord("VIEW") },
+		v.ifNotExists,
+		name,
+		// Optional ( column_list ) — and any inline per-column policy/tag clauses
+		// are subsumed by this balanced run.
+		func() bool { return v.Optional(balanced) },
+		func() bool { return v.ZeroOrMore(opt) },
+		func() bool { return v.MatchKeyword("AS") },
+		func() bool { return !v.AtEnd() },
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				if v.AtEnd() {
+					return false
+				}
+				v.advance()
+				return true
+			})
+		},
+	)
 }
 
 // ParseCreateWarehouse validates the Snowflake `CREATE WAREHOUSE` command.
@@ -3145,7 +8559,42 @@ func (v *Validator) ParseCreateView() bool {
 //	  STATEMENT_QUEUED_TIMEOUT_IN_SECONDS = <num>
 //	  STATEMENT_TIMEOUT_IN_SECONDS = <num>
 func (v *Validator) ParseCreateWarehouse() bool {
-	return true
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	name := v.parseIdentPath
+	opt := func() bool {
+		return v.Choice(
+			v.option("WAREHOUSE_TYPE", v.parseScalar),
+			v.option("WAREHOUSE_SIZE", v.parseScalar),
+			v.option("GENERATION", v.parseScalar),
+			v.option("RESOURCE_CONSTRAINT", v.parseScalar),
+			v.option("MAX_CLUSTER_COUNT", num),
+			v.option("MIN_CLUSTER_COUNT", num),
+			v.option("SCALING_POLICY", v.wordsValue("STANDARD", "ECONOMY")),
+			v.option("AUTO_SUSPEND", v.parseScalar),
+			v.option("AUTO_RESUME", v.parseBool),
+			v.option("INITIALLY_SUSPENDED", v.parseBool),
+			v.option("RESOURCE_MONITOR", name),
+			v.commentOption(),
+			v.option("ENABLE_QUERY_ACCELERATION", v.parseBool),
+			v.option("QUERY_ACCELERATION_MAX_SCALE_FACTOR", num),
+			v.option("MAX_CONCURRENCY_LEVEL", num),
+			v.option("STATEMENT_QUEUED_TIMEOUT_IN_SECONDS", num),
+			v.option("STATEMENT_TIMEOUT_IN_SECONDS", num),
+			v.tagClause,
+			// generic catch-all for any other session parameter assignment.
+			v.option2(name, v.parseScalar),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("WAREHOUSE") },
+		v.ifNotExists,
+		name,
+		// optional leading WITH before the property list.
+		func() bool { return v.Optional(func() bool { return v.MatchKeyword("WITH") }) },
+		func() bool { return v.ZeroOrMore(opt) },
+	)
 }
 
 // ParseCreateApplicationService validates the Snowflake `CREATE APPLICATION SERVICE` command.
@@ -3162,7 +8611,36 @@ func (v *Validator) ParseCreateWarehouse() bool {
 //	  [ AUTO_SUSPEND_SECS = <num> ]
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateApplicationService() bool {
-	return true
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	name := v.parseIdentPath
+	opt := func() bool {
+		return v.Choice(
+			v.option("EXTERNAL_ACCESS_INTEGRATIONS", func() bool { return v.parseParenList(name) }),
+			v.option("QUERY_WAREHOUSE", name),
+			v.option("AUTO_RESUME", v.parseBool),
+			v.option("AUTO_SUSPEND_SECS", num),
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		func() bool { return v.MatchWord("APPLICATION") },
+		func() bool { return v.MatchWord("SERVICE") },
+		v.ifNotExists,
+		name,
+		func() bool { return v.MatchKeyword("FROM") },
+		func() bool { return v.MatchWord("ARTIFACT") },
+		func() bool { return v.MatchWord("REPOSITORY") },
+		name,
+		func() bool { return v.MatchWord("PACKAGE") },
+		name,
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(func() bool { return v.MatchWord("VERSION") }, name)
+			})
+		},
+		func() bool { return v.ZeroOrMore(opt) },
+	)
 }
 
 // ParseCreateArtifactRepository validates the Snowflake `CREATE ARTIFACT REPOSITORY` command.
@@ -3176,7 +8654,26 @@ func (v *Validator) ParseCreateApplicationService() bool {
 //	  [ [ WITH ] TAG ( <tag_name> = '<tag_value>' [ , ... ] ) ]
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateArtifactRepository() bool {
-	return true
+	opt := func() bool {
+		return v.Choice(
+			v.option("TYPE", v.wordsValue("APPLICATION", "PYPI")),
+			v.option("API_INTEGRATION", v.parseScalar),
+			v.tagClause,
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("ARTIFACT") },
+		func() bool { return v.MatchWord("REPOSITORY") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		// TYPE is required; require at least the option list to start with it but
+		// keep ordering flexible.
+		opt,
+		func() bool { return v.ZeroOrMore(opt) },
+	)
 }
 
 // ParseCreateCatalogIntegrationDeltaSharing validates the Snowflake `CREATE CATALOG INTEGRATION (Delta Sharing)` command.
@@ -3214,7 +8711,47 @@ func (v *Validator) ParseCreateArtifactRepository() bool {
 //	  OAUTH_CLIENT_SECRET = '<oauth_client_secret>'
 //	  OAUTH_TOKEN_URI = 'https://<token_server_uri>'
 func (v *Validator) ParseCreateCatalogIntegrationDeltaSharing() bool {
-	return true
+	var balanced func() bool
+	balanced = func() bool {
+		return v.Sequence(
+			func() bool { return v.Match(sqltok.LParen) },
+			func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Choice(
+						balanced,
+						func() bool {
+							if v.AtEnd() || v.Peek().Kind == sqltok.RParen {
+								return false
+							}
+							v.advance()
+							return true
+						},
+					)
+				})
+			},
+			func() bool { return v.Match(sqltok.RParen) },
+		)
+	}
+	opt := func() bool {
+		return v.Choice(
+			v.option("CATALOG_SOURCE", v.parseScalar),
+			v.option("TABLE_FORMAT", v.parseScalar),
+			v.option("REST_CONFIG", balanced),
+			v.option("REST_AUTHENTICATION", balanced),
+			v.option("ENABLED", v.parseBool),
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("CATALOG") },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		opt,
+		func() bool { return v.ZeroOrMore(opt) },
+	)
 }
 
 // ParseCreateCatalogIntegrationSnowflakePostgres validates the Snowflake `CREATE CATALOG INTEGRATION (Snowflake Postgres)` command.
@@ -3239,7 +8776,47 @@ func (v *Validator) ParseCreateCatalogIntegrationDeltaSharing() bool {
 //	  ACCESS_DELEGATION_MODE = VENDED_CREDENTIALS
 //	  [ CATALOG_NAME = '<database_name>' ]
 func (v *Validator) ParseCreateCatalogIntegrationSnowflakePostgres() bool {
-	return true
+	var balanced func() bool
+	balanced = func() bool {
+		return v.Sequence(
+			func() bool { return v.Match(sqltok.LParen) },
+			func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Choice(
+						balanced,
+						func() bool {
+							if v.AtEnd() || v.Peek().Kind == sqltok.RParen {
+								return false
+							}
+							v.advance()
+							return true
+						},
+					)
+				})
+			},
+			func() bool { return v.Match(sqltok.RParen) },
+		)
+	}
+	opt := func() bool {
+		return v.Choice(
+			v.option("CATALOG_SOURCE", v.parseScalar),
+			v.option("TABLE_FORMAT", v.parseScalar),
+			v.option("CATALOG_NAMESPACE", v.parseString),
+			v.option("REST_CONFIG", balanced),
+			v.option("ENABLED", v.parseBool),
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("CATALOG") },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		opt,
+		func() bool { return v.ZeroOrMore(opt) },
+	)
 }
 
 // ParseCreateEventRoutingTable validates the Snowflake `CREATE EVENT ROUTING TABLE` command.
@@ -3252,7 +8829,46 @@ func (v *Validator) ParseCreateCatalogIntegrationSnowflakePostgres() bool {
 //	    {rule name} = (REGION_GROUP={region group}, REGIONS=('{region1}', '{region2}', ...), DESTINATION_ACCOUNT = {organization}.{account_name})
 //	    ...
 func (v *Validator) ParseCreateEventRoutingTable() bool {
-	return true
+	var balanced func() bool
+	balanced = func() bool {
+		return v.Sequence(
+			func() bool { return v.Match(sqltok.LParen) },
+			func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Choice(
+						balanced,
+						func() bool {
+							if v.AtEnd() || v.Peek().Kind == sqltok.RParen {
+								return false
+							}
+							v.advance()
+							return true
+						},
+					)
+				})
+			},
+			func() bool { return v.Match(sqltok.RParen) },
+		)
+	}
+	// <rule_name> = ( <params> )
+	rule := func() bool {
+		return v.Sequence(
+			v.parseIdentPath,
+			func() bool { return v.MatchOp("=") },
+			balanced,
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		func() bool { return v.MatchWord("EVENT") },
+		func() bool { return v.MatchWord("ROUTING") },
+		func() bool { return v.MatchKeyword("TABLE") },
+		v.parseIdentPath,
+		func() bool { return v.MatchKeyword("WITH") },
+		func() bool { return v.MatchWord("RULES") },
+		rule,
+		func() bool { return v.ZeroOrMore(rule) },
+	)
 }
 
 // ParseCreateStorageIntegrationPostgresInternal validates the Snowflake `CREATE STORAGE INTEGRATION (Postgres internal)` command.
@@ -3266,5 +8882,22 @@ func (v *Validator) ParseCreateEventRoutingTable() bool {
 //	  [ ENABLED = { TRUE | FALSE } ]
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateStorageIntegrationPostgresInternal() bool {
-	return true
+	opt := func() bool {
+		return v.Choice(
+			v.option("TYPE", v.parseScalar),
+			v.option("POSTGRES_INSTANCE", v.parseString),
+			v.option("ENABLED", v.parseBool),
+			v.commentOption(),
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		v.orReplace,
+		func() bool { return v.MatchWord("STORAGE") },
+		func() bool { return v.MatchWord("INTEGRATION") },
+		v.ifNotExists,
+		v.parseIdentPath,
+		opt,
+		func() bool { return v.ZeroOrMore(opt) },
+	)
 }
