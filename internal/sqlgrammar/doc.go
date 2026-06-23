@@ -11,9 +11,10 @@
 // internal/sqleditor (diagnostics + autocomplete). It must never import
 // internal/sqleditor (import cycle).
 //
-// This file set currently contains STUB rules (one func (v *Validator) ParseXxx()
-// bool per Snowflake command reference, each returning true). The recursive-
-// descent bodies are implemented incrementally per issue #556.
+// The recursive-descent bodies are implemented incrementally per issue #556:
+// ParseCreateDatabase (internal/sqlgrammar/create.go) is the first real rule;
+// the remaining per-command func (v *Validator) ParseXxx() bool rules are still
+// stubs that return true until they are translated from their doc syntax.
 //
 // thaw:domain: SQL Editor & Diagnostics
 package sqlgrammar

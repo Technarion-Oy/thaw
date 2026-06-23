@@ -1,6 +1,10 @@
 package sqlgrammar
 
-import "thaw/internal/sqltok"
+import (
+	"strings"
+
+	"thaw/internal/sqltok"
+)
 
 // Validator is the recursive-descent / pushdown-automaton state for one statement.
 //
@@ -11,9 +15,10 @@ import "thaw/internal/sqltok"
 // grammar expected there, which powers both diagnostics (error messages) and
 // autocomplete (the "valid next" set).
 //
-// The terminals (Match/MatchKeyword/MatchOp), combinators (Sequence/Choice/
-// Optional/ZeroOrMore) and the dispatch (Recognized/ParseTopLevel) are implemented
-// per issue #556; the per-command Parse* rules currently stub to return true.
+// The terminals (Match/MatchKeyword/MatchWord/MatchOp) and combinators
+// (Sequence/Choice/Optional/ZeroOrMore) are implemented per issue #556. The
+// per-command Parse* rules are filled in incrementally (ParseCreateDatabase is
+// the first); the remainder still stub to return true.
 type Validator struct {
 	src      string
 	tokens   []sqltok.Token // significant tokens only
@@ -25,4 +30,253 @@ type Validator struct {
 // New builds a Validator over src, tokenizing into significant tokens.
 func New(src string) *Validator {
 	return &Validator{src: src, tokens: sqltok.SignificantTokens(src)}
+}
+
+// -- State management --
+
+// Peek returns the token at the current cursor, or the EOF sentinel when the
+// cursor has run past the end of the significant-token slice.
+func (v *Validator) Peek() sqltok.Token {
+	if v.pos >= len(v.tokens) {
+		return sqltok.Token{Kind: sqltok.EOF}
+	}
+	return v.tokens[v.pos]
+}
+
+// AtEnd reports whether every significant token has been consumed. Top-level
+// callers use it to reject trailing tokens after an otherwise valid statement.
+func (v *Validator) AtEnd() bool { return v.pos >= len(v.tokens) }
+
+func (v *Validator) advance() {
+	if v.pos < len(v.tokens) {
+		v.pos++
+	}
+	if v.pos > v.furthest {
+		v.furthest, v.expected = v.pos, nil
+	}
+}
+
+func (v *Validator) save() int     { return v.pos }
+func (v *Validator) restore(p int) { v.pos = p }
+
+// expect records what the grammar was looking for at the current position, so a
+// failed parse can report (diagnostics) or complete (autocomplete) the expected
+// set. Only labels recorded at the furthest position reached are retained.
+func (v *Validator) expect(label string) {
+	if v.pos == v.furthest {
+		v.expected = append(v.expected, label)
+	}
+}
+
+// Failure describes why a parse stopped: the furthest token reached and the set
+// of things the grammar expected there. Tok is the EOF sentinel when the parser
+// ran off the end of the statement (furthest >= len(tokens)).
+type Failure struct {
+	Tok      sqltok.Token // furthest token reached
+	Expected []string     // distinct labels expected at Tok (keywords / kind names)
+}
+
+// Failure returns the furthest-position failure info. Call it after a top-level
+// parse returns false. Expected is de-duplicated and order-preserving.
+func (v *Validator) Failure() Failure {
+	tok := sqltok.Token{Kind: sqltok.EOF}
+	if v.furthest < len(v.tokens) {
+		tok = v.tokens[v.furthest]
+	}
+	seen := make(map[string]struct{}, len(v.expected))
+	uniq := v.expected[:0:0]
+	for _, e := range v.expected {
+		if _, dup := seen[e]; dup {
+			continue
+		}
+		seen[e] = struct{}{}
+		uniq = append(uniq, e)
+	}
+	return Failure{Tok: tok, Expected: uniq}
+}
+
+// Message renders a human-readable diagnostic message, e.g. `expected FROM` or
+// `expected one of: FROM, (`.
+func (f Failure) Message() string {
+	switch len(f.Expected) {
+	case 0:
+		return "unexpected token"
+	case 1:
+		return "expected " + f.Expected[0]
+	default:
+		return "expected one of: " + strings.Join(f.Expected, ", ")
+	}
+}
+
+// -- Terminals --
+
+// Match consumes the current token if it is of kind, otherwise records kind as
+// expected and leaves the cursor unmoved.
+func (v *Validator) Match(kind sqltok.TokenKind) bool {
+	if v.Peek().Kind == kind {
+		v.advance()
+		return true
+	}
+	v.expect(kind.String())
+	return false
+}
+
+// MatchKeyword matches a token tagged sqltok.Keyword whose text equals word
+// (case-insensitive). Keywords are classified by the lexer's keyword map; text
+// is recovered via Token.Text(v.src) — there is no Token.Value.
+func (v *Validator) MatchKeyword(word string) bool {
+	t := v.Peek()
+	if t.Kind == sqltok.Keyword && strings.EqualFold(t.Text(v.src), word) {
+		v.advance()
+		return true
+	}
+	v.expect(word)
+	return false
+}
+
+// MatchWord matches word (case-insensitive) against any identifier-like token —
+// a Keyword, bare Identifier, or QuotedIdent. Many Snowflake clause words and
+// option names (IGNORE, LISTING, DATA_RETENTION_TIME_IN_DAYS, …) are not in the
+// lexer's keyword map, so they arrive as Identifier; this matcher accepts a word
+// regardless of that classification.
+func (v *Validator) MatchWord(word string) bool {
+	t := v.Peek()
+	if t.Kind.IsIdentLike() && strings.EqualFold(t.Text(v.src), word) {
+		v.advance()
+		return true
+	}
+	v.expect(word)
+	return false
+}
+
+// MatchOp matches an Operator token by text (e.g. "=", "=>", "::").
+func (v *Validator) MatchOp(op string) bool {
+	t := v.Peek()
+	if t.Kind == sqltok.Operator && t.Text(v.src) == op {
+		v.advance()
+		return true
+	}
+	v.expect(op)
+	return false
+}
+
+// -- Grammar combinators (the backtracking "machine") --
+
+// Rule is a parse step that consumes zero or more tokens and reports success.
+type Rule func() bool
+
+// Sequence requires every rule to match in order; on any failure it rewinds the
+// cursor to where the sequence began so no partial consumption leaks out.
+func (v *Validator) Sequence(rules ...Rule) bool {
+	saved := v.save()
+	for _, r := range rules {
+		if !r() {
+			v.restore(saved)
+			return false
+		}
+	}
+	return true
+}
+
+// Optional always succeeds; it rewinds if the inner rule fails so an absent
+// optional clause consumes nothing.
+func (v *Validator) Optional(r Rule) bool {
+	saved := v.save()
+	if !r() {
+		v.restore(saved)
+	}
+	return true
+}
+
+// Choice tries each alternative in order, rewinding between attempts, and
+// returns true at the first that matches.
+func (v *Validator) Choice(rules ...Rule) bool {
+	for _, r := range rules {
+		saved := v.save()
+		if r() {
+			return true
+		}
+		v.restore(saved)
+	}
+	return false
+}
+
+// ZeroOrMore applies r until it stops matching, rewinding the final failed
+// attempt. It always succeeds.
+func (v *Validator) ZeroOrMore(r Rule) bool {
+	for {
+		saved := v.save()
+		if !r() {
+			v.restore(saved)
+			break
+		}
+	}
+	return true
+}
+
+// -- Shared name / value helpers --
+
+// parseIdentPath consumes a (possibly dot-qualified) name such as DB.SCHEMA.OBJ
+// using the existing sqltok helper, recording "identifier" as expected on miss.
+func (v *Validator) parseIdentPath() bool {
+	_, next := sqltok.ReadIdentParts(v.tokens, v.src, v.pos, 0 /* unbounded */)
+	if next == v.pos {
+		v.expect("identifier")
+		return false
+	}
+	v.pos = next
+	if v.pos > v.furthest {
+		v.furthest, v.expected = v.pos, nil
+	}
+	return true
+}
+
+// parseBool matches a TRUE / FALSE literal.
+func (v *Validator) parseBool() bool {
+	return v.Choice(
+		func() bool { return v.MatchWord("TRUE") },
+		func() bool { return v.MatchWord("FALSE") },
+	)
+}
+
+// parseScalar matches a single scalar value: a string/number literal (with an
+// optional leading sign), a boolean, or an identifier path. It is the catch-all
+// right-hand side for `<option> = <value>` and `=> <value>` assignments.
+func (v *Validator) parseScalar() bool {
+	v.Optional(func() bool {
+		return v.Choice(
+			func() bool { return v.MatchOp("+") },
+			func() bool { return v.MatchOp("-") },
+		)
+	})
+	return v.Choice(
+		func() bool { return v.Match(sqltok.StringLit) },
+		func() bool { return v.Match(sqltok.NumberLit) },
+		v.parseBool,
+		v.parseIdentPath,
+	)
+}
+
+// option builds a rule matching `<key> = <value>` where value is produced by
+// valueRule. The key is matched word-kind-agnostically (see MatchWord).
+func (v *Validator) option(key string, valueRule Rule) Rule {
+	return func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchWord(key) },
+			func() bool { return v.MatchOp("=") },
+			valueRule,
+		)
+	}
+}
+
+// wordsValue builds a rule matching exactly one of the given keyword choices,
+// e.g. `{ COMPATIBLE | OPTIMIZED }`.
+func (v *Validator) wordsValue(words ...string) Rule {
+	return func() bool {
+		alts := make([]Rule, len(words))
+		for i, w := range words {
+			alts[i] = func() bool { return v.MatchWord(w) }
+		}
+		return v.Choice(alts...)
+	}
 }

@@ -1,5 +1,7 @@
 package sqlgrammar
 
+import "thaw/internal/sqltok"
+
 // CREATE commands — grammar-rule stubs for issue #556.
 //
 // Each function corresponds to one Snowflake command reference (see the per-
@@ -587,7 +589,252 @@ func (v *Validator) ParseCreateDataMetricFunction() bool {
 //	CREATE OR ALTER [ TRANSIENT ] DATABASE <name>
 //	    [ ... database properties ... ]
 func (v *Validator) ParseCreateDatabase() bool {
-	return true
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CREATE") },
+		// [ OR { REPLACE | ALTER } ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchKeyword("OR") },
+					v.wordsValue("REPLACE", "ALTER"),
+				)
+			})
+		},
+		// [ TRANSIENT ]
+		func() bool { return v.Optional(func() bool { return v.MatchWord("TRANSIENT") }) },
+		func() bool { return v.MatchKeyword("DATABASE") },
+		// [ IF NOT EXISTS ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchKeyword("IF") },
+					func() bool { return v.MatchKeyword("NOT") },
+					func() bool { return v.MatchKeyword("EXISTS") },
+				)
+			})
+		},
+		// <name>
+		v.parseIdentPath,
+		// One of the trailing forms: FROM …, AS REPLICA OF …, or
+		// [ CLONE … ] followed by the database property list.
+		func() bool {
+			return v.Choice(
+				v.parseDatabaseFromClause,
+				v.parseDatabaseReplicaClause,
+				v.parseDatabaseCreateBody,
+			)
+		},
+	)
+}
+
+// parseDatabaseFromClause matches the source-backed creation forms:
+//
+//	FROM BACKUP SET <backup_set> IDENTIFIER '<backup_id>'
+//	FROM LISTING '<listing_global_name>'
+//	FROM SHARE <provider_account>.<share_name>
+func (v *Validator) parseDatabaseFromClause() bool {
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("FROM") },
+		func() bool {
+			return v.Choice(
+				// BACKUP SET <name> IDENTIFIER '<id>'
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("BACKUP") },
+						func() bool { return v.MatchKeyword("SET") },
+						v.parseIdentPath,
+						func() bool { return v.MatchWord("IDENTIFIER") },
+						func() bool { return v.Match(sqltok.StringLit) },
+					)
+				},
+				// LISTING '<global_name>'
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("LISTING") },
+						func() bool { return v.Match(sqltok.StringLit) },
+					)
+				},
+				// SHARE <provider_account>.<share_name>
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchKeyword("SHARE") },
+						v.parseIdentPath,
+					)
+				},
+			)
+		},
+	)
+}
+
+// parseDatabaseReplicaClause matches:
+//
+//	AS REPLICA OF <account_identifier>.<primary_db_name>
+//	    [ DATA_RETENTION_TIME_IN_DAYS = <integer> ]
+func (v *Validator) parseDatabaseReplicaClause() bool {
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("AS") },
+		func() bool { return v.MatchWord("REPLICA") },
+		func() bool { return v.MatchKeyword("OF") },
+		v.parseIdentPath,
+		func() bool {
+			return v.Optional(v.option("DATA_RETENTION_TIME_IN_DAYS",
+				func() bool { return v.Match(sqltok.NumberLit) }))
+		},
+	)
+}
+
+// parseDatabaseCreateBody matches the optional CLONE clause followed by the
+// (order-independent) database property list. It always succeeds — a bare
+// `CREATE DATABASE <name>` has no trailing clauses.
+func (v *Validator) parseDatabaseCreateBody() bool {
+	v.Optional(v.parseDatabaseCloneClause)
+	return v.ZeroOrMore(v.parseDatabaseProperty)
+}
+
+// parseDatabaseCloneClause matches:
+//
+//	CLONE <source_db>
+//	    [ { AT | BEFORE } ( { TIMESTAMP => … | OFFSET => … | STATEMENT => … } ) ]
+//	    [ IGNORE TABLES WITH INSUFFICIENT DATA RETENTION ]
+//	    [ IGNORE HYBRID TABLES ]
+func (v *Validator) parseDatabaseCloneClause() bool {
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("CLONE") },
+		v.parseIdentPath,
+		// [ { AT | BEFORE } ( <point-in-time> ) ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					v.wordsValue("AT", "BEFORE"),
+					func() bool { return v.Match(sqltok.LParen) },
+					func() bool {
+						return v.Choice(
+							v.arrowOption("TIMESTAMP"),
+							v.arrowOption("OFFSET"),
+							v.arrowOption("STATEMENT"),
+						)
+					},
+					func() bool { return v.Match(sqltok.RParen) },
+				)
+			})
+		},
+		// [ IGNORE TABLES WITH INSUFFICIENT DATA RETENTION ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("IGNORE") },
+					func() bool { return v.MatchWord("TABLES") },
+					func() bool { return v.MatchKeyword("WITH") },
+					func() bool { return v.MatchWord("INSUFFICIENT") },
+					func() bool { return v.MatchWord("DATA") },
+					func() bool { return v.MatchWord("RETENTION") },
+				)
+			})
+		},
+		// [ IGNORE HYBRID TABLES ]
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("IGNORE") },
+					func() bool { return v.MatchWord("HYBRID") },
+					func() bool { return v.MatchWord("TABLES") },
+				)
+			})
+		},
+	)
+}
+
+// arrowOption builds a rule matching `<key> => <value>` (the AT/BEFORE point-in-
+// time arguments).
+func (v *Validator) arrowOption(key string) Rule {
+	return func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchWord(key) },
+			func() bool { return v.MatchOp("=>") },
+			v.parseScalar,
+		)
+	}
+}
+
+// parseDatabaseProperty matches one entry of the database property list. The
+// properties may appear in any order, so the caller drives this with ZeroOrMore.
+func (v *Validator) parseDatabaseProperty() bool {
+	str := func() bool { return v.Match(sqltok.StringLit) }
+	intLit := func() bool { return v.Match(sqltok.NumberLit) }
+	name := v.parseIdentPath
+
+	return v.Choice(
+		v.option("DATA_RETENTION_TIME_IN_DAYS", intLit),
+		v.option("MAX_DATA_EXTENSION_TIME_IN_DAYS", intLit),
+		v.option("EXTERNAL_VOLUME", name),
+		v.option("CATALOG_SYNC_NAMESPACE_FLATTEN_DELIMITER", str),
+		v.option("CATALOG_SYNC_NAMESPACE_MODE", v.wordsValue("NEST", "FLATTEN")),
+		v.option("CATALOG_SYNC", str),
+		v.option("CATALOG", name),
+		v.option("ICEBERG_VERSION_DEFAULT", intLit),
+		v.option("ICEBERG_MERGE_ON_READ_BEHAVIOR", str),
+		v.option("ENABLE_ICEBERG_MERGE_ON_READ", v.parseBool),
+		v.option("REPLACE_INVALID_CHARACTERS", v.parseBool),
+		v.option("DEFAULT_DDL_COLLATION", str),
+		v.option("STORAGE_SERIALIZATION_POLICY", v.wordsValue("COMPATIBLE", "OPTIMIZED")),
+		v.option("COMMENT", str),
+		v.option("OBJECT_VISIBILITY", v.parseScalar),
+		v.option("ENABLE_DATA_COMPACTION", v.parseBool),
+		v.parseDatabaseTagClause,
+		v.parseDatabaseContactClause,
+	)
+}
+
+// parseDatabaseTagClause matches:
+//
+//	[ WITH ] TAG ( <tag_name> = '<tag_value>' [ , <tag_name> = '<tag_value>' ... ] )
+func (v *Validator) parseDatabaseTagClause() bool {
+	return v.Sequence(
+		func() bool { return v.Optional(func() bool { return v.MatchKeyword("WITH") }) },
+		func() bool { return v.MatchWord("TAG") },
+		func() bool {
+			return v.parseParenList(v.option2(v.parseIdentPath, func() bool { return v.Match(sqltok.StringLit) }))
+		},
+	)
+}
+
+// parseDatabaseContactClause matches:
+//
+//	WITH CONTACT ( <purpose> = <contact_name> [ , <purpose> = <contact_name> ... ] )
+func (v *Validator) parseDatabaseContactClause() bool {
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("WITH") },
+		func() bool { return v.MatchWord("CONTACT") },
+		func() bool {
+			return v.parseParenList(v.option2(v.parseIdentPath, v.parseIdentPath))
+		},
+	)
+}
+
+// option2 builds a rule matching `<key> = <value>` where both sides are given
+// as rules (used for the `( name = value, … )` entries of TAG / CONTACT).
+func (v *Validator) option2(keyRule, valueRule Rule) Rule {
+	return func() bool {
+		return v.Sequence(
+			keyRule,
+			func() bool { return v.MatchOp("=") },
+			valueRule,
+		)
+	}
+}
+
+// parseParenList matches `( item [ , item ]* )`.
+func (v *Validator) parseParenList(item Rule) bool {
+	return v.Sequence(
+		func() bool { return v.Match(sqltok.LParen) },
+		item,
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+			})
+		},
+		func() bool { return v.Match(sqltok.RParen) },
+	)
 }
 
 // ParseCreateDatabaseCatalogLinked validates the Snowflake `CREATE DATABASE (catalog-linked)` command.
