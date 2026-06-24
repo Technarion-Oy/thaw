@@ -56,9 +56,11 @@ var dispatchExclude = map[string]bool{
 	"ParseShowObjs":         true,
 	"ParseDescribeObj":      true,
 	"ParseUndropObj":        true,
-	// Lenient duplicate of ParseCreateTable for the CREATE-TABLE-with-constraint
-	// doc page; its CREATE form (balanced-paren body) masks malformed column
-	// lists, and its ALTER form is unreachable here (ALTER routes to ParseAlter*).
+	// Redundant duplicate of ParseCreateTable for the CREATE-TABLE-with-constraint
+	// doc page: its CREATE form validates the same column/constraint list (now with
+	// the inline/out-of-line constraint clauses modeled), so ParseCreateTable
+	// already governs that leader; and its ALTER form is unreachable here (ALTER
+	// routes to ParseAlter*). Kept defined (and meta-tested), just not dispatched.
 	"ParseCreateAlterTableConstraint": true,
 }
 

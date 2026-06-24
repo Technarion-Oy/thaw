@@ -8115,48 +8115,232 @@ func (v *Validator) ParseCreateTable() bool {
 //	  [ ENABLE { VALIDATE | NOVALIDATE } ]
 func (v *Validator) ParseCreateAlterTableConstraint() bool {
 	name := v.parseIdentPath
-	var balanced func() bool
-	balanced = func() bool {
+	str := v.parseString
+	// dataType matches a single data-type token (NUMBER, VARCHAR, …) plus optional
+	// ( precision, scale ) args — the same skeleton ParseCreateTable validates.
+	dataType := func() bool {
 		return v.Sequence(
-			func() bool { return v.Match(sqltok.LParen) },
 			func() bool {
-				return v.ZeroOrMore(func() bool {
-					return v.Choice(
-						balanced,
+				if t := v.Peek(); t.Kind.IsIdentLike() {
+					v.advance()
+					return true
+				}
+				v.expect("data type")
+				return false
+			},
+			func() bool { return v.Optional(v.consumeBalancedParens) },
+		)
+	}
+	// colItemEnd swallows the remainder of one entry up to the next top-level comma
+	// or the closing paren, balancing nested parens. It absorbs the column props we
+	// don't model in detail (DEFAULT, COLLATE, AUTOINCREMENT, masking policies, …)
+	// so a well-formed entry with extra props is never false-rejected.
+	colItemEnd := func() bool {
+		depth := 0
+		for !v.AtEnd() {
+			k := v.Peek().Kind
+			if depth == 0 && (k == sqltok.Comma || k == sqltok.RParen) {
+				return true
+			}
+			switch k {
+			case sqltok.LParen:
+				depth++
+			case sqltok.RParen:
+				depth--
+			}
+			v.advance()
+		}
+		return true
+	}
+
+	// [ CONSTRAINT <constraint_name> ]
+	constraintName := func() bool {
+		return v.Optional(func() bool {
+			return v.Sequence(func() bool { return v.MatchWord("CONSTRAINT") }, name)
+		})
+	}
+	// notWord matches `[ NOT ] <word>`, the shape of [NOT] ENFORCED / [NOT] DEFERRABLE.
+	notWord := func(word string) Rule {
+		return func() bool {
+			return v.Sequence(
+				func() bool { return v.Optional(func() bool { return v.MatchWord("NOT") }) },
+				func() bool { return v.MatchWord(word) },
+			)
+		}
+	}
+	// constraintProps matches the trailing property flags shared by UNIQUE / PRIMARY
+	// KEY / FOREIGN KEY constraints, each optional. They are accepted in any order
+	// (ZeroOrMore over a Choice) rather than the documented fixed order, to avoid
+	// false rejections on Snowflake's lenient ordering:
+	//   [ [NOT] ENFORCED ] [ [NOT] DEFERRABLE ] [ INITIALLY {DEFERRED|IMMEDIATE} ]
+	//   [ {ENABLE|DISABLE} ] [ {VALIDATE|NOVALIDATE} ] [ {RELY|NORELY} ]
+	constraintProps := func() bool {
+		return v.ZeroOrMore(func() bool {
+			return v.Choice(
+				notWord("ENFORCED"),
+				notWord("DEFERRABLE"),
+				func() bool {
+					return v.Sequence(func() bool { return v.MatchWord("INITIALLY") }, v.wordsValue("DEFERRED", "IMMEDIATE"))
+				},
+				v.wordsValue("ENABLE", "DISABLE"),
+				v.wordsValue("VALIDATE", "NOVALIDATE"),
+				v.wordsValue("RELY", "NORELY"),
+			)
+		})
+	}
+	// ( <col_name> [ , <col_name> , ... ] )
+	colNameList := func() bool { return v.parseParenList(name) }
+	// uniqueOrPK matches `{ UNIQUE | PRIMARY KEY }`.
+	uniqueOrPK := func() bool {
+		return v.Choice(
+			func() bool { return v.MatchWord("UNIQUE") },
+			func() bool { return v.phrase("PRIMARY", "KEY") },
+		)
+	}
+	// referential action: CASCADE | SET NULL | SET DEFAULT | RESTRICT | NO ACTION
+	refAction := func() bool {
+		return v.Choice(
+			func() bool { return v.MatchWord("CASCADE") },
+			func() bool { return v.phrase("SET", "NULL") },
+			func() bool { return v.phrase("SET", "DEFAULT") },
+			func() bool { return v.MatchWord("RESTRICT") },
+			func() bool { return v.phrase("NO", "ACTION") },
+		)
+	}
+	// references matches `REFERENCES <table> [ ( <cols> ) ] [ MATCH {FULL|SIMPLE|
+	// PARTIAL} ] [ ON [ UPDATE <action> ] [ DELETE <action> ] ]`.
+	references := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchWord("REFERENCES") },
+			name,
+			func() bool { return v.Optional(colNameList) },
+			func() bool {
+				return v.Optional(func() bool {
+					return v.Sequence(func() bool { return v.MatchWord("MATCH") }, v.wordsValue("FULL", "SIMPLE", "PARTIAL"))
+				})
+			},
+			func() bool {
+				return v.Optional(func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchKeyword("ON") },
 						func() bool {
-							if v.AtEnd() || v.Peek().Kind == sqltok.RParen {
-								return false
-							}
-							v.advance()
-							return true
+							return v.ZeroOrMore(func() bool {
+								return v.Sequence(v.wordsValue("UPDATE", "DELETE"), refAction)
+							})
 						},
 					)
+				})
+			},
+		)
+	}
+	// CHECK ( <expr> ) [ ENABLE {VALIDATE|NOVALIDATE} ] — the expr is consumed as a
+	// balanced paren group (it is an arbitrary boolean expression).
+	checkConstraint := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchWord("CHECK") },
+			v.consumeBalancedParens,
+			func() bool {
+				return v.Optional(func() bool {
+					return v.Sequence(func() bool { return v.MatchWord("ENABLE") }, v.wordsValue("VALIDATE", "NOVALIDATE"))
+				})
+			},
+		)
+	}
+	// constraintComment matches the bare `COMMENT '<string>'` (no '=', unlike the
+	// table-option COMMENT) permitted on out-of-line UNIQUE/PK/FK constraints.
+	constraintComment := func() bool {
+		return v.Optional(func() bool {
+			return v.Sequence(func() bool { return v.MatchWord("COMMENT") }, str)
+		})
+	}
+
+	// inlineConstraint ::= [ CONSTRAINT n ] { {UNIQUE|PRIMARY KEY} props
+	//   | [FOREIGN KEY] REFERENCES … props | CHECK (…) } — attached to a column def.
+	inlineConstraint := func() bool {
+		return v.Sequence(
+			constraintName,
+			func() bool {
+				return v.Choice(
+					func() bool { return v.Sequence(uniqueOrPK, constraintProps) },
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.Optional(func() bool { return v.phrase("FOREIGN", "KEY") }) },
+							references,
+							constraintProps,
+						)
+					},
+					checkConstraint,
+				)
+			},
+		)
+	}
+	// outOfLineConstraint ::= [ CONSTRAINT n ] { {UNIQUE|PRIMARY KEY} (cols) props
+	//   [COMMENT] | FOREIGN KEY (cols) REFERENCES … props [COMMENT] | CHECK (…) }.
+	outOfLineConstraint := func() bool {
+		return v.Sequence(
+			constraintName,
+			func() bool {
+				return v.Choice(
+					func() bool {
+						return v.Sequence(uniqueOrPK, colNameList, constraintProps, constraintComment)
+					},
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.phrase("FOREIGN", "KEY") },
+							colNameList,
+							references,
+							constraintProps,
+							constraintComment,
+						)
+					},
+					checkConstraint,
+				)
+			},
+		)
+	}
+
+	// One column-list entry: an out-of-line constraint, or a column definition
+	// (<name> <type> [NOT NULL] [inline constraint]) with its unmodeled tail
+	// swallowed to the entry boundary. Out-of-line is tried first (its leading
+	// CONSTRAINT/UNIQUE/PRIMARY/FOREIGN/CHECK words can't begin a column name).
+	colItem := func() bool {
+		return v.Choice(
+			func() bool { return v.Sequence(outOfLineConstraint, colItemEnd) },
+			func() bool {
+				return v.Sequence(
+					name,
+					dataType,
+					func() bool { return v.Optional(func() bool { return v.phrase("NOT", "NULL") }) },
+					func() bool { return v.Optional(inlineConstraint) },
+					colItemEnd,
+				)
+			},
+		)
+	}
+	// colList ::= ( <entry> [ , <entry> ]* ) — at least one well-formed entry.
+	colList := func() bool {
+		return v.Sequence(
+			func() bool { return v.Match(sqltok.LParen) },
+			colItem,
+			func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, colItem)
 				})
 			},
 			func() bool { return v.Match(sqltok.RParen) },
 		)
 	}
-	consumeRest := func() bool {
-		before := v.save()
-		v.ZeroOrMore(func() bool {
-			if v.AtEnd() {
-				return false
-			}
-			v.advance()
-			return true
-		})
-		return v.pos > before
-	}
-	// CREATE TABLE <name> ( <col defs / constraints> )
+
+	// CREATE TABLE <name> ( <col defs / table constraints> )
 	createForm := func() bool {
 		return v.Sequence(
 			func() bool { return v.MatchKeyword("CREATE") },
 			func() bool { return v.MatchKeyword("TABLE") },
 			name,
-			balanced,
+			colList,
 		)
 	}
-	// ALTER TABLE <name> ADD COLUMN <col> <type> [ NOT NULL ] { inline constraint }
+	// ALTER TABLE <name> ADD COLUMN <col> <type> [ NOT NULL ] [ inline constraint ]
 	alterForm := func() bool {
 		return v.Sequence(
 			func() bool { return v.MatchKeyword("ALTER") },
@@ -8164,8 +8348,20 @@ func (v *Validator) ParseCreateAlterTableConstraint() bool {
 			name,
 			func() bool { return v.MatchWord("ADD") },
 			func() bool { return v.MatchWord("COLUMN") },
-			// <col_name> <col_type> + inline constraint — consume the rest permissively.
-			consumeRest,
+			name,
+			dataType,
+			func() bool { return v.Optional(func() bool { return v.phrase("NOT", "NULL") }) },
+			func() bool { return v.Optional(inlineConstraint) },
+			// Swallow any remaining unmodeled column props (DEFAULT, policies, …).
+			func() bool {
+				return v.ZeroOrMore(func() bool {
+					if v.AtEnd() {
+						return false
+					}
+					v.advance()
+					return true
+				})
+			},
 		)
 	}
 	return v.Choice(createForm, alterForm)

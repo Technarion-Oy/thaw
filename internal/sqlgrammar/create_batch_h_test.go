@@ -74,11 +74,30 @@ func TestParseCreateAlterTableConstraint(t *testing.T) {
 		`CREATE TABLE t (id INT PRIMARY KEY)`,
 		`CREATE TABLE t (a INT, b INT, CONSTRAINT fk FOREIGN KEY (b) REFERENCES o (id))`,
 		`ALTER TABLE t ADD COLUMN c INT NOT NULL UNIQUE`,
+		// Inline PK with property trailers.
+		`CREATE TABLE t (a INT PRIMARY KEY NOT ENFORCED DEFERRABLE INITIALLY DEFERRED RELY)`,
+		// Inline FK with MATCH and ON UPDATE/DELETE referential actions.
+		`CREATE TABLE t (a INT REFERENCES o (id) MATCH FULL ON UPDATE CASCADE DELETE SET NULL)`,
+		// Inline and out-of-line CHECK.
+		`CREATE TABLE t (a INT CHECK (a > 0))`,
+		`CREATE TABLE t (a INT, CHECK (a > 0) ENABLE VALIDATE)`,
+		// Out-of-line UNIQUE with column list, props, and bare COMMENT (no '=').
+		`CREATE TABLE t (a INT, UNIQUE (a) ENFORCED COMMENT 'u')`,
+		// Out-of-line FK with explicit FOREIGN KEY column list + referential action.
+		`CREATE TABLE t (a INT, FOREIGN KEY (a) REFERENCES o (id) ON DELETE RESTRICT)`,
+		// Column with an unmodeled trailing prop (DEFAULT) is still accepted.
+		`CREATE TABLE t (a INT DEFAULT 0 NOT NULL)`,
+		// ALTER ADD COLUMN with an inline FK.
+		`ALTER TABLE t ADD COLUMN c INT REFERENCES o (id) ON UPDATE SET DEFAULT`,
 	)
 	assertInvalid(t, (*Validator).ParseCreateAlterTableConstraint,
 		`CREATE TABLE t`,
 		`ALTER TABLE t ADD c INT`,
 		`CREATE t (id INT)`,
+		// Newly enforced: a real column list is required (these the old
+		// balanced-paren body wrongly accepted).
+		`CREATE TABLE t ()`,
+		`CREATE TABLE t (id)`,
 	)
 }
 
