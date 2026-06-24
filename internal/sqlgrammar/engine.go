@@ -70,9 +70,10 @@ func (v *Validator) expect(label string) {
 
 // Failure describes why a parse stopped: the furthest token reached and the set
 // of things the grammar expected there. Tok is the EOF sentinel when the parser
-// ran off the end of the statement (furthest >= len(tokens)).
+// ran off the end of the statement (furthest >= len(tokens)); Found then is "".
 type Failure struct {
 	Tok      sqltok.Token // furthest token reached
+	Found    string       // text of Tok ("" when the parser ran off the end)
 	Expected []string     // distinct labels expected at Tok (keywords / kind names)
 }
 
@@ -80,8 +81,10 @@ type Failure struct {
 // parse returns false. Expected is de-duplicated and order-preserving.
 func (v *Validator) Failure() Failure {
 	tok := sqltok.Token{Kind: sqltok.EOF}
+	found := ""
 	if v.furthest < len(v.tokens) {
 		tok = v.tokens[v.furthest]
+		found = tok.Text(v.src)
 	}
 	seen := make(map[string]struct{}, len(v.expected))
 	uniq := v.expected[:0:0]
@@ -92,19 +95,26 @@ func (v *Validator) Failure() Failure {
 		seen[e] = struct{}{}
 		uniq = append(uniq, e)
 	}
-	return Failure{Tok: tok, Expected: uniq}
+	return Failure{Tok: tok, Found: found, Expected: uniq}
 }
 
-// Message renders a human-readable diagnostic message, e.g. `expected FROM` or
-// `expected one of: FROM, (`.
+// Message renders a human-readable diagnostic naming both what was found and what
+// the grammar expected there, e.g. `unexpected 'GROUP', expected FROM` or
+// `unexpected end of statement, expected one of: FROM, (`. Naming the offending
+// token (the furthest one reached, not token 0 — backtracking rewinds the cursor)
+// is what makes the message actionable.
 func (f Failure) Message() string {
+	found := "end of statement"
+	if f.Found != "" {
+		found = "'" + f.Found + "'"
+	}
 	switch len(f.Expected) {
 	case 0:
-		return "unexpected token"
+		return "unexpected " + found
 	case 1:
-		return "expected " + f.Expected[0]
+		return "unexpected " + found + ", expected " + f.Expected[0]
 	default:
-		return "expected one of: " + strings.Join(f.Expected, ", ")
+		return "unexpected " + found + ", expected one of: " + strings.Join(f.Expected, ", ")
 	}
 }
 

@@ -153,6 +153,93 @@ func (v *Validator) candidates() []ruleFn {
 	return rules()[v.leadKeyword()]
 }
 
+// StatementKind classifies a statement by its effective top-level verb. A leading
+// WITH (CTE) prefix is looked past, so a CTE'd query is classified by the
+// statement it feeds — SELECT/INSERT/UPDATE/DELETE/MERGE — rather than by WITH.
+// DDL, session, transaction, and utility commands are StmtOther; callers needing
+// the precise leader for those use leadKeyword instead.
+type StatementKind int
+
+const (
+	StmtOther StatementKind = iota
+	StmtSelect
+	StmtInsert
+	StmtUpdate
+	StmtDelete
+	StmtMerge
+)
+
+// String renders the kind as its SQL verb, or "OTHER".
+func (k StatementKind) String() string {
+	switch k {
+	case StmtSelect:
+		return "SELECT"
+	case StmtInsert:
+		return "INSERT"
+	case StmtUpdate:
+		return "UPDATE"
+	case StmtDelete:
+		return "DELETE"
+	case StmtMerge:
+		return "MERGE"
+	default:
+		return "OTHER"
+	}
+}
+
+// dmlVerb maps an uppercased leading word to its StatementKind, or StmtOther.
+func dmlVerb(word string) StatementKind {
+	switch word {
+	case "SELECT":
+		return StmtSelect
+	case "INSERT":
+		return StmtInsert
+	case "UPDATE":
+		return StmtUpdate
+	case "DELETE":
+		return StmtDelete
+	case "MERGE":
+		return StmtMerge
+	}
+	return StmtOther
+}
+
+// IdentifyStatement classifies the statement by its effective top-level verb,
+// looking past a leading WITH … CTE prefix. A WITH clause may precede SELECT,
+// INSERT, UPDATE, DELETE, or MERGE, so keying off the literal first keyword would
+// misclassify every CTE'd statement as "WITH". To skip the CTE list safely it
+// tracks parenthesis depth and inspects only depth-0 tokens: a verb buried inside
+// a CTE's (always parenthesized) subquery is never mistaken for the main verb.
+// Because the tokenizer already separated string- and comment-text, a '(' or a
+// verb inside a literal cannot perturb the depth count. It does not move the
+// validator cursor.
+func (v *Validator) IdentifyStatement() StatementKind {
+	if len(v.tokens) == 0 {
+		return StmtOther
+	}
+	if !strings.EqualFold(v.tokens[0].Text(v.src), "WITH") {
+		return dmlVerb(strings.ToUpper(v.tokens[0].Text(v.src)))
+	}
+	depth := 0
+	for i := 1; i < len(v.tokens); i++ {
+		switch v.tokens[i].Kind {
+		case sqltok.LParen:
+			depth++
+		case sqltok.RParen:
+			if depth > 0 {
+				depth--
+			}
+		default:
+			if depth == 0 {
+				if k := dmlVerb(strings.ToUpper(v.tokens[i].Text(v.src))); k != StmtOther {
+					return k
+				}
+			}
+		}
+	}
+	return StmtOther
+}
+
 // Recognized reports whether the statement's leading keyword maps to at least
 // one implemented grammar. Diagnostics only flag a statement when it is
 // Recognized, so unmodeled-but-valid SQL is never marked.

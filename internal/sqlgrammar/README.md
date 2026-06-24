@@ -25,7 +25,7 @@ It is a **leaf package**: it imports only `internal/sqltok` and must never impor
 | File | Purpose |
 |------|---------|
 | `engine.go` | The `Validator` type, terminals (`Match`/`MatchKeyword`/`MatchWord`/`MatchOp`), combinators (`Sequence`/`Choice`/`Optional`/`ZeroOrMore`), `furthest`/`expected` tracking + `Failure`, and shared helpers (`parseIdentPath`, `option`, `wordsValue`, `phrase`, `tagClause`, `consumeBalancedParens`, `consumeRest`, `showTrailers`, …) |
-| `dispatch.go` | `Recognized()` + `ParseTopLevel()`: a leading-keyword → candidate-rules registry (bulk families by `Parse*` prefix via reflection, DML/misc leaders enumerated explicitly) |
+| `dispatch.go` | `Recognized()` + `ParseTopLevel()`: a leading-keyword → candidate-rules registry (bulk families by `Parse*` prefix via reflection, DML/misc leaders enumerated explicitly); plus `IdentifyStatement()` — the effective-verb classifier that looks past a leading `WITH`/CTE prefix |
 | `create.go`, `alter.go`, `drop.go`, `show.go`, `describe.go`, `undrop.go`, `dml.go`, `grant_revoke.go`, `query_constructs.go`, `data_loading.go`, `execute.go`, `session.go`, `transactions.go` | One `func (v *Validator) ParseXxx() bool` per Snowflake command reference; the doc-comment header carries the command's documented syntax. ~716 rules total |
 | `doc.go` | Package doc + `thaw:domain` annotation |
 
@@ -35,9 +35,15 @@ It is a **leaf package**: it imports only `internal/sqltok` and must never impor
 v := sqlgrammar.New(stmt)        // tokenizes stmt into significant tokens
 if v.Recognized() && !v.ParseTopLevel() {
     f := v.Failure()             // furthest token reached + expected labels
-    msg := f.Message()           // "expected FROM" / "expected one of: …"
+    msg := f.Message()           // "unexpected 'GROUP', expected FROM" / "unexpected end of statement, expected one of: …"
 }
+
+kind := v.IdentifyStatement()    // StmtSelect/Insert/Update/Delete/Merge (past a WITH/CTE prefix), else StmtOther
 ```
+
+The message names both what was **found** (the furthest token, quoted, or
+`end of statement`) and what was **expected** there — naming the offending token is
+what makes it actionable, since backtracking would otherwise rewind to token 0.
 
 - **Terminals** advance on match and record an `expect` label on miss. `MatchKeyword`
   matches a lexer-classified `Keyword`; **`MatchWord`** matches any identifier-like
@@ -79,6 +85,8 @@ via `orReplace`.
   rejects input with no significant tokens or a non-command leading word (guards
   against stubs and over-leniency).
 - `dispatch_test.go` — `Recognized`/`ParseTopLevel` across all families.
+- `classify_test.go` — `IdentifyStatement` (incl. the WITH/CTE bypass) and the
+  `Failure.Message` token naming.
 
 ## Gotchas
 

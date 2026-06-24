@@ -13,6 +13,7 @@ package sqleditor
 import (
 	"strings"
 
+	"thaw/internal/sqlgrammar"
 	"thaw/internal/sqltok"
 )
 
@@ -41,13 +42,23 @@ func ValidateAntiPatterns(sql string, stmtRanges []StatementRange) []DiagMarker 
 			continue
 		}
 		firstTok := getFirstSQLToken(rawText)
-		strippedUpper := strings.ToUpper(stripped)
+		// stmtKind is the statement's effective top-level verb, derived by the
+		// grammar engine (which looks past a leading WITH/CTE prefix) rather than
+		// from fragile substring matching. firstTok stays the *literal* leader,
+		// used only for the lexical guards below (GRANT/REVOKE, BEGIN/COMMIT/…).
+		stmtKind := sqlgrammar.New(rawText).IdentifyStatement()
+		// present is the set of significant keyword/identifier tokens in the
+		// statement. The clause-level validators gate on it instead of
+		// strings.Contains, which mis-fires on substrings — "AT" inside CREATE/DATE,
+		// "PIVOT" inside UNPIVOT — running validators on statements that have no
+		// such clause at all.
+		present := sigWordSet(stripped)
 
 		markers = append(markers, checkLateralFlattenTypo(rawText, r)...)
 		markers = append(markers, checkFlattenWithoutLateral(rawText, stripped, r)...)
 		markers = append(markers, checkVariantPathColon(rawText, r)...)
 		markers = append(markers, checkQualifyPlacement(rawText, stripped, r)...)
-		if firstTok == "MERGE" {
+		if stmtKind == sqlgrammar.StmtMerge {
 			markers = append(markers, checkMergeClauses(rawText, r)...)
 		}
 		if firstTok != "GRANT" && firstTok != "REVOKE" {
@@ -55,35 +66,38 @@ func ValidateAntiPatterns(sql string, stmtRanges []StatementRange) []DiagMarker 
 		}
 
 		// ── Clause-level semantic anti-patterns ───────────────────────────
-		if strings.Contains(strippedUpper, "PIVOT") {
+		if present["PIVOT"] {
 			markers = append(markers, validatePivotClauses(stripped, r)...)
 		}
-		if strings.Contains(strippedUpper, "UNPIVOT") {
+		if present["UNPIVOT"] {
 			markers = append(markers, validateUnpivotClauses(stripped, r)...)
 		}
-		if strings.Contains(strippedUpper, "MATCH_RECOGNIZE") {
+		if present["MATCH_RECOGNIZE"] {
 			markers = append(markers, validateMatchRecognizeClauses(stripped, r)...)
 		}
-		if strings.Contains(strippedUpper, "ASOF") {
+		if present["ASOF"] {
 			markers = append(markers, validateAsofJoinClauses(stripped, r)...)
 		}
-		if strings.Contains(strippedUpper, "AT") || strings.Contains(strippedUpper, "BEFORE") {
+		if present["AT"] || present["BEFORE"] {
 			markers = append(markers, validateTimeTravelClauses(stripped, r)...)
 		}
 
 		// ── INSERT ALL / FIRST / OVERWRITE ────────────────────────────────
-		if firstTok == "INSERT" {
+		// Gated on the literal leading INSERT: the multi-table validators index
+		// from sig[0]=INSERT, so the (non-standard) WITH-prefixed form is out of
+		// scope. stmtKind confirms the classification; firstTok pins sig[0].
+		if stmtKind == sqlgrammar.StmtInsert && firstTok == "INSERT" {
 			sig := sigTokens(stripped)
 			secondTok := ""
 			if len(sig) >= 2 {
 				secondTok = tokUpper(sig[1], stripped)
 			}
-			switch {
-			case secondTok == "ALL":
+			switch secondTok {
+			case "ALL":
 				markers = append(markers, validateInsertAll(stripped, r)...)
-			case secondTok == "FIRST":
+			case "FIRST":
 				markers = append(markers, validateInsertFirst(stripped, r)...)
-			case secondTok == "OVERWRITE":
+			case "OVERWRITE":
 				markers = append(markers, validateInsertOverwrite(stripped, r)...)
 			}
 		}

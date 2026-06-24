@@ -43,6 +43,21 @@ func tokUpper(tok sqltok.Token, sql string) string {
 	return ""
 }
 
+// sigWordSet returns the set of uppercased keyword/identifier token texts present
+// in sql. It powers precise clause-presence gating: a clause word counts only when
+// it appears as its own token, never as a substring of another word — unlike
+// strings.Contains, which matches "AT" inside CREATE/DATE/MATCH or "PIVOT" inside
+// UNPIVOT.
+func sigWordSet(sql string) map[string]bool {
+	set := make(map[string]bool)
+	for _, t := range sigTokens(sql) {
+		if u := tokUpper(t, sql); u != "" {
+			set[u] = true
+		}
+	}
+	return set
+}
+
 // isIdent reports whether tok is a keyword, identifier, or quoted identifier —
 // i.e. something that can appear in a qualified name.
 func isIdent(tok sqltok.Token) bool {
