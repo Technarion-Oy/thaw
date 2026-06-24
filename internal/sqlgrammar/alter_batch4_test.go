@@ -174,11 +174,15 @@ func TestParseAlterTable(t *testing.T) {
 		`ALTER TABLE IF EXISTS t SWAP WITH t2`,
 		`ALTER TABLE t SET DATA_RETENTION_TIME_IN_DAYS = 1`,
 		`ALTER TABLE t ADD COLUMN c INT`,
+		`ALTER TABLE t DROP COLUMN c`,
+		`ALTER TABLE t CLUSTER BY (a)`,
 	)
 	assertInvalid(t, (*Validator).ParseAlterTable,
 		``,
 		`ALTER TABLE`,
 		`ALTER TABLE t`,
+		// Newly enforced: the action must be a documented verb, not arbitrary.
+		`ALTER TABLE t FOOBAR x y`,
 	)
 }
 
@@ -199,10 +203,12 @@ func TestParseAlterTableEventTables(t *testing.T) {
 		`ALTER TABLE t RENAME TO t2`,
 		`ALTER TABLE IF EXISTS t SET CHANGE_TRACKING = TRUE`,
 		`ALTER TABLE t CLUSTER BY ( a, b )`,
+		`ALTER TABLE t SUSPEND RECLUSTER`,
 	)
 	assertInvalid(t, (*Validator).ParseAlterTableEventTables,
 		``,
 		`ALTER TABLE t`,
+		`ALTER TABLE t FOOBAR x`,
 	)
 }
 

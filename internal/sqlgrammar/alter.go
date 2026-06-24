@@ -1451,12 +1451,14 @@ func (v *Validator) ParseAlterDynamicTable() bool {
 					return v.MatchWord("REFRESH") &&
 						v.Optional(func() bool { return v.phrase("COPY", "SESSION") })
 				},
-				// SET / UNSET and all object-specific actions: require >=1 token, consume rest.
+				// SET / UNSET and the object-specific clustering / governance /
+				// search-optimization actions — require a documented action verb (so a
+				// garbage action is flagged) before the free-form remainder.
 				func() bool {
-					if v.AtEnd() {
-						return false
-					}
-					return v.consumeRest()
+					return v.Sequence(
+						v.wordsValue("SET", "UNSET", "ADD", "DROP", "CLUSTER"),
+						v.consumeRest,
+					)
 				},
 			)
 		},
@@ -1735,12 +1737,13 @@ func (v *Validator) ParseAlterFailoverGroup() bool {
 					return v.MatchWord("SUSPEND") &&
 						v.Optional(func() bool { return v.MatchWord("IMMEDIATE") })
 				},
-				// SET / UNSET / ADD / MOVE / REMOVE — free-form trailing actions.
+				// SET / UNSET / ADD / MOVE / REMOVE — require a documented action verb
+				// (so a garbage action is flagged) before the free-form target list.
 				func() bool {
-					if v.AtEnd() {
-						return false
-					}
-					return v.consumeRest()
+					return v.Sequence(
+						v.wordsValue("SET", "UNSET", "ADD", "MOVE", "REMOVE"),
+						v.consumeRest,
+					)
 				},
 			)
 		},
@@ -2064,12 +2067,14 @@ func (v *Validator) ParseAlterIcebergTable() bool {
 					return v.Sequence(v.wordsValue("SUSPEND", "RESUME"), func() bool { return v.MatchWord("RECLUSTER") })
 				},
 				func() bool { return v.phrase("DROP", "CLUSTERING", "KEY") },
-				// SET / UNSET option lists and tableColumnAction / governance / search optimization.
+				// SET / UNSET option lists, tableColumnAction, governance, and
+				// search-optimization actions — require a documented action verb (so a
+				// garbage action is flagged) before the free-form remainder.
 				func() bool {
-					if v.AtEnd() {
-						return false
-					}
-					return v.consumeRest()
+					return v.Sequence(
+						v.wordsValue("SET", "UNSET", "ADD", "DROP", "ALTER", "MODIFY", "RENAME"),
+						v.consumeRest,
+					)
 				},
 			)
 		},
@@ -2925,14 +2930,10 @@ func (v *Validator) ParseAlterOnlineFeatureTable() bool {
 			return v.Choice(
 				v.wordsValue("SUSPEND", "RESUME", "REFRESH"),
 				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				// <tagAction> (SET/UNSET TAG) and SET COMMENT/TARGET_LAG/WAREHOUSE are
+				// all covered by this SET/UNSET branch — no ungated catch-all, so a
+				// garbage action is flagged.
 				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
-				// tag action / other object-specific forms
-				func() bool {
-					if v.AtEnd() {
-						return false
-					}
-					return v.consumeRest()
-				},
 			)
 		},
 	)
@@ -4720,15 +4721,16 @@ func (v *Validator) ParseAlterTable() bool {
 				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
 				func() bool { return v.phrase("SWAP", "WITH") && v.parseIdentPath() },
 				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
-				// ADD / DROP / clusteringAction / tableColumnAction / constraintAction /
-				// dataMetricFunctionAction / searchOptimizationAction etc. — require a verb
-				// word then accept the free-form remainder.
+				// clusteringAction / tableColumnAction / constraintAction /
+				// dataMetricFunctionAction / dataGovnPolicyTagAction /
+				// searchOptimizationAction / STORAGE LIFECYCLE POLICY — require a
+				// documented action verb (so a garbage action is flagged), then accept
+				// the free-form remainder.
 				func() bool {
-					if v.AtEnd() {
-						return false
-					}
-					v.advance()
-					return v.consumeRest()
+					return v.Sequence(
+						v.wordsValue("ADD", "DROP", "ALTER", "MODIFY", "RENAME", "CLUSTER", "RECLUSTER", "SUSPEND", "RESUME"),
+						v.consumeRest,
+					)
 				},
 			)
 		},
@@ -4815,13 +4817,13 @@ func (v *Validator) ParseAlterTableEventTables() bool {
 			return v.Choice(
 				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
 				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
-				// clusteringAction / dataGovnPolicyTagAction / searchOptimizationAction
+				// clusteringAction / dataGovnPolicyTagAction / searchOptimizationAction —
+				// require a documented action verb before the free-form remainder.
 				func() bool {
-					if v.AtEnd() {
-						return false
-					}
-					v.advance()
-					return v.consumeRest()
+					return v.Sequence(
+						v.wordsValue("ADD", "DROP", "CLUSTER", "SUSPEND", "RESUME"),
+						v.consumeRest,
+					)
 				},
 			)
 		},

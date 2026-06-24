@@ -105,10 +105,13 @@ func TestParseAlterOnlineFeatureTable(t *testing.T) {
 		`ALTER ONLINE FEATURE TABLE my_t SUSPEND`,
 		`ALTER ONLINE FEATURE TABLE IF EXISTS my_t RENAME TO new_t`,
 		`ALTER ONLINE FEATURE TABLE my_t SET TARGET_LAG = '1 hours'`,
+		`ALTER ONLINE FEATURE TABLE my_t REFRESH`,
 	)
 	assertInvalid(t, (*Validator).ParseAlterOnlineFeatureTable,
 		``,
 		`ALTER ONLINE FEATURE TABLE my_t`,
+		// Newly enforced: ungated catch-all removed, so a garbage action is flagged.
+		`ALTER ONLINE FEATURE TABLE my_t FOOBAR x`,
 	)
 }
 

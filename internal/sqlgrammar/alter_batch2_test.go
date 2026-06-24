@@ -22,11 +22,13 @@ func TestParseAlterDynamicTable(t *testing.T) {
 		`ALTER DYNAMIC TABLE my_dt REFRESH COPY SESSION`,
 		`ALTER DYNAMIC TABLE my_dt SET TARGET_LAG = '1 minute'`,
 		`ALTER DYNAMIC TABLE my_dt SWAP WITH other_dt`,
+		`ALTER DYNAMIC TABLE my_dt UNSET COMMENT`,
 	)
 	assertInvalid(t, (*Validator).ParseAlterDynamicTable,
 		``,
 		`ALTER DYNAMIC TABLE my_dt`,
 		`ALTER TABLE my_dt SUSPEND`,
+		`ALTER DYNAMIC TABLE my_dt FOOBAR x`,
 	)
 }
 
@@ -103,11 +105,13 @@ func TestParseAlterFailoverGroup(t *testing.T) {
 		`ALTER FAILOVER GROUP IF EXISTS my_fg RENAME TO new_fg`,
 		`ALTER FAILOVER GROUP my_fg SUSPEND IMMEDIATE`,
 		`ALTER FAILOVER GROUP my_fg SET OBJECT_TYPES = DATABASES`,
+		`ALTER FAILOVER GROUP my_fg ADD db1 TO ALLOWED_DATABASES`,
 	)
 	assertInvalid(t, (*Validator).ParseAlterFailoverGroup,
 		``,
 		`ALTER FAILOVER GROUP my_fg`,
 		`ALTER GROUP my_fg REFRESH`,
+		`ALTER FAILOVER GROUP my_fg FOOBAR x`,
 	)
 }
 
@@ -208,11 +212,13 @@ func TestParseAlterIcebergTable(t *testing.T) {
 		`ALTER ICEBERG TABLE IF EXISTS my_it DROP CLUSTERING KEY`,
 		`ALTER ICEBERG TABLE my_it SET AUTO_REFRESH = TRUE`,
 		`ALTER ICEBERG TABLE my_it SUSPEND RECLUSTER`,
+		`ALTER ICEBERG TABLE my_it ADD COLUMN c2 INT`,
 	)
 	assertInvalid(t, (*Validator).ParseAlterIcebergTable,
 		``,
 		`ALTER ICEBERG TABLE my_it`,
 		`ALTER TABLE my_it CLUSTER BY (c1)`,
+		`ALTER ICEBERG TABLE my_it FOOBAR x`,
 	)
 }
 
