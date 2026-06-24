@@ -314,22 +314,90 @@ func (v *Validator) ParseAlterAggregationPolicy() bool {
 //
 //	ALTER ALERT [ IF EXISTS ] <name> MODIFY ACTION <action>
 func (v *Validator) ParseAlterAlert() bool {
+	name := v.parseIdentPath
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	// TAG <tag> = '<value>' assignment.
+	tagAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
+	// SET option (closed set).
+	setOption := func() bool {
+		return v.Choice(
+			v.option("WAREHOUSE", v.parseScalar),
+			v.option("SCHEDULE", v.parseString),
+			v.commentOption(),
+			v.option("CONFIG", v.parseString),
+			v.option("RUNBOOK", v.parseString),
+			v.option("SUSPEND_ALERT_AFTER_NUM_FAILURES", num),
+		)
+	}
+	setForm := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchWord("SET") },
+			func() bool {
+				return v.Choice(
+					// SET TAG <tag> = '<value>' [ , ... ]
+					func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+					// SET <option> [ <option> ... ]  (at least one)
+					func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+				)
+			},
+		)
+	}
+	unsetForm := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchWord("UNSET") },
+			func() bool {
+				return v.Choice(
+					// UNSET TAG <tag> [ , ... ]
+					func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+					// UNSET { WAREHOUSE | COMMENT | CONFIG | RUNBOOK | SUSPEND_ALERT_AFTER_NUM_FAILURES } [ , ... ]
+					commaList(v.wordsValue("WAREHOUSE", "COMMENT", "CONFIG", "RUNBOOK", "SUSPEND_ALERT_AFTER_NUM_FAILURES")),
+				)
+			},
+		)
+	}
+	modifyForm := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchWord("MODIFY") },
+			func() bool {
+				return v.Choice(
+					// CONDITION EXISTS ( <condition> )
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchWord("CONDITION") },
+							func() bool { return v.MatchWord("EXISTS") },
+							v.consumeBalancedParens,
+						)
+					},
+					// ACTION <action> — the action body is free-form.
+					func() bool {
+						return v.Sequence(func() bool { return v.MatchWord("ACTION") }, v.consumeRest)
+					},
+				)
+			},
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.MatchWord("ALERT") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
-				// RESUME | SUSPEND
 				v.wordsValue("RESUME", "SUSPEND"),
-				// SET / UNSET <options…> ; MODIFY CONDITION/ACTION … — free-form.
-				func() bool {
-					return v.Sequence(
-						v.wordsValue("SET", "UNSET", "MODIFY"),
-						v.consumeRest,
-					)
-				},
+				setForm,
+				unsetForm,
+				modifyForm,
 			)
 		},
 	)

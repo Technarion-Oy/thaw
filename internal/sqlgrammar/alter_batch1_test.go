@@ -82,11 +82,23 @@ func TestParseAlterAlert(t *testing.T) {
 		`ALTER ALERT a1 RESUME`,
 		`ALTER ALERT IF EXISTS a1 SET WAREHOUSE = 'wh'`,
 		`ALTER ALERT a1 MODIFY ACTION foo`,
+		// Newly modeled forms.
+		`ALTER ALERT a1 SET SCHEDULE = '5 MINUTE' COMMENT = 'c' RUNBOOK = 'rb'`,
+		`ALTER ALERT a1 SET CONFIG = 'x' SUSPEND_ALERT_AFTER_NUM_FAILURES = 3`,
+		`ALTER ALERT a1 SET TAG t1 = 'v1', t2 = 'v2'`,
+		`ALTER ALERT IF EXISTS a1 UNSET WAREHOUSE, COMMENT, CONFIG, RUNBOOK`,
+		`ALTER ALERT a1 UNSET RUNBOOK`,
+		`ALTER ALERT a1 UNSET TAG t1, t2`,
+		`ALTER ALERT a1 MODIFY CONDITION EXISTS (SELECT 1 FROM t)`,
 	)
 	assertInvalid(t, (*Validator).ParseAlterAlert,
 		``,
 		`ALTER ALERT a1`,
 		`ALTER ALERT a1 FOO`,
+		// Newly enforced: SET/UNSET options come from the documented closed set.
+		`ALTER ALERT a1 SET BOGUS = 1`,
+		`ALTER ALERT a1 UNSET BOGUS`,
+		`ALTER ALERT a1 MODIFY CONDITION SELECT 1`,
 	)
 }
 
