@@ -98,11 +98,24 @@ func TestParseCreateProcedure(t *testing.T) {
 		`CREATE PROCEDURE p() RETURNS STRING LANGUAGE SQL AS 'BEGIN RETURN 1; END'`,
 		`CREATE OR REPLACE PROCEDURE p(x INT, y VARCHAR) RETURNS TABLE (a INT) LANGUAGE SQL AS $$ x $$`,
 		`CREATE SECURE PROCEDURE p() COPY GRANTS RETURNS INT NOT NULL LANGUAGE SQL AS 'x'`,
+		// Full Java handler form: RUNTIME_VERSION / PACKAGES / HANDLER / SECRETS /
+		// EXTERNAL_ACCESS_INTEGRATIONS / EXECUTE AS now modeled, not swallowed.
+		`CREATE PROCEDURE p(x INT) RETURNS STRING LANGUAGE JAVA RUNTIME_VERSION = '11' ` +
+			`PACKAGES = ('com.snowflake:snowpark:1.2') HANDLER = 'C.m' ` +
+			`EXTERNAL_ACCESS_INTEGRATIONS = (i1, i2) EXECUTE AS CALLER AS 'body'`,
+		`CREATE PROCEDURE p() RETURNS INT LANGUAGE PYTHON STRICT IMMUTABLE COMMENT = 'c' ` +
+			`EXECUTE AS RESTRICTED CALLER AS 'x'`,
+		// Unmodeled option key tolerated by the generic fallback (no false reject).
+		`CREATE PROCEDURE p() RETURNS INT LANGUAGE SQL SOME_FUTURE_OPT = 5 AS 'x'`,
 	)
 	assertInvalid(t, (*Validator).ParseCreateProcedure,
 		`CREATE PROCEDURE p()`,
 		`CREATE PROCEDURE p RETURNS INT`,
 		`CREATE PROCEDURE () RETURNS INT`,
+		// Newly enforced: RETURNS must have a type, and the AS body is required
+		// (the old consumeRest body accepted both of these).
+		`CREATE PROCEDURE p() RETURNS LANGUAGE SQL AS 'x'`,
+		`CREATE PROCEDURE p() RETURNS INT LANGUAGE SQL`,
 	)
 }
 

@@ -5940,8 +5940,9 @@ func (v *Validator) ParseCreatePrivacyPolicy() bool {
 //	  [ EXECUTE AS { OWNER | CALLER | RESTRICTED CALLER } ]
 //	  AS <procedure_definition>
 func (v *Validator) ParseCreateProcedure() bool {
-	// balancedParens consumes a single ( ... ) span with nested parens — used
-	// for the free-form argument list which we don't model in detail.
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	// balancedParens consumes a single ( ... ) span with nested parens — used for
+	// the free-form argument list and nested option-block values.
 	var balancedParens func() bool
 	balancedParens = func() bool {
 		if !v.Match(sqltok.LParen) {
@@ -5962,13 +5963,24 @@ func (v *Validator) ParseCreateProcedure() bool {
 		}
 		return false
 	}
-	// consumeRest greedily consumes the remaining tokens (RETURNS spec, option
-	// list, and the procedure body), which are too free-form to model.
-	consumeRest := func() bool {
-		for !v.AtEnd() {
-			v.advance()
-		}
-		return true
+	parenIdentList := func() bool { return v.parseParenList(v.parseIdentPath) }
+	parenStringList := func() bool { return v.parseParenList(v.parseString) }
+	// RETURNS { <result_data_type> | TABLE ( ... ) }
+	returnsType := func() bool {
+		return v.Choice(
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("TABLE") },
+					func() bool { return v.Optional(balancedParens) },
+				)
+			},
+			func() bool {
+				return v.Sequence(
+					v.parseIdentPath,
+					func() bool { return v.Optional(balancedParens) },
+				)
+			},
+		)
 	}
 	return v.Sequence(
 		func() bool { return v.MatchKeyword("CREATE") },
@@ -5977,6 +5989,7 @@ func (v *Validator) ParseCreateProcedure() bool {
 		func() bool { return v.Optional(func() bool { return v.MatchKeyword("SECURE") }) },
 		func() bool { return v.MatchKeyword("PROCEDURE") },
 		v.parseIdentPath,
+		// argument list ( ... ) — free-form arg defs.
 		balancedParens,
 		// [ COPY GRANTS ]
 		func() bool {
@@ -5987,8 +6000,80 @@ func (v *Validator) ParseCreateProcedure() bool {
 				)
 			})
 		},
+		// RETURNS { <type> [ [ NOT ] NULL ] | TABLE ( ... ) }
 		func() bool { return v.MatchWord("RETURNS") },
-		consumeRest,
+		returnsType,
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.Optional(func() bool { return v.MatchWord("NOT") }) },
+					func() bool { return v.MatchWord("NULL") },
+				)
+			})
+		},
+		// Order-independent body of property clauses (LANGUAGE, HANDLER, the
+		// null-input / volatility flags, EXECUTE AS, …).
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					func() bool {
+						return v.Sequence(func() bool { return v.MatchWord("LANGUAGE") }, v.parseIdentPath)
+					},
+					func() bool { return v.phrase("CALLED", "ON", "NULL", "INPUT") },
+					func() bool { return v.phrase("RETURNS", "NULL", "ON", "NULL", "INPUT") },
+					func() bool { return v.MatchWord("STRICT") },
+					v.wordsValue("VOLATILE", "IMMUTABLE"),
+					v.option("RUNTIME_VERSION", v.parseScalar),
+					v.option("PACKAGES", parenStringList),
+					v.option("IMPORTS", parenStringList),
+					v.option("HANDLER", v.parseString),
+					v.option("EXTERNAL_ACCESS_INTEGRATIONS", parenIdentList),
+					v.option("SECRETS", balancedParens),
+					v.option("TARGET_PATH", v.parseString),
+					v.option("MAX_BATCH_ROWS", num),
+					v.commentOption(),
+					// EXECUTE AS { OWNER | CALLER | RESTRICTED CALLER }
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.phrase("EXECUTE", "AS") },
+							func() bool {
+								return v.Choice(
+									func() bool { return v.MatchWord("OWNER") },
+									func() bool { return v.phrase("RESTRICTED", "CALLER") },
+									func() bool { return v.MatchWord("CALLER") },
+								)
+							},
+						)
+					},
+					// Generic `<option> = <value>` fallback — keep LAST so the rule
+					// tolerates language/option keys not enumerated above (this rule is
+					// dispatched, so an unmodeled option must not false-reject a valid
+					// procedure). The RETURNS skeleton and AS body stay required.
+					v.option2(v.parseIdentPath, v.parseScalar),
+				)
+			})
+		},
+		// AS '<procedure_definition>' — a string literal, or a permissive
+		// consume-to-EOF fallback for dollar-quoted-like bodies.
+		func() bool {
+			return v.Sequence(
+				func() bool { return v.MatchKeyword("AS") },
+				func() bool {
+					return v.Choice(
+						v.parseString,
+						func() bool {
+							if v.AtEnd() {
+								return false
+							}
+							for !v.AtEnd() {
+								v.advance()
+							}
+							return true
+						},
+					)
+				},
+			)
+		},
 	)
 }
 
