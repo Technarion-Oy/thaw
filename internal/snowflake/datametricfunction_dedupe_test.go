@@ -27,7 +27,7 @@ func TestDedupeDataMetricFunctions(t *testing.T) {
 		{Name: "NULL_COUNT", Kind: "DATA METRIC FUNCTION", Schema: "PUBLIC", Arguments: "TABLE(VARCHAR)"},
 	}
 
-	got := dedupeDataMetricFunctions(objs)
+	got := dedupeFunctionVariant(objs, "DATA METRIC FUNCTION")
 
 	var keys []string
 	for _, o := range got {
@@ -52,7 +52,7 @@ func TestDedupeDataMetricFunctionsNone(t *testing.T) {
 	objs := []SnowflakeObject{
 		{Name: "ADD_ONE", Kind: "FUNCTION", Schema: "PUBLIC", Arguments: "NUMBER"},
 	}
-	got := dedupeDataMetricFunctions(objs)
+	got := dedupeFunctionVariant(objs, "DATA METRIC FUNCTION")
 	if len(got) != 1 || got[0].Name != "ADD_ONE" {
 		t.Fatalf("expected slice returned unchanged, got %v", got)
 	}

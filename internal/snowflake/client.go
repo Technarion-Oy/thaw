@@ -3346,14 +3346,14 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 	// collapses the duplicate "EXTERNAL FUNCTION" entries and drops any plain
 	// "FUNCTION" that collides with one, so each external function appears exactly
 	// once under External Functions — even if one of the two SHOW commands fails.
-	all = dedupeExternalFunctions(all)
+	all = dedupeFunctionVariant(all, "EXTERNAL FUNCTION")
 
 	// Data metric functions reach this slice the same two ways external functions
 	// do: SHOW DATA METRIC FUNCTIONS (kind "DATA METRIC FUNCTION") and SHOW
 	// FUNCTIONS (where showInSchema relabels is_data_metric=Y rows). Collapse the
 	// duplicate "DATA METRIC FUNCTION" entries and drop any plain "FUNCTION" that
 	// collides with one.
-	all = dedupeDataMetricFunctions(all)
+	all = dedupeFunctionVariant(all, "DATA METRIC FUNCTION")
 
 	// GET_DDL fallback: for Snowflake editions that don't expose the FINALIZE
 	// relationship via SHOW TASKS columns (task_relations / finalize), call
@@ -3364,42 +3364,43 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 	return all, nil
 }
 
-// dedupeExternalFunctions reconciles the two ways external functions reach the
-// extended-object list. SHOW EXTERNAL FUNCTIONS returns them as kind "EXTERNAL
-// FUNCTION"; SHOW FUNCTIONS returns them too (with is_external_function=Y), where
-// showInSchema relabels them to "EXTERNAL FUNCTION" when that column is present or
-// leaves them as plain "FUNCTION" when it is absent. This pass therefore:
+// dedupeFunctionVariant reconciles the two ways a function-like object of the
+// given <kind> (e.g. "EXTERNAL FUNCTION", "DATA METRIC FUNCTION") reaches the
+// extended-object list. SHOW <KIND>S returns it as kind <kind>; SHOW FUNCTIONS
+// returns it too (with the variant's discriminator column), where showInSchema
+// relabels it to <kind> when that column is present or leaves it as plain
+// "FUNCTION" when it is absent. This pass therefore:
 //
-//   - collapses duplicate "EXTERNAL FUNCTION" entries (one from each SHOW command)
-//     to a single entry, and
+//   - collapses duplicate <kind> entries (one from each SHOW command) to a single
+//     entry, and
 //   - drops any plain "FUNCTION" entry whose (schema, name, arguments) collides
-//     with an "EXTERNAL FUNCTION" (the column-absent edition).
+//     with a <kind> entry (the column-absent edition).
 //
 // Matching is case-insensitive and includes the argument signature because
 // functions overload by signature. The input slice is not mutated.
-func dedupeExternalFunctions(objs []SnowflakeObject) []SnowflakeObject {
-	extKeys := make(map[string]struct{})
+func dedupeFunctionVariant(objs []SnowflakeObject, kind string) []SnowflakeObject {
+	keys := make(map[string]struct{})
 	for _, o := range objs {
-		if o.Kind == "EXTERNAL FUNCTION" {
-			extKeys[externalFunctionDedupeKey(o)] = struct{}{}
+		if o.Kind == kind {
+			keys[externalFunctionDedupeKey(o)] = struct{}{}
 		}
 	}
-	if len(extKeys) == 0 {
+	if len(keys) == 0 {
 		return objs
 	}
 	out := make([]SnowflakeObject, 0, len(objs))
-	seenExt := make(map[string]struct{})
+	seen := make(map[string]struct{})
 	for _, o := range objs {
 		key := externalFunctionDedupeKey(o)
 		switch o.Kind {
-		case "EXTERNAL FUNCTION":
-			if _, dup := seenExt[key]; dup {
+		case kind:
+			if _, dup := seen[key]; dup {
 				continue // already emitted from the other SHOW command
 			}
-			seenExt[key] = struct{}{}
+			seen[key] = struct{}{}
 		case "FUNCTION":
-			if _, dup := extKeys[key]; dup {
-				continue // a plain FUNCTION that is really external (column absent)
+			if _, dup := keys[key]; dup {
+				continue // a plain FUNCTION that is really <kind> (column absent)
 			}
 		}
 		out = append(out, o)
@@ -3411,44 +3412,6 @@ func dedupeExternalFunctions(objs []SnowflakeObject) []SnowflakeObject {
 // key used to match a FUNCTION against an EXTERNAL FUNCTION.
 func externalFunctionDedupeKey(o SnowflakeObject) string {
 	return strings.ToUpper(o.Schema) + "\x00" + strings.ToUpper(o.Name) + "\x00" + strings.ToUpper(strings.TrimSpace(o.Arguments))
-}
-
-// dedupeDataMetricFunctions reconciles the two ways data metric functions reach
-// the extended-object list, mirroring dedupeExternalFunctions. SHOW DATA METRIC
-// FUNCTIONS returns them as kind "DATA METRIC FUNCTION"; SHOW FUNCTIONS returns
-// them too (with is_data_metric=Y), where showInSchema relabels them to "DATA
-// METRIC FUNCTION" when that column is present or leaves them as plain "FUNCTION"
-// when it is absent. This pass therefore collapses duplicate "DATA METRIC
-// FUNCTION" entries and drops any plain "FUNCTION" entry whose
-// (schema, name, arguments) collides with one. The input slice is not mutated.
-func dedupeDataMetricFunctions(objs []SnowflakeObject) []SnowflakeObject {
-	dmfKeys := make(map[string]struct{})
-	for _, o := range objs {
-		if o.Kind == "DATA METRIC FUNCTION" {
-			dmfKeys[externalFunctionDedupeKey(o)] = struct{}{}
-		}
-	}
-	if len(dmfKeys) == 0 {
-		return objs
-	}
-	out := make([]SnowflakeObject, 0, len(objs))
-	seen := make(map[string]struct{})
-	for _, o := range objs {
-		key := externalFunctionDedupeKey(o)
-		switch o.Kind {
-		case "DATA METRIC FUNCTION":
-			if _, dup := seen[key]; dup {
-				continue // already emitted from the other SHOW command
-			}
-			seen[key] = struct{}{}
-		case "FUNCTION":
-			if _, dup := dmfKeys[key]; dup {
-				continue // a plain FUNCTION that is really a DMF (column absent)
-			}
-		}
-		out = append(out, o)
-	}
-	return out
 }
 
 // enrichTaskFinalize enriches TASK objects with FINALIZE metadata by calling

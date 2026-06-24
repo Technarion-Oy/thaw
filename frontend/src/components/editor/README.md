@@ -36,7 +36,9 @@ the bundled artifact `src/generated/snowflakeDataTypes.ts`.)
 **IPC calls (from `wailsjs/go/sqleditor/Service`):**
 `AnalyzeSqlSyntax`, `ParseJoinTableRefs`, `ComputeJoinOnConditions`, `AnalyzeSqlSemantics`,
 `GetSqlStatementRanges`, `GetIdentifierAtColumn`, `GetActiveFunctionCall`,
-`ParseSignatureParams`, `ValidateSnowflakePatterns`, `ValidateDataTypes`,
+`ParseSignatureParams`, `ValidateDataTypes`,
+`ValidateGrammar` (recursive-descent Snowflake grammar check — Warning markers),
+`ValidateAntiPatterns` (semantic anti-patterns: MERGE clause actions, QUALIFY, FLATTEN/LATERAL, variant paths, Cortex names),
 `ValidateTablesExist`, `ValidateBareColumnRefs`, `GetSnowflakeKeywords`,
 `GetAutocompleteContextFull`, `ResolveTableRefs`, `ComputeGitLineDiff`.
 

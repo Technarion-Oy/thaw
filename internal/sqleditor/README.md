@@ -8,8 +8,9 @@ This package implements the proprietary SQL analysis logic that backs Thaw's edi
 
 Key capabilities:
 - Structural syntax validation (unclosed strings, unmatched parens, bad scripting syntax)
-- Anti-pattern and statement-preamble validation
+- Grammar-conformance validation via the recursive-descent state machine in [`internal/sqlgrammar`](../sqlgrammar/README.md) (replaced the legacy regex/token-scanning anti-pattern & preamble checks)
 - Data-type validation in DDL and CAST expressions
+- Object-existence validation — a referenced table/view/schema/database must exist in the catalog **or be created earlier in the same script** (`ValidateTablesExist`)
 - JOIN ON / USING condition suggestions (3-tier: FK → PK heuristic → type-compatible same-name columns)
 - Autocomplete context bundling (statement ranges, scripting variables, CTE columns, table refs, ref resolution)
 - LCS-based line diff for git gutter decorations
@@ -21,7 +22,9 @@ Key capabilities:
 |------|---------|
 | `service.go` | `Service` struct (Wails-bound, stateless); thin delegators to package-level functions |
 | `sqleditor.go` | Core types (`DiagMarker`, `JoinTableRef`, `ResolvedRef`, `ColInfo`, `ColEntry`, `JoinCondition`, `AutocompleteContext`, `UseContext`, `LineDiff`, etc.) and main analysis functions |
-| `patterns.go` | `ValidateSnowflakePatterns`, `ValidateDataTypes`; regex constants `ReIdentifier`, `_ident`, `_identPath`; `ApplyCasing` |
+| `patterns.go` | `ValidateDataTypes`; regex constants `ReIdentifier`, `_ident`, `_identPath`; `ApplyCasing`; the `matchesSnowflakeFP` false-positive guard shared by the bare-column-ref and table-existence validators |
+| `grammar.go` | `ValidateGrammar` — per-statement check against the recursive-descent grammar in `internal/sqlgrammar`; rebases failure positions to absolute doc coordinates |
+| `antipatterns.go` | `ValidateAntiPatterns` — semantic checks the grammar can't perform: MERGE clause-action validity, QUALIFY placement, FLATTEN/LATERAL usage, variant-path traversal, unknown Cortex functions, stray token / dangling `AS` after a FROM/JOIN table reference, PIVOT/UNPIVOT/MATCH_RECOGNIZE/ASOF JOIN clause shape, INSERT OVERWRITE/ALL/FIRST structure, Time Travel `AT`/`BEFORE`, and cross-statement transaction tracking (nested `BEGIN`, stray `COMMIT`/`ROLLBACK`, uncommitted transaction) |
 | `barecolrefs.go` | `ValidateBareColumnRefs`, `ExtractInEditorTableDefs` — validates INSERT column lists and CREATE TABLE REFERENCES; extracts in-editor table columns for pre-execution autocomplete |
 | `tableexist.go` | `ValidateTablesExist` — checks SELECT/CREATE/ALTER/DROP/UNDROP for unresolvable table/schema/database references; emits quick-fix `Code` JSON when a table exists in another schema |
 | `diaghelpers.go` | Shared internal helpers: `stripCommentsSQL`, `stripStringLiterals`, `getFirstSQLToken` |
@@ -35,8 +38,9 @@ Key capabilities:
 ### Syntax & semantic validation
 - `ValidateSyntax(sql) []DiagMarker` — walks the `internal/sqltok` token stream (recursing into `$$` scripting bodies and rebasing line/col); flags unclosed strings/parens/comments, bad `$$` scripting syntax, placeholder tokens, wrong `:=`/`=` assignments, undeclared variables
 - `ValidateSemantics(sql, resolvedRefs, colEntries) []DiagMarker` — alias.column reference validator
-- `ValidateSnowflakePatterns(sql, stmtRanges) []DiagMarker` — anti-pattern checks, preamble validation
 - `ValidateDataTypes(sql, stmtRanges) []DiagMarker` — unrecognised Snowflake type names in CREATE TABLE, CAST, `::`
+- `ValidateAntiPatterns(sql, stmtRanges) []DiagMarker` — semantic Snowflake anti-patterns the grammar engine can't see (it consumes clause bodies permissively): `INSERT` in a MERGE `WHEN MATCHED` clause (and `UPDATE`/`DELETE` in `WHEN NOT MATCHED`, plus the unsupported `WHEN NOT MATCHED BY SOURCE`), `QUALIFY` placed after `ORDER BY`, `FLATTEN` used as a table function without `LATERAL`/`TABLE(...)`, the `LATERALFLATTEN` typo, dotted variant-path traversal that should use `:`, unknown `SNOWFLAKE.CORTEX.<fn>` names, a stray token or dangling `AS` after a FROM/JOIN table reference (`FROM t 1000`, `FROM t AS`, `FROM t a AS`), malformed `PIVOT`/`UNPIVOT`/`MATCH_RECOGNIZE`/`ASOF JOIN` clauses, `INSERT OVERWRITE`/`ALL`/`FIRST` structure, Time Travel `AT`/`BEFORE` clause shape, and **cross-statement** transaction tracking (nested `BEGIN`, stray `COMMIT`/`ROLLBACK`, transaction left open at end of script). All **Warnings**. (Re-homed from the removed `ValidateSnowflakePatterns`.) Statement-type dispatch uses `sqlgrammar.IdentifyStatement` (CTE-aware) and the clause validators are gated on significant-token presence (`sigWordSet`), never `strings.Contains` — which mis-fires on `AT` inside `CREATE`/`DATE` or `PIVOT` inside `UNPIVOT`.
+- `ValidateGrammar(sql, stmtRanges) []DiagMarker` — validates each statement against the recursive-descent Snowflake grammar in [`internal/sqlgrammar`](../sqlgrammar/README.md). Only statements whose leading keyword maps to an implemented grammar (`sqlgrammar.Validator.Recognized`) are checked; a non-conforming one yields a single **Warning** at the furthest position the grammar reached (with its `expected …` message). The generic catch-all rules are excluded from dispatch, so it flags unknown object types and malformed statements — e.g. a `CREATE TABLE` with no body, an empty column list, or a column without a data type (the data-type *name* itself is checked by `ValidateDataTypes`, not duplicated here)
 - `ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker` — checks tables/schemas/databases against resolved refs; populates `DiagMarker.Code` with JSON quick-fix metadata (`{"kind":"qualify-table","original":"FOO","suggestions":["DB.SCHEMA.FOO"]}`)
 - `ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker` — validates INSERT and CREATE TABLE REFERENCES column lists
 
@@ -46,12 +50,13 @@ Key capabilities:
 - `ResolveTableRefs(refs, storeObjects, useCtx, session) []ResolvedRef` — qualifies unresolved refs against store objects, `UseContext`, and session context (priority: fully-qualified → store match → UseContext → session)
 
 ### Autocomplete context
-- `GetAutocompleteContext(sql, cursorOffset) AutocompleteContext` — bundles statement ranges, scripting completions, table refs, CTE column projections, and `UseContext` in one IPC round-trip
-- `GetAutocompleteContextFull(req AutocompleteContextRequest) AutocompleteContext` — extends the above with backend ref resolution (`ResolvedRefs`), in-editor CREATE TABLE extraction (`InEditorTables`), and context-detection flags (`IsDatatypeCtx`, `IsInJoinOnClause`, `UsingClause`)
-- `IsDatatypeContext(textToCursor, lineUpToWord) bool` — detects cursor position after `::`, `CAST AS`, `DECLARE`, or column definition in `CREATE/ALTER TABLE`
-- `IsInJoinOnClause(textToCursor) bool` — detects cursor inside a JOIN … ON … not yet terminated
-- `DetectUsingClause(textToCursor) UsingClauseInfo` — `InUsing` (empty USING) vs `IsPartial` (partial column list)
-- `GetScriptingCompletions(sql, cursorOffset) ScriptingCompletionResult` — declared Snowflake Scripting variables visible at cursor
+- `GetAutocompleteContextFull(req AutocompleteContextRequest) AutocompleteContext` — **the IPC entry point** the completion provider calls. Bundles statement ranges, scripting completions, table refs, CTE column projections, and `UseContext`, then extends them with backend ref resolution (`ResolvedRefs`), in-editor CREATE TABLE extraction (`InEditorTables`), and context-detection flags (`IsDatatypeCtx`, `IsInJoinOnClause`, `UsingClause`)
+- The following are **package-level helpers only** (no IPC wrapper): `GetAutocompleteContextFull` computes them server-side so the frontend needs a single round-trip —
+  - `GetAutocompleteContext(sql, cursorOffset)` — the un-resolved bundle `…Full` builds on
+  - `GetScriptingCompletions(sql, cursorOffset)` — declared Snowflake Scripting variables visible at cursor
+  - `IsDatatypeContext(textToCursor, lineUpToWord)` — cursor after `::`, `CAST AS`, `DECLARE`, or a column definition
+  - `IsInJoinOnClause(textToCursor)` — cursor inside a JOIN … ON … not yet terminated
+  - `DetectUsingClause(textToCursor)` — `InUsing` (empty USING) vs `IsPartial` (partial column list)
 - `GetStatementRanges(sql) []StatementRange` — per-statement line ranges and byte offsets
 - `GetIdentifierAtColumn(line, col) []string` — dot-separated identifier parts under cursor
 - `GetActiveFunctionCall(prefix) *FunctionCallContext` — innermost open function call + active parameter index
@@ -74,4 +79,4 @@ Key capabilities:
 
 - The `validateWithParser` and `validateBareColumnRefs` paths in the frontend (`sqlDiagnostics.ts`) still use `node-sql-parser` for checks that have no Go equivalent; this package does not replace those paths.
 - `ComputeGitLineDiff` returns empty slices (not an error) when either input exceeds `maxLines`. Callers must check for this case to avoid rendering stale gutter decorations.
-- `GetAutocompleteContextFull` supersedes `GetAutocompleteContext` for the main completion provider; `GetAutocompleteContext` remains for lighter-weight hover/diagnostics paths that already have resolved refs.
+- `GetAutocompleteContextFull` is the **only** autocomplete IPC entry point; `GetAutocompleteContext`, `GetScriptingCompletions`, `IsDatatypeContext`, `IsInJoinOnClause`, and `DetectUsingClause` are package-level helpers it calls server-side (their standalone `Service` wrappers were removed once the frontend consolidated onto `…Full`).

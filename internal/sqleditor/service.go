@@ -48,16 +48,24 @@ func (s *Service) AnalyzeSqlSemantics(sql string, resolvedRefs []ResolvedRef, co
 	return ValidateSemantics(sql, resolvedRefs, colEntries)
 }
 
-// ValidateSnowflakePatterns runs custom Snowflake anti-pattern checks and
-// statement preamble validation.
-func (s *Service) ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMarker {
-	return ValidateSnowflakePatterns(sql, stmtRanges)
-}
-
 // ValidateDataTypes checks CREATE TABLE, ALTER TABLE ADD COLUMN, CAST(), and
 // shorthand cast (::) expressions for unrecognized Snowflake data type names.
 func (s *Service) ValidateDataTypes(sql string, stmtRanges []StatementRange) []DiagMarker {
 	return ValidateDataTypes(sql, stmtRanges)
+}
+
+// ValidateGrammar validates each statement against the recursive-descent
+// Snowflake grammar (internal/sqlgrammar): recognized statements that don't
+// conform yield a Warning marker at the furthest position the grammar reached.
+func (s *Service) ValidateGrammar(sql string, stmtRanges []StatementRange) []DiagMarker {
+	return ValidateGrammar(sql, stmtRanges)
+}
+
+// ValidateAntiPatterns runs the semantic Snowflake anti-pattern checks the
+// grammar can't perform (MERGE clause actions, QUALIFY placement, FLATTEN/LATERAL
+// usage, variant-path traversal, unknown Cortex functions).
+func (s *Service) ValidateAntiPatterns(sql string, stmtRanges []StatementRange) []DiagMarker {
+	return ValidateAntiPatterns(sql, stmtRanges)
 }
 
 // ValidateTablesExist checks SELECT/CREATE/ALTER/DROP/UNDROP statements for
@@ -73,13 +81,6 @@ func (s *Service) ValidateTablesExist(req ValidateTablesExistRequest) []DiagMark
 // validate against tables created earlier in the same script.
 func (s *Service) ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {
 	return ValidateBareColumnRefs(req)
-}
-
-// GetScriptingCompletions extracts declared Snowflake Scripting variables
-// visible at cursorOffset and determines whether a ':' prefix is required for
-// completions.
-func (s *Service) GetScriptingCompletions(sql string, cursorOffset int) ScriptingCompletionResult {
-	return GetScriptingCompletions(sql, cursorOffset)
 }
 
 // GetSqlStatementRanges splits sql into per-statement line ranges and byte offsets.
@@ -114,13 +115,6 @@ func (s *Service) ApplySqlCasing(sql, keywordCase, identifierCase, functionCase 
 	return ApplyCasing(sql, keywordCase, identifierCase, functionCase)
 }
 
-// GetAutocompleteContext bundles statement ranges, scripting completions, table
-// references, and CTE column projections for the cursor position into a single
-// response, reducing IPC round-trips for the frontend completion provider.
-func (s *Service) GetAutocompleteContext(sql string, cursorOffset int) AutocompleteContext {
-	return GetAutocompleteContext(sql, cursorOffset)
-}
-
 // GetAutocompleteContextFull extends GetAutocompleteContext with ref resolution
 // and in-editor CREATE TABLE column extraction, reducing the frontend to a thin
 // wrapper. It resolves unqualified table refs against store objects, UseContext,
@@ -149,19 +143,7 @@ func (s *Service) ComputeGitLineDiff(headLines, currentLines []string, maxLines 
 	return ComputeGitLineDiff(headLines, currentLines, maxLines)
 }
 
-// IsDatatypeContext returns true when the cursor is in a position that expects
-// a Snowflake data type name (after ::, CAST AS, DECLARE, CREATE/ALTER TABLE column).
-func (s *Service) IsDatatypeContext(textToCursor, lineUpToWord string) bool {
-	return IsDatatypeContext(textToCursor, lineUpToWord)
-}
-
-// IsInJoinOnClause returns true when the cursor is inside a JOIN ... ON ...
-// clause that has not been terminated by a subsequent keyword.
-func (s *Service) IsInJoinOnClause(textToCursor string) bool {
-	return IsInJoinOnClause(textToCursor)
-}
-
-// DetectUsingClause checks whether the cursor is inside a USING(...) clause.
-func (s *Service) DetectUsingClause(textToCursor string) UsingClauseInfo {
-	return DetectUsingClause(textToCursor)
-}
+// IsDatatypeContext, IsInJoinOnClause, and DetectUsingClause are intentionally
+// not exposed as standalone IPC methods: the frontend consumes them via the
+// bundled GetAutocompleteContextFull (which computes all three) to avoid extra
+// round-trips. The package-level functions remain for that consumer.

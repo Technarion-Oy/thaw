@@ -10,8 +10,6 @@
 
 package snowflake
 
-import "strings"
-
 // Collation support in Snowflake is defined by a hyphen-separated specification
 // string: an optional locale (which, when present, must come first) followed by
 // zero or more specifiers in any order. The pseudo-locale "utf8" selects raw
@@ -162,21 +160,4 @@ func CollationSpecifiers() []CollationSpecifier {
 	result := make([]CollationSpecifier, len(collationSpecifiers))
 	copy(result, collationSpecifiers)
 	return result
-}
-
-// BuildCollation assembles a collation specification string from an optional
-// locale and an ordered list of specifier codes, joining them with hyphens.
-// The locale, when non-empty, is always placed first as Snowflake requires.
-// Empty segments are skipped; the result is suitable for COLLATE '<result>'.
-func BuildCollation(locale string, specifiers ...string) string {
-	segments := make([]string, 0, len(specifiers)+1)
-	if s := strings.TrimSpace(locale); s != "" {
-		segments = append(segments, s)
-	}
-	for _, sp := range specifiers {
-		if s := strings.TrimSpace(sp); s != "" {
-			segments = append(segments, s)
-		}
-	}
-	return strings.Join(segments, "-")
 }

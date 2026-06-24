@@ -22,16 +22,8 @@ export function ComputeJoinOnConditions(arg1) {
   return window['go']['sqleditor']['Service']['ComputeJoinOnConditions'](arg1);
 }
 
-export function DetectUsingClause(arg1) {
-  return window['go']['sqleditor']['Service']['DetectUsingClause'](arg1);
-}
-
 export function GetActiveFunctionCall(arg1) {
   return window['go']['sqleditor']['Service']['GetActiveFunctionCall'](arg1);
-}
-
-export function GetAutocompleteContext(arg1, arg2) {
-  return window['go']['sqleditor']['Service']['GetAutocompleteContext'](arg1, arg2);
 }
 
 export function GetAutocompleteContextFull(arg1) {
@@ -42,24 +34,12 @@ export function GetIdentifierAtColumn(arg1, arg2) {
   return window['go']['sqleditor']['Service']['GetIdentifierAtColumn'](arg1, arg2);
 }
 
-export function GetScriptingCompletions(arg1, arg2) {
-  return window['go']['sqleditor']['Service']['GetScriptingCompletions'](arg1, arg2);
-}
-
 export function GetSnowflakeKeywords() {
   return window['go']['sqleditor']['Service']['GetSnowflakeKeywords']();
 }
 
 export function GetSqlStatementRanges(arg1) {
   return window['go']['sqleditor']['Service']['GetSqlStatementRanges'](arg1);
-}
-
-export function IsDatatypeContext(arg1, arg2) {
-  return window['go']['sqleditor']['Service']['IsDatatypeContext'](arg1, arg2);
-}
-
-export function IsInJoinOnClause(arg1) {
-  return window['go']['sqleditor']['Service']['IsInJoinOnClause'](arg1);
 }
 
 export function ParseJoinTableRefs(arg1) {
@@ -74,6 +54,10 @@ export function ResolveTableRefs(arg1, arg2, arg3, arg4) {
   return window['go']['sqleditor']['Service']['ResolveTableRefs'](arg1, arg2, arg3, arg4);
 }
 
+export function ValidateAntiPatterns(arg1, arg2) {
+  return window['go']['sqleditor']['Service']['ValidateAntiPatterns'](arg1, arg2);
+}
+
 export function ValidateBareColumnRefs(arg1) {
   return window['go']['sqleditor']['Service']['ValidateBareColumnRefs'](arg1);
 }
@@ -82,8 +66,8 @@ export function ValidateDataTypes(arg1, arg2) {
   return window['go']['sqleditor']['Service']['ValidateDataTypes'](arg1, arg2);
 }
 
-export function ValidateSnowflakePatterns(arg1, arg2) {
-  return window['go']['sqleditor']['Service']['ValidateSnowflakePatterns'](arg1, arg2);
+export function ValidateGrammar(arg1, arg2) {
+  return window['go']['sqleditor']['Service']['ValidateGrammar'](arg1, arg2);
 }
 
 export function ValidateTablesExist(arg1) {

@@ -1,0 +1,637 @@
+package sqlgrammar
+
+import "testing"
+
+// Tests for the first batch of ALTER grammar rules (ParseAlterObj …
+// ParseAlterDbtProject) implemented for issue #556.
+
+func TestParseAlterObj(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterObj,
+		`ALTER TABLE t1 RENAME TO t2`,
+		`ALTER WAREHOUSE wh SET WAREHOUSE_SIZE = 'LARGE'`,
+		`ALTER VIEW v1 SET COMMENT = 'hi'`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterObj,
+		``,
+		`SELECT 1`,
+		`ALTER`,
+	)
+}
+
+func TestParseAlterAccount(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterAccount,
+		`ALTER ACCOUNT SET RESOURCE_MONITOR = mon1`,
+		`ALTER ACCOUNT UNSET TIMEZONE`,
+		`ALTER ACCOUNT myacct RENAME TO newacct`,
+		`ALTER ACCOUNT ADD ORGANIZATION USER GROUP g1`,
+		// Newly modeled structured forms.
+		`ALTER ACCOUNT SET AUTHENTICATION POLICY pol FOR ALL PERSON USERS FORCE`,
+		`ALTER ACCOUNT UNSET SESSION POLICY`,
+		`ALTER ACCOUNT SET FEATURE POLICY fp FOR ALL APPLICATIONS FORCE`,
+		`ALTER ACCOUNT SET MAINTENANCE POLICY mp FORCE FOR ALL APPLICATIONS`,
+		`ALTER ACCOUNT SET PASSWORD POLICY pp`,
+		`ALTER ACCOUNT UNSET PACKAGES POLICY`,
+		`ALTER ACCOUNT SET CONTACT support = c1, security = c2`,
+		`ALTER ACCOUNT SET TAG t1 = 'v1', t2 = 'v2'`,
+		`ALTER ACCOUNT REMOVE ORGANIZATION USER GROUP g1`,
+		`ALTER ACCOUNT acct DROP OLD URL`,
+		`ALTER ACCOUNT acct DROP OLD ORGANIZATION URL`,
+		`ALTER ACCOUNT acct RENAME TO newacct SAVE_OLD_URL = TRUE`,
+		`ALTER ACCOUNT acct SET EDITION = 'ENTERPRISE'`,
+		`ALTER ACCOUNT SET TIMEZONE = 'UTC', ABORT_DETACHED_QUERY = TRUE`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterAccount,
+		``,
+		`DROP ACCOUNT a`,
+		`ALTER ACCOUNT`,
+		// Newly enforced: ADD/REMOVE and DROP forms are closed, not arbitrary.
+		`ALTER ACCOUNT ADD FOO`,
+		`ALTER ACCOUNT DROP FOO`,
+		`ALTER ACCOUNT DROP OLD`,
+	)
+}
+
+func TestParseAlterAgent(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterAgent,
+		`ALTER AGENT a1 SET COMMENT = 'x'`,
+		`ALTER AGENT a1 SET COMMENT = 'x' PROFILE = 'p'`,
+		`ALTER AGENT a1 MODIFY LIVE VERSION SET SPECIFICATION = spec`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterAgent,
+		``,
+		`ALTER AGENT a1`,
+		`ALTER AGENT a1 FOO`,
+	)
+}
+
+func TestParseAlterAggregationPolicy(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterAggregationPolicy,
+		`ALTER AGGREGATION POLICY p1 RENAME TO p2`,
+		`ALTER AGGREGATION POLICY IF EXISTS p1 SET COMMENT = 'x'`,
+		`ALTER AGGREGATION POLICY p1 UNSET TAG t1`,
+		// Newly modeled forms.
+		`ALTER AGGREGATION POLICY IF EXISTS p1 SET BODY -> CASE WHEN COUNT(*) < 5 THEN AGGREGATION_CONSTRAINT(MIN_GROUP_SIZE => 5) ELSE NO_AGGREGATION_CONSTRAINT() END`,
+		`ALTER AGGREGATION POLICY p1 SET TAG t1 = 'v1', t2 = 'v2'`,
+		`ALTER AGGREGATION POLICY p1 UNSET TAG t1, t2`,
+		`ALTER AGGREGATION POLICY IF EXISTS p1 UNSET COMMENT`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterAggregationPolicy,
+		``,
+		`ALTER AGGREGATION POLICY p1`,
+		`ALTER POLICY p1 SET COMMENT = 'x'`,
+		// Newly enforced: SET/UNSET targets come from the documented closed set.
+		`ALTER AGGREGATION POLICY p1 SET BOGUS = 1`,
+		`ALTER AGGREGATION POLICY p1 UNSET BOGUS`,
+		`ALTER AGGREGATION POLICY p1 SET WAREHOUSE = 'wh'`,
+	)
+}
+
+func TestParseAlterAlert(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterAlert,
+		`ALTER ALERT a1 RESUME`,
+		`ALTER ALERT IF EXISTS a1 SET WAREHOUSE = 'wh'`,
+		`ALTER ALERT a1 MODIFY ACTION foo`,
+		// Newly modeled forms.
+		`ALTER ALERT a1 SET SCHEDULE = '5 MINUTE' COMMENT = 'c' RUNBOOK = 'rb'`,
+		`ALTER ALERT a1 SET CONFIG = 'x' SUSPEND_ALERT_AFTER_NUM_FAILURES = 3`,
+		`ALTER ALERT a1 SET TAG t1 = 'v1', t2 = 'v2'`,
+		`ALTER ALERT IF EXISTS a1 UNSET WAREHOUSE, COMMENT, CONFIG, RUNBOOK`,
+		`ALTER ALERT a1 UNSET RUNBOOK`,
+		`ALTER ALERT a1 UNSET TAG t1, t2`,
+		`ALTER ALERT a1 MODIFY CONDITION EXISTS (SELECT 1 FROM t)`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterAlert,
+		``,
+		`ALTER ALERT a1`,
+		`ALTER ALERT a1 FOO`,
+		// Newly enforced: SET/UNSET options come from the documented closed set.
+		`ALTER ALERT a1 SET BOGUS = 1`,
+		`ALTER ALERT a1 UNSET BOGUS`,
+		`ALTER ALERT a1 MODIFY CONDITION SELECT 1`,
+	)
+}
+
+func TestParseAlterApiIntegration(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterApiIntegration,
+		`ALTER API INTEGRATION i1 SET ENABLED = TRUE`,
+		`ALTER INTEGRATION IF EXISTS i1 UNSET COMMENT`,
+		`ALTER API INTEGRATION i1 SET TAG t1 = 'v'`,
+		// Newly modeled forms.
+		`ALTER API INTEGRATION i1 SET API_AWS_ROLE_ARN = 'arn' API_KEY = 'k' COMMENT = 'c'`,
+		`ALTER API INTEGRATION i1 SET API_ALLOWED_PREFIXES = ('a', 'b') API_BLOCKED_PREFIXES = ('c')`,
+		`ALTER API INTEGRATION i1 SET ALLOWED_AUTHENTICATION_SECRETS = NONE`,
+		`ALTER API INTEGRATION i1 SET ALLOWED_AUTHENTICATION_SECRETS = (s1, s2)`,
+		`ALTER API INTEGRATION i1 UNSET API_KEY, ENABLED, API_BLOCKED_PREFIXES`,
+		`ALTER INTEGRATION i1 UNSET TAG t1, t2`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterApiIntegration,
+		``,
+		`ALTER API INTEGRATION i1`,
+		`ALTER API i1 SET ENABLED = TRUE`,
+		// Newly enforced: SET/UNSET options come from the documented closed set.
+		`ALTER API INTEGRATION i1 SET BOGUS = 1`,
+		`ALTER API INTEGRATION i1 UNSET API_AWS_ROLE_ARN`,
+	)
+}
+
+func TestParseAlterApplication(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterApplication,
+		`ALTER APPLICATION app1 RENAME TO app2`,
+		`ALTER APPLICATION IF EXISTS app1 SET COMMENT = 'x'`,
+		`ALTER APPLICATION app1 UPGRADE`,
+		// Newly modeled forms.
+		`ALTER APPLICATION app1 SET SHARE_EVENTS_WITH_PROVIDER = TRUE DEBUG_MODE = FALSE`,
+		`ALTER APPLICATION app1 SET FEATURE POLICY fp FORCE`,
+		`ALTER APPLICATION app1 SET MAINTENANCE POLICY mp`,
+		`ALTER APPLICATION app1 SET TAG t1 = 'v1', t2 = 'v2'`,
+		`ALTER APPLICATION app1 SET SHARED TELEMETRY EVENTS ('e1', 'e2')`,
+		`ALTER APPLICATION app1 UNSET FEATURE POLICY`,
+		`ALTER APPLICATION app1 UNSET COMMENT, DEBUG_MODE`,
+		`ALTER APPLICATION app1 UNSET TAG t1`,
+		`ALTER APPLICATION app1 UNSET REFERENCES ('r1', 'a1')`,
+		`ALTER APPLICATION app1 UPGRADE USING VERSION v1 PATCH 3`,
+		`ALTER APPLICATION app1 UPGRADE USING @stg/path`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterApplication,
+		``,
+		`ALTER APPLICATION app1`,
+		`ALTER APPLICATION app1 FOO`,
+		// Newly enforced: SET/UNSET options come from the documented closed set.
+		`ALTER APPLICATION app1 SET BOGUS = 1`,
+		`ALTER APPLICATION app1 UNSET BOGUS`,
+	)
+}
+
+func TestParseAlterApplicationDropSpecification(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterApplicationDropSpecification,
+		`ALTER APPLICATION DROP SPECIFICATION spec1`,
+		`ALTER APPLICATION DROP SPECIFICATION db.sch.spec1`,
+		`ALTER APPLICATION DROP SPECIFICATION "MySpec"`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterApplicationDropSpecification,
+		``,
+		`ALTER APPLICATION DROP SPECIFICATION`,
+		`ALTER APPLICATION SPECIFICATION spec1`,
+	)
+}
+
+func TestParseAlterApplicationDropConfigurationDefinition(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterApplicationDropConfigurationDefinition,
+		`ALTER APPLICATION DROP CONFIGURATION DEFINITION cfg1`,
+		`ALTER APPLICATION DROP CONFIGURATION DEFINITION db.cfg1`,
+		`ALTER APPLICATION DROP CONFIGURATION DEFINITION "Cfg"`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterApplicationDropConfigurationDefinition,
+		``,
+		`ALTER APPLICATION DROP CONFIGURATION DEFINITION`,
+		`ALTER APPLICATION DROP CONFIGURATION cfg1`,
+	)
+}
+
+func TestParseAlterApplicationPackage(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterApplicationPackage,
+		`ALTER APPLICATION PACKAGE pkg1 SET DISTRIBUTION = INTERNAL`,
+		`ALTER APPLICATION PACKAGE IF EXISTS pkg1 UNSET COMMENT`,
+		`ALTER APPLICATION PACKAGE pkg1 SET TAG t1 = 'v'`,
+		// Newly modeled forms.
+		`ALTER APPLICATION PACKAGE pkg1 SET DATA_RETENTION_TIME_IN_DAYS = 5 COMMENT = 'c'`,
+		`ALTER APPLICATION PACKAGE pkg1 SET MULTIPLE_INSTANCES = TRUE LISTING_AUTO_REFRESH = FALSE`,
+		`ALTER APPLICATION PACKAGE pkg1 SET DEFAULT_DDL_COLLATION = 'en-ci' DISTRIBUTION = EXTERNAL`,
+		`ALTER APPLICATION PACKAGE pkg1 UNSET DATA_RETENTION_TIME_IN_DAYS, COMMENT, DISTRIBUTION`,
+		`ALTER APPLICATION PACKAGE pkg1 UNSET TAG t1, t2`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterApplicationPackage,
+		``,
+		`ALTER APPLICATION PACKAGE pkg1`,
+		`ALTER PACKAGE pkg1 SET DISTRIBUTION = INTERNAL`,
+		// Newly enforced: SET/UNSET options come from the documented closed set.
+		`ALTER APPLICATION PACKAGE pkg1 SET BOGUS = 1`,
+		`ALTER APPLICATION PACKAGE pkg1 UNSET BOGUS`,
+	)
+}
+
+func TestParseAlterApplicationPackageModifyReleaseChannel(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterApplicationPackageModifyReleaseChannel,
+		`ALTER APPLICATION PACKAGE pkg1 MODIFY RELEASE CHANNEL rc1 SET DEFAULT RELEASE DIRECTIVE VERSION = v1 PATCH = 2`,
+		`ALTER APPLICATION PACKAGE pkg1 MODIFY RELEASE CHANNEL rc1 UNSET RELEASE DIRECTIVE d1`,
+		`ALTER APPLICATION PACKAGE pkg1 MODIFY RELEASE CHANNEL rc1 MODIFY RELEASE DIRECTIVE d1 VERSION = v1`,
+		// Newly modeled: SET RELEASE DIRECTIVE with ACCOUNTS + upgrade options.
+		`ALTER APPLICATION PACKAGE pkg1 MODIFY RELEASE CHANNEL rc1 SET RELEASE DIRECTIVE d1 ACCOUNTS = (o.a1, o.a2) VERSION = v1 PATCH = 2`,
+		`ALTER APPLICATION PACKAGE pkg1 MODIFY RELEASE CHANNEL rc1 SET DEFAULT RELEASE DIRECTIVE VERSION = v1 PATCH = 2 UPGRADE_AFTER = '2026-01-01' UPGRADE_IN_MAINTENANCE_WINDOW = TRUE`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterApplicationPackageModifyReleaseChannel,
+		``,
+		`ALTER APPLICATION PACKAGE pkg1 MODIFY RELEASE CHANNEL rc1`,
+		`ALTER APPLICATION PACKAGE pkg1 RENAME TO pkg2`,
+		// Newly enforced: a RELEASE DIRECTIVE form (not arbitrary) and known trailers.
+		`ALTER APPLICATION PACKAGE pkg1 MODIFY RELEASE CHANNEL rc1 SET FOO`,
+		`ALTER APPLICATION PACKAGE pkg1 MODIFY RELEASE CHANNEL rc1 SET DEFAULT RELEASE DIRECTIVE BOGUS = 1`,
+	)
+}
+
+func TestParseAlterApplicationPackageReleaseDirective(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterApplicationPackageReleaseDirective,
+		`ALTER APPLICATION PACKAGE pkg1 MODIFY RELEASE DIRECTIVE d1 VERSION = v1 PATCH = 2`,
+		`ALTER APPLICATION PACKAGE pkg1 SET DEFAULT RELEASE DIRECTIVE VERSION = v1 PATCH = 2`,
+		`ALTER APPLICATION PACKAGE pkg1 UNSET RELEASE DIRECTIVE d1`,
+		// Newly modeled: ADD/REMOVE ACCOUNTS, FORCE, optional channel prefix, SET RELEASE DIRECTIVE.
+		`ALTER APPLICATION PACKAGE pkg1 MODIFY RELEASE DIRECTIVE d1 ADD ACCOUNTS = (o.a1, o.a2) VERSION = v1 PATCH = 2 FORCE`,
+		`ALTER APPLICATION PACKAGE pkg1 MODIFY RELEASE CHANNEL rc1 MODIFY RELEASE DIRECTIVE d1 REMOVE ACCOUNTS = (o.a1)`,
+		`ALTER APPLICATION PACKAGE pkg1 SET RELEASE DIRECTIVE d1 ACCOUNTS = (o.a1) VERSION = v1 PATCH = 2 FORCE`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterApplicationPackageReleaseDirective,
+		``,
+		`ALTER APPLICATION PACKAGE pkg1`,
+		`ALTER APPLICATION pkg1 SET DEFAULT RELEASE DIRECTIVE VERSION = v1`,
+		// Newly enforced: a RELEASE DIRECTIVE form and known trailers only.
+		`ALTER APPLICATION PACKAGE pkg1 SET FOO`,
+		`ALTER APPLICATION PACKAGE pkg1 MODIFY RELEASE DIRECTIVE d1 BOGUS = 1`,
+	)
+}
+
+func TestParseAlterApplicationPackageVersion(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterApplicationPackageVersion,
+		`ALTER APPLICATION PACKAGE pkg1 ADD VERSION v1 USING '@stage/path'`,
+		`ALTER APPLICATION PACKAGE pkg1 DROP VERSION v1`,
+		`ALTER APPLICATION PACKAGE pkg1 ADD PATCH 3 FOR VERSION v1 USING '@stage/path'`,
+		// Newly modeled: optional version, LABEL, and the version-less / patch-less forms.
+		`ALTER APPLICATION PACKAGE pkg1 ADD VERSION USING '@stage/path'`,
+		`ALTER APPLICATION PACKAGE pkg1 ADD VERSION v1 USING '@stage/path' LABEL = 'My Label'`,
+		`ALTER APPLICATION PACKAGE pkg1 ADD PATCH FOR VERSION USING '@stage/path'`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterApplicationPackageVersion,
+		``,
+		`ALTER APPLICATION PACKAGE pkg1`,
+		`ALTER APPLICATION PACKAGE pkg1 RENAME TO pkg2`,
+		// Newly enforced: ADD VERSION requires USING; ADD PATCH requires FOR VERSION.
+		`ALTER APPLICATION PACKAGE pkg1 ADD VERSION v1`,
+		`ALTER APPLICATION PACKAGE pkg1 ADD PATCH 3 USING '@stage/path'`,
+	)
+}
+
+func TestParseAlterApplicationRole(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterApplicationRole,
+		`ALTER APPLICATION ROLE r1 RENAME TO r2`,
+		`ALTER APPLICATION ROLE IF EXISTS r1 SET COMMENT = 'x'`,
+		`ALTER APPLICATION ROLE r1 UNSET COMMENT`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterApplicationRole,
+		``,
+		`ALTER APPLICATION ROLE r1`,
+		`ALTER ROLE r1 RENAME TO r2`,
+	)
+}
+
+func TestParseAlterApplicationApproveDeclineSpecification(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterApplicationApproveDeclineSpecification,
+		`ALTER APPLICATION app1 APPROVE SPECIFICATION spec1 SEQUENCE_NUMBER = 5`,
+		`ALTER APPLICATION app1 DECLINE SPECIFICATION spec1 SEQUENCE_NUMBER = 7`,
+		`ALTER APPLICATION app1 APPROVE SPECIFICATION db.spec1 SEQUENCE_NUMBER = 1`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterApplicationApproveDeclineSpecification,
+		``,
+		`ALTER APPLICATION app1 APPROVE SPECIFICATION spec1`,
+		`ALTER APPLICATION app1 SPECIFICATION spec1 SEQUENCE_NUMBER = 5`,
+	)
+}
+
+func TestParseAlterApplicationSetSpecification(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterApplicationSetSpecification,
+		`ALTER APPLICATION SET SPECIFICATION spec1 TYPE = EXTERNAL_ACCESS LABEL = 'l'`,
+		`ALTER APPLICATION SET SPECIFICATION spec1 TYPE = LISTING LABEL = 'l' DESCRIPTION = 'd'`,
+		`ALTER APPLICATION SET SPECIFICATION spec1 TYPE = SETTING LABEL = 'l'`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterApplicationSetSpecification,
+		``,
+		`ALTER APPLICATION SET SPECIFICATION spec1`,
+		`ALTER APPLICATION SET SPECIFICATION spec1 LABEL = 'l'`,
+	)
+}
+
+func TestParseAlterApplicationSetConfigurationDefinition(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterApplicationSetConfigurationDefinition,
+		`ALTER APPLICATION SET CONFIGURATION DEFINITION cfg1 TYPE = STRING LABEL = 'l'`,
+		`ALTER APPLICATION SET CONFIGURATION DEFINITION cfg1 TYPE = APPLICATION_NAME LABEL = 'l'`,
+		`ALTER APPLICATION SET CONFIGURATION DEFINITION cfg1 TYPE = SECRET_AUTHORIZATION SECRET = s.sec`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterApplicationSetConfigurationDefinition,
+		``,
+		`ALTER APPLICATION SET CONFIGURATION DEFINITION cfg1`,
+		`ALTER APPLICATION SET CONFIGURATION cfg1 TYPE = STRING`,
+	)
+}
+
+func TestParseAlterApplicationSetConfigurationValue(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterApplicationSetConfigurationValue,
+		`ALTER APPLICATION app1 SET CONFIGURATION cfg1 VALUE = 'v'`,
+		`ALTER APPLICATION db.app1 SET CONFIGURATION cfg1 VALUE = 'abc'`,
+		`ALTER APPLICATION app1 SET CONFIGURATION db.cfg1 VALUE = 'x'`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterApplicationSetConfigurationValue,
+		``,
+		`ALTER APPLICATION app1 SET CONFIGURATION cfg1`,
+		`ALTER APPLICATION app1 SET CONFIGURATION cfg1 VALUE = 5`,
+	)
+}
+
+func TestParseAlterApplicationUnsetConfiguration(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterApplicationUnsetConfiguration,
+		`ALTER APPLICATION app1 UNSET CONFIGURATION cfg1`,
+		`ALTER APPLICATION db.app1 UNSET CONFIGURATION cfg1`,
+		`ALTER APPLICATION app1 UNSET CONFIGURATION db.cfg1`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterApplicationUnsetConfiguration,
+		``,
+		`ALTER APPLICATION app1 UNSET CONFIGURATION`,
+		`ALTER APPLICATION app1 SET CONFIGURATION cfg1`,
+	)
+}
+
+func TestParseAlterAuthenticationPolicy(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterAuthenticationPolicy,
+		`ALTER AUTHENTICATION POLICY p1 RENAME TO p2`,
+		`ALTER AUTHENTICATION POLICY IF EXISTS p1 SET COMMENT = 'x'`,
+		`ALTER AUTHENTICATION POLICY p1 UNSET COMMENT`,
+		// Newly modeled forms.
+		`ALTER AUTHENTICATION POLICY p1 SET AUTHENTICATION_METHODS = ('PASSWORD', 'SAML') CLIENT_TYPES = ('SNOWFLAKE_UI')`,
+		`ALTER AUTHENTICATION POLICY IF EXISTS p1 SET MFA_ENROLLMENT = 'REQUIRED' COMMENT = 'c'`,
+		`ALTER AUTHENTICATION POLICY p1 SET MFA_POLICY = (ALLOW_PASSKEY = true) PAT_POLICY = (NETWORK_POLICY_EVALUATION = ENFORCED)`,
+		`ALTER AUTHENTICATION POLICY p1 SET CLIENT_POLICY = (DRIVERS = (MINIMUM_VERSION = '1.0')) SECURITY_INTEGRATIONS = ('ALL')`,
+		`ALTER AUTHENTICATION POLICY IF EXISTS p1 UNSET AUTHENTICATION_METHODS, CLIENT_TYPES, MFA_ENROLLMENT`,
+		`ALTER AUTHENTICATION POLICY p1 UNSET DCM PROJECT`,
+		`ALTER AUTHENTICATION POLICY p1 UNSET WORKLOAD_IDENTITY_POLICY`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterAuthenticationPolicy,
+		``,
+		`ALTER AUTHENTICATION POLICY p1`,
+		`ALTER POLICY p1 RENAME TO p2`,
+		// Newly enforced: SET/UNSET options come from the documented closed set.
+		`ALTER AUTHENTICATION POLICY p1 SET BOGUS = 1`,
+		`ALTER AUTHENTICATION POLICY p1 UNSET BOGUS`,
+		`ALTER AUTHENTICATION POLICY p1 SET WAREHOUSE = 'wh'`,
+	)
+}
+
+func TestParseAlterBackupPolicy(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterBackupPolicy,
+		`ALTER BACKUP POLICY p1 RENAME TO p2`,
+		`ALTER BACKUP POLICY p1 SET EXPIRE_AFTER_DAYS = 30`,
+		`ALTER BACKUP POLICY p1 UNSET COMMENT`,
+		`ALTER BACKUP POLICY p1 SET COMMENT = 'note' SCHEDULE = '60 MINUTE'`,
+		`ALTER BACKUP POLICY p1 SET TAG t1 = 'v1', t2 = 'v2'`,
+		`ALTER BACKUP POLICY p1 UNSET TAG t1, t2`,
+		`ALTER BACKUP POLICY p1 UNSET SCHEDULE`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterBackupPolicy,
+		``,
+		`ALTER BACKUP POLICY p1`,
+		`ALTER POLICY p1 RENAME TO p2`,
+		`ALTER BACKUP POLICY p1 SET FOO = 'x'`,
+		`ALTER BACKUP POLICY p1 UNSET BOGUS`,
+	)
+}
+
+func TestParseAlterBackupSet(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterBackupSet,
+		`ALTER BACKUP SET bs1 ADD BACKUP`,
+		`ALTER BACKUP SET bs1 RENAME TO bs2`,
+		`ALTER BACKUP SET bs1 DELETE BACKUP IDENTIFIER 'id'`,
+		`ALTER BACKUP SET bs1 APPLY BACKUP POLICY pol FORCE`,
+		`ALTER BACKUP SET bs1 SUSPEND BACKUP CREATION POLICY`,
+		`ALTER BACKUP SET bs1 RESUME BACKUP POLICY`,
+		`ALTER BACKUP SET bs1 MODIFY BACKUP IDENTIFIER 'id' ADD LEGAL HOLD`,
+		`ALTER BACKUP SET bs1 MODIFY BACKUP IDENTIFIER 'id' SET COMMENT = 'c'`,
+		`ALTER BACKUP SET bs1 MODIFY BACKUP IDENTIFIER 'id' UNSET COMMENT`,
+		`ALTER BACKUP SET bs1 SET COMMENT = 'c'`,
+		`ALTER BACKUP SET bs1 UNSET COMMENT`,
+		`ALTER BACKUP SET bs1 SET TAG t1 = 'v1'`,
+		`ALTER BACKUP SET bs1 UNSET TAG t1, t2`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterBackupSet,
+		``,
+		`ALTER BACKUP SET bs1`,
+		`ALTER SET bs1 ADD BACKUP`,
+		`ALTER BACKUP SET bs1 ADD FOO`,
+		`ALTER BACKUP SET bs1 SUSPEND BACKUP BOGUS POLICY`,
+	)
+}
+
+func TestParseAlterCatalogIntegration(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterCatalogIntegration,
+		`ALTER CATALOG INTEGRATION c1 SET REFRESH_INTERVAL_SECONDS = 60`,
+		`ALTER CATALOG INTEGRATION IF EXISTS c1 SET COMMENT = 'x'`,
+		`ALTER CATALOG INTEGRATION c1 SET REST_AUTHENTICATION = ( BEARER_TOKEN = 'tok' )`,
+		`ALTER CATALOG INTEGRATION c1 SET REST_AUTHENTICATION = ( OAUTH_CLIENT_SECRET = 's' ) REFRESH_INTERVAL_SECONDS = 30 COMMENT = 'c'`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterCatalogIntegration,
+		``,
+		`ALTER CATALOG INTEGRATION c1`,
+		`ALTER INTEGRATION c1 SET COMMENT = 'x'`,
+		`ALTER CATALOG INTEGRATION c1 SET FOO = 'x'`,
+	)
+}
+
+func TestParseAlterComputePool(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterComputePool,
+		`ALTER COMPUTE POOL cp1 SUSPEND`,
+		`ALTER COMPUTE POOL IF EXISTS cp1 SET MIN_NODES = 1`,
+		`ALTER COMPUTE POOL cp1 STOP ALL`,
+		`ALTER COMPUTE POOL cp1 STOP ALL OF TYPE wt1, wt2`,
+		`ALTER COMPUTE POOL cp1 SET MIN_NODES = 1 MAX_NODES = 4 AUTO_RESUME = TRUE`,
+		`ALTER COMPUTE POOL cp1 SET TAG t1 = 'v1'`,
+		`ALTER COMPUTE POOL cp1 UNSET AUTO_RESUME, COMMENT`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterComputePool,
+		``,
+		`ALTER COMPUTE POOL cp1`,
+		`ALTER POOL cp1 SUSPEND`,
+		`ALTER COMPUTE POOL cp1 SET FOO = 1`,
+		`ALTER COMPUTE POOL cp1 UNSET MIN_NODES`,
+	)
+}
+
+func TestParseAlterConnection(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterConnection,
+		`ALTER CONNECTION c1 PRIMARY`,
+		`ALTER CONNECTION IF EXISTS c1 SET COMMENT = 'x'`,
+		`ALTER CONNECTION c1 ENABLE FAILOVER TO ACCOUNTS org.acc`,
+		`ALTER CONNECTION c1 ENABLE FAILOVER TO ACCOUNTS org.acc, org.acc2 IGNORE EDITION CHECK`,
+		`ALTER CONNECTION c1 DISABLE FAILOVER`,
+		`ALTER CONNECTION c1 DISABLE FAILOVER TO ACCOUNTS org.acc`,
+		`ALTER CONNECTION c1 UNSET COMMENT`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterConnection,
+		``,
+		`ALTER CONNECTION c1`,
+		`ALTER CONNECTION c1 FOO`,
+		`ALTER CONNECTION c1 SET FOO = 'x'`,
+		`ALTER CONNECTION c1 UNSET FOO`,
+	)
+}
+
+func TestParseAlterContact(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterContact,
+		`ALTER CONTACT c1 RENAME TO c2`,
+		`ALTER CONTACT IF EXISTS c1 SET URL = 'http://x'`,
+		`ALTER CONTACT c1 SET COMMENT = 'x'`,
+		`ALTER CONTACT c1 SET USERS = ( 'u1', 'u2' ) COMMENT = 'c'`,
+		`ALTER CONTACT c1 SET EMAIL_DISTRIBUTION_LIST = 'a@b.com'`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterContact,
+		``,
+		`ALTER CONTACT c1`,
+		`ALTER CONTACT c1 FOO`,
+		`ALTER CONTACT c1 SET FOO = 'x'`,
+		`ALTER CONTACT c1 SET`,
+	)
+}
+
+func TestParseAlterCortexSearchService(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterCortexSearchService,
+		`ALTER CORTEX SEARCH SERVICE s1 SUSPEND`,
+		`ALTER CORTEX SEARCH SERVICE IF EXISTS s1 REFRESH`,
+		`ALTER CORTEX SEARCH SERVICE s1 SET WAREHOUSE = wh`,
+		`ALTER CORTEX SEARCH SERVICE s1 SUSPEND INDEXING`,
+		`ALTER CORTEX SEARCH SERVICE s1 SET TARGET_LAG = '1 minutes' WAREHOUSE = wh`,
+		`ALTER CORTEX SEARCH SERVICE s1 SET PRIMARY KEY = ( c1, c2 )`,
+		`ALTER CORTEX SEARCH SERVICE s1 SET ATTRIBUTES ( c1, c2 )`,
+		`ALTER CORTEX SEARCH SERVICE s1 UNSET PRIMARY KEY`,
+		`ALTER CORTEX SEARCH SERVICE s1 UNSET ATTRIBUTES`,
+		`ALTER CORTEX SEARCH SERVICE s1 SET TAG t1 = 'v1'`,
+		`ALTER CORTEX SEARCH SERVICE s1 UNSET TAG t1, t2`,
+		`ALTER CORTEX SEARCH SERVICE s1 DROP SCORING PROFILE IF EXISTS prof`,
+		`ALTER CORTEX SEARCH SERVICE s1 ADD SCORING PROFILE prof some body here`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterCortexSearchService,
+		``,
+		`ALTER CORTEX SEARCH SERVICE s1`,
+		`ALTER SEARCH SERVICE s1 SUSPEND`,
+		`ALTER CORTEX SEARCH SERVICE s1 SET FOO = 1`,
+		`ALTER CORTEX SEARCH SERVICE s1 UNSET FOO`,
+	)
+}
+
+func TestParseAlterDatabase(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterDatabase,
+		`ALTER DATABASE db1 RENAME TO db2`,
+		`ALTER DATABASE IF EXISTS db1 SET DATA_RETENTION_TIME_IN_DAYS = 5`,
+		`ALTER DATABASE db1 SWAP WITH db2`,
+		`ALTER DATABASE db1 REFRESH`,
+		`ALTER DATABASE db1 PRIMARY`,
+		`ALTER DATABASE db1 SET STORAGE_SERIALIZATION_POLICY = OPTIMIZED COMMENT = 'c'`,
+		`ALTER DATABASE db1 SET CONTACT support = c1, security = c2`,
+		`ALTER DATABASE db1 SET TAG t1 = 'v1', t2 = 'v2'`,
+		`ALTER DATABASE db1 UNSET TAG t1`,
+		`ALTER DATABASE db1 UNSET DATA_RETENTION_TIME_IN_DAYS, COMMENT`,
+		`ALTER DATABASE db1 UNSET CONTACT support`,
+		`ALTER DATABASE db1 UNSET DCM PROJECT`,
+		`ALTER DATABASE db1 ENABLE REPLICATION TO ACCOUNTS a1, a2 IGNORE EDITION CHECK`,
+		`ALTER DATABASE db1 DISABLE FAILOVER`,
+		`ALTER DATABASE db1 ENABLE FAILOVER TO ACCOUNTS a1`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterDatabase,
+		``,
+		`ALTER DATABASE db1`,
+		`ALTER DB db1 RENAME TO db2`,
+		`ALTER DATABASE db1 SET FOO = 1`,
+		`ALTER DATABASE db1 UNSET FOO`,
+	)
+}
+
+func TestParseAlterDatabaseCatalogLinked(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterDatabaseCatalogLinked,
+		`ALTER DATABASE db1 RENAME TO db2`,
+		`ALTER DATABASE IF EXISTS db1 SUSPEND DISCOVERY`,
+		`ALTER DATABASE db1 UPDATE LINKED_CATALOG SET SYNC_INTERVAL_SECONDS = 60`,
+		`ALTER DATABASE db1 RESUME DISCOVERY`,
+		`ALTER DATABASE db1 UPDATE LINKED_CATALOG ADD ( 'ns1', 'ns2' ) TO ALLOWED_NAMESPACES`,
+		`ALTER DATABASE db1 UPDATE LINKED_CATALOG REMOVE ( 'ns1' ) FROM BLOCKED_NAMESPACES`,
+		`ALTER DATABASE db1 UPDATE LINKED_CATALOG UNSET ALLOWED_NAMESPACES`,
+		`ALTER DATABASE db1 UPDATE LINKED_CATALOG SET ALLOWED_WRITE_OPERATIONS = ALL`,
+		`ALTER DATABASE db1 SET BASE_LOCATION_PREFIX = 'p' COMMENT = 'c'`,
+		`ALTER DATABASE db1 SET CONTACT support = c1`,
+		`ALTER DATABASE db1 UNSET COMMENT, BASE_LOCATION_PREFIX`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterDatabaseCatalogLinked,
+		``,
+		`ALTER DATABASE db1`,
+		`ALTER DATABASE db1 SUSPEND`,
+		`ALTER DATABASE db1 UPDATE LINKED_CATALOG SET FOO = 1`,
+		`ALTER DATABASE db1 UNSET FOO`,
+	)
+}
+
+func TestParseAlterDatabaseRole(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterDatabaseRole,
+		`ALTER DATABASE ROLE r1 RENAME TO r2`,
+		`ALTER DATABASE ROLE IF EXISTS r1 SET COMMENT = 'x'`,
+		`ALTER DATABASE ROLE r1 UNSET COMMENT`,
+		`ALTER DATABASE ROLE r1 SET TAG t1 = 'v1', t2 = 'v2'`,
+		`ALTER DATABASE ROLE r1 UNSET TAG t1, t2`,
+		`ALTER DATABASE ROLE r1 UNSET DCM PROJECT`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterDatabaseRole,
+		``,
+		`ALTER DATABASE ROLE r1`,
+		`ALTER ROLE r1 RENAME TO r2`,
+		`ALTER DATABASE ROLE r1 SET FOO = 'x'`,
+		`ALTER DATABASE ROLE r1 UNSET FOO`,
+	)
+}
+
+func TestParseAlterDataset(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterDataset,
+		`ALTER DATASET d1 SET COMMENT = 'x'`,
+		`ALTER DATASET IF EXISTS d1 RENAME TO d2`,
+		`ALTER DATASET d1 DROP VERSION v1`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterDataset,
+		``,
+		`ALTER DATASET d1`,
+		`ALTER DATASETS d1 SET COMMENT = 'x'`,
+	)
+}
+
+func TestParseAlterDatasetAddVersion(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterDatasetAddVersion,
+		`ALTER DATASET d1 ADD VERSION v1 FROM SELECT 1`,
+		`ALTER DATASET d1 ADD VERSION v1 FROM SELECT * FROM t COMMENT = 'x'`,
+		`ALTER DATASET db.d1 ADD VERSION v2 FROM SELECT a, b FROM t`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterDatasetAddVersion,
+		``,
+		`ALTER DATASET d1 ADD VERSION v1`,
+		`ALTER DATASET d1 DROP VERSION v1`,
+	)
+}
+
+func TestParseAlterDatasetDropVersion(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterDatasetDropVersion,
+		`ALTER DATASET d1 DROP VERSION v1`,
+		`ALTER DATASET IF EXISTS d1 DROP VERSION v1`,
+		`ALTER DATASET db.d1 DROP VERSION v2`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterDatasetDropVersion,
+		``,
+		`ALTER DATASET d1 DROP VERSION`,
+		`ALTER DATASET d1 ADD VERSION v1`,
+	)
+}
+
+func TestParseAlterDbtProject(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterDbtProject,
+		`ALTER DBT PROJECT p1 RENAME TO p2`,
+		`ALTER DBT PROJECT IF EXISTS p1 SET DBT_VERSION = '1.7'`,
+		`ALTER DBT PROJECT p1 ADD VERSION v1 FROM '@stage/path'`,
+		`ALTER DBT PROJECT p1 ADD VERSION FROM '@stage/path'`,
+		`ALTER DBT PROJECT p1 SET DEFAULT_TARGET = 'dev' EXTERNAL_ACCESS_INTEGRATIONS = ( i1, i2 ) COMMENT = 'c'`,
+		`ALTER DBT PROJECT p1 UNSET DBT_VERSION, COMMENT`,
+	)
+	assertInvalid(t, (*Validator).ParseAlterDbtProject,
+		``,
+		`ALTER DBT PROJECT p1`,
+		`ALTER PROJECT p1 RENAME TO p2`,
+		`ALTER DBT PROJECT p1 SET FOO = 'x'`,
+		`ALTER DBT PROJECT p1 UNSET FOO`,
+	)
+}

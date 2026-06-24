@@ -12,14 +12,6 @@ func getWarnings(markers []DiagMarker) []DiagMarker {
 	return res
 }
 
-func warnMsgs(markers []DiagMarker) []string {
-	msgs := make([]string, len(markers))
-	for i, m := range markers {
-		msgs[i] = m.Message
-	}
-	return msgs
-}
-
 func getErrors(markers []DiagMarker) []DiagMarker {
 	var res []DiagMarker
 	for _, m := range markers {

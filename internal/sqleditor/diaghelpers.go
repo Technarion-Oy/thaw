@@ -170,25 +170,6 @@ func diagMarkerAt(t tokenPos, msg string, severity int) DiagMarker {
 	}
 }
 
-// diagMarkerSpan constructs a Warning DiagMarker covering the full statement.
-// Every pattern diagnostic is a warning (severity 4), so the severity is fixed.
-func diagMarkerSpan(r StatementRange, msg string) DiagMarker {
-	return DiagMarker{
-		StartLineNumber: r.StartLine,
-		StartColumn:     1,
-		EndLineNumber:   r.EndLine,
-		EndColumn:       100,
-		Message:         msg,
-		Severity:        4, // Warning
-	}
-}
-
-// oneMarker wraps a single statement-span warning in a slice, for the common
-// "fail fast with one diagnostic" return in the validators.
-func oneMarker(r StatementRange, msg string) []DiagMarker {
-	return []DiagMarker{diagMarkerSpan(r, msg)}
-}
-
 // sqlStmt returns the raw statement text from sql given a StatementRange.
 // StatementRange offsets are byte-based (not rune-based).
 func sqlStmt(sql string, r StatementRange) string {

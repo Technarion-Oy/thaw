@@ -30,7 +30,7 @@ func TestDedupeExternalFunctions(t *testing.T) {
 		{Name: "CALL_API", Kind: "EXTERNAL FUNCTION", Schema: "PUBLIC", Arguments: "NUMBER"},
 	}
 
-	got := dedupeExternalFunctions(objs)
+	got := dedupeFunctionVariant(objs, "EXTERNAL FUNCTION")
 
 	var keys []string
 	for _, o := range got {
@@ -60,7 +60,7 @@ func TestDedupeExternalFunctionsNone(t *testing.T) {
 	objs := []SnowflakeObject{
 		{Name: "ADD_ONE", Kind: "FUNCTION", Schema: "PUBLIC", Arguments: "NUMBER"},
 	}
-	got := dedupeExternalFunctions(objs)
+	got := dedupeFunctionVariant(objs, "EXTERNAL FUNCTION")
 	if len(got) != 1 || got[0].Name != "ADD_ONE" {
 		t.Fatalf("expected slice returned unchanged, got %v", got)
 	}

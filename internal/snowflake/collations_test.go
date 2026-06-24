@@ -94,26 +94,3 @@ func TestCollationSpecifiersCoverSpec(t *testing.T) {
 		}
 	}
 }
-
-func TestBuildCollation(t *testing.T) {
-	cases := []struct {
-		name       string
-		locale     string
-		specifiers []string
-		want       string
-	}{
-		{"locale only", "en", nil, "en"},
-		{"locale and one specifier", "en", []string{"ci"}, "en-ci"},
-		{"locale and many specifiers", "en", []string{"ci", "ai"}, "en-ci-ai"},
-		{"specifiers only", "", []string{"ci", "trim"}, "ci-trim"},
-		{"empty segments skipped", "  en ", []string{"", " ai "}, "en-ai"},
-		{"all empty", "", nil, ""},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := BuildCollation(tc.locale, tc.specifiers...); got != tc.want {
-				t.Errorf("BuildCollation(%q, %v) = %q, want %q", tc.locale, tc.specifiers, got, tc.want)
-			}
-		})
-	}
-}
