@@ -50,12 +50,13 @@ Key capabilities:
 - `ResolveTableRefs(refs, storeObjects, useCtx, session) []ResolvedRef` — qualifies unresolved refs against store objects, `UseContext`, and session context (priority: fully-qualified → store match → UseContext → session)
 
 ### Autocomplete context
-- `GetAutocompleteContext(sql, cursorOffset) AutocompleteContext` — bundles statement ranges, scripting completions, table refs, CTE column projections, and `UseContext` in one IPC round-trip
-- `GetAutocompleteContextFull(req AutocompleteContextRequest) AutocompleteContext` — extends the above with backend ref resolution (`ResolvedRefs`), in-editor CREATE TABLE extraction (`InEditorTables`), and context-detection flags (`IsDatatypeCtx`, `IsInJoinOnClause`, `UsingClause`)
-- `IsDatatypeContext(textToCursor, lineUpToWord) bool` — detects cursor position after `::`, `CAST AS`, `DECLARE`, or column definition in `CREATE/ALTER TABLE`
-- `IsInJoinOnClause(textToCursor) bool` — detects cursor inside a JOIN … ON … not yet terminated
-- `DetectUsingClause(textToCursor) UsingClauseInfo` — `InUsing` (empty USING) vs `IsPartial` (partial column list)
-- `GetScriptingCompletions(sql, cursorOffset) ScriptingCompletionResult` — declared Snowflake Scripting variables visible at cursor
+- `GetAutocompleteContextFull(req AutocompleteContextRequest) AutocompleteContext` — **the IPC entry point** the completion provider calls. Bundles statement ranges, scripting completions, table refs, CTE column projections, and `UseContext`, then extends them with backend ref resolution (`ResolvedRefs`), in-editor CREATE TABLE extraction (`InEditorTables`), and context-detection flags (`IsDatatypeCtx`, `IsInJoinOnClause`, `UsingClause`)
+- The following are **package-level helpers only** (no IPC wrapper): `GetAutocompleteContextFull` computes them server-side so the frontend needs a single round-trip —
+  - `GetAutocompleteContext(sql, cursorOffset)` — the un-resolved bundle `…Full` builds on
+  - `GetScriptingCompletions(sql, cursorOffset)` — declared Snowflake Scripting variables visible at cursor
+  - `IsDatatypeContext(textToCursor, lineUpToWord)` — cursor after `::`, `CAST AS`, `DECLARE`, or a column definition
+  - `IsInJoinOnClause(textToCursor)` — cursor inside a JOIN … ON … not yet terminated
+  - `DetectUsingClause(textToCursor)` — `InUsing` (empty USING) vs `IsPartial` (partial column list)
 - `GetStatementRanges(sql) []StatementRange` — per-statement line ranges and byte offsets
 - `GetIdentifierAtColumn(line, col) []string` — dot-separated identifier parts under cursor
 - `GetActiveFunctionCall(prefix) *FunctionCallContext` — innermost open function call + active parameter index
@@ -78,4 +79,4 @@ Key capabilities:
 
 - The `validateWithParser` and `validateBareColumnRefs` paths in the frontend (`sqlDiagnostics.ts`) still use `node-sql-parser` for checks that have no Go equivalent; this package does not replace those paths.
 - `ComputeGitLineDiff` returns empty slices (not an error) when either input exceeds `maxLines`. Callers must check for this case to avoid rendering stale gutter decorations.
-- `GetAutocompleteContextFull` supersedes `GetAutocompleteContext` for the main completion provider; `GetAutocompleteContext` remains for lighter-weight hover/diagnostics paths that already have resolved refs.
+- `GetAutocompleteContextFull` is the **only** autocomplete IPC entry point; `GetAutocompleteContext`, `GetScriptingCompletions`, `IsDatatypeContext`, `IsInJoinOnClause`, and `DetectUsingClause` are package-level helpers it calls server-side (their standalone `Service` wrappers were removed once the frontend consolidated onto `…Full`).
