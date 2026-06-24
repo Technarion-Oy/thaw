@@ -55,6 +55,9 @@ func TestParseTopLevel_Valid(t *testing.T) {
 		`REVOKE ROLE r1 FROM USER u`,
 		`SELECT * FROM t WHERE x = 1`,
 		`INSERT INTO t VALUES (1, 2)`,
+		`VALUES (1, 2), (3, 4)`,           // standalone VALUES query (#560 finding 1)
+		`INSERT INTO t (SELECT * FROM u)`, // parenthesized subquery body (#560 finding 3)
+		`INSERT INTO t (a, b) SELECT a, b FROM u`,
 		`UPDATE t SET a = 1 WHERE id = 2`,
 		`DELETE FROM t WHERE id = 1`,
 		`MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN UPDATE SET t.a = s.a`,

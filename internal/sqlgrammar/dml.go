@@ -41,11 +41,11 @@ func (v *Validator) ParseInsert() bool {
 		func() bool { return v.Optional(func() bool { return v.MatchWord("OVERWRITE") }) },
 		func() bool { return v.MatchWord("INTO") },
 		v.parseIdentPath,
-		// optional ( <target_col_name> [ , ... ] )
-		func() bool {
-			return v.Optional(func() bool { return v.consumeBalancedParens() })
-		},
-		// VALUES (...) [, (...)] | <query> — require at least one more token.
+		// [ ( <target_col_name> [ , ... ] ) ] { VALUES (...) [, (...)] | <query> }.
+		// The body is free-form (a column list, VALUES, a SELECT, or a
+		// parenthesized subquery), so require at least one more token and consume
+		// the rest — handles INSERT INTO t (SELECT …) where the leading paren is
+		// the subquery itself, not a target column list.
 		func() bool {
 			if v.AtEnd() {
 				v.expect("VALUES or query")

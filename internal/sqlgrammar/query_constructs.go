@@ -598,19 +598,37 @@ func (v *Validator) ParseUnpivot() bool {
 //	  [ [ AS ] <table_alias> [ ( <column_alias> [ , ... ] ) ] ]
 //	[ ... ]
 func (v *Validator) ParseValues() bool {
-	// FROM ( VALUES ( <expr> [, ...] ) [ , ( ... ) ]* ) [ [AS] alias [(cols)] ]
-	return v.Sequence(
-		func() bool { return v.MatchKeyword("FROM") },
-		func() bool { return v.Match(sqltok.LParen) },
-		func() bool { return v.MatchWord("VALUES") },
-		v.consumeBalancedParens, // ( <expr> [, ...] )
+	// A comma-separated list of parenthesized row tuples: ( … ) [ , ( … ) ]*
+	rowList := func() bool {
+		return v.Sequence(
+			v.consumeBalancedParens,
+			func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, v.consumeBalancedParens)
+				})
+			},
+		)
+	}
+	return v.Choice(
+		// Standalone VALUES query: VALUES ( … ) [ , ( … ) ]* [ ORDER BY / LIMIT … ]
 		func() bool {
-			return v.ZeroOrMore(func() bool {
-				return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, v.consumeBalancedParens)
-			})
+			return v.Sequence(
+				func() bool { return v.MatchWord("VALUES") },
+				rowList,
+				v.consumeRest,
+			)
 		},
-		func() bool { return v.Match(sqltok.RParen) },
-		v.consumeRest, // optional alias / column list
+		// Table-source form: FROM ( VALUES ( … ) [ , ( … ) ]* ) [ [AS] alias [(cols)] ]
+		func() bool {
+			return v.Sequence(
+				func() bool { return v.MatchKeyword("FROM") },
+				func() bool { return v.Match(sqltok.LParen) },
+				func() bool { return v.MatchWord("VALUES") },
+				rowList,
+				func() bool { return v.Match(sqltok.RParen) },
+				v.consumeRest,
+			)
+		},
 	)
 }
 

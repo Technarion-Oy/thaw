@@ -180,11 +180,13 @@ func TestParseValues(t *testing.T) {
 		`FROM ( VALUES ( 1, 2 ) )`,
 		`FROM ( VALUES ( 1, 'a' ), ( 2, 'b' ) ) AS t ( id, name )`,
 		`FROM ( VALUES ( 1 ), ( 2 ), ( 3 ) ) v`,
+		`VALUES ( 1, 2 )`,           // standalone VALUES query
+		`VALUES ( 1, 2 ), ( 3, 4 )`, // multi-row standalone
 	)
 	assertInvalid(t, (*Validator).ParseValues,
 		``,
-		`VALUES ( 1, 2 )`, // missing FROM (
-		`FROM ( SELECT 1 )`,
+		`VALUES`,            // VALUES with no row tuples
+		`FROM ( SELECT 1 )`, // FROM ( … ) but not VALUES
 	)
 }
 
