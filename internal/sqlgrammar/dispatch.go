@@ -269,3 +269,37 @@ func (v *Validator) ParseTopLevel() bool {
 	}
 	return false
 }
+
+// ExpectedAt answers "what is valid next at the cursor?" — the grammar's expected
+// set at the byte offset cursorOffset within the statement, which is exactly the
+// candidate-completion set an autocomplete provider needs.
+//
+// It parses the token prefix lying before the cursor and returns the distinct
+// labels the grammar expected at the furthest point it reached (via the same
+// furthest/expected machinery diagnostics uses). The token straddling — or word-
+// like and immediately abutting — the cursor is the half-typed word being
+// completed, so it is dropped before parsing: the expectation reflects the
+// position, not the partial token (Monaco filters the visible items by it).
+//
+// Labels are keyword/option words (FROM, TAG), operators (=, ::), or token-kind
+// names (Identifier, StringLit, …) — see the engine's expect() calls. Returns nil
+// for an empty prefix or an unrecognized leading keyword; gate with Recognized()
+// upstream to keep completion leading-keyword-gated.
+func (v *Validator) ExpectedAt(cursorOffset int) []string {
+	end := 0
+	for end < len(v.tokens) && v.tokens[end].End <= cursorOffset {
+		end++
+	}
+	// Drop a word-like token that abuts the cursor with no separating gap — the
+	// partially-typed word. A token straddling the cursor (Start < cursor < End)
+	// is already excluded by the End <= cursor bound above.
+	if end > 0 {
+		t := v.tokens[end-1]
+		if t.End == cursorOffset && (t.Kind.IsIdentLike() || t.Kind == sqltok.NumberLit) {
+			end--
+		}
+	}
+	pv := &Validator{src: v.src, tokens: v.tokens[:end]}
+	pv.ParseTopLevel()
+	return pv.Failure().Expected
+}

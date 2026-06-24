@@ -57,6 +57,16 @@ the bundled artifact `src/generated/snowflakeDataTypes.ts`.)
 are registered once at module level (disposable refs). Never re-register inside the component
 render or `handleMount` — doing so accumulates duplicate providers across editor remounts.
 
+**Grammar-driven keyword completions:** `GetAutocompleteContextFull` returns `grammarExpected`
+— the recursive-descent grammar's "valid next" set at the cursor (see
+[`internal/sqlgrammar`](../../../../internal/sqlgrammar/README.md) and `internal/sqleditor.GrammarExpectedAt`).
+The completion provider offers `grammarExpected.keywords` first (`sortText "00_grm_"`, detail
+"Expected here") and drops them from the generic keyword dump so they aren't listed twice — e.g.
+`FROM` after `COPY INTO <table>`, the object types after `CREATE`/`DROP`. It is empty for
+unmodelled leading keywords, so completion stays leading-keyword-gated (no behavior change for
+SQL the grammar doesn't yet model). `grammarExpected.kinds` (token-kind expectations like
+`Identifier`) is reserved for future use; the catalog/column/stage sources still drive those.
+
 **Snippet context menu:** Uses Monaco internal `MenuRegistry` + `CommandsRegistry` (IIFE, runs
 once). Per-editor `onContextMenu` sets `_activeSnippetEditor` so commands target the right
 instance.

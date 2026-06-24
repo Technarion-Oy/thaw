@@ -17,15 +17,17 @@ It is a **leaf package**: it imports only `internal/sqltok` and must never impor
 
 1. **Diagnostics** — `internal/sqleditor.ValidateGrammar` flags statements that
    don't conform (`[]DiagMarker`).
-2. **Autocomplete** (future) — the `furthest`/`expected` machinery answers "what is
-   valid next at the cursor?".
+2. **Autocomplete** — `Validator.ExpectedAt(cursorOffset)` answers "what is valid
+   next at the cursor?" by parsing the prefix before the cursor and returning the
+   `furthest`/`expected` set. `internal/sqleditor.GrammarExpectedAt` classifies
+   that set into keyword vs token-kind completions for the frontend provider.
 
 ## Key files
 
 | File | Purpose |
 |------|---------|
 | `engine.go` | The `Validator` type, terminals (`Match`/`MatchKeyword`/`MatchWord`/`MatchOp`), combinators (`Sequence`/`Choice`/`Optional`/`ZeroOrMore`), `furthest`/`expected` tracking + `Failure`, and shared helpers (`parseIdentPath`, `option`, `wordsValue`, `phrase`, `tagClause`, `consumeBalancedParens`, `consumeRest`, `showTrailers`, …) |
-| `dispatch.go` | `Recognized()` + `ParseTopLevel()`: a leading-keyword → candidate-rules registry (bulk families by `Parse*` prefix via reflection, DML/misc leaders enumerated explicitly); plus `IdentifyStatement()` — the effective-verb classifier that looks past a leading `WITH`/CTE prefix |
+| `dispatch.go` | `Recognized()` + `ParseTopLevel()`: a leading-keyword → candidate-rules registry (bulk families by `Parse*` prefix via reflection, DML/misc leaders enumerated explicitly); `ExpectedAt(cursorOffset)` — the autocomplete "valid next" accessor; plus `IdentifyStatement()` — the effective-verb classifier that looks past a leading `WITH`/CTE prefix |
 | `create.go`, `alter.go`, `drop.go`, `show.go`, `describe.go`, `undrop.go`, `dml.go`, `grant_revoke.go`, `query_constructs.go`, `data_loading.go`, `execute.go`, `session.go`, `transactions.go` | One `func (v *Validator) ParseXxx() bool` per Snowflake command reference; the doc-comment header carries the command's documented syntax. ~716 rules total |
 | `doc.go` | Package doc + `thaw:domain` annotation |
 
@@ -39,6 +41,9 @@ if v.Recognized() && !v.ParseTopLevel() {
 }
 
 kind := v.IdentifyStatement()    // StmtSelect/Insert/Update/Delete/Merge (past a WITH/CTE prefix), else StmtOther
+
+expected := v.ExpectedAt(cursor) // autocomplete: keywords/kinds valid at byte offset `cursor`
+                                 // (parses the prefix before the cursor; drops the half-typed word abutting it)
 ```
 
 The message names both what was **found** (the furthest token, quoted, or

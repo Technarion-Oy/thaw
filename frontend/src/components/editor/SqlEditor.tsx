@@ -1249,13 +1249,34 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           }
         }
 
-        const keywordSuggestions = snowflakeKeywordsArray.map((kw) => ({
+        // ── Grammar-driven keyword expectations ───────────────────────────
+        // The recursive-descent grammar (internal/sqlgrammar, via ExpectedAt)
+        // reports the keywords valid right after the cursor for modelled
+        // statements — e.g. FROM after `COPY INTO <table>`, the object types
+        // after CREATE/DROP, the alter verbs after `ALTER TABLE <name>`. Offer
+        // them first (sortText "00_grm_") and drop them from the generic keyword
+        // dump below so they aren't listed twice. Empty for unmodelled leaders,
+        // so completion stays leading-keyword-gated with no behavior change.
+        const grammarKeywords: string[] = ctx?.grammarExpected?.keywords ?? [];
+        const grammarKwSet = new Set(grammarKeywords.map((k) => k.toUpperCase()));
+        const grammarKeywordSuggestions = grammarKeywords.map((kw) => ({
           label:      kw,
           kind:       monaco.languages.CompletionItemKind.Keyword,
           insertText: kw,
-          sortText:   "08_" + kw,
+          sortText:   "00_grm_" + kw,
+          detail:     "Expected here",
           range,
         }));
+
+        const keywordSuggestions = snowflakeKeywordsArray
+          .filter((kw) => !grammarKwSet.has(kw.toUpperCase()))
+          .map((kw) => ({
+            label:      kw,
+            kind:       monaco.languages.CompletionItemKind.Keyword,
+            insertText: kw,
+            sortText:   "08_" + kw,
+            range,
+          }));
 
         const variableSuggestions = buildVariableSuggestions(declaredVars, needsColon, range, monaco);
 
@@ -1384,6 +1405,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
         return {
           suggestions: [
+            ...grammarKeywordSuggestions,
             ...variableSuggestions,
             ...contextColSuggestions,
             ...keywordSuggestions,
