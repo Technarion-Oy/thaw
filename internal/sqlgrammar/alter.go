@@ -70,23 +70,138 @@ func (v *Validator) ParseAlterObj() bool {
 //
 //	ALTER ACCOUNT <name> DROP OLD ORGANIZATION URL
 func (v *Validator) ParseAlterAccount() bool {
+	name := v.parseIdentPath
+	// FOR ALL { PERSON | SERVICE } USERS
+	forAllUsers := func() bool {
+		return v.Sequence(
+			func() bool { return v.phrase("FOR", "ALL") },
+			v.wordsValue("PERSON", "SERVICE"),
+			func() bool { return v.MatchWord("USERS") },
+		)
+	}
+	forAllApps := func() bool { return v.phrase("FOR", "ALL", "APPLICATIONS") }
+	force := func() bool { return v.Optional(func() bool { return v.MatchWord("FORCE") }) }
+	// A `<key> = <value>` assignment with a permissive value (the account/object/
+	// session param bag and the CONTACT / TAG lists are all this shape).
+	assign := func() bool {
+		return v.Sequence(
+			name,
+			func() bool { return v.MatchOp("=") },
+			func() bool { return v.Choice(v.parseScalar, v.consumeBalancedParens) },
+		)
+	}
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	assignList := commaList(assign)
+	nameList := commaList(name)
+
+	// SET <target>: the structured policy / CONTACT / TAG forms, then the generic
+	// `<param> = <value> [ , ... ]` bag (RESOURCE_MONITOR, IS_ORG_ADMIN, EDITION,
+	// and the account / object / session params).
+	setTarget := func() bool {
+		return v.Choice(
+			// { AUTHENTICATION | SESSION } POLICY <name> [ FOR ALL {PERSON|SERVICE} USERS ] [ FORCE ]
+			func() bool {
+				return v.Sequence(
+					v.wordsValue("AUTHENTICATION", "SESSION"),
+					func() bool { return v.MatchWord("POLICY") },
+					name,
+					func() bool { return v.Optional(forAllUsers) },
+					force,
+				)
+			},
+			// FEATURE POLICY <name> FOR ALL APPLICATIONS [ FORCE ]
+			func() bool {
+				return v.Sequence(func() bool { return v.phrase("FEATURE", "POLICY") }, name, forAllApps, force)
+			},
+			// MAINTENANCE POLICY <name> [ FORCE ] FOR ALL APPLICATIONS
+			func() bool {
+				return v.Sequence(func() bool { return v.phrase("MAINTENANCE", "POLICY") }, name, force, forAllApps)
+			},
+			// { PACKAGES | PASSWORD } POLICY <name> [ FORCE ]
+			func() bool {
+				return v.Sequence(
+					v.wordsValue("PACKAGES", "PASSWORD"),
+					func() bool { return v.MatchWord("POLICY") },
+					name, force,
+				)
+			},
+			// CONTACT <purpose> = <contact_name> [ , ... ]  |  TAG <tag> = '<value>' [ , ... ]
+			func() bool { return v.Sequence(v.wordsValue("CONTACT", "TAG"), assignList) },
+			// RESOURCE_MONITOR / IS_ORG_ADMIN / EDITION / account / object / session params.
+			assignList,
+		)
+	}
+	// UNSET <target>: the structured policy / CONTACT / TAG forms, then the generic
+	// `<param_name> [ , ... ]` list.
+	unsetTarget := func() bool {
+		return v.Choice(
+			func() bool {
+				return v.Sequence(
+					v.wordsValue("AUTHENTICATION", "SESSION"),
+					func() bool { return v.MatchWord("POLICY") },
+					func() bool { return v.Optional(forAllUsers) },
+				)
+			},
+			func() bool { return v.Sequence(func() bool { return v.phrase("FEATURE", "POLICY") }, forAllApps) },
+			func() bool { return v.Sequence(func() bool { return v.phrase("MAINTENANCE", "POLICY") }, forAllApps) },
+			func() bool {
+				return v.Sequence(v.wordsValue("PACKAGES", "PASSWORD"), func() bool { return v.MatchWord("POLICY") })
+			},
+			func() bool { return v.Sequence(func() bool { return v.MatchWord("CONTACT") }, name) },
+			func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, nameList) },
+			nameList,
+		)
+	}
+
+	action := func() bool {
+		return v.Choice(
+			// RENAME TO <new_name> [ SAVE_OLD_URL = { TRUE | FALSE } ]
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.phrase("RENAME", "TO") },
+					name,
+					func() bool { return v.Optional(v.option("SAVE_OLD_URL", v.parseBool)) },
+				)
+			},
+			// DROP OLD [ ORGANIZATION ] URL
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("DROP") },
+					func() bool { return v.MatchWord("OLD") },
+					func() bool { return v.Optional(func() bool { return v.MatchWord("ORGANIZATION") }) },
+					func() bool { return v.MatchWord("URL") },
+				)
+			},
+			// { ADD | REMOVE } ORGANIZATION USER GROUP <group_name>
+			func() bool {
+				return v.Sequence(
+					v.wordsValue("ADD", "REMOVE"),
+					func() bool { return v.phrase("ORGANIZATION", "USER", "GROUP") },
+					name,
+				)
+			},
+			func() bool { return v.Sequence(func() bool { return v.MatchWord("SET") }, setTarget) },
+			func() bool { return v.Sequence(func() bool { return v.MatchWord("UNSET") }, unsetTarget) },
+		)
+	}
+
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.MatchWord("ACCOUNT") },
-		// Either an action directly (account-level forms) or `<name> <action>`
-		// (per-account forms: RENAME TO, DROP OLD URL, SET IS_ORG_ADMIN, …).
+		// Account-level form (action directly) or per-account form (`<name> <action>`:
+		// RENAME TO, DROP OLD URL, SET IS_ORG_ADMIN / EDITION, …).
 		func() bool {
-			action := func() bool {
-				return v.Choice(
-					func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() && v.consumeRest() },
-					func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
-					func() bool { return v.Sequence(v.wordsValue("ADD", "REMOVE"), v.consumeRest) },
-					func() bool { return v.Sequence(func() bool { return v.MatchWord("DROP") }, v.consumeRest) },
-				)
-			}
 			return v.Choice(
 				action,
-				func() bool { return v.Sequence(v.parseIdentPath, action) },
+				func() bool { return v.Sequence(name, action) },
 			)
 		},
 	)
