@@ -769,9 +769,12 @@ type tableAlias struct {
 }
 
 func findFromJoinWithAlias(sig []sqltok.Token, sql string) []tableAlias {
-	// Keywords that start a FROM/JOIN clause (single-word)
+	// Keywords that start a FROM/JOIN clause (single-word). USING introduces the
+	// MERGE source table (`MERGE INTO t USING s …`); the `JOIN … USING (cols)`
+	// form is not mis-captured because the next token there is `(`, not an
+	// identifier (see the isIdent guard below).
 	singleKW := map[string]bool{
-		"FROM": true, "JOIN": true, "UPDATE": true,
+		"FROM": true, "JOIN": true, "UPDATE": true, "USING": true,
 	}
 	twoPartKW := map[string]string{
 		"CROSS":  "JOIN",
@@ -827,8 +830,10 @@ func findFromJoinWithAlias(sig []sqltok.Token, sql string) []tableAlias {
 // findFromJoinTables2 is like findFromJoinTables but uses the barecolrefs
 // FROM/JOIN keyword set (includes TRUNCATE TABLE, DESCRIBE TABLE, etc.)
 func findFromJoinTables2(sig []sqltok.Token, sql string) []string {
+	// USING introduces the MERGE source table; `JOIN … USING (cols)` is not
+	// mis-captured (the next token is `(`, guarded by the isIdent check below).
 	singleKW := map[string]bool{
-		"FROM": true, "JOIN": true, "UPDATE": true,
+		"FROM": true, "JOIN": true, "UPDATE": true, "USING": true,
 	}
 	twoPartKW := map[string]string{
 		"CROSS":    "JOIN",

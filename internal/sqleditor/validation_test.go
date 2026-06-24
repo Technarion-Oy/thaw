@@ -1162,6 +1162,22 @@ func TestValidateSemantics_MultiByteCharacters(t *testing.T) {
 	}
 }
 
+// TestValidateSemantics_MergeUsingSource ensures the MERGE source table —
+// introduced by USING (not FROM/JOIN) — is recognized as a table in scope, so
+// its bare name is not wrongly flagged as a missing column.
+func TestValidateSemantics_MergeUsingSource(t *testing.T) {
+	sql := `
+CREATE OR REPLACE TABLE t (id INT, a INT, b INT, name VARCHAR(100));
+CREATE OR REPLACE TABLE s (id INT, a INT);
+MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN UPDATE SET t.a = s.a;
+`
+	for _, w := range getWarnings(ValidateSemantics(sql, nil, nil)) {
+		if strings.Contains(strings.ToLower(w.Message), "not found in any of the tables") {
+			t.Errorf("false positive on MERGE USING source: %q", w.Message)
+		}
+	}
+}
+
 // ── 7. CREATE STAGE / ALTER STAGE Diagnostics (Issue #109) ───────────────────
 
 // TestCreateStage_Valid covers the full CREATE STAGE syntax matrix: all
