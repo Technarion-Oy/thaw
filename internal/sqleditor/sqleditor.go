@@ -12,6 +12,57 @@
 // Go backend to protect proprietary logic from frontend reverse-engineering.
 // These functions mirror the TypeScript counterparts previously in
 // sqlDiagnostics.ts and SqlEditor.tsx.
+//
+// # SQL validation data flow (backend)
+//
+// There is no central validator. The frontend diagnostics provider
+// (sqlDiagnostics.ts) is the orchestrator: on every edit it fans the document
+// out to a set of INDEPENDENT backend checks over the Wails IPC bridge, then
+// merges all the returned []DiagMarker into one Monaco marker set. Each method
+// on the bound Service (service.go) is a thin delegator to a package-level
+// Validate*/Get* function; the validators never call one another.
+//
+//	┌──────────────────────────────────────────────────────────────────────────┐
+//	│ frontend  sqlDiagnostics.ts   (Monaco onDidChangeContent → fan-out/merge)  │
+//	└──────────────────────────────────────────────────────────────────────────┘
+//	             │  Wails IPC  (wailsjs/go/sqleditor/Service.*)
+//	             ▼
+//	   sqleditor.Service          (service.go — stateless thin delegators)
+//	             │
+//	  IPC method ├─ GetSqlStatementRanges ─► GetStatementRanges      (sqleditor.go)
+//	             │                              └─► []StatementRange ─┐ split once,
+//	             │                                                    │ then reused
+//	             ├─ AnalyzeSqlSyntax ─────────► ValidateSyntax        (sqleditor.go)
+//	             ├─ AnalyzeSqlSemantics ──────► ValidateSemantics     (sqleditor.go)
+//	             ├─ ValidateDataTypes ────────► ValidateDataTypes     (patterns.go)
+//	             ├─ ValidateGrammar ──────────► ValidateGrammar       (grammar.go)
+//	             ├─ ValidateAntiPatterns ─────► ValidateAntiPatterns  (antipatterns.go)
+//	             ├─ ValidateTablesExist ──────► ValidateTablesExist   (tableexist.go)
+//	             └─ ValidateBareColumnRefs ───► ValidateBareColumnRefs (barecolrefs.go)
+//	                          │
+//	                          ▼  each returns []DiagMarker (Severity 8=Error, 4=Warning)
+//	            ◄── merged by the frontend ──►  monaco.setModelMarkers
+//
+// Reference resolution (a prerequisite for the two reference-aware checks) is its
+// own IPC round-trip: the frontend calls ParseJoinTableRefs → ResolveTableRefs and
+// passes the resulting []ResolvedRef into AnalyzeSqlSemantics and ValidateTablesExist.
+//
+// Shared lower layers each validator builds on (none reach the frontend directly):
+//
+//	ValidateSyntax         → internal/sqltok        (tokenizer: walks the token stream)
+//	ValidateSemantics      → tokmatch.go            (findFromJoinWithAlias, aliases, CTEs)
+//	ValidateDataTypes      → internal/snowflake     (sf.AllDataTypes) + patterns.go
+//	ValidateGrammar        → internal/sqlgrammar    (New → ParseTopLevel → Failure.Message)
+//	ValidateAntiPatterns   → internal/sqlgrammar    (IdentifyStatement) + tokmatch.go
+//	ValidateTablesExist    → tokmatch.go            (matchCreate*/Drop*/Alter*, findFromJoinTables2)
+//	ValidateBareColumnRefs → tokmatch.go            (matchInsertColList, findReferences)
+//
+// tokmatch.go + diaghelpers.go (sigTokens, sqlStmt, stripCommentsSQL, …) are the
+// common token-scanning toolkit layered on internal/sqltok; only ValidateGrammar
+// and ValidateAntiPatterns reach into the internal/sqlgrammar grammar engine, and
+// only ValidateDataTypes reaches into internal/snowflake. Every check re-derives
+// its per-statement ranges from GetStatementRanges, so the checks stay independent
+// and order-free.
 package sqleditor
 
 import (
