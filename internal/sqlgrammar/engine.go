@@ -347,7 +347,7 @@ func (v *Validator) tagClause() bool {
 
 // consumeBalancedParens matches a `( … )` group with arbitrary balanced content,
 // including nested parens. Use for option/column/constraint lists that are not
-// worth modelling token-for-token. Fails if there is no opening paren or the
+// worth modeling token-for-token. Fails if there is no opening paren or the
 // parens are unbalanced before end-of-statement.
 func (v *Validator) consumeBalancedParens() bool {
 	if !v.Match(sqltok.LParen) {

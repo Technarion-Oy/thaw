@@ -237,7 +237,7 @@ func (v *Validator) ParseCreateAggregationPolicy() bool {
 //	  THEN
 //	    <action>
 func (v *Validator) ParseCreateAlert() bool {
-	// balanced parenthesised group: ( ... ) with nested parens.
+	// balanced parenthesized group: ( ... ) with nested parens.
 	var parenGroup func() bool
 	parenGroup = func() bool {
 		return v.Sequence(
@@ -595,7 +595,7 @@ func (v *Validator) ParseCreateApplicationRole() bool {
 func (v *Validator) ParseCreateAuthenticationPolicy() bool {
 	str := v.parseString
 	strList := func() bool { return v.parseParenList(str) }
-	// A balanced parenthesised value (for the structured property lists).
+	// A balanced parenthesized value (for the structured property lists).
 	var parenValue func() bool
 	parenValue = func() bool {
 		return v.Sequence(
@@ -1344,7 +1344,7 @@ func (v *Validator) ParseCreateContact() bool {
 //	AS <query>;
 func (v *Validator) ParseCreateCortexSearchService() bool {
 	num := func() bool { return v.Match(sqltok.NumberLit) }
-	// A comma-separated, unparenthesised list of items.
+	// A comma-separated, unparenthesized list of items.
 	commaList := func(item Rule) Rule {
 		return func() bool {
 			return v.Sequence(
@@ -2488,7 +2488,7 @@ func (v *Validator) ParseCreateExternalFunction() bool {
 		return true
 	}
 	num := func() bool { return v.Match(sqltok.NumberLit) }
-	// <result_data_type> — a (possibly parameterised) type name.
+	// <result_data_type> — a (possibly parameterized) type name.
 	dataType := func() bool {
 		return v.Sequence(
 			v.parseIdentPath,
@@ -2756,7 +2756,7 @@ func (v *Validator) ParseCreateExternalTable() bool {
 //	  STORAGE_ENDPOINT = '<s3_api_compatible_endpoint>'
 func (v *Validator) ParseCreateExternalVolume() bool {
 	// STORAGE_LOCATIONS is an outer paren list whose entries are themselves
-	// parenthesised property blocks; consume the whole value permissively as a
+	// parenthesized property blocks; consume the whole value permissively as a
 	// balanced-paren span.
 	balancedParens := func() bool {
 		if !v.Match(sqltok.LParen) {
@@ -2931,7 +2931,7 @@ func (v *Validator) ParseCreateFeaturePolicy() bool {
 func (v *Validator) ParseCreateFileFormat() bool {
 	num := func() bool { return v.Match(sqltok.NumberLit) }
 	// formatTypeOptions: an order-independent KEY = value list. The CSV options
-	// are modelled explicitly; other-format options are accepted via the generic
+	// are modeled explicitly; other-format options are accepted via the generic
 	// fallthrough (any identifier KEY = value).
 	formatOption := func() bool {
 		return v.Choice(
@@ -4811,12 +4811,10 @@ func (v *Validator) ParseCreateModel() bool {
 //	    [ SEGMENT_COLUMNS = <segment_column_name_array> ]
 //	    [ CUSTOM_METRIC_COLUMNS = <custom_metric_column_name_array> ]
 func (v *Validator) ParseCreateModelMonitor() bool {
-	// Array RHS like [c1, c2] or a parenthesised/identifier value — accept a
-	// bracketed span, a parenthesised span, a string, or an ident path.
-	var consumeBalanced func(open, close sqltok.TokenKind) func() bool
-	consumeBalanced = func(open, closeK sqltok.TokenKind) func() bool {
-		var inner func() bool
-		inner = func() bool {
+	// Array RHS like [c1, c2] or a parenthesized/identifier value — accept a
+	// bracketed span, a parenthesized span, a string, or an ident path.
+	consumeBalanced := func(open, closeK sqltok.TokenKind) func() bool {
+		return func() bool {
 			return v.Sequence(
 				func() bool { return v.Match(open) },
 				func() bool {
@@ -4831,7 +4829,6 @@ func (v *Validator) ParseCreateModelMonitor() bool {
 				func() bool { return v.Match(closeK) },
 			)
 		}
-		return inner
 	}
 	value := func() bool {
 		return v.Choice(
@@ -5651,7 +5648,7 @@ func (v *Validator) ParseCreateOrganizationUserGroup() bool {
 //	  [ ADDITIONAL_CREATION_BLOCKLIST = ( [ '<packageSpec>' ] [ , '<packageSpec>' ... ] ) ]
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreatePackagesPolicy() bool {
-	// A possibly-empty parenthesised list of string literals.
+	// A possibly-empty parenthesized list of string literals.
 	strList := func() bool {
 		return v.Sequence(
 			func() bool { return v.Match(sqltok.LParen) },
@@ -6861,7 +6858,7 @@ func (v *Validator) ParseCreateSecurityIntegrationScim() bool {
 func (v *Validator) ParseCreateSemanticView() bool {
 	// balanced consumes a single ( ... ) group, including nested parens. The
 	// inner definitions (logicalTable, relationshipDef, expressions, …) are
-	// free-form, so accept any balanced span rather than modelling them.
+	// free-form, so accept any balanced span rather than modeling them.
 	var balanced func() bool
 	balanced = func() bool {
 		return v.Sequence(
@@ -7776,7 +7773,7 @@ func (v *Validator) ParseCreateStreamlit() bool {
 func (v *Validator) ParseCreateTable() bool {
 	num := func() bool { return v.Match(sqltok.NumberLit) }
 	name := v.parseIdentPath
-	// Balanced parenthesised run — used for the column/constraint definition list
+	// Balanced parenthesized run — used for the column/constraint definition list
 	// and for CLUSTER BY / policy column lists. Validates only paren balance.
 	var balanced func() bool
 	balanced = func() bool {
@@ -8375,7 +8372,7 @@ func (v *Validator) ParseCreateType() bool {
 		v.ifNotExists,
 		v.parseIdentPath,
 		func() bool { return v.MatchKeyword("AS") },
-		// <type> — accept an identifier/path or a parenthesised spec; consume a
+		// <type> — accept an identifier/path or a parenthesized spec; consume a
 		// single type token (possibly dotted) plus an optional ( ... ) suffix.
 		v.parseIdentPath,
 		func() bool {

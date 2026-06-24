@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// These tests lock in the "object exists OR is created in-script" behaviour of
+// These tests lock in the "object exists OR is created in-script" behavior of
 // ValidateTablesExist: a referenced object is accepted when it is present in the
 // known catalog OR a CREATE earlier in the same script defines it; otherwise it
 // is flagged. (See #556 — diagnostics check object-reference tokens for

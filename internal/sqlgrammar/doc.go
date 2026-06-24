@@ -2,8 +2,8 @@
 //
 // It consumes the significant-token stream produced by internal/sqltok and
 // validates that a statement conforms to a known Snowflake grammar. Because SQL
-// allows nested structures (parenthesised expressions, subqueries, nested option
-// lists), the engine is a pushdown automaton realised as recursive descent:
+// allows nested structures (parenthesized expressions, subqueries, nested option
+// lists), the engine is a pushdown automaton realized as recursive descent:
 // Go's call stack is the automaton's memory, the pos cursor is the state pointer,
 // and the per-command Parse* rules are the state transitions.
 //

@@ -26,16 +26,16 @@ func TestValidateGrammar_AcceptsValid(t *testing.T) {
 	}
 }
 
-func TestValidateGrammar_SkipsUnmodelled(t *testing.T) {
+func TestValidateGrammar_SkipsUnmodeled(t *testing.T) {
 	// Leading keyword has no implemented grammar → no markers, ever.
-	unmodelled := []string{
+	unmodeled := []string{
 		`FOOBAR baz qux`,
 		`-- just a comment`,
 		``,
 	}
-	for _, sql := range unmodelled {
+	for _, sql := range unmodeled {
 		if m := grammarMarkers(sql); len(m) != 0 {
-			t.Errorf("expected unmodelled %q to be skipped, got markers: %+v", sql, m)
+			t.Errorf("expected unmodeled %q to be skipped, got markers: %+v", sql, m)
 		}
 	}
 }

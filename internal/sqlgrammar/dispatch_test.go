@@ -1,10 +1,43 @@
 package sqlgrammar
 
-import "testing"
+import (
+	"reflect"
+	"strings"
+	"testing"
+)
 
 func topLevelOK(sql string) bool {
 	v := New(sql)
 	return v.Recognized() && v.ParseTopLevel()
+}
+
+// TestDispatch_NoGenericIndexRules is a tripwire for the hand-maintained
+// dispatchExclude denylist: a generic "CREATE/ALTER/DROP/… <object>" index-page
+// rule (its method name ends in "Obj" or "Objs") must never reach a dispatch
+// bucket — if one does, it would re-introduce the catch-all leniency this design
+// removes (masking malformed statements). A future such rule added without being
+// listed in dispatchExclude fails here, forcing a conscious decision. (Specific
+// rules like ParseShowObjects — "...Objects" — are unaffected.)
+func TestDispatch_NoGenericIndexRules(t *testing.T) {
+	reg := rules()
+	vt := reflect.TypeFor[*Validator]()
+	for i := 0; i < vt.NumMethod(); i++ {
+		name := vt.Method(i).Name
+		if !strings.HasSuffix(name, "Obj") && !strings.HasSuffix(name, "Objs") {
+			continue
+		}
+		fn, ok := vt.Method(i).Func.Interface().(ruleFn)
+		if !ok {
+			continue
+		}
+		for kw, bucket := range reg {
+			for _, r := range bucket {
+				if reflect.ValueOf(r).Pointer() == reflect.ValueOf(fn).Pointer() {
+					t.Errorf("generic index rule %s leaked into dispatch bucket %q — add it to dispatchExclude", name, kw)
+				}
+			}
+		}
+	}
 }
 
 func TestParseTopLevel_Valid(t *testing.T) {
@@ -64,7 +97,7 @@ func TestParseTopLevel_Malformed(t *testing.T) {
 	for _, sql := range cases {
 		v := New(sql)
 		if !v.Recognized() {
-			t.Errorf("expected %q to be Recognized (leading keyword is modelled)", sql)
+			t.Errorf("expected %q to be Recognized (leading keyword is modeled)", sql)
 		}
 		if v.ParseTopLevel() {
 			t.Errorf("expected top-level FAILURE for malformed %q", sql)
@@ -92,7 +125,7 @@ func TestParseTopLevel_NoCatchAllLeniency(t *testing.T) {
 			t.Errorf("expected %q to be flagged (no catch-all), but it parsed", sql)
 		}
 	}
-	// Well-formed statements for modelled objects are still accepted.
+	// Well-formed statements for modeled objects are still accepted.
 	valid := []string{
 		`DROP DATABASE d`,
 		`ALTER TABLE t RENAME TO t2`,
@@ -109,13 +142,13 @@ func TestParseTopLevel_NoCatchAllLeniency(t *testing.T) {
 	}
 }
 
-func TestRecognized_Unmodelled(t *testing.T) {
+func TestRecognized_Unmodeled(t *testing.T) {
 	// Leading keywords with no implemented grammar must not be Recognized, so the
 	// grammar validator stays silent on them.
 	cases := []string{
 		``,
 		`   `,
-		`PUT file:///tmp/a @stage`, // PUT is modelled — sanity excluded below
+		`PUT file:///tmp/a @stage`, // PUT is modeled — sanity excluded below
 		`FOOBAR baz qux`,
 		`WHERE x = 1`, // a bare sub-clause is not a statement
 	}

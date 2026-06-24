@@ -148,14 +148,14 @@ func (v *Validator) leadKeyword() string {
 }
 
 // candidates returns the grammar rules whose statements can begin with the
-// current leading keyword (nil when none — i.e. an unmodelled statement).
+// current leading keyword (nil when none — i.e. an unmodeled statement).
 func (v *Validator) candidates() []ruleFn {
 	return rules()[v.leadKeyword()]
 }
 
 // Recognized reports whether the statement's leading keyword maps to at least
 // one implemented grammar. Diagnostics only flag a statement when it is
-// Recognized, so unmodelled-but-valid SQL is never marked.
+// Recognized, so unmodeled-but-valid SQL is never marked.
 func (v *Validator) Recognized() bool {
 	return len(v.candidates()) > 0
 }
@@ -166,7 +166,7 @@ func (v *Validator) Recognized() bool {
 // position reached across all attempts is retained for Failure()/diagnostics.
 //
 // It returns false for an unrecognized leading keyword; gate with Recognized()
-// first if you want to distinguish "unmodelled" from "modelled but malformed".
+// first if you want to distinguish "unmodeled" from "modeled but malformed".
 func (v *Validator) ParseTopLevel() bool {
 	for _, rule := range v.candidates() {
 		saved := v.save()

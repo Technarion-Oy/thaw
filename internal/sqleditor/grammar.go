@@ -20,14 +20,14 @@ import (
 // ValidateGrammar validates each statement against the recursive-descent
 // Snowflake grammar in internal/sqlgrammar. A statement is checked only when its
 // leading keyword maps to an implemented grammar (sqlgrammar.Validator.Recognized);
-// unmodelled statements are skipped so valid-but-unmodelled SQL is never flagged.
+// unmodeled statements are skipped so valid-but-unmodeled SQL is never flagged.
 //
 // When a recognized statement does not conform, a single marker is emitted at the
 // furthest position the grammar reached, carrying the grammar's "expected …"
 // message. The grammar is deliberately conservative (generic catch-all rules
 // accept any roughly-well-formed statement), so this fires on clearly-broken
 // statements — missing names, dangling keywords, unbalanced parens — rather than
-// on stylistic or unmodelled-option differences. Markers are Warnings, leaving
+// on stylistic or unmodeled-option differences. Markers are Warnings, leaving
 // hard Errors to the lexical checks in ValidateSyntax.
 func ValidateGrammar(sql string, stmtRanges []StatementRange) []DiagMarker {
 	var markers []DiagMarker
