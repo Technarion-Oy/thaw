@@ -212,12 +212,19 @@ func (v *Validator) Choice(rules ...Rule) bool {
 }
 
 // ZeroOrMore applies r until it stops matching, rewinding the final failed
-// attempt. It always succeeds.
+// attempt. It always succeeds. The zero-progress guard stops when an iteration
+// succeeds without consuming a token: such a body (e.g. an all-Optional Sequence,
+// or a Choice with an empty-matchable branch) would otherwise spin forever and
+// hang the diagnostics goroutine. Breaking is always correct — a rule that
+// relies on looping over a non-consuming body is already a bug.
 func (v *Validator) ZeroOrMore(r Rule) bool {
 	for {
 		saved := v.save()
 		if !r() {
 			v.restore(saved)
+			break
+		}
+		if v.save() == saved {
 			break
 		}
 	}
