@@ -2078,26 +2078,7 @@ func (v *Validator) ParseCreateDynamicTable() bool {
 	num := func() bool { return v.Match(sqltok.NumberLit) }
 	// Permissive consumer for a balanced-paren span (column definition list,
 	// CLUSTER BY exprs, etc.). Assumes the opening LParen is the current token.
-	balancedParens := func() bool {
-		if !v.Match(sqltok.LParen) {
-			return false
-		}
-		depth := 1
-		for depth > 0 {
-			if v.AtEnd() {
-				return false
-			}
-			switch v.Peek().Kind {
-			case sqltok.LParen:
-				depth++
-			case sqltok.RParen:
-				depth--
-			}
-			v.advance()
-		}
-		return true
-	}
-	colList := func() bool { return v.Optional(balancedParens) }
+	colList := func() bool { return v.Optional(v.consumeBalancedParens) }
 	policyOn := func(words ...string) Rule {
 		return func() bool {
 			return v.Sequence(
@@ -2108,7 +2089,7 @@ func (v *Validator) ParseCreateDynamicTable() bool {
 					return v.Optional(func() bool {
 						return v.Sequence(
 							func() bool { return v.MatchKeyword("ON") },
-							balancedParens,
+							v.consumeBalancedParens,
 						)
 					})
 				},
@@ -2138,7 +2119,7 @@ func (v *Validator) ParseCreateDynamicTable() bool {
 					v.option("MAX_DATA_EXTENSION_TIME_IN_DAYS", num),
 					v.option("ROW_TIMESTAMP", v.parseBool),
 					v.commentOption(),
-					func() bool { return v.phrase("CLUSTER", "BY") && balancedParens() },
+					func() bool { return v.phrase("CLUSTER", "BY") && v.consumeBalancedParens() },
 					func() bool { return v.phrase("COPY", "GRANTS") },
 					func() bool { return v.phrase("COPY", "TAGS") },
 					func() bool { return v.phrase("REQUIRE", "USER") },
@@ -2152,14 +2133,14 @@ func (v *Validator) ParseCreateDynamicTable() bool {
 							v.parseIdentPath,
 							func() bool {
 								return v.Optional(func() bool {
-									return v.Sequence(func() bool { return v.phrase("ENTITY", "KEY") }, balancedParens)
+									return v.Sequence(func() bool { return v.phrase("ENTITY", "KEY") }, v.consumeBalancedParens)
 								})
 							},
 						)
 					},
 					v.tagClause,
 					// FROZEN WHERE ( <expr> )
-					func() bool { return v.phrase("FROZEN", "WHERE") && balancedParens() },
+					func() bool { return v.phrase("FROZEN", "WHERE") && v.consumeBalancedParens() },
 					// BACKFILL FROM <table_name>
 					func() bool {
 						return v.Sequence(
@@ -2169,7 +2150,7 @@ func (v *Validator) ParseCreateDynamicTable() bool {
 						)
 					},
 					// START AT ( ... )
-					func() bool { return v.phrase("START", "AT") && balancedParens() },
+					func() bool { return v.phrase("START", "AT") && v.consumeBalancedParens() },
 					// EXECUTE AS USER <user> [ USE SECONDARY ROLES { ALL | NONE | <role> [, ...] } ]
 					func() bool {
 						return v.Sequence(
@@ -2226,7 +2207,7 @@ func (v *Validator) ParseCreateDynamicTable() bool {
 					return v.Sequence(
 						func() bool { return v.MatchWord("REFRESH") },
 						func() bool { return v.MatchWord("USING") },
-						balancedParens,
+						v.consumeBalancedParens,
 					)
 				},
 			)
@@ -2258,25 +2239,6 @@ func (v *Validator) ParseCreateDynamicTable() bool {
 //	    [ ... ]
 func (v *Validator) ParseCreateEventTable() bool {
 	num := func() bool { return v.Match(sqltok.NumberLit) }
-	balancedParens := func() bool {
-		if !v.Match(sqltok.LParen) {
-			return false
-		}
-		depth := 1
-		for depth > 0 {
-			if v.AtEnd() {
-				return false
-			}
-			switch v.Peek().Kind {
-			case sqltok.LParen:
-				depth++
-			case sqltok.RParen:
-				depth--
-			}
-			v.advance()
-		}
-		return true
-	}
 	// [ { AT | BEFORE } ( … ) ]
 	pointInTime := func() bool {
 		return v.Optional(func() bool {
@@ -2318,7 +2280,7 @@ func (v *Validator) ParseCreateEventTable() bool {
 				func() bool {
 					return v.ZeroOrMore(func() bool {
 						return v.Choice(
-							func() bool { return v.phrase("CLUSTER", "BY") && balancedParens() },
+							func() bool { return v.phrase("CLUSTER", "BY") && v.consumeBalancedParens() },
 							v.option("DATA_RETENTION_TIME_IN_DAYS", num),
 							v.option("MAX_DATA_EXTENSION_TIME_IN_DAYS", num),
 							v.option("CHANGE_TRACKING", v.parseBool),
@@ -2338,7 +2300,7 @@ func (v *Validator) ParseCreateEventTable() bool {
 									func() bool { return v.phrase("ROW", "ACCESS", "POLICY") },
 									v.parseIdentPath,
 									func() bool { return v.MatchKeyword("ON") },
-									balancedParens,
+									v.consumeBalancedParens,
 								)
 							},
 							v.tagClause,
@@ -2468,31 +2430,12 @@ func (v *Validator) ParseCreateExternalAccessIntegration() bool {
 func (v *Validator) ParseCreateExternalFunction() bool {
 	// Permissive consumer for a balanced-paren span (the argument list / RETURNS
 	// TABLE column list). Assumes the opening LParen is the current token.
-	balancedParens := func() bool {
-		if !v.Match(sqltok.LParen) {
-			return false
-		}
-		depth := 1
-		for depth > 0 {
-			if v.AtEnd() {
-				return false
-			}
-			switch v.Peek().Kind {
-			case sqltok.LParen:
-				depth++
-			case sqltok.RParen:
-				depth--
-			}
-			v.advance()
-		}
-		return true
-	}
 	num := func() bool { return v.Match(sqltok.NumberLit) }
 	// <result_data_type> — a (possibly parameterized) type name.
 	dataType := func() bool {
 		return v.Sequence(
 			v.parseIdentPath,
-			func() bool { return v.Optional(balancedParens) },
+			func() bool { return v.Optional(v.consumeBalancedParens) },
 		)
 	}
 	return v.Sequence(
@@ -2511,7 +2454,7 @@ func (v *Validator) ParseCreateExternalFunction() bool {
 		func() bool { return v.MatchWord("FUNCTION") },
 		v.parseIdentPath,
 		// ( [ <arg_name> <arg_data_type> ] [ , ... ] )
-		balancedParens,
+		v.consumeBalancedParens,
 		func() bool { return v.MatchKeyword("RETURNS") },
 		dataType,
 		// [ [ NOT ] NULL ]
@@ -2542,8 +2485,8 @@ func (v *Validator) ParseCreateExternalFunction() bool {
 				return v.Choice(
 					v.commentOption(),
 					v.option("API_INTEGRATION", v.parseIdentPath),
-					v.option("HEADERS", balancedParens),
-					v.option("CONTEXT_HEADERS", balancedParens),
+					v.option("HEADERS", v.consumeBalancedParens),
+					v.option("CONTEXT_HEADERS", v.consumeBalancedParens),
 					v.option("MAX_BATCH_ROWS", num),
 					v.option("COMPRESSION", v.parseScalar),
 					v.option("REQUEST_TRANSLATOR", v.parseIdentPath),
@@ -2609,25 +2552,6 @@ func (v *Validator) ParseCreateExternalFunction() bool {
 //	  [ COMMENT = '<string_literal>' ]
 //	  [ ... ]
 func (v *Validator) ParseCreateExternalTable() bool {
-	balancedParens := func() bool {
-		if !v.Match(sqltok.LParen) {
-			return false
-		}
-		depth := 1
-		for depth > 0 {
-			if v.AtEnd() {
-				return false
-			}
-			switch v.Peek().Kind {
-			case sqltok.LParen:
-				depth++
-			case sqltok.RParen:
-				depth--
-			}
-			v.advance()
-		}
-		return true
-	}
 	// externalStage value: @stage path or a string literal or identifier path.
 	stageValue := func() bool {
 		return v.Choice(
@@ -2649,7 +2573,7 @@ func (v *Validator) ParseCreateExternalTable() bool {
 		v.ifNotExists,
 		v.parseIdentPath,
 		// ( column / partition definitions ) — permissive paren span.
-		func() bool { return v.Optional(balancedParens) },
+		func() bool { return v.Optional(v.consumeBalancedParens) },
 		// Order-independent option / clause list.
 		func() bool {
 			return v.ZeroOrMore(func() bool {
@@ -2659,7 +2583,7 @@ func (v *Validator) ParseCreateExternalTable() bool {
 						return v.Sequence(
 							func() bool { return v.MatchKeyword("PARTITION") },
 							func() bool { return v.MatchKeyword("BY") },
-							balancedParens,
+							v.consumeBalancedParens,
 						)
 					},
 					// [ WITH ] LOCATION = externalStage
@@ -2675,7 +2599,7 @@ func (v *Validator) ParseCreateExternalTable() bool {
 					v.option("AUTO_REFRESH", v.parseBool),
 					v.option("PATTERN", v.parseString),
 					v.option("PARTITION_TYPE", v.wordsValue("USER_SPECIFIED")),
-					v.option("FILE_FORMAT", balancedParens),
+					v.option("FILE_FORMAT", v.consumeBalancedParens),
 					v.option("TABLE_FORMAT", v.wordsValue("DELTA")),
 					v.option("AWS_SNS_TOPIC", v.parseString),
 					// [ COPY GRANTS ]
@@ -2688,7 +2612,7 @@ func (v *Validator) ParseCreateExternalTable() bool {
 							func() bool { return v.phrase("ROW", "ACCESS", "POLICY") },
 							v.parseIdentPath,
 							func() bool { return v.MatchKeyword("ON") },
-							balancedParens,
+							v.consumeBalancedParens,
 						)
 					},
 					v.tagClause,
@@ -2697,7 +2621,7 @@ func (v *Validator) ParseCreateExternalTable() bool {
 						return v.Sequence(
 							func() bool { return v.MatchKeyword("WITH") },
 							func() bool { return v.MatchWord("CONTACT") },
-							balancedParens,
+							v.consumeBalancedParens,
 						)
 					},
 				)
@@ -2758,25 +2682,6 @@ func (v *Validator) ParseCreateExternalVolume() bool {
 	// STORAGE_LOCATIONS is an outer paren list whose entries are themselves
 	// parenthesized property blocks; consume the whole value permissively as a
 	// balanced-paren span.
-	balancedParens := func() bool {
-		if !v.Match(sqltok.LParen) {
-			return false
-		}
-		depth := 1
-		for depth > 0 {
-			if v.AtEnd() {
-				return false
-			}
-			switch v.Peek().Kind {
-			case sqltok.LParen:
-				depth++
-			case sqltok.RParen:
-				depth--
-			}
-			v.advance()
-		}
-		return true
-	}
 	return v.Sequence(
 		func() bool { return v.MatchKeyword("CREATE") },
 		v.orReplace,
@@ -2788,7 +2693,7 @@ func (v *Validator) ParseCreateExternalVolume() bool {
 		func() bool {
 			return v.ZeroOrMore(func() bool {
 				return v.Choice(
-					v.option("STORAGE_LOCATIONS", balancedParens),
+					v.option("STORAGE_LOCATIONS", v.consumeBalancedParens),
 					v.option("ALLOW_WRITES", v.parseBool),
 					v.commentOption(),
 				)
@@ -3024,38 +2929,19 @@ func (v *Validator) ParseCreateFileFormat() bool {
 //	-- CREATE OR ALTER FUNCTION ... is also supported.
 func (v *Validator) ParseCreateFunction() bool {
 	num := func() bool { return v.Match(sqltok.NumberLit) }
-	balancedParens := func() bool {
-		if !v.Match(sqltok.LParen) {
-			return false
-		}
-		depth := 1
-		for depth > 0 {
-			if v.AtEnd() {
-				return false
-			}
-			switch v.Peek().Kind {
-			case sqltok.LParen:
-				depth++
-			case sqltok.RParen:
-				depth--
-			}
-			v.advance()
-		}
-		return true
-	}
 	// RETURNS { <result_data_type> | TABLE ( ... ) }
 	returnsType := func() bool {
 		return v.Choice(
 			func() bool {
 				return v.Sequence(
 					func() bool { return v.MatchWord("TABLE") },
-					func() bool { return v.Optional(balancedParens) },
+					func() bool { return v.Optional(v.consumeBalancedParens) },
 				)
 			},
 			func() bool {
 				return v.Sequence(
 					v.parseIdentPath,
-					func() bool { return v.Optional(balancedParens) },
+					func() bool { return v.Optional(v.consumeBalancedParens) },
 				)
 			},
 		)
@@ -3079,7 +2965,7 @@ func (v *Validator) ParseCreateFunction() bool {
 		v.ifNotExists,
 		v.parseIdentPath,
 		// argument list ( ... )
-		balancedParens,
+		v.consumeBalancedParens,
 		// [ COPY GRANTS ]
 		func() bool { return v.Optional(func() bool { return v.phrase("COPY", "GRANTS") }) },
 		func() bool { return v.MatchKeyword("RETURNS") },
@@ -3116,7 +3002,7 @@ func (v *Validator) ParseCreateFunction() bool {
 					v.option("PACKAGES", parenStringList),
 					v.option("HANDLER", v.parseString),
 					v.option("EXTERNAL_ACCESS_INTEGRATIONS", parenIdentList),
-					v.option("SECRETS", balancedParens),
+					v.option("SECRETS", v.consumeBalancedParens),
 					v.option("TARGET_PATH", v.parseString),
 					v.option("MAX_BATCH_ROWS", num),
 				)
@@ -3170,29 +3056,10 @@ func (v *Validator) ParseCreateFunction() bool {
 //	CREATE [ OR ALTER ] FUNCTION ...
 func (v *Validator) ParseCreateFunctionSnowparkContainerServices() bool {
 	num := func() bool { return v.Match(sqltok.NumberLit) }
-	balancedParens := func() bool {
-		if !v.Match(sqltok.LParen) {
-			return false
-		}
-		depth := 1
-		for depth > 0 {
-			if v.AtEnd() {
-				return false
-			}
-			switch v.Peek().Kind {
-			case sqltok.LParen:
-				depth++
-			case sqltok.RParen:
-				depth--
-			}
-			v.advance()
-		}
-		return true
-	}
 	dataType := func() bool {
 		return v.Sequence(
 			v.parseIdentPath,
-			func() bool { return v.Optional(balancedParens) },
+			func() bool { return v.Optional(v.consumeBalancedParens) },
 		)
 	}
 	return v.Sequence(
@@ -3207,7 +3074,7 @@ func (v *Validator) ParseCreateFunctionSnowparkContainerServices() bool {
 		},
 		func() bool { return v.MatchWord("FUNCTION") },
 		v.parseIdentPath,
-		balancedParens,
+		v.consumeBalancedParens,
 		func() bool { return v.MatchKeyword("RETURNS") },
 		dataType,
 		func() bool {
@@ -3235,7 +3102,7 @@ func (v *Validator) ParseCreateFunctionSnowparkContainerServices() bool {
 					v.option("SERVICE", v.parseIdentPath),
 					v.option("ENDPOINT", v.parseIdentPath),
 					v.commentOption(),
-					v.option("CONTEXT_HEADERS", balancedParens),
+					v.option("CONTEXT_HEADERS", v.consumeBalancedParens),
 					v.option("MAX_BATCH_ROWS", num),
 					v.option("MAX_BATCH_RETRIES", num),
 					v.option("ON_BATCH_FAILURE", v.wordsValue("ABORT", "RETURN_NULL")),
@@ -3366,25 +3233,6 @@ func (v *Validator) ParseCreateGitRepository() bool {
 func (v *Validator) ParseCreateHybridTable() bool {
 	// The column/constraint/index list is free-form; consume it as a balanced
 	// paren span.
-	balancedParens := func() bool {
-		if !v.Match(sqltok.LParen) {
-			return false
-		}
-		depth := 1
-		for depth > 0 {
-			if v.AtEnd() {
-				return false
-			}
-			switch v.Peek().Kind {
-			case sqltok.LParen:
-				depth++
-			case sqltok.RParen:
-				depth--
-			}
-			v.advance()
-		}
-		return true
-	}
 	return v.Sequence(
 		func() bool { return v.MatchKeyword("CREATE") },
 		v.orReplace,
@@ -3393,7 +3241,7 @@ func (v *Validator) ParseCreateHybridTable() bool {
 		v.ifNotExists,
 		v.parseIdentPath,
 		// ( column / constraint / index definitions )
-		balancedParens,
+		v.consumeBalancedParens,
 		// [ COMMENT = '<string_literal>' ]
 		func() bool { return v.Optional(v.commentOption()) },
 	)
@@ -3439,25 +3287,6 @@ func (v *Validator) ParseCreateHybridTable() bool {
 //	-- variants (CATALOG_TABLE_NAME / METADATA_FILE_PATH / BASE_LOCATION).
 func (v *Validator) ParseCreateIcebergTable() bool {
 	num := func() bool { return v.Match(sqltok.NumberLit) }
-	balancedParens := func() bool {
-		if !v.Match(sqltok.LParen) {
-			return false
-		}
-		depth := 1
-		for depth > 0 {
-			if v.AtEnd() {
-				return false
-			}
-			switch v.Peek().Kind {
-			case sqltok.LParen:
-				depth++
-			case sqltok.RParen:
-				depth--
-			}
-			v.advance()
-		}
-		return true
-	}
 	// The order-independent body of Iceberg-table options.
 	optionList := func() bool {
 		return v.ZeroOrMore(func() bool {
@@ -3467,7 +3296,7 @@ func (v *Validator) ParseCreateIcebergTable() bool {
 					return v.Sequence(
 						func() bool { return v.MatchKeyword("PARTITION") },
 						func() bool { return v.MatchKeyword("BY") },
-						balancedParens,
+						v.consumeBalancedParens,
 					)
 				},
 				// CLUSTER BY ( ... )
@@ -3475,7 +3304,7 @@ func (v *Validator) ParseCreateIcebergTable() bool {
 					return v.Sequence(
 						func() bool { return v.MatchKeyword("CLUSTER") },
 						func() bool { return v.MatchKeyword("BY") },
-						balancedParens,
+						v.consumeBalancedParens,
 					)
 				},
 				v.option("PATH_LAYOUT", v.wordsValue("FLAT", "HIERARCHICAL")),
@@ -3505,7 +3334,7 @@ func (v *Validator) ParseCreateIcebergTable() bool {
 					return v.Sequence(
 						func() bool { return v.MatchKeyword("WITH") },
 						func() bool { return v.MatchWord("CONTACT") },
-						balancedParens,
+						v.consumeBalancedParens,
 					)
 				},
 			)
@@ -3533,7 +3362,7 @@ func (v *Validator) ParseCreateIcebergTable() bool {
 				// ( column definitions ) [ options ] [ AS <query> ]
 				func() bool {
 					return v.Sequence(
-						balancedParens,
+						v.consumeBalancedParens,
 						optionList,
 						func() bool {
 							return v.Optional(func() bool {
@@ -3596,25 +3425,6 @@ func (v *Validator) ParseCreateIcebergTable() bool {
 //	  [ [ WITH ] TAG ( <tag_name> = '<tag_value>' [ , <tag_name> = '<tag_value>' , ... ] ) ]
 //	  [ WITH CONTACT ( <purpose> = <contact_name> [ , <purpose> = <contact_name> ... ] ) ]
 func (v *Validator) ParseCreateIcebergTableAwsGlueCatalog() bool {
-	balancedParens := func() bool {
-		if !v.Match(sqltok.LParen) {
-			return false
-		}
-		depth := 1
-		for depth > 0 {
-			if v.AtEnd() {
-				return false
-			}
-			switch v.Peek().Kind {
-			case sqltok.LParen:
-				depth++
-			case sqltok.RParen:
-				depth--
-			}
-			v.advance()
-		}
-		return true
-	}
 	return v.Sequence(
 		func() bool { return v.MatchKeyword("CREATE") },
 		v.orReplace,
@@ -3638,7 +3448,7 @@ func (v *Validator) ParseCreateIcebergTableAwsGlueCatalog() bool {
 						return v.Sequence(
 							func() bool { return v.MatchKeyword("WITH") },
 							func() bool { return v.MatchWord("CONTACT") },
-							balancedParens,
+							v.consumeBalancedParens,
 						)
 					},
 				)
@@ -3662,25 +3472,6 @@ func (v *Validator) ParseCreateIcebergTableAwsGlueCatalog() bool {
 //	  [ [ WITH ] TAG ( <tag_name> = '<tag_value>' [ , <tag_name> = '<tag_value>' , ... ] ) ]
 //	  [ WITH CONTACT ( <purpose> = <contact_name> [ , <purpose> = <contact_name> ... ] ) ]
 func (v *Validator) ParseCreateIcebergTableDeltaFiles() bool {
-	balancedParens := func() bool {
-		if !v.Match(sqltok.LParen) {
-			return false
-		}
-		depth := 1
-		for depth > 0 {
-			if v.AtEnd() {
-				return false
-			}
-			switch v.Peek().Kind {
-			case sqltok.LParen:
-				depth++
-			case sqltok.RParen:
-				depth--
-			}
-			v.advance()
-		}
-		return true
-	}
 	return v.Sequence(
 		func() bool { return v.MatchKeyword("CREATE") },
 		v.orReplace,
@@ -3703,7 +3494,7 @@ func (v *Validator) ParseCreateIcebergTableDeltaFiles() bool {
 						return v.Sequence(
 							func() bool { return v.MatchKeyword("WITH") },
 							func() bool { return v.MatchWord("CONTACT") },
-							balancedParens,
+							v.consumeBalancedParens,
 						)
 					},
 				)
@@ -3726,25 +3517,6 @@ func (v *Validator) ParseCreateIcebergTableDeltaFiles() bool {
 //	  [ [ WITH ] TAG ( <tag_name> = '<tag_value>' [ , <tag_name> = '<tag_value>' , ... ] ) ]
 //	  [ WITH CONTACT ( <purpose> = <contact_name> [ , <purpose> = <contact_name> ... ] ) ]
 func (v *Validator) ParseCreateIcebergTableIcebergFiles() bool {
-	balancedParens := func() bool {
-		if !v.Match(sqltok.LParen) {
-			return false
-		}
-		depth := 1
-		for depth > 0 {
-			if v.AtEnd() {
-				return false
-			}
-			switch v.Peek().Kind {
-			case sqltok.LParen:
-				depth++
-			case sqltok.RParen:
-				depth--
-			}
-			v.advance()
-		}
-		return true
-	}
 	return v.Sequence(
 		func() bool { return v.MatchKeyword("CREATE") },
 		v.orReplace,
@@ -3766,7 +3538,7 @@ func (v *Validator) ParseCreateIcebergTableIcebergFiles() bool {
 						return v.Sequence(
 							func() bool { return v.MatchKeyword("WITH") },
 							func() bool { return v.MatchWord("CONTACT") },
-							balancedParens,
+							v.consumeBalancedParens,
 						)
 					},
 				)
@@ -3796,25 +3568,6 @@ func (v *Validator) ParseCreateIcebergTableIcebergFiles() bool {
 //	  [ [ WITH ] TAG ( <tag_name> = '<tag_value>' [ , <tag_name> = '<tag_value>' , ... ] ) ]
 //	  [ WITH CONTACT ( <purpose> = <contact_name> [ , <purpose> = <contact_name> ... ] ) ]
 func (v *Validator) ParseCreateIcebergTableIcebergRestCatalog() bool {
-	balancedParens := func() bool {
-		if !v.Match(sqltok.LParen) {
-			return false
-		}
-		depth := 1
-		for depth > 0 {
-			if v.AtEnd() {
-				return false
-			}
-			switch v.Peek().Kind {
-			case sqltok.LParen:
-				depth++
-			case sqltok.RParen:
-				depth--
-			}
-			v.advance()
-		}
-		return true
-	}
 	return v.Sequence(
 		func() bool { return v.MatchKeyword("CREATE") },
 		v.orReplace,
@@ -3843,7 +3596,7 @@ func (v *Validator) ParseCreateIcebergTableIcebergRestCatalog() bool {
 						return v.Sequence(
 							func() bool { return v.MatchKeyword("WITH") },
 							func() bool { return v.MatchWord("CONTACT") },
-							balancedParens,
+							v.consumeBalancedParens,
 						)
 					},
 				)
@@ -5941,28 +5694,6 @@ func (v *Validator) ParseCreatePrivacyPolicy() bool {
 //	  AS <procedure_definition>
 func (v *Validator) ParseCreateProcedure() bool {
 	num := func() bool { return v.Match(sqltok.NumberLit) }
-	// balancedParens consumes a single ( ... ) span with nested parens — used for
-	// the free-form argument list and nested option-block values.
-	var balancedParens func() bool
-	balancedParens = func() bool {
-		if !v.Match(sqltok.LParen) {
-			return false
-		}
-		for !v.AtEnd() {
-			if v.Peek().Kind == sqltok.LParen {
-				if !balancedParens() {
-					return false
-				}
-				continue
-			}
-			if v.Peek().Kind == sqltok.RParen {
-				v.advance()
-				return true
-			}
-			v.advance()
-		}
-		return false
-	}
 	parenIdentList := func() bool { return v.parseParenList(v.parseIdentPath) }
 	parenStringList := func() bool { return v.parseParenList(v.parseString) }
 	// RETURNS { <result_data_type> | TABLE ( ... ) }
@@ -5971,13 +5702,13 @@ func (v *Validator) ParseCreateProcedure() bool {
 			func() bool {
 				return v.Sequence(
 					func() bool { return v.MatchWord("TABLE") },
-					func() bool { return v.Optional(balancedParens) },
+					func() bool { return v.Optional(v.consumeBalancedParens) },
 				)
 			},
 			func() bool {
 				return v.Sequence(
 					v.parseIdentPath,
-					func() bool { return v.Optional(balancedParens) },
+					func() bool { return v.Optional(v.consumeBalancedParens) },
 				)
 			},
 		)
@@ -5990,7 +5721,7 @@ func (v *Validator) ParseCreateProcedure() bool {
 		func() bool { return v.MatchKeyword("PROCEDURE") },
 		v.parseIdentPath,
 		// argument list ( ... ) — free-form arg defs.
-		balancedParens,
+		v.consumeBalancedParens,
 		// [ COPY GRANTS ]
 		func() bool {
 			return v.Optional(func() bool {
@@ -6028,7 +5759,7 @@ func (v *Validator) ParseCreateProcedure() bool {
 					v.option("IMPORTS", parenStringList),
 					v.option("HANDLER", v.parseString),
 					v.option("EXTERNAL_ACCESS_INTEGRATIONS", parenIdentList),
-					v.option("SECRETS", balancedParens),
+					v.option("SECRETS", v.consumeBalancedParens),
 					v.option("TARGET_PATH", v.parseString),
 					v.option("MAX_BATCH_ROWS", num),
 					v.commentOption(),
@@ -6327,26 +6058,6 @@ func (v *Validator) ParseCreateRole() bool {
 func (v *Validator) ParseCreateRowAccessPolicy() bool {
 	// The signature ( <arg> <type> [, ...] ) is consumed as a balanced-paren
 	// span; the trailing <body> is an arbitrary expression consumed permissively.
-	var balancedParens func() bool
-	balancedParens = func() bool {
-		if !v.Match(sqltok.LParen) {
-			return false
-		}
-		for !v.AtEnd() {
-			if v.Peek().Kind == sqltok.LParen {
-				if !balancedParens() {
-					return false
-				}
-				continue
-			}
-			if v.Peek().Kind == sqltok.RParen {
-				v.advance()
-				return true
-			}
-			v.advance()
-		}
-		return false
-	}
 	consumeRest := func() bool {
 		for !v.AtEnd() {
 			v.advance()
@@ -6362,7 +6073,7 @@ func (v *Validator) ParseCreateRowAccessPolicy() bool {
 		v.ifNotExists,
 		v.parseIdentPath,
 		func() bool { return v.MatchKeyword("AS") },
-		balancedParens,
+		v.consumeBalancedParens,
 		func() bool { return v.MatchWord("RETURNS") },
 		func() bool { return v.MatchWord("BOOLEAN") },
 		func() bool { return v.MatchOp("-") },
