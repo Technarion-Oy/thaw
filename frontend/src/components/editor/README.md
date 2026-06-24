@@ -38,6 +38,7 @@ the bundled artifact `src/generated/snowflakeDataTypes.ts`.)
 `GetSqlStatementRanges`, `GetIdentifierAtColumn`, `GetActiveFunctionCall`,
 `ParseSignatureParams`, `ValidateDataTypes`,
 `ValidateGrammar` (recursive-descent Snowflake grammar check — Warning markers),
+`ValidateAntiPatterns` (semantic anti-patterns: MERGE clause actions, QUALIFY, FLATTEN/LATERAL, variant paths, Cortex names),
 `ValidateTablesExist`, `ValidateBareColumnRefs`, `GetSnowflakeKeywords`,
 `GetAutocompleteContextFull`, `ResolveTableRefs`, `ComputeGitLineDiff`.
 

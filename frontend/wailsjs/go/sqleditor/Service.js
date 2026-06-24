@@ -74,6 +74,10 @@ export function ResolveTableRefs(arg1, arg2, arg3, arg4) {
   return window['go']['sqleditor']['Service']['ResolveTableRefs'](arg1, arg2, arg3, arg4);
 }
 
+export function ValidateAntiPatterns(arg1, arg2) {
+  return window['go']['sqleditor']['Service']['ValidateAntiPatterns'](arg1, arg2);
+}
+
 export function ValidateBareColumnRefs(arg1) {
   return window['go']['sqleditor']['Service']['ValidateBareColumnRefs'](arg1);
 }

@@ -38,6 +38,8 @@ export function ParseSignatureParams(arg1:string):Promise<Array<sqleditor.Signat
 
 export function ResolveTableRefs(arg1:Array<sqleditor.JoinTableRef>,arg2:Array<sqleditor.StoreObject>,arg3:sqleditor.UseContext,arg4:sqleditor.SessionContext):Promise<Array<sqleditor.ResolvedRef>>;
 
+export function ValidateAntiPatterns(arg1:string,arg2:Array<sqleditor.StatementRange>):Promise<Array<sqleditor.DiagMarker>>;
+
 export function ValidateBareColumnRefs(arg1:sqleditor.ValidateBareColsRequest):Promise<Array<sqleditor.DiagMarker>>;
 
 export function ValidateDataTypes(arg1:string,arg2:Array<sqleditor.StatementRange>):Promise<Array<sqleditor.DiagMarker>>;

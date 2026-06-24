@@ -131,8 +131,9 @@ func validateSQL(ctx context.Context, client *snowflake.Client, sql string) []sq
 	stmtRanges := sqleditor.GetStatementRanges(sql)
 	datatypeMarkers := sqleditor.ValidateDataTypes(sql, stmtRanges)
 	grammarMarkers := sqleditor.ValidateGrammar(sql, stmtRanges)
+	antiPatternMarkers := sqleditor.ValidateAntiPatterns(sql, stmtRanges)
 
-	phase1 := append(append(syntaxMarkers, datatypeMarkers...), grammarMarkers...)
+	phase1 := append(append(append(syntaxMarkers, datatypeMarkers...), grammarMarkers...), antiPatternMarkers...)
 
 	// Phase 2 — schema-aware validations (needs Snowflake client).
 	if client == nil {

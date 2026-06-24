@@ -248,6 +248,11 @@ var joinStopKW = map[string]bool{
 	"SELECT": true, "WITH": true, "FROM": true,
 	"AT": true, "BEFORE": true,
 	"ASOF": true, "MATCH_CONDITION": true,
+	// MERGE: `MERGE INTO t USING s …` — without USING/WHEN as stop words the
+	// alias scan swallows USING (giving the target a bogus "USING" alias) and
+	// skips past it, so the source table `s` is never extracted and later
+	// `s.col` references are wrongly flagged as unknown columns.
+	"USING": true, "WHEN": true,
 }
 
 func isWordChar(c rune) bool {

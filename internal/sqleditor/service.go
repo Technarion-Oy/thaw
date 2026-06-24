@@ -61,6 +61,13 @@ func (s *Service) ValidateGrammar(sql string, stmtRanges []StatementRange) []Dia
 	return ValidateGrammar(sql, stmtRanges)
 }
 
+// ValidateAntiPatterns runs the semantic Snowflake anti-pattern checks the
+// grammar can't perform (MERGE clause actions, QUALIFY placement, FLATTEN/LATERAL
+// usage, variant-path traversal, unknown Cortex functions).
+func (s *Service) ValidateAntiPatterns(sql string, stmtRanges []StatementRange) []DiagMarker {
+	return ValidateAntiPatterns(sql, stmtRanges)
+}
+
 // ValidateTablesExist checks SELECT/CREATE/ALTER/DROP/UNDROP statements for
 // references to databases, schemas, or tables that are absent from the resolved
 // references or known catalogs.
