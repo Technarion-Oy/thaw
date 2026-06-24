@@ -267,18 +267,57 @@ func (v *Validator) ParseAlterAgent() bool {
 //
 //	ALTER AGGREGATION POLICY [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterAggregationPolicy() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
+	setForm := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchWord("SET") },
+			func() bool {
+				return v.Choice(
+					// SET BODY -> <expression> — the policy body is free-form.
+					func() bool { return v.Sequence(func() bool { return v.MatchWord("BODY") }, v.consumeRest) },
+					// SET TAG <tag> = '<value>' [ , ... ]
+					func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+					// SET COMMENT = '<string_literal>'
+					v.commentOption(),
+				)
+			},
+		)
+	}
+	unsetForm := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchWord("UNSET") },
+			func() bool {
+				return v.Choice(
+					// UNSET TAG <tag> [ , ... ]
+					func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+					// UNSET COMMENT
+					func() bool { return v.MatchWord("COMMENT") },
+				)
+			},
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("AGGREGATION", "POLICY") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
 				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
-				// SET / UNSET … (BODY -> expr, TAG, COMMENT) — free-form remainder.
-				func() bool {
-					return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest)
-				},
+				setForm,
+				unsetForm,
 			)
 		},
 	)
@@ -1239,15 +1278,63 @@ func (v *Validator) ParseAlterApplicationUnsetConfiguration() bool {
 //	  [ COMMENT ]
 //	  [ DCM PROJECT ]
 func (v *Validator) ParseAlterAuthenticationPolicy() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	// SET options (closed set). The list-valued options take a `( ... )` value;
+	// MFA_ENROLLMENT takes one of the documented quoted enum strings.
+	setOption := func() bool {
+		return v.Choice(
+			v.option("AUTHENTICATION_METHODS", v.consumeBalancedParens),
+			v.option("CLIENT_TYPES", v.consumeBalancedParens),
+			v.option("CLIENT_POLICY", v.consumeBalancedParens),
+			v.option("SECURITY_INTEGRATIONS", v.consumeBalancedParens),
+			v.option("MFA_ENROLLMENT", v.parseString),
+			v.option("MFA_POLICY", v.consumeBalancedParens),
+			v.option("PAT_POLICY", v.consumeBalancedParens),
+			v.option("WORKLOAD_IDENTITY_POLICY", v.consumeBalancedParens),
+			v.commentOption(),
+		)
+	}
+	setForm := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchWord("SET") },
+			func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+		)
+	}
+	// UNSET keys (closed set), including the two-word DCM PROJECT.
+	unsetKey := func() bool {
+		return v.Choice(
+			func() bool { return v.phrase("DCM", "PROJECT") },
+			v.wordsValue(
+				"AUTHENTICATION_METHODS", "CLIENT_TYPES", "CLIENT_POLICY",
+				"SECURITY_INTEGRATIONS", "MFA_ENROLLMENT", "MFA_POLICY",
+				"PAT_POLICY", "WORKLOAD_IDENTITY_POLICY", "COMMENT"),
+		)
+	}
+	unsetForm := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchWord("UNSET") },
+			commaList(unsetKey),
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("AUTHENTICATION", "POLICY") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
 				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				setForm,
+				unsetForm,
 			)
 		},
 	)
@@ -1271,14 +1358,50 @@ func (v *Validator) ParseAlterAuthenticationPolicy() bool {
 //
 //	ALTER BACKUP POLICY <name> UNSET TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterBackupPolicy() bool {
+	name := v.parseIdentPath
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool { return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString) }
+	setOption := func() bool {
+		return v.Choice(
+			v.commentOption(),
+			v.option("SCHEDULE", v.parseString),
+			v.option("EXPIRE_AFTER_DAYS", num),
+		)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+				func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+			)
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+				v.wordsValue("COMMENT", "SCHEDULE", "EXPIRE_AFTER_DAYS"),
+			)
+		})
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("BACKUP", "POLICY") },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
 				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				setForm,
+				unsetForm,
 			)
 		},
 	)
@@ -1315,21 +1438,79 @@ func (v *Validator) ParseAlterBackupPolicy() bool {
 //
 //	ALTER BACKUP SET <name> UNSET TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterBackupSet() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool { return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString) }
+	setTagOrComment := func() bool {
+		return v.Choice(
+			func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+			v.commentOption(),
+		)
+	}
+	unsetTagOrComment := func() bool {
+		return v.Choice(
+			func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+			func() bool { return v.MatchWord("COMMENT") },
+		)
+	}
+	// MODIFY BACKUP IDENTIFIER '<id>' { { ADD | REMOVE } LEGAL HOLD | SET COMMENT = '…' | UNSET COMMENT }
+	modifyForm := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchWord("MODIFY") },
+			func() bool { return v.MatchWord("BACKUP") },
+			func() bool { return v.MatchWord("IDENTIFIER") },
+			v.parseString,
+			func() bool {
+				return v.Choice(
+					func() bool {
+						return v.Sequence(v.wordsValue("ADD", "REMOVE"), func() bool { return v.phrase("LEGAL", "HOLD") })
+					},
+					func() bool { return v.Sequence(func() bool { return v.MatchWord("SET") }, v.commentOption()) },
+					func() bool { return v.phrase("UNSET", "COMMENT") },
+				)
+			},
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("BACKUP", "SET") },
-		v.parseIdentPath,
-		// One of many actions (ADD/APPLY/SUSPEND/RESUME/DELETE/MODIFY/RENAME/SET/UNSET);
-		// require at least the action verb then consume the free-form remainder.
+		name,
 		func() bool {
 			return v.Choice(
-				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.phrase("ADD", "BACKUP") },
 				func() bool {
 					return v.Sequence(
-						v.wordsValue("ADD", "APPLY", "SUSPEND", "RESUME", "DELETE", "MODIFY", "SET", "UNSET"),
-						v.consumeRest,
+						func() bool { return v.phrase("APPLY", "BACKUP", "POLICY") },
+						v.parseIdentPath,
+						func() bool { return v.Optional(func() bool { return v.MatchWord("FORCE") }) },
 					)
 				},
+				func() bool {
+					return v.Sequence(
+						v.wordsValue("SUSPEND", "RESUME"),
+						func() bool { return v.MatchWord("BACKUP") },
+						func() bool { return v.Optional(v.wordsValue("CREATION", "EXPIRATION")) },
+						func() bool { return v.MatchWord("POLICY") },
+					)
+				},
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.phrase("DELETE", "BACKUP", "IDENTIFIER") },
+						v.parseString,
+					)
+				},
+				modifyForm,
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("SET") }, setTagOrComment) },
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("UNSET") }, unsetTagOrComment) },
 			)
 		},
 	)
@@ -1355,14 +1536,21 @@ func (v *Validator) ParseAlterBackupSet() bool {
 //
 //	  BEARER_TOKEN = '<bearer_token>'
 func (v *Validator) ParseAlterCatalogIntegration() bool {
+	setOption := func() bool {
+		return v.Choice(
+			v.option("REST_AUTHENTICATION", v.consumeBalancedParens),
+			v.option("REFRESH_INTERVAL_SECONDS", v.parseScalar),
+			v.commentOption(),
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("CATALOG", "INTEGRATION") },
 		func() bool { return v.ifExists() },
 		v.parseIdentPath,
-		// SET REST_AUTHENTICATION = ( … ) [ … ] — free-form remainder.
 		func() bool { return v.MatchWord("SET") },
-		v.consumeRest,
+		setOption,
+		func() bool { return v.ZeroOrMore(setOption) },
 	)
 }
 
@@ -1391,18 +1579,58 @@ func (v *Validator) ParseAlterCatalogIntegration() bool {
 //	                                              }
 //	                                              [ , ... ]
 func (v *Validator) ParseAlterComputePool() bool {
+	name := v.parseIdentPath
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool { return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString) }
+	setOption := func() bool {
+		return v.Choice(
+			v.option("MIN_NODES", num),
+			v.option("MAX_NODES", num),
+			v.option("AUTO_RESUME", v.parseBool),
+			v.option("AUTO_SUSPEND_SECS", num),
+			v.option("PLACEMENT_GROUP", v.parseString),
+			v.option("INSTANCE_FAMILY", v.parseIdentPath),
+			func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+			v.commentOption(),
+		)
+	}
+	stopAll := func() bool {
+		return v.Sequence(
+			func() bool { return v.phrase("STOP", "ALL") },
+			func() bool {
+				return v.Optional(func() bool {
+					return v.Sequence(func() bool { return v.phrase("OF", "TYPE") }, commaList(v.parseIdentPath))
+				})
+			},
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("COMPUTE", "POOL") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
 				v.wordsValue("SUSPEND", "RESUME"),
-				// STOP ALL [ OF TYPE … ]
-				func() bool { return v.phrase("STOP", "ALL") && v.consumeRest() },
-				// SET … | UNSET …
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				stopAll,
+				func() bool {
+					return v.Sequence(func() bool { return v.MatchWord("SET") }, setOption, func() bool { return v.ZeroOrMore(setOption) })
+				},
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("UNSET") },
+						commaList(v.wordsValue("AUTO_SUSPEND_SECS", "AUTO_RESUME", "PLACEMENT_GROUP", "COMMENT")),
+					)
+				},
 			)
 		},
 	)
@@ -1424,6 +1652,18 @@ func (v *Validator) ParseAlterComputePool() bool {
 //
 //	ALTER CONNECTION [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterConnection() bool {
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	toAccounts := func() bool {
+		return v.Sequence(func() bool { return v.phrase("TO", "ACCOUNTS") }, commaList(v.parseIdentPath))
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.MatchWord("CONNECTION") },
@@ -1432,12 +1672,23 @@ func (v *Validator) ParseAlterConnection() bool {
 		func() bool {
 			return v.Choice(
 				// ENABLE FAILOVER TO ACCOUNTS … [ IGNORE EDITION CHECK ]
-				func() bool { return v.phrase("ENABLE", "FAILOVER") && v.consumeRest() },
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.phrase("ENABLE", "FAILOVER") },
+						toAccounts,
+						func() bool { return v.Optional(func() bool { return v.phrase("IGNORE", "EDITION", "CHECK") }) },
+					)
+				},
 				// DISABLE FAILOVER [ TO ACCOUNTS … ]
-				func() bool { return v.phrase("DISABLE", "FAILOVER") && v.consumeRest() },
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.phrase("DISABLE", "FAILOVER") },
+						func() bool { return v.Optional(toAccounts) },
+					)
+				},
 				func() bool { return v.MatchWord("PRIMARY") },
-				// SET COMMENT = … | UNSET COMMENT
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("SET") }, v.commentOption()) },
+				func() bool { return v.phrase("UNSET", "COMMENT") },
 			)
 		},
 	)
@@ -1458,6 +1709,14 @@ func (v *Validator) ParseAlterConnection() bool {
 //	    } ]
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseAlterContact() bool {
+	setOption := func() bool {
+		return v.Choice(
+			v.option("USERS", v.consumeBalancedParens),
+			v.option("EMAIL_DISTRIBUTION_LIST", v.parseString),
+			v.option("URL", v.parseString),
+			v.commentOption(),
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.MatchWord("CONTACT") },
@@ -1466,7 +1725,9 @@ func (v *Validator) ParseAlterContact() bool {
 		func() bool {
 			return v.Choice(
 				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
-				func() bool { return v.Sequence(func() bool { return v.MatchWord("SET") }, v.consumeRest) },
+				func() bool {
+					return v.Sequence(func() bool { return v.MatchWord("SET") }, setOption, func() bool { return v.ZeroOrMore(setOption) })
+				},
 			)
 		},
 	)
@@ -1509,11 +1770,53 @@ func (v *Validator) ParseAlterContact() bool {
 //
 //	ALTER CORTEX SEARCH SERVICE [ IF EXISTS ] <name> UNSET TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterCortexSearchService() bool {
+	name := v.parseIdentPath
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool { return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString) }
+	// PRIMARY KEY = ( <col> [ , … ] )
+	primaryKeyOpt := func() bool {
+		return v.Sequence(
+			func() bool { return v.phrase("PRIMARY", "KEY") },
+			func() bool { return v.MatchOp("=") },
+			v.consumeBalancedParens,
+		)
+	}
+	setOption := func() bool {
+		return v.Choice(
+			v.option("TARGET_LAG", v.parseString),
+			v.option("WAREHOUSE", v.parseIdentPath),
+			primaryKeyOpt,
+			v.option("FULL_INDEX_BUILD_INTERVAL_DAYS", num),
+			v.option("REQUEST_LOGGING", v.parseBool),
+			v.option("AUTO_SUSPEND", v.parseScalar),
+			func() bool {
+				return v.Sequence(func() bool { return v.MatchWord("ATTRIBUTES") }, v.consumeBalancedParens)
+			},
+			func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+			v.commentOption(),
+		)
+	}
+	unsetForm := func() bool {
+		return v.Choice(
+			func() bool { return v.phrase("PRIMARY", "KEY") },
+			func() bool { return v.MatchWord("ATTRIBUTES") },
+			func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("CORTEX", "SEARCH", "SERVICE") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
 				// { SUSPEND | RESUME } [ { INDEXING | SERVING } ]
@@ -1524,10 +1827,20 @@ func (v *Validator) ParseAlterCortexSearchService() bool {
 					)
 				},
 				func() bool { return v.MatchWord("REFRESH") },
-				// ADD/DROP SCORING PROFILE … ; SET/UNSET [ATTRIBUTES|TAG|options]
+				// ADD SCORING PROFILE … <scoring_profile> — free-form profile body.
+				func() bool { return v.phrase("ADD", "SCORING", "PROFILE") && v.consumeRest() },
+				// DROP SCORING PROFILE [ IF EXISTS ] <profile_name>
 				func() bool {
-					return v.Sequence(v.wordsValue("ADD", "DROP", "SET", "UNSET"), v.consumeRest)
+					return v.Sequence(
+						func() bool { return v.phrase("DROP", "SCORING", "PROFILE") },
+						func() bool { return v.ifExists() },
+						v.parseIdentPath,
+					)
 				},
+				func() bool {
+					return v.Sequence(func() bool { return v.MatchWord("SET") }, setOption, func() bool { return v.ZeroOrMore(setOption) })
+				},
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("UNSET") }, unsetForm) },
 			)
 		},
 	)
@@ -1610,21 +1923,116 @@ func (v *Validator) ParseAlterCortexSearchService() bool {
 //
 //	ALTER DATABASE <name> PRIMARY
 func (v *Validator) ParseAlterDatabase() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool { return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString) }
+	purposeAssign := func() bool { return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseIdentPath) }
+	contactSet := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("CONTACT") }, commaList(purposeAssign))
+	}
+	setOption := func() bool {
+		return v.Choice(
+			contactSet,
+			v.option("DATA_RETENTION_TIME_IN_DAYS", v.parseScalar),
+			v.option("MAX_DATA_EXTENSION_TIME_IN_DAYS", v.parseScalar),
+			v.option("EXTERNAL_VOLUME", v.parseIdentPath),
+			v.option("CATALOG", v.parseIdentPath),
+			v.option("ICEBERG_VERSION_DEFAULT", v.parseScalar),
+			v.option("ICEBERG_MERGE_ON_READ_BEHAVIOR", v.parseString),
+			v.option("ENABLE_ICEBERG_MERGE_ON_READ", v.parseBool),
+			v.option("REPLACE_INVALID_CHARACTERS", v.parseBool),
+			v.option("DEFAULT_DDL_COLLATION", v.parseString),
+			v.option("DEFAULT_NOTEBOOK_COMPUTE_POOL_CPU", v.parseString),
+			v.option("DEFAULT_NOTEBOOK_COMPUTE_POOL_GPU", v.parseString),
+			v.option("OBJECT_VISIBILITY", v.parseScalar),
+			v.option("LOG_LEVEL", v.parseString),
+			v.option("METRIC_LEVEL", v.parseString),
+			v.option("TRACE_LEVEL", v.parseString),
+			v.option("STORAGE_SERIALIZATION_POLICY", v.wordsValue("COMPATIBLE", "OPTIMIZED")),
+			v.option("EVENT_TABLE", v.parseIdentPath),
+			v.option("CATALOG_SYNC", v.parseString),
+			v.option("REPLICABLE_WITH_FAILOVER_GROUPS", v.parseString),
+			v.option("BASE_LOCATION_PREFIX", v.parseString),
+			v.option("DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE", v.parseIdentPath),
+			v.option("CLASSIFICATION_PROFILE", v.parseString),
+			v.option("ENABLE_DATA_COMPACTION", v.parseBool),
+			v.option("DATA_QUALITY_MONITORING_SETTINGS", v.parseScalar),
+			v.commentOption(),
+		)
+	}
+	unsetName := v.wordsValue(
+		"DATA_RETENTION_TIME_IN_DAYS", "MAX_DATA_EXTENSION_TIME_IN_DAYS", "EXTERNAL_VOLUME",
+		"CATALOG", "ICEBERG_VERSION_DEFAULT", "ICEBERG_MERGE_ON_READ_BEHAVIOR",
+		"ENABLE_ICEBERG_MERGE_ON_READ", "DEFAULT_DDL_COLLATION",
+		"DEFAULT_NOTEBOOK_COMPUTE_POOL_CPU", "DEFAULT_NOTEBOOK_COMPUTE_POOL_GPU",
+		"OBJECT_VISIBILITY", "STORAGE_SERIALIZATION_POLICY", "EVENT_TABLE", "COMMENT",
+		"CATALOG_SYNC", "REPLICABLE_WITH_FAILOVER_GROUPS", "BASE_LOCATION_PREFIX",
+		"DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE", "CLASSIFICATION_PROFILE", "ENABLE_DATA_COMPACTION",
+	)
+	unsetItem := func() bool {
+		return v.Choice(
+			func() bool { return v.Sequence(func() bool { return v.MatchWord("CONTACT") }, v.parseIdentPath) },
+			func() bool { return v.phrase("DCM", "PROJECT") },
+			unsetName,
+		)
+	}
+	toAccounts := func() bool {
+		return v.Sequence(func() bool { return v.phrase("TO", "ACCOUNTS") }, commaList(v.parseIdentPath))
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.MatchWord("DATABASE") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
 				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
 				func() bool { return v.phrase("SWAP", "WITH") && v.parseIdentPath() },
 				func() bool { return v.MatchWord("REFRESH") },
 				func() bool { return v.MatchWord("PRIMARY") },
-				// ENABLE/DISABLE { REPLICATION | FAILOVER } … TO ACCOUNTS …
-				func() bool { return v.Sequence(v.wordsValue("ENABLE", "DISABLE"), v.consumeRest) },
-				// SET <options/TAG> | UNSET <options/TAG>
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				// ENABLE { REPLICATION | FAILOVER } TO ACCOUNTS … [ IGNORE EDITION CHECK ]
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("ENABLE") },
+						v.wordsValue("REPLICATION", "FAILOVER"),
+						toAccounts,
+						func() bool { return v.Optional(func() bool { return v.phrase("IGNORE", "EDITION", "CHECK") }) },
+					)
+				},
+				// DISABLE { REPLICATION | FAILOVER } [ TO ACCOUNTS … ]
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("DISABLE") },
+						v.wordsValue("REPLICATION", "FAILOVER"),
+						func() bool { return v.Optional(toAccounts) },
+					)
+				},
+				// SET TAG … | SET <options>
+				func() bool {
+					return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+						return v.Choice(
+							func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+							func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+						)
+					})
+				},
+				// UNSET TAG … | UNSET <options>
+				func() bool {
+					return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+						return v.Choice(
+							func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+							commaList(unsetItem),
+						)
+					})
+				},
 			)
 		},
 	)
@@ -1680,21 +2088,86 @@ func (v *Validator) ParseAlterDatabase() bool {
 //	                                            ENABLE_ICEBERG_MERGE_ON_READ
 //	                                          }
 func (v *Validator) ParseAlterDatabaseCatalogLinked() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	purposeAssign := func() bool { return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseIdentPath) }
+	namespaces := v.wordsValue("ALLOWED_NAMESPACES", "BLOCKED_NAMESPACES")
+	updateForm := func() bool {
+		return v.Sequence(
+			func() bool { return v.phrase("UPDATE", "LINKED_CATALOG") },
+			func() bool {
+				return v.Choice(
+					// ADD ( '<ns>' [ , … ] ) TO { ALLOWED | BLOCKED }_NAMESPACES
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchWord("ADD") }, v.consumeBalancedParens,
+							func() bool { return v.MatchWord("TO") }, namespaces,
+						)
+					},
+					// REMOVE ( '<ns>' [ , … ] ) FROM { ALLOWED | BLOCKED }_NAMESPACES
+					func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchWord("REMOVE") }, v.consumeBalancedParens,
+							func() bool { return v.MatchWord("FROM") }, namespaces,
+						)
+					},
+					func() bool { return v.Sequence(func() bool { return v.MatchWord("UNSET") }, namespaces) },
+					func() bool {
+						return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+							return v.Choice(
+								v.option("SYNC_INTERVAL_SECONDS", v.parseScalar),
+								v.option("ALLOWED_WRITE_OPERATIONS", v.wordsValue("NONE", "ALL")),
+							)
+						})
+					},
+				)
+			},
+		)
+	}
+	setOption := func() bool {
+		return v.Choice(
+			func() bool {
+				return v.Sequence(func() bool { return v.MatchWord("CONTACT") }, commaList(purposeAssign))
+			},
+			v.option("BASE_LOCATION_PREFIX", v.parseString),
+			v.option("ICEBERG_VERSION_DEFAULT", v.parseScalar),
+			v.option("ICEBERG_MERGE_ON_READ_BEHAVIOR", v.parseString),
+			v.option("ENABLE_ICEBERG_MERGE_ON_READ", v.parseBool),
+			v.commentOption(),
+		)
+	}
+	unsetItem := func() bool {
+		return v.wordsValue(
+			"BASE_LOCATION_PREFIX", "COMMENT", "CONTACT", "ICEBERG_VERSION_DEFAULT",
+			"ICEBERG_MERGE_ON_READ_BEHAVIOR", "ENABLE_ICEBERG_MERGE_ON_READ",
+		)()
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.MatchWord("DATABASE") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
 				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
-				// SUSPEND/RESUME DISCOVERY
 				func() bool {
 					return v.Sequence(v.wordsValue("SUSPEND", "RESUME"), func() bool { return v.MatchWord("DISCOVERY") })
 				},
-				// UPDATE LINKED_CATALOG <add/remove/unset/set …>
-				func() bool { return v.phrase("UPDATE", "LINKED_CATALOG") && v.consumeRest() },
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				updateForm,
+				func() bool {
+					return v.Sequence(func() bool { return v.MatchWord("SET") }, setOption, func() bool { return v.ZeroOrMore(setOption) })
+				},
+				func() bool {
+					return v.Sequence(func() bool { return v.MatchWord("UNSET") }, commaList(unsetItem))
+				},
 			)
 		},
 	)
@@ -1717,15 +2190,42 @@ func (v *Validator) ParseAlterDatabaseCatalogLinked() bool {
 //
 //	ALTER DATABASE ROLE [ IF EXISTS ] <name> UNSET DCM PROJECT
 func (v *Validator) ParseAlterDatabaseRole() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool { return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString) }
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("DATABASE", "ROLE") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
 				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				func() bool {
+					return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+						return v.Choice(
+							func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+							v.commentOption(),
+						)
+					})
+				},
+				func() bool {
+					return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+						return v.Choice(
+							func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+							func() bool { return v.phrase("DCM", "PROJECT") },
+							func() bool { return v.MatchWord("COMMENT") },
+						)
+					})
+				},
 			)
 		},
 	)
@@ -1811,6 +2311,24 @@ func (v *Validator) ParseAlterDatasetDropVersion() bool {
 //	  [ EXTERNAL_ACCESS_INTEGRATIONS ]
 //	  [ COMMENT ]
 func (v *Validator) ParseAlterDbtProject() bool {
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	setOption := func() bool {
+		return v.Choice(
+			v.option("DBT_VERSION", v.parseString),
+			v.option("DEFAULT_TARGET", v.parseString),
+			v.option("EXTERNAL_ACCESS_INTEGRATIONS", v.consumeBalancedParens),
+			v.commentOption(),
+		)
+	}
+	fromSource := func() bool { return v.Sequence(func() bool { return v.MatchWord("FROM") }, v.parseString) }
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("DBT", "PROJECT") },
@@ -1820,8 +2338,26 @@ func (v *Validator) ParseAlterDbtProject() bool {
 			return v.Choice(
 				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
 				// ADD VERSION [ <alias> ] FROM '<source>'
-				func() bool { return v.phrase("ADD", "VERSION") && v.consumeRest() },
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.phrase("ADD", "VERSION") },
+						func() bool {
+							return v.Choice(
+								func() bool { return v.Sequence(v.parseIdentPath, fromSource) },
+								fromSource,
+							)
+						},
+					)
+				},
+				func() bool {
+					return v.Sequence(func() bool { return v.MatchWord("SET") }, setOption, func() bool { return v.ZeroOrMore(setOption) })
+				},
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("UNSET") },
+						commaList(v.wordsValue("DBT_VERSION", "DEFAULT_TARGET", "EXTERNAL_ACCESS_INTEGRATIONS", "COMMENT")),
+					)
+				},
 			)
 		},
 	)
@@ -1840,12 +2376,39 @@ func (v *Validator) ParseAlterDbtProject() bool {
 //	  [ LOG_LEVEL ]
 //	  [ COMMENT ]
 func (v *Validator) ParseAlterDcmProject() bool {
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	setOption := func() bool {
+		return v.Choice(
+			v.option("LOG_LEVEL", v.parseScalar),
+			v.commentOption(),
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("DCM", "PROJECT") },
 		func() bool { return v.ifExists() },
 		v.parseIdentPath,
-		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+		func() bool {
+			return v.Choice(
+				func() bool {
+					return v.Sequence(func() bool { return v.MatchWord("SET") }, setOption, func() bool { return v.ZeroOrMore(setOption) })
+				},
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("UNSET") },
+						commaList(v.wordsValue("LOG_LEVEL", "COMMENT")),
+					)
+				},
+			)
+		},
 	)
 }
 
@@ -1996,12 +2559,59 @@ func (v *Validator) ParseAlterExternalAgent() bool {
 //	  TAG <tag_name> }
 //	  [ , ... ]
 func (v *Validator) ParseAlterExternalAccessIntegration() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
+	setOption := func() bool {
+		return v.Choice(
+			v.option("ALLOWED_NETWORK_RULES", v.consumeBalancedParens),
+			v.option("ALLOWED_API_AUTHENTICATION_INTEGRATIONS", func() bool {
+				return v.Choice(v.consumeBalancedParens, func() bool { return v.MatchWord("NONE") })
+			}),
+			v.option("ALLOWED_AUTHENTICATION_SECRETS", func() bool {
+				return v.Choice(v.consumeBalancedParens, v.wordsValue("ALL", "NONE"))
+			}),
+			v.option("ENABLED", v.parseBool),
+			v.commentOption(),
+		)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+				func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+			)
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+				commaList(v.wordsValue(
+					"ALLOWED_NETWORK_RULES",
+					"ALLOWED_API_AUTHENTICATION_INTEGRATIONS",
+					"ALLOWED_AUTHENTICATION_SECRETS",
+					"COMMENT",
+				)),
+			)
+		})
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("EXTERNAL", "ACCESS", "INTEGRATION") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
-		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+		name,
+		func() bool { return v.Choice(setForm, unsetForm) },
 	)
 }
 
@@ -2045,8 +2655,13 @@ func (v *Validator) ParseAlterExternalTable() bool {
 						v.consumeBalancedParens,
 					)
 				},
-				// SET [ AUTO_REFRESH = ... ]
-				func() bool { return v.MatchWord("SET") && v.consumeRest() },
+				// SET [ AUTO_REFRESH = { TRUE | FALSE } ]
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("SET") },
+						func() bool { return v.Optional(v.option("AUTO_REFRESH", v.parseBool)) },
+					)
+				},
 				// ADD PARTITION (...) LOCATION '<path>'
 				func() bool {
 					return v.Sequence(
@@ -2107,9 +2722,21 @@ func (v *Validator) ParseAlterExternalVolume() bool {
 						func() bool { return v.parseString() },
 					)
 				},
-				// ADD / UPDATE / SET — free-form trailing options.
+				// SET { ALLOW_WRITES = { TRUE | FALSE } | COMMENT = '<string>' }
 				func() bool {
-					return v.Sequence(v.wordsValue("ADD", "UPDATE", "SET"), v.consumeRest)
+					return v.Sequence(
+						func() bool { return v.MatchWord("SET") },
+						func() bool {
+							return v.Choice(
+								v.option("ALLOW_WRITES", v.parseBool),
+								v.commentOption(),
+							)
+						},
+					)
+				},
+				// ADD STORAGE_LOCATION / UPDATE — free-form cloud-provider params.
+				func() bool {
+					return v.Sequence(v.wordsValue("ADD", "UPDATE"), v.consumeRest)
 				},
 			)
 		},
@@ -2187,11 +2814,80 @@ func (v *Validator) ParseAlterExternalVolume() bool {
 //
 //	ALTER FAILOVER GROUP [ IF EXISTS ] <name> RESUME
 func (v *Validator) ParseAlterFailoverGroup() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
+	nameList := commaList(name)
+	setOption := func() bool {
+		return v.Choice(
+			v.option("OBJECT_TYPES", commaList(v.parseScalar)),
+			v.option("ALLOWED_DATABASES", commaList(v.parseScalar)),
+			v.option("ALLOWED_EXTERNAL_VOLUMES", commaList(v.parseScalar)),
+			v.option("ALLOWED_SHARES", commaList(v.parseScalar)),
+			v.option("ALLOWED_INTEGRATION_TYPES", commaList(v.parseScalar)),
+			v.option("REPLICATION_SCHEDULE", v.parseString),
+			v.option("OPTIMIZED_REFRESH", v.parseBool),
+			v.option("ERROR_INTEGRATION", v.parseScalar),
+			v.commentOption(),
+		)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+				func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+			)
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+				commaList(v.wordsValue("COMMENT", "REPLICATION_SCHEDULE", "OPTIMIZED_REFRESH", "ERROR_INTEGRATION")),
+			)
+		})
+	}
+	addForm := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchWord("ADD") },
+			nameList,
+			func() bool { return v.MatchWord("TO") },
+			v.wordsValue("ALLOWED_DATABASES", "ALLOWED_SHARES", "ALLOWED_ACCOUNTS"),
+			func() bool { return v.Optional(func() bool { return v.phrase("IGNORE", "EDITION", "CHECK") }) },
+		)
+	}
+	moveForm := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchWord("MOVE") },
+			v.wordsValue("DATABASES", "SHARES"),
+			nameList,
+			func() bool { return v.phrase("TO", "FAILOVER", "GROUP") },
+			name,
+		)
+	}
+	removeForm := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchWord("REMOVE") },
+			nameList,
+			func() bool { return v.MatchWord("FROM") },
+			v.wordsValue("ALLOWED_DATABASES", "ALLOWED_SHARES", "ALLOWED_ACCOUNTS"),
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("FAILOVER", "GROUP") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
 				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
@@ -2202,14 +2898,11 @@ func (v *Validator) ParseAlterFailoverGroup() bool {
 					return v.MatchWord("SUSPEND") &&
 						v.Optional(func() bool { return v.MatchWord("IMMEDIATE") })
 				},
-				// SET / UNSET / ADD / MOVE / REMOVE — require a documented action verb
-				// (so a garbage action is flagged) before the free-form target list.
-				func() bool {
-					return v.Sequence(
-						v.wordsValue("SET", "UNSET", "ADD", "MOVE", "REMOVE"),
-						v.consumeRest,
-					)
-				},
+				setForm,
+				unsetForm,
+				addForm,
+				moveForm,
+				removeForm,
 			)
 		},
 	)
@@ -2234,15 +2927,51 @@ func (v *Validator) ParseAlterFailoverGroup() bool {
 //
 //	ALTER FEATURE POLICY [ IF EXISTS ] <name> UNSET TAG <tag_name> [ , ... ]
 func (v *Validator) ParseAlterFeaturePolicy() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
+	setOption := func() bool {
+		return v.Choice(
+			v.option("BLOCKED_OBJECT_TYPES_FOR_CREATION", v.consumeBalancedParens),
+			v.commentOption(),
+		)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+				func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+			)
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+				commaList(v.wordsValue("BLOCKED_OBJECT_TYPES_FOR_CREATION", "COMMENT")),
+			)
+		})
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("FEATURE", "POLICY") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
 				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				setForm,
+				unsetForm,
 			)
 		},
 	)
@@ -2310,17 +3039,69 @@ func (v *Validator) ParseAlterFileFormat() bool {
 //	ALTER FUNCTION [ IF EXISTS ] <name> ( [ <arg_data_type> , ... ] ) UNSET
 //	              { COMMENT | HEADERS | CONTEXT_HEADERS | MAX_BATCH_ROWS | COMPRESSION | SECURE | REQUEST_TRANSLATOR | RESPONSE_TRANSLATOR }
 func (v *Validator) ParseAlterFunction() bool {
+	name := v.parseIdentPath
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
+	setOption := func() bool {
+		return v.Choice(
+			func() bool { return v.MatchWord("SECURE") },
+			v.option("LOG_LEVEL", v.parseString),
+			v.option("TRACE_LEVEL", v.parseString),
+			v.option("EXTERNAL_ACCESS_INTEGRATIONS", v.consumeBalancedParens),
+			v.option("SECRETS", v.consumeBalancedParens),
+			v.option("API_INTEGRATION", v.parseScalar),
+			v.option("HEADERS", v.consumeBalancedParens),
+			v.option("CONTEXT_HEADERS", v.consumeBalancedParens),
+			v.option("MAX_BATCH_ROWS", num),
+			v.option("COMPRESSION", v.parseScalar),
+			v.option("REQUEST_TRANSLATOR", v.parseScalar),
+			v.option("RESPONSE_TRANSLATOR", v.parseScalar),
+			v.commentOption(),
+		)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+				func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+			)
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+				commaList(v.wordsValue(
+					"SECURE", "LOG_LEVEL", "TRACE_LEVEL", "COMMENT",
+					"HEADERS", "CONTEXT_HEADERS", "MAX_BATCH_ROWS", "COMPRESSION",
+					"REQUEST_TRANSLATOR", "RESPONSE_TRANSLATOR",
+				)),
+			)
+		})
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.MatchWord("FUNCTION") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		// ( [ <arg_data_type> , ... ] )
 		v.consumeBalancedParens,
 		func() bool {
 			return v.Choice(
 				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				setForm,
+				unsetForm,
 			)
 		},
 	)
@@ -2352,17 +3133,48 @@ func (v *Validator) ParseAlterFunction() bool {
 //	ALTER FUNCTION [ IF EXISTS ] <name> ( TABLE(  <arg_data_type> [ , ... ] ) [ , TABLE( <arg_data_type> [ , ... ] ) ] )
 //	  UNSET TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterFunctionDmf() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+				func() bool { return v.MatchWord("SECURE") },
+				v.commentOption(),
+			)
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+				v.wordsValue("SECURE", "COMMENT"),
+			)
+		})
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.MatchWord("FUNCTION") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		// ( TABLE( <arg_data_type> [ , ... ] ) [ , TABLE(...) ] )
 		v.consumeBalancedParens,
 		func() bool {
 			return v.Choice(
 				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				setForm,
+				unsetForm,
 			)
 		},
 	)
@@ -2400,17 +3212,45 @@ func (v *Validator) ParseAlterFunctionDmf() bool {
 //	ALTER FUNCTION [ IF EXISTS ] <name> ( [ <arg_data_type> , ... ] )
 //	  UNSET { CONTEXT_HEADERS | MAX_BATCH_ROWS | MAX_BATCH_RETRIES | ON_BATCH_FAILURE | BATCH_TIMEOUT_SECS | COMMENT }
 func (v *Validator) ParseAlterFunctionSnowparkContainerServices() bool {
+	name := v.parseIdentPath
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	setOption := func() bool {
+		return v.Choice(
+			v.option("CONTEXT_HEADERS", v.consumeBalancedParens),
+			v.option("MAX_BATCH_ROWS", num),
+			v.option("MAX_BATCH_RETRIES", num),
+			v.option("ON_BATCH_FAILURE", v.wordsValue("ABORT", "RETURN_NULL")),
+			v.option("BATCH_TIMEOUT_SECS", num),
+			v.commentOption(),
+			func() bool {
+				return v.Sequence(
+					v.option("SERVICE", v.parseString),
+					v.option("ENDPOINT", v.parseString),
+				)
+			},
+		)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, setOption)
+	}
+	unsetForm := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchWord("UNSET") },
+			v.wordsValue("CONTEXT_HEADERS", "MAX_BATCH_ROWS", "MAX_BATCH_RETRIES", "ON_BATCH_FAILURE", "BATCH_TIMEOUT_SECS", "COMMENT"),
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.MatchWord("FUNCTION") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		// ( [ <arg_data_type> , ... ] )
 		v.consumeBalancedParens,
 		func() bool {
 			return v.Choice(
 				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				setForm,
+				unsetForm,
 			)
 		},
 	)
@@ -2461,15 +3301,52 @@ func (v *Validator) ParseAlterGateway() bool {
 //
 //	ALTER GIT REPOSITORY [ IF EXISTS ] <name> FETCH
 func (v *Validator) ParseAlterGitRepository() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
+	setOption := func() bool {
+		return v.Choice(
+			v.option("GIT_CREDENTIALS", v.parseScalar),
+			v.option("API_INTEGRATION", v.parseScalar),
+			v.commentOption(),
+		)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+				func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+			)
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+				commaList(v.wordsValue("GIT_CREDENTIALS", "COMMENT")),
+			)
+		})
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("GIT", "REPOSITORY") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
 				func() bool { return v.MatchWord("FETCH") },
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				setForm,
+				unsetForm,
 			)
 		},
 	)
@@ -2718,25 +3595,33 @@ func (v *Validator) ParseAlterJoinPolicy() bool {
 //
 //	ALTER LISTING [ IF EXISTS ] <name> SET COMMENT = '<string>'
 func (v *Validator) ParseAlterListing() bool {
+	name := v.parseIdentPath
+	asOption := func() bool {
+		return v.Choice(
+			v.option("PUBLISH", v.parseBool),
+			v.option("REVIEW", v.parseBool),
+			v.commentOption(),
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.MatchWord("LISTING") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
 				// [ { PUBLISH | UNPUBLISH | REVIEW } ]
 				v.wordsValue("PUBLISH", "UNPUBLISH", "REVIEW"),
-				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
-				// AS '<manifest>' [ options ]
+				func() bool { return v.phrase("RENAME", "TO") && name() },
+				// AS '<manifest>' [ PUBLISH = .. ] [ REVIEW = .. ] [ COMMENT = .. ]
 				func() bool {
 					return v.Sequence(
 						func() bool { return v.MatchWord("AS") },
-						func() bool { return v.parseString() },
-						v.consumeRest,
+						v.parseString,
+						func() bool { return v.ZeroOrMore(asOption) },
 					)
 				},
-				// ADD VERSION ... FROM ...
+				// ADD VERSION [ [ IF NOT EXISTS ] <version_name> ] FROM <stage_location> [ COMMENT = .. ]
 				func() bool { return v.phrase("ADD", "VERSION") && v.consumeRest() },
 				// { ADD | REMOVE } TARGETS <manifest>
 				func() bool {
@@ -2746,8 +3631,13 @@ func (v *Validator) ParseAlterListing() bool {
 						v.consumeRest,
 					)
 				},
-				// SET COMMENT = ...
-				func() bool { return v.MatchWord("SET") && v.consumeRest() },
+				// SET COMMENT = '<string>'
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("SET") },
+						v.commentOption(),
+					)
+				},
 				// Bare listing (no action).
 				func() bool { return v.AtEnd() },
 			)
@@ -2769,15 +3659,35 @@ func (v *Validator) ParseAlterListing() bool {
 //
 //	ALTER MAINTENANCE POLICY [ IF EXISTS ] <name> RENAME TO <new_name>
 func (v *Validator) ParseAlterMaintenancePolicy() bool {
+	name := v.parseIdentPath
+	setOption := func() bool {
+		return v.Choice(
+			v.option("SCHEDULE", v.parseString),
+			v.commentOption(),
+		)
+	}
+	setForm := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchWord("SET") },
+			func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+		)
+	}
+	unsetForm := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchWord("UNSET") },
+			func() bool { return v.MatchWord("COMMENT") },
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("MAINTENANCE", "POLICY") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
-				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				func() bool { return v.phrase("RENAME", "TO") && name() },
+				setForm,
+				unsetForm,
 			)
 		},
 	)
@@ -2800,15 +3710,28 @@ func (v *Validator) ParseAlterMaintenancePolicy() bool {
 //
 //	ALTER MASKING POLICY [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterMaskingPolicy() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("MASKING", "POLICY") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
-				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
-				// SET BODY -> <expression>
+				func() bool { return v.phrase("RENAME", "TO") && name() },
+				// SET BODY -> <expression> (free-form)
 				func() bool {
 					return v.Sequence(
 						func() bool { return v.phrase("SET", "BODY") },
@@ -2817,7 +3740,29 @@ func (v *Validator) ParseAlterMaskingPolicy() bool {
 						v.consumeRest,
 					)
 				},
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				// SET TAG <name> = '<value>' [ , ... ]
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.phrase("SET", "TAG") },
+						commaList(tagAssign),
+					)
+				},
+				// SET COMMENT = '<string>'
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("SET") },
+						v.commentOption(),
+					)
+				},
+				// UNSET TAG <name> [ , ... ]
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.phrase("UNSET", "TAG") },
+						commaList(name),
+					)
+				},
+				// UNSET COMMENT
+				func() bool { return v.phrase("UNSET", "COMMENT") },
 			)
 		},
 	)
@@ -2857,14 +3802,47 @@ func (v *Validator) ParseAlterMaskingPolicy() bool {
 //
 //	ALTER MATERIALIZED VIEW UNSET DATA_METRIC_SCHEDULE
 func (v *Validator) ParseAlterMaterializedView() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	contactAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, name)
+	}
+	setOption := func() bool {
+		return v.Choice(
+			func() bool { return v.MatchWord("SECURE") },
+			func() bool {
+				return v.Sequence(func() bool { return v.MatchWord("CONTACT") }, commaList(contactAssign))
+			},
+			v.commentOption(),
+			v.option("DATA_METRIC_SCHEDULE", v.parseString),
+		)
+	}
+	unsetOption := func() bool {
+		return v.Choice(
+			func() bool { return v.MatchWord("SECURE") },
+			func() bool {
+				return v.Sequence(func() bool { return v.MatchWord("CONTACT") }, name)
+			},
+			func() bool { return v.MatchWord("COMMENT") },
+			func() bool { return v.MatchWord("DATA_METRIC_SCHEDULE") },
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("MATERIALIZED", "VIEW") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
-				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.phrase("RENAME", "TO") && name() },
 				func() bool {
 					return v.Sequence(
 						func() bool { return v.phrase("CLUSTER", "BY") },
@@ -2876,7 +3854,18 @@ func (v *Validator) ParseAlterMaterializedView() bool {
 					return v.Sequence(v.wordsValue("SUSPEND", "RESUME"), func() bool { return v.MatchWord("RECLUSTER") })
 				},
 				v.wordsValue("SUSPEND", "RESUME"),
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("SET") },
+						func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+					)
+				},
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("UNSET") },
+						func() bool { return v.Sequence(unsetOption, func() bool { return v.ZeroOrMore(unsetOption) }) },
+					)
+				},
 			)
 		},
 	)
@@ -2901,23 +3890,69 @@ func (v *Validator) ParseAlterMaterializedView() bool {
 //
 //	ALTER MODEL <model_name> RENAME TO <new_name>
 func (v *Validator) ParseAlterModel() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
+	setOption := func() bool {
+		return v.Choice(
+			v.commentOption(),
+			v.option("DEFAULT_VERSION", v.parseString),
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.MatchWord("MODEL") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
-				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				func() bool { return v.phrase("RENAME", "TO") && name() },
 				// VERSION <name> { SET ALIAS = <name> | UNSET ALIAS }
 				func() bool {
 					return v.Sequence(
 						func() bool { return v.MatchWord("VERSION") },
-						v.parseIdentPath,
-						func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+						name,
+						func() bool {
+							return v.Choice(
+								func() bool {
+									return v.Sequence(func() bool { return v.phrase("SET", "ALIAS") }, func() bool { return v.MatchOp("=") }, name)
+								},
+								func() bool { return v.phrase("UNSET", "ALIAS") },
+							)
+						},
 					)
 				},
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				// SET TAG <name> = '<value>' [ , ... ]
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.phrase("SET", "TAG") },
+						commaList(tagAssign),
+					)
+				},
+				// SET [ COMMENT = .. ] [ DEFAULT_VERSION = .. ]
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("SET") },
+						func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+					)
+				},
+				// UNSET TAG <name> [ , ... ]
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.phrase("UNSET", "TAG") },
+						commaList(name),
+					)
+				},
 			)
 		},
 	)
@@ -3020,22 +4055,36 @@ func (v *Validator) ParseAlterModelModifyVersion() bool {
 //
 //	ALTER MODEL MONITOR [ IF EXISTS ] <monitor_name> DROP segment_column = '<segment_column_name>'
 func (v *Validator) ParseAlterModelMonitor() bool {
+	name := v.parseIdentPath
+	setOption := func() bool {
+		return v.Choice(
+			v.option("BASELINE", v.parseString),
+			v.option("REFRESH_INTERVAL", v.parseString),
+			v.option("WAREHOUSE", v.parseScalar),
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("MODEL", "MONITOR") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
 				v.wordsValue("SUSPEND", "RESUME"),
-				func() bool { return v.MatchWord("SET") && v.consumeRest() },
-				// ADD / DROP segment_column = '<name>'
+				// SET [ BASELINE = .. ] [ REFRESH_INTERVAL = .. ] [ WAREHOUSE = .. ]
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("SET") },
+						func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+					)
+				},
+				// { ADD | DROP } SEGMENT_COLUMN = '<name>'
 				func() bool {
 					return v.Sequence(
 						v.wordsValue("ADD", "DROP"),
 						func() bool { return v.MatchWord("SEGMENT_COLUMN") },
 						func() bool { return v.MatchOp("=") },
-						func() bool { return v.parseString() },
+						v.parseString,
 					)
 				},
 			)
@@ -3067,22 +4116,69 @@ func (v *Validator) ParseAlterModelMonitor() bool {
 //
 //	ALTER NETWORK POLICY <name> UNSET TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterNetworkPolicy() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
+	setOption := func() bool {
+		return v.Choice(
+			v.option("ALLOWED_NETWORK_RULE_LIST", v.consumeBalancedParens),
+			v.option("BLOCKED_NETWORK_RULE_LIST", v.consumeBalancedParens),
+			v.option("ALLOWED_IP_LIST", v.consumeBalancedParens),
+			v.option("BLOCKED_IP_LIST", v.consumeBalancedParens),
+			v.commentOption(),
+		)
+	}
+	addRemoveOption := func() bool {
+		return v.Choice(
+			v.option("ALLOWED_NETWORK_RULE_LIST", v.parseString),
+			v.option("BLOCKED_NETWORK_RULE_LIST", v.parseString),
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("NETWORK", "POLICY") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
-				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
-				// ADD / REMOVE { ALLOWED_NETWORK_RULE_LIST | BLOCKED_NETWORK_RULE_LIST } = '<rule>'
+				func() bool { return v.phrase("RENAME", "TO") && name() },
+				// { ADD | REMOVE } { ALLOWED_NETWORK_RULE_LIST | BLOCKED_NETWORK_RULE_LIST } = '<rule>'
+				func() bool {
+					return v.Sequence(v.wordsValue("ADD", "REMOVE"), addRemoveOption)
+				},
+				// SET TAG <name> = '<value>' [ , ... ]
 				func() bool {
 					return v.Sequence(
-						v.wordsValue("ADD", "REMOVE"),
-						v.consumeRest,
+						func() bool { return v.phrase("SET", "TAG") },
+						commaList(tagAssign),
 					)
 				},
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				// SET { lists / ip-lists / COMMENT }
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("SET") },
+						func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+					)
+				},
+				// UNSET TAG <name> [ , ... ]
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.phrase("UNSET", "TAG") },
+						commaList(name),
+					)
+				},
+				// UNSET COMMENT
+				func() bool { return v.phrase("UNSET", "COMMENT") },
 			)
 		},
 	)
@@ -3099,12 +4195,36 @@ func (v *Validator) ParseAlterNetworkPolicy() bool {
 //
 //	ALTER NETWORK RULE [ IF EXISTS ] <name> UNSET { VALUE_LIST | COMMENT }
 func (v *Validator) ParseAlterNetworkRule() bool {
+	name := v.parseIdentPath
+	setOption := func() bool {
+		return v.Choice(
+			v.option("VALUE_LIST", v.consumeBalancedParens),
+			v.commentOption(),
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("NETWORK", "RULE") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
-		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+		name,
+		func() bool {
+			return v.Choice(
+				// SET VALUE_LIST = ( .. ) [ COMMENT = .. ]   (also bare SET COMMENT)
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("SET") },
+						func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+					)
+				},
+				// UNSET { VALUE_LIST | COMMENT }
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("UNSET") },
+						v.wordsValue("VALUE_LIST", "COMMENT"),
+					)
+				},
+			)
+		},
 	)
 }
 
@@ -3121,15 +4241,47 @@ func (v *Validator) ParseAlterNetworkRule() bool {
 //	  [ IDLE_AUTO_SHUTDOWN_TIME_SECONDS = <number_of_seconds> ]
 //	  [ SECRETS = ('<secret_variable_name>' = <secret_name>) [ , ... ] ]
 func (v *Validator) ParseAlterNotebook() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	setOption := func() bool {
+		return v.Choice(
+			v.commentOption(),
+			v.option("QUERY_WAREHOUSE", v.parseScalar),
+			v.option("IDLE_AUTO_SHUTDOWN_TIME_SECONDS", num),
+			v.option("SECRETS", v.consumeBalancedParens),
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.MatchWord("NOTEBOOK") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
-				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				func() bool { return v.phrase("RENAME", "TO") && name() },
+				// SET [ COMMENT ] [ QUERY_WAREHOUSE ] [ IDLE_AUTO_SHUTDOWN_TIME_SECONDS ] [ SECRETS ]
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("SET") },
+						func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+					)
+				},
+				// UNSET <option> [ , ... ] (not in upstream syntax; kept permissive to avoid regressions)
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("UNSET") },
+						commaList(name),
+					)
+				},
 			)
 		},
 	)
@@ -3179,13 +4331,56 @@ func (v *Validator) ParseAlterNotificationIntegration() bool {
 //	  DEFAULT_SUBJECT    |
 //	  COMMENT
 func (v *Validator) ParseAlterNotificationIntegrationEmail() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
+	setOption := func() bool {
+		return v.Choice(
+			v.option("ENABLED", v.parseBool),
+			v.option("ALLOWED_RECIPIENTS", v.consumeBalancedParens),
+			v.option("DEFAULT_RECIPIENTS", v.consumeBalancedParens),
+			v.option("DEFAULT_SUBJECT", v.parseString),
+			v.commentOption(),
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.Optional(func() bool { return v.MatchWord("NOTIFICATION") }) },
 		func() bool { return v.MatchWord("INTEGRATION") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
-		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+		name,
+		func() bool {
+			return v.Choice(
+				// SET TAG <name> = '<value>' [ , ... ]
+				func() bool { return v.Sequence(func() bool { return v.phrase("SET", "TAG") }, commaList(tagAssign)) },
+				// SET <option> [ <option> ... ]
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("SET") },
+						func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+					)
+				},
+				// UNSET TAG <name> [ , ... ]
+				func() bool { return v.Sequence(func() bool { return v.phrase("UNSET", "TAG") }, commaList(name)) },
+				// UNSET { ENABLED | ALLOWED_RECIPIENTS | DEFAULT_RECIPIENTS | DEFAULT_SUBJECT | COMMENT }
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("UNSET") },
+						v.wordsValue("ENABLED", "ALLOWED_RECIPIENTS", "DEFAULT_RECIPIENTS", "DEFAULT_SUBJECT", "COMMENT"),
+					)
+				},
+			)
+		},
 	)
 }
 
@@ -3204,13 +4399,44 @@ func (v *Validator) ParseAlterNotificationIntegrationEmail() bool {
 //
 //	ALTER [ NOTIFICATION ] INTEGRATION [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterNotificationIntegrationInboundAzureEventGrid() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
+	setOption := func() bool {
+		return v.Choice(
+			v.option("ENABLED", v.parseBool),
+			v.commentOption(),
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.Optional(func() bool { return v.MatchWord("NOTIFICATION") }) },
 		func() bool { return v.MatchWord("INTEGRATION") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
-		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+		name,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.phrase("SET", "TAG") }, commaList(tagAssign)) },
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("SET") },
+						func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+					)
+				},
+				func() bool { return v.Sequence(func() bool { return v.phrase("UNSET", "TAG") }, commaList(name)) },
+				func() bool { return v.phrase("UNSET", "COMMENT") },
+			)
+		},
 	)
 }
 
@@ -3229,13 +4455,44 @@ func (v *Validator) ParseAlterNotificationIntegrationInboundAzureEventGrid() boo
 //
 //	ALTER [ NOTIFICATION ] INTEGRATION [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterNotificationIntegrationInboundGooglePubSub() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
+	setOption := func() bool {
+		return v.Choice(
+			v.option("ENABLED", v.parseBool),
+			v.commentOption(),
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.Optional(func() bool { return v.MatchWord("NOTIFICATION") }) },
 		func() bool { return v.MatchWord("INTEGRATION") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
-		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+		name,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.phrase("SET", "TAG") }, commaList(tagAssign)) },
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("SET") },
+						func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+					)
+				},
+				func() bool { return v.Sequence(func() bool { return v.phrase("UNSET", "TAG") }, commaList(name)) },
+				func() bool { return v.phrase("UNSET", "COMMENT") },
+			)
+		},
 	)
 }
 
@@ -3256,13 +4513,46 @@ func (v *Validator) ParseAlterNotificationIntegrationInboundGooglePubSub() bool 
 //
 //	ALTER [ NOTIFICATION ] INTEGRATION [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterNotificationIntegrationOutboundAmazonSns() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
+	setOption := func() bool {
+		return v.Choice(
+			v.option("ENABLED", v.parseBool),
+			v.option("AWS_SNS_TOPIC_ARN", v.parseString),
+			v.option("AWS_SNS_ROLE_ARN", v.parseString),
+			v.commentOption(),
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.Optional(func() bool { return v.MatchWord("NOTIFICATION") }) },
 		func() bool { return v.MatchWord("INTEGRATION") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
-		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+		name,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.phrase("SET", "TAG") }, commaList(tagAssign)) },
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("SET") },
+						func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+					)
+				},
+				func() bool { return v.Sequence(func() bool { return v.phrase("UNSET", "TAG") }, commaList(name)) },
+				func() bool { return v.phrase("UNSET", "COMMENT") },
+			)
+		},
 	)
 }
 
@@ -3283,13 +4573,46 @@ func (v *Validator) ParseAlterNotificationIntegrationOutboundAmazonSns() bool {
 //
 //	ALTER [ NOTIFICATION ] INTEGRATION [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterNotificationIntegrationOutboundAzureEventGrid() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
+	setOption := func() bool {
+		return v.Choice(
+			v.option("ENABLED", v.parseBool),
+			v.option("AZURE_STORAGE_QUEUE_PRIMARY_URI", v.parseString),
+			v.option("AZURE_TENANT_ID", v.parseString),
+			v.commentOption(),
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.Optional(func() bool { return v.MatchWord("NOTIFICATION") }) },
 		func() bool { return v.MatchWord("INTEGRATION") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
-		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+		name,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.phrase("SET", "TAG") }, commaList(tagAssign)) },
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("SET") },
+						func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+					)
+				},
+				func() bool { return v.Sequence(func() bool { return v.phrase("UNSET", "TAG") }, commaList(name)) },
+				func() bool { return v.phrase("UNSET", "COMMENT") },
+			)
+		},
 	)
 }
 
@@ -3309,13 +4632,45 @@ func (v *Validator) ParseAlterNotificationIntegrationOutboundAzureEventGrid() bo
 //
 //	ALTER [ NOTIFICATION ] INTEGRATION [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterNotificationIntegrationOutboundGooglePubSub() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
+	setOption := func() bool {
+		return v.Choice(
+			v.option("ENABLED", v.parseBool),
+			v.option("GCP_PUBSUB_SUBSCRIPTION_NAME", v.parseString),
+			v.commentOption(),
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.Optional(func() bool { return v.MatchWord("NOTIFICATION") }) },
 		func() bool { return v.MatchWord("INTEGRATION") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
-		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+		name,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.phrase("SET", "TAG") }, commaList(tagAssign)) },
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("SET") },
+						func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+					)
+				},
+				func() bool { return v.Sequence(func() bool { return v.phrase("UNSET", "TAG") }, commaList(name)) },
+				func() bool { return v.phrase("UNSET", "COMMENT") },
+			)
+		},
 	)
 }
 
@@ -3340,13 +4695,41 @@ func (v *Validator) ParseAlterNotificationIntegrationOutboundGooglePubSub() bool
 //	  COMMENT
 //	}
 func (v *Validator) ParseAlterNotificationIntegrationWebhooks() bool {
+	name := v.parseIdentPath
+	setOption := func() bool {
+		return v.Choice(
+			v.option("ENABLED", v.parseBool),
+			v.option("WEBHOOK_URL", v.parseString),
+			v.option("WEBHOOK_SECRET", v.parseScalar),
+			v.option("WEBHOOK_BODY_TEMPLATE", v.parseString),
+			v.option("WEBHOOK_HEADERS", v.consumeBalancedParens),
+			v.commentOption(),
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.Optional(func() bool { return v.MatchWord("NOTIFICATION") }) },
 		func() bool { return v.MatchWord("INTEGRATION") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
-		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+		name,
+		func() bool {
+			return v.Choice(
+				// SET <option> [ <option> ... ]
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("SET") },
+						func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+					)
+				},
+				// UNSET { ENABLED | WEBHOOK_SECRET | WEBHOOK_BODY_TEMPLATE | WEBHOOK_HEADERS | COMMENT }
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("UNSET") },
+						v.wordsValue("ENABLED", "WEBHOOK_SECRET", "WEBHOOK_BODY_TEMPLATE", "WEBHOOK_HEADERS", "COMMENT"),
+					)
+				},
+			)
+		},
 	)
 }
 
@@ -3386,19 +4769,50 @@ func (v *Validator) ParseAlterOpenflowDataPlane() bool {
 //
 //	ALTER ONLINE FEATURE TABLE [ IF EXISTS ] <name> <tagAction>
 func (v *Validator) ParseAlterOnlineFeatureTable() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
+	setOption := func() bool {
+		return v.Choice(
+			v.option("TARGET_LAG", v.parseString),
+			v.option("WAREHOUSE", v.parseIdentPath),
+			v.commentOption(),
+		)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+				func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+			)
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+			return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name))
+		})
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("ONLINE", "FEATURE", "TABLE") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
 				v.wordsValue("SUSPEND", "RESUME", "REFRESH"),
 				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
-				// <tagAction> (SET/UNSET TAG) and SET COMMENT/TARGET_LAG/WAREHOUSE are
-				// all covered by this SET/UNSET branch — no ungated catch-all, so a
-				// garbage action is flagged.
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				setForm,
+				unsetForm,
 			)
 		},
 	)
@@ -3487,12 +4901,26 @@ func (v *Validator) ParseAlterOrganizationProfile() bool {
 //	  LAST_NAME = '<string>'
 //	  COMMENT = '<string>'
 func (v *Validator) ParseAlterOrganizationUser() bool {
+	prop := v.wordsValue("EMAIL", "DISPLAY_NAME", "FIRST_NAME", "MIDDLE_NAME", "LAST_NAME", "COMMENT")
+	setProp := func() bool {
+		return v.Sequence(prop, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Sequence(setProp, func() bool { return v.ZeroOrMore(setProp) })
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+			return v.Sequence(prop, func() bool { return v.ZeroOrMore(prop) })
+		})
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("ORGANIZATION", "USER") },
 		func() bool { return v.ifExists() },
 		v.parseIdentPath,
-		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+		func() bool { return v.Choice(setForm, unsetForm) },
 	)
 }
 
@@ -3513,17 +4941,54 @@ func (v *Validator) ParseAlterOrganizationUser() bool {
 //
 //	ALTER ORGANIZATION USER GROUP [ IF EXISTS ] <name> SET IS_GRANTABLE = { TRUE | FALSE }
 func (v *Validator) ParseAlterOrganizationUserGroup() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	visibility := func() bool {
+		return v.Choice(
+			func() bool { return v.MatchWord("ALL") },
+			func() bool {
+				return v.Sequence(func() bool { return v.MatchWord("ACCOUNTS") }, commaList(name))
+			},
+			func() bool {
+				return v.Sequence(func() bool { return v.phrase("REGION", "GROUPS") }, commaList(v.parseString))
+			},
+		)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Choice(
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("VISIBILITY") },
+						func() bool { return v.MatchOp("=") },
+						visibility,
+					)
+				},
+				v.option("IS_GRANTABLE", v.parseBool),
+			)
+		})
+	}
+	addRemove := func() bool {
+		return v.Sequence(
+			v.wordsValue("ADD", "REMOVE"),
+			func() bool { return v.phrase("ORGANIZATION", "USERS") },
+			commaList(name),
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("ORGANIZATION", "USER", "GROUP") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
-		func() bool {
-			return v.Choice(
-				func() bool { return v.wordsValue("ADD", "REMOVE")() && v.consumeRest() },
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
-			)
-		},
+		name,
+		func() bool { return v.Choice(addRemove, setForm) },
 	)
 }
 
@@ -3544,12 +5009,38 @@ func (v *Validator) ParseAlterOrganizationUserGroup() bool {
 //	  [ ADDITIONAL_CREATION_BLOCKLIST ]
 //	  [ COMMENT ]
 func (v *Validator) ParseAlterPackagesPolicy() bool {
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	setOption := func() bool {
+		return v.Choice(
+			v.option("ALLOWLIST", v.consumeBalancedParens),
+			v.option("BLOCKLIST", v.consumeBalancedParens),
+			v.option("ADDITIONAL_CREATION_BLOCKLIST", v.consumeBalancedParens),
+			v.commentOption(),
+		)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) })
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") },
+			commaList(v.wordsValue("ALLOWLIST", "BLOCKLIST", "ADDITIONAL_CREATION_BLOCKLIST", "COMMENT")))
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("PACKAGES", "POLICY") },
 		func() bool { return v.ifExists() },
 		v.parseIdentPath,
-		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+		func() bool { return v.Choice(setForm, unsetForm) },
 	)
 }
 
@@ -3590,15 +5081,59 @@ func (v *Validator) ParseAlterPackagesPolicy() bool {
 //	                                                 [ PASSWORD_HISTORY ]
 //	                                                 [ COMMENT ]
 func (v *Validator) ParseAlterPasswordPolicy() bool {
+	name := v.parseIdentPath
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	intOpts := []string{
+		"PASSWORD_MIN_LENGTH", "PASSWORD_MAX_LENGTH",
+		"PASSWORD_MIN_UPPER_CASE_CHARS", "PASSWORD_MIN_LOWER_CASE_CHARS",
+		"PASSWORD_MIN_NUMERIC_CHARS", "PASSWORD_MIN_SPECIAL_CHARS",
+		"PASSWORD_MIN_AGE_DAYS", "PASSWORD_MAX_AGE_DAYS",
+		"PASSWORD_MAX_RETRIES", "PASSWORD_LOCKOUT_TIME_MINS", "PASSWORD_HISTORY",
+	}
+	setOption := func() bool {
+		return v.Choice(
+			func() bool { return v.option2(v.wordsValue(intOpts...), num)() },
+			v.commentOption(),
+		)
+	}
+	tagAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+				func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+			)
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+				commaList(v.wordsValue(append(intOpts, "COMMENT")...)),
+			)
+		})
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("PASSWORD", "POLICY") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
 				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				setForm,
+				unsetForm,
 			)
 		},
 	)
@@ -3625,17 +5160,58 @@ func (v *Validator) ParseAlterPasswordPolicy() bool {
 //	objectProperties ::=
 //	  PIPE_EXECUTION_PAUSED = TRUE | FALSE
 func (v *Validator) ParseAlterPipe() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
+	setOption := func() bool {
+		return v.Choice(
+			v.option("PIPE_EXECUTION_PAUSED", v.parseBool),
+			v.commentOption(),
+		)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+				func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+			)
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+				commaList(v.wordsValue("PIPE_EXECUTION_PAUSED", "COMMENT")),
+			)
+		})
+	}
+	refreshOption := func() bool {
+		return v.Choice(
+			v.option("PREFIX", v.parseString),
+			v.option("MODIFIED_AFTER", v.parseScalar),
+		)
+	}
+	refreshForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("REFRESH") }, func() bool {
+			return v.ZeroOrMore(refreshOption)
+		})
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.MatchWord("PIPE") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
-		func() bool {
-			return v.Choice(
-				func() bool { return v.MatchWord("REFRESH") && v.consumeRest() },
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
-			)
-		},
+		name,
+		func() bool { return v.Choice(refreshForm, setForm, unsetForm) },
 	)
 }
 
@@ -3677,17 +5253,78 @@ func (v *Validator) ParseAlterPipe() bool {
 //	ALTER POSTGRES INSTANCE [ IF EXISTS ] <name> UNSET TAG <tag_name>
 //	  [ , <tag_name> ... ]
 func (v *Validator) ParseAlterPostgresInstance() bool {
+	name := v.parseIdentPath
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
+	applyClause := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("APPLY") }, func() bool {
+			return v.Choice(
+				func() bool { return v.MatchWord("IMMEDIATELY") },
+				func() bool { return v.MatchWord("ON") && v.parseString() },
+			)
+		})
+	}
+	setOption := func() bool {
+		return v.Choice(
+			v.option("NETWORK_POLICY", v.parseString),
+			v.option("AUTHENTICATION_AUTHORITY", v.wordsValue("POSTGRES", "POSTGRES_OR_SNOWFLAKE")),
+			v.commentOption(),
+			v.option("HIGH_AVAILABILITY", v.parseBool),
+			v.option("COMPUTE_FAMILY", v.parseString),
+			v.option("STORAGE_SIZE_GB", num),
+			v.option("STORAGE_INTEGRATION", v.parseString),
+			v.option("POSTGRES_VERSION", num),
+			v.option("MAINTENANCE_WINDOW_START", num),
+			v.option("POSTGRES_SETTINGS", v.parseString),
+			applyClause,
+		)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+				func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+			)
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+				commaList(v.wordsValue("COMMENT", "POSTGRES_SETTINGS", "NETWORK_POLICY",
+					"MAINTENANCE_WINDOW_START", "STORAGE_INTEGRATION")),
+			)
+		})
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("POSTGRES", "INSTANCE") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
 				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
 				v.wordsValue("SUSPEND", "RESUME"),
-				func() bool { return v.phrase("RESET", "ACCESS") && v.consumeRest() },
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.phrase("RESET", "ACCESS") },
+						func() bool { return v.MatchWord("FOR") },
+						v.parseString,
+					)
+				},
+				setForm,
+				unsetForm,
 			)
 		},
 	)
@@ -3710,25 +5347,54 @@ func (v *Validator) ParseAlterPostgresInstance() bool {
 //
 //	ALTER PRIVACY POLICY [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterPrivacyPolicy() bool {
-	return v.Sequence(
-		func() bool { return v.MatchWord("ALTER") },
-		func() bool { return v.phrase("PRIVACY", "POLICY") },
-		func() bool { return v.ifExists() },
-		v.parseIdentPath,
-		func() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
 			return v.Choice(
-				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
-				// SET BODY -> <expression>
+				// SET BODY -> <expression> (free-form RHS)
 				func() bool {
 					return v.Sequence(
-						func() bool { return v.MatchWord("SET") },
 						func() bool { return v.MatchWord("BODY") },
 						func() bool { return v.MatchOp("-") },
 						func() bool { return v.MatchOp(">") },
 						v.consumeRest,
 					)
 				},
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+				v.commentOption(),
+			)
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+				func() bool { return v.MatchWord("COMMENT") },
+			)
+		})
+	}
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("PRIVACY", "POLICY") },
+		func() bool { return v.ifExists() },
+		name,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				setForm,
+				unsetForm,
 			)
 		},
 	)
@@ -3761,18 +5427,71 @@ func (v *Validator) ParseAlterPrivacyPolicy() bool {
 //	-- JavaScript / Snowflake Scripting handlers omit EXTERNAL_ACCESS_INTEGRATIONS and SECRETS in the SET block
 //	-- (Snowflake Scripting additionally supports AUTO_EVENT_LOGGING = '<option>').
 func (v *Validator) ParseAlterProcedure() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
+	secretAssign := func() bool {
+		return v.Sequence(v.parseString, func() bool { return v.MatchOp("=") }, v.parseIdentPath)
+	}
+	setOption := func() bool {
+		return v.Choice(
+			v.option("LOG_LEVEL", v.parseString),
+			v.option("TRACE_LEVEL", v.parseString),
+			v.option("AUTO_EVENT_LOGGING", v.parseString),
+			v.option("EXTERNAL_ACCESS_INTEGRATIONS", commaList(v.parseString)),
+			v.option("SECRETS", commaList(secretAssign)),
+			v.commentOption(),
+		)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+				func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+			)
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+				func() bool { return v.MatchWord("COMMENT") },
+			)
+		})
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.MatchWord("PROCEDURE") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		// ( [ <arg_data_type> , ... ] )
 		v.consumeBalancedParens,
 		func() bool {
 			return v.Choice(
 				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
-				func() bool { return v.phrase("EXECUTE", "AS") && v.consumeRest() },
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.phrase("EXECUTE", "AS") },
+						func() bool {
+							return v.Choice(
+								v.wordsValue("OWNER", "CALLER"),
+								func() bool { return v.phrase("RESTRICTED", "CALLER") },
+							)
+						},
+					)
+				},
+				setForm,
+				unsetForm,
 			)
 		},
 	)
@@ -3795,25 +5514,54 @@ func (v *Validator) ParseAlterProcedure() bool {
 //
 //	ALTER PROJECTION POLICY [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterProjectionPolicy() bool {
-	return v.Sequence(
-		func() bool { return v.MatchWord("ALTER") },
-		func() bool { return v.phrase("PROJECTION", "POLICY") },
-		func() bool { return v.ifExists() },
-		v.parseIdentPath,
-		func() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
 			return v.Choice(
-				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
-				// SET BODY -> <expression>
+				// SET BODY -> <expression> (free-form RHS)
 				func() bool {
 					return v.Sequence(
-						func() bool { return v.MatchWord("SET") },
 						func() bool { return v.MatchWord("BODY") },
 						func() bool { return v.MatchOp("-") },
 						func() bool { return v.MatchOp(">") },
 						v.consumeRest,
 					)
 				},
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+				v.commentOption(),
+			)
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+				func() bool { return v.MatchWord("COMMENT") },
+			)
+		})
+	}
+	return v.Sequence(
+		func() bool { return v.MatchWord("ALTER") },
+		func() bool { return v.phrase("PROJECTION", "POLICY") },
+		func() bool { return v.ifExists() },
+		name,
+		func() bool {
+			return v.Choice(
+				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
+				setForm,
+				unsetForm,
 			)
 		},
 	)
@@ -3921,20 +5669,45 @@ func (v *Validator) ParseAlterReplicationGroup() bool {
 //	triggerDefinition ::=
 //	   ON <threshold> PERCENT DO { SUSPEND | SUSPEND_IMMEDIATE | NOTIFY }
 func (v *Validator) ParseAlterResourceMonitor() bool {
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	setOption := func() bool {
+		return v.Choice(
+			v.option("CREDIT_QUOTA", num),
+			v.option("FREQUENCY", v.wordsValue("MONTHLY", "DAILY", "WEEKLY", "YEARLY", "NEVER")),
+			v.option("START_TIMESTAMP", func() bool {
+				return v.Choice(v.parseString, func() bool { return v.MatchWord("IMMEDIATELY") })
+			}),
+			v.option("END_TIMESTAMP", v.parseString),
+			v.option("NOTIFY_USERS", v.consumeBalancedParens),
+		)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) })
+		})
+	}
+	triggerDef := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchWord("ON") },
+			num,
+			func() bool { return v.MatchWord("PERCENT") },
+			func() bool { return v.MatchWord("DO") },
+			v.wordsValue("SUSPEND", "SUSPEND_IMMEDIATE", "NOTIFY"),
+		)
+	}
+	triggersForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("TRIGGERS") }, func() bool {
+			return v.Sequence(triggerDef, func() bool { return v.ZeroOrMore(triggerDef) })
+		})
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("RESOURCE", "MONITOR") },
 		func() bool { return v.ifExists() },
 		v.parseIdentPath,
 		// [ SET <opts> ] [ TRIGGERS <triggerDefinition> ... ] — both optional.
-		func() bool {
-			return v.Optional(func() bool {
-				return v.Choice(
-					func() bool { return v.MatchWord("SET") && v.consumeRest() },
-					func() bool { return v.MatchWord("TRIGGERS") && v.consumeRest() },
-				)
-			})
-		},
+		func() bool { return v.Optional(setForm) },
+		func() bool { return v.Optional(triggersForm) },
 	)
 }
 
@@ -3955,15 +5728,46 @@ func (v *Validator) ParseAlterResourceMonitor() bool {
 //
 //	ALTER ROLE [ IF EXISTS ] <name> UNSET DCM PROJECT
 func (v *Validator) ParseAlterRole() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+				v.commentOption(),
+			)
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+				func() bool { return v.phrase("DCM", "PROJECT") },
+				func() bool { return v.MatchWord("COMMENT") },
+			)
+		})
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.MatchWord("ROLE") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
 				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				setForm,
+				unsetForm,
 			)
 		},
 	)
@@ -3986,15 +5790,41 @@ func (v *Validator) ParseAlterRole() bool {
 //
 //	ALTER ROW ACCESS POLICY [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterRowAccessPolicy() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool { return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString) }
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+				v.commentOption(),
+			)
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+				func() bool { return v.MatchWord("COMMENT") },
+			)
+		})
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("ROW", "ACCESS", "POLICY") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
 				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
-				// SET BODY -> <expression>
 				func() bool {
 					return v.Sequence(
 						func() bool { return v.MatchWord("SET") },
@@ -4004,7 +5834,8 @@ func (v *Validator) ParseAlterRowAccessPolicy() bool {
 						v.consumeRest,
 					)
 				},
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				setForm,
+				unsetForm,
 			)
 		},
 	)
@@ -4077,18 +5908,91 @@ func (v *Validator) ParseAlterRowAccessPolicy() bool {
 //
 //	ALTER SCHEMA [ IF EXISTS ] <name> { ENABLE | DISABLE } MANAGED ACCESS
 func (v *Validator) ParseAlterSchema() bool {
+	name := v.parseIdentPath
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool { return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString) }
+	contactAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, name)
+	}
+	setOption := func() bool {
+		return v.Choice(
+			v.option("DATA_RETENTION_TIME_IN_DAYS", num),
+			v.option("MAX_DATA_EXTENSION_TIME_IN_DAYS", num),
+			v.option("EXTERNAL_VOLUME", v.parseScalar),
+			v.option("CATALOG", v.parseScalar),
+			v.option("ICEBERG_VERSION_DEFAULT", num),
+			v.option("ICEBERG_MERGE_ON_READ_BEHAVIOR", v.parseString),
+			v.option("ENABLE_ICEBERG_MERGE_ON_READ", v.parseBool),
+			v.option("REPLACE_INVALID_CHARACTERS", v.parseBool),
+			v.option("DEFAULT_DDL_COLLATION", v.parseString),
+			v.option("DEFAULT_NOTEBOOK_COMPUTE_POOL_CPU", v.parseString),
+			v.option("DEFAULT_NOTEBOOK_COMPUTE_POOL_GPU", v.parseString),
+			v.option("LOG_LEVEL", v.parseString),
+			v.option("TRACE_LEVEL", v.parseString),
+			v.option("STORAGE_SERIALIZATION_POLICY", v.wordsValue("COMPATIBLE", "OPTIMIZED")),
+			v.option("CLASSIFICATION_PROFILE", v.parseString),
+			v.commentOption(),
+			v.option("CATALOG_SYNC", v.parseString),
+			v.option("REPLICABLE_WITH_FAILOVER_GROUPS", v.parseString),
+			v.option("BASE_LOCATION_PREFIX", v.parseString),
+			v.option("DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE", v.parseString),
+			func() bool {
+				return v.Sequence(func() bool { return v.MatchWord("CONTACT") }, commaList(contactAssign))
+			},
+			v.option("OBJECT_VISIBILITY", func() bool { return v.MatchWord("PRIVILEGED") }),
+			v.option("ENABLE_DATA_COMPACTION", v.parseBool),
+		)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+				func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+			)
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+				commaList(func() bool {
+					return v.Choice(
+						v.wordsValue(
+							"DATA_RETENTION_TIME_IN_DAYS", "MAX_DATA_EXTENSION_TIME_IN_DAYS", "EXTERNAL_VOLUME",
+							"CATALOG", "ICEBERG_VERSION_DEFAULT", "ICEBERG_MERGE_ON_READ_BEHAVIOR",
+							"ENABLE_ICEBERG_MERGE_ON_READ", "REPLACE_INVALID_CHARACTERS", "DEFAULT_DDL_COLLATION",
+							"LOG_LEVEL", "TRACE_LEVEL", "STORAGE_SERIALIZATION_POLICY", "COMMENT", "CATALOG_SYNC",
+							"REPLICABLE_WITH_FAILOVER_GROUPS", "BASE_LOCATION_PREFIX", "DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE",
+							"CLASSIFICATION_PROFILE", "OBJECT_VISIBILITY", "ENABLE_DATA_COMPACTION",
+						),
+						func() bool { return v.Sequence(func() bool { return v.MatchWord("CONTACT") }, name) },
+						func() bool { return v.phrase("DCM", "PROJECT") },
+					)
+				}),
+			)
+		})
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.MatchWord("SCHEMA") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
 				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
 				func() bool { return v.phrase("SWAP", "WITH") && v.parseIdentPath() },
-				// { ENABLE | DISABLE } MANAGED ACCESS
 				func() bool { return v.wordsValue("ENABLE", "DISABLE")() && v.phrase("MANAGED", "ACCESS") },
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				setForm,
+				unsetForm,
 			)
 		},
 	)
@@ -4118,12 +6022,38 @@ func (v *Validator) ParseAlterSchema() bool {
 //	ALTER SECRET [ IF EXISTS ] <name> SET [ SECRET_STRING = '<string_literal>' ]
 //	                                      [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseAlterSecret() bool {
+	name := v.parseIdentPath
+	setOption := func() bool {
+		return v.Choice(
+			v.option("OAUTH_SCOPES", v.consumeBalancedParens),
+			v.option("OAUTH_REFRESH_TOKEN", v.parseString),
+			v.option("OAUTH_REFRESH_TOKEN_EXPIRY_TIME", v.parseString),
+			v.option("API_AUTHENTICATION", v.parseString),
+			v.option("USERNAME", v.parseString),
+			v.option("PASSWORD", v.parseString),
+			v.option("SECRET_STRING", v.parseString),
+			v.commentOption(),
+		)
+	}
+	setForm := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchWord("SET") },
+			setOption,
+			func() bool { return v.ZeroOrMore(setOption) },
+		)
+	}
+	unsetForm := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchWord("UNSET") },
+			func() bool { return v.MatchWord("COMMENT") },
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.MatchWord("SECRET") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
-		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+		name,
+		func() bool { return v.Choice(setForm, unsetForm) },
 	)
 }
 
@@ -4202,13 +6132,56 @@ func (v *Validator) ParseAlterSecurityIntegration() bool {
 //
 //	ALTER [ SECURITY ] INTEGRATION [ IF EXISTS ] <name> UNSET { ENABLED | [ , ... ] }
 func (v *Validator) ParseAlterSecurityIntegrationExternalApiAuthentication() bool {
+	name := v.parseIdentPath
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool { return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString) }
+	setOption := func() bool {
+		return v.Choice(
+			v.option("ENABLED", v.parseBool),
+			v.option("OAUTH_AUTHORIZATION_ENDPOINT", v.parseString),
+			v.option("OAUTH_TOKEN_ENDPOINT", v.parseString),
+			v.option("OAUTH_CLIENT_AUTH_METHOD", v.wordsValue("CLIENT_SECRET_BASIC", "CLIENT_SECRET_POST")),
+			v.option("OAUTH_CLIENT_ID", v.parseString),
+			v.option("OAUTH_CLIENT_SECRET", v.parseString),
+			v.option("OAUTH_GRANT", v.parseString),
+			v.option("OAUTH_ACCESS_TOKEN_VALIDITY", num),
+			v.option("OAUTH_REFRESH_TOKEN_VALIDITY", num),
+			v.option("OAUTH_ALLOWED_SCOPES", v.consumeBalancedParens),
+			v.commentOption(),
+		)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+				func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+			)
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+				commaList(v.wordsValue("ENABLED")),
+			)
+		})
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.Optional(func() bool { return v.MatchWord("SECURITY") }) },
 		func() bool { return v.MatchWord("INTEGRATION") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
-		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+		name,
+		func() bool { return v.Choice(setForm, unsetForm) },
 	)
 }
 
@@ -4227,13 +6200,48 @@ func (v *Validator) ParseAlterSecurityIntegrationExternalApiAuthentication() boo
 //
 //	ALTER [ SECURITY ] INTEGRATION <name> UNSET TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterSecurityIntegrationAwsIamAuthentication() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool { return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString) }
+	setOption := func() bool {
+		return v.Choice(
+			v.option("TYPE", func() bool { return v.MatchWord("AWS_IAM") }),
+			v.option("AWS_ROLE_ARN", v.parseString),
+			v.option("ENABLED", v.parseBool),
+			v.commentOption(),
+		)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+				func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+			)
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+				commaList(v.wordsValue("ENABLED", "COMMENT")),
+			)
+		})
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.Optional(func() bool { return v.MatchWord("SECURITY") }) },
 		func() bool { return v.MatchWord("INTEGRATION") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
-		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+		name,
+		func() bool { return v.Choice(setForm, unsetForm) },
 	)
 }
 
@@ -4271,13 +6279,64 @@ func (v *Validator) ParseAlterSecurityIntegrationAwsIamAuthentication() bool {
 //
 //	ALTER [ SECURITY ] INTEGRATION <name> UNSET TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterSecurityIntegrationExternalOauth() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool { return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString) }
+	setOption := func() bool {
+		return v.Choice(
+			v.option("TYPE", func() bool { return v.MatchWord("EXTERNAL_OAUTH") }),
+			v.option("ENABLED", v.parseBool),
+			v.option("EXTERNAL_OAUTH_TYPE", v.wordsValue("OKTA", "AZURE", "PING_FEDERATE", "CUSTOM")),
+			v.option("EXTERNAL_OAUTH_ISSUER", v.parseString),
+			v.option("EXTERNAL_OAUTH_TOKEN_USER_MAPPING_CLAIM", func() bool {
+				return v.Choice(v.parseString, v.consumeBalancedParens)
+			}),
+			v.option("EXTERNAL_OAUTH_SNOWFLAKE_USER_MAPPING_ATTRIBUTE", v.parseString),
+			v.option("EXTERNAL_OAUTH_JWS_KEYS_URL", func() bool {
+				return v.Choice(v.parseString, v.consumeBalancedParens)
+			}),
+			v.option("EXTERNAL_OAUTH_RSA_PUBLIC_KEY", v.parseScalar),
+			v.option("EXTERNAL_OAUTH_RSA_PUBLIC_KEY_2", v.parseScalar),
+			v.option("EXTERNAL_OAUTH_BLOCKED_ROLES_LIST", v.consumeBalancedParens),
+			v.option("EXTERNAL_OAUTH_ALLOWED_ROLES_LIST", v.consumeBalancedParens),
+			v.option("EXTERNAL_OAUTH_AUDIENCE_LIST", v.consumeBalancedParens),
+			v.option("EXTERNAL_OAUTH_ANY_ROLE_MODE", v.wordsValue("DISABLE", "ENABLE", "ENABLE_FOR_PRIVILEGE")),
+			v.option("EXTERNAL_OAUTH_SCOPE_DELIMITER", v.parseString),
+			v.option("NETWORK_POLICY", v.parseString),
+			v.commentOption(),
+		)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+				func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+			)
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+				commaList(v.wordsValue("ENABLED", "EXTERNAL_OAUTH_AUDIENCE_LIST")),
+			)
+		})
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.Optional(func() bool { return v.MatchWord("SECURITY") }) },
 		func() bool { return v.MatchWord("INTEGRATION") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
-		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+		name,
+		func() bool { return v.Choice(setForm, unsetForm) },
 	)
 }
 
@@ -4329,19 +6388,68 @@ func (v *Validator) ParseAlterSecurityIntegrationExternalOauth() bool {
 //
 //	ALTER [ SECURITY ] INTEGRATION <name> UNSET TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterSecurityIntegrationSnowflakeOauth() bool {
+	name := v.parseIdentPath
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool { return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString) }
+	setOption := func() bool {
+		return v.Choice(
+			v.option("ENABLED", v.parseBool),
+			v.option("OAUTH_ISSUE_REFRESH_TOKENS", v.parseBool),
+			v.option("OAUTH_REDIRECT_URI", v.parseString),
+			v.option("OAUTH_REFRESH_TOKEN_VALIDITY", num),
+			v.option("OAUTH_SINGLE_USE_REFRESH_TOKENS_REQUIRED", v.parseBool),
+			v.option("OAUTH_USE_SECONDARY_ROLES", v.wordsValue("IMPLICIT", "NONE")),
+			v.option("ALLOWED_ROLES_LIST", v.consumeBalancedParens),
+			v.option("BLOCKED_ROLES_LIST", v.consumeBalancedParens),
+			v.option("PRE_AUTHORIZED_ROLES_LIST", v.consumeBalancedParens),
+			v.option("OAUTH_ALLOW_NON_TLS_REDIRECT_URI", v.parseBool),
+			v.option("OAUTH_ALTERNATE_REDIRECT_URIS", v.consumeBalancedParens),
+			v.option("OAUTH_ENFORCE_PKCE", v.parseBool),
+			v.option("OAUTH_CLIENT_RSA_PUBLIC_KEY", v.parseScalar),
+			v.option("OAUTH_CLIENT_RSA_PUBLIC_KEY_2", v.parseScalar),
+			v.option("NETWORK_POLICY", v.parseString),
+			v.option("USE_PRIVATELINK_FOR_AUTHORIZATION_ENDPOINT", v.parseBool),
+			v.commentOption(),
+		)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+				func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+			)
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+				commaList(name),
+			)
+		})
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.Optional(func() bool { return v.MatchWord("SECURITY") }) },
 		func() bool { return v.MatchWord("INTEGRATION") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
-				// REFRESH { OAUTH_CLIENT_SECRET | OAUTH_CLIENT_SECRET_2 }
 				func() bool {
 					return v.MatchWord("REFRESH") && v.wordsValue("OAUTH_CLIENT_SECRET", "OAUTH_CLIENT_SECRET_2")()
 				},
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				setForm,
+				unsetForm,
 			)
 		},
 	)
@@ -4386,15 +6494,64 @@ func (v *Validator) ParseAlterSecurityIntegrationSnowflakeOauth() bool {
 //
 //	ALTER [ SECURITY ] INTEGRATION <name> UNSET TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterSecurityIntegrationSaml2() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool { return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString) }
+	setOption := func() bool {
+		return v.Choice(
+			v.option("TYPE", func() bool { return v.MatchWord("SAML2") }),
+			v.option("ENABLED", v.parseBool),
+			v.option("METADATA_URL", v.parseString),
+			v.option("SAML2_ISSUER", v.parseString),
+			v.option("SAML2_SSO_URL", v.parseString),
+			v.option("SAML2_PROVIDER", v.parseString),
+			v.option("SAML2_X509_CERT", v.parseString),
+			v.option("ALLOWED_USER_DOMAINS", v.consumeBalancedParens),
+			v.option("ALLOWED_EMAIL_PATTERNS", v.consumeBalancedParens),
+			v.option("SAML2_SP_INITIATED_LOGIN_PAGE_LABEL", v.parseString),
+			v.option("SAML2_ENABLE_SP_INITIATED", v.parseBool),
+			v.option("SAML2_SNOWFLAKE_X509_CERT", v.parseString),
+			v.option("SAML2_SIGN_REQUEST", v.parseBool),
+			v.option("SAML2_REQUESTED_NAMEID_FORMAT", v.parseString),
+			v.option("SAML2_POST_LOGOUT_REDIRECT_URL", v.parseString),
+			v.option("SAML2_FORCE_AUTHN", v.parseBool),
+			v.option("SAML2_SNOWFLAKE_ISSUER_URL", v.parseString),
+			v.option("SAML2_SNOWFLAKE_ACS_URL", v.parseString),
+			v.commentOption(),
+		)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+				func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+			)
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+				commaList(v.wordsValue("ENABLED")),
+			)
+		})
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.Optional(func() bool { return v.MatchWord("SECURITY") }) },
 		func() bool { return v.MatchWord("INTEGRATION") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
-				// REFRESH [ SAML2_SNOWFLAKE_PRIVATE_KEY ] [ METADATA_URL ]
 				func() bool {
 					return v.Sequence(
 						func() bool { return v.MatchWord("REFRESH") },
@@ -4402,7 +6559,8 @@ func (v *Validator) ParseAlterSecurityIntegrationSaml2() bool {
 						func() bool { return v.Optional(func() bool { return v.MatchWord("METADATA_URL") }) },
 					)
 				},
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				setForm,
+				unsetForm,
 			)
 		},
 	)
@@ -4430,13 +6588,49 @@ func (v *Validator) ParseAlterSecurityIntegrationSaml2() bool {
 //
 //	ALTER [ SECURITY ] INTEGRATION <name> UNSET TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterSecurityIntegrationScim() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool { return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString) }
+	setOption := func() bool {
+		return v.Choice(
+			v.option("ENABLED", v.parseBool),
+			v.option("NETWORK_POLICY", v.parseString),
+			v.option("REJECT_TOKENS_ISSUED_BEFORE", v.parseString),
+			v.option("SYNC_PASSWORD", v.parseBool),
+			v.commentOption(),
+		)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+				func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+			)
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+				commaList(v.wordsValue("NETWORK_POLICY")),
+			)
+		})
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.Optional(func() bool { return v.MatchWord("SECURITY") }) },
 		func() bool { return v.MatchWord("INTEGRATION") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
-		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+		name,
+		func() bool { return v.Choice(setForm, unsetForm) },
 	)
 }
 
@@ -4457,15 +6651,43 @@ func (v *Validator) ParseAlterSecurityIntegrationScim() bool {
 //
 //	ALTER SEMANTIC VIEW <name> UNSET TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterSemanticView() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool { return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString) }
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+				v.commentOption(),
+			)
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+				func() bool { return v.MatchWord("COMMENT") },
+			)
+		})
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("SEMANTIC", "VIEW") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
 				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				setForm,
+				unsetForm,
 			)
 		},
 	)
@@ -4486,6 +6708,13 @@ func (v *Validator) ParseAlterSemanticView() bool {
 //
 //	ALTER SEQUENCE [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterSequence() bool {
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	setOption := func() bool {
+		return v.Choice(
+			v.wordsValue("ORDER", "NOORDER"),
+			v.commentOption(),
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.MatchWord("SEQUENCE") },
@@ -4493,9 +6722,13 @@ func (v *Validator) ParseAlterSequence() bool {
 		v.parseIdentPath,
 		func() bool {
 			return v.Choice(
-				// RENAME TO <new_name>
 				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
-				// [ SET ] [ INCREMENT [ BY ] [ = ] <interval> ] / SET <opts> / UNSET COMMENT
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("UNSET") },
+						func() bool { return v.MatchWord("COMMENT") },
+					)
+				},
 				func() bool {
 					v.Optional(func() bool { return v.MatchWord("SET") })
 					return v.Sequence(
@@ -4505,14 +6738,13 @@ func (v *Validator) ParseAlterSequence() bool {
 									func() bool { return v.MatchWord("INCREMENT") },
 									func() bool { return v.Optional(func() bool { return v.MatchWord("BY") }) },
 									func() bool { return v.Optional(func() bool { return v.MatchOp("=") }) },
-									func() bool { return v.Match(sqltok.NumberLit) },
+									num,
 								)
 							})
 						},
-						func() bool { return v.Optional(v.consumeRest) },
+						func() bool { return v.ZeroOrMore(setOption) },
 					)
 				},
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
 			)
 		},
 	)
@@ -4576,16 +6808,57 @@ func (v *Validator) ParseAlterSequence() bool {
 //	  }
 //	  USING ( <key> => <value> [ , <key> => <value> [ , ... ] ]  )
 func (v *Validator) ParseAlterService() bool {
+	name := v.parseIdentPath
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool { return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString) }
+	setOption := func() bool {
+		return v.Choice(
+			v.option("MIN_INSTANCES", num),
+			v.option("MAX_INSTANCES", num),
+			v.option("LOG_LEVEL", v.parseString),
+			v.option("AUTO_SUSPEND_SECS", num),
+			v.option("MIN_READY_INSTANCES", num),
+			v.option("QUERY_WAREHOUSE", v.parseScalar),
+			v.option("AUTO_RESUME", v.parseBool),
+			v.option("EXTERNAL_ACCESS_INTEGRATIONS", v.consumeBalancedParens),
+			v.commentOption(),
+		)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+				func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+			)
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchWord("UNSET") },
+			commaList(v.wordsValue(
+				"MIN_INSTANCES", "AUTO_SUSPEND_SECS", "MAX_INSTANCES", "LOG_LEVEL",
+				"MIN_READY_INSTANCES", "QUERY_WAREHOUSE", "AUTO_RESUME",
+				"EXTERNAL_ACCESS_INTEGRATIONS", "COMMENT",
+			)),
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.MatchWord("SERVICE") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
-				// SUSPEND | RESUME
 				v.wordsValue("SUSPEND", "RESUME"),
-				// RESTORE VOLUME ... INSTANCES ... FROM SNAPSHOT ...
 				func() bool {
 					return v.Sequence(
 						func() bool { return v.MatchWord("RESTORE") },
@@ -4593,15 +6866,14 @@ func (v *Validator) ParseAlterService() bool {
 						func() bool { return v.consumeRest() },
 					)
 				},
-				// FROM SPECIFICATION[_TEMPLATE][_FILE] ... (free-form)
 				func() bool {
 					return v.Sequence(
 						func() bool { return v.MatchWord("FROM") },
 						func() bool { return v.consumeRest() },
 					)
 				},
-				// SET <opts> | SET TAG ... | UNSET ...
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				setForm,
+				unsetForm,
 			)
 		},
 	)
@@ -4731,15 +7003,65 @@ func (v *Validator) ParseAlterSession() bool {
 //	  [ BLOCKED_SECONDARY_ROLES ]
 //	  [ COMMENT ]
 func (v *Validator) ParseAlterSessionPolicy() bool {
+	name := v.parseIdentPath
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
+	setOption := func() bool {
+		return v.Choice(
+			v.option("SESSION_IDLE_TIMEOUT_MINS", num),
+			v.option("SESSION_UI_IDLE_TIMEOUT_MINS", num),
+			v.option("SESSION_MAX_LIFESPAN_MINS", num),
+			v.option("SESSION_UI_MAX_LIFESPAN_MINS", num),
+			v.option("ALLOWED_SECONDARY_ROLES", v.consumeBalancedParens),
+			v.option("BLOCKED_SECONDARY_ROLES", v.consumeBalancedParens),
+			v.commentOption(),
+		)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+				func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+			)
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+				commaList(v.wordsValue(
+					"SESSION_IDLE_TIMEOUT_MINS",
+					"SESSION_UI_IDLE_TIMEOUT_MINS",
+					"SESSION_MAX_LIFESPAN_MINS",
+					"SESSION_UI_MAX_LIFESPAN_MINS",
+					"ALLOWED_SECONDARY_ROLES",
+					"BLOCKED_SECONDARY_ROLES",
+					"COMMENT",
+				)),
+			)
+		})
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("SESSION", "POLICY") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
 				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				setForm,
+				unsetForm,
 			)
 		},
 	)
@@ -4762,24 +7084,54 @@ func (v *Validator) ParseAlterSessionPolicy() bool {
 //
 //	ALTER SHARE [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterShare() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
+	setOption := func() bool {
+		return v.Choice(
+			v.option("ACCOUNTS", commaList(name)),
+			v.commentOption(),
+		)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+				func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+			)
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+				func() bool { return v.MatchWord("COMMENT") },
+			)
+		})
+	}
+	addRemoveForm := func() bool {
+		return v.Sequence(
+			v.wordsValue("ADD", "REMOVE"),
+			v.option("ACCOUNTS", commaList(name)),
+			func() bool { return v.Optional(v.option("SHARE_RESTRICTIONS", v.parseBool)) },
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.MatchWord("SHARE") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
-		func() bool {
-			return v.Choice(
-				// { ADD | REMOVE } ACCOUNTS = ...
-				func() bool {
-					return v.Sequence(
-						v.wordsValue("ADD", "REMOVE"),
-						func() bool { return v.MatchWord("ACCOUNTS") },
-						func() bool { return v.consumeRest() },
-					)
-				},
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
-			)
-		},
+		name,
+		func() bool { return v.Choice(addRemoveForm, setForm, unsetForm) },
 	)
 }
 
@@ -4819,14 +7171,52 @@ func (v *Validator) ParseAlterSnapshot() bool {
 //
 //	ALTER SNAPSHOT POLICY <name> UNSET TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterSnapshotPolicy() bool {
+	name := v.parseIdentPath
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
+	setOption := func() bool {
+		return v.Choice(
+			v.commentOption(),
+			v.option("SCHEDULE", v.parseString),
+			v.option("EXPIRE_AFTER_DAYS", num),
+		)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+				func() bool { return v.Sequence(setOption, func() bool { return v.ZeroOrMore(setOption) }) },
+			)
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+				v.wordsValue("COMMENT", "SCHEDULE", "EXPIRE_AFTER_DAYS"),
+			)
+		})
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("SNAPSHOT", "POLICY") },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
 				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				setForm,
+				unsetForm,
 			)
 		},
 	)
@@ -5046,13 +7436,41 @@ func (v *Validator) ParseAlterStorageLifecyclePolicy() bool {
 //
 //	ALTER STREAM [ IF EXISTS ] <name> UNSET COMMENT
 func (v *Validator) ParseAlterStream() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+				v.commentOption(),
+			)
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+				func() bool { return v.MatchWord("COMMENT") },
+			)
+		})
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.MatchWord("STREAM") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
-		// SET COMMENT/TAG ... | UNSET COMMENT/TAG ...
-		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+		name,
+		func() bool { return v.Choice(setForm, unsetForm) },
 	)
 }
 
@@ -5903,15 +8321,52 @@ func (v *Validator) ParseAlterWarehouse() bool {
 //	  }
 //	  [ , ... ]
 func (v *Validator) ParseAlterApplicationService() bool {
+	name := v.parseIdentPath
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	setOption := func() bool {
+		return v.Choice(
+			v.option("AUTO_RESUME", v.parseBool),
+			v.option("AUTO_SUSPEND_SECS", num),
+			v.option("EXTERNAL_ACCESS_INTEGRATIONS", v.consumeBalancedParens),
+			v.option("QUERY_WAREHOUSE", name),
+			v.commentOption(),
+		)
+	}
+	setForm := func() bool {
+		return v.Sequence(
+			func() bool { return v.MatchWord("SET") },
+			setOption,
+			func() bool { return v.ZeroOrMore(setOption) },
+		)
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") },
+			commaList(v.wordsValue(
+				"AUTO_RESUME",
+				"AUTO_SUSPEND_SECS",
+				"EXTERNAL_ACCESS_INTEGRATIONS",
+				"QUERY_WAREHOUSE",
+				"COMMENT",
+			)),
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("APPLICATION", "SERVICE") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
 				v.wordsValue("SUSPEND", "RESUME"),
-				// UPGRADE [ TO VERSION <version_alias> ]
 				func() bool {
 					return v.Sequence(
 						func() bool { return v.MatchWord("UPGRADE") },
@@ -5922,7 +8377,8 @@ func (v *Validator) ParseAlterApplicationService() bool {
 						},
 					)
 				},
-				func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+				setForm,
+				unsetForm,
 			)
 		},
 	)
@@ -5945,13 +8401,41 @@ func (v *Validator) ParseAlterApplicationService() bool {
 //	ALTER ARTIFACT REPOSITORY [ IF EXISTS ] <name> UNSET
 //	  TAG <tag_name> [ , <tag_name> ... ]
 func (v *Validator) ParseAlterArtifactRepository() bool {
+	name := v.parseIdentPath
+	commaList := func(item Rule) Rule {
+		return func() bool {
+			return v.Sequence(item, func() bool {
+				return v.ZeroOrMore(func() bool {
+					return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, item)
+				})
+			})
+		}
+	}
+	tagAssign := func() bool {
+		return v.Sequence(name, func() bool { return v.MatchOp("=") }, v.parseString)
+	}
+	setForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("SET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
+				v.commentOption(),
+			)
+		})
+	}
+	unsetForm := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("UNSET") }, func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
+				func() bool { return v.MatchWord("COMMENT") },
+			)
+		})
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("ARTIFACT", "REPOSITORY") },
 		func() bool { return v.ifExists() },
-		v.parseIdentPath,
-		// SET ( COMMENT | TAG ... ) | UNSET ( COMMENT | TAG ... )
-		func() bool { return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest) },
+		name,
+		func() bool { return v.Choice(setForm, unsetForm) },
 	)
 }
 
