@@ -812,18 +812,49 @@ func (v *Validator) ParseAlterApplicationPackage() bool {
 //	  MODIFY RELEASE CHANNEL <release_channel>
 //	  UNSET RELEASE DIRECTIVE <release_directive>
 func (v *Validator) ParseAlterApplicationPackageModifyReleaseChannel() bool {
-	// ALTER APPLICATION PACKAGE <name> MODIFY RELEASE CHANNEL <rc> { SET|MODIFY|UNSET } …
+	name := v.parseIdentPath
+	// Order-independent trailing options shared by the release-directive forms:
+	// VERSION / PATCH / ACCOUNTS = ( ... ) / UPGRADE_AFTER / UPGRADE_IN_MAINTENANCE_WINDOW
+	// / UPGRADE_DEADLINE.
+	trailers := func() bool {
+		return v.ZeroOrMore(func() bool {
+			return v.Choice(
+				v.option("VERSION", v.parseScalar),
+				v.option("PATCH", v.parseScalar),
+				v.option("ACCOUNTS", v.consumeBalancedParens),
+				v.option("UPGRADE_AFTER", v.parseString),
+				v.option("UPGRADE_IN_MAINTENANCE_WINDOW", v.parseBool),
+				v.option("UPGRADE_DEADLINE", v.parseString),
+			)
+		})
+	}
+	directive := func() bool {
+		return v.Choice(
+			// SET DEFAULT RELEASE DIRECTIVE [ <trailers> ]
+			func() bool {
+				return v.Sequence(func() bool { return v.phrase("SET", "DEFAULT", "RELEASE", "DIRECTIVE") }, trailers)
+			},
+			// SET RELEASE DIRECTIVE <directive> [ ACCOUNTS = ( ... ) ] [ <trailers> ]
+			func() bool {
+				return v.Sequence(func() bool { return v.phrase("SET", "RELEASE", "DIRECTIVE") }, name, trailers)
+			},
+			// MODIFY RELEASE DIRECTIVE <directive> [ <trailers> ]
+			func() bool {
+				return v.Sequence(func() bool { return v.phrase("MODIFY", "RELEASE", "DIRECTIVE") }, name, trailers)
+			},
+			// UNSET RELEASE DIRECTIVE <directive>
+			func() bool {
+				return v.Sequence(func() bool { return v.phrase("UNSET", "RELEASE", "DIRECTIVE") }, name)
+			},
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("APPLICATION", "PACKAGE") },
-		v.parseIdentPath,
+		name,
 		func() bool { return v.phrase("MODIFY", "RELEASE", "CHANNEL") },
-		v.parseIdentPath,
-		// SET DEFAULT RELEASE DIRECTIVE … | SET RELEASE DIRECTIVE … |
-		// MODIFY RELEASE DIRECTIVE … | UNSET RELEASE DIRECTIVE … — free-form.
-		func() bool {
-			return v.Sequence(v.wordsValue("SET", "MODIFY", "UNSET"), v.consumeRest)
-		},
+		name,
+		directive,
 	)
 }
 
@@ -873,31 +904,57 @@ func (v *Validator) ParseAlterApplicationPackageModifyReleaseChannel() bool {
 //
 //	ALTER APPLICATION PACKAGE <name> UNSET RELEASE DIRECTIVE <release_directive>
 func (v *Validator) ParseAlterApplicationPackageReleaseDirective() bool {
-	// ALTER APPLICATION PACKAGE <name> [MODIFY RELEASE CHANNEL <rc>]
-	//   { MODIFY RELEASE DIRECTIVE … | SET [DEFAULT] RELEASE DIRECTIVE … | UNSET RELEASE DIRECTIVE … }
+	name := v.parseIdentPath
+	// Order-independent trailing options shared by the release-directive forms:
+	// VERSION / PATCH / [ ADD | REMOVE ] ACCOUNTS = ( ... ) / UPGRADE_AFTER /
+	// UPGRADE_IN_MAINTENANCE_WINDOW / UPGRADE_DEADLINE / FORCE.
+	trailers := func() bool {
+		return v.ZeroOrMore(func() bool {
+			return v.Choice(
+				v.option("VERSION", v.parseScalar),
+				v.option("PATCH", v.parseScalar),
+				func() bool {
+					return v.Sequence(v.wordsValue("ADD", "REMOVE"), v.option("ACCOUNTS", v.consumeBalancedParens))
+				},
+				v.option("ACCOUNTS", v.consumeBalancedParens),
+				v.option("UPGRADE_AFTER", v.parseString),
+				v.option("UPGRADE_IN_MAINTENANCE_WINDOW", v.parseBool),
+				v.option("UPGRADE_DEADLINE", v.parseString),
+				func() bool { return v.MatchWord("FORCE") },
+			)
+		})
+	}
+	directive := func() bool {
+		return v.Choice(
+			// SET DEFAULT RELEASE DIRECTIVE [ <trailers> ]
+			func() bool {
+				return v.Sequence(func() bool { return v.phrase("SET", "DEFAULT", "RELEASE", "DIRECTIVE") }, trailers)
+			},
+			// SET RELEASE DIRECTIVE <directive> [ <trailers> ]
+			func() bool {
+				return v.Sequence(func() bool { return v.phrase("SET", "RELEASE", "DIRECTIVE") }, name, trailers)
+			},
+			// MODIFY RELEASE DIRECTIVE <directive> [ <trailers> ]
+			func() bool {
+				return v.Sequence(func() bool { return v.phrase("MODIFY", "RELEASE", "DIRECTIVE") }, name, trailers)
+			},
+			// UNSET RELEASE DIRECTIVE <directive>
+			func() bool {
+				return v.Sequence(func() bool { return v.phrase("UNSET", "RELEASE", "DIRECTIVE") }, name)
+			},
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("APPLICATION", "PACKAGE") },
-		v.parseIdentPath,
+		name,
 		// optional MODIFY RELEASE CHANNEL <name>
 		func() bool {
 			return v.Optional(func() bool {
-				return v.Sequence(
-					func() bool { return v.phrase("MODIFY", "RELEASE", "CHANNEL") },
-					v.parseIdentPath,
-				)
+				return v.Sequence(func() bool { return v.phrase("MODIFY", "RELEASE", "CHANNEL") }, name)
 			})
 		},
-		func() bool {
-			return v.Choice(
-				func() bool {
-					return v.Sequence(func() bool { return v.phrase("MODIFY", "RELEASE", "DIRECTIVE") }, v.consumeRest)
-				},
-				func() bool {
-					return v.Sequence(v.wordsValue("SET", "UNSET"), v.consumeRest)
-				},
-			)
-		},
+		directive,
 	)
 }
 
@@ -914,21 +971,43 @@ func (v *Validator) ParseAlterApplicationPackageReleaseDirective() bool {
 //	ALTER APPLICATION PACKAGE <name> ADD PATCH [<patch_number>] FOR VERSION [<version_identifier>]
 //	  USING <path_to_version_directory> [ LABEL = '<display_label>' ]
 func (v *Validator) ParseAlterApplicationPackageVersion() bool {
-	// ALTER APPLICATION PACKAGE <name> { ADD VERSION … | DROP VERSION … | ADD PATCH … }
+	name := v.parseIdentPath
+	num := func() bool { return v.Match(sqltok.NumberLit) }
+	// `[ <version_identifier> ] USING` — the version is optional, so try
+	// `<version> USING` first and fall back to a bare `USING` (a greedy identifier
+	// match would otherwise swallow the USING keyword).
+	optVersionUsing := func() bool {
+		return v.Choice(
+			func() bool { return v.Sequence(name, func() bool { return v.MatchWord("USING") }) },
+			func() bool { return v.MatchWord("USING") },
+		)
+	}
+	// USING <path> [ LABEL = '<display_label>' ]
+	usingPath := func() bool {
+		return v.Sequence(
+			optVersionUsing,
+			v.parseScalar, // <path_to_version_directory>
+			func() bool { return v.Optional(v.option("LABEL", v.parseString)) },
+		)
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
 		func() bool { return v.phrase("APPLICATION", "PACKAGE") },
-		v.parseIdentPath,
+		name,
 		func() bool {
 			return v.Choice(
+				// ADD VERSION [ <version> ] USING <path> [ LABEL = '<label>' ]
+				func() bool { return v.Sequence(func() bool { return v.phrase("ADD", "VERSION") }, usingPath) },
+				// DROP VERSION <version_identifier>
+				func() bool { return v.Sequence(func() bool { return v.phrase("DROP", "VERSION") }, name) },
+				// ADD PATCH [ <patch_number> ] FOR VERSION [ <version> ] USING <path> [ LABEL = '<label>' ]
 				func() bool {
-					return v.Sequence(func() bool { return v.phrase("ADD", "VERSION") }, v.consumeRest)
-				},
-				func() bool {
-					return v.Sequence(func() bool { return v.phrase("DROP", "VERSION") }, v.parseIdentPath)
-				},
-				func() bool {
-					return v.Sequence(func() bool { return v.phrase("ADD", "PATCH") }, v.consumeRest)
+					return v.Sequence(
+						func() bool { return v.phrase("ADD", "PATCH") },
+						func() bool { return v.Optional(num) },
+						func() bool { return v.phrase("FOR", "VERSION") },
+						usingPath,
+					)
 				},
 			)
 		},
