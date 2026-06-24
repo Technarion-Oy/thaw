@@ -22,6 +22,18 @@ func TestValidateAntiPatterns_Flags(t *testing.T) {
 		{`SELECT LATERALFLATTEN(x)`, "Did you mean 'LATERAL FLATTEN'"},
 		{`SELECT payload.customer.name FROM t`, "Missing colon for variant path"},
 		{`SELECT SNOWFLAKE.CORTEX.NOTAFUNC('x')`, "Unknown Cortex function"},
+		// Recovered clause-level anti-pattern validators.
+		{`SELECT * FROM t PIVOT (SUM(amount))`, "PIVOT requires FOR"},
+		{`SELECT * FROM t UNPIVOT (val FOR name IN ())`, "UNPIVOT IN list must not be empty"},
+		{`SELECT * FROM t MATCH_RECOGNIZE (PARTITION BY id ORDER BY ts PATTERN (a b))`, "requires a DEFINE clause"},
+		{`SELECT * FROM a ASOF JOIN t`, "ASOF JOIN requires a MATCH_CONDITION"},
+		{`SELECT * FROM a ASOF JOIN t ON a = b`, "ON clause is not valid with ASOF JOIN"},
+		{`INSERT OVERWRITE t SELECT 1`, "INSERT OVERWRITE requires INTO"},
+		{`SELECT * FROM t AT TIMESTAMP => '2020-01-01'`, "Time Travel clause requires parentheses"},
+		// Cross-statement transaction tracking.
+		{"BEGIN;\nUPDATE t SET a = 1;", "not committed or rolled back"},
+		{`COMMIT`, "no open transaction"},
+		{"BEGIN;\nUPDATE t SET a = 1;\nBEGIN;\nUPDATE t SET b = 2;\nCOMMIT;", "does not support nested BEGIN"},
 	}
 	for _, c := range cases {
 		m := antiPatternMarkers(c.sql)
@@ -56,6 +68,13 @@ func TestValidateAntiPatterns_Clean(t *testing.T) {
 		`SELECT SNOWFLAKE.CORTEX.SUMMARIZE('text')`,
 		`SELECT a, b FROM t WHERE a = 1 ORDER BY b`,
 		`CREATE TABLE t (id INT)`,
+		// Recovered clause-level validators — valid forms must stay clean.
+		`SELECT * FROM t PIVOT (SUM(amount) FOR month IN ('jan','feb'))`,
+		`SELECT * FROM t UNPIVOT (val FOR name IN (c1, c2))`,
+		`SELECT * FROM a ASOF JOIN t MATCH_CONDITION (a.ts >= t.ts)`,
+		`INSERT OVERWRITE INTO t SELECT 1`,
+		`SELECT * FROM t AT (OFFSET => -60)`,
+		"BEGIN;\nUPDATE t SET a = 1;\nCOMMIT;",
 	}
 	for _, sql := range clean {
 		if m := antiPatternMarkers(sql); len(m) != 0 {
