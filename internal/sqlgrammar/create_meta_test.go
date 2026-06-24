@@ -6,6 +6,32 @@ import (
 	"testing"
 )
 
+// TestAllParseMethodsAreRuleShaped guards the reflection-driven dispatch in
+// buildRegistry, which casts each method to ruleFn (func(*Validator) bool) and
+// SILENTLY skips any that don't match. A rule accidentally declared with the
+// wrong signature (an extra parameter, a non-bool return) would therefore drop
+// out of dispatch with no other test failing. Assert here that every exported
+// Parse*-prefixed method is rule-shaped so such a mistake fails loudly.
+func TestAllParseMethodsAreRuleShaped(t *testing.T) {
+	vt := reflect.TypeFor[*Validator]()
+	ruleType := reflect.TypeOf(func(*Validator) bool { return false })
+	n := 0
+	for i := 0; i < vt.NumMethod(); i++ {
+		m := vt.Method(i)
+		if !strings.HasPrefix(m.Name, "Parse") {
+			continue
+		}
+		n++
+		if m.Func.Type() != ruleType {
+			t.Errorf("%s has signature %s, want func(*Validator) bool — it would be "+
+				"silently excluded from dispatch (buildRegistry)", m.Name, m.Func.Type())
+		}
+	}
+	if n < 700 {
+		t.Fatalf("expected to find the full Parse* method set via reflection, found only %d", n)
+	}
+}
+
 // parseRulesByPrefix returns every Parse* grammar rule whose name starts with
 // prefix as a (name, method-value) pair via reflection, so invariants can be
 // asserted across whole command families without hand-maintaining a list.

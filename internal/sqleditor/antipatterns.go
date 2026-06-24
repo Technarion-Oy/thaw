@@ -64,6 +64,11 @@ func ValidateAntiPatterns(sql string, stmtRanges []StatementRange) []DiagMarker 
 		if firstTok != "GRANT" && firstTok != "REVOKE" {
 			markers = append(markers, checkUnknownCortexFunc(rawText, r)...)
 		}
+		// Stray token / dangling AS after a FROM/JOIN table reference. The grammar
+		// consumes the FROM body permissively, so it does not catch these typos.
+		if present["FROM"] || present["JOIN"] {
+			markers = append(markers, checkStrayAfterTableRef(sigTokens(stripped), stripped, r)...)
+		}
 
 		// ── Clause-level semantic anti-patterns ───────────────────────────
 		if present["PIVOT"] {
@@ -365,6 +370,59 @@ func checkMergeClauses(rawText string, r StatementRange) []DiagMarker {
 		}
 	}
 	return out
+}
+
+// checkStrayAfterTableRef flags a stray token or dangling AS immediately after a
+// FROM/JOIN table reference — typo patterns the grammar does not catch because
+// ParseSelect consumes the FROM body permissively:
+//   - `FROM t 1000`        → a bare literal where a comma/JOIN/WHERE was expected
+//   - `FROM t AS`          → AS with no alias following it
+//   - `FROM t myalias AS`  → a second AS after the alias is already given
+func checkStrayAfterTableRef(sig []sqltok.Token, sql string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+	for i := 0; i+1 < len(sig); i++ {
+		if u := tokUpper(sig[i], sql); u != "FROM" && u != "JOIN" {
+			continue
+		}
+		j := i + 1
+		if j >= len(sig) || !isIdent(sig[j]) {
+			continue // subquery "(", @stage, or nothing — not a bare table path
+		}
+		_, j = readIdentPath(sig, sql, j)
+
+		// Optional [AS] <alias>. An implicit alias must be an Identifier/QuotedIdent
+		// (not a keyword), mirroring findFromJoinWithAlias.
+		hadAS, aliasConsumed := false, false
+		if j < len(sig) && tokUpper(sig[j], sql) == "AS" {
+			hadAS = true
+			j++
+			if j < len(sig) && isAliasTok(sig[j]) {
+				j++
+				aliasConsumed = true
+			}
+		} else if j < len(sig) && isAliasTok(sig[j]) {
+			j++
+			aliasConsumed = true
+		}
+
+		switch {
+		case hadAS && !aliasConsumed:
+			// `FROM t AS` with no (valid) alias after AS.
+			markers = append(markers, diagMarkerSpan(r,
+				"Expected an alias after AS in the FROM clause."))
+		case j < len(sig) && (sig[j].Kind == sqltok.NumberLit ||
+			sig[j].Kind == sqltok.StringLit || sig[j].Kind == sqltok.DollarQuoted):
+			markers = append(markers, diagMarkerSpan(r,
+				"Unexpected token '"+sig[j].Text(sql)+"' after table reference in FROM clause. "+
+					"Add a comma, JOIN, or WHERE clause."))
+		case j < len(sig) && aliasConsumed && tokUpper(sig[j], sql) == "AS":
+			// `FROM t aaa AS …` — a second AS after the alias is already given.
+			markers = append(markers, diagMarkerSpan(r,
+				"Unexpected 'AS' after the table alias in the FROM clause."))
+		}
+		i = j - 1 // resume scanning after this table reference
+	}
+	return markers
 }
 
 // checkUnknownCortexFunc flags a SNOWFLAKE.CORTEX.<name>( call where <name> is

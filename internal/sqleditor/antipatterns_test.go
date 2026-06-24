@@ -30,6 +30,11 @@ func TestValidateAntiPatterns_Flags(t *testing.T) {
 		{`SELECT * FROM a ASOF JOIN t ON a = b`, "ON clause is not valid with ASOF JOIN"},
 		{`INSERT OVERWRITE t SELECT 1`, "INSERT OVERWRITE requires INTO"},
 		{`SELECT * FROM t AT TIMESTAMP => '2020-01-01'`, "Time Travel clause requires parentheses"},
+		// Stray token / dangling AS after a FROM/JOIN table reference (ported from
+		// the removed checkStrayAfterTableRef — not caught by the grammar).
+		{`SELECT * FROM t 1000`, "Unexpected token '1000' after table reference"},
+		{`SELECT * FROM t AS`, "Expected an alias after AS"},
+		{`SELECT * FROM t myalias AS`, "Unexpected 'AS' after the table alias"},
 		// Cross-statement transaction tracking.
 		{"BEGIN;\nUPDATE t SET a = 1;", "not committed or rolled back"},
 		{`COMMIT`, "no open transaction"},
@@ -68,6 +73,15 @@ func TestValidateAntiPatterns_Clean(t *testing.T) {
 		`SELECT SNOWFLAKE.CORTEX.SUMMARIZE('text')`,
 		`SELECT a, b FROM t WHERE a = 1 ORDER BY b`,
 		`CREATE TABLE t (id INT)`,
+		// Well-formed FROM/JOIN table references must NOT trip checkStrayAfterTableRef.
+		`SELECT * FROM t`,
+		`SELECT * FROM t a`,
+		`SELECT * FROM t AS a`,
+		`SELECT * FROM t, s`,
+		`SELECT * FROM t JOIN s ON t.id = s.id`,
+		`SELECT * FROM t WHERE a = 1`,
+		`SELECT * FROM t GROUP BY a`,
+		`SELECT * FROM db.sch.t alias WHERE alias.x = 1`,
 		// Recovered clause-level validators — valid forms must stay clean.
 		`SELECT * FROM t PIVOT (SUM(amount) FOR month IN ('jan','feb'))`,
 		`SELECT * FROM t UNPIVOT (val FOR name IN (c1, c2))`,
