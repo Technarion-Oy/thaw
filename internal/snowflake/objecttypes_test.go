@@ -58,6 +58,9 @@ func TestObjectScopeClassification(t *testing.T) {
 		"DATABASE ROLE":     ScopeDatabase,
 		"APPLICATION ROLE":  ScopeApplication,
 		"ORGANIZATION USER": ScopeOrganization,
+		// INDEX has a table-relative name, not a db.schema path — must not be schema-
+		// scoped or it false-positives the "no database selected" check.
+		"INDEX": ScopeUnknown,
 	}
 	got := map[string]ObjectScope{}
 	for _, ot := range ObjectTypes {

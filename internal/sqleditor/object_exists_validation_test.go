@@ -89,6 +89,10 @@ func TestValidateTablesExist_NoContext_SchemaScopedObjects(t *testing.T) {
 		`CREATE DATABASE db1;`,
 		`CREATE ROLE r1;`,
 		`CREATE SEQUENCE mydb.sch.seq_01;`,
+		// INDEX names are table-relative, not db.schema-qualified, so an unqualified
+		// index name must never trigger the warning (PR #561 review).
+		`CREATE INDEX idx ON db.sch.tbl(c);`,
+		`CREATE INDEX idx ON tbl(c);`,
 	}
 	for _, sql := range silent {
 		if m := noCtx(sql); len(m) != 0 {

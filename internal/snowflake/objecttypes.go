@@ -36,6 +36,14 @@ const (
 	// ScopeOrganization — the object lives at the organization level
 	// (ORGANIZATION ACCOUNT / USER / PROFILE / LISTING).
 	ScopeOrganization
+	// ScopeUnknown — the object's name is not a `db.schema.name` path so the
+	// "needs an active database/schema" question doesn't apply (INDEX, whose name
+	// is relative to its already-qualified table), or its scope is genuinely
+	// ambiguous (newer/preview objects). Because ScopeSchema is the ONLY scope that
+	// raises the "no database/schema selected" diagnostic, anything uncertain must
+	// land here rather than ScopeSchema — picking schema-when-unsure maximizes false
+	// positives, the opposite of conservative.
+	ScopeUnknown
 )
 
 // String renders the scope as a lowercase word for diagnostics and logging.
@@ -51,6 +59,8 @@ func (s ObjectScope) String() string {
 		return "application"
 	case ScopeOrganization:
 		return "organization"
+	case ScopeUnknown:
+		return "unknown"
 	default:
 		return "unknown"
 	}
@@ -75,9 +85,11 @@ func (o ObjectType) Name() string { return strings.ToLower(strings.Join(o.Keywor
 // editor's "no database/schema selected" diagnostic) must read from here rather
 // than maintaining their own lists.
 //
-// Scope reflects Snowflake's namespace model. When a newer/rarely-used object's
-// scope is genuinely ambiguous it is classified conservatively so the editor does
-// not raise a false "missing database/schema" warning for it.
+// Scope reflects Snowflake's namespace model. Because ScopeSchema is the only
+// scope that raises the "no database/schema selected" diagnostic, the conservative
+// classification for a genuinely ambiguous object is ScopeUnknown — NOT
+// ScopeSchema — so an uncertain guess errs toward a missed warning rather than a
+// false positive on valid DDL.
 var ObjectTypes = []ObjectType{
 	// ── Schema-scoped: tables and table-likes ────────────────────────────────
 	{[]string{"TABLE"}, ScopeSchema},
@@ -104,7 +116,10 @@ var ObjectTypes = []ObjectType{
 	{[]string{"PIPE"}, ScopeSchema},
 	{[]string{"TASK"}, ScopeSchema},
 	{[]string{"FILE", "FORMAT"}, ScopeSchema},
-	{[]string{"INDEX"}, ScopeSchema},
+	// INDEX names a (hybrid-table) index relative to its already-qualified table —
+	// `CREATE INDEX idx ON db.sch.tbl(c)`, never `db.sch.idx` — so it must NOT
+	// require an active database/schema.
+	{[]string{"INDEX"}, ScopeUnknown},
 	{[]string{"TYPE"}, ScopeSchema},
 	{[]string{"SECRET"}, ScopeSchema},
 	{[]string{"TAG"}, ScopeSchema},
@@ -141,9 +156,11 @@ var ObjectTypes = []ObjectType{
 	{[]string{"ARTIFACT", "REPOSITORY"}, ScopeSchema},
 	{[]string{"DATASET"}, ScopeSchema},
 	{[]string{"EXPERIMENT"}, ScopeSchema},
-	{[]string{"SNAPSHOT"}, ScopeSchema},
-	{[]string{"BACKUP", "SET"}, ScopeSchema},
-	{[]string{"SNAPSHOT", "SET"}, ScopeSchema},
+	// Newer/preview backup & snapshot objects — scope (and whether the name is
+	// path-qualified) is not firmly documented, so keep them out of the warning.
+	{[]string{"SNAPSHOT"}, ScopeUnknown},
+	{[]string{"BACKUP", "SET"}, ScopeUnknown},
+	{[]string{"SNAPSHOT", "SET"}, ScopeUnknown},
 	{[]string{"DBT", "PROJECT"}, ScopeSchema},
 	{[]string{"DCM", "PROJECT"}, ScopeSchema},
 	{[]string{"NOTEBOOK", "PROJECT"}, ScopeSchema},
