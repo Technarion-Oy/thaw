@@ -1224,19 +1224,17 @@ func (v *Validator) ParseCreateComputePool() bool {
 		// The remaining options may appear in any order (MIN_NODES / MAX_NODES /
 		// INSTANCE_FAMILY are required but order-independent in practice).
 		func() bool {
-			return v.ZeroOrMore(func() bool {
-				return v.Choice(
-					v.option("MIN_NODES", num),
-					v.option("MAX_NODES", num),
-					v.option("INSTANCE_FAMILY", v.parseIdentPath),
-					v.option("AUTO_RESUME", v.parseBool),
-					v.option("INITIALLY_SUSPENDED", v.parseBool),
-					v.option("AUTO_SUSPEND_SECS", num),
-					v.option("PLACEMENT_GROUP", v.parseString),
-					v.tagClause,
-					v.commentOption(),
-				)
-			})
+			return v.unorderedOnce(
+				v.option("MIN_NODES", num),
+				v.option("MAX_NODES", num),
+				v.option("INSTANCE_FAMILY", v.parseIdentPath),
+				v.option("AUTO_RESUME", v.parseBool),
+				v.option("INITIALLY_SUSPENDED", v.parseBool),
+				v.option("AUTO_SUSPEND_SECS", num),
+				v.option("PLACEMENT_GROUP", v.parseString),
+				v.tagClause,
+				v.commentOption(),
+			)
 		},
 	)
 }
@@ -1376,19 +1374,17 @@ func (v *Validator) ParseCreateCortexSearchService() bool {
 	}
 	// The shared trailing option list.
 	options := func() bool {
-		return v.ZeroOrMore(func() bool {
-			return v.Choice(
-				v.option("WAREHOUSE", v.parseIdentPath),
-				v.option("TARGET_LAG", v.parseString),
-				v.option("EMBEDDING_MODEL", v.parseIdentPath),
-				v.option("REFRESH_MODE", v.wordsValue("FULL", "INCREMENTAL")),
-				v.option("INITIALIZE", v.wordsValue("ON_CREATE", "ON_SCHEDULE")),
-				v.option("FULL_INDEX_BUILD_INTERVAL_DAYS", num),
-				v.option("REQUEST_LOGGING", v.parseBool),
-				v.option("AUTO_SUSPEND", num),
-				v.commentOption(),
-			)
-		})
+		return v.unorderedOnce(
+			v.option("WAREHOUSE", v.parseIdentPath),
+			v.option("TARGET_LAG", v.parseString),
+			v.option("EMBEDDING_MODEL", v.parseIdentPath),
+			v.option("REFRESH_MODE", v.wordsValue("FULL", "INCREMENTAL")),
+			v.option("INITIALIZE", v.wordsValue("ON_CREATE", "ON_SCHEDULE")),
+			v.option("FULL_INDEX_BUILD_INTERVAL_DAYS", num),
+			v.option("REQUEST_LOGGING", v.parseBool),
+			v.option("AUTO_SUSPEND", num),
+			v.commentOption(),
+		)
 	}
 	// AS <query> — consume a permissive run of the remaining tokens.
 	asQuery := func() bool {
@@ -1993,14 +1989,12 @@ func (v *Validator) ParseCreateDbtProject() bool {
 			})
 		},
 		func() bool {
-			return v.ZeroOrMore(func() bool {
-				return v.Choice(
-					v.commentOption(),
-					v.option("DBT_VERSION", v.parseScalar),
-					v.option("DEFAULT_TARGET", v.parseIdentPath),
-					v.option("EXTERNAL_ACCESS_INTEGRATIONS", func() bool { return v.parseParenList(v.parseIdentPath) }),
-				)
-			})
+			return v.unorderedOnce(
+				v.commentOption(),
+				v.option("DBT_VERSION", v.parseScalar),
+				v.option("DEFAULT_TARGET", v.parseIdentPath),
+				v.option("EXTERNAL_ACCESS_INTEGRATIONS", func() bool { return v.parseParenList(v.parseIdentPath) }),
+			)
 		},
 	)
 }
@@ -2022,12 +2016,10 @@ func (v *Validator) ParseCreateDcmProject() bool {
 		v.ifNotExists,
 		v.parseIdentPath,
 		func() bool {
-			return v.ZeroOrMore(func() bool {
-				return v.Choice(
-					v.option("LOG_LEVEL", v.wordsValue("DEBUG", "INFO", "WARN", "ERROR")),
-					v.commentOption(),
-				)
-			})
+			return v.unorderedOnce(
+				v.option("LOG_LEVEL", v.wordsValue("DEBUG", "INFO", "WARN", "ERROR")),
+				v.commentOption(),
+			)
 		},
 	)
 }
@@ -2391,17 +2383,15 @@ func (v *Validator) ParseCreateExternalAccessIntegration() bool {
 		// ALLOWED_NETWORK_RULES and ENABLED are required; the optional ones may
 		// be interleaved, so accept the whole set order-independently.
 		func() bool {
-			return v.ZeroOrMore(func() bool {
-				return v.Choice(
-					v.option("ALLOWED_NETWORK_RULES", parenIdentList),
-					v.option("ALLOWED_API_AUTHENTICATION_INTEGRATIONS",
-						func() bool { return v.Choice(parenIdentList, v.wordsValue("NONE")) }),
-					v.option("ALLOWED_AUTHENTICATION_SECRETS",
-						func() bool { return v.Choice(parenIdentList, v.wordsValue("ALL", "NONE")) }),
-					v.option("ENABLED", v.parseBool),
-					v.commentOption(),
-				)
-			})
+			return v.unorderedOnce(
+				v.option("ALLOWED_NETWORK_RULES", parenIdentList),
+				v.option("ALLOWED_API_AUTHENTICATION_INTEGRATIONS",
+					func() bool { return v.Choice(parenIdentList, v.wordsValue("NONE")) }),
+				v.option("ALLOWED_AUTHENTICATION_SECRETS",
+					func() bool { return v.Choice(parenIdentList, v.wordsValue("ALL", "NONE")) }),
+				v.option("ENABLED", v.parseBool),
+				v.commentOption(),
+			)
 		},
 	)
 }
@@ -2481,18 +2471,16 @@ func (v *Validator) ParseCreateExternalFunction() bool {
 		// Order-independent option list (API_INTEGRATION is required but accept
 		// any order). The trailing AS clause is matched after the loop.
 		func() bool {
-			return v.ZeroOrMore(func() bool {
-				return v.Choice(
-					v.commentOption(),
-					v.option("API_INTEGRATION", v.parseIdentPath),
-					v.option("HEADERS", v.consumeBalancedParens),
-					v.option("CONTEXT_HEADERS", v.consumeBalancedParens),
-					v.option("MAX_BATCH_ROWS", num),
-					v.option("COMPRESSION", v.parseScalar),
-					v.option("REQUEST_TRANSLATOR", v.parseIdentPath),
-					v.option("RESPONSE_TRANSLATOR", v.parseIdentPath),
-				)
-			})
+			return v.unorderedOnce(
+				v.commentOption(),
+				v.option("API_INTEGRATION", v.parseIdentPath),
+				v.option("HEADERS", v.consumeBalancedParens),
+				v.option("CONTEXT_HEADERS", v.consumeBalancedParens),
+				v.option("MAX_BATCH_ROWS", num),
+				v.option("COMPRESSION", v.parseScalar),
+				v.option("REQUEST_TRANSLATOR", v.parseIdentPath),
+				v.option("RESPONSE_TRANSLATOR", v.parseIdentPath),
+			)
 		},
 		// AS '<url_of_proxy_and_resource>'
 		func() bool { return v.MatchKeyword("AS") },
@@ -2691,13 +2679,11 @@ func (v *Validator) ParseCreateExternalVolume() bool {
 		v.parseIdentPath,
 		// Order-independent: STORAGE_LOCATIONS (required) plus options.
 		func() bool {
-			return v.ZeroOrMore(func() bool {
-				return v.Choice(
-					v.option("STORAGE_LOCATIONS", v.consumeBalancedParens),
-					v.option("ALLOW_WRITES", v.parseBool),
-					v.commentOption(),
-				)
-			})
+			return v.unorderedOnce(
+				v.option("STORAGE_LOCATIONS", v.consumeBalancedParens),
+				v.option("ALLOW_WRITES", v.parseBool),
+				v.commentOption(),
+			)
 		},
 	)
 }
@@ -3097,18 +3083,16 @@ func (v *Validator) ParseCreateFunctionSnowparkContainerServices() bool {
 		func() bool { return v.Optional(v.wordsValue("VOLATILE", "IMMUTABLE")) },
 		// SERVICE and ENDPOINT are required; accept the whole set in any order.
 		func() bool {
-			return v.ZeroOrMore(func() bool {
-				return v.Choice(
-					v.option("SERVICE", v.parseIdentPath),
-					v.option("ENDPOINT", v.parseIdentPath),
-					v.commentOption(),
-					v.option("CONTEXT_HEADERS", v.consumeBalancedParens),
-					v.option("MAX_BATCH_ROWS", num),
-					v.option("MAX_BATCH_RETRIES", num),
-					v.option("ON_BATCH_FAILURE", v.wordsValue("ABORT", "RETURN_NULL")),
-					v.option("BATCH_TIMEOUT_SECS", num),
-				)
-			})
+			return v.unorderedOnce(
+				v.option("SERVICE", v.parseIdentPath),
+				v.option("ENDPOINT", v.parseIdentPath),
+				v.commentOption(),
+				v.option("CONTEXT_HEADERS", v.consumeBalancedParens),
+				v.option("MAX_BATCH_ROWS", num),
+				v.option("MAX_BATCH_RETRIES", num),
+				v.option("ON_BATCH_FAILURE", v.wordsValue("ABORT", "RETURN_NULL")),
+				v.option("BATCH_TIMEOUT_SECS", num),
+			)
 		},
 		func() bool { return v.MatchKeyword("AS") },
 		v.parseString,
@@ -3171,15 +3155,13 @@ func (v *Validator) ParseCreateGitRepository() bool {
 		v.parseIdentPath,
 		// ORIGIN and API_INTEGRATION are required; accept the whole set in any order.
 		func() bool {
-			return v.ZeroOrMore(func() bool {
-				return v.Choice(
-					v.option("ORIGIN", v.parseString),
-					v.option("API_INTEGRATION", v.parseIdentPath),
-					v.option("GIT_CREDENTIALS", v.parseIdentPath),
-					v.commentOption(),
-					v.tagClause,
-				)
-			})
+			return v.unorderedOnce(
+				v.option("ORIGIN", v.parseString),
+				v.option("API_INTEGRATION", v.parseIdentPath),
+				v.option("GIT_CREDENTIALS", v.parseIdentPath),
+				v.commentOption(),
+				v.tagClause,
+			)
 		},
 	)
 }
@@ -3759,15 +3741,13 @@ func (v *Validator) ParseCreateImageRepository() bool {
 		v.ifNotExists,
 		v.parseIdentPath,
 		func() bool {
-			return v.ZeroOrMore(func() bool {
-				return v.Choice(
-					v.option("ENCRYPTION", func() bool {
-						return v.parseParenList(v.option("TYPE", v.parseString))
-					}),
-					v.commentOption(),
-					v.tagClause,
-				)
-			})
+			return v.unorderedOnce(
+				v.option("ENCRYPTION", func() bool {
+					return v.parseParenList(v.option("TYPE", v.parseString))
+				}),
+				v.commentOption(),
+				v.tagClause,
+			)
 		},
 	)
 }
@@ -4311,12 +4291,10 @@ func (v *Validator) ParseCreateMaskingPolicy() bool {
 		func() bool { return v.MatchOp(">") },
 		consumeBody,
 		func() bool {
-			return v.ZeroOrMore(func() bool {
-				return v.Choice(
-					v.commentOption(),
-					v.option("EXEMPT_OTHER_POLICIES", v.parseBool),
-				)
-			})
+			return v.unorderedOnce(
+				v.commentOption(),
+				v.option("EXEMPT_OTHER_POLICIES", v.parseBool),
+			)
 		},
 	)
 }
@@ -4712,14 +4690,12 @@ func (v *Validator) ParseCreateNetworkRule() bool {
 		v.parseIdentPath,
 		// Order-independent options; TYPE/VALUE_LIST/MODE required, COMMENT optional.
 		func() bool {
-			return v.ZeroOrMore(func() bool {
-				return v.Choice(
-					v.option("TYPE", typeValue),
-					v.option("VALUE_LIST", func() bool { return v.parseParenList(v.parseString) }),
-					v.option("MODE", modeValue),
-					v.commentOption(),
-				)
-			})
+			return v.unorderedOnce(
+				v.option("TYPE", typeValue),
+				v.option("VALUE_LIST", func() bool { return v.parseParenList(v.parseString) }),
+				v.option("MODE", modeValue),
+				v.commentOption(),
+			)
 		},
 	)
 }
@@ -4755,17 +4731,15 @@ func (v *Validator) ParseCreateNotebook() bool {
 			})
 		},
 		func() bool {
-			return v.ZeroOrMore(func() bool {
-				return v.Choice(
-					v.option("MAIN_FILE", v.parseString),
-					v.commentOption(),
-					v.option("QUERY_WAREHOUSE", v.parseIdentPath),
-					v.option("IDLE_AUTO_SHUTDOWN_TIME_SECONDS", v.parseNumber),
-					v.option("RUNTIME_NAME", v.parseString),
-					v.option("COMPUTE_POOL", v.parseScalar),
-					v.option("WAREHOUSE", v.parseIdentPath),
-				)
-			})
+			return v.unorderedOnce(
+				v.option("MAIN_FILE", v.parseString),
+				v.commentOption(),
+				v.option("QUERY_WAREHOUSE", v.parseIdentPath),
+				v.option("IDLE_AUTO_SHUTDOWN_TIME_SECONDS", v.parseNumber),
+				v.option("RUNTIME_NAME", v.parseString),
+				v.option("COMPUTE_POOL", v.parseScalar),
+				v.option("WAREHOUSE", v.parseIdentPath),
+			)
 		},
 	)
 }
@@ -4848,16 +4822,14 @@ func (v *Validator) ParseCreateNotificationIntegrationEmail() bool {
 		v.ifNotExists,
 		v.parseIdentPath,
 		func() bool {
-			return v.ZeroOrMore(func() bool {
-				return v.Choice(
-					v.option("TYPE", v.wordsValue("EMAIL")),
-					v.option("ENABLED", v.parseBool),
-					v.option("ALLOWED_RECIPIENTS", func() bool { return v.parseParenList(v.parseString) }),
-					v.option("DEFAULT_RECIPIENTS", func() bool { return v.parseParenList(v.parseString) }),
-					v.option("DEFAULT_SUBJECT", v.parseString),
-					v.commentOption(),
-				)
-			})
+			return v.unorderedOnce(
+				v.option("TYPE", v.wordsValue("EMAIL")),
+				v.option("ENABLED", v.parseBool),
+				v.option("ALLOWED_RECIPIENTS", func() bool { return v.parseParenList(v.parseString) }),
+				v.option("DEFAULT_RECIPIENTS", func() bool { return v.parseParenList(v.parseString) }),
+				v.option("DEFAULT_SUBJECT", v.parseString),
+				v.commentOption(),
+			)
 		},
 	)
 }
@@ -4884,17 +4856,15 @@ func (v *Validator) ParseCreateNotificationIntegrationInboundAzureEventGrid() bo
 		v.ifNotExists,
 		v.parseIdentPath,
 		func() bool {
-			return v.ZeroOrMore(func() bool {
-				return v.Choice(
-					v.option("ENABLED", v.parseBool),
-					v.option("TYPE", v.wordsValue("QUEUE")),
-					v.option("NOTIFICATION_PROVIDER", v.wordsValue("AZURE_STORAGE_QUEUE")),
-					v.option("AZURE_STORAGE_QUEUE_PRIMARY_URI", v.parseString),
-					v.option("AZURE_TENANT_ID", v.parseString),
-					v.option("USE_PRIVATELINK_ENDPOINT", v.parseBool),
-					v.commentOption(),
-				)
-			})
+			return v.unorderedOnce(
+				v.option("ENABLED", v.parseBool),
+				v.option("TYPE", v.wordsValue("QUEUE")),
+				v.option("NOTIFICATION_PROVIDER", v.wordsValue("AZURE_STORAGE_QUEUE")),
+				v.option("AZURE_STORAGE_QUEUE_PRIMARY_URI", v.parseString),
+				v.option("AZURE_TENANT_ID", v.parseString),
+				v.option("USE_PRIVATELINK_ENDPOINT", v.parseBool),
+				v.commentOption(),
+			)
 		},
 	)
 }
@@ -4919,15 +4889,13 @@ func (v *Validator) ParseCreateNotificationIntegrationInboundGooglePubSub() bool
 		v.ifNotExists,
 		v.parseIdentPath,
 		func() bool {
-			return v.ZeroOrMore(func() bool {
-				return v.Choice(
-					v.option("ENABLED", v.parseBool),
-					v.option("TYPE", v.wordsValue("QUEUE")),
-					v.option("NOTIFICATION_PROVIDER", v.wordsValue("GCP_PUBSUB")),
-					v.option("GCP_PUBSUB_SUBSCRIPTION_NAME", v.parseString),
-					v.commentOption(),
-				)
-			})
+			return v.unorderedOnce(
+				v.option("ENABLED", v.parseBool),
+				v.option("TYPE", v.wordsValue("QUEUE")),
+				v.option("NOTIFICATION_PROVIDER", v.wordsValue("GCP_PUBSUB")),
+				v.option("GCP_PUBSUB_SUBSCRIPTION_NAME", v.parseString),
+				v.commentOption(),
+			)
 		},
 	)
 }
@@ -4954,17 +4922,15 @@ func (v *Validator) ParseCreateNotificationIntegrationOutboundAmazonSns() bool {
 		v.ifNotExists,
 		v.parseIdentPath,
 		func() bool {
-			return v.ZeroOrMore(func() bool {
-				return v.Choice(
-					v.option("ENABLED", v.parseBool),
-					v.option("TYPE", v.wordsValue("QUEUE")),
-					v.option("DIRECTION", v.wordsValue("OUTBOUND")),
-					v.option("NOTIFICATION_PROVIDER", v.wordsValue("AWS_SNS")),
-					v.option("AWS_SNS_TOPIC_ARN", v.parseString),
-					v.option("AWS_SNS_ROLE_ARN", v.parseString),
-					v.commentOption(),
-				)
-			})
+			return v.unorderedOnce(
+				v.option("ENABLED", v.parseBool),
+				v.option("TYPE", v.wordsValue("QUEUE")),
+				v.option("DIRECTION", v.wordsValue("OUTBOUND")),
+				v.option("NOTIFICATION_PROVIDER", v.wordsValue("AWS_SNS")),
+				v.option("AWS_SNS_TOPIC_ARN", v.parseString),
+				v.option("AWS_SNS_ROLE_ARN", v.parseString),
+				v.commentOption(),
+			)
 		},
 	)
 }
@@ -4991,17 +4957,15 @@ func (v *Validator) ParseCreateNotificationIntegrationOutboundAzureEventGrid() b
 		v.ifNotExists,
 		v.parseIdentPath,
 		func() bool {
-			return v.ZeroOrMore(func() bool {
-				return v.Choice(
-					v.option("ENABLED", v.parseBool),
-					v.option("TYPE", v.wordsValue("QUEUE")),
-					v.option("DIRECTION", v.wordsValue("OUTBOUND")),
-					v.option("NOTIFICATION_PROVIDER", v.wordsValue("AZURE_EVENT_GRID")),
-					v.option("AZURE_EVENT_GRID_TOPIC_ENDPOINT", v.parseString),
-					v.option("AZURE_TENANT_ID", v.parseString),
-					v.commentOption(),
-				)
-			})
+			return v.unorderedOnce(
+				v.option("ENABLED", v.parseBool),
+				v.option("TYPE", v.wordsValue("QUEUE")),
+				v.option("DIRECTION", v.wordsValue("OUTBOUND")),
+				v.option("NOTIFICATION_PROVIDER", v.wordsValue("AZURE_EVENT_GRID")),
+				v.option("AZURE_EVENT_GRID_TOPIC_ENDPOINT", v.parseString),
+				v.option("AZURE_TENANT_ID", v.parseString),
+				v.commentOption(),
+			)
 		},
 	)
 }
@@ -5027,16 +4991,14 @@ func (v *Validator) ParseCreateNotificationIntegrationOutboundGooglePubSub() boo
 		v.ifNotExists,
 		v.parseIdentPath,
 		func() bool {
-			return v.ZeroOrMore(func() bool {
-				return v.Choice(
-					v.option("ENABLED", v.parseBool),
-					v.option("TYPE", v.wordsValue("QUEUE")),
-					v.option("DIRECTION", v.wordsValue("OUTBOUND")),
-					v.option("NOTIFICATION_PROVIDER", v.wordsValue("GCP_PUBSUB")),
-					v.option("GCP_PUBSUB_TOPIC_NAME", v.parseString),
-					v.commentOption(),
-				)
-			})
+			return v.unorderedOnce(
+				v.option("ENABLED", v.parseBool),
+				v.option("TYPE", v.wordsValue("QUEUE")),
+				v.option("DIRECTION", v.wordsValue("OUTBOUND")),
+				v.option("NOTIFICATION_PROVIDER", v.wordsValue("GCP_PUBSUB")),
+				v.option("GCP_PUBSUB_TOPIC_NAME", v.parseString),
+				v.commentOption(),
+			)
 		},
 	)
 }
@@ -5064,17 +5026,15 @@ func (v *Validator) ParseCreateNotificationIntegrationWebhooks() bool {
 		v.ifNotExists,
 		v.parseIdentPath,
 		func() bool {
-			return v.ZeroOrMore(func() bool {
-				return v.Choice(
-					v.option("TYPE", v.wordsValue("WEBHOOK")),
-					v.option("ENABLED", v.parseBool),
-					v.option("WEBHOOK_URL", v.parseString),
-					v.option("WEBHOOK_SECRET", v.parseIdentPath),
-					v.option("WEBHOOK_BODY_TEMPLATE", v.parseString),
-					v.option("WEBHOOK_HEADERS", func() bool { return v.parseParenList(headerItem) }),
-					v.commentOption(),
-				)
-			})
+			return v.unorderedOnce(
+				v.option("TYPE", v.wordsValue("WEBHOOK")),
+				v.option("ENABLED", v.parseBool),
+				v.option("WEBHOOK_URL", v.parseString),
+				v.option("WEBHOOK_SECRET", v.parseIdentPath),
+				v.option("WEBHOOK_BODY_TEMPLATE", v.parseString),
+				v.option("WEBHOOK_HEADERS", func() bool { return v.parseParenList(headerItem) }),
+				v.commentOption(),
+			)
 		},
 	)
 }
@@ -5192,21 +5152,19 @@ func (v *Validator) ParseCreateOrganizationAccount() bool {
 		// Order-independent property list (ADMIN_NAME, EMAIL, EDITION required by doc;
 		// kept lenient as an option set).
 		func() bool {
-			return v.ZeroOrMore(func() bool {
-				return v.Choice(
-					v.option("ADMIN_NAME", v.parseScalar),
-					v.option("ADMIN_PASSWORD", v.parseString),
-					v.option("ADMIN_RSA_PUBLIC_KEY", v.parseScalar),
-					v.option("FIRST_NAME", v.parseScalar),
-					v.option("LAST_NAME", v.parseScalar),
-					v.option("EMAIL", v.parseString),
-					v.option("MUST_CHANGE_PASSWORD", v.parseBool),
-					v.option("EDITION", v.wordsValue("ENTERPRISE", "BUSINESS_CRITICAL")),
-					v.option("REGION_GROUP", v.parseScalar),
-					v.option("REGION", v.parseScalar),
-					v.commentOption(),
-				)
-			})
+			return v.unorderedOnce(
+				v.option("ADMIN_NAME", v.parseScalar),
+				v.option("ADMIN_PASSWORD", v.parseString),
+				v.option("ADMIN_RSA_PUBLIC_KEY", v.parseScalar),
+				v.option("FIRST_NAME", v.parseScalar),
+				v.option("LAST_NAME", v.parseScalar),
+				v.option("EMAIL", v.parseString),
+				v.option("MUST_CHANGE_PASSWORD", v.parseBool),
+				v.option("EDITION", v.wordsValue("ENTERPRISE", "BUSINESS_CRITICAL")),
+				v.option("REGION_GROUP", v.parseScalar),
+				v.option("REGION", v.parseScalar),
+				v.commentOption(),
+			)
 		},
 	)
 }
@@ -6991,9 +6949,7 @@ func (v *Validator) ParseCreateSnapshot() bool {
 		v.parseScalar,
 		// [ COMMENT = ... ] and [ TAG ( ... ) ] in any order.
 		func() bool {
-			return v.ZeroOrMore(func() bool {
-				return v.Choice(v.commentOption(), v.tagClause)
-			})
+			return v.unorderedOnce(v.commentOption(), v.tagClause)
 		},
 	)
 }

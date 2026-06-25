@@ -25,6 +25,9 @@ func TestParseCreateNotebook(t *testing.T) {
 		`CREATE NOTEBOOK`,
 		`CREATE OR REPLACE NOTEBOOK nb MAIN_FILE 'main.ipynb'`,
 		`NOTEBOOK nb`,
+		// Each order-independent option may appear at most once (unorderedOnce).
+		`CREATE OR REPLACE NOTEBOOK db.sch.nb COMMENT = '' COMMENT = ''`,
+		`CREATE NOTEBOOK nb WAREHOUSE = w1 WAREHOUSE = w2`,
 	)
 }
 
