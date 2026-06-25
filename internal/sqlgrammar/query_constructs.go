@@ -1086,6 +1086,12 @@ func (v *Validator) atSelectBoundary() bool {
 		// clause only when it begins a set operation; otherwise it's part of the body.
 		return v.exceptBeginsSetOp()
 	}
+	if w == "GROUP" && v.pos > 0 && strings.EqualFold(v.tokens[v.pos-1].Text(v.src), "WITHIN") {
+		// `<agg>(…) WITHIN GROUP (ORDER BY …)` — an ordered-set aggregate, not a
+		// GROUP BY clause. The GROUP here is part of the projection expression, so
+		// it must not end the clause body (LISTAGG/ARRAY_AGG/PERCENTILE_CONT/…).
+		return false
+	}
 	return selectClauseBoundaries[w]
 }
 
@@ -1242,7 +1248,10 @@ func (v *Validator) selectOrderByClause() bool {
 func (v *Validator) selectLimitOffsetFetchClause() bool {
 	return v.Sequence(
 		v.wordsValue("LIMIT", "OFFSET", "FETCH"),
-		func() bool { return v.consumeClauseBody(false, "") },
+		// A row-count operand is required — a bare `LIMIT`/`OFFSET`/`FETCH` is
+		// incomplete, and requiring it makes ExpectedAt offer a count hint at the
+		// cursor rather than the next clause's keywords.
+		func() bool { return v.consumeClauseBody(true, "row count") },
 	)
 }
 

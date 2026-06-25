@@ -86,6 +86,11 @@ func TestParseSelect(t *testing.T) {
 		`SELECT * EXCEPT (col1, col2) FROM t`,
 		`SELECT a FROM t EXCEPT (SELECT b FROM u)`, // parenthesized set-op operand still works
 		`SELECT a FROM t EXCEPT DISTINCT SELECT b FROM u`,
+		// WITHIN GROUP (ORDER BY …) — ordered-set aggregates; the depth-0 GROUP must
+		// not be read as a GROUP BY clause boundary (PR #561 review).
+		`SELECT LISTAGG(x, ',') WITHIN GROUP (ORDER BY x) FROM t`,
+		`SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY x) FROM t`,
+		`SELECT ARRAY_AGG(x) WITHIN GROUP (ORDER BY x) AS a, y FROM t GROUP BY y`,
 	)
 	assertInvalid(t, (*Validator).ParseSelect,
 		``,
@@ -94,6 +99,7 @@ func TestParseSelect(t *testing.T) {
 		`SELECT FROM t`,           // empty projection before FROM — 0 columns is not allowed
 		`SELECT a FROM`,           // dangling FROM with no table
 		`SELECT a FROM t GROUP a`, // GROUP without BY
+		`SELECT a FROM t LIMIT`,   // LIMIT with no row count
 	)
 }
 
