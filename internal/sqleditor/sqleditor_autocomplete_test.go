@@ -4701,13 +4701,27 @@ func TestGrammarExpectedAt(t *testing.T) {
 		}
 	})
 
-	t.Run("free-form clause body yields nil", func(t *testing.T) {
-		// SELECT is consumed permissively (consumeRest), so it has no grammar
-		// expectation beyond an optional trailing semicolon — nothing to offer.
+	t.Run("after a complete projection the clause keywords are offered", func(t *testing.T) {
+		// ParseSelect models the SELECT statement, so after a finished projection
+		// item the grammar offers the clauses that may follow — FROM first, plus
+		// the later WHERE / GROUP BY / ORDER BY / set-operator keywords.
 		stmt := "SELECT col "
 		exp := GrammarExpectedAt(stmt, len(stmt))
+		for _, kw := range []string{"FROM", "WHERE", "ORDER", "GROUP", "UNION"} {
+			if !grammarExpHas(exp, kw) {
+				t.Errorf("expected %q keyword after a complete projection, got %+v", kw, exp)
+			}
+		}
+	})
+
+	t.Run("after FROM <table> the post-FROM clauses are offered, not FROM again", func(t *testing.T) {
+		stmt := "SELECT col FROM t "
+		exp := GrammarExpectedAt(stmt, len(stmt))
+		if !grammarExpHas(exp, "WHERE") {
+			t.Errorf("expected WHERE keyword after FROM <table>, got %+v", exp)
+		}
 		if grammarExpHas(exp, "FROM") {
-			t.Errorf("did not expect FROM keyword for free-form SELECT body, got %+v", exp)
+			t.Errorf("did not expect FROM again after FROM <table>, got %+v", exp)
 		}
 	})
 

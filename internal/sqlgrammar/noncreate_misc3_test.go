@@ -61,10 +61,27 @@ func TestParseSelect(t *testing.T) {
 		`SELECT 1`,
 		`SELECT a, b FROM t WHERE a > 1`,
 		`SELECT DISTINCT col FROM db.s.t ORDER BY col`,
+		`SELECT ALL * FROM t`,
+		`SELECT TOP 5 a, b FROM t`,
+		`SELECT * FROM t`,
+		`SELECT EXTRACT(YEAR FROM dt) AS y FROM t`,        // FROM nested in a function call
+		`SELECT a FROM t WHERE x IN ( SELECT id FROM u )`, // boundary keyword nested in a subquery
+		`SELECT a, count(*) FROM t GROUP BY a HAVING count(*) > 1 ORDER BY a LIMIT 10`, // full clause stack
+		`SELECT a FROM t QUALIFY row_number() OVER ( ORDER BY a ) = 1`,
+		`SELECT a FROM t1 JOIN t2 ON t1.id = t2.id`, // permissive FROM body (joins)
+		`SELECT 1 UNION SELECT 2`,                   // set operator
+		`SELECT 1 UNION ALL SELECT 2 ORDER BY 1`,    // trailing ORDER BY on the union
+		`SELECT 1 INTERSECT SELECT 2 EXCEPT SELECT 3`,
+		`SELECT a FROM t OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY`,
+		`SELECT a FROM t FOR UPDATE`,
 	)
 	assertInvalid(t, (*Validator).ParseSelect,
 		``,
 		`INSERT INTO t VALUES (1)`,
+		`SELECT`,                  // no projection — 0 columns is not allowed
+		`SELECT FROM t`,           // empty projection before FROM — 0 columns is not allowed
+		`SELECT a FROM`,           // dangling FROM with no table
+		`SELECT a FROM t GROUP a`, // GROUP without BY
 	)
 }
 

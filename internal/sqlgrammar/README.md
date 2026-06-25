@@ -81,6 +81,18 @@ a CTAS column-alias list followed by `AS <query>`, or `AS`/`LIKE`/`CLONE`/
 `USING TEMPLATE`/`FROM ARCHIVE`. The `CREATE OR ALTER` form is accepted everywhere
 via `orReplace`.
 
+`SELECT` is modelled as a statement skeleton (`ParseSelect` in `dml.go`, helpers in
+`query_constructs.go`): `SELECT [ ALL | DISTINCT ] [ TOP <n> ] <projection>` followed
+by the ordered optional `FROM` / `WHERE` / `GROUP BY` / `HAVING` / `QUALIFY` clauses,
+the trailing `ORDER BY` / `LIMIT` / `OFFSET` / `FETCH` / `FOR UPDATE` clauses, and
+set operators (`UNION` / `INTERSECT` / `EXCEPT` / `MINUS`) chaining further blocks.
+Each clause **body** is consumed permissively up to the next clause boundary
+(`consumeClauseBody`, skipping balanced parens so a boundary keyword nested in a
+subquery or function call — `EXTRACT(YEAR FROM dt)` — does not end the clause), so
+valid queries are accepted while the clause keywords are surfaced at every boundary
+for `ExpectedAt` autocomplete. A non-empty projection is required, so `SELECT` with
+zero columns (`SELECT`, `SELECT FROM t`) and a dangling `FROM`/`GROUP` are flagged.
+
 ## Tests
 
 - Per-family `*_test.go` files (e.g. `create_batch_*_test.go`, `show_batch_*_test.go`)

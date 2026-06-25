@@ -185,12 +185,32 @@ func (v *Validator) ParseMerge() bool {
 //	       [ [ AS ] <col_alias> ]
 //	       [ , ... ]
 //	[ ... ]
+//
+// A SELECT statement is one or more query blocks combined by set operators
+// (UNION / INTERSECT / EXCEPT / MINUS), followed by trailing ORDER BY / LIMIT /
+// FOR clauses that apply to the whole set expression. Each query block — the
+// projection list plus FROM / WHERE / GROUP BY / HAVING / QUALIFY and its own
+// trailing clauses — is parsed by parseSelectCore (query_constructs.go). Clause
+// bodies are consumed permissively up to the next clause boundary, so valid
+// queries are accepted while the clause keywords are still surfaced at each
+// boundary for diagnostics and autocomplete (ExpectedAt).
 func (v *Validator) ParseSelect() bool {
 	return v.Sequence(
-		// Require the SELECT keyword; the projection list, FROM/WHERE/GROUP BY/
-		// etc. clause soup is free-form.
-		func() bool { return v.MatchWord("SELECT") },
-		func() bool { return v.consumeRest() },
+		v.parseSelectCore,
+		// Set operators chain additional query blocks. Each member is another
+		// query block or a parenthesized subquery: SELECT … UNION ( SELECT … ).
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Sequence(
+					v.parseSetOperator,
+					func() bool { return v.Choice(v.consumeBalancedParens, v.parseSelectCore) },
+				)
+			})
+		},
+		// ORDER BY / LIMIT / OFFSET / FETCH / FOR UPDATE may trail the whole set
+		// expression — when the final member was parenthesized, its inner block
+		// did not absorb them.
+		v.parseSelectTail,
 	)
 }
 

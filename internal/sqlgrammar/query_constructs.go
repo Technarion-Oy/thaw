@@ -1039,3 +1039,172 @@ func (v *Validator) ParseForUpdate() bool {
 		},
 	)
 }
+
+// -- SELECT statement composition (consumed by ParseSelect, dml.go) --
+//
+// ParseSelect models a full SELECT statement by composing the projection list
+// and the ordered optional clauses. The individual ParseFrom/ParseWhere/… rules
+// above are standalone clause validators (each ends in consumeRest, so they
+// cannot be chained); the helpers below re-model the same clauses in a chainable
+// way, consuming each clause body permissively up to the next clause boundary.
+
+// selectClauseBoundaries are the reserved keywords that begin a top-level SELECT
+// clause or a set operator. The projection list and every clause body are
+// consumed up to the next boundary, so a boundary keyword is exactly where one
+// clause ends and the next may begin. All are Snowflake reserved words, so none
+// can appear unquoted as a column name at paren depth 0 — making them safe stops.
+var selectClauseBoundaries = map[string]bool{
+	"FROM": true, "WHERE": true, "GROUP": true, "HAVING": true, "QUALIFY": true,
+	"ORDER": true, "LIMIT": true, "OFFSET": true, "FETCH": true, "FOR": true,
+	"UNION": true, "INTERSECT": true, "EXCEPT": true, "MINUS": true,
+}
+
+// atSelectBoundary reports whether the cursor sits at a top-level clause
+// boundary: a reserved clause / set-operator keyword, a closing paren (the end of
+// an enclosing subquery), a semicolon, or end of input.
+func (v *Validator) atSelectBoundary() bool {
+	if v.AtEnd() {
+		return true
+	}
+	t := v.Peek()
+	switch t.Kind {
+	case sqltok.RParen, sqltok.Semicolon:
+		return true
+	}
+	return t.Kind.IsIdentLike() && selectClauseBoundaries[strings.ToUpper(t.Text(v.src))]
+}
+
+// consumeClauseBody consumes one clause body: every token up to the next
+// top-level boundary (atSelectBoundary), skipping balanced parens so a boundary
+// keyword nested in a subquery or function call (e.g. EXTRACT(YEAR FROM dt)) does
+// not prematurely end the clause. With requireOne it fails — recording label as
+// expected — when the body is empty, catching a clause keyword with nothing after
+// it (a dangling FROM / WHERE / ORDER BY).
+func (v *Validator) consumeClauseBody(requireOne bool, label string) bool {
+	start := v.pos
+	for !v.atSelectBoundary() {
+		if v.Peek().Kind == sqltok.LParen {
+			if !v.consumeBalancedParens() {
+				return false
+			}
+			continue
+		}
+		v.advance()
+	}
+	if requireOne && v.pos == start {
+		v.expect(label)
+		return false
+	}
+	return true
+}
+
+// parseSelectCore parses one query block: SELECT [ { ALL | DISTINCT } ] [ TOP <n> ]
+// <projection> followed by the optional FROM / WHERE / GROUP BY / HAVING / QUALIFY
+// clauses and the trailing ORDER BY / LIMIT / FOR clauses (parseSelectTail).
+func (v *Validator) parseSelectCore() bool {
+	return v.Sequence(
+		func() bool { return v.MatchWord("SELECT") },
+		func() bool { return v.Optional(v.wordsValue("ALL", "DISTINCT")) },
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("TOP") },
+					func() bool { return v.Match(sqltok.NumberLit) },
+				)
+			})
+		},
+		// Projection list — required; one or more items up to the first boundary.
+		func() bool { return v.consumeClauseBody(true, "expression") },
+		func() bool { return v.Optional(v.selectFromClause) },
+		func() bool { return v.Optional(v.selectWhereClause) },
+		func() bool { return v.Optional(v.selectGroupByClause) },
+		func() bool { return v.Optional(v.selectHavingClause) },
+		func() bool { return v.Optional(v.selectQualifyClause) },
+		v.parseSelectTail,
+	)
+}
+
+// parseSelectTail consumes the clauses that trail a query block (or the whole set
+// expression): ORDER BY, LIMIT / OFFSET / FETCH, and FOR UPDATE, in any order.
+func (v *Validator) parseSelectTail() bool {
+	return v.ZeroOrMore(func() bool {
+		return v.Choice(
+			v.selectOrderByClause,
+			v.selectLimitOffsetFetchClause,
+			v.selectForUpdateClause,
+		)
+	})
+}
+
+func (v *Validator) selectFromClause() bool {
+	return v.Sequence(
+		func() bool { return v.MatchWord("FROM") },
+		func() bool { return v.consumeClauseBody(true, "identifier") },
+	)
+}
+
+func (v *Validator) selectWhereClause() bool {
+	return v.Sequence(
+		func() bool { return v.MatchWord("WHERE") },
+		func() bool { return v.consumeClauseBody(true, "predicate") },
+	)
+}
+
+func (v *Validator) selectGroupByClause() bool {
+	return v.Sequence(
+		func() bool { return v.phrase("GROUP", "BY") },
+		func() bool { return v.consumeClauseBody(true, "grouping element") },
+	)
+}
+
+func (v *Validator) selectHavingClause() bool {
+	return v.Sequence(
+		func() bool { return v.MatchWord("HAVING") },
+		func() bool { return v.consumeClauseBody(true, "predicate") },
+	)
+}
+
+func (v *Validator) selectQualifyClause() bool {
+	return v.Sequence(
+		func() bool { return v.MatchWord("QUALIFY") },
+		func() bool { return v.consumeClauseBody(true, "predicate") },
+	)
+}
+
+func (v *Validator) selectOrderByClause() bool {
+	return v.Sequence(
+		func() bool { return v.phrase("ORDER", "BY") },
+		func() bool { return v.consumeClauseBody(true, "sort key") },
+	)
+}
+
+// selectLimitOffsetFetchClause matches one of the row-limit keywords and its
+// body. The three are handled as separate clause iterations (parseSelectTail
+// loops) so the LIMIT … OFFSET … and OFFSET … FETCH … combinations both parse.
+func (v *Validator) selectLimitOffsetFetchClause() bool {
+	return v.Sequence(
+		v.wordsValue("LIMIT", "OFFSET", "FETCH"),
+		func() bool { return v.consumeClauseBody(false, "") },
+	)
+}
+
+func (v *Validator) selectForUpdateClause() bool {
+	return v.Sequence(
+		func() bool { return v.phrase("FOR", "UPDATE") },
+		func() bool { return v.consumeClauseBody(false, "") },
+	)
+}
+
+// parseSetOperator matches a set operator joining two query blocks:
+// { UNION | INTERSECT | EXCEPT } [ ALL | DISTINCT ] | MINUS.
+func (v *Validator) parseSetOperator() bool {
+	return v.Choice(
+		func() bool {
+			return v.Sequence(
+				v.wordsValue("UNION", "INTERSECT", "EXCEPT"),
+				func() bool { return v.Optional(v.wordsValue("ALL", "DISTINCT")) },
+			)
+		},
+		func() bool { return v.MatchWord("MINUS") },
+	)
+}
