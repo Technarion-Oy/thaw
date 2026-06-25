@@ -74,6 +74,18 @@ func TestParseSelect(t *testing.T) {
 		`SELECT 1 INTERSECT SELECT 2 EXCEPT SELECT 3`,
 		`SELECT a FROM t OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY`,
 		`SELECT a FROM t FOR UPDATE`,
+		// Non-reserved words that also start clauses are legal identifiers — they
+		// must not be treated as unconditional clause boundaries (PR #561 review).
+		`SELECT offset FROM t`,
+		`SELECT t.offset FROM t`,
+		`SELECT fetch FROM t`,
+		`SELECT except FROM t`,        // EXCEPT as a column name
+		`SELECT * FROM offset`,        // ...and as a table name
+		`SELECT * FROM except`,
+		`SELECT * EXCEPT (col1) FROM t`,         // Snowflake column-exclusion
+		`SELECT * EXCEPT (col1, col2) FROM t`,
+		`SELECT a FROM t EXCEPT (SELECT b FROM u)`, // parenthesized set-op operand still works
+		`SELECT a FROM t EXCEPT DISTINCT SELECT b FROM u`,
 	)
 	assertInvalid(t, (*Validator).ParseSelect,
 		``,

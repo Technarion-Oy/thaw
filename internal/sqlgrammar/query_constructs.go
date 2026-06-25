@@ -1048,15 +1048,20 @@ func (v *Validator) ParseForUpdate() bool {
 // cannot be chained); the helpers below re-model the same clauses in a chainable
 // way, consuming each clause body permissively up to the next clause boundary.
 
-// selectClauseBoundaries are the reserved keywords that begin a top-level SELECT
-// clause or a set operator. The projection list and every clause body are
-// consumed up to the next boundary, so a boundary keyword is exactly where one
-// clause ends and the next may begin. All are Snowflake reserved words, so none
-// can appear unquoted as a column name at paren depth 0 — making them safe stops.
+// selectClauseBoundaries are the keywords that begin a top-level SELECT clause or
+// a set operator. The projection list and every clause body are consumed up to
+// the next boundary, so a boundary keyword is exactly where one clause ends and
+// the next may begin. Every word here is a Snowflake reserved word, so none can
+// appear unquoted as a column name at paren depth 0 — making them unconditional
+// stops. The non-reserved words that also start clauses — OFFSET, FETCH (row
+// limits) and EXCEPT (set operator) — are deliberately NOT listed: they are legal
+// unquoted identifiers, so treating them as unconditional boundaries flagged valid
+// SQL (`SELECT offset FROM t`). OFFSET/FETCH are matched positionally by
+// parseSelectTail instead; EXCEPT is handled contextually in atSelectBoundary.
 var selectClauseBoundaries = map[string]bool{
 	"FROM": true, "WHERE": true, "GROUP": true, "HAVING": true, "QUALIFY": true,
-	"ORDER": true, "LIMIT": true, "OFFSET": true, "FETCH": true, "FOR": true,
-	"UNION": true, "INTERSECT": true, "EXCEPT": true, "MINUS": true,
+	"ORDER": true, "LIMIT": true, "FOR": true,
+	"UNION": true, "INTERSECT": true, "MINUS": true,
 }
 
 // atSelectBoundary reports whether the cursor sits at a top-level clause
@@ -1071,7 +1076,48 @@ func (v *Validator) atSelectBoundary() bool {
 	case sqltok.RParen, sqltok.Semicolon:
 		return true
 	}
-	return t.Kind.IsIdentLike() && selectClauseBoundaries[strings.ToUpper(t.Text(v.src))]
+	if !t.Kind.IsIdentLike() {
+		return false
+	}
+	w := strings.ToUpper(t.Text(v.src))
+	if w == "EXCEPT" {
+		// EXCEPT is both the set operator AND a non-reserved word — a legal column
+		// name and the `SELECT * EXCEPT (cols)` column-exclusion keyword. It ends the
+		// clause only when it begins a set operation; otherwise it's part of the body.
+		return v.exceptBeginsSetOp()
+	}
+	return selectClauseBoundaries[w]
+}
+
+// exceptBeginsSetOp decides whether an EXCEPT at the cursor is the set operator
+// (a clause boundary) rather than an identifier or a `* EXCEPT (cols)` exclusion.
+// The set operator is followed by a query — SELECT/WITH/VALUES, optionally
+// parenthesized — or by ALL/DISTINCT. A bare `(col, …)` exclusion list, a clause
+// keyword, another identifier, or end of input means it is not a set operation.
+func (v *Validator) exceptBeginsSetOp() bool {
+	next := v.pos + 1
+	if next >= len(v.tokens) {
+		return false
+	}
+	nt := v.tokens[next]
+	if nt.Kind.IsIdentLike() {
+		switch strings.ToUpper(nt.Text(v.src)) {
+		case "SELECT", "WITH", "VALUES", "ALL", "DISTINCT":
+			return true
+		}
+		return false
+	}
+	// A parenthesized operand is a set op only when the parens hold a query.
+	if nt.Kind == sqltok.LParen && next+1 < len(v.tokens) {
+		inner := v.tokens[next+1]
+		if inner.Kind.IsIdentLike() {
+			switch strings.ToUpper(inner.Text(v.src)) {
+			case "SELECT", "WITH", "VALUES":
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // consumeClauseBody consumes one clause body: every token up to the next
