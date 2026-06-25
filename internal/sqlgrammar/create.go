@@ -6735,31 +6735,31 @@ func (v *Validator) ParseCreateSemanticView() bool {
 //	  [ COMMENT = '<string_literal>' ]
 func (v *Validator) ParseCreateSequence() bool {
 	eqOpt := func() bool { return v.Optional(func() bool { return v.MatchOp("=") }) }
+	// Each parameter may appear at most once, in any order, so unorderedOnce both
+	// rejects duplicates and stops autocomplete re-offering a parameter already set.
 	body := func() bool {
-		return v.ZeroOrMore(func() bool {
-			return v.Choice(
-				// START [ WITH ] [ = ] <initial_value>
-				func() bool {
-					return v.Sequence(
-						func() bool { return v.MatchWord("START") },
-						func() bool { return v.Optional(func() bool { return v.MatchWord("WITH") }) },
-						eqOpt,
-						v.parseNumber,
-					)
-				},
-				// INCREMENT [ BY ] [ = ] <sequence_interval>
-				func() bool {
-					return v.Sequence(
-						func() bool { return v.MatchWord("INCREMENT") },
-						func() bool { return v.Optional(func() bool { return v.MatchWord("BY") }) },
-						eqOpt,
-						v.parseNumber,
-					)
-				},
-				v.wordsValue("ORDER", "NOORDER"),
-				v.option("COMMENT", v.parseString),
-			)
-		})
+		return v.unorderedOnce(
+			// START [ WITH ] [ = ] <initial_value>
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("START") },
+					func() bool { return v.Optional(func() bool { return v.MatchWord("WITH") }) },
+					eqOpt,
+					v.parseNumber,
+				)
+			},
+			// INCREMENT [ BY ] [ = ] <sequence_interval>
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("INCREMENT") },
+					func() bool { return v.Optional(func() bool { return v.MatchWord("BY") }) },
+					eqOpt,
+					v.parseNumber,
+				)
+			},
+			v.wordsValue("ORDER", "NOORDER"),
+			v.option("COMMENT", v.parseString),
+		)
 	}
 	return v.Sequence(
 		func() bool { return v.MatchKeyword("CREATE") },

@@ -26,7 +26,7 @@ It is a **leaf package**: it imports only `internal/sqltok` and must never impor
 
 | File | Purpose |
 |------|---------|
-| `engine.go` | The `Validator` type, terminals (`Match`/`MatchKeyword`/`MatchWord`/`MatchOp`), combinators (`Sequence`/`Choice`/`Optional`/`ZeroOrMore`), `furthest`/`expected` tracking + `Failure`, and shared helpers (`parseIdentPath`, `option`, `wordsValue`, `phrase`, `tagClause`, `consumeBalancedParens`, `consumeRest`, `showTrailers`, …) |
+| `engine.go` | The `Validator` type, terminals (`Match`/`MatchKeyword`/`MatchWord`/`MatchOp`), combinators (`Sequence`/`Choice`/`Optional`/`ZeroOrMore`/`unorderedOnce` — the last for order-independent parameter lists where each option may appear at most once, so duplicates are rejected and `ExpectedAt` stops offering a parameter already set), `furthest`/`expected` tracking + `Failure`, and shared helpers (`parseIdentPath`, `option`, `wordsValue`, `phrase`, `tagClause`, `consumeBalancedParens`, `consumeRest`, `showTrailers`, …) |
 | `dispatch.go` | `Recognized()` + `ParseTopLevel()`: a leading-keyword → candidate-rules registry (bulk families by `Parse*` prefix via reflection, DML/misc leaders enumerated explicitly); `ExpectedAt(cursorOffset)` — the autocomplete "valid next" accessor; plus `IdentifyStatement()` — the effective-verb classifier that looks past a leading `WITH`/CTE prefix |
 | `create.go`, `alter.go`, `drop.go`, `show.go`, `describe.go`, `undrop.go`, `dml.go`, `grant_revoke.go`, `query_constructs.go`, `data_loading.go`, `execute.go`, `session.go`, `transactions.go` | One `func (v *Validator) ParseXxx() bool` per Snowflake command reference; the doc-comment header carries the command's documented syntax. ~716 rules total |
 | `doc.go` | Package doc + `thaw:domain` annotation |

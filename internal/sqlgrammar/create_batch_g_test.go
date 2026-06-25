@@ -109,6 +109,10 @@ func TestParseCreateSequence(t *testing.T) {
 	assertInvalid(t, (*Validator).ParseCreateSequence,
 		`CREATE SEQUENCE`,
 		`CREATE SEQUENCE seq START WITH`,
+		// Each parameter is allowed at most once; a duplicate is rejected.
+		`CREATE SEQUENCE seq START = 1 START = 2`,
+		`CREATE SEQUENCE seq INCREMENT = 1 INCREMENT = 2`,
+		`CREATE SEQUENCE seq ORDER NOORDER`,
 	)
 }
 

@@ -44,6 +44,15 @@ func TestExpectedAt(t *testing.T) {
 			want:    []string{"identifier"},
 			notWant: []string{"WHERE", "GROUP"},
 		},
+		// An order-independent parameter already set (unorderedOnce) is not
+		// re-offered: after START and INCREMENT, only the remaining parameters
+		// (ORDER/NOORDER, COMMENT) are expected — never START or INCREMENT again.
+		{
+			name:    "CREATE SEQUENCE drops already-set params",
+			prefix:  "CREATE SEQUENCE s START = 1 INCREMENT = 1 ",
+			want:    []string{"ORDER", "NOORDER", "COMMENT"},
+			notWant: []string{"START", "INCREMENT"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
