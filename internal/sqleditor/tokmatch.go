@@ -13,6 +13,7 @@ package sqleditor
 import (
 	"strings"
 
+	sf "thaw/internal/snowflake"
 	"thaw/internal/sqltok"
 )
 
@@ -185,6 +186,68 @@ func matchCreateTV(sig []sqltok.Token, sql string) (rawPath, objKw string, ok bo
 		return
 	}
 	i++
+	i = skipIfNotExists(sig, sql, i)
+	rawPath, _ = readIdentPath(sig, sql, i)
+	ok = rawPath != ""
+	return
+}
+
+// matchWordsAt reports whether sig[pos:] begins with the given keyword sequence.
+func matchWordsAt(sig []sqltok.Token, sql string, pos int, words []string) bool {
+	for j, w := range words {
+		if !kwAt(sig, sql, pos+j, w) {
+			return false
+		}
+	}
+	return true
+}
+
+// matchCreateSchemaScoped matches a CREATE for any schema-scoped object whose name
+// comes immediately after the object keyword(s):
+//
+//	CREATE [OR REPLACE] [SECURE] [INTERACTIVE] [{LOCAL|GLOBAL}]
+//	  [{TEMP|TEMPORARY|VOLATILE|TRANSIENT}] [RECURSIVE] [MATERIALIZED]
+//	  <kind> [IF NOT EXISTS] <ident_path>
+//
+// The set of <kind> phrases is the single source of truth in
+// snowflake.SchemaScopedCreateKeywords() (TABLE, VIEW, SEQUENCE, STAGE, STREAM,
+// TASK, FILE FORMAT, the policy family, …) — account-level objects (DATABASE,
+// WAREHOUSE, ROLE, integrations, …) are excluded there, so they never match.
+// Returns the raw ident path, the human-readable object type used in diagnostics,
+// and ok. It generalizes matchCreateTV, which is retained for table-only
+// CREATE-effect tracking.
+func matchCreateSchemaScoped(sig []sqltok.Token, sql string) (rawPath, objType string, ok bool) {
+	i := 0
+	if !kwAt(sig, sql, i, "CREATE") {
+		return
+	}
+	i++
+	i, orOK := skipCreateOr(sig, sql, i)
+	if !orOK {
+		return
+	}
+	// Modifier prefix shared with matchCreateTV — each modifier group is optional
+	// and consumed at most once, in canonical order.
+	for _, group := range [][]string{
+		{"SECURE"}, {"INTERACTIVE"}, {"LOCAL", "GLOBAL"},
+		{"TEMP", "TEMPORARY", "VOLATILE", "TRANSIENT"}, {"RECURSIVE"}, {"MATERIALIZED"},
+	} {
+		if kwAtAny(sig, sql, i, group...) != "" {
+			i++
+		}
+	}
+	// SchemaScopedCreateKeywords is longest-phrase-first, so the most specific
+	// match (EVENT ROUTING TABLE before TABLE) wins.
+	for _, words := range sf.SchemaScopedCreateKeywords() {
+		if matchWordsAt(sig, sql, i, words) {
+			i += len(words)
+			objType = strings.ToLower(strings.Join(words, " "))
+			break
+		}
+	}
+	if objType == "" {
+		return
+	}
 	i = skipIfNotExists(sig, sql, i)
 	rawPath, _ = readIdentPath(sig, sql, i)
 	ok = rawPath != ""

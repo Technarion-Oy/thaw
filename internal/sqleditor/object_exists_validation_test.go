@@ -52,3 +52,47 @@ func TestValidateTablesExist_MissingObjectFlagged(t *testing.T) {
 		}
 	}
 }
+
+// TestValidateTablesExist_NoContext_SchemaScopedObjects verifies that the
+// "No database selected" diagnostic covers all schema-scoped object types, not
+// just TABLE/VIEW — and stays silent for account-level objects (which are not
+// schema-scoped) and for fully qualified names.
+func TestValidateTablesExist_NoContext_SchemaScopedObjects(t *testing.T) {
+	noCtx := func(sql string) []DiagMarker {
+		return ValidateTablesExist(ValidateTablesExistRequest{
+			SQL:        sql,
+			StmtRanges: GetStatementRanges(sql),
+			// no KnownDatabases/KnownSchemas → no session context
+		})
+	}
+
+	flagged := []struct{ sql, objType string }{
+		{`CREATE OR REPLACE SEQUENCE seq_01 START = 1 INCREMENT = 1 ORDER;`, "sequence"},
+		{`CREATE STAGE my_stage;`, "stage"},
+		{`CREATE STREAM s ON TABLE t;`, "stream"},
+		{`CREATE TASK t1 SCHEDULE = '1 minute' AS SELECT 1;`, "task"},
+		{`CREATE FILE FORMAT ff TYPE = CSV;`, "file format"},
+		{`CREATE TABLE foo (id INT);`, "table"},
+	}
+	for _, c := range flagged {
+		m := noCtx(c.sql)
+		want := "No database selected. Cannot create " + c.objType
+		if len(m) == 0 || !strings.Contains(m[0].Message, want) {
+			t.Errorf("for %q: expected a marker containing %q, got %+v", c.sql, want, m)
+		}
+	}
+
+	// Account-level objects are not schema-scoped, and a fully qualified name is
+	// self-contained — neither should warn about a missing database/schema.
+	silent := []string{
+		`CREATE WAREHOUSE wh;`,
+		`CREATE DATABASE db1;`,
+		`CREATE ROLE r1;`,
+		`CREATE SEQUENCE mydb.sch.seq_01;`,
+	}
+	for _, sql := range silent {
+		if m := noCtx(sql); len(m) != 0 {
+			t.Errorf("for %q: expected no marker, got %d: %+v", sql, len(m), m)
+		}
+	}
+}

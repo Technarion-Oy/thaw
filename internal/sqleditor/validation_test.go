@@ -195,8 +195,9 @@ func TestValidateTablesExist_Valid(t *testing.T) {
 		"WITH cte1 AS (SELECT 1 AS id), cte2 AS (SELECT * FROM LIVE_TABLE) SELECT * FROM cte1 JOIN cte2 ON 1=1",
 		"WITH a AS (SELECT 1), b AS (SELECT 2), c AS (SELECT 3) SELECT * FROM a JOIN b ON 1=1 JOIN c ON 1=1",
 
-		// CREATE TASK — SCHEDULE with USING CRON must not flag CRON as a table (Issue #306)
-		"CREATE OR REPLACE TASK LINEAGE_SOURCE_DB.RAW_DATA.TASK_1\n\tWAREHOUSE=COMPUTE_WH\n\tSCHEDULE='USING CRON 0 0 * * * UTC'\n\tAS SELECT SYSTEM$WAIT(5)",
+		// CREATE TASK — SCHEDULE with USING CRON must not flag CRON as a table (Issue #306).
+		// Fully qualified with a cataloged DB.SCH so the schema-scoped name check passes.
+		"CREATE OR REPLACE TASK DB.SCH.TASK_1\n\tWAREHOUSE=COMPUTE_WH\n\tSCHEDULE='USING CRON 0 0 * * * UTC'\n\tAS SELECT SYSTEM$WAIT(5)",
 		"CREATE OR REPLACE TASK my_task WAREHOUSE = wh SCHEDULE = 'USING CRON 0 0 * * * UTC' AS INSERT INTO LIVE_TABLE SELECT 1",
 		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' AS SELECT 1",
 	}

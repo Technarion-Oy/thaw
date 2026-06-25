@@ -10,7 +10,7 @@ Key capabilities:
 - Structural syntax validation (unclosed strings, unmatched parens, bad scripting syntax)
 - Grammar-conformance validation via the recursive-descent state machine in [`internal/sqlgrammar`](../sqlgrammar/README.md) (replaced the legacy regex/token-scanning anti-pattern & preamble checks)
 - Data-type validation in DDL and CAST expressions
-- Object-existence validation — a referenced table/view/schema/database must exist in the catalog **or be created earlier in the same script** (`ValidateTablesExist`)
+- Object-existence validation — a referenced table/view/schema/database must exist in the catalog **or be created earlier in the same script** (`ValidateTablesExist`). The "no database/schema selected" check on an unqualified CREATE name covers all schema-scoped object types (TABLE, VIEW, SEQUENCE, STAGE, STREAM, TASK, PIPE, FILE FORMAT, FUNCTION, the policy family, …) via `matchCreateSchemaScoped`, which reads the schema-scoped phrase list from `snowflake.SchemaScopedCreateKeywords()` (the single source of truth for object scope). Account-level objects (DATABASE, WAREHOUSE, ROLE, NETWORK POLICY, integrations, …) are excluded there.
 - JOIN ON / USING condition suggestions (3-tier: FK → PK heuristic → type-compatible same-name columns)
 - Autocomplete context bundling (statement ranges, scripting variables, CTE columns, table refs, ref resolution)
 - LCS-based line diff for git gutter decorations
@@ -26,7 +26,7 @@ Key capabilities:
 | `grammar.go` | `ValidateGrammar` — per-statement check against the recursive-descent grammar in `internal/sqlgrammar`; rebases failure positions to absolute doc coordinates |
 | `antipatterns.go` | `ValidateAntiPatterns` — semantic checks the grammar can't perform: MERGE clause-action validity, QUALIFY placement, FLATTEN/LATERAL usage, variant-path traversal, unknown Cortex functions, stray token / dangling `AS` after a FROM/JOIN table reference, PIVOT/UNPIVOT/MATCH_RECOGNIZE/ASOF JOIN clause shape, INSERT OVERWRITE/ALL/FIRST structure, Time Travel `AT`/`BEFORE`, and cross-statement transaction tracking (nested `BEGIN`, stray `COMMIT`/`ROLLBACK`, uncommitted transaction) |
 | `barecolrefs.go` | `ValidateBareColumnRefs`, `ExtractInEditorTableDefs` — validates INSERT column lists and CREATE TABLE REFERENCES; extracts in-editor table columns for pre-execution autocomplete |
-| `tableexist.go` | `ValidateTablesExist` — checks SELECT/CREATE/ALTER/DROP/UNDROP for unresolvable table/schema/database references; emits quick-fix `Code` JSON when a table exists in another schema |
+| `tableexist.go` | `ValidateTablesExist` — checks SELECT/CREATE/ALTER/DROP/UNDROP for unresolvable table/schema/database references and unqualified schema-scoped CREATEs with no active database/schema (`matchCreateSchemaScoped`); emits quick-fix `Code` JSON when a table exists in another schema |
 | `diaghelpers.go` | Shared internal helpers: `stripCommentsSQL`, `stripStringLiterals`, `getFirstSQLToken` |
 | `doc.go` | Package doc + `thaw:domain` annotation |
 
