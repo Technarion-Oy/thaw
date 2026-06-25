@@ -1136,8 +1136,15 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         // Kick off the function-name lookup concurrently with the context fetch:
         // it depends only on the typed word, so there's no reason to wait for the
         // context round-trip before starting it. Awaited near the end.
+        //
+        // Skip it in JOIN-ON / USING contexts: those branches return their own
+        // suggestions before this promise is awaited, so firing it there is a wasted
+        // IPC — and neither position wants function names ("ON" is never a function;
+        // a USING(…) list holds column names).
+        const inJoinOnOrUsing =
+          word.word.toUpperCase() === "ON" || /\bUSING\s*\([^)]*$/i.test(textToCursor);
         const fnSuggestionsPromise =
-          (word.word.length >= 2 && !lineUpToWord.trim().endsWith("."))
+          (word.word.length >= 2 && !lineUpToWord.trim().endsWith(".") && !inJoinOnOrUsing)
             ? GetFunctionSuggestions(word.word).catch(() => null)
             : Promise.resolve(null);
 
