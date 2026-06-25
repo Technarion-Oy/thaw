@@ -29,6 +29,13 @@ import StatusBar from "../components/results/StatusBar";
 import CellDetailPanel from "../components/results/CellDetailPanel";
 import QueryLogPane from "../components/results/QueryLogPane";
 
+// Catalog-mutating statement leaders. Only a run that creates/alters/drops objects
+// changes the columns/object lists the editor caches, so only these trigger a
+// metadata-cache clear after a run. Matches at the buffer start or after a `;`
+// statement boundary (a DDL verb inside a string/SELECT projection won't sit
+// there), case-insensitive. RENAME/SWAP/SET arrive via ALTER.
+const DDL_LEADER_RE = /(?:^|;)\s*(?:CREATE|ALTER|DROP|TRUNCATE|UNDROP)\b/i;
+
 // ── Lazy-loaded panels & modals ───────────────────────────────────────────────
 // None of these are on the initial render path — they mount only when the user
 // opens a notebook, the terminal, or a specific dialog.  React.lazy keeps their
@@ -433,10 +440,10 @@ export default function QueryPage() {
       setStmtProgress(null);
       setActiveStmtIdx(null);
       loadContext(runTabId); // refresh database/schema (and role/warehouse) after any USE command
-      // A run may have been DDL (CREATE/ALTER/DROP) that changed the catalog, so
-      // drop the cached column/object metadata. Autocomplete and diagnostics then
-      // lazily re-fetch fresh data on next use.
-      clearMetadataCaches();
+      // Only DDL changes the catalog, so only DDL needs the column/object metadata
+      // dropped. Gating on a leading DDL verb keeps the common edit→run→edit SELECT
+      // loop's warm cache instead of forcing a cold re-fetch after every run.
+      if (DDL_LEADER_RE.test(query)) clearMetadataCaches();
     }
   };
 

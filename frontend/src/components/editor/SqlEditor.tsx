@@ -37,7 +37,7 @@ import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableColumn
 import { SNOWFLAKE_DATA_TYPES } from "../../generated/snowflakeDataTypes";
 import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateDataTypes, ValidateGrammar, ValidateAntiPatterns, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContextFull, ResolveTableRefs, ComputeGitLineDiff } from "../../../wailsjs/go/sqleditor/Service";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
-import { UC, quoteIfNecessary, getFKs, getFKsCached, setFKCache, clearFKCache, FKEntry, buildVariableSuggestions } from "./sqlEditorUtils";
+import { UC, quoteIfNecessary, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions } from "./sqlEditorUtils";
 import ExplainModal from "../results/ExplainModal";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 
@@ -144,12 +144,13 @@ async function getColumns(db: string, schema: string, table: string): Promise<st
   if (columnCache.has(key)) return columnCache.get(key)!;
   if (fetchingCols.has(key)) return [];
   fetchingCols.add(key);
+  const gen = currentCacheGeneration();
   try {
     const cols = await GetTableColumns(db, schema, table);
-    columnCache.set(key, cols ?? []);
+    if (gen === currentCacheGeneration()) columnCache.set(key, cols ?? []);
     return cols ?? [];
   } catch {
-    columnCache.set(key, []);
+    if (gen === currentCacheGeneration()) columnCache.set(key, []);
     return [];
   } finally {
     fetchingCols.delete(key);
@@ -167,16 +168,17 @@ async function getColInfos(db: string, schema: string, table: string): Promise<C
   if (colInfoCache.has(key)) return colInfoCache.get(key)!;
   if (fetchingColInfos.has(key)) return [];
   fetchingColInfos.add(key);
+  const gen = currentCacheGeneration();
   try {
     const cols = await GetTableColumnsWithTypes(db, schema, table);
     const entries: ColInfo[] = (cols ?? []).map((c: any) => ({
       name:     c.name     ?? "",
       dataType: c.dataType ?? "",
     }));
-    colInfoCache.set(key, entries);
+    if (gen === currentCacheGeneration()) colInfoCache.set(key, entries);
     return entries;
   } catch {
-    colInfoCache.set(key, []);
+    if (gen === currentCacheGeneration()) colInfoCache.set(key, []);
     return [];
   } finally {
     fetchingColInfos.delete(key);
@@ -226,6 +228,9 @@ async function warmUpFKsForSchema(db: string, schema: string): Promise<void> {
 // Function-name, keyword, and git-HEAD caches are intentionally left alone — they
 // are not part of the live catalog and are not affected by running SQL.
 export function clearMetadataCaches(): void {
+  // Bump the generation first so any fetch already in flight discards its
+  // now-stale result instead of repopulating the just-cleared cache.
+  bumpCacheGeneration();
   columnCache.clear();
   fetchingCols.clear();
   colInfoCache.clear();
