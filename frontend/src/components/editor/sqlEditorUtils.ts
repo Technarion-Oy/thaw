@@ -69,6 +69,13 @@ export function getFKsCached(db: string, schema: string, table: string): FKEntry
   return fkCache.get(key) ?? [];
 }
 
+// Drop all cached foreign keys. Called when query execution or an object-store
+// refresh may have changed the catalog, so JOIN-ON suggestions re-fetch.
+export function clearFKCache(): void {
+  fkCache.clear();
+  fetchingFKs.clear();
+}
+
 // ── variableSuggestions factory ───────────────────────────────────────────────
 export function buildVariableSuggestions(
   declaredVars: string[],

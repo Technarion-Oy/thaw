@@ -18,7 +18,7 @@ import { GetSqlStatementRanges } from "../../wailsjs/go/sqleditor/Service";
 import type { snowflake } from "../../wailsjs/go/models";
 import { usePanelLayoutStore } from "../store/panelLayoutStore";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
-import SqlEditor, { type DiagMarker, pendingMcpMarkers } from "../components/editor/SqlEditor";
+import SqlEditor, { type DiagMarker, pendingMcpMarkers, clearMetadataCaches } from "../components/editor/SqlEditor";
 import TabBar from "../components/editor/TabBar";
 import { DiffEditor } from "@monaco-editor/react";
 import { ensureMonacoSetup } from "../components/editor/monacoSetup";
@@ -433,6 +433,10 @@ export default function QueryPage() {
       setStmtProgress(null);
       setActiveStmtIdx(null);
       loadContext(runTabId); // refresh database/schema (and role/warehouse) after any USE command
+      // A run may have been DDL (CREATE/ALTER/DROP) that changed the catalog, so
+      // drop the cached column/object metadata. Autocomplete and diagnostics then
+      // lazily re-fetch fresh data on next use.
+      clearMetadataCaches();
     }
   };
 

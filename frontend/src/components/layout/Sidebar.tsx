@@ -1521,6 +1521,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     if (!expandedKeys.includes(dbKey) && !reveal) {
       useObjectStore.getState().clearDatabase(db);
       setTreeData((prev) => clearNodeChildren(prev, dbKey));
+      // Catalog changed — drop the editor's cached column/object metadata.
+      window.dispatchEvent(new Event("thaw:refresh-diagnostics"));
       return;
     }
 
@@ -1551,6 +1553,10 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         .filter((schemaKey) => schemaNames.includes(schemaKey.slice(schemaPrefix.length)))
         .map((schemaKey) => onLoadData({ key: schemaKey } as DataNode & { children?: DataNode[] })),
     );
+
+    // Catalog was re-fetched — drop the editor's cached column/object metadata so
+    // autocomplete/diagnostics reflect the refreshed objects.
+    window.dispatchEvent(new Event("thaw:refresh-diagnostics"));
 
     // Restore scroll after React commits the rebuilt rows. A double rAF makes
     // this deterministic: the first frame lets React flush the batched setData

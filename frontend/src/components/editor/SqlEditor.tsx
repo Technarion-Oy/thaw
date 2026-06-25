@@ -37,7 +37,7 @@ import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableColumn
 import { SNOWFLAKE_DATA_TYPES } from "../../generated/snowflakeDataTypes";
 import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateDataTypes, ValidateGrammar, ValidateAntiPatterns, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContextFull, ResolveTableRefs, ComputeGitLineDiff } from "../../../wailsjs/go/sqleditor/Service";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
-import { UC, quoteIfNecessary, getFKs, getFKsCached, setFKCache, FKEntry, buildVariableSuggestions } from "./sqlEditorUtils";
+import { UC, quoteIfNecessary, getFKs, getFKsCached, setFKCache, clearFKCache, FKEntry, buildVariableSuggestions } from "./sqlEditorUtils";
 import ExplainModal from "../results/ExplainModal";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 
@@ -213,6 +213,28 @@ async function warmUpFKsForSchema(db: string, schema: string): Promise<void> {
   } catch {
     fetchedFKSchemas.delete(key); 
   }
+}
+
+// clearMetadataCaches drops every cached Snowflake catalog lookup the editor uses
+// for autocomplete and diagnostics — table columns, column types, foreign keys,
+// and the "already fetched" markers for schema object lists / database schemas /
+// per-schema FK warm-ups / hover DDL. Call it whenever the catalog may have
+// changed underneath us: after a statement is executed (DDL can add/drop/alter
+// objects and columns) or when the object store is explicitly refreshed. The next
+// autocomplete/diagnostics pass then re-fetches fresh metadata on demand.
+//
+// Function-name, keyword, and git-HEAD caches are intentionally left alone — they
+// are not part of the live catalog and are not affected by running SQL.
+export function clearMetadataCaches(): void {
+  columnCache.clear();
+  fetchingCols.clear();
+  colInfoCache.clear();
+  fetchingColInfos.clear();
+  fetchedSchemaObjects.clear();
+  fetchedDatabaseSchemas.clear();
+  fetchedFKSchemas.clear();
+  hoverDDLCache.clear();
+  clearFKCache();
 }
 
 function mkColSuggestions(cols: string[], range: any, monaco: any) {
@@ -805,7 +827,10 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
     // Re-run diagnostics when the object store is refreshed after a new
     // connection (e.g. offline-first startup: databases load post-connect).
+    // The catalog may have changed, so drop the cached column/object metadata
+    // first — autocomplete and the re-run diagnostics then re-fetch it fresh.
     const refreshDiagnosticsHandler = () => {
+      clearMetadataCaches();
       if (diagTimerRef.current) clearTimeout(diagTimerRef.current);
       diagTimerRef.current = setTimeout(runDiagnostics, 0);
     };
@@ -1337,6 +1362,11 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         for (const ref of (ctx?.resolvedRefs || [])) {
           // Skip CTE names — their columns are added below
           if (cteColMap.has(UC(ref.name)) && !ref.db && !ref.schema) continue;
+          // Skip the ref whose name is the token currently being typed: it's a
+          // half-finished table name (FROM MY_T…), so DESCRIBE-ing it fires a failing
+          // Snowflake query on every keystroke. Its columns get fetched once the name
+          // is complete and the cursor moves off it.
+          if (word.word && UC(ref.name) === UC(word.word)) continue;
           refsToFetch.push({ db: ref.db, schema: ref.schema, name: ref.name });
         }
 
