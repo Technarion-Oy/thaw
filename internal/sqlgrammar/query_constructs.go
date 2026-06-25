@@ -1080,6 +1080,14 @@ func (v *Validator) atSelectBoundary() bool {
 // not prematurely end the clause. With requireOne it fails — recording label as
 // expected — when the body is empty, catching a clause keyword with nothing after
 // it (a dangling FROM / WHERE / ORDER BY).
+//
+// A body that ends in a top-level comma is likewise incomplete: the comma is a
+// list separator with no item after it (e.g. `SELECT a, <cursor>` before FROM, or
+// `FROM t1, <cursor>`). Failing there — and re-recording label as expected —
+// keeps the clause "still being typed" rather than complete, so autocomplete
+// offers another item (a column/expression, a table) at the cursor instead of the
+// next clause's keyword. Only labelled (comma-list) bodies do this; the unlabeled
+// LIMIT/OFFSET/FETCH and FOR UPDATE bodies are not lists and are left untouched.
 func (v *Validator) consumeClauseBody(requireOne bool, label string) bool {
 	start := v.pos
 	for !v.atSelectBoundary() {
@@ -1092,6 +1100,10 @@ func (v *Validator) consumeClauseBody(requireOne bool, label string) bool {
 		v.advance()
 	}
 	if requireOne && v.pos == start {
+		v.expect(label)
+		return false
+	}
+	if label != "" && v.pos > start && v.tokens[v.pos-1].Kind == sqltok.Comma {
 		v.expect(label)
 		return false
 	}

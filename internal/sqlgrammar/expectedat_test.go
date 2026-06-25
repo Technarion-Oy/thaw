@@ -27,6 +27,23 @@ func TestExpectedAt(t *testing.T) {
 		{name: "ALTER TABLE → actions", prefix: "ALTER TABLE foo ", want: []string{"RENAME", "SET", "ADD", "DROP"}},
 		// DROP offers droppable object types.
 		{name: "DROP → object types", prefix: "DROP ", want: []string{"TABLE", "VIEW", "SCHEMA"}},
+		// A trailing comma in the projection means another item is required: expect
+		// an expression, NOT the next clause's keyword. This is what lets
+		// autocomplete offer columns on a blank line mid-SELECT (e.g. cursor on the
+		// empty line in `SELECT\n  AMOUNT,\n  <cursor>\nFROM t`) instead of FROM.
+		{
+			name:    "SELECT projection trailing comma → expression",
+			prefix:  "SELECT \nAMOUNT,\n",
+			want:    []string{"expression"},
+			notWant: []string{"FROM", "WHERE", "GROUP"},
+		},
+		// Same rule for a comma-separated FROM list: another table is expected.
+		{
+			name:    "FROM list trailing comma → identifier",
+			prefix:  "SELECT a FROM t1, ",
+			want:    []string{"identifier"},
+			notWant: []string{"WHERE", "GROUP"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

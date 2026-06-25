@@ -92,6 +92,11 @@ subquery or function call — `EXTRACT(YEAR FROM dt)` — does not end the claus
 valid queries are accepted while the clause keywords are surfaced at every boundary
 for `ExpectedAt` autocomplete. A non-empty projection is required, so `SELECT` with
 zero columns (`SELECT`, `SELECT FROM t`) and a dangling `FROM`/`GROUP` are flagged.
+A comma-list body that ends in a **trailing comma** (`SELECT a, <cursor>`, `FROM t1,
+<cursor>`) is likewise treated as incomplete: the clause stays "still being typed",
+so `ExpectedAt` reports the item label (`expression`, `identifier`) instead of the
+next clause's keyword — that is what lets autocomplete offer another column/table at
+the cursor (e.g. on a blank line mid-`SELECT`) rather than `FROM`/`WHERE`.
 
 ## Tests
 
