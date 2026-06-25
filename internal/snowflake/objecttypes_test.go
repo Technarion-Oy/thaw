@@ -75,12 +75,13 @@ func TestObjectScopeClassification(t *testing.T) {
 	}
 }
 
-// TestSchemaScopedCreateKeywords verifies the helper returns only schema-scoped
-// phrases, longest first (so prefix matching picks the most specific phrase).
-func TestSchemaScopedCreateKeywords(t *testing.T) {
-	kws := SchemaScopedCreateKeywords()
-	if len(kws) == 0 {
-		t.Fatal("expected schema-scoped keywords")
+// TestSchemaScopedObjectTypes verifies the helper returns only schema-scoped
+// types, longest keyword phrase first (so prefix matching picks the most specific
+// phrase), and that Name() renders the lowercased phrase.
+func TestSchemaScopedObjectTypes(t *testing.T) {
+	types := SchemaScopedObjectTypes()
+	if len(types) == 0 {
+		t.Fatal("expected schema-scoped object types")
 	}
 	schemaSet := map[string]bool{}
 	for _, ot := range ObjectTypes {
@@ -88,15 +89,21 @@ func TestSchemaScopedCreateKeywords(t *testing.T) {
 			schemaSet[phraseKey(ot.Keywords)] = true
 		}
 	}
-	for i, words := range kws {
-		if !schemaSet[phraseKey(words)] {
-			t.Errorf("phrase %q is not a schema-scoped object", phraseKey(words))
+	for i, ot := range types {
+		if ot.Scope != ScopeSchema {
+			t.Errorf("%q is not schema-scoped", ot.Name())
 		}
-		if i > 0 && len(kws[i-1]) < len(words) {
-			t.Errorf("not sorted longest-first at %d: %v before %v", i, kws[i-1], words)
+		if !schemaSet[phraseKey(ot.Keywords)] {
+			t.Errorf("phrase %q is not a schema-scoped object", phraseKey(ot.Keywords))
+		}
+		if i > 0 && len(types[i-1].Keywords) < len(ot.Keywords) {
+			t.Errorf("not sorted longest-first at %d: %v before %v", i, types[i-1].Keywords, ot.Keywords)
 		}
 	}
-	if len(kws) != len(schemaSet) {
-		t.Errorf("got %d schema phrases, want %d", len(kws), len(schemaSet))
+	if got := SchemaScopedObjectTypes()[0]; got.Name() != strings.ToLower(strings.Join(got.Keywords, " ")) {
+		t.Errorf("Name() = %q, want lowercased %v", got.Name(), got.Keywords)
+	}
+	if len(types) != len(schemaSet) {
+		t.Errorf("got %d schema types, want %d", len(types), len(schemaSet))
 	}
 }

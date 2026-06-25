@@ -195,26 +195,25 @@ var ObjectTypes = []ObjectType{
 	{[]string{"ORGANIZATION", "LISTING"}, ScopeOrganization},
 }
 
-// schemaScopedKeywords caches the keyword phrases of every ScopeSchema object,
-// sorted longest-phrase-first so a prefix match tries the most specific phrase
+// schemaScopedTypes caches every ScopeSchema object type, sorted
+// longest-keyword-phrase first so a prefix match tries the most specific phrase
 // first (e.g. EVENT ROUTING TABLE before TABLE).
-var schemaScopedKeywords = buildSchemaScopedKeywords()
+var schemaScopedTypes = buildSchemaScopedTypes()
 
-func buildSchemaScopedKeywords() [][]string {
-	var out [][]string
+func buildSchemaScopedTypes() []ObjectType {
+	var out []ObjectType
 	for _, ot := range ObjectTypes {
 		if ot.Scope == ScopeSchema {
-			kw := make([]string, len(ot.Keywords))
-			copy(kw, ot.Keywords)
-			out = append(out, kw)
+			out = append(out, ot)
 		}
 	}
-	sort.SliceStable(out, func(i, j int) bool { return len(out[i]) > len(out[j]) })
+	sort.SliceStable(out, func(i, j int) bool { return len(out[i].Keywords) > len(out[j].Keywords) })
 	return out
 }
 
-// SchemaScopedCreateKeywords returns the upper-case keyword phrases of every
-// schema-scoped object type, longest phrase first. Callers match a CREATE
-// statement's object keyword against these to decide whether an unqualified name
-// needs an active database + schema. The returned slices must not be mutated.
-func SchemaScopedCreateKeywords() [][]string { return schemaScopedKeywords }
+// SchemaScopedObjectTypes returns every schema-scoped object type, longest keyword
+// phrase first. Callers match a CREATE statement's object keyword against
+// ObjectType.Keywords to decide whether an unqualified name needs an active
+// database + schema, and use ObjectType.Name() for the diagnostic label. The
+// returned slice and its Keywords must not be mutated.
+func SchemaScopedObjectTypes() []ObjectType { return schemaScopedTypes }

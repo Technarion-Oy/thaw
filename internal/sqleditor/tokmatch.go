@@ -152,6 +152,26 @@ func skipIfExists(sig []sqltok.Token, sql string, i int) (next int, present bool
 //	  [RECURSIVE] [MATERIALIZED]
 //	  {TABLE|VIEW} [IF NOT EXISTS] <ident_path>
 //
+// createModifierGroups are the optional modifiers that may appear between
+// CREATE [OR REPLACE] and a table/view-like object keyword. Each group is consumed
+// at most once, in this canonical order. Shared by every CREATE-object matcher via
+// skipCreateModifiers so the scan can't drift between them.
+var createModifierGroups = [][]string{
+	{"SECURE"}, {"INTERACTIVE"}, {"LOCAL", "GLOBAL"},
+	{"TEMP", "TEMPORARY", "VOLATILE", "TRANSIENT"}, {"RECURSIVE"}, {"MATERIALIZED"},
+}
+
+// skipCreateModifiers advances past the optional CREATE object modifiers at sig[i]
+// (each group at most once, in order) and returns the new index.
+func skipCreateModifiers(sig []sqltok.Token, sql string, i int) int {
+	for _, group := range createModifierGroups {
+		if kwAtAny(sig, sql, i, group...) != "" {
+			i++
+		}
+	}
+	return i
+}
+
 // Returns the raw ident path text, the object keyword (TABLE or VIEW), and ok.
 func matchCreateTV(sig []sqltok.Token, sql string) (rawPath, objKw string, ok bool) {
 	i := 0
@@ -163,24 +183,7 @@ func matchCreateTV(sig []sqltok.Token, sql string) (rawPath, objKw string, ok bo
 	if !orOK {
 		return
 	}
-	if kwAt(sig, sql, i, "SECURE") {
-		i++
-	}
-	if kwAt(sig, sql, i, "INTERACTIVE") {
-		i++
-	}
-	if kwAtAny(sig, sql, i, "LOCAL", "GLOBAL") != "" {
-		i++
-	}
-	if kwAtAny(sig, sql, i, "TEMP", "TEMPORARY", "VOLATILE", "TRANSIENT") != "" {
-		i++
-	}
-	if kwAt(sig, sql, i, "RECURSIVE") {
-		i++
-	}
-	if kwAt(sig, sql, i, "MATERIALIZED") {
-		i++
-	}
+	i = skipCreateModifiers(sig, sql, i)
 	objKw = kwAtAny(sig, sql, i, "TABLE", "VIEW")
 	if objKw == "" {
 		return
@@ -210,7 +213,7 @@ func matchWordsAt(sig []sqltok.Token, sql string, pos int, words []string) bool 
 //	  <kind> [IF NOT EXISTS] <ident_path>
 //
 // The set of <kind> phrases is the single source of truth in
-// snowflake.SchemaScopedCreateKeywords() (TABLE, VIEW, SEQUENCE, STAGE, STREAM,
+// snowflake.SchemaScopedObjectTypes() (TABLE, VIEW, SEQUENCE, STAGE, STREAM,
 // TASK, FILE FORMAT, the policy family, …) — account-level objects (DATABASE,
 // WAREHOUSE, ROLE, integrations, …) are excluded there, so they never match.
 // Returns the raw ident path, the human-readable object type used in diagnostics,
@@ -226,22 +229,13 @@ func matchCreateSchemaScoped(sig []sqltok.Token, sql string) (rawPath, objType s
 	if !orOK {
 		return
 	}
-	// Modifier prefix shared with matchCreateTV — each modifier group is optional
-	// and consumed at most once, in canonical order.
-	for _, group := range [][]string{
-		{"SECURE"}, {"INTERACTIVE"}, {"LOCAL", "GLOBAL"},
-		{"TEMP", "TEMPORARY", "VOLATILE", "TRANSIENT"}, {"RECURSIVE"}, {"MATERIALIZED"},
-	} {
-		if kwAtAny(sig, sql, i, group...) != "" {
-			i++
-		}
-	}
-	// SchemaScopedCreateKeywords is longest-phrase-first, so the most specific
-	// match (EVENT ROUTING TABLE before TABLE) wins.
-	for _, words := range sf.SchemaScopedCreateKeywords() {
-		if matchWordsAt(sig, sql, i, words) {
-			i += len(words)
-			objType = strings.ToLower(strings.Join(words, " "))
+	i = skipCreateModifiers(sig, sql, i)
+	// SchemaScopedObjectTypes is longest-phrase-first, so the most specific match
+	// (EVENT ROUTING TABLE before TABLE) wins.
+	for _, ot := range sf.SchemaScopedObjectTypes() {
+		if matchWordsAt(sig, sql, i, ot.Keywords) {
+			i += len(ot.Keywords)
+			objType = ot.Name()
 			break
 		}
 	}
