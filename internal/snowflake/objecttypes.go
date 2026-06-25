@@ -101,8 +101,11 @@ var ObjectTypes = []ObjectType{
 	{[]string{"ICEBERG", "TABLE"}, ScopeSchema},
 	{[]string{"ONLINE", "FEATURE", "TABLE"}, ScopeSchema},
 	// ── Schema-scoped: views ─────────────────────────────────────────────────
+	// MATERIALIZED / SECURE / RECURSIVE views fold into VIEW: those words are
+	// stripped as CREATE modifiers before the object keyword is matched, so a
+	// separate {"MATERIALIZED","VIEW"} entry would be dead. They are still flagged
+	// (scope is identical) — just labeled "view".
 	{[]string{"VIEW"}, ScopeSchema},
-	{[]string{"MATERIALIZED", "VIEW"}, ScopeSchema},
 	{[]string{"SEMANTIC", "VIEW"}, ScopeSchema},
 	// ── Schema-scoped: routines ──────────────────────────────────────────────
 	{[]string{"FUNCTION"}, ScopeSchema},
