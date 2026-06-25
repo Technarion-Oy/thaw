@@ -1092,6 +1092,12 @@ func (v *Validator) atSelectBoundary() bool {
 		// it must not end the clause body (LISTAGG/ARRAY_AGG/PERCENTILE_CONT/…).
 		return false
 	}
+	if w == "FROM" && v.pos > 0 && strings.EqualFold(v.tokens[v.pos-1].Text(v.src), "DISTINCT") {
+		// `a IS [NOT] DISTINCT FROM b` — the FROM is part of the comparison operator,
+		// not a clause (the token before FROM is DISTINCT in both forms). Without this
+		// it would end the clause body mid-predicate and flag valid SQL.
+		return false
+	}
 	return selectClauseBoundaries[w]
 }
 

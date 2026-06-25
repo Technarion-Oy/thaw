@@ -91,6 +91,12 @@ func TestParseSelect(t *testing.T) {
 		`SELECT LISTAGG(x, ',') WITHIN GROUP (ORDER BY x) FROM t`,
 		`SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY x) FROM t`,
 		`SELECT ARRAY_AGG(x) WITHIN GROUP (ORDER BY x) AS a, y FROM t GROUP BY y`,
+		// IS [NOT] DISTINCT FROM — the FROM is part of the operator, not a clause
+		// boundary (PR #561 review).
+		`SELECT a FROM t WHERE a IS DISTINCT FROM b`,
+		`SELECT a FROM t WHERE a IS NOT DISTINCT FROM b`,
+		`SELECT * FROM t1 JOIN t2 ON t1.a IS DISTINCT FROM t2.a`,
+		`SELECT a IS DISTINCT FROM b AS flag FROM t`,
 	)
 	assertInvalid(t, (*Validator).ParseSelect,
 		``,
