@@ -4741,7 +4741,7 @@ func TestGrammarExpectedAt(t *testing.T) {
 }
 
 func TestGetAutocompleteContext_GrammarExpected(t *testing.T) {
-	t.Run("populated for modelled statement", func(t *testing.T) {
+	t.Run("populated for modeled statement", func(t *testing.T) {
 		sql := "COPY INTO mytable "
 		ctx := GetAutocompleteContext(sql, len(sql))
 		if !grammarExpHas(ctx.GrammarExpected, "FROM") {

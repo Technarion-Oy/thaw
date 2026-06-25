@@ -247,7 +247,7 @@ type AutocompleteContext struct {
 //     scripting variables); surfaced so the provider can tell, e.g., "a name is
 //     expected here" from "a keyword is expected here".
 //
-// It is nil when the statement's leading keyword is not modelled by sqlgrammar,
+// It is nil when the statement's leading keyword is not modeled by sqlgrammar,
 // keeping grammar-driven completion leading-keyword-gated.
 type GrammarExpectation struct {
 	Keywords []string `json:"keywords,omitempty"`

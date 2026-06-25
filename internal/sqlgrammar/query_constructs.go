@@ -1086,7 +1086,7 @@ func (v *Validator) atSelectBoundary() bool {
 // `FROM t1, <cursor>`). Failing there — and re-recording label as expected —
 // keeps the clause "still being typed" rather than complete, so autocomplete
 // offers another item (a column/expression, a table) at the cursor instead of the
-// next clause's keyword. Only labelled (comma-list) bodies do this; the unlabeled
+// next clause's keyword. Only labeled (comma-list) bodies do this; the unlabeled
 // LIMIT/OFFSET/FETCH and FOR UPDATE bodies are not lists and are left untouched.
 func (v *Validator) consumeClauseBody(requireOne bool, label string) bool {
 	start := v.pos
