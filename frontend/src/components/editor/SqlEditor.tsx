@@ -1102,6 +1102,14 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         // ── Unified autocomplete context (single IPC round-trip) ─────────
         const { databases, schemas, objects } = useObjectStore.getState();
 
+        // Kick off the function-name lookup concurrently with the context fetch:
+        // it depends only on the typed word, so there's no reason to wait for the
+        // context round-trip before starting it. Awaited near the end.
+        const fnSuggestionsPromise =
+          (word.word.length >= 2 && !lineUpToWord.trim().endsWith("."))
+            ? GetFunctionSuggestions(word.word).catch(() => null)
+            : Promise.resolve(null);
+
         const ctx = await GetAutocompleteContextFull({
           sql: model.getValue(),
           cursorOffset,
@@ -1143,7 +1151,8 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         // ── JOIN ON clause completion (computed by backend) ────────────────
         const isInJoinOnClause = ctx?.isInJoinOnClause ?? false;
         const wordIsOn = word.word.toUpperCase() === "ON";
-        if ((wordIsOn || isInJoinOnClause) && schemaAutocompleteEnabled) {
+        // Needs ≥2 table refs; gate the IPC on the already-fetched ctxTableRefs.
+        if ((wordIsOn || isInJoinOnClause) && schemaAutocompleteEnabled && ctxTableRefs.length >= 2) {
           const rawRefs = await ParseJoinTableRefs(textToCursor);
           if (rawRefs && (rawRefs as any[]).length >= 2) {
             const resolvedRefs = await ResolveTableRefs(rawRefs as any[], useObjectStore.getState().objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, { database: "", schema: "" } as any, { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema } as any);
@@ -1172,13 +1181,17 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           }
         }
 
-        if (schemaAutocompleteEnabled) {
+        // JOIN/comma-join "ON <condition>" completion needs ≥2 table refs. ctxTableRefs
+        // (already fetched, parsed from the whole statement) is a superset of the refs
+        // up to the cursor, so when it has <2 we skip the ParseJoinTableRefs IPC
+        // entirely — the common single-table keystroke no longer pays for it. The cheap
+        // ON/USING text check is likewise done before the round-trip.
+        if (schemaAutocompleteEnabled && ctxTableRefs.length >= 2) {
           const lastJoinSegment = (textToCursor.split(/\bJOIN\b/i).pop() ?? "").trim();
-          const rawRefsC = await ParseJoinTableRefs(textToCursor);
-          const hasTriggerC =
-            lastJoinSegment.length > 0 &&
-            !/\b(?:ON|USING)\b/i.test(lastJoinSegment) &&
-            rawRefsC && (rawRefsC as any[]).length >= 2;
+          const segmentOpenForJoin =
+            lastJoinSegment.length > 0 && !/\b(?:ON|USING)\b/i.test(lastJoinSegment);
+          const rawRefsC = segmentOpenForJoin ? await ParseJoinTableRefs(textToCursor) : null;
+          const hasTriggerC = !!rawRefsC && (rawRefsC as any[]).length >= 2;
 
           if (hasTriggerC) {
             const resolvedC = await ResolveTableRefs(rawRefsC as any[], useObjectStore.getState().objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, { database: "", schema: "" } as any, { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema } as any);
@@ -1383,23 +1396,19 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         } // end schemaAutocompleteEnabled (context columns)
 
         let fnSuggestions: any[] = [];
-        if (word.word.length >= 2 && !lineUpToWord.trim().endsWith(".")) {
-          try {
-            const fns = await GetFunctionSuggestions(word.word);
-            if (fns) {
-              fnSuggestions = fns.map((fn) => ({
-                label:            fn.functionName,
-                kind:             monaco.languages.CompletionItemKind.Function,
-                detail:           fn.functionType === "UDF" ? "User-defined function" : "Built-in function",
-                documentation:    fn.description || fn.functionSignature,
-                insertText:       fn.functionName,
-                filterText:       fn.functionName,
-                sortText:         fn.functionType === "UDF" ? "06_" + fn.functionName : "07_" + fn.functionName,
-                range,
-              }));
-            }
-          } catch {
-            // best-effort
+        {
+          const fns = await fnSuggestionsPromise;
+          if (fns) {
+            fnSuggestions = fns.map((fn) => ({
+              label:            fn.functionName,
+              kind:             monaco.languages.CompletionItemKind.Function,
+              detail:           fn.functionType === "UDF" ? "User-defined function" : "Built-in function",
+              documentation:    fn.description || fn.functionSignature,
+              insertText:       fn.functionName,
+              filterText:       fn.functionName,
+              sortText:         fn.functionType === "UDF" ? "06_" + fn.functionName : "07_" + fn.functionName,
+              range,
+            }));
           }
         }
 
