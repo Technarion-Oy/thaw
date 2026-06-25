@@ -920,7 +920,13 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         }
 
         if (charBefore === "." && schemaAutocompleteEnabled) {
-          const contextParts = await GetIdentifierAtColumn(fullLine, word.startColumn - 1);
+          const idParts = await GetIdentifierAtColumn(fullLine, word.startColumn - 1);
+          // GetIdentifierAtColumn returns the whole dotted chain, which includes the
+          // segment currently being typed (word.word) as its last element. Drop it so
+          // we complete the children of the *qualifier* and never DESCRIBE/SHOW the
+          // half-typed name itself — doing so fired a failing Snowflake query on every
+          // keystroke while typing an object name (DB.SCH.MY_N, MY_NO, MY_NOT, …).
+          const contextParts = word.word ? idParts.slice(0, -1) : idParts;
           if (contextParts && contextParts.length > 0) {
             // Case: db.schema.table.
             if (contextParts.length === 3) {
