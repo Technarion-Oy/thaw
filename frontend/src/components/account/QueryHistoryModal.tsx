@@ -90,6 +90,10 @@ export default function QueryHistoryModal({ onClose }: Props) {
   const [copiedId,        setCopiedId]        = useState<string | null>(null);
   const [profileQueryId,  setProfileQueryId]  = useState<string | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // True when entering session scope cleared a previously-set range — only then
+  // do we restore "today" on leaving, so a range the user deliberately cleared on
+  // another scope is preserved.
+  const sessionClearedRange = useRef(false);
 
   // runQuery accepts optional overrides so callers (e.g. "Filter by this
   // session") can run with new scope/session/range values before the
@@ -144,6 +148,9 @@ export default function QueryHistoryModal({ onClose }: Props) {
     // run, since setState hasn't flushed yet in this handler). When adding a new
     // runQuery param, thread it through `params` here only.
     const params = { filterType: "session" as FilterType, sessionId: sid, timeRange: null };
+    // Entering session scope: remember whether we're clearing a real range, so a
+    // later switch away restores "today" only if session scope cleared it.
+    sessionClearedRange.current = timeRange !== null;
     setFilterType(params.filterType);
     setSessionId(params.sessionId);
     setTimeRange(params.timeRange);
@@ -164,9 +171,10 @@ export default function QueryHistoryModal({ onClose }: Props) {
   // ran the user's editor SQL); a non-numeric / overflowing id is rejected by
   // the backend. Disable Run rather than issue a request that can't succeed.
   const sessionScopeInvalid = filterType === "session" && !isValidSessionId(sessionId);
-  // Distinct from the above: only flag the field red once the user has typed
-  // something wrong, not the moment they switch to session scope.
-  const sessionIdHasError = sessionId.trim() !== "" && sessionScopeInvalid;
+  // Distinct from the above: flag the field red once the user has typed anything
+  // invalid (checked on the raw value so whitespace-only input — which disables
+  // Run — still shows a cue), but not the instant they switch to session scope.
+  const sessionIdHasError = sessionId !== "" && sessionScopeInvalid;
 
   // Auto-run on mount with the current-user / today defaults.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -274,15 +282,19 @@ export default function QueryHistoryModal({ onClose }: Props) {
             value={filterType}
             disabled={loading}
             onChange={(v) => {
-              // Entering session scope: clear the range so a pasted id for an
-              // older session isn't silently bounded by today's window.
               if (v === "session") {
+                // Entering session scope: clear the range so a pasted id for an
+                // older session isn't silently bounded by today's window. Record
+                // whether we actually cleared a range, so the inverse switch knows
+                // whether restoring "today" is warranted.
+                sessionClearedRange.current = timeRange !== null;
                 setTimeRange(null);
-              } else if (filterType === "session" && timeRange === null) {
-                // Leaving session scope: restore the "today" default, but only if
-                // the range is still cleared — don't clobber a range the user
-                // deliberately set/cleared while on user/warehouse/all.
+              } else if (filterType === "session" && sessionClearedRange.current && timeRange === null) {
+                // Leaving session scope: restore "today" only if session scope is
+                // what cleared the range — never clobber a range the user
+                // deliberately cleared while on user/warehouse/all.
                 setTimeRange([dayjs().startOf("day"), dayjs().endOf("day")]);
+                sessionClearedRange.current = false;
               }
               setFilterType(v);
             }}
@@ -326,7 +338,7 @@ export default function QueryHistoryModal({ onClose }: Props) {
               value={sessionId}
               status={sessionIdHasError ? "error" : undefined}
               onChange={(e) => setSessionId(e.target.value)}
-              onPressEnter={() => { if (!sessionScopeInvalid) handleRun(); }}
+              onPressEnter={() => { if (!sessionScopeInvalid && !loading) handleRun(); }}
               style={{ width: 180 }}
               placeholder="Paste a numeric session ID…"
             />

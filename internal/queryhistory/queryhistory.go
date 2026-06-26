@@ -38,7 +38,7 @@ type QueryHistoryRow struct {
 	BytesScanned  int64  `json:"bytesScanned"`
 }
 
-// BuildQueryHistorySql builds the SELECT over the appropriate
+// buildQueryHistorySql builds the SELECT over the appropriate
 // INFORMATION_SCHEMA.QUERY_HISTORY* table function for the given filter.
 //
 //   - filterType:             "session" | "user" | "warehouse" | "all"
@@ -54,7 +54,7 @@ type QueryHistoryRow struct {
 // argument-less QUERY_HISTORY_BY_SESSION() that resolves to the wrong (pooled)
 // session. Prefer GetQueryHistory, which rejects invalid session IDs with an
 // error rather than producing a semantically wrong query.
-func BuildQueryHistorySql(
+func buildQueryHistorySql(
 	filterType string,
 	sessionID string,
 	userName string,
@@ -222,7 +222,7 @@ func GetQueryHistory(
 	if filterType == "session" && !isNumericID(sessionID) {
 		return nil, fmt.Errorf("invalid session id %q: must be a numeric Snowflake session id", sessionID)
 	}
-	query := BuildQueryHistorySql(filterType, sessionID, userName, warehouseName, endTimeStart, endTimeEnd, resultLimit, includeClientGenerated)
+	query := buildQueryHistorySql(filterType, sessionID, userName, warehouseName, endTimeStart, endTimeEnd, resultLimit, includeClientGenerated)
 	res, err := client.QuerySingle(ctx, query)
 	if err != nil {
 		return nil, err

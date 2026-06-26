@@ -17,7 +17,7 @@ import (
 	"thaw/internal/snowflake"
 )
 
-func TestBuildQueryHistorySql(t *testing.T) {
+func TestBuildQueryHistorySQL(t *testing.T) {
 	tests := []struct {
 		name         string
 		filterType   string
@@ -58,7 +58,7 @@ func TestBuildQueryHistorySql(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sql := BuildQueryHistorySql(tt.filterType, tt.sessionID, tt.userName, tt.warehouse, "", "", 100, true)
+			sql := buildQueryHistorySql(tt.filterType, tt.sessionID, tt.userName, tt.warehouse, "", "", 100, true)
 			if !strings.Contains(sql, tt.wantFunc) {
 				t.Errorf("expected func %q in SQL:\n%s", tt.wantFunc, sql)
 			}
@@ -80,7 +80,7 @@ func TestBuildQueryHistorySql(t *testing.T) {
 	}
 }
 
-func TestBuildQueryHistorySqlSessionInjection(t *testing.T) {
+func TestBuildQueryHistorySQLSessionInjection(t *testing.T) {
 	// A non-numeric / injection-laden session id must never be embedded.
 	for _, sid := range []string{
 		"1234, RESULT_LIMIT => 10000",
@@ -92,21 +92,21 @@ func TestBuildQueryHistorySqlSessionInjection(t *testing.T) {
 		"9999999999999999999",           // 19 digits but overflows int64
 		"007",                           // leading zeros
 	} {
-		sql := BuildQueryHistorySql("session", sid, "", "", "", "", 100, false)
+		sql := buildQueryHistorySql("session", sid, "", "", "", "", 100, false)
 		if strings.Contains(sql, "SESSION_ID =>") {
 			t.Errorf("session id %q must not be embedded as an argument:\n%s", sid, sql)
 		}
 	}
 
 	// A clean numeric id is embedded as-is.
-	sql := BuildQueryHistorySql("session", "1234567890", "", "", "", "", 100, false)
+	sql := buildQueryHistorySql("session", "1234567890", "", "", "", "", 100, false)
 	if !strings.Contains(sql, "SESSION_ID => 1234567890") {
 		t.Errorf("expected numeric SESSION_ID argument:\n%s", sql)
 	}
 }
 
-func TestBuildQueryHistorySqlTimeRange(t *testing.T) {
-	sql := BuildQueryHistorySql("all", "", "", "", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z", 50, false)
+func TestBuildQueryHistorySQLTimeRange(t *testing.T) {
+	sql := buildQueryHistorySql("all", "", "", "", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z", 50, false)
 	if !strings.Contains(sql, "END_TIME_RANGE_START => '2026-01-01T00:00:00Z'::TIMESTAMP_LTZ") {
 		t.Errorf("missing range start in SQL:\n%s", sql)
 	}
