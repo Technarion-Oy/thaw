@@ -71,6 +71,7 @@ import (
 	"strings"
 
 	sf "thaw/internal/snowflake"
+	"thaw/internal/sqlgrammar"
 	"thaw/internal/sqltok"
 )
 
@@ -232,6 +233,25 @@ type AutocompleteContext struct {
 	IsDatatypeCtx    bool                      `json:"isDatatypeContext"`
 	IsInJoinOnClause bool                      `json:"isInJoinOnClause"`
 	UsingClause      *UsingClauseInfo          `json:"usingClause,omitempty"`
+	GrammarExpected  *GrammarExpectation       `json:"grammarExpected,omitempty"`
+}
+
+// GrammarExpectation is the recursive-descent grammar's "valid next" set at the
+// cursor (sqlgrammar.Validator.ExpectedAt), split into the two buckets an
+// autocomplete provider treats differently:
+//
+//   - Keywords — literal keyword/option words (FROM, TAG, DATA_RETENTION_TIME_IN_DAYS)
+//     the provider can offer verbatim, ranked above the generic keyword list.
+//   - Kinds — token-kind expectations (Identifier, StringLit, …) that the existing
+//     completion sources already fill (object/column catalogs, stage lists,
+//     scripting variables); surfaced so the provider can tell, e.g., "a name is
+//     expected here" from "a keyword is expected here".
+//
+// It is nil when the statement's leading keyword is not modeled by sqlgrammar,
+// keeping grammar-driven completion leading-keyword-gated.
+type GrammarExpectation struct {
+	Keywords []string `json:"keywords,omitempty"`
+	Kinds    []string `json:"kinds,omitempty"`
 }
 
 // FunctionCallContext is returned by GetActiveFunctionCall and identifies the
@@ -2545,12 +2565,16 @@ func ComputeJoinOnConditions(req JoinOnSuggestionsReq) []JoinCondition {
 func GetAutocompleteContext(sql string, cursorOffset int) AutocompleteContext {
 	ranges := GetStatementRanges(sql)
 
-	// Identify which statement contains the cursor.
+	// Identify which statement contains the cursor. stmtStart is the chosen
+	// statement's start offset, so the cursor's statement-local offset (for the
+	// grammar) is cursorOffset - stmtStart.
 	currentIdx := -1
 	currentStmt := sql
+	stmtStart := 0
 	for i, r := range ranges {
 		if cursorOffset >= r.StartOffset && cursorOffset <= r.EndOffset {
 			currentIdx = i
+			stmtStart = r.StartOffset
 			runes := []rune(sql)
 			currentStmt = string(runes[r.StartOffset:r.EndOffset])
 			break
@@ -2560,11 +2584,23 @@ func GetAutocompleteContext(sql string, cursorOffset int) AutocompleteContext {
 	if currentIdx == -1 && len(ranges) > 0 {
 		last := ranges[len(ranges)-1]
 		currentIdx = len(ranges) - 1
+		stmtStart = last.StartOffset
 		runes := []rune(sql)
 		if last.EndOffset <= len(runes) {
 			currentStmt = string(runes[last.StartOffset:last.EndOffset])
 		}
 	}
+
+	// Grammar-driven "valid next" set at the cursor (nil for unmodelled leaders).
+	// The grammar is fed the current statement's text from its start up to the
+	// cursor — NOT the trimmed currentStmt — so trailing whitespace before the
+	// cursor is preserved. That distinction matters: it is what tells the grammar
+	// the word before the cursor is finished (offer the next clause) rather than
+	// still being typed (the half-typed word it must drop).
+	runesAll := []rune(sql)
+	cur := max(stmtStart, min(cursorOffset, len(runesAll)))
+	stmtPrefix := string(runesAll[stmtStart:cur])
+	grammarExpected := GrammarExpectedAt(stmtPrefix, len(stmtPrefix))
 
 	scripting := GetScriptingCompletions(sql, cursorOffset)
 	tableRefs := ParseJoinTables(currentStmt)
@@ -2608,6 +2644,7 @@ func GetAutocompleteContext(sql string, cursorOffset int) AutocompleteContext {
 		TableRefs:       tableRefs,
 		CTEColumns:      cteColumns,
 		UseContext:      useCtx,
+		GrammarExpected: grammarExpected,
 	}
 }
 
@@ -2988,6 +3025,48 @@ func DetectUsingClause(textToCursor string) UsingClauseInfo {
 		return UsingClauseInfo{InUsing: false, IsPartial: true}
 	}
 	return UsingClauseInfo{}
+}
+
+// ── GrammarExpectedAt ──────────────────────────────────────────────────────
+
+// reGrammarKeyword matches a grammar expected-label that is a literal keyword or
+// option word (FROM, TAG, DATA_RETENTION_TIME_IN_DAYS) — all-uppercase, as the
+// grammar emits them. Token-kind names (Identifier, StringLit, …), the lowercase
+// "identifier" / "column assignment" placeholders, and operators (=, ::) do not
+// match, so they fall into the Kinds bucket.
+var reGrammarKeyword = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
+
+// GrammarExpectedAt parses stmt up to localOffset (a byte offset within stmt)
+// with the recursive-descent grammar and returns its classified "valid next" set
+// — the keywords/token-kinds the grammar expects at the cursor. It returns nil
+// when the statement's leading keyword is unmodelled (so grammar-driven
+// completion stays leading-keyword-gated and unmodelled SQL is unaffected) or
+// when the grammar has no expectation at that position (e.g. a free-form clause
+// body the grammar consumes permissively).
+func GrammarExpectedAt(stmt string, localOffset int) *GrammarExpectation {
+	v := sqlgrammar.New(stmt)
+	if !v.Recognized() {
+		return nil
+	}
+	expected := v.ExpectedAt(localOffset)
+	if len(expected) == 0 {
+		return nil
+	}
+	exp := &GrammarExpectation{}
+	for _, label := range expected {
+		if label == "EOF" {
+			continue // end-of-input sentinel — not a completion candidate
+		}
+		if reGrammarKeyword.MatchString(label) {
+			exp.Keywords = append(exp.Keywords, label)
+		} else {
+			exp.Kinds = append(exp.Kinds, label)
+		}
+	}
+	if len(exp.Keywords) == 0 && len(exp.Kinds) == 0 {
+		return nil
+	}
+	return exp
 }
 
 // GetAutocompleteContextFull extends GetAutocompleteContext with ref resolution

@@ -229,12 +229,10 @@ func (v *Validator) ParseAlterAgent() bool {
 					return v.Sequence(
 						func() bool { return v.MatchWord("SET") },
 						func() bool {
-							return v.ZeroOrMore(func() bool {
-								return v.Choice(
-									v.commentOption(),
-									v.option("PROFILE", v.parseString),
-								)
-							})
+							return v.unorderedOnce(
+								v.commentOption(),
+								v.option("PROFILE", v.parseString),
+							)
 						},
 					)
 				},
@@ -856,16 +854,14 @@ func (v *Validator) ParseAlterApplicationPackageModifyReleaseChannel() bool {
 	// VERSION / PATCH / ACCOUNTS = ( ... ) / UPGRADE_AFTER / UPGRADE_IN_MAINTENANCE_WINDOW
 	// / UPGRADE_DEADLINE.
 	trailers := func() bool {
-		return v.ZeroOrMore(func() bool {
-			return v.Choice(
-				v.option("VERSION", v.parseScalar),
-				v.option("PATCH", v.parseScalar),
-				v.option("ACCOUNTS", v.consumeBalancedParens),
-				v.option("UPGRADE_AFTER", v.parseString),
-				v.option("UPGRADE_IN_MAINTENANCE_WINDOW", v.parseBool),
-				v.option("UPGRADE_DEADLINE", v.parseString),
-			)
-		})
+		return v.unorderedOnce(
+			v.option("VERSION", v.parseScalar),
+			v.option("PATCH", v.parseScalar),
+			v.option("ACCOUNTS", v.consumeBalancedParens),
+			v.option("UPGRADE_AFTER", v.parseString),
+			v.option("UPGRADE_IN_MAINTENANCE_WINDOW", v.parseBool),
+			v.option("UPGRADE_DEADLINE", v.parseString),
+		)
 	}
 	directive := func() bool {
 		return v.Choice(
@@ -3469,12 +3465,10 @@ func (v *Validator) ParseAlterIcebergTableConvertToManaged() bool {
 		v.parseIdentPath,
 		func() bool { return v.phrase("CONVERT", "TO", "MANAGED") },
 		func() bool {
-			return v.ZeroOrMore(func() bool {
-				return v.Choice(
-					v.option("BASE_LOCATION", v.parseString),
-					v.option("STORAGE_SERIALIZATION_POLICY", v.wordsValue("COMPATIBLE", "OPTIMIZED")),
-				)
-			})
+			return v.unorderedOnce(
+				v.option("BASE_LOCATION", v.parseString),
+				v.option("STORAGE_SERIALIZATION_POLICY", v.wordsValue("COMPATIBLE", "OPTIMIZED")),
+			)
 		},
 	)
 }
@@ -4029,12 +4023,10 @@ func (v *Validator) ParseAlterModelModifyVersion() bool {
 		func() bool { return v.MatchWord("SET") },
 		// [ COMMENT = ... ] [ METADATA = ... ]
 		func() bool {
-			return v.ZeroOrMore(func() bool {
-				return v.Choice(
-					v.option("COMMENT", v.parseString),
-					v.option("METADATA", v.parseString),
-				)
-			})
+			return v.unorderedOnce(
+				v.option("COMMENT", v.parseString),
+				v.option("METADATA", v.parseString),
+			)
 		},
 	)
 }

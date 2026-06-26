@@ -37,7 +37,7 @@ import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableColumn
 import { SNOWFLAKE_DATA_TYPES } from "../../generated/snowflakeDataTypes";
 import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateDataTypes, ValidateGrammar, ValidateAntiPatterns, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContextFull, ResolveTableRefs, ComputeGitLineDiff } from "../../../wailsjs/go/sqleditor/Service";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
-import { UC, quoteIfNecessary, getFKs, getFKsCached, setFKCache, FKEntry, buildVariableSuggestions } from "./sqlEditorUtils";
+import { UC, quoteIfNecessary, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions } from "./sqlEditorUtils";
 import ExplainModal from "../results/ExplainModal";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 
@@ -144,12 +144,13 @@ async function getColumns(db: string, schema: string, table: string): Promise<st
   if (columnCache.has(key)) return columnCache.get(key)!;
   if (fetchingCols.has(key)) return [];
   fetchingCols.add(key);
+  const gen = currentCacheGeneration();
   try {
     const cols = await GetTableColumns(db, schema, table);
-    columnCache.set(key, cols ?? []);
+    if (gen === currentCacheGeneration()) columnCache.set(key, cols ?? []);
     return cols ?? [];
   } catch {
-    columnCache.set(key, []);
+    if (gen === currentCacheGeneration()) columnCache.set(key, []);
     return [];
   } finally {
     fetchingCols.delete(key);
@@ -167,16 +168,17 @@ async function getColInfos(db: string, schema: string, table: string): Promise<C
   if (colInfoCache.has(key)) return colInfoCache.get(key)!;
   if (fetchingColInfos.has(key)) return [];
   fetchingColInfos.add(key);
+  const gen = currentCacheGeneration();
   try {
     const cols = await GetTableColumnsWithTypes(db, schema, table);
     const entries: ColInfo[] = (cols ?? []).map((c: any) => ({
       name:     c.name     ?? "",
       dataType: c.dataType ?? "",
     }));
-    colInfoCache.set(key, entries);
+    if (gen === currentCacheGeneration()) colInfoCache.set(key, entries);
     return entries;
   } catch {
-    colInfoCache.set(key, []);
+    if (gen === currentCacheGeneration()) colInfoCache.set(key, []);
     return [];
   } finally {
     fetchingColInfos.delete(key);
@@ -213,6 +215,31 @@ async function warmUpFKsForSchema(db: string, schema: string): Promise<void> {
   } catch {
     fetchedFKSchemas.delete(key); 
   }
+}
+
+// clearMetadataCaches drops every cached Snowflake catalog lookup the editor uses
+// for autocomplete and diagnostics — table columns, column types, foreign keys,
+// and the "already fetched" markers for schema object lists / database schemas /
+// per-schema FK warm-ups / hover DDL. Call it whenever the catalog may have
+// changed underneath us: after a statement is executed (DDL can add/drop/alter
+// objects and columns) or when the object store is explicitly refreshed. The next
+// autocomplete/diagnostics pass then re-fetches fresh metadata on demand.
+//
+// Function-name, keyword, and git-HEAD caches are intentionally left alone — they
+// are not part of the live catalog and are not affected by running SQL.
+export function clearMetadataCaches(): void {
+  // Bump the generation first so any fetch already in flight discards its
+  // now-stale result instead of repopulating the just-cleared cache.
+  bumpCacheGeneration();
+  columnCache.clear();
+  fetchingCols.clear();
+  colInfoCache.clear();
+  fetchingColInfos.clear();
+  fetchedSchemaObjects.clear();
+  fetchedDatabaseSchemas.clear();
+  fetchedFKSchemas.clear();
+  hoverDDLCache.clear();
+  clearFKCache();
 }
 
 function mkColSuggestions(cols: string[], range: any, monaco: any) {
@@ -805,7 +832,10 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
     // Re-run diagnostics when the object store is refreshed after a new
     // connection (e.g. offline-first startup: databases load post-connect).
+    // The catalog may have changed, so drop the cached column/object metadata
+    // first — autocomplete and the re-run diagnostics then re-fetch it fresh.
     const refreshDiagnosticsHandler = () => {
+      clearMetadataCaches();
       if (diagTimerRef.current) clearTimeout(diagTimerRef.current);
       diagTimerRef.current = setTimeout(runDiagnostics, 0);
     };
@@ -920,7 +950,13 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         }
 
         if (charBefore === "." && schemaAutocompleteEnabled) {
-          const contextParts = await GetIdentifierAtColumn(fullLine, word.startColumn - 1);
+          const idParts = await GetIdentifierAtColumn(fullLine, word.startColumn - 1);
+          // GetIdentifierAtColumn returns the whole dotted chain, which includes the
+          // segment currently being typed (word.word) as its last element. Drop it so
+          // we complete the children of the *qualifier* and never DESCRIBE/SHOW the
+          // half-typed name itself — doing so fired a failing Snowflake query on every
+          // keystroke while typing an object name (DB.SCH.MY_N, MY_NO, MY_NOT, …).
+          const contextParts = word.word ? idParts.slice(0, -1) : idParts;
           if (contextParts && contextParts.length > 0) {
             // Case: db.schema.table.
             if (contextParts.length === 3) {
@@ -1102,6 +1138,24 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         // ── Unified autocomplete context (single IPC round-trip) ─────────
         const { databases, schemas, objects } = useObjectStore.getState();
 
+        // Kick off the function-name lookup concurrently with the context fetch:
+        // it depends only on the typed word, so there's no reason to wait for the
+        // context round-trip before starting it. Awaited near the end.
+        //
+        // Skip it in JOIN-ON / JOIN-USING contexts: those branches return their own
+        // suggestions before this promise is awaited, so firing it there is a wasted
+        // IPC — and neither position wants function names ("ON" is never a function;
+        // a JOIN USING(…) list holds column names). The USING check requires a
+        // preceding JOIN in the same statement so it does NOT match
+        // `MERGE INTO t USING (SELECT …)`, whose subquery DOES want function names.
+        const inJoinOnOrUsing =
+          word.word.toUpperCase() === "ON" ||
+          /\bJOIN\b[^;]*\bUSING\s*\([^)]*$/i.test(textToCursor);
+        const fnSuggestionsPromise =
+          (word.word.length >= 2 && !lineUpToWord.trim().endsWith(".") && !inJoinOnOrUsing)
+            ? GetFunctionSuggestions(word.word).catch(() => null)
+            : Promise.resolve(null);
+
         const ctx = await GetAutocompleteContextFull({
           sql: model.getValue(),
           cursorOffset,
@@ -1143,7 +1197,8 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         // ── JOIN ON clause completion (computed by backend) ────────────────
         const isInJoinOnClause = ctx?.isInJoinOnClause ?? false;
         const wordIsOn = word.word.toUpperCase() === "ON";
-        if ((wordIsOn || isInJoinOnClause) && schemaAutocompleteEnabled) {
+        // Needs ≥2 table refs; gate the IPC on the already-fetched ctxTableRefs.
+        if ((wordIsOn || isInJoinOnClause) && schemaAutocompleteEnabled && ctxTableRefs.length >= 2) {
           const rawRefs = await ParseJoinTableRefs(textToCursor);
           if (rawRefs && (rawRefs as any[]).length >= 2) {
             const resolvedRefs = await ResolveTableRefs(rawRefs as any[], useObjectStore.getState().objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, { database: "", schema: "" } as any, { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema } as any);
@@ -1172,13 +1227,17 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           }
         }
 
-        if (schemaAutocompleteEnabled) {
+        // JOIN/comma-join "ON <condition>" completion needs ≥2 table refs. ctxTableRefs
+        // (already fetched, parsed from the whole statement) is a superset of the refs
+        // up to the cursor, so when it has <2 we skip the ParseJoinTableRefs IPC
+        // entirely — the common single-table keystroke no longer pays for it. The cheap
+        // ON/USING text check is likewise done before the round-trip.
+        if (schemaAutocompleteEnabled && ctxTableRefs.length >= 2) {
           const lastJoinSegment = (textToCursor.split(/\bJOIN\b/i).pop() ?? "").trim();
-          const rawRefsC = await ParseJoinTableRefs(textToCursor);
-          const hasTriggerC =
-            lastJoinSegment.length > 0 &&
-            !/\b(?:ON|USING)\b/i.test(lastJoinSegment) &&
-            rawRefsC && (rawRefsC as any[]).length >= 2;
+          const segmentOpenForJoin =
+            lastJoinSegment.length > 0 && !/\b(?:ON|USING)\b/i.test(lastJoinSegment);
+          const rawRefsC = segmentOpenForJoin ? await ParseJoinTableRefs(textToCursor) : null;
+          const hasTriggerC = !!rawRefsC && (rawRefsC as any[]).length >= 2;
 
           if (hasTriggerC) {
             const resolvedC = await ResolveTableRefs(rawRefsC as any[], useObjectStore.getState().objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, { database: "", schema: "" } as any, { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema } as any);
@@ -1249,13 +1308,34 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           }
         }
 
-        const keywordSuggestions = snowflakeKeywordsArray.map((kw) => ({
+        // ── Grammar-driven keyword expectations ───────────────────────────
+        // The recursive-descent grammar (internal/sqlgrammar, via ExpectedAt)
+        // reports the keywords valid right after the cursor for modelled
+        // statements — e.g. FROM after `COPY INTO <table>`, the object types
+        // after CREATE/DROP, the alter verbs after `ALTER TABLE <name>`. Offer
+        // them first (sortText "00_grm_") and drop them from the generic keyword
+        // dump below so they aren't listed twice. Empty for unmodelled leaders,
+        // so completion stays leading-keyword-gated with no behavior change.
+        const grammarKeywords: string[] = ctx?.grammarExpected?.keywords ?? [];
+        const grammarKwSet = new Set(grammarKeywords.map((k) => k.toUpperCase()));
+        const grammarKeywordSuggestions = grammarKeywords.map((kw) => ({
           label:      kw,
           kind:       monaco.languages.CompletionItemKind.Keyword,
           insertText: kw,
-          sortText:   "08_" + kw,
+          sortText:   "00_grm_" + kw,
+          detail:     "Expected here",
           range,
         }));
+
+        const keywordSuggestions = snowflakeKeywordsArray
+          .filter((kw) => !grammarKwSet.has(kw.toUpperCase()))
+          .map((kw) => ({
+            label:      kw,
+            kind:       monaco.languages.CompletionItemKind.Keyword,
+            insertText: kw,
+            sortText:   "08_" + kw,
+            range,
+          }));
 
         const variableSuggestions = buildVariableSuggestions(declaredVars, needsColon, range, monaco);
 
@@ -1297,6 +1377,11 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         for (const ref of (ctx?.resolvedRefs || [])) {
           // Skip CTE names — their columns are added below
           if (cteColMap.has(UC(ref.name)) && !ref.db && !ref.schema) continue;
+          // Skip the ref whose name is the token currently being typed: it's a
+          // half-finished table name (FROM MY_T…), so DESCRIBE-ing it fires a failing
+          // Snowflake query on every keystroke. Its columns get fetched once the name
+          // is complete and the cursor moves off it.
+          if (word.word && UC(ref.name) === UC(word.word)) continue;
           refsToFetch.push({ db: ref.db, schema: ref.schema, name: ref.name });
         }
 
@@ -1362,28 +1447,25 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         } // end schemaAutocompleteEnabled (context columns)
 
         let fnSuggestions: any[] = [];
-        if (word.word.length >= 2 && !lineUpToWord.trim().endsWith(".")) {
-          try {
-            const fns = await GetFunctionSuggestions(word.word);
-            if (fns) {
-              fnSuggestions = fns.map((fn) => ({
-                label:            fn.functionName,
-                kind:             monaco.languages.CompletionItemKind.Function,
-                detail:           fn.functionType === "UDF" ? "User-defined function" : "Built-in function",
-                documentation:    fn.description || fn.functionSignature,
-                insertText:       fn.functionName,
-                filterText:       fn.functionName,
-                sortText:         fn.functionType === "UDF" ? "06_" + fn.functionName : "07_" + fn.functionName,
-                range,
-              }));
-            }
-          } catch {
-            // best-effort
+        {
+          const fns = await fnSuggestionsPromise;
+          if (fns) {
+            fnSuggestions = fns.map((fn) => ({
+              label:            fn.functionName,
+              kind:             monaco.languages.CompletionItemKind.Function,
+              detail:           fn.functionType === "UDF" ? "User-defined function" : "Built-in function",
+              documentation:    fn.description || fn.functionSignature,
+              insertText:       fn.functionName,
+              filterText:       fn.functionName,
+              sortText:         fn.functionType === "UDF" ? "06_" + fn.functionName : "07_" + fn.functionName,
+              range,
+            }));
           }
         }
 
         return {
           suggestions: [
+            ...grammarKeywordSuggestions,
             ...variableSuggestions,
             ...contextColSuggestions,
             ...keywordSuggestions,

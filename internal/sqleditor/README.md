@@ -10,7 +10,7 @@ Key capabilities:
 - Structural syntax validation (unclosed strings, unmatched parens, bad scripting syntax)
 - Grammar-conformance validation via the recursive-descent state machine in [`internal/sqlgrammar`](../sqlgrammar/README.md) (replaced the legacy regex/token-scanning anti-pattern & preamble checks)
 - Data-type validation in DDL and CAST expressions
-- Object-existence validation — a referenced table/view/schema/database must exist in the catalog **or be created earlier in the same script** (`ValidateTablesExist`)
+- Object-existence validation — a referenced table/view/schema/database must exist in the catalog **or be created earlier in the same script** (`ValidateTablesExist`). The "no database/schema selected" check on an unqualified CREATE name covers all schema-scoped object types (TABLE, VIEW, SEQUENCE, STAGE, STREAM, TASK, PIPE, FILE FORMAT, FUNCTION, the policy family, …) via `matchCreateSchemaScoped`, which reads the schema-scoped phrase list from `snowflake.SchemaScopedObjectTypes()` (the single source of truth for object scope). Account-level objects (DATABASE, WAREHOUSE, ROLE, NETWORK POLICY, integrations, …) are excluded there.
 - JOIN ON / USING condition suggestions (3-tier: FK → PK heuristic → type-compatible same-name columns)
 - Autocomplete context bundling (statement ranges, scripting variables, CTE columns, table refs, ref resolution)
 - LCS-based line diff for git gutter decorations
@@ -21,12 +21,12 @@ Key capabilities:
 | File | Purpose |
 |------|---------|
 | `service.go` | `Service` struct (Wails-bound, stateless); thin delegators to package-level functions |
-| `sqleditor.go` | Core types (`DiagMarker`, `JoinTableRef`, `ResolvedRef`, `ColInfo`, `ColEntry`, `JoinCondition`, `AutocompleteContext`, `UseContext`, `LineDiff`, etc.) and main analysis functions |
+| `sqleditor.go` | Core types (`DiagMarker`, `JoinTableRef`, `ResolvedRef`, `ColInfo`, `ColEntry`, `JoinCondition`, `AutocompleteContext`, `GrammarExpectation`, `UseContext`, `LineDiff`, etc.) and main analysis functions (incl. `GrammarExpectedAt`, the grammar-driven completion bridge to `internal/sqlgrammar`) |
 | `patterns.go` | `ValidateDataTypes`; regex constants `ReIdentifier`, `_ident`, `_identPath`; `ApplyCasing`; the `matchesSnowflakeFP` false-positive guard shared by the bare-column-ref and table-existence validators |
 | `grammar.go` | `ValidateGrammar` — per-statement check against the recursive-descent grammar in `internal/sqlgrammar`; rebases failure positions to absolute doc coordinates |
 | `antipatterns.go` | `ValidateAntiPatterns` — semantic checks the grammar can't perform: MERGE clause-action validity, QUALIFY placement, FLATTEN/LATERAL usage, variant-path traversal, unknown Cortex functions, stray token / dangling `AS` after a FROM/JOIN table reference, PIVOT/UNPIVOT/MATCH_RECOGNIZE/ASOF JOIN clause shape, INSERT OVERWRITE/ALL/FIRST structure, Time Travel `AT`/`BEFORE`, and cross-statement transaction tracking (nested `BEGIN`, stray `COMMIT`/`ROLLBACK`, uncommitted transaction) |
 | `barecolrefs.go` | `ValidateBareColumnRefs`, `ExtractInEditorTableDefs` — validates INSERT column lists and CREATE TABLE REFERENCES; extracts in-editor table columns for pre-execution autocomplete |
-| `tableexist.go` | `ValidateTablesExist` — checks SELECT/CREATE/ALTER/DROP/UNDROP for unresolvable table/schema/database references; emits quick-fix `Code` JSON when a table exists in another schema |
+| `tableexist.go` | `ValidateTablesExist` — checks SELECT/CREATE/ALTER/DROP/UNDROP for unresolvable table/schema/database references and unqualified schema-scoped CREATEs with no active database/schema (`matchCreateSchemaScoped`); emits quick-fix `Code` JSON when a table exists in another schema |
 | `diaghelpers.go` | Shared internal helpers: `stripCommentsSQL`, `stripStringLiterals`, `getFirstSQLToken` |
 | `doc.go` | Package doc + `thaw:domain` annotation |
 
@@ -50,10 +50,11 @@ Key capabilities:
 - `ResolveTableRefs(refs, storeObjects, useCtx, session) []ResolvedRef` — qualifies unresolved refs against store objects, `UseContext`, and session context (priority: fully-qualified → store match → UseContext → session)
 
 ### Autocomplete context
-- `GetAutocompleteContextFull(req AutocompleteContextRequest) AutocompleteContext` — **the IPC entry point** the completion provider calls. Bundles statement ranges, scripting completions, table refs, CTE column projections, and `UseContext`, then extends them with backend ref resolution (`ResolvedRefs`), in-editor CREATE TABLE extraction (`InEditorTables`), and context-detection flags (`IsDatatypeCtx`, `IsInJoinOnClause`, `UsingClause`)
+- `GetAutocompleteContextFull(req AutocompleteContextRequest) AutocompleteContext` — **the IPC entry point** the completion provider calls. Bundles statement ranges, scripting completions, table refs, CTE column projections, and `UseContext`, then extends them with backend ref resolution (`ResolvedRefs`), in-editor CREATE TABLE extraction (`InEditorTables`), the context-detection flags (`IsDatatypeCtx`, `IsInJoinOnClause`, `UsingClause`), and the grammar-driven `GrammarExpected`
 - The following are **package-level helpers only** (no IPC wrapper): `GetAutocompleteContextFull` computes them server-side so the frontend needs a single round-trip —
-  - `GetAutocompleteContext(sql, cursorOffset)` — the un-resolved bundle `…Full` builds on
+  - `GetAutocompleteContext(sql, cursorOffset)` — the un-resolved bundle `…Full` builds on; also computes `GrammarExpected`
   - `GetScriptingCompletions(sql, cursorOffset)` — declared Snowflake Scripting variables visible at cursor
+  - `GrammarExpectedAt(stmt, localOffset) *GrammarExpectation` — **grammar-driven completion.** Parses the statement prefix up to the cursor with [`internal/sqlgrammar`](../sqlgrammar/README.md)'s `Validator.ExpectedAt` and classifies its "valid next" set into `Keywords` (literal keyword/option words the provider offers verbatim — e.g. `FROM` after `COPY INTO <table>`, the object types after `CREATE`/`DROP`, the verbs after `ALTER TABLE <name>`) and `Kinds` (token-kind expectations like `Identifier`/`StringLit` that the existing catalog/column/stage sources already fill). Returns nil for unmodelled leading keywords, so completion is **leading-keyword-gated** — unmodelled SQL keeps the legacy detector behavior. Migrates the ad-hoc detectors below over time (issue #557)
   - `IsDatatypeContext(textToCursor, lineUpToWord)` — cursor after `::`, `CAST AS`, `DECLARE`, or a column definition
   - `IsInJoinOnClause(textToCursor)` — cursor inside a JOIN … ON … not yet terminated
   - `DetectUsingClause(textToCursor)` — `InUsing` (empty USING) vs `IsPartial` (partial column list)

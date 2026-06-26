@@ -61,10 +61,56 @@ func TestParseSelect(t *testing.T) {
 		`SELECT 1`,
 		`SELECT a, b FROM t WHERE a > 1`,
 		`SELECT DISTINCT col FROM db.s.t ORDER BY col`,
+		`SELECT ALL * FROM t`,
+		`SELECT TOP 5 a, b FROM t`,
+		`SELECT * FROM t`,
+		`SELECT EXTRACT(YEAR FROM dt) AS y FROM t`,        // FROM nested in a function call
+		`SELECT a FROM t WHERE x IN ( SELECT id FROM u )`, // boundary keyword nested in a subquery
+		`SELECT a, count(*) FROM t GROUP BY a HAVING count(*) > 1 ORDER BY a LIMIT 10`, // full clause stack
+		`SELECT a FROM t QUALIFY row_number() OVER ( ORDER BY a ) = 1`,
+		`SELECT a FROM t1 JOIN t2 ON t1.id = t2.id`, // permissive FROM body (joins)
+		`SELECT 1 UNION SELECT 2`,                   // set operator
+		`SELECT 1 UNION ALL SELECT 2 ORDER BY 1`,    // trailing ORDER BY on the union
+		`SELECT 1 INTERSECT SELECT 2 EXCEPT SELECT 3`,
+		`SELECT a FROM t OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY`,
+		`SELECT a FROM t FOR UPDATE`,
+		// Non-reserved words that also start clauses are legal identifiers — they
+		// must not be treated as unconditional clause boundaries (PR #561 review).
+		`SELECT offset FROM t`,
+		`SELECT t.offset FROM t`,
+		`SELECT fetch FROM t`,
+		`SELECT except FROM t`,        // EXCEPT as a column name
+		`SELECT * FROM offset`,        // ...and as a table name
+		`SELECT * FROM except`,
+		`SELECT * EXCEPT (col1) FROM t`,         // Snowflake column-exclusion
+		`SELECT * EXCEPT (col1, col2) FROM t`,
+		`SELECT a FROM t EXCEPT (SELECT b FROM u)`, // parenthesized set-op operand still works
+		`SELECT a FROM t EXCEPT DISTINCT SELECT b FROM u`,
+		// WITHIN GROUP (ORDER BY …) — ordered-set aggregates; the depth-0 GROUP must
+		// not be read as a GROUP BY clause boundary (PR #561 review).
+		`SELECT LISTAGG(x, ',') WITHIN GROUP (ORDER BY x) FROM t`,
+		`SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY x) FROM t`,
+		`SELECT ARRAY_AGG(x) WITHIN GROUP (ORDER BY x) AS a, y FROM t GROUP BY y`,
+		// IS [NOT] DISTINCT FROM — the FROM is part of the operator, not a clause
+		// boundary (PR #561 review).
+		`SELECT a FROM t WHERE a IS DISTINCT FROM b`,
+		`SELECT a FROM t WHERE a IS NOT DISTINCT FROM b`,
+		`SELECT * FROM t1 JOIN t2 ON t1.a IS DISTINCT FROM t2.a`,
+		`SELECT a IS DISTINCT FROM b AS flag FROM t`,
+		// LIMIT/OFFSET/FETCH are non-reserved — legal unquoted identifiers, not
+		// unconditional clause boundaries (PR #561 review).
+		`SELECT limit FROM t`,
+		`SELECT * FROM limit`,
+		`SELECT id, limit FROM t`,
+		`SELECT a FROM t LIMIT 10 OFFSET 5`,
 	)
 	assertInvalid(t, (*Validator).ParseSelect,
 		``,
 		`INSERT INTO t VALUES (1)`,
+		`SELECT`,                  // no projection — 0 columns is not allowed
+		`SELECT FROM t`,           // empty projection before FROM — 0 columns is not allowed
+		`SELECT a FROM`,           // dangling FROM with no table
+		`SELECT a FROM t GROUP a`, // GROUP without BY
 	)
 }
 

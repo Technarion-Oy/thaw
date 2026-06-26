@@ -17,15 +17,17 @@ It is a **leaf package**: it imports only `internal/sqltok` and must never impor
 
 1. **Diagnostics** — `internal/sqleditor.ValidateGrammar` flags statements that
    don't conform (`[]DiagMarker`).
-2. **Autocomplete** (future) — the `furthest`/`expected` machinery answers "what is
-   valid next at the cursor?".
+2. **Autocomplete** — `Validator.ExpectedAt(cursorOffset)` answers "what is valid
+   next at the cursor?" by parsing the prefix before the cursor and returning the
+   `furthest`/`expected` set. `internal/sqleditor.GrammarExpectedAt` classifies
+   that set into keyword vs token-kind completions for the frontend provider.
 
 ## Key files
 
 | File | Purpose |
 |------|---------|
-| `engine.go` | The `Validator` type, terminals (`Match`/`MatchKeyword`/`MatchWord`/`MatchOp`), combinators (`Sequence`/`Choice`/`Optional`/`ZeroOrMore`), `furthest`/`expected` tracking + `Failure`, and shared helpers (`parseIdentPath`, `option`, `wordsValue`, `phrase`, `tagClause`, `consumeBalancedParens`, `consumeRest`, `showTrailers`, …) |
-| `dispatch.go` | `Recognized()` + `ParseTopLevel()`: a leading-keyword → candidate-rules registry (bulk families by `Parse*` prefix via reflection, DML/misc leaders enumerated explicitly); plus `IdentifyStatement()` — the effective-verb classifier that looks past a leading `WITH`/CTE prefix |
+| `engine.go` | The `Validator` type, terminals (`Match`/`MatchKeyword`/`MatchWord`/`MatchOp`), combinators (`Sequence`/`Choice`/`Optional`/`ZeroOrMore`/`unorderedOnce` — the last for order-independent parameter lists where each option may appear at most once, so duplicates are rejected and `ExpectedAt` stops offering a parameter already set), `furthest`/`expected` tracking + `Failure`, and shared helpers (`parseIdentPath`, `option`, `wordsValue`, `phrase`, `tagClause`, `consumeBalancedParens`, `consumeRest`, `showTrailers`, …) |
+| `dispatch.go` | `Recognized()` + `ParseTopLevel()`: a leading-keyword → candidate-rules registry (bulk families by `Parse*` prefix via reflection, DML/misc leaders enumerated explicitly); `ExpectedAt(cursorOffset)` — the autocomplete "valid next" accessor; plus `IdentifyStatement()` — the effective-verb classifier that looks past a leading `WITH`/CTE prefix |
 | `create.go`, `alter.go`, `drop.go`, `show.go`, `describe.go`, `undrop.go`, `dml.go`, `grant_revoke.go`, `query_constructs.go`, `data_loading.go`, `execute.go`, `session.go`, `transactions.go` | One `func (v *Validator) ParseXxx() bool` per Snowflake command reference; the doc-comment header carries the command's documented syntax. ~716 rules total |
 | `doc.go` | Package doc + `thaw:domain` annotation |
 
@@ -39,6 +41,9 @@ if v.Recognized() && !v.ParseTopLevel() {
 }
 
 kind := v.IdentifyStatement()    // StmtSelect/Insert/Update/Delete/Merge (past a WITH/CTE prefix), else StmtOther
+
+expected := v.ExpectedAt(cursor) // autocomplete: keywords/kinds valid at byte offset `cursor`
+                                 // (parses the prefix before the cursor; drops the half-typed word abutting it)
 ```
 
 The message names both what was **found** (the furthest token, quoted, or
@@ -75,6 +80,23 @@ reported. `CREATE TABLE` requires a real column-definition list (each column
 a CTAS column-alias list followed by `AS <query>`, or `AS`/`LIKE`/`CLONE`/
 `USING TEMPLATE`/`FROM ARCHIVE`. The `CREATE OR ALTER` form is accepted everywhere
 via `orReplace`.
+
+`SELECT` is modelled as a statement skeleton (`ParseSelect` in `dml.go`, helpers in
+`query_constructs.go`): `SELECT [ ALL | DISTINCT ] [ TOP <n> ] <projection>` followed
+by the ordered optional `FROM` / `WHERE` / `GROUP BY` / `HAVING` / `QUALIFY` clauses,
+the trailing `ORDER BY` / `LIMIT` / `OFFSET` / `FETCH` / `FOR UPDATE` clauses, and
+set operators (`UNION` / `INTERSECT` / `EXCEPT` / `MINUS`) chaining further blocks.
+Each clause **body** is consumed permissively up to the next clause boundary
+(`consumeClauseBody`, skipping balanced parens so a boundary keyword nested in a
+subquery or function call — `EXTRACT(YEAR FROM dt)` — does not end the clause), so
+valid queries are accepted while the clause keywords are surfaced at every boundary
+for `ExpectedAt` autocomplete. A non-empty projection is required, so `SELECT` with
+zero columns (`SELECT`, `SELECT FROM t`) and a dangling `FROM`/`GROUP` are flagged.
+A comma-list body that ends in a **trailing comma** (`SELECT a, <cursor>`, `FROM t1,
+<cursor>`) is likewise treated as incomplete: the clause stays "still being typed",
+so `ExpectedAt` reports the item label (`expression`, `identifier`) instead of the
+next clause's keyword — that is what lets autocomplete offer another column/table at
+the cursor (e.g. on a blank line mid-`SELECT`) rather than `FROM`/`WHERE`.
 
 ## Tests
 

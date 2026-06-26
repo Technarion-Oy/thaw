@@ -231,6 +231,39 @@ func (v *Validator) ZeroOrMore(r Rule) bool {
 	return true
 }
 
+// unorderedOnce parses a set of order-independent options, each at most once. It
+// loops like ZeroOrMore but, on every pass, tries only the options not yet
+// matched. Matching an option marks it used, which has two effects:
+//
+//   - A duplicate is rejected — the second occurrence matches no remaining option,
+//     so the loop stops before it and the statement fails to fully parse
+//     (diagnostics then flag the repeat).
+//   - Because only un-matched options run their leading MatchWord at the cursor,
+//     ExpectedAt stops offering an option already present — so autocomplete no
+//     longer suggests, e.g., INCREMENT once `INCREMENT = 1` is typed.
+//
+// Each option's rule must consume at least its leading keyword on success (the
+// ZeroOrMore zero-progress guard otherwise stops the loop). Mutually-exclusive
+// keywords (ORDER | NOORDER) belong in one option so matching either retires both.
+// It always succeeds — zero matched options is allowed.
+func (v *Validator) unorderedOnce(opts ...Rule) bool {
+	used := make([]bool, len(opts))
+	return v.ZeroOrMore(func() bool {
+		for i, opt := range opts {
+			if used[i] {
+				continue
+			}
+			saved := v.save()
+			if opt() {
+				used[i] = true
+				return true
+			}
+			v.restore(saved)
+		}
+		return false
+	})
+}
+
 // -- Shared name / value helpers --
 
 // parseIdentPath consumes a (possibly dot-qualified) name such as DB.SCHEMA.OBJ

@@ -5233,6 +5233,20 @@ export namespace snowpark {
 
 export namespace sqleditor {
 	
+	export class GrammarExpectation {
+	    keywords?: string[];
+	    kinds?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new GrammarExpectation(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.keywords = source["keywords"];
+	        this.kinds = source["kinds"];
+	    }
+	}
 	export class UsingClauseInfo {
 	    inUsing: boolean;
 	    isPartial: boolean;
@@ -5424,6 +5438,7 @@ export namespace sqleditor {
 	    isDatatypeContext: boolean;
 	    isInJoinOnClause: boolean;
 	    usingClause?: UsingClauseInfo;
+	    grammarExpected?: GrammarExpectation;
 	
 	    static createFrom(source: any = {}) {
 	        return new AutocompleteContext(source);
@@ -5443,6 +5458,7 @@ export namespace sqleditor {
 	        this.isDatatypeContext = source["isDatatypeContext"];
 	        this.isInJoinOnClause = source["isInJoinOnClause"];
 	        this.usingClause = this.convertValues(source["usingClause"], UsingClauseInfo);
+	        this.grammarExpected = this.convertValues(source["grammarExpected"], GrammarExpectation);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -5633,6 +5649,7 @@ export namespace sqleditor {
 	        this.paramIndex = source["paramIndex"];
 	    }
 	}
+	
 	
 	export class JoinCondition {
 	    condition: string;

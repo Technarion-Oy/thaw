@@ -32,11 +32,20 @@ export interface FKEntry {
 const fkCache    = new Map<string, FKEntry[]>();
 const fetchingFKs = new Set<string>();
 
+// cacheGeneration is bumped whenever the metadata caches are invalidated (a query
+// ran DDL, or the object store was refreshed). A fetch that started before the
+// bump must NOT write its now-stale result into the cache, so every fetch helper
+// captures the generation at start and discards its result if it changed.
+let cacheGeneration = 0;
+export function currentCacheGeneration(): number { return cacheGeneration; }
+export function bumpCacheGeneration(): void { cacheGeneration++; }
+
 export async function getFKs(db: string, schema: string, table: string): Promise<FKEntry[]> {
   const key = `${db.toUpperCase()}\0${schema.toUpperCase()}\0${table.toUpperCase()}`;
   if (fkCache.has(key)) return fkCache.get(key)!;
   if (fetchingFKs.has(key)) return [];
   fetchingFKs.add(key);
+  const gen = cacheGeneration;
   try {
     const fks = await GetTableForeignKeys(db, schema, table);
     const entries: FKEntry[] = (fks ?? []).map((fk: any) => ({
@@ -48,10 +57,10 @@ export async function getFKs(db: string, schema: string, table: string): Promise
       constraintName: fk.constraintName ?? "",
       keySequence:    fk.keySequence    ?? 0,
     }));
-    fkCache.set(key, entries);
+    if (gen === cacheGeneration) fkCache.set(key, entries);
     return entries;
   } catch {
-    fkCache.set(key, []);
+    if (gen === cacheGeneration) fkCache.set(key, []);
     return [];
   } finally {
     fetchingFKs.delete(key);
@@ -67,6 +76,13 @@ export function setFKCache(key: string, entries: FKEntry[]): void {
 export function getFKsCached(db: string, schema: string, table: string): FKEntry[] {
   const key = `${db.toUpperCase()}\0${schema.toUpperCase()}\0${table.toUpperCase()}`;
   return fkCache.get(key) ?? [];
+}
+
+// Drop all cached foreign keys. Called when query execution or an object-store
+// refresh may have changed the catalog, so JOIN-ON suggestions re-fetch.
+export function clearFKCache(): void {
+  fkCache.clear();
+  fetchingFKs.clear();
 }
 
 // ── variableSuggestions factory ───────────────────────────────────────────────

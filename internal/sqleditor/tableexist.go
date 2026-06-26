@@ -144,14 +144,12 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		hasGlobalDB := len(req.KnownDatabases) > 0 || anyHasDB(req.ResolvedRefs)
 		hasGlobalSchema := len(req.KnownSchemas) > 0 || anyHasSchema(req.ResolvedRefs)
 
-		// ── CREATE TABLE/VIEW ─────────────────────────────────────────
-		if rawPath, objKwTV, ok := matchCreateTV(sig, raw); ok {
+		// ── CREATE <schema-scoped object> ─────────────────────────────
+		// TABLE, VIEW, SEQUENCE, STAGE, STREAM, TASK, FILE FORMAT, … all live in a
+		// schema, so an unqualified name needs an active database + schema.
+		if rawPath, objType, ok := matchCreateSchemaScoped(sig, raw); ok {
 			parts := extractIdentParts(rawPath, ic)
 			rawParts, _ := readIdentParts(sig, raw, findPathStartInSig(sig, raw, rawPath))
-			objType := "table"
-			if objKwTV == "VIEW" {
-				objType = "view"
-			}
 
 			switch len(parts) {
 			case 1:

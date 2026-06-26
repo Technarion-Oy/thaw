@@ -4634,3 +4634,138 @@ func TestComputeJoinOnConditions_SameNameDifferentCaseBothPresent(t *testing.T) 
 		t.Errorf("expected case-insensitive same-name column match for User_Id/USER_ID, got %v", got)
 	}
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Grammar-driven autocomplete — GrammarExpectedAt + AutocompleteContext wiring
+// ══════════════════════════════════════════════════════════════════════════════
+
+func grammarExpHas(exp *GrammarExpectation, kw string) bool {
+	if exp == nil {
+		return false
+	}
+	for _, k := range exp.Keywords {
+		if k == kw {
+			return true
+		}
+	}
+	return false
+}
+
+func grammarKindHas(exp *GrammarExpectation, kind string) bool {
+	if exp == nil {
+		return false
+	}
+	for _, k := range exp.Kinds {
+		if k == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func TestGrammarExpectedAt(t *testing.T) {
+	t.Run("COPY INTO table expects FROM keyword", func(t *testing.T) {
+		stmt := "COPY INTO mytable "
+		exp := GrammarExpectedAt(stmt, len(stmt))
+		if !grammarExpHas(exp, "FROM") {
+			t.Errorf("expected FROM in keywords, got %+v", exp)
+		}
+	})
+
+	t.Run("CREATE offers object-type keywords", func(t *testing.T) {
+		stmt := "CREATE "
+		exp := GrammarExpectedAt(stmt, len(stmt))
+		for _, kw := range []string{"TABLE", "VIEW", "DATABASE"} {
+			if !grammarExpHas(exp, kw) {
+				t.Errorf("expected %q in keywords, got %+v", kw, exp)
+			}
+		}
+	})
+
+	t.Run("CREATE TABLE expects an identifier kind", func(t *testing.T) {
+		stmt := "CREATE TABLE "
+		exp := GrammarExpectedAt(stmt, len(stmt))
+		// The table name is a token-kind expectation (identifier), not a keyword.
+		if !grammarKindHas(exp, "identifier") {
+			t.Errorf("expected 'identifier' in kinds, got %+v", exp)
+		}
+		// IF [NOT EXISTS] is a literal keyword the grammar also accepts here.
+		if !grammarExpHas(exp, "IF") {
+			t.Errorf("expected IF in keywords, got %+v", exp)
+		}
+	})
+
+	t.Run("unmodelled leading keyword yields nil", func(t *testing.T) {
+		if exp := GrammarExpectedAt("FLOOBAR x y", 11); exp != nil {
+			t.Errorf("expected nil for unmodelled statement, got %+v", exp)
+		}
+	})
+
+	t.Run("after a complete projection the clause keywords are offered", func(t *testing.T) {
+		// ParseSelect models the SELECT statement, so after a finished projection
+		// item the grammar offers the clauses that may follow — FROM first, plus
+		// the later WHERE / GROUP BY / ORDER BY / set-operator keywords.
+		stmt := "SELECT col "
+		exp := GrammarExpectedAt(stmt, len(stmt))
+		for _, kw := range []string{"FROM", "WHERE", "ORDER", "GROUP", "UNION"} {
+			if !grammarExpHas(exp, kw) {
+				t.Errorf("expected %q keyword after a complete projection, got %+v", kw, exp)
+			}
+		}
+	})
+
+	t.Run("after FROM <table> the post-FROM clauses are offered, not FROM again", func(t *testing.T) {
+		stmt := "SELECT col FROM t "
+		exp := GrammarExpectedAt(stmt, len(stmt))
+		if !grammarExpHas(exp, "WHERE") {
+			t.Errorf("expected WHERE keyword after FROM <table>, got %+v", exp)
+		}
+		if grammarExpHas(exp, "FROM") {
+			t.Errorf("did not expect FROM again after FROM <table>, got %+v", exp)
+		}
+	})
+
+	t.Run("keywords and kinds are disjoint and exclude operators-as-keywords", func(t *testing.T) {
+		stmt := "CREATE TABLE "
+		exp := GrammarExpectedAt(stmt, len(stmt))
+		if exp == nil {
+			t.Fatal("expected non-nil expectation")
+		}
+		// No kind name (e.g. Identifier, LParen) should leak into Keywords.
+		for _, k := range exp.Keywords {
+			if !reGrammarKeyword.MatchString(k) {
+				t.Errorf("keyword %q is not an all-uppercase keyword label", k)
+			}
+		}
+	})
+}
+
+func TestGetAutocompleteContext_GrammarExpected(t *testing.T) {
+	t.Run("populated for modeled statement", func(t *testing.T) {
+		sql := "COPY INTO mytable "
+		ctx := GetAutocompleteContext(sql, len(sql))
+		if !grammarExpHas(ctx.GrammarExpected, "FROM") {
+			t.Errorf("expected FROM in ctx.GrammarExpected, got %+v", ctx.GrammarExpected)
+		}
+	})
+
+	t.Run("nil for unmodelled statement", func(t *testing.T) {
+		sql := "FLOOBAR x y"
+		ctx := GetAutocompleteContext(sql, len(sql))
+		if ctx.GrammarExpected != nil {
+			t.Errorf("expected nil GrammarExpected for unmodelled SQL, got %+v", ctx.GrammarExpected)
+		}
+	})
+
+	t.Run("uses cursor statement in multi-statement SQL", func(t *testing.T) {
+		// Cursor in the second statement (an ALTER) — expectations must come from
+		// it, not the first statement.
+		sql := "SELECT 1;\nALTER TABLE foo "
+		ctx := GetAutocompleteContext(sql, len(sql))
+		for _, kw := range []string{"RENAME", "ADD", "DROP"} {
+			if !grammarExpHas(ctx.GrammarExpected, kw) {
+				t.Errorf("expected %q from ALTER TABLE statement, got %+v", kw, ctx.GrammarExpected)
+			}
+		}
+	})
+}

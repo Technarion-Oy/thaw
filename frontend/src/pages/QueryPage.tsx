@@ -18,7 +18,7 @@ import { GetSqlStatementRanges } from "../../wailsjs/go/sqleditor/Service";
 import type { snowflake } from "../../wailsjs/go/models";
 import { usePanelLayoutStore } from "../store/panelLayoutStore";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
-import SqlEditor, { type DiagMarker, pendingMcpMarkers } from "../components/editor/SqlEditor";
+import SqlEditor, { type DiagMarker, pendingMcpMarkers, clearMetadataCaches } from "../components/editor/SqlEditor";
 import TabBar from "../components/editor/TabBar";
 import { DiffEditor } from "@monaco-editor/react";
 import { ensureMonacoSetup } from "../components/editor/monacoSetup";
@@ -28,6 +28,26 @@ import GridSearch from "../components/results/GridSearch";
 import StatusBar from "../components/results/StatusBar";
 import CellDetailPanel from "../components/results/CellDetailPanel";
 import QueryLogPane from "../components/results/QueryLogPane";
+
+// Catalog-mutating statement leaders. Only a run that creates/alters/drops objects
+// changes the columns/object lists the editor caches, so only these trigger a
+// metadata-cache clear after a run. Matched at the buffer start or after a `;`
+// statement boundary, case-insensitive. RENAME/SWAP/SET arrive via ALTER.
+const DDL_LEADER_RE = /(?:^|;)\s*(?:CREATE|ALTER|DROP|TRUNCATE|UNDROP)\b/i;
+
+// ranContainedDDL reports whether the executed SQL has a DDL statement. Comments
+// and string/dollar-quoted literals are blanked first so a `;` or DDL verb inside
+// one (e.g. INSERT … VALUES ('ran; CREATE TABLE x')) can't trigger a spurious
+// clear — a real statement boundary only exists in code, not inside a literal.
+function ranContainedDDL(sql: string): boolean {
+  const code = sql
+    .replace(/\$\$[\s\S]*?\$\$/g, "$$$$") // dollar-quoted blocks
+    .replace(/'(?:[^']|'')*'/g, "''")     // single-quoted string literals
+    .replace(/"(?:[^"]|"")*"/g, '""')     // quoted identifiers
+    .replace(/--[^\n]*/g, "")             // line comments
+    .replace(/\/\*[\s\S]*?\*\//g, "");    // block comments
+  return DDL_LEADER_RE.test(code);
+}
 
 // ── Lazy-loaded panels & modals ───────────────────────────────────────────────
 // None of these are on the initial render path — they mount only when the user
@@ -433,6 +453,10 @@ export default function QueryPage() {
       setStmtProgress(null);
       setActiveStmtIdx(null);
       loadContext(runTabId); // refresh database/schema (and role/warehouse) after any USE command
+      // Only DDL changes the catalog, so only DDL needs the column/object metadata
+      // dropped. Gating on a leading DDL verb keeps the common edit→run→edit SELECT
+      // loop's warm cache instead of forcing a cold re-fetch after every run.
+      if (ranContainedDDL(query)) clearMetadataCaches();
     }
   };
 
