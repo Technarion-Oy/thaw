@@ -39,8 +39,22 @@ import type { queryhistory } from "../../../wailsjs/go/models";
 const { Text } = Typography;
 const { RangePicker } = DatePicker;
 
-// Detail-grid labels rendered in a monospace font (identifiers, not prose).
-const MONO_LABELS = new Set(["Session ID", "Query ID"]);
+// Largest int64 — Snowflake session IDs are int64, so the box must reject
+// over-long pastes the backend would otherwise error on. Kept in sync with the
+// backend's isNumericID / strconv.ParseInt(_, 10, 64) guard.
+const INT64_MAX = 9223372036854775807n;
+
+// isValidSessionId reports whether s is a non-empty decimal integer that fits in
+// an int64 (digits only — no sign or whitespace, matching the unquoted-embed).
+function isValidSessionId(s: string): boolean {
+  const t = s.trim();
+  if (!/^\d+$/.test(t)) return false;
+  try {
+    return BigInt(t) <= INT64_MAX;
+  } catch {
+    return false;
+  }
+}
 
 interface Props {
   onClose: () => void;
@@ -83,10 +97,14 @@ export default function QueryHistoryModal({ onClose }: Props) {
   const runQuery = async (override?: {
     filterType?: FilterType;
     sessionId?: string;
+    userName?: string;
+    warehouseName?: string;
     timeRange?: [Dayjs, Dayjs] | null;
   }) => {
     const ft    = override?.filterType ?? filterType;
     const sid   = (override?.sessionId ?? sessionId).trim();
+    const un    = override?.userName ?? userName;
+    const wn    = override?.warehouseName ?? warehouseName;
     const range = override && "timeRange" in override ? override.timeRange : timeRange;
     setLoading(true);
     setError(null);
@@ -97,8 +115,8 @@ export default function QueryHistoryModal({ onClose }: Props) {
       const data = await GetQueryHistory(
         ft,
         sid,
-        userName,
-        warehouseName,
+        un,
+        wn,
         start,
         end,
         resultLimit,
@@ -133,11 +151,14 @@ export default function QueryHistoryModal({ onClose }: Props) {
     runQuery();
   };
 
-  // "session" scope needs an explicit numeric id. An empty id would silently
-  // fall back to QUERY_HISTORY_BY_SESSION() of the pooled metadata connection
-  // (never ran the user's editor SQL); a non-numeric id is rejected by the
-  // backend. Disable Run rather than issue a request that can't succeed.
-  const sessionScopeInvalid = filterType === "session" && !/^\d+$/.test(sessionId.trim());
+  // "session" scope needs an explicit int64 id. An empty id would silently fall
+  // back to QUERY_HISTORY_BY_SESSION() of the pooled metadata connection (never
+  // ran the user's editor SQL); a non-numeric / overflowing id is rejected by
+  // the backend. Disable Run rather than issue a request that can't succeed.
+  const sessionScopeInvalid = filterType === "session" && !isValidSessionId(sessionId);
+  // Distinct from the above: only flag the field red once the user has typed
+  // something wrong, not the moment they switch to session scope.
+  const sessionIdHasError = sessionId.trim() !== "" && sessionScopeInvalid;
 
   // Auto-run on mount with the current-user / today defaults.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -290,7 +311,7 @@ export default function QueryHistoryModal({ onClose }: Props) {
             <Input
               size="small"
               value={sessionId}
-              status={sessionId.trim() && sessionScopeInvalid ? "error" : undefined}
+              status={sessionIdHasError ? "error" : undefined}
               onChange={(e) => setSessionId(e.target.value)}
               onPressEnter={() => { if (!sessionScopeInvalid) handleRun(); }}
               style={{ width: 180 }}
@@ -383,15 +404,15 @@ export default function QueryHistoryModal({ onClose }: Props) {
             pagination={{ pageSize: 50, showSizeChanger: false }}
             expandable={{
               expandedRowRender: (row) => {
-                const details: { label: string; value: string | number | null }[] = [
+                const details: { label: string; value: string | number | null; mono?: boolean }[] = [
                   { label: "User",          value: row.userName      || null },
                   { label: "Warehouse",     value: row.warehouseName || null },
                   { label: "Database",      value: row.databaseName  || null },
                   { label: "Schema",        value: row.schemaName    || null },
                   { label: "Rows produced", value: row.rowsProduced  ?? null },
                   { label: "Bytes scanned", value: row.bytesScanned  ?? null },
-                  { label: "Session ID",    value: row.sessionId     || null },
-                  { label: "Query ID",      value: row.queryId       || null },
+                  { label: "Session ID",    value: row.sessionId     || null, mono: true },
+                  { label: "Query ID",      value: row.queryId       || null, mono: true },
                 ];
                 return (
                   <div style={{ padding: "8px 0 4px" }}>
@@ -399,10 +420,10 @@ export default function QueryHistoryModal({ onClose }: Props) {
                       {highlight(row.queryText, querySearch)}
                     </pre>
                     <div style={{ display: "grid", gridTemplateColumns: "max-content 1fr", rowGap: 3, columnGap: 12, fontSize: 12, marginBottom: 8 }}>
-                      {details.map(({ label, value }) => value !== null && (
+                      {details.map(({ label, value, mono }) => value !== null && (
                         <>
                           <span key={label + "-l"} style={{ color: "var(--text-muted)", whiteSpace: "nowrap" }}>{label}</span>
-                          <span key={label + "-v"} style={{ fontFamily: MONO_LABELS.has(label) ? "monospace" : undefined, wordBreak: "break-all" }}>{String(value)}</span>
+                          <span key={label + "-v"} style={{ fontFamily: mono ? "monospace" : undefined, wordBreak: "break-all" }}>{String(value)}</span>
                         </>
                       ))}
                     </div>

@@ -42,12 +42,18 @@ type QueryHistoryRow struct {
 // INFORMATION_SCHEMA.QUERY_HISTORY* table function for the given filter.
 //
 //   - filterType:             "session" | "user" | "warehouse" | "all"
-//   - sessionID:              non-empty → SESSION_ID => <id> (filterType="session")
+//   - sessionID:              valid int64 → SESSION_ID => <id> (filterType="session")
 //   - userName:               non-empty → USER_NAME => '<name>'
 //   - warehouseName:          non-empty → WAREHOUSE_NAME => '<name>'
 //   - endTimeStart/End:       RFC3339 strings or "" for no filter
 //   - resultLimit:            max rows returned (1–10 000)
 //   - includeClientGenerated: include client-generated statements
+//
+// Precondition: callers must validate sessionID. As an injection guard, a
+// SESSION_ID that is not a bare int64 is silently dropped here, which yields an
+// argument-less QUERY_HISTORY_BY_SESSION() that resolves to the wrong (pooled)
+// session. Prefer GetQueryHistory, which rejects invalid session IDs with an
+// error rather than producing a semantically wrong query.
 func BuildQueryHistorySql(
 	filterType string,
 	sessionID string,
