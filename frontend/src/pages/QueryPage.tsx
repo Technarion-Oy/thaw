@@ -31,10 +31,23 @@ import QueryLogPane from "../components/results/QueryLogPane";
 
 // Catalog-mutating statement leaders. Only a run that creates/alters/drops objects
 // changes the columns/object lists the editor caches, so only these trigger a
-// metadata-cache clear after a run. Matches at the buffer start or after a `;`
-// statement boundary (a DDL verb inside a string/SELECT projection won't sit
-// there), case-insensitive. RENAME/SWAP/SET arrive via ALTER.
+// metadata-cache clear after a run. Matched at the buffer start or after a `;`
+// statement boundary, case-insensitive. RENAME/SWAP/SET arrive via ALTER.
 const DDL_LEADER_RE = /(?:^|;)\s*(?:CREATE|ALTER|DROP|TRUNCATE|UNDROP)\b/i;
+
+// ranContainedDDL reports whether the executed SQL has a DDL statement. Comments
+// and string/dollar-quoted literals are blanked first so a `;` or DDL verb inside
+// one (e.g. INSERT … VALUES ('ran; CREATE TABLE x')) can't trigger a spurious
+// clear — a real statement boundary only exists in code, not inside a literal.
+function ranContainedDDL(sql: string): boolean {
+  const code = sql
+    .replace(/\$\$[\s\S]*?\$\$/g, "$$$$") // dollar-quoted blocks
+    .replace(/'(?:[^']|'')*'/g, "''")     // single-quoted string literals
+    .replace(/"(?:[^"]|"")*"/g, '""')     // quoted identifiers
+    .replace(/--[^\n]*/g, "")             // line comments
+    .replace(/\/\*[\s\S]*?\*\//g, "");    // block comments
+  return DDL_LEADER_RE.test(code);
+}
 
 // ── Lazy-loaded panels & modals ───────────────────────────────────────────────
 // None of these are on the initial render path — they mount only when the user
@@ -443,7 +456,7 @@ export default function QueryPage() {
       // Only DDL changes the catalog, so only DDL needs the column/object metadata
       // dropped. Gating on a leading DDL verb keeps the common edit→run→edit SELECT
       // loop's warm cache instead of forcing a cold re-fetch after every run.
-      if (DDL_LEADER_RE.test(query)) clearMetadataCaches();
+      if (ranContainedDDL(query)) clearMetadataCaches();
     }
   };
 
