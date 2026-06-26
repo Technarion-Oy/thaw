@@ -179,11 +179,16 @@ func ParseQueryHistory(res *snowflake.QueryResult) []QueryHistoryRow {
 }
 
 // isNumericID reports whether s is a non-empty string of decimal digits that
-// fits in an int64. Snowflake session IDs are int64; this guards the SESSION_ID
-// argument, which is embedded unquoted, against argument injection, and rejects
-// over-long pastes that would otherwise surface as a raw numeric-overflow error.
+// fits in an int64, with no leading zeros. Snowflake session IDs are int64; this
+// guards the SESSION_ID argument, which is embedded unquoted, against argument
+// injection, rejects over-long pastes that would otherwise surface as a raw
+// numeric-overflow error, and rejects leading zeros so the embedded value
+// matches what the user sees (Snowflake would evaluate "007" as 7).
 func isNumericID(s string) bool {
 	if s == "" {
+		return false
+	}
+	if len(s) > 1 && s[0] == '0' {
 		return false
 	}
 	for _, r := range s {

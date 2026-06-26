@@ -45,10 +45,11 @@ const { RangePicker } = DatePicker;
 const INT64_MAX = 9223372036854775807n;
 
 // isValidSessionId reports whether s is a non-empty decimal integer that fits in
-// an int64 (digits only — no sign or whitespace, matching the unquoted-embed).
+// an int64 (digits only — no sign, whitespace, or leading zeros, so the value
+// embedded unquoted matches what the user sees). Mirrors backend isNumericID.
 function isValidSessionId(s: string): boolean {
   const t = s.trim();
-  if (!/^\d+$/.test(t)) return false;
+  if (!/^(?:0|[1-9]\d*)$/.test(t)) return false;
   try {
     return BigInt(t) <= INT64_MAX;
   } catch {
@@ -136,11 +137,16 @@ export default function QueryHistoryModal({ onClose }: Props) {
   // range is cleared so sessions that started before today are not filtered out.
   const filterBySession = (sid: string) => {
     if (!sid) return;
-    setFilterType("session");
-    setSessionId(sid);
-    setTimeRange(null);
+    // Single source of truth for the drill-down filters: the same object drives
+    // both the state updates (for the UI) and the override (for the immediate
+    // run, since setState hasn't flushed yet in this handler). When adding a new
+    // runQuery param, thread it through `params` here only.
+    const params = { filterType: "session" as FilterType, sessionId: sid, timeRange: null };
+    setFilterType(params.filterType);
+    setSessionId(params.sessionId);
+    setTimeRange(params.timeRange);
     setQuerySearch("");
-    runQuery({ filterType: "session", sessionId: sid, timeRange: null });
+    runQuery(params);
   };
 
   // Manual "Run" from the form: clear the stale query-text filter so new results
@@ -265,13 +271,14 @@ export default function QueryHistoryModal({ onClose }: Props) {
             size="small"
             value={filterType}
             onChange={(v) => {
-              setFilterType(v);
-              // Restore the "today" default when leaving session scope — a prior
-              // "Filter by this session" cleared the range to make the drill-down
-              // unbounded, and we don't want non-session scopes to scan unbounded.
-              if (v !== "session" && timeRange === null) {
+              // Restore the "today" default only when leaving session scope —
+              // "Filter by this session" clears the range to make that drill-down
+              // unbounded. Gate on the *outgoing* scope so we don't clobber a
+              // range the user deliberately cleared while on user/warehouse/all.
+              if (filterType === "session" && v !== "session" && timeRange === null) {
                 setTimeRange([dayjs().startOf("day"), dayjs().endOf("day")]);
               }
+              setFilterType(v);
             }}
             style={{ width: 160 }}
             options={[
