@@ -88,6 +88,8 @@ func TestBuildQueryHistorySqlSessionInjection(t *testing.T) {
 		" 1234 ",
 		"abc",
 		"",
+		"12345678901234567890123456789", // longer than int64 max
+		"9999999999999999999",           // 19 digits but overflows int64
 	} {
 		sql := BuildQueryHistorySql("session", sid, "", "", "", "", 100, false)
 		if strings.Contains(sql, "SESSION_ID =>") {

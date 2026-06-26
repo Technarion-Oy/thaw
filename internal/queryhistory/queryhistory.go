@@ -13,6 +13,7 @@ package queryhistory
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"thaw/internal/snowflake"
@@ -90,11 +91,13 @@ func BuildQueryHistorySql(
 			args = append(args, fmt.Sprintf("WAREHOUSE_NAME => %s", snowflake.QuoteStringLit(warehouseName)))
 		}
 	}
+	// QuoteStringLit escapes any embedded single-quote so the timestamp literal
+	// cannot break out of its delimiter (consistent with USER_NAME/WAREHOUSE_NAME).
 	if endTimeStart != "" {
-		args = append(args, fmt.Sprintf("END_TIME_RANGE_START => '%s'::TIMESTAMP_LTZ", endTimeStart))
+		args = append(args, fmt.Sprintf("END_TIME_RANGE_START => %s::TIMESTAMP_LTZ", snowflake.QuoteStringLit(endTimeStart)))
 	}
 	if endTimeEnd != "" {
-		args = append(args, fmt.Sprintf("END_TIME_RANGE_END => '%s'::TIMESTAMP_LTZ", endTimeEnd))
+		args = append(args, fmt.Sprintf("END_TIME_RANGE_END => %s::TIMESTAMP_LTZ", snowflake.QuoteStringLit(endTimeEnd)))
 	}
 	if resultLimit > 0 {
 		args = append(args, fmt.Sprintf("RESULT_LIMIT => %d", resultLimit))
@@ -169,9 +172,10 @@ func ParseQueryHistory(res *snowflake.QueryResult) []QueryHistoryRow {
 	return rows
 }
 
-// isNumericID reports whether s is a non-empty string of decimal digits only.
-// Snowflake session IDs are integers; this guards the SESSION_ID argument, which
-// is embedded unquoted, against argument injection.
+// isNumericID reports whether s is a non-empty string of decimal digits that
+// fits in an int64. Snowflake session IDs are int64; this guards the SESSION_ID
+// argument, which is embedded unquoted, against argument injection, and rejects
+// over-long pastes that would otherwise surface as a raw numeric-overflow error.
 func isNumericID(s string) bool {
 	if s == "" {
 		return false
@@ -181,7 +185,10 @@ func isNumericID(s string) bool {
 			return false
 		}
 	}
-	return true
+	// Digit-only above means no sign/whitespace; ParseInt only adds the int64
+	// range check (catches > 19 digits and the 19-digit overflow window).
+	_, err := strconv.ParseInt(s, 10, 64)
+	return err == nil
 }
 
 // GetQueryHistory runs the query-history query for the given filter and returns

@@ -125,6 +125,14 @@ export default function QueryHistoryModal({ onClose }: Props) {
     runQuery({ filterType: "session", sessionId: sid, timeRange: null });
   };
 
+  // Manual "Run" from the form: clear the stale query-text filter so new results
+  // aren't silently pre-filtered by an old search term (filterBySession already
+  // clears it for the drill-down path).
+  const handleRun = () => {
+    setQuerySearch("");
+    runQuery();
+  };
+
   // "session" scope needs an explicit numeric id. An empty id would silently
   // fall back to QUERY_HISTORY_BY_SESSION() of the pooled metadata connection
   // (never ran the user's editor SQL); a non-numeric id is rejected by the
@@ -235,7 +243,15 @@ export default function QueryHistoryModal({ onClose }: Props) {
           <Select
             size="small"
             value={filterType}
-            onChange={(v) => setFilterType(v)}
+            onChange={(v) => {
+              setFilterType(v);
+              // Restore the "today" default when leaving session scope — a prior
+              // "Filter by this session" cleared the range to make the drill-down
+              // unbounded, and we don't want non-session scopes to scan unbounded.
+              if (v !== "session" && timeRange === null) {
+                setTimeRange([dayjs().startOf("day"), dayjs().endOf("day")]);
+              }
+            }}
             style={{ width: 160 }}
             options={[
               { value: "session",   label: "By Session" },
@@ -276,7 +292,7 @@ export default function QueryHistoryModal({ onClose }: Props) {
               value={sessionId}
               status={sessionId.trim() && sessionScopeInvalid ? "error" : undefined}
               onChange={(e) => setSessionId(e.target.value)}
-              onPressEnter={() => { if (!sessionScopeInvalid) runQuery(); }}
+              onPressEnter={() => { if (!sessionScopeInvalid) handleRun(); }}
               style={{ width: 180 }}
               placeholder="Paste a numeric session ID…"
             />
@@ -336,7 +352,7 @@ export default function QueryHistoryModal({ onClose }: Props) {
         <Button
           type="primary"
           size="small"
-          onClick={() => runQuery()}
+          onClick={handleRun}
           loading={loading}
           disabled={sessionScopeInvalid}
         >
