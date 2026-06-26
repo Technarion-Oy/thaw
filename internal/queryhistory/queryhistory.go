@@ -13,7 +13,6 @@ package queryhistory
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"thaw/internal/snowflake"
@@ -84,8 +83,8 @@ func buildQueryHistorySql(
 		// SESSION_ID is a bare numeric argument (not quoted), so it must never
 		// be embedded verbatim — a value like "1234, RESULT_LIMIT => 10000"
 		// would inject extra named arguments. Snowflake session IDs are
-		// integers; only embed when the value is purely decimal digits.
-		if isNumericID(sessionID) {
+		// integers; only embed when the value is a valid bare int64.
+		if snowflake.IsNumericID(sessionID) {
 			args = append(args, fmt.Sprintf("SESSION_ID => %s", sessionID))
 		}
 	case "user":
@@ -178,30 +177,6 @@ func ParseQueryHistory(res *snowflake.QueryResult) []QueryHistoryRow {
 	return rows
 }
 
-// isNumericID reports whether s is a non-empty string of decimal digits that
-// fits in an int64, with no leading zeros. Snowflake session IDs are int64; this
-// guards the SESSION_ID argument, which is embedded unquoted, against argument
-// injection, rejects over-long pastes that would otherwise surface as a raw
-// numeric-overflow error, and rejects leading zeros so the embedded value
-// matches what the user sees (Snowflake would evaluate "007" as 7).
-func isNumericID(s string) bool {
-	if s == "" {
-		return false
-	}
-	if len(s) > 1 && s[0] == '0' {
-		return false
-	}
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	// Digit-only above means no sign/whitespace; ParseInt only adds the int64
-	// range check (catches > 19 digits and the 19-digit overflow window).
-	_, err := strconv.ParseInt(s, 10, 64)
-	return err == nil
-}
-
 // GetQueryHistory runs the query-history query for the given filter and returns
 // the parsed rows ordered by start time descending.
 func GetQueryHistory(
@@ -219,7 +194,7 @@ func GetQueryHistory(
 	// Reject a non-numeric session id at the boundary with a clear error rather
 	// than silently producing an argument-less QUERY_HISTORY_BY_SESSION() that
 	// resolves to the wrong (pooled metadata) session.
-	if filterType == "session" && !isNumericID(sessionID) {
+	if filterType == "session" && !snowflake.IsNumericID(sessionID) {
 		return nil, fmt.Errorf("invalid session id %q: must be a numeric Snowflake session id", sessionID)
 	}
 	query := buildQueryHistorySql(filterType, sessionID, userName, warehouseName, endTimeStart, endTimeEnd, resultLimit, includeClientGenerated)

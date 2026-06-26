@@ -41,12 +41,12 @@ const { RangePicker } = DatePicker;
 
 // Largest int64 — Snowflake session IDs are int64, so the box must reject
 // over-long pastes the backend would otherwise error on. Kept in sync with the
-// backend's isNumericID / strconv.ParseInt(_, 10, 64) guard.
+// backend's snowflake.IsNumericID / strconv.ParseInt(_, 10, 64) guard.
 const INT64_MAX = 9223372036854775807n;
 
 // isValidSessionId reports whether s is a non-empty decimal integer that fits in
 // an int64 (digits only — no sign, whitespace, or leading zeros, so the value
-// embedded unquoted matches what the user sees). Mirrors backend isNumericID.
+// embedded unquoted matches what the user sees). Mirrors snowflake.IsNumericID.
 function isValidSessionId(s: string): boolean {
   const t = s.trim();
   if (!/^(?:0|[1-9]\d*)$/.test(t)) return false;

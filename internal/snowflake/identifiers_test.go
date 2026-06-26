@@ -735,3 +735,29 @@ func TestReconcileSecondaryRoles(t *testing.T) {
 		})
 	}
 }
+
+func TestIsNumericID(t *testing.T) {
+	tests := []struct {
+		in   string
+		want bool
+	}{
+		{"1234567890", true},
+		{"0", true},                             // a lone zero is allowed
+		{"9223372036854775807", true},           // int64 max
+		{"", false},                             // empty
+		{"007", false},                          // leading zeros
+		{" 1234 ", false},                       // surrounding whitespace
+		{"12.3", false},                         // non-digit
+		{"-5", false},                           // sign
+		{"abc", false},                          // letters
+		{"1234, RESULT_LIMIT => 10000", false},  // injection attempt
+		{"9223372036854775808", false},          // int64 max + 1
+		{"9999999999999999999", false},          // 19 digits, overflows int64
+		{"12345678901234567890123456789", false}, // far over int64
+	}
+	for _, tt := range tests {
+		if got := IsNumericID(tt.in); got != tt.want {
+			t.Errorf("IsNumericID(%q) = %v, want %v", tt.in, got, tt.want)
+		}
+	}
+}

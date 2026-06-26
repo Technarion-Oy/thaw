@@ -14,6 +14,7 @@ import (
 	"context"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"thaw/internal/sqltok"
@@ -144,6 +145,31 @@ func QuoteStringLit(s string) string {
 // escape sequences are intentional.
 func QuoteTextLit(s string) string {
 	return `'` + EscapeTextLit(s) + `'`
+}
+
+// IsNumericID reports whether s is a non-empty string of decimal digits that
+// fits in an int64, with no leading zeros. Use it to validate a value that will
+// be embedded unquoted into SQL as a bare integer argument (e.g. a Snowflake
+// SESSION_ID, which is an int64): the digit-only requirement blocks argument
+// injection, the int64 bound rejects over-long pastes that would otherwise
+// surface as a raw numeric-overflow error, and rejecting leading zeros keeps the
+// embedded value equal to what the user typed (Snowflake reads "007" as 7).
+func IsNumericID(s string) bool {
+	if s == "" {
+		return false
+	}
+	if len(s) > 1 && s[0] == '0' {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	// Digit-only above means no sign/whitespace; ParseInt only adds the int64
+	// range check (catches > 19 digits and the 19-digit overflow window).
+	_, err := strconv.ParseInt(s, 10, 64)
+	return err == nil
 }
 
 // CommentClause returns the optional COMMENT clause appended by the CREATE/ALTER
