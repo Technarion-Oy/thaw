@@ -83,7 +83,10 @@ func buildQueryHistorySql(
 		// SESSION_ID is a bare numeric argument (not quoted), so it must never
 		// be embedded verbatim — a value like "1234, RESULT_LIMIT => 10000"
 		// would inject extra named arguments. Snowflake session IDs are
-		// integers; only embed when the value is a valid bare int64.
+		// integers; only embed when the value is a valid bare int64. On the
+		// production path GetQueryHistory has already rejected an invalid id, so
+		// this is a defense-in-depth guard for direct/test callers, not the
+		// primary gate — see the precondition note above.
 		if snowflake.IsNumericID(sessionID) {
 			args = append(args, fmt.Sprintf("SESSION_ID => %s", sessionID))
 		}
@@ -196,6 +199,12 @@ func GetQueryHistory(
 	// resolves to the wrong (pooled metadata) session.
 	if filterType == "session" && !snowflake.IsNumericID(sessionID) {
 		return nil, fmt.Errorf("invalid session id %q: must be a numeric Snowflake session id", sessionID)
+	}
+	// Likewise require an explicit user for user scope — an empty USER_NAME would
+	// drop the filter and widen the query beyond the intended user. Use the "all"
+	// scope to query history across users.
+	if filterType == "user" && strings.TrimSpace(userName) == "" {
+		return nil, fmt.Errorf("a user name is required for user-scoped query history")
 	}
 	query := buildQueryHistorySql(filterType, sessionID, userName, warehouseName, endTimeStart, endTimeEnd, resultLimit, includeClientGenerated)
 	res, err := client.QuerySingle(ctx, query)

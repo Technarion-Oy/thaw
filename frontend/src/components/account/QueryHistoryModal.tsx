@@ -57,6 +57,10 @@ function isValidSessionId(s: string): boolean {
   }
 }
 
+// "Today" as an end-of-day-bounded range. A function (not a constant) so the
+// bounds are evaluated when the range is applied, not at module load.
+const todayRange = (): [Dayjs, Dayjs] => [dayjs().startOf("day"), dayjs().endOf("day")];
+
 interface Props {
   onClose: () => void;
 }
@@ -77,9 +81,7 @@ export default function QueryHistoryModal({ onClose }: Props) {
   // rather than an empty range. The upper bound is end-of-day (not "now") so a
   // re-run later in the same session still includes queries that completed in
   // the meantime. The picker stays adjustable.
-  const [timeRange,       setTimeRange]       = useState<[Dayjs, Dayjs] | null>(
-    () => [dayjs().startOf("day"), dayjs().endOf("day")],
-  );
+  const [timeRange,       setTimeRange]       = useState<[Dayjs, Dayjs] | null>(todayRange);
   const [resultLimit,     setResultLimit]     = useState(100);
   const [includeClientGen, setIncludeClientGen] = useState(false);
   const [rows,            setRows]            = useState<queryhistory.QueryHistoryRow[] | null>(null);
@@ -148,9 +150,13 @@ export default function QueryHistoryModal({ onClose }: Props) {
     // run, since setState hasn't flushed yet in this handler). When adding a new
     // runQuery param, thread it through `params` here only.
     const params = { filterType: "session" as FilterType, sessionId: sid, timeRange: null };
-    // Entering session scope: remember whether we're clearing a real range, so a
-    // later switch away restores "today" only if session scope cleared it.
-    sessionClearedRange.current = timeRange !== null;
+    // Remember whether session scope cleared a real range, so a later switch away
+    // restores "today" only if it did. Only latch on the *first* entry into
+    // session scope — a session→session drill-down (timeRange already null) must
+    // not reset the latch to false.
+    if (filterType !== "session") {
+      sessionClearedRange.current = timeRange !== null;
+    }
     setFilterType(params.filterType);
     setSessionId(params.sessionId);
     setTimeRange(params.timeRange);
@@ -175,10 +181,24 @@ export default function QueryHistoryModal({ onClose }: Props) {
   // invalid (checked on the raw value so whitespace-only input — which disables
   // Run — still shows a cue), but not the instant they switch to session scope.
   const sessionIdHasError = sessionId !== "" && sessionScopeInvalid;
+  // "user" scope needs an explicit name — an empty USER_NAME widens the query
+  // beyond the intended user (the backend rejects it). Disable Run; use "all"
+  // scope to query across users.
+  const userScopeInvalid = filterType === "user" && userName.trim() === "";
+  const runDisabled = sessionScopeInvalid || userScopeInvalid;
 
-  // Auto-run on mount with the current-user / today defaults.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { runQuery(); }, []);
+  // Auto-run on mount once the current user is known. If the connection store
+  // hasn't hydrated yet, `defaultUser` is "" at mount; wait for it (the effect
+  // re-fires when it arrives) rather than auto-running an unfiltered user query.
+  const didAutoRun = useRef(false);
+  useEffect(() => {
+    if (didAutoRun.current) return;
+    if (filterType === "user" && !defaultUser.trim()) return;
+    didAutoRun.current = true;
+    if (defaultUser && !userName) setUserName(defaultUser);
+    runQuery({ userName: defaultUser || userName });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultUser]);
 
   const loadInEditor = (sql: string) => {
     window.dispatchEvent(new CustomEvent("load-query", { detail: { sql } }));
@@ -283,17 +303,22 @@ export default function QueryHistoryModal({ onClose }: Props) {
             disabled={loading}
             onChange={(v) => {
               if (v === "session") {
-                // Entering session scope: clear the range so a pasted id for an
-                // older session isn't silently bounded by today's window. Record
-                // whether we actually cleared a range, so the inverse switch knows
-                // whether restoring "today" is warranted.
+                // Entering session scope (always from a non-session scope here):
+                // clear the range so a pasted id for an older session isn't
+                // silently bounded by today's window. Record whether we actually
+                // cleared a range, so the inverse switch knows whether restoring
+                // "today" is warranted.
                 sessionClearedRange.current = timeRange !== null;
                 setTimeRange(null);
-              } else if (filterType === "session" && sessionClearedRange.current && timeRange === null) {
-                // Leaving session scope: restore "today" only if session scope is
-                // what cleared the range — never clobber a range the user
+              } else if (filterType === "session") {
+                // Leaving session scope: clear the now-stale id so switching back
+                // doesn't silently re-query it, and restore "today" only if session
+                // scope is what cleared the range — never clobber a range the user
                 // deliberately cleared while on user/warehouse/all.
-                setTimeRange([dayjs().startOf("day"), dayjs().endOf("day")]);
+                setSessionId("");
+                if (sessionClearedRange.current && timeRange === null) {
+                  setTimeRange(todayRange());
+                }
                 sessionClearedRange.current = false;
               }
               setFilterType(v);
@@ -314,6 +339,7 @@ export default function QueryHistoryModal({ onClose }: Props) {
             <AutoComplete
               size="small"
               value={userName}
+              status={userScopeInvalid ? "error" : undefined}
               onChange={setUserName}
               options={userList.map((u) => ({ value: u }))}
               filterOption={(input, option) =>
@@ -338,7 +364,7 @@ export default function QueryHistoryModal({ onClose }: Props) {
               value={sessionId}
               status={sessionIdHasError ? "error" : undefined}
               onChange={(e) => setSessionId(e.target.value)}
-              onPressEnter={() => { if (!sessionScopeInvalid && !loading) handleRun(); }}
+              onPressEnter={() => { if (!runDisabled && !loading) handleRun(); }}
               style={{ width: 180 }}
               placeholder="Paste a numeric session ID…"
             />
@@ -400,7 +426,7 @@ export default function QueryHistoryModal({ onClose }: Props) {
           size="small"
           onClick={handleRun}
           loading={loading}
-          disabled={sessionScopeInvalid}
+          disabled={runDisabled}
         >
           Run
         </Button>
