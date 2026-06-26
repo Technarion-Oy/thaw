@@ -8,7 +8,7 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Fragment } from "react";
 import {
   Modal,
   Select,
@@ -136,7 +136,9 @@ export default function QueryHistoryModal({ onClose }: Props) {
   // query they recognise to everything that ran in the same session. The time
   // range is cleared so sessions that started before today are not filtered out.
   const filterBySession = (sid: string) => {
-    if (!sid) return;
+    // Symmetric with the manual input's Run guard — never enter a stuck state
+    // (scope=session, Run disabled) from a malformed id.
+    if (!isValidSessionId(sid)) return;
     // Single source of truth for the drill-down filters: the same object drives
     // both the state updates (for the UI) and the override (for the immediate
     // run, since setState hasn't flushed yet in this handler). When adding a new
@@ -270,12 +272,16 @@ export default function QueryHistoryModal({ onClose }: Props) {
           <Select
             size="small"
             value={filterType}
+            disabled={loading}
             onChange={(v) => {
-              // Restore the "today" default only when leaving session scope —
-              // "Filter by this session" clears the range to make that drill-down
-              // unbounded. Gate on the *outgoing* scope so we don't clobber a
-              // range the user deliberately cleared while on user/warehouse/all.
-              if (filterType === "session" && v !== "session" && timeRange === null) {
+              // Entering session scope: clear the range so a pasted id for an
+              // older session isn't silently bounded by today's window.
+              if (v === "session") {
+                setTimeRange(null);
+              } else if (filterType === "session" && timeRange === null) {
+                // Leaving session scope: restore the "today" default, but only if
+                // the range is still cleared — don't clobber a range the user
+                // deliberately set/cleared while on user/warehouse/all.
                 setTimeRange([dayjs().startOf("day"), dayjs().endOf("day")]);
               }
               setFilterType(v);
@@ -427,11 +433,11 @@ export default function QueryHistoryModal({ onClose }: Props) {
                       {highlight(row.queryText, querySearch)}
                     </pre>
                     <div style={{ display: "grid", gridTemplateColumns: "max-content 1fr", rowGap: 3, columnGap: 12, fontSize: 12, marginBottom: 8 }}>
-                      {details.map(({ label, value, mono }) => value !== null && (
-                        <>
-                          <span key={label + "-l"} style={{ color: "var(--text-muted)", whiteSpace: "nowrap" }}>{label}</span>
-                          <span key={label + "-v"} style={{ fontFamily: mono ? "monospace" : undefined, wordBreak: "break-all" }}>{String(value)}</span>
-                        </>
+                      {details.filter(({ value }) => value !== null).map(({ label, value, mono }) => (
+                        <Fragment key={label}>
+                          <span style={{ color: "var(--text-muted)", whiteSpace: "nowrap" }}>{label}</span>
+                          <span style={{ fontFamily: mono ? "monospace" : undefined, wordBreak: "break-all" }}>{String(value)}</span>
+                        </Fragment>
                       ))}
                     </div>
                     <Space>
