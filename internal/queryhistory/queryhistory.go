@@ -74,7 +74,11 @@ func BuildQueryHistorySql(
 	var args []string
 	switch filterType {
 	case "session":
-		if sessionID != "" {
+		// SESSION_ID is a bare numeric argument (not quoted), so it must never
+		// be embedded verbatim — a value like "1234, RESULT_LIMIT => 10000"
+		// would inject extra named arguments. Snowflake session IDs are
+		// integers; only embed when the value is purely decimal digits.
+		if isNumericID(sessionID) {
 			args = append(args, fmt.Sprintf("SESSION_ID => %s", sessionID))
 		}
 	case "user":
@@ -165,6 +169,21 @@ func ParseQueryHistory(res *snowflake.QueryResult) []QueryHistoryRow {
 	return rows
 }
 
+// isNumericID reports whether s is a non-empty string of decimal digits only.
+// Snowflake session IDs are integers; this guards the SESSION_ID argument, which
+// is embedded unquoted, against argument injection.
+func isNumericID(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // GetQueryHistory runs the query-history query for the given filter and returns
 // the parsed rows ordered by start time descending.
 func GetQueryHistory(
@@ -179,6 +198,12 @@ func GetQueryHistory(
 	resultLimit int,
 	includeClientGenerated bool,
 ) ([]QueryHistoryRow, error) {
+	// Reject a non-numeric session id at the boundary with a clear error rather
+	// than silently producing an argument-less QUERY_HISTORY_BY_SESSION() that
+	// resolves to the wrong (pooled metadata) session.
+	if filterType == "session" && !isNumericID(sessionID) {
+		return nil, fmt.Errorf("invalid session id %q: must be a numeric Snowflake session id", sessionID)
+	}
 	query := BuildQueryHistorySql(filterType, sessionID, userName, warehouseName, endTimeStart, endTimeEnd, resultLimit, includeClientGenerated)
 	res, err := client.QuerySingle(ctx, query)
 	if err != nil {

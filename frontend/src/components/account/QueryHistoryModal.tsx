@@ -39,6 +39,9 @@ import type { queryhistory } from "../../../wailsjs/go/models";
 const { Text } = Typography;
 const { RangePicker } = DatePicker;
 
+// Detail-grid labels rendered in a monospace font (identifiers, not prose).
+const MONO_LABELS = new Set(["Session ID", "Query ID"]);
+
 interface Props {
   onClose: () => void;
 }
@@ -56,9 +59,11 @@ export default function QueryHistoryModal({ onClose }: Props) {
   const [userName,        setUserName]        = useState(defaultUser);
   const [warehouseName,   setWarehouseName]   = useState(defaultWarehouse);
   // Default to "today" so the modal opens on the current user's recent activity
-  // rather than an empty range. The picker stays adjustable.
+  // rather than an empty range. The upper bound is end-of-day (not "now") so a
+  // re-run later in the same session still includes queries that completed in
+  // the meantime. The picker stays adjustable.
   const [timeRange,       setTimeRange]       = useState<[Dayjs, Dayjs] | null>(
-    () => [dayjs().startOf("day"), dayjs()],
+    () => [dayjs().startOf("day"), dayjs().endOf("day")],
   );
   const [resultLimit,     setResultLimit]     = useState(100);
   const [includeClientGen, setIncludeClientGen] = useState(false);
@@ -72,17 +77,23 @@ export default function QueryHistoryModal({ onClose }: Props) {
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // runQuery accepts optional overrides so callers (e.g. "Filter by this
-  // session") can run with new scope/session values before the corresponding
-  // setState has been flushed.
-  const runQuery = async (override?: { filterType?: FilterType; sessionId?: string }) => {
-    const ft  = override?.filterType ?? filterType;
-    const sid = override?.sessionId  ?? sessionId;
+  // session") can run with new scope/session/range values before the
+  // corresponding setState has been flushed. `timeRange` uses `in` detection so
+  // an explicit `null` (clear the range) is distinguishable from "not provided".
+  const runQuery = async (override?: {
+    filterType?: FilterType;
+    sessionId?: string;
+    timeRange?: [Dayjs, Dayjs] | null;
+  }) => {
+    const ft    = override?.filterType ?? filterType;
+    const sid   = (override?.sessionId ?? sessionId).trim();
+    const range = override && "timeRange" in override ? override.timeRange : timeRange;
     setLoading(true);
     setError(null);
     setRows(null);
     try {
-      const start = timeRange ? timeRange[0].toISOString() : "";
-      const end   = timeRange ? timeRange[1].toISOString() : "";
+      const start = range ? range[0].toISOString() : "";
+      const end   = range ? range[1].toISOString() : "";
       const data = await GetQueryHistory(
         ft,
         sid,
@@ -103,19 +114,22 @@ export default function QueryHistoryModal({ onClose }: Props) {
 
   // Switch to the "session" scope for a specific session id and re-run. Used by
   // the per-row "Filter by this session" action so users can drill down from a
-  // query they recognise to everything that ran in the same session.
+  // query they recognise to everything that ran in the same session. The time
+  // range is cleared so sessions that started before today are not filtered out.
   const filterBySession = (sid: string) => {
     if (!sid) return;
     setFilterType("session");
     setSessionId(sid);
+    setTimeRange(null);
     setQuerySearch("");
-    runQuery({ filterType: "session", sessionId: sid });
+    runQuery({ filterType: "session", sessionId: sid, timeRange: null });
   };
 
-  // "session" scope needs an explicit id — an empty id would silently fall back
-  // to QUERY_HISTORY_BY_SESSION() of the pooled metadata connection, which never
-  // ran the user's editor SQL. Disable Run rather than query the wrong session.
-  const sessionScopeMissingId = filterType === "session" && !sessionId.trim();
+  // "session" scope needs an explicit numeric id. An empty id would silently
+  // fall back to QUERY_HISTORY_BY_SESSION() of the pooled metadata connection
+  // (never ran the user's editor SQL); a non-numeric id is rejected by the
+  // backend. Disable Run rather than issue a request that can't succeed.
+  const sessionScopeInvalid = filterType === "session" && !/^\d+$/.test(sessionId.trim());
 
   // Auto-run on mount with the current-user / today defaults.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -224,7 +238,7 @@ export default function QueryHistoryModal({ onClose }: Props) {
             onChange={(v) => setFilterType(v)}
             style={{ width: 160 }}
             options={[
-              { value: "session",   label: "Current Session" },
+              { value: "session",   label: "By Session" },
               { value: "user",      label: "By User" },
               { value: "warehouse", label: "By Warehouse" },
               { value: "all",       label: "All" },
@@ -260,10 +274,11 @@ export default function QueryHistoryModal({ onClose }: Props) {
             <Input
               size="small"
               value={sessionId}
+              status={sessionId.trim() && sessionScopeInvalid ? "error" : undefined}
               onChange={(e) => setSessionId(e.target.value)}
-              onPressEnter={() => { if (!sessionScopeMissingId) runQuery(); }}
+              onPressEnter={() => { if (!sessionScopeInvalid) runQuery(); }}
               style={{ width: 180 }}
-              placeholder="Paste a session ID…"
+              placeholder="Paste a numeric session ID…"
             />
           </div>
         )}
@@ -323,7 +338,7 @@ export default function QueryHistoryModal({ onClose }: Props) {
           size="small"
           onClick={() => runQuery()}
           loading={loading}
-          disabled={sessionScopeMissingId}
+          disabled={sessionScopeInvalid}
         >
           Run
         </Button>
@@ -362,7 +377,6 @@ export default function QueryHistoryModal({ onClose }: Props) {
                   { label: "Session ID",    value: row.sessionId     || null },
                   { label: "Query ID",      value: row.queryId       || null },
                 ];
-                const monoLabels = new Set(["Session ID", "Query ID"]);
                 return (
                   <div style={{ padding: "8px 0 4px" }}>
                     <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, margin: "0 0 10px", fontFamily: "monospace" }}>
@@ -372,7 +386,7 @@ export default function QueryHistoryModal({ onClose }: Props) {
                       {details.map(({ label, value }) => value !== null && (
                         <>
                           <span key={label + "-l"} style={{ color: "var(--text-muted)", whiteSpace: "nowrap" }}>{label}</span>
-                          <span key={label + "-v"} style={{ fontFamily: monoLabels.has(label) ? "monospace" : undefined, wordBreak: "break-all" }}>{String(value)}</span>
+                          <span key={label + "-v"} style={{ fontFamily: MONO_LABELS.has(label) ? "monospace" : undefined, wordBreak: "break-all" }}>{String(value)}</span>
                         </>
                       ))}
                     </div>
@@ -403,6 +417,7 @@ export default function QueryHistoryModal({ onClose }: Props) {
                       {row.sessionId && (
                         <Button
                           size="small"
+                          disabled={loading}
                           onClick={() => filterBySession(row.sessionId)}
                         >
                           Filter by this session

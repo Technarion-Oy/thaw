@@ -80,6 +80,28 @@ func TestBuildQueryHistorySql(t *testing.T) {
 	}
 }
 
+func TestBuildQueryHistorySqlSessionInjection(t *testing.T) {
+	// A non-numeric / injection-laden session id must never be embedded.
+	for _, sid := range []string{
+		"1234, RESULT_LIMIT => 10000",
+		"1234; DROP TABLE",
+		" 1234 ",
+		"abc",
+		"",
+	} {
+		sql := BuildQueryHistorySql("session", sid, "", "", "", "", 100, false)
+		if strings.Contains(sql, "SESSION_ID =>") {
+			t.Errorf("session id %q must not be embedded as an argument:\n%s", sid, sql)
+		}
+	}
+
+	// A clean numeric id is embedded as-is.
+	sql := BuildQueryHistorySql("session", "1234567890", "", "", "", "", 100, false)
+	if !strings.Contains(sql, "SESSION_ID => 1234567890") {
+		t.Errorf("expected numeric SESSION_ID argument:\n%s", sql)
+	}
+}
+
 func TestBuildQueryHistorySqlTimeRange(t *testing.T) {
 	sql := BuildQueryHistorySql("all", "", "", "", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z", 50, false)
 	if !strings.Contains(sql, "END_TIME_RANGE_START => '2026-01-01T00:00:00Z'::TIMESTAMP_LTZ") {
