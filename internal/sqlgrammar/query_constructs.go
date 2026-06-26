@@ -1053,14 +1053,14 @@ func (v *Validator) ParseForUpdate() bool {
 // the next boundary, so a boundary keyword is exactly where one clause ends and
 // the next may begin. Every word here is a Snowflake reserved word, so none can
 // appear unquoted as a column name at paren depth 0 — making them unconditional
-// stops. The non-reserved words that also start clauses — OFFSET, FETCH (row
+// stops. The non-reserved words that also start clauses — LIMIT, OFFSET, FETCH (row
 // limits) and EXCEPT (set operator) — are deliberately NOT listed: they are legal
 // unquoted identifiers, so treating them as unconditional boundaries flagged valid
-// SQL (`SELECT offset FROM t`). OFFSET/FETCH are matched positionally by
+// SQL (`SELECT limit FROM t`, `SELECT * FROM offset`). LIMIT/OFFSET/FETCH are matched positionally by
 // parseSelectTail instead; EXCEPT is handled contextually in atSelectBoundary.
 var selectClauseBoundaries = map[string]bool{
 	"FROM": true, "WHERE": true, "GROUP": true, "HAVING": true, "QUALIFY": true,
-	"ORDER": true, "LIMIT": true, "FOR": true,
+	"ORDER": true, "FOR": true,
 	"UNION": true, "INTERSECT": true, "MINUS": true,
 }
 
@@ -1252,12 +1252,14 @@ func (v *Validator) selectOrderByClause() bool {
 // body. The three are handled as separate clause iterations (parseSelectTail
 // loops) so the LIMIT … OFFSET … and OFFSET … FETCH … combinations both parse.
 func (v *Validator) selectLimitOffsetFetchClause() bool {
+	// LIMIT/OFFSET/FETCH are non-reserved identifiers, so they aren't clause
+	// boundaries — a preceding clause body absorbs them and this rule's body is only
+	// reached when none precedes. The wordsValue match still drives the completion
+	// hint (ExpectedAt offers LIMIT/OFFSET/FETCH after a complete query); the body is
+	// consumed permissively.
 	return v.Sequence(
 		v.wordsValue("LIMIT", "OFFSET", "FETCH"),
-		// A row-count operand is required — a bare `LIMIT`/`OFFSET`/`FETCH` is
-		// incomplete, and requiring it makes ExpectedAt offer a count hint at the
-		// cursor rather than the next clause's keywords.
-		func() bool { return v.consumeClauseBody(true, "row count") },
+		func() bool { return v.consumeClauseBody(false, "") },
 	)
 }
 

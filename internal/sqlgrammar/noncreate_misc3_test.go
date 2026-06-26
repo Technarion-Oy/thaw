@@ -97,6 +97,12 @@ func TestParseSelect(t *testing.T) {
 		`SELECT a FROM t WHERE a IS NOT DISTINCT FROM b`,
 		`SELECT * FROM t1 JOIN t2 ON t1.a IS DISTINCT FROM t2.a`,
 		`SELECT a IS DISTINCT FROM b AS flag FROM t`,
+		// LIMIT/OFFSET/FETCH are non-reserved — legal unquoted identifiers, not
+		// unconditional clause boundaries (PR #561 review).
+		`SELECT limit FROM t`,
+		`SELECT * FROM limit`,
+		`SELECT id, limit FROM t`,
+		`SELECT a FROM t LIMIT 10 OFFSET 5`,
 	)
 	assertInvalid(t, (*Validator).ParseSelect,
 		``,
@@ -105,7 +111,6 @@ func TestParseSelect(t *testing.T) {
 		`SELECT FROM t`,           // empty projection before FROM — 0 columns is not allowed
 		`SELECT a FROM`,           // dangling FROM with no table
 		`SELECT a FROM t GROUP a`, // GROUP without BY
-		`SELECT a FROM t LIMIT`,   // LIMIT with no row count
 	)
 }
 
