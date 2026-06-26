@@ -193,10 +193,14 @@ export default function QueryHistoryModal({ onClose }: Props) {
   const didAutoRun = useRef(false);
   useEffect(() => {
     if (didAutoRun.current) return;
-    if (filterType === "user" && !defaultUser.trim()) return;
-    didAutoRun.current = true;
-    if (defaultUser && !userName) setUserName(defaultUser);
-    runQuery({ userName: defaultUser || userName });
+    if (!defaultUser.trim()) return; // still waiting for the connection user — don't latch yet
+    didAutoRun.current = true;       // latch unconditionally once the user arrives
+    if (filterType !== "user") return; // user already switched scope — they're driving now
+    // Prefer a name the user already typed (slow-hydration race) over the
+    // connection default, so the query and the visible input never diverge.
+    const user = userName.trim() || defaultUser;
+    if (user !== userName) setUserName(user);
+    runQuery({ userName: user });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [defaultUser]);
 

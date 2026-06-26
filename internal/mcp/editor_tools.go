@@ -93,14 +93,28 @@ func registerEditorTools(srv *mcpsdk.Server, client *snowflake.Client, mode stri
 			limit = 50
 		}
 
+		// Resolve the current user explicitly — user-scoped query history requires
+		// a non-empty USER_NAME (an empty one would widen the query beyond the
+		// session user, so GetQueryHistory rejects it).
+		currentUser, err := client.GetCurrentUser(ctx)
+		if err != nil {
+			logger.L.Error("mcp get_query_history: resolve current user failed", "err", err)
+			return &mcpsdk.CallToolResult{
+				Content: []mcpsdk.Content{&mcpsdk.TextContent{
+					Text: "failed to fetch query history",
+				}},
+				IsError: true,
+			}, nil, nil
+		}
+
 		rows, err := queryhistory.GetQueryHistory(
 			ctx, client,
-			"user", // filter by current user
-			"",     // sessionID (unused for user filter)
-			"",     // userName — empty uses current user
-			"",     // warehouseName
-			"",     // endTimeStart
-			"",     // endTimeEnd
+			"user",      // filter by current user
+			"",          // sessionID (unused for user filter)
+			currentUser, // userName — the resolved session user
+			"",          // warehouseName
+			"",          // endTimeStart
+			"",          // endTimeEnd
 			limit,
 			false, // exclude client-generated statements
 		)

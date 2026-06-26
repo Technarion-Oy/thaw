@@ -500,6 +500,15 @@ func (c *Client) GetSessionID(ctx context.Context) (string, error) {
 	return id, nil
 }
 
+// GetCurrentUser returns the current session's user via SELECT CURRENT_USER().
+func (c *Client) GetCurrentUser(ctx context.Context) (string, error) {
+	var name string
+	if err := c.queryRowCtx(ctx, "SELECT CURRENT_USER()").Scan(&name); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
 // GetCachedSessionContext returns the session context from the connector's
 // in-memory cache without making a Snowflake RPC. Useful when the caller needs
 // the context but cannot tolerate network latency (e.g. under a mutex).
