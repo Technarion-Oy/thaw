@@ -21,6 +21,7 @@ import (
 // QueryHistoryRow holds one row from INFORMATION_SCHEMA.QUERY_HISTORY*.
 type QueryHistoryRow struct {
 	QueryID       string `json:"queryId"`
+	SessionID     string `json:"sessionId"`
 	QueryText     string `json:"queryText"`
 	QueryType     string `json:"queryType"`
 	UserName      string `json:"userName"`
@@ -104,7 +105,7 @@ func BuildQueryHistorySql(
 	}
 
 	return fmt.Sprintf(`
-SELECT QUERY_ID, QUERY_TEXT, QUERY_TYPE, USER_NAME, WAREHOUSE_NAME,
+SELECT QUERY_ID, SESSION_ID, QUERY_TEXT, QUERY_TYPE, USER_NAME, WAREHOUSE_NAME,
        DATABASE_NAME, SCHEMA_NAME, START_TIME, END_TIME,
        TOTAL_ELAPSED_TIME, EXECUTION_STATUS, ERROR_MESSAGE,
        ROWS_PRODUCED, BYTES_SCANNED
@@ -119,6 +120,7 @@ func ParseQueryHistory(res *snowflake.QueryResult) []QueryHistoryRow {
 	}
 
 	qidIdx := snowflake.ColIdx(res.Columns, "query_id")
+	sidIdx := snowflake.ColIdx(res.Columns, "session_id")
 	qtxtIdx := snowflake.ColIdx(res.Columns, "query_text")
 	qtypIdx := snowflake.ColIdx(res.Columns, "query_type")
 	userIdx := snowflake.ColIdx(res.Columns, "user_name")
@@ -144,6 +146,7 @@ func ParseQueryHistory(res *snowflake.QueryResult) []QueryHistoryRow {
 	for _, row := range res.Rows {
 		rows = append(rows, QueryHistoryRow{
 			QueryID:       snowflake.CellString(get(row, qidIdx)),
+			SessionID:     snowflake.CellString(get(row, sidIdx)),
 			QueryText:     snowflake.CellString(get(row, qtxtIdx)),
 			QueryType:     snowflake.CellString(get(row, qtypIdx)),
 			UserName:      snowflake.CellString(get(row, userIdx)),

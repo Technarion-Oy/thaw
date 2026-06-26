@@ -51,11 +51,15 @@ export default function QueryHistoryModal({ onClose }: Props) {
   const warehouses       = useSessionStore((s) => s.warehouses);
   const loadWarehouses   = useSessionStore((s) => s.loadWarehouses);
 
-  const [filterType,      setFilterType]      = useState<FilterType>("session");
-  const [sessionId] = useState("");
+  const [filterType,      setFilterType]      = useState<FilterType>("user");
+  const [sessionId,       setSessionId]       = useState("");
   const [userName,        setUserName]        = useState(defaultUser);
   const [warehouseName,   setWarehouseName]   = useState(defaultWarehouse);
-  const [timeRange,       setTimeRange]       = useState<[Dayjs, Dayjs] | null>(null);
+  // Default to "today" so the modal opens on the current user's recent activity
+  // rather than an empty range. The picker stays adjustable.
+  const [timeRange,       setTimeRange]       = useState<[Dayjs, Dayjs] | null>(
+    () => [dayjs().startOf("day"), dayjs()],
+  );
   const [resultLimit,     setResultLimit]     = useState(100);
   const [includeClientGen, setIncludeClientGen] = useState(false);
   const [rows,            setRows]            = useState<queryhistory.QueryHistoryRow[] | null>(null);
@@ -67,7 +71,12 @@ export default function QueryHistoryModal({ onClose }: Props) {
   const [profileQueryId,  setProfileQueryId]  = useState<string | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const runQuery = async () => {
+  // runQuery accepts optional overrides so callers (e.g. "Filter by this
+  // session") can run with new scope/session values before the corresponding
+  // setState has been flushed.
+  const runQuery = async (override?: { filterType?: FilterType; sessionId?: string }) => {
+    const ft  = override?.filterType ?? filterType;
+    const sid = override?.sessionId  ?? sessionId;
     setLoading(true);
     setError(null);
     setRows(null);
@@ -75,8 +84,8 @@ export default function QueryHistoryModal({ onClose }: Props) {
       const start = timeRange ? timeRange[0].toISOString() : "";
       const end   = timeRange ? timeRange[1].toISOString() : "";
       const data = await GetQueryHistory(
-        filterType,
-        sessionId,
+        ft,
+        sid,
         userName,
         warehouseName,
         start,
@@ -92,7 +101,23 @@ export default function QueryHistoryModal({ onClose }: Props) {
     }
   };
 
-  // Auto-run on mount with current session defaults
+  // Switch to the "session" scope for a specific session id and re-run. Used by
+  // the per-row "Filter by this session" action so users can drill down from a
+  // query they recognise to everything that ran in the same session.
+  const filterBySession = (sid: string) => {
+    if (!sid) return;
+    setFilterType("session");
+    setSessionId(sid);
+    setQuerySearch("");
+    runQuery({ filterType: "session", sessionId: sid });
+  };
+
+  // "session" scope needs an explicit id — an empty id would silently fall back
+  // to QUERY_HISTORY_BY_SESSION() of the pooled metadata connection, which never
+  // ran the user's editor SQL. Disable Run rather than query the wrong session.
+  const sessionScopeMissingId = filterType === "session" && !sessionId.trim();
+
+  // Auto-run on mount with the current-user / today defaults.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { runQuery(); }, []);
 
@@ -229,6 +254,20 @@ export default function QueryHistoryModal({ onClose }: Props) {
           </div>
         )}
 
+        {filterType === "session" && (
+          <div>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 2 }}>Session ID</div>
+            <Input
+              size="small"
+              value={sessionId}
+              onChange={(e) => setSessionId(e.target.value)}
+              onPressEnter={() => { if (!sessionScopeMissingId) runQuery(); }}
+              style={{ width: 180 }}
+              placeholder="Paste a session ID…"
+            />
+          </div>
+        )}
+
         {filterType === "warehouse" && (
           <div>
             <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 2 }}>Warehouse name</div>
@@ -279,7 +318,13 @@ export default function QueryHistoryModal({ onClose }: Props) {
           </Checkbox>
         </div>
 
-        <Button type="primary" size="small" onClick={runQuery} loading={loading}>
+        <Button
+          type="primary"
+          size="small"
+          onClick={() => runQuery()}
+          loading={loading}
+          disabled={sessionScopeMissingId}
+        >
           Run
         </Button>
       </div>
@@ -314,8 +359,10 @@ export default function QueryHistoryModal({ onClose }: Props) {
                   { label: "Schema",        value: row.schemaName    || null },
                   { label: "Rows produced", value: row.rowsProduced  ?? null },
                   { label: "Bytes scanned", value: row.bytesScanned  ?? null },
+                  { label: "Session ID",    value: row.sessionId     || null },
                   { label: "Query ID",      value: row.queryId       || null },
                 ];
+                const monoLabels = new Set(["Session ID", "Query ID"]);
                 return (
                   <div style={{ padding: "8px 0 4px" }}>
                     <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, margin: "0 0 10px", fontFamily: "monospace" }}>
@@ -325,7 +372,7 @@ export default function QueryHistoryModal({ onClose }: Props) {
                       {details.map(({ label, value }) => value !== null && (
                         <>
                           <span key={label + "-l"} style={{ color: "var(--text-muted)", whiteSpace: "nowrap" }}>{label}</span>
-                          <span key={label + "-v"} style={{ fontFamily: label === "Query ID" ? "monospace" : undefined, wordBreak: "break-all" }}>{String(value)}</span>
+                          <span key={label + "-v"} style={{ fontFamily: monoLabels.has(label) ? "monospace" : undefined, wordBreak: "break-all" }}>{String(value)}</span>
                         </>
                       ))}
                     </div>
@@ -351,6 +398,14 @@ export default function QueryHistoryModal({ onClose }: Props) {
                           onClick={() => { setProfileQueryId(row.queryId); }}
                         >
                           Profile
+                        </Button>
+                      )}
+                      {row.sessionId && (
+                        <Button
+                          size="small"
+                          onClick={() => filterBySession(row.sessionId)}
+                        >
+                          Filter by this session
                         </Button>
                       )}
                       {row.errorMessage && (

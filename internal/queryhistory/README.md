@@ -24,6 +24,7 @@ function that combines both steps.
 ```go
 type QueryHistoryRow struct {
     QueryID       string `json:"queryId"`
+    SessionID     string `json:"sessionId"`
     QueryText     string `json:"queryText"`
     QueryType     string `json:"queryType"`
     UserName      string `json:"userName"`

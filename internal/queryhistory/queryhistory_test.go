@@ -65,6 +65,9 @@ func TestBuildQueryHistorySql(t *testing.T) {
 			if !strings.Contains(sql, "RESULT_LIMIT => 100") {
 				t.Errorf("expected RESULT_LIMIT in SQL:\n%s", sql)
 			}
+			if !strings.Contains(sql, "SESSION_ID,") {
+				t.Errorf("expected SESSION_ID in projected columns:\n%s", sql)
+			}
 			if !strings.Contains(sql, "INCLUDE_CLIENT_GENERATED_STATEMENT => TRUE") {
 				t.Errorf("expected include-client-generated in SQL:\n%s", sql)
 			}
@@ -93,14 +96,14 @@ func TestBuildQueryHistorySqlTimeRange(t *testing.T) {
 func TestParseQueryHistory(t *testing.T) {
 	res := &snowflake.QueryResult{
 		Columns: []string{
-			"QUERY_ID", "QUERY_TEXT", "QUERY_TYPE", "USER_NAME", "WAREHOUSE_NAME",
+			"QUERY_ID", "SESSION_ID", "QUERY_TEXT", "QUERY_TYPE", "USER_NAME", "WAREHOUSE_NAME",
 			"DATABASE_NAME", "SCHEMA_NAME", "START_TIME", "END_TIME",
 			"TOTAL_ELAPSED_TIME", "EXECUTION_STATUS", "ERROR_MESSAGE",
 			"ROWS_PRODUCED", "BYTES_SCANNED",
 		},
 		Rows: [][]interface{}{
 			{
-				"q1", "SELECT 1", "SELECT", "ALICE", "WH",
+				"q1", "9876543210", "SELECT 1", "SELECT", "ALICE", "WH",
 				"DB", "PUBLIC", "2026-01-01", "2026-01-01",
 				int64(1500), "SUCCESS", "",
 				int64(1), int64(2048),
@@ -112,7 +115,7 @@ func TestParseQueryHistory(t *testing.T) {
 		t.Fatalf("expected 1 row, got %d", len(rows))
 	}
 	got := rows[0]
-	if got.QueryID != "q1" || got.UserName != "ALICE" || got.Status != "SUCCESS" {
+	if got.QueryID != "q1" || got.SessionID != "9876543210" || got.UserName != "ALICE" || got.Status != "SUCCESS" {
 		t.Errorf("unexpected projection: %+v", got)
 	}
 	if got.ElapsedMs != 1500 || got.RowsProduced != 1 || got.BytesScanned != 2048 {
