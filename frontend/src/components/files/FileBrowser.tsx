@@ -530,9 +530,26 @@ export default function FileBrowser() {
     // Refresh git status alongside the tree so the status colors stay current.
     refreshGitStatus();
     try {
-      const entries = await ListDirectory(exportDir);
-      setTreeData(entriesToNodes(entries));
-      setLoadedKeys([]); // clear so Tree re-triggers loadData for expanded dirs
+      // Re-fetch the root and every currently-loaded (expanded) directory in
+      // parallel, then merge — this picks up external changes while PRESERVING the
+      // expanded subtree. Replacing treeData with root-only nodes (the old
+      // behavior) desynced rc-tree's uncontrolled expand state: folders collapsed
+      // and could not be reopened.
+      const loaded = loadedKeysRef.current.map(String);
+      const [rootEntries, ...childResults] = await Promise.all([
+        ListDirectory(exportDir),
+        ...loaded.map(async (k) => {
+          try { return { key: k, entries: await ListDirectory(k) }; }
+          catch { return { key: k, entries: null as FileEntry[] | null }; }
+        }),
+      ]);
+      setTreeData((prev) => {
+        let tree = mergeNodes(prev, entriesToNodes(rootEntries));
+        for (const r of childResults) {
+          if (r.entries) tree = updateNode(tree, r.key, entriesToNodes(r.entries), true);
+        }
+        return tree;
+      });
       setLoaded(true);
     } catch {
       // non-fatal
