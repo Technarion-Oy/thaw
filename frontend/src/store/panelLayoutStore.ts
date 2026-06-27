@@ -101,7 +101,7 @@ export const usePanelLayoutStore = create<PanelLayoutState>()(
       migrate: (persisted: any, version: number) => {
         if (persisted && version < 1) {
           const strip = (arr: unknown, fallback: PanelId[]) => {
-            if (!Array.isArray(arr)) return arr;
+            if (!Array.isArray(arr)) return fallback; // null/undefined/corrupt → defaults
             const kept = arr.filter((id) => id !== "git");
             return kept.length ? kept : fallback;
           };

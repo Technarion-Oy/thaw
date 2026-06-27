@@ -108,8 +108,11 @@ func PerformOAuthFlow(ctx context.Context, provider string, onURL func(string)) 
 	}
 
 	state := generateState()
-	codeChan := make(chan string)
-	errChan := make(chan error)
+	// Buffered (cap 1) so the HTTP callback handler can always send and return
+	// even if the select below already exited (e.g. ctx canceled) — otherwise the
+	// handler blocks forever and the deferred server.Shutdown deadlocks waiting on it.
+	codeChan := make(chan string, 1)
+	errChan := make(chan error, 1)
 
 	mux := http.NewServeMux()
 	server := &http.Server{

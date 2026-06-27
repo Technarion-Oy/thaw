@@ -272,35 +272,46 @@ func GetStatus(dir string) (RepoStatus, error) {
 	}
 
 	// Ahead count: commits in HEAD not reachable from upstream tracking ref
-	if s.HasRemote && head != nil {
-		cfg, _ := repo.Config()
-		var trackingRef plumbing.ReferenceName
-		if cfg != nil {
-			branchName := head.Name().Short()
-			if bc, ok := cfg.Branches[branchName]; ok && bc.Remote != "" {
-				trackingRef = plumbing.NewRemoteReferenceName(bc.Remote, bc.Merge.Short())
-			}
-		}
-		if trackingRef == "" {
-			// Fallback: guess origin/<branch>
-			trackingRef = plumbing.NewRemoteReferenceName("origin", head.Name().Short())
-		}
-		upstreamRef, err := repo.Reference(trackingRef, true)
-		if err == nil {
-			logs, err := repo.Log(&gogit.LogOptions{From: head.Hash()})
-			if err == nil {
-				_ = logs.ForEach(func(c *object.Commit) error {
-					if c.Hash == upstreamRef.Hash() {
-						return errors.New("stop")
-					}
-					s.Ahead++
-					return nil
-				})
-			}
-		}
+	if s.HasRemote {
+		s.Ahead = aheadCount(repo, head)
 	}
 
 	return s, nil
+}
+
+// aheadCount returns the number of commits on HEAD not reachable from the
+// upstream tracking ref (origin/<branch> by default). Returns 0 when there's no
+// HEAD, no upstream ref, or nothing ahead.
+func aheadCount(repo *gogit.Repository, head *plumbing.Reference) int {
+	if head == nil {
+		return 0
+	}
+	var trackingRef plumbing.ReferenceName
+	if cfg, _ := repo.Config(); cfg != nil {
+		if bc, ok := cfg.Branches[head.Name().Short()]; ok && bc.Remote != "" {
+			trackingRef = plumbing.NewRemoteReferenceName(bc.Remote, bc.Merge.Short())
+		}
+	}
+	if trackingRef == "" {
+		trackingRef = plumbing.NewRemoteReferenceName("origin", head.Name().Short())
+	}
+	upstreamRef, err := repo.Reference(trackingRef, true)
+	if err != nil {
+		return 0
+	}
+	logs, err := repo.Log(&gogit.LogOptions{From: head.Hash()})
+	if err != nil {
+		return 0
+	}
+	n := 0
+	_ = logs.ForEach(func(c *object.Commit) error {
+		if c.Hash == upstreamRef.Hash() {
+			return errors.New("stop")
+		}
+		n++
+		return nil
+	})
+	return n
 }
 
 // CommitAndPush stages files, commits, and pushes to the remote.
@@ -413,11 +424,15 @@ func CommitAndPush(ctx context.Context, p PushParams) error {
 		if !empty {
 			return fmt.Errorf("git commit: %w", err)
 		}
-		// Nothing new to commit. For the auto-export path that means there's
-		// genuinely nothing to do. For StagedOnly we still fall through to push:
-		// a prior attempt may have committed successfully but failed to push, and
-		// the retry would otherwise see an empty index and silently skip the push.
-		if !p.StagedOnly {
+		// Nothing new to commit. The auto-export path and local-only commits have
+		// nothing to do. For a StagedOnly push we fall through to push *only* when
+		// there's actually an unpushed commit (a prior commit that committed but
+		// failed to push) — otherwise a genuinely-empty staging area would surface
+		// the push's error (e.g. auth) instead of being a clean no-op.
+		if !p.StagedOnly || p.NoPush {
+			return nil
+		}
+		if head, _ := repo.Head(); aheadCount(repo, head) == 0 {
 			return nil
 		}
 	}
@@ -917,16 +932,10 @@ func ListBranches(dir string) ([]BranchInfo, error) {
 
 // CheckoutBranch checks out an existing local branch.
 func CheckoutBranch(dir, name string) error {
-	repo, err := gogit.PlainOpenWithOptions(dir, &gogit.PlainOpenOptions{DetectDotGit: true})
+	_, wt, err := openWorktree(dir)
 	if err != nil {
-		return fmt.Errorf("not a git repository")
+		return err
 	}
-
-	wt, err := repo.Worktree()
-	if err != nil {
-		return fmt.Errorf("worktree: %w", err)
-	}
-
 	return wt.Checkout(&gogit.CheckoutOptions{
 		Branch: plumbing.NewBranchReferenceName(name),
 		Create: false,
@@ -935,16 +944,10 @@ func CheckoutBranch(dir, name string) error {
 
 // CreateBranch creates and checks out a new branch.
 func CreateBranch(dir, name string) error {
-	repo, err := gogit.PlainOpenWithOptions(dir, &gogit.PlainOpenOptions{DetectDotGit: true})
+	_, wt, err := openWorktree(dir)
 	if err != nil {
-		return fmt.Errorf("not a git repository")
+		return err
 	}
-
-	wt, err := repo.Worktree()
-	if err != nil {
-		return fmt.Errorf("worktree: %w", err)
-	}
-
 	return wt.Checkout(&gogit.CheckoutOptions{
 		Branch: plumbing.NewBranchReferenceName(name),
 		Create: true,
@@ -955,9 +958,9 @@ func CreateBranch(dir, name string) error {
 // checks it out. remoteName must be in "origin/<branch>" form (the format
 // returned by ListBranches for remote entries).
 func CheckoutRemoteBranch(dir, remoteName string) error {
-	repo, err := gogit.PlainOpenWithOptions(dir, &gogit.PlainOpenOptions{DetectDotGit: true})
+	repo, wt, err := openWorktree(dir)
 	if err != nil {
-		return fmt.Errorf("not a git repository")
+		return err
 	}
 
 	// Split "origin/feature/xyz" → remote="origin", local="feature/xyz"
@@ -971,11 +974,6 @@ func CheckoutRemoteBranch(dir, remoteName string) error {
 	remoteRef, err := repo.Reference(plumbing.NewRemoteReferenceName(remotePart, localName), true)
 	if err != nil {
 		return fmt.Errorf("remote branch not found: %w", err)
-	}
-
-	wt, err := repo.Worktree()
-	if err != nil {
-		return fmt.Errorf("worktree: %w", err)
 	}
 
 	return wt.Checkout(&gogit.CheckoutOptions{
@@ -1062,19 +1060,14 @@ func MergeBranch(dir, sourceBranch string) error {
 // ResetHard discards all uncommitted working-tree changes,
 // resetting the worktree to the HEAD commit (git reset --hard HEAD).
 func ResetHard(dir string) error {
-	repo, err := gogit.PlainOpenWithOptions(dir, &gogit.PlainOpenOptions{DetectDotGit: true})
+	repo, wt, err := openWorktree(dir)
 	if err != nil {
-		return fmt.Errorf("not a git repository")
+		return err
 	}
 
 	head, err := repo.Head()
 	if err != nil {
 		return fmt.Errorf("no commits yet: %w", err)
-	}
-
-	wt, err := repo.Worktree()
-	if err != nil {
-		return fmt.Errorf("worktree: %w", err)
 	}
 
 	return wt.Reset(&gogit.ResetOptions{

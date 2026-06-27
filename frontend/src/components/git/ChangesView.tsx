@@ -30,7 +30,7 @@ const MONO = 'var(--editor-font, "JetBrains Mono", monospace)';
 // ── A collapsible, paginated group of changed files ───────────────────────────
 
 function ChangeGroup({
-  title, files, total, action, onAction, onDiscard, busy,
+  title, files, total, action, onAction, onDiscard, busy, newFilesRel,
 }: {
   title: string;
   files: FileChange[];
@@ -39,6 +39,7 @@ function ChangeGroup({
   onAction: (path: string) => void;
   onDiscard: (path: string) => void;
   busy: boolean;
+  newFilesRel: Set<string>;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [page, setPage] = useState(0);
@@ -73,7 +74,7 @@ function ChangeGroup({
       {!collapsed && (
         <>
           {visible.map((f) => (
-            <ChangeRow key={f.path} file={f} action={action} onAction={onAction} onDiscard={onDiscard} busy={busy} />
+            <ChangeRow key={f.path} file={f} action={action} onAction={onAction} onDiscard={onDiscard} busy={busy} isNew={newFilesRel.has(f.path)} />
           ))}
 
           {/* Paginator — surfaces the formerly-silent cap honestly */}
@@ -113,6 +114,17 @@ export default function ChangesView() {
   const stagedTotal   = status?.stagedTotal   ?? 0;
   const unstagedTotal = status?.unstagedTotal ?? 0;
   const totalChanged  = status?.totalChanged  ?? 0;
+
+  // Files with no committed version (staging side Added, or worktree Untracked).
+  // Discarding these deletes them — so the unstaged row of a staged-then-modified
+  // file (shown as "M") must still be treated as new, hence a path-set, not the
+  // per-row display letter.
+  const newFilesRel = useMemo(() => {
+    const s = new Set<string>();
+    for (const f of staged)   if (f.status === "A") s.add(f.path);
+    for (const f of unstaged) if (f.status === "U") s.add(f.path);
+    return s;
+  }, [staged, unstaged]);
 
   // Every one of these writes the git index, which go-git can't do concurrently —
   // so any in-flight op disables the row/header actions.
@@ -243,11 +255,11 @@ export default function ChangesView() {
         <>
           <ChangeGroup
             title="Staged changes" files={staged} total={stagedTotal} action="unstage"
-            onAction={unstageFile} onDiscard={discardFile} busy={busy}
+            onAction={unstageFile} onDiscard={discardFile} busy={busy} newFilesRel={newFilesRel}
           />
           <ChangeGroup
             title="Changes" files={unstaged} total={unstagedTotal} action="stage"
-            onAction={stageFile} onDiscard={discardFile} busy={busy}
+            onAction={stageFile} onDiscard={discardFile} busy={busy} newFilesRel={newFilesRel}
           />
         </>
       )}

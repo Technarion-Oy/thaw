@@ -23,21 +23,22 @@ const MONO = 'var(--editor-font, "JetBrains Mono", monospace)';
 // Inter), the Snowflake object-type ledger column, and reveal-on-hover actions
 // overlaid so the resting row stays tight.
 export default function ChangeRow({
-  file, action, onAction, onDiscard, busy,
+  file, action, onAction, onDiscard, busy, isNew,
 }: {
   file: FileChange;
   action: "stage" | "unstage";
   onAction: (path: string) => void;
   onDiscard: (path: string) => void;
   busy: boolean;
+  // Whether the file has no committed version (added/untracked) — passed in
+  // because the row's display letter can be "M" for a staged-new-then-modified
+  // file, yet discarding it still deletes it. Determined from the staging side.
+  isNew: boolean;
 }) {
   const { dir, name } = splitPath(file.path);
   const ot = objectTypeFromPath(file.path);
   const color = sigilColor(file.status);
 
-  // New files (added/untracked) have no committed version — discarding deletes
-  // them permanently rather than reverting to a prior state.
-  const isNew = file.status === "A" || file.status === "U";
   const discardDesc = isNew
     ? "Permanently deletes this file — it has never been committed and cannot be recovered."
     : "Reverts the file to its last committed state. This cannot be undone.";

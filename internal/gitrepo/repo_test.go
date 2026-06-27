@@ -214,6 +214,40 @@ func TestDiscardFileRestoresModeAndRecreatesDir(t *testing.T) {
 	}
 }
 
+// A file that was staged (git add) and then edited again appears on BOTH the
+// staged side ("A") and the unstaged side ("M"), and has no committed version —
+// so DiscardFile deletes it. The UI must classify it as "new" from the staged
+// "A" (not the unstaged "M" display letter), or it would warn "discard changes"
+// while permanently deleting the file. This test pins that backend contract.
+func TestStagedThenModifiedIsNewAndDiscarded(t *testing.T) {
+	dir := initRepoWithCommit(t)
+	target := filepath.Join(dir, "new.sql")
+	if err := os.WriteFile(target, []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := StageFile(dir, "new.sql"); err != nil {
+		t.Fatalf("StageFile: %v", err)
+	}
+	if err := os.WriteFile(target, []byte("v2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	staged, unstaged := statusSets(t, dir)
+	if staged["new.sql"] != "A" {
+		t.Fatalf("expected staged side A, got %v", staged)
+	}
+	if unstaged["new.sql"] != "M" {
+		t.Fatalf("expected unstaged side M, got %v", unstaged)
+	}
+
+	if err := DiscardFile(dir, "new.sql"); err != nil {
+		t.Fatalf("DiscardFile: %v", err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("expected new.sql deleted (no committed version), stat err = %v", err)
+	}
+}
+
 func TestNormaliseHTTPS(t *testing.T) {
 	tests := []struct {
 		url  string

@@ -255,6 +255,7 @@ export default function FileBrowser() {
     const dirLetter   = new Map<string, string>(); // dir rel → dominant letter
     const stagedRel   = new Set<string>();
     const unstagedRel = new Set<string>();
+    const newFilesRel = new Set<string>(); // no committed version → discard deletes
 
     // Folder color = the most significant change beneath it. A/U are both "new"
     // (green), so a folder of only-new files stays green rather than reading as
@@ -275,8 +276,16 @@ export default function FileBrowser() {
         byRel.set(rel, letter);
         addDirs(rel, letter);
       }
-      for (const fc of (gitStatus.staged   ?? [])) stagedRel.add(fc.path.replace(/\\/g, "/"));
-      for (const fc of (gitStatus.unstaged ?? [])) unstagedRel.add(fc.path.replace(/\\/g, "/"));
+      for (const fc of (gitStatus.staged ?? [])) {
+        const rel = fc.path.replace(/\\/g, "/");
+        stagedRel.add(rel);
+        if (fc.status === "A") newFilesRel.add(rel); // added to index, not in HEAD
+      }
+      for (const fc of (gitStatus.unstaged ?? [])) {
+        const rel = fc.path.replace(/\\/g, "/");
+        unstagedRel.add(rel);
+        if (fc.status === "U") newFilesRel.add(rel); // untracked
+      }
     }
 
     // Exact repo-relative path of a tree node, or null when it's outside the repo.
@@ -288,7 +297,7 @@ export default function FileBrowser() {
       return null;
     };
 
-    return { byRel, dirLetter, stagedRel, unstagedRel, relOf };
+    return { byRel, dirLetter, stagedRel, unstagedRel, newFilesRel, relOf };
   }, [gitStatus, exportDir]);
 
   // ── File tree state ────────────────────────────────────────────────────────
@@ -750,10 +759,11 @@ export default function FileBrowser() {
     if (!fileCtxMenu) return;
     const { path, name } = fileCtxMenu;
     setFileCtxMenu(null);
-    // New files (added/untracked) have no committed version — discard deletes them.
+    // New files (no committed version) get deleted by discard. Use the dedicated
+    // set, not the display letter — a staged-new-then-modified file shows "M" but
+    // is still new (and would be permanently deleted).
     const rel = gitOverlay.relOf(path);
-    const letter = rel != null ? gitOverlay.byRel.get(rel) : undefined;
-    const isNew = letter === "A" || letter === "U";
+    const isNew = rel != null && gitOverlay.newFilesRel.has(rel);
     modal.confirm({
       title: isNew ? `Delete ${name}?` : `Discard changes to ${name}?`,
       content: isNew
