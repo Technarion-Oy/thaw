@@ -504,8 +504,13 @@ func headTreeEntry(repo *gogit.Repository, rel string) (entry *object.TreeEntry,
 	return te, true
 }
 
-// StageFile stages a single file (git add <file>). Deletions are staged too.
-// OS junk files are silently skipped.
+// StageFile stages a single file (git add <file>). OS junk files are skipped.
+//
+// SkipStatus avoids go-git's full-repository status scan that AddWithOptions
+// otherwise runs on every call — without it, staging one file in a large repo
+// costs O(repo size). With it, staging is proportional to that one file. The
+// status scan is only skipped for existing regular files; deletions (the file no
+// longer exists) still fall back to a scan inside go-git, which is fine.
 func StageFile(dir, file string) error {
 	_, wt, err := openWorktree(dir)
 	if err != nil {
@@ -515,33 +520,28 @@ func StageFile(dir, file string) error {
 	if osJunkFiles[filepath.Base(rel)] {
 		return nil
 	}
-	if err := wt.AddWithOptions(&gogit.AddOptions{Path: rel}); err != nil {
+	if err := wt.AddWithOptions(&gogit.AddOptions{Path: rel, SkipStatus: true}); err != nil {
 		return fmt.Errorf("git add %s: %w", rel, err)
 	}
 	return nil
 }
 
-// StageAll stages every working-tree change (git add -A), skipping OS junk.
+// StageAll stages every working-tree change (git add -A), respecting .gitignore.
+//
+// This is a single bulk add — one status scan and one index write — rather than
+// a per-file loop. go-git's AddWithOptions rewrites the whole index on every
+// call and re-scans status, so staging files one at a time was O(N²) (and
+// crawled at a few hundred files); All:true stages additions, modifications, and
+// deletions in one pass. OS junk is excluded via .gitignore (status skips
+// ignored files, so they never enter the add set).
 func StageAll(dir string) error {
 	_, wt, err := openWorktree(dir)
 	if err != nil {
 		return err
 	}
 	_ = ensureGitignore(dir)
-	st, err := wt.Status()
-	if err != nil {
-		return fmt.Errorf("status: %w", err)
-	}
-	for p, fs := range st {
-		if fs.Worktree == gogit.Unmodified {
-			continue // already matches the index — nothing to stage
-		}
-		if osJunkFiles[filepath.Base(p)] {
-			continue
-		}
-		if err := wt.AddWithOptions(&gogit.AddOptions{Path: p}); err != nil {
-			return fmt.Errorf("git add %s: %w", p, err)
-		}
+	if err := wt.AddWithOptions(&gogit.AddOptions{All: true}); err != nil {
+		return fmt.Errorf("git add -A: %w", err)
 	}
 	return nil
 }
