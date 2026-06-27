@@ -631,7 +631,7 @@ func DiscardFile(dir, file string) error {
 	if err != nil {
 		return fmt.Errorf("read HEAD blob: %w", err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 	contents, err := io.ReadAll(reader)
 	if err != nil {
 		return fmt.Errorf("read HEAD blob: %w", err)
