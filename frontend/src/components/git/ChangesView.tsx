@@ -132,8 +132,9 @@ export default function ChangesView() {
     : `Commit ${stagedTotal.toLocaleString()} staged file${stagedTotal === 1 ? "" : "s"} locally — connect to GitHub to also push`;
 
   const handleCommit = async (push: boolean) => {
-    await commitStaged(commitMsg, push);
-    if (!useGitStore.getState().error) setCommitMsg("");
+    // Clear the message only when the commit itself succeeded — a post-commit
+    // status-refresh failure must not look like a failed commit.
+    if (await commitStaged(commitMsg, push)) setCommitMsg("");
   };
 
   return (

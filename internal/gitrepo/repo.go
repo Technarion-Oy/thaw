@@ -613,6 +613,12 @@ func UnstageAll(dir string) error {
 // DiscardFile reverts a file to its HEAD state: tracked files are restored from
 // HEAD (and unstaged); untracked / newly-added files are removed from the index
 // and deleted from disk. This cannot be undone.
+//
+// Ordering is chosen so a failure never loses data: for untracked files the disk
+// deletion happens only after the index write succeeds; for tracked files the
+// index is reset first (which doesn't touch the worktree) and the worktree copy
+// is then written atomically (temp + rename), so the user's edits survive any
+// failure along the way.
 func DiscardFile(dir, file string) error {
 	repo, wt, err := openWorktree(dir)
 	if err != nil {
@@ -623,11 +629,18 @@ func DiscardFile(dir, file string) error {
 
 	te, found := headTreeEntry(repo, rel)
 	if !found {
-		// Untracked or newly-added: drop from index and delete from disk.
-		if idx, err := repo.Storer.Index(); err == nil {
-			if _, err := idx.Remove(rel); err == nil || errors.Is(err, index.ErrEntryNotFound) {
-				_ = repo.Storer.SetIndex(idx)
-			}
+		// Untracked or newly-added: drop from the index, then delete from disk.
+		// Both index errors are propagated, and the file is removed only after the
+		// index write succeeds — otherwise we could leave a phantom staged entry.
+		idx, err := repo.Storer.Index()
+		if err != nil {
+			return fmt.Errorf("read index: %w", err)
+		}
+		if _, err := idx.Remove(rel); err != nil && !errors.Is(err, index.ErrEntryNotFound) {
+			return fmt.Errorf("discard %s: %w", rel, err)
+		}
+		if err := repo.Storer.SetIndex(idx); err != nil {
+			return fmt.Errorf("write index: %w", err)
 		}
 		if err := os.Remove(absPath); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("discard %s: %w", rel, err)
@@ -635,7 +648,9 @@ func DiscardFile(dir, file string) error {
 		return nil
 	}
 
-	// Tracked: restore the worktree copy from the HEAD blob, then unstage.
+	// Tracked: read the HEAD blob first, then unstage (index reset — leaves the
+	// worktree untouched), then atomically replace the worktree copy. If anything
+	// fails, the user's edits are still on disk.
 	blob, err := repo.BlobObject(te.Hash)
 	if err != nil {
 		return fmt.Errorf("read HEAD blob: %w", err)
@@ -649,10 +664,54 @@ func DiscardFile(dir, file string) error {
 	if err != nil {
 		return fmt.Errorf("read HEAD blob: %w", err)
 	}
-	if err := os.WriteFile(absPath, contents, 0o644); err != nil {
+
+	mode := os.FileMode(0o644)
+	if m, err := te.Mode.ToOSFileMode(); err == nil {
+		mode = m.Perm()
+	}
+
+	if err := UnstageFile(dir, file); err != nil {
+		return err
+	}
+	if err := writeFileAtomic(absPath, contents, mode); err != nil {
 		return fmt.Errorf("restore %s: %w", rel, err)
 	}
-	return UnstageFile(dir, file)
+	return nil
+}
+
+// writeFileAtomic writes data to path via a temp file in the same directory and
+// an atomic rename, creating parent directories as needed. The original file is
+// only replaced once the new content is fully written, so a failure mid-write
+// never corrupts or truncates it.
+func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
+	parent := filepath.Dir(path)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(parent, ".thaw-discard-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	cleanup := func() { _ = os.Remove(tmpName) }
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Chmod(tmpName, mode); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		cleanup()
+		return err
+	}
+	return nil
 }
 
 // Pull fetches and merges changes from the remote branch.

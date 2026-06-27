@@ -70,7 +70,7 @@ interface GitState {
   stageAll: () => Promise<void>;
   unstageAll: () => Promise<void>;
   discardFile: (file: string) => Promise<void>;
-  commitStaged: (message: string, push?: boolean) => Promise<void>;
+  commitStaged: (message: string, push?: boolean) => Promise<boolean>;
 
   loginWithOAuth: (provider: string) => Promise<string>;
   setOAuthToken: (token: string) => void;
@@ -264,9 +264,9 @@ export const useGitStore = create<GitState>((set, get) => ({
     }
   },
 
-  commitStaged: async (message: string, push: boolean = true) => {
+  commitStaged: async (message: string, push: boolean = true): Promise<boolean> => {
     const { exportDir, remoteURL: storedURL, branch, authorName, authorEmail, oauthToken, status } = get();
-    if (!exportDir) return;
+    if (!exportDir) return false;
     const remoteURL = storedURL || status?.remoteURL || "";
     set({ committing: true, error: null });
     try {
@@ -283,12 +283,18 @@ export const useGitStore = create<GitState>((set, get) => ({
         stagedOnly:  true,
         noPush:      !push, // commit locally only when push is false
       } as any);
-      await get().refreshStatus();
     } catch (e) {
-      set({ error: String(e) });
-    } finally {
-      set({ committing: false });
+      set({ error: String(e), committing: false });
+      return false;
     }
+    set({ committing: false });
+    // Best-effort status refresh — a refresh failure here must NOT be reported as
+    // a commit failure (the commit already succeeded), so don't touch `error`.
+    try {
+      const fresh = await GitStatus(exportDir);
+      set({ status: fresh });
+    } catch { /* status will update on the next action */ }
+    return true;
   },
 
   loginWithOAuth: async (provider: string) => {

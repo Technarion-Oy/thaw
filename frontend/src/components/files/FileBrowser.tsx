@@ -390,6 +390,7 @@ export default function FileBrowser() {
   // bursts so we don't run the (potentially expensive) status scan repeatedly.
   const gitRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduleGitRefresh = useCallback(() => {
+    if (!useFeatureFlagsStore.getState().flags.gitIntegration) return; // respect the feature flag
     if (gitRefreshTimerRef.current) clearTimeout(gitRefreshTimerRef.current);
     gitRefreshTimerRef.current = setTimeout(() => { useGitStore.getState().refreshStatus(); }, 400);
   }, []);
@@ -701,18 +702,29 @@ export default function FileBrowser() {
     else message.success(okMsg);
   };
 
+  // The store's git index isn't safe to write concurrently; bail if one is mid-flight
+  // (otherwise overlapping ops race on the shared `error` flag → wrong toasts).
+  const gitBusy = () => {
+    if (useGitStore.getState().staging) {
+      message.warning("A git action is already running — try again in a moment");
+      return true;
+    }
+    return false;
+  };
+
   const handleStage = () => {
-    if (!fileCtxMenu) return;
+    if (!fileCtxMenu || gitBusy()) return;
     const { path, name } = fileCtxMenu;
     setFileCtxMenu(null);
-    stageFile(path).then(() => reportGit(`Staged ${name}`)).catch((e) => message.error(String(e)));
+    // stageFile never rejects (it stores errors in gitStore.error); reportGit surfaces them.
+    stageFile(path).then(() => reportGit(`Staged ${name}`));
   };
 
   const handleUnstage = () => {
-    if (!fileCtxMenu) return;
+    if (!fileCtxMenu || gitBusy()) return;
     const { path, name } = fileCtxMenu;
     setFileCtxMenu(null);
-    unstageFile(path).then(() => reportGit(`Unstaged ${name}`)).catch((e) => message.error(String(e)));
+    unstageFile(path).then(() => reportGit(`Unstaged ${name}`));
   };
 
   // Open a diff of the file's working-tree content against its last-committed
@@ -742,6 +754,7 @@ export default function FileBrowser() {
       okText: "Discard",
       okButtonProps: { danger: true },
       onOk: async () => {
+        if (gitBusy()) return;
         await discardFile(path);
         reportGit(`Discarded changes to ${name}`);
       },
@@ -1340,7 +1353,7 @@ export default function FileBrowser() {
           <CtxItem icon={<DeleteOutlined />} label="Delete" onClick={handleDeleteConfirm} danger />
 
           {/* ── Git staging actions (changed files only) ── */}
-          {!fileCtxMenu.isDir && (ctxUnstaged || ctxStaged) && (
+          {gitEnabled && !fileCtxMenu.isDir && (ctxUnstaged || ctxStaged) && (
             <>
               <div role="separator" style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
               {ctxComparable && (

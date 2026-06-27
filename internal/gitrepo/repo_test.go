@@ -3,6 +3,7 @@ package gitrepo
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -147,6 +148,69 @@ func TestDiscardFile(t *testing.T) {
 	staged, unstaged := statusSets(t, dir)
 	if len(staged) != 0 || len(unstaged) != 0 {
 		t.Fatalf("expected clean tree after discards, got staged=%v unstaged=%v", staged, unstaged)
+	}
+}
+
+// Discarding a tracked file must restore its original mode (executable bit) and
+// recreate its parent directory if it was deleted — otherwise the tree isn't
+// actually clean afterwards.
+func TestDiscardFileRestoresModeAndRecreatesDir(t *testing.T) {
+	dir := t.TempDir()
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	sub := filepath.Join(dir, "scripts")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(sub, "run.sh")
+	const orig = "#!/bin/sh\necho hi\n"
+	if err := os.WriteFile(script, []byte(orig), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wt, _ := repo.Worktree()
+	if err := wt.AddWithOptions(&gogit.AddOptions{All: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wt.Commit("init", &gogit.CommitOptions{
+		Author: &object.Signature{Name: "t", Email: "t@t", When: time.Now()},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Modify the file, then delete its whole parent directory.
+	if err := os.WriteFile(script, []byte("garbage\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(sub); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := DiscardFile(dir, "scripts/run.sh"); err != nil {
+		t.Fatalf("DiscardFile: %v", err)
+	}
+
+	got, err := os.ReadFile(script)
+	if err != nil {
+		t.Fatalf("read restored file (parent dir not recreated?): %v", err)
+	}
+	if string(got) != orig {
+		t.Fatalf("content not restored: %q", string(got))
+	}
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(script)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm()&0o100 == 0 {
+			t.Fatalf("executable bit not restored, mode = %v", info.Mode())
+		}
+	}
+
+	staged, unstaged := statusSets(t, dir)
+	if len(staged) != 0 || len(unstaged) != 0 {
+		t.Fatalf("expected clean tree after discard, got staged=%v unstaged=%v", staged, unstaged)
 	}
 }
 
