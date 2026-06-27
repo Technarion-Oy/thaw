@@ -23,7 +23,7 @@ const MONO = 'var(--editor-font, "JetBrains Mono", monospace)';
 // Inter), the Snowflake object-type ledger column, and reveal-on-hover actions
 // overlaid so the resting row stays tight.
 export default function ChangeRow({
-  file, action, onAction, onDiscard, busy, isNew,
+  file, action, onAction, onDiscard, busy, isNew, partiallyStaged,
 }: {
   file: FileChange;
   action: "stage" | "unstage";
@@ -34,6 +34,10 @@ export default function ChangeRow({
   // because the row's display letter can be "M" for a staged-new-then-modified
   // file, yet discarding it still deletes it. Determined from the staging side.
   isNew: boolean;
+  // Whether the file has both staged and unstaged changes. Discard always reverts
+  // the whole file to HEAD, so from either row it also throws away the staged part
+  // — the confirmation must say so.
+  partiallyStaged: boolean;
 }) {
   const { dir, name } = splitPath(file.path);
   const ot = objectTypeFromPath(file.path);
@@ -41,7 +45,9 @@ export default function ChangeRow({
 
   const discardDesc = isNew
     ? "Permanently deletes this file — it has never been committed and cannot be recovered."
-    : "Reverts the file to its last committed state. This cannot be undone.";
+    : partiallyStaged
+      ? "Reverts the file to its last committed state — this also discards your staged changes for this file. This cannot be undone."
+      : "Reverts the file to its last committed state. This cannot be undone.";
 
   return (
     <div

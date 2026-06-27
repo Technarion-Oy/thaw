@@ -30,7 +30,7 @@ const MONO = 'var(--editor-font, "JetBrains Mono", monospace)';
 // ── A collapsible, paginated group of changed files ───────────────────────────
 
 function ChangeGroup({
-  title, files, total, action, onAction, onDiscard, busy, newFilesRel,
+  title, files, total, action, onAction, onDiscard, busy, newFilesRel, partiallyStagedRel,
 }: {
   title: string;
   files: FileChange[];
@@ -40,6 +40,7 @@ function ChangeGroup({
   onDiscard: (path: string) => void;
   busy: boolean;
   newFilesRel: Set<string>;
+  partiallyStagedRel: Set<string>;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [page, setPage] = useState(0);
@@ -74,7 +75,7 @@ function ChangeGroup({
       {!collapsed && (
         <>
           {visible.map((f) => (
-            <ChangeRow key={f.path} file={f} action={action} onAction={onAction} onDiscard={onDiscard} busy={busy} isNew={newFilesRel.has(f.path)} />
+            <ChangeRow key={f.path} file={f} action={action} onAction={onAction} onDiscard={onDiscard} busy={busy} isNew={newFilesRel.has(f.path)} partiallyStaged={partiallyStagedRel.has(f.path)} />
           ))}
 
           {/* Paginator — surfaces the formerly-silent cap honestly */}
@@ -124,6 +125,14 @@ export default function ChangesView() {
     for (const f of staged)   if (f.status === "A") s.add(f.path);
     for (const f of unstaged) if (f.status === "U") s.add(f.path);
     return s;
+  }, [staged, unstaged]);
+
+  // Files with BOTH staged and unstaged changes — discarding either row reverts
+  // the whole file to HEAD, so it also throws away the staged part. The discard
+  // confirmation calls this out.
+  const partiallyStagedRel = useMemo(() => {
+    const stagedSet = new Set(staged.map((f) => f.path));
+    return new Set(unstaged.filter((f) => stagedSet.has(f.path)).map((f) => f.path));
   }, [staged, unstaged]);
 
   // Every one of these writes the git index, which go-git can't do concurrently —
@@ -255,11 +264,11 @@ export default function ChangesView() {
         <>
           <ChangeGroup
             title="Staged changes" files={staged} total={stagedTotal} action="unstage"
-            onAction={unstageFile} onDiscard={discardFile} busy={busy} newFilesRel={newFilesRel}
+            onAction={unstageFile} onDiscard={discardFile} busy={busy} newFilesRel={newFilesRel} partiallyStagedRel={partiallyStagedRel}
           />
           <ChangeGroup
             title="Changes" files={unstaged} total={unstagedTotal} action="stage"
-            onAction={stageFile} onDiscard={discardFile} busy={busy} newFilesRel={newFilesRel}
+            onAction={stageFile} onDiscard={discardFile} busy={busy} newFilesRel={newFilesRel} partiallyStagedRel={partiallyStagedRel}
           />
         </>
       )}

@@ -764,11 +764,16 @@ export default function FileBrowser() {
     // is still new (and would be permanently deleted).
     const rel = gitOverlay.relOf(path);
     const isNew = rel != null && gitOverlay.newFilesRel.has(rel);
+    // Discard always reverts to HEAD, so a file with both staged and unstaged
+    // changes loses its staged part too — warn about that.
+    const partiallyStaged = rel != null && gitOverlay.stagedRel.has(rel) && gitOverlay.unstagedRel.has(rel);
     modal.confirm({
       title: isNew ? `Delete ${name}?` : `Discard changes to ${name}?`,
       content: isNew
         ? "Permanently deletes this file — it has never been committed and cannot be recovered."
-        : "Reverts the file to its last committed state. This cannot be undone.",
+        : partiallyStaged
+          ? "Reverts the file to its last committed state — this also discards your staged changes for this file. This cannot be undone."
+          : "Reverts the file to its last committed state. This cannot be undone.",
       okText: isNew ? "Delete" : "Discard",
       okButtonProps: { danger: true },
       onOk: async () => {
