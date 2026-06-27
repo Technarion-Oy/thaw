@@ -489,6 +489,8 @@ export function FormatPackagesPolicyList(arg1:Array<string>):Promise<string>;
 
 export function FormatSecondaryRoles(arg1:Array<string>):Promise<string>;
 
+export function FreezeRequirements(arg1:string):Promise<void>;
+
 export function GenerateKeyPair(arg1:string,arg2:string,arg3:string):Promise<keypair.KeyPairResult>;
 
 export function GenerateMigrationScript(arg1:Array<migration.MigrationDiffItem>,arg2:string,arg3:migration.TableMigrationStrategy):Promise<string>;
@@ -745,6 +747,10 @@ export function InstallJupyterNotebook():Promise<void>;
 
 export function InstallJupyterVenv():Promise<void>;
 
+export function InstallPyprojectFile(arg1:string):Promise<void>;
+
+export function InstallRequirementsFile(arg1:string):Promise<void>;
+
 export function InstallSnowparkPackage():Promise<void>;
 
 export function InstallSnowparkVenv(arg1:boolean):Promise<void>;
@@ -911,11 +917,17 @@ export function PickDirectory():Promise<string>;
 
 export function PickFileForFormatPreview():Promise<string>;
 
+export function PickFreezeOutputFile():Promise<string>;
+
 export function PickNotebookFile():Promise<string>;
 
 export function PickOpenFile():Promise<string>;
 
+export function PickPyprojectFile():Promise<string>;
+
 export function PickQueryLogExportFile(arg1:string):Promise<string>;
+
+export function PickRequirementsFile():Promise<string>;
 
 export function PickSaveExportFile(arg1:string,arg2:string):Promise<string>;
 

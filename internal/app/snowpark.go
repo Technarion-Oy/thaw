@@ -61,6 +61,26 @@ func (a *App) InstallEnvPackage(pkg string) error { return a.snowparkSvc.Install
 
 func (a *App) UninstallEnvPackage(pkg string) error { return a.snowparkSvc.UninstallEnvPackage(pkg) }
 
+func (a *App) PickRequirementsFile() (string, error) { return a.snowparkSvc.PickRequirementsFile() }
+
+func (a *App) PickPyprojectFile() (string, error) { return a.snowparkSvc.PickPyprojectFile() }
+
+func (a *App) InstallRequirementsFile(path string) error {
+	return a.snowparkSvc.InstallRequirementsFile(path)
+}
+
+func (a *App) InstallPyprojectFile(path string) error {
+	return a.snowparkSvc.InstallPyprojectFile(path)
+}
+
+func (a *App) PickFreezeOutputFile() (string, error) {
+	return a.snowparkSvc.PickFreezeOutputFile()
+}
+
+func (a *App) FreezeRequirements(path string) error {
+	return a.snowparkSvc.FreezeRequirements(path)
+}
+
 func (a *App) InstallCondaEnv() error { return a.snowparkSvc.InstallCondaEnv() }
 
 func (a *App) InstallSnowparkPackage() error { return a.snowparkSvc.InstallSnowparkPackage() }

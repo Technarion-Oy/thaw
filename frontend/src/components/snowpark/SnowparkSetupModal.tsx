@@ -13,6 +13,8 @@ import { Modal, Button, Steps, Typography, Alert, Space, Tag, Radio, Divider, Se
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
+  ExportOutlined,
+  FileTextOutlined,
   FolderOpenOutlined,
   LoadingOutlined,
   SettingOutlined,
@@ -38,6 +40,12 @@ import {
   ListEnvPackages,
   InstallEnvPackage,
   UninstallEnvPackage,
+  PickRequirementsFile,
+  PickPyprojectFile,
+  InstallRequirementsFile,
+  InstallPyprojectFile,
+  PickFreezeOutputFile,
+  FreezeRequirements,
   PickDirectory,
 } from "../../../wailsjs/go/app/App";
 import type { snowpark } from "../../../wailsjs/go/models";
@@ -161,6 +169,12 @@ export default function SnowparkSetupModal({ onClose }: Props) {
   const [packageLog, setPackageLog]       = useState<string[]>([]);
   const [packageOpRunning, setPackageOpRunning] = useState(false);
   const [uninstallingPkg, setUninstallingPkg] = useState<string | null>(null);
+  // Which dependency-file operation is in flight (drives per-button spinners); null = idle.
+  const [depFileOp, setDepFileOp] = useState<"requirements" | "pyproject" | "freeze" | null>(null);
+  const depFileRunning = depFileOp !== null;
+  // Synchronous guard against a rapid double-click opening two pickers before the
+  // disabled prop has re-rendered (state updates are async).
+  const depFileGuard = useRef(false);
   const pkgLogEndRef = useRef<HTMLDivElement | null>(null);
 
   const exportDir    = useGitStore((s) => s.exportDir);
@@ -359,6 +373,20 @@ export default function SnowparkSetupModal({ onClose }: Props) {
     : undefined,
   );
 
+  // refreshPackages reloads the package list without letting a transient list
+  // failure masquerade as an operation failure. The failure is surfaced both in
+  // the Alert (packagesError) and appended to the output log the user is
+  // watching, so a stale package table can't be mistaken for fresh data.
+  const refreshPackages = async () => {
+    try {
+      setPackages(await ListEnvPackages());
+      setPackagesError(null);
+    } catch (e) {
+      setPackagesError(String(e));
+      setPackageLog((prev) => [...prev, `⚠ Package list refresh failed: ${String(e)}`]);
+    }
+  };
+
   const handleInstallPackage = async () => {
     const pkg = packageInput.trim();
     if (!pkg) return;
@@ -367,8 +395,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
     try {
       await InstallEnvPackage(pkg);
       setPackageInput("");
-      const updated = await ListEnvPackages();
-      setPackages(updated);
+      await refreshPackages();
     } catch (e) {
       setPackageLog((prev) => [...prev, String(e)]);
     } finally {
@@ -387,8 +414,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
         setPackageLog([]);
         try {
           await UninstallEnvPackage(name);
-          const updated = await ListEnvPackages();
-          setPackages(updated);
+          await refreshPackages();
         } catch (e) {
           setPackageLog((prev) => [...prev, String(e)]);
         } finally {
@@ -397,6 +423,55 @@ export default function SnowparkSetupModal({ onClose }: Props) {
       },
     });
   };
+
+  // runDepFileOp handles the shared shape of every dependency-file flow: pick a
+  // file (detecting cancel before touching the log), then run the backend op.
+  // The backend emits the authoritative command (`$ pip install …` / `$ pip
+  // freeze`) and its output — including the final summary line — via
+  // "snowpark:package-output", so the frontend only manages the log around the
+  // picker and never appends its own success line (avoiding an ordering race).
+  const runDepFileOp = async (
+    op: "requirements" | "pyproject" | "freeze",
+    pick: () => Promise<string>,
+    run: (path: string) => Promise<void>,
+    refresh = true,
+  ) => {
+    if (depFileGuard.current) return; // synchronous re-entry guard (double-click)
+    depFileGuard.current = true;
+    const prevLog = packageLog;
+    setDepFileOp(op);
+    try {
+      let path: string;
+      try {
+        path = await pick();
+      } catch (e) {
+        // The picker itself failed — keep the prior log and surface the error.
+        setPackageLog([...prevLog, String(e)]);
+        return;
+      }
+      if (!path) return; // canceled — leave the prior log untouched
+      setPackageLog([]);
+      try {
+        await run(path);
+        if (refresh) await refreshPackages();
+      } catch (e) {
+        setPackageLog((prev) => [...prev, String(e)]);
+      }
+    } finally {
+      setDepFileOp(null);
+      depFileGuard.current = false;
+    }
+  };
+
+  const handleInstallRequirements = () =>
+    runDepFileOp("requirements", PickRequirementsFile, InstallRequirementsFile);
+
+  const handleInstallPyproject = () =>
+    runDepFileOp("pyproject", PickPyprojectFile, InstallPyprojectFile);
+
+  // Freeze doesn't change the installed set, so skip the package-list refresh.
+  const handleFreezeRequirements = () =>
+    runDepFileOp("freeze", PickFreezeOutputFile, FreezeRequirements, false);
 
   const rawDefs = backend === "conda" ? condaSteps(isAppleSilicon) : venvSteps(venvPath, withPandas, pythonPath);
   const defs = useExisting
@@ -713,22 +788,53 @@ export default function SnowparkSetupModal({ onClose }: Props) {
                 value={packageInput}
                 onChange={(e) => setPackageInput(e.target.value)}
                 onPressEnter={handleInstallPackage}
-                disabled={packageOpRunning}
+                disabled={packageOpRunning || depFileRunning}
                 style={{ flex: 1, fontFamily: "monospace", fontSize: 12 }}
               />
               <Button
                 type="primary"
                 size="small"
                 loading={packageOpRunning && !uninstallingPkg}
-                disabled={!packageInput.trim() || !!uninstallingPkg}
+                disabled={!packageInput.trim() || !!uninstallingPkg || depFileRunning}
                 onClick={handleInstallPackage}
               >
                 Install
               </Button>
             </div>
 
+            {/* Dependency files */}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Button
+                size="small"
+                icon={<FileTextOutlined />}
+                loading={depFileOp === "requirements"}
+                disabled={packageOpRunning || !!uninstallingPkg || depFileRunning}
+                onClick={handleInstallRequirements}
+              >
+                Install requirements.txt
+              </Button>
+              <Button
+                size="small"
+                icon={<FileTextOutlined />}
+                loading={depFileOp === "pyproject"}
+                disabled={packageOpRunning || !!uninstallingPkg || depFileRunning}
+                onClick={handleInstallPyproject}
+              >
+                Install pyproject.toml
+              </Button>
+              <Button
+                size="small"
+                icon={<ExportOutlined />}
+                loading={depFileOp === "freeze"}
+                disabled={packageOpRunning || !!uninstallingPkg || depFileRunning || packages.length === 0}
+                onClick={handleFreezeRequirements}
+              >
+                Freeze to requirements.txt
+              </Button>
+            </div>
+
             {/* Output log */}
-            {(packageLog.length > 0 || packageOpRunning) && (
+            {(packageLog.length > 0 || packageOpRunning || depFileRunning) && (
               <div style={{
                 border: "1px solid var(--border)",
                 borderRadius: 6,
@@ -754,7 +860,14 @@ export default function SnowparkSetupModal({ onClose }: Props) {
 
             {/* Package list */}
             {packagesError && (
-              <Alert type="error" message={packagesError} showIcon style={{ fontSize: 12 }} />
+              <Alert
+                type="error"
+                message={packagesError}
+                showIcon
+                closable
+                onClose={() => setPackagesError(null)}
+                style={{ fontSize: 12 }}
+              />
             )}
             <div style={{
               border: "1px solid var(--border)",

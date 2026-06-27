@@ -934,13 +934,13 @@ func splitHosts(s string) []string {
 
 // buildPipRegistrySetup converts the persisted PipRegistryConfig into concrete
 // pip CLI flags and environment variables.  It is called immediately before
-// every pip install invocation.
-func (s *Service) buildPipRegistrySetup() pipRegistrySetup {
-	appCfg, err := config.Load()
-	if err != nil {
+// every pip install invocation.  Callers pass the already-loaded config so the
+// file is not read more than once per command.
+func (s *Service) buildPipRegistrySetup(cfg *config.AppConfig) pipRegistrySetup {
+	if cfg == nil {
 		return pipRegistrySetup{}
 	}
-	rc := appCfg.PipRegistry
+	rc := cfg.PipRegistry
 
 	var args []string
 	var env []string
@@ -1198,6 +1198,20 @@ func (s *Service) CheckSnowparkEnv() SnowparkCheckResult {
 	return s.checkCondaEnv(&result)
 }
 
+// moduleAvailableScript returns a Python one-off program that exits 0 if mod is
+// importable and 1 otherwise. It uses importlib.util.find_spec rather than a
+// real `import`, so it does not execute the module's (often heavy) init code —
+// importing snowflake.snowpark or notebook for real can take many seconds and
+// intermittently fail under load, producing flaky false negatives in the check.
+func moduleAvailableScript(mod string) string {
+	return fmt.Sprintf(`import importlib.util, sys
+try:
+    spec = importlib.util.find_spec(%q)
+except Exception:
+    spec = None
+sys.exit(0 if spec else 1)`, mod)
+}
+
 func (s *Service) checkCondaEnv(result *SnowparkCheckResult) SnowparkCheckResult {
 	condaPath, err := exec.LookPath("conda")
 	if err != nil {
@@ -1228,14 +1242,14 @@ func (s *Service) checkCondaEnv(result *SnowparkCheckResult) SnowparkCheckResult
 	}
 
 	if err := exec.Command(condaPath, "run", "-n", SnowparkCondaEnv,
-		"python", "-c", "import snowflake.snowpark").Run(); err != nil {
+		"python", "-c", moduleAvailableScript("snowflake.snowpark")).Run(); err != nil {
 		result.Details = "snowflake-snowpark-python not installed. Run Snowpark > Setup Environment."
 		return *result
 	}
 	result.HasSnowpark = true
 
 	if err := exec.Command(condaPath, "run", "-n", SnowparkCondaEnv,
-		"python", "-c", "import notebook").Run(); err != nil {
+		"python", "-c", moduleAvailableScript("notebook")).Run(); err != nil {
 		result.Details = "notebook package not installed. Run Snowpark > Setup Environment."
 		return *result
 	}
@@ -1272,13 +1286,13 @@ func (s *Service) checkVenvEnv(result *SnowparkCheckResult, cfg *config.AppConfi
 		return *result
 	}
 
-	if err := exec.Command(python, "-c", "import snowflake.snowpark").Run(); err != nil {
+	if err := exec.Command(python, "-c", moduleAvailableScript("snowflake.snowpark")).Run(); err != nil {
 		result.Details = "snowflake-snowpark-python not installed. Run Snowpark > Setup Environment."
 		return *result
 	}
 	result.HasSnowpark = true
 
-	if err := exec.Command(python, "-c", "import notebook").Run(); err != nil {
+	if err := exec.Command(python, "-c", moduleAvailableScript("notebook")).Run(); err != nil {
 		result.Details = "notebook package not installed. Run Snowpark > Setup Environment."
 		return *result
 	}
@@ -1292,37 +1306,13 @@ func (s *Service) checkVenvEnv(result *SnowparkCheckResult, cfg *config.AppConfi
 
 // ─── command streaming ────────────────────────────────────────────────────────
 
-// streamCommandTo runs cmd and emits each output line as the given event.
+// streamCommandTo runs cmd and emits each output line as the given event. It
+// delegates to streamAndCapture and discards the captured slice; the captured
+// stdout (a few KB of pip output at most) is allocated then dropped here, which
+// is an accepted trade-off for keeping a single pipe-scan implementation.
 func (s *Service) streamCommandTo(cmd *exec.Cmd, eventName string) error {
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return err
-	}
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-
-	emit := func(line string) {
-		wailsruntime.EventsEmit(s.ctx, eventName, line)
-	}
-
-	var wg sync.WaitGroup
-	scanPipe := func(r io.Reader) {
-		defer wg.Done()
-		sc := bufio.NewScanner(r)
-		for sc.Scan() {
-			emit(sc.Text())
-		}
-	}
-	wg.Add(2)
-	go scanPipe(stdout)
-	go scanPipe(stderr)
-	wg.Wait()
-	return cmd.Wait()
+	_, err := s.streamAndCapture(cmd, eventName)
+	return err
 }
 
 // streamCommand runs cmd and emits each output line as a "snowpark:install-output" event.
@@ -1330,54 +1320,96 @@ func (s *Service) streamCommand(cmd *exec.Cmd) error {
 	return s.streamCommandTo(cmd, "snowpark:install-output")
 }
 
+// streamAndCapture runs cmd, emits each stdout/stderr line as eventName (so the
+// UI gets live progress), and returns the collected stdout lines for callers
+// that also need the output (e.g. writing `pip freeze` to a file). Callers that
+// only need the streaming use streamCommandTo, which discards the slice.
+//
+// captured and scanErr are written only by the stdout goroutine and read by the
+// main goroutine after wg.Wait(), which establishes the happens-before edge — no
+// extra locking is needed.
+func (s *Service) streamAndCapture(cmd *exec.Cmd, eventName string) ([]string, error) {
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		_ = stdout.Close() // StdoutPipe's read-end would otherwise leak (Wait never runs)
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+
+	emit := func(line string) {
+		wailsruntime.EventsEmit(s.ctx, eventName, line)
+	}
+
+	var (
+		captured []string
+		scanErr  error
+	)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		sc := bufio.NewScanner(stdout)
+		for sc.Scan() {
+			line := sc.Text()
+			captured = append(captured, line)
+			emit(line)
+		}
+		// A scan error means the captured output may be truncated; record it so
+		// the caller never writes a partial requirements file as if complete.
+		if err := sc.Err(); err != nil {
+			scanErr = err
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		sc := bufio.NewScanner(stderr)
+		for sc.Scan() {
+			emit(sc.Text())
+		}
+		// Surface a truncated stderr stream too, so the user isn't shown only a
+		// fragment of pip's error output with no indication it was cut short.
+		if err := sc.Err(); err != nil {
+			emit("stderr scan error: " + err.Error())
+		}
+	}()
+	wg.Wait()
+	if err := cmd.Wait(); err != nil {
+		return nil, err
+	}
+	if scanErr != nil {
+		return nil, scanErr
+	}
+	return captured, nil
+}
+
 // ─── pip/env helpers ──────────────────────────────────────────────────────────
 
-// pipBinForEnv returns the pip binary path for the active backend environment.
-func (s *Service) pipBinForEnv() (string, error) {
-	cfg, _ := config.Load()
-	backend := cfg.Snowpark.Backend
-	if backend == "" {
-		backend = "conda"
+// pipBinForEnv returns the venv pip binary path for the given config. It is only
+// meaningful for the venv backend; callers handle the conda case themselves.
+func (s *Service) pipBinForEnv(cfg *config.AppConfig) (string, error) {
+	venvPath := cfg.Snowpark.VenvPath
+	if venvPath == "" {
+		venvPath = defaultVenvPath()
 	}
-	if backend == "venv" {
-		venvPath := cfg.Snowpark.VenvPath
-		if venvPath == "" {
-			venvPath = defaultVenvPath()
-		}
-		pip := venvPipBin(venvPath)
-		if _, err := os.Stat(pip); err != nil {
-			return "", fmt.Errorf("venv pip not found at %s — run Setup first", pip)
-		}
-		return pip, nil
+	pip := venvPipBin(venvPath)
+	if _, err := os.Stat(pip); err != nil {
+		return "", fmt.Errorf("venv pip not found at %s — run Setup first", pip)
 	}
-	// conda: use "conda run -n thaw_snowpark pip"
-	return "", nil
+	return pip, nil
 }
 
 // ListEnvPackages returns all packages installed in the active Snowpark environment.
 func (s *Service) ListEnvPackages() ([]PackageInfo, error) {
-	cfg, _ := config.Load()
-	backend := cfg.Snowpark.Backend
-	if backend == "" {
-		backend = "conda"
+	cmd, err := s.pipCmd("list", "--format=json")
+	if err != nil {
+		return nil, err
 	}
-
-	var cmd *exec.Cmd
-	if backend == "venv" {
-		pip, err := s.pipBinForEnv()
-		if err != nil {
-			return nil, err
-		}
-		cmd = exec.Command(pip, "list", "--format=json")
-	} else {
-		condaPath, err := exec.LookPath("conda")
-		if err != nil {
-			return nil, fmt.Errorf("conda not found: %w", err)
-		}
-		cmd = exec.Command(condaPath, "run", "-n", SnowparkCondaEnv,
-			"pip", "list", "--format=json")
-	}
-
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("pip list: %w", err)
@@ -1401,34 +1433,10 @@ func (s *Service) ListEnvPackages() ([]PackageInfo, error) {
 // InstallEnvPackage installs a single Python package in the active environment,
 // streaming output via the "snowpark:package-output" event.
 func (s *Service) InstallEnvPackage(pkg string) error {
-	cfg, _ := config.Load()
-	backend := cfg.Snowpark.Backend
-	if backend == "" {
-		backend = "conda"
+	cmd, err := s.pipInstallCmd("install", pkg)
+	if err != nil {
+		return err
 	}
-
-	setup := s.buildPipRegistrySetup()
-	var cmd *exec.Cmd
-	if backend == "venv" {
-		pip, err := s.pipBinForEnv()
-		if err != nil {
-			return err
-		}
-		args := append([]string{"install", pkg}, setup.Args...)
-		cmd = exec.Command(pip, args...)
-	} else {
-		condaPath, err := exec.LookPath("conda")
-		if err != nil {
-			return fmt.Errorf("conda not found: %w", err)
-		}
-		baseArgs := []string{"run", "-n", SnowparkCondaEnv, "pip", "install", pkg}
-		args := append(baseArgs, setup.Args...)
-		cmd = exec.Command(condaPath, args...)
-	}
-	if len(setup.Env) > 0 {
-		cmd.Env = append(os.Environ(), setup.Env...)
-	}
-
 	if err := s.streamCommandTo(cmd, "snowpark:package-output"); err != nil {
 		return fmt.Errorf("install %s failed: %w", pkg, err)
 	}
@@ -1438,32 +1446,216 @@ func (s *Service) InstallEnvPackage(pkg string) error {
 // UninstallEnvPackage removes a Python package from the active environment,
 // streaming output via the "snowpark:package-output" event.
 func (s *Service) UninstallEnvPackage(pkg string) error {
-	cfg, _ := config.Load()
-	backend := cfg.Snowpark.Backend
-	if backend == "" {
-		backend = "conda"
+	cmd, err := s.pipCmd("uninstall", "-y", pkg)
+	if err != nil {
+		return err
 	}
-
-	var cmd *exec.Cmd
-	if backend == "venv" {
-		pip, err := s.pipBinForEnv()
-		if err != nil {
-			return err
-		}
-		cmd = exec.Command(pip, "uninstall", "-y", pkg)
-	} else {
-		condaPath, err := exec.LookPath("conda")
-		if err != nil {
-			return fmt.Errorf("conda not found: %w", err)
-		}
-		cmd = exec.Command(condaPath, "run", "-n", SnowparkCondaEnv,
-			"pip", "uninstall", "-y", pkg)
-	}
-
 	if err := s.streamCommandTo(cmd, "snowpark:package-output"); err != nil {
 		return fmt.Errorf("uninstall %s failed: %w", pkg, err)
 	}
 	return nil
+}
+
+// ─── dependency-file operations ────────────────────────────────────────────────
+
+// pipCmdConfig builds an *exec.Cmd that runs pip with the given args against the
+// backend selected by cfg — the venv pip binary, or "conda run -n <env> pip".
+func (s *Service) pipCmdConfig(cfg *config.AppConfig, args ...string) (*exec.Cmd, error) {
+	backend := cfg.Snowpark.Backend
+	if backend == "" {
+		backend = "conda"
+	}
+	if backend == "venv" {
+		pip, err := s.pipBinForEnv(cfg)
+		if err != nil {
+			return nil, err
+		}
+		return exec.Command(pip, args...), nil
+	}
+	condaPath, err := exec.LookPath("conda")
+	if err != nil {
+		return nil, fmt.Errorf("conda not found: %w", err)
+	}
+	full := append([]string{"run", "-n", SnowparkCondaEnv, "pip"}, args...)
+	return exec.Command(condaPath, full...), nil
+}
+
+// pipCmd builds a pip command against the active backend with no registry flags.
+// Used for read-only / offline operations (`pip list`, `pip freeze`).
+func (s *Service) pipCmd(args ...string) (*exec.Cmd, error) {
+	cfg, err := config.Load()
+	if err != nil || cfg == nil {
+		return nil, fmt.Errorf("config unavailable: %w", err)
+	}
+	return s.pipCmdConfig(cfg, args...)
+}
+
+// pipInstallCmd builds a `pip install` command with the configured private-
+// registry flags and environment applied, loading config exactly once. The
+// leading args are the pip subcommand and its operands (e.g. "install", "-r",
+// path); registry flags are appended.
+//
+// It is the wiring point for the package-manager install paths (InstallEnvPackage
+// and the dependency-file installs). The conda/venv environment-setup steps
+// (InstallSnowparkVenv, InstallJupyterVenv, InstallJupyterNotebook) deliberately
+// do NOT route through here: they must target a fixed backend (the env the
+// wizard step is building) rather than dispatching on cfg.Snowpark.Backend, so
+// they build their command directly while still applying buildPipRegistrySetup.
+func (s *Service) pipInstallCmd(args ...string) (*exec.Cmd, error) {
+	cfg, err := config.Load()
+	if err != nil || cfg == nil {
+		return nil, fmt.Errorf("config unavailable: %w", err)
+	}
+	setup := s.buildPipRegistrySetup(cfg)
+	cmd, err := s.pipCmdConfig(cfg, append(args, setup.Args...)...)
+	if err != nil {
+		return nil, err
+	}
+	if len(setup.Env) > 0 {
+		cmd.Env = append(os.Environ(), setup.Env...)
+	}
+	return cmd, nil
+}
+
+// PickRequirementsFile opens a file dialog to select a pip requirements file.
+func (s *Service) PickRequirementsFile() (string, error) {
+	return wailsruntime.OpenFileDialog(s.ctx, wailsruntime.OpenDialogOptions{
+		Title: "Select requirements file",
+		Filters: []wailsruntime.FileFilter{
+			{DisplayName: "Requirements (*.txt)", Pattern: "*.txt"},
+			{DisplayName: "All Files", Pattern: "*.*"},
+		},
+	})
+}
+
+// PickPyprojectFile opens a file dialog to select a pyproject.toml / TOML file.
+func (s *Service) PickPyprojectFile() (string, error) {
+	return wailsruntime.OpenFileDialog(s.ctx, wailsruntime.OpenDialogOptions{
+		Title: "Select pyproject.toml",
+		Filters: []wailsruntime.FileFilter{
+			{DisplayName: "TOML (*.toml)", Pattern: "*.toml"},
+			{DisplayName: "All Files", Pattern: "*.*"},
+		},
+	})
+}
+
+// InstallRequirementsFile installs every package listed in a pip requirements
+// file (`pip install -r <path>`), applying the pip registry configuration and
+// streaming output via the "snowpark:package-output" event.
+func (s *Service) InstallRequirementsFile(path string) error {
+	if path == "" {
+		return fmt.Errorf("no requirements file selected")
+	}
+	cmd, err := s.pipInstallCmd("install", "-r", path)
+	if err != nil {
+		return err
+	}
+	wailsruntime.EventsEmit(s.ctx, "snowpark:package-output", fmt.Sprintf("$ pip install -r %s", path))
+	if err := s.streamCommandTo(cmd, "snowpark:package-output"); err != nil {
+		return fmt.Errorf("install from %s failed: %w", filepath.Base(path), err)
+	}
+	return nil
+}
+
+// InstallPyprojectFile installs the project defined by a pyproject.toml (or any
+// TOML build file) by running `pip install <dir>` against the directory that
+// contains it, applying the pip registry configuration and streaming output.
+func (s *Service) InstallPyprojectFile(path string) error {
+	if path == "" {
+		return fmt.Errorf("no pyproject.toml selected")
+	}
+	dir := filepath.Dir(path)
+	cmd, err := s.pipInstallCmd("install", dir)
+	if err != nil {
+		return err
+	}
+	// Emit the authoritative command so the UI never has to guess the directory
+	// pip actually receives (vs. the selected pyproject.toml file path).
+	wailsruntime.EventsEmit(s.ctx, "snowpark:package-output", fmt.Sprintf("$ pip install %s", dir))
+	if err := s.streamCommandTo(cmd, "snowpark:package-output"); err != nil {
+		return fmt.Errorf("install from %s failed: %w", filepath.Base(dir), err)
+	}
+	return nil
+}
+
+// PickFreezeOutputFile opens a save dialog for the freeze target file. Returns
+// "" if the dialog was canceled. Split from FreezeRequirements so the frontend
+// can detect cancel before touching the log, mirroring the pick→install flow of
+// the other dependency-file operations.
+func (s *Service) PickFreezeOutputFile() (string, error) {
+	return wailsruntime.SaveFileDialog(s.ctx, wailsruntime.SaveDialogOptions{
+		Title:           "Save requirements.txt",
+		DefaultFilename: "requirements.txt",
+		Filters: []wailsruntime.FileFilter{
+			{DisplayName: "Requirements (*.txt)", Pattern: "*.txt"},
+		},
+	})
+}
+
+// FreezeRequirements writes `pip freeze` output to path, streaming progress via
+// the "snowpark:package-output" event (use PickFreezeOutputFile to choose path).
+func (s *Service) FreezeRequirements(path string) error {
+	if path == "" {
+		return fmt.Errorf("no output file selected")
+	}
+	return s.freezeToFile(path)
+}
+
+// freezeToFile runs `pip freeze` and writes its output to path, streaming each
+// line via the "snowpark:package-output" event so the UI shows live progress.
+// It uses plain pipCmd, not pipInstallCmd: `pip freeze` makes no network calls
+// and rejects index options such as --index-url, so the private-registry flags
+// are intentionally not applied here.
+func (s *Service) freezeToFile(path string) error {
+	cmd, err := s.pipCmd("freeze")
+	if err != nil {
+		return err
+	}
+	wailsruntime.EventsEmit(s.ctx, "snowpark:package-output", "$ pip freeze")
+	lines, err := s.streamAndCapture(cmd, "snowpark:package-output")
+	if err != nil {
+		return fmt.Errorf("pip freeze: %w", err)
+	}
+	// `conda run` can interleave activation/solver/deprecation notices on stdout
+	// (the venv path doesn't), so keep only genuine pip-freeze lines — otherwise
+	// the requirements.txt would contain noise that `pip install -r` rejects.
+	reqs := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if isFreezeLine(line) {
+			reqs = append(reqs, line)
+		}
+	}
+	// Avoid writing a bare "\n" for an empty environment.
+	content := ""
+	if len(reqs) > 0 {
+		content = strings.Join(reqs, "\n") + "\n"
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	// Emit the summary as the final event on the same ordered channel so it
+	// always lands after the streamed package lines (no UI ordering race).
+	wailsruntime.EventsEmit(s.ctx, "snowpark:package-output",
+		fmt.Sprintf("✓ Wrote %d packages to %s", len(reqs), path))
+	return nil
+}
+
+// reFreezeRequirement matches a `pip freeze` requirement spec: an identifier
+// followed by a version operator or a PEP 508 direct-reference "@".
+var reFreezeRequirement = regexp.MustCompile(`^[A-Za-z0-9._-]+\s*(===|==|>=|<=|~=|!=|@|>|<)`)
+
+// isFreezeLine reports whether line is a legitimate `pip freeze` output line —
+// a requirement spec, an editable/option line (-e, --…), or a pip-emitted
+// comment — as opposed to conda/activation noise that must not reach the file.
+func isFreezeLine(line string) bool {
+	t := strings.TrimSpace(line)
+	if t == "" {
+		return false
+	}
+	if strings.HasPrefix(t, "#") || strings.HasPrefix(t, "-") {
+		return true
+	}
+	return reFreezeRequirement.MatchString(t)
 }
 
 // ─── conda install methods ────────────────────────────────────────────────────
@@ -1533,7 +1725,11 @@ func (s *Service) InstallJupyterNotebook() error {
 	if err != nil {
 		return fmt.Errorf("conda not found: %w", err)
 	}
-	setup := s.buildPipRegistrySetup()
+	cfg, err := config.Load()
+	if err != nil || cfg == nil {
+		return fmt.Errorf("config unavailable: %w", err)
+	}
+	setup := s.buildPipRegistrySetup(cfg)
 	baseArgs := []string{"run", "-n", SnowparkCondaEnv, "pip", "install", "notebook", "ipython-sql", "sqlalchemy", "pyflakes", "debugpy", "cryptography<44.0.0"}
 	args := append(baseArgs, setup.Args...)
 	cmd := exec.Command(condaPath, args...)
@@ -1550,7 +1746,10 @@ func (s *Service) InstallJupyterNotebook() error {
 
 // InstallVenvEnv creates a Python venv at the configured path using system python3.
 func (s *Service) InstallVenvEnv() error {
-	cfg, _ := config.Load()
+	cfg, err := config.Load()
+	if err != nil || cfg == nil {
+		return fmt.Errorf("config unavailable: %w", err)
+	}
 	venvPath := cfg.Snowpark.VenvPath
 	if venvPath == "" {
 		venvPath = defaultVenvPath()
@@ -1590,7 +1789,10 @@ func (s *Service) InstallVenvEnv() error {
 // InstallSnowparkVenv installs snowflake-snowpark-python into the venv.
 // Pass withPandas=true for the [pandas] extras variant.
 func (s *Service) InstallSnowparkVenv(withPandas bool) error {
-	cfg, _ := config.Load()
+	cfg, err := config.Load()
+	if err != nil || cfg == nil {
+		return fmt.Errorf("config unavailable: %w", err)
+	}
 	venvPath := cfg.Snowpark.VenvPath
 	if venvPath == "" {
 		venvPath = defaultVenvPath()
@@ -1599,7 +1801,7 @@ func (s *Service) InstallSnowparkVenv(withPandas bool) error {
 	if withPandas {
 		pkg = "snowflake-snowpark-python[pandas]"
 	}
-	setup := s.buildPipRegistrySetup()
+	setup := s.buildPipRegistrySetup(cfg)
 	args := append([]string{"install", pkg}, setup.Args...)
 	cmd := exec.Command(venvPipBin(venvPath), args...)
 	if len(setup.Env) > 0 {
@@ -1613,7 +1815,10 @@ func (s *Service) InstallSnowparkVenv(withPandas bool) error {
 
 // DeleteVenvFolder removes the venv directory at the configured path.
 func (s *Service) DeleteVenvFolder() error {
-	cfg, _ := config.Load()
+	cfg, err := config.Load()
+	if err != nil || cfg == nil {
+		return fmt.Errorf("config unavailable: %w", err)
+	}
 	venvPath := cfg.Snowpark.VenvPath
 	if venvPath == "" {
 		venvPath = defaultVenvPath()
@@ -1626,12 +1831,15 @@ func (s *Service) DeleteVenvFolder() error {
 
 // InstallJupyterVenv installs notebook, ipython-sql, sqlalchemy and pyflakes into the venv.
 func (s *Service) InstallJupyterVenv() error {
-	cfg, _ := config.Load()
+	cfg, err := config.Load()
+	if err != nil || cfg == nil {
+		return fmt.Errorf("config unavailable: %w", err)
+	}
 	venvPath := cfg.Snowpark.VenvPath
 	if venvPath == "" {
 		venvPath = defaultVenvPath()
 	}
-	setup := s.buildPipRegistrySetup()
+	setup := s.buildPipRegistrySetup(cfg)
 	baseArgs := []string{"install", "notebook", "ipython-sql", "sqlalchemy", "pyflakes", "debugpy", "cryptography<44.0.0"}
 	args := append(baseArgs, setup.Args...)
 	cmd := exec.Command(venvPipBin(venvPath), args...)

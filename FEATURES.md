@@ -928,7 +928,10 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - **Manage Packages** — a 4th step in the setup wizard is always accessible (via the stepper or the "Manage Packages" footer button) regardless of whether the setup steps have been run in the current session:
   - **Install** — enter any package name and press Install or hit Enter; output streams line-by-line into a log panel; the package list refreshes automatically on success
   - **Uninstall** — all installed packages are listed with their versions; click Uninstall on any row (with confirmation) to remove it; the list refreshes after removal
-  - Backed by `pip list --format=json` and `pip install` / `pip uninstall -y` inside the active conda or venv environment
+  - **Install requirements.txt** — pick a pip requirements file via a native file picker and install every pinned package at once (`pip install -r`); output streams to the log and the package list refreshes on success
+  - **Install pyproject.toml** — pick a `pyproject.toml` (or any TOML build file) and install the project it defines (`pip install <dir>`); honors the same registry settings
+  - **Freeze to requirements.txt** — export the active environment's exact package set to a file via a native save dialog (`pip freeze`); disabled until at least one package is installed
+  - Backed by `pip list --format=json` and `pip install` / `pip install -r` / `pip install <dir>` / `pip freeze` / `pip uninstall -y` inside the active conda or venv environment; all install paths apply the configured private pip registry settings
 - **Private Pip Registries** — configure corporate or private pip repositories (including credentials) in the Snowpark setup wizard; Thaw automatically injects them into all `pip install` commands.
 
 ### Notebook tabs

@@ -7,7 +7,8 @@
 - Manage two Python backend options: a named conda environment (`thaw_snowpark`) and a custom venv; detect, install, and verify each via `conda` / `python` / `pip` CLI calls.
 - List system Python installations and evaluate their Snowpark compatibility (`ListSystemPythons`, `CheckSnowparkEnv`).
 - Manage pip package operations in the active environment: list, install, uninstall (`ListEnvPackages`, `InstallEnvPackage`, `UninstallEnvPackage`).
-- Apply corporate pip registry settings (primary URL, extra indexes, proxy, CA cert, Basic Auth credentials) via `PipRegistryConfig` before every `pip install`.
+- Install from / export to dependency files: `pip install -r requirements.txt` (`InstallRequirementsFile`), `pip install <dir>` from a `pyproject.toml` (`InstallPyprojectFile`), and `pip freeze` to a file (`FreezeRequirements`); file pickers `PickRequirementsFile` / `PickPyprojectFile` / `PickFreezeOutputFile` (each install/freeze is a pick→run pair so the UI can detect cancel before touching the log).
+- Apply corporate pip registry settings (primary URL, extra indexes, proxy, CA cert, Basic Auth credentials) via `PipRegistryConfig` before every `pip install` (including requirements/pyproject installs).
 - Create, read, save, and pick `.ipynb` notebook files (`NewNotebook`, `ReadNotebook`, `SaveNotebook`, `PickNotebookFile`).
 - Start and stop per-tab Python kernel sessions as long-lived `python -c <kernelPyScript>` subprocesses (`StartNotebookSession`, `StopNotebookSession`).
 - Execute Python code cells and SQL cells in a running kernel, returning captured stdout/stderr and matplotlib figures as base64 PNGs (`RunNotebookCell`, `RunNotebookCellSql`).
@@ -55,6 +56,12 @@ func (s *Service) InstallCondaEnv() error
 func (s *Service) InstallVenvEnv() error
 func (s *Service) ListEnvPackages() ([]PackageInfo, error)
 func (s *Service) InstallEnvPackage(pkg string) error
+func (s *Service) PickRequirementsFile() (string, error)
+func (s *Service) PickPyprojectFile() (string, error)
+func (s *Service) InstallRequirementsFile(path string) error
+func (s *Service) InstallPyprojectFile(path string) error
+func (s *Service) PickFreezeOutputFile() (string, error)
+func (s *Service) FreezeRequirements(path string) error
 
 // Config
 func (s *Service) GetSnowparkConfig() SnowparkConfigResult
@@ -69,7 +76,8 @@ func (s *Service) SavePipRegistryConfig(cfg config.PipRegistryConfig) error
 - Kernel sessions are stored in a package-level `sync.Map` keyed by `tabId`; each entry is a `notebookSession` struct holding the `*exec.Cmd`, stdin/stdout pipes, and a per-session mutex.
 - The embedded `kernelPyScript` (a constant Go string containing ~500 lines of Python) is piped to the subprocess via stdin at startup. It sets up a shared namespace `g`, auto-creates a Snowpark `session` from `THAW_SF_*` environment variables, patches `session.sql()` to auto-collect DDL statements, and loops reading code blocks.
 - Snowflake connection parameters for the kernel are injected via environment variables (`THAW_SF_ACCOUNT`, `THAW_SF_USER`, `THAW_SF_PASSWORD`, etc.) set at `StartNotebookSession` time (`notebookKernelEnv`), so the Python process shares the same connection as the active Wails tab.
-- pip registry flags (`buildPipRegistrySetup`) are assembled from `config.PipRegistryConfig` immediately before each `pip install` invocation; credentials are embedded directly into registry URLs (no `.netrc` writes).
+- pip registry flags (`buildPipRegistrySetup`, taking the already-loaded `*config.AppConfig`) are assembled from `config.PipRegistryConfig`; credentials are embedded directly into registry URLs (no `.netrc` writes). The package-manager install paths (`InstallEnvPackage`, `InstallRequirementsFile`, `InstallPyprojectFile`) funnel through `pipInstallCmd` (single config read → registry flags + env → backend dispatch via `pipCmdConfig`). The conda/venv environment-setup steps (`InstallJupyterNotebook`, `InstallSnowparkVenv`, `InstallJupyterVenv`) build their commands directly but apply the same `buildPipRegistrySetup` flags after a nil-guarded `config.Load` (they return an error rather than silently dropping registry flags). Read-only/offline pip commands (`pip list`, `pip freeze`) use `pipCmd` and deliberately omit the registry flags — `pip freeze` makes no network calls and rejects index options like `--index-url`.
+- `streamAndCapture` runs a command, emits each stdout/stderr line as a Wails event for live UI progress, **and** returns the captured stdout lines (checking both scanners' `Err()` so a truncated read is never written to disk or shown as a partial fragment). `freezeToFile` uses it to stream `pip freeze` while collecting its output, filters the captured lines through `isFreezeLine` (dropping `conda run` activation/solver/deprecation noise that would make `pip install -r` reject the file), writes the kept lines, then emits a final `✓ Wrote N packages to <path>` summary on the same ordered event channel so it always lands after the streamed lines.
 - `SyncTabContextFunc` is called when `syncKernelContext` detects that the kernel's `USE DATABASE/SCHEMA` state has drifted from the tab; this keeps the session context pane in sync.
 - DAP debugging writes each cell to a temp file (`/tmp/thaw_cell_<id>.py`) so debugpy can map breakpoints to physical file lines, then connects to `debugpy` via a local TCP port.
 
@@ -82,3 +90,4 @@ func (s *Service) SavePipRegistryConfig(cfg config.PipRegistryConfig) error
 - `matplotlib` is forced to the `Agg` (non-interactive) backend at kernel startup; `plt.show()` captures the figure as a base64 PNG rather than opening a GUI window.
 - On Apple Silicon (`darwin/arm64`), conda environment setup may require additional considerations; `IsAppleSilicon()` is exposed for callers that need platform-specific handling.
 - `config.PipRegistryConfig.Password` is stored in `config.json` (0600), not in the system keychain; it is embedded into registry URLs at call time only, never written to `.netrc` or pip config files.
+- `CheckSnowparkEnv` verifies `snowflake-snowpark-python` and `notebook` with `importlib.util.find_spec` (`moduleAvailableScript`), **not** a real `import`. Actually importing those packages executes heavy init code (pandas/pyarrow/cryptography, jupyter-server) that can take many seconds and intermittently fail under load, which previously produced flaky false negatives in the check. `find_spec` only resolves the module spec, so it is fast and deterministic.

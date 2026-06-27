@@ -143,7 +143,10 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - **Manage Packages** — a 4th step in the setup wizard (always accessible via the stepper or the "Manage Packages" footer button) provides a persistent package manager for the Snowpark environment:
   - **Install** — type any package name (e.g. `scikit-learn`) and press Install or Enter; installation streams line-by-line output into a scrollable log and refreshes the package list on completion
   - **Uninstall** — every installed package is listed with its version and an Uninstall button; a confirmation dialog is shown before removal
-  - The package list is loaded automatically on each visit by running `pip list --format=json` inside the active environment (conda or venv); works without completing the setup steps on return visits
+  - **Install requirements.txt** — pick a pip requirements file and install every pinned package at once (`pip install -r`)
+  - **Install pyproject.toml** — pick a `pyproject.toml` (or any TOML build file) and install the project it defines (`pip install <dir>`)
+  - **Freeze to requirements.txt** — export the active environment's exact package set to a file via a native save dialog (`pip freeze`); disabled until at least one package is installed
+  - All install paths apply the configured private pip registry settings; the package list is loaded automatically on each visit by running `pip list --format=json` inside the active environment (conda or venv); works without completing the setup steps on return visits
 
 #### Notebook tabs
 
