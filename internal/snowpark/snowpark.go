@@ -1294,35 +1294,8 @@ func (s *Service) checkVenvEnv(result *SnowparkCheckResult, cfg *config.AppConfi
 
 // streamCommandTo runs cmd and emits each output line as the given event.
 func (s *Service) streamCommandTo(cmd *exec.Cmd, eventName string) error {
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return err
-	}
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-
-	emit := func(line string) {
-		wailsruntime.EventsEmit(s.ctx, eventName, line)
-	}
-
-	var wg sync.WaitGroup
-	scanPipe := func(r io.Reader) {
-		defer wg.Done()
-		sc := bufio.NewScanner(r)
-		for sc.Scan() {
-			emit(sc.Text())
-		}
-	}
-	wg.Add(2)
-	go scanPipe(stdout)
-	go scanPipe(stderr)
-	wg.Wait()
-	return cmd.Wait()
+	_, err := s.streamAndCapture(cmd, eventName)
+	return err
 }
 
 // streamCommand runs cmd and emits each output line as a "snowpark:install-output" event.
@@ -1332,7 +1305,12 @@ func (s *Service) streamCommand(cmd *exec.Cmd) error {
 
 // streamAndCapture runs cmd, emits each stdout/stderr line as eventName (so the
 // UI gets live progress), and returns the collected stdout lines for callers
-// that also need the output (e.g. writing `pip freeze` to a file).
+// that also need the output (e.g. writing `pip freeze` to a file). Callers that
+// only need the streaming use streamCommandTo, which discards the slice.
+//
+// captured and scanErr are written only by the stdout goroutine and read by the
+// main goroutine after wg.Wait(), which establishes the happens-before edge — no
+// extra locking is needed.
 func (s *Service) streamAndCapture(cmd *exec.Cmd, eventName string) ([]string, error) {
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -1351,7 +1329,6 @@ func (s *Service) streamAndCapture(cmd *exec.Cmd, eventName string) ([]string, e
 	}
 
 	var (
-		mu       sync.Mutex
 		captured []string
 		scanErr  error
 	)
@@ -1362,19 +1339,13 @@ func (s *Service) streamAndCapture(cmd *exec.Cmd, eventName string) ([]string, e
 		sc := bufio.NewScanner(stdout)
 		for sc.Scan() {
 			line := sc.Text()
-			mu.Lock()
 			captured = append(captured, line)
-			mu.Unlock()
 			emit(line)
 		}
 		// A scan error means the captured output may be truncated; record it so
 		// the caller never writes a partial requirements file as if complete.
 		if err := sc.Err(); err != nil {
-			mu.Lock()
-			if scanErr == nil {
-				scanErr = err
-			}
-			mu.Unlock()
+			scanErr = err
 		}
 	}()
 	go func() {
@@ -1382,6 +1353,11 @@ func (s *Service) streamAndCapture(cmd *exec.Cmd, eventName string) ([]string, e
 		sc := bufio.NewScanner(stderr)
 		for sc.Scan() {
 			emit(sc.Text())
+		}
+		// Surface a truncated stderr stream too, so the user isn't shown only a
+		// fragment of pip's error output with no indication it was cut short.
+		if err := sc.Err(); err != nil {
+			emit("stderr scan error: " + err.Error())
 		}
 	}()
 	wg.Wait()
@@ -1578,27 +1554,27 @@ func (s *Service) InstallPyprojectFile(path string) error {
 	return nil
 }
 
-// FreezeRequirements opens a save dialog and writes `pip freeze` output to the
-// chosen file, streaming progress via the "snowpark:package-output" event. It
-// returns the path written, or "" if the dialog was canceled.
-func (s *Service) FreezeRequirements() (string, error) {
-	path, err := wailsruntime.SaveFileDialog(s.ctx, wailsruntime.SaveDialogOptions{
+// PickFreezeOutputFile opens a save dialog for the freeze target file. Returns
+// "" if the dialog was canceled. Split from FreezeRequirements so the frontend
+// can detect cancel before touching the log, mirroring the pick→install flow of
+// the other dependency-file operations.
+func (s *Service) PickFreezeOutputFile() (string, error) {
+	return wailsruntime.SaveFileDialog(s.ctx, wailsruntime.SaveDialogOptions{
 		Title:           "Save requirements.txt",
 		DefaultFilename: "requirements.txt",
 		Filters: []wailsruntime.FileFilter{
 			{DisplayName: "Requirements (*.txt)", Pattern: "*.txt"},
 		},
 	})
-	if err != nil {
-		return "", err
-	}
+}
+
+// FreezeRequirements writes `pip freeze` output to path, streaming progress via
+// the "snowpark:package-output" event (use PickFreezeOutputFile to choose path).
+func (s *Service) FreezeRequirements(path string) error {
 	if path == "" {
-		return "", nil // canceled
+		return fmt.Errorf("no output file selected")
 	}
-	if err := s.freezeToFile(path); err != nil {
-		return "", err
-	}
-	return path, nil
+	return s.freezeToFile(path)
 }
 
 // freezeToFile runs `pip freeze` and writes its output to path, streaming each
@@ -1698,7 +1674,10 @@ func (s *Service) InstallJupyterNotebook() error {
 	if err != nil {
 		return fmt.Errorf("conda not found: %w", err)
 	}
-	cfg, _ := config.Load()
+	cfg, err := config.Load()
+	if err != nil || cfg == nil {
+		return fmt.Errorf("config unavailable: %w", err)
+	}
 	setup := s.buildPipRegistrySetup(cfg)
 	baseArgs := []string{"run", "-n", SnowparkCondaEnv, "pip", "install", "notebook", "ipython-sql", "sqlalchemy", "pyflakes", "debugpy", "cryptography<44.0.0"}
 	args := append(baseArgs, setup.Args...)
@@ -1756,7 +1735,10 @@ func (s *Service) InstallVenvEnv() error {
 // InstallSnowparkVenv installs snowflake-snowpark-python into the venv.
 // Pass withPandas=true for the [pandas] extras variant.
 func (s *Service) InstallSnowparkVenv(withPandas bool) error {
-	cfg, _ := config.Load()
+	cfg, err := config.Load()
+	if err != nil || cfg == nil {
+		return fmt.Errorf("config unavailable: %w", err)
+	}
 	venvPath := cfg.Snowpark.VenvPath
 	if venvPath == "" {
 		venvPath = defaultVenvPath()
@@ -1792,7 +1774,10 @@ func (s *Service) DeleteVenvFolder() error {
 
 // InstallJupyterVenv installs notebook, ipython-sql, sqlalchemy and pyflakes into the venv.
 func (s *Service) InstallJupyterVenv() error {
-	cfg, _ := config.Load()
+	cfg, err := config.Load()
+	if err != nil || cfg == nil {
+		return fmt.Errorf("config unavailable: %w", err)
+	}
 	venvPath := cfg.Snowpark.VenvPath
 	if venvPath == "" {
 		venvPath = defaultVenvPath()

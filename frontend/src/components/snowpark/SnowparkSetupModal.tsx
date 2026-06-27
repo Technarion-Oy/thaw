@@ -44,6 +44,7 @@ import {
   PickPyprojectFile,
   InstallRequirementsFile,
   InstallPyprojectFile,
+  PickFreezeOutputFile,
   FreezeRequirements,
   PickDirectory,
 } from "../../../wailsjs/go/app/App";
@@ -171,6 +172,9 @@ export default function SnowparkSetupModal({ onClose }: Props) {
   // Which dependency-file operation is in flight (drives per-button spinners); null = idle.
   const [depFileOp, setDepFileOp] = useState<"requirements" | "pyproject" | "freeze" | null>(null);
   const depFileRunning = depFileOp !== null;
+  // Synchronous guard against a rapid double-click opening two pickers before the
+  // disabled prop has re-rendered (state updates are async).
+  const depFileGuard = useRef(false);
   const pkgLogEndRef = useRef<HTMLDivElement | null>(null);
 
   const exportDir    = useGitStore((s) => s.exportDir);
@@ -420,64 +424,54 @@ export default function SnowparkSetupModal({ onClose }: Props) {
     });
   };
 
-  // runDepFileInstall handles the shared shape of the requirements/pyproject
-  // install flows: pick a file, then install it. The backend emits the exact
-  // `$ pip install …` command and pip's output via "snowpark:package-output",
-  // so we only manage the log around the picker.
-  const runDepFileInstall = async (
-    op: "requirements" | "pyproject",
+  // runDepFileOp handles the shared shape of every dependency-file flow: pick a
+  // file (detecting cancel before touching the log), then run the backend op.
+  // The backend emits the authoritative command (`$ pip install …` / `$ pip
+  // freeze`) and its output — including the final summary line — via
+  // "snowpark:package-output", so the frontend only manages the log around the
+  // picker and never appends its own success line (avoiding an ordering race).
+  const runDepFileOp = async (
+    op: "requirements" | "pyproject" | "freeze",
     pick: () => Promise<string>,
-    install: (path: string) => Promise<void>,
+    run: (path: string) => Promise<void>,
+    refresh = true,
   ) => {
+    if (depFileGuard.current) return; // synchronous re-entry guard (double-click)
+    depFileGuard.current = true;
     const prevLog = packageLog;
     setDepFileOp(op);
-    let path: string;
     try {
-      path = await pick();
-    } catch (e) {
-      // The picker itself failed — keep the prior log and surface the error.
-      setPackageLog([...prevLog, String(e)]);
-      setDepFileOp(null);
-      return;
-    }
-    if (!path) {
-      // Canceled — leave the prior log untouched.
-      setDepFileOp(null);
-      return;
-    }
-    setPackageLog([]);
-    try {
-      await install(path);
-      await refreshPackages();
-    } catch (e) {
-      setPackageLog((prev) => [...prev, String(e)]);
+      let path: string;
+      try {
+        path = await pick();
+      } catch (e) {
+        // The picker itself failed — keep the prior log and surface the error.
+        setPackageLog([...prevLog, String(e)]);
+        return;
+      }
+      if (!path) return; // canceled — leave the prior log untouched
+      setPackageLog([]);
+      try {
+        await run(path);
+        if (refresh) await refreshPackages();
+      } catch (e) {
+        setPackageLog((prev) => [...prev, String(e)]);
+      }
     } finally {
       setDepFileOp(null);
+      depFileGuard.current = false;
     }
   };
 
   const handleInstallRequirements = () =>
-    runDepFileInstall("requirements", PickRequirementsFile, InstallRequirementsFile);
+    runDepFileOp("requirements", PickRequirementsFile, InstallRequirementsFile);
 
   const handleInstallPyproject = () =>
-    runDepFileInstall("pyproject", PickPyprojectFile, InstallPyprojectFile);
+    runDepFileOp("pyproject", PickPyprojectFile, InstallPyprojectFile);
 
-  const handleFreezeRequirements = async () => {
-    const prevLog = packageLog;
-    setDepFileOp("freeze");
-    setPackageLog([]);
-    try {
-      // The save dialog and the streamed output (including the final
-      // "✓ Wrote N packages to <path>" summary) come from the backend, so on
-      // success we leave the streamed log alone — avoiding an ordering race.
-      const written = await FreezeRequirements();
-      if (!written) setPackageLog(prevLog); // canceled — restore prior log
-    } catch (e) {
-      setPackageLog((prev) => [...prev, String(e)]);
-    } finally {
-      setDepFileOp(null);
-    }
-  };
+  // Freeze doesn't change the installed set, so skip the package-list refresh.
+  const handleFreezeRequirements = () =>
+    runDepFileOp("freeze", PickFreezeOutputFile, FreezeRequirements, false);
 
   const rawDefs = backend === "conda" ? condaSteps(isAppleSilicon) : venvSteps(venvPath, withPandas, pythonPath);
   const defs = useExisting
@@ -866,7 +860,14 @@ export default function SnowparkSetupModal({ onClose }: Props) {
 
             {/* Package list */}
             {packagesError && (
-              <Alert type="error" message={packagesError} showIcon style={{ fontSize: 12 }} />
+              <Alert
+                type="error"
+                message={packagesError}
+                showIcon
+                closable
+                onClose={() => setPackagesError(null)}
+                style={{ fontSize: 12 }}
+              />
             )}
             <div style={{
               border: "1px solid var(--border)",

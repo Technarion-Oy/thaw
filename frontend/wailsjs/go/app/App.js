@@ -838,8 +838,8 @@ export function FormatSecondaryRoles(arg1) {
   return window['go']['app']['App']['FormatSecondaryRoles'](arg1);
 }
 
-export function FreezeRequirements() {
-  return window['go']['app']['App']['FreezeRequirements']();
+export function FreezeRequirements(arg1) {
+  return window['go']['app']['App']['FreezeRequirements'](arg1);
 }
 
 export function GenerateKeyPair(arg1, arg2, arg3) {
@@ -1692,6 +1692,10 @@ export function PickDirectory() {
 
 export function PickFileForFormatPreview() {
   return window['go']['app']['App']['PickFileForFormatPreview']();
+}
+
+export function PickFreezeOutputFile() {
+  return window['go']['app']['App']['PickFreezeOutputFile']();
 }
 
 export function PickNotebookFile() {

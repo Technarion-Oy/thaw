@@ -489,7 +489,7 @@ export function FormatPackagesPolicyList(arg1:Array<string>):Promise<string>;
 
 export function FormatSecondaryRoles(arg1:Array<string>):Promise<string>;
 
-export function FreezeRequirements():Promise<string>;
+export function FreezeRequirements(arg1:string):Promise<void>;
 
 export function GenerateKeyPair(arg1:string,arg2:string,arg3:string):Promise<keypair.KeyPairResult>;
 
@@ -916,6 +916,8 @@ export function PickDataFilesByFormat(arg1:string):Promise<Array<string>>;
 export function PickDirectory():Promise<string>;
 
 export function PickFileForFormatPreview():Promise<string>;
+
+export function PickFreezeOutputFile():Promise<string>;
 
 export function PickNotebookFile():Promise<string>;
 
