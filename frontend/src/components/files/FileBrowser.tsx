@@ -231,6 +231,7 @@ export default function FileBrowser() {
   const stageFile    = useGitStore((s) => s.stageFile);
   const unstageFile  = useGitStore((s) => s.unstageFile);
   const discardFile  = useGitStore((s) => s.discardFile);
+  const resetHard    = useGitStore((s) => s.resetHard);
   const openGitOps   = useGitStore((s) => s.openGitOps);
   const pickExportDir = useGitStore((s) => s.pickExportDir);
   const refreshGitStatus = useGitStore((s) => s.refreshStatus);
@@ -743,6 +744,21 @@ export default function FileBrowser() {
       onOk: async () => {
         await discardFile(path);
         reportGit(`Discarded changes to ${name}`);
+      },
+    });
+  };
+
+  // Repo-wide reset --hard: discard every staged and unstaged change.
+  const handleDiscardAll = () => {
+    setFileCtxMenu(null);
+    modal.confirm({
+      title: "Discard all changes?",
+      content: "Resets the entire working tree to the last commit (git reset --hard HEAD). Every staged and unstaged change across all files is permanently lost. This cannot be undone.",
+      okText: "Discard all",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        await resetHard();
+        reportGit("Discarded all changes — working tree reset to last commit");
       },
     });
   };
@@ -1337,6 +1353,14 @@ export default function FileBrowser() {
                 <CtxItem icon={<MinusOutlined />} label="Unstage" onClick={handleUnstage} />
               )}
               <CtxItem icon={<UndoOutlined />} label="Discard changes" onClick={handleDiscardGit} danger />
+            </>
+          )}
+
+          {/* ── Repo-wide discard (reset --hard) — shown whenever the repo has changes ── */}
+          {gitRepo && gitChanged > 0 && (
+            <>
+              <div role="separator" style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+              <CtxItem icon={<UndoOutlined />} label="Discard all changes (reset to last commit)" onClick={handleDiscardAll} danger />
             </>
           )}
 
