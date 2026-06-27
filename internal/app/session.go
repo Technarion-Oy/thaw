@@ -195,12 +195,14 @@ func (a *App) GetSnowsightURL() (string, error) {
 }
 
 // GetCurrentUser returns the result of SELECT CURRENT_USER(), which reflects
-// the canonical Snowflake username exactly as stored (preserving case).
+// the canonical Snowflake username exactly as stored (preserving case). Cached
+// for the connection's lifetime — the user is constant, so repeated callers
+// (e.g. each Query Activity modal open) don't re-run the round-trip.
 func (a *App) GetCurrentUser() (string, error) {
 	if a.client == nil {
 		return "", apperrors.ErrNotConnected
 	}
-	return a.client.GetCurrentUser(a.ctx)
+	return a.client.GetCurrentUserCached(a.ctx)
 }
 
 // GetSessionParameters returns the current session parameters from SHOW PARAMETERS IN SESSION.

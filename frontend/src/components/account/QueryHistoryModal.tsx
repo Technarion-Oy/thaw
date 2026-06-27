@@ -49,12 +49,10 @@ const INT64_MAX = 9223372036854775807n;
 // embedded unquoted matches what the user sees). Mirrors snowflake.IsNumericID.
 function isValidSessionId(s: string): boolean {
   const t = s.trim();
+  // After this regex, t is a non-empty sign-less decimal string, so BigInt(t)
+  // cannot throw.
   if (!/^(?:0|[1-9]\d*)$/.test(t)) return false;
-  try {
-    return BigInt(t) <= INT64_MAX;
-  } catch {
-    return false;
-  }
+  return BigInt(t) <= INT64_MAX;
 }
 
 // "Today" as an end-of-day-bounded range. A function (not a constant) so the
@@ -248,9 +246,17 @@ export default function QueryHistoryModal({ onClose }: Props) {
         handedOff = true;
         runQueryRef.current({ userName: user }); // owns the loading lifecycle from here
       });
-    // If the resolve is cancelled before handing off to runQuery, clear the
-    // spinner we set above (runQuery would otherwise never run to clear it).
-    return () => { cancelled = true; if (!handedOff) setLoading(false); };
+    // If the resolve is cancelled before handing off to runQuery (e.g. the user
+    // switched scope mid-round-trip), un-burn the latch and clear the spinner so
+    // returning to "user" scope can auto-run again — and runQuery, which would
+    // otherwise clear loading, never got to run.
+    return () => {
+      cancelled = true;
+      if (!handedOff) {
+        didAutoRun.current = false;
+        setLoading(false);
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConnected, filterType]);
 
@@ -379,9 +385,10 @@ export default function QueryHistoryModal({ onClose }: Props) {
               } else {
                 // warehouse / all: don't silently inherit the user-scope "today"
                 // default — clear the range so these scopes show full history
-                // unless the user sets one explicitly.
+                // unless the user sets one explicitly. Leave `savedRange` intact:
+                // it's only consumed by the user-scope restore, so a
+                // session→warehouse→user round-trip still restores the range.
                 setTimeRange(null);
-                savedRange.current = { saved: false };
               }
               setFilterType(v);
             }}
