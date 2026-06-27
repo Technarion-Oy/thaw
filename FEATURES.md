@@ -721,16 +721,18 @@ Click the bar-chart icon in the Administration panel header (always visible, eve
 
 Click the clock icon in the Administration panel header (always visible, even before expanding) to open the **Query Activity** modal:
 
-- **Scope** — *Current Session*, *By User*, *By Warehouse*, or *All*
-  - *By User* — autocomplete dropdown from `SHOW USERS`; accepts free-typed names for users that no longer exist
-  - *By Warehouse* — autocomplete dropdown from the live warehouse list; accepts free-typed names for dropped or renamed warehouses
-- **Time range** — optional date/time range picker to bound the history window
+- **Scope** — *By User* (default), *By Session*, *By Warehouse*, or *All*
+  - *By User* — autocomplete dropdown from `SHOW USERS`; accepts free-typed names for users that no longer exist. **Run** stays disabled until a name is entered (an empty filter would widen the query beyond the intended user — use *All* for cross-user history).
+  - *By Session* — free-text Session ID box; **Run** stays disabled until an id is entered. (A session can't be auto-detected because each editor tab runs on its own isolated session — paste an id, or use **Filter by this session** from a result row.)
+  - *By Warehouse* — autocomplete dropdown from the live warehouse list; accepts free-typed names for dropped or renamed warehouses. **Run** stays disabled until a name is entered.
+- **Time range** — date/time range picker bounding the history window; pre-filled to **today** on open and freely adjustable
 - **Limit** — cap results from 1 to 10 000 (default 100)
 - **Include client-generated** — toggle to include Thaw's own internal statements
-- **Run** — re-fetches with the current filters; auto-runs on open with current session scope
+- **Run** — re-fetches with the current filters; auto-runs on open scoped to the **current user, today**
 - **Query text search** — live filter bar narrows the loaded results by query text as you type; matches are highlighted in the table and in expanded rows; row count shows `N of M rows` when a filter is active
 - Results table shows status (colour-coded), query type, query preview, start time, end time, and duration
-- Expand any row to see the full SQL plus a detail grid with user, warehouse, database, schema, rows produced, bytes scanned, and query ID
+- Expand any row to see the full SQL plus a detail grid with user, warehouse, database, schema, rows produced, bytes scanned, session ID, and query ID
+- **Filter by this session** — re-runs scoped to the row's session ID, for drilling down from a recognised query to everything in the same session
 - **Load in Editor** — inserts the query into the active editor tab and closes the modal
 - **Copy** — copies the full query text to the clipboard with a brief "Copied!" confirmation
 

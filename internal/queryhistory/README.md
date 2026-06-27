@@ -15,7 +15,7 @@ function that combines both steps.
 | File | Purpose |
 |------|---------|
 | `doc.go` | Package doc + `thaw:domain` annotation (SQL Editor & Diagnostics) |
-| `queryhistory.go` | `QueryHistoryRow` type, `BuildQueryHistorySql`, `ParseQueryHistory`, `GetQueryHistory` |
+| `queryhistory.go` | `QueryHistoryRow` type, `buildQueryHistorySql` (unexported), `ParseQueryHistory`, `GetQueryHistory` |
 | `queryhistory_test.go` | Unit tests for the SQL builder covering all filter types and edge cases |
 
 ## Key types & functions
@@ -24,6 +24,7 @@ function that combines both steps.
 ```go
 type QueryHistoryRow struct {
     QueryID       string `json:"queryId"`
+    SessionID     string `json:"sessionId"`
     QueryText     string `json:"queryText"`
     QueryType     string `json:"queryType"`
     UserName      string `json:"userName"`
@@ -40,11 +41,15 @@ type QueryHistoryRow struct {
 }
 ```
 
-### `BuildQueryHistorySql(filterType, sessionID, userName, warehouseName, endTimeStart, endTimeEnd string, resultLimit int, includeClientGenerated bool) string`
-Selects the Snowflake table function based on `filterType` (`"session"`, `"user"`,
-`"warehouse"`, or default `"all"`), builds named-argument clauses for whichever
-filters are non-empty, and returns a `SELECT` ordered by `START_TIME DESC`.
-Date strings are cast to `TIMESTAMP_LTZ` inline.
+### `buildQueryHistorySql(filterType, sessionID, userName, warehouseName, endTimeStart, endTimeEnd string, resultLimit int, includeClientGenerated bool) string`
+Unexported — all external access goes through `GetQueryHistory`, which validates
+the session ID first. Selects the Snowflake table function based on `filterType`
+(`"session"`, `"user"`, `"warehouse"`, or default `"all"`), builds named-argument
+clauses for whichever filters are non-empty, and returns a `SELECT` ordered by
+`START_TIME DESC`. Date strings are cast to `TIMESTAMP_LTZ` inline. For
+`filterType "session"`, a `SESSION_ID` that is not a bare int64 violates the
+precondition and **panics** (a programmer error — callers must pre-validate;
+`GetQueryHistory` does), rather than silently emitting a wrong query.
 
 ### `ParseQueryHistory(res *snowflake.QueryResult) []QueryHistoryRow`
 Uses `snowflake.ColIdx` for position-independent column lookup (safe against
@@ -52,7 +57,8 @@ column-order changes) and `snowflake.CellString` / `snowflake.CellInt64` for
 nil-safe value extraction.
 
 ### `GetQueryHistory(ctx, client, ...) ([]QueryHistoryRow, error)`
-Convenience wrapper: calls `BuildQueryHistorySql`, executes via
+Convenience wrapper: rejects an invalid (non-int64) session ID with an error,
+calls `buildQueryHistorySql`, executes via
 `client.QuerySingle`, and parses the result. This is the function called by the
 `*App` thin delegator in `internal/app`.
 

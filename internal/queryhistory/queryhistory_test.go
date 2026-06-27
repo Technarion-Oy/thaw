@@ -11,13 +11,14 @@
 package queryhistory
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"thaw/internal/snowflake"
 )
 
-func TestBuildQueryHistorySql(t *testing.T) {
+func TestBuildQueryHistorySQL(t *testing.T) {
 	tests := []struct {
 		name         string
 		filterType   string
@@ -58,12 +59,15 @@ func TestBuildQueryHistorySql(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sql := BuildQueryHistorySql(tt.filterType, tt.sessionID, tt.userName, tt.warehouse, "", "", 100, true)
+			sql := buildQueryHistorySql(tt.filterType, tt.sessionID, tt.userName, tt.warehouse, "", "", 100, true)
 			if !strings.Contains(sql, tt.wantFunc) {
 				t.Errorf("expected func %q in SQL:\n%s", tt.wantFunc, sql)
 			}
 			if !strings.Contains(sql, "RESULT_LIMIT => 100") {
 				t.Errorf("expected RESULT_LIMIT in SQL:\n%s", sql)
+			}
+			if !strings.Contains(sql, "SESSION_ID,") {
+				t.Errorf("expected SESSION_ID in projected columns:\n%s", sql)
 			}
 			if !strings.Contains(sql, "INCLUDE_CLIENT_GENERATED_STATEMENT => TRUE") {
 				t.Errorf("expected include-client-generated in SQL:\n%s", sql)
@@ -77,8 +81,38 @@ func TestBuildQueryHistorySql(t *testing.T) {
 	}
 }
 
-func TestBuildQueryHistorySqlTimeRange(t *testing.T) {
-	sql := BuildQueryHistorySql("all", "", "", "", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z", 50, false)
+func TestBuildQueryHistorySQLSessionInjection(t *testing.T) {
+	// A non-numeric / injection-laden session id violates the builder's
+	// precondition and must panic (never be embedded as an argument).
+	for _, sid := range []string{
+		"1234, RESULT_LIMIT => 10000",
+		"1234; DROP TABLE",
+		" 1234 ",
+		"abc",
+		"",
+		"12345678901234567890123456789", // longer than int64 max
+		"9999999999999999999",           // 19 digits but overflows int64
+		"007",                           // leading zeros
+	} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("session id %q must panic, not be embedded", sid)
+				}
+			}()
+			buildQueryHistorySql("session", sid, "", "", "", "", 100, false)
+		}()
+	}
+
+	// A clean numeric id is embedded as-is.
+	sql := buildQueryHistorySql("session", "1234567890", "", "", "", "", 100, false)
+	if !strings.Contains(sql, "SESSION_ID => 1234567890") {
+		t.Errorf("expected numeric SESSION_ID argument:\n%s", sql)
+	}
+}
+
+func TestBuildQueryHistorySQLTimeRange(t *testing.T) {
+	sql := buildQueryHistorySql("all", "", "", "", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z", 50, false)
 	if !strings.Contains(sql, "END_TIME_RANGE_START => '2026-01-01T00:00:00Z'::TIMESTAMP_LTZ") {
 		t.Errorf("missing range start in SQL:\n%s", sql)
 	}
@@ -90,17 +124,61 @@ func TestBuildQueryHistorySqlTimeRange(t *testing.T) {
 	}
 }
 
+// TestBuildQueryHistorySQLTimeRangeQuoting exercises the QuoteStringLit guard on
+// the timestamp args: a value containing a single-quote must be doubled, not
+// embedded verbatim (which would break out of the literal). A clean RFC3339
+// string can't distinguish QuoteStringLit from a bare '%s', so use a quote here.
+func TestBuildQueryHistorySQLTimeRangeQuoting(t *testing.T) {
+	sql := buildQueryHistorySql("all", "", "", "", "2026-01-01'T00:00:00Z", "2026-01-02T00:00:00Z", 50, false)
+	if !strings.Contains(sql, "END_TIME_RANGE_START => '2026-01-01''T00:00:00Z'::TIMESTAMP_LTZ") {
+		t.Errorf("single-quote in start timestamp must be doubled by QuoteStringLit:\n%s", sql)
+	}
+}
+
+// TestGetQueryHistoryValidationGuards verifies the GetQueryHistory boundary
+// guards (the primary gate) reject invalid filters before any client use, so a
+// nil client is never dereferenced on these paths.
+func TestGetQueryHistoryValidationGuards(t *testing.T) {
+	tests := []struct {
+		name       string
+		filterType string
+		sessionID  string
+		userName   string
+		warehouse  string
+		wantErr    string
+	}{
+		{"invalid session id", "session", "abc", "", "", "invalid session id"},
+		{"empty session id", "session", "", "", "", "invalid session id"},
+		{"empty user", "user", "", "", "", "user name is required"},
+		{"whitespace user", "user", "", "   ", "", "user name is required"},
+		{"empty warehouse", "warehouse", "", "", "", "warehouse name is required"},
+		{"whitespace warehouse", "warehouse", "", "", "  ", "warehouse name is required"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// nil client is safe: every guard returns before the client is used.
+			_, err := GetQueryHistory(context.Background(), nil, tt.filterType, tt.sessionID, tt.userName, tt.warehouse, "", "", 100, false)
+			if err == nil {
+				t.Fatalf("expected an error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error %q does not contain %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestParseQueryHistory(t *testing.T) {
 	res := &snowflake.QueryResult{
 		Columns: []string{
-			"QUERY_ID", "QUERY_TEXT", "QUERY_TYPE", "USER_NAME", "WAREHOUSE_NAME",
+			"QUERY_ID", "SESSION_ID", "QUERY_TEXT", "QUERY_TYPE", "USER_NAME", "WAREHOUSE_NAME",
 			"DATABASE_NAME", "SCHEMA_NAME", "START_TIME", "END_TIME",
 			"TOTAL_ELAPSED_TIME", "EXECUTION_STATUS", "ERROR_MESSAGE",
 			"ROWS_PRODUCED", "BYTES_SCANNED",
 		},
 		Rows: [][]interface{}{
 			{
-				"q1", "SELECT 1", "SELECT", "ALICE", "WH",
+				"q1", "9876543210", "SELECT 1", "SELECT", "ALICE", "WH",
 				"DB", "PUBLIC", "2026-01-01", "2026-01-01",
 				int64(1500), "SUCCESS", "",
 				int64(1), int64(2048),
@@ -112,7 +190,7 @@ func TestParseQueryHistory(t *testing.T) {
 		t.Fatalf("expected 1 row, got %d", len(rows))
 	}
 	got := rows[0]
-	if got.QueryID != "q1" || got.UserName != "ALICE" || got.Status != "SUCCESS" {
+	if got.QueryID != "q1" || got.SessionID != "9876543210" || got.UserName != "ALICE" || got.Status != "SUCCESS" {
 		t.Errorf("unexpected projection: %+v", got)
 	}
 	if got.ElapsedMs != 1500 || got.RowsProduced != 1 || got.BytesScanned != 2048 {

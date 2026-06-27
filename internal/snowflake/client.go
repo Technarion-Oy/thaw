@@ -238,6 +238,11 @@ type Client struct {
 	objectCacheMu sync.RWMutex
 	objectCache   map[string]objectCacheEntry
 
+	// currentUser caches SELECT CURRENT_USER() — constant for the connection's
+	// lifetime. Resolved lazily via GetCurrentUserCached; failures are not cached.
+	currentUserMu sync.RWMutex
+	currentUser   string
+
 	// excludedExtendedKinds stores a map[string]bool of object kinds to skip
 	// in ListExtendedObjects. Accessed via SetExcludedExtendedKinds (write)
 	// and getExcludedExtendedKinds (read) which use atomic.Value for safe
@@ -498,6 +503,42 @@ func (c *Client) GetSessionID(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return id, nil
+}
+
+// GetCurrentUser returns the current session's user via SELECT CURRENT_USER().
+func (c *Client) GetCurrentUser(ctx context.Context) (string, error) {
+	var name string
+	if err := c.queryRowCtx(ctx, "SELECT CURRENT_USER()").Scan(&name); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+// GetCurrentUserCached returns the current session's user, resolving it via
+// GetCurrentUser on first use and caching the result for the client's lifetime.
+// The user is constant for a connection, so this avoids repeating the round-trip.
+// A failed lookup is not cached, so a later call can retry.
+func (c *Client) GetCurrentUserCached(ctx context.Context) (string, error) {
+	// Warm path: a shared read lock so concurrent callers don't serialize.
+	c.currentUserMu.RLock()
+	cached := c.currentUser
+	c.currentUserMu.RUnlock()
+	if cached != "" {
+		return cached, nil
+	}
+	// Cold path: resolve outside the lock (no RPC under the mutex), then store
+	// under the write lock, re-checking in case another caller won the race.
+	name, err := c.GetCurrentUser(ctx)
+	if err != nil {
+		return "", err
+	}
+	c.currentUserMu.Lock()
+	defer c.currentUserMu.Unlock()
+	if c.currentUser != "" {
+		return c.currentUser, nil
+	}
+	c.currentUser = name
+	return name, nil
 }
 
 // GetCachedSessionContext returns the session context from the connector's

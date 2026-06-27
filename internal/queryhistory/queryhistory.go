@@ -21,6 +21,7 @@ import (
 // QueryHistoryRow holds one row from INFORMATION_SCHEMA.QUERY_HISTORY*.
 type QueryHistoryRow struct {
 	QueryID       string `json:"queryId"`
+	SessionID     string `json:"sessionId"`
 	QueryText     string `json:"queryText"`
 	QueryType     string `json:"queryType"`
 	UserName      string `json:"userName"`
@@ -36,17 +37,23 @@ type QueryHistoryRow struct {
 	BytesScanned  int64  `json:"bytesScanned"`
 }
 
-// BuildQueryHistorySql builds the SELECT over the appropriate
+// buildQueryHistorySql builds the SELECT over the appropriate
 // INFORMATION_SCHEMA.QUERY_HISTORY* table function for the given filter.
 //
 //   - filterType:             "session" | "user" | "warehouse" | "all"
-//   - sessionID:              non-empty → SESSION_ID => <id> (filterType="session")
+//   - sessionID:              valid int64 → SESSION_ID => <id> (filterType="session")
 //   - userName:               non-empty → USER_NAME => '<name>'
 //   - warehouseName:          non-empty → WAREHOUSE_NAME => '<name>'
 //   - endTimeStart/End:       RFC3339 strings or "" for no filter
 //   - resultLimit:            max rows returned (1–10 000)
 //   - includeClientGenerated: include client-generated statements
-func BuildQueryHistorySql(
+//
+// Precondition: for filterType "session", sessionID must be a valid bare int64.
+// GetQueryHistory (the primary gate, and the only production caller) enforces
+// this; passing an invalid id here is a programmer error and panics rather than
+// silently emitting an argument-less QUERY_HISTORY_BY_SESSION() that resolves to
+// the wrong (pooled) session. Always go through GetQueryHistory.
+func buildQueryHistorySql(
 	filterType string,
 	sessionID string,
 	userName string,
@@ -73,9 +80,15 @@ func BuildQueryHistorySql(
 	var args []string
 	switch filterType {
 	case "session":
-		if sessionID != "" {
-			args = append(args, fmt.Sprintf("SESSION_ID => %s", sessionID))
+		// SESSION_ID is a bare numeric argument (not quoted), so it must never be
+		// embedded verbatim — a value like "1234, RESULT_LIMIT => 10000" would
+		// inject extra named arguments. The precondition (a valid bare int64) is
+		// enforced by GetQueryHistory; an invalid id reaching here is a programmer
+		// error, so fail loud rather than emit a semantically wrong query.
+		if !snowflake.IsNumericID(sessionID) {
+			panic(fmt.Sprintf("buildQueryHistorySql: invalid session id %q (callers must validate via GetQueryHistory)", sessionID))
 		}
+		args = append(args, fmt.Sprintf("SESSION_ID => %s", sessionID))
 	case "user":
 		if userName != "" {
 			args = append(args, fmt.Sprintf("USER_NAME => %s", snowflake.QuoteStringLit(userName)))
@@ -85,11 +98,13 @@ func BuildQueryHistorySql(
 			args = append(args, fmt.Sprintf("WAREHOUSE_NAME => %s", snowflake.QuoteStringLit(warehouseName)))
 		}
 	}
+	// QuoteStringLit escapes any embedded single-quote so the timestamp literal
+	// cannot break out of its delimiter (consistent with USER_NAME/WAREHOUSE_NAME).
 	if endTimeStart != "" {
-		args = append(args, fmt.Sprintf("END_TIME_RANGE_START => '%s'::TIMESTAMP_LTZ", endTimeStart))
+		args = append(args, fmt.Sprintf("END_TIME_RANGE_START => %s::TIMESTAMP_LTZ", snowflake.QuoteStringLit(endTimeStart)))
 	}
 	if endTimeEnd != "" {
-		args = append(args, fmt.Sprintf("END_TIME_RANGE_END => '%s'::TIMESTAMP_LTZ", endTimeEnd))
+		args = append(args, fmt.Sprintf("END_TIME_RANGE_END => %s::TIMESTAMP_LTZ", snowflake.QuoteStringLit(endTimeEnd)))
 	}
 	if resultLimit > 0 {
 		args = append(args, fmt.Sprintf("RESULT_LIMIT => %d", resultLimit))
@@ -104,7 +119,7 @@ func BuildQueryHistorySql(
 	}
 
 	return fmt.Sprintf(`
-SELECT QUERY_ID, QUERY_TEXT, QUERY_TYPE, USER_NAME, WAREHOUSE_NAME,
+SELECT QUERY_ID, SESSION_ID, QUERY_TEXT, QUERY_TYPE, USER_NAME, WAREHOUSE_NAME,
        DATABASE_NAME, SCHEMA_NAME, START_TIME, END_TIME,
        TOTAL_ELAPSED_TIME, EXECUTION_STATUS, ERROR_MESSAGE,
        ROWS_PRODUCED, BYTES_SCANNED
@@ -119,6 +134,7 @@ func ParseQueryHistory(res *snowflake.QueryResult) []QueryHistoryRow {
 	}
 
 	qidIdx := snowflake.ColIdx(res.Columns, "query_id")
+	sidIdx := snowflake.ColIdx(res.Columns, "session_id")
 	qtxtIdx := snowflake.ColIdx(res.Columns, "query_text")
 	qtypIdx := snowflake.ColIdx(res.Columns, "query_type")
 	userIdx := snowflake.ColIdx(res.Columns, "user_name")
@@ -144,6 +160,7 @@ func ParseQueryHistory(res *snowflake.QueryResult) []QueryHistoryRow {
 	for _, row := range res.Rows {
 		rows = append(rows, QueryHistoryRow{
 			QueryID:       snowflake.CellString(get(row, qidIdx)),
+			SessionID:     snowflake.CellString(get(row, sidIdx)),
 			QueryText:     snowflake.CellString(get(row, qtxtIdx)),
 			QueryType:     snowflake.CellString(get(row, qtypIdx)),
 			UserName:      snowflake.CellString(get(row, userIdx)),
@@ -176,7 +193,31 @@ func GetQueryHistory(
 	resultLimit int,
 	includeClientGenerated bool,
 ) ([]QueryHistoryRow, error) {
-	query := BuildQueryHistorySql(filterType, sessionID, userName, warehouseName, endTimeStart, endTimeEnd, resultLimit, includeClientGenerated)
+	// Trim the name filters up front so the empty-checks and the value embedded
+	// by buildQueryHistorySql agree — otherwise "ALICE " would pass the guard and
+	// be matched verbatim (zero rows, no error).
+	userName = strings.TrimSpace(userName)
+	warehouseName = strings.TrimSpace(warehouseName)
+
+	// Reject a non-numeric session id at the boundary with a clear error rather
+	// than silently producing an argument-less QUERY_HISTORY_BY_SESSION() that
+	// resolves to the wrong (pooled metadata) session.
+	if filterType == "session" && !snowflake.IsNumericID(sessionID) {
+		return nil, fmt.Errorf("invalid session id %q: must be a numeric Snowflake session id", sessionID)
+	}
+	// Likewise require an explicit user for user scope — an empty USER_NAME would
+	// drop the filter and widen the query beyond the intended user. Use the "all"
+	// scope to query history across users.
+	if filterType == "user" && userName == "" {
+		return nil, fmt.Errorf("a user name is required for user-scoped query history")
+	}
+	// And an explicit warehouse for warehouse scope — an empty WAREHOUSE_NAME
+	// would drop the filter, leaving QUERY_HISTORY_BY_WAREHOUSE() to resolve to
+	// the pooled metadata connection's warehouse (silently wrong, not an error).
+	if filterType == "warehouse" && warehouseName == "" {
+		return nil, fmt.Errorf("a warehouse name is required for warehouse-scoped query history")
+	}
+	query := buildQueryHistorySql(filterType, sessionID, userName, warehouseName, endTimeStart, endTimeEnd, resultLimit, includeClientGenerated)
 	res, err := client.QuerySingle(ctx, query)
 	if err != nil {
 		return nil, err

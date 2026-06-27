@@ -3311,6 +3311,7 @@ export namespace queryhistory {
 	
 	export class QueryHistoryRow {
 	    queryId: string;
+	    sessionId: string;
 	    queryText: string;
 	    queryType: string;
 	    userName: string;
@@ -3332,6 +3333,7 @@ export namespace queryhistory {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.queryId = source["queryId"];
+	        this.sessionId = source["sessionId"];
 	        this.queryText = source["queryText"];
 	        this.queryType = source["queryType"];
 	        this.userName = source["userName"];
