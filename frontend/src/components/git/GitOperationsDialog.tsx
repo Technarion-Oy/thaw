@@ -315,8 +315,17 @@ function RepositorySection() {
 // ── Section 2: GitHub Authentication ─────────────────────────────────────────
 
 function AuthSection() {
-  const { oauthToken, loginWithOAuth, setOAuthToken } = useGitStore();
+  const { oauthToken, loginWithOAuth, setOAuthToken, authorName, authorEmail, saveConfig } = useGitStore();
   const [loading, setLoading] = useState(false);
+  const [showToken, setShowToken] = useState(false);
+  const [tokenInput, setTokenInput] = useState("");
+
+  // Commit identity (persisted, excluding any secret).
+  const [name, setName]   = useState(authorName);
+  const [email, setEmail] = useState(authorEmail);
+  useEffect(() => { setName(authorName); }, [authorName]);
+  useEffect(() => { setEmail(authorEmail); }, [authorEmail]);
+  const identityDirty = name !== authorName || email !== authorEmail;
 
   const handleConnect = async () => {
     setLoading(true);
@@ -328,6 +337,20 @@ function AuthSection() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleUseToken = () => {
+    const t = tokenInput.trim();
+    if (!t) return;
+    setOAuthToken(t);
+    setTokenInput("");
+    setShowToken(false);
+    antMessage.success("Token set — held in memory only");
+  };
+
+  const handleSaveIdentity = async () => {
+    await saveConfig({ authorName: name.trim(), authorEmail: email.trim() });
+    antMessage.success("Commit identity saved");
   };
 
   return (
@@ -344,23 +367,73 @@ function AuthSection() {
           type="success"
           showIcon
           style={{ fontSize: 12 }}
-          message="Authenticated with GitHub. Token is held in memory only."
+          message="Authenticated. Token is held in memory only."
           action={
-            <Button size="small" type="link" danger onClick={() => setOAuthToken("")}>
-              Disconnect
-            </Button>
+            <Space size={4}>
+              <Button size="small" type="link" onClick={() => { setOAuthToken(""); setShowToken(true); }}>
+                Switch
+              </Button>
+              <Button size="small" type="link" danger onClick={() => setOAuthToken("")}>
+                Disconnect
+              </Button>
+            </Space>
           }
         />
       ) : (
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <Button icon={<GithubOutlined />} loading={loading} onClick={handleConnect} size="small">
-            Connect to GitHub
-          </Button>
-          <Text style={{ fontSize: 12, color: "var(--text-muted)" }}>
-            Opens your browser. Token is kept in memory only.
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <Button icon={<GithubOutlined />} loading={loading} onClick={handleConnect} size="small">
+              Connect to GitHub
+            </Button>
+            <Button size="small" type="link" onClick={() => setShowToken((s) => !s)} style={{ padding: 0 }}>
+              {showToken ? "Hide token field" : "Use a personal access token"}
+            </Button>
+          </div>
+          <Text style={{ fontSize: 11, color: "var(--text-muted)" }}>
+            Connecting opens your browser (uses its GitHub session). To sign in as a different account, paste that account&apos;s token. Tokens are kept in memory only.
           </Text>
+
+          {showToken && (
+            <div style={{ display: "flex", gap: 6 }}>
+              <Input.Password
+                size="small"
+                placeholder="Personal access token (repo scope)"
+                value={tokenInput}
+                onChange={(e) => setTokenInput(e.target.value)}
+                onPressEnter={handleUseToken}
+                style={{ flex: 1, fontSize: 12 }}
+                addonBefore={<GithubOutlined />}
+              />
+              <Button size="small" type="primary" onClick={handleUseToken} disabled={!tokenInput.trim()}>
+                Use token
+              </Button>
+            </div>
+          )}
         </div>
       )}
+
+      {/* Commit identity — the "who" recorded on each commit (separate from auth). */}
+      <SectionTitle>Commit identity</SectionTitle>
+      <div style={{ display: "flex", gap: 6 }}>
+        <Input
+          size="small"
+          placeholder="Author name (default: Thaw)"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          style={{ flex: 1, fontSize: 12 }}
+        />
+        <Input
+          size="small"
+          placeholder="Author email (default: thaw@local)"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          onPressEnter={() => { if (identityDirty) handleSaveIdentity(); }}
+          style={{ flex: 1, fontSize: 12 }}
+        />
+        <Button size="small" type="primary" disabled={!identityDirty} onClick={handleSaveIdentity}>
+          Save
+        </Button>
+      </div>
     </div>
   );
 }
