@@ -13,6 +13,8 @@ package app
 import (
 	"thaw/internal/config"
 	"thaw/internal/gitrepo"
+
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // GetGitConfig returns the persisted git / export settings.
@@ -165,6 +167,13 @@ func (a *App) GitPushBranch(dir string, branch string, token string) error {
 
 // GitLoginWithOAuth starts the local loopback OAuth flow for the specified provider
 // ("github", "gitlab", etc.) and returns the obtained access token.
+//
+// Rather than opening a browser, it emits the authorization URL via the
+// "git:oauth-url" event so the frontend can let the user open it in their chosen
+// browser or copy it (useful when the default browser is signed into a different
+// account). The loopback callback still completes the flow.
 func (a *App) GitLoginWithOAuth(provider string) (string, error) {
-	return gitrepo.PerformOAuthFlow(a.ctx, provider)
+	return gitrepo.PerformOAuthFlow(a.ctx, provider, func(authURL string) {
+		wailsruntime.EventsEmit(a.ctx, "git:oauth-url", authURL)
+	})
 }

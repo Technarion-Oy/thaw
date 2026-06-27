@@ -35,7 +35,7 @@ token-based authentication.
 | `GetStatus(dir)` | Returns `RepoStatus`; non-repos return `IsRepo: false` without error. |
 | `CommitAndPush(ctx, p)` | Init-if-needed → ensure `.gitignore` → stage → commit → push. "Nothing to commit" and "already up-to-date" are success. |
 | `GetHeadFileContent(filePath)` | Returns file content at HEAD; returns `""` (no error) for untracked files or repos with no commits. |
-| `PerformOAuthFlow(ctx, provider)` | Opens browser, runs loopback callback server, exchanges code for token. |
+| `PerformOAuthFlow(ctx, provider, onURL)` | Runs the loopback callback server and exchanges the code for a token. It does **not** open a browser — it passes the authorization URL to `onURL` so the caller/UI can let the user open it (in any browser) or copy it. |
 
 ## Patterns & integration
 
@@ -51,4 +51,5 @@ token-based authentication.
 - Clone of an empty remote repository (no commits) returns a user-friendly error and cleans up the partial `.git` directory so the user can retry.
 - `MergeBranch` only supports fast-forward merges (`gogit.FastForwardMerge`). Conflict resolution is not supported.
 - The OAuth loopback server listens on a fixed port `127.0.0.1:3456`. If that port is occupied, the flow will fail.
+- `PerformOAuthFlow` no longer opens a browser itself; `internal/app/git.go` emits the URL via the `git:oauth-url` Wails event and the frontend offers "Open in browser" / "Copy URL".
 - GitHub does not accept the `Authorization: Bearer` header for Git-over-HTTPS; the code special-cases `github.com` to always use `BasicAuth` even for OAuth tokens.

@@ -13,16 +13,18 @@
 import React, { useState, useEffect, useMemo } from "react";
 import {
   Modal, Button, Input, Space, Tag, Typography, Divider, Alert,
-  List, Badge, Tooltip, Popconfirm, message as antMessage,
+  List, Badge, Tooltip, Popconfirm, Spin, message as antMessage,
 } from "antd";
 import {
   CloudUploadOutlined, CloudDownloadOutlined,
   FolderOpenOutlined, ReloadOutlined,
   BranchesOutlined, PlusOutlined, GithubOutlined,
   EditOutlined, CheckOutlined, CloseOutlined, MergeOutlined,
+  GlobalOutlined, CopyOutlined,
 } from "@ant-design/icons";
 import { useGitStore } from "../../store/gitStore";
 import { PickDirectory, GitInitWithRemote } from "../../../wailsjs/go/app/App";
+import { BrowserOpenURL, ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 import ChangesView from "./ChangesView";
 
 const { Text } = Typography;
@@ -327,8 +329,17 @@ function AuthSection() {
   useEffect(() => { setEmail(authorEmail); }, [authorEmail]);
   const identityDirty = name !== authorName || email !== authorEmail;
 
+  // The auth URL arrives via an event (the backend no longer opens a browser);
+  // we show it so the user can open it in their chosen browser or copy it.
+  const [authUrl, setAuthUrl] = useState("");
+  useEffect(() => {
+    const off = EventsOn("git:oauth-url", (u: string) => setAuthUrl(u));
+    return off;
+  }, []);
+
   const handleConnect = async () => {
     setLoading(true);
+    setAuthUrl("");
     try {
       await loginWithOAuth("github");
       antMessage.success("Successfully authenticated with GitHub");
@@ -336,7 +347,13 @@ function AuthSection() {
       // error in store
     } finally {
       setLoading(false);
+      setAuthUrl("");
     }
+  };
+
+  const copyAuthUrl = async () => {
+    try { await ClipboardSetText(authUrl); antMessage.success("Authorization URL copied"); }
+    catch { antMessage.error("Could not copy URL"); }
   };
 
   const handleUseToken = () => {
@@ -379,10 +396,35 @@ function AuthSection() {
             </Space>
           }
         />
+      ) : loading ? (
+        /* OAuth in progress — let the user open the URL in their chosen browser or copy it */
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "10px 12px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8 }}>
+          {authUrl ? (
+            <>
+              <Text style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                Authorize Thaw on GitHub, then return here. Open the link in your browser, or copy it to use a browser signed into a different account.
+              </Text>
+              <div style={{ fontFamily: "monospace", fontSize: 11, color: "var(--text-muted)", background: "var(--bg-raised)", border: "1px solid var(--border)", borderRadius: 6, padding: "6px 8px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={authUrl}>
+                {authUrl}
+              </div>
+              <Space size={6}>
+                <Button size="small" type="primary" icon={<GlobalOutlined />} onClick={() => BrowserOpenURL(authUrl)}>Open in browser</Button>
+                <Button size="small" icon={<CopyOutlined />} onClick={copyAuthUrl}>Copy URL</Button>
+              </Space>
+              <Text style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                <Spin size="small" style={{ marginRight: 6 }} /> Waiting for authorization…
+              </Text>
+            </>
+          ) : (
+            <Text style={{ fontSize: 12, color: "var(--text-muted)" }}>
+              <Spin size="small" style={{ marginRight: 6 }} /> Preparing authorization…
+            </Text>
+          )}
+        </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <Button icon={<GithubOutlined />} loading={loading} onClick={handleConnect} size="small">
+            <Button icon={<GithubOutlined />} onClick={handleConnect} size="small">
               Connect to GitHub
             </Button>
             <Button size="small" type="link" onClick={() => setShowToken((s) => !s)} style={{ padding: 0 }}>
@@ -390,7 +432,7 @@ function AuthSection() {
             </Button>
           </div>
           <Text style={{ fontSize: 11, color: "var(--text-muted)" }}>
-            Connecting opens your browser (uses its GitHub session). To sign in as a different account, paste that account&apos;s token. Tokens are kept in memory only.
+            Connecting shows a GitHub authorization link you can open or copy (no forced browser). To sign in as a different account, copy the link into that browser, or paste that account&apos;s token. Tokens are kept in memory only.
           </Text>
 
           {showToken && (
