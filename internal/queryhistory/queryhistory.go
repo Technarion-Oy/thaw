@@ -206,6 +206,12 @@ func GetQueryHistory(
 	if filterType == "user" && strings.TrimSpace(userName) == "" {
 		return nil, fmt.Errorf("a user name is required for user-scoped query history")
 	}
+	// And an explicit warehouse for warehouse scope — an empty WAREHOUSE_NAME
+	// would drop the filter, leaving QUERY_HISTORY_BY_WAREHOUSE() to resolve to
+	// the pooled metadata connection's warehouse (silently wrong, not an error).
+	if filterType == "warehouse" && strings.TrimSpace(warehouseName) == "" {
+		return nil, fmt.Errorf("a warehouse name is required for warehouse-scoped query history")
+	}
 	query := buildQueryHistorySql(filterType, sessionID, userName, warehouseName, endTimeStart, endTimeEnd, resultLimit, includeClientGenerated)
 	res, err := client.QuerySingle(ctx, query)
 	if err != nil {

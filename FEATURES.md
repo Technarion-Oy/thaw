@@ -722,9 +722,9 @@ Click the bar-chart icon in the Administration panel header (always visible, eve
 Click the clock icon in the Administration panel header (always visible, even before expanding) to open the **Query Activity** modal:
 
 - **Scope** — *By User* (default), *By Session*, *By Warehouse*, or *All*
-  - *By User* — autocomplete dropdown from `SHOW USERS`; accepts free-typed names for users that no longer exist
+  - *By User* — autocomplete dropdown from `SHOW USERS`; accepts free-typed names for users that no longer exist. **Run** stays disabled until a name is entered (an empty filter would widen the query beyond the intended user — use *All* for cross-user history).
   - *By Session* — free-text Session ID box; **Run** stays disabled until an id is entered. (A session can't be auto-detected because each editor tab runs on its own isolated session — paste an id, or use **Filter by this session** from a result row.)
-  - *By Warehouse* — autocomplete dropdown from the live warehouse list; accepts free-typed names for dropped or renamed warehouses
+  - *By Warehouse* — autocomplete dropdown from the live warehouse list; accepts free-typed names for dropped or renamed warehouses. **Run** stays disabled until a name is entered.
 - **Time range** — date/time range picker bounding the history window; pre-filled to **today** on open and freely adjustable
 - **Limit** — cap results from 1 to 10 000 (default 100)
 - **Include client-generated** — toggle to include Thaw's own internal statements

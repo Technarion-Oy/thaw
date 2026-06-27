@@ -110,8 +110,8 @@ export default function QueryHistoryModal({ onClose }: Props) {
   }) => {
     const ft    = override?.filterType ?? filterType;
     const sid   = (override?.sessionId ?? sessionId).trim();
-    const un    = override?.userName ?? userName;
-    const wn    = override?.warehouseName ?? warehouseName;
+    const un    = (override?.userName ?? userName).trim();
+    const wn    = (override?.warehouseName ?? warehouseName).trim();
     const range = override && "timeRange" in override ? override.timeRange : timeRange;
     setLoading(true);
     setError(null);
@@ -181,11 +181,12 @@ export default function QueryHistoryModal({ onClose }: Props) {
   // invalid (checked on the raw value so whitespace-only input — which disables
   // Run — still shows a cue), but not the instant they switch to session scope.
   const sessionIdHasError = sessionId !== "" && sessionScopeInvalid;
-  // "user" scope needs an explicit name — an empty USER_NAME widens the query
-  // beyond the intended user (the backend rejects it). Disable Run; use "all"
-  // scope to query across users.
+  // "user"/"warehouse" scope each need an explicit name — an empty filter widens
+  // the query (user) or resolves to the pooled metadata connection (warehouse);
+  // the backend rejects both. Disable Run; use "all" scope to query across users.
   const userScopeInvalid = filterType === "user" && userName.trim() === "";
-  const runDisabled = sessionScopeInvalid || userScopeInvalid;
+  const warehouseScopeInvalid = filterType === "warehouse" && warehouseName.trim() === "";
+  const runDisabled = sessionScopeInvalid || userScopeInvalid || warehouseScopeInvalid;
 
   // Auto-run on mount once the current user is known. If the connection store
   // hasn't hydrated yet, `defaultUser` is "" at mount; wait for it (the effect
@@ -193,9 +194,9 @@ export default function QueryHistoryModal({ onClose }: Props) {
   const didAutoRun = useRef(false);
   useEffect(() => {
     if (didAutoRun.current) return;
-    if (!defaultUser.trim()) return; // still waiting for the connection user — don't latch yet
-    didAutoRun.current = true;       // latch unconditionally once the user arrives
-    if (filterType !== "user") return; // user already switched scope — they're driving now
+    if (!defaultUser.trim()) return;   // still waiting for the connection user — don't latch yet
+    if (filterType !== "user") return; // user already switched scope — leave the latch eligible
+    didAutoRun.current = true;         // only consume the latch when we actually auto-run
     // Prefer a name the user already typed (slow-hydration race) over the
     // connection default, so the query and the visible input never diverge.
     const user = userName.trim() || defaultUser;
@@ -381,6 +382,7 @@ export default function QueryHistoryModal({ onClose }: Props) {
             <AutoComplete
               size="small"
               value={warehouseName}
+              status={warehouseScopeInvalid ? "error" : undefined}
               onChange={setWarehouseName}
               options={warehouses.map((w) => ({ value: w }))}
               filterOption={(input, option) =>
