@@ -95,12 +95,18 @@ export const usePanelLayoutStore = create<PanelLayoutState>()(
       name: "thaw-panel-layout",
       version: 1,
       // v1 folded the standalone "git" panel into the Files panel. Strip any
-      // persisted "git" entries so old layouts don't render an empty panel.
+      // persisted "git" entries so old layouts don't render an empty panel —
+      // falling back to defaults if stripping leaves a sidebar empty (a user
+      // whose left sidebar held only the Git panel would otherwise go blank).
       migrate: (persisted: any, version: number) => {
         if (persisted && version < 1) {
-          const strip = (arr: unknown) => Array.isArray(arr) ? arr.filter((id) => id !== "git") : arr;
-          persisted.left = strip(persisted.left);
-          persisted.right = strip(persisted.right);
+          const strip = (arr: unknown, fallback: PanelId[]) => {
+            if (!Array.isArray(arr)) return arr;
+            const kept = arr.filter((id) => id !== "git");
+            return kept.length ? kept : fallback;
+          };
+          persisted.left  = strip(persisted.left,  DEFAULT_LEFT);
+          persisted.right = strip(persisted.right, DEFAULT_RIGHT);
         }
         return persisted as PanelLayoutState;
       },

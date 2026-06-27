@@ -114,7 +114,9 @@ export default function ChangesView() {
   const unstagedTotal = status?.unstagedTotal ?? 0;
   const totalChanged  = status?.totalChanged  ?? 0;
 
-  const busy = staging || committing;
+  // Every one of these writes the git index, which go-git can't do concurrently —
+  // so any in-flight op disables the row/header actions.
+  const busy = staging || committing || resetting;
 
   // Tooltips that explain *why* an action is unavailable, not just what it does.
   const stageAllTip = busy ? "Working…"

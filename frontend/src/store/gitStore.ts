@@ -287,13 +287,17 @@ export const useGitStore = create<GitState>((set, get) => ({
       set({ error: String(e), committing: false });
       return false;
     }
-    set({ committing: false });
-    // Best-effort status refresh — a refresh failure here must NOT be reported as
-    // a commit failure (the commit already succeeded), so don't touch `error`.
+    // Keep `committing` true through the status refresh so the commit button
+    // stays disabled until stagedTotal reflects the now-empty index — otherwise a
+    // fast second click commits an empty index (ErrEmptyCommit). A refresh
+    // failure here must NOT be reported as a commit failure (the commit already
+    // succeeded), so don't touch `error`.
     try {
       const fresh = await GitStatus(exportDir);
       set({ status: fresh });
-    } catch { /* status will update on the next action */ }
+    } catch { /* status will update on the next action */ } finally {
+      set({ committing: false });
+    }
     return true;
   },
 

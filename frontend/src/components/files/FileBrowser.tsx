@@ -702,10 +702,12 @@ export default function FileBrowser() {
     else message.success(okMsg);
   };
 
-  // The store's git index isn't safe to write concurrently; bail if one is mid-flight
-  // (otherwise overlapping ops race on the shared `error` flag → wrong toasts).
+  // The store's git index isn't safe to write concurrently; bail if any index op
+  // (stage/unstage/discard, commit, or reset --hard) is mid-flight — otherwise
+  // overlapping writes race on the index and on the shared `error` flag.
   const gitBusy = () => {
-    if (useGitStore.getState().staging) {
+    const s = useGitStore.getState();
+    if (s.staging || s.committing || s.resetting) {
       message.warning("A git action is already running — try again in a moment");
       return true;
     }
@@ -748,15 +750,21 @@ export default function FileBrowser() {
     if (!fileCtxMenu) return;
     const { path, name } = fileCtxMenu;
     setFileCtxMenu(null);
+    // New files (added/untracked) have no committed version — discard deletes them.
+    const rel = gitOverlay.relOf(path);
+    const letter = rel != null ? gitOverlay.byRel.get(rel) : undefined;
+    const isNew = letter === "A" || letter === "U";
     modal.confirm({
-      title: `Discard changes to ${name}?`,
-      content: "Reverts the file to its last committed state. This cannot be undone.",
-      okText: "Discard",
+      title: isNew ? `Delete ${name}?` : `Discard changes to ${name}?`,
+      content: isNew
+        ? "Permanently deletes this file — it has never been committed and cannot be recovered."
+        : "Reverts the file to its last committed state. This cannot be undone.",
+      okText: isNew ? "Delete" : "Discard",
       okButtonProps: { danger: true },
       onOk: async () => {
         if (gitBusy()) return;
         await discardFile(path);
-        reportGit(`Discarded changes to ${name}`);
+        reportGit(isNew ? `Deleted ${name}` : `Discarded changes to ${name}`);
       },
     });
   };
@@ -770,6 +778,7 @@ export default function FileBrowser() {
       okText: "Discard all",
       okButtonProps: { danger: true },
       onOk: async () => {
+        if (gitBusy()) return;
         await resetHard();
         reportGit("Discarded all changes — working tree reset to last commit");
       },

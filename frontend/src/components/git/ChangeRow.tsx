@@ -35,6 +35,13 @@ export default function ChangeRow({
   const ot = objectTypeFromPath(file.path);
   const color = sigilColor(file.status);
 
+  // New files (added/untracked) have no committed version — discarding deletes
+  // them permanently rather than reverting to a prior state.
+  const isNew = file.status === "A" || file.status === "U";
+  const discardDesc = isNew
+    ? "Permanently deletes this file — it has never been committed and cannot be recovered."
+    : "Reverts the file to its last committed state. This cannot be undone.";
+
   return (
     <div
       className="git-change-row"
@@ -66,12 +73,12 @@ export default function ChangeRow({
           background: "linear-gradient(to right, transparent, var(--bg-hover) 28%)",
         }}
       >
-        <Tooltip title="Discard changes">
+        <Tooltip title={isNew ? "Delete file" : "Discard changes"}>
           <Popconfirm
-            title={`Discard changes to ${name}?`}
-            description="Reverts the file to its last committed state. This cannot be undone."
+            title={isNew ? `Delete ${name}?` : `Discard changes to ${name}?`}
+            description={discardDesc}
             onConfirm={() => onDiscard(file.path)}
-            okText="Discard"
+            okText={isNew ? "Delete" : "Discard"}
             okButtonProps={{ danger: true }}
             icon={<WarningOutlined style={{ color: "var(--danger)" }} />}
           >
