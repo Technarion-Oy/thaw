@@ -399,7 +399,7 @@ export const useQueryStore = create<QueryState>()(
       return next;
     }),
 
-  markSaved: (id, path, title) =>
+  markSaved: (id, path, title) => {
     set((state) => {
       const tab = state.tabs.find((t) => t.id === id);
       const savedSql = tab?.sql ?? "";
@@ -409,7 +409,13 @@ export const useQueryStore = create<QueryState>()(
         tabs: updatedTabs,
         ...(isActive ? { currentFile: path } : {}),
       };
-    }),
+    });
+    // Writing the file may have changed its git status — let the file explorer
+    // refresh its status colors without a manual tree refresh.
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("thaw:file-saved"));
+    }
+  },
 
   updateTabPath: (id, path, title) =>
     set((state) => {

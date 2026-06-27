@@ -8,7 +8,7 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from "react";
 import { Tree, Typography, Spin, Button, Input, Switch, Modal, Tooltip, App as AntApp } from "antd";
 import {
   FolderOutlined,
@@ -384,6 +384,23 @@ export default function FileBrowser() {
   const loadedRef = useRef(loaded);
   loadedRef.current = loaded;
 
+  // Debounced git-status refresh so the tree's status colors update live (on
+  // save, external edits, file ops) without a manual refresh, while coalescing
+  // bursts so we don't run the (potentially expensive) status scan repeatedly.
+  const gitRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleGitRefresh = useCallback(() => {
+    if (gitRefreshTimerRef.current) clearTimeout(gitRefreshTimerRef.current);
+    gitRefreshTimerRef.current = setTimeout(() => { useGitStore.getState().refreshStatus(); }, 400);
+  }, []);
+  useEffect(() => () => { if (gitRefreshTimerRef.current) clearTimeout(gitRefreshTimerRef.current); }, []);
+
+  // Refresh git colors when a file is saved in the editor (watcher-independent).
+  useEffect(() => {
+    const handler = () => scheduleGitRefresh();
+    window.addEventListener("thaw:file-saved", handler);
+    return () => window.removeEventListener("thaw:file-saved", handler);
+  }, [scheduleGitRefresh]);
+
   // Close file context menu on outside click or Escape key
   useEffect(() => {
     if (!fileCtxMenu) return;
@@ -439,6 +456,9 @@ export default function FileBrowser() {
   useEffect(() => {
     if (!exportDir || !fileWatcherEnabled) return;
     const off = EventsOn("fs:changed", (evt: { dir: string }) => {
+      // Any disk change may alter git status — refresh colors even for the app's
+      // own mutations (which suppress the tree update below to avoid flicker).
+      scheduleGitRefresh();
       if (selfChangedDirs.current.has(evt.dir)) return;
 
       // After refreshing a directory, prune loadedKeys entries that reference
@@ -475,7 +495,7 @@ export default function FileBrowser() {
         .catch(() => {});
     });
     return off;
-  }, [exportDir, fileWatcherEnabled]);
+  }, [exportDir, fileWatcherEnabled, scheduleGitRefresh]);
 
   // Keep selected key in sync with the active tab (including tab switches)
   useEffect(() => {
