@@ -242,22 +242,25 @@ export default function FileBrowser() {
 
   // ── Git status overlay ───────────────────────────────────────────────────────
   // Git status paths are repo-relative ("MYDB/PUBLIC/T.sql"); tree node keys are
-  // absolute OS paths the explorer built by joining the export dir with each name.
-  // So a node key always *ends with* its git path — we match on the longest path
-  // suffix that's a known changed path (robust to trailing slashes / symlinks /
-  // case in the picked directory). The uncapped `changedPaths` map drives coloring
-  // so the whole tree is covered even in huge change sets; the capped
-  // staged/unstaged lists drive the precise Stage/Unstage context menu.
+  // absolute OS paths the explorer built by joining the export dir with each name,
+  // so `relOf` recovers a node's repo-relative path by stripping the export-dir
+  // prefix (exact — no suffix guessing, which would false-match files that merely
+  // share a basename). The uncapped `changedPaths` map drives coloring so the whole
+  // tree is covered even in huge change sets; the capped staged/unstaged lists
+  // drive the precise Stage/Unstage context menu.
   const gitOverlay = useMemo(() => {
     const byRel       = new Map<string, string>(); // file rel → status letter
-    const dirLetter   = new Map<string, string>(); // dir rel → aggregate letter (mixed → "M")
+    const dirLetter   = new Map<string, string>(); // dir rel → dominant letter
     const stagedRel   = new Set<string>();
     const unstagedRel = new Set<string>();
 
+    // Folder color = the most significant change beneath it. A/U are both "new"
+    // (green), so a folder of only-new files stays green rather than reading as
+    // modified. Higher rank wins.
+    const RANK: Record<string, number> = { M: 5, R: 5, C: 5, D: 4, A: 2, U: 1 };
     const bumpDir = (dir: string, letter: string) => {
       const cur = dirLetter.get(dir);
-      if (cur === undefined) dirLetter.set(dir, letter);
-      else if (cur !== letter) dirLetter.set(dir, "M"); // mixed change types → modified
+      if (cur === undefined || (RANK[letter] ?? 0) > (RANK[cur] ?? 0)) dirLetter.set(dir, letter);
     };
     const addDirs = (rel: string, letter: string) => {
       let i = rel.lastIndexOf("/");
@@ -274,23 +277,17 @@ export default function FileBrowser() {
       for (const fc of (gitStatus.unstaged ?? [])) unstagedRel.add(fc.path.replace(/\\/g, "/"));
     }
 
-    // Longest path suffix of nodeKey that satisfies `has` (longest = the real path).
-    const matchSuffix = (nodeKey: string, has: (s: string) => boolean): string | null => {
-      const k = nodeKey.replace(/\\/g, "/");
-      if (has(k)) return k;
-      let idx = k.indexOf("/");
-      while (idx !== -1) {
-        const cand = k.slice(idx + 1);
-        if (has(cand)) return cand;
-        idx = k.indexOf("/", idx + 1);
-      }
+    // Exact repo-relative path of a tree node, or null when it's outside the repo.
+    const base = exportDir.replace(/[/\\]+$/, "").replace(/\\/g, "/");
+    const relOf = (nodeKey: string): string | null => {
+      const a = nodeKey.replace(/\\/g, "/");
+      if (a === base) return "";
+      if (base && a.startsWith(base + "/")) return a.slice(base.length + 1);
       return null;
     };
-    const fileRel = (nodeKey: string) => matchSuffix(nodeKey, (s) => byRel.has(s));
-    const dirRel  = (nodeKey: string) => matchSuffix(nodeKey, (s) => dirLetter.has(s));
 
-    return { byRel, dirLetter, stagedRel, unstagedRel, fileRel, dirRel };
-  }, [gitStatus]);
+    return { byRel, dirLetter, stagedRel, unstagedRel, relOf };
+  }, [gitStatus, exportDir]);
 
   // ── File tree state ────────────────────────────────────────────────────────
   const [treeData,    setTreeData]    = useState<DataNode[]>([]);
@@ -910,9 +907,8 @@ export default function FileBrowser() {
     }
     // Git status overlay: color changed files (with a trailing sigil) and
     // emphasize directories that contain nested changes.
-    const key = String(nodeData.key);
-    const fileR = gitOverlay.fileRel(key);
-    const letter = fileR ? gitOverlay.byRel.get(fileR) : undefined;
+    const rel = gitOverlay.relOf(String(nodeData.key));
+    const letter = rel != null ? gitOverlay.byRel.get(rel) : undefined;
     if (letter) {
       const color = sigilColor(letter);
       return (
@@ -926,9 +922,9 @@ export default function FileBrowser() {
         </span>
       );
     }
-    const dirR = gitOverlay.dirRel(key);
-    if (dirR) {
-      const color = sigilColor(gitOverlay.dirLetter.get(dirR) ?? "M");
+    const dirLetter = rel != null ? gitOverlay.dirLetter.get(rel) : undefined;
+    if (dirLetter) {
+      const color = sigilColor(dirLetter);
       return <span style={{ color, fontWeight: 600 }}>{nodeData.title as React.ReactNode}</span>;
     }
     return <>{nodeData.title}</>;
@@ -945,8 +941,8 @@ export default function FileBrowser() {
   // ctxChanged: the file is changed at all. When we don't have a precise
   // staged/unstaged side (legacy-only data), offer both Stage and Unstage and let
   // the backend no-op the irrelevant one.
-  const ctxRel       = fileCtxMenu && !fileCtxMenu.isDir ? gitOverlay.fileRel(fileCtxMenu.path) : null;
-  const ctxChanged   = ctxRel != null;
+  const ctxRel       = fileCtxMenu && !fileCtxMenu.isDir ? gitOverlay.relOf(fileCtxMenu.path) : null;
+  const ctxChanged   = ctxRel != null && gitOverlay.byRel.has(ctxRel);
   const ctxStagedHit   = ctxRel != null && gitOverlay.stagedRel.has(ctxRel);
   const ctxUnstagedHit = ctxRel != null && gitOverlay.unstagedRel.has(ctxRel);
   const ctxUnknownSide = ctxChanged && !ctxStagedHit && !ctxUnstagedHit;

@@ -14,9 +14,11 @@ The **git surface is folded into this panel** (there is no separate Git panel): 
 shows a branch chip + changed-file count + a Git Operations button, and the tree itself is
 **color-coded by git status**. The `gitOverlay` memo builds its color map from the status's
 **uncapped `changedPaths`** map (so the whole tree is covered even in huge change sets) and
-matches it to absolute tree node keys by **longest path suffix** (no export-dir prefix
-assumptions — robust to trailing slashes, symlinks, and case). Files get a sigil + status
-color; folders take the aggregate color of the changes beneath them. The capped
+matches it to absolute tree node keys via `relOf` — an **exact** export-dir prefix strip
+(suffix matching was rejected: in large repos files that merely share a basename would
+false-match). Files get a sigil + status color; folders take the color of the most
+significant change beneath them (A/U both count as "new"/green, so an all-new folder stays
+green rather than reading as modified). The capped
 `staged`/`unstaged` lists drive the precise Stage/Unstage context menu. The full
 staged/unstaged control lives in the Git Operations dialog. `FileBrowser` also owns calling
 `gitStore.loadConfig()` and refreshing git status on first mount (idempotent), since the
