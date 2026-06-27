@@ -46,6 +46,7 @@ import {
   DuplicateFile,
   StartFileWatcher,
   StopFileWatcher,
+  GitGetHeadFileContent,
 } from "../../../wailsjs/go/app/App";
 import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 import { useGitStore } from "../../store/gitStore";
@@ -693,6 +694,23 @@ export default function FileBrowser() {
     unstageFile(path).then(() => reportGit(`Unstaged ${name}`)).catch((e) => message.error(String(e)));
   };
 
+  // Open a diff of the file's working-tree content against its last-committed
+  // (HEAD) state. HEAD content comes from go-git; a deleted file reads as empty
+  // on the working side so the diff shows what was removed.
+  const handleCompareWithHead = async () => {
+    if (!fileCtxMenu) return;
+    const { path, name } = fileCtxMenu;
+    setFileCtxMenu(null);
+    try {
+      const head = await GitGetHeadFileContent(path);
+      let current = "";
+      try { current = await ReadFile(path); } catch { /* file deleted in worktree */ }
+      useQueryStore.getState().openDiff(`HEAD · ${name}`, head ?? "", `Working tree · ${name}`, current);
+    } catch (e) {
+      message.error(`Could not compare with last commit: ${String(e)}`);
+    }
+  };
+
   const handleDiscardGit = () => {
     if (!fileCtxMenu) return;
     const { path, name } = fileCtxMenu;
@@ -965,6 +983,10 @@ export default function FileBrowser() {
   const ctxUnknownSide = ctxChanged && !ctxStagedHit && !ctxUnstagedHit;
   const ctxStaged   = ctxStagedHit   || ctxUnknownSide; // show Unstage
   const ctxUnstaged = ctxUnstagedHit || ctxUnknownSide; // show Stage
+  // Comparable against HEAD only when there's a prior committed version — i.e. a
+  // tracked change (modified/renamed/copied/deleted), not a brand-new file (A/U).
+  const ctxLetter     = ctxRel != null ? gitOverlay.byRel.get(ctxRel) : undefined;
+  const ctxComparable = ctxLetter === "M" || ctxLetter === "R" || ctxLetter === "C" || ctxLetter === "D";
 
   return (
     <div style={{ padding: "4px 4px" }}>
@@ -1285,6 +1307,9 @@ export default function FileBrowser() {
           {!fileCtxMenu.isDir && (ctxUnstaged || ctxStaged) && (
             <>
               <div role="separator" style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+              {ctxComparable && (
+                <CtxItem icon={<DiffOutlined />} label="Compare with last commit" onClick={handleCompareWithHead} />
+              )}
               {ctxUnstaged && (
                 <CtxItem icon={<PlusOutlined />} label="Stage" onClick={handleStage} />
               )}

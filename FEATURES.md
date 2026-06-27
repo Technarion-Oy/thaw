@@ -694,6 +694,7 @@ When multiple databases or schemas are selected, stub filenames are prefixed wit
   - **Clone** — remote URL input, local path picker (native OS dialog), optional PAT (for private repos), clone progress feedback
   - **Branches** — lists all local and remote branches with the current branch highlighted; Switch button per local branch; **Merge branch** button to merge any local branch into the current one (Fast-Forward only); create new branch with name input and **Create Branch** button; refresh button to reload branch list
 - **Stage individual files** — stage, unstage, or discard a single file (`git add` / `git reset` / restore-to-HEAD) from the file-browser context menu or the Changes dialog; commit then operates on the staged set. Staging is whole-file (per-hunk staging is not yet supported)
+- **Compare with last commit** — right-click a tracked changed file in the explorer and choose **Compare with last commit** to open a side-by-side diff of the working-tree version against its HEAD (last-committed) state; deleted files show what was removed
 - **Git gutter indicators** — when a tracked file is open in the SQL editor, VS Code-style coloured bars appear in the gutter:
   - **Green bar** — lines added since the last HEAD commit
   - **Blue bar** — lines modified since the last HEAD commit
