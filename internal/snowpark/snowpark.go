@@ -1335,7 +1335,10 @@ func (s *Service) streamCommand(cmd *exec.Cmd) error {
 
 // pipBinForEnv returns the pip binary path for the active backend environment.
 func (s *Service) pipBinForEnv() (string, error) {
-	cfg, _ := config.Load()
+	cfg, err := config.Load()
+	if err != nil || cfg == nil {
+		return "", fmt.Errorf("config unavailable: %w", err)
+	}
 	backend := cfg.Snowpark.Backend
 	if backend == "" {
 		backend = "conda"
@@ -1520,7 +1523,7 @@ func (s *Service) InstallPyprojectFile(path string) error {
 		cmd.Env = append(os.Environ(), setup.Env...)
 	}
 	if err := s.streamCommandTo(cmd, "snowpark:package-output"); err != nil {
-		return fmt.Errorf("install from %s failed: %w", filepath.Base(path), err)
+		return fmt.Errorf("install from %s failed: %w", filepath.Base(dir), err)
 	}
 	return nil
 }

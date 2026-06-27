@@ -408,6 +408,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
 
   const handleInstallRequirements = async () => {
     setDepFileRunning(true);
+    setPackageLog([]);
     try {
       const path = await PickRequirementsFile();
       if (!path) return;
@@ -424,10 +425,13 @@ export default function SnowparkSetupModal({ onClose }: Props) {
 
   const handleInstallPyproject = async () => {
     setDepFileRunning(true);
+    setPackageLog([]);
     try {
       const path = await PickPyprojectFile();
       if (!path) return;
-      setPackageLog([`$ pip install (from ${path})`]);
+      // pip installs the directory containing the pyproject.toml, not the file.
+      const dir = path.replace(/[/\\][^/\\]*$/, "");
+      setPackageLog([`$ pip install ${dir}`]);
       await InstallPyprojectFile(path);
       const updated = await ListEnvPackages();
       setPackages(updated);
@@ -443,9 +447,10 @@ export default function SnowparkSetupModal({ onClose }: Props) {
     setPackageLog(["$ pip freeze…"]);
     try {
       const written = await FreezeRequirements("");
-      setPackageLog(written ? [`✓ Wrote requirements to ${written}`] : []);
+      // On cancel (written === ""), keep the prior log rather than clearing it.
+      setPackageLog((prev) => (written ? [`✓ Wrote requirements to ${written}`] : prev));
     } catch (e) {
-      setPackageLog([String(e)]);
+      setPackageLog((prev) => [...prev, String(e)]);
     } finally {
       setDepFileRunning(false);
     }
