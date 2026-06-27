@@ -1198,6 +1198,20 @@ func (s *Service) CheckSnowparkEnv() SnowparkCheckResult {
 	return s.checkCondaEnv(&result)
 }
 
+// moduleAvailableScript returns a Python one-off program that exits 0 if mod is
+// importable and 1 otherwise. It uses importlib.util.find_spec rather than a
+// real `import`, so it does not execute the module's (often heavy) init code —
+// importing snowflake.snowpark or notebook for real can take many seconds and
+// intermittently fail under load, producing flaky false negatives in the check.
+func moduleAvailableScript(mod string) string {
+	return fmt.Sprintf(`import importlib.util, sys
+try:
+    spec = importlib.util.find_spec(%q)
+except Exception:
+    spec = None
+sys.exit(0 if spec else 1)`, mod)
+}
+
 func (s *Service) checkCondaEnv(result *SnowparkCheckResult) SnowparkCheckResult {
 	condaPath, err := exec.LookPath("conda")
 	if err != nil {
@@ -1228,14 +1242,14 @@ func (s *Service) checkCondaEnv(result *SnowparkCheckResult) SnowparkCheckResult
 	}
 
 	if err := exec.Command(condaPath, "run", "-n", SnowparkCondaEnv,
-		"python", "-c", "import snowflake.snowpark").Run(); err != nil {
+		"python", "-c", moduleAvailableScript("snowflake.snowpark")).Run(); err != nil {
 		result.Details = "snowflake-snowpark-python not installed. Run Snowpark > Setup Environment."
 		return *result
 	}
 	result.HasSnowpark = true
 
 	if err := exec.Command(condaPath, "run", "-n", SnowparkCondaEnv,
-		"python", "-c", "import notebook").Run(); err != nil {
+		"python", "-c", moduleAvailableScript("notebook")).Run(); err != nil {
 		result.Details = "notebook package not installed. Run Snowpark > Setup Environment."
 		return *result
 	}
@@ -1272,13 +1286,13 @@ func (s *Service) checkVenvEnv(result *SnowparkCheckResult, cfg *config.AppConfi
 		return *result
 	}
 
-	if err := exec.Command(python, "-c", "import snowflake.snowpark").Run(); err != nil {
+	if err := exec.Command(python, "-c", moduleAvailableScript("snowflake.snowpark")).Run(); err != nil {
 		result.Details = "snowflake-snowpark-python not installed. Run Snowpark > Setup Environment."
 		return *result
 	}
 	result.HasSnowpark = true
 
-	if err := exec.Command(python, "-c", "import notebook").Run(); err != nil {
+	if err := exec.Command(python, "-c", moduleAvailableScript("notebook")).Run(); err != nil {
 		result.Details = "notebook package not installed. Run Snowpark > Setup Environment."
 		return *result
 	}
