@@ -1306,7 +1306,10 @@ func (s *Service) checkVenvEnv(result *SnowparkCheckResult, cfg *config.AppConfi
 
 // ─── command streaming ────────────────────────────────────────────────────────
 
-// streamCommandTo runs cmd and emits each output line as the given event.
+// streamCommandTo runs cmd and emits each output line as the given event. It
+// delegates to streamAndCapture and discards the captured slice; the captured
+// stdout (a few KB of pip output at most) is allocated then dropped here, which
+// is an accepted trade-off for keeping a single pipe-scan implementation.
 func (s *Service) streamCommandTo(cmd *exec.Cmd, eventName string) error {
 	_, err := s.streamAndCapture(cmd, eventName)
 	return err
@@ -1332,6 +1335,7 @@ func (s *Service) streamAndCapture(cmd *exec.Cmd, eventName string) ([]string, e
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		stdout.Close() // StdoutPipe's read-end would otherwise leak (Wait never runs)
 		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
@@ -1487,10 +1491,16 @@ func (s *Service) pipCmd(args ...string) (*exec.Cmd, error) {
 }
 
 // pipInstallCmd builds a `pip install` command with the configured private-
-// registry flags and environment applied, loading config exactly once. It is
-// the single wiring point for every install path so none can drift (e.g. miss a
-// proxy/index flag). The leading args are the pip subcommand and its operands
-// (e.g. "install", "-r", path); registry flags are appended.
+// registry flags and environment applied, loading config exactly once. The
+// leading args are the pip subcommand and its operands (e.g. "install", "-r",
+// path); registry flags are appended.
+//
+// It is the wiring point for the package-manager install paths (InstallEnvPackage
+// and the dependency-file installs). The conda/venv environment-setup steps
+// (InstallSnowparkVenv, InstallJupyterVenv, InstallJupyterNotebook) deliberately
+// do NOT route through here: they must target a fixed backend (the env the
+// wizard step is building) rather than dispatching on cfg.Snowpark.Backend, so
+// they build their command directly while still applying buildPipRegistrySetup.
 func (s *Service) pipInstallCmd(args ...string) (*exec.Cmd, error) {
 	cfg, err := config.Load()
 	if err != nil || cfg == nil {
@@ -1606,10 +1616,19 @@ func (s *Service) freezeToFile(path string) error {
 	if err != nil {
 		return fmt.Errorf("pip freeze: %w", err)
 	}
+	// `conda run` can interleave activation/solver/deprecation notices on stdout
+	// (the venv path doesn't), so keep only genuine pip-freeze lines — otherwise
+	// the requirements.txt would contain noise that `pip install -r` rejects.
+	reqs := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if isFreezeLine(line) {
+			reqs = append(reqs, line)
+		}
+	}
 	// Avoid writing a bare "\n" for an empty environment.
 	content := ""
-	if len(lines) > 0 {
-		content = strings.Join(lines, "\n") + "\n"
+	if len(reqs) > 0 {
+		content = strings.Join(reqs, "\n") + "\n"
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
@@ -1617,8 +1636,26 @@ func (s *Service) freezeToFile(path string) error {
 	// Emit the summary as the final event on the same ordered channel so it
 	// always lands after the streamed package lines (no UI ordering race).
 	wailsruntime.EventsEmit(s.ctx, "snowpark:package-output",
-		fmt.Sprintf("✓ Wrote %d packages to %s", len(lines), path))
+		fmt.Sprintf("✓ Wrote %d packages to %s", len(reqs), path))
 	return nil
+}
+
+// reFreezeRequirement matches a `pip freeze` requirement spec: an identifier
+// followed by a version operator or a PEP 508 direct-reference "@".
+var reFreezeRequirement = regexp.MustCompile(`^[A-Za-z0-9._-]+\s*(===|==|>=|<=|~=|!=|@|>|<)`)
+
+// isFreezeLine reports whether line is a legitimate `pip freeze` output line —
+// a requirement spec, an editable/option line (-e, --…), or a pip-emitted
+// comment — as opposed to conda/activation noise that must not reach the file.
+func isFreezeLine(line string) bool {
+	t := strings.TrimSpace(line)
+	if t == "" {
+		return false
+	}
+	if strings.HasPrefix(t, "#") || strings.HasPrefix(t, "-") {
+		return true
+	}
+	return reFreezeRequirement.MatchString(t)
 }
 
 // ─── conda install methods ────────────────────────────────────────────────────
@@ -1709,7 +1746,10 @@ func (s *Service) InstallJupyterNotebook() error {
 
 // InstallVenvEnv creates a Python venv at the configured path using system python3.
 func (s *Service) InstallVenvEnv() error {
-	cfg, _ := config.Load()
+	cfg, err := config.Load()
+	if err != nil || cfg == nil {
+		return fmt.Errorf("config unavailable: %w", err)
+	}
 	venvPath := cfg.Snowpark.VenvPath
 	if venvPath == "" {
 		venvPath = defaultVenvPath()
@@ -1775,7 +1815,10 @@ func (s *Service) InstallSnowparkVenv(withPandas bool) error {
 
 // DeleteVenvFolder removes the venv directory at the configured path.
 func (s *Service) DeleteVenvFolder() error {
-	cfg, _ := config.Load()
+	cfg, err := config.Load()
+	if err != nil || cfg == nil {
+		return fmt.Errorf("config unavailable: %w", err)
+	}
 	venvPath := cfg.Snowpark.VenvPath
 	if venvPath == "" {
 		venvPath = defaultVenvPath()
