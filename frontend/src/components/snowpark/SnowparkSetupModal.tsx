@@ -370,13 +370,16 @@ export default function SnowparkSetupModal({ onClose }: Props) {
   );
 
   // refreshPackages reloads the package list without letting a transient list
-  // failure masquerade as an operation failure (it surfaces via packagesError).
+  // failure masquerade as an operation failure. The failure is surfaced both in
+  // the Alert (packagesError) and appended to the output log the user is
+  // watching, so a stale package table can't be mistaken for fresh data.
   const refreshPackages = async () => {
     try {
       setPackages(await ListEnvPackages());
       setPackagesError(null);
     } catch (e) {
       setPackagesError(String(e));
+      setPackageLog((prev) => [...prev, `⚠ Package list refresh failed: ${String(e)}`]);
     }
   };
 
@@ -417,20 +420,34 @@ export default function SnowparkSetupModal({ onClose }: Props) {
     });
   };
 
-  const handleInstallRequirements = async () => {
-    // Capture the current log so a cancelled picker restores it rather than
-    // leaving the panel blank with no indication the action was a no-op.
+  // runDepFileInstall handles the shared shape of the requirements/pyproject
+  // install flows: pick a file, then install it. The backend emits the exact
+  // `$ pip install …` command and pip's output via "snowpark:package-output",
+  // so we only manage the log around the picker.
+  const runDepFileInstall = async (
+    op: "requirements" | "pyproject",
+    pick: () => Promise<string>,
+    install: (path: string) => Promise<void>,
+  ) => {
     const prevLog = packageLog;
-    setDepFileOp("requirements");
+    setDepFileOp(op);
+    let path: string;
+    try {
+      path = await pick();
+    } catch (e) {
+      // The picker itself failed — keep the prior log and surface the error.
+      setPackageLog([...prevLog, String(e)]);
+      setDepFileOp(null);
+      return;
+    }
+    if (!path) {
+      // Canceled — leave the prior log untouched.
+      setDepFileOp(null);
+      return;
+    }
     setPackageLog([]);
     try {
-      const path = await PickRequirementsFile();
-      if (!path) {
-        setPackageLog(prevLog);
-        return;
-      }
-      setPackageLog([`$ pip install -r ${path}`]);
-      await InstallRequirementsFile(path);
+      await install(path);
       await refreshPackages();
     } catch (e) {
       setPackageLog((prev) => [...prev, String(e)]);
@@ -439,36 +456,22 @@ export default function SnowparkSetupModal({ onClose }: Props) {
     }
   };
 
-  const handleInstallPyproject = async () => {
-    const prevLog = packageLog;
-    setDepFileOp("pyproject");
-    setPackageLog([]);
-    try {
-      const path = await PickPyprojectFile();
-      if (!path) {
-        setPackageLog(prevLog);
-        return;
-      }
-      // pip is given the directory containing the file, not the file itself.
-      setPackageLog([`Installing project from ${path}…`]);
-      await InstallPyprojectFile(path);
-      await refreshPackages();
-    } catch (e) {
-      setPackageLog((prev) => [...prev, String(e)]);
-    } finally {
-      setDepFileOp(null);
-    }
-  };
+  const handleInstallRequirements = () =>
+    runDepFileInstall("requirements", PickRequirementsFile, InstallRequirementsFile);
+
+  const handleInstallPyproject = () =>
+    runDepFileInstall("pyproject", PickPyprojectFile, InstallPyprojectFile);
 
   const handleFreezeRequirements = async () => {
-    // Capture the current log so a cancelled save dialog can restore it rather
-    // than leaving the "$ pip freeze…" placeholder stranded in the panel.
     const prevLog = packageLog;
     setDepFileOp("freeze");
-    setPackageLog(["$ pip freeze…"]);
+    setPackageLog([]);
     try {
+      // The save dialog and the streamed output (including the final
+      // "✓ Wrote N packages to <path>" summary) come from the backend, so on
+      // success we leave the streamed log alone — avoiding an ordering race.
       const written = await FreezeRequirements();
-      setPackageLog(written ? [`✓ Wrote requirements to ${written}`] : prevLog);
+      if (!written) setPackageLog(prevLog); // canceled — restore prior log
     } catch (e) {
       setPackageLog((prev) => [...prev, String(e)]);
     } finally {
