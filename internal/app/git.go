@@ -48,6 +48,31 @@ func (a *App) GitCommitAndPush(params gitrepo.PushParams) error {
 	return gitrepo.CommitAndPush(a.ctx, params)
 }
 
+// GitStageFile stages a single file in the working tree (git add <file>).
+func (a *App) GitStageFile(dir string, file string) error {
+	return gitrepo.StageFile(dir, file)
+}
+
+// GitUnstageFile removes a file from the index, restoring it to HEAD (git reset HEAD -- <file>).
+func (a *App) GitUnstageFile(dir string, file string) error {
+	return gitrepo.UnstageFile(dir, file)
+}
+
+// GitStageAll stages every working-tree change (git add -A), skipping OS junk files.
+func (a *App) GitStageAll(dir string) error {
+	return gitrepo.StageAll(dir)
+}
+
+// GitUnstageAll resets the whole index to HEAD, leaving the working tree untouched.
+func (a *App) GitUnstageAll(dir string) error {
+	return gitrepo.UnstageAll(dir)
+}
+
+// GitDiscardFile reverts a file to its HEAD state (tracked) or deletes it (untracked). Cannot be undone.
+func (a *App) GitDiscardFile(dir string, file string) error {
+	return gitrepo.DiscardFile(dir, file)
+}
+
 // GitPull fetches and merges changes from the remote branch.
 // The Token field is used only in-memory for the pull URL and is never persisted.
 func (a *App) GitPull(params gitrepo.PullParams) error {

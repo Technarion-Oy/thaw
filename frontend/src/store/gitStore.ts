@@ -11,7 +11,7 @@
 // @thaw-domain: Git Integration
 
 import { create } from "zustand";
-import { GitStatus, GitCommitAndPush, GitPull, GitFetch, PickDirectory, GetGitConfig, SaveGitConfig, GitClone, GitListBranches, GitCheckoutBranch, GitCheckoutRemoteBranch, GitCreateBranch, GitDeleteBranch, GitDeleteRemoteBranch, GitMergeBranch, GitResetHard, GitUpdateRemoteURL, GitPushBranch, GitLoginWithOAuth } from "../../wailsjs/go/app/App";
+import { GitStatus, GitCommitAndPush, GitPull, GitFetch, PickDirectory, GetGitConfig, SaveGitConfig, GitClone, GitListBranches, GitCheckoutBranch, GitCheckoutRemoteBranch, GitCreateBranch, GitDeleteBranch, GitDeleteRemoteBranch, GitMergeBranch, GitResetHard, GitUpdateRemoteURL, GitPushBranch, GitLoginWithOAuth, GitStageFile, GitUnstageFile, GitStageAll, GitUnstageAll, GitDiscardFile } from "../../wailsjs/go/app/App";
 import type { gitrepo } from "../../wailsjs/go/models";
 
 export type RepoStatus = gitrepo.RepoStatus;
@@ -19,6 +19,7 @@ export type PushParams = gitrepo.PushParams;
 export type BranchInfo = gitrepo.BranchInfo;
 export type CloneParams = gitrepo.CloneParams;
 export type CredentialResult = gitrepo.CredentialResult;
+export type FileChange = gitrepo.FileChange;
 
 interface GitState {
   // Persistent config (saved to disk, excluding token)
@@ -62,6 +63,17 @@ interface GitState {
   refreshStatus: () => Promise<void>;
   push: (params: { message: string; files?: string[] }) => Promise<void>;
   pull: () => Promise<void>;
+
+  // Staging (git index) actions — operate on the real index, then refresh status.
+  staging: boolean;
+  committing: boolean;
+  stageFile: (file: string) => Promise<void>;
+  unstageFile: (file: string) => Promise<void>;
+  stageAll: () => Promise<void>;
+  unstageAll: () => Promise<void>;
+  discardFile: (file: string) => Promise<void>;
+  commitStaged: (message: string) => Promise<void>;
+
   loginWithOAuth: (provider: string) => Promise<string>;
   setOAuthToken: (token: string) => void;
   clearError: () => void;
@@ -104,6 +116,8 @@ export const useGitStore = create<GitState>((set, get) => ({
   pulling: false,
   cloning: false,
   resetting: false,
+  staging: false,
+  committing: false,
   error: null,
 
   oauthToken: "",
@@ -206,6 +220,102 @@ export const useGitStore = create<GitState>((set, get) => ({
       set({ error: String(e) });
     } finally {
       set({ pulling: false });
+    }
+  },
+
+  stageFile: async (file: string) => {
+    const { exportDir } = get();
+    if (!exportDir) return;
+    set({ staging: true, error: null });
+    try {
+      await GitStageFile(exportDir, file);
+      await get().refreshStatus();
+    } catch (e) {
+      set({ error: String(e) });
+    } finally {
+      set({ staging: false });
+    }
+  },
+
+  unstageFile: async (file: string) => {
+    const { exportDir } = get();
+    if (!exportDir) return;
+    set({ staging: true, error: null });
+    try {
+      await GitUnstageFile(exportDir, file);
+      await get().refreshStatus();
+    } catch (e) {
+      set({ error: String(e) });
+    } finally {
+      set({ staging: false });
+    }
+  },
+
+  stageAll: async () => {
+    const { exportDir } = get();
+    if (!exportDir) return;
+    set({ staging: true, error: null });
+    try {
+      await GitStageAll(exportDir);
+      await get().refreshStatus();
+    } catch (e) {
+      set({ error: String(e) });
+    } finally {
+      set({ staging: false });
+    }
+  },
+
+  unstageAll: async () => {
+    const { exportDir } = get();
+    if (!exportDir) return;
+    set({ staging: true, error: null });
+    try {
+      await GitUnstageAll(exportDir);
+      await get().refreshStatus();
+    } catch (e) {
+      set({ error: String(e) });
+    } finally {
+      set({ staging: false });
+    }
+  },
+
+  discardFile: async (file: string) => {
+    const { exportDir } = get();
+    if (!exportDir) return;
+    set({ staging: true, error: null });
+    try {
+      await GitDiscardFile(exportDir, file);
+      await get().refreshStatus();
+    } catch (e) {
+      set({ error: String(e) });
+    } finally {
+      set({ staging: false });
+    }
+  },
+
+  commitStaged: async (message: string) => {
+    const { exportDir, remoteURL: storedURL, branch, authorName, authorEmail, oauthToken, status } = get();
+    if (!exportDir) return;
+    const remoteURL = storedURL || status?.remoteURL || "";
+    set({ committing: true, error: null });
+    try {
+      await GitCommitAndPush({
+        dir:         exportDir,
+        remoteURL,
+        branch:      branch || "main",
+        authMethod:  "oauth",
+        token:       oauthToken,
+        message:     message || "chore: export Snowflake DDL",
+        authorName,
+        authorEmail,
+        files:       [],
+        stagedOnly:  true,
+      } as any);
+      await get().refreshStatus();
+    } catch (e) {
+      set({ error: String(e) });
+    } finally {
+      set({ committing: false });
     }
   },
 

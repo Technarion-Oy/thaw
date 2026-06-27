@@ -281,7 +281,10 @@ func GetCodebaseSemanticMap() string {
         "internal/snowgitrepo/"
       ],
       "frontend_paths": [
+        "frontend/src/components/git/ChangeRow.tsx",
+        "frontend/src/components/git/ChangesView.tsx",
         "frontend/src/components/git/GitOperationsDialog.tsx",
+        "frontend/src/components/git/gitStatusUtil.ts",
         "frontend/src/store/gitStore.ts"
       ],
       "description": "Git repository operations, Snowflake Git repository objects, and schema export versioning."

@@ -709,6 +709,8 @@ export function GitDeleteBranch(arg1:string,arg2:string):Promise<void>;
 
 export function GitDeleteRemoteBranch(arg1:string,arg2:string,arg3:string):Promise<void>;
 
+export function GitDiscardFile(arg1:string,arg2:string):Promise<void>;
+
 export function GitFetch(arg1:string,arg2:string):Promise<void>;
 
 export function GitGetHeadFileContent(arg1:string):Promise<string>;
@@ -729,7 +731,15 @@ export function GitPushBranch(arg1:string,arg2:string,arg3:string):Promise<void>
 
 export function GitResetHard(arg1:string):Promise<void>;
 
+export function GitStageAll(arg1:string):Promise<void>;
+
+export function GitStageFile(arg1:string,arg2:string):Promise<void>;
+
 export function GitStatus(arg1:string):Promise<gitrepo.RepoStatus>;
+
+export function GitUnstageAll(arg1:string):Promise<void>;
+
+export function GitUnstageFile(arg1:string,arg2:string):Promise<void>;
 
 export function GitUpdateRemoteURL(arg1:string,arg2:string):Promise<void>;
 

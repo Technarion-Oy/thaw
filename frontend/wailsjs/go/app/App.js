@@ -1278,6 +1278,10 @@ export function GitDeleteRemoteBranch(arg1, arg2, arg3) {
   return window['go']['app']['App']['GitDeleteRemoteBranch'](arg1, arg2, arg3);
 }
 
+export function GitDiscardFile(arg1, arg2) {
+  return window['go']['app']['App']['GitDiscardFile'](arg1, arg2);
+}
+
 export function GitFetch(arg1, arg2) {
   return window['go']['app']['App']['GitFetch'](arg1, arg2);
 }
@@ -1318,8 +1322,24 @@ export function GitResetHard(arg1) {
   return window['go']['app']['App']['GitResetHard'](arg1);
 }
 
+export function GitStageAll(arg1) {
+  return window['go']['app']['App']['GitStageAll'](arg1);
+}
+
+export function GitStageFile(arg1, arg2) {
+  return window['go']['app']['App']['GitStageFile'](arg1, arg2);
+}
+
 export function GitStatus(arg1) {
   return window['go']['app']['App']['GitStatus'](arg1);
+}
+
+export function GitUnstageAll(arg1) {
+  return window['go']['app']['App']['GitUnstageAll'](arg1);
+}
+
+export function GitUnstageFile(arg1, arg2) {
+  return window['go']['app']['App']['GitUnstageFile'](arg1, arg2);
 }
 
 export function GitUpdateRemoteURL(arg1, arg2) {

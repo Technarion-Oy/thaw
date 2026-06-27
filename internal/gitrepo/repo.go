@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +23,7 @@ import (
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/format/index"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 )
@@ -32,17 +34,64 @@ import (
 // render thousands of rows.
 const maxStatusFiles = 500
 
+// FileChange is a single working-tree change with its VS Code-style status
+// letter: "A" added/untracked-new, "M" modified, "D" deleted, "R" renamed,
+// "C" copied, "U" untracked. Status is derived from the index side (staged)
+// or the worktree side (unstaged) depending on which list it appears in.
+type FileChange struct {
+	Path   string `json:"path"`
+	Status string `json:"status"`
+}
+
 // RepoStatus describes the current state of a git repository directory.
 type RepoStatus struct {
-	IsRepo       bool     `json:"isRepo"`
-	Branch       string   `json:"branch"`
-	Modified     []string `json:"modified"`
-	Added        []string `json:"added"`
-	Deleted      []string `json:"deleted"`
-	HasRemote    bool     `json:"hasRemote"`
-	RemoteURL    string   `json:"remoteURL"`
-	Ahead        int      `json:"ahead"`
-	TotalChanged int      `json:"totalChanged"` // exact total (may exceed len of arrays above)
+	IsRepo bool   `json:"isRepo"`
+	Branch string `json:"branch"`
+
+	// Legacy flat arrays (union of staged + unstaged), kept for compatibility.
+	Modified []string `json:"modified"`
+	Added    []string `json:"added"`
+	Deleted  []string `json:"deleted"`
+
+	// Staged holds files whose index differs from HEAD (git add'ed).
+	// Unstaged holds files whose worktree differs from the index (incl. untracked).
+	// A partially-staged file appears in both. Each is capped at maxStatusFiles;
+	// StagedTotal / UnstagedTotal carry the exact counts for the paginator.
+	Staged        []FileChange `json:"staged"`
+	Unstaged      []FileChange `json:"unstaged"`
+	StagedTotal   int          `json:"stagedTotal"`
+	UnstagedTotal int          `json:"unstagedTotal"`
+
+	HasRemote    bool   `json:"hasRemote"`
+	RemoteURL    string `json:"remoteURL"`
+	Ahead        int    `json:"ahead"`
+	TotalChanged int    `json:"totalChanged"` // exact total distinct changed paths
+
+	// ChangedPaths maps every changed path (repo-relative, forward-slash) to its
+	// single-letter status — uncapped, so the file-explorer color overlay can
+	// cover the whole tree even when the capped arrays above can't. Worktree
+	// status wins; staged-only files use their staging status.
+	ChangedPaths map[string]string `json:"changedPaths"`
+}
+
+// statusLetter maps a go-git StatusCode to the single-letter sigil the UI uses.
+// Untracked ('?') is surfaced as "U".
+func statusLetter(c gogit.StatusCode) string {
+	switch c {
+	case gogit.Untracked:
+		return "U"
+	case gogit.Added:
+		return "A"
+	case gogit.Deleted:
+		return "D"
+	case gogit.Renamed:
+		return "R"
+	case gogit.Copied:
+		return "C"
+	default:
+		// Modified and UpdatedButUnmerged both read as a modification.
+		return "M"
+	}
 }
 
 // PushParams holds all parameters needed for a commit-and-push operation.
@@ -55,7 +104,8 @@ type PushParams struct {
 	Message     string   `json:"message"`
 	AuthorName  string   `json:"authorName"`
 	AuthorEmail string   `json:"authorEmail"`
-	Files       []string `json:"files"` // if empty, stages all changes
+	Files       []string `json:"files"` // if empty (and StagedOnly false), stages all changes
+	StagedOnly  bool     `json:"stagedOnly"`
 }
 
 // PullParams holds parameters needed for a git pull operation.
@@ -163,10 +213,35 @@ func GetStatus(dir string) (RepoStatus, error) {
 	if err == nil {
 		st, err := wt.Status()
 		if err == nil {
+			s.ChangedPaths = make(map[string]string, len(st))
 			for path, fs := range st {
 				x := fs.Staging
 				y := fs.Worktree
 				s.TotalChanged++
+
+				// Uncapped color overlay: worktree status wins, else staging.
+				disp := y
+				if y == gogit.Unmodified {
+					disp = x
+				}
+				s.ChangedPaths[filepath.ToSlash(path)] = statusLetter(disp)
+
+				// Staged side: index differs from HEAD. Untracked is never staged.
+				if x != gogit.Unmodified && x != gogit.Untracked {
+					s.StagedTotal++
+					if len(s.Staged) < maxStatusFiles {
+						s.Staged = append(s.Staged, FileChange{Path: path, Status: statusLetter(x)})
+					}
+				}
+				// Unstaged side: worktree differs from the index (includes untracked).
+				if y != gogit.Unmodified {
+					s.UnstagedTotal++
+					if len(s.Unstaged) < maxStatusFiles {
+						s.Unstaged = append(s.Unstaged, FileChange{Path: path, Status: statusLetter(y)})
+					}
+				}
+
+				// Legacy union arrays.
 				switch {
 				case x == gogit.Deleted || y == gogit.Deleted:
 					if len(s.Deleted) < maxStatusFiles {
@@ -280,8 +355,11 @@ func CommitAndPush(ctx context.Context, p PushParams) error {
 		return fmt.Errorf("worktree: %w", err)
 	}
 
-	// Stage specified files or everything.
-	if len(p.Files) > 0 {
+	// Stage specified files or everything. When StagedOnly is set the commit
+	// operates on whatever is already in the index — nothing new is staged.
+	if p.StagedOnly {
+		// no-op: commit the existing index as-is
+	} else if len(p.Files) > 0 {
 		var stageable []string
 		for _, f := range p.Files {
 			if !osJunkFiles[filepath.Base(f)] {
@@ -328,7 +406,8 @@ func CommitAndPush(ctx context.Context, p PushParams) error {
 		},
 	})
 	if err != nil {
-		if strings.Contains(err.Error(), "nothing to commit") ||
+		if errors.Is(err, gogit.ErrEmptyCommit) ||
+			strings.Contains(err.Error(), "nothing to commit") ||
 			strings.Contains(err.Error(), "nothing added to commit") {
 			return nil
 		}
@@ -357,6 +436,210 @@ func CommitAndPush(ctx context.Context, p PushParams) error {
 		return fmt.Errorf("git push: %w", err)
 	}
 	return nil
+}
+
+// ── Index (staging) operations ──────────────────────────────────────────────
+//
+// These give the UI a real git index to work with: stage a single file, unstage
+// it, stage/unstage everything, or discard a file's changes. Commit then runs
+// over the staged set (CommitAndPush with StagedOnly) rather than re-selecting
+// files. go-git exposes no "git add -p", so staging is whole-file only.
+
+// openWorktree opens the repository at dir and returns its worktree.
+func openWorktree(dir string) (*gogit.Repository, *gogit.Worktree, error) {
+	repo, err := gogit.PlainOpenWithOptions(dir, &gogit.PlainOpenOptions{DetectDotGit: true})
+	if err != nil {
+		return nil, nil, fmt.Errorf("not a git repository")
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		return nil, nil, fmt.Errorf("worktree: %w", err)
+	}
+	return repo, wt, nil
+}
+
+// repoRelPath normalises file (absolute or already-relative) into a
+// forward-slash path relative to the worktree root, the form go-git's index and
+// tree APIs expect.
+func repoRelPath(wt *gogit.Worktree, dir, file string) string {
+	if !filepath.IsAbs(file) {
+		return filepath.ToSlash(file)
+	}
+	root := wt.Filesystem.Root()
+	if rel, err := filepath.Rel(root, file); err == nil {
+		return filepath.ToSlash(rel)
+	}
+	if rel, err := filepath.Rel(dir, file); err == nil {
+		return filepath.ToSlash(rel)
+	}
+	return filepath.ToSlash(file)
+}
+
+// headTreeEntry returns the HEAD tree entry for rel. found is false when there
+// is no HEAD commit yet, or rel is not tracked in HEAD (i.e. newly added).
+func headTreeEntry(repo *gogit.Repository, rel string) (entry *object.TreeEntry, found bool) {
+	head, err := repo.Head()
+	if err != nil {
+		return nil, false
+	}
+	commit, err := repo.CommitObject(head.Hash())
+	if err != nil {
+		return nil, false
+	}
+	tree, err := commit.Tree()
+	if err != nil {
+		return nil, false
+	}
+	te, err := tree.FindEntry(rel)
+	if err != nil {
+		return nil, false
+	}
+	return te, true
+}
+
+// StageFile stages a single file (git add <file>). Deletions are staged too.
+// OS junk files are silently skipped.
+func StageFile(dir, file string) error {
+	_, wt, err := openWorktree(dir)
+	if err != nil {
+		return err
+	}
+	rel := repoRelPath(wt, dir, file)
+	if osJunkFiles[filepath.Base(rel)] {
+		return nil
+	}
+	if err := wt.AddWithOptions(&gogit.AddOptions{Path: rel}); err != nil {
+		return fmt.Errorf("git add %s: %w", rel, err)
+	}
+	return nil
+}
+
+// StageAll stages every working-tree change (git add -A), skipping OS junk.
+func StageAll(dir string) error {
+	_, wt, err := openWorktree(dir)
+	if err != nil {
+		return err
+	}
+	_ = ensureGitignore(dir)
+	st, err := wt.Status()
+	if err != nil {
+		return fmt.Errorf("status: %w", err)
+	}
+	for p, fs := range st {
+		if fs.Worktree == gogit.Unmodified {
+			continue // already matches the index — nothing to stage
+		}
+		if osJunkFiles[filepath.Base(p)] {
+			continue
+		}
+		if err := wt.AddWithOptions(&gogit.AddOptions{Path: p}); err != nil {
+			return fmt.Errorf("git add %s: %w", p, err)
+		}
+	}
+	return nil
+}
+
+// UnstageFile removes a file from the index, restoring its staged state to HEAD
+// (git reset HEAD -- <file>). Newly-added files are dropped from the index
+// entirely. The working-tree copy is left untouched.
+//
+// It delegates to a path-constrained mixed reset rather than hand-editing the
+// index so the entry's stat cache is reset too — otherwise go-git's status
+// fast-path would still see the file as matching the (stale) index.
+func UnstageFile(dir, file string) error {
+	repo, wt, err := openWorktree(dir)
+	if err != nil {
+		return err
+	}
+	rel := repoRelPath(wt, dir, file)
+
+	head, err := repo.Head()
+	if err != nil {
+		// No commits yet — there is no HEAD to reset to; just drop the entry.
+		idx, err := repo.Storer.Index()
+		if err != nil {
+			return fmt.Errorf("read index: %w", err)
+		}
+		if _, err := idx.Remove(rel); err != nil && !errors.Is(err, index.ErrEntryNotFound) {
+			return fmt.Errorf("unstage %s: %w", rel, err)
+		}
+		if err := repo.Storer.SetIndex(idx); err != nil {
+			return fmt.Errorf("write index: %w", err)
+		}
+		return nil
+	}
+
+	if err := wt.Reset(&gogit.ResetOptions{
+		Commit: head.Hash(),
+		Mode:   gogit.MixedReset,
+		Files:  []string{rel},
+	}); err != nil {
+		return fmt.Errorf("unstage %s: %w", rel, err)
+	}
+	return nil
+}
+
+// UnstageAll resets the whole index to HEAD (git reset HEAD), leaving the
+// working tree untouched.
+func UnstageAll(dir string) error {
+	repo, wt, err := openWorktree(dir)
+	if err != nil {
+		return err
+	}
+	head, err := repo.Head()
+	if err != nil {
+		// No commits yet — clear the index entirely.
+		if err := repo.Storer.SetIndex(&index.Index{Version: 2}); err != nil {
+			return fmt.Errorf("write index: %w", err)
+		}
+		return nil
+	}
+	return wt.Reset(&gogit.ResetOptions{Commit: head.Hash(), Mode: gogit.MixedReset})
+}
+
+// DiscardFile reverts a file to its HEAD state: tracked files are restored from
+// HEAD (and unstaged); untracked / newly-added files are removed from the index
+// and deleted from disk. This cannot be undone.
+func DiscardFile(dir, file string) error {
+	repo, wt, err := openWorktree(dir)
+	if err != nil {
+		return err
+	}
+	rel := repoRelPath(wt, dir, file)
+	absPath := filepath.Join(wt.Filesystem.Root(), filepath.FromSlash(rel))
+
+	te, found := headTreeEntry(repo, rel)
+	if !found {
+		// Untracked or newly-added: drop from index and delete from disk.
+		if idx, err := repo.Storer.Index(); err == nil {
+			if _, err := idx.Remove(rel); err == nil || errors.Is(err, index.ErrEntryNotFound) {
+				_ = repo.Storer.SetIndex(idx)
+			}
+		}
+		if err := os.Remove(absPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("discard %s: %w", rel, err)
+		}
+		return nil
+	}
+
+	// Tracked: restore the worktree copy from the HEAD blob, then unstage.
+	blob, err := repo.BlobObject(te.Hash)
+	if err != nil {
+		return fmt.Errorf("read HEAD blob: %w", err)
+	}
+	reader, err := blob.Reader()
+	if err != nil {
+		return fmt.Errorf("read HEAD blob: %w", err)
+	}
+	defer reader.Close()
+	contents, err := io.ReadAll(reader)
+	if err != nil {
+		return fmt.Errorf("read HEAD blob: %w", err)
+	}
+	if err := os.WriteFile(absPath, contents, 0o644); err != nil {
+		return fmt.Errorf("restore %s: %w", rel, err)
+	}
+	return UnstageFile(dir, file)
 }
 
 // Pull fetches and merges changes from the remote branch.

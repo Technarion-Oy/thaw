@@ -11,10 +11,10 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export type PanelId   = "export" | "files" | "git" | "objects" | "account";
+export type PanelId   = "export" | "files" | "objects" | "account";
 export type SidebarId = "left" | "right";
 
-const DEFAULT_LEFT:              PanelId[] = ["export", "files", "git"];
+const DEFAULT_LEFT:              PanelId[] = ["export", "files"];
 const DEFAULT_RIGHT:             PanelId[] = ["objects", "account"];
 const DEFAULT_EDITOR_SPLIT                 = 0.4;
 const DEFAULT_LEFT_WIDTH                   = 220;
@@ -91,6 +91,19 @@ export const usePanelLayoutStore = create<PanelLayoutState>()(
         cellDetailWidth:  DEFAULT_CELL_DETAIL_WIDTH,
       }),
     }),
-    { name: "thaw-panel-layout" }
+    {
+      name: "thaw-panel-layout",
+      version: 1,
+      // v1 folded the standalone "git" panel into the Files panel. Strip any
+      // persisted "git" entries so old layouts don't render an empty panel.
+      migrate: (persisted: any, version: number) => {
+        if (persisted && version < 1) {
+          const strip = (arr: unknown) => Array.isArray(arr) ? arr.filter((id) => id !== "git") : arr;
+          persisted.left = strip(persisted.left);
+          persisted.right = strip(persisted.right);
+        }
+        return persisted as PanelLayoutState;
+      },
+    }
   )
 );

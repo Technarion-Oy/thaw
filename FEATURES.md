@@ -685,17 +685,20 @@ When multiple databases or schemas are selected, stub filenames are prefixed wit
 ## Git Integration
 
 - **Embedded `go-git`** — all git operations run without a system `git` installation; no external binary dependency
-- **Git Operations Dialog** — open via **Git → Git Operations…** (`⌘G` / `Ctrl+G`) or the "Git Operations…" button in the sidebar Git panel; provides four tabs:
-  - **Commit & Push** — file checklist with checkboxes (added/modified/deleted colour-coded), select all / none / by extension, commit message textarea, personal access token input (ephemeral, never saved)
+- **Git status in the Files panel** — git is folded into the file explorer (no separate Git panel). The Files header shows a **branch chip** (branch · commits-to-push), a changed-file count, and a Git Operations button. Both **files and folders are colour-coded by git status** — green for new/untracked (`A`/`U`), orange for modified (`M`, and folders with mixed changes), red for deleted (`D`) — with a single-letter sigil on files; folders take the aggregate colour of the changes beneath them. Coverage is uncapped, so even very large change sets colour the whole tree. Right-click a changed file to **Stage / Unstage / Discard** it
+- **Git Operations Dialog** — open via **Git → Git Operations…** (`⌘G` / `Ctrl+G`), the branch chip, or the Git Operations button in the Files header:
+  - **Changes view** — the full VS Code-style Source Control surface. Working-tree changes are split into **Staged changes** and **Changes** groups, each row showing a coloured status spine, single-letter sigil, the directory prefix + filename, and a trailing Snowflake **object-type** label in its type colour. Hover a row to **Stage** / **Unstage** or **Discard** it. Header actions: **Stage all** (`git add -A`), **Unstage all** (clears the staging area but keeps your edits), and **Reset to commit** (`git reset --hard` — discards all working-tree changes, behind a confirmation). Each group is **paginated** (50/page) so the backend's 500-file cap is surfaced honestly instead of silently truncated
+  - **Commit** — the commit summary box commits the **staged set** (the real git index) and pushes; the button names its target (e.g. *"Commit 4 staged"*). Personal-access / OAuth token is ephemeral, never saved
+  - **Repository** — local path picker, remote URL display/edit, clone form, or empty-repo init form
   - **Pull** — shows current remote URL and branch; PAT input; pull from configured remote branch
   - **Clone** — remote URL input, local path picker (native OS dialog), optional PAT (for private repos), clone progress feedback
   - **Branches** — lists all local and remote branches with the current branch highlighted; Switch button per local branch; **Merge branch** button to merge any local branch into the current one (Fast-Forward only); create new branch with name input and **Create Branch** button; refresh button to reload branch list
+- **Stage individual files** — stage, unstage, or discard a single file (`git add` / `git reset` / restore-to-HEAD) from the file-browser context menu or the Changes dialog; commit then operates on the staged set. Staging is whole-file (per-hunk staging is not yet supported)
 - **Git gutter indicators** — when a tracked file is open in the SQL editor, VS Code-style coloured bars appear in the gutter:
   - **Green bar** — lines added since the last HEAD commit
   - **Blue bar** — lines modified since the last HEAD commit
   - **Red chevron** — deletion point where lines were removed
   - Indicators update 400 ms after each keystroke; clear automatically when a scratch tab (no file path) is active
-- View git status for the working directory (staged and unstaged files shown in the sidebar panel)
 - Git credentials are **never saved to disk** — tokens are held in memory only for the duration of the operation
 - OS junk files (`.DS_Store`, `Thumbs.db`, `desktop.ini`) are automatically excluded and added to `.gitignore`
 
@@ -1142,7 +1145,7 @@ The following features are identified as feasible to be turned off via feature f
 - **Help menu** — **Function Catalog…** opens the built-in Snowflake function reference with overload signatures and descriptions for every function; **Keyboard Shortcuts…** opens a searchable modal listing every shortcut with macOS and Windows columns
 - **Resizable sidebars** — drag either sidebar edge to any width between 160 px and 600 px
 - **Resizable editor/results split** — drag the horizontal divider between the SQL editor and the results pane to any ratio; position is saved across sessions
-- **Drag-and-drop panel layout** — every sidebar panel (Export DDL, File Browser, Git, Object Browser, Administration) has a drag handle at its top edge; drag panels between the left and right sidebars or reorder them within a sidebar; layout is persisted across sessions
+- **Drag-and-drop panel layout** — every sidebar panel (Export DDL, File Browser, Object Browser, Administration) has a drag handle at its top edge; drag panels between the left and right sidebars or reorder them within a sidebar; layout is persisted across sessions
 - **Reset Layout** — restore the default panel positions and editor/results split via the **Customize Layout…** dialog (accessible from the **View** menu)
 - **Resizable object browser** — collapse, expand, or drag to resize the object tree panel
 - Right-click context menus are always clamped inside the viewport

@@ -1,10 +1,154 @@
 package gitrepo
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
+	gogit "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	gogithttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 )
+
+// initRepoWithCommit creates a repo in a temp dir with a single committed file
+// (a.sql) and returns the repo directory.
+func initRepoWithCommit(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.sql"), []byte("create table a;\n"), 0o644); err != nil {
+		t.Fatalf("write a.sql: %v", err)
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("worktree: %v", err)
+	}
+	if err := wt.AddWithOptions(&gogit.AddOptions{All: true}); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if _, err := wt.Commit("init", &gogit.CommitOptions{
+		Author: &object.Signature{Name: "t", Email: "t@t", When: time.Now()},
+	}); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	return dir
+}
+
+// statusSets returns the set of paths on the staged and unstaged sides.
+func statusSets(t *testing.T, dir string) (staged, unstaged map[string]string) {
+	t.Helper()
+	s, err := GetStatus(dir)
+	if err != nil {
+		t.Fatalf("GetStatus: %v", err)
+	}
+	staged, unstaged = map[string]string{}, map[string]string{}
+	for _, f := range s.Staged {
+		staged[f.Path] = f.Status
+	}
+	for _, f := range s.Unstaged {
+		unstaged[f.Path] = f.Status
+	}
+	return staged, unstaged
+}
+
+func TestStagingFlow(t *testing.T) {
+	dir := initRepoWithCommit(t)
+
+	// Modify the tracked file and add an untracked one.
+	if err := os.WriteFile(filepath.Join(dir, "a.sql"), []byte("create table a2;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "b.sql"), []byte("create table b;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Initially everything is unstaged.
+	staged, unstaged := statusSets(t, dir)
+	if len(staged) != 0 {
+		t.Fatalf("expected nothing staged, got %v", staged)
+	}
+	if unstaged["a.sql"] != "M" || unstaged["b.sql"] != "U" {
+		t.Fatalf("unexpected unstaged set: %v", unstaged)
+	}
+
+	// Stage a.sql → moves to the staged side; b.sql remains unstaged.
+	if err := StageFile(dir, "a.sql"); err != nil {
+		t.Fatalf("StageFile: %v", err)
+	}
+	staged, unstaged = statusSets(t, dir)
+	if staged["a.sql"] != "M" {
+		t.Fatalf("expected a.sql staged M, got %v", staged)
+	}
+	if _, ok := unstaged["b.sql"]; !ok {
+		t.Fatalf("expected b.sql still unstaged, got %v", unstaged)
+	}
+
+	// Unstage a.sql → back to unstaged.
+	if err := UnstageFile(dir, "a.sql"); err != nil {
+		t.Fatalf("UnstageFile: %v", err)
+	}
+	staged, unstaged = statusSets(t, dir)
+	if len(staged) != 0 {
+		t.Fatalf("expected nothing staged after unstage, got %v", staged)
+	}
+	if unstaged["a.sql"] != "M" {
+		t.Fatalf("expected a.sql unstaged M, got %v", unstaged)
+	}
+
+	// StageAll → both staged (a modified, b added).
+	if err := StageAll(dir); err != nil {
+		t.Fatalf("StageAll: %v", err)
+	}
+	staged, _ = statusSets(t, dir)
+	if staged["a.sql"] != "M" || staged["b.sql"] != "A" {
+		t.Fatalf("unexpected staged set after StageAll: %v", staged)
+	}
+
+	// UnstageAll → nothing staged.
+	if err := UnstageAll(dir); err != nil {
+		t.Fatalf("UnstageAll: %v", err)
+	}
+	staged, _ = statusSets(t, dir)
+	if len(staged) != 0 {
+		t.Fatalf("expected nothing staged after UnstageAll, got %v", staged)
+	}
+}
+
+func TestDiscardFile(t *testing.T) {
+	dir := initRepoWithCommit(t)
+
+	// Discard a tracked modification → file restored to HEAD content.
+	if err := os.WriteFile(filepath.Join(dir, "a.sql"), []byte("garbage\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := DiscardFile(dir, "a.sql"); err != nil {
+		t.Fatalf("DiscardFile tracked: %v", err)
+	}
+	got, _ := os.ReadFile(filepath.Join(dir, "a.sql"))
+	if string(got) != "create table a;\n" {
+		t.Fatalf("expected a.sql restored to HEAD, got %q", string(got))
+	}
+
+	// Discard an untracked file → deleted from disk.
+	if err := os.WriteFile(filepath.Join(dir, "c.sql"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := DiscardFile(dir, "c.sql"); err != nil {
+		t.Fatalf("DiscardFile untracked: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "c.sql")); !os.IsNotExist(err) {
+		t.Fatalf("expected c.sql removed, stat err = %v", err)
+	}
+
+	staged, unstaged := statusSets(t, dir)
+	if len(staged) != 0 || len(unstaged) != 0 {
+		t.Fatalf("expected clean tree after discards, got staged=%v unstaged=%v", staged, unstaged)
+	}
+}
 
 func TestNormaliseHTTPS(t *testing.T) {
 	tests := []struct {

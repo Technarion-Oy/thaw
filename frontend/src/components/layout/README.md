@@ -14,7 +14,7 @@ and the three-tier object-listing cache cascade.
 
 | File | Purpose |
 |------|---------|
-| `AppLayout.tsx` | Root shell. Renders left `Sidebar`, centre `QueryPage`, and optional right-side panels (`ExportPanel`, `FileBrowser`, `GitPanel`, `AccountPanel`). Implements `useResize` hook for drag-to-resize sidebar widths (clamped 160–600 px), `ResizeHandle` component, and panel drag-and-drop reordering. Reads `panelLayoutStore` for panel order/sizes and `featureFlagsStore` to gate panels. Listens for `menu:*` Wails events. Adjusts for macOS title bar (40 px offset). |
+| `AppLayout.tsx` | Root shell. Renders left `Sidebar`, centre `QueryPage`, and the draggable panels (`ExportPanel`, `FileBrowser`, object `Sidebar`, `AccountPanel`) — there is no standalone Git panel; git was folded into `FileBrowser`. Implements `useResize` hook for drag-to-resize sidebar widths (clamped 160–600 px), `ResizeHandle` component, and panel drag-and-drop reordering. Reads `panelLayoutStore` for panel order/sizes. Listens for `menu:*` Wails events (incl. `menu:git-operations`, which opens `GitOperationsDialog`). Adjusts for macOS title bar (40 px offset). |
 | `Sidebar.tsx` | Object browser. Builds and maintains the `DataNode` tree for databases → schemas → object type groups → objects → columns/sub-nodes. Implements `loadData` (lazy expansion), `buildTaskTree` (hierarchical TASK graph), `buildEntryNodes` (stages and DBT projects), `filterTree` (search), `removeNode`/`clearNodeChildren` (surgical tree mutations), and `menuItem` (context menu factory with `disabled`/`disabledReason` for feature gating). Owns all inline modals (40+). |
 
 ## Key patterns in `Sidebar.tsx`
