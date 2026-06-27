@@ -252,7 +252,7 @@ All workspace tools that accept a directory or file path validate the input agai
 | `get_query_results_summary` | readonly, explain_only only (NOT metadata) | `EditorContextStore.QueryResultSummary()` |
 | `get_query_history` | All modes | `queryhistory.GetQueryHistory()` via session's `*snowflake.Client` |
 
-`get_query_results_summary` is suppressed in metadata mode because it exposes actual data rows. `get_query_history` uses the MCP session's own Snowflake client to query `INFORMATION_SCHEMA.QUERY_HISTORY`; it resolves the session user via `GetCurrentUser` (`SELECT CURRENT_USER()`) and passes it as the explicit `USER_NAME` filter, since user-scoped history now requires a non-empty user.
+`get_query_results_summary` is suppressed in metadata mode because it exposes actual data rows. `get_query_history` uses the MCP session's own Snowflake client to query `INFORMATION_SCHEMA.QUERY_HISTORY`; it resolves the session user via `GetCurrentUserCached` (`SELECT CURRENT_USER()`, cached on the client for the connection's lifetime so it survives mode-switch tool re-registration) and passes it as the explicit `USER_NAME` filter, since user-scoped history now requires a non-empty user.
 
 **SQL execution tools** (readonly/explain_only only, `sql_tools.go`):
 

@@ -118,6 +118,17 @@ func TestBuildQueryHistorySQLTimeRange(t *testing.T) {
 	}
 }
 
+// TestBuildQueryHistorySQLTimeRangeQuoting exercises the QuoteStringLit guard on
+// the timestamp args: a value containing a single-quote must be doubled, not
+// embedded verbatim (which would break out of the literal). A clean RFC3339
+// string can't distinguish QuoteStringLit from a bare '%s', so use a quote here.
+func TestBuildQueryHistorySQLTimeRangeQuoting(t *testing.T) {
+	sql := buildQueryHistorySql("all", "", "", "", "2026-01-01'T00:00:00Z", "2026-01-02T00:00:00Z", 50, false)
+	if !strings.Contains(sql, "END_TIME_RANGE_START => '2026-01-01''T00:00:00Z'::TIMESTAMP_LTZ") {
+		t.Errorf("single-quote in start timestamp must be doubled by QuoteStringLit:\n%s", sql)
+	}
+}
+
 func TestParseQueryHistory(t *testing.T) {
 	res := &snowflake.QueryResult{
 		Columns: []string{

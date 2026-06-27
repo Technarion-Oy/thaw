@@ -12,7 +12,6 @@ package mcp
 
 import (
 	"context"
-	"sync"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -73,14 +72,6 @@ func registerEditorTools(srv *mcpsdk.Server, client *snowflake.Client, mode stri
 	// about past executions (SQL text, timing, status), not query result data,
 	// so it is not suppressed in metadata mode. Uses the MCP session's own
 	// Snowflake client to query INFORMATION_SCHEMA.QUERY_HISTORY.
-	//
-	// The session user is constant for the connection's lifetime, so resolve it
-	// once (lazily, on the first call when the client is ready) and cache it
-	// rather than paying a SELECT CURRENT_USER() round-trip on every invocation.
-	var (
-		userMu     sync.Mutex
-		cachedUser string
-	)
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
 		Name: "get_query_history",
 		Description: "Return the user's recent Snowflake query history (up to 50 entries), " +
@@ -104,27 +95,18 @@ func registerEditorTools(srv *mcpsdk.Server, client *snowflake.Client, mode stri
 
 		// Resolve the current user explicitly — user-scoped query history requires
 		// a non-empty USER_NAME (an empty one would widen the query beyond the
-		// session user, so GetQueryHistory rejects it). Resolved once and cached
-		// for the connection's lifetime; failures aren't cached so a later call
-		// can retry.
-		userMu.Lock()
-		currentUser := cachedUser
-		if currentUser == "" {
-			u, err := client.GetCurrentUser(ctx)
-			if err != nil {
-				userMu.Unlock()
-				logger.L.Error("mcp get_query_history: resolve current user failed", "err", err)
-				return &mcpsdk.CallToolResult{
-					Content: []mcpsdk.Content{&mcpsdk.TextContent{
-						Text: "failed to fetch query history",
-					}},
-					IsError: true,
-				}, nil, nil
-			}
-			cachedUser = u
-			currentUser = u
+		// session user, so GetQueryHistory rejects it). Cached on the client for
+		// the connection's lifetime, so it survives MCP mode-switch re-registration.
+		currentUser, err := client.GetCurrentUserCached(ctx)
+		if err != nil {
+			logger.L.Error("mcp get_query_history: resolve current user failed", "err", err)
+			return &mcpsdk.CallToolResult{
+				Content: []mcpsdk.Content{&mcpsdk.TextContent{
+					Text: "failed to fetch query history",
+				}},
+				IsError: true,
+			}, nil, nil
 		}
-		userMu.Unlock()
 
 		rows, err := queryhistory.GetQueryHistory(
 			ctx, client,

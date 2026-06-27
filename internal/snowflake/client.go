@@ -238,6 +238,11 @@ type Client struct {
 	objectCacheMu sync.RWMutex
 	objectCache   map[string]objectCacheEntry
 
+	// currentUser caches SELECT CURRENT_USER() — constant for the connection's
+	// lifetime. Resolved lazily via GetCurrentUserCached; failures are not cached.
+	currentUserMu sync.Mutex
+	currentUser   string
+
 	// excludedExtendedKinds stores a map[string]bool of object kinds to skip
 	// in ListExtendedObjects. Accessed via SetExcludedExtendedKinds (write)
 	// and getExcludedExtendedKinds (read) which use atomic.Value for safe
@@ -506,6 +511,24 @@ func (c *Client) GetCurrentUser(ctx context.Context) (string, error) {
 	if err := c.queryRowCtx(ctx, "SELECT CURRENT_USER()").Scan(&name); err != nil {
 		return "", err
 	}
+	return name, nil
+}
+
+// GetCurrentUserCached returns the current session's user, resolving it via
+// GetCurrentUser on first use and caching the result for the client's lifetime.
+// The user is constant for a connection, so this avoids repeating the round-trip.
+// A failed lookup is not cached, so a later call can retry.
+func (c *Client) GetCurrentUserCached(ctx context.Context) (string, error) {
+	c.currentUserMu.Lock()
+	defer c.currentUserMu.Unlock()
+	if c.currentUser != "" {
+		return c.currentUser, nil
+	}
+	name, err := c.GetCurrentUser(ctx)
+	if err != nil {
+		return "", err
+	}
+	c.currentUser = name
 	return name, nil
 }
 
