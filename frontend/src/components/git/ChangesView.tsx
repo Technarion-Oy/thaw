@@ -116,6 +116,18 @@ export default function ChangesView() {
 
   const busy = staging || committing;
 
+  // Tooltips that explain *why* an action is unavailable, not just what it does.
+  const stageAllTip = busy ? "Working…"
+    : unstagedTotal === 0 ? "Nothing to stage — every change is already staged"
+    : "Stage every change (git add -A)";
+  const unstageAllTip = busy ? "Working…"
+    : stagedTotal === 0 ? "Nothing staged yet — use “Stage all” or the + on a row first"
+    : "Remove every file from the staging area. Your edits are kept (git reset).";
+  const commitTip = busy ? "Working…"
+    : !oauthToken ? "Connect to GitHub (above) to commit & push"
+    : stagedTotal === 0 ? "Stage changes first — commit applies only to staged files. Use “Stage all” or the + on a row."
+    : `Commit & push ${stagedTotal.toLocaleString()} staged file${stagedTotal === 1 ? "" : "s"}`;
+
   const handleCommit = async () => {
     await commitStaged(commitMsg);
     if (!useGitStore.getState().error) setCommitMsg("");
@@ -132,11 +144,15 @@ export default function ChangesView() {
           <Tooltip title="Refresh">
             <Button size="small" icon={<ReloadOutlined spin={loading} />} onClick={refreshStatus} disabled={loading} />
           </Tooltip>
-          <Tooltip title="Stage every change (git add -A)">
-            <Button size="small" icon={<PlusOutlined />} disabled={busy || unstagedTotal === 0} onClick={stageAll}>Stage all</Button>
+          <Tooltip title={stageAllTip}>
+            <span style={{ display: "inline-flex" }}>
+              <Button size="small" icon={<PlusOutlined />} disabled={busy || unstagedTotal === 0} onClick={stageAll}>Stage all</Button>
+            </span>
           </Tooltip>
-          <Tooltip title="Remove every file from the staging area. Your edits are kept (git reset).">
-            <Button size="small" icon={<MinusOutlined />} disabled={busy || stagedTotal === 0} onClick={unstageAll}>Unstage all</Button>
+          <Tooltip title={unstageAllTip}>
+            <span style={{ display: "inline-flex" }}>
+              <Button size="small" icon={<MinusOutlined />} disabled={busy || stagedTotal === 0} onClick={unstageAll}>Unstage all</Button>
+            </span>
           </Tooltip>
           {totalChanged > 0 && (
             <Tooltip title="Discard all working-tree changes and reset to the last commit (git reset --hard)">
@@ -165,15 +181,25 @@ export default function ChangesView() {
         onChange={(e) => setCommitMsg(e.target.value)}
         style={{ fontSize: 12, resize: "none" }}
       />
-      <Button
-        type="primary"
-        icon={<CloudUploadOutlined />}
-        loading={committing}
-        disabled={busy || stagedTotal === 0 || !oauthToken}
-        onClick={handleCommit}
-      >
-        {committing ? "Committing & pushing…" : `Commit & Push ${stagedTotal.toLocaleString()} staged`}
-      </Button>
+      <Tooltip title={commitTip}>
+        <span style={{ display: "inline-flex", width: "100%" }}>
+          <Button
+            type="primary"
+            block
+            icon={<CloudUploadOutlined />}
+            loading={committing}
+            disabled={busy || stagedTotal === 0 || !oauthToken}
+            onClick={handleCommit}
+          >
+            {committing ? "Committing & pushing…" : `Commit & Push ${stagedTotal.toLocaleString()} staged`}
+          </Button>
+        </span>
+      </Tooltip>
+      {stagedTotal === 0 && totalChanged > 0 && (
+        <Text style={{ fontSize: 11, color: "var(--text-muted)" }}>
+          Nothing staged yet — Stage changes above to enable commit.
+        </Text>
+      )}
       {!oauthToken && (
         <Text style={{ fontSize: 11, color: "var(--text-muted)" }}>Connect to GitHub above to enable commit &amp; push.</Text>
       )}
