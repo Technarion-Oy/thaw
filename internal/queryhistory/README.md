@@ -46,9 +46,10 @@ Unexported — all external access goes through `GetQueryHistory`, which validat
 the session ID first. Selects the Snowflake table function based on `filterType`
 (`"session"`, `"user"`, `"warehouse"`, or default `"all"`), builds named-argument
 clauses for whichever filters are non-empty, and returns a `SELECT` ordered by
-`START_TIME DESC`. Date strings are cast to `TIMESTAMP_LTZ` inline. A SESSION_ID
-that is not a bare int64 is silently dropped here as an injection guard, so
-callers must pre-validate (`GetQueryHistory` does).
+`START_TIME DESC`. Date strings are cast to `TIMESTAMP_LTZ` inline. For
+`filterType "session"`, a `SESSION_ID` that is not a bare int64 violates the
+precondition and **panics** (a programmer error — callers must pre-validate;
+`GetQueryHistory` does), rather than silently emitting a wrong query.
 
 ### `ParseQueryHistory(res *snowflake.QueryResult) []QueryHistoryRow`
 Uses `snowflake.ColIdx` for position-independent column lookup (safe against

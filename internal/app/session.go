@@ -200,14 +200,7 @@ func (a *App) GetCurrentUser() (string, error) {
 	if a.client == nil {
 		return "", apperrors.ErrNotConnected
 	}
-	qr, err := a.client.Execute(a.ctx, `SELECT CURRENT_USER()`)
-	if err != nil {
-		return "", err
-	}
-	if len(qr.Rows) > 0 && len(qr.Rows[0]) > 0 && qr.Rows[0][0] != nil {
-		return fmt.Sprint(qr.Rows[0][0]), nil
-	}
-	return "", nil
+	return a.client.GetCurrentUser(a.ctx)
 }
 
 // GetSessionParameters returns the current session parameters from SHOW PARAMETERS IN SESSION.

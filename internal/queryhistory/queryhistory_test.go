@@ -82,7 +82,8 @@ func TestBuildQueryHistorySQL(t *testing.T) {
 }
 
 func TestBuildQueryHistorySQLSessionInjection(t *testing.T) {
-	// A non-numeric / injection-laden session id must never be embedded.
+	// A non-numeric / injection-laden session id violates the builder's
+	// precondition and must panic (never be embedded as an argument).
 	for _, sid := range []string{
 		"1234, RESULT_LIMIT => 10000",
 		"1234; DROP TABLE",
@@ -93,10 +94,14 @@ func TestBuildQueryHistorySQLSessionInjection(t *testing.T) {
 		"9999999999999999999",           // 19 digits but overflows int64
 		"007",                           // leading zeros
 	} {
-		sql := buildQueryHistorySql("session", sid, "", "", "", "", 100, false)
-		if strings.Contains(sql, "SESSION_ID =>") {
-			t.Errorf("session id %q must not be embedded as an argument:\n%s", sid, sql)
-		}
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("session id %q must panic, not be embedded", sid)
+				}
+			}()
+			buildQueryHistorySql("session", sid, "", "", "", "", 100, false)
+		}()
 	}
 
 	// A clean numeric id is embedded as-is.

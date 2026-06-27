@@ -96,10 +96,10 @@ export default function QueryHistoryModal({ onClose }: Props) {
   const [profileQueryId,  setProfileQueryId]  = useState<string | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Holds the exact range that was active when session scope cleared it, so
-  // leaving session scope restores it verbatim (not just "today"). `undefined`
-  // means "not in a session-cleared state"; a stored `null` means the user had
-  // deliberately cleared the range before entering session scope.
-  const savedRange = useRef<[Dayjs, Dayjs] | null | undefined>(undefined);
+  // leaving session scope restores it verbatim (not just "today"). Tagged union
+  // so the "no saved range" state can't be confused with a saved `null` (the
+  // user having deliberately cleared the range before entering session scope).
+  const savedRange = useRef<{ saved: false } | { saved: true; range: [Dayjs, Dayjs] | null }>({ saved: false });
   // Set when the user explicitly edits the user-name field, so the on-open
   // CURRENT_USER() resolution doesn't clobber a name they typed first.
   const userEdited = useRef(false);
@@ -161,7 +161,7 @@ export default function QueryHistoryModal({ onClose }: Props) {
     // the *first* entry into session scope — a session→session drill-down
     // (range already null) must not overwrite the saved value.
     if (filterType !== "session") {
-      savedRange.current = timeRange;
+      savedRange.current = { saved: true, range: timeRange };
     }
     setFilterType(params.filterType);
     setSessionId(params.sessionId);
@@ -194,6 +194,14 @@ export default function QueryHistoryModal({ onClose }: Props) {
   const warehouseScopeInvalid = filterType === "warehouse" && warehouseName.trim() === "";
   const runDisabled = sessionScopeInvalid || userScopeInvalid || warehouseScopeInvalid;
 
+  // Refs the async auto-run reads, kept in sync each render so it never acts on a
+  // stale closure (latest runQuery captures the current limit/range/flags; latest
+  // typed userName wins over the resolved identity).
+  const runQueryRef = useRef(runQuery);
+  runQueryRef.current = runQuery;
+  const userNameRef = useRef(userName);
+  userNameRef.current = userName;
+
   // Reset the auto-run latch and the (now-stale) user filter on disconnect, so a
   // reconnect — possibly as a different account — re-resolves and re-runs instead
   // of showing the previous user's history. Declared before the auto-run effect
@@ -218,6 +226,8 @@ export default function QueryHistoryModal({ onClose }: Props) {
     if (filterType !== "user") return; // user is driving another scope — stay eligible
     didAutoRun.current = true;         // only consume the latch when we actually auto-run
     let cancelled = false;
+    let handedOff = false;
+    setLoading(true); // show a spinner and block a manual Run from racing the auto-run
     GetCurrentUser()
       .then((u) => (u && u.trim()) || connFormUser)
       .catch(() => connFormUser)
@@ -225,11 +235,22 @@ export default function QueryHistoryModal({ onClose }: Props) {
         if (cancelled) return;
         // Respect a name the user explicitly typed first; otherwise use the
         // resolved identity, so the query and the visible input never diverge.
-        const user = userEdited.current && userName.trim() ? userName.trim() : resolved;
-        if (user !== userName) setUserName(user);
-        runQuery({ userName: user });
+        const typed = userEdited.current ? userNameRef.current.trim() : "";
+        const user = typed || resolved.trim();
+        if (user !== userNameRef.current) setUserName(user);
+        if (!user) {
+          // SSO with no connect-form user and CURRENT_USER() failed: don't fire a
+          // doomed request. The empty/red field + disabled Run cue the user to
+          // type a name and Run manually.
+          setLoading(false);
+          return;
+        }
+        handedOff = true;
+        runQueryRef.current({ userName: user }); // owns the loading lifecycle from here
       });
-    return () => { cancelled = true; };
+    // If the resolve is cancelled before handing off to runQuery, clear the
+    // spinner we set above (runQuery would otherwise never run to clear it).
+    return () => { cancelled = true; if (!handedOff) setLoading(false); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConnected, filterType]);
 
@@ -335,23 +356,32 @@ export default function QueryHistoryModal({ onClose }: Props) {
             value={filterType}
             disabled={loading}
             onChange={(v) => {
+              // Leaving session scope: clear the now-stale id so switching back
+              // doesn't silently re-query it.
+              if (filterType === "session" && v !== "session") {
+                setSessionId("");
+              }
               if (v === "session") {
                 // Entering session scope (always from a non-session scope here):
                 // save the exact range and clear it, so a pasted id for an older
                 // session isn't silently bounded by today's window — and so the
                 // inverse switch can restore precisely what was there.
-                savedRange.current = timeRange;
+                savedRange.current = { saved: true, range: timeRange };
                 setTimeRange(null);
-              } else if (filterType === "session") {
-                // Leaving session scope: clear the now-stale id so switching back
-                // doesn't silently re-query it, and restore the saved range
-                // verbatim — but only if the user didn't set a new one while in
-                // session scope (then `timeRange` is no longer the null we set).
-                setSessionId("");
-                if (timeRange === null && savedRange.current !== undefined) {
-                  setTimeRange(savedRange.current);
+              } else if (v === "user") {
+                // Returning to user scope from session: restore the saved range
+                // verbatim, unless the user set a new one while in session scope
+                // (then `timeRange` is no longer the null we set on entry).
+                if (savedRange.current.saved && timeRange === null) {
+                  setTimeRange(savedRange.current.range);
                 }
-                savedRange.current = undefined;
+                savedRange.current = { saved: false };
+              } else {
+                // warehouse / all: don't silently inherit the user-scope "today"
+                // default — clear the range so these scopes show full history
+                // unless the user sets one explicitly.
+                setTimeRange(null);
+                savedRange.current = { saved: false };
               }
               setFilterType(v);
             }}

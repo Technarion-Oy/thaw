@@ -48,11 +48,11 @@ type QueryHistoryRow struct {
 //   - resultLimit:            max rows returned (1–10 000)
 //   - includeClientGenerated: include client-generated statements
 //
-// Precondition: callers must validate sessionID. As an injection guard, a
-// SESSION_ID that is not a bare int64 is silently dropped here, which yields an
-// argument-less QUERY_HISTORY_BY_SESSION() that resolves to the wrong (pooled)
-// session. Prefer GetQueryHistory, which rejects invalid session IDs with an
-// error rather than producing a semantically wrong query.
+// Precondition: for filterType "session", sessionID must be a valid bare int64.
+// GetQueryHistory (the primary gate, and the only production caller) enforces
+// this; passing an invalid id here is a programmer error and panics rather than
+// silently emitting an argument-less QUERY_HISTORY_BY_SESSION() that resolves to
+// the wrong (pooled) session. Always go through GetQueryHistory.
 func buildQueryHistorySql(
 	filterType string,
 	sessionID string,
@@ -80,16 +80,15 @@ func buildQueryHistorySql(
 	var args []string
 	switch filterType {
 	case "session":
-		// SESSION_ID is a bare numeric argument (not quoted), so it must never
-		// be embedded verbatim — a value like "1234, RESULT_LIMIT => 10000"
-		// would inject extra named arguments. Snowflake session IDs are
-		// integers; only embed when the value is a valid bare int64. On the
-		// production path GetQueryHistory has already rejected an invalid id, so
-		// this is a defense-in-depth guard for direct/test callers, not the
-		// primary gate — see the precondition note above.
-		if snowflake.IsNumericID(sessionID) {
-			args = append(args, fmt.Sprintf("SESSION_ID => %s", sessionID))
+		// SESSION_ID is a bare numeric argument (not quoted), so it must never be
+		// embedded verbatim — a value like "1234, RESULT_LIMIT => 10000" would
+		// inject extra named arguments. The precondition (a valid bare int64) is
+		// enforced by GetQueryHistory; an invalid id reaching here is a programmer
+		// error, so fail loud rather than emit a semantically wrong query.
+		if !snowflake.IsNumericID(sessionID) {
+			panic(fmt.Sprintf("buildQueryHistorySql: invalid session id %q (callers must validate via GetQueryHistory)", sessionID))
 		}
+		args = append(args, fmt.Sprintf("SESSION_ID => %s", sessionID))
 	case "user":
 		if userName != "" {
 			args = append(args, fmt.Sprintf("USER_NAME => %s", snowflake.QuoteStringLit(userName)))
