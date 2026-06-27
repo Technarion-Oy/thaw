@@ -189,13 +189,15 @@ export default function QueryHistoryModal({ onClose }: Props) {
   const runDisabled = sessionScopeInvalid || userScopeInvalid || warehouseScopeInvalid;
 
   // Auto-run on mount once the current user is known. If the connection store
-  // hasn't hydrated yet, `defaultUser` is "" at mount; wait for it (the effect
-  // re-fires when it arrives) rather than auto-running an unfiltered user query.
+  // hasn't hydrated yet, `defaultUser` is "" at mount; wait for it. `filterType`
+  // is a dependency so that if the user switched scope before the user arrived,
+  // switching back to "user" later re-evaluates and finally fires (the latch
+  // ensures it still happens at most once).
   const didAutoRun = useRef(false);
   useEffect(() => {
     if (didAutoRun.current) return;
     if (!defaultUser.trim()) return;   // still waiting for the connection user — don't latch yet
-    if (filterType !== "user") return; // user already switched scope — leave the latch eligible
+    if (filterType !== "user") return; // user is driving another scope — stay eligible
     didAutoRun.current = true;         // only consume the latch when we actually auto-run
     // Prefer a name the user already typed (slow-hydration race) over the
     // connection default, so the query and the visible input never diverge.
@@ -203,7 +205,7 @@ export default function QueryHistoryModal({ onClose }: Props) {
     if (user !== userName) setUserName(user);
     runQuery({ userName: user });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [defaultUser]);
+  }, [defaultUser, filterType]);
 
   const loadInEditor = (sql: string) => {
     window.dispatchEvent(new CustomEvent("load-query", { detail: { sql } }));

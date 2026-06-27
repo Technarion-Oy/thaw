@@ -194,6 +194,12 @@ func GetQueryHistory(
 	resultLimit int,
 	includeClientGenerated bool,
 ) ([]QueryHistoryRow, error) {
+	// Trim the name filters up front so the empty-checks and the value embedded
+	// by buildQueryHistorySql agree — otherwise "ALICE " would pass the guard and
+	// be matched verbatim (zero rows, no error).
+	userName = strings.TrimSpace(userName)
+	warehouseName = strings.TrimSpace(warehouseName)
+
 	// Reject a non-numeric session id at the boundary with a clear error rather
 	// than silently producing an argument-less QUERY_HISTORY_BY_SESSION() that
 	// resolves to the wrong (pooled metadata) session.
@@ -203,13 +209,13 @@ func GetQueryHistory(
 	// Likewise require an explicit user for user scope — an empty USER_NAME would
 	// drop the filter and widen the query beyond the intended user. Use the "all"
 	// scope to query history across users.
-	if filterType == "user" && strings.TrimSpace(userName) == "" {
+	if filterType == "user" && userName == "" {
 		return nil, fmt.Errorf("a user name is required for user-scoped query history")
 	}
 	// And an explicit warehouse for warehouse scope — an empty WAREHOUSE_NAME
 	// would drop the filter, leaving QUERY_HISTORY_BY_WAREHOUSE() to resolve to
 	// the pooled metadata connection's warehouse (silently wrong, not an error).
-	if filterType == "warehouse" && strings.TrimSpace(warehouseName) == "" {
+	if filterType == "warehouse" && warehouseName == "" {
 		return nil, fmt.Errorf("a warehouse name is required for warehouse-scoped query history")
 	}
 	query := buildQueryHistorySql(filterType, sessionID, userName, warehouseName, endTimeStart, endTimeEnd, resultLimit, includeClientGenerated)
