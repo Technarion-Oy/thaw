@@ -1335,7 +1335,7 @@ func (s *Service) streamAndCapture(cmd *exec.Cmd, eventName string) ([]string, e
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		stdout.Close() // StdoutPipe's read-end would otherwise leak (Wait never runs)
+		_ = stdout.Close() // StdoutPipe's read-end would otherwise leak (Wait never runs)
 		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
