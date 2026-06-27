@@ -123,10 +123,13 @@ export default function ChangesView() {
   const unstageAllTip = busy ? "Working…"
     : stagedTotal === 0 ? "Nothing staged yet — use “Stage all” or the + on a row first"
     : "Remove every file from the staging area. Your edits are kept (git reset).";
+  // The default (main-button) action commits & pushes when connected to GitHub,
+  // and is a plain local commit otherwise — committing never requires GitHub.
+  const mainWillPush = !!oauthToken;
   const commitTip = busy ? "Working…"
-    : !oauthToken ? "Connect to GitHub to push — or use the ▾ dropdown to commit locally"
     : stagedTotal === 0 ? "Stage changes first — commit applies only to staged files. Use “Stage all” or the + on a row."
-    : `Commit & push ${stagedTotal.toLocaleString()} staged file${stagedTotal === 1 ? "" : "s"}`;
+    : mainWillPush ? `Commit & push ${stagedTotal.toLocaleString()} staged file${stagedTotal === 1 ? "" : "s"}`
+    : `Commit ${stagedTotal.toLocaleString()} staged file${stagedTotal === 1 ? "" : "s"} locally — connect to GitHub to also push`;
 
   const handleCommit = async (push: boolean) => {
     await commitStaged(commitMsg, push);
@@ -189,13 +192,13 @@ export default function ChangesView() {
             <Button
               type="primary"
               block
-              icon={<CloudUploadOutlined />}
+              icon={mainWillPush ? <CloudUploadOutlined /> : <CheckOutlined />}
               loading={committing}
-              disabled={busy || stagedTotal === 0 || !oauthToken}
-              onClick={() => handleCommit(true)}
+              disabled={busy || stagedTotal === 0}
+              onClick={() => handleCommit(mainWillPush)}
               style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
             >
-              {committing ? "Working…" : `Commit & Push ${stagedTotal.toLocaleString()} staged`}
+              {committing ? "Working…" : `${mainWillPush ? "Commit & Push" : "Commit"} ${stagedTotal.toLocaleString()} staged`}
             </Button>
           </span>
         </Tooltip>
@@ -222,7 +225,7 @@ export default function ChangesView() {
       )}
       {!oauthToken && stagedTotal > 0 && (
         <Text style={{ fontSize: 11, color: "var(--text-muted)" }}>
-          Not connected to GitHub — use the ▾ dropdown to commit locally, or connect to also push.
+          Not connected to GitHub — this commits locally. Connect to also push (or use the ▾ menu).
         </Text>
       )}
 
