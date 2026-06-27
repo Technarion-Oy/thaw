@@ -1466,6 +1466,132 @@ func (s *Service) UninstallEnvPackage(pkg string) error {
 	return nil
 }
 
+// ─── dependency-file operations ────────────────────────────────────────────────
+
+// pipCmd builds an *exec.Cmd that runs pip with the given args against the
+// active backend — the venv pip binary, or "conda run -n <env> pip" for conda.
+func (s *Service) pipCmd(args ...string) (*exec.Cmd, error) {
+	cfg, _ := config.Load()
+	backend := cfg.Snowpark.Backend
+	if backend == "" {
+		backend = "conda"
+	}
+	if backend == "venv" {
+		pip, err := s.pipBinForEnv()
+		if err != nil {
+			return nil, err
+		}
+		return exec.Command(pip, args...), nil
+	}
+	condaPath, err := exec.LookPath("conda")
+	if err != nil {
+		return nil, fmt.Errorf("conda not found: %w", err)
+	}
+	full := append([]string{"run", "-n", SnowparkCondaEnv, "pip"}, args...)
+	return exec.Command(condaPath, full...), nil
+}
+
+// PickRequirementsFile opens a file dialog to select a pip requirements file.
+func (s *Service) PickRequirementsFile() (string, error) {
+	return wailsruntime.OpenFileDialog(s.ctx, wailsruntime.OpenDialogOptions{
+		Title: "Select requirements file",
+		Filters: []wailsruntime.FileFilter{
+			{DisplayName: "Requirements (*.txt)", Pattern: "*.txt"},
+			{DisplayName: "All Files", Pattern: "*.*"},
+		},
+	})
+}
+
+// PickPyprojectFile opens a file dialog to select a pyproject.toml / TOML file.
+func (s *Service) PickPyprojectFile() (string, error) {
+	return wailsruntime.OpenFileDialog(s.ctx, wailsruntime.OpenDialogOptions{
+		Title: "Select pyproject.toml",
+		Filters: []wailsruntime.FileFilter{
+			{DisplayName: "TOML (*.toml)", Pattern: "*.toml"},
+			{DisplayName: "All Files", Pattern: "*.*"},
+		},
+	})
+}
+
+// InstallRequirementsFile installs every package listed in a pip requirements
+// file (`pip install -r <path>`), applying the pip registry configuration and
+// streaming output via the "snowpark:package-output" event.
+func (s *Service) InstallRequirementsFile(path string) error {
+	if path == "" {
+		return fmt.Errorf("no requirements file selected")
+	}
+	setup := s.buildPipRegistrySetup()
+	args := append([]string{"install", "-r", path}, setup.Args...)
+	cmd, err := s.pipCmd(args...)
+	if err != nil {
+		return err
+	}
+	if len(setup.Env) > 0 {
+		cmd.Env = append(os.Environ(), setup.Env...)
+	}
+	if err := s.streamCommandTo(cmd, "snowpark:package-output"); err != nil {
+		return fmt.Errorf("install from %s failed: %w", filepath.Base(path), err)
+	}
+	return nil
+}
+
+// InstallPyprojectFile installs the project defined by a pyproject.toml (or any
+// TOML build file) by running `pip install <dir>` against the directory that
+// contains it, applying the pip registry configuration and streaming output.
+func (s *Service) InstallPyprojectFile(path string) error {
+	if path == "" {
+		return fmt.Errorf("no pyproject.toml selected")
+	}
+	dir := filepath.Dir(path)
+	setup := s.buildPipRegistrySetup()
+	args := append([]string{"install", dir}, setup.Args...)
+	cmd, err := s.pipCmd(args...)
+	if err != nil {
+		return err
+	}
+	if len(setup.Env) > 0 {
+		cmd.Env = append(os.Environ(), setup.Env...)
+	}
+	if err := s.streamCommandTo(cmd, "snowpark:package-output"); err != nil {
+		return fmt.Errorf("install from %s failed: %w", filepath.Base(path), err)
+	}
+	return nil
+}
+
+// FreezeRequirements writes `pip freeze` output to a requirements file. When
+// path is empty it opens a save dialog; it returns the path written, or "" if
+// the dialog was cancelled.
+func (s *Service) FreezeRequirements(path string) (string, error) {
+	if path == "" {
+		chosen, err := wailsruntime.SaveFileDialog(s.ctx, wailsruntime.SaveDialogOptions{
+			Title:           "Save requirements.txt",
+			DefaultFilename: "requirements.txt",
+			Filters: []wailsruntime.FileFilter{
+				{DisplayName: "Requirements (*.txt)", Pattern: "*.txt"},
+			},
+		})
+		if err != nil {
+			return "", err
+		}
+		if chosen == "" {
+			return "", nil // cancelled
+		}
+		path = chosen
+	}
+	cmd, err := s.pipCmd("freeze")
+	if err != nil {
+		return "", err
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("pip freeze: %w", err)
+	}
+	if err := os.WriteFile(path, out, 0o644); err != nil {
+		return "", fmt.Errorf("write %s: %w", path, err)
+	}
+	return path, nil
+}
+
 // ─── conda install methods ────────────────────────────────────────────────────
 
 // InstallCondaEnv creates the thaw_snowpark conda environment.

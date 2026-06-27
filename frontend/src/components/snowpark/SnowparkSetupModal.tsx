@@ -13,6 +13,8 @@ import { Modal, Button, Steps, Typography, Alert, Space, Tag, Radio, Divider, Se
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
+  ExportOutlined,
+  FileTextOutlined,
   FolderOpenOutlined,
   LoadingOutlined,
   SettingOutlined,
@@ -38,6 +40,11 @@ import {
   ListEnvPackages,
   InstallEnvPackage,
   UninstallEnvPackage,
+  PickRequirementsFile,
+  PickPyprojectFile,
+  InstallRequirementsFile,
+  InstallPyprojectFile,
+  FreezeRequirements,
   PickDirectory,
 } from "../../../wailsjs/go/app/App";
 import type { snowpark } from "../../../wailsjs/go/models";
@@ -161,6 +168,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
   const [packageLog, setPackageLog]       = useState<string[]>([]);
   const [packageOpRunning, setPackageOpRunning] = useState(false);
   const [uninstallingPkg, setUninstallingPkg] = useState<string | null>(null);
+  const [depFileRunning, setDepFileRunning] = useState(false);
   const pkgLogEndRef = useRef<HTMLDivElement | null>(null);
 
   const exportDir    = useGitStore((s) => s.exportDir);
@@ -396,6 +404,52 @@ export default function SnowparkSetupModal({ onClose }: Props) {
         }
       },
     });
+  };
+
+  const handleInstallRequirements = async () => {
+    const path = await PickRequirementsFile();
+    if (!path) return;
+    setDepFileRunning(true);
+    setPackageLog([`$ pip install -r ${path}`]);
+    try {
+      await InstallRequirementsFile(path);
+      const updated = await ListEnvPackages();
+      setPackages(updated);
+    } catch (e) {
+      setPackageLog((prev) => [...prev, String(e)]);
+    } finally {
+      setDepFileRunning(false);
+    }
+  };
+
+  const handleInstallPyproject = async () => {
+    const path = await PickPyprojectFile();
+    if (!path) return;
+    setDepFileRunning(true);
+    setPackageLog([`$ pip install (from ${path})`]);
+    try {
+      await InstallPyprojectFile(path);
+      const updated = await ListEnvPackages();
+      setPackages(updated);
+    } catch (e) {
+      setPackageLog((prev) => [...prev, String(e)]);
+    } finally {
+      setDepFileRunning(false);
+    }
+  };
+
+  const handleFreezeRequirements = async () => {
+    setDepFileRunning(true);
+    try {
+      const written = await FreezeRequirements("");
+      if (written) {
+        setPackageLog([`✓ Wrote ${packages.length} packages to ${written}`]);
+      }
+    } catch (e) {
+      setPackageLog((prev) => [...prev, String(e)]);
+    } finally {
+      setDepFileRunning(false);
+    }
   };
 
   const rawDefs = backend === "conda" ? condaSteps(isAppleSilicon) : venvSteps(venvPath, withPandas, pythonPath);
@@ -720,10 +774,41 @@ export default function SnowparkSetupModal({ onClose }: Props) {
                 type="primary"
                 size="small"
                 loading={packageOpRunning && !uninstallingPkg}
-                disabled={!packageInput.trim() || !!uninstallingPkg}
+                disabled={!packageInput.trim() || !!uninstallingPkg || depFileRunning}
                 onClick={handleInstallPackage}
               >
                 Install
+              </Button>
+            </div>
+
+            {/* Dependency files */}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Button
+                size="small"
+                icon={<FileTextOutlined />}
+                loading={depFileRunning}
+                disabled={packageOpRunning || !!uninstallingPkg}
+                onClick={handleInstallRequirements}
+              >
+                Install requirements.txt
+              </Button>
+              <Button
+                size="small"
+                icon={<FileTextOutlined />}
+                loading={depFileRunning}
+                disabled={packageOpRunning || !!uninstallingPkg}
+                onClick={handleInstallPyproject}
+              >
+                Install pyproject.toml
+              </Button>
+              <Button
+                size="small"
+                icon={<ExportOutlined />}
+                loading={depFileRunning}
+                disabled={packageOpRunning || !!uninstallingPkg || packages.length === 0}
+                onClick={handleFreezeRequirements}
+              >
+                Freeze to requirements.txt
               </Button>
             </div>
 

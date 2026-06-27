@@ -13,7 +13,7 @@ the backend `snowpark` package via IPC and streams installation output via Wails
 | File | Purpose |
 |------|---------|
 | `SnowparkCheckModal.tsx` | Environment health check: calls `CheckSnowparkEnv` on mount and on "Re-check". Displays pass/fail rows for Python, conda/venv, snowflake-snowpark-python, and notebook. Shows "Setup Environment…" link if not ready. |
-| `SnowparkSetupModal.tsx` | Multi-step installation wizard (3 steps + package manager). Supports conda and venv. Streams install output via `EventsOn("snowpark:install-output")`. Step 3 embeds a full package manager (install/uninstall). |
+| `SnowparkSetupModal.tsx` | Multi-step installation wizard (3 steps + package manager). Supports conda and venv. Streams install output via `EventsOn("snowpark:install-output")`. Step 3 embeds a full package manager (install/uninstall, plus install from `requirements.txt`/`pyproject.toml` and freeze to `requirements.txt`). |
 | `PipRegistryModal.tsx` | Pip registry configuration: primary URL, extra index URLs, credentials per registry, proxy settings, trusted hosts, and CA cert path. Loads/saves via `GetPipRegistryConfig`/`SavePipRegistryConfig`. |
 
 ## Patterns & integration
@@ -22,6 +22,7 @@ the backend `snowpark` package via IPC and streams installation output via Wails
 - `CheckSnowparkEnv()` — returns `snowpark.SnowparkCheckResult` with per-check pass/fail flags
 - `InstallSnowparkStep(step, backend)` — installs one step (conda/venv setup or package install); streams output via `snowpark:install-output` Wails event
 - `ListEnvPackages()` / `InstallEnvPackage(name)` / `UninstallEnvPackage(name)` — package manager in Step 3
+- `PickRequirementsFile()` + `InstallRequirementsFile(path)`, `PickPyprojectFile()` + `InstallPyprojectFile(path)`, `FreezeRequirements("")` — dependency-file install/export buttons in Step 3
 - `SaveSnowparkConfig(cfg)` / `SaveSnowparkVenvPath(path)` / `SaveSnowparkPythonPath(path)` — persist environment settings
 - `GetPipRegistryConfig()` / `SavePipRegistryConfig(cfg)` — load/save pip registry settings
 - `PickCACertFile()` — native file picker for CA certificate path

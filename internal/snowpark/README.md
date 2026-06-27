@@ -7,7 +7,8 @@
 - Manage two Python backend options: a named conda environment (`thaw_snowpark`) and a custom venv; detect, install, and verify each via `conda` / `python` / `pip` CLI calls.
 - List system Python installations and evaluate their Snowpark compatibility (`ListSystemPythons`, `CheckSnowparkEnv`).
 - Manage pip package operations in the active environment: list, install, uninstall (`ListEnvPackages`, `InstallEnvPackage`, `UninstallEnvPackage`).
-- Apply corporate pip registry settings (primary URL, extra indexes, proxy, CA cert, Basic Auth credentials) via `PipRegistryConfig` before every `pip install`.
+- Install from / export to dependency files: `pip install -r requirements.txt` (`InstallRequirementsFile`), `pip install <dir>` from a `pyproject.toml` (`InstallPyprojectFile`), and `pip freeze` to a file (`FreezeRequirements`); file pickers `PickRequirementsFile` / `PickPyprojectFile`.
+- Apply corporate pip registry settings (primary URL, extra indexes, proxy, CA cert, Basic Auth credentials) via `PipRegistryConfig` before every `pip install` (including requirements/pyproject installs).
 - Create, read, save, and pick `.ipynb` notebook files (`NewNotebook`, `ReadNotebook`, `SaveNotebook`, `PickNotebookFile`).
 - Start and stop per-tab Python kernel sessions as long-lived `python -c <kernelPyScript>` subprocesses (`StartNotebookSession`, `StopNotebookSession`).
 - Execute Python code cells and SQL cells in a running kernel, returning captured stdout/stderr and matplotlib figures as base64 PNGs (`RunNotebookCell`, `RunNotebookCellSql`).
@@ -55,6 +56,9 @@ func (s *Service) InstallCondaEnv() error
 func (s *Service) InstallVenvEnv() error
 func (s *Service) ListEnvPackages() ([]PackageInfo, error)
 func (s *Service) InstallEnvPackage(pkg string) error
+func (s *Service) InstallRequirementsFile(path string) error
+func (s *Service) InstallPyprojectFile(path string) error
+func (s *Service) FreezeRequirements(path string) (string, error)
 
 // Config
 func (s *Service) GetSnowparkConfig() SnowparkConfigResult

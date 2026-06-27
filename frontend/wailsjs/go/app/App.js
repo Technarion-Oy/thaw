@@ -838,6 +838,10 @@ export function FormatSecondaryRoles(arg1) {
   return window['go']['app']['App']['FormatSecondaryRoles'](arg1);
 }
 
+export function FreezeRequirements(arg1) {
+  return window['go']['app']['App']['FreezeRequirements'](arg1);
+}
+
 export function GenerateKeyPair(arg1, arg2, arg3) {
   return window['go']['app']['App']['GenerateKeyPair'](arg1, arg2, arg3);
 }
@@ -1350,6 +1354,14 @@ export function InstallJupyterVenv() {
   return window['go']['app']['App']['InstallJupyterVenv']();
 }
 
+export function InstallPyprojectFile(arg1) {
+  return window['go']['app']['App']['InstallPyprojectFile'](arg1);
+}
+
+export function InstallRequirementsFile(arg1) {
+  return window['go']['app']['App']['InstallRequirementsFile'](arg1);
+}
+
 export function InstallSnowparkPackage() {
   return window['go']['app']['App']['InstallSnowparkPackage']();
 }
@@ -1690,8 +1702,16 @@ export function PickOpenFile() {
   return window['go']['app']['App']['PickOpenFile']();
 }
 
+export function PickPyprojectFile() {
+  return window['go']['app']['App']['PickPyprojectFile']();
+}
+
 export function PickQueryLogExportFile(arg1) {
   return window['go']['app']['App']['PickQueryLogExportFile'](arg1);
+}
+
+export function PickRequirementsFile() {
+  return window['go']['app']['App']['PickRequirementsFile']();
 }
 
 export function PickSaveExportFile(arg1, arg2) {
