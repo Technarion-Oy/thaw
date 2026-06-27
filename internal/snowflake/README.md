@@ -68,6 +68,7 @@ No business logic belongs here — callers pass SQL strings or high-level parame
 ### Session management
 - `UseRole/UseWarehouse/UseDatabase/UseSchema` — execute the USE statement then call `refreshConnectorState`, which flushes idle connections on role/warehouse/database changes
 - `GetSessionContext` / `GetCachedSessionContext` — live and in-memory snapshots of `{Role, Warehouse, Database, Schema}`
+- `GetSessionID` (`SELECT CURRENT_SESSION()`), `GetCurrentUser` (`SELECT CURRENT_USER()`), and `GetCurrentUserCached` — the cached variant resolves the user once and stores it for the connection's lifetime (the user is constant per connection; used by the MCP `get_query_history` tool)
 - `SetPoolLimits(maxOpen, maxIdle)` — tab sessions use smaller limits (e.g. 4/1) vs. shared client default of 8/8
 
 ## Patterns & integration

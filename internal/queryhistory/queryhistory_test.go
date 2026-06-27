@@ -11,6 +11,7 @@
 package queryhistory
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -126,6 +127,39 @@ func TestBuildQueryHistorySQLTimeRangeQuoting(t *testing.T) {
 	sql := buildQueryHistorySql("all", "", "", "", "2026-01-01'T00:00:00Z", "2026-01-02T00:00:00Z", 50, false)
 	if !strings.Contains(sql, "END_TIME_RANGE_START => '2026-01-01''T00:00:00Z'::TIMESTAMP_LTZ") {
 		t.Errorf("single-quote in start timestamp must be doubled by QuoteStringLit:\n%s", sql)
+	}
+}
+
+// TestGetQueryHistoryValidationGuards verifies the GetQueryHistory boundary
+// guards (the primary gate) reject invalid filters before any client use, so a
+// nil client is never dereferenced on these paths.
+func TestGetQueryHistoryValidationGuards(t *testing.T) {
+	tests := []struct {
+		name       string
+		filterType string
+		sessionID  string
+		userName   string
+		warehouse  string
+		wantErr    string
+	}{
+		{"invalid session id", "session", "abc", "", "", "invalid session id"},
+		{"empty session id", "session", "", "", "", "invalid session id"},
+		{"empty user", "user", "", "", "", "user name is required"},
+		{"whitespace user", "user", "", "   ", "", "user name is required"},
+		{"empty warehouse", "warehouse", "", "", "", "warehouse name is required"},
+		{"whitespace warehouse", "warehouse", "", "", "  ", "warehouse name is required"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// nil client is safe: every guard returns before the client is used.
+			_, err := GetQueryHistory(context.Background(), nil, tt.filterType, tt.sessionID, tt.userName, tt.warehouse, "", "", 100, false)
+			if err == nil {
+				t.Fatalf("expected an error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error %q does not contain %q", err.Error(), tt.wantErr)
+			}
+		})
 	}
 }
 

@@ -29,7 +29,7 @@ import { SearchOutlined, BarChartOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
-import { GetQueryHistory, ListUsers } from "../../../wailsjs/go/app/App";
+import { GetQueryHistory, ListUsers, GetCurrentUser } from "../../../wailsjs/go/app/App";
 import QueryProfileModal from "../results/QueryProfileModal";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { useConnectionStore } from "../../store/connectionStore";
@@ -68,14 +68,17 @@ interface Props {
 type FilterType = "session" | "user" | "warehouse" | "all";
 
 export default function QueryHistoryModal({ onClose }: Props) {
-  const defaultUser      = useConnectionStore((s) => s.params?.user ?? "");
+  // The connect-form user is only a fallback — the authoritative identity is
+  // CURRENT_USER() (resolved on open), which can differ for SSO/OAuth or in case.
+  const connFormUser     = useConnectionStore((s) => s.params?.user ?? "");
+  const isConnected      = useConnectionStore((s) => s.isConnected);
   const defaultWarehouse = useSessionStore((s) => s.warehouse);
   const warehouses       = useSessionStore((s) => s.warehouses);
   const loadWarehouses   = useSessionStore((s) => s.loadWarehouses);
 
   const [filterType,      setFilterType]      = useState<FilterType>("user");
   const [sessionId,       setSessionId]       = useState("");
-  const [userName,        setUserName]        = useState(defaultUser);
+  const [userName,        setUserName]        = useState(connFormUser);
   const [warehouseName,   setWarehouseName]   = useState(defaultWarehouse);
   // Default to "today" so the modal opens on the current user's recent activity
   // rather than an empty range. The upper bound is end-of-day (not "now") so a
@@ -92,10 +95,14 @@ export default function QueryHistoryModal({ onClose }: Props) {
   const [copiedId,        setCopiedId]        = useState<string | null>(null);
   const [profileQueryId,  setProfileQueryId]  = useState<string | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // True when entering session scope cleared a previously-set range — only then
-  // do we restore "today" on leaving, so a range the user deliberately cleared on
-  // another scope is preserved.
-  const sessionClearedRange = useRef(false);
+  // Holds the exact range that was active when session scope cleared it, so
+  // leaving session scope restores it verbatim (not just "today"). `undefined`
+  // means "not in a session-cleared state"; a stored `null` means the user had
+  // deliberately cleared the range before entering session scope.
+  const savedRange = useRef<[Dayjs, Dayjs] | null | undefined>(undefined);
+  // Set when the user explicitly edits the user-name field, so the on-open
+  // CURRENT_USER() resolution doesn't clobber a name they typed first.
+  const userEdited = useRef(false);
 
   // runQuery accepts optional overrides so callers (e.g. "Filter by this
   // session") can run with new scope/session/range values before the
@@ -150,12 +157,11 @@ export default function QueryHistoryModal({ onClose }: Props) {
     // run, since setState hasn't flushed yet in this handler). When adding a new
     // runQuery param, thread it through `params` here only.
     const params = { filterType: "session" as FilterType, sessionId: sid, timeRange: null };
-    // Remember whether session scope cleared a real range, so a later switch away
-    // restores "today" only if it did. Only latch on the *first* entry into
-    // session scope — a session→session drill-down (timeRange already null) must
-    // not reset the latch to false.
+    // Save the exact range so leaving session scope restores it verbatim. Only on
+    // the *first* entry into session scope — a session→session drill-down
+    // (range already null) must not overwrite the saved value.
     if (filterType !== "session") {
-      sessionClearedRange.current = timeRange !== null;
+      savedRange.current = timeRange;
     }
     setFilterType(params.filterType);
     setSessionId(params.sessionId);
@@ -188,24 +194,44 @@ export default function QueryHistoryModal({ onClose }: Props) {
   const warehouseScopeInvalid = filterType === "warehouse" && warehouseName.trim() === "";
   const runDisabled = sessionScopeInvalid || userScopeInvalid || warehouseScopeInvalid;
 
-  // Auto-run on mount once the current user is known. If the connection store
-  // hasn't hydrated yet, `defaultUser` is "" at mount; wait for it. `filterType`
-  // is a dependency so that if the user switched scope before the user arrived,
-  // switching back to "user" later re-evaluates and finally fires (the latch
-  // ensures it still happens at most once).
+  // Reset the auto-run latch and the (now-stale) user filter on disconnect, so a
+  // reconnect — possibly as a different account — re-resolves and re-runs instead
+  // of showing the previous user's history. Declared before the auto-run effect
+  // so the reset wins when isConnected flips.
   const didAutoRun = useRef(false);
   useEffect(() => {
+    if (!isConnected) {
+      didAutoRun.current = false;
+      userEdited.current = false;
+      setUserName("");
+    }
+  }, [isConnected]);
+
+  // Auto-run once connected. The authoritative filter is CURRENT_USER() (resolved
+  // on open — it can differ from the connect-form user for SSO/OAuth or in case),
+  // falling back to the connect-form user on error. `filterType` is a dependency
+  // so that if the user is driving another scope when this would fire, switching
+  // back to "user" later re-evaluates; the latch keeps it at most once.
+  useEffect(() => {
     if (didAutoRun.current) return;
-    if (!defaultUser.trim()) return;   // still waiting for the connection user — don't latch yet
+    if (!isConnected) return;
     if (filterType !== "user") return; // user is driving another scope — stay eligible
     didAutoRun.current = true;         // only consume the latch when we actually auto-run
-    // Prefer a name the user already typed (slow-hydration race) over the
-    // connection default, so the query and the visible input never diverge.
-    const user = userName.trim() || defaultUser;
-    if (user !== userName) setUserName(user);
-    runQuery({ userName: user });
+    let cancelled = false;
+    GetCurrentUser()
+      .then((u) => (u && u.trim()) || connFormUser)
+      .catch(() => connFormUser)
+      .then((resolved) => {
+        if (cancelled) return;
+        // Respect a name the user explicitly typed first; otherwise use the
+        // resolved identity, so the query and the visible input never diverge.
+        const user = userEdited.current && userName.trim() ? userName.trim() : resolved;
+        if (user !== userName) setUserName(user);
+        runQuery({ userName: user });
+      });
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [defaultUser, filterType]);
+  }, [isConnected, filterType]);
 
   const loadInEditor = (sql: string) => {
     window.dispatchEvent(new CustomEvent("load-query", { detail: { sql } }));
@@ -311,22 +337,21 @@ export default function QueryHistoryModal({ onClose }: Props) {
             onChange={(v) => {
               if (v === "session") {
                 // Entering session scope (always from a non-session scope here):
-                // clear the range so a pasted id for an older session isn't
-                // silently bounded by today's window. Record whether we actually
-                // cleared a range, so the inverse switch knows whether restoring
-                // "today" is warranted.
-                sessionClearedRange.current = timeRange !== null;
+                // save the exact range and clear it, so a pasted id for an older
+                // session isn't silently bounded by today's window — and so the
+                // inverse switch can restore precisely what was there.
+                savedRange.current = timeRange;
                 setTimeRange(null);
               } else if (filterType === "session") {
                 // Leaving session scope: clear the now-stale id so switching back
-                // doesn't silently re-query it, and restore "today" only if session
-                // scope is what cleared the range — never clobber a range the user
-                // deliberately cleared while on user/warehouse/all.
+                // doesn't silently re-query it, and restore the saved range
+                // verbatim — but only if the user didn't set a new one while in
+                // session scope (then `timeRange` is no longer the null we set).
                 setSessionId("");
-                if (sessionClearedRange.current && timeRange === null) {
-                  setTimeRange(todayRange());
+                if (timeRange === null && savedRange.current !== undefined) {
+                  setTimeRange(savedRange.current);
                 }
-                sessionClearedRange.current = false;
+                savedRange.current = undefined;
               }
               setFilterType(v);
             }}
@@ -347,7 +372,7 @@ export default function QueryHistoryModal({ onClose }: Props) {
               size="small"
               value={userName}
               status={userScopeInvalid ? "error" : undefined}
-              onChange={setUserName}
+              onChange={(v) => { userEdited.current = true; setUserName(v); }}
               options={userList.map((u) => ({ value: u }))}
               filterOption={(input, option) =>
                 (option?.value ?? "").toLowerCase().includes(input.toLowerCase())
