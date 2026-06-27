@@ -168,7 +168,9 @@ export default function SnowparkSetupModal({ onClose }: Props) {
   const [packageLog, setPackageLog]       = useState<string[]>([]);
   const [packageOpRunning, setPackageOpRunning] = useState(false);
   const [uninstallingPkg, setUninstallingPkg] = useState<string | null>(null);
-  const [depFileRunning, setDepFileRunning] = useState(false);
+  // Which dependency-file operation is in flight (drives per-button spinners); null = idle.
+  const [depFileOp, setDepFileOp] = useState<"requirements" | "pyproject" | "freeze" | null>(null);
+  const depFileRunning = depFileOp !== null;
   const pkgLogEndRef = useRef<HTMLDivElement | null>(null);
 
   const exportDir    = useGitStore((s) => s.exportDir);
@@ -406,25 +408,35 @@ export default function SnowparkSetupModal({ onClose }: Props) {
     });
   };
 
+  // refreshPackages reloads the package list without letting a transient list
+  // failure masquerade as an install failure (it surfaces via packagesError).
+  const refreshPackages = async () => {
+    try {
+      setPackages(await ListEnvPackages());
+      setPackagesError(null);
+    } catch (e) {
+      setPackagesError(String(e));
+    }
+  };
+
   const handleInstallRequirements = async () => {
-    setDepFileRunning(true);
+    setDepFileOp("requirements");
     setPackageLog([]);
     try {
       const path = await PickRequirementsFile();
       if (!path) return;
       setPackageLog([`$ pip install -r ${path}`]);
       await InstallRequirementsFile(path);
-      const updated = await ListEnvPackages();
-      setPackages(updated);
+      await refreshPackages();
     } catch (e) {
       setPackageLog((prev) => [...prev, String(e)]);
     } finally {
-      setDepFileRunning(false);
+      setDepFileOp(null);
     }
   };
 
   const handleInstallPyproject = async () => {
-    setDepFileRunning(true);
+    setDepFileOp("pyproject");
     setPackageLog([]);
     try {
       const path = await PickPyprojectFile();
@@ -433,26 +445,27 @@ export default function SnowparkSetupModal({ onClose }: Props) {
       const dir = path.replace(/[/\\][^/\\]*$/, "");
       setPackageLog([`$ pip install ${dir}`]);
       await InstallPyprojectFile(path);
-      const updated = await ListEnvPackages();
-      setPackages(updated);
+      await refreshPackages();
     } catch (e) {
       setPackageLog((prev) => [...prev, String(e)]);
     } finally {
-      setDepFileRunning(false);
+      setDepFileOp(null);
     }
   };
 
   const handleFreezeRequirements = async () => {
-    setDepFileRunning(true);
+    // Capture the current log so a cancelled save dialog can restore it rather
+    // than leaving the "$ pip freeze…" placeholder stranded in the panel.
+    const prevLog = packageLog;
+    setDepFileOp("freeze");
     setPackageLog(["$ pip freeze…"]);
     try {
       const written = await FreezeRequirements("");
-      // On cancel (written === ""), keep the prior log rather than clearing it.
-      setPackageLog((prev) => (written ? [`✓ Wrote requirements to ${written}`] : prev));
+      setPackageLog(written ? [`✓ Wrote requirements to ${written}`] : prevLog);
     } catch (e) {
       setPackageLog((prev) => [...prev, String(e)]);
     } finally {
-      setDepFileRunning(false);
+      setDepFileOp(null);
     }
   };
 
@@ -790,7 +803,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
               <Button
                 size="small"
                 icon={<FileTextOutlined />}
-                loading={depFileRunning}
+                loading={depFileOp === "requirements"}
                 disabled={packageOpRunning || !!uninstallingPkg || depFileRunning}
                 onClick={handleInstallRequirements}
               >
@@ -799,7 +812,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
               <Button
                 size="small"
                 icon={<FileTextOutlined />}
-                loading={depFileRunning}
+                loading={depFileOp === "pyproject"}
                 disabled={packageOpRunning || !!uninstallingPkg || depFileRunning}
                 onClick={handleInstallPyproject}
               >
@@ -808,7 +821,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
               <Button
                 size="small"
                 icon={<ExportOutlined />}
-                loading={depFileRunning}
+                loading={depFileOp === "freeze"}
                 disabled={packageOpRunning || !!uninstallingPkg || depFileRunning || packages.length === 0}
                 onClick={handleFreezeRequirements}
               >

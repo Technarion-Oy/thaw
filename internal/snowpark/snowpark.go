@@ -1440,7 +1440,7 @@ func (s *Service) UninstallEnvPackage(pkg string) error {
 func (s *Service) pipCmd(args ...string) (*exec.Cmd, error) {
 	cfg, err := config.Load()
 	if err != nil || cfg == nil {
-		cfg = &config.AppConfig{}
+		return nil, fmt.Errorf("config unavailable: %w", err)
 	}
 	backend := cfg.Snowpark.Backend
 	if backend == "" {

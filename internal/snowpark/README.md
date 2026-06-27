@@ -56,6 +56,8 @@ func (s *Service) InstallCondaEnv() error
 func (s *Service) InstallVenvEnv() error
 func (s *Service) ListEnvPackages() ([]PackageInfo, error)
 func (s *Service) InstallEnvPackage(pkg string) error
+func (s *Service) PickRequirementsFile() (string, error)
+func (s *Service) PickPyprojectFile() (string, error)
 func (s *Service) InstallRequirementsFile(path string) error
 func (s *Service) InstallPyprojectFile(path string) error
 func (s *Service) FreezeRequirements(path string) (string, error)
