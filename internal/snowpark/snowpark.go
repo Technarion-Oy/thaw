@@ -1546,7 +1546,7 @@ func (s *Service) InstallPyprojectFile(path string) error {
 
 // FreezeRequirements opens a save dialog and writes `pip freeze` output to the
 // chosen file, streaming progress via the "snowpark:package-output" event. It
-// returns the path written, or "" if the dialog was cancelled.
+// returns the path written, or "" if the dialog was canceled.
 func (s *Service) FreezeRequirements() (string, error) {
 	path, err := wailsruntime.SaveFileDialog(s.ctx, wailsruntime.SaveDialogOptions{
 		Title:           "Save requirements.txt",
@@ -1559,7 +1559,7 @@ func (s *Service) FreezeRequirements() (string, error) {
 		return "", err
 	}
 	if path == "" {
-		return "", nil // cancelled
+		return "", nil // canceled
 	}
 	if err := s.freezeToFile(path); err != nil {
 		return "", err
