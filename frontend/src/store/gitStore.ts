@@ -70,7 +70,7 @@ interface GitState {
   stageAll: () => Promise<void>;
   unstageAll: () => Promise<void>;
   discardFile: (file: string) => Promise<void>;
-  commitStaged: (message: string) => Promise<void>;
+  commitStaged: (message: string, push?: boolean) => Promise<void>;
 
   loginWithOAuth: (provider: string) => Promise<string>;
   setOAuthToken: (token: string) => void;
@@ -264,7 +264,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     }
   },
 
-  commitStaged: async (message: string) => {
+  commitStaged: async (message: string, push: boolean = true) => {
     const { exportDir, remoteURL: storedURL, branch, authorName, authorEmail, oauthToken, status } = get();
     if (!exportDir) return;
     const remoteURL = storedURL || status?.remoteURL || "";
@@ -281,6 +281,7 @@ export const useGitStore = create<GitState>((set, get) => ({
         authorEmail,
         files:       [],
         stagedOnly:  true,
+        noPush:      !push, // commit locally only when push is false
       } as any);
       await get().refreshStatus();
     } catch (e) {

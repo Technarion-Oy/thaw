@@ -1974,6 +1974,7 @@ export namespace gitrepo {
 	    authorEmail: string;
 	    files: string[];
 	    stagedOnly: boolean;
+	    noPush: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new PushParams(source);
@@ -1991,6 +1992,7 @@ export namespace gitrepo {
 	        this.authorEmail = source["authorEmail"];
 	        this.files = source["files"];
 	        this.stagedOnly = source["stagedOnly"];
+	        this.noPush = source["noPush"];
 	    }
 	}
 	export class RepoStatus {

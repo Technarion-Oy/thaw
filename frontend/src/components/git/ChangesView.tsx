@@ -11,11 +11,11 @@
 // @thaw-domain: Git Integration
 
 import { useEffect, useMemo, useState } from "react";
-import { Button, Input, Tooltip, Popconfirm, Typography, Alert } from "antd";
+import { Button, Input, Tooltip, Popconfirm, Typography, Alert, Dropdown } from "antd";
 import {
   CloudUploadOutlined, PlusOutlined, MinusOutlined,
   CaretRightFilled, CaretDownFilled, WarningOutlined, ReloadOutlined,
-  LeftOutlined, RightOutlined,
+  LeftOutlined, RightOutlined, DownOutlined, CheckOutlined,
 } from "@ant-design/icons";
 import { useGitStore } from "../../store/gitStore";
 import type { FileChange } from "../../store/gitStore";
@@ -124,12 +124,12 @@ export default function ChangesView() {
     : stagedTotal === 0 ? "Nothing staged yet — use “Stage all” or the + on a row first"
     : "Remove every file from the staging area. Your edits are kept (git reset).";
   const commitTip = busy ? "Working…"
-    : !oauthToken ? "Connect to GitHub (above) to commit & push"
+    : !oauthToken ? "Connect to GitHub to push — or use the ▾ dropdown to commit locally"
     : stagedTotal === 0 ? "Stage changes first — commit applies only to staged files. Use “Stage all” or the + on a row."
     : `Commit & push ${stagedTotal.toLocaleString()} staged file${stagedTotal === 1 ? "" : "s"}`;
 
-  const handleCommit = async () => {
-    await commitStaged(commitMsg);
+  const handleCommit = async (push: boolean) => {
+    await commitStaged(commitMsg, push);
     if (!useGitStore.getState().error) setCommitMsg("");
   };
 
@@ -181,27 +181,49 @@ export default function ChangesView() {
         onChange={(e) => setCommitMsg(e.target.value)}
         style={{ fontSize: 12, resize: "none" }}
       />
-      <Tooltip title={commitTip}>
-        <span style={{ display: "inline-flex", width: "100%" }}>
+      {/* Split button: main action commits & pushes; the ▾ dropdown offers a
+          local-only commit (no push), which works without a GitHub connection. */}
+      <div style={{ display: "flex", width: "100%" }}>
+        <Tooltip title={commitTip}>
+          <span style={{ display: "inline-flex", flex: 1 }}>
+            <Button
+              type="primary"
+              block
+              icon={<CloudUploadOutlined />}
+              loading={committing}
+              disabled={busy || stagedTotal === 0 || !oauthToken}
+              onClick={() => handleCommit(true)}
+              style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
+            >
+              {committing ? "Working…" : `Commit & Push ${stagedTotal.toLocaleString()} staged`}
+            </Button>
+          </span>
+        </Tooltip>
+        <Dropdown
+          trigger={["click"]}
+          disabled={busy || stagedTotal === 0}
+          menu={{ items: [
+            { key: "push",  icon: <CloudUploadOutlined />, label: "Commit & Push", disabled: !oauthToken, onClick: () => handleCommit(true) },
+            { key: "local", icon: <CheckOutlined />,       label: "Commit (no push)",                      onClick: () => handleCommit(false) },
+          ] }}
+        >
           <Button
             type="primary"
-            block
-            icon={<CloudUploadOutlined />}
-            loading={committing}
-            disabled={busy || stagedTotal === 0 || !oauthToken}
-            onClick={handleCommit}
-          >
-            {committing ? "Committing & pushing…" : `Commit & Push ${stagedTotal.toLocaleString()} staged`}
-          </Button>
-        </span>
-      </Tooltip>
+            icon={<DownOutlined />}
+            disabled={busy || stagedTotal === 0}
+            style={{ borderTopLeftRadius: 0, borderBottomLeftRadius: 0, marginLeft: -1 }}
+          />
+        </Dropdown>
+      </div>
       {stagedTotal === 0 && totalChanged > 0 && (
         <Text style={{ fontSize: 11, color: "var(--text-muted)" }}>
           Nothing staged yet — Stage changes above to enable commit.
         </Text>
       )}
-      {!oauthToken && (
-        <Text style={{ fontSize: 11, color: "var(--text-muted)" }}>Connect to GitHub above to enable commit &amp; push.</Text>
+      {!oauthToken && stagedTotal > 0 && (
+        <Text style={{ fontSize: 11, color: "var(--text-muted)" }}>
+          Not connected to GitHub — use the ▾ dropdown to commit locally, or connect to also push.
+        </Text>
       )}
 
       {/* Empty state */}

@@ -106,6 +106,7 @@ type PushParams struct {
 	AuthorEmail string   `json:"authorEmail"`
 	Files       []string `json:"files"` // if empty (and StagedOnly false), stages all changes
 	StagedOnly  bool     `json:"stagedOnly"`
+	NoPush      bool     `json:"noPush"` // commit locally without pushing to the remote
 }
 
 // PullParams holds parameters needed for a git pull operation.
@@ -421,6 +422,11 @@ func CommitAndPush(ctx context.Context, p PushParams) error {
 		}
 	}
 	_ = commitHash
+
+	// Local-only commit: stop before touching the remote (no auth/remote needed).
+	if p.NoPush {
+		return nil
+	}
 
 	branch := p.Branch
 	if branch == "" {
