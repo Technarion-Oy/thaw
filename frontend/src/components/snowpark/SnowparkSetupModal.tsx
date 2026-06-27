@@ -407,11 +407,11 @@ export default function SnowparkSetupModal({ onClose }: Props) {
   };
 
   const handleInstallRequirements = async () => {
-    const path = await PickRequirementsFile();
-    if (!path) return;
     setDepFileRunning(true);
-    setPackageLog([`$ pip install -r ${path}`]);
     try {
+      const path = await PickRequirementsFile();
+      if (!path) return;
+      setPackageLog([`$ pip install -r ${path}`]);
       await InstallRequirementsFile(path);
       const updated = await ListEnvPackages();
       setPackages(updated);
@@ -423,11 +423,11 @@ export default function SnowparkSetupModal({ onClose }: Props) {
   };
 
   const handleInstallPyproject = async () => {
-    const path = await PickPyprojectFile();
-    if (!path) return;
     setDepFileRunning(true);
-    setPackageLog([`$ pip install (from ${path})`]);
     try {
+      const path = await PickPyprojectFile();
+      if (!path) return;
+      setPackageLog([`$ pip install (from ${path})`]);
       await InstallPyprojectFile(path);
       const updated = await ListEnvPackages();
       setPackages(updated);
@@ -440,13 +440,12 @@ export default function SnowparkSetupModal({ onClose }: Props) {
 
   const handleFreezeRequirements = async () => {
     setDepFileRunning(true);
+    setPackageLog(["$ pip freeze…"]);
     try {
       const written = await FreezeRequirements("");
-      if (written) {
-        setPackageLog([`✓ Wrote ${packages.length} packages to ${written}`]);
-      }
+      setPackageLog(written ? [`✓ Wrote requirements to ${written}`] : []);
     } catch (e) {
-      setPackageLog((prev) => [...prev, String(e)]);
+      setPackageLog([String(e)]);
     } finally {
       setDepFileRunning(false);
     }
@@ -767,7 +766,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
                 value={packageInput}
                 onChange={(e) => setPackageInput(e.target.value)}
                 onPressEnter={handleInstallPackage}
-                disabled={packageOpRunning}
+                disabled={packageOpRunning || depFileRunning}
                 style={{ flex: 1, fontFamily: "monospace", fontSize: 12 }}
               />
               <Button
@@ -787,7 +786,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
                 size="small"
                 icon={<FileTextOutlined />}
                 loading={depFileRunning}
-                disabled={packageOpRunning || !!uninstallingPkg}
+                disabled={packageOpRunning || !!uninstallingPkg || depFileRunning}
                 onClick={handleInstallRequirements}
               >
                 Install requirements.txt
@@ -796,7 +795,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
                 size="small"
                 icon={<FileTextOutlined />}
                 loading={depFileRunning}
-                disabled={packageOpRunning || !!uninstallingPkg}
+                disabled={packageOpRunning || !!uninstallingPkg || depFileRunning}
                 onClick={handleInstallPyproject}
               >
                 Install pyproject.toml
@@ -805,7 +804,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
                 size="small"
                 icon={<ExportOutlined />}
                 loading={depFileRunning}
-                disabled={packageOpRunning || !!uninstallingPkg || packages.length === 0}
+                disabled={packageOpRunning || !!uninstallingPkg || depFileRunning || packages.length === 0}
                 onClick={handleFreezeRequirements}
               >
                 Freeze to requirements.txt
@@ -813,7 +812,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
             </div>
 
             {/* Output log */}
-            {(packageLog.length > 0 || packageOpRunning) && (
+            {(packageLog.length > 0 || packageOpRunning || depFileRunning) && (
               <div style={{
                 border: "1px solid var(--border)",
                 borderRadius: 6,

@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -1401,34 +1402,15 @@ func (s *Service) ListEnvPackages() ([]PackageInfo, error) {
 // InstallEnvPackage installs a single Python package in the active environment,
 // streaming output via the "snowpark:package-output" event.
 func (s *Service) InstallEnvPackage(pkg string) error {
-	cfg, _ := config.Load()
-	backend := cfg.Snowpark.Backend
-	if backend == "" {
-		backend = "conda"
-	}
-
 	setup := s.buildPipRegistrySetup()
-	var cmd *exec.Cmd
-	if backend == "venv" {
-		pip, err := s.pipBinForEnv()
-		if err != nil {
-			return err
-		}
-		args := append([]string{"install", pkg}, setup.Args...)
-		cmd = exec.Command(pip, args...)
-	} else {
-		condaPath, err := exec.LookPath("conda")
-		if err != nil {
-			return fmt.Errorf("conda not found: %w", err)
-		}
-		baseArgs := []string{"run", "-n", SnowparkCondaEnv, "pip", "install", pkg}
-		args := append(baseArgs, setup.Args...)
-		cmd = exec.Command(condaPath, args...)
+	args := append([]string{"install", pkg}, setup.Args...)
+	cmd, err := s.pipCmd(args...)
+	if err != nil {
+		return err
 	}
 	if len(setup.Env) > 0 {
 		cmd.Env = append(os.Environ(), setup.Env...)
 	}
-
 	if err := s.streamCommandTo(cmd, "snowpark:package-output"); err != nil {
 		return fmt.Errorf("install %s failed: %w", pkg, err)
 	}
@@ -1438,28 +1420,10 @@ func (s *Service) InstallEnvPackage(pkg string) error {
 // UninstallEnvPackage removes a Python package from the active environment,
 // streaming output via the "snowpark:package-output" event.
 func (s *Service) UninstallEnvPackage(pkg string) error {
-	cfg, _ := config.Load()
-	backend := cfg.Snowpark.Backend
-	if backend == "" {
-		backend = "conda"
+	cmd, err := s.pipCmd("uninstall", "-y", pkg)
+	if err != nil {
+		return err
 	}
-
-	var cmd *exec.Cmd
-	if backend == "venv" {
-		pip, err := s.pipBinForEnv()
-		if err != nil {
-			return err
-		}
-		cmd = exec.Command(pip, "uninstall", "-y", pkg)
-	} else {
-		condaPath, err := exec.LookPath("conda")
-		if err != nil {
-			return fmt.Errorf("conda not found: %w", err)
-		}
-		cmd = exec.Command(condaPath, "run", "-n", SnowparkCondaEnv,
-			"pip", "uninstall", "-y", pkg)
-	}
-
 	if err := s.streamCommandTo(cmd, "snowpark:package-output"); err != nil {
 		return fmt.Errorf("uninstall %s failed: %w", pkg, err)
 	}
@@ -1471,7 +1435,10 @@ func (s *Service) UninstallEnvPackage(pkg string) error {
 // pipCmd builds an *exec.Cmd that runs pip with the given args against the
 // active backend — the venv pip binary, or "conda run -n <env> pip" for conda.
 func (s *Service) pipCmd(args ...string) (*exec.Cmd, error) {
-	cfg, _ := config.Load()
+	cfg, err := config.Load()
+	if err != nil || cfg == nil {
+		cfg = &config.AppConfig{}
+	}
 	backend := cfg.Snowpark.Backend
 	if backend == "" {
 		backend = "conda"
@@ -1584,6 +1551,10 @@ func (s *Service) FreezeRequirements(path string) (string, error) {
 	}
 	out, err := cmd.Output()
 	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
+			return "", fmt.Errorf("pip freeze: %w\n%s", err, exitErr.Stderr)
+		}
 		return "", fmt.Errorf("pip freeze: %w", err)
 	}
 	if err := os.WriteFile(path, out, 0o644); err != nil {
