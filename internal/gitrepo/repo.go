@@ -406,12 +406,19 @@ func CommitAndPush(ctx context.Context, p PushParams) error {
 		},
 	})
 	if err != nil {
-		if errors.Is(err, gogit.ErrEmptyCommit) ||
+		empty := errors.Is(err, gogit.ErrEmptyCommit) ||
 			strings.Contains(err.Error(), "nothing to commit") ||
-			strings.Contains(err.Error(), "nothing added to commit") {
+			strings.Contains(err.Error(), "nothing added to commit")
+		if !empty {
+			return fmt.Errorf("git commit: %w", err)
+		}
+		// Nothing new to commit. For the auto-export path that means there's
+		// genuinely nothing to do. For StagedOnly we still fall through to push:
+		// a prior attempt may have committed successfully but failed to push, and
+		// the retry would otherwise see an empty index and silently skip the push.
+		if !p.StagedOnly {
 			return nil
 		}
-		return fmt.Errorf("git commit: %w", err)
 	}
 	_ = commitHash
 

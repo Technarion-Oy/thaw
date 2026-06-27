@@ -19,8 +19,10 @@
  *  gitDecoration mapping so muscle memory transfers). */
 export function sigilColor(status: string): string {
   switch (status) {
-    case "A": return "var(--success)";   // added / staged-new
-    case "U": return "var(--success)";   // untracked — new file, green like VS Code
+    case "A": return "var(--success)";   // added / staged-new — full green
+    // Untracked is also "new" (green family) but NOT yet staged, so it's a muted
+    // green — distinguishable at a glance from a staged-new file in the tree.
+    case "U": return "color-mix(in srgb, var(--success) 60%, var(--text-faint))";
     case "M": return "var(--warning)";   // modified
     case "D": return "var(--danger)";    // deleted
     case "R":

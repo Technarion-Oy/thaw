@@ -55,11 +55,13 @@ export default function ChangeRow({
         {ot ? ot.label : ""}
       </span>
 
-      {/* Reveal-on-hover / focus actions, overlaid so the resting row stays tight */}
+      {/* Reveal-on-hover / focus actions. Overlaid (so the resting row stays
+          tight) but positioned to the LEFT of the object-type column at right:78,
+          so the type label stays visible while the user decides to stage/discard. */}
       <span
         className="git-row-actions"
         style={{
-          position: "absolute", right: 6, top: 0, height: "100%",
+          position: "absolute", right: 78, top: 0, height: "100%",
           display: "flex", alignItems: "center", gap: 2, paddingLeft: 24,
           background: "linear-gradient(to right, transparent, var(--bg-hover) 28%)",
         }}

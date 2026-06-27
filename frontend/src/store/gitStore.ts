@@ -34,7 +34,6 @@ interface GitState {
   // Runtime state
   status: RepoStatus | null;
   loading: boolean;
-  pushing: boolean;
   pulling: boolean;
   cloning: boolean;
   resetting: boolean;
@@ -61,7 +60,6 @@ interface GitState {
   }>) => Promise<void>;
   pickExportDir: () => Promise<void>;
   refreshStatus: () => Promise<void>;
-  push: (params: { message: string; files?: string[] }) => Promise<void>;
   pull: () => Promise<void>;
 
   // Staging (git index) actions — operate on the real index, then refresh status.
@@ -112,7 +110,6 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   status: null,
   loading: false,
-  pushing: false,
   pulling: false,
   cloning: false,
   resetting: false,
@@ -173,32 +170,6 @@ export const useGitStore = create<GitState>((set, get) => ({
       set({ status, loading: false });
     } catch (e) {
       set({ error: String(e), loading: false });
-    }
-  },
-
-  push: async ({ message, files }) => {
-    const { exportDir, remoteURL: storedURL, branch, authorName, authorEmail, oauthToken, status } = get();
-    if (!exportDir) return;
-    // Prefer the store's saved URL; fall back to what the repo's git config reports.
-    const remoteURL = storedURL || status?.remoteURL || "";
-    set({ pushing: true, error: null });
-    try {
-      await GitCommitAndPush({
-        dir:         exportDir,
-        remoteURL,
-        branch:      branch || "main",
-        authMethod:  "oauth",
-        token:       oauthToken,
-        message:     message || "chore: export Snowflake DDL",
-        authorName,
-        authorEmail,
-        files:       files ?? [],
-      } as any);
-      await get().refreshStatus();
-    } catch (e) {
-      set({ error: String(e) });
-    } finally {
-      set({ pushing: false });
     }
   },
 

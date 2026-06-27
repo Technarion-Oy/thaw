@@ -657,22 +657,26 @@ export default function FileBrowser() {
     }
   };
 
+  // gitStore records failures in state.error, which only ChangesView renders — so
+  // here we surface it as a toast, otherwise context-menu git actions fail silently.
+  const reportGit = (okMsg: string) => {
+    const err = useGitStore.getState().error;
+    if (err) message.error(err);
+    else message.success(okMsg);
+  };
+
   const handleStage = () => {
     if (!fileCtxMenu) return;
     const { path, name } = fileCtxMenu;
     setFileCtxMenu(null);
-    stageFile(path)
-      .then(() => { if (!useGitStore.getState().error) message.success(`Staged ${name}`); })
-      .catch(() => {});
+    stageFile(path).then(() => reportGit(`Staged ${name}`)).catch((e) => message.error(String(e)));
   };
 
   const handleUnstage = () => {
     if (!fileCtxMenu) return;
     const { path, name } = fileCtxMenu;
     setFileCtxMenu(null);
-    unstageFile(path)
-      .then(() => { if (!useGitStore.getState().error) message.success(`Unstaged ${name}`); })
-      .catch(() => {});
+    unstageFile(path).then(() => reportGit(`Unstaged ${name}`)).catch((e) => message.error(String(e)));
   };
 
   const handleDiscardGit = () => {
@@ -686,7 +690,7 @@ export default function FileBrowser() {
       okButtonProps: { danger: true },
       onOk: async () => {
         await discardFile(path);
-        if (!useGitStore.getState().error) message.success(`Discarded changes to ${name}`);
+        reportGit(`Discarded changes to ${name}`);
       },
     });
   };

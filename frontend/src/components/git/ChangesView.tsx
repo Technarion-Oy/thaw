@@ -133,24 +133,24 @@ export default function ChangesView() {
             <Button size="small" icon={<ReloadOutlined spin={loading} />} onClick={refreshStatus} disabled={loading} />
           </Tooltip>
           <Tooltip title="Stage every change (git add -A)">
-            <Button size="small" icon={<PlusOutlined />} disabled={unstagedTotal === 0} onClick={stageAll}>Stage all</Button>
+            <Button size="small" icon={<PlusOutlined />} disabled={busy || unstagedTotal === 0} onClick={stageAll}>Stage all</Button>
           </Tooltip>
           <Tooltip title="Remove every file from the staging area. Your edits are kept (git reset).">
-            <Button size="small" icon={<MinusOutlined />} disabled={stagedTotal === 0} onClick={unstageAll}>Unstage all</Button>
+            <Button size="small" icon={<MinusOutlined />} disabled={busy || stagedTotal === 0} onClick={unstageAll}>Unstage all</Button>
           </Tooltip>
           {totalChanged > 0 && (
-            <Popconfirm
-              title="Reset all changes to the last commit?"
-              description="Reverts every staged and unstaged change in the working tree (git reset --hard HEAD). Your edits are permanently lost — this cannot be undone."
-              onConfirm={resetHard}
-              okText="Reset hard"
-              okButtonProps={{ danger: true }}
-              icon={<WarningOutlined style={{ color: "var(--danger)" }} />}
-            >
-              <Tooltip title="Discard all working-tree changes and reset to the last commit (git reset --hard)">
-                <Button size="small" danger icon={<WarningOutlined />} loading={resetting}>Reset to commit</Button>
-              </Tooltip>
-            </Popconfirm>
+            <Tooltip title="Discard all working-tree changes and reset to the last commit (git reset --hard)">
+              <Popconfirm
+                title="Reset all changes to the last commit?"
+                description="Reverts every staged and unstaged change in the working tree (git reset --hard HEAD). Your edits are permanently lost — this cannot be undone."
+                onConfirm={resetHard}
+                okText="Reset hard"
+                okButtonProps={{ danger: true }}
+                icon={<WarningOutlined style={{ color: "var(--danger)" }} />}
+              >
+                <Button size="small" danger icon={<WarningOutlined />} loading={resetting} disabled={busy}>Reset to commit</Button>
+              </Popconfirm>
+            </Tooltip>
           )}
         </div>
       </div>
@@ -169,10 +169,10 @@ export default function ChangesView() {
         type="primary"
         icon={<CloudUploadOutlined />}
         loading={committing}
-        disabled={stagedTotal === 0 || !oauthToken}
+        disabled={busy || stagedTotal === 0 || !oauthToken}
         onClick={handleCommit}
       >
-        {committing ? "Committing…" : `Commit ${stagedTotal.toLocaleString()} staged`}
+        {committing ? "Committing & pushing…" : `Commit & Push ${stagedTotal.toLocaleString()} staged`}
       </Button>
       {!oauthToken && (
         <Text style={{ fontSize: 11, color: "var(--text-muted)" }}>Connect to GitHub above to enable commit &amp; push.</Text>
