@@ -60,7 +60,7 @@ func (s *Service) PickRequirementsFile() (string, error)
 func (s *Service) PickPyprojectFile() (string, error)
 func (s *Service) InstallRequirementsFile(path string) error
 func (s *Service) InstallPyprojectFile(path string) error
-func (s *Service) FreezeRequirements(path string) (string, error)
+func (s *Service) FreezeRequirements() (string, error)
 
 // Config
 func (s *Service) GetSnowparkConfig() SnowparkConfigResult

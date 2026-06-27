@@ -369,6 +369,17 @@ export default function SnowparkSetupModal({ onClose }: Props) {
     : undefined,
   );
 
+  // refreshPackages reloads the package list without letting a transient list
+  // failure masquerade as an operation failure (it surfaces via packagesError).
+  const refreshPackages = async () => {
+    try {
+      setPackages(await ListEnvPackages());
+      setPackagesError(null);
+    } catch (e) {
+      setPackagesError(String(e));
+    }
+  };
+
   const handleInstallPackage = async () => {
     const pkg = packageInput.trim();
     if (!pkg) return;
@@ -377,8 +388,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
     try {
       await InstallEnvPackage(pkg);
       setPackageInput("");
-      const updated = await ListEnvPackages();
-      setPackages(updated);
+      await refreshPackages();
     } catch (e) {
       setPackageLog((prev) => [...prev, String(e)]);
     } finally {
@@ -397,8 +407,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
         setPackageLog([]);
         try {
           await UninstallEnvPackage(name);
-          const updated = await ListEnvPackages();
-          setPackages(updated);
+          await refreshPackages();
         } catch (e) {
           setPackageLog((prev) => [...prev, String(e)]);
         } finally {
@@ -408,23 +417,18 @@ export default function SnowparkSetupModal({ onClose }: Props) {
     });
   };
 
-  // refreshPackages reloads the package list without letting a transient list
-  // failure masquerade as an install failure (it surfaces via packagesError).
-  const refreshPackages = async () => {
-    try {
-      setPackages(await ListEnvPackages());
-      setPackagesError(null);
-    } catch (e) {
-      setPackagesError(String(e));
-    }
-  };
-
   const handleInstallRequirements = async () => {
+    // Capture the current log so a cancelled picker restores it rather than
+    // leaving the panel blank with no indication the action was a no-op.
+    const prevLog = packageLog;
     setDepFileOp("requirements");
     setPackageLog([]);
     try {
       const path = await PickRequirementsFile();
-      if (!path) return;
+      if (!path) {
+        setPackageLog(prevLog);
+        return;
+      }
       setPackageLog([`$ pip install -r ${path}`]);
       await InstallRequirementsFile(path);
       await refreshPackages();
@@ -436,14 +440,17 @@ export default function SnowparkSetupModal({ onClose }: Props) {
   };
 
   const handleInstallPyproject = async () => {
+    const prevLog = packageLog;
     setDepFileOp("pyproject");
     setPackageLog([]);
     try {
       const path = await PickPyprojectFile();
-      if (!path) return;
-      // pip installs the directory containing the pyproject.toml, not the file.
-      const dir = path.replace(/[/\\][^/\\]*$/, "");
-      setPackageLog([`$ pip install ${dir}`]);
+      if (!path) {
+        setPackageLog(prevLog);
+        return;
+      }
+      // pip is given the directory containing the file, not the file itself.
+      setPackageLog([`Installing project from ${path}…`]);
       await InstallPyprojectFile(path);
       await refreshPackages();
     } catch (e) {
@@ -460,7 +467,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
     setDepFileOp("freeze");
     setPackageLog(["$ pip freeze…"]);
     try {
-      const written = await FreezeRequirements("");
+      const written = await FreezeRequirements();
       setPackageLog(written ? [`✓ Wrote requirements to ${written}`] : prevLog);
     } catch (e) {
       setPackageLog((prev) => [...prev, String(e)]);

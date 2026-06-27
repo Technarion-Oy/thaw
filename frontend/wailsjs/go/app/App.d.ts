@@ -489,7 +489,7 @@ export function FormatPackagesPolicyList(arg1:Array<string>):Promise<string>;
 
 export function FormatSecondaryRoles(arg1:Array<string>):Promise<string>;
 
-export function FreezeRequirements(arg1:string):Promise<string>;
+export function FreezeRequirements():Promise<string>;
 
 export function GenerateKeyPair(arg1:string,arg2:string,arg3:string):Promise<keypair.KeyPairResult>;
 

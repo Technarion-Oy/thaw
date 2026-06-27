@@ -15,7 +15,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -1331,57 +1330,74 @@ func (s *Service) streamCommand(cmd *exec.Cmd) error {
 	return s.streamCommandTo(cmd, "snowpark:install-output")
 }
 
+// streamAndCapture runs cmd, emits each stdout/stderr line as eventName (so the
+// UI gets live progress), and returns the collected stdout for callers that also
+// need the output (e.g. writing `pip freeze` to a file).
+func (s *Service) streamAndCapture(cmd *exec.Cmd, eventName string) (string, error) {
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return "", err
+	}
+	if err := cmd.Start(); err != nil {
+		return "", err
+	}
+
+	emit := func(line string) {
+		wailsruntime.EventsEmit(s.ctx, eventName, line)
+	}
+
+	var captured []string
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		sc := bufio.NewScanner(stdout)
+		for sc.Scan() {
+			line := sc.Text()
+			captured = append(captured, line)
+			emit(line)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		sc := bufio.NewScanner(stderr)
+		for sc.Scan() {
+			emit(sc.Text())
+		}
+	}()
+	wg.Wait()
+	if err := cmd.Wait(); err != nil {
+		return "", err
+	}
+	return strings.Join(captured, "\n") + "\n", nil
+}
+
 // ─── pip/env helpers ──────────────────────────────────────────────────────────
 
-// pipBinForEnv returns the pip binary path for the active backend environment.
-func (s *Service) pipBinForEnv() (string, error) {
-	cfg, err := config.Load()
-	if err != nil || cfg == nil {
-		return "", fmt.Errorf("config unavailable: %w", err)
+// pipBinForEnv returns the venv pip binary path for the given config. It is only
+// meaningful for the venv backend; callers handle the conda case themselves.
+func (s *Service) pipBinForEnv(cfg *config.AppConfig) (string, error) {
+	venvPath := cfg.Snowpark.VenvPath
+	if venvPath == "" {
+		venvPath = defaultVenvPath()
 	}
-	backend := cfg.Snowpark.Backend
-	if backend == "" {
-		backend = "conda"
+	pip := venvPipBin(venvPath)
+	if _, err := os.Stat(pip); err != nil {
+		return "", fmt.Errorf("venv pip not found at %s — run Setup first", pip)
 	}
-	if backend == "venv" {
-		venvPath := cfg.Snowpark.VenvPath
-		if venvPath == "" {
-			venvPath = defaultVenvPath()
-		}
-		pip := venvPipBin(venvPath)
-		if _, err := os.Stat(pip); err != nil {
-			return "", fmt.Errorf("venv pip not found at %s — run Setup first", pip)
-		}
-		return pip, nil
-	}
-	// conda: use "conda run -n thaw_snowpark pip"
-	return "", nil
+	return pip, nil
 }
 
 // ListEnvPackages returns all packages installed in the active Snowpark environment.
 func (s *Service) ListEnvPackages() ([]PackageInfo, error) {
-	cfg, _ := config.Load()
-	backend := cfg.Snowpark.Backend
-	if backend == "" {
-		backend = "conda"
+	cmd, err := s.pipCmd("list", "--format=json")
+	if err != nil {
+		return nil, err
 	}
-
-	var cmd *exec.Cmd
-	if backend == "venv" {
-		pip, err := s.pipBinForEnv()
-		if err != nil {
-			return nil, err
-		}
-		cmd = exec.Command(pip, "list", "--format=json")
-	} else {
-		condaPath, err := exec.LookPath("conda")
-		if err != nil {
-			return nil, fmt.Errorf("conda not found: %w", err)
-		}
-		cmd = exec.Command(condaPath, "run", "-n", SnowparkCondaEnv,
-			"pip", "list", "--format=json")
-	}
-
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("pip list: %w", err)
@@ -1447,7 +1463,7 @@ func (s *Service) pipCmd(args ...string) (*exec.Cmd, error) {
 		backend = "conda"
 	}
 	if backend == "venv" {
-		pip, err := s.pipBinForEnv()
+		pip, err := s.pipBinForEnv(cfg)
 		if err != nil {
 			return nil, err
 		}
@@ -1528,42 +1544,44 @@ func (s *Service) InstallPyprojectFile(path string) error {
 	return nil
 }
 
-// FreezeRequirements writes `pip freeze` output to a requirements file. When
-// path is empty it opens a save dialog; it returns the path written, or "" if
-// the dialog was cancelled.
-func (s *Service) FreezeRequirements(path string) (string, error) {
-	if path == "" {
-		chosen, err := wailsruntime.SaveFileDialog(s.ctx, wailsruntime.SaveDialogOptions{
-			Title:           "Save requirements.txt",
-			DefaultFilename: "requirements.txt",
-			Filters: []wailsruntime.FileFilter{
-				{DisplayName: "Requirements (*.txt)", Pattern: "*.txt"},
-			},
-		})
-		if err != nil {
-			return "", err
-		}
-		if chosen == "" {
-			return "", nil // cancelled
-		}
-		path = chosen
-	}
-	cmd, err := s.pipCmd("freeze")
+// FreezeRequirements opens a save dialog and writes `pip freeze` output to the
+// chosen file, streaming progress via the "snowpark:package-output" event. It
+// returns the path written, or "" if the dialog was cancelled.
+func (s *Service) FreezeRequirements() (string, error) {
+	path, err := wailsruntime.SaveFileDialog(s.ctx, wailsruntime.SaveDialogOptions{
+		Title:           "Save requirements.txt",
+		DefaultFilename: "requirements.txt",
+		Filters: []wailsruntime.FileFilter{
+			{DisplayName: "Requirements (*.txt)", Pattern: "*.txt"},
+		},
+	})
 	if err != nil {
 		return "", err
 	}
-	out, err := cmd.Output()
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
-			return "", fmt.Errorf("pip freeze: %w\n%s", err, exitErr.Stderr)
-		}
-		return "", fmt.Errorf("pip freeze: %w", err)
+	if path == "" {
+		return "", nil // cancelled
 	}
-	if err := os.WriteFile(path, out, 0o644); err != nil {
-		return "", fmt.Errorf("write %s: %w", path, err)
+	if err := s.freezeToFile(path); err != nil {
+		return "", err
 	}
 	return path, nil
+}
+
+// freezeToFile runs `pip freeze` and writes its output to path, streaming each
+// line via the "snowpark:package-output" event so the UI shows live progress.
+func (s *Service) freezeToFile(path string) error {
+	cmd, err := s.pipCmd("freeze")
+	if err != nil {
+		return err
+	}
+	out, err := s.streamAndCapture(cmd, "snowpark:package-output")
+	if err != nil {
+		return fmt.Errorf("pip freeze: %w", err)
+	}
+	if err := os.WriteFile(path, []byte(out), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
 }
 
 // ─── conda install methods ────────────────────────────────────────────────────

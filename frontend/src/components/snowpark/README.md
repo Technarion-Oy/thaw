@@ -22,7 +22,7 @@ the backend `snowpark` package via IPC and streams installation output via Wails
 - `CheckSnowparkEnv()` — returns `snowpark.SnowparkCheckResult` with per-check pass/fail flags
 - `InstallSnowparkStep(step, backend)` — installs one step (conda/venv setup or package install); streams output via `snowpark:install-output` Wails event
 - `ListEnvPackages()` / `InstallEnvPackage(name)` / `UninstallEnvPackage(name)` — package manager in Step 3
-- `PickRequirementsFile()` + `InstallRequirementsFile(path)`, `PickPyprojectFile()` + `InstallPyprojectFile(path)`, `FreezeRequirements("")` — dependency-file install/export buttons in Step 3
+- `PickRequirementsFile()` + `InstallRequirementsFile(path)`, `PickPyprojectFile()` + `InstallPyprojectFile(path)`, `FreezeRequirements()` — dependency-file install/export buttons in Step 3 (install ops stream output via `snowpark:package-output`; freeze opens its own save dialog)
 - `SaveSnowparkConfig(cfg)` / `SaveSnowparkVenvPath(path)` / `SaveSnowparkPythonPath(path)` — persist environment settings
 - `GetPipRegistryConfig()` / `SavePipRegistryConfig(cfg)` — load/save pip registry settings
 - `PickCACertFile()` — native file picker for CA certificate path

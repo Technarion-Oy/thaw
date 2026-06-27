@@ -73,8 +73,8 @@ func (a *App) InstallPyprojectFile(path string) error {
 	return a.snowparkSvc.InstallPyprojectFile(path)
 }
 
-func (a *App) FreezeRequirements(path string) (string, error) {
-	return a.snowparkSvc.FreezeRequirements(path)
+func (a *App) FreezeRequirements() (string, error) {
+	return a.snowparkSvc.FreezeRequirements()
 }
 
 func (a *App) InstallCondaEnv() error { return a.snowparkSvc.InstallCondaEnv() }
