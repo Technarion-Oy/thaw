@@ -199,12 +199,19 @@ models:
 	// INFORMATION_SCHEMA should still get plain stg_<table> names).
 	multiScope := multiScopeFor(objects)
 
+	// Resolve the final, project-unique source and staging-model names up front.
+	// The readable base names are not injective on their own (see SourceName), so
+	// these maps break any collision deterministically; create.go builds the same
+	// maps to keep {{ source(...) }} / {{ ref(...) }} references consistent.
+	srcNames := SourceNames(objects)
+	stagingNames := StagingNames(objects, srcNames, multiScope)
+
 	// Build _sources.yml
 	var sourcesBuilder strings.Builder
 	sourcesBuilder.WriteString("version: 2\nsources:\n")
 
 	for _, so := range objects {
-		sName := sourceName(so.DB, so.Schema)
+		sName := srcNames[scopeKey(so.DB, so.Schema)]
 
 		// System schemas (e.g. INFORMATION_SCHEMA) are written as source
 		// entries so models can reference them via {{ source(...) }}, but no
@@ -239,7 +246,8 @@ models:
 
 		// Write one stub model per table/view
 		for _, t := range allNames {
-			stubPath := stagingModelPath(so.DB, so.Schema, t, multiScope)
+			stem := stagingNames[tableKey(so.DB, so.Schema, t)]
+			stubPath := filepath.Join("models", "staging", stem+".sql")
 			stub := stagingModelSQL(sName, t, so.ViewDefs[t])
 			if err := write(stubPath, stub); err != nil {
 				return nil, err
@@ -258,35 +266,42 @@ models:
 	}, nil
 }
 
-// SourceName returns the lower-case dbt source name for the given (db, schema)
-// pair, e.g. "mydb_public".  Exported so IPC callers can build consistent
-// {{ source('...', '...') }} references without duplicating the convention.
-func SourceName(db, schema string) string {
-	return scopeName(db, schema)
-}
-
-// sourceName is the unexported alias kept for internal use within this file.
-func sourceName(db, schema string) string { return SourceName(db, schema) }
-
-// scopeName builds the lower-case "db_schema" scope name shared by source names
-// and (multi-scope) staging-model names.
+// SourceName returns the readable dbt source-name convention for a (db, schema)
+// pair: the two identifiers lower-cased and joined with "_", e.g. "mydb_public".
 //
-// A single "_" separator is ambiguous when an identifier itself contains an
-// underscore: "A_B"."C" and "A"."B_C" would both join to "a_b_c", colliding
-// distinct Snowflake scopes.  To make the join injective, each identifier's own
-// underscores are doubled (escapeIdent), so the single un-doubled "_" is always
-// the real db/schema boundary and the doubled runs are interior.  Identifiers
-// without underscores are unchanged, so the common "mydb_public" form is
-// preserved.  References built via SourceName/StagingModelName stay consistent
-// because they call this same helper.
-func scopeName(db, schema string) string {
-	return escapeIdent(db) + "_" + escapeIdent(schema)
+// This base name is NOT unique on its own.  dbt source and model names may only
+// contain [A-Za-z0-9_], so "_" is the only available separator — and because
+// Snowflake identifiers may themselves contain "_", two distinct scopes can map
+// to the same string ("A_B"."C" and "A"."B_C" both → "a_b_c").  No "_"-based
+// scheme can avoid this, so uniqueness is enforced at the project level by
+// SourceNames, which appends a numeric suffix to any collision.  Callers needing
+// the final name must use that map, not this function in isolation.
+func SourceName(db, schema string) string {
+	return strings.ToLower(db) + "_" + strings.ToLower(schema)
 }
 
-// escapeIdent lower-cases an identifier and doubles every "_" it contains, so a
-// single "_" can be used as an unambiguous component separator.
-func escapeIdent(s string) string {
-	return strings.ReplaceAll(strings.ToLower(s), "_", "__")
+// StagingModelName returns the readable staging-model name convention (filename
+// without the .sql extension): "stg_<table>" for a single data scope, or
+// "stg_<source>_<table>" when multiple scopes are present.  Like SourceName this
+// is the pre-deduplication base name; StagingNames resolves collisions.
+func StagingModelName(db, schema, table string, multiScope bool) string {
+	return stagingBase(SourceName(db, schema), table, multiScope)
+}
+
+// stagingBase builds the readable staging-model name from an (already-resolved)
+// source name and a table.  Multi-scope names embed the source name so a model
+// and its source stay in sync.
+func stagingBase(srcName, table string, multiScope bool) string {
+	if multiScope {
+		return "stg_" + srcName + "_" + strings.ToLower(table)
+	}
+	return "stg_" + strings.ToLower(table)
+}
+
+// stagingModelPath returns the relative path for a staging model file from its
+// resolved model-name stem.
+func stagingModelPath(db, schema, table string, multiScope bool) string {
+	return filepath.Join("models", "staging", StagingModelName(db, schema, table, multiScope)+".sql")
 }
 
 // multiScopeFor reports whether staging model names need a db_schema prefix to
@@ -304,25 +319,86 @@ func multiScopeFor(objects []SchemaObjects) bool {
 	return n > 1
 }
 
-// StagingModelName returns the dbt model name (filename without the .sql
-// extension) for a staging model.  Exported so IPC callers can build
-// consistent {{ ref('...') }} references that match the generated filenames.
-func StagingModelName(db, schema, table string, multiScope bool) string {
-	if multiScope {
-		return "stg_" + scopeName(db, schema) + "_" + strings.ToLower(table)
+// scopeKey / tableKey are case-insensitive map keys identifying a (db, schema)
+// scope and a (db, schema, table) object respectively.  The NUL separator can't
+// occur in a Snowflake identifier, so keys never collide across components.
+func scopeKey(db, schema string) string {
+	return strings.ToUpper(db) + "\x00" + strings.ToUpper(schema)
+}
+
+func tableKey(db, schema, table string) string {
+	return scopeKey(db, schema) + "\x00" + strings.ToUpper(table)
+}
+
+// uniqueName returns base when it is unused, otherwise the first free
+// base_2 / base_3 / … form, recording the chosen name in used.
+func uniqueName(base string, used map[string]bool) string {
+	name := base
+	for i := 2; used[name]; i++ {
+		name = fmt.Sprintf("%s_%d", base, i)
 	}
-	return fmt.Sprintf("stg_%s", strings.ToLower(table))
+	used[name] = true
+	return name
 }
 
-// stagingModelPath returns the relative path for a staging model file.
-// When multiScope is true (multiple db/schema pairs) a db_schema_ prefix is
-// added to avoid collisions.
-func stagingModelPath(db, schema, table string, multiScope bool) string {
-	return filepath.Join("models", "staging", StagingModelName(db, schema, table, multiScope)+".sql")
+// SourceNames assigns a project-unique _sources.yml source name to every scope
+// that gets a source entry — system schemas, plus regular schemas with at least
+// one table or view — keyed by scopeKey.  The readable SourceName base is used
+// as-is unless an earlier scope already claimed it (a collision, e.g. "A_B"."C"
+// vs "A"."B_C"), in which case a _2/_3/… suffix is appended.  Iteration follows
+// objects order, so Generate and create.go compute identical names.
+func SourceNames(objects []SchemaObjects) map[string]string {
+	used := map[string]bool{}
+	out := map[string]string{}
+	for _, so := range objects {
+		if !so.IsSystem && len(so.Tables)+len(so.Views) == 0 {
+			continue // empty schema — no source entry
+		}
+		k := scopeKey(so.DB, so.Schema)
+		if _, ok := out[k]; ok {
+			continue
+		}
+		out[k] = uniqueName(SourceName(so.DB, so.Schema), used)
+	}
+	return out
 }
 
-// blockComment matches /* ... */ comments, including across newlines.
-var blockComment = regexp.MustCompile(`(?s)/\*.*?\*/`)
+// StagingNames assigns a project-unique staging-model name (filename stem) to
+// every (db, schema, table) that gets a stub, keyed by tableKey.  srcNames
+// supplies the already-deduplicated source name used as the multi-scope prefix,
+// and a separate used-set guards the model-name space (which can collide even
+// when source names don't, e.g. source "a_b" + table "c_d" vs source "a_b_c" +
+// table "d" both → "stg_a_b_c_d").
+func StagingNames(objects []SchemaObjects, srcNames map[string]string, multiScope bool) map[string]string {
+	used := map[string]bool{}
+	out := map[string]string{}
+	for _, so := range objects {
+		if so.IsSystem || len(so.Tables)+len(so.Views) == 0 {
+			continue
+		}
+		sName := srcNames[scopeKey(so.DB, so.Schema)]
+		names := make([]string, 0, len(so.Tables)+len(so.Views))
+		names = append(names, so.Tables...)
+		names = append(names, so.Views...)
+		for _, t := range names {
+			k := tableKey(so.DB, so.Schema, t)
+			if _, ok := out[k]; ok {
+				continue
+			}
+			out[k] = uniqueName(stagingBase(sName, t, multiScope), used)
+		}
+	}
+	return out
+}
+
+// blockComment matches /* ... */ comments, including across newlines.  The
+// second pattern strips an unterminated "/*" (no closing "*/") through end of
+// input — Snowflake can return truncated DDL for secured/unavailable views, and
+// a body that is only an unclosed comment must still fall back to the stub.
+var (
+	blockComment     = regexp.MustCompile(`(?s)/\*.*?\*/`)
+	openBlockComment = regexp.MustCompile(`(?s)/\*.*`)
+)
 
 // hasExecutableSQL reports whether s contains anything other than whitespace and
 // SQL comments.  Used to decide between inlining a view body and emitting the
@@ -332,6 +408,7 @@ var blockComment = regexp.MustCompile(`(?s)/\*.*?\*/`)
 // early; harmless here — a body with real SQL still tests non-empty.
 func hasExecutableSQL(s string) bool {
 	s = blockComment.ReplaceAllString(s, "")
+	s = openBlockComment.ReplaceAllString(s, "")
 	for _, line := range strings.Split(s, "\n") {
 		if i := strings.Index(line, "--"); i >= 0 {
 			line = line[:i]

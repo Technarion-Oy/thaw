@@ -234,7 +234,7 @@ func TestGenerate(t *testing.T) {
 		}
 
 		sources := readFile(t, result.ProjectDir, filepath.Join("models", "staging", "_sources.yml"))
-		assertContains(t, sources, "mydb_information__schema", "_sources.yml source name")
+		assertContains(t, sources, "mydb_information_schema", "_sources.yml source name")
 		assertContains(t, sources, "database: MYDB", "_sources.yml database")
 		assertContains(t, sources, "schema: INFORMATION_SCHEMA", "_sources.yml schema")
 		assertContains(t, sources, "tables: []", "_sources.yml empty tables list")
@@ -285,7 +285,7 @@ func TestGenerate(t *testing.T) {
 
 		sources := readFile(t, result.ProjectDir, filepath.Join("models", "staging", "_sources.yml"))
 		// System schema present as source entry.
-		assertContains(t, sources, "db_information__schema", "system source entry")
+		assertContains(t, sources, "db_information_schema", "system source entry")
 		assertContains(t, sources, "tables: []", "system schema empty tables")
 		// Regular schema present with its tables.
 		assertContains(t, sources, "db_public", "regular source entry")
@@ -540,7 +540,7 @@ func TestGenerate(t *testing.T) {
 
 		// _sources.yml has both entries.
 		sources := readFile(t, result.ProjectDir, filepath.Join("models", "staging", "_sources.yml"))
-		assertContains(t, sources, "db_information__schema", "system source")
+		assertContains(t, sources, "db_information_schema", "system source")
 		assertContains(t, sources, "db_public", "regular source")
 	})
 
@@ -566,7 +566,7 @@ func TestGenerate(t *testing.T) {
 
 		// Source name must be fully lowercase.
 		sources := readFile(t, result.ProjectDir, filepath.Join("models", "staging", "_sources.yml"))
-		assertContains(t, sources, "name: upper__db_upper__sch", "lowercase source name")
+		assertContains(t, sources, "name: upper_db_upper_sch", "lowercase source name")
 		// Database and schema in YAML kept as-is (user's original casing).
 		assertContains(t, sources, "database: UPPER_DB", "database casing preserved")
 		assertContains(t, sources, "schema: UPPER_SCH", "schema casing preserved")
@@ -588,10 +588,9 @@ func TestGenerate(t *testing.T) {
 	})
 
 	t.Run("source name collision with underscore-containing identifiers", func(t *testing.T) {
-		// DB "A_B" + Schema "C" and DB "A" + Schema "B_C" must produce
-		// distinct source names in _sources.yml.  The current underscore
-		// separator is ambiguous for identifiers that themselves contain
-		// underscores.
+		// DB "A_B" + Schema "C" and DB "A" + Schema "B_C" share the readable base
+		// name "a_b_c"; project-level dedup must give them distinct source names
+		// (the first keeps "a_b_c", the second becomes "a_b_c_2").
 		dir := t.TempDir()
 		req := CreateRequest{ProjectName: "proj", OutputDir: dir}
 		objects := []SchemaObjects{
@@ -602,11 +601,12 @@ func TestGenerate(t *testing.T) {
 		result := mustGenerate(t, req, typicalSession(), objects)
 		sources := readFile(t, result.ProjectDir, filepath.Join("models", "staging", "_sources.yml"))
 
-		count := strings.Count(sources, "- name: a_b_c")
-		if count > 1 {
-			t.Errorf("duplicate source name 'a_b_c' in _sources.yml (%d occurrences) — "+
-				"A_B.C and A.B_C produce the same source name due to underscore separator ambiguity",
-				count)
+		// Exactly one entry keeps the base name and one is disambiguated.
+		if c := strings.Count(sources, "  - name: a_b_c\n"); c != 1 {
+			t.Errorf("want exactly one '- name: a_b_c' entry, got %d in:\n%s", c, sources)
+		}
+		if !strings.Contains(sources, "  - name: a_b_c_2\n") {
+			t.Errorf("want disambiguated '- name: a_b_c_2' entry in:\n%s", sources)
 		}
 	})
 }
@@ -621,10 +621,10 @@ func TestSourceName(t *testing.T) {
 		{"MYDB", "PUBLIC", "mydb_public"},
 		{"mydb", "public", "mydb_public"},
 		{"MyDb", "MySchema", "mydb_myschema"},
-		{"DB", "INFORMATION_SCHEMA", "db_information__schema"},
+		{"DB", "INFORMATION_SCHEMA", "db_information_schema"},
 		{"ANALYTICS", "GOLD", "analytics_gold"},
 		{"A", "B", "a_b"},
-		{"DB_WITH_UNDERSCORES", "SCH_WITH_UNDERSCORES", "db__with__underscores_sch__with__underscores"},
+		{"DB_WITH_UNDERSCORES", "SCH_WITH_UNDERSCORES", "db_with_underscores_sch_with_underscores"},
 		// Numbers and mixed case.
 		{"DB1", "SCH2", "db1_sch2"},
 		{"UPPER", "lower", "upper_lower"},
@@ -632,39 +632,63 @@ func TestSourceName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.db+"."+tt.schema, func(t *testing.T) {
-			got := sourceName(tt.db, tt.schema)
+			got := SourceName(tt.db, tt.schema)
 			if got != tt.want {
-				t.Errorf("sourceName(%q, %q) = %q, want %q", tt.db, tt.schema, got, tt.want)
+				t.Errorf("SourceName(%q, %q) = %q, want %q", tt.db, tt.schema, got, tt.want)
 			}
 		})
 	}
+}
 
-	t.Run("underscore separator must not cause collisions", func(t *testing.T) {
-		// DB "A_B" + Schema "C" and DB "A" + Schema "B_C" are different
-		// Snowflake scopes but both lower to "a_b" + "_" + "c" = "a_b_c".
-		a := sourceName("A_B", "C")
-		b := sourceName("A", "B_C")
+// ─── TestSourceNames (project-level dedup) ────────────────────────────────────
+
+func TestSourceNames(t *testing.T) {
+	// Distinct Snowflake scopes whose readable base names collide must each get
+	// a unique source name. The "_" separator cannot distinguish these on its
+	// own (dbt names allow only [A-Za-z0-9_]), so dedup happens at this level.
+	collidingPairs := [][2][2]string{
+		{{"A_B", "C"}, {"A", "B_C"}},     // underscore moves across the boundary
+		{{"A_B", "C_D"}, {"A", "B_C_D"}}, // underscores on both sides
+		{{"X_", "Y"}, {"X", "_Y"}},       // trailing- vs leading-underscore (reviewer case)
+	}
+	for _, p := range collidingPairs {
+		objects := []SchemaObjects{
+			{DB: p[0][0], Schema: p[0][1], Tables: []string{"T"}},
+			{DB: p[1][0], Schema: p[1][1], Tables: []string{"T"}},
+		}
+		names := SourceNames(objects)
+		a := names[scopeKey(p[0][0], p[0][1])]
+		b := names[scopeKey(p[1][0], p[1][1])]
+		if a == "" || b == "" {
+			t.Fatalf("missing source name for %v: %v", p, names)
+		}
 		if a == b {
-			t.Errorf("sourceName(%q, %q) = sourceName(%q, %q) = %q — "+
-				"ambiguous underscore separator causes collision",
-				"A_B", "C", "A", "B_C", a)
+			t.Errorf("SourceNames(%v): both scopes got %q — collision not resolved", p, a)
+		}
+	}
+
+	t.Run("non-colliding names are left unchanged", func(t *testing.T) {
+		objects := []SchemaObjects{
+			{DB: "MY_DB", Schema: "PUBLIC", Tables: []string{"T"}},
+			{DB: "ANALYTICS", Schema: "GOLD", Tables: []string{"T"}},
+		}
+		names := SourceNames(objects)
+		if got := names[scopeKey("MY_DB", "PUBLIC")]; got != "my_db_public" {
+			t.Errorf("got %q, want clean base name my_db_public", got)
 		}
 	})
 
-	t.Run("underscores on both sides must not collide", func(t *testing.T) {
-		// Both identifiers carry an underscore: "A_B"."C_D" vs "A"."B_C_D".
-		a := sourceName("A_B", "C_D")
-		b := sourceName("A", "B_C_D")
-		if a == b {
-			t.Errorf("sourceName(%q, %q) = sourceName(%q, %q) = %q — collision",
-				"A_B", "C_D", "A", "B_C_D", a)
+	t.Run("empty schemas get no entry, system schemas do", func(t *testing.T) {
+		objects := []SchemaObjects{
+			{DB: "DB", Schema: "EMPTY"},
+			{DB: "DB", Schema: "INFORMATION_SCHEMA", IsSystem: true},
 		}
-		// Even identifiers that themselves contain "__" stay distinct.
-		c := sourceName("A__B", "C")
-		d := sourceName("A", "B__C")
-		if c == d {
-			t.Errorf("sourceName(%q, %q) = sourceName(%q, %q) = %q — collision",
-				"A__B", "C", "A", "B__C", c)
+		names := SourceNames(objects)
+		if _, ok := names[scopeKey("DB", "EMPTY")]; ok {
+			t.Errorf("empty schema should not get a source name: %v", names)
+		}
+		if _, ok := names[scopeKey("DB", "INFORMATION_SCHEMA")]; !ok {
+			t.Errorf("system schema should get a source name: %v", names)
 		}
 	})
 }
@@ -719,7 +743,7 @@ func TestStagingModelPath(t *testing.T) {
 			name:       "multi-scope with underscores in identifiers",
 			db:         "MY_DB", schema: "MY_SCH", table: "MY_TABLE",
 			multiScope: true,
-			want:       filepath.Join("models", "staging", "stg_my__db_my__sch_my_table.sql"),
+			want:       filepath.Join("models", "staging", "stg_my_db_my_sch_my_table.sql"),
 		},
 	}
 
@@ -732,14 +756,49 @@ func TestStagingModelPath(t *testing.T) {
 			}
 		})
 	}
+}
 
-	t.Run("underscore separator must not cause multi-scope path collisions", func(t *testing.T) {
-		a := stagingModelPath("A_B", "C", "T", true)
-		b := stagingModelPath("A", "B_C", "T", true)
-		if a == b {
-			t.Errorf("stagingModelPath collision: (A_B, C, T) and (A, B_C, T) both produce %q", a)
-		}
-	})
+// ─── TestStagingNames (project-level dedup) ───────────────────────────────────
+
+func TestStagingNames(t *testing.T) {
+	// Distinct (db, schema, table) triples whose readable model names collide
+	// must each get a unique stem — including collisions that arise only at the
+	// scope/table boundary, which scope-level dedup alone would miss.
+	cases := []struct {
+		name    string
+		objects []SchemaObjects
+	}{
+		{
+			name: "scope collision",
+			objects: []SchemaObjects{
+				{DB: "A_B", Schema: "C", Tables: []string{"T"}},
+				{DB: "A", Schema: "B_C", Tables: []string{"T"}},
+			},
+		},
+		{
+			name: "scope/table boundary collision (source a_b + table c_d vs source a_b_c + table d)",
+			objects: []SchemaObjects{
+				{DB: "A", Schema: "B", Tables: []string{"C_D"}},
+				{DB: "A", Schema: "B_C", Tables: []string{"D"}},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			multiScope := multiScopeFor(tc.objects)
+			names := StagingNames(tc.objects, SourceNames(tc.objects), multiScope)
+			seen := map[string]string{}
+			for key, name := range names {
+				if other, dup := seen[name]; dup {
+					t.Errorf("duplicate staging model name %q for %q and %q", name, key, other)
+				}
+				seen[name] = key
+			}
+			if len(names) != 2 {
+				t.Fatalf("want 2 staging names, got %d: %v", len(names), names)
+			}
+		})
+	}
 }
 
 // ─── TestStagingModelSQL ──────────────────────────────────────────────────────
@@ -867,6 +926,18 @@ func TestStagingModelSQL(t *testing.T) {
 			name:    "comment-only body falls back to source() stub",
 			source:  "src", table: "T",
 			sqlBody: "-- definition unavailable\n/* secured view */",
+			mustContain: []string{
+				"{{ source('src', 'T') }}",
+				"with source as (",
+			},
+			mustNotContain: []string{
+				"view SQL inlined from Snowflake",
+			},
+		},
+		{
+			name:    "unterminated block comment falls back to source() stub",
+			source:  "src", table: "T",
+			sqlBody: "/* definition unavailable", // no closing */ (truncated DDL)
 			mustContain: []string{
 				"{{ source('src', 'T') }}",
 				"with source as (",

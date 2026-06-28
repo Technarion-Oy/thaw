@@ -24,10 +24,15 @@ This package is a **pure file-generation** package for classic (local) dbt proje
 | `CreateResult` | Return value: `ProjectDir`, `FilesCreated []string`, `Warnings []string` |
 | `Generate(req, session, objects)` | Pure function — writes all project files; no Snowflake connection needed |
 | `CreateProject(ctx, client, req, schemasMap)` | Orchestrator — queries Snowflake, builds `SchemaObjects`, rewrites view refs, calls `Generate` |
-| `SourceName(db, schema)` | Returns the lower-case dbt source name convention (`"mydb_public"`); exported for IPC callers |
-| `StagingModelName(db, schema, table, multiScope)` | Returns the model file stem (`"stg_table"` or `"stg_db_schema_table"`) |
+| `SourceName(db, schema)` | Returns the readable base source-name convention (`"mydb_public"`) — **not unique on its own** |
+| `StagingModelName(db, schema, table, multiScope)` | Returns the readable base model stem (`"stg_table"` or `"stg_source_table"`) |
+| `SourceNames(objects)` / `StagingNames(objects, srcNames, multiScope)` | Resolve the **project-unique** names actually written to disk, keyed by `scopeKey` / `tableKey` |
 
-Both names join lowered identifiers with a single `_`. Since identifiers may themselves contain `_`, each identifier's own underscores are doubled before joining (`escapeIdent`), so the single un-doubled `_` is always the real db/schema boundary — distinct scopes can't collide (`"A_B"."C"` → `a__b_c` vs `"A"."B_C"` → `a_b__c`). Identifiers without underscores are unchanged, so the common `mydb_public` form is preserved. `multiScope` (the `stg_db_schema_table` prefix) is decided from the count of schemas that actually produce stubs — system and empty schemas don't inflate it.
+### Name uniqueness
+
+dbt source and model names may only contain `[A-Za-z0-9_]`, so `_` is the only available separator. Because Snowflake identifiers can themselves contain `_`, the readable base names are **not injective** — distinct scopes can map to the same string (`"A_B"."C"` and `"A"."B_C"` both → `a_b_c`; the same applies at the scope/table boundary and for leading/trailing underscores). No `_`-based scheme avoids this, so uniqueness is enforced at the **project level**: `SourceNames`/`StagingNames` walk `objects` in order and append a numeric suffix (`_2`, `_3`, …) to any base name already taken. `Generate` and `CreateProject` (for inlined `{{ source }}`/`{{ ref }}` rewrites) build the same maps, so on-disk names and references stay consistent. `multiScope` (the `stg_source_table` prefix) is decided from the count of schemas that actually produce stubs — system and empty schemas don't inflate it.
+
+> **Migration note:** since the previous generator keyed multi-scope naming on `len(objects)`, a project regenerated after this change may rename staging files (e.g. a single data schema discovered alongside `INFORMATION_SCHEMA` now yields `stg_orders.sql` instead of `stg_db_public_orders.sql`). Update any hand-written `{{ ref(...) }}` accordingly after regenerating.
 
 ## Patterns & integration
 

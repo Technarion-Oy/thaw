@@ -124,7 +124,13 @@ func CreateProject(
 			}
 		}
 
+		// Resolve the project-unique source / staging-model names exactly as
+		// Generate will, so the inlined {{ source(...) }} / {{ ref(...) }} macros
+		// match the names actually written to disk (matters when a collision is
+		// disambiguated with a numeric suffix).
 		multiScope := multiScopeFor(schemaObjects)
+		srcNames := SourceNames(schemaObjects)
+		stagingNames := StagingNames(schemaObjects, srcNames, multiScope)
 
 		for i := range schemaObjects {
 			if len(schemaObjects[i].ViewDefs) == 0 {
@@ -142,11 +148,10 @@ func CreateProject(
 						if !ok {
 							return ""
 						}
-						sName := SourceName(info.db, info.schema)
 						if info.kind == "table" {
-							return fmt.Sprintf("{{ source('%s', '%s') }}", sName, info.name)
+							return fmt.Sprintf("{{ source('%s', '%s') }}", srcNames[scopeKey(info.db, info.schema)], info.name)
 						}
-						modelName := StagingModelName(info.db, info.schema, info.name, multiScope)
+						modelName := stagingNames[tableKey(info.db, info.schema, info.name)]
 						return fmt.Sprintf("{{ ref('%s') }}", modelName)
 					},
 				)
