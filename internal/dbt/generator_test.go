@@ -234,7 +234,7 @@ func TestGenerate(t *testing.T) {
 		}
 
 		sources := readFile(t, result.ProjectDir, filepath.Join("models", "staging", "_sources.yml"))
-		assertContains(t, sources, "mydb_information_schema", "_sources.yml source name")
+		assertContains(t, sources, "mydb_information__schema", "_sources.yml source name")
 		assertContains(t, sources, "database: MYDB", "_sources.yml database")
 		assertContains(t, sources, "schema: INFORMATION_SCHEMA", "_sources.yml schema")
 		assertContains(t, sources, "tables: []", "_sources.yml empty tables list")
@@ -285,7 +285,7 @@ func TestGenerate(t *testing.T) {
 
 		sources := readFile(t, result.ProjectDir, filepath.Join("models", "staging", "_sources.yml"))
 		// System schema present as source entry.
-		assertContains(t, sources, "db_information_schema", "system source entry")
+		assertContains(t, sources, "db_information__schema", "system source entry")
 		assertContains(t, sources, "tables: []", "system schema empty tables")
 		// Regular schema present with its tables.
 		assertContains(t, sources, "db_public", "regular source entry")
@@ -294,9 +294,10 @@ func TestGenerate(t *testing.T) {
 		// Empty schema must be absent.
 		assertNotContains(t, sources, "db_temp", "empty schema must not appear")
 
-		// Stubs only for the regular schema — multi-scope since 3 objects passed.
-		assertFileExists(t, filepath.Join(result.ProjectDir, "models", "staging", "stg_db_public_orders.sql"))
-		assertFileExists(t, filepath.Join(result.ProjectDir, "models", "staging", "stg_db_public_v_open.sql"))
+		// Stubs only for the regular schema — single-scope since only one schema
+		// actually produces stubs (system + empty schemas don't count).
+		assertFileExists(t, filepath.Join(result.ProjectDir, "models", "staging", "stg_orders.sql"))
+		assertFileExists(t, filepath.Join(result.ProjectDir, "models", "staging", "stg_v_open.sql"))
 	})
 
 	t.Run("profile name defaults to project name when empty", func(t *testing.T) {
@@ -520,9 +521,10 @@ func TestGenerate(t *testing.T) {
 		}
 	})
 
-	t.Run("INFORMATION_SCHEMA alongside regular schemas multi-scope naming", func(t *testing.T) {
-		// When INFORMATION_SCHEMA + one regular schema are both present,
-		// len(objects)==2 so multi-scope prefixes apply to stub files.
+	t.Run("INFORMATION_SCHEMA alongside one regular schema stays single-scope", func(t *testing.T) {
+		// A system schema produces no stubs, so it must not inflate the scope
+		// count: with exactly one stub-producing schema the names stay plain
+		// stg_<table> rather than gaining a db_schema prefix.
 		dir := t.TempDir()
 		req := CreateRequest{ProjectName: "proj", OutputDir: dir}
 		objects := []SchemaObjects{
@@ -532,13 +534,13 @@ func TestGenerate(t *testing.T) {
 
 		result := mustGenerate(t, req, typicalSession(), objects)
 
-		// Stub uses multi-scope prefix.
-		assertFileExists(t, filepath.Join(result.ProjectDir, "models", "staging", "stg_db_public_users.sql"))
-		assertFileAbsent(t, filepath.Join(result.ProjectDir, "models", "staging", "stg_users.sql"))
+		// Single-scope stub: no db_schema prefix.
+		assertFileExists(t, filepath.Join(result.ProjectDir, "models", "staging", "stg_users.sql"))
+		assertFileAbsent(t, filepath.Join(result.ProjectDir, "models", "staging", "stg_db_public_users.sql"))
 
 		// _sources.yml has both entries.
 		sources := readFile(t, result.ProjectDir, filepath.Join("models", "staging", "_sources.yml"))
-		assertContains(t, sources, "db_information_schema", "system source")
+		assertContains(t, sources, "db_information__schema", "system source")
 		assertContains(t, sources, "db_public", "regular source")
 	})
 
@@ -564,7 +566,7 @@ func TestGenerate(t *testing.T) {
 
 		// Source name must be fully lowercase.
 		sources := readFile(t, result.ProjectDir, filepath.Join("models", "staging", "_sources.yml"))
-		assertContains(t, sources, "name: upper_db_upper_sch", "lowercase source name")
+		assertContains(t, sources, "name: upper__db_upper__sch", "lowercase source name")
 		// Database and schema in YAML kept as-is (user's original casing).
 		assertContains(t, sources, "database: UPPER_DB", "database casing preserved")
 		assertContains(t, sources, "schema: UPPER_SCH", "schema casing preserved")
@@ -619,10 +621,10 @@ func TestSourceName(t *testing.T) {
 		{"MYDB", "PUBLIC", "mydb_public"},
 		{"mydb", "public", "mydb_public"},
 		{"MyDb", "MySchema", "mydb_myschema"},
-		{"DB", "INFORMATION_SCHEMA", "db_information_schema"},
+		{"DB", "INFORMATION_SCHEMA", "db_information__schema"},
 		{"ANALYTICS", "GOLD", "analytics_gold"},
 		{"A", "B", "a_b"},
-		{"DB_WITH_UNDERSCORES", "SCH_WITH_UNDERSCORES", "db_with_underscores_sch_with_underscores"},
+		{"DB_WITH_UNDERSCORES", "SCH_WITH_UNDERSCORES", "db__with__underscores_sch__with__underscores"},
 		// Numbers and mixed case.
 		{"DB1", "SCH2", "db1_sch2"},
 		{"UPPER", "lower", "upper_lower"},
@@ -646,6 +648,23 @@ func TestSourceName(t *testing.T) {
 			t.Errorf("sourceName(%q, %q) = sourceName(%q, %q) = %q — "+
 				"ambiguous underscore separator causes collision",
 				"A_B", "C", "A", "B_C", a)
+		}
+	})
+
+	t.Run("underscores on both sides must not collide", func(t *testing.T) {
+		// Both identifiers carry an underscore: "A_B"."C_D" vs "A"."B_C_D".
+		a := sourceName("A_B", "C_D")
+		b := sourceName("A", "B_C_D")
+		if a == b {
+			t.Errorf("sourceName(%q, %q) = sourceName(%q, %q) = %q — collision",
+				"A_B", "C_D", "A", "B_C_D", a)
+		}
+		// Even identifiers that themselves contain "__" stay distinct.
+		c := sourceName("A__B", "C")
+		d := sourceName("A", "B__C")
+		if c == d {
+			t.Errorf("sourceName(%q, %q) = sourceName(%q, %q) = %q — collision",
+				"A__B", "C", "A", "B__C", c)
 		}
 	})
 }
@@ -700,7 +719,7 @@ func TestStagingModelPath(t *testing.T) {
 			name:       "multi-scope with underscores in identifiers",
 			db:         "MY_DB", schema: "MY_SCH", table: "MY_TABLE",
 			multiScope: true,
-			want:       filepath.Join("models", "staging", "stg_my_db_my_sch_my_table.sql"),
+			want:       filepath.Join("models", "staging", "stg_my__db_my__sch_my_table.sql"),
 		},
 	}
 
@@ -836,6 +855,18 @@ func TestStagingModelSQL(t *testing.T) {
 			name:    "whitespace-only body falls back to source() stub",
 			source:  "src", table: "T",
 			sqlBody: "   \n  \t  ",
+			mustContain: []string{
+				"{{ source('src', 'T') }}",
+				"with source as (",
+			},
+			mustNotContain: []string{
+				"view SQL inlined from Snowflake",
+			},
+		},
+		{
+			name:    "comment-only body falls back to source() stub",
+			source:  "src", table: "T",
+			sqlBody: "-- definition unavailable\n/* secured view */",
 			mustContain: []string{
 				"{{ source('src', 'T') }}",
 				"with source as (",

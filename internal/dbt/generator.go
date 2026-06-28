@@ -18,6 +18,7 @@ package dbt
 import (
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -192,9 +193,11 @@ models:
 
 	// ── models/staging/_sources.yml + stub models ─────────────────────────────
 
-	// Determine whether we have multiple (db, schema) pairs — used to build
-	// unique file prefixes.
-	multiScope := len(objects) > 1
+	// Determine whether we have multiple real (db, schema) pairs — used to build
+	// unique file prefixes.  System and empty schemas produce no staging stubs,
+	// so they must not inflate the count (a single data schema alongside
+	// INFORMATION_SCHEMA should still get plain stg_<table> names).
+	multiScope := multiScopeFor(objects)
 
 	// Build _sources.yml
 	var sourcesBuilder strings.Builder
@@ -226,7 +229,9 @@ models:
 		fmt.Fprintf(&sourcesBuilder, "    description: \"Source tables from %s.%s\"\n", so.DB, so.Schema)
 		sourcesBuilder.WriteString("    tables:\n")
 
-		allNames := append(so.Tables, so.Views...)
+		allNames := make([]string, 0, len(so.Tables)+len(so.Views))
+		allNames = append(allNames, so.Tables...)
+		allNames = append(allNames, so.Views...)
 		for _, t := range allNames {
 			fmt.Fprintf(&sourcesBuilder, "      - name: %s\n", t)
 			sourcesBuilder.WriteString("        description: \"\"\n")
@@ -266,25 +271,37 @@ func sourceName(db, schema string) string { return SourceName(db, schema) }
 // scopeName builds the lower-case "db_schema" scope name shared by source names
 // and (multi-scope) staging-model names.
 //
-// The "_" separator is ambiguous when an identifier itself contains an
-// underscore: "A_B"."C" and "A"."B_C" both join to "a_b_c", colliding distinct
-// Snowflake scopes.  When the left (db) identifier carries an underscore but the
-// right (schema) does not, the db/schema boundary is unrecoverable, so the db's
-// own underscores are doubled ("a_b" → "a__b", giving "a__b_c") — the single
-// remaining underscore marks the real boundary, the doubled ones are inside the
-// db identifier.  References built via SourceName/StagingModelName stay
-// consistent because they call this same helper.
-//
-// ponytail: heuristic — only the left-boundary case is disambiguated (the one
-// the exact-name tests leave room for); right-side and multi-underscore
-// collisions aren't caught.  A fully general scheme would need a reserved
-// separator or set-level dedup, but the pinned expected names forbid that here.
+// A single "_" separator is ambiguous when an identifier itself contains an
+// underscore: "A_B"."C" and "A"."B_C" would both join to "a_b_c", colliding
+// distinct Snowflake scopes.  To make the join injective, each identifier's own
+// underscores are doubled (escapeIdent), so the single un-doubled "_" is always
+// the real db/schema boundary and the doubled runs are interior.  Identifiers
+// without underscores are unchanged, so the common "mydb_public" form is
+// preserved.  References built via SourceName/StagingModelName stay consistent
+// because they call this same helper.
 func scopeName(db, schema string) string {
-	ldb, lsch := strings.ToLower(db), strings.ToLower(schema)
-	if strings.Contains(ldb, "_") && !strings.Contains(lsch, "_") {
-		ldb = strings.ReplaceAll(ldb, "_", "__")
+	return escapeIdent(db) + "_" + escapeIdent(schema)
+}
+
+// escapeIdent lower-cases an identifier and doubles every "_" it contains, so a
+// single "_" can be used as an unambiguous component separator.
+func escapeIdent(s string) string {
+	return strings.ReplaceAll(strings.ToLower(s), "_", "__")
+}
+
+// multiScopeFor reports whether staging model names need a db_schema prefix to
+// stay unique.  Only schemas that actually produce staging stubs count — system
+// schemas (no object listing) and empty schemas (no tables/views) are excluded,
+// so filenames don't depend on which non-data schemas happened to be discovered.
+func multiScopeFor(objects []SchemaObjects) bool {
+	n := 0
+	for _, so := range objects {
+		if so.IsSystem || len(so.Tables)+len(so.Views) == 0 {
+			continue
+		}
+		n++
 	}
-	return ldb + "_" + lsch
+	return n > 1
 }
 
 // StagingModelName returns the dbt model name (filename without the .sql
@@ -304,11 +321,34 @@ func stagingModelPath(db, schema, table string, multiScope bool) string {
 	return filepath.Join("models", "staging", StagingModelName(db, schema, table, multiScope)+".sql")
 }
 
+// blockComment matches /* ... */ comments, including across newlines.
+var blockComment = regexp.MustCompile(`(?s)/\*.*?\*/`)
+
+// hasExecutableSQL reports whether s contains anything other than whitespace and
+// SQL comments.  Used to decide between inlining a view body and emitting the
+// generic source() stub — a comment-only body (e.g. "-- definition unavailable")
+// would otherwise be inlined and fail dbt compile.
+// ponytail: strips -- naively, so a "--" inside a string literal ends the line
+// early; harmless here — a body with real SQL still tests non-empty.
+func hasExecutableSQL(s string) bool {
+	s = blockComment.ReplaceAllString(s, "")
+	for _, line := range strings.Split(s, "\n") {
+		if i := strings.Index(line, "--"); i >= 0 {
+			line = line[:i]
+		}
+		if strings.TrimSpace(line) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // stagingModelSQL returns the body of a staging model stub.
-// When sqlBody is non-empty the actual view SELECT SQL is inlined instead of a
-// generic pass-through {{ source(...) }} reference.
+// When sqlBody carries actual SQL the view body is inlined instead of a generic
+// pass-through {{ source(...) }} reference.  A body that is blank or only
+// comments would compile to nothing, so it falls back to the stub.
 func stagingModelSQL(src, table, sqlBody string) string {
-	if strings.TrimSpace(sqlBody) != "" {
+	if hasExecutableSQL(sqlBody) {
 		return fmt.Sprintf(
 			"-- Generated by Thaw — view SQL inlined from Snowflake\n"+
 				"-- TODO: replace Snowflake table references with {{ source('...', '...') }} or {{ ref('...') }} calls\n"+

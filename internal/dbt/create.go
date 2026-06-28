@@ -124,7 +124,7 @@ func CreateProject(
 			}
 		}
 
-		multiScope := len(schemaObjects) > 1
+		multiScope := multiScopeFor(schemaObjects)
 
 		for i := range schemaObjects {
 			if len(schemaObjects[i].ViewDefs) == 0 {
