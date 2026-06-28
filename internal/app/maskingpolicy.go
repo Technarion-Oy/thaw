@@ -27,6 +27,18 @@ func (a *App) AlterMaskingPolicy(database, schema, name, clause string) error {
 	return a.alterObject("MASKING POLICY", database, schema, name, clause)
 }
 
+// ListAccountMaskingPolicies returns every masking policy in the account via
+// SHOW MASKING POLICIES IN ACCOUNT (name, database_name, schema_name, owner,
+// comment, …). It backs the masking-policy picker in the column properties
+// editor. The command requires privileges on the policies, so accounts without
+// governance access may see only a subset.
+func (a *App) ListAccountMaskingPolicies() (*snowflake.QueryResult, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return a.client.QuerySingle(a.ctx, "SHOW MASKING POLICIES IN ACCOUNT")
+}
+
 // GetMaskingPolicyReferences returns the columns to which the given masking
 // policy is currently applied, by querying
 // SNOWFLAKE.ACCOUNT_USAGE.POLICY_REFERENCES filtered to POLICY_KIND =

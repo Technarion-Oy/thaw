@@ -136,6 +136,26 @@ func (a *App) BuildChangeColumnTypeSql(database, schema, table, col, dataType st
 	return column.BuildChangeDataTypeSql(database, schema, table, col, dataType)
 }
 
+// BuildSetColumnDefaultSql returns the SQL for an ALTER COLUMN ... SET DEFAULT statement.
+func (a *App) BuildSetColumnDefaultSql(database, schema, table, col, expr string) string {
+	return column.BuildSetColumnDefaultSql(database, schema, table, col, expr)
+}
+
+// BuildDropColumnDefaultSql returns the SQL for an ALTER COLUMN ... DROP DEFAULT statement.
+func (a *App) BuildDropColumnDefaultSql(database, schema, table, col string) string {
+	return column.BuildDropColumnDefaultSql(database, schema, table, col)
+}
+
+// BuildSetColumnMaskingPolicySql returns the SQL for an ALTER COLUMN ... SET MASKING POLICY statement.
+func (a *App) BuildSetColumnMaskingPolicySql(database, schema, table, col, policyDb, policySchema, policyName string) string {
+	return column.BuildSetColumnMaskingPolicySql(database, schema, table, col, policyDb, policySchema, policyName)
+}
+
+// BuildUnsetColumnMaskingPolicySql returns the SQL for an ALTER COLUMN ... UNSET MASKING POLICY statement.
+func (a *App) BuildUnsetColumnMaskingPolicySql(database, schema, table, col string) string {
+	return column.BuildUnsetColumnMaskingPolicySql(database, schema, table, col)
+}
+
 // BuildCreatePipeSql returns the SQL for creating a Snowflake PIPE.
 func (a *App) BuildCreatePipeSql(database, schema string, cfg pipe.PipeConfig) (string, error) {
 	return pipe.BuildCreatePipeSql(database, schema, cfg)

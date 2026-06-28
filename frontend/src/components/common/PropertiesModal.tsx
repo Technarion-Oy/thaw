@@ -12,8 +12,8 @@ import { useState, useEffect } from "react";
 import { Modal, Spin, Button, Input, InputNumber, Switch, message } from "antd";
 import { CopyOutlined, EditOutlined, CheckOutlined, CloseOutlined, SearchOutlined } from "@ant-design/icons";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import type { snowflake, objects, table } from "../../../wailsjs/go/models";
-import { GetColumnComments, SetColumnComment, GetTableSettings, AlterTableProperty } from "../../../wailsjs/go/app/App";
+import type { snowflake, table } from "../../../wailsjs/go/models";
+import { GetTableSettings, AlterTableProperty } from "../../../wailsjs/go/app/App";
 
 interface TableContext {
   db: string;
@@ -27,139 +27,6 @@ interface Props {
   error: string | null;
   onClose: () => void;
   tableContext?: TableContext;
-}
-
-function ColumnCommentsSection({ db, schema, table }: TableContext) {
-  const [colComments, setColComments] = useState<objects.ColumnComment[] | null>(null);
-  const [loadError, setLoadError]     = useState<string | null>(null);
-  const [editingCol, setEditingCol]   = useState<string | null>(null);
-  const [editValue, setEditValue]     = useState("");
-  const [saving, setSaving]           = useState(false);
-
-  useEffect(() => {
-    GetColumnComments(db, schema, table)
-      .then(setColComments)
-      .catch((e) => setLoadError(String(e)));
-  }, [db, schema, table]);
-
-  const startEdit = (col: string, current: string) => {
-    setEditingCol(col);
-    setEditValue(current);
-  };
-
-  const cancelEdit = () => {
-    setEditingCol(null);
-    setEditValue("");
-  };
-
-  const saveEdit = async (col: string) => {
-    setSaving(true);
-    try {
-      await SetColumnComment(db, schema, table, col, editValue);
-      setColComments((prev) =>
-        prev ? prev.map((c) => c.column === col ? { ...c, comment: editValue } : c) : prev
-      );
-      setEditingCol(null);
-      message.success("Comment updated");
-    } catch (e) {
-      message.error(String(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div style={{ marginTop: 20, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
-      <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", letterSpacing: "0.05em", marginBottom: 8, textTransform: "uppercase" }}>
-        Column Comments
-      </div>
-
-      {colComments === null && !loadError && (
-        <div style={{ textAlign: "center", padding: "12px 0" }}>
-          <Spin size="small" />
-        </div>
-      )}
-
-      {loadError && (
-        <div style={{ color: "#f85149", fontFamily: "monospace", fontSize: 12 }}>{loadError}</div>
-      )}
-
-      {colComments && colComments.length === 0 && (
-        <div style={{ color: "var(--text-muted)", fontSize: 12 }}>No columns found.</div>
-      )}
-
-      {colComments && colComments.length > 0 && (
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-          <tbody>
-            {colComments.map((c) => (
-              <tr key={c.column} style={{ borderBottom: "1px solid var(--border)" }}>
-                {/* Column name */}
-                <td style={{
-                  padding: "5px 12px 5px 0",
-                  color: "var(--text-muted)",
-                  fontFamily: "monospace",
-                  whiteSpace: "nowrap",
-                  verticalAlign: "middle",
-                  width: 200,
-                  minWidth: 160,
-                }}>
-                  {c.column}
-                </td>
-
-                {/* Comment value / editor */}
-                <td style={{ padding: "4px 0", verticalAlign: "middle" }}>
-                  {editingCol === c.column ? (
-                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                      <Input
-                        size="small"
-                        value={editValue}
-                        onChange={(e) => setEditValue(e.target.value)}
-                        onPressEnter={() => saveEdit(c.column)}
-                        autoFocus
-                        style={{ fontFamily: "monospace", fontSize: 12 }}
-                      />
-                      <Button
-                        size="small"
-                        type="primary"
-                        icon={<CheckOutlined />}
-                        loading={saving}
-                        onClick={() => saveEdit(c.column)}
-                      />
-                      <Button
-                        size="small"
-                        icon={<CloseOutlined />}
-                        disabled={saving}
-                        onClick={cancelEdit}
-                      />
-                    </div>
-                  ) : (
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{
-                        fontFamily: "monospace",
-                        color: c.comment ? "var(--text)" : "var(--text-faint)",
-                        fontStyle: c.comment ? "normal" : "italic",
-                        flex: 1,
-                        wordBreak: "break-word",
-                      }}>
-                        {c.comment || "—"}
-                      </span>
-                      <Button
-                        size="small"
-                        type="text"
-                        icon={<EditOutlined />}
-                        onClick={() => startEdit(c.column, c.comment)}
-                        style={{ flexShrink: 0, color: "var(--text-faint)" }}
-                      />
-                    </div>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </div>
-  );
 }
 
 // ── Table-level settings section ──────────────────────────────────────────────
@@ -438,7 +305,6 @@ export default function PropertiesModal({ title, rows, error, onClose, tableCont
         )}
 
         {tableContext && <TableSettingsSection {...tableContext} />}
-        {tableContext && <ColumnCommentsSection {...tableContext} />}
       </div>
     </Modal>
   );

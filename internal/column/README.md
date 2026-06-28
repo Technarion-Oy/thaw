@@ -31,14 +31,18 @@ Owns every SQL string for mutating table columns via `ALTER TABLE`. No column DD
 | `BuildDropNotNullSql(db, schema, table, column)` | `ALTER TABLE ... ALTER COLUMN ... DROP NOT NULL;` |
 | `BuildSetColumnCommentSql(db, schema, table, column, comment)` | `ALTER TABLE ... ALTER COLUMN ... COMMENT ...;` or `UNSET COMMENT;` when empty |
 | `BuildChangeDataTypeSql(db, schema, table, column, dataType)` | `ALTER TABLE ... ALTER COLUMN ... SET DATA TYPE ...;` |
+| `BuildSetColumnDefaultSql(db, schema, table, column, expr)` | `ALTER TABLE ... ALTER COLUMN ... SET DEFAULT <expr>;` |
+| `BuildDropColumnDefaultSql(db, schema, table, column)` | `ALTER TABLE ... ALTER COLUMN ... DROP DEFAULT;` |
+| `BuildSetColumnMaskingPolicySql(db, schema, table, column, policyDb, policySchema, policyName)` | `ALTER TABLE ... ALTER COLUMN ... SET MASKING POLICY <policy>;` |
+| `BuildUnsetColumnMaskingPolicySql(db, schema, table, column)` | `ALTER TABLE ... ALTER COLUMN ... UNSET MASKING POLICY;` |
 
 All builders return a semicolon-terminated string. `BuildAddColumnSql` also returns an `error` for IPC signature symmetry, though it currently always returns `nil`.
 
 ## Patterns & integration
 
-The `*App` in `internal/app/builders.go` exposes each builder as a public IPC method (e.g. `BuildAddColumnSql`, `BuildDropColumnSql`). These methods are pure SQL generators — they require no live connection and return strings that the frontend displays in a preview pane before the user confirms execution. The actual `ALTER TABLE` execution is a separate IPC call (`ExecDDL` / `AlterTable*`).
+The `*App` in `internal/app/builders.go` exposes each builder as a public IPC method (e.g. `BuildAddColumnSql`, `BuildDropColumnSql`). These methods are pure SQL generators — they require no live connection and return strings the frontend executes via the separate `ExecDDL` IPC call.
 
-All column management actions (Add, Rename, Change Type, Set Comment, Set/Drop NOT NULL, Drop) are gated behind the `columnManagement` feature flag in `featureFlagsStore`.
+The altering actions (Rename, Change Type, Default, Comment, Set/Drop NOT NULL, Masking Policy, Tags) are surfaced together in the frontend's `ColumnPropertiesModal` (opened via the column context menu's **Properties…** item); **Add Column…** and **Drop Column…** stay as standalone actions. All of these are gated behind the `columnManagement` feature flag in `featureFlagsStore`. Safe edits run immediately; only a data-loss-risk edit (a data-type change) shows a confirmation dialog. The current default expression and masking policy a column carries are read via `App.GetColumnDetails` (`snowflake.Client.GetColumnDetails`); the masking-policy and tag pick lists come from `App.ListAccountMaskingPolicies` and `App.ListAccountTags`.
 
 ## Gotchas
 

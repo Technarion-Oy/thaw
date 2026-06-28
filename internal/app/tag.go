@@ -210,8 +210,11 @@ func tagReferenceObjectName(domain string, callable bool, database, schema, name
 
 // GetColumnTagReferences returns the tags applied to every column of a table or
 // view via the INFORMATION_SCHEMA.TAG_REFERENCES_ALL_COLUMNS table function — the
-// no-latency, per-table companion to GetObjectTagReferences for column-level
-// tags. domain is the parent object's browser kind; tagReferenceDomain folds the
+// per-table companion to GetObjectTagReferences for column-level tags. Unlike the
+// single-object TAG_REFERENCES function, the ALL_COLUMNS variant has propagation
+// latency, so a read immediately after a SET/UNSET may still return stale rows;
+// callers that mutate tags should update their view optimistically rather than
+// refetch. domain is the parent object's browser kind; tagReferenceDomain folds the
 // specialized table / view kinds (DYNAMIC TABLE, ICEBERG TABLE, MATERIALIZED
 // VIEW, …) onto the TABLE / VIEW domains the function accepts. One row is
 // returned per (column, tag).

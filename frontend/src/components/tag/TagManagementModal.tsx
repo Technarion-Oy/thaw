@@ -22,6 +22,7 @@ import {
 } from "../../../wailsjs/go/app/App";
 import { tag as tagModels } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
+import { parseAllowedValues } from "./allowedValues";
 
 const { Text } = Typography;
 
@@ -39,21 +40,6 @@ function cell(row: unknown[], idx: number): string {
   if (idx < 0 || idx >= row.length) return "";
   const v = row[idx];
   return v === null || v === undefined ? "" : String(v);
-}
-
-// SHOW TAGS reports allowed_values as a JSON array string (e.g. ["a","b"]) or an
-// empty/null value when the tag accepts any string. Parsed defensively so a
-// format change degrades to "no restriction" rather than throwing.
-function parseAllowedValues(raw: string): string[] {
-  const s = (raw ?? "").trim();
-  if (s === "" || s.toLowerCase() === "null" || s === "[]") return [];
-  try {
-    const parsed = JSON.parse(s);
-    if (Array.isArray(parsed)) return parsed.map((v) => String(v));
-  } catch {
-    /* fall through */
-  }
-  return [];
 }
 
 // ─── Domain → object-name shape ──────────────────────────────────────────────

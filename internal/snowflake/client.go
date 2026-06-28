@@ -2940,6 +2940,71 @@ func (c *Client) GetTableColumnsWithTypes(ctx context.Context, database, schema,
 	return result, rows.Err()
 }
 
+// ColumnDetails holds the column properties that DESCRIBE TABLE / the column
+// list don't surface cheaply — the DEFAULT expression and the currently attached
+// masking policy — for the column properties editor.
+type ColumnDetails struct {
+	Default       string `json:"default"`       // DEFAULT expression, empty if none
+	MaskingPolicy string `json:"maskingPolicy"` // fully-qualified policy name, empty if none
+}
+
+// GetColumnDetails returns the DEFAULT expression and the masking policy attached
+// to a single column. The default comes from DESCRIBE TABLE; the masking policy
+// from the INFORMATION_SCHEMA.POLICY_REFERENCES table function (latency-free,
+// unlike the ACCOUNT_USAGE view). A masking-policy lookup failure (missing
+// governance privileges) is swallowed so the default still loads.
+func (c *Client) GetColumnDetails(ctx context.Context, database, schema, table, column string) (ColumnDetails, error) {
+	var out ColumnDetails
+
+	// DEFAULT — scan DESCRIBE TABLE inside a closure so a panic mid-scan still
+	// closes the cursor (defer) before the masking-policy lookup runs.
+	if err := func() error {
+		rows, err := c.queryCtx(ctx, fmt.Sprintf("DESCRIBE TABLE %s", Qualify(database, schema, table)))
+		if err != nil {
+			return err
+		}
+		defer rows.Close() //nolint:errcheck
+		cols, _ := rows.Columns()
+		idxs := colIndexMap(cols, "name", "default")
+		for rows.Next() {
+			vals, ptrs := makeValPtrs(len(cols))
+			if err := rows.Scan(ptrs...); err != nil {
+				continue
+			}
+			if strings.EqualFold(strVal(vals, idxs["name"]), column) {
+				out.Default = strVal(vals, idxs["default"])
+				break
+			}
+		}
+		return rows.Err()
+	}(); err != nil {
+		return out, err
+	}
+
+	// Masking policy — best effort. REF_ENTITY_NAME takes a plain dotted FQN, not
+	// a double-quoted one (Qualify's quoting would make the function match nothing).
+	mpQuery := fmt.Sprintf(
+		"SELECT POLICY_DB, POLICY_SCHEMA, POLICY_NAME "+
+			"FROM TABLE(%s.INFORMATION_SCHEMA.POLICY_REFERENCES(REF_ENTITY_NAME => '%s', REF_ENTITY_DOMAIN => 'TABLE')) "+
+			"WHERE POLICY_KIND = 'MASKING_POLICY' AND REF_COLUMN_NAME = '%s'",
+		QuoteIdent(database),
+		EscapeStringLit(fmt.Sprintf("%s.%s.%s", database, schema, table)),
+		EscapeStringLit(column))
+	if mrows, err := c.queryCtx(ctx, mpQuery); err == nil {
+		defer mrows.Close() //nolint:errcheck
+		if mrows.Next() {
+			var pdb, psc, pname string
+			if err := mrows.Scan(&pdb, &psc, &pname); err == nil {
+				// Plain dotted FQN — matches the unquoted form the frontend's
+				// policy picker builds, so the current policy preselects in the
+				// dropdown (Qualify's double-quoting would never match).
+				out.MaskingPolicy = fmt.Sprintf("%s.%s.%s", pdb, psc, pname)
+			}
+		}
+	}
+	return out, nil
+}
+
 // GetSchemaForeignKeys returns all FK→PK column mappings in a schema by running
 // SHOW IMPORTED KEYS IN SCHEMA. This bulk call is cheaper than per-table SHOW
 // IMPORTED KEYS when the editor needs to warm up FK data for many tables at once.

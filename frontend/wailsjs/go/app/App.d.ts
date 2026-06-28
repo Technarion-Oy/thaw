@@ -59,7 +59,6 @@ import {keypair} from '../models';
 import {config} from '../models';
 import {fnmeta} from '../models';
 import {app} from '../models';
-import {objects} from '../models';
 import {table} from '../models';
 import {queryhistory} from '../models';
 import {querylog} from '../models';
@@ -293,6 +292,8 @@ export function BuildCreateTagSql(arg1:string,arg2:string,arg3:tag.TagConfig):Pr
 
 export function BuildCreateViewSql(arg1:string,arg2:string,arg3:view.ViewConfig):Promise<string>;
 
+export function BuildDropColumnDefaultSql(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
+
 export function BuildDropColumnNotNullSql(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
 
 export function BuildDropColumnSql(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
@@ -319,7 +320,13 @@ export function BuildRenameColumnSql(arg1:string,arg2:string,arg3:string,arg4:st
 
 export function BuildSetColumnCommentSql(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<string>;
 
+export function BuildSetColumnDefaultSql(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<string>;
+
+export function BuildSetColumnMaskingPolicySql(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:string):Promise<string>;
+
 export function BuildSetColumnNotNullSql(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
+
+export function BuildUnsetColumnMaskingPolicySql(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
 
 export function BuildWorkloadIdentityPolicyValue(arg1:authenticationpolicy.WorkloadIdentityPolicy):Promise<string>;
 
@@ -521,7 +528,7 @@ export function GetCollationSpecifiers():Promise<Array<snowflake.CollationSpecif
 
 export function GetCollations():Promise<Array<snowflake.CollationOption>>;
 
-export function GetColumnComments(arg1:string,arg2:string,arg3:string):Promise<Array<objects.ColumnComment>>;
+export function GetColumnDetails(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.ColumnDetails>;
 
 export function GetColumnTagReferences(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.QueryResult>;
 
@@ -781,6 +788,8 @@ export function IsQueryLogEnabled():Promise<boolean>;
 
 export function ListAIModels(arg1:string,arg2:string,arg3:number):Promise<Array<string>>;
 
+export function ListAccountMaskingPolicies():Promise<snowflake.QueryResult>;
+
 export function ListAccountTags():Promise<snowflake.QueryResult>;
 
 export function ListApiIntegrations():Promise<Array<snowflake.ApiIntegration>>;
@@ -1018,8 +1027,6 @@ export function SaveSnowparkVenvPath(arg1:string):Promise<void>;
 export function ScanMigrationSource(arg1:string):Promise<Array<migration.MigrationObject>>;
 
 export function SearchFiles(arg1:string,arg2:string,arg3:boolean):Promise<Array<filesystem.SearchMatch>>;
-
-export function SetColumnComment(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
 export function SetDefaultProfile(arg1:string):Promise<void>;
 

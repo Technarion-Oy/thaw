@@ -78,8 +78,8 @@ repeated IPC calls on tree hover.
 `GetTableForeignKeys`, `ListGitRepoEntries`, `ListGitBranches`, `ListGitTags`, `ExecuteGitFile`,
 `DropDatabase`, `DropSchema`, `AlterPipe`, `UploadFileToStage`, `ListStageEntries`,
 `ExecuteStageFile`, `ListDbtProjectVersions`, `ListDbtProjectEntries`, `DownloadFileFromStage`,
-`RemoveStageFiles`, `BuildDropColumnSql`, `BuildRenameColumnSql`, `BuildSetColumnNotNullSql`,
-`BuildDropColumnNotNullSql`, `BuildSetColumnCommentSql`, `BuildChangeColumnTypeSql`.
+`RemoveStageFiles`, `BuildDropColumnSql`. (The other column `Build*Sql` IPC methods now live in
+`components/column/ColumnPropertiesModal`.)
 
 ## Gotchas
 
@@ -93,8 +93,10 @@ repeated IPC calls on tree hover.
   `Build*ColumnSql` IPC methods — SQL is never constructed inline in the frontend.
 - **`buildEntryNodes`** is the shared helper for both stage file nodes and DBT project file nodes
   (they have identical sub-tree shapes); `emptyChildNode` provides the empty-state placeholder.
-- **Column management actions** (Add/Rename/Change Type/Set Comment/Set NOT NULL/Drop NOT NULL/Drop)
-  are all gated behind the `columnManagement` feature flag. "Insert Column Name" is never gated.
+- **Column management actions** — **Add Column…**, **Properties…** (which opens
+  `ColumnPropertiesModal`, where Rename / Change Type / Default / Comment / NOT NULL / Masking Policy /
+  Tags all live), and **Drop Column…** are gated behind the `columnManagement` feature flag.
+  "Insert Column Name" and "Tag References…" are never gated.
 - **`removeNode`** surgically deletes a file/object node from the tree after DROP so the parent
   directory stays expanded without a full refresh.
 - **`refreshDatabaseByName(db, reveal?)` preserves the open path AND scroll position.** Naively

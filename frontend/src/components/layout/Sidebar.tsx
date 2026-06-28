@@ -98,7 +98,7 @@ import {
 import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, AlterDynamicTable, AlterExternalTable, AlterIcebergTable, AlterMaterializedView, AlterAlert, ExecuteAlert, AlterService, AlterModelMonitor, UploadFileToStage, PickOpenFile, ExecDDL, ListStageEntries, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory, BuildDropColumnSql, BuildRenameColumnSql, BuildSetColumnNotNullSql, BuildDropColumnNotNullSql, BuildSetColumnCommentSql, BuildChangeColumnTypeSql } from "../../../wailsjs/go/app/App";
+import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, AlterDynamicTable, AlterExternalTable, AlterIcebergTable, AlterMaterializedView, AlterAlert, ExecuteAlert, AlterService, AlterModelMonitor, UploadFileToStage, PickOpenFile, ExecDDL, ListStageEntries, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory, BuildDropColumnSql } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl, { identToken, quoteIdent } from "../shared/ObjectNameCaseControl";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
@@ -118,7 +118,7 @@ import CreateTaskModal from "../task/CreateTaskModal";
 import CreateDatabaseModal from "../database/CreateDatabaseModal";
 import CreateTableModal from "../database/CreateTableModal";
 import AddColumnModal from "../database/AddColumnModal";
-import DataTypeSelect from "../shared/DataTypeSelect";
+import ColumnPropertiesModal from "../column/ColumnPropertiesModal";
 import CreateFileFormatModal from "../database/CreateFileFormatModal";
 import ObjectSummariesModal from "../database/ObjectSummariesModal";
 import ExecuteTaskModal from "../task/ExecuteTaskModal";
@@ -689,10 +689,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [createDbOpen, setCreateDbOpen] = useState(false);
   const [createTableModal, setCreateTableModal] = useState<{ db: string; schema: string } | null>(null);
   const [addColumnModal, setAddColumnModal] = useState<{ db: string; schema: string; table: string } | null>(null);
-  const [renameColumnModal, setRenameColumnModal] = useState<{ db: string; schema: string; table: string; oldName: string; newName: string; caseSensitive: boolean } | null>(null);
-  const [renameColQiic, setRenameColQiic] = useState(false);
-  const [columnCommentModal, setColumnCommentModal] = useState<{ db: string; schema: string; table: string; column: string; comment: string } | null>(null);
-  const [changeDataTypeModal, setChangeDataTypeModal] = useState<{ db: string; schema: string; table: string; column: string; dataType: string } | null>(null);
+  const [columnPropertiesModal, setColumnPropertiesModal] = useState<{ db: string; schema: string; table: string; column: string; parentKind: string; initial: { dataType: string; nullable: boolean; isPrimaryKey: boolean; comment: string } } | null>(null);
   const [createStageModal, setCreateStageModal] = useState<{ db: string; schema: string } | null>(null);
   const [stagePropertiesModal, setStagePropertiesModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [stageBrowserModal, setStageBrowserModal] = useState<{ db: string; schema: string; name: string } | null>(null);
@@ -3674,104 +3671,21 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     });
   };
 
-  const openRenameColumn = () => {
+  const openColumnProperties = () => {
     if (!ctxMenu) return;
     const { db, schema, table, column } = parseColKey(ctxMenu.nodeKey);
+    const m = ctxMenu.colMeta;
     setCtxMenu(null);
-    setRenameColumnModal({ db, schema, table, oldName: column, newName: column, caseSensitive: false });
-    setRenameColQiic(false);
-    GetQuotedIdentifiersIgnoreCase().then((v) => setRenameColQiic(v ?? false)).catch(() => {});
-  };
-
-  const executeRenameColumn = async () => {
-    if (!renameColumnModal) return;
-    const { db, schema, table, oldName, newName, caseSensitive } = renameColumnModal;
-    const trimmed = newName.trim();
-    if (!trimmed || trimmed === oldName) {
-      setRenameColumnModal(null);
-      return;
-    }
-    setRenameColumnModal(null);
-    try {
-      await ExecDDL(await BuildRenameColumnSql(db, schema, table, oldName, trimmed, caseSensitive));
-      message.success(`Renamed column "${oldName}" to "${trimmed}"`);
-      refreshTableColumns(db, schema, table);
-    } catch (e) {
-      message.error(String(e));
-    }
-  };
-
-  const setColumnNotNull = async () => {
-    if (!ctxMenu) return;
-    const { db, schema, table, column } = parseColKey(ctxMenu.nodeKey);
-    setCtxMenu(null);
-    try {
-      await ExecDDL(await BuildSetColumnNotNullSql(db, schema, table, column));
-      message.success(`Set NOT NULL on "${column}"`);
-      refreshTableColumns(db, schema, table);
-    } catch (e) {
-      message.error(String(e));
-    }
-  };
-
-  const dropColumnNotNull = async () => {
-    if (!ctxMenu) return;
-    const { db, schema, table, column } = parseColKey(ctxMenu.nodeKey);
-    setCtxMenu(null);
-    try {
-      await ExecDDL(await BuildDropColumnNotNullSql(db, schema, table, column));
-      message.success(`Dropped NOT NULL on "${column}"`);
-      refreshTableColumns(db, schema, table);
-    } catch (e) {
-      message.error(String(e));
-    }
-  };
-
-  const openColumnComment = () => {
-    if (!ctxMenu) return;
-    const { db, schema, table, column } = parseColKey(ctxMenu.nodeKey);
-    const existing = ctxMenu.colMeta?.comment ?? "";
-    setCtxMenu(null);
-    setColumnCommentModal({ db, schema, table, column, comment: existing });
-  };
-
-  const executeColumnComment = async () => {
-    if (!columnCommentModal) return;
-    const { db, schema, table, column, comment } = columnCommentModal;
-    setColumnCommentModal(null);
-    try {
-      await ExecDDL(await BuildSetColumnCommentSql(db, schema, table, column, comment));
-      message.success(comment.trim() ? `Set comment on "${column}"` : `Removed comment from "${column}"`);
-      refreshTableColumns(db, schema, table);
-    } catch (e) {
-      message.error(String(e));
-    }
-  };
-
-  const openChangeDataType = () => {
-    if (!ctxMenu) return;
-    const { db, schema, table, column } = parseColKey(ctxMenu.nodeKey);
-    const currentType = ctxMenu.colMeta?.dataType ?? "VARCHAR";
-    setCtxMenu(null);
-    setChangeDataTypeModal({ db, schema, table, column, dataType: currentType });
-  };
-
-  const executeChangeDataType = async () => {
-    if (!changeDataTypeModal) return;
-    const { db, schema, table, column, dataType } = changeDataTypeModal;
-    const trimmed = dataType.trim();
-    if (!trimmed) {
-      setChangeDataTypeModal(null);
-      return;
-    }
-    setChangeDataTypeModal(null);
-    try {
-      await ExecDDL(await BuildChangeColumnTypeSql(db, schema, table, column, trimmed));
-      message.success(`Changed data type of "${column}" to ${trimmed}`);
-      refreshTableColumns(db, schema, table);
-    } catch (e) {
-      message.error(String(e));
-    }
+    setColumnPropertiesModal({
+      db, schema, table, column,
+      parentKind: m?.parentKind ?? "TABLE",
+      initial: {
+        dataType: m?.dataType ?? "VARCHAR",
+        nullable: m?.nullable ?? true,
+        isPrimaryKey: m?.isPrimaryKey ?? false,
+        comment: m?.comment ?? "",
+      },
+    });
   };
 
   const insertColumnName = () => {
@@ -5015,13 +4929,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             return (
               <>
                 <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
-                {menuItem("Rename Column…", <EditOutlined style={{ fontSize: 12 }} />, openRenameColumn, undefined, disabled, reason)}
-                {menuItem("Change Data Type…", <EditOutlined style={{ fontSize: 12 }} />, openChangeDataType, undefined, disabled, reason)}
-                {menuItem("Set Comment…", <EditOutlined style={{ fontSize: 12 }} />, openColumnComment, undefined, disabled, reason)}
-                {ctxMenu.colMeta.nullable && !ctxMenu.colMeta.isPrimaryKey &&
-                  menuItem("Set NOT NULL", null, setColumnNotNull, undefined, disabled, reason)}
-                {!ctxMenu.colMeta.nullable && !ctxMenu.colMeta.isPrimaryKey &&
-                  menuItem("Drop NOT NULL", null, dropColumnNotNull, undefined, disabled, reason)}
+                {menuItem("Properties…", <EditOutlined style={{ fontSize: 12 }} />, openColumnProperties, undefined, disabled, reason)}
                 <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
                 {menuItem("Drop Column…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, dropColumn, "#f85149", disabled, reason)}
               </>
@@ -6382,74 +6290,19 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         />
       )}
 
-      {/* Rename Column modal */}
-      <Modal
-        open={renameColumnModal !== null}
-        title={renameColumnModal ? `Rename column "${renameColumnModal.oldName}"` : ""}
-        onOk={executeRenameColumn}
-        onCancel={() => setRenameColumnModal(null)}
-        okText="Rename"
-        width={460}
-      >
-        <div style={{ padding: "8px 0" }}>
-          <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>New name</div>
-          <Input
-            value={renameColumnModal?.newName ?? ""}
-            onChange={(e) => setRenameColumnModal((prev) => prev ? { ...prev, newName: e.target.value } : null)}
-            onPressEnter={executeRenameColumn}
-            autoFocus
-            style={{ marginBottom: 8 }}
-          />
-          <ObjectNameCaseControl
-            name={renameColumnModal?.newName ?? ""}
-            caseSensitive={renameColumnModal?.caseSensitive ?? false}
-            onCaseSensitiveChange={(v) => setRenameColumnModal((prev) => prev ? { ...prev, caseSensitive: v } : null)}
-            quotedIdentifiersIgnoreCase={renameColQiic}
-          />
-        </div>
-      </Modal>
-
-      {/* Column Comment modal */}
-      <Modal
-        open={columnCommentModal !== null}
-        title={columnCommentModal ? `Set comment on "${columnCommentModal.column}"` : ""}
-        onOk={executeColumnComment}
-        onCancel={() => setColumnCommentModal(null)}
-        okText="Save"
-        width={460}
-      >
-        <div style={{ padding: "8px 0" }}>
-          <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>Comment (prefilled with the current value; leave empty to remove)</div>
-          <Input.TextArea
-            value={columnCommentModal?.comment ?? ""}
-            onChange={(e) => setColumnCommentModal((prev) => prev ? { ...prev, comment: e.target.value } : null)}
-            rows={3}
-            autoFocus
-          />
-        </div>
-      </Modal>
-
-      {/* Change Data Type modal */}
-      <Modal
-        open={changeDataTypeModal !== null}
-        title={changeDataTypeModal ? `Change data type of "${changeDataTypeModal.column}"` : ""}
-        onOk={executeChangeDataType}
-        onCancel={() => setChangeDataTypeModal(null)}
-        okText="Change"
-        width={460}
-      >
-        <div style={{ padding: "8px 0" }}>
-          <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>New data type</div>
-          <DataTypeSelect
-            value={changeDataTypeModal?.dataType ?? "VARCHAR"}
-            onChange={(v) => setChangeDataTypeModal((prev) => prev ? { ...prev, dataType: v } : null)}
-          />
-          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8, lineHeight: 1.5 }}>
-            Snowflake only permits a narrow set of <code>SET DATA TYPE</code> changes — e.g. increasing a
-            VARCHAR length or a NUMBER scale. Arbitrary base-type conversions are rejected by the server.
-          </div>
-        </div>
-      </Modal>
+      {/* Column Properties modal */}
+      {columnPropertiesModal && (
+        <ColumnPropertiesModal
+          db={columnPropertiesModal.db}
+          schema={columnPropertiesModal.schema}
+          table={columnPropertiesModal.table}
+          column={columnPropertiesModal.column}
+          parentKind={columnPropertiesModal.parentKind}
+          initial={columnPropertiesModal.initial}
+          onClose={() => setColumnPropertiesModal(null)}
+          onChanged={() => refreshTableColumns(columnPropertiesModal.db, columnPropertiesModal.schema, columnPropertiesModal.table)}
+        />
+      )}
 
       {/* ER Diagram modal */}
       {erModal && (

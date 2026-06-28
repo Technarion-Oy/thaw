@@ -18,12 +18,6 @@ import (
 	"thaw/internal/snowflake"
 )
 
-// ColumnComment holds a column name and its optional comment.
-type ColumnComment struct {
-	Column  string `json:"column"`
-	Comment string `json:"comment"`
-}
-
 // BuildObjectPropertiesQuery returns the SHOW/DESCRIBE query that fetches the
 // metadata for a single Snowflake object. kind is one of: DATABASE, SCHEMA,
 // TABLE, VIEW, DYNAMIC TABLE, EXTERNAL TABLE, ICEBERG TABLE, HYBRID TABLE, EVENT TABLE, MATERIALIZED VIEW, ALERT, TAG,
@@ -720,59 +714,3 @@ func GetRoutineProperties(ctx context.Context, client *snowflake.Client, databas
 	return pairs, nil
 }
 
-// BuildGetColumnCommentsQuery returns the INFORMATION_SCHEMA query that selects
-// each column name and its comment, ordered by ordinal position.
-func BuildGetColumnCommentsQuery(database, schema, table string) string {
-	return fmt.Sprintf(
-		`SELECT COLUMN_NAME, COALESCE(COMMENT, '') AS COMMENT`+
-			` FROM %s.INFORMATION_SCHEMA.COLUMNS`+
-			` WHERE TABLE_SCHEMA = '%s' AND TABLE_NAME = '%s'`+
-			` ORDER BY ORDINAL_POSITION`,
-		snowflake.QuoteIdent(database), snowflake.EscapeStringLit(strings.ToUpper(schema)), snowflake.EscapeStringLit(strings.ToUpper(table)),
-	)
-}
-
-// ParseColumnComments projects a column-comment query result into ColumnComment
-// rows (column name + comment), preserving ordinal order.
-func ParseColumnComments(res *snowflake.QueryResult) []ColumnComment {
-	if res == nil {
-		return []ColumnComment{}
-	}
-	out := make([]ColumnComment, 0, len(res.Rows))
-	for _, row := range res.Rows {
-		col, cmt := "", ""
-		if len(row) > 0 && row[0] != nil {
-			col = fmt.Sprint(row[0])
-		}
-		if len(row) > 1 && row[1] != nil {
-			cmt = fmt.Sprint(row[1])
-		}
-		out = append(out, ColumnComment{Column: col, Comment: cmt})
-	}
-	return out
-}
-
-// GetColumnComments returns the comment for every column in a table, ordered
-// by ordinal position.
-func GetColumnComments(ctx context.Context, client *snowflake.Client, database, schema, table string) ([]ColumnComment, error) {
-	res, err := client.Execute(ctx, BuildGetColumnCommentsQuery(database, schema, table))
-	if err != nil {
-		return nil, err
-	}
-	return ParseColumnComments(res), nil
-}
-
-// BuildSetColumnCommentSql returns the ALTER TABLE ... MODIFY COLUMN ... COMMENT
-// statement that sets (or clears) the comment on a single table column.
-func BuildSetColumnCommentSql(database, schema, table, column, comment string) string {
-	return fmt.Sprintf("ALTER TABLE %s MODIFY COLUMN %s COMMENT '%s'",
-		snowflake.Qualify(database, schema, table),
-		snowflake.QuoteIdent(column), snowflake.EscapeStringLit(comment),
-	)
-}
-
-// SetColumnComment sets (or clears) the COMMENT on a single table column.
-func SetColumnComment(ctx context.Context, client *snowflake.Client, database, schema, table, column, comment string) error {
-	_, err := client.Execute(ctx, BuildSetColumnCommentSql(database, schema, table, column, comment))
-	return err
-}

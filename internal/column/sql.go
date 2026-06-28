@@ -138,7 +138,9 @@ func BuildAddColumnSql(db, schema, table string, cfg AddColumnConfig) (string, e
 	}
 
 	if c := strings.TrimSpace(cfg.Comment); c != "" {
-		parts = append(parts, "COMMENT "+snowflake.QuoteStringLit(c))
+		// QuoteTextLit (not QuoteStringLit) so backslashes in a free-text comment
+		// are doubled and stored literally rather than read as escape sequences.
+		parts = append(parts, "COMMENT "+snowflake.QuoteTextLit(c))
 	}
 
 	return strings.Join(parts, " ") + ";", nil
@@ -178,11 +180,38 @@ func BuildSetColumnCommentSql(db, schema, table, column, comment string) string 
 			tableRef(db, schema, table), snowflake.QuoteIdent(column))
 	}
 	return fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s COMMENT %s;",
-		tableRef(db, schema, table), snowflake.QuoteIdent(column), snowflake.QuoteStringLit(c))
+		tableRef(db, schema, table), snowflake.QuoteIdent(column), snowflake.QuoteTextLit(c))
 }
 
 // BuildChangeDataTypeSql constructs an ALTER TABLE ... ALTER COLUMN ... SET DATA TYPE statement.
 func BuildChangeDataTypeSql(db, schema, table, column, dataType string) string {
 	return fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s SET DATA TYPE %s;",
 		tableRef(db, schema, table), snowflake.QuoteIdent(column), strings.TrimSpace(dataType))
+}
+
+// BuildSetColumnDefaultSql constructs an ALTER TABLE ... ALTER COLUMN ... SET DEFAULT statement.
+// The expression is emitted verbatim (Snowflake only permits a sequence reference
+// here, e.g. seq.NEXTVAL); the caller is responsible for its correctness.
+func BuildSetColumnDefaultSql(db, schema, table, column, expr string) string {
+	return fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s SET DEFAULT %s;",
+		tableRef(db, schema, table), snowflake.QuoteIdent(column), strings.TrimSpace(expr))
+}
+
+// BuildDropColumnDefaultSql constructs an ALTER TABLE ... ALTER COLUMN ... DROP DEFAULT statement.
+func BuildDropColumnDefaultSql(db, schema, table, column string) string {
+	return fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s DROP DEFAULT;",
+		tableRef(db, schema, table), snowflake.QuoteIdent(column))
+}
+
+// BuildSetColumnMaskingPolicySql constructs an ALTER TABLE ... ALTER COLUMN ... SET MASKING POLICY statement.
+func BuildSetColumnMaskingPolicySql(db, schema, table, column, policyDb, policySchema, policyName string) string {
+	return fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s SET MASKING POLICY %s;",
+		tableRef(db, schema, table), snowflake.QuoteIdent(column),
+		tableRef(policyDb, policySchema, policyName))
+}
+
+// BuildUnsetColumnMaskingPolicySql constructs an ALTER TABLE ... ALTER COLUMN ... UNSET MASKING POLICY statement.
+func BuildUnsetColumnMaskingPolicySql(db, schema, table, column string) string {
+	return fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s UNSET MASKING POLICY;",
+		tableRef(db, schema, table), snowflake.QuoteIdent(column))
 }
