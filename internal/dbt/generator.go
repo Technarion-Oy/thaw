@@ -18,11 +18,11 @@ package dbt
 import (
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
 	"thaw/internal/filesystem"
+	"thaw/internal/sqltok"
 )
 
 // CreateRequest contains the user-supplied parameters for a new dbt project.
@@ -200,7 +200,7 @@ models:
 	multiScope := multiScopeFor(objects)
 
 	// Resolve the final, project-unique source and staging-model names up front.
-	// The readable base names are not injective on their own (see SourceName), so
+	// The readable base names are not injective on their own (see sourceName), so
 	// these maps break any collision deterministically; create.go builds the same
 	// maps to keep {{ source(...) }} / {{ ref(...) }} references consistent.
 	srcNames := sourceNameMap(objects)
@@ -236,9 +236,21 @@ models:
 		fmt.Fprintf(&sourcesBuilder, "    description: \"Source tables from %s.%s\"\n", so.DB, so.Schema)
 		sourcesBuilder.WriteString("    tables:\n")
 
+		// Tables first, then views, de-duplicated by upper-cased name.  Snowflake
+		// normally forbids a table and view sharing a name in one schema, but the
+		// generator doesn't validate it — a duplicate would otherwise emit two
+		// "- name:" entries (invalid YAML) and write the same stub file twice.
 		allNames := make([]string, 0, len(so.Tables)+len(so.Views))
-		allNames = append(allNames, so.Tables...)
-		allNames = append(allNames, so.Views...)
+		seenName := make(map[string]bool, len(so.Tables)+len(so.Views))
+		for _, t := range append(append([]string{}, so.Tables...), so.Views...) {
+			u := strings.ToUpper(t)
+			if seenName[u] {
+				warnings = append(warnings, fmt.Sprintf("duplicate object name %s in %s.%s — keeping first", t, so.DB, so.Schema))
+				continue
+			}
+			seenName[u] = true
+			allNames = append(allNames, t)
+		}
 		for _, t := range allNames {
 			fmt.Fprintf(&sourcesBuilder, "      - name: %s\n", t)
 			sourcesBuilder.WriteString("        description: \"\"\n")
@@ -279,28 +291,17 @@ func sourceName(db, schema string) string {
 	return strings.ToLower(db) + "_" + strings.ToLower(schema)
 }
 
-// stagingModelName returns the readable staging-model name convention (filename
-// without the .sql extension): "stg_<table>" for a single data scope, or
-// "stg_<source>_<table>" when multiple scopes are present.  Like sourceName this
-// is the pre-deduplication base name; stagingNameMap resolves collisions.
-func stagingModelName(db, schema, table string, multiScope bool) string {
-	return stagingBase(sourceName(db, schema), table, multiScope)
-}
-
-// stagingBase builds the readable staging-model name from an (already-resolved)
-// source name and a table.  Multi-scope names embed the source name so a model
-// and its source stay in sync.
+// stagingBase builds the readable staging-model name (filename without the .sql
+// extension) from an (already-resolved) source name and a table: "stg_<table>"
+// for a single data scope, or "stg_<source>_<table>" when multiple scopes are
+// present (embedding the source name keeps a model and its source in sync).
+// Like sourceName this is the pre-deduplication base name; stagingNameMap
+// resolves collisions.
 func stagingBase(srcName, table string, multiScope bool) string {
 	if multiScope {
 		return "stg_" + srcName + "_" + strings.ToLower(table)
 	}
 	return "stg_" + strings.ToLower(table)
-}
-
-// stagingModelPath returns the relative path for a staging model file from its
-// resolved model-name stem.
-func stagingModelPath(db, schema, table string, multiScope bool) string {
-	return filepath.Join("models", "staging", stagingModelName(db, schema, table, multiScope)+".sql")
 }
 
 // multiScopeFor reports whether staging model names need a db_schema prefix to
@@ -362,7 +363,7 @@ func sourceNameMap(objects []SchemaObjects) map[string]string {
 	return out
 }
 
-// StagingNames assigns a project-unique staging-model name (filename stem) to
+// stagingNameMap assigns a project-unique staging-model name (filename stem) to
 // every (db, schema, table) that gets a stub, keyed by tableKey.  srcNames
 // supplies the already-deduplicated source name used as the multi-scope prefix,
 // and a separate used-set guards the model-name space (which can collide even
@@ -390,33 +391,15 @@ func stagingNameMap(objects []SchemaObjects, srcNames map[string]string, multiSc
 	return out
 }
 
-// blockComment matches /* ... */ comments, including across newlines.  The
-// second pattern strips an unterminated "/*" (no closing "*/") through end of
-// input — Snowflake can return truncated DDL for secured/unavailable views, and
-// a body that is only an unclosed comment must still fall back to the stub.
-var (
-	blockComment     = regexp.MustCompile(`(?s)/\*.*?\*/`)
-	openBlockComment = regexp.MustCompile(`(?s)/\*.*`)
-)
-
-// hasExecutableSQL reports whether s contains anything other than whitespace and
-// SQL comments.  Used to decide between inlining a view body and emitting the
-// generic source() stub — a comment-only body (e.g. "-- definition unavailable")
-// would otherwise be inlined and fail dbt compile.
-// ponytail: strips -- naively, so a "--" inside a string literal ends the line
-// early; harmless here — a body with real SQL still tests non-empty.
+// hasExecutableSQL reports whether s contains any syntactically meaningful SQL,
+// as opposed to only whitespace and comments.  Used to decide between inlining a
+// view body and emitting the generic source() stub — a blank or comment-only
+// body (e.g. "-- definition unavailable", or truncated DDL with an unterminated
+// "/*") would otherwise be inlined and fail dbt compile.  The shared sqltok
+// lexer does the work, so line/block/unterminated comments and string literals
+// are all handled correctly.
 func hasExecutableSQL(s string) bool {
-	s = blockComment.ReplaceAllString(s, "")
-	s = openBlockComment.ReplaceAllString(s, "")
-	for _, line := range strings.Split(s, "\n") {
-		if i := strings.Index(line, "--"); i >= 0 {
-			line = line[:i]
-		}
-		if strings.TrimSpace(line) != "" {
-			return true
-		}
-	}
-	return false
+	return len(sqltok.SignificantTokens(s)) > 0
 }
 
 // stagingModelSQL returns the body of a staging model stub.

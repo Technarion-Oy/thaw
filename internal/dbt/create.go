@@ -50,9 +50,10 @@ func CreateProject(
 	}
 
 	// ── Discover objects per schema ───────────────────────────────────────────
-	// Iterate databases in sorted order: name dedup (SourceNames/StagingNames)
-	// breaks ties by input order, so a stable order keeps generated names
-	// deterministic across runs of the same request.
+	// Iterate databases and schemas in sorted order, and sort the object lists:
+	// name dedup (sourceNameMap/stagingNameMap) breaks ties by input order, so a
+	// stable order keeps generated names — and the _sources.yml object order —
+	// deterministic across runs of the same request (avoiding spurious git diffs).
 	var schemaObjects []SchemaObjects
 	var discoveryWarnings []string
 
@@ -63,7 +64,9 @@ func CreateProject(
 	sort.Strings(dbs)
 
 	for _, db := range dbs {
-		for _, schema := range schemasMap[db] {
+		schemas := append([]string(nil), schemasMap[db]...)
+		sort.Strings(schemas)
+		for _, schema := range schemas {
 			if strings.ToUpper(schema) == "INFORMATION_SCHEMA" {
 				schemaObjects = append(schemaObjects, SchemaObjects{
 					DB:       db,
@@ -92,6 +95,10 @@ func CreateProject(
 					views = append(views, o.Name)
 				}
 			}
+			// ListObjects order isn't a SQL ORDER BY contract; sort for stable
+			// _sources.yml output.
+			sort.Strings(tables)
+			sort.Strings(views)
 
 			so := SchemaObjects{
 				DB:     db,
@@ -134,10 +141,10 @@ func CreateProject(
 		objLookup := make(map[string]objInfo)
 		for _, so := range schemaObjects {
 			for _, t := range so.Tables {
-				objLookup[strings.ToUpper(so.DB+"\x00"+so.Schema+"\x00"+t)] = objInfo{"table", so.DB, so.Schema, t}
+				objLookup[tableKey(so.DB, so.Schema, t)] = objInfo{"table", so.DB, so.Schema, t}
 			}
 			for _, v := range so.Views {
-				objLookup[strings.ToUpper(so.DB+"\x00"+so.Schema+"\x00"+v)] = objInfo{"view", so.DB, so.Schema, v}
+				objLookup[tableKey(so.DB, so.Schema, v)] = objInfo{"view", so.DB, so.Schema, v}
 			}
 		}
 
@@ -160,8 +167,7 @@ func CreateProject(
 					schemaObjects[i].DB,
 					schemaObjects[i].Schema,
 					func(db, schema, name string) string {
-						key := strings.ToUpper(db + "\x00" + schema + "\x00" + name)
-						info, ok := objLookup[key]
+						info, ok := objLookup[tableKey(db, schema, name)]
 						if !ok {
 							return ""
 						}

@@ -10,7 +10,7 @@ This package is a **pure file-generation** package for classic (local) dbt proje
 
 | File | Purpose |
 |---|---|
-| `generator.go` | `Generate(req, session, objects)` — pure file writer; also exports `SourceName` and `StagingModelName` naming helpers |
+| `generator.go` | `Generate(req, session, objects)` — pure file writer; plus the unexported naming/dedup helpers (`sourceName`, `stagingBase`, `sourceNameMap`, `stagingNameMap`) |
 | `create.go` | `CreateProject(ctx, client, req, schemasMap)` — fetches live Snowflake data, builds `SchemaObjects`, optionally rewrites view SQL references into `{{ source(...) }}` / `{{ ref(...) }}` macros, then calls `Generate` |
 | `generator_test.go` | Unit tests for generation logic |
 

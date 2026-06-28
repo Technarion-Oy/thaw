@@ -608,6 +608,13 @@ func TestGenerate(t *testing.T) {
 		if !strings.Contains(sources, "  - name: a_b_c_2\n") {
 			t.Errorf("want disambiguated '- name: a_b_c_2' entry in:\n%s", sources)
 		}
+
+		// Both stubs are written to distinct files (multi-scope prefix uses the
+		// resolved, deduplicated source name) and reference the matching source.
+		base := readFile(t, result.ProjectDir, filepath.Join("models", "staging", "stg_a_b_c_t1.sql"))
+		assertContains(t, base, "{{ source('a_b_c', 'T1') }}", "first stub references base source name")
+		dis := readFile(t, result.ProjectDir, filepath.Join("models", "staging", "stg_a_b_c_2_t2.sql"))
+		assertContains(t, dis, "{{ source('a_b_c_2', 'T2') }}", "second stub references disambiguated source name")
 	})
 }
 
@@ -693,66 +700,33 @@ func TestSourceNames(t *testing.T) {
 	})
 }
 
-// ─── TestStagingModelPath ─────────────────────────────────────────────────────
+// ─── TestStagingBase ──────────────────────────────────────────────────────────
 
-func TestStagingModelPath(t *testing.T) {
+func TestStagingBase(t *testing.T) {
+	// stagingBase is the readable, pre-dedup model-name convention. The db/schema
+	// → source-name join is covered by TestSourceName; here srcName is the
+	// already-resolved source name used as the multi-scope prefix.
 	tests := []struct {
 		name       string
-		db, schema string
+		srcName    string
 		table      string
 		multiScope bool
 		want       string
 	}{
-		{
-			name:       "single-scope lowercase path",
-			db:         "DB", schema: "SCH", table: "ORDERS",
-			multiScope: false,
-			want:       filepath.Join("models", "staging", "stg_orders.sql"),
-		},
-		{
-			name:       "multi-scope includes db and schema prefix",
-			db:         "DB", schema: "SCH", table: "ORDERS",
-			multiScope: true,
-			want:       filepath.Join("models", "staging", "stg_db_sch_orders.sql"),
-		},
-		{
-			name:       "single-scope uppercase table lowercased",
-			db:         "MYDB", schema: "PUBLIC", table: "FACT_SALES",
-			multiScope: false,
-			want:       filepath.Join("models", "staging", "stg_fact_sales.sql"),
-		},
-		{
-			name:       "multi-scope all uppercase lowercased",
-			db:         "MYDB", schema: "PUBLIC", table: "FACT_SALES",
-			multiScope: true,
-			want:       filepath.Join("models", "staging", "stg_mydb_public_fact_sales.sql"),
-		},
-		{
-			name:       "single-scope mixed case",
-			db:         "Db", schema: "Sch", table: "MyTable",
-			multiScope: false,
-			want:       filepath.Join("models", "staging", "stg_mytable.sql"),
-		},
-		{
-			name:       "multi-scope mixed case",
-			db:         "Db", schema: "Sch", table: "MyTable",
-			multiScope: true,
-			want:       filepath.Join("models", "staging", "stg_db_sch_mytable.sql"),
-		},
-		{
-			name:       "multi-scope with underscores in identifiers",
-			db:         "MY_DB", schema: "MY_SCH", table: "MY_TABLE",
-			multiScope: true,
-			want:       filepath.Join("models", "staging", "stg_my_db_my_sch_my_table.sql"),
-		},
+		{name: "single-scope lowercases table", srcName: "db_sch", table: "ORDERS", multiScope: false, want: "stg_orders"},
+		{name: "single-scope ignores source", srcName: "mydb_public", table: "FACT_SALES", multiScope: false, want: "stg_fact_sales"},
+		{name: "single-scope mixed case", srcName: "db_sch", table: "MyTable", multiScope: false, want: "stg_mytable"},
+		{name: "multi-scope embeds source", srcName: "db_sch", table: "ORDERS", multiScope: true, want: "stg_db_sch_orders"},
+		{name: "multi-scope all lowercased", srcName: "mydb_public", table: "FACT_SALES", multiScope: true, want: "stg_mydb_public_fact_sales"},
+		{name: "multi-scope underscores preserved", srcName: "my_db_my_sch", table: "MY_TABLE", multiScope: true, want: "stg_my_db_my_sch_my_table"},
+		{name: "multi-scope deduplicated source prefix", srcName: "a_b_c_2", table: "T", multiScope: true, want: "stg_a_b_c_2_t"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := stagingModelPath(tt.db, tt.schema, tt.table, tt.multiScope)
-			if got != tt.want {
-				t.Errorf("stagingModelPath(%q, %q, %q, %v) = %q, want %q",
-					tt.db, tt.schema, tt.table, tt.multiScope, got, tt.want)
+			if got := stagingBase(tt.srcName, tt.table, tt.multiScope); got != tt.want {
+				t.Errorf("stagingBase(%q, %q, %v) = %q, want %q",
+					tt.srcName, tt.table, tt.multiScope, got, tt.want)
 			}
 		})
 	}
@@ -870,6 +844,20 @@ func TestStagingModelSQL(t *testing.T) {
 				"with source as (",
 				"renamed as (",
 				"{{ source('prod_raw', 'SALES_VIEW') }}",
+			},
+		},
+		{
+			// A "/*" sitting inside a -- line comment is not a block-comment
+			// opener; the real SELECT on the next line must still be inlined.
+			name:    "non-empty body: /* inside a line comment doesn't eat following SQL",
+			source:  "db_sch", table: "V",
+			sqlBody: "-- note: /* not a block comment\nSELECT id FROM orders",
+			mustContain: []string{
+				"view SQL inlined from Snowflake",
+				"SELECT id FROM orders",
+			},
+			mustNotContain: []string{
+				"with source as (",
 			},
 		},
 		{
