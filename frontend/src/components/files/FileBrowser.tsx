@@ -50,7 +50,7 @@ import {
 } from "../../../wailsjs/go/app/App";
 import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 import { useGitStore } from "../../store/gitStore";
-import { sigilColor } from "../git/gitStatusUtil";
+import { sigilColor, deriveNewAndPartial } from "../git/gitStatusUtil";
 import { useQueryStore } from "../../store/queryStore";
 import { useDiffStore } from "../../store/diffStore";
 import { getPlatformOS, getCachedPlatformOS, revealLabel } from "./platformUtil";
@@ -255,8 +255,9 @@ export default function FileBrowser() {
     const dirLetter   = new Map<string, string>(); // dir rel → dominant letter
     const stagedRel   = new Set<string>();
     const unstagedRel = new Set<string>();
-    const newFilesRel = new Set<string>(); // no committed version → discard deletes
-    const partialRel  = new Set<string>(); // both staged & unstaged → discard also drops staged
+    // Discard-prompt sets (new-file / partially-staged) from the shared helper, so
+    // the classification has a single home (also used by ChangesView).
+    const { newFilesRel, partiallyStagedRel: partialRel } = deriveNewAndPartial(gitStatus?.changedPaths);
 
     // Folder color = the most significant change beneath it. A/U are both "new"
     // (green), so a folder of only-new files stays green rather than reading as
@@ -272,13 +273,11 @@ export default function FileBrowser() {
     };
 
     if (gitStatus) {
-      // Uncapped: drives coloring and the authoritative new-file (discard-deletes)
-      // classification for every changed file, including beyond the 500-cap arrays.
+      // Uncapped: drives the tree coloring for every changed file, including
+      // beyond the 500-cap arrays.
       for (const [p, cf] of Object.entries(gitStatus.changedPaths ?? {})) {
         const rel = p.replace(/\\/g, "/");
         byRel.set(rel, cf.status);
-        if (cf.isNew) newFilesRel.add(rel);
-        if (cf.partiallyStaged) partialRel.add(rel);
         addDirs(rel, cf.status);
       }
       for (const fc of (gitStatus.staged   ?? [])) stagedRel.add(fc.path.replace(/\\/g, "/"));
@@ -1046,6 +1045,9 @@ export default function FileBrowser() {
   // rc-tree memoizes its flattened node list by treeData identity, so a status
   // change alone won't re-run titleRender. Hand it a fresh top-level array
   // reference whenever the git overlay changes so the status colors repaint.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- gitOverlay dep is
+  // intentional: it's not read in the body, it exists to force rc-tree to re-run
+  // titleRender on status change. Removing it stops colors repainting after edits.
   const treeForRender = useMemo(() => [...treeData], [treeData, gitOverlay]);
 
   // Git status of the right-clicked file (drives the Stage/Unstage/Discard menu items).

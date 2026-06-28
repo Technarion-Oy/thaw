@@ -291,11 +291,12 @@ export const useGitStore = create<GitState>((set, get) => ({
       // Backend sentinel: the index was empty, nothing was committed. Don't claim
       // success / clear the message; just refresh so the UI shows the real state.
       const nothing = msg.includes("nothing staged to commit");
-      set(nothing ? { committing: false } : { error: msg, committing: false });
       // Even on a push failure the local commit was made and the index is now
-      // empty — refresh so the UI reflects that instead of showing stale staged
-      // files (silent: this isn't an operation failure to re-report).
+      // empty. Refresh BEFORE clearing `committing` (same ordering as the success
+      // path) so the commit button stays disabled until stagedTotal reflects the
+      // empty index — otherwise the user re-clicks against stale staged files.
       await get().refreshStatus(true);
+      set(nothing ? { committing: false } : { error: msg, committing: false });
       return false;
     }
     // Keep `committing` true through the status refresh so the commit button stays

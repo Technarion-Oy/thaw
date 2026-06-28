@@ -247,9 +247,12 @@ func GetStatus(dir string) (RepoStatus, error) {
 
 				// "New" = no committed version at this path, so DiscardFile deletes
 				// it rather than reverting to HEAD. Covers added, untracked, and
-				// rename/copy destinations (none of which exist in HEAD here).
-				isNew := x == gogit.Added || x == gogit.Renamed || x == gogit.Copied ||
-					x == gogit.Untracked || y == gogit.Untracked
+				// rename/copy destinations (none of which exist in HEAD here). Keyed
+				// on the staging side only: a truly untracked file is x==Untracked,
+				// whereas `git rm --cached` gives x==Deleted, y==Untracked for a file
+				// that IS in HEAD — so a worktree-Untracked term would misflag it.
+				isNew := x == gogit.Added || x == gogit.Renamed ||
+					x == gogit.Copied || x == gogit.Untracked
 				// Forward-slash everywhere so the frontend's changedPaths keys and
 				// staged/unstaged paths always match (go-git is slash-native today,
 				// but don't rely on that).

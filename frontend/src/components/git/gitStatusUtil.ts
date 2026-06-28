@@ -59,6 +59,25 @@ export function objectTypeFromPath(path: string): { label: string; color: string
   return null;
 }
 
+/** From the uncapped `changedPaths` map, derive the two path-sets the discard
+ *  prompts need: `newFilesRel` (no committed version → discard deletes, not
+ *  reverts) and `partiallyStagedRel` (both staged & unstaged → discard also drops
+ *  the staged part). Both flags are computed authoritatively on the backend; this
+ *  is the single place the frontend reads them, shared by the Changes view and the
+ *  FileBrowser tree. Keys are repo-relative forward-slash paths (as the backend
+ *  emits them). */
+export function deriveNewAndPartial(
+  changedPaths: Record<string, { isNew: boolean; partiallyStaged: boolean }> | undefined | null,
+): { newFilesRel: Set<string>; partiallyStagedRel: Set<string> } {
+  const newFilesRel = new Set<string>();
+  const partiallyStagedRel = new Set<string>();
+  for (const [p, cf] of Object.entries(changedPaths ?? {})) {
+    if (cf.isNew) newFilesRel.add(p);
+    if (cf.partiallyStaged) partiallyStagedRel.add(p);
+  }
+  return { newFilesRel, partiallyStagedRel };
+}
+
 /** Split a path into its directory prefix (with trailing slash) and filename. */
 export function splitPath(path: string): { dir: string; name: string } {
   const norm = path.replace(/\\/g, "/");

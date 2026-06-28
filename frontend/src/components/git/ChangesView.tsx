@@ -20,6 +20,7 @@ import {
 import { useGitStore } from "../../store/gitStore";
 import type { FileChange } from "../../store/gitStore";
 import ChangeRow from "./ChangeRow";
+import { deriveNewAndPartial } from "./gitStatusUtil";
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -116,25 +117,12 @@ export default function ChangesView() {
   const unstagedTotal = status?.unstagedTotal ?? 0;
   const totalChanged  = status?.totalChanged  ?? 0;
 
-  // Files with no committed version — discarding these deletes them. Sourced from
-  // the backend's authoritative `isNew` (covers added/untracked AND rename/copy
-  // destinations, and a staged-then-modified file that displays as "M") rather
-  // than guessing from the per-row letter.
-  const newFilesRel = useMemo(() => {
-    const s = new Set<string>();
-    for (const [p, cf] of Object.entries(status?.changedPaths ?? {})) if (cf.isNew) s.add(p);
-    return s;
-  }, [status]);
-
-  // Files with BOTH staged and unstaged changes — discarding either row reverts
-  // the whole file to HEAD, so it also throws away the staged part. The discard
-  // confirmation calls this out. Sourced from the authoritative (uncapped)
-  // changedPaths so it's correct beyond the 500-file cap.
-  const partiallyStagedRel = useMemo(() => {
-    const s = new Set<string>();
-    for (const [p, cf] of Object.entries(status?.changedPaths ?? {})) if (cf.partiallyStaged) s.add(p);
-    return s;
-  }, [status]);
+  // Discard-prompt path sets from the backend's authoritative flags (uncapped, so
+  // correct beyond the 500-file cap). See deriveNewAndPartial.
+  const { newFilesRel, partiallyStagedRel } = useMemo(
+    () => deriveNewAndPartial(status?.changedPaths),
+    [status],
+  );
 
   // Every one of these writes the git index, which go-git can't do concurrently —
   // so any in-flight op disables the row/header actions.
