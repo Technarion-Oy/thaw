@@ -11,7 +11,6 @@
 package app
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -65,38 +64,6 @@ func (a *App) ListAccountTags() (*snowflake.QueryResult, error) {
 		return nil, apperrors.ErrNotConnected
 	}
 	return a.client.QuerySingle(a.ctx, "SHOW TAGS IN ACCOUNT")
-}
-
-// GetTagAllowedValues returns the allowed-value whitelist configured on a tag via
-// the SYSTEM$GET_TAG_ALLOWED_VALUES function. The function yields a JSON array
-// string (e.g. `["HIGH","LOW"]`) when the tag was created/altered with
-// ALLOWED_VALUES, or NULL when any value is permitted. A nil result means the tag
-// editors should keep a free-text value field; a non-empty list backs a value
-// dropdown. The tag is addressed by its plain dotted FQN, which the function
-// accepts; a mixed-case quoted tag that fails to resolve simply yields NULL and
-// degrades to free text.
-func (a *App) GetTagAllowedValues(database, schema, name string) ([]string, error) {
-	if a.client == nil {
-		return nil, apperrors.ErrNotConnected
-	}
-	fqn := fmt.Sprintf("%s.%s.%s", database, schema, name)
-	query := fmt.Sprintf("SELECT SYSTEM$GET_TAG_ALLOWED_VALUES('%s')", snowflake.EscapeStringLit(fqn))
-	res, err := a.client.QuerySingle(a.ctx, query)
-	if err != nil {
-		return nil, err
-	}
-	if res == nil || len(res.Rows) == 0 || len(res.Rows[0]) == 0 || res.Rows[0][0] == nil {
-		return nil, nil
-	}
-	raw, ok := res.Rows[0][0].(string)
-	if !ok || strings.TrimSpace(raw) == "" {
-		return nil, nil
-	}
-	var values []string
-	if err := json.Unmarshal([]byte(raw), &values); err != nil {
-		return nil, fmt.Errorf("parse tag allowed values: %w", err)
-	}
-	return values, nil
 }
 
 // GetAllTagReferences returns every live tag application across the account by

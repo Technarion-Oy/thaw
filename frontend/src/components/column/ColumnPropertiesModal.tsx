@@ -12,13 +12,13 @@ import { App as AntApp, Modal, Spin, Button, Input, Switch, Space, Tag, Select }
 import { EditOutlined, CheckOutlined, CloseOutlined, PlusOutlined } from "@ant-design/icons";
 import DataTypeSelect from "../shared/DataTypeSelect";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
+import { parseAllowedValues } from "../tag/allowedValues";
 import type { snowflake } from "../../../wailsjs/go/models";
 import {
   ExecDDL,
   GetColumnDetails,
   GetColumnTagReferences,
   GetQuotedIdentifiersIgnoreCase,
-  GetTagAllowedValues,
   ListAccountMaskingPolicies,
   ListAccountTags,
   SetObjectTag,
@@ -35,7 +35,9 @@ import {
 } from "../../../wailsjs/go/app/App";
 
 // A schema-qualified object (masking policy or tag) parsed from a SHOW … result.
-interface QualifiedObject { db: string; schema: string; name: string; fqn: string; }
+// allowedValues is populated from SHOW TAGS' allowed_values column (empty for
+// masking policies, which have no such column).
+interface QualifiedObject { db: string; schema: string; name: string; fqn: string; allowedValues: string[]; }
 
 // SHOW MASKING POLICIES / SHOW TAGS share the name/database_name/schema_name
 // columns; pull the qualified object list out by column name.
@@ -44,12 +46,14 @@ function parseObjectList(res: snowflake.QueryResult): QualifiedObject[] {
   const iName = cols.indexOf("name");
   const iDb = cols.indexOf("database_name");
   const iSc = cols.indexOf("schema_name");
+  const iAllowed = cols.indexOf("allowed_values");
   if (iName < 0) return [];
   return (res.rows ?? []).map((r) => {
     const name = String(r[iName]);
     const db = iDb >= 0 && r[iDb] != null ? String(r[iDb]) : "";
     const schema = iSc >= 0 && r[iSc] != null ? String(r[iSc]) : "";
-    return { db, schema, name, fqn: [db, schema, name].filter(Boolean).join(".") };
+    const allowedValues = iAllowed >= 0 && r[iAllowed] != null ? parseAllowedValues(String(r[iAllowed])) : [];
+    return { db, schema, name, fqn: [db, schema, name].filter(Boolean).join("."), allowedValues };
   });
 }
 
@@ -264,16 +268,15 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
   const sameTag = (a: { db: string; schema: string; name: string }, b: ColTag) =>
     a.db === b.db && a.schema === b.schema && a.name === b.name;
 
-  // On tag selection, look up its allowed values so the value field can switch
-  // between a dropdown (whitelist) and free text. Reset the value either way.
+  // On tag selection, switch the value field between a dropdown (the tag's
+  // allowed-values whitelist) and free text. The allowed values come from the
+  // SHOW TAGS catalog already loaded into tagCatalog — no extra round-trip.
   const onTagNameChange = (v?: string) => {
     const name = v ?? "";
     setTagName(name);
     setTagValue("");
-    setTagAllowed(null);
-    if (!name) return;
-    const t = splitQualified(name, tagCatalog);
-    GetTagAllowedValues(t.db, t.schema, t.name).then((vals) => setTagAllowed(vals?.length ? vals : null)).catch(() => setTagAllowed(null));
+    const allowed = tagCatalog.find((t) => t.fqn === name)?.allowedValues ?? [];
+    setTagAllowed(allowed.length ? allowed : null);
   };
 
   const addTag = async () => {

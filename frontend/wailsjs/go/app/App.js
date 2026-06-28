@@ -1234,10 +1234,6 @@ export function GetTableSettings(arg1, arg2, arg3) {
   return window['go']['app']['App']['GetTableSettings'](arg1, arg2, arg3);
 }
 
-export function GetTagAllowedValues(arg1, arg2, arg3) {
-  return window['go']['app']['App']['GetTagAllowedValues'](arg1, arg2, arg3);
-}
-
 export function GetTagReferences(arg1, arg2, arg3) {
   return window['go']['app']['App']['GetTagReferences'](arg1, arg2, arg3);
 }
