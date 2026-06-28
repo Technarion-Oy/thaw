@@ -382,7 +382,7 @@ export const useQueryStore = create<QueryState>()(
 
       // Closing the last tab — replace with a fresh scratch tab.
       if (newTabs.length === 0) {
-        const freshTab = makeTab();
+        const freshTab = makeTab({ title: nextScratchTitle(newTabs) });
         return {
           tabs: [freshTab],
           activeTabId: freshTab.id,
@@ -508,17 +508,19 @@ export const useQueryStore = create<QueryState>()(
   },
 
   executeInNewTab: (sql) => {
-    const newTab = makeTab({ sql });
-    set((state) => ({
-      tabs: [...state.tabs, newTab],
-      activeTabId: newTab.id,
-      sql,
-      selectedSql: "",
-      currentFile: null,
-      result: null,
-      error: null,
-      isRunning: false,
-    }));
+    set((state) => {
+      const newTab = makeTab({ title: nextScratchTitle(state.tabs), sql });
+      return {
+        tabs: [...state.tabs, newTab],
+        activeTabId: newTab.id,
+        sql,
+        selectedSql: "",
+        currentFile: null,
+        result: null,
+        error: null,
+        isRunning: false,
+      };
+    });
     // Ask QueryPage to run via its StartQuery/WaitForQueryResult path, which
     // is the only path that populates resultHistory and shows results in the UI.
     // The SQL is passed in the event detail to avoid stale-closure issues.
@@ -526,17 +528,19 @@ export const useQueryStore = create<QueryState>()(
   },
 
   loadInNewTab: (sql) => {
-    const newTab = makeTab({ sql });
-    set((state) => ({
-      tabs: [...state.tabs, newTab],
-      activeTabId: newTab.id,
-      sql,
-      selectedSql: "",
-      currentFile: null,
-      result: null,
-      error: null,
-      isRunning: false,
-    }));
+    set((state) => {
+      const newTab = makeTab({ title: nextScratchTitle(state.tabs), sql });
+      return {
+        tabs: [...state.tabs, newTab],
+        activeTabId: newTab.id,
+        sql,
+        selectedSql: "",
+        currentFile: null,
+        result: null,
+        error: null,
+        isRunning: false,
+      };
+    });
   },
 
   openMcpTab: (title, sql) => {

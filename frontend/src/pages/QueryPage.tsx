@@ -81,6 +81,11 @@ import { useEditorContextSync } from "../hooks/useEditorContextSync";
 
 const { Text } = Typography;
 
+// Default save-dialog filename for a tab: untitled.sql for unsaved scratch tabs
+// (titled "SQL" or "SQL (n)"), otherwise the tab's own title.
+const saveDefaultName = (title: string) =>
+  /^SQL( \(\d+\))?$/.test(title) ? "untitled.sql" : title;
+
 export default function QueryPage() {
   const { sql, selectedSql, isRunning, error, setResult, setError, markSaved, openScratch, openFile, setSql, openNotebook, openNotebookUnsaved, refreshFileTab, orphanFileTab } = useQueryStore();
   const activeTabId    = useQueryStore((s) => s.activeTabId);
@@ -601,7 +606,7 @@ export default function QueryPage() {
     let saveTitle = tab.title;
 
     if (!savePath) {
-      savePath = await PickSaveFile(tab.title === "SQL" ? "untitled.sql" : tab.title);
+      savePath = await PickSaveFile(saveDefaultName(tab.title));
       if (!savePath) return;
       saveTitle = savePath.split("/").pop() ?? savePath;
     }
@@ -622,7 +627,7 @@ export default function QueryPage() {
 
     const defaultName = tab.path
       ? (tab.path.split("/").pop() ?? "untitled.sql")
-      : (tab.title === "SQL" ? "untitled.sql" : tab.title);
+      : saveDefaultName(tab.title);
 
     const savePath = await PickSaveFile(defaultName);
     if (!savePath) return;
@@ -647,7 +652,7 @@ export default function QueryPage() {
     let saveTitle = tab.title;
 
     if (!savePath) {
-      const defaultName = tab.title === "SQL" ? "untitled.sql" : tab.title;
+      const defaultName = saveDefaultName(tab.title);
       savePath = await PickSaveFile(defaultName);
       if (!savePath) return false; // user cancelled the dialog
       saveTitle = savePath.split("/").pop() ?? savePath;

@@ -78,6 +78,10 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
 - **Unsaved-change indicator** — a `•` dot in the tab title shows unsaved work at a glance
 - **Close confirmation** — closing a tab with unsaved changes (via the `×` button or `⌘W` / `Ctrl+W`) shows a dialog with three choices: **Save**, **Close without Saving**, or **Cancel**; for new scratch tabs or files not yet saved to disk, **Save** opens a native Save As dialog first; applies to SQL files, notebooks, and any scratch tab that has been edited
 - **Tab reordering** — drag any tab left or right to rearrange the tab strip; a vertical accent line shows the insertion point
+- **Active Files dropdown** — a downward-triangle button pinned at the far-right of the tab strip (after the `+`) opens a searchable list of every open tab — icon, dirty `•` / orphan `↺` prefix, and title; click an entry to jump to that tab; filter by title; the active tab is highlighted; open it with `⌘⇧E` / `Ctrl+Shift+E` and dismiss with Escape or an outside click; stays visible even when many tabs overflow the bar
+- **Numbered scratch tabs** — new scratch tabs are titled `SQL (1)`, `SQL (2)`, … so they're easy to tell apart in the tab strip and Active Files list
+- **Rename tabs** — double-click a scratch tab's title (or right-click → **Rename**) to give it a custom name; Enter confirms, Escape cancels; file-backed tabs keep their filename
+- **Tab reordering** — drag any tab left or right to rearrange the tab strip; a vertical accent line shows the insertion point
 - **Split view** — right-click any tab and choose **Split with: [tab name]** to view two editors side by side; a draggable vertical divider separates them and the ratio is persisted across sessions; each editor is fully independent with its own completions, hover definitions, and editing history; close the split with the × button in the secondary editor header, via **Close split view** in the right-click menu, or by closing either of the two tabs
 - **Snowflake Scripting Support** — advanced support for Snowflake Scripting (used in Stored Procedures and UDFs):
   - **Syntax Highlighting** — distinct coloring for scripting keywords (`DECLARE`, `BEGIN`, `EXCEPTION`, `END`), control flow (`IF`, `LOOP`, `WHILE`), and async operations (`ASYNC`, `AWAIT`)
@@ -1186,6 +1190,7 @@ Open **Help → Keyboard Shortcuts…** in the menu bar for a searchable, always
 | `⌘⇧T` | `Ctrl+Shift+T` | Reopen last closed tab |
 | `⌃Tab` | `Ctrl+Tab` | Switch to next tab |
 | `⌃⇧Tab` | `Ctrl+Shift+Tab` | Switch to previous tab |
+| `⌘⇧E` | `Ctrl+Shift+E` | Open Active Files dropdown |
 | `⌘,` | `Ctrl+,` | Open Preferences (AI settings) |
 
 ### Query Execution

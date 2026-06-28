@@ -62,13 +62,24 @@ export default function TabBar() {
   // Inline tab rename (non-file tabs only — file tabs derive their title from the path).
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  // Guards against the blur that fires after the input is removed (on Enter/Escape)
+  // re-running the rename — and lets Escape cancel without committing.
+  const renameDoneRef = useRef(false);
   const startRename = (tab: Tab) => {
     if (tab.path || tab.diff) return;
+    renameDoneRef.current = false;
     setRenamingId(tab.id);
     setRenameValue(tab.title);
   };
   const commitRename = () => {
-    if (renamingId) renameTab(renamingId, renameValue);
+    if (renamingId && !renameDoneRef.current) {
+      renameDoneRef.current = true;
+      renameTab(renamingId, renameValue);
+    }
+    setRenamingId(null);
+  };
+  const cancelRename = () => {
+    renameDoneRef.current = true; // suppress the trailing onBlur commit
     setRenamingId(null);
   };
 
@@ -258,7 +269,7 @@ export default function TabBar() {
                 onKeyDown={(e) => {
                   e.stopPropagation();
                   if (e.key === "Enter") commitRename();
-                  else if (e.key === "Escape") setRenamingId(null);
+                  else if (e.key === "Escape") cancelRename();
                 }}
                 style={{
                   flex: 1,
