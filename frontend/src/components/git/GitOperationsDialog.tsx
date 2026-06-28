@@ -23,7 +23,7 @@ import {
   GlobalOutlined, CopyOutlined,
 } from "@ant-design/icons";
 import { useGitStore } from "../../store/gitStore";
-import { PickDirectory, GitInitWithRemote } from "../../../wailsjs/go/app/App";
+import { PickDirectory, GitInitWithRemote, GitCancelOAuth } from "../../../wailsjs/go/app/App";
 import { BrowserOpenURL, ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 import ChangesView from "./ChangesView";
 
@@ -356,6 +356,10 @@ function AuthSection() {
     catch { antMessage.error("Could not copy URL"); }
   };
 
+  // Abort the loopback flow (frees port 3456); unblocks loginWithOAuth so the
+  // finally clause clears `loading`.
+  const handleCancelConnect = () => { void GitCancelOAuth(); };
+
   const handleUseToken = () => {
     const t = tokenInput.trim();
     if (!t) return;
@@ -410,15 +414,19 @@ function AuthSection() {
               <Space size={6}>
                 <Button size="small" type="primary" icon={<GlobalOutlined />} onClick={() => BrowserOpenURL(authUrl)}>Open in browser</Button>
                 <Button size="small" icon={<CopyOutlined />} onClick={copyAuthUrl}>Copy URL</Button>
+                <Button size="small" icon={<CloseOutlined />} onClick={handleCancelConnect}>Cancel</Button>
               </Space>
               <Text style={{ fontSize: 11, color: "var(--text-muted)" }}>
                 <Spin size="small" style={{ marginRight: 6 }} /> Waiting for authorization…
               </Text>
             </>
           ) : (
-            <Text style={{ fontSize: 12, color: "var(--text-muted)" }}>
-              <Spin size="small" style={{ marginRight: 6 }} /> Preparing authorization…
-            </Text>
+            <Space size={6}>
+              <Text style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                <Spin size="small" style={{ marginRight: 6 }} /> Preparing authorization…
+              </Text>
+              <Button size="small" icon={<CloseOutlined />} onClick={handleCancelConnect}>Cancel</Button>
+            </Space>
           )}
         </div>
       ) : (
@@ -696,10 +704,14 @@ export default function GitOperationsDialog() {
   const { gitOpsOpen, closeGitOps, status, exportDir } = useGitStore();
   const isRepo = status?.isRepo ?? false;
 
+  // Closing the dialog mid-auth must abort the loopback flow, else its goroutine +
+  // port 3456 leak until quit. No-op when no flow is running.
+  const handleClose = () => { void GitCancelOAuth(); closeGitOps(); };
+
   return (
     <Modal
       open={gitOpsOpen}
-      onCancel={closeGitOps}
+      onCancel={handleClose}
       title={
         <Space size={8}>
           <GithubOutlined />

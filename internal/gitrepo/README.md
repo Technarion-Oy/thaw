@@ -27,13 +27,13 @@ token-based authentication.
 | `FileChange` | `{ path, status }` — `status` is a single VS Code-style letter: `A` added, `M` modified, `D` deleted, `R` renamed, `C` copied, `U` untracked. |
 | `PushParams` | All fields needed for `CommitAndPush`: dir, remoteURL, branch, authMethod, token, message, author, files, `stagedOnly`, `noPush`. When `stagedOnly` is set, the commit runs over the existing index (nothing is staged first); when `noPush` is set, it commits locally and returns without touching the remote (no auth/remote required). |
 | `StageFile` / `UnstageFile` / `StageAll` / `UnstageAll` | Manipulate the git index (whole-file granularity — go-git has no `git add -p`). `UnstageFile` uses a path-constrained mixed reset so the index stat-cache is refreshed and status re-detects the file. **Perf:** `StageAll` does one bulk `AddOptions{All:true}` (single status scan + single index write) — never a per-file loop, which is O(N²) because go-git rewrites the whole index and re-scans status on every `Add`. `StageFile` sets `AddOptions{SkipStatus:true}` so staging one file doesn't trigger a full-repo status scan. |
-| `DiscardFile(dir, file)` | Reverts a tracked file to its HEAD content (and unstages it); deletes an untracked/newly-added file from disk and the index. Reverts the **whole** file to HEAD — for a file with both staged and unstaged changes it discards the staged part too, so the UI warns about that. Cannot be undone. |
+| `DiscardFile(dir, file)` | Reverts a tracked file to its HEAD content (and unstages it); deletes an untracked/newly-added file from disk and the index. Reverts the **whole** file to HEAD — for a file with both staged and unstaged changes it discards the staged part too, so the UI warns about that. For the untracked/new branch the disk delete happens **before** the index write, so an `os.Remove` failure leaves the entry staged (consistent, retryable) rather than a trapped "phantom untracked" file. Cannot be undone. |
 | `PullParams` | Dir, remoteURL, branch, authMethod, token. |
 | `CloneParams` | URL, path, authMethod, token. |
 | `BranchInfo` | `{ name, isRemote, isCurrent }` |
 | `CredentialResult` | IPC-safe: `{ found, username, source }` — never includes the secret. |
 | `GetStatus(dir)` | Returns `RepoStatus`; non-repos return `IsRepo: false` without error. |
-| `CommitAndPush(ctx, p)` | Init-if-needed → ensure `.gitignore` → stage → commit → push. "Nothing to commit" and "already up-to-date" are success. |
+| `CommitAndPush(ctx, p)` | Open (`DetectDotGit`, so a subdirectory resolves to its repo — matching `openWorktree`) or init → ensure `.gitignore` → stage → commit → push. "Nothing to commit" returns `ErrNothingToCommit` for `stagedOnly`; "already up-to-date" is success. |
 | `GetHeadFileContent(filePath)` | Returns file content at HEAD; returns `""` (no error) for untracked files or repos with no commits. |
 | `PerformOAuthFlow(ctx, provider, onURL)` | Runs the loopback callback server and exchanges the code for a token. It does **not** open a browser — it passes the authorization URL to `onURL` so the caller/UI can let the user open it (in any browser) or copy it. |
 

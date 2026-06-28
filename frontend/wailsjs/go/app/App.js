@@ -1250,6 +1250,10 @@ export function GetWarehouseParameters(arg1) {
   return window['go']['app']['App']['GetWarehouseParameters'](arg1);
 }
 
+export function GitCancelOAuth() {
+  return window['go']['app']['App']['GitCancelOAuth']();
+}
+
 export function GitCheckoutBranch(arg1, arg2) {
   return window['go']['app']['App']['GitCheckoutBranch'](arg1, arg2);
 }

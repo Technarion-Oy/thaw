@@ -1061,10 +1061,12 @@ export default function FileBrowser() {
   const ctxUnknownSide = ctxChanged && !ctxStagedHit && !ctxUnstagedHit;
   const ctxStaged   = ctxStagedHit   || ctxUnknownSide; // show Unstage
   const ctxUnstaged = ctxUnstagedHit || ctxUnknownSide; // show Stage
-  // Comparable against HEAD only when there's a prior committed version — i.e. a
-  // tracked change (modified/renamed/copied/deleted), not a brand-new file (A/U).
+  // Comparable against HEAD only when there's a prior committed version. Gate on
+  // the authoritative isNew, not the display letter — a staged-new-then-modified
+  // file shows "M" but has no HEAD version, so HEAD diff would be empty/misleading.
   const ctxLetter     = ctxRel != null ? gitOverlay.byRel.get(ctxRel) : undefined;
-  const ctxComparable = ctxLetter === "M" || ctxLetter === "R" || ctxLetter === "C" || ctxLetter === "D";
+  const ctxIsNew      = ctxRel != null && gitOverlay.newFilesRel.has(ctxRel);
+  const ctxComparable = !ctxIsNew && (ctxLetter === "M" || ctxLetter === "R" || ctxLetter === "C" || ctxLetter === "D");
 
   return (
     <div style={{ padding: "4px 4px" }}>

@@ -335,8 +335,10 @@ func aheadCount(repo *gogit.Repository, head *plumbing.Reference) int {
 // CommitAndPush stages files, commits, and pushes to the remote.
 // "Nothing to commit" / "already up-to-date" are treated as success.
 func CommitAndPush(ctx context.Context, p PushParams) error {
-	// Init repo if directory is not yet a repo.
-	repo, err := gogit.PlainOpen(p.Dir)
+	// Init repo if directory is not yet a repo. DetectDotGit so a subdirectory of
+	// an existing repo resolves to it — matching openWorktree, which all the
+	// staging ops use (otherwise you could stage but not commit).
+	repo, err := gogit.PlainOpenWithOptions(p.Dir, &gogit.PlainOpenOptions{DetectDotGit: true})
 	if err != nil {
 		if !errors.Is(err, gogit.ErrRepositoryNotExists) {
 			return fmt.Errorf("open repo: %w", err)
@@ -663,9 +665,12 @@ func DiscardFile(dir, file string) error {
 
 	te, found := headTreeEntry(repo, rel)
 	if !found {
-		// Untracked or newly-added: drop from the index, then delete from disk.
-		// Both index errors are propagated, and the file is removed only after the
-		// index write succeeds — otherwise we could leave a phantom staged entry.
+		// Untracked or newly-added: delete from disk FIRST, then commit the index.
+		// If os.Remove fails, we return before writing the index, so the entry stays
+		// staged (consistent, retryable). If SetIndex then fails, the on-disk index
+		// is unchanged (still has the entry, whose blob persists) so the file shows
+		// staged-deleted and a retry completes — never the trapped "phantom
+		// untracked" state that index-first ordering leaves on an os.Remove failure.
 		idx, err := repo.Storer.Index()
 		if err != nil {
 			return fmt.Errorf("read index: %w", err)
@@ -673,11 +678,11 @@ func DiscardFile(dir, file string) error {
 		if _, err := idx.Remove(rel); err != nil && !errors.Is(err, index.ErrEntryNotFound) {
 			return fmt.Errorf("discard %s: %w", rel, err)
 		}
-		if err := repo.Storer.SetIndex(idx); err != nil {
-			return fmt.Errorf("write index: %w", err)
-		}
 		if err := os.Remove(absPath); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("discard %s: %w", rel, err)
+		}
+		if err := repo.Storer.SetIndex(idx); err != nil {
+			return fmt.Errorf("write index: %w", err)
 		}
 		return nil
 	}

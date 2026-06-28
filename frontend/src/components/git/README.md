@@ -36,4 +36,5 @@ distinct from `gitrepoobj/`, which manages Snowflake-native GIT REPOSITORY objec
 - Only GitHub remote URLs are accepted (validated by `isGithubURL()`). The clone and remote-URL inputs reject non-GitHub URLs with an inline error message.
 - When `clone()` fails because the remote repository is empty, the store error is cleared and the UI switches to an "init mode" form (`GitInitWithRemote` IPC) rather than showing an error.
 - The OAuth token is **memory-only** — it is not persisted and is lost on app restart. Push and Delete-remote buttons are disabled when `oauthToken` is absent.
+- The OAuth flow holds a loopback server on port 3456 until it completes. Dismissing the dialog (or the **Cancel** button shown while connecting) calls `GitCancelOAuth` so the server/port is freed; otherwise it would leak until app quit and eventually break login.
 - `destroyOnClose: false` on `GitOperationsDialog` means the modal's internal state (commit message, clone URL, branch name input) survives close/reopen within the same session.

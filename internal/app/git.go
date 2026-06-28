@@ -11,6 +11,8 @@
 package app
 
 import (
+	"context"
+
 	"thaw/internal/config"
 	"thaw/internal/gitrepo"
 
@@ -173,7 +175,31 @@ func (a *App) GitPushBranch(dir string, branch string, token string) error {
 // browser or copy it (useful when the default browser is signed into a different
 // account). The loopback callback still completes the flow.
 func (a *App) GitLoginWithOAuth(provider string) (string, error) {
-	return gitrepo.PerformOAuthFlow(a.ctx, provider, func(authURL string) {
+	// Per-flow cancelable context so GitCancelOAuth (dialog dismiss) can unblock the
+	// loopback wait and trigger the deferred server shutdown — otherwise the
+	// goroutine + port 3456 leak until app quit. Abort any prior in-flight flow
+	// first so reopening the dialog can't double-bind the port.
+	a.oauthMu.Lock()
+	if a.oauthCancel != nil {
+		a.oauthCancel()
+	}
+	ctx, cancel := context.WithCancel(a.ctx)
+	a.oauthCancel = cancel
+	a.oauthMu.Unlock()
+	defer cancel() // free our flow's server/goroutine on return (idempotent)
+
+	return gitrepo.PerformOAuthFlow(ctx, provider, func(authURL string) {
 		wailsruntime.EventsEmit(a.ctx, "git:oauth-url", authURL)
 	})
+}
+
+// GitCancelOAuth aborts an in-flight OAuth flow (called when the user closes the
+// auth dialog without completing it), freeing the loopback server + port 3456.
+func (a *App) GitCancelOAuth() {
+	a.oauthMu.Lock()
+	defer a.oauthMu.Unlock()
+	if a.oauthCancel != nil {
+		a.oauthCancel()
+		a.oauthCancel = nil
+	}
 }

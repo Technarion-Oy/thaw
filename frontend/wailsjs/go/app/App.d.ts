@@ -695,6 +695,8 @@ export function GetWarehouseMeteringHistory(arg1:string,arg2:string,arg3:string)
 
 export function GetWarehouseParameters(arg1:string):Promise<Array<snowflake.PropertyPair>>;
 
+export function GitCancelOAuth():Promise<void>;
+
 export function GitCheckoutBranch(arg1:string,arg2:string):Promise<void>;
 
 export function GitCheckoutRemoteBranch(arg1:string,arg2:string):Promise<void>;

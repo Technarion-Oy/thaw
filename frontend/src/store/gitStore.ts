@@ -288,16 +288,22 @@ export const useGitStore = create<GitState>((set, get) => ({
       } as any);
     } catch (e) {
       const msg = String(e);
-      // Backend sentinel: the index was empty, nothing was committed. Don't claim
-      // success / clear the message; just refresh so the UI shows the real state.
-      const nothing = msg.includes("nothing staged to commit");
-      // Even on a push failure the local commit was made and the index is now
-      // empty. Refresh BEFORE clearing `committing` (same ordering as the success
-      // path) so the commit button stays disabled until stagedTotal reflects the
-      // empty index — otherwise the user re-clicks against stale staged files.
+      // Refresh BEFORE clearing `committing` (mirrors the success path) so the
+      // button stays disabled until stagedTotal reflects reality.
       await get().refreshStatus(true);
-      set(nothing ? { committing: false } : { error: msg, committing: false });
-      return false;
+      if (msg.includes("nothing staged to commit")) {
+        // ErrNothingToCommit: the index was empty (e.g. cleared in a terminal
+        // between the last refresh and the click). Surface it instead of a silent
+        // no-op; keep the message (return false).
+        set({ error: "Nothing to commit — there were no staged changes.", committing: false });
+        return false;
+      }
+      // A "git push:" error means the local commit succeeded and only the push
+      // failed — the index is drained, so clear the message (return true) to stop
+      // the user re-committing into a duplicate, while still showing the push error.
+      const committedButPushFailed = msg.includes("git push");
+      set({ error: msg, committing: false });
+      return committedButPushFailed;
     }
     // Keep `committing` true through the status refresh so the commit button stays
     // disabled until stagedTotal reflects the now-empty index — otherwise a fast
@@ -314,7 +320,9 @@ export const useGitStore = create<GitState>((set, get) => ({
       set({ oauthToken: token });
       return token;
     } catch (e) {
-      set({ error: String(e) });
+      const msg = String(e);
+      // A user-initiated cancel (dialog closed / Cancel button) isn't an error.
+      if (!msg.includes("context canceled")) set({ error: msg });
       throw e;
     }
   },
@@ -458,7 +466,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     set({ resetting: true, error: null });
     try {
       await GitResetHard(exportDir);
-      await get().refreshStatus();
+      await get().refreshStatus(true); // silent: a status-fetch failure isn't a reset failure
     } catch (e) {
       set({ error: String(e) });
     } finally {
