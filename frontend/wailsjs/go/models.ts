@@ -1895,6 +1895,20 @@ export namespace gitrepo {
 	        this.isCurrent = source["isCurrent"];
 	    }
 	}
+	export class ChangedFile {
+	    status: string;
+	    isNew: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ChangedFile(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.status = source["status"];
+	        this.isNew = source["isNew"];
+	    }
+	}
 	export class CloneParams {
 	    url: string;
 	    path: string;
@@ -2009,7 +2023,7 @@ export namespace gitrepo {
 	    remoteURL: string;
 	    ahead: number;
 	    totalChanged: number;
-	    changedPaths: Record<string, string>;
+	    changedPaths: Record<string, ChangedFile>;
 	
 	    static createFrom(source: any = {}) {
 	        return new RepoStatus(source);
@@ -2030,7 +2044,7 @@ export namespace gitrepo {
 	        this.remoteURL = source["remoteURL"];
 	        this.ahead = source["ahead"];
 	        this.totalChanged = source["totalChanged"];
-	        this.changedPaths = source["changedPaths"];
+	        this.changedPaths = this.convertValues(source["changedPaths"], ChangedFile, true);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

@@ -43,6 +43,16 @@ type FileChange struct {
 	Status string `json:"status"`
 }
 
+// ChangedFile is the per-path entry of RepoStatus.ChangedPaths: the display
+// status letter plus whether the file has no committed version (so discarding it
+// deletes it from disk rather than reverting to HEAD). IsNew is authoritative —
+// the UI must use it instead of guessing from the display letter, which loses the
+// staging/worktree distinction (a staged-new-then-modified file reads as "M").
+type ChangedFile struct {
+	Status string `json:"status"`
+	IsNew  bool   `json:"isNew"`
+}
+
 // RepoStatus describes the current state of a git repository directory.
 type RepoStatus struct {
 	IsRepo bool   `json:"isRepo"`
@@ -68,10 +78,11 @@ type RepoStatus struct {
 	TotalChanged int    `json:"totalChanged"` // exact total distinct changed paths
 
 	// ChangedPaths maps every changed path (repo-relative, forward-slash) to its
-	// single-letter status — uncapped, so the file-explorer color overlay can
-	// cover the whole tree even when the capped arrays above can't. Worktree
-	// status wins; staged-only files use their staging status.
-	ChangedPaths map[string]string `json:"changedPaths"`
+	// display status + IsNew flag — uncapped, so the file-explorer color overlay
+	// and the discard prompts cover the whole tree even when the capped arrays
+	// above can't. Worktree status wins for the letter; staged-only files use
+	// their staging status.
+	ChangedPaths map[string]ChangedFile `json:"changedPaths"`
 }
 
 // statusLetter maps a go-git StatusCode to the single-letter sigil the UI uses.
@@ -214,7 +225,7 @@ func GetStatus(dir string) (RepoStatus, error) {
 	if err == nil {
 		st, err := wt.Status()
 		if err == nil {
-			s.ChangedPaths = make(map[string]string, len(st))
+			s.ChangedPaths = make(map[string]ChangedFile, len(st))
 			for path, fs := range st {
 				x := fs.Staging
 				y := fs.Worktree
@@ -225,7 +236,12 @@ func GetStatus(dir string) (RepoStatus, error) {
 				if y == gogit.Unmodified {
 					disp = x
 				}
-				s.ChangedPaths[filepath.ToSlash(path)] = statusLetter(disp)
+				// "New" = no committed version at this path, so DiscardFile deletes
+				// it rather than reverting to HEAD. Covers added, untracked, and
+				// rename/copy destinations (none of which exist in HEAD here).
+				isNew := x == gogit.Added || x == gogit.Renamed || x == gogit.Copied ||
+					x == gogit.Untracked || y == gogit.Untracked
+				s.ChangedPaths[filepath.ToSlash(path)] = ChangedFile{Status: statusLetter(disp), IsNew: isNew}
 
 				// Staged side: index differs from HEAD. Untracked is never staged.
 				if x != gogit.Unmodified && x != gogit.Untracked {
@@ -560,7 +576,11 @@ func StageAll(dir string) error {
 	if err != nil {
 		return err
 	}
-	_ = ensureGitignore(dir)
+	// Must succeed before a bulk add — otherwise OS junk (.DS_Store, …) that the
+	// gitignore would exclude gets staged. (CommitAndPush already does this.)
+	if err := ensureGitignore(dir); err != nil {
+		return fmt.Errorf("git stage: write .gitignore: %w", err)
+	}
 	if err := wt.AddWithOptions(&gogit.AddOptions{All: true}); err != nil {
 		return fmt.Errorf("git add -A: %w", err)
 	}

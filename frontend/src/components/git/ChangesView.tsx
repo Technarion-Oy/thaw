@@ -116,16 +116,15 @@ export default function ChangesView() {
   const unstagedTotal = status?.unstagedTotal ?? 0;
   const totalChanged  = status?.totalChanged  ?? 0;
 
-  // Files with no committed version (staging side Added, or worktree Untracked).
-  // Discarding these deletes them — so the unstaged row of a staged-then-modified
-  // file (shown as "M") must still be treated as new, hence a path-set, not the
-  // per-row display letter.
+  // Files with no committed version — discarding these deletes them. Sourced from
+  // the backend's authoritative `isNew` (covers added/untracked AND rename/copy
+  // destinations, and a staged-then-modified file that displays as "M") rather
+  // than guessing from the per-row letter.
   const newFilesRel = useMemo(() => {
     const s = new Set<string>();
-    for (const f of staged)   if (f.status === "A") s.add(f.path);
-    for (const f of unstaged) if (f.status === "U") s.add(f.path);
+    for (const [p, cf] of Object.entries(status?.changedPaths ?? {})) if (cf.isNew) s.add(p);
     return s;
-  }, [staged, unstaged]);
+  }, [status]);
 
   // Files with BOTH staged and unstaged changes — discarding either row reverts
   // the whole file to HEAD, so it also throws away the staged part. The discard

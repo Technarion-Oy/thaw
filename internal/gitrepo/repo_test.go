@@ -248,6 +248,66 @@ func TestStagedThenModifiedIsNewAndDiscarded(t *testing.T) {
 	}
 }
 
+// ChangedPaths.IsNew must be true exactly for files with no committed version
+// (so the UI knows discard deletes rather than reverts), including a
+// staged-new-then-modified file whose display letter is "M".
+func TestChangedPathsIsNew(t *testing.T) {
+	dir := initRepoWithCommit(t) // commits a.sql
+
+	// A second committed file we'll delete (tracked delete → not new).
+	if err := os.WriteFile(filepath.Join(dir, "keep.sql"), []byte("k\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo, _ := gogit.PlainOpen(dir)
+	wt, _ := repo.Worktree()
+	if err := wt.AddWithOptions(&gogit.AddOptions{All: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wt.Commit("c2", &gogit.CommitOptions{
+		Author: &object.Signature{Name: "t", Email: "t@t", When: time.Now()},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	write := func(name, content string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("a.sql", "modified\n")               // tracked modified → not new
+	write("new.sql", "n\n")                    // untracked → new
+	write("staged.sql", "s\n")                 // staged-new → new
+	if err := StageFile(dir, "staged.sql"); err != nil {
+		t.Fatal(err)
+	}
+	write("both.sql", "b1\n")                  // staged-new then modified → new (displays M)
+	if err := StageFile(dir, "both.sql"); err != nil {
+		t.Fatal(err)
+	}
+	write("both.sql", "b2\n")
+	if err := os.Remove(filepath.Join(dir, "keep.sql")); err != nil { // tracked deleted → not new
+		t.Fatal(err)
+	}
+
+	s, err := GetStatus(dir)
+	if err != nil {
+		t.Fatalf("GetStatus: %v", err)
+	}
+	cases := map[string]bool{
+		"a.sql": false, "new.sql": true, "staged.sql": true, "both.sql": true, "keep.sql": false,
+	}
+	for path, want := range cases {
+		cf, ok := s.ChangedPaths[path]
+		if !ok {
+			t.Errorf("%s missing from ChangedPaths", path)
+			continue
+		}
+		if cf.IsNew != want {
+			t.Errorf("%s IsNew=%v, want %v (status=%q)", path, cf.IsNew, want, cf.Status)
+		}
+	}
+}
+
 func TestNormaliseHTTPS(t *testing.T) {
 	tests := []struct {
 		url  string

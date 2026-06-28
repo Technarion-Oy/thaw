@@ -271,21 +271,16 @@ export default function FileBrowser() {
     };
 
     if (gitStatus) {
-      for (const [p, letter] of Object.entries(gitStatus.changedPaths ?? {})) {
+      // Uncapped: drives coloring and the authoritative new-file (discard-deletes)
+      // classification for every changed file, including beyond the 500-cap arrays.
+      for (const [p, cf] of Object.entries(gitStatus.changedPaths ?? {})) {
         const rel = p.replace(/\\/g, "/");
-        byRel.set(rel, letter);
-        addDirs(rel, letter);
+        byRel.set(rel, cf.status);
+        if (cf.isNew) newFilesRel.add(rel);
+        addDirs(rel, cf.status);
       }
-      for (const fc of (gitStatus.staged ?? [])) {
-        const rel = fc.path.replace(/\\/g, "/");
-        stagedRel.add(rel);
-        if (fc.status === "A") newFilesRel.add(rel); // added to index, not in HEAD
-      }
-      for (const fc of (gitStatus.unstaged ?? [])) {
-        const rel = fc.path.replace(/\\/g, "/");
-        unstagedRel.add(rel);
-        if (fc.status === "U") newFilesRel.add(rel); // untracked
-      }
+      for (const fc of (gitStatus.staged   ?? [])) stagedRel.add(fc.path.replace(/\\/g, "/"));
+      for (const fc of (gitStatus.unstaged ?? [])) unstagedRel.add(fc.path.replace(/\\/g, "/"));
     }
 
     // Exact repo-relative path of a tree node, or null when it's outside the repo.
