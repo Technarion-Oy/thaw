@@ -250,7 +250,11 @@ func GetStatus(dir string) (RepoStatus, error) {
 				// rename/copy destinations (none of which exist in HEAD here).
 				isNew := x == gogit.Added || x == gogit.Renamed || x == gogit.Copied ||
 					x == gogit.Untracked || y == gogit.Untracked
-				s.ChangedPaths[filepath.ToSlash(path)] = ChangedFile{
+				// Forward-slash everywhere so the frontend's changedPaths keys and
+				// staged/unstaged paths always match (go-git is slash-native today,
+				// but don't rely on that).
+				slash := filepath.ToSlash(path)
+				s.ChangedPaths[slash] = ChangedFile{
 					Status:          statusLetter(disp),
 					IsNew:           isNew,
 					PartiallyStaged: stagedSide && unstagedSide,
@@ -259,13 +263,13 @@ func GetStatus(dir string) (RepoStatus, error) {
 				if stagedSide {
 					s.StagedTotal++
 					if len(s.Staged) < maxStatusFiles {
-						s.Staged = append(s.Staged, FileChange{Path: path, Status: statusLetter(x)})
+						s.Staged = append(s.Staged, FileChange{Path: slash, Status: statusLetter(x)})
 					}
 				}
 				if unstagedSide {
 					s.UnstagedTotal++
 					if len(s.Unstaged) < maxStatusFiles {
-						s.Unstaged = append(s.Unstaged, FileChange{Path: path, Status: statusLetter(y)})
+						s.Unstaged = append(s.Unstaged, FileChange{Path: slash, Status: statusLetter(y)})
 					}
 				}
 			}

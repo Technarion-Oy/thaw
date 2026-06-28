@@ -357,7 +357,8 @@ export default function FileBrowser() {
   }, [exportDir]);
 
   const gitRepo       = gitEnabled && !!gitStatus?.isRepo;
-  const gitBranch     = gitStatus?.branch || "main";
+  // Empty branch = repo with no commits yet (Head() failed); don't imply "main".
+  const gitBranch     = gitStatus?.branch || "(no commits)";
   const gitAhead      = gitStatus?.ahead ?? 0;
   const gitChanged    = gitStatus?.totalChanged ?? 0;
   const gitStagedTot  = gitStatus?.stagedTotal ?? 0;
@@ -754,7 +755,7 @@ export default function FileBrowser() {
   };
 
   const handleDiscardGit = () => {
-    if (!fileCtxMenu) return;
+    if (!fileCtxMenu || gitBusy()) return; // don't open the modal mid-op
     const { path, name } = fileCtxMenu;
     setFileCtxMenu(null);
     // New files (no committed version) get deleted by discard. Use the dedicated
@@ -776,7 +777,9 @@ export default function FileBrowser() {
       okText: isNew ? "Delete" : "Discard",
       okButtonProps: { danger: true },
       onOk: async () => {
-        if (gitBusy()) return;
+        // throw (not return) — a resolved onOk closes the modal, which would read
+        // as success even though nothing was discarded. Throwing keeps it open.
+        if (gitBusy()) throw new Error("busy");
         await discardFile(path);
         reportGit(isNew ? `Deleted ${name}` : `Discarded changes to ${name}`);
       },
@@ -785,6 +788,7 @@ export default function FileBrowser() {
 
   // Repo-wide reset --hard: discard every staged and unstaged change.
   const handleDiscardAll = () => {
+    if (gitBusy()) return; // don't open the modal mid-op
     setFileCtxMenu(null);
     modal.confirm({
       title: "Discard all changes?",
@@ -792,7 +796,7 @@ export default function FileBrowser() {
       okText: "Discard all",
       okButtonProps: { danger: true },
       onOk: async () => {
-        if (gitBusy()) return;
+        if (gitBusy()) throw new Error("busy"); // keep modal open; a resolved onOk reads as success
         await resetHard();
         reportGit("Discarded all changes — working tree reset to last commit");
       },
