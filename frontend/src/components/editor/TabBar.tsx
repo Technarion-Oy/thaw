@@ -15,6 +15,7 @@ import type { Tab } from "../../store/queryStore";
 import { useQueryStore } from "../../store/queryStore";
 import { GetTabSessionID } from "../../../wailsjs/go/app/App";
 import { useConnectionStore } from "../../store/connectionStore";
+import { getEditorInstance } from "./editorRef";
 
 const CLR_BORDER       = "var(--border)";
 const CLR_BG           = "var(--bg)";
@@ -66,7 +67,9 @@ export default function TabBar() {
   // re-running the rename — and lets Escape cancel without committing.
   const renameDoneRef = useRef(false);
   const startRename = (tab: Tab) => {
-    if (tab.path || tab.diff) return;
+    // Orphaned tabs (lost their backing file, ↺ prefix) are pending a save/discard
+    // decision, not a free-form scratch tab — don't allow renaming them.
+    if (tab.path || tab.diff || tab.orphaned) return;
     renameDoneRef.current = false;
     setRenamingId(tab.id);
     setRenameValue(tab.title);
@@ -89,12 +92,23 @@ export default function TabBar() {
   const [activeFilesOpen, setActiveFilesOpen] = useState(false);
   const [activeFilesFilter, setActiveFilesFilter] = useState("");
   const activeFilesBtnRef = useRef<HTMLDivElement>(null);
+  const activeFilesPanelRef = useRef<HTMLDivElement>(null);
   const [activeFilesPos, setActiveFilesPos] = useState<{ top: number; right: number }>({ top: 0, right: 0 });
 
+  // Close and return focus to the editor, so keyboard-driven flows (⌘⇧E, Esc)
+  // don't strand focus on document.body.
+  const closeActiveFiles = useCallback(() => {
+    setActiveFilesOpen(false);
+    getEditorInstance()?.focus();
+  }, []);
+
   const openActiveFiles = useCallback(() => {
-    const rect = activeFilesBtnRef.current?.getBoundingClientRect();
-    if (rect) setActiveFilesPos({ top: rect.bottom, right: window.innerWidth - rect.right });
-    setActiveFilesOpen((prev) => !prev);
+    setActiveFilesOpen((prev) => {
+      if (prev) { getEditorInstance()?.focus(); return false; }
+      const rect = activeFilesBtnRef.current?.getBoundingClientRect();
+      if (rect) setActiveFilesPos({ top: rect.bottom, right: window.innerWidth - rect.right });
+      return true;
+    });
   }, []);
 
   // Open via ⌘⇧E / Ctrl+Shift+E (dispatched from QueryPage's global handler).
@@ -106,14 +120,17 @@ export default function TabBar() {
   // Close on outside click and Escape; reset the filter when closing.
   useEffect(() => {
     if (!activeFilesOpen) { setActiveFilesFilter(""); return; }
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setActiveFilesOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeActiveFiles(); };
     const dismiss = (e: MouseEvent) => {
-      if (!(e.target as HTMLElement).closest?.("[data-active-files]")) setActiveFilesOpen(false);
+      const t = e.target as Node;
+      if (!activeFilesPanelRef.current?.contains(t) && !activeFilesBtnRef.current?.contains(t)) {
+        setActiveFilesOpen(false);
+      }
     };
     document.addEventListener("keydown", onKey);
     document.addEventListener("mousedown", dismiss);
     return () => { document.removeEventListener("keydown", onKey); document.removeEventListener("mousedown", dismiss); };
-  }, [activeFilesOpen]);
+  }, [activeFilesOpen, closeActiveFiles]);
 
   // Session ID cache for tab tooltips (fetched lazily on hover).
   // Only caches non-empty results; tabs without sessions are re-checked on hover.
@@ -348,7 +365,7 @@ export default function TabBar() {
 
       {/* Active Files dropdown — searchable list of every open tab (issue #468).
           Pinned to the right, outside the scroll region, so it's always visible. */}
-      <div data-active-files ref={activeFilesBtnRef} style={{ display: "flex", flexShrink: 0, borderLeft: `1px solid ${CLR_BORDER}` }}>
+      <div ref={activeFilesBtnRef} style={{ display: "flex", flexShrink: 0, borderLeft: `1px solid ${CLR_BORDER}` }}>
         <Tooltip title="Active files (⌘⇧E)" mouseEnterDelay={0.6} placement="bottom">
           <div
             onClick={openActiveFiles}
@@ -371,7 +388,7 @@ export default function TabBar() {
 
         {activeFilesOpen && (
           <div
-            data-active-files
+            ref={activeFilesPanelRef}
             style={{
               position: "fixed",
               top: activeFilesPos.top,
@@ -406,7 +423,7 @@ export default function TabBar() {
                   <div
                     key={t.id}
                     className="ctx-item"
-                    onClick={() => { activateTab(t.id); setActiveFilesOpen(false); }}
+                    onClick={() => { activateTab(t.id); closeActiveFiles(); }}
                     style={{
                       display: "flex",
                       alignItems: "center",
@@ -495,7 +512,7 @@ export default function TabBar() {
             onMouseDown={(e) => e.stopPropagation()}
           >
             {/* ── Rename (non-file tabs only) ───────────────────────── */}
-            {ctxTab && !ctxTab.path && !ctxTab.diff && (
+            {ctxTab && !ctxTab.path && !ctxTab.diff && !ctxTab.orphaned && (
               <>
                 <div
                   className="ctx-item"
