@@ -9,8 +9,9 @@
 // license agreement with Technarion Oy.
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Button, Modal, Tooltip } from "antd";
-import { FileOutlined, CodeOutlined, PlusOutlined, CloseOutlined, DiffOutlined, ExperimentOutlined, RobotOutlined } from "@ant-design/icons";
+import { Button, Modal, Tooltip, Input } from "antd";
+import { FileOutlined, CodeOutlined, PlusOutlined, CloseOutlined, DiffOutlined, ExperimentOutlined, RobotOutlined, CaretDownOutlined, SearchOutlined } from "@ant-design/icons";
+import type { Tab } from "../../store/queryStore";
 import { useQueryStore } from "../../store/queryStore";
 import { GetTabSessionID } from "../../../wailsjs/go/app/App";
 import { useConnectionStore } from "../../store/connectionStore";
@@ -22,12 +23,28 @@ const CLR_TEXT         = "var(--text-muted)";
 const CLR_TEXT_ACTIVE  = "var(--text)";
 const CLR_ACCENT       = "var(--accent)";
 
+// Icon for a tab, matching the tab-strip logic (diff → mcp → notebook → file → scratch).
+function tabIcon(tab: Tab, size = 11) {
+  const style = { fontSize: size, flexShrink: 0 };
+  if (tab.diff)       return <DiffOutlined style={style} />;
+  if (tab.mcpOrigin)  return <RobotOutlined style={{ ...style, color: "var(--accent)" }} />;
+  if (tab.kind === "notebook") return <ExperimentOutlined style={style} />;
+  if (tab.path)       return <FileOutlined style={style} />;
+  return <CodeOutlined style={style} />;
+}
+
+// Title prefix matching the tab strip: orphan ↺ or dirty •.
+function tabPrefix(tab: Tab) {
+  return tab.orphaned ? "↺ " : (tab.path && tab.sql !== tab.savedSql ? "• " : "");
+}
+
 export default function TabBar() {
   const tabs        = useQueryStore((s) => s.tabs);
   const activeTabId = useQueryStore((s) => s.activeTabId);
   const activateTab = useQueryStore((s) => s.activateTab);
   // closeTab is invoked via "thaw:request-close-tab" event handled in QueryPage.
   const moveTab     = useQueryStore((s) => s.moveTab);
+  const renameTab   = useQueryStore((s) => s.renameTab);
   const openScratch = useQueryStore((s) => s.openScratch);
   const splitTabId  = useQueryStore((s) => s.splitTabId);
   const setSplitTab = useQueryStore((s) => s.setSplitTab);
@@ -41,6 +58,51 @@ export default function TabBar() {
   // Track which tab the pointer is hovering over so the close button
   // only appears on hover (less cluttered when many tabs are open).
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+
+  // Inline tab rename (non-file tabs only — file tabs derive their title from the path).
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const startRename = (tab: Tab) => {
+    if (tab.path || tab.diff) return;
+    setRenamingId(tab.id);
+    setRenameValue(tab.title);
+  };
+  const commitRename = () => {
+    if (renamingId) renameTab(renamingId, renameValue);
+    setRenamingId(null);
+  };
+
+  // Active Files dropdown — searchable list of all open tabs (issue #468).
+  // The panel is position:fixed (anchored to the trigger) because the tab bar's
+  // overflow-x:auto forces overflow-y:auto, which would otherwise clip it.
+  const [activeFilesOpen, setActiveFilesOpen] = useState(false);
+  const [activeFilesFilter, setActiveFilesFilter] = useState("");
+  const activeFilesBtnRef = useRef<HTMLDivElement>(null);
+  const [activeFilesPos, setActiveFilesPos] = useState<{ top: number; right: number }>({ top: 0, right: 0 });
+
+  const openActiveFiles = useCallback(() => {
+    const rect = activeFilesBtnRef.current?.getBoundingClientRect();
+    if (rect) setActiveFilesPos({ top: rect.bottom, right: window.innerWidth - rect.right });
+    setActiveFilesOpen((prev) => !prev);
+  }, []);
+
+  // Open via ⌘⇧E / Ctrl+Shift+E (dispatched from QueryPage's global handler).
+  useEffect(() => {
+    window.addEventListener("thaw:open-active-files", openActiveFiles);
+    return () => window.removeEventListener("thaw:open-active-files", openActiveFiles);
+  }, [openActiveFiles]);
+
+  // Close on outside click and Escape; reset the filter when closing.
+  useEffect(() => {
+    if (!activeFilesOpen) { setActiveFilesFilter(""); return; }
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setActiveFilesOpen(false); };
+    const dismiss = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest?.("[data-active-files]")) setActiveFilesOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", dismiss);
+    return () => { document.removeEventListener("keydown", onKey); document.removeEventListener("mousedown", dismiss); };
+  }, [activeFilesOpen]);
 
   // Session ID cache for tab tooltips (fetched lazily on hover).
   // Only caches non-empty results; tabs without sessions are re-checked on hover.
@@ -105,11 +167,21 @@ export default function TabBar() {
         alignItems: "stretch",
         background: CLR_BG,
         borderBottom: `1px solid ${CLR_BORDER}`,
-        overflowX: "auto",
         flexShrink: 0,
-        scrollbarWidth: "none",
       }}
     >
+      {/* Scrolling region: tabs + the "+" button. The Active Files arrow lives
+          outside this so it stays pinned when tabs overflow the bar. */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "stretch",
+          overflowX: "auto",
+          flex: 1,
+          minWidth: 0,
+          scrollbarWidth: "none",
+        }}
+      >
       {tabs.map((tab) => {
         const active  = tab.id === activeTabId;
         const hovered = tab.id === hoveredId;
@@ -127,7 +199,7 @@ export default function TabBar() {
         return (
           <Tooltip key={tab.id} title={tooltipText} mouseEnterDelay={0.6} placement="bottom">
           <div
-            draggable
+            draggable={renamingId !== tab.id}
             onClick={() => activateTab(tab.id)}
             onMouseEnter={() => { setHoveredId(tab.id); fetchTab(tab.id); }}
             onMouseLeave={() => setHoveredId(null)}
@@ -174,25 +246,44 @@ export default function TabBar() {
               boxSizing: "border-box",
             }}
           >
-            {tab.diff
-              ? <DiffOutlined style={{ fontSize: 11, flexShrink: 0 }} />
-              : tab.mcpOrigin
-              ? <RobotOutlined style={{ fontSize: 11, flexShrink: 0, color: "var(--accent)" }} />
-              : tab.kind === "notebook"
-              ? <ExperimentOutlined style={{ fontSize: 11, flexShrink: 0 }} />
-              : tab.path
-              ? <FileOutlined style={{ fontSize: 11, flexShrink: 0 }} />
-              : <CodeOutlined style={{ fontSize: 11, flexShrink: 0 }} />
-            }
+            {tabIcon(tab)}
 
-            <span style={{
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              flex: 1,
-            }}>
-              {tab.orphaned ? "↺ " : (tab.path && tab.sql !== tab.savedSql ? "• " : "")}{tab.title}
-            </span>
+            {renamingId === tab.id ? (
+              <input
+                autoFocus
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                onBlur={commitRename}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === "Enter") commitRename();
+                  else if (e.key === "Escape") setRenamingId(null);
+                }}
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  background: "var(--bg)",
+                  color: CLR_TEXT_ACTIVE,
+                  border: `1px solid ${CLR_ACCENT}`,
+                  borderRadius: 3,
+                  fontSize: 12,
+                  padding: "0 4px",
+                  outline: "none",
+                }}
+              />
+            ) : (
+              <span
+                onDoubleClick={(e) => { e.stopPropagation(); startRename(tab); }}
+                style={{
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  flex: 1,
+                }}>
+                {tabPrefix(tab)}{tab.title}
+              </span>
+            )}
 
             {/* Close button — always reserve space so layout doesn't shift,
                 but only show the icon on hover or when this is the active tab
@@ -241,6 +332,88 @@ export default function TabBar() {
         }}
       >
         <PlusOutlined style={{ fontSize: 11 }} />
+      </div>
+      </div>
+
+      {/* Active Files dropdown — searchable list of every open tab (issue #468).
+          Pinned to the right, outside the scroll region, so it's always visible. */}
+      <div data-active-files ref={activeFilesBtnRef} style={{ display: "flex", flexShrink: 0, borderLeft: `1px solid ${CLR_BORDER}` }}>
+        <Tooltip title="Active files (⌘⇧E)" mouseEnterDelay={0.6} placement="bottom">
+          <div
+            onClick={openActiveFiles}
+            onMouseEnter={() => setHoveredId("__active__")}
+            onMouseLeave={() => setHoveredId(null)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              height: "100%",
+              padding: "0 10px",
+              cursor: "pointer",
+              color: activeFilesOpen ? CLR_TEXT_ACTIVE : CLR_TEXT,
+              fontSize: 11,
+              background: (activeFilesOpen || hoveredId === "__active__") ? "color-mix(in srgb, var(--text) 5%, transparent)" : "transparent",
+            }}
+          >
+            <CaretDownOutlined />
+          </div>
+        </Tooltip>
+
+        {activeFilesOpen && (
+          <div
+            data-active-files
+            style={{
+              position: "fixed",
+              top: activeFilesPos.top,
+              right: activeFilesPos.right,
+              zIndex: 9999,
+              width: 280,
+              background: "var(--bg-overlay)",
+              border: "1px solid var(--border)",
+              borderRadius: 4,
+              boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+            }}
+          >
+            <div style={{ padding: 6, borderBottom: "1px solid var(--border)" }}>
+              <Input
+                size="small"
+                autoFocus
+                allowClear
+                prefix={<SearchOutlined style={{ color: CLR_TEXT }} />}
+                placeholder="Filter open tabs…"
+                value={activeFilesFilter}
+                onChange={(e) => setActiveFilesFilter(e.target.value)}
+              />
+            </div>
+            <div style={{ maxHeight: 360, overflowY: "auto", padding: "2px 0" }}>
+              {(() => {
+                const f = activeFilesFilter.trim().toLowerCase();
+                const matches = tabs.filter((t) => !f || t.title.toLowerCase().includes(f));
+                if (matches.length === 0) {
+                  return <div style={{ padding: "8px 12px", color: "var(--text-faint)", fontSize: 12 }}>No matching tabs</div>;
+                }
+                return matches.map((t) => (
+                  <div
+                    key={t.id}
+                    className="ctx-item"
+                    onClick={() => { activateTab(t.id); setActiveFilesOpen(false); }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      background: t.id === activeTabId ? CLR_BG_ACTIVE : undefined,
+                      color: t.id === activeTabId ? CLR_TEXT_ACTIVE : undefined,
+                    }}
+                  >
+                    {tabIcon(t)}
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+                      {tabPrefix(t)}{t.title}
+                    </span>
+                  </div>
+                ));
+              })()}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Bulk-close confirmation modal */}
@@ -295,6 +468,7 @@ export default function TabBar() {
         const rightTabs = tabs.slice(ctxTabIdx + 1);
         const otherTabs = tabs.filter((t) => t.id !== ctxMenu.tabId);
         const savedTabs = tabs.filter((t) => t.sql === t.savedSql);
+        const ctxTab    = tabs.find((t) => t.id === ctxMenu.tabId);
 
         return (
           <div
@@ -309,6 +483,19 @@ export default function TabBar() {
             }}
             onMouseDown={(e) => e.stopPropagation()}
           >
+            {/* ── Rename (non-file tabs only) ───────────────────────── */}
+            {ctxTab && !ctxTab.path && !ctxTab.diff && (
+              <>
+                <div
+                  className="ctx-item"
+                  onClick={() => { startRename(ctxTab); setCtxMenu(null); }}
+                >
+                  Rename
+                </div>
+                <div style={{ height: 1, background: "var(--border)", margin: "2px 0" }} />
+              </>
+            )}
+
             {/* ── Close actions ─────────────────────────────────────── */}
             <div
               className="ctx-item"

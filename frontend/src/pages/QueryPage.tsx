@@ -809,6 +809,13 @@ export default function QueryPage() {
         return;
       }
 
+      // ⌘⇧E / Ctrl+Shift+E — Toggle the Active Files dropdown
+      if (cmd && e.shiftKey && !e.altKey && e.key === "E") {
+        e.preventDefault();
+        window.dispatchEvent(new Event("thaw:open-active-files"));
+        return;
+      }
+
       // ── UI shortcuts ─────────────────────────────────────────────────────
 
       // ⌘B / Ctrl+B — Toggle left sidebar

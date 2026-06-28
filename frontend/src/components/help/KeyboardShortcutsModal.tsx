@@ -36,6 +36,7 @@ const GROUPS: ShortcutGroup[] = [
       { action: "Reopen Closed Tab",     mac: "⌘ ⇧ T",      win: "Ctrl+Shift+T",  status: "new" },
       { action: "Switch to Next Tab",    mac: "⌃ Tab",       win: "Ctrl+Tab",      status: "new" },
       { action: "Switch to Prev Tab",    mac: "⌃ ⇧ Tab",    win: "Ctrl+Shift+Tab",status: "new" },
+      { action: "Open Active Files",     mac: "⌘ ⇧ E",      win: "Ctrl+Shift+E",  status: "new" },
       { action: "Open Preferences",      mac: "⌘ ,",         win: "Ctrl+,",        status: "new" },
     ],
   },
