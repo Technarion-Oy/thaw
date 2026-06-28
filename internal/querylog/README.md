@@ -53,4 +53,4 @@ issue reporting via the "Query Log" result pane tab.
   RUNNING → final flow in `app/query.go`. The `OnQuery` hook on `snowflake.Client` checks
   `GetSource(ctx)` and skips `SourceUser` to avoid double-logging.
 - **Feature flag**: Disabled by default (`QueryLog: false` in `DefaultFeatureFlags`). Opt-in via
-  View → Enabled Features or View → Query Log → Enable Query Log.
+  View → Enabled Features or Tools → Query Log → Enable Query Log.

@@ -912,7 +912,7 @@ export default function QueryPage() {
     return () => off();
   }, [featureFlags.embeddedTerminal]);
 
-  // Query Log — toggle and filter via View → Query Log menu
+  // Query Log — toggle and filter via Tools → Query Log menu
   useEffect(() => {
     const off = EventsOn("menu:query-log-toggle", (enabled: boolean) => {
       if (!featureFlags.queryLog) return;

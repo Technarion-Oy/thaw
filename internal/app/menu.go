@@ -92,12 +92,50 @@ func buildMenu(app *App) *menu.Menu {
 	viewMenu.AddText("Enabled Features…", nil, func(_ *menu.CallbackData) {
 		wailsruntime.EventsEmit(app.ctx, "menu:feature-flags")
 	})
-	viewMenu.AddText("MCP Sessions…", nil, func(_ *menu.CallbackData) {
+
+	// ── Tools ─────────────────────────────────────────────────────────────────
+	// Catchall for workflow tools and operational settings. Absorbs the former
+	// standalone Git, Terminal, and AI menus plus the operational items that used
+	// to live under View (MCP Sessions, Query Log, Session Management).
+	toolsMenu := appMenu.AddSubmenu("Tools")
+	toolsMenu.AddText("Code Snippets…", nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:code-snippets")
+	})
+	toolsMenu.AddSeparator()
+	toolsMenu.AddText("Tag Management…", nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:tag-management")
+	})
+	toolsMenu.AddSeparator()
+	toolsMenu.AddText("Export Path Format…", nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:export-path-format")
+	})
+	toolsMenu.AddSeparator()
+	toolsMenu.AddText("Schema Migration…", nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:migration")
+	})
+	toolsMenu.AddText("Create dbt Project…", nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:dbt-create")
+	})
+	toolsMenu.AddSeparator()
+	toolsMenu.AddText("Git Operations…", keys.CmdOrCtrl("g"), func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:git-operations")
+	})
+	toolsMenu.AddSeparator()
+	toolsMenu.AddText("New Terminal", keys.CmdOrCtrl("`"), func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:open-terminal")
+	})
+	toolsMenu.AddSeparator()
+	toolsMenu.AddText("Configure AI…", nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:configure-ai")
+	})
+	toolsMenu.AddText("MCP Sessions…", nil, func(_ *menu.CallbackData) {
 		wailsruntime.EventsEmit(app.ctx, "menu:mcp-sessions")
 	})
 
+	toolsMenu.AddSeparator()
+
 	// ── Query Log submenu ────────────────────────────────────────────────
-	queryLogMenu := viewMenu.AddSubmenu("Query Log")
+	queryLogMenu := toolsMenu.AddSubmenu("Query Log")
 
 	var queryLogEnabled *menu.MenuItem
 	queryLogEnabled = queryLogMenu.AddCheckbox("Enable Query Log", false, nil, func(_ *menu.CallbackData) {
@@ -128,50 +166,8 @@ func buildMenu(app *App) *menu.Menu {
 		setLogFilter(logInternal, "internal")
 	})
 
-	viewMenu.AddSeparator()
-	advancedMenu := viewMenu.AddSubmenu("Advanced")
-	advancedMenu.AddText("Session Management…", nil, func(_ *menu.CallbackData) {
+	toolsMenu.AddText("Session Management…", nil, func(_ *menu.CallbackData) {
 		wailsruntime.EventsEmit(app.ctx, "menu:session-management")
-	})
-
-	// ── AI ────────────────────────────────────────────────────────────────────
-	aiMenu := appMenu.AddSubmenu("AI")
-	aiMenu.AddText("Configure AI…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:configure-ai")
-	})
-
-	// ── Terminal ──────────────────────────────────────────────────────────────
-	terminalMenu := appMenu.AddSubmenu("Terminal")
-	terminalMenu.AddText("New Terminal", keys.CmdOrCtrl("`"), func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:open-terminal")
-	})
-
-	// ── Git ───────────────────────────────────────────────────────────────────
-	gitMenu := appMenu.AddSubmenu("Git")
-	gitMenu.AddText("Git Operations…", keys.CmdOrCtrl("g"), func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:git-operations")
-	})
-
-	// ── Tools ─────────────────────────────────────────────────────────────────
-	toolsMenu := appMenu.AddSubmenu("Tools")
-	toolsMenu.AddText("Code Snippets…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:code-snippets")
-	})
-	toolsMenu.AddSeparator()
-	toolsMenu.AddText("Tag Management…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:tag-management")
-	})
-	toolsMenu.AddSeparator()
-	toolsMenu.AddText("Export Path Format…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:export-path-format")
-	})
-	toolsMenu.AddSeparator()
-	toolsMenu.AddText("Schema Migration…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:migration")
-	})
-	toolsMenu.AddSeparator()
-	toolsMenu.AddText("Create dbt Project…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:dbt-create")
 	})
 
 	// ── Snowpark ──────────────────────────────────────────────────────────────
