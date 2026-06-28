@@ -256,6 +256,7 @@ export default function FileBrowser() {
     const stagedRel   = new Set<string>();
     const unstagedRel = new Set<string>();
     const newFilesRel = new Set<string>(); // no committed version → discard deletes
+    const partialRel  = new Set<string>(); // both staged & unstaged → discard also drops staged
 
     // Folder color = the most significant change beneath it. A/U are both "new"
     // (green), so a folder of only-new files stays green rather than reading as
@@ -277,6 +278,7 @@ export default function FileBrowser() {
         const rel = p.replace(/\\/g, "/");
         byRel.set(rel, cf.status);
         if (cf.isNew) newFilesRel.add(rel);
+        if (cf.partiallyStaged) partialRel.add(rel);
         addDirs(rel, cf.status);
       }
       for (const fc of (gitStatus.staged   ?? [])) stagedRel.add(fc.path.replace(/\\/g, "/"));
@@ -292,7 +294,7 @@ export default function FileBrowser() {
       return null;
     };
 
-    return { byRel, dirLetter, stagedRel, unstagedRel, newFilesRel, relOf };
+    return { byRel, dirLetter, stagedRel, unstagedRel, newFilesRel, partialRel, relOf };
   }, [gitStatus, exportDir]);
 
   // ── File tree state ────────────────────────────────────────────────────────
@@ -350,7 +352,7 @@ export default function FileBrowser() {
   // Keep git status fresh for whatever directory the explorer is showing, so the
   // tree colors don't depend on some other surface having refreshed first.
   useEffect(() => {
-    if (exportDir) refreshGitStatus();
+    if (exportDir) refreshGitStatus(true); // background: don't surface status errors
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exportDir]);
 
@@ -396,7 +398,7 @@ export default function FileBrowser() {
   const scheduleGitRefresh = useCallback(() => {
     if (!useFeatureFlagsStore.getState().flags.gitIntegration) return; // respect the feature flag
     if (gitRefreshTimerRef.current) clearTimeout(gitRefreshTimerRef.current);
-    gitRefreshTimerRef.current = setTimeout(() => { useGitStore.getState().refreshStatus(); }, 400);
+    gitRefreshTimerRef.current = setTimeout(() => { useGitStore.getState().refreshStatus(true); }, 400);
   }, []);
   useEffect(() => () => { if (gitRefreshTimerRef.current) clearTimeout(gitRefreshTimerRef.current); }, []);
 
@@ -554,8 +556,9 @@ export default function FileBrowser() {
   const refresh = async () => {
     setFileCtxMenu(null); // dismiss stale context menu
     setLoading(true);
-    // Refresh git status alongside the tree so the status colors stay current.
-    refreshGitStatus();
+    // Refresh git status alongside the tree so the status colors stay current
+    // (silent: a status-fetch failure shouldn't pop an error from the file tree).
+    refreshGitStatus(true);
     try {
       // Re-fetch the root and every currently-loaded (expanded) directory in
       // parallel, then merge — this picks up external changes while PRESERVING the
@@ -760,8 +763,9 @@ export default function FileBrowser() {
     const rel = gitOverlay.relOf(path);
     const isNew = rel != null && gitOverlay.newFilesRel.has(rel);
     // Discard always reverts to HEAD, so a file with both staged and unstaged
-    // changes loses its staged part too — warn about that.
-    const partiallyStaged = rel != null && gitOverlay.stagedRel.has(rel) && gitOverlay.unstagedRel.has(rel);
+    // changes loses its staged part too — warn about that. From the uncapped set
+    // so it's correct beyond the 500-file cap.
+    const partiallyStaged = rel != null && gitOverlay.partialRel.has(rel);
     modal.confirm({
       title: isNew ? `Delete ${name}?` : `Discard changes to ${name}?`,
       content: isNew

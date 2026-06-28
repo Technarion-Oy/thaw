@@ -86,7 +86,9 @@ export default function ChangeRow({
             description={discardDesc}
             onConfirm={() => onDiscard(file.path)}
             okText={isNew ? "Delete" : "Discard"}
-            okButtonProps={{ danger: true }}
+            // Disable confirm while another index op runs — the dialog may have
+            // opened before `busy` flipped, and go-git's index isn't concurrent-safe.
+            okButtonProps={{ danger: true, disabled: busy }}
             icon={<WarningOutlined style={{ color: "var(--danger)" }} />}
           >
             <Button size="small" type="text" disabled={busy} icon={<UndoOutlined />} style={{ height: 22, width: 22, minWidth: 0, padding: 0, color: "var(--text-muted)" }} />

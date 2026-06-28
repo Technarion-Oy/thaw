@@ -34,6 +34,11 @@ import (
 // render thousands of rows.
 const maxStatusFiles = 500
 
+// ErrNothingToCommit is returned by CommitAndPush when a StagedOnly commit finds
+// an empty index — the UI uses it to avoid reporting a successful commit (and
+// clearing the user's message) when nothing was actually committed.
+var ErrNothingToCommit = errors.New("nothing staged to commit")
+
 // FileChange is a single working-tree change with its VS Code-style status
 // letter: "A" added/untracked-new, "M" modified, "D" deleted, "R" renamed,
 // "C" copied, "U" untracked. Status is derived from the index side (staged)
@@ -44,24 +49,23 @@ type FileChange struct {
 }
 
 // ChangedFile is the per-path entry of RepoStatus.ChangedPaths: the display
-// status letter plus whether the file has no committed version (so discarding it
-// deletes it from disk rather than reverting to HEAD). IsNew is authoritative —
-// the UI must use it instead of guessing from the display letter, which loses the
-// staging/worktree distinction (a staged-new-then-modified file reads as "M").
+// status letter plus a couple of authoritative flags the UI must use instead of
+// guessing from the display letter (which loses the staging/worktree distinction
+// — e.g. a staged-new-then-modified file reads as "M").
+//   - IsNew: the file has no committed version, so discarding it deletes it from
+//     disk rather than reverting to HEAD.
+//   - PartiallyStaged: the file has both staged and unstaged changes, so a
+//     discard (which reverts the whole file) also throws away the staged part.
 type ChangedFile struct {
-	Status string `json:"status"`
-	IsNew  bool   `json:"isNew"`
+	Status          string `json:"status"`
+	IsNew           bool   `json:"isNew"`
+	PartiallyStaged bool   `json:"partiallyStaged"`
 }
 
 // RepoStatus describes the current state of a git repository directory.
 type RepoStatus struct {
 	IsRepo bool   `json:"isRepo"`
 	Branch string `json:"branch"`
-
-	// Legacy flat arrays (union of staged + unstaged), kept for compatibility.
-	Modified []string `json:"modified"`
-	Added    []string `json:"added"`
-	Deleted  []string `json:"deleted"`
 
 	// Staged holds files whose index differs from HEAD (git add'ed).
 	// Unstaged holds files whose worktree differs from the index (incl. untracked).
@@ -236,41 +240,32 @@ func GetStatus(dir string) (RepoStatus, error) {
 				if y == gogit.Unmodified {
 					disp = x
 				}
+				// Staged side: index differs from HEAD. Untracked is never staged.
+				stagedSide := x != gogit.Unmodified && x != gogit.Untracked
+				// Unstaged side: worktree differs from the index (includes untracked).
+				unstagedSide := y != gogit.Unmodified
+
 				// "New" = no committed version at this path, so DiscardFile deletes
 				// it rather than reverting to HEAD. Covers added, untracked, and
 				// rename/copy destinations (none of which exist in HEAD here).
 				isNew := x == gogit.Added || x == gogit.Renamed || x == gogit.Copied ||
 					x == gogit.Untracked || y == gogit.Untracked
-				s.ChangedPaths[filepath.ToSlash(path)] = ChangedFile{Status: statusLetter(disp), IsNew: isNew}
+				s.ChangedPaths[filepath.ToSlash(path)] = ChangedFile{
+					Status:          statusLetter(disp),
+					IsNew:           isNew,
+					PartiallyStaged: stagedSide && unstagedSide,
+				}
 
-				// Staged side: index differs from HEAD. Untracked is never staged.
-				if x != gogit.Unmodified && x != gogit.Untracked {
+				if stagedSide {
 					s.StagedTotal++
 					if len(s.Staged) < maxStatusFiles {
 						s.Staged = append(s.Staged, FileChange{Path: path, Status: statusLetter(x)})
 					}
 				}
-				// Unstaged side: worktree differs from the index (includes untracked).
-				if y != gogit.Unmodified {
+				if unstagedSide {
 					s.UnstagedTotal++
 					if len(s.Unstaged) < maxStatusFiles {
 						s.Unstaged = append(s.Unstaged, FileChange{Path: path, Status: statusLetter(y)})
-					}
-				}
-
-				// Legacy union arrays.
-				switch {
-				case x == gogit.Deleted || y == gogit.Deleted:
-					if len(s.Deleted) < maxStatusFiles {
-						s.Deleted = append(s.Deleted, path)
-					}
-				case x == gogit.Added || x == gogit.Untracked || y == gogit.Untracked:
-					if len(s.Added) < maxStatusFiles {
-						s.Added = append(s.Added, path)
-					}
-				default:
-					if len(s.Modified) < maxStatusFiles {
-						s.Modified = append(s.Modified, path)
 					}
 				}
 			}
@@ -440,17 +435,14 @@ func CommitAndPush(ctx context.Context, p PushParams) error {
 		if !empty {
 			return fmt.Errorf("git commit: %w", err)
 		}
-		// Nothing new to commit. The auto-export path and local-only commits have
-		// nothing to do. For a StagedOnly push we fall through to push *only* when
-		// there's actually an unpushed commit (a prior commit that committed but
-		// failed to push) — otherwise a genuinely-empty staging area would surface
-		// the push's error (e.g. auth) instead of being a clean no-op.
-		if !p.StagedOnly || p.NoPush {
-			return nil
+		// Nothing new to commit. For a StagedOnly commit the caller asked to commit
+		// the staged set but the index is empty (e.g. a race after the index was
+		// already consumed) — report it distinctly so the UI doesn't claim success
+		// and clear the user's message. The auto-export path just no-ops.
+		if p.StagedOnly {
+			return ErrNothingToCommit
 		}
-		if head, _ := repo.Head(); aheadCount(repo, head) == 0 {
-			return nil
-		}
+		return nil
 	}
 	_ = commitHash
 

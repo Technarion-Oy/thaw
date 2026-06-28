@@ -293,8 +293,13 @@ func TestChangedPathsIsNew(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetStatus: %v", err)
 	}
-	cases := map[string]bool{
-		"a.sql": false, "new.sql": true, "staged.sql": true, "both.sql": true, "keep.sql": false,
+	// {isNew, partiallyStaged} expectations.
+	cases := map[string]struct{ isNew, partial bool }{
+		"a.sql":      {false, false}, // tracked modified, unstaged only
+		"new.sql":    {true, false},  // untracked, unstaged only
+		"staged.sql": {true, false},  // staged-new, staged only
+		"both.sql":   {true, true},   // staged-new then modified → both sides
+		"keep.sql":   {false, false}, // tracked delete, unstaged only
 	}
 	for path, want := range cases {
 		cf, ok := s.ChangedPaths[path]
@@ -302,8 +307,11 @@ func TestChangedPathsIsNew(t *testing.T) {
 			t.Errorf("%s missing from ChangedPaths", path)
 			continue
 		}
-		if cf.IsNew != want {
-			t.Errorf("%s IsNew=%v, want %v (status=%q)", path, cf.IsNew, want, cf.Status)
+		if cf.IsNew != want.isNew {
+			t.Errorf("%s IsNew=%v, want %v (status=%q)", path, cf.IsNew, want.isNew, cf.Status)
+		}
+		if cf.PartiallyStaged != want.partial {
+			t.Errorf("%s PartiallyStaged=%v, want %v (status=%q)", path, cf.PartiallyStaged, want.partial, cf.Status)
 		}
 	}
 }

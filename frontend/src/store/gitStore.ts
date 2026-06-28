@@ -59,7 +59,7 @@ interface GitState {
     exportPathTemplate: string;
   }>) => Promise<void>;
   pickExportDir: () => Promise<void>;
-  refreshStatus: () => Promise<void>;
+  refreshStatus: (silent?: boolean) => Promise<void>;
   pull: () => Promise<void>;
 
   // Staging (git index) actions — operate on the real index, then refresh status.
@@ -161,15 +161,18 @@ export const useGitStore = create<GitState>((set, get) => ({
     await get().refreshStatus();
   },
 
-  refreshStatus: async () => {
+  // silent=true is for refreshes that run after another operation (or as
+  // background auto-refresh): they must not write `error`, or a status-fetch
+  // failure would masquerade as the preceding operation having failed.
+  refreshStatus: async (silent = false) => {
     const { exportDir } = get();
     if (!exportDir) return;
-    set({ loading: true, error: null });
+    set(silent ? { loading: true } : { loading: true, error: null });
     try {
       const status = await GitStatus(exportDir);
       set({ status, loading: false });
     } catch (e) {
-      set({ error: String(e), loading: false });
+      set(silent ? { loading: false } : { error: String(e), loading: false });
     }
   },
 
@@ -200,7 +203,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     set({ staging: true, error: null });
     try {
       await GitStageFile(exportDir, file);
-      await get().refreshStatus();
+      await get().refreshStatus(true);
     } catch (e) {
       set({ error: String(e) });
     } finally {
@@ -214,7 +217,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     set({ staging: true, error: null });
     try {
       await GitUnstageFile(exportDir, file);
-      await get().refreshStatus();
+      await get().refreshStatus(true);
     } catch (e) {
       set({ error: String(e) });
     } finally {
@@ -228,7 +231,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     set({ staging: true, error: null });
     try {
       await GitStageAll(exportDir);
-      await get().refreshStatus();
+      await get().refreshStatus(true);
     } catch (e) {
       set({ error: String(e) });
     } finally {
@@ -242,7 +245,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     set({ staging: true, error: null });
     try {
       await GitUnstageAll(exportDir);
-      await get().refreshStatus();
+      await get().refreshStatus(true);
     } catch (e) {
       set({ error: String(e) });
     } finally {
@@ -256,7 +259,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     set({ staging: true, error: null });
     try {
       await GitDiscardFile(exportDir, file);
-      await get().refreshStatus();
+      await get().refreshStatus(true);
     } catch (e) {
       set({ error: String(e) });
     } finally {
@@ -284,20 +287,23 @@ export const useGitStore = create<GitState>((set, get) => ({
         noPush:      !push, // commit locally only when push is false
       } as any);
     } catch (e) {
-      set({ error: String(e), committing: false });
+      const msg = String(e);
+      // Backend sentinel: the index was empty, nothing was committed. Don't claim
+      // success / clear the message; just refresh so the UI shows the real state.
+      const nothing = msg.includes("nothing staged to commit");
+      set(nothing ? { committing: false } : { error: msg, committing: false });
+      // Even on a push failure the local commit was made and the index is now
+      // empty — refresh so the UI reflects that instead of showing stale staged
+      // files (silent: this isn't an operation failure to re-report).
+      await get().refreshStatus(true);
       return false;
     }
-    // Keep `committing` true through the status refresh so the commit button
-    // stays disabled until stagedTotal reflects the now-empty index — otherwise a
-    // fast second click commits an empty index (ErrEmptyCommit). A refresh
-    // failure here must NOT be reported as a commit failure (the commit already
-    // succeeded), so don't touch `error`.
-    try {
-      const fresh = await GitStatus(exportDir);
-      set({ status: fresh });
-    } catch { /* status will update on the next action */ } finally {
-      set({ committing: false });
-    }
+    // Keep `committing` true through the status refresh so the commit button stays
+    // disabled until stagedTotal reflects the now-empty index — otherwise a fast
+    // second click commits an empty index. Silent refresh keeps a status-fetch
+    // failure from masquerading as a commit failure.
+    await get().refreshStatus(true);
+    set({ committing: false });
     return true;
   },
 

@@ -179,7 +179,7 @@ function RepositorySection() {
         </Tooltip>
         {exportDir && (
           <Tooltip title="Refresh status">
-            <Button size="small" icon={<ReloadOutlined spin={loading} />} onClick={refreshStatus} disabled={loading} />
+            <Button size="small" icon={<ReloadOutlined spin={loading} />} onClick={() => refreshStatus()} disabled={loading} />
           </Tooltip>
         )}
       </div>

@@ -128,11 +128,13 @@ export default function ChangesView() {
 
   // Files with BOTH staged and unstaged changes — discarding either row reverts
   // the whole file to HEAD, so it also throws away the staged part. The discard
-  // confirmation calls this out.
+  // confirmation calls this out. Sourced from the authoritative (uncapped)
+  // changedPaths so it's correct beyond the 500-file cap.
   const partiallyStagedRel = useMemo(() => {
-    const stagedSet = new Set(staged.map((f) => f.path));
-    return new Set(unstaged.filter((f) => stagedSet.has(f.path)).map((f) => f.path));
-  }, [staged, unstaged]);
+    const s = new Set<string>();
+    for (const [p, cf] of Object.entries(status?.changedPaths ?? {})) if (cf.partiallyStaged) s.add(p);
+    return s;
+  }, [status]);
 
   // Every one of these writes the git index, which go-git can't do concurrently —
   // so any in-flight op disables the row/header actions.
@@ -168,7 +170,7 @@ export default function ChangesView() {
         </Text>
         <div style={{ display: "flex", gap: 4 }}>
           <Tooltip title="Refresh">
-            <Button size="small" icon={<ReloadOutlined spin={loading} />} onClick={refreshStatus} disabled={loading} />
+            <Button size="small" icon={<ReloadOutlined spin={loading} />} onClick={() => refreshStatus()} disabled={loading} />
           </Tooltip>
           <Tooltip title={stageAllTip}>
             <span style={{ display: "inline-flex" }}>

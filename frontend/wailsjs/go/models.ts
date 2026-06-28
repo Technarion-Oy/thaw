@@ -1898,6 +1898,7 @@ export namespace gitrepo {
 	export class ChangedFile {
 	    status: string;
 	    isNew: boolean;
+	    partiallyStaged: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new ChangedFile(source);
@@ -1907,6 +1908,7 @@ export namespace gitrepo {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.status = source["status"];
 	        this.isNew = source["isNew"];
+	        this.partiallyStaged = source["partiallyStaged"];
 	    }
 	}
 	export class CloneParams {
@@ -2012,9 +2014,6 @@ export namespace gitrepo {
 	export class RepoStatus {
 	    isRepo: boolean;
 	    branch: string;
-	    modified: string[];
-	    added: string[];
-	    deleted: string[];
 	    staged: FileChange[];
 	    unstaged: FileChange[];
 	    stagedTotal: number;
@@ -2033,9 +2032,6 @@ export namespace gitrepo {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.isRepo = source["isRepo"];
 	        this.branch = source["branch"];
-	        this.modified = source["modified"];
-	        this.added = source["added"];
-	        this.deleted = source["deleted"];
 	        this.staged = this.convertValues(source["staged"], FileChange);
 	        this.unstaged = this.convertValues(source["unstaged"], FileChange);
 	        this.stagedTotal = source["stagedTotal"];
