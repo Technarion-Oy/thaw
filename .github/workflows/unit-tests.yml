@@ -86,9 +86,16 @@ jobs:
       - name: Publish test results
         uses: EnricoMi/publish-unit-test-result-action/linux@v2
         if: always()
+        # This is a best-effort reporting step. Real test failures already fail the
+        # job via the go test steps above; don't let a flaky GitHub API throttle
+        # (429 on the self-hosted runner) in the publisher fail the whole build.
+        continue-on-error: true
         with:
           files: report-*.xml
           check_name: Pure Go Unit Tests
+          # Avoid the extra get_commit() API call (which 429'd) — we don't need
+          # the "changes since last commit" comparison.
+          compare_to_earlier_commit: false
 
       - name: Unlock permissions for host runner agent
         if: always() 
