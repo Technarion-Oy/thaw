@@ -13,6 +13,7 @@ package dbt
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"thaw/internal/snowflake"
@@ -49,9 +50,22 @@ func CreateProject(
 	}
 
 	// ── Discover objects per schema ───────────────────────────────────────────
+	// Iterate databases and schemas in sorted order, and sort the object lists:
+	// name dedup (sourceNameMap/stagingNameMap) breaks ties by input order, so a
+	// stable order keeps generated names — and the _sources.yml object order —
+	// deterministic across runs of the same request (avoiding spurious git diffs).
 	var schemaObjects []SchemaObjects
+	var discoveryWarnings []string
 
-	for db, schemas := range schemasMap {
+	dbs := make([]string, 0, len(schemasMap))
+	for db := range schemasMap {
+		dbs = append(dbs, db)
+	}
+	sort.Strings(dbs)
+
+	for _, db := range dbs {
+		schemas := append([]string(nil), schemasMap[db]...)
+		sort.Strings(schemas)
 		for _, schema := range schemas {
 			if strings.ToUpper(schema) == "INFORMATION_SCHEMA" {
 				schemaObjects = append(schemaObjects, SchemaObjects{
@@ -64,10 +78,11 @@ func CreateProject(
 
 			objs, err := client.ListObjects(ctx, db, schema)
 			if err != nil {
-				schemaObjects = append(schemaObjects, SchemaObjects{
-					DB:     db,
-					Schema: schema,
-				})
+				// Surface the failure rather than letting it look like an empty
+				// schema (a permission denial / network blip must be
+				// distinguishable from "genuinely no objects").
+				discoveryWarnings = append(discoveryWarnings,
+					fmt.Sprintf("could not list objects in %s.%s: %v — skipped", db, schema, err))
 				continue
 			}
 
@@ -80,6 +95,10 @@ func CreateProject(
 					views = append(views, o.Name)
 				}
 			}
+			// ListObjects order isn't a SQL ORDER BY contract; sort for stable
+			// _sources.yml output.
+			sort.Strings(tables)
+			sort.Strings(views)
 
 			so := SchemaObjects{
 				DB:     db,
@@ -93,10 +112,15 @@ func CreateProject(
 				for _, v := range views {
 					ddlText, err := client.GetObjectDDL(ctx, db, schema, "VIEW", v, "")
 					if err != nil {
+						discoveryWarnings = append(discoveryWarnings,
+							fmt.Sprintf("could not fetch DDL for view %s.%s.%s: %v — using source() stub", db, schema, v, err))
 						continue
 					}
 					if body := snowflake.ExtractDDLBody(ddlText, "VIEW"); body != "" {
 						viewDefs[v] = body
+					} else {
+						discoveryWarnings = append(discoveryWarnings,
+							fmt.Sprintf("could not extract body for view %s.%s.%s — using source() stub", db, schema, v))
 					}
 				}
 				so.ViewDefs = viewDefs
@@ -117,14 +141,20 @@ func CreateProject(
 		objLookup := make(map[string]objInfo)
 		for _, so := range schemaObjects {
 			for _, t := range so.Tables {
-				objLookup[strings.ToUpper(so.DB+"\x00"+so.Schema+"\x00"+t)] = objInfo{"table", so.DB, so.Schema, t}
+				objLookup[tableKey(so.DB, so.Schema, t)] = objInfo{"table", so.DB, so.Schema, t}
 			}
 			for _, v := range so.Views {
-				objLookup[strings.ToUpper(so.DB+"\x00"+so.Schema+"\x00"+v)] = objInfo{"view", so.DB, so.Schema, v}
+				objLookup[tableKey(so.DB, so.Schema, v)] = objInfo{"view", so.DB, so.Schema, v}
 			}
 		}
 
-		multiScope := len(schemaObjects) > 1
+		// Resolve the project-unique source / staging-model names exactly as
+		// Generate will, so the inlined {{ source(...) }} / {{ ref(...) }} macros
+		// match the names actually written to disk (matters when a collision is
+		// disambiguated with a numeric suffix).
+		multiScope := multiScopeFor(schemaObjects)
+		srcNames := sourceNameMap(schemaObjects)
+		stagingNames := stagingNameMap(schemaObjects, srcNames, multiScope)
 
 		for i := range schemaObjects {
 			if len(schemaObjects[i].ViewDefs) == 0 {
@@ -137,16 +167,14 @@ func CreateProject(
 					schemaObjects[i].DB,
 					schemaObjects[i].Schema,
 					func(db, schema, name string) string {
-						key := strings.ToUpper(db + "\x00" + schema + "\x00" + name)
-						info, ok := objLookup[key]
+						info, ok := objLookup[tableKey(db, schema, name)]
 						if !ok {
 							return ""
 						}
-						sName := SourceName(info.db, info.schema)
 						if info.kind == "table" {
-							return fmt.Sprintf("{{ source('%s', '%s') }}", sName, info.name)
+							return fmt.Sprintf("{{ source('%s', '%s') }}", srcNames[scopeKey(info.db, info.schema)], info.name)
 						}
-						modelName := StagingModelName(info.db, info.schema, info.name, multiScope)
+						modelName := stagingNames[tableKey(info.db, info.schema, info.name)]
 						return fmt.Sprintf("{{ ref('%s') }}", modelName)
 					},
 				)
@@ -156,5 +184,12 @@ func CreateProject(
 		}
 	}
 
-	return Generate(req, sess, schemaObjects)
+	result, err := Generate(req, sess, schemaObjects)
+	if err != nil {
+		return nil, err
+	}
+	// Surface discovery problems (list/DDL failures) ahead of Generate's own
+	// per-schema warnings.
+	result.Warnings = append(discoveryWarnings, result.Warnings...)
+	return result, nil
 }

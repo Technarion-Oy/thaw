@@ -678,7 +678,7 @@ Open **Tools → Create dbt Project…** to scaffold a complete dbt project pre-
 | `seeds/.gitkeep` | Directory placeholder |
 | `macros/.gitkeep` | Directory placeholder |
 
-When multiple databases or schemas are selected, stub filenames are prefixed with `db_schema_` (e.g. `stg_mydb_public_orders.sql`) to prevent collisions. Single-scope projects use the shorter `stg_<table>.sql` form.
+When more than one schema actually produces stubs, stub filenames are prefixed with `db_schema_` (e.g. `stg_mydb_public_orders.sql`) to keep them distinct; a single data schema — even alongside `INFORMATION_SCHEMA` or empty schemas, which produce no stubs — uses the shorter `stg_<table>.sql` form. Source names and stub filenames are guaranteed unique within a project: should two scopes' readable names collide (possible because Snowflake identifiers may contain the `_` separator), the later one is disambiguated with a numeric suffix (`_2`, `_3`, …). Discovery runs in sorted database/schema/object order, so regenerating the same selection produces byte-identical files.
 
 ---
 

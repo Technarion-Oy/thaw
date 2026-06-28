@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"thaw/internal/filesystem"
+	"thaw/internal/sqltok"
 )
 
 // CreateRequest contains the user-supplied parameters for a new dbt project.
@@ -192,16 +193,25 @@ models:
 
 	// ── models/staging/_sources.yml + stub models ─────────────────────────────
 
-	// Determine whether we have multiple (db, schema) pairs — used to build
-	// unique file prefixes.
-	multiScope := len(objects) > 1
+	// Determine whether we have multiple real (db, schema) pairs — used to build
+	// unique file prefixes.  System and empty schemas produce no staging stubs,
+	// so they must not inflate the count (a single data schema alongside
+	// INFORMATION_SCHEMA should still get plain stg_<table> names).
+	multiScope := multiScopeFor(objects)
+
+	// Resolve the final, project-unique source and staging-model names up front.
+	// The readable base names are not injective on their own (see sourceName), so
+	// these maps break any collision deterministically; create.go builds the same
+	// maps to keep {{ source(...) }} / {{ ref(...) }} references consistent.
+	srcNames := sourceNameMap(objects)
+	stagingNames := stagingNameMap(objects, srcNames, multiScope)
 
 	// Build _sources.yml
 	var sourcesBuilder strings.Builder
 	sourcesBuilder.WriteString("version: 2\nsources:\n")
 
 	for _, so := range objects {
-		sName := sourceName(so.DB, so.Schema)
+		sName := srcNames[scopeKey(so.DB, so.Schema)]
 
 		// System schemas (e.g. INFORMATION_SCHEMA) are written as source
 		// entries so models can reference them via {{ source(...) }}, but no
@@ -226,7 +236,21 @@ models:
 		fmt.Fprintf(&sourcesBuilder, "    description: \"Source tables from %s.%s\"\n", so.DB, so.Schema)
 		sourcesBuilder.WriteString("    tables:\n")
 
-		allNames := append(so.Tables, so.Views...)
+		// Tables first, then views, de-duplicated by upper-cased name.  Snowflake
+		// normally forbids a table and view sharing a name in one schema, but the
+		// generator doesn't validate it — a duplicate would otherwise emit two
+		// "- name:" entries (invalid YAML) and write the same stub file twice.
+		allNames := make([]string, 0, len(so.Tables)+len(so.Views))
+		seenName := make(map[string]bool, len(so.Tables)+len(so.Views))
+		for _, t := range append(append([]string{}, so.Tables...), so.Views...) {
+			u := strings.ToUpper(t)
+			if seenName[u] {
+				warnings = append(warnings, fmt.Sprintf("duplicate object name %s in %s.%s — keeping first", t, so.DB, so.Schema))
+				continue
+			}
+			seenName[u] = true
+			allNames = append(allNames, t)
+		}
 		for _, t := range allNames {
 			fmt.Fprintf(&sourcesBuilder, "      - name: %s\n", t)
 			sourcesBuilder.WriteString("        description: \"\"\n")
@@ -234,7 +258,8 @@ models:
 
 		// Write one stub model per table/view
 		for _, t := range allNames {
-			stubPath := stagingModelPath(so.DB, so.Schema, t, multiScope)
+			stem := stagingNames[tableKey(so.DB, so.Schema, t)]
+			stubPath := filepath.Join("models", "staging", stem+".sql")
 			stub := stagingModelSQL(sName, t, so.ViewDefs[t])
 			if err := write(stubPath, stub); err != nil {
 				return nil, err
@@ -253,41 +278,136 @@ models:
 	}, nil
 }
 
-// SourceName returns the lower-case dbt source name for the given (db, schema)
-// pair, e.g. "mydb_public".  Exported so IPC callers can build consistent
-// {{ source('...', '...') }} references without duplicating the convention.
-func SourceName(db, schema string) string {
+// sourceName returns the readable dbt source-name convention for a (db, schema)
+// pair: the two identifiers lower-cased and joined with "_", e.g. "mydb_public".
+//
+// This base name is NOT unique on its own.  dbt source and model names may only
+// contain [A-Za-z0-9_], so "_" is the only available separator — and because
+// Snowflake identifiers may themselves contain "_", two distinct scopes can map
+// to the same string ("A_B"."C" and "A"."B_C" both → "a_b_c").  No "_"-based
+// scheme can avoid this, so uniqueness is enforced at the project level by
+// sourceNameMap, which appends a numeric suffix to any collision.
+func sourceName(db, schema string) string {
 	return strings.ToLower(db) + "_" + strings.ToLower(schema)
 }
 
-// sourceName is the unexported alias kept for internal use within this file.
-func sourceName(db, schema string) string { return SourceName(db, schema) }
-
-// StagingModelName returns the dbt model name (filename without the .sql
-// extension) for a staging model.  Exported so IPC callers can build
-// consistent {{ ref('...') }} references that match the generated filenames.
-func StagingModelName(db, schema, table string, multiScope bool) string {
+// stagingBase builds the readable staging-model name (filename without the .sql
+// extension) from an (already-resolved) source name and a table: "stg_<table>"
+// for a single data scope, or "stg_<source>_<table>" when multiple scopes are
+// present (embedding the source name keeps a model and its source in sync).
+// Like sourceName this is the pre-deduplication base name; stagingNameMap
+// resolves collisions.
+func stagingBase(srcName, table string, multiScope bool) string {
 	if multiScope {
-		return fmt.Sprintf("stg_%s_%s_%s",
-			strings.ToLower(db),
-			strings.ToLower(schema),
-			strings.ToLower(table))
+		return "stg_" + srcName + "_" + strings.ToLower(table)
 	}
-	return fmt.Sprintf("stg_%s", strings.ToLower(table))
+	return "stg_" + strings.ToLower(table)
 }
 
-// stagingModelPath returns the relative path for a staging model file.
-// When multiScope is true (multiple db/schema pairs) a db_schema_ prefix is
-// added to avoid collisions.
-func stagingModelPath(db, schema, table string, multiScope bool) string {
-	return filepath.Join("models", "staging", StagingModelName(db, schema, table, multiScope)+".sql")
+// multiScopeFor reports whether staging model names need a db_schema prefix to
+// stay unique.  Only schemas that actually produce staging stubs count — system
+// schemas (no object listing) and empty schemas (no tables/views) are excluded,
+// so filenames don't depend on which non-data schemas happened to be discovered.
+func multiScopeFor(objects []SchemaObjects) bool {
+	n := 0
+	for _, so := range objects {
+		if so.IsSystem || len(so.Tables)+len(so.Views) == 0 {
+			continue
+		}
+		n++
+	}
+	return n > 1
+}
+
+// scopeKey / tableKey are case-insensitive map keys identifying a (db, schema)
+// scope and a (db, schema, table) object respectively.  The NUL separator can't
+// occur in a Snowflake identifier, so keys never collide across components.
+func scopeKey(db, schema string) string {
+	return strings.ToUpper(db) + "\x00" + strings.ToUpper(schema)
+}
+
+func tableKey(db, schema, table string) string {
+	return scopeKey(db, schema) + "\x00" + strings.ToUpper(table)
+}
+
+// uniqueName returns base when it is unused, otherwise the first free
+// base_2 / base_3 / … form, recording the chosen name in used.
+func uniqueName(base string, used map[string]bool) string {
+	name := base
+	for i := 2; used[name]; i++ {
+		name = fmt.Sprintf("%s_%d", base, i)
+	}
+	used[name] = true
+	return name
+}
+
+// sourceNameMap assigns a project-unique _sources.yml source name to every scope
+// that gets a source entry — system schemas, plus regular schemas with at least
+// one table or view — keyed by scopeKey.  The readable sourceName base is used
+// as-is unless an earlier scope already claimed it (a collision, e.g. "A_B"."C"
+// vs "A"."B_C"), in which case a _2/_3/… suffix is appended.  Iteration follows
+// objects order, so Generate and create.go compute identical names.
+func sourceNameMap(objects []SchemaObjects) map[string]string {
+	used := map[string]bool{}
+	out := map[string]string{}
+	for _, so := range objects {
+		if !so.IsSystem && len(so.Tables)+len(so.Views) == 0 {
+			continue // empty schema — no source entry
+		}
+		k := scopeKey(so.DB, so.Schema)
+		if _, ok := out[k]; ok {
+			continue
+		}
+		out[k] = uniqueName(sourceName(so.DB, so.Schema), used)
+	}
+	return out
+}
+
+// stagingNameMap assigns a project-unique staging-model name (filename stem) to
+// every (db, schema, table) that gets a stub, keyed by tableKey.  srcNames
+// supplies the already-deduplicated source name used as the multi-scope prefix,
+// and a separate used-set guards the model-name space (which can collide even
+// when source names don't, e.g. source "a_b" + table "c_d" vs source "a_b_c" +
+// table "d" both → "stg_a_b_c_d").
+func stagingNameMap(objects []SchemaObjects, srcNames map[string]string, multiScope bool) map[string]string {
+	used := map[string]bool{}
+	out := map[string]string{}
+	for _, so := range objects {
+		if so.IsSystem || len(so.Tables)+len(so.Views) == 0 {
+			continue
+		}
+		sName := srcNames[scopeKey(so.DB, so.Schema)]
+		names := make([]string, 0, len(so.Tables)+len(so.Views))
+		names = append(names, so.Tables...)
+		names = append(names, so.Views...)
+		for _, t := range names {
+			k := tableKey(so.DB, so.Schema, t)
+			if _, ok := out[k]; ok {
+				continue
+			}
+			out[k] = uniqueName(stagingBase(sName, t, multiScope), used)
+		}
+	}
+	return out
+}
+
+// hasExecutableSQL reports whether s contains any syntactically meaningful SQL,
+// as opposed to only whitespace and comments.  Used to decide between inlining a
+// view body and emitting the generic source() stub — a blank or comment-only
+// body (e.g. "-- definition unavailable", or truncated DDL with an unterminated
+// "/*") would otherwise be inlined and fail dbt compile.  The shared sqltok
+// lexer does the work, so line/block/unterminated comments and string literals
+// are all handled correctly.
+func hasExecutableSQL(s string) bool {
+	return len(sqltok.SignificantTokens(s)) > 0
 }
 
 // stagingModelSQL returns the body of a staging model stub.
-// When sqlBody is non-empty the actual view SELECT SQL is inlined instead of a
-// generic pass-through {{ source(...) }} reference.
+// When sqlBody carries actual SQL the view body is inlined instead of a generic
+// pass-through {{ source(...) }} reference.  A body that is blank or only
+// comments would compile to nothing, so it falls back to the stub.
 func stagingModelSQL(src, table, sqlBody string) string {
-	if sqlBody != "" {
+	if hasExecutableSQL(sqlBody) {
 		return fmt.Sprintf(
 			"-- Generated by Thaw — view SQL inlined from Snowflake\n"+
 				"-- TODO: replace Snowflake table references with {{ source('...', '...') }} or {{ ref('...') }} calls\n"+

@@ -294,9 +294,10 @@ func TestGenerate(t *testing.T) {
 		// Empty schema must be absent.
 		assertNotContains(t, sources, "db_temp", "empty schema must not appear")
 
-		// Stubs only for the regular schema — multi-scope since 3 objects passed.
-		assertFileExists(t, filepath.Join(result.ProjectDir, "models", "staging", "stg_db_public_orders.sql"))
-		assertFileExists(t, filepath.Join(result.ProjectDir, "models", "staging", "stg_db_public_v_open.sql"))
+		// Stubs only for the regular schema — single-scope since only one schema
+		// actually produces stubs (system + empty schemas don't count).
+		assertFileExists(t, filepath.Join(result.ProjectDir, "models", "staging", "stg_orders.sql"))
+		assertFileExists(t, filepath.Join(result.ProjectDir, "models", "staging", "stg_v_open.sql"))
 	})
 
 	t.Run("profile name defaults to project name when empty", func(t *testing.T) {
@@ -520,9 +521,10 @@ func TestGenerate(t *testing.T) {
 		}
 	})
 
-	t.Run("INFORMATION_SCHEMA alongside regular schemas multi-scope naming", func(t *testing.T) {
-		// When INFORMATION_SCHEMA + one regular schema are both present,
-		// len(objects)==2 so multi-scope prefixes apply to stub files.
+	t.Run("INFORMATION_SCHEMA alongside one regular schema stays single-scope", func(t *testing.T) {
+		// A system schema produces no stubs, so it must not inflate the scope
+		// count: with exactly one stub-producing schema the names stay plain
+		// stg_<table> rather than gaining a db_schema prefix.
 		dir := t.TempDir()
 		req := CreateRequest{ProjectName: "proj", OutputDir: dir}
 		objects := []SchemaObjects{
@@ -532,9 +534,9 @@ func TestGenerate(t *testing.T) {
 
 		result := mustGenerate(t, req, typicalSession(), objects)
 
-		// Stub uses multi-scope prefix.
-		assertFileExists(t, filepath.Join(result.ProjectDir, "models", "staging", "stg_db_public_users.sql"))
-		assertFileAbsent(t, filepath.Join(result.ProjectDir, "models", "staging", "stg_users.sql"))
+		// Single-scope stub: no db_schema prefix.
+		assertFileExists(t, filepath.Join(result.ProjectDir, "models", "staging", "stg_users.sql"))
+		assertFileAbsent(t, filepath.Join(result.ProjectDir, "models", "staging", "stg_db_public_users.sql"))
 
 		// _sources.yml has both entries.
 		sources := readFile(t, result.ProjectDir, filepath.Join("models", "staging", "_sources.yml"))
@@ -586,10 +588,9 @@ func TestGenerate(t *testing.T) {
 	})
 
 	t.Run("source name collision with underscore-containing identifiers", func(t *testing.T) {
-		// DB "A_B" + Schema "C" and DB "A" + Schema "B_C" must produce
-		// distinct source names in _sources.yml.  The current underscore
-		// separator is ambiguous for identifiers that themselves contain
-		// underscores.
+		// DB "A_B" + Schema "C" and DB "A" + Schema "B_C" share the readable base
+		// name "a_b_c"; project-level dedup must give them distinct source names
+		// (the first keeps "a_b_c", the second becomes "a_b_c_2").
 		dir := t.TempDir()
 		req := CreateRequest{ProjectName: "proj", OutputDir: dir}
 		objects := []SchemaObjects{
@@ -600,12 +601,20 @@ func TestGenerate(t *testing.T) {
 		result := mustGenerate(t, req, typicalSession(), objects)
 		sources := readFile(t, result.ProjectDir, filepath.Join("models", "staging", "_sources.yml"))
 
-		count := strings.Count(sources, "- name: a_b_c")
-		if count > 1 {
-			t.Errorf("duplicate source name 'a_b_c' in _sources.yml (%d occurrences) — "+
-				"A_B.C and A.B_C produce the same source name due to underscore separator ambiguity",
-				count)
+		// Exactly one entry keeps the base name and one is disambiguated.
+		if c := strings.Count(sources, "  - name: a_b_c\n"); c != 1 {
+			t.Errorf("want exactly one '- name: a_b_c' entry, got %d in:\n%s", c, sources)
 		}
+		if !strings.Contains(sources, "  - name: a_b_c_2\n") {
+			t.Errorf("want disambiguated '- name: a_b_c_2' entry in:\n%s", sources)
+		}
+
+		// Both stubs are written to distinct files (multi-scope prefix uses the
+		// resolved, deduplicated source name) and reference the matching source.
+		base := readFile(t, result.ProjectDir, filepath.Join("models", "staging", "stg_a_b_c_t1.sql"))
+		assertContains(t, base, "{{ source('a_b_c', 'T1') }}", "first stub references base source name")
+		dis := readFile(t, result.ProjectDir, filepath.Join("models", "staging", "stg_a_b_c_2_t2.sql"))
+		assertContains(t, dis, "{{ source('a_b_c_2', 'T2') }}", "second stub references disambiguated source name")
 	})
 }
 
@@ -636,91 +645,134 @@ func TestSourceName(t *testing.T) {
 			}
 		})
 	}
+}
 
-	t.Run("underscore separator must not cause collisions", func(t *testing.T) {
-		// DB "A_B" + Schema "C" and DB "A" + Schema "B_C" are different
-		// Snowflake scopes but both lower to "a_b" + "_" + "c" = "a_b_c".
-		a := sourceName("A_B", "C")
-		b := sourceName("A", "B_C")
+// ─── TestSourceNames (project-level dedup) ────────────────────────────────────
+
+func TestSourceNames(t *testing.T) {
+	// Distinct Snowflake scopes whose readable base names collide must each get
+	// a unique source name. The "_" separator cannot distinguish these on its
+	// own (dbt names allow only [A-Za-z0-9_]), so dedup happens at this level.
+	collidingPairs := [][2][2]string{
+		{{"A_B", "C"}, {"A", "B_C"}},     // underscore moves across the boundary
+		{{"A_B", "C_D"}, {"A", "B_C_D"}}, // underscores on both sides
+		{{"X_", "Y"}, {"X", "_Y"}},       // trailing- vs leading-underscore (reviewer case)
+	}
+	for _, p := range collidingPairs {
+		objects := []SchemaObjects{
+			{DB: p[0][0], Schema: p[0][1], Tables: []string{"T"}},
+			{DB: p[1][0], Schema: p[1][1], Tables: []string{"T"}},
+		}
+		names := sourceNameMap(objects)
+		a := names[scopeKey(p[0][0], p[0][1])]
+		b := names[scopeKey(p[1][0], p[1][1])]
+		if a == "" || b == "" {
+			t.Fatalf("missing source name for %v: %v", p, names)
+		}
 		if a == b {
-			t.Errorf("sourceName(%q, %q) = sourceName(%q, %q) = %q — "+
-				"ambiguous underscore separator causes collision",
-				"A_B", "C", "A", "B_C", a)
+			t.Errorf("sourceNameMap(%v): both scopes got %q — collision not resolved", p, a)
+		}
+	}
+
+	t.Run("non-colliding names are left unchanged", func(t *testing.T) {
+		objects := []SchemaObjects{
+			{DB: "MY_DB", Schema: "PUBLIC", Tables: []string{"T"}},
+			{DB: "ANALYTICS", Schema: "GOLD", Tables: []string{"T"}},
+		}
+		names := sourceNameMap(objects)
+		if got := names[scopeKey("MY_DB", "PUBLIC")]; got != "my_db_public" {
+			t.Errorf("got %q, want clean base name my_db_public", got)
+		}
+	})
+
+	t.Run("empty schemas get no entry, system schemas do", func(t *testing.T) {
+		objects := []SchemaObjects{
+			{DB: "DB", Schema: "EMPTY"},
+			{DB: "DB", Schema: "INFORMATION_SCHEMA", IsSystem: true},
+		}
+		names := sourceNameMap(objects)
+		if _, ok := names[scopeKey("DB", "EMPTY")]; ok {
+			t.Errorf("empty schema should not get a source name: %v", names)
+		}
+		if _, ok := names[scopeKey("DB", "INFORMATION_SCHEMA")]; !ok {
+			t.Errorf("system schema should get a source name: %v", names)
 		}
 	})
 }
 
-// ─── TestStagingModelPath ─────────────────────────────────────────────────────
+// ─── TestStagingBase ──────────────────────────────────────────────────────────
 
-func TestStagingModelPath(t *testing.T) {
+func TestStagingBase(t *testing.T) {
+	// stagingBase is the readable, pre-dedup model-name convention. The db/schema
+	// → source-name join is covered by TestSourceName; here srcName is the
+	// already-resolved source name used as the multi-scope prefix.
 	tests := []struct {
 		name       string
-		db, schema string
+		srcName    string
 		table      string
 		multiScope bool
 		want       string
 	}{
-		{
-			name:       "single-scope lowercase path",
-			db:         "DB", schema: "SCH", table: "ORDERS",
-			multiScope: false,
-			want:       filepath.Join("models", "staging", "stg_orders.sql"),
-		},
-		{
-			name:       "multi-scope includes db and schema prefix",
-			db:         "DB", schema: "SCH", table: "ORDERS",
-			multiScope: true,
-			want:       filepath.Join("models", "staging", "stg_db_sch_orders.sql"),
-		},
-		{
-			name:       "single-scope uppercase table lowercased",
-			db:         "MYDB", schema: "PUBLIC", table: "FACT_SALES",
-			multiScope: false,
-			want:       filepath.Join("models", "staging", "stg_fact_sales.sql"),
-		},
-		{
-			name:       "multi-scope all uppercase lowercased",
-			db:         "MYDB", schema: "PUBLIC", table: "FACT_SALES",
-			multiScope: true,
-			want:       filepath.Join("models", "staging", "stg_mydb_public_fact_sales.sql"),
-		},
-		{
-			name:       "single-scope mixed case",
-			db:         "Db", schema: "Sch", table: "MyTable",
-			multiScope: false,
-			want:       filepath.Join("models", "staging", "stg_mytable.sql"),
-		},
-		{
-			name:       "multi-scope mixed case",
-			db:         "Db", schema: "Sch", table: "MyTable",
-			multiScope: true,
-			want:       filepath.Join("models", "staging", "stg_db_sch_mytable.sql"),
-		},
-		{
-			name:       "multi-scope with underscores in identifiers",
-			db:         "MY_DB", schema: "MY_SCH", table: "MY_TABLE",
-			multiScope: true,
-			want:       filepath.Join("models", "staging", "stg_my_db_my_sch_my_table.sql"),
-		},
+		{name: "single-scope lowercases table", srcName: "db_sch", table: "ORDERS", multiScope: false, want: "stg_orders"},
+		{name: "single-scope ignores source", srcName: "mydb_public", table: "FACT_SALES", multiScope: false, want: "stg_fact_sales"},
+		{name: "single-scope mixed case", srcName: "db_sch", table: "MyTable", multiScope: false, want: "stg_mytable"},
+		{name: "multi-scope embeds source", srcName: "db_sch", table: "ORDERS", multiScope: true, want: "stg_db_sch_orders"},
+		{name: "multi-scope all lowercased", srcName: "mydb_public", table: "FACT_SALES", multiScope: true, want: "stg_mydb_public_fact_sales"},
+		{name: "multi-scope underscores preserved", srcName: "my_db_my_sch", table: "MY_TABLE", multiScope: true, want: "stg_my_db_my_sch_my_table"},
+		{name: "multi-scope deduplicated source prefix", srcName: "a_b_c_2", table: "T", multiScope: true, want: "stg_a_b_c_2_t"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := stagingModelPath(tt.db, tt.schema, tt.table, tt.multiScope)
-			if got != tt.want {
-				t.Errorf("stagingModelPath(%q, %q, %q, %v) = %q, want %q",
-					tt.db, tt.schema, tt.table, tt.multiScope, got, tt.want)
+			if got := stagingBase(tt.srcName, tt.table, tt.multiScope); got != tt.want {
+				t.Errorf("stagingBase(%q, %q, %v) = %q, want %q",
+					tt.srcName, tt.table, tt.multiScope, got, tt.want)
 			}
 		})
 	}
+}
 
-	t.Run("underscore separator must not cause multi-scope path collisions", func(t *testing.T) {
-		a := stagingModelPath("A_B", "C", "T", true)
-		b := stagingModelPath("A", "B_C", "T", true)
-		if a == b {
-			t.Errorf("stagingModelPath collision: (A_B, C, T) and (A, B_C, T) both produce %q", a)
-		}
-	})
+// ─── TestStagingNames (project-level dedup) ───────────────────────────────────
+
+func TestStagingNames(t *testing.T) {
+	// Distinct (db, schema, table) triples whose readable model names collide
+	// must each get a unique stem — including collisions that arise only at the
+	// scope/table boundary, which scope-level dedup alone would miss.
+	cases := []struct {
+		name    string
+		objects []SchemaObjects
+	}{
+		{
+			name: "scope collision",
+			objects: []SchemaObjects{
+				{DB: "A_B", Schema: "C", Tables: []string{"T"}},
+				{DB: "A", Schema: "B_C", Tables: []string{"T"}},
+			},
+		},
+		{
+			name: "scope/table boundary collision (source a_b + table c_d vs source a_b_c + table d)",
+			objects: []SchemaObjects{
+				{DB: "A", Schema: "B", Tables: []string{"C_D"}},
+				{DB: "A", Schema: "B_C", Tables: []string{"D"}},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			multiScope := multiScopeFor(tc.objects)
+			names := stagingNameMap(tc.objects, sourceNameMap(tc.objects), multiScope)
+			seen := map[string]string{}
+			for key, name := range names {
+				if other, dup := seen[name]; dup {
+					t.Errorf("duplicate staging model name %q for %q and %q", name, key, other)
+				}
+				seen[name] = key
+			}
+			if len(names) != 2 {
+				t.Fatalf("want 2 staging names, got %d: %v", len(names), names)
+			}
+		})
+	}
 }
 
 // ─── TestStagingModelSQL ──────────────────────────────────────────────────────
@@ -795,6 +847,20 @@ func TestStagingModelSQL(t *testing.T) {
 			},
 		},
 		{
+			// A "/*" sitting inside a -- line comment is not a block-comment
+			// opener; the real SELECT on the next line must still be inlined.
+			name:    "non-empty body: /* inside a line comment doesn't eat following SQL",
+			source:  "db_sch", table: "V",
+			sqlBody: "-- note: /* not a block comment\nSELECT id FROM orders",
+			mustContain: []string{
+				"view SQL inlined from Snowflake",
+				"SELECT id FROM orders",
+			},
+			mustNotContain: []string{
+				"with source as (",
+			},
+		},
+		{
 			name:    "non-empty body: already-rewritten Jinja refs emitted verbatim",
 			source:  "db_sch", table: "MY_VIEW",
 			sqlBody: "SELECT * FROM {{ source('db_raw', 'ORDERS') }}\nJOIN {{ ref('stg_customers') }} ON id = customer_id",
@@ -836,6 +902,30 @@ func TestStagingModelSQL(t *testing.T) {
 			name:    "whitespace-only body falls back to source() stub",
 			source:  "src", table: "T",
 			sqlBody: "   \n  \t  ",
+			mustContain: []string{
+				"{{ source('src', 'T') }}",
+				"with source as (",
+			},
+			mustNotContain: []string{
+				"view SQL inlined from Snowflake",
+			},
+		},
+		{
+			name:    "comment-only body falls back to source() stub",
+			source:  "src", table: "T",
+			sqlBody: "-- definition unavailable\n/* secured view */",
+			mustContain: []string{
+				"{{ source('src', 'T') }}",
+				"with source as (",
+			},
+			mustNotContain: []string{
+				"view SQL inlined from Snowflake",
+			},
+		},
+		{
+			name:    "unterminated block comment falls back to source() stub",
+			source:  "src", table: "T",
+			sqlBody: "/* definition unavailable", // no closing */ (truncated DDL)
 			mustContain: []string{
 				"{{ source('src', 'T') }}",
 				"with source as (",
