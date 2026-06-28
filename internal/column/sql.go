@@ -138,7 +138,9 @@ func BuildAddColumnSql(db, schema, table string, cfg AddColumnConfig) (string, e
 	}
 
 	if c := strings.TrimSpace(cfg.Comment); c != "" {
-		parts = append(parts, "COMMENT "+snowflake.QuoteStringLit(c))
+		// QuoteTextLit (not QuoteStringLit) so backslashes in a free-text comment
+		// are doubled and stored literally rather than read as escape sequences.
+		parts = append(parts, "COMMENT "+snowflake.QuoteTextLit(c))
 	}
 
 	return strings.Join(parts, " ") + ";", nil
@@ -178,7 +180,7 @@ func BuildSetColumnCommentSql(db, schema, table, column, comment string) string 
 			tableRef(db, schema, table), snowflake.QuoteIdent(column))
 	}
 	return fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s COMMENT %s;",
-		tableRef(db, schema, table), snowflake.QuoteIdent(column), snowflake.QuoteStringLit(c))
+		tableRef(db, schema, table), snowflake.QuoteIdent(column), snowflake.QuoteTextLit(c))
 }
 
 // BuildChangeDataTypeSql constructs an ALTER TABLE ... ALTER COLUMN ... SET DATA TYPE statement.

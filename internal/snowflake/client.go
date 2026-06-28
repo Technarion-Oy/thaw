@@ -2971,7 +2971,7 @@ func (c *Client) GetColumnDetails(ctx context.Context, database, schema, table, 
 			if err := rows.Scan(ptrs...); err != nil {
 				continue
 			}
-			if strVal(vals, idxs["name"]) == column {
+			if strings.EqualFold(strVal(vals, idxs["name"]), column) {
 				out.Default = strVal(vals, idxs["default"])
 				break
 			}

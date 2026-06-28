@@ -152,22 +152,29 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
 
   // Run a statement. Safe edits execute immediately; only edits that can lose or
   // truncate data (`warning` set) get a confirmation dialog with a SQL preview.
-  const run = (sql: string, okMsg: string, after?: () => void, warning?: string) => {
-    if (!warning) { exec(sql, okMsg, after).catch(() => {}); return; }
-    modal.confirm({
-      title: "This change may affect existing data",
-      width: 580,
-      okText: "Run anyway",
-      okButtonProps: { danger: true },
-      content: (
-        <div>
-          <div style={{ marginBottom: 8, color: "var(--text)" }}>{warning}</div>
-          <div style={{ padding: "10px 12px", background: "var(--bg)", borderRadius: 6, border: "1px solid var(--border)" }}>
-            <pre style={{ margin: 0, color: "var(--text)", fontSize: 11, fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{sql}</pre>
+  // Returns a promise that settles when the work is fully done (including the
+  // user acting on the dialog) so the caller's `saving` guard stays up until then.
+  const run = (sql: string, okMsg: string, after?: () => void, warning?: string): Promise<void> => {
+    if (!warning) return exec(sql, okMsg, after).catch(() => {});
+    return new Promise<void>((resolve) => {
+      modal.confirm({
+        title: "This change may affect existing data",
+        width: 580,
+        okText: "Run anyway",
+        okButtonProps: { danger: true },
+        content: (
+          <div>
+            <div style={{ marginBottom: 8, color: "var(--text)" }}>{warning}</div>
+            <div style={{ padding: "10px 12px", background: "var(--bg)", borderRadius: 6, border: "1px solid var(--border)" }}>
+              <pre style={{ margin: 0, color: "var(--text)", fontSize: 11, fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{sql}</pre>
+            </div>
           </div>
-        </div>
-      ),
-      onOk: () => exec(sql, okMsg, after),
+        ),
+        // Returning the promise keeps the dialog (and its loading OK button) open
+        // until ExecDDL settles; afterClose resolves once the dialog is gone.
+        onOk: () => exec(sql, okMsg, after),
+        afterClose: () => resolve(),
+      });
     });
   };
 
@@ -180,9 +187,9 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
     const trimmed = draft.trim();
     if (!trimmed || trimmed === column) { cancelEdit(); return; }
     const sql = await BuildRenameColumnSql(db, schema, table, column, trimmed, caseSensitive);
-    cancelEdit();
+    // Clear edit state only on success — a failed DDL keeps the typed name.
     // The column identity changes on rename, so close the modal afterwards.
-    run(sql, `Renamed column to "${trimmed}"`, onClose);
+    return run(sql, `Renamed column to "${trimmed}"`, () => { cancelEdit(); onClose(); });
   };
 
   const saveDataType = async () => {
@@ -191,7 +198,7 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
     const sql = await BuildChangeColumnTypeSql(db, schema, table, column, trimmed);
     // Don't clear edit state before the confirm dialog — if the user cancels,
     // their typed type must survive. cancelEdit runs only on confirmed success.
-    run(sql, `Changed data type to ${trimmed}`, () => { cancelEdit(); setCur((c) => ({ ...c, dataType: trimmed })); },
+    return run(sql, `Changed data type to ${trimmed}`, () => { cancelEdit(); setCur((c) => ({ ...c, dataType: trimmed })); },
       `Changing the data type of "${column}" from ${cur.dataType} to ${trimmed} can truncate or fail on existing rows. Snowflake only permits a narrow set of conversions (e.g. widening a VARCHAR or NUMBER).`);
   };
 
@@ -200,7 +207,7 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
     const sql = checked
       ? await BuildDropColumnNotNullSql(db, schema, table, column)
       : await BuildSetColumnNotNullSql(db, schema, table, column);
-    run(sql, checked ? "Dropped NOT NULL" : "Set NOT NULL", () => setCur((c) => ({ ...c, nullable: checked })));
+    return run(sql, checked ? "Dropped NOT NULL" : "Set NOT NULL", () => setCur((c) => ({ ...c, nullable: checked })));
   };
 
   const saveDefault = async () => {
@@ -209,8 +216,8 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
     const sql = trimmed
       ? await BuildSetColumnDefaultSql(db, schema, table, column, trimmed)
       : await BuildDropColumnDefaultSql(db, schema, table, column);
-    cancelEdit();
-    run(sql, trimmed ? "Default updated" : "Default dropped", () => setColDefault(trimmed));
+    // Clear edit state only on success so a failed DDL keeps the typed value.
+    return run(sql, trimmed ? "Default updated" : "Default dropped", () => { cancelEdit(); setColDefault(trimmed); });
   };
 
   const saveComment = async () => {
@@ -219,13 +226,9 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
     // The backend trims and emits UNSET COMMENT for whitespace-only input, so
     // mirror that here — store the trimmed value to keep the display in sync.
     const v = draft.trim();
-    cancelEdit();
-    run(sql, v ? "Comment updated" : "Comment removed", () => setCur((c) => ({ ...c, comment: v })));
+    // Clear edit state only on success so a failed DDL keeps the typed comment.
+    return run(sql, v ? "Comment updated" : "Comment removed", () => { cancelEdit(); setCur((c) => ({ ...c, comment: v })); });
   };
-
-  // GetColumnDetails already returns the policy as a plain dotted FQN matching
-  // the picker option fqns, so no normalisation is needed.
-  const normMasking = maskingPolicy;
 
   // Split a qualified name into db/schema/name, preferring a known catalog match
   // (handles quoted/dotted identifiers); falls back to a naive dotted split with
@@ -239,7 +242,7 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
 
   const saveMasking = async () => {
     const trimmed = draft.trim();
-    if (trimmed === normMasking) { cancelEdit(); return; }
+    if (trimmed === maskingPolicy) { cancelEdit(); return; }
     let sql: string;
     if (!trimmed) {
       sql = await BuildUnsetColumnMaskingPolicySql(db, schema, table, column);
@@ -250,12 +253,12 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
     // Replacing or removing an existing governance policy is destructive — confirm
     // with a SQL preview. This also guards the case where the policy list failed
     // to load (empty dropdown) so the user can't silently unset a live policy.
-    const warning = normMasking
+    const warning = maskingPolicy
       ? (trimmed
-          ? `This replaces the masking policy currently on "${column}" (${normMasking}) with ${trimmed}.`
-          : `This removes the masking policy currently on "${column}" (${normMasking}).`)
+          ? `This replaces the masking policy currently on "${column}" (${maskingPolicy}) with ${trimmed}.`
+          : `This removes the masking policy currently on "${column}" (${maskingPolicy}).`)
       : undefined;
-    run(sql, trimmed ? "Masking policy set" : "Masking policy unset", () => { cancelEdit(); setMaskingPolicy(trimmed); }, warning);
+    return run(sql, trimmed ? "Masking policy set" : "Masking policy unset", () => { cancelEdit(); setMaskingPolicy(trimmed); }, warning);
   };
 
   // ── Tags (via the existing tag governance system) ──────────────────────────
@@ -410,7 +413,7 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
                 {confirmButtons(saveMasking)}
               </div>
             ) : (
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>{displayValue(normMasking)}{editButton("masking", normMasking, detailsError)}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>{displayValue(maskingPolicy)}{editButton("masking", maskingPolicy, detailsError)}</div>
             ))}
 
             {/* Tags */}
