@@ -194,6 +194,16 @@ func (a *App) GetTableColumnsWithTypes(database, schema, name string) ([]snowfla
 	return a.client.GetTableColumnsWithTypes(a.ctx, database, schema, name)
 }
 
+// GetColumnDetails returns the DEFAULT expression and masking policy attached to
+// a single column, backing the column properties editor's Default and Masking
+// Policy sections.
+func (a *App) GetColumnDetails(database, schema, table, column string) (snowflake.ColumnDetails, error) {
+	if a.client == nil {
+		return snowflake.ColumnDetails{}, apperrors.ErrNotConnected
+	}
+	return a.client.GetColumnDetails(a.ctx, database, schema, table, column)
+}
+
 // ListGitRepoEntries returns the immediate children (files and directories) at
 // dirPath inside the git repository stage @database.schema.repoName/dirPath.
 // Pass an empty dirPath to list the root.

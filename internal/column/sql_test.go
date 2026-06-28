@@ -205,3 +205,17 @@ func TestBuildChangeDataTypeSql(t *testing.T) {
 	assertEqual(t, BuildChangeDataTypeSql("DB", "SC", "T", "C", "  VARCHAR(20) "),
 		`ALTER TABLE "DB"."SC"."T" ALTER COLUMN "C" SET DATA TYPE VARCHAR(20);`)
 }
+
+func TestBuildColumnDefaultSql(t *testing.T) {
+	assertEqual(t, BuildSetColumnDefaultSql("DB", "SC", "T", "C", "  MY_SEQ.NEXTVAL "),
+		`ALTER TABLE "DB"."SC"."T" ALTER COLUMN "C" SET DEFAULT MY_SEQ.NEXTVAL;`)
+	assertEqual(t, BuildDropColumnDefaultSql("DB", "SC", "T", "C"),
+		`ALTER TABLE "DB"."SC"."T" ALTER COLUMN "C" DROP DEFAULT;`)
+}
+
+func TestBuildColumnMaskingPolicySql(t *testing.T) {
+	assertEqual(t, BuildSetColumnMaskingPolicySql("DB", "SC", "T", "C", "PDB", "PSC", "PII"),
+		`ALTER TABLE "DB"."SC"."T" ALTER COLUMN "C" SET MASKING POLICY "PDB"."PSC"."PII";`)
+	assertEqual(t, BuildUnsetColumnMaskingPolicySql("DB", "SC", "T", "C"),
+		`ALTER TABLE "DB"."SC"."T" ALTER COLUMN "C" UNSET MASKING POLICY;`)
+}

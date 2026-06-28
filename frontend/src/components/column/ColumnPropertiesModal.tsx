@@ -1,0 +1,395 @@
+// Copyright (c) 2026 Technarion Oy. All rights reserved.
+//
+// This software and its source code are proprietary and confidential.
+// Unauthorized copying, distribution, modification, or use of this software,
+// in whole or in part, is strictly prohibited without prior written permission
+// from Technarion Oy.
+//
+// @thaw-domain: Object Browser & Administration
+
+import { useState, useEffect } from "react";
+import { App as AntApp, Modal, Spin, Button, Input, Switch, Space, Tag, Select } from "antd";
+import { EditOutlined, CheckOutlined, CloseOutlined, PlusOutlined } from "@ant-design/icons";
+import DataTypeSelect from "../shared/DataTypeSelect";
+import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
+import type { snowflake } from "../../../wailsjs/go/models";
+import {
+  ExecDDL,
+  GetColumnDetails,
+  GetColumnTagReferences,
+  GetQuotedIdentifiersIgnoreCase,
+  ListAccountMaskingPolicies,
+  ListAccountTags,
+  SetObjectTag,
+  UnsetObjectTag,
+  BuildRenameColumnSql,
+  BuildChangeColumnTypeSql,
+  BuildSetColumnNotNullSql,
+  BuildDropColumnNotNullSql,
+  BuildSetColumnCommentSql,
+  BuildSetColumnDefaultSql,
+  BuildDropColumnDefaultSql,
+  BuildSetColumnMaskingPolicySql,
+  BuildUnsetColumnMaskingPolicySql,
+} from "../../../wailsjs/go/app/App";
+
+// A schema-qualified object (masking policy or tag) parsed from a SHOW … result.
+interface QualifiedObject { db: string; schema: string; name: string; fqn: string; }
+
+// SHOW MASKING POLICIES / SHOW TAGS share the name/database_name/schema_name
+// columns; pull the qualified object list out by column name.
+function parseObjectList(res: snowflake.QueryResult): QualifiedObject[] {
+  const cols = res.columns ?? [];
+  const iName = cols.indexOf("name");
+  const iDb = cols.indexOf("database_name");
+  const iSc = cols.indexOf("schema_name");
+  if (iName < 0) return [];
+  return (res.rows ?? []).map((r) => {
+    const name = String(r[iName]);
+    const db = iDb >= 0 && r[iDb] != null ? String(r[iDb]) : "";
+    const schema = iSc >= 0 && r[iSc] != null ? String(r[iSc]) : "";
+    return { db, schema, name, fqn: [db, schema, name].filter(Boolean).join(".") };
+  });
+}
+
+interface ColMeta {
+  dataType: string;
+  nullable: boolean;
+  isPrimaryKey: boolean;
+  comment: string;
+}
+
+interface Props {
+  db: string;
+  schema: string;
+  table: string;
+  column: string;
+  parentKind: string; // "TABLE"
+  initial: ColMeta;
+  onClose: () => void;
+  onChanged: () => void; // refresh the table's columns in the sidebar
+}
+
+const ROW_LABEL: React.CSSProperties = {
+  padding: "8px 12px 8px 0",
+  color: "var(--text-muted)",
+  fontFamily: "monospace",
+  whiteSpace: "nowrap",
+  verticalAlign: "top",
+  width: 150,
+  minWidth: 130,
+};
+
+interface ColTag { db: string; schema: string; name: string; value: string; }
+
+export default function ColumnPropertiesModal({ db, schema, table, column, parentKind, initial, onClose, onChanged }: Props) {
+  const { modal, message } = AntApp.useApp();
+
+  const [cur, setCur] = useState<ColMeta>(initial);
+  const [colDefault, setColDefault] = useState("");
+  const [maskingPolicy, setMaskingPolicy] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [qiic, setQiic] = useState(false);
+
+  // Which section is in edit mode, plus its draft value.
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [caseSensitive, setCaseSensitive] = useState(false);
+
+  // Pick lists for the masking-policy and tag dropdowns.
+  const [policies, setPolicies] = useState<QualifiedObject[]>([]);
+  const [tagCatalog, setTagCatalog] = useState<QualifiedObject[]>([]);
+
+  // Tags.
+  const [tags, setTags] = useState<ColTag[] | null>(null);
+  const [tagName, setTagName] = useState("");
+  const [tagValue, setTagValue] = useState("");
+
+  useEffect(() => {
+    GetQuotedIdentifiersIgnoreCase().then((v) => setQiic(v ?? false)).catch(() => {});
+    GetColumnDetails(db, schema, table, column)
+      .then((d) => { setColDefault(d.default || ""); setMaskingPolicy(d.maskingPolicy || ""); })
+      .catch((e) => message.error(String(e)))
+      .finally(() => setLoading(false));
+    ListAccountMaskingPolicies().then((r) => setPolicies(parseObjectList(r))).catch(() => {});
+    ListAccountTags().then((r) => setTagCatalog(parseObjectList(r))).catch(() => {});
+    loadTags();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [db, schema, table, column]);
+
+  const loadTags = () => {
+    GetColumnTagReferences(parentKind, db, schema, table)
+      .then((res) => {
+        const rows = res.rows ?? [];
+        setTags(rows
+          .filter((r) => String(r[0]) === column)
+          .map((r) => ({ db: String(r[1]), schema: String(r[2]), name: String(r[3]), value: r[4] == null ? "" : String(r[4]) })));
+      })
+      .catch(() => setTags([]));
+  };
+
+  const exec = async (sql: string, okMsg: string, after?: () => void) => {
+    try {
+      await ExecDDL(sql);
+      message.success(okMsg);
+      onChanged();
+      after?.();
+    } catch (e) {
+      message.error(String(e));
+      throw e;
+    }
+  };
+
+  // Run a statement. Safe edits execute immediately; only edits that can lose or
+  // truncate data (`warning` set) get a confirmation dialog with a SQL preview.
+  const run = (sql: string, okMsg: string, after?: () => void, warning?: string) => {
+    if (!warning) { exec(sql, okMsg, after).catch(() => {}); return; }
+    modal.confirm({
+      title: "This change may affect existing data",
+      width: 580,
+      okText: "Run anyway",
+      okButtonProps: { danger: true },
+      content: (
+        <div>
+          <div style={{ marginBottom: 8, color: "var(--text)" }}>{warning}</div>
+          <div style={{ padding: "10px 12px", background: "var(--bg)", borderRadius: 6, border: "1px solid var(--border)" }}>
+            <pre style={{ margin: 0, color: "var(--text)", fontSize: 11, fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{sql}</pre>
+          </div>
+        </div>
+      ),
+      onOk: () => exec(sql, okMsg, after),
+    });
+  };
+
+  const startEdit = (key: string, value: string) => { setEditing(key); setDraft(value); setCaseSensitive(false); };
+  const cancelEdit = () => { setEditing(null); setDraft(""); };
+
+  // ── Section savers ──────────────────────────────────────────────────────────
+
+  const saveName = async () => {
+    const trimmed = draft.trim();
+    if (!trimmed || trimmed === column) { cancelEdit(); return; }
+    const sql = await BuildRenameColumnSql(db, schema, table, column, trimmed, caseSensitive);
+    cancelEdit();
+    // The column identity changes on rename, so close the modal afterwards.
+    run(sql, `Renamed column to "${trimmed}"`, onClose);
+  };
+
+  const saveDataType = async () => {
+    const trimmed = draft.trim();
+    if (!trimmed || trimmed === cur.dataType) { cancelEdit(); return; }
+    const sql = await BuildChangeColumnTypeSql(db, schema, table, column, trimmed);
+    cancelEdit();
+    run(sql, `Changed data type to ${trimmed}`, () => setCur((c) => ({ ...c, dataType: trimmed })),
+      `Changing the data type of "${column}" from ${cur.dataType} to ${trimmed} can truncate or fail on existing rows. Snowflake only permits a narrow set of conversions (e.g. widening a VARCHAR or NUMBER).`);
+  };
+
+  const toggleNullable = async (checked: boolean) => {
+    // checked = nullable. SET NOT NULL when turning off; DROP NOT NULL when on.
+    const sql = checked
+      ? await BuildDropColumnNotNullSql(db, schema, table, column)
+      : await BuildSetColumnNotNullSql(db, schema, table, column);
+    run(sql, checked ? "Dropped NOT NULL" : "Set NOT NULL", () => setCur((c) => ({ ...c, nullable: checked })));
+  };
+
+  const saveDefault = async () => {
+    const trimmed = draft.trim();
+    if (trimmed === colDefault.trim()) { cancelEdit(); return; }
+    const sql = trimmed
+      ? await BuildSetColumnDefaultSql(db, schema, table, column, trimmed)
+      : await BuildDropColumnDefaultSql(db, schema, table, column);
+    cancelEdit();
+    run(sql, trimmed ? "Default updated" : "Default dropped", () => setColDefault(trimmed));
+  };
+
+  const saveComment = async () => {
+    if (draft === (cur.comment ?? "")) { cancelEdit(); return; }
+    const sql = await BuildSetColumnCommentSql(db, schema, table, column, draft);
+    const v = draft;
+    cancelEdit();
+    run(sql, v.trim() ? "Comment updated" : "Comment removed", () => setCur((c) => ({ ...c, comment: v })));
+  };
+
+  // The current masking policy comes back double-quoted (Qualify output); strip
+  // the quotes so it matches the unquoted picker option fqns.
+  const normMasking = maskingPolicy.replace(/"/g, "");
+
+  // Split a qualified name into db/schema/name, preferring a known catalog match
+  // (handles quoted/dotted identifiers); falls back to a naive dotted split with
+  // the table's db/schema as defaults.
+  const splitQualified = (fqn: string, catalog: QualifiedObject[]) => {
+    const hit = catalog.find((o) => o.fqn === fqn);
+    if (hit) return { db: hit.db, schema: hit.schema, name: hit.name };
+    const parts = fqn.split(".");
+    return { name: parts.pop()!, schema: parts.pop() ?? schema, db: parts.pop() ?? db };
+  };
+
+  const saveMasking = async () => {
+    const trimmed = draft.trim();
+    if (trimmed === normMasking) { cancelEdit(); return; }
+    let sql: string;
+    if (!trimmed) {
+      sql = await BuildUnsetColumnMaskingPolicySql(db, schema, table, column);
+    } else {
+      const p = splitQualified(trimmed, policies);
+      sql = await BuildSetColumnMaskingPolicySql(db, schema, table, column, p.db, p.schema, p.name);
+    }
+    cancelEdit();
+    run(sql, trimmed ? "Masking policy set" : "Masking policy unset", () => setMaskingPolicy(trimmed));
+  };
+
+  // ── Tags (via the existing tag governance system) ──────────────────────────
+
+  const tagRef = () => ({ domain: "COLUMN", database: db, schema, name: table, column, parentKind } as any);
+
+  const addTag = async () => {
+    const name = tagName.trim();
+    if (!name) return;
+    const t = splitQualified(name, tagCatalog);
+    try {
+      await SetObjectTag(tagRef(), t.db, t.schema, t.name, tagValue.trim());
+      message.success(`Tag "${t.name}" set`);
+      setTagName(""); setTagValue("");
+      loadTags();
+    } catch (e) { message.error(String(e)); }
+  };
+
+  const removeTag = async (t: ColTag) => {
+    try {
+      await UnsetObjectTag(tagRef(), t.db, t.schema, t.name);
+      message.success(`Tag "${t.name}" removed`);
+      loadTags();
+    } catch (e) { message.error(String(e)); }
+  };
+
+  // ── Render helpers ──────────────────────────────────────────────────────────
+
+  const displayValue = (v: string) => (
+    <span style={{ fontFamily: "monospace", color: v ? "var(--text)" : "var(--text-faint)", fontStyle: v ? "normal" : "italic", flex: 1, wordBreak: "break-word" }}>
+      {v || "—"}
+    </span>
+  );
+
+  const editButton = (key: string, value: string) => (
+    <Button size="small" type="text" icon={<EditOutlined />} onClick={() => startEdit(key, value)} style={{ flexShrink: 0, color: "var(--text-faint)" }} />
+  );
+
+  const confirmButtons = (onSave: () => void) => (
+    <>
+      <Button size="small" type="primary" icon={<CheckOutlined />} onClick={onSave} />
+      <Button size="small" icon={<CloseOutlined />} onClick={cancelEdit} />
+    </>
+  );
+
+  const row = (label: string, body: React.ReactNode) => (
+    <tr style={{ borderBottom: "1px solid var(--border)" }}>
+      <td style={ROW_LABEL}>{label}</td>
+      <td style={{ padding: "6px 0", verticalAlign: "middle" }}>{body}</td>
+    </tr>
+  );
+
+  const textRow = (label: string, key: string, value: string, onSave: () => void, textarea = false) =>
+    row(label, editing === key ? (
+      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        {textarea ? (
+          <Input.TextArea value={draft} onChange={(e) => setDraft(e.target.value)} rows={2} autoFocus style={{ fontFamily: "monospace", fontSize: 12 }} />
+        ) : (
+          <Input size="small" value={draft} onChange={(e) => setDraft(e.target.value)} onPressEnter={onSave} autoFocus style={{ fontFamily: "monospace", fontSize: 12 }} />
+        )}
+        {confirmButtons(onSave)}
+      </div>
+    ) : (
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>{displayValue(value)}{editButton(key, value)}</div>
+    ));
+
+  return (
+    <Modal open title={`Column "${column}"`} onCancel={onClose} width={620} footer={[<Button key="close" onClick={onClose}>Close</Button>]}>
+      {loading ? (
+        <div style={{ textAlign: "center", padding: "32px 0" }}><Spin /></div>
+      ) : (
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <tbody>
+            {/* Name */}
+            {textRow("Name", "name", column, saveName)}
+            {editing === "name" && (
+              <tr><td /><td style={{ paddingBottom: 8 }}>
+                <ObjectNameCaseControl name={draft} caseSensitive={caseSensitive} onCaseSensitiveChange={setCaseSensitive} quotedIdentifiersIgnoreCase={qiic} />
+              </td></tr>
+            )}
+
+            {/* Data type */}
+            {row("Data type", editing === "dataType" ? (
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <DataTypeSelect value={draft || cur.dataType} onChange={setDraft} />
+                {confirmButtons(saveDataType)}
+              </div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>{displayValue(cur.dataType)}{editButton("dataType", cur.dataType)}</div>
+            ))}
+
+            {/* Nullable */}
+            {row("Nullable", cur.isPrimaryKey ? (
+              <span style={{ color: "var(--text-faint)", fontStyle: "italic" }}>NOT NULL (primary key)</span>
+            ) : (
+              <Switch size="small" checked={cur.nullable} onChange={toggleNullable} />
+            ))}
+
+            {/* Default — free-text for now; a built-in-functions dropdown is
+                deferred to #506, which will provide the shared catalog. */}
+            {textRow("Default", "default", colDefault, saveDefault)}
+
+            {/* Comment */}
+            {textRow("Comment", "comment", cur.comment ?? "", saveComment, true)}
+
+            {/* Masking policy */}
+            {row("Masking policy", editing === "masking" ? (
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <Select
+                  size="small"
+                  showSearch
+                  allowClear
+                  placeholder="Select a masking policy (clear to unset)"
+                  value={draft || undefined}
+                  onChange={(v) => setDraft(v ?? "")}
+                  style={{ flex: 1, minWidth: 0 }}
+                  options={policies.map((p) => ({ value: p.fqn, label: p.fqn }))}
+                />
+                {confirmButtons(saveMasking)}
+              </div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>{displayValue(normMasking)}{editButton("masking", normMasking)}</div>
+            ))}
+
+            {/* Tags */}
+            {row("Tags", (
+              <Space direction="vertical" size={6} style={{ width: "100%" }}>
+                {tags === null ? <Spin size="small" /> : tags.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {tags.map((t) => (
+                      <Tag key={`${t.db}.${t.schema}.${t.name}`} closable onClose={(e) => { e.preventDefault(); removeTag(t); }}>
+                        {t.name}{t.value ? `: ${t.value}` : ""}
+                      </Tag>
+                    ))}
+                  </div>
+                )}
+                <Space>
+                  <Select
+                    size="small"
+                    showSearch
+                    placeholder="Tag name"
+                    value={tagName || undefined}
+                    onChange={(v) => setTagName(v ?? "")}
+                    style={{ width: 170 }}
+                    options={tagCatalog.map((t) => ({ value: t.fqn, label: t.fqn }))}
+                  />
+                  <Input size="small" value={tagValue} onChange={(e) => setTagValue(e.target.value)} onPressEnter={addTag} placeholder="Tag value" style={{ width: 150 }} />
+                  <Button size="small" icon={<PlusOutlined />} onClick={addTag} disabled={!tagName.trim()}>Add</Button>
+                </Space>
+              </Space>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Modal>
+  );
+}

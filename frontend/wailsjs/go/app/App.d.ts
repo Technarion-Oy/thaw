@@ -293,6 +293,8 @@ export function BuildCreateTagSql(arg1:string,arg2:string,arg3:tag.TagConfig):Pr
 
 export function BuildCreateViewSql(arg1:string,arg2:string,arg3:view.ViewConfig):Promise<string>;
 
+export function BuildDropColumnDefaultSql(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
+
 export function BuildDropColumnNotNullSql(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
 
 export function BuildDropColumnSql(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
@@ -319,7 +321,13 @@ export function BuildRenameColumnSql(arg1:string,arg2:string,arg3:string,arg4:st
 
 export function BuildSetColumnCommentSql(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<string>;
 
+export function BuildSetColumnDefaultSql(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<string>;
+
+export function BuildSetColumnMaskingPolicySql(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:string):Promise<string>;
+
 export function BuildSetColumnNotNullSql(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
+
+export function BuildUnsetColumnMaskingPolicySql(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
 
 export function BuildWorkloadIdentityPolicyValue(arg1:authenticationpolicy.WorkloadIdentityPolicy):Promise<string>;
 
@@ -522,6 +530,8 @@ export function GetCollationSpecifiers():Promise<Array<snowflake.CollationSpecif
 export function GetCollations():Promise<Array<snowflake.CollationOption>>;
 
 export function GetColumnComments(arg1:string,arg2:string,arg3:string):Promise<Array<objects.ColumnComment>>;
+
+export function GetColumnDetails(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.ColumnDetails>;
 
 export function GetColumnTagReferences(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.QueryResult>;
 
@@ -780,6 +790,8 @@ export function IsNumeric(arg1:string):Promise<boolean>;
 export function IsQueryLogEnabled():Promise<boolean>;
 
 export function ListAIModels(arg1:string,arg2:string,arg3:number):Promise<Array<string>>;
+
+export function ListAccountMaskingPolicies():Promise<snowflake.QueryResult>;
 
 export function ListAccountTags():Promise<snowflake.QueryResult>;
 

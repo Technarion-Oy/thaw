@@ -4158,6 +4158,20 @@ export namespace snowflake {
 	        this.category = source["category"];
 	    }
 	}
+	export class ColumnDetails {
+	    default: string;
+	    maskingPolicy: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ColumnDetails(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.default = source["default"];
+	        this.maskingPolicy = source["maskingPolicy"];
+	    }
+	}
 	export class ColumnInfo {
 	    name: string;
 	    dataType: string;

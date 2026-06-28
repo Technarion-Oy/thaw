@@ -446,6 +446,10 @@ export function BuildCreateViewSql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateViewSql'](arg1, arg2, arg3);
 }
 
+export function BuildDropColumnDefaultSql(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['BuildDropColumnDefaultSql'](arg1, arg2, arg3, arg4);
+}
+
 export function BuildDropColumnNotNullSql(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['BuildDropColumnNotNullSql'](arg1, arg2, arg3, arg4);
 }
@@ -498,8 +502,20 @@ export function BuildSetColumnCommentSql(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['BuildSetColumnCommentSql'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function BuildSetColumnDefaultSql(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['app']['App']['BuildSetColumnDefaultSql'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function BuildSetColumnMaskingPolicySql(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
+  return window['go']['app']['App']['BuildSetColumnMaskingPolicySql'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
+}
+
 export function BuildSetColumnNotNullSql(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['BuildSetColumnNotNullSql'](arg1, arg2, arg3, arg4);
+}
+
+export function BuildUnsetColumnMaskingPolicySql(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['BuildUnsetColumnMaskingPolicySql'](arg1, arg2, arg3, arg4);
 }
 
 export function BuildWorkloadIdentityPolicyValue(arg1) {
@@ -904,6 +920,10 @@ export function GetCollations() {
 
 export function GetColumnComments(arg1, arg2, arg3) {
   return window['go']['app']['App']['GetColumnComments'](arg1, arg2, arg3);
+}
+
+export function GetColumnDetails(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['GetColumnDetails'](arg1, arg2, arg3, arg4);
 }
 
 export function GetColumnTagReferences(arg1, arg2, arg3, arg4) {
@@ -1420,6 +1440,10 @@ export function IsQueryLogEnabled() {
 
 export function ListAIModels(arg1, arg2, arg3) {
   return window['go']['app']['App']['ListAIModels'](arg1, arg2, arg3);
+}
+
+export function ListAccountMaskingPolicies() {
+  return window['go']['app']['App']['ListAccountMaskingPolicies']();
 }
 
 export function ListAccountTags() {
