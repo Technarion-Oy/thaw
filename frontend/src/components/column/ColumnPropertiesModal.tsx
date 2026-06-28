@@ -205,9 +205,11 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
   const saveComment = async () => {
     if (draft === (cur.comment ?? "")) { cancelEdit(); return; }
     const sql = await BuildSetColumnCommentSql(db, schema, table, column, draft);
-    const v = draft;
+    // The backend trims and emits UNSET COMMENT for whitespace-only input, so
+    // mirror that here — store the trimmed value to keep the display in sync.
+    const v = draft.trim();
     cancelEdit();
-    run(sql, v.trim() ? "Comment updated" : "Comment removed", () => setCur((c) => ({ ...c, comment: v })));
+    run(sql, v ? "Comment updated" : "Comment removed", () => setCur((c) => ({ ...c, comment: v })));
   };
 
   // The current masking policy comes back double-quoted (Qualify output); strip

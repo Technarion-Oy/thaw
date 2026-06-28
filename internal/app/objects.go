@@ -356,20 +356,3 @@ func (a *App) GetRoutineProperties(database, schema, kind, name, args string) ([
 	}
 	return objects.GetRoutineProperties(a.ctx, a.client, database, schema, kind, name, args)
 }
-
-// GetColumnComments returns the comment for every column in a table, ordered
-// by ordinal position.
-func (a *App) GetColumnComments(database, schema, table string) ([]objects.ColumnComment, error) {
-	if a.client == nil {
-		return nil, apperrors.ErrNotConnected
-	}
-	return objects.GetColumnComments(a.ctx, a.client, database, schema, table)
-}
-
-// SetColumnComment sets (or clears) the COMMENT on a single table column.
-func (a *App) SetColumnComment(database, schema, table, column, comment string) error {
-	if a.client == nil {
-		return apperrors.ErrNotConnected
-	}
-	return objects.SetColumnComment(a.ctx, a.client, database, schema, table, column, comment)
-}

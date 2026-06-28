@@ -3062,25 +3062,6 @@ export namespace networkrule {
 
 }
 
-export namespace objects {
-	
-	export class ColumnComment {
-	    column: string;
-	    comment: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new ColumnComment(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.column = source["column"];
-	        this.comment = source["comment"];
-	    }
-	}
-
-}
-
 export namespace packagespolicy {
 	
 	export class PackagesPolicyConfig {

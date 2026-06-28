@@ -17,9 +17,8 @@ Each editable section:
 - **Name** — `RENAME COLUMN` with an `ObjectNameCaseControl` case-sensitivity toggle. Closes the modal afterwards, since the column identity changes.
 - **Data type** — `SET DATA TYPE` via `DataTypeSelect`.
 - **Nullable** — a switch issuing `SET NOT NULL` / `DROP NOT NULL`; disabled (shown as NOT NULL) for primary-key columns.
-- **Default value** — `SET DEFAULT <expr>` / `DROP DEFAULT` (empty clears).
+- **Default value** — `SET DEFAULT <expr>` / `DROP DEFAULT` (empty clears). Free-text for now; a built-in-functions dropdown is deferred to issue #506 (which will provide the shared function catalog).
 - **Comment** — `COMMENT …` / `UNSET COMMENT` (empty clears).
-- **Default value** — `SET DEFAULT <expr>` / `DROP DEFAULT`. Free-text for now; a built-in-functions dropdown is deferred to issue #506 (which will provide the shared function catalog).
 - **Masking policy** — `SET / UNSET MASKING POLICY`, chosen from a searchable dropdown populated by `ListAccountMaskingPolicies` (`SHOW MASKING POLICIES IN ACCOUNT`); clearing the dropdown unsets the policy.
 - **Tags** — removable chips plus an add row whose tag-name field is a dropdown populated by `ListAccountTags` (`SHOW TAGS IN ACCOUNT`); applied via the shared tag governance IPC (`SetObjectTag` / `UnsetObjectTag`) with an `ObjectTagRef` of domain `COLUMN`.
 

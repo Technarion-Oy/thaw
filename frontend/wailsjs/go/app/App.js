@@ -918,10 +918,6 @@ export function GetCollations() {
   return window['go']['app']['App']['GetCollations']();
 }
 
-export function GetColumnComments(arg1, arg2, arg3) {
-  return window['go']['app']['App']['GetColumnComments'](arg1, arg2, arg3);
-}
-
 export function GetColumnDetails(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['GetColumnDetails'](arg1, arg2, arg3, arg4);
 }
@@ -1920,10 +1916,6 @@ export function ScanMigrationSource(arg1) {
 
 export function SearchFiles(arg1, arg2, arg3) {
   return window['go']['app']['App']['SearchFiles'](arg1, arg2, arg3);
-}
-
-export function SetColumnComment(arg1, arg2, arg3, arg4, arg5) {
-  return window['go']['app']['App']['SetColumnComment'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function SetDefaultProfile(arg1) {

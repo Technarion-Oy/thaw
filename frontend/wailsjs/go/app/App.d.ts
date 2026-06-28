@@ -59,7 +59,6 @@ import {keypair} from '../models';
 import {config} from '../models';
 import {fnmeta} from '../models';
 import {app} from '../models';
-import {objects} from '../models';
 import {table} from '../models';
 import {queryhistory} from '../models';
 import {querylog} from '../models';
@@ -528,8 +527,6 @@ export function GetCollationLocales():Promise<Array<snowflake.CollationLocale>>;
 export function GetCollationSpecifiers():Promise<Array<snowflake.CollationSpecifier>>;
 
 export function GetCollations():Promise<Array<snowflake.CollationOption>>;
-
-export function GetColumnComments(arg1:string,arg2:string,arg3:string):Promise<Array<objects.ColumnComment>>;
 
 export function GetColumnDetails(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.ColumnDetails>;
 
@@ -1030,8 +1027,6 @@ export function SaveSnowparkVenvPath(arg1:string):Promise<void>;
 export function ScanMigrationSource(arg1:string):Promise<Array<migration.MigrationObject>>;
 
 export function SearchFiles(arg1:string,arg2:string,arg3:boolean):Promise<Array<filesystem.SearchMatch>>;
-
-export function SetColumnComment(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
 export function SetDefaultProfile(arg1:string):Promise<void>;
 

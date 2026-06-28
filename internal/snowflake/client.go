@@ -2972,14 +2972,21 @@ func (c *Client) GetColumnDetails(ctx context.Context, database, schema, table, 
 			break
 		}
 	}
+	scanErr := rows.Err()
 	rows.Close() //nolint:errcheck
+	if scanErr != nil {
+		return out, scanErr
+	}
 
-	// Masking policy — best effort.
+	// Masking policy — best effort. REF_ENTITY_NAME takes a plain dotted FQN, not
+	// a double-quoted one (Qualify's quoting would make the function match nothing).
 	mpQuery := fmt.Sprintf(
 		"SELECT POLICY_DB, POLICY_SCHEMA, POLICY_NAME "+
 			"FROM TABLE(%s.INFORMATION_SCHEMA.POLICY_REFERENCES(REF_ENTITY_NAME => '%s', REF_ENTITY_DOMAIN => 'TABLE')) "+
 			"WHERE POLICY_KIND = 'MASKING_POLICY' AND REF_COLUMN_NAME = '%s'",
-		QuoteIdent(database), EscapeStringLit(Qualify(database, schema, table)), EscapeStringLit(column))
+		QuoteIdent(database),
+		EscapeStringLit(fmt.Sprintf("%s.%s.%s", database, schema, table)),
+		EscapeStringLit(column))
 	if mrows, err := c.queryCtx(ctx, mpQuery); err == nil {
 		defer mrows.Close() //nolint:errcheck
 		if mrows.Next() {
