@@ -203,8 +203,8 @@ models:
 	// The readable base names are not injective on their own (see SourceName), so
 	// these maps break any collision deterministically; create.go builds the same
 	// maps to keep {{ source(...) }} / {{ ref(...) }} references consistent.
-	srcNames := SourceNames(objects)
-	stagingNames := StagingNames(objects, srcNames, multiScope)
+	srcNames := sourceNameMap(objects)
+	stagingNames := stagingNameMap(objects, srcNames, multiScope)
 
 	// Build _sources.yml
 	var sourcesBuilder strings.Builder
@@ -266,7 +266,7 @@ models:
 	}, nil
 }
 
-// SourceName returns the readable dbt source-name convention for a (db, schema)
+// sourceName returns the readable dbt source-name convention for a (db, schema)
 // pair: the two identifiers lower-cased and joined with "_", e.g. "mydb_public".
 //
 // This base name is NOT unique on its own.  dbt source and model names may only
@@ -274,18 +274,17 @@ models:
 // Snowflake identifiers may themselves contain "_", two distinct scopes can map
 // to the same string ("A_B"."C" and "A"."B_C" both → "a_b_c").  No "_"-based
 // scheme can avoid this, so uniqueness is enforced at the project level by
-// SourceNames, which appends a numeric suffix to any collision.  Callers needing
-// the final name must use that map, not this function in isolation.
-func SourceName(db, schema string) string {
+// sourceNameMap, which appends a numeric suffix to any collision.
+func sourceName(db, schema string) string {
 	return strings.ToLower(db) + "_" + strings.ToLower(schema)
 }
 
-// StagingModelName returns the readable staging-model name convention (filename
+// stagingModelName returns the readable staging-model name convention (filename
 // without the .sql extension): "stg_<table>" for a single data scope, or
-// "stg_<source>_<table>" when multiple scopes are present.  Like SourceName this
-// is the pre-deduplication base name; StagingNames resolves collisions.
-func StagingModelName(db, schema, table string, multiScope bool) string {
-	return stagingBase(SourceName(db, schema), table, multiScope)
+// "stg_<source>_<table>" when multiple scopes are present.  Like sourceName this
+// is the pre-deduplication base name; stagingNameMap resolves collisions.
+func stagingModelName(db, schema, table string, multiScope bool) string {
+	return stagingBase(sourceName(db, schema), table, multiScope)
 }
 
 // stagingBase builds the readable staging-model name from an (already-resolved)
@@ -301,7 +300,7 @@ func stagingBase(srcName, table string, multiScope bool) string {
 // stagingModelPath returns the relative path for a staging model file from its
 // resolved model-name stem.
 func stagingModelPath(db, schema, table string, multiScope bool) string {
-	return filepath.Join("models", "staging", StagingModelName(db, schema, table, multiScope)+".sql")
+	return filepath.Join("models", "staging", stagingModelName(db, schema, table, multiScope)+".sql")
 }
 
 // multiScopeFor reports whether staging model names need a db_schema prefix to
@@ -341,13 +340,13 @@ func uniqueName(base string, used map[string]bool) string {
 	return name
 }
 
-// SourceNames assigns a project-unique _sources.yml source name to every scope
+// sourceNameMap assigns a project-unique _sources.yml source name to every scope
 // that gets a source entry — system schemas, plus regular schemas with at least
-// one table or view — keyed by scopeKey.  The readable SourceName base is used
+// one table or view — keyed by scopeKey.  The readable sourceName base is used
 // as-is unless an earlier scope already claimed it (a collision, e.g. "A_B"."C"
 // vs "A"."B_C"), in which case a _2/_3/… suffix is appended.  Iteration follows
 // objects order, so Generate and create.go compute identical names.
-func SourceNames(objects []SchemaObjects) map[string]string {
+func sourceNameMap(objects []SchemaObjects) map[string]string {
 	used := map[string]bool{}
 	out := map[string]string{}
 	for _, so := range objects {
@@ -358,7 +357,7 @@ func SourceNames(objects []SchemaObjects) map[string]string {
 		if _, ok := out[k]; ok {
 			continue
 		}
-		out[k] = uniqueName(SourceName(so.DB, so.Schema), used)
+		out[k] = uniqueName(sourceName(so.DB, so.Schema), used)
 	}
 	return out
 }
@@ -369,7 +368,7 @@ func SourceNames(objects []SchemaObjects) map[string]string {
 // and a separate used-set guards the model-name space (which can collide even
 // when source names don't, e.g. source "a_b" + table "c_d" vs source "a_b_c" +
 // table "d" both → "stg_a_b_c_d").
-func StagingNames(objects []SchemaObjects, srcNames map[string]string, multiScope bool) map[string]string {
+func stagingNameMap(objects []SchemaObjects, srcNames map[string]string, multiScope bool) map[string]string {
 	used := map[string]bool{}
 	out := map[string]string{}
 	for _, so := range objects {

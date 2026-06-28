@@ -632,9 +632,9 @@ func TestSourceName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.db+"."+tt.schema, func(t *testing.T) {
-			got := SourceName(tt.db, tt.schema)
+			got := sourceName(tt.db, tt.schema)
 			if got != tt.want {
-				t.Errorf("SourceName(%q, %q) = %q, want %q", tt.db, tt.schema, got, tt.want)
+				t.Errorf("sourceName(%q, %q) = %q, want %q", tt.db, tt.schema, got, tt.want)
 			}
 		})
 	}
@@ -656,14 +656,14 @@ func TestSourceNames(t *testing.T) {
 			{DB: p[0][0], Schema: p[0][1], Tables: []string{"T"}},
 			{DB: p[1][0], Schema: p[1][1], Tables: []string{"T"}},
 		}
-		names := SourceNames(objects)
+		names := sourceNameMap(objects)
 		a := names[scopeKey(p[0][0], p[0][1])]
 		b := names[scopeKey(p[1][0], p[1][1])]
 		if a == "" || b == "" {
 			t.Fatalf("missing source name for %v: %v", p, names)
 		}
 		if a == b {
-			t.Errorf("SourceNames(%v): both scopes got %q — collision not resolved", p, a)
+			t.Errorf("sourceNameMap(%v): both scopes got %q — collision not resolved", p, a)
 		}
 	}
 
@@ -672,7 +672,7 @@ func TestSourceNames(t *testing.T) {
 			{DB: "MY_DB", Schema: "PUBLIC", Tables: []string{"T"}},
 			{DB: "ANALYTICS", Schema: "GOLD", Tables: []string{"T"}},
 		}
-		names := SourceNames(objects)
+		names := sourceNameMap(objects)
 		if got := names[scopeKey("MY_DB", "PUBLIC")]; got != "my_db_public" {
 			t.Errorf("got %q, want clean base name my_db_public", got)
 		}
@@ -683,7 +683,7 @@ func TestSourceNames(t *testing.T) {
 			{DB: "DB", Schema: "EMPTY"},
 			{DB: "DB", Schema: "INFORMATION_SCHEMA", IsSystem: true},
 		}
-		names := SourceNames(objects)
+		names := sourceNameMap(objects)
 		if _, ok := names[scopeKey("DB", "EMPTY")]; ok {
 			t.Errorf("empty schema should not get a source name: %v", names)
 		}
@@ -786,7 +786,7 @@ func TestStagingNames(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			multiScope := multiScopeFor(tc.objects)
-			names := StagingNames(tc.objects, SourceNames(tc.objects), multiScope)
+			names := stagingNameMap(tc.objects, sourceNameMap(tc.objects), multiScope)
 			seen := map[string]string{}
 			for key, name := range names {
 				if other, dup := seen[name]; dup {
