@@ -56,8 +56,12 @@ jobs:
       - name: Publish test results
         uses: EnricoMi/publish-unit-test-result-action@v2
         if: always()
+        # Best-effort reporting; the go test step already fails the job on real
+        # failures. Don't let a flaky GitHub API throttle (429) fail the build.
+        continue-on-error: true
         with:
           files: report.xml
+          compare_to_earlier_commit: false
 
       - name: Unlock permissions for host runner agent
         if: always() 

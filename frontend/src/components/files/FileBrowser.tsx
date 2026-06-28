@@ -8,8 +8,8 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useState, useEffect, useLayoutEffect, useRef } from "react";
-import { Tree, Typography, Spin, Button, Input, Switch, Modal, App as AntApp } from "antd";
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from "react";
+import { Tree, Typography, Spin, Button, Input, Switch, Modal, Tooltip, App as AntApp } from "antd";
 import {
   FolderOutlined,
   FolderOpenOutlined,
@@ -26,6 +26,10 @@ import {
   FolderViewOutlined,
   CaretRightFilled,
   CaretDownFilled,
+  PlusOutlined,
+  MinusOutlined,
+  UndoOutlined,
+  BranchesOutlined,
 } from "@ant-design/icons";
 import type { DataNode, EventDataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
@@ -42,9 +46,11 @@ import {
   DuplicateFile,
   StartFileWatcher,
   StopFileWatcher,
+  GitGetHeadFileContent,
 } from "../../../wailsjs/go/app/App";
 import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 import { useGitStore } from "../../store/gitStore";
+import { sigilColor, deriveNewAndPartial } from "../git/gitStatusUtil";
 import { useQueryStore } from "../../store/queryStore";
 import { useDiffStore } from "../../store/diffStore";
 import { getPlatformOS, getCachedPlatformOS, revealLabel } from "./platformUtil";
@@ -220,11 +226,75 @@ function groupByPath(matches: SearchMatch[]): Map<string, SearchMatch[]> {
 
 export default function FileBrowser() {
   const { modal, message } = AntApp.useApp();
-  const exportDir   = useGitStore((s) => s.exportDir);
-  const openFile    = useQueryStore((s) => s.openFile);
+  const exportDir    = useGitStore((s) => s.exportDir);
+  const gitStatus    = useGitStore((s) => s.status);
+  const stageFile    = useGitStore((s) => s.stageFile);
+  const unstageFile  = useGitStore((s) => s.unstageFile);
+  const discardFile  = useGitStore((s) => s.discardFile);
+  const resetHard    = useGitStore((s) => s.resetHard);
+  const openGitOps   = useGitStore((s) => s.openGitOps);
+  const pickExportDir = useGitStore((s) => s.pickExportDir);
+  const refreshGitStatus = useGitStore((s) => s.refreshStatus);
+  const loadGitConfig = useGitStore((s) => s.loadConfig);
+  const gitConfigLoaded = useGitStore((s) => s.configLoaded);
+  const openFile     = useQueryStore((s) => s.openFile);
   const currentFile = useQueryStore((s) => s.currentFile);
   const updateTabPath  = useQueryStore((s) => s.updateTabPath);
   const orphanTab      = useQueryStore((s) => s.orphanFileTab);
+
+  // ── Git status overlay ───────────────────────────────────────────────────────
+  // Git status paths are repo-relative ("MYDB/PUBLIC/T.sql"); tree node keys are
+  // absolute OS paths the explorer built by joining the export dir with each name,
+  // so `relOf` recovers a node's repo-relative path by stripping the export-dir
+  // prefix (exact — no suffix guessing, which would false-match files that merely
+  // share a basename). The uncapped `changedPaths` map drives coloring so the whole
+  // tree is covered even in huge change sets; the capped staged/unstaged lists
+  // drive the precise Stage/Unstage context menu.
+  const gitOverlay = useMemo(() => {
+    const byRel       = new Map<string, string>(); // file rel → status letter
+    const dirLetter   = new Map<string, string>(); // dir rel → dominant letter
+    const stagedRel   = new Set<string>();
+    const unstagedRel = new Set<string>();
+    // Discard-prompt sets (new-file / partially-staged) from the shared helper, so
+    // the classification has a single home (also used by ChangesView).
+    const { newFilesRel, partiallyStagedRel: partialRel } = deriveNewAndPartial(gitStatus?.changedPaths);
+
+    // Folder color = the most significant change beneath it. A/U are both "new"
+    // (green), so a folder of only-new files stays green rather than reading as
+    // modified. Higher rank wins.
+    const RANK: Record<string, number> = { M: 5, R: 5, C: 5, D: 4, A: 2, U: 1 };
+    const bumpDir = (dir: string, letter: string) => {
+      const cur = dirLetter.get(dir);
+      if (cur === undefined || (RANK[letter] ?? 0) > (RANK[cur] ?? 0)) dirLetter.set(dir, letter);
+    };
+    const addDirs = (rel: string, letter: string) => {
+      let i = rel.lastIndexOf("/");
+      while (i > 0) { bumpDir(rel.slice(0, i), letter); i = rel.lastIndexOf("/", i - 1); }
+    };
+
+    if (gitStatus) {
+      // Uncapped: drives the tree coloring for every changed file, including
+      // beyond the 500-cap arrays.
+      for (const [p, cf] of Object.entries(gitStatus.changedPaths ?? {})) {
+        const rel = p.replace(/\\/g, "/");
+        byRel.set(rel, cf.status);
+        addDirs(rel, cf.status);
+      }
+      for (const fc of (gitStatus.staged   ?? [])) stagedRel.add(fc.path.replace(/\\/g, "/"));
+      for (const fc of (gitStatus.unstaged ?? [])) unstagedRel.add(fc.path.replace(/\\/g, "/"));
+    }
+
+    // Exact repo-relative path of a tree node, or null when it's outside the repo.
+    const base = exportDir.replace(/[/\\]+$/, "").replace(/\\/g, "/");
+    const relOf = (nodeKey: string): string | null => {
+      const a = nodeKey.replace(/\\/g, "/");
+      if (a === base) return "";
+      if (base && a.startsWith(base + "/")) return a.slice(base.length + 1);
+      return null;
+    };
+
+    return { byRel, dirLetter, stagedRel, unstagedRel, newFilesRel, partialRel, relOf };
+  }, [gitStatus, exportDir]);
 
   // ── File tree state ────────────────────────────────────────────────────────
   const [treeData,    setTreeData]    = useState<DataNode[]>([]);
@@ -269,6 +339,28 @@ export default function FileBrowser() {
   const compareWith   = useDiffStore((s) => s.compareWith);
 
   const fileWatcherEnabled = useFeatureFlagsStore((s) => s.flags.fileWatcher);
+  const gitEnabled         = useFeatureFlagsStore((s) => s.flags.gitIntegration);
+
+  // The standalone Git panel was folded into this panel, so the Files panel now
+  // owns loading the git/export config on first mount (idempotent).
+  useEffect(() => {
+    if (!gitConfigLoaded) loadGitConfig();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gitConfigLoaded]);
+
+  // Keep git status fresh for whatever directory the explorer is showing, so the
+  // tree colors don't depend on some other surface having refreshed first.
+  useEffect(() => {
+    if (exportDir) refreshGitStatus(true); // background: don't surface status errors
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exportDir]);
+
+  const gitRepo       = gitEnabled && !!gitStatus?.isRepo;
+  // Empty branch = repo with no commits yet (Head() failed); don't imply "main".
+  const gitBranch     = gitStatus?.branch || "(no commits)";
+  const gitAhead      = gitStatus?.ahead ?? 0;
+  const gitChanged    = gitStatus?.totalChanged ?? 0;
+  const gitStagedTot  = gitStatus?.stagedTotal ?? 0;
 
   // ── Self-change suppression ────────────────────────────────────────────────
   // Tracks directories modified by in-app operations so watcher events don't
@@ -298,6 +390,24 @@ export default function FileBrowser() {
   loadedKeysRef.current = loadedKeys;
   const loadedRef = useRef(loaded);
   loadedRef.current = loaded;
+
+  // Debounced git-status refresh so the tree's status colors update live (on
+  // save, external edits, file ops) without a manual refresh, while coalescing
+  // bursts so we don't run the (potentially expensive) status scan repeatedly.
+  const gitRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleGitRefresh = useCallback(() => {
+    if (!useFeatureFlagsStore.getState().flags.gitIntegration) return; // respect the feature flag
+    if (gitRefreshTimerRef.current) clearTimeout(gitRefreshTimerRef.current);
+    gitRefreshTimerRef.current = setTimeout(() => { useGitStore.getState().refreshStatus(true); }, 400);
+  }, []);
+  useEffect(() => () => { if (gitRefreshTimerRef.current) clearTimeout(gitRefreshTimerRef.current); }, []);
+
+  // Refresh git colors when a file is saved in the editor (watcher-independent).
+  useEffect(() => {
+    const handler = () => scheduleGitRefresh();
+    window.addEventListener("thaw:file-saved", handler);
+    return () => window.removeEventListener("thaw:file-saved", handler);
+  }, [scheduleGitRefresh]);
 
   // Close file context menu on outside click or Escape key
   useEffect(() => {
@@ -354,6 +464,9 @@ export default function FileBrowser() {
   useEffect(() => {
     if (!exportDir || !fileWatcherEnabled) return;
     const off = EventsOn("fs:changed", (evt: { dir: string }) => {
+      // Any disk change may alter git status — refresh colors even for the app's
+      // own mutations (which suppress the tree update below to avoid flicker).
+      scheduleGitRefresh();
       if (selfChangedDirs.current.has(evt.dir)) return;
 
       // After refreshing a directory, prune loadedKeys entries that reference
@@ -390,7 +503,7 @@ export default function FileBrowser() {
         .catch(() => {});
     });
     return off;
-  }, [exportDir, fileWatcherEnabled]);
+  }, [exportDir, fileWatcherEnabled, scheduleGitRefresh]);
 
   // Keep selected key in sync with the active tab (including tab switches)
   useEffect(() => {
@@ -443,10 +556,30 @@ export default function FileBrowser() {
   const refresh = async () => {
     setFileCtxMenu(null); // dismiss stale context menu
     setLoading(true);
+    // Refresh git status alongside the tree so the status colors stay current
+    // (silent: a status-fetch failure shouldn't pop an error from the file tree).
+    refreshGitStatus(true);
     try {
-      const entries = await ListDirectory(exportDir);
-      setTreeData(entriesToNodes(entries));
-      setLoadedKeys([]); // clear so Tree re-triggers loadData for expanded dirs
+      // Re-fetch the root and every currently-loaded (expanded) directory in
+      // parallel, then merge — this picks up external changes while PRESERVING the
+      // expanded subtree. Replacing treeData with root-only nodes (the old
+      // behavior) desynced rc-tree's uncontrolled expand state: folders collapsed
+      // and could not be reopened.
+      const loaded = loadedKeysRef.current.map(String);
+      const [rootEntries, ...childResults] = await Promise.all([
+        ListDirectory(exportDir),
+        ...loaded.map(async (k) => {
+          try { return { key: k, entries: await ListDirectory(k) }; }
+          catch { return { key: k, entries: null as FileEntry[] | null }; }
+        }),
+      ]);
+      setTreeData((prev) => {
+        let tree = mergeNodes(prev, entriesToNodes(rootEntries));
+        for (const r of childResults) {
+          if (r.entries) tree = updateNode(tree, r.key, entriesToNodes(r.entries), true);
+        }
+        return tree;
+      });
       setLoaded(true);
     } catch {
       // non-fatal
@@ -566,6 +699,107 @@ export default function FileBrowser() {
     } catch {
       message.error("Failed to copy path");
     }
+  };
+
+  // gitStore records failures in state.error, which only ChangesView renders — so
+  // here we surface it as a toast, otherwise context-menu git actions fail silently.
+  const reportGit = (okMsg: string) => {
+    const err = useGitStore.getState().error;
+    if (err) message.error(err);
+    else message.success(okMsg);
+  };
+
+  // The store's git index isn't safe to write concurrently; bail if any index op
+  // (stage/unstage/discard, commit, or reset --hard) is mid-flight — otherwise
+  // overlapping writes race on the index and on the shared `error` flag.
+  const gitBusy = () => {
+    const s = useGitStore.getState();
+    if (s.staging || s.committing || s.resetting) {
+      message.warning("A git action is already running — try again in a moment");
+      return true;
+    }
+    return false;
+  };
+
+  const handleStage = () => {
+    if (!fileCtxMenu || gitBusy()) return;
+    const { path, name } = fileCtxMenu;
+    setFileCtxMenu(null);
+    // stageFile never rejects (it stores errors in gitStore.error); reportGit surfaces them.
+    stageFile(path).then(() => reportGit(`Staged ${name}`));
+  };
+
+  const handleUnstage = () => {
+    if (!fileCtxMenu || gitBusy()) return;
+    const { path, name } = fileCtxMenu;
+    setFileCtxMenu(null);
+    unstageFile(path).then(() => reportGit(`Unstaged ${name}`));
+  };
+
+  // Open a diff of the file's working-tree content against its last-committed
+  // (HEAD) state. HEAD content comes from go-git; a deleted file reads as empty
+  // on the working side so the diff shows what was removed.
+  const handleCompareWithHead = async () => {
+    if (!fileCtxMenu) return;
+    const { path, name } = fileCtxMenu;
+    setFileCtxMenu(null);
+    try {
+      const head = await GitGetHeadFileContent(path);
+      let current = "";
+      try { current = await ReadFile(path); } catch { /* file deleted in worktree */ }
+      useQueryStore.getState().openDiff(`HEAD · ${name}`, head ?? "", `Working tree · ${name}`, current);
+    } catch (e) {
+      message.error(`Could not compare with last commit: ${String(e)}`);
+    }
+  };
+
+  const handleDiscardGit = () => {
+    if (!fileCtxMenu || gitBusy()) return; // don't open the modal mid-op
+    const { path, name } = fileCtxMenu;
+    setFileCtxMenu(null);
+    // New files (no committed version) get deleted by discard. Use the dedicated
+    // set, not the display letter — a staged-new-then-modified file shows "M" but
+    // is still new (and would be permanently deleted).
+    const rel = gitOverlay.relOf(path);
+    const isNew = rel != null && gitOverlay.newFilesRel.has(rel);
+    // Discard always reverts to HEAD, so a file with both staged and unstaged
+    // changes loses its staged part too — warn about that. From the uncapped set
+    // so it's correct beyond the 500-file cap.
+    const partiallyStaged = rel != null && gitOverlay.partialRel.has(rel);
+    modal.confirm({
+      title: isNew ? `Delete ${name}?` : `Discard changes to ${name}?`,
+      content: isNew
+        ? "Permanently deletes this file — it has never been committed and cannot be recovered."
+        : partiallyStaged
+          ? "Reverts the file to its last committed state — this also discards your staged changes for this file. This cannot be undone."
+          : "Reverts the file to its last committed state. This cannot be undone.",
+      okText: isNew ? "Delete" : "Discard",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        // throw (not return) — a resolved onOk closes the modal, which would read
+        // as success even though nothing was discarded. Throwing keeps it open.
+        if (gitBusy()) throw new Error("busy");
+        await discardFile(path);
+        reportGit(isNew ? `Deleted ${name}` : `Discarded changes to ${name}`);
+      },
+    });
+  };
+
+  // Repo-wide reset --hard: discard every staged and unstaged change.
+  const handleDiscardAll = () => {
+    if (gitBusy()) return; // don't open the modal mid-op
+    setFileCtxMenu(null);
+    modal.confirm({
+      title: "Discard all changes?",
+      content: "Resets the entire working tree to the last commit (git reset --hard HEAD). Every staged and unstaged change across all files is permanently lost. This cannot be undone.",
+      okText: "Discard all",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        if (gitBusy()) throw new Error("busy"); // keep modal open; a resolved onOk reads as success
+        await resetHard();
+        reportGit("Discarded all changes — working tree reset to last commit");
+      },
+    });
   };
 
   const handleDuplicate = async () => {
@@ -781,10 +1015,58 @@ export default function FileBrowser() {
         />
       );
     }
+    // Git status overlay: color changed files (with a trailing sigil) and
+    // emphasize directories that contain nested changes.
+    const rel = gitOverlay.relOf(String(nodeData.key));
+    const letter = rel != null ? gitOverlay.byRel.get(rel) : undefined;
+    if (letter) {
+      const color = sigilColor(letter);
+      return (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, width: "100%" }}>
+          <span style={{ flex: 1, color, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {nodeData.title as React.ReactNode}
+          </span>
+          <span style={{ fontFamily: 'var(--editor-font, monospace)', fontSize: 10, fontWeight: 600, color, flexShrink: 0 }}>
+            {letter}
+          </span>
+        </span>
+      );
+    }
+    const dirLetter = rel != null ? gitOverlay.dirLetter.get(rel) : undefined;
+    if (dirLetter) {
+      const color = sigilColor(dirLetter);
+      return <span style={{ color, fontWeight: 600 }}>{nodeData.title as React.ReactNode}</span>;
+    }
     return <>{nodeData.title}</>;
   };
 
   const grouped = groupByPath(searchResults);
+
+  // rc-tree memoizes its flattened node list by treeData identity, so a status
+  // change alone won't re-run titleRender. Hand it a fresh top-level array
+  // reference whenever the git overlay changes so the status colors repaint.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- gitOverlay dep is
+  // intentional: it's not read in the body, it exists to force rc-tree to re-run
+  // titleRender on status change. Removing it stops colors repainting after edits.
+  const treeForRender = useMemo(() => [...treeData], [treeData, gitOverlay]);
+
+  // Git status of the right-clicked file (drives the Stage/Unstage/Discard menu items).
+  // ctxChanged: the file is changed at all. When we don't have a precise
+  // staged/unstaged side (legacy-only data), offer both Stage and Unstage and let
+  // the backend no-op the irrelevant one.
+  const ctxRel       = fileCtxMenu && !fileCtxMenu.isDir ? gitOverlay.relOf(fileCtxMenu.path) : null;
+  const ctxChanged   = ctxRel != null && gitOverlay.byRel.has(ctxRel);
+  const ctxStagedHit   = ctxRel != null && gitOverlay.stagedRel.has(ctxRel);
+  const ctxUnstagedHit = ctxRel != null && gitOverlay.unstagedRel.has(ctxRel);
+  const ctxUnknownSide = ctxChanged && !ctxStagedHit && !ctxUnstagedHit;
+  const ctxStaged   = ctxStagedHit   || ctxUnknownSide; // show Unstage
+  const ctxUnstaged = ctxUnstagedHit || ctxUnknownSide; // show Stage
+  // Comparable against HEAD only when there's a prior committed version. Gate on
+  // the authoritative isNew, not the display letter — a staged-new-then-modified
+  // file shows "M" but has no HEAD version, so HEAD diff would be empty/misleading.
+  const ctxLetter     = ctxRel != null ? gitOverlay.byRel.get(ctxRel) : undefined;
+  const ctxIsNew      = ctxRel != null && gitOverlay.newFilesRel.has(ctxRel);
+  const ctxComparable = !ctxIsNew && (ctxLetter === "M" || ctxLetter === "R" || ctxLetter === "C" || ctxLetter === "D");
 
   return (
     <div style={{ padding: "4px 4px" }}>
@@ -805,6 +1087,31 @@ export default function FileBrowser() {
             Files
           </Text>
         </div>
+        {/* Branch chip — folded in from the former Git panel; opens Git Operations */}
+        {gitRepo && (
+          <div
+            onClick={(e) => { e.stopPropagation(); openGitOps(); }}
+            title={`On branch ${gitBranch}${gitAhead > 0 ? ` · ${gitAhead} to push` : ""} — open Git Operations`}
+            style={{ display: "flex", alignItems: "center", gap: 3, maxWidth: 96, cursor: "pointer", padding: "1px 5px", borderRadius: 4, background: "color-mix(in srgb, var(--text) 6%, transparent)" }}
+          >
+            <BranchesOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />
+            <span style={{ fontFamily: 'var(--editor-font, monospace)', fontSize: 10, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {gitBranch}{gitAhead > 0 ? ` ↑${gitAhead}` : ""}
+            </span>
+          </div>
+        )}
+        {/* Changed-file count — at a glance, and opens Git Operations */}
+        {gitRepo && gitChanged > 0 && (
+          <div
+            onClick={(e) => { e.stopPropagation(); openGitOps(); }}
+            title={`${gitChanged} changed${gitStagedTot > 0 ? `, ${gitStagedTot} staged` : ""} — open Git Operations`}
+            style={{ display: "flex", alignItems: "center", gap: 3, cursor: "pointer", padding: "1px 5px", borderRadius: 4, background: "color-mix(in srgb, var(--warning) 16%, transparent)" }}
+          >
+            <span style={{ fontFamily: 'var(--editor-font, monospace)', fontSize: 10, fontWeight: 600, color: "var(--warning)" }}>
+              {gitChanged}{gitStagedTot > 0 ? `·${gitStagedTot}` : ""}
+            </span>
+          </div>
+        )}
         <Button
           size="small"
           type="text"
@@ -812,6 +1119,17 @@ export default function FileBrowser() {
           onClick={toggleSearch}
           style={{ height: 20, padding: "0 4px", minWidth: 0 }}
         />
+        {gitEnabled && exportDir && (
+          <Tooltip title="Git Operations…">
+            <Button
+              size="small"
+              type="text"
+              icon={<BranchesOutlined style={{ fontSize: 11 }} />}
+              onClick={(e) => { e.stopPropagation(); openGitOps(); }}
+              style={{ height: 20, padding: "0 4px", minWidth: 0 }}
+            />
+          </Tooltip>
+        )}
         {loaded && (
           <Button
             size="small"
@@ -828,9 +1146,10 @@ export default function FileBrowser() {
       {expanded && (
         <div style={{ padding: "0 4px" }}>
           {!exportDir && (
-            <Text style={{ fontSize: 11, color: CLR_SECONDARY }}>
-              Set a working directory in the Git section below.
-            </Text>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "2px 0 6px" }}>
+              <Text style={{ fontSize: 11, color: CLR_SECONDARY }}>No working directory selected.</Text>
+              <Button size="small" icon={<FolderOpenOutlined />} onClick={pickExportDir}>Pick directory…</Button>
+            </div>
           )}
 
           {exportDir && searchOpen && (
@@ -966,7 +1285,7 @@ export default function FileBrowser() {
           {!searchOpen && loaded && treeData.length > 0 && (
             <div style={{ overflow: "hidden" }}>
               <Tree
-                treeData={treeData}
+                treeData={treeForRender}
                 loadedKeys={loadedKeys}
                 selectedKeys={selectedKey ? [selectedKey] : []}
                 onLoad={(keys) => setLoadedKeys(keys)}
@@ -1063,6 +1382,31 @@ export default function FileBrowser() {
           )}
           <CtxItem icon={<EditOutlined />} label="Rename…" onClick={handleRenameStart} />
           <CtxItem icon={<DeleteOutlined />} label="Delete" onClick={handleDeleteConfirm} danger />
+
+          {/* ── Git staging actions (changed files only) ── */}
+          {gitEnabled && !fileCtxMenu.isDir && (ctxUnstaged || ctxStaged) && (
+            <>
+              <div role="separator" style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+              {ctxComparable && (
+                <CtxItem icon={<DiffOutlined />} label="Compare with last commit" onClick={handleCompareWithHead} />
+              )}
+              {ctxUnstaged && (
+                <CtxItem icon={<PlusOutlined />} label="Stage" onClick={handleStage} />
+              )}
+              {ctxStaged && (
+                <CtxItem icon={<MinusOutlined />} label="Unstage" onClick={handleUnstage} />
+              )}
+              <CtxItem icon={<UndoOutlined />} label="Discard changes" onClick={handleDiscardGit} danger />
+            </>
+          )}
+
+          {/* ── Repo-wide discard (reset --hard) — shown whenever the repo has changes ── */}
+          {gitRepo && gitChanged > 0 && (
+            <>
+              <div role="separator" style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+              <CtxItem icon={<UndoOutlined />} label="Discard all changes (reset to last commit)" onClick={handleDiscardAll} danger />
+            </>
+          )}
 
           {/* ── Directory-only actions ── */}
           {fileCtxMenu.isDir && (

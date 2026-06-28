@@ -68,6 +68,11 @@ type App struct {
 	logCleanup       func()               // closes the log rotation file on shutdown
 	savedWindowState *session.WindowState // non-nil when a persisted window state was loaded at launch
 
+	// oauthCancel cancels the in-flight GitHub OAuth loopback flow (frees port 3456
+	// and its goroutine when the user dismisses the auth dialog). Guarded by oauthMu.
+	oauthMu     sync.Mutex
+	oauthCancel context.CancelFunc
+
 	// Service instances for delegated business logic.
 	migrationSvc *migration.Service
 	snowparkSvc  *snowpark.Service

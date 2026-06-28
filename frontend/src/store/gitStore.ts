@@ -11,7 +11,7 @@
 // @thaw-domain: Git Integration
 
 import { create } from "zustand";
-import { GitStatus, GitCommitAndPush, GitPull, GitFetch, PickDirectory, GetGitConfig, SaveGitConfig, GitClone, GitListBranches, GitCheckoutBranch, GitCheckoutRemoteBranch, GitCreateBranch, GitDeleteBranch, GitDeleteRemoteBranch, GitMergeBranch, GitResetHard, GitUpdateRemoteURL, GitPushBranch, GitLoginWithOAuth } from "../../wailsjs/go/app/App";
+import { GitStatus, GitCommitAndPush, GitPull, GitFetch, PickDirectory, GetGitConfig, SaveGitConfig, GitClone, GitListBranches, GitCheckoutBranch, GitCheckoutRemoteBranch, GitCreateBranch, GitDeleteBranch, GitDeleteRemoteBranch, GitMergeBranch, GitResetHard, GitUpdateRemoteURL, GitPushBranch, GitLoginWithOAuth, GitStageFile, GitUnstageFile, GitStageAll, GitUnstageAll, GitDiscardFile } from "../../wailsjs/go/app/App";
 import type { gitrepo } from "../../wailsjs/go/models";
 
 export type RepoStatus = gitrepo.RepoStatus;
@@ -19,6 +19,7 @@ export type PushParams = gitrepo.PushParams;
 export type BranchInfo = gitrepo.BranchInfo;
 export type CloneParams = gitrepo.CloneParams;
 export type CredentialResult = gitrepo.CredentialResult;
+export type FileChange = gitrepo.FileChange;
 
 interface GitState {
   // Persistent config (saved to disk, excluding token)
@@ -33,7 +34,6 @@ interface GitState {
   // Runtime state
   status: RepoStatus | null;
   loading: boolean;
-  pushing: boolean;
   pulling: boolean;
   cloning: boolean;
   resetting: boolean;
@@ -59,9 +59,19 @@ interface GitState {
     exportPathTemplate: string;
   }>) => Promise<void>;
   pickExportDir: () => Promise<void>;
-  refreshStatus: () => Promise<void>;
-  push: (params: { message: string; files?: string[] }) => Promise<void>;
+  refreshStatus: (silent?: boolean) => Promise<void>;
   pull: () => Promise<void>;
+
+  // Staging (git index) actions — operate on the real index, then refresh status.
+  staging: boolean;
+  committing: boolean;
+  stageFile: (file: string) => Promise<void>;
+  unstageFile: (file: string) => Promise<void>;
+  stageAll: () => Promise<void>;
+  unstageAll: () => Promise<void>;
+  discardFile: (file: string) => Promise<void>;
+  commitStaged: (message: string, push?: boolean) => Promise<boolean>;
+
   loginWithOAuth: (provider: string) => Promise<string>;
   setOAuthToken: (token: string) => void;
   clearError: () => void;
@@ -100,10 +110,11 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   status: null,
   loading: false,
-  pushing: false,
   pulling: false,
   cloning: false,
   resetting: false,
+  staging: false,
+  committing: false,
   error: null,
 
   oauthToken: "",
@@ -150,41 +161,18 @@ export const useGitStore = create<GitState>((set, get) => ({
     await get().refreshStatus();
   },
 
-  refreshStatus: async () => {
+  // silent=true is for refreshes that run after another operation (or as
+  // background auto-refresh): they must not write `error`, or a status-fetch
+  // failure would masquerade as the preceding operation having failed.
+  refreshStatus: async (silent = false) => {
     const { exportDir } = get();
     if (!exportDir) return;
-    set({ loading: true, error: null });
+    set(silent ? { loading: true } : { loading: true, error: null });
     try {
       const status = await GitStatus(exportDir);
       set({ status, loading: false });
     } catch (e) {
-      set({ error: String(e), loading: false });
-    }
-  },
-
-  push: async ({ message, files }) => {
-    const { exportDir, remoteURL: storedURL, branch, authorName, authorEmail, oauthToken, status } = get();
-    if (!exportDir) return;
-    // Prefer the store's saved URL; fall back to what the repo's git config reports.
-    const remoteURL = storedURL || status?.remoteURL || "";
-    set({ pushing: true, error: null });
-    try {
-      await GitCommitAndPush({
-        dir:         exportDir,
-        remoteURL,
-        branch:      branch || "main",
-        authMethod:  "oauth",
-        token:       oauthToken,
-        message:     message || "chore: export Snowflake DDL",
-        authorName,
-        authorEmail,
-        files:       files ?? [],
-      } as any);
-      await get().refreshStatus();
-    } catch (e) {
-      set({ error: String(e) });
-    } finally {
-      set({ pushing: false });
+      set(silent ? { loading: false } : { error: String(e), loading: false });
     }
   },
 
@@ -209,13 +197,132 @@ export const useGitStore = create<GitState>((set, get) => ({
     }
   },
 
+  stageFile: async (file: string) => {
+    const { exportDir } = get();
+    if (!exportDir) return;
+    set({ staging: true, error: null });
+    try {
+      await GitStageFile(exportDir, file);
+      await get().refreshStatus(true);
+    } catch (e) {
+      set({ error: String(e) });
+    } finally {
+      set({ staging: false });
+    }
+  },
+
+  unstageFile: async (file: string) => {
+    const { exportDir } = get();
+    if (!exportDir) return;
+    set({ staging: true, error: null });
+    try {
+      await GitUnstageFile(exportDir, file);
+      await get().refreshStatus(true);
+    } catch (e) {
+      set({ error: String(e) });
+    } finally {
+      set({ staging: false });
+    }
+  },
+
+  stageAll: async () => {
+    const { exportDir } = get();
+    if (!exportDir) return;
+    set({ staging: true, error: null });
+    try {
+      await GitStageAll(exportDir);
+      await get().refreshStatus(true);
+    } catch (e) {
+      set({ error: String(e) });
+    } finally {
+      set({ staging: false });
+    }
+  },
+
+  unstageAll: async () => {
+    const { exportDir } = get();
+    if (!exportDir) return;
+    set({ staging: true, error: null });
+    try {
+      await GitUnstageAll(exportDir);
+      await get().refreshStatus(true);
+    } catch (e) {
+      set({ error: String(e) });
+    } finally {
+      set({ staging: false });
+    }
+  },
+
+  discardFile: async (file: string) => {
+    const { exportDir } = get();
+    if (!exportDir) return;
+    set({ staging: true, error: null });
+    try {
+      await GitDiscardFile(exportDir, file);
+      await get().refreshStatus(true);
+    } catch (e) {
+      set({ error: String(e) });
+    } finally {
+      set({ staging: false });
+    }
+  },
+
+  commitStaged: async (message: string, push: boolean = true): Promise<boolean> => {
+    const { exportDir, remoteURL: storedURL, branch, authorName, authorEmail, oauthToken, status } = get();
+    if (!exportDir) return false;
+    const remoteURL = storedURL || status?.remoteURL || "";
+    set({ committing: true, error: null });
+    try {
+      await GitCommitAndPush({
+        dir:         exportDir,
+        remoteURL,
+        branch:      branch || "main",
+        authMethod:  "oauth",
+        token:       oauthToken,
+        message:     message || "chore: export Snowflake DDL",
+        authorName,
+        authorEmail,
+        files:       [],
+        stagedOnly:  true,
+        noPush:      !push, // commit locally only when push is false
+      } as any);
+    } catch (e) {
+      const msg = String(e);
+      // Refresh BEFORE clearing `committing` (mirrors the success path) so the
+      // button stays disabled until stagedTotal reflects reality.
+      await get().refreshStatus(true);
+      if (msg.includes("nothing staged to commit")) {
+        // ErrNothingToCommit: the index was empty (e.g. cleared in a terminal
+        // between the last refresh and the click). Surface it instead of a silent
+        // no-op; keep the message (return false).
+        set({ error: "Nothing to commit — there were no staged changes.", committing: false });
+        return false;
+      }
+      // A "git push:" error means the local commit succeeded and only the push
+      // failed — the index is drained, so clear the message (return true) to stop
+      // the user re-committing into a duplicate, while still showing the push error.
+      const committedButPushFailed = msg.includes("git push");
+      set({ error: msg, committing: false });
+      return committedButPushFailed;
+    }
+    // Keep `committing` true through the status refresh so the commit button stays
+    // disabled until stagedTotal reflects the now-empty index — otherwise a fast
+    // second click commits an empty index. Silent refresh keeps a status-fetch
+    // failure from masquerading as a commit failure.
+    await get().refreshStatus(true);
+    set({ committing: false });
+    return true;
+  },
+
   loginWithOAuth: async (provider: string) => {
     try {
       const token = await GitLoginWithOAuth(provider);
       set({ oauthToken: token });
       return token;
     } catch (e) {
-      set({ error: String(e) });
+      const msg = String(e);
+      // A user-initiated cancel (dialog closed / Cancel button) isn't an error.
+      if (!msg.includes("context canceled")) set({ error: msg });
       throw e;
     }
   },
@@ -359,7 +466,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     set({ resetting: true, error: null });
     try {
       await GitResetHard(exportDir);
-      await get().refreshStatus();
+      await get().refreshStatus(true); // silent: a status-fetch failure isn't a reset failure
     } catch (e) {
       set({ error: String(e) });
     } finally {

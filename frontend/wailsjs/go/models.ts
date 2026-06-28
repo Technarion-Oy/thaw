@@ -1895,6 +1895,22 @@ export namespace gitrepo {
 	        this.isCurrent = source["isCurrent"];
 	    }
 	}
+	export class ChangedFile {
+	    status: string;
+	    isNew: boolean;
+	    partiallyStaged: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ChangedFile(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.status = source["status"];
+	        this.isNew = source["isNew"];
+	        this.partiallyStaged = source["partiallyStaged"];
+	    }
+	}
 	export class CloneParams {
 	    url: string;
 	    path: string;
@@ -1929,6 +1945,20 @@ export namespace gitrepo {
 	        this.source = source["source"];
 	    }
 	}
+	export class FileChange {
+	    path: string;
+	    status: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FileChange(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.status = source["status"];
+	    }
+	}
 	export class PullParams {
 	    dir: string;
 	    remoteURL: string;
@@ -1959,6 +1989,8 @@ export namespace gitrepo {
 	    authorName: string;
 	    authorEmail: string;
 	    files: string[];
+	    stagedOnly: boolean;
+	    noPush: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new PushParams(source);
@@ -1975,18 +2007,22 @@ export namespace gitrepo {
 	        this.authorName = source["authorName"];
 	        this.authorEmail = source["authorEmail"];
 	        this.files = source["files"];
+	        this.stagedOnly = source["stagedOnly"];
+	        this.noPush = source["noPush"];
 	    }
 	}
 	export class RepoStatus {
 	    isRepo: boolean;
 	    branch: string;
-	    modified: string[];
-	    added: string[];
-	    deleted: string[];
+	    staged: FileChange[];
+	    unstaged: FileChange[];
+	    stagedTotal: number;
+	    unstagedTotal: number;
 	    hasRemote: boolean;
 	    remoteURL: string;
 	    ahead: number;
 	    totalChanged: number;
+	    changedPaths: Record<string, ChangedFile>;
 	
 	    static createFrom(source: any = {}) {
 	        return new RepoStatus(source);
@@ -1996,14 +2032,34 @@ export namespace gitrepo {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.isRepo = source["isRepo"];
 	        this.branch = source["branch"];
-	        this.modified = source["modified"];
-	        this.added = source["added"];
-	        this.deleted = source["deleted"];
+	        this.staged = this.convertValues(source["staged"], FileChange);
+	        this.unstaged = this.convertValues(source["unstaged"], FileChange);
+	        this.stagedTotal = source["stagedTotal"];
+	        this.unstagedTotal = source["unstagedTotal"];
 	        this.hasRemote = source["hasRemote"];
 	        this.remoteURL = source["remoteURL"];
 	        this.ahead = source["ahead"];
 	        this.totalChanged = source["totalChanged"];
+	        this.changedPaths = this.convertValues(source["changedPaths"], ChangedFile, true);
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }

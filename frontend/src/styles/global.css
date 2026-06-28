@@ -394,6 +394,25 @@ body,
   margin-top: 8px;
 }
 
+/* Git Changes view — a row reads like a typeset `git status` line: a colored
+   status spine + mono sigil rail on the left, the object-type ledger column on
+   the right, and reveal-on-hover actions so the resting state stays tight. */
+.git-change-row:hover,
+.git-change-row:focus-within {
+  background: var(--bg-hover);
+}
+.git-change-row .git-row-actions {
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+.git-change-row:hover .git-row-actions,
+.git-change-row:focus-within .git-row-actions {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .git-change-row .git-row-actions { transition: none; }
+}
+
 /* Monaco editor — Snowflake function call highlighting.
    Built-ins use the same gold as the Monarch `predefined` token so they are
    consistent with the hardcoded keyword list.  UDFs use a distinct teal so

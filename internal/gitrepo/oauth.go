@@ -13,8 +13,6 @@ import (
 	"time"
 
 	"thaw/internal/config"
-
-	"github.com/pkg/browser"
 )
 
 // The secret is scrambled before compile.
@@ -99,15 +97,22 @@ func generateState() string {
 	return hex.EncodeToString(b)
 }
 
-func PerformOAuthFlow(ctx context.Context, provider string) (string, error) {
+// PerformOAuthFlow runs the loopback OAuth flow. It does not open a browser
+// itself — instead it hands the authorization URL to onURL (so the caller/UI can
+// let the user open it in their chosen browser, or copy it) and then waits for
+// the loopback callback.
+func PerformOAuthFlow(ctx context.Context, provider string, onURL func(string)) (string, error) {
 	cfg := GetProviderConfig(provider)
 	if cfg.ClientID == "" {
 		return "", fmt.Errorf("unsupported or unconfigured provider: %s", provider)
 	}
 
 	state := generateState()
-	codeChan := make(chan string)
-	errChan := make(chan error)
+	// Buffered (cap 1) so the HTTP callback handler can always send and return
+	// even if the select below already exited (e.g. ctx canceled) — otherwise the
+	// handler blocks forever and the deferred server.Shutdown deadlocks waiting on it.
+	codeChan := make(chan string, 1)
+	errChan := make(chan error, 1)
 
 	mux := http.NewServeMux()
 	server := &http.Server{
@@ -171,8 +176,9 @@ func PerformOAuthFlow(ctx context.Context, provider string) (string, error) {
 	q.Set("state", state)
 	authURL.RawQuery = q.Encode()
 
-	if err := browser.OpenURL(authURL.String()); err != nil {
-		return "", fmt.Errorf("failed to open browser: %w", err)
+	// Surface the URL to the caller (the UI lets the user open or copy it).
+	if onURL != nil {
+		onURL(authURL.String())
 	}
 
 	var code string

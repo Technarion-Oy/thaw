@@ -11,8 +11,12 @@
 package app
 
 import (
+	"context"
+
 	"thaw/internal/config"
 	"thaw/internal/gitrepo"
+
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // GetGitConfig returns the persisted git / export settings.
@@ -46,6 +50,31 @@ func (a *App) GitStatus(dir string) (gitrepo.RepoStatus, error) {
 // The Token field is used only in-memory for the push URL and is never persisted.
 func (a *App) GitCommitAndPush(params gitrepo.PushParams) error {
 	return gitrepo.CommitAndPush(a.ctx, params)
+}
+
+// GitStageFile stages a single file in the working tree (git add <file>).
+func (a *App) GitStageFile(dir string, file string) error {
+	return gitrepo.StageFile(dir, file)
+}
+
+// GitUnstageFile removes a file from the index, restoring it to HEAD (git reset HEAD -- <file>).
+func (a *App) GitUnstageFile(dir string, file string) error {
+	return gitrepo.UnstageFile(dir, file)
+}
+
+// GitStageAll stages every working-tree change (git add -A), skipping OS junk files.
+func (a *App) GitStageAll(dir string) error {
+	return gitrepo.StageAll(dir)
+}
+
+// GitUnstageAll resets the whole index to HEAD, leaving the working tree untouched.
+func (a *App) GitUnstageAll(dir string) error {
+	return gitrepo.UnstageAll(dir)
+}
+
+// GitDiscardFile reverts a file to its HEAD state (tracked) or deletes it (untracked). Cannot be undone.
+func (a *App) GitDiscardFile(dir string, file string) error {
+	return gitrepo.DiscardFile(dir, file)
 }
 
 // GitPull fetches and merges changes from the remote branch.
@@ -140,6 +169,37 @@ func (a *App) GitPushBranch(dir string, branch string, token string) error {
 
 // GitLoginWithOAuth starts the local loopback OAuth flow for the specified provider
 // ("github", "gitlab", etc.) and returns the obtained access token.
+//
+// Rather than opening a browser, it emits the authorization URL via the
+// "git:oauth-url" event so the frontend can let the user open it in their chosen
+// browser or copy it (useful when the default browser is signed into a different
+// account). The loopback callback still completes the flow.
 func (a *App) GitLoginWithOAuth(provider string) (string, error) {
-	return gitrepo.PerformOAuthFlow(a.ctx, provider)
+	// Per-flow cancelable context so GitCancelOAuth (dialog dismiss) can unblock the
+	// loopback wait and trigger the deferred server shutdown — otherwise the
+	// goroutine + port 3456 leak until app quit. Abort any prior in-flight flow
+	// first so reopening the dialog can't double-bind the port.
+	a.oauthMu.Lock()
+	if a.oauthCancel != nil {
+		a.oauthCancel()
+	}
+	ctx, cancel := context.WithCancel(a.ctx)
+	a.oauthCancel = cancel
+	a.oauthMu.Unlock()
+	defer cancel() // free our flow's server/goroutine on return (idempotent)
+
+	return gitrepo.PerformOAuthFlow(ctx, provider, func(authURL string) {
+		wailsruntime.EventsEmit(a.ctx, "git:oauth-url", authURL)
+	})
+}
+
+// GitCancelOAuth aborts an in-flight OAuth flow (called when the user closes the
+// auth dialog without completing it), freeing the loopback server + port 3456.
+func (a *App) GitCancelOAuth() {
+	a.oauthMu.Lock()
+	defer a.oauthMu.Unlock()
+	if a.oauthCancel != nil {
+		a.oauthCancel()
+		a.oauthCancel = nil
+	}
 }
