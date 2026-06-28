@@ -254,15 +254,28 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
 
   const tagRef = () => ({ domain: "COLUMN", database: db, schema, name: table, column, parentKind } as any);
 
+  // After a set/unset, update local state directly rather than re-querying:
+  // TAG_REFERENCES_ALL_COLUMNS has propagation latency and a refetch returns
+  // stale rows that still include a just-removed tag (or omit a just-added one).
+  const sameTag = (a: { db: string; schema: string; name: string }, b: ColTag) =>
+    a.db === b.db && a.schema === b.schema && a.name === b.name;
+
   const addTag = async () => {
     const name = tagName.trim();
     if (!name) return;
     const t = splitQualified(name, tagCatalog);
+    const value = tagValue.trim();
     try {
-      await SetObjectTag(tagRef(), t.db, t.schema, t.name, tagValue.trim());
+      await SetObjectTag(tagRef(), t.db, t.schema, t.name, value);
       message.success(`Tag "${t.name}" set`);
       setTagName(""); setTagValue("");
-      loadTags();
+      setTags((cur) => {
+        const list = cur ?? [];
+        const entry = { db: t.db, schema: t.schema, name: t.name, value };
+        const i = list.findIndex((x) => sameTag(t, x));
+        if (i < 0) return [...list, entry];
+        const copy = list.slice(); copy[i] = entry; return copy; // retag updates the value
+      });
     } catch (e) { message.error(String(e)); }
   };
 
@@ -270,7 +283,7 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
     try {
       await UnsetObjectTag(tagRef(), t.db, t.schema, t.name);
       message.success(`Tag "${t.name}" removed`);
-      loadTags();
+      setTags((cur) => (cur ?? []).filter((x) => !sameTag(t, x)));
     } catch (e) { message.error(String(e)); }
   };
 
