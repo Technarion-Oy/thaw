@@ -87,6 +87,28 @@ func QualifyOrBare(db, schema, name string, caseSensitive bool) string {
 	return QuoteIdent(db) + "." + QuoteIdent(schema) + "." + QuoteOrBare(name, caseSensitive)
 }
 
+// splitIdent splits a (possibly quoted, possibly multi-part) identifier string
+// into its component parts, stripping surrounding double-quotes from each part.
+// It is the rough parsing inverse of Qualify: Qualify("DB","S","T") builds
+// `"DB"."S"."T"`, splitIdent turns it back into ["DB","S","T"]. The split is on
+// every "." regardless of quoting, so a quoted part that itself contains a dot
+// is not preserved — callers pass identifiers whose component dots are already
+// delimited (e.g. tokens from sqltok.ReadIdentPath).
+func splitIdent(s string) []string {
+	var parts []string
+	for _, p := range strings.Split(s, ".") {
+		parts = append(parts, stripQuotes(p))
+	}
+	return parts
+}
+
+// stripQuotes trims surrounding whitespace and a single outer double-quote pair
+// from an identifier part (e.g. `"My Table"` → `My Table`). Embedded doubled
+// quotes are left as-is; for full SQL-token unquoting use unquoteSQLToken.
+func stripQuotes(s string) string {
+	return sqltok.StripQuotePair(strings.TrimSpace(s))
+}
+
 // CreateClause assembles the `CREATE [OR REPLACE] <body> [IF NOT EXISTS]` prefix
 // of a DDL statement, enforcing the OR REPLACE / IF NOT EXISTS mutual exclusivity
 // Snowflake requires: the two may not appear together, and OR REPLACE wins when

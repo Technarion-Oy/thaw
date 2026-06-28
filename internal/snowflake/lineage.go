@@ -837,17 +837,3 @@ func RewriteSQLReferences(sql, defaultDB, defaultSchema string, lookup func(db, 
 	}
 	return result
 }
-
-// splitIdent splits a (possibly quoted, possibly multi-part) identifier string
-// into its component parts, stripping surrounding double-quotes from each part.
-func splitIdent(s string) []string {
-	var parts []string
-	for _, p := range strings.Split(s, ".") {
-		parts = append(parts, stripQuotes(p))
-	}
-	return parts
-}
-
-func stripQuotes(s string) string {
-	return sqltok.StripQuotePair(strings.TrimSpace(s))
-}
