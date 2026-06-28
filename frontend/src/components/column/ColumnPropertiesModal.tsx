@@ -18,6 +18,7 @@ import {
   GetColumnDetails,
   GetColumnTagReferences,
   GetQuotedIdentifiersIgnoreCase,
+  GetTagAllowedValues,
   ListAccountMaskingPolicies,
   ListAccountTags,
   SetObjectTag,
@@ -106,6 +107,9 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
   const [tags, setTags] = useState<ColTag[] | null>(null);
   const [tagName, setTagName] = useState("");
   const [tagValue, setTagValue] = useState("");
+  // Allowed values for the selected tag (SYSTEM$GET_TAG_ALLOWED_VALUES); null
+  // means the tag accepts any value, so the value field stays free-text.
+  const [tagAllowed, setTagAllowed] = useState<string[] | null>(null);
 
   useEffect(() => {
     GetQuotedIdentifiersIgnoreCase().then((v) => setQiic(v ?? false)).catch(() => {});
@@ -260,6 +264,18 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
   const sameTag = (a: { db: string; schema: string; name: string }, b: ColTag) =>
     a.db === b.db && a.schema === b.schema && a.name === b.name;
 
+  // On tag selection, look up its allowed values so the value field can switch
+  // between a dropdown (whitelist) and free text. Reset the value either way.
+  const onTagNameChange = (v?: string) => {
+    const name = v ?? "";
+    setTagName(name);
+    setTagValue("");
+    setTagAllowed(null);
+    if (!name) return;
+    const t = splitQualified(name, tagCatalog);
+    GetTagAllowedValues(t.db, t.schema, t.name).then((vals) => setTagAllowed(vals?.length ? vals : null)).catch(() => setTagAllowed(null));
+  };
+
   const addTag = async () => {
     const name = tagName.trim();
     if (!name) return;
@@ -412,11 +428,23 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
                     showSearch
                     placeholder="Tag name"
                     value={tagName || undefined}
-                    onChange={(v) => setTagName(v ?? "")}
+                    onChange={onTagNameChange}
                     style={{ width: 170 }}
                     options={tagCatalog.map((t) => ({ value: t.fqn, label: t.fqn }))}
                   />
-                  <Input size="small" value={tagValue} onChange={(e) => setTagValue(e.target.value)} onPressEnter={addTag} placeholder="Tag value" style={{ width: 150 }} />
+                  {tagAllowed ? (
+                    <Select
+                      size="small"
+                      showSearch
+                      placeholder="Tag value"
+                      value={tagValue || undefined}
+                      onChange={(v) => setTagValue(v ?? "")}
+                      style={{ width: 150 }}
+                      options={tagAllowed.map((v) => ({ value: v, label: v }))}
+                    />
+                  ) : (
+                    <Input size="small" value={tagValue} onChange={(e) => setTagValue(e.target.value)} onPressEnter={addTag} placeholder="Tag value" style={{ width: 150 }} />
+                  )}
                   <Button size="small" icon={<PlusOutlined />} onClick={addTag} disabled={!tagName.trim()}>Add</Button>
                 </Space>
               </Space>

@@ -686,6 +686,8 @@ export function GetTableRetentionDays(arg1:string,arg2:string,arg3:string):Promi
 
 export function GetTableSettings(arg1:string,arg2:string,arg3:string):Promise<table.TableSettings>;
 
+export function GetTagAllowedValues(arg1:string,arg2:string,arg3:string):Promise<Array<string>>;
+
 export function GetTagReferences(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function GetTaskRunHistory(arg1:string,arg2:string,arg3:string,arg4:boolean,arg5:number):Promise<Array<tasks.TaskHistoryRow>>;
