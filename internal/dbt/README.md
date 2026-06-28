@@ -27,6 +27,8 @@ This package is a **pure file-generation** package for classic (local) dbt proje
 | `SourceName(db, schema)` | Returns the lower-case dbt source name convention (`"mydb_public"`); exported for IPC callers |
 | `StagingModelName(db, schema, table, multiScope)` | Returns the model file stem (`"stg_table"` or `"stg_db_schema_table"`) |
 
+Both names join lowered identifiers with `_`. Since identifiers may contain `_`, the boundary is ambiguous when the db carries an underscore but the schema does not (`"A_B"."C"` vs `"A"."B_C"` both → `a_b_c`); in that case the db's underscores are doubled (`a__b_c`) to keep distinct scopes distinct.
+
 ## Patterns & integration
 
 `App.CreateDbtProject(req, schemasMap)` in `internal/app/dbtproject.go` is the thin delegator: nil-check → `dbt.CreateProject(...)` → return `*dbt.CreateResult`. All Snowflake queries and file I/O happen inside this package.
