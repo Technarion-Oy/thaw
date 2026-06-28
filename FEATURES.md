@@ -538,11 +538,11 @@ Ghost-text SQL suggestions appear automatically as you type in the editor. Press
 
 - **Model Validation** — when configuring AI, a live **model status indicator** appears next to the model selector: a green `● Model OK` confirms the model is reachable, while a red indicator shows the exact API error — so misconfigured model names are caught immediately rather than at runtime.
 - **Query Profile** — click the graph icon in the results status bar (visible for successful runs) to see the execution profile for the query; shows Operator Statistics, Execution Time Breakdown, and Operator Attributes sourced from `GET_QUERY_OPERATOR_STATS`.
-- **Query Log** — session-scoped log of all SQL queries Thaw sends to Snowflake (both user-initiated from the editor and internal queries like object listing and DDL fetching). Appears as a third result pane tab ("Query Log") alongside Results and Terminal. Useful for debugging and attaching to issue reports. Enable via **View → Enabled Features → Query Log** or **View → Query Log → Enable Query Log**. Supports source filtering (All/User/Internal), status filtering, text search, and one-click copy formatting.
+- **Query Log** — session-scoped log of all SQL queries Thaw sends to Snowflake (both user-initiated from the editor and internal queries like object listing and DDL fetching). Appears as a third result pane tab ("Query Log") alongside Results and Terminal. Useful for debugging and attaching to issue reports. Enable via **View → Enabled Features → Query Log** or **Tools → Query Log → Enable Query Log**. Supports source filtering (All/User/Internal), status filtering, text search, and one-click copy formatting.
 
 ### Configuration
 
-Open **AI → Configure AI…** in the menu bar to set your provider, API key, and model. The API key is stored locally with restricted file permissions (`0600`) and never transmitted anywhere other than the selected AI provider.
+Open **Tools → Configure AI…** in the menu bar to set your provider, API key, and model. The API key is stored locally with restricted file permissions (`0600`) and never transmitted anywhere other than the selected AI provider.
 
 ---
 
@@ -886,7 +886,7 @@ Right-click any warehouse in the Administration panel and choose **Properties** 
   - **Variables** section — all rows from `SHOW VARIABLES`; editing works identically; changes apply via `SET variable = value`
   - String-type values are automatically single-quoted in the generated SQL; booleans and numbers are passed raw
   - **Copy** button copies all parameters and variables to the clipboard
-- **Session Management** — open **View → Advanced → Session Management…** to configure:
+- **Session Management** — open **Tools → Session Management…** to configure:
   - **Max concurrent sessions** (1–32) — LRU cap; excess idle sessions are evicted
   - **Max open connections per session** (1–16) — `database/sql` MaxOpenConns per tab pool
   - **Max idle connections per session** (1–16) — `database/sql` MaxIdleConns per tab pool
@@ -900,7 +900,7 @@ Right-click any warehouse in the Administration panel and choose **Properties** 
 
 An OS shell terminal is available as a tab in the results area alongside Results.
 
-- **Open** via **Terminal → New Terminal** in the menu bar (`⌘ \`` / `Ctrl+\``)
+- **Open** via **Tools → New Terminal** in the menu bar (`⌘ \`` / `Ctrl+\``)
 - **Shell picker** — a dropdown lists all shells from `/etc/shells`; switching shells immediately restarts the session in the selected shell
 - **New** button restarts the current shell; **Kill** stops it without closing the tab; **×** closes the tab and returns to the Results tab
 - The terminal opens in the configured export directory so file operations run in context
@@ -1001,7 +1001,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 
 Thaw can expose the active Snowflake connection to external AI clients (Claude Desktop, Cursor, etc.) through the **Model Context Protocol**, built on the official Go MCP SDK over a localhost SSE/HTTP transport.
 
-- **Multi-session** — open **View → MCP Sessions…** to start one or more independent servers. Each session is bound to its own dedicated Snowflake connection (inheriting the current connect parameters) and listens on its own localhost port, auto-assigned from `9100` (a port can be overridden). Because each session opens a *separate* Snowflake connection, interactive authenticators (e.g. `externalbrowser`) may re-prompt when a session starts, and every running session consumes one additional Snowflake session.
+- **Multi-session** — open **Tools → MCP Sessions…** to start one or more independent servers. Each session is bound to its own dedicated Snowflake connection (inheriting the current connect parameters) and listens on its own localhost port, auto-assigned from `9100` (a port can be overridden). Because each session opens a *separate* Snowflake connection, interactive authenticators (e.g. `externalbrowser`) may re-prompt when a session starts, and every running session consumes one additional Snowflake session.
 - **Lifecycle** — sessions start and stop only on explicit user action; all sessions stop cleanly when the app quits. There is no auto-start on launch. Sessions are **not persisted** — they exist only for the lifetime of the running app and are not restored on the next launch.
 - **Execution modes** — three modes control what a session can do:
   - **Metadata Only** — schema-browsing and diagnostics tools only. No SQL execution.
@@ -1144,7 +1144,7 @@ The following features are identified as feasible to be turned off via feature f
 
 - **Light, Dark, and System** themes — switch via **View → Appearance**; preference is saved across sessions
 - **Session restoration across app restarts** — all open tabs (scratch SQL, file tabs, notebook tabs) and their SQL content are restored exactly when the app is relaunched; file-backed tabs re-read their content from disk on startup so they always show the current file; if a file has been deleted or moved the tab becomes a scratch tab (prefixed `↺`) so the last-known SQL content is not lost; window size is saved on quit and restored on the next launch
-- **Tools menu** — native menu bar **Tools** entry provides **Code Snippets…**, **Export Path Format…**, **Schema Migration…**, and **Create dbt Project…**
+- **Tools menu** — native menu bar **Tools** entry consolidates workflow tools and operational settings: **Code Snippets…**, **Tag Management…**, **Export Path Format…**, **Schema Migration…**, **Create dbt Project…**, **Git Operations…** (`⌘G`), **New Terminal** (`⌘\``), **Configure AI…**, **MCP Sessions…**, **Query Log** (Enable / All / User / Internal), and **Session Management…**
 - **Snowpark menu** — native menu bar **Snowpark** entry provides **Check Environment…**, **Setup Environment…**, **New Notebook…**, and **Open Notebook…**
 - **Help menu** — **Function Catalog…** opens the built-in Snowflake function reference with overload signatures and descriptions for every function; **Keyboard Shortcuts…** opens a searchable modal listing every shortcut with macOS and Windows columns
 - **Resizable sidebars** — drag either sidebar edge to any width between 160 px and 600 px

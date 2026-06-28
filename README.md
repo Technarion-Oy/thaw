@@ -83,7 +83,7 @@ This README is the front door. Deeper documentation is organized as follows:
   - **Ctrl+Space before ON (Trigger C)** — press `Ctrl+Space` right after a JOIN table reference (before typing `ON`) to get a full dropdown of `ON <condition>` options (all three tiers: FK, heuristic, same-name)
   - Column lists are fetched once via `DESCRIBE TABLE` and cached for the session; subsequent invocations are instant
   - **Function completions** — typing any two or more characters outside a dotted context also returns matching Snowflake built-in and user-defined functions from the local cache; UDFs are sorted above built-ins so custom functions are easy to find; backed by the same SQLite store as hover tooltips, so results are instant and available offline
-- **AI inline completions** — ghost-text SQL suggestions powered by OpenAI or Google AI Studios (Gemini); appears automatically as you type and is accepted with `Tab`; configure via **AI → Configure AI…** in the menu bar
+- **AI inline completions** — ghost-text SQL suggestions powered by OpenAI or Google AI Studios (Gemini); appears automatically as you type and is accepted with `Tab`; configure via **Tools → Configure AI…** in the menu bar
 - **SQL formatter** — right-click anywhere in the editor and choose **Format SQL** (or press `⇧⌥F` / `Shift+Alt+F`) to format the selection or the entire document; preferences are configurable via **View → Editor Preferences…** and cover:
   - **Keyword casing** — `UPPER`, `lower`, `Title` (first letter capitalised), or `Preserve` — applied to reserved words: `SELECT`, `FROM`, `WINDOW`, `QUALIFY`, etc.
   - **Identifier casing** — `Preserve`, `UPPER`, or `lower` — applied to unquoted table and column names only; double-quoted identifiers (`"MyTable"`) are never modified
@@ -112,7 +112,7 @@ This README is the front door. Deeper documentation is organized as follows:
 
 ### Embedded terminal
 
-- **Terminal tab** appears in the results area alongside Results; open via **Terminal → New Terminal** (`⌘ \`` / `Ctrl+\``) in the menu bar
+- **Terminal tab** appears in the results area alongside Results; open via **Tools → New Terminal** (`⌘ \`` / `Ctrl+\``) in the menu bar
 - **Shell picker** — a dropdown lists every shell from `/etc/shells`; switching shells immediately restarts the session in the chosen binary
 - **New** button restarts the current shell; **Kill** stops it without closing the tab; **×** closes the tab and returns to Results
 - The terminal opens in the configured export / working directory by default
@@ -481,7 +481,7 @@ Right-click the **account · user** tag in the query toolbar to open the **Sessi
 
 #### Session Management
 
-Open **View → Advanced → Session Management…** to tune per-tab connection pooling:
+Open **Tools → Session Management…** to tune per-tab connection pooling:
 
 - **Max concurrent sessions** — LRU cap (1–32); excess idle sessions are evicted
 - **Max open / idle connections per session** — controls `database/sql` pool limits per tab
@@ -596,7 +596,7 @@ Open **Tools → Schema Migration…** in the menu bar to deploy local `.sql` DD
 
 ### MCP server
 - **Model Context Protocol** — expose the active Snowflake connection to external AI clients (Claude Desktop, Cursor, etc.) over a localhost SSE/HTTP transport, built on the official Go MCP SDK (`github.com/modelcontextprotocol/go-sdk`)
-- **Multi-session** — open **View → MCP Sessions…** to start one or more independent servers; each session binds its own dedicated Snowflake connection and listens on its own localhost port, auto-assigned from `9100` (overridable per session). Because each session opens a separate Snowflake connection, interactive authenticators (e.g. `externalbrowser`) may prompt again on start, and each running session consumes one additional Snowflake session
+- **Multi-session** — open **Tools → MCP Sessions…** to start one or more independent servers; each session binds its own dedicated Snowflake connection and listens on its own localhost port, auto-assigned from `9100` (overridable per session). Because each session opens a separate Snowflake connection, interactive authenticators (e.g. `externalbrowser`) may prompt again on start, and each running session consumes one additional Snowflake session
 - **Lifecycle** — sessions start/stop only on explicit user action and all stop cleanly on app quit; no auto-start. Sessions are **not persisted**: they live only for the lifetime of the running app and are not restored on the next launch
 - **Metadata Only execution mode** — read-only schema-browsing tools: `get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`
 - **Copy Config** — one click copies the client config block `{ "mcpServers": { "thaw-<label>": { "url": "http://localhost:<port>/sse" } } }`
@@ -610,7 +610,7 @@ Open **Tools → Schema Migration…** in the menu bar to deploy local `.sql` DD
 - **Resizable editor/results split** — drag the horizontal divider between the SQL editor and the results pane; ratio is persisted across sessions
 - **Object browser height** — the Objects panel is collapsible (click the label or the ▶/▼ chevron) and vertically resizable (drag the handle below the tree, 80 – 800 px); the Administration panel fills the remaining space
 - **Theming** — light, dark, and system-default themes; switch via **View → Appearance** in the native menu bar; preference is persisted across sessions
-- Native application menu bar with **File** (open / save / new tab), **View → Appearance** (System / Light / Dark), **View** (**Enabled Features…**, **MCP Sessions…**, **Advanced → Session Management…**), **AI → Configure AI…**, **Tools** (**Code Snippets…**, **Export Path Format…**, **Schema Migration…**, **Create dbt Project…**), **Snowpark** (**Check Environment…**, **Setup Environment…**, **New Notebook…**, **Open Notebook…**), and **Help** (**Function Catalog…**, **Keyboard Shortcuts…**) menus
+- Native application menu bar with **File** (open / save / new tab), **View → Appearance** (System / Light / Dark), **View** (**Editor Preferences…**, **Enabled Features…**), **Tools** (**Code Snippets…**, **Tag Management…**, **Export Path Format…**, **Schema Migration…**, **Create dbt Project…**, **Git Operations…**, **New Terminal**, **Configure AI…**, **MCP Sessions…**, **Query Log**, **Session Management…**), **Snowpark** (**Check Environment…**, **Setup Environment…**, **New Notebook…**, **Open Notebook…**), and **Help** (**Function Catalog…**, **Keyboard Shortcuts…**) menus
 - Object browser scrolls horizontally when object names are wider than the sidebar
 - Right-click context menu is always clamped inside the viewport — never overflows the screen edges
 - Closing the app while a query is running shows a confirmation dialog; if confirmed, the query is cancelled in Snowflake before exit

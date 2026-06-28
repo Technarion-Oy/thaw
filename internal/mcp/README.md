@@ -4,7 +4,7 @@
 
 ## Responsibility
 
-Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Client`, on `localhost`. A `Manager` owns the set of running sessions; each session runs an `http.Server` serving the Go MCP SDK's SSE handler and registers schema-browsing, SQL diagnostics, editor context, and (optionally) SQL execution tools. Sessions are started and stopped only on explicit user action (View → MCP Sessions); none start automatically.
+Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Client`, on `localhost`. A `Manager` owns the set of running sessions; each session runs an `http.Server` serving the Go MCP SDK's SSE handler and registers schema-browsing, SQL diagnostics, editor context, and (optionally) SQL execution tools. Sessions are started and stopped only on explicit user action (Tools → MCP Sessions); none start automatically.
 
 `internal/mcp` must **not** import `internal/app` — the dependency is one-way (`App` holds a `*mcp.Manager`). All Snowflake access goes through the `*snowflake.Client` handed to each session, mirroring the isolated per-tab session pattern.
 
