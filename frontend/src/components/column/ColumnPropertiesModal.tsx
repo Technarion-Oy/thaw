@@ -89,6 +89,8 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
   const [colDefault, setColDefault] = useState("");
   const [maskingPolicy, setMaskingPolicy] = useState("");
   const [loading, setLoading] = useState(true);
+  const [detailsError, setDetailsError] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [qiic, setQiic] = useState(false);
 
   // Which section is in edit mode, plus its draft value.
@@ -109,7 +111,7 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
     GetQuotedIdentifiersIgnoreCase().then((v) => setQiic(v ?? false)).catch(() => {});
     GetColumnDetails(db, schema, table, column)
       .then((d) => { setColDefault(d.default || ""); setMaskingPolicy(d.maskingPolicy || ""); })
-      .catch((e) => message.error(String(e)))
+      .catch((e) => { setDetailsError(true); message.error(String(e)); })
       .finally(() => setLoading(false));
     ListAccountMaskingPolicies().then((r) => setPolicies(parseObjectList(r))).catch(() => {});
     ListAccountTags().then((r) => setTagCatalog(parseObjectList(r))).catch(() => {});
@@ -122,7 +124,7 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
       .then((res) => {
         const rows = res.rows ?? [];
         setTags(rows
-          .filter((r) => String(r[0]) === column)
+          .filter((r) => String(r[0]).toLowerCase() === column.toLowerCase())
           .map((r) => ({ db: String(r[1]), schema: String(r[2]), name: String(r[3]), value: r[4] == null ? "" : String(r[4]) })));
       })
       .catch(() => setTags([]));
@@ -179,8 +181,9 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
     const trimmed = draft.trim();
     if (!trimmed || trimmed === cur.dataType) { cancelEdit(); return; }
     const sql = await BuildChangeColumnTypeSql(db, schema, table, column, trimmed);
-    cancelEdit();
-    run(sql, `Changed data type to ${trimmed}`, () => setCur((c) => ({ ...c, dataType: trimmed })),
+    // Don't clear edit state before the confirm dialog — if the user cancels,
+    // their typed type must survive. cancelEdit runs only on confirmed success.
+    run(sql, `Changed data type to ${trimmed}`, () => { cancelEdit(); setCur((c) => ({ ...c, dataType: trimmed })); },
       `Changing the data type of "${column}" from ${cur.dataType} to ${trimmed} can truncate or fail on existing rows. Snowflake only permits a narrow set of conversions (e.g. widening a VARCHAR or NUMBER).`);
   };
 
@@ -212,9 +215,9 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
     run(sql, v ? "Comment updated" : "Comment removed", () => setCur((c) => ({ ...c, comment: v })));
   };
 
-  // The current masking policy comes back double-quoted (Qualify output); strip
-  // the quotes so it matches the unquoted picker option fqns.
-  const normMasking = maskingPolicy.replace(/"/g, "");
+  // GetColumnDetails already returns the policy as a plain dotted FQN matching
+  // the picker option fqns, so no normalisation is needed.
+  const normMasking = maskingPolicy;
 
   // Split a qualified name into db/schema/name, preferring a known catalog match
   // (handles quoted/dotted identifiers); falls back to a naive dotted split with
@@ -236,8 +239,15 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
       const p = splitQualified(trimmed, policies);
       sql = await BuildSetColumnMaskingPolicySql(db, schema, table, column, p.db, p.schema, p.name);
     }
-    cancelEdit();
-    run(sql, trimmed ? "Masking policy set" : "Masking policy unset", () => setMaskingPolicy(trimmed));
+    // Replacing or removing an existing governance policy is destructive — confirm
+    // with a SQL preview. This also guards the case where the policy list failed
+    // to load (empty dropdown) so the user can't silently unset a live policy.
+    const warning = normMasking
+      ? (trimmed
+          ? `This replaces the masking policy currently on "${column}" (${normMasking}) with ${trimmed}.`
+          : `This removes the masking policy currently on "${column}" (${normMasking}).`)
+      : undefined;
+    run(sql, trimmed ? "Masking policy set" : "Masking policy unset", () => { cancelEdit(); setMaskingPolicy(trimmed); }, warning);
   };
 
   // ── Tags (via the existing tag governance system) ──────────────────────────
@@ -272,14 +282,17 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
     </span>
   );
 
-  const editButton = (key: string, value: string) => (
-    <Button size="small" type="text" icon={<EditOutlined />} onClick={() => startEdit(key, value)} style={{ flexShrink: 0, color: "var(--text-faint)" }} />
+  const editButton = (key: string, value: string, disabled = false) => (
+    <Button size="small" type="text" disabled={disabled} icon={<EditOutlined />} onClick={() => startEdit(key, value)} style={{ flexShrink: 0, color: "var(--text-faint)" }} />
   );
 
+  // The confirm button guards against a double-click firing two concurrent saves
+  // (each an async IPC + DDL round-trip) by disabling itself until the save settles.
   const confirmButtons = (onSave: () => void) => (
     <>
-      <Button size="small" type="primary" icon={<CheckOutlined />} onClick={onSave} />
-      <Button size="small" icon={<CloseOutlined />} onClick={cancelEdit} />
+      <Button size="small" type="primary" loading={saving} disabled={saving} icon={<CheckOutlined />}
+        onClick={() => { if (saving) return; setSaving(true); Promise.resolve(onSave()).finally(() => setSaving(false)); }} />
+      <Button size="small" icon={<CloseOutlined />} disabled={saving} onClick={cancelEdit} />
     </>
   );
 
@@ -290,7 +303,7 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
     </tr>
   );
 
-  const textRow = (label: string, key: string, value: string, onSave: () => void, textarea = false) =>
+  const textRow = (label: string, key: string, value: string, onSave: () => void, textarea = false, editDisabled = false) =>
     row(label, editing === key ? (
       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
         {textarea ? (
@@ -301,7 +314,7 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
         {confirmButtons(onSave)}
       </div>
     ) : (
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>{displayValue(value)}{editButton(key, value)}</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>{displayValue(value)}{editButton(key, value, editDisabled)}</div>
     ));
 
   return (
@@ -309,6 +322,12 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
       {loading ? (
         <div style={{ textAlign: "center", padding: "32px 0" }}><Spin /></div>
       ) : (
+        <>
+        {detailsError && (
+          <div style={{ marginBottom: 12, padding: "8px 12px", borderRadius: 6, background: "var(--bg)", border: "1px solid var(--border)", color: "var(--text-faint)", fontSize: 12 }}>
+            Couldn't load the column's default and masking policy. Editing those is disabled to avoid overwriting values that didn't load.
+          </div>
+        )}
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
           <tbody>
             {/* Name */}
@@ -338,7 +357,7 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
 
             {/* Default — free-text for now; a built-in-functions dropdown is
                 deferred to #506, which will provide the shared catalog. */}
-            {textRow("Default", "default", colDefault, saveDefault)}
+            {textRow("Default", "default", colDefault, saveDefault, false, detailsError)}
 
             {/* Comment */}
             {textRow("Comment", "comment", cur.comment ?? "", saveComment, true)}
@@ -359,7 +378,7 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
                 {confirmButtons(saveMasking)}
               </div>
             ) : (
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>{displayValue(normMasking)}{editButton("masking", normMasking)}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>{displayValue(normMasking)}{editButton("masking", normMasking, detailsError)}</div>
             ))}
 
             {/* Tags */}
@@ -391,6 +410,7 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
             ))}
           </tbody>
         </table>
+        </>
       )}
     </Modal>
   );

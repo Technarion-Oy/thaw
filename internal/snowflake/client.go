@@ -2956,26 +2956,29 @@ type ColumnDetails struct {
 func (c *Client) GetColumnDetails(ctx context.Context, database, schema, table, column string) (ColumnDetails, error) {
 	var out ColumnDetails
 
-	rows, err := c.queryCtx(ctx, fmt.Sprintf("DESCRIBE TABLE %s", Qualify(database, schema, table)))
-	if err != nil {
+	// DEFAULT — scan DESCRIBE TABLE inside a closure so a panic mid-scan still
+	// closes the cursor (defer) before the masking-policy lookup runs.
+	if err := func() error {
+		rows, err := c.queryCtx(ctx, fmt.Sprintf("DESCRIBE TABLE %s", Qualify(database, schema, table)))
+		if err != nil {
+			return err
+		}
+		defer rows.Close() //nolint:errcheck
+		cols, _ := rows.Columns()
+		idxs := colIndexMap(cols, "name", "default")
+		for rows.Next() {
+			vals, ptrs := makeValPtrs(len(cols))
+			if err := rows.Scan(ptrs...); err != nil {
+				continue
+			}
+			if strVal(vals, idxs["name"]) == column {
+				out.Default = strVal(vals, idxs["default"])
+				break
+			}
+		}
+		return rows.Err()
+	}(); err != nil {
 		return out, err
-	}
-	cols, _ := rows.Columns()
-	idxs := colIndexMap(cols, "name", "default")
-	for rows.Next() {
-		vals, ptrs := makeValPtrs(len(cols))
-		if err := rows.Scan(ptrs...); err != nil {
-			continue
-		}
-		if strVal(vals, idxs["name"]) == column {
-			out.Default = strVal(vals, idxs["default"])
-			break
-		}
-	}
-	scanErr := rows.Err()
-	rows.Close() //nolint:errcheck
-	if scanErr != nil {
-		return out, scanErr
 	}
 
 	// Masking policy — best effort. REF_ENTITY_NAME takes a plain dotted FQN, not
@@ -2992,7 +2995,10 @@ func (c *Client) GetColumnDetails(ctx context.Context, database, schema, table, 
 		if mrows.Next() {
 			var pdb, psc, pname string
 			if err := mrows.Scan(&pdb, &psc, &pname); err == nil {
-				out.MaskingPolicy = Qualify(pdb, psc, pname)
+				// Plain dotted FQN — matches the unquoted form the frontend's
+				// policy picker builds, so the current policy preselects in the
+				// dropdown (Qualify's double-quoting would never match).
+				out.MaskingPolicy = fmt.Sprintf("%s.%s.%s", pdb, psc, pname)
 			}
 		}
 	}
