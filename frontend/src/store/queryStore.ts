@@ -61,6 +61,8 @@ export interface Tab {
   isRunning?: boolean;   // per-tab running state; never persisted
   orphaned?: boolean;    // true when the backing file was deleted from disk
   mcpOrigin?: boolean;   // true when the tab was created by an MCP tool
+  isDefaultTitle?: boolean; // true while the title is the auto-generated "SQL (n)";
+                            // cleared by renameTab. Drives the "untitled.sql" save default.
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -90,6 +92,21 @@ function patchTab(tabs: Tab[], id: string, patch: Partial<Tab>): Tab[] {
   return tabs.map((t) => (t.id === id ? { ...t, ...patch } : t));
 }
 
+/** Next scratch-tab title "SQL (n)", where n is one past the highest existing. */
+function nextScratchTitle(tabs: Tab[]): string {
+  let max = 0;
+  for (const t of tabs) {
+    const m = /^SQL \((\d+)\)$/.exec(t.title);
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return `SQL (${max + 1})`;
+}
+
+/** A scratch tab with the next auto-generated "SQL (n)" title, flagged as default. */
+function makeScratchTab(tabs: Tab[], overrides?: Partial<Tab>): Tab {
+  return makeTab({ title: nextScratchTitle(tabs), isDefaultTitle: true, ...overrides });
+}
+
 // ── state ─────────────────────────────────────────────────────────────────────
 
 interface QueryState {
@@ -116,6 +133,9 @@ interface QueryState {
   openNotebookUnsaved: (title: string, content: string) => void;
   closeTab: (id: string) => void;
   moveTab: (draggedId: string, targetId: string, before: boolean) => void;
+  // Rename a tab's title. Only meaningful for non-file tabs (file tabs derive
+  // their title from the path); a blank title is ignored.
+  renameTab: (id: string, title: string) => void;
   // Called after a successful save to update the tab's path/title and clear dirty state.
   markSaved: (id: string, path: string, title: string) => void;
   // Called after a rename to update the tab's path/title without clearing dirty state.
@@ -146,7 +166,7 @@ interface QueryState {
 
 const INITIAL_SQL = "SELECT CURRENT_USER(), CURRENT_WAREHOUSE(), CURRENT_DATABASE();";
 
-const initialTab = makeTab({ sql: INITIAL_SQL, savedSql: INITIAL_SQL });
+const initialTab = makeScratchTab([], { sql: INITIAL_SQL, savedSql: INITIAL_SQL });
 
 export const useQueryStore = create<QueryState>()(
   persist(
@@ -217,7 +237,7 @@ export const useQueryStore = create<QueryState>()(
 
   openScratch: () =>
     set((state) => {
-      const newTab = makeTab();
+      const newTab = makeScratchTab(state.tabs);
       return {
         tabs: [...state.tabs, newTab],
         activeTabId: newTab.id,
@@ -312,6 +332,13 @@ export const useQueryStore = create<QueryState>()(
       return { tabs: without };
     }),
 
+  renameTab: (id, title) =>
+    set((state) => {
+      const t = title.trim();
+      if (!t) return {};
+      return { tabs: patchTab(state.tabs, id, { title: t, isDefaultTitle: false }) };
+    }),
+
   setSplitTab: (id) => set({ splitTabId: id }),
 
   setSqlForTab: (tabId, sql) =>
@@ -360,9 +387,10 @@ export const useQueryStore = create<QueryState>()(
       if (idx === -1) return {};
       const newTabs = state.tabs.filter((t) => t.id !== id);
 
-      // Closing the last tab — replace with a fresh scratch tab.
+      // Closing the last tab — replace with a fresh scratch tab. Use the
+      // pre-removal tabs so the "SQL (n)" sequence continues instead of resetting.
       if (newTabs.length === 0) {
-        const freshTab = makeTab();
+        const freshTab = makeScratchTab(state.tabs);
         return {
           tabs: [freshTab],
           activeTabId: freshTab.id,
@@ -403,7 +431,7 @@ export const useQueryStore = create<QueryState>()(
     set((state) => {
       const tab = state.tabs.find((t) => t.id === id);
       const savedSql = tab?.sql ?? "";
-      const updatedTabs = patchTab(state.tabs, id, { path, title, savedSql });
+      const updatedTabs = patchTab(state.tabs, id, { path, title, savedSql, isDefaultTitle: false });
       const isActive = state.activeTabId === id;
       return {
         tabs: updatedTabs,
@@ -419,7 +447,7 @@ export const useQueryStore = create<QueryState>()(
 
   updateTabPath: (id, path, title) =>
     set((state) => {
-      const updatedTabs = patchTab(state.tabs, id, { path, title });
+      const updatedTabs = patchTab(state.tabs, id, { path, title, isDefaultTitle: false });
       const isActive = state.activeTabId === id;
       return {
         tabs: updatedTabs,
@@ -488,17 +516,19 @@ export const useQueryStore = create<QueryState>()(
   },
 
   executeInNewTab: (sql) => {
-    const newTab = makeTab({ sql });
-    set((state) => ({
-      tabs: [...state.tabs, newTab],
-      activeTabId: newTab.id,
-      sql,
-      selectedSql: "",
-      currentFile: null,
-      result: null,
-      error: null,
-      isRunning: false,
-    }));
+    set((state) => {
+      const newTab = makeScratchTab(state.tabs, { sql });
+      return {
+        tabs: [...state.tabs, newTab],
+        activeTabId: newTab.id,
+        sql,
+        selectedSql: "",
+        currentFile: null,
+        result: null,
+        error: null,
+        isRunning: false,
+      };
+    });
     // Ask QueryPage to run via its StartQuery/WaitForQueryResult path, which
     // is the only path that populates resultHistory and shows results in the UI.
     // The SQL is passed in the event detail to avoid stale-closure issues.
@@ -506,17 +536,19 @@ export const useQueryStore = create<QueryState>()(
   },
 
   loadInNewTab: (sql) => {
-    const newTab = makeTab({ sql });
-    set((state) => ({
-      tabs: [...state.tabs, newTab],
-      activeTabId: newTab.id,
-      sql,
-      selectedSql: "",
-      currentFile: null,
-      result: null,
-      error: null,
-      isRunning: false,
-    }));
+    set((state) => {
+      const newTab = makeScratchTab(state.tabs, { sql });
+      return {
+        tabs: [...state.tabs, newTab],
+        activeTabId: newTab.id,
+        sql,
+        selectedSql: "",
+        currentFile: null,
+        result: null,
+        error: null,
+        isRunning: false,
+      };
+    });
   },
 
   openMcpTab: (title, sql) => {

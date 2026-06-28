@@ -68,7 +68,7 @@ const CrossTabSearch         = lazy(() => import("../components/editor/CrossTabS
 const QueryProfileModal      = lazy(() => import("../components/results/QueryProfileModal"));
 const TerminalPanel          = lazy(() => import("../components/terminal/TerminalPanel"));
 const NotebookTab            = lazy(() => import("../components/notebook/NotebookTab"));
-import { useQueryStore, type QueryResult, EXECUTE_IN_TAB_EVENT } from "../store/queryStore";
+import { useQueryStore, type QueryResult, type Tab, EXECUTE_IN_TAB_EVENT } from "../store/queryStore";
 import { useConnectionStore } from "../store/connectionStore";
 import { useSessionStore } from "../store/sessionStore";
 import { useFeatureFlagsStore } from "../store/featureFlagsStore";
@@ -80,6 +80,11 @@ import { NotebookToolbarSlot } from "../components/notebook/NotebookToolbarSlot"
 import { useEditorContextSync } from "../hooks/useEditorContextSync";
 
 const { Text } = Typography;
+
+// Default save-dialog filename for a tab: untitled.sql for scratch tabs still
+// carrying their auto-generated "SQL (n)" title, otherwise the tab's own title.
+const saveDefaultName = (tab: Tab) =>
+  tab.isDefaultTitle ? "untitled.sql" : tab.title;
 
 export default function QueryPage() {
   const { sql, selectedSql, isRunning, error, setResult, setError, markSaved, openScratch, openFile, setSql, openNotebook, openNotebookUnsaved, refreshFileTab, orphanFileTab } = useQueryStore();
@@ -601,7 +606,7 @@ export default function QueryPage() {
     let saveTitle = tab.title;
 
     if (!savePath) {
-      savePath = await PickSaveFile(tab.title === "SQL" ? "untitled.sql" : tab.title);
+      savePath = await PickSaveFile(saveDefaultName(tab));
       if (!savePath) return;
       saveTitle = savePath.split("/").pop() ?? savePath;
     }
@@ -622,7 +627,7 @@ export default function QueryPage() {
 
     const defaultName = tab.path
       ? (tab.path.split("/").pop() ?? "untitled.sql")
-      : (tab.title === "SQL" ? "untitled.sql" : tab.title);
+      : saveDefaultName(tab);
 
     const savePath = await PickSaveFile(defaultName);
     if (!savePath) return;
@@ -647,7 +652,7 @@ export default function QueryPage() {
     let saveTitle = tab.title;
 
     if (!savePath) {
-      const defaultName = tab.title === "SQL" ? "untitled.sql" : tab.title;
+      const defaultName = saveDefaultName(tab);
       savePath = await PickSaveFile(defaultName);
       if (!savePath) return false; // user cancelled the dialog
       saveTitle = savePath.split("/").pop() ?? savePath;
@@ -806,6 +811,13 @@ export default function QueryPage() {
       if (cmd && !e.shiftKey && !e.altKey && e.key === "e") {
         e.preventDefault();
         window.dispatchEvent(new Event("thaw:export-csv"));
+        return;
+      }
+
+      // ⌘⇧E / Ctrl+Shift+E — Toggle the Active Files dropdown
+      if (cmd && e.shiftKey && !e.altKey && e.key === "E") {
+        e.preventDefault();
+        window.dispatchEvent(new Event("thaw:open-active-files"));
         return;
       }
 
