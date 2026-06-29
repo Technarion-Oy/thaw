@@ -52,6 +52,7 @@ import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 import { useGitStore } from "../../store/gitStore";
 import { sigilColor, deriveNewAndPartial } from "../git/gitStatusUtil";
 import { useQueryStore } from "../../store/queryStore";
+import { openFileInTab } from "../../utils/openFileInTab";
 import { useDiffStore } from "../../store/diffStore";
 import { getPlatformOS, getCachedPlatformOS, revealLabel } from "./platformUtil";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
@@ -237,7 +238,6 @@ export default function FileBrowser() {
   const refreshGitStatus = useGitStore((s) => s.refreshStatus);
   const loadGitConfig = useGitStore((s) => s.loadConfig);
   const gitConfigLoaded = useGitStore((s) => s.configLoaded);
-  const openFile     = useQueryStore((s) => s.openFile);
   const currentFile = useQueryStore((s) => s.currentFile);
   const updateTabPath  = useQueryStore((s) => s.updateTabPath);
   const orphanTab      = useQueryStore((s) => s.orphanFileTab);
@@ -612,11 +612,9 @@ export default function FileBrowser() {
     if ((node as any).isLeaf === false) return;
     const path = String(node.key);
     setSelectedKey(path);
-    try {
-      const content = await ReadFile(path);
-      openFile(path, content);
-    } catch (e) {
-      message.error(`Could not open file: ${String(e)}`);
+    const err = await openFileInTab(path);
+    if (err) {
+      message.error(`Could not open file: ${err}`);
       setSelectedKey(null);
     }
   };
@@ -641,23 +639,22 @@ export default function FileBrowser() {
   };
 
   const handleResultClick = async (match: SearchMatch) => {
-    try {
-      const content = await ReadFile(match.path);
-      openFile(match.path, content);
-      setTimeout(() => {
-        window.dispatchEvent(
-          new CustomEvent("thaw:scroll-to-line", {
-            detail: {
-              line:       match.lineNumber,
-              matchStart: match.matchStart,
-              matchEnd:   match.matchEnd,
-            },
-          })
-        );
-      }, 50);
-    } catch {
-      // non-fatal
+    const err = await openFileInTab(match.path);
+    if (err) {
+      message.error(`Could not open file: ${err}`);
+      return;
     }
+    setTimeout(() => {
+      window.dispatchEvent(
+        new CustomEvent("thaw:scroll-to-line", {
+          detail: {
+            line:       match.lineNumber,
+            matchStart: match.matchStart,
+            matchEnd:   match.matchEnd,
+          },
+        })
+      );
+    }, 50);
   };
 
   const onRightClick = ({ event, node }: { event: React.MouseEvent; node: DataNode }) => {

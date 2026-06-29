@@ -29,7 +29,8 @@ const GROUPS: ShortcutGroup[] = [
     title: "Tabs & Navigation",
     rows: [
       { action: "New Scratch Tab",       mac: "⌘ T",         win: "Ctrl+T" },
-      { action: "Open File",             mac: "⌘ O",         win: "Ctrl+O" },
+      { action: "Open SQL/YAML/Python",  mac: "⌘ O",         win: "Ctrl+O" },
+      { action: "Open Any File…",        mac: "⌘ ⇧ O",      win: "Ctrl+Shift+O",  status: "new" },
       { action: "Save Active File",      mac: "⌘ S",         win: "Ctrl+S" },
       { action: "Save As…",             mac: "⌘ ⇧ S",       win: "Ctrl+Shift+S" },
       { action: "Close Current Tab",     mac: "⌘ W",         win: "Ctrl+W",        status: "new" },

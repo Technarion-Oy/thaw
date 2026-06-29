@@ -1714,6 +1714,10 @@ export function ParseWorkloadIdentityPolicy(arg1) {
   return window['go']['app']['App']['ParseWorkloadIdentityPolicy'](arg1);
 }
 
+export function PickAnyFile() {
+  return window['go']['app']['App']['PickAnyFile']();
+}
+
 export function PickCACertFile() {
   return window['go']['app']['App']['PickCACertFile']();
 }

@@ -50,7 +50,7 @@ export interface TabDiff {
 
 export interface Tab {
   id: string;
-  kind?: "sql" | "notebook" | "yaml" | "python"; // defaults to "sql" when absent (backward compat)
+  kind?: "sql" | "notebook" | "yaml" | "python" | "plaintext"; // defaults to "sql" when absent (backward compat)
   path: string | null;   // null = unsaved scratch tab
   title: string;
   sql: string;
@@ -72,7 +72,11 @@ function kindFromPath(path: string): Tab["kind"] {
   const ext = path.split(".").pop()?.toLowerCase();
   if (ext === "py") return "python";
   if (ext === "yml" || ext === "yaml") return "yaml";
-  return undefined; // treated as "sql"
+  if (ext === "sql") return undefined; // treated as "sql"
+  // Any other text file: open as plaintext (no SQL highlighting/autocomplete).
+  // ponytail: not per-format highlighting — the slim Monaco build registers only
+  // sql/python/yaml grammars; mapping more extensions needs grammar registration.
+  return "plaintext";
 }
 
 function makeTab(overrides?: Partial<Tab>): Tab {

@@ -13,7 +13,7 @@ import { flushSync } from "react-dom";
 import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message, Modal, type MenuProps } from "antd";
 import { CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined, SearchOutlined, CloudUploadOutlined } from "@ant-design/icons";
 import { ClipboardSetText, BrowserOpenURL } from "../../wailsjs/runtime/runtime";
-import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, CloseTabSession, GetSessionInitMode, InitTabSession, SetQueryLogEnabled } from "../../wailsjs/go/app/App";
+import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, PickAnyFile, ReadFile, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, CloseTabSession, GetSessionInitMode, InitTabSession, SetQueryLogEnabled } from "../../wailsjs/go/app/App";
 import { GetSqlStatementRanges } from "../../wailsjs/go/sqleditor/Service";
 import type { snowflake } from "../../wailsjs/go/models";
 import { usePanelLayoutStore } from "../store/panelLayoutStore";
@@ -69,6 +69,7 @@ const QueryProfileModal      = lazy(() => import("../components/results/QueryPro
 const TerminalPanel          = lazy(() => import("../components/terminal/TerminalPanel"));
 const NotebookTab            = lazy(() => import("../components/notebook/NotebookTab"));
 import { useQueryStore, type QueryResult, type Tab, EXECUTE_IN_TAB_EVENT } from "../store/queryStore";
+import { openFileInTab } from "../utils/openFileInTab";
 import { useConnectionStore } from "../store/connectionStore";
 import { useSessionStore } from "../store/sessionStore";
 import { useFeatureFlagsStore } from "../store/featureFlagsStore";
@@ -87,7 +88,7 @@ const saveDefaultName = (tab: Tab) =>
   tab.isDefaultTitle ? "untitled.sql" : tab.title;
 
 export default function QueryPage() {
-  const { sql, selectedSql, isRunning, error, setResult, setError, markSaved, openScratch, openFile, setSql, openNotebook, openNotebookUnsaved, refreshFileTab, orphanFileTab } = useQueryStore();
+  const { sql, selectedSql, isRunning, error, setResult, setError, markSaved, openScratch, setSql, openNotebook, openNotebookUnsaved, refreshFileTab, orphanFileTab } = useQueryStore();
   const activeTabId    = useQueryStore((s) => s.activeTabId);
   const isNotebookTab  = useQueryStore((s) => (s.tabs.find((t) => t.id === s.activeTabId)?.kind ?? "sql") === "notebook");
   const activeDiff     = useQueryStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.diff ?? null);
@@ -692,16 +693,14 @@ export default function QueryPage() {
     }
   };
 
-  const handleOpen = async () => {
-    const filePath = await PickOpenFile();
+  const openPicked = async (filePath: string) => {
     if (!filePath) return;
-    try {
-      const content = await ReadFile(filePath);
-      openFile(filePath, content);
-    } catch (e) {
-      message.error(`Open failed: ${String(e)}`);
-    }
+    const err = await openFileInTab(filePath);
+    if (err) message.error(`Open failed: ${err}`);
   };
+
+  const handleOpen    = async () => openPicked(await PickOpenFile());
+  const handleOpenAny = async () => openPicked(await PickAnyFile());
 
   // Browser events — dispatched by Monaco keyboard bindings and the Save button.
   useEffect(() => {
@@ -837,7 +836,7 @@ export default function QueryPage() {
         if (splitTabId) {
           setSplitTab(null);
         } else {
-          const others = tabs.filter((t) => t.id !== activeTabId && (!t.kind || t.kind === "sql"));
+          const others = tabs.filter((t) => t.id !== activeTabId && (!t.kind || t.kind === "sql" || t.kind === "plaintext"));
           if (others.length > 0) setSplitTab(others[others.length - 1].id);
         }
         return;
@@ -898,9 +897,10 @@ export default function QueryPage() {
   useEffect(() => {
     const offNewTab  = EventsOn("menu:new-tab",  () => openScratch());
     const offOpen    = EventsOn("menu:open",     () => handleOpen());
+    const offOpenAny = EventsOn("menu:open-any", () => handleOpenAny());
     const offSave    = EventsOn("menu:save",     () => handleSave());
     const offSaveAs  = EventsOn("menu:save-as",  () => handleSaveAs());
-    return () => { offNewTab(); offOpen(); offSave(); offSaveAs(); };
+    return () => { offNewTab(); offOpen(); offOpenAny(); offSave(); offSaveAs(); };
   }, []);
 
   useEffect(() => {

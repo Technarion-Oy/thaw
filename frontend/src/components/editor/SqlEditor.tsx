@@ -418,6 +418,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
   const activeKind     = activeTab?.kind;
   const editorLanguage = activeKind === "python" ? "python"
     : activeKind === "yaml"   ? "yaml"
+    : activeKind === "plaintext" ? "plaintext"
     : "sql";
 
   const yamlModelPath = editorLanguage === "yaml"

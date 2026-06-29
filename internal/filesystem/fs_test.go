@@ -576,3 +576,24 @@ func TestRenameFile_SameFileCheck(t *testing.T) {
 		t.Errorf("expected no error for same-path rename, got: %v", err)
 	}
 }
+
+// ─── ReadFile binary guard ──────────────────────────────────────────────────
+
+func TestReadFile_RejectsBinary(t *testing.T) {
+	dir := t.TempDir()
+	text := filepath.Join(dir, "a.txt")
+	bin := filepath.Join(dir, "a.bin")
+	if err := os.WriteFile(text, []byte("hello\nworld\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bin, []byte("ELF\x00\x01\x02binary"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, err := ReadFile(text); err != nil || got != "hello\nworld\n" {
+		t.Errorf("text file: got %q err %v", got, err)
+	}
+	if _, err := ReadFile(bin); err == nil {
+		t.Error("binary file: expected error, got nil")
+	}
+}

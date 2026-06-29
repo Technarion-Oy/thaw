@@ -926,6 +926,8 @@ export function ParseSqlList(arg1:string):Promise<Array<string>>;
 
 export function ParseWorkloadIdentityPolicy(arg1:string):Promise<authenticationpolicy.WorkloadIdentityPolicy>;
 
+export function PickAnyFile():Promise<string>;
+
 export function PickCACertFile():Promise<string>;
 
 export function PickDataFile():Promise<string>;
