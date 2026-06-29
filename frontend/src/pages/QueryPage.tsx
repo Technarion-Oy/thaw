@@ -13,7 +13,7 @@ import { flushSync } from "react-dom";
 import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message, Modal, type MenuProps } from "antd";
 import { CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined, SearchOutlined, CloudUploadOutlined } from "@ant-design/icons";
 import { ClipboardSetText, BrowserOpenURL } from "../../wailsjs/runtime/runtime";
-import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, CloseTabSession, GetSessionInitMode, InitTabSession, SetQueryLogEnabled } from "../../wailsjs/go/app/App";
+import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, PickAnyFile, ReadFile, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, CloseTabSession, GetSessionInitMode, InitTabSession, SetQueryLogEnabled } from "../../wailsjs/go/app/App";
 import { GetSqlStatementRanges } from "../../wailsjs/go/sqleditor/Service";
 import type { snowflake } from "../../wailsjs/go/models";
 import { usePanelLayoutStore } from "../store/panelLayoutStore";
@@ -692,8 +692,7 @@ export default function QueryPage() {
     }
   };
 
-  const handleOpen = async () => {
-    const filePath = await PickOpenFile();
+  const openPicked = async (filePath: string) => {
     if (!filePath) return;
     try {
       const content = await ReadFile(filePath);
@@ -702,6 +701,9 @@ export default function QueryPage() {
       message.error(`Open failed: ${String(e)}`);
     }
   };
+
+  const handleOpen    = async () => openPicked(await PickOpenFile());
+  const handleOpenAny = async () => openPicked(await PickAnyFile());
 
   // Browser events — dispatched by Monaco keyboard bindings and the Save button.
   useEffect(() => {
@@ -898,9 +900,10 @@ export default function QueryPage() {
   useEffect(() => {
     const offNewTab  = EventsOn("menu:new-tab",  () => openScratch());
     const offOpen    = EventsOn("menu:open",     () => handleOpen());
+    const offOpenAny = EventsOn("menu:open-any", () => handleOpenAny());
     const offSave    = EventsOn("menu:save",     () => handleSave());
     const offSaveAs  = EventsOn("menu:save-as",  () => handleSaveAs());
-    return () => { offNewTab(); offOpen(); offSave(); offSaveAs(); };
+    return () => { offNewTab(); offOpen(); offOpenAny(); offSave(); offSaveAs(); };
   }, []);
 
   useEffect(() => {

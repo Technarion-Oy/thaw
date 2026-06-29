@@ -196,6 +196,26 @@ func (a *App) PickOpenFile() string {
 	return path
 }
 
+// PickAnyFile opens a native open-file dialog with no extension filter and
+// returns the chosen path, or "" if canceled. Passing zero filters is the only
+// way Wails sets allowsOtherFileTypes on macOS, so this is the explicit opt-in
+// for opening files other than SQL/YAML/Python. The dialog opens in the
+// configured export directory when one is set.
+func (a *App) PickAnyFile() string {
+	defaultDir := ""
+	if cfg, err := config.Load(); err == nil {
+		defaultDir = cfg.Git.ExportDir
+	}
+	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
+		Title:            "Open any file",
+		DefaultDirectory: defaultDir,
+	})
+	if err != nil {
+		return ""
+	}
+	return path
+}
+
 // dataFileFilters returns dialog file filters for the given import format.
 func dataFileFilters(format string) []wailsruntime.FileFilter {
 	switch strings.ToUpper(format) {

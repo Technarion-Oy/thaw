@@ -548,7 +548,8 @@ Open **Tools → Configure AI…** in the menu bar to set your provider, API key
 
 ## File Management
 
-- **Open** (`⌘O` / `Ctrl+O`) — native OS file dialog filtered to `.sql`, `.yml`, `.yaml`, and `.py`; opens in the configured export directory by default; re-activates an existing tab if the file is already open; the editor automatically uses YAML or Python syntax highlighting based on the file extension
+- **Open SQL/YAML/Python…** (`⌘O` / `Ctrl+O`) — native OS file dialog filtered to `.sql`, `.yml`, `.yaml`, and `.py`; opens in the configured export directory by default; re-activates an existing tab if the file is already open; the editor automatically uses YAML or Python syntax highlighting based on the file extension
+- **Open Any File…** (`⌘⇧O` / `Ctrl+Shift+O`) — native OS file dialog with **no extension filter** (the explicit opt-in to open files other than `.sql`/`.yml`/`.yaml`/`.py`); any text file (`.md`, `.txt`, `.json`, `.toml`, …) opens as plaintext with no SQL highlighting or autocomplete; binary files (detected by a NUL byte) are refused with a clear message instead of dumping garbage into the editor
 - **YAML intelligence** — dbt YAML files opened in the editor receive schema-driven autocompletions, hover documentation, and real-time validation (red squiggles) powered by the bundled dbt-jsonschema schemas — all schemas are embedded locally, no network requests at runtime; covers `dbt_project.yml`, `packages.yml`, `dependencies.yml`, `selectors.yml`, and all model/source/seed/snapshot/exposure YAML files; property names, allowed values, and inline documentation strings are surfaced as you type; non-dbt YAML files (`profiles.yml`, CI configs, etc.) are not falsely flagged with schema validation warnings
 - **Save** (`⌘S` / `Ctrl+S`) — writes back to the file's original path
 - **Save As…** (`⌘⇧S` / `Ctrl+Shift+S`) — native OS save dialog; promotes a scratch tab to a named file

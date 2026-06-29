@@ -34,6 +34,7 @@ tree for changes and emits debounced Wails events to refresh the file browser UI
 ## Patterns & integration
 
 - IPC entry points live in `internal/app/filesystem.go`; the package functions are called as thin delegators.
+- `ReadFile` refuses files that look binary (a NUL byte in the first 8 KB, the git heuristic) so the editor never opens garbage; all open paths (native dialog, file-tree click, diff) route through it.
 - `Watcher` is started by `StartFileWatcher(dir)` and stopped by `StopFileWatcher()` IPC methods. The frontend (`FileBrowser.tsx`) listens for the `"fs:changed"` Wails event.
 - The watcher uses a **single recursive watch** (`rjeczalik/notify`): FSEvents on macOS, `ReadDirectoryChangesW` on Windows, inotify on Linux. On macOS/Windows this is one OS subscription for the entire tree, so a large/deep tree (a `venv`, `node_modules`, …) no longer registers one watch per directory or exhausts the file-descriptor limit (issue #485). New subdirectories are covered automatically.
 - Write-only events on existing files are intentionally skipped — only create/delete/rename events trigger directory refresh, since `ListDir` output does not change on file content edits.

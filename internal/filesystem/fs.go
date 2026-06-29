@@ -11,6 +11,7 @@
 package filesystem
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -29,11 +30,20 @@ type FileEntry struct {
 	Size  int64  `json:"size"`
 }
 
-// ReadFile returns the full text content of the file at path.
+// ReadFile returns the full text content of the file at path. It refuses files
+// that look binary (a NUL byte in the first 8 KB, the same heuristic git uses)
+// so the editor never dumps garbage from a non-text file.
 func ReadFile(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
+	}
+	head := data
+	if len(head) > 8000 {
+		head = head[:8000]
+	}
+	if bytes.IndexByte(head, 0) >= 0 {
+		return "", fmt.Errorf("%s looks like a binary file — only text files can be opened", filepath.Base(path))
 	}
 	return string(data), nil
 }
