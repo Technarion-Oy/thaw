@@ -2025,13 +2025,14 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         refreshOccurrences();
       }, 0);
     });
+    editor.onDidDispose(() => clearTimeout(selectionTimer));
 
     // After a mouse drag-select, WKWebView wedges Monaco's hidden-textarea input
     // deduction: the first printable key typed over the selection produces no
     // model edit (you had to press twice). Double-click/keyboard selections are
     // unaffected. Rather than fight Monaco's textarea sync, intercept that first
-    // key and apply the replacement directly. Scoped to single-click drags
-    // (detail === 1) so double-click/keyboard keep Monaco's normal path. (#575)
+    // key and re-issue it through Monaco's type command. Scoped to single-click
+    // drags (detail === 1) so double-click/keyboard keep Monaco's normal path. (#575)
     const dragSyncDom = editor.getDomNode();
     let pendingDragReplace = false;
     dragSyncDom?.addEventListener("mouseup", (e) => {
@@ -2040,18 +2041,25 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       const sel = editor.getSelection();
       pendingDragReplace = !!(sel && !sel.isEmpty());
     });
+    // Drop the pending state if focus leaves before the first key (e.g. Alt+Tab),
+    // otherwise we'd intercept a keystroke against a stale selection on return.
+    dragSyncDom?.addEventListener("blur", () => { pendingDragReplace = false; }, true);
     dragSyncDom?.addEventListener("keydown", (e) => {
       const ke = e as KeyboardEvent;
       if (!pendingDragReplace) return;
-      pendingDragReplace = false;                                   // only the first key
+      // A lone modifier press precedes the real char (Shift before 'A'); let it
+      // through without consuming the pending state.
+      if (ke.key === "Shift" || ke.key === "Control" || ke.key === "Alt" || ke.key === "Meta") return;
+      pendingDragReplace = false;                                   // first real key consumes it
       if (ke.metaKey || ke.ctrlKey || ke.altKey || ke.isComposing) return;
       if (ke.key.length !== 1) return;                              // printable chars only
       const sel = editor.getSelection();
       if (!sel || sel.isEmpty()) return;
       ke.preventDefault();
       ke.stopPropagation();
-      editor.executeEdits("drag-sel-replace", [{ range: sel, text: ke.key }],
-        [new monaco.Selection(sel.startLineNumber, sel.startColumn + 1, sel.startLineNumber, sel.startColumn + 1)]);
+      // type command (not executeEdits) so auto-surround/auto-close, cursor
+      // placement and undo coalescing match a real keystroke.
+      editor.trigger("keyboard", "type", { text: ke.key });
     }, true);                                                       // capture: beat Monaco's handler
 
     editor.addCommand(
