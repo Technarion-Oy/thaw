@@ -18,6 +18,13 @@ The driver writes the query ID to the channel and **then closes it**. Never call
 
 `navigator.clipboard` is blocked in WKWebView. All clipboard operations use Wails' `ClipboardGetText` / `ClipboardSetText` native APIs. Monaco's built-in copy/paste is overridden via a `_commandService` patch + capture-phase keydown listeners (`utils/monacoClipboard.ts`).
 
+## WKWebView drops the first keystroke typed over a selection (#575)
+
+Two workarounds in `SqlEditor.tsx`'s `handleMount`, both load-bearing — don't "simplify" them away:
+
+1. The `onDidChangeCursorSelection` handler defers its `setSelectedSql` store write via `setTimeout(0)`. Running it synchronously makes the Zustand re-render land mid-keystroke and the first character typed over a keyboard/double-click selection is dropped. `refreshOccurrences` stays synchronous so occurrence highlights update live during a drag.
+2. A capture-phase `mouseup`/`keydown` pair (`onDragMouseUp`/`onDragKeyDown`) intercepts the first printable key after a **mouse drag-select** and re-issues it via `editor.trigger("keyboard", "type", …)`. WKWebView wedges Monaco's hidden-`<textarea>` input deduction after a drag — the model never sees the first input — so without this the character is silently lost until the second press. Using `trigger("type")` (not `executeEdits`) preserves auto-surround/auto-close and undo coalescing.
+
 ## Multi-statement execution
 
 For multi-statement SQL, `Execute` uses an inner `execCtx` (fresh context), so the outer `qidChan` (single-statement async mode) never fires. Per-statement query IDs are tracked via per-statement goroutines + a `sync.WaitGroup` in `internal/app/query.go`'s `StartQuery`.
