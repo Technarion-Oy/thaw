@@ -69,6 +69,7 @@ const QueryProfileModal      = lazy(() => import("../components/results/QueryPro
 const TerminalPanel          = lazy(() => import("../components/terminal/TerminalPanel"));
 const NotebookTab            = lazy(() => import("../components/notebook/NotebookTab"));
 import { useQueryStore, type QueryResult, type Tab, EXECUTE_IN_TAB_EVENT } from "../store/queryStore";
+import { openFileInTab } from "../utils/openFileInTab";
 import { useConnectionStore } from "../store/connectionStore";
 import { useSessionStore } from "../store/sessionStore";
 import { useFeatureFlagsStore } from "../store/featureFlagsStore";
@@ -87,7 +88,7 @@ const saveDefaultName = (tab: Tab) =>
   tab.isDefaultTitle ? "untitled.sql" : tab.title;
 
 export default function QueryPage() {
-  const { sql, selectedSql, isRunning, error, setResult, setError, markSaved, openScratch, openFile, setSql, openNotebook, openNotebookUnsaved, refreshFileTab, orphanFileTab } = useQueryStore();
+  const { sql, selectedSql, isRunning, error, setResult, setError, markSaved, openScratch, setSql, openNotebook, openNotebookUnsaved, refreshFileTab, orphanFileTab } = useQueryStore();
   const activeTabId    = useQueryStore((s) => s.activeTabId);
   const isNotebookTab  = useQueryStore((s) => (s.tabs.find((t) => t.id === s.activeTabId)?.kind ?? "sql") === "notebook");
   const activeDiff     = useQueryStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.diff ?? null);
@@ -694,12 +695,8 @@ export default function QueryPage() {
 
   const openPicked = async (filePath: string) => {
     if (!filePath) return;
-    try {
-      const content = await ReadFile(filePath);
-      openFile(filePath, content);
-    } catch (e) {
-      message.error(`Open failed: ${String(e)}`);
-    }
+    const err = await openFileInTab(filePath);
+    if (err) message.error(`Open failed: ${err}`);
   };
 
   const handleOpen    = async () => openPicked(await PickOpenFile());
@@ -839,7 +836,7 @@ export default function QueryPage() {
         if (splitTabId) {
           setSplitTab(null);
         } else {
-          const others = tabs.filter((t) => t.id !== activeTabId && (!t.kind || t.kind === "sql"));
+          const others = tabs.filter((t) => t.id !== activeTabId && (!t.kind || t.kind === "sql" || t.kind === "plaintext"));
           if (others.length > 0) setSplitTab(others[others.length - 1].id);
         }
         return;
