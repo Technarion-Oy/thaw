@@ -2010,14 +2010,49 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       );
     };
 
+    // ponytail: defer past Monaco's keystroke tick — running setSelectedSql
+    // (React re-render) + refreshOccurrences synchronously here drops the first
+    // keystroke when typing over a selection (issue #575).
+    let selectionTimer: ReturnType<typeof setTimeout> | undefined;
     editor.onDidChangeCursorSelection(() => {
-      const selection = editor.getSelection();
-      const selected  = selection && !selection.isEmpty()
-        ? editor.getModel()?.getValueInRange(selection) ?? ""
-        : "";
-      setSelectedSql(selected);
-      refreshOccurrences();
+      clearTimeout(selectionTimer);
+      selectionTimer = setTimeout(() => {
+        const selection = editor.getSelection();
+        const selected  = selection && !selection.isEmpty()
+          ? editor.getModel()?.getValueInRange(selection) ?? ""
+          : "";
+        setSelectedSql(selected);
+        refreshOccurrences();
+      }, 0);
     });
+
+    // After a mouse drag-select, WKWebView wedges Monaco's hidden-textarea input
+    // deduction: the first printable key typed over the selection produces no
+    // model edit (you had to press twice). Double-click/keyboard selections are
+    // unaffected. Rather than fight Monaco's textarea sync, intercept that first
+    // key and apply the replacement directly. Scoped to single-click drags
+    // (detail === 1) so double-click/keyboard keep Monaco's normal path. (#575)
+    const dragSyncDom = editor.getDomNode();
+    let pendingDragReplace = false;
+    dragSyncDom?.addEventListener("mouseup", (e) => {
+      const me = e as MouseEvent;
+      if (me.button !== 0 || me.detail !== 1) { pendingDragReplace = false; return; }
+      const sel = editor.getSelection();
+      pendingDragReplace = !!(sel && !sel.isEmpty());
+    });
+    dragSyncDom?.addEventListener("keydown", (e) => {
+      const ke = e as KeyboardEvent;
+      if (!pendingDragReplace) return;
+      pendingDragReplace = false;                                   // only the first key
+      if (ke.metaKey || ke.ctrlKey || ke.altKey || ke.isComposing) return;
+      if (ke.key.length !== 1) return;                              // printable chars only
+      const sel = editor.getSelection();
+      if (!sel || sel.isEmpty()) return;
+      ke.preventDefault();
+      ke.stopPropagation();
+      editor.executeEdits("drag-sel-replace", [{ range: sel, text: ke.key }],
+        [new monaco.Selection(sel.startLineNumber, sel.startColumn + 1, sel.startLineNumber, sel.startColumn + 1)]);
+    }, true);                                                       // capture: beat Monaco's handler
 
     editor.addCommand(
       monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter,
