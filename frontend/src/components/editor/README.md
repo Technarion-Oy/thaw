@@ -94,3 +94,14 @@ instance.
 - **Notebook navigation** in `CrossTabSearch`: switching to a notebook tab does not scroll to or
   highlight the match within the cell — `thaw:editor-ready` is only emitted by the primary
   `SqlEditor`, not by per-cell notebook editors.
+- **Typing over a selection — two WKWebView workarounds you must not remove (#575):**
+  1. In `onDidChangeCursorSelection`, the `setSelectedSql` store write is deferred via
+     `setTimeout(0)`; running it synchronously drops the first keystroke typed over a
+     keyboard/double-click selection (the Zustand re-render lands mid-keystroke).
+     `refreshOccurrences` deliberately stays synchronous so occurrence highlights still
+     update live during a drag.
+  2. The `onDragMouseUp`/`onDragKeyDown` capture-phase block intercepts the **first printable
+     key after a mouse drag-select** and re-issues it via `editor.trigger("keyboard", "type", …)`.
+     WKWebView wedges Monaco's hidden-textarea input deduction after a drag, so without this the
+     first character is silently dropped. It is **not** dead code — removing it reintroduces #575
+     for drag selections.

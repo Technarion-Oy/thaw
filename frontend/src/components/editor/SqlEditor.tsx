@@ -2010,13 +2010,63 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       );
     };
 
+    // ponytail: defer the setSelectedSql store write (a React re-render) past
+    // Monaco's keystroke tick — running it synchronously here drops the first
+    // keystroke when typing over a selection (issue #575). refreshOccurrences
+    // stays synchronous so occurrence highlights still update live during a drag.
+    let selectionTimer: ReturnType<typeof setTimeout> | undefined;
     editor.onDidChangeCursorSelection(() => {
-      const selection = editor.getSelection();
-      const selected  = selection && !selection.isEmpty()
-        ? editor.getModel()?.getValueInRange(selection) ?? ""
-        : "";
-      setSelectedSql(selected);
       refreshOccurrences();
+      clearTimeout(selectionTimer);
+      selectionTimer = setTimeout(() => {
+        const selection = editor.getSelection();
+        const selected  = selection && !selection.isEmpty()
+          ? editor.getModel()?.getValueInRange(selection) ?? ""
+          : "";
+        setSelectedSql(selected);
+      }, 0);
+    });
+    editor.onDidDispose(() => clearTimeout(selectionTimer));
+
+    // After a mouse drag-select, WKWebView wedges Monaco's hidden-textarea input
+    // deduction: the first printable key typed over the selection produces no
+    // model edit (you had to press twice). Keyboard selections are unaffected.
+    // Rather than fight Monaco's textarea sync, intercept that first key and
+    // re-issue it through Monaco's type command. (#575)
+    const dragDom = editor.getDomNode();
+    let pendingDragReplace = false;
+    const onDragMouseUp = (e: Event) => {
+      const me = e as MouseEvent;
+      if (me.button !== 0) { pendingDragReplace = false; return; } // leave right-click alone
+      const sel = editor.getSelection();
+      pendingDragReplace = !!(sel && !sel.isEmpty());
+    };
+    const onDragKeyDown = (e: Event) => {
+      const ke = e as KeyboardEvent;
+      if (!pendingDragReplace) return;
+      // A lone modifier press precedes the real char (Shift before 'A'); let it
+      // through without consuming the pending state.
+      if (ke.key === "Shift" || ke.key === "Control" || ke.key === "Alt" || ke.key === "Meta") return;
+      pendingDragReplace = false;                                   // first real key consumes it
+      if (ke.metaKey || ke.ctrlKey || ke.altKey || ke.isComposing) return;
+      if (ke.key.length !== 1) return;                              // printable chars only
+      const sel = editor.getSelection();
+      if (!sel || sel.isEmpty()) return;
+      ke.preventDefault();
+      ke.stopPropagation();
+      // type command (not executeEdits) so auto-surround/auto-close, cursor
+      // placement and undo coalescing match a real keystroke.
+      editor.trigger("keyboard", "type", { text: ke.key });
+    };
+    dragDom?.addEventListener("mouseup", onDragMouseUp);
+    dragDom?.addEventListener("keydown", onDragKeyDown, true);      // capture: beat Monaco's handler
+    // Drop the pending state when the editor loses focus (e.g. Alt+Tab) so we
+    // don't intercept a keystroke against a stale selection on return. Uses
+    // Monaco's widget-blur event, not a DOM blur, to ignore internal textarea churn.
+    editor.onDidBlurEditorWidget(() => { pendingDragReplace = false; });
+    editor.onDidDispose(() => {
+      dragDom?.removeEventListener("mouseup", onDragMouseUp);
+      dragDom?.removeEventListener("keydown", onDragKeyDown, true);
     });
 
     editor.addCommand(
