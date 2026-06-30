@@ -35,12 +35,12 @@ import QueryLogPane from "../components/results/QueryLogPane";
 // statement boundary, case-insensitive. RENAME/SWAP/SET arrive via ALTER.
 const DDL_LEADER_RE = /(?:^|;)\s*(?:CREATE|ALTER|DROP|TRUNCATE|UNDROP)\b/i;
 
-// Directory portion of a path (handles both / and \ separators) — matches the
-// parent dir the file watcher reports in fs:changed events.
-function pathDir(p: string): string {
-  const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
-  if (i < 0) return ".";
-  return i === 0 ? p.substring(0, 1) : p.substring(0, i);
+// Whether an error from ReadFile/ReadNotebook means the file is actually gone
+// (vs. a transient IPC/permission/binary-file error). Backend errors surface as
+// the OS message string across the Wails bridge.
+function isFileNotFound(e: unknown): boolean {
+  const msg = String(e).toLowerCase();
+  return msg.includes("no such file") || msg.includes("cannot find") || msg.includes("does not exist");
 }
 
 // ranContainedDDL reports whether the executed SQL has a DDL statement. Comments
@@ -278,8 +278,10 @@ export default function QueryPage() {
         ? await ReadNotebook(tab.path)
         : await ReadFile(tab.path);
       refreshFileTab(tab.id, content);
-    } catch {
-      orphanFileTab(tab.id);
+    } catch (e) {
+      // Only drop the file association when the file is truly gone — a transient
+      // IPC/permission error must not permanently orphan a still-valid tab.
+      if (isFileNotFound(e)) orphanFileTab(tab.id);
     }
   }, [refreshFileTab, orphanFileTab]);
 
@@ -289,13 +291,17 @@ export default function QueryPage() {
     useQueryStore.getState().tabs.forEach(rereadTab);
   }, [rereadTab]);
 
-  // Reflect external edits: when the file watcher reports a directory change,
-  // re-read any open tab whose file lives in that directory.
+  // Reflect external edits: when the file watcher reports any change, re-read
+  // every open file-backed tab. We deliberately don't match the event's
+  // directory against tab paths — native open-dialogs return canonical
+  // (symlink-resolved) paths while the watcher reports the pre-resolution root,
+  // so the two namespaces can differ (e.g. /tmp vs /private/tmp on macOS).
+  // ponytail: re-reads all file tabs on any workspace change — fine for a handful
+  // of tabs; refreshFileTab no-ops when content is unchanged, so the cost is one
+  // ReadFile per tab. Revisit if a high-churn workspace makes the fan-out hurt.
   useEffect(() => {
-    const off = EventsOn("fs:changed", (evt: { dir: string }) => {
-      useQueryStore.getState().tabs.forEach((tab) => {
-        if (tab.path && pathDir(tab.path) === evt.dir) rereadTab(tab);
-      });
+    const off = EventsOn("fs:changed", () => {
+      useQueryStore.getState().tabs.forEach(rereadTab);
     });
     return off;
   }, [rereadTab]);

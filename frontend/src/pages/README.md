@@ -63,6 +63,9 @@ overhead.
 - `menu:snowpark-open-notebook` — opens a file-picker then loads the notebook.
 - `menu:snowpark-new-notebook` — opens a blank notebook tab.
 - `query:statement-start` / `query:statement-qid` — multi-statement progress.
+- `fs:changed` — file watcher change event; re-reads every open file-backed tab
+  from disk (see "File-backed tab recovery" below) so external edits are
+  reflected. Independent of `FileBrowser`'s own `fs:changed` listener.
 
 Custom DOM events handled here:
 - `thaw:execute-in-tab` — emitted by `queryStore.executeInNewTab` to ask
@@ -72,11 +75,15 @@ Custom DOM events handled here:
   causing the connect modal to open.
 - `thaw:session-config-saved` — re-reads session init mode after config save.
 
-**File-backed tab recovery on startup**
+**File-backed tab recovery**
 
-On mount, `QueryPage` iterates all tabs in the store and re-reads file-backed
-tabs from disk (SQL files via `ReadFile`, notebooks via `ReadNotebook`),
-calling `refreshFileTab` or `orphanFileTab` as appropriate.
+On mount — and whenever a `fs:changed` watcher event arrives — `QueryPage`
+iterates all tabs in the store and re-reads file-backed tabs from disk (SQL files
+via `ReadFile`, notebooks via `ReadNotebook`) through the shared `rereadTab`
+helper, calling `refreshFileTab` (clean tabs adopt the disk content; tabs with
+unsaved edits are left untouched, VSCode-style) or `orphanFileTab` only when the
+file is genuinely gone (transient IPC/permission errors are ignored so a tab is
+never orphaned by a momentary failure).
 
 **Modal orchestration**
 

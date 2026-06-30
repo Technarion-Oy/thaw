@@ -413,8 +413,6 @@ export default function FileBrowser() {
   // Stable refs so effects can read current values without re-registering.
   const loadedKeysRef = useRef(loadedKeys);
   loadedKeysRef.current = loadedKeys;
-  const loadedRef = useRef(loaded);
-  loadedRef.current = loaded;
   const selKeysRef = useRef(selKeys);
   selKeysRef.current = selKeys;
 
@@ -475,10 +473,9 @@ export default function FileBrowser() {
   }, [exportDir]);
 
   // ── File system watcher lifecycle ──────────────────────────────────────────
-  // Only watch while the panel is expanded to conserve inotify watches on Linux.
-  // On re-expand, refresh root entries to catch changes that happened while collapsed.
   // Run the watcher whenever a workspace is open — open editor tabs need change
-  // events even while the Files panel is collapsed (not just the tree).
+  // events even while the Files panel is collapsed (not just the tree). It is not
+  // gated on `expanded`, so collapsing the panel does not stop watching.
   useEffect(() => {
     if (!exportDir || !fileWatcherEnabled) return;
     StartFileWatcher(exportDir).catch((e) => console.warn("File watcher failed to start:", e));
@@ -486,12 +483,14 @@ export default function FileBrowser() {
   }, [exportDir, fileWatcherEnabled]);
 
   // On (re)expand, refresh the root to pick up changes that occurred while collapsed.
+  // Depends on `loaded` (state, reactive) so it also fires once the initial load
+  // completes while already expanded.
   useEffect(() => {
-    if (!exportDir || !expanded || !loadedRef.current) return;
+    if (!exportDir || !expanded || !loaded) return;
     ListDirectory(exportDir)
       .then((entries) => setTreeData((prev) => mergeNodes(prev, entriesToNodes(entries))))
       .catch(() => {});
-  }, [exportDir, expanded]);
+  }, [exportDir, expanded, loaded]);
 
   // ── File system change listener ────────────────────────────────────────────
   useEffect(() => {

@@ -354,6 +354,10 @@ export const useQueryStore = create<QueryState>()(
     set((state) => {
       const tab = state.tabs.find((t) => t.id === id);
       if (!tab) return {};
+      // Disk content already matches what this tab loaded — nothing to do. Also
+      // short-circuits the app's own saves: the watcher re-fires ~200 ms after we
+      // write, and re-applying identical content would needlessly churn editor state.
+      if (diskContent === tab.savedSql) return {};
       // VSCode-style: a tab with unsaved edits is left untouched — the external
       // change is ignored and the tab stays dirty against its original baseline,
       // handled like any other file with unsaved modifications. Only clean tabs
