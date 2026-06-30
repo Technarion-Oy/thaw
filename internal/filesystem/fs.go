@@ -465,14 +465,25 @@ func CopyFile(srcPath, dstPath, allowedRoot string) (string, error) {
 	if info.IsDir() {
 		// Refuse copying a directory into itself or a descendant — that would
 		// recurse forever as the copy keeps finding its own freshly-written files.
-		srcPrefix := filepath.Clean(srcPath) + string(filepath.Separator)
-		dstClean := filepath.Clean(dstPath) + string(filepath.Separator)
-		if hasPathPrefix(dstClean, srcPrefix) {
+		// Resolve symlinks first: a lexical filepath.Clean check is bypassed when
+		// dstPath traverses a symlink that points back into srcPath.
+		realSrc, err := filepath.EvalSymlinks(srcPath)
+		if err != nil {
+			return "", err
+		}
+		// dstPath does not exist yet, so resolve its parent and rejoin the leaf.
+		realDstParent, err := filepath.EvalSymlinks(filepath.Dir(dstPath))
+		if err != nil {
+			return "", err
+		}
+		realDst := filepath.Join(realDstParent, filepath.Base(dstPath))
+		if hasPathPrefix(realDst+string(filepath.Separator), realSrc+string(filepath.Separator)) {
 			return "", fmt.Errorf("cannot copy a directory into itself")
 		}
 		// os.CopyFS creates dstPath, copies regular files and dirs, and errors on
 		// pre-existing files or irregular files (symlinks) — exactly the safety we want.
 		if err := os.CopyFS(dstPath, os.DirFS(srcPath)); err != nil {
+			os.RemoveAll(dstPath) //nolint:errcheck // drop the partial tree so retries don't pile up _copy_N orphans
 			return "", err
 		}
 		return dstPath, nil

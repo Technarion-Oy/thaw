@@ -670,3 +670,20 @@ func TestCopyFile_OutsideRoot(t *testing.T) {
 		t.Error("expected error for source outside root, got nil")
 	}
 }
+
+func TestCopyFile_RefusesDirIntoItselfViaSymlink(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "data")
+	if err := os.MkdirAll(filepath.Join(src, "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A symlink inside root that resolves back to src — the lexical guard would miss it.
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(src, link); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+	// dst traverses the symlink into src; must be rejected, not copied into itself.
+	if _, err := CopyFile(src, filepath.Join(link, "copy"), root); err == nil {
+		t.Error("expected error copying a directory into itself via a symlink, got nil")
+	}
+}

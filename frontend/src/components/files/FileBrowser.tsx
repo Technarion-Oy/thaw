@@ -415,6 +415,8 @@ export default function FileBrowser() {
   loadedKeysRef.current = loadedKeys;
   const loadedRef = useRef(loaded);
   loadedRef.current = loaded;
+  const selKeysRef = useRef(selKeys);
+  selKeysRef.current = selKeys;
 
   // Debounced git-status refresh so the tree's status colors update live (on
   // save, external edits, file ops) without a manual refresh, while coalescing
@@ -532,8 +534,11 @@ export default function FileBrowser() {
     return off;
   }, [exportDir, fileWatcherEnabled, scheduleGitRefresh]);
 
-  // Keep selection in sync with the active tab (including tab switches)
+  // Keep selection in sync with the active tab (tab switches / opens). Skip while a
+  // multi-selection is active so an unrelated tab change can't silently collapse a
+  // bulk selection the user is about to act on.
   useEffect(() => {
+    if (selKeysRef.current.length > 1) return;
     setSelKeys(currentFile ? [String(currentFile)] : []);
     setAnchorKey(currentFile ? String(currentFile) : null);
   }, [currentFile]);
@@ -661,16 +666,20 @@ export default function FileBrowser() {
       return;
     }
     // Shift+click — select the range between the anchor and this node (don't open).
-    if (ne && ne.shiftKey && anchorKey) {
+    if (ne && ne.shiftKey) {
       const flat = visibleKeysInOrder();
-      const ai = flat.indexOf(anchorKey);
+      const ai = anchorKey ? flat.indexOf(anchorKey) : -1;
       const bi = flat.indexOf(path);
       if (ai >= 0 && bi >= 0) {
         const [lo, hi] = ai < bi ? [ai, bi] : [bi, ai];
         setSelKeys(flat.slice(lo, hi + 1));
-        return;
+      } else {
+        // No anchor, or it scrolled out of view — fall back to selecting just this
+        // node. Return regardless so a Shift+click never opens the file.
+        setAnchorKey(path);
+        setSelKeys([path]);
       }
-      // Anchor scrolled out of view — fall back to a single selection.
+      return;
     }
     // Plain click — single selection; open files, leave folders unexpanded (caret expands).
     setAnchorKey(path);
@@ -728,7 +737,10 @@ export default function FileBrowser() {
     const isDir = (node as any).isLeaf === false;
     // Right-clicking a node outside the current multi-selection acts on just that
     // node (standard file-manager behavior); right-clicking inside it keeps the set.
-    if (!selKeys.includes(path)) setSelKeys([path]);
+    if (!selKeys.includes(path)) {
+      setSelKeys([path]);
+      setAnchorKey(path); // keep the Shift+range pivot aligned with the new selection
+    }
     setFileCtxMenu({ x: event.clientX, y: event.clientY, path, name, isDir });
   };
 
@@ -738,6 +750,10 @@ export default function FileBrowser() {
     if (!fileCtxMenu) return [];
     return selKeys.length > 1 && selKeys.includes(fileCtxMenu.path) ? selKeys : [fileCtxMenu.path];
   };
+
+  // Files-only subset of the operation set — git staging operates per file; passing a
+  // directory to `git add` would recursively stage everything under it.
+  const opFilePaths = (): string[] => opPaths().filter((p) => !isDirKey(p));
 
   const selectFileForComparison = () => {
     if (!fileCtxMenu) return;
@@ -878,7 +894,9 @@ export default function FileBrowser() {
       }
     }
     markSelfChanged(targetDir);
-    if (mode === "cut") {
+    if (mode === "cut" && ok > 0) {
+      // Only consume the cut clipboard when something actually moved — otherwise a
+      // failed paste (e.g. read-only target) would silently drop the selection.
       for (const src of paths) markSelfChanged(pathDir(src));
       setClipboard(null); // cut is one-shot
     }
@@ -890,34 +908,41 @@ export default function FileBrowser() {
   // ponytail: loops the per-file store actions, so each awaits a status refresh —
   // fine for the handful of files a user selects; add a batch IPC if it ever lags.
   const handleBulkStage = async () => {
-    const paths = opPaths();
+    const paths = opFilePaths();
     setFileCtxMenu(null);
-    if (gitBusy()) return;
+    if (!paths.length || gitBusy()) return;
     for (const p of paths) await stageFile(p);
-    reportGit(`Staged ${paths.length} item${paths.length > 1 ? "s" : ""}`);
+    reportGit(`Staged ${paths.length} file${paths.length > 1 ? "s" : ""}`);
   };
 
   const handleBulkUnstage = async () => {
-    const paths = opPaths();
+    const paths = opFilePaths();
     setFileCtxMenu(null);
-    if (gitBusy()) return;
+    if (!paths.length || gitBusy()) return;
     for (const p of paths) await unstageFile(p);
-    reportGit(`Unstaged ${paths.length} item${paths.length > 1 ? "s" : ""}`);
+    reportGit(`Unstaged ${paths.length} file${paths.length > 1 ? "s" : ""}`);
   };
 
   const handleBulkDiscard = () => {
-    const paths = opPaths();
+    const paths = opFilePaths();
     setFileCtxMenu(null);
-    if (gitBusy()) return;
+    if (!paths.length || gitBusy()) return;
+    // Name any never-committed files — discard permanently deletes those (they have
+    // no HEAD to revert to), so they deserve an explicit callout, not a generic line.
+    const newNames = paths
+      .filter((p) => { const rel = gitOverlay.relOf(p); return rel != null && gitOverlay.newFilesRel.has(rel); })
+      .map(pathBase);
     modal.confirm({
-      title: `Discard changes to ${paths.length} item${paths.length > 1 ? "s" : ""}?`,
-      content: "Reverts each file to its last committed state. New files are deleted. This cannot be undone.",
+      title: `Discard changes to ${paths.length} file${paths.length > 1 ? "s" : ""}?`,
+      content: newNames.length
+        ? `Reverts each file to its last committed state. ${newNames.length} never-committed file${newNames.length > 1 ? "s" : ""} will be permanently deleted (${newNames.join(", ")}). This cannot be undone.`
+        : "Reverts each file to its last committed state. This cannot be undone.",
       okText: "Discard",
       okButtonProps: { danger: true },
       onOk: async () => {
         if (gitBusy()) throw new Error("busy");
         for (const p of paths) await discardFile(p);
-        reportGit(`Discarded changes to ${paths.length} item${paths.length > 1 ? "s" : ""}`);
+        reportGit(`Discarded changes to ${paths.length} file${paths.length > 1 ? "s" : ""}`);
       },
     });
   };
@@ -1297,6 +1322,8 @@ export default function FileBrowser() {
   // menu offers bulk variants. ctxCount labels them.
   const ctxMulti = !!fileCtxMenu && selKeys.length > 1 && selKeys.includes(fileCtxMenu.path);
   const ctxCount = ctxMulti ? selKeys.length : 1;
+  // Files-only count for the bulk git actions (directories are excluded — see opFilePaths).
+  const ctxFileCount = ctxMulti ? opFilePaths().length : 0;
 
   return (
     <div style={{ padding: "4px 4px" }}>
@@ -1646,13 +1673,13 @@ export default function FileBrowser() {
           {!ctxMulti && <CtxItem icon={<EditOutlined />} label="Rename…" onClick={handleRenameStart} />}
           <CtxItem icon={<DeleteOutlined />} label={ctxMulti ? `Delete ${ctxCount} items` : "Delete"} onClick={handleDeleteConfirm} danger />
 
-          {/* ── Bulk git staging (multi-select) ── */}
-          {gitEnabled && ctxMulti && (
+          {/* ── Bulk git staging (multi-select, files only) ── */}
+          {gitEnabled && ctxMulti && ctxFileCount > 0 && (
             <>
               <div role="separator" style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
-              <CtxItem icon={<PlusOutlined />} label={`Stage ${ctxCount} items`} onClick={handleBulkStage} />
-              <CtxItem icon={<MinusOutlined />} label={`Unstage ${ctxCount} items`} onClick={handleBulkUnstage} />
-              <CtxItem icon={<UndoOutlined />} label={`Discard ${ctxCount} items`} onClick={handleBulkDiscard} danger />
+              <CtxItem icon={<PlusOutlined />} label={`Stage ${ctxFileCount} file${ctxFileCount > 1 ? "s" : ""}`} onClick={handleBulkStage} />
+              <CtxItem icon={<MinusOutlined />} label={`Unstage ${ctxFileCount} file${ctxFileCount > 1 ? "s" : ""}`} onClick={handleBulkUnstage} />
+              <CtxItem icon={<UndoOutlined />} label={`Discard ${ctxFileCount} file${ctxFileCount > 1 ? "s" : ""}`} onClick={handleBulkDiscard} danger />
             </>
           )}
 
