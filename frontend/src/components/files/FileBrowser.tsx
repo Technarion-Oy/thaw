@@ -73,6 +73,19 @@ function pathDir(p: string): string {
   return i === 0 ? p.substring(0, 1) : p.substring(0, i);
 }
 
+/**
+ * Normalize a directory for self-change suppression so a canonical, symlink-
+ * resolved path (what macOS save/open dialogs return — e.g. `/private/tmp/…`) and
+ * the watcher's pre-resolution event path (e.g. `/tmp/…`) collapse to one key.
+ * Applied symmetrically to the stored key and the `fs:changed` lookup.
+ * ponytail: covers only macOS's auto-symlinked roots (`/private/{tmp,var,etc}`),
+ * the realistic case; an arbitrary user symlink still costs one redundant
+ * ListDirectory — not worth a backend round-trip to resolve.
+ */
+function suppressKey(dir: string): string {
+  return dir.replace(/^\/private(?=\/(?:tmp|var|etc)(?:\/|$))/, "");
+}
+
 /** Detect the path separator used in a path (backslash on Windows, forward slash otherwise). */
 function pathSep(p: string): string {
   return p.includes("\\") ? "\\" : "/";
@@ -392,12 +405,13 @@ export default function FileBrowser() {
   const selfChangeTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   const markSelfChanged = (dir: string) => {
-    selfChangedDirs.current.add(dir);
-    const prev = selfChangeTimers.current.get(dir);
+    const key = suppressKey(dir); // normalize so canonical dialog paths match evt.dir
+    selfChangedDirs.current.add(key);
+    const prev = selfChangeTimers.current.get(key);
     if (prev) clearTimeout(prev);
-    selfChangeTimers.current.set(dir, setTimeout(() => {
-      selfChangedDirs.current.delete(dir);
-      selfChangeTimers.current.delete(dir);
+    selfChangeTimers.current.set(key, setTimeout(() => {
+      selfChangedDirs.current.delete(key);
+      selfChangeTimers.current.delete(key);
     }, 500));
   };
 
@@ -504,7 +518,7 @@ export default function FileBrowser() {
       // Any disk change may alter git status — refresh colors even for the app's
       // own mutations (which suppress the tree update below to avoid flicker).
       scheduleGitRefresh();
-      if (selfChangedDirs.current.has(evt.dir)) return;
+      if (selfChangedDirs.current.has(suppressKey(evt.dir))) return;
 
       // After refreshing a directory, prune loadedKeys entries that reference
       // children which no longer exist (prevents unbounded stale-key growth).

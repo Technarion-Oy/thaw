@@ -43,7 +43,8 @@ const DDL_LEADER_RE = /(?:^|;)\s*(?:CREATE|ALTER|DROP|TRUNCATE|UNDROP)\b/i;
 // raw OS-string forms are deliberately not matched (they'd risk a spurious
 // orphan on an unrelated IPC error like a Wails "cannot find module").
 function isFileNotFound(e: unknown): boolean {
-  return String(e).toLowerCase().includes("file not found");
+  // The marker is lowercase ASCII, formatted as `<marker>: <path>`; no case-fold needed.
+  return String(e).includes("file not found");
 }
 
 // ranContainedDDL reports whether the executed SQL has a DDL statement. Comments
@@ -312,14 +313,21 @@ export default function QueryPage() {
   // directory against tab paths — native open-dialogs return canonical
   // (symlink-resolved) paths while the watcher reports the pre-resolution root,
   // so the two namespaces can differ (e.g. /tmp vs /private/tmp on macOS).
-  // ponytail: re-reads all file tabs on any workspace change — fine for a handful
-  // of tabs; refreshFileTab no-ops when content is unchanged, so the cost is one
-  // ReadFile per tab. Revisit if a high-churn workspace makes the fan-out hurt.
+  //
+  // The watcher debounces per *directory*, so a tool touching K directories at
+  // once fires K separate events; debouncing here collapses that burst into a
+  // single fan-out so the cost stays N (one ReadFile per tab), not K×N.
+  // ponytail: refreshFileTab no-ops when content is unchanged, so a re-read of an
+  // untouched tab is just one cheap ReadFile. Revisit only if N grows large.
   useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const off = EventsOn("fs:changed", () => {
-      useQueryStore.getState().tabs.forEach(rereadTab);
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        useQueryStore.getState().tabs.forEach(rereadTab);
+      }, 250);
     });
-    return off;
+    return () => { if (timer) clearTimeout(timer); off(); };
   }, [rereadTab]);
 
   // Own the file watcher lifecycle here rather than in FileBrowser: QueryPage is

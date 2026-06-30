@@ -64,6 +64,9 @@ func ReadFile(path string) (string, error) {
 func ReadFileHead(path string, maxBytes int) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("%s: %s", NotFoundMarker, path)
+		}
 		return "", err
 	}
 	defer f.Close() //nolint:errcheck
