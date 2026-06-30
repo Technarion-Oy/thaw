@@ -870,12 +870,15 @@ export default function FileBrowser() {
     [selKeys, treeData, exportDir],
   );
 
-  const handlePaste = async (targetDir: string) => {
+  const handlePaste = async (rawTarget: string) => {
     setFileCtxMenu(null);
     if (!clipboard) return;
     const { mode, paths } = clipboard;
+    // Strip any trailing separator (exportDir may be stored with one) so the
+    // same-folder no-op guard below matches pathDir(src), which always strips it.
+    const targetDir = rawTarget.replace(/[/\\]+$/, "");
     const sep = pathSep(targetDir);
-    const join = (n: string) => (targetDir.endsWith(sep) ? `${targetDir}${n}` : `${targetDir}${sep}${n}`);
+    const join = (n: string) => `${targetDir}${sep}${n}`;
     // List the target dir once; claim each chosen name in `names` so sequential
     // pastes don't collide (replaces one ListDirectory IPC per item). If the target
     // is gone (e.g. deleted between Cut and Paste), bail with one clear error rather

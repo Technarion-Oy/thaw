@@ -462,6 +462,13 @@ func CopyFile(srcPath, dstPath, allowedRoot string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// A symlink reports IsDir()==false, so it would fall through to the file branch
+	// where os.Open follows it — copying the target's content for a link-to-file, or
+	// failing with EISDIR for a link-to-dir. Neither is what "copy this entry" means,
+	// and ListDir surfaces symlinks as browsable entries, so reject them explicitly.
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("cannot copy a symbolic link: %s", filepath.Base(srcPath))
+	}
 	if info.IsDir() {
 		// Refuse copying a directory into itself or a descendant — that would
 		// recurse forever as the copy keeps finding its own freshly-written files.
@@ -480,8 +487,13 @@ func CopyFile(srcPath, dstPath, allowedRoot string) (string, error) {
 		if hasPathPrefix(realDst+string(filepath.Separator), realSrc+string(filepath.Separator)) {
 			return "", fmt.Errorf("cannot copy a directory into itself")
 		}
-		// os.CopyFS creates dstPath, copies regular files and dirs, and errors on
-		// pre-existing files or irregular files (symlinks) — exactly the safety we want.
+		// os.CopyFS would silently merge into a pre-existing dstPath (it only errors
+		// on pre-existing *files*), so guard existence explicitly — both to honor the
+		// "must not already exist" contract and so the RemoveAll cleanup below can
+		// only ever delete a directory this call just created.
+		if _, err := os.Lstat(dstPath); err == nil {
+			return "", fmt.Errorf("destination already exists: %s", filepath.Base(dstPath))
+		}
 		if err := os.CopyFS(dstPath, os.DirFS(srcPath)); err != nil {
 			os.RemoveAll(dstPath) //nolint:errcheck // drop the partial tree so retries don't pile up _copy_N orphans
 			return "", err

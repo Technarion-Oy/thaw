@@ -687,3 +687,40 @@ func TestCopyFile_RefusesDirIntoItselfViaSymlink(t *testing.T) {
 		t.Error("expected error copying a directory into itself via a symlink, got nil")
 	}
 }
+
+func TestCopyFile_RefusesExistingDirDestination(t *testing.T) {
+	root := t.TempDir()
+	srcDir := filepath.Join(root, "src")
+	if err := os.Mkdir(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "a.sql"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(root, "dst")
+	if err := os.Mkdir(dst, 0o755); err != nil { // pre-existing empty dir
+		t.Fatal(err)
+	}
+	if _, err := CopyFile(srcDir, dst, root); err == nil {
+		t.Error("expected error copying dir onto an existing directory, got nil")
+	}
+	// The pre-existing destination must be left untouched (no merge).
+	if entries, _ := os.ReadDir(dst); len(entries) != 0 {
+		t.Errorf("expected destination left empty, found %d entries", len(entries))
+	}
+}
+
+func TestCopyFile_RejectsSymlink(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "target")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+	if _, err := CopyFile(link, filepath.Join(root, "copy"), root); err == nil {
+		t.Error("expected error copying a symbolic link, got nil")
+	}
+}
