@@ -36,13 +36,14 @@ import QueryLogPane from "../components/results/QueryLogPane";
 const DDL_LEADER_RE = /(?:^|;)\s*(?:CREATE|ALTER|DROP|TRUNCATE|UNDROP)\b/i;
 
 // Whether an error from ReadFile/ReadNotebook means the file is actually gone
-// (vs. a transient IPC/permission/binary-file error). The backend tags missing
-// files with a locale-independent "file not found" marker (the raw OS message is
-// localized, so it can't be matched on non-English Windows); the OS-string forms
-// are kept as a defensive fallback.
+// (vs. a transient IPC/permission/binary-file error). Both backends map
+// os.ErrNotExist to a locale-independent "file not found" marker before the error
+// crosses the Wails bridge (the raw OS message is localized, so it can't be
+// matched on non-English Windows), so matching that single marker is exact —
+// raw OS-string forms are deliberately not matched (they'd risk a spurious
+// orphan on an unrelated IPC error like a Wails "cannot find module").
 function isFileNotFound(e: unknown): boolean {
-  const msg = String(e).toLowerCase();
-  return msg.includes("file not found") || msg.includes("no such file") || msg.includes("cannot find");
+  return String(e).toLowerCase().includes("file not found");
 }
 
 // ranContainedDDL reports whether the executed SQL has a DDL statement. Comments
@@ -291,9 +292,12 @@ export default function QueryPage() {
       if (readSeqRef.current.get(tab.id) !== seq) return; // superseded by a newer read
       refreshFileTab(tab.id, content);
     } catch (e) {
+      if (readSeqRef.current.get(tab.id) !== seq) return; // superseded by a newer read
       // Only drop the file association when the file is truly gone — a transient
-      // IPC/permission error must not permanently orphan a still-valid tab.
-      if (readSeqRef.current.get(tab.id) === seq && isFileNotFound(e)) orphanFileTab(tab.id);
+      // IPC/permission error must not permanently orphan a still-valid tab. Surface
+      // anything else (binary file, EACCES, …) so a blank-reopen isn't silent.
+      if (isFileNotFound(e)) orphanFileTab(tab.id);
+      else console.warn(`Could not re-read ${tab.path}:`, e);
     }
   }, [refreshFileTab, orphanFileTab]);
 
