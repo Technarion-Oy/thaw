@@ -30,6 +30,8 @@ import {
   MinusOutlined,
   UndoOutlined,
   BranchesOutlined,
+  ScissorOutlined,
+  BlockOutlined,
 } from "@ant-design/icons";
 import type { DataNode, EventDataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
@@ -41,6 +43,7 @@ import {
   DeleteFile,
   DeleteDirectory,
   RenameFile,
+  CopyFile,
   CreateDirectory,
   CreateFile,
   DuplicateFile,
@@ -132,6 +135,18 @@ function makeNode(path: string, name: string, isDir: boolean): DataNode {
         : <FileOutlined style={{ color: CLR_SECONDARY }} />,
     isLeaf: !isDir,
   };
+}
+
+/** Find a node by key anywhere in the tree (depth-first). */
+function findNode(nodes: DataNode[], key: string): DataNode | null {
+  for (const n of nodes) {
+    if (n.key === key) return n;
+    if (n.children) {
+      const f = findNode(n.children, key);
+      if (f) return f;
+    }
+  }
+  return null;
 }
 
 /** Remove a node by key from the tree. */
@@ -299,9 +314,19 @@ export default function FileBrowser() {
   // ── File tree state ────────────────────────────────────────────────────────
   const [treeData,    setTreeData]    = useState<DataNode[]>([]);
   const [loadedKeys,  setLoadedKeys]  = useState<Key[]>([]);
-  const [selectedKey, setSelectedKey] = useState<Key | null>(null);
+  // Multi-selection: the set of selected node keys (drives highlight + bulk ops).
+  // `anchorKey` is the pivot for Shift+click range selection.
+  const [selKeys,     setSelKeys]     = useState<string[]>([]);
+  const [anchorKey,   setAnchorKey]   = useState<string | null>(null);
   const [loading,     setLoading]     = useState(false);
   const [loaded,      setLoaded]      = useState(false);
+  const treeWrapRef = useRef<HTMLDivElement>(null);
+
+  // ── Internal file clipboard (cut/copy/paste) ────────────────────────────────
+  // Frontend-only — never touches the OS text clipboard. Cut is one-shot (cleared
+  // after a paste); copy persists. ponytail: local state, not a store — only this
+  // component reads it; promote to a slice if another panel ever needs it.
+  const [clipboard, setClipboard] = useState<{ mode: "cut" | "copy"; paths: string[] } | null>(null);
 
   // ── Search state ───────────────────────────────────────────────────────────
   const [searchOpen,    setSearchOpen]    = useState(false);
@@ -390,6 +415,8 @@ export default function FileBrowser() {
   loadedKeysRef.current = loadedKeys;
   const loadedRef = useRef(loaded);
   loadedRef.current = loaded;
+  const selKeysRef = useRef(selKeys);
+  selKeysRef.current = selKeys;
 
   // Debounced git-status refresh so the tree's status colors update live (on
   // save, external edits, file ops) without a manual refresh, while coalescing
@@ -442,7 +469,9 @@ export default function FileBrowser() {
     setLoaded(false);
     setTreeData([]);
     setLoadedKeys([]);
-    setSelectedKey(null);
+    setSelKeys([]);
+    setAnchorKey(null);
+    setClipboard(null);
   }, [exportDir]);
 
   // ── File system watcher lifecycle ──────────────────────────────────────────
@@ -505,9 +534,13 @@ export default function FileBrowser() {
     return off;
   }, [exportDir, fileWatcherEnabled, scheduleGitRefresh]);
 
-  // Keep selected key in sync with the active tab (including tab switches)
+  // Keep selection in sync with the active tab (tab switches / opens). Skip while a
+  // multi-selection is active so an unrelated tab change can't silently collapse a
+  // bulk selection the user is about to act on.
   useEffect(() => {
-    setSelectedKey(currentFile);
+    if (selKeysRef.current.length > 1) return;
+    setSelKeys(currentFile ? [String(currentFile)] : []);
+    setAnchorKey(currentFile ? String(currentFile) : null);
   }, [currentFile]);
 
   // Debounced search
@@ -607,15 +640,61 @@ export default function FileBrowser() {
     }
   };
 
-  const onSelect = async (_keys: Key[], info: { node: DataNode }) => {
+  // Keys of currently-rendered tree nodes in visual (top-to-bottom) order. Read
+  // from the DOM (each title carries a data-fbkey attribute, set in titleRender)
+  // so it honors expand/collapse without us controlling rc-tree's expandedKeys —
+  // this tree uses uncontrolled, lazy expansion, so there's no in-memory expanded
+  // set to walk (unlike the object-store sidebar's flattenVisibleNodes).
+  // ponytail: correct as long as the tree isn't virtualized. If the rc-tree
+  // `height` prop is ever set, only viewport rows render, so an off-screen anchor
+  // would drop from the range — switch to controlled expandedKeys + a treeData
+  // walk at that point.
+  const visibleKeysInOrder = (): string[] => {
+    const root = treeWrapRef.current;
+    if (!root) return [];
+    return Array.from(root.querySelectorAll<HTMLElement>("[data-fbkey]"))
+      .map((el) => el.dataset.fbkey || "")
+      .filter(Boolean);
+  };
+
+  const isDirKey = (key: string) => findNode(treeData, key)?.isLeaf === false;
+
+  const onSelect = async (_keys: Key[], info: { node: DataNode; nativeEvent: MouseEvent }) => {
     const node = info.node;
-    if ((node as any).isLeaf === false) return;
     const path = String(node.key);
-    setSelectedKey(path);
+    const isDir = (node as any).isLeaf === false;
+    const ne = info.nativeEvent;
+
+    // Cmd/Ctrl+click — toggle this node in the selection (don't open).
+    if (ne && (ne.metaKey || ne.ctrlKey)) {
+      setAnchorKey(path);
+      setSelKeys((prev) => (prev.includes(path) ? prev.filter((k) => k !== path) : [...prev, path]));
+      return;
+    }
+    // Shift+click — select the range between the anchor and this node (don't open).
+    if (ne && ne.shiftKey) {
+      const flat = visibleKeysInOrder();
+      const ai = anchorKey ? flat.indexOf(anchorKey) : -1;
+      const bi = flat.indexOf(path);
+      if (ai >= 0 && bi >= 0) {
+        const [lo, hi] = ai < bi ? [ai, bi] : [bi, ai];
+        setSelKeys(flat.slice(lo, hi + 1));
+      } else {
+        // No anchor, or it scrolled out of view — fall back to selecting just this
+        // node. Return regardless so a Shift+click never opens the file.
+        setAnchorKey(path);
+        setSelKeys([path]);
+      }
+      return;
+    }
+    // Plain click — single selection; open files, leave folders unexpanded (caret expands).
+    setAnchorKey(path);
+    setSelKeys([path]);
+    if (isDir) return;
     const err = await openFileInTab(path);
     if (err) {
       message.error(`Could not open file: ${err}`);
-      setSelectedKey(null);
+      setSelKeys([]);
     }
   };
 
@@ -662,8 +741,34 @@ export default function FileBrowser() {
     const path = String(node.key);
     const name = pathBase(path);
     const isDir = (node as any).isLeaf === false;
+    // Right-clicking a node outside the current multi-selection acts on just that
+    // node (standard file-manager behavior); right-clicking inside it keeps the set.
+    if (!selKeys.includes(path)) {
+      setSelKeys([path]);
+      setAnchorKey(path); // keep the Shift+range pivot aligned with the new selection
+    }
     setFileCtxMenu({ x: event.clientX, y: event.clientY, path, name, isDir });
   };
+
+  // Paths the context-menu bulk actions operate on: the whole selection when the
+  // right-clicked node is part of a multi-selection, otherwise just that node.
+  const opPaths = (): string[] => {
+    if (!fileCtxMenu) return [];
+    return selKeys.length > 1 && selKeys.includes(fileCtxMenu.path) ? selKeys : [fileCtxMenu.path];
+  };
+
+  // Drop any path whose ancestor directory is also in the set. A Shift+range
+  // selection naturally spans a folder and its children; the recursive ops
+  // (delete / move / copy) already act on the whole subtree via the folder, so
+  // keeping the descendants would double-process them (ENOENT on delete/move,
+  // duplicate files on copy). Git staging deliberately does NOT dedup — it
+  // operates per file and excludes dirs (see opFilePaths).
+  const dropDescendants = (paths: string[]): string[] =>
+    paths.filter((p) => !paths.some((o) => o !== p && p.startsWith(o + pathSep(o))));
+
+  // Files-only subset of the operation set — git staging operates per file; passing a
+  // directory to `git add` would recursively stage everything under it.
+  const opFilePaths = (): string[] => opPaths().filter((p) => !isDirKey(p));
 
   const selectFileForComparison = () => {
     if (!fileCtxMenu) return;
@@ -696,6 +801,230 @@ export default function FileBrowser() {
     } catch {
       message.error("Failed to copy path");
     }
+  };
+
+  // Copy the path relative to the project root (export dir) — useful for @stage
+  // references, dbt refs, etc. Falls back to the absolute path if outside the root.
+  const handleCopyRelativePath = async () => {
+    if (!fileCtxMenu) return;
+    const p = fileCtxMenu.path;
+    setFileCtxMenu(null);
+    const base = exportDir.replace(/[/\\]+$/, "");
+    let rel = p;
+    if (base && (p === base || p.startsWith(base + "/") || p.startsWith(base + "\\"))) {
+      rel = p === base ? "." : p.slice(base.length + 1);
+    }
+    try {
+      await ClipboardSetText(rel);
+      message.success("Relative path copied");
+    } catch {
+      message.error("Failed to copy path");
+    }
+  };
+
+  // ── Internal clipboard: cut / copy / paste ─────────────────────────────────
+  const handleCut = () => {
+    const paths = opPaths();
+    setFileCtxMenu(null);
+    if (!paths.length) return;
+    setClipboard({ mode: "cut", paths });
+    message.info(`Cut ${paths.length} item${paths.length > 1 ? "s" : ""}`);
+  };
+
+  const handleCopy = () => {
+    const paths = opPaths();
+    setFileCtxMenu(null);
+    if (!paths.length) return;
+    setClipboard({ mode: "copy", paths });
+    message.success(`Copied ${paths.length} item${paths.length > 1 ? "s" : ""}`);
+  };
+
+  // Pick a non-colliding name for `base` against the set of names already present
+  // in the target dir, appending _copy, _copy_2, … like the backend DuplicateFile.
+  // Synchronous: the caller lists the target dir once and updates `names` as it
+  // claims each destination, so pasting N items costs one IPC call, not N.
+  const uniqueDstName = (names: Set<string>, base: string): string => {
+    if (!names.has(base)) return base;
+    const dot = base.lastIndexOf(".");
+    const ext = dot > 0 ? base.slice(dot) : "";
+    const stem = dot > 0 ? base.slice(0, dot) : base;
+    let cand = `${stem}_copy${ext}`;
+    if (!names.has(cand)) return cand;
+    for (let i = 2; i < 1000; i++) {
+      cand = `${stem}_copy_${i}${ext}`;
+      if (!names.has(cand)) return cand;
+    }
+    return `${stem}_copy_${Date.now()}${ext}`;
+  };
+
+  // Update open tabs after a file/folder moves so they don't dangle.
+  const remapTabsForMove = (oldPath: string, newPath: string, isDir: boolean) => {
+    const sep = pathSep(oldPath);
+    const prefix = oldPath + sep;
+    for (const tab of useQueryStore.getState().tabs) {
+      if (tab.path === oldPath) {
+        updateTabPath(tab.id, newPath, pathBase(newPath));
+      } else if (isDir && tab.path?.startsWith(prefix)) {
+        const np = newPath + tab.path.substring(oldPath.length);
+        updateTabPath(tab.id, np, pathBase(np));
+      }
+    }
+  };
+
+  // Toolbar paste targets the single selected folder, else the project root.
+  // Memoized so the JSX (Tooltip title + onClick) doesn't re-walk the tree each render.
+  const toolbarPasteTarget = useMemo(
+    () => (selKeys.length === 1 && isDirKey(selKeys[0]) ? selKeys[0] : exportDir),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selKeys, treeData, exportDir],
+  );
+
+  const handlePaste = async (rawTarget: string) => {
+    setFileCtxMenu(null);
+    if (!clipboard) return;
+    const { mode } = clipboard;
+    // A folder copy/move already carries its whole subtree, so drop any clipboard
+    // entry nested under another — otherwise the descendant would be processed
+    // twice (a duplicate file at the target on copy, an ENOENT on move).
+    const paths = dropDescendants(clipboard.paths);
+    // Strip any trailing separator (exportDir may be stored with one) so the
+    // same-folder no-op guard below matches pathDir(src), which always strips it.
+    const targetDir = rawTarget.replace(/[/\\]+$/, "");
+    const sep = pathSep(targetDir);
+    const join = (n: string) => `${targetDir}${sep}${n}`;
+    // List the target dir once; claim each chosen name in `names` so sequential
+    // pastes don't collide (replaces one ListDirectory IPC per item). If the target
+    // is gone (e.g. deleted between Cut and Paste), bail with one clear error rather
+    // than letting every item fail with a confusing per-file toast.
+    let names: Set<string>;
+    try { names = new Set((await ListDirectory(targetDir)).map((e) => e.name)); }
+    catch { message.error("Paste target is not accessible"); return; }
+    const failed: string[] = [];
+    const skipped: string[] = []; // cut items already in the target folder (no-op)
+    let ok = 0;
+    for (const src of paths) {
+      // Moving an item into the folder it already lives in is a no-op.
+      if (mode === "cut" && pathDir(src) === targetDir) { skipped.push(src); continue; }
+      const base = pathBase(src);
+      const isDir = isDirKey(src);
+      try {
+        const dstName = uniqueDstName(names, base);
+        const dst = join(dstName);
+        if (mode === "cut") {
+          try {
+            await RenameFile(src, dst); // atomic on the same volume
+          } catch {
+            // ponytail: cross-volume fallback (copy+delete). Effectively dead on a
+            // single-root export dir, but the issue requires it; remove if proven moot.
+            await CopyFile(src, dst);
+            try {
+              if (isDir) await DeleteDirectory(src); else await DeleteFile(src);
+            } catch (delErr) {
+              // Source delete failed — roll back the copy so a retry doesn't leave
+              // (and keep accumulating) orphan duplicates at the destination.
+              try { if (isDir) await DeleteDirectory(dst); else await DeleteFile(dst); } catch { /* best effort */ }
+              throw delErr;
+            }
+          }
+          remapTabsForMove(src, dst, isDir);
+        } else {
+          await CopyFile(src, dst);
+        }
+        names.add(dstName); // claim the name for the remaining items
+        ok++;
+      } catch (e) {
+        failed.push(src);
+        message.error(`Paste failed for ${base}: ${String(e)}`);
+      }
+    }
+    markSelfChanged(targetDir);
+    if (mode === "cut") {
+      for (const src of paths) markSelfChanged(pathDir(src));
+      // Keep items that didn't move (failed) or that were a no-op for *this* target
+      // (skipped — same folder) so the clipboard stays retriable elsewhere; clearing
+      // on ok>0 would silently drop them.
+      const keep = [...failed, ...skipped];
+      setClipboard(keep.length ? { mode: "cut", paths: keep } : null);
+      // All items were already here — say so, otherwise the cut vanishes silently.
+      if (!ok && !failed.length && skipped.length) message.info("Already in this folder");
+    }
+    if (ok) message.success(`Pasted ${ok} item${ok > 1 ? "s" : ""}`);
+    refresh();
+  };
+
+  // ── Bulk git staging ───────────────────────────────────────────────────────
+  // ponytail: loops the per-file store actions, so each awaits a status refresh —
+  // fine for the handful of files a user selects; add a batch IPC if it ever lags.
+  // Each store action resets gitStore.error at its start, so a later iteration
+  // would erase an earlier failure — capture error per file, right after each call.
+  const runBulkGit = async (
+    paths: string[],
+    action: (p: string) => Promise<void>,
+    failVerb: string,  // imperative, e.g. "Stage"
+    pastVerb: string,  // past tense, e.g. "Staged"
+  ) => {
+    const failed: string[] = [];
+    for (const p of paths) {
+      await action(p);
+      if (useGitStore.getState().error) failed.push(pathBase(p));
+    }
+    if (failed.length) message.error(`${failVerb} failed: ${failed.join(", ")}`);
+    else message.success(`${pastVerb} ${paths.length} file${paths.length > 1 ? "s" : ""}`);
+  };
+
+  const handleBulkStage = async () => {
+    const paths = opFilePaths();
+    setFileCtxMenu(null);
+    if (!paths.length || gitBusy()) return;
+    await runBulkGit(paths, stageFile, "Stage", "Staged");
+  };
+
+  const handleBulkUnstage = async () => {
+    const paths = opFilePaths();
+    setFileCtxMenu(null);
+    if (!paths.length || gitBusy()) return;
+    await runBulkGit(paths, unstageFile, "Unstage", "Unstaged");
+  };
+
+  const handleBulkDiscard = () => {
+    const paths = opFilePaths();
+    setFileCtxMenu(null);
+    if (!paths.length || gitBusy()) return;
+    // Name any never-committed files — discard permanently deletes those (they have
+    // no HEAD to revert to), so they deserve an explicit callout, not a generic line.
+    const newNames = paths
+      .filter((p) => { const rel = gitOverlay.relOf(p); return rel != null && gitOverlay.newFilesRel.has(rel); })
+      .map(pathBase);
+    modal.confirm({
+      title: `Discard changes to ${paths.length} file${paths.length > 1 ? "s" : ""}?`,
+      content: newNames.length
+        ? `Reverts each file to its last committed state. ${newNames.length} never-committed file${newNames.length > 1 ? "s" : ""} will be permanently deleted (${newNames.join(", ")}). This cannot be undone.`
+        : "Reverts each file to its last committed state. This cannot be undone.",
+      okText: "Discard",
+      okButtonProps: { danger: true },
+      // `done` persists across retries so a re-click skips files already discarded —
+      // re-discarding a now-deleted new file would error and wedge the modal open.
+      onOk: (() => {
+        const done = new Set<string>();
+        return async () => {
+          if (gitBusy()) throw new Error("busy");
+          const failed: string[] = [];
+          for (const p of paths) {
+            if (done.has(p)) continue;
+            await discardFile(p);
+            if (useGitStore.getState().error) failed.push(pathBase(p));
+            else done.add(p);
+          }
+          if (failed.length) {
+            // Surface which files still have changes — a success toast here would be
+            // dangerous (the user might commit, unaware a discard silently failed).
+            message.error(`Discard failed: ${failed.join(", ")}`);
+            throw new Error("discard failed"); // keep the modal open
+          }
+          message.success(`Discarded changes to ${paths.length} file${paths.length > 1 ? "s" : ""}`);
+        };
+      })(),
+    });
   };
 
   // gitStore records failures in state.error, which only ChangesView renders — so
@@ -817,46 +1146,55 @@ export default function FileBrowser() {
 
   const handleDeleteConfirm = () => {
     if (!fileCtxMenu) return;
-    const { path, name, isDir } = fileCtxMenu;
+    // Deleting a folder removes its children, so drop any selected descendants —
+    // otherwise the child delete would ENOENT and wedge the modal open on retry.
+    const paths = dropDescendants(opPaths());
+    const multi = paths.length > 1;
+    const { name, isDir } = fileCtxMenu;
     setFileCtxMenu(null);
     modal.confirm({
-      title: `Delete ${isDir ? "folder" : "file"}`,
-      content: `Are you sure you want to delete "${name}"?${isDir ? " This item and all its contents will be permanently removed." : ""}`,
+      title: multi ? `Delete ${paths.length} items` : `Delete ${isDir ? "folder" : "file"}`,
+      content: multi
+        ? `Are you sure you want to delete these ${paths.length} items? Folders and all their contents will be permanently removed.`
+        : `Are you sure you want to delete "${name}"?${isDir ? " This item and all its contents will be permanently removed." : ""}`,
       okText: "Delete",
       okButtonProps: { danger: true },
-      onOk: async () => {
-        try {
-          if (isDir) {
-            await DeleteDirectory(path);
-          } else {
-            await DeleteFile(path);
-          }
-          markSelfChanged(pathDir(path));
-          // Read fresh tabs from the store (not the stale closure captured at render time).
-          const currentTabs = useQueryStore.getState().tabs;
-          const sep = pathSep(path);
-          for (const tab of currentTabs) {
-            if (tab.path === path || (isDir && tab.path?.startsWith(path + sep))) {
-              orphanTab(tab.id);
+      // Tracks paths already deleted so a retry (after a partial failure) doesn't
+      // re-attempt them — re-deleting would ENOENT and wedge the modal open forever.
+      onOk: (() => {
+        const done = new Set<string>();
+        return async () => {
+        const failed: string[] = [];
+        for (const path of paths) {
+          if (done.has(path)) continue;
+          const dir = isDirKey(path);
+          try {
+            if (dir) await DeleteDirectory(path); else await DeleteFile(path);
+            done.add(path);
+            markSelfChanged(pathDir(path));
+            const sep = pathSep(path);
+            // Read fresh tabs from the store (not the stale closure captured at render time).
+            for (const tab of useQueryStore.getState().tabs) {
+              if (tab.path === path || (dir && tab.path?.startsWith(path + sep))) orphanTab(tab.id);
             }
+            // Update tree in-place instead of full refresh.
+            setTreeData((prev) => removeNode(prev, path));
+            setLoadedKeys((prev) => prev.filter((k) => {
+              const ks = String(k);
+              return ks !== path && !ks.startsWith(path + sep);
+            }));
+            setSelKeys((prev) => prev.filter((k) => k !== path && !k.startsWith(path + sep)));
+          } catch (e) {
+            failed.push(`${pathBase(path)}: ${String(e)}`);
           }
-          message.success(`Deleted ${name}`);
-          // Update tree in-place instead of full refresh.
-          setTreeData(prev => removeNode(prev, path));
-          setLoadedKeys(prev => prev.filter(k => {
-            const ks = String(k);
-            return ks !== path && !ks.startsWith(path + sep);
-          }));
-          setSelectedKey(prev => {
-            const sk = prev ? String(prev) : null;
-            if (sk === path || (isDir && sk?.startsWith(path + sep))) return null;
-            return prev;
-          });
-        } catch (e) {
-          message.error(`Delete failed: ${String(e)}`);
-          throw e; // Re-throw to keep the modal open on failure.
         }
-      },
+        if (failed.length) {
+          message.error(`Delete failed — ${failed.join("; ")}`);
+          throw new Error("delete failed"); // keep the modal open
+        }
+        message.success(multi ? `Deleted ${paths.length} items` : `Deleted ${name}`);
+        };
+      })(),
     });
   };
 
@@ -891,16 +1229,8 @@ export default function FileBrowser() {
     try {
       await RenameFile(path, newPath);
       markSelfChanged(dir);
-      const currentTabs = useQueryStore.getState().tabs;
       const prefix = path + sep;
-      for (const tab of currentTabs) {
-        if (tab.path === path) {
-          updateTabPath(tab.id, newPath, sanitized);
-        } else if (tab.path?.startsWith(prefix)) {
-          const updatedPath = newPath + tab.path.substring(path.length);
-          updateTabPath(tab.id, updatedPath, pathBase(updatedPath));
-        }
-      }
+      remapTabsForMove(path, newPath, isDirKey(path));
       setTreeData(prev => renameTreeNode(prev, path, newPath, sanitized));
       setLoadedKeys(prev => prev.map(k => {
         const ks = String(k);
@@ -908,12 +1238,11 @@ export default function FileBrowser() {
         if (ks.startsWith(prefix)) return newPath + ks.substring(path.length);
         return k;
       }));
-      setSelectedKey(prev => {
-        const sk = prev ? String(prev) : null;
-        if (sk === path) return newPath;
-        if (sk?.startsWith(prefix)) return newPath + sk.substring(path.length);
-        return prev;
-      });
+      setSelKeys(prev => prev.map(k => {
+        if (k === path) return newPath;
+        if (k.startsWith(prefix)) return newPath + k.substring(path.length);
+        return k;
+      }));
       setEditingKey(null);
       message.success(`Renamed to ${sanitized}`);
     } catch (e) {
@@ -983,9 +1312,20 @@ export default function FileBrowser() {
     }
   };
 
+  // Set of cut paths, derived once per clipboard change — titleRender runs for
+  // every visible node on every rc-tree render, so an O(n) Array.includes there
+  // would be O(nodes × cut-items).
+  const cutSet = useMemo(
+    () => (clipboard?.mode === "cut" ? new Set(clipboard.paths) : null),
+    [clipboard],
+  );
+
   const titleRender = (nodeData: DataNode) => {
     if (editingKey !== null && nodeData.key === editingKey) {
+      // Keep the data-fbkey wrapper even while editing so the renaming node stays
+      // visible to visibleKeysInOrder() (it may be the Shift+range anchor).
       return (
+        <span data-fbkey={String(nodeData.key)}>
         <Input
           size="small"
           autoFocus
@@ -998,7 +1338,7 @@ export default function FileBrowser() {
           }}
           onBlur={submitRename}
           onClick={(e) => e.stopPropagation()} // prevent tree selection
-          style={{ fontSize: 12, height: 22, padding: "0 4px" }}
+          style={{ fontSize: 12, height: 22, padding: "0 4px", userSelect: "text" }}
           ref={(el) => {
             if (!el || editInitRef.current) return;
             editInitRef.current = true;
@@ -1010,15 +1350,18 @@ export default function FileBrowser() {
             }
           }}
         />
+        </span>
       );
     }
     // Git status overlay: color changed files (with a trailing sigil) and
     // emphasize directories that contain nested changes.
-    const rel = gitOverlay.relOf(String(nodeData.key));
+    const key = String(nodeData.key);
+    const rel = gitOverlay.relOf(key);
     const letter = rel != null ? gitOverlay.byRel.get(rel) : undefined;
+    let content: React.ReactNode;
     if (letter) {
       const color = sigilColor(letter);
-      return (
+      content = (
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6, width: "100%" }}>
           <span style={{ flex: 1, color, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {nodeData.title as React.ReactNode}
@@ -1028,13 +1371,16 @@ export default function FileBrowser() {
           </span>
         </span>
       );
+    } else {
+      const dirLetter = rel != null ? gitOverlay.dirLetter.get(rel) : undefined;
+      content = dirLetter
+        ? <span style={{ color: sigilColor(dirLetter), fontWeight: 600 }}>{nodeData.title as React.ReactNode}</span>
+        : <>{nodeData.title}</>;
     }
-    const dirLetter = rel != null ? gitOverlay.dirLetter.get(rel) : undefined;
-    if (dirLetter) {
-      const color = sigilColor(dirLetter);
-      return <span style={{ color, fontWeight: 600 }}>{nodeData.title as React.ReactNode}</span>;
-    }
-    return <>{nodeData.title}</>;
+    // data-fbkey lets visibleKeysInOrder() recover the on-screen order for Shift+range.
+    // Cut items are dimmed until pasted (then the clipboard clears).
+    const isCut = !!cutSet?.has(key);
+    return <span data-fbkey={key} style={isCut ? { opacity: 0.5 } : undefined}>{content}</span>;
   };
 
   const grouped = groupByPath(searchResults);
@@ -1042,10 +1388,11 @@ export default function FileBrowser() {
   // rc-tree memoizes its flattened node list by treeData identity, so a status
   // change alone won't re-run titleRender. Hand it a fresh top-level array
   // reference whenever the git overlay changes so the status colors repaint.
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- gitOverlay dep is
-  // intentional: it's not read in the body, it exists to force rc-tree to re-run
-  // titleRender on status change. Removing it stops colors repainting after edits.
-  const treeForRender = useMemo(() => [...treeData], [treeData, gitOverlay]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- gitOverlay/cutSet
+  // deps are intentional: not read in the body, they exist to force rc-tree to
+  // re-run titleRender on status change / cut-dimming. cutSet (not clipboard) so a
+  // Copy — which changes no node opacity — doesn't trigger a full re-sweep.
+  const treeForRender = useMemo(() => [...treeData], [treeData, gitOverlay, cutSet]);
 
   // Git status of the right-clicked file (drives the Stage/Unstage/Discard menu items).
   // ctxChanged: the file is changed at all. When we don't have a precise
@@ -1064,6 +1411,19 @@ export default function FileBrowser() {
   const ctxLetter     = ctxRel != null ? gitOverlay.byRel.get(ctxRel) : undefined;
   const ctxIsNew      = ctxRel != null && gitOverlay.newFilesRel.has(ctxRel);
   const ctxComparable = !ctxIsNew && (ctxLetter === "M" || ctxLetter === "R" || ctxLetter === "C" || ctxLetter === "D");
+
+  // Multi-select context: the right-clicked node is part of a >1 selection, so the
+  // menu offers bulk variants. ctxCount labels them.
+  const ctxMulti = !!fileCtxMenu && selKeys.length > 1 && selKeys.includes(fileCtxMenu.path);
+  const ctxCount = ctxMulti ? selKeys.length : 1;
+  // Files-only count for the bulk git actions (directories are excluded — see
+  // opFilePaths). Memoized: opFilePaths walks the tree per selected key, and this
+  // runs on every render while the menu is open.
+  const ctxFileCount = useMemo(
+    () => (ctxMulti ? opFilePaths().length : 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ctxMulti, selKeys, treeData, fileCtxMenu],
+  );
 
   return (
     <div style={{ padding: "4px 4px" }}>
@@ -1108,6 +1468,17 @@ export default function FileBrowser() {
               {gitChanged}{gitStagedTot > 0 ? `·${gitStagedTot}` : ""}
             </span>
           </div>
+        )}
+        {clipboard && exportDir && (
+          <Tooltip title={`Paste ${clipboard.paths.length} item${clipboard.paths.length > 1 ? "s" : ""} into ${pathBase(toolbarPasteTarget)}`}>
+            <Button
+              size="small"
+              type="text"
+              icon={<BlockOutlined style={{ fontSize: 11, color: "var(--link)" }} />}
+              onClick={(e) => { e.stopPropagation(); handlePaste(toolbarPasteTarget); }}
+              style={{ height: 20, padding: "0 4px", minWidth: 0 }}
+            />
+          </Tooltip>
         )}
         <Button
           size="small"
@@ -1280,11 +1651,19 @@ export default function FileBrowser() {
           )}
 
           {!searchOpen && loaded && treeData.length > 0 && (
-            <div style={{ overflow: "hidden" }}>
+            <div
+              style={{ overflow: "hidden", userSelect: "none" }}
+              ref={treeWrapRef}
+              // Shift+click extends the document's text selection (which WebKit
+              // still paints despite user-select:none). preventDefault on the
+              // shift mousedown suppresses that without blocking the click.
+              onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); }}
+            >
               <Tree
                 treeData={treeForRender}
                 loadedKeys={loadedKeys}
-                selectedKeys={selectedKey ? [selectedKey] : []}
+                selectedKeys={selKeys}
+                multiple
                 onLoad={(keys) => setLoadedKeys(keys)}
                 loadData={onLoadData as any}
                 onSelect={onSelect as any}
@@ -1372,16 +1751,40 @@ export default function FileBrowser() {
           }}
         >
           {/* ── File management actions ── */}
-          <CtxItem icon={<FolderViewOutlined />} label={revealText} onClick={handleReveal} />
-          <CtxItem icon={<CopyOutlined />} label="Copy Path" onClick={handleCopyPath} />
-          {!fileCtxMenu.isDir && (
+          {!ctxMulti && <CtxItem icon={<FolderViewOutlined />} label={revealText} onClick={handleReveal} />}
+          {!ctxMulti && <CtxItem icon={<CopyOutlined />} label="Copy Path" onClick={handleCopyPath} />}
+          {!ctxMulti && <CtxItem icon={<CopyOutlined />} label="Copy Relative Path" onClick={handleCopyRelativePath} />}
+
+          {/* ── Internal clipboard (cut / copy / paste) ── */}
+          <div role="separator" style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+          <CtxItem icon={<ScissorOutlined />} label={ctxMulti ? `Cut ${ctxCount} items` : "Cut"} onClick={handleCut} />
+          <CtxItem icon={<CopyOutlined />} label={ctxMulti ? `Copy ${ctxCount} items` : "Copy"} onClick={handleCopy} />
+          {fileCtxMenu.isDir && clipboard && (
+            <CtxItem
+              icon={<BlockOutlined />}
+              label={`Paste ${clipboard.paths.length} item${clipboard.paths.length > 1 ? "s" : ""}`}
+              onClick={() => handlePaste(fileCtxMenu.path)}
+            />
+          )}
+
+          {!ctxMulti && !fileCtxMenu.isDir && (
             <CtxItem icon={<SnippetsOutlined />} label="Duplicate" onClick={handleDuplicate} />
           )}
-          <CtxItem icon={<EditOutlined />} label="Rename…" onClick={handleRenameStart} />
-          <CtxItem icon={<DeleteOutlined />} label="Delete" onClick={handleDeleteConfirm} danger />
+          {!ctxMulti && <CtxItem icon={<EditOutlined />} label="Rename…" onClick={handleRenameStart} />}
+          <CtxItem icon={<DeleteOutlined />} label={ctxMulti ? `Delete ${ctxCount} items` : "Delete"} onClick={handleDeleteConfirm} danger />
 
-          {/* ── Git staging actions (changed files only) ── */}
-          {gitEnabled && !fileCtxMenu.isDir && (ctxUnstaged || ctxStaged) && (
+          {/* ── Bulk git staging (multi-select, files only) ── */}
+          {gitEnabled && ctxMulti && ctxFileCount > 0 && (
+            <>
+              <div role="separator" style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+              <CtxItem icon={<PlusOutlined />} label={`Stage ${ctxFileCount} file${ctxFileCount > 1 ? "s" : ""}`} onClick={handleBulkStage} />
+              <CtxItem icon={<MinusOutlined />} label={`Unstage ${ctxFileCount} file${ctxFileCount > 1 ? "s" : ""}`} onClick={handleBulkUnstage} />
+              <CtxItem icon={<UndoOutlined />} label={`Discard ${ctxFileCount} file${ctxFileCount > 1 ? "s" : ""}`} onClick={handleBulkDiscard} danger />
+            </>
+          )}
+
+          {/* ── Git staging actions (single changed file) ── */}
+          {gitEnabled && !ctxMulti && !fileCtxMenu.isDir && (ctxUnstaged || ctxStaged) && (
             <>
               <div role="separator" style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
               {ctxComparable && (
@@ -1406,7 +1809,7 @@ export default function FileBrowser() {
           )}
 
           {/* ── Directory-only actions ── */}
-          {fileCtxMenu.isDir && (
+          {!ctxMulti && fileCtxMenu.isDir && (
             <>
               <div role="separator" style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
               <CtxItem icon={<FolderAddOutlined />} label="New Folder…" onClick={handleNewFolderStart} />
@@ -1415,7 +1818,7 @@ export default function FileBrowser() {
           )}
 
           {/* ── Comparison actions (files only) ── */}
-          {!fileCtxMenu.isDir && (
+          {!ctxMulti && !fileCtxMenu.isDir && (
             <>
               <div role="separator" style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
               <CtxItem icon={<DiffOutlined />} label="Select for Comparison" onClick={selectFileForComparison} />

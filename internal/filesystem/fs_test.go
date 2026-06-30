@@ -597,3 +597,130 @@ func TestReadFile_RejectsBinary(t *testing.T) {
 		t.Error("binary file: expected error, got nil")
 	}
 }
+
+// ─── CopyFile ───────────────────────────────────────────────────────────────
+
+func TestCopyFile_RegularFile(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "a.sql")
+	dst := filepath.Join(root, "sub", "b.sql")
+	if err := os.WriteFile(src, []byte("select 1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := CopyFile(src, dst, root)
+	if err != nil || got != dst {
+		t.Fatalf("CopyFile: got %q err %v", got, err)
+	}
+	if b, _ := os.ReadFile(dst); string(b) != "select 1" {
+		t.Errorf("copied content = %q", b)
+	}
+	// Source must remain untouched.
+	if _, err := os.Stat(src); err != nil {
+		t.Errorf("source removed: %v", err)
+	}
+}
+
+func TestCopyFile_Directory(t *testing.T) {
+	root := t.TempDir()
+	srcDir := filepath.Join(root, "d")
+	if err := os.MkdirAll(filepath.Join(srcDir, "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "nested", "x.sql"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(root, "d_copy")
+	if _, err := CopyFile(srcDir, dst, root); err != nil {
+		t.Fatalf("CopyFile dir: %v", err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dst, "nested", "x.sql")); string(b) != "x" {
+		t.Errorf("nested copy = %q", b)
+	}
+}
+
+func TestCopyFile_RefusesOverwrite(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "a.sql")
+	dst := filepath.Join(root, "b.sql")
+	os.WriteFile(src, []byte("a"), 0o644) //nolint:errcheck
+	os.WriteFile(dst, []byte("b"), 0o644) //nolint:errcheck
+	if _, err := CopyFile(src, dst, root); err == nil {
+		t.Error("expected error copying onto existing file, got nil")
+	}
+}
+
+func TestCopyFile_RefusesDirIntoItself(t *testing.T) {
+	root := t.TempDir()
+	d := filepath.Join(root, "d")
+	os.Mkdir(d, 0o755) //nolint:errcheck
+	if _, err := CopyFile(d, filepath.Join(d, "inner"), root); err == nil {
+		t.Error("expected error copying directory into itself, got nil")
+	}
+}
+
+func TestCopyFile_OutsideRoot(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	src := filepath.Join(outside, "a.sql")
+	os.WriteFile(src, []byte("a"), 0o644) //nolint:errcheck
+	if _, err := CopyFile(src, filepath.Join(root, "a.sql"), root); err == nil {
+		t.Error("expected error for source outside root, got nil")
+	}
+}
+
+func TestCopyFile_RefusesDirIntoItselfViaSymlink(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "data")
+	if err := os.MkdirAll(filepath.Join(src, "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A symlink inside root that resolves back to src — the lexical guard would miss it.
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(src, link); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+	// dst traverses the symlink into src; must be rejected, not copied into itself.
+	if _, err := CopyFile(src, filepath.Join(link, "copy"), root); err == nil {
+		t.Error("expected error copying a directory into itself via a symlink, got nil")
+	}
+}
+
+func TestCopyFile_RefusesExistingDirDestination(t *testing.T) {
+	root := t.TempDir()
+	srcDir := filepath.Join(root, "src")
+	if err := os.Mkdir(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "a.sql"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(root, "dst")
+	if err := os.Mkdir(dst, 0o755); err != nil { // pre-existing empty dir
+		t.Fatal(err)
+	}
+	if _, err := CopyFile(srcDir, dst, root); err == nil {
+		t.Error("expected error copying dir onto an existing directory, got nil")
+	}
+	// The pre-existing destination must be left untouched (no merge).
+	if entries, _ := os.ReadDir(dst); len(entries) != 0 {
+		t.Errorf("expected destination left empty, found %d entries", len(entries))
+	}
+}
+
+func TestCopyFile_RejectsSymlink(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "target")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+	if _, err := CopyFile(link, filepath.Join(root, "copy"), root); err == nil {
+		t.Error("expected error copying a symbolic link, got nil")
+	}
+}

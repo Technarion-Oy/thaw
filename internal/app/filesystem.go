@@ -153,6 +153,16 @@ func (a *App) DuplicateFile(path string) (string, error) {
 	return filesystem.DuplicateFile(path, root)
 }
 
+// CopyFile copies srcPath to dstPath (both inside the export directory). srcPath
+// may be a file or a directory; dstPath must not already exist. Returns the new path.
+func (a *App) CopyFile(srcPath, dstPath string) (string, error) {
+	root, err := a.exportRoot()
+	if err != nil {
+		return "", err
+	}
+	return filesystem.CopyFile(srcPath, dstPath, root)
+}
+
 // exportRoot returns the cached export directory, or an error if not set.
 func (a *App) exportRoot() (string, error) {
 	a.exportDirMu.RLock()

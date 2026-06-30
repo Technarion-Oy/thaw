@@ -447,6 +447,85 @@ func DuplicateFile(srcPath, allowedRoot string) (string, error) {
 	return dstPath, nil
 }
 
+// CopyFile copies srcPath to dstPath. Both must be inside allowedRoot. srcPath
+// may be a regular file or a directory (copied recursively). dstPath must not
+// already exist — callers resolve name conflicts beforehand, and the O_EXCL /
+// os.CopyFS semantics here guarantee no silent overwrite. Returns dstPath.
+func CopyFile(srcPath, dstPath, allowedRoot string) (string, error) {
+	if err := validateExistingPath(srcPath, allowedRoot); err != nil {
+		return "", err
+	}
+	if err := validateNewPath(dstPath, allowedRoot); err != nil {
+		return "", err
+	}
+	info, err := os.Lstat(srcPath)
+	if err != nil {
+		return "", err
+	}
+	// A symlink reports IsDir()==false, so it would fall through to the file branch
+	// where os.Open follows it — copying the target's content for a link-to-file, or
+	// failing with EISDIR for a link-to-dir. Neither is what "copy this entry" means,
+	// and ListDir surfaces symlinks as browsable entries, so reject them explicitly.
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("cannot copy a symbolic link: %s", filepath.Base(srcPath))
+	}
+	if info.IsDir() {
+		// Refuse copying a directory into itself or a descendant — that would
+		// recurse forever as the copy keeps finding its own freshly-written files.
+		// Resolve symlinks first: a lexical filepath.Clean check is bypassed when
+		// dstPath traverses a symlink that points back into srcPath.
+		realSrc, err := filepath.EvalSymlinks(srcPath)
+		if err != nil {
+			return "", err
+		}
+		// dstPath does not exist yet, so resolve its parent and rejoin the leaf.
+		realDstParent, err := filepath.EvalSymlinks(filepath.Dir(dstPath))
+		if err != nil {
+			return "", err
+		}
+		realDst := filepath.Join(realDstParent, filepath.Base(dstPath))
+		if hasPathPrefix(realDst+string(filepath.Separator), realSrc+string(filepath.Separator)) {
+			return "", fmt.Errorf("cannot copy a directory into itself")
+		}
+		// os.CopyFS would silently merge into a pre-existing dstPath (it only errors
+		// on pre-existing *files*), so guard existence explicitly — both to honor the
+		// "must not already exist" contract and so the RemoveAll cleanup below can
+		// only ever delete a directory this call just created.
+		if _, err := os.Lstat(dstPath); err == nil {
+			return "", fmt.Errorf("destination already exists: %s", filepath.Base(dstPath))
+		}
+		if err := os.CopyFS(dstPath, os.DirFS(srcPath)); err != nil {
+			os.RemoveAll(dstPath) //nolint:errcheck // drop the partial tree so retries don't pile up _copy_N orphans
+			return "", err
+		}
+		return dstPath, nil
+	}
+
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return "", err
+	}
+	defer src.Close() //nolint:errcheck
+
+	dst, err := os.OpenFile(dstPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, info.Mode().Perm())
+	if err != nil {
+		if os.IsExist(err) {
+			return "", fmt.Errorf("destination already exists: %s", filepath.Base(dstPath))
+		}
+		return "", err
+	}
+	if _, err := io.Copy(dst, src); err != nil {
+		dst.Close()        //nolint:errcheck // close before remove (required on Windows)
+		os.Remove(dstPath) //nolint:errcheck
+		return "", err
+	}
+	if err := dst.Close(); err != nil {
+		os.Remove(dstPath) //nolint:errcheck
+		return "", err
+	}
+	return dstPath, nil
+}
+
 // checkInsideOrEqual verifies that resolvedPath is inside or equal to resolvedRoot.
 // Uses both a string-prefix check and filepath.Rel as defense-in-depth.
 func checkInsideOrEqual(resolvedPath, resolvedRoot string) error {

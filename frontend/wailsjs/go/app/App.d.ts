@@ -374,6 +374,8 @@ export function CloseTabSession(arg1:string):Promise<void>;
 
 export function Connect(arg1:snowflake.ConnectParams):Promise<void>;
 
+export function CopyFile(arg1:string,arg2:string):Promise<string>;
+
 export function CreateApiIntegration(arg1:integrations.ApiIntegrationParams):Promise<void>;
 
 export function CreateBackupPolicy(arg1:string,arg2:string,arg3:number,arg4:boolean,arg5:string,arg6:string,arg7:boolean,arg8:boolean,arg9:boolean):Promise<void>;
