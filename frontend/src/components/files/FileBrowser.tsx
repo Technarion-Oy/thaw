@@ -863,8 +863,12 @@ export default function FileBrowser() {
   };
 
   // Toolbar paste targets the single selected folder, else the project root.
-  const toolbarPasteTarget = (): string =>
-    selKeys.length === 1 && isDirKey(selKeys[0]) ? selKeys[0] : exportDir;
+  // Memoized so the JSX (Tooltip title + onClick) doesn't re-walk the tree each render.
+  const toolbarPasteTarget = useMemo(
+    () => (selKeys.length === 1 && isDirKey(selKeys[0]) ? selKeys[0] : exportDir),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selKeys, treeData, exportDir],
+  );
 
   const handlePaste = async (targetDir: string) => {
     setFileCtxMenu(null);
@@ -873,10 +877,12 @@ export default function FileBrowser() {
     const sep = pathSep(targetDir);
     const join = (n: string) => (targetDir.endsWith(sep) ? `${targetDir}${n}` : `${targetDir}${sep}${n}`);
     // List the target dir once; claim each chosen name in `names` so sequential
-    // pastes don't collide (replaces one ListDirectory IPC per item).
+    // pastes don't collide (replaces one ListDirectory IPC per item). If the target
+    // is gone (e.g. deleted between Cut and Paste), bail with one clear error rather
+    // than letting every item fail with a confusing per-file toast.
     let names: Set<string>;
     try { names = new Set((await ListDirectory(targetDir)).map((e) => e.name)); }
-    catch { names = new Set(); }
+    catch { message.error("Paste target is not accessible"); return; }
     const failed: string[] = [];
     let ok = 0;
     for (const src of paths) {
@@ -894,7 +900,14 @@ export default function FileBrowser() {
             // ponytail: cross-volume fallback (copy+delete). Effectively dead on a
             // single-root export dir, but the issue requires it; remove if proven moot.
             await CopyFile(src, dst);
-            if (isDir) await DeleteDirectory(src); else await DeleteFile(src);
+            try {
+              if (isDir) await DeleteDirectory(src); else await DeleteFile(src);
+            } catch (delErr) {
+              // Source delete failed — roll back the copy so a retry doesn't leave
+              // (and keep accumulating) orphan duplicates at the destination.
+              try { if (isDir) await DeleteDirectory(dst); else await DeleteFile(dst); } catch { /* best effort */ }
+              throw delErr;
+            }
           }
           remapTabsForMove(src, dst, isDir);
         } else {
@@ -921,20 +934,35 @@ export default function FileBrowser() {
   // ── Bulk git staging ───────────────────────────────────────────────────────
   // ponytail: loops the per-file store actions, so each awaits a status refresh —
   // fine for the handful of files a user selects; add a batch IPC if it ever lags.
+  // Each store action resets gitStore.error at its start, so a later iteration
+  // would erase an earlier failure — capture error per file, right after each call.
+  const runBulkGit = async (
+    paths: string[],
+    action: (p: string) => Promise<void>,
+    failVerb: string,  // imperative, e.g. "Stage"
+    pastVerb: string,  // past tense, e.g. "Staged"
+  ) => {
+    const failed: string[] = [];
+    for (const p of paths) {
+      await action(p);
+      if (useGitStore.getState().error) failed.push(pathBase(p));
+    }
+    if (failed.length) message.error(`${failVerb} failed: ${failed.join(", ")}`);
+    else message.success(`${pastVerb} ${paths.length} file${paths.length > 1 ? "s" : ""}`);
+  };
+
   const handleBulkStage = async () => {
     const paths = opFilePaths();
     setFileCtxMenu(null);
     if (!paths.length || gitBusy()) return;
-    for (const p of paths) await stageFile(p);
-    reportGit(`Staged ${paths.length} file${paths.length > 1 ? "s" : ""}`);
+    await runBulkGit(paths, stageFile, "Stage", "Staged");
   };
 
   const handleBulkUnstage = async () => {
     const paths = opFilePaths();
     setFileCtxMenu(null);
     if (!paths.length || gitBusy()) return;
-    for (const p of paths) await unstageFile(p);
-    reportGit(`Unstaged ${paths.length} file${paths.length > 1 ? "s" : ""}`);
+    await runBulkGit(paths, unstageFile, "Unstage", "Unstaged");
   };
 
   const handleBulkDiscard = () => {
@@ -953,11 +981,28 @@ export default function FileBrowser() {
         : "Reverts each file to its last committed state. This cannot be undone.",
       okText: "Discard",
       okButtonProps: { danger: true },
-      onOk: async () => {
-        if (gitBusy()) throw new Error("busy");
-        for (const p of paths) await discardFile(p);
-        reportGit(`Discarded changes to ${paths.length} file${paths.length > 1 ? "s" : ""}`);
-      },
+      // `done` persists across retries so a re-click skips files already discarded —
+      // re-discarding a now-deleted new file would error and wedge the modal open.
+      onOk: (() => {
+        const done = new Set<string>();
+        return async () => {
+          if (gitBusy()) throw new Error("busy");
+          const failed: string[] = [];
+          for (const p of paths) {
+            if (done.has(p)) continue;
+            await discardFile(p);
+            if (useGitStore.getState().error) failed.push(pathBase(p));
+            else done.add(p);
+          }
+          if (failed.length) {
+            // Surface which files still have changes — a success toast here would be
+            // dangerous (the user might commit, unaware a discard silently failed).
+            message.error(`Discard failed: ${failed.join(", ")}`);
+            throw new Error("discard failed"); // keep the modal open
+          }
+          message.success(`Discarded changes to ${paths.length} file${paths.length > 1 ? "s" : ""}`);
+        };
+      })(),
     });
   };
 
@@ -1244,6 +1289,14 @@ export default function FileBrowser() {
     }
   };
 
+  // Set of cut paths, derived once per clipboard change — titleRender runs for
+  // every visible node on every rc-tree render, so an O(n) Array.includes there
+  // would be O(nodes × cut-items).
+  const cutSet = useMemo(
+    () => (clipboard?.mode === "cut" ? new Set(clipboard.paths) : null),
+    [clipboard],
+  );
+
   const titleRender = (nodeData: DataNode) => {
     if (editingKey !== null && nodeData.key === editingKey) {
       return (
@@ -1299,7 +1352,7 @@ export default function FileBrowser() {
     }
     // data-fbkey lets visibleKeysInOrder() recover the on-screen order for Shift+range.
     // Cut items are dimmed until pasted (then the clipboard clears).
-    const isCut = clipboard?.mode === "cut" && clipboard.paths.includes(key);
+    const isCut = !!cutSet?.has(key);
     return <span data-fbkey={key} style={isCut ? { opacity: 0.5 } : undefined}>{content}</span>;
   };
 
@@ -1335,8 +1388,14 @@ export default function FileBrowser() {
   // menu offers bulk variants. ctxCount labels them.
   const ctxMulti = !!fileCtxMenu && selKeys.length > 1 && selKeys.includes(fileCtxMenu.path);
   const ctxCount = ctxMulti ? selKeys.length : 1;
-  // Files-only count for the bulk git actions (directories are excluded — see opFilePaths).
-  const ctxFileCount = ctxMulti ? opFilePaths().length : 0;
+  // Files-only count for the bulk git actions (directories are excluded — see
+  // opFilePaths). Memoized: opFilePaths walks the tree per selected key, and this
+  // runs on every render while the menu is open.
+  const ctxFileCount = useMemo(
+    () => (ctxMulti ? opFilePaths().length : 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ctxMulti, selKeys, treeData, fileCtxMenu],
+  );
 
   return (
     <div style={{ padding: "4px 4px" }}>
@@ -1383,12 +1442,12 @@ export default function FileBrowser() {
           </div>
         )}
         {clipboard && exportDir && (
-          <Tooltip title={`Paste ${clipboard.paths.length} item${clipboard.paths.length > 1 ? "s" : ""} into ${pathBase(toolbarPasteTarget())}`}>
+          <Tooltip title={`Paste ${clipboard.paths.length} item${clipboard.paths.length > 1 ? "s" : ""} into ${pathBase(toolbarPasteTarget)}`}>
             <Button
               size="small"
               type="text"
               icon={<BlockOutlined style={{ fontSize: 11, color: "var(--link)" }} />}
-              onClick={(e) => { e.stopPropagation(); handlePaste(toolbarPasteTarget()); }}
+              onClick={(e) => { e.stopPropagation(); handlePaste(toolbarPasteTarget); }}
               style={{ height: 20, padding: "0 4px", minWidth: 0 }}
             />
           </Tooltip>
