@@ -554,7 +554,7 @@ Open **Tools → Configure AI…** in the menu bar to set your provider, API key
 - **Save** (`⌘S` / `Ctrl+S`) — writes back to the file's original path
 - **Save As…** (`⌘⇧S` / `Ctrl+Shift+S`) — native OS save dialog; promotes a scratch tab to a named file
 - **New Tab** (`⌘T` / `Ctrl+T`) — opens a blank scratch tab
-- **File Browser** — browse the working directory in the sidebar; click any file to open it; auto-refreshes after a DDL export; **file system watcher** monitors the working directory for external changes (files created, renamed, or deleted in the terminal, other editors, or via git) and incrementally refreshes only the affected directories — no manual reload needed; toggleable via **View → Enabled Features → File Watcher**; **multi-select** with **Cmd/Ctrl+click** (toggle a node) and **Shift+click** (select a range), so Cut/Copy/Delete and git Stage/Unstage/Discard can act on the whole selection at once; right-click any file or folder to access the context menu:
+- **File Browser** — browse the working directory in the sidebar; click any file to open it; auto-refreshes after a DDL export; **file system watcher** monitors the working directory for external changes (files created, renamed, deleted, or edited in the terminal, other editors, or via git) and incrementally refreshes only the affected directories — no manual reload needed; an open editor tab whose file is changed externally re-reads the new content automatically (a tab with unsaved edits keeps your changes, VSCode-style, rather than overwriting them); toggleable via **View → Enabled Features → File Watcher**; **multi-select** with **Cmd/Ctrl+click** (toggle a node) and **Shift+click** (select a range), so Cut/Copy/Delete and git Stage/Unstage/Discard can act on the whole selection at once; right-click any file or folder to access the context menu:
   - **Reveal in Finder** / **Show in Explorer** — opens the platform file manager and selects the file or folder
   - **Copy Path** — copies the full file path to the clipboard
   - **Copy Relative Path** — copies the path relative to the project root (export directory) — handy for `@stage` references and dbt refs
@@ -1134,7 +1134,7 @@ The following features are identified as feasible to be turned off via feature f
 - **Snowflake CLI Profile Manager** (Manage Snowflake CLI profiles from the connection dialog)
 
 **File Browser**
-- **File Watcher** (Auto-refresh the file browser when files are created, renamed, or deleted externally)
+- **File Watcher** (Auto-refresh the file browser and open editor tabs when files are created, renamed, deleted, or edited externally)
 
 **Schema Management**
 - **Column Management** (Add, rename, retype, set/drop NOT NULL, set comment, and drop table columns from the sidebar tree)

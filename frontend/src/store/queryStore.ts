@@ -354,18 +354,18 @@ export const useQueryStore = create<QueryState>()(
     set((state) => {
       const tab = state.tabs.find((t) => t.id === id);
       if (!tab) return {};
-      // If clean (no unsaved changes), update both sql and savedSql.
-      // If dirty, only update savedSql so the user's edits are preserved.
-      const isClean = tab.sql === tab.savedSql;
+      // VSCode-style: a tab with unsaved edits is left untouched — the external
+      // change is ignored and the tab stays dirty against its original baseline,
+      // handled like any other file with unsaved modifications. Only clean tabs
+      // pick up the new disk content.
+      if (tab.sql !== tab.savedSql) return {};
       const updatedTabs = state.tabs.map((t) =>
-        t.id === id
-          ? { ...t, savedSql: diskContent, ...(isClean ? { sql: diskContent } : {}) }
-          : t
+        t.id === id ? { ...t, sql: diskContent, savedSql: diskContent } : t
       );
       const isActive = state.activeTabId === id;
       return {
         tabs: updatedTabs,
-        ...(isActive && isClean ? { sql: diskContent } : {}),
+        ...(isActive ? { sql: diskContent } : {}),
       };
     }),
 

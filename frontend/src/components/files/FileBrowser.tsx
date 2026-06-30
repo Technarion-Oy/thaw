@@ -477,17 +477,21 @@ export default function FileBrowser() {
   // ── File system watcher lifecycle ──────────────────────────────────────────
   // Only watch while the panel is expanded to conserve inotify watches on Linux.
   // On re-expand, refresh root entries to catch changes that happened while collapsed.
+  // Run the watcher whenever a workspace is open — open editor tabs need change
+  // events even while the Files panel is collapsed (not just the tree).
   useEffect(() => {
-    if (!exportDir || !fileWatcherEnabled || !expanded) return;
+    if (!exportDir || !fileWatcherEnabled) return;
     StartFileWatcher(exportDir).catch((e) => console.warn("File watcher failed to start:", e));
-    // Refresh root to pick up changes that occurred while collapsed.
-    if (loadedRef.current) {
-      ListDirectory(exportDir)
-        .then((entries) => setTreeData((prev) => mergeNodes(prev, entriesToNodes(entries))))
-        .catch(() => {});
-    }
     return () => { StopFileWatcher().catch(() => {}); };
-  }, [exportDir, fileWatcherEnabled, expanded]);
+  }, [exportDir, fileWatcherEnabled]);
+
+  // On (re)expand, refresh the root to pick up changes that occurred while collapsed.
+  useEffect(() => {
+    if (!exportDir || !expanded || !loadedRef.current) return;
+    ListDirectory(exportDir)
+      .then((entries) => setTreeData((prev) => mergeNodes(prev, entriesToNodes(entries))))
+      .catch(() => {});
+  }, [exportDir, expanded]);
 
   // ── File system change listener ────────────────────────────────────────────
   useEffect(() => {

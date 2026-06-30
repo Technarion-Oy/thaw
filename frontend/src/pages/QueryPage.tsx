@@ -8,7 +8,7 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useEffect, useRef, useState, lazy, Suspense } from "react";
+import { useEffect, useRef, useState, useCallback, lazy, Suspense } from "react";
 import { flushSync } from "react-dom";
 import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message, Modal, type MenuProps } from "antd";
 import { CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined, SearchOutlined, CloudUploadOutlined } from "@ant-design/icons";
@@ -34,6 +34,14 @@ import QueryLogPane from "../components/results/QueryLogPane";
 // metadata-cache clear after a run. Matched at the buffer start or after a `;`
 // statement boundary, case-insensitive. RENAME/SWAP/SET arrive via ALTER.
 const DDL_LEADER_RE = /(?:^|;)\s*(?:CREATE|ALTER|DROP|TRUNCATE|UNDROP)\b/i;
+
+// Directory portion of a path (handles both / and \ separators) — matches the
+// parent dir the file watcher reports in fs:changed events.
+function pathDir(p: string): string {
+  const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
+  if (i < 0) return ".";
+  return i === 0 ? p.substring(0, 1) : p.substring(0, i);
+}
 
 // ranContainedDDL reports whether the executed SQL has a DDL statement. Comments
 // and string/dollar-quoted literals are blanked first so a `;` or DDL verb inside
@@ -261,22 +269,36 @@ export default function QueryPage() {
     prevTabIdsRef.current = currentIds;
   }, [tabs]);
 
+  // Re-read a single file-backed tab from disk: refresh content (clean tabs
+  // only — see refreshFileTab) or orphan it if the file is gone.
+  const rereadTab = useCallback(async (tab: typeof tabs[number]) => {
+    if (!tab.path) return;
+    try {
+      const content = tab.kind === "notebook"
+        ? await ReadNotebook(tab.path)
+        : await ReadFile(tab.path);
+      refreshFileTab(tab.id, content);
+    } catch {
+      orphanFileTab(tab.id);
+    }
+  }, [refreshFileTab, orphanFileTab]);
+
   // On mount, re-read file-backed tabs from disk so their content is fresh
   // after an app restart (they were persisted with cleared sql/savedSql).
   useEffect(() => {
-    const { tabs } = useQueryStore.getState();
-    tabs.forEach(async (tab) => {
-      if (!tab.path) return;
-      try {
-        const content = tab.kind === "notebook"
-          ? await ReadNotebook(tab.path)
-          : await ReadFile(tab.path);
-        refreshFileTab(tab.id, content);
-      } catch {
-        orphanFileTab(tab.id);
-      }
+    useQueryStore.getState().tabs.forEach(rereadTab);
+  }, [rereadTab]);
+
+  // Reflect external edits: when the file watcher reports a directory change,
+  // re-read any open tab whose file lives in that directory.
+  useEffect(() => {
+    const off = EventsOn("fs:changed", (evt: { dir: string }) => {
+      useQueryStore.getState().tabs.forEach((tab) => {
+        if (tab.path && pathDir(tab.path) === evt.dir) rereadTab(tab);
+      });
     });
-  }, []);
+    return off;
+  }, [rereadTab]);
 
   // Keep the Snowpark kernel in sync with the tab's session context whenever
   // role, warehouse, database or schema changes, or when switching notebook tabs.
