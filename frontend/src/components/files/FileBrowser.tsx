@@ -482,11 +482,16 @@ export default function FileBrowser() {
     return () => { StopFileWatcher().catch(() => {}); };
   }, [exportDir, fileWatcherEnabled]);
 
-  // On (re)expand, refresh the root to pick up changes that occurred while collapsed.
-  // Depends on `loaded` (state, reactive) so it also fires once the initial load
-  // completes while already expanded.
+  // On re-expand, refresh the root to pick up changes that occurred while
+  // collapsed. loadRoot() handles the first-ever load (and no-ops thereafter),
+  // so this fires only on a genuine collapse→expand transition — a prev-expanded
+  // ref gates it so the loaded:false→true tick right after the initial load
+  // doesn't trigger a redundant second ListDirectory.
+  const prevExpandedRef = useRef(expanded);
   useEffect(() => {
-    if (!exportDir || !expanded || !loaded) return;
+    const justExpanded = expanded && !prevExpandedRef.current;
+    prevExpandedRef.current = expanded;
+    if (!justExpanded || !exportDir || !loaded) return;
     ListDirectory(exportDir)
       .then((entries) => setTreeData((prev) => mergeNodes(prev, entriesToNodes(entries))))
       .catch(() => {});
