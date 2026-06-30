@@ -12,6 +12,7 @@ package filesystem
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -21,6 +22,12 @@ import (
 	"strings"
 	"unicode/utf8"
 )
+
+// NotFoundMarker is a locale-independent substring included in the error
+// returned when a file does not exist. The OS-level "no such file" message is
+// localized (e.g. on non-English Windows), so callers — including the frontend
+// over the Wails bridge — must match on this stable marker instead.
+const NotFoundMarker = "file not found"
 
 // FileEntry describes a single file or directory.
 type FileEntry struct {
@@ -36,6 +43,9 @@ type FileEntry struct {
 func ReadFile(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("%s: %s", NotFoundMarker, path)
+		}
 		return "", err
 	}
 	head := data

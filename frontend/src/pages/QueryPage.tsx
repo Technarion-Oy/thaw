@@ -13,7 +13,7 @@ import { flushSync } from "react-dom";
 import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message, Modal, type MenuProps } from "antd";
 import { CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined, SearchOutlined, CloudUploadOutlined } from "@ant-design/icons";
 import { ClipboardSetText, BrowserOpenURL } from "../../wailsjs/runtime/runtime";
-import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, PickAnyFile, ReadFile, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, CloseTabSession, GetSessionInitMode, InitTabSession, SetQueryLogEnabled } from "../../wailsjs/go/app/App";
+import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, PickAnyFile, ReadFile, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, CloseTabSession, GetSessionInitMode, InitTabSession, SetQueryLogEnabled, StartFileWatcher, StopFileWatcher } from "../../wailsjs/go/app/App";
 import { GetSqlStatementRanges } from "../../wailsjs/go/sqleditor/Service";
 import type { snowflake } from "../../wailsjs/go/models";
 import { usePanelLayoutStore } from "../store/panelLayoutStore";
@@ -36,11 +36,13 @@ import QueryLogPane from "../components/results/QueryLogPane";
 const DDL_LEADER_RE = /(?:^|;)\s*(?:CREATE|ALTER|DROP|TRUNCATE|UNDROP)\b/i;
 
 // Whether an error from ReadFile/ReadNotebook means the file is actually gone
-// (vs. a transient IPC/permission/binary-file error). Backend errors surface as
-// the OS message string across the Wails bridge.
+// (vs. a transient IPC/permission/binary-file error). The backend tags missing
+// files with a locale-independent "file not found" marker (the raw OS message is
+// localized, so it can't be matched on non-English Windows); the OS-string forms
+// are kept as a defensive fallback.
 function isFileNotFound(e: unknown): boolean {
   const msg = String(e).toLowerCase();
-  return msg.includes("no such file") || msg.includes("cannot find") || msg.includes("does not exist");
+  return msg.includes("file not found") || msg.includes("no such file") || msg.includes("cannot find");
 }
 
 // ranContainedDDL reports whether the executed SQL has a DDL statement. Comments
@@ -80,6 +82,7 @@ import { useQueryStore, type QueryResult, type Tab, EXECUTE_IN_TAB_EVENT } from 
 import { openFileInTab } from "../utils/openFileInTab";
 import { useConnectionStore } from "../store/connectionStore";
 import { useSessionStore } from "../store/sessionStore";
+import { useGitStore } from "../store/gitStore";
 import { useFeatureFlagsStore } from "../store/featureFlagsStore";
 import { useTagManagementStore } from "../store/tagManagementStore";
 import { useNotebookToolbarStore } from "../store/notebookToolbarStore";
@@ -271,17 +274,26 @@ export default function QueryPage() {
 
   // Re-read a single file-backed tab from disk: refresh content (clean tabs
   // only — see refreshFileTab) or orphan it if the file is gone.
+  //
+  // A per-tab read sequence guards against out-of-order completion: two change
+  // events can launch concurrent reads of the same tab, and a slow earlier read
+  // landing after a newer one would otherwise revert the tab to stale content
+  // (observable on network filesystems). Only the latest-issued read applies.
+  const readSeqRef = useRef<Map<string, number>>(new Map());
   const rereadTab = useCallback(async (tab: typeof tabs[number]) => {
     if (!tab.path) return;
+    const seq = (readSeqRef.current.get(tab.id) ?? 0) + 1;
+    readSeqRef.current.set(tab.id, seq);
     try {
       const content = tab.kind === "notebook"
         ? await ReadNotebook(tab.path)
         : await ReadFile(tab.path);
+      if (readSeqRef.current.get(tab.id) !== seq) return; // superseded by a newer read
       refreshFileTab(tab.id, content);
     } catch (e) {
       // Only drop the file association when the file is truly gone — a transient
       // IPC/permission error must not permanently orphan a still-valid tab.
-      if (isFileNotFound(e)) orphanFileTab(tab.id);
+      if (readSeqRef.current.get(tab.id) === seq && isFileNotFound(e)) orphanFileTab(tab.id);
     }
   }, [refreshFileTab, orphanFileTab]);
 
@@ -305,6 +317,17 @@ export default function QueryPage() {
     });
     return off;
   }, [rereadTab]);
+
+  // Own the file watcher lifecycle here rather than in FileBrowser: QueryPage is
+  // always mounted, whereas the left sidebar (and FileBrowser) is unmounted when
+  // hidden via ⌘B — which would otherwise stop the watcher and silently freeze
+  // tab refresh. Gated on the same `fileWatcher` flag the FileBrowser tree uses.
+  const exportDir = useGitStore((s) => s.exportDir);
+  useEffect(() => {
+    if (!exportDir || !featureFlags.fileWatcher) return;
+    StartFileWatcher(exportDir).catch((e) => console.warn("File watcher failed to start:", e));
+    return () => { StopFileWatcher().catch(() => {}); };
+  }, [exportDir, featureFlags.fileWatcher]);
 
   // Keep the Snowpark kernel in sync with the tab's session context whenever
   // role, warehouse, database or schema changes, or when switching notebook tabs.

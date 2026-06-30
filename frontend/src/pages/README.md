@@ -67,6 +67,12 @@ overhead.
   from disk (see "File-backed tab recovery" below) so external edits are
   reflected. Independent of `FileBrowser`'s own `fs:changed` listener.
 
+`QueryPage` also owns the **watcher lifecycle** (`StartFileWatcher`/`StopFileWatcher`,
+keyed on `gitStore.exportDir`, gated by the `fileWatcher` flag). It lives here —
+not in `FileBrowser` — because `QueryPage` is always mounted, whereas the sidebar
+(and `FileBrowser`) is unmounted when hidden via ⌘B, which would otherwise stop
+the watcher and silently freeze tab refresh.
+
 Custom DOM events handled here:
 - `thaw:execute-in-tab` — emitted by `queryStore.executeInNewTab` to ask
   `QueryPage` to run the query through the full pipeline.
@@ -80,10 +86,13 @@ Custom DOM events handled here:
 On mount — and whenever a `fs:changed` watcher event arrives — `QueryPage`
 iterates all tabs in the store and re-reads file-backed tabs from disk (SQL files
 via `ReadFile`, notebooks via `ReadNotebook`) through the shared `rereadTab`
-helper, calling `refreshFileTab` (clean tabs adopt the disk content; tabs with
-unsaved edits are left untouched, VSCode-style) or `orphanFileTab` only when the
-file is genuinely gone (transient IPC/permission errors are ignored so a tab is
-never orphaned by a momentary failure).
+helper, calling `refreshFileTab` (clean tabs adopt the disk content; dirty tabs
+keep the user's edits but advance their saved baseline, VSCode-style) or
+`orphanFileTab` only when the file is genuinely gone — detected via the backend's
+locale-independent "file not found" marker, so transient IPC/permission errors
+(and localized OS messages) never orphan a still-valid tab. A per-tab read
+sequence makes the latest read win, so out-of-order completions can't revert a
+tab to stale content.
 
 **Modal orchestration**
 

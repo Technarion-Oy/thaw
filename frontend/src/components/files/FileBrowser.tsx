@@ -47,8 +47,6 @@ import {
   CreateDirectory,
   CreateFile,
   DuplicateFile,
-  StartFileWatcher,
-  StopFileWatcher,
   GitGetHeadFileContent,
 } from "../../../wailsjs/go/app/App";
 import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
@@ -428,10 +426,17 @@ export default function FileBrowser() {
   useEffect(() => () => { if (gitRefreshTimerRef.current) clearTimeout(gitRefreshTimerRef.current); }, []);
 
   // Refresh git colors when a file is saved in the editor (watcher-independent).
+  // Also mark the saved file's directory as self-changed so the watcher's echo of
+  // our own write (arriving ~200 ms later) doesn't trigger a redundant tree re-list.
   useEffect(() => {
-    const handler = () => scheduleGitRefresh();
+    const handler = (e: Event) => {
+      scheduleGitRefresh();
+      const path = (e as CustomEvent<{ path?: string }>).detail?.path;
+      if (path) markSelfChanged(pathDir(path));
+    };
     window.addEventListener("thaw:file-saved", handler);
     return () => window.removeEventListener("thaw:file-saved", handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- markSelfChanged only closes over stable refs
   }, [scheduleGitRefresh]);
 
   // Close file context menu on outside click or Escape key
@@ -473,14 +478,9 @@ export default function FileBrowser() {
   }, [exportDir]);
 
   // ── File system watcher lifecycle ──────────────────────────────────────────
-  // Run the watcher whenever a workspace is open — open editor tabs need change
-  // events even while the Files panel is collapsed (not just the tree). It is not
-  // gated on `expanded`, so collapsing the panel does not stop watching.
-  useEffect(() => {
-    if (!exportDir || !fileWatcherEnabled) return;
-    StartFileWatcher(exportDir).catch((e) => console.warn("File watcher failed to start:", e));
-    return () => { StopFileWatcher().catch(() => {}); };
-  }, [exportDir, fileWatcherEnabled]);
+  // The watcher's Start/Stop lifecycle lives in QueryPage (always mounted), so
+  // hiding the sidebar via ⌘B — which unmounts FileBrowser — doesn't stop it.
+  // FileBrowser only consumes the resulting fs:changed events for the tree.
 
   // On re-expand, refresh the root to pick up changes that occurred while
   // collapsed. loadRoot() handles the first-ever load (and no-ops thereafter),
@@ -593,6 +593,17 @@ export default function FileBrowser() {
       setLoading(false);
     }
   };
+
+  // Ensure the root loads whenever the panel is expanded but not yet loaded —
+  // covers a workspace switch that happens while already expanded (the reset
+  // effect clears `loaded`, and toggleExpanded — the only other caller — doesn't
+  // fire in that case, leaving the tree blank with no Reload button). loadRoot()
+  // self-guards on loading/loaded, so this never double-lists alongside the
+  // toggleExpanded path.
+  useEffect(() => {
+    if (exportDir && expanded && !loaded && !loading) loadRoot();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exportDir, expanded, loaded, loading]);
 
   const refresh = async () => {
     setFileCtxMenu(null); // dismiss stale context menu

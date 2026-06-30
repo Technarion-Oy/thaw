@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -1911,6 +1912,11 @@ func (s *Service) PickNotebookFile() (string, error) {
 func (s *Service) ReadNotebook(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// Locale-independent marker so the frontend can detect a deleted file
+			// reliably (matches filesystem.NotFoundMarker).
+			return "", fmt.Errorf("file not found: %s", path)
+		}
 		return "", err
 	}
 	return string(data), nil
