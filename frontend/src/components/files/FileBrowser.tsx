@@ -641,8 +641,14 @@ export default function FileBrowser() {
   };
 
   // Keys of currently-rendered tree nodes in visual (top-to-bottom) order. Read
-  // from the DOM so it honors expand/collapse state without us controlling it —
-  // each node's title carries a data-fbkey attribute (set in titleRender).
+  // from the DOM (each title carries a data-fbkey attribute, set in titleRender)
+  // so it honors expand/collapse without us controlling rc-tree's expandedKeys —
+  // this tree uses uncontrolled, lazy expansion, so there's no in-memory expanded
+  // set to walk (unlike the object-store sidebar's flattenVisibleNodes).
+  // ponytail: correct as long as the tree isn't virtualized. If the rc-tree
+  // `height` prop is ever set, only viewport rows render, so an off-screen anchor
+  // would drop from the range — switch to controlled expandedKeys + a treeData
+  // walk at that point.
   const visibleKeysInOrder = (): string[] => {
     const root = treeWrapRef.current;
     if (!root) return [];
@@ -824,25 +830,22 @@ export default function FileBrowser() {
     message.success(`Copied ${paths.length} item${paths.length > 1 ? "s" : ""}`);
   };
 
-  // Compute a non-colliding destination path inside targetDir for a file/folder
-  // named `base`, appending _copy, _copy_2, … like the backend DuplicateFile.
-  const uniqueDstPath = async (targetDir: string, base: string): Promise<string> => {
-    const sep = pathSep(targetDir);
-    const join = (n: string) => (targetDir.endsWith(sep) ? `${targetDir}${n}` : `${targetDir}${sep}${n}`);
-    let names: Set<string>;
-    try { names = new Set((await ListDirectory(targetDir)).map((e) => e.name)); }
-    catch { names = new Set(); }
-    if (!names.has(base)) return join(base);
+  // Pick a non-colliding name for `base` against the set of names already present
+  // in the target dir, appending _copy, _copy_2, … like the backend DuplicateFile.
+  // Synchronous: the caller lists the target dir once and updates `names` as it
+  // claims each destination, so pasting N items costs one IPC call, not N.
+  const uniqueDstName = (names: Set<string>, base: string): string => {
+    if (!names.has(base)) return base;
     const dot = base.lastIndexOf(".");
     const ext = dot > 0 ? base.slice(dot) : "";
     const stem = dot > 0 ? base.slice(0, dot) : base;
     let cand = `${stem}_copy${ext}`;
-    if (!names.has(cand)) return join(cand);
+    if (!names.has(cand)) return cand;
     for (let i = 2; i < 1000; i++) {
       cand = `${stem}_copy_${i}${ext}`;
-      if (!names.has(cand)) return join(cand);
+      if (!names.has(cand)) return cand;
     }
-    return join(`${stem}_copy_${Date.now()}${ext}`);
+    return `${stem}_copy_${Date.now()}${ext}`;
   };
 
   // Update open tabs after a file/folder moves so they don't dangle.
@@ -867,6 +870,14 @@ export default function FileBrowser() {
     setFileCtxMenu(null);
     if (!clipboard) return;
     const { mode, paths } = clipboard;
+    const sep = pathSep(targetDir);
+    const join = (n: string) => (targetDir.endsWith(sep) ? `${targetDir}${n}` : `${targetDir}${sep}${n}`);
+    // List the target dir once; claim each chosen name in `names` so sequential
+    // pastes don't collide (replaces one ListDirectory IPC per item).
+    let names: Set<string>;
+    try { names = new Set((await ListDirectory(targetDir)).map((e) => e.name)); }
+    catch { names = new Set(); }
+    const failed: string[] = [];
     let ok = 0;
     for (const src of paths) {
       // Moving an item into the folder it already lives in is a no-op.
@@ -874,7 +885,8 @@ export default function FileBrowser() {
       const base = pathBase(src);
       const isDir = isDirKey(src);
       try {
-        const dst = await uniqueDstPath(targetDir, base);
+        const dstName = uniqueDstName(names, base);
+        const dst = join(dstName);
         if (mode === "cut") {
           try {
             await RenameFile(src, dst); // atomic on the same volume
@@ -888,17 +900,19 @@ export default function FileBrowser() {
         } else {
           await CopyFile(src, dst);
         }
+        names.add(dstName); // claim the name for the remaining items
         ok++;
       } catch (e) {
+        failed.push(src);
         message.error(`Paste failed for ${base}: ${String(e)}`);
       }
     }
     markSelfChanged(targetDir);
-    if (mode === "cut" && ok > 0) {
-      // Only consume the cut clipboard when something actually moved — otherwise a
-      // failed paste (e.g. read-only target) would silently drop the selection.
+    if (mode === "cut") {
       for (const src of paths) markSelfChanged(pathDir(src));
-      setClipboard(null); // cut is one-shot
+      // Keep only the items that didn't move, so a partial failure stays retriable
+      // (clearing on ok>0 would silently drop the still-unmoved files).
+      setClipboard(failed.length ? { mode: "cut", paths: failed } : null);
     }
     if (ok) message.success(`Pasted ${ok} item${ok > 1 ? "s" : ""}`);
     refresh();
@@ -1077,12 +1091,18 @@ export default function FileBrowser() {
         : `Are you sure you want to delete "${name}"?${isDir ? " This item and all its contents will be permanently removed." : ""}`,
       okText: "Delete",
       okButtonProps: { danger: true },
-      onOk: async () => {
+      // Tracks paths already deleted so a retry (after a partial failure) doesn't
+      // re-attempt them — re-deleting would ENOENT and wedge the modal open forever.
+      onOk: (() => {
+        const done = new Set<string>();
+        return async () => {
         const failed: string[] = [];
         for (const path of paths) {
+          if (done.has(path)) continue;
           const dir = isDirKey(path);
           try {
             if (dir) await DeleteDirectory(path); else await DeleteFile(path);
+            done.add(path);
             markSelfChanged(pathDir(path));
             const sep = pathSep(path);
             // Read fresh tabs from the store (not the stale closure captured at render time).
@@ -1105,7 +1125,8 @@ export default function FileBrowser() {
           throw new Error("delete failed"); // keep the modal open
         }
         message.success(multi ? `Deleted ${paths.length} items` : `Deleted ${name}`);
-      },
+        };
+      })(),
     });
   };
 
@@ -1140,16 +1161,8 @@ export default function FileBrowser() {
     try {
       await RenameFile(path, newPath);
       markSelfChanged(dir);
-      const currentTabs = useQueryStore.getState().tabs;
       const prefix = path + sep;
-      for (const tab of currentTabs) {
-        if (tab.path === path) {
-          updateTabPath(tab.id, newPath, sanitized);
-        } else if (tab.path?.startsWith(prefix)) {
-          const updatedPath = newPath + tab.path.substring(path.length);
-          updateTabPath(tab.id, updatedPath, pathBase(updatedPath));
-        }
-      }
+      remapTabsForMove(path, newPath, isDirKey(path));
       setTreeData(prev => renameTreeNode(prev, path, newPath, sanitized));
       setLoadedKeys(prev => prev.map(k => {
         const ks = String(k);
