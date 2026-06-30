@@ -668,6 +668,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [ctxMenu, setCtxMenu]     = useState<ContextMenu | null>(null);
   const [selectedNodeKeys, setSelectedNodeKeys] = useState<Set<string>>(new Set());
   const [selectedNodeArgs, setSelectedNodeArgs] = useState<Map<string, string>>(new Map());
+  // Pivot for Shift+click range selection of object-store nodes.
+  const [objAnchorKey, setObjAnchorKey] = useState<string | null>(null);
   // Path of currently-open submenu keys, indexed by nesting depth (0 = first
   // level off the context menu, 1 = a submenu nested inside that one, …).
   const [submenuPath, setSubmenuPath] = useState<string[]>([]);
@@ -964,6 +966,17 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     () => (searchQuery ? filterTree(searchResults, searchQuery) : treeData),
     [searchResults, treeData, searchQuery],
   );
+
+  // Visible nodes in top-to-bottom order, honoring the controlled expanded set —
+  // used to resolve Shift+click range selection in the object store.
+  const flattenVisibleNodes = (nodes: DataNode[], expanded: Set<string>, out: DataNode[]): DataNode[] => {
+    for (const n of nodes) {
+      out.push(n);
+      const kids = (n as any).children as DataNode[] | undefined;
+      if (kids?.length && expanded.has(String(n.key))) flattenVisibleNodes(kids, expanded, out);
+    }
+    return out;
+  };
 
   // Derived flag: is the right-clicked stage file a .sql file? Used to gate Execute File and the divider.
   const stageFileIsSql = useMemo(
@@ -4240,14 +4253,21 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
 
           {treeData.length > 0 && (!searchQuery || displayData.length > 0) && (
             <div
-              style={{ overflowX: "auto" }}
+              // userSelect:none stops the browser from painting a text highlight
+              // across node labels during Shift/Cmd+click multi-selection.
+              style={{ overflowX: "auto", userSelect: "none" }}
+              // Shift+click extends the document's text selection (still painted by
+              // WebKit despite user-select:none); preventDefault on the shift
+              // mousedown suppresses it without blocking the click.
+              onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); }}
               onClick={(e) => {
                 // Clear multi-selection on any plain (non-modifier) click that
-                // bubbles up from the tree. Ctrl/Cmd+clicks on obj nodes
+                // bubbles up from the tree. Ctrl/Cmd/Shift+clicks on obj nodes
                 // call stopPropagation() so they never reach this handler.
-                if (!e.ctrlKey && !e.metaKey && selectedNodeKeys.size > 0) {
+                if (!e.ctrlKey && !e.metaKey && !e.shiftKey && selectedNodeKeys.size > 0) {
                   setSelectedNodeKeys(new Set());
                   setSelectedNodeArgs(new Map());
+                  setObjAnchorKey(null);
                 }
               }}
             >
@@ -4273,9 +4293,33 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
 
                  if (!key.startsWith("obj:")) return;
 
+                // Shift+click — select the range between the anchor and this node
+                // across the visible object nodes.
+                if (nativeEvent.shiftKey) {
+                  nativeEvent.stopPropagation();
+                  const expandedSet = new Set((searchQuery ? searchExpandedKeys : expandedKeys).map(String));
+                  const flat = flattenVisibleNodes(displayData, expandedSet, []);
+                  const keys = flat.map((n) => String(n.key));
+                  const anchor = objAnchorKey && keys.includes(objAnchorKey) ? objAnchorKey : key;
+                  const ai = keys.indexOf(anchor);
+                  const bi = keys.indexOf(key);
+                  if (ai >= 0 && bi >= 0) {
+                    const [lo, hi] = ai < bi ? [ai, bi] : [bi, ai];
+                    const rangeNodes = flat.slice(lo, hi + 1).filter((n) => String(n.key).startsWith("obj:"));
+                    setObjAnchorKey(anchor);
+                    setSelectedNodeKeys(new Set(rangeNodes.map((n) => String(n.key))));
+                    setSelectedNodeArgs(new Map(
+                      rangeNodes
+                        .map((n) => [String(n.key), (n as any).arguments ?? ""] as [string, string])
+                        .filter(([, a]) => a),
+                    ));
+                  }
+                  return;
+                }
 
                 if (nativeEvent.ctrlKey || nativeEvent.metaKey) {
                   nativeEvent.stopPropagation();
+                  setObjAnchorKey(key);
                   setSelectedNodeKeys((prev) => {
                     const next = new Set(prev);
                     if (next.has(key)) next.delete(key); else next.add(key);

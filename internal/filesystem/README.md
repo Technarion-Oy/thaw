@@ -14,7 +14,7 @@ tree for changes and emits debounced Wails events to refresh the file browser UI
 
 | File | Purpose |
 |---|---|
-| `fs.go` | Core CRUD helpers: `ReadFile`, `ReadFileHead`, `WriteFile`, `ListDir`, `RevealInFinder`, `DeleteFile`, `DeleteDirectory`, `RenameFile`, `MkDir`, `WriteFileInRoot`, `DuplicateFile`, and the path-validation internals. |
+| `fs.go` | Core CRUD helpers: `ReadFile`, `ReadFileHead`, `WriteFile`, `ListDir`, `RevealInFinder`, `DeleteFile`, `DeleteDirectory`, `RenameFile`, `MkDir`, `WriteFileInRoot`, `DuplicateFile`, `CopyFile`, and the path-validation internals. |
 | `watcher.go` | `Watcher` struct (`rjeczalik/notify`-based): a single recursive watch over the whole tree, 200 ms debounce per directory, `FSChangeEvent`. |
 | `export.go` | `WriteBinaryFile` (base64-decode then write, used for Excel export) and `SanitizeFilename`. |
 | `search.go` | `SearchFiles`: recursive file-content search (substring or regex), capped at 200 results. |
@@ -40,6 +40,7 @@ tree for changes and emits debounced Wails events to refresh the file browser UI
 - Write-only events on existing files are intentionally skipped — only create/delete/rename events trigger directory refresh, since `ListDir` output does not change on file content edits.
 - Hidden files and directories (names starting with `.`) are excluded from both the watcher and `SearchFiles`.
 - The `DuplicateFile` copy name follows the pattern `stem_copy.ext`, `stem_copy_2.ext`, etc., up to 999 attempts.
+- `CopyFile(src, dst, allowedRoot)` copies a file (`io.Copy` with `O_EXCL`) or a directory (recursive `os.CopyFS`); both endpoints are validated inside `allowedRoot`, `dst` must not already exist (never a silent overwrite), and copying a directory into itself/a descendant is rejected. The frontend resolves name conflicts before calling, so the move/paste flow stays backend-stateless. Cross-volume **move** is the frontend's `RenameFile`-then-`CopyFile`+delete fallback (effectively dead on a single-root export dir).
 
 ## Gotchas
 

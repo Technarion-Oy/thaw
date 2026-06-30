@@ -447,6 +447,62 @@ func DuplicateFile(srcPath, allowedRoot string) (string, error) {
 	return dstPath, nil
 }
 
+// CopyFile copies srcPath to dstPath. Both must be inside allowedRoot. srcPath
+// may be a regular file or a directory (copied recursively). dstPath must not
+// already exist — callers resolve name conflicts beforehand, and the O_EXCL /
+// os.CopyFS semantics here guarantee no silent overwrite. Returns dstPath.
+func CopyFile(srcPath, dstPath, allowedRoot string) (string, error) {
+	if err := validateExistingPath(srcPath, allowedRoot); err != nil {
+		return "", err
+	}
+	if err := validateNewPath(dstPath, allowedRoot); err != nil {
+		return "", err
+	}
+	info, err := os.Lstat(srcPath)
+	if err != nil {
+		return "", err
+	}
+	if info.IsDir() {
+		// Refuse copying a directory into itself or a descendant — that would
+		// recurse forever as the copy keeps finding its own freshly-written files.
+		srcPrefix := filepath.Clean(srcPath) + string(filepath.Separator)
+		dstClean := filepath.Clean(dstPath) + string(filepath.Separator)
+		if hasPathPrefix(dstClean, srcPrefix) {
+			return "", fmt.Errorf("cannot copy a directory into itself")
+		}
+		// os.CopyFS creates dstPath, copies regular files and dirs, and errors on
+		// pre-existing files or irregular files (symlinks) — exactly the safety we want.
+		if err := os.CopyFS(dstPath, os.DirFS(srcPath)); err != nil {
+			return "", err
+		}
+		return dstPath, nil
+	}
+
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return "", err
+	}
+	defer src.Close() //nolint:errcheck
+
+	dst, err := os.OpenFile(dstPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, info.Mode().Perm())
+	if err != nil {
+		if os.IsExist(err) {
+			return "", fmt.Errorf("destination already exists: %s", filepath.Base(dstPath))
+		}
+		return "", err
+	}
+	if _, err := io.Copy(dst, src); err != nil {
+		dst.Close()        //nolint:errcheck // close before remove (required on Windows)
+		os.Remove(dstPath) //nolint:errcheck
+		return "", err
+	}
+	if err := dst.Close(); err != nil {
+		os.Remove(dstPath) //nolint:errcheck
+		return "", err
+	}
+	return dstPath, nil
+}
+
 // checkInsideOrEqual verifies that resolvedPath is inside or equal to resolvedRoot.
 // Uses both a string-prefix check and filepath.Rel as defense-in-depth.
 func checkInsideOrEqual(resolvedPath, resolvedRoot string) error {

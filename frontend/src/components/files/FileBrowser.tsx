@@ -30,6 +30,8 @@ import {
   MinusOutlined,
   UndoOutlined,
   BranchesOutlined,
+  ScissorOutlined,
+  BlockOutlined,
 } from "@ant-design/icons";
 import type { DataNode, EventDataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
@@ -41,6 +43,7 @@ import {
   DeleteFile,
   DeleteDirectory,
   RenameFile,
+  CopyFile,
   CreateDirectory,
   CreateFile,
   DuplicateFile,
@@ -132,6 +135,18 @@ function makeNode(path: string, name: string, isDir: boolean): DataNode {
         : <FileOutlined style={{ color: CLR_SECONDARY }} />,
     isLeaf: !isDir,
   };
+}
+
+/** Find a node by key anywhere in the tree (depth-first). */
+function findNode(nodes: DataNode[], key: string): DataNode | null {
+  for (const n of nodes) {
+    if (n.key === key) return n;
+    if (n.children) {
+      const f = findNode(n.children, key);
+      if (f) return f;
+    }
+  }
+  return null;
 }
 
 /** Remove a node by key from the tree. */
@@ -299,9 +314,19 @@ export default function FileBrowser() {
   // ── File tree state ────────────────────────────────────────────────────────
   const [treeData,    setTreeData]    = useState<DataNode[]>([]);
   const [loadedKeys,  setLoadedKeys]  = useState<Key[]>([]);
-  const [selectedKey, setSelectedKey] = useState<Key | null>(null);
+  // Multi-selection: the set of selected node keys (drives highlight + bulk ops).
+  // `anchorKey` is the pivot for Shift+click range selection.
+  const [selKeys,     setSelKeys]     = useState<string[]>([]);
+  const [anchorKey,   setAnchorKey]   = useState<string | null>(null);
   const [loading,     setLoading]     = useState(false);
   const [loaded,      setLoaded]      = useState(false);
+  const treeWrapRef = useRef<HTMLDivElement>(null);
+
+  // ── Internal file clipboard (cut/copy/paste) ────────────────────────────────
+  // Frontend-only — never touches the OS text clipboard. Cut is one-shot (cleared
+  // after a paste); copy persists. ponytail: local state, not a store — only this
+  // component reads it; promote to a slice if another panel ever needs it.
+  const [clipboard, setClipboard] = useState<{ mode: "cut" | "copy"; paths: string[] } | null>(null);
 
   // ── Search state ───────────────────────────────────────────────────────────
   const [searchOpen,    setSearchOpen]    = useState(false);
@@ -442,7 +467,9 @@ export default function FileBrowser() {
     setLoaded(false);
     setTreeData([]);
     setLoadedKeys([]);
-    setSelectedKey(null);
+    setSelKeys([]);
+    setAnchorKey(null);
+    setClipboard(null);
   }, [exportDir]);
 
   // ── File system watcher lifecycle ──────────────────────────────────────────
@@ -505,9 +532,10 @@ export default function FileBrowser() {
     return off;
   }, [exportDir, fileWatcherEnabled, scheduleGitRefresh]);
 
-  // Keep selected key in sync with the active tab (including tab switches)
+  // Keep selection in sync with the active tab (including tab switches)
   useEffect(() => {
-    setSelectedKey(currentFile);
+    setSelKeys(currentFile ? [String(currentFile)] : []);
+    setAnchorKey(currentFile ? String(currentFile) : null);
   }, [currentFile]);
 
   // Debounced search
@@ -607,15 +635,51 @@ export default function FileBrowser() {
     }
   };
 
-  const onSelect = async (_keys: Key[], info: { node: DataNode }) => {
+  // Keys of currently-rendered tree nodes in visual (top-to-bottom) order. Read
+  // from the DOM so it honors expand/collapse state without us controlling it —
+  // each node's title carries a data-fbkey attribute (set in titleRender).
+  const visibleKeysInOrder = (): string[] => {
+    const root = treeWrapRef.current;
+    if (!root) return [];
+    return Array.from(root.querySelectorAll<HTMLElement>("[data-fbkey]"))
+      .map((el) => el.dataset.fbkey || "")
+      .filter(Boolean);
+  };
+
+  const isDirKey = (key: string) => findNode(treeData, key)?.isLeaf === false;
+
+  const onSelect = async (_keys: Key[], info: { node: DataNode; nativeEvent: MouseEvent }) => {
     const node = info.node;
-    if ((node as any).isLeaf === false) return;
     const path = String(node.key);
-    setSelectedKey(path);
+    const isDir = (node as any).isLeaf === false;
+    const ne = info.nativeEvent;
+
+    // Cmd/Ctrl+click — toggle this node in the selection (don't open).
+    if (ne && (ne.metaKey || ne.ctrlKey)) {
+      setAnchorKey(path);
+      setSelKeys((prev) => (prev.includes(path) ? prev.filter((k) => k !== path) : [...prev, path]));
+      return;
+    }
+    // Shift+click — select the range between the anchor and this node (don't open).
+    if (ne && ne.shiftKey && anchorKey) {
+      const flat = visibleKeysInOrder();
+      const ai = flat.indexOf(anchorKey);
+      const bi = flat.indexOf(path);
+      if (ai >= 0 && bi >= 0) {
+        const [lo, hi] = ai < bi ? [ai, bi] : [bi, ai];
+        setSelKeys(flat.slice(lo, hi + 1));
+        return;
+      }
+      // Anchor scrolled out of view — fall back to a single selection.
+    }
+    // Plain click — single selection; open files, leave folders unexpanded (caret expands).
+    setAnchorKey(path);
+    setSelKeys([path]);
+    if (isDir) return;
     const err = await openFileInTab(path);
     if (err) {
       message.error(`Could not open file: ${err}`);
-      setSelectedKey(null);
+      setSelKeys([]);
     }
   };
 
@@ -662,7 +726,17 @@ export default function FileBrowser() {
     const path = String(node.key);
     const name = pathBase(path);
     const isDir = (node as any).isLeaf === false;
+    // Right-clicking a node outside the current multi-selection acts on just that
+    // node (standard file-manager behavior); right-clicking inside it keeps the set.
+    if (!selKeys.includes(path)) setSelKeys([path]);
     setFileCtxMenu({ x: event.clientX, y: event.clientY, path, name, isDir });
+  };
+
+  // Paths the context-menu bulk actions operate on: the whole selection when the
+  // right-clicked node is part of a multi-selection, otherwise just that node.
+  const opPaths = (): string[] => {
+    if (!fileCtxMenu) return [];
+    return selKeys.length > 1 && selKeys.includes(fileCtxMenu.path) ? selKeys : [fileCtxMenu.path];
   };
 
   const selectFileForComparison = () => {
@@ -696,6 +770,156 @@ export default function FileBrowser() {
     } catch {
       message.error("Failed to copy path");
     }
+  };
+
+  // Copy the path relative to the project root (export dir) — useful for @stage
+  // references, dbt refs, etc. Falls back to the absolute path if outside the root.
+  const handleCopyRelativePath = async () => {
+    if (!fileCtxMenu) return;
+    const p = fileCtxMenu.path;
+    setFileCtxMenu(null);
+    const base = exportDir.replace(/[/\\]+$/, "");
+    let rel = p;
+    if (base && (p === base || p.startsWith(base + "/") || p.startsWith(base + "\\"))) {
+      rel = p === base ? "." : p.slice(base.length + 1);
+    }
+    try {
+      await ClipboardSetText(rel);
+      message.success("Relative path copied");
+    } catch {
+      message.error("Failed to copy path");
+    }
+  };
+
+  // ── Internal clipboard: cut / copy / paste ─────────────────────────────────
+  const handleCut = () => {
+    const paths = opPaths();
+    setFileCtxMenu(null);
+    if (!paths.length) return;
+    setClipboard({ mode: "cut", paths });
+    message.info(`Cut ${paths.length} item${paths.length > 1 ? "s" : ""}`);
+  };
+
+  const handleCopy = () => {
+    const paths = opPaths();
+    setFileCtxMenu(null);
+    if (!paths.length) return;
+    setClipboard({ mode: "copy", paths });
+    message.success(`Copied ${paths.length} item${paths.length > 1 ? "s" : ""}`);
+  };
+
+  // Compute a non-colliding destination path inside targetDir for a file/folder
+  // named `base`, appending _copy, _copy_2, … like the backend DuplicateFile.
+  const uniqueDstPath = async (targetDir: string, base: string): Promise<string> => {
+    const sep = pathSep(targetDir);
+    const join = (n: string) => (targetDir.endsWith(sep) ? `${targetDir}${n}` : `${targetDir}${sep}${n}`);
+    let names: Set<string>;
+    try { names = new Set((await ListDirectory(targetDir)).map((e) => e.name)); }
+    catch { names = new Set(); }
+    if (!names.has(base)) return join(base);
+    const dot = base.lastIndexOf(".");
+    const ext = dot > 0 ? base.slice(dot) : "";
+    const stem = dot > 0 ? base.slice(0, dot) : base;
+    let cand = `${stem}_copy${ext}`;
+    if (!names.has(cand)) return join(cand);
+    for (let i = 2; i < 1000; i++) {
+      cand = `${stem}_copy_${i}${ext}`;
+      if (!names.has(cand)) return join(cand);
+    }
+    return join(`${stem}_copy_${Date.now()}${ext}`);
+  };
+
+  // Update open tabs after a file/folder moves so they don't dangle.
+  const remapTabsForMove = (oldPath: string, newPath: string, isDir: boolean) => {
+    const sep = pathSep(oldPath);
+    const prefix = oldPath + sep;
+    for (const tab of useQueryStore.getState().tabs) {
+      if (tab.path === oldPath) {
+        updateTabPath(tab.id, newPath, pathBase(newPath));
+      } else if (isDir && tab.path?.startsWith(prefix)) {
+        const np = newPath + tab.path.substring(oldPath.length);
+        updateTabPath(tab.id, np, pathBase(np));
+      }
+    }
+  };
+
+  // Toolbar paste targets the single selected folder, else the project root.
+  const toolbarPasteTarget = (): string =>
+    selKeys.length === 1 && isDirKey(selKeys[0]) ? selKeys[0] : exportDir;
+
+  const handlePaste = async (targetDir: string) => {
+    setFileCtxMenu(null);
+    if (!clipboard) return;
+    const { mode, paths } = clipboard;
+    let ok = 0;
+    for (const src of paths) {
+      // Moving an item into the folder it already lives in is a no-op.
+      if (mode === "cut" && pathDir(src) === targetDir) continue;
+      const base = pathBase(src);
+      const isDir = isDirKey(src);
+      try {
+        const dst = await uniqueDstPath(targetDir, base);
+        if (mode === "cut") {
+          try {
+            await RenameFile(src, dst); // atomic on the same volume
+          } catch {
+            // ponytail: cross-volume fallback (copy+delete). Effectively dead on a
+            // single-root export dir, but the issue requires it; remove if proven moot.
+            await CopyFile(src, dst);
+            if (isDir) await DeleteDirectory(src); else await DeleteFile(src);
+          }
+          remapTabsForMove(src, dst, isDir);
+        } else {
+          await CopyFile(src, dst);
+        }
+        ok++;
+      } catch (e) {
+        message.error(`Paste failed for ${base}: ${String(e)}`);
+      }
+    }
+    markSelfChanged(targetDir);
+    if (mode === "cut") {
+      for (const src of paths) markSelfChanged(pathDir(src));
+      setClipboard(null); // cut is one-shot
+    }
+    if (ok) message.success(`Pasted ${ok} item${ok > 1 ? "s" : ""}`);
+    refresh();
+  };
+
+  // ── Bulk git staging ───────────────────────────────────────────────────────
+  // ponytail: loops the per-file store actions, so each awaits a status refresh —
+  // fine for the handful of files a user selects; add a batch IPC if it ever lags.
+  const handleBulkStage = async () => {
+    const paths = opPaths();
+    setFileCtxMenu(null);
+    if (gitBusy()) return;
+    for (const p of paths) await stageFile(p);
+    reportGit(`Staged ${paths.length} item${paths.length > 1 ? "s" : ""}`);
+  };
+
+  const handleBulkUnstage = async () => {
+    const paths = opPaths();
+    setFileCtxMenu(null);
+    if (gitBusy()) return;
+    for (const p of paths) await unstageFile(p);
+    reportGit(`Unstaged ${paths.length} item${paths.length > 1 ? "s" : ""}`);
+  };
+
+  const handleBulkDiscard = () => {
+    const paths = opPaths();
+    setFileCtxMenu(null);
+    if (gitBusy()) return;
+    modal.confirm({
+      title: `Discard changes to ${paths.length} item${paths.length > 1 ? "s" : ""}?`,
+      content: "Reverts each file to its last committed state. New files are deleted. This cannot be undone.",
+      okText: "Discard",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        if (gitBusy()) throw new Error("busy");
+        for (const p of paths) await discardFile(p);
+        reportGit(`Discarded changes to ${paths.length} item${paths.length > 1 ? "s" : ""}`);
+      },
+    });
   };
 
   // gitStore records failures in state.error, which only ChangesView renders — so
@@ -817,45 +1041,45 @@ export default function FileBrowser() {
 
   const handleDeleteConfirm = () => {
     if (!fileCtxMenu) return;
-    const { path, name, isDir } = fileCtxMenu;
+    const paths = opPaths();
+    const multi = paths.length > 1;
+    const { name, isDir } = fileCtxMenu;
     setFileCtxMenu(null);
     modal.confirm({
-      title: `Delete ${isDir ? "folder" : "file"}`,
-      content: `Are you sure you want to delete "${name}"?${isDir ? " This item and all its contents will be permanently removed." : ""}`,
+      title: multi ? `Delete ${paths.length} items` : `Delete ${isDir ? "folder" : "file"}`,
+      content: multi
+        ? `Are you sure you want to delete these ${paths.length} items? Folders and all their contents will be permanently removed.`
+        : `Are you sure you want to delete "${name}"?${isDir ? " This item and all its contents will be permanently removed." : ""}`,
       okText: "Delete",
       okButtonProps: { danger: true },
       onOk: async () => {
-        try {
-          if (isDir) {
-            await DeleteDirectory(path);
-          } else {
-            await DeleteFile(path);
-          }
-          markSelfChanged(pathDir(path));
-          // Read fresh tabs from the store (not the stale closure captured at render time).
-          const currentTabs = useQueryStore.getState().tabs;
-          const sep = pathSep(path);
-          for (const tab of currentTabs) {
-            if (tab.path === path || (isDir && tab.path?.startsWith(path + sep))) {
-              orphanTab(tab.id);
+        const failed: string[] = [];
+        for (const path of paths) {
+          const dir = isDirKey(path);
+          try {
+            if (dir) await DeleteDirectory(path); else await DeleteFile(path);
+            markSelfChanged(pathDir(path));
+            const sep = pathSep(path);
+            // Read fresh tabs from the store (not the stale closure captured at render time).
+            for (const tab of useQueryStore.getState().tabs) {
+              if (tab.path === path || (dir && tab.path?.startsWith(path + sep))) orphanTab(tab.id);
             }
+            // Update tree in-place instead of full refresh.
+            setTreeData((prev) => removeNode(prev, path));
+            setLoadedKeys((prev) => prev.filter((k) => {
+              const ks = String(k);
+              return ks !== path && !ks.startsWith(path + sep);
+            }));
+            setSelKeys((prev) => prev.filter((k) => k !== path && !k.startsWith(path + sep)));
+          } catch (e) {
+            failed.push(`${pathBase(path)}: ${String(e)}`);
           }
-          message.success(`Deleted ${name}`);
-          // Update tree in-place instead of full refresh.
-          setTreeData(prev => removeNode(prev, path));
-          setLoadedKeys(prev => prev.filter(k => {
-            const ks = String(k);
-            return ks !== path && !ks.startsWith(path + sep);
-          }));
-          setSelectedKey(prev => {
-            const sk = prev ? String(prev) : null;
-            if (sk === path || (isDir && sk?.startsWith(path + sep))) return null;
-            return prev;
-          });
-        } catch (e) {
-          message.error(`Delete failed: ${String(e)}`);
-          throw e; // Re-throw to keep the modal open on failure.
         }
+        if (failed.length) {
+          message.error(`Delete failed — ${failed.join("; ")}`);
+          throw new Error("delete failed"); // keep the modal open
+        }
+        message.success(multi ? `Deleted ${paths.length} items` : `Deleted ${name}`);
       },
     });
   };
@@ -908,12 +1132,11 @@ export default function FileBrowser() {
         if (ks.startsWith(prefix)) return newPath + ks.substring(path.length);
         return k;
       }));
-      setSelectedKey(prev => {
-        const sk = prev ? String(prev) : null;
-        if (sk === path) return newPath;
-        if (sk?.startsWith(prefix)) return newPath + sk.substring(path.length);
-        return prev;
-      });
+      setSelKeys(prev => prev.map(k => {
+        if (k === path) return newPath;
+        if (k.startsWith(prefix)) return newPath + k.substring(path.length);
+        return k;
+      }));
       setEditingKey(null);
       message.success(`Renamed to ${sanitized}`);
     } catch (e) {
@@ -998,7 +1221,7 @@ export default function FileBrowser() {
           }}
           onBlur={submitRename}
           onClick={(e) => e.stopPropagation()} // prevent tree selection
-          style={{ fontSize: 12, height: 22, padding: "0 4px" }}
+          style={{ fontSize: 12, height: 22, padding: "0 4px", userSelect: "text" }}
           ref={(el) => {
             if (!el || editInitRef.current) return;
             editInitRef.current = true;
@@ -1014,11 +1237,13 @@ export default function FileBrowser() {
     }
     // Git status overlay: color changed files (with a trailing sigil) and
     // emphasize directories that contain nested changes.
-    const rel = gitOverlay.relOf(String(nodeData.key));
+    const key = String(nodeData.key);
+    const rel = gitOverlay.relOf(key);
     const letter = rel != null ? gitOverlay.byRel.get(rel) : undefined;
+    let content: React.ReactNode;
     if (letter) {
       const color = sigilColor(letter);
-      return (
+      content = (
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6, width: "100%" }}>
           <span style={{ flex: 1, color, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {nodeData.title as React.ReactNode}
@@ -1028,13 +1253,16 @@ export default function FileBrowser() {
           </span>
         </span>
       );
+    } else {
+      const dirLetter = rel != null ? gitOverlay.dirLetter.get(rel) : undefined;
+      content = dirLetter
+        ? <span style={{ color: sigilColor(dirLetter), fontWeight: 600 }}>{nodeData.title as React.ReactNode}</span>
+        : <>{nodeData.title}</>;
     }
-    const dirLetter = rel != null ? gitOverlay.dirLetter.get(rel) : undefined;
-    if (dirLetter) {
-      const color = sigilColor(dirLetter);
-      return <span style={{ color, fontWeight: 600 }}>{nodeData.title as React.ReactNode}</span>;
-    }
-    return <>{nodeData.title}</>;
+    // data-fbkey lets visibleKeysInOrder() recover the on-screen order for Shift+range.
+    // Cut items are dimmed until pasted (then the clipboard clears).
+    const isCut = clipboard?.mode === "cut" && clipboard.paths.includes(key);
+    return <span data-fbkey={key} style={isCut ? { opacity: 0.5 } : undefined}>{content}</span>;
   };
 
   const grouped = groupByPath(searchResults);
@@ -1042,10 +1270,10 @@ export default function FileBrowser() {
   // rc-tree memoizes its flattened node list by treeData identity, so a status
   // change alone won't re-run titleRender. Hand it a fresh top-level array
   // reference whenever the git overlay changes so the status colors repaint.
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- gitOverlay dep is
-  // intentional: it's not read in the body, it exists to force rc-tree to re-run
-  // titleRender on status change. Removing it stops colors repainting after edits.
-  const treeForRender = useMemo(() => [...treeData], [treeData, gitOverlay]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- gitOverlay/clipboard
+  // deps are intentional: not read in the body, they exist to force rc-tree to
+  // re-run titleRender on status change / cut-dimming. Removing them stops repaint.
+  const treeForRender = useMemo(() => [...treeData], [treeData, gitOverlay, clipboard]);
 
   // Git status of the right-clicked file (drives the Stage/Unstage/Discard menu items).
   // ctxChanged: the file is changed at all. When we don't have a precise
@@ -1064,6 +1292,11 @@ export default function FileBrowser() {
   const ctxLetter     = ctxRel != null ? gitOverlay.byRel.get(ctxRel) : undefined;
   const ctxIsNew      = ctxRel != null && gitOverlay.newFilesRel.has(ctxRel);
   const ctxComparable = !ctxIsNew && (ctxLetter === "M" || ctxLetter === "R" || ctxLetter === "C" || ctxLetter === "D");
+
+  // Multi-select context: the right-clicked node is part of a >1 selection, so the
+  // menu offers bulk variants. ctxCount labels them.
+  const ctxMulti = !!fileCtxMenu && selKeys.length > 1 && selKeys.includes(fileCtxMenu.path);
+  const ctxCount = ctxMulti ? selKeys.length : 1;
 
   return (
     <div style={{ padding: "4px 4px" }}>
@@ -1108,6 +1341,17 @@ export default function FileBrowser() {
               {gitChanged}{gitStagedTot > 0 ? `·${gitStagedTot}` : ""}
             </span>
           </div>
+        )}
+        {clipboard && exportDir && (
+          <Tooltip title={`Paste ${clipboard.paths.length} item${clipboard.paths.length > 1 ? "s" : ""} into ${pathBase(toolbarPasteTarget())}`}>
+            <Button
+              size="small"
+              type="text"
+              icon={<BlockOutlined style={{ fontSize: 11, color: "var(--link)" }} />}
+              onClick={(e) => { e.stopPropagation(); handlePaste(toolbarPasteTarget()); }}
+              style={{ height: 20, padding: "0 4px", minWidth: 0 }}
+            />
+          </Tooltip>
         )}
         <Button
           size="small"
@@ -1280,11 +1524,19 @@ export default function FileBrowser() {
           )}
 
           {!searchOpen && loaded && treeData.length > 0 && (
-            <div style={{ overflow: "hidden" }}>
+            <div
+              style={{ overflow: "hidden", userSelect: "none" }}
+              ref={treeWrapRef}
+              // Shift+click extends the document's text selection (which WebKit
+              // still paints despite user-select:none). preventDefault on the
+              // shift mousedown suppresses that without blocking the click.
+              onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); }}
+            >
               <Tree
                 treeData={treeForRender}
                 loadedKeys={loadedKeys}
-                selectedKeys={selectedKey ? [selectedKey] : []}
+                selectedKeys={selKeys}
+                multiple
                 onLoad={(keys) => setLoadedKeys(keys)}
                 loadData={onLoadData as any}
                 onSelect={onSelect as any}
@@ -1372,16 +1624,40 @@ export default function FileBrowser() {
           }}
         >
           {/* ── File management actions ── */}
-          <CtxItem icon={<FolderViewOutlined />} label={revealText} onClick={handleReveal} />
-          <CtxItem icon={<CopyOutlined />} label="Copy Path" onClick={handleCopyPath} />
-          {!fileCtxMenu.isDir && (
+          {!ctxMulti && <CtxItem icon={<FolderViewOutlined />} label={revealText} onClick={handleReveal} />}
+          {!ctxMulti && <CtxItem icon={<CopyOutlined />} label="Copy Path" onClick={handleCopyPath} />}
+          {!ctxMulti && <CtxItem icon={<CopyOutlined />} label="Copy Relative Path" onClick={handleCopyRelativePath} />}
+
+          {/* ── Internal clipboard (cut / copy / paste) ── */}
+          <div role="separator" style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+          <CtxItem icon={<ScissorOutlined />} label={ctxMulti ? `Cut ${ctxCount} items` : "Cut"} onClick={handleCut} />
+          <CtxItem icon={<CopyOutlined />} label={ctxMulti ? `Copy ${ctxCount} items` : "Copy"} onClick={handleCopy} />
+          {fileCtxMenu.isDir && clipboard && (
+            <CtxItem
+              icon={<BlockOutlined />}
+              label={`Paste ${clipboard.paths.length} item${clipboard.paths.length > 1 ? "s" : ""}`}
+              onClick={() => handlePaste(fileCtxMenu.path)}
+            />
+          )}
+
+          {!ctxMulti && !fileCtxMenu.isDir && (
             <CtxItem icon={<SnippetsOutlined />} label="Duplicate" onClick={handleDuplicate} />
           )}
-          <CtxItem icon={<EditOutlined />} label="Rename…" onClick={handleRenameStart} />
-          <CtxItem icon={<DeleteOutlined />} label="Delete" onClick={handleDeleteConfirm} danger />
+          {!ctxMulti && <CtxItem icon={<EditOutlined />} label="Rename…" onClick={handleRenameStart} />}
+          <CtxItem icon={<DeleteOutlined />} label={ctxMulti ? `Delete ${ctxCount} items` : "Delete"} onClick={handleDeleteConfirm} danger />
 
-          {/* ── Git staging actions (changed files only) ── */}
-          {gitEnabled && !fileCtxMenu.isDir && (ctxUnstaged || ctxStaged) && (
+          {/* ── Bulk git staging (multi-select) ── */}
+          {gitEnabled && ctxMulti && (
+            <>
+              <div role="separator" style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+              <CtxItem icon={<PlusOutlined />} label={`Stage ${ctxCount} items`} onClick={handleBulkStage} />
+              <CtxItem icon={<MinusOutlined />} label={`Unstage ${ctxCount} items`} onClick={handleBulkUnstage} />
+              <CtxItem icon={<UndoOutlined />} label={`Discard ${ctxCount} items`} onClick={handleBulkDiscard} danger />
+            </>
+          )}
+
+          {/* ── Git staging actions (single changed file) ── */}
+          {gitEnabled && !ctxMulti && !fileCtxMenu.isDir && (ctxUnstaged || ctxStaged) && (
             <>
               <div role="separator" style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
               {ctxComparable && (
@@ -1406,7 +1682,7 @@ export default function FileBrowser() {
           )}
 
           {/* ── Directory-only actions ── */}
-          {fileCtxMenu.isDir && (
+          {!ctxMulti && fileCtxMenu.isDir && (
             <>
               <div role="separator" style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
               <CtxItem icon={<FolderAddOutlined />} label="New Folder…" onClick={handleNewFolderStart} />
@@ -1415,7 +1691,7 @@ export default function FileBrowser() {
           )}
 
           {/* ── Comparison actions (files only) ── */}
-          {!fileCtxMenu.isDir && (
+          {!ctxMulti && !fileCtxMenu.isDir && (
             <>
               <div role="separator" style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
               <CtxItem icon={<DiffOutlined />} label="Select for Comparison" onClick={selectFileForComparison} />

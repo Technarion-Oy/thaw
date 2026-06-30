@@ -610,6 +610,10 @@ export function Connect(arg1) {
   return window['go']['app']['App']['Connect'](arg1);
 }
 
+export function CopyFile(arg1, arg2) {
+  return window['go']['app']['App']['CopyFile'](arg1, arg2);
+}
+
 export function CreateApiIntegration(arg1) {
   return window['go']['app']['App']['CreateApiIntegration'](arg1);
 }
