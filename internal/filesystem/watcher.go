@@ -137,14 +137,13 @@ func (w *Watcher) handleEvent(ev notify.EventInfo) {
 		}
 	}
 
-	// Write-only events on existing files don't change the directory listing
-	// (no files added or removed), so skip them to avoid unnecessary IPC calls.
-	if ev.Event() == notify.Write {
-		return
-	}
-
 	// Map the canonical path back into the caller's namespace and emit for the
-	// parent directory that changed.
+	// parent directory that changed. Write events are included so open editor
+	// tabs can re-read changed files; they coalesce by directory like any other
+	// change.
+	// ponytail: re-listing the dir on a pure content change is mildly redundant
+	// (listing is unchanged), but it's debounced and one IPC — not worth a
+	// per-file event channel to skip it.
 	w.scheduleEmit(filepath.Dir(filepath.Join(w.root, rel)))
 }
 

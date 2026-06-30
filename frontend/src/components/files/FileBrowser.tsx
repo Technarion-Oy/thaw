@@ -47,8 +47,6 @@ import {
   CreateDirectory,
   CreateFile,
   DuplicateFile,
-  StartFileWatcher,
-  StopFileWatcher,
   GitGetHeadFileContent,
 } from "../../../wailsjs/go/app/App";
 import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
@@ -73,6 +71,19 @@ function pathDir(p: string): string {
   if (i < 0) return ".";
   // i == 0 means root separator (e.g. "/filename") — preserve the separator.
   return i === 0 ? p.substring(0, 1) : p.substring(0, i);
+}
+
+/**
+ * Normalize a directory for self-change suppression so a canonical, symlink-
+ * resolved path (what macOS save/open dialogs return — e.g. `/private/tmp/…`) and
+ * the watcher's pre-resolution event path (e.g. `/tmp/…`) collapse to one key.
+ * Applied symmetrically to the stored key and the `fs:changed` lookup.
+ * ponytail: covers only macOS's auto-symlinked roots (`/private/{tmp,var,etc}`),
+ * the realistic case; an arbitrary user symlink still costs one redundant
+ * ListDirectory — not worth a backend round-trip to resolve.
+ */
+function suppressKey(dir: string): string {
+  return dir.replace(/^\/private(?=\/(?:tmp|var|etc)(?:\/|$))/, "");
 }
 
 /** Detect the path separator used in a path (backslash on Windows, forward slash otherwise). */
@@ -394,12 +405,13 @@ export default function FileBrowser() {
   const selfChangeTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   const markSelfChanged = (dir: string) => {
-    selfChangedDirs.current.add(dir);
-    const prev = selfChangeTimers.current.get(dir);
+    const key = suppressKey(dir); // normalize so canonical dialog paths match evt.dir
+    selfChangedDirs.current.add(key);
+    const prev = selfChangeTimers.current.get(key);
     if (prev) clearTimeout(prev);
-    selfChangeTimers.current.set(dir, setTimeout(() => {
-      selfChangedDirs.current.delete(dir);
-      selfChangeTimers.current.delete(dir);
+    selfChangeTimers.current.set(key, setTimeout(() => {
+      selfChangedDirs.current.delete(key);
+      selfChangeTimers.current.delete(key);
     }, 500));
   };
 
@@ -413,8 +425,6 @@ export default function FileBrowser() {
   // Stable refs so effects can read current values without re-registering.
   const loadedKeysRef = useRef(loadedKeys);
   loadedKeysRef.current = loadedKeys;
-  const loadedRef = useRef(loaded);
-  loadedRef.current = loaded;
   const selKeysRef = useRef(selKeys);
   selKeysRef.current = selKeys;
 
@@ -430,10 +440,17 @@ export default function FileBrowser() {
   useEffect(() => () => { if (gitRefreshTimerRef.current) clearTimeout(gitRefreshTimerRef.current); }, []);
 
   // Refresh git colors when a file is saved in the editor (watcher-independent).
+  // Also mark the saved file's directory as self-changed so the watcher's echo of
+  // our own write (arriving ~200 ms later) doesn't trigger a redundant tree re-list.
   useEffect(() => {
-    const handler = () => scheduleGitRefresh();
+    const handler = (e: Event) => {
+      scheduleGitRefresh();
+      const path = (e as CustomEvent<{ path?: string }>).detail?.path;
+      if (path) markSelfChanged(pathDir(path));
+    };
     window.addEventListener("thaw:file-saved", handler);
     return () => window.removeEventListener("thaw:file-saved", handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- markSelfChanged only closes over stable refs
   }, [scheduleGitRefresh]);
 
   // Close file context menu on outside click or Escape key
@@ -475,19 +492,24 @@ export default function FileBrowser() {
   }, [exportDir]);
 
   // ── File system watcher lifecycle ──────────────────────────────────────────
-  // Only watch while the panel is expanded to conserve inotify watches on Linux.
-  // On re-expand, refresh root entries to catch changes that happened while collapsed.
+  // The watcher's Start/Stop lifecycle lives in QueryPage (always mounted), so
+  // hiding the sidebar via ⌘B — which unmounts FileBrowser — doesn't stop it.
+  // FileBrowser only consumes the resulting fs:changed events for the tree.
+
+  // On re-expand, refresh the root to pick up changes that occurred while
+  // collapsed. loadRoot() handles the first-ever load (and no-ops thereafter),
+  // so this fires only on a genuine collapse→expand transition — a prev-expanded
+  // ref gates it so the loaded:false→true tick right after the initial load
+  // doesn't trigger a redundant second ListDirectory.
+  const prevExpandedRef = useRef(expanded);
   useEffect(() => {
-    if (!exportDir || !fileWatcherEnabled || !expanded) return;
-    StartFileWatcher(exportDir).catch((e) => console.warn("File watcher failed to start:", e));
-    // Refresh root to pick up changes that occurred while collapsed.
-    if (loadedRef.current) {
-      ListDirectory(exportDir)
-        .then((entries) => setTreeData((prev) => mergeNodes(prev, entriesToNodes(entries))))
-        .catch(() => {});
-    }
-    return () => { StopFileWatcher().catch(() => {}); };
-  }, [exportDir, fileWatcherEnabled, expanded]);
+    const justExpanded = expanded && !prevExpandedRef.current;
+    prevExpandedRef.current = expanded;
+    if (!justExpanded || !exportDir || !loaded) return;
+    ListDirectory(exportDir)
+      .then((entries) => setTreeData((prev) => mergeNodes(prev, entriesToNodes(entries))))
+      .catch(() => {});
+  }, [exportDir, expanded, loaded]);
 
   // ── File system change listener ────────────────────────────────────────────
   useEffect(() => {
@@ -496,7 +518,7 @@ export default function FileBrowser() {
       // Any disk change may alter git status — refresh colors even for the app's
       // own mutations (which suppress the tree update below to avoid flicker).
       scheduleGitRefresh();
-      if (selfChangedDirs.current.has(evt.dir)) return;
+      if (selfChangedDirs.current.has(suppressKey(evt.dir))) return;
 
       // After refreshing a directory, prune loadedKeys entries that reference
       // children which no longer exist (prevents unbounded stale-key growth).
@@ -585,6 +607,17 @@ export default function FileBrowser() {
       setLoading(false);
     }
   };
+
+  // Ensure the root loads whenever the panel is expanded but not yet loaded —
+  // covers a workspace switch that happens while already expanded (the reset
+  // effect clears `loaded`, and toggleExpanded — the only other caller — doesn't
+  // fire in that case, leaving the tree blank with no Reload button). loadRoot()
+  // self-guards on loading/loaded, so this never double-lists alongside the
+  // toggleExpanded path.
+  useEffect(() => {
+    if (exportDir && expanded && !loaded && !loading) loadRoot();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exportDir, expanded, loaded, loading]);
 
   const refresh = async () => {
     setFileCtxMenu(null); // dismiss stale context menu

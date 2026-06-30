@@ -63,6 +63,15 @@ overhead.
 - `menu:snowpark-open-notebook` — opens a file-picker then loads the notebook.
 - `menu:snowpark-new-notebook` — opens a blank notebook tab.
 - `query:statement-start` / `query:statement-qid` — multi-statement progress.
+- `fs:changed` — file watcher change event; re-reads every open file-backed tab
+  from disk (see "File-backed tab recovery" below) so external edits are
+  reflected. Independent of `FileBrowser`'s own `fs:changed` listener.
+
+`QueryPage` also owns the **watcher lifecycle** (`StartFileWatcher`/`StopFileWatcher`,
+keyed on `gitStore.exportDir`, gated by the `fileWatcher` flag). It lives here —
+not in `FileBrowser` — because `QueryPage` is always mounted, whereas the sidebar
+(and `FileBrowser`) is unmounted when hidden via ⌘B, which would otherwise stop
+the watcher and silently freeze tab refresh.
 
 Custom DOM events handled here:
 - `thaw:execute-in-tab` — emitted by `queryStore.executeInNewTab` to ask
@@ -72,11 +81,18 @@ Custom DOM events handled here:
   causing the connect modal to open.
 - `thaw:session-config-saved` — re-reads session init mode after config save.
 
-**File-backed tab recovery on startup**
+**File-backed tab recovery**
 
-On mount, `QueryPage` iterates all tabs in the store and re-reads file-backed
-tabs from disk (SQL files via `ReadFile`, notebooks via `ReadNotebook`),
-calling `refreshFileTab` or `orphanFileTab` as appropriate.
+On mount — and whenever a `fs:changed` watcher event arrives — `QueryPage`
+iterates all tabs in the store and re-reads file-backed tabs from disk (SQL files
+via `ReadFile`, notebooks via `ReadNotebook`) through the shared `rereadTab`
+helper, calling `refreshFileTab` (clean tabs adopt the disk content; dirty tabs
+keep the user's edits but advance their saved baseline, VSCode-style) or
+`orphanFileTab` only when the file is genuinely gone — detected via the backend's
+locale-independent "file not found" marker, so transient IPC/permission errors
+(and localized OS messages) never orphan a still-valid tab. A per-tab read
+sequence makes the latest read win, so out-of-order completions can't revert a
+tab to stale content.
 
 **Modal orchestration**
 

@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -31,6 +32,7 @@ import (
 
 	"thaw/internal/apperrors"
 	"thaw/internal/config"
+	"thaw/internal/filesystem"
 	"thaw/internal/snowflake"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -1911,6 +1913,11 @@ func (s *Service) PickNotebookFile() (string, error) {
 func (s *Service) ReadNotebook(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// Locale-independent marker so the frontend can detect a deleted file
+			// reliably (the raw OS message is localized).
+			return "", fmt.Errorf("%s: %s", filesystem.NotFoundMarker, path)
+		}
 		return "", err
 	}
 	return string(data), nil

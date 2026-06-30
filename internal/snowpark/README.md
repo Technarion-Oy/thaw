@@ -9,7 +9,7 @@
 - Manage pip package operations in the active environment: list, install, uninstall (`ListEnvPackages`, `InstallEnvPackage`, `UninstallEnvPackage`).
 - Install from / export to dependency files: `pip install -r requirements.txt` (`InstallRequirementsFile`), `pip install <dir>` from a `pyproject.toml` (`InstallPyprojectFile`), and `pip freeze` to a file (`FreezeRequirements`); file pickers `PickRequirementsFile` / `PickPyprojectFile` / `PickFreezeOutputFile` (each install/freeze is a pick→run pair so the UI can detect cancel before touching the log).
 - Apply corporate pip registry settings (primary URL, extra indexes, proxy, CA cert, Basic Auth credentials) via `PipRegistryConfig` before every `pip install` (including requirements/pyproject installs).
-- Create, read, save, and pick `.ipynb` notebook files (`NewNotebook`, `ReadNotebook`, `SaveNotebook`, `PickNotebookFile`).
+- Create, read, save, and pick `.ipynb` notebook files (`NewNotebook`, `ReadNotebook`, `SaveNotebook`, `PickNotebookFile`). `ReadNotebook` maps a missing file (`os.ErrNotExist`) to an error carrying `filesystem.NotFoundMarker` (`"file not found"`) so callers — e.g. the frontend's tab-refresh, deciding whether to orphan a tab — can detect a deleted notebook with a stable, locale-independent string rather than the localized OS message.
 - Start and stop per-tab Python kernel sessions as long-lived `python -c <kernelPyScript>` subprocesses (`StartNotebookSession`, `StopNotebookSession`).
 - Execute Python code cells and SQL cells in a running kernel, returning captured stdout/stderr and matplotlib figures as base64 PNGs (`RunNotebookCell`, `RunNotebookCellSql`).
 - Support DAP (Debug Adapter Protocol) cell debugging via `debugpy` (`StartDapProxy`, `DebugNotebookCell`).

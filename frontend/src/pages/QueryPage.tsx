@@ -8,12 +8,12 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useEffect, useRef, useState, lazy, Suspense } from "react";
+import { useEffect, useRef, useState, useCallback, lazy, Suspense } from "react";
 import { flushSync } from "react-dom";
 import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message, Modal, type MenuProps } from "antd";
 import { CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined, SearchOutlined, CloudUploadOutlined } from "@ant-design/icons";
 import { ClipboardSetText, BrowserOpenURL } from "../../wailsjs/runtime/runtime";
-import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, PickAnyFile, ReadFile, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, CloseTabSession, GetSessionInitMode, InitTabSession, SetQueryLogEnabled } from "../../wailsjs/go/app/App";
+import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, PickAnyFile, ReadFile, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, CloseTabSession, GetSessionInitMode, InitTabSession, SetQueryLogEnabled, StartFileWatcher, StopFileWatcher } from "../../wailsjs/go/app/App";
 import { GetSqlStatementRanges } from "../../wailsjs/go/sqleditor/Service";
 import type { snowflake } from "../../wailsjs/go/models";
 import { usePanelLayoutStore } from "../store/panelLayoutStore";
@@ -34,6 +34,18 @@ import QueryLogPane from "../components/results/QueryLogPane";
 // metadata-cache clear after a run. Matched at the buffer start or after a `;`
 // statement boundary, case-insensitive. RENAME/SWAP/SET arrive via ALTER.
 const DDL_LEADER_RE = /(?:^|;)\s*(?:CREATE|ALTER|DROP|TRUNCATE|UNDROP)\b/i;
+
+// Whether an error from ReadFile/ReadNotebook means the file is actually gone
+// (vs. a transient IPC/permission/binary-file error). Both backends map
+// os.ErrNotExist to a locale-independent "file not found" marker before the error
+// crosses the Wails bridge (the raw OS message is localized, so it can't be
+// matched on non-English Windows), so matching that single marker is exact —
+// raw OS-string forms are deliberately not matched (they'd risk a spurious
+// orphan on an unrelated IPC error like a Wails "cannot find module").
+function isFileNotFound(e: unknown): boolean {
+  // The marker is lowercase ASCII, formatted as `<marker>: <path>`; no case-fold needed.
+  return String(e).includes("file not found");
+}
 
 // ranContainedDDL reports whether the executed SQL has a DDL statement. Comments
 // and string/dollar-quoted literals are blanked first so a `;` or DDL verb inside
@@ -72,6 +84,7 @@ import { useQueryStore, type QueryResult, type Tab, EXECUTE_IN_TAB_EVENT } from 
 import { openFileInTab } from "../utils/openFileInTab";
 import { useConnectionStore } from "../store/connectionStore";
 import { useSessionStore } from "../store/sessionStore";
+import { useGitStore } from "../store/gitStore";
 import { useFeatureFlagsStore } from "../store/featureFlagsStore";
 import { useTagManagementStore } from "../store/tagManagementStore";
 import { useNotebookToolbarStore } from "../store/notebookToolbarStore";
@@ -261,22 +274,72 @@ export default function QueryPage() {
     prevTabIdsRef.current = currentIds;
   }, [tabs]);
 
+  // Re-read a single file-backed tab from disk: refresh content (clean tabs
+  // only — see refreshFileTab) or orphan it if the file is gone.
+  //
+  // A per-tab read sequence guards against out-of-order completion: two change
+  // events can launch concurrent reads of the same tab, and a slow earlier read
+  // landing after a newer one would otherwise revert the tab to stale content
+  // (observable on network filesystems). Only the latest-issued read applies.
+  const readSeqRef = useRef<Map<string, number>>(new Map());
+  const rereadTab = useCallback(async (tab: typeof tabs[number]) => {
+    if (!tab.path) return;
+    const seq = (readSeqRef.current.get(tab.id) ?? 0) + 1;
+    readSeqRef.current.set(tab.id, seq);
+    try {
+      const content = tab.kind === "notebook"
+        ? await ReadNotebook(tab.path)
+        : await ReadFile(tab.path);
+      if (readSeqRef.current.get(tab.id) !== seq) return; // superseded by a newer read
+      refreshFileTab(tab.id, content);
+    } catch (e) {
+      if (readSeqRef.current.get(tab.id) !== seq) return; // superseded by a newer read
+      // Only drop the file association when the file is truly gone — a transient
+      // IPC/permission error must not permanently orphan a still-valid tab. Surface
+      // anything else (binary file, EACCES, …) so a blank-reopen isn't silent.
+      if (isFileNotFound(e)) orphanFileTab(tab.id);
+      else console.warn(`Could not re-read ${tab.path}:`, e);
+    }
+  }, [refreshFileTab, orphanFileTab]);
+
   // On mount, re-read file-backed tabs from disk so their content is fresh
   // after an app restart (they were persisted with cleared sql/savedSql).
   useEffect(() => {
-    const { tabs } = useQueryStore.getState();
-    tabs.forEach(async (tab) => {
-      if (!tab.path) return;
-      try {
-        const content = tab.kind === "notebook"
-          ? await ReadNotebook(tab.path)
-          : await ReadFile(tab.path);
-        refreshFileTab(tab.id, content);
-      } catch {
-        orphanFileTab(tab.id);
-      }
+    useQueryStore.getState().tabs.forEach(rereadTab);
+  }, [rereadTab]);
+
+  // Reflect external edits: when the file watcher reports any change, re-read
+  // every open file-backed tab. We deliberately don't match the event's
+  // directory against tab paths — native open-dialogs return canonical
+  // (symlink-resolved) paths while the watcher reports the pre-resolution root,
+  // so the two namespaces can differ (e.g. /tmp vs /private/tmp on macOS).
+  //
+  // The watcher debounces per *directory*, so a tool touching K directories at
+  // once fires K separate events; debouncing here collapses that burst into a
+  // single fan-out so the cost stays N (one ReadFile per tab), not K×N.
+  // ponytail: refreshFileTab no-ops when content is unchanged, so a re-read of an
+  // untouched tab is just one cheap ReadFile. Revisit only if N grows large.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const off = EventsOn("fs:changed", () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        useQueryStore.getState().tabs.forEach(rereadTab);
+      }, 250);
     });
-  }, []);
+    return () => { if (timer) clearTimeout(timer); off(); };
+  }, [rereadTab]);
+
+  // Own the file watcher lifecycle here rather than in FileBrowser: QueryPage is
+  // always mounted, whereas the left sidebar (and FileBrowser) is unmounted when
+  // hidden via ⌘B — which would otherwise stop the watcher and silently freeze
+  // tab refresh. Gated on the same `fileWatcher` flag the FileBrowser tree uses.
+  const exportDir = useGitStore((s) => s.exportDir);
+  useEffect(() => {
+    if (!exportDir || !featureFlags.fileWatcher) return;
+    StartFileWatcher(exportDir).catch((e) => console.warn("File watcher failed to start:", e));
+    return () => { StopFileWatcher().catch(() => {}); };
+  }, [exportDir, featureFlags.fileWatcher]);
 
   // Keep the Snowpark kernel in sync with the tab's session context whenever
   // role, warehouse, database or schema changes, or when switching notebook tabs.

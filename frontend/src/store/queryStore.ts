@@ -354,8 +354,15 @@ export const useQueryStore = create<QueryState>()(
     set((state) => {
       const tab = state.tabs.find((t) => t.id === id);
       if (!tab) return {};
-      // If clean (no unsaved changes), update both sql and savedSql.
-      // If dirty, only update savedSql so the user's edits are preserved.
+      // Disk content already matches the tab's saved baseline — nothing to do.
+      // Also short-circuits the app's own saves: the watcher re-fires ~200 ms
+      // after we write, and re-applying identical content would churn editor state.
+      if (diskContent === tab.savedSql) return {};
+      // VSCode-style: a clean tab adopts the new disk content; a dirty tab keeps
+      // the user's unsaved edits (`sql`) but still advances `savedSql` to the new
+      // disk baseline. Advancing it keeps the tab correctly dirty *vs. the current
+      // file* — otherwise undoing back to the original load would make the tab look
+      // clean and a save would silently clobber the external change.
       const isClean = tab.sql === tab.savedSql;
       const updatedTabs = state.tabs.map((t) =>
         t.id === id
@@ -443,9 +450,10 @@ export const useQueryStore = create<QueryState>()(
       };
     });
     // Writing the file may have changed its git status — let the file explorer
-    // refresh its status colors without a manual tree refresh.
+    // refresh its status colors without a manual tree refresh. The path lets the
+    // explorer suppress the watcher's echo of our own write (no tree re-list).
     if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("thaw:file-saved"));
+      window.dispatchEvent(new CustomEvent("thaw:file-saved", { detail: { path } }));
     }
   },
 
