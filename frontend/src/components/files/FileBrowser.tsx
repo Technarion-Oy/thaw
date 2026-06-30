@@ -757,6 +757,15 @@ export default function FileBrowser() {
     return selKeys.length > 1 && selKeys.includes(fileCtxMenu.path) ? selKeys : [fileCtxMenu.path];
   };
 
+  // Drop any path whose ancestor directory is also in the set. A Shift+range
+  // selection naturally spans a folder and its children; the recursive ops
+  // (delete / move / copy) already act on the whole subtree via the folder, so
+  // keeping the descendants would double-process them (ENOENT on delete/move,
+  // duplicate files on copy). Git staging deliberately does NOT dedup — it
+  // operates per file and excludes dirs (see opFilePaths).
+  const dropDescendants = (paths: string[]): string[] =>
+    paths.filter((p) => !paths.some((o) => o !== p && p.startsWith(o + pathSep(o))));
+
   // Files-only subset of the operation set — git staging operates per file; passing a
   // directory to `git add` would recursively stage everything under it.
   const opFilePaths = (): string[] => opPaths().filter((p) => !isDirKey(p));
@@ -873,7 +882,11 @@ export default function FileBrowser() {
   const handlePaste = async (rawTarget: string) => {
     setFileCtxMenu(null);
     if (!clipboard) return;
-    const { mode, paths } = clipboard;
+    const { mode } = clipboard;
+    // A folder copy/move already carries its whole subtree, so drop any clipboard
+    // entry nested under another — otherwise the descendant would be processed
+    // twice (a duplicate file at the target on copy, an ENOENT on move).
+    const paths = dropDescendants(clipboard.paths);
     // Strip any trailing separator (exportDir may be stored with one) so the
     // same-folder no-op guard below matches pathDir(src), which always strips it.
     const targetDir = rawTarget.replace(/[/\\]+$/, "");
@@ -887,10 +900,11 @@ export default function FileBrowser() {
     try { names = new Set((await ListDirectory(targetDir)).map((e) => e.name)); }
     catch { message.error("Paste target is not accessible"); return; }
     const failed: string[] = [];
+    const skipped: string[] = []; // cut items already in the target folder (no-op)
     let ok = 0;
     for (const src of paths) {
       // Moving an item into the folder it already lives in is a no-op.
-      if (mode === "cut" && pathDir(src) === targetDir) continue;
+      if (mode === "cut" && pathDir(src) === targetDir) { skipped.push(src); continue; }
       const base = pathBase(src);
       const isDir = isDirKey(src);
       try {
@@ -926,9 +940,13 @@ export default function FileBrowser() {
     markSelfChanged(targetDir);
     if (mode === "cut") {
       for (const src of paths) markSelfChanged(pathDir(src));
-      // Keep only the items that didn't move, so a partial failure stays retriable
-      // (clearing on ok>0 would silently drop the still-unmoved files).
-      setClipboard(failed.length ? { mode: "cut", paths: failed } : null);
+      // Keep items that didn't move (failed) or that were a no-op for *this* target
+      // (skipped — same folder) so the clipboard stays retriable elsewhere; clearing
+      // on ok>0 would silently drop them.
+      const keep = [...failed, ...skipped];
+      setClipboard(keep.length ? { mode: "cut", paths: keep } : null);
+      // All items were already here — say so, otherwise the cut vanishes silently.
+      if (!ok && !failed.length && skipped.length) message.info("Already in this folder");
     }
     if (ok) message.success(`Pasted ${ok} item${ok > 1 ? "s" : ""}`);
     refresh();
@@ -1128,7 +1146,9 @@ export default function FileBrowser() {
 
   const handleDeleteConfirm = () => {
     if (!fileCtxMenu) return;
-    const paths = opPaths();
+    // Deleting a folder removes its children, so drop any selected descendants —
+    // otherwise the child delete would ENOENT and wedge the modal open on retry.
+    const paths = dropDescendants(opPaths());
     const multi = paths.length > 1;
     const { name, isDir } = fileCtxMenu;
     setFileCtxMenu(null);
@@ -1302,7 +1322,10 @@ export default function FileBrowser() {
 
   const titleRender = (nodeData: DataNode) => {
     if (editingKey !== null && nodeData.key === editingKey) {
+      // Keep the data-fbkey wrapper even while editing so the renaming node stays
+      // visible to visibleKeysInOrder() (it may be the Shift+range anchor).
       return (
+        <span data-fbkey={String(nodeData.key)}>
         <Input
           size="small"
           autoFocus
@@ -1327,6 +1350,7 @@ export default function FileBrowser() {
             }
           }}
         />
+        </span>
       );
     }
     // Git status overlay: color changed files (with a trailing sigil) and
@@ -1364,10 +1388,11 @@ export default function FileBrowser() {
   // rc-tree memoizes its flattened node list by treeData identity, so a status
   // change alone won't re-run titleRender. Hand it a fresh top-level array
   // reference whenever the git overlay changes so the status colors repaint.
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- gitOverlay/clipboard
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- gitOverlay/cutSet
   // deps are intentional: not read in the body, they exist to force rc-tree to
-  // re-run titleRender on status change / cut-dimming. Removing them stops repaint.
-  const treeForRender = useMemo(() => [...treeData], [treeData, gitOverlay, clipboard]);
+  // re-run titleRender on status change / cut-dimming. cutSet (not clipboard) so a
+  // Copy — which changes no node opacity — doesn't trigger a full re-sweep.
+  const treeForRender = useMemo(() => [...treeData], [treeData, gitOverlay, cutSet]);
 
   // Git status of the right-clicked file (drives the Stage/Unstage/Discard menu items).
   // ctxChanged: the file is changed at all. When we don't have a precise
