@@ -18,10 +18,10 @@ The driver writes the query ID to the channel and **then closes it**. Never call
 
 `navigator.clipboard` is blocked in WKWebView. All clipboard operations use Wails' `ClipboardGetText` / `ClipboardSetText` native APIs. Clipboard routing is split by target:
 
-- **Monaco's code buffer** — overridden per-editor via a `_commandService` patch + a capture-phase keydown listener (`utils/monacoClipboard.ts`, `patchMonacoClipboard`). The listener acts **only** when the focused element is the code surface (`isMonacoCodeSurface`, i.e. Monaco's `.inputarea`).
-- **Every other native `<input>`/`<textarea>`** — including Monaco's find/replace/rename fields, which live inside `.monaco-editor` but are plain fields — handled by a single global Cmd/Ctrl+V/C/X listener in `App.tsx`. The code-buffer listener lets these events bubble to it (no `stopPropagation`), so they work even on Monaco mounts that never call `patchMonacoClipboard`.
+- **Monaco's code buffer** — overridden per-editor via a `_commandService` patch + a capture-phase keydown listener (`utils/monacoClipboard.ts`, `patchMonacoClipboard`, called from every editor's `onMount`). The listener acts **only** when the editor's text input is focused, using Monaco's public `codeEditor.hasTextFocus()` (not an internal CSS class).
+- **Every other native `<input>`/`<textarea>`** — including Monaco's find/replace/rename fields, which live inside `.monaco-editor` but are plain fields — handled by a single global Cmd/Ctrl+V/C/X listener in `App.tsx`. The code-buffer listener lets these events bubble to it (no `stopPropagation`); `App.tsx` skips the code buffer via `monaco.editor.getEditors().some(e => e.hasTextFocus())`.
 
-`patchMonacoClipboard` is also where the find-widget tooltip fix is installed (`utils/monacoTooltipFix.ts`), since every Monaco mount routes through it.
+The find-widget tooltip fix (`utils/monacoTooltipFix.ts`) is separate: a global `onDidCreateEditor` hook registered once from `ensureMonacoSetup`, so it's decoupled from the clipboard wiring.
 
 ## WKWebView drops the first keystroke typed over a selection (#575)
 

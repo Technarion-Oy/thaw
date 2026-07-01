@@ -24,13 +24,14 @@ import SessionManagementModal from "./components/settings/SessionManagementModal
 import MCPSessionsModal from "./components/settings/MCPSessionsModal";
 import { IsConnected } from "../wailsjs/go/app/App";
 import { ClipboardGetText, ClipboardSetText, EventsOn } from "../wailsjs/runtime/runtime";
-import { isMonacoCodeSurface } from "./utils/fieldClipboard";
+import { useMonaco } from "@monaco-editor/react";
 import { useThemeStore, type ThemePreference } from "./store/themeStore";
 import { useDiffStore } from "./store/diffStore";
 import { useFeatureFlagsStore } from "./store/featureFlagsStore";
 import { useNotebookPrefsStore } from "./store/notebookPrefsStore";
 
 export default function App() {
+  const monaco = useMonaco();
   const isConnected    = useConnectionStore((s) => s.isConnected);
   const setIsConnected = useConnectionStore((s) => s.setIsConnected);
   const resolved      = useThemeStore((s) => s.resolved);
@@ -191,12 +192,14 @@ export default function App() {
 
     const isEditableInput = (el: Element | null): el is Field => {
       if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return false;
-      // Only ignore Monaco's own code-editing surface — its paste must go through
-      // the editor model (handled per-editor by patchMonacoClipboard). Other
-      // editables inside .monaco-editor (find/replace, rename) are plain fields
-      // this global handler must cover, since not every Monaco mount installs the
-      // per-editor handler (notebook cells, the read-only diff view). #593.
-      if (isMonacoCodeSurface(el)) return false;
+      // Ignore Monaco's own code buffer — its paste must go through the editor
+      // model (handled per-editor by patchMonacoClipboard, which also stops those
+      // events from reaching here). `hasTextFocus()` is the public API for "the
+      // editor's text input is focused" and is false for find/replace/rename
+      // fields, which this global handler must cover. #593.
+      if (el instanceof HTMLTextAreaElement && monaco?.editor.getEditors().some((ed) => ed.hasTextFocus())) {
+        return false;
+      }
       return true;
     };
 
@@ -235,7 +238,7 @@ export default function App() {
 
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [monaco]);
 
   const antdAlgorithm = resolved === "dark" ? theme.darkAlgorithm : theme.defaultAlgorithm;
   const isDark = resolved === "dark";

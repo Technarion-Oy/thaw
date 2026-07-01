@@ -902,7 +902,8 @@ export default function NotebookTab({ tabId }: Props) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const el = document.activeElement;
-      if (el?.classList.contains("inputarea")) return; // Monaco focused
+      // Skip when any editable is focused — this also covers Monaco's own
+      // `.inputarea`, which is itself an <textarea>.
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return;
 
       const selId = selectedCellIdRef.current ?? cellsRef.current[0]?.id ?? null;

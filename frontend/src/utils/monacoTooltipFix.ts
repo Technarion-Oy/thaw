@@ -10,8 +10,6 @@
 import { StandaloneServices } from "monaco-editor/esm/vs/editor/standalone/browser/standaloneServices.js";
 // @ts-expect-error no type declarations for this deep Monaco path
 import { IHoverService } from "monaco-editor/esm/vs/platform/hover/browser/hover.js";
-// @ts-expect-error no type declarations for this deep Monaco path
-import { ICodeEditorService } from "monaco-editor/esm/vs/editor/browser/services/codeEditorService.js";
 
 let patched = false;
 
@@ -26,6 +24,11 @@ let patched = false;
 // overflow the window, so this stays correct for targets that aren't near the
 // top. The code hover uses a content widget (not this service), so it's
 // unaffected.
+//
+// The hover service is a shared singleton, so patching it once covers every
+// editor for the rest of the session — but it must run AFTER an editor exists
+// (the service is instantiated in the StandaloneCodeEditor constructor). Called
+// from the onDidCreateEditor hook below, so every call is post-creation.
 function applyHoverPatch(): void {
   if (patched) return;
   const HOVER_POSITION_BELOW = 2; // HoverPosition.BELOW
@@ -57,29 +60,22 @@ function applyHoverPatch(): void {
   patched = true;
 }
 
+interface EditorNamespace {
+  onDidCreateEditor: (listener: () => void) => void;
+}
+
 let hookRegistered = false;
 
 /**
- * Ensure find-widget button tooltips render below (issue #593). Idempotent, and
- * safe to call from any POST-CREATE Monaco mount hook (never `beforeMount` — the
- * hover-service singleton is only live once an editor has been constructed):
- *
- *  - patches the hover-service singleton immediately for the editor mounting now
- *    (so a modal that is the first Monaco surface of a session is covered without
- *    depending on some other mount having run first), and
- *  - registers a one-time global `onCodeEditorAdd` hook so every future editor
- *    creation re-applies the patch — covering any surface that never calls this.
+ * Register a global `onDidCreateEditor` hook that applies the find-widget tooltip
+ * fix to every editor Monaco creates (issue #593). Idempotent; call once with the
+ * `monaco.editor` namespace (from `ensureMonacoSetup`, which runs before the first
+ * editor is created). Because the hook fires on every creation and the patch
+ * targets a shared singleton, this covers all editors — SqlEditor, notebook
+ * cells, modals, diff views — independent of any per-mount clipboard wiring.
  */
-export function installFindWidgetTooltipFix(): void {
-  applyHoverPatch();
+export function registerFindWidgetTooltipFix(editorNs: EditorNamespace): void {
   if (hookRegistered) return;
   hookRegistered = true;
-  try {
-    const codeEditorService = StandaloneServices.get(ICodeEditorService) as {
-      onCodeEditorAdd: (listener: () => void) => unknown;
-    };
-    codeEditorService.onCodeEditorAdd(() => applyHoverPatch());
-  } catch {
-    /* best-effort: the per-mount applyHoverPatch calls still cover known surfaces */
-  }
+  editorNs.onDidCreateEditor(() => applyHoverPatch());
 }

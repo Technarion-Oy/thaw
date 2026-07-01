@@ -904,9 +904,10 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       gitGutterTimerRef.current = setTimeout(refreshGitGutter, 400);
     });
 
-    if (!tabId) {
-      patchMonacoClipboard(editor);
-    }
+    // Every editor instance — including the split-view secondary pane
+    // (`tabId=splitTabId`) — needs its own clipboard patch (WKWebView blocks
+    // navigator.clipboard).
+    patchMonacoClipboard(editor);
 
     const trigger = (id: string) => editor.trigger("keyboard", id, null);
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Slash,                      () => trigger("editor.action.commentLine"));

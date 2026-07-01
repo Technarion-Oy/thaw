@@ -73,9 +73,9 @@ instance.
 
 **Clipboard:** `navigator.clipboard` is blocked in WKWebView. All copy operations use
 `ClipboardSetText` from `wailsjs/runtime/runtime`. Monaco's built-in **code-buffer** copy/paste is
-patched per-editor via `patchMonacoClipboard`; the find/replace/rename fields inside `.monaco-editor`
-are ordinary native fields handled by the global Cmd/Ctrl+V/C/X handler in `App.tsx` (so they work
-even on Monaco mounts that don't call `patchMonacoClipboard`). See `utils/fieldClipboard.ts`.
+patched per-editor via `patchMonacoClipboard` (gated on the public `codeEditor.hasTextFocus()`); the
+find/replace/rename fields inside `.monaco-editor` are ordinary native fields handled by the global
+Cmd/Ctrl+V/C/X handler in `App.tsx` (which skips the code buffer via `monaco.editor.getEditors()`).
 
 ## Gotchas
 
@@ -94,12 +94,12 @@ even on Monaco mounts that don't call `patchMonacoClipboard`). See `utils/fieldC
 - **Find-widget button tooltips clip under the tab bar** unless forced below. Monaco's base-layer
   hover tooltips default to rendering *above* their target and the find widget is pinned to the
   editor's top edge, so "above" lands in the tab-bar band where the editor pane's `overflow: hidden`
-  clips it. `utils/monacoTooltipFix.ts`'s `installFindWidgetTooltipFix()` patches the hover-service
-  singleton (a private `_createHover` method) to flip the default to below. It's called from
-  `patchMonacoClipboard`, which every Monaco mount in the app routes through (SqlEditor, notebook
-  cells, modals, and both diff views — see the Clipboard note above), so it patches the mounting
-  editor directly *and* registers a one-time `onCodeEditorAdd` hook for any future surface. If a
-  version bump removes `_createHover`, it warns once and no-ops rather than retrying forever.
+  clips it. `utils/monacoTooltipFix.ts`'s `registerFindWidgetTooltipFix()` — called once from
+  `ensureMonacoSetup` — registers a global `monaco.editor.onDidCreateEditor` hook that patches the
+  hover-service singleton (a private `_createHover` method) to flip the default to below. Because
+  it's a global editor-creation hook it covers every Monaco mount (SqlEditor, notebook cells, modals,
+  diff views) and is decoupled from the per-editor clipboard patch. If a version bump removes
+  `_createHover`, it warns once and no-ops rather than retrying forever.
 - **`crossTabSearch` flag**: the panel is conditionally rendered by `QueryPage`; its state (search
   term, toggles) is lost when closed because the component unmounts.
 - **Notebook navigation** in `CrossTabSearch`: switching to a notebook tab does not scroll to or
