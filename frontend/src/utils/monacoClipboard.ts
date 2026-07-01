@@ -7,6 +7,50 @@
 
 import type * as monaco from "monaco-editor";
 import { ClipboardGetText, ClipboardSetText } from "../../wailsjs/runtime/runtime";
+import { spliceFieldValue, fieldSelectionText } from "./fieldClipboard";
+// Deep internals — needed to fix find-widget tooltip clipping; see forceHoverTooltipsBelow().
+// @ts-expect-error no type declarations for this deep Monaco path
+import { StandaloneServices } from "monaco-editor/esm/vs/editor/standalone/browser/standaloneServices.js";
+// @ts-expect-error no type declarations for this deep Monaco path
+import { IHoverService } from "monaco-editor/esm/vs/platform/hover/browser/hover.js";
+
+let hoverTooltipsPatched = false;
+
+/**
+ * Force Monaco's base-layer hover tooltips (find-widget button tooltips — the
+ * Aa/ab/.* toggles, prev/next, close) to render BELOW their target instead of
+ * the default ABOVE. The find widget is pinned to the editor's top edge, so
+ * "above" lands in the tab-bar band where the editor pane's `overflow: hidden`
+ * clips it away (issue #593). `_createHover` is the single choke point both
+ * showInstantHover and showDelayedHover funnel through; forcing BELOW there
+ * (only when the caller set no explicit position) drops these tooltips into the
+ * editor body, unclipped. Monaco still auto-flips back to ABOVE if BELOW would
+ * overflow the window, so this stays correct for targets that aren't near the
+ * top. The code hover uses a content widget (not this service), so it's
+ * unaffected.
+ *
+ * This patches a session-wide singleton, so it only needs to succeed once — but
+ * it must run AFTER an editor exists (`setBaseLayerHoverDelegate(hoverService)`
+ * runs in the StandaloneCodeEditor constructor). It's called from
+ * `patchMonacoClipboard` (every SqlEditor/modal Monaco mount) and from
+ * NotebookTab's onMount, all post-mount; idempotent and retryable.
+ */
+export function forceHoverTooltipsBelow(): void {
+  if (hoverTooltipsPatched) return;
+  const HOVER_POSITION_BELOW = 2; // HoverPosition.BELOW
+  const hoverService = StandaloneServices.get(IHoverService) as {
+    _createHover?: (options: { position?: { hoverPosition?: unknown } }, skip?: unknown) => unknown;
+  } | undefined;
+  if (!hoverService || typeof hoverService._createHover !== "function") return;
+  const original = hoverService._createHover.bind(hoverService);
+  hoverService._createHover = (options, skip) => {
+    if (options && options.position?.hoverPosition === undefined) {
+      options = { ...options, position: { ...options.position, hoverPosition: HOVER_POSITION_BELOW } };
+    }
+    return original(options, skip);
+  };
+  hoverTooltipsPatched = true;
+}
 
 /**
  * Patches a Monaco editor instance to use Wails' native clipboard APIs.
@@ -21,6 +65,11 @@ export function patchMonacoClipboard(editor: monaco.editor.IStandaloneCodeEditor
   }
 
   const codeEditor = editor as monaco.editor.IStandaloneCodeEditor;
+
+  // Every Monaco mount routes through here, so this is a reliable post-mount hook
+  // to apply the session-wide find-widget tooltip fix (idempotent — no-op after
+  // the first successful call).
+  forceHoverTooltipsBelow();
 
   const doPaste = async () => {
     const text = await ClipboardGetText();
@@ -54,36 +103,23 @@ export function patchMonacoClipboard(editor: monaco.editor.IStandaloneCodeEditor
   // editor DOM. Cmd+V/C/X land here (capture-phase, below) even when one of
   // those fields is focused, so we must route clipboard ops to the field rather
   // than the code buffer. WKWebView clipboard is untrusted (the whole reason for
-  // this module), so we drive it with the Wails native API and fire an `input`
-  // event so the find widget re-runs its search after a paste/cut.
-  const fieldSelection = (el: HTMLTextAreaElement | HTMLInputElement) => {
-    const start = el.selectionStart ?? el.value.length;
-    const end = el.selectionEnd ?? el.value.length;
-    return start <= end ? [start, end] : [end, start];
-  };
-
+  // this module), so we drive it with the Wails native API; spliceFieldValue
+  // fires an `input` event so the find widget re-runs its search after paste/cut.
   const pasteIntoField = async (el: HTMLTextAreaElement | HTMLInputElement) => {
     const text = await ClipboardGetText();
-    if (!text) return;
-    const [start, end] = fieldSelection(el);
-    el.value = el.value.slice(0, start) + text + el.value.slice(end);
-    const caret = start + text.length;
-    el.setSelectionRange(caret, caret);
-    el.dispatchEvent(new Event("input", { bubbles: true }));
+    if (text) spliceFieldValue(el, text);
   };
 
   const copyFromField = async (el: HTMLTextAreaElement | HTMLInputElement) => {
-    const [start, end] = fieldSelection(el);
-    if (start !== end) await ClipboardSetText(el.value.slice(start, end));
+    const text = fieldSelectionText(el);
+    if (text) await ClipboardSetText(text);
   };
 
   const cutFromField = async (el: HTMLTextAreaElement | HTMLInputElement) => {
-    const [start, end] = fieldSelection(el);
-    if (start === end) return;
-    await ClipboardSetText(el.value.slice(start, end));
-    el.value = el.value.slice(0, start) + el.value.slice(end);
-    el.setSelectionRange(start, start);
-    el.dispatchEvent(new Event("input", { bubbles: true }));
+    const text = fieldSelectionText(el);
+    if (!text) return;
+    await ClipboardSetText(text);
+    spliceFieldValue(el, "");
   };
 
   // Monaco's own typing surface is `<textarea class="inputarea">`; anything else

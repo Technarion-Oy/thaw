@@ -89,6 +89,13 @@ instance.
 - **Do not use `instanceof SubmenuAction`** from an external import for the snippet submenu —
   Monaco's `menu.js` checks its own bundled class; external imports are different module instances
   and always fail. Use `MenuRegistry` and let Monaco create `SubmenuAction` internally.
+- **Find-widget button tooltips clip under the tab bar** unless forced below. Monaco's base-layer
+  hover tooltips default to rendering *above* their target and the find widget is pinned to the
+  editor's top edge, so "above" lands in the tab-bar band where the editor pane's `overflow: hidden`
+  clips it. `forceHoverTooltipsBelow()` (in `utils/monacoClipboard.ts`) patches the hover-service
+  singleton once, post-mount, to flip the default to below. It's a session-wide patch, so any Monaco
+  mount path that can show a find widget must trigger it — routed through `patchMonacoClipboard`
+  (SqlEditor + modals) and `NotebookTab`'s `onMount`.
 - **`crossTabSearch` flag**: the panel is conditionally rendered by `QueryPage`; its state (search
   term, toggles) is lost when closed because the component unmounts.
 - **Notebook navigation** in `CrossTabSearch`: switching to a notebook tab does not scroll to or

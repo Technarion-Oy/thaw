@@ -24,6 +24,7 @@ import SessionManagementModal from "./components/settings/SessionManagementModal
 import MCPSessionsModal from "./components/settings/MCPSessionsModal";
 import { IsConnected } from "../wailsjs/go/app/App";
 import { ClipboardGetText, ClipboardSetText, EventsOn } from "../wailsjs/runtime/runtime";
+import { spliceFieldValue, fieldSelectionText } from "./utils/fieldClipboard";
 import { useThemeStore, type ThemePreference } from "./store/themeStore";
 import { useDiffStore } from "./store/diffStore";
 import { useFeatureFlagsStore } from "./store/featureFlagsStore";
@@ -193,19 +194,6 @@ export default function App() {
       return true;
     };
 
-    // Insert text at the current selection of a native input / textarea.
-    const spliceValue = (target: HTMLInputElement | HTMLTextAreaElement, text: string) => {
-      const start = target.selectionStart ?? 0;
-      const end   = target.selectionEnd   ?? 0;
-      const next  = target.value.slice(0, start) + text + target.value.slice(end);
-      // Use the native setter so React's synthetic onChange fires.
-      const proto  = target instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
-      const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
-      setter?.call(target, next);
-      target.dispatchEvent(new Event("input", { bubbles: true }));
-      target.setSelectionRange(start + text.length, start + text.length);
-    };
-
     const onKeyDown = async (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
       const target = document.activeElement;
@@ -214,16 +202,13 @@ export default function App() {
       if (e.key === "v") {
         e.preventDefault();
         const text = await ClipboardGetText();
-        if (text) spliceValue(target, text);
+        if (text) spliceFieldValue(target, text);
       } else if (e.key === "c" || e.key === "x") {
-        const selected = target.value.slice(
-          target.selectionStart ?? 0,
-          target.selectionEnd   ?? 0,
-        );
+        const selected = fieldSelectionText(target);
         if (!selected) return;
         e.preventDefault();
         await ClipboardSetText(selected);
-        if (e.key === "x") spliceValue(target, "");
+        if (e.key === "x") spliceFieldValue(target, "");
       }
     };
 

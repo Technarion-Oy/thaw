@@ -24,7 +24,7 @@ import { CommandsRegistry } from "monaco-editor/esm/vs/platform/commands/common/
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
 import { ContextKeyExpr } from "monaco-editor/esm/vs/platform/contextkey/common/contextkey.js";
-import { ensureMonacoSetup, forceHoverTooltipsBelow } from "./monacoSetup";
+import { ensureMonacoSetup } from "./monacoSetup";
 import { setEditorInstance } from "./editorRef";
 import { useQueryStore } from "../../store/queryStore";
 import { useObjectStore } from "../../store/objectStore";
@@ -565,11 +565,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
   };
 
   const handleMount: OnMount = (editor, monaco) => {
-    // Force find-widget button tooltips to render below (issue #593). Must run
-    // after the editor exists — the hover-service singleton is wired in the
-    // StandaloneCodeEditor constructor.
-    forceHoverTooltipsBelow();
-
     if (!tabId) {
       setEditorInstance(editor);
       editor.onDidDispose(() => setEditorInstance(null));
