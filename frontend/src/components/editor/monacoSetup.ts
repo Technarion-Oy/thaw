@@ -30,11 +30,6 @@ import { loader } from "@monaco-editor/react";
 // editor.api so Vite never resolves the full barrel.
 import * as monacoLib from "monaco-editor/esm/vs/editor/editor.api.js";
 import "monaco-editor/esm/vs/editor/editor.all.js";
-// Deep internals — needed to fix find-widget tooltip clipping; see forceHoverTooltipsBelow().
-// @ts-expect-error no type declarations for this deep Monaco path
-import { StandaloneServices } from "monaco-editor/esm/vs/editor/standalone/browser/standaloneServices.js";
-// @ts-expect-error no type declarations for this deep Monaco path
-import { IHoverService } from "monaco-editor/esm/vs/platform/hover/browser/hover.js";
 
 // ── Inline Python Monarch grammar ─────────────────────────────────────────────
 // Defined inline instead of importing from monaco-editor/esm/vs/basic-languages/python/python.js
@@ -244,61 +239,12 @@ loader.config({ monaco: monacoLib });
 };
 
 let registered = false;
-let hoverTooltipsPatched = false;
-
-// Force Monaco's base-layer hover tooltips (find-widget button tooltips — the
-// Aa/ab/.* toggles, prev/next, close) to render BELOW their target instead of
-// the default ABOVE. The find widget is pinned to the editor's top edge, so
-// "above" lands in the tab-bar band where the editor pane's `overflow: hidden`
-// clips it away (issue #593). `_createHover` is the single choke point both
-// showInstantHover and showDelayedHover funnel through; forcing BELOW there (only
-// when the caller set no explicit position) drops these tooltips into the editor
-// body, unclipped. Monaco still auto-flips back to ABOVE if BELOW would overflow
-// the window, so this stays correct for targets that aren't near the top. The
-// code hover uses a content widget (not this service), so it's unaffected.
-//
-// This mutates a session-wide singleton, so it only needs to succeed once — and
-// must run AFTER an editor exists (the hover service is instantiated in the
-// StandaloneCodeEditor constructor). It's wired to `onDidCreateEditor` below so
-// every Monaco mount (SqlEditor, notebook cells, modals, the diff view) is
-// covered without each site remembering to call it.
-function forceHoverTooltipsBelow(): void {
-  if (hoverTooltipsPatched) return;
-  const HOVER_POSITION_BELOW = 2; // HoverPosition.BELOW
-  const hoverService = StandaloneServices.get(IHoverService) as {
-    _createHover?: (options: { position?: { hoverPosition?: unknown } }, skip?: unknown) => unknown;
-  } | undefined;
-  if (!hoverService || typeof hoverService._createHover !== "function") {
-    // Monaco internals changed (e.g. a version bump renamed _createHover). Warn
-    // once and stop — don't silently regress to clipped tooltips while retrying
-    // on every editor creation for the rest of the session.
-    hoverTooltipsPatched = true;
-    console.warn(
-      "[thaw] forceHoverTooltipsBelow: Monaco hover service `_createHover` unavailable; " +
-      "find-widget tooltips may render clipped (issue #593).",
-    );
-    return;
-  }
-  const original = hoverService._createHover.bind(hoverService);
-  hoverService._createHover = (options, skip) => {
-    if (options && options.position?.hoverPosition === undefined) {
-      options = { ...options, position: { ...options.position, hoverPosition: HOVER_POSITION_BELOW } };
-    }
-    return original(options, skip);
-  };
-  hoverTooltipsPatched = true;
-}
 
 export function ensureMonacoSetup(monaco: unknown): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const m = monaco as any;
   if (registered) return;
   registered = true;
-
-  // Apply the find-widget tooltip fix to every editor via a single global hook:
-  // it fires post-creation (when the hover-service singleton is live) for every
-  // Monaco mount, so no individual call site has to remember to call it. #593.
-  m.editor.onDidCreateEditor(() => forceHoverTooltipsBelow());
 
   // ── Register the languages we use ─────────────────────────────────────────
   // The slim Monaco import (editor.api + editor.all, see top of file) drops the

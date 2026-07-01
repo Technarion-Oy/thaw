@@ -94,12 +94,12 @@ even on Monaco mounts that don't call `patchMonacoClipboard`). See `utils/fieldC
 - **Find-widget button tooltips clip under the tab bar** unless forced below. Monaco's base-layer
   hover tooltips default to rendering *above* their target and the find widget is pinned to the
   editor's top edge, so "above" lands in the tab-bar band where the editor pane's `overflow: hidden`
-  clips it. `monacoSetup.ts`'s `forceHoverTooltipsBelow()` patches the hover-service singleton once,
-  post-creation, to flip the default to below. It's wired to `monaco.editor.onDidCreateEditor` in
-  `ensureMonacoSetup` so it fires for **every** Monaco mount (SqlEditor, notebook cells, modals, the
-  read-only diff view) without each call site remembering it — the previous per-site approach kept
-  missing surfaces. It monkeypatches a private Monaco method (`_createHover`); if a version bump
-  removes it, the patch warns once and no-ops rather than retrying forever.
+  clips it. `utils/monacoTooltipFix.ts`'s `installFindWidgetTooltipFix()` patches the hover-service
+  singleton (a private `_createHover` method) to flip the default to below. It's called from
+  `patchMonacoClipboard`, which every Monaco mount in the app routes through (SqlEditor, notebook
+  cells, modals, and both diff views — see the Clipboard note above), so it patches the mounting
+  editor directly *and* registers a one-time `onCodeEditorAdd` hook for any future surface. If a
+  version bump removes `_createHover`, it warns once and no-ops rather than retrying forever.
 - **`crossTabSearch` flag**: the panel is conditionally rendered by `QueryPage`; its state (search
   term, toggles) is lost when closed because the component unmounts.
 - **Notebook navigation** in `CrossTabSearch`: switching to a notebook tab does not scroll to or

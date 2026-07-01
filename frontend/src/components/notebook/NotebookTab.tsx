@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useRef, useState, useMemo, Fragment } from "react";
 import Editor, { type BeforeMount, type OnMount, type Monaco } from "@monaco-editor/react";
 import { ensureMonacoSetup } from "../editor/monacoSetup";
+import { patchMonacoClipboard } from "../../utils/monacoClipboard";
 import { setActiveSnippetEditor } from "../editor/SqlEditor";
 import { getPythonSnippets, PYTHON_SNIPPET_CATEGORIES } from "../editor/snowflakeSnippets";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -55,7 +56,7 @@ import {
 } from "../../../wailsjs/go/app/App";
 import { DapClient, type CellBreakpoints, type DebugVariable } from "./debugClient";
 import type { snowpark } from "../../../wailsjs/go/models";
-import { ClipboardGetText, ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
+import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 import { useNotebookPrefsStore } from "../../store/notebookPrefsStore";
 
 // Install a document-level capture-phase Cmd+C handler that routes clipboard
@@ -1403,45 +1404,19 @@ function CellView({
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.UpArrow,   () => trigger("editor.action.insertCursorAbove"));
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.DownArrow, () => trigger("editor.action.insertCursorBelow"));
 
-    // WKWebView clipboard fix — same pattern as SqlEditor.
-    const doCopy = async () => {
-      const sel = editor.getSelection();
-      const model = editor.getModel();
-      if (!sel || !model) return;
-      const text = model.getValueInRange(sel);
-      if (text) await ClipboardSetText(text);
-    };
-    const doPaste = async () => {
-      const text = await ClipboardGetText();
-      if (!text) return;
-      const sel = editor.getSelection();
-      if (!sel) return;
-      editor.executeEdits("clipboard-paste", [{ range: sel, text, forceMoveMarkers: true }]);
-      editor.pushUndoStop();
-    };
-    const doCut = async () => {
-      const sel = editor.getSelection();
-      const model = editor.getModel();
-      if (!sel || !model) return;
-      const text = model.getValueInRange(sel);
-      if (!text) return;
-      await ClipboardSetText(text);
-      editor.executeEdits("clipboard-cut", [{ range: sel, text: "", forceMoveMarkers: true }]);
-      editor.pushUndoStop();
-    };
+    // WKWebView clipboard fix + find-widget tooltip fix. Routes the CODE BUFFER's
+    // copy/cut/paste through the Wails native API and gates on the code surface,
+    // so Cmd+V/C/X in a cell's find/replace box bubbles to App.tsx's global
+    // handler instead of hitting the code buffer (issue #593).
+    patchMonacoClipboard(editor);
+
     const editorDom = editor.getDomNode();
+    // ⌘⌥↑/↓ — add cursor above/below. Intercept in capture phase so Monaco's
+    // suggest widget cannot grab these first. (Clipboard is handled above.)
     editorDom?.addEventListener("keydown", (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey)) return;
-      // Intercept in capture phase so Monaco's suggest widget cannot grab these first.
-      if (e.altKey) {
-        if (e.key === "ArrowUp")   { e.preventDefault(); e.stopPropagation(); trigger("editor.action.insertCursorAbove"); return; }
-        if (e.key === "ArrowDown") { e.preventDefault(); e.stopPropagation(); trigger("editor.action.insertCursorBelow"); return; }
-      }
-      switch (e.key.toLowerCase()) {
-        case "c": e.preventDefault(); e.stopPropagation(); doCopy(); break;
-        case "v": e.preventDefault(); e.stopPropagation(); doPaste(); break;
-        case "x": e.preventDefault(); e.stopPropagation(); doCut(); break;
-      }
+      if (!(e.metaKey || e.ctrlKey) || !e.altKey) return;
+      if (e.key === "ArrowUp")   { e.preventDefault(); e.stopPropagation(); trigger("editor.action.insertCursorAbove"); }
+      else if (e.key === "ArrowDown") { e.preventDefault(); e.stopPropagation(); trigger("editor.action.insertCursorBelow"); }
     }, true /* capture */);
 
     // Drag-and-drop from sidebar (same payload as SqlEditor).

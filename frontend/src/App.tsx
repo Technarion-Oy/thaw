@@ -24,7 +24,7 @@ import SessionManagementModal from "./components/settings/SessionManagementModal
 import MCPSessionsModal from "./components/settings/MCPSessionsModal";
 import { IsConnected } from "../wailsjs/go/app/App";
 import { ClipboardGetText, ClipboardSetText, EventsOn } from "../wailsjs/runtime/runtime";
-import { spliceFieldValue, fieldSelectionText, isMonacoCodeSurface } from "./utils/fieldClipboard";
+import { isMonacoCodeSurface } from "./utils/fieldClipboard";
 import { useThemeStore, type ThemePreference } from "./store/themeStore";
 import { useDiffStore } from "./store/diffStore";
 import { useFeatureFlagsStore } from "./store/featureFlagsStore";
@@ -187,7 +187,9 @@ export default function App() {
   // components (Ant Design inputs etc.) update their state correctly.
   // Cmd+C / Cmd+X are handled symmetrically for consistency.
   useEffect(() => {
-    const isEditableInput = (el: Element | null): el is HTMLInputElement | HTMLTextAreaElement => {
+    type Field = HTMLInputElement | HTMLTextAreaElement;
+
+    const isEditableInput = (el: Element | null): el is Field => {
       if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return false;
       // Only ignore Monaco's own code-editing surface — its paste must go through
       // the editor model (handled per-editor by patchMonacoClipboard). Other
@@ -198,6 +200,21 @@ export default function App() {
       return true;
     };
 
+    const selectedText = (el: Field) => el.value.slice(el.selectionStart ?? 0, el.selectionEnd ?? 0);
+
+    // Replace the field's selection with `text`, driving the change through the
+    // native value setter so React-controlled inputs (Ant Design etc.) fire
+    // onChange, then dispatching `input` for any non-React listeners.
+    const spliceValue = (el: Field, text: string) => {
+      const start = el.selectionStart ?? 0;
+      const end = el.selectionEnd ?? 0;
+      const next = el.value.slice(0, start) + text + el.value.slice(end);
+      const proto = el instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+      Object.getOwnPropertyDescriptor(proto, "value")?.set?.call(el, next);
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.setSelectionRange(start + text.length, start + text.length);
+    };
+
     const onKeyDown = async (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
       const target = document.activeElement;
@@ -206,13 +223,13 @@ export default function App() {
       if (e.key === "v") {
         e.preventDefault();
         const text = await ClipboardGetText();
-        if (text) spliceFieldValue(target, text);
+        if (text) spliceValue(target, text);
       } else if (e.key === "c" || e.key === "x") {
-        const selected = fieldSelectionText(target);
+        const selected = selectedText(target);
         if (!selected) return;
         e.preventDefault();
         await ClipboardSetText(selected);
-        if (e.key === "x") spliceFieldValue(target, "");
+        if (e.key === "x") spliceValue(target, "");
       }
     };
 

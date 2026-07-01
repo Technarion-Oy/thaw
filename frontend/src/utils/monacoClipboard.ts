@@ -8,6 +8,9 @@
 import type * as monaco from "monaco-editor";
 import { ClipboardGetText, ClipboardSetText } from "../../wailsjs/runtime/runtime";
 import { isMonacoCodeSurface } from "./fieldClipboard";
+import { installFindWidgetTooltipFix } from "./monacoTooltipFix";
+
+let codeSurfaceClassChecked = false;
 
 /**
  * Patches a Monaco editor instance to route the CODE BUFFER's copy / cut / paste
@@ -16,6 +19,10 @@ import { isMonacoCodeSurface } from "./fieldClipboard";
  * model (not a value splice), which is why it's handled per-editor here; every
  * other editable inside `.monaco-editor` (find/replace, rename) is an ordinary
  * field handled by the global handler in `App.tsx`.
+ *
+ * Every Monaco mount in the app routes through here (SqlEditor, notebook cells,
+ * modals, diff views), so this is also where the find-widget tooltip fix is
+ * installed — see `installFindWidgetTooltipFix`.
  */
 export function patchMonacoClipboard(editor: monaco.editor.IStandaloneCodeEditor | monaco.editor.IStandaloneDiffEditor) {
   // For DiffEditor, we need to patch both internal editors
@@ -26,6 +33,8 @@ export function patchMonacoClipboard(editor: monaco.editor.IStandaloneCodeEditor
   }
 
   const codeEditor = editor as monaco.editor.IStandaloneCodeEditor;
+
+  installFindWidgetTooltipFix();
 
   const doPaste = async () => {
     const text = await ClipboardGetText();
@@ -76,6 +85,18 @@ export function patchMonacoClipboard(editor: monaco.editor.IStandaloneCodeEditor
   // App.tsx's global handler (which splices native fields) instead.
   const editorDom = codeEditor.getDomNode();
   if (editorDom) {
+    // One-time guard: `isMonacoCodeSurface` keys on the `.inputarea` class. If a
+    // Monaco bump renames it, the capture handler below silently stops matching
+    // the code textarea and code-buffer paste regresses — warn so it's visible.
+    if (!codeSurfaceClassChecked) {
+      codeSurfaceClassChecked = true;
+      if (!editorDom.querySelector("textarea.inputarea")) {
+        console.warn(
+          "[thaw] monacoClipboard: Monaco's `.inputarea` code surface not found; " +
+          "code-buffer clipboard routing may be broken (WKWebView).",
+        );
+      }
+    }
     editorDom.addEventListener("keydown", (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
       const key = e.key.toLowerCase();
