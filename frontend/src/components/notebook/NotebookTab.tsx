@@ -13,7 +13,6 @@
 import { useCallback, useEffect, useRef, useState, useMemo, Fragment } from "react";
 import Editor, { type BeforeMount, type OnMount, type Monaco } from "@monaco-editor/react";
 import { ensureMonacoSetup } from "../editor/monacoSetup";
-import { forceHoverTooltipsBelow } from "../../utils/monacoClipboard";
 import { setActiveSnippetEditor } from "../editor/SqlEditor";
 import { getPythonSnippets, PYTHON_SNIPPET_CATEGORIES } from "../editor/snowflakeSnippets";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -1315,10 +1314,6 @@ function CellView({
 
   const handleMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
-
-    // Notebook cells don't route through patchMonacoClipboard, so apply the
-    // session-wide find-widget tooltip fix here (issue #593; idempotent).
-    forceHoverTooltipsBelow();
 
     // Register model → tabId mapping so the global jedi providers can route
     // requests to the correct kernel.  Clean up on editor disposal.

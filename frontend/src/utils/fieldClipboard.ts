@@ -12,6 +12,17 @@
 // use these helpers to apply it to a focused field. Keeping the splice logic in
 // one place means a future fix (e.g. firing additional events) lands once.
 
+/**
+ * True if `el` is Monaco's own code-editing surface (the hidden `.inputarea`
+ * textarea) rather than an ordinary editable field. Find/replace and rename
+ * inputs also live inside `.monaco-editor` but are plain fields, so this is the
+ * single source of truth for "leave this to `patchMonacoClipboard` / the editor
+ * model" vs. "splice it like any native field".
+ */
+export function isMonacoCodeSurface(el: Element | null): boolean {
+  return !!el && el.classList.contains("inputarea") && !!el.closest(".monaco-editor");
+}
+
 /** [lo, hi] selection range of a native field, defaulting to the caret / 0. */
 function selectionRange(el: HTMLInputElement | HTMLTextAreaElement): [number, number] {
   const a = el.selectionStart ?? 0;

@@ -7,54 +7,15 @@
 
 import type * as monaco from "monaco-editor";
 import { ClipboardGetText, ClipboardSetText } from "../../wailsjs/runtime/runtime";
-import { spliceFieldValue, fieldSelectionText } from "./fieldClipboard";
-// Deep internals — needed to fix find-widget tooltip clipping; see forceHoverTooltipsBelow().
-// @ts-expect-error no type declarations for this deep Monaco path
-import { StandaloneServices } from "monaco-editor/esm/vs/editor/standalone/browser/standaloneServices.js";
-// @ts-expect-error no type declarations for this deep Monaco path
-import { IHoverService } from "monaco-editor/esm/vs/platform/hover/browser/hover.js";
-
-let hoverTooltipsPatched = false;
+import { isMonacoCodeSurface } from "./fieldClipboard";
 
 /**
- * Force Monaco's base-layer hover tooltips (find-widget button tooltips — the
- * Aa/ab/.* toggles, prev/next, close) to render BELOW their target instead of
- * the default ABOVE. The find widget is pinned to the editor's top edge, so
- * "above" lands in the tab-bar band where the editor pane's `overflow: hidden`
- * clips it away (issue #593). `_createHover` is the single choke point both
- * showInstantHover and showDelayedHover funnel through; forcing BELOW there
- * (only when the caller set no explicit position) drops these tooltips into the
- * editor body, unclipped. Monaco still auto-flips back to ABOVE if BELOW would
- * overflow the window, so this stays correct for targets that aren't near the
- * top. The code hover uses a content widget (not this service), so it's
- * unaffected.
- *
- * This patches a session-wide singleton, so it only needs to succeed once — but
- * it must run AFTER an editor exists (`setBaseLayerHoverDelegate(hoverService)`
- * runs in the StandaloneCodeEditor constructor). It's called from
- * `patchMonacoClipboard` (every SqlEditor/modal Monaco mount) and from
- * NotebookTab's onMount, all post-mount; idempotent and retryable.
- */
-export function forceHoverTooltipsBelow(): void {
-  if (hoverTooltipsPatched) return;
-  const HOVER_POSITION_BELOW = 2; // HoverPosition.BELOW
-  const hoverService = StandaloneServices.get(IHoverService) as {
-    _createHover?: (options: { position?: { hoverPosition?: unknown } }, skip?: unknown) => unknown;
-  } | undefined;
-  if (!hoverService || typeof hoverService._createHover !== "function") return;
-  const original = hoverService._createHover.bind(hoverService);
-  hoverService._createHover = (options, skip) => {
-    if (options && options.position?.hoverPosition === undefined) {
-      options = { ...options, position: { ...options.position, hoverPosition: HOVER_POSITION_BELOW } };
-    }
-    return original(options, skip);
-  };
-  hoverTooltipsPatched = true;
-}
-
-/**
- * Patches a Monaco editor instance to use Wails' native clipboard APIs.
- * This is required in WKWebView (macOS) where navigator.clipboard is blocked.
+ * Patches a Monaco editor instance to route the CODE BUFFER's copy / cut / paste
+ * through Wails' native clipboard APIs. Required in WKWebView (macOS) where
+ * `navigator.clipboard` is blocked. The code buffer must go through the editor
+ * model (not a value splice), which is why it's handled per-editor here; every
+ * other editable inside `.monaco-editor` (find/replace, rename) is an ordinary
+ * field handled by the global handler in `App.tsx`.
  */
 export function patchMonacoClipboard(editor: monaco.editor.IStandaloneCodeEditor | monaco.editor.IStandaloneDiffEditor) {
   // For DiffEditor, we need to patch both internal editors
@@ -66,11 +27,6 @@ export function patchMonacoClipboard(editor: monaco.editor.IStandaloneCodeEditor
 
   const codeEditor = editor as monaco.editor.IStandaloneCodeEditor;
 
-  // Every Monaco mount routes through here, so this is a reliable post-mount hook
-  // to apply the session-wide find-widget tooltip fix (idempotent — no-op after
-  // the first successful call).
-  forceHoverTooltipsBelow();
-
   const doPaste = async () => {
     const text = await ClipboardGetText();
     if (!text) return;
@@ -80,55 +36,19 @@ export function patchMonacoClipboard(editor: monaco.editor.IStandaloneCodeEditor
     codeEditor.pushUndoStop();
   };
 
-  const doCopy = async () => {
-    const selection = codeEditor.getSelection();
-    const model = codeEditor.getModel();
-    if (!selection || !model) return;
-    const text = model.getValueInRange(selection);
-    if (text) await ClipboardSetText(text);
-  };
-
-  const doCut = async () => {
+  // Copy is cut without the delete-and-undo-stop step.
+  const doCopyOrCut = async (cut: boolean) => {
     const selection = codeEditor.getSelection();
     const model = codeEditor.getModel();
     if (!selection || !model) return;
     const text = model.getValueInRange(selection);
     if (!text) return;
     await ClipboardSetText(text);
-    codeEditor.executeEdits("clipboard-cut", [{ range: selection, text: "", forceMoveMarkers: true }]);
-    codeEditor.pushUndoStop();
+    if (cut) {
+      codeEditor.executeEdits("clipboard-cut", [{ range: selection, text: "", forceMoveMarkers: true }]);
+      codeEditor.pushUndoStop();
+    }
   };
-
-  // The find / replace widgets host their own <textarea>/<input> inside the
-  // editor DOM. Cmd+V/C/X land here (capture-phase, below) even when one of
-  // those fields is focused, so we must route clipboard ops to the field rather
-  // than the code buffer. WKWebView clipboard is untrusted (the whole reason for
-  // this module), so we drive it with the Wails native API; spliceFieldValue
-  // fires an `input` event so the find widget re-runs its search after paste/cut.
-  const pasteIntoField = async (el: HTMLTextAreaElement | HTMLInputElement) => {
-    const text = await ClipboardGetText();
-    if (text) spliceFieldValue(el, text);
-  };
-
-  const copyFromField = async (el: HTMLTextAreaElement | HTMLInputElement) => {
-    const text = fieldSelectionText(el);
-    if (text) await ClipboardSetText(text);
-  };
-
-  const cutFromField = async (el: HTMLTextAreaElement | HTMLInputElement) => {
-    const text = fieldSelectionText(el);
-    if (!text) return;
-    await ClipboardSetText(text);
-    spliceFieldValue(el, "");
-  };
-
-  // Monaco's own typing surface is `<textarea class="inputarea">`; anything else
-  // editable inside the editor DOM is a find/replace field.
-  const findField = (target: EventTarget | null): HTMLTextAreaElement | HTMLInputElement | null =>
-    (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) &&
-    !target.classList.contains("inputarea")
-      ? target
-      : null;
 
   const cs = (codeEditor as any)._commandService;
   if (cs && typeof cs.executeCommand === "function") {
@@ -139,10 +59,10 @@ export function patchMonacoClipboard(editor: monaco.editor.IStandaloneCodeEditor
           doPaste();
           return Promise.resolve();
         case "editor.action.clipboardCopyAction":
-          doCopy();
+          doCopyOrCut(false);
           return Promise.resolve();
         case "editor.action.clipboardCutAction":
-          doCut();
+          doCopyOrCut(true);
           return Promise.resolve();
         default:
           return origExec(commandId, ...args);
@@ -151,25 +71,20 @@ export function patchMonacoClipboard(editor: monaco.editor.IStandaloneCodeEditor
   }
 
   // Capture-phase keydown listener so clipboard shortcuts are intercepted
-  // before WKWebView or Monaco can swallow them.
+  // before WKWebView or Monaco can swallow them. Only the code buffer is handled
+  // here; when a find/replace/rename field is focused we let the event bubble to
+  // App.tsx's global handler (which splices native fields) instead.
   const editorDom = codeEditor.getDomNode();
   if (editorDom) {
     editorDom.addEventListener("keydown", (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
       const key = e.key.toLowerCase();
       if (key !== "v" && key !== "c" && key !== "x") return;
+      if (!isMonacoCodeSurface(e.target as Element | null)) return;
       e.preventDefault();
       e.stopPropagation();
-      const field = findField(e.target);
-      if (field) {
-        if (key === "v") pasteIntoField(field);
-        else if (key === "c") copyFromField(field);
-        else cutFromField(field);
-      } else {
-        if (key === "v") doPaste();
-        else if (key === "c") doCopy();
-        else doCut();
-      }
+      if (key === "v") doPaste();
+      else doCopyOrCut(key === "x");
     }, true /* capture */);
   }
 }

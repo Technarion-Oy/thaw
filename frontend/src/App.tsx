@@ -24,7 +24,7 @@ import SessionManagementModal from "./components/settings/SessionManagementModal
 import MCPSessionsModal from "./components/settings/MCPSessionsModal";
 import { IsConnected } from "../wailsjs/go/app/App";
 import { ClipboardGetText, ClipboardSetText, EventsOn } from "../wailsjs/runtime/runtime";
-import { spliceFieldValue, fieldSelectionText } from "./utils/fieldClipboard";
+import { spliceFieldValue, fieldSelectionText, isMonacoCodeSurface } from "./utils/fieldClipboard";
 import { useThemeStore, type ThemePreference } from "./store/themeStore";
 import { useDiffStore } from "./store/diffStore";
 import { useFeatureFlagsStore } from "./store/featureFlagsStore";
@@ -189,8 +189,12 @@ export default function App() {
   useEffect(() => {
     const isEditableInput = (el: Element | null): el is HTMLInputElement | HTMLTextAreaElement => {
       if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return false;
-      // Ignore Monaco hidden textarea — it is an <textarea> but Monaco manages its own clipboard.
-      if (el.closest(".monaco-editor")) return false;
+      // Only ignore Monaco's own code-editing surface — its paste must go through
+      // the editor model (handled per-editor by patchMonacoClipboard). Other
+      // editables inside .monaco-editor (find/replace, rename) are plain fields
+      // this global handler must cover, since not every Monaco mount installs the
+      // per-editor handler (notebook cells, the read-only diff view). #593.
+      if (isMonacoCodeSurface(el)) return false;
       return true;
     };
 
