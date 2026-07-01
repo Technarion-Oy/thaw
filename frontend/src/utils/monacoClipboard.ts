@@ -50,6 +50,50 @@ export function patchMonacoClipboard(editor: monaco.editor.IStandaloneCodeEditor
     codeEditor.pushUndoStop();
   };
 
+  // The find / replace widgets host their own <textarea>/<input> inside the
+  // editor DOM. Cmd+V/C/X land here (capture-phase, below) even when one of
+  // those fields is focused, so we must route clipboard ops to the field rather
+  // than the code buffer. WKWebView clipboard is untrusted (the whole reason for
+  // this module), so we drive it with the Wails native API and fire an `input`
+  // event so the find widget re-runs its search after a paste/cut.
+  const fieldSelection = (el: HTMLTextAreaElement | HTMLInputElement) => {
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? el.value.length;
+    return start <= end ? [start, end] : [end, start];
+  };
+
+  const pasteIntoField = async (el: HTMLTextAreaElement | HTMLInputElement) => {
+    const text = await ClipboardGetText();
+    if (!text) return;
+    const [start, end] = fieldSelection(el);
+    el.value = el.value.slice(0, start) + text + el.value.slice(end);
+    const caret = start + text.length;
+    el.setSelectionRange(caret, caret);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+
+  const copyFromField = async (el: HTMLTextAreaElement | HTMLInputElement) => {
+    const [start, end] = fieldSelection(el);
+    if (start !== end) await ClipboardSetText(el.value.slice(start, end));
+  };
+
+  const cutFromField = async (el: HTMLTextAreaElement | HTMLInputElement) => {
+    const [start, end] = fieldSelection(el);
+    if (start === end) return;
+    await ClipboardSetText(el.value.slice(start, end));
+    el.value = el.value.slice(0, start) + el.value.slice(end);
+    el.setSelectionRange(start, start);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+
+  // Monaco's own typing surface is `<textarea class="inputarea">`; anything else
+  // editable inside the editor DOM is a find/replace field.
+  const findField = (target: EventTarget | null): HTMLTextAreaElement | HTMLInputElement | null =>
+    (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) &&
+    !target.classList.contains("inputarea")
+      ? target
+      : null;
+
   const cs = (codeEditor as any)._commandService;
   if (cs && typeof cs.executeCommand === "function") {
     const origExec = cs.executeCommand.bind(cs);
@@ -76,10 +120,19 @@ export function patchMonacoClipboard(editor: monaco.editor.IStandaloneCodeEditor
   if (editorDom) {
     editorDom.addEventListener("keydown", (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
-      switch (e.key.toLowerCase()) {
-        case "v": e.preventDefault(); e.stopPropagation(); doPaste(); break;
-        case "c": e.preventDefault(); e.stopPropagation(); doCopy(); break;
-        case "x": e.preventDefault(); e.stopPropagation(); doCut(); break;
+      const key = e.key.toLowerCase();
+      if (key !== "v" && key !== "c" && key !== "x") return;
+      e.preventDefault();
+      e.stopPropagation();
+      const field = findField(e.target);
+      if (field) {
+        if (key === "v") pasteIntoField(field);
+        else if (key === "c") copyFromField(field);
+        else cutFromField(field);
+      } else {
+        if (key === "v") doPaste();
+        else if (key === "c") doCopy();
+        else doCut();
       }
     }, true /* capture */);
   }
