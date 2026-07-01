@@ -2046,6 +2046,11 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     const onDragKeyDown = (e: Event) => {
       const ke = e as KeyboardEvent;
       if (!pendingDragReplace) return;
+      // If focus moved out of the code text input — e.g. into the find/replace
+      // box, which is part of the editor widget and so does NOT fire
+      // onDidBlurEditorWidget — this keystroke isn't for the editor. Drop the
+      // pending state and let it reach the focused field untouched.
+      if (!editor.hasTextFocus()) { pendingDragReplace = false; return; }
       // A lone modifier press precedes the real char (Shift before 'A'); let it
       // through without consuming the pending state.
       if (ke.key === "Shift" || ke.key === "Control" || ke.key === "Alt" || ke.key === "Meta") return;
