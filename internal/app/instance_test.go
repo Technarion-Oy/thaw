@@ -49,20 +49,17 @@ func TestWorkdirOverrideArg(t *testing.T) {
 	cases := []struct {
 		name string
 		args []string
-		env  string // "" is equivalent to unset for os.Getenv, which the parser uses
 		want string
 	}{
-		{"arg wins", []string{"thaw", "--workdir=/a/b"}, "/env/dir", "/a/b"},
-		{"env fallback", []string{"thaw"}, "/env/dir", "/env/dir"},
-		{"neither", []string{"thaw"}, "", ""},
-		{"arg with spaces", []string{"thaw", "--workdir=/My Projects/x"}, "", "/My Projects/x"},
-		{"ignores other flags", []string{"thaw", "--foo", "--workdir=/z"}, "", "/z"},
-		{"empty arg falls through to env", []string{"thaw", "--workdir="}, "/env/dir", "/env/dir"},
+		{"present", []string{"thaw", "--workdir=/a/b"}, "/a/b"},
+		{"absent", []string{"thaw"}, ""},
+		{"arg with spaces", []string{"thaw", "--workdir=/My Projects/x"}, "/My Projects/x"},
+		{"ignores other flags", []string{"thaw", "--foo", "--workdir=/z"}, "/z"},
+		{"empty value ignored (no env fallback)", []string{"thaw", "--workdir="}, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			os.Args = c.args
-			t.Setenv("THAW_WORKDIR", c.env) // auto-restored after the subtest
 			if got := workdirOverrideArg(); got != c.want {
 				t.Errorf("workdirOverrideArg() = %q, want %q", got, c.want)
 			}

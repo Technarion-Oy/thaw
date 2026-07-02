@@ -138,16 +138,18 @@ func NewApp() *App {
 }
 
 // workdirOverrideArg returns the directory passed via --workdir=<dir> on the
-// command line (or the THAW_WORKDIR env var as a fallback), or "" if absent. Set
-// by "Open Folder in New Window" when it relaunches the executable so the new
-// instance opens that folder.
+// command line, or "" if absent. Set by "Open Folder in New Window" when it
+// relaunches the executable so the new instance opens that folder. Deliberately
+// arg-only (no env fallback): direct exec always delivers argv, and honoring a
+// stray/inherited env var would silently turn a normal launch into an override
+// window (blanked remote/branch, non-persisting saves) with no clear indicator.
 func workdirOverrideArg() string {
 	for _, arg := range os.Args[1:] {
 		if dir, ok := strings.CutPrefix(arg, "--workdir="); ok && dir != "" {
 			return dir
 		}
 	}
-	return os.Getenv("THAW_WORKDIR")
+	return ""
 }
 
 // startup is called by the Wails runtime after the application window is ready.
@@ -186,6 +188,9 @@ func (a *App) startup(ctx context.Context) {
 	a.migrationSvc = migration.NewService(func(eventName string, data interface{}) {
 		wailsruntime.EventsEmit(ctx, eventName, data)
 	})
+	// Let Snowpark resolve the working directory the override-aware way (an
+	// "Open Folder in New Window" instance's folder lives only in memory).
+	snowpark.SetWorkdirProvider(a.currentWorkdir)
 	a.snowparkSvc = snowpark.NewService(ctx, func(tabId, role, wh, db, schema string) {
 		if val, ok := a.tabSessions.Load(tabId); ok {
 			ts := val.(*tabSession)

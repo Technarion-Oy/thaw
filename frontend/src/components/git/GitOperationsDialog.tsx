@@ -317,7 +317,7 @@ function RepositorySection() {
 // ── Section 2: GitHub Authentication ─────────────────────────────────────────
 
 function AuthSection() {
-  const { oauthToken, loginWithOAuth, setOAuthToken, authorName, authorEmail, saveConfig } = useGitStore();
+  const { oauthToken, loginWithOAuth, setOAuthToken, authorName, authorEmail, saveAuthor } = useGitStore();
   const [loading, setLoading] = useState(false);
   const [showToken, setShowToken] = useState(false);
   const [tokenInput, setTokenInput] = useState("");
@@ -370,7 +370,7 @@ function AuthSection() {
   };
 
   const handleSaveIdentity = async () => {
-    await saveConfig({ authorName: name.trim(), authorEmail: email.trim() });
+    await saveAuthor(name.trim(), email.trim());
     antMessage.success("Commit identity saved");
   };
 

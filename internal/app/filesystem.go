@@ -392,16 +392,15 @@ func (a *App) PickDirectory() string {
 }
 
 // OpenFolderInNewInstance launches a second, independent instance of Thaw rooted
-// at dir (VS Code's "Open Folder in New Window"). The folder is passed both as
-// --workdir=<dir> and via the THAW_WORKDIR env var; the new process treats it as a
-// per-instance override and never writes it back to the global config, so the two
-// windows can work on different folders.
+// at dir (VS Code's "Open Folder in New Window"), passing it as --workdir=<dir>;
+// the new process treats it as a per-instance override and never writes it back to
+// the global config, so the two windows can work on different folders.
 //
 // We deliberately re-exec the running binary directly rather than `open -n
 // Thaw.app`: on macOS `open` resolves the target through LaunchServices by bundle
 // ID, which can launch a stale or duplicate registered copy of the app (running
 // old code that ignores --workdir) instead of the build in hand. Direct exec runs
-// exactly this binary and reliably delivers both argv and the environment.
+// exactly this binary and reliably delivers argv.
 func (a *App) OpenFolderInNewInstance(dir string) error {
 	if dir == "" {
 		return fmt.Errorf("no directory given")
@@ -416,7 +415,6 @@ func (a *App) OpenFolderInNewInstance(dir string) error {
 		return err
 	}
 	cmd := exec.Command(exe, "--workdir="+dir)
-	cmd.Env = append(os.Environ(), "THAW_WORKDIR="+dir)
 	if err := cmd.Start(); err != nil {
 		return err
 	}

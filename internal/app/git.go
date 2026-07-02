@@ -41,41 +41,46 @@ func (a *App) GetGitConfig() (config.GitConfig, error) {
 	return cfg.Git, nil
 }
 
-// copySharedGitFields copies the fields that are global/shared across all windows
-// (never per-repo or per-instance) from src into dst. It is the single source of
-// truth for the shared-vs-instance split that override-window handling relies on:
-// GetGitConfig blanks the per-repo fields (RemoteURL/Branch) and overrides ExportDir,
-// while SaveGitConfig preserves those on disk and copies only these shared fields. A
-// new GitConfig field is therefore treated as per-instance (preserved on disk, not
-// leaked to override windows) until it is deliberately added here. RecentDirs is
-// shared too but owned by AddRecentDir/ClearRecentDirs, so it's handled separately.
-func copySharedGitFields(dst *config.GitConfig, src config.GitConfig) {
-	dst.AuthorName = src.AuthorName
-	dst.AuthorEmail = src.AuthorEmail
-	dst.ExportPathTemplate = src.ExportPathTemplate
-}
-
-// SaveGitConfig persists git / export settings to disk.
-// The token field is intentionally absent — it must never be written.
-//
-// RecentDirs is owned exclusively by AddRecentDir/ClearRecentDirs, so it is always
-// preserved from disk here regardless of what the caller sent — a whole-struct write
-// of a stale snapshot must never drop the other window's recent entries.
+// SaveGitConfig persists only the per-repo/instance git fields — ExportDir,
+// RemoteURL, Branch. The genuinely-shared fields (AuthorName, AuthorEmail,
+// ExportPathTemplate, RecentDirs) are each owned by a dedicated atomic method
+// (SaveGitAuthor / SaveGitExportPathTemplate / AddRecentDir-ClearRecentDirs) and
+// preserved from disk here, so this whole-struct call can never write a stale
+// snapshot of them back — the lost-update trap when a second window (its own
+// process) saves a shared field concurrently. The token field is never written.
 func (a *App) SaveGitConfig(gitCfg config.GitConfig) error {
 	return config.Update(func(cfg *config.AppConfig) error {
-		// An override window's snapshot of the per-repo/instance-local fields
-		// (ExportDir, RemoteURL, Branch) belongs to a different repo, so keep the
-		// on-disk values (cfg.Git already holds them) and copy only the genuinely-
-		// shared prefs it may have edited — tracking its own folder in memory without
-		// clobbering the main window's remote/branch/export dir.
+		// An override window owns none of these: ExportDir is per-instance (memory
+		// only) and RemoteURL/Branch are per-repo (blanked in GetGitConfig so ops use
+		// the folder's live status). Just track the folder in memory.
 		if a.workdirOverridden {
 			a.setExportDir(gitCfg.ExportDir)
-			copySharedGitFields(&cfg.Git, gitCfg)
 			return nil
 		}
-		gitCfg.RecentDirs = cfg.Git.RecentDirs // preserve; owned by the atomic methods
-		cfg.Git = gitCfg
+		cfg.Git.ExportDir = gitCfg.ExportDir
+		cfg.Git.RemoteURL = gitCfg.RemoteURL
+		cfg.Git.Branch = gitCfg.Branch
 		a.setExportDir(gitCfg.ExportDir)
+		return nil
+	})
+}
+
+// SaveGitAuthor persists the shared commit-author identity with an atomic,
+// field-scoped write, so it can't be clobbered by a stale whole-struct snapshot
+// from another window (and works identically in override windows).
+func (a *App) SaveGitAuthor(name, email string) error {
+	return config.Update(func(cfg *config.AppConfig) error {
+		cfg.Git.AuthorName = name
+		cfg.Git.AuthorEmail = email
+		return nil
+	})
+}
+
+// SaveGitExportPathTemplate persists the shared export-path template (atomic,
+// field-scoped — see SaveGitAuthor).
+func (a *App) SaveGitExportPathTemplate(tmpl string) error {
+	return config.Update(func(cfg *config.AppConfig) error {
+		cfg.Git.ExportPathTemplate = tmpl
 		return nil
 	})
 }

@@ -1890,8 +1890,16 @@ export function SaveFile(arg1, arg2) {
   return window['go']['app']['App']['SaveFile'](arg1, arg2);
 }
 
+export function SaveGitAuthor(arg1, arg2) {
+  return window['go']['app']['App']['SaveGitAuthor'](arg1, arg2);
+}
+
 export function SaveGitConfig(arg1) {
   return window['go']['app']['App']['SaveGitConfig'](arg1);
+}
+
+export function SaveGitExportPathTemplate(arg1) {
+  return window['go']['app']['App']['SaveGitExportPathTemplate'](arg1);
 }
 
 export function SaveNotebook(arg1, arg2) {

@@ -83,6 +83,7 @@ func (s *Service) SavePipRegistryConfig(cfg config.PipRegistryConfig) error
 
 ## Gotchas
 
+- **Working directory**: `defaultVenvPath` (`<workdir>/snowpark_venv`) resolves the working dir through `workingDir()`, which prefers the provider injected by `snowpark.SetWorkdirProvider` (set once in `App.startup` to `App.currentWorkdir`) over a bare `config.Load().Git.ExportDir`. This is required for **"Open Folder in New Window"** override instances, whose folder lives only in memory and is never persisted — reading config directly would wrongly pick the shared/main-window folder. All config writers (`SaveSnowparkConfig`, `SaveSnowparkVenvPath`, `SaveSnowparkPythonPath`, `SavePipRegistryConfig`, `ResetPipRegistryConfig`) go through `config.Update` (process-locked RMW) so a concurrent write can't revert them.
 - Each kernel subprocess is a long-lived process; `StopNotebookSession` must be called on tab close to avoid orphaned Python processes. `App.shutdown()` calls `StopAll()` on the service.
 - The kernel stdout/stdin protocol is synchronous (one request in-flight per kernel session). Concurrent cell executions on the same tab are serialized by the per-session mutex.
 - `externalbrowser` authenticator cannot be automated; the kernel prints a warning and leaves `session` uncreated. Users must call `Session.builder` manually in a cell.

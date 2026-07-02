@@ -41,14 +41,14 @@ function applyTemplate(template: string): string {
 interface Props { onClose: () => void; }
 
 export default function ExportPathFormatModal({ onClose }: Props) {
-  const { exportPathTemplate, saveConfig } = useGitStore();
+  const { exportPathTemplate, saveExportPathTemplate } = useGitStore();
   const [value, setValue] = useState(exportPathTemplate || "");
 
   const effective = value.trim() || DEFAULT_TEMPLATE;
   const preview = applyTemplate(effective);
 
   function handleSave() {
-    saveConfig({ exportPathTemplate: value.trim() });
+    saveExportPathTemplate(value.trim());
     onClose();
   }
 

@@ -11,7 +11,7 @@
 // @thaw-domain: Git Integration
 
 import { create } from "zustand";
-import { GitStatus, GitCommitAndPush, GitPull, GitFetch, PickDirectory, GetGitConfig, SaveGitConfig, GitClone, GitListBranches, GitCheckoutBranch, GitCheckoutRemoteBranch, GitCreateBranch, GitDeleteBranch, GitDeleteRemoteBranch, GitMergeBranch, GitResetHard, GitUpdateRemoteURL, GitPushBranch, GitLoginWithOAuth, GitStageFile, GitUnstageFile, GitStageAll, GitUnstageAll, GitDiscardFile, OpenFolderInNewInstance, AddRecentDir, ClearRecentDirs } from "../../wailsjs/go/app/App";
+import { GitStatus, GitCommitAndPush, GitPull, GitFetch, PickDirectory, GetGitConfig, SaveGitConfig, GitClone, GitListBranches, GitCheckoutBranch, GitCheckoutRemoteBranch, GitCreateBranch, GitDeleteBranch, GitDeleteRemoteBranch, GitMergeBranch, GitResetHard, GitUpdateRemoteURL, GitPushBranch, GitLoginWithOAuth, GitStageFile, GitUnstageFile, GitStageAll, GitUnstageAll, GitDiscardFile, OpenFolderInNewInstance, AddRecentDir, ClearRecentDirs, SaveGitAuthor, SaveGitExportPathTemplate } from "../../wailsjs/go/app/App";
 import type { gitrepo } from "../../wailsjs/go/models";
 
 export type RepoStatus = gitrepo.RepoStatus;
@@ -51,14 +51,16 @@ interface GitState {
 
   // Actions
   loadConfig: () => Promise<void>;
+  // saveConfig persists only the per-repo/instance git fields. The shared identity/
+  // pref fields are owned by dedicated atomic actions (saveAuthor,
+  // saveExportPathTemplate) so a whole-struct write can't revert another window's edit.
   saveConfig: (patch: Partial<{
     exportDir: string;
     remoteURL: string;
     branch: string;
-    authorName: string;
-    authorEmail: string;
-    exportPathTemplate: string;
   }>) => Promise<void>;
+  saveAuthor: (name: string, email: string) => Promise<void>;
+  saveExportPathTemplate: (tmpl: string) => Promise<void>;
   pickExportDir: () => Promise<void>;
   // openFolder switches the working directory to `dir` (VS Code "Open Folder"),
   // recording it in the recent-folders list. Used by the File menu, the File
@@ -155,10 +157,11 @@ export const useGitStore = create<GitState>((set, get) => ({
   },
 
   saveConfig: async (patch) => {
-    const { exportDir, remoteURL, branch, authorName, authorEmail, exportPathTemplate } = get();
-    // recentDirs is deliberately NOT sent — it's owned by AddRecentDir/ClearRecentDirs
-    // (atomic on the backend); SaveGitConfig preserves the on-disk list regardless.
-    const merged = { exportDir, remoteURL, branch, authorName, authorEmail, exportPathTemplate, ...patch };
+    const { exportDir, remoteURL, branch } = get();
+    // Only the per-repo/instance fields ride SaveGitConfig. Shared fields (author,
+    // export-path template, recentDirs) are owned by dedicated atomic backend methods
+    // and preserved on disk, so they can't be clobbered by this whole-struct write.
+    const merged = { exportDir, remoteURL, branch, ...patch };
     set(merged);
     try {
       await SaveGitConfig(merged as any);
@@ -167,25 +170,49 @@ export const useGitStore = create<GitState>((set, get) => ({
     }
   },
 
+  saveAuthor: async (name, email) => {
+    set({ authorName: name, authorEmail: email });
+    try {
+      await SaveGitAuthor(name, email); // atomic, field-scoped — safe across windows
+    } catch {
+      // non-fatal — in-memory state is still updated
+    }
+  },
+
+  saveExportPathTemplate: async (tmpl) => {
+    set({ exportPathTemplate: tmpl });
+    try {
+      await SaveGitExportPathTemplate(tmpl);
+    } catch {
+      // non-fatal — in-memory state is still updated
+    }
+  },
+
   openFolder: async (dir: string) => {
     if (!dir) return;
-    if (dir !== get().exportDir) {
-      // Actually switching repos. Clear the previous folder's live status AND stored
-      // remote override up front so any git op during the async refresh window falls
-      // back to the NEW folder's own repo — an empty remoteURL makes the Go side use
-      // the actual origin at exportDir, and a null status disables Commit/Push (gated
-      // on stagedTotal) until the refresh lands, so B's changes can't push to A's
-      // remote. branch is NOT blanked — refreshStatus derives it from the new folder's
-      // live HEAD (it has no other fallback). Re-selecting the current folder skips all
-      // this so a manually-set remote override isn't wiped.
-      set({ status: null });
-      await get().saveConfig({ exportDir: dir, remoteURL: "" });
+    try {
+      if (dir !== get().exportDir) {
+        // Actually switching repos. Clear the previous folder's live status AND stored
+        // remote override up front so any git op during the async refresh window falls
+        // back to the NEW folder's own repo — an empty remoteURL makes the Go side use
+        // the actual origin at exportDir, and a null status disables Commit/Push (gated
+        // on stagedTotal) until the refresh lands, so B's changes can't push to A's
+        // remote. branch is NOT blanked — refreshStatus derives it from the new folder's
+        // live HEAD. Re-selecting the current folder skips this so a manual remote
+        // override isn't wiped.
+        set({ status: null });
+        await get().saveConfig({ exportDir: dir, remoteURL: "" });
+      }
+      // Atomic add returns the authoritative merged list (no stale-snapshot overwrite).
+      const recentDirs = await AddRecentDir(dir);
+      set({ recentDirs: recentDirs ?? [] });
+    } catch (e) {
+      set({ error: String(e) });
+    } finally {
+      // Always refresh — otherwise a thrown AddRecentDir would strand `status: null`
+      // and leave the new folder showing "no status" until an unrelated action ran.
+      await get().refreshStatus();
     }
-    // Atomic add on the backend returns the authoritative merged list (no stale-
-    // snapshot overwrite of another window's entries).
-    const recentDirs = await AddRecentDir(dir);
-    set({ recentDirs: recentDirs ?? [] });
-    await get().refreshStatus();
   },
 
   clearRecentDirs: async () => {

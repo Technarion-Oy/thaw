@@ -800,13 +800,37 @@ func pythonVersionAtLeast(version string, wantMajor, wantMinor int) bool {
 	return major > wantMajor || (major == wantMajor && minor >= wantMinor)
 }
 
+// workdirProvider, when set by the app layer at startup, returns this process's
+// working directory in an override-aware way (an "Open Folder in New Window"
+// instance's folder lives only in memory and is never persisted, so reading it
+// straight from config would wrongly yield the shared/main-window folder). This
+// package reads config globally, so a package-level provider matches that style;
+// it is written once before any Snowpark action, so no lock is needed.
+var workdirProvider func() string
+
+// SetWorkdirProvider injects the override-aware working-directory accessor.
+func SetWorkdirProvider(fn func() string) { workdirProvider = fn }
+
+// workingDir returns this process's working directory, preferring the injected
+// provider and falling back to the persisted ExportDir.
+func workingDir() string {
+	if workdirProvider != nil {
+		if d := workdirProvider(); d != "" {
+			return d
+		}
+	}
+	if cfg, err := config.Load(); err == nil {
+		return cfg.Git.ExportDir
+	}
+	return ""
+}
+
 // defaultVenvPath returns the default venv location.
-// Prefers <exportDir>/snowpark_venv so the env lives next to the project files;
-// falls back to ~/snowpark_venv when no export directory is configured.
+// Prefers <workingDir>/snowpark_venv so the env lives next to the project files;
+// falls back to ~/snowpark_venv when no working directory is configured.
 func defaultVenvPath() string {
-	cfg, err := config.Load()
-	if err == nil && cfg.Git.ExportDir != "" {
-		return filepath.Join(cfg.Git.ExportDir, "snowpark_venv")
+	if dir := workingDir(); dir != "" {
+		return filepath.Join(dir, "snowpark_venv")
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, "snowpark_venv")
@@ -1034,22 +1058,18 @@ func (s *Service) GetSnowparkConfig() SnowparkConfigResult {
 
 // SaveSnowparkConfig persists the backend choice.
 func (s *Service) SaveSnowparkConfig(backend string) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	cfg.Snowpark.Backend = backend
-	return config.Save(cfg)
+	return config.Update(func(cfg *config.AppConfig) error {
+		cfg.Snowpark.Backend = backend
+		return nil
+	})
 }
 
 // SaveSnowparkVenvPath persists the custom venv directory path.
 func (s *Service) SaveSnowparkVenvPath(path string) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	cfg.Snowpark.VenvPath = path
-	return config.Save(cfg)
+	return config.Update(func(cfg *config.AppConfig) error {
+		cfg.Snowpark.VenvPath = path
+		return nil
+	})
 }
 
 // VenvFolderExists reports whether the configured venv directory exists on disk.
@@ -1065,12 +1085,10 @@ func (s *Service) VenvFolderExists() bool {
 
 // SaveSnowparkPythonPath persists the chosen Python binary path for venv creation.
 func (s *Service) SaveSnowparkPythonPath(pythonPath string) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	cfg.Snowpark.PythonPath = pythonPath
-	return config.Save(cfg)
+	return config.Update(func(cfg *config.AppConfig) error {
+		cfg.Snowpark.PythonPath = pythonPath
+		return nil
+	})
 }
 
 // ─── pip registry IPC ─────────────────────────────────────────────────────────
@@ -1086,22 +1104,18 @@ func (s *Service) GetPipRegistryConfig() (config.PipRegistryConfig, error) {
 
 // SavePipRegistryConfig persists the pip registry configuration to disk.
 func (s *Service) SavePipRegistryConfig(cfg config.PipRegistryConfig) error {
-	appCfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	appCfg.PipRegistry = cfg
-	return config.Save(appCfg)
+	return config.Update(func(appCfg *config.AppConfig) error {
+		appCfg.PipRegistry = cfg
+		return nil
+	})
 }
 
 // ResetPipRegistryConfig clears the pip registry configuration.
 func (s *Service) ResetPipRegistryConfig() error {
-	appCfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	appCfg.PipRegistry = config.PipRegistryConfig{}
-	return config.Save(appCfg)
+	return config.Update(func(appCfg *config.AppConfig) error {
+		appCfg.PipRegistry = config.PipRegistryConfig{}
+		return nil
+	})
 }
 
 // PickCACertFile opens a file picker for certificate files and returns the chosen path.

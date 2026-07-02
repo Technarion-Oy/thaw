@@ -78,9 +78,11 @@ export function deriveNewAndPartial(
   return { newFilesRel, partiallyStagedRel };
 }
 
-/** Split a path into its directory prefix (with trailing slash) and filename. */
+/** Split a path into its directory prefix (with trailing slash) and filename.
+ *  Trailing separators are stripped first so "a/b/" yields name "b" (matches
+ *  FileBrowser's pathBase). */
 export function splitPath(path: string): { dir: string; name: string } {
-  const norm = path.replace(/\\/g, "/");
+  const norm = path.replace(/\\/g, "/").replace(/\/+$/, "");
   const i = norm.lastIndexOf("/");
   return i >= 0 ? { dir: norm.slice(0, i + 1), name: norm.slice(i + 1) } : { dir: "", name: norm };
 }

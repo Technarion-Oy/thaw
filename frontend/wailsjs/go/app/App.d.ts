@@ -1014,7 +1014,11 @@ export function SaveFeatureFlags(arg1:config.FeatureFlags):Promise<void>;
 
 export function SaveFile(arg1:string,arg2:string):Promise<void>;
 
+export function SaveGitAuthor(arg1:string,arg2:string):Promise<void>;
+
 export function SaveGitConfig(arg1:config.GitConfig):Promise<void>;
+
+export function SaveGitExportPathTemplate(arg1:string):Promise<void>;
 
 export function SaveNotebook(arg1:string,arg2:string):Promise<void>;
 
