@@ -29,6 +29,10 @@ const CLR_TEXT         = "var(--text-muted)";
 const CLR_TEXT_ACTIVE  = "var(--text)";
 const CLR_ACCENT       = "var(--accent)";
 
+// Same platform check QueryPage's global keydown handler and KeyboardShortcutsModal use —
+// menu shortcut hints must match the modifier keys actually bound on this platform.
+const isMac = /Macintosh/i.test(navigator.userAgent);
+
 // Icon for a tab, matching the tab-strip logic (diff → mcp → notebook → file → scratch).
 function tabIcon(tab: Tab, size = 11) {
   const style = { fontSize: size, flexShrink: 0 };
@@ -61,6 +65,9 @@ export default function TabBar() {
   const draggingId  = useRef<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string; before: boolean } | null>(null);
   const [bulkCloseConfirm, setBulkCloseConfirm] = useState<{ ids: string[]; dirtyCount: number } | null>(null);
+  // Which tab's context menu is open, if any — lets buildTabMenuItems run only for
+  // the tab actually showing a menu instead of once per tab on every render.
+  const [openTabMenuId, setOpenTabMenuId] = useState<string | null>(null);
 
   // Track which tab the pointer is hovering over so the close button
   // only appears on hover (less cluttered when many tabs are open).
@@ -180,15 +187,20 @@ export default function TabBar() {
     }
   };
 
+  // Tab-independent, so computed once per render rather than once per tab inside
+  // buildTabMenuItems.
+  const savedTabs = tabs.filter((t) => t.sql === t.savedSql);
+
   // Right-click tab menu — shared visual language with the Active Files dropdown
   // and (as far as Monaco's API allows) the editor's own context menu: icons,
   // dividers, danger styling on destructive actions, keybinding hints via `extra`.
+  // Only called for the tab whose menu is actually open (see the Dropdown below) —
+  // not on every render of every tab.
   const buildTabMenuItems = (tab: Tab): MenuProps["items"] => {
     const tabIdx     = tabs.findIndex((t) => t.id === tab.id);
     const rightTabs  = tabs.slice(tabIdx + 1);
     const otherTabs  = tabs.filter((t) => t.id !== tab.id);
-    const savedTabs  = tabs.filter((t) => t.sql === t.savedSql);
-    const splitCandidates = tabs.filter((t) => t.id !== tab.id && !t.diff);
+    const splitCandidates = otherTabs.filter((t) => !t.diff);
 
     const items: MenuProps["items"] = [];
 
@@ -201,7 +213,7 @@ export default function TabBar() {
       key: "close",
       icon: <CloseOutlined />,
       label: "Close",
-      extra: "⌘W",
+      extra: isMac ? "⌘W" : "Ctrl+W",
       onClick: () => window.dispatchEvent(new CustomEvent("thaw:request-close-tab", { detail: { tabId: tab.id } })),
     });
     if (otherTabs.length > 0) {
@@ -270,7 +282,12 @@ export default function TabBar() {
 
         return (
           <Tooltip key={tab.id} title={tooltipText} mouseEnterDelay={0.6} placement="bottom">
-          <Dropdown trigger={["contextMenu"]} menu={{ items: buildTabMenuItems(tab) }}>
+          <Dropdown
+            trigger={["contextMenu"]}
+            open={openTabMenuId === tab.id}
+            onOpenChange={(open) => setOpenTabMenuId(open ? tab.id : null)}
+            menu={{ items: openTabMenuId === tab.id ? buildTabMenuItems(tab) : [] }}
+          >
           <div
             draggable={renamingId !== tab.id}
             onClick={() => activateTab(tab.id)}
