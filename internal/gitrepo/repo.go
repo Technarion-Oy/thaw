@@ -725,6 +725,13 @@ func DiscardFile(dir, file string) error {
 // only replaced once the new content is fully written, so a failure mid-write
 // never corrupts or truncates it.
 func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
+	// Recreate any missing parent at the working tree's conventional 0o755, not the
+	// 0o700 filesystem.WriteFileAtomic uses for per-user config dirs — its own
+	// MkdirAll then no-ops on the now-existing dir. Matters when DiscardFile revives
+	// a directory the user deleted, so it isn't left narrower than its siblings.
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
 	return filesystem.WriteFileAtomic(path, data, mode)
 }
 

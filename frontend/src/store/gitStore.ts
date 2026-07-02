@@ -216,8 +216,14 @@ export const useGitStore = create<GitState>((set, get) => ({
   },
 
   clearRecentDirs: async () => {
-    await ClearRecentDirs();
-    set({ recentDirs: [] });
+    // Called fire-and-forget from the folder dropdown, so surface failures via the
+    // error slice rather than an unhandled rejection (nothing catches it upstream).
+    try {
+      await ClearRecentDirs();
+      set({ recentDirs: [] });
+    } catch (e) {
+      set({ error: String(e) });
+    }
   },
 
   openInNewWindow: async () => {
@@ -233,9 +239,14 @@ export const useGitStore = create<GitState>((set, get) => ({
       set({ error: String(e) });
       return;
     }
-    // Record in the shared recents so it's reachable from any window.
-    const recentDirs = await AddRecentDir(dir);
-    set({ recentDirs: recentDirs ?? [] });
+    // Record in the shared recents so it's reachable from any window. Guard this
+    // too — a transient failure shouldn't surface as an unhandled rejection.
+    try {
+      const recentDirs = await AddRecentDir(dir);
+      set({ recentDirs: recentDirs ?? [] });
+    } catch (e) {
+      set({ error: String(e) });
+    }
   },
 
   pickExportDir: async () => {

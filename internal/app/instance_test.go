@@ -41,7 +41,7 @@ func TestUnionRecentDirs(t *testing.T) {
 
 // workdirOverrideArg drives the per-instance working-directory override used by
 // "Open Folder in New Window"; a regression here silently reverts new windows to
-// the global folder, so pin the arg + env-fallback precedence.
+// the global folder, so pin the arg-only parsing (no env fallback, by design).
 func TestWorkdirOverrideArg(t *testing.T) {
 	origArgs := os.Args
 	t.Cleanup(func() { os.Args = origArgs })

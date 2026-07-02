@@ -96,10 +96,14 @@ function RepositorySection() {
         setCloneUrl("");
         setClonePath("");
         // Route through openFolder so the cloned path is added to Recent (consistent
-        // with every other folder change) and status refreshes; the cloned repo's
-        // origin is picked up from live status, so the blanked stored remote is fine.
+        // with every other folder change) and status refreshes.
         if (targetPath) {
           await useGitStore.getState().openFolder(targetPath);
+          // Persist the repo's real origin. openFolder only clears the stored remote
+          // on an actual switch, so a same-folder clone would otherwise leave a stale
+          // on-disk remoteURL that commit/push prefer over live status — silently
+          // repointing origin to the previous repo's URL.
+          await useGitStore.getState().saveConfig({ remoteURL: cloneUrl });
         } else {
           await refreshStatus();
         }
@@ -124,12 +128,16 @@ function RepositorySection() {
       setInitMode(false);
 
       // Route through openFolder so the initialized path lands in Recent and status
-      // refreshes; GitInitWithRemote already set the repo's origin, so it's read back
-      // from live status (the stored remote override is blanked on the switch).
+      // refreshes.
+      const initedRemote = cloneUrl;
       setCloneUrl("");
       setClonePath("");
       if (targetPath) {
         await useGitStore.getState().openFolder(targetPath);
+        // Persist the origin GitInitWithRemote just set. openFolder only clears the
+        // stored remote on an actual switch, so a same-folder init would otherwise
+        // leave a stale on-disk remoteURL that commit/push silently push to.
+        await useGitStore.getState().saveConfig({ remoteURL: initedRemote });
       } else {
         await refreshStatus();
       }
