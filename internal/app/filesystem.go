@@ -15,7 +15,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"thaw/internal/config"
 	"thaw/internal/filesystem"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -183,14 +182,20 @@ func (a *App) setExportDir(dir string) {
 	a.exportDirMu.Unlock()
 }
 
+// currentWorkdir returns this process's working directory (the override folder in
+// an "Open Folder in New Window" instance, otherwise the persisted one). Unlike
+// exportRoot it never errors on an empty dir — callers use it for dialog defaults.
+func (a *App) currentWorkdir() string {
+	a.exportDirMu.RLock()
+	defer a.exportDirMu.RUnlock()
+	return a.cachedExportDir
+}
+
 // PickOpenFile opens a native open-file dialog filtered to SQL, YAML and
 // Python files and returns the chosen path, or an empty string if canceled.
 // The dialog opens in the configured export directory when one is set.
 func (a *App) PickOpenFile() string {
-	defaultDir := ""
-	if cfg, err := config.Load(); err == nil {
-		defaultDir = cfg.Git.ExportDir
-	}
+	defaultDir := a.currentWorkdir()
 	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
 		Title:            "Open file",
 		DefaultDirectory: defaultDir,
@@ -214,10 +219,7 @@ func (a *App) PickOpenFile() string {
 // for opening files other than SQL/YAML/Python. The dialog opens in the
 // configured export directory when one is set.
 func (a *App) PickAnyFile() string {
-	defaultDir := ""
-	if cfg, err := config.Load(); err == nil {
-		defaultDir = cfg.Git.ExportDir
-	}
+	defaultDir := a.currentWorkdir()
 	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
 		Title:            "Open any file",
 		DefaultDirectory: defaultDir,
@@ -401,7 +403,13 @@ func (a *App) OpenFolderInNewInstance(dir string) error {
 	}
 	cmd := exec.Command(exe, "--workdir="+dir)
 	cmd.Env = append(os.Environ(), "THAW_WORKDIR="+dir)
-	return cmd.Start()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	// Reap the child once it exits so it doesn't linger as a zombie in this
+	// long-lived parent's process table after its window is closed.
+	go func() { _ = cmd.Wait() }()
+	return nil
 }
 
 // PickFileForFormatPreview opens a native file-picker filtered to common data

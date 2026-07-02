@@ -27,8 +27,8 @@ func (a *App) GetGitConfig() (config.GitConfig, error) {
 	if err != nil {
 		return config.GitConfig{}, err
 	}
-	if a.workdirOverride != "" {
-		cfg.Git.ExportDir = a.workdirOverride
+	if a.workdirOverridden {
+		cfg.Git.ExportDir = a.currentWorkdir()
 	}
 	return cfg.Git, nil
 }
@@ -40,15 +40,14 @@ func (a *App) SaveGitConfig(gitCfg config.GitConfig) error {
 	if err != nil {
 		return err
 	}
-	// In an override window the working folder is per-instance: track it in memory
-	// (so file IPC and GetGitConfig follow folder switches within this window) but
-	// pin the persisted ExportDir to whatever is already on disk, so this window
-	// never clobbers the global working dir used by the main instance / next launch.
-	if a.workdirOverride != "" {
-		a.workdirOverride = gitCfg.ExportDir
+	// An override window's in-memory GitConfig is a snapshot taken at its own
+	// startup and can be stale relative to edits the main window has since saved.
+	// Writing the whole struct back would clobber those (remote, branch, author, …),
+	// so an override window persists NOTHING but the shared RecentDirs list (merged
+	// into the fresh on-disk config) and tracks its own folder in memory only.
+	if a.workdirOverridden {
 		a.setExportDir(gitCfg.ExportDir)
-		gitCfg.ExportDir = cfg.Git.ExportDir
-		cfg.Git = gitCfg
+		cfg.Git.RecentDirs = gitCfg.RecentDirs
 		return config.Save(cfg)
 	}
 	cfg.Git = gitCfg

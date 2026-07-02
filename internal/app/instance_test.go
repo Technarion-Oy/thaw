@@ -20,20 +20,12 @@ import (
 // the global folder, so pin the arg + env-fallback precedence.
 func TestWorkdirOverrideArg(t *testing.T) {
 	origArgs := os.Args
-	origEnv, hadEnv := os.LookupEnv("THAW_WORKDIR")
-	t.Cleanup(func() {
-		os.Args = origArgs
-		if hadEnv {
-			os.Setenv("THAW_WORKDIR", origEnv)
-		} else {
-			os.Unsetenv("THAW_WORKDIR")
-		}
-	})
+	t.Cleanup(func() { os.Args = origArgs })
 
 	cases := []struct {
 		name string
 		args []string
-		env  string
+		env  string // "" is equivalent to unset for os.Getenv, which the parser uses
 		want string
 	}{
 		{"arg wins", []string{"thaw", "--workdir=/a/b"}, "/env/dir", "/a/b"},
@@ -45,11 +37,7 @@ func TestWorkdirOverrideArg(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			os.Args = c.args
-			if c.env == "" {
-				os.Unsetenv("THAW_WORKDIR")
-			} else {
-				os.Setenv("THAW_WORKDIR", c.env)
-			}
+			t.Setenv("THAW_WORKDIR", c.env) // auto-restored after the subtest
 			if got := workdirOverrideArg(); got != c.want {
 				t.Errorf("workdirOverrideArg() = %q, want %q", got, c.want)
 			}

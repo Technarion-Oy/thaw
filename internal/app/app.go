@@ -102,15 +102,17 @@ type App struct {
 	gitCommitFiltersMu sync.Mutex
 	gitCommitFilters   map[string]string
 
-	// Cached export directory (set on startup and when SaveGitConfig is called).
-	// workdirOverride, when non-empty, is a per-instance working directory passed
-	// via --workdir=<dir> when this window was launched by "Open Folder in New
-	// Window". It shadows the persisted working dir for this process only and is
-	// never written back to the global config (see GetGitConfig / SaveGitConfig),
-	// so multiple windows can operate on different folders without fighting.
+	// Cached working directory — the single source of truth for this process's
+	// folder, guarded by exportDirMu (set on startup and by SaveGitConfig).
 	exportDirMu     sync.RWMutex
 	cachedExportDir string
-	workdirOverride string
+
+	// workdirOverridden marks this process as an "Open Folder in New Window"
+	// instance: it was launched with --workdir=<dir>, so its folder lives only in
+	// cachedExportDir and is never persisted back to the shared config (see
+	// GetGitConfig / SaveGitConfig), letting windows operate on different folders
+	// without fighting. Set once in NewApp and never mutated, so no lock is needed.
+	workdirOverridden bool
 
 	// File system watcher for the working directory.
 	fsWatcherMu sync.Mutex
@@ -129,9 +131,9 @@ type App struct {
 // NewApp creates and returns a new App instance for use with the Wails runtime.
 func NewApp() *App {
 	return &App{
-		gitCommitFilters: make(map[string]string),
-		queryLog:         querylog.New(),
-		workdirOverride:  workdirOverrideArg(),
+		gitCommitFilters:  make(map[string]string),
+		queryLog:          querylog.New(),
+		workdirOverridden: workdirOverrideArg() != "",
 	}
 }
 
@@ -166,10 +168,10 @@ func (a *App) startup(ctx context.Context) {
 	// Cache the export directory so file management IPC methods don't re-read config.
 	// A --workdir override (this window was opened via "Open Folder in New Window")
 	// wins over the persisted dir and retitles the window so the two are tellable apart.
-	if a.workdirOverride != "" {
-		logger.L.Info("launched with working-directory override", "dir", a.workdirOverride)
-		a.setExportDir(a.workdirOverride)
-		wailsruntime.WindowSetTitle(ctx, "Thaw — "+filepath.Base(a.workdirOverride))
+	if dir := workdirOverrideArg(); dir != "" {
+		logger.L.Info("launched with working-directory override", "dir", dir)
+		a.setExportDir(dir)
+		wailsruntime.WindowSetTitle(ctx, "Thaw — "+filepath.Base(dir))
 	} else if cfg, err := config.Load(); err == nil {
 		a.setExportDir(cfg.Git.ExportDir)
 	}
