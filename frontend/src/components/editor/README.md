@@ -20,7 +20,7 @@ git gutter decorations, the tab bar, editor preferences, and the cross-tab searc
 | `snowflakeSnippets.ts` | Snowflake Scripting snippet definitions (`getSnowflakeSnippets`) and `SNIPPET_CATEGORIES` for the cascading context-menu submenu. Snippets are applied through `applyPrefsToSnippet` at insertion time (keyword casing, indent style). |
 | `CrossTabSearch.tsx` | Search/replace panel triggered by `⌘⇧H` / `Ctrl+Shift+H`. Searches all tabs (SQL, YAML, Python) and notebook cell sources. Navigates via `thaw:scroll-to-line` / `thaw:editor-ready` events. Supports regex with back-references, case-sensitive toggle, and match counter. Gated behind the `crossTabSearch` feature flag. |
 | `CrossTabSearch.test.ts` | Unit tests for `getNotebookCellSources` and related helpers in `CrossTabSearch.tsx`. |
-| `TabBar.tsx` | Renders the tab strip above the editor. Supports drag-to-reorder, right-click context menu (close, close others, split, duplicate), bulk-close confirmation, and split-tab mode. MCP-created tabs (`tab.mcpOrigin`) display a `RobotOutlined` icon in the accent color — this check takes priority over the notebook `ExperimentOutlined` icon, so MCP-created notebooks also show the robot badge. A far-right `CaretDownOutlined` button (after the `+` new-scratch button) opens the **Active Files** dropdown: a searchable list of every open tab (icon + dirty `•`/orphan `↺` prefix + title); clicking an entry calls `activateTab`. Also toggled by `⌘⇧E` / `Ctrl+Shift+E` via the `thaw:open-active-files` window event; closes on outside click or Escape. Non-file tabs (no backing path, not a diff) can be **renamed** — double-click the title or use the context-menu "Rename" — via `queryStore.renameTab`; file tabs keep the filename-derived title. New scratch tabs are numbered `SQL (n)` (`nextScratchTitle` in `queryStore`). Reads/writes `queryStore`. |
+| `TabBar.tsx` | Renders the tab strip above the editor. Supports drag-to-reorder, right-click context menu (close, close others, split, duplicate), bulk-close confirmation, and split-tab mode. MCP-created tabs (`tab.mcpOrigin`) display a `RobotOutlined` icon in the accent color — this check takes priority over the notebook `ExperimentOutlined` icon, so MCP-created notebooks also show the robot badge. The right-click menu is a per-tab AntD `Dropdown` (`trigger={["contextMenu"]}`, built by `buildTabMenuItems`) — same idiom as the query-history context menu in `QueryPage.tsx` — with icons, `danger: true` on Close Others/Close All, an `extra` keybinding hint on Close (`⌘W`), and "Split with" as a native submenu (`children`) instead of a hand-rolled hover panel. A far-right `CaretDownOutlined` button (after the `+` new-scratch button) opens the **Active Files** dropdown: a searchable list of every open tab (icon + dirty `•`/orphan `↺` prefix + title), styled with the same `.ctx-item` class (rounded, inset rows) so it reads as one visual language with the tab context menu; clicking an entry calls `activateTab`. Also toggled by `⌘⇧E` / `Ctrl+Shift+E` via the `thaw:open-active-files` window event; closes on outside click or Escape. Non-file tabs (no backing path, not a diff) can be **renamed** — double-click the title or use the context-menu "Rename" — via `queryStore.renameTab`; file tabs keep the filename-derived title. New scratch tabs are numbered `SQL (n)` (`nextScratchTitle` in `queryStore`). Reads/writes `queryStore`. |
 | `EditorPreferencesModal.tsx` | Modal for editor preferences (keyword case, indent style/size, font, font size). Calls `GetEditorPrefs`/`SaveEditorPrefs` IPC. Shows a live SQL preview using `formatSQL`. |
 | `yamlWorker.ts` | Vite worker entry point that imports `monaco-yaml/yaml.worker` for YAML language support. |
 
@@ -91,6 +91,21 @@ Cmd/Ctrl+V/C/X handler in `App.tsx` (which skips the code buffer via `monaco.edi
 - **Do not use `instanceof SubmenuAction`** from an external import for the snippet submenu —
   Monaco's `menu.js` checks its own bundled class; external imports are different module instances
   and always fail. Use `MenuRegistry` and let Monaco create `SubmenuAction` internally.
+- **Monaco's standalone editor context menu does not render item icons at all**, verified
+  empirically (issue #592): the internal `ICommandAction.icon` field on a `MenuRegistry`-registered
+  command (tried on Explain SQL / SQL Snippets) never reaches the rendered `.action-label` — the
+  standalone context-menu's action resolution doesn't go through the same `MenuItemAction`
+  icon-to-class conversion the full VS Code menu bar uses. The codicon font itself loads fine (other
+  Monaco chrome uses it), so don't spend more time trying to attach an `icon` — there's no hook for
+  it in this render path, for `addAction` items or `MenuRegistry` items alike.
+- **Keybinding hints in the Monaco context menu only auto-render when the shown action's own id has
+  a keybinding the editor's keybinding service can resolve.** `editor.addAction({keybindings: [...]})`
+  registers a real per-editor keybinding under that action's id, and the built-in context menu does
+  look it up and right-align it — confirmed working for Format SQL's `⇧⌥F` (and for Monaco's own
+  built-ins, e.g. "Change All Occurrences" shows `⌘F2`). Actions with no `keybindings` entry (Toggle
+  Line Comment, Find & Replace in Tabs — the latter is deliberately unbound here to avoid a
+  double-toggle with `QueryPage`'s global `⌘⇧H` handler) can't get that native hint, so their
+  shortcut is appended to the label text instead (`"Toggle Line Comment    ⌘/"`).
 - **Find-widget button tooltips clip under the tab bar** unless forced below. Monaco's base-layer
   hover tooltips default to rendering *above* their target and the find widget is pinned to the
   editor's top edge, so "above" lands in the tab-bar band where the editor pane's `overflow: hidden`
