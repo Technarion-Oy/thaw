@@ -398,15 +398,10 @@ export const useQueryStore = create<QueryState>()(
       if (idx === -1) return {};
       const newTabs = state.tabs.filter((t) => t.id !== id);
 
-      // Closing the last tab. If it's already a clean scratch tab there's
-      // nothing to close (VS Code behaviour) — keep it. Otherwise replace it
-      // with a fresh "SQL (1)" scratch tab; pass newTabs (empty) so the number
-      // resets instead of climbing on every close.
+      // Closing the last tab — replace it with a fresh scratch tab so the
+      // editor is never left empty. Pass newTabs (empty) so the "SQL (n)"
+      // number resets to 1 instead of climbing on every close (#595).
       if (newTabs.length === 0) {
-        const closing = state.tabs[idx];
-        if (closing.isDefaultTitle && closing.sql === closing.savedSql && !closing.path) {
-          return {};
-        }
         const freshTab = makeScratchTab(newTabs);
         return {
           tabs: [freshTab],
