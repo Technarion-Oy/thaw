@@ -19,11 +19,16 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-// GetGitConfig returns the persisted git / export settings.
+// GetGitConfig returns the persisted git / export settings. When this window was
+// launched with a --workdir override, the returned ExportDir reflects that
+// per-instance folder rather than the global one, so the frontend roots there.
 func (a *App) GetGitConfig() (config.GitConfig, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return config.GitConfig{}, err
+	}
+	if a.workdirOverride != "" {
+		cfg.Git.ExportDir = a.workdirOverride
 	}
 	return cfg.Git, nil
 }
@@ -34,6 +39,17 @@ func (a *App) SaveGitConfig(gitCfg config.GitConfig) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
+	}
+	// In an override window the working folder is per-instance: track it in memory
+	// (so file IPC and GetGitConfig follow folder switches within this window) but
+	// pin the persisted ExportDir to whatever is already on disk, so this window
+	// never clobbers the global working dir used by the main instance / next launch.
+	if a.workdirOverride != "" {
+		a.workdirOverride = gitCfg.ExportDir
+		a.setExportDir(gitCfg.ExportDir)
+		gitCfg.ExportDir = cfg.Git.ExportDir
+		cfg.Git = gitCfg
+		return config.Save(cfg)
 	}
 	cfg.Git = gitCfg
 	a.setExportDir(gitCfg.ExportDir)

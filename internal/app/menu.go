@@ -43,8 +43,16 @@ func buildMenu(app *App) *menu.Menu {
 		wailsruntime.EventsEmit(app.ctx, "menu:open")
 	})
 
-	fileMenu.AddText("Open Any File…", keys.Combo("o", keys.CmdOrCtrlKey, keys.ShiftKey), func(_ *menu.CallbackData) {
+	fileMenu.AddText("Open Any File…", nil, func(_ *menu.CallbackData) {
 		wailsruntime.EventsEmit(app.ctx, "menu:open-any")
+	})
+
+	fileMenu.AddText("Open Folder…", keys.Combo("o", keys.CmdOrCtrlKey, keys.ShiftKey), func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:open-folder")
+	})
+
+	fileMenu.AddText("Open Folder in New Window…", nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:open-folder-new-window")
 	})
 
 	fileMenu.AddSeparator()

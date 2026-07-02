@@ -914,6 +914,8 @@ export function NormalizeSqlScalar(arg1:string):Promise<string>;
 
 export function NotebookUseContext(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
+export function OpenFolderInNewInstance(arg1:string):Promise<void>;
+
 export function ParseClientPolicy(arg1:string):Promise<authenticationpolicy.ClientPolicy>;
 
 export function ParseMFAPolicy(arg1:string):Promise<authenticationpolicy.MFAPolicy>;

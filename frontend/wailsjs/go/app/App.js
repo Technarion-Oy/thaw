@@ -1690,6 +1690,10 @@ export function NotebookUseContext(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['NotebookUseContext'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function OpenFolderInNewInstance(arg1) {
+  return window['go']['app']['App']['OpenFolderInNewInstance'](arg1);
+}
+
 export function ParseClientPolicy(arg1) {
   return window['go']['app']['App']['ParseClientPolicy'](arg1);
 }

@@ -624,6 +624,7 @@ export namespace config {
 	    authorName: string;
 	    authorEmail: string;
 	    exportPathTemplate: string;
+	    recentDirs?: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new GitConfig(source);
@@ -637,6 +638,7 @@ export namespace config {
 	        this.authorName = source["authorName"];
 	        this.authorEmail = source["authorEmail"];
 	        this.exportPathTemplate = source["exportPathTemplate"];
+	        this.recentDirs = source["recentDirs"];
 	    }
 	}
 	export class NotebookPrefs {

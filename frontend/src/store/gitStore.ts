@@ -11,7 +11,7 @@
 // @thaw-domain: Git Integration
 
 import { create } from "zustand";
-import { GitStatus, GitCommitAndPush, GitPull, GitFetch, PickDirectory, GetGitConfig, SaveGitConfig, GitClone, GitListBranches, GitCheckoutBranch, GitCheckoutRemoteBranch, GitCreateBranch, GitDeleteBranch, GitDeleteRemoteBranch, GitMergeBranch, GitResetHard, GitUpdateRemoteURL, GitPushBranch, GitLoginWithOAuth, GitStageFile, GitUnstageFile, GitStageAll, GitUnstageAll, GitDiscardFile } from "../../wailsjs/go/app/App";
+import { GitStatus, GitCommitAndPush, GitPull, GitFetch, PickDirectory, GetGitConfig, SaveGitConfig, GitClone, GitListBranches, GitCheckoutBranch, GitCheckoutRemoteBranch, GitCreateBranch, GitDeleteBranch, GitDeleteRemoteBranch, GitMergeBranch, GitResetHard, GitUpdateRemoteURL, GitPushBranch, GitLoginWithOAuth, GitStageFile, GitUnstageFile, GitStageAll, GitUnstageAll, GitDiscardFile, OpenFolderInNewInstance } from "../../wailsjs/go/app/App";
 import type { gitrepo } from "../../wailsjs/go/models";
 
 export type RepoStatus = gitrepo.RepoStatus;
@@ -29,6 +29,7 @@ interface GitState {
   authorName: string;
   authorEmail: string;
   exportPathTemplate: string;
+  recentDirs: string[];
   configLoaded: boolean;
 
   // Runtime state
@@ -57,8 +58,17 @@ interface GitState {
     authorName: string;
     authorEmail: string;
     exportPathTemplate: string;
+    recentDirs: string[];
   }>) => Promise<void>;
   pickExportDir: () => Promise<void>;
+  // openFolder switches the working directory to `dir` (VS Code "Open Folder"),
+  // recording it in the recent-folders list. Used by the File menu, the File
+  // Browser header dropdown, and pickExportDir.
+  openFolder: (dir: string) => Promise<void>;
+  clearRecentDirs: () => Promise<void>;
+  // openInNewWindow picks a folder and launches a second Thaw instance rooted
+  // there, leaving this window's working directory unchanged.
+  openInNewWindow: () => Promise<void>;
   refreshStatus: (silent?: boolean) => Promise<void>;
   pull: () => Promise<void>;
 
@@ -106,6 +116,7 @@ export const useGitStore = create<GitState>((set, get) => ({
   authorName: "",
   authorEmail: "",
   exportPathTemplate: "",
+  recentDirs: [],
   configLoaded: false,
 
   status: null,
@@ -132,6 +143,7 @@ export const useGitStore = create<GitState>((set, get) => ({
         authorName:         cfg.authorName         || "",
         authorEmail:        cfg.authorEmail        || "",
         exportPathTemplate: cfg.exportPathTemplate || "",
+        recentDirs:         cfg.recentDirs         || [],
         configLoaded: true,
       });
       // Auto-refresh git status if we have a saved directory
@@ -144,21 +156,53 @@ export const useGitStore = create<GitState>((set, get) => ({
   },
 
   saveConfig: async (patch) => {
-    const { exportDir, remoteURL, branch, authorName, authorEmail, exportPathTemplate } = get();
-    const merged = { exportDir, remoteURL, branch, authorName, authorEmail, exportPathTemplate, ...patch };
+    const { exportDir, remoteURL, branch, authorName, authorEmail, exportPathTemplate, recentDirs } = get();
+    // recentDirs must ride along on every save — SaveGitConfig replaces the whole
+    // GitConfig, so omitting it would wipe the recent-folders list.
+    const merged = { exportDir, remoteURL, branch, authorName, authorEmail, exportPathTemplate, recentDirs, ...patch };
     set(merged);
     try {
-      await SaveGitConfig(merged);
+      await SaveGitConfig(merged as any);
     } catch {
       // non-fatal — in-memory state is still updated
     }
   },
 
-  pickExportDir: async () => {
+  openFolder: async (dir: string) => {
+    if (!dir) return;
+    // Newest first, deduped, capped at 8. A re-opened dir jumps back to the top.
+    const recentDirs = [dir, ...get().recentDirs.filter((d) => d !== dir)].slice(0, 8);
+    await get().saveConfig({ exportDir: dir, recentDirs });
+    await get().refreshStatus();
+  },
+
+  clearRecentDirs: async () => {
+    await get().saveConfig({ recentDirs: [] });
+  },
+
+  openInNewWindow: async () => {
+    if (!get().configLoaded) await get().loadConfig();
     const dir = await PickDirectory();
     if (!dir) return;
-    await get().saveConfig({ exportDir: dir });
-    await get().refreshStatus();
+    // Record it in the shared recents so it's reachable from any window, but don't
+    // touch this window's exportDir — the folder opens in the new instance only.
+    const recentDirs = [dir, ...get().recentDirs.filter((d) => d !== dir)].slice(0, 8);
+    await get().saveConfig({ recentDirs });
+    try {
+      await OpenFolderInNewInstance(dir);
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  pickExportDir: async () => {
+    // Ensure config is loaded before we save — the File menu's Open Folder (⌘⇧O)
+    // can fire before FileBrowser mounts (sidebar hidden), and saving with an
+    // unloaded store would clobber the real GitConfig with defaults.
+    if (!get().configLoaded) await get().loadConfig();
+    const dir = await PickDirectory();
+    if (!dir) return;
+    await get().openFolder(dir);
   },
 
   // silent=true is for refreshes that run after another operation (or as
