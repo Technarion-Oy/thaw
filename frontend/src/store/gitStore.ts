@@ -169,11 +169,18 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   openFolder: async (dir: string) => {
     if (!dir) return;
-    // Clear the previous folder's remote/branch so git ops on the new folder fall
-    // back to its live status (pull/commit prefer storedURL over status.remoteURL —
-    // a leftover URL would target the old repo). Mirrors the blanking GetGitConfig
-    // does for override windows.
-    await get().saveConfig({ exportDir: dir, remoteURL: "", branch: "" });
+    if (dir !== get().exportDir) {
+      // Actually switching repos. Clear the previous folder's live status AND stored
+      // remote override up front so any git op during the async refresh window falls
+      // back to the NEW folder's own repo — an empty remoteURL makes the Go side use
+      // the actual origin at exportDir, and a null status disables Commit/Push (gated
+      // on stagedTotal) until the refresh lands, so B's changes can't push to A's
+      // remote. branch is NOT blanked — refreshStatus derives it from the new folder's
+      // live HEAD (it has no other fallback). Re-selecting the current folder skips all
+      // this so a manually-set remote override isn't wiped.
+      set({ status: null });
+      await get().saveConfig({ exportDir: dir, remoteURL: "" });
+    }
     // Atomic add on the backend returns the authoritative merged list (no stale-
     // snapshot overwrite of another window's entries).
     const recentDirs = await AddRecentDir(dir);
@@ -223,7 +230,10 @@ export const useGitStore = create<GitState>((set, get) => ({
     set(silent ? { loading: true } : { loading: true, error: null });
     try {
       const status = await GitStatus(exportDir);
-      set({ status, loading: false });
+      // Track the live checked-out branch so pull/commit target the real HEAD rather
+      // than a stale default (branch has no other fallback, unlike remoteURL). Only
+      // when non-empty, so a transient head-read miss doesn't blank it to "main".
+      set({ status, loading: false, ...(status.branch ? { branch: status.branch } : {}) });
     } catch (e) {
       set(silent ? { loading: false } : { error: String(e), loading: false });
     }

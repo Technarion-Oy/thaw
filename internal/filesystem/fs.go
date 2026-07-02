@@ -91,6 +91,37 @@ func WriteFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0o644)
 }
 
+// WriteFileAtomic writes data to path by writing a temp file in the same
+// directory and renaming it over the target. Rename is atomic within a
+// filesystem (Go maps it to MoveFileEx with replace on Windows), so a concurrent
+// reader — including a second process — never observes a half-written file, even
+// if the writer is killed mid-write. The parent directory is created (mode 0700,
+// suited to per-user config/data) if missing and perm is applied to the result.
+// It is the shared implementation for config.Save, gitrepo, and sfconfig.
+func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".thaw-atomic-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) //nolint:errcheck // best-effort; no-op after a successful rename
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close() //nolint:errcheck
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpName, perm); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
+}
+
 // ListDir returns the direct children of dir, directories first then files,
 // both groups sorted alphabetically.
 func ListDir(dir string) ([]FileEntry, error) {

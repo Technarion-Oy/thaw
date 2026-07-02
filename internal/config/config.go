@@ -16,6 +16,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+
+	"thaw/internal/filesystem"
 )
 
 // fileMu serializes config read-modify-write within this process, so concurrent
@@ -522,33 +524,10 @@ func save(cfg *AppConfig) error {
 	if err != nil {
 		return err
 	}
-
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
-
-	// Write to a temp file in the same dir, then rename over the target. Rename is
-	// atomic within a filesystem (Go maps it to MoveFileEx with replace on Windows),
-	// so a concurrent reader — e.g. a second Thaw window — never sees a half-written
-	// file, even if the process is killed mid-write.
-	tmp, err := os.CreateTemp(dir, "config-*.json.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName) //nolint:errcheck // best-effort cleanup; no-op after a successful rename
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close() //nolint:errcheck
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpName, path)
+	// Atomic temp+rename so a second Thaw process never reads a half-written file.
+	return filesystem.WriteFileAtomic(path, data, 0o600)
 }

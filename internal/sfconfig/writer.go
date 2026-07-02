@@ -16,6 +16,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"thaw/internal/filesystem"
 )
 
 // profileNameRe matches valid profile names: alphanumerics, hyphens, underscores.
@@ -220,30 +222,7 @@ func init() {
 
 // atomicWriteFile writes data to a temp file and renames it into place.
 func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return fmt.Errorf("create directory %s: %w", dir, err)
-	}
-	tmp, err := os.CreateTemp(dir, ".thaw-sfconfig-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer func() {
-		// Clean up on failure.
-		_ = os.Remove(tmpName)
-	}()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmpName, perm); err != nil {
-		return err
-	}
-	return os.Rename(tmpName, path)
+	return filesystem.WriteFileAtomic(path, data, perm)
 }
 
 // readFileLines reads a file and splits it into lines.

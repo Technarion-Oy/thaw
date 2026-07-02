@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"thaw/internal/config"
 	"thaw/internal/filesystem"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -182,13 +183,21 @@ func (a *App) setExportDir(dir string) {
 	a.exportDirMu.Unlock()
 }
 
-// currentWorkdir returns this process's working directory (the override folder in
-// an "Open Folder in New Window" instance, otherwise the persisted one). Unlike
-// exportRoot it never errors on an empty dir — callers use it for dialog defaults.
+// currentWorkdir returns this process's working directory for dialog defaults
+// (never errors on empty, unlike exportRoot). An override window's folder lives
+// only in memory (it's never persisted), so read cachedExportDir there; an ordinary
+// window reads fresh from disk so it picks up a folder change made by another
+// ordinary window since startup, matching the pre-override behavior.
 func (a *App) currentWorkdir() string {
-	a.exportDirMu.RLock()
-	defer a.exportDirMu.RUnlock()
-	return a.cachedExportDir
+	if a.workdirOverridden {
+		a.exportDirMu.RLock()
+		defer a.exportDirMu.RUnlock()
+		return a.cachedExportDir
+	}
+	if cfg, err := config.Load(); err == nil {
+		return cfg.Git.ExportDir
+	}
+	return ""
 }
 
 // PickOpenFile opens a native open-file dialog filtered to SQL, YAML and

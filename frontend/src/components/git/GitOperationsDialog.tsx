@@ -95,12 +95,14 @@ function RepositorySection() {
         setCloneSuccess(true);
         setCloneUrl("");
         setClonePath("");
-        // Ensure exportDir points to the cloned path and refresh status so the
-        // working tree and remote URL are populated without requiring a manual refresh.
-        if (targetPath && targetPath !== exportDir) {
-          await useGitStore.getState().saveConfig({ exportDir: targetPath });
+        // Route through openFolder so the cloned path is added to Recent (consistent
+        // with every other folder change) and status refreshes; the cloned repo's
+        // origin is picked up from live status, so the blanked stored remote is fine.
+        if (targetPath) {
+          await useGitStore.getState().openFolder(targetPath);
+        } else {
+          await refreshStatus();
         }
-        await refreshStatus();
       }
     } catch (e) {
       // If the remote is empty, offer to initialize instead.
@@ -121,18 +123,16 @@ function RepositorySection() {
       setInitSuccess(true);
       setInitMode(false);
 
-      // Ensure exportDir and remoteURL point to the newly initialized repo and 
-      // refresh status so the working tree is shown immediately.
-      const currentExportDir = useGitStore.getState().exportDir;
-      if (targetPath && targetPath !== currentExportDir) {
-        await useGitStore.getState().saveConfig({ exportDir: targetPath, remoteURL: cloneUrl });
-      } else if (cloneUrl && cloneUrl !== useGitStore.getState().remoteURL) {
-        await useGitStore.getState().saveConfig({ remoteURL: cloneUrl });
-      }
-
+      // Route through openFolder so the initialized path lands in Recent and status
+      // refreshes; GitInitWithRemote already set the repo's origin, so it's read back
+      // from live status (the stored remote override is blanked on the switch).
       setCloneUrl("");
       setClonePath("");
-      await refreshStatus();
+      if (targetPath) {
+        await useGitStore.getState().openFolder(targetPath);
+      } else {
+        await refreshStatus();
+      }
     } catch (e) {
       useGitStore.setState({ error: String(e) });
     } finally {

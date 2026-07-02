@@ -120,16 +120,13 @@ func (a *App) saveMCPCredential(label string, port int) {
 	if !ok {
 		return
 	}
-	appCfg, err := config.Load()
-	if err != nil {
-		logger.L.Warn("mcp: failed to load config for credential save", "err", err)
-		return
-	}
-	if appCfg.MCPCredentials == nil {
-		appCfg.MCPCredentials = make(map[string]config.MCPSessionCredential)
-	}
-	appCfg.MCPCredentials[label] = config.MCPSessionCredential{Port: port, Token: token}
-	if err := config.Save(appCfg); err != nil {
+	if err := config.Update(func(appCfg *config.AppConfig) error {
+		if appCfg.MCPCredentials == nil {
+			appCfg.MCPCredentials = make(map[string]config.MCPSessionCredential)
+		}
+		appCfg.MCPCredentials[label] = config.MCPSessionCredential{Port: port, Token: token}
+		return nil
+	}); err != nil {
 		logger.L.Warn("mcp: failed to save credential", "label", label, "err", err)
 	}
 }

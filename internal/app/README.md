@@ -81,7 +81,7 @@ nil-check → delegate → return.
 | `profiles.go` | Snowflake CLI profile CRUD (save, delete, clone, rename, set default); delegates to `internal/sfconfig`. |
 | `ddlexport.go` | `ExportDatabaseDDL`, `ExportAllDatabasesDDL`, `ExportAccountObjectsDDL`, `GetERDiagramData`. Contain goroutine orchestration and `ddl:progress` event emission — not thin delegators. |
 | `querylog.go` | `GetQueryLogEntries`, `ClearQueryLog`, `IsQueryLogEnabled`, `SetQueryLogEnabled`, `PickQueryLogExportFile`. Thin delegators to `a.queryLog` (`internal/querylog`). |
-| `config.go` | `GetFeatureFlags`/`SaveFeatureFlags`/`GetAdminLockedFlags`, `GetEditorPrefs`/`SaveEditorPrefs`, `GetGitConfig`/`SaveGitConfig`, `GetSessionConfig`/`SaveSessionConfig`/`GetSessionInitMode`. |
+| `config.go` | `GetFeatureFlags`/`SaveFeatureFlags`/`GetAdminLockedFlags`, `GetEditorPrefs`/`SaveEditorPrefs`, `GetGitConfig`/`SaveGitConfig`, `GetSessionConfig`/`SaveSessionConfig`/`GetSessionInitMode`. All `Save*` here (and `AddRecentDir`/`ClearRecentDirs`/`saveMCPCredential`/`PickSnowflakeCLIConfigPath`) go through `config.Update` (process-locked read-modify-write) so concurrent config writes can't lose each other's change. |
 | `ai.go` | `ListAIModels`, `TestAIModel`, `GetAISuggestion`, `GetAIEdit`, `GetAIExplain`, `GetEditorPrefs` back-fill; delegates to `internal/ai`. |
 | `shell.go` | Embedded terminal (PTY): `GetAvailableShells`, `StartShell`, `StopShell`, `WriteShell`, `ResizeShell`. Contains PTY goroutine; emits `shell:data` events. |
 | `users.go` | User/role management IPC: `ListUsers`, `ListRoles`, `CreateUser`, `DropUser`, `AlterUserProperty`, `GetUserRSAKeyPair`; delegates to `internal/keypair`. |

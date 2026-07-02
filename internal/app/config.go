@@ -26,12 +26,10 @@ func (a *App) GetAIConfig() config.AIConfig {
 
 // SaveAIConfig persists AI provider settings to disk.
 func (a *App) SaveAIConfig(aiCfg config.AIConfig) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	cfg.AI = aiCfg
-	return config.Save(cfg)
+	return config.Update(func(cfg *config.AppConfig) error {
+		cfg.AI = aiCfg
+		return nil
+	})
 }
 
 // GetSystemRAMGB returns the total physical RAM in gigabytes (rounded down).
@@ -53,12 +51,10 @@ func (a *App) GetEditorPrefs() config.EditorPrefs {
 
 // SaveEditorPrefs persists SQL editor formatting preferences to disk.
 func (a *App) SaveEditorPrefs(prefs config.EditorPrefs) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	cfg.Editor = prefs
-	return config.Save(cfg)
+	return config.Update(func(cfg *config.AppConfig) error {
+		cfg.Editor = prefs
+		return nil
+	})
 }
 
 // loadUserFeatureFlags returns the raw user-persisted flags (or defaults when
@@ -93,10 +89,6 @@ func (a *App) GetAdminLockedFlags() config.FeatureFlags {
 // preserved so a rogue client cannot bypass IT policy.
 // Initialized is always set to true so subsequent loads use the saved values.
 func (a *App) SaveFeatureFlags(flags config.FeatureFlags) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
 	flags.Initialized = true
 
 	// Preserve admin-locked values: restore the admin-controlled fields from
@@ -104,8 +96,10 @@ func (a *App) SaveFeatureFlags(flags config.FeatureFlags) error {
 	effective, locked := config.LoadAdminConfig(flags)
 	flags = config.RestoreAdminLockedFields(flags, effective, locked)
 
-	cfg.FeatureFlags = flags
-	if err := config.Save(cfg); err != nil {
+	if err := config.Update(func(cfg *config.AppConfig) error {
+		cfg.FeatureFlags = flags
+		return nil
+	}); err != nil {
 		return err
 	}
 	a.applyFeatureFlagExclusions()
@@ -144,12 +138,10 @@ func (a *App) GetNotebookPrefs() config.NotebookPrefs {
 
 // SaveNotebookPrefs persists notebook editor preferences to disk.
 func (a *App) SaveNotebookPrefs(prefs config.NotebookPrefs) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	cfg.NotebookPrefs = prefs
-	return config.Save(cfg)
+	return config.Update(func(cfg *config.AppConfig) error {
+		cfg.NotebookPrefs = prefs
+		return nil
+	})
 }
 
 // GetSessionConfig returns the persisted session management configuration.
@@ -181,12 +173,10 @@ func (a *App) SaveSessionConfig(sc config.SessionConfig) error {
 	// Validate and clamp values to valid ranges.
 	sc = config.ValidateSessionConfig(sc)
 
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	cfg.Session = sc
-	if err := config.Save(cfg); err != nil {
+	if err := config.Update(func(cfg *config.AppConfig) error {
+		cfg.Session = sc
+		return nil
+	}); err != nil {
 		return err
 	}
 	a.applySessionConfig(sc)

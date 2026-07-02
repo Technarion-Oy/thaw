@@ -14,7 +14,7 @@ tree for changes and emits debounced Wails events to refresh the file browser UI
 
 | File | Purpose |
 |---|---|
-| `fs.go` | Core CRUD helpers: `ReadFile`, `ReadFileHead`, `WriteFile`, `ListDir`, `RevealInFinder`, `DeleteFile`, `DeleteDirectory`, `RenameFile`, `MkDir`, `WriteFileInRoot`, `DuplicateFile`, `CopyFile`, and the path-validation internals. |
+| `fs.go` | Core CRUD helpers: `ReadFile`, `ReadFileHead`, `WriteFile`, `WriteFileAtomic` (temp-file + rename; shared atomic writer used by `config.Save`, `gitrepo`, and `sfconfig` so a concurrent/second-process reader never sees a torn file), `ListDir`, `RevealInFinder`, `DeleteFile`, `DeleteDirectory`, `RenameFile`, `MkDir`, `WriteFileInRoot`, `DuplicateFile`, `CopyFile`, and the path-validation internals. |
 | `watcher.go` | `Watcher` struct (`rjeczalik/notify`-based): a single recursive watch over the whole tree, 200 ms debounce per directory, `FSChangeEvent`. |
 | `export.go` | `WriteBinaryFile` (base64-decode then write, used for Excel export) and `SanitizeFilename`. |
 | `search.go` | `SearchFiles`: recursive file-content search (substring or regex), capped at 200 results. |

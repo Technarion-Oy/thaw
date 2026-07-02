@@ -1477,10 +1477,14 @@ export default function FileBrowser() {
       items.push({ type: "divider" });
       items.push({ key: "__recent_label", type: "group", label: "Recent" });
       for (const dir of recentDirs) {
+        const isCurrent = dir === exportDir;
         items.push({
           key: `recent:${dir}`,
-          icon: <FolderOutlined style={{ color: dir === exportDir ? "var(--link)" : CLR_SECONDARY }} />,
-          label: <span title={dir} style={{ color: dir === exportDir ? "var(--link)" : undefined }}>{pathBase(dir) || dir}</span>,
+          // Disable the current folder — reselecting it is a no-op (openFolder guards
+          // against re-blanking a manual remote override), so make that visible.
+          disabled: isCurrent,
+          icon: <FolderOutlined style={{ color: isCurrent ? "var(--link)" : CLR_SECONDARY }} />,
+          label: <span title={dir} style={{ color: isCurrent ? "var(--link)" : undefined }}>{pathBase(dir) || dir}</span>,
         });
       }
       items.push({ type: "divider" });
