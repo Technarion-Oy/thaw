@@ -41,6 +41,10 @@ import { UC, quoteIfNecessary, getFKs, getFKsCached, setFKCache, clearFKCache, c
 import ExplainModal from "../results/ExplainModal";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 
+// Same platform check QueryPage's global keydown handler and KeyboardShortcutsModal use —
+// the label-appended shortcut hints below must match the modifier keys actually bound here.
+const isMac = /Macintosh/i.test(navigator.userAgent);
+
 // ── Types migrated from sqlDiagnostics.ts ────────────────────────────────────
 export interface DiagMarker {
   startLineNumber: number;
@@ -397,7 +401,9 @@ let _explainMenuRegistered = false;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (MenuRegistry as any).appendMenuItem((MenuId as any).EditorContext, {
     command: { id: "thaw.explain.sql", title: "Explain SQL" },
-    group: "z_thaw_explain",
+    // "2_" sits above the 9_snippets submenu — Explain is used far more often than
+    // any one snippet category, so it shouldn't be buried below the whole list.
+    group: "2_thaw_explain",
     order: 0,
     when: ContextKeyExpr.equals("editorLangId", "sql"),
   });
@@ -2097,7 +2103,11 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
     editor.addAction({
       id: "thaw.toggleLineComment",
-      label: "Toggle Line Comment",
+      // IActionDescriptor has no icon/keybinding-hint field (editor.api.d.ts), so the
+      // shortcut is appended to the label itself — the only way addAction items can
+      // surface one. Triggers Monaco's own commentLine command, whose default binding
+      // this action doesn't register under its own id, so it wouldn't auto-display anyway.
+      label: isMac ? "Toggle Line Comment    ⌘/" : "Toggle Line Comment    Ctrl+/",
       contextMenuGroupId: "1_modification",
       contextMenuOrder: 1,
       run: (ed) => ed.trigger("keyboard", "editor.action.commentLine", null),
@@ -2145,7 +2155,9 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       // to avoid a double-toggle when Monaco doesn't preventDefault on the event.
       editor.addAction({
         id: "thaw.crossTabSearch",
-        label: "Find & Replace in Tabs",
+        // No `keybindings` entry (see comment above) so Monaco can't resolve a real
+        // keybinding for this action id — the shortcut is appended to the label instead.
+        label: isMac ? "Find & Replace in Tabs    ⌘⇧H" : "Find & Replace in Tabs    Ctrl+Shift+H",
         contextMenuGroupId: "3_find",
         contextMenuOrder: 1,
         run: () => {

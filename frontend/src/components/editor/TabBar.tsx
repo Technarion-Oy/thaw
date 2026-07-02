@@ -9,8 +9,13 @@
 // license agreement with Technarion Oy.
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Button, Modal, Tooltip, Input } from "antd";
-import { FileOutlined, CodeOutlined, PlusOutlined, CloseOutlined, DiffOutlined, ExperimentOutlined, RobotOutlined, CaretDownOutlined, SearchOutlined } from "@ant-design/icons";
+import { Button, Modal, Tooltip, Input, Dropdown } from "antd";
+import type { MenuProps } from "antd";
+import {
+  FileOutlined, CodeOutlined, PlusOutlined, CloseOutlined, DiffOutlined, ExperimentOutlined,
+  RobotOutlined, CaretDownOutlined, SearchOutlined, EditOutlined, CloseSquareOutlined,
+  DoubleRightOutlined, SaveOutlined, ClearOutlined, SplitCellsOutlined, MergeCellsOutlined,
+} from "@ant-design/icons";
 import type { Tab } from "../../store/queryStore";
 import { useQueryStore } from "../../store/queryStore";
 import { GetTabSessionID } from "../../../wailsjs/go/app/App";
@@ -24,6 +29,10 @@ const CLR_TEXT         = "var(--text-muted)";
 const CLR_TEXT_ACTIVE  = "var(--text)";
 const CLR_ACCENT       = "var(--accent)";
 
+// Same platform check QueryPage's global keydown handler and KeyboardShortcutsModal use —
+// menu shortcut hints must match the modifier keys actually bound on this platform.
+const isMac = /Macintosh/i.test(navigator.userAgent);
+
 // Icon for a tab, matching the tab-strip logic (diff → mcp → notebook → file → scratch).
 function tabIcon(tab: Tab, size = 11) {
   const style = { fontSize: size, flexShrink: 0 };
@@ -34,9 +43,12 @@ function tabIcon(tab: Tab, size = 11) {
   return <CodeOutlined style={style} />;
 }
 
-// Title prefix matching the tab strip: orphan ↺ or dirty •.
+// Title prefix matching the tab strip: orphan ↺ (warning) or dirty • (accent),
+// colored separately so the two states are distinguishable at a glance.
 function tabPrefix(tab: Tab) {
-  return tab.orphaned ? "↺ " : (tab.path && tab.sql !== tab.savedSql ? "• " : "");
+  if (tab.orphaned) return <span style={{ color: "var(--warning)" }}>↺ </span>;
+  if (tab.path && tab.sql !== tab.savedSql) return <span style={{ color: "var(--accent)" }}>• </span>;
+  return null;
 }
 
 export default function TabBar() {
@@ -52,9 +64,10 @@ export default function TabBar() {
 
   const draggingId  = useRef<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string; before: boolean } | null>(null);
-  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; tabId: string } | null>(null);
-  const [splitSubmenuOpen, setSplitSubmenuOpen] = useState(false);
   const [bulkCloseConfirm, setBulkCloseConfirm] = useState<{ ids: string[]; dirtyCount: number } | null>(null);
+  // Which tab's context menu is open, if any — lets buildTabMenuItems run only for
+  // the tab actually showing a menu instead of once per tab on every render.
+  const [openTabMenuId, setOpenTabMenuId] = useState<string | null>(null);
 
   // Track which tab the pointer is hovering over so the close button
   // only appears on hover (less cluttered when many tabs are open).
@@ -167,7 +180,6 @@ export default function TabBar() {
       const t = currentTabs.find((tab) => tab.id === id);
       return t && t.sql !== t.savedSql;
     }).length;
-    setCtxMenu(null);
     if (dirtyCount > 0) {
       setBulkCloseConfirm({ ids, dirtyCount });
     } else {
@@ -175,18 +187,62 @@ export default function TabBar() {
     }
   };
 
-  // Dismiss context menu on next document click.
-  useEffect(() => {
-    if (!ctxMenu) return;
-    const dismiss = () => setCtxMenu(null);
-    document.addEventListener("click", dismiss);
-    return () => document.removeEventListener("click", dismiss);
-  }, [ctxMenu]);
+  // Tab-independent, so computed once per render rather than once per tab inside
+  // buildTabMenuItems.
+  const savedTabs = tabs.filter((t) => t.sql === t.savedSql);
 
-  // Reset submenu state when context menu closes.
-  useEffect(() => {
-    if (!ctxMenu) setSplitSubmenuOpen(false);
-  }, [ctxMenu]);
+  // Right-click tab menu — shared visual language with the Active Files dropdown
+  // and (as far as Monaco's API allows) the editor's own context menu: icons,
+  // dividers, danger styling on destructive actions, keybinding hints via `extra`.
+  // Only called for the tab whose menu is actually open (see the Dropdown below) —
+  // not on every render of every tab.
+  const buildTabMenuItems = (tab: Tab): MenuProps["items"] => {
+    const tabIdx     = tabs.findIndex((t) => t.id === tab.id);
+    const rightTabs  = tabs.slice(tabIdx + 1);
+    const otherTabs  = tabs.filter((t) => t.id !== tab.id);
+    const splitCandidates = otherTabs.filter((t) => !t.diff);
+
+    const items: MenuProps["items"] = [];
+
+    if (!tab.path && !tab.diff && !tab.orphaned) {
+      items.push({ key: "rename", icon: <EditOutlined />, label: "Rename", onClick: () => startRename(tab) });
+      items.push({ type: "divider" });
+    }
+
+    items.push({
+      key: "close",
+      icon: <CloseOutlined />,
+      label: "Close",
+      extra: isMac ? "⌘W" : "Ctrl+W",
+      onClick: () => window.dispatchEvent(new CustomEvent("thaw:request-close-tab", { detail: { tabId: tab.id } })),
+    });
+    if (otherTabs.length > 0) {
+      items.push({ key: "close-others", icon: <CloseSquareOutlined />, danger: true, label: "Close Others", onClick: () => requestCloseMany(otherTabs.map((t) => t.id)) });
+    }
+    if (rightTabs.length > 0) {
+      items.push({ key: "close-right", icon: <DoubleRightOutlined />, label: "Close to the Right", onClick: () => requestCloseMany(rightTabs.map((t) => t.id)) });
+    }
+    if (savedTabs.length > 0) {
+      items.push({ key: "close-saved", icon: <SaveOutlined />, label: "Close Saved", onClick: () => requestCloseMany(savedTabs.map((t) => t.id)) });
+    }
+    items.push({ key: "close-all", icon: <ClearOutlined />, danger: true, label: "Close All", onClick: () => requestCloseMany(tabs.map((t) => t.id)) });
+
+    items.push({ type: "divider" });
+
+    if (splitTabId) {
+      items.push({ key: "close-split", icon: <MergeCellsOutlined />, label: "Close split view", onClick: () => setSplitTab(null) });
+    } else {
+      items.push({
+        key: "split",
+        icon: <SplitCellsOutlined />,
+        label: "Split with",
+        disabled: splitCandidates.length === 0,
+        children: splitCandidates.map((t) => ({ key: `split-${t.id}`, label: t.title, onClick: () => setSplitTab(t.id) })),
+      });
+    }
+
+    return items;
+  };
 
   return (
     <div
@@ -226,6 +282,12 @@ export default function TabBar() {
 
         return (
           <Tooltip key={tab.id} title={tooltipText} mouseEnterDelay={0.6} placement="bottom">
+          <Dropdown
+            trigger={["contextMenu"]}
+            open={openTabMenuId === tab.id}
+            onOpenChange={(open) => setOpenTabMenuId(open ? tab.id : null)}
+            menu={{ items: openTabMenuId === tab.id ? buildTabMenuItems(tab) : [] }}
+          >
           <div
             draggable={renamingId !== tab.id}
             onClick={() => activateTab(tab.id)}
@@ -251,10 +313,6 @@ export default function TabBar() {
               }
               draggingId.current = null;
               setDropTarget(null);
-            }}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              setCtxMenu({ x: e.clientX, y: e.clientY, tabId: tab.id });
             }}
             style={{ position: "relative",
               display: "flex",
@@ -318,8 +376,8 @@ export default function TabBar() {
                 (and there is more than one tab). */}
             <span
               style={{
-                width: 14,
-                height: 14,
+                width: 16,
+                height: 16,
                 flexShrink: 0,
                 display: "flex",
                 alignItems: "center",
@@ -331,7 +389,7 @@ export default function TabBar() {
               }}
             >
               {(active || hovered) && (
-                <CloseOutlined style={{ fontSize: 9, opacity: 0.7 }} />
+                <CloseOutlined style={{ fontSize: 10, opacity: 0.7 }} />
               )}
             </span>
 
@@ -339,6 +397,7 @@ export default function TabBar() {
             {isDropBefore && <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 2, background: CLR_ACCENT, pointerEvents: "none" }} />}
             {isDropAfter  && <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 2, background: CLR_ACCENT, pointerEvents: "none" }} />}
           </div>
+          </Dropdown>
           </Tooltip>
         );
       })}
@@ -488,142 +547,6 @@ export default function TabBar() {
           Close them without saving?
         </p>
       </Modal>
-
-      {/* Right-click context menu */}
-      {ctxMenu && (() => {
-        const ctxTabIdx = tabs.findIndex((t) => t.id === ctxMenu.tabId);
-        const others    = tabs.filter((t) => t.id !== ctxMenu.tabId && !t.diff);
-        const rightTabs = tabs.slice(ctxTabIdx + 1);
-        const otherTabs = tabs.filter((t) => t.id !== ctxMenu.tabId);
-        const savedTabs = tabs.filter((t) => t.sql === t.savedSql);
-        const ctxTab    = tabs.find((t) => t.id === ctxMenu.tabId);
-
-        return (
-          <div
-            style={{
-              position: "fixed", zIndex: 9999,
-              top: ctxMenu.y, left: ctxMenu.x,
-              background: "var(--bg-overlay)",
-              border: "1px solid var(--border)",
-              borderRadius: 4, padding: "2px 0",
-              minWidth: 180,
-              boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
-            }}
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            {/* ── Rename (non-file tabs only) ───────────────────────── */}
-            {ctxTab && !ctxTab.path && !ctxTab.diff && !ctxTab.orphaned && (
-              <>
-                <div
-                  className="ctx-item"
-                  onClick={() => { startRename(ctxTab); setCtxMenu(null); }}
-                >
-                  Rename
-                </div>
-                <div style={{ height: 1, background: "var(--border)", margin: "2px 0" }} />
-              </>
-            )}
-
-            {/* ── Close actions ─────────────────────────────────────── */}
-            <div
-              className="ctx-item"
-              onClick={() => {
-                window.dispatchEvent(new CustomEvent("thaw:request-close-tab", { detail: { tabId: ctxMenu.tabId } }));
-                setCtxMenu(null);
-              }}
-            >
-              Close
-            </div>
-
-            {otherTabs.length > 0 && (
-              <div
-                className="ctx-item"
-                onClick={() => requestCloseMany(otherTabs.map((t) => t.id))}
-              >
-                Close Others
-              </div>
-            )}
-
-            {rightTabs.length > 0 && (
-              <div
-                className="ctx-item"
-                onClick={() => requestCloseMany(rightTabs.map((t) => t.id))}
-              >
-                Close to the Right
-              </div>
-            )}
-
-            {savedTabs.length > 0 && (
-              <div
-                className="ctx-item"
-                onClick={() => requestCloseMany(savedTabs.map((t) => t.id))}
-              >
-                Close Saved
-              </div>
-            )}
-
-            <div
-              className="ctx-item"
-              onClick={() => requestCloseMany(tabs.map((t) => t.id))}
-            >
-              Close All
-            </div>
-
-            {/* ── Separator ─────────────────────────────────────────── */}
-            <div style={{ height: 1, background: "var(--border)", margin: "2px 0" }} />
-
-            {/* ── Split view ────────────────────────────────────────── */}
-            {splitTabId ? (
-              <div className="ctx-item" onClick={() => { setSplitTab(null); setCtxMenu(null); }}>
-                Close split view
-              </div>
-            ) : (
-              <div
-                className="ctx-item"
-                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", position: "relative" }}
-                onMouseEnter={() => setSplitSubmenuOpen(true)}
-                onMouseLeave={() => setSplitSubmenuOpen(false)}
-              >
-                <span>Split with</span>
-                <span style={{ fontSize: 8, marginLeft: 8, opacity: 0.6 }}>▶</span>
-                {splitSubmenuOpen && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      left: "100%",
-                      top: -2,
-                      background: "var(--bg-overlay)",
-                      border: "1px solid var(--border)",
-                      borderRadius: 4,
-                      padding: "2px 0",
-                      minWidth: 160,
-                      boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
-                      zIndex: 10000,
-                    }}
-                  >
-                    {others.length > 0
-                      ? others.map((t) => (
-                          <div
-                            key={t.id}
-                            className="ctx-item"
-                            onClick={() => { setSplitTab(t.id); setCtxMenu(null); }}
-                          >
-                            {t.title}
-                          </div>
-                        ))
-                      : (
-                          <div style={{ padding: "4px 12px", color: "var(--text-faint)", fontSize: 11, whiteSpace: "nowrap" }}>
-                            No other tabs
-                          </div>
-                        )
-                    }
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        );
-      })()}
     </div>
   );
 }
