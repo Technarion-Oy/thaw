@@ -41,59 +41,67 @@ func (a *App) GetGitConfig() (config.GitConfig, error) {
 	return cfg.Git, nil
 }
 
+// copySharedGitFields copies the fields that are global/shared across all windows
+// (never per-repo or per-instance) from src into dst. It is the single source of
+// truth for the shared-vs-instance split that override-window handling relies on:
+// GetGitConfig blanks the per-repo fields (RemoteURL/Branch) and overrides ExportDir,
+// while SaveGitConfig preserves those on disk and copies only these shared fields. A
+// new GitConfig field is therefore treated as per-instance (preserved on disk, not
+// leaked to override windows) until it is deliberately added here. RecentDirs is
+// shared too but owned by AddRecentDir/ClearRecentDirs, so it's handled separately.
+func copySharedGitFields(dst *config.GitConfig, src config.GitConfig) {
+	dst.AuthorName = src.AuthorName
+	dst.AuthorEmail = src.AuthorEmail
+	dst.ExportPathTemplate = src.ExportPathTemplate
+}
+
 // SaveGitConfig persists git / export settings to disk.
 // The token field is intentionally absent — it must never be written.
 //
-// RecentDirs is owned exclusively by AddRecentDir/ClearRecentDirs (atomic
-// read-modify-write), so it is always preserved from disk here regardless of what
-// the caller sent — a whole-struct write of a stale snapshot must never drop the
-// other window's recent entries.
+// RecentDirs is owned exclusively by AddRecentDir/ClearRecentDirs, so it is always
+// preserved from disk here regardless of what the caller sent — a whole-struct write
+// of a stale snapshot must never drop the other window's recent entries.
 func (a *App) SaveGitConfig(gitCfg config.GitConfig) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	gitCfg.RecentDirs = cfg.Git.RecentDirs
-	// An override window's snapshot of the per-repo/instance-local fields (ExportDir,
-	// RemoteURL, Branch) belongs to a different repo, so preserve the on-disk values
-	// and only persist the genuinely-shared prefs it may have edited (author, export
-	// path template). This tracks its own folder in memory without clobbering the
-	// main window's remote/branch/export dir.
-	if a.workdirOverridden {
+	return config.Update(func(cfg *config.AppConfig) error {
+		// An override window's snapshot of the per-repo/instance-local fields
+		// (ExportDir, RemoteURL, Branch) belongs to a different repo, so keep the
+		// on-disk values (cfg.Git already holds them) and copy only the genuinely-
+		// shared prefs it may have edited — tracking its own folder in memory without
+		// clobbering the main window's remote/branch/export dir.
+		if a.workdirOverridden {
+			a.setExportDir(gitCfg.ExportDir)
+			copySharedGitFields(&cfg.Git, gitCfg)
+			return nil
+		}
+		gitCfg.RecentDirs = cfg.Git.RecentDirs // preserve; owned by the atomic methods
+		cfg.Git = gitCfg
 		a.setExportDir(gitCfg.ExportDir)
-		cfg.Git.AuthorName = gitCfg.AuthorName
-		cfg.Git.AuthorEmail = gitCfg.AuthorEmail
-		cfg.Git.ExportPathTemplate = gitCfg.ExportPathTemplate
-		return config.Save(cfg)
-	}
-	cfg.Git = gitCfg
-	a.setExportDir(gitCfg.ExportDir)
-	return config.Save(cfg)
+		return nil
+	})
 }
 
 // AddRecentDir prepends dir to the shared recent-folders list (newest first,
-// deduped, capped) with an atomic read-modify-write, so concurrent updates from
-// another window aren't lost to a stale snapshot. Returns the updated list.
+// deduped, capped) with an atomic read-modify-write, so a concurrent update from
+// another window in this process isn't lost to a stale snapshot. Returns the list.
 func (a *App) AddRecentDir(dir string) ([]string, error) {
-	cfg, err := config.Load()
+	var out []string
+	err := config.Update(func(cfg *config.AppConfig) error {
+		cfg.Git.RecentDirs = unionRecentDirs([]string{dir}, cfg.Git.RecentDirs)
+		out = cfg.Git.RecentDirs
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	cfg.Git.RecentDirs = unionRecentDirs([]string{dir}, cfg.Git.RecentDirs)
-	if err := config.Save(cfg); err != nil {
-		return nil, err
-	}
-	return cfg.Git.RecentDirs, nil
+	return out, nil
 }
 
 // ClearRecentDirs empties the shared recent-folders list.
 func (a *App) ClearRecentDirs() error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	cfg.Git.RecentDirs = nil
-	return config.Save(cfg)
+	return config.Update(func(cfg *config.AppConfig) error {
+		cfg.Git.RecentDirs = nil
+		return nil
+	})
 }
 
 // unionRecentDirs concatenates primary then extra, dropping empties and

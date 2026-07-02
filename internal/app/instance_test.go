@@ -57,6 +57,7 @@ func TestWorkdirOverrideArg(t *testing.T) {
 		{"neither", []string{"thaw"}, "", ""},
 		{"arg with spaces", []string{"thaw", "--workdir=/My Projects/x"}, "", "/My Projects/x"},
 		{"ignores other flags", []string{"thaw", "--foo", "--workdir=/z"}, "", "/z"},
+		{"empty arg falls through to env", []string{"thaw", "--workdir="}, "/env/dir", "/env/dir"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

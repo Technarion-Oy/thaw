@@ -15,7 +15,14 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 )
+
+// fileMu serializes config read-modify-write within this process, so concurrent
+// Wails IPC calls (Wails dispatches bound methods concurrently) can't interleave a
+// Load→Save round trip and lose an update. It does NOT guard against a *second Thaw
+// process* racing on the same file — see Update.
+var fileMu sync.Mutex
 
 // Connection is a saved Snowflake connection profile.
 type Connection struct {
@@ -445,6 +452,35 @@ func configPath() (string, error) {
 
 // Load reads the config file, returning an empty config if it doesn't exist yet.
 func Load() (*AppConfig, error) {
+	fileMu.Lock()
+	defer fileMu.Unlock()
+	return load()
+}
+
+// Update runs fn against the current on-disk config and writes the result back as
+// a single locked read-modify-write, so a concurrent config write in this process
+// can't clobber fn's change (or vice versa). Use this instead of a bare
+// Load→mutate→Save whenever the new value depends on the old one.
+//
+// ponytail: process-scoped lock only. A second Thaw process writing concurrently
+// can still last-writer-win (a dropped update); the atomic temp+rename in save
+// keeps the file from ever being torn/corrupt, which is the dangerous part. Add an
+// flock here if cross-process lost updates ever matter.
+func Update(fn func(*AppConfig) error) error {
+	fileMu.Lock()
+	defer fileMu.Unlock()
+	cfg, err := load()
+	if err != nil {
+		return err
+	}
+	if err := fn(cfg); err != nil {
+		return err
+	}
+	return save(cfg)
+}
+
+// load reads and parses the config; caller must hold fileMu.
+func load() (*AppConfig, error) {
 	path, err := configPath()
 	if err != nil {
 		return nil, err
@@ -475,12 +511,20 @@ func Load() (*AppConfig, error) {
 
 // Save writes the config to disk, creating directories as needed.
 func Save(cfg *AppConfig) error {
+	fileMu.Lock()
+	defer fileMu.Unlock()
+	return save(cfg)
+}
+
+// save marshals and atomically writes the config; caller must hold fileMu.
+func save(cfg *AppConfig) error {
 	path, err := configPath()
 	if err != nil {
 		return err
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 
@@ -488,5 +532,23 @@ func Save(cfg *AppConfig) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o600)
+
+	// Write to a temp file in the same dir, then rename over the target. Rename is
+	// atomic within a filesystem (Go maps it to MoveFileEx with replace on Windows),
+	// so a concurrent reader — e.g. a second Thaw window — never sees a half-written
+	// file, even if the process is killed mid-write.
+	tmp, err := os.CreateTemp(dir, "config-*.json.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) //nolint:errcheck // best-effort cleanup; no-op after a successful rename
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close() //nolint:errcheck
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
 }

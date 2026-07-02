@@ -143,7 +143,7 @@ func NewApp() *App {
 // instance opens that folder.
 func workdirOverrideArg() string {
 	for _, arg := range os.Args[1:] {
-		if dir, ok := strings.CutPrefix(arg, "--workdir="); ok {
+		if dir, ok := strings.CutPrefix(arg, "--workdir="); ok && dir != "" {
 			return dir
 		}
 	}

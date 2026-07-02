@@ -93,8 +93,10 @@ function pathSep(p: string): string {
   return p.includes("\\") ? "\\" : "/";
 }
 
-/** Extract the filename from a path, handling both / and \ separators. */
+/** Extract the filename from a path, handling both / and \ separators.
+ *  Trailing separators are stripped first so "/projects/" yields "projects". */
 function pathBase(p: string): string {
+  p = p.replace(/[/\\]+$/, "");
   const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
   return i >= 0 ? p.substring(i + 1) : p;
 }

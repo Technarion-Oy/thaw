@@ -169,7 +169,11 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   openFolder: async (dir: string) => {
     if (!dir) return;
-    await get().saveConfig({ exportDir: dir });
+    // Clear the previous folder's remote/branch so git ops on the new folder fall
+    // back to its live status (pull/commit prefer storedURL over status.remoteURL —
+    // a leftover URL would target the old repo). Mirrors the blanking GetGitConfig
+    // does for override windows.
+    await get().saveConfig({ exportDir: dir, remoteURL: "", branch: "" });
     // Atomic add on the backend returns the authoritative merged list (no stale-
     // snapshot overwrite of another window's entries).
     const recentDirs = await AddRecentDir(dir);
