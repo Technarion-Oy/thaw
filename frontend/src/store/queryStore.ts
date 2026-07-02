@@ -398,10 +398,11 @@ export const useQueryStore = create<QueryState>()(
       if (idx === -1) return {};
       const newTabs = state.tabs.filter((t) => t.id !== id);
 
-      // Closing the last tab — replace with a fresh scratch tab. Use the
-      // pre-removal tabs so the "SQL (n)" sequence continues instead of resetting.
+      // Closing the last tab — replace it with a fresh scratch tab so the
+      // editor is never left empty. Pass newTabs (empty) so the "SQL (n)"
+      // number resets to 1 instead of climbing on every close (#595).
       if (newTabs.length === 0) {
-        const freshTab = makeScratchTab(state.tabs);
+        const freshTab = makeScratchTab(newTabs);
         return {
           tabs: [freshTab],
           activeTabId: freshTab.id,
