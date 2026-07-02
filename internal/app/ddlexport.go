@@ -107,15 +107,56 @@ func (a *App) ListExportableDatabases() ([]string, error) {
 	return a.client.ListExportableDatabases(a.ctx)
 }
 
+// DDLExportOptions carries the per-export choices made in the frontend's
+// pre-export options dialog. All fields are optional; the zero value
+// reproduces the historical behavior (all types, all schemas, overwrite,
+// session warehouse, configured path template).
+type DDLExportOptions struct {
+	// ObjectTypes restricts export to these kinds (ddl.Kind strings such as
+	// "TABLE", "FILE FORMAT"). Empty = all. Post-fetch filter only.
+	ObjectTypes []string `json:"objectTypes"`
+	// Schemas restricts export to these schema names (case-insensitive).
+	// Empty = all. Post-fetch filter only.
+	Schemas []string `json:"schemas"`
+	// SkipExisting leaves already-existing files untouched instead of
+	// overwriting them.
+	SkipExisting bool `json:"skipExisting"`
+	// Warehouse runs the export on this warehouse (USE WAREHOUSE before the
+	// GET_DDL calls; the previous warehouse is restored afterwards).
+	// Empty = session warehouse.
+	Warehouse string `json:"warehouse"`
+	// PathTemplate overrides the configured export path template for this
+	// export only. Empty = configured template.
+	PathTemplate string `json:"pathTemplate"`
+}
+
 // ExportAllDatabasesDDL exports DDL for the given databases in parallel.
 // When databases is nil or empty every exportable database owned by the
 // account is exported (same behavior as before database selection was added).
 //
 // Progress events ("ddl:progress") are emitted after each database completes,
 // allowing the frontend to show a live progress bar.
-func (a *App) ExportAllDatabasesDDL(outputDir string, databases []string) ([]ddl.ExportResult, error) {
+func (a *App) ExportAllDatabasesDDL(outputDir string, databases []string, options DDLExportOptions) ([]ddl.ExportResult, error) {
 	if a.client == nil {
 		return nil, apperrors.ErrNotConnected
+	}
+
+	// Switch to the requested warehouse for the duration of the export.
+	// UseWarehouse updates the session connector, so every pooled connection
+	// the parallel GET_DDL fetches use inherits it.
+	if options.Warehouse != "" {
+		prev, err := a.client.CurrentWarehouse(a.ctx)
+		if err != nil {
+			return nil, err
+		}
+		if prev != options.Warehouse {
+			if err := a.client.UseWarehouse(a.ctx, options.Warehouse); err != nil {
+				return nil, err
+			}
+			if prev != "" {
+				defer a.client.UseWarehouse(a.ctx, prev) //nolint:errcheck // best-effort restore
+			}
+		}
 	}
 
 	// Temporarily scale up pool for parallel DDL fetching.
@@ -137,11 +178,23 @@ func (a *App) ExportAllDatabasesDDL(outputDir string, databases []string) ([]ddl
 		a.exportCancelFunc = nil
 	}()
 
-	var pathTemplate string
-	if cfg, err := config.Load(); err == nil {
-		pathTemplate = cfg.Git.ExportPathTemplate
+	pathTemplate := options.PathTemplate
+	if pathTemplate == "" {
+		if cfg, err := config.Load(); err == nil {
+			pathTemplate = cfg.Git.ExportPathTemplate
+		}
 	}
-	opts := ddl.ExportOptions{OutputDir: outputDir, PathTemplate: pathTemplate}
+	kinds := make([]ddl.Kind, len(options.ObjectTypes))
+	for i, t := range options.ObjectTypes {
+		kinds[i] = ddl.Kind(t)
+	}
+	opts := ddl.ExportOptions{
+		OutputDir:    outputDir,
+		PathTemplate: pathTemplate,
+		ObjectTypes:  kinds,
+		Schemas:      options.Schemas,
+		SkipExisting: options.SkipExisting,
+	}
 
 	results := ddl.ExportDatabases(
 		ctx,

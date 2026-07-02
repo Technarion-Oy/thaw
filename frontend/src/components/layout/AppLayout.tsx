@@ -13,7 +13,6 @@ import { Layout } from "antd";
 import { HolderOutlined } from "@ant-design/icons";
 import Sidebar from "./Sidebar";
 import QueryPage from "../../pages/QueryPage";
-import ExportPanel from "../export/ExportPanel";
 import FileBrowser from "../files/FileBrowser";
 import GitOperationsDialog from "../git/GitOperationsDialog";
 import AccountPanel from "../account/AccountPanel";
@@ -117,7 +116,6 @@ let _draggingId: PanelId | null = null;
 
 function renderPanelContent(id: PanelId) {
   switch (id) {
-    case "export":  return <ExportPanel />;
     case "files":   return <FileBrowser />;
     case "objects": return <Sidebar hideAccountPanel />;
     case "account": return <AccountPanel />;

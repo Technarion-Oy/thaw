@@ -129,6 +129,26 @@ export namespace app {
 	        this.comments = source["comments"];
 	    }
 	}
+	export class DDLExportOptions {
+	    objectTypes: string[];
+	    schemas: string[];
+	    skipExisting: boolean;
+	    warehouse: string;
+	    pathTemplate: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DDLExportOptions(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.objectTypes = source["objectTypes"];
+	        this.schemas = source["schemas"];
+	        this.skipExisting = source["skipExisting"];
+	        this.warehouse = source["warehouse"];
+	        this.pathTemplate = source["pathTemplate"];
+	    }
+	}
 
 }
 

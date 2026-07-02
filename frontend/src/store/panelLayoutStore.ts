@@ -11,10 +11,10 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export type PanelId   = "export" | "files" | "objects" | "account";
+export type PanelId   = "files" | "objects" | "account";
 export type SidebarId = "left" | "right";
 
-const DEFAULT_LEFT:              PanelId[] = ["export", "files"];
+const DEFAULT_LEFT:              PanelId[] = ["files"];
 const DEFAULT_RIGHT:             PanelId[] = ["objects", "account"];
 const DEFAULT_EDITOR_SPLIT                 = 0.4;
 const DEFAULT_LEFT_WIDTH                   = 220;
@@ -93,16 +93,18 @@ export const usePanelLayoutStore = create<PanelLayoutState>()(
     }),
     {
       name: "thaw-panel-layout",
-      version: 1,
-      // v1 folded the standalone "git" panel into the Files panel. Strip any
-      // persisted "git" entries so old layouts don't render an empty panel —
+      version: 2,
+      // v1 folded the standalone "git" panel into the Files panel; v2 moved
+      // DDL export from a sidebar panel to Tools → Export Database DDL….
+      // Strip retired panel ids so old layouts don't render an empty panel —
       // falling back to defaults if stripping leaves a sidebar empty (a user
-      // whose left sidebar held only the Git panel would otherwise go blank).
+      // whose sidebar held only a retired panel would otherwise go blank).
       migrate: (persisted: any, version: number) => {
-        if (persisted && version < 1) {
+        if (persisted && version < 2) {
+          const retired = version < 1 ? ["git", "export"] : ["export"];
           const strip = (arr: unknown, fallback: PanelId[]) => {
             if (!Array.isArray(arr)) return fallback; // null/undefined/corrupt → defaults
-            const kept = arr.filter((id) => id !== "git");
+            const kept = arr.filter((id) => !retired.includes(id));
             return kept.length ? kept : fallback;
           };
           persisted.left  = strip(persisted.left,  DEFAULT_LEFT);

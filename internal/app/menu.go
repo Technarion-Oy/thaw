@@ -118,6 +118,9 @@ func buildMenu(app *App) *menu.Menu {
 		wailsruntime.EventsEmit(app.ctx, "menu:tag-management")
 	})
 	toolsMenu.AddSeparator()
+	toolsMenu.AddText("Export Database DDL…", nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:export-ddl")
+	})
 	toolsMenu.AddText("Export Path Format…", nil, func(_ *menu.CallbackData) {
 		wailsruntime.EventsEmit(app.ctx, "menu:export-path-format")
 	})

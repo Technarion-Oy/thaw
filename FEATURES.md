@@ -573,11 +573,12 @@ Open **Tools → Configure AI…** in the menu bar to set your provider, API key
 
 ## DDL Export
 
-- Export DDL for every database (or a specific one) as individual files, one per object
+- Open **Tools → Export Database DDL…** to export DDL for every database (or a selection) as individual files, one per object; the whole flow — output directory, options, progress, and results — lives in one dialog
 - Fully qualified object names (`db.schema.object`) in every `CREATE` statement
 - Shared / imported databases (e.g. `SNOWFLAKE_SAMPLE_DATA`) are automatically skipped
 - Files are organised on disk by schema and object type (tables, views, functions, procedures, sequences, stages, streams, tasks, file formats, pipes)
 - **Configurable export path format** — open **Tools → Export Path Format…** to define a custom file path template; supported placeholders: `{database}`, `{schema}`, `{object_type}`, `{object_name}`; leave blank to use the default `{database}/{schema}/{object_type}/{object_name}.sql`; a live preview shows an example path as you type; the template is persisted across sessions
+- **Export options** — in the dialog: pick the **output directory**, the **databases** from a multi-select dropdown (leave empty for all databases), restrict to specific **schemas** via a dropdown (suggestions list the schemas of every database in the export as qualified `DATABASE.SCHEMA` entries so same-named schemas stay individually selectable; a typed bare name matches that schema in every database, case-insensitively; leave empty for all schemas), choose which **object types** to include (type and schema selection are post-fetch filters — `GET_DDL` always returns the whole database), override the **file path template** for this export only, choose **overwrite vs. skip** existing files (skipped files are counted in the summary), and pick the **warehouse** to run the export on (`USE WAREHOUSE` is issued for the export and the previous warehouse restored afterwards; leave empty for the session warehouse); overloaded functions/procedures are always written as `name__ARGTYPES.sql`
 - Parallel export — up to 16 databases fetched concurrently; each database uses a single `GET_DDL('DATABASE', name, true)` call for maximum throughput
 - **Live progress bar** while the export runs
 - **Cancel** — stop an in-progress export at any time
@@ -1155,7 +1156,7 @@ The following features are identified as feasible to be turned off via feature f
 - **Help menu** — **Function Catalog…** opens the built-in Snowflake function reference with overload signatures and descriptions for every function; **Keyboard Shortcuts…** opens a searchable modal listing every shortcut with macOS and Windows columns
 - **Resizable sidebars** — drag either sidebar edge to any width between 160 px and 600 px
 - **Resizable editor/results split** — drag the horizontal divider between the SQL editor and the results pane to any ratio; position is saved across sessions
-- **Drag-and-drop panel layout** — every sidebar panel (Export DDL, File Browser, Object Browser, Administration) has a drag handle at its top edge; drag panels between the left and right sidebars or reorder them within a sidebar; layout is persisted across sessions
+- **Drag-and-drop panel layout** — every sidebar panel (File Browser, Object Browser, Administration) has a drag handle at its top edge; drag panels between the left and right sidebars or reorder them within a sidebar; layout is persisted across sessions
 - **Reset Layout** — restore the default panel positions and editor/results split via the **Customize Layout…** dialog (accessible from the **View** menu)
 - **Resizable object browser** — collapse, expand, or drag to resize the object tree panel
 - Right-click context menus are always clamped inside the viewport

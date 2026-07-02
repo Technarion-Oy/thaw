@@ -17,7 +17,7 @@ A separate `account.go` sub-pipeline handles account-level objects (roles, wareh
 |------|---------|
 | `parser.go` | Helper functions (`isIdentRune`, `runesEqual`) used by tests |
 | `object.go` | `Object`, `Kind` constants, `Parse(sql) Object`, `FilePath()`, `FilePathFor(template, db)`, `nameTracker` (collision resolver) |
-| `exporter.go` | `ExportDatabases(ctx, dbs, fetch, opts, progress)` — parallel export pipeline; `ExportOptions`, `ExportResult`, `ProgressFunc`, `FetchDDL` |
+| `exporter.go` | `ExportDatabases(ctx, dbs, fetch, opts, progress)` — parallel export pipeline; `ExportOptions` (path template, object-type/schema filters, skip-existing, concurrency), `ExportResult`, `ProgressFunc`, `FetchDDL` |
 | `account.go` | `ExportAccountObjects(ctx, client, outputDir)` — exports roles and warehouses to `_account/roles/` and `_account/warehouses/` |
 | `doc.go` | Package doc + `thaw:domain` annotation |
 
@@ -65,6 +65,8 @@ func ExportDatabases(
 - Up to `opts.DBConcurrency` (default `min(16, NumCPU*4)`) databases are fetched from Snowflake in parallel via a channel semaphore.
 - For each database, up to `opts.FileConcurrency` (default `NumCPU*4`) goroutines write `.sql` files in parallel.
 - `ExportResult{Database, Files, Skipped, Errors}` is returned per database and reported to `progress`.
+- `opts.ObjectTypes []Kind` / `opts.Schemas []string` (both empty = all) filter parsed statements before writing — **post-fetch filters**; `GET_DDL('DATABASE', …)` always returns the whole database. `KindDatabase`/`KindSchema` anchors are always written. Schema entries are matched case-insensitively and may be bare (`"PUBLIC"` — matches in every exported database) or qualified (`"DB1.PUBLIC"` — matches only in that database).
+- `opts.SkipExisting` leaves already-existing files untouched (counted in `Skipped` alongside unparsable statements).
 
 ### Account-level export
 `ExportAccountObjects(ctx, client, outputDir)` calls `client.ListRoles`/`client.GetRoleDDL` and `client.ListWarehouses`/`client.GetWarehouseDDL`, writing results under `outputDir/_account/{roles,warehouses}/`.

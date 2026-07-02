@@ -54,11 +54,11 @@ import {snowpark} from '../models';
 import {snowflake} from '../models';
 import {dbt} from '../models';
 import {ddl} from '../models';
+import {app} from '../models';
 import {tasks} from '../models';
 import {keypair} from '../models';
 import {config} from '../models';
 import {fnmeta} from '../models';
-import {app} from '../models';
 import {table} from '../models';
 import {queryhistory} from '../models';
 import {querylog} from '../models';
@@ -480,7 +480,7 @@ export function ExecuteTask(arg1:string,arg2:string,arg3:string,arg4:string,arg5
 
 export function ExportAccountObjectsDDL(arg1:string):Promise<ddl.AccountExportResult>;
 
-export function ExportAllDatabasesDDL(arg1:string,arg2:Array<string>):Promise<Array<ddl.ExportResult>>;
+export function ExportAllDatabasesDDL(arg1:string,arg2:Array<string>,arg3:app.DDLExportOptions):Promise<Array<ddl.ExportResult>>;
 
 export function ExportDatabaseDDL(arg1:string,arg2:string):Promise<ddl.ExportResult>;
 

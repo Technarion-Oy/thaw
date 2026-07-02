@@ -2248,6 +2248,24 @@ func (c *Client) UseWarehouse(ctx context.Context, warehouse string) error {
 	return nil
 }
 
+// CurrentWarehouse returns the session's active warehouse. It prefers the
+// warehouse tracked by the session connector and falls back to a
+// CURRENT_WAREHOUSE() query when no explicit switch has been recorded yet.
+// Returns "" when the session has no warehouse at all.
+func (c *Client) CurrentWarehouse(ctx context.Context) (string, error) {
+	c.connector.mu.RLock()
+	wh := c.connector.wh
+	c.connector.mu.RUnlock()
+	if wh != "" {
+		return wh, nil
+	}
+	var v sql.NullString
+	if err := c.queryRowCtx(ctx, "SELECT CURRENT_WAREHOUSE()").Scan(&v); err != nil {
+		return "", err
+	}
+	return v.String, nil
+}
+
 // UseDatabase switches the active database for the current session.
 // Switching the database also resets the active schema.
 func (c *Client) UseDatabase(ctx context.Context, database string) error {
