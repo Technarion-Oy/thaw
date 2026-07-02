@@ -16,7 +16,12 @@ The driver writes the query ID to the channel and **then closes it**. Never call
 
 ## WKWebView clipboard
 
-`navigator.clipboard` is blocked in WKWebView. All clipboard operations use Wails' `ClipboardGetText` / `ClipboardSetText` native APIs. Monaco's built-in copy/paste is overridden via a `_commandService` patch + capture-phase keydown listeners (`utils/monacoClipboard.ts`).
+`navigator.clipboard` is blocked in WKWebView. All clipboard operations use Wails' `ClipboardGetText` / `ClipboardSetText` native APIs. Clipboard routing is split by target:
+
+- **Monaco's code buffer** — overridden per-editor via a `_commandService` patch + a capture-phase keydown listener (`utils/monacoClipboard.ts`, `patchMonacoClipboard`, called from every editor's `onMount`). The listener acts **only** when the editor's text input is focused, using Monaco's public `codeEditor.hasTextFocus()` (not an internal CSS class).
+- **Every other native `<input>`/`<textarea>`** — including Monaco's find/replace/rename fields, which live inside `.monaco-editor` but are plain fields — handled by a single global Cmd/Ctrl+V/C/X listener in `App.tsx`. The code-buffer listener lets these events bubble to it (no `stopPropagation`); `App.tsx` skips the code buffer via `monaco.editor.getEditors().some(e => e.hasTextFocus())`.
+
+The find-widget tooltip fix (`utils/monacoTooltipFix.ts`) is separate: a global `onDidCreateEditor` hook registered once from `ensureMonacoSetup`, so it's decoupled from the clipboard wiring.
 
 ## WKWebView drops the first keystroke typed over a selection (#575)
 

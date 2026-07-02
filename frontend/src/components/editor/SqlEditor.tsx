@@ -904,9 +904,10 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       gitGutterTimerRef.current = setTimeout(refreshGitGutter, 400);
     });
 
-    if (!tabId) {
-      patchMonacoClipboard(editor);
-    }
+    // Every editor instance — including the split-view secondary pane
+    // (`tabId=splitTabId`) — needs its own clipboard patch (WKWebView blocks
+    // navigator.clipboard).
+    patchMonacoClipboard(editor);
 
     const trigger = (id: string) => editor.trigger("keyboard", id, null);
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Slash,                      () => trigger("editor.action.commentLine"));
@@ -2045,6 +2046,13 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     const onDragKeyDown = (e: Event) => {
       const ke = e as KeyboardEvent;
       if (!pendingDragReplace) return;
+      // If focus already left the code text input — e.g. into the find/replace
+      // box — this keystroke isn't for the editor. Read the LIVE focus state
+      // here rather than relying on onDidBlurEditorText: that event is delivered
+      // via Monaco's deferred queue, so it can arrive after this keydown when the
+      // user clicks the search box and types quickly (#593). hasTextFocus() is
+      // synchronous and always current.
+      if (!editor.hasTextFocus()) { pendingDragReplace = false; return; }
       // A lone modifier press precedes the real char (Shift before 'A'); let it
       // through without consuming the pending state.
       if (ke.key === "Shift" || ke.key === "Control" || ke.key === "Alt" || ke.key === "Meta") return;
@@ -2061,9 +2069,11 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     };
     dragDom?.addEventListener("mouseup", onDragMouseUp);
     dragDom?.addEventListener("keydown", onDragKeyDown, true);      // capture: beat Monaco's handler
-    // Drop the pending state when the editor loses focus (e.g. Alt+Tab) so we
-    // don't intercept a keystroke against a stale selection on return. Uses
-    // Monaco's widget-blur event, not a DOM blur, to ignore internal textarea churn.
+    // Also drop the pending state on widget blur (e.g. Alt+Tab) so we don't
+    // intercept a keystroke against a stale selection on return. Uses Monaco's
+    // widget-blur event, not a DOM blur, to ignore internal textarea churn. (The
+    // find-box case is handled by the live hasTextFocus() check above, not this
+    // event — see the comment there.)
     editor.onDidBlurEditorWidget(() => { pendingDragReplace = false; });
     editor.onDidDispose(() => {
       dragDom?.removeEventListener("mouseup", onDragMouseUp);

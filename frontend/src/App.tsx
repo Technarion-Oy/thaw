@@ -24,12 +24,14 @@ import SessionManagementModal from "./components/settings/SessionManagementModal
 import MCPSessionsModal from "./components/settings/MCPSessionsModal";
 import { IsConnected } from "../wailsjs/go/app/App";
 import { ClipboardGetText, ClipboardSetText, EventsOn } from "../wailsjs/runtime/runtime";
+import { useMonaco } from "@monaco-editor/react";
 import { useThemeStore, type ThemePreference } from "./store/themeStore";
 import { useDiffStore } from "./store/diffStore";
 import { useFeatureFlagsStore } from "./store/featureFlagsStore";
 import { useNotebookPrefsStore } from "./store/notebookPrefsStore";
 
 export default function App() {
+  const monaco = useMonaco();
   const isConnected    = useConnectionStore((s) => s.isConnected);
   const setIsConnected = useConnectionStore((s) => s.setIsConnected);
   const resolved      = useThemeStore((s) => s.resolved);
@@ -186,50 +188,60 @@ export default function App() {
   // components (Ant Design inputs etc.) update their state correctly.
   // Cmd+C / Cmd+X are handled symmetrically for consistency.
   useEffect(() => {
-    const isEditableInput = (el: Element | null): el is HTMLInputElement | HTMLTextAreaElement => {
+    type Field = HTMLInputElement | HTMLTextAreaElement;
+
+    const isEditableInput = (el: Element | null): el is Field => {
       if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return false;
-      // Ignore Monaco hidden textarea — it is an <textarea> but Monaco manages its own clipboard.
-      if (el.closest(".monaco-editor")) return false;
+      // Ignore Monaco's own code buffer — its paste must go through the editor
+      // model (handled per-editor by patchMonacoClipboard, which also stops those
+      // events from reaching here). `hasTextFocus()` is the public API for "the
+      // editor's text input is focused" and is false for find/replace/rename
+      // fields, which this global handler must cover. #593.
+      if (el instanceof HTMLTextAreaElement && monaco?.editor.getEditors().some((ed) => ed.hasTextFocus())) {
+        return false;
+      }
       return true;
     };
 
-    // Insert text at the current selection of a native input / textarea.
-    const spliceValue = (target: HTMLInputElement | HTMLTextAreaElement, text: string) => {
-      const start = target.selectionStart ?? 0;
-      const end   = target.selectionEnd   ?? 0;
-      const next  = target.value.slice(0, start) + text + target.value.slice(end);
-      // Use the native setter so React's synthetic onChange fires.
-      const proto  = target instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
-      const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
-      setter?.call(target, next);
-      target.dispatchEvent(new Event("input", { bubbles: true }));
-      target.setSelectionRange(start + text.length, start + text.length);
+    const selectedText = (el: Field) => el.value.slice(el.selectionStart ?? 0, el.selectionEnd ?? 0);
+
+    // Replace the field's selection with `text`, driving the change through the
+    // native value setter so React-controlled inputs (Ant Design etc.) fire
+    // onChange, then dispatching `input` for any non-React listeners.
+    const spliceValue = (el: Field, text: string) => {
+      const start = el.selectionStart ?? 0;
+      const end = el.selectionEnd ?? 0;
+      const next = el.value.slice(0, start) + text + el.value.slice(end);
+      const proto = el instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+      Object.getOwnPropertyDescriptor(proto, "value")?.set?.call(el, next);
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.setSelectionRange(start + text.length, start + text.length);
     };
 
     const onKeyDown = async (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
+      // Cheap key check first — only v/c/x need the (editor-scanning) field check.
+      const key = e.key;
+      if (key !== "v" && key !== "c" && key !== "x") return;
       const target = document.activeElement;
       if (!isEditableInput(target)) return;
 
-      if (e.key === "v") {
+      if (key === "v") {
         e.preventDefault();
         const text = await ClipboardGetText();
         if (text) spliceValue(target, text);
-      } else if (e.key === "c" || e.key === "x") {
-        const selected = target.value.slice(
-          target.selectionStart ?? 0,
-          target.selectionEnd   ?? 0,
-        );
+      } else {
+        const selected = selectedText(target);
         if (!selected) return;
         e.preventDefault();
         await ClipboardSetText(selected);
-        if (e.key === "x") spliceValue(target, "");
+        if (key === "x") spliceValue(target, "");
       }
     };
 
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [monaco]);
 
   const antdAlgorithm = resolved === "dark" ? theme.darkAlgorithm : theme.defaultAlgorithm;
   const isDark = resolved === "dark";

@@ -22,6 +22,7 @@ import SqlEditor, { type DiagMarker, pendingMcpMarkers, clearMetadataCaches } fr
 import TabBar from "../components/editor/TabBar";
 import { DiffEditor } from "@monaco-editor/react";
 import { ensureMonacoSetup } from "../components/editor/monacoSetup";
+import { patchMonacoClipboard } from "../utils/monacoClipboard";
 import { useThemeStore } from "../store/themeStore";
 import ResultGrid, { type ResultGridHandle } from "../components/results/ResultGrid";
 import GridSearch from "../components/results/GridSearch";
@@ -1202,6 +1203,7 @@ export default function QueryPage() {
               original={activeDiff.leftText}
               modified={activeDiff.rightText}
               beforeMount={ensureMonacoSetup}
+              onMount={(editor) => patchMonacoClipboard(editor)}
               options={{
                 readOnly: true,
                 renderSideBySide: true,

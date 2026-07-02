@@ -30,6 +30,7 @@ import { loader } from "@monaco-editor/react";
 // editor.api so Vite never resolves the full barrel.
 import * as monacoLib from "monaco-editor/esm/vs/editor/editor.api.js";
 import "monaco-editor/esm/vs/editor/editor.all.js";
+import { registerFindWidgetTooltipFix } from "../../utils/monacoTooltipFix";
 
 // ── Inline Python Monarch grammar ─────────────────────────────────────────────
 // Defined inline instead of importing from monaco-editor/esm/vs/basic-languages/python/python.js
@@ -245,6 +246,10 @@ export function ensureMonacoSetup(monaco: unknown): void {
   const m = monaco as any;
   if (registered) return;
   registered = true;
+
+  // Find-widget tooltip fix (issue #593). A global editor-creation hook, so it's
+  // decoupled from any per-editor clipboard wiring and covers every Monaco mount.
+  registerFindWidgetTooltipFix(m.editor);
 
   // ── Register the languages we use ─────────────────────────────────────────
   // The slim Monaco import (editor.api + editor.all, see top of file) drops the

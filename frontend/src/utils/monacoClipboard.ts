@@ -9,8 +9,12 @@ import type * as monaco from "monaco-editor";
 import { ClipboardGetText, ClipboardSetText } from "../../wailsjs/runtime/runtime";
 
 /**
- * Patches a Monaco editor instance to use Wails' native clipboard APIs.
- * This is required in WKWebView (macOS) where navigator.clipboard is blocked.
+ * Patches a Monaco editor instance to route the CODE BUFFER's copy / cut / paste
+ * through Wails' native clipboard APIs. Required in WKWebView (macOS) where
+ * `navigator.clipboard` is blocked. The code buffer must go through the editor
+ * model (not a value splice), which is why it's handled per-editor here; every
+ * other editable inside `.monaco-editor` (find/replace, rename) is an ordinary
+ * field handled by the global handler in `App.tsx`.
  */
 export function patchMonacoClipboard(editor: monaco.editor.IStandaloneCodeEditor | monaco.editor.IStandaloneDiffEditor) {
   // For DiffEditor, we need to patch both internal editors
@@ -31,23 +35,21 @@ export function patchMonacoClipboard(editor: monaco.editor.IStandaloneCodeEditor
     codeEditor.pushUndoStop();
   };
 
-  const doCopy = async () => {
-    const selection = codeEditor.getSelection();
-    const model = codeEditor.getModel();
-    if (!selection || !model) return;
-    const text = model.getValueInRange(selection);
-    if (text) await ClipboardSetText(text);
-  };
-
-  const doCut = async () => {
+  // Copy is cut without the delete-and-undo-stop step.
+  const doCopyOrCut = async (cut: boolean) => {
+    // Cut can't delete from a read-only buffer — mirror VS Code and no-op rather
+    // than writing the clipboard and silently behaving like copy.
+    if (cut && codeEditor.getRawOptions().readOnly) return;
     const selection = codeEditor.getSelection();
     const model = codeEditor.getModel();
     if (!selection || !model) return;
     const text = model.getValueInRange(selection);
     if (!text) return;
     await ClipboardSetText(text);
-    codeEditor.executeEdits("clipboard-cut", [{ range: selection, text: "", forceMoveMarkers: true }]);
-    codeEditor.pushUndoStop();
+    if (cut) {
+      codeEditor.executeEdits("clipboard-cut", [{ range: selection, text: "", forceMoveMarkers: true }]);
+      codeEditor.pushUndoStop();
+    }
   };
 
   const cs = (codeEditor as any)._commandService;
@@ -59,10 +61,10 @@ export function patchMonacoClipboard(editor: monaco.editor.IStandaloneCodeEditor
           doPaste();
           return Promise.resolve();
         case "editor.action.clipboardCopyAction":
-          doCopy();
+          doCopyOrCut(false);
           return Promise.resolve();
         case "editor.action.clipboardCutAction":
-          doCut();
+          doCopyOrCut(true);
           return Promise.resolve();
         default:
           return origExec(commandId, ...args);
@@ -71,16 +73,23 @@ export function patchMonacoClipboard(editor: monaco.editor.IStandaloneCodeEditor
   }
 
   // Capture-phase keydown listener so clipboard shortcuts are intercepted
-  // before WKWebView or Monaco can swallow them.
+  // before WKWebView or Monaco can swallow them. Only the code buffer is handled
+  // here; when a find/replace/rename field is focused we let the event bubble to
+  // App.tsx's global handler (which splices native fields) instead.
   const editorDom = codeEditor.getDomNode();
   if (editorDom) {
     editorDom.addEventListener("keydown", (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
-      switch (e.key.toLowerCase()) {
-        case "v": e.preventDefault(); e.stopPropagation(); doPaste(); break;
-        case "c": e.preventDefault(); e.stopPropagation(); doCopy(); break;
-        case "x": e.preventDefault(); e.stopPropagation(); doCut(); break;
-      }
+      const key = e.key.toLowerCase();
+      if (key !== "v" && key !== "c" && key !== "x") return;
+      // Only handle the code buffer. `hasTextFocus()` (public API) is true only
+      // when the editor's own text input is focused — not the find/replace or
+      // rename fields — so those bubble to App.tsx's global native-field handler.
+      if (!codeEditor.hasTextFocus()) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (key === "v") doPaste();
+      else doCopyOrCut(key === "x");
     }, true /* capture */);
   }
 }
