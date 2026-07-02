@@ -11,7 +11,7 @@
 // @thaw-domain: Git Integration
 
 import { create } from "zustand";
-import { GitStatus, GitCommitAndPush, GitPull, GitFetch, PickDirectory, GetGitConfig, SaveGitConfig, GitClone, GitListBranches, GitCheckoutBranch, GitCheckoutRemoteBranch, GitCreateBranch, GitDeleteBranch, GitDeleteRemoteBranch, GitMergeBranch, GitResetHard, GitUpdateRemoteURL, GitPushBranch, GitLoginWithOAuth, GitStageFile, GitUnstageFile, GitStageAll, GitUnstageAll, GitDiscardFile } from "../../wailsjs/go/app/App";
+import { GitStatus, GitCommitAndPush, GitPull, GitFetch, PickDirectory, GetGitConfig, SaveGitConfig, GitClone, GitListBranches, GitCheckoutBranch, GitCheckoutRemoteBranch, GitCreateBranch, GitDeleteBranch, GitDeleteRemoteBranch, GitMergeBranch, GitResetHard, GitUpdateRemoteURL, GitPushBranch, GitLoginWithOAuth, GitStageFile, GitUnstageFile, GitStageAll, GitUnstageAll, GitDiscardFile, OpenFolderInNewInstance, AddRecentDir, ClearRecentDirs, SaveGitAuthor, SaveGitExportPathTemplate } from "../../wailsjs/go/app/App";
 import type { gitrepo } from "../../wailsjs/go/models";
 
 export type RepoStatus = gitrepo.RepoStatus;
@@ -29,6 +29,7 @@ interface GitState {
   authorName: string;
   authorEmail: string;
   exportPathTemplate: string;
+  recentDirs: string[];
   configLoaded: boolean;
 
   // Runtime state
@@ -50,15 +51,25 @@ interface GitState {
 
   // Actions
   loadConfig: () => Promise<void>;
+  // saveConfig persists only the per-repo/instance git fields. The shared identity/
+  // pref fields are owned by dedicated atomic actions (saveAuthor,
+  // saveExportPathTemplate) so a whole-struct write can't revert another window's edit.
   saveConfig: (patch: Partial<{
     exportDir: string;
     remoteURL: string;
     branch: string;
-    authorName: string;
-    authorEmail: string;
-    exportPathTemplate: string;
   }>) => Promise<void>;
+  saveAuthor: (name: string, email: string) => Promise<void>;
+  saveExportPathTemplate: (tmpl: string) => Promise<void>;
   pickExportDir: () => Promise<void>;
+  // openFolder switches the working directory to `dir` (VS Code "Open Folder"),
+  // recording it in the recent-folders list. Used by the File menu, the File
+  // Browser header dropdown, and pickExportDir.
+  openFolder: (dir: string) => Promise<void>;
+  clearRecentDirs: () => Promise<void>;
+  // openInNewWindow picks a folder and launches a second Thaw instance rooted
+  // there, leaving this window's working directory unchanged.
+  openInNewWindow: () => Promise<void>;
   refreshStatus: (silent?: boolean) => Promise<void>;
   pull: () => Promise<void>;
 
@@ -106,6 +117,7 @@ export const useGitStore = create<GitState>((set, get) => ({
   authorName: "",
   authorEmail: "",
   exportPathTemplate: "",
+  recentDirs: [],
   configLoaded: false,
 
   status: null,
@@ -132,6 +144,7 @@ export const useGitStore = create<GitState>((set, get) => ({
         authorName:         cfg.authorName         || "",
         authorEmail:        cfg.authorEmail        || "",
         exportPathTemplate: cfg.exportPathTemplate || "",
+        recentDirs:         cfg.recentDirs         || [],
         configLoaded: true,
       });
       // Auto-refresh git status if we have a saved directory
@@ -144,21 +157,106 @@ export const useGitStore = create<GitState>((set, get) => ({
   },
 
   saveConfig: async (patch) => {
-    const { exportDir, remoteURL, branch, authorName, authorEmail, exportPathTemplate } = get();
-    const merged = { exportDir, remoteURL, branch, authorName, authorEmail, exportPathTemplate, ...patch };
+    const { exportDir, remoteURL, branch } = get();
+    // Only the per-repo/instance fields ride SaveGitConfig. Shared fields (author,
+    // export-path template, recentDirs) are owned by dedicated atomic backend methods
+    // and preserved on disk, so they can't be clobbered by this whole-struct write.
+    const merged = { exportDir, remoteURL, branch, ...patch };
     set(merged);
     try {
-      await SaveGitConfig(merged);
+      await SaveGitConfig(merged as any);
     } catch {
       // non-fatal — in-memory state is still updated
     }
   },
 
-  pickExportDir: async () => {
+  saveAuthor: async (name, email) => {
+    set({ authorName: name, authorEmail: email });
+    try {
+      await SaveGitAuthor(name, email); // atomic, field-scoped — safe across windows
+    } catch {
+      // non-fatal — in-memory state is still updated
+    }
+  },
+
+  saveExportPathTemplate: async (tmpl) => {
+    set({ exportPathTemplate: tmpl });
+    try {
+      await SaveGitExportPathTemplate(tmpl);
+    } catch {
+      // non-fatal — in-memory state is still updated
+    }
+  },
+
+  openFolder: async (dir: string) => {
+    if (!dir) return;
+    try {
+      if (dir !== get().exportDir) {
+        // Actually switching repos. Clear the previous folder's live status AND stored
+        // remote override up front so any git op during the async refresh window falls
+        // back to the NEW folder's own repo — an empty remoteURL makes the Go side use
+        // the actual origin at exportDir, and a null status disables Commit/Push (gated
+        // on stagedTotal) until the refresh lands, so B's changes can't push to A's
+        // remote. branch is NOT blanked — refreshStatus derives it from the new folder's
+        // live HEAD. Re-selecting the current folder skips this so a manual remote
+        // override isn't wiped.
+        set({ status: null });
+        await get().saveConfig({ exportDir: dir, remoteURL: "" });
+      }
+      // Atomic add returns the authoritative merged list (no stale-snapshot overwrite).
+      const recentDirs = await AddRecentDir(dir);
+      set({ recentDirs: recentDirs ?? [] });
+    } catch (e) {
+      set({ error: String(e) });
+    } finally {
+      // Always refresh — otherwise a thrown AddRecentDir would strand `status: null`
+      // and leave the new folder showing "no status" until an unrelated action ran.
+      await get().refreshStatus();
+    }
+  },
+
+  clearRecentDirs: async () => {
+    // Called fire-and-forget from the folder dropdown, so surface failures via the
+    // error slice rather than an unhandled rejection (nothing catches it upstream).
+    try {
+      await ClearRecentDirs();
+      set({ recentDirs: [] });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  openInNewWindow: async () => {
+    if (!get().configLoaded) await get().loadConfig();
     const dir = await PickDirectory();
     if (!dir) return;
-    await get().saveConfig({ exportDir: dir });
-    await get().refreshStatus();
+    // Spawn first so a bad folder (missing/unmounted) surfaces its error before we
+    // record it as recent; the new instance opens rooted there without touching
+    // this window's exportDir.
+    try {
+      await OpenFolderInNewInstance(dir);
+    } catch (e) {
+      set({ error: String(e) });
+      return;
+    }
+    // Record in the shared recents so it's reachable from any window. Guard this
+    // too — a transient failure shouldn't surface as an unhandled rejection.
+    try {
+      const recentDirs = await AddRecentDir(dir);
+      set({ recentDirs: recentDirs ?? [] });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  pickExportDir: async () => {
+    // Ensure config is loaded before we save — the File menu's Open Folder (⌘⇧O)
+    // can fire before FileBrowser mounts (sidebar hidden), and saving with an
+    // unloaded store would clobber the real GitConfig with defaults.
+    if (!get().configLoaded) await get().loadConfig();
+    const dir = await PickDirectory();
+    if (!dir) return;
+    await get().openFolder(dir);
   },
 
   // silent=true is for refreshes that run after another operation (or as
@@ -170,7 +268,10 @@ export const useGitStore = create<GitState>((set, get) => ({
     set(silent ? { loading: true } : { loading: true, error: null });
     try {
       const status = await GitStatus(exportDir);
-      set({ status, loading: false });
+      // Track the live checked-out branch so pull/commit target the real HEAD rather
+      // than a stale default (branch has no other fallback, unlike remoteURL). Only
+      // when non-empty, so a transient head-read miss doesn't blank it to "main".
+      set({ status, loading: false, ...(status.branch ? { branch: status.branch } : {}) });
     } catch (e) {
       set(silent ? { loading: false } : { error: String(e), loading: false });
     }

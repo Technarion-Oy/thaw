@@ -15,7 +15,16 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
+
+	"thaw/internal/filesystem"
 )
+
+// fileMu serializes config read-modify-write within this process, so concurrent
+// Wails IPC calls (Wails dispatches bound methods concurrently) can't interleave a
+// Load→Save round trip and lose an update. It does NOT guard against a *second Thaw
+// process* racing on the same file — see Update.
+var fileMu sync.Mutex
 
 // Connection is a saved Snowflake connection profile.
 type Connection struct {
@@ -31,12 +40,15 @@ type Connection struct {
 // GitConfig holds the persisted git / export settings.
 // Token is intentionally excluded — it must not be written to disk.
 type GitConfig struct {
-	ExportDir          string `json:"exportDir"`
-	RemoteURL          string `json:"remoteURL"`
-	Branch             string `json:"branch"`
-	AuthorName         string `json:"authorName"`
-	AuthorEmail        string `json:"authorEmail"`
-	ExportPathTemplate string `json:"exportPathTemplate"`
+	ExportDir          string   `json:"exportDir"`
+	RemoteURL          string   `json:"remoteURL"`
+	Branch             string   `json:"branch"`
+	AuthorName         string   `json:"authorName"`
+	AuthorEmail        string   `json:"authorEmail"`
+	ExportPathTemplate string   `json:"exportPathTemplate"`
+	// RecentDirs is the most-recently-opened working directories, newest first,
+	// for quick project switching. Capped in the frontend when updated.
+	RecentDirs []string `json:"recentDirs,omitempty"`
 }
 
 // OAuthConfig holds the OAuth client IDs and secrets for Git providers.
@@ -442,6 +454,35 @@ func configPath() (string, error) {
 
 // Load reads the config file, returning an empty config if it doesn't exist yet.
 func Load() (*AppConfig, error) {
+	fileMu.Lock()
+	defer fileMu.Unlock()
+	return load()
+}
+
+// Update runs fn against the current on-disk config and writes the result back as
+// a single locked read-modify-write, so a concurrent config write in this process
+// can't clobber fn's change (or vice versa). Use this instead of a bare
+// Load→mutate→Save whenever the new value depends on the old one.
+//
+// ponytail: process-scoped lock only. A second Thaw process writing concurrently
+// can still last-writer-win (a dropped update); the atomic temp+rename in save
+// keeps the file from ever being torn/corrupt, which is the dangerous part. Add an
+// flock here if cross-process lost updates ever matter.
+func Update(fn func(*AppConfig) error) error {
+	fileMu.Lock()
+	defer fileMu.Unlock()
+	cfg, err := load()
+	if err != nil {
+		return err
+	}
+	if err := fn(cfg); err != nil {
+		return err
+	}
+	return save(cfg)
+}
+
+// load reads and parses the config; caller must hold fileMu.
+func load() (*AppConfig, error) {
 	path, err := configPath()
 	if err != nil {
 		return nil, err
@@ -472,18 +513,21 @@ func Load() (*AppConfig, error) {
 
 // Save writes the config to disk, creating directories as needed.
 func Save(cfg *AppConfig) error {
+	fileMu.Lock()
+	defer fileMu.Unlock()
+	return save(cfg)
+}
+
+// save marshals and atomically writes the config; caller must hold fileMu.
+func save(cfg *AppConfig) error {
 	path, err := configPath()
 	if err != nil {
 		return err
 	}
-
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o600)
+	// Atomic temp+rename so a second Thaw process never reads a half-written file.
+	return filesystem.WriteFileAtomic(path, data, 0o600)
 }

@@ -150,8 +150,13 @@ func (a *App) PickSnowflakeCLIConfigPath() (string, error) {
 		return "", err
 	}
 
-	cfg.SnowflakeCLIConfigPath = path
-	if err := config.Save(cfg); err != nil {
+	// Re-load fresh inside Update rather than reusing the pre-dialog snapshot — the
+	// file dialog can sit open for a while, during which another window may have
+	// written config; a whole-struct Save of the stale cfg would revert that.
+	if err := config.Update(func(c *config.AppConfig) error {
+		c.SnowflakeCLIConfigPath = path
+		return nil
+	}); err != nil {
 		return "", err
 	}
 	return path, nil

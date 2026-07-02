@@ -14,6 +14,15 @@ discard across the selection. When the `fileWatcher` feature flag is enabled it 
 backend FS watcher and incrementally refreshes only the changed directory node on
 `fs:changed` events.
 
+The header also carries a **folder-switch button** (open-folder icon) whose dropdown offers
+**Open Folder…** (native directory picker → `gitStore.pickExportDir`), **Open Folder in New
+Window…** (`gitStore.openInNewWindow` → `OpenFolderInNewInstance` IPC — spawns a second Thaw
+instance rooted at the folder), a **Recent** list of the last working directories
+(`gitStore.recentDirs` → `openFolder`), and **Clear Recent**. This is the discoverable,
+always-visible way to change the operating folder without opening Git Operations; the same
+**Open Folder…** action is bound to **File → Open Folder…** (`⌘⇧O`) and **Open Folder in New
+Window…** to its File-menu twin.
+
 The **git surface is folded into this panel** (there is no separate Git panel): the header
 shows a branch chip + changed-file count + a Git Operations button, and the tree itself is
 **color-coded by git status**. The `gitOverlay` memo builds its color map from the status's

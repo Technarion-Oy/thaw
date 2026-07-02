@@ -20,24 +20,115 @@ import (
 )
 
 // GetGitConfig returns the persisted git / export settings.
+//
+// In an "Open Folder in New Window" instance (workdirOverridden), the per-repository
+// fields are corrected so this window operates on its own folder, not the shared
+// config's project: ExportDir is this window's folder, and RemoteURL/Branch are
+// blanked so git operations fall back to the live status of the actual repo at that
+// folder — otherwise a pull/push here would target (and CommitAndPush would even
+// repoint) the main window's origin. Author/ExportPathTemplate/RecentDirs are
+// genuinely shared (global identity/prefs) and pass through unchanged.
 func (a *App) GetGitConfig() (config.GitConfig, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return config.GitConfig{}, err
 	}
+	if a.workdirOverridden {
+		cfg.Git.ExportDir = a.currentWorkdir()
+		cfg.Git.RemoteURL = ""
+		cfg.Git.Branch = ""
+	}
 	return cfg.Git, nil
 }
 
-// SaveGitConfig persists git / export settings to disk.
-// The token field is intentionally absent — it must never be written.
+// SaveGitConfig persists only the per-repo/instance git fields — ExportDir,
+// RemoteURL, Branch. The genuinely-shared fields (AuthorName, AuthorEmail,
+// ExportPathTemplate, RecentDirs) are each owned by a dedicated atomic method
+// (SaveGitAuthor / SaveGitExportPathTemplate / AddRecentDir-ClearRecentDirs) and
+// preserved from disk here, so this whole-struct call can never write a stale
+// snapshot of them back — the lost-update trap when a second window (its own
+// process) saves a shared field concurrently. The token field is never written.
 func (a *App) SaveGitConfig(gitCfg config.GitConfig) error {
-	cfg, err := config.Load()
+	return config.Update(func(cfg *config.AppConfig) error {
+		// An override window owns none of these: ExportDir is per-instance (memory
+		// only) and RemoteURL/Branch are per-repo (blanked in GetGitConfig so ops use
+		// the folder's live status). Just track the folder in memory.
+		if a.workdirOverridden {
+			a.setExportDir(gitCfg.ExportDir)
+			return nil
+		}
+		cfg.Git.ExportDir = gitCfg.ExportDir
+		cfg.Git.RemoteURL = gitCfg.RemoteURL
+		cfg.Git.Branch = gitCfg.Branch
+		a.setExportDir(gitCfg.ExportDir)
+		return nil
+	})
+}
+
+// SaveGitAuthor persists the shared commit-author identity with an atomic,
+// field-scoped write, so it can't be clobbered by a stale whole-struct snapshot
+// from another window (and works identically in override windows).
+func (a *App) SaveGitAuthor(name, email string) error {
+	return config.Update(func(cfg *config.AppConfig) error {
+		cfg.Git.AuthorName = name
+		cfg.Git.AuthorEmail = email
+		return nil
+	})
+}
+
+// SaveGitExportPathTemplate persists the shared export-path template (atomic,
+// field-scoped — see SaveGitAuthor).
+func (a *App) SaveGitExportPathTemplate(tmpl string) error {
+	return config.Update(func(cfg *config.AppConfig) error {
+		cfg.Git.ExportPathTemplate = tmpl
+		return nil
+	})
+}
+
+// AddRecentDir prepends dir to the shared recent-folders list (newest first,
+// deduped, capped) with an atomic read-modify-write, so a concurrent update from
+// another window in this process isn't lost to a stale snapshot. Returns the list.
+func (a *App) AddRecentDir(dir string) ([]string, error) {
+	var out []string
+	err := config.Update(func(cfg *config.AppConfig) error {
+		cfg.Git.RecentDirs = unionRecentDirs([]string{dir}, cfg.Git.RecentDirs)
+		out = cfg.Git.RecentDirs
+		return nil
+	})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	cfg.Git = gitCfg
-	a.setExportDir(gitCfg.ExportDir)
-	return config.Save(cfg)
+	return out, nil
+}
+
+// ClearRecentDirs empties the shared recent-folders list.
+func (a *App) ClearRecentDirs() error {
+	return config.Update(func(cfg *config.AppConfig) error {
+		cfg.Git.RecentDirs = nil
+		return nil
+	})
+}
+
+// unionRecentDirs concatenates primary then extra, dropping empties and
+// duplicates (first occurrence wins) and capping the result. primary carries the
+// caller's newest entry at the front; extra backfills anything only on disk so a
+// concurrent write from another window isn't silently dropped.
+func unionRecentDirs(primary, extra []string) []string {
+	const maxRecent = 8
+	seen := make(map[string]bool, len(primary)+len(extra))
+	out := make([]string, 0, maxRecent)
+	for _, list := range [][]string{primary, extra} {
+		for _, d := range list {
+			if d == "" || seen[d] {
+				continue
+			}
+			seen[d] = true
+			if out = append(out, d); len(out) == maxRecent {
+				return out
+			}
+		}
+	}
+	return out
 }
 
 // GitStatus returns the git status for the given directory.

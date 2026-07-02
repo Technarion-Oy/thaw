@@ -248,6 +248,21 @@ export default function AppLayout() {
     return cleanup;
   }, [openGitOps]);
 
+  // Listen for "Open Folder…" (Cmd+Shift+O) — the top-level, discoverable way to
+  // change the working directory, mirroring VS Code's Open Folder.
+  const pickExportDir = useGitStore((s) => s.pickExportDir);
+  useEffect(() => {
+    const cleanup = EventsOn("menu:open-folder", () => pickExportDir());
+    return cleanup;
+  }, [pickExportDir]);
+
+  // Listen for "Open Folder in New Window…" — spawns a second instance.
+  const openInNewWindow = useGitStore((s) => s.openInNewWindow);
+  useEffect(() => {
+    const cleanup = EventsOn("menu:open-folder-new-window", () => openInNewWindow());
+    return cleanup;
+  }, [openInNewWindow]);
+
   const sidebarStyle = (width: number): React.CSSProperties => ({
     width,
     minWidth: width,

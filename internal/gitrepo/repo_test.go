@@ -370,3 +370,25 @@ func TestResolveAuth(t *testing.T) {
 		t.Errorf("resolveAuth(pat) should return BasicAuth with x-access-token")
 	}
 }
+
+// writeFileAtomic must recreate a missing parent at the working tree's 0o755
+// (not the 0o700 the shared filesystem.WriteFileAtomic uses for config dirs), so
+// a directory revived by DiscardFile isn't left narrower than its siblings.
+func TestWriteFileAtomicDirPerm(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix directory permissions")
+	}
+	dir := t.TempDir()
+	nested := filepath.Join(dir, "revived") // does not exist yet
+	path := filepath.Join(nested, "f.sql")
+	if err := writeFileAtomic(path, []byte("x"), 0o644); err != nil {
+		t.Fatalf("writeFileAtomic: %v", err)
+	}
+	info, err := os.Stat(nested)
+	if err != nil {
+		t.Fatalf("stat parent: %v", err)
+	}
+	if info.Mode().Perm() != 0o755 {
+		t.Errorf("recreated dir perm = %o, want 755", info.Mode().Perm())
+	}
+}

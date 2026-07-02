@@ -54,6 +54,11 @@ type AppConfig struct {
 // config.go:386 / 416
 func Load() (*AppConfig, error)
 func Save(cfg *AppConfig) error
+// Update runs a read-modify-write under a process mutex so concurrent config
+// writes in this process can't lose each other's change; use it whenever the new
+// value depends on the old (e.g. appending to a list). Save writes atomically
+// (temp file + rename) so a second Thaw process never reads a half-written file.
+func Update(fn func(*AppConfig) error) error
 
 // adminconfig.go:180
 func LoadAdminConfig(user FeatureFlags) (effective FeatureFlags, locked FeatureFlags)

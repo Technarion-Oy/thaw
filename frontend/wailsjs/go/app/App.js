@@ -6,6 +6,10 @@ export function AddBackup(arg1, arg2, arg3) {
   return window['go']['app']['App']['AddBackup'](arg1, arg2, arg3);
 }
 
+export function AddRecentDir(arg1) {
+  return window['go']['app']['App']['AddRecentDir'](arg1);
+}
+
 export function AlterAgent(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterAgent'](arg1, arg2, arg3, arg4);
 }
@@ -592,6 +596,10 @@ export function ClearQueryLog() {
 
 export function ClearQueryResult(arg1) {
   return window['go']['app']['App']['ClearQueryResult'](arg1);
+}
+
+export function ClearRecentDirs() {
+  return window['go']['app']['App']['ClearRecentDirs']();
 }
 
 export function CloneChildTask(arg1, arg2, arg3, arg4, arg5, arg6) {
@@ -1690,6 +1698,10 @@ export function NotebookUseContext(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['NotebookUseContext'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function OpenFolderInNewInstance(arg1) {
+  return window['go']['app']['App']['OpenFolderInNewInstance'](arg1);
+}
+
 export function ParseClientPolicy(arg1) {
   return window['go']['app']['App']['ParseClientPolicy'](arg1);
 }
@@ -1878,8 +1890,16 @@ export function SaveFile(arg1, arg2) {
   return window['go']['app']['App']['SaveFile'](arg1, arg2);
 }
 
+export function SaveGitAuthor(arg1, arg2) {
+  return window['go']['app']['App']['SaveGitAuthor'](arg1, arg2);
+}
+
 export function SaveGitConfig(arg1) {
   return window['go']['app']['App']['SaveGitConfig'](arg1);
+}
+
+export function SaveGitExportPathTemplate(arg1) {
+  return window['go']['app']['App']['SaveGitExportPathTemplate'](arg1);
 }
 
 export function SaveNotebook(arg1, arg2) {

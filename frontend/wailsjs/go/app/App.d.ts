@@ -72,6 +72,8 @@ import {sfconfig} from '../models';
 
 export function AddBackup(arg1:string,arg2:string,arg3:string):Promise<void>;
 
+export function AddRecentDir(arg1:string):Promise<Array<string>>;
+
 export function AlterAgent(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterAggregationPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
@@ -365,6 +367,8 @@ export function ClearObjectCacheForDatabase(arg1:string):Promise<void>;
 export function ClearQueryLog():Promise<void>;
 
 export function ClearQueryResult(arg1:string):Promise<void>;
+
+export function ClearRecentDirs():Promise<void>;
 
 export function CloneChildTask(arg1:string,arg2:string,arg3:string,arg4:string,arg5:boolean,arg6:Array<string>):Promise<void>;
 
@@ -914,6 +918,8 @@ export function NormalizeSqlScalar(arg1:string):Promise<string>;
 
 export function NotebookUseContext(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
+export function OpenFolderInNewInstance(arg1:string):Promise<void>;
+
 export function ParseClientPolicy(arg1:string):Promise<authenticationpolicy.ClientPolicy>;
 
 export function ParseMFAPolicy(arg1:string):Promise<authenticationpolicy.MFAPolicy>;
@@ -1008,7 +1014,11 @@ export function SaveFeatureFlags(arg1:config.FeatureFlags):Promise<void>;
 
 export function SaveFile(arg1:string,arg2:string):Promise<void>;
 
+export function SaveGitAuthor(arg1:string,arg2:string):Promise<void>;
+
 export function SaveGitConfig(arg1:config.GitConfig):Promise<void>;
+
+export function SaveGitExportPathTemplate(arg1:string):Promise<void>;
 
 export function SaveNotebook(arg1:string,arg2:string):Promise<void>;
 

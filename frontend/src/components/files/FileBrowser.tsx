@@ -9,7 +9,8 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from "react";
-import { Tree, Typography, Spin, Button, Input, Switch, Modal, Tooltip, App as AntApp } from "antd";
+import { Tree, Typography, Spin, Button, Input, Switch, Modal, Tooltip, Dropdown, App as AntApp } from "antd";
+import type { MenuProps } from "antd";
 import {
   FolderOutlined,
   FolderOpenOutlined,
@@ -32,6 +33,7 @@ import {
   BranchesOutlined,
   ScissorOutlined,
   BlockOutlined,
+  ExportOutlined,
 } from "@ant-design/icons";
 import type { DataNode, EventDataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
@@ -91,8 +93,10 @@ function pathSep(p: string): string {
   return p.includes("\\") ? "\\" : "/";
 }
 
-/** Extract the filename from a path, handling both / and \ separators. */
+/** Extract the filename from a path, handling both / and \ separators.
+ *  Trailing separators are stripped first so "/projects/" yields "projects". */
 function pathBase(p: string): string {
+  p = p.replace(/[/\\]+$/, "");
   const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
   return i >= 0 ? p.substring(i + 1) : p;
 }
@@ -261,6 +265,10 @@ export default function FileBrowser() {
   const resetHard    = useGitStore((s) => s.resetHard);
   const openGitOps   = useGitStore((s) => s.openGitOps);
   const pickExportDir = useGitStore((s) => s.pickExportDir);
+  const openFolder    = useGitStore((s) => s.openFolder);
+  const clearRecentDirs = useGitStore((s) => s.clearRecentDirs);
+  const openInNewWindow = useGitStore((s) => s.openInNewWindow);
+  const recentDirs    = useGitStore((s) => s.recentDirs);
   const refreshGitStatus = useGitStore((s) => s.refreshStatus);
   const loadGitConfig = useGitStore((s) => s.loadConfig);
   const gitConfigLoaded = useGitStore((s) => s.configLoaded);
@@ -1458,13 +1466,48 @@ export default function FileBrowser() {
     [ctxMulti, selKeys, treeData, fileCtxMenu],
   );
 
+  // Folder-switch dropdown: "Open Folder…" plus recent working directories, so
+  // users can change the operating folder without digging into Git Operations.
+  const folderMenu: MenuProps["items"] = useMemo(() => {
+    const items: MenuProps["items"] = [
+      { key: "__open", icon: <FolderOpenOutlined />, label: "Open Folder…" },
+      { key: "__open_new", icon: <ExportOutlined />, label: "Open Folder in New Window…" },
+    ];
+    if (recentDirs.length) {
+      items.push({ type: "divider" });
+      items.push({ key: "__recent_label", type: "group", label: "Recent" });
+      for (const dir of recentDirs) {
+        const isCurrent = dir === exportDir;
+        items.push({
+          key: `recent:${dir}`,
+          // Disable the current folder — reselecting it is a no-op (openFolder guards
+          // against re-blanking a manual remote override), so make that visible.
+          disabled: isCurrent,
+          icon: <FolderOutlined style={{ color: isCurrent ? "var(--link)" : CLR_SECONDARY }} />,
+          label: <span title={dir} style={{ color: isCurrent ? "var(--link)" : undefined }}>{pathBase(dir) || dir}</span>,
+        });
+      }
+      items.push({ type: "divider" });
+      items.push({ key: "__clear", label: "Clear Recent" });
+    }
+    return items;
+  }, [recentDirs, exportDir]);
+
+  const onFolderMenuClick: MenuProps["onClick"] = ({ key }) => {
+    if (key === "__open") pickExportDir();
+    else if (key === "__open_new") openInNewWindow();
+    else if (key === "__clear") clearRecentDirs();
+    else if (key.startsWith("recent:")) openFolder(key.slice("recent:".length));
+  };
+
   return (
     <div style={{ padding: "4px 4px" }}>
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", padding: "0 4px 0 8px", marginBottom: expanded ? 4 : 0, gap: 2 }}>
         <div
-          style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", flex: 1, padding: "2px 4px", borderRadius: 4 }}
+          style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", flex: 1, minWidth: 0, padding: "2px 4px", borderRadius: 4 }}
           onClick={toggleExpanded}
+          title={exportDir || "No folder open"}
           onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
           onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
         >
@@ -1472,9 +1515,12 @@ export default function FileBrowser() {
             ? <CaretDownFilled style={{ fontSize: 9, color: "var(--text-muted)" }} />
             : <CaretRightFilled style={{ fontSize: 9, color: "var(--text-muted)" }} />
           }
-          <FolderOutlined style={{ color: "var(--text)", fontSize: 13 }} />
-          <Text style={{ fontSize: 11, color: "var(--text)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-            Files
+          <FolderOutlined style={{ color: "var(--text)", fontSize: 13, flexShrink: 0 }} />
+          <Text
+            ellipsis
+            style={{ fontSize: 11, color: "var(--text)", textTransform: "uppercase", letterSpacing: "0.08em", minWidth: 0 }}
+          >
+            {pathBase(exportDir) || "Files"}
           </Text>
         </div>
         {/* Branch chip — folded in from the former Git panel; opens Git Operations */}
@@ -1513,6 +1559,20 @@ export default function FileBrowser() {
             />
           </Tooltip>
         )}
+        <Dropdown
+          menu={{ items: folderMenu, onClick: onFolderMenuClick }}
+          trigger={["click"]}
+        >
+          <Tooltip title="Open / change working folder">
+            <Button
+              size="small"
+              type="text"
+              icon={<FolderOpenOutlined style={{ fontSize: 11, color: CLR_SECONDARY }} />}
+              onClick={(e) => e.stopPropagation()}
+              style={{ height: 20, padding: "0 4px", minWidth: 0 }}
+            />
+          </Tooltip>
+        </Dropdown>
         <Button
           size="small"
           type="text"

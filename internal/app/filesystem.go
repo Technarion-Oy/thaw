@@ -12,6 +12,8 @@ package app
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 	"thaw/internal/config"
 	"thaw/internal/filesystem"
@@ -181,14 +183,28 @@ func (a *App) setExportDir(dir string) {
 	a.exportDirMu.Unlock()
 }
 
+// currentWorkdir returns this process's working directory for dialog defaults
+// (never errors on empty, unlike exportRoot). An override window's folder lives
+// only in memory (it's never persisted), so read cachedExportDir there; an ordinary
+// window reads fresh from disk so it picks up a folder change made by another
+// ordinary window since startup, matching the pre-override behavior.
+func (a *App) currentWorkdir() string {
+	if a.workdirOverridden {
+		a.exportDirMu.RLock()
+		defer a.exportDirMu.RUnlock()
+		return a.cachedExportDir
+	}
+	if cfg, err := config.Load(); err == nil {
+		return cfg.Git.ExportDir
+	}
+	return ""
+}
+
 // PickOpenFile opens a native open-file dialog filtered to SQL, YAML and
 // Python files and returns the chosen path, or an empty string if canceled.
 // The dialog opens in the configured export directory when one is set.
 func (a *App) PickOpenFile() string {
-	defaultDir := ""
-	if cfg, err := config.Load(); err == nil {
-		defaultDir = cfg.Git.ExportDir
-	}
+	defaultDir := a.currentWorkdir()
 	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
 		Title:            "Open file",
 		DefaultDirectory: defaultDir,
@@ -212,10 +228,7 @@ func (a *App) PickOpenFile() string {
 // for opening files other than SQL/YAML/Python. The dialog opens in the
 // configured export directory when one is set.
 func (a *App) PickAnyFile() string {
-	defaultDir := ""
-	if cfg, err := config.Load(); err == nil {
-		defaultDir = cfg.Git.ExportDir
-	}
+	defaultDir := a.currentWorkdir()
 	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
 		Title:            "Open any file",
 		DefaultDirectory: defaultDir,
@@ -376,6 +389,39 @@ func (a *App) PickDirectory() string {
 		return ""
 	}
 	return path
+}
+
+// OpenFolderInNewInstance launches a second, independent instance of Thaw rooted
+// at dir (VS Code's "Open Folder in New Window"), passing it as --workdir=<dir>;
+// the new process treats it as a per-instance override and never writes it back to
+// the global config, so the two windows can work on different folders.
+//
+// We deliberately re-exec the running binary directly rather than `open -n
+// Thaw.app`: on macOS `open` resolves the target through LaunchServices by bundle
+// ID, which can launch a stale or duplicate registered copy of the app (running
+// old code that ignores --workdir) instead of the build in hand. Direct exec runs
+// exactly this binary and reliably delivers argv.
+func (a *App) OpenFolderInNewInstance(dir string) error {
+	if dir == "" {
+		return fmt.Errorf("no directory given")
+	}
+	// Fail up front on a stale Recent entry (deleted/renamed/unmounted) rather than
+	// spawning a window rooted at a nonexistent folder that then degrades silently.
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		return fmt.Errorf("folder is not available: %s", dir)
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(exe, "--workdir="+dir)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	// Reap the child once it exits so it doesn't linger as a zombie in this
+	// long-lived parent's process table after its window is closed.
+	go func() { _ = cmd.Wait() }()
+	return nil
 }
 
 // PickFileForFormatPreview opens a native file-picker filtered to common data

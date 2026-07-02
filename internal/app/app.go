@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"thaw/internal/apperrors"
@@ -101,9 +102,17 @@ type App struct {
 	gitCommitFiltersMu sync.Mutex
 	gitCommitFilters   map[string]string
 
-	// Cached export directory (set on startup and when SaveGitConfig is called).
+	// Cached working directory — the single source of truth for this process's
+	// folder, guarded by exportDirMu (set on startup and by SaveGitConfig).
 	exportDirMu     sync.RWMutex
 	cachedExportDir string
+
+	// workdirOverridden marks this process as an "Open Folder in New Window"
+	// instance: it was launched with --workdir=<dir>, so its folder lives only in
+	// cachedExportDir and is never persisted back to the shared config (see
+	// GetGitConfig / SaveGitConfig), letting windows operate on different folders
+	// without fighting. Set once in NewApp and never mutated, so no lock is needed.
+	workdirOverridden bool
 
 	// File system watcher for the working directory.
 	fsWatcherMu sync.Mutex
@@ -122,9 +131,25 @@ type App struct {
 // NewApp creates and returns a new App instance for use with the Wails runtime.
 func NewApp() *App {
 	return &App{
-		gitCommitFilters: make(map[string]string),
-		queryLog:         querylog.New(),
+		gitCommitFilters:  make(map[string]string),
+		queryLog:          querylog.New(),
+		workdirOverridden: workdirOverrideArg() != "",
 	}
+}
+
+// workdirOverrideArg returns the directory passed via --workdir=<dir> on the
+// command line, or "" if absent. Set by "Open Folder in New Window" when it
+// relaunches the executable so the new instance opens that folder. Deliberately
+// arg-only (no env fallback): direct exec always delivers argv, and honoring a
+// stray/inherited env var would silently turn a normal launch into an override
+// window (blanked remote/branch, non-persisting saves) with no clear indicator.
+func workdirOverrideArg() string {
+	for _, arg := range os.Args[1:] {
+		if dir, ok := strings.CutPrefix(arg, "--workdir="); ok && dir != "" {
+			return dir
+		}
+	}
+	return ""
 }
 
 // startup is called by the Wails runtime after the application window is ready.
@@ -143,7 +168,13 @@ func (a *App) startup(ctx context.Context) {
 	telemetry.Track(telemetry.EventAppStarted, nil)
 
 	// Cache the export directory so file management IPC methods don't re-read config.
-	if cfg, err := config.Load(); err == nil {
+	// A --workdir override (this window was opened via "Open Folder in New Window")
+	// wins over the persisted dir and retitles the window so the two are tellable apart.
+	if dir := workdirOverrideArg(); dir != "" {
+		logger.L.Info("launched with working-directory override", "dir", dir)
+		a.setExportDir(dir)
+		wailsruntime.WindowSetTitle(ctx, "Thaw — "+filepath.Base(dir))
+	} else if cfg, err := config.Load(); err == nil {
 		a.setExportDir(cfg.Git.ExportDir)
 	}
 
@@ -157,6 +188,9 @@ func (a *App) startup(ctx context.Context) {
 	a.migrationSvc = migration.NewService(func(eventName string, data interface{}) {
 		wailsruntime.EventsEmit(ctx, eventName, data)
 	})
+	// Let Snowpark resolve the working directory the override-aware way (an
+	// "Open Folder in New Window" instance's folder lives only in memory).
+	snowpark.SetWorkdirProvider(a.currentWorkdir)
 	a.snowparkSvc = snowpark.NewService(ctx, func(tabId, role, wh, db, schema string) {
 		if val, ok := a.tabSessions.Load(tabId); ok {
 			ts := val.(*tabSession)

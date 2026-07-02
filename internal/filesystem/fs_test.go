@@ -724,3 +724,52 @@ func TestCopyFile_RejectsSymlink(t *testing.T) {
 		t.Error("expected error copying a symbolic link, got nil")
 	}
 }
+
+// WriteFileAtomic is the shared temp+rename writer for config/gitrepo/sfconfig;
+// verify it overwrites, applies perms, and never leaves a torn file under
+// concurrent writers (the whole point of the atomic rename).
+func TestWriteFileAtomic(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sub", "f.txt") // sub doesn't exist yet — must be created
+
+	if err := WriteFileAtomic(path, []byte("first"), 0o600); err != nil {
+		t.Fatalf("first write: %v", err)
+	}
+	if b, err := os.ReadFile(path); err != nil || string(b) != "first" {
+		t.Fatalf("read after first = %q, %v", b, err)
+	}
+	// Overwrites an existing file (rename replaces).
+	if err := WriteFileAtomic(path, []byte("second"), 0o600); err != nil {
+		t.Fatalf("second write: %v", err)
+	}
+	if b, _ := os.ReadFile(path); string(b) != "second" {
+		t.Fatalf("read after overwrite = %q", b)
+	}
+	if runtime.GOOS != "windows" {
+		if info, _ := os.Stat(path); info.Mode().Perm() != 0o600 {
+			t.Fatalf("perm = %o, want 600", info.Mode().Perm())
+		}
+	}
+
+	// Concurrent writers: every read must observe one whole value (never a torn
+	// mix), and no temp files should be left behind.
+	const payload = "0123456789abcdef0123456789abcdef"
+	done := make(chan error, 16)
+	for i := 0; i < 16; i++ {
+		go func() { done <- WriteFileAtomic(path, []byte(payload), 0o600) }()
+	}
+	for i := 0; i < 16; i++ {
+		if err := <-done; err != nil {
+			t.Fatalf("concurrent write: %v", err)
+		}
+	}
+	if b, _ := os.ReadFile(path); string(b) != payload {
+		t.Fatalf("after concurrent writes = %q, want intact payload", b)
+	}
+	entries, _ := os.ReadDir(filepath.Dir(path))
+	for _, e := range entries {
+		if e.Name() != "f.txt" {
+			t.Errorf("leftover temp file: %s", e.Name())
+		}
+	}
+}
