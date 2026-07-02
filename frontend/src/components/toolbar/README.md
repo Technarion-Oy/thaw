@@ -51,6 +51,14 @@ handled upstream in the store actions or in `QueryPage`.
   is the primary consumer; it renders the kernel status dot and Restart Kernel button.
 - `primaryAction` — Notebook Deploy button is passed here from `QueryPage`.
 
+**Responsive layout (issue #603):** the root strip (`.thaw-tb` in `global.css`) is a CSS
+container (`container-type: inline-size`), so breakpoints track the centre-column width — which
+depends on the side panels — not the window. As the column narrows: the "⌘↵ to run" hint hides
+(≤880px), the session selects slim from 130px to 104px (≤760px), and finally `flex-wrap` moves
+the session cluster onto its own right-aligned row (`.thaw-tb-right { margin-left: auto }`).
+Nothing is ever clipped. Don't put fixed widths back as inline `style` props — they'd override
+the container-query rules.
+
 ## Gotchas
 
 - The Toolbar is the single source of truth for the session selector row. Do not replicate
