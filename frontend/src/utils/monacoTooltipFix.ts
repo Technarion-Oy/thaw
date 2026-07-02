@@ -13,16 +13,29 @@ import { IHoverService } from "monaco-editor/esm/vs/platform/hover/browser/hover
 
 let patched = false;
 
-// Force Monaco's base-layer hover tooltips (find-widget button tooltips — the
-// Aa/ab/.* toggles, prev/next, close) to render BELOW their target instead of
-// the default ABOVE. The find widget is pinned to the editor's top edge, so
-// "above" lands in the tab-bar band where the editor pane's `overflow: hidden`
-// clips it away (issue #593). `_createHover` is the single choke point both
-// showInstantHover and showDelayedHover funnel through; forcing BELOW there
-// (only when the caller set no explicit position) drops these tooltips into the
-// editor body, unclipped. Monaco still auto-flips back to ABOVE if BELOW would
-// overflow the window, so this stays correct for targets that aren't near the
-// top. The code hover uses a content widget (not this service), so it's
+interface HoverOptions {
+  position?: { hoverPosition?: unknown };
+  target?: HTMLElement | { targetElements?: HTMLElement[] };
+}
+
+// The find widget is pinned to the editor's top edge, and Monaco's base-layer
+// hover tooltips default to rendering ABOVE their target — so its button
+// tooltips (the Aa/ab/.* toggles, prev/next, close) land in the tab-bar band
+// where the editor pane's `overflow: hidden` clips them away (issue #593).
+// Whether the tooltip's target lives inside the find widget.
+function isFindWidgetHover(options: HoverOptions): boolean {
+  const t = options.target;
+  const el = t instanceof HTMLElement ? t : t?.targetElements?.[0];
+  return !!el && !!el.closest(".find-widget");
+}
+
+// Patch Monaco's base-layer hover service so FIND-WIDGET tooltips render BELOW.
+// `_createHover` is the single choke point both showInstantHover and
+// showDelayedHover funnel through — but it backs every base-layer tooltip in the
+// app (toolbar buttons, rename widget, etc.), so we flip to BELOW only for
+// hovers whose target is inside the find widget, leaving all others at Monaco's
+// default. Monaco still auto-flips back to ABOVE if BELOW would overflow the
+// window. The code hover uses a content widget (not this service), so it's
 // unaffected.
 //
 // The hover service is a shared singleton, so patching it once covers every
@@ -33,7 +46,7 @@ function applyHoverPatch(): void {
   if (patched) return;
   const HOVER_POSITION_BELOW = 2; // HoverPosition.BELOW
   const hoverService = StandaloneServices.get(IHoverService) as {
-    _createHover?: (options: { position?: { hoverPosition?: unknown } }, skip?: unknown) => unknown;
+    _createHover?: (options: HoverOptions, skip?: unknown) => unknown;
   } | undefined;
   if (!hoverService || typeof hoverService._createHover !== "function") {
     // Monaco internals changed (e.g. a version bump renamed _createHover). Warn
@@ -52,7 +65,7 @@ function applyHoverPatch(): void {
     // copy. The real `_createHover` also writes `options.container` on this same
     // reference (for aux-window support), and the caller reads it back after; a
     // spread copy would swallow that write.
-    if (options && options.position?.hoverPosition === undefined) {
+    if (options && options.position?.hoverPosition === undefined && isFindWidgetHover(options)) {
       options.position = { ...options.position, hoverPosition: HOVER_POSITION_BELOW };
     }
     return original(options, skip);
@@ -64,18 +77,15 @@ interface EditorNamespace {
   onDidCreateEditor: (listener: () => void) => void;
 }
 
-let hookRegistered = false;
-
 /**
  * Register a global `onDidCreateEditor` hook that applies the find-widget tooltip
- * fix to every editor Monaco creates (issue #593). Idempotent; call once with the
- * `monaco.editor` namespace (from `ensureMonacoSetup`, which runs before the first
- * editor is created). Because the hook fires on every creation and the patch
- * targets a shared singleton, this covers all editors — SqlEditor, notebook
- * cells, modals, diff views — independent of any per-mount clipboard wiring.
+ * fix to every editor Monaco creates (issue #593). Call once with the
+ * `monaco.editor` namespace from `ensureMonacoSetup` (its module-level `registered`
+ * guard already makes a second call structurally impossible). The hook fires on
+ * every editor creation and the underlying patch (`patched`) is a one-time
+ * singleton mutation, so this covers all editors — SqlEditor, notebook cells,
+ * modals, diff views — independent of any per-mount clipboard wiring.
  */
 export function registerFindWidgetTooltipFix(editorNs: EditorNamespace): void {
-  if (hookRegistered) return;
-  hookRegistered = true;
   editorNs.onDidCreateEditor(() => applyHoverPatch());
 }

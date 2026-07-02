@@ -37,6 +37,9 @@ export function patchMonacoClipboard(editor: monaco.editor.IStandaloneCodeEditor
 
   // Copy is cut without the delete-and-undo-stop step.
   const doCopyOrCut = async (cut: boolean) => {
+    // Cut can't delete from a read-only buffer — mirror VS Code and no-op rather
+    // than writing the clipboard and silently behaving like copy.
+    if (cut && codeEditor.getRawOptions().readOnly) return;
     const selection = codeEditor.getSelection();
     const model = codeEditor.getModel();
     if (!selection || !model) return;

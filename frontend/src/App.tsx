@@ -220,19 +220,22 @@ export default function App() {
 
     const onKeyDown = async (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
+      // Cheap key check first — only v/c/x need the (editor-scanning) field check.
+      const key = e.key;
+      if (key !== "v" && key !== "c" && key !== "x") return;
       const target = document.activeElement;
       if (!isEditableInput(target)) return;
 
-      if (e.key === "v") {
+      if (key === "v") {
         e.preventDefault();
         const text = await ClipboardGetText();
         if (text) spliceValue(target, text);
-      } else if (e.key === "c" || e.key === "x") {
+      } else {
         const selected = selectedText(target);
         if (!selected) return;
         e.preventDefault();
         await ClipboardSetText(selected);
-        if (e.key === "x") spliceValue(target, "");
+        if (key === "x") spliceValue(target, "");
       }
     };
 
