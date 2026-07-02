@@ -27,8 +27,6 @@ import MCPIndicator from "./MCPIndicator";
 
 const { Text } = Typography;
 
-const selectStyle = { fontSize: 12, width: 130 };
-
 export interface ToolbarProps {
   /** Whether a query is currently running in the active tab. */
   isRunning: boolean;
@@ -116,18 +114,9 @@ export default function Toolbar({
   const switchSchema = useSessionStore((s) => s.switchSchema);
 
   return (
-    <div
-      style={{
-        padding: "6px 12px",
-        borderBottom: "1px solid var(--border)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        background: "var(--bg-raised)",
-      }}
-    >
+    <div className="thaw-tb">
       {/* ── Left: execution controls + button grid ── */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div className="thaw-tb-left">
         {/* Run/Cancel + hint */}
         <Space size={4}>
           {isRunning ? (
@@ -153,7 +142,7 @@ export default function Toolbar({
               </Button>
             </Tooltip>
           )}
-          <Text type="secondary" style={{ fontSize: 11, whiteSpace: "nowrap" }}>
+          <Text type="secondary" className="thaw-tb-hint">
             {isRunning
               ? "Esc to cancel"
               : selectedSql.trim()
@@ -163,7 +152,7 @@ export default function Toolbar({
         </Space>
 
         {/* Separator */}
-        <div style={{ width: 1, alignSelf: "stretch", background: "var(--border)" }} />
+        <div className="thaw-tb-sep" />
 
         {/* Action button grid: 3 columns, 1 or 2 rows */}
         {primaryAction ? (
@@ -214,6 +203,7 @@ export default function Toolbar({
       {/* ── Right: connect button or session context ── */}
       {!isConnected ? (
         <Button
+          className="thaw-tb-right"
           icon={<LinkOutlined />}
           type="primary"
           size="small"
@@ -222,14 +212,14 @@ export default function Toolbar({
           Connect to Snowflake
         </Button>
       ) : null}
-      <Space size={6} style={{ display: isConnected ? undefined : "none" }}>
+      <Space size={6} wrap className="thaw-tb-right" style={{ display: isConnected ? undefined : "none" }}>
         {/* Session selectors: two rows (role+wh / db+schema) */}
         <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
           <Space size={6}>
             <Tooltip title={role ? `Role: ${role}` : "Active role"}>
               <Select
                 size="small"
-                style={selectStyle}
+                className="thaw-tb-select"
                 value={role || undefined}
                 placeholder={loadingContext ? "\u2026" : "Role"}
                 loading={loadingRoles || switchingRole}
@@ -244,7 +234,7 @@ export default function Toolbar({
             <Tooltip title={warehouse ? `Warehouse: ${warehouse}` : "Active warehouse"}>
               <Select
                 size="small"
-                style={selectStyle}
+                className="thaw-tb-select"
                 value={warehouse || undefined}
                 placeholder={loadingContext ? "\u2026" : "Warehouse"}
                 loading={loadingWarehouses || switchingWarehouse}
@@ -261,7 +251,7 @@ export default function Toolbar({
             <Tooltip title={database ? `Database: ${database}` : "Active database"}>
               <Select
                 size="small"
-                style={selectStyle}
+                className="thaw-tb-select"
                 value={database || undefined}
                 placeholder={loadingContext ? "\u2026" : "Database"}
                 loading={loadingDatabases || switchingDatabase}
@@ -276,7 +266,7 @@ export default function Toolbar({
             <Tooltip title={schema ? `Schema: ${schema}` : "Active schema"}>
               <Select
                 size="small"
-                style={selectStyle}
+                className="thaw-tb-select"
                 value={schema || undefined}
                 placeholder={loadingContext ? "\u2026" : "Schema"}
                 loading={loadingSchemas || switchingSchema}

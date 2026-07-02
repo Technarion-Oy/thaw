@@ -821,6 +821,47 @@ body,
 .thaw-nb-add-btn[data-kind="sql"]      .thaw-nb-add-dot { background: var(--cell-accent-sql); }
 .thaw-nb-add-btn[data-kind="markdown"] .thaw-nb-add-dot { background: var(--cell-accent-markdown); }
 
+/* ── App toolbar root (Toolbar.tsx) ─────────────────────────────────────
+   A container-query context: the toolbar adapts to the centre-column
+   width (which depends on the side panels), not the window. Degrades in
+   steps as the column narrows — drop the run hint, slim the session
+   selects — and finally wraps the session cluster onto its own
+   right-aligned row instead of clipping it (issue #603). */
+
+.thaw-tb {
+  container-type: inline-size;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+}
+.thaw-tb-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+/* margin-left:auto (not space-between on the root) so the cluster stays
+   right-aligned even when it wraps onto a row of its own. */
+.thaw-tb .thaw-tb-right { margin-left: auto; }
+.thaw-tb .thaw-tb-hint {
+  font-size: 11px;
+  white-space: nowrap;
+}
+.thaw-tb .thaw-tb-select {
+  width: 130px;
+  font-size: 12px;
+}
+@container (max-width: 880px) {
+  .thaw-tb .thaw-tb-hint { display: none; }
+}
+@container (max-width: 760px) {
+  .thaw-tb .thaw-tb-select { width: 104px; }
+}
+
 /* ── App toolbar buttons (Toolbar.tsx) ──────────────────────────────────
    The top toolbar's left side. Sized to read at the same height as the
    Antd primary Run button (32px) so the row reads as a coherent strip
