@@ -57,7 +57,11 @@ export default function CellDetailPanel({ columns, onVisibleCellChange }: Props)
   // changes when the user clicks a different cell. Only cell-originated
   // selections count: row/column/select-all gestures must not open the panel
   // (or auto-scroll the grid to their column-0 anchor).
-  const anchorKey = selectionRange && selectionOrigin === "cell"
+  const isSingleCell = selectionRange
+    ? selectionRange.startRow === selectionRange.endRow &&
+      selectionRange.startCol === selectionRange.endCol
+    : false;
+  const anchorKey = selectionRange && selectionOrigin === "cell" && isSingleCell
     ? `${selectionRange.startRow}:${selectionRange.startCol}`
     : null;
 
