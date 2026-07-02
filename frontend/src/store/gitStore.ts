@@ -11,7 +11,7 @@
 // @thaw-domain: Git Integration
 
 import { create } from "zustand";
-import { GitStatus, GitCommitAndPush, GitPull, GitFetch, PickDirectory, GetGitConfig, SaveGitConfig, GitClone, GitListBranches, GitCheckoutBranch, GitCheckoutRemoteBranch, GitCreateBranch, GitDeleteBranch, GitDeleteRemoteBranch, GitMergeBranch, GitResetHard, GitUpdateRemoteURL, GitPushBranch, GitLoginWithOAuth, GitStageFile, GitUnstageFile, GitStageAll, GitUnstageAll, GitDiscardFile, OpenFolderInNewInstance } from "../../wailsjs/go/app/App";
+import { GitStatus, GitCommitAndPush, GitPull, GitFetch, PickDirectory, GetGitConfig, SaveGitConfig, GitClone, GitListBranches, GitCheckoutBranch, GitCheckoutRemoteBranch, GitCreateBranch, GitDeleteBranch, GitDeleteRemoteBranch, GitMergeBranch, GitResetHard, GitUpdateRemoteURL, GitPushBranch, GitLoginWithOAuth, GitStageFile, GitUnstageFile, GitStageAll, GitUnstageAll, GitDiscardFile, OpenFolderInNewInstance, AddRecentDir, ClearRecentDirs } from "../../wailsjs/go/app/App";
 import type { gitrepo } from "../../wailsjs/go/models";
 
 export type RepoStatus = gitrepo.RepoStatus;
@@ -58,7 +58,6 @@ interface GitState {
     authorName: string;
     authorEmail: string;
     exportPathTemplate: string;
-    recentDirs: string[];
   }>) => Promise<void>;
   pickExportDir: () => Promise<void>;
   // openFolder switches the working directory to `dir` (VS Code "Open Folder"),
@@ -156,10 +155,10 @@ export const useGitStore = create<GitState>((set, get) => ({
   },
 
   saveConfig: async (patch) => {
-    const { exportDir, remoteURL, branch, authorName, authorEmail, exportPathTemplate, recentDirs } = get();
-    // recentDirs must ride along on every save — SaveGitConfig replaces the whole
-    // GitConfig, so omitting it would wipe the recent-folders list.
-    const merged = { exportDir, remoteURL, branch, authorName, authorEmail, exportPathTemplate, recentDirs, ...patch };
+    const { exportDir, remoteURL, branch, authorName, authorEmail, exportPathTemplate } = get();
+    // recentDirs is deliberately NOT sent — it's owned by AddRecentDir/ClearRecentDirs
+    // (atomic on the backend); SaveGitConfig preserves the on-disk list regardless.
+    const merged = { exportDir, remoteURL, branch, authorName, authorEmail, exportPathTemplate, ...patch };
     set(merged);
     try {
       await SaveGitConfig(merged as any);
@@ -170,29 +169,35 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   openFolder: async (dir: string) => {
     if (!dir) return;
-    // Newest first, deduped, capped at 8. A re-opened dir jumps back to the top.
-    const recentDirs = [dir, ...get().recentDirs.filter((d) => d !== dir)].slice(0, 8);
-    await get().saveConfig({ exportDir: dir, recentDirs });
+    await get().saveConfig({ exportDir: dir });
+    // Atomic add on the backend returns the authoritative merged list (no stale-
+    // snapshot overwrite of another window's entries).
+    const recentDirs = await AddRecentDir(dir);
+    set({ recentDirs: recentDirs ?? [] });
     await get().refreshStatus();
   },
 
   clearRecentDirs: async () => {
-    await get().saveConfig({ recentDirs: [] });
+    await ClearRecentDirs();
+    set({ recentDirs: [] });
   },
 
   openInNewWindow: async () => {
     if (!get().configLoaded) await get().loadConfig();
     const dir = await PickDirectory();
     if (!dir) return;
-    // Record it in the shared recents so it's reachable from any window, but don't
-    // touch this window's exportDir — the folder opens in the new instance only.
-    const recentDirs = [dir, ...get().recentDirs.filter((d) => d !== dir)].slice(0, 8);
-    await get().saveConfig({ recentDirs });
+    // Spawn first so a bad folder (missing/unmounted) surfaces its error before we
+    // record it as recent; the new instance opens rooted there without touching
+    // this window's exportDir.
     try {
       await OpenFolderInNewInstance(dir);
     } catch (e) {
       set({ error: String(e) });
+      return;
     }
+    // Record in the shared recents so it's reachable from any window.
+    const recentDirs = await AddRecentDir(dir);
+    set({ recentDirs: recentDirs ?? [] });
   },
 
   pickExportDir: async () => {

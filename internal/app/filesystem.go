@@ -397,6 +397,11 @@ func (a *App) OpenFolderInNewInstance(dir string) error {
 	if dir == "" {
 		return fmt.Errorf("no directory given")
 	}
+	// Fail up front on a stale Recent entry (deleted/renamed/unmounted) rather than
+	// spawning a window rooted at a nonexistent folder that then degrades silently.
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		return fmt.Errorf("folder is not available: %s", dir)
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		return err

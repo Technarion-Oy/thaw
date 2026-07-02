@@ -12,8 +12,32 @@ package app
 
 import (
 	"os"
+	"reflect"
 	"testing"
 )
+
+// unionRecentDirs backs the atomic AddRecentDir merge; a regression drops another
+// window's concurrently-added recent entry or breaks the newest-first cap.
+func TestUnionRecentDirs(t *testing.T) {
+	cases := []struct {
+		name           string
+		primary, extra []string
+		want           []string
+	}{
+		{"prepend + backfill disk", []string{"/new"}, []string{"/a", "/b"}, []string{"/new", "/a", "/b"}},
+		{"dedupe across lists", []string{"/a"}, []string{"/a", "/b"}, []string{"/a", "/b"}},
+		{"drop empties", []string{""}, []string{"/a", ""}, []string{"/a"}},
+		{"cap at 8", []string{"/1", "/2", "/3", "/4", "/5"}, []string{"/6", "/7", "/8", "/9"}, []string{"/1", "/2", "/3", "/4", "/5", "/6", "/7", "/8"}},
+		{"both empty", nil, nil, []string{}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := unionRecentDirs(c.primary, c.extra); !reflect.DeepEqual(got, c.want) {
+				t.Errorf("unionRecentDirs(%v, %v) = %v, want %v", c.primary, c.extra, got, c.want)
+			}
+		})
+	}
+}
 
 // workdirOverrideArg drives the per-instance working-directory override used by
 // "Open Folder in New Window"; a regression here silently reverts new windows to

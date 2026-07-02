@@ -19,9 +19,15 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-// GetGitConfig returns the persisted git / export settings. When this window was
-// launched with a --workdir override, the returned ExportDir reflects that
-// per-instance folder rather than the global one, so the frontend roots there.
+// GetGitConfig returns the persisted git / export settings.
+//
+// In an "Open Folder in New Window" instance (workdirOverridden), the per-repository
+// fields are corrected so this window operates on its own folder, not the shared
+// config's project: ExportDir is this window's folder, and RemoteURL/Branch are
+// blanked so git operations fall back to the live status of the actual repo at that
+// folder — otherwise a pull/push here would target (and CommitAndPush would even
+// repoint) the main window's origin. Author/ExportPathTemplate/RecentDirs are
+// genuinely shared (global identity/prefs) and pass through unchanged.
 func (a *App) GetGitConfig() (config.GitConfig, error) {
 	cfg, err := config.Load()
 	if err != nil {
@@ -29,30 +35,87 @@ func (a *App) GetGitConfig() (config.GitConfig, error) {
 	}
 	if a.workdirOverridden {
 		cfg.Git.ExportDir = a.currentWorkdir()
+		cfg.Git.RemoteURL = ""
+		cfg.Git.Branch = ""
 	}
 	return cfg.Git, nil
 }
 
 // SaveGitConfig persists git / export settings to disk.
 // The token field is intentionally absent — it must never be written.
+//
+// RecentDirs is owned exclusively by AddRecentDir/ClearRecentDirs (atomic
+// read-modify-write), so it is always preserved from disk here regardless of what
+// the caller sent — a whole-struct write of a stale snapshot must never drop the
+// other window's recent entries.
 func (a *App) SaveGitConfig(gitCfg config.GitConfig) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
-	// An override window's in-memory GitConfig is a snapshot taken at its own
-	// startup and can be stale relative to edits the main window has since saved.
-	// Writing the whole struct back would clobber those (remote, branch, author, …),
-	// so an override window persists NOTHING but the shared RecentDirs list (merged
-	// into the fresh on-disk config) and tracks its own folder in memory only.
+	gitCfg.RecentDirs = cfg.Git.RecentDirs
+	// An override window's snapshot of the per-repo/instance-local fields (ExportDir,
+	// RemoteURL, Branch) belongs to a different repo, so preserve the on-disk values
+	// and only persist the genuinely-shared prefs it may have edited (author, export
+	// path template). This tracks its own folder in memory without clobbering the
+	// main window's remote/branch/export dir.
 	if a.workdirOverridden {
 		a.setExportDir(gitCfg.ExportDir)
-		cfg.Git.RecentDirs = gitCfg.RecentDirs
+		cfg.Git.AuthorName = gitCfg.AuthorName
+		cfg.Git.AuthorEmail = gitCfg.AuthorEmail
+		cfg.Git.ExportPathTemplate = gitCfg.ExportPathTemplate
 		return config.Save(cfg)
 	}
 	cfg.Git = gitCfg
 	a.setExportDir(gitCfg.ExportDir)
 	return config.Save(cfg)
+}
+
+// AddRecentDir prepends dir to the shared recent-folders list (newest first,
+// deduped, capped) with an atomic read-modify-write, so concurrent updates from
+// another window aren't lost to a stale snapshot. Returns the updated list.
+func (a *App) AddRecentDir(dir string) ([]string, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	cfg.Git.RecentDirs = unionRecentDirs([]string{dir}, cfg.Git.RecentDirs)
+	if err := config.Save(cfg); err != nil {
+		return nil, err
+	}
+	return cfg.Git.RecentDirs, nil
+}
+
+// ClearRecentDirs empties the shared recent-folders list.
+func (a *App) ClearRecentDirs() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	cfg.Git.RecentDirs = nil
+	return config.Save(cfg)
+}
+
+// unionRecentDirs concatenates primary then extra, dropping empties and
+// duplicates (first occurrence wins) and capping the result. primary carries the
+// caller's newest entry at the front; extra backfills anything only on disk so a
+// concurrent write from another window isn't silently dropped.
+func unionRecentDirs(primary, extra []string) []string {
+	const maxRecent = 8
+	seen := make(map[string]bool, len(primary)+len(extra))
+	out := make([]string, 0, maxRecent)
+	for _, list := range [][]string{primary, extra} {
+		for _, d := range list {
+			if d == "" || seen[d] {
+				continue
+			}
+			seen[d] = true
+			if out = append(out, d); len(out) == maxRecent {
+				return out
+			}
+		}
+	}
+	return out
 }
 
 // GitStatus returns the git status for the given directory.

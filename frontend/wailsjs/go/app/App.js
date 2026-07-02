@@ -6,6 +6,10 @@ export function AddBackup(arg1, arg2, arg3) {
   return window['go']['app']['App']['AddBackup'](arg1, arg2, arg3);
 }
 
+export function AddRecentDir(arg1) {
+  return window['go']['app']['App']['AddRecentDir'](arg1);
+}
+
 export function AlterAgent(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterAgent'](arg1, arg2, arg3, arg4);
 }
@@ -592,6 +596,10 @@ export function ClearQueryLog() {
 
 export function ClearQueryResult(arg1) {
   return window['go']['app']['App']['ClearQueryResult'](arg1);
+}
+
+export function ClearRecentDirs() {
+  return window['go']['app']['App']['ClearRecentDirs']();
 }
 
 export function CloneChildTask(arg1, arg2, arg3, arg4, arg5, arg6) {
