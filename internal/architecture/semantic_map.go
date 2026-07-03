@@ -30,6 +30,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/settings/SessionManagementModal.tsx",
         "frontend/src/components/toolbar/Toolbar.tsx",
         "frontend/src/store/connectionStore.ts",
+        "frontend/src/utils/modalDragResize.ts",
         "frontend/wailsjs/"
       ],
       "description": "Wails entry points, window state persistence, and Zustand state management."
@@ -60,7 +61,8 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/results/cellDetailUtils.ts",
         "frontend/src/components/results/columnOrderUtils.ts",
         "frontend/src/store/gridStore.ts",
-        "frontend/src/store/queryStore.ts"
+        "frontend/src/store/queryStore.ts",
+        "frontend/src/utils/openFileInTab.ts"
       ],
       "description": "Proprietary SQL tokenizer, syntax validation, and Monaco editor UI components."
     },
@@ -230,6 +232,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/tag/TagPropagationFields.tsx",
         "frontend/src/components/tag/TagPropertiesModal.tsx",
         "frontend/src/components/tag/TagReferencesModal.tsx",
+        "frontend/src/components/tag/allowedValues.ts",
         "frontend/src/components/task/TaskHistoryModal.tsx",
         "frontend/src/components/view/CreateViewModal.tsx",
         "frontend/src/components/view/ViewPropertiesModal.tsx",

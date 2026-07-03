@@ -338,6 +338,31 @@ body,
   user-select: text !important;
 }
 
+/* ── Draggable + resizable modals (issue #572) ──────────────────────────────
+   Drag: the global document delegate in utils/modalDragResize.ts grabs the
+   header and translates the modal box. `cursor: move` advertises the handle;
+   `--wails-draggable: no-drag` stops WKWebView from swallowing the header drag
+   as a native window move.
+   Resize: native CSS on the content box. Both engines this app runs on
+   (WebKit / WebView2) support `resize: both`; no JS needed. */
+.ant-modal-header {
+  --wails-draggable: no-drag;
+  user-select: none;
+}
+/* The whole padding box is a drag handle (see modalDragResize.ts), so it shows
+   the move cursor; body and footer opt back out so their contents feel normal. */
+.ant-modal .ant-modal-content {
+  cursor: move;
+  resize: both;
+  overflow: auto;
+  min-width: 260px;
+  min-height: 120px;
+}
+.ant-modal-body,
+.ant-modal-footer {
+  cursor: auto;
+}
+
 /* Monaco editor — custom selection occurrence highlights.
    Applied to every match of the selected text that is not the selection itself.
    Bumped opacity slightly so the highlight reads at the new background tones. */

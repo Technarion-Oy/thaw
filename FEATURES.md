@@ -1157,6 +1157,7 @@ The following features are identified as feasible to be turned off via feature f
 - **Resizable editor/results split** — drag the horizontal divider between the SQL editor and the results pane to any ratio; position is saved across sessions
 - **Drag-and-drop panel layout** — every sidebar panel (Export DDL, File Browser, Object Browser, Administration) has a drag handle at its top edge; drag panels between the left and right sidebars or reorder them within a sidebar; layout is persisted across sessions
 - **Reset Layout** — restore the default panel positions and editor/results split via the **Customize Layout…** dialog (accessible from the **View** menu)
+- **Draggable & resizable dialogs** — every modal dialog can be repositioned by dragging its title bar and resized from its bottom-right corner; position and size reset to the default each time a dialog is reopened
 - **Resizable object browser** — collapse, expand, or drag to resize the object tree panel
 - Right-click context menus are always clamped inside the viewport
 - Closing the app while a query is running prompts a confirmation dialog; the query is cancelled in Snowflake before exit

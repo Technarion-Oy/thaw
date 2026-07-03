@@ -12,6 +12,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./styles/global.css";
+import "./utils/modalDragResize"; // global drag-to-move for all antd modals (#572)
 import { ClipboardGetText, ClipboardSetText } from "../wailsjs/runtime/runtime";
 
 // Suppress the WebView's native browser context menu so that right-clicking
