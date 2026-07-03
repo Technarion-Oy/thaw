@@ -101,7 +101,7 @@ export default function FunctionCatalogModal({ onClose }: Props) {
         {/* ── Left: list ─────────────────────────────────────────────── */}
         <div style={{
           width: 260,
-          borderRight: "1px solid var(--border-color, #303030)",
+          borderRight: "1px solid var(--border)",
           display: "flex",
           flexDirection: "column",
           flexShrink: 0,
@@ -156,15 +156,15 @@ export default function FunctionCatalogModal({ onClose }: Props) {
                       alignItems: "center",
                       justifyContent: "space-between",
                       gap: 6,
-                      backgroundColor: isSelected ? "var(--item-active-bg, #177ddc22)" : "transparent",
-                      borderLeft: isSelected ? "2px solid var(--ant-color-primary, #177ddc)" : "2px solid transparent",
+                      backgroundColor: isSelected ? "color-mix(in oklab, var(--accent) 12%, transparent)" : "transparent",
+                      borderLeft: isSelected ? "2px solid var(--accent)" : "2px solid transparent",
                     }}
                   >
                     <span style={{
                       fontSize: 12,
                       fontFamily: "monospace",
                       fontWeight: isSelected ? 600 : 400,
-                      color: fn.functionType === "UDF" ? "var(--udf-color, #4ec9b0)" : undefined,
+                      color: fn.functionType === "UDF" ? "var(--cell-accent-sql)" : undefined,
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                       whiteSpace: "nowrap",
@@ -183,7 +183,7 @@ export default function FunctionCatalogModal({ onClose }: Props) {
           </div>
 
           {/* Count */}
-          <div style={{ padding: "6px 10px", fontSize: 11, color: "var(--text-muted, #888)", borderTop: "1px solid var(--border-color, #303030)" }}>
+          <div style={{ padding: "6px 10px", fontSize: 11, color: "var(--text-muted, #888)", borderTop: "1px solid var(--border)" }}>
             {filtered.length} / {allFns.length} functions
           </div>
         </div>
@@ -195,7 +195,7 @@ export default function FunctionCatalogModal({ onClose }: Props) {
               {/* Header */}
               <div style={{
                 padding: "12px 16px 10px",
-                borderBottom: "1px solid var(--border-color, #303030)",
+                borderBottom: "1px solid var(--border)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",
@@ -224,18 +224,19 @@ export default function FunctionCatalogModal({ onClose }: Props) {
                       <div key={i} style={{
                         marginBottom: i < overloads.length - 1 ? 20 : 0,
                         paddingBottom: i < overloads.length - 1 ? 20 : 0,
-                        borderBottom: i < overloads.length - 1 ? "1px dashed var(--border-color, #303030)" : "none",
+                        borderBottom: i < overloads.length - 1 ? "1px dashed var(--border)" : "none",
                       }}>
                         <div style={{
                           fontFamily: "monospace",
                           fontSize: 12,
-                          background: "var(--code-bg, #1e1e1e)",
+                          background: "var(--cell-editor-bg)",
+                          color: "var(--text)",
                           borderRadius: 4,
                           padding: "8px 10px",
                           whiteSpace: "pre-wrap",
                           wordBreak: "break-word",
                           lineHeight: 1.6,
-                          border: "1px solid var(--border-color, #303030)",
+                          border: "1px solid var(--border)",
                         }}>
                           {ol.functionSignature}
                         </div>
@@ -250,7 +251,7 @@ export default function FunctionCatalogModal({ onClose }: Props) {
                 </div>
                 <div style={{
                   padding: "10px 16px",
-                  borderTop: "1px solid var(--border-color, #303030)",
+                  borderTop: "1px solid var(--border)",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "flex-end",
@@ -265,7 +266,7 @@ export default function FunctionCatalogModal({ onClose }: Props) {
                         padding: 0,
                         cursor: "pointer",
                         fontSize: 12,
-                        color: "var(--ant-color-primary, #177ddc)",
+                        color: "var(--accent)",
                         textDecoration: "underline",
                         textUnderlineOffset: 2,
                         textAlign: "left",
