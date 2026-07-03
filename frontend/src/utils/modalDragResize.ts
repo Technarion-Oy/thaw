@@ -114,10 +114,10 @@ function onMouseDown(e: MouseEvent) {
 
 function onMouseMove(e: MouseEvent) {
   if (!drag) return;
-  // The button was released outside our event stream (alt-tab, a native dialog
-  // stealing focus, …) — recover instead of sticking to the cursor forever.
-  if (e.buttons === 0) { endDrag(); return; }
-
+  // NB: do not gate on `e.buttons` here — WKWebView (this app's engine) reports
+  // buttons === 0 during mousemove even while the button is held, which would
+  // kill the drag on the first move. Recovery from a lost mouseup is handled by
+  // the mouseup + window `blur` listeners instead.
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   // Clamp the target screen position, then express it as the inline offset delta
