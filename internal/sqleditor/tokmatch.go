@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	sf "thaw/internal/snowflake"
+	"thaw/internal/sqlgrammar"
 	"thaw/internal/sqltok"
 )
 
@@ -635,18 +636,16 @@ func findDynAsSelect(sig []sqltok.Token, sql string) int {
 	return -1
 }
 
-// findCTENames finds all CTE names in a WITH query by looking for the
-// pattern <ident> AS ( in the significant tokens. Returns a normalised
-// set of CTE names.
+// findCTENames returns the normalised set of CTE alias names declared by any
+// WITH clause in sig. Scanning is delegated to the shared
+// sqlgrammar.CollectCTENames (issue #559), which walks WITH lists structurally
+// — so WITH RECURSIVE, CTE column lists, nested WITH clauses, and an
+// unterminated body mid-typing are all handled, while non-CTE `x AS (…)`
+// shapes (computed columns, MATCH_RECOGNIZE DEFINE) are no longer collected.
 func findCTENames(sig []sqltok.Token, sql string, ic bool) map[string]struct{} {
 	names := make(map[string]struct{})
-	for i := 0; i+2 < len(sig); i++ {
-		if !isIdent(sig[i]) {
-			continue
-		}
-		if tokUpper(sig[i+1], sql) == "AS" && sig[i+2].Kind == sqltok.LParen {
-			names[normIdent(sig[i].Text(sql), ic)] = struct{}{}
-		}
+	for _, n := range sqlgrammar.CollectCTENames(sql, sig) {
+		names[normIdent(n, ic)] = struct{}{}
 	}
 	return names
 }
