@@ -89,18 +89,20 @@ function onMouseDown(e: MouseEvent) {
   // very top edge lands on the content element, not the header. Restrict the
   // content-as-handle to that top band (above the body) so nothing lower — the
   // body, footer, or the resize grip in the corner — is mistaken for a drag.
-  const onHeader = target.closest(".ant-modal-header") !== null;
-  if (!onHeader) {
+  const headerEl = target.closest(".ant-modal-header") as HTMLElement | null;
+  if (!headerEl) {
     if (!target.classList.contains("ant-modal-content")) return;
     const body = target.querySelector(".ant-modal-body");
     if (body && e.clientY >= body.getBoundingClientRect().top) return;
   }
-  // Don't hijack drags that start on interactive controls placed in the title.
-  // Scope the match to controls *inside* the modal so antd's focus-trap wrapper
-  // (`.ant-modal-wrap[tabindex="-1"]`, an ancestor of every header) isn't taken
-  // for an interactive control and doesn't block the drag.
+  // Don't hijack drags that start on an interactive control placed *in* the
+  // handle. Bound the match by the handle element: antd wraps the dialog in
+  // focus-trap/`[tabindex]` divs that are ANCESTORS of the header, so an
+  // unbounded `closest(INTERACTIVE)` matches those and blocks every drag — only
+  // a control the handle actually contains should count.
+  const handle = headerEl ?? (modal.querySelector(".ant-modal-content") as HTMLElement | null);
   const hit = target.closest(INTERACTIVE);
-  if (hit && hit !== modal && modal.contains(hit)) return;
+  if (hit && handle && hit !== handle && handle.contains(hit)) return;
 
   const [baseLeft, baseTop] = readOffset(modal);
   const rect = modal.getBoundingClientRect();
