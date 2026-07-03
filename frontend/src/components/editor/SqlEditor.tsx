@@ -99,6 +99,90 @@ let fnNamesLoaded = false;
 const fetchedSchemaObjects   = new Set<string>();
 const fetchedDatabaseSchemas = new Set<string>();
 
+// Resolve a dotted identifier (as returned by GetIdentifierAtColumn) to a schema
+// object in the store — ANY kind, not just TABLE/VIEW. Fetches the schema's
+// objects on demand if not yet cached. Returns null if no object matches.
+// The store `kind` is passed straight through so callers never guess it (a wrong
+// kind makes the gosnowflake driver log every error as noise).
+async function resolveStoreObject(
+  parts: string[],
+): Promise<{ db: string; schema: string; kind: string; name: string } | null> {
+  const ingest = (db: string, schema: string, fetched: Array<{ name: string; kind?: string }> | null) =>
+    useObjectStore.getState().addObjects(
+      db, schema,
+      (fetched ?? []).map((o) => ({ name: o.name, kind: (o.kind || "OTHER").toUpperCase() })),
+    );
+  const pick = (o: { db: string; schema: string; kind: string; name: string }) =>
+    ({ db: o.db, schema: o.schema, kind: o.kind, name: o.name });
+
+  if (parts.length >= 3) {
+    const [pDb, pSchema, pName] = [parts[parts.length - 3], parts[parts.length - 2], parts[parts.length - 1]];
+    const schemaKey = `${UC(pDb)}\0${UC(pSchema)}`;
+    const hasSchemaInStore = useObjectStore.getState().objects
+      .some((o) => UC(o.db) === UC(pDb) && UC(o.schema) === UC(pSchema));
+    if (!hasSchemaInStore && !fetchedSchemaObjects.has(schemaKey)) {
+      fetchedSchemaObjects.add(schemaKey);
+      try { ingest(UC(pDb), UC(pSchema), await ListObjects(UC(pDb), UC(pSchema))); }
+      catch { fetchedSchemaObjects.delete(schemaKey); }
+    }
+    const inStore = useObjectStore.getState().objects.find(
+      (o) => UC(o.db) === UC(pDb) && UC(o.schema) === UC(pSchema) && UC(o.name) === UC(pName));
+    return inStore ? pick(inStore) : null;
+  }
+
+  if (parts.length === 2) {
+    const [qualifier, pName] = [parts[0], parts[1]];
+    let inStore = useObjectStore.getState().objects.find(
+      (o) => UC(o.schema) === UC(qualifier) && UC(o.name) === UC(pName));
+    if (!inStore) {
+      const sessDb = useSessionStore.getState().database;
+      if (sessDb) {
+        const schemaKey = `${UC(sessDb)}\0${UC(qualifier)}`;
+        if (!fetchedSchemaObjects.has(schemaKey)) {
+          fetchedSchemaObjects.add(schemaKey);
+          try { ingest(sessDb, qualifier, await ListObjects(sessDb, qualifier)); }
+          catch { fetchedSchemaObjects.delete(schemaKey); }
+        }
+        inStore = useObjectStore.getState().objects.find(
+          (o) => UC(o.db) === UC(sessDb) && UC(o.schema) === UC(qualifier) && UC(o.name) === UC(pName));
+      }
+    }
+    return inStore ? pick(inStore) : null;
+  }
+
+  // 1-part, unqualified
+  let inStore = useObjectStore.getState().objects.find((o) => UC(o.name) === UC(parts[0]));
+  if (!inStore) {
+    const sess = useSessionStore.getState();
+    if (sess.database && sess.schema) {
+      const schemaKey = `${UC(sess.database)}\0${UC(sess.schema)}`;
+      if (!fetchedSchemaObjects.has(schemaKey)) {
+        fetchedSchemaObjects.add(schemaKey);
+        try { ingest(sess.database, sess.schema, await ListObjects(sess.database, sess.schema)); }
+        catch { fetchedSchemaObjects.delete(schemaKey); }
+      }
+      inStore = useObjectStore.getState().objects.find(
+        (o) => UC(o.db) === UC(sess.database) && UC(o.schema) === UC(sess.schema) && UC(o.name) === UC(parts[0]));
+    }
+  }
+  return inStore ? pick(inStore) : null;
+}
+
+// Column span (1-based Monaco columns) of the dotted identifier at a 0-based char
+// index, or null if that index isn't on an identifier. Includes dots and double
+// quotes so DB."SCHEMA".NAME underlines as one link. Used for the cmd/ctrl-hover
+// link affordance.
+function identifierRangeAt(line: string, idx0: number): { start: number; end: number } | null {
+  const isIdent = (ch: string | undefined) => !!ch && /[A-Za-z0-9_$."]/.test(ch);
+  let i = idx0;
+  if (!isIdent(line[i])) i = idx0 - 1;   // allow the cursor to sit just past the last char
+  if (!isIdent(line[i])) return null;
+  let s = i, e = i;
+  while (s > 0 && isIdent(line[s - 1])) s--;
+  while (e + 1 < line.length && isIdent(line[e + 1])) e++;
+  return { start: s + 1, end: e + 2 };   // Monaco endColumn is exclusive (points after last char)
+}
+
 // ── Git gutter: HEAD content cache ────────────────────────────────────────────
 // Maps absolute file path → HEAD content string (empty = new file).
 const headContentCache = new Map<string, string>();
@@ -1534,6 +1618,103 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       hoverProviderDisposable = null;
     }
 
+    // ── Cmd/Ctrl-hover: DDL + link affordance ───────────────────────────────────
+    // Plain hover over an object shows a lightweight identity tooltip (kind + name).
+    // Holding the platform modifier upgrades it: the identifier is underlined (link
+    // styling) and its full DDL is fetched and shown — no click needed. Driven by
+    // mouse move + modifier key down/up so it reacts even without moving the mouse.
+    const cmdLinkDecos = editor.createDecorationsCollection([]);
+    let cmdLinkKey: string | null = null;
+    let cmdModHeld = false;
+    let lastSqlMousePos: any = null;
+    const clearCmdLink = () => { if (cmdLinkKey) { cmdLinkDecos.clear(); cmdLinkKey = null; } };
+
+    // Position and render the overlay for a resolved store object. withDdl=false →
+    // header-only identity tooltip; withDdl=true → fetch (cached) and show full DDL.
+    const showObjectTooltip = async (
+      pos: any,
+      obj: { db: string; schema: string; kind: string; name: string },
+      withDdl: boolean,
+    ) => {
+      let ddl = "";
+      if (withDdl) {
+        const cacheKey = `${obj.db}\0${obj.schema}\0${obj.kind}\0${obj.name}`;
+        const cached = hoverDDLCache.get(cacheKey);
+        if (cached && Date.now() - cached.ts < DDL_CACHE_TTL) {
+          ddl = cached.ddl;
+        } else {
+          try {
+            ddl = await GetObjectDDL(obj.db, obj.schema, obj.kind, obj.name, "");
+            hoverDDLCache.set(cacheKey, { ddl, ts: Date.now() });
+          } catch { return; }
+        }
+        if (!ddl) return;
+      }
+      const editorDom = editor.getDomNode();
+      const editorRect = editorDom?.getBoundingClientRect();
+      const scrolledPos = editor.getScrolledVisiblePosition(pos);
+      if (!scrolledPos || !editorRect) return;
+      const h = ddl ? 320 : 40;
+      const rawX = editorRect.left + scrolledPos.left;
+      const mouseY = currentMouseYRef.current;
+      const fitsBelow = mouseY + 24 + h <= window.innerHeight;
+      const x = Math.min(rawX, window.innerWidth - 570);
+      const y = fitsBelow ? mouseY + 24 : Math.max(0, mouseY - 24 - h);
+      if (hoverHideTimerRef.current) { clearTimeout(hoverHideTimerRef.current); hoverHideTimerRef.current = null; }
+      setDdlHover({ ddl, kind: obj.kind, db: obj.db, schema: obj.schema, name: obj.name, x, y });
+    };
+
+    // Underline the object identifier under the cursor while the modifier is held.
+    const evaluateCmdLink = (pos: any) => {
+      const m = editor.getModel();
+      if (!cmdModHeld || !pos || !m || m.getLanguageId() !== "sql" ||
+          !useFeatureFlagsStore.getState().flags.ddlHoverTooltips) { clearCmdLink(); return; }
+      const line = m.getLineContent(pos.lineNumber);
+      const rng = identifierRangeAt(line, pos.column - 1);
+      if (!rng) { clearCmdLink(); return; }
+      const key = `${pos.lineNumber}:${rng.start}:${rng.end}`;
+      if (key === cmdLinkKey) return;
+      cmdLinkKey = key;   // claim synchronously; the async result fills or reverts it
+      void (async () => {
+        const partsRaw = await GetIdentifierAtColumn(line, pos.column - 1);
+        const parts = (partsRaw && partsRaw.length > 0) ? partsRaw : null;
+        const obj = parts ? await resolveStoreObject(parts) : null;
+        if (cmdLinkKey !== key) return;   // superseded by a newer identifier
+        if (!obj || !cmdModHeld) { cmdLinkDecos.clear(); cmdLinkKey = null; return; }
+        cmdLinkDecos.set([{
+          range: new monaco.Range(pos.lineNumber, rng.start, pos.lineNumber, rng.end),
+          options: { inlineClassName: "cmd-link" },
+        }]);
+      })();
+    };
+
+    // Modifier pressed while already hovering an object (no mouse move) → upgrade the
+    // identity tooltip to its DDL at the last known position.
+    const showDdlAtLastPos = () => {
+      const pos = lastSqlMousePos;
+      const m = editor.getModel();
+      if (!pos || !m || m.getLanguageId() !== "sql" ||
+          !useFeatureFlagsStore.getState().flags.ddlHoverTooltips) return;
+      void (async () => {
+        const partsRaw = await GetIdentifierAtColumn(m.getLineContent(pos.lineNumber), pos.column - 1);
+        const parts = (partsRaw && partsRaw.length > 0) ? partsRaw : null;
+        const obj = parts ? await resolveStoreObject(parts) : null;
+        if (!obj || !cmdModHeld) return;   // released during the await
+        if (hoverTimerRef.current) { clearTimeout(hoverTimerRef.current); hoverTimerRef.current = null; }
+        lastHoverWordRef.current = parts!.join("\0");
+        await showObjectTooltip(pos, obj, true);
+      })();
+    };
+
+    const onModChange = (held: boolean) => {
+      if (held === cmdModHeld) return;
+      cmdModHeld = held;
+      evaluateCmdLink(lastSqlMousePos);
+      if (held) showDdlAtLastPos();
+    };
+    editor.onKeyDown((e: any) => onModChange(!!(e.ctrlKey || e.metaKey)));
+    editor.onKeyUp((e: any) => onModChange(!!(e.ctrlKey || e.metaKey)));
+
     editor.onMouseMove((e: any) => {
       currentMouseYRef.current = (e.event as any).posy ?? 0;
 
@@ -1601,6 +1782,10 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       }
 
       if (model && model.getLanguageId() !== "sql") return;
+
+      cmdModHeld = !!((e.event as any)?.ctrlKey || (e.event as any)?.metaKey);
+      lastSqlMousePos = e.target?.position ?? null;
+      evaluateCmdLink(lastSqlMousePos);
 
       if (!useFeatureFlagsStore.getState().flags.ddlHoverTooltips) {
         if (hoverTimerRef.current) { clearTimeout(hoverTimerRef.current); hoverTimerRef.current = null; }
@@ -1680,7 +1865,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         if (!parts || parts.length === 0) return;
 
         const { objects } = useObjectStore.getState();
-        let db = "", schema = "", kind = "", name = "", ddl = "";
 
         if (parts.length === 2) {
           const rawRefs = await ParseJoinTableRefs(editor.getModel()?.getValue() ?? "");
@@ -1717,169 +1901,69 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           }
         }
 
-        if (parts.length >= 3) {
-          const [pDb, pSchema, pName] = [
-            parts[parts.length - 3],
-            parts[parts.length - 2],
-            parts[parts.length - 1],
-          ];
-          const schemaKey = `${UC(pDb)}\0${UC(pSchema)}`;
-          const hasSchemaInStore = useObjectStore.getState().objects
-            .some((o) => UC(o.db) === UC(pDb) && UC(o.schema) === UC(pSchema));
-          if (!hasSchemaInStore && !fetchedSchemaObjects.has(schemaKey)) {
-            fetchedSchemaObjects.add(schemaKey);
-            try {
-              const fetched = await ListObjects(UC(pDb), UC(pSchema));
-              useObjectStore.getState().addObjects(
-                UC(pDb), UC(pSchema),
-                (fetched ?? []).map((o) => ({ name: o.name, kind: (o.kind || "OTHER").toUpperCase() })),
-              );
-            } catch {
-              fetchedSchemaObjects.delete(schemaKey);
-            }
-          }
-          const inStore = useObjectStore.getState().objects.find(
-            (o) => UC(o.db) === UC(pDb) && UC(o.schema) === UC(pSchema) &&
-                   UC(o.name) === UC(pName) && (o.kind === "TABLE" || o.kind === "VIEW"),
-          );
-          if (inStore) {
-            db = inStore.db; schema = inStore.schema; kind = inStore.kind; name = inStore.name;
-          } else {
-            setDdlHover(null); return;
-          }
-        } else if (parts.length === 2) {
-          const [qualifier, pName] = [parts[0], parts[1]];
-          let inStore = objects.find(
-            (o) => UC(o.schema) === UC(qualifier) && UC(o.name) === UC(pName) &&
-                   (o.kind === "TABLE" || o.kind === "VIEW"),
-          );
-          if (!inStore) {
-            const sessDb = useSessionStore.getState().database;
-            if (sessDb) {
-              const schemaKey = `${UC(sessDb)}\0${UC(qualifier)}`;
-              if (!fetchedSchemaObjects.has(schemaKey)) {
-                fetchedSchemaObjects.add(schemaKey);
-                try {
-                  const fetched = await ListObjects(sessDb, qualifier);
-                  useObjectStore.getState().addObjects(
-                    sessDb, qualifier,
-                    (fetched ?? []).map((o) => ({ name: o.name, kind: (o.kind || "OTHER").toUpperCase() })),
-                  );
-                } catch { fetchedSchemaObjects.delete(schemaKey); }
-              }
-              inStore = useObjectStore.getState().objects.find(
-                (o) => UC(o.db) === UC(sessDb) && UC(o.schema) === UC(qualifier) &&
-                       UC(o.name) === UC(pName) && (o.kind === "TABLE" || o.kind === "VIEW"),
-              );
-            }
-          }
-          if (!inStore) { setDdlHover(null); return; }
-          db = inStore.db; schema = inStore.schema; kind = inStore.kind; name = inStore.name;
-        } else {
-          let inStore = objects.find(
-            (o) => UC(o.name) === UC(parts[0]) && (o.kind === "TABLE" || o.kind === "VIEW"),
-          );
-          if (!inStore) {
-            const sess = useSessionStore.getState();
-            if (sess.database && sess.schema) {
-              const schemaKey = `${UC(sess.database)}\0${UC(sess.schema)}`;
-              if (!fetchedSchemaObjects.has(schemaKey)) {
-                fetchedSchemaObjects.add(schemaKey);
-                try {
-                  const fetched = await ListObjects(sess.database, sess.schema);
-                  useObjectStore.getState().addObjects(
-                    sess.database, sess.schema,
-                    (fetched ?? []).map((o) => ({ name: o.name, kind: (o.kind || "OTHER").toUpperCase() })),
-                  );
-                } catch { fetchedSchemaObjects.delete(schemaKey); }
-              }
-              inStore = useObjectStore.getState().objects.find(
-                (o) => UC(o.db) === UC(sess.database) && UC(o.schema) === UC(sess.schema) &&
-                       UC(o.name) === UC(parts[0]) && (o.kind === "TABLE" || o.kind === "VIEW"),
-              );
-            }
-          }
-          if (!inStore) {
-            try {
-              // Prevent keywords (REPLACE, LEFT, RIGHT) from showing function tooltips 
-              // when they are being used as SQL keywords rather than function calls.
-              const wordInfo = model?.getWordAtPosition(pos);
-              if (wordInfo) {
-                const textAfterWord = model?.getLineContent(pos.lineNumber).substring(wordInfo.endColumn - 1);
-                const isFollowedByParen = /^\s*\(/.test(textAfterWord || "");
-                
-                // Snowflake has a few parameterless context functions that don't need parentheses
-                const upperWord = parts[0].toUpperCase();
-                const isContextFn = upperWord.startsWith("CURRENT_") || upperWord === "LOCALTIMESTAMP";
-                
-                if (!isFollowedByParen && !isContextFn) {
-                  setDdlHover(null);
-                  return;
-                }
-              }
-              const fns = await GetFunctionTooltip(parts[0]);
-              if (fns && fns.length > 0) {
-                const sigs = fns.map((fn: any) => fn.functionSignature).join("\n");
-                const desc = fns.find((fn: any) => fn.description)?.description ?? "";
-                const fnDdl = desc ? `${sigs}\n\n${desc}` : sigs;
-                const fnKind = fns[0].functionType === "UDF" ? "UDF" : "FUNCTION";
-                const editorDom2 = editor.getDomNode();
-                const editorRect2 = editorDom2?.getBoundingClientRect();
-                const scrolledPos2 = editor.getScrolledVisiblePosition(pos);
-                if (scrolledPos2 && editorRect2) {
-                  const rawX2 = editorRect2.left + scrolledPos2.left;
-                  const mouseY2 = currentMouseYRef.current;
-                  const fitsBelow2 = mouseY2 + 24 + 320 <= window.innerHeight;
-                  const fnX = Math.min(rawX2, window.innerWidth - 570);
-                  const fnY = fitsBelow2 ? mouseY2 + 24 : Math.max(0, mouseY2 - 24 - 320);
-                  if (hoverHideTimerRef.current) { clearTimeout(hoverHideTimerRef.current); hoverHideTimerRef.current = null; }
-                  setDdlHover({ ddl: fnDdl, kind: fnKind, db: "", schema: "", name: parts[0].toUpperCase(), x: fnX, y: fnY });
-                }
-              } else {
+        // Any object in the store (any kind). Plain hover → identity tooltip
+        // (kind + name); with the modifier held → full DDL. No click needed.
+        const obj = await resolveStoreObject(parts);
+        if (obj) {
+          await showObjectTooltip(pos, obj, cmdModHeld);
+          return;
+        }
+
+        // 1-part fallback: function / UDF signature tooltip.
+        if (parts.length === 1) {
+          try {
+            // Prevent keywords (REPLACE, LEFT, RIGHT) from showing function tooltips
+            // when they are being used as SQL keywords rather than function calls.
+            const wordInfo = model?.getWordAtPosition(pos);
+            if (wordInfo) {
+              const textAfterWord = model?.getLineContent(pos.lineNumber).substring(wordInfo.endColumn - 1);
+              const isFollowedByParen = /^\s*\(/.test(textAfterWord || "");
+
+              // Snowflake has a few parameterless context functions that don't need parentheses
+              const upperWord = parts[0].toUpperCase();
+              const isContextFn = upperWord.startsWith("CURRENT_") || upperWord === "LOCALTIMESTAMP";
+
+              if (!isFollowedByParen && !isContextFn) {
                 setDdlHover(null);
+                return;
               }
-            } catch { setDdlHover(null); }
-            return;
-          }
-          db = inStore.db; schema = inStore.schema; kind = inStore.kind; name = inStore.name;
-        }
-
-        if (!ddl) {
-          const cacheKey = `${db}\0${schema}\0${kind}\0${name}`;
-          const cached = hoverDDLCache.get(cacheKey);
-          if (cached && Date.now() - cached.ts < DDL_CACHE_TTL) {
-            ddl = cached.ddl;
-          } else {
-            try {
-              ddl = await GetObjectDDL(db, schema, kind, name, "");
-              hoverDDLCache.set(cacheKey, { ddl, ts: Date.now() });
-            } catch {
-              return;
             }
-          }
+            const fns = await GetFunctionTooltip(parts[0]);
+            if (fns && fns.length > 0) {
+              const sigs = fns.map((fn: any) => fn.functionSignature).join("\n");
+              const desc = fns.find((fn: any) => fn.description)?.description ?? "";
+              const fnDdl = desc ? `${sigs}\n\n${desc}` : sigs;
+              const fnKind = fns[0].functionType === "UDF" ? "UDF" : "FUNCTION";
+              const editorDom2 = editor.getDomNode();
+              const editorRect2 = editorDom2?.getBoundingClientRect();
+              const scrolledPos2 = editor.getScrolledVisiblePosition(pos);
+              if (scrolledPos2 && editorRect2) {
+                const rawX2 = editorRect2.left + scrolledPos2.left;
+                const mouseY2 = currentMouseYRef.current;
+                const fitsBelow2 = mouseY2 + 24 + 320 <= window.innerHeight;
+                const fnX = Math.min(rawX2, window.innerWidth - 570);
+                const fnY = fitsBelow2 ? mouseY2 + 24 : Math.max(0, mouseY2 - 24 - 320);
+                if (hoverHideTimerRef.current) { clearTimeout(hoverHideTimerRef.current); hoverHideTimerRef.current = null; }
+                setDdlHover({ ddl: fnDdl, kind: fnKind, db: "", schema: "", name: parts[0].toUpperCase(), x: fnX, y: fnY });
+              }
+            } else {
+              setDdlHover(null);
+            }
+          } catch { setDdlHover(null); }
+          return;
         }
-        if (!ddl) return;
 
-        const editorDom = editor.getDomNode();
-        const editorRect = editorDom?.getBoundingClientRect();
-        const scrolledPos = editor.getScrolledVisiblePosition(pos);
-        if (!scrolledPos || !editorRect) return;
-
-        const rawX    = editorRect.left + scrolledPos.left;
-        const mouseY  = currentMouseYRef.current;
-        const fitsBelow = mouseY + 24 + 320 <= window.innerHeight;
-        const x = Math.min(rawX, window.innerWidth - 570);
-        const y = fitsBelow ? mouseY + 24 : Math.max(0, mouseY - 24 - 320);
-
-        if (hoverHideTimerRef.current) { clearTimeout(hoverHideTimerRef.current); hoverHideTimerRef.current = null; }
-        setDdlHover({ ddl, kind, db, schema, name, x, y });
+        setDdlHover(null);
       }, 200);
       })();
     });
 
     editor.onMouseLeave(() => {
       lastHoverWordRef.current = null;
-      yamlHoverSetTopRef.current = null; 
+      yamlHoverSetTopRef.current = null;
+      cmdModHeld = false;
+      lastSqlMousePos = null;
+      clearCmdLink();
       if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
       if (!isOnTooltipRef.current) scheduleHide();
     });
@@ -2392,7 +2476,13 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
               ? `${ddlHover.kind} — ${ddlHover.db}.${ddlHover.schema}.${ddlHover.name}`
               : `${ddlHover.kind} — ${ddlHover.name}`}
           </span>
-          {ddlHover.ddl && <Button size="small" onClick={() => ClipboardSetText(ddlHover.ddl)}>Copy</Button>}
+          {ddlHover.ddl
+            ? <Button size="small" onClick={() => ClipboardSetText(ddlHover.ddl)}>Copy</Button>
+            : ddlHover.db && (
+                <span style={{ color: "var(--text-secondary)", fontWeight: 400, whiteSpace: "nowrap" }}>
+                  Hold {navigator.platform.toUpperCase().includes("MAC") ? "⌘" : "Ctrl"} for DDL
+                </span>
+              )}
         </div>
         {ddlHover.ddl && (
           <pre style={{

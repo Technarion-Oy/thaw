@@ -57,6 +57,19 @@ the bundled artifact `src/generated/snowflakeDataTypes.ts`.)
 are registered once at module level (disposable refs). Never re-register inside the component
 render or `handleMount` — doing so accumulates duplicate providers across editor remounts.
 
+**Object hover + cmd/ctrl modifier (`ddlHoverTooltips` flag):** `resolveStoreObject(parts)`
+(module-level) resolves a dotted identifier under the cursor to a store object of **any** kind
+(not just TABLE/VIEW), fetching the schema's objects on demand. `editor.onMouseMove` uses it via the
+shared `showObjectTooltip(pos, obj, withDdl)`: plain hover shows a lightweight identity tooltip
+(`withDdl=false` → header-only `KIND — DB.SCHEMA.NAME`, no DDL fetch); with the platform modifier
+(`metaKey`/`ctrlKey`) held, `withDdl=true` fetches `GetObjectDDL(db, schema, kind, name, "")` and
+renders the full DDL — no click. `cmdModHeld` tracks the modifier from mouse-move events and
+`onKeyDown`/`onKeyUp` (`onModChange`), so pressing the modifier while already stationary over an
+object upgrades identity → DDL via `showDdlAtLastPos()`. While held, `evaluateCmdLink` underlines
+the identifier with a `.cmd-link` decoration (link affordance); `identifierRangeAt` computes the
+dotted-identifier span. The store `kind` is passed straight through — never guessed. Column and
+function hovers keep their own dedicated paths in `onMouseMove`.
+
 **Grammar-driven keyword completions:** `GetAutocompleteContextFull` returns `grammarExpected`
 — the recursive-descent grammar's "valid next" set at the cursor (see
 [`internal/sqlgrammar`](../../../../internal/sqlgrammar/README.md) and `internal/sqleditor.GrammarExpectedAt`).

@@ -326,6 +326,13 @@ body,
   user-select: text !important;
 }
 
+/* Cmd/Ctrl-hover link affordance on object identifiers — signals click-for-DDL. */
+.cmd-link {
+  text-decoration: underline;
+  cursor: pointer;
+  color: var(--link) !important;
+}
+
 /* Custom TanStack data grid — re-enable text selection.
    WKWebView sets user-select:none on the body; this override ensures cell
    text is selectable. --wails-draggable: no-drag prevents the WebKit drag
