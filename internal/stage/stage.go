@@ -314,7 +314,7 @@ func strVal(row []interface{}, idx int) string {
 //
 // A legitimate reference is @[db.schema.]stage[/path]; only the identifier parts are
 // double-quoted (by quoteIdent), and a quoted identifier may legally contain ';',
-// '\'', newlines, or '--'. A quote is therefore honoured as a quoted-identifier
+// '\'', newlines, or '--'. A quote is therefore honored as a quoted-identifier
 // delimiter ONLY in an identifier position — at the start or right after '@' or '.'.
 // A quote anywhere else (i.e. in the free-typed path segment) is itself illegal, so a
 // payload like `data/x"; DROP TABLE t; --"y` cannot smuggle a blocked sequence past

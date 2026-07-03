@@ -94,7 +94,7 @@ prefixes) uses the `ListStageEntries` IPC method, which delegates to
   `LIST @stage` that anyone with write access to the backing storage can plant. All
   four functions (`UploadFileToStage`, `DownloadFileFromStage`, `RemoveStageFiles`,
   `ListStageFiles`) run it through `validateStageRef`, a scan that rejects `;`, `'`,
-  newlines, and `--` in the unquoted portion of the reference. Quotes are honoured as
+  newlines, and `--` in the unquoted portion of the reference. Quotes are honored as
   quoted-identifier delimiters **only in identifier position** (start, or after `@`
   or `.`), so a legitimately quoted identifier such as `"my;stage"` is allowed, but a
   quote inside the free-typed path segment can't wrap a payload to smuggle a blocked
