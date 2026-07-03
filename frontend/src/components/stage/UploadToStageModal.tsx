@@ -23,8 +23,12 @@ interface Props {
   /** Destination sub-directory prefill (e.g. the right-clicked dir); "" targets the stage root. */
   initialPath?: string;
   onClose: () => void;
-  /** Called after a successful upload so the caller can refresh the stage tree. */
-  onSuccess?: () => void;
+  /**
+   * Called after a successful upload with the resolved destination path
+   * (normalised, relative to the stage root) so the caller can refresh the
+   * actual destination node rather than the right-click-time path.
+   */
+  onSuccess?: (destPath: string) => void;
 }
 
 export default function UploadToStageModal({ db, schema, name, initialPath = "", onClose, onSuccess }: Props) {
@@ -39,6 +43,10 @@ export default function UploadToStageModal({ db, schema, name, initialPath = "",
   const stageRoot = `@${quoteIdent(db)}.${quoteIdent(schema)}.${quoteIdent(name)}`;
   const dest = destPath.trim().replace(/^\/+|\/+$/g, "");
   const stageRef = dest ? `${stageRoot}/${dest}` : stageRoot;
+  // dest is spliced unquoted into a PUT statement server-side; reject characters
+  // that could break out of it (statement terminator, quotes, newlines). The
+  // backend enforces this too — this just gives immediate feedback.
+  const pathError = /[;'"`\n\r]/.test(destPath) ? "Path cannot contain ; ' \" ` or newlines." : null;
 
   const pickFile = async () => {
     const p = await PickAnyFile();
@@ -46,13 +54,13 @@ export default function UploadToStageModal({ db, schema, name, initialPath = "",
   };
 
   const handleUpload = () => {
-    if (!localPath) return;
+    if (!localPath || pathError) return;
     setUploading(true);
     setError(null);
     UploadFileToStage(localPath, stageRef, 4, autoCompress, "AUTO_DETECT", overwrite)
       .then(() => {
         message.success("Uploaded successfully.");
-        onSuccess?.();
+        onSuccess?.(dest);
         onClose();
       })
       .catch((e) => setError(String(e)))
@@ -71,7 +79,7 @@ export default function UploadToStageModal({ db, schema, name, initialPath = "",
       errorTitle="Upload failed"
       onErrorClose={() => setError(null)}
       creating={uploading}
-      canSubmit={!!localPath}
+      canSubmit={!!localPath && !pathError}
       okText="Upload"
       onClose={onClose}
       onSubmit={handleUpload}
@@ -86,7 +94,8 @@ export default function UploadToStageModal({ db, schema, name, initialPath = "",
         <Form.Item
           label="Destination path"
           style={itemStyle}
-          help={<Text type="secondary" style={{ fontSize: 12 }}>Uploads to {stageRef}</Text>}
+          validateStatus={pathError ? "error" : undefined}
+          help={pathError ?? <Text type="secondary" style={{ fontSize: 12 }}>Uploads to {stageRef}</Text>}
         >
           <Input
             value={destPath}

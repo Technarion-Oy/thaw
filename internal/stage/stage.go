@@ -302,11 +302,28 @@ func strVal(row []interface{}, idx int) string {
 	}
 }
 
+// validateStageRef guards a stage reference that is spliced unquoted into a PUT/GET
+// statement. Its path segment can be free-typed by the user (see UploadToStageModal),
+// so this is the choke point that stops injection such as ".../x; DROP TABLE y; --"
+// from being split into a second statement by client.Execute. A legitimate reference
+// is @[db.schema.]stage[/path] with optionally double-quoted identifiers, so it never
+// contains a statement terminator, a string-literal quote, or a newline.
+func validateStageRef(stageName string) error {
+	if strings.ContainsAny(stageName, ";'\n\r\x00") {
+		return fmt.Errorf("invalid stage reference %q: contains illegal characters", stageName)
+	}
+	return nil
+}
+
 // UploadFileToStage executes a PUT command to upload a local file to an internal stage.
 func UploadFileToStage(ctx context.Context, client *snowflake.Client, localPath string, stageName string, parallel int, autoCompress bool, sourceCompression string, overwrite bool) error {
 	// Ensure stageName starts with @
 	if !strings.HasPrefix(stageName, "@") {
 		stageName = "@" + stageName
+	}
+
+	if err := validateStageRef(stageName); err != nil {
+		return err
 	}
 
 	sql := fmt.Sprintf("PUT 'file://%s' %s", strings.ReplaceAll(localPath, "'", "\\'"), stageName)

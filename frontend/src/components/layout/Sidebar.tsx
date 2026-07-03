@@ -5196,9 +5196,15 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           name={uploadStageModal.name}
           initialPath={uploadStageModal.initialPath}
           onClose={() => setUploadStageModal(null)}
-          onSuccess={() => {
+          onSuccess={(destPath) => {
             const m = uploadStageModal;
-            if (m.nodeKey) refreshStageDir(m.db, m.schema, m.name, m.initialPath, m.nodeKey);
+            // Only refresh when the file landed in the directory whose node we
+            // hold. If the user retyped a different destination, that path may
+            // not be an expanded node — it re-fetches on next expand — and
+            // refreshing the stale node would be misleading.
+            if (m.nodeKey && destPath === m.initialPath) {
+              refreshStageDir(m.db, m.schema, m.name, m.initialPath, m.nodeKey);
+            }
           }}
         />
       )}
