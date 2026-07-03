@@ -338,6 +338,51 @@ body,
   user-select: text !important;
 }
 
+/* ── Draggable + resizable modals (issue #572) ──────────────────────────────
+   Drag: the global document delegate in utils/modalDragResize.ts moves the
+   `.ant-modal` box via left/top (not transform — that would break fixed-
+   positioned descendants such as the in-modal context menus). `cursor: move`
+   advertises the handle; `--wails-draggable: no-drag` stops WKWebView from
+   swallowing the header drag as a native window move.
+
+   Resize: native CSS `resize` on `.ant-modal` — the box that carries antd's
+   `width` prop — so growing it moves the whole centered dialog outright, with
+   no JS relocating the width and nothing to break responsive (`90vw`) or
+   state-dependent widths. It's width-only: height stays `auto`, so every modal
+   keeps its own body scroll/height behaviour (some hardcode `styles.body`) —
+   untouched. `resize` needs a non-`visible` overflow, and `overflow: hidden`
+   would clip the child content's box-shadow, so the dialog shadow + radius move
+   up onto `.ant-modal` (its own shadow is not clipped by its own overflow), and
+   pointer-events are re-enabled so the corner grip — which sits in `.ant-modal`'s
+   bottom padding strip, clear of the footer/body — is grabbable. */
+.ant-modal-header {
+  --wails-draggable: no-drag;
+  user-select: none;
+}
+.ant-modal {
+  resize: horizontal;
+  overflow: hidden;
+  pointer-events: auto;
+  border-radius: var(--ant-border-radius-lg, 8px);
+  box-shadow: var(--ant-box-shadow,
+    0 6px 16px 0 rgba(0, 0, 0, 0.08),
+    0 3px 6px -4px rgba(0, 0, 0, 0.12),
+    0 9px 28px 8px rgba(0, 0, 0, 0.05));
+  min-width: 260px;
+}
+.ant-modal .ant-modal-content {
+  box-shadow: none;
+}
+/* Header + the content's top padding band are the drag handle, so they show the
+   move cursor; body and footer opt back out so their contents feel normal. */
+.ant-modal .ant-modal-content {
+  cursor: move;
+}
+.ant-modal-body,
+.ant-modal-footer {
+  cursor: auto;
+}
+
 /* Monaco editor — custom selection occurrence highlights.
    Applied to every match of the selected text that is not the selection itself.
    Bumped opacity slightly so the highlight reads at the new background tones. */

@@ -30,6 +30,7 @@ Contains a single stylesheet, `global.css`, that is loaded once at application s
 | Ant Design overrides | `--border-strong` on inputs, selects, pickers; tree indentation, node title layout, font size |
 | UI density tokens | `--row-height` / `--header-height` per `[data-density]` attribute (`compact`, default, `comfortable`) |
 | `.ai-chat-selectable`, `.ddl-tooltip`, `.thaw-grid` | Re-enable `user-select: text` and set `--wails-draggable: no-drag` to unblock WKWebView pointer events |
+| Draggable/resizable modals | `.ant-modal-header` gets `--wails-draggable: no-drag` (drag driven by `utils/modalDragResize.ts`); `.ant-modal` gets `resize: horizontal` (width-only, the box that owns antd's `width`) with `overflow: hidden` + the dialog `box-shadow`/`border-radius` moved up from `.ant-modal-content` so `overflow` doesn't clip the shadow; content shows `cursor: move`, body/footer reset it (#572) |
 | Monaco decorations | `.sql-occurrence-highlight`, `.sql-active-stmt-bg/indicator`, `.git-gutter-added/modified/deleted`, `.sql-token-builtin/udf`, squiggle SVG overrides, hover widget theme |
 | `.ctx-item` | Tab-bar right-click context menu items |
 | ReactFlow controls | Maps `--xy-controls-*` to app palette so ReactFlow buttons respect the theme |

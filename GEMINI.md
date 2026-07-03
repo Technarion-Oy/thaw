@@ -95,7 +95,7 @@ When a feature is admin-controlled, the toggle in **Enabled Features** is automa
 ## 🎨 UI & Ant Design Standards
 - **Icons**: Use `@ant-design/icons` (e.g., `SyncOutlined`, `TableOutlined`).
 - **Feedback**: Use `antd`'s `message.success`/`error` for immediate feedback.
-- **Modals**: Use `antd` `Modal` with `destroyOnClose`.
+- **Modals**: Use `antd` `Modal` with `destroyOnClose`. Prefer conditionally mounting the modal (`{open && <Modal open … />}`) so it unmounts on close — every modal is globally draggable (by its header) and width-resizable (bottom-right corner) via `frontend/src/utils/modalDragResize.ts` + the `.ant-modal` rules in `styles/global.css`, and that global feature relies on the unmount to reset a dragged/resized dialog to its default on reopen (a modal left mounted across close keeps its last position/width). Don't add per-modal drag/resize props.
 - **Alerts**: `antd` `Alert` does **not** have a `size` property. Use `showIcon` and `message` (can be a `Space` or `Typography` block).
 - **Typography**: Use `Typography.Text` for consistent font styling.
 - **Tree Component**:
