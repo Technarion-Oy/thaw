@@ -71,6 +71,7 @@ function ranContainedDDL(sql: string): boolean {
 const SessionPropertiesModal = lazy(() => import("../components/common/SessionPropertiesModal"));
 const SnippetsModal          = lazy(() => import("../components/snippets/SnippetsModal"));
 const ExportPathFormatModal  = lazy(() => import("../components/export/ExportPathFormatModal"));
+const ExportOptionsModal     = lazy(() => import("../components/export/ExportOptionsModal"));
 const MigrationModal         = lazy(() => import("../components/migration/MigrationModal"));
 const DbtProjectModal        = lazy(() => import("../components/dbt/DbtProjectModal"));
 const FunctionCatalogModal   = lazy(() => import("../components/fnmeta/FunctionCatalogModal"));
@@ -184,6 +185,7 @@ export default function QueryPage() {
 
   const [snippetsOpen, setSnippetsOpen] = useState(false);
   const [exportPathFormatOpen, setExportPathFormatOpen] = useState(false);
+  const [exportDdlOpen, setExportDdlOpen] = useState(false);
   const [migrationOpen, setMigrationOpen] = useState(false);
   const [dbtCreateOpen, setDbtCreateOpen] = useState(false);
   const [fnCatalogOpen, setFnCatalogOpen] = useState(false);
@@ -1004,6 +1006,11 @@ export default function QueryPage() {
   }, []);
 
   useEffect(() => {
+    const off = EventsOn("menu:export-ddl", () => setExportDdlOpen(true));
+    return () => off();
+  }, []);
+
+  useEffect(() => {
     const off = EventsOn("menu:migration", () => { if (featureFlags.schemaMigration) setMigrationOpen(true); });
     return () => off();
   }, [featureFlags.schemaMigration]);
@@ -1688,6 +1695,7 @@ export default function QueryPage() {
       <Suspense fallback={null}>
         {snippetsOpen && <SnippetsModal onClose={() => setSnippetsOpen(false)} />}
         {exportPathFormatOpen && <ExportPathFormatModal onClose={() => setExportPathFormatOpen(false)} />}
+        {exportDdlOpen && <ExportOptionsModal onClose={() => setExportDdlOpen(false)} />}
         {migrationOpen && <MigrationModal onClose={() => setMigrationOpen(false)} />}
         {dbtCreateOpen && <DbtProjectModal onClose={() => setDbtCreateOpen(false)} />}
         {fnCatalogOpen && <FunctionCatalogModal onClose={() => setFnCatalogOpen(false)} />}
