@@ -177,7 +177,9 @@ func exportOne(ctx context.Context, database string, fetch FetchDDL, opts Export
 	}
 	wantSchema := make(map[string]bool, len(opts.Schemas))
 	for _, s := range opts.Schemas {
-		wantSchema[strings.ToUpper(s)] = true
+		if s = strings.TrimSpace(s); s != "" {
+			wantSchema[strings.ToUpper(s)] = true
+		}
 	}
 
 	jobs := make([]writeJob, 0, len(stmts))

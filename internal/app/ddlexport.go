@@ -121,9 +121,10 @@ type DDLExportOptions struct {
 	// SkipExisting leaves already-existing files untouched instead of
 	// overwriting them.
 	SkipExisting bool `json:"skipExisting"`
-	// Warehouse runs the export on this warehouse (USE WAREHOUSE before the
-	// GET_DDL calls; the previous warehouse is restored afterwards).
-	// Empty = session warehouse.
+	// Warehouse runs the export on this warehouse. USE WAREHOUSE is issued on
+	// each fetch connection (not the shared session), so it never affects other
+	// operations; the connection is restored to the session warehouse before
+	// returning to the pool. Empty = session warehouse.
 	Warehouse string `json:"warehouse"`
 	// PathTemplate overrides the configured export path template for this
 	// export only. Empty = configured template.
@@ -141,21 +142,24 @@ func (a *App) ExportAllDatabasesDDL(outputDir string, databases []string, option
 		return nil, apperrors.ErrNotConnected
 	}
 
-	// Switch to the requested warehouse for the duration of the export.
-	// UseWarehouse updates the session connector, so every pooled connection
-	// the parallel GET_DDL fetches use inherits it.
+	// Resolve the fetch function. A warehouse override is applied per fetch
+	// connection (see GetCompleteDatabaseDDLOnWarehouse) rather than by mutating
+	// the shared session connector, so it can never race a query the user runs
+	// elsewhere in the app while the export is in flight.
+	fetch := a.client.GetCompleteDatabaseDDL
 	if options.Warehouse != "" {
 		prev, err := a.client.CurrentWarehouse(a.ctx)
 		if err != nil {
 			return nil, err
 		}
-		if prev != options.Warehouse {
-			if err := a.client.UseWarehouse(a.ctx, options.Warehouse); err != nil {
-				return nil, err
-			}
-			if prev != "" {
-				defer a.client.UseWarehouse(a.ctx, prev) //nolint:errcheck // best-effort restore
-			}
+		fetch = func(ctx context.Context, database string) (string, error) {
+			return a.client.GetCompleteDatabaseDDLOnWarehouse(ctx, database, options.Warehouse, prev)
+		}
+		if prev == "" {
+			// The session had no warehouse to restore to, so an export
+			// connection may return to the pool still carrying the override.
+			// Purge idle connections once the export finishes.
+			defer a.client.FlushIdleConns()
 		}
 	}
 
@@ -199,7 +203,7 @@ func (a *App) ExportAllDatabasesDDL(outputDir string, databases []string, option
 	results := ddl.ExportDatabases(
 		ctx,
 		databases,
-		a.client.GetCompleteDatabaseDDL,
+		fetch,
 		opts,
 		func(done, total int, res ddl.ExportResult) {
 			wailsruntime.EventsEmit(a.ctx, ddlProgressEvent, DDLProgressPayload{

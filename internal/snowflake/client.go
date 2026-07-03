@@ -2253,10 +2253,7 @@ func (c *Client) UseWarehouse(ctx context.Context, warehouse string) error {
 // CURRENT_WAREHOUSE() query when no explicit switch has been recorded yet.
 // Returns "" when the session has no warehouse at all.
 func (c *Client) CurrentWarehouse(ctx context.Context) (string, error) {
-	c.connector.mu.RLock()
-	wh := c.connector.wh
-	c.connector.mu.RUnlock()
-	if wh != "" {
+	if wh := c.GetCachedSessionContext().Warehouse; wh != "" {
 		return wh, nil
 	}
 	var v sql.NullString
@@ -3915,6 +3912,48 @@ func buildGetDDLQuery(database, schema, kind, name, arguments string) (query, id
 // supplementing with per-schema SHOW + individual GET_DDL calls.
 func (c *Client) GetCompleteDatabaseDDL(ctx context.Context, database string) (string, error) {
 	return c.GetDatabaseDDL(ctx, database)
+}
+
+// GetCompleteDatabaseDDLOnWarehouse behaves like GetCompleteDatabaseDDL but runs
+// the GET_DDL on a dedicated pinned connection whose warehouse is switched to
+// `warehouse` first. Because USE WAREHOUSE is issued on the pinned connection's
+// own session, it does NOT mutate the shared connector default and cannot race
+// with concurrent operations on the pool. The connection's warehouse is
+// restored to `restore` before it returns to the pool so a later borrower does
+// not inherit the export warehouse; callers that had no warehouse (restore == "")
+// should FlushIdleConns() afterwards to purge any conn still carrying the override.
+func (c *Client) GetCompleteDatabaseDDLOnWarehouse(ctx context.Context, database, warehouse, restore string) (string, error) {
+	conn, err := c.db.Conn(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		if restore != "" {
+			// Best-effort, and on a fresh context so a canceled export still
+			// resets the connection before it is pooled.
+			_, _ = conn.ExecContext(context.Background(), fmt.Sprintf(`USE WAREHOUSE %s`, QuoteIdent(restore)))
+		}
+		conn.Close()
+	}()
+
+	if _, err := conn.ExecContext(ctx, fmt.Sprintf(`USE WAREHOUSE %s`, QuoteIdent(warehouse))); err != nil {
+		return "", err
+	}
+	query, identifier := buildGetDDLQuery("", "", "DATABASE", database, "")
+	var src string
+	if err := conn.QueryRowContext(ctx, query).Scan(&src); err != nil {
+		return "", fmt.Errorf("GET_DDL(DATABASE %s): %w", identifier, err)
+	}
+	return src, nil
+}
+
+// FlushIdleConns drops all currently-idle pooled connections so the next query
+// gets a fresh connection built via sessionConnector.Connect (which applies the
+// connector's session defaults). Used to purge session state left on a pooled
+// connection by a per-connection override.
+func (c *Client) FlushIdleConns() {
+	c.db.SetMaxIdleConns(0)
+	c.db.SetMaxIdleConns(DefaultMaxIdleConns)
 }
 
 // GetDatabaseDDL returns the complete DDL for a database using Snowflake's
