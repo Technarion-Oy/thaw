@@ -63,7 +63,7 @@ func CollectCTENames(src string, sig []sqltok.Token) []string {
 // cteListMember matches one CTE list member `name [ ( col [, col…] ) ] AS (…)`
 // at sig[j]. It returns the raw name, the index just past the body's closing
 // paren, whether the body's parens were balanced, and whether a member was
-// recognised at all. An unbalanced body still yields the name (closed=false):
+// recognized at all. An unbalanced body still yields the name (closed=false):
 // `name AS (` is enough to identify a CTE while the statement is being typed.
 func cteListMember(src string, sig []sqltok.Token, j int) (name string, next int, closed, ok bool) {
 	if j >= len(sig) || !sig[j].Kind.IsIdentLike() {
