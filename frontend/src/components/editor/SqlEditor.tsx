@@ -37,7 +37,7 @@ import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableColumn
 import { SNOWFLAKE_DATA_TYPES } from "../../generated/snowflakeDataTypes";
 import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateDataTypes, ValidateGrammar, ValidateAntiPatterns, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContextFull, ResolveTableRefs, ComputeGitLineDiff } from "../../../wailsjs/go/sqleditor/Service";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
-import { UC, quoteIfNecessary, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions } from "./sqlEditorUtils";
+import { UC, quoteIfNecessary, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt } from "./sqlEditorUtils";
 import ExplainModal from "../results/ExplainModal";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 import { kindSupportsDdl } from "../../utils/objectDdl";
@@ -173,21 +173,6 @@ async function resolveStoreObject(
     }
   }
   return inStore ? pick(inStore) : null;
-}
-
-// Column span (1-based Monaco columns) of the dotted identifier at a 0-based char
-// index, or null if that index isn't on an identifier. Includes dots and double
-// quotes so DB."SCHEMA".NAME underlines as one link. Used for the cmd/ctrl-hover
-// link affordance.
-function identifierRangeAt(line: string, idx0: number): { start: number; end: number } | null {
-  const isIdent = (ch: string | undefined) => !!ch && /[A-Za-z0-9_$."]/.test(ch);
-  let i = idx0;
-  if (!isIdent(line[i])) i = idx0 - 1;   // allow the cursor to sit just past the last char
-  if (!isIdent(line[i])) return null;
-  let s = i, e = i;
-  while (s > 0 && isIdent(line[s - 1])) s--;
-  while (e + 1 < line.length && isIdent(line[e + 1])) e++;
-  return { start: s + 1, end: e + 2 };   // Monaco endColumn is exclusive (points after last char)
 }
 
 // ── Git gutter: HEAD content cache ────────────────────────────────────────────
@@ -1741,8 +1726,18 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       evaluateCmdLink(lastSqlMousePos);
       if (held) showDdlAtLastPos();
     };
-    editor.onKeyDown((e: any) => onModChange(!!(e.ctrlKey || e.metaKey)));
-    editor.onKeyUp((e: any) => onModChange(!!(e.ctrlKey || e.metaKey)));
+    // Monaco's editor.onKeyDown/onKeyUp only fire while the hidden textarea has DOM
+    // focus, but hovering never focuses the editor — so "press Cmd/Ctrl while
+    // stationary over an object" would do nothing until the user clicked in first.
+    // Listen at the document level (capture) instead; the downstream handlers gate
+    // on lastSqlMousePos, so only the editor the mouse is actually over reacts.
+    const onDocModKey = (e: KeyboardEvent) => onModChange(!!(e.ctrlKey || e.metaKey));
+    document.addEventListener("keydown", onDocModKey, true);
+    document.addEventListener("keyup", onDocModKey, true);
+    editor.onDidDispose(() => {
+      document.removeEventListener("keydown", onDocModKey, true);
+      document.removeEventListener("keyup", onDocModKey, true);
+    });
 
     editor.onMouseMove((e: any) => {
       currentMouseYRef.current = (e.event as any).posy ?? 0;
@@ -1898,19 +1893,20 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
             const cacheKey = `${UC(matchedTable.db)}\0${UC(matchedTable.schema)}\0${UC(matchedTable.name)}`;
             const cols = colInfoCache.get(cacheKey);
             const col = cols?.find((c) => c.name.toUpperCase() === parts[1].toUpperCase());
-            if (col) {
-              const coords = positionTooltip(pos, 320);
-              if (coords) {
-                if (hoverHideTimerRef.current) { clearTimeout(hoverHideTimerRef.current); hoverHideTimerRef.current = null; }
-                setDdlHover({
-                  kind: "COLUMN",
-                  db: matchedTable.db,
-                  schema: matchedTable.schema,
-                  name: `${matchedTable.name}.${col.name}`,
-                  ddl: col.dataType,
-                  x: coords.x, y: coords.y,
-                });
-              }
+            const coords = col ? positionTooltip(pos, 320) : null;
+            if (col && coords) {
+              if (hoverHideTimerRef.current) { clearTimeout(hoverHideTimerRef.current); hoverHideTimerRef.current = null; }
+              setDdlHover({
+                kind: "COLUMN",
+                db: matchedTable.db,
+                schema: matchedTable.schema,
+                name: `${matchedTable.name}.${col.name}`,
+                ddl: col.dataType,
+                x: coords.x, y: coords.y,
+              });
+            } else {
+              // Resolved alias but column not (yet) known — clear any stale tooltip.
+              setDdlHover(null);
             }
             // parts[0] is a resolved table alias — this is alias.column, not
             // schema.object. Stop here even when the column isn't in the (possibly

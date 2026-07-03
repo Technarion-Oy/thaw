@@ -8,5 +8,7 @@ export const DDL_UNSUPPORTED_KINDS = new Set<string>([
   "MODEL MONITOR", "DATASET", "CORTEX SEARCH SERVICE", "EXTERNAL AGENT", "MCP SERVER",
 ]);
 
-export const kindSupportsDdl = (kind: string): boolean =>
-  !DDL_UNSUPPORTED_KINDS.has(kind.toUpperCase().trim());
+// A nullish/unknown kind is treated as supported (not in the blocklist) — matches
+// the old inline `objKind !== "..."` chains, which showed the item for undefined.
+export const kindSupportsDdl = (kind: string | null | undefined): boolean =>
+  !kind || !DDL_UNSUPPORTED_KINDS.has(kind.toUpperCase().trim());

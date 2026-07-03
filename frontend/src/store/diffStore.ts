@@ -13,6 +13,7 @@
 import { create } from "zustand";
 import { GetObjectDDL, GetRoleDDL, GetWarehouseDDL, ReadFile } from "../../wailsjs/go/app/App";
 import { useQueryStore } from "./queryStore";
+import { kindSupportsDdl } from "../utils/objectDdl";
 
 export type DiffCategory = "obj" | "file" | "role" | "warehouse";
 
@@ -38,6 +39,10 @@ interface DiffState {
 async function fetchText(item: PendingDiffItem): Promise<string> {
   switch (item.category) {
     case "obj":
+      // Defence-in-depth: the Sidebar menu already hides Compare for these kinds,
+      // but guard here too so a doomed GET_DDL never reaches the driver (log noise).
+      if (item.kind && !kindSupportsDdl(item.kind))
+        throw new Error(`GET_DDL does not support ${item.kind} objects`);
       return GetObjectDDL(item.db ?? "", item.schema ?? "", item.kind ?? "", item.name ?? "", item.args ?? "");
     case "role":
       return GetRoleDDL(item.name ?? "");

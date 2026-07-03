@@ -12,6 +12,36 @@ import { GetTableForeignKeys } from "../../../wailsjs/go/app/App";
 // ── UC helper ────────────────────────────────────────────────────────────────
 export const UC = (s: string) => s.toUpperCase();
 
+// ── identifierRangeAt ─────────────────────────────────────────────────────────
+// Column span (1-based Monaco columns) of the dotted identifier at a 0-based char
+// index, or null if that index isn't on an identifier. A double-quoted segment
+// (which may contain spaces, e.g. "MY TABLE") counts as part of the identifier, so
+// DB."MY SCHEMA".NAME spans as one unit. Used for the cmd/ctrl-hover link underline.
+export function identifierRangeAt(line: string, idx0: number): { start: number; end: number } | null {
+  // Mark every column that belongs to an identifier: bare chars, plus whole
+  // double-quoted segments ("" is an escaped quote inside one). One pass, quote-aware.
+  const isBare = (ch: string) => /[A-Za-z0-9_$.]/.test(ch);
+  const inIdent = new Array<boolean>(line.length).fill(false);
+  for (let i = 0; i < line.length;) {
+    if (line[i] === '"') {
+      const q = i++;
+      while (i < line.length) {
+        if (line[i] === '"') { if (line[i + 1] === '"') { i += 2; continue; } i++; break; }
+        i++;
+      }
+      for (let k = q; k < i; k++) inIdent[k] = true;
+    } else if (isBare(line[i])) { inIdent[i] = true; i++; }
+    else i++;
+  }
+  let j = idx0;
+  if (!(j >= 0 && j < line.length && inIdent[j])) j = idx0 - 1;   // allow cursor just past the last char
+  if (!(j >= 0 && j < line.length && inIdent[j])) return null;
+  let s = j, e = j;
+  while (s > 0 && inIdent[s - 1]) s--;
+  while (e + 1 < line.length && inIdent[e + 1]) e++;
+  return { start: s + 1, end: e + 2 };   // Monaco endColumn is exclusive (points after last char)
+}
+
 // ── quoteIfNecessary ─────────────────────────────────────────────────────────
 // Quotes a Snowflake identifier if it contains characters that require quoting
 // or conflicts with a reserved keyword. Accepts the keyword set as a parameter.

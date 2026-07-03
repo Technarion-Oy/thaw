@@ -68,12 +68,16 @@ tie-break, since hover has no parse context. `editor.onMouseMove` uses it via th
 renders the full DDL — no click. Kinds `GET_DDL` can't render (`kindSupportsDdl` from
 `utils/objectDdl.ts`) get no underline and fall back to the identity tooltip; a failed/empty fetch
 also falls back to identity (not cached, so a re-hover retries). `cmdModHeld` tracks the modifier
-from mouse-move events and `onKeyDown`/`onKeyUp` (`onModChange`), so pressing the modifier while
-already stationary over an object upgrades identity → DDL via `showDdlAtLastPos()` — which honours
-diagnostic-marker precedence (`markerAt`) and bails if the mouse moved mid-fetch. While held,
-`evaluateCmdLink` underlines the identifier with a `.cmd-link` decoration (link affordance);
-`identifierRangeAt` computes the dotted-identifier span. All four hover tooltips (diagnostic,
-column, object, function) share `positionTooltip(pos, heightPx)` for screen placement. A resolved
+from mouse-move events and from **document-level** `keydown`/`keyup` listeners (`onModChange`) —
+Monaco's `editor.onKeyDown` only fires while the hidden textarea is focused, which hover never is, so
+document listeners (gated on `lastSqlMousePos`) are what make "press the modifier while stationary
+over an object" work without clicking in first. That path upgrades identity → DDL via
+`showDdlAtLastPos()` — which honours diagnostic-marker precedence (`markerAt`) and bails if the mouse
+moved mid-fetch. While held, `evaluateCmdLink` underlines the identifier with a `.cmd-link`
+decoration (link affordance); `identifierRangeAt` (in `sqlEditorUtils.ts`, quote-aware so
+`DB."MY TABLE".COL` spans as one, unit-tested) computes the dotted-identifier span. All four hover
+tooltips (diagnostic, column, object, function) share `positionTooltip(pos, heightPx)` for screen
+placement. A resolved
 table alias short-circuits to the column path only — never object resolution — so `alias.col` can't
 false-match a `schema.object`. The store `kind` is passed straight through — never guessed. Column
 and function hovers keep their own dedicated paths in `onMouseMove`.
