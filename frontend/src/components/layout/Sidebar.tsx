@@ -98,7 +98,7 @@ import {
 import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, AlterDynamicTable, AlterExternalTable, AlterIcebergTable, AlterMaterializedView, AlterAlert, ExecuteAlert, AlterService, AlterModelMonitor, UploadFileToStage, PickOpenFile, ExecDDL, ListStageEntries, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory, BuildDropColumnSql } from "../../../wailsjs/go/app/App";
+import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, AlterDynamicTable, AlterExternalTable, AlterIcebergTable, AlterMaterializedView, AlterAlert, ExecuteAlert, AlterService, AlterModelMonitor, ExecDDL, ListStageEntries, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory, BuildDropColumnSql } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl, { identToken, quoteIdent } from "../shared/ObjectNameCaseControl";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
@@ -136,6 +136,7 @@ import BackupSetsModal from "../backup/BackupSetsModal";
 import DependenciesModal from "../lineage/DependenciesModal";
 import InsertMappingModal from "../database/InsertMappingModal";
 import CreateSecretModal from "../secret/CreateSecretModal";
+import UploadToStageModal from "../stage/UploadToStageModal";
 import ModifySecretModal from "../secret/ModifySecretModal";
 import CreateGitRepositoryModal from "../gitrepoobj/CreateGitRepositoryModal";
 import ModifyGitRepositoryModal from "../gitrepoobj/ModifyGitRepositoryModal";
@@ -695,6 +696,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [createStageModal, setCreateStageModal] = useState<{ db: string; schema: string } | null>(null);
   const [stagePropertiesModal, setStagePropertiesModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [stageBrowserModal, setStageBrowserModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [uploadStageModal, setUploadStageModal] = useState<{ db: string; schema: string; name: string; initialPath: string; nodeKey?: string } | null>(null);
   const [createFileFormatModal, setCreateFileFormatModal] = useState<{ db: string; schema: string } | null>(null);
   const [createSecretModal, setCreateSecretModal] = useState<{ db: string; schema: string } | null>(null);
   const [modifySecretModal, setModifySecretModal] = useState<{ db: string; schema: string; name: string } | null>(null);
@@ -1771,25 +1773,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setStageBrowserModal({ db, schema, name });
   };
 
-  const uploadToStage = async () => {
+  const uploadToStage = () => {
     if (!ctxMenu) return;
     const [, db, schema, , ...nameParts] = ctxMenu.nodeKey.split(":");
     const name = nameParts.join(":");
     setCtxMenu(null);
-
-    const localPath = await PickOpenFile();
-    if (!localPath) return;
-
-    const stageRef = `@${db}.${schema}.${name}`;
-    const hide = message.loading(`Uploading ${localPath} to ${stageRef}…`, 0);
-    try {
-      await UploadFileToStage(localPath, stageRef, 4, true, "AUTO_DETECT", true);
-      hide();
-      message.success(`Uploaded ${localPath} successfully.`);
-    } catch (e) {
-      hide();
-      message.error(`Failed to upload file: ${String(e)}`);
-    }
+    setUploadStageModal({ db, schema, name, initialPath: "" });
   };
 
   const openCreateFileFormat = () => {
@@ -3239,34 +3228,24 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     });
   };
 
-  const uploadToStageDir = async () => {
+  const uploadToStageDir = () => {
     const k = parseStageOrDbtKey(ctxMenu);
     if (!k) return;
     const nodeKey = ctxMenu!.nodeKey;
     setCtxMenu(null);
-    const localPath = await PickOpenFile();
-    if (!localPath) return;
-    const stageRef = `@${quoteIdent(k.db)}.${quoteIdent(k.schema)}.${quoteIdent(k.name)}/${k.path}`;
-    const hide = message.loading(`Uploading to ${k.name}/${k.path}…`, 0);
+    setUploadStageModal({ db: k.db, schema: k.schema, name: k.name, initialPath: k.path, nodeKey });
+  };
+
+  // Re-fetch a stage directory's contents so a freshly uploaded file appears
+  // without collapsing the node. Falls back to clearing children so the next
+  // expand re-fetches. Used as the upload modal's onSuccess for the dir flow.
+  const refreshStageDir = async (db: string, schema: string, name: string, path: string, nodeKey: string) => {
     try {
-      await UploadFileToStage(localPath, stageRef, 4, true, "AUTO_DETECT", true);
-      message.success(`Uploaded successfully.`);
-    } catch (e) {
-      message.error(`Failed to upload file: ${String(e)}`);
-      return; // Skip re-fetch on upload failure
-    } finally {
-      hide();
-    }
-    // Re-fetch directory contents so the new file appears without collapsing.
-    // Separated from the upload try/catch so a re-fetch failure doesn't show
-    // the misleading "Failed to upload" message.
-    try {
-      const entries = await ListStageEntries(k.db, k.schema, k.name, k.path);
-      const nodes = buildEntryNodes(k.db, k.schema, k.name, entries ?? [], "stagedir", "stagefile");
+      const entries = await ListStageEntries(db, schema, name, path);
+      const nodes = buildEntryNodes(db, schema, name, entries ?? [], "stagedir", "stagefile");
       setTreeData((prev) => updateNode(prev, nodeKey, nodes.length ? nodes : [emptyChildNode(nodeKey)]));
     } catch (e) {
       console.error("Failed to refresh directory after upload:", e);
-      // Fall back to clearing children so the next expand re-fetches
       setTreeData((prev) => clearNodeChildren(prev, nodeKey));
     }
   };
@@ -5207,6 +5186,24 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={createSecretModal.schema}
           onClose={() => setCreateSecretModal(null)}
           onSuccess={() => refreshDatabaseByName(createSecretModal.db, { schema: createSecretModal.schema, kind: "SECRET" })}
+        />
+      )}
+
+      {uploadStageModal && (
+        <UploadToStageModal
+          db={uploadStageModal.db}
+          schema={uploadStageModal.schema}
+          name={uploadStageModal.name}
+          initialPath={uploadStageModal.initialPath}
+          onClose={() => setUploadStageModal(null)}
+          onSuccess={() => {
+            const m = uploadStageModal;
+            // Re-fetch the right-clicked directory node (the dir flow). This shows
+            // the file when it landed here or in a new sub-path under it, and is
+            // never wrong when it landed elsewhere — it just re-lists this dir's
+            // real contents. The stage-root flow has no node to refresh.
+            if (m.nodeKey) refreshStageDir(m.db, m.schema, m.name, m.initialPath, m.nodeKey);
+          }}
         />
       )}
 
