@@ -6,14 +6,19 @@
 // from Technarion Oy.
 
 import { describe, it, expect } from "vitest";
-import { parseTranslate } from "./modalDragResize";
+import { clamp } from "./modalDragResize";
 
-describe("parseTranslate", () => {
-  it("returns [0,0] for an un-dragged element (empty transform)", () => {
-    expect(parseTranslate("")).toEqual([0, 0]);
+describe("clamp", () => {
+  it("passes a value that is within bounds through unchanged", () => {
+    expect(clamp(50, 0, 100)).toBe(50);
   });
 
-  it("parses a prior translate, including negatives and decimals", () => {
-    expect(parseTranslate("translate(120px, -33.5px)")).toEqual([120, -33.5]);
+  it("floors to lo and ceils to hi — the drag viewport bounds", () => {
+    expect(clamp(-30, 0, 100)).toBe(0);
+    expect(clamp(160, 0, 100)).toBe(100);
+  });
+
+  it("handles a negative lower bound (KEEP_X - width can be negative)", () => {
+    expect(clamp(-500, -420, 900)).toBe(-420);
   });
 });

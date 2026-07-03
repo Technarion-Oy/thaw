@@ -339,16 +339,19 @@ body,
 }
 
 /* ── Draggable + resizable modals (issue #572) ──────────────────────────────
-   Drag: the global document delegate in utils/modalDragResize.ts grabs the
-   header and translates the modal box. `cursor: move` advertises the handle;
+   Drag: the global document delegate in utils/modalDragResize.ts moves the
+   `.ant-modal` box via left/top (not transform — that would break fixed-
+   positioned descendants). `cursor: move` advertises the handle;
    `--wails-draggable: no-drag` stops WKWebView from swallowing the header drag
    as a native window move.
    Resize: native CSS on the content box (`resize: both`; supported by both
    WebKit and WebView2). The content becomes a flex column so the header and
    footer stay pinned and only the body scrolls when the box is made smaller —
    otherwise the whole modal, drag handle and all, would scroll out of view.
-   `overflow: hidden` on the content is what enables the resize grip without
-   adding a second scrollbar over the body's own. */
+   `overflow: hidden` enables the resize grip without a second scrollbar over
+   the body's own. The delegate also moves antd's fixed `width` off `.ant-modal`
+   onto the content on first interaction, so resizing grows the whole centered
+   dialog rather than overflowing a still-fixed-width parent. */
 .ant-modal-header {
   --wails-draggable: no-drag;
   user-select: none;
@@ -372,6 +375,11 @@ body,
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
+}
+/* Inset the right-aligned footer buttons so they clear the native resize grip
+   in the bottom-right corner, even on narrow modals. */
+.ant-modal .ant-modal-footer {
+  padding-right: 18px;
 }
 /* The padding box is the drag handle, so it shows the move cursor; body and
    footer opt back out so their contents feel normal. */
