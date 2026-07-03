@@ -87,7 +87,7 @@ export default function CreateModalShell({
           )}
         </Space>
       }
-      onCancel={onClose}
+      onCancel={() => { if (!creating) onClose(); }}
       footer={
         <Space style={{ justifyContent: "flex-end", display: "flex" }}>
           <Button onClick={onClose} disabled={creating}>Cancel</Button>

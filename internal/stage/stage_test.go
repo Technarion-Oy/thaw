@@ -13,7 +13,10 @@ func TestValidateStageRef(t *testing.T) {
 	valid := []string{
 		`@DB.SCHEMA.STAGE`,
 		`@"db"."schema"."stage"/data/2026`,
-		`@stage/sub-dir_1/file.csv`,
+		`@stage/sub-dir_1/file.csv`, // single dashes are fine
+		`@"my;stage"/a`,             // ';' inside a quoted identifier is legal
+		`@"we''ird"/a`,              // escaped quote inside a quoted identifier
+		`@"da--sh"/a`,               // '--' inside a quoted identifier is legal
 	}
 	for _, s := range valid {
 		if err := validateStageRef(s); err != nil {
@@ -21,11 +24,14 @@ func TestValidateStageRef(t *testing.T) {
 		}
 	}
 
-	// The reported injection vector and its building blocks must be rejected.
+	// The reported injection vector and its building blocks must be rejected
+	// when they appear in the unquoted path segment.
 	injections := []string{
 		`@db.schema.stage/x; DROP TABLE foo; --`,
 		`@db.schema.stage/x' OR '1'='1`,
 		"@db.schema.stage/x\nSELECT 1",
+		`@db.schema.stage/data--`, // '--' would comment out the PUT option clauses
+		`@"unbalanced/x`,          // dangling quote
 	}
 	for _, s := range injections {
 		if err := validateStageRef(s); err == nil {

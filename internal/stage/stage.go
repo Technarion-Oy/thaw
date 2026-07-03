@@ -302,15 +302,38 @@ func strVal(row []interface{}, idx int) string {
 	}
 }
 
-// validateStageRef guards a stage reference that is spliced unquoted into a PUT/GET
-// statement. Its path segment can be free-typed by the user (see UploadToStageModal),
-// so this is the choke point that stops injection such as ".../x; DROP TABLE y; --"
-// from being split into a second statement by client.Execute. A legitimate reference
-// is @[db.schema.]stage[/path] with optionally double-quoted identifiers, so it never
-// contains a statement terminator, a string-literal quote, or a newline.
+// validateStageRef guards a stage reference spliced unquoted into a PUT/GET/REMOVE
+// statement. The path segment is attacker-influenced — free-typed in the upload
+// dialog, or taken from file/dir names returned by LIST @stage, which anyone with
+// write access to the backing cloud storage can plant — so it is a genuine injection
+// sink: client.Execute splits on top-level ';' and Snowflake treats '--' as a line
+// comment (which would also silently drop the trailing PUT option clauses).
+//
+// A legitimate reference is @[db.schema.]stage[/path]; only the identifier parts are
+// double-quoted (by quoteIdent), and a quoted identifier may legally contain ';',
+// '\'', newlines, or '--'. So the scan tracks quoted regions and only rejects those
+// sequences when they appear OUTSIDE quotes (i.e. in the unquoted path segment).
 func validateStageRef(stageName string) error {
-	if strings.ContainsAny(stageName, ";'\n\r\x00") {
-		return fmt.Errorf("invalid stage reference %q: contains illegal characters", stageName)
+	inQuote := false
+	for i := 0; i < len(stageName); i++ {
+		switch c := stageName[i]; {
+		case c == '"':
+			// "" inside a quoted identifier is an escaped quote, not a delimiter.
+			if inQuote && i+1 < len(stageName) && stageName[i+1] == '"' {
+				i++
+				continue
+			}
+			inQuote = !inQuote
+		case inQuote:
+			// Anything is allowed inside a quoted identifier.
+		case c == ';' || c == '\'' || c == '\n' || c == '\r' || c == 0:
+			return fmt.Errorf("invalid stage reference %q: contains illegal character", stageName)
+		case c == '-' && i+1 < len(stageName) && stageName[i+1] == '-':
+			return fmt.Errorf("invalid stage reference %q: contains a SQL comment", stageName)
+		}
+	}
+	if inQuote {
+		return fmt.Errorf("invalid stage reference %q: unbalanced quote", stageName)
 	}
 	return nil
 }
@@ -354,6 +377,9 @@ func DownloadFileFromStage(ctx context.Context, client *snowflake.Client, stageN
 	if !strings.HasPrefix(stageName, "@") {
 		stageName = "@" + stageName
 	}
+	if err := validateStageRef(stageName); err != nil {
+		return err
+	}
 
 	sql := fmt.Sprintf("GET %s 'file://%s'", stageName, strings.ReplaceAll(localDirPath, "'", "\\'"))
 	if parallel > 0 {
@@ -372,6 +398,9 @@ func RemoveStageFiles(ctx context.Context, client *snowflake.Client, stageName s
 	// Ensure stageName starts with @
 	if !strings.HasPrefix(stageName, "@") {
 		stageName = "@" + stageName
+	}
+	if err := validateStageRef(stageName); err != nil {
+		return err
 	}
 
 	sql := fmt.Sprintf("REMOVE %s", stageName)

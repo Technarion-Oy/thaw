@@ -88,11 +88,15 @@ prefixes) uses the `ListStageEntries` IPC method, which delegates to
   `localPath` with a backslash (`\'`) rather than doubling, which is the correct
   form for the `file://` URI inside a Snowflake `PUT`/`GET` command — but this
   differs from standard SQL string literal escaping used elsewhere.
-- `stageName` is spliced **unquoted** into the `PUT` statement (a stage reference
-  can't be a string literal), and its path segment is user-typed in the upload
-  dialog. `UploadFileToStage` therefore runs it through `validateStageRef`, which
-  rejects `;`, `'`, and newlines — the characters that would let a typed path like
-  `x; DROP TABLE y; --` split into a second statement in `Client.Execute`.
+- `stageName` is spliced **unquoted** into the `PUT`/`GET`/`REMOVE` statements (a
+  stage reference can't be a string literal), and its path segment is attacker-
+  influenced — free-typed in the upload dialog, or a file/dir name from
+  `LIST @stage` that anyone with write access to the backing storage can plant. All
+  three functions run it through `validateStageRef`, a quote-aware scan that rejects
+  `;`, `'`, newlines, and `--` **outside** double-quoted identifiers (so a path like
+  `x; DROP TABLE y; --` is refused, while a legitimately quoted identifier such as
+  `"my;stage"` is still allowed). `--` matters because the options are appended to a
+  single-line statement, so an un-rejected `--` would silently comment them out.
 - `ListStageFiles` returns a `nil` slice (not empty) when no files are found
   because it uses `append` without pre-allocating. Callers should treat `nil` and
   empty as equivalent.

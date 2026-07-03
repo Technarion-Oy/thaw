@@ -44,9 +44,12 @@ export default function UploadToStageModal({ db, schema, name, initialPath = "",
   const dest = destPath.trim().replace(/^\/+|\/+$/g, "");
   const stageRef = dest ? `${stageRoot}/${dest}` : stageRoot;
   // dest is spliced unquoted into a PUT statement server-side; reject characters
-  // that could break out of it (statement terminator, quotes, newlines). The
+  // and sequences that could break out of it (statement terminator, quotes,
+  // newlines, and the '--' comment that would silently drop the PUT options). The
   // backend enforces this too — this just gives immediate feedback.
-  const pathError = /[;'"`\n\r]/.test(destPath) ? "Path cannot contain ; ' \" ` or newlines." : null;
+  const pathError = /[;'"`\n\r]|--/.test(destPath)
+    ? "Path cannot contain ; ' \" ` -- or newlines."
+    : null;
 
   const pickFile = async () => {
     const p = await PickAnyFile();
