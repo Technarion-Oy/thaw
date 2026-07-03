@@ -343,21 +343,38 @@ body,
    header and translates the modal box. `cursor: move` advertises the handle;
    `--wails-draggable: no-drag` stops WKWebView from swallowing the header drag
    as a native window move.
-   Resize: native CSS on the content box. Both engines this app runs on
-   (WebKit / WebView2) support `resize: both`; no JS needed. */
+   Resize: native CSS on the content box (`resize: both`; supported by both
+   WebKit and WebView2). The content becomes a flex column so the header and
+   footer stay pinned and only the body scrolls when the box is made smaller —
+   otherwise the whole modal, drag handle and all, would scroll out of view.
+   `overflow: hidden` on the content is what enables the resize grip without
+   adding a second scrollbar over the body's own. */
 .ant-modal-header {
   --wails-draggable: no-drag;
   user-select: none;
 }
-/* The whole padding box is a drag handle (see modalDragResize.ts), so it shows
-   the move cursor; body and footer opt back out so their contents feel normal. */
 .ant-modal .ant-modal-content {
   cursor: move;
   resize: both;
-  overflow: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   min-width: 260px;
-  min-height: 120px;
+  min-height: 160px;
+  max-width: 100vw;
+  max-height: 100vh;
 }
+.ant-modal .ant-modal-header,
+.ant-modal .ant-modal-footer {
+  flex: 0 0 auto;
+}
+.ant-modal .ant-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+/* The padding box is the drag handle, so it shows the move cursor; body and
+   footer opt back out so their contents feel normal. */
 .ant-modal-body,
 .ant-modal-footer {
   cursor: auto;
