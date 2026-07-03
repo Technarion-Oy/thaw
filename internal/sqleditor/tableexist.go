@@ -587,8 +587,8 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			}
 		}
 
-		// CTE names — every identifier that appears as `name AS (` is a CTE
-		// definition.
+		// CTE names — collected structurally from the statement's WITH clauses
+		// by the shared sqlgrammar.CollectCTENames scanner.
 		strippedSig := sigTokens(strippedCtx)
 		cteNames := findCTENames(strippedSig, strippedCtx, ic)
 

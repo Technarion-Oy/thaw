@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 
+	"thaw/internal/sqlgrammar"
 	"thaw/internal/sqltok"
 )
 
@@ -95,6 +96,16 @@ func depKey(db, schema, name string) string {
 //     "DB" . "SC" . "T" still collapses to a single-part reference, and
 //   - bare keywords (TABLE, SET, GENERATOR, …) are captured as parts and then
 //     dropped by skipNames, exactly as \w+ + skipNames did before.
+//
+// Extraction deliberately stays keyword-anchored rather than grammar-driven
+// (issue #559 evaluation: no-go). The sqlgrammar engine is a backtracking
+// recognizer whose rules consume exactly the free-form spans where table refs
+// live (AS <query>, procedure bodies) permissively via consumeRest — a
+// grammar-driven parse would need capture hooks with backtrack-undo plus a
+// full query/expression grammar to see those refs at all, and a strict parse
+// that fails on an unrecognized proc-body construct would extract nothing.
+// The lenient scanner ignores what it doesn't recognize, which is the required
+// failure mode here.
 
 // refIntroKeywords are the keywords that introduce a table/view reference as
 // the identifier immediately following them. MERGE INTO is covered by INTO.
@@ -208,27 +219,14 @@ func commaWalk(tokens []sqltok.Token, src string, start int, refs *[]rawRef) int
 }
 
 // collectCTENames returns the set of CTE alias names (upper-cased, unquoted)
-// declared by "WITH name AS (" or ", name AS (". These are local aliases and
-// must never be treated as object references.
+// declared by any WITH clause. These are local aliases and must never be
+// treated as object references. Scanning is delegated to the shared
+// sqlgrammar.CollectCTENames (issue #559), which also handles WITH RECURSIVE,
+// CTE column lists, and nested WITH clauses.
 func collectCTENames(src string, tokens []sqltok.Token) map[string]bool {
 	names := map[string]bool{}
-	for i, t := range tokens {
-		if !(tokKeywordIs(t, src, "WITH") || t.Kind == sqltok.Comma) {
-			continue
-		}
-		j := sqltok.SkipTrivia(tokens, i+1)
-		if j >= len(tokens) || !tokens[j].Kind.IsIdentLike() {
-			continue
-		}
-		name := tokens[j].Text(src)
-		k := sqltok.SkipTrivia(tokens, j+1)
-		if k >= len(tokens) || !tokKeywordIs(tokens[k], src, "AS") {
-			continue
-		}
-		if l := sqltok.SkipTrivia(tokens, k+1); l >= len(tokens) || tokens[l].Kind != sqltok.LParen {
-			continue
-		}
-		names[strings.ToUpper(stripQuotes(name))] = true
+	for _, n := range sqlgrammar.CollectCTENames(src, sqltok.Significant(tokens)) {
+		names[strings.ToUpper(stripQuotes(n))] = true
 	}
 	return names
 }
