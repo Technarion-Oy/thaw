@@ -8,42 +8,31 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-// Drag-to-move + native resize for every Ant Design modal (issue #572).
+// Drag-to-move for every Ant Design modal (issue #572).
 //
 // antd's <Modal> has no `draggable` prop, but every instance renders the same
-// stable DOM (`.ant-modal` box, `.ant-modal-header` title bar, `.ant-modal-content`
-// panel). A single document-level mousedown delegate grabs the header and moves
-// the box, so all ~160 modals — present and future — become draggable without
-// touching a single Modal call site. Resize is native CSS (`resize: both` on
-// `.ant-modal-content`, see global.css); this file only owns the drag and one
-// bit of resize plumbing (below).
+// stable DOM (`.ant-modal` box, `.ant-modal-header` title bar). A single
+// document-level mousedown delegate grabs the header and moves the box, so all
+// ~160 modals — present and future — become draggable without touching a single
+// Modal call site. Resize is native CSS (`resize` on `.ant-modal`, see
+// global.css); this file owns only the drag.
 //
-// Two constraints from antd's own layout shape the mechanics:
+// Drag moves the box with inline `left`/`top`, NOT `transform`. A CSS transform
+// on `.ant-modal` would establish a containing block for `position: fixed`
+// descendants (e.g. the custom context menus in TaskGraphModal / ERCanvas /
+// StageBrowserModal), pinning them to the modal instead of the viewport.
+// `.ant-modal` is already `position: relative`, so left/top offsets move it
+// without that side effect (offsets are relative to the normal-flow position,
+// so they compose cleanly with antd's centering / `top: 100px`).
 //
-//   * Drag moves the box with `left`/`top`, NOT `transform`. A CSS transform on
-//     `.ant-modal` would establish a containing block for `position: fixed`
-//     descendants (e.g. the custom context menus in TaskGraphModal / ERCanvas /
-//     StageBrowserModal), pinning them to the modal instead of the viewport.
-//     `.ant-modal` is already `position: relative`, so left/top offsets move it
-//     without that side effect.
-//
-//   * The `width` prop lands as an inline width on `.ant-modal`, while the CSS
-//     resize handle sizes its child `.ant-modal-content`. Growing the child
-//     alone would overflow the still-fixed-width parent, so on first interaction
-//     `initModalSizing` transfers the width onto the content and lets the parent
-//     shrink-wrap (`fit-content`) — after which resizing the content grows the
-//     whole centered dialog symmetrically.
-//
-// Drag offset lives as inline left/top; resize lives as inline width/height on
-// the content. Thaw's modals unmount on close (conditional render + `<Modal open>`),
-// so both are discarded and rebuilt on reopen — the "reset on reopen" behaviour
-// for free.
-//
-// ponytail: modals that toggle the `open` prop without unmounting keep their
-// dragged position/size across reopen; add an on-hide reset if that ever matters.
+// Offset lives as inline left/top and, for resize, inline width on `.ant-modal`.
+// Thaw's modals unmount on close (conditional render + `<Modal open>` — including
+// GitOperationsDialog, gated in AppLayout), so both are discarded and rebuilt on
+// reopen: the "reset on reopen" behaviour for free.
 
 // Keep this much of the modal on-screen horizontally, and this much of the
-// header band vertically, so a drag can never push the handle out of reach.
+// header band vertically, so neither a drag nor a later window shrink can push
+// the handle out of reach.
 const KEEP_X = 80;
 const KEEP_Y = 40;
 
@@ -64,7 +53,7 @@ export function clamp(v: number, lo: number, hi: number) {
 }
 
 // Current left/top offset of a relatively-positioned modal: the inline value if
-// we've already moved it, else antd's computed base (top: 100px; left: auto → 0).
+// we've already moved it, else antd's computed base (top: 100px; left → 0).
 function readOffset(el: HTMLElement): [number, number] {
   const cs = getComputedStyle(el);
   const left = el.style.left ? parseFloat(el.style.left) : parseFloat(cs.left) || 0;
@@ -72,16 +61,16 @@ function readOffset(el: HTMLElement): [number, number] {
   return [left, top];
 }
 
-// Move antd's fixed `width` from `.ant-modal` onto `.ant-modal-content` so the
-// CSS resize (which sizes the content) grows the whole dialog. Idempotent; runs
-// on the first mousedown anywhere in the modal, before any resize gesture lands.
-function initModalSizing(modal: HTMLElement) {
-  if (modal.dataset.rszInit) return;
-  modal.dataset.rszInit = "1";
-  const content = modal.querySelector<HTMLElement>(".ant-modal-content");
-  if (!content) return;
-  content.style.width = `${content.getBoundingClientRect().width}px`;
-  modal.style.width = "fit-content";
+// Nudge a modal's inline left/top so its box keeps KEEP_X/KEEP_Y on-screen.
+// Relative offsets move the box 1:1 on screen, so a screen-space correction maps
+// straight onto the inline offset.
+function clampIntoView(el: HTMLElement) {
+  const r = el.getBoundingClientRect();
+  const wantLeft = clamp(r.left, KEEP_X - r.width, window.innerWidth - KEEP_X);
+  const wantTop = clamp(r.top, 0, window.innerHeight - KEEP_Y);
+  const [left, top] = readOffset(el);
+  if (wantLeft !== r.left) el.style.left = `${left + (wantLeft - r.left)}px`;
+  if (wantTop !== r.top) el.style.top = `${top + (wantTop - r.top)}px`;
 }
 
 function endDrag() {
@@ -91,26 +80,23 @@ function endDrag() {
 }
 
 function onMouseDown(e: MouseEvent) {
-  const target = e.target as HTMLElement;
-  const modal = target.closest(".ant-modal") as HTMLElement | null;
-  if (!modal) return;
-  // Prep resize on the first interaction with this modal (grip, body, anywhere).
-  initModalSizing(modal);
-
   if (e.button !== 0) return;
-  // Drag handle = the title bar, plus the modal's top padding strip. antd puts
+  const target = e.target as HTMLElement;
+  // Drag handle = the title bar, plus the content's top padding band. antd puts
   // ~20px top padding on `.ant-modal-content` with none on the header, so the
   // very top edge lands on the content element, not the header. Restrict the
-  // content-as-handle to that top band (above the body) so the bottom-right
-  // resize grip is never mistaken for a drag start — no grip-size guessing.
+  // content-as-handle to that top band (above the body) so nothing lower — the
+  // body, footer, or the resize grip in the corner — is mistaken for a drag.
   const onHeader = target.closest(".ant-modal-header") !== null;
   if (!onHeader) {
     if (!target.classList.contains("ant-modal-content")) return;
-    const body = modal.querySelector(".ant-modal-body");
+    const body = target.querySelector(".ant-modal-body");
     if (body && e.clientY >= body.getBoundingClientRect().top) return;
   }
   // Don't hijack drags that start on interactive controls placed in the title.
   if (target.closest(INTERACTIVE)) return;
+  const modal = target.closest(".ant-modal") as HTMLElement | null;
+  if (!modal) return;
 
   const [baseLeft, baseTop] = readOffset(modal);
   const rect = modal.getBoundingClientRect();
@@ -130,12 +116,21 @@ function onMouseMove(e: MouseEvent) {
 
   const vw = window.innerWidth;
   const vh = window.innerHeight;
-  // Relative left/top move the box 1:1 on screen, so clamp the target screen
-  // position, then express it as an offset delta from the drag-start position.
+  // Clamp the target screen position, then express it as the inline offset delta
+  // from the drag-start position (relative left/top move the box 1:1 on screen).
   const screenLeft = clamp(drag.startLeft + (e.clientX - drag.startX), KEEP_X - drag.width, vw - KEEP_X);
   const screenTop = clamp(drag.startTop + (e.clientY - drag.startY), 0, vh - KEEP_Y);
   drag.el.style.left = `${drag.baseLeft + (screenLeft - drag.startLeft)}px`;
   drag.el.style.top = `${drag.baseTop + (screenTop - drag.startTop)}px`;
+}
+
+function onWindowResize() {
+  // A native window shrink can strand a moved/resized modal off-screen; pull any
+  // that carry an inline offset back into reach. (Untouched, centered modals are
+  // already within bounds, so the clamp is a no-op for them.)
+  document.querySelectorAll<HTMLElement>(".ant-modal").forEach((el) => {
+    if (el.style.left || el.style.top) clampIntoView(el);
+  });
 }
 
 if (typeof document !== "undefined") {
@@ -144,4 +139,5 @@ if (typeof document !== "undefined") {
   document.addEventListener("mouseup", endDrag);
   // A focus loss (native dialog, OS drag interruption) can swallow the mouseup.
   window.addEventListener("blur", endDrag);
+  window.addEventListener("resize", onWindowResize);
 }

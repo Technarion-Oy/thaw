@@ -243,6 +243,7 @@ export default function AppLayout() {
 
   // Listen for "Git Operations…" menu item
   const openGitOps = useGitStore((s) => s.openGitOps);
+  const gitOpsOpen = useGitStore((s) => s.gitOpsOpen);
   useEffect(() => {
     const cleanup = EventsOn("menu:git-operations", () => openGitOps());
     return cleanup;
@@ -328,8 +329,9 @@ export default function AppLayout() {
         <SidebarDropZone sidebar="right" />
       </div>
 
-      {/* Git Operations Dialog — rendered at layout root so it floats above all panels */}
-      <GitOperationsDialog />
+      {/* Git Operations Dialog — rendered at layout root so it floats above all panels.
+          Mounted only while open so a dragged/resized dialog resets on reopen (#572). */}
+      {gitOpsOpen && <GitOperationsDialog />}
     </Layout>
   );
 }
