@@ -32,6 +32,8 @@ func TestValidateStageRef(t *testing.T) {
 		"@db.schema.stage/x\nSELECT 1",
 		`@db.schema.stage/data--`, // '--' would comment out the PUT option clauses
 		`@"unbalanced/x`,          // dangling quote
+		// A quote in the path segment must not grant amnesty to the payload it wraps.
+		`@"db"."schema"."stage"/data/x"; DROP TABLE t; --"y`,
 	}
 	for _, s := range injections {
 		if err := validateStageRef(s); err == nil {

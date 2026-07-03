@@ -40,6 +40,13 @@ interface Props {
   width?: number;
   /** `body.maxHeight`. Defaults to "80vh". */
   bodyMaxHeight?: string;
+  /**
+   * When true, ESC / backdrop-click / close-X are ignored while `creating` — for
+   * modals whose submit runs a real side effect (e.g. a file upload) that
+   * shouldn't be orphaned by dismissing the modal mid-flight. Defaults to false so
+   * existing modals keep their normal dismiss-anytime behavior.
+   */
+  lockWhileBusy?: boolean;
   onClose: () => void;
   onSubmit: () => void;
   children: ReactNode;
@@ -63,6 +70,7 @@ export default function CreateModalShell({
   okIcon,
   width = 600,
   bodyMaxHeight = "80vh",
+  lockWhileBusy = false,
   onClose,
   onSubmit,
   children,
@@ -87,7 +95,7 @@ export default function CreateModalShell({
           )}
         </Space>
       }
-      onCancel={() => { if (!creating) onClose(); }}
+      onCancel={() => { if (!(lockWhileBusy && creating)) onClose(); }}
       footer={
         <Space style={{ justifyContent: "flex-end", display: "flex" }}>
           <Button onClick={onClose} disabled={creating}>Cancel</Button>

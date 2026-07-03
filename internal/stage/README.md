@@ -92,10 +92,13 @@ prefixes) uses the `ListStageEntries` IPC method, which delegates to
   stage reference can't be a string literal), and its path segment is attacker-
   influenced — free-typed in the upload dialog, or a file/dir name from
   `LIST @stage` that anyone with write access to the backing storage can plant. All
-  three functions run it through `validateStageRef`, a quote-aware scan that rejects
-  `;`, `'`, newlines, and `--` **outside** double-quoted identifiers (so a path like
-  `x; DROP TABLE y; --` is refused, while a legitimately quoted identifier such as
-  `"my;stage"` is still allowed). `--` matters because the options are appended to a
+  four functions (`UploadFileToStage`, `DownloadFileFromStage`, `RemoveStageFiles`,
+  `ListStageFiles`) run it through `validateStageRef`, a scan that rejects `;`, `'`,
+  newlines, and `--` in the unquoted portion of the reference. Quotes are honoured as
+  quoted-identifier delimiters **only in identifier position** (start, or after `@`
+  or `.`), so a legitimately quoted identifier such as `"my;stage"` is allowed, but a
+  quote inside the free-typed path segment can't wrap a payload to smuggle a blocked
+  sequence past the scan. `--` matters because the options are appended to a
   single-line statement, so an un-rejected `--` would silently comment them out.
 - `ListStageFiles` returns a `nil` slice (not empty) when no files are found
   because it uses `append` without pre-allocating. Callers should treat `nil` and

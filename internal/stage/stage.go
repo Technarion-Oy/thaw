@@ -235,6 +235,9 @@ func ListStageFiles(ctx context.Context, client *snowflake.Client, stageName str
 	if !strings.HasPrefix(stageName, "@") {
 		stageName = "@" + stageName
 	}
+	if err := validateStageRef(stageName); err != nil {
+		return nil, err
+	}
 
 	sql := fmt.Sprintf(`LIST %s`, stageName)
 	if pattern != "" {
@@ -311,21 +314,33 @@ func strVal(row []interface{}, idx int) string {
 //
 // A legitimate reference is @[db.schema.]stage[/path]; only the identifier parts are
 // double-quoted (by quoteIdent), and a quoted identifier may legally contain ';',
-// '\'', newlines, or '--'. So the scan tracks quoted regions and only rejects those
-// sequences when they appear OUTSIDE quotes (i.e. in the unquoted path segment).
+// '\'', newlines, or '--'. A quote is therefore honoured as a quoted-identifier
+// delimiter ONLY in an identifier position — at the start or right after '@' or '.'.
+// A quote anywhere else (i.e. in the free-typed path segment) is itself illegal, so a
+// payload like `data/x"; DROP TABLE t; --"y` cannot smuggle a blocked sequence past
+// the scan by wrapping it in quotes.
 func validateStageRef(stageName string) error {
 	inQuote := false
 	for i := 0; i < len(stageName); i++ {
-		switch c := stageName[i]; {
+		c := stageName[i]
+		if inQuote {
+			if c == '"' {
+				// "" inside a quoted identifier is an escaped quote, not the end.
+				if i+1 < len(stageName) && stageName[i+1] == '"' {
+					i++
+					continue
+				}
+				inQuote = false
+			}
+			continue // any char is allowed inside a quoted identifier
+		}
+		switch {
 		case c == '"':
-			// "" inside a quoted identifier is an escaped quote, not a delimiter.
-			if inQuote && i+1 < len(stageName) && stageName[i+1] == '"' {
-				i++
+			if i == 0 || stageName[i-1] == '@' || stageName[i-1] == '.' {
+				inQuote = true
 				continue
 			}
-			inQuote = !inQuote
-		case inQuote:
-			// Anything is allowed inside a quoted identifier.
+			return fmt.Errorf("invalid stage reference %q: unexpected quote", stageName)
 		case c == ';' || c == '\'' || c == '\n' || c == '\r' || c == 0:
 			return fmt.Errorf("invalid stage reference %q: contains illegal character", stageName)
 		case c == '-' && i+1 < len(stageName) && stageName[i+1] == '-':

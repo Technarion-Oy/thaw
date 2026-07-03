@@ -5196,18 +5196,13 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           name={uploadStageModal.name}
           initialPath={uploadStageModal.initialPath}
           onClose={() => setUploadStageModal(null)}
-          onSuccess={(destPath) => {
+          onSuccess={() => {
             const m = uploadStageModal;
-            // Only refresh when the file landed in the directory whose node we
-            // hold. If the user retyped a different destination, that path may
-            // not be an expanded node — it re-fetches on next expand — and
-            // refreshing the stale node would be misleading. The node's path
-            // carries a trailing slash (client.go appends one to directories),
-            // so normalise both sides before comparing to the modal's stripped path.
-            const nodePath = m.initialPath.replace(/^\/+|\/+$/g, "");
-            if (m.nodeKey && destPath === nodePath) {
-              refreshStageDir(m.db, m.schema, m.name, m.initialPath, m.nodeKey);
-            }
+            // Re-fetch the right-clicked directory node (the dir flow). This shows
+            // the file when it landed here or in a new sub-path under it, and is
+            // never wrong when it landed elsewhere — it just re-lists this dir's
+            // real contents. The stage-root flow has no node to refresh.
+            if (m.nodeKey) refreshStageDir(m.db, m.schema, m.name, m.initialPath, m.nodeKey);
           }}
         />
       )}

@@ -23,12 +23,8 @@ interface Props {
   /** Destination sub-directory prefill (e.g. the right-clicked dir); "" targets the stage root. */
   initialPath?: string;
   onClose: () => void;
-  /**
-   * Called after a successful upload with the resolved destination path
-   * (normalised, relative to the stage root) so the caller can refresh the
-   * actual destination node rather than the right-click-time path.
-   */
-  onSuccess?: (destPath: string) => void;
+  /** Called after a successful upload so the caller can refresh the stage tree. */
+  onSuccess?: () => void;
 }
 
 export default function UploadToStageModal({ db, schema, name, initialPath = "", onClose, onSuccess }: Props) {
@@ -63,7 +59,7 @@ export default function UploadToStageModal({ db, schema, name, initialPath = "",
     UploadFileToStage(localPath, stageRef, 4, autoCompress, "AUTO_DETECT", overwrite)
       .then(() => {
         message.success("Uploaded successfully.");
-        onSuccess?.(dest);
+        onSuccess?.();
         onClose();
       })
       .catch((e) => setError(String(e)))
@@ -83,6 +79,7 @@ export default function UploadToStageModal({ db, schema, name, initialPath = "",
       onErrorClose={() => setError(null)}
       creating={uploading}
       canSubmit={!!localPath && !pathError}
+      lockWhileBusy
       okText="Upload"
       onClose={onClose}
       onSubmit={handleUpload}
