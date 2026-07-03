@@ -3933,7 +3933,7 @@ func (c *Client) GetCompleteDatabaseDDLOnWarehouse(ctx context.Context, database
 			// resets the connection before it is pooled.
 			_, _ = conn.ExecContext(context.Background(), fmt.Sprintf(`USE WAREHOUSE %s`, QuoteIdent(restore)))
 		}
-		conn.Close()
+		_ = conn.Close()
 	}()
 
 	if _, err := conn.ExecContext(ctx, fmt.Sprintf(`USE WAREHOUSE %s`, QuoteIdent(warehouse))); err != nil {
