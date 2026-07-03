@@ -59,16 +59,24 @@ render or `handleMount` — doing so accumulates duplicate providers across edit
 
 **Object hover + cmd/ctrl modifier (`ddlHoverTooltips` flag):** `resolveStoreObject(parts)`
 (module-level) resolves a dotted identifier under the cursor to a store object of **any** kind
-(not just TABLE/VIEW), fetching the schema's objects on demand. `editor.onMouseMove` uses it via the
-shared `showObjectTooltip(pos, obj, withDdl)`: plain hover shows a lightweight identity tooltip
+(not just TABLE/VIEW), fetching the schema's objects on demand. On a name collision across
+namespaces (e.g. a stream named after its source table) it prefers the TABLE/VIEW — a heuristic
+tie-break, since hover has no parse context. `editor.onMouseMove` uses it via the shared
+`showObjectTooltip(pos, obj, withDdl)`: plain hover shows a lightweight identity tooltip
 (`withDdl=false` → header-only `KIND — DB.SCHEMA.NAME`, no DDL fetch); with the platform modifier
 (`metaKey`/`ctrlKey`) held, `withDdl=true` fetches `GetObjectDDL(db, schema, kind, name, "")` and
-renders the full DDL — no click. `cmdModHeld` tracks the modifier from mouse-move events and
-`onKeyDown`/`onKeyUp` (`onModChange`), so pressing the modifier while already stationary over an
-object upgrades identity → DDL via `showDdlAtLastPos()`. While held, `evaluateCmdLink` underlines
-the identifier with a `.cmd-link` decoration (link affordance); `identifierRangeAt` computes the
-dotted-identifier span. The store `kind` is passed straight through — never guessed. Column and
-function hovers keep their own dedicated paths in `onMouseMove`.
+renders the full DDL — no click. Kinds `GET_DDL` can't render (`kindSupportsDdl` from
+`utils/objectDdl.ts`) get no underline and fall back to the identity tooltip; a failed/empty fetch
+also falls back to identity (not cached, so a re-hover retries). `cmdModHeld` tracks the modifier
+from mouse-move events and `onKeyDown`/`onKeyUp` (`onModChange`), so pressing the modifier while
+already stationary over an object upgrades identity → DDL via `showDdlAtLastPos()` — which honours
+diagnostic-marker precedence (`markerAt`) and bails if the mouse moved mid-fetch. While held,
+`evaluateCmdLink` underlines the identifier with a `.cmd-link` decoration (link affordance);
+`identifierRangeAt` computes the dotted-identifier span. All four hover tooltips (diagnostic,
+column, object, function) share `positionTooltip(pos, heightPx)` for screen placement. A resolved
+table alias short-circuits to the column path only — never object resolution — so `alias.col` can't
+false-match a `schema.object`. The store `kind` is passed straight through — never guessed. Column
+and function hovers keep their own dedicated paths in `onMouseMove`.
 
 **Grammar-driven keyword completions:** `GetAutocompleteContextFull` returns `grammarExpected`
 — the recursive-descent grammar's "valid next" set at the cursor (see

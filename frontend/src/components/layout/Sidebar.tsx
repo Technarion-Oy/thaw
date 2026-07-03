@@ -235,6 +235,7 @@ import ExecuteDbtProjectModal from "../dbtproject/ExecuteDbtProjectModal";
 import ModifyDbtProjectModal from "../dbtproject/ModifyDbtProjectModal";
 import AddDbtProjectVersionModal from "../dbtproject/AddDbtProjectVersionModal";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
+import { kindSupportsDdl } from "../../utils/objectDdl";
 
 const { Text } = Typography;
 
@@ -560,7 +561,7 @@ function ObjTooltip({ cacheKey, db, schema, kind, name, args, children }: {
     // policies, so the call would always fail and emit gosnowflake driver
     // error-log noise on every hover. Skip the fetch entirely — with content
     // left null the tooltip simply doesn't show.
-    if (kind === "IMAGE REPOSITORY" || kind === "SERVICE" || kind === "GATEWAY" || kind === "PACKAGES POLICY" || kind === "MODEL" || kind === "MODEL MONITOR" || kind === "DATASET" || kind === "CORTEX SEARCH SERVICE" || kind === "EXTERNAL AGENT" || kind === "MCP SERVER") return;
+    if (!kindSupportsDdl(kind)) return;
     const fresh = getCached();
     if (fresh !== null) {
       if (content !== fresh) setContent(fresh);

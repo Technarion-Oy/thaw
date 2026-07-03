@@ -40,6 +40,7 @@ import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { UC, quoteIfNecessary, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions } from "./sqlEditorUtils";
 import ExplainModal from "../results/ExplainModal";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
+import { kindSupportsDdl } from "../../utils/objectDdl";
 
 // Same platform check QueryPage's global keydown handler and KeyboardShortcutsModal use —
 // the label-appended shortcut hints below must match the modifier keys actually bound here.
@@ -114,6 +115,12 @@ async function resolveStoreObject(
     );
   const pick = (o: { db: string; schema: string; kind: string; name: string }) =>
     ({ db: o.db, schema: o.schema, kind: o.kind, name: o.name });
+  // A bare name can collide across namespaces (a CDC stream named after its
+  // source table, etc.). With no parse context to disambiguate, prefer the
+  // table/view — the far more common hover target. ponytail: heuristic tie-break;
+  // wrong only when a non-table object shadows a same-named table in one schema.
+  const best = (list: Array<{ db: string; schema: string; kind: string; name: string }>) =>
+    list.find((o) => o.kind === "TABLE" || o.kind === "VIEW") ?? list[0] ?? null;
 
   if (parts.length >= 3) {
     const [pDb, pSchema, pName] = [parts[parts.length - 3], parts[parts.length - 2], parts[parts.length - 1]];
@@ -125,15 +132,15 @@ async function resolveStoreObject(
       try { ingest(UC(pDb), UC(pSchema), await ListObjects(UC(pDb), UC(pSchema))); }
       catch { fetchedSchemaObjects.delete(schemaKey); }
     }
-    const inStore = useObjectStore.getState().objects.find(
-      (o) => UC(o.db) === UC(pDb) && UC(o.schema) === UC(pSchema) && UC(o.name) === UC(pName));
+    const inStore = best(useObjectStore.getState().objects.filter(
+      (o) => UC(o.db) === UC(pDb) && UC(o.schema) === UC(pSchema) && UC(o.name) === UC(pName)));
     return inStore ? pick(inStore) : null;
   }
 
   if (parts.length === 2) {
     const [qualifier, pName] = [parts[0], parts[1]];
-    let inStore = useObjectStore.getState().objects.find(
-      (o) => UC(o.schema) === UC(qualifier) && UC(o.name) === UC(pName));
+    let inStore = best(useObjectStore.getState().objects.filter(
+      (o) => UC(o.schema) === UC(qualifier) && UC(o.name) === UC(pName)));
     if (!inStore) {
       const sessDb = useSessionStore.getState().database;
       if (sessDb) {
@@ -143,15 +150,15 @@ async function resolveStoreObject(
           try { ingest(sessDb, qualifier, await ListObjects(sessDb, qualifier)); }
           catch { fetchedSchemaObjects.delete(schemaKey); }
         }
-        inStore = useObjectStore.getState().objects.find(
-          (o) => UC(o.db) === UC(sessDb) && UC(o.schema) === UC(qualifier) && UC(o.name) === UC(pName));
+        inStore = best(useObjectStore.getState().objects.filter(
+          (o) => UC(o.db) === UC(sessDb) && UC(o.schema) === UC(qualifier) && UC(o.name) === UC(pName)));
       }
     }
     return inStore ? pick(inStore) : null;
   }
 
   // 1-part, unqualified
-  let inStore = useObjectStore.getState().objects.find((o) => UC(o.name) === UC(parts[0]));
+  let inStore = best(useObjectStore.getState().objects.filter((o) => UC(o.name) === UC(parts[0])));
   if (!inStore) {
     const sess = useSessionStore.getState();
     if (sess.database && sess.schema) {
@@ -161,8 +168,8 @@ async function resolveStoreObject(
         try { ingest(sess.database, sess.schema, await ListObjects(sess.database, sess.schema)); }
         catch { fetchedSchemaObjects.delete(schemaKey); }
       }
-      inStore = useObjectStore.getState().objects.find(
-        (o) => UC(o.db) === UC(sess.database) && UC(o.schema) === UC(sess.schema) && UC(o.name) === UC(parts[0]));
+      inStore = best(useObjectStore.getState().objects.filter(
+        (o) => UC(o.db) === UC(sess.database) && UC(o.schema) === UC(sess.schema) && UC(o.name) === UC(parts[0])));
     }
   }
   return inStore ? pick(inStore) : null;
@@ -1629,15 +1636,42 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     let lastSqlMousePos: any = null;
     const clearCmdLink = () => { if (cmdLinkKey) { cmdLinkDecos.clear(); cmdLinkKey = null; } };
 
+    // Screen coords for a tooltip of height `h` anchored at editor position `pos`,
+    // or null if the position isn't currently laid out. Shared by every hover tooltip.
+    const positionTooltip = (pos: any, h: number): { x: number; y: number } | null => {
+      const editorRect = editor.getDomNode()?.getBoundingClientRect();
+      const scrolledPos = editor.getScrolledVisiblePosition(pos);
+      if (!scrolledPos || !editorRect) return null;
+      const mouseY = currentMouseYRef.current;
+      const fitsBelow = mouseY + 24 + h <= window.innerHeight;
+      return {
+        x: Math.min(editorRect.left + scrolledPos.left, window.innerWidth - 570),
+        y: fitsBelow ? mouseY + 24 : Math.max(0, mouseY - 24 - h),
+      };
+    };
+
+    // True if a thaw-sql diagnostic marker overlaps `pos` — diagnostics take
+    // precedence over object/DDL tooltips at the same position.
+    const markerAt = (pos: any): boolean => {
+      const m = editor.getModel();
+      if (!m) return false;
+      return monaco.editor.getModelMarkers({ owner: "thaw-sql", resource: m.uri }).some((mk: any) =>
+        pos.lineNumber >= mk.startLineNumber && pos.lineNumber <= mk.endLineNumber &&
+        pos.column    >= mk.startColumn      && pos.column    <= mk.endColumn);
+    };
+
     // Position and render the overlay for a resolved store object. withDdl=false →
-    // header-only identity tooltip; withDdl=true → fetch (cached) and show full DDL.
+    // header-only identity tooltip. withDdl=true → fetch (cached) DDL and show it;
+    // kinds GET_DDL can't render, or a failed/empty fetch, fall back to identity so
+    // the user still sees kind+name (failures aren't cached, so a re-hover retries).
+    // Returns true iff the full DDL was rendered.
     const showObjectTooltip = async (
       pos: any,
       obj: { db: string; schema: string; kind: string; name: string },
       withDdl: boolean,
-    ) => {
+    ): Promise<boolean> => {
       let ddl = "";
-      if (withDdl) {
+      if (withDdl && kindSupportsDdl(obj.kind)) {
         const cacheKey = `${obj.db}\0${obj.schema}\0${obj.kind}\0${obj.name}`;
         const cached = hoverDDLCache.get(cacheKey);
         if (cached && Date.now() - cached.ts < DDL_CACHE_TTL) {
@@ -1646,25 +1680,18 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           try {
             ddl = await GetObjectDDL(obj.db, obj.schema, obj.kind, obj.name, "");
             hoverDDLCache.set(cacheKey, { ddl, ts: Date.now() });
-          } catch { return; }
+          } catch { ddl = ""; }   // fall through to identity; don't cache the failure
         }
-        if (!ddl) return;
       }
-      const editorDom = editor.getDomNode();
-      const editorRect = editorDom?.getBoundingClientRect();
-      const scrolledPos = editor.getScrolledVisiblePosition(pos);
-      if (!scrolledPos || !editorRect) return;
-      const h = ddl ? 320 : 40;
-      const rawX = editorRect.left + scrolledPos.left;
-      const mouseY = currentMouseYRef.current;
-      const fitsBelow = mouseY + 24 + h <= window.innerHeight;
-      const x = Math.min(rawX, window.innerWidth - 570);
-      const y = fitsBelow ? mouseY + 24 : Math.max(0, mouseY - 24 - h);
+      const coords = positionTooltip(pos, ddl ? 320 : 40);
+      if (!coords) return false;
       if (hoverHideTimerRef.current) { clearTimeout(hoverHideTimerRef.current); hoverHideTimerRef.current = null; }
-      setDdlHover({ ddl, kind: obj.kind, db: obj.db, schema: obj.schema, name: obj.name, x, y });
+      setDdlHover({ ddl, kind: obj.kind, db: obj.db, schema: obj.schema, name: obj.name, x: coords.x, y: coords.y });
+      return ddl !== "";
     };
 
-    // Underline the object identifier under the cursor while the modifier is held.
+    // Underline the object identifier under the cursor while the modifier is held —
+    // only for kinds whose DDL can actually be shown (don't promise what we can't render).
     const evaluateCmdLink = (pos: any) => {
       const m = editor.getModel();
       if (!cmdModHeld || !pos || !m || m.getLanguageId() !== "sql" ||
@@ -1680,7 +1707,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const parts = (partsRaw && partsRaw.length > 0) ? partsRaw : null;
         const obj = parts ? await resolveStoreObject(parts) : null;
         if (cmdLinkKey !== key) return;   // superseded by a newer identifier
-        if (!obj || !cmdModHeld) { cmdLinkDecos.clear(); cmdLinkKey = null; return; }
+        if (!obj || !cmdModHeld || !kindSupportsDdl(obj.kind)) { cmdLinkDecos.clear(); cmdLinkKey = null; return; }
         cmdLinkDecos.set([{
           range: new monaco.Range(pos.lineNumber, rng.start, pos.lineNumber, rng.end),
           options: { inlineClassName: "cmd-link" },
@@ -1695,14 +1722,16 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       const m = editor.getModel();
       if (!pos || !m || m.getLanguageId() !== "sql" ||
           !useFeatureFlagsStore.getState().flags.ddlHoverTooltips) return;
+      if (markerAt(pos)) return;   // diagnostic marker wins at this position (match mouse-move flow)
       void (async () => {
         const partsRaw = await GetIdentifierAtColumn(m.getLineContent(pos.lineNumber), pos.column - 1);
         const parts = (partsRaw && partsRaw.length > 0) ? partsRaw : null;
         const obj = parts ? await resolveStoreObject(parts) : null;
-        if (!obj || !cmdModHeld) return;   // released during the await
+        // Bail if the modifier was released or the mouse moved off this position mid-await.
+        if (!obj || !cmdModHeld || lastSqlMousePos !== pos) return;
         if (hoverTimerRef.current) { clearTimeout(hoverTimerRef.current); hoverTimerRef.current = null; }
-        lastHoverWordRef.current = parts!.join("\0");
-        await showObjectTooltip(pos, obj, true);
+        const shown = await showObjectTooltip(pos, obj, true);
+        if (!shown) lastHoverWordRef.current = null;   // failed/empty DDL — let a re-hover retry
       })();
     };
 
@@ -1839,22 +1868,15 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
               pos.column    >= m.startColumn      && pos.column    <= m.endColumn,
             );
             if (diagMarker) {
-              const editorDom = editor.getDomNode();
-              const editorRect = editorDom?.getBoundingClientRect();
-              const scrolledPos = editor.getScrolledVisiblePosition(pos);
-              if (scrolledPos && editorRect) {
-                const rawX = editorRect.left + scrolledPos.left;
-                const mouseY = currentMouseYRef.current;
-                const fitsBelow = mouseY + 24 + 80 <= window.innerHeight;
-                const x = Math.min(rawX, window.innerWidth - 570);
-                const y = fitsBelow ? mouseY + 24 : Math.max(0, mouseY - 24 - 80);
+              const coords = positionTooltip(pos, 80);
+              if (coords) {
                 if (hoverHideTimerRef.current) { clearTimeout(hoverHideTimerRef.current); hoverHideTimerRef.current = null; }
                 setDdlHover({
                   kind: diagMarker.severity === 8 ? "ERROR" : "WARNING",
                   db: "", schema: "",
                   name: diagMarker.message,
                   ddl: "",
-                  x, y,
+                  x: coords.x, y: coords.y,
                 });
               }
               return;
@@ -1877,15 +1899,8 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
             const cols = colInfoCache.get(cacheKey);
             const col = cols?.find((c) => c.name.toUpperCase() === parts[1].toUpperCase());
             if (col) {
-              const editorDom = editor.getDomNode();
-              const editorRect = editorDom?.getBoundingClientRect();
-              const scrolledPos = editor.getScrolledVisiblePosition(pos);
-              if (scrolledPos && editorRect) {
-                const rawX = editorRect.left + scrolledPos.left;
-                const mouseY = currentMouseYRef.current;
-                const fitsBelow = mouseY + 24 + 320 <= window.innerHeight;
-                const x = Math.min(rawX, window.innerWidth - 570);
-                const y = fitsBelow ? mouseY + 24 : Math.max(0, mouseY - 24 - 320);
+              const coords = positionTooltip(pos, 320);
+              if (coords) {
                 if (hoverHideTimerRef.current) { clearTimeout(hoverHideTimerRef.current); hoverHideTimerRef.current = null; }
                 setDdlHover({
                   kind: "COLUMN",
@@ -1893,11 +1908,15 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                   schema: matchedTable.schema,
                   name: `${matchedTable.name}.${col.name}`,
                   ddl: col.dataType,
-                  x, y,
+                  x: coords.x, y: coords.y,
                 });
               }
-              return; 
             }
+            // parts[0] is a resolved table alias — this is alias.column, not
+            // schema.object. Stop here even when the column isn't in the (possibly
+            // unwarmed) cache, so we don't false-match an object named parts[1] in a
+            // schema literally named like the alias.
+            return;
           }
         }
 
@@ -1905,7 +1924,10 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         // (kind + name); with the modifier held → full DDL. No click needed.
         const obj = await resolveStoreObject(parts);
         if (obj) {
-          await showObjectTooltip(pos, obj, cmdModHeld);
+          const shown = await showObjectTooltip(pos, obj, cmdModHeld);
+          // Modifier held over a DDL-capable kind but the fetch failed → unpin the
+          // word so jittering the mouse re-runs the fetch instead of deduping out.
+          if (cmdModHeld && kindSupportsDdl(obj.kind) && !shown) lastHoverWordRef.current = null;
           return;
         }
 
@@ -1934,17 +1956,10 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
               const desc = fns.find((fn: any) => fn.description)?.description ?? "";
               const fnDdl = desc ? `${sigs}\n\n${desc}` : sigs;
               const fnKind = fns[0].functionType === "UDF" ? "UDF" : "FUNCTION";
-              const editorDom2 = editor.getDomNode();
-              const editorRect2 = editorDom2?.getBoundingClientRect();
-              const scrolledPos2 = editor.getScrolledVisiblePosition(pos);
-              if (scrolledPos2 && editorRect2) {
-                const rawX2 = editorRect2.left + scrolledPos2.left;
-                const mouseY2 = currentMouseYRef.current;
-                const fitsBelow2 = mouseY2 + 24 + 320 <= window.innerHeight;
-                const fnX = Math.min(rawX2, window.innerWidth - 570);
-                const fnY = fitsBelow2 ? mouseY2 + 24 : Math.max(0, mouseY2 - 24 - 320);
+              const coords = positionTooltip(pos, 320);
+              if (coords) {
                 if (hoverHideTimerRef.current) { clearTimeout(hoverHideTimerRef.current); hoverHideTimerRef.current = null; }
-                setDdlHover({ ddl: fnDdl, kind: fnKind, db: "", schema: "", name: parts[0].toUpperCase(), x: fnX, y: fnY });
+                setDdlHover({ ddl: fnDdl, kind: fnKind, db: "", schema: "", name: parts[0].toUpperCase(), x: coords.x, y: coords.y });
               }
             } else {
               setDdlHover(null);
@@ -2478,7 +2493,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           </span>
           {ddlHover.ddl
             ? <Button size="small" onClick={() => ClipboardSetText(ddlHover.ddl)}>Copy</Button>
-            : ddlHover.db && (
+            : ddlHover.db && kindSupportsDdl(ddlHover.kind) && (
                 <span style={{ color: "var(--text-secondary)", fontWeight: 400, whiteSpace: "nowrap" }}>
                   Hold {navigator.platform.toUpperCase().includes("MAC") ? "⌘" : "Ctrl"} for DDL
                 </span>
