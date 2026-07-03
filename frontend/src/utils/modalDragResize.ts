@@ -82,6 +82,8 @@ function endDrag() {
 function onMouseDown(e: MouseEvent) {
   if (e.button !== 0) return;
   const target = e.target as HTMLElement;
+  const modal = target.closest(".ant-modal") as HTMLElement | null;
+  if (!modal) return;
   // Drag handle = the title bar, plus the content's top padding band. antd puts
   // ~20px top padding on `.ant-modal-content` with none on the header, so the
   // very top edge lands on the content element, not the header. Restrict the
@@ -94,9 +96,11 @@ function onMouseDown(e: MouseEvent) {
     if (body && e.clientY >= body.getBoundingClientRect().top) return;
   }
   // Don't hijack drags that start on interactive controls placed in the title.
-  if (target.closest(INTERACTIVE)) return;
-  const modal = target.closest(".ant-modal") as HTMLElement | null;
-  if (!modal) return;
+  // Scope the match to controls *inside* the modal so antd's focus-trap wrapper
+  // (`.ant-modal-wrap[tabindex="-1"]`, an ancestor of every header) isn't taken
+  // for an interactive control and doesn't block the drag.
+  const hit = target.closest(INTERACTIVE);
+  if (hit && hit !== modal && modal.contains(hit)) return;
 
   const [baseLeft, baseTop] = readOffset(modal);
   const rect = modal.getBoundingClientRect();
