@@ -99,6 +99,34 @@ let fnNamesLoaded = false;
 
 const fetchedSchemaObjects   = new Set<string>();
 const fetchedDatabaseSchemas = new Set<string>();
+// In-flight ListObjects fetches, keyed like fetchedSchemaObjects. Concurrent
+// callers (e.g. the unthrottled cmd-link path racing the debounced hover
+// pipeline) await the SAME fetch instead of one claiming the key and the other
+// reading a still-empty store.
+const inflightSchemaFetches = new Map<string, Promise<void>>();
+
+// Ensure a schema's objects are loaded into the store, deduping concurrent and
+// repeat fetches. A failed fetch leaves the key unclaimed so a later hover retries.
+async function ensureSchemaObjectsLoaded(db: string, schema: string): Promise<void> {
+  const key = `${UC(db)}\0${UC(schema)}`;
+  if (fetchedSchemaObjects.has(key)) return;
+  let inflight = inflightSchemaFetches.get(key);
+  if (!inflight) {
+    inflight = (async () => {
+      try {
+        const fetched = await ListObjects(UC(db), UC(schema));
+        useObjectStore.getState().addObjects(
+          UC(db), UC(schema),
+          (fetched ?? []).map((o) => ({ name: o.name, kind: (o.kind || "OTHER").toUpperCase() })),
+        );
+        fetchedSchemaObjects.add(key);
+      } catch { /* leave unfetched → a later hover retries */ }
+      finally { inflightSchemaFetches.delete(key); }
+    })();
+    inflightSchemaFetches.set(key, inflight);
+  }
+  await inflight;
+}
 
 // Resolve a dotted identifier (as returned by GetIdentifierAtColumn) to a schema
 // object in the store — ANY kind, not just TABLE/VIEW. Fetches the schema's
@@ -108,11 +136,6 @@ const fetchedDatabaseSchemas = new Set<string>();
 async function resolveStoreObject(
   parts: string[],
 ): Promise<{ db: string; schema: string; kind: string; name: string } | null> {
-  const ingest = (db: string, schema: string, fetched: Array<{ name: string; kind?: string }> | null) =>
-    useObjectStore.getState().addObjects(
-      db, schema,
-      (fetched ?? []).map((o) => ({ name: o.name, kind: (o.kind || "OTHER").toUpperCase() })),
-    );
   const pick = (o: { db: string; schema: string; kind: string; name: string }) =>
     ({ db: o.db, schema: o.schema, kind: o.kind, name: o.name });
   // A bare name can collide across namespaces (a CDC stream named after its
@@ -121,58 +144,45 @@ async function resolveStoreObject(
   // wrong only when a non-table object shadows a same-named table in one schema.
   const best = (list: Array<{ db: string; schema: string; kind: string; name: string }>) =>
     list.find((o) => o.kind === "TABLE" || o.kind === "VIEW") ?? list[0] ?? null;
+  // Shared "match in store → fetch schema if missing → re-match" sequence.
+  // `looseMatch` runs first (may match without a db qualifier); if it misses and
+  // a concrete (db, schema) is known, load that schema and match it strictly.
+  const resolveIn = async (
+    looseMatch: (o: { db: string; schema: string; kind: string; name: string }) => boolean,
+    fetch: { db: string; schema: string; name: string } | null,
+  ) => {
+    let inStore = best(useObjectStore.getState().objects.filter(looseMatch));
+    if (!inStore && fetch) {
+      await ensureSchemaObjectsLoaded(fetch.db, fetch.schema);
+      inStore = best(useObjectStore.getState().objects.filter(
+        (o) => UC(o.db) === UC(fetch.db) && UC(o.schema) === UC(fetch.schema) && UC(o.name) === UC(fetch.name)));
+    }
+    return inStore ? pick(inStore) : null;
+  };
 
   if (parts.length >= 3) {
     const [pDb, pSchema, pName] = [parts[parts.length - 3], parts[parts.length - 2], parts[parts.length - 1]];
-    const schemaKey = `${UC(pDb)}\0${UC(pSchema)}`;
-    const hasSchemaInStore = useObjectStore.getState().objects
-      .some((o) => UC(o.db) === UC(pDb) && UC(o.schema) === UC(pSchema));
-    if (!hasSchemaInStore && !fetchedSchemaObjects.has(schemaKey)) {
-      fetchedSchemaObjects.add(schemaKey);
-      try { ingest(UC(pDb), UC(pSchema), await ListObjects(UC(pDb), UC(pSchema))); }
-      catch { fetchedSchemaObjects.delete(schemaKey); }
-    }
-    const inStore = best(useObjectStore.getState().objects.filter(
-      (o) => UC(o.db) === UC(pDb) && UC(o.schema) === UC(pSchema) && UC(o.name) === UC(pName)));
-    return inStore ? pick(inStore) : null;
+    return resolveIn(
+      (o) => UC(o.db) === UC(pDb) && UC(o.schema) === UC(pSchema) && UC(o.name) === UC(pName),
+      { db: pDb, schema: pSchema, name: pName },
+    );
   }
 
   if (parts.length === 2) {
     const [qualifier, pName] = [parts[0], parts[1]];
-    let inStore = best(useObjectStore.getState().objects.filter(
-      (o) => UC(o.schema) === UC(qualifier) && UC(o.name) === UC(pName)));
-    if (!inStore) {
-      const sessDb = useSessionStore.getState().database;
-      if (sessDb) {
-        const schemaKey = `${UC(sessDb)}\0${UC(qualifier)}`;
-        if (!fetchedSchemaObjects.has(schemaKey)) {
-          fetchedSchemaObjects.add(schemaKey);
-          try { ingest(sessDb, qualifier, await ListObjects(sessDb, qualifier)); }
-          catch { fetchedSchemaObjects.delete(schemaKey); }
-        }
-        inStore = best(useObjectStore.getState().objects.filter(
-          (o) => UC(o.db) === UC(sessDb) && UC(o.schema) === UC(qualifier) && UC(o.name) === UC(pName)));
-      }
-    }
-    return inStore ? pick(inStore) : null;
+    const sessDb = useSessionStore.getState().database;
+    return resolveIn(
+      (o) => UC(o.schema) === UC(qualifier) && UC(o.name) === UC(pName),
+      sessDb ? { db: sessDb, schema: qualifier, name: pName } : null,
+    );
   }
 
   // 1-part, unqualified
-  let inStore = best(useObjectStore.getState().objects.filter((o) => UC(o.name) === UC(parts[0])));
-  if (!inStore) {
-    const sess = useSessionStore.getState();
-    if (sess.database && sess.schema) {
-      const schemaKey = `${UC(sess.database)}\0${UC(sess.schema)}`;
-      if (!fetchedSchemaObjects.has(schemaKey)) {
-        fetchedSchemaObjects.add(schemaKey);
-        try { ingest(sess.database, sess.schema, await ListObjects(sess.database, sess.schema)); }
-        catch { fetchedSchemaObjects.delete(schemaKey); }
-      }
-      inStore = best(useObjectStore.getState().objects.filter(
-        (o) => UC(o.db) === UC(sess.database) && UC(o.schema) === UC(sess.schema) && UC(o.name) === UC(parts[0])));
-    }
-  }
-  return inStore ? pick(inStore) : null;
+  const sess = useSessionStore.getState();
+  return resolveIn(
+    (o) => UC(o.name) === UC(parts[0]),
+    sess.database && sess.schema ? { db: sess.database, schema: sess.schema, name: parts[0] } : null,
+  );
 }
 
 // ── Git gutter: HEAD content cache ────────────────────────────────────────────
@@ -1621,6 +1631,20 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     let lastSqlMousePos: any = null;
     const clearCmdLink = () => { if (cmdLinkKey) { cmdLinkDecos.clear(); cmdLinkKey = null; } };
 
+    // A single mouse-move drives both the unthrottled cmd-link path and the
+    // debounced hover pipeline, each of which needs the identifier under the
+    // cursor. Memoize the last (line, column) lookup so the IPC call runs once.
+    let identCacheKey = "";
+    let identCachePromise: Promise<string[]> | null = null;
+    const identifierAt = (line: string, col: number): Promise<string[]> => {
+      const key = `${col}\0${line}`;
+      if (key !== identCacheKey || !identCachePromise) {
+        identCacheKey = key;
+        identCachePromise = GetIdentifierAtColumn(line, col);
+      }
+      return identCachePromise;
+    };
+
     // Screen coords for a tooltip of height `h` anchored at editor position `pos`,
     // or null if the position isn't currently laid out. Shared by every hover tooltip.
     const positionTooltip = (pos: any, h: number): { x: number; y: number } | null => {
@@ -1688,7 +1712,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       if (key === cmdLinkKey) return;
       cmdLinkKey = key;   // claim synchronously; the async result fills or reverts it
       void (async () => {
-        const partsRaw = await GetIdentifierAtColumn(line, pos.column - 1);
+        const partsRaw = await identifierAt(line, pos.column - 1);
         const parts = (partsRaw && partsRaw.length > 0) ? partsRaw : null;
         const obj = parts ? await resolveStoreObject(parts) : null;
         if (cmdLinkKey !== key) return;   // superseded by a newer identifier
@@ -1708,12 +1732,16 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       if (!pos || !m || m.getLanguageId() !== "sql" ||
           !useFeatureFlagsStore.getState().flags.ddlHoverTooltips) return;
       if (markerAt(pos)) return;   // diagnostic marker wins at this position (match mouse-move flow)
+      const posLine = pos.lineNumber, posCol = pos.column;
       void (async () => {
-        const partsRaw = await GetIdentifierAtColumn(m.getLineContent(pos.lineNumber), pos.column - 1);
+        const partsRaw = await identifierAt(m.getLineContent(pos.lineNumber), pos.column - 1);
         const parts = (partsRaw && partsRaw.length > 0) ? partsRaw : null;
         const obj = parts ? await resolveStoreObject(parts) : null;
-        // Bail if the modifier was released or the mouse moved off this position mid-await.
-        if (!obj || !cmdModHeld || lastSqlMousePos !== pos) return;
+        // Bail if the modifier was released or the mouse moved off this position
+        // mid-await. Compare line/column, not object identity — Monaco hands out a
+        // fresh Position on every move even for stationary sub-pixel jitter.
+        if (!obj || !cmdModHeld || !lastSqlMousePos ||
+            lastSqlMousePos.lineNumber !== posLine || lastSqlMousePos.column !== posCol) return;
         if (hoverTimerRef.current) { clearTimeout(hoverTimerRef.current); hoverTimerRef.current = null; }
         const shown = await showObjectTooltip(pos, obj, true);
         if (!shown) lastHoverWordRef.current = null;   // failed/empty DDL — let a re-hover retry
@@ -1820,7 +1848,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       void (async () => {
       const pos = e.target?.position;
       const partsRaw = (pos && model)
-        ? await GetIdentifierAtColumn(model.getLineContent(pos.lineNumber), pos.column - 1)
+        ? await identifierAt(model.getLineContent(pos.lineNumber), pos.column - 1)
         : null;
       const parts = (partsRaw && partsRaw.length > 0) ? partsRaw : null;
 
