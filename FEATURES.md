@@ -67,13 +67,14 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **AND / OR position** — Before or After the line break
   - **Snowflake-specific rules** always applied: `::` and `:` operators kept whitespace-free; `WITH` on its own line; LATERAL FLATTEN treated as a unit
   - **Live preview** panel in the preferences dialog shows a Snowflake sample query updating in real time
-- **Code Snippets** — open **Tools → Code Snippets…** in the menu bar to browse 24 curated `CREATE OR REPLACE` templates across six categories:
+- **Code Snippets** — open **Tools → Code Snippets…** in the menu bar to browse curated `CREATE OR REPLACE` templates plus built-in functions in a cascading, collapsible category menu:
   - **Data Objects** — Table, View, Materialized View, Dynamic Table, Sequence
   - **Code** — Stored Procedure (Snowflake Scripting), Stored Procedure (Python), UDF (SQL), UDF (JavaScript), UDF (Python)
   - **Automation** — Task, Stream on Table, Pipe, Alert
   - **Storage** — Stage (Internal), Stage (External S3), File Format (CSV), File Format (Parquet)
   - **Governance** — Network Policy, Resource Monitor
   - **Infrastructure** — Database, Schema, Warehouse
+  - **Built-in Functions** — nests one level deeper into sub-categories (Context, Aggregate, Window, String, Date & Time, Conversion & Cast, Conditional & NULL, Math, Semi-structured / JSON, Hash & Crypto, System & Table); context functions (`CURRENT_TIMESTAMP()`, `CURRENT_USER()`, `SYSDATE()`, …) and common builtins are inserted in callable form
   - Live search filters by snippet name across all categories; the first match is auto-selected; clicking **Open in New Tab** loads the SQL into a new scratch tab for review and customisation — not auto-executed
 - **Unsaved-change indicator** — a `•` dot in the tab title shows unsaved work at a glance
 - **Close confirmation** — closing a tab with unsaved changes (via the `×` button or `⌘W` / `Ctrl+W`) shows a dialog with three choices: **Save**, **Close without Saving**, or **Cancel**; for new scratch tabs or files not yet saved to disk, **Save** opens a native Save As dialog first; applies to SQL files, notebooks, and any scratch tab that has been edited
@@ -84,7 +85,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
 - **Split view** — right-click any tab and choose **Split with: [tab name]** to view two editors side by side; a draggable vertical divider separates them and the ratio is persisted across sessions; each editor is fully independent with its own completions, hover definitions, and editing history; close the split with the × button in the secondary editor header, via **Close split view** in the right-click menu, or by closing either of the two tabs
 - **Snowflake Scripting Support** — advanced support for Snowflake Scripting (used in Stored Procedures and UDFs):
   - **Syntax Highlighting** — distinct coloring for scripting keywords (`DECLARE`, `BEGIN`, `EXCEPTION`, `END`), control flow (`IF`, `LOOP`, `WHILE`), and async operations (`ASYNC`, `AWAIT`)
-  - **Right-click Code Snippets** — right-click anywhere in the SQL editor and hover over **Code Snippets →** to open a cascading submenu of Snowflake Scripting templates grouped into seven categories:
+  - **Right-click Code Snippets** — right-click anywhere in the SQL editor and hover over **SQL Snippets →** to open a cascading menu: the first level lists eight Snowflake Scripting category names plus a **Built-in Functions** group, and hovering a category reveals its templates. Keeping each level short means the menu never runs off-screen (and any menu still taller than the viewport scrolls). The Scripting categories:
     - **Block Structure** — `block` (DECLARE / BEGIN / EXCEPTION / END with correct `WHEN exception THEN` / `WHEN OTHER THEN` handlers), `declare` (block without EXCEPTION)
     - **DECLARE Variables** — `declare var` (`variable_name type DEFAULT expression;`), `declare var (type only)` (`variable_name type;` — NULL until assigned)
     - **LET Variables** — `let (typed)` (`LET variable_name type DEFAULT|:= expression;`), `let` (`LET variable_name DEFAULT|:= expression;` — type inferred)
@@ -92,7 +93,9 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
     - **Loops** — `for`, `for_reverse`, `while`, `repeat`, `loop`
     - **Cursors & Resultsets** — `cursor_lifecycle` (OPEN / FETCH / CLOSE), `resultset`, `execute_immediate` (dollar-quoted `EXECUTE IMMEDIATE $$ … $$;`), `execute_immediate_using` (with USING bind variables)
     - **Async Jobs** — `async_job`, `await_job`, `cancel_job`
-    - The submenu opens on hover (auto-flips left if there is insufficient space to the right); clicking any item inserts the snippet at the cursor with **keyword casing and indentation** automatically applied from **View → Editor Preferences…** — changing preferences takes effect on the next insertion with no restart required
+    - **DDL Statements** — `CREATE OR REPLACE …`, `ALTER …`, `DROP IF EXISTS …`, `DESCRIBE …`
+    - **Built-in Functions** — a further-nested group (Context, Aggregate, Window, String, Date & Time, Conversion & Cast, Conditional & NULL, Math, Semi-structured / JSON, Hash & Crypto, System & Table) drawn from the same catalogue as the Code Snippets modal; clicking a function inserts its callable form (`NAME()`) with the cursor placed between the parentheses
+    - Each submenu opens on hover (auto-flips left if there is insufficient space to the right); clicking any Scripting item inserts the snippet at the cursor with **keyword casing and indentation** automatically applied from **View → Editor Preferences…** — changing preferences takes effect on the next insertion with no restart required
   - **Autocomplete Snippets** — the same templates are also available as autocomplete suggestions; type the snippet label (e.g. `block`, `if`, `for`) and press Enter or Tab to expand
   - **Transparent Dollar Quoting** — code inside `$$...$$` or `$tag$...$tag$` is treated as normal SQL for highlighting, diagnostics, and hover tooltips, perfect for Snowflake Scripting development
 
@@ -410,7 +413,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Column Editor** — dynamic list of columns:
     - Set name and choose from a searchable list of Snowflake data types
     - Toggle **Primary Key** and **Not Null** constraints per column
-    - Set **Default Values** and **Comments** for each column
+    - Set **Default Values** (free text, or pick a built-in function like `CURRENT_TIMESTAMP()` / `UUID_STRING()` from the **ƒ** shortcut) and **Comments** for each column
     - Add, remove, and reorder columns easily
   - **Table Options** — configure advanced Snowflake table properties:
     - **Cluster By** — define one or more clustering keys or expressions
@@ -509,7 +512,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
     - **Time Travel Retention** (days)
     - **Created On** and **Last Altered** timestamps
     - **Comment** description
-- **Visual ER Designer** — interactively design or modify tables: add columns, set data types, define primary and foreign keys, preview the live Mermaid diagram, then generate and apply the necessary `CREATE TABLE` / `ALTER TABLE` SQL in one step
+- **Visual ER Designer** — interactively design or modify tables: add columns, set data types, define primary and foreign keys, set per-column `DEFAULT` values (free text, or pick a built-in function like `CURRENT_TIMESTAMP()` / `UUID_STRING()` from the **ƒ** shortcut), preview the live Mermaid diagram, then generate and apply the necessary `CREATE TABLE` / `ALTER TABLE` SQL in one step
 
 ---
 

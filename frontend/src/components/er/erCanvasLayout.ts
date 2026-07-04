@@ -238,6 +238,7 @@ export function mergeAITablesIntoDesigner(
         isPK: c.isPK ?? false,
         notNull: c.notNull ?? (c.isPK ?? false),
         fkRef: c.fkRef ?? "",
+        defaultValue: "",
       })),
     };
     if (existing) {
@@ -270,6 +271,7 @@ export function initFromERData(data: snowflake.ERDiagramData): DesignerTable[] {
       isPK: c.isPK,
       notNull: c.isPK || c.nullable === "NO",
       fkRef: "",
+      defaultValue: c.default || "",
     })),
   }));
 

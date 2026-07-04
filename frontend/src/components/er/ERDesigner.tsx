@@ -13,6 +13,7 @@ const ERCanvas = lazy(() => import("./ERCanvas"));
 import { initFromERData, normalizeDataType, mergeAITablesIntoDesigner } from "./erCanvasLayout";
 import type { AITableIn } from "./erCanvasLayout";
 import { buildMermaid } from "./buildMermaid";
+import DefaultFunctionPicker from "../shared/DefaultFunctionPicker";
 import { type DesignerColumn, type DesignerTable, SF_DATA_TYPES, SF_TYPES, normalizeIdentifier } from "./erTypes";
 
 interface Props {
@@ -178,7 +179,8 @@ function generateDiffSQL(
       for (const c of t.columns) {
         if (!c.name.trim()) continue;
         const nn = c.isPK || c.notNull ? " NOT NULL" : "";
-        colLines.push(`    ${q(c.name.trim())} ${c.dataType}${nn}`);
+        const def = c.defaultValue?.trim() ? ` DEFAULT ${c.defaultValue.trim()}` : "";
+        colLines.push(`    ${q(c.name.trim())} ${c.dataType}${nn}${def}`);
         if (c.isPK) pkCols.push(q(c.name.trim()));
         if (c.fkRef) {
           const parts = c.fkRef.split(".");
@@ -252,7 +254,8 @@ function generateDiffSQL(
       for (const c of t.columns) {
         if (!c.name.trim()) continue;
         const nn = c.isPK || c.notNull ? " NOT NULL" : "";
-        colLines.push(`    ${q(c.name.trim())} ${c.dataType}${nn}`);
+        const def = c.defaultValue?.trim() ? ` DEFAULT ${c.defaultValue.trim()}` : "";
+        colLines.push(`    ${q(c.name.trim())} ${c.dataType}${nn}${def}`);
         if (c.isPK) pkCols.push(q(c.name.trim()));
         if (c.fkRef) {
           const parts = c.fkRef.split(".");
@@ -310,7 +313,12 @@ function generateDiffSQL(
         if (!bc) {
           // New column
           const nn = c.isPK || c.notNull ? " NOT NULL" : "";
-          stmts.push(`${alter} ADD COLUMN ${q(c.name.trim())} ${c.dataType}${nn};`);
+          // ponytail: Snowflake accepts only literal defaults on ADD COLUMN
+          // (function expressions are rejected); we emit whatever the user set
+          // and let Snowflake validate. Existing columns' default changes are
+          // not diffed — SET DEFAULT is heavily restricted anyway.
+          const def = c.defaultValue?.trim() ? ` DEFAULT ${c.defaultValue.trim()}` : "";
+          stmts.push(`${alter} ADD COLUMN ${q(c.name.trim())} ${c.dataType}${nn}${def};`);
         } else {
           // Existing column — check for type change.
           // normalizeDataType is applied to bc.dataType (raw from INFORMATION_SCHEMA)
@@ -571,7 +579,7 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
     setTables((prev) =>
       prev.map((t) =>
         t.id === tableId
-          ? { ...t, columns: [...t.columns, { id: crypto.randomUUID(), name: "", dataType: "VARCHAR", isPK: false, notNull: false, fkRef: "" }] }
+          ? { ...t, columns: [...t.columns, { id: crypto.randomUUID(), name: "", dataType: "VARCHAR", isPK: false, notNull: false, fkRef: "", defaultValue: "" }] }
           : t
       )
     );
@@ -979,6 +987,14 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
                         options={fkOptions(t.id)}
                         showSearch
                       />
+                      <Input
+                        size="small"
+                        placeholder="DEFAULT"
+                        value={c.defaultValue}
+                        onChange={(e) => updateColumn(t.id, c.id, { defaultValue: e.target.value })}
+                        style={{ width: 110, flexShrink: 0, fontFamily: "monospace", fontSize: 11 }}
+                      />
+                      <DefaultFunctionPicker onPick={(sql) => updateColumn(t.id, c.id, { defaultValue: sql })} />
                       <Button
                         size="small"
                         type="text"

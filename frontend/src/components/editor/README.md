@@ -95,7 +95,14 @@ SQL the grammar doesn't yet model). `grammarExpected.kinds` (token-kind expectat
 
 **Snippet context menu:** Uses Monaco internal `MenuRegistry` + `CommandsRegistry` (IIFE, runs
 once). Per-editor `onContextMenu` sets `_activeSnippetEditor` so commands target the right
-instance.
+instance. **Cascade:** the "SQL Snippets" submenu holds one nested submenu per
+`SNIPPET_CATEGORIES` entry (its own `MenuId`, titled by `cat.header`), each holding the snippet
+commands, plus a **Built-in Functions** submenu that nests one level deeper — category (Context +
+`BUILTIN_FUNCTION_CATEGORIES` from `snowflakeSql.ts`) → `NAME()` command. Function insert text
+escapes `$` (e.g. `SYSTEM$CANCEL_QUERY`) so the snippet engine doesn't read it as a variable, and
+uses `$0` to drop the cursor inside the parens. Keeping every level short means the menu never
+overflows off-screen; `.context-view .monaco-menu-container` in `global.css` also caps menu height
+to the viewport and scrolls as a backstop.
 
 **Clipboard:** `navigator.clipboard` is blocked in WKWebView. All copy operations use
 `ClipboardSetText` from `wailsjs/runtime/runtime`. Monaco's built-in **code-buffer** copy/paste is

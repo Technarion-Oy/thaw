@@ -12,7 +12,7 @@ Hosts the wizard-style creation modals and property sheets for schema objects ac
 |---|---|
 | `AddColumnModal.tsx` | `ADD COLUMN` wizard; mirrors `column.AddColumnConfig` (name, type, default value, identity, constraints, collation, comment); calls `BuildAddColumnSql` for a live SQL preview and `ExecDDL` to apply; uses `DataTypeSelect` and `ObjectNameCaseControl` from `shared/`. Column DDL is built entirely in `internal/column`. |
 | `CreateDatabaseModal.tsx` | `CREATE DATABASE` form with optional clone, transient flag, data retention slider, external volume, catalog integration, and tag assignments; calls `ExecDDL`; uses `ObjectNameCaseControl`. |
-| `CreateTableModal.tsx` | `CREATE TABLE` form with column definitions, clustering keys, transient/temp flags, and comment; calls `ExecDDL`. |
+| `CreateTableModal.tsx` | `CREATE TABLE` form with column definitions, clustering keys, transient/temp flags, and comment; calls `ExecDDL`. The per-column Default field pairs a free-text `Input` with a `DefaultFunctionPicker` (from `shared/`) that inserts a built-in function default (`CURRENT_TIMESTAMP()`, `UUID_STRING()`, …). Function defaults are only valid at table-create time, so this shortcut is not offered in `AddColumnModal`. |
 | `CreateStageModal.tsx` | `CREATE STAGE` form for internal and external stages; configures URL, credentials, file format, copy options, and server-side encryption; calls `ExecDDL`. |
 | `CreateFileFormatModal.tsx` | `CREATE FILE FORMAT` builder; delegates format-specific field rendering to `FileFormatFields`; calls `ExecDDL`. |
 | `FileFormatFields.tsx` | Renders format-specific fields (CSV, JSON, Parquet, Avro, ORC, XML) as a reusable sub-component used by `CreateFileFormatModal` and `StagePropertiesModal`. |

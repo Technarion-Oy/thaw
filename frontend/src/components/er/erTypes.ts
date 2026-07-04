@@ -10,6 +10,7 @@ export interface DesignerColumn {
   isPK: boolean;
   notNull: boolean;
   fkRef: string; // "SCHEMA.TABLE.COLUMN" or "" for none
+  defaultValue: string; // column DEFAULT expression, "" for none
 }
 
 export interface DesignerTable {

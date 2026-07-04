@@ -4382,6 +4382,7 @@ export namespace snowflake {
 	    dataType: string;
 	    isPK: boolean;
 	    nullable: string;
+	    default: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ERColumn(source);
@@ -4393,6 +4394,7 @@ export namespace snowflake {
 	        this.dataType = source["dataType"];
 	        this.isPK = source["isPK"];
 	        this.nullable = source["nullable"];
+	        this.default = source["default"];
 	    }
 	}
 	export class ERForeignKey {

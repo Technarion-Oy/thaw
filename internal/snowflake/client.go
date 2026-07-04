@@ -3786,6 +3786,7 @@ type ERColumn struct {
 	DataType string `json:"dataType"`
 	IsPK     bool   `json:"isPK"`
 	Nullable string `json:"nullable"`
+	Default  string `json:"default"` // COLUMN_DEFAULT, "" when none
 }
 
 // ERTable represents a table (entity) in an ER diagram.
@@ -3819,7 +3820,7 @@ func (c *Client) GetERDiagramData(ctx context.Context, database string) (ERDiagr
 	db := QuoteIdent(database)
 
 	type colRow struct {
-		tableSchema, tableName, columnName, dataType, isNullable string
+		tableSchema, tableName, columnName, dataType, isNullable, columnDefault string
 	}
 	type pkRow struct {
 		schema, table, column string
@@ -3843,7 +3844,7 @@ func (c *Client) GetERDiagramData(ctx context.Context, database string) (ERDiagr
 	go func() {
 		defer wg.Done()
 		query := fmt.Sprintf(
-			`SELECT c.TABLE_SCHEMA, c.TABLE_NAME, c.COLUMN_NAME, c.DATA_TYPE, c.IS_NULLABLE`+
+			`SELECT c.TABLE_SCHEMA, c.TABLE_NAME, c.COLUMN_NAME, c.DATA_TYPE, c.IS_NULLABLE, COALESCE(c.COLUMN_DEFAULT, '')`+
 				` FROM %s.INFORMATION_SCHEMA.COLUMNS c`+
 				` JOIN %s.INFORMATION_SCHEMA.TABLES t`+
 				` ON c.TABLE_SCHEMA = t.TABLE_SCHEMA AND c.TABLE_NAME = t.TABLE_NAME`+
@@ -3858,7 +3859,7 @@ func (c *Client) GetERDiagramData(ctx context.Context, database string) (ERDiagr
 		defer rows.Close() //nolint:errcheck
 		for rows.Next() {
 			var r colRow
-			if err := rows.Scan(&r.tableSchema, &r.tableName, &r.columnName, &r.dataType, &r.isNullable); err != nil {
+			if err := rows.Scan(&r.tableSchema, &r.tableName, &r.columnName, &r.dataType, &r.isNullable, &r.columnDefault); err != nil {
 				continue
 			}
 			colRows = append(colRows, r)
@@ -3949,6 +3950,7 @@ func (c *Client) GetERDiagramData(ctx context.Context, database string) (ERDiagr
 			DataType: r.dataType,
 			IsPK:     isPK,
 			Nullable: r.isNullable,
+			Default:  r.columnDefault,
 		})
 	}
 

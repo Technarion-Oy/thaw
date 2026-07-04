@@ -21,6 +21,7 @@ import DataTypeSelect from "../shared/DataTypeSelect";
 import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
 import SqlPreview from "../shared/SqlPreview";
+import DefaultFunctionPicker from "../shared/DefaultFunctionPicker";
 import { useQuotedIdentifiers, useCreateSubmit } from "../shared/createModalHooks";
 
 interface ColumnDef {
@@ -212,12 +213,15 @@ export default function CreateTableModal({ db, schema, onClose, onSuccess }: Pro
       title: "Default",
       dataIndex: "defaultValue",
       render: (val, record) => (
-        <Input 
-          size="small" 
-          value={val} 
-          placeholder="NULL"
-          onChange={e => updateColumn(record.key, { defaultValue: e.target.value })} 
-        />
+        <div style={{ display: "flex", gap: 4 }}>
+          <Input
+            size="small"
+            value={val}
+            placeholder="NULL"
+            onChange={e => updateColumn(record.key, { defaultValue: e.target.value })}
+          />
+          <DefaultFunctionPicker onPick={(sql) => updateColumn(record.key, { defaultValue: sql })} />
+        </div>
       )
     },
     {

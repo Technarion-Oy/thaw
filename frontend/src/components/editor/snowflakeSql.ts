@@ -10,6 +10,89 @@
 
 import { SNOWFLAKE_DATA_TYPE_NAMES } from "../../generated/snowflakeDataTypes";
 
+// ─── Built-in function catalogue ──────────────────────────────────────────────
+// Single source of truth for both the Monarch `@builtins` tokenizer rule below
+// and the "Built-in Functions" group in the Code Snippets browser (which renders
+// these keys as cascading sub-categories). Keep names uppercase.
+export const BUILTIN_FUNCTION_CATEGORIES: Record<string, string[]> = {
+  Aggregate: [
+    "COUNT", "SUM", "AVG", "MIN", "MAX", "VARIANCE", "VAR_POP", "VAR_SAMP",
+    "STDDEV", "STDDEV_POP", "STDDEV_SAMP", "MEDIAN", "MODE",
+    "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "LISTAGG",
+    "ARRAY_AGG", "OBJECT_AGG", "BOOLAND_AGG", "BOOLOR_AGG", "BOOLXOR_AGG",
+  ],
+  Window: [
+    "ROW_NUMBER", "RANK", "DENSE_RANK", "NTILE", "LEAD", "LAG",
+    "FIRST_VALUE", "LAST_VALUE", "NTH_VALUE", "RATIO_TO_REPORT",
+    "PERCENT_RANK", "CUME_DIST",
+  ],
+  String: [
+    "CONCAT", "CONCAT_WS", "UPPER", "LOWER", "TRIM", "LTRIM", "RTRIM",
+    "LENGTH", "LEN", "SUBSTR", "SUBSTRING", "REPLACE", "REGEXP_REPLACE",
+    "REGEXP_LIKE", "REGEXP_SUBSTR", "REGEXP_INSTR", "REGEXP_COUNT",
+    "SPLIT", "SPLIT_PART", "STRTOK", "STRTOK_TO_ARRAY", "CONTAINS",
+    "STARTSWITH", "ENDSWITH", "CHARINDEX", "POSITION", "INITCAP",
+    "REPEAT", "SPACE", "REVERSE", "LPAD", "RPAD", "ASCII", "CHR",
+    "UNICODE", "SOUNDEX", "EDITDISTANCE", "JAROWINKLER_SIMILARITY",
+    "FORMAT_NUMBER", "TO_VARCHAR",
+  ],
+  "Date & Time": [
+    "DATEADD", "DATEDIFF", "DATE_TRUNC", "DATE_PART", "EXTRACT",
+    "TO_DATE", "TO_TIME", "TO_TIMESTAMP", "TO_TIMESTAMP_NTZ",
+    "TO_TIMESTAMP_LTZ", "TO_TIMESTAMP_TZ",
+    "YEAR", "MONTH", "DAY", "HOUR", "MINUTE", "SECOND", "QUARTER",
+    "DAYOFWEEK", "DAYOFWEEKISO", "DAYOFYEAR", "WEEK", "WEEKOFYEAR",
+    "WEEKISO", "YEAROFWEEK", "YEAROFWEEKISO",
+    "LAST_DAY", "NEXT_DAY", "ADD_MONTHS", "MONTHS_BETWEEN", "TRUNC",
+    "TIME_FROM_PARTS", "DATE_FROM_PARTS", "TIMESTAMP_FROM_PARTS",
+    "CONVERT_TIMEZONE",
+  ],
+  "Conversion & Cast": [
+    "TO_CHAR", "TO_NUMBER", "TO_DECIMAL", "TO_DOUBLE", "TO_BOOLEAN",
+    "TO_BINARY", "TRY_TO_DATE", "TRY_TO_TIME", "TRY_TO_TIMESTAMP",
+    "TRY_TO_NUMBER", "TRY_TO_DECIMAL", "TRY_TO_DOUBLE", "TRY_TO_BOOLEAN",
+    "CAST", "TRY_CAST", "CONVERT",
+  ],
+  "Conditional & NULL": [
+    "COALESCE", "NULLIF", "IFNULL", "NVL", "NVL2", "ZEROIFNULL",
+    "DECODE", "GREATEST", "LEAST", "EQUAL_NULL",
+  ],
+  Math: [
+    "ABS", "CEIL", "CEILING", "FLOOR", "ROUND", "MOD", "POWER", "POW",
+    "SQRT", "SQUARE", "EXP", "LN", "LOG", "LOG2", "LOG10", "SIGN",
+    "FACTORIAL", "UNIFORM", "NORMAL", "RANDOM", "RANDSTR",
+    "SEQ1", "SEQ2", "SEQ4", "SEQ8",
+    "SIN", "COS", "TAN", "ASIN", "ACOS", "ATAN", "ATAN2",
+    "DEGREES", "RADIANS", "PI", "HAVERSINE", "WIDTH_BUCKET",
+    "REGR_SLOPE", "REGR_INTERCEPT", "REGR_R2",
+  ],
+  "Semi-structured / JSON": [
+    "PARSE_JSON", "TO_JSON", "TO_ARRAY", "TO_OBJECT",
+    "ARRAY_CONSTRUCT", "OBJECT_CONSTRUCT",
+    "ARRAY_SIZE", "ARRAY_CONTAINS", "ARRAY_APPEND", "ARRAY_CAT",
+    "ARRAY_COMPACT", "ARRAY_DISTINCT", "ARRAY_FLATTEN", "ARRAY_INTERSECTION",
+    "ARRAY_POSITION", "ARRAY_PREPEND", "ARRAY_REMOVE", "ARRAY_SLICE",
+    "ARRAY_SORT", "ARRAY_TO_STRING", "ARRAYS_OVERLAP",
+    "OBJECT_KEYS", "OBJECT_INSERT", "OBJECT_DELETE", "OBJECT_PICK",
+    "FLATTEN", "GET", "GET_PATH", "IS_ARRAY", "IS_OBJECT",
+    "IS_NULL_VALUE", "JSON_EXTRACT_PATH_TEXT", "TYPEOF", "CHECK_JSON", "CHECK_XML",
+    "STRIP_NULL_VALUE",
+    "AS_CHAR", "AS_VARCHAR", "AS_ARRAY", "AS_OBJECT",
+    "AS_INTEGER", "AS_DOUBLE", "AS_DECIMAL", "AS_DATE", "AS_TIME",
+  ],
+  "Hash & Crypto": [
+    "HASH", "MD5", "SHA1", "SHA2",
+    "HEX_ENCODE", "HEX_DECODE_STRING",
+    "BASE64_ENCODE", "BASE64_DECODE_STRING",
+  ],
+  "System & Table": [
+    "GENERATOR", "RESULT_SCAN", "VALIDATE",
+    "SYSTEM$CANCEL_QUERY", "SYSTEM$CLUSTERING_INFORMATION",
+  ],
+};
+
+const BUILTINS_FLAT: string[] = Object.values(BUILTIN_FUNCTION_CATEGORIES).flat();
+
 // ─── Monarch tokenizer ────────────────────────────────────────────────────────
 // Produces granular token types so the custom themes below can assign distinct
 // colours to DML, DDL, clause, control-flow, functions, types, etc.
@@ -88,72 +171,9 @@ export const snowflakeMonarchLanguage = {
   // harmless; "PRECISION" alone is intentionally no longer highlighted.
   datatypes: [...SNOWFLAKE_DATA_TYPE_NAMES],
 
-  builtins: [
-    // Aggregates
-    "COUNT", "SUM", "AVG", "MIN", "MAX", "VARIANCE", "VAR_POP", "VAR_SAMP",
-    "STDDEV", "STDDEV_POP", "STDDEV_SAMP", "MEDIAN", "MODE",
-    "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "LISTAGG",
-    "ARRAY_AGG", "OBJECT_AGG", "BOOLAND_AGG", "BOOLOR_AGG", "BOOLXOR_AGG",
-    // Window
-    "ROW_NUMBER", "RANK", "DENSE_RANK", "NTILE", "LEAD", "LAG",
-    "FIRST_VALUE", "LAST_VALUE", "NTH_VALUE", "RATIO_TO_REPORT",
-    "PERCENT_RANK", "CUME_DIST",
-    // String
-    "CONCAT", "CONCAT_WS", "UPPER", "LOWER", "TRIM", "LTRIM", "RTRIM",
-    "LENGTH", "LEN", "SUBSTR", "SUBSTRING", "REPLACE", "REGEXP_REPLACE",
-    "REGEXP_LIKE", "REGEXP_SUBSTR", "REGEXP_INSTR", "REGEXP_COUNT",
-    "SPLIT", "SPLIT_PART", "STRTOK", "STRTOK_TO_ARRAY", "CONTAINS",
-    "STARTSWITH", "ENDSWITH", "CHARINDEX", "POSITION", "INITCAP",
-    "REPEAT", "SPACE", "REVERSE", "LPAD", "RPAD", "ASCII", "CHR",
-    "UNICODE", "SOUNDEX", "EDITDISTANCE", "JAROWINKLER_SIMILARITY",
-    "FORMAT_NUMBER", "TO_VARCHAR",
-    // Date / Time
-    "DATEADD", "DATEDIFF", "DATE_TRUNC", "DATE_PART", "EXTRACT",
-    "TO_DATE", "TO_TIME", "TO_TIMESTAMP", "TO_TIMESTAMP_NTZ",
-    "TO_TIMESTAMP_LTZ", "TO_TIMESTAMP_TZ",
-    "YEAR", "MONTH", "DAY", "HOUR", "MINUTE", "SECOND", "QUARTER",
-    "DAYOFWEEK", "DAYOFWEEKISO", "DAYOFYEAR", "WEEK", "WEEKOFYEAR",
-    "WEEKISO", "YEAROFWEEK", "YEAROFWEEKISO",
-    "LAST_DAY", "NEXT_DAY", "ADD_MONTHS", "MONTHS_BETWEEN", "TRUNC",
-    "TIME_FROM_PARTS", "DATE_FROM_PARTS", "TIMESTAMP_FROM_PARTS",
-    "CONVERT_TIMEZONE",
-    // Conversion / Cast
-    "TO_CHAR", "TO_NUMBER", "TO_DECIMAL", "TO_DOUBLE", "TO_BOOLEAN",
-    "TO_BINARY", "TRY_TO_DATE", "TRY_TO_TIME", "TRY_TO_TIMESTAMP",
-    "TRY_TO_NUMBER", "TRY_TO_DECIMAL", "TRY_TO_DOUBLE", "TRY_TO_BOOLEAN",
-    "CAST", "TRY_CAST", "CONVERT",
-    // Conditional / NULL-handling
-    "COALESCE", "NULLIF", "IFNULL", "NVL", "NVL2", "ZEROIFNULL",
-    "DECODE", "GREATEST", "LEAST", "EQUAL_NULL",
-    // Math
-    "ABS", "CEIL", "CEILING", "FLOOR", "ROUND", "MOD", "POWER", "POW",
-    "SQRT", "SQUARE", "EXP", "LN", "LOG", "LOG2", "LOG10", "SIGN",
-    "FACTORIAL", "UNIFORM", "NORMAL", "RANDOM", "RANDSTR",
-    "SEQ1", "SEQ2", "SEQ4", "SEQ8",
-    "SIN", "COS", "TAN", "ASIN", "ACOS", "ATAN", "ATAN2",
-    "DEGREES", "RADIANS", "PI", "HAVERSINE", "WIDTH_BUCKET",
-    "REGR_SLOPE", "REGR_INTERCEPT", "REGR_R2",
-    // JSON / Semi-structured
-    "PARSE_JSON", "TO_JSON", "TO_ARRAY", "TO_OBJECT",
-    "ARRAY_CONSTRUCT", "OBJECT_CONSTRUCT",
-    "ARRAY_SIZE", "ARRAY_CONTAINS", "ARRAY_APPEND", "ARRAY_CAT",
-    "ARRAY_COMPACT", "ARRAY_DISTINCT", "ARRAY_FLATTEN", "ARRAY_INTERSECTION",
-    "ARRAY_POSITION", "ARRAY_PREPEND", "ARRAY_REMOVE", "ARRAY_SLICE",
-    "ARRAY_SORT", "ARRAY_TO_STRING", "ARRAYS_OVERLAP",
-    "OBJECT_KEYS", "OBJECT_INSERT", "OBJECT_DELETE", "OBJECT_PICK",
-    "FLATTEN", "GET", "GET_PATH", "IS_ARRAY", "IS_OBJECT",
-    "IS_NULL_VALUE", "JSON_EXTRACT_PATH_TEXT", "TYPEOF", "CHECK_JSON", "CHECK_XML",
-    "STRIP_NULL_VALUE",
-    "AS_CHAR", "AS_VARCHAR", "AS_ARRAY", "AS_OBJECT",
-    "AS_INTEGER", "AS_DOUBLE", "AS_DECIMAL", "AS_DATE", "AS_TIME",
-    // Hash / Crypto
-    "HASH", "MD5", "SHA1", "SHA2",
-    "HEX_ENCODE", "HEX_DECODE_STRING",
-    "BASE64_ENCODE", "BASE64_DECODE_STRING",
-    // System / Table
-    "GENERATOR", "RESULT_SCAN", "VALIDATE",
-    "SYSTEM$CANCEL_QUERY", "SYSTEM$CLUSTERING_INFORMATION",
-  ],
+  // Built-in functions — sourced from BUILTIN_FUNCTION_CATEGORIES (single source
+  // of truth, also drives the Code Snippets "Built-in Functions" sub-categories).
+  builtins: BUILTINS_FLAT,
 
   // ── Tokenizer rules ─────────────────────────────────────────────────────────
 
@@ -249,6 +269,13 @@ export const snowflakeMonarchLanguage = {
     ],
   },
 } as const;
+
+// Context (session) functions — the callable subset of `constants` (excludes
+// NULL/TRUE/FALSE/UNKNOWN). Shared by the Code Snippets modal and the editor's
+// right-click "Built-in Functions" submenu so there's one source.
+export const CONTEXT_FUNCTIONS: string[] = snowflakeMonarchLanguage.constants.filter(
+  (c) => c.startsWith("CURRENT_") || ["SYSDATE", "NOW", "LOCALTIME", "LOCALTIMESTAMP"].includes(c),
+);
 
 // ─── Dark theme ───────────────────────────────────────────────────────────────
 // GitHub dark palette: coral DML, azure clauses, peach DDL, lavender control,
