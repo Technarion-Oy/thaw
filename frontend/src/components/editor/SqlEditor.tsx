@@ -142,8 +142,14 @@ async function resolveStoreObject(
   // source table, etc.). With no parse context to disambiguate, prefer the
   // table/view — the far more common hover target. ponytail: heuristic tie-break;
   // wrong only when a non-table object shadows a same-named table in one schema.
-  const best = (list: Array<{ db: string; schema: string; kind: string; name: string }>) =>
-    list.find((o) => o.kind === "TABLE" || o.kind === "VIEW") ?? list[0] ?? null;
+  // FUNCTION/PROCEDURE are intentionally excluded: the overload-aware
+  // GetFunctionTooltip fallback owns them (per-overload signatures + the
+  // "followed by (" keyword guard), and GetObjectDDL with an empty arguments
+  // string fails for any non-zero-arg overload. Falling through keeps both.
+  const best = (list: Array<{ db: string; schema: string; kind: string; name: string }>) => {
+    const c = list.filter((o) => UC(o.kind) !== "FUNCTION" && UC(o.kind) !== "PROCEDURE");
+    return c.find((o) => o.kind === "TABLE" || o.kind === "VIEW") ?? c[0] ?? null;
+  };
   // Shared "match in store → fetch schema if missing → re-match" sequence.
   // `looseMatch` runs first (may match without a db qualifier); if it misses and
   // a concrete (db, schema) is known, load that schema and match it strictly.
@@ -1705,6 +1711,9 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       const m = editor.getModel();
       if (!cmdModHeld || !pos || !m || m.getLanguageId() !== "sql" ||
           !useFeatureFlagsStore.getState().flags.ddlHoverTooltips) { clearCmdLink(); return; }
+      // A diagnostic marker wins at this position (matches the hover flows), so
+      // don't offer a "hold-for-DDL" underline where only the marker will show.
+      if (markerAt(pos)) { clearCmdLink(); return; }
       const line = m.getLineContent(pos.lineNumber);
       const rng = identifierRangeAt(line, pos.column - 1);
       if (!rng) { clearCmdLink(); return; }
