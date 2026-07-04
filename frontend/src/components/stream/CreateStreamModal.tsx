@@ -14,7 +14,7 @@ import { useState, useEffect } from "react";
 import { Form, Input, Select, Checkbox, Space, Collapse } from "antd";
 import { ThunderboltOutlined } from "@ant-design/icons";
 import {
-  BuildCreateStreamSql, ExecDDL, ListDatabases, ListSchemas, ListObjects,
+  BuildCreateStreamSql, ExecDDL, ListDatabases, ListUserSchemas, ListObjects,
 } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
@@ -85,7 +85,7 @@ export default function CreateStreamModal({ db, schema, onClose, onSuccess }: Pr
   useEffect(() => {
     if (!srcDb) { setSchemaOptions([]); return; }
     setLoadingSchemas(true);
-    ListSchemas(srcDb)
+    ListUserSchemas(srcDb)
       .then((s) => setSchemaOptions(s ?? []))
       .catch(() => setSchemaOptions([]))
       .finally(() => setLoadingSchemas(false));

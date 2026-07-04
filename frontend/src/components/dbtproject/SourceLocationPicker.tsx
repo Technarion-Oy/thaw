@@ -20,7 +20,7 @@ import {
 } from "@ant-design/icons";
 import {
   ListDatabases,
-  ListSchemas,
+  ListUserSchemas,
   ListObjects,
   ListGitBranches,
   ListGitTags,
@@ -121,7 +121,7 @@ export default function SourceLocationPicker({ db, schema, value, onChange, mode
     setSchemas([]);
     if (!pickerDb) return;
     setLoadingSchemas(true);
-    ListSchemas(pickerDb)
+    ListUserSchemas(pickerDb)
       .then((s) => setSchemas((s ?? []).filter((n) => n.toUpperCase() !== "INFORMATION_SCHEMA")))
       .catch(() => setSchemas([]))
       .finally(() => setLoadingSchemas(false));

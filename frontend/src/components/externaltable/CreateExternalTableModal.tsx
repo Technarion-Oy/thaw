@@ -21,7 +21,7 @@ import {
 } from "@ant-design/icons";
 import {
   BuildCreateExternalTableSql, ExecDDL,
-  ListDatabases, ListSchemas, ListObjects, ListStages, ListStageEntries,
+  ListDatabases, ListUserSchemas, ListObjects, ListStages, ListStageEntries,
 } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
@@ -123,7 +123,7 @@ export default function CreateExternalTableModal({ db, schema, onClose, onSucces
   useEffect(() => {
     if (!pickerDb) { setSchemaOptions([]); return; }
     setLoadingSchemas(true);
-    ListSchemas(pickerDb)
+    ListUserSchemas(pickerDb)
       .then((s) => setSchemaOptions(s ?? []))
       .catch(() => setSchemaOptions([]))
       .finally(() => setLoadingSchemas(false));

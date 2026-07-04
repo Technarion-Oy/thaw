@@ -27,7 +27,7 @@ import {
 } from "antd";
 import { PlusOutlined, PlusCircleOutlined, EditOutlined, DeleteOutlined, MinusCircleOutlined, ReloadOutlined, RollbackOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { ListBackupSets, CreateBackupSet, DropBackupSet, AlterBackupSet, ListBackupPolicies, ListBackups, AddBackup, DeleteOldestBackup, RestoreFromBackup, ListDatabases, ListSchemas, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/app/App";
+import { ListBackupSets, CreateBackupSet, DropBackupSet, AlterBackupSet, ListBackupPolicies, ListBackups, AddBackup, DeleteOldestBackup, RestoreFromBackup, ListDatabases, ListUserSchemas, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/app/App";
 import type { backup } from "../../../wailsjs/go/models";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 import dayjs from "dayjs";
@@ -152,7 +152,7 @@ export default function BackupSetsModal(props: Props) {
   const loadCreateSchemas = async (dbName: string) => {
     if (!dbName) { setCreateSchemaList([]); return; }
     setCreateSchemaLoading(true);
-    try { setCreateSchemaList(((await ListSchemas(dbName)) ?? []).filter((s) => s.toUpperCase() !== "INFORMATION_SCHEMA")); }
+    try { setCreateSchemaList((await ListUserSchemas(dbName)) ?? []); }
     catch { setCreateSchemaList([]); }
     finally { setCreateSchemaLoading(false); }
   };
@@ -177,7 +177,7 @@ export default function BackupSetsModal(props: Props) {
     if (!dbName) { setRestoreSchemaList([]); return; }
     setRestoreSchemaLoading(true);
     try {
-      const data = await ListSchemas(dbName);
+      const data = await ListUserSchemas(dbName);
       setRestoreSchemaList(data ?? []);
     } catch { setRestoreSchemaList([]); }
     finally { setRestoreSchemaLoading(false); }

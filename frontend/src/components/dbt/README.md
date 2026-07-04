@@ -19,7 +19,7 @@ and supporting files to the local filesystem.
 
 **IPC calls:**
 - `GetGitConfig` — pre-fills output directory from the git export path on mount
-- `ListDatabases` / `ListSchemas` — populate the database/schema picker in Step 1 (lazy, on panel expand)
+- `ListDatabases` / `ListUserSchemas` — populate the database/schema picker in Step 1 (lazy, on panel expand); `ListUserSchemas` omits `INFORMATION_SCHEMA`, which can't host generated dbt models
 - `GetSchemaCrossDeps(db, schema)` — per-schema cross-dependency hints; triggers automatically when a schema is selected
 - `GetDatabaseCrossDeps(db, uncachedSchemas)` — batched variant used by "Select all" to avoid concurrent connection-pool exhaustion
 - `ListDirectory` — checks whether the target project directory already exists (warns user)
@@ -33,4 +33,4 @@ and supporting files to the local filesystem.
 ## Gotchas
 
 - `CreateDbtProject` accepts a `schemasMap` (`Record<db, schema[]>`) built from the `selectedSchemas` state. The `Record<string, Set<string>>` is serialised to `Record<string, string[]>` at call time.
-- `INFORMATION_SCHEMA` is flagged as a system schema with a warning tooltip; it can be selected but no staging stubs are generated for it by the backend.
+- `INFORMATION_SCHEMA` is excluded from the schema picker (`ListUserSchemas`) since it can't host generated dbt models.
