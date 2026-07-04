@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect, useCallback } from "react";
-import { Modal, Spin, Button, Input, Space, Typography, message } from "antd";
+import { Modal, Spin, Button, Input, Space, Typography, Alert, message } from "antd";
 import { UserOutlined, CheckOutlined, SearchOutlined } from "@ant-design/icons";
 import {
   GetObjectProperties, AlterUserProperty, ListWarehouses, ListRoles, ParseSecondaryRoles,
@@ -155,6 +155,19 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
 
       {rows !== null && !loadError && (
         <>
+          {/* Backend marker: DESCRIBE USER was denied for this role, so
+              DESCRIBE-only fields below may be hidden rather than unset. */}
+          {m["__DESCRIBE_DEGRADED__"] === "1" && (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 8 }}
+              message={<span style={{ fontSize: 12 }}>
+                Some properties (network policy, middle name, …) may be hidden — your role
+                lacks DESCRIBE USER on this user, so blank fields below are not necessarily unset.
+              </span>}
+            />
+          )}
           <Input
             prefix={<SearchOutlined style={{ color: "var(--text-faint)" }} />}
             placeholder="Search properties…"

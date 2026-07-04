@@ -156,7 +156,10 @@ export default function CellDetailPanel({ columns, onVisibleCellChange }: Props)
   const onResizeStart = (e: React.MouseEvent) => {
     e.preventDefault();
     const startX = e.clientX;
-    const startW = width;
+    // Anchor to the rendered (clamped) width, not the raw persisted one —
+    // otherwise a wide persisted width creates a drag dead-zone on a
+    // narrower window until the delta exceeds the clamp gap.
+    const startW = Math.min(width, Math.round(window.innerWidth * 0.6));
     const onMove = (ev: MouseEvent) => {
       const vpCap = Math.round(window.innerWidth * 0.6);
       setWidth(Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, vpCap, startW + (startX - ev.clientX))));

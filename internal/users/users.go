@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"thaw/internal/snowflake"
+	"thaw/internal/sqltok"
 )
 
 // BuildAlterUserPropertySQL builds an ALTER USER ... SET / UNSET statement for a
@@ -175,44 +176,32 @@ type nsPart struct {
 	quoted bool
 }
 
-// splitNamespace splits a DATABASE / DATABASE.SCHEMA reference on dots that sit
-// outside double-quoted identifiers, so `"MY.DB".PUB` yields ["MY.DB", "PUB"].
-// Each returned part is unquoted (outer quotes stripped, doubled quotes
-// unescaped) and non-empty, with a flag recording whether it was quoted —
-// the caller re-quotes accordingly. Unbalanced quotes or empty segments
-// return an error.
+// splitNamespace splits a DATABASE / DATABASE.SCHEMA reference into its dotted
+// parts using the shared sqltok tokenizer (quote-aware, so `"MY.DB".PUB`
+// yields ["MY.DB", "PUB"]). Each returned part is unquoted via sqltok.Unquote
+// and non-empty, with a flag recording whether it was quoted — the caller
+// re-quotes accordingly. Trailing tokens, empty segments, and unterminated
+// quotes return an error.
 func splitNamespace(v string) ([]nsPart, error) {
-	var parts []nsPart
-	var cur strings.Builder
-	inQuote := false
-	sawQuote := false
-	rs := []rune(v)
-	flush := func() {
-		parts = append(parts, nsPart{text: cur.String(), quoted: sawQuote})
-		cur.Reset()
-		sawQuote = false
+	trimmed := strings.TrimSpace(v)
+	tokens := sqltok.Tokenize(trimmed)
+	raw, next := sqltok.ReadIdentParts(tokens, trimmed, 0, 2)
+	// The whole input must be exactly one identifier path — reject leftovers
+	// ("DB.", third parts beyond maxParts, stray tokens).
+	if raw == nil || next >= len(tokens) || tokens[next].Kind != sqltok.EOF {
+		return nil, fmt.Errorf("invalid namespace %q", v)
 	}
-	for i := 0; i < len(rs); i++ {
-		c := rs[i]
-		switch {
-		case c == '"' && inQuote && i+1 < len(rs) && rs[i+1] == '"':
-			cur.WriteRune('"') // escaped quote inside a quoted identifier
-			i++
-		case c == '"':
-			inQuote = !inQuote
-			sawQuote = true
-		case c == '.' && !inQuote:
-			flush()
-		default:
-			cur.WriteRune(c)
+	parts := make([]nsPart, len(raw))
+	for i, p := range raw {
+		if strings.HasPrefix(p, `"`) {
+			// Quoted identifier: must be a terminated pair.
+			if len(p) < 2 || !strings.HasSuffix(p, `"`) {
+				return nil, fmt.Errorf("unbalanced quotes in %q", v)
+			}
+			parts[i] = nsPart{text: sqltok.Unquote(p), quoted: true}
+		} else {
+			parts[i] = nsPart{text: p, quoted: false}
 		}
-	}
-	if inQuote {
-		return nil, fmt.Errorf("unbalanced quotes in %q", v)
-	}
-	flush()
-	for i := range parts {
-		parts[i].text = strings.TrimSpace(parts[i].text)
 		if parts[i].text == "" {
 			return nil, fmt.Errorf("empty segment in %q", v)
 		}

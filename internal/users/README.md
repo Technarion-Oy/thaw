@@ -20,7 +20,7 @@ never inline in a component.
 ## Property semantics
 
 - **Strings** (`loginName`, `displayName`, `firstName`, `middleName`, `lastName`, `email`, `comment`) — quoted string literals; empty value → `UNSET`.
-- **Identifiers** (`defaultWarehouse`, `defaultRole`, `networkPolicy`) — double-quoted; empty → `UNSET`. `defaultNamespace` quotes each dotted part (`DB` or `DB.SCHEMA`).
+- **Identifiers** — `defaultWarehouse` / `defaultRole` are double-quoted exactly (their values are canonical-case names from SHOW via the UI's Selects); `networkPolicy` is typed free-hand and rendered via `QuoteOrBare` so bare names fold. `defaultNamespace` (`DB` or `DB.SCHEMA`) splits quote-aware via `sqltok` — explicitly-quoted parts keep exact case, bare parts stay bare. Empty → `UNSET`.
 - **Integers** (`daysToExpiry`, `minsToUnlock`, `minsToBypassMfa`) — validated non-negative; empty → `UNSET`.
 - **Booleans** (`disabled`, `mustChangePassword`) — `TRUE`/`FALSE` only; no UNSET. MFA is deliberately not managed here (`DISABLE_MFA` is a legacy Duo-era property with contested support); use `minsToUnlock`/`minsToBypassMfa` or `ALTER USER … REMOVE MFA METHOD` via the SQL editor.
 - **Enums** — `type` (`PERSON`/`SERVICE`/`LEGACY_SERVICE`, empty → `UNSET`); `defaultSecondaryRoles` (`ALL` → `('ALL')`, `NONE` → `()`, empty → `UNSET`).

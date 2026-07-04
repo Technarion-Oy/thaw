@@ -76,7 +76,13 @@ export function EditRow({ label, value, type, options, loadOptions, min, max, al
     setEditVal(value);
     setEditError(null);
     if (loadOptions && lazyOpts === null) {
-      loadOptions().then(setLazyOpts).catch(() => setLazyOpts([]));
+      // On failure reset to null so the next edit retries, and surface the
+      // error — leaving [] would permanently empty the select for the
+      // rest of the modal session.
+      loadOptions().then(setLazyOpts).catch((e) => {
+        setLazyOpts(null);
+        message.error(friendlyError(e), 6);
+      });
     }
   };
   const cancel = () => { setEditing(false); setEditError(null); };
