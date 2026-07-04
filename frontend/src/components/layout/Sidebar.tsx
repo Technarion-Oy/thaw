@@ -235,6 +235,7 @@ import ExecuteDbtProjectModal from "../dbtproject/ExecuteDbtProjectModal";
 import ModifyDbtProjectModal from "../dbtproject/ModifyDbtProjectModal";
 import AddDbtProjectVersionModal from "../dbtproject/AddDbtProjectVersionModal";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
+import { kindSupportsDdl } from "../../utils/objectDdl";
 
 const { Text } = Typography;
 
@@ -560,7 +561,7 @@ function ObjTooltip({ cacheKey, db, schema, kind, name, args, children }: {
     // policies, so the call would always fail and emit gosnowflake driver
     // error-log noise on every hover. Skip the fetch entirely — with content
     // left null the tooltip simply doesn't show.
-    if (kind === "IMAGE REPOSITORY" || kind === "SERVICE" || kind === "GATEWAY" || kind === "PACKAGES POLICY" || kind === "MODEL" || kind === "MODEL MONITOR" || kind === "DATASET" || kind === "CORTEX SEARCH SERVICE" || kind === "EXTERNAL AGENT" || kind === "MCP SERVER") return;
+    if (!kindSupportsDdl(kind)) return;
     const fresh = getCached();
     if (fresh !== null) {
       if (content !== fresh) setContent(fresh);
@@ -4913,14 +4914,14 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Make Live", <CloudUploadOutlined style={{ fontSize: 12 }} />, makeNotebookLive, undefined, !featureFlags.snowparkNotebooks, "Snowpark & Notebooks is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && menuItem("Tag References…", <TagsOutlined style={{ fontSize: 12 }} />, openTagReferences)}
           {ctxMenu.nodeType === "obj" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "GATEWAY" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "MODEL MONITOR" && ctxMenu.objKind !== "DATASET" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && menuItem("View Definition", null, viewDefinition)}
+          {ctxMenu.nodeType === "obj" && kindSupportsDdl(ctxMenu.objKind) && menuItem("View Definition", null, viewDefinition)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ICEBERG TABLE" && ctxMenu.objKind !== "HYBRID TABLE" && ctxMenu.objKind !== "EVENT TABLE" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "JOIN POLICY" && ctxMenu.objKind !== "PRIVACY POLICY" && ctxMenu.objKind !== "STORAGE LIFECYCLE POLICY" && ctxMenu.objKind !== "PASSWORD POLICY" && ctxMenu.objKind !== "SESSION POLICY" && ctxMenu.objKind !== "AGGREGATION POLICY" && ctxMenu.objKind !== "PROJECTION POLICY" && ctxMenu.objKind !== "AUTHENTICATION POLICY" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "GATEWAY" && ctxMenu.objKind !== "CONTACT" && ctxMenu.objKind !== "STREAMLIT" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "MODEL MONITOR" && ctxMenu.objKind !== "DATASET" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "AGENT" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && ctxMenu.objKind !== "SEMANTIC VIEW" && ctxMenu.objKind !== "VIEW" && ctxMenu.objKind !== "SEQUENCE" && ctxMenu.objKind !== "STREAM" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {/* Comparison diffs via GET_DDL, which image repositories, services,
               packages policies, and models don't support — exclude them so the
               diff view can't surface a GET_DDL error for a kind that has no DDL. */}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "GATEWAY" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "MODEL MONITOR" && ctxMenu.objKind !== "DATASET" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" &&
+          {ctxMenu.nodeType === "obj" && kindSupportsDdl(ctxMenu.objKind) &&
             menuItem("Select for Comparison", <DiffOutlined style={{ fontSize: 12 }} />, selectObjForComparison)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "GATEWAY" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "MODEL MONITOR" && ctxMenu.objKind !== "DATASET" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && pendingDiff !== null &&
+          {ctxMenu.nodeType === "obj" && kindSupportsDdl(ctxMenu.objKind) && pendingDiff !== null &&
             menuItem(`Compare with: ${pendingDiff.label}`, <DiffOutlined style={{ fontSize: 12, color: "var(--accent)" }} />, compareObjWith)}
           {ctxMenu.nodeType === "obj" &&
             (ctxMenu.objKind === "VIEW" || ctxMenu.objKind === "PROCEDURE" || ctxMenu.objKind === "FUNCTION" || ctxMenu.objKind === "EXTERNAL FUNCTION") &&

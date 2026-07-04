@@ -13,7 +13,8 @@ git gutter decorations, the tab bar, editor preferences, and the cross-tab searc
 | File | Purpose |
 |------|---------|
 | `SqlEditor.tsx` | Main editor component. Mounts Monaco, registers all completion/hover/code-action/signature providers (module-level, not in render), runs `runDiagnostics` on content change, handles git gutter decoration, clipboard patching, and the snippet context menu via internal Monaco `MenuRegistry`. Exports `DiagMarker`, `ColInfo`, `ResolvedRef`, `pendingMcpMarkers`. |
-| `sqlEditorUtils.ts` | Pure helpers: `UC`, `quoteIfNecessary`, `FKEntry`, `getFKs` (async, deduped), `getFKsCached`, `setFKCache`, `buildVariableSuggestions`, `getQualifiedIdent`, `getStatementLineRanges`. No React. |
+| `sqlEditorUtils.ts` | Pure helpers: `UC`, `quoteIfNecessary`, `FKEntry`, `getFKs` (async, deduped), `getFKsCached`, `setFKCache`, `buildVariableSuggestions`, `getQualifiedIdent`, `getStatementLineRanges`, `identifierRangeAt` (quote-aware column span of the dotted identifier under the cursor, for the cmd/ctrl-hover link underline). No React. |
+| `sqlEditorUtils.test.ts` | Unit tests for `identifierRangeAt` (bare/quoted/escaped-quote/unterminated-quote spans). |
 | `editorRef.ts` | Singleton ref to the active `IStandaloneCodeEditor`. Exports `setEditorInstance`, `getEditorInstance`, `insertAtCursor`. Kept separate from `SqlEditor.tsx` so Vite Fast Refresh is not broken by mixing component and non-component exports. |
 | `monacoSetup.ts` | One-time Monaco initialisation: Snowflake Monarch language, Python Monarch grammar (inlined to avoid side-effect imports), YAML worker wiring, `thawDarkTheme`/`thawLightTheme` registration. Called via `ensureMonacoSetup()` guard. Imports the **slim** Monaco API (`editor.api.js` + `editor.all.js`), never the `monaco-editor` barrel, to keep the TS/HTML/CSS/JSON language workers (~9 MB) and ~80 basic-language grammars out of the binary — see [gotchas](../../../../docs/concepts/gotchas.md). |
 | `snowflakeSql.ts` | Snowflake Monarch tokenizer (`snowflakeMonarchLanguage`) and custom Monaco theme definitions (`thawDarkTheme`, `thawLightTheme`). The tokenizer's `datatypes` list is sourced from the generated artifact `src/generated/snowflakeDataTypes.ts` (source of truth: `internal/snowflake/datatypes.go`) rather than hand-maintained. |
@@ -56,6 +57,31 @@ the bundled artifact `src/generated/snowflakeDataTypes.ts`.)
 **Provider registration:** All completion, hover, signature-help, and code-action providers
 are registered once at module level (disposable refs). Never re-register inside the component
 render or `handleMount` — doing so accumulates duplicate providers across editor remounts.
+
+**Object hover + cmd/ctrl modifier (`ddlHoverTooltips` flag):** `resolveStoreObject(parts)`
+(module-level) resolves a dotted identifier under the cursor to a store object of **any** kind
+(not just TABLE/VIEW), fetching the schema's objects on demand. On a name collision across
+namespaces (e.g. a stream named after its source table) it prefers the TABLE/VIEW — a heuristic
+tie-break, since hover has no parse context. `editor.onMouseMove` uses it via the shared
+`showObjectTooltip(pos, obj, withDdl)`: plain hover shows a lightweight identity tooltip
+(`withDdl=false` → header-only `KIND — DB.SCHEMA.NAME`, no DDL fetch); with the platform modifier
+(`metaKey`/`ctrlKey`) held, `withDdl=true` fetches `GetObjectDDL(db, schema, kind, name, "")` and
+renders the full DDL — no click. Kinds `GET_DDL` can't render (`kindSupportsDdl` from
+`utils/objectDdl.ts`) get no underline and fall back to the identity tooltip; a failed/empty fetch
+also falls back to identity (not cached, so a re-hover retries). `cmdModHeld` tracks the modifier
+from mouse-move events and from **document-level** `keydown`/`keyup` listeners (`onModChange`) —
+Monaco's `editor.onKeyDown` only fires while the hidden textarea is focused, which hover never is, so
+document listeners (gated on `lastSqlMousePos`) are what make "press the modifier while stationary
+over an object" work without clicking in first. That path upgrades identity → DDL via
+`showDdlAtLastPos()` — which honours diagnostic-marker precedence (`markerAt`) and bails if the mouse
+moved mid-fetch. While held, `evaluateCmdLink` underlines the identifier with a `.cmd-link`
+decoration (link affordance); `identifierRangeAt` (in `sqlEditorUtils.ts`, quote-aware so
+`DB."MY TABLE".COL` spans as one, unit-tested) computes the dotted-identifier span. All four hover
+tooltips (diagnostic, column, object, function) share `positionTooltip(pos, heightPx)` for screen
+placement. A resolved
+table alias short-circuits to the column path only — never object resolution — so `alias.col` can't
+false-match a `schema.object`. The store `kind` is passed straight through — never guessed. Column
+and function hovers keep their own dedicated paths in `onMouseMove`.
 
 **Grammar-driven keyword completions:** `GetAutocompleteContextFull` returns `grammarExpected`
 — the recursive-descent grammar's "valid next" set at the cursor (see

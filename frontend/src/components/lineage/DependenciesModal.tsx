@@ -22,6 +22,7 @@ import {
 import type { DataNode } from "antd/es/tree";
 import { GetObjectDependencies, GetObjectDDL } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
+import { kindSupportsDdl } from "../../utils/objectDdl";
 
 const { Text } = Typography;
 
@@ -41,6 +42,9 @@ function DdlTooltip({
   children: React.ReactNode;
 }) {
   const cacheKey = `${db}\x00${schema}\x00${kind}\x00${name}\x00${args}`;
+  // Skip the doomed GET_DDL for kinds Snowflake can't render (SERVICE, MODEL, …),
+  // matching every other frontend DDL entry point. Renders children with no tooltip.
+  const ddlSupported = kindSupportsDdl(kind);
 
   const getCached = () => {
     const entry = ddlCache.get(cacheKey);
@@ -55,7 +59,7 @@ function DdlTooltip({
   // disables the tooltip entirely when title={null}, which prevents onOpenChange
   // from ever firing in the initial state.
   const triggerLoad = () => {
-    if (loading) return;
+    if (loading || !ddlSupported) return;
     const fresh = getCached();
     if (fresh !== null) {
       if (content !== fresh) setContent(fresh);
