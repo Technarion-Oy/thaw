@@ -5346,6 +5346,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={viewPropsModal.schema}
           name={viewPropsModal.name}
           onClose={() => setViewPropsModal(null)}
+          onSuccess={() => refreshDatabaseByName(viewPropsModal.db, { schema: viewPropsModal.schema, kind: "VIEW" })}
         />
       )}
 

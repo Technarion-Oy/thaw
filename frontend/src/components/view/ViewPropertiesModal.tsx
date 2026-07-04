@@ -12,13 +12,15 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Modal, Spin, Button, Input, Space, Typography, Alert, Tooltip, Switch,
+  Modal, Spin, Button, Input, Select, Space, Typography, Alert, Tooltip, Switch, Tag,
 } from "antd";
 import {
   EyeOutlined, EditOutlined, CheckOutlined, CloseOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterView } from "../../../wailsjs/go/app/App";
+import { GetObjectProperties, AlterView, GetObjectTagReferences } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
+import TagsRow, { EditableTag } from "../shared/TagsRow";
+import { quoteIdent, identToken } from "../shared/ObjectNameCaseControl";
 
 const { Text } = Typography;
 
@@ -144,13 +146,48 @@ interface Props {
   schema: string;
   name: string;
   onClose: () => void;
+  onSuccess?: () => void;
 }
 
-export default function ViewPropertiesModal({ db, schema, name, onClose }: Props) {
+export default function ViewPropertiesModal({ db, schema, name, onClose, onSuccess }: Props) {
   const [rows, setRows] = useState<snowflake.PropertyPair[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [secureSaving, setSecureSaving] = useState(false);
+  const [ctSaving, setCtSaving] = useState(false);
+  const [tags, setTags] = useState<EditableTag[]>([]);
+
+  // Tags use the no-latency INFORMATION_SCHEMA.TAG_REFERENCES read so a SET/UNSET
+  // reflects immediately. Best-effort: SET/UNSET still work if the read fails.
+  // Tags whose LEVEL is not the object itself (inherited from schema/database)
+  // are shown for context but can't be unset here — that has to happen where
+  // they were applied.
+  const reloadTags = useCallback(async () => {
+    try {
+      const t = await GetObjectTagReferences("VIEW", db, schema, name, "");
+      const cols = (t?.columns ?? []).map((c) => c.toLowerCase());
+      const ci = (n: string) => cols.indexOf(n);
+      const dbI = ci("tag_database"), scI = ci("tag_schema"), nmI = ci("tag_name"),
+        vlI = ci("tag_value"), lvI = ci("level");
+      const parsed = (t?.rows ?? []).map((row): EditableTag => {
+        const tdb = dbI >= 0 ? String(row[dbI] ?? "") : "";
+        const tsc = scI >= 0 ? String(row[scI] ?? "") : "";
+        const tnm = nmI >= 0 ? String(row[nmI] ?? "") : "";
+        const qualified = [tdb, tsc, tnm].filter(Boolean).map(quoteIdent).join(".");
+        const inherited = lvI >= 0 && String(row[lvI] ?? "").toUpperCase() !== "VIEW";
+        return {
+          key: qualified,
+          name: tnm,
+          value: vlI >= 0 ? String(row[vlI] ?? "") : "",
+          removable: !inherited,
+          suffix: inherited ? " (inherited)" : "",
+        };
+      });
+      setTags(parsed);
+    } catch {
+      setTags([]);
+    }
+  }, [db, schema, name]);
 
   const reload = useCallback(async () => {
     setRows(null);
@@ -161,7 +198,8 @@ export default function ViewPropertiesModal({ db, schema, name, onClose }: Props
     } catch (e) {
       setError(String(e));
     }
-  }, [db, schema, name]);
+    reloadTags();
+  }, [db, schema, name, reloadTags]);
 
   useEffect(() => { reload(); }, [reload]);
 
@@ -192,12 +230,52 @@ export default function ViewPropertiesModal({ db, schema, name, onClose }: Props
     }
   };
 
+  const setChangeTracking = async (value: string) => {
+    setCtSaving(true);
+    setActionError(null);
+    try {
+      await AlterView(db, schema, name, `SET CHANGE_TRACKING = ${value}`);
+      await reload();
+    } catch (e) {
+      setActionError(`Change tracking update failed: ${String(e)}`);
+    } finally {
+      setCtSaving(false);
+    }
+  };
+
+  // In-place rename within the same schema — mirrors the sidebar's Rename dialog
+  // (same-schema, identToken folding by default) so both entry points produce the
+  // same stored identifier. The modal's identity changes, so refresh the browser
+  // and close rather than track the new name.
+  const rename = async (newName: string) => {
+    const t = newName.trim();
+    if (!t || t === name) return;
+    const target = `${quoteIdent(db)}.${quoteIdent(schema)}.${identToken(t, false)}`;
+    await AlterView(db, schema, name, `RENAME TO ${target}`);
+    onSuccess?.();
+    onClose();
+  };
+
+  const setTag = async (tagName: string, tagValue: string) => {
+    // Tag name may be a qualified identifier (db.schema.tag) — inserted verbatim;
+    // the value is a quoted string literal.
+    await AlterView(db, schema, name, `SET TAG ${tagName} = ${q1(tagValue)}`);
+    await reloadTags();
+  };
+
+  const unsetTag = async (qualified: string) => {
+    await AlterView(db, schema, name, `UNSET TAG ${qualified}`);
+    await reloadTags();
+  };
+
   const comment = find("comment");
   const definingQuery = find("text");
   const isSecure = truthy(find("is_secure"));
+  const changeTracking = find("change_tracking");
+  const ctOn = /^(on|true)$/i.test(changeTracking.trim());
 
   // Keys handled by the editable Settings section or rendered elsewhere.
-  const handledKeys = new Set(["comment", "is_secure", "text"]);
+  const handledKeys = new Set(["name", "comment", "is_secure", "text", "change_tracking"]);
 
   return (
     <Modal
@@ -241,6 +319,11 @@ export default function ViewPropertiesModal({ db, schema, name, onClose }: Props
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
               <EditRow
+                label="Rename to"
+                value={name}
+                onSave={rename}
+              />
+              <EditRow
                 label="Comment"
                 value={comment}
                 canUnset={comment !== ""}
@@ -258,6 +341,23 @@ export default function ViewPropertiesModal({ db, schema, name, onClose }: Props
                   />
                 </td>
               </tr>
+              <tr>
+                <td style={LABEL_TD}>Change tracking</td>
+                <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
+                  <Space>
+                    <Tag color={ctOn ? "green" : "default"}>{ctOn ? "ON" : "OFF"}</Tag>
+                    <Select
+                      size="small"
+                      value={ctOn ? "TRUE" : "FALSE"}
+                      onChange={setChangeTracking}
+                      loading={ctSaving}
+                      style={{ width: 100 }}
+                      options={[{ value: "TRUE", label: "On" }, { value: "FALSE", label: "Off" }]}
+                    />
+                  </Space>
+                </td>
+              </tr>
+              <TagsRow tags={tags} onSetTag={setTag} onUnsetTag={unsetTag} />
             </tbody>
           </table>
 
