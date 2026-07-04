@@ -39,7 +39,7 @@ import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeS
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { FUNCTION_CATEGORIES } from "./snowflakeSql";
 import { getOrCreateMenuId } from "./monacoMenu";
-import { UC, quoteIfNecessary, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt } from "./sqlEditorUtils";
+import { UC, quoteIfNecessary, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt, starAtPosition, StarToken } from "./sqlEditorUtils";
 import ExplainModal from "../results/ExplainModal";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 import { kindSupportsDdl } from "../../utils/objectDdl";
@@ -573,6 +573,103 @@ let _explainMenuRegistered = false;
     group: "2_thaw_explain",
     order: 0,
     when: ContextKeyExpr.equals("editorLangId", "sql"),
+  });
+})();
+
+// ── "Expand *" context menu item ─────────────────────────────────────────────
+// Detect a select-list `*` (or `alias.*`) under the right-click position and,
+// when present, offer to replace it with the resolved column list.
+// `starAtPosition` lives in sqlEditorUtils (pure, so it's unit-testable without
+// pulling in Monaco).
+
+// Set on context-menu open (from e.target.position) so the command and the menu
+// gate read the exact same detection, regardless of when the cursor settles.
+let _starTarget: StarToken | null = null;
+
+let _expandWildcardRegistered = false;
+(() => {
+  if (_expandWildcardRegistered) return;
+  _expandWildcardRegistered = true;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (CommandsRegistry as any).registerCommand("thaw.expandWildcard", async () => {
+    const editor = _activeSnippetEditor;
+    const star = _starTarget;
+    if (!editor || !star) return;
+    const model = editor.getModel();
+    if (!model) return;
+
+    const fullSql = model.getValue();
+    const cursorLine = star.range.startLineNumber;
+
+    // Scope to the statement under the cursor.
+    let stmtSql = fullSql;
+    try {
+      const ranges = await GetSqlStatementRanges(fullSql);
+      for (const r of ranges || []) {
+        if (cursorLine >= r.startLine && cursorLine <= r.endLine) {
+          stmtSql = fullSql.split("\n").slice(r.startLine - 1, r.endLine).join("\n");
+          break;
+        }
+      }
+    } catch { /* fall back to full SQL */ }
+
+    // Resolve the FROM/JOIN table refs for that statement (same call the JOIN
+    // completion + drag-drop paths use).
+    let refs: ResolvedRef[];
+    try {
+      const rawRefs = await ParseJoinTableRefs(stmtSql);
+      refs = await ResolveTableRefs(
+        (rawRefs || []) as any[], // eslint-disable-line @typescript-eslint/no-explicit-any
+        useObjectStore.getState().objects.map((o) => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+        { database: "", schema: "" } as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+        { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema } as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+      );
+    } catch { return; }
+    if (!refs || refs.length === 0) return;
+
+    const esc = (s: string) => s.replace(/"/g, '""');
+
+    // `alias.*` → just that ref, keep the alias prefix.
+    // bare `*` → all refs; qualify each column only when there's more than one table.
+    let targets: ResolvedRef[];
+    let qualify: boolean;
+    if (star.alias) {
+      const a = star.alias.replace(/"/g, "").toLowerCase();
+      const match = refs.find((r) => (r.alias || r.name).toLowerCase() === a || r.name.toLowerCase() === a);
+      if (!match) return;
+      targets = [match];
+      qualify = true;
+    } else {
+      targets = refs;
+      qualify = refs.length > 1;
+    }
+
+    const parts: string[] = [];
+    for (const t of targets) {
+      let cols: string[];
+      try { cols = await GetTableColumns(t.db, t.schema, t.name); }
+      catch { return; } // don't leave a half-expanded list behind
+      if (!cols || cols.length === 0) return;
+      const prefix = star.alias ?? t.alias ?? t.name;
+      for (const c of cols) parts.push(qualify ? `${prefix}."${esc(c)}"` : `"${esc(c)}"`);
+    }
+    if (parts.length === 0) return;
+
+    editor.executeEdits("thaw.expandWildcard", [{ range: star.range, text: parts.join(", "), forceMoveMarkers: true }]);
+    editor.pushUndoStop();
+    editor.focus();
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (MenuRegistry as any).appendMenuItem((MenuId as any).EditorContext, {
+    command: { id: "thaw.expandWildcard", title: "Expand *" },
+    group: "2_thaw_expand",
+    order: 0,
+    when: ContextKeyExpr.and(
+      ContextKeyExpr.equals("editorLangId", "sql"),
+      ContextKeyExpr.has("thawStarUnderCursor"),
+    ),
   });
 })();
 
@@ -2365,7 +2462,14 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       () => window.dispatchEvent(new CustomEvent("save-file"))
     );
 
-    editor.onContextMenu(() => { _activeSnippetEditor = editor; });
+    const starCtxKey = editor.createContextKey<boolean>("thawStarUnderCursor", false);
+    editor.onContextMenu((e) => {
+      _activeSnippetEditor = editor;
+      const model = editor.getModel();
+      const pos = e.target.position;
+      _starTarget = model && pos ? starAtPosition(model, pos) : null;
+      starCtxKey.set(!!_starTarget);
+    });
     editor.onDidDispose(() => {
       if (_activeSnippetEditor === editor) _activeSnippetEditor = null;
     });

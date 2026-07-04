@@ -45,6 +45,49 @@ export function identifierRangeAt(line: string, idx0: number): { start: number; 
   return { start: s + 1, end: e + 2 };   // Monaco endColumn is exclusive (points after last char)
 }
 
+// ── starAtPosition ────────────────────────────────────────────────────────────
+// If `position` sits on a select-list wildcard (`*` or `alias.*`), return the
+// token's Monaco range and any `alias.` prefix; otherwise null. Function-argument
+// stars like COUNT(*) are skipped. Used by the editor's "Expand *" context menu.
+export interface StarToken {
+  range: { startLineNumber: number; endLineNumber: number; startColumn: number; endColumn: number };
+  alias: string | null;
+}
+export function starAtPosition(
+  model: { getLineContent: (line: number) => string },
+  position: { lineNumber: number; column: number },
+): StarToken | null {
+  const line = model.getLineContent(position.lineNumber);
+  const col = position.column; // 1-indexed; char at column c is line[c-1]
+  // A right-click lands the cursor on either edge of the star, so check the char
+  // under the cursor and the one to its left.
+  let starIdx = -1;
+  for (const c of [col - 1, col - 2]) {
+    if (c >= 0 && c < line.length && line[c] === "*") { starIdx = c; break; }
+  }
+  if (starIdx === -1) return null;
+
+  // Walk left over an optional `alias.` prefix.
+  let i = starIdx - 1;
+  let alias: string | null = null;
+  if (i >= 0 && line[i] === ".") {
+    let j = i - 1;
+    while (j >= 0 && /[A-Za-z0-9_$"]/.test(line[j])) j--;
+    alias = line.slice(j + 1, i);
+    i = j;
+  }
+  // ponytail: a '(' immediately before the token means it's a function argument
+  // (COUNT(*), etc.), not a select-list wildcard — skip it.
+  while (i >= 0 && /\s/.test(line[i])) i--;
+  if (i >= 0 && line[i] === "(") return null;
+
+  const startCol = (alias ? starIdx - 1 - alias.length : starIdx) + 1;
+  return {
+    range: { startLineNumber: position.lineNumber, endLineNumber: position.lineNumber, startColumn: startCol, endColumn: starIdx + 2 },
+    alias: alias && alias.length ? alias : null,
+  };
+}
+
 // ── quoteIfNecessary ─────────────────────────────────────────────────────────
 // Quotes a Snowflake identifier if it contains characters that require quoting
 // or conflicts with a reserved keyword. Accepts the keyword set as a parameter.
