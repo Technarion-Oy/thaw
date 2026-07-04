@@ -40,6 +40,7 @@ type erDesignerColumnIn struct {
 	IsPK     bool   `json:"isPK,omitempty" jsonschema:"true if this column is part of the primary key"`
 	NotNull  bool   `json:"notNull,omitempty" jsonschema:"true if the column has a NOT NULL constraint"`
 	FKRef    string `json:"fkRef,omitempty" jsonschema:"foreign key reference in SCHEMA.TABLE.COLUMN format"`
+	Default  string `json:"defaultValue,omitempty" jsonschema:"existing column DEFAULT expression to preserve across edits (echo the value from get_er_designer_state, especially when renaming a column); leave empty for new columns"`
 }
 
 // OpenERDesignerPayload is the Wails event payload for "mcp:open-er-designer".
@@ -85,6 +86,7 @@ func mergeAITables(live snowflake.ERDiagramData, aiTables []erDesignerTableIn) s
 				DataType: c.DataType,
 				IsPK:     c.IsPK,
 				Nullable: nullable,
+				Default:  c.Default,
 			})
 			// Convert fkRef to ERForeignKey.
 			if c.FKRef != "" {

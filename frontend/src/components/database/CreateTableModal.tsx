@@ -22,6 +22,7 @@ import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
 import SqlPreview from "../shared/SqlPreview";
 import DefaultFunctionPicker from "../shared/DefaultFunctionPicker";
+import { columnConstraints } from "../shared/columnDdl";
 import { useQuotedIdentifiers, useCreateSubmit } from "../shared/createModalHooks";
 
 interface ColumnDef {
@@ -89,12 +90,12 @@ function buildSql(db: string, schema: string, cfg: TableConfig): string {
   // Columns
   cfg.columns.forEach((col, idx) => {
     let line = `    "${esc(col.name)}" ${col.type}`;
-    // Snowflake column grammar: DEFAULT precedes NOT NULL and the inline
-    // PRIMARY KEY / UNIQUE constraints.
-    if (col.defaultValue.trim()) line += ` DEFAULT ${col.defaultValue.trim()}`;
-    if (col.notNull) line += " NOT NULL";
-    if (col.primaryKey) line += " PRIMARY KEY";
-    if (col.unique && !col.primaryKey) line += " UNIQUE";
+    line += columnConstraints({
+      defaultValue: col.defaultValue,
+      notNull: col.notNull,
+      primaryKey: col.primaryKey,
+      unique: col.unique,
+    });
     if (col.comment.trim()) line += ` COMMENT ${sq(col.comment.trim())}`;
     
     lines.push(line + (idx === cfg.columns.length - 1 ? "" : ","));

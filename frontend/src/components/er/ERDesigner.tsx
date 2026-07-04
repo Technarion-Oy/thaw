@@ -14,7 +14,8 @@ import { initFromERData, normalizeDataType, mergeAITablesIntoDesigner } from "./
 import type { AITableIn } from "./erCanvasLayout";
 import { buildMermaid } from "./buildMermaid";
 import DefaultFunctionPicker from "../shared/DefaultFunctionPicker";
-import { type DesignerColumn, type DesignerTable, SF_DATA_TYPES, SF_TYPES, normalizeIdentifier } from "./erTypes";
+import { columnConstraints } from "../shared/columnDdl";
+import { type DesignerColumn, type DesignerTable, SF_DATA_TYPES, SF_TYPES, normalizeIdentifier, baselineTableKey } from "./erTypes";
 
 interface Props {
   database: string;
@@ -166,8 +167,9 @@ function generateDiffSQL(
   };
   const tableRef = (schema: string, name: string) =>
     `${q(database)}.${q(schema)}.${q(name.trim())}`;
-  const defClause = (c: DesignerColumn) =>
-    c.defaultValue?.trim() ? ` DEFAULT ${c.defaultValue.trim()}` : "";
+  // DEFAULT + NOT NULL in Snowflake-correct order (PK is emitted table-level).
+  const colTail = (c: DesignerColumn) =>
+    columnConstraints({ defaultValue: c.defaultValue, notNull: c.isPK || c.notNull });
 
   const stmts: string[] = [];
 
@@ -180,8 +182,7 @@ function generateDiffSQL(
       const fkLines: string[] = [];
       for (const c of t.columns) {
         if (!c.name.trim()) continue;
-        const nn = c.isPK || c.notNull ? " NOT NULL" : "";
-        colLines.push(`    ${q(c.name.trim())} ${c.dataType}${defClause(c)}${nn}`);
+        colLines.push(`    ${q(c.name.trim())} ${c.dataType}${colTail(c)}`);
         if (c.isPK) pkCols.push(q(c.name.trim()));
         if (c.fkRef) {
           const parts = c.fkRef.split(".");
@@ -212,7 +213,7 @@ function generateDiffSQL(
     { schema: string; name: string; columns: snowflake.ERColumn[] }
   >();
   for (const t of baseline.tables) {
-    baselineMap.set(`${t.schema.toUpperCase()}.${t.name.toUpperCase()}`, t);
+    baselineMap.set(baselineTableKey(t.schema, t.name), t);
   }
 
   // Baseline FK lookup keyed by "SCHEMA.TABLE.COL"
@@ -228,7 +229,7 @@ function generateDiffSQL(
   const currentSet = new Set<string>();
   for (const t of tables) {
     if (t.schema && t.name.trim()) {
-      currentSet.add(`${t.schema.toUpperCase()}.${t.name.trim().toUpperCase()}`);
+      currentSet.add(baselineTableKey(t.schema, t.name));
     }
   }
 
@@ -244,7 +245,7 @@ function generateDiffSQL(
   // 2. Process each table currently in the designer
   for (const t of tables) {
     if (!t.schema || !t.name.trim()) continue;
-    const key = `${t.schema.toUpperCase()}.${t.name.trim().toUpperCase()}`;
+    const key = baselineTableKey(t.schema, t.name);
     const bt = baselineMap.get(key);
 
     if (!bt) {
@@ -254,8 +255,7 @@ function generateDiffSQL(
       const fkLines: string[] = [];
       for (const c of t.columns) {
         if (!c.name.trim()) continue;
-        const nn = c.isPK || c.notNull ? " NOT NULL" : "";
-        colLines.push(`    ${q(c.name.trim())} ${c.dataType}${defClause(c)}${nn}`);
+        colLines.push(`    ${q(c.name.trim())} ${c.dataType}${colTail(c)}`);
         if (c.isPK) pkCols.push(q(c.name.trim()));
         if (c.fkRef) {
           const parts = c.fkRef.split(".");
@@ -311,14 +311,12 @@ function generateDiffSQL(
         const ck = c.name.trim().toUpperCase();
         const bc = baseColMap.get(ck);
         if (!bc) {
-          // New column
-          const nn = c.isPK || c.notNull ? " NOT NULL" : "";
-          // ponytail: only literal defaults are valid on ADD COLUMN (Snowflake
-          // rejects function expressions), which is why the ƒ picker is hidden
-          // for existing tables; free-text literals are still emitted here.
-          // Existing columns' default changes are not diffed — SET DEFAULT is
-          // heavily restricted anyway.
-          stmts.push(`${alter} ADD COLUMN ${q(c.name.trim())} ${c.dataType}${defClause(c)}${nn};`);
+          // New column on an existing table → ADD COLUMN. Only literal defaults
+          // are valid here (Snowflake rejects function expressions), which is
+          // why the ƒ picker is hidden for existing tables while the free-text
+          // literal input stays. Existing columns' default changes are not
+          // diffed — SET DEFAULT is heavily restricted anyway.
+          stmts.push(`${alter} ADD COLUMN ${q(c.name.trim())} ${c.dataType}${colTail(c)};`);
         } else {
           // Existing column — check for type change.
           // normalizeDataType is applied to bc.dataType (raw from INFORMATION_SCHEMA)
@@ -407,17 +405,24 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
   const tablesRef = useRef(tables);
   tablesRef.current = tables;
 
-  // Baseline table keys ("SCHEMA.TABLE"), matching generateDiffSQL's keying.
-  // A table absent here is brand-new → its columns emit CREATE TABLE (function
-  // DEFAULTs allowed). A table present here diffs to ALTER … ADD COLUMN, where
-  // Snowflake rejects function-expression defaults, so the ƒ picker is hidden.
-  const baselineTableKeys = useMemo(() => {
-    const s = new Set<string>();
-    for (const bt of initialData?.tables ?? []) s.add(`${bt.schema.toUpperCase()}.${bt.name.toUpperCase()}`);
-    return s;
+  // Baseline snapshot keyed by table (uppercased "SCHEMA.TABLE" → set of its
+  // column names), matching generateDiffSQL's keying. Used to decide which
+  // DEFAULT controls to show per column.
+  const baselineCols = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    for (const bt of initialData?.tables ?? []) {
+      m.set(baselineTableKey(bt.schema, bt.name), new Set(bt.columns.map((c) => c.name.trim().toUpperCase())));
+    }
+    return m;
   }, [initialData]);
-  const isExistingTable = (t: DesignerTable) =>
-    baselineTableKeys.has(`${t.schema.toUpperCase()}.${t.name.trim().toUpperCase()}`);
+  // A table absent from the baseline is brand-new → CREATE TABLE (function
+  // DEFAULTs allowed). A table present diffs to ALTER; existing columns can't
+  // change their DEFAULT, but a newly-added column emits ADD COLUMN … DEFAULT.
+  const isExistingTable = (t: DesignerTable) => baselineCols.has(baselineTableKey(t.schema, t.name));
+  const isNewColumn = (t: DesignerTable, c: DesignerColumn) => {
+    const cols = baselineCols.get(baselineTableKey(t.schema, t.name));
+    return !cols || !cols.has(c.name.trim().toUpperCase());
+  };
 
   // Canvas selection (multi-select via Cmd/Ctrl+click)
   const [selectedTableIds, setSelectedTableIds] = useState<string[]>([]);
@@ -1000,10 +1005,13 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
                         options={fkOptions(t.id)}
                         showSearch
                       />
-                      {/* DEFAULT is a new-table-only field: Snowflake's ALTER … ADD
-                          COLUMN rejects function defaults, and literal defaults on
-                          existing tables belong in the dedicated Add Column dialog. */}
-                      {!isExistingTable(t) && (
+                      {/* DEFAULT editing is for *new* columns only — an existing
+                          column's default can't be changed (SET DEFAULT is heavily
+                          restricted). The ƒ picker is further limited to new tables:
+                          Snowflake rejects function-expression defaults on ADD COLUMN,
+                          so a new column on an existing table gets free-text (literal)
+                          only. */}
+                      {isNewColumn(t, c) && (
                         <>
                           <Input
                             size="small"
@@ -1012,7 +1020,9 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
                             onChange={(e) => updateColumn(t.id, c.id, { defaultValue: e.target.value })}
                             style={{ width: 110, flexShrink: 0, fontFamily: "monospace", fontSize: 11 }}
                           />
-                          <DefaultFunctionPicker onPick={(sql) => updateColumn(t.id, c.id, { defaultValue: sql })} />
+                          {!isExistingTable(t) && (
+                            <DefaultFunctionPicker onPick={(sql) => updateColumn(t.id, c.id, { defaultValue: sql })} />
+                          )}
                         </>
                       )}
                       <Button

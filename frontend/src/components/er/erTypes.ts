@@ -84,6 +84,13 @@ export interface JoinPath {
 export const tableKey = (schema: string, name: string) =>
   `${schema.trim()}.${name.trim()}`;
 
+/** Case-insensitive baseline key ("SCHEMA.TABLE" uppercased) used to match a
+ *  designer table against the INFORMATION_SCHEMA baseline, whose identifiers are
+ *  uppercase. Distinct from `tableKey` (case-preserving) on purpose — the diff
+ *  and the "is this table new?" check must agree on this uppercased form. */
+export const baselineTableKey = (schema: string, name: string) =>
+  `${schema.trim().toUpperCase()}.${name.trim().toUpperCase()}`;
+
 export const ER_NODE_WIDTH = 240;
 export const ER_NODE_HEADER_HEIGHT = 32;
 export const ER_NODE_ROW_HEIGHT = 24;

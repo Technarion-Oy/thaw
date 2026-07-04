@@ -4,6 +4,9 @@
 // Unauthorized copying, distribution, modification, or use of this software,
 // in whole or in part, is strictly prohibited without prior written permission
 // from Technarion Oy.
+//
+// Commercial use of this software is restricted to parties holding a valid
+// license agreement with Technarion Oy.
 
 import { useState, useMemo, useEffect, useRef } from "react";
 import { Modal, Input, Button, Menu } from "antd";
