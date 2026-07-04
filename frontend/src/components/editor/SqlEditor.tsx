@@ -37,7 +37,7 @@ import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableColumn
 import { SNOWFLAKE_DATA_TYPES } from "../../generated/snowflakeDataTypes";
 import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateDataTypes, ValidateGrammar, ValidateAntiPatterns, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContextFull, ResolveTableRefs, ComputeGitLineDiff } from "../../../wailsjs/go/sqleditor/Service";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
-import { BUILTIN_FUNCTION_CATEGORIES, CONTEXT_FUNCTIONS } from "./snowflakeSql";
+import { FUNCTION_CATEGORIES } from "./snowflakeSql";
 import { UC, quoteIfNecessary, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt } from "./sqlEditorUtils";
 import ExplainModal from "../results/ExplainModal";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
@@ -524,12 +524,7 @@ let _snippetMenuRegistered = false;
       order: SNIPPET_CATEGORIES.length,
     });
 
-    const functionCategories: { header: string; fns: readonly string[] }[] = [
-      { header: "Context", fns: CONTEXT_FUNCTIONS },
-      ...Object.entries(BUILTIN_FUNCTION_CATEGORIES).map(([header, fns]) => ({ header, fns })),
-    ];
-
-    functionCategories.forEach((cat, ci) => {
+    FUNCTION_CATEGORIES.forEach((cat, ci) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let catMenuId: any;
       const catKey = `thaw.snippets.builtins.${ci}`;
@@ -545,7 +540,7 @@ let _snippetMenuRegistered = false;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (MenuRegistry as any).appendMenuItem(fnRootId, {
         submenu: catMenuId,
-        title: cat.header,
+        title: cat.name,
         group: "fns",
         order: ci,
       });

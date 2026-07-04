@@ -9,24 +9,20 @@ import { useState, useMemo, useEffect } from "react";
 import { Modal, Input, Button, Menu } from "antd";
 import type { MenuProps } from "antd";
 import { useQueryStore } from "../../store/queryStore";
-import { BUILTIN_FUNCTION_CATEGORIES, CONTEXT_FUNCTIONS } from "../editor/snowflakeSql";
+import { FUNCTION_CATEGORIES } from "../editor/snowflakeSql";
 
 interface Snippet { name: string; sql: string; }
 // A category is either a leaf group (has `items`) or a parent (has `children`),
 // letting the left panel render as a cascading multi-level menu.
 interface Category { label: string; items?: Snippet[]; children?: Category[]; }
 
-// Built-in functions, sourced from the editor's curated lists (no duplicate
-// list). Context functions first, then the categorised builtins — callable form
-// (`NAME()`) as the snippet body.
+// Built-in functions, sourced from the shared catalogue (no duplicate list) —
+// callable form (`NAME()`) as the snippet body.
 const fnItems = (names: readonly string[]): Snippet[] => names.map((n) => ({ name: n, sql: `${n}()` }));
 
 const FUNCTIONS_CATEGORY: Category = {
   label: "Built-in Functions",
-  children: [
-    { label: "Context", items: fnItems(CONTEXT_FUNCTIONS) },
-    ...Object.entries(BUILTIN_FUNCTION_CATEGORIES).map(([label, names]) => ({ label, items: fnItems(names) })),
-  ],
+  children: FUNCTION_CATEGORIES.map((cat) => ({ label: cat.name, items: fnItems(cat.fns) })),
 };
 
 const CATEGORIES: Category[] = [
@@ -368,7 +364,11 @@ export default function SnippetsModal({ onClose }: Props) {
       setOpenKeys(allCategoryKeys);
       if (defaultLeaf) setSelectedKey(defaultLeaf);
     } else {
+      // Collapse back to the first top-level category and re-select its first
+      // item, so the previewed/highlighted snippet is visible in the tree
+      // (a match selected under a now-collapsed nested category would vanish).
       setOpenKeys([CATEGORIES[0].label]);
+      if (defaultLeaf) setSelectedKey(defaultLeaf);
     }
   }, [q, allCategoryKeys, defaultLeaf]);
 

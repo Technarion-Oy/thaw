@@ -277,6 +277,14 @@ export const CONTEXT_FUNCTIONS: string[] = snowflakeMonarchLanguage.constants.fi
   (c) => c.startsWith("CURRENT_") || ["SYSDATE", "NOW", "LOCALTIME", "LOCALTIMESTAMP"].includes(c),
 );
 
+// Canonical ordered category list (Context first, then the builtins by group).
+// Single shape consumed by both the Code Snippets modal and the editor's
+// right-click "Built-in Functions" submenu — assemble it once, here.
+export const FUNCTION_CATEGORIES: { name: string; fns: string[] }[] = [
+  { name: "Context", fns: CONTEXT_FUNCTIONS },
+  ...Object.entries(BUILTIN_FUNCTION_CATEGORIES).map(([name, fns]) => ({ name, fns })),
+];
+
 // ─── Dark theme ───────────────────────────────────────────────────────────────
 // GitHub dark palette: coral DML, azure clauses, peach DDL, lavender control,
 // gold functions, mint types, amber constants, pale-blue strings.

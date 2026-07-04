@@ -166,6 +166,8 @@ function generateDiffSQL(
   };
   const tableRef = (schema: string, name: string) =>
     `${q(database)}.${q(schema)}.${q(name.trim())}`;
+  const defClause = (c: DesignerColumn) =>
+    c.defaultValue?.trim() ? ` DEFAULT ${c.defaultValue.trim()}` : "";
 
   const stmts: string[] = [];
 
@@ -179,8 +181,7 @@ function generateDiffSQL(
       for (const c of t.columns) {
         if (!c.name.trim()) continue;
         const nn = c.isPK || c.notNull ? " NOT NULL" : "";
-        const def = c.defaultValue?.trim() ? ` DEFAULT ${c.defaultValue.trim()}` : "";
-        colLines.push(`    ${q(c.name.trim())} ${c.dataType}${nn}${def}`);
+        colLines.push(`    ${q(c.name.trim())} ${c.dataType}${nn}${defClause(c)}`);
         if (c.isPK) pkCols.push(q(c.name.trim()));
         if (c.fkRef) {
           const parts = c.fkRef.split(".");
@@ -254,8 +255,7 @@ function generateDiffSQL(
       for (const c of t.columns) {
         if (!c.name.trim()) continue;
         const nn = c.isPK || c.notNull ? " NOT NULL" : "";
-        const def = c.defaultValue?.trim() ? ` DEFAULT ${c.defaultValue.trim()}` : "";
-        colLines.push(`    ${q(c.name.trim())} ${c.dataType}${nn}${def}`);
+        colLines.push(`    ${q(c.name.trim())} ${c.dataType}${nn}${defClause(c)}`);
         if (c.isPK) pkCols.push(q(c.name.trim()));
         if (c.fkRef) {
           const parts = c.fkRef.split(".");
@@ -313,12 +313,12 @@ function generateDiffSQL(
         if (!bc) {
           // New column
           const nn = c.isPK || c.notNull ? " NOT NULL" : "";
-          // ponytail: Snowflake accepts only literal defaults on ADD COLUMN
-          // (function expressions are rejected); we emit whatever the user set
-          // and let Snowflake validate. Existing columns' default changes are
-          // not diffed — SET DEFAULT is heavily restricted anyway.
-          const def = c.defaultValue?.trim() ? ` DEFAULT ${c.defaultValue.trim()}` : "";
-          stmts.push(`${alter} ADD COLUMN ${q(c.name.trim())} ${c.dataType}${nn}${def};`);
+          // ponytail: only literal defaults are valid on ADD COLUMN (Snowflake
+          // rejects function expressions), which is why the ƒ picker is hidden
+          // for existing tables; free-text literals are still emitted here.
+          // Existing columns' default changes are not diffed — SET DEFAULT is
+          // heavily restricted anyway.
+          stmts.push(`${alter} ADD COLUMN ${q(c.name.trim())} ${c.dataType}${nn}${defClause(c)};`);
         } else {
           // Existing column — check for type change.
           // normalizeDataType is applied to bc.dataType (raw from INFORMATION_SCHEMA)
@@ -406,6 +406,18 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
   // Stable ref for tables — used in callbacks that shouldn't re-create on every tables change
   const tablesRef = useRef(tables);
   tablesRef.current = tables;
+
+  // Baseline table keys ("SCHEMA.TABLE"), matching generateDiffSQL's keying.
+  // A table absent here is brand-new → its columns emit CREATE TABLE (function
+  // DEFAULTs allowed). A table present here diffs to ALTER … ADD COLUMN, where
+  // Snowflake rejects function-expression defaults, so the ƒ picker is hidden.
+  const baselineTableKeys = useMemo(() => {
+    const s = new Set<string>();
+    for (const bt of initialData?.tables ?? []) s.add(`${bt.schema.toUpperCase()}.${bt.name.toUpperCase()}`);
+    return s;
+  }, [initialData]);
+  const isExistingTable = (t: DesignerTable) =>
+    baselineTableKeys.has(`${t.schema.toUpperCase()}.${t.name.trim().toUpperCase()}`);
 
   // Canvas selection (multi-select via Cmd/Ctrl+click)
   const [selectedTableIds, setSelectedTableIds] = useState<string[]>([]);
@@ -994,7 +1006,9 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
                         onChange={(e) => updateColumn(t.id, c.id, { defaultValue: e.target.value })}
                         style={{ width: 110, flexShrink: 0, fontFamily: "monospace", fontSize: 11 }}
                       />
-                      <DefaultFunctionPicker onPick={(sql) => updateColumn(t.id, c.id, { defaultValue: sql })} />
+                      {!isExistingTable(t) && (
+                        <DefaultFunctionPicker onPick={(sql) => updateColumn(t.id, c.id, { defaultValue: sql })} />
+                      )}
                       <Button
                         size="small"
                         type="text"
