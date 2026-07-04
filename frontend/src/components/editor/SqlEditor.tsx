@@ -136,6 +136,12 @@ async function ensureSchemaObjectsLoaded(db: string, schema: string): Promise<vo
   await inflight;
 }
 
+// Callable kinds resolveStoreObject skips (they need an overload arg list GET_DDL
+// can't get from a bare hover) — handled by the GetFunctionTooltip fallback instead.
+const RESOLVE_EXCLUDED_KINDS = new Set([
+  "FUNCTION", "PROCEDURE", "EXTERNAL FUNCTION", "DATA METRIC FUNCTION",
+]);
+
 // Resolve a dotted identifier (as returned by GetIdentifierAtColumn) to a schema
 // object in the store — ANY kind, not just TABLE/VIEW. Fetches the schema's
 // objects on demand if not yet cached. Returns null if no object matches.
@@ -150,12 +156,14 @@ async function resolveStoreObject(
   // source table, etc.). With no parse context to disambiguate, prefer the
   // table/view — the far more common hover target. ponytail: heuristic tie-break;
   // wrong only when a non-table object shadows a same-named table in one schema.
-  // FUNCTION/PROCEDURE are intentionally excluded: the overload-aware
-  // GetFunctionTooltip fallback owns them (per-overload signatures + the
-  // "followed by (" keyword guard), and GetObjectDDL with an empty arguments
-  // string fails for any non-zero-arg overload. Falling through keeps both.
+  // Callable kinds are intentionally excluded: the overload-aware GetFunctionTooltip
+  // fallback owns them (per-overload signatures + the "followed by (" keyword guard),
+  // and GetObjectDDL with an empty arguments string fails for any non-zero-arg
+  // overload. All four route through GET_DDL('FUNCTION'/'PROCEDURE', …) needing the
+  // arg list, so excluding them here keeps the identity/DDL path from firing a doomed
+  // GET_DDL. Falling through keeps both.
   const best = (list: Array<{ db: string; schema: string; kind: string; name: string }>) => {
-    const c = list.filter((o) => UC(o.kind) !== "FUNCTION" && UC(o.kind) !== "PROCEDURE");
+    const c = list.filter((o) => !RESOLVE_EXCLUDED_KINDS.has(UC(o.kind)));
     return c.find((o) => o.kind === "TABLE" || o.kind === "VIEW") ?? c[0] ?? null;
   };
   // Shared "match in store → fetch schema if missing → re-match" sequence.
@@ -1645,6 +1653,14 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     let cmdLinkKey: string | null = null;
     let cmdModHeld = false;
     let lastSqlMousePos: any = null;
+    // Model version when lastSqlMousePos was recorded. SQL tabs swap the shared
+    // editor's value (same model, no onMouseLeave on Ctrl+Tab), so a stale position
+    // must be treated as belonging to a different document once the version moves.
+    let lastSqlMouseVersion: number | null = null;
+    const posIsStale = () => {
+      const m = editor.getModel();
+      return !m || lastSqlMouseVersion === null || m.getVersionId() !== lastSqlMouseVersion;
+    };
     const clearCmdLink = () => { if (cmdLinkKey) { cmdLinkDecos.clear(); cmdLinkKey = null; } };
 
     // A single mouse-move drives both the unthrottled cmd-link path and the
@@ -1696,14 +1712,32 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     // buffer)? Returns the aliased table if so. Callers must NOT fall through to
     // resolveStoreObject on a hit — invariant: a resolved alias short-circuits to
     // the column path only, never object resolution. Only 2-part idents can alias.
+    // Resolve the buffer's table refs, memoized per (model version, session db/schema)
+    // so the unthrottled cmd-link path and the debounced hover pipeline share one
+    // full-buffer parse+resolve per hover instead of two (mirrors identifierAt).
+    let aliasRefsKey = "";
+    let aliasRefsPromise: Promise<any[]> | null = null;
+    const resolveAliasRefs = (): Promise<any[]> => {
+      const model = editor.getModel();
+      const sess = useSessionStore.getState();
+      const key = `${model?.getVersionId() ?? 0}\0${sess.database}\0${sess.schema}`;
+      if (key !== aliasRefsKey || !aliasRefsPromise) {
+        aliasRefsKey = key;
+        const objects = useObjectStore.getState().objects;
+        const text = model?.getValue() ?? "";
+        aliasRefsPromise = (async () => {
+          const rawRefs = await ParseJoinTableRefs(text);
+          return (await ResolveTableRefs((rawRefs || []) as any[], objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, { database: "", schema: "" } as any, { database: sess.database, schema: sess.schema } as any)) ?? [];
+        })();
+      }
+      return aliasRefsPromise;
+    };
     const matchTableAlias = async (
       parts: string[] | null,
     ): Promise<{ db: string; schema: string; name: string } | null> => {
       if (!parts || parts.length !== 2) return null;
-      const objects = useObjectStore.getState().objects;
-      const rawRefs = await ParseJoinTableRefs(editor.getModel()?.getValue() ?? "");
-      const resolved = await ResolveTableRefs((rawRefs || []) as any[], objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, { database: "", schema: "" } as any, { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema } as any);
-      const m = resolved?.find((r) => r.alias.toUpperCase() === parts[0].toUpperCase());
+      const resolved = await resolveAliasRefs();
+      const m = resolved.find((r) => r.alias.toUpperCase() === parts[0].toUpperCase());
       return m ? { db: m.db, schema: m.schema, name: m.name } : null;
     };
 
@@ -1743,6 +1777,8 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       const m = editor.getModel();
       if (!cmdModHeld || !pos || !m || m.getLanguageId() !== "sql" ||
           !useFeatureFlagsStore.getState().flags.ddlHoverTooltips) { clearCmdLink(); return; }
+      // Position recorded against a since-swapped document (tab switch) → not ours.
+      if (posIsStale()) { clearCmdLink(); return; }
       // A diagnostic marker wins at this position (matches the hover flows), so
       // don't offer a "hold-for-DDL" underline where only the marker will show.
       if (markerAt(pos)) { clearCmdLink(); return; }
@@ -1775,6 +1811,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       const m = editor.getModel();
       if (!pos || !m || m.getLanguageId() !== "sql" ||
           !useFeatureFlagsStore.getState().flags.ddlHoverTooltips) return;
+      if (posIsStale()) return;    // pos belongs to a since-swapped document (tab switch)
       if (markerAt(pos)) return;   // diagnostic marker wins at this position (match mouse-move flow)
       const line = lineContentAt(m, pos);
       if (line === null) return;   // stale pos past a shorter (tab-switched) document
@@ -1809,7 +1846,13 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     // stationary over an object" would do nothing until the user clicked in first.
     // Listen at the document level (capture) instead; the downstream handlers gate
     // on lastSqlMousePos, so only the editor the mouse is actually over reacts.
-    const onDocModKey = (e: KeyboardEvent) => onModChange(!!(e.ctrlKey || e.metaKey));
+    // Only the bare Meta/Control key toggles DDL mode — react to its own down/up,
+    // not to chords like Cmd+S / Cmd+Enter (whose keydown also carries metaKey and
+    // would otherwise pop an uninvited DDL tooltip over the hovered identifier).
+    const onDocModKey = (e: KeyboardEvent) => {
+      if (e.key !== "Meta" && e.key !== "Control") return;
+      onModChange(!!(e.ctrlKey || e.metaKey));
+    };
     document.addEventListener("keydown", onDocModKey, true);
     document.addEventListener("keyup", onDocModKey, true);
     editor.onDidDispose(() => {
@@ -1887,6 +1930,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
       cmdModHeld = !!((e.event as any)?.ctrlKey || (e.event as any)?.metaKey);
       lastSqlMousePos = e.target?.position ?? null;
+      lastSqlMouseVersion = model?.getVersionId() ?? null;
       evaluateCmdLink(lastSqlMousePos);
 
       if (!useFeatureFlagsStore.getState().flags.ddlHoverTooltips) {
@@ -2046,6 +2090,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       yamlHoverSetTopRef.current = null;
       cmdModHeld = false;
       lastSqlMousePos = null;
+      lastSqlMouseVersion = null;
       clearCmdLink();
       if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
       if (!isOnTooltipRef.current) scheduleHide();
@@ -2561,7 +2606,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           </span>
           {ddlHover.ddl
             ? <Button size="small" onClick={() => ClipboardSetText(ddlHover.ddl)}>Copy</Button>
-            : ddlHover.db && kindSupportsDdl(ddlHover.kind) && (
+            : ddlHover.db && ddlHover.kind !== "COLUMN" && kindSupportsDdl(ddlHover.kind) && (
                 <span style={{ color: "var(--text-secondary)", fontWeight: 400, whiteSpace: "nowrap" }}>
                   Hold {navigator.platform.toUpperCase().includes("MAC") ? "⌘" : "Ctrl"} for DDL
                 </span>
