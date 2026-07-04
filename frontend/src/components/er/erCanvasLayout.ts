@@ -198,6 +198,7 @@ export interface AITableIn {
     isPK?: boolean;
     notNull?: boolean;
     fkRef?: string;
+    defaultValue?: string;
   }[];
 }
 
@@ -227,6 +228,12 @@ export function mergeAITablesIntoDesigner(
   for (const at of aiTables) {
     const key = tableKey(at.schema, at.name);
     const existing = currentMap.get(key);
+    // Prefer a DEFAULT the AI explicitly echoed back; otherwise fall back to the
+    // one the user already set on a same-named column of a replaced table
+    // (matched case-insensitively). The name-match misses on a rename, which is
+    // why the AI is asked to carry the default through in its proposal.
+    const prevDefaults = new Map<string, string>();
+    for (const c of existing?.columns ?? []) prevDefaults.set(c.name.trim().toUpperCase(), c.defaultValue);
     const dt: DesignerTable = {
       id: existing?.id ?? crypto.randomUUID(),
       schema: at.schema,
@@ -238,6 +245,7 @@ export function mergeAITablesIntoDesigner(
         isPK: c.isPK ?? false,
         notNull: c.notNull ?? (c.isPK ?? false),
         fkRef: c.fkRef ?? "",
+        defaultValue: c.defaultValue ?? prevDefaults.get(c.name.trim().toUpperCase()) ?? "",
       })),
     };
     if (existing) {
@@ -257,6 +265,15 @@ export function mergeAITablesIntoDesigner(
   return merged;
 }
 
+/** An IDENTITY / AUTOINCREMENT column's INFORMATION_SCHEMA COLUMN_DEFAULT holds
+ *  a generator clause (e.g. "IDENTITY START 1 INCREMENT 1"), not a literal — the
+ *  ER Designer has no identity model, so treat it as "no default" rather than
+ *  round-tripping it into an invalid `DEFAULT <clause>` (e.g. on duplicate). */
+function literalDefault(raw: string): string {
+  const s = (raw || "").trim();
+  return /^(IDENTITY|AUTOINCREMENT)\b/i.test(s) ? "" : s;
+}
+
 /** Convert snowflake.ERDiagramData to DesignerTable[] with FK wiring. */
 export function initFromERData(data: snowflake.ERDiagramData): DesignerTable[] {
   const tables: DesignerTable[] = data.tables.map((t) => ({
@@ -270,6 +287,7 @@ export function initFromERData(data: snowflake.ERDiagramData): DesignerTable[] {
       isPK: c.isPK,
       notNull: c.isPK || c.nullable === "NO",
       fkRef: "",
+      defaultValue: literalDefault(c.default),
     })),
   }));
 

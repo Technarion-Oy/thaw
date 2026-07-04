@@ -21,6 +21,8 @@ import DataTypeSelect from "../shared/DataTypeSelect";
 import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
 import SqlPreview from "../shared/SqlPreview";
+import DefaultFunctionPicker from "../shared/DefaultFunctionPicker";
+import { columnConstraints } from "../shared/columnDdl";
 import { useQuotedIdentifiers, useCreateSubmit } from "../shared/createModalHooks";
 
 interface ColumnDef {
@@ -88,10 +90,12 @@ function buildSql(db: string, schema: string, cfg: TableConfig): string {
   // Columns
   cfg.columns.forEach((col, idx) => {
     let line = `    "${esc(col.name)}" ${col.type}`;
-    if (col.notNull) line += " NOT NULL";
-    if (col.primaryKey) line += " PRIMARY KEY";
-    if (col.unique && !col.primaryKey) line += " UNIQUE";
-    if (col.defaultValue.trim()) line += ` DEFAULT ${col.defaultValue.trim()}`;
+    line += columnConstraints({
+      defaultValue: col.defaultValue,
+      notNull: col.notNull,
+      primaryKey: col.primaryKey,
+      unique: col.unique,
+    });
     if (col.comment.trim()) line += ` COMMENT ${sq(col.comment.trim())}`;
     
     lines.push(line + (idx === cfg.columns.length - 1 ? "" : ","));
@@ -212,12 +216,15 @@ export default function CreateTableModal({ db, schema, onClose, onSuccess }: Pro
       title: "Default",
       dataIndex: "defaultValue",
       render: (val, record) => (
-        <Input 
-          size="small" 
-          value={val} 
-          placeholder="NULL"
-          onChange={e => updateColumn(record.key, { defaultValue: e.target.value })} 
-        />
+        <div style={{ display: "flex", gap: 4 }}>
+          <Input
+            size="small"
+            value={val}
+            placeholder="NULL"
+            onChange={e => updateColumn(record.key, { defaultValue: e.target.value })}
+          />
+          <DefaultFunctionPicker onPick={(sql) => updateColumn(record.key, { defaultValue: sql })} />
+        </div>
       )
     },
     {

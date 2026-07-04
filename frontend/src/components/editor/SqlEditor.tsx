@@ -37,6 +37,8 @@ import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableColumn
 import { SNOWFLAKE_DATA_TYPES } from "../../generated/snowflakeDataTypes";
 import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateDataTypes, ValidateGrammar, ValidateAntiPatterns, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContextFull, ResolveTableRefs, ComputeGitLineDiff } from "../../../wailsjs/go/sqleditor/Service";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
+import { FUNCTION_CATEGORIES } from "./snowflakeSql";
+import { getOrCreateMenuId } from "./monacoMenu";
 import { UC, quoteIfNecessary, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt } from "./sqlEditorUtils";
 import ExplainModal from "../results/ExplainModal";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
@@ -432,15 +434,7 @@ let _snippetMenuRegistered = false;
   if (_snippetMenuRegistered) return;
   _snippetMenuRegistered = true;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let snippetSubMenuId: any;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    snippetSubMenuId = new (MenuId as any)("thaw.snippets.submenu");
-  } catch {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    snippetSubMenuId = (MenuId as any)._instances?.get("thaw.snippets.submenu");
-  }
+  const snippetSubMenuId = getOrCreateMenuId("thaw.snippets.submenu");
   if (!snippetSubMenuId) return;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -455,7 +449,21 @@ let _snippetMenuRegistered = false;
   const snippetItems = getSnowflakeSnippets(monacoLib);
   const snippetMap   = new Map(snippetItems.map((s) => [String(s.label), s]));
 
+  // Each category becomes its own nested submenu under "SQL Snippets", so the
+  // top-level list stays short (one entry per category) and never overflows the
+  // screen — the flat variant ran off the bottom on smaller displays.
   SNIPPET_CATEGORIES.forEach((cat, gi) => {
+    const catMenuId = getOrCreateMenuId(`thaw.snippets.cat.${gi}`);
+    if (!catMenuId) return;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (MenuRegistry as any).appendMenuItem(snippetSubMenuId, {
+      submenu: catMenuId,
+      title: cat.header,
+      group: "snippets",
+      order: gi,
+    });
+
     cat.labels.forEach((lbl, li) => {
       const s = snippetMap.get(lbl);
       if (!s) return;
@@ -472,13 +480,62 @@ let _snippetMenuRegistered = false;
       });
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (MenuRegistry as any).appendMenuItem(snippetSubMenuId, {
+      (MenuRegistry as any).appendMenuItem(catMenuId, {
         command: { id: cmdId, title: cat.titles?.[lbl] ?? lbl },
-        group: `${gi + 1}`,
         order: li,
       });
     });
   });
+
+  // ── Built-in Functions ──────────────────────────────────────────────────────
+  // Same catalogue as the Code Snippets modal, as a nested "Built-in Functions"
+  // submenu (→ category → NAME()). Inserts the callable form at the cursor.
+  const fnRootId = getOrCreateMenuId("thaw.snippets.builtins");
+  if (fnRootId) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (MenuRegistry as any).appendMenuItem(snippetSubMenuId, {
+      submenu: fnRootId,
+      title: "Built-in Functions",
+      group: "snippets",
+      order: SNIPPET_CATEGORIES.length,
+    });
+
+    FUNCTION_CATEGORIES.forEach((cat, ci) => {
+      const catMenuId = getOrCreateMenuId(`thaw.snippets.builtins.${ci}`);
+      if (!catMenuId) return;
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (MenuRegistry as any).appendMenuItem(fnRootId, {
+        submenu: catMenuId,
+        title: cat.name,
+        group: "fns",
+        order: ci,
+      });
+
+      cat.fns.forEach((fn, fi) => {
+        const cmdId = `thaw.fn.${fn}`;
+        // Escape `$` (e.g. SYSTEM$CANCEL_QUERY) so the snippet engine doesn't
+        // treat it as a variable; `$0` drops the cursor between the parens.
+        const insert = `${fn.replace(/\$/g, "\\$")}($0)`;
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (CommandsRegistry as any).registerCommand(cmdId, () => {
+          if (_activeSnippetEditor) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const ctrl = (_activeSnippetEditor as any).getContribution("snippetController2");
+            if (ctrl) ctrl.insert(insert);
+            _activeSnippetEditor.focus();
+          }
+        });
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (MenuRegistry as any).appendMenuItem(catMenuId, {
+          command: { id: cmdId, title: `${fn}()` },
+          order: fi,
+        });
+      });
+    });
+  }
 })();
 
 // ── "Explain SQL" context menu item ──────────────────────────────────────────

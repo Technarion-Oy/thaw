@@ -17,7 +17,8 @@ git gutter decorations, the tab bar, editor preferences, and the cross-tab searc
 | `sqlEditorUtils.test.ts` | Unit tests for `identifierRangeAt` (bare/quoted/escaped-quote/unterminated-quote spans). |
 | `editorRef.ts` | Singleton ref to the active `IStandaloneCodeEditor`. Exports `setEditorInstance`, `getEditorInstance`, `insertAtCursor`. Kept separate from `SqlEditor.tsx` so Vite Fast Refresh is not broken by mixing component and non-component exports. |
 | `monacoSetup.ts` | One-time Monaco initialisation: Snowflake Monarch language, Python Monarch grammar (inlined to avoid side-effect imports), YAML worker wiring, `thawDarkTheme`/`thawLightTheme` registration. Called via `ensureMonacoSetup()` guard. Imports the **slim** Monaco API (`editor.api.js` + `editor.all.js`), never the `monaco-editor` barrel, to keep the TS/HTML/CSS/JSON language workers (~9 MB) and ~80 basic-language grammars out of the binary — see [gotchas](../../../../docs/concepts/gotchas.md). |
-| `snowflakeSql.ts` | Snowflake Monarch tokenizer (`snowflakeMonarchLanguage`) and custom Monaco theme definitions (`thawDarkTheme`, `thawLightTheme`). The tokenizer's `datatypes` list is sourced from the generated artifact `src/generated/snowflakeDataTypes.ts` (source of truth: `internal/snowflake/datatypes.go`) rather than hand-maintained. |
+| `snowflakeSql.ts` | Snowflake Monarch tokenizer (`snowflakeMonarchLanguage`) and custom Monaco theme definitions (`thawDarkTheme`, `thawLightTheme`). The tokenizer's `datatypes` list is sourced from the generated artifact `src/generated/snowflakeDataTypes.ts` (source of truth: `internal/snowflake/datatypes.go`) rather than hand-maintained. Also the single source for the built-in-function catalogue: `BUILTIN_FUNCTION_CATEGORIES`, `CONTEXT_FUNCTIONS`, and the assembled `FUNCTION_CATEGORIES` consumed by the Code Snippets modal and the editor's Built-in Functions submenu. |
+| `monacoMenu.ts` | `getOrCreateMenuId(key)` — one helper for the "get existing Monaco `MenuId` or create it" idiom (reaches into Monaco's unexported `MenuId._instances`), shared by the SQL and notebook context-menu registrations so a Monaco bump breaking that internal is fixed in one place. |
 | `snowflakeSnippets.ts` | Snowflake Scripting snippet definitions (`getSnowflakeSnippets`) and `SNIPPET_CATEGORIES` for the cascading context-menu submenu. Snippets are applied through `applyPrefsToSnippet` at insertion time (keyword casing, indent style). |
 | `CrossTabSearch.tsx` | Search/replace panel triggered by `⌘⇧H` / `Ctrl+Shift+H`. Searches all tabs (SQL, YAML, Python) and notebook cell sources. Navigates via `thaw:scroll-to-line` / `thaw:editor-ready` events. Supports regex with back-references, case-sensitive toggle, and match counter. Gated behind the `crossTabSearch` feature flag. |
 | `CrossTabSearch.test.ts` | Unit tests for `getNotebookCellSources` and related helpers in `CrossTabSearch.tsx`. |
@@ -95,7 +96,14 @@ SQL the grammar doesn't yet model). `grammarExpected.kinds` (token-kind expectat
 
 **Snippet context menu:** Uses Monaco internal `MenuRegistry` + `CommandsRegistry` (IIFE, runs
 once). Per-editor `onContextMenu` sets `_activeSnippetEditor` so commands target the right
-instance.
+instance. **Cascade:** the "SQL Snippets" submenu holds one nested submenu per
+`SNIPPET_CATEGORIES` entry (its own `MenuId`, titled by `cat.header`), each holding the snippet
+commands, plus a **Built-in Functions** submenu that nests one level deeper — category (Context +
+`BUILTIN_FUNCTION_CATEGORIES` from `snowflakeSql.ts`) → `NAME()` command. Function insert text
+escapes `$` (e.g. `SYSTEM$CANCEL_QUERY`) so the snippet engine doesn't read it as a variable, and
+uses `$0` to drop the cursor inside the parens. Keeping every level short means the menu never
+overflows off-screen; `.context-view .monaco-menu-container` in `global.css` also caps menu height
+to the viewport and scrolls as a backstop.
 
 **Clipboard:** `navigator.clipboard` is blocked in WKWebView. All copy operations use
 `ClipboardSetText` from `wailsjs/runtime/runtime`. Monaco's built-in **code-buffer** copy/paste is

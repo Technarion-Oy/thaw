@@ -2778,6 +2778,7 @@ export namespace mcp {
 	    isPK: boolean;
 	    notNull: boolean;
 	    fkRef?: string;
+	    defaultValue?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ERDesignerColumnOut(source);
@@ -2790,6 +2791,7 @@ export namespace mcp {
 	        this.isPK = source["isPK"];
 	        this.notNull = source["notNull"];
 	        this.fkRef = source["fkRef"];
+	        this.defaultValue = source["defaultValue"];
 	    }
 	}
 	export class ERDesignerTableOut {
@@ -4382,6 +4384,7 @@ export namespace snowflake {
 	    dataType: string;
 	    isPK: boolean;
 	    nullable: string;
+	    default: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ERColumn(source);
@@ -4393,6 +4396,7 @@ export namespace snowflake {
 	        this.dataType = source["dataType"];
 	        this.isPK = source["isPK"];
 	        this.nullable = source["nullable"];
+	        this.default = source["default"];
 	    }
 	}
 	export class ERForeignKey {

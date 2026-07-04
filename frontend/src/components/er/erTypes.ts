@@ -10,6 +10,7 @@ export interface DesignerColumn {
   isPK: boolean;
   notNull: boolean;
   fkRef: string; // "SCHEMA.TABLE.COLUMN" or "" for none
+  defaultValue: string; // column DEFAULT expression, "" for none
 }
 
 export interface DesignerTable {
@@ -82,6 +83,13 @@ export interface JoinPath {
  *  Matches Go's `snowflake.TableKey` which trims both parts. */
 export const tableKey = (schema: string, name: string) =>
   `${schema.trim()}.${name.trim()}`;
+
+/** Case-insensitive baseline key ("SCHEMA.TABLE" uppercased) used to match a
+ *  designer table against the INFORMATION_SCHEMA baseline, whose identifiers are
+ *  uppercase. Distinct from `tableKey` (case-preserving) on purpose — the diff
+ *  and the "is this table new?" check must agree on this uppercased form. */
+export const baselineTableKey = (schema: string, name: string) =>
+  `${schema.trim().toUpperCase()}.${name.trim().toUpperCase()}`;
 
 export const ER_NODE_WIDTH = 240;
 export const ER_NODE_HEADER_HEIGHT = 32;

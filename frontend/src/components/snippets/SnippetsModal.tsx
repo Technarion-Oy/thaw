@@ -8,12 +8,25 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useState, useMemo } from "react";
-import { Modal, Input, Button } from "antd";
+import { useState, useMemo, useEffect, useRef } from "react";
+import { Modal, Input, Button, Menu } from "antd";
+import type { MenuProps } from "antd";
 import { useQueryStore } from "../../store/queryStore";
+import { FUNCTION_CATEGORIES } from "../editor/snowflakeSql";
 
-interface Snippet  { name: string; sql: string; }
-interface Category { label: string; items: Snippet[]; }
+interface Snippet { name: string; sql: string; }
+// A category is either a leaf group (has `items`) or a parent (has `children`),
+// letting the left panel render as a cascading multi-level menu.
+interface Category { label: string; items?: Snippet[]; children?: Category[]; }
+
+// Built-in functions, sourced from the shared catalogue (no duplicate list) —
+// callable form (`NAME()`) as the snippet body.
+const fnItems = (names: readonly string[]): Snippet[] => names.map((n) => ({ name: n, sql: `${n}()` }));
+
+const FUNCTIONS_CATEGORY: Category = {
+  label: "Built-in Functions",
+  children: FUNCTION_CATEGORIES.map((cat) => ({ label: cat.name, items: fnItems(cat.fns) })),
+};
 
 const CATEGORIES: Category[] = [
   {
@@ -268,7 +281,68 @@ FILE_FORMAT = (TYPE = 'CSV' SKIP_HEADER = 1);`,
       },
     ],
   },
+  FUNCTIONS_CATEGORY,
 ];
+
+// ── Tree helpers ──────────────────────────────────────────────────────────────
+
+type MenuItems = NonNullable<MenuProps["items"]>;
+
+/** Prune the tree to categories/items whose snippet name matches the query. */
+function filterTree(nodes: Category[], q: string): Category[] {
+  if (!q) return nodes;
+  const out: Category[] = [];
+  for (const n of nodes) {
+    if (n.children) {
+      const kids = filterTree(n.children, q);
+      if (kids.length) out.push({ ...n, children: kids });
+    } else if (n.items) {
+      const items = n.items.filter((i) => i.name.toLowerCase().includes(q));
+      if (items.length) out.push({ ...n, items });
+    }
+  }
+  return out;
+}
+
+/** Build AntD Menu items, a key→snippet lookup, and each leaf's ancestor
+ *  category keys (so a leaf's path can be expanded without parsing the "/"
+ *  delimiter, which category labels like "Semi-structured / JSON" contain). */
+function buildMenu(
+  nodes: Category[],
+  path: string,
+  ancestors: string[],
+  sink: Map<string, Snippet>,
+  parents: Map<string, string[]>,
+): MenuItems {
+  return nodes.map((n) => {
+    const key = path ? `${path}/${n.label}` : n.label;
+    const children: MenuItems = n.children
+      ? buildMenu(n.children, key, [...ancestors, key], sink, parents)
+      : (n.items ?? []).map((it) => {
+          const ik = `${key}/${it.name}`;
+          sink.set(ik, it);
+          parents.set(ik, [...ancestors, key]);
+          return { key: ik, label: it.name };
+        });
+    return { key, label: n.label, children };
+  });
+}
+
+/** All non-leaf (category) keys — used to expand everything while searching. */
+function categoryKeys(nodes: Category[], path: string): string[] {
+  const keys: string[] = [];
+  for (const n of nodes) {
+    const key = path ? `${path}/${n.label}` : n.label;
+    keys.push(key);
+    if (n.children) keys.push(...categoryKeys(n.children, key));
+  }
+  return keys;
+}
+
+/** First leaf key in document order (default selection). */
+function firstLeaf(nodes: Category[], sink: Map<string, Snippet>): string | undefined {
+  return sink.keys().next().value ?? categoryKeys(nodes, "")[0];
+}
 
 interface Props {
   onClose: () => void;
@@ -276,33 +350,54 @@ interface Props {
 
 export default function SnippetsModal({ onClose }: Props) {
   const [search, setSearch] = useState("");
-  const [selected, setSelected] = useState<Snippet>(CATEGORIES[0].items[0]);
+  const [openKeys, setOpenKeys] = useState<string[]>([CATEGORIES[0].label]);
   const loadInNewTab = useQueryStore((s) => s.loadInNewTab);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return CATEGORIES;
-    return CATEGORIES.map((cat) => ({
-      ...cat,
-      items: cat.items.filter((item) => item.name.toLowerCase().includes(q)),
-    })).filter((cat) => cat.items.length > 0);
-  }, [search]);
+  const q = search.trim().toLowerCase();
 
-  // Auto-select first match when search changes
-  const firstMatch = filtered[0]?.items[0];
-  const effectiveSelected =
-    search.trim() && firstMatch && !filtered.some((c) => c.items.includes(selected))
-      ? firstMatch
-      : selected;
+  const { menuItems, snippetMap, allCategoryKeys, defaultLeaf, leafParents } = useMemo(() => {
+    const tree = filterTree(CATEGORIES, q);
+    const map = new Map<string, Snippet>();
+    const parents = new Map<string, string[]>();
+    const items = buildMenu(tree, "", [], map, parents);
+    return {
+      menuItems: items,
+      snippetMap: map,
+      allCategoryKeys: categoryKeys(tree, ""),
+      defaultLeaf: firstLeaf(tree, map),
+      leafParents: parents,
+    };
+  }, [q]);
 
-  const handleSearch = (value: string) => {
-    setSearch(value);
-    const q = value.trim().toLowerCase();
+  const [selectedKey, setSelectedKey] = useState<string | undefined>(defaultLeaf);
+
+  // Only touch selection/openKeys on a search *transition*, never on plain
+  // clicks (which change selectedKey while q stays constant) — otherwise the
+  // user's manual pick would snap back on every keystroke.
+  const prevQ = useRef(q);
+  useEffect(() => {
+    const wasSearching = prevQ.current;
+    prevQ.current = q;
     if (q) {
-      const match = CATEGORIES.flatMap((c) => c.items).find((i) => i.name.toLowerCase().includes(q));
-      if (match) setSelected(match);
+      setOpenKeys(allCategoryKeys);
+      // Keep the current pick if it still matches the filter; else jump to the
+      // first hit so highlight and preview agree.
+      if (!selectedKey || !snippetMap.has(selectedKey)) {
+        if (defaultLeaf) setSelectedKey(defaultLeaf);
+      }
+    } else if (wasSearching) {
+      // Search just cleared — keep the selection but expand its category path
+      // so it stays visible (a pick under a nested category would otherwise
+      // vanish when the tree collapses).
+      setOpenKeys(
+        selectedKey && leafParents.has(selectedKey)
+          ? [...leafParents.get(selectedKey)!]
+          : [CATEGORIES[0].label],
+      );
     }
-  };
+  }, [q, allCategoryKeys, defaultLeaf, selectedKey, snippetMap, leafParents]);
+
+  const selected = (selectedKey && snippetMap.get(selectedKey)) || (defaultLeaf ? snippetMap.get(defaultLeaf) : undefined);
 
   return (
     <Modal
@@ -314,10 +409,10 @@ export default function SnippetsModal({ onClose }: Props) {
       styles={{ body: { padding: 0 } }}
     >
       <div style={{ display: "flex", height: 520 }}>
-        {/* Left panel */}
+        {/* Left panel — cascading menu */}
         <div
           style={{
-            width: 220,
+            width: 260,
             flexShrink: 0,
             borderRight: "1px solid var(--border)",
             display: "flex",
@@ -330,51 +425,23 @@ export default function SnippetsModal({ onClose }: Props) {
               placeholder="Search snippets…"
               size="small"
               value={search}
-              onChange={(e) => handleSearch(e.target.value)}
+              onChange={(e) => setSearch(e.target.value)}
               allowClear
             />
           </div>
           <div style={{ flex: 1, overflowY: "auto", padding: "4px 0" }}>
-            {filtered.map((cat) => (
-              <div key={cat.label}>
-                <div
-                  style={{
-                    padding: "4px 12px",
-                    fontSize: 11,
-                    fontWeight: 600,
-                    color: "var(--text-muted)",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.04em",
-                  }}
-                >
-                  {cat.label}
-                </div>
-                {cat.items.map((item) => {
-                  const isActive = item === effectiveSelected;
-                  return (
-                    <div
-                      key={item.name}
-                      onClick={() => setSelected(item)}
-                      style={{
-                        padding: "5px 12px 5px 20px",
-                        fontSize: 12,
-                        cursor: "pointer",
-                        background: isActive ? "var(--border)" : "transparent",
-                        color: isActive ? "var(--text)" : "var(--text-muted)",
-                        borderRadius: 4,
-                        margin: "1px 4px",
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                      }}
-                    >
-                      {item.name}
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
-            {filtered.length === 0 && (
+            {menuItems.length > 0 ? (
+              <Menu
+                mode="inline"
+                items={menuItems}
+                openKeys={openKeys}
+                onOpenChange={(keys) => setOpenKeys(keys as string[])}
+                selectedKeys={selectedKey ? [selectedKey] : []}
+                onClick={({ key }) => setSelectedKey(key)}
+                style={{ border: "none", background: "transparent", fontSize: 12 }}
+                inlineIndent={16}
+              />
+            ) : (
               <div style={{ padding: "12px", fontSize: 12, color: "var(--text-muted)" }}>
                 No snippets match.
               </div>
@@ -400,13 +467,15 @@ export default function SnippetsModal({ onClose }: Props) {
               lineHeight: 1.6,
             }}
           >
-            <code>{effectiveSelected.sql}</code>
+            <code>{selected?.sql ?? ""}</code>
           </pre>
           <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
             <Button
               type="primary"
+              disabled={!selected}
               onClick={() => {
-                loadInNewTab(effectiveSelected.sql);
+                if (!selected) return;
+                loadInNewTab(selected.sql);
                 onClose();
               }}
             >

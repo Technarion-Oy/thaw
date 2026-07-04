@@ -13,7 +13,9 @@ const ERCanvas = lazy(() => import("./ERCanvas"));
 import { initFromERData, normalizeDataType, mergeAITablesIntoDesigner } from "./erCanvasLayout";
 import type { AITableIn } from "./erCanvasLayout";
 import { buildMermaid } from "./buildMermaid";
-import { type DesignerColumn, type DesignerTable, SF_DATA_TYPES, SF_TYPES, normalizeIdentifier } from "./erTypes";
+import DefaultFunctionPicker from "../shared/DefaultFunctionPicker";
+import { columnConstraints } from "../shared/columnDdl";
+import { type DesignerColumn, type DesignerTable, SF_DATA_TYPES, SF_TYPES, normalizeIdentifier, baselineTableKey } from "./erTypes";
 
 interface Props {
   database: string;
@@ -165,6 +167,9 @@ function generateDiffSQL(
   };
   const tableRef = (schema: string, name: string) =>
     `${q(database)}.${q(schema)}.${q(name.trim())}`;
+  // DEFAULT + NOT NULL in Snowflake-correct order (PK is emitted table-level).
+  const colTail = (c: DesignerColumn) =>
+    columnConstraints({ defaultValue: c.defaultValue, notNull: c.isPK || c.notNull });
 
   const stmts: string[] = [];
 
@@ -177,8 +182,7 @@ function generateDiffSQL(
       const fkLines: string[] = [];
       for (const c of t.columns) {
         if (!c.name.trim()) continue;
-        const nn = c.isPK || c.notNull ? " NOT NULL" : "";
-        colLines.push(`    ${q(c.name.trim())} ${c.dataType}${nn}`);
+        colLines.push(`    ${q(c.name.trim())} ${c.dataType}${colTail(c)}`);
         if (c.isPK) pkCols.push(q(c.name.trim()));
         if (c.fkRef) {
           const parts = c.fkRef.split(".");
@@ -209,7 +213,7 @@ function generateDiffSQL(
     { schema: string; name: string; columns: snowflake.ERColumn[] }
   >();
   for (const t of baseline.tables) {
-    baselineMap.set(`${t.schema.toUpperCase()}.${t.name.toUpperCase()}`, t);
+    baselineMap.set(baselineTableKey(t.schema, t.name), t);
   }
 
   // Baseline FK lookup keyed by "SCHEMA.TABLE.COL"
@@ -225,7 +229,7 @@ function generateDiffSQL(
   const currentSet = new Set<string>();
   for (const t of tables) {
     if (t.schema && t.name.trim()) {
-      currentSet.add(`${t.schema.toUpperCase()}.${t.name.trim().toUpperCase()}`);
+      currentSet.add(baselineTableKey(t.schema, t.name));
     }
   }
 
@@ -241,7 +245,7 @@ function generateDiffSQL(
   // 2. Process each table currently in the designer
   for (const t of tables) {
     if (!t.schema || !t.name.trim()) continue;
-    const key = `${t.schema.toUpperCase()}.${t.name.trim().toUpperCase()}`;
+    const key = baselineTableKey(t.schema, t.name);
     const bt = baselineMap.get(key);
 
     if (!bt) {
@@ -251,8 +255,7 @@ function generateDiffSQL(
       const fkLines: string[] = [];
       for (const c of t.columns) {
         if (!c.name.trim()) continue;
-        const nn = c.isPK || c.notNull ? " NOT NULL" : "";
-        colLines.push(`    ${q(c.name.trim())} ${c.dataType}${nn}`);
+        colLines.push(`    ${q(c.name.trim())} ${c.dataType}${colTail(c)}`);
         if (c.isPK) pkCols.push(q(c.name.trim()));
         if (c.fkRef) {
           const parts = c.fkRef.split(".");
@@ -308,9 +311,12 @@ function generateDiffSQL(
         const ck = c.name.trim().toUpperCase();
         const bc = baseColMap.get(ck);
         if (!bc) {
-          // New column
-          const nn = c.isPK || c.notNull ? " NOT NULL" : "";
-          stmts.push(`${alter} ADD COLUMN ${q(c.name.trim())} ${c.dataType}${nn};`);
+          // New column on an existing table → ADD COLUMN. Only literal defaults
+          // are valid here (Snowflake rejects function expressions), which is
+          // why the ƒ picker is hidden for existing tables while the free-text
+          // literal input stays. Existing columns' default changes are not
+          // diffed — SET DEFAULT is heavily restricted anyway.
+          stmts.push(`${alter} ADD COLUMN ${q(c.name.trim())} ${c.dataType}${colTail(c)};`);
         } else {
           // Existing column — check for type change.
           // normalizeDataType is applied to bc.dataType (raw from INFORMATION_SCHEMA)
@@ -399,6 +405,25 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
   const tablesRef = useRef(tables);
   tablesRef.current = tables;
 
+  // Baseline snapshot keyed by table (uppercased "SCHEMA.TABLE" → set of its
+  // column names), matching generateDiffSQL's keying. Used to decide which
+  // DEFAULT controls to show per column.
+  const baselineCols = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    for (const bt of initialData?.tables ?? []) {
+      m.set(baselineTableKey(bt.schema, bt.name), new Set(bt.columns.map((c) => c.name.trim().toUpperCase())));
+    }
+    return m;
+  }, [initialData]);
+  // A table absent from the baseline is brand-new → CREATE TABLE (function
+  // DEFAULTs allowed). A table present diffs to ALTER; existing columns can't
+  // change their DEFAULT, but a newly-added column emits ADD COLUMN … DEFAULT.
+  const isExistingTable = (t: DesignerTable) => baselineCols.has(baselineTableKey(t.schema, t.name));
+  const isNewColumn = (t: DesignerTable, c: DesignerColumn) => {
+    const cols = baselineCols.get(baselineTableKey(t.schema, t.name));
+    return !cols || !cols.has(c.name.trim().toUpperCase());
+  };
+
   // Canvas selection (multi-select via Cmd/Ctrl+click)
   const [selectedTableIds, setSelectedTableIds] = useState<string[]>([]);
 
@@ -459,6 +484,7 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
             isPK: c.isPK,
             notNull: c.notNull,
             fkRef: c.fkRef || undefined,
+            defaultValue: c.defaultValue || undefined,
           }),
         ),
       }),
@@ -571,7 +597,7 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
     setTables((prev) =>
       prev.map((t) =>
         t.id === tableId
-          ? { ...t, columns: [...t.columns, { id: crypto.randomUUID(), name: "", dataType: "VARCHAR", isPK: false, notNull: false, fkRef: "" }] }
+          ? { ...t, columns: [...t.columns, { id: crypto.randomUUID(), name: "", dataType: "VARCHAR", isPK: false, notNull: false, fkRef: "", defaultValue: "" }] }
           : t
       )
     );
@@ -979,6 +1005,26 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
                         options={fkOptions(t.id)}
                         showSearch
                       />
+                      {/* DEFAULT editing is for *new* columns only — an existing
+                          column's default can't be changed (SET DEFAULT is heavily
+                          restricted). The ƒ picker is further limited to new tables:
+                          Snowflake rejects function-expression defaults on ADD COLUMN,
+                          so a new column on an existing table gets free-text (literal)
+                          only. */}
+                      {isNewColumn(t, c) && (
+                        <>
+                          <Input
+                            size="small"
+                            placeholder="DEFAULT"
+                            value={c.defaultValue}
+                            onChange={(e) => updateColumn(t.id, c.id, { defaultValue: e.target.value })}
+                            style={{ width: 110, flexShrink: 0, fontFamily: "monospace", fontSize: 11 }}
+                          />
+                          {!isExistingTable(t) && (
+                            <DefaultFunctionPicker onPick={(sql) => updateColumn(t.id, c.id, { defaultValue: sql })} />
+                          )}
+                        </>
+                      )}
                       <Button
                         size="small"
                         type="text"
