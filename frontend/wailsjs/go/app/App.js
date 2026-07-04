@@ -186,6 +186,10 @@ export function AlterTask(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterTask'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterUserProperty(arg1, arg2, arg3) {
+  return window['go']['app']['App']['AlterUserProperty'](arg1, arg2, arg3);
+}
+
 export function AlterView(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterView'](arg1, arg2, arg3, arg4);
 }

@@ -158,7 +158,8 @@ export default function CellDetailPanel({ columns, onVisibleCellChange }: Props)
     const startX = e.clientX;
     const startW = width;
     const onMove = (ev: MouseEvent) => {
-      setWidth(Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, startW + (startX - ev.clientX))));
+      const vpCap = Math.round(window.innerWidth * 0.6);
+      setWidth(Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, vpCap, startW + (startX - ev.clientX))));
     };
     const cleanup = () => {
       document.removeEventListener("mousemove", onMove);
@@ -177,10 +178,15 @@ export default function CellDetailPanel({ columns, onVisibleCellChange }: Props)
     message.success("Cell value copied");
   };
 
+  // Cap the persisted width at 60% of the window so a wide saved panel can't
+  // crowd the main grid on a small screen. ponytail: recomputed on render, so a
+  // passive window resize while open reflows on the next render, not instantly.
+  const effWidth = Math.min(width, Math.round(window.innerWidth * 0.6));
+
   return (
     <div
       style={{
-        width,
+        width: effWidth,
         flexShrink: 0,
         display: "flex",
         flexDirection: "column",

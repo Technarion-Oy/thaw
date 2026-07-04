@@ -162,6 +162,8 @@ export function AlterTag(arg1:string,arg2:string,arg3:string,arg4:string):Promis
 
 export function AlterTask(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
+export function AlterUserProperty(arg1:string,arg2:string,arg3:string):Promise<void>;
+
 export function AlterView(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterWarehouseAbortAllQueries(arg1:string):Promise<void>;

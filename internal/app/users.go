@@ -14,6 +14,7 @@ import (
 	"thaw/internal/apperrors"
 	"thaw/internal/keypair"
 	"thaw/internal/snowflake"
+	"thaw/internal/users"
 )
 
 // ListUsers returns all users visible to the current role.
@@ -31,6 +32,17 @@ func (a *App) GetUserDDL(name string) (string, error) {
 		return "", apperrors.ErrNotConnected
 	}
 	return a.client.GetUserDDL(a.ctx, name)
+}
+
+// AlterUserProperty applies a single SET/UNSET property change to a user.
+// property must be one of the keys documented on users.BuildAlterUserPropertySQL
+// (loginName, email, defaultWarehouse, minsToBypassMfa, type, …); an empty
+// value UNSETs the property where Snowflake allows it.
+func (a *App) AlterUserProperty(name, property, value string) error {
+	if a.client == nil {
+		return apperrors.ErrNotConnected
+	}
+	return users.AlterProperty(a.ctx, a.client, name, property, value)
 }
 
 // CanManageUsers returns true when the given role can alter or drop users.

@@ -121,6 +121,7 @@ func GetCodebaseSemanticMap() string {
         "internal/tag/",
         "internal/tasks/",
         "internal/udf/",
+        "internal/users/",
         "internal/view/",
         "internal/warehouse/"
       ],

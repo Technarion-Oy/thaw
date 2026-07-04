@@ -818,9 +818,9 @@ Right-click any warehouse in the Administration panel and choose **Properties** 
 
 - **User Management** — search users by name, login, display name, or email; view disabled accounts at a glance
 - **Create User** — dialog with all user properties and a live `CREATE USER` SQL preview
-- **Edit User** — pre-populated form that generates only the `ALTER USER … SET/UNSET` statements needed for the changed fields
+- **User Properties** — right-click a user and choose **Properties** for a per-property editable view (same pattern as warehouse properties): every settable `ALTER USER` property — identity fields, user `TYPE`, default warehouse/role/namespace/secondary roles, network policy, disabled / must-change-password switches, days-to-expiry, mins-to-unlock, mins-to-bypass-MFA, and password reset — edits inline with typed controls (dropdowns for enums and warehouse/role pickers), saves one `ALTER USER … SET/UNSET` statement at a time, and shows insufficient-privilege errors inline; clearing a value `UNSET`s it; a read-only Info section shows owner, login history, and MFA enrolment with a **Disable MFA** action
 - **Enable / Disable / Drop** users with a single right-click action
-- All user management actions are automatically hidden or greyed out when the current role lacks the required privileges
+- User management actions are always offered; if the current role lacks the required privilege, the Snowflake error is shown instead of the action being pre-disabled
 - **Key Pair Authentication** — right-click any user and choose **Key Pair Auth…** to set up Snowflake key-pair authentication without leaving the app:
   - Choose a key generation method: **Go built-in crypto** (always available, no passphrase), **OpenSSL** (passphrase-encrypted private key), or **ssh-keygen** (passphrase-encrypted private key); only tools present on PATH are shown
   - Set the private key output path (type or browse); the public key is saved alongside with `_pub.pem` appended; the private key file is written with mode `0600`

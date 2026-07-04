@@ -34,7 +34,7 @@ Contains a single stylesheet, `global.css`, that is loaded once at application s
 | Monaco decorations | `.sql-occurrence-highlight`, `.sql-active-stmt-bg/indicator`, `.git-gutter-added/modified/deleted`, `.sql-token-builtin/udf`, squiggle SVG overrides, hover widget theme |
 | `.ctx-item` | Tab-bar right-click context menu items |
 | ReactFlow controls | Maps `--xy-controls-*` to app palette so ReactFlow buttons respect the theme |
-| Notebook cell styles | `.thaw-nb-cell`, gutter, kind tag, editor/output areas, toolbar buttons, hover-reveal add-cell bars |
+| Notebook cell styles | `.thaw-nb-cell`, gutter, kind tag, editor/output areas, toolbar buttons, hover-reveal add-cell bars. `[data-status]` (`idle`/`running`/`ok`/`error`) recolours the left stripe/border — errored cells go `--danger`, running cells pulse `--warning` (disabled under `prefers-reduced-motion`) |
 | App toolbar styles | `.thaw-tb-icon-btn`, `.thaw-tb-text-btn`, `.thaw-tb-primary-btn`, `.thaw-tb-group`, `.thaw-tb-sep`, vstack layout for notebook deploy action |
 | Sidebar column icons | `.thaw-col-icon[data-family]` — maps type families to `--col-*` tokens |
 | Kernel status dot | `.thaw-kernel-dot` with ready/error/starting states |
