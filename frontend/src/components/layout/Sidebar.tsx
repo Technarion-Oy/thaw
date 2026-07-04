@@ -4100,9 +4100,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     el.style.top = "0px";
     const triggerTop = el.getBoundingClientRect().top;
     const fullH = el.scrollHeight;
-    if (triggerTop + fullH <= vh - pad) return; // fits below — leave as-is
     if (fullH <= vh - 2 * pad) {
-      el.style.top = `${vh - pad - fullH - triggerTop}px`; // shift up just enough
+      // Fits in the viewport: keep the natural (trigger-aligned) top but clamp it
+      // into [pad, vh - pad - fullH] so it overruns neither the bottom nor the top
+      // (the latter when the trigger row is scrolled above the visible area).
+      const top = Math.max(pad, Math.min(triggerTop, vh - pad - fullH));
+      el.style.top = `${top - triggerTop}px`;
     } else {
       el.style.top = `${pad - triggerTop}px`; // taller than viewport — pin & scroll
       el.style.maxHeight = `${vh - 2 * pad}px`;
