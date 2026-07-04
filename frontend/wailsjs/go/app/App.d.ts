@@ -334,16 +334,6 @@ export function BuildUnsetColumnMaskingPolicySql(arg1:string,arg2:string,arg3:st
 
 export function BuildWorkloadIdentityPolicyValue(arg1:authenticationpolicy.WorkloadIdentityPolicy):Promise<string>;
 
-export function CanCreateIntegration(arg1:string):Promise<boolean>;
-
-export function CanCreateUsers(arg1:string):Promise<boolean>;
-
-export function CanManageUsers(arg1:string):Promise<boolean>;
-
-export function CanModifyUserAuth(arg1:string):Promise<boolean>;
-
-export function CanViewWarehouseMeteringHistory():Promise<boolean>;
-
 export function CancelConnect():Promise<void>;
 
 export function CancelExport():Promise<void>;

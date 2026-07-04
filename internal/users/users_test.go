@@ -27,9 +27,12 @@ func TestBuildAlterUserPropertySQL(t *testing.T) {
 		// identifiers — quoted, empty → UNSET
 		{"defaultWarehouse", "WH", `ALTER USER "ALICE" SET DEFAULT_WAREHOUSE = "WH"`, false},
 		{"networkPolicy", "", `ALTER USER "ALICE" UNSET NETWORK_POLICY`, false},
-		// namespace — each dotted part quoted separately
+		// namespace — each dotted part quoted separately; empty segments rejected
 		{"defaultNamespace", "DB.PUB", `ALTER USER "ALICE" SET DEFAULT_NAMESPACE = "DB"."PUB"`, false},
 		{"defaultNamespace", "DB", `ALTER USER "ALICE" SET DEFAULT_NAMESPACE = "DB"`, false},
+		{"defaultNamespace", "DB.", "", true},
+		{"defaultNamespace", ".SCHEMA", "", true},
+		{"defaultNamespace", "A.B.C", "", true},
 		// integers — validated, empty → UNSET
 		{"minsToBypassMfa", "30", `ALTER USER "ALICE" SET MINS_TO_BYPASS_MFA = 30`, false},
 		{"minsToBypassMfa", "", `ALTER USER "ALICE" UNSET MINS_TO_BYPASS_MFA`, false},

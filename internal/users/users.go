@@ -13,8 +13,6 @@ package users
 import (
 	"context"
 	"fmt"
-	"slices"
-	"strconv"
 	"strings"
 
 	"thaw/internal/snowflake"
@@ -34,19 +32,12 @@ func BuildAlterUserPropertySQL(name, property, value string) (string, error) {
 	u := snowflake.QuoteIdent(name)
 	trimmed := strings.TrimSpace(value)
 
+	what := fmt.Sprintf("user property %q", property)
 	checkEnum := func(v string, allowed ...string) (string, error) {
-		up := strings.ToUpper(strings.TrimSpace(v))
-		if slices.Contains(allowed, up) {
-			return up, nil
-		}
-		return "", fmt.Errorf("invalid value %q for user property %q", v, property)
+		return snowflake.ValidateEnumValue(what, v, allowed...)
 	}
 	validateInt := func(v string) (string, error) {
-		n, err := strconv.Atoi(strings.TrimSpace(v))
-		if err != nil || n < 0 {
-			return "", fmt.Errorf("invalid integer value %q for user property %q", v, property)
-		}
-		return strconv.Itoa(n), nil
+		return snowflake.ValidateNonNegativeInt(what, v)
 	}
 
 	// setOrUnset emits `SET <KEY> = <rendered>` or, when the value is empty,
@@ -116,11 +107,25 @@ func BuildAlterUserPropertySQL(name, property, value string) (string, error) {
 		return fmt.Sprintf("ALTER USER %s SET PASSWORD = %s", u, snowflake.QuoteStringLit(value)), nil
 	case "defaultNamespace":
 		// DATABASE or DATABASE.SCHEMA — quote each dotted part separately.
+		// Reject empty segments ("DB.", ".SCHEMA") up front: QuoteIdent("")
+		// would render `""` and Snowflake would throw a raw syntax error.
 		return setOrUnset("DEFAULT_NAMESPACE", func(v string) (string, error) {
-			return snowflake.Qualify(strings.Split(v, ".")...), nil
+			parts := strings.Split(v, ".")
+			if len(parts) > 2 {
+				return "", fmt.Errorf("invalid namespace %q: expected DATABASE or DATABASE.SCHEMA", v)
+			}
+			for i := range parts {
+				parts[i] = strings.TrimSpace(parts[i])
+				if parts[i] == "" {
+					return "", fmt.Errorf("invalid namespace %q: expected DATABASE or DATABASE.SCHEMA", v)
+				}
+			}
+			return snowflake.Qualify(parts...), nil
 		})
 	case "defaultSecondaryRoles":
-		// Only ('ALL') and () are valid values; empty UNSETs.
+		// Only ('ALL') and () are valid values; empty UNSETs. The clause is
+		// rendered by FormatSecondaryRoles — the shared writer for the
+		// DEFAULT_SECONDARY_ROLES grammar.
 		if trimmed == "" {
 			return fmt.Sprintf("ALTER USER %s UNSET DEFAULT_SECONDARY_ROLES", u), nil
 		}
@@ -128,10 +133,11 @@ func BuildAlterUserPropertySQL(name, property, value string) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		var roles []string
 		if v == "ALL" {
-			return fmt.Sprintf("ALTER USER %s SET DEFAULT_SECONDARY_ROLES = ('ALL')", u), nil
+			roles = []string{"ALL"}
 		}
-		return fmt.Sprintf("ALTER USER %s SET DEFAULT_SECONDARY_ROLES = ()", u), nil
+		return fmt.Sprintf("ALTER USER %s SET DEFAULT_SECONDARY_ROLES = %s", u, snowflake.FormatSecondaryRoles(roles)), nil
 	case "type":
 		return setOrUnset("TYPE", func(v string) (string, error) {
 			return checkEnum(v, "PERSON", "SERVICE", "LEGACY_SERVICE")

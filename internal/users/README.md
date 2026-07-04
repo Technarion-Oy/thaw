@@ -28,8 +28,11 @@ never inline in a component.
 
 ## Gotchas
 
-- `ListUsers`, `GetUserDDL`, and the `Can*` privilege probes still live on the
-  Snowflake client (`internal/snowflake/client.go`), not here — this package
-  only owns the ALTER property path.
+- `ListUsers` and `GetUserDDL` still live on the Snowflake client
+  (`internal/snowflake/client.go`), not here — this package only owns the
+  ALTER property path.
+- Enum/integer validation delegates to the shared
+  `snowflake.ValidateEnumValue` / `snowflake.ValidateNonNegativeInt` helpers
+  (also used by `internal/warehouse`).
 - `MINS_TO_BYPASS_MFA` is rejected by Snowflake for users without MFA enrolled;
   the error surfaces to the UI rather than being pre-checked.

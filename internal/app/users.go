@@ -45,34 +45,6 @@ func (a *App) AlterUserProperty(name, property, value string) error {
 	return users.AlterProperty(a.ctx, a.client, name, property, value)
 }
 
-// CanManageUsers returns true when the given role can alter or drop users.
-// The frontend passes the current role from sessionStore.
-func (a *App) CanManageUsers(role string) (bool, error) {
-	if a.client == nil {
-		return false, apperrors.ErrNotConnected
-	}
-	return a.client.CanManageUsers(a.ctx, role)
-}
-
-// CanCreateUsers returns true when the given role can create users.
-// The frontend passes the current role from sessionStore.
-func (a *App) CanCreateUsers(role string) (bool, error) {
-	if a.client == nil {
-		return false, apperrors.ErrNotConnected
-	}
-	return a.client.CanCreateUsers(a.ctx, role)
-}
-
-// CanModifyUserAuth returns true when the current session role (or any role it
-// inherits) has OWNERSHIP or MODIFY PROGRAMMATIC AUTHENTICATION METHODS on the
-// named user.
-func (a *App) CanModifyUserAuth(username string) (bool, error) {
-	if a.client == nil {
-		return false, apperrors.ErrNotConnected
-	}
-	return a.client.CanModifyUserAuth(a.ctx, username)
-}
-
 // CheckAvailableKeyTools returns the list of available key generation methods.
 // "go" (Go built-in crypto) is always present. "openssl" and "ssh-keygen" are
 // included only when their executables are found on PATH.

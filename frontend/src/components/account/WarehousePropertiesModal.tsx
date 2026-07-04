@@ -10,12 +10,13 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Modal, Spin, Button, Input, InputNumber, Switch, Select, Tag, Popconfirm, message,
+  Modal, Spin, Button, Input, Tag, Popconfirm, message,
 } from "antd";
 import {
-  CopyOutlined, EditOutlined, CheckOutlined, CloseOutlined,
+  CopyOutlined, CheckOutlined, CloseOutlined,
   PauseCircleOutlined, PlayCircleOutlined, StopOutlined, FontSizeOutlined, SearchOutlined,
 } from "@ant-design/icons";
+import { EditRow, InfoRow, SECTION_HEAD, LABEL_TD, friendlyError } from "../common/PropertyRows";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import {
   GetObjectProperties,
@@ -64,174 +65,8 @@ const TYPE_OPTIONS = [
   { label: "Snowpark-Optimized",  value: "SNOWPARK-OPTIMIZED" },
 ];
 
-const SECTION_HEAD: React.CSSProperties = {
-  fontSize: 11, fontWeight: 600, color: "var(--text-muted)",
-  letterSpacing: "0.05em", textTransform: "uppercase",
-  marginBottom: 8, marginTop: 16,
-};
-
-// ─── Helper: one editable row ────────────────────────────────────────────────
-
-interface RowProps {
-  label:     string;
-  value:     string;
-  type:      "text" | "number" | "select" | "boolean";
-  options?:  { label: string; value: string }[];
-  min?:      number;
-  max?:      number;
-  saving?:   boolean;
-  disabled?: boolean;
-  hint?:     string;
-  search?:   string;
-  onSave:    (val: string) => Promise<void>;
-}
-
-function EditRow({ label, value, type, options, min, max, saving: externalSaving, disabled, hint, search, onSave }: RowProps) {
-  const [editing,   setEditing]   = useState(false);
-  const [editVal,   setEditVal]   = useState(value);
-  const [saving,    setSaving]    = useState(false);
-  const [editError, setEditError] = useState<string | null>(null);
-
-  const startEdit = () => { setEditing(true); setEditVal(value); setEditError(null); };
-  const cancel    = () => { setEditing(false); setEditError(null); };
-
-  const save = async () => {
-    setSaving(true);
-    setEditError(null);
-    try {
-      await onSave(editVal);
-      setEditing(false);
-    } catch (e) {
-      // Strip gosnowflake noise — show only the human-readable part after the last ":"
-      // e.g. "003001 (42501): SQL access control error:\nInsufficient privileges…"
-      const raw = String(e);
-      const match = raw.match(/Insufficient privileges[^\n]*/i) ?? raw.match(/:\s*(.+)$/s);
-      setEditError(match ? match[0].trim() : raw);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const showSection = (labels: string[]) => {
-    if (!search) return true;
-    return labels.some(l => l.toLowerCase().includes(search.toLowerCase()));
-  };
-
-  if (!showSection([label])) return null;
-
-  if (type === "boolean") {
-    return (
-      <tr style={{ borderBottom: "1px solid var(--border)" }}>
-        <td style={LABEL_TD}>{label}</td>
-        <td style={{ padding: "6px 0", verticalAlign: "middle" }}>
-          <Switch
-            size="small"
-            checked={value === "true" || value === "TRUE"}
-            disabled={disabled || externalSaving}
-            onChange={async (checked) => {
-              try {
-                await onSave(checked ? "TRUE" : "FALSE");
-              } catch (e) {
-                const raw = String(e);
-                const match = raw.match(/Insufficient privileges[^\n]*/i) ?? raw.match(/:\s*(.+)$/s);
-                message.error(match ? match[0].trim() : raw, 6);
-              }
-            }}
-          />
-        </td>
-      </tr>
-    );
-  }
-
-  return (
-    <tr style={{ borderBottom: "1px solid var(--border)" }}>
-      <td style={LABEL_TD}>{label}</td>
-      <td style={{ padding: "4px 0", verticalAlign: "middle" }}>
-        {editing ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              {type === "select" ? (
-                <Select
-                  size="small"
-                  value={editVal}
-                  onChange={setEditVal}
-                  options={options}
-                  style={{ minWidth: 160 }}
-                  autoFocus
-                />
-              ) : type === "number" ? (
-                <InputNumber
-                  size="small"
-                  min={min ?? 0}
-                  max={max}
-                  value={parseInt(editVal, 10) || 0}
-                  onChange={(v) => setEditVal(String(v ?? 0))}
-                  style={{ width: 120 }}
-                  title={hint}
-                />
-              ) : (
-                <Input
-                  size="small"
-                  value={editVal}
-                  onChange={(e) => setEditVal(e.target.value)}
-                  onPressEnter={save}
-                  autoFocus
-                  style={{ fontFamily: "monospace", fontSize: 12 }}
-                  title={hint}
-                  status={editError ? "error" : undefined}
-                />
-              )}
-              <Button size="small" type="primary" icon={<CheckOutlined />} loading={saving} onClick={save} />
-              <Button size="small" icon={<CloseOutlined />} disabled={saving} onClick={cancel} />
-            </div>
-            {editError && (
-              <div style={{ color: "#f85149", fontSize: 11, fontFamily: "monospace", lineHeight: 1.4, paddingLeft: 2 }}>
-                {editError}
-              </div>
-            )}
-          </div>
-        ) : (
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{
-              fontFamily: "monospace", fontSize: 12,
-              color: value ? "var(--text)" : "var(--text-faint)",
-              fontStyle: value ? "normal" : "italic",
-              flex: 1, wordBreak: "break-word",
-            }}>
-              {value || "—"}
-            </span>
-            {!disabled && (
-              <Button
-                size="small" type="text" icon={<EditOutlined />}
-                onClick={startEdit}
-                style={{ flexShrink: 0, color: "var(--text-faint)" }}
-              />
-            )}
-          </div>
-        )}
-      </td>
-    </tr>
-  );
-}
-
-const LABEL_TD: React.CSSProperties = {
-  padding: "6px 12px 6px 0", color: "var(--text-muted)",
-  fontFamily: "monospace", whiteSpace: "nowrap",
-  verticalAlign: "middle", width: 200, minWidth: 160,
-};
-
-// ─── Helper: read-only info row ──────────────────────────────────────────────
-
-function InfoRow({ label, value }: { label: string; value: string }) {
-  return (
-    <tr style={{ borderBottom: "1px solid var(--border)" }}>
-      <td style={LABEL_TD}>{label}</td>
-      <td style={{ padding: "5px 0", fontFamily: "monospace", fontSize: 12, color: "var(--text)", wordBreak: "break-word" }}>
-        {value || <span style={{ color: "var(--text-faint)", fontStyle: "italic" }}>—</span>}
-      </td>
-    </tr>
-  );
-}
+// EditRow / InfoRow / SECTION_HEAD / LABEL_TD are shared with
+// UserPropertiesModal via ../common/PropertyRows.
 
 // ─── Main component ──────────────────────────────────────────────────────────
 
@@ -342,9 +177,7 @@ export default function WarehousePropertiesModal({ name: initialName, onClose, o
       onRename(trimmed);
       setRenaming(false);
     } catch (e) {
-      const raw = String(e);
-      const match = raw.match(/Insufficient privileges[^\n]*/i) ?? raw.match(/:\s*(.+)$/s);
-      setRenameError(match ? match[0].trim() : raw);
+      setRenameError(friendlyError(e));
     } finally {
       setRenameSaving(false);
     }

@@ -129,15 +129,6 @@ func (a *App) DropIntegration(name string) error {
 	return a.client.DropIntegration(a.ctx, name)
 }
 
-// CanCreateIntegration returns true when the given role can create integrations.
-// The frontend passes the current role from sessionStore.
-func (a *App) CanCreateIntegration(role string) (bool, error) {
-	if a.client == nil {
-		return false, apperrors.ErrNotConnected
-	}
-	return a.client.CanCreateIntegration(a.ctx, role)
-}
-
 // CreateStorageIntegration builds and executes a CREATE STORAGE INTEGRATION DDL.
 func (a *App) CreateStorageIntegration(params integrations.StorageIntegrationParams) error {
 	if a.client == nil {

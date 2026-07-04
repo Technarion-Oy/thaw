@@ -9,186 +9,15 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect, useCallback } from "react";
-import {
-  Modal, Spin, Button, Input, InputNumber, Select, Switch, Space, Typography,
-  Popconfirm, message,
-} from "antd";
-import {
-  UserOutlined, EditOutlined, CheckOutlined, CloseOutlined, SearchOutlined,
-} from "@ant-design/icons";
+import { Modal, Spin, Button, Input, Space, Typography, Popconfirm, message } from "antd";
+import { UserOutlined, CheckOutlined, SearchOutlined } from "@ant-design/icons";
 import {
   GetObjectProperties, AlterUserProperty, ListWarehouses, ListRoles,
 } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
+import { EditRow, InfoRow, SECTION_HEAD, LABEL_TD, friendlyError } from "../common/PropertyRows";
 
 const { Text } = Typography;
-
-const SECTION_HEAD: React.CSSProperties = {
-  fontSize: 11, fontWeight: 600, color: "var(--text-muted)",
-  letterSpacing: "0.05em", textTransform: "uppercase",
-  marginBottom: 8, marginTop: 16,
-};
-
-const LABEL_TD: React.CSSProperties = {
-  padding: "6px 12px 6px 0", color: "var(--text-muted)",
-  fontFamily: "monospace", whiteSpace: "nowrap",
-  verticalAlign: "middle", width: 200, minWidth: 160,
-};
-
-function friendlyError(e: unknown): string {
-  const raw = String(e);
-  const match = raw.match(/Insufficient privileges[^\n]*/i) ?? raw.match(/:\s*(.+)$/s);
-  return match ? match[0].trim() : raw;
-}
-
-// ─── Helper: one editable row (same pattern as WarehousePropertiesModal) ─────
-
-interface RowProps {
-  label:    string;
-  value:    string;
-  type:     "text" | "number" | "select" | "boolean";
-  options?: { label: string; value: string }[];
-  hint?:    string;
-  search?:  string;
-  onSave:   (val: string) => Promise<void>;
-}
-
-function EditRow({ label, value, type, options, hint, search, onSave }: RowProps) {
-  const [editing,   setEditing]   = useState(false);
-  const [editVal,   setEditVal]   = useState(value);
-  const [saving,    setSaving]    = useState(false);
-  const [editError, setEditError] = useState<string | null>(null);
-
-  const startEdit = () => { setEditing(true); setEditVal(value); setEditError(null); };
-  const cancel    = () => { setEditing(false); setEditError(null); };
-
-  const save = async () => {
-    setSaving(true);
-    setEditError(null);
-    try {
-      await onSave(editVal);
-      setEditing(false);
-    } catch (e) {
-      setEditError(friendlyError(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (search && !label.toLowerCase().includes(search.toLowerCase())) return null;
-
-  if (type === "boolean") {
-    return (
-      <tr style={{ borderBottom: "1px solid var(--border)" }}>
-        <td style={LABEL_TD}>{label}</td>
-        <td style={{ padding: "6px 0", verticalAlign: "middle" }}>
-          <Switch
-            size="small"
-            checked={value.toLowerCase() === "true"}
-            disabled={saving}
-            onChange={async (checked) => {
-              setSaving(true);
-              try {
-                await onSave(checked ? "TRUE" : "FALSE");
-              } catch (e) {
-                message.error(friendlyError(e), 6);
-              } finally {
-                setSaving(false);
-              }
-            }}
-          />
-        </td>
-      </tr>
-    );
-  }
-
-  return (
-    <tr style={{ borderBottom: "1px solid var(--border)" }}>
-      <td style={LABEL_TD}>{label}</td>
-      <td style={{ padding: "4px 0", verticalAlign: "middle" }}>
-        {editing ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              {type === "select" ? (
-                <Select
-                  size="small"
-                  value={editVal}
-                  onChange={setEditVal}
-                  options={options}
-                  showSearch
-                  style={{ minWidth: 180 }}
-                  autoFocus
-                />
-              ) : type === "number" ? (
-                <InputNumber
-                  size="small"
-                  min={0}
-                  value={editVal === "" ? undefined : parseInt(editVal, 10)}
-                  onChange={(v) => setEditVal(v === null || v === undefined ? "" : String(v))}
-                  placeholder="— unset —"
-                  style={{ width: 140 }}
-                  title={hint}
-                />
-              ) : (
-                <Input
-                  size="small"
-                  value={editVal}
-                  onChange={(e) => setEditVal(e.target.value)}
-                  onPressEnter={save}
-                  autoFocus
-                  style={{ fontFamily: "monospace", fontSize: 12 }}
-                  title={hint}
-                  status={editError ? "error" : undefined}
-                />
-              )}
-              <Button size="small" type="primary" icon={<CheckOutlined />} loading={saving} onClick={save} />
-              <Button size="small" icon={<CloseOutlined />} disabled={saving} onClick={cancel} />
-            </div>
-            {hint && !editError && (
-              <div style={{ color: "var(--text-faint)", fontSize: 11, paddingLeft: 2 }}>{hint}</div>
-            )}
-            {editError && (
-              <div style={{ color: "#f85149", fontSize: 11, fontFamily: "monospace", lineHeight: 1.4, paddingLeft: 2 }}>
-                {editError}
-              </div>
-            )}
-          </div>
-        ) : (
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{
-              fontFamily: "monospace", fontSize: 12,
-              color: value ? "var(--text)" : "var(--text-faint)",
-              fontStyle: value ? "normal" : "italic",
-              flex: 1, wordBreak: "break-word",
-            }}>
-              {value || "—"}
-            </span>
-            <Button
-              size="small" type="text" icon={<EditOutlined />}
-              onClick={startEdit}
-              style={{ flexShrink: 0, color: "var(--text-faint)" }}
-            />
-          </div>
-        )}
-      </td>
-    </tr>
-  );
-}
-
-// ─── Helper: read-only info row ──────────────────────────────────────────────
-
-function InfoRow({ label, value, search, extra }: { label: string; value: string; search?: string; extra?: React.ReactNode }) {
-  if (search && !label.toLowerCase().includes(search.toLowerCase())) return null;
-  return (
-    <tr style={{ borderBottom: "1px solid var(--border)" }}>
-      <td style={LABEL_TD}>{label}</td>
-      <td style={{ padding: "5px 0", fontFamily: "monospace", fontSize: 12, color: "var(--text)", wordBreak: "break-word" }}>
-        {value || <span style={{ color: "var(--text-faint)", fontStyle: "italic" }}>—</span>}
-        {extra}
-      </td>
-    </tr>
-  );
-}
 
 // ─── Helper: password reset row ──────────────────────────────────────────────
 
@@ -251,8 +80,6 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
   const [rows, setRows]           = useState<snowflake.PropertyPair[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch]       = useState("");
-  const [warehouses, setWarehouses] = useState<string[]>([]);
-  const [roles, setRoles]           = useState<string[]>([]);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -265,11 +92,15 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
     }
   }, [name]);
 
-  useEffect(() => {
-    load();
-    ListWarehouses().then((w) => setWarehouses(w ?? [])).catch(() => {});
-    ListRoles().then((r) => setRoles(r ?? [])).catch(() => {});
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
+
+  // Lazy option loaders for the warehouse/role dropdowns — fetched by EditRow
+  // the first time the row enters edit mode, not on every modal open.
+  const noneOpt = { value: "", label: "— none —" };
+  const warehouseOptions = () =>
+    ListWarehouses().then((w) => [noneOpt, ...(w ?? []).map((x) => ({ value: x, label: x }))]);
+  const roleOptions = () =>
+    ListRoles().then((r) => [noneOpt, ...(r ?? []).map((x) => ({ value: x, label: x }))]);
 
   // SHOW USERS column → value, keys uppercased.
   const m: Record<string, string> = {};
@@ -299,7 +130,6 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
     }
   };
 
-  const noneOpt = { value: "", label: "— none —" };
   const tableStyle: React.CSSProperties = { width: "100%", borderCollapse: "collapse", fontSize: 12 };
 
   return (
@@ -360,12 +190,12 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
           <table style={tableStyle}><tbody>
             <EditRow
               label="Default warehouse" value={val("DEFAULT_WAREHOUSE")} type="select" search={search}
-              options={[noneOpt, ...warehouses.map((w) => ({ value: w, label: w }))]}
+              loadOptions={warehouseOptions}
               onSave={save("defaultWarehouse")}
             />
             <EditRow
               label="Default role" value={val("DEFAULT_ROLE")} type="select" search={search}
-              options={[noneOpt, ...roles.map((r) => ({ value: r, label: r }))]}
+              loadOptions={roleOptions}
               onSave={save("defaultRole")}
             />
             <EditRow

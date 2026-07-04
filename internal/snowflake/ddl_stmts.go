@@ -12,7 +12,7 @@ package snowflake
 
 // This file holds pure (no I/O) builders for the DROP and SHOW statements whose
 // object names must be quoted. They exist as a unit-testable seam: the executing
-// *Client methods (DropDatabase, GetRoleDDL, CanModifyUserAuth, …) delegate here,
+// *Client methods (DropDatabase, GetRoleDDL, …) delegate here,
 // so the quoting that guards against bare/reserved/case-sensitive identifiers is
 // asserted by tests rather than relying on a live connection. Every name is run
 // through QuoteIdent/Qualify, which both wrap and escape — never emit an
@@ -44,8 +44,7 @@ func dropSchemaStmt(database, schema, mode string) string {
 }
 
 // showGrantsToRoleStmt builds `SHOW GRANTS TO ROLE "<role>"` — the privileges
-// granted to the role. Shared by roleGrantsPrivilege, collectRoleHierarchy and
-// GetRoleDDL.
+// granted to the role. Used by GetRoleDDL.
 func showGrantsToRoleStmt(role string) string {
 	return "SHOW GRANTS TO ROLE " + QuoteIdent(role)
 }
@@ -54,11 +53,6 @@ func showGrantsToRoleStmt(role string) string {
 // granted to.
 func showGrantsOnRoleStmt(role string) string {
 	return "SHOW GRANTS ON ROLE " + QuoteIdent(role)
-}
-
-// showGrantsOnUserStmt builds `SHOW GRANTS ON USER "<user>"`.
-func showGrantsOnUserStmt(username string) string {
-	return "SHOW GRANTS ON USER " + QuoteIdent(username)
 }
 
 // showSchemasHistoryStmt builds `SHOW SCHEMAS HISTORY IN DATABASE "<db>"` — used

@@ -530,26 +530,6 @@ export function BuildWorkloadIdentityPolicyValue(arg1) {
   return window['go']['app']['App']['BuildWorkloadIdentityPolicyValue'](arg1);
 }
 
-export function CanCreateIntegration(arg1) {
-  return window['go']['app']['App']['CanCreateIntegration'](arg1);
-}
-
-export function CanCreateUsers(arg1) {
-  return window['go']['app']['App']['CanCreateUsers'](arg1);
-}
-
-export function CanManageUsers(arg1) {
-  return window['go']['app']['App']['CanManageUsers'](arg1);
-}
-
-export function CanModifyUserAuth(arg1) {
-  return window['go']['app']['App']['CanModifyUserAuth'](arg1);
-}
-
-export function CanViewWarehouseMeteringHistory() {
-  return window['go']['app']['App']['CanViewWarehouseMeteringHistory']();
-}
-
 export function CancelConnect() {
   return window['go']['app']['App']['CancelConnect']();
 }

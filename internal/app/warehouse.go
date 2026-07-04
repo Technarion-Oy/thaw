@@ -86,21 +86,6 @@ func (a *App) GetWarehouseParameters(name string) ([]snowflake.PropertyPair, err
 	return warehouse.GetParameters(a.ctx, a.client, name)
 }
 
-// CanViewWarehouseMeteringHistory returns true when the current role has SELECT
-// access to SNOWFLAKE.ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY.  It runs a
-// zero-row probe query so it is fast and never touches real data.
-func (a *App) CanViewWarehouseMeteringHistory() (bool, error) {
-	if a.client == nil {
-		return false, apperrors.ErrNotConnected
-	}
-	_, err := a.client.QuerySingle(a.ctx,
-		"SELECT 1 FROM SNOWFLAKE.ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY LIMIT 0")
-	if err != nil {
-		return false, nil //nolint:nilerr // permission denied is not a caller error
-	}
-	return true, nil
-}
-
 // GetWarehouseMeteringHistory returns hourly credit usage records from
 // SNOWFLAKE.ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY. Rows are ordered by
 // START_TIME ascending. warehouse, startDate, and endDate are all optional

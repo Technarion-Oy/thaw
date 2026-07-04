@@ -54,7 +54,6 @@ func TestDropShowStmtQuoting(t *testing.T) {
 		{"show grants to role", showGrantsToRoleStmt("ANALYST"), `SHOW GRANTS TO ROLE "ANALYST"`},
 		{"show grants to role reserved", showGrantsToRoleStmt("order"), `SHOW GRANTS TO ROLE "order"`},
 		{"show grants on role", showGrantsOnRoleStmt("ANALYST"), `SHOW GRANTS ON ROLE "ANALYST"`},
-		{"show grants on user", showGrantsOnUserStmt("Jane.Doe"), `SHOW GRANTS ON USER "Jane.Doe"`},
 		{"show schemas history", showSchemasHistoryStmt("MY_DB"), `SHOW SCHEMAS HISTORY IN DATABASE "MY_DB"`},
 	}
 	for _, tc := range tests {

@@ -12,6 +12,7 @@ Provides general-purpose modals for displaying and editing Snowflake object prop
 |---|---|
 | `PropertiesModal.tsx` | Displays a searchable key-value property table from `snowflake.PropertyPair[]`; optionally renders the editable `TableSettingsSection` (calls `GetTableSettings`, `AlterTableProperty`) when a `tableContext` prop is provided; includes Copy-all to clipboard. (Column-comment editing has moved to `components/column/ColumnPropertiesModal`.) |
 | `SessionPropertiesModal.tsx` | Displays and allows inline editing of `snowflake.SessionParam[]` (session parameters) and `snowflake.SessionVar[]` (session variables); calls `SetSessionParameter` and `SetSessionVariable` IPC; Boolean params/vars are rendered as `Switch` toggles; non-boolean as editable text inputs; includes search and Copy-all. |
+| `PropertyRows.tsx` | Shared building blocks for the per-property "Properties: <OBJECT>" modals (`WarehousePropertiesModal`, `UserPropertiesModal`): `EditRow` (typed inline-editable row — text / number / select / boolean switch — with a no-op save guard, inline error display, and optional `loadOptions` for lazily-fetched select lists), `InfoRow` (read-only, searchable, optional `extra` node), `SECTION_HEAD` / `LABEL_TD` styles, and `friendlyError` (strips gosnowflake noise down to the human-readable message). Pure presentational — the caller supplies `onSave`, which should route through a backend `Alter*Property` builder. |
 
 ## Patterns & integration
 
