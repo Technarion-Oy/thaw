@@ -22,7 +22,7 @@ import (
 // single property. property must be one of: loginName, displayName, firstName,
 // middleName, lastName, email, comment, password, defaultWarehouse, defaultRole,
 // defaultNamespace, networkPolicy, defaultSecondaryRoles, type, daysToExpiry,
-// minsToUnlock, minsToBypassMfa, disabled, mustChangePassword, disableMfa.
+// minsToUnlock, minsToBypassMfa, disabled, mustChangePassword.
 //
 // An empty value UNSETs the property (resetting it to its default) for every
 // property except the booleans (which require TRUE/FALSE) and password (which
@@ -75,10 +75,12 @@ func BuildAlterUserPropertySQL(name, property, value string) (string, error) {
 		"minsToUnlock":    "MINS_TO_UNLOCK",
 		"minsToBypassMfa": "MINS_TO_BYPASS_MFA",
 	}
+	// Note: MFA is deliberately not managed here — DISABLE_MFA is a legacy
+	// Duo-era property with contested support; the current admin mechanism is
+	// MINS_TO_BYPASS_MFA (above) or ALTER USER … REMOVE MFA METHOD.
 	boolProps := map[string]string{
 		"disabled":           "DISABLED",
 		"mustChangePassword": "MUST_CHANGE_PASSWORD",
-		"disableMfa":         "DISABLE_MFA",
 	}
 
 	if key, ok := stringProps[property]; ok {
@@ -107,18 +109,14 @@ func BuildAlterUserPropertySQL(name, property, value string) (string, error) {
 		return fmt.Sprintf("ALTER USER %s SET PASSWORD = %s", u, snowflake.QuoteStringLit(value)), nil
 	case "defaultNamespace":
 		// DATABASE or DATABASE.SCHEMA — quote each dotted part separately.
-		// Reject empty segments ("DB.", ".SCHEMA") up front: QuoteIdent("")
+		// The split is quote-aware so a quoted identifier containing a literal
+		// dot (`"MY.DB".PUB`) stays one part; empty segments ("DB.", ".SCHEMA")
+		// and unbalanced quotes are rejected up front, since QuoteIdent("")
 		// would render `""` and Snowflake would throw a raw syntax error.
 		return setOrUnset("DEFAULT_NAMESPACE", func(v string) (string, error) {
-			parts := strings.Split(v, ".")
-			if len(parts) > 2 {
+			parts, err := splitNamespace(v)
+			if err != nil || len(parts) > 2 {
 				return "", fmt.Errorf("invalid namespace %q: expected DATABASE or DATABASE.SCHEMA", v)
-			}
-			for i := range parts {
-				parts[i] = strings.TrimSpace(parts[i])
-				if parts[i] == "" {
-					return "", fmt.Errorf("invalid namespace %q: expected DATABASE or DATABASE.SCHEMA", v)
-				}
 			}
 			return snowflake.Qualify(parts...), nil
 		})
@@ -145,6 +143,44 @@ func BuildAlterUserPropertySQL(name, property, value string) (string, error) {
 	default:
 		return "", fmt.Errorf("unknown user property: %s", property)
 	}
+}
+
+// splitNamespace splits a DATABASE / DATABASE.SCHEMA reference on dots that sit
+// outside double-quoted identifiers, so `"MY.DB".PUB` yields ["MY.DB", "PUB"].
+// Each returned part is unquoted (outer quotes stripped, doubled quotes
+// unescaped) and non-empty — the caller re-quotes via Qualify. Unbalanced
+// quotes or empty segments return an error.
+func splitNamespace(v string) ([]string, error) {
+	var parts []string
+	var cur strings.Builder
+	inQuote := false
+	rs := []rune(v)
+	for i := 0; i < len(rs); i++ {
+		c := rs[i]
+		switch {
+		case c == '"' && inQuote && i+1 < len(rs) && rs[i+1] == '"':
+			cur.WriteRune('"') // escaped quote inside a quoted identifier
+			i++
+		case c == '"':
+			inQuote = !inQuote
+		case c == '.' && !inQuote:
+			parts = append(parts, cur.String())
+			cur.Reset()
+		default:
+			cur.WriteRune(c)
+		}
+	}
+	if inQuote {
+		return nil, fmt.Errorf("unbalanced quotes in %q", v)
+	}
+	parts = append(parts, cur.String())
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+		if parts[i] == "" {
+			return nil, fmt.Errorf("empty segment in %q", v)
+		}
+	}
+	return parts, nil
 }
 
 // AlterProperty applies a single SET/UNSET property change to a user.

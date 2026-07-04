@@ -25,6 +25,7 @@ import {
   PickDirectory,
 } from "../../../wailsjs/go/app/App";
 import type { keypair } from "../../../wailsjs/go/models";
+import { friendlyError } from "../common/PropertyRows";
 
 const { Text } = Typography;
 
@@ -83,9 +84,7 @@ export default function KeyPairAuthModal({ username, onKeyPicked, onClose }: Pro
       const r = await GenerateKeyPair(method, keyPath.trim(), isGo ? "" : passphrase);
       setResult(r);
     } catch (e) {
-      const raw = String(e);
-      const match = raw.match(/:\s*(.+)$/s);
-      setGenError(match ? match[1].trim() : raw);
+      setGenError(friendlyError(e));
     } finally {
       setGenerating(false);
     }
@@ -100,9 +99,13 @@ export default function KeyPairAuthModal({ username, onKeyPicked, onClose }: Pro
       message.success(`RSA public key applied to ${username}`);
       onClose();
     } catch (e) {
-      const raw = String(e);
-      const match = raw.match(/Insufficient privileges[^\n]*/i) ?? raw.match(/:\s*(.+)$/s);
-      setApplyError(match ? match[0].trim() : raw);
+      // The key pair was already written to disk by handleGenerate; if the
+      // apply is refused (e.g. insufficient privileges), tell the user where
+      // the now-unused private key lives so it isn't silently orphaned.
+      setApplyError(
+        `${friendlyError(e)}\nThe generated key pair was NOT applied. ` +
+        `Delete the unused key files at ${keyPath.trim()} (and its _pub.pem), or keep them to retry.`,
+      );
     } finally {
       setApplying(false);
     }
@@ -250,7 +253,7 @@ export default function KeyPairAuthModal({ username, onKeyPicked, onClose }: Pro
             {applyError && (
               <Alert
                 type="error"
-                message={<span style={{ fontSize: 12 }}>{applyError}</span>}
+                message={<span style={{ fontSize: 12, whiteSpace: "pre-line" }}>{applyError}</span>}
                 style={{ marginBottom: 12 }}
               />
             )}

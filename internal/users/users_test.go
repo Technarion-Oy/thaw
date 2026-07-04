@@ -33,6 +33,10 @@ func TestBuildAlterUserPropertySQL(t *testing.T) {
 		{"defaultNamespace", "DB.", "", true},
 		{"defaultNamespace", ".SCHEMA", "", true},
 		{"defaultNamespace", "A.B.C", "", true},
+		// quote-aware: a quoted identifier containing a dot stays one part
+		{"defaultNamespace", `"MY.DB".PUB`, `ALTER USER "ALICE" SET DEFAULT_NAMESPACE = "MY.DB"."PUB"`, false},
+		{"defaultNamespace", `"MY""DB"`, `ALTER USER "ALICE" SET DEFAULT_NAMESPACE = "MY""DB"`, false},
+		{"defaultNamespace", `"UNBALANCED`, "", true},
 		// integers — validated, empty → UNSET
 		{"minsToBypassMfa", "30", `ALTER USER "ALICE" SET MINS_TO_BYPASS_MFA = 30`, false},
 		{"minsToBypassMfa", "", `ALTER USER "ALICE" UNSET MINS_TO_BYPASS_MFA`, false},
@@ -40,7 +44,7 @@ func TestBuildAlterUserPropertySQL(t *testing.T) {
 		{"daysToExpiry", "-1", "", true},
 		// booleans — TRUE/FALSE only, no UNSET
 		{"disabled", "TRUE", `ALTER USER "ALICE" SET DISABLED = TRUE`, false},
-		{"disableMfa", "true", `ALTER USER "ALICE" SET DISABLE_MFA = TRUE`, false},
+		{"mustChangePassword", "true", `ALTER USER "ALICE" SET MUST_CHANGE_PASSWORD = TRUE`, false},
 		{"mustChangePassword", "", "", true},
 		// enums
 		{"type", "SERVICE", `ALTER USER "ALICE" SET TYPE = SERVICE`, false},

@@ -9,10 +9,10 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect, useCallback } from "react";
-import { Modal, Spin, Button, Input, Space, Typography, Popconfirm, message } from "antd";
+import { Modal, Spin, Button, Input, Space, Typography, message } from "antd";
 import { UserOutlined, CheckOutlined, SearchOutlined } from "@ant-design/icons";
 import {
-  GetObjectProperties, AlterUserProperty, ListWarehouses, ListRoles,
+  GetObjectProperties, AlterUserProperty, ListWarehouses, ListRoles, ParseSecondaryRoles,
 } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { EditRow, InfoRow, SECTION_HEAD, LABEL_TD, friendlyError } from "../common/PropertyRows";
@@ -80,12 +80,22 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
   const [rows, setRows]           = useState<snowflake.PropertyPair[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch]       = useState("");
+  // "ALL" | "NONE" | "" (unset) — derived from DEFAULT_SECONDARY_ROLES via the
+  // backend's tested ParseSecondaryRoles rather than a bespoke regex.
+  const [dsr, setDsr]             = useState("");
 
   const load = useCallback(async () => {
     setLoadError(null);
     try {
       const r = await GetObjectProperties("", "", "USER", name);
       setRows(r ?? []);
+      const raw = (r ?? []).find((p) => p.key.toUpperCase() === "DEFAULT_SECONDARY_ROLES")?.value ?? "";
+      if (!raw.trim() || raw.trim() === "null") {
+        setDsr("");
+      } else {
+        const roles = await ParseSecondaryRoles(raw).catch(() => null);
+        setDsr(roles === null ? "" : roles.some((x) => x.toUpperCase() === "ALL") ? "ALL" : "NONE");
+      }
     } catch (e) {
       setRows([]);
       setLoadError(friendlyError(e));
@@ -111,23 +121,9 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
   };
   const numVal = (key: string) => (/^\d+$/.test(val(key)) ? val(key) : "");
 
-  // default_secondary_roles renders as e.g. ["ALL"] or [].
-  const dsr = /all/i.test(val("DEFAULT_SECONDARY_ROLES")) ? "ALL"
-    : val("DEFAULT_SECONDARY_ROLES").replace(/\s/g, "") === "[]" ? "NONE" : "";
-
   const save = (property: string) => async (v: string) => {
     await AlterUserProperty(name, property, v);
     await load();
-  };
-
-  const disableMfa = async () => {
-    try {
-      await AlterUserProperty(name, "disableMfa", "TRUE");
-      message.success("MFA disabled");
-      await load();
-    } catch (e) {
-      message.error(friendlyError(e), 6);
-    }
   };
 
   const tableStyle: React.CSSProperties = { width: "100%", borderCollapse: "collapse", fontSize: 12 };
@@ -232,14 +228,9 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
             <InfoRow label="Last success login" value={val("LAST_SUCCESS_LOGIN")} search={search} />
             <InfoRow label="Has password"       value={val("HAS_PASSWORD")}       search={search} />
             <InfoRow label="Has RSA public key" value={val("HAS_RSA_PUBLIC_KEY")} search={search} />
-            <InfoRow
-              label="MFA (Duo)" value={val("EXT_AUTHN_DUO")} search={search}
-              extra={val("EXT_AUTHN_DUO").toLowerCase() === "true" && (
-                <Popconfirm title="Disable MFA for this user?" okText="Disable" onConfirm={disableMfa}>
-                  <Button size="small" danger style={{ marginLeft: 12 }}>Disable MFA</Button>
-                </Popconfirm>
-              )}
-            />
+            {/* Read-only: MFA is managed via Mins to bypass MFA above or
+                ALTER USER … REMOVE MFA METHOD in the SQL editor. */}
+            <InfoRow label="MFA (Duo)" value={val("EXT_AUTHN_DUO")} search={search} />
           </tbody></table>
         </>
       )}

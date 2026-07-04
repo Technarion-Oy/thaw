@@ -309,6 +309,16 @@ func BuildDescribeStreamlitQuery(database, schema, name string) string {
 // DESCRIBE NETWORK RULE value_list; for SERVICE objects the DESCRIBE SERVICE spec
 // and dns_name; for STREAMLIT objects the DESCRIBE STREAMLIT root_location and
 // main_file.
+// isPrivilegeError reports whether err reads as a Snowflake access-control
+// failure (as opposed to a transient/network one). Used to decide when a
+// supplemental DESCRIBE may silently degrade instead of failing the request.
+func isPrivilegeError(err error) bool {
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "insufficient privileges") ||
+		strings.Contains(s, "not authorized") ||
+		strings.Contains(s, "access control")
+}
+
 func GetObjectProperties(ctx context.Context, client *snowflake.Client, database, schema, kind, name string) ([]snowflake.PropertyPair, error) {
 	query, err := BuildObjectPropertiesQuery(database, schema, kind, name)
 	if err != nil {
@@ -327,8 +337,13 @@ func GetObjectProperties(ctx context.Context, client *snowflake.Client, database
 		// DESCRIBE property not already present so the user properties view
 		// reads complete — without this, those fields would always render
 		// empty and an edit could silently UNSET a real value. DESCRIBE may
-		// fail on privileges where SHOW succeeded; degrade to SHOW-only then.
+		// fail on privileges where SHOW succeeded; degrade to SHOW-only only
+		// in that case — any other failure (network blip, timeout) must
+		// surface, or the UI would render real values as blank/unset.
 		descRes, err := client.Execute(ctx, fmt.Sprintf("DESCRIBE USER %s", snowflake.QuoteIdent(name)))
+		if err != nil && !isPrivilegeError(err) {
+			return nil, fmt.Errorf("DESCRIBE USER: %w", err)
+		}
 		if err == nil {
 			have := make(map[string]bool, len(pairs))
 			for _, p := range pairs {
