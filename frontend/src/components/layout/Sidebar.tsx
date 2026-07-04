@@ -5009,7 +5009,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
               overflowX: "auto",
               maxHeight: "60vh",
               overflowY: "auto",
-              borderRadius: "0 0 6px 6px",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
             }}
           >
             {ddlModal.src}
