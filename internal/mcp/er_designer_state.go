@@ -35,6 +35,7 @@ type ERDesignerColumnOut struct {
 	IsPK     bool   `json:"isPK"`
 	NotNull  bool   `json:"notNull"`
 	FKRef    string `json:"fkRef,omitempty"`
+	Default  string `json:"defaultValue,omitempty"` // column DEFAULT expression, if set
 }
 
 // ERDesignerStateStore is a concurrency-safe in-memory cache that holds the

@@ -89,10 +89,12 @@ function buildSql(db: string, schema: string, cfg: TableConfig): string {
   // Columns
   cfg.columns.forEach((col, idx) => {
     let line = `    "${esc(col.name)}" ${col.type}`;
+    // Snowflake column grammar: DEFAULT precedes NOT NULL and the inline
+    // PRIMARY KEY / UNIQUE constraints.
+    if (col.defaultValue.trim()) line += ` DEFAULT ${col.defaultValue.trim()}`;
     if (col.notNull) line += " NOT NULL";
     if (col.primaryKey) line += " PRIMARY KEY";
     if (col.unique && !col.primaryKey) line += " UNIQUE";
-    if (col.defaultValue.trim()) line += ` DEFAULT ${col.defaultValue.trim()}`;
     if (col.comment.trim()) line += ` COMMENT ${sq(col.comment.trim())}`;
     
     lines.push(line + (idx === cfg.columns.length - 1 ? "" : ","));

@@ -2778,6 +2778,7 @@ export namespace mcp {
 	    isPK: boolean;
 	    notNull: boolean;
 	    fkRef?: string;
+	    defaultValue?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ERDesignerColumnOut(source);
@@ -2790,6 +2791,7 @@ export namespace mcp {
 	        this.isPK = source["isPK"];
 	        this.notNull = source["notNull"];
 	        this.fkRef = source["fkRef"];
+	        this.defaultValue = source["defaultValue"];
 	    }
 	}
 	export class ERDesignerTableOut {

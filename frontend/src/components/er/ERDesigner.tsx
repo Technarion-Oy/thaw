@@ -181,7 +181,7 @@ function generateDiffSQL(
       for (const c of t.columns) {
         if (!c.name.trim()) continue;
         const nn = c.isPK || c.notNull ? " NOT NULL" : "";
-        colLines.push(`    ${q(c.name.trim())} ${c.dataType}${nn}${defClause(c)}`);
+        colLines.push(`    ${q(c.name.trim())} ${c.dataType}${defClause(c)}${nn}`);
         if (c.isPK) pkCols.push(q(c.name.trim()));
         if (c.fkRef) {
           const parts = c.fkRef.split(".");
@@ -255,7 +255,7 @@ function generateDiffSQL(
       for (const c of t.columns) {
         if (!c.name.trim()) continue;
         const nn = c.isPK || c.notNull ? " NOT NULL" : "";
-        colLines.push(`    ${q(c.name.trim())} ${c.dataType}${nn}${defClause(c)}`);
+        colLines.push(`    ${q(c.name.trim())} ${c.dataType}${defClause(c)}${nn}`);
         if (c.isPK) pkCols.push(q(c.name.trim()));
         if (c.fkRef) {
           const parts = c.fkRef.split(".");
@@ -318,7 +318,7 @@ function generateDiffSQL(
           // for existing tables; free-text literals are still emitted here.
           // Existing columns' default changes are not diffed — SET DEFAULT is
           // heavily restricted anyway.
-          stmts.push(`${alter} ADD COLUMN ${q(c.name.trim())} ${c.dataType}${nn}${defClause(c)};`);
+          stmts.push(`${alter} ADD COLUMN ${q(c.name.trim())} ${c.dataType}${defClause(c)}${nn};`);
         } else {
           // Existing column — check for type change.
           // normalizeDataType is applied to bc.dataType (raw from INFORMATION_SCHEMA)
@@ -479,6 +479,7 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
             isPK: c.isPK,
             notNull: c.notNull,
             fkRef: c.fkRef || undefined,
+            defaultValue: c.defaultValue || undefined,
           }),
         ),
       }),
@@ -999,15 +1000,20 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
                         options={fkOptions(t.id)}
                         showSearch
                       />
-                      <Input
-                        size="small"
-                        placeholder="DEFAULT"
-                        value={c.defaultValue}
-                        onChange={(e) => updateColumn(t.id, c.id, { defaultValue: e.target.value })}
-                        style={{ width: 110, flexShrink: 0, fontFamily: "monospace", fontSize: 11 }}
-                      />
+                      {/* DEFAULT is a new-table-only field: Snowflake's ALTER … ADD
+                          COLUMN rejects function defaults, and literal defaults on
+                          existing tables belong in the dedicated Add Column dialog. */}
                       {!isExistingTable(t) && (
-                        <DefaultFunctionPicker onPick={(sql) => updateColumn(t.id, c.id, { defaultValue: sql })} />
+                        <>
+                          <Input
+                            size="small"
+                            placeholder="DEFAULT"
+                            value={c.defaultValue}
+                            onChange={(e) => updateColumn(t.id, c.id, { defaultValue: e.target.value })}
+                            style={{ width: 110, flexShrink: 0, fontFamily: "monospace", fontSize: 11 }}
+                          />
+                          <DefaultFunctionPicker onPick={(sql) => updateColumn(t.id, c.id, { defaultValue: sql })} />
+                        </>
                       )}
                       <Button
                         size="small"

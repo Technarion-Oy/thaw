@@ -38,6 +38,7 @@ import { SNOWFLAKE_DATA_TYPES } from "../../generated/snowflakeDataTypes";
 import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateDataTypes, ValidateGrammar, ValidateAntiPatterns, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContextFull, ResolveTableRefs, ComputeGitLineDiff } from "../../../wailsjs/go/sqleditor/Service";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { FUNCTION_CATEGORIES } from "./snowflakeSql";
+import { getOrCreateMenuId } from "./monacoMenu";
 import { UC, quoteIfNecessary, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt } from "./sqlEditorUtils";
 import ExplainModal from "../results/ExplainModal";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
@@ -433,15 +434,7 @@ let _snippetMenuRegistered = false;
   if (_snippetMenuRegistered) return;
   _snippetMenuRegistered = true;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let snippetSubMenuId: any;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    snippetSubMenuId = new (MenuId as any)("thaw.snippets.submenu");
-  } catch {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    snippetSubMenuId = (MenuId as any)._instances?.get("thaw.snippets.submenu");
-  }
+  const snippetSubMenuId = getOrCreateMenuId("thaw.snippets.submenu");
   if (!snippetSubMenuId) return;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -460,16 +453,7 @@ let _snippetMenuRegistered = false;
   // top-level list stays short (one entry per category) and never overflows the
   // screen — the flat variant ran off the bottom on smaller displays.
   SNIPPET_CATEGORIES.forEach((cat, gi) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let catMenuId: any;
-    const catKey = `thaw.snippets.cat.${gi}`;
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      catMenuId = new (MenuId as any)(catKey);
-    } catch {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      catMenuId = (MenuId as any)._instances?.get(catKey);
-    }
+    const catMenuId = getOrCreateMenuId(`thaw.snippets.cat.${gi}`);
     if (!catMenuId) return;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -506,15 +490,7 @@ let _snippetMenuRegistered = false;
   // ── Built-in Functions ──────────────────────────────────────────────────────
   // Same catalogue as the Code Snippets modal, as a nested "Built-in Functions"
   // submenu (→ category → NAME()). Inserts the callable form at the cursor.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let fnRootId: any;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    fnRootId = new (MenuId as any)("thaw.snippets.builtins");
-  } catch {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    fnRootId = (MenuId as any)._instances?.get("thaw.snippets.builtins");
-  }
+  const fnRootId = getOrCreateMenuId("thaw.snippets.builtins");
   if (fnRootId) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (MenuRegistry as any).appendMenuItem(snippetSubMenuId, {
@@ -525,16 +501,7 @@ let _snippetMenuRegistered = false;
     });
 
     FUNCTION_CATEGORIES.forEach((cat, ci) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let catMenuId: any;
-      const catKey = `thaw.snippets.builtins.${ci}`;
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        catMenuId = new (MenuId as any)(catKey);
-      } catch {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        catMenuId = (MenuId as any)._instances?.get(catKey);
-      }
+      const catMenuId = getOrCreateMenuId(`thaw.snippets.builtins.${ci}`);
       if (!catMenuId) return;
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

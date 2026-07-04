@@ -227,6 +227,11 @@ export function mergeAITablesIntoDesigner(
   for (const at of aiTables) {
     const key = tableKey(at.schema, at.name);
     const existing = currentMap.get(key);
+    // The AI payload carries no DEFAULT, so preserve any default the user
+    // already set on a same-named column of a replaced table (matched
+    // case-insensitively) rather than silently wiping it.
+    const prevDefaults = new Map<string, string>();
+    for (const c of existing?.columns ?? []) prevDefaults.set(c.name.trim().toUpperCase(), c.defaultValue);
     const dt: DesignerTable = {
       id: existing?.id ?? crypto.randomUUID(),
       schema: at.schema,
@@ -238,7 +243,7 @@ export function mergeAITablesIntoDesigner(
         isPK: c.isPK ?? false,
         notNull: c.notNull ?? (c.isPK ?? false),
         fkRef: c.fkRef ?? "",
-        defaultValue: "",
+        defaultValue: prevDefaults.get(c.name.trim().toUpperCase()) ?? "",
       })),
     };
     if (existing) {

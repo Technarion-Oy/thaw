@@ -27,6 +27,7 @@ import { CommandsRegistry } from "monaco-editor/esm/vs/platform/commands/common/
 import { ContextKeyExpr } from "monaco-editor/esm/vs/platform/contextkey/common/contextkey.js";
 // Slim editor API only (no language services) — see monacoSetup.ts for why.
 import * as monacoLib from "monaco-editor/esm/vs/editor/editor.api.js";
+import { getOrCreateMenuId } from "../editor/monacoMenu";
 import { Button, Dropdown, Modal, Space, Spin, Tooltip, Typography, Select, message, Tag } from "antd";
 import type { MenuProps } from "antd";
 import {
@@ -88,15 +89,7 @@ let _pythonSnippetMenuRegistered = false;
   if (_pythonSnippetMenuRegistered) return;
   _pythonSnippetMenuRegistered = true;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let pySubMenuId: any;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    pySubMenuId = new (MenuId as any)("thaw.python.snippets.submenu");
-  } catch {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    pySubMenuId = (MenuId as any)._instances?.get("thaw.python.snippets.submenu");
-  }
+  const pySubMenuId = getOrCreateMenuId("thaw.python.snippets.submenu");
   if (!pySubMenuId) return;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

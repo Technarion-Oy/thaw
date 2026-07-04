@@ -5,7 +5,7 @@
 // in whole or in part, is strictly prohibited without prior written permission
 // from Technarion Oy.
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { Modal, Input, Button, Menu } from "antd";
 import type { MenuProps } from "antd";
 import { useQueryStore } from "../../store/queryStore";
@@ -301,15 +301,24 @@ function filterTree(nodes: Category[], q: string): Category[] {
   return out;
 }
 
-/** Build AntD Menu items and a key→snippet lookup. Leaf keys are full paths. */
-function buildMenu(nodes: Category[], path: string, sink: Map<string, Snippet>): MenuItems {
+/** Build AntD Menu items, a key→snippet lookup, and each leaf's ancestor
+ *  category keys (so a leaf's path can be expanded without parsing the "/"
+ *  delimiter, which category labels like "Semi-structured / JSON" contain). */
+function buildMenu(
+  nodes: Category[],
+  path: string,
+  ancestors: string[],
+  sink: Map<string, Snippet>,
+  parents: Map<string, string[]>,
+): MenuItems {
   return nodes.map((n) => {
     const key = path ? `${path}/${n.label}` : n.label;
     const children: MenuItems = n.children
-      ? buildMenu(n.children, key, sink)
+      ? buildMenu(n.children, key, [...ancestors, key], sink, parents)
       : (n.items ?? []).map((it) => {
           const ik = `${key}/${it.name}`;
           sink.set(ik, it);
+          parents.set(ik, [...ancestors, key]);
           return { key: ik, label: it.name };
         });
     return { key, label: n.label, children };
@@ -343,34 +352,47 @@ export default function SnippetsModal({ onClose }: Props) {
 
   const q = search.trim().toLowerCase();
 
-  const { menuItems, snippetMap, allCategoryKeys, defaultLeaf } = useMemo(() => {
+  const { menuItems, snippetMap, allCategoryKeys, defaultLeaf, leafParents } = useMemo(() => {
     const tree = filterTree(CATEGORIES, q);
     const map = new Map<string, Snippet>();
-    const items = buildMenu(tree, "", map);
+    const parents = new Map<string, string[]>();
+    const items = buildMenu(tree, "", [], map, parents);
     return {
       menuItems: items,
       snippetMap: map,
       allCategoryKeys: categoryKeys(tree, ""),
       defaultLeaf: firstLeaf(tree, map),
+      leafParents: parents,
     };
   }, [q]);
 
   const [selectedKey, setSelectedKey] = useState<string | undefined>(defaultLeaf);
 
-  // While searching, expand every matching category and jump to the first hit.
-  // When cleared, collapse back to the first top-level category.
+  // Only touch selection/openKeys on a search *transition*, never on plain
+  // clicks (which change selectedKey while q stays constant) — otherwise the
+  // user's manual pick would snap back on every keystroke.
+  const prevQ = useRef(q);
   useEffect(() => {
+    const wasSearching = prevQ.current;
+    prevQ.current = q;
     if (q) {
       setOpenKeys(allCategoryKeys);
-      if (defaultLeaf) setSelectedKey(defaultLeaf);
-    } else {
-      // Collapse back to the first top-level category and re-select its first
-      // item, so the previewed/highlighted snippet is visible in the tree
-      // (a match selected under a now-collapsed nested category would vanish).
-      setOpenKeys([CATEGORIES[0].label]);
-      if (defaultLeaf) setSelectedKey(defaultLeaf);
+      // Keep the current pick if it still matches the filter; else jump to the
+      // first hit so highlight and preview agree.
+      if (!selectedKey || !snippetMap.has(selectedKey)) {
+        if (defaultLeaf) setSelectedKey(defaultLeaf);
+      }
+    } else if (wasSearching) {
+      // Search just cleared — keep the selection but expand its category path
+      // so it stays visible (a pick under a nested category would otherwise
+      // vanish when the tree collapses).
+      setOpenKeys(
+        selectedKey && leafParents.has(selectedKey)
+          ? [...leafParents.get(selectedKey)!]
+          : [CATEGORIES[0].label],
+      );
     }
-  }, [q, allCategoryKeys, defaultLeaf]);
+  }, [q, allCategoryKeys, defaultLeaf, selectedKey, snippetMap, leafParents]);
 
   const selected = (selectedKey && snippetMap.get(selectedKey)) || (defaultLeaf ? snippetMap.get(defaultLeaf) : undefined);
 
