@@ -13,7 +13,7 @@
 import { useState, useEffect } from "react";
 import { Select, InputNumber, Button, Typography } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
-import { ListDatabases, ListSchemas, ListObjects, ListServiceEndpoints } from "../../../wailsjs/go/app/App";
+import { ListDatabases, ListUserSchemas, ListObjects, ListServiceEndpoints } from "../../../wailsjs/go/app/App";
 
 const { Text } = Typography;
 
@@ -52,7 +52,7 @@ export default function EndpointTargetPicker({ defaultDb, defaultSchema, onInser
 
   useEffect(() => {
     if (!db) { setSchemas([]); return; }
-    ListSchemas(db).then(setSchemas).catch(() => setSchemas([]));
+    ListUserSchemas(db).then(setSchemas).catch(() => setSchemas([]));
   }, [db]);
 
   useEffect(() => {

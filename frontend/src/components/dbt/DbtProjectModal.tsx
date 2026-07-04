@@ -24,7 +24,7 @@ import {
   Tooltip,
   Typography,
 } from "antd";
-import { FolderOpenOutlined, LinkOutlined, WarningOutlined } from "@ant-design/icons";
+import { FolderOpenOutlined, LinkOutlined } from "@ant-design/icons";
 import {
   CreateDbtProject,
   GetDatabaseCrossDeps,
@@ -32,7 +32,7 @@ import {
   GetSchemaCrossDeps,
   ListDatabases,
   ListDirectory,
-  ListSchemas,
+  ListUserSchemas,
   PickDirectory,
 } from "../../../wailsjs/go/app/App";
 import type { dbt } from "../../../wailsjs/go/models";
@@ -165,7 +165,7 @@ export default function DbtProjectModal({ onClose }: Props) {
   function handlePanelExpand(db: string) {
     if (schemasByDb[db] !== undefined || loadingSchemas[db]) return;
     setLoadingSchemas((prev) => ({ ...prev, [db]: true }));
-    ListSchemas(db)
+    ListUserSchemas(db)
       .then((schemas) => {
         const list = schemas ?? [];
         setSchemasByDb((prev) => ({ ...prev, [db]: list }));
@@ -564,31 +564,9 @@ export default function DbtProjectModal({ onClose }: Props) {
                     </Space>
                     <Space wrap>
                       {schemas.map((schema) => {
-                        const system = isSystemSchema(schema);
                         const schemaKey = `${db}||${schema}`;
                         const isSuggested = suggestedSet.has(schemaKey);
                         const refBy = isSuggested ? referencedByLabels(db, schema) : [];
-
-                        if (system) {
-                          return (
-                            <Tooltip
-                              key={schema}
-                              title="System schema — contains Snowflake metadata. Include only if your models reference it directly. No staging stubs will be generated."
-                            >
-                              <Checkbox
-                                checked={isSchemaSelected(db, schema)}
-                                onChange={(e) => toggleSchema(db, schema, e.target.checked)}
-                              >
-                                <Text type="secondary" italic>
-                                  <WarningOutlined
-                                    style={{ marginRight: 4, color: "var(--ant-color-warning)" }}
-                                  />
-                                  {schema}
-                                </Text>
-                              </Checkbox>
-                            </Tooltip>
-                          );
-                        }
 
                         if (isSuggested) {
                           return (

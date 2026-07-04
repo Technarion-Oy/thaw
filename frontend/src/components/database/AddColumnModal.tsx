@@ -14,7 +14,7 @@ import {
   Typography, Button, Alert,
 } from "antd";
 import { PlusOutlined, TableOutlined } from "@ant-design/icons";
-import { ExecDDL, GetQuotedIdentifiersIgnoreCase, ListDatabases, ListSchemas, ListObjects, GetTableColumnsWithTypes, BuildAddColumnSql, IsNumeric, GetCollations } from "../../../wailsjs/go/app/App";
+import { ExecDDL, GetQuotedIdentifiersIgnoreCase, ListDatabases, ListUserSchemas, ListObjects, GetTableColumnsWithTypes, BuildAddColumnSql, IsNumeric, GetCollations } from "../../../wailsjs/go/app/App";
 import { column, snowflake } from "../../../wailsjs/go/models";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import DataTypeSelect from "../shared/DataTypeSelect";
@@ -114,7 +114,7 @@ export default function AddColumnModal({ db, schema, table, onClose, onSuccess }
   // Load schemas when FK database changes
   useEffect(() => {
     if (cfg.constraintKind !== "foreign_key" || !cfg.fkDb) { setFkSchemas([]); return; }
-    ListSchemas(cfg.fkDb).then((s) => setFkSchemas(s ?? [])).catch(() => setFkSchemas([]));
+    ListUserSchemas(cfg.fkDb).then((s) => setFkSchemas(s ?? [])).catch(() => setFkSchemas([]));
   }, [cfg.constraintKind, cfg.fkDb]);
 
   // Load tables when FK schema changes

@@ -4,7 +4,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from "react";
 import { App as AntApp, Modal, Button, Input, Select, Checkbox, AutoComplete } from "antd";
 import { PlusOutlined, DeleteOutlined, CopyOutlined, LinkOutlined, SwapOutlined } from "@ant-design/icons";
-import { ExecuteQuery, ListSchemas, UpdateERDesignerState, ClearERDesignerState } from "../../../wailsjs/go/app/App";
+import { ExecuteQuery, ListUserSchemas, UpdateERDesignerState, ClearERDesignerState } from "../../../wailsjs/go/app/App";
 import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { mcp } from "../../../wailsjs/go/models";
@@ -465,7 +465,7 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
   // ── Fetch schemas on mount ──────────────────────────────────────────────────
 
   useEffect(() => {
-    ListSchemas(database)
+    ListUserSchemas(database)
       .then((s) => setSchemas(s.filter((n) => n.toUpperCase() !== "INFORMATION_SCHEMA")))
       .catch(() => {});
   }, [database]);

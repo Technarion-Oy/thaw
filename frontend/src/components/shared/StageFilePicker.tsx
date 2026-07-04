@@ -14,7 +14,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Select, Tree, Space, Typography, Spin } from "antd";
 import { FolderOutlined, FileOutlined } from "@ant-design/icons";
 import {
-  ListDatabases, ListSchemas, ListStages, ListStageEntries,
+  ListDatabases, ListUserSchemas, ListStages, ListStageEntries,
 } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 import type { DataNode, EventDataNode } from "antd/es/tree";
@@ -83,7 +83,7 @@ export default function StageFilePicker({ db, schema, onPick, label, allowUserSt
     setSchemas([]);
     if (!pickerDb) return;
     setLoadingSchemas(true);
-    ListSchemas(pickerDb)
+    ListUserSchemas(pickerDb)
       .then((s) => setSchemas((s ?? []).filter((n) => n.toUpperCase() !== "INFORMATION_SCHEMA")))
       .catch(() => setSchemas([]))
       .finally(() => setLoadingSchemas(false));

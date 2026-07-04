@@ -25,7 +25,7 @@ Renders an interactive ER diagram using `@xyflow/react` from Snowflake table/col
 **IPC calls:**
 - `ERDiagramModal` receives `snowflake.ERDiagramData` as a prop (pre-fetched by the caller) and calls `ListSchemas(database)` on mount to populate the schema filter with all database schemas (not just those present in the ER data). Join pathfinding (`FindJoinPaths`) and state building (`BuildJoinState`) are delegated to Go via IPC — see `internal/erdesigner/`.
 - `JoinQueryPanel` delegates SQL generation to Go via `BuildJoinSQL` IPC — the Go backend uses `snowflake.QuoteIdent` for proper identifier quoting.
-- `ERDesigner` calls `ListSchemas(database)` for the schema picker and `ExecuteQuery(sql)` to run generated DDL
+- `ERDesigner` calls `ListUserSchemas(database)` for the schema picker (omits `INFORMATION_SCHEMA`, since it generates + executes DDL) and `ExecuteQuery(sql)` to run generated DDL
 - All other files are pure TypeScript/React with no IPC
 
 **MCP integration:** The `open_er_designer` MCP tool (in `internal/mcp/er_tools.go`) emits a `mcp:open-er-designer` Wails event. `Sidebar.tsx` listens for this event and opens `ERDesigner` with two data sets: `mergedData` (AI tables merged into live schema, used for initial canvas population) and `initialData` (the original live schema, used as the baseline for diff SQL generation). The `mergedData` prop takes priority over `initialData` for table initialization, while `initialData` continues to drive `generateDiffSQL`.

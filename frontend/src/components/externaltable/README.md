@@ -26,7 +26,7 @@ offered for them.
 - `BuildCreateExternalTableSql(db, schema, cfg)` — live SQL preview (direct `useEffect` dependency, no explicit debounce timer)
 - `ExecDDL(sql)` — executes the CREATE DDL on submit; the statement is rebuilt fresh via `BuildCreateExternalTableSql(db, schema, cfg)` at submit time rather than reusing the debounced `preview` state (which lags a keystroke behind)
 - `GetQuotedIdentifiersIgnoreCase()` — feeds `ObjectNameCaseControl`
-- `ListDatabases()` / `ListSchemas(db)` — feed the cascading database/schema selects
+- `ListDatabases()` / `ListUserSchemas(db)` — feed the cascading database/schema selects (`ListUserSchemas` omits `INFORMATION_SCHEMA`, not a valid external-table target)
 - `ListStages(db, schema)` — stage picker options, filtered to `type === "EXTERNAL"`; the returned `url` is shown beneath each option via `optionRender`
 - `ListObjects(db, schema)` — file-format picker options (filtered to `FILE FORMAT`)
 - `ListStageEntries(db, schema, stage, dirPath)` — directory-aware listing for the inline stage browser; navigating folders composes the `@stage/path` Location
