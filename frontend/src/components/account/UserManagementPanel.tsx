@@ -21,7 +21,7 @@ import {
   SearchOutlined,
   KeyOutlined,
 } from "@ant-design/icons";
-import { ListUsers, ExecuteQuery } from "../../../wailsjs/go/app/App";
+import { ListUsers, ExecuteQuery, AlterUserProperty } from "../../../wailsjs/go/app/App";
 import { useSessionStore } from "../../store/sessionStore";
 import type { snowflake } from "../../../wailsjs/go/models";
 import UserPropertiesModal from "./UserPropertiesModal";
@@ -98,7 +98,9 @@ export default function UserManagementPanel() {
     const action = user.disabled ? "FALSE" : "TRUE";
     const verb   = user.disabled ? "Enabled" : "Disabled";
     try {
-      await ExecuteQuery(`ALTER USER "${esc(user.name)}" SET DISABLED = ${action};`);
+      // Same builder as the Properties modal's Disabled switch — one source
+      // of truth for the ALTER USER SET DISABLED statement.
+      await AlterUserProperty(user.name, "disabled", action);
       message.success(`${verb} user ${user.name}`);
       load();
     } catch (e) {

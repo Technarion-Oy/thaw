@@ -19,8 +19,10 @@ func TestBuildAlterUserPropertySQL(t *testing.T) {
 		want     string
 		wantErr  bool
 	}{
-		// strings — quoted + escaped, empty → UNSET
+		// strings — quoted + escaped (text-literal rules: backslash doubled), empty → UNSET
 		{"comment", "O'Neil", `ALTER USER "ALICE" SET COMMENT = 'O''Neil'`, false},
+		{"comment", `ends in \`, `ALTER USER "ALICE" SET COMMENT = 'ends in \\'`, false},
+		{"password", `p\w`, `ALTER USER "ALICE" SET PASSWORD = 'p\\w'`, false},
 		{"comment", "", `ALTER USER "ALICE" UNSET COMMENT`, false},
 		{"email", "a@x.io", `ALTER USER "ALICE" SET EMAIL = 'a@x.io'`, false},
 		{"middleName", "Q", `ALTER USER "ALICE" SET MIDDLE_NAME = 'Q'`, false},

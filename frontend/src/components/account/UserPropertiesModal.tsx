@@ -93,8 +93,11 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
       if (!raw.trim() || raw.trim() === "null") {
         setDsr("");
       } else {
+        // On parse failure keep the raw value: the select then displays it
+        // verbatim (an unknown option) instead of masquerading as "— unset —",
+        // and the no-op guard prevents a save from that state.
         const roles = await ParseSecondaryRoles(raw).catch(() => null);
-        setDsr(roles === null ? "" : roles.some((x) => x.toUpperCase() === "ALL") ? "ALL" : "NONE");
+        setDsr(roles === null ? raw.trim() : roles.some((x) => x.toUpperCase() === "ALL") ? "ALL" : "NONE");
       }
     } catch (e) {
       setRows([]);
@@ -215,9 +218,9 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
           <table style={tableStyle}><tbody>
             <EditRow label="Disabled"             value={val("DISABLED")}             type="boolean" search={search} onSave={save("disabled")} />
             <EditRow label="Must change password" value={val("MUST_CHANGE_PASSWORD")} type="boolean" search={search} onSave={save("mustChangePassword")} />
-            <EditRow label="Days to expiry"     value={numVal("DAYS_TO_EXPIRY")}     type="number" search={search} hint="Clear to remove expiry"       onSave={save("daysToExpiry")} />
-            <EditRow label="Mins to unlock"     value={numVal("MINS_TO_UNLOCK")}     type="number" search={search} hint="Clear to reset"               onSave={save("minsToUnlock")} />
-            <EditRow label="Mins to bypass MFA" value={numVal("MINS_TO_BYPASS_MFA")} type="number" search={search} hint="Requires MFA enrolment; clear to reset" onSave={save("minsToBypassMfa")} />
+            <EditRow label="Days to expiry"     value={numVal("DAYS_TO_EXPIRY")}     type="number" allowEmpty search={search} hint="Clear to remove expiry"       onSave={save("daysToExpiry")} />
+            <EditRow label="Mins to unlock"     value={numVal("MINS_TO_UNLOCK")}     type="number" allowEmpty search={search} hint="Clear to reset"               onSave={save("minsToUnlock")} />
+            <EditRow label="Mins to bypass MFA" value={numVal("MINS_TO_BYPASS_MFA")} type="number" allowEmpty search={search} hint="Requires MFA enrolment; clear to reset" onSave={save("minsToBypassMfa")} />
             <PasswordRow search={search} onSave={async (v) => { await AlterUserProperty(name, "password", v); await load(); }} />
           </tbody></table>
 

@@ -78,7 +78,9 @@ func BuildAlterWarehousePropertySQL(name, property, value string) (string, error
 		}
 		return fmt.Sprintf(`ALTER WAREHOUSE %s SET AUTO_RESUME = %s`, wh, v), nil
 	case "comment":
-		return fmt.Sprintf(`ALTER WAREHOUSE %s SET COMMENT = '%s'`, wh, snowflake.EscapeStringLit(value)), nil
+		// QuoteTextLit: comments are free text — a trailing backslash must not
+		// escape the closing quote.
+		return fmt.Sprintf(`ALTER WAREHOUSE %s SET COMMENT = %s`, wh, snowflake.QuoteTextLit(value)), nil
 	case "maxClusterCount":
 		v, err := validateInt(value)
 		if err != nil {

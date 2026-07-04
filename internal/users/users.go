@@ -52,7 +52,10 @@ func BuildAlterUserPropertySQL(name, property, value string) (string, error) {
 		}
 		return fmt.Sprintf("ALTER USER %s SET %s = %s", u, key, rendered), nil
 	}
-	asString := func(v string) (string, error) { return snowflake.QuoteStringLit(v), nil }
+	// QuoteTextLit, not QuoteStringLit: these are human-entered values, and
+	// Snowflake treats backslash as an escape inside single-quoted literals —
+	// a trailing `\` would swallow the closing quote and break the statement.
+	asString := func(v string) (string, error) { return snowflake.QuoteTextLit(v), nil }
 	asIdent := func(v string) (string, error) { return snowflake.QuoteIdent(v), nil }
 	asInt := func(v string) (string, error) { return validateInt(v) }
 
@@ -105,8 +108,9 @@ func BuildAlterUserPropertySQL(name, property, value string) (string, error) {
 		if trimmed == "" {
 			return "", fmt.Errorf("password cannot be empty")
 		}
-		// Deliberately not trimmed — leading/trailing spaces are legal in passwords.
-		return fmt.Sprintf("ALTER USER %s SET PASSWORD = %s", u, snowflake.QuoteStringLit(value)), nil
+		// Deliberately not trimmed — leading/trailing spaces are legal in
+		// passwords, and QuoteTextLit keeps embedded backslashes literal.
+		return fmt.Sprintf("ALTER USER %s SET PASSWORD = %s", u, snowflake.QuoteTextLit(value)), nil
 	case "defaultNamespace":
 		// DATABASE or DATABASE.SCHEMA — quote each dotted part separately.
 		// The split is quote-aware so a quoted identifier containing a literal

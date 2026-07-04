@@ -33,8 +33,12 @@ export const LABEL_TD: React.CSSProperties = {
 // privileges…" → "Insufficient privileges…").
 export function friendlyError(e: unknown): string {
   const raw = String(e);
-  const match = raw.match(/Insufficient privileges[^\n]*/i) ?? raw.match(/:\s*(.+)$/s);
-  return match ? match[0].trim() : raw;
+  const priv = raw.match(/Insufficient privileges[^\n]*/i);
+  if (priv) return priv[0].trim();
+  // The greedy [\s\S]* prefix pushes the match to the LAST colon; capture
+  // what follows it (must start with a non-space so an empty tail falls back).
+  const m = raw.match(/^[\s\S]*:\s*(\S[\s\S]*)$/);
+  return m ? m[1].trim() : raw;
 }
 
 export interface Option { label: string; value: string }
@@ -50,12 +54,17 @@ export interface EditRowProps {
   loadOptions?: () => Promise<Option[]>;
   min?:     number;
   max?:     number;
+  /** Number rows only: when true, clearing the input yields "" (the caller
+   *  treats it as UNSET). Default false — a cleared input coerces to "0",
+   *  preserving the original WarehousePropertiesModal behavior whose builder
+   *  rejects empty strings. */
+  allowEmpty?: boolean;
   hint?:    string;
   search?:  string;
   onSave:   (val: string) => Promise<void>;
 }
 
-export function EditRow({ label, value, type, options, loadOptions, min, max, hint, search, onSave }: EditRowProps) {
+export function EditRow({ label, value, type, options, loadOptions, min, max, allowEmpty, hint, search, onSave }: EditRowProps) {
   const [editing,   setEditing]   = useState(false);
   const [editVal,   setEditVal]   = useState(value);
   const [saving,    setSaving]    = useState(false);
@@ -139,8 +148,12 @@ export function EditRow({ label, value, type, options, loadOptions, min, max, hi
                   min={min ?? 0}
                   max={max}
                   value={editVal === "" ? undefined : parseInt(editVal, 10)}
-                  onChange={(v) => setEditVal(v === null || v === undefined ? "" : String(v))}
-                  placeholder="— unset —"
+                  onChange={(v) => setEditVal(
+                    v === null || v === undefined
+                      ? (allowEmpty ? "" : String(min ?? 0))
+                      : String(v),
+                  )}
+                  placeholder={allowEmpty ? "— unset —" : undefined}
                   style={{ width: 140 }}
                   title={hint}
                 />
