@@ -3782,6 +3782,16 @@ func (c *Client) ListFileFormats(ctx context.Context, database, schema string) (
 	return c.queryStringSlice(ctx, fmt.Sprintf("SHOW FILE FORMATS IN SCHEMA %s", q), 1)
 }
 
+// DDLUnsupportedKinds are object kinds GET_DDL has no type for: buildGetDDLQuery
+// would emit an invalid GET_DDL('<kind>', …). Keys are upper-cased kind names.
+// Mirrored in frontend/src/utils/objectDdl.ts (DDL_UNSUPPORTED_KINDS);
+// TestDDLUnsupportedKindsInSyncWithFrontend fails CI if the two drift.
+var DDLUnsupportedKinds = map[string]bool{
+	"IMAGE REPOSITORY": true, "SERVICE": true, "GATEWAY": true, "PACKAGES POLICY": true,
+	"MODEL": true, "MODEL MONITOR": true, "DATASET": true, "CORTEX SEARCH SERVICE": true,
+	"EXTERNAL AGENT": true, "MCP SERVER": true,
+}
+
 // GetObjectDDL returns the DDL definition of a Snowflake object using GET_DDL.
 //
 // For account-level objects (warehouses, databases, etc.) pass empty strings
@@ -3799,8 +3809,7 @@ func (c *Client) GetObjectDDL(ctx context.Context, database, schema, kind, name,
 	// Definition, comparison); guard here too so a future caller can't trip the
 	// invalid query (a packages-policy GET_DDL fails with "Cannot initialize
 	// Snowflake Metadata. Dictionary unavailable").
-	switch strings.ToUpper(strings.TrimSpace(kind)) {
-	case "IMAGE REPOSITORY", "SERVICE", "GATEWAY", "PACKAGES POLICY", "MODEL", "MODEL MONITOR", "DATASET", "CORTEX SEARCH SERVICE", "EXTERNAL AGENT", "MCP SERVER":
+	if DDLUnsupportedKinds[strings.ToUpper(strings.TrimSpace(kind))] {
 		return "", fmt.Errorf("GET_DDL does not support %s objects", kind)
 	}
 

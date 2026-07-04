@@ -44,4 +44,12 @@ describe("identifierRangeAt", () => {
     const line = "FROM foo";
     expect(span(line, line.length)).toBe("foo"); // idx0 == length → step back one
   });
+
+  it("does not let an unterminated quote swallow the rest of the line", () => {
+    // Mid-typing a quoted identifier: the open quote must not mark the tail as ident.
+    const line = 'SELECT * FROM DB.SCHEMA."MY';
+    expect(identifierRangeAt(line, line.length - 1)).toBeNull(); // inside the open quote
+    // A bare segment before the open quote still resolves on its own.
+    expect(span(line, 14)).toBe("DB.SCHEMA."); // trailing dot is bare; open quote excluded
+  });
 });

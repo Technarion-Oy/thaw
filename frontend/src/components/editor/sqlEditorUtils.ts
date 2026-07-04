@@ -25,11 +25,14 @@ export function identifierRangeAt(line: string, idx0: number): { start: number; 
   for (let i = 0; i < line.length;) {
     if (line[i] === '"') {
       const q = i++;
+      let closed = false;
       while (i < line.length) {
-        if (line[i] === '"') { if (line[i + 1] === '"') { i += 2; continue; } i++; break; }
+        if (line[i] === '"') { if (line[i + 1] === '"') { i += 2; continue; } i++; closed = true; break; }
         i++;
       }
-      for (let k = q; k < i; k++) inIdent[k] = true;
+      // Only a *closed* quote is a real identifier segment. An unterminated quote
+      // (mid-typing, e.g. DB.SCHEMA."MY) must not swallow the rest of the line.
+      if (closed) for (let k = q; k < i; k++) inIdent[k] = true;
     } else if (isBare(line[i])) { inIdent[i] = true; i++; }
     else i++;
   }

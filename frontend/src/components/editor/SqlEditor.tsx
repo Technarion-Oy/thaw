@@ -107,16 +107,24 @@ const inflightSchemaFetches = new Map<string, Promise<void>>();
 
 // Ensure a schema's objects are loaded into the store, deduping concurrent and
 // repeat fetches. A failed fetch leaves the key unclaimed so a later hover retries.
+// db/schema are passed to ListObjects verbatim (the Go side quotes them exactly, so
+// callers keep session identifiers case-preserved and uppercase SQL-literal ones).
 async function ensureSchemaObjectsLoaded(db: string, schema: string): Promise<void> {
   const key = `${UC(db)}\0${UC(schema)}`;
   if (fetchedSchemaObjects.has(key)) return;
+  // Already loaded (e.g. by the Sidebar, which never touches fetchedSchemaObjects)?
+  // Don't refetch just because a hovered name happens to be absent (typo/in-progress).
+  if (useObjectStore.getState().objects.some((o) => UC(o.db) === UC(db) && UC(o.schema) === UC(schema))) {
+    fetchedSchemaObjects.add(key);
+    return;
+  }
   let inflight = inflightSchemaFetches.get(key);
   if (!inflight) {
     inflight = (async () => {
       try {
-        const fetched = await ListObjects(UC(db), UC(schema));
+        const fetched = await ListObjects(db, schema);
         useObjectStore.getState().addObjects(
-          UC(db), UC(schema),
+          db, schema,
           (fetched ?? []).map((o) => ({ name: o.name, kind: (o.kind || "OTHER").toUpperCase() })),
         );
         fetchedSchemaObjects.add(key);
@@ -167,14 +175,16 @@ async function resolveStoreObject(
   };
 
   if (parts.length >= 3) {
+    // Fully-qualified in the SQL text → uppercase (Snowflake folds unquoted idents).
     const [pDb, pSchema, pName] = [parts[parts.length - 3], parts[parts.length - 2], parts[parts.length - 1]];
     return resolveIn(
       (o) => UC(o.db) === UC(pDb) && UC(o.schema) === UC(pSchema) && UC(o.name) === UC(pName),
-      { db: pDb, schema: pSchema, name: pName },
+      { db: UC(pDb), schema: UC(pSchema), name: pName },
     );
   }
 
   if (parts.length === 2) {
+    // schema.name — fetch under the case-preserved session database.
     const [qualifier, pName] = [parts[0], parts[1]];
     const sessDb = useSessionStore.getState().database;
     return resolveIn(
@@ -183,7 +193,7 @@ async function resolveStoreObject(
     );
   }
 
-  // 1-part, unqualified
+  // 1-part, unqualified → case-preserved session database + schema.
   const sess = useSessionStore.getState();
   return resolveIn(
     (o) => UC(o.name) === UC(parts[0]),
@@ -1675,6 +1685,28 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         pos.column    >= mk.startColumn      && pos.column    <= mk.endColumn);
     };
 
+    // Line content at pos, or null if pos is out of range — lastSqlMousePos can be
+    // stale after a tab switch (Ctrl+Tab fires no onMouseLeave) and point past the
+    // new, shorter document; getLineContent throws for an out-of-range line.
+    const lineContentAt = (m: any, pos: any): string | null =>
+      (pos && pos.lineNumber >= 1 && pos.lineNumber <= m.getLineCount())
+        ? m.getLineContent(pos.lineNumber) : null;
+
+    // Does `parts` resolve to `alias.column` (first segment is a table alias in the
+    // buffer)? Returns the aliased table if so. Callers must NOT fall through to
+    // resolveStoreObject on a hit — invariant: a resolved alias short-circuits to
+    // the column path only, never object resolution. Only 2-part idents can alias.
+    const matchTableAlias = async (
+      parts: string[] | null,
+    ): Promise<{ db: string; schema: string; name: string } | null> => {
+      if (!parts || parts.length !== 2) return null;
+      const objects = useObjectStore.getState().objects;
+      const rawRefs = await ParseJoinTableRefs(editor.getModel()?.getValue() ?? "");
+      const resolved = await ResolveTableRefs((rawRefs || []) as any[], objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, { database: "", schema: "" } as any, { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema } as any);
+      const m = resolved?.find((r) => r.alias.toUpperCase() === parts[0].toUpperCase());
+      return m ? { db: m.db, schema: m.schema, name: m.name } : null;
+    };
+
     // Position and render the overlay for a resolved store object. withDdl=false →
     // header-only identity tooltip. withDdl=true → fetch (cached) DDL and show it;
     // kinds GET_DDL can't render, or a failed/empty fetch, fall back to identity so
@@ -1714,7 +1746,8 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       // A diagnostic marker wins at this position (matches the hover flows), so
       // don't offer a "hold-for-DDL" underline where only the marker will show.
       if (markerAt(pos)) { clearCmdLink(); return; }
-      const line = m.getLineContent(pos.lineNumber);
+      const line = lineContentAt(m, pos);
+      if (line === null) { clearCmdLink(); return; }
       const rng = identifierRangeAt(line, pos.column - 1);
       if (!rng) { clearCmdLink(); return; }
       const key = `${pos.lineNumber}:${rng.start}:${rng.end}`;
@@ -1723,6 +1756,8 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       void (async () => {
         const partsRaw = await identifierAt(line, pos.column - 1);
         const parts = (partsRaw && partsRaw.length > 0) ? partsRaw : null;
+        // alias.column is not a linkable object — don't underline it (match the hover flow).
+        if (await matchTableAlias(parts)) { if (cmdLinkKey === key) { cmdLinkDecos.clear(); cmdLinkKey = null; } return; }
         const obj = parts ? await resolveStoreObject(parts) : null;
         if (cmdLinkKey !== key) return;   // superseded by a newer identifier
         if (!obj || !cmdModHeld || !kindSupportsDdl(obj.kind)) { cmdLinkDecos.clear(); cmdLinkKey = null; return; }
@@ -1741,10 +1776,14 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       if (!pos || !m || m.getLanguageId() !== "sql" ||
           !useFeatureFlagsStore.getState().flags.ddlHoverTooltips) return;
       if (markerAt(pos)) return;   // diagnostic marker wins at this position (match mouse-move flow)
+      const line = lineContentAt(m, pos);
+      if (line === null) return;   // stale pos past a shorter (tab-switched) document
       const posLine = pos.lineNumber, posCol = pos.column;
       void (async () => {
-        const partsRaw = await identifierAt(m.getLineContent(pos.lineNumber), pos.column - 1);
+        const partsRaw = await identifierAt(line, pos.column - 1);
         const parts = (partsRaw && partsRaw.length > 0) ? partsRaw : null;
+        // alias.column short-circuits to the column path — never object DDL (match hover flow).
+        if (await matchTableAlias(parts)) return;
         const obj = parts ? await resolveStoreObject(parts) : null;
         // Bail if the modifier was released or the mouse moved off this position
         // mid-await. Compare line/column, not object identity — Monaco hands out a
@@ -1753,7 +1792,9 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
             lastSqlMousePos.lineNumber !== posLine || lastSqlMousePos.column !== posCol) return;
         if (hoverTimerRef.current) { clearTimeout(hoverTimerRef.current); hoverTimerRef.current = null; }
         const shown = await showObjectTooltip(pos, obj, true);
-        if (!shown) lastHoverWordRef.current = null;   // failed/empty DDL — let a re-hover retry
+        // Gate the cache-bust on DDL-capable kinds (match the main hover path) — an
+        // unsupported kind always returns false and shouldn't force a re-hover.
+        if (kindSupportsDdl(obj.kind) && !shown) lastHoverWordRef.current = null;
       })();
     };
 
@@ -1918,14 +1959,8 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
         if (!parts || parts.length === 0) return;
 
-        const { objects } = useObjectStore.getState();
-
         if (parts.length === 2) {
-          const rawRefs = await ParseJoinTableRefs(editor.getModel()?.getValue() ?? "");
-          const resolved = await ResolveTableRefs((rawRefs || []) as any[], objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, { database: "", schema: "" } as any, { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema } as any);
-          const matchedTable = resolved?.find(
-            (r) => r.alias.toUpperCase() === parts[0].toUpperCase(),
-          );
+          const matchedTable = await matchTableAlias(parts);
           if (matchedTable) {
             const cacheKey = `${UC(matchedTable.db)}\0${UC(matchedTable.schema)}\0${UC(matchedTable.name)}`;
             const cols = colInfoCache.get(cacheKey);
