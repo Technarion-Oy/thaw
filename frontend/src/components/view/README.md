@@ -16,7 +16,7 @@ driven from the sidebar context menu.
 | File | Purpose |
 |------|---------|
 | `CreateViewModal.tsx` | `CREATE VIEW` form — name/options (OR REPLACE / IF NOT EXISTS), comment, and an embedded Monaco editor for the defining query with an **Insert from table** database→schema→table picker; an **Advanced options** `Collapse` covers explicit Columns, SECURE, RECURSIVE, COPY GRANTS, and view-level Tags. Uses `BuildCreateViewSql` for live SQL preview. |
-| `ViewPropertiesModal.tsx` | Loads `GetObjectProperties(db, schema, "VIEW", name)` and `GetObjectTagReferences("VIEW", …)`; renders inline-editable Rename, Comment, a SECURE toggle, a Change Tracking on/off `Select`, and a Tag editor (all via `AlterView … RENAME TO / SET / UNSET`), plus the remaining `SHOW VIEWS` properties and the rendered defining query (`text` column). Rename fires `onSuccess` (sidebar refresh) and closes, since the view identity may have moved. Inherited tags are shown but not removable. Views have no lifecycle (no Suspend/Resume). |
+| `ViewPropertiesModal.tsx` | Loads `GetObjectProperties(db, schema, "VIEW", name)` and `GetObjectTagReferences("VIEW", …)`; renders inline-editable Rename, Comment, a SECURE toggle, a Change Tracking on/off `Select`, and the shared `TagsRow` editor (all via `AlterView … RENAME TO / SET / UNSET`), plus the remaining `SHOW VIEWS` properties and the rendered defining query (`text` column). Rename is in-place within the same schema, using the shared `identToken`/`quoteIdent` (case-folding by default) so it matches the sidebar Rename dialog; it fires `onSuccess` (sidebar refresh) and closes. Inherited tags are shown but not removable. Views have no lifecycle (no Suspend/Resume). |
 
 ## Patterns & integration
 
@@ -46,9 +46,10 @@ boundary.
 - The properties panel reads the defining query from the `text` column of `SHOW
   VIEWS`; `comment`, `is_secure`, `text`, and `change_tracking` are excluded from
   the generic Properties table because they are surfaced in dedicated sections.
-- Rename qualifies a bare name into the current db/schema; a dotted input is
-  treated as an already-qualified path (splitting on `.`, so a name literally
-  containing a dot must be renamed from the SQL editor).
+- Rename is in-place within the current schema (bare name only) via the shared
+  `identToken(name, false)`, so it folds to uppercase by default exactly like the
+  sidebar's Rename dialog — the two entry points can't diverge on stored casing.
+  Cross-schema moves stay in the SQL editor.
 - Policy attach/detach (masking / row-access / aggregation / projection / join)
   and column-level ALTER COLUMN edits are deliberately left to follow-ups — they
   need a policy picker (issue #618).

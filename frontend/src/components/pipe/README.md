@@ -13,7 +13,7 @@ data (status, copy history) or trigger management actions (refresh).
 | File | Purpose |
 |------|---------|
 | `CreatePipeModal.tsx` | `CREATE PIPE` form with auto-ingest toggle, notification integrations, AWS SNS topic, and an embedded Monaco editor for the `COPY INTO` statement body. Uses `BuildCreatePipeSql` for live SQL preview. |
-| `PipePropertiesModal.tsx` | Displays SHOW PIPES properties for an existing pipe as a read-only key/value list. |
+| `PipePropertiesModal.tsx` | Displays SHOW PIPES properties for an existing pipe; the Settings section adds an inline-editable Comment and the shared `TagsRow` editor (`SET`/`UNSET TAG` via `AlterPipe`). |
 | `PipeStatusModal.tsx` | Shows live pipe status from `SYSTEM$PIPE_STATUS`, formatted as execution state, pending files, error count, and last ingested time. |
 | `PipeCopyHistoryModal.tsx` | Paginated table of `COPY_HISTORY` records for a pipe: file name, row count, status, load time. |
 | `RefreshPipeModal.tsx` | Confirms and triggers `ALTER PIPE … REFRESH` (optionally with a prefix filter and error-on-execute flag). |

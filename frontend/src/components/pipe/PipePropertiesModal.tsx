@@ -10,13 +10,14 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Modal, Spin, Button, Input, Space, Typography, Alert, Tag, Tooltip,
+  Modal, Spin, Button, Input, Space, Typography, Alert, Tooltip,
 } from "antd";
 import {
-  ApiOutlined, EditOutlined, CheckOutlined, CloseOutlined, PlusOutlined,
+  ApiOutlined, EditOutlined, CheckOutlined, CloseOutlined,
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterPipe } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
+import TagsRow, { EditableTag } from "../shared/TagsRow";
 
 const { Text } = Typography;
 
@@ -138,88 +139,6 @@ function EditRow({ label, value, canUnset, onSave, onUnset }: EditRowProps) {
   );
 }
 
-// ─── Tag editor ──────────────────────────────────────────────────────────────
-
-interface TagsRowProps {
-  tags: { name: string; value: string }[];
-  onSetTag: (name: string, value: string) => Promise<void>;
-  onUnsetTag: (name: string) => Promise<void>;
-}
-
-function TagsRow({ tags, onSetTag, onUnsetTag }: TagsRowProps) {
-  const [newName, setNewName] = useState("");
-  const [newValue, setNewValue] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const addTag = async () => {
-    if (!newName.trim()) return;
-    setSaving(true);
-    setError(null);
-    try {
-      await onSetTag(newName.trim(), newValue.trim());
-      setNewName("");
-      setNewValue("");
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <tr>
-      <td style={LABEL_TD}>Tags</td>
-      <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "top" }}>
-        <Space direction="vertical" size={6} style={{ width: "100%" }}>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {tags.length === 0 && <Text type="secondary" style={{ fontSize: 12 }}>(none)</Text>}
-            {tags.map((t) => (
-              <Tag
-                key={t.name}
-                closable
-                onClose={async (e) => {
-                  e.preventDefault();
-                  await onUnsetTag(t.name);
-                }}
-              >
-                {t.name}: {t.value}
-              </Tag>
-            ))}
-          </div>
-          <Space>
-            <Input
-              size="small"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="Tag name"
-              style={{ width: 140 }}
-            />
-            <Input
-              size="small"
-              value={newValue}
-              onChange={(e) => setNewValue(e.target.value)}
-              placeholder="Tag value"
-              style={{ width: 160 }}
-              onPressEnter={addTag}
-            />
-            <Button
-              size="small"
-              icon={<PlusOutlined />}
-              onClick={addTag}
-              loading={saving}
-              disabled={!newName.trim()}
-            >
-              Add Tag
-            </Button>
-          </Space>
-          {error && <Text type="danger" style={{ fontSize: 11 }}>{error}</Text>}
-        </Space>
-      </td>
-    </tr>
-  );
-}
-
 // ─── Main component ──────────────────────────────────────────────────────────
 
 interface Props {
@@ -232,7 +151,7 @@ interface Props {
 export default function PipePropertiesModal({ db, schema, name, onClose }: Props) {
   const [rows, setRows] = useState<snowflake.PropertyPair[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [tags, setTags] = useState<{ name: string; value: string }[]>([]);
+  const [tags, setTags] = useState<EditableTag[]>([]);
 
   const reload = useCallback(async () => {
     setRows(null);
@@ -261,14 +180,14 @@ export default function PipePropertiesModal({ db, schema, name, onClose }: Props
   const setTag = async (tagName: string, tagValue: string) => {
     await AlterPipe(db, schema, name, `SET TAG "${tagName.replace(/"/g, '""')}" = ${q1(tagValue)}`);
     setTags((prev) => {
-      const next = prev.filter((t) => t.name !== tagName);
-      return [...next, { name: tagName, value: tagValue }];
+      const next = prev.filter((t) => t.key !== tagName);
+      return [...next, { key: tagName, name: tagName, value: tagValue }];
     });
   };
 
   const unsetTag = async (tagName: string) => {
     await AlterPipe(db, schema, name, `UNSET TAG "${tagName.replace(/"/g, '""')}"`);
-    setTags((prev) => prev.filter((t) => t.name !== tagName));
+    setTags((prev) => prev.filter((t) => t.key !== tagName));
   };
 
   const comment = rows ? (rows.find((r) => r.key.toUpperCase() === "COMMENT")?.value ?? "") : "";

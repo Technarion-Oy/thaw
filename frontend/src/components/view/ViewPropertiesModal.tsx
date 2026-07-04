@@ -15,10 +15,12 @@ import {
   Modal, Spin, Button, Input, Select, Space, Typography, Alert, Tooltip, Switch, Tag,
 } from "antd";
 import {
-  EyeOutlined, EditOutlined, CheckOutlined, CloseOutlined, PlusOutlined,
+  EyeOutlined, EditOutlined, CheckOutlined, CloseOutlined,
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterView, GetObjectTagReferences } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
+import TagsRow, { EditableTag } from "../shared/TagsRow";
+import { quoteIdent, identToken } from "../shared/ObjectNameCaseControl";
 
 const { Text } = Typography;
 
@@ -45,17 +47,6 @@ function q1(s: string) { return "'" + s.replace(/\\/g, "\\\\").replace(/'/g, "''
 
 function truthy(v: string): boolean {
   return /^(y|yes|true|1)$/i.test(v.trim());
-}
-
-// Build the RENAME TO target. A bare name stays in the current db/schema; a
-// dotted name is treated as an already-qualified path and each part is quoted.
-// ponytail: splits on ".", so a name literally containing a dot can't be moved
-// this way — type the fully-quoted identifier in the SQL editor for that.
-export function qualifyRename(input: string, db: string, schema: string): string {
-  const t = input.trim();
-  const quote = (p: string) => `"${p.replace(/"/g, '""')}"`;
-  if (t.includes(".")) return t.split(".").map((p) => quote(p.trim())).join(".");
-  return `${quote(db)}.${quote(schema)}.${quote(t)}`;
 }
 
 // ─── EditRow ─────────────────────────────────────────────────────────────────
@@ -148,93 +139,6 @@ function EditRow({ label, value, canUnset, onSave, onUnset }: EditRowProps) {
   );
 }
 
-// ─── Tag editor ──────────────────────────────────────────────────────────────
-// Tags whose LEVEL is not the object itself (inherited from the schema/database)
-// are shown for context but can't be unset here — that has to happen where they
-// were applied.
-
-interface ViewTag { name: string; qualified: string; value: string; inherited: boolean }
-
-interface TagsRowProps {
-  tags: ViewTag[];
-  onSetTag: (name: string, value: string) => Promise<void>;
-  onUnsetTag: (qualified: string) => Promise<void>;
-}
-
-function TagsRow({ tags, onSetTag, onUnsetTag }: TagsRowProps) {
-  const [newName, setNewName] = useState("");
-  const [newValue, setNewValue] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const addTag = async () => {
-    if (!newName.trim()) return;
-    setSaving(true);
-    setError(null);
-    try {
-      await onSetTag(newName.trim(), newValue.trim());
-      setNewName("");
-      setNewValue("");
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <tr>
-      <td style={LABEL_TD}>Tags</td>
-      <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "top" }}>
-        <Space direction="vertical" size={6} style={{ width: "100%" }}>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {tags.length === 0 && <Text type="secondary" style={{ fontSize: 12 }}>(none)</Text>}
-            {tags.map((t) => (
-              <Tag
-                key={t.qualified}
-                closable={!t.inherited}
-                onClose={async (e) => {
-                  e.preventDefault();
-                  await onUnsetTag(t.qualified);
-                }}
-              >
-                {t.name}: {t.value}{t.inherited ? " (inherited)" : ""}
-              </Tag>
-            ))}
-          </div>
-          <Space>
-            <Input
-              size="small"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="Tag name"
-              style={{ width: 140 }}
-            />
-            <Input
-              size="small"
-              value={newValue}
-              onChange={(e) => setNewValue(e.target.value)}
-              placeholder="Tag value"
-              style={{ width: 160 }}
-              onPressEnter={addTag}
-            />
-            <Button
-              size="small"
-              icon={<PlusOutlined />}
-              onClick={addTag}
-              loading={saving}
-              disabled={!newName.trim()}
-            >
-              Add Tag
-            </Button>
-          </Space>
-          {error && <Text type="danger" style={{ fontSize: 11 }}>{error}</Text>}
-        </Space>
-      </td>
-    </tr>
-  );
-}
-
 // ─── Main component ──────────────────────────────────────────────────────────
 
 interface Props {
@@ -251,10 +155,13 @@ export default function ViewPropertiesModal({ db, schema, name, onClose, onSucce
   const [actionError, setActionError] = useState<string | null>(null);
   const [secureSaving, setSecureSaving] = useState(false);
   const [ctSaving, setCtSaving] = useState(false);
-  const [tags, setTags] = useState<ViewTag[]>([]);
+  const [tags, setTags] = useState<EditableTag[]>([]);
 
   // Tags use the no-latency INFORMATION_SCHEMA.TAG_REFERENCES read so a SET/UNSET
   // reflects immediately. Best-effort: SET/UNSET still work if the read fails.
+  // Tags whose LEVEL is not the object itself (inherited from schema/database)
+  // are shown for context but can't be unset here — that has to happen where
+  // they were applied.
   const reloadTags = useCallback(async () => {
     try {
       const t = await GetObjectTagReferences("VIEW", db, schema, name, "");
@@ -262,16 +169,18 @@ export default function ViewPropertiesModal({ db, schema, name, onClose, onSucce
       const ci = (n: string) => cols.indexOf(n);
       const dbI = ci("tag_database"), scI = ci("tag_schema"), nmI = ci("tag_name"),
         vlI = ci("tag_value"), lvI = ci("level");
-      const parsed = (t?.rows ?? []).map((row): ViewTag => {
+      const parsed = (t?.rows ?? []).map((row): EditableTag => {
         const tdb = dbI >= 0 ? String(row[dbI] ?? "") : "";
         const tsc = scI >= 0 ? String(row[scI] ?? "") : "";
         const tnm = nmI >= 0 ? String(row[nmI] ?? "") : "";
-        const qualified = [tdb, tsc, tnm].filter(Boolean).map((p) => `"${p.replace(/"/g, '""')}"`).join(".");
+        const qualified = [tdb, tsc, tnm].filter(Boolean).map(quoteIdent).join(".");
+        const inherited = lvI >= 0 && String(row[lvI] ?? "").toUpperCase() !== "VIEW";
         return {
+          key: qualified,
           name: tnm,
-          qualified,
           value: vlI >= 0 ? String(row[vlI] ?? "") : "",
-          inherited: lvI >= 0 && String(row[lvI] ?? "").toUpperCase() !== "VIEW",
+          removable: !inherited,
+          suffix: inherited ? " (inherited)" : "",
         };
       });
       setTags(parsed);
@@ -334,11 +243,15 @@ export default function ViewPropertiesModal({ db, schema, name, onClose, onSucce
     }
   };
 
-  // RENAME can move the view to another schema/db, so the modal's identity is no
-  // longer valid afterwards — refresh the browser and close rather than track it.
+  // In-place rename within the same schema — mirrors the sidebar's Rename dialog
+  // (same-schema, identToken folding by default) so both entry points produce the
+  // same stored identifier. The modal's identity changes, so refresh the browser
+  // and close rather than track the new name.
   const rename = async (newName: string) => {
-    if (!newName.trim() || newName.trim() === name) return;
-    await AlterView(db, schema, name, `RENAME TO ${qualifyRename(newName, db, schema)}`);
+    const t = newName.trim();
+    if (!t || t === name) return;
+    const target = `${quoteIdent(db)}.${quoteIdent(schema)}.${identToken(t, false)}`;
+    await AlterView(db, schema, name, `RENAME TO ${target}`);
     onSuccess?.();
     onClose();
   };
@@ -362,7 +275,7 @@ export default function ViewPropertiesModal({ db, schema, name, onClose, onSucce
   const ctOn = /^(on|true)$/i.test(changeTracking.trim());
 
   // Keys handled by the editable Settings section or rendered elsewhere.
-  const handledKeys = new Set(["comment", "is_secure", "text", "change_tracking"]);
+  const handledKeys = new Set(["name", "comment", "is_secure", "text", "change_tracking"]);
 
   return (
     <Modal
