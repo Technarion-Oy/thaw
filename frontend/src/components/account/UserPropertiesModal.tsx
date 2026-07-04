@@ -53,7 +53,7 @@ function PasswordRow({ onSave, search }: { onSave: (val: string) => Promise<void
             style={{ maxWidth: 220 }}
             onPressEnter={save}
           />
-          <Button size="small" type="primary" icon={<CheckOutlined />} loading={saving} disabled={!val} onClick={save}>
+          <Button size="small" type="primary" icon={<CheckOutlined />} loading={saving} disabled={!val.trim()} onClick={save}>
             Set
           </Button>
         </div>

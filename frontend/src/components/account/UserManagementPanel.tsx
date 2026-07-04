@@ -25,6 +25,7 @@ import { ListUsers, ExecuteQuery, AlterUserProperty } from "../../../wailsjs/go/
 import { useSessionStore } from "../../store/sessionStore";
 import type { snowflake } from "../../../wailsjs/go/models";
 import UserPropertiesModal from "./UserPropertiesModal";
+import { friendlyError } from "../common/PropertyRows";
 import CreateUserModal from "./CreateUserModal";
 import KeyPairAuthModal from "./KeyPairAuthModal";
 
@@ -104,7 +105,7 @@ export default function UserManagementPanel() {
       message.success(`${verb} user ${user.name}`);
       load();
     } catch (e) {
-      message.error(String(e));
+      message.error(friendlyError(e));
     }
   };
 
@@ -121,7 +122,7 @@ export default function UserManagementPanel() {
           message.success(`Dropped user ${user.name}`);
           load();
         } catch (e) {
-          message.error(String(e));
+          message.error(friendlyError(e));
         }
       },
     });

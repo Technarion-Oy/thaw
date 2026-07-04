@@ -68,10 +68,12 @@ func BuildAlterUserPropertySQL(name, property, value string) (string, error) {
 		"email":       "EMAIL",
 		"comment":     "COMMENT",
 	}
+	// defaultWarehouse / defaultRole arrive from Selects populated with
+	// canonical-case names out of SHOW, so unconditional quoting is exact.
+	// networkPolicy is typed free-hand and handled below with QuoteOrBare.
 	identProps := map[string]string{
 		"defaultWarehouse": "DEFAULT_WAREHOUSE",
 		"defaultRole":      "DEFAULT_ROLE",
-		"networkPolicy":    "NETWORK_POLICY",
 	}
 	intProps := map[string]string{
 		"daysToExpiry":    "DAYS_TO_EXPIRY",
@@ -104,6 +106,13 @@ func BuildAlterUserPropertySQL(name, property, value string) (string, error) {
 	}
 
 	switch property {
+	case "networkPolicy":
+		// Typed free-hand in the UI: QuoteOrBare leaves a valid bare name
+		// unquoted so Snowflake's identifier folding resolves `corp_policy`
+		// to the uppercase-stored CORP_POLICY, matching the other builders.
+		return setOrUnset("NETWORK_POLICY", func(v string) (string, error) {
+			return snowflake.QuoteOrBare(v, false), nil
+		})
 	case "password":
 		if trimmed == "" {
 			return "", fmt.Errorf("password cannot be empty")
@@ -112,17 +121,27 @@ func BuildAlterUserPropertySQL(name, property, value string) (string, error) {
 		// passwords, and QuoteTextLit keeps embedded backslashes literal.
 		return fmt.Sprintf("ALTER USER %s SET PASSWORD = %s", u, snowflake.QuoteTextLit(value)), nil
 	case "defaultNamespace":
-		// DATABASE or DATABASE.SCHEMA — quote each dotted part separately.
-		// The split is quote-aware so a quoted identifier containing a literal
-		// dot (`"MY.DB".PUB`) stays one part; empty segments ("DB.", ".SCHEMA")
-		// and unbalanced quotes are rejected up front, since QuoteIdent("")
-		// would render `""` and Snowflake would throw a raw syntax error.
+		// DATABASE or DATABASE.SCHEMA — the split is quote-aware so a quoted
+		// identifier containing a literal dot (`"MY.DB".PUB`) stays one part;
+		// empty segments ("DB.", ".SCHEMA") and unbalanced quotes are rejected
+		// up front, since QuoteIdent("") would render `""` and Snowflake would
+		// throw a raw syntax error. Explicitly-quoted parts keep their exact
+		// case (QuoteIdent); bare parts are typed free-hand and stay bare
+		// (QuoteOrBare) so Snowflake's identifier folding resolves them.
 		return setOrUnset("DEFAULT_NAMESPACE", func(v string) (string, error) {
 			parts, err := splitNamespace(v)
 			if err != nil || len(parts) > 2 {
 				return "", fmt.Errorf("invalid namespace %q: expected DATABASE or DATABASE.SCHEMA", v)
 			}
-			return snowflake.Qualify(parts...), nil
+			rendered := make([]string, len(parts))
+			for i, p := range parts {
+				if p.quoted {
+					rendered[i] = snowflake.QuoteIdent(p.text)
+				} else {
+					rendered[i] = snowflake.QuoteOrBare(p.text, false)
+				}
+			}
+			return strings.Join(rendered, "."), nil
 		})
 	case "defaultSecondaryRoles":
 		// Only ('ALL') and () are valid values; empty UNSETs. The clause is
@@ -149,16 +168,30 @@ func BuildAlterUserPropertySQL(name, property, value string) (string, error) {
 	}
 }
 
+// nsPart is one dotted segment of a namespace reference: its unquoted text and
+// whether the input wrapped it in double quotes (case-sensitive intent).
+type nsPart struct {
+	text   string
+	quoted bool
+}
+
 // splitNamespace splits a DATABASE / DATABASE.SCHEMA reference on dots that sit
 // outside double-quoted identifiers, so `"MY.DB".PUB` yields ["MY.DB", "PUB"].
 // Each returned part is unquoted (outer quotes stripped, doubled quotes
-// unescaped) and non-empty — the caller re-quotes via Qualify. Unbalanced
-// quotes or empty segments return an error.
-func splitNamespace(v string) ([]string, error) {
-	var parts []string
+// unescaped) and non-empty, with a flag recording whether it was quoted —
+// the caller re-quotes accordingly. Unbalanced quotes or empty segments
+// return an error.
+func splitNamespace(v string) ([]nsPart, error) {
+	var parts []nsPart
 	var cur strings.Builder
 	inQuote := false
+	sawQuote := false
 	rs := []rune(v)
+	flush := func() {
+		parts = append(parts, nsPart{text: cur.String(), quoted: sawQuote})
+		cur.Reset()
+		sawQuote = false
+	}
 	for i := 0; i < len(rs); i++ {
 		c := rs[i]
 		switch {
@@ -167,9 +200,9 @@ func splitNamespace(v string) ([]string, error) {
 			i++
 		case c == '"':
 			inQuote = !inQuote
+			sawQuote = true
 		case c == '.' && !inQuote:
-			parts = append(parts, cur.String())
-			cur.Reset()
+			flush()
 		default:
 			cur.WriteRune(c)
 		}
@@ -177,10 +210,10 @@ func splitNamespace(v string) ([]string, error) {
 	if inQuote {
 		return nil, fmt.Errorf("unbalanced quotes in %q", v)
 	}
-	parts = append(parts, cur.String())
+	flush()
 	for i := range parts {
-		parts[i] = strings.TrimSpace(parts[i])
-		if parts[i] == "" {
+		parts[i].text = strings.TrimSpace(parts[i].text)
+		if parts[i].text == "" {
 			return nil, fmt.Errorf("empty segment in %q", v)
 		}
 	}

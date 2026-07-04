@@ -26,17 +26,22 @@ func TestBuildAlterUserPropertySQL(t *testing.T) {
 		{"comment", "", `ALTER USER "ALICE" UNSET COMMENT`, false},
 		{"email", "a@x.io", `ALTER USER "ALICE" SET EMAIL = 'a@x.io'`, false},
 		{"middleName", "Q", `ALTER USER "ALICE" SET MIDDLE_NAME = 'Q'`, false},
-		// identifiers — quoted, empty → UNSET
+		// identifiers — Select-sourced values quoted exactly; empty → UNSET
 		{"defaultWarehouse", "WH", `ALTER USER "ALICE" SET DEFAULT_WAREHOUSE = "WH"`, false},
+		// networkPolicy is typed free-hand: bare names stay bare so Snowflake
+		// folds them; names needing quoting are quoted
 		{"networkPolicy", "", `ALTER USER "ALICE" UNSET NETWORK_POLICY`, false},
-		// namespace — each dotted part quoted separately; empty segments rejected
-		{"defaultNamespace", "DB.PUB", `ALTER USER "ALICE" SET DEFAULT_NAMESPACE = "DB"."PUB"`, false},
-		{"defaultNamespace", "DB", `ALTER USER "ALICE" SET DEFAULT_NAMESPACE = "DB"`, false},
+		{"networkPolicy", "corp_policy", `ALTER USER "ALICE" SET NETWORK_POLICY = corp_policy`, false},
+		{"networkPolicy", "My Policy", `ALTER USER "ALICE" SET NETWORK_POLICY = "My Policy"`, false},
+		// namespace — bare parts stay bare (identifier folding); quoted parts
+		// keep exact case; empty segments rejected
+		{"defaultNamespace", "analytics.public", `ALTER USER "ALICE" SET DEFAULT_NAMESPACE = analytics.public`, false},
+		{"defaultNamespace", "DB", `ALTER USER "ALICE" SET DEFAULT_NAMESPACE = DB`, false},
 		{"defaultNamespace", "DB.", "", true},
 		{"defaultNamespace", ".SCHEMA", "", true},
 		{"defaultNamespace", "A.B.C", "", true},
 		// quote-aware: a quoted identifier containing a dot stays one part
-		{"defaultNamespace", `"MY.DB".PUB`, `ALTER USER "ALICE" SET DEFAULT_NAMESPACE = "MY.DB"."PUB"`, false},
+		{"defaultNamespace", `"MY.DB".PUB`, `ALTER USER "ALICE" SET DEFAULT_NAMESPACE = "MY.DB".PUB`, false},
 		{"defaultNamespace", `"MY""DB"`, `ALTER USER "ALICE" SET DEFAULT_NAMESPACE = "MY""DB"`, false},
 		{"defaultNamespace", `"UNBALANCED`, "", true},
 		// integers — validated, empty → UNSET
