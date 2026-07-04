@@ -12,12 +12,12 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Modal, Spin, Button, Input, Space, Typography, Alert, Tooltip, Switch,
+  Modal, Spin, Button, Input, Select, Space, Typography, Alert, Tooltip, Switch, Tag,
 } from "antd";
 import {
-  EyeOutlined, EditOutlined, CheckOutlined, CloseOutlined,
+  EyeOutlined, EditOutlined, CheckOutlined, CloseOutlined, PlusOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterView } from "../../../wailsjs/go/app/App";
+import { GetObjectProperties, AlterView, GetObjectTagReferences } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -45,6 +45,17 @@ function q1(s: string) { return "'" + s.replace(/\\/g, "\\\\").replace(/'/g, "''
 
 function truthy(v: string): boolean {
   return /^(y|yes|true|1)$/i.test(v.trim());
+}
+
+// Build the RENAME TO target. A bare name stays in the current db/schema; a
+// dotted name is treated as an already-qualified path and each part is quoted.
+// ponytail: splits on ".", so a name literally containing a dot can't be moved
+// this way — type the fully-quoted identifier in the SQL editor for that.
+export function qualifyRename(input: string, db: string, schema: string): string {
+  const t = input.trim();
+  const quote = (p: string) => `"${p.replace(/"/g, '""')}"`;
+  if (t.includes(".")) return t.split(".").map((p) => quote(p.trim())).join(".");
+  return `${quote(db)}.${quote(schema)}.${quote(t)}`;
 }
 
 // ─── EditRow ─────────────────────────────────────────────────────────────────
@@ -137,6 +148,93 @@ function EditRow({ label, value, canUnset, onSave, onUnset }: EditRowProps) {
   );
 }
 
+// ─── Tag editor ──────────────────────────────────────────────────────────────
+// Tags whose LEVEL is not the object itself (inherited from the schema/database)
+// are shown for context but can't be unset here — that has to happen where they
+// were applied.
+
+interface ViewTag { name: string; qualified: string; value: string; inherited: boolean }
+
+interface TagsRowProps {
+  tags: ViewTag[];
+  onSetTag: (name: string, value: string) => Promise<void>;
+  onUnsetTag: (qualified: string) => Promise<void>;
+}
+
+function TagsRow({ tags, onSetTag, onUnsetTag }: TagsRowProps) {
+  const [newName, setNewName] = useState("");
+  const [newValue, setNewValue] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const addTag = async () => {
+    if (!newName.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onSetTag(newName.trim(), newValue.trim());
+      setNewName("");
+      setNewValue("");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <tr>
+      <td style={LABEL_TD}>Tags</td>
+      <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "top" }}>
+        <Space direction="vertical" size={6} style={{ width: "100%" }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {tags.length === 0 && <Text type="secondary" style={{ fontSize: 12 }}>(none)</Text>}
+            {tags.map((t) => (
+              <Tag
+                key={t.qualified}
+                closable={!t.inherited}
+                onClose={async (e) => {
+                  e.preventDefault();
+                  await onUnsetTag(t.qualified);
+                }}
+              >
+                {t.name}: {t.value}{t.inherited ? " (inherited)" : ""}
+              </Tag>
+            ))}
+          </div>
+          <Space>
+            <Input
+              size="small"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="Tag name"
+              style={{ width: 140 }}
+            />
+            <Input
+              size="small"
+              value={newValue}
+              onChange={(e) => setNewValue(e.target.value)}
+              placeholder="Tag value"
+              style={{ width: 160 }}
+              onPressEnter={addTag}
+            />
+            <Button
+              size="small"
+              icon={<PlusOutlined />}
+              onClick={addTag}
+              loading={saving}
+              disabled={!newName.trim()}
+            >
+              Add Tag
+            </Button>
+          </Space>
+          {error && <Text type="danger" style={{ fontSize: 11 }}>{error}</Text>}
+        </Space>
+      </td>
+    </tr>
+  );
+}
+
 // ─── Main component ──────────────────────────────────────────────────────────
 
 interface Props {
@@ -144,13 +242,43 @@ interface Props {
   schema: string;
   name: string;
   onClose: () => void;
+  onSuccess?: () => void;
 }
 
-export default function ViewPropertiesModal({ db, schema, name, onClose }: Props) {
+export default function ViewPropertiesModal({ db, schema, name, onClose, onSuccess }: Props) {
   const [rows, setRows] = useState<snowflake.PropertyPair[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [secureSaving, setSecureSaving] = useState(false);
+  const [ctSaving, setCtSaving] = useState(false);
+  const [tags, setTags] = useState<ViewTag[]>([]);
+
+  // Tags use the no-latency INFORMATION_SCHEMA.TAG_REFERENCES read so a SET/UNSET
+  // reflects immediately. Best-effort: SET/UNSET still work if the read fails.
+  const reloadTags = useCallback(async () => {
+    try {
+      const t = await GetObjectTagReferences("VIEW", db, schema, name, "");
+      const cols = (t?.columns ?? []).map((c) => c.toLowerCase());
+      const ci = (n: string) => cols.indexOf(n);
+      const dbI = ci("tag_database"), scI = ci("tag_schema"), nmI = ci("tag_name"),
+        vlI = ci("tag_value"), lvI = ci("level");
+      const parsed = (t?.rows ?? []).map((row): ViewTag => {
+        const tdb = dbI >= 0 ? String(row[dbI] ?? "") : "";
+        const tsc = scI >= 0 ? String(row[scI] ?? "") : "";
+        const tnm = nmI >= 0 ? String(row[nmI] ?? "") : "";
+        const qualified = [tdb, tsc, tnm].filter(Boolean).map((p) => `"${p.replace(/"/g, '""')}"`).join(".");
+        return {
+          name: tnm,
+          qualified,
+          value: vlI >= 0 ? String(row[vlI] ?? "") : "",
+          inherited: lvI >= 0 && String(row[lvI] ?? "").toUpperCase() !== "VIEW",
+        };
+      });
+      setTags(parsed);
+    } catch {
+      setTags([]);
+    }
+  }, [db, schema, name]);
 
   const reload = useCallback(async () => {
     setRows(null);
@@ -161,7 +289,8 @@ export default function ViewPropertiesModal({ db, schema, name, onClose }: Props
     } catch (e) {
       setError(String(e));
     }
-  }, [db, schema, name]);
+    reloadTags();
+  }, [db, schema, name, reloadTags]);
 
   useEffect(() => { reload(); }, [reload]);
 
@@ -192,12 +321,48 @@ export default function ViewPropertiesModal({ db, schema, name, onClose }: Props
     }
   };
 
+  const setChangeTracking = async (value: string) => {
+    setCtSaving(true);
+    setActionError(null);
+    try {
+      await AlterView(db, schema, name, `SET CHANGE_TRACKING = ${value}`);
+      await reload();
+    } catch (e) {
+      setActionError(`Change tracking update failed: ${String(e)}`);
+    } finally {
+      setCtSaving(false);
+    }
+  };
+
+  // RENAME can move the view to another schema/db, so the modal's identity is no
+  // longer valid afterwards — refresh the browser and close rather than track it.
+  const rename = async (newName: string) => {
+    if (!newName.trim() || newName.trim() === name) return;
+    await AlterView(db, schema, name, `RENAME TO ${qualifyRename(newName, db, schema)}`);
+    onSuccess?.();
+    onClose();
+  };
+
+  const setTag = async (tagName: string, tagValue: string) => {
+    // Tag name may be a qualified identifier (db.schema.tag) — inserted verbatim;
+    // the value is a quoted string literal.
+    await AlterView(db, schema, name, `SET TAG ${tagName} = ${q1(tagValue)}`);
+    await reloadTags();
+  };
+
+  const unsetTag = async (qualified: string) => {
+    await AlterView(db, schema, name, `UNSET TAG ${qualified}`);
+    await reloadTags();
+  };
+
   const comment = find("comment");
   const definingQuery = find("text");
   const isSecure = truthy(find("is_secure"));
+  const changeTracking = find("change_tracking");
+  const ctOn = /^(on|true)$/i.test(changeTracking.trim());
 
   // Keys handled by the editable Settings section or rendered elsewhere.
-  const handledKeys = new Set(["comment", "is_secure", "text"]);
+  const handledKeys = new Set(["comment", "is_secure", "text", "change_tracking"]);
 
   return (
     <Modal
@@ -241,6 +406,11 @@ export default function ViewPropertiesModal({ db, schema, name, onClose }: Props
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
               <EditRow
+                label="Rename to"
+                value={name}
+                onSave={rename}
+              />
+              <EditRow
                 label="Comment"
                 value={comment}
                 canUnset={comment !== ""}
@@ -258,6 +428,23 @@ export default function ViewPropertiesModal({ db, schema, name, onClose }: Props
                   />
                 </td>
               </tr>
+              <tr>
+                <td style={LABEL_TD}>Change tracking</td>
+                <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
+                  <Space>
+                    <Tag color={ctOn ? "green" : "default"}>{ctOn ? "ON" : "OFF"}</Tag>
+                    <Select
+                      size="small"
+                      value={ctOn ? "TRUE" : "FALSE"}
+                      onChange={setChangeTracking}
+                      loading={ctSaving}
+                      style={{ width: 100 }}
+                      options={[{ value: "TRUE", label: "On" }, { value: "FALSE", label: "Off" }]}
+                    />
+                  </Space>
+                </td>
+              </tr>
+              <TagsRow tags={tags} onSetTag={setTag} onUnsetTag={unsetTag} />
             </tbody>
           </table>
 

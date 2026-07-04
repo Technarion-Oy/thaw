@@ -7,15 +7,16 @@
 Provides the create and properties UI for Snowflake View objects.
 `CreateViewModal` follows the standard debounced SQL preview pattern.
 `ViewPropertiesModal` shows `SHOW VIEWS` metadata, the rendered defining query,
-and inline-editable settings (Comment and a SECURE toggle). Drop / Rename are
-driven from the sidebar context menu via `App.AlterView`.
+and inline-editable settings (Rename, Comment, a SECURE toggle, a Change
+Tracking on/off, and Tags). All edits route through `App.AlterView`. Drop is
+driven from the sidebar context menu.
 
 ## Files
 
 | File | Purpose |
 |------|---------|
 | `CreateViewModal.tsx` | `CREATE VIEW` form — name/options (OR REPLACE / IF NOT EXISTS), comment, and an embedded Monaco editor for the defining query with an **Insert from table** database→schema→table picker; an **Advanced options** `Collapse` covers explicit Columns, SECURE, RECURSIVE, COPY GRANTS, and view-level Tags. Uses `BuildCreateViewSql` for live SQL preview. |
-| `ViewPropertiesModal.tsx` | Loads `GetObjectProperties(db, schema, "VIEW", name)`; renders inline-editable Comment and a SECURE toggle (via `AlterView … SET/UNSET`), the remaining `SHOW VIEWS` properties, and the rendered defining query (`text` column). Views have no lifecycle (no Suspend/Resume). |
+| `ViewPropertiesModal.tsx` | Loads `GetObjectProperties(db, schema, "VIEW", name)` and `GetObjectTagReferences("VIEW", …)`; renders inline-editable Rename, Comment, a SECURE toggle, a Change Tracking on/off `Select`, and a Tag editor (all via `AlterView … RENAME TO / SET / UNSET`), plus the remaining `SHOW VIEWS` properties and the rendered defining query (`text` column). Rename fires `onSuccess` (sidebar refresh) and closes, since the view identity may have moved. Inherited tags are shown but not removable. Views have no lifecycle (no Suspend/Resume). |
 
 ## Patterns & integration
 
@@ -24,7 +25,8 @@ driven from the sidebar context menu via `App.AlterView`.
 - `ExecDDL(preview)` — executes the CREATE DDL on submit
 - `GetQuotedIdentifiersIgnoreCase()` — feeds `ObjectNameCaseControl`
 - `GetObjectProperties(db, schema, "VIEW", name)` — properties panel data
-- `AlterView(db, schema, name, clause)` — `SET SECURE` / `UNSET SECURE` / `SET COMMENT …` / `UNSET COMMENT`
+- `GetObjectTagReferences("VIEW", db, schema, name, "")` — current tag applications (no-latency `INFORMATION_SCHEMA.TAG_REFERENCES`)
+- `AlterView(db, schema, name, clause)` — `RENAME TO …` / `SET SECURE` / `UNSET SECURE` / `SET COMMENT …` / `UNSET COMMENT` / `SET CHANGE_TRACKING = TRUE|FALSE` / `SET TAG …` / `UNSET TAG …`
 
 **`view.ViewConfig` type** from `wailsjs/go/models`: `name`, `caseSensitive`,
 `orReplace`, `secure`, `recursive`, `ifNotExists`, `copyGrants`, `comment`,
@@ -42,6 +44,12 @@ boundary.
   `DEFAULT_QUERY` placeholder — submitting the untouched template would `CREATE …
   AS SELECT * FROM my_source_table` and fail server-side.
 - The properties panel reads the defining query from the `text` column of `SHOW
-  VIEWS`; `comment`, `is_secure`, and `text` are excluded from the generic
-  Properties table because they are surfaced in dedicated sections.
+  VIEWS`; `comment`, `is_secure`, `text`, and `change_tracking` are excluded from
+  the generic Properties table because they are surfaced in dedicated sections.
+- Rename qualifies a bare name into the current db/schema; a dotted input is
+  treated as an already-qualified path (splitting on `.`, so a name literally
+  containing a dot must be renamed from the SQL editor).
+- Policy attach/detach (masking / row-access / aggregation / projection / join)
+  and column-level ALTER COLUMN edits are deliberately left to follow-ups — they
+  need a policy picker (issue #618).
 - Views have no lifecycle: there is no Suspend/Resume or behind-by status.
