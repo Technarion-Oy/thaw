@@ -35,11 +35,11 @@ import { patchMonacoClipboard } from "../../utils/monacoClipboard";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, GitGetHeadFileContent } from "../../../wailsjs/go/app/App";
 import { SNOWFLAKE_DATA_TYPES } from "../../generated/snowflakeDataTypes";
-import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateDataTypes, ValidateGrammar, ValidateAntiPatterns, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContextFull, ResolveTableRefs, ComputeGitLineDiff } from "../../../wailsjs/go/sqleditor/Service";
+import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateDataTypes, ValidateGrammar, ValidateAntiPatterns, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContextFull, ResolveTableRefs, ComputeGitLineDiff, StarSelectAt } from "../../../wailsjs/go/sqleditor/Service";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { FUNCTION_CATEGORIES } from "./snowflakeSql";
 import { getOrCreateMenuId } from "./monacoMenu";
-import { UC, quoteIfNecessary, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt, starAtPosition, StarToken } from "./sqlEditorUtils";
+import { UC, quoteIfNecessary, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt } from "./sqlEditorUtils";
 import ExplainModal from "../results/ExplainModal";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 import { kindSupportsDdl } from "../../utils/objectDdl";
@@ -577,14 +577,13 @@ let _explainMenuRegistered = false;
 })();
 
 // ── "Expand *" context menu item ─────────────────────────────────────────────
-// Detect a select-list `*` (or `alias.*`) under the right-click position and,
-// when present, offer to replace it with the resolved column list.
-// `starAtPosition` lives in sqlEditorUtils (pure, so it's unit-testable without
-// pulling in Monaco).
-
-// Set on context-menu open (from e.target.position) so the command and the menu
-// gate read the exact same detection, regardless of when the cursor settles.
-let _starTarget: StarToken | null = null;
+// Replace a select-list `*` (or `alias.*`) under the cursor with the resolved
+// column list. Whether the token is really a wildcard is decided by the backend
+// tokenizer (Service.StarSelectAt) — a `*` inside a quoted identifier
+// ("a*b table") or a multiplication (`a * b`) is never misread. The menu is
+// merely gated on a cheap "cursor is on a literal `*`" check (set on
+// context-menu open, since the tokenizer call is async and can't fill a context
+// key before the menu renders); the authoritative decision runs in the command.
 
 let _expandWildcardRegistered = false;
 (() => {
@@ -594,28 +593,34 @@ let _expandWildcardRegistered = false;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (CommandsRegistry as any).registerCommand("thaw.expandWildcard", async () => {
     const editor = _activeSnippetEditor;
-    const star = _starTarget;
-    if (!editor || !star) return;
+    if (!editor) return;
     const model = editor.getModel();
-    if (!model) return;
+    const position = editor.getPosition();
+    if (!model || !position) return;
 
     const fullSql = model.getValue();
-    const cursorLine = star.range.startLineNumber;
+    // Authoritative, tokenizer-based detection of the wildcard + its span/alias.
+    const star = await StarSelectAt(fullSql, position.lineNumber, position.column);
+    if (!star) return;
+    const range = {
+      startLineNumber: star.startLine, startColumn: star.startCol,
+      endLineNumber: star.endLine, endColumn: star.endCol,
+    };
 
-    // Scope to the statement under the cursor.
+    // Scope to the statement the star sits in.
     let stmtSql = fullSql;
     try {
       const ranges = await GetSqlStatementRanges(fullSql);
       for (const r of ranges || []) {
-        if (cursorLine >= r.startLine && cursorLine <= r.endLine) {
+        if (star.startLine >= r.startLine && star.startLine <= r.endLine) {
           stmtSql = fullSql.split("\n").slice(r.startLine - 1, r.endLine).join("\n");
           break;
         }
       }
     } catch { /* fall back to full SQL */ }
 
-    // Resolve the FROM/JOIN table refs for that statement (same call the JOIN
-    // completion + drag-drop paths use).
+    // Resolve the FROM/JOIN table refs (same calls the JOIN completion +
+    // drag-drop paths use).
     let refs: ResolvedRef[];
     try {
       const rawRefs = await ParseJoinTableRefs(stmtSql);
@@ -627,8 +632,6 @@ let _expandWildcardRegistered = false;
       );
     } catch { return; }
     if (!refs || refs.length === 0) return;
-
-    const esc = (s: string) => s.replace(/"/g, '""');
 
     // `alias.*` → just that ref, keep the alias prefix.
     // bare `*` → all refs; qualify each column only when there's more than one table.
@@ -645,18 +648,26 @@ let _expandWildcardRegistered = false;
       qualify = refs.length > 1;
     }
 
+    // Fetch each distinct table once, concurrently, through the shared column
+    // cache. Dedup by table key first — a self-join (FROM T a JOIN T b) would
+    // otherwise fire two in-flight fetches for the same key and getColumns
+    // returns [] for the second, tripping the half-edit guard below.
+    const tkey = (t: ResolvedRef) => `${t.db.toUpperCase()}\0${t.schema.toUpperCase()}\0${t.name.toUpperCase()}`;
+    const uniq = [...new Map(targets.map((t) => [tkey(t), t])).values()];
+    const fetched = await Promise.all(uniq.map((t) => getColumns(t.db, t.schema, t.name)));
+    const colsByKey = new Map(uniq.map((t, i) => [tkey(t), fetched[i]]));
+    // A cold cache / failed fetch yields []; no-op rather than leave a half-expanded list.
+    if ([...colsByKey.values()].some((c) => !c || c.length === 0)) return;
+
     const parts: string[] = [];
     for (const t of targets) {
-      let cols: string[];
-      try { cols = await GetTableColumns(t.db, t.schema, t.name); }
-      catch { return; } // don't leave a half-expanded list behind
-      if (!cols || cols.length === 0) return;
-      const prefix = star.alias ?? t.alias ?? t.name;
-      for (const c of cols) parts.push(qualify ? `${prefix}."${esc(c)}"` : `"${esc(c)}"`);
+      // star.alias is "" (not null) for a bare `*`, so use || to fall through.
+      const prefix = star.alias || t.alias || t.name;
+      for (const c of colsByKey.get(tkey(t))!) parts.push(qualify ? `${prefix}.${quoteIfNec(c)}` : quoteIfNec(c));
     }
     if (parts.length === 0) return;
 
-    editor.executeEdits("thaw.expandWildcard", [{ range: star.range, text: parts.join(", "), forceMoveMarkers: true }]);
+    editor.executeEdits("thaw.expandWildcard", [{ range, text: parts.join(", "), forceMoveMarkers: true }]);
     editor.pushUndoStop();
     editor.focus();
   });
@@ -2465,10 +2476,12 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     const starCtxKey = editor.createContextKey<boolean>("thawStarUnderCursor", false);
     editor.onContextMenu((e) => {
       _activeSnippetEditor = editor;
+      // Cheap gate only — is the cursor on a literal `*`? The backend tokenizer
+      // makes the real select-list-wildcard decision when the command runs.
       const model = editor.getModel();
       const pos = e.target.position;
-      _starTarget = model && pos ? starAtPosition(model, pos) : null;
-      starCtxKey.set(!!_starTarget);
+      const line = model && pos ? model.getLineContent(pos.lineNumber) : "";
+      starCtxKey.set(!!pos && (line[pos.column - 1] === "*" || line[pos.column - 2] === "*"));
     });
     editor.onDidDispose(() => {
       if (_activeSnippetEditor === editor) _activeSnippetEditor = null;

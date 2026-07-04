@@ -54,6 +54,10 @@ export function ResolveTableRefs(arg1, arg2, arg3, arg4) {
   return window['go']['sqleditor']['Service']['ResolveTableRefs'](arg1, arg2, arg3, arg4);
 }
 
+export function StarSelectAt(arg1, arg2, arg3) {
+  return window['go']['sqleditor']['Service']['StarSelectAt'](arg1, arg2, arg3);
+}
+
 export function ValidateAntiPatterns(arg1, arg2) {
   return window['go']['sqleditor']['Service']['ValidateAntiPatterns'](arg1, arg2);
 }

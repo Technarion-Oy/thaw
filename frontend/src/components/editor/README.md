@@ -13,9 +13,8 @@ git gutter decorations, the tab bar, editor preferences, and the cross-tab searc
 | File | Purpose |
 |------|---------|
 | `SqlEditor.tsx` | Main editor component. Mounts Monaco, registers all completion/hover/code-action/signature providers (module-level, not in render), runs `runDiagnostics` on content change, handles git gutter decoration, clipboard patching, and the snippet context menu via internal Monaco `MenuRegistry`. Exports `DiagMarker`, `ColInfo`, `ResolvedRef`, `pendingMcpMarkers`. |
-| `sqlEditorUtils.ts` | Pure helpers: `UC`, `quoteIfNecessary`, `FKEntry`, `getFKs` (async, deduped), `getFKsCached`, `setFKCache`, `buildVariableSuggestions`, `getQualifiedIdent`, `getStatementLineRanges`, `identifierRangeAt` (quote-aware column span of the dotted identifier under the cursor, for the cmd/ctrl-hover link underline), `starAtPosition` (detect a select-list `*`/`alias.*` at a position, for the "Expand \*" context menu). No React. |
+| `sqlEditorUtils.ts` | Pure helpers: `UC`, `quoteIfNecessary`, `FKEntry`, `getFKs` (async, deduped), `getFKsCached`, `setFKCache`, `buildVariableSuggestions`, `getQualifiedIdent`, `getStatementLineRanges`, `identifierRangeAt` (quote-aware column span of the dotted identifier under the cursor, for the cmd/ctrl-hover link underline). No React. |
 | `sqlEditorUtils.test.ts` | Unit tests for `identifierRangeAt` (bare/quoted/escaped-quote/unterminated-quote spans). |
-| `starAtPosition.test.ts` | Unit tests for `starAtPosition` (bare `*`, `alias.*`, `COUNT(*)` skip, non-star). |
 | `editorRef.ts` | Singleton ref to the active `IStandaloneCodeEditor`. Exports `setEditorInstance`, `getEditorInstance`, `insertAtCursor`. Kept separate from `SqlEditor.tsx` so Vite Fast Refresh is not broken by mixing component and non-component exports. |
 | `monacoSetup.ts` | One-time Monaco initialisation: Snowflake Monarch language, Python Monarch grammar (inlined to avoid side-effect imports), YAML worker wiring, `thawDarkTheme`/`thawLightTheme` registration. Called via `ensureMonacoSetup()` guard. Imports the **slim** Monaco API (`editor.api.js` + `editor.all.js`), never the `monaco-editor` barrel, to keep the TS/HTML/CSS/JSON language workers (~9 MB) and ~80 basic-language grammars out of the binary — see [gotchas](../../../../docs/concepts/gotchas.md). |
 | `snowflakeSql.ts` | Snowflake Monarch tokenizer (`snowflakeMonarchLanguage`) and custom Monaco theme definitions (`thawDarkTheme`, `thawLightTheme`). The tokenizer's `datatypes` list is sourced from the generated artifact `src/generated/snowflakeDataTypes.ts` (source of truth: `internal/snowflake/datatypes.go`) rather than hand-maintained. Also the single source for the built-in-function catalogue: `BUILTIN_FUNCTION_CATEGORIES`, `CONTEXT_FUNCTIONS`, and the assembled `FUNCTION_CATEGORIES` consumed by the Code Snippets modal and the editor's Built-in Functions submenu. |
@@ -108,15 +107,19 @@ to the viewport and scrolls as a backstop.
 
 **Expand `*` context menu:** A module-level `MenuRegistry` item (`thaw.expandWildcard`, gated on
 `editorLangId == sql` **and** the per-editor `thawStarUnderCursor` context key) that replaces a
-select-list wildcard with its column list. `starAtPosition` (in `sqlEditorUtils.ts`, pure so it's
-unit-tested in `starAtPosition.test.ts`) detects a `*` / `alias.*` at the right-click position and
-skips function-argument stars (`COUNT(*)`); `onContextMenu` runs it against `e.target.position`,
-stashes the result in module-level `_starTarget`, and sets the context key so the menu and the
-command read the exact same detection. The command scopes to the statement under the cursor
-(`GetSqlStatementRanges`), resolves its `FROM`/`JOIN` refs (`ParseJoinTableRefs` + `ResolveTableRefs`,
-same as the JOIN/drag-drop paths), fetches columns via `GetTableColumns` (same call drag-drop uses),
-and `executeEdits` the list over the star range — qualifying columns for `alias.*` and for bare `*`
-over multiple tables. Any resolve/fetch failure no-ops rather than leaving a half-edit.
+select-list wildcard with its column list. Detection is **backend/tokenizer-based**: the command calls
+`Service.StarSelectAt(sql, line, col)` (`internal/sqleditor`, over `sqltok`), which returns the
+wildcard's span + any `alias.` qualifier or nil — a `*` inside a quoted identifier (`"a*b"`) or a
+multiplication (`a * b`) is never misread, and quoted aliases (`"my table".*`) are captured whole.
+The context key is only a cheap display gate — `onContextMenu` sets it when the cursor sits on a
+literal `*` char (the async tokenizer call can't fill a context key before the menu renders, so the
+authoritative decision runs in the command and no-ops if the token isn't really a wildcard). The
+command scopes to the statement under the cursor (`GetSqlStatementRanges`), resolves its `FROM`/`JOIN`
+refs (`ParseJoinTableRefs` + `ResolveTableRefs`, same as the JOIN/drag-drop paths), fetches columns
+via the shared cached `getColumns()` wrapper (all target tables concurrently, `Promise.all`), quotes
+each with `quoteIfNec` (only when needed — same style as drag-drop/autocomplete), and `executeEdits`
+the list over the star range — qualifying columns for `alias.*` and for bare `*` over multiple
+tables. A cold cache / failed fetch no-ops rather than leaving a half-edit.
 
 **Clipboard:** `navigator.clipboard` is blocked in WKWebView. All copy operations use
 `ClipboardSetText` from `wailsjs/runtime/runtime`. Monaco's built-in **code-buffer** copy/paste is

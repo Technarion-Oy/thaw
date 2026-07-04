@@ -5866,6 +5866,26 @@ export namespace sqleditor {
 	        this.end = source["end"];
 	    }
 	}
+	export class StarSelect {
+	    startLine: number;
+	    startCol: number;
+	    endLine: number;
+	    endCol: number;
+	    alias: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new StarSelect(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.startLine = source["startLine"];
+	        this.startCol = source["startCol"];
+	        this.endLine = source["endLine"];
+	        this.endCol = source["endCol"];
+	        this.alias = source["alias"];
+	    }
+	}
 	
 	
 	

@@ -95,6 +95,13 @@ func (s *Service) GetIdentifierAtColumn(line string, col int) []string {
 	return GetIdentifierAtColumn(line, col)
 }
 
+// StarSelectAt reports whether the token at the 1-based Monaco cursor position
+// (line, col) is a select-list wildcard (`*` or `alias.*`), returning its span
+// and any qualifier, or nil. Backs the editor's "Expand *" context menu.
+func (s *Service) StarSelectAt(sql string, line, col int) *StarSelect {
+	return StarSelectAt(sql, line, col)
+}
+
 // GetActiveFunctionCall parses the SQL prefix (text from document start to
 // cursor) and returns the innermost open function call with its active parameter
 // index.  Returns nil when the cursor is not inside a named function call.
