@@ -4,10 +4,11 @@
 
 - **Concepts** (hand-written)
   - [Overview](concepts/README.md)
+  - [ARCHITECTURE_DIAGRAM](concepts/ARCHITECTURE_DIAGRAM.md)
   - [architecture](concepts/architecture.md)
+  - [gotchas](concepts/gotchas.md)
   - [onboarding](concepts/onboarding.md)
   - [patterns](concepts/patterns.md)
-  - [gotchas](concepts/gotchas.md)
   - [testing](concepts/testing.md)
 
 - **Backend (Go)**
@@ -30,65 +31,322 @@
   - **Stores**
     - [connectionStore](frontend/store/connectionStore.md)
     - [diffStore](frontend/store/diffStore.md)
+    - [featureFlagsStore](frontend/store/featureFlagsStore.md)
     - [gitStore](frontend/store/gitStore.md)
+    - [gridStore](frontend/store/gridStore.md)
+    - [insertMappingStore](frontend/store/insertMappingStore.md)
+    - [mcpStore](frontend/store/mcpStore.md)
+    - [notebookPrefsStore](frontend/store/notebookPrefsStore.md)
+    - [notebookToolbarStore](frontend/store/notebookToolbarStore.md)
     - [objectStore](frontend/store/objectStore.md)
     - [panelLayoutStore](frontend/store/panelLayoutStore.md)
     - [queryStore](frontend/store/queryStore.md)
     - [sessionStore](frontend/store/sessionStore.md)
+    - [tagManagementStore](frontend/store/tagManagementStore.md)
     - [themeStore](frontend/store/themeStore.md)
   - **Pages**
     - [QueryPage](frontend/pages/QueryPage.md)
   - **Components — account**
     - [AccountPanel](frontend/components/account/AccountPanel.md)
+    - [CreateIntegrationModal](frontend/components/account/CreateIntegrationModal.md)
     - [CreateUserModal](frontend/components/account/CreateUserModal.md)
-    - [EditUserModal](frontend/components/account/EditUserModal.md)
+    - [IntegrationModifyModal](frontend/components/account/IntegrationModifyModal.md)
+    - [IntegrationsPanel](frontend/components/account/IntegrationsPanel.md)
+    - [KeyPairAuthModal](frontend/components/account/KeyPairAuthModal.md)
     - [QueryHistoryModal](frontend/components/account/QueryHistoryModal.md)
     - [UserManagementPanel](frontend/components/account/UserManagementPanel.md)
+    - [UserPropertiesModal](frontend/components/account/UserPropertiesModal.md)
     - [WarehouseMeteringModal](frontend/components/account/WarehouseMeteringModal.md)
+    - [WarehousePropertiesModal](frontend/components/account/WarehousePropertiesModal.md)
+  - **Components — agent**
+    - [AgentPropertiesModal](frontend/components/agent/AgentPropertiesModal.md)
+    - [CreateAgentModal](frontend/components/agent/CreateAgentModal.md)
+    - [profile](frontend/components/agent/profile.md)
+  - **Components — aggregationpolicy**
+    - [AggregationPolicyPropertiesModal](frontend/components/aggregationpolicy/AggregationPolicyPropertiesModal.md)
+    - [CreateAggregationPolicyModal](frontend/components/aggregationpolicy/CreateAggregationPolicyModal.md)
+  - **Components — alert**
+    - [AlertPropertiesModal](frontend/components/alert/AlertPropertiesModal.md)
+    - [CreateAlertModal](frontend/components/alert/CreateAlertModal.md)
+  - **Components — authenticationpolicy**
+    - [AuthenticationPolicyPropertiesModal](frontend/components/authenticationpolicy/AuthenticationPolicyPropertiesModal.md)
+    - [CreateAuthenticationPolicyModal](frontend/components/authenticationpolicy/CreateAuthenticationPolicyModal.md)
+    - [PolicyBagRows](frontend/components/authenticationpolicy/PolicyBagRows.md)
   - **Components — backup**
     - [BackupPoliciesPanel](frontend/components/backup/BackupPoliciesPanel.md)
     - [BackupSetsModal](frontend/components/backup/BackupSetsModal.md)
-  - **Components — chat**
-    - [AiChat](frontend/components/chat/AiChat.md)
+  - **Components — column**
+    - [ColumnPropertiesModal](frontend/components/column/ColumnPropertiesModal.md)
   - **Components — common**
     - [PropertiesModal](frontend/components/common/PropertiesModal.md)
+    - [PropertyRows](frontend/components/common/PropertyRows.md)
     - [SessionPropertiesModal](frontend/components/common/SessionPropertiesModal.md)
   - **Components — connection**
     - [ConnectModal](frontend/components/connection/ConnectModal.md)
+    - [UserAgreementModal](frontend/components/connection/UserAgreementModal.md)
+  - **Components — contact**
+    - [ContactPropertiesModal](frontend/components/contact/ContactPropertiesModal.md)
+    - [CreateContactModal](frontend/components/contact/CreateContactModal.md)
+  - **Components — cortexsearchservice**
+    - [CortexSearchServicePropertiesModal](frontend/components/cortexsearchservice/CortexSearchServicePropertiesModal.md)
+    - [CreateCortexSearchServiceModal](frontend/components/cortexsearchservice/CreateCortexSearchServiceModal.md)
+  - **Components — database**
+    - [AddColumnModal](frontend/components/database/AddColumnModal.md)
+    - [CreateDatabaseModal](frontend/components/database/CreateDatabaseModal.md)
+    - [CreateFileFormatModal](frontend/components/database/CreateFileFormatModal.md)
+    - [CreateStageModal](frontend/components/database/CreateStageModal.md)
+    - [CreateTableModal](frontend/components/database/CreateTableModal.md)
+    - [FileFormatFields](frontend/components/database/FileFormatFields.md)
+    - [FormatPreviewTable](frontend/components/database/FormatPreviewTable.md)
+    - [InsertMappingModal](frontend/components/database/InsertMappingModal.md)
+    - [ObjectSummariesModal](frontend/components/database/ObjectSummariesModal.md)
+    - [StageBrowserModal](frontend/components/database/StageBrowserModal.md)
+    - [StagePropertiesModal](frontend/components/database/StagePropertiesModal.md)
+  - **Components — datametricfunction**
+    - [CreateDataMetricFunctionModal](frontend/components/datametricfunction/CreateDataMetricFunctionModal.md)
+    - [DataMetricFunctionPropertiesModal](frontend/components/datametricfunction/DataMetricFunctionPropertiesModal.md)
+  - **Components — dataset**
+    - [CreateDatasetModal](frontend/components/dataset/CreateDatasetModal.md)
+    - [DatasetPropertiesModal](frontend/components/dataset/DatasetPropertiesModal.md)
+  - **Components — dbt**
+    - [DbtProjectModal](frontend/components/dbt/DbtProjectModal.md)
+  - **Components — dbtproject**
+    - [AddDbtProjectVersionModal](frontend/components/dbtproject/AddDbtProjectVersionModal.md)
+    - [CreateDbtProjectModal](frontend/components/dbtproject/CreateDbtProjectModal.md)
+    - [ExecuteDbtProjectModal](frontend/components/dbtproject/ExecuteDbtProjectModal.md)
+    - [ModifyDbtProjectModal](frontend/components/dbtproject/ModifyDbtProjectModal.md)
+    - [SourceLocationPicker](frontend/components/dbtproject/SourceLocationPicker.md)
+  - **Components — dynamictable**
+    - [CreateDynamicTableModal](frontend/components/dynamictable/CreateDynamicTableModal.md)
+    - [DynamicTablePropertiesModal](frontend/components/dynamictable/DynamicTablePropertiesModal.md)
   - **Components — editor**
+    - [CrossTabSearch](frontend/components/editor/CrossTabSearch.md)
+    - [EditorPreferencesModal](frontend/components/editor/EditorPreferencesModal.md)
     - [SqlEditor](frontend/components/editor/SqlEditor.md)
     - [TabBar](frontend/components/editor/TabBar.md)
     - [editorRef](frontend/components/editor/editorRef.md)
     - [monacoSetup](frontend/components/editor/monacoSetup.md)
+    - [snowflakeSnippets](frontend/components/editor/snowflakeSnippets.md)
     - [snowflakeSql](frontend/components/editor/snowflakeSql.md)
+    - [sqlEditorUtils](frontend/components/editor/sqlEditorUtils.md)
+    - [yamlWorker](frontend/components/editor/yamlWorker.md)
   - **Components — er**
+    - [ERCanvas](frontend/components/er/ERCanvas.md)
     - [ERDesigner](frontend/components/er/ERDesigner.md)
     - [ERDiagramModal](frontend/components/er/ERDiagramModal.md)
+    - [ERTableNode](frontend/components/er/ERTableNode.md)
+    - [JoinQueryPanel](frontend/components/er/JoinQueryPanel.md)
     - [buildMermaid](frontend/components/er/buildMermaid.md)
+    - [erCanvasLayout](frontend/components/er/erCanvasLayout.md)
+    - [erLayoutStore](frontend/components/er/erLayoutStore.md)
+    - [erTypes](frontend/components/er/erTypes.md)
+  - **Components — eventtable**
+    - [CreateEventTableModal](frontend/components/eventtable/CreateEventTableModal.md)
+    - [EventTablePropertiesModal](frontend/components/eventtable/EventTablePropertiesModal.md)
   - **Components — export**
-    - [ExportPanel](frontend/components/export/ExportPanel.md)
+    - [ExportOptionsModal](frontend/components/export/ExportOptionsModal.md)
+    - [ExportPathFormatModal](frontend/components/export/ExportPathFormatModal.md)
     - [ExportTableModal](frontend/components/export/ExportTableModal.md)
     - [ImportTableModal](frontend/components/export/ImportTableModal.md)
+  - **Components — externalagent**
+    - [CreateExternalAgentModal](frontend/components/externalagent/CreateExternalAgentModal.md)
+    - [ExternalAgentPropertiesModal](frontend/components/externalagent/ExternalAgentPropertiesModal.md)
+  - **Components — externalfunction**
+    - [CreateExternalFunctionModal](frontend/components/externalfunction/CreateExternalFunctionModal.md)
+    - [ExternalFunctionPropertiesModal](frontend/components/externalfunction/ExternalFunctionPropertiesModal.md)
+  - **Components — externaltable**
+    - [CreateExternalTableModal](frontend/components/externaltable/CreateExternalTableModal.md)
+    - [ExternalTablePropertiesModal](frontend/components/externaltable/ExternalTablePropertiesModal.md)
   - **Components — files**
     - [FileBrowser](frontend/components/files/FileBrowser.md)
+    - [platformUtil](frontend/components/files/platformUtil.md)
+  - **Components — fnmeta**
+    - [FunctionCatalogModal](frontend/components/fnmeta/FunctionCatalogModal.md)
   - **Components — function**
+    - [CreateFunctionModal](frontend/components/function/CreateFunctionModal.md)
+    - [FunctionPropertiesModal](frontend/components/function/FunctionPropertiesModal.md)
     - [SelectFunctionModal](frontend/components/function/SelectFunctionModal.md)
+  - **Components — gateway**
+    - [CreateGatewayModal](frontend/components/gateway/CreateGatewayModal.md)
+    - [EndpointTargetPicker](frontend/components/gateway/EndpointTargetPicker.md)
+    - [GatewayPropertiesModal](frontend/components/gateway/GatewayPropertiesModal.md)
+    - [insertSpecTarget](frontend/components/gateway/insertSpecTarget.md)
   - **Components — git**
-    - [CommitModal](frontend/components/git/CommitModal.md)
-    - [GitPanel](frontend/components/git/GitPanel.md)
+    - [ChangeRow](frontend/components/git/ChangeRow.md)
+    - [ChangesView](frontend/components/git/ChangesView.md)
+    - [GitOperationsDialog](frontend/components/git/GitOperationsDialog.md)
+    - [gitStatusUtil](frontend/components/git/gitStatusUtil.md)
+  - **Components — gitrepoobj**
+    - [CreateGitRepositoryModal](frontend/components/gitrepoobj/CreateGitRepositoryModal.md)
+    - [ModifyGitRepositoryModal](frontend/components/gitrepoobj/ModifyGitRepositoryModal.md)
+    - [SetGitCommitFilterModal](frontend/components/gitrepoobj/SetGitCommitFilterModal.md)
+  - **Components — help**
+    - [AboutModal](frontend/components/help/AboutModal.md)
+    - [KeyboardShortcutsModal](frontend/components/help/KeyboardShortcutsModal.md)
+  - **Components — hybridtable**
+    - [CreateHybridTableModal](frontend/components/hybridtable/CreateHybridTableModal.md)
+    - [HybridTablePropertiesModal](frontend/components/hybridtable/HybridTablePropertiesModal.md)
+  - **Components — icebergtable**
+    - [CreateIcebergTableModal](frontend/components/icebergtable/CreateIcebergTableModal.md)
+    - [IcebergTablePropertiesModal](frontend/components/icebergtable/IcebergTablePropertiesModal.md)
+  - **Components — imagerepository**
+    - [CreateImageRepositoryModal](frontend/components/imagerepository/CreateImageRepositoryModal.md)
+    - [ImageRepositoryPropertiesModal](frontend/components/imagerepository/ImageRepositoryPropertiesModal.md)
+  - **Components — joinpolicy**
+    - [CreateJoinPolicyModal](frontend/components/joinpolicy/CreateJoinPolicyModal.md)
+    - [JoinPolicyPropertiesModal](frontend/components/joinpolicy/JoinPolicyPropertiesModal.md)
   - **Components — layout**
     - [AppLayout](frontend/components/layout/AppLayout.md)
     - [Sidebar](frontend/components/layout/Sidebar.md)
+  - **Components — lineage**
+    - [DependenciesModal](frontend/components/lineage/DependenciesModal.md)
+  - **Components — maskingpolicy**
+    - [CreateMaskingPolicyModal](frontend/components/maskingpolicy/CreateMaskingPolicyModal.md)
+    - [MaskingPolicyPropertiesModal](frontend/components/maskingpolicy/MaskingPolicyPropertiesModal.md)
+  - **Components — materializedview**
+    - [CreateMaterializedViewModal](frontend/components/materializedview/CreateMaterializedViewModal.md)
+    - [MaterializedViewPropertiesModal](frontend/components/materializedview/MaterializedViewPropertiesModal.md)
+  - **Components — mcpserver**
+    - [CreateMCPServerModal](frontend/components/mcpserver/CreateMCPServerModal.md)
+    - [MCPServerPropertiesModal](frontend/components/mcpserver/MCPServerPropertiesModal.md)
+  - **Components — migration**
+    - [ExecGrid](frontend/components/migration/ExecGrid.md)
+    - [MigrationModal](frontend/components/migration/MigrationModal.md)
+    - [ReviewGrid](frontend/components/migration/ReviewGrid.md)
+    - [migrationUtils](frontend/components/migration/migrationUtils.md)
+  - **Components — model**
+    - [CreateModelModal](frontend/components/model/CreateModelModal.md)
+    - [ModelPropertiesModal](frontend/components/model/ModelPropertiesModal.md)
+    - [ModelSourcePicker](frontend/components/model/ModelSourcePicker.md)
+  - **Components — modelmonitor**
+    - [CreateModelMonitorModal](frontend/components/modelmonitor/CreateModelMonitorModal.md)
+    - [ModelMonitorPropertiesModal](frontend/components/modelmonitor/ModelMonitorPropertiesModal.md)
+  - **Components — networkrule**
+    - [CreateNetworkRuleModal](frontend/components/networkrule/CreateNetworkRuleModal.md)
+    - [NetworkRulePropertiesModal](frontend/components/networkrule/NetworkRulePropertiesModal.md)
+    - [valueList](frontend/components/networkrule/valueList.md)
+  - **Components — notebook**
+    - [DeployNotebookModal](frontend/components/notebook/DeployNotebookModal.md)
+    - [ExecuteNotebookModal](frontend/components/notebook/ExecuteNotebookModal.md)
+    - [NotebookPrefsModal](frontend/components/notebook/NotebookPrefsModal.md)
+    - [NotebookTab](frontend/components/notebook/NotebookTab.md)
+    - [NotebookToolbarSlot](frontend/components/notebook/NotebookToolbarSlot.md)
+    - [SetNotebookWarehouseModal](frontend/components/notebook/SetNotebookWarehouseModal.md)
+    - [debugClient](frontend/components/notebook/debugClient.md)
+  - **Components — packagespolicy**
+    - [CreatePackagesPolicyModal](frontend/components/packagespolicy/CreatePackagesPolicyModal.md)
+    - [PackagesPolicyPropertiesModal](frontend/components/packagespolicy/PackagesPolicyPropertiesModal.md)
+  - **Components — passwordpolicy**
+    - [CreatePasswordPolicyModal](frontend/components/passwordpolicy/CreatePasswordPolicyModal.md)
+    - [PasswordPolicyPropertiesModal](frontend/components/passwordpolicy/PasswordPolicyPropertiesModal.md)
+  - **Components — pipe**
+    - [CreatePipeModal](frontend/components/pipe/CreatePipeModal.md)
+    - [PipeCopyHistoryModal](frontend/components/pipe/PipeCopyHistoryModal.md)
+    - [PipePropertiesModal](frontend/components/pipe/PipePropertiesModal.md)
+    - [PipeStatusModal](frontend/components/pipe/PipeStatusModal.md)
+    - [RefreshPipeModal](frontend/components/pipe/RefreshPipeModal.md)
+  - **Components — privacypolicy**
+    - [CreatePrivacyPolicyModal](frontend/components/privacypolicy/CreatePrivacyPolicyModal.md)
+    - [PrivacyPolicyPropertiesModal](frontend/components/privacypolicy/PrivacyPolicyPropertiesModal.md)
   - **Components — procedure**
     - [CallProcedureModal](frontend/components/procedure/CallProcedureModal.md)
+    - [CreateProcedureModal](frontend/components/procedure/CreateProcedureModal.md)
+    - [ProcedurePropertiesModal](frontend/components/procedure/ProcedurePropertiesModal.md)
+  - **Components — projectionpolicy**
+    - [CreateProjectionPolicyModal](frontend/components/projectionpolicy/CreateProjectionPolicyModal.md)
+    - [ProjectionPolicyPropertiesModal](frontend/components/projectionpolicy/ProjectionPolicyPropertiesModal.md)
   - **Components — results**
+    - [CellDetailPanel](frontend/components/results/CellDetailPanel.md)
+    - [ColumnFilterDropdown](frontend/components/results/ColumnFilterDropdown.md)
+    - [ConditionalFormattingModal](frontend/components/results/ConditionalFormattingModal.md)
+    - [DataTypeFormatModal](frontend/components/results/DataTypeFormatModal.md)
+    - [ExplainModal](frontend/components/results/ExplainModal.md)
+    - [GridSearch](frontend/components/results/GridSearch.md)
+    - [QueryLogPane](frontend/components/results/QueryLogPane.md)
+    - [QueryProfileModal](frontend/components/results/QueryProfileModal.md)
+    - [QuickChartModal](frontend/components/results/QuickChartModal.md)
     - [ResultGrid](frontend/components/results/ResultGrid.md)
+    - [StatusBar](frontend/components/results/StatusBar.md)
+    - [cellDetailUtils](frontend/components/results/cellDetailUtils.md)
+    - [columnOrderUtils](frontend/components/results/columnOrderUtils.md)
+  - **Components — rowaccesspolicy**
+    - [CreateRowAccessPolicyModal](frontend/components/rowaccesspolicy/CreateRowAccessPolicyModal.md)
+    - [RowAccessPolicyPropertiesModal](frontend/components/rowaccesspolicy/RowAccessPolicyPropertiesModal.md)
+  - **Components — secret**
+    - [CreateSecretModal](frontend/components/secret/CreateSecretModal.md)
+    - [ModifySecretModal](frontend/components/secret/ModifySecretModal.md)
+  - **Components — semanticview**
+    - [CreateSemanticViewModal](frontend/components/semanticview/CreateSemanticViewModal.md)
+    - [SemanticViewPropertiesModal](frontend/components/semanticview/SemanticViewPropertiesModal.md)
+  - **Components — sequence**
+    - [CreateSequenceModal](frontend/components/sequence/CreateSequenceModal.md)
+    - [SequencePropertiesModal](frontend/components/sequence/SequencePropertiesModal.md)
+  - **Components — service**
+    - [CreateServiceModal](frontend/components/service/CreateServiceModal.md)
+    - [ServicePropertiesModal](frontend/components/service/ServicePropertiesModal.md)
+  - **Components — sessionpolicy**
+    - [CreateSessionPolicyModal](frontend/components/sessionpolicy/CreateSessionPolicyModal.md)
+    - [SessionPolicyPropertiesModal](frontend/components/sessionpolicy/SessionPolicyPropertiesModal.md)
   - **Components — settings**
     - [AISettingsModal](frontend/components/settings/AISettingsModal.md)
+    - [FeatureFlagsModal](frontend/components/settings/FeatureFlagsModal.md)
     - [LayoutSettingsModal](frontend/components/settings/LayoutSettingsModal.md)
+    - [MCPSessionsModal](frontend/components/settings/MCPSessionsModal.md)
+    - [SessionManagementModal](frontend/components/settings/SessionManagementModal.md)
+  - **Components — shared**
+    - [CreateModalShell](frontend/components/shared/CreateModalShell.md)
+    - [DataTypeAutoComplete](frontend/components/shared/DataTypeAutoComplete.md)
+    - [DataTypeSelect](frontend/components/shared/DataTypeSelect.md)
+    - [MonacoSqlField](frontend/components/shared/MonacoSqlField.md)
+    - [NameWithReplaceOptions](frontend/components/shared/NameWithReplaceOptions.md)
+    - [ObjectNameCaseControl](frontend/components/shared/ObjectNameCaseControl.md)
+    - [SqlPreview](frontend/components/shared/SqlPreview.md)
+    - [StageFilePicker](frontend/components/shared/StageFilePicker.md)
+    - [TagInput](frontend/components/shared/TagInput.md)
+    - [createModalHooks](frontend/components/shared/createModalHooks.md)
+  - **Components — sidebar**
+    - [objectIcons](frontend/components/sidebar/objectIcons.md)
   - **Components — snippets**
     - [SnippetsModal](frontend/components/snippets/SnippetsModal.md)
+  - **Components — snowpark**
+    - [PipRegistryModal](frontend/components/snowpark/PipRegistryModal.md)
+    - [SnowparkCheckModal](frontend/components/snowpark/SnowparkCheckModal.md)
+    - [SnowparkSetupModal](frontend/components/snowpark/SnowparkSetupModal.md)
+  - **Components — stage**
+    - [UploadToStageModal](frontend/components/stage/UploadToStageModal.md)
+  - **Components — storagelifecyclepolicy**
+    - [CreateStorageLifecyclePolicyModal](frontend/components/storagelifecyclepolicy/CreateStorageLifecyclePolicyModal.md)
+    - [StorageLifecyclePolicyPropertiesModal](frontend/components/storagelifecyclepolicy/StorageLifecyclePolicyPropertiesModal.md)
+  - **Components — stream**
+    - [CreateStreamModal](frontend/components/stream/CreateStreamModal.md)
+    - [StreamPropertiesModal](frontend/components/stream/StreamPropertiesModal.md)
+  - **Components — streamlit**
+    - [CreateStreamlitModal](frontend/components/streamlit/CreateStreamlitModal.md)
+    - [StreamlitPropertiesModal](frontend/components/streamlit/StreamlitPropertiesModal.md)
+  - **Components — tag**
+    - [CreateTagModal](frontend/components/tag/CreateTagModal.md)
+    - [TagManagementModal](frontend/components/tag/TagManagementModal.md)
+    - [TagPropagationFields](frontend/components/tag/TagPropagationFields.md)
+    - [TagPropertiesModal](frontend/components/tag/TagPropertiesModal.md)
+    - [TagReferencesModal](frontend/components/tag/TagReferencesModal.md)
+    - [allowedValues](frontend/components/tag/allowedValues.md)
   - **Components — task**
+    - [AddExistingChildModal](frontend/components/task/AddExistingChildModal.md)
+    - [CopyTaskModal](frontend/components/task/CopyTaskModal.md)
     - [CreateTaskModal](frontend/components/task/CreateTaskModal.md)
+    - [ExecuteTaskModal](frontend/components/task/ExecuteTaskModal.md)
+    - [RemoveChildLinksModal](frontend/components/task/RemoveChildLinksModal.md)
+    - [ScheduleEditor](frontend/components/task/ScheduleEditor.md)
+    - [TaskGraphModal](frontend/components/task/TaskGraphModal.md)
+    - [TaskHistoryModal](frontend/components/task/TaskHistoryModal.md)
+    - [TaskPropertiesModal](frontend/components/task/TaskPropertiesModal.md)
+    - [TaskStatusesModal](frontend/components/task/TaskStatusesModal.md)
+    - [WhenConditionBuilder](frontend/components/task/WhenConditionBuilder.md)
   - **Components — terminal**
     - [TerminalPanel](frontend/components/terminal/TerminalPanel.md)
+  - **Components — toolbar**
+    - [MCPIndicator](frontend/components/toolbar/MCPIndicator.md)
+    - [Toolbar](frontend/components/toolbar/Toolbar.md)
+  - **Components — view**
+    - [CreateViewModal](frontend/components/view/CreateViewModal.md)
+    - [ViewPropertiesModal](frontend/components/view/ViewPropertiesModal.md)

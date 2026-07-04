@@ -10,7 +10,7 @@
 //
 // @thaw-domain: Object Browser & Administration
 
-import { useState, useEffect, useLayoutEffect, useRef, lazy, Suspense } from "react";
+import { useState, useLayoutEffect, useRef, lazy, Suspense } from "react";
 import { Button, Typography, Tree, Spin, Modal, message } from "antd";
 import {
   TeamOutlined,
@@ -35,7 +35,6 @@ import {
   GetWarehouseDDL,
   ExportAccountObjectsDDL,
   GetObjectProperties,
-  CanViewWarehouseMeteringHistory,
 } from "../../../wailsjs/go/app/App";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { useGitStore } from "../../store/gitStore";
@@ -116,22 +115,11 @@ export default function AccountPanel() {
   const [whPropsName,  setWhPropsName]  = useState<string | null>(null);
   const [historyOpen,        setHistoryOpen]        = useState(false);
   const [meteringOpen,       setMeteringOpen]       = useState(false);
-  const [canViewMetering,    setCanViewMetering]    = useState(false);
   const ctxRef = useRef<HTMLDivElement>(null);
 
   const pendingDiff   = useDiffStore((s) => s.pending);
   const selectForComp = useDiffStore((s) => s.selectForComparison);
   const compareWith   = useDiffStore((s) => s.compareWith);
-
-  // ── Probe warehouse metering access on connect ───────────────────────────
-
-  useEffect(() => {
-    if (isConnected) {
-      CanViewWarehouseMeteringHistory().then(setCanViewMetering).catch(() => {});
-    } else {
-      setCanViewMetering(false);
-    }
-  }, [isConnected]);
 
   // ── Loading ──────────────────────────────────────────────────────────────
 
@@ -317,7 +305,7 @@ export default function AccountPanel() {
               style={{ height: 20, padding: "0 4px", minWidth: 0 }}
             />
           )}
-          {canViewMetering && featureFlags.warehouseCreditUsage && (
+          {featureFlags.warehouseCreditUsage && (
             <Button
               size="small"
               type="text"

@@ -14,6 +14,7 @@ import (
 	"thaw/internal/apperrors"
 	"thaw/internal/keypair"
 	"thaw/internal/snowflake"
+	"thaw/internal/users"
 )
 
 // ListUsers returns all users visible to the current role.
@@ -33,32 +34,15 @@ func (a *App) GetUserDDL(name string) (string, error) {
 	return a.client.GetUserDDL(a.ctx, name)
 }
 
-// CanManageUsers returns true when the given role can alter or drop users.
-// The frontend passes the current role from sessionStore.
-func (a *App) CanManageUsers(role string) (bool, error) {
+// AlterUserProperty applies a single SET/UNSET property change to a user.
+// property must be one of the keys documented on users.BuildAlterUserPropertySQL
+// (loginName, email, defaultWarehouse, minsToBypassMfa, type, …); an empty
+// value UNSETs the property where Snowflake allows it.
+func (a *App) AlterUserProperty(name, property, value string) error {
 	if a.client == nil {
-		return false, apperrors.ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
-	return a.client.CanManageUsers(a.ctx, role)
-}
-
-// CanCreateUsers returns true when the given role can create users.
-// The frontend passes the current role from sessionStore.
-func (a *App) CanCreateUsers(role string) (bool, error) {
-	if a.client == nil {
-		return false, apperrors.ErrNotConnected
-	}
-	return a.client.CanCreateUsers(a.ctx, role)
-}
-
-// CanModifyUserAuth returns true when the current session role (or any role it
-// inherits) has OWNERSHIP or MODIFY PROGRAMMATIC AUTHENTICATION METHODS on the
-// named user.
-func (a *App) CanModifyUserAuth(username string) (bool, error) {
-	if a.client == nil {
-		return false, apperrors.ErrNotConnected
-	}
-	return a.client.CanModifyUserAuth(a.ctx, username)
+	return users.AlterProperty(a.ctx, a.client, name, property, value)
 }
 
 // CheckAvailableKeyTools returns the list of available key generation methods.

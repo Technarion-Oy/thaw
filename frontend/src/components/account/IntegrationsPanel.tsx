@@ -8,8 +8,7 @@
 // Commercial use of this software is restricted to parties   holding a valid
 // license agreement with Technarion Oy.
 
-import { useState, useEffect, useLayoutEffect, useRef } from "react";
-import { useSessionStore } from "../../store/sessionStore";
+import { useState, useLayoutEffect, useRef } from "react";
 import { Typography, Tree, Spin, Popconfirm, message } from "antd";
 import {
   ApiOutlined,
@@ -26,7 +25,6 @@ import type { DataNode } from "antd/es/tree";
 import {
   ListIntegrations,
   DropIntegration,
-  CanCreateIntegration,
 } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 import PropertiesModal from "../common/PropertiesModal";
@@ -90,11 +88,9 @@ export default function IntegrationsPanel() {
   const [loadedKinds, setLoadedKinds] = useState<Set<string>>(new Set());
   const [loadingKinds, setLoadingKinds] = useState<Set<string>>(new Set());
   const [childrenMap, setChildrenMap] = useState<Map<string, snowflake.IntegrationRow[]>>(new Map());
-  const [canCreate, setCanCreate] = useState(false);
   const [expanded,  setExpanded]  = useState(false);
   const [ctxMenu,   setCtxMenu]   = useState<CtxMenuState | null>(null);
   const ctxRef = useRef<HTMLDivElement>(null);
-  const role = useSessionStore((s) => s.role);
 
   // Modal state
   const [createOpen,    setCreateOpen]    = useState<{ kind: string } | null>(null);
@@ -103,19 +99,6 @@ export default function IntegrationsPanel() {
   const [modifyFor,     setModifyFor]     = useState<string | null>(null);
   const [dropConfirm,   setDropConfirm]   = useState<string | null>(null);
   const [dropKind,      setDropKind]      = useState<string>("");
-
-  // Re-check whenever the active role changes. The stale guard prevents
-  // an old in-flight response from overwriting a newer result.
-  useEffect(() => {
-    setCanCreate(false);
-    if (!role) return;
-    let stale = false;
-    CanCreateIntegration(role).then((v) => { if (!stale) setCanCreate(v); }).catch(() => {});
-    return () => { stale = true; };
-  }, [role]);
-
-  const refreshCanCreate = () =>
-    CanCreateIntegration(role).then(setCanCreate).catch(() => {});
 
   // Clamp context menu in viewport before paint
   useLayoutEffect(() => {
@@ -170,10 +153,6 @@ export default function IntegrationsPanel() {
   
     if (key.startsWith("category:")) {
       const kind = key.slice("category:".length);
-      
-      // FETCH FRESH STATE HERE
-      refreshCanCreate(); 
-      
       setCtxMenu({ x: event.clientX, y: event.clientY, type: "category", kind });
   } else if (key.startsWith("integration:")) {
       // key = "integration:{KIND}:{name}"
@@ -238,7 +217,7 @@ export default function IntegrationsPanel() {
       <div style={{ display: "flex", alignItems: "center", padding: "0 4px 0 8px", marginBottom: expanded ? 4 : 0, gap: 2 }}>
         <div
           style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", flex: 1, padding: "2px 4px", borderRadius: 4 }}
-          onClick={() => { setExpanded((v) => !v); if (!expanded) refreshCanCreate(); }}
+          onClick={() => setExpanded((v) => !v)}
           onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
           onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
         >
@@ -260,7 +239,6 @@ export default function IntegrationsPanel() {
             onClick={(e) => {
               e.stopPropagation();
               loadedKinds.forEach((k) => reloadKind(k));
-              refreshCanCreate();
             }}
           />
         )}
@@ -320,14 +298,11 @@ export default function IntegrationsPanel() {
               style={{
                 display: "flex", alignItems: "center", gap: 8,
                 padding: "6px 14px", fontSize: 13, cursor: "pointer",
-                color: canCreate ? "var(--text)" : "var(--text-faint)",
-                pointerEvents: canCreate ? "auto" : "none",
-                opacity: canCreate ? 1 : 0.45,
+                color: "var(--text)",
               }}
-              onMouseEnter={(e) => canCreate && (e.currentTarget.style.background = "var(--border)")}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
               onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
               onClick={() => {
-                if (!canCreate) return;
                 closeCtx();
                 setCreateOpen({ kind: ctxMenu.kind });
               }}

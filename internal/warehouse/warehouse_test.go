@@ -33,6 +33,7 @@ func TestBuildAlterWarehousePropertySQL(t *testing.T) {
 		{name: "autoResume valid", property: "autoResume", value: "true", want: `ALTER WAREHOUSE "WH" SET AUTO_RESUME = TRUE`},
 		{name: "autoResume invalid", property: "autoResume", value: "maybe", wantErr: true},
 		{name: "comment escapes quotes", property: "comment", value: "it's fine", want: `ALTER WAREHOUSE "WH" SET COMMENT = 'it''s fine'`},
+		{name: "comment escapes trailing backslash", property: "comment", value: `path\`, want: `ALTER WAREHOUSE "WH" SET COMMENT = 'path\\'`},
 		{name: "scalingPolicy valid", property: "scalingPolicy", value: "economy", want: `ALTER WAREHOUSE "WH" SET SCALING_POLICY = ECONOMY`},
 		{name: "resourceMonitor empty is null", property: "resourceMonitor", value: "", want: `ALTER WAREHOUSE "WH" SET RESOURCE_MONITOR = NULL`},
 		{name: "resourceMonitor named", property: "resourceMonitor", value: "RM1", want: `ALTER WAREHOUSE "WH" SET RESOURCE_MONITOR = "RM1"`},

@@ -186,6 +186,10 @@ export function AlterTask(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterTask'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterUserProperty(arg1, arg2, arg3) {
+  return window['go']['app']['App']['AlterUserProperty'](arg1, arg2, arg3);
+}
+
 export function AlterView(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterView'](arg1, arg2, arg3, arg4);
 }
@@ -524,26 +528,6 @@ export function BuildUnsetColumnMaskingPolicySql(arg1, arg2, arg3, arg4) {
 
 export function BuildWorkloadIdentityPolicyValue(arg1) {
   return window['go']['app']['App']['BuildWorkloadIdentityPolicyValue'](arg1);
-}
-
-export function CanCreateIntegration(arg1) {
-  return window['go']['app']['App']['CanCreateIntegration'](arg1);
-}
-
-export function CanCreateUsers(arg1) {
-  return window['go']['app']['App']['CanCreateUsers'](arg1);
-}
-
-export function CanManageUsers(arg1) {
-  return window['go']['app']['App']['CanManageUsers'](arg1);
-}
-
-export function CanModifyUserAuth(arg1) {
-  return window['go']['app']['App']['CanModifyUserAuth'](arg1);
-}
-
-export function CanViewWarehouseMeteringHistory() {
-  return window['go']['app']['App']['CanViewWarehouseMeteringHistory']();
 }
 
 export function CancelConnect() {

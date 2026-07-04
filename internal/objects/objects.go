@@ -321,6 +321,52 @@ func GetObjectProperties(ctx context.Context, client *snowflake.Client, database
 	}
 	pairs := snowflake.ResultToPairs(res)
 
+	if strings.ToUpper(kind) == "USER" {
+		// SHOW USERS lacks several ALTER USER properties (NETWORK_POLICY,
+		// MIDDLE_NAME, …) that only surface via DESCRIBE USER. Merge in any
+		// DESCRIBE property not already present so the user properties view
+		// reads complete — without this, those fields would always render
+		// empty and an edit could silently UNSET a real value. DESCRIBE may
+		// fail on privileges where SHOW succeeded; degrade to SHOW-only only
+		// in that case — any other failure (network blip, timeout) must
+		// surface, or the UI would render real values as blank/unset.
+		descRes, err := client.Execute(ctx, fmt.Sprintf("DESCRIBE USER %s", snowflake.QuoteIdent(name)))
+		if err != nil && !snowflake.IsPrivilegeError(err) {
+			return nil, fmt.Errorf("DESCRIBE USER: %w", err)
+		}
+		if err != nil {
+			// Privilege-degraded: mark the result so the UI can say "some
+			// properties may be hidden" instead of rendering DESCRIBE-only
+			// fields as if they were genuinely unset.
+			pairs = append(pairs, snowflake.PropertyPair{Key: "__DESCRIBE_DEGRADED__", Value: "1"})
+		}
+		if err == nil {
+			have := make(map[string]bool, len(pairs))
+			for _, p := range pairs {
+				have[strings.ToUpper(p.Key)] = true
+			}
+			propIdx := snowflake.ColIdx(descRes.Columns, "property")
+			valIdx := snowflake.ColIdx(descRes.Columns, "value")
+			for _, row := range descRes.Rows {
+				if propIdx < 0 || propIdx >= len(row) {
+					continue
+				}
+				key := snowflake.CellString(row[propIdx])
+				if key == "" || have[strings.ToUpper(key)] {
+					continue
+				}
+				val := ""
+				if valIdx >= 0 && valIdx < len(row) {
+					val = snowflake.CellString(row[valIdx])
+				}
+				if val == "null" {
+					val = ""
+				}
+				pairs = append(pairs, snowflake.PropertyPair{Key: key, Value: val})
+			}
+		}
+	}
+
 	if strings.ToUpper(kind) == "MASKING POLICY" {
 		descRes, err := client.Execute(ctx, BuildDescribeMaskingPolicyQuery(database, schema, name))
 		if err == nil && len(descRes.Rows) > 0 {

@@ -12,6 +12,7 @@ package snowflake
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"slices"
 	"strconv"
@@ -25,6 +26,29 @@ import (
 // signs. The pattern is case-insensitive because Snowflake normalizes unquoted
 // identifiers to uppercase regardless of how they were written.
 var reUnquotedIdent = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_$]*$`)
+
+// ValidateEnumValue uppercases value and checks it against allowed, returning
+// the canonical uppercase form safe for unquoted SQL interpolation. what names
+// the target in the error (e.g. `user property "type"`). Shared by the
+// per-property ALTER builders in internal/warehouse and internal/users.
+func ValidateEnumValue(what, value string, allowed ...string) (string, error) {
+	up := strings.ToUpper(strings.TrimSpace(value))
+	if slices.Contains(allowed, up) {
+		return up, nil
+	}
+	return "", fmt.Errorf("invalid value %q for %s", value, what)
+}
+
+// ValidateNonNegativeInt parses value as a non-negative integer and returns its
+// canonical decimal form safe for SQL interpolation. what names the target in
+// the error, mirroring ValidateEnumValue.
+func ValidateNonNegativeInt(what, value string) (string, error) {
+	n, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || n < 0 {
+		return "", fmt.Errorf("invalid integer value %q for %s", value, what)
+	}
+	return strconv.Itoa(n), nil
+}
 
 // TableKey returns the canonical lookup key for a Snowflake table:
 // "SCHEMA.TABLE" with both parts trimmed. Names arrive from Snowflake

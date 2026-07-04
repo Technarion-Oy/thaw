@@ -13,7 +13,6 @@ package warehouse
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"thaw/internal/snowflake"
@@ -38,23 +37,14 @@ type WarehouseMeteringRow struct {
 func BuildAlterWarehousePropertySQL(name, property, value string) (string, error) {
 	wh := snowflake.QuoteIdent(name)
 
-	// allowlist checks for enum-typed values that are interpolated unquoted into SQL.
+	// Shared validators for enum/integer values that are interpolated unquoted
+	// into SQL (also used by the internal/users property builder).
+	what := fmt.Sprintf("warehouse property %q", property)
 	checkEnum := func(v string, allowed ...string) (string, error) {
-		u := strings.ToUpper(strings.TrimSpace(v))
-		for _, a := range allowed {
-			if u == a {
-				return u, nil
-			}
-		}
-		return "", fmt.Errorf("invalid value %q for warehouse property %q", v, property)
+		return snowflake.ValidateEnumValue(what, v, allowed...)
 	}
-	// validateInt parses v as a non-negative integer and returns it as a string safe for SQL interpolation.
 	validateInt := func(v string) (string, error) {
-		n, err := strconv.Atoi(strings.TrimSpace(v))
-		if err != nil || n < 0 {
-			return "", fmt.Errorf("invalid integer value %q for warehouse property %q", v, property)
-		}
-		return strconv.Itoa(n), nil
+		return snowflake.ValidateNonNegativeInt(what, v)
 	}
 
 	switch property {
@@ -88,7 +78,9 @@ func BuildAlterWarehousePropertySQL(name, property, value string) (string, error
 		}
 		return fmt.Sprintf(`ALTER WAREHOUSE %s SET AUTO_RESUME = %s`, wh, v), nil
 	case "comment":
-		return fmt.Sprintf(`ALTER WAREHOUSE %s SET COMMENT = '%s'`, wh, snowflake.EscapeStringLit(value)), nil
+		// QuoteTextLit: comments are free text — a trailing backslash must not
+		// escape the closing quote.
+		return fmt.Sprintf(`ALTER WAREHOUSE %s SET COMMENT = %s`, wh, snowflake.QuoteTextLit(value)), nil
 	case "maxClusterCount":
 		v, err := validateInt(value)
 		if err != nil {

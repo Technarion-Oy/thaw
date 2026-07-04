@@ -1472,11 +1472,22 @@ function CellView({
     });
   };
 
+  // Execution status drives the left stripe / border colour so idle, running
+  // and errored cells are distinguishable at a glance in a long notebook.
+  const status = cell.running
+    ? "running"
+    : cell.outputs.some((o) => o.type === "error")
+    ? "error"
+    : cell.executionCount != null
+    ? "ok"
+    : "idle";
+
   return (
     <div onClick={onSelect}>
       <div
         className="thaw-nb-cell"
         data-kind={cell.kind}
+        data-status={status}
         data-selected={focused || isSelected}
       >
         {/* Left gutter — execution count + kind tag */}

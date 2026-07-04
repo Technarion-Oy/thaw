@@ -162,6 +162,8 @@ export function AlterTag(arg1:string,arg2:string,arg3:string,arg4:string):Promis
 
 export function AlterTask(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
+export function AlterUserProperty(arg1:string,arg2:string,arg3:string):Promise<void>;
+
 export function AlterView(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterWarehouseAbortAllQueries(arg1:string):Promise<void>;
@@ -331,16 +333,6 @@ export function BuildSetColumnNotNullSql(arg1:string,arg2:string,arg3:string,arg
 export function BuildUnsetColumnMaskingPolicySql(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
 
 export function BuildWorkloadIdentityPolicyValue(arg1:authenticationpolicy.WorkloadIdentityPolicy):Promise<string>;
-
-export function CanCreateIntegration(arg1:string):Promise<boolean>;
-
-export function CanCreateUsers(arg1:string):Promise<boolean>;
-
-export function CanManageUsers(arg1:string):Promise<boolean>;
-
-export function CanModifyUserAuth(arg1:string):Promise<boolean>;
-
-export function CanViewWarehouseMeteringHistory():Promise<boolean>;
 
 export function CancelConnect():Promise<void>;
 

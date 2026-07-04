@@ -97,13 +97,13 @@ function ResizeHandle({ resizing, onMouseDown }: { resizing: boolean; onMouseDow
         width:      5,
         flexShrink: 0,
         cursor:     "col-resize",
-        background: resizing ? "var(--accent)" : "transparent",
-        borderLeft: "1px solid var(--border)",
+        background: resizing ? "var(--accent)" : "color-mix(in srgb, var(--text) 7%, transparent)",
+        borderLeft: "1px solid var(--border-strong)",
         transition: resizing ? "none" : "background 0.15s",
         zIndex:     10,
       }}
       onMouseEnter={(e) => { if (!resizing) e.currentTarget.style.background = "color-mix(in srgb, var(--accent) 26%, transparent)"; }}
-      onMouseLeave={(e) => { if (!resizing) e.currentTarget.style.background = "transparent"; }}
+      onMouseLeave={(e) => { if (!resizing) e.currentTarget.style.background = "color-mix(in srgb, var(--text) 7%, transparent)"; }}
     />
   );
 }
