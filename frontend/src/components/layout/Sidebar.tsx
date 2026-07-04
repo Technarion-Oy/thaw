@@ -4085,6 +4085,30 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       applyOpenSub(depth, key, dir);
     }
   };
+  // Callback ref: clamp a submenu panel into the viewport after it lays out.
+  // Passed inline so it re-runs on every render (React invokes a fresh callback
+  // ref each render), keeping the clamp correct as nested levels re-render. The
+  // panel defaults to top:0 (aligned with its trigger, growing down); we prefer
+  // that and only shift up as much as needed, falling back to a scroll cap when
+  // the menu is taller than the viewport.
+  const clampSubPanel = (el: HTMLDivElement | null) => {
+    if (!el) return;
+    const pad = 8;
+    const vh = window.innerHeight;
+    el.style.maxHeight = "";
+    el.style.overflowY = "";
+    el.style.top = "0px";
+    const triggerTop = el.getBoundingClientRect().top;
+    const fullH = el.scrollHeight;
+    if (triggerTop + fullH <= vh - pad) return; // fits below — leave as-is
+    if (fullH <= vh - 2 * pad) {
+      el.style.top = `${vh - pad - fullH - triggerTop}px`; // shift up just enough
+    } else {
+      el.style.top = `${pad - triggerTop}px`; // taller than viewport — pin & scroll
+      el.style.maxHeight = `${vh - 2 * pad}px`;
+      el.style.overflowY = "auto";
+    }
+  };
   const hideSub = (depth: number) => {
     if (submenuTimer.current) clearTimeout(submenuTimer.current);
     if (submenuOpenTimer.current) clearTimeout(submenuOpenTimer.current);
@@ -4110,6 +4134,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         </div>
         {open && (
           <div
+            ref={clampSubPanel}
             style={{ position: "absolute", top: 0, ...(dir === "right" ? { left: "100%" } : { right: "100%" }), background: "var(--bg-overlay)", border: "1px solid var(--border)", borderRadius: 6, boxShadow: "0 4px 16px rgba(0,0,0,0.5)", minWidth: 160, zIndex: 10000 }}
             onMouseEnter={cancelHide}
             onMouseLeave={() => hideSub(depth)}
