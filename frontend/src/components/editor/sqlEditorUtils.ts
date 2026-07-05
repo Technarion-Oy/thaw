@@ -12,6 +12,23 @@ import { GetTableForeignKeys } from "../../../wailsjs/go/app/App";
 // ── UC helper ────────────────────────────────────────────────────────────────
 export const UC = (s: string) => s.toUpperCase();
 
+// ── normId ────────────────────────────────────────────────────────────────────
+// Mirror of the backend `normID` (internal/sqleditor/sqleditor.go): normalise a
+// raw identifier the way ResolveTableRefs already stored its refs, so a captured
+// qualifier can be matched with an exact `===`. A quoted "..." keeps its
+// (case-sensitive) inner text with doubled "" unescaped; a bare identifier is
+// upper-cased (Snowflake folds unquoted names). Keeps `"Foo"` and `"foo"`
+// distinct — a lower-cased compare would silently expand the wrong table.
+export const normId = (s: string): string =>
+  !s ? s : s.startsWith('"') ? s.slice(1, -1).replace(/""/g, '"') : s.toUpperCase();
+
+// ── colCacheKey ───────────────────────────────────────────────────────────────
+// Case-insensitive, NUL-delimited key for a fully-qualified table, shared by
+// every per-table cache (column list, column types, wildcard expansion) so the
+// format lives in exactly one place.
+export const colCacheKey = (db: string, schema: string, table: string) =>
+  `${db.toUpperCase()}\0${schema.toUpperCase()}\0${table.toUpperCase()}`;
+
 // ── identifierRangeAt ─────────────────────────────────────────────────────────
 // Column span (1-based Monaco columns) of the dotted identifier at a 0-based char
 // index, or null if that index isn't on an identifier. A double-quoted segment
@@ -43,6 +60,45 @@ export function identifierRangeAt(line: string, idx0: number): { start: number; 
   while (s > 0 && inIdent[s - 1]) s--;
   while (e + 1 < line.length && inIdent[e + 1]) e++;
   return { start: s + 1, end: e + 2 };   // Monaco endColumn is exclusive (points after last char)
+}
+
+// ── starMenuEligible ──────────────────────────────────────────────────────────
+// Display gate for the editor's "Expand *" context-menu item: true when the
+// cursor sits on a literal `*` that is NOT part of an object name. A `*` in an
+// object name is always inside a quoted identifier ("Testin*table") — reuse
+// identifierRangeAt (the DDL-hover span logic) instead of a bespoke parser to
+// tell them apart: it returns a range that *contains* the star only in that
+// case. A genuine `alias.*` star falls just past the `alias.` range (identifier
+// chars never include `*`), and a bare `*` gets no range at all — both eligible.
+// A `*` inside a single-quoted string literal ('x*y') is likewise not a wildcard
+// (identifierRangeAt only tracks double-quoted identifiers, so that's checked
+// separately). Cheap + synchronous so it can fill the Monaco context key before
+// the menu renders; the command still re-checks the token authoritatively.
+export function starMenuEligible(line: string, column: number): boolean {
+  let idx = -1;
+  if (line[column - 1] === "*") idx = column - 1;
+  else if (line[column - 2] === "*") idx = column - 2; // cursor on the star's right edge
+  if (idx < 0) return false;
+  // Inside a double-quoted identifier (object name)?
+  const r = identifierRangeAt(line, idx);
+  const col = idx + 1; // 1-based Monaco column of the star
+  if (r !== null && col >= r.start && col < r.end) return false;
+  // Inside a single-quoted string literal? Count unescaped `'` before the star
+  // ('' is an escaped quote); an odd count means the star is inside a string. Skip
+  // over double-quoted identifiers so an apostrophe in a column name (e.g. "it's")
+  // doesn't flip the parity.
+  let quotes = 0;
+  let inDouble = false;
+  for (let i = 0; i < idx; i++) {
+    const ch = line[i];
+    if (inDouble) {
+      if (ch === '"') { if (line[i + 1] === '"') { i++; continue; } inDouble = false; }
+      continue;
+    }
+    if (ch === '"') { inDouble = true; continue; }
+    if (ch === "'") { if (line[i + 1] === "'") { i++; continue; } quotes++; }
+  }
+  return quotes % 2 === 0;
 }
 
 // ── quoteIfNecessary ─────────────────────────────────────────────────────────

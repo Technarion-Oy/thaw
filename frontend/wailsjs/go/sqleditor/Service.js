@@ -22,6 +22,10 @@ export function ComputeJoinOnConditions(arg1) {
   return window['go']['sqleditor']['Service']['ComputeJoinOnConditions'](arg1);
 }
 
+export function FromSourceCount(arg1) {
+  return window['go']['sqleditor']['Service']['FromSourceCount'](arg1);
+}
+
 export function GetActiveFunctionCall(arg1) {
   return window['go']['sqleditor']['Service']['GetActiveFunctionCall'](arg1);
 }
@@ -52,6 +56,10 @@ export function ParseSignatureParams(arg1) {
 
 export function ResolveTableRefs(arg1, arg2, arg3, arg4) {
   return window['go']['sqleditor']['Service']['ResolveTableRefs'](arg1, arg2, arg3, arg4);
+}
+
+export function StarSelectAt(arg1, arg2, arg3) {
+  return window['go']['sqleditor']['Service']['StarSelectAt'](arg1, arg2, arg3);
 }
 
 export function ValidateAntiPatterns(arg1, arg2) {

@@ -27,6 +27,7 @@ Key capabilities:
 | `antipatterns.go` | `ValidateAntiPatterns` — semantic checks the grammar can't perform: MERGE clause-action validity, QUALIFY placement, FLATTEN/LATERAL usage, variant-path traversal, unknown Cortex functions, stray token / dangling `AS` after a FROM/JOIN table reference, PIVOT/UNPIVOT/MATCH_RECOGNIZE/ASOF JOIN clause shape, INSERT OVERWRITE/ALL/FIRST structure, Time Travel `AT`/`BEFORE`, and cross-statement transaction tracking (nested `BEGIN`, stray `COMMIT`/`ROLLBACK`, uncommitted transaction) |
 | `barecolrefs.go` | `ValidateBareColumnRefs`, `ExtractInEditorTableDefs` — validates INSERT column lists and CREATE TABLE REFERENCES; extracts in-editor table columns for pre-execution autocomplete |
 | `tableexist.go` | `ValidateTablesExist` — checks SELECT/CREATE/ALTER/DROP/UNDROP for unresolvable table/schema/database references and unqualified schema-scoped CREATEs with no active database/schema (`matchCreateSchemaScoped`); emits quick-fix `Code` JSON when a table exists in another schema |
+| `starselect.go` | `StarSelectAt(sql, line, col) *StarSelect` — tokenizer-based (`sqltok`) detection of a select-list wildcard (`*`/`alias.*`) at a Monaco cursor position; returns its replace span + qualifier or nil. Ignores a `*` inside a quoted identifier and a `*` multiplication; walks the full dotted chain so a multi-part `db.schema.tbl.*` replace range starts at the first segment; converts sqltok byte columns to Monaco UTF-16 columns (`utf16Col`) so non-ASCII earlier on the line doesn't shift the range. `FromSourceCount(sql) int` — number of *plain-table* top-level FROM sources (JOIN/comma separated), or -1 when a bare `*` can't be safely expanded: nested SELECT/CTE, no FROM, or a non-table source (subquery, table function `TABLE(…)`, or a `PIVOT`/`UNPIVOT`/`SAMPLE` clause — all detected as a `(` opening at a source position, i.e. not inside an `ON`/`USING` condition). The "Expand \*" command compares it to the resolved-ref count to refuse incomplete/wrong expansions. Backs the editor's "Expand \*" context menu |
 | `diaghelpers.go` | Shared internal helpers: `stripCommentsSQL`, `stripStringLiterals`, `getFirstSQLToken` |
 | `doc.go` | Package doc + `thaw:domain` annotation |
 
@@ -60,6 +61,8 @@ Key capabilities:
   - `DetectUsingClause(textToCursor)` — `InUsing` (empty USING) vs `IsPartial` (partial column list)
 - `GetStatementRanges(sql) []StatementRange` — per-statement line ranges and byte offsets
 - `GetIdentifierAtColumn(line, col) []string` — dot-separated identifier parts under cursor
+- `StarSelectAt(sql, line, col) *StarSelect` — select-list wildcard (`*`/`alias.*`) at a cursor position, with its replace span + qualifier (nil when not a wildcard)
+- `FromSourceCount(sql) int` — plain-table top-level FROM source count, or -1 when a bare `*` can't be safely expanded (nested SELECT/CTE, no FROM, or a non-table source: subquery / table function / PIVOT etc.)
 - `GetActiveFunctionCall(prefix) *FunctionCallContext` — innermost open function call + active parameter index
 - `ParseSignatureParams(sig) []SignatureParam` — byte spans of parameters for Monaco parameter highlighting
 - `ExtractInEditorTableDefs(sql) []InEditorTableDef` — reuses `parseCreateTableColDefs` from `barecolrefs.go`

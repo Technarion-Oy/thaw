@@ -95,6 +95,21 @@ func (s *Service) GetIdentifierAtColumn(line string, col int) []string {
 	return GetIdentifierAtColumn(line, col)
 }
 
+// StarSelectAt reports whether the token at the 1-based Monaco cursor position
+// (line, col) is a select-list wildcard (`*` or `alias.*`), returning its span
+// and any qualifier, or nil. Backs the editor's "Expand *" context menu.
+func (s *Service) StarSelectAt(sql string, line, col int) *StarSelect {
+	return StarSelectAt(sql, line, col)
+}
+
+// FromSourceCount returns the number of table sources in the statement's
+// top-level FROM clause, or -1 when a bare `*` can't be safely expanded (nested
+// SELECT / no FROM). The "Expand *" command compares it against the resolved-ref
+// count to avoid writing an incomplete column list.
+func (s *Service) FromSourceCount(sql string) int {
+	return FromSourceCount(sql)
+}
+
 // GetActiveFunctionCall parses the SQL prefix (text from document start to
 // cursor) and returns the innermost open function call with its active parameter
 // index.  Returns nil when the cursor is not inside a named function call.

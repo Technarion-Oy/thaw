@@ -12,6 +12,8 @@ export function ComputeGitLineDiff(arg1:Array<string>,arg2:Array<string>,arg3:nu
 
 export function ComputeJoinOnConditions(arg1:sqleditor.JoinOnSuggestionsReq):Promise<Array<sqleditor.JoinCondition>>;
 
+export function FromSourceCount(arg1:string):Promise<number>;
+
 export function GetActiveFunctionCall(arg1:string):Promise<sqleditor.FunctionCallContext>;
 
 export function GetAutocompleteContextFull(arg1:sqleditor.AutocompleteContextRequest):Promise<sqleditor.AutocompleteContext>;
@@ -27,6 +29,8 @@ export function ParseJoinTableRefs(arg1:string):Promise<Array<sqleditor.JoinTabl
 export function ParseSignatureParams(arg1:string):Promise<Array<sqleditor.SignatureParam>>;
 
 export function ResolveTableRefs(arg1:Array<sqleditor.JoinTableRef>,arg2:Array<sqleditor.StoreObject>,arg3:sqleditor.UseContext,arg4:sqleditor.SessionContext):Promise<Array<sqleditor.ResolvedRef>>;
+
+export function StarSelectAt(arg1:string,arg2:number,arg3:number):Promise<sqleditor.StarSelect>;
 
 export function ValidateAntiPatterns(arg1:string,arg2:Array<sqleditor.StatementRange>):Promise<Array<sqleditor.DiagMarker>>;
 

@@ -35,11 +35,11 @@ import { patchMonacoClipboard } from "../../utils/monacoClipboard";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, GitGetHeadFileContent } from "../../../wailsjs/go/app/App";
 import { SNOWFLAKE_DATA_TYPES } from "../../generated/snowflakeDataTypes";
-import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateDataTypes, ValidateGrammar, ValidateAntiPatterns, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContextFull, ResolveTableRefs, ComputeGitLineDiff } from "../../../wailsjs/go/sqleditor/Service";
+import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateDataTypes, ValidateGrammar, ValidateAntiPatterns, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContextFull, ResolveTableRefs, ComputeGitLineDiff, StarSelectAt, FromSourceCount } from "../../../wailsjs/go/sqleditor/Service";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { FUNCTION_CATEGORIES } from "./snowflakeSql";
 import { getOrCreateMenuId } from "./monacoMenu";
-import { UC, quoteIfNecessary, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt } from "./sqlEditorUtils";
+import { UC, quoteIfNecessary, colCacheKey, normId, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt, starMenuEligible } from "./sqlEditorUtils";
 import ExplainModal from "../results/ExplainModal";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 import { kindSupportsDdl } from "../../utils/objectDdl";
@@ -251,55 +251,59 @@ function ensureKeywordsLoaded(): Promise<void> {
 // quoteIfNecessary is imported from sqlEditorUtils.ts — local wrapper for convenience.
 const quoteIfNec = (name: string) => quoteIfNecessary(name, snowflakeKeywords);
 
+// ── Per-table fetch cache ─────────────────────────────────────────────────────
+// Shared shape for getColumns/getColInfos: return the cached value, else the
+// in-flight fetch (so a concurrent caller awaits the same round-trip instead of
+// getting [] and silently dropping results), else start one. The fetch result is
+// cached only if the cache generation hasn't rolled over mid-flight; a failure
+// caches [] so we don't hammer a broken table.
+async function cachedTableFetch<T>(
+  cache: Map<string, T[]>,
+  inflight: Map<string, Promise<T[]>>,
+  db: string, schema: string, table: string,
+  fetchFn: () => Promise<T[]>,
+): Promise<T[]> {
+  const key = colCacheKey(db, schema, table);
+  if (cache.has(key)) return cache.get(key)!;
+  const cur = inflight.get(key);
+  if (cur) return cur;
+  const gen = currentCacheGeneration();
+  const p = (async () => {
+    try {
+      const v = await fetchFn();
+      if (gen === currentCacheGeneration()) cache.set(key, v);
+      return v;
+    } catch {
+      if (gen === currentCacheGeneration()) cache.set(key, []);
+      return [];
+    } finally {
+      inflight.delete(key);
+    }
+  })();
+  inflight.set(key, p);
+  return p;
+}
+
 // ── Column-level completion cache ─────────────────────────────────────────────
 const columnCache  = new Map<string, string[]>();
-const fetchingCols = new Set<string>();
+const fetchingCols = new Map<string, Promise<string[]>>();
 
-async function getColumns(db: string, schema: string, table: string): Promise<string[]> {
-  const key = `${db.toUpperCase()}\0${schema.toUpperCase()}\0${table.toUpperCase()}`;
-  if (columnCache.has(key)) return columnCache.get(key)!;
-  if (fetchingCols.has(key)) return [];
-  fetchingCols.add(key);
-  const gen = currentCacheGeneration();
-  try {
-    const cols = await GetTableColumns(db, schema, table);
-    if (gen === currentCacheGeneration()) columnCache.set(key, cols ?? []);
-    return cols ?? [];
-  } catch {
-    if (gen === currentCacheGeneration()) columnCache.set(key, []);
-    return [];
-  } finally {
-    fetchingCols.delete(key);
-  }
-}
+const getColumns = (db: string, schema: string, table: string): Promise<string[]> =>
+  cachedTableFetch(columnCache, fetchingCols, db, schema, table,
+    async () => (await GetTableColumns(db, schema, table)) ?? []);
 
 // FK cache for JOIN ON autocomplete — imported from sqlEditorUtils.ts
 
 // ── ColInfo cache for type-compatible JOIN ON suggestions ─────────────────────
 const colInfoCache   = new Map<string, ColInfo[]>();
-const fetchingColInfos = new Set<string>();
+const fetchingColInfos = new Map<string, Promise<ColInfo[]>>();
 
-async function getColInfos(db: string, schema: string, table: string): Promise<ColInfo[]> {
-  const key = `${db.toUpperCase()}\0${schema.toUpperCase()}\0${table.toUpperCase()}`;
-  if (colInfoCache.has(key)) return colInfoCache.get(key)!;
-  if (fetchingColInfos.has(key)) return [];
-  fetchingColInfos.add(key);
-  const gen = currentCacheGeneration();
-  try {
+const getColInfos = (db: string, schema: string, table: string): Promise<ColInfo[]> =>
+  cachedTableFetch(colInfoCache, fetchingColInfos, db, schema, table, async () => {
     const cols = await GetTableColumnsWithTypes(db, schema, table);
-    const entries: ColInfo[] = (cols ?? []).map((c: any) => ({
-      name:     c.name     ?? "",
-      dataType: c.dataType ?? "",
-    }));
-    if (gen === currentCacheGeneration()) colInfoCache.set(key, entries);
-    return entries;
-  } catch {
-    if (gen === currentCacheGeneration()) colInfoCache.set(key, []);
-    return [];
-  } finally {
-    fetchingColInfos.delete(key);
-  }
-}
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (cols ?? []).map((c: any) => ({ name: c.name ?? "", dataType: c.dataType ?? "" }));
+  });
 
 // ── Schema-level FK warm-up ────────────────────────────────────────────────────
 const fetchedFKSchemas = new Set<string>(); 
@@ -576,6 +580,147 @@ let _explainMenuRegistered = false;
   });
 })();
 
+// Returns the text of the statement containing the 1-based `line`, or the full
+// SQL when statement ranges can't be computed or none matches. Shared by the
+// "Explain SQL" and "Expand *" handlers.
+async function statementTextAtLine(fullSql: string, line: number): Promise<string> {
+  try {
+    const ranges = await GetSqlStatementRanges(fullSql);
+    for (const r of ranges || []) {
+      if (line >= r.startLine && line <= r.endLine) {
+        return fullSql.split("\n").slice(r.startLine - 1, r.endLine).join("\n");
+      }
+    }
+  } catch { /* fall through to full SQL */ }
+  return fullSql;
+}
+
+// ── "Expand *" context menu item ─────────────────────────────────────────────
+// Replace a select-list `*` (or `alias.*`) under the cursor with the resolved
+// column list. Whether the token is really a wildcard is decided by the backend
+// tokenizer (Service.StarSelectAt) — a `*` inside a quoted identifier
+// ("a*b table") or a multiplication (`a * b`) is never misread. The menu is
+// merely gated on a cheap `starMenuEligible` check; the authoritative decision
+// runs in the command against `_starMenuPos` (the click point, or the cursor for
+// a keyboard-invoked menu — see the onContextMenu handler).
+
+// Where the context menu was invoked: the mouse click point for a right-click
+// (which, inside a selection, differs from the live cursor), or the cursor for a
+// keyboard-invoked menu. Set in onContextMenu; read by the command.
+let _starMenuPos: monacoLib.IPosition | null = null;
+
+let _expandWildcardRegistered = false;
+(() => {
+  if (_expandWildcardRegistered) return;
+  _expandWildcardRegistered = true;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (CommandsRegistry as any).registerCommand("thaw.expandWildcard", async () => {
+    const editor = _activeSnippetEditor;
+    if (!editor) return;
+    const model = editor.getModel();
+    const position = _starMenuPos ?? editor.getPosition();
+    if (!model || !position) return;
+
+    // Bail if the document changes under us across the awaited round-trips below
+    // (StarSelectAt → statement scope → ref resolution → column fetch), so we
+    // never apply the originally-captured range at a shifted offset. Same guard
+    // as runDiagnostics.
+    const startVersion = model.getVersionId();
+    const stale = () => model.getVersionId() !== startVersion;
+
+    const fullSql = model.getValue();
+    // Authoritative, tokenizer-based detection of the wildcard + its span/alias.
+    const star = await StarSelectAt(fullSql, position.lineNumber, position.column);
+    if (!star || stale()) return;
+    const range = {
+      startLineNumber: star.startLine, startColumn: star.startCol,
+      endLineNumber: star.endLine, endColumn: star.endCol,
+    };
+
+    // Scope to the statement the star sits in.
+    const stmtSql = await statementTextAtLine(fullSql, star.startLine);
+    if (stale()) return;
+
+    // A bare `*` also needs the top-level FROM source count (below); it depends
+    // only on stmtSql, so kick it off now to run concurrently with ref resolution.
+    const sourceCountP = star.alias ? null : FromSourceCount(stmtSql);
+
+    // Resolve the FROM/JOIN table refs (same calls the JOIN completion +
+    // drag-drop paths use).
+    let refs: ResolvedRef[];
+    try {
+      const rawRefs = await ParseJoinTableRefs(stmtSql);
+      refs = await ResolveTableRefs(
+        (rawRefs || []) as any[], // eslint-disable-line @typescript-eslint/no-explicit-any
+        useObjectStore.getState().objects.map((o) => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+        { database: "", schema: "" } as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+        { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema } as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+      );
+    } catch { return; }
+    if (!refs || refs.length === 0 || stale()) return;
+
+    // `alias.*` → just that ref, keep the alias prefix.
+    // bare `*` → all refs; qualify each column only when there's more than one table.
+    let targets: ResolvedRef[];
+    let qualify: boolean;
+    if (star.alias) {
+      // ResolvedRef.alias defaults to the table name, so `r.alias` already covers
+      // the unaliased case — no `|| r.name === a` fallback needed (that would only
+      // match a table by its bare name while it's aliased to something else, which
+      // is invalid SQL anyway).
+      const a = normId(star.alias);
+      const match = refs.find((r) => (r.alias || r.name) === a);
+      if (!match) return;
+      targets = [match];
+      qualify = true;
+    } else {
+      // A bare `*` must cover every FROM source. ParseJoinTables isn't depth-aware
+      // (it pulls tables out of subqueries/CTEs and drops old-style comma joins),
+      // so only expand when the backend's top-level source count matches the
+      // resolved refs exactly — otherwise refuse rather than write a wrong list.
+      const sourceCount = await sourceCountP!;
+      if (stale() || sourceCount < 0 || sourceCount !== refs.length) return;
+      targets = refs;
+      qualify = refs.length > 1;
+    }
+
+    // Fetch each distinct table once, concurrently, through the shared column
+    // cache. Dedup by table key so a self-join (FROM T a JOIN T b) fetches T once
+    // and both aliases read from the same colsByKey entry below.
+    const uniq = [...new Map(targets.map((t) => [colCacheKey(t.db, t.schema, t.name), t])).values()];
+    const fetched = await Promise.all(uniq.map((t) => getColumns(t.db, t.schema, t.name)));
+    if (stale()) return;
+    const colsByKey = new Map(uniq.map((t, i) => [colCacheKey(t.db, t.schema, t.name), fetched[i]]));
+    // A cold cache / failed fetch yields []; no-op rather than leave a half-expanded list.
+    if ([...colsByKey.values()].some((c) => !c || c.length === 0)) return;
+
+    const parts: string[] = [];
+    for (const t of targets) {
+      // `alias.*` → star.alias is the raw source text (already valid as written).
+      // bare `*` → prefix is a normID'd alias/name, so re-quote if needed.
+      const prefix = star.alias || quoteIfNec(t.alias || t.name);
+      for (const c of colsByKey.get(colCacheKey(t.db, t.schema, t.name))!) parts.push(qualify ? `${prefix}.${quoteIfNec(c)}` : quoteIfNec(c));
+    }
+    if (parts.length === 0) return;
+
+    editor.executeEdits("thaw.expandWildcard", [{ range, text: parts.join(", "), forceMoveMarkers: true }]);
+    editor.pushUndoStop();
+    editor.focus();
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (MenuRegistry as any).appendMenuItem((MenuId as any).EditorContext, {
+    command: { id: "thaw.expandWildcard", title: "Expand *" },
+    group: "2_thaw_expand",
+    order: 0,
+    when: ContextKeyExpr.and(
+      ContextKeyExpr.equals("editorLangId", "sql"),
+      ContextKeyExpr.has("thawStarUnderCursor"),
+    ),
+  });
+})();
+
 export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {}) {
   const activeSql       = useQueryStore((s) => s.sql);
   const activeSqlSetter = useQueryStore((s) => s.setSql);
@@ -713,20 +858,9 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         return;
       }
 
-      // Priority 2: resolve the statement the cursor sits inside.
-      try {
-        const ranges = await GetSqlStatementRanges(fullSql);
-        for (const r of (ranges || [])) {
-          if (cursorLine >= r.startLine && cursorLine <= r.endLine) {
-            const lines = fullSql.split("\n").slice(r.startLine - 1, r.endLine);
-            const stmt = lines.join("\n").trim();
-            if (stmt) { setExplainSql(stmt); return; }
-          }
-        }
-      } catch { /* fall through */ }
-
-      // Fallback: full editor content.
-      if (fullSql.trim()) setExplainSql(fullSql.trim());
+      // Priority 2: the statement the cursor sits inside (falls back to full SQL).
+      const stmt = (await statementTextAtLine(fullSql, cursorLine)).trim();
+      if (stmt) setExplainSql(stmt);
     };
 
     window.addEventListener("thaw:explain-sql", handleExplain);
@@ -2365,7 +2499,32 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       () => window.dispatchEvent(new CustomEvent("save-file"))
     );
 
-    editor.onContextMenu(() => { _activeSnippetEditor = editor; });
+    // Cheap synchronous display gate for the "Expand *" menu item (starMenuEligible:
+    // cursor on a literal, unquoted `*`). It has to be set *before* the menu renders,
+    // so it's driven off the events that fire ahead of the context-menu event, not
+    // off onContextMenu (whose listener may run after Monaco has already shown the
+    // menu): onDidChangeCursorPosition covers keyboard navigation and clicks that
+    // move the cursor, and the right-mouse onMouseDown covers a right-click *inside a
+    // selection* (where Monaco leaves the cursor put, so e.target.position — the
+    // click point — is the only source of truth). The authoritative wildcard decision
+    // (alias / multiplication / range) runs in the command via Service.StarSelectAt.
+    const starCtxKey = editor.createContextKey<boolean>("thawStarUnderCursor", false);
+    const updateStarGate = (pos: monacoLib.IPosition | null | undefined) => {
+      const model = editor.getModel();
+      const line = model && pos ? model.getLineContent(pos.lineNumber) : "";
+      starCtxKey.set(!!pos && starMenuEligible(line, pos.column));
+    };
+    editor.onDidChangeCursorPosition((e) => updateStarGate(e.position));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    editor.onMouseDown((e: any) => { if (e.event?.rightButton) updateStarGate(e.target?.position); });
+    editor.onContextMenu((e) => {
+      _activeSnippetEditor = editor;
+      // The command reads this: the click point for a right-click (differs from the
+      // live cursor inside a selection), or the cursor for a keyboard-invoked menu
+      // (where e.target.position is null).
+      _starMenuPos = e.target.position ?? editor.getPosition();
+      updateStarGate(_starMenuPos);
+    });
     editor.onDidDispose(() => {
       if (_activeSnippetEditor === editor) _activeSnippetEditor = null;
     });
