@@ -13,8 +13,8 @@ git gutter decorations, the tab bar, editor preferences, and the cross-tab searc
 | File | Purpose |
 |------|---------|
 | `SqlEditor.tsx` | Main editor component. Mounts Monaco, registers all completion/hover/code-action/signature providers (module-level, not in render), runs `runDiagnostics` on content change, handles git gutter decoration, clipboard patching, and the snippet context menu via internal Monaco `MenuRegistry`. Exports `DiagMarker`, `ColInfo`, `ResolvedRef`, `pendingMcpMarkers`. |
-| `sqlEditorUtils.ts` | Pure helpers: `UC`, `quoteIfNecessary`, `FKEntry`, `getFKs` (async, deduped), `getFKsCached`, `setFKCache`, `buildVariableSuggestions`, `getQualifiedIdent`, `getStatementLineRanges`, `identifierRangeAt` (quote-aware column span of the dotted identifier under the cursor, for the cmd/ctrl-hover link underline). No React. |
-| `sqlEditorUtils.test.ts` | Unit tests for `identifierRangeAt` (bare/quoted/escaped-quote/unterminated-quote spans). |
+| `sqlEditorUtils.ts` | Pure helpers: `UC`, `quoteIfNecessary`, `FKEntry`, `getFKs` (async, deduped), `getFKsCached`, `setFKCache`, `buildVariableSuggestions`, `getQualifiedIdent`, `getStatementLineRanges`, `identifierRangeAt` (quote-aware column span of the dotted identifier under the cursor, for the cmd/ctrl-hover link underline), `starMenuEligible` (reuses `identifierRangeAt` to gate the "Expand \*" menu — hides it when the `*` is inside a quoted object name). No React. |
+| `sqlEditorUtils.test.ts` | Unit tests for `identifierRangeAt` (bare/quoted/escaped-quote/unterminated-quote spans) and `starMenuEligible` (bare/`alias.*` eligible, quoted-object-name hidden). |
 | `editorRef.ts` | Singleton ref to the active `IStandaloneCodeEditor`. Exports `setEditorInstance`, `getEditorInstance`, `insertAtCursor`. Kept separate from `SqlEditor.tsx` so Vite Fast Refresh is not broken by mixing component and non-component exports. |
 | `monacoSetup.ts` | One-time Monaco initialisation: Snowflake Monarch language, Python Monarch grammar (inlined to avoid side-effect imports), YAML worker wiring, `thawDarkTheme`/`thawLightTheme` registration. Called via `ensureMonacoSetup()` guard. Imports the **slim** Monaco API (`editor.api.js` + `editor.all.js`), never the `monaco-editor` barrel, to keep the TS/HTML/CSS/JSON language workers (~9 MB) and ~80 basic-language grammars out of the binary — see [gotchas](../../../../docs/concepts/gotchas.md). |
 | `snowflakeSql.ts` | Snowflake Monarch tokenizer (`snowflakeMonarchLanguage`) and custom Monaco theme definitions (`thawDarkTheme`, `thawLightTheme`). The tokenizer's `datatypes` list is sourced from the generated artifact `src/generated/snowflakeDataTypes.ts` (source of truth: `internal/snowflake/datatypes.go`) rather than hand-maintained. Also the single source for the built-in-function catalogue: `BUILTIN_FUNCTION_CATEGORIES`, `CONTEXT_FUNCTIONS`, and the assembled `FUNCTION_CATEGORIES` consumed by the Code Snippets modal and the editor's Built-in Functions submenu. |
@@ -111,13 +111,16 @@ select-list wildcard with its column list. Detection is **backend/tokenizer-base
 `Service.StarSelectAt(sql, line, col)` (`internal/sqleditor`, over `sqltok`), which returns the
 wildcard's span + any `alias.` qualifier or nil — a `*` inside a quoted identifier (`"a*b"`) or a
 multiplication (`a * b`) is never misread, and quoted aliases (`"my table".*`) are captured whole.
-The context key is only a cheap display gate — `starMenuEligible` sets it when the cursor sits on a
-literal `*` that is **not** inside a quoted identifier/string (a `*` in an object name is always
-quoted, e.g. `"a*b"`, so the item stays hidden there). It's driven by `onDidChangeCursorPosition`
-(not `onContextMenu`): the right-click cursor jump fires the cursor-change *before* the menu renders,
-so the key is correct regardless of listener order — the async tokenizer call can't fill a context
-key in time, so the authoritative decision (alias / multiplication / range) runs in the command and
-no-ops if the token isn't really a wildcard. The
+The context key is only a cheap display gate — `starMenuEligible` (in `sqlEditorUtils.ts`) sets it
+when the cursor sits on a literal `*` that is **not** part of an object name. It reuses
+`identifierRangeAt` (the same span logic behind the DDL-hover underline) rather than a bespoke
+parser: a `*` in an object name lives inside a quoted identifier (`"Testin*table"`), which
+`identifierRangeAt` returns a range *containing* the star for, whereas a bare `*` gets no range and an
+`alias.*` star falls just past the `alias.` range — so both stay eligible. It's driven by
+`onDidChangeCursorPosition` (not `onContextMenu`): the right-click cursor jump fires the cursor-change
+*before* the menu renders, so the key is correct regardless of listener order — the async tokenizer
+call can't fill a context key in time, so the authoritative decision (alias / multiplication / range)
+runs in the command and no-ops if the token isn't really a wildcard. The
 command scopes to the statement under the cursor (`GetSqlStatementRanges`), resolves its `FROM`/`JOIN`
 refs (`ParseJoinTableRefs` + `ResolveTableRefs`, same as the JOIN/drag-drop paths), fetches columns
 via the shared cached `getColumns()` wrapper (all target tables concurrently, `Promise.all`), quotes

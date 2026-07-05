@@ -45,6 +45,26 @@ export function identifierRangeAt(line: string, idx0: number): { start: number; 
   return { start: s + 1, end: e + 2 };   // Monaco endColumn is exclusive (points after last char)
 }
 
+// ── starMenuEligible ──────────────────────────────────────────────────────────
+// Display gate for the editor's "Expand *" context-menu item: true when the
+// cursor sits on a literal `*` that is NOT part of an object name. A `*` in an
+// object name is always inside a quoted identifier ("Testin*table") — reuse
+// identifierRangeAt (the DDL-hover span logic) instead of a bespoke parser to
+// tell them apart: it returns a range that *contains* the star only in that
+// case. A genuine `alias.*` star falls just past the `alias.` range (identifier
+// chars never include `*`), and a bare `*` gets no range at all — both eligible.
+// Cheap + synchronous so it can fill the Monaco context key before the menu
+// renders; the command still re-checks the token authoritatively (backend).
+export function starMenuEligible(line: string, column: number): boolean {
+  let idx = -1;
+  if (line[column - 1] === "*") idx = column - 1;
+  else if (line[column - 2] === "*") idx = column - 2; // cursor on the star's right edge
+  if (idx < 0) return false;
+  const r = identifierRangeAt(line, idx);
+  const col = idx + 1; // 1-based Monaco column of the star
+  return !(r !== null && col >= r.start && col < r.end);
+}
+
 // ── quoteIfNecessary ─────────────────────────────────────────────────────────
 // Quotes a Snowflake identifier if it contains characters that require quoting
 // or conflicts with a reserved keyword. Accepts the keyword set as a parameter.

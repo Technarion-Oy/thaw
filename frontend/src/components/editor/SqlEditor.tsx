@@ -39,7 +39,7 @@ import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeS
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { FUNCTION_CATEGORIES } from "./snowflakeSql";
 import { getOrCreateMenuId } from "./monacoMenu";
-import { UC, quoteIfNecessary, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt } from "./sqlEditorUtils";
+import { UC, quoteIfNecessary, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt, starMenuEligible } from "./sqlEditorUtils";
 import ExplainModal from "../results/ExplainModal";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 import { kindSupportsDdl } from "../../utils/objectDdl";
@@ -584,28 +584,6 @@ let _explainMenuRegistered = false;
 // merely gated on a cheap "cursor is on a literal `*`" check (set on
 // context-menu open, since the tokenizer call is async and can't fill a context
 // key before the menu renders); the authoritative decision runs in the command.
-
-// Display gate for the "Expand *" menu item: true when the cursor sits on a
-// literal `*` that is NOT inside a quoted identifier / string literal on this
-// line. A `*` that is part of an object name is always quoted ("a*b"), so this
-// keeps the item hidden there. Cheap + synchronous so it can fill the Monaco
-// context key before the menu renders; the command still re-checks the token
-// authoritatively via the backend tokenizer.
-function starMenuEligible(line: string, column: number): boolean {
-  let idx = -1;
-  if (line[column - 1] === "*") idx = column - 1;
-  else if (line[column - 2] === "*") idx = column - 2; // cursor on the star's right edge
-  if (idx < 0) return false;
-  let inDouble = false, inSingle = false;
-  for (let i = 0; i < idx; i++) {
-    const ch = line[i];
-    if (inDouble) { if (ch === '"') inDouble = false; }
-    else if (inSingle) { if (ch === "'") inSingle = false; }
-    else if (ch === '"') inDouble = true;
-    else if (ch === "'") inSingle = true;
-  }
-  return !inDouble && !inSingle;
-}
 
 let _expandWildcardRegistered = false;
 (() => {

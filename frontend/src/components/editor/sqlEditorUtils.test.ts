@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { identifierRangeAt } from "./sqlEditorUtils";
+import { identifierRangeAt, starMenuEligible } from "./sqlEditorUtils";
 
 // identifierRangeAt(line, idx0) → 1-based Monaco {start, end} (end exclusive) of the
 // dotted identifier at 0-based char index idx0, quote-aware. Substring is
@@ -51,5 +51,34 @@ describe("identifierRangeAt", () => {
     expect(identifierRangeAt(line, line.length - 1)).toBeNull(); // inside the open quote
     // A bare segment before the open quote still resolves on its own.
     expect(span(line, 14)).toBe("DB.SCHEMA."); // trailing dot is bare; open quote excluded
+  });
+});
+
+describe("starMenuEligible", () => {
+  // column = 1-based Monaco cursor column of the first `*` in the line.
+  const atStar = (line: string) => starMenuEligible(line, line.indexOf("*") + 1);
+
+  it("shows for a bare select-list star", () => {
+    expect(atStar("SELECT * FROM t")).toBe(true);
+    expect(atStar("SELECT a, * FROM t")).toBe(true);
+  });
+
+  it("shows for alias.* — the star is not inside the alias identifier", () => {
+    expect(atStar("SELECT t.* FROM tbl t")).toBe(true);
+  });
+
+  it("hides when the star is inside a quoted object name", () => {
+    expect(atStar(`SELECT "ID" FROM "DB"."PUBLIC"."Testin*table"`)).toBe(false);
+  });
+
+  it("is false when the cursor isn't on a star", () => {
+    expect(starMenuEligible("SELECT a FROM t", 8)).toBe(false);
+  });
+
+  it("resolves on either edge of the star", () => {
+    const line = "SELECT * FROM t";
+    const starCol = line.indexOf("*") + 1;
+    expect(starMenuEligible(line, starCol)).toBe(true);     // on the star
+    expect(starMenuEligible(line, starCol + 1)).toBe(true); // right edge
   });
 });
