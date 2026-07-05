@@ -10,7 +10,11 @@
 
 package sqleditor
 
-import "thaw/internal/sqltok"
+import (
+	"strings"
+
+	"thaw/internal/sqltok"
+)
 
 // StarSelect describes a select-list wildcard (`*` or `alias.*`) located at a
 // cursor position. Positions are 1-based Monaco line/column coordinates; the
@@ -33,12 +37,18 @@ type StarSelect struct {
 // QuotedIdent token, never an Operator, so it is never mistaken for a wildcard;
 // and a quoted qualifier ("my table".*) is captured whole regardless of spaces.
 //
-// A `*` is a wildcard only when it is not an arithmetic multiplication and not a
-// function argument. The kind of the preceding significant token decides:
-//   - Dot            → `alias.*` (the ident-like token before the dot is the alias)
-//   - LParen         → function argument, e.g. COUNT(*) — skip
-//   - an operand     → multiplication, e.g. `a * b` / `(x) * y` / `2 * n` — skip
-//   - anything else  → bare wildcard (preceded by SELECT/DISTINCT/comma/…)
+// A `*` is a wildcard only when it introduces a select item, not when it is an
+// arithmetic multiplication or a function argument. The preceding significant
+// token decides:
+//   - Dot                        → `alias.*` (ident-like token before the dot is the alias)
+//   - a select-item introducer   → bare wildcard (SELECT / DISTINCT / ALL / `,`, or nothing)
+//   - anything else              → not a wildcard: multiplication (`a * b`, `2 * n`,
+//                                  `… END * 100`) or a function argument (COUNT(*)) — skip
+//
+// The introducer test is a whitelist, not a blacklist: a blacklist of "operand"
+// token kinds can't tell SELECT/DISTINCT/ALL (which are keywords that legitimately
+// precede a wildcard) apart from END/NULL/… (keywords that are the left operand of
+// a multiplication), since both are sqltok.Keyword.
 func StarSelectAt(sql string, line, col int) *StarSelect {
 	sig := sqltok.Significant(sqltok.Tokenize(sql))
 	for i, t := range sig {
@@ -67,27 +77,30 @@ func StarSelectAt(sql string, line, col int) *StarSelect {
 				EndLine: t.Line, EndCol: t.Col + 1,
 				Alias: alias.Text(sql),
 			}
-		case i > 0 && (prev.Kind == sqltok.LParen || isStarOperand(prev.Kind)):
-			// Function argument (COUNT(*)) or multiplication — not a wildcard.
-			return nil
-		default:
+		case i == 0 || introducesSelectItem(prev, sql):
 			return &StarSelect{
 				StartLine: t.Line, StartCol: t.Col,
 				EndLine: t.Line, EndCol: t.Col + 1,
 			}
+		default:
+			return nil
 		}
 	}
 	return nil
 }
 
-// isStarOperand reports whether a token of this kind can be the left operand of a
-// `*` multiplication. A wildcard `*` never follows one of these.
-func isStarOperand(k sqltok.TokenKind) bool {
-	switch k {
-	case sqltok.Identifier, sqltok.QuotedIdent, sqltok.NumberLit,
-		sqltok.StringLit, sqltok.RParen, sqltok.RBracket:
+// introducesSelectItem reports whether a select-list item (and thus a bare `*`)
+// can legitimately follow this token: a comma, or one of the quantifier keywords
+// that open a SELECT list.
+func introducesSelectItem(tok sqltok.Token, src string) bool {
+	switch tok.Kind {
+	case sqltok.Comma:
 		return true
-	default:
-		return false
+	case sqltok.Keyword:
+		switch strings.ToUpper(tok.Text(src)) {
+		case "SELECT", "DISTINCT", "ALL":
+			return true
+		}
 	}
+	return false
 }

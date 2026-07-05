@@ -39,7 +39,7 @@ import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeS
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { FUNCTION_CATEGORIES } from "./snowflakeSql";
 import { getOrCreateMenuId } from "./monacoMenu";
-import { UC, quoteIfNecessary, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt, starMenuEligible } from "./sqlEditorUtils";
+import { UC, quoteIfNecessary, colCacheKey, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt, starMenuEligible } from "./sqlEditorUtils";
 import ExplainModal from "../results/ExplainModal";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 import { kindSupportsDdl } from "../../utils/objectDdl";
@@ -256,7 +256,7 @@ const columnCache  = new Map<string, string[]>();
 const fetchingCols = new Set<string>();
 
 async function getColumns(db: string, schema: string, table: string): Promise<string[]> {
-  const key = `${db.toUpperCase()}\0${schema.toUpperCase()}\0${table.toUpperCase()}`;
+  const key = colCacheKey(db, schema, table);
   if (columnCache.has(key)) return columnCache.get(key)!;
   if (fetchingCols.has(key)) return [];
   fetchingCols.add(key);
@@ -280,7 +280,7 @@ const colInfoCache   = new Map<string, ColInfo[]>();
 const fetchingColInfos = new Set<string>();
 
 async function getColInfos(db: string, schema: string, table: string): Promise<ColInfo[]> {
-  const key = `${db.toUpperCase()}\0${schema.toUpperCase()}\0${table.toUpperCase()}`;
+  const key = colCacheKey(db, schema, table);
   if (colInfoCache.has(key)) return colInfoCache.get(key)!;
   if (fetchingColInfos.has(key)) return [];
   fetchingColInfos.add(key);
@@ -576,14 +576,44 @@ let _explainMenuRegistered = false;
   });
 })();
 
+// Returns the text of the statement containing the 1-based `line`, or the full
+// SQL when statement ranges can't be computed or none matches. Shared by the
+// "Explain SQL" and "Expand *" handlers.
+async function statementTextAtLine(fullSql: string, line: number): Promise<string> {
+  try {
+    const ranges = await GetSqlStatementRanges(fullSql);
+    for (const r of ranges || []) {
+      if (line >= r.startLine && line <= r.endLine) {
+        return fullSql.split("\n").slice(r.startLine - 1, r.endLine).join("\n");
+      }
+    }
+  } catch { /* fall through to full SQL */ }
+  return fullSql;
+}
+
 // ── "Expand *" context menu item ─────────────────────────────────────────────
 // Replace a select-list `*` (or `alias.*`) under the cursor with the resolved
 // column list. Whether the token is really a wildcard is decided by the backend
 // tokenizer (Service.StarSelectAt) — a `*` inside a quoted identifier
 // ("a*b table") or a multiplication (`a * b`) is never misread. The menu is
-// merely gated on a cheap "cursor is on a literal `*`" check (set on
-// context-menu open, since the tokenizer call is async and can't fill a context
-// key before the menu renders); the authoritative decision runs in the command.
+// merely gated on a cheap `starMenuEligible` check; the authoritative decision
+// runs in the command against `_starMenuPos` (the click point, or the cursor for
+// a keyboard-invoked menu — see the onContextMenu handler).
+
+// Where the context menu was invoked: the mouse click point for a right-click
+// (which, inside a selection, differs from the live cursor), or the cursor for a
+// keyboard-invoked menu. Set in onContextMenu; read by the command.
+let _starMenuPos: monacoLib.IPosition | null = null;
+
+// Normalise a captured `alias.` the way the backend's normID does, so it matches
+// resolved refs (whose db/schema/name are already normID'd): a quoted "..." has
+// its surrounding quotes stripped and doubled "" unescaped; a bare id is as-is.
+// (Case folding is left to the caller.)
+function unquoteId(s: string): string {
+  return s.startsWith('"') && s.endsWith('"') && s.length >= 2
+    ? s.slice(1, -1).replace(/""/g, '"')
+    : s;
+}
 
 let _expandWildcardRegistered = false;
 (() => {
@@ -595,29 +625,28 @@ let _expandWildcardRegistered = false;
     const editor = _activeSnippetEditor;
     if (!editor) return;
     const model = editor.getModel();
-    const position = editor.getPosition();
+    const position = _starMenuPos ?? editor.getPosition();
     if (!model || !position) return;
+
+    // Bail if the document changes under us across the awaited round-trips below
+    // (StarSelectAt → statement scope → ref resolution → column fetch), so we
+    // never apply the originally-captured range at a shifted offset. Same guard
+    // as runDiagnostics.
+    const startVersion = model.getVersionId();
+    const stale = () => model.getVersionId() !== startVersion;
 
     const fullSql = model.getValue();
     // Authoritative, tokenizer-based detection of the wildcard + its span/alias.
     const star = await StarSelectAt(fullSql, position.lineNumber, position.column);
-    if (!star) return;
+    if (!star || stale()) return;
     const range = {
       startLineNumber: star.startLine, startColumn: star.startCol,
       endLineNumber: star.endLine, endColumn: star.endCol,
     };
 
     // Scope to the statement the star sits in.
-    let stmtSql = fullSql;
-    try {
-      const ranges = await GetSqlStatementRanges(fullSql);
-      for (const r of ranges || []) {
-        if (star.startLine >= r.startLine && star.startLine <= r.endLine) {
-          stmtSql = fullSql.split("\n").slice(r.startLine - 1, r.endLine).join("\n");
-          break;
-        }
-      }
-    } catch { /* fall back to full SQL */ }
+    const stmtSql = await statementTextAtLine(fullSql, star.startLine);
+    if (stale()) return;
 
     // Resolve the FROM/JOIN table refs (same calls the JOIN completion +
     // drag-drop paths use).
@@ -631,14 +660,14 @@ let _expandWildcardRegistered = false;
         { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema } as any, // eslint-disable-line @typescript-eslint/no-explicit-any
       );
     } catch { return; }
-    if (!refs || refs.length === 0) return;
+    if (!refs || refs.length === 0 || stale()) return;
 
     // `alias.*` → just that ref, keep the alias prefix.
     // bare `*` → all refs; qualify each column only when there's more than one table.
     let targets: ResolvedRef[];
     let qualify: boolean;
     if (star.alias) {
-      const a = star.alias.replace(/"/g, "").toLowerCase();
+      const a = unquoteId(star.alias).toLowerCase();
       const match = refs.find((r) => (r.alias || r.name).toLowerCase() === a || r.name.toLowerCase() === a);
       if (!match) return;
       targets = [match];
@@ -652,10 +681,10 @@ let _expandWildcardRegistered = false;
     // cache. Dedup by table key first — a self-join (FROM T a JOIN T b) would
     // otherwise fire two in-flight fetches for the same key and getColumns
     // returns [] for the second, tripping the half-edit guard below.
-    const tkey = (t: ResolvedRef) => `${t.db.toUpperCase()}\0${t.schema.toUpperCase()}\0${t.name.toUpperCase()}`;
-    const uniq = [...new Map(targets.map((t) => [tkey(t), t])).values()];
+    const uniq = [...new Map(targets.map((t) => [colCacheKey(t.db, t.schema, t.name), t])).values()];
     const fetched = await Promise.all(uniq.map((t) => getColumns(t.db, t.schema, t.name)));
-    const colsByKey = new Map(uniq.map((t, i) => [tkey(t), fetched[i]]));
+    if (stale()) return;
+    const colsByKey = new Map(uniq.map((t, i) => [colCacheKey(t.db, t.schema, t.name), fetched[i]]));
     // A cold cache / failed fetch yields []; no-op rather than leave a half-expanded list.
     if ([...colsByKey.values()].some((c) => !c || c.length === 0)) return;
 
@@ -663,7 +692,7 @@ let _expandWildcardRegistered = false;
     for (const t of targets) {
       // star.alias is "" (not null) for a bare `*`, so use || to fall through.
       const prefix = star.alias || t.alias || t.name;
-      for (const c of colsByKey.get(tkey(t))!) parts.push(qualify ? `${prefix}.${quoteIfNec(c)}` : quoteIfNec(c));
+      for (const c of colsByKey.get(colCacheKey(t.db, t.schema, t.name))!) parts.push(qualify ? `${prefix}.${quoteIfNec(c)}` : quoteIfNec(c));
     }
     if (parts.length === 0) return;
 
@@ -821,20 +850,9 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         return;
       }
 
-      // Priority 2: resolve the statement the cursor sits inside.
-      try {
-        const ranges = await GetSqlStatementRanges(fullSql);
-        for (const r of (ranges || [])) {
-          if (cursorLine >= r.startLine && cursorLine <= r.endLine) {
-            const lines = fullSql.split("\n").slice(r.startLine - 1, r.endLine);
-            const stmt = lines.join("\n").trim();
-            if (stmt) { setExplainSql(stmt); return; }
-          }
-        }
-      } catch { /* fall through */ }
-
-      // Fallback: full editor content.
-      if (fullSql.trim()) setExplainSql(fullSql.trim());
+      // Priority 2: the statement the cursor sits inside (falls back to full SQL).
+      const stmt = (await statementTextAtLine(fullSql, cursorLine)).trim();
+      if (stmt) setExplainSql(stmt);
     };
 
     window.addEventListener("thaw:explain-sql", handleExplain);
@@ -2474,11 +2492,14 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     );
 
     // Cheap synchronous display gate for the "Expand *" menu item (starMenuEligible:
-    // cursor on a literal, unquoted `*`). Driven by cursor moves — the right-click
-    // cursor jump fires onDidChangeCursorPosition *before* the menu renders, so the
-    // key is correct regardless of listener order. The authoritative wildcard
-    // decision (alias / multiplication / range) runs in the command via the backend
-    // tokenizer (Service.StarSelectAt).
+    // cursor on a literal, unquoted `*`). It has to be set *before* the menu renders,
+    // so it's driven off the events that fire ahead of the context-menu event, not
+    // off onContextMenu (whose listener may run after Monaco has already shown the
+    // menu): onDidChangeCursorPosition covers keyboard navigation and clicks that
+    // move the cursor, and the right-mouse onMouseDown covers a right-click *inside a
+    // selection* (where Monaco leaves the cursor put, so e.target.position — the
+    // click point — is the only source of truth). The authoritative wildcard decision
+    // (alias / multiplication / range) runs in the command via Service.StarSelectAt.
     const starCtxKey = editor.createContextKey<boolean>("thawStarUnderCursor", false);
     const updateStarGate = (pos: monacoLib.IPosition | null | undefined) => {
       const model = editor.getModel();
@@ -2486,9 +2507,15 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       starCtxKey.set(!!pos && starMenuEligible(line, pos.column));
     };
     editor.onDidChangeCursorPosition((e) => updateStarGate(e.position));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    editor.onMouseDown((e: any) => { if (e.event?.rightButton) updateStarGate(e.target?.position); });
     editor.onContextMenu((e) => {
       _activeSnippetEditor = editor;
-      updateStarGate(e.target.position ?? editor.getPosition());
+      // The command reads this: the click point for a right-click (differs from the
+      // live cursor inside a selection), or the cursor for a keyboard-invoked menu
+      // (where e.target.position is null).
+      _starMenuPos = e.target.position ?? editor.getPosition();
+      updateStarGate(_starMenuPos);
     });
     editor.onDidDispose(() => {
       if (_activeSnippetEditor === editor) _activeSnippetEditor = null;

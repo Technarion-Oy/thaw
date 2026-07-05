@@ -12,6 +12,13 @@ import { GetTableForeignKeys } from "../../../wailsjs/go/app/App";
 // ── UC helper ────────────────────────────────────────────────────────────────
 export const UC = (s: string) => s.toUpperCase();
 
+// ── colCacheKey ───────────────────────────────────────────────────────────────
+// Case-insensitive, NUL-delimited key for a fully-qualified table, shared by
+// every per-table cache (column list, column types, wildcard expansion) so the
+// format lives in exactly one place.
+export const colCacheKey = (db: string, schema: string, table: string) =>
+  `${db.toUpperCase()}\0${schema.toUpperCase()}\0${table.toUpperCase()}`;
+
 // ── identifierRangeAt ─────────────────────────────────────────────────────────
 // Column span (1-based Monaco columns) of the dotted identifier at a 0-based char
 // index, or null if that index isn't on an identifier. A double-quoted segment

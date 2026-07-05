@@ -21,12 +21,14 @@ func TestStarSelectAt(t *testing.T) {
 	}{
 		{"bare star", "SELECT * FROM t", true, ""},
 		{"distinct star", "SELECT DISTINCT * FROM t", true, ""},
+		{"all star", "SELECT ALL * FROM t", true, ""},
 		{"star after comma", "SELECT a, * FROM t", true, ""},
 		{"alias star", "SELECT t.* FROM tbl t", true, "t"},
 		{"quoted alias star", `SELECT "my table".* FROM x "my table"`, true, `"my table"`},
 		{"count star skipped", "SELECT COUNT(*) FROM t", false, ""},
 		{"multiplication skipped", "SELECT a * b FROM t", false, ""},
 		{"number multiplication skipped", "SELECT 2 * n FROM t", false, ""},
+		{"keyword operand multiplication skipped", "SELECT CASE WHEN a THEN 1 ELSE 0 END * 100 FROM t", false, ""},
 		{"star inside quoted table name", `SELECT "ID" FROM "DB"."PUBLIC"."Testin*table"`, false, ""},
 	}
 	for _, c := range cases {
