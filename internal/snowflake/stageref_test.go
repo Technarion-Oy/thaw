@@ -33,6 +33,13 @@ func TestValidateStageRef(t *testing.T) {
 		// A bare space lets a crafted name graft a second query in the SELECT sink.
 		`@DB.SCHEMA.REPO/readme.sql UNION SELECT password FROM users`,
 		"@DB.SCHEMA.REPO/foo\tbar.sql",
+		// A '.' in the path segment must not open a spurious quoted identifier that
+		// swallows the payload — quotes are only identifier delimiters in the prefix.
+		`@db.schema.stage/x."; DROP TABLE foo; --"y`,
+		`@"db"."schema"."stage"/data/x."; DROP TABLE t; --"y`,
+		// '..' traversal segments.
+		`@db.schema.stage/../../etc/passwd`,
+		`@db.schema.stage/foo/../../secrets.txt`,
 	}
 	for _, s := range injections {
 		if err := ValidateStageRef(s); err == nil {
