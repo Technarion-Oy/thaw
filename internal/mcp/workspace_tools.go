@@ -93,7 +93,7 @@ func registerWorkspaceTools(srv *mcpsdk.Server, workspaceRoot string) {
 		if in.Path == "" {
 			return nil, nil, fmt.Errorf("path is required")
 		}
-		if err := filesystem.ValidateInsideOrEqual(in.Path, workspaceRoot); err != nil {
+		if err := filesystem.ValidatePathOrAncestorInsideOrEqual(in.Path, workspaceRoot); err != nil {
 			return nil, nil, fmt.Errorf("access denied: %w", err)
 		}
 		content, err := gitrepo.GetHeadFileContent(in.Path)

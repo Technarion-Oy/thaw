@@ -300,12 +300,15 @@ func validateExistingPath(path, allowedRoot string) error {
 	return checkStrictlyInside(realPath, realRoot)
 }
 
-// validateNewPath checks that a path that doesn't exist yet is inside allowedRoot
-// by resolving symlinks on the nearest existing ancestor directory.
-func validateNewPath(path, allowedRoot string) error {
+// resolveViaAncestor resolves symlinks for a path that may or may not exist by
+// walking up to the nearest existing ancestor directory, resolving symlinks on
+// it, and reconstructing the full path. This lets callers validate paths that
+// don't exist on disk yet (new files) or no longer exist (files deleted from the
+// working tree but still present in a git commit).
+func resolveViaAncestor(path string) (string, error) {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
-		return fmt.Errorf("invalid path: %w", err)
+		return "", fmt.Errorf("invalid path: %w", err)
 	}
 	// Walk up to find the nearest existing ancestor and resolve symlinks on it.
 	ancestor := absPath
@@ -316,31 +319,57 @@ func validateNewPath(path, allowedRoot string) error {
 		parent := filepath.Dir(ancestor)
 		if parent == ancestor {
 			// Reached filesystem root without finding an existing ancestor.
-			return fmt.Errorf("no existing ancestor for path: %s", path)
+			return "", fmt.Errorf("no existing ancestor for path: %s", path)
 		}
 		ancestor = parent
 	}
 	realAncestor, err := filepath.EvalSymlinks(ancestor)
 	if err != nil {
-		return fmt.Errorf("invalid path: %w", err)
+		return "", fmt.Errorf("invalid path: %w", err)
 	}
 	// Reconstruct the full path with the resolved ancestor prefix.
 	remaining, err := filepath.Rel(ancestor, absPath)
 	if err != nil {
-		return fmt.Errorf("cannot compute relative path: %w", err)
+		return "", fmt.Errorf("cannot compute relative path: %w", err)
 	}
 	// Defense-in-depth: reject if remaining somehow escapes (should not happen
 	// since absPath is always deeper than ancestor, but guard explicitly).
 	if strings.HasPrefix(remaining, "..") {
-		return fmt.Errorf("path escapes ancestor: %s", path)
+		return "", fmt.Errorf("path escapes ancestor: %s", path)
 	}
-	realPath := filepath.Join(realAncestor, remaining)
+	return filepath.Join(realAncestor, remaining), nil
+}
 
+// validateNewPath checks that a path that doesn't exist yet is inside allowedRoot
+// by resolving symlinks on the nearest existing ancestor directory.
+func validateNewPath(path, allowedRoot string) error {
+	realPath, err := resolveViaAncestor(path)
+	if err != nil {
+		return err
+	}
 	realRoot, err := filepath.EvalSymlinks(allowedRoot)
 	if err != nil {
 		return fmt.Errorf("invalid root: %w", err)
 	}
 	return checkStrictlyInside(realPath, realRoot)
+}
+
+// ValidatePathOrAncestorInsideOrEqual checks that a path is inside or equal to
+// allowedRoot without requiring the path itself to exist. Unlike
+// ValidateInsideOrEqual, it resolves symlinks on the nearest existing ancestor,
+// so it accepts files that were deleted from the working tree but still exist in
+// a git commit. Used by git_get_head_file, which reads HEAD content for exactly
+// that case.
+func ValidatePathOrAncestorInsideOrEqual(path, allowedRoot string) error {
+	realPath, err := resolveViaAncestor(path)
+	if err != nil {
+		return err
+	}
+	realRoot, err := filepath.EvalSymlinks(allowedRoot)
+	if err != nil {
+		return fmt.Errorf("invalid root: %w", err)
+	}
+	return checkInsideOrEqual(realPath, realRoot)
 }
 
 // ValidateInsideOrEqual checks that an existing path is inside or equal to
