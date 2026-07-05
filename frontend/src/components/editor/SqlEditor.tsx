@@ -585,6 +585,28 @@ let _explainMenuRegistered = false;
 // context-menu open, since the tokenizer call is async and can't fill a context
 // key before the menu renders); the authoritative decision runs in the command.
 
+// Display gate for the "Expand *" menu item: true when the cursor sits on a
+// literal `*` that is NOT inside a quoted identifier / string literal on this
+// line. A `*` that is part of an object name is always quoted ("a*b"), so this
+// keeps the item hidden there. Cheap + synchronous so it can fill the Monaco
+// context key before the menu renders; the command still re-checks the token
+// authoritatively via the backend tokenizer.
+function starMenuEligible(line: string, column: number): boolean {
+  let idx = -1;
+  if (line[column - 1] === "*") idx = column - 1;
+  else if (line[column - 2] === "*") idx = column - 2; // cursor on the star's right edge
+  if (idx < 0) return false;
+  let inDouble = false, inSingle = false;
+  for (let i = 0; i < idx; i++) {
+    const ch = line[i];
+    if (inDouble) { if (ch === '"') inDouble = false; }
+    else if (inSingle) { if (ch === "'") inSingle = false; }
+    else if (ch === '"') inDouble = true;
+    else if (ch === "'") inSingle = true;
+  }
+  return !inDouble && !inSingle;
+}
+
 let _expandWildcardRegistered = false;
 (() => {
   if (_expandWildcardRegistered) return;
@@ -2473,15 +2495,22 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       () => window.dispatchEvent(new CustomEvent("save-file"))
     );
 
+    // Cheap synchronous display gate for the "Expand *" menu item (starMenuEligible:
+    // cursor on a literal, unquoted `*`). Driven by cursor moves — the right-click
+    // cursor jump fires onDidChangeCursorPosition *before* the menu renders, so the
+    // key is correct regardless of listener order. The authoritative wildcard
+    // decision (alias / multiplication / range) runs in the command via the backend
+    // tokenizer (Service.StarSelectAt).
     const starCtxKey = editor.createContextKey<boolean>("thawStarUnderCursor", false);
+    const updateStarGate = (pos: monacoLib.IPosition | null | undefined) => {
+      const model = editor.getModel();
+      const line = model && pos ? model.getLineContent(pos.lineNumber) : "";
+      starCtxKey.set(!!pos && starMenuEligible(line, pos.column));
+    };
+    editor.onDidChangeCursorPosition((e) => updateStarGate(e.position));
     editor.onContextMenu((e) => {
       _activeSnippetEditor = editor;
-      // Cheap gate only — is the cursor on a literal `*`? The backend tokenizer
-      // makes the real select-list-wildcard decision when the command runs.
-      const model = editor.getModel();
-      const pos = e.target.position;
-      const line = model && pos ? model.getLineContent(pos.lineNumber) : "";
-      starCtxKey.set(!!pos && (line[pos.column - 1] === "*" || line[pos.column - 2] === "*"));
+      updateStarGate(e.target.position ?? editor.getPosition());
     });
     editor.onDidDispose(() => {
       if (_activeSnippetEditor === editor) _activeSnippetEditor = null;

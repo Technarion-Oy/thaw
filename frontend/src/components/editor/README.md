@@ -111,9 +111,13 @@ select-list wildcard with its column list. Detection is **backend/tokenizer-base
 `Service.StarSelectAt(sql, line, col)` (`internal/sqleditor`, over `sqltok`), which returns the
 wildcard's span + any `alias.` qualifier or nil — a `*` inside a quoted identifier (`"a*b"`) or a
 multiplication (`a * b`) is never misread, and quoted aliases (`"my table".*`) are captured whole.
-The context key is only a cheap display gate — `onContextMenu` sets it when the cursor sits on a
-literal `*` char (the async tokenizer call can't fill a context key before the menu renders, so the
-authoritative decision runs in the command and no-ops if the token isn't really a wildcard). The
+The context key is only a cheap display gate — `starMenuEligible` sets it when the cursor sits on a
+literal `*` that is **not** inside a quoted identifier/string (a `*` in an object name is always
+quoted, e.g. `"a*b"`, so the item stays hidden there). It's driven by `onDidChangeCursorPosition`
+(not `onContextMenu`): the right-click cursor jump fires the cursor-change *before* the menu renders,
+so the key is correct regardless of listener order — the async tokenizer call can't fill a context
+key in time, so the authoritative decision (alias / multiplication / range) runs in the command and
+no-ops if the token isn't really a wildcard. The
 command scopes to the statement under the cursor (`GetSqlStatementRanges`), resolves its `FROM`/`JOIN`
 refs (`ParseJoinTableRefs` + `ResolveTableRefs`, same as the JOIN/drag-drop paths), fetches columns
 via the shared cached `getColumns()` wrapper (all target tables concurrently, `Promise.all`), quotes
