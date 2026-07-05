@@ -540,7 +540,7 @@ Ghost-text SQL suggestions appear automatically as you type in the editor. Press
 
 ### Model Validation
 
-- **Model Validation** — when configuring AI, a live **model status indicator** appears next to the model selector: a green `● Model OK` confirms the model is reachable, while a red indicator shows the exact API error — so misconfigured model names are caught immediately rather than at runtime.
+- **Model Validation** — when configuring AI, a **Test connection** button next to the model selector runs an on-demand connectivity check: a green `● Model OK` confirms the model is reachable, while a red indicator shows the exact API error — so misconfigured model names can be caught before saving rather than at runtime. If the **Enable AI suggestions** toggle is on but the `AI inline completions` feature flag is off, the modal shows a warning explaining the toggle has no effect until the flag is enabled.
 - **Query Profile** — click the graph icon in the results status bar (visible for successful runs) to see the execution profile for the query; shows Operator Statistics, Execution Time Breakdown, and Operator Attributes sourced from `GET_QUERY_OPERATOR_STATS`.
 - **Query Log** — session-scoped log of all SQL queries Thaw sends to Snowflake (both user-initiated from the editor and internal queries like object listing and DDL fetching). Appears as a third result pane tab ("Query Log") alongside Results and Terminal. Useful for debugging and attaching to issue reports. Enable via **View → Enabled Features → Query Log** or **Tools → Query Log → Enable Query Log**. Supports source filtering (All/User/Internal), status filtering, text search, and one-click copy formatting.
 

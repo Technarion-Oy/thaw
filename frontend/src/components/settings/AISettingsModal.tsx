@@ -88,9 +88,11 @@ export default function AISettingsModal({ onClose }: Props) {
   const [fetchedModels, setFetchedModels] = useState<string[] | null>(null);
   const [modelsFetching, setModelsFetching] = useState(false);
 
-  // Model connectivity test.
+  // Model connectivity test. testTokenRef drops a slow in-flight response once a
+  // newer test (or a provider/key/model change) has superseded it.
   const [modelTest, setModelTest] = useState<"idle" | "testing" | "ok" | "error">("idle");
   const [modelTestMsg, setModelTestMsg] = useState("");
+  const testTokenRef = useRef(0);
 
   // Debounce timer ref for the model-list fetch.
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -153,25 +155,29 @@ export default function AISettingsModal({ onClose }: Props) {
 
   // Clear a stale test result when the provider/key/model changes — the user
   // re-runs the check manually via the Test button below (see runModelTest).
+  // Bumping the token also invalidates any in-flight test from the old config.
   useEffect(() => {
+    testTokenRef.current++;
     setModelTest("idle");
     setModelTestMsg("");
   }, [state.provider, state.apiKey, state.model, state.ollamaNumCtx]);
 
   // Test model connectivity on demand.
   async function runModelTest() {
+    const token = ++testTokenRef.current;
     setModelTest("testing");
     setModelTestMsg("");
     try {
       const errMsg = await TestAIModel(state.provider, state.apiKey, state.model, state.ollamaPort, state.ollamaNumCtx);
+      if (testTokenRef.current !== token) return; // superseded by a newer test/change
       if (errMsg) {
         setModelTest("error");
         setModelTestMsg(errMsg);
       } else {
         setModelTest("ok");
-        setModelTestMsg("");
       }
     } catch (e) {
+      if (testTokenRef.current !== token) return;
       setModelTest("error");
       setModelTestMsg(String(e));
     }
@@ -238,7 +244,7 @@ export default function AISettingsModal({ onClose }: Props) {
             type="warning"
             showIcon
             message="AI inline completions are turned off by a feature flag"
-            description="Enable “AI inline completions” in the Feature Flags settings for this toggle to take effect."
+            description="Enable “AI inline completions” under View → Enabled Features… for this toggle to take effect (an IT administrator may have locked it)."
           />
         )}
 
