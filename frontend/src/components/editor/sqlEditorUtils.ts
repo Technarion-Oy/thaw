@@ -12,6 +12,16 @@ import { GetTableForeignKeys } from "../../../wailsjs/go/app/App";
 // ── UC helper ────────────────────────────────────────────────────────────────
 export const UC = (s: string) => s.toUpperCase();
 
+// ── normId ────────────────────────────────────────────────────────────────────
+// Mirror of the backend `normID` (internal/sqleditor/sqleditor.go): normalise a
+// raw identifier the way ResolveTableRefs already stored its refs, so a captured
+// qualifier can be matched with an exact `===`. A quoted "..." keeps its
+// (case-sensitive) inner text with doubled "" unescaped; a bare identifier is
+// upper-cased (Snowflake folds unquoted names). Keeps `"Foo"` and `"foo"`
+// distinct — a lower-cased compare would silently expand the wrong table.
+export const normId = (s: string): string =>
+  !s ? s : s.startsWith('"') ? s.slice(1, -1).replace(/""/g, '"') : s.toUpperCase();
+
 // ── colCacheKey ───────────────────────────────────────────────────────────────
 // Case-insensitive, NUL-delimited key for a fully-qualified table, shared by
 // every per-table cache (column list, column types, wildcard expansion) so the

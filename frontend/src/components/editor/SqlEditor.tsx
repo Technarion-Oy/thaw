@@ -39,7 +39,7 @@ import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeS
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { FUNCTION_CATEGORIES } from "./snowflakeSql";
 import { getOrCreateMenuId } from "./monacoMenu";
-import { UC, quoteIfNecessary, colCacheKey, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt, starMenuEligible } from "./sqlEditorUtils";
+import { UC, quoteIfNecessary, colCacheKey, normId, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt, starMenuEligible } from "./sqlEditorUtils";
 import ExplainModal from "../results/ExplainModal";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 import { kindSupportsDdl } from "../../utils/objectDdl";
@@ -253,24 +253,31 @@ const quoteIfNec = (name: string) => quoteIfNecessary(name, snowflakeKeywords);
 
 // ── Column-level completion cache ─────────────────────────────────────────────
 const columnCache  = new Map<string, string[]>();
-const fetchingCols = new Set<string>();
+// Key → in-flight fetch. A concurrent caller awaits the same promise instead of
+// getting an empty list (which callers treat as "no columns" and silently drop),
+// so e.g. Expand * racing the autocomplete cache-warm loop still resolves.
+const fetchingCols = new Map<string, Promise<string[]>>();
 
 async function getColumns(db: string, schema: string, table: string): Promise<string[]> {
   const key = colCacheKey(db, schema, table);
   if (columnCache.has(key)) return columnCache.get(key)!;
-  if (fetchingCols.has(key)) return [];
-  fetchingCols.add(key);
+  const inflight = fetchingCols.get(key);
+  if (inflight) return inflight;
   const gen = currentCacheGeneration();
-  try {
-    const cols = await GetTableColumns(db, schema, table);
-    if (gen === currentCacheGeneration()) columnCache.set(key, cols ?? []);
-    return cols ?? [];
-  } catch {
-    if (gen === currentCacheGeneration()) columnCache.set(key, []);
-    return [];
-  } finally {
-    fetchingCols.delete(key);
-  }
+  const p = (async () => {
+    try {
+      const cols = (await GetTableColumns(db, schema, table)) ?? [];
+      if (gen === currentCacheGeneration()) columnCache.set(key, cols);
+      return cols;
+    } catch {
+      if (gen === currentCacheGeneration()) columnCache.set(key, []);
+      return [];
+    } finally {
+      fetchingCols.delete(key);
+    }
+  })();
+  fetchingCols.set(key, p);
+  return p;
 }
 
 // FK cache for JOIN ON autocomplete — imported from sqlEditorUtils.ts
@@ -605,16 +612,6 @@ async function statementTextAtLine(fullSql: string, line: number): Promise<strin
 // keyboard-invoked menu. Set in onContextMenu; read by the command.
 let _starMenuPos: monacoLib.IPosition | null = null;
 
-// Normalise a captured `alias.` the way the backend's normID does, so it matches
-// resolved refs (whose db/schema/name are already normID'd): a quoted "..." has
-// its surrounding quotes stripped and doubled "" unescaped; a bare id is as-is.
-// (Case folding is left to the caller.)
-function unquoteId(s: string): string {
-  return s.startsWith('"') && s.endsWith('"') && s.length >= 2
-    ? s.slice(1, -1).replace(/""/g, '"')
-    : s;
-}
-
 let _expandWildcardRegistered = false;
 (() => {
   if (_expandWildcardRegistered) return;
@@ -667,8 +664,8 @@ let _expandWildcardRegistered = false;
     let targets: ResolvedRef[];
     let qualify: boolean;
     if (star.alias) {
-      const a = unquoteId(star.alias).toLowerCase();
-      const match = refs.find((r) => (r.alias || r.name).toLowerCase() === a || r.name.toLowerCase() === a);
+      const a = normId(star.alias);
+      const match = refs.find((r) => (r.alias || r.name) === a || r.name === a);
       if (!match) return;
       targets = [match];
       qualify = true;
@@ -678,9 +675,8 @@ let _expandWildcardRegistered = false;
     }
 
     // Fetch each distinct table once, concurrently, through the shared column
-    // cache. Dedup by table key first — a self-join (FROM T a JOIN T b) would
-    // otherwise fire two in-flight fetches for the same key and getColumns
-    // returns [] for the second, tripping the half-edit guard below.
+    // cache. Dedup by table key so a self-join (FROM T a JOIN T b) fetches T once
+    // and both aliases read from the same colsByKey entry below.
     const uniq = [...new Map(targets.map((t) => [colCacheKey(t.db, t.schema, t.name), t])).values()];
     const fetched = await Promise.all(uniq.map((t) => getColumns(t.db, t.schema, t.name)));
     if (stale()) return;
@@ -690,8 +686,9 @@ let _expandWildcardRegistered = false;
 
     const parts: string[] = [];
     for (const t of targets) {
-      // star.alias is "" (not null) for a bare `*`, so use || to fall through.
-      const prefix = star.alias || t.alias || t.name;
+      // `alias.*` → star.alias is the raw source text (already valid as written).
+      // bare `*` → prefix is a normID'd alias/name, so re-quote if needed.
+      const prefix = star.alias || quoteIfNec(t.alias || t.name);
       for (const c of colsByKey.get(colCacheKey(t.db, t.schema, t.name))!) parts.push(qualify ? `${prefix}.${quoteIfNec(c)}` : quoteIfNec(c));
     }
     if (parts.length === 0) return;

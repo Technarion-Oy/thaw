@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { identifierRangeAt, starMenuEligible } from "./sqlEditorUtils";
+import { identifierRangeAt, starMenuEligible, normId } from "./sqlEditorUtils";
 
 // identifierRangeAt(line, idx0) → 1-based Monaco {start, end} (end exclusive) of the
 // dotted identifier at 0-based char index idx0, quote-aware. Substring is
@@ -80,5 +80,22 @@ describe("starMenuEligible", () => {
     const starCol = line.indexOf("*") + 1;
     expect(starMenuEligible(line, starCol)).toBe(true);     // on the star
     expect(starMenuEligible(line, starCol + 1)).toBe(true); // right edge
+  });
+});
+
+describe("normId", () => {
+  it("upper-cases a bare identifier (Snowflake folds unquoted names)", () => {
+    expect(normId("foo")).toBe("FOO");
+    expect(normId("Foo")).toBe("FOO");
+  });
+
+  it("preserves case of a quoted identifier and strips the quotes", () => {
+    expect(normId('"Foo"')).toBe("Foo");
+    expect(normId('"foo"')).toBe("foo");
+    expect(normId('"Foo"')).not.toBe(normId('"foo"')); // stay distinct
+  });
+
+  it("unescapes doubled quotes inside a quoted identifier", () => {
+    expect(normId('"a""b"')).toBe('a"b');
   });
 });
