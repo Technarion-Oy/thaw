@@ -83,11 +83,20 @@ export function starMenuEligible(line: string, column: number): boolean {
   const r = identifierRangeAt(line, idx);
   const col = idx + 1; // 1-based Monaco column of the star
   if (r !== null && col >= r.start && col < r.end) return false;
-  // Inside a single-quoted string literal? Count unescaped quotes before the star
-  // ('' is an escaped quote); an odd count means the star is inside a string.
+  // Inside a single-quoted string literal? Count unescaped `'` before the star
+  // ('' is an escaped quote); an odd count means the star is inside a string. Skip
+  // over double-quoted identifiers so an apostrophe in a column name (e.g. "it's")
+  // doesn't flip the parity.
   let quotes = 0;
+  let inDouble = false;
   for (let i = 0; i < idx; i++) {
-    if (line[i] === "'") { if (line[i + 1] === "'") { i++; continue; } quotes++; }
+    const ch = line[i];
+    if (inDouble) {
+      if (ch === '"') { if (line[i + 1] === '"') { i++; continue; } inDouble = false; }
+      continue;
+    }
+    if (ch === '"') { inDouble = true; continue; }
+    if (ch === "'") { if (line[i + 1] === "'") { i++; continue; } quotes++; }
   }
   return quotes % 2 === 0;
 }

@@ -145,14 +145,22 @@ var fromTerminatorKW = map[string]bool{
 	"EXCEPT": true, "MINUS": true, "FETCH": true,
 }
 
-// FromSourceCount reports how many table sources the statement's top-level FROM
-// clause has (JOIN- and comma-separated), so a bare `*` expansion can be checked
-// for completeness against the resolved-ref count. It returns -1 when the ref
-// parser (ParseJoinTables, which is not depth-aware) can't be trusted to have
-// enumerated exactly those sources — i.e. the statement has a subquery or CTE
-// (more than one SELECT), or there is no top-level FROM. The caller should treat
-// a bare `*` as expandable only when this equals the resolved-ref count; -1 or a
-// mismatch means "refuse rather than write an incomplete/wrong list".
+// FromSourceCount reports how many *plain table* sources the statement's
+// top-level FROM clause has (JOIN- and comma-separated), so a bare `*` expansion
+// can be checked for completeness against the resolved-ref count. It returns -1
+// when the expansion can't be trusted, because the ref parser (ParseJoinTables,
+// which is regex-based and not depth-aware) can't be relied on to have
+// enumerated exactly those sources:
+//   - a subquery or CTE (more than one SELECT),
+//   - no top-level FROM, or
+//   - a non-table source — subquery, table function (TABLE(…)/FLATTEN(…)), or a
+//     PIVOT/UNPIVOT/SAMPLE/MATCH_RECOGNIZE clause — which all show up as a `(`
+//     opening at a source position (not inside an ON/USING condition). Those both
+//     confuse ParseJoinTables *and* change the `*` output columns, so expanding
+//     the base table's columns would be wrong.
+//
+// -1 or a count that doesn't equal the resolved-ref count means "refuse rather
+// than write an incomplete/wrong list".
 func FromSourceCount(sql string) int {
 	sig := sqltok.Significant(sqltok.Tokenize(sql))
 
@@ -190,14 +198,20 @@ func FromSourceCount(sql string) int {
 	}
 
 	// One source, plus one per top-level JOIN keyword or comma, until the clause
-	// ends. (No nested SELECT exists here, so any `(` is a function-call arg whose
-	// inner commas are at depth > 0 and don't count.)
+	// ends. A `(` opening at depth 0 outside an ON/USING condition is a non-table
+	// source (subquery / table function / PIVOT etc.) → refuse. Function calls in a
+	// join condition are exempt via inJoinCond (that `(` is a predicate, not a
+	// source), and their inner commas are at depth > 0 so they never miscount.
 	sources := 1
 	depth = 0
+	inJoinCond := false
 	for i := fromIdx + 1; i < len(sig); i++ {
 		t := sig[i]
 		switch t.Kind {
 		case sqltok.LParen:
+			if depth == 0 && !inJoinCond {
+				return -1 // non-table source at a source position
+			}
 			depth++
 		case sqltok.RParen:
 			depth--
@@ -206,15 +220,20 @@ func FromSourceCount(sql string) int {
 		case sqltok.Comma:
 			if depth == 0 {
 				sources++
+				inJoinCond = false
 			}
 		case sqltok.Keyword:
 			if depth == 0 {
-				up := strings.ToUpper(t.Text(sql))
-				if fromTerminatorKW[up] {
-					return sources
-				}
-				if up == "JOIN" {
+				switch strings.ToUpper(t.Text(sql)) {
+				case "JOIN":
 					sources++
+					inJoinCond = false
+				case "ON", "USING":
+					inJoinCond = true
+				default:
+					if fromTerminatorKW[strings.ToUpper(t.Text(sql))] {
+						return sources
+					}
 				}
 			}
 		}

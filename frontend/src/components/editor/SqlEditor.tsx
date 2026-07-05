@@ -251,68 +251,59 @@ function ensureKeywordsLoaded(): Promise<void> {
 // quoteIfNecessary is imported from sqlEditorUtils.ts — local wrapper for convenience.
 const quoteIfNec = (name: string) => quoteIfNecessary(name, snowflakeKeywords);
 
-// ── Column-level completion cache ─────────────────────────────────────────────
-const columnCache  = new Map<string, string[]>();
-// Key → in-flight fetch. A concurrent caller awaits the same promise instead of
-// getting an empty list (which callers treat as "no columns" and silently drop),
-// so e.g. Expand * racing the autocomplete cache-warm loop still resolves.
-const fetchingCols = new Map<string, Promise<string[]>>();
-
-async function getColumns(db: string, schema: string, table: string): Promise<string[]> {
+// ── Per-table fetch cache ─────────────────────────────────────────────────────
+// Shared shape for getColumns/getColInfos: return the cached value, else the
+// in-flight fetch (so a concurrent caller awaits the same round-trip instead of
+// getting [] and silently dropping results), else start one. The fetch result is
+// cached only if the cache generation hasn't rolled over mid-flight; a failure
+// caches [] so we don't hammer a broken table.
+async function cachedTableFetch<T>(
+  cache: Map<string, T[]>,
+  inflight: Map<string, Promise<T[]>>,
+  db: string, schema: string, table: string,
+  fetchFn: () => Promise<T[]>,
+): Promise<T[]> {
   const key = colCacheKey(db, schema, table);
-  if (columnCache.has(key)) return columnCache.get(key)!;
-  const inflight = fetchingCols.get(key);
-  if (inflight) return inflight;
+  if (cache.has(key)) return cache.get(key)!;
+  const cur = inflight.get(key);
+  if (cur) return cur;
   const gen = currentCacheGeneration();
   const p = (async () => {
     try {
-      const cols = (await GetTableColumns(db, schema, table)) ?? [];
-      if (gen === currentCacheGeneration()) columnCache.set(key, cols);
-      return cols;
+      const v = await fetchFn();
+      if (gen === currentCacheGeneration()) cache.set(key, v);
+      return v;
     } catch {
-      if (gen === currentCacheGeneration()) columnCache.set(key, []);
+      if (gen === currentCacheGeneration()) cache.set(key, []);
       return [];
     } finally {
-      fetchingCols.delete(key);
+      inflight.delete(key);
     }
   })();
-  fetchingCols.set(key, p);
+  inflight.set(key, p);
   return p;
 }
+
+// ── Column-level completion cache ─────────────────────────────────────────────
+const columnCache  = new Map<string, string[]>();
+const fetchingCols = new Map<string, Promise<string[]>>();
+
+const getColumns = (db: string, schema: string, table: string): Promise<string[]> =>
+  cachedTableFetch(columnCache, fetchingCols, db, schema, table,
+    async () => (await GetTableColumns(db, schema, table)) ?? []);
 
 // FK cache for JOIN ON autocomplete — imported from sqlEditorUtils.ts
 
 // ── ColInfo cache for type-compatible JOIN ON suggestions ─────────────────────
 const colInfoCache   = new Map<string, ColInfo[]>();
-// Key → in-flight fetch (see getColumns): a concurrent caller awaits the same
-// fetch rather than getting [] and dropping type-matched JOIN-ON suggestions.
 const fetchingColInfos = new Map<string, Promise<ColInfo[]>>();
 
-async function getColInfos(db: string, schema: string, table: string): Promise<ColInfo[]> {
-  const key = colCacheKey(db, schema, table);
-  if (colInfoCache.has(key)) return colInfoCache.get(key)!;
-  const inflight = fetchingColInfos.get(key);
-  if (inflight) return inflight;
-  const gen = currentCacheGeneration();
-  const p = (async () => {
-    try {
-      const cols = await GetTableColumnsWithTypes(db, schema, table);
-      const entries: ColInfo[] = (cols ?? []).map((c: any) => ({
-        name:     c.name     ?? "",
-        dataType: c.dataType ?? "",
-      }));
-      if (gen === currentCacheGeneration()) colInfoCache.set(key, entries);
-      return entries;
-    } catch {
-      if (gen === currentCacheGeneration()) colInfoCache.set(key, []);
-      return [];
-    } finally {
-      fetchingColInfos.delete(key);
-    }
-  })();
-  fetchingColInfos.set(key, p);
-  return p;
-}
+const getColInfos = (db: string, schema: string, table: string): Promise<ColInfo[]> =>
+  cachedTableFetch(colInfoCache, fetchingColInfos, db, schema, table, async () => {
+    const cols = await GetTableColumnsWithTypes(db, schema, table);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (cols ?? []).map((c: any) => ({ name: c.name ?? "", dataType: c.dataType ?? "" }));
+  });
 
 // ── Schema-level FK warm-up ────────────────────────────────────────────────────
 const fetchedFKSchemas = new Set<string>(); 
@@ -651,6 +642,10 @@ let _expandWildcardRegistered = false;
     const stmtSql = await statementTextAtLine(fullSql, star.startLine);
     if (stale()) return;
 
+    // A bare `*` also needs the top-level FROM source count (below); it depends
+    // only on stmtSql, so kick it off now to run concurrently with ref resolution.
+    const sourceCountP = star.alias ? null : FromSourceCount(stmtSql);
+
     // Resolve the FROM/JOIN table refs (same calls the JOIN completion +
     // drag-drop paths use).
     let refs: ResolvedRef[];
@@ -684,7 +679,7 @@ let _expandWildcardRegistered = false;
       // (it pulls tables out of subqueries/CTEs and drops old-style comma joins),
       // so only expand when the backend's top-level source count matches the
       // resolved refs exactly — otherwise refuse rather than write a wrong list.
-      const sourceCount = await FromSourceCount(stmtSql);
+      const sourceCount = await sourceCountP!;
       if (stale() || sourceCount < 0 || sourceCount !== refs.length) return;
       targets = refs;
       qualify = refs.length > 1;

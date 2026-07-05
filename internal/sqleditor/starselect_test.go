@@ -87,7 +87,10 @@ func TestFromSourceCount(t *testing.T) {
 		{"SELECT * FROM a LEFT JOIN b ON a.id=b.id JOIN c ON b.k=c.k", 3},
 		{"SELECT * FROM t1, t2", 2},
 		{"SELECT * FROM t WHERE x = 1", 1},
-		{"SELECT * FROM TABLE(FLATTEN(input => x, path => 'a'))", 1}, // inner commas are function args
+		{"SELECT * FROM a JOIN b ON a.id = fn(b.x)", 2},               // fn() in ON is a predicate, not a source
+		{"SELECT * FROM a JOIN b USING (id, name)", 2},               // USING(...) is not a source paren
+		{"SELECT * FROM TABLE(FLATTEN(input => x, path => 'a'))", -1}, // table function → refuse
+		{"SELECT * FROM t1 JOIN sales PIVOT(SUM(amt) FOR q IN ('Q1')) p ON t1.id=p.id", -1}, // PIVOT → refuse
 		{"SELECT * FROM t WHERE x IN (SELECT y FROM z)", -1},         // subquery → refuse
 		{"SELECT * FROM (SELECT 1 x) sub JOIN r ON r.id=sub.x", -1},  // derived table → refuse
 		{"WITH c AS (SELECT 1 x) SELECT * FROM c JOIN r ON r.id=c.x", -1}, // CTE → refuse

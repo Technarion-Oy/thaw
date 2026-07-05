@@ -75,6 +75,10 @@ describe("starMenuEligible", () => {
     expect(atStar("SELECT x FROM t WHERE s = 'a*b'")).toBe(false);
   });
 
+  it("stays eligible when an apostrophe lives in a double-quoted identifier", () => {
+    expect(atStar(`SELECT "it's", * FROM t`)).toBe(true); // the ' is inside "it's", not a string
+  });
+
   it("is false when the cursor isn't on a star", () => {
     expect(starMenuEligible("SELECT a FROM t", 8)).toBe(false);
   });
