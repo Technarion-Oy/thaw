@@ -1592,8 +1592,26 @@ func (c *Client) ListGitTags(ctx context.Context, database, schema, repoName str
 	return tags, nil
 }
 
+// gitFilePathRe restricts stage/repo file paths to characters that cannot break
+// out of the raw @stage/path splice used by GetGitFileContent and ExecuteGitFile.
+var gitFilePathRe = regexp.MustCompile(`^[a-zA-Z0-9_./ -]+$`)
+
+// validateStageFilePath guards filePath before it is spliced raw into a
+// @stage/path SQL clause. Snowflake does not parameterise the path portion, so
+// filePath must originate from server-side LIST output; this allowlist is
+// defence-in-depth against injection.
+func validateStageFilePath(filePath string) error {
+	if !gitFilePathRe.MatchString(filePath) {
+		return fmt.Errorf("invalid file path %q", filePath)
+	}
+	return nil
+}
+
 // GetGitFileContent reads a file from a git repository and returns its content.
 func (c *Client) GetGitFileContent(ctx context.Context, database, schema, repoName, filePath string) (string, error) {
+	if err := validateStageFilePath(filePath); err != nil {
+		return "", err
+	}
 	sql := fmt.Sprintf(`SELECT $1 FROM @%s/%s`, Qualify(database, schema, repoName), filePath)
 
 	res, err := c.Execute(ctx, sql)
@@ -1611,19 +1629,14 @@ func (c *Client) GetGitFileContent(ctx context.Context, database, schema, repoNa
 	return content.String(), nil
 }
 
-// gitFilePathRe restricts stage/repo file paths to characters that cannot break
-// out of the EXECUTE IMMEDIATE FROM @stage/path clause.
-var gitFilePathRe = regexp.MustCompile(`^[a-zA-Z0-9_./ -]+$`)
-
 // ExecuteGitFile executes a SQL file via EXECUTE IMMEDIATE FROM @db.schema.name/path.
 // Also used for stage files (via App.ExecuteStageFile) since the SQL pattern is identical.
 //
 // SAFETY: filePath is spliced into the SQL raw (Snowflake does not parameterise the
-// path portion of EXECUTE IMMEDIATE FROM), so it must originate from server-side LIST
-// output. The allowlist below is defence-in-depth against injection.
+// path portion of EXECUTE IMMEDIATE FROM); see validateStageFilePath.
 func (c *Client) ExecuteGitFile(ctx context.Context, database, schema, repoName, filePath string) error {
-	if !gitFilePathRe.MatchString(filePath) {
-		return fmt.Errorf("invalid file path %q", filePath)
+	if err := validateStageFilePath(filePath); err != nil {
+		return err
 	}
 	sql := fmt.Sprintf(`EXECUTE IMMEDIATE FROM @%s/%s`, Qualify(database, schema, repoName), filePath)
 
