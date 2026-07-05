@@ -447,6 +447,31 @@ func TestValidateInsideOrEqual_OutsideRoot(t *testing.T) {
 	}
 }
 
+func TestValidatePathOrAncestorInsideOrEqual_DeletedFile(t *testing.T) {
+	root := t.TempDir()
+	// A path that doesn't exist on disk (e.g. deleted from the working tree but
+	// still present in HEAD) must still validate as long as it's inside root.
+	deleted := filepath.Join(root, "sub", "gone.sql")
+	if err := ValidatePathOrAncestorInsideOrEqual(deleted, root); err != nil {
+		t.Errorf("expected no error for nonexistent path inside root, got: %v", err)
+	}
+}
+
+func TestValidatePathOrAncestorInsideOrEqual_Outside(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "gone.sql")
+	if err := ValidatePathOrAncestorInsideOrEqual(outside, root); err == nil {
+		t.Error("expected error for nonexistent path outside root, got nil")
+	}
+}
+
+func TestValidatePathOrAncestorInsideOrEqual_RootEqualsPath(t *testing.T) {
+	root := t.TempDir()
+	if err := ValidatePathOrAncestorInsideOrEqual(root, root); err != nil {
+		t.Errorf("expected no error when path equals root, got: %v", err)
+	}
+}
+
 // ─── DeleteFile with symlink to directory ───────────────────────────────────
 
 func TestDeleteFile_SymlinkToDir(t *testing.T) {
