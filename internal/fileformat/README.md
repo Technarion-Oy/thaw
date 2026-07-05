@@ -42,7 +42,7 @@ Three concerns are kept together here because they share `FileFormatConfig` as t
 
 | Function | Description |
 |---|---|
-| `PreviewStageFile(ctx, client, stagePath, cfg)` | Creates a temporary file format, runs `SELECT * FROM <stagePath> (FILE_FORMAT => '<name>') LIMIT 50`, drops the temp format, returns `PreviewResult` |
+| `PreviewStageFile(ctx, client, stagePath, cfg)` | Guards `stagePath` via `snowflake.ValidateStageRef` (returns an error on an invalid/injection-shaped ref, since it's spliced unquoted into the query), then creates a temporary file format, runs `SELECT * FROM <stagePath> (FILE_FORMAT => '<name>') LIMIT 50`, drops the temp format, returns `PreviewResult` |
 | `PreviewLocalFile(path, cfg)` | Reads up to 1 MB of a local file, parses CSV or JSON, returns `PreviewResult` without a Snowflake connection |
 
 ## Patterns & integration

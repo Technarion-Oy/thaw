@@ -8,11 +8,12 @@ func TestValidateStageRef(t *testing.T) {
 	valid := []string{
 		`@DB.SCHEMA.STAGE`,
 		`@"db"."schema"."stage"/data/2026`,
-		`@stage/sub-dir_1/file.csv`, // single dashes are fine
-		`@"my;stage"/a`,             // ';' inside a quoted identifier is legal
-		`@"we''ird"/a`,              // escaped quote inside a quoted identifier
-		`@"da--sh"/a`,               // '--' inside a quoted identifier is legal
-		`@~/branch/models/foo.sql`,  // user stage
+		`@stage/sub-dir_1/file.csv`,       // single dashes are fine
+		`@"my;stage"/a`,                   // ';' inside a quoted identifier is legal
+		`@"we''ird"/a`,                    // escaped quote inside a quoted identifier
+		`@"da--sh"/a`,                     // '--' inside a quoted identifier is legal
+		`@~/branch/models/foo.sql`,        // user stage
+		`@"a/../b"."schema"."stage"/path`, // '..' inside a quoted identifier is not traversal
 	}
 	for _, s := range valid {
 		if err := ValidateStageRef(s); err != nil {

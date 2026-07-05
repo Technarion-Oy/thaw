@@ -1627,7 +1627,7 @@ func (c *Client) ListGitTags(ctx context.Context, database, schema, repoName str
 // unquoted stage path anyway, so nothing valid is lost.
 func ValidateStageRef(stageName string) error {
 	inQuote := false
-	inPath := false // true once the first unquoted '/' (stage-vs-path separator) is seen
+	pathStart := -1 // index of the first unquoted '/' (stage-vs-path separator), -1 until seen
 	for i := 0; i < len(stageName); i++ {
 		c := stageName[i]
 		if inQuote {
@@ -1643,9 +1643,11 @@ func ValidateStageRef(stageName string) error {
 		}
 		switch {
 		case c == '/':
-			inPath = true
+			if pathStart < 0 {
+				pathStart = i
+			}
 		case c == '"':
-			if !inPath && (i == 0 || stageName[i-1] == '@' || stageName[i-1] == '.') {
+			if pathStart < 0 && (i == 0 || stageName[i-1] == '@' || stageName[i-1] == '.') {
 				inQuote = true
 				continue
 			}
@@ -1659,7 +1661,9 @@ func ValidateStageRef(stageName string) error {
 	if inQuote {
 		return fmt.Errorf("invalid stage reference %q: unbalanced quote", stageName)
 	}
-	if slices.Contains(strings.Split(stageName, "/"), "..") {
+	// The path segment (after the first unquoted '/') has no quotes — any '"' there
+	// is rejected above — so splitting it on '/' is quote-safe, unlike the prefix.
+	if pathStart >= 0 && slices.Contains(strings.Split(stageName[pathStart+1:], "/"), "..") {
 		return fmt.Errorf("invalid stage reference %q: contains a traversal segment", stageName)
 	}
 	return nil
