@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -29,7 +30,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode"
 
 	sf "github.com/snowflakedb/gosnowflake/v2"
 
@@ -1592,25 +1592,22 @@ func (c *Client) ListGitTags(ctx context.Context, database, schema, repoName str
 	return tags, nil
 }
 
+// stageFilePathRe is a strict allowlist for the unquoted @stage/path portion of
+// GetGitFileContent / ExecuteGitFile. Snowflake does not parameterise that
+// portion and terminates an unquoted stage path at the first whitespace, so a
+// denylist is unsafe: a single space lets a crafted filename graft a trailing
+// clause (e.g. `foo.sql UNION SELECT ...`) onto the statement. This charset
+// matches what unquoted stage paths actually support; filenames with spaces,
+// parentheses, or non-ASCII would need the whole path quoted, which is not yet
+// implemented.
+var stageFilePathRe = regexp.MustCompile(`^[A-Za-z0-9_./-]+$`)
+
 // validateStageFilePath guards filePath before it is spliced raw into a
-// @stage/path SQL clause used by GetGitFileContent and ExecuteGitFile. Snowflake
-// does not parameterise the path portion, so filePath must originate from
-// server-side LIST output.
-//
-// filePath is the final token in both templates, so the only sequences that
-// could alter the statement are a quote (opens a string), a statement separator,
-// a backslash escape, or a control character. We reject those rather than using a
-// strict allowlist, so real filenames with unicode or punctuation (café.sql,
-// notes (draft).sql, v1.0+hotfix.sql) still work. ".." segments are also rejected
-// as defence-in-depth against directory traversal within the stage.
+// @stage/path SQL clause. filePath must originate from server-side LIST output;
+// this allowlist is defence-in-depth. ".." segments are additionally rejected
+// against directory traversal within the stage.
 func validateStageFilePath(filePath string) error {
-	if filePath == "" {
-		return fmt.Errorf("empty file path")
-	}
-	if strings.ContainsAny(filePath, "'\"`;\\") {
-		return fmt.Errorf("invalid file path %q", filePath)
-	}
-	if strings.ContainsFunc(filePath, unicode.IsControl) {
+	if !stageFilePathRe.MatchString(filePath) {
 		return fmt.Errorf("invalid file path %q", filePath)
 	}
 	if slices.Contains(strings.Split(filePath, "/"), "..") {
