@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -1610,9 +1611,20 @@ func (c *Client) GetGitFileContent(ctx context.Context, database, schema, repoNa
 	return content.String(), nil
 }
 
+// gitFilePathRe restricts stage/repo file paths to characters that cannot break
+// out of the EXECUTE IMMEDIATE FROM @stage/path clause.
+var gitFilePathRe = regexp.MustCompile(`^[a-zA-Z0-9_./ -]+$`)
+
 // ExecuteGitFile executes a SQL file via EXECUTE IMMEDIATE FROM @db.schema.name/path.
 // Also used for stage files (via App.ExecuteStageFile) since the SQL pattern is identical.
+//
+// SAFETY: filePath is spliced into the SQL raw (Snowflake does not parameterise the
+// path portion of EXECUTE IMMEDIATE FROM), so it must originate from server-side LIST
+// output. The allowlist below is defence-in-depth against injection.
 func (c *Client) ExecuteGitFile(ctx context.Context, database, schema, repoName, filePath string) error {
+	if !gitFilePathRe.MatchString(filePath) {
+		return fmt.Errorf("invalid file path %q", filePath)
+	}
 	sql := fmt.Sprintf(`EXECUTE IMMEDIATE FROM @%s/%s`, Qualify(database, schema, repoName), filePath)
 
 	_, err := c.Execute(ctx, sql)
