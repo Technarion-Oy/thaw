@@ -22,7 +22,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -30,6 +29,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	sf "github.com/snowflakedb/gosnowflake/v2"
 
@@ -1592,17 +1592,29 @@ func (c *Client) ListGitTags(ctx context.Context, database, schema, repoName str
 	return tags, nil
 }
 
-// gitFilePathRe restricts stage/repo file paths to characters that cannot break
-// out of the raw @stage/path splice used by GetGitFileContent and ExecuteGitFile.
-var gitFilePathRe = regexp.MustCompile(`^[a-zA-Z0-9_./ -]+$`)
-
 // validateStageFilePath guards filePath before it is spliced raw into a
-// @stage/path SQL clause. Snowflake does not parameterise the path portion, so
-// filePath must originate from server-side LIST output; this allowlist is
-// defence-in-depth against injection.
+// @stage/path SQL clause used by GetGitFileContent and ExecuteGitFile. Snowflake
+// does not parameterise the path portion, so filePath must originate from
+// server-side LIST output.
+//
+// filePath is the final token in both templates, so the only sequences that
+// could alter the statement are a quote (opens a string), a statement separator,
+// a backslash escape, or a control character. We reject those rather than using a
+// strict allowlist, so real filenames with unicode or punctuation (café.sql,
+// notes (draft).sql, v1.0+hotfix.sql) still work. ".." segments are also rejected
+// as defence-in-depth against directory traversal within the stage.
 func validateStageFilePath(filePath string) error {
-	if !gitFilePathRe.MatchString(filePath) {
+	if filePath == "" {
+		return fmt.Errorf("empty file path")
+	}
+	if strings.ContainsAny(filePath, "'\"`;\\") {
 		return fmt.Errorf("invalid file path %q", filePath)
+	}
+	if strings.ContainsFunc(filePath, unicode.IsControl) {
+		return fmt.Errorf("invalid file path %q", filePath)
+	}
+	if slices.Contains(strings.Split(filePath, "/"), "..") {
+		return fmt.Errorf("invalid file path %q: traversal segment", filePath)
 	}
 	return nil
 }

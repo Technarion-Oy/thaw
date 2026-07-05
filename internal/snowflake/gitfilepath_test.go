@@ -5,8 +5,14 @@ package snowflake
 import "testing"
 
 func TestValidateStageFilePath(t *testing.T) {
-	valid := []string{"branches/main/models/foo.sql", "a_b-c.1/d.sql", "file with space.sql"}
-	invalid := []string{"foo.sql; DROP TABLE t", "foo'.sql", "foo/*x*/.sql", "foo`.sql", ""}
+	valid := []string{
+		"branches/main/models/foo.sql", "a_b-c.1/d.sql", "file with space.sql",
+		"café.sql", "notes (draft).sql", "v1.0+hotfix.sql", "a/..b/c.sql",
+	}
+	invalid := []string{
+		"foo.sql; DROP TABLE t", "foo'.sql", `foo".sql`, "foo`.sql",
+		`foo\bar.sql`, "foo\nbar.sql", "../../etc/x.sql", "a/../b.sql", "",
+	}
 
 	for _, p := range valid {
 		if err := validateStageFilePath(p); err != nil {
