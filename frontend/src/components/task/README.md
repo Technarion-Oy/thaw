@@ -14,7 +14,7 @@ child task links. Includes reusable sub-components `ScheduleEditor` and `WhenCon
 | File | Purpose |
 |------|---------|
 | `CreateTaskModal.tsx` | `CREATE TASK` form with compute type (warehouse/serverless), schedule, overlap policy, timeout, retry, notification integrations, WHEN condition, finalize task, AFTER dependencies, and SQL body. SQL preview is built inline by `buildSql()` (frontend-side). |
-| `TaskGraphModal.tsx` | Interactive ReactFlow + dagre DAG of task dependencies. Polls task statuses every 3s. Context-menu actions: Execute, Suspend/Resume, Drop, Copy, Add child, Remove links, Export DDL. Uses a 60s module-level DDL cache. |
+| `TaskGraphModal.tsx` | Interactive ReactFlow + dagre DAG of task dependencies. Polls task statuses every 3s. Context-menu actions: Properties, Execute, Suspend/Resume, Drop, Copy, Add child, Remove links, Export DDL. Properties calls the `onViewProperties` prop, which `Sidebar.tsx` wires to open `TaskPropertiesModal` for the right-clicked node. Uses a 60s module-level DDL cache. |
 | `TaskPropertiesModal.tsx` | Properties/settings panel for an existing task. Inline editing of schedule, WHEN condition, notification integrations. Embeds `TaskHistoryModal`, `WhenConditionBuilder`, `ScheduleEditor`. |
 | `ScheduleEditor.tsx` | Reusable schedule editor sub-component. Three modes: none, interval (N minutes/hours/days with Snowflake constraints), cron (5-field expr + timezone). Parses and emits schedule strings. |
 | `WhenConditionBuilder.tsx` | Visual WHEN condition builder. Supports stream-has-data checks, predecessor task return-value predicates, and free-text expressions. Joined with AND/OR. |

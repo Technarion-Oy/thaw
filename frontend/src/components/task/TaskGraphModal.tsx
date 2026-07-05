@@ -17,7 +17,7 @@ import {
   PauseCircleOutlined, PlayCircleOutlined,
   PlusOutlined, FlagOutlined, DeleteOutlined,
   CopyOutlined, BranchesOutlined, ScissorOutlined,
-  ExportOutlined,
+  ExportOutlined, SettingOutlined,
 } from "@ant-design/icons";
 import {
   ReactFlow,
@@ -382,9 +382,10 @@ export interface TaskGraphModalProps {
   schema:   string;
   taskName: string;
   onClose:  () => void;
+  onViewProperties?: (name: string, isFinalizer: boolean) => void;
 }
 
-export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGraphModalProps) {
+export default function TaskGraphModal({ db, schema, taskName, onClose, onViewProperties }: TaskGraphModalProps) {
   const [loading,      setLoading]      = useState(true);
   const [loadError,    setLoadError]    = useState<string | null>(null);
   const [rootName,     setRootName]     = useState(taskName);
@@ -1126,6 +1127,16 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
                       </span>
                     ),
                     disabled: true,
+                  },
+                  { type: "divider" as const },
+                  {
+                    key: "properties",
+                    icon: <SettingOutlined />,
+                    label: "Properties…",
+                    onClick: () => {
+                      onViewProperties?.(ctxMenu.name, ctxMenu.isFinalizer);
+                      setCtxMenu(null);
+                    },
                   },
                   { type: "divider" as const },
                   isStarted

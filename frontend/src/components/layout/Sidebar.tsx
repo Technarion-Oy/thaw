@@ -5072,6 +5072,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             schema={taskGraphModal.schema}
             taskName={taskGraphModal.name}
             onClose={() => setTaskGraphModal(null)}
+            onViewProperties={(name, isFinalizer) =>
+              setTaskPropsModal({ db: taskGraphModal.db, schema: taskGraphModal.schema, name, isFinalizer })
+            }
           />
         </Suspense>
       )}
