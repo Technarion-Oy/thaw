@@ -1622,7 +1622,7 @@ func (c *Client) ListGitTags(ctx context.Context, database, schema, repoName str
 // stage path terminates at the first whitespace: spliced into a SELECT
 // (GetGitFileContent uses `SELECT $1 FROM @stage/<path>`) a bare space would let a
 // crafted name graft a second query, e.g. `foo UNION SELECT secret FROM t`.
-// '..' path segments are rejected as defence-in-depth against traversal within the
+// '..' path segments are rejected as defense-in-depth against traversal within the
 // stage. Legitimate filenames needing spaces/quotes aren't expressible in an
 // unquoted stage path anyway, so nothing valid is lost.
 func ValidateStageRef(stageName string) error {
