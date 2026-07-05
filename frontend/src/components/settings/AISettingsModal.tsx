@@ -9,8 +9,9 @@
 // license agreement with Technarion Oy.
 
 import { useEffect, useRef, useState } from "react";
-import { Button, Input, Modal, Radio, Select, Switch, Tag, Typography, message } from "antd";
+import { Alert, Button, Input, Modal, Radio, Select, Switch, Tag, Typography, message } from "antd";
 import { GetAIConfig, GetSystemRAMGB, ListAIModels, SaveAIConfig, TestAIModel } from "../../../wailsjs/go/app/App";
+import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 
 const { Text } = Typography;
 
@@ -75,6 +76,11 @@ export default function AISettingsModal({ onClose }: Props) {
   const [saving, setSaving]       = useState(false);
   const [detectedRAM, setDetectedRAM] = useState(0);
 
+  // A second, independent gate: inline completions never fire when this feature
+  // flag is off, no matter what this modal is set to. Surface it so the toggle
+  // isn't silently overridden.
+  const featureFlagOn = useFeatureFlagsStore((s) => s.flags.aiInlineCompletions);
+
   // Tracks the last-saved config so we can show "currently in use" info.
   const [savedConfig, setSavedConfig] = useState<{ provider: Provider; model: string } | null>(null);
 
@@ -82,13 +88,14 @@ export default function AISettingsModal({ onClose }: Props) {
   const [fetchedModels, setFetchedModels] = useState<string[] | null>(null);
   const [modelsFetching, setModelsFetching] = useState(false);
 
-  // Model connectivity test.
+  // Model connectivity test. testTokenRef drops a slow in-flight response once a
+  // newer test (or a provider/key/model change) has superseded it.
   const [modelTest, setModelTest] = useState<"idle" | "testing" | "ok" | "error">("idle");
   const [modelTestMsg, setModelTestMsg] = useState("");
+  const testTokenRef = useRef(0);
 
-  // Debounce timer refs.
+  // Debounce timer ref for the model-list fetch.
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const testDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Load saved config and detect system RAM on open.
   useEffect(() => {
@@ -146,43 +153,37 @@ export default function AISettingsModal({ onClose }: Props) {
     };
   }, [state.provider, state.apiKey, state.ollamaPort]);
 
-  // Test model connectivity whenever provider, apiKey, or model changes.
+  // Clear a stale test result when the provider/key/model changes — the user
+  // re-runs the check manually via the Test button below (see runModelTest).
+  // Bumping the token also invalidates any in-flight test from the old config.
   useEffect(() => {
-    if (testDebounceRef.current) clearTimeout(testDebounceRef.current);
+    testTokenRef.current++;
     setModelTest("idle");
     setModelTestMsg("");
-
-    const isLocal = state.provider === "ollama";
-    if (!isLocal && state.apiKey.length < 8) return;
-    if (!state.model) return;
-
-    let cancelledTest = false;
-
-    testDebounceRef.current = setTimeout(async () => {
-      setModelTest("testing");
-      try {
-        const errMsg = await TestAIModel(state.provider, state.apiKey, state.model, state.ollamaPort, state.ollamaNumCtx);
-        if (cancelledTest) return;
-        if (errMsg) {
-          setModelTest("error");
-          setModelTestMsg(errMsg);
-        } else {
-          setModelTest("ok");
-          setModelTestMsg("");
-        }
-      } catch (e) {
-        if (!cancelledTest) {
-          setModelTest("error");
-          setModelTestMsg(String(e));
-        }
-      }
-    }, 800);
-
-    return () => {
-      cancelledTest = true;
-      if (testDebounceRef.current) clearTimeout(testDebounceRef.current);
-    };
   }, [state.provider, state.apiKey, state.model, state.ollamaNumCtx]);
+
+  // Test model connectivity on demand.
+  async function runModelTest() {
+    const token = ++testTokenRef.current;
+    setModelTest("testing");
+    setModelTestMsg("");
+    try {
+      const errMsg = await TestAIModel(state.provider, state.apiKey, state.model, state.ollamaPort, state.ollamaNumCtx);
+      if (testTokenRef.current !== token) return; // superseded by a newer test/change
+      if (errMsg) {
+        setModelTest("error");
+        setModelTestMsg(errMsg);
+      } else {
+        setModelTest("ok");
+      }
+    } catch (e) {
+      if (testTokenRef.current !== token) return;
+      setModelTest("error");
+      setModelTestMsg(String(e));
+    }
+  }
+
+  const canTest = (state.provider === "ollama" || state.apiKey.length >= 8) && !!state.model;
 
   function setProvider(provider: Provider) {
     setState((s) => ({ ...s, provider, model: DEFAULT_MODEL[provider] }));
@@ -236,6 +237,16 @@ export default function AISettingsModal({ onClose }: Props) {
             onChange={(v) => setState((s) => ({ ...s, enabled: v }))}
           />
         </div>
+
+        {/* Feature-flag gate: this modal's toggle has no effect while the flag is off. */}
+        {state.enabled && !featureFlagOn && (
+          <Alert
+            type="warning"
+            showIcon
+            message="AI inline completions are turned off by a feature flag"
+            description="Enable “AI inline completions” under View → Enabled Features… for this toggle to take effect (an IT administrator may have locked it)."
+          />
+        )}
 
         {/* Currently in use */}
         {savedConfig && (
@@ -343,21 +354,24 @@ export default function AISettingsModal({ onClose }: Props) {
             onChange={(v) => setState((s) => ({ ...s, model: v }))}
             options={modelOptions}
           />
-          {modelTest !== "idle" && (
-            <div style={{ marginTop: 5, fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
-              {modelTest === "testing" && (
-                <Text type="secondary">Testing model…</Text>
-              )}
-              {modelTest === "ok" && (
-                <span style={{ color: "#52c41a" }}>● Model OK</span>
-              )}
-              {modelTest === "error" && (
-                <span style={{ color: "#f5222d" }} title={modelTestMsg}>
-                  ● {modelTestMsg}
-                </span>
-              )}
-            </div>
-          )}
+          <div style={{ marginTop: 6, fontSize: 11, display: "flex", alignItems: "center", gap: 8 }}>
+            <Button
+              size="small"
+              loading={modelTest === "testing"}
+              disabled={!canTest}
+              onClick={runModelTest}
+            >
+              Test connection
+            </Button>
+            {modelTest === "ok" && (
+              <span style={{ color: "#52c41a" }}>● Model OK</span>
+            )}
+            {modelTest === "error" && (
+              <span style={{ color: "#f5222d" }} title={modelTestMsg}>
+                ● {modelTestMsg}
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Storage note */}
