@@ -14,7 +14,7 @@ git gutter decorations, the tab bar, editor preferences, and the cross-tab searc
 |------|---------|
 | `SqlEditor.tsx` | Main editor component. Mounts Monaco, registers all completion/hover/code-action/signature providers (module-level, not in render), runs `runDiagnostics` on content change, handles git gutter decoration, clipboard patching, and the snippet context menu via internal Monaco `MenuRegistry`. Exports `DiagMarker`, `ColInfo`, `ResolvedRef`, `pendingMcpMarkers`. |
 | `sqlEditorUtils.ts` | Pure helpers: `UC`, `quoteIfNecessary`, `colCacheKey` (shared NUL-delimited per-table cache key), `normId` (frontend mirror of the backend `normID` identifier normaliser, for matching captured qualifiers against resolved refs), `FKEntry`, `getFKs` (async, deduped), `getFKsCached`, `setFKCache`, `buildVariableSuggestions`, `getQualifiedIdent`, `getStatementLineRanges`, `identifierRangeAt` (quote-aware column span of the dotted identifier under the cursor, for the cmd/ctrl-hover link underline), `starMenuEligible` (reuses `identifierRangeAt` to gate the "Expand \*" menu — hides it when the `*` is inside a quoted object name). No React. |
-| `sqlEditorUtils.test.ts` | Unit tests for `identifierRangeAt` (bare/quoted/escaped-quote/unterminated-quote spans), `starMenuEligible` (bare/`alias.*` eligible, quoted-object-name hidden), and `normId` (bare→upper, quoted case-preserved/distinct, `""` unescape). |
+| `sqlEditorUtils.test.ts` | Unit tests for `identifierRangeAt` (bare/quoted/escaped-quote/unterminated-quote spans), `starMenuEligible` (bare/`alias.*` eligible, quoted-object-name and single-quoted-string hidden), and `normId` (bare→upper, quoted case-preserved/distinct, `""` unescape). |
 | `editorRef.ts` | Singleton ref to the active `IStandaloneCodeEditor`. Exports `setEditorInstance`, `getEditorInstance`, `insertAtCursor`. Kept separate from `SqlEditor.tsx` so Vite Fast Refresh is not broken by mixing component and non-component exports. |
 | `monacoSetup.ts` | One-time Monaco initialisation: Snowflake Monarch language, Python Monarch grammar (inlined to avoid side-effect imports), YAML worker wiring, `thawDarkTheme`/`thawLightTheme` registration. Called via `ensureMonacoSetup()` guard. Imports the **slim** Monaco API (`editor.api.js` + `editor.all.js`), never the `monaco-editor` barrel, to keep the TS/HTML/CSS/JSON language workers (~9 MB) and ~80 basic-language grammars out of the binary — see [gotchas](../../../../docs/concepts/gotchas.md). |
 | `snowflakeSql.ts` | Snowflake Monarch tokenizer (`snowflakeMonarchLanguage`) and custom Monaco theme definitions (`thawDarkTheme`, `thawLightTheme`). The tokenizer's `datatypes` list is sourced from the generated artifact `src/generated/snowflakeDataTypes.ts` (source of truth: `internal/snowflake/datatypes.go`) rather than hand-maintained. Also the single source for the built-in-function catalogue: `BUILTIN_FUNCTION_CATEGORIES`, `CONTEXT_FUNCTIONS`, and the assembled `FUNCTION_CATEGORIES` consumed by the Code Snippets modal and the editor's Built-in Functions submenu. |
@@ -128,15 +128,21 @@ really a wildcard. The command then scopes to the statement (`statementTextAtLin
 Explain SQL handler), resolves its `FROM`/`JOIN` refs (`ParseJoinTableRefs` + `ResolveTableRefs`,
 same as the JOIN/drag-drop paths), matches `alias.*` against them with `normId` — a case-sensitive
 mirror of the backend `normID` (quoted `"Foo"`/`"foo"` stay distinct, doubled `"a""b"` unescapes),
-so it compares exactly against the already-normID'd refs. It fetches columns via the shared cached
+so it compares exactly against the already-normID'd refs. For a **bare** `*` it additionally checks
+`Service.FromSourceCount(stmt)` against the resolved-ref count and refuses (no-op) on any mismatch or
+`-1` — `ParseJoinTables` isn't depth-aware, so it pulls tables out of `WHERE (SELECT …)` subqueries
+and CTEs and drops old-style `FROM a, b` comma joins; the count guard prevents writing an
+incomplete/wrong list in those cases. It fetches columns via the shared cached
 `getColumns()` wrapper (all target tables concurrently, `Promise.all`, deduped by `colCacheKey`) and
 `quoteIfNec`s each column — and the qualifier too, but only for a bare `*` over multiple tables (where
 the prefix is a normID'd alias/name that may need re-quoting, e.g. an unaliased `"My Table"`); for
 `alias.*` the prefix is the raw source text the user wrote, already valid, so it is emitted verbatim.
 It re-checks `model.getVersionId()` after every await (like `runDiagnostics`) and bails if the
 document changed, so a stale range is never applied; a cold cache / failed fetch no-ops rather than
-leaving a half-edit. (`getColumns` itself caches the in-flight `Promise`, so a concurrent caller — e.g.
-the autocomplete cache-warm loop — resolves the same fetch instead of getting an empty list.)
+leaving a half-edit. (Both `getColumns` and `getColInfos` cache the in-flight `Promise`, so a
+concurrent caller — e.g. the autocomplete cache-warm loop — resolves the same fetch instead of getting
+an empty list.) `starMenuEligible` also hides the item for a `*` inside a single-quoted string literal
+(`'x*y'`), which `identifierRangeAt` — double-quote-only — doesn't cover.
 
 **Clipboard:** `navigator.clipboard` is blocked in WKWebView. All copy operations use
 `ClipboardSetText` from `wailsjs/runtime/runtime`. Monaco's built-in **code-buffer** copy/paste is

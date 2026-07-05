@@ -35,7 +35,7 @@ import { patchMonacoClipboard } from "../../utils/monacoClipboard";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, GitGetHeadFileContent } from "../../../wailsjs/go/app/App";
 import { SNOWFLAKE_DATA_TYPES } from "../../generated/snowflakeDataTypes";
-import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateDataTypes, ValidateGrammar, ValidateAntiPatterns, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContextFull, ResolveTableRefs, ComputeGitLineDiff, StarSelectAt } from "../../../wailsjs/go/sqleditor/Service";
+import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateDataTypes, ValidateGrammar, ValidateAntiPatterns, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContextFull, ResolveTableRefs, ComputeGitLineDiff, StarSelectAt, FromSourceCount } from "../../../wailsjs/go/sqleditor/Service";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { FUNCTION_CATEGORIES } from "./snowflakeSql";
 import { getOrCreateMenuId } from "./monacoMenu";
@@ -284,28 +284,34 @@ async function getColumns(db: string, schema: string, table: string): Promise<st
 
 // ── ColInfo cache for type-compatible JOIN ON suggestions ─────────────────────
 const colInfoCache   = new Map<string, ColInfo[]>();
-const fetchingColInfos = new Set<string>();
+// Key → in-flight fetch (see getColumns): a concurrent caller awaits the same
+// fetch rather than getting [] and dropping type-matched JOIN-ON suggestions.
+const fetchingColInfos = new Map<string, Promise<ColInfo[]>>();
 
 async function getColInfos(db: string, schema: string, table: string): Promise<ColInfo[]> {
   const key = colCacheKey(db, schema, table);
   if (colInfoCache.has(key)) return colInfoCache.get(key)!;
-  if (fetchingColInfos.has(key)) return [];
-  fetchingColInfos.add(key);
+  const inflight = fetchingColInfos.get(key);
+  if (inflight) return inflight;
   const gen = currentCacheGeneration();
-  try {
-    const cols = await GetTableColumnsWithTypes(db, schema, table);
-    const entries: ColInfo[] = (cols ?? []).map((c: any) => ({
-      name:     c.name     ?? "",
-      dataType: c.dataType ?? "",
-    }));
-    if (gen === currentCacheGeneration()) colInfoCache.set(key, entries);
-    return entries;
-  } catch {
-    if (gen === currentCacheGeneration()) colInfoCache.set(key, []);
-    return [];
-  } finally {
-    fetchingColInfos.delete(key);
-  }
+  const p = (async () => {
+    try {
+      const cols = await GetTableColumnsWithTypes(db, schema, table);
+      const entries: ColInfo[] = (cols ?? []).map((c: any) => ({
+        name:     c.name     ?? "",
+        dataType: c.dataType ?? "",
+      }));
+      if (gen === currentCacheGeneration()) colInfoCache.set(key, entries);
+      return entries;
+    } catch {
+      if (gen === currentCacheGeneration()) colInfoCache.set(key, []);
+      return [];
+    } finally {
+      fetchingColInfos.delete(key);
+    }
+  })();
+  fetchingColInfos.set(key, p);
+  return p;
 }
 
 // ── Schema-level FK warm-up ────────────────────────────────────────────────────
@@ -664,12 +670,22 @@ let _expandWildcardRegistered = false;
     let targets: ResolvedRef[];
     let qualify: boolean;
     if (star.alias) {
+      // ResolvedRef.alias defaults to the table name, so `r.alias` already covers
+      // the unaliased case — no `|| r.name === a` fallback needed (that would only
+      // match a table by its bare name while it's aliased to something else, which
+      // is invalid SQL anyway).
       const a = normId(star.alias);
-      const match = refs.find((r) => (r.alias || r.name) === a || r.name === a);
+      const match = refs.find((r) => (r.alias || r.name) === a);
       if (!match) return;
       targets = [match];
       qualify = true;
     } else {
+      // A bare `*` must cover every FROM source. ParseJoinTables isn't depth-aware
+      // (it pulls tables out of subqueries/CTEs and drops old-style comma joins),
+      // so only expand when the backend's top-level source count matches the
+      // resolved refs exactly — otherwise refuse rather than write a wrong list.
+      const sourceCount = await FromSourceCount(stmtSql);
+      if (stale() || sourceCount < 0 || sourceCount !== refs.length) return;
       targets = refs;
       qualify = refs.length > 1;
     }

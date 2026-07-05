@@ -70,16 +70,26 @@ export function identifierRangeAt(line: string, idx0: number): { start: number; 
 // tell them apart: it returns a range that *contains* the star only in that
 // case. A genuine `alias.*` star falls just past the `alias.` range (identifier
 // chars never include `*`), and a bare `*` gets no range at all — both eligible.
-// Cheap + synchronous so it can fill the Monaco context key before the menu
-// renders; the command still re-checks the token authoritatively (backend).
+// A `*` inside a single-quoted string literal ('x*y') is likewise not a wildcard
+// (identifierRangeAt only tracks double-quoted identifiers, so that's checked
+// separately). Cheap + synchronous so it can fill the Monaco context key before
+// the menu renders; the command still re-checks the token authoritatively.
 export function starMenuEligible(line: string, column: number): boolean {
   let idx = -1;
   if (line[column - 1] === "*") idx = column - 1;
   else if (line[column - 2] === "*") idx = column - 2; // cursor on the star's right edge
   if (idx < 0) return false;
+  // Inside a double-quoted identifier (object name)?
   const r = identifierRangeAt(line, idx);
   const col = idx + 1; // 1-based Monaco column of the star
-  return !(r !== null && col >= r.start && col < r.end);
+  if (r !== null && col >= r.start && col < r.end) return false;
+  // Inside a single-quoted string literal? Count unescaped quotes before the star
+  // ('' is an escaped quote); an odd count means the star is inside a string.
+  let quotes = 0;
+  for (let i = 0; i < idx; i++) {
+    if (line[i] === "'") { if (line[i + 1] === "'") { i++; continue; } quotes++; }
+  }
+  return quotes % 2 === 0;
 }
 
 // ── quoteIfNecessary ─────────────────────────────────────────────────────────

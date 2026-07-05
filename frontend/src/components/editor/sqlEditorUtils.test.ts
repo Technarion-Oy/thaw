@@ -71,6 +71,10 @@ describe("starMenuEligible", () => {
     expect(atStar(`SELECT "ID" FROM "DB"."PUBLIC"."Testin*table"`)).toBe(false);
   });
 
+  it("hides when the star is inside a single-quoted string literal", () => {
+    expect(atStar("SELECT x FROM t WHERE s = 'a*b'")).toBe(false);
+  });
+
   it("is false when the cursor isn't on a star", () => {
     expect(starMenuEligible("SELECT a FROM t", 8)).toBe(false);
   });

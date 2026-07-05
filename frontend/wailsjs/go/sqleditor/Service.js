@@ -22,6 +22,10 @@ export function ComputeJoinOnConditions(arg1) {
   return window['go']['sqleditor']['Service']['ComputeJoinOnConditions'](arg1);
 }
 
+export function FromSourceCount(arg1) {
+  return window['go']['sqleditor']['Service']['FromSourceCount'](arg1);
+}
+
 export function GetActiveFunctionCall(arg1) {
   return window['go']['sqleditor']['Service']['GetActiveFunctionCall'](arg1);
 }

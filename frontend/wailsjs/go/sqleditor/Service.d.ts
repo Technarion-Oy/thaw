@@ -12,6 +12,8 @@ export function ComputeGitLineDiff(arg1:Array<string>,arg2:Array<string>,arg3:nu
 
 export function ComputeJoinOnConditions(arg1:sqleditor.JoinOnSuggestionsReq):Promise<Array<sqleditor.JoinCondition>>;
 
+export function FromSourceCount(arg1:string):Promise<number>;
+
 export function GetActiveFunctionCall(arg1:string):Promise<sqleditor.FunctionCallContext>;
 
 export function GetAutocompleteContextFull(arg1:sqleditor.AutocompleteContextRequest):Promise<sqleditor.AutocompleteContext>;
