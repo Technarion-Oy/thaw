@@ -22,7 +22,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -1280,9 +1279,12 @@ func normalizeDirPath(dirPath string) string {
 func (c *Client) ListGitRepoEntries(ctx context.Context, database, schema, repoName, dirPath string) ([]GitRepoEntry, error) {
 	dirPath = normalizeDirPath(dirPath)
 
-	sql := fmt.Sprintf(`LIST @%s/%s`, Qualify(database, schema, repoName), dirPath)
+	ref := fmt.Sprintf("@%s/%s", Qualify(database, schema, repoName), dirPath)
+	if err := ValidateStageRef(ref); err != nil {
+		return nil, err
+	}
 
-	res, err := c.Execute(ctx, sql)
+	res, err := c.Execute(ctx, "LIST "+ref)
 	if err != nil {
 		return nil, err
 	}
@@ -1299,13 +1301,16 @@ func (c *Client) ListStageEntries(ctx context.Context, database, schema, stageNa
 
 	// The user stage (@~) is implicit and not database/schema-scoped, so it must
 	// not be qualified; every other (named) stage is @database.schema.name.
-	ref := Qualify(database, schema, stageName)
+	qualified := Qualify(database, schema, stageName)
 	if stageName == "~" {
-		ref = "~"
+		qualified = "~"
 	}
-	sql := fmt.Sprintf(`LIST @%s/%s`, ref, dirPath)
+	ref := fmt.Sprintf("@%s/%s", qualified, dirPath)
+	if err := ValidateStageRef(ref); err != nil {
+		return nil, err
+	}
 
-	res, err := c.Execute(ctx, sql)
+	res, err := c.Execute(ctx, "LIST "+ref)
 	if err != nil {
 		return nil, err
 	}
@@ -1524,9 +1529,12 @@ func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
 func (c *Client) ListWorkspaceEntries(ctx context.Context, database, schema, workspaceName, dirPath string) ([]WorkspaceEntry, error) {
 	dirPath = normalizeDirPath(dirPath)
 
-	sql := fmt.Sprintf(`LIST @%s/%s`, Qualify(database, schema, workspaceName), dirPath)
+	ref := fmt.Sprintf("@%s/%s", Qualify(database, schema, workspaceName), dirPath)
+	if err := ValidateStageRef(ref); err != nil {
+		return nil, err
+	}
 
-	res, err := c.Execute(ctx, sql)
+	res, err := c.Execute(ctx, "LIST "+ref)
 	if err != nil {
 		return nil, err
 	}
@@ -1592,36 +1600,69 @@ func (c *Client) ListGitTags(ctx context.Context, database, schema, repoName str
 	return tags, nil
 }
 
-// stageFilePathRe is a strict allowlist for the unquoted @stage/path portion of
-// GetGitFileContent / ExecuteGitFile. Snowflake does not parameterise that
-// portion and terminates an unquoted stage path at the first whitespace, so a
-// denylist is unsafe: a single space lets a crafted filename graft a trailing
-// clause (e.g. `foo.sql UNION SELECT ...`) onto the statement. This charset
-// matches what unquoted stage paths actually support; filenames with spaces,
-// parentheses, or non-ASCII would need the whole path quoted, which is not yet
-// implemented.
-var stageFilePathRe = regexp.MustCompile(`^[A-Za-z0-9_./-]+$`)
-
-// validateStageFilePath guards filePath before it is spliced raw into a
-// @stage/path SQL clause. filePath must originate from server-side LIST output;
-// this allowlist is defence-in-depth. ".." segments are additionally rejected
-// against directory traversal within the stage.
-func validateStageFilePath(filePath string) error {
-	if !stageFilePathRe.MatchString(filePath) {
-		return fmt.Errorf("invalid file path %q", filePath)
+// ValidateStageRef guards a stage reference spliced unquoted into a SQL statement
+// (LIST, GET/PUT/REMOVE, EXECUTE IMMEDIATE FROM, SELECT ... FROM @stage). The path
+// segment is attacker-influenced — free-typed in dialogs, or taken from file/dir
+// names returned by LIST @stage, which anyone with write access to the backing
+// cloud storage can plant — so it is a genuine injection sink: Client.Execute
+// splits on top-level ';' and Snowflake treats '--' as a line comment (which would
+// also silently drop any trailing option clauses).
+//
+// A legitimate reference is @[db.schema.]stage[/path]; only the identifier parts
+// are double-quoted (by Qualify/QuoteIdent), and a quoted identifier may legally
+// contain ';', '\”, whitespace, or '--'. A quote is therefore honored as a
+// quoted-identifier delimiter ONLY in an identifier position — at the start or
+// right after '@' or '.'. A quote anywhere else (i.e. in the free-typed path
+// segment) is itself illegal, so a payload like `data/x"; DROP TABLE t; --"y`
+// cannot smuggle a blocked sequence past the scan by wrapping it in quotes.
+//
+// Whitespace outside a quoted identifier is rejected too: an unquoted stage path
+// terminates at the first whitespace, so when the ref is spliced into a SELECT
+// (GetGitFileContent uses `SELECT $1 FROM @stage/<path>`) a bare space would let a
+// crafted name graft a second query, e.g. `foo UNION SELECT secret FROM t`.
+// Legitimate filenames with spaces aren't expressible in an unquoted stage path
+// anyway, so nothing valid is lost.
+func ValidateStageRef(stageName string) error {
+	inQuote := false
+	for i := 0; i < len(stageName); i++ {
+		c := stageName[i]
+		if inQuote {
+			if c == '"' {
+				// "" inside a quoted identifier is an escaped quote, not the end.
+				if i+1 < len(stageName) && stageName[i+1] == '"' {
+					i++
+					continue
+				}
+				inQuote = false
+			}
+			continue // any char is allowed inside a quoted identifier
+		}
+		switch {
+		case c == '"':
+			if i == 0 || stageName[i-1] == '@' || stageName[i-1] == '.' {
+				inQuote = true
+				continue
+			}
+			return fmt.Errorf("invalid stage reference %q: unexpected quote", stageName)
+		case c == ';' || c == '\'' || c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == 0:
+			return fmt.Errorf("invalid stage reference %q: contains illegal character", stageName)
+		case c == '-' && i+1 < len(stageName) && stageName[i+1] == '-':
+			return fmt.Errorf("invalid stage reference %q: contains a SQL comment", stageName)
+		}
 	}
-	if slices.Contains(strings.Split(filePath, "/"), "..") {
-		return fmt.Errorf("invalid file path %q: traversal segment", filePath)
+	if inQuote {
+		return fmt.Errorf("invalid stage reference %q: unbalanced quote", stageName)
 	}
 	return nil
 }
 
 // GetGitFileContent reads a file from a git repository and returns its content.
 func (c *Client) GetGitFileContent(ctx context.Context, database, schema, repoName, filePath string) (string, error) {
-	if err := validateStageFilePath(filePath); err != nil {
+	ref := fmt.Sprintf("@%s/%s", Qualify(database, schema, repoName), filePath)
+	if err := ValidateStageRef(ref); err != nil {
 		return "", err
 	}
-	sql := fmt.Sprintf(`SELECT $1 FROM @%s/%s`, Qualify(database, schema, repoName), filePath)
+	sql := "SELECT $1 FROM " + ref
 
 	res, err := c.Execute(ctx, sql)
 	if err != nil {
@@ -1641,13 +1682,14 @@ func (c *Client) GetGitFileContent(ctx context.Context, database, schema, repoNa
 // ExecuteGitFile executes a SQL file via EXECUTE IMMEDIATE FROM @db.schema.name/path.
 // Also used for stage files (via App.ExecuteStageFile) since the SQL pattern is identical.
 //
-// SAFETY: filePath is spliced into the SQL raw (Snowflake does not parameterise the
-// path portion of EXECUTE IMMEDIATE FROM); see validateStageFilePath.
+// SAFETY: the path is spliced into the SQL raw (Snowflake does not parameterise the
+// path portion of EXECUTE IMMEDIATE FROM); see ValidateStageRef.
 func (c *Client) ExecuteGitFile(ctx context.Context, database, schema, repoName, filePath string) error {
-	if err := validateStageFilePath(filePath); err != nil {
+	ref := fmt.Sprintf("@%s/%s", Qualify(database, schema, repoName), filePath)
+	if err := ValidateStageRef(ref); err != nil {
 		return err
 	}
-	sql := fmt.Sprintf(`EXECUTE IMMEDIATE FROM @%s/%s`, Qualify(database, schema, repoName), filePath)
+	sql := "EXECUTE IMMEDIATE FROM " + ref
 
 	_, err := c.Execute(ctx, sql)
 	return err

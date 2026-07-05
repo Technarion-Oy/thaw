@@ -22,6 +22,12 @@ import (
 // derived from cfg and returns up to 50 rows. stagePath must be a fully
 // qualified stage reference, e.g. "@DB.SCHEMA.STAGE/path/to/file.csv".
 func PreviewStageFile(ctx context.Context, client *snowflake.Client, stagePath string, cfg FileFormatConfig) (PreviewResult, error) {
+	// stagePath is spliced unquoted into SELECT ... FROM <stagePath>; guard it
+	// against injection (see snowflake.ValidateStageRef).
+	if err := snowflake.ValidateStageRef(stagePath); err != nil {
+		return PreviewResult{}, err
+	}
+
 	// Snowflake SELECT queries ignore PARSE_HEADER=TRUE for naming columns (it skips the row but leaves columns as $1, $2).
 	// To provide a useful preview that looks like the target table, if ParseHeader is true,
 	// we turn it off for the query, fetch one extra row, and use the first returned row as our column headers.

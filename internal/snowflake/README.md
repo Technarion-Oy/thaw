@@ -65,6 +65,7 @@ No business logic belongs here — callers pass SQL strings or high-level parame
 - `ClearObjectCacheForSchema(db, schema)` — internal use only, not exposed as IPC
 - `ListStages(ctx, db, schema)` — `SHOW STAGES IN SCHEMA` → `[]StageSummary{Name, Type, URL}`; the `Type` column distinguishes `INTERNAL`/`EXTERNAL` so callers can filter (e.g. external tables may only reference an `EXTERNAL` stage)
 - `ListStageEntries(ctx, db, schema, stage, dirPath)` — directory-aware listing via `LIST @stage/dirPath` (internal or external stages). Pass `stage == "~"` to list the implicit, non-scoped user stage (`LIST @~/dirPath`; db/schema ignored)
+- `ValidateStageRef(ref)` — guards a `@[db.schema.]stage[/path]` reference spliced **unquoted** into SQL (`LIST`, `EXECUTE IMMEDIATE FROM`, `SELECT $1 FROM @stage/…`, PUT/GET/REMOVE). Quoted-identifier-aware scan that rejects `;`, `'`, whitespace, and `--` in the free-typed path segment while allowing them inside quoted identifiers. Shared by `ListGitRepoEntries`/`ListStageEntries`/`ListWorkspaceEntries`/`GetGitFileContent`/`ExecuteGitFile` here and by `internal/stage` + `internal/fileformat` (the `dirPath`/`filePath`/`stagePath` come from `LIST` output, which anyone with write access to the backing storage can plant)
 
 ### Session management
 - `UseRole/UseWarehouse/UseDatabase/UseSchema` — execute the USE statement then call `refreshConnectorState`, which flushes idle connections on role/warehouse/database changes
