@@ -54,6 +54,7 @@ func (v *Validator) parseScriptingStatement() bool {
 	return v.Choice(
 		v.ParseScriptingBlock,
 		v.ParseBreak,
+		v.ParseCancel,
 		func() bool { return v.consumeStmtSpan("END", "EXCEPTION", "WHEN") },
 	)
 }
@@ -219,5 +220,21 @@ func (v *Validator) ParseBreak() bool {
 			)
 		},
 		func() bool { return v.Optional(v.parseIdentPath) }, // optional <label>
+	)
+}
+
+// ParseCancel validates the Snowflake Scripting `CANCEL` construct — terminates the
+// asynchronous child job running for a RESULTSET.
+// Reference: https://docs.snowflake.com/en/sql-reference/snowflake-scripting/cancel
+//
+// Syntax:
+//
+//	CANCEL <result_set_name>
+//
+// (The terminating `;` belongs to the block-body statement list, not this rule.)
+func (v *Validator) ParseCancel() bool {
+	return v.Sequence(
+		func() bool { return v.MatchWord("CANCEL") },
+		v.parseIdentPath, // required <result_set_name>
 	)
 }

@@ -35,6 +35,20 @@ func TestParseBreak(t *testing.T) {
 	)
 }
 
+func TestParseCancel(t *testing.T) {
+	assertValid(t, (*Validator).ParseCancel,
+		`CANCEL my_result_set`,
+		`cancel my_result_set`, // case-insensitive
+		`CANCEL "My Result Set"`,
+	)
+	assertInvalid(t, (*Validator).ParseCancel,
+		`CANCEL`,                // missing target
+		`CANCEL a b`,            // two names
+		`CANCEL my_set extra`,   // trailing token
+		`CANCELS my_result_set`, // wrong keyword
+	)
+}
+
 func TestParseScriptingBlock(t *testing.T) {
 	assertValid(t, (*Validator).ParseScriptingBlock,
 		`BEGIN SELECT 1; END`,
@@ -65,6 +79,9 @@ func TestParseScriptingBlock(t *testing.T) {
 		`BEGIN EXIT; END`,
 		`BEGIN BREAK my_loop; END`,
 		`BEGIN SELECT 1; BREAK; END`,
+		// CANCEL wired into the block-body statement Choice.
+		`BEGIN CANCEL my_rs; END`,
+		`BEGIN SELECT 1; CANCEL my_rs; END`,
 	)
 	assertInvalid(t, (*Validator).ParseScriptingBlock,
 		`BEGIN END`,                   // empty body — needs a statement
