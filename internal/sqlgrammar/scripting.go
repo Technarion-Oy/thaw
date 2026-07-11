@@ -59,6 +59,7 @@ func (v *Validator) parseScriptingStatement() bool {
 		v.ParseClose,
 		v.ParseContinue,
 		v.ParseFetch,
+		v.ParseFor,
 		// ELSE joins END/EXCEPTION/WHEN as a leading boundary so a CASE branch body
 		// (THEN … / ELSE …) ends at the next branch. No plain statement legally starts
 		// with any of these words, so the extra stop is harmless in a non-CASE body.
@@ -469,21 +470,22 @@ func (v *Validator) parseCaseElse() bool {
 }
 
 // consumeExprSpan consumes an expression's tokens up to — but not including — the
-// first `stop` keyword that sits at paren depth 0 and outside any nested CASE … END.
+// first `stops` keyword that sits at paren depth 0 and outside any nested CASE … END.
 // Tracking CASE nesting lets a WHEN condition or operand embedding a scalar
 // `CASE … WHEN … THEN … END` expression not be cut short by the inner WHEN/THEN. A
 // top-level `;` also ends the span (an expression never spans a statement terminator),
 // which keeps a missing THEN failing at the right spot. Requires at least one token,
-// so an immediate stop word yields an empty span and fails.
+// so an immediate stop word yields an empty span and fails. Multiple stop words let a
+// span end at any of several boundaries (e.g. FOR's `<end>` stopping at DO or LOOP).
 //
 // ponytail: a permissive span, NOT a real expression parse — replace with the
 // expression grammar once it lands.
-func (v *Validator) consumeExprSpan(stop string) bool {
+func (v *Validator) consumeExprSpan(stops ...string) bool {
 	start := v.pos
 	paren, caseDepth := 0, 0
 	for !v.AtEnd() {
 		t := v.Peek()
-		if paren == 0 && caseDepth == 0 && v.isWord(t, stop) {
+		if paren == 0 && caseDepth == 0 && v.isWord(t, stops...) {
 			break
 		}
 		if t.Kind == sqltok.Semicolon && paren == 0 {
@@ -584,5 +586,65 @@ func (v *Validator) ParseFetch() bool {
 				return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, v.parseIdentPath)
 			})
 		},
+	)
+}
+
+// ParseFor validates the Snowflake Scripting `FOR` construct — repeats its body once
+// per cursor row (cursor-based) or over a numeric range (counter-based).
+// Reference: https://docs.snowflake.com/en/sql-reference/snowflake-scripting/for
+//
+// Syntax:
+//
+//	-- Cursor-based
+//	FOR <row_variable> IN <cursor_name> DO
+//	    <statement>; [ <statement>; ... ]
+//	END FOR [ <label> ] ;
+//
+//	-- Counter-based
+//	FOR <counter_variable> IN [ REVERSE ] <start> TO <end> { DO | LOOP }
+//	    <statement>; [ <statement>; ... ]
+//	END { FOR | LOOP } [ <label> ] ;
+//
+// The two forms share the `FOR <variable> IN` prefix and diverge after it. The cursor
+// form is tried FIRST: it is the tight `<cursor_name> DO`, so a counter range (whose
+// `<start>` is not immediately followed by DO, or is a number REVERSE can't lead) fails
+// it cleanly and falls through. The counter `<start>`/`<end>` are permissive expression
+// spans (no expression grammar in this layer). Both forms accept `END { FOR | LOOP }`.
+// The terminating `;` belongs to the block-body statement list, not this rule.
+func (v *Validator) ParseFor() bool {
+	cursorForm := func() bool {
+		return v.Sequence(
+			v.parseIdentPath, // <cursor_name>
+			func() bool { return v.MatchWord("DO") },
+		)
+	}
+	counterForm := func() bool {
+		return v.Sequence(
+			func() bool { return v.Optional(func() bool { return v.MatchWord("REVERSE") }) },
+			func() bool { return v.consumeExprSpan("TO") }, // <start>
+			func() bool { return v.MatchWord("TO") },
+			func() bool { return v.consumeExprSpan("DO", "LOOP") }, // <end>
+			func() bool {
+				return v.Choice(
+					func() bool { return v.MatchWord("DO") },
+					func() bool { return v.MatchWord("LOOP") },
+				)
+			},
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchWord("FOR") },
+		v.parseIdentPath, // <row_variable> | <counter_variable>
+		func() bool { return v.MatchWord("IN") },
+		func() bool { return v.Choice(cursorForm, counterForm) },
+		v.parseScriptingStmtList,
+		func() bool { return v.MatchWord("END") },
+		func() bool {
+			return v.Choice(
+				func() bool { return v.MatchWord("FOR") },
+				func() bool { return v.MatchWord("LOOP") },
+			)
+		},
+		func() bool { return v.Optional(v.parseIdentPath) }, // optional <label>
 	)
 }
