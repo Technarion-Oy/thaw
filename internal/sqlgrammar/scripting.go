@@ -61,6 +61,7 @@ func (v *Validator) parseScriptingStatement() bool {
 		v.ParseFetch,
 		v.ParseFor,
 		v.ParseIf,
+		v.ParseLet,
 		// ELSE/ELSEIF join END/EXCEPTION/WHEN as leading boundaries so a CASE or IF
 		// branch body (THEN … / ELSEIF … / ELSE …) ends at the next branch. No plain
 		// statement legally starts with any of these words, so the extra stops are
@@ -149,23 +150,26 @@ func (v *Validator) assignOp() bool {
 	)
 }
 
-// parseVariableDecl matches `<name> [<type>] [ { DEFAULT | := } <expr> ]`. The type
-// is a permissive `<ident> [ ( … ) ]` (data types are validated separately by
-// sqleditor.ValidateDataTypes), guarded so it does not swallow a leading DEFAULT,
-// and the default value is an expression span up to the terminating `;`.
-func (v *Validator) parseVariableDecl() bool {
-	typeName := func() bool {
-		if v.isWord(v.Peek(), "DEFAULT") { // DEFAULT is the assign op, not a type
-			return false
-		}
-		return v.Sequence(
-			v.parseIdentPath,
-			func() bool { return v.Optional(v.consumeBalancedParens) },
-		)
+// parseTypeName matches a permissive data-type span `<ident> [ ( … ) ]` (data types
+// are validated separately by sqleditor.ValidateDataTypes), guarded so it does not
+// swallow a leading DEFAULT (which is an assign op, not a type). Shared by the
+// variable declaration (parseVariableDecl) and LET variable assignment (ParseLet).
+func (v *Validator) parseTypeName() bool {
+	if v.isWord(v.Peek(), "DEFAULT") {
+		return false
 	}
 	return v.Sequence(
+		v.parseIdentPath,
+		func() bool { return v.Optional(v.consumeBalancedParens) },
+	)
+}
+
+// parseVariableDecl matches `<name> [<type>] [ { DEFAULT | := } <expr> ]`. The
+// default value is an expression span up to the terminating `;`.
+func (v *Validator) parseVariableDecl() bool {
+	return v.Sequence(
 		v.parseIdentPath, // <name>
-		func() bool { return v.Optional(typeName) },
+		func() bool { return v.Optional(v.parseTypeName) },
 		func() bool {
 			return v.Optional(func() bool {
 				return v.Sequence(v.assignOp, v.consumeDeclExpr)
@@ -255,6 +259,50 @@ func (v *Validator) parseNestedProcDecl() bool {
 		returnsType,
 		func() bool { return v.MatchWord("AS") },
 		func() bool { return v.Choice(v.ParseScriptingBlock, v.consumeDeclExpr) },
+	)
+}
+
+// ParseLet validates the Snowflake Scripting `LET` construct — assigns an expression,
+// query, or result set to a variable, cursor, or RESULTSET within a scripting block.
+// It is a block-body statement, not top-level.
+// Reference: https://docs.snowflake.com/en/sql-reference/snowflake-scripting/let
+//
+// Syntax:
+//
+//	LET { <variable_assignment> | <cursor_assignment> | <resultset_assignment> }
+//
+//	<variable_assignment>  ::= <name> [ <type> ] { DEFAULT | := } <expression>
+//	<cursor_assignment>    ::= <name> CURSOR FOR <query>
+//	<resultset_assignment> ::= <name> RESULTSET { DEFAULT | := } [ ASYNC ] ( <query> )
+//
+// Unlike the DECLARE forms (parseVariableDecl/parseResultsetDecl) the assignment is
+// REQUIRED here — LET always assigns — so those parsers are not reused for the variable
+// and resultset branches; only the cursor form is identical (parseCursorDecl). The
+// variable branch is tried LAST: its optional <type> would otherwise swallow the CURSOR
+// / RESULTSET keyword as a type name and shadow those more specific forms. Type and
+// expression are permissive spans (no expression grammar in this layer). The terminating
+// `;` belongs to the block-body statement list, not this rule.
+func (v *Validator) ParseLet() bool {
+	variableAssign := func() bool {
+		return v.Sequence(
+			v.parseIdentPath, // <name>
+			func() bool { return v.Optional(v.parseTypeName) },
+			v.assignOp,        // required { DEFAULT | := }
+			v.consumeDeclExpr, // <expression>
+		)
+	}
+	resultsetAssign := func() bool {
+		return v.Sequence(
+			v.parseIdentPath, // <name>
+			func() bool { return v.MatchWord("RESULTSET") },
+			v.assignOp, // required { DEFAULT | := }
+			func() bool { return v.Optional(func() bool { return v.MatchWord("ASYNC") }) },
+			v.consumeBalancedParens, // ( <query> )
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchWord("LET") },
+		func() bool { return v.Choice(v.parseCursorDecl, resultsetAssign, variableAssign) },
 	)
 }
 

@@ -151,6 +151,34 @@ func TestParseIf(t *testing.T) {
 	)
 }
 
+func TestParseLet(t *testing.T) {
+	assertValid(t, (*Validator).ParseLet,
+		// Variable assignment.
+		`LET x := 5`,
+		`let x := 5`, // case-insensitive
+		`LET x DEFAULT 5`,
+		`LET profit NUMBER(38, 2) := 100`, // with type
+		`LET name VARCHAR := 'a'`,
+		`LET x := a + b * 2`,
+		`LET "My Var" := 1`,
+		// Cursor assignment.
+		`LET c1 CURSOR FOR SELECT id FROM t`,
+		`LET c1 CURSOR FOR res`, // for a resultset name
+		// RESULTSET assignment.
+		`LET rs RESULTSET := (SELECT 1)`,
+		`LET rs RESULTSET DEFAULT (SELECT 1)`,
+		`LET rs RESULTSET := ASYNC (SELECT 1)`,
+	)
+	assertInvalid(t, (*Validator).ParseLet,
+		`LET x`,                     // missing assignment (required)
+		`LET x NUMBER`,              // type but no assignment
+		`LET := 5`,                  // missing name
+		`LETS x := 5`,               // wrong keyword
+		`LET c1 CURSOR SELECT 1`,    // cursor missing FOR
+		`LET rs RESULTSET (SELECT 1)`, // resultset missing assign op
+	)
+}
+
 func TestParseCase(t *testing.T) {
 	assertValid(t, (*Validator).ParseCase,
 		// Searched form.
