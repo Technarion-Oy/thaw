@@ -66,6 +66,7 @@ func (v *Validator) parseScriptingStatement() bool {
 		v.ParseNull,
 		v.ParseOpen,
 		v.ParseRaise,
+		v.ParseRepeat,
 		// ELSE/ELSEIF join END/EXCEPTION/WHEN as leading boundaries so a CASE or IF
 		// branch body (THEN … / ELSEIF … / ELSE …) ends at the next branch. No plain
 		// statement legally starts with any of these words, so the extra stops are
@@ -328,6 +329,35 @@ func (v *Validator) ParseLoop() bool {
 		v.parseScriptingStmtList,
 		func() bool { return v.MatchWord("END") },
 		func() bool { return v.MatchWord("LOOP") },
+		func() bool { return v.Optional(v.parseIdentPath) }, // optional <label>
+	)
+}
+
+// ParseRepeat validates the Snowflake Scripting `REPEAT` construct — a post-test
+// loop that executes its body at least once, repeating until the UNTIL condition is
+// true. It is a block-body statement, not top-level.
+// Reference: https://docs.snowflake.com/en/sql-reference/snowflake-scripting/repeat
+//
+// Syntax:
+//
+//	REPEAT
+//	    <statement>; [ <statement>; ... ]
+//	UNTIL ( <condition> )
+//	END REPEAT [ <label> ] ;
+//
+// UNTIL need not be a stop word for the body list: the trailing `UNTIL ( … ) END
+// REPEAT` has no terminating `;`, so the block-body list's next-item attempt fails on
+// the missing semicolon and rewinds cleanly to UNTIL. The condition's surrounding
+// parens are required, matched as a balanced-paren span (no expression grammar in this
+// layer). The terminating `;` belongs to the block-body statement list, not this rule.
+func (v *Validator) ParseRepeat() bool {
+	return v.Sequence(
+		func() bool { return v.MatchWord("REPEAT") },
+		v.parseScriptingStmtList,
+		func() bool { return v.MatchWord("UNTIL") },
+		v.consumeBalancedParens, // ( <condition> )
+		func() bool { return v.MatchWord("END") },
+		func() bool { return v.MatchWord("REPEAT") },
 		func() bool { return v.Optional(v.parseIdentPath) }, // optional <label>
 	)
 }

@@ -233,6 +233,27 @@ func TestParseLoop(t *testing.T) {
 	)
 }
 
+func TestParseRepeat(t *testing.T) {
+	assertValid(t, (*Validator).ParseRepeat,
+		`REPEAT SELECT 1; UNTIL (done) END REPEAT`,
+		`repeat select 1; until (done) end repeat`,            // case-insensitive
+		`REPEAT SELECT 1; SELECT 2; UNTIL (c > 0) END REPEAT`, // multiple statements
+		`REPEAT counter := counter + 1; UNTIL (counter >= 10) END REPEAT`,
+		`REPEAT SELECT 1; UNTIL (done) END REPEAT my_label`, // trailing label
+		`REPEAT IF (x) THEN BREAK; END IF; UNTIL (done) END REPEAT`,
+		// Nested block in the body (inner `;` must not stop the body early).
+		`REPEAT BEGIN SELECT 1; SELECT 2; END; UNTIL (done) END REPEAT`,
+	)
+	assertInvalid(t, (*Validator).ParseRepeat,
+		`REPEAT UNTIL (done) END REPEAT`,               // empty body
+		`REPEAT SELECT 1; END REPEAT`,                  // missing UNTIL
+		`REPEAT SELECT 1; UNTIL done END REPEAT`,       // condition not parenthesized
+		`REPEAT SELECT 1; UNTIL (done) END`,            // missing REPEAT after END
+		`REPEAT SELECT 1; UNTIL (done) END LOOP`,       // wrong END keyword
+		`REPEAT SELECT 1; UNTIL (done) END REPEAT a b`, // two labels
+	)
+}
+
 func TestParseNull(t *testing.T) {
 	assertValid(t, (*Validator).ParseNull,
 		`NULL`,
