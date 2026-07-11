@@ -98,6 +98,35 @@ func TestParseFetch(t *testing.T) {
 	)
 }
 
+func TestParseFor(t *testing.T) {
+	assertValid(t, (*Validator).ParseFor,
+		// Cursor-based.
+		`FOR rec IN c1 DO SELECT rec.id; END FOR`,
+		`for rec in c1 do select rec.id; end for`, // case-insensitive
+		`FOR rec IN c1 DO SELECT 1; END FOR my_label`,
+		`FOR rec IN c1 DO SELECT 1; SELECT 2; END FOR`, // multiple statements
+		`FOR r IN "My Cursor" DO SELECT 1; END FOR`,
+		// Counter-based.
+		`FOR i IN 1 TO 10 DO SELECT i; END FOR`,
+		`FOR i IN 1 TO 10 LOOP SELECT i; END LOOP`,
+		`FOR i IN REVERSE 1 TO 10 DO SELECT i; END FOR`,
+		`FOR i IN start_var TO end_var DO SELECT i; END FOR my_label`,
+		`FOR i IN 1 TO n LOOP SELECT i; END LOOP counter_loop`,
+		// Nested block in the body (inner `;` must not stop the body early).
+		`FOR i IN 1 TO 10 DO BEGIN SELECT 1; SELECT 2; END; END FOR`,
+	)
+	assertInvalid(t, (*Validator).ParseFor,
+		`FOR IN c1 DO SELECT 1; END FOR`,       // missing loop variable
+		`FOR rec c1 DO SELECT 1; END FOR`,      // missing IN
+		`FOR rec IN c1 SELECT 1; END FOR`,      // missing DO
+		`FOR i IN 1 10 DO SELECT 1; END FOR`,   // missing TO
+		`FOR rec IN c1 DO SELECT 1;`,           // missing END FOR
+		`FOR rec IN c1 DO SELECT 1; END`,       // missing FOR/LOOP after END
+		`FORS rec IN c1 DO SELECT 1; END FOR`,  // wrong keyword
+		`FOR rec IN c1 DO SELECT 1; END FOR a b`, // two labels
+	)
+}
+
 func TestParseCase(t *testing.T) {
 	assertValid(t, (*Validator).ParseCase,
 		// Searched form.
