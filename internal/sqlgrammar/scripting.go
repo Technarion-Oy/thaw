@@ -63,6 +63,7 @@ func (v *Validator) parseScriptingStatement() bool {
 		v.ParseIf,
 		v.ParseLet,
 		v.ParseLoop,
+		v.ParseNull,
 		// ELSE/ELSEIF join END/EXCEPTION/WHEN as leading boundaries so a CASE or IF
 		// branch body (THEN … / ELSEIF … / ELSE …) ends at the next branch. No plain
 		// statement legally starts with any of these words, so the extra stops are
@@ -528,6 +529,20 @@ func (v *Validator) ParseBreak() bool {
 		},
 		func() bool { return v.Optional(v.parseIdentPath) }, // optional <label>
 	)
+}
+
+// ParseNull validates the Snowflake Scripting `NULL` construct — a no-op statement,
+// typically used in exception handlers or conditional branches to take no action. It
+// is a block-body statement, not top-level.
+// Reference: https://docs.snowflake.com/en/sql-reference/snowflake-scripting/null
+//
+// Syntax:
+//
+//	NULL
+//
+// (The terminating `;` belongs to the block-body statement list, not this rule.)
+func (v *Validator) ParseNull() bool {
+	return v.MatchWord("NULL")
 }
 
 // ParseCase validates the Snowflake Scripting `CASE` construct — both the simple
