@@ -46,3 +46,35 @@ func TestCollectCTENames(t *testing.T) {
 		})
 	}
 }
+
+// TestCollectCTEDefsSpans checks that the byte-offset spans slice out exactly
+// the name, column list, and body the sqleditor projection extractor needs —
+// and that a `CREATE VIEW v AS (…)` never masquerades as a CTE named v.
+func TestCollectCTEDefsSpans(t *testing.T) {
+	sql := `WITH c (a, b) AS (SELECT 1, 2) SELECT * FROM c`
+	defs := CollectCTEDefs(sql, sqltok.SignificantTokens(sql))
+	if len(defs) != 1 {
+		t.Fatalf("got %d defs, want 1", len(defs))
+	}
+	d := defs[0]
+	if d.Name != "c" || !d.Closed {
+		t.Fatalf("name=%q closed=%v, want c/true", d.Name, d.Closed)
+	}
+	if cols := sql[d.ColsStart:d.ColsEnd]; cols != "(a, b)" {
+		t.Errorf("column-list span = %q, want %q", cols, "(a, b)")
+	}
+	if body := sql[d.BodyStart:d.BodyEnd]; body != "(SELECT 1, 2)" {
+		t.Errorf("body span = %q, want %q", body, "(SELECT 1, 2)")
+	}
+
+	// CREATE VIEW … AS (…) is not a CTE: the old reCTEDef regex matched it.
+	if got := CollectCTEDefs(`CREATE VIEW v AS (SELECT 1)`, sqltok.SignificantTokens(`CREATE VIEW v AS (SELECT 1)`)); len(got) != 0 {
+		t.Errorf("CREATE VIEW matched as CTE: %+v", got)
+	}
+
+	// No column list → ColsStart is -1.
+	nc := CollectCTEDefs(`WITH c AS (SELECT 1) SELECT * FROM c`, sqltok.SignificantTokens(`WITH c AS (SELECT 1) SELECT * FROM c`))
+	if len(nc) != 1 || nc[0].ColsStart != -1 {
+		t.Errorf("no-column-list ColsStart = %d, want -1", nc[0].ColsStart)
+	}
+}
