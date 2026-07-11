@@ -252,6 +252,17 @@ func TestParseRepeat(t *testing.T) {
 		`REPEAT SELECT 1; UNTIL (done) END LOOP`,       // wrong END keyword
 		`REPEAT SELECT 1; UNTIL (done) END REPEAT a b`, // two labels
 	)
+	// A REPEAT embedded in a block with trailing statements: the body list must stop
+	// at UNTIL, not scan past `END REPEAT` to the next `;`. Exercised via
+	// ParseScriptingBlock since the bug only surfaces when REPEAT is not the last
+	// statement (a standalone ParseRepeat runs off the end of input regardless).
+	assertValid(t, (*Validator).ParseScriptingBlock,
+		`BEGIN REPEAT SELECT 1; UNTIL (done) END REPEAT; SELECT 2; END`,
+	)
+	assertInvalid(t, (*Validator).ParseScriptingBlock,
+		`BEGIN REPEAT SELECT 1; UNTIL done END REPEAT; SELECT 2; END`, // condition not parenthesized
+		`BEGIN REPEAT SELECT 1; UNTIL (done) END LOOP; SELECT 2; END`, // wrong END keyword
+	)
 }
 
 func TestParseNull(t *testing.T) {

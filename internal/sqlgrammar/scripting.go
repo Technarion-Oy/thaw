@@ -68,10 +68,12 @@ func (v *Validator) parseScriptingStatement() bool {
 		v.ParseRaise,
 		v.ParseRepeat,
 		// ELSE/ELSEIF join END/EXCEPTION/WHEN as leading boundaries so a CASE or IF
-		// branch body (THEN … / ELSEIF … / ELSE …) ends at the next branch. No plain
-		// statement legally starts with any of these words, so the extra stops are
-		// harmless in a non-CASE/non-IF body.
-		func() bool { return v.consumeStmtSpan("END", "EXCEPTION", "WHEN", "ELSE", "ELSEIF") },
+		// branch body (THEN … / ELSEIF … / ELSE …) ends at the next branch; UNTIL is
+		// REPEAT's body boundary (its `UNTIL (…) END REPEAT` tail has no terminating `;`,
+		// so without this stop the catch-all scans past it to the next statement's `;`).
+		// No plain statement legally starts with any of these words, so the extra stops
+		// are harmless in a non-CASE/non-IF/non-REPEAT body.
+		func() bool { return v.consumeStmtSpan("END", "EXCEPTION", "WHEN", "ELSE", "ELSEIF", "UNTIL") },
 	)
 }
 
@@ -345,11 +347,12 @@ func (v *Validator) ParseLoop() bool {
 //	UNTIL ( <condition> )
 //	END REPEAT [ <label> ] ;
 //
-// UNTIL need not be a stop word for the body list: the trailing `UNTIL ( … ) END
-// REPEAT` has no terminating `;`, so the block-body list's next-item attempt fails on
-// the missing semicolon and rewinds cleanly to UNTIL. The condition's surrounding
-// parens are required, matched as a balanced-paren span (no expression grammar in this
-// layer). The terminating `;` belongs to the block-body statement list, not this rule.
+// UNTIL is a leading boundary in the block-body catch-all (parseScriptingStatement),
+// so the body list stops there instead of scanning the `UNTIL ( … ) END REPEAT` tail
+// into a bogus statement when a REPEAT is embedded (not the last statement in its
+// block). The condition's surrounding parens are required, matched as a balanced-paren
+// span (no expression grammar in this layer). The terminating `;` belongs to the
+// block-body statement list, not this rule.
 func (v *Validator) ParseRepeat() bool {
 	return v.Sequence(
 		func() bool { return v.MatchWord("REPEAT") },
