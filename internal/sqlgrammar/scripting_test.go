@@ -108,13 +108,13 @@ func TestParseOpen(t *testing.T) {
 		`OPEN my_cursor using ("Bind A", "Bind B")`,
 	)
 	assertInvalid(t, (*Validator).ParseOpen,
-		`OPEN`,                       // missing cursor name
-		`OPEN a b`,                   // two names
-		`OPEN my_cursor extra`,       // trailing token
-		`OPENS my_cursor`,            // wrong keyword
-		`OPEN my_cursor USING ()`,    // empty bind list
-		`OPEN my_cursor USING v1`,    // missing parens
-		`OPEN my_cursor USING (v1,)`, // trailing comma
+		`OPEN`,                         // missing cursor name
+		`OPEN a b`,                     // two names
+		`OPEN my_cursor extra`,         // trailing token
+		`OPENS my_cursor`,              // wrong keyword
+		`OPEN my_cursor USING ()`,      // empty bind list
+		`OPEN my_cursor USING v1`,      // missing parens
+		`OPEN my_cursor USING (v1,)`,   // trailing comma
 		`OPEN my_cursor USING (v1 v2)`, // missing comma
 	)
 }
