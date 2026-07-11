@@ -68,6 +68,7 @@ func (v *Validator) parseScriptingStatement() bool {
 		v.ParseRaise,
 		v.ParseRepeat,
 		v.ParseReturn,
+		v.ParseWhile,
 		// ELSE/ELSEIF join END/EXCEPTION/WHEN as leading boundaries so a CASE or IF
 		// branch body (THEN … / ELSEIF … / ELSE …) ends at the next branch; UNTIL is
 		// REPEAT's body boundary (its `UNTIL (…) END REPEAT` tail has no terminating `;`,
@@ -362,6 +363,43 @@ func (v *Validator) ParseRepeat() bool {
 		v.consumeBalancedParens, // ( <condition> )
 		func() bool { return v.MatchWord("END") },
 		func() bool { return v.MatchWord("REPEAT") },
+		func() bool { return v.Optional(v.parseIdentPath) }, // optional <label>
+	)
+}
+
+// ParseWhile validates the Snowflake Scripting `WHILE` construct — a pre-test loop
+// that repeats its body while the condition remains true. It is a block-body
+// statement, not top-level.
+// Reference: https://docs.snowflake.com/en/sql-reference/snowflake-scripting/while
+//
+// Syntax:
+//
+//	WHILE ( <condition> ) { DO | LOOP }
+//	    <statement>; [ <statement>; ... ]
+//	END { WHILE | LOOP } [ <label> ] ;
+//
+// The condition's surrounding parens are required, matched as a balanced-paren span
+// (no expression grammar in this layer), mirroring ParseRepeat. END is already a
+// leading boundary in the block-body catch-all, so no extra body stop is needed. The
+// terminating `;` belongs to the block-body statement list, not this rule.
+func (v *Validator) ParseWhile() bool {
+	return v.Sequence(
+		func() bool { return v.MatchWord("WHILE") },
+		v.consumeBalancedParens, // ( <condition> )
+		func() bool { // { DO | LOOP }
+			return v.Choice(
+				func() bool { return v.MatchWord("DO") },
+				func() bool { return v.MatchWord("LOOP") },
+			)
+		},
+		v.parseScriptingStmtList,
+		func() bool { return v.MatchWord("END") },
+		func() bool { // END { WHILE | LOOP }
+			return v.Choice(
+				func() bool { return v.MatchWord("WHILE") },
+				func() bool { return v.MatchWord("LOOP") },
+			)
+		},
 		func() bool { return v.Optional(v.parseIdentPath) }, // optional <label>
 	)
 }
