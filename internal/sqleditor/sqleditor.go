@@ -1295,7 +1295,7 @@ func partsToRef(parts []string) JoinTableRef {
 // parseUseRef parses a USE statement whose body starts at toks[at] (just past
 // the USE keyword), appending a DB/schema ref to result when applicable. It
 // returns the token index at which the main scan should resume. USE ROLE and
-// USE WAREHOUSE are recognised but produce no ref.
+// USE WAREHOUSE are recognized but produce no ref.
 func parseUseRef(toks []sqltok.Token, src string, at int, result *[]JoinTableRef) int {
 	if at >= len(toks) {
 		return at
