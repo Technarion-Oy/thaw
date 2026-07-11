@@ -67,6 +67,7 @@ func (v *Validator) parseScriptingStatement() bool {
 		v.ParseOpen,
 		v.ParseRaise,
 		v.ParseRepeat,
+		v.ParseReturn,
 		// ELSE/ELSEIF join END/EXCEPTION/WHEN as leading boundaries so a CASE or IF
 		// branch body (THEN … / ELSEIF … / ELSE …) ends at the next branch; UNTIL is
 		// REPEAT's body boundary (its `UNTIL (…) END REPEAT` tail has no terminating `;`,
@@ -717,6 +718,25 @@ func (v *Validator) ParseRaise() bool {
 	return v.Sequence(
 		func() bool { return v.MatchWord("RAISE") },
 		func() bool { return v.Optional(v.parseIdentPath) }, // optional <exception_name>; omitted to re-raise in a handler
+	)
+}
+
+// ParseReturn validates the Snowflake Scripting `RETURN` construct — exits the block
+// and returns the value of the given expression to the caller. It is a block-body
+// statement, not top-level.
+// Reference: https://docs.snowflake.com/en/sql-reference/snowflake-scripting/return
+//
+// Syntax:
+//
+//	RETURN <expression>
+//
+// The expression is a permissive span up to the terminating `;` (no expression grammar
+// in this layer). The terminating `;` belongs to the block-body statement list, not
+// this rule.
+func (v *Validator) ParseReturn() bool {
+	return v.Sequence(
+		func() bool { return v.MatchWord("RETURN") },
+		v.consumeDeclExpr, // required <expression>
 	)
 }
 

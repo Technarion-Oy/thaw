@@ -67,6 +67,23 @@ func TestParseRaise(t *testing.T) {
 	)
 }
 
+func TestParseReturn(t *testing.T) {
+	assertValid(t, (*Validator).ParseReturn,
+		`RETURN 1`,
+		`return 1`, // case-insensitive
+		`RETURN my_variable`,
+		`RETURN a + b * 2`,
+		`RETURN (SELECT count(*) FROM t)`,
+		`RETURN 'done'`,
+	)
+	assertInvalid(t, (*Validator).ParseReturn,
+		`RETURN`,          // missing expression
+		`RETURNS 1`,       // wrong keyword
+		`RETURN ;`,        // no expression before terminator
+		`my_variable`,     // not a return
+	)
+}
+
 func TestParseCancel(t *testing.T) {
 	assertValid(t, (*Validator).ParseCancel,
 		`CANCEL my_result_set`,
