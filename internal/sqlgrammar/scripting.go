@@ -64,6 +64,7 @@ func (v *Validator) parseScriptingStatement() bool {
 		v.ParseLet,
 		v.ParseLoop,
 		v.ParseNull,
+		v.ParseOpen,
 		// ELSE/ELSEIF join END/EXCEPTION/WHEN as leading boundaries so a CASE or IF
 		// branch body (THEN … / ELSEIF … / ELSE …) ends at the next branch. No plain
 		// statement legally starts with any of these words, so the extra stops are
@@ -696,6 +697,37 @@ func (v *Validator) ParseClose() bool {
 	return v.Sequence(
 		func() bool { return v.MatchWord("CLOSE") },
 		v.parseIdentPath, // required <cursor_name>
+	)
+}
+
+// ParseOpen validates the Snowflake Scripting `OPEN` construct — opens a cursor by
+// executing its query and positioning the pointer at the first row.
+// Reference: https://docs.snowflake.com/en/sql-reference/snowflake-scripting/open
+//
+// Syntax:
+//
+//	OPEN <cursor_name> [ USING ( <bind_variable> [, <bind_variable> ... ] ) ]
+//
+// (The terminating `;` belongs to the block-body statement list, not this rule.)
+func (v *Validator) ParseOpen() bool {
+	return v.Sequence(
+		func() bool { return v.MatchWord("OPEN") },
+		v.parseIdentPath, // required <cursor_name>
+		func() bool { // optional USING ( <bind_variable> [, ...] )
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("USING") },
+					func() bool { return v.Match(sqltok.LParen) },
+					v.parseIdentPath, // first <bind_variable>
+					func() bool {
+						return v.ZeroOrMore(func() bool {
+							return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, v.parseIdentPath)
+						})
+					},
+					func() bool { return v.Match(sqltok.RParen) },
+				)
+			})
+		},
 	)
 }
 

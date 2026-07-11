@@ -98,6 +98,27 @@ func TestParseFetch(t *testing.T) {
 	)
 }
 
+func TestParseOpen(t *testing.T) {
+	assertValid(t, (*Validator).ParseOpen,
+		`OPEN my_cursor`,
+		`open my_cursor`, // case-insensitive
+		`OPEN "My Cursor"`,
+		`OPEN my_cursor USING (v1)`,
+		`OPEN my_cursor USING (v1, v2, v3)`,
+		`OPEN my_cursor using ("Bind A", "Bind B")`,
+	)
+	assertInvalid(t, (*Validator).ParseOpen,
+		`OPEN`,                         // missing cursor name
+		`OPEN a b`,                     // two names
+		`OPEN my_cursor extra`,         // trailing token
+		`OPENS my_cursor`,              // wrong keyword
+		`OPEN my_cursor USING ()`,      // empty bind list
+		`OPEN my_cursor USING v1`,      // missing parens
+		`OPEN my_cursor USING (v1,)`,   // trailing comma
+		`OPEN my_cursor USING (v1 v2)`, // missing comma
+	)
+}
+
 func TestParseFor(t *testing.T) {
 	assertValid(t, (*Validator).ParseFor,
 		// Cursor-based.
