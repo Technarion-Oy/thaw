@@ -2980,76 +2980,195 @@ func ComputeGitLineDiff(headLines, currentLines []string, maxLines int) LineDiff
 	return LineDiff{Added: filteredAdded, Modified: modified, Deleted: filteredDeleted}
 }
 
-// ── IsDatatypeContext ──────────────────────────────────────────────────────
+// ── autocomplete context detectors ─────────────────────────────────────────
+//
+// IsDatatypeContext, IsInJoinOnClause, and DetectUsingClause scan the sqltok
+// significant-token stream of the current statement rather than matching keyword
+// regexes over raw text. Tokenizing drops comments and string literals, so a
+// keyword in a comment or a "::" inside a string no longer produces a false
+// context, and the backwards scan is linear instead of regex backtracking over
+// the whole buffer.
 
-// Compiled regex patterns for datatype context detection (autocomplete).
-var (
-	reDtCtxCastShorthand = regexp.MustCompile(`::\s*$`)
-	reDtCtxCastFunction  = regexp.MustCompile(`(?i)\b(?:TRY_)?CAST\s*\([^)]*\bAS\s*$`)
-	reDtCtxDeclareVar    = regexp.MustCompile(`(?i)\bDECLARE\b[^;]*\b\w+\s*$`)
-	reDtCtxCreateAlter   = regexp.MustCompile(`(?is)\b(?:CREATE|ALTER)\b[^;]*\(\s*(?:.*,\s*)?\w+\s*$`)
-)
+// currentStmtSig returns the significant tokens of the statement ending at the
+// cursor: SignificantTokens(textToCursor) with everything up to and including the
+// last statement-terminating ";" dropped. A ";" inside a string or comment is not
+// a Semicolon token, so it never splits the statement.
+func currentStmtSig(textToCursor string) []sqltok.Token {
+	sig := sqltok.SignificantTokens(textToCursor)
+	start := 0
+	for i, t := range sig {
+		if t.Kind == sqltok.Semicolon {
+			start = i + 1
+		}
+	}
+	return sig[start:]
+}
+
+// tokKeyword reports whether t is the keyword kw (case-insensitive).
+func tokKeyword(src string, t sqltok.Token, kw string) bool {
+	return t.Kind == sqltok.Keyword && strings.EqualFold(t.Text(src), kw)
+}
 
 // IsDatatypeContext returns true when the cursor position suggests a Snowflake
 // data type name is expected — after ::, CAST(x AS, DECLARE varname, or
-// CREATE/ALTER TABLE (..., col_name.
-func IsDatatypeContext(textToCursor string, lineUpToWord string) bool {
-	if reDtCtxCastShorthand.MatchString(lineUpToWord) {
+// CREATE/ALTER TABLE (..., col_name. lineUpToWord is unused (kept for the caller
+// signature); detection now works off the tokenized current statement.
+func IsDatatypeContext(textToCursor string, _ string) bool {
+	sig := currentStmtSig(textToCursor)
+	if len(sig) == 0 {
+		return false
+	}
+	last := sig[len(sig)-1]
+
+	// After a "::" cast operator.
+	if last.Kind == sqltok.Operator && last.Text(textToCursor) == "::" {
 		return true
 	}
-	if reDtCtxCastFunction.MatchString(lineUpToWord) {
+
+	// CAST(x AS / TRY_CAST(x AS — the "AS" must sit directly inside the (still
+	// open) CAST paren: walk back to the enclosing "(" without crossing a ")",
+	// then check the word before it is CAST/TRY_CAST.
+	if tokKeyword(textToCursor, last, "AS") {
+		for i := len(sig) - 2; i >= 0; i-- {
+			if sig[i].Kind == sqltok.RParen {
+				break
+			}
+			if sig[i].Kind == sqltok.LParen {
+				if i > 0 {
+					w := strings.ToUpper(sig[i-1].Text(textToCursor))
+					if w == "CAST" || w == "TRY_CAST" {
+						return true
+					}
+				}
+				break
+			}
+		}
+	}
+
+	// The remaining contexts fire when the cursor sits right after a bare word —
+	// the just-typed variable/column name, with the type coming next.
+	if !last.Kind.IsIdentLike() {
+		return false
+	}
+
+	// Scan the preceding tokens once for a DECLARE, a CREATE/ALTER, and the paren
+	// depth at the cursor.
+	prior := sig[:len(sig)-1]
+	depth, hasDeclare, hasCreateAlter := 0, false, false
+	for _, t := range prior {
+		switch t.Kind {
+		case sqltok.LParen:
+			depth++
+		case sqltok.RParen:
+			depth--
+		case sqltok.Keyword:
+			switch strings.ToUpper(t.Text(textToCursor)) {
+			case "DECLARE":
+				hasDeclare = true
+			case "CREATE", "ALTER":
+				hasCreateAlter = true
+			}
+		}
+	}
+
+	// DECLARE varname.
+	if hasDeclare {
 		return true
 	}
-	if reDtCtxDeclareVar.MatchString(textToCursor) {
-		return true
-	}
-	if reDtCtxCreateAlter.MatchString(textToCursor) {
-		return true
+
+	// CREATE/ALTER (... col — inside an unclosed paren, the word is the first
+	// token of a column definition (immediately after "(" or ",").
+	if hasCreateAlter && depth > 0 {
+		prev := prior[len(prior)-1]
+		if prev.Kind == sqltok.LParen || prev.Kind == sqltok.Comma {
+			return true
+		}
 	}
 	return false
 }
 
-// ── IsInJoinOnClause ───────────────────────────────────────────────────────
-
-var (
-	reJoinGlobal     = regexp.MustCompile(`(?i)\bJOIN\b`)
-	reOnAfterJoin    = regexp.MustCompile(`(?i)\bON\b`)
-	reJoinTerminator = regexp.MustCompile(`(?i)\b(?:JOIN|WHERE|GROUP|ORDER|HAVING|UNION|INTERSECT|EXCEPT)\b`)
-)
-
 // IsInJoinOnClause returns true when the cursor is inside a JOIN ... ON ...
 // clause that has not been terminated by a subsequent keyword.
 func IsInJoinOnClause(textToCursor string) bool {
-	matches := reJoinGlobal.FindAllStringIndex(textToCursor, -1)
-	if len(matches) == 0 {
+	sig := currentStmtSig(textToCursor)
+
+	// Last JOIN before the cursor.
+	lastJoin := -1
+	for i, t := range sig {
+		if tokKeyword(textToCursor, t, "JOIN") {
+			lastJoin = i
+		}
+	}
+	if lastJoin < 0 {
 		return false
 	}
-	lastJoin := matches[len(matches)-1]
-	afterLastJoin := textToCursor[lastJoin[1]:]
-	onLoc := reOnAfterJoin.FindStringIndex(afterLastJoin)
-	if onLoc == nil {
+
+	// First ON after that JOIN.
+	on := -1
+	for i := lastJoin + 1; i < len(sig); i++ {
+		if tokKeyword(textToCursor, sig[i], "ON") {
+			on = i
+			break
+		}
+	}
+	if on < 0 {
 		return false
 	}
-	afterOn := afterLastJoin[onLoc[1]:]
-	return !reJoinTerminator.MatchString(afterOn)
+
+	// A terminator keyword after the ON closes the clause.
+	for i := on + 1; i < len(sig); i++ {
+		if sig[i].Kind != sqltok.Keyword {
+			continue
+		}
+		switch strings.ToUpper(sig[i].Text(textToCursor)) {
+		case "JOIN", "WHERE", "GROUP", "ORDER", "HAVING", "UNION", "INTERSECT", "EXCEPT":
+			return false
+		}
+	}
+	return true
 }
-
-// ── DetectUsingClause ──────────────────────────────────────────────────────
-
-var (
-	reUsingFull    = regexp.MustCompile(`(?i)\bUSING\s*\(\s*$`)
-	reUsingPartial = regexp.MustCompile(`(?i)\bUSING\s*\(\s*(?:\w+\s*,\s*)+$`)
-)
 
 // DetectUsingClause checks whether the cursor is inside a USING(...) clause.
 // InUsing is true when right after "USING(" with no columns yet.
 // IsPartial is true when after "USING(col1, " with at least one column listed.
 func DetectUsingClause(textToCursor string) UsingClauseInfo {
-	if reUsingFull.MatchString(textToCursor) {
-		return UsingClauseInfo{InUsing: true, IsPartial: false}
+	sig := currentStmtSig(textToCursor)
+
+	// Last USING immediately followed by "(".
+	open := -1
+	for i := 0; i+1 < len(sig); i++ {
+		if tokKeyword(textToCursor, sig[i], "USING") && sig[i+1].Kind == sqltok.LParen {
+			open = i + 1
+		}
 	}
-	if reUsingPartial.MatchString(textToCursor) {
-		return UsingClauseInfo{InUsing: false, IsPartial: true}
+	if open < 0 {
+		return UsingClauseInfo{}
+	}
+
+	rest := sig[open+1:]
+	if len(rest) == 0 {
+		return UsingClauseInfo{InUsing: true}
+	}
+	// Partial column list: (ident, ident, ...) ending with a trailing comma.
+	if len(rest)%2 == 0 {
+		partial := true
+		for i, t := range rest {
+			want := sqltok.Comma
+			if i%2 == 0 {
+				if !t.Kind.IsIdentLike() {
+					partial = false
+					break
+				}
+				continue
+			}
+			if t.Kind != want {
+				partial = false
+				break
+			}
+		}
+		if partial {
+			return UsingClauseInfo{IsPartial: true}
+		}
 	}
 	return UsingClauseInfo{}
 }
