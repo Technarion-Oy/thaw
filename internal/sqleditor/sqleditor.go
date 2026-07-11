@@ -1430,25 +1430,63 @@ func GetScriptingCompletions(sql string, cursorOffset int) ScriptingCompletionRe
 	}
 }
 
-// scriptingExtractVars mirrors extractDeclaredVariables from snowflakeScriptingUtils.ts.
-// Returns uppercased variable names declared before cursorOffset inside the current $$ block.
-func scriptingExtractVars(sql string, cursorOffset int) []string {
-	runes := []rune(sql)
-	n := len(runes)
-	if cursorOffset > n {
-		cursorOffset = n
+// runeOffsetToByte converts a Unicode-codepoint offset (as produced by Monaco's
+// model.getOffsetAt) into a byte offset into s. Values <= 0 map to 0; values past
+// the end map to len(s).
+func runeOffsetToByte(s string, runeOff int) int {
+	if runeOff <= 0 {
+		return 0
 	}
-	beforeCursor := string(runes[:cursorOffset])
+	n := 0
+	for i := range s {
+		if n == runeOff {
+			return i
+		}
+		n++
+	}
+	return len(s)
+}
 
-	// Count $$ occurrences before cursor to determine if we are inside a block.
-	ddCount := strings.Count(beforeCursor, "$$")
-	if ddCount%2 == 0 {
+// scriptingContext returns the text to analyze for scripting autocomplete at the
+// given byte cursor. When the cursor sits inside a dollar-quoted block it returns
+// that block's body (from just after the opening delimiter up to the cursor) with
+// inBlock=true; otherwise it returns sql up to the cursor with inBlock=false.
+// Detecting the block via sqltok's DollarQuoted token means "$$" markers inside
+// string literals or comments no longer flip block detection.
+func scriptingContext(sql string, cursor int) (text string, inBlock bool) {
+	if cursor > len(sql) {
+		cursor = len(sql)
+	}
+	for _, tok := range sqltok.Tokenize(sql) {
+		if tok.Kind == sqltok.EOF {
+			break
+		}
+		if tok.Kind != sqltok.DollarQuoted {
+			continue
+		}
+		openLen := len(tok.Tag) // Tag is the full "$$" / "$tag$" opening delimiter
+		bodyStart := tok.Start + openLen
+		bodyEnd := tok.End
+		if !tok.Unterminated {
+			bodyEnd -= openLen // closing delimiter matches the opening one
+		}
+		if cursor >= bodyStart && cursor <= bodyEnd {
+			return sql[bodyStart:cursor], true
+		}
+	}
+	return sql[:cursor], false
+}
+
+// scriptingExtractVars mirrors extractDeclaredVariables from snowflakeScriptingUtils.ts.
+// Returns uppercased variable names declared before cursorOffset inside the current
+// $$ block, scanned over sqltok significant tokens so keywords or ';' inside string
+// literals and comments are never mistaken for declarations.
+func scriptingExtractVars(sql string, cursorOffset int) []string {
+	body, inBlock := scriptingContext(sql, runeOffsetToByte(sql, cursorOffset))
+	if !inBlock {
 		return nil // cursor is in plain SQL, not inside a $$ block
 	}
-
-	// Isolate text from the opening $$ to the cursor.
-	blockStart := strings.LastIndex(beforeCursor, "$$")
-	textToScan := beforeCursor[blockStart:]
+	sig := sqltok.SignificantTokens(body)
 
 	seen := make(map[string]struct{})
 	var vars []string
@@ -1459,48 +1497,45 @@ func scriptingExtractVars(sql string, cursorOffset int) []string {
 			vars = append(vars, up)
 		}
 	}
+	upper := func(t sqltok.Token) string { return strings.ToUpper(t.Text(body)) }
 
-	skipWords := map[string]bool{
-		"CURSOR": true, "EXCEPTION": true, "TYPE": true,
-		"LET": true, "VAR": true,
-	}
+	// Phases run in the legacy order (DECLARE, then LET/VAR, then FOR) so dedup
+	// preserves the same first-seen ordering the regex passes produced.
 
-	// 1. DECLARE … BEGIN blocks
-	declareRe := regexp.MustCompile(`(?i)\bDECLARE\b`)
-	blockBoundRe := regexp.MustCompile(`(?i)\b(?:BEGIN|END)\b`)
-	for _, loc := range declareRe.FindAllStringIndex(textToScan, -1) {
-		after := textToScan[loc[1]:]
-		if bound := blockBoundRe.FindStringIndex(after); bound != nil {
-			after = after[:bound[0]]
-		}
-		for _, seg := range strings.Split(after, ";") {
-			// Strip line comments and block comments
-			clean := regexp.MustCompile(`--[^\n]*`).ReplaceAllString(seg, "")
-			clean = regexp.MustCompile(`(?s)/\*.*?\*/`).ReplaceAllString(clean, "")
-			clean = strings.TrimSpace(clean)
-			if clean == "" {
-				continue
-			}
-			wordRe := regexp.MustCompile(`[a-zA-Z0-9_$]+`)
-			if m := wordRe.FindString(clean); m != "" {
-				up := strings.ToUpper(m)
-				if !skipWords[up] {
-					addVar(m)
-				}
+	// 1. DECLARE … BEGIN sections: first identifier of each ';'-separated entry.
+	skipWords := map[string]bool{"CURSOR": true, "EXCEPTION": true, "TYPE": true, "LET": true, "VAR": true}
+	inDeclare, expectName := false, false
+	for _, tok := range sig {
+		switch up := upper(tok); {
+		case up == "DECLARE":
+			inDeclare, expectName = true, true
+		case up == "BEGIN" || up == "END":
+			inDeclare, expectName = false, false
+		case tok.Kind == sqltok.Semicolon:
+			expectName = inDeclare
+		case inDeclare && expectName && tok.Kind.IsIdentLike():
+			expectName = false
+			if !skipWords[up] {
+				addVar(tok.Text(body))
 			}
 		}
 	}
 
-	// 2. LET / VAR declarations
-	letVarRe := regexp.MustCompile(`(?i)\b(?:LET|VAR)\s+([a-zA-Z0-9_$]+)`)
-	for _, m := range letVarRe.FindAllStringSubmatch(textToScan, -1) {
-		addVar(m[1])
+	// 2. LET / VAR declarations: the identifier following the keyword.
+	for i, tok := range sig {
+		if up := upper(tok); up == "LET" || up == "VAR" {
+			if i+1 < len(sig) && sig[i+1].Kind.IsIdentLike() {
+				addVar(sig[i+1].Text(body))
+			}
+		}
 	}
 
-	// 3. FOR loop variables
-	forRe := regexp.MustCompile(`(?i)\bFOR\s+([a-zA-Z0-9_$]+)\s+IN\b`)
-	for _, m := range forRe.FindAllStringSubmatch(textToScan, -1) {
-		addVar(m[1])
+	// 3. FOR loop variables: FOR <ident> IN.
+	for i, tok := range sig {
+		if upper(tok) == "FOR" && i+2 < len(sig) &&
+			sig[i+1].Kind.IsIdentLike() && strings.ToUpper(sig[i+2].Text(body)) == "IN" {
+			addVar(sig[i+1].Text(body))
+		}
 	}
 
 	return vars
@@ -1515,46 +1550,53 @@ var colonRequiredKeywords = map[string]bool{
 	"GRANT": true, "REVOKE": true,
 }
 
-// scriptingNeedsColon mirrors isColonRequired from snowflakeScriptingUtils.ts.
+// scriptingContextKeywords is the full set of keywords that "set the context" for
+// colon detection: the colon-requiring SQL keywords plus the scripting/control-flow
+// keywords that do NOT require a colon. The most recent one before the cursor wins.
+var scriptingContextKeywords = func() map[string]bool {
+	m := map[string]bool{
+		"LET": true, "RETURN": true, "IF": true, "WHILE": true,
+		"UNTIL": true, "DO": true, "LOOP": true, "BEGIN": true,
+	}
+	for k := range colonRequiredKeywords {
+		m[k] = true
+	}
+	return m
+}()
+
+// scriptingNeedsColon mirrors isColonRequired from snowflakeScriptingUtils.ts,
+// scanning sqltok significant tokens (block-aware, comment/string-aware) instead
+// of stripping the text with per-call regexes.
 func scriptingNeedsColon(sql string, offset int) bool {
-	runes := []rune(sql)
-	n := len(runes)
-	if offset > n {
-		offset = n
-	}
-	beforeCursor := string(runes[:offset])
+	text, _ := scriptingContext(sql, runeOffsetToByte(sql, offset))
+	sig := sqltok.SignificantTokens(text)
 
-	// 1. Find where the current word starts and check for a preceding colon.
-	wordStartRe := regexp.MustCompile(`[a-zA-Z0-9_$]+$`)
-	wordLoc := wordStartRe.FindStringIndex(beforeCursor)
-	posToEval := len(beforeCursor)
-	if wordLoc != nil {
-		posToEval = wordLoc[0]
+	// Ignore the word currently being typed: an ident-like token ending at the cursor.
+	if k := len(sig) - 1; k >= 0 && sig[k].Kind.IsIdentLike() && sig[k].End == len(text) {
+		sig = sig[:k]
 	}
-	textBeforeWord := strings.TrimRight(beforeCursor[:posToEval], " \t\r\n")
-	if strings.HasSuffix(textBeforeWord, ":") {
+	// A ':' immediately before the word means the reference is already prefixed.
+	if k := len(sig) - 1; k >= 0 && sig[k].Kind == sqltok.Colon {
 		return false
 	}
-
-	// 2. Strip comments and quoted strings.
-	clean := regexp.MustCompile(`--[^\n]*`).ReplaceAllString(textBeforeWord, " ")
-	clean = regexp.MustCompile(`(?s)/\*.*?\*/`).ReplaceAllString(clean, " ")
-	clean = regexp.MustCompile(`'[^']*'`).ReplaceAllString(clean, " ")
-	clean = regexp.MustCompile(`"[^"]*"`).ReplaceAllString(clean, " ")
-
-	// 3. Find the most recent context-setting token.
-	// SQL statement keywords require a colon. Scripting assignments/control-flow do not.
-	contextRe := regexp.MustCompile(`(?i)(:=|;|\b(?:SELECT|INSERT|UPDATE|DELETE|MERGE|CREATE|ALTER|DROP|TRUNCATE|COPY|CALL|WITH|SHOW|DESCRIBE|GRANT|REVOKE|LET|RETURN|IF|WHILE|UNTIL|DO|LOOP|BEGIN)\b)`)
-
-	matches := contextRe.FindAllString(clean, -1)
-	if len(matches) == 0 {
-		return false
+	// Walk back to the most recent context-setting token.
+	for i := len(sig) - 1; i >= 0; i-- {
+		tok := sig[i]
+		// ':=' assignment (a Colon immediately followed by '=') needs no colon.
+		if tok.Kind == sqltok.Operator && tok.Text(text) == "=" &&
+			i > 0 && sig[i-1].Kind == sqltok.Colon && sig[i-1].End == tok.Start {
+			return false
+		}
+		if tok.Kind == sqltok.Semicolon {
+			return false // a ';' closed the previous statement
+		}
+		if tok.Kind.IsIdentLike() {
+			if up := strings.ToUpper(tok.Text(text)); scriptingContextKeywords[up] {
+				return colonRequiredKeywords[up]
+			}
+		}
 	}
-
-	lastMatch := strings.ToUpper(matches[len(matches)-1])
-
-	// If the last context setter is a standard SQL keyword, it needs a colon.
-	return colonRequiredKeywords[lastMatch]
+	return false
 }
 
 // ── TypeCategory ──────────────────────────────────────────────────────────────
