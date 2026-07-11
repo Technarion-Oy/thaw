@@ -116,13 +116,13 @@ func TestParseFor(t *testing.T) {
 		`FOR i IN 1 TO 10 DO BEGIN SELECT 1; SELECT 2; END; END FOR`,
 	)
 	assertInvalid(t, (*Validator).ParseFor,
-		`FOR IN c1 DO SELECT 1; END FOR`,       // missing loop variable
-		`FOR rec c1 DO SELECT 1; END FOR`,      // missing IN
-		`FOR rec IN c1 SELECT 1; END FOR`,      // missing DO
-		`FOR i IN 1 10 DO SELECT 1; END FOR`,   // missing TO
-		`FOR rec IN c1 DO SELECT 1;`,           // missing END FOR
-		`FOR rec IN c1 DO SELECT 1; END`,       // missing FOR/LOOP after END
-		`FORS rec IN c1 DO SELECT 1; END FOR`,  // wrong keyword
+		`FOR IN c1 DO SELECT 1; END FOR`,         // missing loop variable
+		`FOR rec c1 DO SELECT 1; END FOR`,        // missing IN
+		`FOR rec IN c1 SELECT 1; END FOR`,        // missing DO
+		`FOR i IN 1 10 DO SELECT 1; END FOR`,     // missing TO
+		`FOR rec IN c1 DO SELECT 1;`,             // missing END FOR
+		`FOR rec IN c1 DO SELECT 1; END`,         // missing FOR/LOOP after END
+		`FORS rec IN c1 DO SELECT 1; END FOR`,    // wrong keyword
 		`FOR rec IN c1 DO SELECT 1; END FOR a b`, // two labels
 	)
 }
@@ -142,11 +142,11 @@ func TestParseIf(t *testing.T) {
 		`IF (a) THEN IF (b) THEN SELECT 1; END IF; ELSE SELECT 2; END IF`,
 	)
 	assertInvalid(t, (*Validator).ParseIf,
-		`IF THEN SELECT 1; END IF`,      // empty condition
-		`IF (a) SELECT 1; END IF`,       // missing THEN
-		`IF (a) THEN SELECT 1; END`,     // missing IF after END
-		`IF (a) THEN SELECT 1;`,         // missing END IF
-		`IFS (a) THEN SELECT 1; END IF`, // wrong keyword
+		`IF THEN SELECT 1; END IF`,                           // empty condition
+		`IF (a) SELECT 1; END IF`,                            // missing THEN
+		`IF (a) THEN SELECT 1; END`,                          // missing IF after END
+		`IF (a) THEN SELECT 1;`,                              // missing END IF
+		`IFS (a) THEN SELECT 1; END IF`,                      // wrong keyword
 		`IF (a) THEN SELECT 1; ELSEIF THEN SELECT 2; END IF`, // empty ELSEIF condition
 	)
 }
@@ -170,12 +170,31 @@ func TestParseLet(t *testing.T) {
 		`LET rs RESULTSET := ASYNC (SELECT 1)`,
 	)
 	assertInvalid(t, (*Validator).ParseLet,
-		`LET x`,                     // missing assignment (required)
-		`LET x NUMBER`,              // type but no assignment
-		`LET := 5`,                  // missing name
-		`LETS x := 5`,               // wrong keyword
-		`LET c1 CURSOR SELECT 1`,    // cursor missing FOR
+		`LET x`,                       // missing assignment (required)
+		`LET x NUMBER`,                // type but no assignment
+		`LET := 5`,                    // missing name
+		`LETS x := 5`,                 // wrong keyword
+		`LET c1 CURSOR SELECT 1`,      // cursor missing FOR
 		`LET rs RESULTSET (SELECT 1)`, // resultset missing assign op
+	)
+}
+
+func TestParseLoop(t *testing.T) {
+	assertValid(t, (*Validator).ParseLoop,
+		`LOOP SELECT 1; END LOOP`,
+		`loop select 1; end loop`,           // case-insensitive
+		`LOOP SELECT 1; SELECT 2; END LOOP`, // multiple statements
+		`LOOP IF (done) THEN BREAK; END IF; END LOOP`,
+		`LOOP SELECT 1; END LOOP my_label`, // trailing label
+		// Nested block in the body (inner `;` must not stop the body early).
+		`LOOP BEGIN SELECT 1; SELECT 2; END; END LOOP`,
+	)
+	assertInvalid(t, (*Validator).ParseLoop,
+		`LOOP END LOOP`,               // empty body
+		`LOOP SELECT 1;`,              // missing END LOOP
+		`LOOP SELECT 1; END`,          // missing LOOP after END
+		`LOOPS SELECT 1; END LOOP`,    // wrong keyword
+		`LOOP SELECT 1; END LOOP a b`, // two labels
 	)
 }
 
