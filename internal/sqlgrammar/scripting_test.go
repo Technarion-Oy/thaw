@@ -198,6 +198,18 @@ func TestParseLoop(t *testing.T) {
 	)
 }
 
+func TestParseNull(t *testing.T) {
+	assertValid(t, (*Validator).ParseNull,
+		`NULL`,
+		`null`, // case-insensitive
+	)
+	assertInvalid(t, (*Validator).ParseNull,
+		`NULL extra`, // trailing token
+		`NULLS`,      // wrong keyword
+		``,           // empty
+	)
+}
+
 func TestParseCase(t *testing.T) {
 	assertValid(t, (*Validator).ParseCase,
 		// Searched form.
