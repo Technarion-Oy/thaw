@@ -127,6 +127,30 @@ func TestParseFor(t *testing.T) {
 	)
 }
 
+func TestParseIf(t *testing.T) {
+	assertValid(t, (*Validator).ParseIf,
+		`IF (a) THEN SELECT 1; END IF`,
+		`if (a) then select 1; end if`, // case-insensitive
+		`IF (a > 0) THEN SELECT 1; ELSE SELECT 2; END IF`,
+		`IF (a) THEN SELECT 1; ELSEIF (b) THEN SELECT 2; END IF`,
+		`IF (a) THEN SELECT 1; ELSEIF (b) THEN SELECT 2; ELSEIF (c) THEN SELECT 3; ELSE SELECT 4; END IF`,
+		`IF (a) THEN SELECT 1; SELECT 2; END IF`, // multiple statements in a branch
+		`IF cond THEN SELECT 1; END IF`,          // parens optional (permissive span)
+		// Nested scripting block inside a branch (inner `;` must not stop the body early).
+		`IF (a) THEN BEGIN SELECT 1; SELECT 2; END; END IF`,
+		// Nested IF inside a branch.
+		`IF (a) THEN IF (b) THEN SELECT 1; END IF; ELSE SELECT 2; END IF`,
+	)
+	assertInvalid(t, (*Validator).ParseIf,
+		`IF THEN SELECT 1; END IF`,      // empty condition
+		`IF (a) SELECT 1; END IF`,       // missing THEN
+		`IF (a) THEN SELECT 1; END`,     // missing IF after END
+		`IF (a) THEN SELECT 1;`,         // missing END IF
+		`IFS (a) THEN SELECT 1; END IF`, // wrong keyword
+		`IF (a) THEN SELECT 1; ELSEIF THEN SELECT 2; END IF`, // empty ELSEIF condition
+	)
+}
+
 func TestParseCase(t *testing.T) {
 	assertValid(t, (*Validator).ParseCase,
 		// Searched form.

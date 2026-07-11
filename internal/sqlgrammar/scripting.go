@@ -60,10 +60,12 @@ func (v *Validator) parseScriptingStatement() bool {
 		v.ParseContinue,
 		v.ParseFetch,
 		v.ParseFor,
-		// ELSE joins END/EXCEPTION/WHEN as a leading boundary so a CASE branch body
-		// (THEN … / ELSE …) ends at the next branch. No plain statement legally starts
-		// with any of these words, so the extra stop is harmless in a non-CASE body.
-		func() bool { return v.consumeStmtSpan("END", "EXCEPTION", "WHEN", "ELSE") },
+		v.ParseIf,
+		// ELSE/ELSEIF join END/EXCEPTION/WHEN as leading boundaries so a CASE or IF
+		// branch body (THEN … / ELSEIF … / ELSE …) ends at the next branch. No plain
+		// statement legally starts with any of these words, so the extra stops are
+		// harmless in a non-CASE/non-IF body.
+		func() bool { return v.consumeStmtSpan("END", "EXCEPTION", "WHEN", "ELSE", "ELSEIF") },
 	)
 }
 
@@ -253,6 +255,51 @@ func (v *Validator) parseNestedProcDecl() bool {
 		returnsType,
 		func() bool { return v.MatchWord("AS") },
 		func() bool { return v.Choice(v.ParseScriptingBlock, v.consumeDeclExpr) },
+	)
+}
+
+// ParseIf validates the Snowflake Scripting `IF` construct — conditionally executes
+// statements based on boolean conditions, with optional ELSEIF/ELSE branches. It is a
+// block-body statement, not top-level.
+// Reference: https://docs.snowflake.com/en/sql-reference/snowflake-scripting/if
+//
+// Syntax:
+//
+//	IF ( <condition> ) THEN
+//	    <statement>; [ <statement>; ... ]
+//	[ ELSEIF ( <condition> ) THEN
+//	    <statement>; [ <statement>; ... ] ]
+//	[ ELSE
+//	    <statement>; [ <statement>; ... ] ]
+//	END IF;
+//
+// The condition is a permissive expression span up to THEN (no expression grammar in
+// this layer; the surrounding parens are just part of the span). ELSEIF and ELSE are
+// boundary stops in parseScriptingStatement, so a branch body ends at the next branch.
+// The terminating `;` belongs to the block-body statement list, not this rule.
+func (v *Validator) ParseIf() bool {
+	branch := func() bool { // <condition> THEN <statement>; [ … ]
+		return v.Sequence(
+			func() bool { return v.consumeExprSpan("THEN") },
+			func() bool { return v.MatchWord("THEN") },
+			v.parseScriptingStmtList,
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchWord("IF") },
+		branch, // required IF <condition> THEN body
+		func() bool { // zero or more ELSEIF branches
+			return v.ZeroOrMore(func() bool {
+				return v.Sequence(func() bool { return v.MatchWord("ELSEIF") }, branch)
+			})
+		},
+		func() bool { // optional ELSE branch
+			return v.Optional(func() bool {
+				return v.Sequence(func() bool { return v.MatchWord("ELSE") }, v.parseScriptingStmtList)
+			})
+		},
+		func() bool { return v.MatchWord("END") },
+		func() bool { return v.MatchWord("IF") },
 	)
 }
 
