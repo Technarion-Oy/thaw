@@ -56,6 +56,7 @@ func (v *Validator) parseScriptingStatement() bool {
 		v.ParseBreak,
 		v.ParseCancel,
 		v.ParseCase,
+		v.ParseClose,
 		// ELSE joins END/EXCEPTION/WHEN as a leading boundary so a CASE branch body
 		// (THEN … / ELSE …) ends at the next branch. No plain statement legally starts
 		// with any of these words, so the extra stop is harmless in a non-CASE body.
@@ -339,5 +340,21 @@ func (v *Validator) ParseCancel() bool {
 	return v.Sequence(
 		func() bool { return v.MatchWord("CANCEL") },
 		v.parseIdentPath, // required <result_set_name>
+	)
+}
+
+// ParseClose validates the Snowflake Scripting `CLOSE` construct — closes a cursor,
+// ending access and invalidating its row pointer.
+// Reference: https://docs.snowflake.com/en/sql-reference/snowflake-scripting/close
+//
+// Syntax:
+//
+//	CLOSE <cursor_name>
+//
+// (The terminating `;` belongs to the block-body statement list, not this rule.)
+func (v *Validator) ParseClose() bool {
+	return v.Sequence(
+		func() bool { return v.MatchWord("CLOSE") },
+		v.parseIdentPath, // required <cursor_name>
 	)
 }
