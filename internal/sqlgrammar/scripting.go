@@ -77,27 +77,192 @@ func (v *Validator) parseScriptingStmtList() bool {
 	return v.Sequence(item, func() bool { return v.ZeroOrMore(item) })
 }
 
-// parseDeclareSection matches the optional leading `DECLARE <declarations>` — one
-// or more semicolon-terminated declaration spans.
-//
-// ponytail: the individual declaration grammar (variable / cursor / exception /
-// RESULTSET declarations) is a later issue, so each declaration is consumed as a
-// permissive span up to its `;` (stopping only at the block's BEGIN). Replace the
-// span with real declaration rules when those issues land.
+// parseDeclareSection matches the optional leading `DECLARE <declarations>` that
+// precedes a block's BEGIN — the same construct ParseDeclare validates.
 func (v *Validator) parseDeclareSection() bool {
-	return v.Optional(func() bool {
-		decl := func() bool {
+	return v.Optional(v.ParseDeclare)
+}
+
+// ParseDeclare validates the Snowflake Scripting `DECLARE` construct — one or more
+// semicolon-terminated declarations. It is both the optional section preceding a
+// block's BEGIN (via parseDeclareSection) and a standalone rule.
+// Reference: https://docs.snowflake.com/en/sql-reference/snowflake-scripting/declare
+//
+// Syntax:
+//
+//	DECLARE
+//	  {   <variable_declaration>
+//	    | <cursor_declaration>
+//	    | <resultset_declaration>
+//	    | <nested_stored_procedure_declaration>
+//	    | <exception_declaration> };
+//	  [ { ... }; ... ]
+//
+// Every declaration is terminated by `;` (unlike loop/branch statements, whose `;`
+// belongs to the enclosing block-body list). At least one declaration is required —
+// `DECLARE` with none fails.
+func (v *Validator) ParseDeclare() bool {
+	item := func() bool {
+		return v.Sequence(
+			v.parseOneDeclaration,
+			func() bool { return v.Match(sqltok.Semicolon) },
+		)
+	}
+	return v.Sequence(
+		func() bool { return v.MatchWord("DECLARE") },
+		item,
+		func() bool { return v.ZeroOrMore(item) },
+	)
+}
+
+// parseOneDeclaration parses a single declaration (no trailing `;`). Every form
+// opens with `<name>`; the second token — CURSOR / RESULTSET / PROCEDURE /
+// EXCEPTION — selects the form, and the variable declaration is the catch-all. The
+// variable branch is deliberately LAST: it is the most permissive (a bare name with
+// optional type/default), so trying it first would shadow the keyword-tagged forms.
+func (v *Validator) parseOneDeclaration() bool {
+	return v.Choice(
+		v.parseCursorDecl,
+		v.parseResultsetDecl,
+		v.parseNestedProcDecl,
+		v.parseExceptionDecl,
+		v.parseVariableDecl,
+	)
+}
+
+// assignOp matches the declaration/assignment operator `{ DEFAULT | := }`. The `:=`
+// arrives as a Colon token followed by a `=` Operator (the tokenizer does not fuse
+// them), so it is matched as that two-token sequence.
+func (v *Validator) assignOp() bool {
+	return v.Choice(
+		func() bool { return v.MatchWord("DEFAULT") },
+		func() bool {
 			return v.Sequence(
-				func() bool { return v.consumeStmtSpan("BEGIN") },
-				func() bool { return v.Match(sqltok.Semicolon) },
+				func() bool { return v.Match(sqltok.Colon) },
+				func() bool { return v.MatchOp("=") },
 			)
+		},
+	)
+}
+
+// parseVariableDecl matches `<name> [<type>] [ { DEFAULT | := } <expr> ]`. The type
+// is a permissive `<ident> [ ( … ) ]` (data types are validated separately by
+// sqleditor.ValidateDataTypes), guarded so it does not swallow a leading DEFAULT,
+// and the default value is an expression span up to the terminating `;`.
+func (v *Validator) parseVariableDecl() bool {
+	typeName := func() bool {
+		if v.isWord(v.Peek(), "DEFAULT") { // DEFAULT is the assign op, not a type
+			return false
 		}
 		return v.Sequence(
-			func() bool { return v.MatchWord("DECLARE") },
-			decl,
-			func() bool { return v.ZeroOrMore(decl) },
+			v.parseIdentPath,
+			func() bool { return v.Optional(v.consumeBalancedParens) },
 		)
-	})
+	}
+	return v.Sequence(
+		v.parseIdentPath, // <name>
+		func() bool { return v.Optional(typeName) },
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(v.assignOp, v.consumeDeclExpr)
+			})
+		},
+	)
+}
+
+// parseCursorDecl matches `<name> CURSOR FOR <query>`. The query is a span up to the
+// terminating `;` (there is no full query grammar in this layer).
+func (v *Validator) parseCursorDecl() bool {
+	return v.Sequence(
+		v.parseIdentPath, // <name>
+		func() bool { return v.MatchWord("CURSOR") },
+		func() bool { return v.MatchWord("FOR") },
+		v.consumeDeclExpr, // <query>
+	)
+}
+
+// parseResultsetDecl matches `<name> RESULTSET [ { DEFAULT | := } [ ASYNC ] ( <query> ) ]`.
+func (v *Validator) parseResultsetDecl() bool {
+	return v.Sequence(
+		v.parseIdentPath, // <name>
+		func() bool { return v.MatchWord("RESULTSET") },
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					v.assignOp,
+					func() bool { return v.Optional(func() bool { return v.MatchWord("ASYNC") }) },
+					v.consumeBalancedParens, // ( <query> )
+				)
+			})
+		},
+	)
+}
+
+// parseExceptionDecl matches `<name> EXCEPTION [ ( <number> , '<message>' ) ]`.
+func (v *Validator) parseExceptionDecl() bool {
+	return v.Sequence(
+		v.parseIdentPath, // <name>
+		func() bool { return v.MatchWord("EXCEPTION") },
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.Match(sqltok.LParen) },
+					v.parseNumber, // <exception_number>
+					func() bool { return v.Match(sqltok.Comma) },
+					v.parseString, // '<exception_message>'
+					func() bool { return v.Match(sqltok.RParen) },
+				)
+			})
+		},
+	)
+}
+
+// parseNestedProcDecl matches the nested stored procedure declaration:
+//
+//	<name> PROCEDURE ( [ <arg> <type> ] [ , ... ] )
+//	  RETURNS { <type> | TABLE ( … ) }
+//	  AS <definition>
+//
+// The arg list and RETURNS type are permissive paren/ident spans; the definition is
+// a scripting block (`BEGIN … END`) or, failing that, a span up to the terminating
+// `;` (covering a dollar-quoted or scalar body).
+func (v *Validator) parseNestedProcDecl() bool {
+	returnsType := func() bool {
+		return v.Choice(
+			func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("TABLE") },
+					v.consumeBalancedParens,
+				)
+			},
+			func() bool {
+				return v.Sequence(
+					v.parseIdentPath,
+					func() bool { return v.Optional(v.consumeBalancedParens) },
+				)
+			},
+		)
+	}
+	return v.Sequence(
+		v.parseIdentPath, // <name>
+		func() bool { return v.MatchWord("PROCEDURE") },
+		v.consumeBalancedParens, // ( args )
+		func() bool { return v.MatchWord("RETURNS") },
+		returnsType,
+		func() bool { return v.MatchWord("AS") },
+		func() bool { return v.Choice(v.ParseScriptingBlock, v.consumeDeclExpr) },
+	)
+}
+
+// consumeDeclExpr consumes a declaration's expression or query up to — but not
+// including — the terminating `;` at paren depth 0. It reuses consumeExprSpan with a
+// sentinel stop word that never matches a real token, so the span ends only at that
+// `;` (or end of input). Requires at least one token.
+//
+// ponytail: a permissive span, NOT a real expression/query parse — replace with the
+// expression/query grammar once it reaches this layer.
+func (v *Validator) consumeDeclExpr() bool {
+	return v.consumeExprSpan("\x00")
 }
 
 // parseExceptionHandler matches the optional trailing exception handler:

@@ -109,6 +109,45 @@ func TestParseCase(t *testing.T) {
 	)
 }
 
+func TestParseDeclare(t *testing.T) {
+	assertValid(t, (*Validator).ParseDeclare,
+		// Variable declarations.
+		`DECLARE x INTEGER;`,
+		`declare x integer;`, // case-insensitive
+		`DECLARE x INT DEFAULT 5;`,
+		`DECLARE x NUMBER(38,2) := 0;`,
+		`DECLARE profit NUMBER(38, 2) := 0;`,
+		`DECLARE x DEFAULT 5;`,          // no type, DEFAULT not swallowed as type
+		`DECLARE x := SELECT 1;`,        // := form
+		`DECLARE x INT; y VARCHAR;`,     // multiple
+		`DECLARE flag DEFAULT TRUE;`,
+		// Cursor declaration.
+		`DECLARE c1 CURSOR FOR SELECT id, price FROM invoices;`,
+		// RESULTSET declaration.
+		`DECLARE res RESULTSET;`,
+		`DECLARE res RESULTSET DEFAULT (SELECT col1 FROM mytable ORDER BY col1);`,
+		`DECLARE res RESULTSET := (SELECT 1);`,
+		`DECLARE res RESULTSET DEFAULT ASYNC (SELECT 1);`,
+		// Exception declaration.
+		`DECLARE my_exc EXCEPTION;`,
+		`DECLARE my_exc EXCEPTION (-20001, 'boom');`,
+		// Nested stored procedure declaration.
+		`DECLARE p PROCEDURE (x INT) RETURNS INT AS BEGIN RETURN x; END;`,
+		`DECLARE p PROCEDURE () RETURNS TABLE (a INT) AS BEGIN SELECT 1; END;`,
+		// Mixed forms in one DECLARE.
+		`DECLARE x INT; c CURSOR FOR SELECT 1; e EXCEPTION;`,
+	)
+	assertInvalid(t, (*Validator).ParseDeclare,
+		`DECLARE`,                       // no declarations
+		`DECLARE ;`,                     // empty declaration
+		`DECLARE x INT`,                 // missing terminating ;
+		`DECLARE x INT GARBAGE;`,        // junk after type
+		`DECLARE c CURSOR SELECT 1;`,    // cursor missing FOR
+		`DECLARE my_exc EXCEPTION (-20001);`, // exception missing message
+		`DECLAER x INT;`,                // misspelled keyword
+	)
+}
+
 func TestParseScriptingBlock(t *testing.T) {
 	assertValid(t, (*Validator).ParseScriptingBlock,
 		`BEGIN SELECT 1; END`,
