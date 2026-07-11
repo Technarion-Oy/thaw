@@ -69,6 +69,10 @@ func (v *Validator) parseScriptingStatement() bool {
 		v.ParseRepeat,
 		v.ParseReturn,
 		v.ParseWhile,
+		// Standalone variable update `<name> := <expr>`; tried before the catch-all so
+		// it gets a precise rule (diagnostics + `:=` autocomplete) rather than being
+		// swallowed as an opaque statement span.
+		v.ParseAssignment,
 		// ELSE/ELSEIF join END/EXCEPTION/WHEN as leading boundaries so a CASE or IF
 		// branch body (THEN … / ELSEIF … / ELSE …) ends at the next branch; UNTIL is
 		// REPEAT's body boundary (its `UNTIL (…) END REPEAT` tail has no terminating `;`,
@@ -144,18 +148,37 @@ func (v *Validator) parseOneDeclaration() bool {
 	)
 }
 
-// assignOp matches the declaration/assignment operator `{ DEFAULT | := }`. The `:=`
-// arrives as a Colon token followed by a `=` Operator (the tokenizer does not fuse
-// them), so it is matched as that two-token sequence.
+// assignOp matches the declaration/assignment operator `{ DEFAULT | := }`.
 func (v *Validator) assignOp() bool {
 	return v.Choice(
 		func() bool { return v.MatchWord("DEFAULT") },
-		func() bool {
-			return v.Sequence(
-				func() bool { return v.Match(sqltok.Colon) },
-				func() bool { return v.MatchOp("=") },
-			)
-		},
+		v.walrus,
+	)
+}
+
+// walrus matches the `:=` assignment operator. It arrives as a Colon token
+// followed by a `=` Operator (the tokenizer does not fuse them), so it is matched
+// as that two-token sequence.
+func (v *Validator) walrus() bool {
+	return v.Sequence(
+		func() bool { return v.Match(sqltok.Colon) },
+		func() bool { return v.MatchOp("=") },
+	)
+}
+
+// ParseAssignment validates the Snowflake Scripting variable-update statement
+// `<name> := <expression>` — the standalone assignment that reassigns a variable
+// declared earlier (via DECLARE or LET). It is a block-body statement, not
+// top-level. Assignment uses `:=` only (never DEFAULT, which is declaration-only),
+// so it matches walrus rather than assignOp. The expression is a permissive span
+// up to the terminating `;` (no expression grammar in this layer); that `;` belongs
+// to the block-body statement list, not this rule.
+// Reference: https://docs.snowflake.com/en/developer-guide/snowflake-scripting/variables
+func (v *Validator) ParseAssignment() bool {
+	return v.Sequence(
+		v.parseIdentPath, // <name>
+		v.walrus,         // :=
+		v.consumeDeclExpr,
 	)
 }
 

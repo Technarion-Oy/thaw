@@ -290,7 +290,8 @@ func (v *Validator) parseBool() bool {
 }
 
 // parseScalar matches a single scalar value: a string/number literal (with an
-// optional leading sign), a boolean, or an identifier path. It is the catch-all
+// optional leading sign), a boolean, a Snowflake Scripting bind reference
+// (`:<name>` / `IDENTIFIER(:<name>)`), or an identifier path. It is the catch-all
 // right-hand side for `<option> = <value>` and `=> <value>` assignments.
 func (v *Validator) parseScalar() bool {
 	v.Optional(func() bool {
@@ -303,7 +304,35 @@ func (v *Validator) parseScalar() bool {
 		func() bool { return v.Match(sqltok.StringLit) },
 		func() bool { return v.Match(sqltok.NumberLit) },
 		v.parseBool,
+		v.parseBindVar,       // :<name>  (scripting variable reference; issue #648)
+		v.parseIdentifierFn,  // IDENTIFIER( … ) wrapper — before parseIdentPath
 		v.parseIdentPath,
+	)
+}
+
+// parseBindVar matches a Snowflake Scripting bind reference `:<name>` — a Colon
+// followed by an identifier — used to reference a scripting variable inside a SQL
+// statement (VALUES lists, WHERE, function args, and array-spread bind lists). The
+// `:=` assignment operator is a Colon followed by `=` (an Operator), so a Colon
+// leading an identifier is unambiguously a bind, not an assignment.
+// Reference: https://docs.snowflake.com/en/developer-guide/snowflake-scripting/variables
+func (v *Validator) parseBindVar() bool {
+	return v.Sequence(
+		func() bool { return v.Match(sqltok.Colon) },
+		v.parseIdentPath,
+	)
+}
+
+// parseIdentifierFn matches Snowflake's `IDENTIFIER( <arg> )` wrapper, which
+// resolves a bind reference, string literal, or name to an object name where a
+// table/object name is expected. Accepted as an atom so `IDENTIFIER(:tbl)` parses
+// anywhere a scalar/name does.
+func (v *Validator) parseIdentifierFn() bool {
+	return v.Sequence(
+		func() bool { return v.MatchWord("IDENTIFIER") },
+		func() bool { return v.Match(sqltok.LParen) },
+		func() bool { return v.Choice(v.parseBindVar, v.parseString, v.parseIdentPath) },
+		func() bool { return v.Match(sqltok.RParen) },
 	)
 }
 

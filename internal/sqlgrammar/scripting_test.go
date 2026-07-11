@@ -231,6 +231,45 @@ func TestParseLet(t *testing.T) {
 	)
 }
 
+func TestParseAssignment(t *testing.T) {
+	assertValid(t, (*Validator).ParseAssignment,
+		`x := 5`,
+		`x := 5`, // case-insensitive keyword-free
+		`counter := counter + 1`,
+		`profit := revenue - cost`,
+		`x := (SELECT count(*) FROM t)`,
+		`"My Var" := 'done'`,
+		`x := :other`, // right-hand side references another bind variable
+	)
+	assertInvalid(t, (*Validator).ParseAssignment,
+		`x`,           // no assignment
+		`x := `,       // missing expression
+		`x = 5`,       // `=` is not `:=`
+		`x DEFAULT 5`, // DEFAULT is declaration-only, not an update
+		`:= 5`,        // missing name
+	)
+}
+
+// Bind references and IDENTIFIER(:name) as atoms (parseScalar) — issue #648.
+func TestParseScalar_Bind(t *testing.T) {
+	assertValid(t, (*Validator).parseScalar,
+		`:x`,
+		`:my_var`,
+		`:"My Var"`,
+		`IDENTIFIER(:tbl)`,
+		`IDENTIFIER('my_table')`,
+		`IDENTIFIER(my_table)`,
+		// non-bind atoms still work
+		`5`, `-5`, `'a'`, `TRUE`, `db.schema.obj`,
+	)
+	assertInvalid(t, (*Validator).parseScalar,
+		`:`,             // colon with no name
+		`:=`,            // assignment operator, not a bind
+		`IDENTIFIER()`,  // empty wrapper
+		`IDENTIFIER(:)`, // bind with no name
+	)
+}
+
 func TestParseLoop(t *testing.T) {
 	assertValid(t, (*Validator).ParseLoop,
 		`LOOP SELECT 1; END LOOP`,
@@ -447,6 +486,12 @@ func TestParseScriptingBlock(t *testing.T) {
 		// CANCEL wired into the block-body statement Choice.
 		`BEGIN CANCEL my_rs; END`,
 		`BEGIN SELECT 1; CANCEL my_rs; END`,
+		// Standalone assignment wired into the block-body statement Choice (issue #648).
+		`BEGIN counter := counter + 1; END`,
+		`BEGIN SELECT 1; x := 5; SELECT x; END`,
+		// Bind reference used inside a body SQL statement (tolerated by the statement span).
+		`BEGIN INSERT INTO t (a) VALUES (:x); END`,
+		`BEGIN SELECT * FROM IDENTIFIER(:tbl) WHERE c = :x; END`,
 		// CASE wired into the block-body statement Choice.
 		`BEGIN CASE WHEN a THEN SELECT 1; END CASE; END`,
 		`BEGIN CASE x WHEN 1 THEN SELECT 1; ELSE SELECT 2; END; SELECT 3; END`,
