@@ -58,6 +58,7 @@ func (v *Validator) parseScriptingStatement() bool {
 		v.ParseCase,
 		v.ParseClose,
 		v.ParseContinue,
+		v.ParseFetch,
 		// ELSE joins END/EXCEPTION/WHEN as a leading boundary so a CASE branch body
 		// (THEN … / ELSE …) ends at the next branch. No plain statement legally starts
 		// with any of these words, so the extra stop is harmless in a non-CASE body.
@@ -560,5 +561,28 @@ func (v *Validator) ParseClose() bool {
 	return v.Sequence(
 		func() bool { return v.MatchWord("CLOSE") },
 		v.parseIdentPath, // required <cursor_name>
+	)
+}
+
+// ParseFetch validates the Snowflake Scripting `FETCH` construct — retrieves one or
+// more rows from a cursor into the specified variables.
+// Reference: https://docs.snowflake.com/en/sql-reference/snowflake-scripting/fetch
+//
+// Syntax:
+//
+//	FETCH <cursor_name> INTO <variable> [ , <variable> ... ]
+//
+// (The terminating `;` belongs to the block-body statement list, not this rule.)
+func (v *Validator) ParseFetch() bool {
+	return v.Sequence(
+		func() bool { return v.MatchWord("FETCH") },
+		v.parseIdentPath, // required <cursor_name>
+		func() bool { return v.MatchWord("INTO") },
+		v.parseIdentPath, // required first <variable>
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Sequence(func() bool { return v.Match(sqltok.Comma) }, v.parseIdentPath)
+			})
+		},
 	)
 }

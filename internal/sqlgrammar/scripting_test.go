@@ -81,6 +81,23 @@ func TestParseClose(t *testing.T) {
 	)
 }
 
+func TestParseFetch(t *testing.T) {
+	assertValid(t, (*Validator).ParseFetch,
+		`FETCH my_cursor INTO x`,
+		`fetch my_cursor into x`, // case-insensitive
+		`FETCH my_cursor INTO x, y, z`,
+		`FETCH "My Cursor" INTO "Col A", "Col B"`,
+	)
+	assertInvalid(t, (*Validator).ParseFetch,
+		`FETCH my_cursor`,          // missing INTO
+		`FETCH INTO x`,             // missing cursor name
+		`FETCH my_cursor INTO`,     // missing variable
+		`FETCH my_cursor INTO x,`,  // trailing comma
+		`FETCH my_cursor INTO x y`, // missing comma
+		`FETCHES my_cursor INTO x`, // wrong keyword
+	)
+}
+
 func TestParseCase(t *testing.T) {
 	assertValid(t, (*Validator).ParseCase,
 		// Searched form.
