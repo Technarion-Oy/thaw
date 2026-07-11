@@ -120,9 +120,13 @@ func buildRegistry() map[string][]ruleFn {
 			(*Validator).ParseUse, (*Validator).ParseUseDatabase, (*Validator).ParseUseRole,
 			(*Validator).ParseUseSchema, (*Validator).ParseUseSecondaryRoles, (*Validator).ParseUseWarehouse,
 		},
-		"SET":      {(*Validator).ParseSet},
-		"UNSET":    {(*Validator).ParseUnset},
-		"BEGIN":    {(*Validator).ParseBegin},
+		"SET":   {(*Validator).ParseSet},
+		"UNSET": {(*Validator).ParseUnset},
+		// BEGIN is ambiguous: the transaction command (ParseBegin) and the leader of
+		// a Snowflake Scripting block (ParseScriptingBlock). DECLARE only ever begins
+		// a scripting block. ParseTopLevel accepts whichever candidate fully consumes.
+		"BEGIN":    {(*Validator).ParseBegin, (*Validator).ParseScriptingBlock},
+		"DECLARE":  {(*Validator).ParseScriptingBlock},
 		"START":    {(*Validator).ParseBegin}, // START TRANSACTION
 		"COMMIT":   {(*Validator).ParseCommit},
 		"ROLLBACK": {(*Validator).ParseRollback},
