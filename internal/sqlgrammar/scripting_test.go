@@ -58,9 +58,9 @@ func TestParseRaise(t *testing.T) {
 		`RAISE my_exception`,
 		`raise my_exception`, // case-insensitive
 		`RAISE "My Exception"`,
+		`RAISE`, // re-raise form: exception name omitted inside a handler
 	)
 	assertInvalid(t, (*Validator).ParseRaise,
-		`RAISE`,               // missing exception name
 		`RAISE a b`,           // two names
 		`RAISE my_exc extra`,  // trailing token
 		`RAISES my_exception`, // wrong keyword

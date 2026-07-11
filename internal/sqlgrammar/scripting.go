@@ -675,13 +675,15 @@ func (v *Validator) ParseContinue() bool {
 //
 // Syntax:
 //
-//	RAISE <exception_name>
+//	RAISE [ <exception_name> ]
 //
+// The exception name is optional: a bare `RAISE` inside an EXCEPTION handler
+// re-raises the exception currently being handled.
 // (The terminating `;` belongs to the block-body statement list, not this rule.)
 func (v *Validator) ParseRaise() bool {
 	return v.Sequence(
 		func() bool { return v.MatchWord("RAISE") },
-		v.parseIdentPath, // required <exception_name>
+		func() bool { return v.Optional(v.parseIdentPath) }, // optional <exception_name>; omitted to re-raise in a handler
 	)
 }
 
