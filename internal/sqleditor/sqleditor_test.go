@@ -1125,14 +1125,28 @@ func TestScriptingNeedsColon(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Simulate the cursor being exactly at the end of the SQL string
+			// Simulate the cursor being exactly at the end of the SQL string,
+			// scoping the scan the same way GetScriptingCompletions does.
 			offset := len([]rune(tt.sql))
+			text, _ := scriptingContext(tt.sql, runeOffsetToByte(tt.sql, offset))
 
-			got := scriptingNeedsColon(tt.sql, offset)
+			got := scriptingNeedsColon(text)
 			if got != tt.want {
 				t.Errorf("scriptingNeedsColon() = %v, want %v\nSQL Context: %q", got, tt.want, tt.sql)
 			}
 		})
+	}
+}
+
+// TestScriptingNeedsColon_NoLeakAcrossDollarBlock guards the $$-boundary fix:
+// a colon-required keyword before the opening $$ (here CREATE) must not leak into
+// a reference at the start of the block body. Without scriptingContext scoping the
+// scan back would reach CREATE and wrongly require a colon.
+func TestScriptingNeedsColon_NoLeakAcrossDollarBlock(t *testing.T) {
+	sql := "CREATE PROCEDURE p() RETURNS INT LANGUAGE SQL AS $$ myref"
+	got := GetScriptingCompletions(sql, len([]rune(sql)))
+	if got.NeedsColon {
+		t.Error("NeedsColon should be false: no colon-required keyword exists inside the $$ block")
 	}
 }
 

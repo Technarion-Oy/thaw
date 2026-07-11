@@ -1424,9 +1424,12 @@ type ScriptingCompletionResult struct {
 // is required. cursorOffset is a Unicode codepoint count (matches Monaco's
 // model.getOffsetAt for ASCII SQL).
 func GetScriptingCompletions(sql string, cursorOffset int) ScriptingCompletionResult {
+	// Resolve the analysis scope once — both helpers need it, and it tokenizes
+	// the whole document, so we avoid doing that (and the O(n) offset scan) twice.
+	text, inBlock := scriptingContext(sql, runeOffsetToByte(sql, cursorOffset))
 	return ScriptingCompletionResult{
-		Variables:  scriptingExtractVars(sql, cursorOffset),
-		NeedsColon: scriptingNeedsColon(sql, cursorOffset),
+		Variables:  scriptingExtractVars(text, inBlock),
+		NeedsColon: scriptingNeedsColon(text),
 	}
 }
 
@@ -1478,11 +1481,11 @@ func scriptingContext(sql string, cursor int) (text string, inBlock bool) {
 }
 
 // scriptingExtractVars mirrors extractDeclaredVariables from snowflakeScriptingUtils.ts.
-// Returns uppercased variable names declared before cursorOffset inside the current
-// $$ block, scanned over sqltok significant tokens so keywords or ';' inside string
-// literals and comments are never mistaken for declarations.
-func scriptingExtractVars(sql string, cursorOffset int) []string {
-	body, inBlock := scriptingContext(sql, runeOffsetToByte(sql, cursorOffset))
+// body/inBlock come from scriptingContext: body is the $$ block content up to the
+// cursor, inBlock reports whether the cursor is inside a block at all. Variables are
+// scanned over sqltok significant tokens so keywords or ';' inside string literals
+// and comments are never mistaken for declarations.
+func scriptingExtractVars(body string, inBlock bool) []string {
 	if !inBlock {
 		return nil // cursor is in plain SQL, not inside a $$ block
 	}
@@ -1565,10 +1568,11 @@ var scriptingContextKeywords = func() map[string]bool {
 }()
 
 // scriptingNeedsColon mirrors isColonRequired from snowflakeScriptingUtils.ts,
-// scanning sqltok significant tokens (block-aware, comment/string-aware) instead
-// of stripping the text with per-call regexes.
-func scriptingNeedsColon(sql string, offset int) bool {
-	text, _ := scriptingContext(sql, runeOffsetToByte(sql, offset))
+// scanning sqltok significant tokens (comment/string-aware) instead of stripping
+// the text with per-call regexes. text is the scriptingContext-scoped scan region
+// (the $$ block body when inside one), so context keywords before an enclosing $$
+// never leak into the decision.
+func scriptingNeedsColon(text string) bool {
 	sig := sqltok.SignificantTokens(text)
 
 	// Ignore the word currently being typed: an ident-like token ending at the cursor.
