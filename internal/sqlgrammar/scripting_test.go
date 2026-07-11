@@ -53,6 +53,20 @@ func TestParseContinue(t *testing.T) {
 	)
 }
 
+func TestParseRaise(t *testing.T) {
+	assertValid(t, (*Validator).ParseRaise,
+		`RAISE my_exception`,
+		`raise my_exception`, // case-insensitive
+		`RAISE "My Exception"`,
+	)
+	assertInvalid(t, (*Validator).ParseRaise,
+		`RAISE`,               // missing exception name
+		`RAISE a b`,           // two names
+		`RAISE my_exc extra`,  // trailing token
+		`RAISES my_exception`, // wrong keyword
+	)
+}
+
 func TestParseCancel(t *testing.T) {
 	assertValid(t, (*Validator).ParseCancel,
 		`CANCEL my_result_set`,

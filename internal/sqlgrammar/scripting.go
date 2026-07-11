@@ -65,6 +65,7 @@ func (v *Validator) parseScriptingStatement() bool {
 		v.ParseLoop,
 		v.ParseNull,
 		v.ParseOpen,
+		v.ParseRaise,
 		// ELSE/ELSEIF join END/EXCEPTION/WHEN as leading boundaries so a CASE or IF
 		// branch body (THEN … / ELSEIF … / ELSE …) ends at the next branch. No plain
 		// statement legally starts with any of these words, so the extra stops are
@@ -665,6 +666,22 @@ func (v *Validator) ParseContinue() bool {
 			)
 		},
 		func() bool { return v.Optional(v.parseIdentPath) }, // optional <label>
+	)
+}
+
+// ParseRaise validates the Snowflake Scripting `RAISE` construct — raises a named
+// exception, halting normal execution flow in the block.
+// Reference: https://docs.snowflake.com/en/sql-reference/snowflake-scripting/raise
+//
+// Syntax:
+//
+//	RAISE <exception_name>
+//
+// (The terminating `;` belongs to the block-body statement list, not this rule.)
+func (v *Validator) ParseRaise() bool {
+	return v.Sequence(
+		func() bool { return v.MatchWord("RAISE") },
+		v.parseIdentPath, // required <exception_name>
 	)
 }
 
