@@ -557,31 +557,6 @@ func isWordCharByte2(c byte) bool {
 		(c >= '0' && c <= '9') || c == '_' || c == '$'
 }
 
-// buildSingleQuoteMask returns a boolean slice where true indicates the byte
-// position is inside a single-quoted SQL string literal (including the quotes
-// themselves).  Handles SQL-style escaped quotes (”).
-func buildSingleQuoteMask(s string) []bool {
-	mask := make([]bool, len(s))
-	inSingle := false
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\'' {
-			if inSingle && i+1 < len(s) && s[i+1] == '\'' {
-				// Escaped quote '' — mark both bytes and skip ahead.
-				mask[i] = true
-				mask[i+1] = true
-				i++
-			} else {
-				// Opening or closing quote.
-				mask[i] = true
-				inSingle = !inSingle
-			}
-		} else if inSingle {
-			mask[i] = true
-		}
-	}
-	return mask
-}
-
 // scanSelectClauseForUnknownCols finds identifiers in the SELECT clause that
 // are not qualified (preceded/followed by "."), not function calls (followed
 // by "("), not AS aliases, not numeric literals, and not inside single-quoted
@@ -594,20 +569,16 @@ func buildSingleQuoteMask(s string) []bool {
 //
 // A reference is valid if it matches either set with the appropriate semantics.
 func scanSelectClauseForUnknownCols(clause string, metaCols, localCols map[string]struct{}, ic bool) []string {
-	locs := reIdentOrQuoted.FindAllStringIndex(clause, -1)
-	if len(locs) == 0 {
+	// The clause is tokenized once: significant tokens carry positions, so
+	// identifiers, string literals, and neighboring punctuation are all read
+	// from the same stream (no regex + hand-built quote mask to keep in sync).
+	clauseSig := sigTokens(clause)
+	if len(clauseSig) == 0 {
 		return nil
 	}
 
-	// Pre-compute which positions are inside single-quoted string literals so
-	// that e.g. 'month' in DATE_TRUNC('month', col) is not flagged as an
-	// unknown column reference.
-	inStr := buildSingleQuoteMask(clause)
-
 	// Build set of start positions that are AS aliases (or the AS keyword itself).
 	aliasStarts := make(map[int]struct{})
-	// Use token-based AS alias detection.
-	clauseSig := sigTokens(clause)
 	for _, a := range findAsAliases(clauseSig, clause) {
 		aliasStarts[a.asStart] = struct{}{}
 		aliasStarts[a.aliasStart] = struct{}{}
@@ -615,40 +586,36 @@ func scanSelectClauseForUnknownCols(clause string, metaCols, localCols map[strin
 
 	var missing []string
 	seen := make(map[string]struct{})
-	for _, loc := range locs {
-		start, end := loc[0], loc[1]
-
-		// Skip identifiers inside single-quoted string literals.
-		if start < len(inStr) && inStr[start] {
+	for i, tok := range clauseSig {
+		// Only bare/quoted identifiers (and keywords, filtered below) can be
+		// column names; string literals, numbers, and operators are skipped by
+		// virtue of not being ident-like. String literals in particular — e.g.
+		// 'month' in DATE_TRUNC('month', col) — are their own tokens, never
+		// identifiers, so no quote mask is needed.
+		if !isIdent(tok) {
 			continue
 		}
 
 		// Skip AS keyword and AS aliases
-		if _, skip := aliasStarts[start]; skip {
-			continue
-		}
-		raw := clause[start:end]
-		// Skip numeric literals (can't be column names)
-		if raw[0] >= '0' && raw[0] <= '9' {
+		if _, skip := aliasStarts[tok.Start]; skip {
 			continue
 		}
 		// Skip if preceded by "." (qualified column reference)
-		if start > 0 && clause[start-1] == '.' {
+		if i > 0 && clauseSig[i-1].Kind == sqltok.Dot {
 			continue
 		}
 		// Skip if followed by "." (schema/table qualifier)
-		if end < len(clause) && clause[end] == '.' {
+		if i+1 < len(clauseSig) && clauseSig[i+1].Kind == sqltok.Dot {
 			continue
 		}
-		// Skip if followed by "(" possibly with whitespace (function call)
-		after := strings.TrimLeft(clause[end:], " \t\r\n")
-		if len(after) > 0 && after[0] == '(' {
+		// Skip if followed by "(" (function call)
+		if i+1 < len(clauseSig) && clauseSig[i+1].Kind == sqltok.LParen {
 			continue
 		}
 
 		// Normalize the identifier: bare identifiers are uppercased (Snowflake
 		// convention), quoted identifiers preserve case (unless ic=true).
-		normName := normIdent(raw, ic)
+		normName := normIdent(tok.Text(clause), ic)
 
 		// Skip known SQL keywords to prevent flagging things like FROM, WHERE, etc.
 		normUpper := strings.ToUpper(normName)
@@ -658,7 +625,7 @@ func scanSelectClauseForUnknownCols(clause string, metaCols, localCols map[strin
 
 		// Skip date parts used as the first argument of date functions
 		if bcrDateParts[normUpper] {
-			if fn := GetActiveFunctionCall(clause[:start]); fn != nil {
+			if fn := GetActiveFunctionCall(clause[:tok.Start]); fn != nil {
 				if bcrDateFuncs[strings.ToUpper(fn.Name)] && fn.ParamIndex == 0 {
 					continue
 				}
@@ -693,50 +660,35 @@ type aliasColSets struct{ meta, local map[string]struct{} }
 // checked; all others are silently skipped so that CTE aliases (whose column
 // lists are unknown without an AST) never produce false positives.
 func scanAliasedColRefs(clause string, aliasMap map[string]*aliasColSets, ic bool) []string {
-	locs := reIdentOrQuoted.FindAllStringIndex(clause, -1)
-	if len(locs) == 0 {
-		return nil
-	}
-	inStr := buildSingleQuoteMask(clause)
+	clauseSig := sigTokens(clause)
 	var missing []string
 	seen := make(map[string]struct{})
 
-	for i, loc := range locs {
-		start, end := loc[0], loc[1]
-		// Skip positions inside single-quoted string literals.
-		if start < len(inStr) && inStr[start] {
+	for i, tok := range clauseSig {
+		// We want the column part of alias.column: an ident directly preceded
+		// by a dot, whose preceding token is the alias ident.
+		if !isIdent(tok) {
 			continue
 		}
-		// We want tokens that are directly preceded by a dot (the column part
-		// of alias.column).
-		if start == 0 || clause[start-1] != '.' {
-			continue
-		}
-		// The previous identifier token must be immediately before the dot
-		// (i.e., its end == start-1) so we know it is the alias token, not
-		// a different token that happens to sit near a dot.
-		if i == 0 || locs[i-1][1] != start-1 {
+		if i < 2 || clauseSig[i-1].Kind != sqltok.Dot || !isIdent(clauseSig[i-2]) {
 			continue
 		}
 		// Skip three-part qualifiers like db.schema.table — the token before
 		// the alias would itself be preceded by a dot.
-		prevStart := locs[i-1][0]
-		if prevStart > 0 && clause[prevStart-1] == '.' {
+		if i >= 3 && clauseSig[i-3].Kind == sqltok.Dot {
 			continue
 		}
 		// Skip if the column itself is followed by a dot (e.g. schema.table.col
 		// where this token is not the final component).
-		if end < len(clause) && clause[end] == '.' {
+		if i+1 < len(clauseSig) && clauseSig[i+1].Kind == sqltok.Dot {
 			continue
 		}
-		prevRaw := clause[prevStart:locs[i-1][1]]
-		aliasU := strings.ToUpper(normIdent(prevRaw, false))
+		aliasU := strings.ToUpper(normIdent(clauseSig[i-2].Text(clause), false))
 		sets, hasAlias := aliasMap[aliasU]
 		if !hasAlias {
 			continue // Alias not resolved to a cached table; skip.
 		}
-		colRaw := clause[start:end]
-		normName := normIdent(colRaw, ic)
+		normName := normIdent(tok.Text(clause), ic)
 		key := aliasU + "\x00" + normName
 		_, inLocal := sets.local[normName]
 		_, inMeta := sets.meta[strings.ToUpper(normName)]

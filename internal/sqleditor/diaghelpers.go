@@ -11,17 +11,12 @@
 package sqleditor
 
 import (
-	"regexp"
 	"strings"
 
 	"thaw/internal/sqltok"
 )
 
 // ── Shared diagnostic helpers ─────────────────────────────────────────────────
-
-// reIdentOrQuoted matches bare SQL identifiers or double-quoted identifiers.
-// Used directly by tableexist.go, barecolrefs.go, and patterns.go.
-var reIdentOrQuoted = regexp.MustCompile(`[a-zA-Z_][a-zA-Z0-9_$]*|"(?:[^"]|"")*"`)
 
 // stripCommentsSQL removes SQL single-line (--) and block (/* */) comments.
 // Line comments are removed entirely; block comments are replaced with a
