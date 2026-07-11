@@ -62,6 +62,7 @@ func (v *Validator) parseScriptingStatement() bool {
 		v.ParseFor,
 		v.ParseIf,
 		v.ParseLet,
+		v.ParseLoop,
 		// ELSE/ELSEIF join END/EXCEPTION/WHEN as leading boundaries so a CASE or IF
 		// branch body (THEN … / ELSEIF … / ELSE …) ends at the next branch. No plain
 		// statement legally starts with any of these words, so the extra stops are
@@ -303,6 +304,28 @@ func (v *Validator) ParseLet() bool {
 	return v.Sequence(
 		func() bool { return v.MatchWord("LET") },
 		func() bool { return v.Choice(v.parseCursorDecl, resultsetAssign, variableAssign) },
+	)
+}
+
+// ParseLoop validates the Snowflake Scripting `LOOP` construct — an infinite loop
+// that repeats until explicitly exited with BREAK or RETURN. It is a block-body
+// statement, not top-level.
+// Reference: https://docs.snowflake.com/en/sql-reference/snowflake-scripting/loop
+//
+// Syntax:
+//
+//	LOOP
+//	    <statement>; [ <statement>; ... ]
+//	END LOOP [ <label> ] ;
+//
+// The terminating `;` belongs to the block-body statement list, not this rule.
+func (v *Validator) ParseLoop() bool {
+	return v.Sequence(
+		func() bool { return v.MatchWord("LOOP") },
+		v.parseScriptingStmtList,
+		func() bool { return v.MatchWord("END") },
+		func() bool { return v.MatchWord("LOOP") },
+		func() bool { return v.Optional(v.parseIdentPath) }, // optional <label>
 	)
 }
 
