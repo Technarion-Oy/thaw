@@ -38,8 +38,8 @@ func TestParseBreak(t *testing.T) {
 func TestParseContinue(t *testing.T) {
 	assertValid(t, (*Validator).ParseContinue,
 		`CONTINUE`,
-		`continue`,  // case-insensitive
-		`ITERATE`,   // synonym
+		`continue`, // case-insensitive
+		`ITERATE`,  // synonym
 		`iterate`,
 		`CONTINUE my_label`,
 		`ITERATE my_label`,
@@ -109,6 +109,29 @@ func TestParseCase(t *testing.T) {
 	)
 }
 
+func TestParseException(t *testing.T) {
+	assertValid(t, (*Validator).ParseException,
+		`EXCEPTION WHEN my_exc THEN SELECT 1;`,
+		`exception when my_exc then select 1;`, // case-insensitive
+		`EXCEPTION WHEN OTHER THEN SELECT -1;`,
+		`EXCEPTION WHEN a OR b OR c THEN SELECT 1;`,
+		`EXCEPTION WHEN a THEN SELECT 1; WHEN OTHER THEN SELECT 2;`,
+		`EXCEPTION WHEN my_exc THEN SELECT 1; SELECT 2;`, // multiple statements
+		// Optional { EXIT | CONTINUE } before THEN.
+		`EXCEPTION WHEN my_exc EXIT THEN SELECT 1;`,
+		`EXCEPTION WHEN my_exc CONTINUE THEN SELECT 1;`,
+		`EXCEPTION WHEN a OR b CONTINUE THEN SELECT 1;`,
+		`EXCEPTION WHEN OTHER EXIT THEN SELECT 0;`,
+	)
+	assertInvalid(t, (*Validator).ParseException,
+		`EXCEPTION THEN SELECT 1;`,           // missing WHEN <exception_name>
+		`EXCEPTION WHEN my_exc SELECT 1;`,    // missing THEN
+		`EXCEPTION WHEN my_exc THEN`,         // missing handler statement
+		`WHEN my_exc THEN SELECT 1;`,         // missing EXCEPTION keyword
+		`EXCEPTION WHEN a OR THEN SELECT 1;`, // dangling OR
+	)
+}
+
 func TestParseDeclare(t *testing.T) {
 	assertValid(t, (*Validator).ParseDeclare,
 		// Variable declarations.
@@ -117,9 +140,9 @@ func TestParseDeclare(t *testing.T) {
 		`DECLARE x INT DEFAULT 5;`,
 		`DECLARE x NUMBER(38,2) := 0;`,
 		`DECLARE profit NUMBER(38, 2) := 0;`,
-		`DECLARE x DEFAULT 5;`,          // no type, DEFAULT not swallowed as type
-		`DECLARE x := SELECT 1;`,        // := form
-		`DECLARE x INT; y VARCHAR;`,     // multiple
+		`DECLARE x DEFAULT 5;`,      // no type, DEFAULT not swallowed as type
+		`DECLARE x := SELECT 1;`,    // := form
+		`DECLARE x INT; y VARCHAR;`, // multiple
 		`DECLARE flag DEFAULT TRUE;`,
 		// Cursor declaration.
 		`DECLARE c1 CURSOR FOR SELECT id, price FROM invoices;`,
@@ -138,13 +161,13 @@ func TestParseDeclare(t *testing.T) {
 		`DECLARE x INT; c CURSOR FOR SELECT 1; e EXCEPTION;`,
 	)
 	assertInvalid(t, (*Validator).ParseDeclare,
-		`DECLARE`,                       // no declarations
-		`DECLARE ;`,                     // empty declaration
-		`DECLARE x INT`,                 // missing terminating ;
-		`DECLARE x INT GARBAGE;`,        // junk after type
-		`DECLARE c CURSOR SELECT 1;`,    // cursor missing FOR
+		`DECLARE`,                            // no declarations
+		`DECLARE ;`,                          // empty declaration
+		`DECLARE x INT`,                      // missing terminating ;
+		`DECLARE x INT GARBAGE;`,             // junk after type
+		`DECLARE c CURSOR SELECT 1;`,         // cursor missing FOR
 		`DECLARE my_exc EXCEPTION (-20001);`, // exception missing message
-		`DECLAER x INT;`,                // misspelled keyword
+		`DECLAER x INT;`,                     // misspelled keyword
 	)
 }
 
@@ -171,6 +194,7 @@ func TestParseScriptingBlock(t *testing.T) {
 		`BEGIN SELECT 1; EXCEPTION WHEN my_exc THEN SELECT 2; END`,
 		`BEGIN SELECT 1; EXCEPTION WHEN OTHER THEN SELECT -1; END`,
 		`BEGIN SELECT 1; EXCEPTION WHEN a OR b THEN SELECT 2; WHEN OTHER THEN SELECT 3; END`,
+		`BEGIN SELECT 1; EXCEPTION WHEN my_exc CONTINUE THEN SELECT 2; WHEN OTHER EXIT THEN SELECT 3; END`,
 		// DECLARE + body + handler together.
 		`DECLARE x INT; BEGIN SELECT x; EXCEPTION WHEN OTHER THEN SELECT 0; END`,
 		// BREAK / EXIT wired into the block-body statement Choice.
