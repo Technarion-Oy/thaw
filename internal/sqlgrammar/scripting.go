@@ -39,8 +39,8 @@ func (v *Validator) ParseScriptingBlock() bool {
 	return v.Sequence(
 		v.parseDeclareSection, // optional leading DECLARE
 		func() bool { return v.MatchWord("BEGIN") },
-		v.parseScriptingStmtList, // required <statement>; [ … ]
-		v.parseExceptionHandler,  // optional trailing EXCEPTION
+		v.parseScriptingStmtList,                            // required <statement>; [ … ]
+		func() bool { return v.Optional(v.ParseException) }, // optional trailing EXCEPTION
 		func() bool { return v.MatchWord("END") },
 	)
 }
@@ -265,35 +265,51 @@ func (v *Validator) consumeDeclExpr() bool {
 	return v.consumeExprSpan("\x00")
 }
 
-// parseExceptionHandler matches the optional trailing exception handler:
+// ParseException validates the Snowflake Scripting `EXCEPTION` construct — the
+// trailing handler section of a `BEGIN … END` block that specifies handlers for
+// exceptions raised within the block. It is NOT a standalone statement:
+// ParseScriptingBlock invokes it (wrapped in Optional) as the block's optional
+// trailing section, not the statement Choice or dispatch.
+// Reference: https://docs.snowflake.com/en/sql-reference/snowflake-scripting/exception
+//
+// Syntax:
 //
 //	EXCEPTION
-//	  WHEN <exception> [ OR <exception> ... ] THEN <statement>; [ <statement>; ... ]
-//	  [ WHEN ... THEN ... ]
+//	  WHEN <exception_name> [ OR <exception_name> ... ] [ { EXIT | CONTINUE } ] THEN
+//	    <statement>; [ <statement>; ... ]
+//	  [ WHEN ... ]
+//	  [ WHEN OTHER [ { EXIT | CONTINUE } ] THEN <statement>; [ <statement>; ... ] ]
 //
-// The `WHEN OTHER THEN` catch-all is just a WHEN whose <exception> is the reserved
-// name OTHER, so it needs no special case.
-func (v *Validator) parseExceptionHandler() bool {
+// The `WHEN OTHER THEN` catch-all is just a WHEN whose <exception_name> is the
+// reserved name OTHER, so it needs no special case. The optional `{ EXIT | CONTINUE }`
+// selects whether the block exits or resumes after the handler runs.
+func (v *Validator) ParseException() bool {
 	when := func() bool {
 		return v.Sequence(
 			func() bool { return v.MatchWord("WHEN") },
-			v.parseIdentPath, // <exception> (OTHER is a valid name here)
+			v.parseIdentPath, // <exception_name> (OTHER is a valid name here)
 			func() bool {
 				return v.ZeroOrMore(func() bool {
 					return v.Sequence(func() bool { return v.MatchWord("OR") }, v.parseIdentPath)
+				})
+			},
+			func() bool { // optional { EXIT | CONTINUE }
+				return v.Optional(func() bool {
+					return v.Choice(
+						func() bool { return v.MatchWord("EXIT") },
+						func() bool { return v.MatchWord("CONTINUE") },
+					)
 				})
 			},
 			func() bool { return v.MatchWord("THEN") },
 			v.parseScriptingStmtList,
 		)
 	}
-	return v.Optional(func() bool {
-		return v.Sequence(
-			func() bool { return v.MatchWord("EXCEPTION") },
-			when,
-			func() bool { return v.ZeroOrMore(when) },
-		)
-	})
+	return v.Sequence(
+		func() bool { return v.MatchWord("EXCEPTION") },
+		when,
+		func() bool { return v.ZeroOrMore(when) },
+	)
 }
 
 // consumeStmtSpan consumes one statement's tokens up to — but not including — its
