@@ -1192,24 +1192,6 @@ func validateScriptWord(
 
 // ── ParseJoinTables ───────────────────────────────────────────────────────────
 
-var tableRefRe = regexp.MustCompile(
-	`(?i)(?:FROM|JOIN|MERGE\s+INTO|USING)\s+` +
-		`(?:` +
-		`(` + ReIdentifier + `)\.(` + ReIdentifier + `)\.(` + ReIdentifier + `)` +
-		`|(` + ReIdentifier + `)\.(` + ReIdentifier + `)` +
-		`|(` + ReIdentifier + `)` +
-		`)` +
-		`(?:[ \t]+(?:AS[ \t]+)?(` + ReIdentifier + `))?`,
-)
-
-var useStmtRe = regexp.MustCompile(
-	`(?i)\bUSE\s+(?:(DATABASE|SCHEMA|ROLE|WAREHOUSE)\s+)?` +
-		`(?:` +
-		`(` + ReIdentifier + `)\.(` + ReIdentifier + `)` +
-		`|(` + ReIdentifier + `)` +
-		`)`,
-)
-
 // normID normalises a raw captured identifier:
 //   - Quoted identifiers ("name") have quotes stripped, escaped quotes unescaped, and case preserved.
 //   - Unquoted identifiers are uppercased (Snowflake convention).
@@ -1228,108 +1210,125 @@ func normID(s string) string {
 // AND database/schema references from USE statements from the given SQL text.
 // Three-part (db.schema.table), two-part (schema.table), and one-part (table)
 // references are all recognized.
+//
+// It is a keyword-anchored scan over the significant-token stream (mirroring
+// internal/snowflake/lineage.go extractObjectRefs): FROM/JOIN/USING/MERGE INTO
+// introduce a table path, USE introduces a database/schema. Scanning tokens
+// rather than the raw string means comments and string literals never produce
+// phantom refs, comments between a keyword and its identifier are tolerated,
+// and dotted paths + quoted identifiers are read by the tokenizer's own
+// sqltok.ReadIdentParts.
 func ParseJoinTables(sql string) []JoinTableRef {
+	toks := sqltok.SignificantTokens(sql)
 	var result []JoinTableRef
-	start := 0
 
-	// 1. Extract FROM/JOIN/MERGE/USING references
-	for {
-		m := tableRefRe.FindStringSubmatchIndex(sql[start:])
-		if m == nil {
-			break
+	for i := 0; i < len(toks); {
+		if toks[i].Kind != sqltok.Keyword {
+			i++
+			continue
 		}
+		kw := strings.ToUpper(toks[i].Text(sql))
 
-		// Adjust indices based on the current search start position
-		for i := range m {
-			if m[i] != -1 {
-				m[i] += start
+		// tableAt is the index where the table path begins, or -1 if this
+		// keyword does not introduce one.
+		tableAt := -1
+		switch kw {
+		case "FROM", "JOIN", "USING":
+			tableAt = i + 1
+		case "MERGE":
+			if j := i + 1; j < len(toks) && strings.EqualFold(toks[j].Text(sql), "INTO") {
+				tableAt = j + 1 // MERGE INTO <target>
 			}
+		case "USE":
+			i = parseUseRef(toks, sql, i+1, &result)
+			continue
 		}
-
-		var db, schema, name, alias string
-
-		if m[2] != -1 && m[4] != -1 && m[6] != -1 {
-			// Three-part: db.schema.table
-			db = normID(sql[m[2]:m[3]])
-			schema = normID(sql[m[4]:m[5]])
-			name = normID(sql[m[6]:m[7]])
-			start = m[7]
-		} else if m[8] != -1 && m[10] != -1 {
-			// Two-part: schema.table
-			schema = normID(sql[m[8]:m[9]])
-			name = normID(sql[m[10]:m[11]])
-			start = m[11]
-		} else if m[12] != -1 {
-			// One-part: table
-			name = normID(sql[m[12]:m[13]])
-			start = m[13]
-		}
-
-		alias = name
-		if m[14] != -1 {
-			rawAlias := normID(sql[m[14]:m[15]])
-			if !joinStopKW[strings.ToUpper(rawAlias)] {
-				alias = rawAlias
-				// Successfully matched an alias - continue AFTER the alias
-				start = m[15]
-			} else {
-				// Matched a keyword instead of an alias - continue BEFORE the keyword
-				start = m[14]
-			}
-		}
-
-		result = append(result, JoinTableRef{DB: db, Schema: schema, Name: name, Alias: alias})
-	}
-
-	// 2. Extract USE statement references
-	start = 0
-	for {
-		m := useStmtRe.FindStringSubmatchIndex(sql[start:])
-		if m == nil {
-			break
-		}
-		for i := range m {
-			if m[i] != -1 {
-				m[i] += start
-			}
-		}
-
-		var db, schema string
-		keyword := ""
-		if m[2] != -1 {
-			keyword = strings.ToUpper(sql[m[2]:m[3]])
-		}
-
-		if keyword == "ROLE" || keyword == "WAREHOUSE" {
-			start = m[1]
+		if tableAt < 0 {
+			i++
 			continue
 		}
 
-		if m[4] != -1 && m[6] != -1 {
-			// Two-part: USE [SCHEMA] db.schema
-			db = normID(sql[m[4]:m[5]])
-			schema = normID(sql[m[6]:m[7]])
-			start = m[7]
-		} else if m[8] != -1 {
-			// One-part: USE [DATABASE|SCHEMA] name
-			val := normID(sql[m[8]:m[9]])
-			if keyword == "SCHEMA" {
-				schema = val
-			} else {
-				// USE DATABASE <db> or bare USE <db>
-				db = val
-			}
-			start = m[9]
-		} else {
-			start = m[1]
+		parts, next := sqltok.ReadIdentParts(toks, sql, tableAt, 3)
+		if parts == nil {
+			i++
+			continue
+		}
+		ref := partsToRef(parts)
+		ref.Alias = ref.Name
+
+		// Optional alias, with an optional leading AS. A stop keyword in alias
+		// position is not an alias: leave it for the main loop to re-process
+		// (so `FROM a JOIN b` and `MERGE INTO t USING s` chain correctly).
+		aliasAt := next
+		if aliasAt < len(toks) && toks[aliasAt].Kind == sqltok.Keyword &&
+			strings.EqualFold(toks[aliasAt].Text(sql), "AS") {
+			aliasAt++
+		}
+		resume := next
+		if aliasAt < len(toks) && toks[aliasAt].Kind.IsIdentLike() &&
+			!joinStopKW[strings.ToUpper(toks[aliasAt].Text(sql))] {
+			ref.Alias = normID(toks[aliasAt].Text(sql))
+			resume = aliasAt + 1
 		}
 
-		if db != "" || schema != "" {
-			result = append(result, JoinTableRef{DB: db, Schema: schema, Name: "", Alias: ""})
-		}
+		result = append(result, ref)
+		i = resume
 	}
 
 	return result
+}
+
+// partsToRef maps a 1-, 2-, or 3-part identifier path (as returned by
+// sqltok.ReadIdentParts) onto a JoinTableRef's DB/Schema/Name, normalising each
+// part. Alias is left unset for the caller to fill.
+func partsToRef(parts []string) JoinTableRef {
+	switch len(parts) {
+	case 3:
+		return JoinTableRef{DB: normID(parts[0]), Schema: normID(parts[1]), Name: normID(parts[2])}
+	case 2:
+		return JoinTableRef{Schema: normID(parts[0]), Name: normID(parts[1])}
+	default:
+		return JoinTableRef{Name: normID(parts[len(parts)-1])}
+	}
+}
+
+// parseUseRef parses a USE statement whose body starts at toks[at] (just past
+// the USE keyword), appending a DB/schema ref to result when applicable. It
+// returns the token index at which the main scan should resume. USE ROLE and
+// USE WAREHOUSE are recognised but produce no ref.
+func parseUseRef(toks []sqltok.Token, src string, at int, result *[]JoinTableRef) int {
+	if at >= len(toks) {
+		return at
+	}
+	keyword := strings.ToUpper(toks[at].Text(src))
+	nameAt := at
+	switch keyword {
+	case "DATABASE", "SCHEMA":
+		nameAt = at + 1
+	case "ROLE", "WAREHOUSE":
+		return at + 1
+	default:
+		keyword = ""
+	}
+
+	parts, next := sqltok.ReadIdentParts(toks, src, nameAt, 2)
+	if parts == nil {
+		return nameAt
+	}
+
+	var db, schema string
+	if len(parts) == 2 {
+		db, schema = normID(parts[0]), normID(parts[1])
+	} else if keyword == "SCHEMA" {
+		schema = normID(parts[0])
+	} else {
+		db = normID(parts[0]) // USE DATABASE <db> or bare USE <db>
+	}
+
+	if db != "" || schema != "" {
+		*result = append(*result, JoinTableRef{DB: db, Schema: schema})
+	}
+	return next
 }
 
 // ── BuildCompositeConditions ──────────────────────────────────────────────────

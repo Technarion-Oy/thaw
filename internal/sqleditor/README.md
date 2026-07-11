@@ -46,7 +46,7 @@ Key capabilities:
 - `ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker` — validates INSERT and CREATE TABLE REFERENCES column lists
 
 ### JOIN suggestions
-- `ParseJoinTables(sql) []JoinTableRef` — regex-based FROM/JOIN extractor (3/2/1-part + alias)
+- `ParseJoinTables(sql) []JoinTableRef` — FROM/JOIN/USING/MERGE INTO + USE extractor (3/2/1-part + alias); a keyword-anchored scan over the `sqltok` significant-token stream (mirrors `snowflake/lineage.go`), so comments/string literals never yield phantom refs
 - `ComputeJoinOnConditions(req JoinOnSuggestionsReq) []JoinCondition` — three-tier engine: (1) FK constraints, (2) PK naming heuristic, (3) type-compatible same-name columns + USING
 - `ResolveTableRefs(refs, storeObjects, useCtx, session) []ResolvedRef` — qualifies unresolved refs against store objects, `UseContext`, and session context (priority: fully-qualified → store match → UseContext → session)
 
