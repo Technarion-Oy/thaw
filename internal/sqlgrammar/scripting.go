@@ -53,6 +53,7 @@ func (v *Validator) ParseScriptingBlock() bool {
 func (v *Validator) parseScriptingStatement() bool {
 	return v.Choice(
 		v.ParseScriptingBlock,
+		v.ParseBreak,
 		func() bool { return v.consumeStmtSpan("END", "EXCEPTION", "WHEN") },
 	)
 }
@@ -197,5 +198,26 @@ func (v *Validator) ParseAwait() bool {
 				v.parseIdentPath,
 			)
 		},
+	)
+}
+
+// ParseBreak validates the Snowflake Scripting `BREAK` construct (EXIT is a synonym)
+// — terminates a loop, optionally the enclosing loop named by a label.
+// Reference: https://docs.snowflake.com/en/sql-reference/snowflake-scripting/break
+//
+// Syntax:
+//
+//	{ BREAK | EXIT } [ <label> ]
+//
+// (The terminating `;` belongs to the block-body statement list, not this rule.)
+func (v *Validator) ParseBreak() bool {
+	return v.Sequence(
+		func() bool {
+			return v.Choice(
+				func() bool { return v.MatchWord("BREAK") },
+				func() bool { return v.MatchWord("EXIT") },
+			)
+		},
+		func() bool { return v.Optional(v.parseIdentPath) }, // optional <label>
 	)
 }
