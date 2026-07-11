@@ -35,6 +35,24 @@ func TestParseBreak(t *testing.T) {
 	)
 }
 
+func TestParseContinue(t *testing.T) {
+	assertValid(t, (*Validator).ParseContinue,
+		`CONTINUE`,
+		`continue`,  // case-insensitive
+		`ITERATE`,   // synonym
+		`iterate`,
+		`CONTINUE my_label`,
+		`ITERATE my_label`,
+		`CONTINUE "My Label"`,
+	)
+	assertInvalid(t, (*Validator).ParseContinue,
+		`CONTINUE a b`,     // two labels
+		`CONTINUES`,        // wrong keyword
+		`RETURN`,           // not a continue
+		`CONTINUE a extra`, // trailing token after label
+	)
+}
+
 func TestParseCancel(t *testing.T) {
 	assertValid(t, (*Validator).ParseCancel,
 		`CANCEL my_result_set`,
