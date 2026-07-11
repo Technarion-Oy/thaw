@@ -49,6 +49,34 @@ func TestParseCancel(t *testing.T) {
 	)
 }
 
+func TestParseCase(t *testing.T) {
+	assertValid(t, (*Validator).ParseCase,
+		// Searched form.
+		`CASE WHEN a THEN SELECT 1; END`,
+		`case when a then select 1; end`, // case-insensitive
+		`CASE WHEN a THEN SELECT 1; END CASE`,
+		`CASE WHEN a > 0 THEN SELECT 1; WHEN a < 0 THEN SELECT 2; END`,
+		`CASE WHEN a THEN SELECT 1; ELSE SELECT 2; END`,
+		`CASE WHEN a THEN SELECT 1; SELECT 2; END`, // multiple statements in a branch
+		// Simple form (operand).
+		`CASE (x) WHEN 1 THEN SELECT 1; END`,
+		`CASE x WHEN 1 THEN SELECT 1; WHEN 2 THEN SELECT 2; ELSE SELECT 3; END CASE`,
+		// Nested scripting block inside a branch (must not stop at its inner `;`).
+		`CASE WHEN a THEN BEGIN SELECT 1; SELECT 2; END; END`,
+		// A scalar CASE expression embedded in a WHEN condition — inner WHEN/THEN/END
+		// must not be mistaken for this statement's boundaries.
+		`CASE WHEN CASE WHEN x THEN 1 ELSE 2 END > 0 THEN SELECT 1; END`,
+	)
+	assertInvalid(t, (*Validator).ParseCase,
+		`CASE END`,                             // no WHEN branch
+		`CASE WHEN THEN SELECT 1; END`,         // empty condition
+		`CASE WHEN a SELECT 1; END`,            // missing THEN
+		`CASE WHEN a THEN SELECT 1;`,           // missing END
+		`CASES WHEN a THEN SELECT 1; END`,      // wrong keyword
+		`CASE WHEN a THEN SELECT 1; END extra`, // trailing token
+	)
+}
+
 func TestParseScriptingBlock(t *testing.T) {
 	assertValid(t, (*Validator).ParseScriptingBlock,
 		`BEGIN SELECT 1; END`,
@@ -82,6 +110,9 @@ func TestParseScriptingBlock(t *testing.T) {
 		// CANCEL wired into the block-body statement Choice.
 		`BEGIN CANCEL my_rs; END`,
 		`BEGIN SELECT 1; CANCEL my_rs; END`,
+		// CASE wired into the block-body statement Choice.
+		`BEGIN CASE WHEN a THEN SELECT 1; END CASE; END`,
+		`BEGIN CASE x WHEN 1 THEN SELECT 1; ELSE SELECT 2; END; SELECT 3; END`,
 	)
 	assertInvalid(t, (*Validator).ParseScriptingBlock,
 		`BEGIN END`,                   // empty body — needs a statement

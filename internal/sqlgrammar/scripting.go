@@ -55,7 +55,11 @@ func (v *Validator) parseScriptingStatement() bool {
 		v.ParseScriptingBlock,
 		v.ParseBreak,
 		v.ParseCancel,
-		func() bool { return v.consumeStmtSpan("END", "EXCEPTION", "WHEN") },
+		v.ParseCase,
+		// ELSE joins END/EXCEPTION/WHEN as a leading boundary so a CASE branch body
+		// (THEN … / ELSE …) ends at the next branch. No plain statement legally starts
+		// with any of these words, so the extra stop is harmless in a non-CASE body.
+		func() bool { return v.consumeStmtSpan("END", "EXCEPTION", "WHEN", "ELSE") },
 	)
 }
 
@@ -221,6 +225,105 @@ func (v *Validator) ParseBreak() bool {
 		},
 		func() bool { return v.Optional(v.parseIdentPath) }, // optional <label>
 	)
+}
+
+// ParseCase validates the Snowflake Scripting `CASE` construct — both the simple
+// form (matches an operand against each WHEN expression) and the searched form
+// (evaluates each WHEN boolean). It is a block-body statement, not top-level.
+// Reference: https://docs.snowflake.com/en/sql-reference/snowflake-scripting/case
+//
+// Syntax:
+//
+//	-- Simple
+//	CASE ( <expression_to_match> )
+//	    WHEN <expression> THEN <statement>; [ <statement>; ... ]
+//	    [ WHEN ... ]
+//	    [ ELSE <statement>; [ <statement>; ... ] ]
+//	END [ CASE ]
+//
+//	-- Searched
+//	CASE
+//	    WHEN <boolean_expression> THEN <statement>; [ <statement>; ... ]
+//	    [ WHEN ... ]
+//	    [ ELSE <statement>; [ <statement>; ... ] ]
+//	END [ CASE ]
+//
+// The optional operand distinguishes the two forms: present → simple, absent →
+// searched. Operand and WHEN conditions are consumed as expression spans (there is
+// no full expression grammar yet). The terminating `;` belongs to the block-body
+// statement list, not this rule.
+func (v *Validator) ParseCase() bool {
+	return v.Sequence(
+		func() bool { return v.MatchWord("CASE") },
+		// Simple-form operand `( <expr> )` (or a bare expr) up to the first WHEN;
+		// searched form has none, so the span is empty and Optional rewinds.
+		func() bool { return v.Optional(func() bool { return v.consumeExprSpan("WHEN") }) },
+		v.parseCaseWhen, // required first WHEN … THEN …
+		func() bool { return v.ZeroOrMore(v.parseCaseWhen) }, // additional WHEN branches
+		func() bool { return v.Optional(v.parseCaseElse) },   // optional ELSE branch
+		func() bool { return v.MatchWord("END") },
+		func() bool { return v.Optional(func() bool { return v.MatchWord("CASE") }) }, // END [ CASE ]
+	)
+}
+
+// parseCaseWhen matches one `WHEN <expression> THEN <statement>; [ … ]` branch.
+func (v *Validator) parseCaseWhen() bool {
+	return v.Sequence(
+		func() bool { return v.MatchWord("WHEN") },
+		func() bool { return v.consumeExprSpan("THEN") },
+		func() bool { return v.MatchWord("THEN") },
+		v.parseScriptingStmtList,
+	)
+}
+
+// parseCaseElse matches the trailing `ELSE <statement>; [ … ]` branch.
+func (v *Validator) parseCaseElse() bool {
+	return v.Sequence(
+		func() bool { return v.MatchWord("ELSE") },
+		v.parseScriptingStmtList,
+	)
+}
+
+// consumeExprSpan consumes an expression's tokens up to — but not including — the
+// first `stop` keyword that sits at paren depth 0 and outside any nested CASE … END.
+// Tracking CASE nesting lets a WHEN condition or operand embedding a scalar
+// `CASE … WHEN … THEN … END` expression not be cut short by the inner WHEN/THEN. A
+// top-level `;` also ends the span (an expression never spans a statement terminator),
+// which keeps a missing THEN failing at the right spot. Requires at least one token,
+// so an immediate stop word yields an empty span and fails.
+//
+// ponytail: a permissive span, NOT a real expression parse — replace with the
+// expression grammar once it lands.
+func (v *Validator) consumeExprSpan(stop string) bool {
+	start := v.pos
+	paren, caseDepth := 0, 0
+	for !v.AtEnd() {
+		t := v.Peek()
+		if paren == 0 && caseDepth == 0 && v.isWord(t, stop) {
+			break
+		}
+		if t.Kind == sqltok.Semicolon && paren == 0 {
+			break
+		}
+		switch {
+		case t.Kind == sqltok.LParen:
+			paren++
+		case t.Kind == sqltok.RParen:
+			if paren > 0 {
+				paren--
+			}
+		case paren == 0 && v.isWord(t, "CASE"):
+			caseDepth++
+		case paren == 0 && caseDepth > 0 && v.isWord(t, "END"):
+			caseDepth--
+		}
+		v.advance()
+	}
+	if v.pos == start {
+		v.expect("expression")
+		return false
+	}
+	return true
 }
 
 // ParseCancel validates the Snowflake Scripting `CANCEL` construct — terminates the
