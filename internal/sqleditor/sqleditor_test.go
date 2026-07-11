@@ -660,6 +660,31 @@ func TestParseJoinTables(t *testing.T) {
 				{DB: "DB2", Schema: "SCH2"},
 			},
 		},
+		{
+			// Token scanning ignores comments and string literals — no phantom ref.
+			name: "Refs inside comments and strings are ignored",
+			sql: `SELECT '-- FROM fake.str' FROM real1
+			-- FROM legacy.t
+			/* FROM block.comment */ JOIN real2 r2`,
+			want: []JoinTableRef{
+				{Name: "REAL1", Alias: "REAL1"},
+				{Name: "REAL2", Alias: "R2"},
+			},
+		},
+		{
+			name: "Comment between keyword and identifier",
+			sql:  `SELECT * FROM /* hint */ db.sch.t`,
+			want: []JoinTableRef{
+				{DB: "DB", Schema: "SCH", Name: "T", Alias: "T"},
+			},
+		},
+		{
+			name: "Newline-separated alias",
+			sql:  "SELECT * FROM t1\n  t1alias",
+			want: []JoinTableRef{
+				{Name: "T1", Alias: "T1ALIAS"},
+			},
+		},
 	}
 
 	for _, tt := range tests {
