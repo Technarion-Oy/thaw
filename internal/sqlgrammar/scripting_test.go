@@ -17,6 +17,24 @@ func TestParseAwait(t *testing.T) {
 	)
 }
 
+func TestParseBreak(t *testing.T) {
+	assertValid(t, (*Validator).ParseBreak,
+		`BREAK`,
+		`break`, // case-insensitive
+		`EXIT`,  // synonym
+		`exit`,
+		`BREAK my_label`,
+		`EXIT my_label`,
+		`BREAK "My Label"`,
+	)
+	assertInvalid(t, (*Validator).ParseBreak,
+		`BREAK a b`,     // two labels
+		`BREAKS`,        // wrong keyword
+		`RETURN`,        // not a break
+		`BREAK a extra`, // trailing token after label
+	)
+}
+
 func TestParseScriptingBlock(t *testing.T) {
 	assertValid(t, (*Validator).ParseScriptingBlock,
 		`BEGIN SELECT 1; END`,
@@ -42,6 +60,11 @@ func TestParseScriptingBlock(t *testing.T) {
 		`BEGIN SELECT 1; EXCEPTION WHEN a OR b THEN SELECT 2; WHEN OTHER THEN SELECT 3; END`,
 		// DECLARE + body + handler together.
 		`DECLARE x INT; BEGIN SELECT x; EXCEPTION WHEN OTHER THEN SELECT 0; END`,
+		// BREAK / EXIT wired into the block-body statement Choice.
+		`BEGIN BREAK; END`,
+		`BEGIN EXIT; END`,
+		`BEGIN BREAK my_loop; END`,
+		`BEGIN SELECT 1; BREAK; END`,
 	)
 	assertInvalid(t, (*Validator).ParseScriptingBlock,
 		`BEGIN END`,                   // empty body — needs a statement
