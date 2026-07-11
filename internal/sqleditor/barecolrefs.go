@@ -570,7 +570,7 @@ func isWordCharByte2(c byte) bool {
 // A reference is valid if it matches either set with the appropriate semantics.
 func scanSelectClauseForUnknownCols(clause string, metaCols, localCols map[string]struct{}, ic bool) []string {
 	// The clause is tokenized once: significant tokens carry positions, so
-	// identifiers, string literals, and neighbouring punctuation are all read
+	// identifiers, string literals, and neighboring punctuation are all read
 	// from the same stream (no regex + hand-built quote mask to keep in sync).
 	clauseSig := sigTokens(clause)
 	if len(clauseSig) == 0 {

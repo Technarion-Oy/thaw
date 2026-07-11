@@ -17,6 +17,10 @@ func TestValidateBareColumnRefs_Valid(t *testing.T) {
 		`SELECT "first_name", salary FROM "DB"."SCH"."EMPLOYEES"`,
 		// Aliased — qualified refs with valid columns must not warn
 		"SELECT e.ID, e.FIRST_NAME FROM DB.SCH.EMPLOYEES e",
+		// Whitespace around the dot must still read as a qualified ref (token
+		// adjacency, not byte adjacency) — issue #675. Old byte-based scan
+		// treated `e` here as a bare unknown column.
+		"SELECT e . FIRST_NAME FROM DB.SCH.EMPLOYEES e",
 		"SELECT e.ID, d.DEPT_NAME FROM DB.SCH.EMPLOYEES e JOIN DB.SCH.DEPARTMENTS d ON e.DEPT_ID = d.DEPT_ID",
 		// Local table via alias — valid qualified refs
 		"CREATE TABLE local_t (id NUMBER, name VARCHAR);\nSELECT t.id, t.name FROM local_t t;",
