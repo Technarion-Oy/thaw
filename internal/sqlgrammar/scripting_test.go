@@ -49,6 +49,20 @@ func TestParseCancel(t *testing.T) {
 	)
 }
 
+func TestParseClose(t *testing.T) {
+	assertValid(t, (*Validator).ParseClose,
+		`CLOSE my_cursor`,
+		`close my_cursor`, // case-insensitive
+		`CLOSE "My Cursor"`,
+	)
+	assertInvalid(t, (*Validator).ParseClose,
+		`CLOSE`,               // missing cursor name
+		`CLOSE a b`,           // two names
+		`CLOSE my_cursor xtr`, // trailing token
+		`CLOSES my_cursor`,    // wrong keyword
+	)
+}
+
 func TestParseCase(t *testing.T) {
 	assertValid(t, (*Validator).ParseCase,
 		// Searched form.
