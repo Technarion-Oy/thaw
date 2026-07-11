@@ -77,10 +77,10 @@ func TestParseReturn(t *testing.T) {
 		`RETURN 'done'`,
 	)
 	assertInvalid(t, (*Validator).ParseReturn,
-		`RETURN`,          // missing expression
-		`RETURNS 1`,       // wrong keyword
-		`RETURN ;`,        // no expression before terminator
-		`my_variable`,     // not a return
+		`RETURN`,      // missing expression
+		`RETURNS 1`,   // wrong keyword
+		`RETURN ;`,    // no expression before terminator
+		`my_variable`, // not a return
 	)
 }
 
@@ -318,6 +318,35 @@ func TestParseRepeat(t *testing.T) {
 	assertInvalid(t, (*Validator).ParseScriptingBlock,
 		`BEGIN REPEAT SELECT 1; UNTIL done END REPEAT; SELECT 2; END`, // condition not parenthesized
 		`BEGIN REPEAT SELECT 1; UNTIL (done) END LOOP; SELECT 2; END`, // wrong END keyword
+	)
+}
+
+func TestParseWhile(t *testing.T) {
+	assertValid(t, (*Validator).ParseWhile,
+		`WHILE (c < 10) DO SELECT 1; END WHILE`,
+		`while (c < 10) do select 1; end while`,            // case-insensitive
+		`WHILE (c < 10) LOOP SELECT 1; END LOOP`,           // DO/LOOP + END LOOP variant
+		`WHILE (c < 10) DO SELECT 1; SELECT 2; END WHILE`,  // multiple statements
+		`WHILE (c < 10) DO c := c + 1; END WHILE my_label`, // trailing label
+		`WHILE (x) DO IF (done) THEN BREAK; END IF; END WHILE`,
+		// Nested block in the body (inner `;` must not stop the body early).
+		`WHILE (x) DO BEGIN SELECT 1; SELECT 2; END; END WHILE`,
+	)
+	assertInvalid(t, (*Validator).ParseWhile,
+		`WHILE (c < 10) DO END WHILE`,               // empty body
+		`WHILE c < 10 DO SELECT 1; END WHILE`,       // condition not parenthesized
+		`WHILE (c < 10) SELECT 1; END WHILE`,        // missing DO/LOOP
+		`WHILE (c < 10) DO SELECT 1;`,               // missing END
+		`WHILE (c < 10) DO SELECT 1; END`,           // missing WHILE/LOOP after END
+		`WHILE (c < 10) DO SELECT 1; END WHILE a b`, // two labels
+	)
+	// A WHILE embedded in a block with trailing statements: the body list must stop
+	// at END, not scan past `END WHILE` to the next `;`.
+	assertValid(t, (*Validator).ParseScriptingBlock,
+		`BEGIN WHILE (c < 10) DO SELECT 1; END WHILE; SELECT 2; END`,
+	)
+	assertInvalid(t, (*Validator).ParseScriptingBlock,
+		`BEGIN WHILE c < 10 DO SELECT 1; END WHILE; SELECT 2; END`, // condition not parenthesized
 	)
 }
 
