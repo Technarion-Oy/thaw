@@ -57,6 +57,7 @@ func (v *Validator) parseScriptingStatement() bool {
 		v.ParseCancel,
 		v.ParseCase,
 		v.ParseClose,
+		v.ParseContinue,
 		// ELSE joins END/EXCEPTION/WHEN as a leading boundary so a CASE branch body
 		// (THEN … / ELSE …) ends at the next branch. No plain statement legally starts
 		// with any of these words, so the extra stop is harmless in a non-CASE body.
@@ -325,6 +326,28 @@ func (v *Validator) consumeExprSpan(stop string) bool {
 		return false
 	}
 	return true
+}
+
+// ParseContinue validates the Snowflake Scripting `CONTINUE` construct (ITERATE is a
+// synonym) — skips the rest of the current loop iteration and proceeds to the next,
+// optionally the enclosing loop named by a label.
+// Reference: https://docs.snowflake.com/en/sql-reference/snowflake-scripting/continue
+//
+// Syntax:
+//
+//	{ CONTINUE | ITERATE } [ <label> ]
+//
+// (The terminating `;` belongs to the block-body statement list, not this rule.)
+func (v *Validator) ParseContinue() bool {
+	return v.Sequence(
+		func() bool {
+			return v.Choice(
+				func() bool { return v.MatchWord("CONTINUE") },
+				func() bool { return v.MatchWord("ITERATE") },
+			)
+		},
+		func() bool { return v.Optional(v.parseIdentPath) }, // optional <label>
+	)
 }
 
 // ParseCancel validates the Snowflake Scripting `CANCEL` construct — terminates the
