@@ -124,38 +124,36 @@ func (v *Validator) parseExceptionHandler() bool {
 }
 
 // consumeStmtSpan consumes one statement's tokens up to — but not including — its
-// terminating semicolon or, at the top nesting level, any of the given stop words
-// (the enclosing block/handler keywords). CASE…END and BEGIN…END pairs and
-// parentheses are depth-tracked, so a `;`, END, or stop word nested inside them
-// (e.g. inside a CASE expression) does not end the span. It requires at least one
-// token, so an empty statement fails.
+// terminating semicolon. A stop word (an enclosing block/handler keyword: END,
+// EXCEPTION, the next WHEN) ends the span ONLY when it is the LEADING token — i.e.
+// the statement list has run out of statements and reached the boundary. Mid-
+// statement the same word belongs to the statement and is consumed, which is what
+// lets MERGE's bare `WHEN MATCHED …` / `WHEN NOT MATCHED …` clauses — and a CASE
+// expression's WHEN/END — sit inside a block body without cutting the span short.
+// A `;` only terminates outside parentheses (a subquery cannot contain one, but
+// the paren guard is kept defensively). It requires at least one token, so an
+// empty statement fails.
 //
 // ponytail: a permissive span, NOT a real parse — precise per-construct rules
 // (LET/IF/FOR/RETURN/…) supersede it as their issues land, inserted ahead of the
 // catch-all branch in parseScriptingStatement.
 func (v *Validator) consumeStmtSpan(stops ...string) bool {
 	start := v.pos
-	depth := 0 // CASE / BEGIN … END nesting
 	paren := 0
 	for !v.AtEnd() {
 		t := v.Peek()
-		if depth == 0 && paren == 0 {
-			if t.Kind == sqltok.Semicolon || v.isWord(t, stops...) {
-				break
-			}
+		if v.pos == start && v.isWord(t, stops...) {
+			break
 		}
-		switch {
-		case t.Kind == sqltok.LParen:
+		if t.Kind == sqltok.Semicolon && paren == 0 {
+			break
+		}
+		switch t.Kind {
+		case sqltok.LParen:
 			paren++
-		case t.Kind == sqltok.RParen:
+		case sqltok.RParen:
 			if paren > 0 {
 				paren--
-			}
-		case v.isWord(t, "CASE", "BEGIN"):
-			depth++
-		case v.isWord(t, "END"):
-			if depth > 0 {
-				depth--
 			}
 		}
 		v.advance()
@@ -167,10 +165,12 @@ func (v *Validator) consumeStmtSpan(stops ...string) bool {
 	return true
 }
 
-// isWord reports whether t is an identifier-like token whose text equals (case-
-// insensitively) any of words.
+// isWord reports whether t is an UNQUOTED identifier-like token (Keyword or bare
+// Identifier) whose text equals (case-insensitively) any of words. QuotedIdent is
+// excluded: a structural keyword is never quoted, so a legal quoted alias like
+// `"END"` or `"WHEN"` is not mistaken for a block/handler boundary.
 func (v *Validator) isWord(t sqltok.Token, words ...string) bool {
-	if !t.Kind.IsIdentLike() {
+	if t.Kind != sqltok.Keyword && t.Kind != sqltok.Identifier {
 		return false
 	}
 	txt := t.Text(v.src)

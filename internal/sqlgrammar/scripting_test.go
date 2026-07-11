@@ -30,6 +30,12 @@ func TestParseScriptingBlock(t *testing.T) {
 		`BEGIN BEGIN SELECT 1; END; SELECT 2; END`,
 		// CASE … END inside a statement must not end the block early.
 		`BEGIN SELECT CASE WHEN a THEN 1 ELSE 2 END FROM t; END`,
+		// MERGE's bare `WHEN MATCHED …` clauses (depth 0, no CASE/parens) must not
+		// be mistaken for a boundary — in the body and in a handler's THEN list.
+		`BEGIN MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN UPDATE SET x = 1 WHEN NOT MATCHED THEN INSERT (x) VALUES (1); END`,
+		`BEGIN SELECT 1; EXCEPTION WHEN OTHER THEN MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN UPDATE SET x = 1; END`,
+		// A quoted identifier named after a stop word is not a boundary.
+		`BEGIN SELECT 1 AS "END"; END`,
 		// Exception handler.
 		`BEGIN SELECT 1; EXCEPTION WHEN my_exc THEN SELECT 2; END`,
 		`BEGIN SELECT 1; EXCEPTION WHEN OTHER THEN SELECT -1; END`,
