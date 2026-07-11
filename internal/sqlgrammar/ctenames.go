@@ -30,6 +30,31 @@ import (
 // `key = 'value'` shape of a tag list.
 func CollectCTENames(src string, sig []sqltok.Token) []string {
 	var names []string
+	for _, d := range CollectCTEDefs(src, sig) {
+		names = append(names, d.Name)
+	}
+	return names
+}
+
+// CTEDef describes one CTE definition located by CollectCTEDefs, as byte-offset
+// spans into src. It carries the structural positions a consumer needs to slice
+// out the name, the optional explicit column list, and the body — without
+// re-scanning with its own regex (issue #673).
+type CTEDef struct {
+	Name      string // raw CTE alias name text, as it appears in src
+	ColsStart int    // byte offset of the explicit column-list '(', or -1 if none
+	ColsEnd   int    // byte offset just past the column-list ')'
+	BodyStart int    // byte offset of the body's opening '('
+	BodyEnd   int    // byte offset just past the body's ')'; len(src) if unterminated
+	Closed    bool   // whether the body's parens were balanced
+}
+
+// CollectCTEDefs is the span-returning sibling of CollectCTENames: it walks the
+// same CTE-list positions but returns each member's structural spans (see
+// CTEDef) instead of just its name. Nested WITH clauses each anchor their own
+// walk, so nested CTE members are returned too, in source order.
+func CollectCTEDefs(src string, sig []sqltok.Token) []CTEDef {
+	var defs []CTEDef
 	for i := 0; i < len(sig); i++ {
 		t := sig[i]
 		if t.Kind != sqltok.Keyword || !strings.EqualFold(t.Text(src), "WITH") {
@@ -38,17 +63,17 @@ func CollectCTENames(src string, sig []sqltok.Token) []string {
 		j := i + 1
 		// Skip a RECURSIVE modifier — but only when it is not itself the CTE
 		// name (`WITH recursive AS (…)` is a valid alias).
-		if _, _, _, ok := cteListMember(src, sig, j); !ok &&
+		if _, _, ok := cteListMember(src, sig, j); !ok &&
 			j < len(sig) && sig[j].Kind.IsIdentLike() && strings.EqualFold(sig[j].Text(src), "RECURSIVE") {
 			j++
 		}
 		for {
-			name, next, closed, ok := cteListMember(src, sig, j)
+			def, next, ok := cteListMember(src, sig, j)
 			if !ok {
 				break
 			}
-			names = append(names, name)
-			if !closed {
+			defs = append(defs, def)
+			if !def.Closed {
 				break // unterminated body — nothing structural follows
 			}
 			if next >= len(sig) || sig[next].Kind != sqltok.Comma {
@@ -57,40 +82,46 @@ func CollectCTENames(src string, sig []sqltok.Token) []string {
 			j = next + 1
 		}
 	}
-	return names
+	return defs
 }
 
 // cteListMember matches one CTE list member `name [ ( col [, col…] ) ] AS (…)`
-// at sig[j]. It returns the raw name, the index just past the body's closing
-// paren, whether the body's parens were balanced, and whether a member was
-// recognized at all. An unbalanced body still yields the name (closed=false):
-// `name AS (` is enough to identify a CTE while the statement is being typed.
-func cteListMember(src string, sig []sqltok.Token, j int) (name string, next int, closed, ok bool) {
+// at sig[j]. It returns the member's spans (see CTEDef), the index just past the
+// body's closing paren, and whether a member was recognized at all. An
+// unbalanced body still yields the member (def.Closed=false): `name AS (` is
+// enough to identify a CTE while the statement is being typed.
+func cteListMember(src string, sig []sqltok.Token, j int) (def CTEDef, next int, ok bool) {
 	if j >= len(sig) || !sig[j].Kind.IsIdentLike() {
-		return
+		return CTEDef{}, 0, false
 	}
-	name = sig[j].Text(src)
+	def = CTEDef{Name: sig[j].Text(src), ColsStart: -1}
 	k := j + 1
 	// Optional column list: contents must be only identifiers and commas, so a
 	// `WITH TAG (key = 'value')` clause is not mistaken for a CTE member.
 	if k < len(sig) && sig[k].Kind == sqltok.LParen {
 		end := skipBalanced(sig, k)
 		if end < 0 || !onlyIdentsAndCommas(sig, k+1, end-1) {
-			return "", 0, false, false
+			return CTEDef{}, 0, false
 		}
+		def.ColsStart = sig[k].Start
+		def.ColsEnd = sig[end-1].End
 		k = end
 	}
 	if k >= len(sig) || !sig[k].Kind.IsIdentLike() || !strings.EqualFold(sig[k].Text(src), "AS") {
-		return "", 0, false, false
+		return CTEDef{}, 0, false
 	}
 	k++
 	if k >= len(sig) || sig[k].Kind != sqltok.LParen {
-		return "", 0, false, false
+		return CTEDef{}, 0, false
 	}
+	def.BodyStart = sig[k].Start
 	if end := skipBalanced(sig, k); end >= 0 {
-		return name, end, true, true
+		def.BodyEnd = sig[end-1].End
+		def.Closed = true
+		return def, end, true
 	}
-	return name, len(sig), false, true
+	def.BodyEnd = len(src)
+	return def, len(sig), true
 }
 
 // skipBalanced returns the index just past the paren group opening at

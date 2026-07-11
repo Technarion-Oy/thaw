@@ -1651,12 +1651,6 @@ func TypeCategory(dt string) string {
 
 // ── CTE projection helpers ────────────────────────────────────────────────────
 
-// reCTEDef matches a CTE definition of the form:  <name> [(<col_list>)] AS (
-// Used to locate CTE names and their opening parenthesis.
-// The optional (?:\([^)]*\))? matches an explicit column alias list between
-// the CTE name and the AS keyword, e.g. cte(col_a, col_b) AS (...).
-var reCTEDef = regexp.MustCompile(`(?i)(?:^|[^a-zA-Z0-9_$])(` + _ident + `)\s*(?:\([^)]*\))?\s+AS\s*\(`)
-
 // reAsAliasExpr matches a trailing "AS <alias>" at the end of a SELECT-list
 // expression (anchored with $).
 var reAsAliasExpr = regexp.MustCompile(`(?i)\bAS\s+(` + _ident + `)\s*$`)
@@ -1851,45 +1845,36 @@ func extractCTEProjections(stripped string, globalRegistry map[string][]ColInfo)
 
 	result := make(map[string][]ColInfo)
 
-	// We want to process CTEs in order so that later CTEs can reference earlier ones.
-	// We iterate through the whole string finding ALL CTE definitions.
-	remaining := stripped
-	for {
-		m := reCTEDef.FindStringSubmatchIndex(remaining)
-		if m == nil {
-			break
+	// CollectCTEDefs is the single structural CTE scanner (issue #673): it
+	// returns each member's name/column-list/body spans in source order, so
+	// later CTEs can reference earlier ones. It also descends into nested WITH
+	// clauses; we skip those (cursor guard) to keep this the top-level
+	// WITH-clause scope the projection registry has always tracked.
+	sig := sqltok.SignificantTokens(stripped)
+	cursor := 0
+	for _, def := range sqlgrammar.CollectCTEDefs(stripped, sig) {
+		if def.BodyStart < cursor {
+			continue // nested inside an already-processed body
 		}
 
-		cteName := remaining[m[2]:m[3]]
+		cteName := def.Name
 
-		// The regex match ends with "AS\s*(" so the body's opening paren
-		// is always at m[1]-1.
-		bodyParenStart := m[1] - 1
-
-		// Check for explicit column aliases between name and "AS (".
-		// E.g. cte(col_a, col_b) AS (...) — the region between the name
-		// and the body paren contains "(col_a, col_b) AS ".
+		// Explicit column aliases, e.g. cte(col_a, col_b) AS (...).
 		var explicitCols []string
-		betweenNameAndBody := remaining[m[3]:bodyParenStart]
-		if parenIdx := strings.Index(betweenNameAndBody, "("); parenIdx >= 0 {
-			block := extractBalancedBlock(betweenNameAndBody, parenIdx)
-			if len(block) > 2 {
-				inner := block[1 : len(block)-1]
-				for _, part := range splitTopLevelCommas(inner) {
-					trimmed := strings.TrimSpace(part)
-					if trimmed != "" {
-						explicitCols = append(explicitCols, strings.ToUpper(normIdent(trimmed, true)))
-					}
+		if def.ColsStart >= 0 {
+			for _, part := range splitTopLevelCommas(stripped[def.ColsStart+1 : def.ColsEnd-1]) {
+				trimmed := strings.TrimSpace(part)
+				if trimmed != "" {
+					explicitCols = append(explicitCols, strings.ToUpper(normIdent(trimmed, true)))
 				}
 			}
 		}
 
-		bodyBlock := extractBalancedBlock(remaining, bodyParenStart)
-		if len(bodyBlock) < 2 {
-			remaining = remaining[bodyParenStart+1:]
-			continue
+		if !def.Closed {
+			continue // unterminated body (statement still being typed)
 		}
-		innerSQL := strings.TrimSpace(bodyBlock[1 : len(bodyBlock)-1])
+		cursor = def.BodyEnd
+		innerSQL := strings.TrimSpace(stripped[def.BodyStart+1 : def.BodyEnd-1])
 
 		// Process this CTE using current localScope.
 		firstTok := getFirstSQLToken(innerSQL)
@@ -1976,9 +1961,6 @@ func extractCTEProjections(stripped string, globalRegistry map[string][]ColInfo)
 			result[nameU] = cteCols
 			localScope[nameU] = cteCols // Update local scope for next CTE in sequence
 		}
-
-		// Advance past this CTE definition
-		remaining = remaining[bodyParenStart+len(bodyBlock):]
 	}
 	return result
 }
