@@ -111,11 +111,12 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 	scriptHasActiveDB := false
 	scriptHasActiveSchema := false
 
-	// Stage references (@stg) — tracked separately since they use a distinct
-	// scanner and the KnownObjects catalog rather than ResolvedRefs.
-	scriptCreatedStages := make(map[string]struct{})
-	scriptDroppedStages := make(map[string]struct{})
-	knownStages := objectsOfKind(req.KnownObjects, "STAGE")
+	// Schema-scoped objects beyond tables/views (stages, streams, tasks, pipes,
+	// file formats, table-likes, policies, …) — resolved against the KnownObjects
+	// catalog rather than ResolvedRefs. In-script CREATE/DROP effects are tracked
+	// per kind (keyed by ObjectType.Name(), e.g. "stage", "file format").
+	scriptCreatedByKind := make(map[string]map[string]struct{})
+	scriptDroppedByKind := make(map[string]map[string]struct{})
 
 	for _, r := range req.StmtRanges {
 		raw := sqlStmt(req.SQL, r)
@@ -129,12 +130,10 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 				scriptCreatedTables[strings.Join(parts, ".")] = struct{}{}
 			}
 		}
-		if rawPath, objType, ok := matchCreateSchemaScoped(sig, raw); ok && strings.EqualFold(objType, "stage") {
+		if rawPath, objType, ok := matchCreateSchemaScoped(sig, raw); ok {
 			if parts := extractIdentParts(rawPath, ic); len(parts) > 0 {
-				scriptCreatedStages[parts[len(parts)-1]] = struct{}{}
-				scriptCreatedStages[strings.Join(parts, ".")] = struct{}{}
-				delete(scriptDroppedStages, parts[len(parts)-1])
-				delete(scriptDroppedStages, strings.Join(parts, "."))
+				regByKind(scriptCreatedByKind, objType, parts)
+				unregByKind(scriptDroppedByKind, objType, parts)
 			}
 		}
 		if rawPath, ok := matchCreateDbSch(sig, raw); ok {
@@ -535,6 +534,15 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			}
 		}
 
+		// ── Object-kind references (phase 2): ALTER/DROP/DESCRIBE/COMMENT ON
+		// <kind> <name>, where the statement names its own schema-scoped kind.
+		// Runs BEFORE section (d) so a DROP statement is validated against the
+		// pre-drop state (its own drop effect has not been applied yet).
+		markers = append(markers, validateObjectKindRefs(
+			raw, sig, r.StartLine, ic, checkEq, req.KnownObjects,
+			req.FetchedObjectSchemas, req.SessionDatabase, req.SessionSchema,
+			scriptCreatedByKind, scriptDroppedByKind)...)
+
 		// ── (d) Apply DROP/UNDROP effects after validation ─────────
 		// Runs before the SELECT/WITH continue so DROP TABLE etc. always
 		// update state even though DROP is not in the SELECT/WITH list.
@@ -568,12 +576,10 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 				scriptCreatedDbsAndSchemas[strings.Join(parts, ".")] = struct{}{}
 			}
 		}
-		if rawPath, ok := matchDropStage(sig, raw); ok {
+		if rawPath, objType, _, ok := matchDropSchemaScoped(sig, raw); ok {
 			if parts := extractIdentParts(rawPath, ic); len(parts) > 0 {
-				scriptDroppedStages[parts[len(parts)-1]] = struct{}{}
-				scriptDroppedStages[strings.Join(parts, ".")] = struct{}{}
-				delete(scriptCreatedStages, parts[len(parts)-1])
-				delete(scriptCreatedStages, strings.Join(parts, "."))
+				regByKind(scriptDroppedByKind, objType, parts)
+				unregByKind(scriptCreatedByKind, objType, parts)
 			}
 		}
 
@@ -581,9 +587,9 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		// GET, LIST, REMOVE, COPY, SELECT … FROM @stg), so it must precede the
 		// SELECT/WITH continue below. ─────────────────────────────────────────
 		markers = append(markers, validateStageRefs(
-			raw, sig, r.StartLine, ic, checkEq, knownStages,
+			raw, sig, r.StartLine, ic, checkEq, objectsOfKind(req.KnownObjects, "STAGE"),
 			req.FetchedObjectSchemas, req.SessionDatabase, req.SessionSchema,
-			scriptCreatedStages, scriptDroppedStages)...)
+			scriptCreatedByKind["stage"], scriptDroppedByKind["stage"])...)
 
 		// ── SELECT / WITH / CREATE AS SELECT: table existence ─────────
 		if firstKw != "SELECT" && firstKw != "WITH" && firstKw != "CREATE" && firstKw != "UNDROP" &&

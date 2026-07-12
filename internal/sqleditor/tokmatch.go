@@ -417,18 +417,70 @@ func matchDropSchema(sig []sqltok.Token, sql string) (rawPath string, hasIfExist
 	return
 }
 
-// matchDropStage matches DROP STAGE [IF EXISTS] <ident_path>.
-func matchDropStage(sig []sqltok.Token, sql string) (rawPath string, ok bool) {
-	i := 0
-	if !kwAt(sig, sql, i, "DROP") {
+// matchDropSchemaScoped matches DROP <kind> [IF EXISTS] <ident_path> for any
+// schema-scoped object kind (STAGE, STREAM, TASK, PIPE, FILE FORMAT, the
+// table-likes, the policy family, …), longest keyword phrase first. Account- and
+// database-scoped DROPs (DATABASE, SCHEMA, WAREHOUSE, ROLE, …) do not match. It
+// returns the raw ident path, the ObjectType.Name() kind, whether IF EXISTS was
+// present, and ok. Used for in-script DROP-effect tracking.
+func matchDropSchemaScoped(sig []sqltok.Token, sql string) (rawPath, objType string, hasIfExists, ok bool) {
+	if !kwAt(sig, sql, 0, "DROP") {
 		return
 	}
-	i++
-	if !kwAt(sig, sql, i, "STAGE") {
+	i := 1
+	for _, ot := range sf.SchemaScopedObjectTypes() {
+		if matchWordsAt(sig, sql, i, ot.Keywords) {
+			i += len(ot.Keywords)
+			objType = ot.Name()
+			break
+		}
+	}
+	if objType == "" {
 		return
 	}
-	i++
-	i, _ = skipIfExists(sig, sql, i)
+	i, hasIfExists = skipIfExists(sig, sql, i)
+	rawPath, _ = readIdentPath(sig, sql, i)
+	ok = rawPath != ""
+	return
+}
+
+// matchObjectKindRef matches a DDL/DCL statement that names its own schema-scoped
+// object kind and existence-checks it (issue #719, phase 2):
+//
+//	{ALTER|DROP} <kind> [IF EXISTS] <name>
+//	{DESCRIBE|DESC} <kind> <name>
+//	COMMENT ON <kind> <name> IS '…'
+//
+// The <kind> phrase is matched against snowflake.SchemaScopedObjectTypes()
+// (longest-first, so EVENT TABLE beats TABLE), which excludes account-/org-scoped
+// kinds — WAREHOUSE, ROLE, integrations, … — so those are naturally skipped
+// (deferred to phase 3). Returns the ObjectType.Name() kind, the raw ident path,
+// whether an IF EXISTS clause was present, and ok.
+func matchObjectKindRef(sig []sqltok.Token, sql string) (objType, rawPath string, hasIfExists, ok bool) {
+	verb := kwAtAny(sig, sql, 0, "ALTER", "DROP", "DESCRIBE", "DESC", "COMMENT")
+	if verb == "" {
+		return
+	}
+	i := 1
+	if verb == "COMMENT" {
+		if !kwAt(sig, sql, 1, "ON") {
+			return
+		}
+		i = 2
+	}
+	for _, ot := range sf.SchemaScopedObjectTypes() {
+		if matchWordsAt(sig, sql, i, ot.Keywords) {
+			i += len(ot.Keywords)
+			objType = ot.Name()
+			break
+		}
+	}
+	if objType == "" {
+		return
+	}
+	if verb == "ALTER" || verb == "DROP" {
+		i, hasIfExists = skipIfExists(sig, sql, i)
+	}
 	rawPath, _ = readIdentPath(sig, sql, i)
 	ok = rawPath != ""
 	return
