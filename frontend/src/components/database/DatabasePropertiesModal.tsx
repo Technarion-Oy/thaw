@@ -15,7 +15,7 @@ import { DatabaseOutlined } from "@ant-design/icons";
 import {
   GetObjectProperties, AlterDatabase, GetDatabaseParameters,
   ListExternalVolumes, ListIntegrations, ListComputePools, ListWarehouses,
-  ListUserDatabases, GetObjectTagReferences,
+  ListUserDatabases, ListEventTables, GetObjectTagReferences,
 } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 import TagsRow, { EditableTag } from "../shared/TagsRow";
@@ -36,6 +36,11 @@ const BOOLS = opts("TRUE", "FALSE");
 const MERGE_BEHAVIOR = opts("AUTO", "ENABLED", "DISABLED");
 const YES_NO = opts("YES", "NO");
 const VISIBILITY = opts("PRIVILEGED");
+
+// Quote a dotted qualified identifier (DB.SCHEMA.NAME) part-by-part.
+// ponytail: names containing literal dots aren't handled — SHOW never returns
+// those unquoted, and the picker only feeds SHOW output here.
+const quoteQualified = (v: string) => v.split(".").map(quoteIdent).join(".");
 
 
 // ─── Main component ──────────────────────────────────────────────────────────
@@ -60,6 +65,13 @@ export default function DatabasePropertiesModal({ db, name, onClose }: Props) {
   const [accounts, setAccounts] = useState("");
   const [ignoreEdition, setIgnoreEdition] = useState(false);
   const [replBusy, setReplBusy] = useState<string | null>(null);
+  // CONTACT <purpose> = <contact_name> editor (one pair at a time).
+  const [contactPurpose, setContactPurpose] = useState("");
+  const [contactName, setContactName] = useState("");
+  const [contactBusy, setContactBusy] = useState<string | null>(null);
+  // DATA_QUALITY_MONITORING_SETTINGS YAML spec.
+  const [dqms, setDqms] = useState("");
+  const [dqmsBusy, setDqmsBusy] = useState(false);
 
   const reload = useCallback(async () => {
     // Keep prior data rendered while refetching so an inline edit doesn't collapse
@@ -263,6 +275,38 @@ export default function DatabasePropertiesModal({ db, name, onClose }: Props) {
     });
   };
 
+  // A contact purpose is spliced unquoted into the clause, so it MUST be a bare
+  // identifier (letters, digits, underscores) — otherwise it's an injection
+  // vector. The contact name is a qualified identifier, double-quoted per part.
+  const purposeValid = /^[A-Za-z0-9_]+$/.test(contactPurpose.trim());
+  const runContact = (key: string, clause: string) => async () => {
+    setContactBusy(key);
+    setActionError(null);
+    try {
+      await AlterDatabase(db, clause);
+      setContactName("");
+    } catch (e) {
+      setActionError(`Contact ${key} failed: ${String(e)}`);
+    } finally {
+      setContactBusy(null);
+    }
+  };
+
+  const saveDqms = async () => {
+    setDqmsBusy(true);
+    setActionError(null);
+    try {
+      const v = dqms.trim();
+      await AlterDatabase(db, v === ""
+        ? "UNSET DATA_QUALITY_MONITORING_SETTINGS"
+        : `SET DATA_QUALITY_MONITORING_SETTINGS = ${q1(dqms)}`);
+    } catch (e) {
+      setActionError(`Data quality monitoring settings update failed: ${String(e)}`);
+    } finally {
+      setDqmsBusy(false);
+    }
+  };
+
   const comment = find("comment");
   const owner = find("owner");
   const createdOn = find("created_on");
@@ -291,6 +335,8 @@ export default function DatabasePropertiesModal({ db, name, onClose }: Props) {
   const objectVisibility = paramVal("OBJECT_VISIBILITY");
   const dataCompaction = paramVal("ENABLE_DATA_COMPACTION");
   const replicableFailover = paramVal("REPLICABLE_WITH_FAILOVER_GROUPS");
+  const eventTable = paramVal("EVENT_TABLE");
+  const classificationProfile = paramVal("CLASSIFICATION_PROFILE");
 
   const catalogNames = () => ListIntegrations("CATALOG").then((rs) => (rs ?? []).map((r) => r.name));
 
@@ -487,6 +533,114 @@ export default function DatabasePropertiesModal({ db, name, onClose }: Props) {
                 onSet={(v) => applyParam("DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE")(`SET DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE = ${quoteIdent(v)}`)}
                 onUnset={() => applyParam("DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE")("UNSET DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE")}
               />
+            </tbody>
+          </table>
+
+          <div style={SECTION_HEAD}>Governance</div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>
+              <PickerRow
+                label="Event table"
+                value={eventTable}
+                // Always offer the account's built-in default event table — it
+                // lives in the shared SNOWFLAKE database and may not surface in
+                // SHOW EVENT TABLES IN ACCOUNT, but is always a valid target.
+                load={() => ListEventTables().then((ns) => ["SNOWFLAKE.TELEMETRY.EVENTS", ...(ns ?? [])])}
+                busy={busyKey === "EVENT_TABLE"}
+                onSet={(v) => applyParam("EVENT_TABLE")(`SET EVENT_TABLE = ${quoteQualified(v)}`)}
+                onUnset={() => applyParam("EVENT_TABLE")("UNSET EVENT_TABLE")}
+              />
+              {/* CLASSIFICATION_PROFILE is a string value (parseString) — free-text
+                  rather than a picker, so no classification-profile list IPC is needed. */}
+              <EditRow
+                label="Classification profile"
+                value={classificationProfile}
+                canUnset={classificationProfile !== ""}
+                onSave={saveTextParam("CLASSIFICATION_PROFILE")}
+                onUnset={() => saveTextParam("CLASSIFICATION_PROFILE")("")}
+              />
+              {/* CONTACT <purpose> = <contact_name>. Current contacts aren't read
+                  back (needs SHOW CONTACTS); this is a set/unset-by-purpose editor. */}
+              <tr>
+                <td style={LABEL_TD}>Contact</td>
+                <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
+                  <Space direction="vertical" size={4} style={{ width: "100%" }}>
+                    <Space wrap>
+                      <Input
+                        size="small"
+                        value={contactPurpose}
+                        onChange={(e) => setContactPurpose(e.target.value)}
+                        placeholder="purpose (e.g. SUPPORT)"
+                        style={{ width: 180 }}
+                      />
+                      <Input
+                        size="small"
+                        value={contactName}
+                        onChange={(e) => setContactName(e.target.value)}
+                        placeholder="contact name"
+                        style={{ width: 180 }}
+                      />
+                      <Button
+                        size="small"
+                        type="primary"
+                        disabled={!purposeValid || contactName.trim() === ""}
+                        loading={contactBusy === "SET"}
+                        onClick={runContact("SET",
+                          `SET CONTACT ${contactPurpose.trim()} = ${quoteQualified(contactName.trim())}`)}
+                      >
+                        Set
+                      </Button>
+                      <Button
+                        size="small"
+                        disabled={!purposeValid}
+                        loading={contactBusy === "UNSET"}
+                        onClick={runContact("UNSET", `UNSET CONTACT ${contactPurpose.trim()}`)}
+                      >
+                        Unset
+                      </Button>
+                    </Space>
+                    {contactPurpose.trim() !== "" && !purposeValid && (
+                      <Text type="danger" style={{ fontSize: 11 }}>
+                        Purpose must be a bare identifier (letters, digits, underscores).
+                      </Text>
+                    )}
+                  </Space>
+                </td>
+              </tr>
+              {/* DATA_QUALITY_MONITORING_SETTINGS is a YAML spec — multi-line editor. */}
+              <tr>
+                <td style={{ ...LABEL_TD, verticalAlign: "top", paddingTop: 10 }}>
+                  Data quality monitoring
+                </td>
+                <td style={{ padding: "6px 0", fontSize: 12 }}>
+                  <Space direction="vertical" size={4} style={{ width: "100%" }}>
+                    <Input.TextArea
+                      value={dqms}
+                      onChange={(e) => setDqms(e.target.value)}
+                      placeholder="YAML spec"
+                      autoSize={{ minRows: 3, maxRows: 10 }}
+                      style={{ width: 360, fontFamily: "monospace", fontSize: 12 }}
+                    />
+                    <Space>
+                      <Button size="small" type="primary" loading={dqmsBusy} onClick={saveDqms}>
+                        {dqms.trim() === "" ? "Unset" : "Set"}
+                      </Button>
+                    </Space>
+                  </Space>
+                </td>
+              </tr>
+              <tr>
+                <td style={LABEL_TD}>DCM project</td>
+                <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
+                  <Button
+                    size="small"
+                    loading={busyKey === "DCM PROJECT"}
+                    onClick={() => applyParam("DCM PROJECT")("UNSET DCM PROJECT")}
+                  >
+                    Unset
+                  </Button>
+                </td>
+              </tr>
             </tbody>
           </table>
 
