@@ -36,6 +36,11 @@ func TestValidateBareColumnRefs_Valid(t *testing.T) {
 		// Views
 		`CREATE VIEW my_view AS SELECT FIRST_NAME, LAST_NAME FROM "DB"."SCH"."EMPLOYEES"`,
 
+		// Implicit (AS-less) column aliases must not be flagged (issue #713).
+		"SELECT ID employee_id FROM DB.SCH.EMPLOYEES",
+		"SELECT ID employee_id, FIRST_NAME fn FROM DB.SCH.EMPLOYEES",
+		"SELECT COUNT(ID) cnt FROM DB.SCH.EMPLOYEES",
+
 		// String literals containing identifier-like words must not be flagged
 		// as unknown column refs (e.g. 'month' in DATE_TRUNC('month', ID)).
 		`SELECT DATE_TRUNC('month', ID) AS m FROM DB.SCH.EMPLOYEES`,
@@ -722,6 +727,13 @@ func TestValidateSemantics_CTEAliasColumns(t *testing.T) {
 			name: "CTE with AS-aliased expressions",
 			sql:  `WITH summary AS (SELECT COUNT(*) AS cnt, SUM(amount) AS total FROM t) SELECT s.cnt, s.total FROM summary s`,
 		},
+		{
+			// Issue #713: implicit (AS-less) projection alias in a CTE must be
+			// resolvable in the outer query — no "cnt not found" / "does not
+			// exist in C" markers.
+			name: "CTE with implicit (AS-less) alias",
+			sql:  `WITH c AS (SELECT ID, COUNT(*) cnt FROM t GROUP BY ID) SELECT c.cnt FROM c`,
+		},
 	}
 	for _, tt := range validCases {
 		t.Run(tt.name, func(t *testing.T) {
@@ -842,6 +854,17 @@ LIMIT 100;`,
 				t.Errorf("Expected warning for column %q but got markers: %v", tt.wantCol, warns)
 			}
 		})
+	}
+}
+
+// TestValidateSemantics_ImplicitColumnAlias verifies that an implicit (AS-less)
+// output alias is treated as an alias, not a bare column reference against the
+// FROM tables (issue #713).
+func TestValidateSemantics_ImplicitColumnAlias(t *testing.T) {
+	sql := "SELECT ID employee_id FROM DB.SCH.EMPLOYEES"
+	markers := ValidateSemantics(sql, getTestRefs(), getTestColCaches())
+	if warns := getWarnings(markers); len(warns) > 0 {
+		t.Errorf("Expected no warnings for %q, got %d: %v", sql, len(warns), warns)
 	}
 }
 

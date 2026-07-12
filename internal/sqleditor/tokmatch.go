@@ -1020,16 +1020,59 @@ type asAliasLoc struct {
 
 func findAsAliases(sig []sqltok.Token, sql string) []asAliasLoc {
 	var locs []asAliasLoc
-	for i := 0; i+1 < len(sig); i++ {
-		if tokUpper(sig[i], sql) == "AS" && isIdent(sig[i+1]) {
+	for i := 0; i < len(sig); i++ {
+		// Explicit "AS <alias>".
+		if i+1 < len(sig) && tokUpper(sig[i], sql) == "AS" && isIdent(sig[i+1]) {
 			locs = append(locs, asAliasLoc{
 				asStart:    sig[i].Start,
 				aliasStart: sig[i+1].Start,
 				aliasEnd:   sig[i+1].End,
 			})
+			continue
+		}
+		// Implicit "<expr> <alias>" (no AS): a bare/quoted identifier that closes
+		// a select-list item — preceded by an expression terminator and followed
+		// by a list boundary (comma, clause keyword, ), ; or end). This catches
+		// `SELECT ID employee_id` and `SELECT COUNT(*) cnt` without misreading
+		// `db.sch.tbl` dotted refs (the ident before a dotted part is a Dot, not
+		// an expression terminator) or clause keywords (never expression ends).
+		// ponytail: whole-statement scans may also pick up table aliases / other
+		// trailing idents — harmless, they only suppress missing-column noise.
+		if isAliasTok(sig[i]) && i > 0 && isExprEnd(sig[i-1].Kind) && isListItemBoundary(sig, i+1) {
+			locs = append(locs, asAliasLoc{
+				asStart:    sig[i].Start,
+				aliasStart: sig[i].Start,
+				aliasEnd:   sig[i].End,
+			})
 		}
 	}
 	return locs
+}
+
+// isExprEnd reports whether a token can terminate a SQL value expression, so a
+// following bare/quoted identifier reads as an implicit (AS-less) output alias
+// rather than as part of the expression. Keywords are deliberately excluded so
+// clause keywords (SELECT DISTINCT col, GROUP BY x) are never misread.
+func isExprEnd(k sqltok.TokenKind) bool {
+	switch k {
+	case sqltok.Identifier, sqltok.QuotedIdent, sqltok.RParen,
+		sqltok.NumberLit, sqltok.StringLit, sqltok.RBracket:
+		return true
+	}
+	return false
+}
+
+// isListItemBoundary reports whether sig[next] ends the current select-list item
+// (comma, clause keyword, ), ; or end-of-tokens).
+func isListItemBoundary(sig []sqltok.Token, next int) bool {
+	if next >= len(sig) {
+		return true
+	}
+	switch sig[next].Kind {
+	case sqltok.Comma, sqltok.RParen, sqltok.Semicolon, sqltok.Keyword:
+		return true
+	}
+	return false
 }
 
 // ── Statement guard factories ─────────────────────────────────────────────────

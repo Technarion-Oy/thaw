@@ -1706,6 +1706,17 @@ func extractProjectedColName(expr string) string {
 	if m := reAsAliasExpr.FindStringSubmatch(expr); m != nil {
 		return strings.ToUpper(normIdent(m[1], true))
 	}
+	// Rule 1.5: implicit (AS-less) trailing alias — a bare/quoted identifier
+	// closing the item, preceded by an expression terminator (e.g. `COUNT(*) cnt`,
+	// `ID employee_id`). A single bare/qualified ident has no such predecessor and
+	// falls through to rule 2; `db.sch.col` has a Dot before the last part, not a
+	// terminator, so it is never misread as an alias.
+	if sig := sigTokens(expr); len(sig) >= 2 {
+		last := sig[len(sig)-1]
+		if isAliasTok(last) && isExprEnd(sig[len(sig)-2].Kind) {
+			return strings.ToUpper(normIdent(last.Text(expr), true))
+		}
+	}
 	// Rule 2: simple identifier — must not contain operators or function calls.
 	if strings.ContainsAny(expr, "()+-*/%|&^!<>=") {
 		return ""
