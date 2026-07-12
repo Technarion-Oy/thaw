@@ -132,12 +132,17 @@ func TestSplit(t *testing.T) {
 		{
 			name:  "line comment at end consumes trailing semicolon-like chars",
 			input: "SELECT 1; -- comment with ; inside",
-			want:  []string{"SELECT 1", "-- comment with ; inside"},
+			want:  []string{"SELECT 1"},
+		},
+		{
+			name:  "trailing line comment after final semicolon is dropped",
+			input: "INSERT INTO t SELECT 1; -- trailing comment",
+			want:  []string{"INSERT INTO t SELECT 1"},
 		},
 		{
 			name:  "only a line comment",
 			input: "-- just a comment",
-			want:  []string{"-- just a comment"},
+			want:  nil,
 		},
 
 		// ── block comments ───────────────────────────────────────────────────
@@ -179,7 +184,12 @@ func TestSplit(t *testing.T) {
 		{
 			name:  "only a block comment",
 			input: "/* comment only */",
-			want:  []string{"/* comment only */"},
+			want:  nil,
+		},
+		{
+			name:  "trailing block comment after final semicolon is dropped",
+			input: "SELECT 1; /* trailing comment */",
+			want:  []string{"SELECT 1"},
 		},
 
 		// ── single-quoted strings ────────────────────────────────────────────
@@ -621,7 +631,7 @@ func TestSplit(t *testing.T) {
 		{
 			name:  "CR-only line ending does NOT terminate a line comment",
 			input: "-- comment\rSELECT 2;",
-			want:  []string{"-- comment\rSELECT 2;"},
+			want:  nil, // whole input is one line comment (CR doesn't end it) → comment-only, dropped
 		},
 
 		// ── backslash is not an escape character in Snowflake strings ────────
@@ -658,21 +668,21 @@ func TestSplit(t *testing.T) {
 			want:  []string{"x $" + strings.Repeat("a", 60) + "$body;$" + strings.Repeat("a", 60) + "$"},
 		},
 
-		// ── comment-only statements ───────────────────────────────────────────
+		// ── comment-only statements are dropped (Snowflake rejects them) ──────
 		{
 			name:  "block comment only statement",
 			input: "/* comment */;",
-			want:  []string{"/* comment */"},
+			want:  nil,
 		},
 		{
 			name:  "line comment only with no terminating newline",
 			input: "-- only a comment",
-			want:  []string{"-- only a comment"},
+			want:  nil,
 		},
 		{
 			name:  "line comment only followed by semicolon on next line",
 			input: "-- comment\n;",
-			want:  []string{"-- comment"},
+			want:  nil,
 		},
 
 		// ── whitespace and empty statements ───────────────────────────────────
@@ -892,7 +902,6 @@ $$;`,
 			want: []string{
 				"SELECT * FROM users WHERE name = ''",
 				"DROP TABLE users",
-				"--'",
 			},
 		},
 		{
@@ -901,7 +910,6 @@ $$;`,
 			want: []string{
 				`SELECT '\'`,
 				"DROP TABLE users",
-				"--'",
 			},
 		},
 		{
