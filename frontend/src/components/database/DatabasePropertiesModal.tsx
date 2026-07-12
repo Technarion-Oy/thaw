@@ -11,9 +11,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   Modal, Spin, Button, Input, Select, Space, Typography, Alert, Tooltip, Checkbox,
 } from "antd";
-import {
-  DatabaseOutlined, EditOutlined, CheckOutlined, CloseOutlined,
-} from "@ant-design/icons";
+import { DatabaseOutlined } from "@ant-design/icons";
 import {
   GetObjectProperties, AlterDatabase, GetDatabaseParameters,
   ListExternalVolumes, ListIntegrations, ListComputePools, ListWarehouses,
@@ -22,31 +20,14 @@ import {
 import type { snowflake } from "../../../wailsjs/go/models";
 import TagsRow, { EditableTag } from "../shared/TagsRow";
 import { quoteIdent } from "../shared/ObjectNameCaseControl";
+import {
+  SECTION_HEAD, LABEL_TD, q1, opts, paramValue,
+  EditRow, InfoRow, SelectRow, PickerRow,
+} from "../shared/PropertyRows";
 
 const { Text } = Typography;
 
-// ─── Styles ──────────────────────────────────────────────────────────────────
-
-const SECTION_HEAD: React.CSSProperties = {
-  fontSize: 11, fontWeight: 600, color: "var(--text-muted)",
-  letterSpacing: "0.05em", textTransform: "uppercase",
-  margin: "20px 0 8px",
-};
-
-const LABEL_TD: React.CSSProperties = {
-  padding: "6px 12px 6px 0", color: "var(--text-muted)",
-  fontSize: 12, whiteSpace: "nowrap", verticalAlign: "middle",
-  width: 220,
-};
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-// Escape a SQL text literal the way the backend's EscapeTextLit does — double
-// backslashes then single quotes — so a value like C:\temp round-trips intact.
-function q1(s: string) { return "'" + s.replace(/\\/g, "\\\\").replace(/'/g, "''") + "'"; }
-
 // Fixed-choice ALTER DATABASE parameters, read from SHOW PARAMETERS IN DATABASE.
-const opts = (...vs: string[]) => vs.map((v) => ({ value: v, label: v }));
 const LOG_LEVELS = opts("TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL", "OFF");
 const METRIC_LEVELS = opts("ALL", "NONE");
 const TRACE_LEVELS = opts("ALWAYS", "ON_EVENT", "PROPAGATE", "OFF");
@@ -56,189 +37,6 @@ const MERGE_BEHAVIOR = opts("AUTO", "ENABLED", "DISABLED");
 const YES_NO = opts("YES", "NO");
 const VISIBILITY = opts("PRIVILEGED");
 
-// ─── EditRow ─────────────────────────────────────────────────────────────────
-
-interface EditRowProps {
-  label: string;
-  value: string;
-  canUnset?: boolean;
-  onSave: (val: string) => Promise<void>;
-  onUnset?: () => Promise<void>;
-}
-
-function EditRow({ label, value, canUnset, onSave, onUnset }: EditRowProps) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(value);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const save = async () => {
-    setSaving(true);
-    setError(null);
-    try {
-      await onSave(draft);
-      setEditing(false);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const unset = async () => {
-    if (!onUnset) return;
-    setSaving(true);
-    setError(null);
-    try {
-      await onUnset();
-      setEditing(false);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <tr>
-      <td style={LABEL_TD}>{label}</td>
-      <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
-        {editing ? (
-          <Space direction="vertical" size={4} style={{ width: "100%" }}>
-            <Space>
-              <Input
-                size="small"
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                style={{ width: 280 }}
-                onPressEnter={save}
-              />
-              <Tooltip title="Save">
-                <Button size="small" icon={<CheckOutlined />} type="primary" onClick={save} loading={saving} />
-              </Tooltip>
-              {canUnset && onUnset && (
-                <Tooltip title="Unset (reset to default)">
-                  <Button size="small" onClick={unset} loading={saving}>Unset</Button>
-                </Tooltip>
-              )}
-              <Tooltip title="Cancel">
-                <Button size="small" icon={<CloseOutlined />} onClick={() => { setEditing(false); setDraft(value); setError(null); }} />
-              </Tooltip>
-            </Space>
-            {error && <Text type="danger" style={{ fontSize: 11 }}>{error}</Text>}
-          </Space>
-        ) : (
-          <Space>
-            <span style={{ color: "var(--text)" }}>{value || <Text type="secondary">(not set)</Text>}</span>
-            <Tooltip title="Edit">
-              <Button
-                type="text"
-                size="small"
-                icon={<EditOutlined style={{ fontSize: 11 }} />}
-                onClick={() => { setDraft(value); setEditing(true); }}
-                style={{ color: "var(--text-muted)" }}
-              />
-            </Tooltip>
-          </Space>
-        )}
-      </td>
-    </tr>
-  );
-}
-
-function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <tr>
-      <td style={LABEL_TD}>{label}</td>
-      <td style={{ padding: "6px 0", fontSize: 12, color: "var(--text)", wordBreak: "break-word" }}>
-        {value || <Text type="secondary">(empty)</Text>}
-      </td>
-    </tr>
-  );
-}
-
-// A fixed-choice parameter row: a Select that applies the change on pick, plus an
-// Unset button (reset to default / inherited) when a value is set. The Unset
-// button is only shown when onUnset is supplied — some database parameters
-// (LOG_LEVEL, METRIC_LEVEL, TRACE_LEVEL, REPLACE_INVALID_CHARACTERS) are settable
-// but not UNSET-able at the database level, per the ALTER DATABASE grammar.
-function SelectRow({ label, value, options, busy, onSet, onUnset }: {
-  label: string;
-  value: string;
-  options: { value: string; label: string }[];
-  busy: boolean;
-  onSet: (v: string) => void;
-  onUnset?: () => void;
-}) {
-  const cur = value ? value.toUpperCase() : undefined;
-  return (
-    <tr>
-      <td style={LABEL_TD}>{label}</td>
-      <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
-        <Space>
-          <Select
-            size="small"
-            value={cur}
-            placeholder="(default)"
-            style={{ width: 200 }}
-            options={options}
-            onChange={onSet}
-            loading={busy}
-          />
-          {cur && onUnset && (
-            <Tooltip title="Unset (reset to default)">
-              <Button size="small" onClick={onUnset} loading={busy}>Unset</Button>
-            </Tooltip>
-          )}
-        </Space>
-      </td>
-    </tr>
-  );
-}
-
-// An identifier-valued parameter row: a searchable Select populated from a live
-// list. If the list read fails the current value is still shown and unsettable —
-// a fresh pick just isn't offered (use the SQL editor instead).
-function PickerRow({ label, value, load, busy, onSet, onUnset }: {
-  label: string;
-  value: string;
-  load: () => Promise<string[]>;
-  busy: boolean;
-  onSet: (name: string) => void;
-  onUnset: () => void;
-}) {
-  const [names, setNames] = useState<string[]>([]);
-  const [loadErr, setLoadErr] = useState(false);
-  useEffect(() => {
-    load().then((ns) => setNames(ns ?? [])).catch(() => setLoadErr(true));
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  const options = Array.from(new Set([...(value ? [value] : []), ...names]))
-    .map((n) => ({ value: n, label: n }));
-  return (
-    <tr>
-      <td style={LABEL_TD}>{label}</td>
-      <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
-        <Space>
-          <Select
-            size="small"
-            showSearch
-            value={value || undefined}
-            placeholder={loadErr ? "(list unavailable)" : "(not set)"}
-            style={{ width: 240 }}
-            options={options}
-            onChange={onSet}
-            loading={busy}
-          />
-          {value && (
-            <Tooltip title="Unset">
-              <Button size="small" onClick={onUnset} loading={busy}>Unset</Button>
-            </Tooltip>
-          )}
-        </Space>
-      </td>
-    </tr>
-  );
-}
 
 // ─── Main component ──────────────────────────────────────────────────────────
 
@@ -330,16 +128,7 @@ export default function DatabasePropertiesModal({ db, name, onClose }: Props) {
   const find = (key: string) =>
     rows ? (rows.find((r) => r.key.toLowerCase() === key.toLowerCase())?.value ?? "") : "";
 
-  // Pull a parameter's current value out of the SHOW PARAMETERS result.
-  const paramVal = (key: string): string => {
-    if (!params) return "";
-    const cols = (params.columns ?? []).map((c) => c.toLowerCase());
-    const keyCi = cols.indexOf("key");
-    const valCi = cols.indexOf("value");
-    if (keyCi < 0 || valCi < 0) return "";
-    const row = (params.rows ?? []).find((r) => String(r[keyCi] ?? "").toLowerCase() === key.toLowerCase());
-    return row ? String(row[valCi] ?? "") : "";
-  };
+  const paramVal = (key: string) => paramValue(params, key);
 
   const saveComment = async (comment: string) => {
     if (comment.trim() === "") {
@@ -438,9 +227,16 @@ export default function DatabasePropertiesModal({ db, name, onClose }: Props) {
     });
   };
 
-  // Account identifiers are org_name.account_name and are given unquoted (the
-  // grammar's parseIdentPath accepts the dotted form) — pass them through verbatim.
-  const accountList = () => accounts.split(",").map((s) => s.trim()).filter(Boolean).join(", ");
+  // Account identifiers are org_name.account_name and are spliced unquoted into
+  // the ALTER clause (the grammar's parseIdentPath accepts the dotted form), so
+  // they MUST be validated — an unquoted free-text field is otherwise a SQL
+  // injection / multi-statement vector (a stray ';' would smuggle a second
+  // statement past Client.Execute's statement splitter). A Snowflake account
+  // identifier is a dot-separated path of unquoted identifiers: letters, digits
+  // and underscores only. Anything else disables the replication/failover actions.
+  const accountTokens = accounts.split(",").map((s) => s.trim()).filter(Boolean);
+  const accountsValid = accountTokens.every((a) => /^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*$/.test(a));
+  const accountList = () => accountTokens.join(", ");
 
   const runRepl = (key: string, clause: string) => async () => {
     setReplBusy(key);
@@ -783,6 +579,11 @@ export default function DatabasePropertiesModal({ db, name, onClose }: Props) {
                       <span style={{ fontSize: 11 }}>Ignore edition check (replication)</span>
                     </Checkbox>
                   </div>
+                  {accountTokens.length > 0 && !accountsValid && (
+                    <Text type="danger" style={{ fontSize: 11, display: "block", marginTop: 4 }}>
+                      Accounts must be org_name.account_name (letters, digits, underscores only).
+                    </Text>
+                  )}
                 </td>
               </tr>
               <tr>
@@ -791,7 +592,7 @@ export default function DatabasePropertiesModal({ db, name, onClose }: Props) {
                   <Space wrap>
                     <Button
                       size="small"
-                      disabled={!accountList()}
+                      disabled={!accountTokens.length || !accountsValid}
                       loading={replBusy === "ENABLE REPLICATION"}
                       onClick={runRepl("ENABLE REPLICATION",
                         `ENABLE REPLICATION TO ACCOUNTS ${accountList()}${ignoreEdition ? " IGNORE EDITION CHECK" : ""}`)}
@@ -800,9 +601,10 @@ export default function DatabasePropertiesModal({ db, name, onClose }: Props) {
                     </Button>
                     <Button
                       size="small"
+                      disabled={accountTokens.length > 0 && !accountsValid}
                       loading={replBusy === "DISABLE REPLICATION"}
                       onClick={runRepl("DISABLE REPLICATION",
-                        accountList() ? `DISABLE REPLICATION TO ACCOUNTS ${accountList()}` : "DISABLE REPLICATION")}
+                        accountTokens.length ? `DISABLE REPLICATION TO ACCOUNTS ${accountList()}` : "DISABLE REPLICATION")}
                     >
                       Disable
                     </Button>
@@ -815,7 +617,7 @@ export default function DatabasePropertiesModal({ db, name, onClose }: Props) {
                   <Space wrap>
                     <Button
                       size="small"
-                      disabled={!accountList()}
+                      disabled={!accountTokens.length || !accountsValid}
                       loading={replBusy === "ENABLE FAILOVER"}
                       onClick={runRepl("ENABLE FAILOVER", `ENABLE FAILOVER TO ACCOUNTS ${accountList()}`)}
                     >
@@ -823,9 +625,10 @@ export default function DatabasePropertiesModal({ db, name, onClose }: Props) {
                     </Button>
                     <Button
                       size="small"
+                      disabled={accountTokens.length > 0 && !accountsValid}
                       loading={replBusy === "DISABLE FAILOVER"}
                       onClick={runRepl("DISABLE FAILOVER",
-                        accountList() ? `DISABLE FAILOVER TO ACCOUNTS ${accountList()}` : "DISABLE FAILOVER")}
+                        accountTokens.length ? `DISABLE FAILOVER TO ACCOUNTS ${accountList()}` : "DISABLE FAILOVER")}
                     >
                       Disable
                     </Button>

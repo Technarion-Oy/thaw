@@ -218,6 +218,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/shared/DataTypeAutoComplete.tsx",
         "frontend/src/components/shared/MonacoSqlField.tsx",
         "frontend/src/components/shared/NameWithReplaceOptions.tsx",
+        "frontend/src/components/shared/PropertyRows.tsx",
         "frontend/src/components/shared/SqlPreview.tsx",
         "frontend/src/components/shared/StageFilePicker.tsx",
         "frontend/src/components/shared/TagInput.tsx",
