@@ -140,6 +140,8 @@ export function AlterProjectionPolicy(arg1:string,arg2:string,arg3:string,arg4:s
 
 export function AlterRowAccessPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
+export function AlterSchema(arg1:string,arg2:string,arg3:string):Promise<void>;
+
 export function AlterSemanticView(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterSequence(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
@@ -637,6 +639,8 @@ export function GetRowAccessPolicyReferences(arg1:string,arg2:string,arg3:string
 export function GetSchemaCrossDeps(arg1:string,arg2:string):Promise<Array<snowflake.SchemaRef>>;
 
 export function GetSchemaForeignKeys(arg1:string,arg2:string):Promise<Array<snowflake.TableForeignKey>>;
+
+export function GetSchemaParameters(arg1:string,arg2:string):Promise<snowflake.QueryResult>;
 
 export function GetSchemaRetentionDays(arg1:string,arg2:string):Promise<number>;
 

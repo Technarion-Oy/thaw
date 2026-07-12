@@ -204,6 +204,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/projectionpolicy/ProjectionPolicyPropertiesModal.tsx",
         "frontend/src/components/rowaccesspolicy/CreateRowAccessPolicyModal.tsx",
         "frontend/src/components/rowaccesspolicy/RowAccessPolicyPropertiesModal.tsx",
+        "frontend/src/components/schema/SchemaPropertiesModal.tsx",
         "frontend/src/components/semanticview/CreateSemanticViewModal.tsx",
         "frontend/src/components/semanticview/SemanticViewPropertiesModal.tsx",
         "frontend/src/components/sequence/CreateSequenceModal.tsx",
