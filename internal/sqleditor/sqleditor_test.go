@@ -721,6 +721,12 @@ func TestValidateSemantics(t *testing.T) {
 			want: nil,
 		},
 		{
+			// Issue #714: paren-less SELECT * EXCLUDE <col> must not flag EXCLUDE.
+			name: "Star exclude",
+			sql:  "SELECT * EXCLUDE NAME FROM TABLE1 T1",
+			want: nil,
+		},
+		{
 			name: "Invalid column",
 			sql:  "SELECT T1.MISSING FROM TABLE1 T1",
 			want: []DiagMarker{

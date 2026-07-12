@@ -60,7 +60,7 @@ var keywords = map[string]struct{}{
 	"INSERT": {}, "INTO": {}, "VALUES": {}, "UPDATE": {}, "SET": {}, "DELETE": {}, "MERGE": {}, "MATCHED": {},
 	"CREATE": {}, "OR": {}, "REPLACE": {}, "TABLE": {}, "VIEW": {}, "TEMPORARY": {}, "TEMP": {}, "TRANSIENT": {},
 	"DATABASE": {}, "SCHEMA": {}, "FUNCTION": {}, "PROCEDURE": {}, "TASK": {}, "STREAM": {}, "PIPE": {},
-	"DROP": {}, "TRUNCATE": {}, "ALTER": {}, "RENAME": {}, "ADD": {}, "COLUMN": {}, "MODIFY": {},
+	"DROP": {}, "TRUNCATE": {}, "ALTER": {}, "RENAME": {}, "EXCLUDE": {}, "ADD": {}, "COLUMN": {}, "MODIFY": {},
 	"USE": {}, "WAREHOUSE": {}, "ROLE": {}, "USER": {}, "GRANT": {}, "REVOKE": {}, "TO": {},
 	"AND": {}, "NOT": {}, "IN": {}, "IS": {}, "NULL": {}, "TRUE": {}, "FALSE": {}, "BETWEEN": {}, "LIKE": {}, "ILIKE": {},
 	"CASE": {}, "WHEN": {}, "THEN": {}, "ELSE": {}, "END": {}, "CAST": {}, "TRY_CAST": {}, "TYPE": {},

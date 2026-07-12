@@ -13,6 +13,11 @@ func TestValidateBareColumnRefs_Valid(t *testing.T) {
 		`SELECT "ID", "FIRST_NAME", "LAST_NAME" FROM "DB"."SCH"."EMPLOYEES"`,
 		"SELECT ID, FIRST_NAME FROM DB.SCH.EMPLOYEES e",
 		`SELECT * FROM "DB"."SCH"."EMPLOYEES"`,
+		// Issue #714: SELECT * EXCLUDE takes a bare column name (no parens) in
+		// Snowflake; EXCLUDE must not be flagged as an unknown column.
+		"SELECT * EXCLUDE DEPT_ID FROM DB.SCH.EMPLOYEES",
+		// The parenthesized form must stay clean too.
+		"SELECT * EXCLUDE (DEPT_ID) FROM DB.SCH.EMPLOYEES",
 		// Case insensitivity inside quotes
 		`SELECT "first_name", salary FROM "DB"."SCH"."EMPLOYEES"`,
 		// Aliased — qualified refs with valid columns must not warn
