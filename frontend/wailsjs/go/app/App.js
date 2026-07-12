@@ -142,6 +142,10 @@ export function AlterRowAccessPolicy(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterRowAccessPolicy'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterSchema(arg1, arg2, arg3) {
+  return window['go']['app']['App']['AlterSchema'](arg1, arg2, arg3);
+}
+
 export function AlterSemanticView(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterSemanticView'](arg1, arg2, arg3, arg4);
 }
@@ -1136,6 +1140,10 @@ export function GetSchemaCrossDeps(arg1, arg2) {
 
 export function GetSchemaForeignKeys(arg1, arg2) {
   return window['go']['app']['App']['GetSchemaForeignKeys'](arg1, arg2);
+}
+
+export function GetSchemaParameters(arg1, arg2) {
+  return window['go']['app']['App']['GetSchemaParameters'](arg1, arg2);
 }
 
 export function GetSchemaRetentionDays(arg1, arg2) {

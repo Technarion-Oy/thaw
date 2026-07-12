@@ -161,6 +161,7 @@ import CreateViewModal from "../view/CreateViewModal";
 import ViewPropertiesModal from "../view/ViewPropertiesModal";
 import CreateSequenceModal from "../sequence/CreateSequenceModal";
 import SequencePropertiesModal from "../sequence/SequencePropertiesModal";
+import SchemaPropertiesModal from "../schema/SchemaPropertiesModal";
 import CreateStreamModal from "../stream/CreateStreamModal";
 import StreamPropertiesModal from "../stream/StreamPropertiesModal";
 import CreateFunctionModal from "../function/CreateFunctionModal";
@@ -728,6 +729,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [viewPropsModal, setViewPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createSequenceModal, setCreateSequenceModal] = useState<{ db: string; schema: string } | null>(null);
   const [sequencePropsModal, setSequencePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [schemaPropsModal, setSchemaPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createStreamModal, setCreateStreamModal] = useState<{ db: string; schema: string } | null>(null);
   const [streamPropsModal, setStreamPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createFunctionModal, setCreateFunctionModal] = useState<{ db: string; schema: string } | null>(null);
@@ -3851,6 +3853,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       return;
     }
 
+    // Schemas get a dedicated editable properties modal (ALTER SCHEMA options).
+    if (kind === "SCHEMA") {
+      setSchemaPropsModal({ db, schema, name });
+      return;
+    }
+
     const tableContext = kind === "TABLE" ? { db, schema, table: name } : undefined;
     setPropsModal({ title, rows: null, error: null, tableContext });
     try {
@@ -5396,6 +5404,15 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={sequencePropsModal.schema}
           name={sequencePropsModal.name}
           onClose={() => setSequencePropsModal(null)}
+        />
+      )}
+
+      {schemaPropsModal && (
+        <SchemaPropertiesModal
+          db={schemaPropsModal.db}
+          schema={schemaPropsModal.schema}
+          name={schemaPropsModal.name}
+          onClose={() => setSchemaPropsModal(null)}
         />
       )}
 
