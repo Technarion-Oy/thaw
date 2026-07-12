@@ -29,7 +29,7 @@ func Split(sql string) []string {
 	tokens := Tokenize(sql)
 	for _, tok := range tokens {
 		if tok.Kind == Semicolon {
-			if s := strings.TrimSpace(sql[stmtStart:tok.Start]); s != "" {
+			if s := strings.TrimSpace(sql[stmtStart:tok.Start]); hasContent(s) {
 				out = append(out, s)
 			}
 			stmtStart = tok.End
@@ -38,11 +38,30 @@ func Split(sql string) []string {
 
 	// Flush trailing content without a closing semicolon.
 	if stmtStart < n {
-		if s := strings.TrimSpace(sql[stmtStart:]); s != "" {
+		if s := strings.TrimSpace(sql[stmtStart:]); hasContent(s) {
 			out = append(out, s)
 		}
 	}
 	return out
+}
+
+// hasContent reports whether s tokenizes to at least one non-comment,
+// non-whitespace token. A comment-only chunk (e.g. text after the final
+// semicolon) is not a real statement and would be rejected by Snowflake as an
+// "Empty SQL statement".
+func hasContent(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, tok := range Tokenize(s) {
+		switch tok.Kind {
+		case EOF, Whitespace, Newline, LineComment, BlockComment:
+			continue
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 // StatementRange is the position of one SQL statement within a multi-statement
