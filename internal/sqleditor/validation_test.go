@@ -487,6 +487,62 @@ $$;
 			`,
 			expectedError: "Expected ':=' for assignment",
 		},
+		{
+			// Issue #705(a): proc args must seed the $$ body's declared vars.
+			name: "Procedure argument returned",
+			sql: `
+create procedure add_one(x float)
+returns float
+language sql
+as $$
+  begin
+    return x;
+  end;
+$$;
+			`,
+			expectedError: "",
+		},
+		{
+			// Issue #705(a): multiple function args, used in an expression.
+			name: "Function arguments used",
+			sql: `
+create function combine(a varchar, b varchar)
+returns varchar
+language sql
+as $$
+  begin
+    return a || b;
+  end;
+$$;
+			`,
+			expectedError: "",
+		},
+		{
+			// Issue #705(b): RETURN <builtin>(...) is an expression, not a var.
+			name: "RETURN builtin function call",
+			sql: `
+execute immediate $$
+  begin
+    return upper('a');
+  end;
+$$;
+			`,
+			expectedError: "",
+		},
+		{
+			// Issue #705(c): FOR i IN REVERSE <range> — REVERSE isn't a cursor.
+			name: "FOR loop with REVERSE range",
+			sql: `
+execute immediate $$
+  begin
+    for i in reverse 1 to 10 do
+      null;
+    end for;
+  end;
+$$;
+			`,
+			expectedError: "",
+		},
 	}
 
 	for _, tt := range tests {
