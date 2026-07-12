@@ -1066,6 +1066,8 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           resolvedRefs: resolved,
           knownDatabases: storeDbs,
           knownSchemas: storeSchemas,
+          sessionDatabase: useSessionStore.getState().database,
+          sessionSchema: useSessionStore.getState().schema,
           quotedIdentifiersIgnoreCase: false,
           droppedDatabases: [],
           droppedSchemas: [],

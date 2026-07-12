@@ -5935,6 +5935,8 @@ export namespace sqleditor {
 	    resolvedRefs: ResolvedRef[];
 	    knownDatabases: string[];
 	    knownSchemas: SchemaEntry[];
+	    sessionDatabase: string;
+	    sessionSchema: string;
 	    quotedIdentifiersIgnoreCase: boolean;
 	    droppedDatabases: string[];
 	    droppedSchemas: SchemaEntry[];
@@ -5952,6 +5954,8 @@ export namespace sqleditor {
 	        this.resolvedRefs = this.convertValues(source["resolvedRefs"], ResolvedRef);
 	        this.knownDatabases = source["knownDatabases"];
 	        this.knownSchemas = this.convertValues(source["knownSchemas"], SchemaEntry);
+	        this.sessionDatabase = source["sessionDatabase"];
+	        this.sessionSchema = source["sessionSchema"];
 	        this.quotedIdentifiersIgnoreCase = source["quotedIdentifiersIgnoreCase"];
 	        this.droppedDatabases = source["droppedDatabases"];
 	        this.droppedSchemas = this.convertValues(source["droppedSchemas"], SchemaEntry);

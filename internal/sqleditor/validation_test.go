@@ -207,9 +207,11 @@ func TestValidateTablesExist_Valid(t *testing.T) {
 	}
 
 	req := ValidateTablesExistRequest{
-		ResolvedRefs:   getLiveRefs(),
-		KnownDatabases: []string{"DB", "GOVERNANCE"},
-		KnownSchemas:   []SchemaEntry{{DB: "DB", Name: "SCH"}, {DB: "GOVERNANCE", Name: "PUBLIC"}},
+		ResolvedRefs:    getLiveRefs(),
+		KnownDatabases:  []string{"DB", "GOVERNANCE"},
+		KnownSchemas:    []SchemaEntry{{DB: "DB", Name: "SCH"}, {DB: "GOVERNANCE", Name: "PUBLIC"}},
+		SessionDatabase: "DB",
+		SessionSchema:   "SCH",
 	}
 
 	for _, sql := range validQueries {
