@@ -74,6 +74,8 @@ func TestTokenKinds(t *testing.T) {
 		{"block comment multiline", "/* a\nb */", []TokenKind{BlockComment, EOF}},
 		{"string literal", "'hello'", []TokenKind{StringLit, EOF}},
 		{"string with escape", "'it''s'", []TokenKind{StringLit, EOF}},
+		{"string backslash-escaped quote", `'it\'s a test'`, []TokenKind{StringLit, EOF}},
+		{"string escaped backslash then close", `'a\\'`, []TokenKind{StringLit, EOF}},
 		{"empty string", "''", []TokenKind{StringLit, EOF}},
 		{"quoted ident", `"my col"`, []TokenKind{QuotedIdent, EOF}},
 		{"quoted ident escape", `"col""name"`, []TokenKind{QuotedIdent, EOF}},
@@ -254,6 +256,30 @@ func TestTokenizeUnterminatedString(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected StringLit token for unterminated string")
+	}
+}
+
+// TestTokenizeBackslashEscapedQuote is the repro from issue #701: a
+// backslash-escaped quote inside a Snowflake string constant must not close
+// the string, so the whole literal tokenizes as one terminated StringLit.
+func TestTokenizeBackslashEscapedQuote(t *testing.T) {
+	sql := `SELECT 'it\'s a test';`
+	tokens := Tokenize(sql)
+
+	var strs []Token
+	for _, tok := range tokens {
+		if tok.Kind == StringLit {
+			strs = append(strs, tok)
+		}
+	}
+	if len(strs) != 1 {
+		t.Fatalf("got %d StringLit tokens, want 1", len(strs))
+	}
+	if got, want := strs[0].Text(sql), `'it\'s a test'`; got != want {
+		t.Errorf("string text=%q, want %q", got, want)
+	}
+	if strs[0].Unterminated {
+		t.Error("string should be terminated")
 	}
 }
 
