@@ -37,6 +37,33 @@ export function prettyPrintJson(raw: string): string | null {
   }
 }
 
+/** GeoJSON `type` values we recognise as map-renderable (geometry objects plus
+ *  Feature/FeatureCollection). Matches what Leaflet's `L.geoJSON` accepts. */
+const GEOJSON_TYPES = new Set([
+  "Point", "MultiPoint", "LineString", "MultiLineString",
+  "Polygon", "MultiPolygon", "GeometryCollection", "Feature", "FeatureCollection",
+]);
+
+/**
+ * Parse a cell value as GeoJSON, returning the parsed object when it has a
+ * recognised GeoJSON `type` (so the Map view can render it) or null otherwise.
+ * Snowflake GEOGRAPHY/GEOMETRY cells arrive as GeoJSON strings under the
+ * default `GEOGRAPHY_OUTPUT_FORMAT=GEOJSON`; WKT/WKB won't JSON.parse and
+ * correctly return null. Skips values above JSON_DETECT_CAP to avoid freezing
+ * on multi-MB VARIANT cells.
+ */
+export function parseGeoJson(raw: string): unknown | null {
+  if (raw.length > JSON_DETECT_CAP) return null;
+  const t = raw.trim();
+  if (!t.startsWith("{")) return null;
+  try {
+    const obj = JSON.parse(t);
+    return obj && typeof obj === "object" && GEOJSON_TYPES.has(obj.type) ? obj : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Truncate text to DISPLAY_CAP unless the user asked for the full value. */
 export function truncateForDisplay(text: string, showFull: boolean): { text: string; truncated: boolean } {
   if (showFull || text.length <= DISPLAY_CAP) return { text, truncated: false };

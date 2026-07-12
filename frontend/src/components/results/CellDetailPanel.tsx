@@ -10,14 +10,17 @@
 //
 // @thaw-domain: SQL Editor & Diagnostics
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Tooltip, message } from "antd";
 import { CloseOutlined, CopyOutlined } from "@ant-design/icons";
 import { useGridStore } from "../../store/gridStore";
 import { usePanelLayoutStore } from "../../store/panelLayoutStore";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import { prettyPrintJson, truncateForDisplay, reconcileDismissedKey } from "./cellDetailUtils";
+import { prettyPrintJson, parseGeoJson, truncateForDisplay, reconcileDismissedKey } from "./cellDetailUtils";
 import { visualToOriginalIndex } from "./columnOrderUtils";
+
+// Lazy so Leaflet (and its tile/CSS assets) only load when a geo cell is inspected.
+const GeoMapView = lazy(() => import("./GeoMapView"));
 
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 700;
@@ -72,6 +75,7 @@ export default function CellDetailPanel({ columns, onVisibleCellChange }: Props)
 
   const [showRaw, setShowRaw] = useState(false);
   const [showFull, setShowFull] = useState(false);
+  const [showMap, setShowMap] = useState(false);
 
   // Start fresh whenever the anchor moves: clear a stale dismissal (so it
   // can't suppress an unrelated cell — or a new result — that happens to land
@@ -82,6 +86,10 @@ export default function CellDetailPanel({ columns, onVisibleCellChange }: Props)
     setDismissedKey((prev) => reconcileDismissedKey(prev, anchorKey));
     setShowRaw(false);
     setShowFull(false);
+    // showMap intentionally NOT reset — the Map view is a sticky preference so
+    // switching between geo cells keeps the map open. It only renders when the
+    // new cell is GeoJSON (guarded by `geojson`), and its toggle is hidden
+    // otherwise, so a non-geo cell cleanly falls back to text.
   }, [anchorKey]);
 
   const cell = useMemo(() => {
@@ -105,6 +113,13 @@ export default function CellDetailPanel({ columns, onVisibleCellChange }: Props)
   // too large to parse without freezing the UI (Snowflake VARIANT can be 16 MB).
   const prettyJson = useMemo(
     () => (rawText == null ? null : prettyPrintJson(rawText)),
+    [rawText],
+  );
+
+  // GeoJSON-shaped values (Snowflake GEOGRAPHY/GEOMETRY under GEOJSON output)
+  // gain a Map view; null for anything else, which hides the Map toggle.
+  const geojson = useMemo(
+    () => (rawText == null ? null : parseGeoJson(rawText)),
     [rawText],
   );
 
@@ -267,11 +282,16 @@ export default function CellDetailPanel({ columns, onVisibleCellChange }: Props)
       <div
         style={{
           flex: 1,
-          overflow: "auto",
-          padding: "8px 10px",
+          overflow: showMap ? "hidden" : "auto",
+          padding: showMap ? 0 : "8px 10px",
+          display: showMap ? "flex" : "block",
         }}
       >
-        {displayText === null ? (
+        {showMap && geojson ? (
+          <Suspense fallback={<span style={{ margin: 10, fontSize: 11, color: "var(--text-faint)" }}>Loading map…</span>}>
+            <GeoMapView geojson={geojson} />
+          </Suspense>
+        ) : displayText === null ? (
           <span style={{ color: "var(--text-faint)", fontStyle: "italic", fontSize: 11, letterSpacing: "0.04em" }}>
             NULL
           </span>
@@ -322,13 +342,27 @@ export default function CellDetailPanel({ columns, onVisibleCellChange }: Props)
         }}
       >
         <span>{rawText === null ? "NULL" : `${rawText.length.toLocaleString()} chars`}</span>
-        {prettyJson !== null && (
+        {prettyJson !== null && !showMap && (
           <span
             role="button"
             onClick={() => setShowRaw((v) => !v)}
             style={{ marginLeft: "auto", cursor: "pointer", color: "var(--accent)", userSelect: "none" }}
           >
             {showRaw ? "Formatted JSON" : "Raw"}
+          </span>
+        )}
+        {geojson !== null && (
+          <span
+            role="button"
+            onClick={() => setShowMap((v) => !v)}
+            style={{
+              marginLeft: prettyJson !== null && !showMap ? 8 : "auto",
+              cursor: "pointer",
+              color: "var(--accent)",
+              userSelect: "none",
+            }}
+          >
+            {showMap ? "Text" : "Map"}
           </span>
         )}
       </div>

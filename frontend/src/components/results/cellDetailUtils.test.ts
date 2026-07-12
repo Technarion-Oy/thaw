@@ -13,10 +13,39 @@ import {
   DISPLAY_CAP,
   JSON_DETECT_CAP,
   prettyPrintJson,
+  parseGeoJson,
   truncateForDisplay,
   reconcileDismissedKey,
   computeCellScrollLeft,
 } from "./cellDetailUtils";
+
+// ── parseGeoJson ──────────────────────────────────────────────────────────────
+
+describe("parseGeoJson", () => {
+  it("accepts a GeoJSON Point (default GEOGRAPHY output)", () => {
+    const v = '{"type":"Point","coordinates":[-122.4,37.8]}';
+    expect(parseGeoJson(v)).toEqual({ type: "Point", coordinates: [-122.4, 37.8] });
+  });
+
+  it("accepts Polygon, Feature, and FeatureCollection", () => {
+    expect(parseGeoJson('{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,0]]]}')).not.toBeNull();
+    expect(parseGeoJson('{"type":"Feature","geometry":null,"properties":{}}')).not.toBeNull();
+    expect(parseGeoJson('{"type":"FeatureCollection","features":[]}')).not.toBeNull();
+  });
+
+  it("rejects non-geo JSON, WKT, and non-JSON text", () => {
+    expect(parseGeoJson('{"type":"foo","a":1}')).toBeNull();
+    expect(parseGeoJson('{"a":1}')).toBeNull();
+    expect(parseGeoJson("POINT(-122.4 37.8)")).toBeNull(); // WKT
+    expect(parseGeoJson("hello")).toBeNull();
+    expect(parseGeoJson("[1,2,3]")).toBeNull(); // array, not a geo object
+  });
+
+  it("returns null above the JSON detection cap", () => {
+    const huge = '{"type":"Point","coordinates":[0,0]}' + " ".repeat(JSON_DETECT_CAP);
+    expect(parseGeoJson(huge)).toBeNull();
+  });
+});
 
 // ── prettyPrintJson ───────────────────────────────────────────────────────────
 
