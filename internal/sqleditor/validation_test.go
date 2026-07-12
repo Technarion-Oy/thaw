@@ -487,6 +487,32 @@ $$;
 			`,
 			expectedError: "Expected ':=' for assignment",
 		},
+		{
+			// #704: a $$…$$ that is a plain string constant, not a scripting
+			// block, must not be validated as Snowflake Scripting.
+			name:          "Plain dollar-quoted string constant",
+			sql:           "SELECT $$hello world$$ AS greeting;",
+			expectedError: "",
+		},
+		{
+			// #704: an apostrophe inside a plain $$ string previously produced a
+			// phantom "Unclosed string literal".
+			name:          "Dollar-quoted string with apostrophe",
+			sql:           "SELECT $$Bob's daughter$$;",
+			expectedError: "",
+		},
+		{
+			// #704: a non-SQL UDF body must be treated as opaque.
+			name:          "Python UDF body",
+			sql:           "CREATE FUNCTION f(x INT) RETURNS INT LANGUAGE PYTHON AS $$ def main(x): return x + 1 $$;",
+			expectedError: "",
+		},
+		{
+			// #704: a JavaScript body must not hit the scripting LET/VAR rule.
+			name:          "JavaScript UDF body",
+			sql:           `CREATE FUNCTION f() RETURNS STRING LANGUAGE JAVASCRIPT AS $$ var s = "hi"; return s; $$;`,
+			expectedError: "",
+		},
 	}
 
 	for _, tt := range tests {
