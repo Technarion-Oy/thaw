@@ -90,8 +90,9 @@ func scan(src string, n int, pos, line, col *int) Token {
 		*pos = i
 		return Token{Kind: Whitespace, Start: start, End: i, Line: startLine, Col: startCol}
 
-	// ── Line comment -- ─────────────────────────────────────────────────
-	case c == '-' && start+1 < n && src[start+1] == '-':
+	// ── Line comment -- or // ───────────────────────────────────────────
+	// Snowflake treats both `--` and `//` as line comments.
+	case start+1 < n && ((c == '-' && src[start+1] == '-') || (c == '/' && src[start+1] == '/')):
 		i := start + 2
 		if nl := strings.IndexByte(src[i:], '\n'); nl < 0 {
 			i = n

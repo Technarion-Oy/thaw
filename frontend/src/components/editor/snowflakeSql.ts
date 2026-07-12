@@ -182,8 +182,8 @@ export const snowflakeMonarchLanguage = {
       // Whitespace
       [/[ \t\r\n]+/, "white"],
 
-      // Line comment
-      [/--.*$/, "comment"],
+      // Line comment (Snowflake: both -- and //)
+      [/(--|\/\/).*$/, "comment"],
 
       // Block comment
       [/\/\*/, { token: "comment.block", next: "@blockComment" }],
