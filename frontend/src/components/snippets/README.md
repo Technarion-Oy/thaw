@@ -12,7 +12,7 @@ The six DDL-template categories (Data Objects, Code, Automation, Storage, Govern
 Infrastructure) each hold a flat item list; a final **Built-in Functions** category nests
 one level deeper into sub-categories (Context, Aggregate, Window, String, Date & Time,
 Conversion & Cast, Conditional & NULL, Math, Semi-structured / JSON, Hash & Crypto,
-System & Table). Function items are sourced from the editor's single-source catalogue —
+System & Table, Geospatial). Function items are sourced from the editor's single-source catalogue —
 `BUILTIN_FUNCTION_CATEGORIES` and the context `constants` in `../editor/snowflakeSql.ts`
 (the same data that drives the Monarch `@builtins` tokenizer rule) — with the callable
 form (`NAME()`) as the snippet body. No duplicate function list is maintained here.
