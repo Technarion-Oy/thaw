@@ -566,9 +566,13 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
       id: crypto.randomUUID(),
       schema: defaultSchema,
       name,
+      // Column names are kept verbatim (not normalizeIdentifier'd) to match the
+      // modal's direct ExecDDL path, which quotes them as-typed — so the same
+      // modal input yields the same Snowflake identifier from either entry point
+      // (#688 review). q() in createTableSQL quotes them the same way buildSql does.
       columns: cfg.columns.map((c) => ({
         id: crypto.randomUUID(),
-        name: normalizeIdentifier(c.name),
+        name: c.name.trim(),
         dataType: c.type,
         isPK: c.primaryKey,
         notNull: c.notNull || c.primaryKey,

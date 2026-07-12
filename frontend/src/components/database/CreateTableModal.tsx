@@ -113,7 +113,11 @@ interface Props {
 }
 
 export default function CreateTableModal({ db, schema, onClose, onSuccess, onDefine }: Props) {
-  const [cfg, setCfg] = useState<TableConfig>(DEFAULTS);
+  // In ER Designer (onDefine) mode default IF NOT EXISTS on — the designer's
+  // diff/preview/apply flow historically emitted CREATE TABLE IF NOT EXISTS as a
+  // safety net against re-runs / out-of-band collisions (#688 review). Still a
+  // user-toggleable checkbox.
+  const [cfg, setCfg] = useState<TableConfig>(onDefine ? { ...DEFAULTS, ifNotExists: true } : DEFAULTS);
   const quotedIdentifiersIgnoreCase = useQuotedIdentifiers();
   const { creating, error: createError, setError: setCreateError, submit } = useCreateSubmit();
 
@@ -152,8 +156,6 @@ export default function CreateTableModal({ db, schema, onClose, onSuccess, onDef
       onClose();
     });
   };
-
-  const preview = buildSql(db, schema, cfg);
 
   const columns: ColumnsType<ColumnDef> = [
     {
@@ -355,7 +357,7 @@ export default function CreateTableModal({ db, schema, onClose, onSuccess, onDef
         {/* In onDefine (ER Designer) mode the real SQL is assembled later by the
             designer's diff builder — with a table-level PRIMARY KEY and the final
             schema — so a buildSql preview here would be misleading. Hidden. */}
-        {!onDefine && <SqlPreview sql={preview} />}
+        {!onDefine && <SqlPreview sql={buildSql(db, schema, cfg)} />}
       </Form>
     </CreateModalShell>
   );
