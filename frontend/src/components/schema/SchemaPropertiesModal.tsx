@@ -275,7 +275,7 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
     const newName = val.trim();
     if (newName === "" || newName === name) return;
     // RENAME TO takes a fully-qualified target; keep the schema in the same db.
-    await AlterSchema(db, schema, `RENAME TO "${db}"."${newName.replace(/"/g, '""')}"`);
+    await AlterSchema(db, schema, `RENAME TO "${db.replace(/"/g, '""')}"."${newName.replace(/"/g, '""')}"`);
     // The modal's name/schema props are now stale — close and let the sidebar refresh.
     onClose();
   };
