@@ -181,7 +181,18 @@ func (v *Validator) ParseCopyIntoLocation() bool {
 				v.option("STORAGE_INTEGRATION", v.parseIdentPath),
 				v.option("CREDENTIALS", v.consumeBalancedParens),
 				v.option("ENCRYPTION", v.consumeBalancedParens),
-				func() bool { return v.MatchWord("HEADER") },
+				// HEADER: bare `[ HEADER ]` per the docs skeleton, or the common
+				// `HEADER = TRUE|FALSE` form.
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("HEADER") },
+						func() bool {
+							return v.Optional(func() bool {
+								return v.Sequence(func() bool { return v.MatchOp("=") }, v.parseBool)
+							})
+						},
+					)
+				},
 			)
 		})
 	}
@@ -248,37 +259,10 @@ func (v *Validator) ParseCopyIntoLocation() bool {
 //	  [ { STORAGE_INTEGRATION = <integration_name> } | { CREDENTIALS = ( [ AZURE_SAS_TOKEN = '<string>' ] ) } ]
 //	  [ ENCRYPTION = ( [ TYPE = { 'AZURE_CSE' | 'NONE' } ] [ MASTER_KEY = '<string>' ] ) ]
 func (v *Validator) ParseCopyIntoTable() bool {
-	stageRef := func() bool {
-		at := v.Peek()
-		if !v.Match(sqltok.At) {
-			return false
-		}
-		// Only consume tokens directly adjacent to the previous one (no
-		// intervening whitespace), so the stage path stops before the next
-		// clause word (FROM, PATTERN, …).
-		lastEnd := at.End
-		matched := false
-		for !v.AtEnd() {
-			t := v.Peek()
-			if t.Start != lastEnd {
-				break
-			}
-			ok := t.Kind.IsIdentLike() || t.Kind == sqltok.Dot || t.Kind == sqltok.NumberLit ||
-				(t.Kind == sqltok.Operator && (t.Text(v.src) == "/" || t.Text(v.src) == "%")) ||
-				(t.Kind == sqltok.Other && t.Text(v.src) == "~")
-			if !ok {
-				break
-			}
-			lastEnd = t.End
-			v.advance()
-			matched = true
-		}
-		return matched
-	}
 	// FROM source: a stage (@…), an external-location string, or a ( SELECT … )
 	// transformation sub-query.
 	source := func() bool {
-		return v.Choice(stageRef, v.parseString, v.consumeBalancedParens)
+		return v.Choice(v.parseStageRef, v.parseString, v.consumeBalancedParens)
 	}
 	trailing := func() bool {
 		return v.ZeroOrMore(func() bool {
@@ -290,8 +274,10 @@ func (v *Validator) ParseCopyIntoTable() bool {
 				v.option("STORAGE_INTEGRATION", v.parseIdentPath),
 				v.option("CREDENTIALS", v.consumeBalancedParens),
 				v.option("ENCRYPTION", v.consumeBalancedParens),
-				// generic copyOptions (ON_ERROR, SIZE_LIMIT, PURGE, FORCE, …).
-				v.option2(func() bool { return v.Match(sqltok.Identifier) }, v.parseScalar),
+				// generic copyOptions (ON_ERROR, SIZE_LIMIT, PURGE, FORCE, …). The
+				// key is matched ident-like: PURGE / FORCE are lexer keywords, so a
+				// strict Identifier match would reject them.
+				v.option2(v.matchIdentLike, v.parseScalar),
 			)
 		})
 	}
