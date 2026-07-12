@@ -417,6 +417,23 @@ func matchDropSchema(sig []sqltok.Token, sql string) (rawPath string, hasIfExist
 	return
 }
 
+// matchDropStage matches DROP STAGE [IF EXISTS] <ident_path>.
+func matchDropStage(sig []sqltok.Token, sql string) (rawPath string, ok bool) {
+	i := 0
+	if !kwAt(sig, sql, i, "DROP") {
+		return
+	}
+	i++
+	if !kwAt(sig, sql, i, "STAGE") {
+		return
+	}
+	i++
+	i, _ = skipIfExists(sig, sql, i)
+	rawPath, _ = readIdentPath(sig, sql, i)
+	ok = rawPath != ""
+	return
+}
+
 // matchUndropTable matches UNDROP TABLE <ident_path>.
 func matchUndropTable(sig []sqltok.Token, sql string) (rawPath string, ok bool) {
 	i := 0

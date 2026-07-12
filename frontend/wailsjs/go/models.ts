@@ -5835,6 +5835,24 @@ export namespace sqleditor {
 	        this.deleted = source["deleted"];
 	    }
 	}
+	export class ObjectRef {
+	    db: string;
+	    schema: string;
+	    name: string;
+	    kind: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ObjectRef(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.db = source["db"];
+	        this.schema = source["schema"];
+	        this.name = source["name"];
+	        this.kind = source["kind"];
+	    }
+	}
 	
 	export class SchemaEntry {
 	    db: string;
@@ -5942,6 +5960,8 @@ export namespace sqleditor {
 	    droppedSchemas: SchemaEntry[];
 	    droppedTables: ResolvedRef[];
 	    allKnownTables: ResolvedRef[];
+	    knownObjects: ObjectRef[];
+	    fetchedObjectSchemas: SchemaEntry[];
 	
 	    static createFrom(source: any = {}) {
 	        return new ValidateTablesExistRequest(source);
@@ -5961,6 +5981,8 @@ export namespace sqleditor {
 	        this.droppedSchemas = this.convertValues(source["droppedSchemas"], SchemaEntry);
 	        this.droppedTables = this.convertValues(source["droppedTables"], ResolvedRef);
 	        this.allKnownTables = this.convertValues(source["allKnownTables"], ResolvedRef);
+	        this.knownObjects = this.convertValues(source["knownObjects"], ObjectRef);
+	        this.fetchedObjectSchemas = this.convertValues(source["fetchedObjectSchemas"], SchemaEntry);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
