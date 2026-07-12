@@ -543,6 +543,13 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			req.FetchedObjectSchemas, req.SessionDatabase, req.SessionSchema,
 			scriptCreatedByKind, scriptDroppedByKind)...)
 
+		// ── Kind-implied references (phase 3): CALL, EXECUTE TASK, SET/ADD
+		// <policy>, FORMAT_NAME — the kind is implied by the clause, not spelled. ──
+		markers = append(markers, validateKindImpliedRefs(
+			raw, sig, r.StartLine, ic, checkEq, req.KnownObjects,
+			req.FetchedObjectSchemas, req.SessionDatabase, req.SessionSchema,
+			scriptCreatedByKind, scriptDroppedByKind)...)
+
 		// ── (d) Apply DROP/UNDROP effects after validation ─────────
 		// Runs before the SELECT/WITH continue so DROP TABLE etc. always
 		// update state even though DROP is not in the SELECT/WITH list.
