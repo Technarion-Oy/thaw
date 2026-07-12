@@ -230,6 +230,15 @@ func toUpperSet(keys []string) map[string]bool {
 	return m
 }
 
+// nonColumnDefKeywords are the leading words of a table-level clause that is
+// NOT a column definition, so the token after them must not be treated as a
+// column name / data type. Shared by walkColumnDefTypes (CREATE TABLE body) and
+// the ALTER TABLE ADD handler. ROW (ROW ACCESS POLICY) and SEARCH (SEARCH
+// OPTIMIZATION) only appear in the ALTER ADD form but are harmless in both.
+var nonColumnDefKeywords = toUpperSet([]string{
+	"CONSTRAINT", "PRIMARY", "UNIQUE", "FOREIGN", "INDEX", "CHECK", "ROW", "SEARCH",
+})
+
 // ── ValidateDataTypes ─────────────────────────────────────────────────────────
 
 // ValidateDataTypes checks that explicit data type declarations within
@@ -290,14 +299,28 @@ func ValidateDataTypes(sql string, stmtRanges []StatementRange) []DiagMarker {
 			}
 		}
 
-		// 2. CAST / TRY_CAST ( … AS TYPE ) — first AS after the opening paren.
+		// 2. CAST / TRY_CAST ( … AS TYPE ) — the CAST's own AS, which sits at the
+		// depth of the opening paren. A nested AS alias (e.g. an inner subquery's
+		// SELECT MAX(id) AS mx) is at a deeper depth and must be ignored.
 		for i := 0; i+1 < len(sig); i++ {
 			u := tokUpper(sig[i], rawText)
 			if (u != "CAST" && u != "TRY_CAST") || sig[i+1].Kind != sqltok.LParen {
 				continue
 			}
+			depth := 1 // sig[i+1] is the opening "("
 			for j := i + 2; j < len(sig); j++ {
-				if tokUpper(sig[j], rawText) != "AS" {
+				switch sig[j].Kind {
+				case sqltok.LParen:
+					depth++
+					continue
+				case sqltok.RParen:
+					depth--
+					if depth == 0 {
+						j = len(sig) // CAST paren closed without a type-level AS
+					}
+					continue
+				}
+				if depth != 1 || tokUpper(sig[j], rawText) != "AS" {
 					continue
 				}
 				if j+1 < len(sig) {
@@ -323,8 +346,12 @@ func ValidateDataTypes(sql string, stmtRanges []StatementRange) []DiagMarker {
 					kwAt(sig, rawText, pos+1, "NOT") && kwAt(sig, rawText, pos+2, "EXISTS") {
 					pos += 3
 				}
-				// Column name (one ident token), then the declared type.
-				if pos < len(sig) && isIdent(sig[pos]) {
+				// Column name (one ident token), then the declared type — but only
+				// if this ADD introduces a column. ADD PRIMARY KEY / CONSTRAINT /
+				// FOREIGN KEY / ROW ACCESS POLICY / SEARCH OPTIMIZATION / … are
+				// table-level clauses, not column defs.
+				if pos < len(sig) && isIdent(sig[pos]) &&
+					!nonColumnDefKeywords[strings.ToUpper(sig[pos].Text(rawText))] {
 					pos++
 					if pos < len(sig) && (sig[pos].Kind == sqltok.Keyword || sig[pos].Kind == sqltok.Identifier) {
 						rel(sig[pos].Text(rawText), sig[pos].Start)
@@ -492,13 +519,10 @@ func walkColumnDefTypes(sig []sqltok.Token, sql string, lparenIdx int, onType fu
 	wn := 0
 	flush := func() {
 		if wn >= 2 {
-			switch strings.ToUpper(w0.Text(sql)) {
-			case "CONSTRAINT", "PRIMARY", "UNIQUE", "FOREIGN", "INDEX", "CHECK":
-				// table-level constraint, not a column definition
-			default:
-				if w1.Kind != sqltok.QuotedIdent {
-					onType(w1.Text(sql), w1.Start)
-				}
+			if nonColumnDefKeywords[strings.ToUpper(w0.Text(sql))] {
+				// table-level constraint / policy, not a column definition
+			} else if w1.Kind != sqltok.QuotedIdent {
+				onType(w1.Text(sql), w1.Start)
 			}
 		}
 		wn = 0
