@@ -15,6 +15,8 @@ import type { AITableIn } from "./erCanvasLayout";
 import { buildMermaid } from "./buildMermaid";
 import DefaultFunctionPicker from "../shared/DefaultFunctionPicker";
 import { columnConstraints } from "../shared/columnDdl";
+import { createTableClause, tableOptionsClauses } from "../shared/tableDdl";
+import CreateTableModal, { type TableConfig } from "../database/CreateTableModal";
 import { type DesignerColumn, type DesignerTable, SF_DATA_TYPES, SF_TYPES, normalizeIdentifier, baselineTableKey } from "./erTypes";
 
 interface Props {
@@ -171,36 +173,45 @@ function generateDiffSQL(
   const colTail = (c: DesignerColumn) =>
     columnConstraints({ defaultValue: c.defaultValue, notNull: c.isPK || c.notNull });
 
+  // Full CREATE TABLE for a brand-new table: inline columns, table-level PK/FK,
+  // plus any table options captured from the Create Table modal (#615). Returns
+  // null when the table has no named columns. Used by both the pure-create and
+  // diff (new-table) paths.
+  const createTableSQL = (t: DesignerTable): string | null => {
+    const colLines: string[] = [];
+    const pkCols: string[] = [];
+    const fkLines: string[] = [];
+    for (const c of t.columns) {
+      if (!c.name.trim()) continue;
+      colLines.push(`    ${q(c.name.trim())} ${c.dataType}${colTail(c)}`);
+      if (c.isPK) pkCols.push(q(c.name.trim()));
+      if (c.fkRef) {
+        const parts = c.fkRef.split(".");
+        if (parts.length === 3) {
+          const [rs, rt, rc] = parts;
+          fkLines.push(
+            `    FOREIGN KEY (${q(c.name.trim())}) REFERENCES ${tableRef(rs, rt)}(${q(rc)})`
+          );
+        }
+      }
+    }
+    if (colLines.length === 0) return null;
+    const allLines = [...colLines];
+    if (pkCols.length > 0) allLines.push(`    PRIMARY KEY (${pkCols.join(", ")})`);
+    allLines.push(...fkLines);
+    const suffix = tableOptionsClauses(t.options);
+    const tail = suffix.length ? "\n" + suffix.join("\n") : "";
+    return `${createTableClause(t.options)} ${tableRef(t.schema, t.name)} (\n${allLines.join(",\n")}\n)${tail};`;
+  };
+
   const stmts: string[] = [];
 
   // ── Pure-create mode (no baseline tables) ────────────────────────────────────
   if (!baseline || baseline.tables.length === 0) {
     for (const t of tables) {
       if (!t.schema || !t.name.trim() || t.columns.length === 0) continue;
-      const colLines: string[] = [];
-      const pkCols: string[] = [];
-      const fkLines: string[] = [];
-      for (const c of t.columns) {
-        if (!c.name.trim()) continue;
-        colLines.push(`    ${q(c.name.trim())} ${c.dataType}${colTail(c)}`);
-        if (c.isPK) pkCols.push(q(c.name.trim()));
-        if (c.fkRef) {
-          const parts = c.fkRef.split(".");
-          if (parts.length === 3) {
-            const [rs, rt, rc] = parts;
-            fkLines.push(
-              `    FOREIGN KEY (${q(c.name.trim())}) REFERENCES ${tableRef(rs, rt)}(${q(rc)})`
-            );
-          }
-        }
-      }
-      if (colLines.length === 0) continue;
-      const allLines = [...colLines];
-      if (pkCols.length > 0) allLines.push(`    PRIMARY KEY (${pkCols.join(", ")})`);
-      allLines.push(...fkLines);
-      stmts.push(
-        `CREATE TABLE IF NOT EXISTS ${tableRef(t.schema, t.name)} (\n${allLines.join(",\n")}\n);`
-      );
+      const s = createTableSQL(t);
+      if (s) stmts.push(s);
     }
     return stmts.join("\n\n");
   }
@@ -250,30 +261,8 @@ function generateDiffSQL(
 
     if (!bt) {
       // ── New table ─────────────────────────────────────────────────────────────
-      const colLines: string[] = [];
-      const pkCols: string[] = [];
-      const fkLines: string[] = [];
-      for (const c of t.columns) {
-        if (!c.name.trim()) continue;
-        colLines.push(`    ${q(c.name.trim())} ${c.dataType}${colTail(c)}`);
-        if (c.isPK) pkCols.push(q(c.name.trim()));
-        if (c.fkRef) {
-          const parts = c.fkRef.split(".");
-          if (parts.length === 3) {
-            const [rs, rt, rc] = parts;
-            fkLines.push(
-              `    FOREIGN KEY (${q(c.name.trim())}) REFERENCES ${tableRef(rs, rt)}(${q(rc)})`
-            );
-          }
-        }
-      }
-      if (colLines.length === 0) continue;
-      const allLines = [...colLines];
-      if (pkCols.length > 0) allLines.push(`    PRIMARY KEY (${pkCols.join(", ")})`);
-      allLines.push(...fkLines);
-      stmts.push(
-        `CREATE TABLE IF NOT EXISTS ${tableRef(t.schema, t.name)} (\n${allLines.join(",\n")}\n);`
-      );
+      const s = createTableSQL(t);
+      if (s) stmts.push(s);
     } else {
       // ── Existing table: diff ──────────────────────────────────────────────────
       const ref = tableRef(t.schema, t.name);
@@ -427,6 +416,9 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
   // Canvas selection (multi-select via Cmd/Ctrl+click)
   const [selectedTableIds, setSelectedTableIds] = useState<string[]>([]);
 
+  // Create Table modal (new-table creation reuses the full modal — #615)
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+
   // SQL modal
   const [sqlModalOpen, setSqlModalOpen] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
@@ -559,11 +551,42 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
 
   // ── Table / column mutators ───────────────────────────────────────────────────
 
-  const addTable = () => {
-    setTables((prev) => [
-      ...prev,
-      { id: crypto.randomUUID(), schema: schemas[0] ?? "", name: "", columns: [] },
-    ]);
+  // Default schema for a brand-new table — the modal has no schema picker, so the
+  // table lands here and can be reassigned via the sidebar card's schema Select.
+  const defaultSchema = schemas[0] ?? "";
+
+  // "Add Table" opens the full Create Table modal; the returned definition is
+  // mapped to a DesignerTable and placed on the canvas (#615). FKs are still
+  // wired on the canvas; table-level options ride along in `options`.
+  const handleDefine = (cfg: TableConfig) => {
+    const name = cfg.caseSensitive ? `"${cfg.name.trim()}"` : normalizeIdentifier(cfg.name);
+    const newTable: DesignerTable = {
+      id: crypto.randomUUID(),
+      schema: defaultSchema,
+      name,
+      columns: cfg.columns.map((c) => ({
+        id: crypto.randomUUID(),
+        name: normalizeIdentifier(c.name),
+        dataType: c.type,
+        isPK: c.primaryKey,
+        notNull: c.notNull || c.primaryKey,
+        fkRef: "",
+        defaultValue: c.defaultValue,
+      })),
+      options: {
+        tableType: cfg.tableType,
+        orReplace: cfg.orReplace,
+        ifNotExists: cfg.ifNotExists,
+        clusterBy: cfg.clusterBy,
+        dataRetentionTimeInDays: cfg.dataRetentionTimeInDays,
+        maxDataExtensionTimeInDays: cfg.maxDataExtensionTimeInDays,
+        changeTracking: cfg.changeTracking,
+        enableSchemaEvolution: cfg.enableSchemaEvolution,
+        comment: cfg.comment,
+      },
+    };
+    setTables((prev) => [...prev, newTable]);
+    setSelectedTableIds([newTable.id]);
   };
 
   const removeTable = useCallback((tableId: string) => {
@@ -880,7 +903,7 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
               gap: 14,
             }}
           >
-            <Button size="small" icon={<PlusOutlined />} onClick={addTable} style={{ alignSelf: "flex-start" }}>
+            <Button size="small" icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)} style={{ alignSelf: "flex-start" }}>
               Add Table
             </Button>
 
@@ -1114,6 +1137,16 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
           </div>
         </div>
       </Modal>
+
+      {/* Create Table modal — full new-table feature set incl. the ƒ DEFAULT picker (#615) */}
+      {createModalOpen && (
+        <CreateTableModal
+          db={database}
+          schema={defaultSchema}
+          onClose={() => setCreateModalOpen(false)}
+          onDefine={handleDefine}
+        />
+      )}
 
       {/* Add FK reference dialog (two tables pre-populated from multi-select) */}
       {fkDialog && (
