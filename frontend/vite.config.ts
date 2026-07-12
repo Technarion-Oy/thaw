@@ -271,6 +271,8 @@ export default defineConfig({
           if (id.includes("/xlsx/")) return "vendor-xlsx";
           // xterm — only when the embedded terminal panel opens.
           if (id.includes("/@xterm/")) return "vendor-xterm";
+          // leaflet — only when a GeoJSON cell's Map view is opened (lazy).
+          if (id.includes("/leaflet/")) return "vendor-leaflet";
           // Visualization stack: recharts (Quick Chart / Warehouse Metering)
           // and @xyflow/@dagrejs (ER diagram / task graph), plus their shared
           // d3 / victory dependencies.  All reached only via lazy modals.

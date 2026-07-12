@@ -52,6 +52,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/results/ColumnFilterDropdown.tsx",
         "frontend/src/components/results/ConditionalFormattingModal.tsx",
         "frontend/src/components/results/DataTypeFormatModal.tsx",
+        "frontend/src/components/results/GeoMapView.tsx",
         "frontend/src/components/results/GridSearch.tsx",
         "frontend/src/components/results/QueryLogPane.tsx",
         "frontend/src/components/results/QuickChartModal.tsx",
