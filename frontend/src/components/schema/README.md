@@ -13,7 +13,8 @@ context-menu "Properties" item.
 
 | File | Purpose |
 |------|---------|
-| `SchemaPropertiesModal.tsx` | Loads `GetObjectProperties(db, schema, "SCHEMA", name)` (SHOW SCHEMAS) plus `GetSchemaParameters(db, schema)` (SHOW PARAMETERS, the source for the parameters SHOW SCHEMAS omits). Renders inline-editable Comment, Data retention (days), Max data extension (days), Default DDL collation, a Managed access toggle (`ENABLE`/`DISABLE MANAGED ACCESS`), and a Rename row, plus a **Parameters** section of fixed-choice `SelectRow`s (Log level, Trace level, Storage serialization policy, Replace invalid characters) that `SET` on pick / `UNSET` to reset — all applied via `AlterSchema(db, schema, clause)`. Remaining SHOW SCHEMAS columns render read-only. |
+| `SchemaPropertiesModal.tsx` | Loads `GetObjectProperties(db, schema, "SCHEMA", name)` (SHOW SCHEMAS) plus `GetSchemaParameters(db, schema)` (SHOW PARAMETERS, the source for the parameters SHOW SCHEMAS omits). Renders inline-editable Comment, Data retention (days), Max data extension (days), Default DDL collation, a Managed access toggle (`ENABLE`/`DISABLE MANAGED ACCESS`), and a Rename row; a **Tags** section (shared `TagsRow`, current tags read via `GetObjectTagReferences("SCHEMA", …)`); a **Storage & Iceberg** section with live-list `PickerRow`s (External volume, Catalog, Catalog sync) plus Iceberg params (default DDL collation, version default, merge-on-read behavior/enable, base location prefix); a **Notebook & Streamlit** section of `PickerRow`s (notebook compute pool CPU/GPU, Streamlit warehouse); a **Parameters** section of fixed-choice `SelectRow`s (Log level, Trace level, Storage serialization policy, Replace invalid characters, Object visibility, Enable data compaction, Replicable with failover groups) that `SET` on pick / `UNSET` to reset; and a **Danger zone** `SWAP WITH` (sibling-schema picker + confirm dialog). All applied via `AlterSchema(db, schema, clause)`. Remaining SHOW SCHEMAS columns render read-only. **Deferred** (need backend list IPC or a bespoke editor): `CLASSIFICATION_PROFILE`, `SET/UNSET CONTACT`, `UNSET DCM PROJECT`. |
+| `PickerRow` (in `SchemaPropertiesModal.tsx`) | Identifier-valued row: a searchable `Select` populated from a live list loader (`ListExternalVolumes` / `ListIntegrations("CATALOG")` / `ListComputePools` / `ListWarehouses`); sets the picked name double-quoted, or unsets. Falls back to showing the current value (unsettable) if the list read fails. |
 
 ## Patterns & integration
 
@@ -21,9 +22,14 @@ context-menu "Properties" item.
 - `GetObjectProperties(db, schema, "SCHEMA", name)` — properties panel data
 - `GetSchemaParameters(db, schema)` — SHOW PARAMETERS fallback for parameters the
   SHOW dump omits
-- `AlterSchema(db, schema, clause)` — `SET/UNSET COMMENT`, `SET/UNSET
-  DATA_RETENTION_TIME_IN_DAYS` / `MAX_DATA_EXTENSION_TIME_IN_DAYS` /
-  `DEFAULT_DDL_COLLATION`, `ENABLE`/`DISABLE MANAGED ACCESS`, `RENAME TO`
+- `AlterSchema(db, schema, clause)` — every SET/UNSET clause plus `ENABLE`/`DISABLE
+  MANAGED ACCESS`, `RENAME TO`, `SET/UNSET TAG`, and `SWAP WITH` (the backend
+  accepts any trailing clause; the modal owns the SQL quoting)
+- `GetObjectTagReferences("SCHEMA", db, schema, name, "")` — current tags (no-latency
+  `INFORMATION_SCHEMA.TAG_REFERENCES` read; inherited rows shown non-removable)
+- `ListExternalVolumes` / `ListIntegrations("CATALOG")` / `ListComputePools` /
+  `ListWarehouses` — `PickerRow` option lists
+- `ListSchemas(db)` — sibling targets for `SWAP WITH` (current schema filtered out)
 
 ## Gotchas
 
@@ -34,3 +40,9 @@ context-menu "Properties" item.
   the modal; refresh the sidebar to see the new name.
 - The modal mirrors `EventTablePropertiesModal` (same numeric retention /
   extension + SHOW-PARAMETERS-fallback shape).
+- `SWAP WITH` is destructive (exchanges all contents of the two schemas) and, like
+  `RENAME TO`, invalidates the modal's `name` prop — it confirms first, then closes.
+- Identifier-valued params (external volume, catalog, compute pools, warehouse) are
+  double-quoted (`quoteIdent`) on `SET`; fixed-choice enums are interpolated raw from
+  their closed option list. Text params (Iceberg collation/version, base location
+  prefix) and tag values are string-literal-quoted (`q1`).

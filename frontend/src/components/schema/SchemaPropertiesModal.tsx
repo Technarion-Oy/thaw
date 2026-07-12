@@ -14,8 +14,14 @@ import {
 import {
   FolderOutlined, EditOutlined, CheckOutlined, CloseOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterSchema, GetSchemaParameters } from "../../../wailsjs/go/app/App";
+import {
+  GetObjectProperties, AlterSchema, GetSchemaParameters,
+  ListExternalVolumes, ListIntegrations, ListComputePools, ListWarehouses,
+  ListSchemas, GetObjectTagReferences,
+} from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
+import TagsRow, { EditableTag } from "../shared/TagsRow";
+import { quoteIdent } from "../shared/ObjectNameCaseControl";
 
 const { Text } = Typography;
 
@@ -46,6 +52,9 @@ const LOG_LEVELS = opts("TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL", "OFF
 const TRACE_LEVELS = opts("ALWAYS", "ON_EVENT", "PROPAGATE", "OFF");
 const SERIALIZATION = opts("COMPATIBLE", "OPTIMIZED");
 const BOOLS = opts("TRUE", "FALSE");
+const MERGE_BEHAVIOR = opts("AUTO", "ENABLED", "DISABLED");
+const YES_NO = opts("YES", "NO");
+const VISIBILITY = opts("PRIVILEGED");
 
 // ─── EditRow ─────────────────────────────────────────────────────────────────
 
@@ -184,6 +193,53 @@ function SelectRow({ label, value, options, busy, onSet, onUnset }: {
   );
 }
 
+// An identifier-valued parameter row: a searchable Select populated from a live
+// list (external volumes, catalog integrations, compute pools, warehouses …).
+// The picked name is set case-sensitively (double-quoted) by the caller's onSet;
+// onUnset clears it. If the list read fails the current value is still shown and
+// unsettable — a fresh pick just isn't offered (use the SQL editor instead).
+function PickerRow({ label, value, load, busy, onSet, onUnset }: {
+  label: string;
+  value: string;
+  load: () => Promise<string[]>;
+  busy: boolean;
+  onSet: (name: string) => void;
+  onUnset: () => void;
+}) {
+  const [names, setNames] = useState<string[]>([]);
+  const [loadErr, setLoadErr] = useState(false);
+  useEffect(() => {
+    load().then((ns) => setNames(ns ?? [])).catch(() => setLoadErr(true));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Always include the current value so it renders even if the list omitted it.
+  const options = Array.from(new Set([...(value ? [value] : []), ...names]))
+    .map((n) => ({ value: n, label: n }));
+  return (
+    <tr>
+      <td style={LABEL_TD}>{label}</td>
+      <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
+        <Space>
+          <Select
+            size="small"
+            showSearch
+            value={value || undefined}
+            placeholder={loadErr ? "(list unavailable)" : "(not set)"}
+            style={{ width: 240 }}
+            options={options}
+            onChange={onSet}
+            loading={busy}
+          />
+          {value && (
+            <Tooltip title="Unset">
+              <Button size="small" onClick={onUnset} loading={busy}>Unset</Button>
+            </Tooltip>
+          )}
+        </Space>
+      </td>
+    </tr>
+  );
+}
+
 // ─── Main component ──────────────────────────────────────────────────────────
 
 interface Props {
@@ -200,6 +256,10 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
   const [actionError, setActionError] = useState<string | null>(null);
   const [managedBusy, setManagedBusy] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [tags, setTags] = useState<EditableTag[]>([]);
+  const [siblings, setSiblings] = useState<string[]>([]);
+  const [swapTarget, setSwapTarget] = useState<string | undefined>();
+  const [swapBusy, setSwapBusy] = useState(false);
 
   const reload = useCallback(async () => {
     // Keep prior data rendered while refetching so an inline edit doesn't collapse
@@ -223,6 +283,45 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
   }, [db, schema, name]);
 
   useEffect(() => { reload(); }, [reload]);
+
+  // Tags use the no-latency INFORMATION_SCHEMA.TAG_REFERENCES read so a SET/UNSET
+  // reflects immediately. Best-effort: SET/UNSET still work if the read fails.
+  // Tags inherited from the database/account are shown for context but can't be
+  // unset here — that has to happen where they were applied.
+  const reloadTags = useCallback(async () => {
+    try {
+      const t = await GetObjectTagReferences("SCHEMA", db, schema, name, "");
+      const cols = (t?.columns ?? []).map((c) => c.toLowerCase());
+      const ci = (n: string) => cols.indexOf(n);
+      const dbI = ci("tag_database"), scI = ci("tag_schema"), nmI = ci("tag_name"),
+        vlI = ci("tag_value"), lvI = ci("level");
+      setTags((t?.rows ?? []).map((row): EditableTag => {
+        const tdb = dbI >= 0 ? String(row[dbI] ?? "") : "";
+        const tsc = scI >= 0 ? String(row[scI] ?? "") : "";
+        const tnm = nmI >= 0 ? String(row[nmI] ?? "") : "";
+        const qualified = [tdb, tsc, tnm].filter(Boolean).map(quoteIdent).join(".");
+        const inherited = lvI >= 0 && String(row[lvI] ?? "").toUpperCase() !== "SCHEMA";
+        return {
+          key: qualified,
+          name: tnm,
+          value: vlI >= 0 ? String(row[vlI] ?? "") : "",
+          removable: !inherited,
+          suffix: inherited ? " (inherited)" : "",
+        };
+      }));
+    } catch {
+      setTags([]);
+    }
+  }, [db, schema, name]);
+
+  useEffect(() => { reloadTags(); }, [reloadTags]);
+
+  // Sibling schemas in the same database, for the SWAP WITH target picker.
+  useEffect(() => {
+    ListSchemas(db)
+      .then((s) => setSiblings((s ?? []).filter((n) => n.toUpperCase() !== name.toUpperCase())))
+      .catch(() => setSiblings([]));
+  }, [db, name]);
 
   const schemaRef = `"${db}"."${name}"`;
 
@@ -258,6 +357,18 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
     } else {
       if (!/^\d+$/.test(v)) throw new Error("Must be a non-negative integer.");
       await AlterSchema(db, schema, `SET ${param} = ${v}`);
+    }
+    await reload();
+  };
+
+  // SET/UNSET a free-text string parameter (quoted as a string literal on SET,
+  // UNSET when cleared). Used for the Iceberg text params and BASE_LOCATION_PREFIX.
+  const saveTextParam = (param: string) => async (val: string) => {
+    const v = val.trim();
+    if (v === "") {
+      await AlterSchema(db, schema, `UNSET ${param}`);
+    } else {
+      await AlterSchema(db, schema, `SET ${param} = ${q1(v)}`);
     }
     await reload();
   };
@@ -309,6 +420,42 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
     }
   };
 
+  const setTag = async (tagName: string, tagValue: string) => {
+    // Tag name may be a qualified identifier (db.schema.tag) — inserted verbatim;
+    // the value is a quoted string literal.
+    await AlterSchema(db, schema, `SET TAG ${tagName} = ${q1(tagValue)}`);
+    await reloadTags();
+  };
+
+  const unsetTag = async (qualified: string) => {
+    await AlterSchema(db, schema, `UNSET TAG ${qualified}`);
+    await reloadTags();
+  };
+
+  // SWAP WITH exchanges ALL contents of two schemas — destructive, so confirm
+  // first. On success the modal's name context is stale, so close and let the
+  // sidebar refresh.
+  const doSwap = () => {
+    if (!swapTarget) return;
+    Modal.confirm({
+      title: "Swap schema contents?",
+      content: `This exchanges every object between "${name}" and "${swapTarget}". It is disruptive and can't be undone automatically.`,
+      okText: "Swap",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setSwapBusy(true);
+        setActionError(null);
+        try {
+          await AlterSchema(db, schema, `SWAP WITH ${quoteIdent(swapTarget)}`);
+          onClose();
+        } catch (e) {
+          setActionError(`Swap failed: ${String(e)}`);
+          setSwapBusy(false);
+        }
+      },
+    });
+  };
+
   const comment = find("comment");
   const owner = find("owner");
   const createdOn = find("created_on");
@@ -321,6 +468,22 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
   const traceLevel = paramVal("TRACE_LEVEL");
   const serialization = paramVal("STORAGE_SERIALIZATION_POLICY");
   const replaceInvalid = paramVal("REPLACE_INVALID_CHARACTERS");
+  const externalVolume = paramVal("EXTERNAL_VOLUME");
+  const catalog = paramVal("CATALOG");
+  const catalogSync = paramVal("CATALOG_SYNC");
+  const notebookCpu = paramVal("DEFAULT_NOTEBOOK_COMPUTE_POOL_CPU");
+  const notebookGpu = paramVal("DEFAULT_NOTEBOOK_COMPUTE_POOL_GPU");
+  const streamlitWh = paramVal("DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE");
+  const icebergCollation = paramVal("ICEBERG_DEFAULT_DDL_COLLATION");
+  const icebergVersion = paramVal("ICEBERG_VERSION_DEFAULT");
+  const icebergMerge = paramVal("ICEBERG_MERGE_ON_READ_BEHAVIOR");
+  const enableIcebergMerge = paramVal("ENABLE_ICEBERG_MERGE_ON_READ");
+  const baseLocationPrefix = paramVal("BASE_LOCATION_PREFIX");
+  const objectVisibility = paramVal("OBJECT_VISIBILITY");
+  const dataCompaction = paramVal("ENABLE_DATA_COMPACTION");
+  const replicableFailover = paramVal("REPLICABLE_WITH_FAILOVER_GROUPS");
+
+  const catalogNames = () => ListIntegrations("CATALOG").then((rs) => (rs ?? []).map((r) => r.name));
 
   // Keys rendered in the dedicated sections, hidden from the generic Properties dump.
   const handledKeys = new Set([
@@ -430,6 +593,110 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
             </tbody>
           </table>
 
+          <div style={SECTION_HEAD}>Tags</div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>
+              <TagsRow tags={tags} onSetTag={setTag} onUnsetTag={unsetTag} />
+            </tbody>
+          </table>
+
+          <div style={SECTION_HEAD}>Storage &amp; Iceberg</div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>
+              <PickerRow
+                label="External volume"
+                value={externalVolume}
+                load={ListExternalVolumes}
+                busy={busyKey === "EXTERNAL_VOLUME"}
+                onSet={(v) => applyParam("EXTERNAL_VOLUME")(`SET EXTERNAL_VOLUME = ${quoteIdent(v)}`)}
+                onUnset={() => applyParam("EXTERNAL_VOLUME")("UNSET EXTERNAL_VOLUME")}
+              />
+              <PickerRow
+                label="Catalog"
+                value={catalog}
+                load={catalogNames}
+                busy={busyKey === "CATALOG"}
+                onSet={(v) => applyParam("CATALOG")(`SET CATALOG = ${quoteIdent(v)}`)}
+                onUnset={() => applyParam("CATALOG")("UNSET CATALOG")}
+              />
+              <PickerRow
+                label="Catalog sync"
+                value={catalogSync}
+                load={catalogNames}
+                busy={busyKey === "CATALOG_SYNC"}
+                onSet={(v) => applyParam("CATALOG_SYNC")(`SET CATALOG_SYNC = ${quoteIdent(v)}`)}
+                onUnset={() => applyParam("CATALOG_SYNC")("UNSET CATALOG_SYNC")}
+              />
+              <EditRow
+                label="Iceberg default DDL collation"
+                value={icebergCollation}
+                canUnset={icebergCollation !== ""}
+                onSave={saveTextParam("ICEBERG_DEFAULT_DDL_COLLATION")}
+                onUnset={() => saveTextParam("ICEBERG_DEFAULT_DDL_COLLATION")("")}
+              />
+              <EditRow
+                label="Iceberg version default"
+                value={icebergVersion}
+                canUnset={icebergVersion !== ""}
+                onSave={saveTextParam("ICEBERG_VERSION_DEFAULT")}
+                onUnset={() => saveTextParam("ICEBERG_VERSION_DEFAULT")("")}
+              />
+              <SelectRow
+                label="Iceberg merge-on-read behavior"
+                value={icebergMerge}
+                options={MERGE_BEHAVIOR}
+                busy={busyKey === "ICEBERG_MERGE_ON_READ_BEHAVIOR"}
+                onSet={(v) => applyParam("ICEBERG_MERGE_ON_READ_BEHAVIOR")(`SET ICEBERG_MERGE_ON_READ_BEHAVIOR = ${v}`)}
+                onUnset={() => applyParam("ICEBERG_MERGE_ON_READ_BEHAVIOR")("UNSET ICEBERG_MERGE_ON_READ_BEHAVIOR")}
+              />
+              <SelectRow
+                label="Enable Iceberg merge-on-read"
+                value={enableIcebergMerge}
+                options={BOOLS}
+                busy={busyKey === "ENABLE_ICEBERG_MERGE_ON_READ"}
+                onSet={(v) => applyParam("ENABLE_ICEBERG_MERGE_ON_READ")(`SET ENABLE_ICEBERG_MERGE_ON_READ = ${v}`)}
+                onUnset={() => applyParam("ENABLE_ICEBERG_MERGE_ON_READ")("UNSET ENABLE_ICEBERG_MERGE_ON_READ")}
+              />
+              <EditRow
+                label="Base location prefix"
+                value={baseLocationPrefix}
+                canUnset={baseLocationPrefix !== ""}
+                onSave={saveTextParam("BASE_LOCATION_PREFIX")}
+                onUnset={() => saveTextParam("BASE_LOCATION_PREFIX")("")}
+              />
+            </tbody>
+          </table>
+
+          <div style={SECTION_HEAD}>Notebook &amp; Streamlit</div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>
+              <PickerRow
+                label="Default notebook compute pool (CPU)"
+                value={notebookCpu}
+                load={ListComputePools}
+                busy={busyKey === "DEFAULT_NOTEBOOK_COMPUTE_POOL_CPU"}
+                onSet={(v) => applyParam("DEFAULT_NOTEBOOK_COMPUTE_POOL_CPU")(`SET DEFAULT_NOTEBOOK_COMPUTE_POOL_CPU = ${quoteIdent(v)}`)}
+                onUnset={() => applyParam("DEFAULT_NOTEBOOK_COMPUTE_POOL_CPU")("UNSET DEFAULT_NOTEBOOK_COMPUTE_POOL_CPU")}
+              />
+              <PickerRow
+                label="Default notebook compute pool (GPU)"
+                value={notebookGpu}
+                load={ListComputePools}
+                busy={busyKey === "DEFAULT_NOTEBOOK_COMPUTE_POOL_GPU"}
+                onSet={(v) => applyParam("DEFAULT_NOTEBOOK_COMPUTE_POOL_GPU")(`SET DEFAULT_NOTEBOOK_COMPUTE_POOL_GPU = ${quoteIdent(v)}`)}
+                onUnset={() => applyParam("DEFAULT_NOTEBOOK_COMPUTE_POOL_GPU")("UNSET DEFAULT_NOTEBOOK_COMPUTE_POOL_GPU")}
+              />
+              <PickerRow
+                label="Default Streamlit notebook warehouse"
+                value={streamlitWh}
+                load={ListWarehouses}
+                busy={busyKey === "DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE"}
+                onSet={(v) => applyParam("DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE")(`SET DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE = ${quoteIdent(v)}`)}
+                onUnset={() => applyParam("DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE")("UNSET DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE")}
+              />
+            </tbody>
+          </table>
+
           <div style={SECTION_HEAD}>Parameters</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
@@ -465,6 +732,55 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
                 onSet={(v) => applyParam("REPLACE_INVALID_CHARACTERS")(`SET REPLACE_INVALID_CHARACTERS = ${v}`)}
                 onUnset={() => applyParam("REPLACE_INVALID_CHARACTERS")("UNSET REPLACE_INVALID_CHARACTERS")}
               />
+              <SelectRow
+                label="Object visibility"
+                value={objectVisibility}
+                options={VISIBILITY}
+                busy={busyKey === "OBJECT_VISIBILITY"}
+                onSet={(v) => applyParam("OBJECT_VISIBILITY")(`SET OBJECT_VISIBILITY = ${v}`)}
+                onUnset={() => applyParam("OBJECT_VISIBILITY")("UNSET OBJECT_VISIBILITY")}
+              />
+              <SelectRow
+                label="Enable data compaction"
+                value={dataCompaction}
+                options={BOOLS}
+                busy={busyKey === "ENABLE_DATA_COMPACTION"}
+                onSet={(v) => applyParam("ENABLE_DATA_COMPACTION")(`SET ENABLE_DATA_COMPACTION = ${v}`)}
+                onUnset={() => applyParam("ENABLE_DATA_COMPACTION")("UNSET ENABLE_DATA_COMPACTION")}
+              />
+              <SelectRow
+                label="Replicable with failover groups"
+                value={replicableFailover}
+                options={YES_NO}
+                busy={busyKey === "REPLICABLE_WITH_FAILOVER_GROUPS"}
+                onSet={(v) => applyParam("REPLICABLE_WITH_FAILOVER_GROUPS")(`SET REPLICABLE_WITH_FAILOVER_GROUPS = ${q1(v)}`)}
+                onUnset={() => applyParam("REPLICABLE_WITH_FAILOVER_GROUPS")("UNSET REPLICABLE_WITH_FAILOVER_GROUPS")}
+              />
+            </tbody>
+          </table>
+
+          <div style={SECTION_HEAD}>Danger zone</div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>
+              <tr>
+                <td style={LABEL_TD}>Swap with</td>
+                <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
+                  <Space>
+                    <Select
+                      size="small"
+                      showSearch
+                      value={swapTarget}
+                      placeholder="Target schema"
+                      style={{ width: 240 }}
+                      options={siblings.map((s) => ({ value: s, label: s }))}
+                      onChange={setSwapTarget}
+                    />
+                    <Button size="small" danger disabled={!swapTarget} loading={swapBusy} onClick={doSwap}>
+                      Swap…
+                    </Button>
+                  </Space>
+                </td>
+              </tr>
             </tbody>
           </table>
 
