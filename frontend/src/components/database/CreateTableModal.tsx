@@ -352,7 +352,10 @@ export default function CreateTableModal({ db, schema, onClose, onSuccess, onDef
           </Checkbox>
         </Space>
 
-        <SqlPreview sql={preview} />
+        {/* In onDefine (ER Designer) mode the real SQL is assembled later by the
+            designer's diff builder — with a table-level PRIMARY KEY and the final
+            schema — so a buildSql preview here would be misleading. Hidden. */}
+        {!onDefine && <SqlPreview sql={preview} />}
       </Form>
     </CreateModalShell>
   );

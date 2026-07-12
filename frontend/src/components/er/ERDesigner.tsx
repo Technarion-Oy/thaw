@@ -559,7 +559,9 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
   // mapped to a DesignerTable and placed on the canvas (#615). FKs are still
   // wired on the canvas; table-level options ride along in `options`.
   const handleDefine = (cfg: TableConfig) => {
-    const name = cfg.caseSensitive ? `"${cfg.name.trim()}"` : normalizeIdentifier(cfg.name);
+    // A case-sensitive name must keep its case → wrap in quotes so
+    // normalizeIdentifier preserves it (it uppercases only unquoted names).
+    const name = normalizeIdentifier(cfg.caseSensitive ? `"${cfg.name.trim()}"` : cfg.name);
     const newTable: DesignerTable = {
       id: crypto.randomUUID(),
       schema: defaultSchema,
