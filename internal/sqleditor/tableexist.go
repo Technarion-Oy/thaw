@@ -27,14 +27,22 @@ type SchemaEntry struct {
 
 // ValidateTablesExistRequest is the input to ValidateTablesExist.
 type ValidateTablesExistRequest struct {
-	SQL                         string           `json:"sql"`
-	StmtRanges                  []StatementRange `json:"stmtRanges"`
-	ResolvedRefs                []ResolvedRef    `json:"resolvedRefs"`
-	KnownDatabases              []string         `json:"knownDatabases"`
-	KnownSchemas                []SchemaEntry    `json:"knownSchemas"`
-	QuotedIdentifiersIgnoreCase bool             `json:"quotedIdentifiersIgnoreCase"`
-	DroppedDatabases            []string         `json:"droppedDatabases"`
-	DroppedSchemas              []SchemaEntry    `json:"droppedSchemas"`
+	SQL            string           `json:"sql"`
+	StmtRanges     []StatementRange `json:"stmtRanges"`
+	ResolvedRefs   []ResolvedRef    `json:"resolvedRefs"`
+	KnownDatabases []string         `json:"knownDatabases"`
+	KnownSchemas   []SchemaEntry    `json:"knownSchemas"`
+	// SessionDatabase/SessionSchema are the active session context (the
+	// USE'd database/schema), NOT the catalog. They — plus in-script
+	// USE/CREATE effects — decide whether an unqualified name has a
+	// database/schema to resolve against ("No database selected" warnings).
+	// KnownDatabases/KnownSchemas are the full catalog, used only for
+	// existence checks on qualified names.
+	SessionDatabase             string        `json:"sessionDatabase"`
+	SessionSchema               string        `json:"sessionSchema"`
+	QuotedIdentifiersIgnoreCase bool          `json:"quotedIdentifiersIgnoreCase"`
+	DroppedDatabases            []string      `json:"droppedDatabases"`
+	DroppedSchemas              []SchemaEntry `json:"droppedSchemas"`
 	// DroppedTables uses ResolvedRef (Alias field is ignored).
 	DroppedTables []ResolvedRef `json:"droppedTables"`
 	// AllKnownTables is the full set of resolved table references available in
@@ -48,8 +56,11 @@ type ValidateTablesExistRequest struct {
 
 // ValidateTablesExist checks each statement for references to databases,
 // schemas, or tables/views that are not in the resolved references or known
-// catalogs.  It is a direct Go port of the validateTablesExist function from
-// sqlDiagnostics.ts.
+// catalogs.  It is a Go port of the validateTablesExist function from
+// sqlDiagnostics.ts, with one deliberate divergence (issue #689): the
+// "No database/schema selected" warnings key off SessionDatabase/SessionSchema
+// (the actual USE'd session context) plus in-script USE/CREATE effects, not
+// off catalog size — a populated catalog does not mean a database is selected.
 //
 // Severity mapping: 8 = Monaco Error (red squiggles).
 func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
@@ -141,8 +152,11 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			}
 		}
 
-		hasGlobalDB := len(req.KnownDatabases) > 0 || anyHasDB(req.ResolvedRefs)
-		hasGlobalSchema := len(req.KnownSchemas) > 0 || anyHasSchema(req.ResolvedRefs)
+		// "Is a database/schema selected for unqualified name resolution?" —
+		// session context only, NOT catalog size. The catalog always has
+		// databases once connected, which is unrelated to whether one is USE'd.
+		hasSessionDB := req.SessionDatabase != ""
+		hasSessionSchema := req.SessionSchema != ""
 
 		// ── CREATE <schema-scoped object> ─────────────────────────────
 		// TABLE, VIEW, SEQUENCE, STAGE, STREAM, TASK, FILE FORMAT, … all live in a
@@ -153,12 +167,12 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 
 			switch len(parts) {
 			case 1:
-				if !hasGlobalDB && !scriptHasActiveDB {
+				if !hasSessionDB && !scriptHasActiveDB {
 					for _, t := range findTokensLocally(raw, []string{parts[0]}, r.StartLine, ic) {
 						markers = append(markers, diagMarkerAt(t,
 							"No database selected. Cannot create "+objType+" '"+t.name+"'.", 8))
 					}
-				} else if !hasGlobalSchema && !scriptHasActiveSchema {
+				} else if !hasSessionSchema && !scriptHasActiveSchema {
 					for _, t := range findTokensLocally(raw, []string{parts[0]}, r.StartLine, ic) {
 						markers = append(markers, diagMarkerAt(t,
 							"No schema selected. Cannot create "+objType+" '"+t.name+"'.", 8))
@@ -166,7 +180,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 				}
 			case 2:
 				schemaNorm := parts[0]
-				if !hasGlobalDB && !scriptHasActiveDB {
+				if !hasSessionDB && !scriptHasActiveDB {
 					searchToken := parts[0]
 					if len(rawParts) > 0 {
 						searchToken = normIdent(rawParts[0], ic)
@@ -226,10 +240,9 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		if rawPath, ok := matchCreateSchema(sig, raw); ok {
 			parts := extractIdentParts(rawPath, ic)
 			rawParts, _ := readIdentParts(sig, raw, findPathStartInSig(sig, raw, rawPath))
-			hasGlobalDBHere := len(req.KnownDatabases) > 0 || anyHasDB(req.ResolvedRefs)
 			switch len(parts) {
 			case 1:
-				if !hasGlobalDBHere && !scriptHasActiveDB {
+				if !hasSessionDB && !scriptHasActiveDB {
 					for _, t := range findTokensLocally(raw, []string{parts[0]}, r.StartLine, ic) {
 						markers = append(markers, diagMarkerAt(t,
 							"No database selected. Cannot create schema '"+t.name+"'.", 8))
@@ -270,7 +283,6 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			if !hasIfExists {
 				parts := extractIdentParts(rawPath, ic)
 				rawParts, _ := readIdentParts(sig, raw, findPathStartInSig(sig, raw, rawPath))
-				hasGlobalDBHere := len(req.KnownDatabases) > 0 || anyHasDB(req.ResolvedRefs)
 				var targetDB, targetSch string
 				if len(parts) >= 2 {
 					targetDB = parts[0]
@@ -298,7 +310,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 						}
 					}
 				} else {
-					if !hasGlobalDBHere && !scriptHasActiveDB {
+					if !hasSessionDB && !scriptHasActiveDB {
 						for _, t := range findTokensLocally(raw, []string{targetSch}, r.StartLine, ic) {
 							markers = append(markers, diagMarkerAt(t,
 								"No database selected. Cannot drop schema '"+t.name+"'.", 8))
@@ -695,15 +707,6 @@ func findPathStartInSig(sig []sqltok.Token, sql, rawPath string) int {
 func isIn(m map[string]struct{}, key string) bool {
 	_, ok := m[key]
 	return ok
-}
-
-func anyHasDB(refs []ResolvedRef) bool {
-	for _, r := range refs {
-		if r.DB != "" {
-			return true
-		}
-	}
-	return false
 }
 
 func anyHasSchema(refs []ResolvedRef) bool {

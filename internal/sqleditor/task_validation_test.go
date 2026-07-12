@@ -56,9 +56,11 @@ func TestValidateTablesExist_CreateTask_UsingCron(t *testing.T) {
 	}
 
 	req := ValidateTablesExistRequest{
-		ResolvedRefs:   getLiveRefs(),
-		KnownDatabases: []string{"DB", "LINEAGE_SOURCE_DB"},
-		KnownSchemas:   []SchemaEntry{{DB: "DB", Name: "SCH"}, {DB: "LINEAGE_SOURCE_DB", Name: "RAW_DATA"}},
+		ResolvedRefs:    getLiveRefs(),
+		KnownDatabases:  []string{"DB", "LINEAGE_SOURCE_DB"},
+		KnownSchemas:    []SchemaEntry{{DB: "DB", Name: "SCH"}, {DB: "LINEAGE_SOURCE_DB", Name: "RAW_DATA"}},
+		SessionDatabase: "DB",
+		SessionSchema:   "SCH",
 	}
 
 	for _, tc := range cases {

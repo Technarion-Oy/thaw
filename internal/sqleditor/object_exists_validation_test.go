@@ -12,10 +12,12 @@ import (
 // existence-or-creation.)
 func tablesExistMarkers(sql string) []DiagMarker {
 	return ValidateTablesExist(ValidateTablesExistRequest{
-		SQL:            sql,
-		StmtRanges:     GetStatementRanges(sql),
-		KnownDatabases: []string{"MYDB"},
-		KnownSchemas:   []SchemaEntry{{DB: "MYDB", Name: "PUBLIC"}},
+		SQL:             sql,
+		StmtRanges:      GetStatementRanges(sql),
+		KnownDatabases:  []string{"MYDB"},
+		KnownSchemas:    []SchemaEntry{{DB: "MYDB", Name: "PUBLIC"}},
+		SessionDatabase: "MYDB",
+		SessionSchema:   "PUBLIC",
 	})
 }
 
@@ -98,5 +100,37 @@ func TestValidateTablesExist_NoContext_SchemaScopedObjects(t *testing.T) {
 		if m := noCtx(sql); len(m) != 0 {
 			t.Errorf("for %q: expected no marker, got %d: %+v", sql, len(m), m)
 		}
+	}
+}
+
+// Regression for #689: a populated catalog must NOT be mistaken for a selected
+// database/schema. Once connected the object store always holds databases, but
+// unless one is actually USE'd (SessionDatabase/SessionSchema), an unqualified
+// schema-scoped CREATE still has nowhere to resolve and must warn.
+func TestValidateTablesExist_CatalogPresentButNoSession(t *testing.T) {
+	req := ValidateTablesExistRequest{
+		KnownDatabases: []string{"DB1", "DB2"},
+		KnownSchemas:   []SchemaEntry{{DB: "DB1", Name: "PUBLIC"}},
+		// SessionDatabase/SessionSchema deliberately empty.
+	}
+	sql := "CREATE OR REPLACE TABLE spatial_test_data (id INT);"
+	req.SQL = sql
+	req.StmtRanges = GetStatementRanges(sql)
+	m := ValidateTablesExist(req)
+	if len(m) == 0 || !strings.Contains(m[0].Message, "No database selected") {
+		t.Fatalf("expected 'No database selected' warning, got %+v", m)
+	}
+
+	// With a session database but no schema, it should flip to the schema warning.
+	req.SessionDatabase = "DB1"
+	m = ValidateTablesExist(req)
+	if len(m) == 0 || !strings.Contains(m[0].Message, "No schema selected") {
+		t.Fatalf("expected 'No schema selected' warning, got %+v", m)
+	}
+
+	// With both set, no warning.
+	req.SessionSchema = "PUBLIC"
+	if m = ValidateTablesExist(req); len(m) != 0 {
+		t.Fatalf("expected no warning with full session context, got %+v", m)
 	}
 }
