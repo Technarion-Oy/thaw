@@ -227,6 +227,40 @@ func TestValidateTablesExist_Valid(t *testing.T) {
 	}
 }
 
+// Regression test for #708: in-script CREATE of the special table-likes
+// (DYNAMIC/EXTERNAL/ICEBERG/HYBRID/EVENT TABLE) and STREAM must register the
+// created object so a later SELECT FROM it is not falsely flagged as missing.
+// Before the fix only plain CREATE TABLE/VIEW was tracked (matchCreateTV).
+func TestValidateTablesExist_SpecialCreateTracking(t *testing.T) {
+	scripts := []string{
+		"CREATE DYNAMIC TABLE dt TARGET_LAG='1 minute' WAREHOUSE=wh AS SELECT * FROM LIVE_TABLE;\nSELECT * FROM dt;",
+		"CREATE EXTERNAL TABLE et LOCATION=@s FILE_FORMAT=(TYPE=CSV);\nSELECT * FROM et;",
+		"CREATE ICEBERG TABLE it (id INT);\nSELECT * FROM it;",
+		"CREATE HYBRID TABLE ht (id INT PRIMARY KEY);\nSELECT * FROM ht;",
+		"CREATE EVENT TABLE ev;\nSELECT * FROM ev;",
+		"CREATE STREAM s1 ON TABLE LIVE_TABLE;\nSELECT * FROM s1;",
+	}
+
+	req := ValidateTablesExistRequest{
+		ResolvedRefs:    getLiveRefs(),
+		KnownDatabases:  []string{"DB"},
+		KnownSchemas:    []SchemaEntry{{DB: "DB", Name: "SCH"}},
+		SessionDatabase: "DB",
+		SessionSchema:   "SCH",
+	}
+
+	for _, sql := range scripts {
+		t.Run(sql[:min(len(sql), 30)], func(t *testing.T) {
+			req.SQL = sql
+			req.StmtRanges = GetStatementRanges(sql)
+			markers := ValidateTablesExist(req)
+			if errs := getErrors(markers); len(errs) > 0 {
+				t.Errorf("Expected 0 errors for %q, got %d: %v", sql, len(errs), errs)
+			}
+		})
+	}
+}
+
 // Regression test for Issue: USE statements containing underscores failing to set context
 func TestValidateTablesExist_UseWithUnderscores(t *testing.T) {
 	sql := `use LINEAGE_SOURCE_DB.RAW_DATA;

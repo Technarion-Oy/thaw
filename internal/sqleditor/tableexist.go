@@ -134,6 +134,15 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			if parts := extractIdentParts(rawPath, ic); len(parts) > 0 {
 				regByKind(scriptCreatedByKind, objType, parts)
 				unregByKind(scriptDroppedByKind, objType, parts)
+				// FROM-able kinds (every table-like, view, and stream) must also
+				// register in scriptCreatedTables so a later SELECT FROM them is
+				// clean. matchCreateTV above only tracks plain TABLE/VIEW, so
+				// DYNAMIC/EXTERNAL/ICEBERG/HYBRID/EVENT TABLE and STREAM would
+				// otherwise be missed (#708).
+				if isFromableKind(objType) {
+					scriptCreatedTables[parts[len(parts)-1]] = struct{}{}
+					scriptCreatedTables[strings.Join(parts, ".")] = struct{}{}
+				}
 			}
 		}
 		if rawPath, ok := matchCreateDbSch(sig, raw); ok {
@@ -768,6 +777,17 @@ func findPathStartInSig(sig []sqltok.Token, sql, rawPath string) int {
 func isIn(m map[string]struct{}, key string) bool {
 	_, ok := m[key]
 	return ok
+}
+
+// isFromableKind reports whether a schema-scoped object kind (an
+// ObjectType.Name(), e.g. "dynamic table", "stream") can appear in a FROM clause
+// and so must register in scriptCreatedTables for in-script CREATE-effect
+// tracking. It covers every table-like (plain/DYNAMIC/EXTERNAL/ICEBERG/HYBRID/
+// EVENT/… TABLE), every view (VIEW, SEMANTIC VIEW), and STREAM (#708).
+func isFromableKind(objType string) bool {
+	return objType == "stream" ||
+		strings.HasSuffix(objType, "table") ||
+		strings.HasSuffix(objType, "view")
 }
 
 func anyHasSchema(refs []ResolvedRef) bool {
