@@ -1060,6 +1060,14 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           .filter((o) => o.kind === "TABLE" || o.kind === "VIEW")
           .map((o) => ({ alias: "", db: o.db, schema: o.schema, name: o.name }));
 
+        // Non-table object catalog (stages, streams, tasks, …) for @stage etc.
+        // existence checks. fetchedObjectSchemas = schemas we actually have
+        // object data for; it is the guard that keeps shared/unlistable DBs silent.
+        const knownObjects = storeObjs.map((o) => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind }));
+        const fetchedObjectSchemas = Array.from(
+          new Map(storeObjs.map((o) => [`${UC(o.db)}\0${UC(o.schema)}`, { db: o.db, name: o.schema }])).values(),
+        );
+
         const tableMarkers = await ValidateTablesExist({
           sql: diagSql,
           stmtRanges,
@@ -1073,6 +1081,8 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           droppedSchemas: [],
           droppedTables: [],
           allKnownTables,
+          knownObjects,
+          fetchedObjectSchemas,
         } as any);
         if (model.getVersionId() !== diagVersion) return;
         diagMarkers.push(...((tableMarkers || []) as DiagMarker[]));
@@ -1815,7 +1825,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           try {
             payload = typeof marker.code === "string" ? JSON.parse(marker.code) : marker.code;
           } catch { continue; }
-          if (payload.kind !== "qualify-table" || !payload.suggestions) continue;
+          if (typeof payload.kind !== "string" || !payload.kind.startsWith("qualify-") || !payload.suggestions) continue;
           for (const suggestion of payload.suggestions) {
             actions.push({
               title: `Qualify as ${suggestion}`,

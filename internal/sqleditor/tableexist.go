@@ -25,6 +25,15 @@ type SchemaEntry struct {
 	Name string `json:"name"`
 }
 
+// ObjectRef is a schema-scoped object beyond tables/views (stages, streams,
+// tasks, pipes, file formats, …). Kind strings match ListObjects (e.g. "STAGE").
+type ObjectRef struct {
+	DB     string `json:"db"`
+	Schema string `json:"schema"`
+	Name   string `json:"name"`
+	Kind   string `json:"kind"`
+}
+
 // ValidateTablesExistRequest is the input to ValidateTablesExist.
 type ValidateTablesExistRequest struct {
 	SQL            string           `json:"sql"`
@@ -50,6 +59,13 @@ type ValidateTablesExistRequest struct {
 	// searched for tables with the same name in other schemas, enabling
 	// quick-fix qualification suggestions via the Code field.
 	AllKnownTables []ResolvedRef `json:"allKnownTables"`
+	// KnownObjects lists schema-scoped objects beyond tables/views (stages,
+	// streams, tasks, …), used to existence-check non-table references such as
+	// stage refs (@stg). FetchedObjectSchemas is the guard: only schemas whose
+	// object lists were actually fetched are validated, so shared DBs where SHOW
+	// can never succeed (e.g. SNOWFLAKE) stay silent instead of false-positiving.
+	KnownObjects         []ObjectRef   `json:"knownObjects"`
+	FetchedObjectSchemas []SchemaEntry `json:"fetchedObjectSchemas"`
 }
 
 // ── ValidateTablesExist ───────────────────────────────────────────────────────
@@ -95,6 +111,12 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 	scriptHasActiveDB := false
 	scriptHasActiveSchema := false
 
+	// Stage references (@stg) — tracked separately since they use a distinct
+	// scanner and the KnownObjects catalog rather than ResolvedRefs.
+	scriptCreatedStages := make(map[string]struct{})
+	scriptDroppedStages := make(map[string]struct{})
+	knownStages := objectsOfKind(req.KnownObjects, "STAGE")
+
 	for _, r := range req.StmtRanges {
 		raw := sqlStmt(req.SQL, r)
 		tokens := sqltok.Tokenize(raw)
@@ -105,6 +127,14 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			if parts := extractIdentParts(rawPath, ic); len(parts) > 0 {
 				scriptCreatedTables[parts[len(parts)-1]] = struct{}{}
 				scriptCreatedTables[strings.Join(parts, ".")] = struct{}{}
+			}
+		}
+		if rawPath, objType, ok := matchCreateSchemaScoped(sig, raw); ok && strings.EqualFold(objType, "stage") {
+			if parts := extractIdentParts(rawPath, ic); len(parts) > 0 {
+				scriptCreatedStages[parts[len(parts)-1]] = struct{}{}
+				scriptCreatedStages[strings.Join(parts, ".")] = struct{}{}
+				delete(scriptDroppedStages, parts[len(parts)-1])
+				delete(scriptDroppedStages, strings.Join(parts, "."))
 			}
 		}
 		if rawPath, ok := matchCreateDbSch(sig, raw); ok {
@@ -538,6 +568,22 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 				scriptCreatedDbsAndSchemas[strings.Join(parts, ".")] = struct{}{}
 			}
 		}
+		if rawPath, ok := matchDropStage(sig, raw); ok {
+			if parts := extractIdentParts(rawPath, ic); len(parts) > 0 {
+				scriptDroppedStages[parts[len(parts)-1]] = struct{}{}
+				scriptDroppedStages[strings.Join(parts, ".")] = struct{}{}
+				delete(scriptCreatedStages, parts[len(parts)-1])
+				delete(scriptCreatedStages, strings.Join(parts, "."))
+			}
+		}
+
+		// ── Stage references (@stg) — runs for every statement kind (PUT,
+		// GET, LIST, REMOVE, COPY, SELECT … FROM @stg), so it must precede the
+		// SELECT/WITH continue below. ─────────────────────────────────────────
+		markers = append(markers, validateStageRefs(
+			raw, sig, r.StartLine, ic, checkEq, knownStages,
+			req.FetchedObjectSchemas, req.SessionDatabase, req.SessionSchema,
+			scriptCreatedStages, scriptDroppedStages)...)
 
 		// ── SELECT / WITH / CREATE AS SELECT: table existence ─────────
 		if firstKw != "SELECT" && firstKw != "WITH" && firstKw != "CREATE" && firstKw != "UNDROP" &&
