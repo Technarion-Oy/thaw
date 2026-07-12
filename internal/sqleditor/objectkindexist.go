@@ -68,7 +68,22 @@ func validateObjectKindRefs(
 	if objType == "table" || objType == "view" {
 		return nil
 	}
+	return flagMissingObject(raw, baseLine, ic, checkEq, objType, extractIdentParts(rawPath, ic),
+		knownObjects, fetchedSchemas, sessionDB, sessionSchema, createdByKind, droppedByKind)
+}
 
+// resolveObjectMissing decides whether an object reference (of kind objType, with
+// already-normalised path parts) is missing. It returns the bare name to mark,
+// the kind's catalog slice (for quick-fix suggestions), and whether it is missing.
+// It applies the shared guards: a kind never seen in the catalog, an unfetched
+// schema, no session context, or an in-script CREATE all yield missing=false.
+func resolveObjectMissing(
+	objType string, parts []string, ic bool,
+	checkEq func(string, string) bool,
+	knownObjects []ObjectRef, fetchedSchemas []SchemaEntry,
+	sessionDB, sessionSchema string,
+	createdByKind, droppedByKind map[string]map[string]struct{},
+) (missing bool, name string, kindObjs []ObjectRef) {
 	// Only validate kinds we have actually seen in the catalog. A kind we never
 	// list (SHOW failed on this edition, or it has no SHOW command — TYPE,
 	// SEQUENCE, …) yields no KnownObjects, so treat it as "no data" and stay
@@ -76,16 +91,11 @@ func validateObjectKindRefs(
 	// ponytail: needs ≥1 object of the kind somewhere fetched; a schema whose
 	// only object of that kind is the typo'd one won't flag. Upgrade path: pass an
 	// explicit fetched-kinds set from the frontend if this proves too lax.
-	kindObjs := objectsOfKind(knownObjects, objType)
-	if len(kindObjs) == 0 {
-		return nil
+	kindObjs = objectsOfKind(knownObjects, objType)
+	if len(kindObjs) == 0 || len(parts) == 0 {
+		return
 	}
-
-	parts := extractIdentParts(rawPath, ic)
-	if len(parts) == 0 {
-		return nil
-	}
-	var db, schema, name string
+	var db, schema string
 	switch len(parts) {
 	case 1:
 		db, schema, name = normIdent(sessionDB, ic), normIdent(sessionSchema, ic), parts[0]
@@ -95,24 +105,44 @@ func validateObjectKindRefs(
 		db, schema, name = parts[0], parts[1], parts[len(parts)-1]
 	}
 	if db == "" || schema == "" {
-		return nil
+		return
 	}
 	path := name
 	if len(parts) >= 2 {
 		path = strings.Join(parts, ".")
 	}
 	if created := createdByKind[objType]; isIn(created, name) || isIn(created, path) {
-		return nil
+		return
 	}
 	if !schemaFetched(fetchedSchemas, db, schema) {
-		return nil
+		return
 	}
 	dropped := droppedByKind[objType]
 	wasDropped := isIn(dropped, name) || isIn(dropped, path)
 	if !wasDropped && objectExists(kindObjs, db, schema, name, checkEq) {
+		return
+	}
+	missing = true
+	return
+}
+
+// flagMissingObject resolves a bare/qualified object reference and, when missing,
+// emits a marker on every occurrence of its name in the statement (located via
+// findTokensLocally, so the name must be a bare identifier — string-literal
+// values place their own marker). Shared by the phase-2 ALTER/DROP sweep and the
+// phase-3 kind-implied extractors.
+func flagMissingObject(
+	raw string, baseLine int, ic bool, checkEq func(string, string) bool,
+	objType string, parts []string,
+	knownObjects []ObjectRef, fetchedSchemas []SchemaEntry,
+	sessionDB, sessionSchema string,
+	createdByKind, droppedByKind map[string]map[string]struct{},
+) []DiagMarker {
+	missing, name, kindObjs := resolveObjectMissing(objType, parts, ic, checkEq,
+		knownObjects, fetchedSchemas, sessionDB, sessionSchema, createdByKind, droppedByKind)
+	if !missing {
 		return nil
 	}
-
 	var markers []DiagMarker
 	for _, t := range findTokensLocally(raw, []string{name}, baseLine, ic) {
 		m := diagMarkerAt(t, capitalizeKind(objType)+" '"+t.name+"' does not exist or is not authorized.", 8)
