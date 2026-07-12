@@ -515,7 +515,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
     - **Time Travel Retention** (days)
     - **Created On** and **Last Altered** timestamps
     - **Comment** description
-- **Visual ER Designer** — interactively design or modify tables: add columns, set data types, define primary and foreign keys, set per-column `DEFAULT` values (free text, or pick a built-in function like `CURRENT_TIMESTAMP()` / `UUID_STRING()` from the **ƒ** shortcut), preview the live Mermaid diagram, then generate and apply the necessary `CREATE TABLE` / `ALTER TABLE` SQL in one step
+- **Visual ER Designer** — interactively design or modify tables: **Add Table** opens the full **Create Table** modal (table type, `OR REPLACE` / `IF NOT EXISTS`, clustering keys, data-retention / max-data-extension, change-tracking, schema evolution, table + column comments, and the built-in-function `DEFAULT` **ƒ** picker on every column) and drops the result on the canvas; then edit columns, set data types, define primary and foreign keys, set per-column `DEFAULT` values (free text, or pick a built-in function like `CURRENT_TIMESTAMP()` / `UUID_STRING()` from the **ƒ** shortcut), preview the live Mermaid diagram, and generate and apply the necessary `CREATE TABLE` / `ALTER TABLE` SQL in one step
 
 ---
 

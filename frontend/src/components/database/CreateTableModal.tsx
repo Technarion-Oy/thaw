@@ -23,6 +23,7 @@ import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
 import SqlPreview from "../shared/SqlPreview";
 import DefaultFunctionPicker from "../shared/DefaultFunctionPicker";
 import { columnConstraints } from "../shared/columnDdl";
+import { createTableClause, tableOptionsClauses } from "../shared/tableDdl";
 import { useQuotedIdentifiers, useCreateSubmit } from "../shared/createModalHooks";
 
 interface ColumnDef {
@@ -36,7 +37,7 @@ interface ColumnDef {
   comment: string;
 }
 
-interface TableConfig {
+export interface TableConfig {
   name: string;
   caseSensitive: boolean;
   orReplace: boolean;
@@ -72,15 +73,7 @@ function buildSql(db: string, schema: string, cfg: TableConfig): string {
   const esc = (s: string) => s.replace(/"/g, '""');
   const sq = (s: string) => "'" + s.replace(/'/g, "''") + "'";
 
-  let createClause = "CREATE";
-  if (cfg.orReplace) createClause += " OR REPLACE";
-
-  if (cfg.tableType !== "PERMANENT") {
-    createClause += ` ${cfg.tableType}`;
-  }
-
-  createClause += " TABLE";
-  if (cfg.ifNotExists && !cfg.orReplace) createClause += " IF NOT EXISTS";
+  const createClause = createTableClause(cfg);
 
   const nameToken = identToken(cfg.name || "table_name", cfg.caseSensitive);
   const lines: string[] = [
@@ -102,14 +95,7 @@ function buildSql(db: string, schema: string, cfg: TableConfig): string {
   });
 
   lines.push(")");
-
-  // Table options
-  if (cfg.clusterBy.trim()) lines.push(`CLUSTER BY (${cfg.clusterBy.trim()})`);
-  if (cfg.enableSchemaEvolution) lines.push("ENABLE_SCHEMA_EVOLUTION = TRUE");
-  if (cfg.dataRetentionTimeInDays !== "") lines.push(`DATA_RETENTION_TIME_IN_DAYS = ${cfg.dataRetentionTimeInDays}`);
-  if (cfg.maxDataExtensionTimeInDays !== "") lines.push(`MAX_DATA_EXTENSION_TIME_IN_DAYS = ${cfg.maxDataExtensionTimeInDays}`);
-  if (cfg.changeTracking) lines.push("CHANGE_TRACKING = TRUE");
-  if (cfg.comment.trim()) lines.push(`COMMENT = ${sq(cfg.comment.trim())}`);
+  lines.push(...tableOptionsClauses(cfg));
 
   return lines.join("\n") + ";";
 }
@@ -119,10 +105,19 @@ interface Props {
   schema: string;
   onClose: () => void;
   onSuccess?: () => void;
+  /**
+   * When set, the modal returns the table definition instead of executing DDL
+   * (used by the ER Designer, which folds it into its diff/canvas flow — #615).
+   */
+  onDefine?: (cfg: TableConfig) => void;
 }
 
-export default function CreateTableModal({ db, schema, onClose, onSuccess }: Props) {
-  const [cfg, setCfg] = useState<TableConfig>(DEFAULTS);
+export default function CreateTableModal({ db, schema, onClose, onSuccess, onDefine }: Props) {
+  // In ER Designer (onDefine) mode default IF NOT EXISTS on — the designer's
+  // diff/preview/apply flow historically emitted CREATE TABLE IF NOT EXISTS as a
+  // safety net against re-runs / out-of-band collisions (#688 review). Still a
+  // user-toggleable checkbox.
+  const [cfg, setCfg] = useState<TableConfig>(onDefine ? { ...DEFAULTS, ifNotExists: true } : DEFAULTS);
   const quotedIdentifiersIgnoreCase = useQuotedIdentifiers();
   const { creating, error: createError, setError: setCreateError, submit } = useCreateSubmit();
 
@@ -149,6 +144,11 @@ export default function CreateTableModal({ db, schema, onClose, onSuccess }: Pro
 
   const handleCreate = () => {
     if (!canSubmit) return;
+    if (onDefine) {
+      onDefine(cfg);
+      onClose();
+      return;
+    }
     const sql = buildSql(db, schema, cfg);
     submit(async () => {
       await ExecDDL(sql);
@@ -156,8 +156,6 @@ export default function CreateTableModal({ db, schema, onClose, onSuccess }: Pro
       onClose();
     });
   };
-
-  const preview = buildSql(db, schema, cfg);
 
   const columns: ColumnsType<ColumnDef> = [
     {
@@ -356,7 +354,10 @@ export default function CreateTableModal({ db, schema, onClose, onSuccess }: Pro
           </Checkbox>
         </Space>
 
-        <SqlPreview sql={preview} />
+        {/* In onDefine (ER Designer) mode the real SQL is assembled later by the
+            designer's diff builder — with a table-level PRIMARY KEY and the final
+            schema — so a buildSql preview here would be misleading. Hidden. */}
+        {!onDefine && <SqlPreview sql={buildSql(db, schema, cfg)} />}
       </Form>
     </CreateModalShell>
   );

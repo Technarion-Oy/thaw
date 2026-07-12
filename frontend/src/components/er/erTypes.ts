@@ -2,6 +2,7 @@
 // @thaw-domain: ER Designer
 
 import { SNOWFLAKE_DATA_TYPES, SNOWFLAKE_DATA_TYPE_NAMES } from "../../generated/snowflakeDataTypes";
+import type { TableOptions } from "../shared/tableDdl";
 
 export interface DesignerColumn {
   id: string;
@@ -18,6 +19,12 @@ export interface DesignerTable {
   schema: string;
   name: string;
   columns: DesignerColumn[];
+  /**
+   * Table-level CREATE options captured from the Create Table modal for a
+   * brand-new table (#615). Absent for tables loaded from Snowflake or added
+   * inline — those fall back to `CREATE TABLE IF NOT EXISTS` with no options.
+   */
+  options?: TableOptions;
 }
 
 /**
