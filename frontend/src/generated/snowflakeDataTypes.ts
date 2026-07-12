@@ -43,6 +43,9 @@ export const SNOWFLAKE_DATA_TYPES: readonly SnowflakeDataType[] = [
   { name: "TIMESTAMP_LTZ", paramHint: "(scale)", category: "datetime" },
   { name: "TIMESTAMP_NTZ", paramHint: "(scale)", category: "datetime" },
   { name: "TIMESTAMP_TZ", paramHint: "(scale)", category: "datetime" },
+  { name: "TIMESTAMPLTZ", paramHint: "(scale)", category: "datetime" },
+  { name: "TIMESTAMPNTZ", paramHint: "(scale)", category: "datetime" },
+  { name: "TIMESTAMPTZ", paramHint: "(scale)", category: "datetime" },
   { name: "VARIANT", paramHint: "", category: "semi_structured" },
   { name: "OBJECT", paramHint: "(name type, ...)", category: "semi_structured" },
   { name: "ARRAY", paramHint: "(element_type)", category: "semi_structured" },
@@ -50,6 +53,7 @@ export const SNOWFLAKE_DATA_TYPES: readonly SnowflakeDataType[] = [
   { name: "GEOGRAPHY", paramHint: "", category: "geospatial" },
   { name: "GEOMETRY", paramHint: "", category: "geospatial" },
   { name: "VECTOR", paramHint: "(element_type, dimension)", category: "vector" },
+  { name: "FILE", paramHint: "", category: "file" },
 ];
 
 /** Flat list of canonical data type names. */

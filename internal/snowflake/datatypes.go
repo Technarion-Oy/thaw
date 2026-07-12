@@ -75,6 +75,8 @@ const (
 	CategoryGeospatial DataTypeCategory = "geospatial"
 	// CategoryVector — VECTOR.
 	CategoryVector DataTypeCategory = "vector"
+	// CategoryFile — FILE (references to unstructured-data files).
+	CategoryFile DataTypeCategory = "file"
 )
 
 // ── DataTypeInfo ──────────────────────────────────────────────────────────────
@@ -133,6 +135,10 @@ var snowflakeDataTypes = []DataTypeInfo{
 	{Name: "TIMESTAMP_LTZ", Kind: KindFracSeconds, Category: CategoryDatetime, ParamHint: "(scale)"},
 	{Name: "TIMESTAMP_NTZ", Kind: KindFracSeconds, Category: CategoryDatetime, ParamHint: "(scale)"},
 	{Name: "TIMESTAMP_TZ", Kind: KindFracSeconds, Category: CategoryDatetime, ParamHint: "(scale)"},
+	// No-underscore TIMESTAMP synonyms (documented official forms).
+	{Name: "TIMESTAMPLTZ", Kind: KindFracSeconds, Category: CategoryDatetime, ParamHint: "(scale)"},
+	{Name: "TIMESTAMPNTZ", Kind: KindFracSeconds, Category: CategoryDatetime, ParamHint: "(scale)"},
+	{Name: "TIMESTAMPTZ", Kind: KindFracSeconds, Category: CategoryDatetime, ParamHint: "(scale)"},
 	// ── Semi-structured ──────────────────────────────────────────────────
 	{Name: "VARIANT", Kind: KindNoParams, Category: CategorySemiStructured},
 	{Name: "OBJECT", Kind: KindStructuredObject, Category: CategorySemiStructured, ParamHint: "(name type, ...)"},
@@ -144,6 +150,8 @@ var snowflakeDataTypes = []DataTypeInfo{
 	{Name: "GEOMETRY", Kind: KindNoParams, Category: CategoryGeospatial},
 	// ── Vector ───────────────────────────────────────────────────────────
 	{Name: "VECTOR", Kind: KindVector, Category: CategoryVector, ParamHint: "(element_type, dimension)"},
+	// ── File ─────────────────────────────────────────────────────────────
+	{Name: "FILE", Kind: KindNoParams, Category: CategoryFile},
 }
 
 // dataTypeMap is a fast lookup by canonical upper-case name, built once at init.

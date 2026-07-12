@@ -581,6 +581,30 @@ create table my_table (
 			sql:           `CREATE TABLE t (tags ARRAY, metadata OBJECT);`,
 			expectedError: "",
 		},
+		{
+			// Issue #711: no-underscore TIMESTAMP synonyms in a cast.
+			name:          "Valid TIMESTAMP synonym in shorthand cast",
+			sql:           `SELECT '2020-01-01'::TIMESTAMPNTZ;`,
+			expectedError: "",
+		},
+		{
+			// Issue #711: no-underscore TIMESTAMP synonyms in a CREATE TABLE col def.
+			name:          "Valid TIMESTAMP synonyms in CREATE TABLE",
+			sql:           `CREATE TABLE t (a TIMESTAMPNTZ, b TIMESTAMPLTZ, c TIMESTAMPTZ);`,
+			expectedError: "",
+		},
+		{
+			// Issue #711: no-underscore TIMESTAMP synonym in a RETURNS clause.
+			name:          "Valid TIMESTAMP synonym in RETURNS",
+			sql:           `CREATE FUNCTION f() RETURNS TIMESTAMPTZ AS $$ SELECT CURRENT_TIMESTAMP() $$;`,
+			expectedError: "",
+		},
+		{
+			// Issue #711: FILE data type for unstructured data.
+			name:          "Valid FILE type in CREATE TABLE",
+			sql:           `CREATE TABLE images_table (img FILE);`,
+			expectedError: "",
+		},
 	}
 
 	for _, tt := range tests {
