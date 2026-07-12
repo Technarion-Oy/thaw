@@ -110,12 +110,20 @@ func ValidateAntiPatterns(sql string, stmtRanges []StatementRange) []DiagMarker 
 		// ── Block-level transaction tracking ──────────────────────────────
 		switch firstTok {
 		case "BEGIN":
-			// Skip anonymous scripting blocks (BEGIN followed by LET, IF, etc.).
+			// A transaction BEGIN is bare `BEGIN` or `BEGIN {WORK|TRANSACTION|NAME …}`.
+			// Anything else is an anonymous scripting block whose body opens with a
+			// statement (LET/IF/FOR/…, or DML/DDL such as INSERT/SELECT). SplitRanges
+			// glues the block's first inner statement onto the BEGIN (e.g.
+			// `BEGIN INSERT …`), so a scripting-verb blacklist missed DML/DDL-opening
+			// blocks and mis-counted them as open transactions. Whitelist the
+			// transaction forms instead.
 			sig := sigTokens(stripped)
 			if len(sig) >= 2 {
 				u := tokUpper(sig[1], stripped)
-				if u == "LET" || u == "IF" || u == "FOR" || u == "WHILE" || u == "LOOP" ||
-					u == "DECLARE" || u == "RETURN" || u == "CASE" || u == "CALL" {
+				// u == "" is a non-word token (e.g. the trailing `;` of a bare
+				// `BEGIN;` transaction) — those stay transactions. Only a real
+				// statement verb after BEGIN marks a scripting block.
+				if u != "" && u != "WORK" && u != "TRANSACTION" && u != "NAME" {
 					continue // scripting block, not a transaction
 				}
 			}
@@ -170,6 +178,9 @@ var knownCortexFunctions = map[string]bool{
 	"COMPLETE": true, "EXTRACT_ANSWER": true, "SENTIMENT": true, "SUMMARIZE": true,
 	"TRANSLATE": true, "CLASSIFY_TEXT": true, "EMBED_TEXT_768": true, "EMBED_TEXT_1024": true,
 	"FINETUNE": true, "SEARCH_PREVIEW": true, "TRY_COMPLETE": true,
+	"PARSE_DOCUMENT": true, "COUNT_TOKENS": true, "ENTITY_SENTIMENT": true,
+	"SPLIT_TEXT_RECURSIVE_CHARACTER": true, "SPLIT_TEXT_MARKDOWN_HEADER": true,
+	"AGENT_RUN": true, "DATA_AGENT_RUN": true,
 }
 
 // checkLateralFlattenTypo flags `LATERALFLATTEN` (missing space).
@@ -205,7 +216,9 @@ func checkFlattenWithoutLateral(rawText, stripped string, r StatementRange) []Di
 		if i > 0 && tokUpper(sig[i-1], stripped) == "LATERAL" {
 			hasLateralFlatten = true
 		}
-		if i > 0 {
+		// Only a FLATTEN *call* (FLATTEN followed by `(`) is a table function; a bare
+		// `flatten` after a comma/FROM is just a column/table named flatten.
+		if i > 0 && i+1 < len(sig) && sig[i+1].Kind == sqltok.LParen {
 			prevU := tokUpper(sig[i-1], stripped)
 			if prevU == "FROM" || prevU == "JOIN" || sig[i-1].Kind == sqltok.Comma {
 				hasFlattenFromJoin = true
@@ -244,6 +257,13 @@ func checkVariantPathColon(rawText string, r StatementRange) []DiagMarker {
 	var out []DiagMarker
 	sig := sigTokens(rawText)
 	for i := 0; i+4 < len(sig); i++ {
+		// A `payload.x.y` right after FROM/JOIN is a qualified object name
+		// (db.schema.table), not a variant-path traversal — don't flag it.
+		if i > 0 {
+			if prev := tokUpper(sig[i-1], rawText); prev == "FROM" || prev == "JOIN" {
+				continue
+			}
+		}
 		if sig[i].Kind == sqltok.Identifier && sig[i+1].Kind == sqltok.Dot &&
 			sig[i+2].Kind == sqltok.Identifier && sig[i+3].Kind == sqltok.Dot &&
 			sig[i+4].Kind == sqltok.Identifier &&
@@ -267,9 +287,25 @@ func checkVariantPathColon(rawText string, r StatementRange) []DiagMarker {
 // checkQualifyPlacement flags a QUALIFY clause that appears after ORDER BY.
 func checkQualifyPlacement(rawText, stripped string, r StatementRange) []DiagMarker {
 	sig := sigTokens(stripped)
+	// Only a *top-level* ORDER BY out-orders QUALIFY. An ORDER BY nested inside a
+	// window's OVER (…) or a subquery is unrelated to statement clause order, so
+	// track paren depth and consider depth-0 matches only — otherwise the canonical
+	// `… ROW_NUMBER() OVER (ORDER BY b) … QUALIFY rn = 1` false-positives.
 	orderByIdx := -1
-	for i := 0; i+1 < len(sig); i++ {
-		if tokUpper(sig[i], stripped) == "ORDER" && tokUpper(sig[i+1], stripped) == "BY" {
+	depth := 0
+	for i := 0; i < len(sig); i++ {
+		switch sig[i].Kind {
+		case sqltok.LParen:
+			depth++
+			continue
+		case sqltok.RParen:
+			if depth > 0 {
+				depth--
+			}
+			continue
+		}
+		if depth == 0 && i+1 < len(sig) &&
+			tokUpper(sig[i], stripped) == "ORDER" && tokUpper(sig[i+1], stripped) == "BY" {
 			orderByIdx = i
 			break
 		}
@@ -278,8 +314,19 @@ func checkQualifyPlacement(rawText, stripped string, r StatementRange) []DiagMar
 		return nil
 	}
 	hasQualifyAfter := false
+	depth = 0
 	for i := orderByIdx + 2; i < len(sig); i++ {
-		if tokUpper(sig[i], stripped) == "QUALIFY" {
+		switch sig[i].Kind {
+		case sqltok.LParen:
+			depth++
+			continue
+		case sqltok.RParen:
+			if depth > 0 {
+				depth--
+			}
+			continue
+		}
+		if depth == 0 && tokUpper(sig[i], stripped) == "QUALIFY" {
 			hasQualifyAfter = true
 			break
 		}
@@ -396,7 +443,11 @@ func checkStrayAfterTableRef(sig []sqltok.Token, sql string, r StatementRange) [
 		if j < len(sig) && tokUpper(sig[j], sql) == "AS" {
 			hadAS = true
 			j++
-			if j < len(sig) && isAliasTok(sig[j]) {
+			// After an explicit AS the next token is unambiguously the alias, so a
+			// non-reserved keyword (KEY, FIRST, TYPE, …) is legal here even though it
+			// tokenizes as Keyword. isAliasTok stays strict for the implicit-alias
+			// branch below (it must not swallow PIVOT/AT/ASOF clause keywords).
+			if j < len(sig) && isAliasWord(sig[j], sql) {
 				j++
 				aliasConsumed = true
 			}
@@ -434,7 +485,9 @@ func checkUnknownCortexFunc(rawText string, r StatementRange) []DiagMarker {
 		if tokUpper(sig[i], rawText) == "SNOWFLAKE" && sig[i+1].Kind == sqltok.Dot &&
 			tokUpper(sig[i+2], rawText) == "CORTEX" && sig[i+3].Kind == sqltok.Dot &&
 			isIdent(sig[i+4]) && sig[i+5].Kind == sqltok.LParen {
-			name := strings.ToUpper(sig[i+4].Text(rawText))
+			// normIdent strips a quoted-identifier's double quotes, so
+			// SNOWFLAKE.CORTEX."COMPLETE"(…) resolves to COMPLETE, not "COMPLETE".
+			name := normIdent(sig[i+4].Text(rawText), true)
 			if !knownCortexFunctions[name] {
 				start, end := sig[i], sig[i+4]
 				match := rawText[start.Start:end.End]
@@ -445,7 +498,8 @@ func checkUnknownCortexFunc(rawText string, r StatementRange) []DiagMarker {
 					StartLineNumber: line, StartColumn: col,
 					EndLineNumber: line, EndColumn: col + len(match),
 					Message: "Unknown Cortex function '" + sig[i+4].Text(rawText) + "'. Known functions: COMPLETE, EXTRACT_ANSWER, " +
-						"SENTIMENT, SUMMARIZE, TRANSLATE, CLASSIFY_TEXT, EMBED_TEXT_768, EMBED_TEXT_1024, FINETUNE, SEARCH_PREVIEW, TRY_COMPLETE.",
+						"SENTIMENT, SUMMARIZE, TRANSLATE, CLASSIFY_TEXT, EMBED_TEXT_768, EMBED_TEXT_1024, FINETUNE, SEARCH_PREVIEW, TRY_COMPLETE, " +
+						"PARSE_DOCUMENT, COUNT_TOKENS, ENTITY_SENTIMENT, SPLIT_TEXT_RECURSIVE_CHARACTER, SPLIT_TEXT_MARKDOWN_HEADER, AGENT_RUN, DATA_AGENT_RUN.",
 					Severity: SeverityWarning,
 				})
 			}
@@ -839,7 +893,10 @@ func validateAsofJoinClauses(stripped string, r StatementRange) []DiagMarker {
 		}
 
 		// 2. Check for invalid USING clause (plain USING, not USING FUNCTION).
-		if hasUsingClauseTok(scope, clean, hasUsingFunction) {
+		//    Docs allow `MATCH_CONDITION (…) [ ON … | USING (…) ]`, so a USING that
+		//    follows MATCH_CONDITION is legal — only a USING standing in *for* the
+		//    match condition is flagged.
+		if hasUsingClauseTok(scope, clean, hasUsingFunction, hasMatchCondition) {
 			markers = append(markers, diagMarkerSpan(r,
 				"USING clause is not valid with ASOF JOIN. Use MATCH_CONDITION instead."))
 			flaggedOnOrUsing = true
@@ -901,10 +958,15 @@ func hasOnClauseTok(scope []sqltok.Token, sql string, hasMatchCondition bool) bo
 }
 
 // hasUsingClauseTok checks if USING ( appears at the top level, and it's not
-// the USING (func(...)) function form.
-func hasUsingClauseTok(scope []sqltok.Token, sql string, hasUsingFunction bool) bool {
+// the USING (func(...)) function form, nor a USING that follows MATCH_CONDITION
+// (where it is a valid equi-join key list). Mirrors hasOnClauseTok.
+func hasUsingClauseTok(scope []sqltok.Token, sql string, hasUsingFunction, hasMatchCondition bool) bool {
 	if hasUsingFunction {
 		return false
+	}
+	mcIdx := -1
+	if hasMatchCondition {
+		mcIdx = findKWLParen(scope, sql, "MATCH_CONDITION")
 	}
 	depth := 0
 	for i := 0; i < len(scope); i++ {
@@ -918,6 +980,9 @@ func hasUsingClauseTok(scope []sqltok.Token, sql string, hasUsingFunction bool) 
 		default:
 			if depth == 0 && tokUpper(scope[i], sql) == "USING" &&
 				i+1 < len(scope) && scope[i+1].Kind == sqltok.LParen {
+				if mcIdx >= 0 && i > mcIdx {
+					continue
+				}
 				return true
 			}
 		}
