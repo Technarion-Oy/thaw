@@ -286,8 +286,9 @@ var sqlStmtKeywords = map[string]bool{
 	"BEGIN": true, "COMMIT": true, "ROLLBACK": true, "SAVEPOINT": true,
 	// Execution
 	"CALL": true, "EXECUTE": true, "RETURN": true,
-	// Data loading
+	// Data loading (LS/RM are the documented abbreviations of LIST/REMOVE)
 	"COPY": true, "PUT": true, "GET": true, "LIST": true, "REMOVE": true,
+	"LS": true, "RM": true,
 	// Snowflake scripting
 	"DECLARE": true, "LET": true, "FOR": true, "WHILE": true, "IF": true,
 	"CASE": true, "RAISE": true, "END": true, "LOOP": true,
@@ -1009,6 +1010,13 @@ func validateSyntaxScope(src string, baseLine, baseCol int, inScript bool, add f
 			i++
 
 		case sqltok.Semicolon:
+			// Paren balance is per-statement: flush/report any parens left open
+			// by this statement so a stray ')' in the next one can't silently pop
+			// them (cross-statement leak).
+			for _, open := range parenStack {
+				add("Unclosed '"+open.char+"'", open.line, open.col, open.line, open.col+1)
+			}
+			parenStack = parenStack[:0]
 			atStart = true
 			i++
 

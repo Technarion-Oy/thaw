@@ -331,6 +331,27 @@ func TestValidateSyntax(t *testing.T) {
 			},
 		},
 		{
+			// RM/LS are the documented abbreviations of REMOVE/LIST (#706).
+			name: "RM stage-file abbreviation is clean",
+			sql:  "RM @mystage/file.csv;",
+			want: nil,
+		},
+		{
+			name: "LS stage abbreviation is clean",
+			sql:  "LS @mystage;",
+			want: nil,
+		},
+		{
+			// Paren balance is per-statement: a '(' left open by statement 1 must
+			// not be silently popped by the stray ')' of statement 2 (#706).
+			name: "Paren balance does not leak across statements",
+			sql:  "SELECT (1;\nSELECT 2);",
+			want: []DiagMarker{
+				{StartLineNumber: 1, StartColumn: 8, EndLineNumber: 1, EndColumn: 9, Message: "Unclosed '('", Severity: 8},
+				{StartLineNumber: 2, StartColumn: 9, EndLineNumber: 2, EndColumn: 10, Message: "Unmatched ')'", Severity: 8},
+			},
+		},
+		{
 			name: "Snowflake scripting valid",
 			sql:  "$$\nBEGIN\n  LET x := 1;\nEND;\n$$",
 			want: nil,
