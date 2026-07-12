@@ -29,7 +29,8 @@ context-menu "Properties" item.
   `INFORMATION_SCHEMA.TAG_REFERENCES` read; inherited rows shown non-removable)
 - `ListExternalVolumes` / `ListIntegrations("CATALOG")` / `ListComputePools` /
   `ListWarehouses` — `PickerRow` option lists
-- `ListSchemas(db)` — sibling targets for `SWAP WITH` (current schema filtered out)
+- `ListUserSchemas(db)` — sibling targets for `SWAP WITH` (excludes the read-only
+  INFORMATION_SCHEMA; current schema also filtered out)
 
 ## Gotchas
 

@@ -17,7 +17,7 @@ import {
 import {
   GetObjectProperties, AlterSchema, GetSchemaParameters,
   ListExternalVolumes, ListIntegrations, ListComputePools, ListWarehouses,
-  ListSchemas, GetObjectTagReferences,
+  ListUserSchemas, GetObjectTagReferences,
 } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 import TagsRow, { EditableTag } from "../shared/TagsRow";
@@ -317,8 +317,9 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
   useEffect(() => { reloadTags(); }, [reloadTags]);
 
   // Sibling schemas in the same database, for the SWAP WITH target picker.
+  // ListUserSchemas excludes the read-only INFORMATION_SCHEMA (not swappable).
   useEffect(() => {
-    ListSchemas(db)
+    ListUserSchemas(db)
       .then((s) => setSiblings((s ?? []).filter((n) => n.toUpperCase() !== name.toUpperCase())))
       .catch(() => setSiblings([]));
   }, [db, name]);
