@@ -53,7 +53,9 @@ var (
 //
 //  1. A pre-scan that builds a local column cache from CREATE TABLE statements
 //     in the script (so subsequent INSERT or REFERENCES can find columns even
-//     if the table is not yet in Snowflake).
+//     if the table is not yet in Snowflake). ALTER TABLE … ADD [COLUMN] effects
+//     are merged into that cache so later references to added columns resolve
+//     (issue #715).
 //  2. Column validation for INSERT column lists:
 //     INSERT INTO t (col1, col2) VALUES (...)
 //  3. Column validation for FK REFERENCES column lists inside CREATE TABLE:
@@ -89,6 +91,11 @@ func ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {
 
 		rawPath, parenOff, ok := matchCreateTablePre(sig, raw)
 		if !ok {
+			// Apply ALTER TABLE … ADD [COLUMN] to tables already created in-script
+			// so later INSERT/SELECT can find the added columns (issue #715).
+			if aPath, aCols, aok := parseAlterAddColumns(raw, ic); aok {
+				applyAlterAddToLocalCache(aPath, aCols, localColCache, ic)
+			}
 			continue
 		}
 		parts := extractIdentParts(rawPath, ic)
@@ -328,6 +335,91 @@ func parseFirstIdentAsCol(def string, ic bool) (ColInfo, bool) {
 		break // first non-WS token is not an identifier
 	}
 	return ColInfo{}, false
+}
+
+// nonColumnAddKw are the words that begin a non-column ALTER TABLE … ADD clause
+// (ADD CONSTRAINT / PRIMARY KEY / …). A parsed "column" whose name is one of
+// these is dropped so constraints aren't cached as columns. COLUMN is included
+// so a repeated "ADD COLUMN a INT, COLUMN b INT" form doesn't cache "COLUMN".
+var nonColumnAddKw = map[string]bool{
+	"CONSTRAINT": true, "PRIMARY": true, "FOREIGN": true,
+	"UNIQUE": true, "CHECK": true, "COLUMN": true,
+}
+
+// parseAlterAddColumns matches
+//
+//	ALTER TABLE [IF EXISTS] <name> ADD [COLUMN] [IF NOT EXISTS] <col> <type> [, …]
+//
+// and returns the table's ident-path text and the added columns. Non-column ADD
+// clauses (CONSTRAINT / PRIMARY KEY / …) yield no columns. ok is false when the
+// statement is not an ALTER TABLE … ADD that introduces at least one column.
+func parseAlterAddColumns(raw string, ic bool) (tablePath string, cols []ColInfo, ok bool) {
+	tokens := sqltok.Tokenize(raw)
+	sig := sigToks(tokens)
+	if !kwAt(sig, raw, 0, "ALTER") || !kwAt(sig, raw, 1, "TABLE") {
+		return "", nil, false
+	}
+	i := 2
+	if kwAt(sig, raw, i, "IF") && kwAt(sig, raw, i+1, "EXISTS") {
+		i += 2
+	}
+	path, pos := readIdentPath(sig, raw, i)
+	if path == "" || !kwAt(sig, raw, pos, "ADD") {
+		return "", nil, false
+	}
+	pos++
+	if kwAt(sig, raw, pos, "COLUMN") {
+		pos++
+	}
+	if kwAt(sig, raw, pos, "IF") && kwAt(sig, raw, pos+1, "NOT") && kwAt(sig, raw, pos+2, "EXISTS") {
+		pos += 3
+	}
+	if pos >= len(sig) {
+		return "", nil, false
+	}
+	// The column-def block is everything from the first def token to end of stmt.
+	// ponytail: reuse the CREATE TABLE column splitter — it already handles commas,
+	// quotes, comments and nested parens; then drop any non-column ADD clauses.
+	for _, c := range parseCreateTableColDefs(raw[sig[pos].Start:], ic) {
+		if nonColumnAddKw[strings.ToUpper(c.Name)] {
+			continue
+		}
+		cols = append(cols, c)
+	}
+	if len(cols) == 0 {
+		return "", nil, false
+	}
+	return path, cols, true
+}
+
+// applyAlterAddToLocalCache appends the columns added by an ALTER TABLE … ADD
+// COLUMN to the in-script column cache, but only for tables already created
+// in-script (whose keys already exist) — never inventing a partial cache entry
+// for a table that lives only in Snowflake metadata.
+func applyAlterAddToLocalCache(tablePath string, cols []ColInfo, localColCache map[string][]ColInfo, ic bool) {
+	parts := extractIdentParts(tablePath, ic)
+	if len(parts) == 0 {
+		return
+	}
+	tableName := parts[len(parts)-1]
+	keys := []string{bcrCacheKey("", "", tableName)}
+	if len(parts) >= 2 {
+		keys = append(keys, bcrCacheKey("", parts[len(parts)-2], tableName))
+	}
+	if len(parts) >= 3 {
+		keys = append(keys, bcrCacheKey(parts[len(parts)-3], parts[len(parts)-2], tableName))
+	}
+	for _, k := range keys {
+		existing, ok := localColCache[k]
+		if !ok {
+			continue
+		}
+		// Fresh slice: CREATE stores the same backing array under several keys.
+		merged := make([]ColInfo, 0, len(existing)+len(cols))
+		merged = append(merged, existing...)
+		merged = append(merged, cols...)
+		localColCache[k] = merged
+	}
 }
 
 // lookupColsForRef finds the ColInfo slice for a table identified by

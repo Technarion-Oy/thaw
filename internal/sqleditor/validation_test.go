@@ -61,6 +61,14 @@ func TestValidateBareColumnRefs_Valid(t *testing.T) {
 		"CREATE TABLE t6 (\n  \"col\"\"name\" INT,\n  other INT\n);\nINSERT INTO t6 (\"col\"\"name\", other) SELECT 1, 2;",
 		// Column after a DEFAULT with escaped single-quote must still be cached.
 		"CREATE TABLE t7 (\n  greeting VARCHAR DEFAULT 'it''s',\n  id INT\n);\nINSERT INTO t7 (greeting, id) SELECT 'hi', 1;",
+
+		// Issue #715: ALTER TABLE … ADD COLUMN must update the in-script column
+		// cache so later INSERT/SELECT can find the added column.
+		"CREATE TABLE loc_t (a INT);\nALTER TABLE loc_t ADD COLUMN b INT;\nINSERT INTO loc_t (a, b) VALUES (1, 2);\nSELECT b FROM loc_t;",
+		// Multi-column ADD (with the optional COLUMN keyword omitted).
+		"CREATE TABLE loc_t2 (a INT);\nALTER TABLE loc_t2 ADD b INT, c INT;\nINSERT INTO loc_t2 (a, b, c) VALUES (1, 2, 3);",
+		// ADD COLUMN IF NOT EXISTS.
+		"CREATE TABLE loc_t3 (a INT);\nALTER TABLE loc_t3 ADD COLUMN IF NOT EXISTS b INT;\nSELECT a, b FROM loc_t3;",
 	}
 
 	req := ValidateBareColsRequest{
@@ -125,6 +133,15 @@ func TestValidateBareColumnRefs_Invalid(t *testing.T) {
 		{"CREATE VIEW bare ref to quoted lowercase col",
 			"CREATE OR REPLACE TABLE RAW_CUSTOMERS1 (\n  \"customer_id\" INT,\n  FIRST_NAME VARCHAR,\n  LAST_NAME VARCHAR,\n  REGISTRATION_DATE DATE,\n  STATUS VARCHAR\n);\n\nCREATE OR REPLACE VIEW VW_CLEAN_CUSTOMERS AS\nSELECT\n  customer_id,\n  UPPER(FIRST_NAME || ' ' || LAST_NAME) AS FULL_NAME,\n  REGISTRATION_DATE\nFROM RAW_CUSTOMERS1\nWHERE STATUS = 'ACTIVE';",
 			[]string{"CUSTOMER_ID"}},
+		// Issue #715: after ALTER ADD COLUMN b, a genuinely missing column c is
+		// still flagged (the cache merge must not suppress real errors).
+		{"ALTER add column still flags missing col",
+			"CREATE TABLE loc_t (a INT);\nALTER TABLE loc_t ADD COLUMN b INT;\nSELECT c FROM loc_t;",
+			[]string{"c"}},
+		// ADD CONSTRAINT must not be cached as a column named CONSTRAINT/PK.
+		{"ALTER add constraint is not cached as a column",
+			"CREATE TABLE loc_t (a INT);\nALTER TABLE loc_t ADD CONSTRAINT pk PRIMARY KEY (a);\nSELECT pk FROM loc_t;",
+			[]string{"pk"}},
 	}
 
 	req := ValidateBareColsRequest{
