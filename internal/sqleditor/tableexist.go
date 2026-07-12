@@ -27,22 +27,22 @@ type SchemaEntry struct {
 
 // ValidateTablesExistRequest is the input to ValidateTablesExist.
 type ValidateTablesExistRequest struct {
-	SQL                         string           `json:"sql"`
-	StmtRanges                  []StatementRange `json:"stmtRanges"`
-	ResolvedRefs                []ResolvedRef    `json:"resolvedRefs"`
-	KnownDatabases              []string         `json:"knownDatabases"`
-	KnownSchemas                []SchemaEntry    `json:"knownSchemas"`
+	SQL            string           `json:"sql"`
+	StmtRanges     []StatementRange `json:"stmtRanges"`
+	ResolvedRefs   []ResolvedRef    `json:"resolvedRefs"`
+	KnownDatabases []string         `json:"knownDatabases"`
+	KnownSchemas   []SchemaEntry    `json:"knownSchemas"`
 	// SessionDatabase/SessionSchema are the active session context (the
 	// USE'd database/schema), NOT the catalog. They — plus in-script
 	// USE/CREATE effects — decide whether an unqualified name has a
 	// database/schema to resolve against ("No database selected" warnings).
 	// KnownDatabases/KnownSchemas are the full catalog, used only for
 	// existence checks on qualified names.
-	SessionDatabase string `json:"sessionDatabase"`
-	SessionSchema   string `json:"sessionSchema"`
-	QuotedIdentifiersIgnoreCase bool             `json:"quotedIdentifiersIgnoreCase"`
-	DroppedDatabases            []string         `json:"droppedDatabases"`
-	DroppedSchemas              []SchemaEntry    `json:"droppedSchemas"`
+	SessionDatabase             string        `json:"sessionDatabase"`
+	SessionSchema               string        `json:"sessionSchema"`
+	QuotedIdentifiersIgnoreCase bool          `json:"quotedIdentifiersIgnoreCase"`
+	DroppedDatabases            []string      `json:"droppedDatabases"`
+	DroppedSchemas              []SchemaEntry `json:"droppedSchemas"`
 	// DroppedTables uses ResolvedRef (Alias field is ignored).
 	DroppedTables []ResolvedRef `json:"droppedTables"`
 	// AllKnownTables is the full set of resolved table references available in

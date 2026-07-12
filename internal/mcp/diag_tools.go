@@ -179,12 +179,14 @@ func validateSQLSchemaAware(ctx context.Context, client *snowflake.Client, sql s
 
 	// Validate table existence.
 	tableExistMarkers := sqleditor.ValidateTablesExist(sqleditor.ValidateTablesExistRequest{
-		SQL:            sql,
-		StmtRanges:     stmtRanges,
-		ResolvedRefs:   resolvedRefs,
-		KnownDatabases: knownDatabases,
-		KnownSchemas:   knownSchemas,
-		AllKnownTables: storeObjsToResolvedRefs(storeObjects),
+		SQL:             sql,
+		StmtRanges:      stmtRanges,
+		ResolvedRefs:    resolvedRefs,
+		KnownDatabases:  knownDatabases,
+		KnownSchemas:    knownSchemas,
+		SessionDatabase: sc.Database,
+		SessionSchema:   sc.Schema,
+		AllKnownTables:  storeObjsToResolvedRefs(storeObjects),
 	})
 
 	// Gather column info for resolved tables.

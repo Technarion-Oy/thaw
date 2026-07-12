@@ -1152,6 +1152,17 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     window.addEventListener("thaw:refresh-diagnostics", refreshDiagnosticsHandler);
     editor.onDidDispose(() => window.removeEventListener("thaw:refresh-diagnostics", refreshDiagnosticsHandler));
 
+    // Re-run diagnostics when the active session database/schema changes via the
+    // toolbar dropdown (not just via editing SQL text), so a stale "No database
+    // selected" marker clears — or a newly-relevant one appears — immediately. (#689)
+    const unsubSession = useSessionStore.subscribe((s, prev) => {
+      if (s.database !== prev.database || s.schema !== prev.schema) {
+        if (diagTimerRef.current) clearTimeout(diagTimerRef.current);
+        diagTimerRef.current = setTimeout(runDiagnostics, 0);
+      }
+    });
+    editor.onDidDispose(() => unsubSession());
+
     // ── Git gutter decorators ────────────────────────────────────────────────
     const refreshGitGutter = async () => {
       const model = editor.getModel();
