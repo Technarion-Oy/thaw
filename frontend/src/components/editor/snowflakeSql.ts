@@ -203,8 +203,9 @@ export const snowflakeMonarchLanguage = {
       // Whitespace
       [/[ \t\r\n]+/, "white"],
 
-      // Line comment (Snowflake: both -- and //)
-      [/(--|\/\/).*$/, "comment"],
+      // Line comment (Snowflake: both -- and //). A `//` preceded by `:` or `/`
+      // is a stage-URI scheme (file:///path, s3://, …) in PUT/GET, not a comment.
+      [/(--|(?<![:/])\/\/).*$/, "comment"],
 
       // Block comment
       [/\/\*/, { token: "comment.block", next: "@blockComment" }],
