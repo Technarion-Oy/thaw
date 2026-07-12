@@ -53,6 +53,42 @@ func TestValidateGrammar_FlagsMalformed(t *testing.T) {
 	}
 }
 
+// TestValidateGrammar_MultiLineFailureTokenSpan guards issue #703 (bug 2): when
+// the failure token spans multiple lines (a `$$…$$` block, a multi-line string),
+// the marker end must follow the token onto its last line instead of assuming
+// the span stays on the start line.
+func TestValidateGrammar_MultiLineFailureTokenSpan(t *testing.T) {
+	sql := "SELECT 1;\nEXECUTE IMMEDIATE\n$$\nSELECT 1\n$$"
+	markers := grammarMarkers(sql)
+	if len(markers) != 1 {
+		t.Fatalf("expected 1 marker, got %d: %+v", len(markers), markers)
+	}
+	m := markers[0]
+	if m.StartLineNumber != 3 || m.StartColumn != 1 {
+		t.Errorf("expected start at 3:1 (the `$$` block), got %d:%d", m.StartLineNumber, m.StartColumn)
+	}
+	// The `$$…$$` token ends on line 5; the span must reach it, not stop on line 3.
+	if m.EndLineNumber != 5 || m.EndColumn != 3 {
+		t.Errorf("expected end at 5:3 (end of the multi-line token), got %d:%d", m.EndLineNumber, m.EndColumn)
+	}
+}
+
+// TestValidateGrammar_MarkerSkipsTrailingComment guards issue #703 (bug 3): an
+// EOF-anchored marker must anchor just past the last significant token, not on a
+// trailing line comment the grammar never consumes.
+func TestValidateGrammar_MarkerSkipsTrailingComment(t *testing.T) {
+	sql := "GRANT ROLE r TO -- oops"
+	markers := grammarMarkers(sql)
+	if len(markers) != 1 {
+		t.Fatalf("expected 1 marker, got %d: %+v", len(markers), markers)
+	}
+	// `TO` ends at column 16; the marker must sit there, not at the comment (col 23+).
+	if markers[0].EndColumn > 16 {
+		t.Errorf("expected marker anchored just past `TO` (≤ col 16), got col %d — landed on the trailing comment",
+			markers[0].EndColumn)
+	}
+}
+
 func TestValidateGrammar_RebasesPositionToSecondStatement(t *testing.T) {
 	// First statement valid; second (on line 3) is malformed. The marker must
 	// land on line 3, not line 1.

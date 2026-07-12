@@ -159,6 +159,28 @@ func TestValidateBareColumnRefs_Invalid(t *testing.T) {
 	}
 }
 
+// TestValidateBareColumnRefs_RebasesColumnForMidLineStatement guards issue #703:
+// when a statement begins mid-line (the second here), findTokensLocally must
+// rebase first-line columns to document coordinates, so the marker lands on
+// `wrong_col` (col 18) rather than inside the first statement.
+func TestValidateBareColumnRefs_RebasesColumnForMidLineStatement(t *testing.T) {
+	sql := `SELECT 1; SELECT wrong_col FROM "DB"."SCH"."EMPLOYEES"`
+	req := ValidateBareColsRequest{
+		SQL:          sql,
+		StmtRanges:   GetStatementRanges(sql),
+		ResolvedRefs: getTestRefs(),
+		ColEntries:   getTestColCaches(),
+	}
+	warnings := getWarnings(ValidateBareColumnRefs(req))
+	if len(warnings) != 1 {
+		t.Fatalf("expected 1 warning, got %d: %+v", len(warnings), warnings)
+	}
+	if warnings[0].StartColumn != 18 || warnings[0].EndColumn != 27 {
+		t.Errorf("expected marker at cols 18–27 (over `wrong_col`), got %d–%d",
+			warnings[0].StartColumn, warnings[0].EndColumn)
+	}
+}
+
 // ── 3. ValidateTablesExist Tests ──────────────────────────────────────────────
 
 func TestValidateTablesExist_Valid(t *testing.T) {

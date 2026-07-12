@@ -128,6 +128,7 @@ func ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {
 
 	for _, r := range req.StmtRanges {
 		raw := sqlStmt(req.SQL, r)
+		baseCol := stmtStartCol(req.SQL, r) // doc column of the statement's first char
 		firstTok := getFirstSQLToken(raw)
 
 		if firstTok != "SELECT" && firstTok != "WITH" &&
@@ -144,19 +145,19 @@ func ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {
 		switch firstTok {
 		case "INSERT":
 			markers = append(markers,
-				validateInsertCols(raw, r, req.ResolvedRefs, colInfoCache, localColCache, checkEq, ic)...)
+				validateInsertCols(raw, r, baseCol, req.ResolvedRefs, colInfoCache, localColCache, checkEq, ic)...)
 
 		case "CREATE":
 			markers = append(markers,
-				validateReferencesCols(raw, r, req.ResolvedRefs, colInfoCache, localColCache, checkEq, ic)...)
+				validateReferencesCols(raw, r, baseCol, req.ResolvedRefs, colInfoCache, localColCache, checkEq, ic)...)
 			if isCreateView(raw) {
 				markers = append(markers,
-					validateSelectCols(raw, r, req.ResolvedRefs, colInfoCache, localColCache, checkEq, ic)...)
+					validateSelectCols(raw, r, baseCol, req.ResolvedRefs, colInfoCache, localColCache, checkEq, ic)...)
 			}
 
 		case "SELECT", "WITH":
 			markers = append(markers,
-				validateSelectCols(raw, r, req.ResolvedRefs, colInfoCache, localColCache, checkEq, ic)...)
+				validateSelectCols(raw, r, baseCol, req.ResolvedRefs, colInfoCache, localColCache, checkEq, ic)...)
 		}
 	}
 
@@ -399,7 +400,7 @@ func lookupColsForRefTagged(
 // validateInsertCols validates the explicit column list in an INSERT statement.
 // Only fires when the INSERT names columns: INSERT INTO t (c1, c2) VALUES ...
 func validateInsertCols(
-	raw string, r StatementRange,
+	raw string, r StatementRange, baseCol int,
 	resolvedRefs []ResolvedRef,
 	colInfoCache, localColCache map[string][]ColInfo,
 	checkEq func(string, string) bool, ic bool,
@@ -442,12 +443,12 @@ func validateInsertCols(
 		return nil
 	}
 
-	return colRefMarkers(raw, r, missing, tableName, ic)
+	return colRefMarkers(raw, r, missing, tableName, baseCol, ic)
 }
 
 // validateReferencesCols validates REFERENCES (col) lists inside CREATE TABLE.
 func validateReferencesCols(
-	raw string, r StatementRange,
+	raw string, r StatementRange, baseCol int,
 	resolvedRefs []ResolvedRef,
 	colInfoCache, localColCache map[string][]ColInfo,
 	checkEq func(string, string) bool, ic bool,
@@ -492,7 +493,7 @@ func validateReferencesCols(
 		if len(missing) == 0 {
 			continue
 		}
-		markers = append(markers, colRefMarkers(raw, r, missing, tableName, ic)...)
+		markers = append(markers, colRefMarkers(raw, r, missing, tableName, baseCol, ic)...)
 	}
 	return markers
 }
@@ -705,7 +706,7 @@ func scanAliasedColRefs(clause string, aliasMap map[string]*aliasColSets, ic boo
 // validateSelectCols validates column references in SELECT clauses (and in
 // CREATE VIEW ... AS SELECT).
 func validateSelectCols(
-	raw string, r StatementRange,
+	raw string, r StatementRange, baseCol int,
 	resolvedRefs []ResolvedRef,
 	colInfoCache, localColCache map[string][]ColInfo,
 	checkEq func(string, string) bool, ic bool,
@@ -851,14 +852,14 @@ func validateSelectCols(
 	if noFromClause {
 		label = "query (no FROM clause)"
 	}
-	return colRefMarkers(raw, r, missing, label, ic)
+	return colRefMarkers(raw, r, missing, label, baseCol, ic)
 }
 
 // colRefMarkers locates tokens in raw for each missing column and returns
 // DiagMarker entries (severity 4 = warning).
-func colRefMarkers(raw string, r StatementRange, missing []string, tableLabel string, ic bool) []DiagMarker {
+func colRefMarkers(raw string, r StatementRange, missing []string, tableLabel string, baseCol int, ic bool) []DiagMarker {
 	var markers []DiagMarker
-	for _, t := range findTokensLocally(raw, missing, r.StartLine, ic) {
+	for _, t := range findTokensLocally(raw, missing, r.StartLine, baseCol, ic) {
 		var msg string
 		if t.quoted {
 			msg = `Column '"` + t.name + `"' not found in ` + tableLabel

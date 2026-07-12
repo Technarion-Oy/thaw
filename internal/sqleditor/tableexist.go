@@ -120,6 +120,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 
 	for _, r := range req.StmtRanges {
 		raw := sqlStmt(req.SQL, r)
+		baseCol := stmtStartCol(req.SQL, r) // doc column of the statement's first char
 		tokens := sqltok.Tokenize(raw)
 		sig := sigToks(tokens)
 
@@ -197,12 +198,12 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			switch len(parts) {
 			case 1:
 				if !hasSessionDB && !scriptHasActiveDB {
-					for _, t := range findTokensLocally(raw, []string{parts[0]}, r.StartLine, ic) {
+					for _, t := range findTokensLocally(raw, []string{parts[0]}, r.StartLine, baseCol, ic) {
 						markers = append(markers, diagMarkerAt(t,
 							"No database selected. Cannot create "+objType+" '"+t.name+"'.", 8))
 					}
 				} else if !hasSessionSchema && !scriptHasActiveSchema {
-					for _, t := range findTokensLocally(raw, []string{parts[0]}, r.StartLine, ic) {
+					for _, t := range findTokensLocally(raw, []string{parts[0]}, r.StartLine, baseCol, ic) {
 						markers = append(markers, diagMarkerAt(t,
 							"No schema selected. Cannot create "+objType+" '"+t.name+"'.", 8))
 					}
@@ -214,13 +215,13 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 					if len(rawParts) > 0 {
 						searchToken = normIdent(rawParts[0], ic)
 					}
-					for _, t := range findTokensLocally(raw, []string{searchToken}, r.StartLine, ic) {
+					for _, t := range findTokensLocally(raw, []string{searchToken}, r.StartLine, baseCol, ic) {
 						markers = append(markers, diagMarkerAt(t,
 							"No database selected. Cannot create "+objType+" using schema '"+t.name+"'.", 8))
 					}
 				} else {
 					if !schemaExists(schemaNorm, "", scriptCreatedDbsAndSchemas, req.KnownSchemas, req.ResolvedRefs, checkEq) {
-						for _, t := range findTokensLocally(raw, []string{schemaNorm}, r.StartLine, ic) {
+						for _, t := range findTokensLocally(raw, []string{schemaNorm}, r.StartLine, baseCol, ic) {
 							markers = append(markers, diagMarkerAt(t,
 								"Schema '"+t.name+"' does not exist or is not authorized.", 8))
 						}
@@ -236,7 +237,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 				}
 				dbNorm := parts[0]
 				if !dbExists(dbNorm, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
-					for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, ic) {
+					for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, baseCol, ic) {
 						markers = append(markers, diagMarkerAt(t,
 							"Database '"+t.name+"' does not exist or is not authorized.", 8))
 					}
@@ -256,7 +257,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 					}
 					if hasSchemaDataForDB &&
 						!schemaExistsForDB(dbNorm, schemaNorm, schemaPath, scriptCreatedDbsAndSchemas, req.KnownSchemas, req.ResolvedRefs, checkEq) {
-						for _, t := range findTokensLocally(raw, []string{schemaNorm}, r.StartLine, ic) {
+						for _, t := range findTokensLocally(raw, []string{schemaNorm}, r.StartLine, baseCol, ic) {
 							markers = append(markers, diagMarkerAt(t,
 								"Schema '"+dbNorm+"."+t.name+"' does not exist or is not authorized.", 8))
 						}
@@ -272,7 +273,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			switch len(parts) {
 			case 1:
 				if !hasSessionDB && !scriptHasActiveDB {
-					for _, t := range findTokensLocally(raw, []string{parts[0]}, r.StartLine, ic) {
+					for _, t := range findTokensLocally(raw, []string{parts[0]}, r.StartLine, baseCol, ic) {
 						markers = append(markers, diagMarkerAt(t,
 							"No database selected. Cannot create schema '"+t.name+"'.", 8))
 					}
@@ -285,7 +286,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 						if len(rawParts) > 0 {
 							searchToken = normIdent(rawParts[0], ic)
 						}
-						for _, t := range findTokensLocally(raw, []string{searchToken}, r.StartLine, ic) {
+						for _, t := range findTokensLocally(raw, []string{searchToken}, r.StartLine, baseCol, ic) {
 							markers = append(markers, diagMarkerAt(t,
 								"Database '"+t.name+"' does not exist or is not authorized.", 8))
 						}
@@ -299,7 +300,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			if !hasIfExists && len(req.KnownDatabases) > 0 {
 				dbNorm := normIdent(rawPath, ic)
 				if !dbExists(dbNorm, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
-					for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, ic) {
+					for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, baseCol, ic) {
 						markers = append(markers, diagMarkerAt(t,
 							"Database '"+t.name+"' does not exist or is not authorized.", 8))
 					}
@@ -325,14 +326,14 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 						if len(rawParts) > 0 {
 							searchToken = normIdent(rawParts[0], ic)
 						}
-						for _, t := range findTokensLocally(raw, []string{searchToken}, r.StartLine, ic) {
+						for _, t := range findTokensLocally(raw, []string{searchToken}, r.StartLine, baseCol, ic) {
 							markers = append(markers, diagMarkerAt(t,
 								"Database '"+t.name+"' does not exist or is not authorized.", 8))
 						}
 					} else {
 						schPath := targetDB + "." + targetSch
 						if !schemaExistsForDB(targetDB, targetSch, schPath, scriptCreatedDbsAndSchemas, req.KnownSchemas, req.ResolvedRefs, checkEq) {
-							for _, t := range findTokensLocally(raw, []string{targetSch}, r.StartLine, ic) {
+							for _, t := range findTokensLocally(raw, []string{targetSch}, r.StartLine, baseCol, ic) {
 								markers = append(markers, diagMarkerAt(t,
 									"Schema '"+t.name+"' does not exist or is not authorized.", 8))
 							}
@@ -340,13 +341,13 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 					}
 				} else {
 					if !hasSessionDB && !scriptHasActiveDB {
-						for _, t := range findTokensLocally(raw, []string{targetSch}, r.StartLine, ic) {
+						for _, t := range findTokensLocally(raw, []string{targetSch}, r.StartLine, baseCol, ic) {
 							markers = append(markers, diagMarkerAt(t,
 								"No database selected. Cannot drop schema '"+t.name+"'.", 8))
 						}
 					} else {
 						if !schemaExists(targetSch, "", scriptCreatedDbsAndSchemas, req.KnownSchemas, req.ResolvedRefs, checkEq) {
-							for _, t := range findTokensLocally(raw, []string{targetSch}, r.StartLine, ic) {
+							for _, t := range findTokensLocally(raw, []string{targetSch}, r.StartLine, baseCol, ic) {
 								markers = append(markers, diagMarkerAt(t,
 									"Schema '"+t.name+"' does not exist or is not authorized.", 8))
 							}
@@ -362,7 +363,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			isDropped := isIn(scriptDroppedDbsAndSchemas, dbNorm) ||
 				anyEq(req.DroppedDatabases, dbNorm, checkEq)
 			if !isDropped {
-				for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, ic) {
+				for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, baseCol, ic) {
 					markers = append(markers, diagMarkerAt(t,
 						"Database '"+t.name+"' is not available to undrop.", 8))
 				}
@@ -378,7 +379,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 				isIn(scriptDroppedDbsAndSchemas, path) ||
 				anySchEq(req.DroppedSchemas, targetSch, checkEq)
 			if !isDropped {
-				for _, t := range findTokensLocally(raw, []string{targetSch}, r.StartLine, ic) {
+				for _, t := range findTokensLocally(raw, []string{targetSch}, r.StartLine, baseCol, ic) {
 					markers = append(markers, diagMarkerAt(t,
 						"Schema '"+t.name+"' is not available to undrop.", 8))
 				}
@@ -394,7 +395,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 				isIn(scriptDroppedTables, path) ||
 				anyRefEq(req.DroppedTables, targetTab, checkEq)
 			if !isDropped {
-				for _, t := range findTokensLocally(raw, []string{targetTab}, r.StartLine, ic) {
+				for _, t := range findTokensLocally(raw, []string{targetTab}, r.StartLine, baseCol, ic) {
 					markers = append(markers, diagMarkerAt(t,
 						"Table '"+t.name+"' is not available to undrop.", 8))
 				}
@@ -423,7 +424,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 						}
 						badToken, msgFn := resolveErrorToken(ftTable, ftDB, ftSchema,
 							scriptCreatedDbsAndSchemas, req.KnownDatabases, req.KnownSchemas, req.ResolvedRefs, checkEq)
-						for _, t := range findTokensLocally(raw, []string{badToken}, r.StartLine, ic) {
+						for _, t := range findTokensLocally(raw, []string{badToken}, r.StartLine, baseCol, ic) {
 							markers = append(markers, diagMarkerAt(t, msgFn(t.name), 8))
 						}
 					}
@@ -451,7 +452,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 						}
 						badToken, msgFn := resolveErrorToken(tgtTable, tgtDB, tgtSchema,
 							scriptCreatedDbsAndSchemas, req.KnownDatabases, req.KnownSchemas, req.ResolvedRefs, checkEq)
-						for _, t := range findTokensLocally(raw, []string{badToken}, r.StartLine, ic) {
+						for _, t := range findTokensLocally(raw, []string{badToken}, r.StartLine, baseCol, ic) {
 							markers = append(markers, diagMarkerAt(t, msgFn(t.name), 8))
 						}
 					}
@@ -463,7 +464,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		if u, ok := matchUse(sig, raw); ok && u.kind == "DATABASE" {
 			dbNorm := normIdent(u.ident1, ic)
 			if len(req.KnownDatabases) > 0 && !dbExists(dbNorm, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
-				for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, ic) {
+				for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, baseCol, ic) {
 					markers = append(markers, diagMarkerAt(t,
 						"Database '"+t.name+"' does not exist or is not authorized.", 8))
 				}
@@ -475,14 +476,14 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			dbNorm := normIdent(u.ident1, ic)
 			schNorm := normIdent(u.ident2, ic)
 			if len(req.KnownDatabases) > 0 && !dbExists(dbNorm, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
-				for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, ic) {
+				for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, baseCol, ic) {
 					markers = append(markers, diagMarkerAt(t,
 						"Database '"+t.name+"' does not exist or is not authorized.", 8))
 				}
 			} else {
 				schPath := dbNorm + "." + schNorm
 				if !schemaExistsForDB(dbNorm, schNorm, schPath, scriptCreatedDbsAndSchemas, req.KnownSchemas, req.ResolvedRefs, checkEq) {
-					for _, t := range findTokensLocally(raw, []string{schNorm}, r.StartLine, ic) {
+					for _, t := range findTokensLocally(raw, []string{schNorm}, r.StartLine, baseCol, ic) {
 						markers = append(markers, diagMarkerAt(t,
 							"Schema '"+t.name+"' does not exist or is not authorized.", 8))
 					}
@@ -495,7 +496,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			schNorm := normIdent(u.ident1, ic)
 			if len(req.KnownSchemas) > 0 || anyHasSchema(req.ResolvedRefs) {
 				if !schemaExists(schNorm, "", scriptCreatedDbsAndSchemas, req.KnownSchemas, req.ResolvedRefs, checkEq) {
-					for _, t := range findTokensLocally(raw, []string{schNorm}, r.StartLine, ic) {
+					for _, t := range findTokensLocally(raw, []string{schNorm}, r.StartLine, baseCol, ic) {
 						markers = append(markers, diagMarkerAt(t,
 							"Schema '"+t.name+"' does not exist or is not authorized.", 8))
 					}
@@ -508,14 +509,14 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			dbNorm := normIdent(u.ident1, ic)
 			schNorm := normIdent(u.ident2, ic)
 			if len(req.KnownDatabases) > 0 && !dbExists(dbNorm, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
-				for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, ic) {
+				for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, baseCol, ic) {
 					markers = append(markers, diagMarkerAt(t,
 						"Database '"+t.name+"' does not exist or is not authorized.", 8))
 				}
 			} else {
 				schPath := dbNorm + "." + schNorm
 				if !schemaExistsForDB(dbNorm, schNorm, schPath, scriptCreatedDbsAndSchemas, req.KnownSchemas, req.ResolvedRefs, checkEq) {
-					for _, t := range findTokensLocally(raw, []string{schNorm}, r.StartLine, ic) {
+					for _, t := range findTokensLocally(raw, []string{schNorm}, r.StartLine, baseCol, ic) {
 						markers = append(markers, diagMarkerAt(t,
 							"Schema '"+t.name+"' does not exist or is not authorized.", 8))
 					}
@@ -527,7 +528,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		if u, ok := matchUse(sig, raw); ok && u.kind == "" && u.parts == 1 {
 			dbNorm := normIdent(u.ident1, ic)
 			if len(req.KnownDatabases) > 0 && !dbExists(dbNorm, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
-				for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, ic) {
+				for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, baseCol, ic) {
 					markers = append(markers, diagMarkerAt(t,
 						"Database '"+t.name+"' does not exist or is not authorized.", 8))
 				}
@@ -539,14 +540,14 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		// Runs BEFORE section (d) so a DROP statement is validated against the
 		// pre-drop state (its own drop effect has not been applied yet).
 		markers = append(markers, validateObjectKindRefs(
-			raw, sig, r.StartLine, ic, checkEq, req.KnownObjects,
+			raw, sig, r.StartLine, baseCol, ic, checkEq, req.KnownObjects,
 			req.FetchedObjectSchemas, req.SessionDatabase, req.SessionSchema,
 			scriptCreatedByKind, scriptDroppedByKind)...)
 
 		// ── Kind-implied references (phase 3): CALL, EXECUTE TASK, SET/ADD
 		// <policy>, FORMAT_NAME — the kind is implied by the clause, not spelled. ──
 		markers = append(markers, validateKindImpliedRefs(
-			raw, sig, r.StartLine, ic, checkEq, req.KnownObjects,
+			raw, sig, r.StartLine, baseCol, ic, checkEq, req.KnownObjects,
 			req.FetchedObjectSchemas, req.SessionDatabase, req.SessionSchema,
 			scriptCreatedByKind, scriptDroppedByKind)...)
 
@@ -594,7 +595,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		// GET, LIST, REMOVE, COPY, SELECT … FROM @stg), so it must precede the
 		// SELECT/WITH continue below. ─────────────────────────────────────────
 		markers = append(markers, validateStageRefs(
-			raw, sig, r.StartLine, ic, checkEq, objectsOfKind(req.KnownObjects, "STAGE"),
+			raw, sig, r.StartLine, baseCol, ic, checkEq, objectsOfKind(req.KnownObjects, "STAGE"),
 			req.FetchedObjectSchemas, req.SessionDatabase, req.SessionSchema,
 			scriptCreatedByKind["stage"], scriptDroppedByKind["stage"])...)
 
@@ -712,7 +713,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		for k := range missingTokens {
 			unknown = append(unknown, k)
 		}
-		for _, t := range findTokensLocally(raw, unknown, r.StartLine, ic) {
+		for _, t := range findTokensLocally(raw, unknown, r.StartLine, baseCol, ic) {
 			name := t.name
 			if !t.quoted {
 				name = strings.ToUpper(name)
