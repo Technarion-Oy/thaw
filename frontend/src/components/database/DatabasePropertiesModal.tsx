@@ -158,14 +158,17 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 // A fixed-choice parameter row: a Select that applies the change on pick, plus an
-// Unset button (reset to default / inherited) when a value is currently set.
+// Unset button (reset to default / inherited) when a value is set. The Unset
+// button is only shown when onUnset is supplied — some database parameters
+// (LOG_LEVEL, METRIC_LEVEL, TRACE_LEVEL, REPLACE_INVALID_CHARACTERS) are settable
+// but not UNSET-able at the database level, per the ALTER DATABASE grammar.
 function SelectRow({ label, value, options, busy, onSet, onUnset }: {
   label: string;
   value: string;
   options: { value: string; label: string }[];
   busy: boolean;
   onSet: (v: string) => void;
-  onUnset: () => void;
+  onUnset?: () => void;
 }) {
   const cur = value ? value.toUpperCase() : undefined;
   return (
@@ -182,7 +185,7 @@ function SelectRow({ label, value, options, busy, onSet, onUnset }: {
             onChange={onSet}
             loading={busy}
           />
-          {cur && (
+          {cur && onUnset && (
             <Tooltip title="Unset (reset to default)">
               <Button size="small" onClick={onUnset} loading={busy}>Unset</Button>
             </Tooltip>
@@ -694,13 +697,15 @@ export default function DatabasePropertiesModal({ db, name, onClose }: Props) {
           <div style={SECTION_HEAD}>Parameters</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
+              {/* LOG_LEVEL / METRIC_LEVEL / TRACE_LEVEL are settable but not
+                  UNSET-able at the database level (grammar omits them), so no
+                  Unset affordance — it would send SQL Snowflake rejects. */}
               <SelectRow
                 label="Log level"
                 value={logLevel}
                 options={LOG_LEVELS}
                 busy={busyKey === "LOG_LEVEL"}
                 onSet={(v) => applyParam("LOG_LEVEL")(`SET LOG_LEVEL = ${q1(v)}`)}
-                onUnset={() => applyParam("LOG_LEVEL")("UNSET LOG_LEVEL")}
               />
               <SelectRow
                 label="Metric level"
@@ -708,7 +713,6 @@ export default function DatabasePropertiesModal({ db, name, onClose }: Props) {
                 options={METRIC_LEVELS}
                 busy={busyKey === "METRIC_LEVEL"}
                 onSet={(v) => applyParam("METRIC_LEVEL")(`SET METRIC_LEVEL = ${q1(v)}`)}
-                onUnset={() => applyParam("METRIC_LEVEL")("UNSET METRIC_LEVEL")}
               />
               <SelectRow
                 label="Trace level"
@@ -716,7 +720,6 @@ export default function DatabasePropertiesModal({ db, name, onClose }: Props) {
                 options={TRACE_LEVELS}
                 busy={busyKey === "TRACE_LEVEL"}
                 onSet={(v) => applyParam("TRACE_LEVEL")(`SET TRACE_LEVEL = ${q1(v)}`)}
-                onUnset={() => applyParam("TRACE_LEVEL")("UNSET TRACE_LEVEL")}
               />
               <SelectRow
                 label="Storage serialization policy"
@@ -726,13 +729,14 @@ export default function DatabasePropertiesModal({ db, name, onClose }: Props) {
                 onSet={(v) => applyParam("STORAGE_SERIALIZATION_POLICY")(`SET STORAGE_SERIALIZATION_POLICY = ${v}`)}
                 onUnset={() => applyParam("STORAGE_SERIALIZATION_POLICY")("UNSET STORAGE_SERIALIZATION_POLICY")}
               />
+              {/* REPLACE_INVALID_CHARACTERS is settable but not UNSET-able at the
+                  database level (unlike ALTER SCHEMA) — no Unset affordance. */}
               <SelectRow
                 label="Replace invalid characters"
                 value={replaceInvalid}
                 options={BOOLS}
                 busy={busyKey === "REPLACE_INVALID_CHARACTERS"}
                 onSet={(v) => applyParam("REPLACE_INVALID_CHARACTERS")(`SET REPLACE_INVALID_CHARACTERS = ${v}`)}
-                onUnset={() => applyParam("REPLACE_INVALID_CHARACTERS")("UNSET REPLACE_INVALID_CHARACTERS")}
               />
               <SelectRow
                 label="Object visibility"
