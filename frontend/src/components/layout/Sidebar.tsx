@@ -162,6 +162,7 @@ import ViewPropertiesModal from "../view/ViewPropertiesModal";
 import CreateSequenceModal from "../sequence/CreateSequenceModal";
 import SequencePropertiesModal from "../sequence/SequencePropertiesModal";
 import SchemaPropertiesModal from "../schema/SchemaPropertiesModal";
+import DatabasePropertiesModal from "../database/DatabasePropertiesModal";
 import CreateStreamModal from "../stream/CreateStreamModal";
 import StreamPropertiesModal from "../stream/StreamPropertiesModal";
 import CreateFunctionModal from "../function/CreateFunctionModal";
@@ -730,6 +731,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [createSequenceModal, setCreateSequenceModal] = useState<{ db: string; schema: string } | null>(null);
   const [sequencePropsModal, setSequencePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [schemaPropsModal, setSchemaPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [dbPropsModal, setDbPropsModal] = useState<{ db: string; name: string } | null>(null);
   const [createStreamModal, setCreateStreamModal] = useState<{ db: string; schema: string } | null>(null);
   const [streamPropsModal, setStreamPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createFunctionModal, setCreateFunctionModal] = useState<{ db: string; schema: string } | null>(null);
@@ -3859,6 +3861,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       return;
     }
 
+    // Databases get a dedicated editable properties modal (ALTER DATABASE options).
+    if (kind === "DATABASE") {
+      setDbPropsModal({ db, name });
+      return;
+    }
+
     const tableContext = kind === "TABLE" ? { db, schema, table: name } : undefined;
     setPropsModal({ title, rows: null, error: null, tableContext });
     try {
@@ -5413,6 +5421,14 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={schemaPropsModal.schema}
           name={schemaPropsModal.name}
           onClose={() => setSchemaPropsModal(null)}
+        />
+      )}
+
+      {dbPropsModal && (
+        <DatabasePropertiesModal
+          db={dbPropsModal.db}
+          name={dbPropsModal.name}
+          onClose={() => setDbPropsModal(null)}
         />
       )}
 

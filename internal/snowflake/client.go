@@ -2167,7 +2167,18 @@ func (c *Client) ListDatabases(ctx context.Context) ([]string, error) {
 // ListExportableDatabases returns only databases that are owned by the account
 // (origin column is empty). Shared / imported databases such as
 // SNOWFLAKE_SAMPLE_DATA are excluded because GET_DDL is not supported on them.
+// This is the same owned-database set as ListUserDatabases.
 func (c *Client) ListExportableDatabases(ctx context.Context) ([]string, error) {
+	return c.ListUserDatabases(ctx)
+}
+
+// ListUserDatabases returns the user-managed databases visible to the current
+// role — i.e. ListDatabases minus shared / imported databases (those with a
+// non-empty origin, such as SNOWFLAKE_SAMPLE_DATA), which cannot be altered,
+// swapped, or exported. Use this wherever the UI offers databases as targets for
+// DDL / governance operations (e.g. the SWAP WITH picker) rather than as a raw
+// catalog listing — the database analogue of ListUserSchemas.
+func (c *Client) ListUserDatabases(ctx context.Context) ([]string, error) {
 	rows, err := c.queryCtx(ctx, "SHOW DATABASES")
 	if err != nil {
 		return nil, err

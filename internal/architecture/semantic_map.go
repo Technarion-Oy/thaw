@@ -143,6 +143,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/cortexsearchservice/CortexSearchServicePropertiesModal.tsx",
         "frontend/src/components/cortexsearchservice/CreateCortexSearchServiceModal.tsx",
         "frontend/src/components/database/CreateStageModal.tsx",
+        "frontend/src/components/database/DatabasePropertiesModal.tsx",
         "frontend/src/components/database/StagePropertiesModal.tsx",
         "frontend/src/components/datametricfunction/CreateDataMetricFunctionModal.tsx",
         "frontend/src/components/datametricfunction/DataMetricFunctionPropertiesModal.tsx",

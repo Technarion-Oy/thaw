@@ -46,6 +46,10 @@ export function AlterDataMetricFunction(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['AlterDataMetricFunction'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function AlterDatabase(arg1, arg2) {
+  return window['go']['app']['App']['AlterDatabase'](arg1, arg2);
+}
+
 export function AlterDataset(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterDataset'](arg1, arg2, arg3, arg4);
 }
@@ -950,6 +954,10 @@ export function GetDatabaseCrossDeps(arg1, arg2) {
   return window['go']['app']['App']['GetDatabaseCrossDeps'](arg1, arg2);
 }
 
+export function GetDatabaseParameters(arg1) {
+  return window['go']['app']['App']['GetDatabaseParameters'](arg1);
+}
+
 export function GetDatabaseRetentionDays(arg1) {
   return window['go']['app']['App']['GetDatabaseRetentionDays'](arg1);
 }
@@ -1636,6 +1644,10 @@ export function ListSupportedDbtVersions() {
 
 export function ListSystemPythons() {
   return window['go']['app']['App']['ListSystemPythons']();
+}
+
+export function ListUserDatabases() {
+  return window['go']['app']['App']['ListUserDatabases']();
 }
 
 export function ListUserFunctions(arg1) {
