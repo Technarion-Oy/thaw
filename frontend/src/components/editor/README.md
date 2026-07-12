@@ -47,6 +47,12 @@ the bundled artifact `src/generated/snowflakeDataTypes.ts`.)
 **Stores used:** `queryStore` (SQL content, tab state, selected SQL), `objectStore` (schema cache),
 `sessionStore` (session context), `themeStore` (dark/light), `featureFlagsStore` (flag gating).
 
+Session is **per-tab** on the backend, so `runDiagnostics` and the Expand-`*` command
+read THIS editor's own tab session via `sessionForTab(tabId)` (its `tabContexts[tabId]`,
+falling back to the global/active-tab context) rather than the global `sessionStore.database/schema`.
+Otherwise the split pane (`tabId=splitTabId`) would validate against the active tab's session,
+mis-firing the "No database/schema selected" diagnostics (#717).
+
 **Module-level caches:**
 - `hoverDDLCache` — `Map<key, {ddl, ts}>`, 60 s TTL.
 - `fetchedSchemaObjects` — `Set<string>` to suppress duplicate `ListObjects` calls.

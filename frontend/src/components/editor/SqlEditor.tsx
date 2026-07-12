@@ -426,6 +426,16 @@ function applyPrefsToSnippet(text: string, prefs: EditorPrefs): string {
   return result;
 }
 
+// Resolve a tab's OWN session context. Session is per-tab on the backend, so a
+// split pane (tabId=splitTabId) must resolve/validate against its own tab's
+// session — not the global (= active tab's) one. Falls back to the global
+// context when the tab has no stored context yet. #717.
+function sessionForTab(tabId: string | undefined): { database: string; schema: string } {
+  const s = useSessionStore.getState();
+  const ctx = tabId ? s.tabContexts[tabId] : undefined;
+  return { database: ctx?.database ?? s.database, schema: ctx?.schema ?? s.schema };
+}
+
 let _activeSnippetEditor: monacoLib.editor.ICodeEditor | null = null;
 
 /** Shared — called by any Monaco editor (SQL or notebook cell) on context menu open. */
@@ -609,6 +619,10 @@ async function statementTextAtLine(fullSql: string, line: number): Promise<strin
 // keyboard-invoked menu. Set in onContextMenu; read by the command.
 let _starMenuPos: monacoLib.IPosition | null = null;
 
+// The tab whose editor last opened the star menu; the command validates against
+// this tab's own session (split pane vs. active tab). Set in onContextMenu. #717.
+let _starMenuTabId: string | undefined;
+
 let _expandWildcardRegistered = false;
 (() => {
   if (_expandWildcardRegistered) return;
@@ -655,7 +669,7 @@ let _expandWildcardRegistered = false;
         (rawRefs || []) as any[], // eslint-disable-line @typescript-eslint/no-explicit-any
         useObjectStore.getState().objects.map((o) => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, // eslint-disable-line @typescript-eslint/no-explicit-any
         { database: "", schema: "" } as any, // eslint-disable-line @typescript-eslint/no-explicit-any
-        { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema } as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+        sessionForTab(_starMenuTabId) as any, // eslint-disable-line @typescript-eslint/no-explicit-any
       );
     } catch { return; }
     if (!refs || refs.length === 0 || stale()) return;
@@ -731,6 +745,9 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
   const activeTabId = useQueryStore((s) => s.activeTabId);
   const sql    = tabId ? (tabs.find((t) => t.id === tabId)?.sql ?? "") : activeSql;
   const setSql = tabId ? (newSql: string) => setSqlForTab(tabId, newSql) : activeSqlSetter;
+
+  // THIS editor's own per-tab session context (see sessionForTab, #717).
+  const editorSession = () => sessionForTab(tabId);
 
   const activeTab      = tabs.find((t) => t.id === (tabId ?? activeTabId));
   const activeKind     = activeTab?.kind;
@@ -1074,8 +1091,8 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           resolvedRefs: resolved,
           knownDatabases: storeDbs,
           knownSchemas: storeSchemas,
-          sessionDatabase: useSessionStore.getState().database,
-          sessionSchema: useSessionStore.getState().schema,
+          sessionDatabase: editorSession().database,
+          sessionSchema: editorSession().schema,
           quotedIdentifiersIgnoreCase: false,
           droppedDatabases: [],
           droppedSchemas: [],
@@ -2542,6 +2559,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     editor.onMouseDown((e: any) => { if (e.event?.rightButton) updateStarGate(e.target?.position); });
     editor.onContextMenu((e) => {
       _activeSnippetEditor = editor;
+      _starMenuTabId = tabId; // validate Expand-* against this pane's own session (#717)
       // The command reads this: the click point for a right-click (differs from the
       // live cursor inside a selection), or the cursor for a keyboard-invoked menu
       // (where e.target.position is null).
