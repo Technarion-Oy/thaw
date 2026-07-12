@@ -50,7 +50,7 @@ Do not edit it by hand. Annotate source files (`// thaw:domain:`, `// thaw:file-
 
 `runDiagnostics` in `SqlEditor.tsx` is async with three IPC `await` points. Two invariants must hold:
 
-1. **Race safety** — capture `model.getVersionId()` before any async work and check it after each `await`; `return` early if the version advanced (user edited mid-flight). The `return` still runs `finally`, but the version check inside `finally` prevents overwriting a newer run's markers.
+1. **Race safety** — capture `model.getVersionId()` **and** a monotonic run token (`myRun = ++diagRunRef.current`) before any async work, and check both after each `await` (and in `finally`); `return` early if either advanced. versionId only detects **text** edits — the run token supersedes an in-flight run triggered *without* a text change (session switch, `thaw:refresh-diagnostics`, mid-run refetch callbacks), where both runs would otherwise share one versionId and the last to *finish* would win, re-applying stale markers (#718). The `return` still runs `finally`, but the guard inside `finally` prevents overwriting a newer run's markers.
 2. **Exception safety** — wrap the whole body in `try/catch/finally`. If any IPC call rejects, `catch` logs and `finally` guarantees `setModelMarkers` is called with whatever was collected, so stale markers never stick.
 
 Also use `editor.onDidChangeModelContent` (not `editor.getModel()?.onDidChangeContent`) — the latter silently skips registration if the model is null at mount.

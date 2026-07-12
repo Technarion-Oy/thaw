@@ -767,6 +767,10 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
   activeFilePathRef.current  = activeTab?.path ?? null;
   const fnDecTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const diagTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Monotonic run token: a newer runDiagnostics supersedes an in-flight older one
+  // even without a text change (session switch, refresh event, mid-run refetch
+  // callbacks) — versionId only detects text edits, so it can't dedup those. (#718)
+  const diagRunRef     = useRef(0);
 
   const [explainSql, setExplainSql] = useState<string | null>(null);
 
@@ -949,6 +953,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         return;
       }
       const diagVersion = model.getVersionId();
+      const myRun = ++diagRunRef.current;
       const diagSql = model.getValue();
       const diagMarkers: DiagMarker[] = [];
 
@@ -959,31 +964,31 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
         // ADD || [] to prevent spreading null from Go's nil slices!
         const syntaxErrors = await AnalyzeSqlSyntax(diagSql);
-        if (model.getVersionId() !== diagVersion) return;
+        if (model.getVersionId() !== diagVersion || myRun !== diagRunRef.current) return;
         diagMarkers.push(...((syntaxErrors || []) as DiagMarker[]));
 
         const stmtRanges = (await GetSqlStatementRanges(diagSql)) || [];
-        if (model.getVersionId() !== diagVersion) return;
+        if (model.getVersionId() !== diagVersion || myRun !== diagRunRef.current) return;
 
         const dataTypeMarkers = await ValidateDataTypes(diagSql, stmtRanges);
-        if (model.getVersionId() !== diagVersion) return;
+        if (model.getVersionId() !== diagVersion || myRun !== diagRunRef.current) return;
         diagMarkers.push(...((dataTypeMarkers || []) as DiagMarker[]));
 
         // Grammar check: recursive-descent Snowflake grammar (internal/sqlgrammar).
         // Flags recognized-but-malformed statements (missing names, dangling
         // keywords, …) as Warnings; skips unmodelled statements entirely.
         const grammarMarkers = await ValidateGrammar(diagSql, stmtRanges);
-        if (model.getVersionId() !== diagVersion) return;
+        if (model.getVersionId() !== diagVersion || myRun !== diagRunRef.current) return;
         diagMarkers.push(...((grammarMarkers || []) as DiagMarker[]));
 
         // Semantic anti-patterns the grammar can't see (MERGE clause actions,
         // QUALIFY placement, FLATTEN/LATERAL, variant paths, Cortex names).
         const antiPatternMarkers = await ValidateAntiPatterns(diagSql, stmtRanges);
-        if (model.getVersionId() !== diagVersion) return;
+        if (model.getVersionId() !== diagVersion || myRun !== diagRunRef.current) return;
         diagMarkers.push(...((antiPatternMarkers || []) as DiagMarker[]));
 
         const rawRefs = await ParseJoinTableRefs(diagSql);
-        if (model.getVersionId() !== diagVersion) return;
+        if (model.getVersionId() !== diagVersion || myRun !== diagRunRef.current) return;
         const storeObjs = useObjectStore.getState().objects;
 
         const storeDbs = useObjectStore.getState().databases;
@@ -1084,7 +1089,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           knownObjects,
           fetchedObjectSchemas,
         } as any);
-        if (model.getVersionId() !== diagVersion) return;
+        if (model.getVersionId() !== diagVersion || myRun !== diagRunRef.current) return;
         diagMarkers.push(...((tableMarkers || []) as DiagMarker[]));
 
         // Build column entries for resolved refs (also used by ValidateBareColumnRefs).
@@ -1104,7 +1109,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         }
 
         const semanticMarkers = await AnalyzeSqlSemantics(diagSql, resolved as any, colEntries as any);
-        if (model.getVersionId() !== diagVersion) return;
+        if (model.getVersionId() !== diagVersion || myRun !== diagRunRef.current) return;
         diagMarkers.push(...((semanticMarkers || []) as DiagMarker[]));
 
         const bareColMarkers = await ValidateBareColumnRefs({
@@ -1114,13 +1119,13 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           colEntries,
           quotedIdentifiersIgnoreCase: false,
         } as any);
-        if (model.getVersionId() !== diagVersion) return;
+        if (model.getVersionId() !== diagVersion || myRun !== diagRunRef.current) return;
         diagMarkers.push(...((bareColMarkers || []) as DiagMarker[]));
         
       } catch (err) {
         console.warn("[thaw] SQL diagnostics aborted:", err);
       } finally {
-        if (model.getVersionId() === diagVersion) {
+        if (model.getVersionId() === diagVersion && myRun === diagRunRef.current) {
           monaco.editor.setModelMarkers(model, "thaw-sql", diagMarkers);
         }
       }
