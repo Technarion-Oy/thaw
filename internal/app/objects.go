@@ -42,6 +42,18 @@ func (a *App) ListDatabases() ([]string, error) {
 	return a.client.ListDatabases(a.ctx)
 }
 
+// ListUserDatabases returns the user-managed databases visible to the current
+// role — all databases except shared / imported ones (non-empty origin, e.g.
+// SNOWFLAKE_SAMPLE_DATA), which cannot be altered or swapped. Use it when
+// offering databases as targets for DDL / governance operations (e.g. the
+// SWAP WITH picker) rather than as a raw catalog list.
+func (a *App) ListUserDatabases() ([]string, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return a.client.ListUserDatabases(a.ctx)
+}
+
 // ListSchemas returns all schemas in the given database.
 func (a *App) ListSchemas(database string) ([]string, error) {
 	if a.client == nil {

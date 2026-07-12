@@ -1855,6 +1855,7 @@ func (v *Validator) ParseAlterCortexSearchService() bool {
 //	                                        [ MAX_DATA_EXTENSION_TIME_IN_DAYS = <integer> ]
 //	                                        [ EXTERNAL_VOLUME = <external_volume_name> ]
 //	                                        [ CATALOG = <catalog_integration_name> ]
+//	                                        [ ICEBERG_DEFAULT_DDL_COLLATION = '<collation_specification>' ]
 //	                                        [ ICEBERG_VERSION_DEFAULT = <integer> ]
 //	                                        [ ICEBERG_MERGE_ON_READ_BEHAVIOR = { 'AUTO' | 'ENABLED' | 'DISABLED' } ]
 //	                                        [ ENABLE_ICEBERG_MERGE_ON_READ = { TRUE | FALSE } ]
@@ -1886,6 +1887,7 @@ func (v *Validator) ParseAlterCortexSearchService() bool {
 //	                                            MAX_DATA_EXTENSION_TIME_IN_DAYS     |
 //	                                            EXTERNAL_VOLUME                     |
 //	                                            CATALOG                             |
+//	                                            ICEBERG_DEFAULT_DDL_COLLATION        |
 //	                                            ICEBERG_VERSION_DEFAULT             |
 //	                                            ICEBERG_MERGE_ON_READ_BEHAVIOR      |
 //	                                            ENABLE_ICEBERG_MERGE_ON_READ        |
@@ -1941,6 +1943,7 @@ func (v *Validator) ParseAlterDatabase() bool {
 			v.option("MAX_DATA_EXTENSION_TIME_IN_DAYS", v.parseScalar),
 			v.option("EXTERNAL_VOLUME", v.parseIdentPath),
 			v.option("CATALOG", v.parseIdentPath),
+			v.option("ICEBERG_DEFAULT_DDL_COLLATION", v.parseString),
 			v.option("ICEBERG_VERSION_DEFAULT", v.parseScalar),
 			v.option("ICEBERG_MERGE_ON_READ_BEHAVIOR", v.parseString),
 			v.option("ENABLE_ICEBERG_MERGE_ON_READ", v.parseBool),
@@ -1966,7 +1969,7 @@ func (v *Validator) ParseAlterDatabase() bool {
 	}
 	unsetName := v.wordsValue(
 		"DATA_RETENTION_TIME_IN_DAYS", "MAX_DATA_EXTENSION_TIME_IN_DAYS", "EXTERNAL_VOLUME",
-		"CATALOG", "ICEBERG_VERSION_DEFAULT", "ICEBERG_MERGE_ON_READ_BEHAVIOR",
+		"CATALOG", "ICEBERG_DEFAULT_DDL_COLLATION", "ICEBERG_VERSION_DEFAULT", "ICEBERG_MERGE_ON_READ_BEHAVIOR",
 		"ENABLE_ICEBERG_MERGE_ON_READ", "DEFAULT_DDL_COLLATION",
 		"DEFAULT_NOTEBOOK_COMPUTE_POOL_CPU", "DEFAULT_NOTEBOOK_COMPUTE_POOL_GPU",
 		"OBJECT_VISIBILITY", "STORAGE_SERIALIZATION_POLICY", "EVENT_TABLE", "COMMENT",

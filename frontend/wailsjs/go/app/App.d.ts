@@ -92,6 +92,8 @@ export function AlterCortexSearchService(arg1:string,arg2:string,arg3:string,arg
 
 export function AlterDataMetricFunction(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
+export function AlterDatabase(arg1:string,arg2:string):Promise<void>;
+
 export function AlterDataset(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterDynamicTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
@@ -544,6 +546,8 @@ export function GetDataMetricFunctionTags(arg1:string,arg2:string,arg3:string,ar
 
 export function GetDatabaseCrossDeps(arg1:string,arg2:Array<string>):Promise<Array<snowflake.SchemaRef>>;
 
+export function GetDatabaseParameters(arg1:string):Promise<snowflake.QueryResult>;
+
 export function GetDatabaseRetentionDays(arg1:string):Promise<number>;
 
 export function GetDatabaseTableSummary(arg1:string):Promise<Array<table.TableSummary>>;
@@ -887,6 +891,8 @@ export function ListStages(arg1:string,arg2:string):Promise<Array<snowflake.Stag
 export function ListSupportedDbtVersions():Promise<Array<dbtproject.DbtVersionInfo>>;
 
 export function ListSystemPythons():Promise<Array<snowpark.PythonInfo>>;
+
+export function ListUserDatabases():Promise<Array<string>>;
 
 export function ListUserFunctions(arg1:string):Promise<Array<snowflake.UserFunction>>;
 

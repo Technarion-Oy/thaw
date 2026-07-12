@@ -9,13 +9,13 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Modal, Spin, Button, Select, Space, Typography, Alert, Tag,
+  Modal, Spin, Button, Input, Select, Space, Typography, Alert, Tooltip, Checkbox,
 } from "antd";
-import { FolderOutlined } from "@ant-design/icons";
+import { DatabaseOutlined } from "@ant-design/icons";
 import {
-  GetObjectProperties, AlterSchema, GetSchemaParameters,
+  GetObjectProperties, AlterDatabase, GetDatabaseParameters,
   ListExternalVolumes, ListIntegrations, ListComputePools, ListWarehouses,
-  ListUserSchemas, GetObjectTagReferences,
+  ListUserDatabases, GetObjectTagReferences,
 } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 import TagsRow, { EditableTag } from "../shared/TagsRow";
@@ -27,8 +27,9 @@ import {
 
 const { Text } = Typography;
 
-// Fixed-choice ALTER SCHEMA parameters, read from SHOW PARAMETERS IN SCHEMA.
+// Fixed-choice ALTER DATABASE parameters, read from SHOW PARAMETERS IN DATABASE.
 const LOG_LEVELS = opts("TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL", "OFF");
+const METRIC_LEVELS = opts("ALL", "NONE");
 const TRACE_LEVELS = opts("ALWAYS", "ON_EVENT", "PROPAGATE", "OFF");
 const SERIALIZATION = opts("COMPATIBLE", "OPTIMIZED");
 const BOOLS = opts("TRUE", "FALSE");
@@ -36,38 +37,41 @@ const MERGE_BEHAVIOR = opts("AUTO", "ENABLED", "DISABLED");
 const YES_NO = opts("YES", "NO");
 const VISIBILITY = opts("PRIVILEGED");
 
+
 // ─── Main component ──────────────────────────────────────────────────────────
 
 interface Props {
   db: string;
-  schema: string;
   name: string;
   onClose: () => void;
 }
 
-export default function SchemaPropertiesModal({ db, schema, name, onClose }: Props) {
+export default function DatabasePropertiesModal({ db, name, onClose }: Props) {
   const [rows, setRows] = useState<snowflake.PropertyPair[] | null>(null);
   const [params, setParams] = useState<snowflake.QueryResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [managedBusy, setManagedBusy] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [tags, setTags] = useState<EditableTag[]>([]);
   const [siblings, setSiblings] = useState<string[]>([]);
   const [swapTarget, setSwapTarget] = useState<string | undefined>();
   const [swapBusy, setSwapBusy] = useState(false);
+  // Replication / failover account list (comma-separated org.account identifiers).
+  const [accounts, setAccounts] = useState("");
+  const [ignoreEdition, setIgnoreEdition] = useState(false);
+  const [replBusy, setReplBusy] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     // Keep prior data rendered while refetching so an inline edit doesn't collapse
     // the modal to a spinner. The centered spinner shows only on first load.
     setError(null);
     try {
-      const props = await GetObjectProperties(db, schema, "SCHEMA", name);
-      // SHOW SCHEMAS omits MAX_DATA_EXTENSION_TIME_IN_DAYS / DEFAULT_DDL_COLLATION;
-      // SHOW PARAMETERS is the fallback source. Failure here is non-fatal.
+      const props = await GetObjectProperties(db, "", "DATABASE", name);
+      // SHOW DATABASES omits most parameters; SHOW PARAMETERS is the fallback
+      // source. Failure here is non-fatal.
       let p: snowflake.QueryResult | null = null;
       try {
-        p = (await GetSchemaParameters(db, schema)) ?? null;
+        p = (await GetDatabaseParameters(db)) ?? null;
       } catch {
         p = null;
       }
@@ -76,17 +80,16 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
     } catch (e) {
       setError(String(e));
     }
-  }, [db, schema, name]);
+  }, [db, name]);
 
   useEffect(() => { reload(); }, [reload]);
 
   // Tags use the no-latency INFORMATION_SCHEMA.TAG_REFERENCES read so a SET/UNSET
-  // reflects immediately. Best-effort: SET/UNSET still work if the read fails.
-  // Tags inherited from the database/account are shown for context but can't be
-  // unset here — that has to happen where they were applied.
+  // reflects immediately. Best-effort. Inherited (account-level) tags are shown
+  // for context but can't be unset here.
   const reloadTags = useCallback(async () => {
     try {
-      const t = await GetObjectTagReferences("SCHEMA", db, schema, name, "");
+      const t = await GetObjectTagReferences("DATABASE", db, "", name, "");
       const cols = (t?.columns ?? []).map((c) => c.toLowerCase());
       const ci = (n: string) => cols.indexOf(n);
       const dbI = ci("tag_database"), scI = ci("tag_schema"), nmI = ci("tag_name"),
@@ -96,7 +99,7 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
         const tsc = scI >= 0 ? String(row[scI] ?? "") : "";
         const tnm = nmI >= 0 ? String(row[nmI] ?? "") : "";
         const qualified = [tdb, tsc, tnm].filter(Boolean).map(quoteIdent).join(".");
-        const inherited = lvI >= 0 && String(row[lvI] ?? "").toUpperCase() !== "SCHEMA";
+        const inherited = lvI >= 0 && String(row[lvI] ?? "").toUpperCase() !== "DATABASE";
         return {
           key: qualified,
           name: tnm,
@@ -108,19 +111,19 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
     } catch {
       setTags([]);
     }
-  }, [db, schema, name]);
+  }, [db, name]);
 
   useEffect(() => { reloadTags(); }, [reloadTags]);
 
-  // Sibling schemas in the same database, for the SWAP WITH target picker.
-  // ListUserSchemas excludes the read-only INFORMATION_SCHEMA (not swappable).
+  // Sibling databases, for the SWAP WITH target picker. ListUserDatabases
+  // excludes shared / imported databases (not swappable).
   useEffect(() => {
-    ListUserSchemas(db)
+    ListUserDatabases()
       .then((s) => setSiblings((s ?? []).filter((n) => n.toUpperCase() !== name.toUpperCase())))
       .catch(() => setSiblings([]));
-  }, [db, name]);
+  }, [name]);
 
-  const schemaRef = `"${db}"."${name}"`;
+  const dbRef = `"${db}"`;
 
   const find = (key: string) =>
     rows ? (rows.find((r) => r.key.toLowerCase() === key.toLowerCase())?.value ?? "") : "";
@@ -129,9 +132,9 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
 
   const saveComment = async (comment: string) => {
     if (comment.trim() === "") {
-      await AlterSchema(db, schema, "UNSET COMMENT");
+      await AlterDatabase(db, "UNSET COMMENT");
     } else {
-      await AlterSchema(db, schema, `SET COMMENT = ${q1(comment)}`);
+      await AlterDatabase(db, `SET COMMENT = ${q1(comment)}`);
     }
     await reload();
   };
@@ -140,31 +143,30 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
   const saveIntParam = (param: string) => async (val: string) => {
     const v = val.trim();
     if (v === "") {
-      await AlterSchema(db, schema, `UNSET ${param}`);
+      await AlterDatabase(db, `UNSET ${param}`);
     } else {
       if (!/^\d+$/.test(v)) throw new Error("Must be a non-negative integer.");
-      await AlterSchema(db, schema, `SET ${param} = ${v}`);
+      await AlterDatabase(db, `SET ${param} = ${v}`);
     }
     await reload();
   };
 
-  // SET/UNSET a free-text string parameter (quoted as a string literal on SET,
-  // UNSET when cleared). Used for the Iceberg text params and BASE_LOCATION_PREFIX.
+  // SET/UNSET a free-text string parameter (quoted as a string literal on SET).
   const saveTextParam = (param: string) => async (val: string) => {
     const v = val.trim();
     if (v === "") {
-      await AlterSchema(db, schema, `UNSET ${param}`);
+      await AlterDatabase(db, `UNSET ${param}`);
     } else {
-      await AlterSchema(db, schema, `SET ${param} = ${q1(v)}`);
+      await AlterDatabase(db, `SET ${param} = ${q1(v)}`);
     }
     await reload();
   };
 
   const saveCollation = async (val: string) => {
     if (val.trim() === "") {
-      await AlterSchema(db, schema, "UNSET DEFAULT_DDL_COLLATION");
+      await AlterDatabase(db, "UNSET DEFAULT_DDL_COLLATION");
     } else {
-      await AlterSchema(db, schema, `SET DEFAULT_DDL_COLLATION = ${q1(val)}`);
+      await AlterDatabase(db, `SET DEFAULT_DDL_COLLATION = ${q1(val)}`);
     }
     await reload();
   };
@@ -172,20 +174,18 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
   const saveRename = async (val: string) => {
     const newName = val.trim();
     if (newName === "" || newName === name) return;
-    // RENAME TO takes a fully-qualified target; keep the schema in the same db.
-    await AlterSchema(db, schema, `RENAME TO "${db.replace(/"/g, '""')}"."${newName.replace(/"/g, '""')}"`);
-    // The modal's name/schema props are now stale — close and let the sidebar refresh.
+    await AlterDatabase(db, `RENAME TO ${quoteIdent(newName)}`);
+    // The modal's name/db props are now stale — close and let the sidebar refresh.
     onClose();
   };
 
   // Apply a fixed-choice SET/UNSET parameter change (value comes from a closed
-  // option list, so the clause is safe to interpolate). busyKey drives per-row
-  // spinners; errors surface in the modal-level Alert.
+  // option list, so the clause is safe to interpolate).
   const applyParam = (key: string) => async (clause: string) => {
     setBusyKey(key);
     setActionError(null);
     try {
-      await AlterSchema(db, schema, clause);
+      await AlterDatabase(db, clause);
       await reload();
     } catch (e) {
       setActionError(`${key} update failed: ${String(e)}`);
@@ -194,38 +194,22 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
     }
   };
 
-  const setManagedAccess = async (enable: boolean) => {
-    setManagedBusy(true);
-    setActionError(null);
-    try {
-      await AlterSchema(db, schema, enable ? "ENABLE MANAGED ACCESS" : "DISABLE MANAGED ACCESS");
-      await reload();
-    } catch (e) {
-      setActionError(`Managed access update failed: ${String(e)}`);
-    } finally {
-      setManagedBusy(false);
-    }
-  };
-
   const setTag = async (tagName: string, tagValue: string) => {
-    // Tag name may be a qualified identifier (db.schema.tag) — inserted verbatim;
-    // the value is a quoted string literal.
-    await AlterSchema(db, schema, `SET TAG ${tagName} = ${q1(tagValue)}`);
+    await AlterDatabase(db, `SET TAG ${tagName} = ${q1(tagValue)}`);
     await reloadTags();
   };
 
   const unsetTag = async (qualified: string) => {
-    await AlterSchema(db, schema, `UNSET TAG ${qualified}`);
+    await AlterDatabase(db, `UNSET TAG ${qualified}`);
     await reloadTags();
   };
 
-  // SWAP WITH exchanges ALL contents of two schemas — destructive, so confirm
-  // first. On success the modal's name context is stale, so close and let the
-  // sidebar refresh.
+  // SWAP WITH exchanges ALL contents of two databases — destructive, so confirm
+  // first. On success the modal's name context is stale, so close and refresh.
   const doSwap = () => {
     if (!swapTarget) return;
     Modal.confirm({
-      title: "Swap schema contents?",
+      title: "Swap database contents?",
       content: `This exchanges every object between "${name}" and "${swapTarget}". It is disruptive and can't be undone automatically.`,
       okText: "Swap",
       okButtonProps: { danger: true },
@@ -233,7 +217,7 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
         setSwapBusy(true);
         setActionError(null);
         try {
-          await AlterSchema(db, schema, `SWAP WITH ${quoteIdent(swapTarget)}`);
+          await AlterDatabase(db, `SWAP WITH ${quoteIdent(swapTarget)}`);
           onClose();
         } catch (e) {
           setActionError(`Swap failed: ${String(e)}`);
@@ -243,15 +227,53 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
     });
   };
 
+  // Account identifiers are org_name.account_name and are spliced unquoted into
+  // the ALTER clause (the grammar's parseIdentPath accepts the dotted form), so
+  // they MUST be validated — an unquoted free-text field is otherwise a SQL
+  // injection / multi-statement vector (a stray ';' would smuggle a second
+  // statement past Client.Execute's statement splitter). A Snowflake account
+  // identifier is a dot-separated path of unquoted identifiers: letters, digits
+  // and underscores only. Anything else disables the replication/failover actions.
+  const accountTokens = accounts.split(",").map((s) => s.trim()).filter(Boolean);
+  const accountsValid = accountTokens.every((a) => /^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*$/.test(a));
+  const accountList = () => accountTokens.join(", ");
+
+  const runRepl = (key: string, clause: string) => async () => {
+    setReplBusy(key);
+    setActionError(null);
+    try {
+      await AlterDatabase(db, clause);
+      await reload();
+    } catch (e) {
+      setActionError(`${key} failed: ${String(e)}`);
+    } finally {
+      setReplBusy(null);
+    }
+  };
+
+  // PRIMARY / REFRESH are lifecycle operations on secondary databases — PRIMARY
+  // (promote) is disruptive, so confirm it.
+  const doPromote = () => {
+    Modal.confirm({
+      title: "Promote to primary?",
+      content: `This makes "${name}" the primary database in its replication group. Other replicas become secondary.`,
+      okText: "Promote",
+      okButtonProps: { danger: true },
+      onOk: runRepl("PRIMARY", "PRIMARY"),
+    });
+  };
+
   const comment = find("comment");
   const owner = find("owner");
   const createdOn = find("created_on");
+  const kind = find("kind");
+  const origin = find("origin");
   // Prefer the SHOW dump; fall back to SHOW PARAMETERS.
   const retention = find("retention_time") || paramVal("DATA_RETENTION_TIME_IN_DAYS");
   const maxExtension = paramVal("MAX_DATA_EXTENSION_TIME_IN_DAYS");
   const collation = paramVal("DEFAULT_DDL_COLLATION");
-  const managed = /managed\s+access/i.test(find("options"));
   const logLevel = paramVal("LOG_LEVEL");
+  const metricLevel = paramVal("METRIC_LEVEL");
   const traceLevel = paramVal("TRACE_LEVEL");
   const serialization = paramVal("STORAGE_SERIALIZATION_POLICY");
   const replaceInvalid = paramVal("REPLACE_INVALID_CHARACTERS");
@@ -274,7 +296,7 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
 
   // Keys rendered in the dedicated sections, hidden from the generic Properties dump.
   const handledKeys = new Set([
-    "comment", "owner", "created_on", "retention_time", "options", "name",
+    "comment", "owner", "created_on", "retention_time", "options", "name", "kind", "origin",
   ]);
 
   return (
@@ -282,10 +304,10 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
       open
       title={
         <Space size={6}>
-          <FolderOutlined style={{ color: "var(--icon-schema)" }} />
-          <span>Schema Properties</span>
+          <DatabaseOutlined style={{ color: "var(--icon-database)" }} />
+          <span>Database Properties</span>
           <Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
-            {schemaRef}
+            {dbRef}
           </Text>
         </Space>
       }
@@ -320,6 +342,8 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
             <tbody>
               <InfoRow label="Owner" value={owner} />
               <InfoRow label="Created on" value={createdOn} />
+              {kind && <InfoRow label="Kind" value={kind} />}
+              {origin && <InfoRow label="Origin" value={origin} />}
             </tbody>
           </table>
 
@@ -333,24 +357,6 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
                 onSave={saveComment}
                 onUnset={() => saveComment("")}
               />
-              {/* Editable (not InfoRow, which reads as read-only): the Tag shows
-                  the current state and the Select applies the change. */}
-              <tr>
-                <td style={LABEL_TD}>Managed access</td>
-                <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
-                  <Space>
-                    <Tag color={managed ? "green" : "default"}>{managed ? "ENABLED" : "DISABLED"}</Tag>
-                    <Select
-                      size="small"
-                      value={managed ? "on" : "off"}
-                      onChange={(v) => setManagedAccess(v === "on")}
-                      loading={managedBusy}
-                      style={{ width: 110 }}
-                      options={[{ value: "on", label: "Enabled" }, { value: "off", label: "Disabled" }]}
-                    />
-                  </Space>
-                </td>
-              </tr>
               <EditRow
                 label="Data retention (days)"
                 value={retention}
@@ -478,7 +484,7 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
                 value={streamlitWh}
                 load={ListWarehouses}
                 busy={busyKey === "DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE"}
-                onSet={(v) => applyParam("DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE")(`SET DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE = ${q1(v)}`)}
+                onSet={(v) => applyParam("DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE")(`SET DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE = ${quoteIdent(v)}`)}
                 onUnset={() => applyParam("DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE")("UNSET DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE")}
               />
             </tbody>
@@ -487,13 +493,22 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
           <div style={SECTION_HEAD}>Parameters</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
+              {/* LOG_LEVEL / METRIC_LEVEL / TRACE_LEVEL are settable but not
+                  UNSET-able at the database level (grammar omits them), so no
+                  Unset affordance — it would send SQL Snowflake rejects. */}
               <SelectRow
                 label="Log level"
                 value={logLevel}
                 options={LOG_LEVELS}
                 busy={busyKey === "LOG_LEVEL"}
                 onSet={(v) => applyParam("LOG_LEVEL")(`SET LOG_LEVEL = ${q1(v)}`)}
-                onUnset={() => applyParam("LOG_LEVEL")("UNSET LOG_LEVEL")}
+              />
+              <SelectRow
+                label="Metric level"
+                value={metricLevel}
+                options={METRIC_LEVELS}
+                busy={busyKey === "METRIC_LEVEL"}
+                onSet={(v) => applyParam("METRIC_LEVEL")(`SET METRIC_LEVEL = ${q1(v)}`)}
               />
               <SelectRow
                 label="Trace level"
@@ -501,7 +516,6 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
                 options={TRACE_LEVELS}
                 busy={busyKey === "TRACE_LEVEL"}
                 onSet={(v) => applyParam("TRACE_LEVEL")(`SET TRACE_LEVEL = ${q1(v)}`)}
-                onUnset={() => applyParam("TRACE_LEVEL")("UNSET TRACE_LEVEL")}
               />
               <SelectRow
                 label="Storage serialization policy"
@@ -511,13 +525,14 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
                 onSet={(v) => applyParam("STORAGE_SERIALIZATION_POLICY")(`SET STORAGE_SERIALIZATION_POLICY = ${v}`)}
                 onUnset={() => applyParam("STORAGE_SERIALIZATION_POLICY")("UNSET STORAGE_SERIALIZATION_POLICY")}
               />
+              {/* REPLACE_INVALID_CHARACTERS is settable but not UNSET-able at the
+                  database level (unlike ALTER SCHEMA) — no Unset affordance. */}
               <SelectRow
                 label="Replace invalid characters"
                 value={replaceInvalid}
                 options={BOOLS}
                 busy={busyKey === "REPLACE_INVALID_CHARACTERS"}
                 onSet={(v) => applyParam("REPLACE_INVALID_CHARACTERS")(`SET REPLACE_INVALID_CHARACTERS = ${v}`)}
-                onUnset={() => applyParam("REPLACE_INVALID_CHARACTERS")("UNSET REPLACE_INVALID_CHARACTERS")}
               />
               <SelectRow
                 label="Object visibility"
@@ -546,6 +561,98 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
             </tbody>
           </table>
 
+          <div style={SECTION_HEAD}>Replication &amp; Failover</div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>
+              <tr>
+                <td style={LABEL_TD}>Target accounts</td>
+                <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
+                  <Input
+                    size="small"
+                    value={accounts}
+                    onChange={(e) => setAccounts(e.target.value)}
+                    placeholder="org1.acctA, org1.acctB"
+                    style={{ width: 320 }}
+                  />
+                  <div style={{ marginTop: 4 }}>
+                    <Checkbox checked={ignoreEdition} onChange={(e) => setIgnoreEdition(e.target.checked)}>
+                      <span style={{ fontSize: 11 }}>Ignore edition check (replication)</span>
+                    </Checkbox>
+                  </div>
+                  {accountTokens.length > 0 && !accountsValid && (
+                    <Text type="danger" style={{ fontSize: 11, display: "block", marginTop: 4 }}>
+                      Accounts must be org_name.account_name (letters, digits, underscores only).
+                    </Text>
+                  )}
+                </td>
+              </tr>
+              <tr>
+                <td style={LABEL_TD}>Replication</td>
+                <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
+                  <Space wrap>
+                    <Button
+                      size="small"
+                      disabled={!accountTokens.length || !accountsValid}
+                      loading={replBusy === "ENABLE REPLICATION"}
+                      onClick={runRepl("ENABLE REPLICATION",
+                        `ENABLE REPLICATION TO ACCOUNTS ${accountList()}${ignoreEdition ? " IGNORE EDITION CHECK" : ""}`)}
+                    >
+                      Enable…
+                    </Button>
+                    <Button
+                      size="small"
+                      disabled={accountTokens.length > 0 && !accountsValid}
+                      loading={replBusy === "DISABLE REPLICATION"}
+                      onClick={runRepl("DISABLE REPLICATION",
+                        accountTokens.length ? `DISABLE REPLICATION TO ACCOUNTS ${accountList()}` : "DISABLE REPLICATION")}
+                    >
+                      Disable
+                    </Button>
+                  </Space>
+                </td>
+              </tr>
+              <tr>
+                <td style={LABEL_TD}>Failover</td>
+                <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
+                  <Space wrap>
+                    <Button
+                      size="small"
+                      disabled={!accountTokens.length || !accountsValid}
+                      loading={replBusy === "ENABLE FAILOVER"}
+                      onClick={runRepl("ENABLE FAILOVER", `ENABLE FAILOVER TO ACCOUNTS ${accountList()}`)}
+                    >
+                      Enable…
+                    </Button>
+                    <Button
+                      size="small"
+                      disabled={accountTokens.length > 0 && !accountsValid}
+                      loading={replBusy === "DISABLE FAILOVER"}
+                      onClick={runRepl("DISABLE FAILOVER",
+                        accountTokens.length ? `DISABLE FAILOVER TO ACCOUNTS ${accountList()}` : "DISABLE FAILOVER")}
+                    >
+                      Disable
+                    </Button>
+                  </Space>
+                </td>
+              </tr>
+              <tr>
+                <td style={LABEL_TD}>Secondary database</td>
+                <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
+                  <Space wrap>
+                    <Tooltip title="Pull the latest changes from the primary">
+                      <Button size="small" loading={replBusy === "REFRESH"} onClick={runRepl("REFRESH", "REFRESH")}>
+                        Refresh
+                      </Button>
+                    </Tooltip>
+                    <Button size="small" danger loading={replBusy === "PRIMARY"} onClick={doPromote}>
+                      Promote to primary…
+                    </Button>
+                  </Space>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
           <div style={SECTION_HEAD}>Danger zone</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
@@ -557,7 +664,7 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
                       size="small"
                       showSearch
                       value={swapTarget}
-                      placeholder="Target schema"
+                      placeholder="Target database"
                       style={{ width: 240 }}
                       options={siblings.map((s) => ({ value: s, label: s }))}
                       onChange={setSwapTarget}
