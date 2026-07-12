@@ -610,7 +610,9 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			ftTable := ft.name
 			compareTable := ftTable
 			upperCompare := strings.ToUpper(compareTable)
-			if (upperCompare == "TABLE" || joinStopKW[upperCompare]) && ft.db == "" && ft.schema == "" {
+			// VALUES is a table literal (`FROM VALUES (...), (...)`), not a table
+			// name — skip it like the TABLE keyword.
+			if (upperCompare == "TABLE" || upperCompare == "VALUES" || joinStopKW[upperCompare]) && ft.db == "" && ft.schema == "" {
 				continue
 			}
 			// Skip SNOWFLAKE.CORTEX.* — built-in Cortex AI function namespace,

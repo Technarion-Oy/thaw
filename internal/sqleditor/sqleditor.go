@@ -2076,12 +2076,25 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 		// In that case bareColValidation is disabled for the whole statement to prevent
 		// false positives on column references from those unknown tables.
 		hasUnknownTable := false
+		hasValuesSource := false
 		for _, ta := range findFromJoinWithAlias(strippedSig, stripped) {
 			parts := extractIdentParts(ta.tablePath, true)
 			if len(parts) == 0 {
 				continue
 			}
 			tableNameU := parts[len(parts)-1]
+
+			// `FROM VALUES (...)` is a table literal exposing implicit columns
+			// (column1..columnN, or an explicit `AS v (a,b,c)` list). Their names
+			// aren't known here, so disable bare-column validation for the whole
+			// statement rather than flag them as out-of-scope.
+			// ponytail: whole-statement disable; register synthetic column1..N /
+			// explicit-list scope if a VALUES statement ever also needs a real
+			// table's bare columns validated.
+			if strings.EqualFold(tableNameU, "VALUES") {
+				hasValuesSource = true
+				continue
+			}
 
 			cacheKey := ""
 			// Priority: 1. CTE, 2. Local Table, 3. Global resolvedRef (already in aliasMap)
@@ -2140,7 +2153,7 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 		// Bare-column validation is only safe when every source table has known columns
 		// (so we can definitively say whether a column exists) and there is at least one
 		// table in scope to validate against.
-		ctx.bareColValidation = !hasUnknownTable && len(ctx.activeKeys) > 0
+		ctx.bareColValidation = !hasUnknownTable && !hasValuesSource && len(ctx.activeKeys) > 0
 
 		stmtContexts[idx] = ctx
 	}

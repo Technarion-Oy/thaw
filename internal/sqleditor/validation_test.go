@@ -1119,6 +1119,48 @@ LIMIT 100;`
 	}
 }
 
+// TestFromValues_NoFalsePositives covers issue #692: `SELECT ... FROM VALUES
+// (...), (...)` is a valid Snowflake table literal. Its implicit columns
+// (column1..columnN) must not be flagged as out-of-scope, and VALUES itself
+// must not be treated as a missing table.
+func TestFromValues_NoFalsePositives(t *testing.T) {
+	sql := `CREATE OR REPLACE TABLE spatial_test_data (
+    id INT,
+    feature_type VARCHAR,
+    geo_data GEOGRAPHY
+);
+
+INSERT INTO spatial_test_data (id, feature_type, geo_data)
+SELECT
+    column1 AS id,
+    column2 AS feature_type,
+    TO_GEOGRAPHY(column3) AS geo_data
+FROM VALUES
+    (1, 'Point', 'POINT(-122.35 37.55)'),
+    (2, 'Line', 'LINESTRING(-124.20 42.00, -120.01 41.99)');`
+
+	// Bug 2: implicit columnN names must not be flagged out-of-scope.
+	warns := getWarnings(ValidateSemantics(sql, nil, nil))
+	for _, w := range warns {
+		if strings.Contains(strings.ToLower(w.Message), "column1") ||
+			strings.Contains(strings.ToLower(w.Message), "column2") ||
+			strings.Contains(strings.ToLower(w.Message), "column3") {
+			t.Errorf("unexpected column-in-scope warning for FROM VALUES: %q", w.Message)
+		}
+	}
+
+	// Bug 1: VALUES must not be reported as a missing table.
+	markers := ValidateTablesExist(ValidateTablesExistRequest{
+		SQL:        sql,
+		StmtRanges: GetStatementRanges(sql),
+	})
+	for _, m := range markers {
+		if strings.Contains(strings.ToUpper(m.Message), "'VALUES'") {
+			t.Errorf("VALUES wrongly reported as a table: %q", m.Message)
+		}
+	}
+}
+
 // TestValidateSemantics_MultiByteCharacters ensures that multi-byte Unicode
 // characters (like em-dashes or emojis) do not corrupt the string slicing
 // used to look backward for function contexts.
