@@ -830,6 +830,8 @@ export function ListDroppedTables(arg1:string,arg2:string):Promise<Array<snowfla
 
 export function ListEnvPackages():Promise<Array<snowpark.PackageInfo>>;
 
+export function ListEventTables():Promise<Array<string>>;
+
 export function ListExportableDatabases():Promise<Array<string>>;
 
 export function ListExternalAccessIntegrations():Promise<Array<snowflake.IntegrationRow>>;

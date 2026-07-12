@@ -1082,6 +1082,34 @@ func (c *Client) ListExternalVolumes(ctx context.Context) ([]string, error) {
 	return c.queryStringSlice(ctx, "SHOW EXTERNAL VOLUMES", 1)
 }
 
+// ListEventTables returns the fully-qualified names (DB.SCHEMA.NAME, unquoted)
+// of all event tables visible to the current role account-wide. Used to offer
+// an EVENT_TABLE target in the Database Properties modal.
+func (c *Client) ListEventTables(ctx context.Context) ([]string, error) {
+	res, err := c.Execute(ctx, "SHOW EVENT TABLES IN ACCOUNT")
+	if err != nil {
+		return nil, err
+	}
+	idxs := colIndexMap(res.Columns, "name", "database_name", "schema_name")
+	names := []string{}
+	for _, row := range res.Rows {
+		var parts []string
+		for _, p := range []string{
+			strVal(row, idxs["database_name"]),
+			strVal(row, idxs["schema_name"]),
+			strVal(row, idxs["name"]),
+		} {
+			if p != "" {
+				parts = append(parts, p)
+			}
+		}
+		if len(parts) > 0 {
+			names = append(names, strings.Join(parts, "."))
+		}
+	}
+	return names, nil
+}
+
 // ApiIntegration holds metadata for a single API integration.
 type ApiIntegration struct {
 	Name    string `json:"name"`

@@ -1522,6 +1522,10 @@ export function ListEnvPackages() {
   return window['go']['app']['App']['ListEnvPackages']();
 }
 
+export function ListEventTables() {
+  return window['go']['app']['App']['ListEventTables']();
+}
+
 export function ListExportableDatabases() {
   return window['go']['app']['App']['ListExportableDatabases']();
 }

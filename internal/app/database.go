@@ -43,3 +43,13 @@ func (a *App) GetDatabaseParameters(database string) (*snowflake.QueryResult, er
 	sql := fmt.Sprintf("SHOW PARAMETERS IN DATABASE %s", snowflake.QuoteIdent(database))
 	return a.client.Execute(a.ctx, sql)
 }
+
+// ListEventTables returns the fully-qualified names of all event tables visible
+// to the current role account-wide, for the EVENT_TABLE picker in the Database
+// Properties modal.
+func (a *App) ListEventTables() ([]string, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return a.client.ListEventTables(a.ctx)
+}
