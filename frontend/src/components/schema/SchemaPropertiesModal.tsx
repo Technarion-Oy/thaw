@@ -624,7 +624,7 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
                 value={catalogSync}
                 load={catalogNames}
                 busy={busyKey === "CATALOG_SYNC"}
-                onSet={(v) => applyParam("CATALOG_SYNC")(`SET CATALOG_SYNC = ${quoteIdent(v)}`)}
+                onSet={(v) => applyParam("CATALOG_SYNC")(`SET CATALOG_SYNC = ${q1(v)}`)}
                 onUnset={() => applyParam("CATALOG_SYNC")("UNSET CATALOG_SYNC")}
               />
               <EditRow
@@ -646,7 +646,7 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
                 value={icebergMerge}
                 options={MERGE_BEHAVIOR}
                 busy={busyKey === "ICEBERG_MERGE_ON_READ_BEHAVIOR"}
-                onSet={(v) => applyParam("ICEBERG_MERGE_ON_READ_BEHAVIOR")(`SET ICEBERG_MERGE_ON_READ_BEHAVIOR = ${v}`)}
+                onSet={(v) => applyParam("ICEBERG_MERGE_ON_READ_BEHAVIOR")(`SET ICEBERG_MERGE_ON_READ_BEHAVIOR = ${q1(v)}`)}
                 onUnset={() => applyParam("ICEBERG_MERGE_ON_READ_BEHAVIOR")("UNSET ICEBERG_MERGE_ON_READ_BEHAVIOR")}
               />
               <SelectRow
@@ -675,7 +675,7 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
                 value={notebookCpu}
                 load={ListComputePools}
                 busy={busyKey === "DEFAULT_NOTEBOOK_COMPUTE_POOL_CPU"}
-                onSet={(v) => applyParam("DEFAULT_NOTEBOOK_COMPUTE_POOL_CPU")(`SET DEFAULT_NOTEBOOK_COMPUTE_POOL_CPU = ${quoteIdent(v)}`)}
+                onSet={(v) => applyParam("DEFAULT_NOTEBOOK_COMPUTE_POOL_CPU")(`SET DEFAULT_NOTEBOOK_COMPUTE_POOL_CPU = ${q1(v)}`)}
                 onUnset={() => applyParam("DEFAULT_NOTEBOOK_COMPUTE_POOL_CPU")("UNSET DEFAULT_NOTEBOOK_COMPUTE_POOL_CPU")}
               />
               <PickerRow
@@ -683,7 +683,7 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
                 value={notebookGpu}
                 load={ListComputePools}
                 busy={busyKey === "DEFAULT_NOTEBOOK_COMPUTE_POOL_GPU"}
-                onSet={(v) => applyParam("DEFAULT_NOTEBOOK_COMPUTE_POOL_GPU")(`SET DEFAULT_NOTEBOOK_COMPUTE_POOL_GPU = ${quoteIdent(v)}`)}
+                onSet={(v) => applyParam("DEFAULT_NOTEBOOK_COMPUTE_POOL_GPU")(`SET DEFAULT_NOTEBOOK_COMPUTE_POOL_GPU = ${q1(v)}`)}
                 onUnset={() => applyParam("DEFAULT_NOTEBOOK_COMPUTE_POOL_GPU")("UNSET DEFAULT_NOTEBOOK_COMPUTE_POOL_GPU")}
               />
               <PickerRow
@@ -691,7 +691,7 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
                 value={streamlitWh}
                 load={ListWarehouses}
                 busy={busyKey === "DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE"}
-                onSet={(v) => applyParam("DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE")(`SET DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE = ${quoteIdent(v)}`)}
+                onSet={(v) => applyParam("DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE")(`SET DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE = ${q1(v)}`)}
                 onUnset={() => applyParam("DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE")("UNSET DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE")}
               />
             </tbody>

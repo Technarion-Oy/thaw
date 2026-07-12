@@ -42,7 +42,13 @@ context-menu "Properties" item.
   extension + SHOW-PARAMETERS-fallback shape).
 - `SWAP WITH` is destructive (exchanges all contents of the two schemas) and, like
   `RENAME TO`, invalidates the modal's `name` prop — it confirms first, then closes.
-- Identifier-valued params (external volume, catalog, compute pools, warehouse) are
-  double-quoted (`quoteIdent`) on `SET`; fixed-choice enums are interpolated raw from
-  their closed option list. Text params (Iceberg collation/version, base location
-  prefix) and tag values are string-literal-quoted (`q1`).
+- Quoting follows the authoritative `ParseAlterSchema` grammar in
+  `internal/sqlgrammar/alter.go`, **not** whether the value looks like an identifier:
+  only `EXTERNAL_VOLUME` / `CATALOG` accept a bare identifier (`parseScalar` → double-
+  quoted via `quoteIdent`, same as `SWAP WITH` / `RENAME TO`). `CATALOG_SYNC`, the
+  notebook compute pools, the Streamlit warehouse, `ICEBERG_MERGE_ON_READ_BEHAVIOR`,
+  the Iceberg text params, `BASE_LOCATION_PREFIX`, tag values, and the `'YES'`/`'NO'`
+  of `REPLICABLE_WITH_FAILOVER_GROUPS` all require a **string literal** (`parseString`
+  → single-quoted via `q1`). The `TRUE`/`FALSE` / `AUTO` / `PRIVILEGED` / policy enums
+  are interpolated raw from their closed option list. When adding a row, check the
+  matching `v.option(...)` in `alter.go` for `parseScalar` vs `parseString`.
