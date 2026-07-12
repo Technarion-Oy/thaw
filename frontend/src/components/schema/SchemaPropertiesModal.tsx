@@ -638,8 +638,8 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
                 label="Iceberg version default"
                 value={icebergVersion}
                 canUnset={icebergVersion !== ""}
-                onSave={saveTextParam("ICEBERG_VERSION_DEFAULT")}
-                onUnset={() => saveTextParam("ICEBERG_VERSION_DEFAULT")("")}
+                onSave={saveIntParam("ICEBERG_VERSION_DEFAULT")}
+                onUnset={() => saveIntParam("ICEBERG_VERSION_DEFAULT")("")}
               />
               <SelectRow
                 label="Iceberg merge-on-read behavior"
