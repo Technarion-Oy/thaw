@@ -143,7 +143,7 @@ func scan(src string, n int, pos, line, col *int) Token {
 	// and backslash escapes (`\'`, `\\`). A quote is a real closer only when an
 	// even number of backslashes immediately precedes it (`\\'` closes; `\'`
 	// does not). Quoted identifiers below deliberately keep the simpler `""`-only
-	// rule — Snowflake identifiers do not honour backslash escapes.
+	// rule — Snowflake identifiers do not honor backslash escapes.
 	case c == '\'':
 		i := start + 1
 		terminated := false
