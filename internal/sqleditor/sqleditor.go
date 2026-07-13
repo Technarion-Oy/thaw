@@ -2056,6 +2056,18 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 					localColCache[tableNameU] = columns
 				}
 			}
+		} else if aPath, aCols, aok := parseAlterAddColumns(rawSig, raw, true); aok {
+			// ALTER TABLE … ADD [COLUMN] on a table created in-script: merge the
+			// added columns so later references resolve (issue #715).
+			if parts := extractIdentParts(aPath, true); len(parts) > 0 {
+				tableNameU := strings.ToUpper(parts[len(parts)-1])
+				if existing, ok := localColCache[tableNameU]; ok {
+					merged := make([]ColInfo, 0, len(existing)+len(aCols))
+					merged = append(merged, existing...)
+					merged = append(merged, aCols...)
+					localColCache[tableNameU] = merged
+				}
+			}
 		}
 
 		// 2. CTE projections in this statement

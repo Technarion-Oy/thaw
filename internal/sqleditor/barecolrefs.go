@@ -13,6 +13,7 @@ package sqleditor
 import (
 	"strings"
 
+	sf "thaw/internal/snowflake"
 	"thaw/internal/sqltok"
 )
 
@@ -53,7 +54,9 @@ var (
 //
 //  1. A pre-scan that builds a local column cache from CREATE TABLE statements
 //     in the script (so subsequent INSERT or REFERENCES can find columns even
-//     if the table is not yet in Snowflake).
+//     if the table is not yet in Snowflake). ALTER TABLE … ADD [COLUMN] effects
+//     are merged into that cache so later references to added columns resolve
+//     (issue #715).
 //  2. Column validation for INSERT column lists:
 //     INSERT INTO t (col1, col2) VALUES (...)
 //  3. Column validation for FK REFERENCES column lists inside CREATE TABLE:
@@ -89,6 +92,11 @@ func ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {
 
 		rawPath, parenOff, ok := matchCreateTablePre(sig, raw)
 		if !ok {
+			// Apply ALTER TABLE … ADD [COLUMN] to tables already created in-script
+			// so later INSERT/SELECT can find the added columns (issue #715).
+			if aPath, aCols, aok := parseAlterAddColumns(sig, raw, ic); aok {
+				applyAlterAddToLocalCache(aPath, aCols, localColCache, ic)
+			}
 			continue
 		}
 		parts := extractIdentParts(rawPath, ic)
@@ -173,6 +181,16 @@ func bcrCacheKey(db, schema, table string) string {
 	return db + "\x00" + schema + "\x00" + table
 }
 
+// splitBcrCacheKey reverses bcrCacheKey into its (db, schema, table) parts. ok
+// is false for a key that isn't the expected 3-part shape.
+func splitBcrCacheKey(k string) (db, schema, table string, ok bool) {
+	parts := strings.SplitN(k, "\x00", 3)
+	if len(parts) != 3 {
+		return "", "", "", false
+	}
+	return parts[0], parts[1], parts[2], true
+}
+
 // extractBalancedBlock returns the substring of s starting at openIdx
 // (which must be '(') up to and including the matching closing ')'.
 // Returns "" if the parentheses are unbalanced.
@@ -206,11 +224,23 @@ func extractBalancedBlock(s string, openIdx int) string {
 
 // parseCreateTableColDefs splits a raw column-definition block (the text
 // between CREATE TABLE name( ... )) into individual ColInfo entries.
-// It handles comments (-- and /* */), double-quoted identifiers with special
-// characters, and single-quoted string literals so that commas and parentheses
-// inside those contexts do not interfere with column splitting.
 func parseCreateTableColDefs(colsRaw string, ic bool) []ColInfo {
 	var columns []ColInfo
+	for _, def := range splitColDefs(colsRaw) {
+		if col, _, ok := parseFirstIdentAsCol(def, ic); ok {
+			columns = append(columns, col)
+		}
+	}
+	return columns
+}
+
+// splitColDefs splits a raw column-definition block into individual
+// comma-separated definition strings. It handles comments (-- and /* */),
+// double-quoted identifiers with special characters, and single-quoted string
+// literals so that commas and parentheses inside those contexts do not
+// interfere with column splitting.
+func splitColDefs(colsRaw string) []string {
+	var defs []string
 	depth := 0
 	inDouble := false
 	inSingle := false
@@ -296,9 +326,7 @@ func parseCreateTableColDefs(colsRaw string, ic bool) []ColInfo {
 			// the caller already stripped the outer parens, but guard anyway.
 		case c == ',' && depth == 0:
 			if def := strings.TrimSpace(current.String()); def != "" {
-				if col, ok := parseFirstIdentAsCol(def, ic); ok {
-					columns = append(columns, col)
-				}
+				defs = append(defs, def)
 			}
 			current.Reset()
 		default:
@@ -306,29 +334,195 @@ func parseCreateTableColDefs(colsRaw string, ic bool) []ColInfo {
 		}
 	}
 	if def := strings.TrimSpace(current.String()); def != "" {
-		if col, ok := parseFirstIdentAsCol(def, ic); ok {
-			columns = append(columns, col)
-		}
+		defs = append(defs, def)
 	}
-	return columns
+	return defs
 }
 
-func parseFirstIdentAsCol(def string, ic bool) (ColInfo, bool) {
-	// Tokenize the column definition and take the first identifier.
-	tokens := sqltok.Tokenize(def)
-	for _, tok := range tokens {
-		if tok.Kind == sqltok.EOF {
-			break
-		}
-		if tok.Kind.IsTrivia() {
+// parseFirstIdentAsCol returns the first identifier of a column definition as a
+// ColInfo. nextUpper is the upper-cased text of the significant token that
+// follows the name (empty if none) — for a real column definition that is the
+// data type, which callers use to tell a column apart from a non-column clause.
+func parseFirstIdentAsCol(def string, ic bool) (col ColInfo, nextUpper string, ok bool) {
+	sig := sigToks(sqltok.Tokenize(def))
+	if len(sig) == 0 || !isIdent(sig[0]) {
+		return ColInfo{}, "", false
+	}
+	if len(sig) >= 2 {
+		nextUpper = strings.ToUpper(sig[1].Text(def))
+	}
+	return ColInfo{Name: normIdent(sig[0].Text(def), ic), DataType: "UNKNOWN"}, nextUpper, true
+}
+
+// dataTypeLead is the set of first words of every recognized Snowflake data
+// type ("DOUBLE" for "DOUBLE PRECISION", etc.). A genuine ALTER … ADD column
+// definition is `<name> <type> …`, so the token after the name is a type; the
+// non-column ADD clauses (CONSTRAINT, PRIMARY KEY, SEARCH OPTIMIZATION, ROW
+// ACCESS POLICY, STORAGE LIFECYCLE POLICY, …) instead have a keyword there. This
+// set is the authority used to tell the two apart (issue #715).
+var dataTypeLead = func() map[string]bool {
+	m := make(map[string]bool)
+	for _, dt := range sf.AllDataTypes() {
+		m[strings.ToUpper(strings.Fields(dt.Name)[0])] = true
+	}
+	return m
+}()
+
+// stripAddColItemPrefix removes a leading COLUMN keyword and/or IF NOT EXISTS
+// from a single comma-separated ALTER TABLE … ADD item, so the repeated
+// "ADD COLUMN a INT, COLUMN b INT" form yields the real names "a" and "b"
+// instead of discarding the COLUMN-prefixed items (issue #715). columnKw
+// reports whether a leading COLUMN keyword was present — it unambiguously marks
+// the item as a real column, even when its name is a keyword.
+func stripAddColItemPrefix(def string) (stripped string, columnKw bool) {
+	sig := sigToks(sqltok.Tokenize(def))
+	i := 0
+	if kwAt(sig, def, i, "COLUMN") {
+		i++
+		columnKw = true
+	}
+	if kwAt(sig, def, i, "IF") && kwAt(sig, def, i+1, "NOT") && kwAt(sig, def, i+2, "EXISTS") {
+		i += 3
+	}
+	if i == 0 || i >= len(sig) {
+		return def, columnKw
+	}
+	return def[sig[i].Start:], columnKw
+}
+
+// parseAlterAddColumns matches
+//
+//	ALTER TABLE [IF EXISTS] <name> ADD [COLUMN] [IF NOT EXISTS] <col> <type> [, …]
+//
+// and returns the table's ident-path text and the added columns. Non-column ADD
+// clauses (CONSTRAINT / PRIMARY KEY / …) yield no columns. ok is false when the
+// statement is not an ALTER TABLE … ADD that introduces at least one column.
+// sig is the caller's already-computed significant tokens for raw.
+func parseAlterAddColumns(sig []sqltok.Token, raw string, ic bool) (tablePath string, cols []ColInfo, ok bool) {
+	if !kwAt(sig, raw, 0, "ALTER") || !kwAt(sig, raw, 1, "TABLE") {
+		return "", nil, false
+	}
+	i := 2
+	if kwAt(sig, raw, i, "IF") && kwAt(sig, raw, i+1, "EXISTS") {
+		i += 2
+	}
+	path, pos := readIdentPath(sig, raw, i)
+	if path == "" || !kwAt(sig, raw, pos, "ADD") {
+		return "", nil, false
+	}
+	pos++
+	topColumnKw := false
+	if kwAt(sig, raw, pos, "COLUMN") {
+		pos++
+		topColumnKw = true
+	}
+	if kwAt(sig, raw, pos, "IF") && kwAt(sig, raw, pos+1, "NOT") && kwAt(sig, raw, pos+2, "EXISTS") {
+		pos += 3
+	}
+	if pos >= len(sig) {
+		return "", nil, false
+	}
+	// The column-def block is everything from the first def token to end of stmt.
+	// Reuse the CREATE TABLE column splitter — it already handles commas, quotes,
+	// comments and nested parens — then strip each item's optional COLUMN / IF NOT
+	// EXISTS prefix. An item is a real column when the COLUMN keyword was explicit
+	// (top-level for the first item, or per-item) OR the token after the name is a
+	// data type; that rejects the non-column ADD clauses (CONSTRAINT, PRIMARY KEY,
+	// SEARCH OPTIMIZATION, ROW ACCESS POLICY, STORAGE LIFECYCLE POLICY, …) whose
+	// second token is a keyword rather than a type (issue #715). The top-level
+	// COLUMN keyword only governs the first split item — it never licenses a later
+	// non-type item to be cached as a column.
+	for idx, def := range splitColDefs(raw[sig[pos].Start:]) {
+		item, itemColumnKw := stripAddColItemPrefix(def)
+		col, nextUpper, cok := parseFirstIdentAsCol(item, ic)
+		if !cok {
 			continue
 		}
-		if isIdent(tok) {
-			return ColInfo{Name: normIdent(tok.Text(def), ic), DataType: "UNKNOWN"}, true
+		explicitColumn := itemColumnKw || (idx == 0 && topColumnKw)
+		if !explicitColumn && !dataTypeLead[nextUpper] {
+			continue
 		}
-		break // first non-WS token is not an identifier
+		cols = append(cols, col)
 	}
-	return ColInfo{}, false
+	if len(cols) == 0 {
+		return "", nil, false
+	}
+	return path, cols, true
+}
+
+// applyAlterAddToLocalCache appends the columns added by an ALTER TABLE … ADD
+// COLUMN to the in-script column cache, but only for tables already created
+// in-script (whose keys already exist) — never inventing a partial cache entry
+// for a table that lives only in Snowflake metadata.
+func applyAlterAddToLocalCache(tablePath string, cols []ColInfo, localColCache map[string][]ColInfo, ic bool) {
+	parts := extractIdentParts(tablePath, ic)
+	if len(parts) == 0 {
+		return
+	}
+	tableName := parts[len(parts)-1]
+	var altSchema, altDb string
+	if len(parts) >= 2 {
+		altSchema = parts[len(parts)-2]
+	}
+	if len(parts) >= 3 {
+		altDb = parts[len(parts)-3]
+	}
+	// Resolve the ALTER to the specific table it targets by finding the most
+	// qualified existing cache key for its path. CREATE stores one column slice
+	// under this table's 1-/2-/3-part keys, so that key identifies the target's
+	// slice; keys the last CREATE of a same-named table in another schema left
+	// on the bare (1-part) slot point at a *different* slice and must be left
+	// alone (issue #715).
+	var targetKey string
+	for _, tk := range []string{
+		bcrCacheKey(altDb, altSchema, tableName),
+		bcrCacheKey("", altSchema, tableName),
+		bcrCacheKey("", "", tableName),
+	} {
+		if _, ok := localColCache[tk]; ok {
+			targetKey = tk
+			break
+		}
+	}
+	if targetKey == "" {
+		return // table not created in-script
+	}
+	target := localColCache[targetKey]
+
+	// Collect every key that aliases the target table's slice. All of these keys
+	// share one backing array (the target and its siblings hold identical
+	// contents), so they must all be refreshed together — a reference using a
+	// qualification other than the ALTER's still sees the added column.
+	aliasKeys := []string{targetKey}
+	for k := range localColCache {
+		if k == targetKey {
+			continue
+		}
+		if _, _, kTable, ok := splitBcrCacheKey(k); !ok || kTable != tableName {
+			continue
+		}
+		if sameColSlice(localColCache[k], target) {
+			aliasKeys = append(aliasKeys, k)
+		}
+	}
+
+	// Build ONE merged slice and store it under every aliasing key, preserving
+	// the shared-backing-array invariant CREATE established. Allocating a fresh
+	// slice per key instead would desync the siblings, so a second ALTER on the
+	// same table could no longer detect them via sameColSlice (issue #715).
+	merged := make([]ColInfo, 0, len(target)+len(cols))
+	merged = append(merged, target...)
+	merged = append(merged, cols...)
+	for _, k := range aliasKeys {
+		localColCache[k] = merged
+	}
+}
+
+// sameColSlice reports whether a and b share the same backing array — i.e. they
+// are the *same* cache entry stored under multiple keys, not merely equal. Empty
+// slices have no identity, so they never match.
+func sameColSlice(a, b []ColInfo) bool {
+	return len(a) > 0 && len(a) == len(b) && &a[0] == &b[0]
 }
 
 // lookupColsForRef finds the ColInfo slice for a table identified by

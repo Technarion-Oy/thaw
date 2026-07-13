@@ -72,6 +72,39 @@ func TestValidateBareColumnRefs_Valid(t *testing.T) {
 		"CREATE TABLE t6 (\n  \"col\"\"name\" INT,\n  other INT\n);\nINSERT INTO t6 (\"col\"\"name\", other) SELECT 1, 2;",
 		// Column after a DEFAULT with escaped single-quote must still be cached.
 		"CREATE TABLE t7 (\n  greeting VARCHAR DEFAULT 'it''s',\n  id INT\n);\nINSERT INTO t7 (greeting, id) SELECT 'hi', 1;",
+
+		// Issue #715: ALTER TABLE … ADD COLUMN must update the in-script column
+		// cache so later INSERT/SELECT can find the added column.
+		"CREATE TABLE loc_t (a INT);\nALTER TABLE loc_t ADD COLUMN b INT;\nINSERT INTO loc_t (a, b) VALUES (1, 2);\nSELECT b FROM loc_t;",
+		// Multi-column ADD (with the optional COLUMN keyword omitted).
+		"CREATE TABLE loc_t2 (a INT);\nALTER TABLE loc_t2 ADD b INT, c INT;\nINSERT INTO loc_t2 (a, b, c) VALUES (1, 2, 3);",
+		// ADD COLUMN IF NOT EXISTS.
+		"CREATE TABLE loc_t3 (a INT);\nALTER TABLE loc_t3 ADD COLUMN IF NOT EXISTS b INT;\nSELECT a, b FROM loc_t3;",
+		// Multi-column ADD with the COLUMN keyword repeated per item (issue #715):
+		// every item's real name must be cached, not just the first.
+		"CREATE TABLE loc_t4 (a INT);\nALTER TABLE loc_t4 ADD COLUMN b INT, COLUMN c INT;\nSELECT b, c FROM loc_t4;",
+		// Issue #715 edge case: a quoted column whose name collides with a
+		// constraint keyword ("check") must still be cached — a quoted name can
+		// never be the ADD clause keyword.
+		"CREATE TABLE loc_t5 (a INT);\nALTER TABLE loc_t5 ADD COLUMN \"check\" INT;\nINSERT INTO loc_t5 (a, \"check\") VALUES (1, 2);",
+		// Issue #715 edge case: an explicit COLUMN keyword marks the item as a
+		// real column even when its (bare) name collides with a clause keyword
+		// (SEARCH / ROW / STORAGE), so it must still be cached.
+		"CREATE TABLE loc_t6 (a INT);\nALTER TABLE loc_t6 ADD COLUMN search INT;\nSELECT a, search FROM loc_t6;",
+		// Issue #715: CREATE schema-qualified, ALTER bare, reference schema-
+		// qualified — the merge must refresh every cache key for the table, not
+		// only the one the ALTER's qualification reconstructs, or the qualified
+		// reference hits a stale slice.
+		"CREATE TABLE sch.loc_t7 (a INT);\nALTER TABLE loc_t7 ADD COLUMN b INT;\nSELECT b FROM sch.loc_t7;",
+		// Reverse direction: CREATE bare, ALTER schema-qualified, reference bare.
+		"CREATE TABLE loc_t8 (a INT);\nALTER TABLE sch.loc_t8 ADD COLUMN b INT;\nSELECT b FROM loc_t8;",
+		// Issue #715: two ALTER … ADD COLUMN on the same table, referenced through
+		// a qualification neither ALTER used. The first merge must not desync the
+		// table's sibling cache keys, or the second ALTER's column goes stale.
+		"CREATE TABLE sch.loc_t9 (a INT);\nALTER TABLE sch.loc_t9 ADD COLUMN b INT;\nALTER TABLE loc_t9 ADD COLUMN c INT;\nSELECT b, c FROM sch.loc_t9;",
+		// Two ALTERs at the same qualification, referenced bare — both added
+		// columns must be visible through the sibling (bare) key.
+		"CREATE TABLE sch.loc_t10 (a INT);\nALTER TABLE sch.loc_t10 ADD COLUMN b INT;\nALTER TABLE sch.loc_t10 ADD COLUMN c INT;\nSELECT a, b, c FROM loc_t10;",
 	}
 
 	req := ValidateBareColsRequest{
@@ -136,6 +169,34 @@ func TestValidateBareColumnRefs_Invalid(t *testing.T) {
 		{"CREATE VIEW bare ref to quoted lowercase col",
 			"CREATE OR REPLACE TABLE RAW_CUSTOMERS1 (\n  \"customer_id\" INT,\n  FIRST_NAME VARCHAR,\n  LAST_NAME VARCHAR,\n  REGISTRATION_DATE DATE,\n  STATUS VARCHAR\n);\n\nCREATE OR REPLACE VIEW VW_CLEAN_CUSTOMERS AS\nSELECT\n  customer_id,\n  UPPER(FIRST_NAME || ' ' || LAST_NAME) AS FULL_NAME,\n  REGISTRATION_DATE\nFROM RAW_CUSTOMERS1\nWHERE STATUS = 'ACTIVE';",
 			[]string{"CUSTOMER_ID"}},
+		// Issue #715: after ALTER ADD COLUMN b, a genuinely missing column c is
+		// still flagged (the cache merge must not suppress real errors).
+		{"ALTER add column still flags missing col",
+			"CREATE TABLE loc_t (a INT);\nALTER TABLE loc_t ADD COLUMN b INT;\nSELECT c FROM loc_t;",
+			[]string{"c"}},
+		// ADD CONSTRAINT must not be cached as a column named CONSTRAINT/PK.
+		{"ALTER add constraint is not cached as a column",
+			"CREATE TABLE loc_t (a INT);\nALTER TABLE loc_t ADD CONSTRAINT pk PRIMARY KEY (a);\nSELECT pk FROM loc_t;",
+			[]string{"pk"}},
+		// A non-column ADD clause (no COLUMN keyword, second token is not a type)
+		// must not be cached as a column named after its lead keyword, so a later
+		// bare reference to that name is still flagged (issue #715). SEARCH
+		// OPTIMIZATION → the pseudo-column "search" must not resolve.
+		{"ALTER add search optimization is not cached as a column",
+			"CREATE TABLE loc_t (a INT);\nALTER TABLE loc_t ADD SEARCH OPTIMIZATION ON EQUALITY(a);\nSELECT search FROM loc_t;",
+			[]string{"search"}},
+		// Issue #715: an ALTER on a schema-qualified table must not leak the added
+		// column into a same-named table in a different schema — SELECT z from the
+		// other schema's table is still flagged.
+		{"ALTER add column does not pollute same-named table in other schema",
+			"CREATE TABLE a.loc_t (x INT);\nCREATE TABLE b.loc_t (y INT);\nALTER TABLE a.loc_t ADD COLUMN z INT;\nSELECT z FROM b.loc_t;",
+			[]string{"z"}},
+		// …and the added column must not leak into the *bare* key either: bare
+		// loc_t resolves to the last-created same-named table (b.loc_t), which
+		// never got z, so a bare reference is still flagged.
+		{"ALTER add column does not pollute bare key of same-named table",
+			"CREATE TABLE a.loc_t (x INT);\nCREATE TABLE b.loc_t (y INT);\nALTER TABLE a.loc_t ADD COLUMN z INT;\nSELECT z FROM loc_t;",
+			[]string{"z"}},
 	}
 
 	req := ValidateBareColsRequest{
@@ -1213,6 +1274,44 @@ func TestValidateSemantics_LocalTableAliasColumns(t *testing.T) {
 				t.Errorf("Expected warning for column %q but got: %v", tt.wantCol, warns)
 			}
 		})
+	}
+}
+
+// TestValidateSemantics_AlterAddColumn verifies that the ValidateSemantics
+// pre-scan (the second #715 call site, alongside ValidateBareColumnRefs) merges
+// columns added by an in-script ALTER TABLE … ADD COLUMN into the local cache,
+// so a later alias.column reference to the added column doesn't false-positive —
+// while a genuinely missing column is still flagged.
+func TestValidateSemantics_AlterAddColumn(t *testing.T) {
+	valid := "CREATE TABLE foo (a NUMBER);\n" +
+		"ALTER TABLE foo ADD COLUMN b VARCHAR;\n" +
+		"SELECT f.a, f.b FROM foo f"
+	if warns := getWarnings(ValidateSemantics(valid, nil, nil)); len(warns) > 0 {
+		t.Errorf("Expected no warnings for ALTER-added column, got %d: %v", len(warns), warns)
+	}
+
+	// Two ALTER … ADD COLUMN on the same table: both added columns must resolve.
+	twoAlters := "CREATE TABLE foo (a NUMBER);\n" +
+		"ALTER TABLE foo ADD COLUMN b VARCHAR;\n" +
+		"ALTER TABLE foo ADD COLUMN c VARCHAR;\n" +
+		"SELECT f.a, f.b, f.c FROM foo f"
+	if warns := getWarnings(ValidateSemantics(twoAlters, nil, nil)); len(warns) > 0 {
+		t.Errorf("Expected no warnings for two ALTER-added columns, got %d: %v", len(warns), warns)
+	}
+
+	invalid := "CREATE TABLE foo (a NUMBER);\n" +
+		"ALTER TABLE foo ADD COLUMN b VARCHAR;\n" +
+		"SELECT f.c FROM foo f"
+	warns := getWarnings(ValidateSemantics(invalid, nil, nil))
+	found := false
+	for _, w := range warns {
+		if strings.Contains(w.Message, "'c'") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected a warning for missing column c, got: %v", warns)
 	}
 }
 
