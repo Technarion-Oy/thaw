@@ -79,6 +79,55 @@ func TestValidateTablesExist_EmptyCatalog_NoFalsePositive(t *testing.T) {
 	}
 }
 
+// ALTER TABLE/VIEW RENAME and ALTER TABLE … SWAP WITH: the DB is known but its
+// schema list hasn't been fetched yet (empty for that DB), so a qualified
+// db.schema.table target must not be flagged (#709). Mirrors the frontend
+// state right after connecting.
+func TestValidateTablesExist_AlterMissingSchemaData_NoFalsePositive(t *testing.T) {
+	req := ValidateTablesExistRequest{
+		KnownDatabases: []string{"MYDB"},
+		// No schema entries for MYDB — schema list not yet fetched.
+	}
+	silent := []string{
+		"ALTER TABLE MYDB.UNLISTEDSCHEMA.TBL RENAME TO MYDB.UNLISTEDSCHEMA.TBL2;",
+		"ALTER VIEW MYDB.UNLISTEDSCHEMA.V RENAME TO MYDB.UNLISTEDSCHEMA.V2;",
+		"ALTER TABLE MYDB.PUBLIC.A SWAP WITH MYDB.UNLISTEDSCHEMA.B;",
+	}
+	for _, sql := range silent {
+		if m := markersFor(req, sql); len(m) != 0 {
+			t.Errorf("for %q: expected no marker (DB known, schema list not fetched), got %d: %+v", sql, len(m), m)
+		}
+	}
+}
+
+// Negative control for the ALTER paths: with real schema data for the DB, a
+// genuinely missing schema in RENAME / SWAP WITH is still flagged.
+func TestValidateTablesExist_AlterKnownSchemaData_StillFlagsMissing(t *testing.T) {
+	req := ValidateTablesExistRequest{
+		KnownDatabases: []string{"MYDB"},
+		KnownSchemas:   []SchemaEntry{{DB: "MYDB", Name: "PUBLIC"}},
+		// A is a real table so only the SWAP target's bad schema is under test.
+		ResolvedRefs: []ResolvedRef{{DB: "MYDB", Schema: "PUBLIC", Name: "A"}},
+	}
+	cases := []struct{ sql, want string }{
+		{"ALTER TABLE MYDB.NOPE.TBL RENAME TO MYDB.NOPE.TBL2;", "Schema 'NOPE'"},
+		{"ALTER TABLE MYDB.PUBLIC.A SWAP WITH MYDB.NOPE.B;", "Schema 'NOPE'"},
+	}
+	for _, c := range cases {
+		m := markersFor(req, c.sql)
+		found := false
+		for _, mk := range m {
+			if strings.Contains(mk.Message, c.want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("for %q: expected a marker containing %q, got %+v", c.sql, c.want, m)
+		}
+	}
+}
+
 // Negative control: when we DO have schema data for the DB, a genuinely missing
 // schema is still flagged (the guard must not suppress real errors).
 func TestValidateTablesExist_KnownSchemaData_StillFlagsMissing(t *testing.T) {

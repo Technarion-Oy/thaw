@@ -410,6 +410,15 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 						if ftDB != "" && len(req.KnownDatabases) == 0 {
 							continue
 						}
+						// DB exists but its schema list hasn't been fetched — we
+						// can validate neither the schema nor the table under it,
+						// so don't flag (#709). A genuinely unknown DB still falls
+						// through to resolveErrorToken.
+						if ftDB != "" && ftSchema != "" &&
+							dbExists(ftDB, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) &&
+							!hasSchemaDataForDB(ftDB, req.KnownSchemas, scriptEverCreatedSchemasByDB, req.ResolvedRefs, checkEq) {
+							continue
+						}
 						badToken, msgFn := resolveErrorToken(ftTable, ftDB, ftSchema,
 							scriptCreatedDbsAndSchemas, req.KnownDatabases, req.KnownSchemas, req.ResolvedRefs, checkEq)
 						for _, t := range findTokensLocally(raw, []string{badToken}, r.StartLine, ic) {
@@ -436,6 +445,15 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 					isLive := anyRefMatch(req.ResolvedRefs, tgtTable, tgtDB, tgtSchema, checkEq)
 					if !isLive {
 						if tgtDB != "" && len(req.KnownDatabases) == 0 {
+							continue
+						}
+						// DB exists but its schema list hasn't been fetched — we
+						// can validate neither the schema nor the table under it,
+						// so don't flag (#709). A genuinely unknown DB still falls
+						// through to resolveErrorToken.
+						if tgtDB != "" && tgtSchema != "" &&
+							dbExists(tgtDB, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) &&
+							!hasSchemaDataForDB(tgtDB, req.KnownSchemas, scriptEverCreatedSchemasByDB, req.ResolvedRefs, checkEq) {
 							continue
 						}
 						badToken, msgFn := resolveErrorToken(tgtTable, tgtDB, tgtSchema,
