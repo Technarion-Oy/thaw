@@ -18,6 +18,9 @@ func TestValidateBareColumnRefs_Valid(t *testing.T) {
 		"SELECT * EXCLUDE DEPT_ID FROM DB.SCH.EMPLOYEES",
 		// The parenthesized form must stay clean too.
 		"SELECT * EXCLUDE (DEPT_ID) FROM DB.SCH.EMPLOYEES",
+		// #714 follow-up: a comment between `*` and EXCLUDE must not break the
+		// contextual recognition (token-based lookback ignores comments).
+		"SELECT * /* cols */ EXCLUDE DEPT_ID FROM DB.SCH.EMPLOYEES",
 		// Case insensitivity inside quotes
 		`SELECT "first_name", salary FROM "DB"."SCH"."EMPLOYEES"`,
 		// Aliased — qualified refs with valid columns must not warn
