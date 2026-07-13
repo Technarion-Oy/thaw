@@ -66,13 +66,25 @@ type tokenPos struct {
 	quoted bool
 }
 
+// stmtStartCol returns the 1-based document column of a statement's first
+// character (byte-based, like sqltok columns). A statement that begins mid-line
+// (e.g. the second of `SELECT 1; SELECT …`) starts past column 1, so tokens on
+// the statement's first line must add this offset to become document-absolute.
+func stmtStartCol(sql string, r StatementRange) int {
+	lineStart := strings.LastIndexByte(sql[:r.StartOffset], '\n') + 1
+	return r.StartOffset - lineStart + 1
+}
+
 // findTokensLocally scans stmtText for occurrences of any identifier listed
-// in targets.  baseLine is the 1-based document line of stmtText's first
-// line.  Returns one tokenPos per match (in document order).
+// in targets.  baseLine is the 1-based document line of stmtText's first line,
+// and baseCol the document column of its first character (see stmtStartCol);
+// tokens on the statement's first line are rebased by baseCol so a statement
+// that starts mid-line reports document-absolute columns.  Returns one tokenPos
+// per match (in document order).
 //
 // If ignoreCase is true the lookup is case-insensitive, otherwise quoted
 // identifiers are matched exactly and unquoted ones are uppercased.
-func findTokensLocally(stmtText string, targets []string, baseLine int, ignoreCase bool) []tokenPos {
+func findTokensLocally(stmtText string, targets []string, baseLine, baseCol int, ignoreCase bool) []tokenPos {
 	targetSet := make(map[string]struct{}, len(targets))
 	for _, t := range targets {
 		if ignoreCase {
@@ -110,11 +122,15 @@ func findTokensLocally(stmtText string, targets []string, baseLine int, ignoreCa
 		}
 
 		if _, ok := targetSet[key]; ok {
+			col := tok.Col
+			if tok.Line == 1 {
+				col += baseCol - 1 // rebase first-line columns to document coords
+			}
 			result = append(result, tokenPos{
 				name:   name,
 				line:   baseLine + tok.Line - 1,
-				col:    tok.Col,
-				endCol: tok.Col + (tok.End - tok.Start),
+				col:    col,
+				endCol: col + (tok.End - tok.Start),
 				quoted: isQuoted,
 			})
 		}
