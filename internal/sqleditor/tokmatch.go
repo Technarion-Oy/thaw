@@ -73,6 +73,18 @@ func isAliasTok(tok sqltok.Token) bool {
 	return tok.Kind == sqltok.Identifier || tok.Kind == sqltok.QuotedIdent
 }
 
+// isAliasWord is the alias check for positions where an alias is unambiguously
+// expected (immediately after AS). It is broader than isAliasTok: any keyword that
+// is not a Snowflake *reserved* word (KEY, FIRST, LAST, TYPE, SCHEDULE, …) is a
+// legal alias — sqltok's keyword set is far wider than the reserved list, so those
+// tokenize as Keyword and would otherwise be rejected.
+func isAliasWord(tok sqltok.Token, sql string) bool {
+	if isAliasTok(tok) {
+		return true
+	}
+	return tok.Kind == sqltok.Keyword && !sqltok.IsReserved(strings.ToUpper(tok.Text(sql)))
+}
+
 // readIdentPath reads a dot-separated identifier path from sig[pos:] and returns
 // the raw substring and the position after the last consumed token. sig is a
 // significant-token slice (trivia removed), so parts join across original
@@ -1020,16 +1032,117 @@ type asAliasLoc struct {
 
 func findAsAliases(sig []sqltok.Token, sql string) []asAliasLoc {
 	var locs []asAliasLoc
-	for i := 0; i+1 < len(sig); i++ {
-		if tokUpper(sig[i], sql) == "AS" && isIdent(sig[i+1]) {
+	// The implicit-alias branch may only fire inside a SELECT projection list.
+	// Two adjacent bare identifiers elsewhere (ORDER BY / GROUP BY x, a table
+	// alias, a subquery body) must NOT be read as an output alias, or a genuine
+	// "column not found" diagnostic on the trailing identifier gets suppressed
+	// (PR #739). Track paren depth and whether we're before the first clause
+	// boundary at depth 0. Both callers start armed: sqleditor.go passes the whole
+	// statement (opens with SELECT/WITH; re-armed at each depth-0 SELECT, disarmed
+	// at FROM/WHERE/GROUP/ORDER/…), and barecolrefs.go passes the already-sliced
+	// projection text (no depth-0 FROM, so it simply stays armed).
+	depth := 0
+	inProj := true
+	for i := 0; i < len(sig); i++ {
+		switch sig[i].Kind {
+		case sqltok.LParen:
+			depth++
+		case sqltok.RParen:
+			if depth > 0 {
+				depth--
+			}
+		case sqltok.Keyword:
+			if depth == 0 {
+				switch tokUpper(sig[i], sql) {
+				case "SELECT":
+					inProj = true
+				case "FROM", "WHERE", "GROUP", "ORDER", "HAVING", "QUALIFY",
+					"LIMIT", "WINDOW", "OFFSET", "FETCH", "SAMPLE", "INTO",
+					"UNION", "INTERSECT", "EXCEPT", "MINUS", "CONNECT", "START":
+					inProj = false
+				}
+			}
+		}
+
+		// Explicit "AS <alias>" — recognized anywhere (also table aliases).
+		if i+1 < len(sig) && tokUpper(sig[i], sql) == "AS" && isIdent(sig[i+1]) {
 			locs = append(locs, asAliasLoc{
 				asStart:    sig[i].Start,
 				aliasStart: sig[i+1].Start,
 				aliasEnd:   sig[i+1].End,
 			})
+			continue
+		}
+		// Implicit "<expr> <alias>" (no AS): a bare/quoted identifier that closes
+		// a select-list item — preceded by an expression terminator and followed
+		// by a list boundary (comma, clause keyword, ), ; or end). This catches
+		// `SELECT ID employee_id` and `SELECT COUNT(*) cnt` without misreading
+		// `db.sch.tbl` dotted refs (the ident before a dotted part is a Dot, not
+		// an expression terminator) or clause keywords (never expression ends).
+		// Gated to depth 0 + projection list so ORDER BY / GROUP BY / subquery
+		// trailing idents are left alone (PR #739).
+		if depth == 0 && inProj &&
+			isAliasTok(sig[i]) && i > 0 && isExprEndAt(sig, i-1, sql) && isListItemBoundary(sig, i+1) {
+			locs = append(locs, asAliasLoc{
+				asStart:    sig[i].Start,
+				aliasStart: sig[i].Start,
+				aliasEnd:   sig[i].End,
+			})
 		}
 	}
 	return locs
+}
+
+// isExprEndAt reports whether sig[i] terminates a SQL value expression, so a
+// following bare/quoted identifier reads as an implicit (AS-less) output alias
+// rather than as part of the expression.
+//
+// Most keywords are deliberately NOT expression ends: clause keywords (FROM,
+// GROUP, ORDER, …) and operator keywords (AND, OR, IN, IS, …) must never let a
+// following bare identifier be misread as an alias (e.g. `SELECT DISTINCT col`).
+// But a small enumerated set of keywords legitimately closes a *value*
+// expression, and excluding those blanket-style left common implicit-alias
+// patterns un-fixed (PR #739 follow-up):
+//   - literal keywords: NULL, TRUE, FALSE      (`SELECT NULL flag`)
+//   - the CASE terminator END                  (`CASE … END sign`)
+//   - a data-type keyword closing a `::` cast   (`ID::VARCHAR name`)
+//
+// Data-type names (VARCHAR, INT, …) are lexed as keywords, so the cast case is
+// recognized by the `::` operator immediately preceding the type keyword rather
+// than by enumerating every type name.
+func isExprEndAt(sig []sqltok.Token, i int, sql string) bool {
+	if i < 0 || i >= len(sig) {
+		return false
+	}
+	switch sig[i].Kind {
+	case sqltok.Identifier, sqltok.QuotedIdent, sqltok.RParen,
+		sqltok.NumberLit, sqltok.StringLit, sqltok.RBracket:
+		return true
+	case sqltok.Keyword:
+		switch tokUpper(sig[i], sql) {
+		case "NULL", "TRUE", "FALSE", "END":
+			return true
+		}
+		// `<expr>::<TYPE>` — the type name is a keyword; the `::` cast operator
+		// one token back marks it as the end of a value expression.
+		if i >= 1 && sig[i-1].Kind == sqltok.Operator && sig[i-1].Text(sql) == "::" {
+			return true
+		}
+	}
+	return false
+}
+
+// isListItemBoundary reports whether sig[next] ends the current select-list item
+// (comma, clause keyword, ), ; or end-of-tokens).
+func isListItemBoundary(sig []sqltok.Token, next int) bool {
+	if next >= len(sig) {
+		return true
+	}
+	switch sig[next].Kind {
+	case sqltok.Comma, sqltok.RParen, sqltok.Semicolon, sqltok.Keyword:
+		return true
+	}
+	return false
 }
 
 // ── Statement guard factories ─────────────────────────────────────────────────

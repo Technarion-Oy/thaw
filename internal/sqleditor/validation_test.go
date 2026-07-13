@@ -36,6 +36,17 @@ func TestValidateBareColumnRefs_Valid(t *testing.T) {
 		// Views
 		`CREATE VIEW my_view AS SELECT FIRST_NAME, LAST_NAME FROM "DB"."SCH"."EMPLOYEES"`,
 
+		// Implicit (AS-less) column aliases must not be flagged (issue #713).
+		"SELECT ID employee_id FROM DB.SCH.EMPLOYEES",
+		"SELECT ID employee_id, FIRST_NAME fn FROM DB.SCH.EMPLOYEES",
+		"SELECT COUNT(ID) cnt FROM DB.SCH.EMPLOYEES",
+		// Keyword-terminated value expressions with an implicit alias (#739 follow-up):
+		// CASE…END, literal keywords (NULL/TRUE/FALSE), and `::TYPE` casts.
+		"SELECT CASE WHEN ID > 0 THEN 'pos' ELSE 'neg' END sign FROM DB.SCH.EMPLOYEES",
+		"SELECT NULL flag_col FROM DB.SCH.EMPLOYEES",
+		"SELECT TRUE is_active FROM DB.SCH.EMPLOYEES",
+		"SELECT ID::VARCHAR name_str FROM DB.SCH.EMPLOYEES",
+
 		// String literals containing identifier-like words must not be flagged
 		// as unknown column refs (e.g. 'month' in DATE_TRUNC('month', ID)).
 		`SELECT DATE_TRUNC('month', ID) AS m FROM DB.SCH.EMPLOYEES`,
@@ -179,6 +190,28 @@ func TestValidateBareColumnRefs_Invalid(t *testing.T) {
 	}
 }
 
+// TestValidateBareColumnRefs_RebasesColumnForMidLineStatement guards issue #703:
+// when a statement begins mid-line (the second here), findTokensLocally must
+// rebase first-line columns to document coordinates, so the marker lands on
+// `wrong_col` (col 18) rather than inside the first statement.
+func TestValidateBareColumnRefs_RebasesColumnForMidLineStatement(t *testing.T) {
+	sql := `SELECT 1; SELECT wrong_col FROM "DB"."SCH"."EMPLOYEES"`
+	req := ValidateBareColsRequest{
+		SQL:          sql,
+		StmtRanges:   GetStatementRanges(sql),
+		ResolvedRefs: getTestRefs(),
+		ColEntries:   getTestColCaches(),
+	}
+	warnings := getWarnings(ValidateBareColumnRefs(req))
+	if len(warnings) != 1 {
+		t.Fatalf("expected 1 warning, got %d: %+v", len(warnings), warnings)
+	}
+	if warnings[0].StartColumn != 18 || warnings[0].EndColumn != 27 {
+		t.Errorf("expected marker at cols 18–27 (over `wrong_col`), got %d–%d",
+			warnings[0].StartColumn, warnings[0].EndColumn)
+	}
+}
+
 // ── 3. ValidateTablesExist Tests ──────────────────────────────────────────────
 
 func TestValidateTablesExist_Valid(t *testing.T) {
@@ -244,6 +277,63 @@ func TestValidateTablesExist_Valid(t *testing.T) {
 				t.Errorf("Expected 0 errors for %q, got %d: %v", sql, len(errs), errs)
 			}
 		})
+	}
+}
+
+// Regression test for #708: in-script CREATE of the special table-likes
+// (DYNAMIC/EXTERNAL/ICEBERG/HYBRID/EVENT TABLE) and STREAM must register the
+// created object so a later SELECT FROM it is not falsely flagged as missing.
+// Before the fix only plain CREATE TABLE/VIEW was tracked (matchCreateTV).
+func TestValidateTablesExist_SpecialCreateTracking(t *testing.T) {
+	scripts := []string{
+		"CREATE DYNAMIC TABLE dt TARGET_LAG='1 minute' WAREHOUSE=wh AS SELECT * FROM LIVE_TABLE;\nSELECT * FROM dt;",
+		"CREATE EXTERNAL TABLE et LOCATION=@s FILE_FORMAT=(TYPE=CSV);\nSELECT * FROM et;",
+		"CREATE ICEBERG TABLE it (id INT);\nSELECT * FROM it;",
+		"CREATE HYBRID TABLE ht (id INT PRIMARY KEY);\nSELECT * FROM ht;",
+		"CREATE EVENT TABLE ev;\nSELECT * FROM ev;",
+		"CREATE STREAM s1 ON TABLE LIVE_TABLE;\nSELECT * FROM s1;",
+	}
+
+	req := ValidateTablesExistRequest{
+		ResolvedRefs:    getLiveRefs(),
+		KnownDatabases:  []string{"DB"},
+		KnownSchemas:    []SchemaEntry{{DB: "DB", Name: "SCH"}},
+		SessionDatabase: "DB",
+		SessionSchema:   "SCH",
+	}
+
+	for _, sql := range scripts {
+		t.Run(sql[:min(len(sql), 30)], func(t *testing.T) {
+			req.SQL = sql
+			req.StmtRanges = GetStatementRanges(sql)
+			markers := ValidateTablesExist(req)
+			if errs := getErrors(markers); len(errs) > 0 {
+				t.Errorf("Expected 0 errors for %q, got %d: %v", sql, len(errs), errs)
+			}
+		})
+	}
+}
+
+// Regression test for #708 (review follow-up): DROP of a FROM-able special
+// kind must clear it from the in-script created set, mirroring DROP TABLE.
+// CREATE STREAM s ON TABLE t; DROP STREAM s; SELECT * FROM s; — the final
+// SELECT must flag s as missing (not suppress it as script-created).
+func TestValidateTablesExist_DropSpecialKindClearsTracking(t *testing.T) {
+	sql := "CREATE STREAM s ON TABLE LIVE_TABLE;\nDROP STREAM s;\nSELECT * FROM s;"
+
+	req := ValidateTablesExistRequest{
+		ResolvedRefs:    getLiveRefs(),
+		KnownDatabases:  []string{"DB"},
+		KnownSchemas:    []SchemaEntry{{DB: "DB", Name: "SCH"}},
+		SessionDatabase: "DB",
+		SessionSchema:   "SCH",
+	}
+	req.SQL = sql
+	req.StmtRanges = GetStatementRanges(sql)
+
+	errs := getErrors(ValidateTablesExist(req))
+	if len(errs) == 0 {
+		t.Errorf("Expected the final SELECT to flag dropped stream s as missing, got none")
 	}
 }
 
@@ -507,6 +597,32 @@ $$;
 			`,
 			expectedError: "Expected ':=' for assignment",
 		},
+		{
+			// #704: a $$…$$ that is a plain string constant, not a scripting
+			// block, must not be validated as Snowflake Scripting.
+			name:          "Plain dollar-quoted string constant",
+			sql:           "SELECT $$hello world$$ AS greeting;",
+			expectedError: "",
+		},
+		{
+			// #704: an apostrophe inside a plain $$ string previously produced a
+			// phantom "Unclosed string literal".
+			name:          "Dollar-quoted string with apostrophe",
+			sql:           "SELECT $$Bob's daughter$$;",
+			expectedError: "",
+		},
+		{
+			// #704: a non-SQL UDF body must be treated as opaque.
+			name:          "Python UDF body",
+			sql:           "CREATE FUNCTION f(x INT) RETURNS INT LANGUAGE PYTHON AS $$ def main(x): return x + 1 $$;",
+			expectedError: "",
+		},
+		{
+			// #704: a JavaScript body must not hit the scripting LET/VAR rule.
+			name:          "JavaScript UDF body",
+			sql:           `CREATE FUNCTION f() RETURNS STRING LANGUAGE JAVASCRIPT AS $$ var s = "hi"; return s; $$;`,
+			expectedError: "",
+		},
 	}
 
 	for _, tt := range tests {
@@ -534,6 +650,62 @@ $$;
 				if !found {
 					t.Errorf("Expected error matching %q, but got: %v", tt.expectedError, errs[0].Message)
 				}
+			}
+		})
+	}
+}
+
+// TestValidateSyntax_UnclosedDollarQuote pins the "Unclosed dollar-quoted
+// string" marker and its column math (#704). The marker spans the opening tag,
+// from the token's start column to start+len(tag). All existing scripting cases
+// use terminated $$ bodies, so nothing else exercises this branch or its offset.
+func TestValidateSyntax_UnclosedDollarQuote(t *testing.T) {
+	tests := []struct {
+		name    string
+		sql     string
+		wantCol int // 1-based start column of the opening tag
+		tagLen  int // width of the tag ($$ = 2, $foo$ = 5)
+	}{
+		{
+			// $$ opens at column 8 (after "SELECT "); body never terminates.
+			name:    "Unterminated $$ body",
+			sql:     "SELECT $$abc",
+			wantCol: 8,
+			tagLen:  2,
+		},
+		{
+			// Multi-char tag: $foo$ opens at column 8, width 5. Pins that the
+			// offset uses len(tag), not a hardcoded 2.
+			name:    "Unterminated multi-char tag body",
+			sql:     "SELECT $foo$abc",
+			wantCol: 8,
+			tagLen:  5,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errs := getErrors(ValidateSyntax(tt.sql))
+
+			var got *DiagMarker
+			for i := range errs {
+				if strings.Contains(errs[i].Message, "Unclosed dollar-quoted string") {
+					got = &errs[i]
+					break
+				}
+			}
+			if got == nil {
+				t.Fatalf("Expected 'Unclosed dollar-quoted string' marker, got: %v", errs)
+			}
+			if got.StartLineNumber != 1 || got.EndLineNumber != 1 {
+				t.Errorf("Expected marker on line 1, got start line %d end line %d",
+					got.StartLineNumber, got.EndLineNumber)
+			}
+			if got.StartColumn != tt.wantCol {
+				t.Errorf("Expected start column %d, got %d", tt.wantCol, got.StartColumn)
+			}
+			if want := tt.wantCol + tt.tagLen; got.EndColumn != want {
+				t.Errorf("Expected end column %d, got %d", want, got.EndColumn)
 			}
 		})
 	}
@@ -600,6 +772,67 @@ create table my_table (
 			name:          "Valid array/object types",
 			sql:           `CREATE TABLE t (tags ARRAY, metadata OBJECT);`,
 			expectedError: "",
+		},
+		// Issue #712: ALTER TABLE ADD non-column clauses must not be parsed as
+		// a column name + data type.
+		{
+			name:          "ALTER TABLE ADD PRIMARY KEY",
+			sql:           `ALTER TABLE t ADD PRIMARY KEY (id);`,
+			expectedError: "",
+		},
+		{
+			name:          "ALTER TABLE ADD CONSTRAINT",
+			sql:           `ALTER TABLE t ADD CONSTRAINT pk_t PRIMARY KEY (id);`,
+			expectedError: "",
+		},
+		{
+			name:          "ALTER TABLE ADD FOREIGN KEY",
+			sql:           `ALTER TABLE t ADD FOREIGN KEY (a) REFERENCES u (b);`,
+			expectedError: "",
+		},
+		{
+			name:          "ALTER TABLE ADD ROW ACCESS POLICY",
+			sql:           `ALTER TABLE t ADD ROW ACCESS POLICY rap ON (id);`,
+			expectedError: "",
+		},
+		{
+			name:          "ALTER TABLE ADD SEARCH OPTIMIZATION",
+			sql:           `ALTER TABLE t ADD SEARCH OPTIMIZATION;`,
+			expectedError: "",
+		},
+		// Issue #712 review: ROW / SEARCH are ALTER-ADD-only markers and must not
+		// suppress type-checking of a column literally named "row"/"search".
+		{
+			name:          "CREATE TABLE column named row still validated",
+			sql:           `CREATE TABLE t (row BADTYPE);`,
+			expectedError: "Unknown data type 'BADTYPE'",
+		},
+		{
+			name:          "CREATE TABLE column named search still validated",
+			sql:           `CREATE TABLE t (search BADTYPE);`,
+			expectedError: "Unknown data type 'BADTYPE'",
+		},
+		{
+			name:          "ALTER TABLE ADD COLUMN named row still validated",
+			sql:           `ALTER TABLE t ADD COLUMN row BADTYPE;`,
+			expectedError: "Unknown data type 'BADTYPE'",
+		},
+		{
+			name:          "ALTER TABLE ADD COLUMN still validated",
+			sql:           `ALTER TABLE t ADD COLUMN c NUMBR;`,
+			expectedError: "Unknown data type 'NUMBR'",
+		},
+		// Issue #712: a CAST with an inner AS alias must resolve the CAST's own
+		// type, not the nested alias.
+		{
+			name:          "CAST with inner AS alias in subquery",
+			sql:           `SELECT CAST((SELECT MAX(id) AS mx FROM t) AS INT);`,
+			expectedError: "",
+		},
+		{
+			name:          "CAST with inner AS alias still flags bad outer type",
+			sql:           `SELECT CAST((SELECT MAX(id) AS mx FROM t) AS INTT);`,
+			expectedError: "Unknown data type 'INTT'",
 		},
 	}
 
@@ -742,6 +975,20 @@ func TestValidateSemantics_CTEAliasColumns(t *testing.T) {
 			name: "CTE with AS-aliased expressions",
 			sql:  `WITH summary AS (SELECT COUNT(*) AS cnt, SUM(amount) AS total FROM t) SELECT s.cnt, s.total FROM summary s`,
 		},
+		{
+			// Issue #713: implicit (AS-less) projection alias in a CTE must be
+			// resolvable in the outer query — no "cnt not found" / "does not
+			// exist in C" markers.
+			name: "CTE with implicit (AS-less) alias",
+			sql:  `WITH c AS (SELECT ID, COUNT(*) cnt FROM t GROUP BY ID) SELECT c.cnt FROM c`,
+		},
+		{
+			// #739 follow-up: keyword-terminated expression (CASE…END) with an
+			// implicit alias in a CTE must project the alias, so the outer
+			// reference resolves — no "flag does not exist in C" marker.
+			name: "CTE with implicit alias on CASE…END",
+			sql:  `WITH c AS (SELECT ID, CASE WHEN ID>0 THEN 1 ELSE 0 END flag FROM t) SELECT c.flag FROM c`,
+		},
 	}
 	for _, tt := range validCases {
 		t.Run(tt.name, func(t *testing.T) {
@@ -860,6 +1107,69 @@ LIMIT 100;`,
 			}
 			if !found {
 				t.Errorf("Expected warning for column %q but got markers: %v", tt.wantCol, warns)
+			}
+		})
+	}
+}
+
+// TestValidateSemantics_ImplicitColumnAlias verifies that an implicit (AS-less)
+// output alias is treated as an alias, not a bare column reference against the
+// FROM tables (issue #713).
+func TestValidateSemantics_ImplicitColumnAlias(t *testing.T) {
+	cases := []string{
+		"SELECT ID employee_id FROM DB.SCH.EMPLOYEES",
+		// #739 follow-up: keyword-terminated value expressions. The alias must
+		// not be read as a bare column against the FROM tables.
+		"SELECT CASE WHEN ID > 0 THEN 'pos' ELSE 'neg' END sign FROM DB.SCH.EMPLOYEES",
+		"SELECT NULL flag_col FROM DB.SCH.EMPLOYEES",
+		"SELECT TRUE is_active FROM DB.SCH.EMPLOYEES",
+		"SELECT ID::VARCHAR name_str FROM DB.SCH.EMPLOYEES",
+	}
+	for _, sql := range cases {
+		t.Run(sql[:min(len(sql), 40)], func(t *testing.T) {
+			markers := ValidateSemantics(sql, getTestRefs(), getTestColCaches())
+			if warns := getWarnings(markers); len(warns) > 0 {
+				t.Errorf("Expected no warnings for %q, got %d: %v", sql, len(warns), warns)
+			}
+		})
+	}
+}
+
+// TestValidateSemantics_ImplicitAliasScopedToProjection verifies the
+// implicit-alias heuristic only applies inside the SELECT projection list.
+// A bogus trailing identifier in GROUP BY / ORDER BY is two adjacent bare
+// idents but must still be flagged as a missing column — it is NOT an implicit
+// output alias (PR #739 regression guard).
+func TestValidateSemantics_ImplicitAliasScopedToProjection(t *testing.T) {
+	cases := []struct {
+		name string
+		sql  string
+		want string // substring of the expected warning message
+	}{
+		{
+			name: "GROUP BY trailing bogus ident",
+			sql:  "SELECT DEPT_ID, COUNT(*) c FROM DB.SCH.EMPLOYEES e GROUP BY DEPT_ID bogus_col",
+			want: "bogus_col",
+		},
+		{
+			name: "ORDER BY trailing bogus ident",
+			sql:  "SELECT ID FROM DB.SCH.EMPLOYEES e ORDER BY ID bogus_col2",
+			want: "bogus_col2",
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			warns := getWarnings(ValidateSemantics(tt.sql, getTestRefs(), getTestColCaches()))
+			found := false
+			for _, w := range warns {
+				if strings.Contains(w.Message, tt.want) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("Expected a warning mentioning %q for %q, got %d: %v",
+					tt.want, tt.sql, len(warns), warns)
 			}
 		})
 	}
