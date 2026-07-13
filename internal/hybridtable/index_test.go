@@ -17,7 +17,9 @@ import (
 
 func TestIsIndexableType(t *testing.T) {
 	// Eligible as an index key column.
-	for _, typ := range []string{"NUMBER(38,0)", "VARCHAR(256)", "BOOLEAN", "TIMESTAMP_NTZ", "DATE", "timestamp_ltz"} {
+	// The no-underscore TIMESTAMP synonyms must classify identically to their
+	// underscored forms: TIMESTAMP_LTZ / TIMESTAMP_NTZ are index-key eligible.
+	for _, typ := range []string{"NUMBER(38,0)", "VARCHAR(256)", "BOOLEAN", "TIMESTAMP_NTZ", "DATE", "timestamp_ltz", "TIMESTAMPLTZ", "timestampntz"} {
 		if !IsIndexableType(typ) {
 			t.Errorf("IsIndexableType(%q) = false, want true", typ)
 		}
