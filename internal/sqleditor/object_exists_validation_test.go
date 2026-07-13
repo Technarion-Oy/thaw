@@ -97,6 +97,22 @@ func TestValidateTablesExist_CreateTableLikeStillTracked(t *testing.T) {
 	}
 }
 
+// TestValidateTablesExist_RebasesColumnForMidLineStatement guards issue #703:
+// a statement that begins mid-line (the second here) must have its marker
+// columns rebased to document coordinates, so the marker lands on `ghost`
+// (cols 25–30), not inside the first statement.
+func TestValidateTablesExist_RebasesColumnForMidLineStatement(t *testing.T) {
+	sql := "SELECT 1; SELECT * FROM ghost;"
+	m := tablesExistMarkers(sql)
+	if len(m) != 1 {
+		t.Fatalf("expected 1 marker, got %d: %+v", len(m), m)
+	}
+	if m[0].StartColumn != 25 || m[0].EndColumn != 30 {
+		t.Errorf("expected marker at cols 25–30 (over `ghost`), got %d–%d",
+			m[0].StartColumn, m[0].EndColumn)
+	}
+}
+
 // TestValidateTablesExist_NoContext_SchemaScopedObjects verifies that the
 // "No database selected" diagnostic covers all schema-scoped object types, not
 // just TABLE/VIEW — and stays silent for account-level objects (which are not

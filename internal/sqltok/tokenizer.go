@@ -90,6 +90,22 @@ func scan(src string, n int, pos, line, col *int) Token {
 		*pos = i
 		return Token{Kind: Whitespace, Start: start, End: i, Line: startLine, Col: startCol}
 
+	// ── Stage-URI scheme separator `://` ────────────────────────────────
+	// A run of `/` right after `:` is a URI authority separator
+	// (file:///path, s3://bucket, azure://, gcs://) in PUT/GET, not a `//`
+	// line comment. Consume the whole slash run as one operator so the
+	// trailing `/path` isn't re-scanned and mistaken for a `//` comment.
+	// Only `:` triggers this — a `/` before `//` (e.g. after a block-comment
+	// close `*/`) must still start a line comment.
+	case c == '/' && start+1 < n && src[start+1] == '/' && start > 0 && src[start-1] == ':':
+		i := start + 1
+		for i < n && src[i] == '/' {
+			i++
+		}
+		*col += i - start
+		*pos = i
+		return Token{Kind: Operator, Start: start, End: i, Line: startLine, Col: startCol}
+
 	// ── Line comment -- or // ───────────────────────────────────────────
 	// Snowflake treats both `--` and `//` as line comments.
 	case start+1 < n && ((c == '-' && src[start+1] == '-') || (c == '/' && src[start+1] == '/')):
@@ -139,6 +155,11 @@ func scan(src string, n int, pos, line, col *int) Token {
 		return Token{Kind: BlockComment, Start: start, End: i, Line: startLine, Col: startCol, Unterminated: unterminated}
 
 	// ── Single-quoted string '...' ──────────────────────────────────────
+	// Snowflake string constants support both the `''` doubled-quote escape
+	// and backslash escapes (`\'`, `\\`). A quote is a real closer only when an
+	// even number of backslashes immediately precedes it (`\\'` closes; `\'`
+	// does not). Quoted identifiers below deliberately keep the simpler `""`-only
+	// rule — Snowflake identifiers do not honor backslash escapes.
 	case c == '\'':
 		i := start + 1
 		terminated := false
@@ -148,7 +169,17 @@ func scan(src string, n int, pos, line, col *int) Token {
 				i = n
 				break
 			}
-			i += j + 1
+			quote := i + j
+			// ponytail: back-scan for escaping backslashes; O(n²) only on
+			// pathological all-backslash input, fine for real SQL.
+			bs := 0
+			for k := quote - 1; k > start && src[k] == '\\'; k-- {
+				bs++
+			}
+			i = quote + 1
+			if bs%2 == 1 {
+				continue // escaped quote (\'), keep scanning
+			}
 			if i < n && src[i] == '\'' {
 				i++ // '' escape
 			} else {

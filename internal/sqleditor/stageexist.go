@@ -41,7 +41,7 @@ func objectsOfKind(objs []ObjectRef, kind string) []ObjectRef {
 // database/schema, qualified names against their own path, and validation only
 // fires for schemas whose objects were actually fetched (fetchedSchemas).
 func validateStageRefs(
-	raw string, sig []sqltok.Token, baseLine int, ic bool,
+	raw string, sig []sqltok.Token, baseLine, baseCol int, ic bool,
 	checkEq func(string, string) bool,
 	knownStages []ObjectRef,
 	fetchedSchemas []SchemaEntry,
@@ -78,7 +78,7 @@ func validateStageRefs(
 		if !wasDropped && stageExists(knownStages, db, schema, name, checkEq) {
 			continue
 		}
-		for _, t := range findTokensLocally(raw, []string{name}, baseLine, ic) {
+		for _, t := range findTokensLocally(raw, []string{name}, baseLine, baseCol, ic) {
 			m := diagMarkerAt(t, "Stage '"+t.name+"' does not exist or is not authorized.", 8)
 			m.Code = buildQualifyObjectCode(name, "stage", knownStages, checkEq)
 			markers = append(markers, m)

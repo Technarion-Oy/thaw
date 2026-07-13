@@ -363,6 +363,62 @@ func (v *Validator) wordsValue(words ...string) Rule {
 // parseString matches a single-quoted string literal.
 func (v *Validator) parseString() bool { return v.Match(sqltok.StringLit) }
 
+// matchIdentLike consumes any single identifier-like token (Identifier, Keyword,
+// or QuotedIdent). Used as the key of an open-ended `<option> = <value>` where the
+// option name is not from a fixed set and some names are lexer keywords — e.g. the
+// COPY INTO copyOptions PURGE / FORCE, which arrive as Keyword, not Identifier.
+func (v *Validator) matchIdentLike() bool {
+	if v.Peek().Kind.IsIdentLike() {
+		v.advance()
+		return true
+	}
+	v.expect("identifier")
+	return false
+}
+
+// parseStageRef matches a stage reference `@[<namespace>.]<stage>[/<path>]`,
+// consuming the `/path` suffix by only accepting tokens directly adjacent to the
+// previous one (no intervening whitespace), so it stops before the next clause
+// word (FROM, PATTERN, …). Shared by COPY INTO and the CREATE rules that take a
+// LOCATION = @stage/path/ value.
+func (v *Validator) parseStageRef() bool {
+	at := v.Peek()
+	if !v.Match(sqltok.At) {
+		return false
+	}
+	lastEnd := at.End
+	matched := false
+	for !v.AtEnd() {
+		t := v.Peek()
+		if t.Start != lastEnd {
+			break
+		}
+		ok := t.Kind.IsIdentLike() || t.Kind == sqltok.Dot || t.Kind == sqltok.NumberLit ||
+			(t.Kind == sqltok.Operator && (t.Text(v.src) == "/" || t.Text(v.src) == "%")) ||
+			(t.Kind == sqltok.Other && t.Text(v.src) == "~")
+		if !ok {
+			break
+		}
+		lastEnd = t.End
+		v.advance()
+		matched = true
+	}
+	return matched
+}
+
+// clusterByClause matches `CLUSTER BY [ LINEAR ] <parens>`. Snowflake accepts the
+// optional LINEAR clustering-function keyword before the expression list, and
+// SHOW TABLES metadata round-trips DDL as `CLUSTER BY LINEAR(...)`.
+func (v *Validator) clusterByClause(parens Rule) Rule {
+	return func() bool {
+		return v.Sequence(
+			func() bool { return v.phrase("CLUSTER", "BY") },
+			func() bool { return v.Optional(func() bool { return v.MatchWord("LINEAR") }) },
+			parens,
+		)
+	}
+}
+
 // parseNumber matches a numeric literal (optionally signed).
 func (v *Validator) parseNumber() bool {
 	v.Optional(func() bool {

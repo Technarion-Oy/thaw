@@ -50,7 +50,7 @@ func unregByKind(m map[string]map[string]struct{}, kind string, parts []string) 
 // validateObjectKindRefs flags an ALTER/DROP/DESCRIBE/COMMENT ON <kind> <name>
 // whose named object does not exist, mirroring table/stage resolution.
 func validateObjectKindRefs(
-	raw string, sig []sqltok.Token, baseLine int, ic bool,
+	raw string, sig []sqltok.Token, baseLine, baseCol int, ic bool,
 	checkEq func(string, string) bool,
 	knownObjects []ObjectRef,
 	fetchedSchemas []SchemaEntry,
@@ -68,7 +68,7 @@ func validateObjectKindRefs(
 	if objType == "table" || objType == "view" {
 		return nil
 	}
-	return flagMissingObject(raw, baseLine, ic, checkEq, objType, extractIdentParts(rawPath, ic),
+	return flagMissingObject(raw, baseLine, baseCol, ic, checkEq, objType, extractIdentParts(rawPath, ic),
 		knownObjects, fetchedSchemas, sessionDB, sessionSchema, createdByKind, droppedByKind)
 }
 
@@ -132,7 +132,7 @@ func resolveObjectMissing(
 // values place their own marker). Shared by the phase-2 ALTER/DROP sweep and the
 // phase-3 kind-implied extractors.
 func flagMissingObject(
-	raw string, baseLine int, ic bool, checkEq func(string, string) bool,
+	raw string, baseLine, baseCol int, ic bool, checkEq func(string, string) bool,
 	objType string, parts []string,
 	knownObjects []ObjectRef, fetchedSchemas []SchemaEntry,
 	sessionDB, sessionSchema string,
@@ -144,7 +144,7 @@ func flagMissingObject(
 		return nil
 	}
 	var markers []DiagMarker
-	for _, t := range findTokensLocally(raw, []string{name}, baseLine, ic) {
+	for _, t := range findTokensLocally(raw, []string{name}, baseLine, baseCol, ic) {
 		m := diagMarkerAt(t, capitalizeKind(objType)+" '"+t.name+"' does not exist or is not authorized.", 8)
 		m.Code = buildQualifyObjectCode(name, objType, kindObjs, checkEq)
 		markers = append(markers, m)

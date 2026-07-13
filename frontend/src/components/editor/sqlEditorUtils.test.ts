@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { identifierRangeAt, starMenuEligible, normId } from "./sqlEditorUtils";
+import { identifierRangeAt, starMenuEligible, normId, byteColToUtf16Col } from "./sqlEditorUtils";
 
 // identifierRangeAt(line, idx0) → 1-based Monaco {start, end} (end exclusive) of the
 // dotted identifier at 0-based char index idx0, quote-aware. Substring is
@@ -105,5 +105,32 @@ describe("normId", () => {
 
   it("unescapes doubled quotes inside a quoted identifier", () => {
     expect(normId('"a""b"')).toBe('a"b');
+  });
+});
+
+// byteColToUtf16Col(lineText, byteCol): backend validators emit 1-based UTF-8 byte
+// columns; Monaco wants 1-based UTF-16 code units. See issue #702.
+describe("byteColToUtf16Col", () => {
+  it("passes ASCII columns through unchanged", () => {
+    const line = "SELECT foo, bar";
+    expect(byteColToUtf16Col(line, 1)).toBe(1);
+    expect(byteColToUtf16Col(line, 8)).toBe(8);
+  });
+
+  it("shifts back over earlier multi-byte chars (issue #702 repro)", () => {
+    // 'äöå€' is 9 bytes but 4 UTF-16 units; the unclosed string starts at
+    // byte col 21 which is Monaco col 16.
+    const line = "SELECT 'äöå€', 'unclosed";
+    expect(byteColToUtf16Col(line, 21)).toBe(16);
+  });
+
+  it("counts an astral emoji as a 4-byte / 2-unit char", () => {
+    // 😀 = 4 bytes, 2 UTF-16 units. "a😀b": 'b' is byte col 6, Monaco col 4.
+    const line = "a😀b";
+    expect(byteColToUtf16Col(line, 6)).toBe(4);
+  });
+
+  it("clamps a byte column past the line end to end+1", () => {
+    expect(byteColToUtf16Col("äö", 10)).toBe(3);
   });
 });
