@@ -608,6 +608,23 @@ create table my_table (
 			sql:           `ALTER TABLE t ADD SEARCH OPTIMIZATION;`,
 			expectedError: "",
 		},
+		// Issue #712 review: ROW / SEARCH are ALTER-ADD-only markers and must not
+		// suppress type-checking of a column literally named "row"/"search".
+		{
+			name:          "CREATE TABLE column named row still validated",
+			sql:           `CREATE TABLE t (row BADTYPE);`,
+			expectedError: "Unknown data type 'BADTYPE'",
+		},
+		{
+			name:          "CREATE TABLE column named search still validated",
+			sql:           `CREATE TABLE t (search BADTYPE);`,
+			expectedError: "Unknown data type 'BADTYPE'",
+		},
+		{
+			name:          "ALTER TABLE ADD COLUMN named row still validated",
+			sql:           `ALTER TABLE t ADD COLUMN row BADTYPE;`,
+			expectedError: "Unknown data type 'BADTYPE'",
+		},
 		{
 			name:          "ALTER TABLE ADD COLUMN still validated",
 			sql:           `ALTER TABLE t ADD COLUMN c NUMBR;`,
