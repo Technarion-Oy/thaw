@@ -944,6 +944,10 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     const runDiagnostics = async () => {
       const model = editor.getModel();
       if (!model) return;
+      // Bump the run token before any early return so an in-flight older run is
+      // invalidated even when we bail out to clear markers — otherwise that
+      // older run's finally re-applies its stale markers, undoing the clear.
+      const myRun = ++diagRunRef.current;
       if (!useFeatureFlagsStore.getState().flags.sqlDiagnostics) {
         monaco.editor.setModelMarkers(model, "thaw-sql", []);
         return;
@@ -953,7 +957,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         return;
       }
       const diagVersion = model.getVersionId();
-      const myRun = ++diagRunRef.current;
       const diagSql = model.getValue();
       const diagMarkers: DiagMarker[] = [];
 
