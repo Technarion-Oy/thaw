@@ -26,6 +26,9 @@ func TestIssue716_CopyIntoLocationHeader(t *testing.T) {
 		"COPY INTO @s FROM t HEADER = TRUE",
 		"COPY INTO @s FROM t HEADER = FALSE",
 		"COPY INTO @s FROM t HEADER", // bare form still accepted
+		// The destination now shares parseStageRef, so a `/path` suffix on the
+		// stage (the same handling COPY INTO <table> gained) is accepted here too.
+		"COPY INTO @s/archive/ FROM t",
 	)
 }
 

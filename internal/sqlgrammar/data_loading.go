@@ -124,36 +124,9 @@ func (v *Validator) ParseCopyFiles() bool {
 //	     INCLUDE_QUERY_ID = TRUE | FALSE
 //	     DETAILED_OUTPUT = TRUE | FALSE
 func (v *Validator) ParseCopyIntoLocation() bool {
-	stageRef := func() bool {
-		at := v.Peek()
-		if !v.Match(sqltok.At) {
-			return false
-		}
-		// Only consume tokens directly adjacent to the previous one (no
-		// intervening whitespace), so the stage path stops before the next
-		// clause word (FROM, PATTERN, …).
-		lastEnd := at.End
-		matched := false
-		for !v.AtEnd() {
-			t := v.Peek()
-			if t.Start != lastEnd {
-				break
-			}
-			ok := t.Kind.IsIdentLike() || t.Kind == sqltok.Dot || t.Kind == sqltok.NumberLit ||
-				(t.Kind == sqltok.Operator && (t.Text(v.src) == "/" || t.Text(v.src) == "%")) ||
-				(t.Kind == sqltok.Other && t.Text(v.src) == "~")
-			if !ok {
-				break
-			}
-			lastEnd = t.End
-			v.advance()
-			matched = true
-		}
-		return matched
-	}
 	// destination: an internal/external stage (@…) or an external location string.
 	dest := func() bool {
-		return v.Choice(stageRef, v.parseString)
+		return v.Choice(v.parseStageRef, v.parseString)
 	}
 	// source after FROM: a table name or a ( <query> ).
 	source := func() bool {
