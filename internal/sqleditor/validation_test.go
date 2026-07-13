@@ -599,10 +599,14 @@ $$;
 		},
 		{
 			// Issue #705: a non-builtin call is a function/procedure call, not a
-			// variable reference — the scope checker must not flag it.
+			// variable reference — the scope checker must not flag it. (`x` is
+			// declared so the RETURN-expression scan, which now descends into call
+			// arguments, has no incidental undeclared identifier to report.)
 			name: "RETURN non-builtin function call",
 			sql: `
 execute immediate $$
+  declare
+    x number default 1;
   begin
     return some_func(x);
   end;
@@ -1111,6 +1115,186 @@ $$;`,
 			}
 			if !found {
 				t.Errorf("Expected warning matching %q, got: %v", tt.expectWarn, warns)
+			}
+		})
+	}
+}
+
+// TestValidateSyntax_ScriptingExprUndeclared pins the scripting-expression scan:
+// an undeclared identifier inside an IF/ELSEIF/WHILE/REPEAT-UNTIL condition, an
+// assignment right-hand side, or a RETURN expression is reported as an Error.
+// The scope walk previously only inspected the first token after RETURN and bare
+// assignment targets, so these were unreported. Negative cases pin the guards
+// (declared vars/args, calls, and embedded-query skipping).
+func TestValidateSyntax_ScriptingExprUndeclared(t *testing.T) {
+	tests := []struct {
+		name          string
+		sql           string
+		expectedError string // "" means expect zero error markers
+	}{
+		{
+			// The reported repro (#509 follow-up): an undeclared name in an IF
+			// condition inside a stored procedure body.
+			name: "Undeclared identifier in a procedure IF condition",
+			sql: `use LINEAGE_SOURCE_DB.RAW_DATA;
+
+CREATE OR REPLACE PROCEDURE calculate_even_sum(max_limit INTEGER)
+RETURNS VARCHAR
+LANGUAGE SQL
+AS
+$$
+DECLARE
+    current_num INTEGER DEFAULT 1;
+    total_sum INTEGER DEFAULT 0;
+    message VARCHAR DEFAULT '';
+BEGIN
+    IF (this_variable_should_not_be_here <= 0) THEN
+        RETURN 'Please provide a positive integer greater than zero.';
+    END IF;
+    WHILE (current_num <= max_limit) DO
+        IF (MOD(current_num, 2) = 0) THEN
+            total_sum := total_sum + current_num;
+        END IF;
+        current_num := current_num + 1;
+    END WHILE;
+    message := 'The sum of even numbers up to ' || TO_VARCHAR(max_limit) || ' is ' || TO_VARCHAR(total_sum) || '.';
+    RETURN message;
+END;
+$$;`,
+			expectedError: "Variable 'this_variable_should_not_be_here' is not declared",
+		},
+		{
+			name: "Undeclared identifier in a WHILE condition",
+			sql: `execute immediate $$
+begin
+  while (missing_flag) do
+    null;
+  end while;
+end;
+$$;`,
+			expectedError: "Variable 'missing_flag' is not declared",
+		},
+		{
+			name: "Undeclared identifier in a RETURN expression",
+			sql: `execute immediate $$
+declare
+  a number default 1;
+begin
+  return a + bogus;
+end;
+$$;`,
+			expectedError: "Variable 'bogus' is not declared",
+		},
+		{
+			name: "Undeclared identifier in an assignment right-hand side",
+			sql: `execute immediate $$
+declare
+  a number;
+begin
+  a := 1 + bogus;
+  return a;
+end;
+$$;`,
+			expectedError: "Variable 'bogus' is not declared",
+		},
+		{
+			name: "Undeclared identifier inside a call argument in a condition",
+			sql: `execute immediate $$
+declare
+  a number default 1;
+begin
+  if (mod(a, typo_var) = 0) then
+    return a;
+  end if;
+  return a;
+end;
+$$;`,
+			expectedError: "Variable 'typo_var' is not declared",
+		},
+		// ── Negative cases: guards must keep these clean ───────────────────
+		{
+			name: "All identifiers declared or arguments is clean",
+			sql: `create procedure p(hi number)
+returns number
+language sql
+as $$
+declare
+  lo number default 0;
+begin
+  if (lo < hi) then
+    return hi - lo;
+  end if;
+  return lo;
+end;
+$$;`,
+			expectedError: "",
+		},
+		{
+			name: "RESULTSET assignment subquery is skipped (may reference columns)",
+			sql: `execute immediate $$
+declare
+  res resultset;
+begin
+  res := (select region from sales where revenue >= 5);
+  return table(res);
+end;
+$$;`,
+			expectedError: "",
+		},
+		{
+			name: "Condition with an EXISTS subquery is skipped",
+			sql: `execute immediate $$
+declare
+  a number default 1;
+begin
+  if (exists(select 1 from t where col = 5)) then
+    return a;
+  end if;
+  return a;
+end;
+$$;`,
+			expectedError: "",
+		},
+		{
+			name: "Builtin calls and date parts are not flagged",
+			sql: `create function f(d date)
+returns number
+language sql
+as $$
+declare
+  n number default 0;
+begin
+  if (datediff(day, d, current_date()) > 0) then
+    n := abs(n) + 1;
+  end if;
+  return n;
+end;
+$$;`,
+			expectedError: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errs := getErrors(ValidateSyntax(tt.sql))
+			if tt.expectedError == "" {
+				if len(errs) > 0 {
+					t.Errorf("Expected 0 errors for %q, got %d: %v", tt.name, len(errs), errs)
+				}
+				return
+			}
+			if len(errs) == 0 {
+				t.Fatalf("Expected error containing %q, got 0 errors", tt.expectedError)
+			}
+			found := false
+			for _, e := range errs {
+				if strings.Contains(strings.ToLower(e.Message), strings.ToLower(tt.expectedError)) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("Expected error matching %q, got: %v", tt.expectedError, errs)
 			}
 		})
 	}

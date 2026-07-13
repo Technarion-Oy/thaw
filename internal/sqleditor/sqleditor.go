@@ -820,8 +820,29 @@ func ValidateSyntax(sql string) []DiagMarker {
 		})
 	}
 	validateSyntaxScope(sql, 1, 1, false, add, nil)
+	markers = append(markers, validateScriptExprIdents(sql)...)
 	markers = append(markers, validateBindVarColons(sql)...)
-	return markers
+	return dedupMarkers(markers)
+}
+
+// dedupMarkers drops exact-duplicate markers (identical span, message, and
+// severity). ValidateSyntax runs several overlapping passes — the scope walk and
+// validateScriptExprIdents both flag the bare token of `RETURN missing;` — and an
+// identical marker twice is redundant to the user. First-occurrence order is kept.
+func dedupMarkers(markers []DiagMarker) []DiagMarker {
+	if len(markers) < 2 {
+		return markers
+	}
+	seen := make(map[DiagMarker]struct{}, len(markers))
+	out := make([]DiagMarker, 0, len(markers))
+	for _, m := range markers {
+		if _, ok := seen[m]; ok {
+			continue
+		}
+		seen[m] = struct{}{}
+		out = append(out, m)
+	}
+	return out
 }
 
 // missingExprKeywords are statement keywords whose appearance immediately after
@@ -1949,6 +1970,180 @@ func scanBindVarColons(inner string, baseLine, baseCol int, vars map[string]bool
 // bindOperandKeywords are keywords after which a following identifier is a value
 // operand (so a variable there needs a ':'), used by scanBindVarColons.
 var bindOperandKeywords = map[string]bool{"THEN": true, "ELSE": true}
+
+// validateScriptExprIdents flags an identifier referenced in a Snowflake
+// Scripting control-flow expression — an IF/ELSEIF/WHILE/REPEAT-UNTIL condition,
+// an assignment right-hand side, or a RETURN expression — that resolves to
+// neither a declared variable, a procedure/function argument, a call, a
+// qualified-name part, nor a builtin/keyword. It is the scripting analogue of
+// the scalar-function body check (#509): the scope walk only inspects the first
+// token after RETURN and bare assignment targets, so an undeclared name buried
+// in an expression (e.g. `IF (missing <= 0) THEN`) went unreported. Only
+// scripting blocks (`$$…$$` opening with BEGIN/DECLARE) are scanned. Emitted as
+// Errors, matching the scope walk's other "Variable '…' is not declared" markers.
+func validateScriptExprIdents(sql string) []DiagMarker {
+	var out []DiagMarker
+	outer := sqltok.Tokenize(sql)
+	for idx, tok := range outer {
+		if tok.Kind != sqltok.DollarQuoted || tok.Unterminated {
+			continue
+		}
+		text := tok.Text(sql)
+		tag := tok.Tag
+		if len(text) < 2*len(tag) {
+			continue
+		}
+		inner := text[len(tag) : len(text)-len(tag)]
+		if kw := getFirstSQLToken(inner); kw != "BEGIN" && kw != "DECLARE" {
+			continue
+		}
+		vars := map[string]bool{}
+		for _, v := range scriptingExtractVars(inner, true) {
+			vars[v] = true
+		}
+		for v := range procFuncArgNames(outer, sql, idx) {
+			vars[v] = true
+		}
+		out = append(out, scanScriptExprIdents(inner, tok.Line, tok.Col+len(tag), vars)...)
+	}
+	return out
+}
+
+// scanScriptExprIdents walks a scripting body's significant tokens, delimits each
+// control-flow expression (IF/ELSEIF/WHILE condition up to THEN/DO, REPEAT-UNTIL
+// condition up to END, and RETURN and ':=' right-hand side up to ';'), and
+// reports undeclared identifiers in it. baseLine/baseCol locate the body's first
+// character for rebasing. `DO`/`ELSEIF` are not tokenizer keywords, so control
+// words are matched via IsIdentLike rather than by kind.
+func scanScriptExprIdents(inner string, baseLine, baseCol int, vars map[string]bool) []DiagMarker {
+	var out []DiagMarker
+	sig := sqltok.SignificantTokens(inner)
+	word := func(i int) string { return strings.ToUpper(sig[i].Text(inner)) }
+	prevIsEnd := func(i int) bool { return i > 0 && sig[i-1].Kind.IsIdentLike() && word(i-1) == "END" }
+	for i := 0; i < len(sig); i++ {
+		t := sig[i]
+		var lo, hi int
+		switch {
+		case t.Kind.IsIdentLike() && (word(i) == "IF" || word(i) == "ELSEIF"):
+			if prevIsEnd(i) { // `END IF`
+				continue
+			}
+			lo, hi = i+1, scriptStopAt(sig, inner, i+1, "THEN")
+		case t.Kind.IsIdentLike() && word(i) == "WHILE":
+			if prevIsEnd(i) { // `END WHILE`
+				continue
+			}
+			lo, hi = i+1, scriptStopAt(sig, inner, i+1, "DO")
+		case t.Kind.IsIdentLike() && word(i) == "UNTIL":
+			lo, hi = i+1, scriptStopAt(sig, inner, i+1, "END")
+		case t.Kind.IsIdentLike() && word(i) == "RETURN":
+			lo, hi = i+1, scriptStopSemicolon(sig, i+1)
+		case t.Kind == sqltok.Colon && i+1 < len(sig) && sig[i+1].Kind == sqltok.Operator &&
+			sig[i+1].Text(inner) == "=" && t.End == sig[i+1].Start: // ':=' assignment
+			lo, hi = i+2, scriptStopSemicolon(sig, i+2)
+		default:
+			continue
+		}
+		out = append(out, scanExprRange(sig, inner, lo, hi, vars, baseLine, baseCol)...)
+	}
+	return out
+}
+
+// scriptStopAt returns the index of the first token from `from` (at paren depth 0)
+// whose word equals stop, or that terminates the statement (';'), or len(sig).
+func scriptStopAt(sig []sqltok.Token, inner string, from int, stop string) int {
+	depth := 0
+	for k := from; k < len(sig); k++ {
+		switch sig[k].Kind {
+		case sqltok.LParen:
+			depth++
+		case sqltok.RParen:
+			if depth > 0 {
+				depth--
+			}
+		case sqltok.Semicolon:
+			if depth == 0 {
+				return k
+			}
+		default:
+			if depth == 0 && sig[k].Kind.IsIdentLike() && strings.ToUpper(sig[k].Text(inner)) == stop {
+				return k
+			}
+		}
+	}
+	return len(sig)
+}
+
+// scriptStopSemicolon returns the index of the first depth-0 ';' from `from`, or
+// len(sig) if the statement runs to the end of the body.
+func scriptStopSemicolon(sig []sqltok.Token, from int) int {
+	depth := 0
+	for k := from; k < len(sig); k++ {
+		switch sig[k].Kind {
+		case sqltok.LParen:
+			depth++
+		case sqltok.RParen:
+			if depth > 0 {
+				depth--
+			}
+		case sqltok.Semicolon:
+			if depth == 0 {
+				return k
+			}
+		}
+	}
+	return len(sig)
+}
+
+// scanExprRange reports each identifier in sig[lo:hi] that is not a declared
+// variable/argument, a call (`name(`), a qualified-name part (adjacent to '.'),
+// or a builtin/keyword/date-part word. A range that embeds a query (SELECT/WITH)
+// is skipped, since such an expression can legitimately reference columns — the
+// same conservative stance as validateSQLExprBodyIdents (#509). Adjacency peeks
+// use the full sig bounds so a call/qualifier just past `hi` still exempts.
+func scanExprRange(sig []sqltok.Token, inner string, lo, hi int, vars map[string]bool, baseLine, baseCol int) []DiagMarker {
+	if lo >= hi {
+		return nil
+	}
+	for k := lo; k < hi; k++ {
+		if sig[k].Kind == sqltok.Keyword {
+			if up := strings.ToUpper(sig[k].Text(inner)); up == "SELECT" || up == "WITH" {
+				return nil
+			}
+		}
+	}
+	var out []DiagMarker
+	for k := lo; k < hi; k++ {
+		t := sig[k]
+		if t.Kind != sqltok.Identifier {
+			continue
+		}
+		up := strings.ToUpper(t.Text(inner))
+		if vars[up] || sqlExprBareWords[up] ||
+			sqltok.IsBuiltinFunction(up) || sqltok.IsReserved(up) || sqltok.IsKeyword(up) {
+			continue
+		}
+		if k+1 < len(sig) && (sig[k+1].Kind == sqltok.LParen || sig[k+1].Kind == sqltok.Dot) {
+			continue
+		}
+		if k > 0 && sig[k-1].Kind == sqltok.Dot {
+			continue
+		}
+		l := baseLine + t.Line - 1
+		c := t.Col
+		if t.Line == 1 {
+			c = baseCol + t.Col - 1
+		}
+		name := t.Text(inner)
+		out = append(out, DiagMarker{
+			StartLineNumber: l, StartColumn: c,
+			EndLineNumber: l, EndColumn: c + (t.End - t.Start),
+			Message:  "Variable '" + name + "' is not declared",
+			Severity: SeverityError,
+		})
+	}
+	return out
+}
 
 // ── TypeCategory ──────────────────────────────────────────────────────────────
 
