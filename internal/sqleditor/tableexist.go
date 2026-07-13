@@ -417,13 +417,12 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 				path := strings.Join(parts, ".")
 				if !isIn(scriptCreatedTables, ftTable) && !isIn(scriptCreatedTables, path) {
 					isLive := anyRefMatch(req.ResolvedRefs, ftTable, ftDB, ftSchema, checkEq)
-					if !isLive {
-						if ftDB != "" && len(req.KnownDatabases) == 0 {
-							continue
-						}
-						if schemaDataMissing(ftDB, ftSchema) {
-							continue
-						}
+					// Suppress the marker (but NOT the rest of the statement — the
+					// SWAP WITH sibling check and later per-statement validators must
+					// still run) when the catalog is empty or the DB's schema list
+					// hasn't been fetched (#709).
+					emptyCatalog := ftDB != "" && len(req.KnownDatabases) == 0
+					if !isLive && !emptyCatalog && !schemaDataMissing(ftDB, ftSchema) {
 						badToken, msgFn := resolveErrorToken(ftTable, ftDB, ftSchema,
 							scriptCreatedDbsAndSchemas, req.KnownDatabases, req.KnownSchemas, req.ResolvedRefs, checkEq)
 						for _, t := range findTokensLocally(raw, []string{badToken}, r.StartLine, ic) {
@@ -448,13 +447,10 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 				tgtPathStr := strings.Join(tgtParts, ".")
 				if !isIn(scriptCreatedTables, tgtTable) && !isIn(scriptCreatedTables, tgtPathStr) {
 					isLive := anyRefMatch(req.ResolvedRefs, tgtTable, tgtDB, tgtSchema, checkEq)
-					if !isLive {
-						if tgtDB != "" && len(req.KnownDatabases) == 0 {
-							continue
-						}
-						if schemaDataMissing(tgtDB, tgtSchema) {
-							continue
-						}
+					// Suppress only this marker, not the later per-statement
+					// validators (#709) — see the ALTER target block above.
+					emptyCatalog := tgtDB != "" && len(req.KnownDatabases) == 0
+					if !isLive && !emptyCatalog && !schemaDataMissing(tgtDB, tgtSchema) {
 						badToken, msgFn := resolveErrorToken(tgtTable, tgtDB, tgtSchema,
 							scriptCreatedDbsAndSchemas, req.KnownDatabases, req.KnownSchemas, req.ResolvedRefs, checkEq)
 						for _, t := range findTokensLocally(raw, []string{badToken}, r.StartLine, ic) {

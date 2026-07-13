@@ -158,6 +158,56 @@ func TestValidateTablesExist_AlterKnownSchemaData_StillFlagsMissing(t *testing.T
 	}
 }
 
+// The #709 suppression on an ALTER TABLE target (whose DB has no fetched schema
+// data) must only suppress that target's marker — not abort the whole statement.
+// The SWAP WITH target's own validation must still run and flag a genuinely
+// missing schema in a fully-known DB.
+func TestValidateTablesExist_AlterSuppressedTarget_StillValidatesSwapTarget(t *testing.T) {
+	req := ValidateTablesExistRequest{
+		KnownDatabases: []string{"MYDB", "OTHERDB"},
+		// MYDB has no schema data yet (target suppressed); OTHERDB is fully known.
+		KnownSchemas: []SchemaEntry{{DB: "OTHERDB", Name: "PUBLIC"}},
+	}
+	sql := "ALTER TABLE MYDB.UNLISTEDSCHEMA.A SWAP WITH OTHERDB.BOGUS.B;"
+	m := markersFor(req, sql)
+	found := false
+	for _, mk := range m {
+		if strings.Contains(mk.Message, "Schema 'BOGUS'") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("for %q: expected the SWAP target's missing schema to still be flagged, got %+v", sql, m)
+	}
+}
+
+// The #709 suppression on an ALTER TABLE target must not abort later
+// per-statement validators for that statement. A kind-implied reference
+// (SET MASKING POLICY) on an unfetched-schema table must still be checked.
+func TestValidateTablesExist_AlterSuppressedTarget_StillValidatesKindImplied(t *testing.T) {
+	req := ValidateTablesExistRequest{
+		KnownDatabases:       []string{"MYDB"}, // no schema data fetched for MYDB yet
+		KnownObjects:         []ObjectRef{{DB: "MYDB", Schema: "PUBLIC", Name: "REALPOLICY", Kind: "MASKING POLICY"}},
+		FetchedObjectSchemas: []SchemaEntry{{DB: "MYDB", Name: "PUBLIC"}},
+		SessionDatabase:      "MYDB",
+		SessionSchema:        "PUBLIC",
+	}
+	sql := "ALTER TABLE MYDB.UNLISTEDSCHEMA.T MODIFY COLUMN c SET MASKING POLICY totally_bogus_policy;"
+	m := markersFor(req, sql)
+	found := false
+	for _, mk := range m {
+		if strings.Contains(mk.Message, "totally_bogus_policy") ||
+			strings.Contains(strings.ToUpper(mk.Message), "TOTALLY_BOGUS_POLICY") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("for %q: expected the kind-implied MASKING POLICY ref to still be flagged, got %+v", sql, m)
+	}
+}
+
 // Negative control: when we DO have schema data for the DB, a genuinely missing
 // schema is still flagged (the guard must not suppress real errors).
 func TestValidateTablesExist_KnownSchemaData_StillFlagsMissing(t *testing.T) {
