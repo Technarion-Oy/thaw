@@ -73,6 +73,18 @@ func isAliasTok(tok sqltok.Token) bool {
 	return tok.Kind == sqltok.Identifier || tok.Kind == sqltok.QuotedIdent
 }
 
+// isAliasWord is the alias check for positions where an alias is unambiguously
+// expected (immediately after AS). It is broader than isAliasTok: any keyword that
+// is not a Snowflake *reserved* word (KEY, FIRST, LAST, TYPE, SCHEDULE, …) is a
+// legal alias — sqltok's keyword set is far wider than the reserved list, so those
+// tokenize as Keyword and would otherwise be rejected.
+func isAliasWord(tok sqltok.Token, sql string) bool {
+	if isAliasTok(tok) {
+		return true
+	}
+	return tok.Kind == sqltok.Keyword && !sqltok.IsReserved(strings.ToUpper(tok.Text(sql)))
+}
+
 // readIdentPath reads a dot-separated identifier path from sig[pos:] and returns
 // the raw substring and the position after the last consumed token. sig is a
 // significant-token slice (trivia removed), so parts join across original
