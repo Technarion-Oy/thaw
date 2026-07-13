@@ -75,6 +75,8 @@ const (
 	CategoryGeospatial DataTypeCategory = "geospatial"
 	// CategoryVector — VECTOR.
 	CategoryVector DataTypeCategory = "vector"
+	// CategoryFile — FILE (references to unstructured-data files).
+	CategoryFile DataTypeCategory = "file"
 )
 
 // ── DataTypeInfo ──────────────────────────────────────────────────────────────
@@ -133,6 +135,10 @@ var snowflakeDataTypes = []DataTypeInfo{
 	{Name: "TIMESTAMP_LTZ", Kind: KindFracSeconds, Category: CategoryDatetime, ParamHint: "(scale)"},
 	{Name: "TIMESTAMP_NTZ", Kind: KindFracSeconds, Category: CategoryDatetime, ParamHint: "(scale)"},
 	{Name: "TIMESTAMP_TZ", Kind: KindFracSeconds, Category: CategoryDatetime, ParamHint: "(scale)"},
+	// No-underscore TIMESTAMP synonyms (documented official forms).
+	{Name: "TIMESTAMPLTZ", Kind: KindFracSeconds, Category: CategoryDatetime, ParamHint: "(scale)"},
+	{Name: "TIMESTAMPNTZ", Kind: KindFracSeconds, Category: CategoryDatetime, ParamHint: "(scale)"},
+	{Name: "TIMESTAMPTZ", Kind: KindFracSeconds, Category: CategoryDatetime, ParamHint: "(scale)"},
 	// ── Semi-structured ──────────────────────────────────────────────────
 	{Name: "VARIANT", Kind: KindNoParams, Category: CategorySemiStructured},
 	{Name: "OBJECT", Kind: KindStructuredObject, Category: CategorySemiStructured, ParamHint: "(name type, ...)"},
@@ -144,6 +150,8 @@ var snowflakeDataTypes = []DataTypeInfo{
 	{Name: "GEOMETRY", Kind: KindNoParams, Category: CategoryGeospatial},
 	// ── Vector ───────────────────────────────────────────────────────────
 	{Name: "VECTOR", Kind: KindVector, Category: CategoryVector, ParamHint: "(element_type, dimension)"},
+	// ── File ─────────────────────────────────────────────────────────────
+	{Name: "FILE", Kind: KindNoParams, Category: CategoryFile},
 }
 
 // dataTypeMap is a fast lookup by canonical upper-case name, built once at init.
@@ -175,14 +183,16 @@ func AllDataTypes() []DataTypeInfo {
 }
 
 // BaseType reduces a Snowflake data-type string to its bare, upper-cased base
-// type name, dropping any parameter list and normalizing the TIMESTAMPTZ
-// synonym to TIMESTAMP_TZ:
+// type name, dropping any parameter list and normalizing the no-underscore
+// TIMESTAMP synonyms to their canonical underscored forms:
 //
 //	"VARCHAR(256)"        → "VARCHAR"
 //	"NUMBER(38,0)"        → "NUMBER"
 //	"TIMESTAMP_TZ(9)"     → "TIMESTAMP_TZ"
 //	"VECTOR(FLOAT, 256)"  → "VECTOR"
 //	"timestamptz"         → "TIMESTAMP_TZ"
+//	"timestampltz"        → "TIMESTAMP_LTZ"
+//	"timestampntz"        → "TIMESTAMP_NTZ"
 //
 // It is a lenient, best-effort classifier (it never errors and ignores trailing
 // tokens) intended for type-family checks such as index-eligibility filters; use
@@ -190,8 +200,13 @@ func AllDataTypes() []DataTypeInfo {
 func BaseType(dataType string) string {
 	base, _, _ := strings.Cut(strings.TrimSpace(dataType), "(")
 	base = strings.ToUpper(strings.TrimSpace(base))
-	if base == "TIMESTAMPTZ" {
+	switch base {
+	case "TIMESTAMPTZ":
 		return "TIMESTAMP_TZ"
+	case "TIMESTAMPLTZ":
+		return "TIMESTAMP_LTZ"
+	case "TIMESTAMPNTZ":
+		return "TIMESTAMP_NTZ"
 	}
 	return base
 }

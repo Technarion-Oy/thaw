@@ -76,4 +76,4 @@ jobs:
       - name: Run golangci-lint
         # webkit2_41: Ubuntu 24.04 only ships libwebkit2gtk-4.1-dev; without this
         # tag, Wails' CGO directives default to webkit2gtk-4.0 and pkg-config fails.
-        run: golangci-lint run --timeout=5m --build-tags webkit2_41
+        run: golangci-lint run --timeout=10m --build-tags webkit2_41
