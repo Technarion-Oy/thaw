@@ -93,7 +93,7 @@ func ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {
 		if !ok {
 			// Apply ALTER TABLE … ADD [COLUMN] to tables already created in-script
 			// so later INSERT/SELECT can find the added columns (issue #715).
-			if aPath, aCols, aok := parseAlterAddColumns(raw, ic); aok {
+			if aPath, aCols, aok := parseAlterAddColumns(sig, raw, ic); aok {
 				applyAlterAddToLocalCache(aPath, aCols, localColCache, ic)
 			}
 			continue
@@ -212,11 +212,23 @@ func extractBalancedBlock(s string, openIdx int) string {
 
 // parseCreateTableColDefs splits a raw column-definition block (the text
 // between CREATE TABLE name( ... )) into individual ColInfo entries.
-// It handles comments (-- and /* */), double-quoted identifiers with special
-// characters, and single-quoted string literals so that commas and parentheses
-// inside those contexts do not interfere with column splitting.
 func parseCreateTableColDefs(colsRaw string, ic bool) []ColInfo {
 	var columns []ColInfo
+	for _, def := range splitColDefs(colsRaw) {
+		if col, ok := parseFirstIdentAsCol(def, ic); ok {
+			columns = append(columns, col)
+		}
+	}
+	return columns
+}
+
+// splitColDefs splits a raw column-definition block into individual
+// comma-separated definition strings. It handles comments (-- and /* */),
+// double-quoted identifiers with special characters, and single-quoted string
+// literals so that commas and parentheses inside those contexts do not
+// interfere with column splitting.
+func splitColDefs(colsRaw string) []string {
+	var defs []string
 	depth := 0
 	inDouble := false
 	inSingle := false
@@ -302,9 +314,7 @@ func parseCreateTableColDefs(colsRaw string, ic bool) []ColInfo {
 			// the caller already stripped the outer parens, but guard anyway.
 		case c == ',' && depth == 0:
 			if def := strings.TrimSpace(current.String()); def != "" {
-				if col, ok := parseFirstIdentAsCol(def, ic); ok {
-					columns = append(columns, col)
-				}
+				defs = append(defs, def)
 			}
 			current.Reset()
 		default:
@@ -312,11 +322,9 @@ func parseCreateTableColDefs(colsRaw string, ic bool) []ColInfo {
 		}
 	}
 	if def := strings.TrimSpace(current.String()); def != "" {
-		if col, ok := parseFirstIdentAsCol(def, ic); ok {
-			columns = append(columns, col)
-		}
+		defs = append(defs, def)
 	}
-	return columns
+	return defs
 }
 
 func parseFirstIdentAsCol(def string, ic bool) (ColInfo, bool) {
@@ -339,11 +347,29 @@ func parseFirstIdentAsCol(def string, ic bool) (ColInfo, bool) {
 
 // nonColumnAddKw are the words that begin a non-column ALTER TABLE … ADD clause
 // (ADD CONSTRAINT / PRIMARY KEY / …). A parsed "column" whose name is one of
-// these is dropped so constraints aren't cached as columns. COLUMN is included
-// so a repeated "ADD COLUMN a INT, COLUMN b INT" form doesn't cache "COLUMN".
+// these is dropped so constraints aren't cached as columns.
 var nonColumnAddKw = map[string]bool{
 	"CONSTRAINT": true, "PRIMARY": true, "FOREIGN": true,
-	"UNIQUE": true, "CHECK": true, "COLUMN": true,
+	"UNIQUE": true, "CHECK": true,
+}
+
+// stripAddColItemPrefix removes a leading COLUMN keyword and/or IF NOT EXISTS
+// from a single comma-separated ALTER TABLE … ADD item, so the repeated
+// "ADD COLUMN a INT, COLUMN b INT" form yields the real names "a" and "b"
+// instead of discarding the COLUMN-prefixed items (issue #715).
+func stripAddColItemPrefix(def string) string {
+	sig := sigToks(sqltok.Tokenize(def))
+	i := 0
+	if kwAt(sig, def, i, "COLUMN") {
+		i++
+	}
+	if kwAt(sig, def, i, "IF") && kwAt(sig, def, i+1, "NOT") && kwAt(sig, def, i+2, "EXISTS") {
+		i += 3
+	}
+	if i == 0 || i >= len(sig) {
+		return def
+	}
+	return def[sig[i].Start:]
 }
 
 // parseAlterAddColumns matches
@@ -353,9 +379,8 @@ var nonColumnAddKw = map[string]bool{
 // and returns the table's ident-path text and the added columns. Non-column ADD
 // clauses (CONSTRAINT / PRIMARY KEY / …) yield no columns. ok is false when the
 // statement is not an ALTER TABLE … ADD that introduces at least one column.
-func parseAlterAddColumns(raw string, ic bool) (tablePath string, cols []ColInfo, ok bool) {
-	tokens := sqltok.Tokenize(raw)
-	sig := sigToks(tokens)
+// sig is the caller's already-computed significant tokens for raw.
+func parseAlterAddColumns(sig []sqltok.Token, raw string, ic bool) (tablePath string, cols []ColInfo, ok bool) {
 	if !kwAt(sig, raw, 0, "ALTER") || !kwAt(sig, raw, 1, "TABLE") {
 		return "", nil, false
 	}
@@ -379,12 +404,14 @@ func parseAlterAddColumns(raw string, ic bool) (tablePath string, cols []ColInfo
 	}
 	// The column-def block is everything from the first def token to end of stmt.
 	// ponytail: reuse the CREATE TABLE column splitter — it already handles commas,
-	// quotes, comments and nested parens; then drop any non-column ADD clauses.
-	for _, c := range parseCreateTableColDefs(raw[sig[pos].Start:], ic) {
-		if nonColumnAddKw[strings.ToUpper(c.Name)] {
+	// quotes, comments and nested parens — then strip each item's optional
+	// COLUMN / IF NOT EXISTS prefix and drop non-column ADD clauses.
+	for _, def := range splitColDefs(raw[sig[pos].Start:]) {
+		col, cok := parseFirstIdentAsCol(stripAddColItemPrefix(def), ic)
+		if !cok || nonColumnAddKw[strings.ToUpper(col.Name)] {
 			continue
 		}
-		cols = append(cols, c)
+		cols = append(cols, col)
 	}
 	if len(cols) == 0 {
 		return "", nil, false

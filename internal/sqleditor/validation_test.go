@@ -69,6 +69,9 @@ func TestValidateBareColumnRefs_Valid(t *testing.T) {
 		"CREATE TABLE loc_t2 (a INT);\nALTER TABLE loc_t2 ADD b INT, c INT;\nINSERT INTO loc_t2 (a, b, c) VALUES (1, 2, 3);",
 		// ADD COLUMN IF NOT EXISTS.
 		"CREATE TABLE loc_t3 (a INT);\nALTER TABLE loc_t3 ADD COLUMN IF NOT EXISTS b INT;\nSELECT a, b FROM loc_t3;",
+		// Multi-column ADD with the COLUMN keyword repeated per item (issue #715):
+		// every item's real name must be cached, not just the first.
+		"CREATE TABLE loc_t4 (a INT);\nALTER TABLE loc_t4 ADD COLUMN b INT, COLUMN c INT;\nSELECT b, c FROM loc_t4;",
 	}
 
 	req := ValidateBareColsRequest{

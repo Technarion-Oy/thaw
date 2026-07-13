@@ -2018,7 +2018,7 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 					localColCache[tableNameU] = columns
 				}
 			}
-		} else if aPath, aCols, aok := parseAlterAddColumns(raw, true); aok {
+		} else if aPath, aCols, aok := parseAlterAddColumns(rawSig, raw, true); aok {
 			// ALTER TABLE … ADD [COLUMN] on a table created in-script: merge the
 			// added columns so later references resolve (issue #715).
 			if parts := extractIdentParts(aPath, true); len(parts) > 0 {
