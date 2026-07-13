@@ -164,6 +164,28 @@ func TestValidateBareColumnRefs_Invalid(t *testing.T) {
 	}
 }
 
+// TestValidateBareColumnRefs_RebasesColumnForMidLineStatement guards issue #703:
+// when a statement begins mid-line (the second here), findTokensLocally must
+// rebase first-line columns to document coordinates, so the marker lands on
+// `wrong_col` (col 18) rather than inside the first statement.
+func TestValidateBareColumnRefs_RebasesColumnForMidLineStatement(t *testing.T) {
+	sql := `SELECT 1; SELECT wrong_col FROM "DB"."SCH"."EMPLOYEES"`
+	req := ValidateBareColsRequest{
+		SQL:          sql,
+		StmtRanges:   GetStatementRanges(sql),
+		ResolvedRefs: getTestRefs(),
+		ColEntries:   getTestColCaches(),
+	}
+	warnings := getWarnings(ValidateBareColumnRefs(req))
+	if len(warnings) != 1 {
+		t.Fatalf("expected 1 warning, got %d: %+v", len(warnings), warnings)
+	}
+	if warnings[0].StartColumn != 18 || warnings[0].EndColumn != 27 {
+		t.Errorf("expected marker at cols 18–27 (over `wrong_col`), got %d–%d",
+			warnings[0].StartColumn, warnings[0].EndColumn)
+	}
+}
+
 // ── 3. ValidateTablesExist Tests ──────────────────────────────────────────────
 
 func TestValidateTablesExist_Valid(t *testing.T) {
@@ -492,6 +514,32 @@ $$;
 			`,
 			expectedError: "Expected ':=' for assignment",
 		},
+		{
+			// #704: a $$…$$ that is a plain string constant, not a scripting
+			// block, must not be validated as Snowflake Scripting.
+			name:          "Plain dollar-quoted string constant",
+			sql:           "SELECT $$hello world$$ AS greeting;",
+			expectedError: "",
+		},
+		{
+			// #704: an apostrophe inside a plain $$ string previously produced a
+			// phantom "Unclosed string literal".
+			name:          "Dollar-quoted string with apostrophe",
+			sql:           "SELECT $$Bob's daughter$$;",
+			expectedError: "",
+		},
+		{
+			// #704: a non-SQL UDF body must be treated as opaque.
+			name:          "Python UDF body",
+			sql:           "CREATE FUNCTION f(x INT) RETURNS INT LANGUAGE PYTHON AS $$ def main(x): return x + 1 $$;",
+			expectedError: "",
+		},
+		{
+			// #704: a JavaScript body must not hit the scripting LET/VAR rule.
+			name:          "JavaScript UDF body",
+			sql:           `CREATE FUNCTION f() RETURNS STRING LANGUAGE JAVASCRIPT AS $$ var s = "hi"; return s; $$;`,
+			expectedError: "",
+		},
 	}
 
 	for _, tt := range tests {
@@ -519,6 +567,62 @@ $$;
 				if !found {
 					t.Errorf("Expected error matching %q, but got: %v", tt.expectedError, errs[0].Message)
 				}
+			}
+		})
+	}
+}
+
+// TestValidateSyntax_UnclosedDollarQuote pins the "Unclosed dollar-quoted
+// string" marker and its column math (#704). The marker spans the opening tag,
+// from the token's start column to start+len(tag). All existing scripting cases
+// use terminated $$ bodies, so nothing else exercises this branch or its offset.
+func TestValidateSyntax_UnclosedDollarQuote(t *testing.T) {
+	tests := []struct {
+		name    string
+		sql     string
+		wantCol int // 1-based start column of the opening tag
+		tagLen  int // width of the tag ($$ = 2, $foo$ = 5)
+	}{
+		{
+			// $$ opens at column 8 (after "SELECT "); body never terminates.
+			name:    "Unterminated $$ body",
+			sql:     "SELECT $$abc",
+			wantCol: 8,
+			tagLen:  2,
+		},
+		{
+			// Multi-char tag: $foo$ opens at column 8, width 5. Pins that the
+			// offset uses len(tag), not a hardcoded 2.
+			name:    "Unterminated multi-char tag body",
+			sql:     "SELECT $foo$abc",
+			wantCol: 8,
+			tagLen:  5,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errs := getErrors(ValidateSyntax(tt.sql))
+
+			var got *DiagMarker
+			for i := range errs {
+				if strings.Contains(errs[i].Message, "Unclosed dollar-quoted string") {
+					got = &errs[i]
+					break
+				}
+			}
+			if got == nil {
+				t.Fatalf("Expected 'Unclosed dollar-quoted string' marker, got: %v", errs)
+			}
+			if got.StartLineNumber != 1 || got.EndLineNumber != 1 {
+				t.Errorf("Expected marker on line 1, got start line %d end line %d",
+					got.StartLineNumber, got.EndLineNumber)
+			}
+			if got.StartColumn != tt.wantCol {
+				t.Errorf("Expected start column %d, got %d", tt.wantCol, got.StartColumn)
+			}
+			if want := tt.wantCol + tt.tagLen; got.EndColumn != want {
+				t.Errorf("Expected end column %d, got %d", want, got.EndColumn)
 			}
 		})
 	}
@@ -585,6 +689,67 @@ create table my_table (
 			name:          "Valid array/object types",
 			sql:           `CREATE TABLE t (tags ARRAY, metadata OBJECT);`,
 			expectedError: "",
+		},
+		// Issue #712: ALTER TABLE ADD non-column clauses must not be parsed as
+		// a column name + data type.
+		{
+			name:          "ALTER TABLE ADD PRIMARY KEY",
+			sql:           `ALTER TABLE t ADD PRIMARY KEY (id);`,
+			expectedError: "",
+		},
+		{
+			name:          "ALTER TABLE ADD CONSTRAINT",
+			sql:           `ALTER TABLE t ADD CONSTRAINT pk_t PRIMARY KEY (id);`,
+			expectedError: "",
+		},
+		{
+			name:          "ALTER TABLE ADD FOREIGN KEY",
+			sql:           `ALTER TABLE t ADD FOREIGN KEY (a) REFERENCES u (b);`,
+			expectedError: "",
+		},
+		{
+			name:          "ALTER TABLE ADD ROW ACCESS POLICY",
+			sql:           `ALTER TABLE t ADD ROW ACCESS POLICY rap ON (id);`,
+			expectedError: "",
+		},
+		{
+			name:          "ALTER TABLE ADD SEARCH OPTIMIZATION",
+			sql:           `ALTER TABLE t ADD SEARCH OPTIMIZATION;`,
+			expectedError: "",
+		},
+		// Issue #712 review: ROW / SEARCH are ALTER-ADD-only markers and must not
+		// suppress type-checking of a column literally named "row"/"search".
+		{
+			name:          "CREATE TABLE column named row still validated",
+			sql:           `CREATE TABLE t (row BADTYPE);`,
+			expectedError: "Unknown data type 'BADTYPE'",
+		},
+		{
+			name:          "CREATE TABLE column named search still validated",
+			sql:           `CREATE TABLE t (search BADTYPE);`,
+			expectedError: "Unknown data type 'BADTYPE'",
+		},
+		{
+			name:          "ALTER TABLE ADD COLUMN named row still validated",
+			sql:           `ALTER TABLE t ADD COLUMN row BADTYPE;`,
+			expectedError: "Unknown data type 'BADTYPE'",
+		},
+		{
+			name:          "ALTER TABLE ADD COLUMN still validated",
+			sql:           `ALTER TABLE t ADD COLUMN c NUMBR;`,
+			expectedError: "Unknown data type 'NUMBR'",
+		},
+		// Issue #712: a CAST with an inner AS alias must resolve the CAST's own
+		// type, not the nested alias.
+		{
+			name:          "CAST with inner AS alias in subquery",
+			sql:           `SELECT CAST((SELECT MAX(id) AS mx FROM t) AS INT);`,
+			expectedError: "",
+		},
+		{
+			name:          "CAST with inner AS alias still flags bad outer type",
+			sql:           `SELECT CAST((SELECT MAX(id) AS mx FROM t) AS INTT);`,
+			expectedError: "Unknown data type 'INTT'",
 		},
 	}
 
