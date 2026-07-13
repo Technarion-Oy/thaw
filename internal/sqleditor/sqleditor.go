@@ -804,9 +804,11 @@ func ApplyCasing(sql, keywordCase, identifierCase, functionCase string) string {
 //   - Unexpected token at a statement start
 //
 // Snowflake Scripting lives inside dollar-quoted bodies, which the tokenizer
-// surfaces as a single opaque DollarQuoted token. validateSyntaxScope therefore
-// recurses into each body (re-tokenizing it) and rebases the inner token
-// positions back to absolute line/column via the baseLine/baseCol offsets.
+// surfaces as a single opaque DollarQuoted token. validateSyntaxScope recurses
+// into a body (re-tokenizing it, rebasing inner positions via baseLine/baseCol)
+// only when it opens with BEGIN or DECLARE — an anonymous scripting block.
+// Plain string constants (SELECT $$hi$$) and non-SQL UDF bodies
+// (LANGUAGE PYTHON/JAVASCRIPT … AS $$…$$) are left opaque (#704).
 func ValidateSyntax(sql string) []DiagMarker {
 	var markers []DiagMarker
 	add := func(msg string, sl, sc, el, ec int) {
@@ -969,8 +971,12 @@ func validateSyntaxScope(src string, baseLine, baseCol int, inScript bool, add f
 			i++
 
 		case sqltok.DollarQuoted:
-			// Recurse into the body, which is Snowflake Scripting. The body
-			// starts len(tag) columns after the token, on the same line.
+			// A $$…$$ body is only Snowflake Scripting when it's an anonymous
+			// block — i.e. it opens with BEGIN or DECLARE (EXECUTE IMMEDIATE $$…$$
+			// and a LANGUAGE SQL procedure body both do). A plain string constant
+			// (SELECT $$hi$$) or a non-SQL UDF body (LANGUAGE PYTHON/JAVASCRIPT …
+			// AS $$…$$) is opaque — validating it as scripting produces phantom
+			// errors (#704). The body starts len(tag) columns after the token.
 			tag := t.Tag
 			text := t.Text(src)
 			var inner string
@@ -979,9 +985,18 @@ func validateSyntaxScope(src string, baseLine, baseCol int, inScript bool, add f
 			} else {
 				inner = text[len(tag) : len(text)-len(tag)]
 			}
-			sl, sc := absT(t)
-			validateSyntaxScope(inner, sl, sc+len(tag), true, add)
-			atStart = true
+			if t.Unterminated {
+				l, c := absT(t)
+				add("Unclosed dollar-quoted string", l, c, l, c+len(tag))
+			}
+			if kw := getFirstSQLToken(inner); kw == "BEGIN" || kw == "DECLARE" {
+				sl, sc := absT(t)
+				validateSyntaxScope(inner, sl, sc+len(tag), true, add)
+				atStart = true
+			} else {
+				// Opaque string constant — like StringLit, it doesn't reset start.
+				atStart = false
+			}
 			i++
 
 		case sqltok.LParen, sqltok.LBracket:
