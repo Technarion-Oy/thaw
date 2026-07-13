@@ -3398,12 +3398,7 @@ func (v *Validator) ParseAlterIcebergTable() bool {
 		func() bool {
 			return v.Choice(
 				// clusteringAction
-				func() bool {
-					return v.Sequence(
-						func() bool { return v.phrase("CLUSTER", "BY") },
-						v.consumeBalancedParens,
-					)
-				},
+				v.clusterByClause(v.consumeBalancedParens),
 				func() bool {
 					return v.Sequence(v.wordsValue("SUSPEND", "RESUME"), func() bool { return v.MatchWord("RECLUSTER") })
 				},
@@ -3840,12 +3835,7 @@ func (v *Validator) ParseAlterMaterializedView() bool {
 		func() bool {
 			return v.Choice(
 				func() bool { return v.phrase("RENAME", "TO") && name() },
-				func() bool {
-					return v.Sequence(
-						func() bool { return v.phrase("CLUSTER", "BY") },
-						v.consumeBalancedParens,
-					)
-				},
+				v.clusterByClause(v.consumeBalancedParens),
 				func() bool { return v.phrase("DROP", "CLUSTERING", "KEY") },
 				func() bool {
 					return v.Sequence(v.wordsValue("SUSPEND", "RESUME"), func() bool { return v.MatchWord("RECLUSTER") })

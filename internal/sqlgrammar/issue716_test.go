@@ -19,7 +19,7 @@ func TestIssue716_CopyIntoTablePurgeForce(t *testing.T) {
 	)
 }
 
-// COPY INTO <location>: HEADER is modelled as a bare word from the docs skeleton,
+// COPY INTO <location>: HEADER is modeled as a bare word from the docs skeleton,
 // but the common `HEADER = TRUE|FALSE` form failed at the `=`.
 func TestIssue716_CopyIntoLocationHeader(t *testing.T) {
 	assertValid(t, (*Validator).ParseCopyIntoLocation,
@@ -58,5 +58,19 @@ func TestIssue716_ClusterByLinear(t *testing.T) {
 	)
 	assertValid(t, (*Validator).ParseCreateMaterializedView,
 		"CREATE MATERIALIZED VIEW v CLUSTER BY LINEAR(a) AS SELECT * FROM t",
+	)
+}
+
+// The ALTER clustering actions must accept CLUSTER BY LINEAR(…) too — SHOW …
+// round-trips DDL in that form. Before the fix these still used the pre-helper
+// `CLUSTER BY <parens>` pattern and flagged LINEAR as a syntax error.
+func TestIssue716_AlterClusterByLinear(t *testing.T) {
+	assertValid(t, (*Validator).ParseAlterIcebergTable,
+		"ALTER ICEBERG TABLE t CLUSTER BY LINEAR(a, b)",
+		"ALTER ICEBERG TABLE t CLUSTER BY (a, b)", // non-LINEAR still valid
+	)
+	assertValid(t, (*Validator).ParseAlterMaterializedView,
+		"ALTER MATERIALIZED VIEW v CLUSTER BY LINEAR(a)",
+		"ALTER MATERIALIZED VIEW v CLUSTER BY (a)", // non-LINEAR still valid
 	)
 }
