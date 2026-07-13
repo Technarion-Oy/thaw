@@ -184,6 +184,12 @@ func TestValidateBareColumnRefs_Invalid(t *testing.T) {
 		{"ALTER add column does not pollute same-named table in other schema",
 			"CREATE TABLE a.loc_t (x INT);\nCREATE TABLE b.loc_t (y INT);\nALTER TABLE a.loc_t ADD COLUMN z INT;\nSELECT z FROM b.loc_t;",
 			[]string{"z"}},
+		// …and the added column must not leak into the *bare* key either: bare
+		// loc_t resolves to the last-created same-named table (b.loc_t), which
+		// never got z, so a bare reference is still flagged.
+		{"ALTER add column does not pollute bare key of same-named table",
+			"CREATE TABLE a.loc_t (x INT);\nCREATE TABLE b.loc_t (y INT);\nALTER TABLE a.loc_t ADD COLUMN z INT;\nSELECT z FROM loc_t;",
+			[]string{"z"}},
 	}
 
 	req := ValidateBareColsRequest{

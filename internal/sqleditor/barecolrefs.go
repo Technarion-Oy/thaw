@@ -354,7 +354,7 @@ func parseFirstIdentAsCol(def string, ic bool) (col ColInfo, nextUpper string, o
 	return ColInfo{Name: normIdent(sig[0].Text(def), ic), DataType: "UNKNOWN"}, nextUpper, true
 }
 
-// dataTypeLead is the set of first words of every recognised Snowflake data
+// dataTypeLead is the set of first words of every recognized Snowflake data
 // type ("DOUBLE" for "DOUBLE PRECISION", etc.). A genuine ALTER … ADD column
 // definition is `<name> <type> …`, so the token after the name is a type; the
 // non-column ADD clauses (CONSTRAINT, PRIMARY KEY, SEARCH OPTIMIZATION, ROW
@@ -464,31 +464,59 @@ func applyAlterAddToLocalCache(tablePath string, cols []ColInfo, localColCache m
 	if len(parts) >= 3 {
 		altDb = parts[len(parts)-3]
 	}
-	// CREATE stores the same column slice under the 1-, 2- and 3-part keys, so an
-	// ALTER that qualifies the table differently than the CREATE did (e.g. bare
-	// vs schema-qualified) must refresh every one of them — otherwise a later
-	// reference using the other qualification hits a stale slice and the added
-	// column is falsely reported missing (issue #715). Merge into every existing
-	// key for this table whose qualification is consistent with the ALTER's: a
-	// db/schema component the ALTER spelled out must match (or be absent in the
-	// key), which keeps a same-named table in another schema from being polluted.
-	for k, existing := range localColCache {
-		kDb, kSchema, kTable, ok := splitBcrCacheKey(k)
-		if !ok || kTable != tableName {
-			continue
+	// Resolve the ALTER to the specific table it targets by finding the most
+	// qualified existing cache key for its path. CREATE stores one column slice
+	// under this table's 1-/2-/3-part keys, so that key identifies the target's
+	// slice; keys the last CREATE of a same-named table in another schema left
+	// on the bare (1-part) slot point at a *different* slice and must be left
+	// alone (issue #715).
+	var targetKey string
+	for _, tk := range []string{
+		bcrCacheKey(altDb, altSchema, tableName),
+		bcrCacheKey("", altSchema, tableName),
+		bcrCacheKey("", "", tableName),
+	} {
+		if _, ok := localColCache[tk]; ok {
+			targetKey = tk
+			break
 		}
-		if altSchema != "" && kSchema != "" && kSchema != altSchema {
-			continue
-		}
-		if altDb != "" && kDb != "" && kDb != altDb {
-			continue
-		}
+	}
+	if targetKey == "" {
+		return // table not created in-script
+	}
+	target := localColCache[targetKey]
+
+	merge := func(k string) {
+		existing := localColCache[k]
 		// Fresh slice: CREATE stores the same backing array under several keys.
 		merged := make([]ColInfo, 0, len(existing)+len(cols))
 		merged = append(merged, existing...)
 		merged = append(merged, cols...)
 		localColCache[k] = merged
 	}
+
+	// Refresh every key that aliases the target table's CREATE slice — so a
+	// reference using a qualification other than the ALTER's still sees the added
+	// column — then the target key itself (which may be the sole/empty entry).
+	for k := range localColCache {
+		if k == targetKey {
+			continue
+		}
+		if _, _, kTable, ok := splitBcrCacheKey(k); !ok || kTable != tableName {
+			continue
+		}
+		if sameColSlice(localColCache[k], target) {
+			merge(k)
+		}
+	}
+	merge(targetKey)
+}
+
+// sameColSlice reports whether a and b share the same backing array — i.e. they
+// are the *same* cache entry stored under multiple keys, not merely equal. Empty
+// slices have no identity, so they never match.
+func sameColSlice(a, b []ColInfo) bool {
+	return len(a) > 0 && len(a) == len(b) && &a[0] == &b[0]
 }
 
 // lookupColsForRef finds the ColInfo slice for a table identified by
