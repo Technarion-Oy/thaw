@@ -52,16 +52,14 @@ func ValidateGrammar(sql string, stmtRanges []StatementRange) []DiagMarker {
 
 // grammarMarkerPos maps a failure token (in statement-local coordinates) to
 // absolute 1-based document coordinates. When the parser ran off the end of the
-// statement (EOF sentinel) the marker is anchored at the end of the statement
-// text, with trailing semicolon/whitespace trimmed off.
+// statement (EOF sentinel) the marker is anchored just past the last significant
+// token — skipping a trailing semicolon, whitespace, and comments, none of which
+// the grammar consumes — so it never lands on a trailing comment.
 func grammarMarkerPos(sql string, r StatementRange, tok sqltok.Token) (sl, sc, el, ec int) {
-	// Column of the statement's first character within the document.
-	lineStart := strings.LastIndexByte(sql[:r.StartOffset], '\n') + 1
-	startCol := r.StartOffset - lineStart + 1
+	startCol := stmtStartCol(sql, r)
 
 	if tok.Kind == sqltok.EOF || tok.Line == 0 {
-		endTrim := strings.TrimRight(sql[r.StartOffset:r.EndOffset], "; \t\r\n")
-		endOff := r.StartOffset + len(endTrim)
+		endOff := r.StartOffset + stmtSignificantEnd(sql[r.StartOffset:r.EndOffset])
 		el = r.StartLine + strings.Count(sql[r.StartOffset:endOff], "\n")
 		elLineStart := strings.LastIndexByte(sql[:endOff], '\n') + 1
 		ec = endOff - elLineStart + 1
@@ -74,5 +72,25 @@ func grammarMarkerPos(sql string, r StatementRange, tok sqltok.Token) (sl, sc, e
 	} else {
 		sc = tok.Col
 	}
+	// The failure token may span multiple lines ($$…$$, a multi-line string
+	// literal), so derive the end from its text rather than assuming the span
+	// stays on the start line.
+	tokText := sql[r.StartOffset+tok.Start : r.StartOffset+tok.End]
+	if nl := strings.Count(tokText, "\n"); nl > 0 {
+		return sl, sc, sl + nl, len(tokText) - strings.LastIndexByte(tokText, '\n')
+	}
 	return sl, sc, sl, sc + (tok.End - tok.Start)
+}
+
+// stmtSignificantEnd returns the byte offset within stmt just past its last
+// significant token, ignoring a trailing semicolon and any trailing
+// whitespace/comment. Returns 0 when the statement has no significant content.
+func stmtSignificantEnd(stmt string) int {
+	sig := sqltok.SignificantTokens(stmt)
+	for i := len(sig) - 1; i >= 0; i-- {
+		if sig[i].Kind != sqltok.Semicolon {
+			return sig[i].End
+		}
+	}
+	return 0
 }

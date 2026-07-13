@@ -2,6 +2,22 @@ package sqlgrammar
 
 import "thaw/internal/sqltok"
 
+// isSlashes reports whether s is one or more '/' and nothing else. The
+// tokenizer emits a URI authority separator (`//` in s3://, `///` in
+// file:///) as a single slash-run operator, so a file:// local path surfaces
+// as one Operator token rather than several.
+func isSlashes(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] != '/' {
+			return false
+		}
+	}
+	return true
+}
+
 // Data loading & unloading / file staging — grammar-rule stubs for issue #556.
 //
 // Each function corresponds to one Snowflake command reference (see the per-
@@ -332,7 +348,7 @@ func (v *Validator) ParseGet() bool {
 				break
 			}
 			ok := t.Kind.IsIdentLike() || t.Kind == sqltok.Dot || t.Kind == sqltok.NumberLit ||
-				(t.Kind == sqltok.Operator && (t.Text(v.src) == "/" || t.Text(v.src) == "*"))
+				(t.Kind == sqltok.Operator && (isSlashes(t.Text(v.src)) || t.Text(v.src) == "*"))
 			if !ok {
 				break
 			}
@@ -458,7 +474,7 @@ func (v *Validator) ParsePut() bool {
 				break
 			}
 			ok := t.Kind.IsIdentLike() || t.Kind == sqltok.Dot || t.Kind == sqltok.NumberLit ||
-				(t.Kind == sqltok.Operator && (t.Text(v.src) == "/" || t.Text(v.src) == "*"))
+				(t.Kind == sqltok.Operator && (isSlashes(t.Text(v.src)) || t.Text(v.src) == "*"))
 			if !ok {
 				break
 			}
