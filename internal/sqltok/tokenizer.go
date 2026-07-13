@@ -155,6 +155,11 @@ func scan(src string, n int, pos, line, col *int) Token {
 		return Token{Kind: BlockComment, Start: start, End: i, Line: startLine, Col: startCol, Unterminated: unterminated}
 
 	// ── Single-quoted string '...' ──────────────────────────────────────
+	// Snowflake string constants support both the `''` doubled-quote escape
+	// and backslash escapes (`\'`, `\\`). A quote is a real closer only when an
+	// even number of backslashes immediately precedes it (`\\'` closes; `\'`
+	// does not). Quoted identifiers below deliberately keep the simpler `""`-only
+	// rule — Snowflake identifiers do not honor backslash escapes.
 	case c == '\'':
 		i := start + 1
 		terminated := false
@@ -164,7 +169,17 @@ func scan(src string, n int, pos, line, col *int) Token {
 				i = n
 				break
 			}
-			i += j + 1
+			quote := i + j
+			// ponytail: back-scan for escaping backslashes; O(n²) only on
+			// pathological all-backslash input, fine for real SQL.
+			bs := 0
+			for k := quote - 1; k > start && src[k] == '\\'; k-- {
+				bs++
+			}
+			i = quote + 1
+			if bs%2 == 1 {
+				continue // escaped quote (\'), keep scanning
+			}
 			if i < n && src[i] == '\'' {
 				i++ // '' escape
 			} else {

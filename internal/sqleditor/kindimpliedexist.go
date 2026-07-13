@@ -141,12 +141,29 @@ func validateKindImpliedRefs(
 }
 
 // unquoteSingle strips the surrounding single quotes from a SQL string literal
-// and collapses doubled '' escapes, returning the raw content ('a''b' → a'b).
+// and decodes its escapes, returning the raw content. It is the inverse of the
+// sqltok single-quote scanner, honoring both the doubled-quote escape (''→') and
+// backslash escapes (\'→', \\→\, and \x→x for any other x) — otherwise a literal
+// the tokenizer now correctly keeps whole (e.g. 'my\'format') would mis-decode.
 func unquoteSingle(s string) string {
 	if len(s) >= 2 && s[0] == '\'' && s[len(s)-1] == '\'' {
 		s = s[1 : len(s)-1]
 	}
-	return strings.ReplaceAll(s, "''", "'")
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '\\' && i+1 < len(s) {
+			i++
+			b.WriteByte(s[i]) // backslash escapes the next char
+		} else if c == '\'' && i+1 < len(s) && s[i+1] == '\'' {
+			i++
+			b.WriteByte('\'') // '' doubled-quote escape
+		} else {
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
 }
 
 // precededBySetOrAdd reports whether the significant token before sig[i] is SET
