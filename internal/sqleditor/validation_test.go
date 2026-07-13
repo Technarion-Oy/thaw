@@ -91,6 +91,13 @@ func TestValidateBareColumnRefs_Valid(t *testing.T) {
 		// real column even when its (bare) name collides with a clause keyword
 		// (SEARCH / ROW / STORAGE), so it must still be cached.
 		"CREATE TABLE loc_t6 (a INT);\nALTER TABLE loc_t6 ADD COLUMN search INT;\nSELECT a, search FROM loc_t6;",
+		// Issue #715: CREATE schema-qualified, ALTER bare, reference schema-
+		// qualified — the merge must refresh every cache key for the table, not
+		// only the one the ALTER's qualification reconstructs, or the qualified
+		// reference hits a stale slice.
+		"CREATE TABLE sch.loc_t7 (a INT);\nALTER TABLE loc_t7 ADD COLUMN b INT;\nSELECT b FROM sch.loc_t7;",
+		// Reverse direction: CREATE bare, ALTER schema-qualified, reference bare.
+		"CREATE TABLE loc_t8 (a INT);\nALTER TABLE sch.loc_t8 ADD COLUMN b INT;\nSELECT b FROM loc_t8;",
 	}
 
 	req := ValidateBareColsRequest{
@@ -171,6 +178,12 @@ func TestValidateBareColumnRefs_Invalid(t *testing.T) {
 		{"ALTER add search optimization is not cached as a column",
 			"CREATE TABLE loc_t (a INT);\nALTER TABLE loc_t ADD SEARCH OPTIMIZATION ON EQUALITY(a);\nSELECT search FROM loc_t;",
 			[]string{"search"}},
+		// Issue #715: an ALTER on a schema-qualified table must not leak the added
+		// column into a same-named table in a different schema — SELECT z from the
+		// other schema's table is still flagged.
+		{"ALTER add column does not pollute same-named table in other schema",
+			"CREATE TABLE a.loc_t (x INT);\nCREATE TABLE b.loc_t (y INT);\nALTER TABLE a.loc_t ADD COLUMN z INT;\nSELECT z FROM b.loc_t;",
+			[]string{"z"}},
 	}
 
 	req := ValidateBareColsRequest{

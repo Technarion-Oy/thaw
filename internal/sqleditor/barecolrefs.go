@@ -181,6 +181,16 @@ func bcrCacheKey(db, schema, table string) string {
 	return db + "\x00" + schema + "\x00" + table
 }
 
+// splitBcrCacheKey reverses bcrCacheKey into its (db, schema, table) parts. ok
+// is false for a key that isn't the expected 3-part shape.
+func splitBcrCacheKey(k string) (db, schema, table string, ok bool) {
+	parts := strings.SplitN(k, "\x00", 3)
+	if len(parts) != 3 {
+		return "", "", "", false
+	}
+	return parts[0], parts[1], parts[2], true
+}
+
 // extractBalancedBlock returns the substring of s starting at openIdx
 // (which must be '(') up to and including the matching closing ')'.
 // Returns "" if the parentheses are unbalanced.
@@ -447,16 +457,30 @@ func applyAlterAddToLocalCache(tablePath string, cols []ColInfo, localColCache m
 		return
 	}
 	tableName := parts[len(parts)-1]
-	keys := []string{bcrCacheKey("", "", tableName)}
+	var altSchema, altDb string
 	if len(parts) >= 2 {
-		keys = append(keys, bcrCacheKey("", parts[len(parts)-2], tableName))
+		altSchema = parts[len(parts)-2]
 	}
 	if len(parts) >= 3 {
-		keys = append(keys, bcrCacheKey(parts[len(parts)-3], parts[len(parts)-2], tableName))
+		altDb = parts[len(parts)-3]
 	}
-	for _, k := range keys {
-		existing, ok := localColCache[k]
-		if !ok {
+	// CREATE stores the same column slice under the 1-, 2- and 3-part keys, so an
+	// ALTER that qualifies the table differently than the CREATE did (e.g. bare
+	// vs schema-qualified) must refresh every one of them — otherwise a later
+	// reference using the other qualification hits a stale slice and the added
+	// column is falsely reported missing (issue #715). Merge into every existing
+	// key for this table whose qualification is consistent with the ALTER's: a
+	// db/schema component the ALTER spelled out must match (or be absent in the
+	// key), which keeps a same-named table in another schema from being polluted.
+	for k, existing := range localColCache {
+		kDb, kSchema, kTable, ok := splitBcrCacheKey(k)
+		if !ok || kTable != tableName {
+			continue
+		}
+		if altSchema != "" && kSchema != "" && kSchema != altSchema {
+			continue
+		}
+		if altDb != "" && kDb != "" && kDb != altDb {
 			continue
 		}
 		// Fresh slice: CREATE stores the same backing array under several keys.
