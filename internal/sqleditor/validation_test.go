@@ -426,6 +426,32 @@ $$;
 			expectedError: "", // Should be perfectly valid, no "Variable 'TABLE' is not declared"
 		},
 		{
+			// Issue #705: a bare identifier matching a builtin name (not a call)
+			// is still a variable reference and must be flagged if undeclared.
+			name: "RETURN bare builtin-named undeclared variable",
+			sql: `
+execute immediate $$
+  begin
+    return count;
+  end;
+$$;
+			`,
+			expectedError: "Variable 'count' is not declared",
+		},
+		{
+			// Issue #705: a non-builtin call is a function/procedure call, not a
+			// variable reference — the scope checker must not flag it.
+			name: "RETURN non-builtin function call",
+			sql: `
+execute immediate $$
+  begin
+    return some_func(x);
+  end;
+$$;
+			`,
+			expectedError: "",
+		},
+		{
 			name: "Valid DECLARE with type annotations",
 			sql: `
 execute immediate $$

@@ -1196,13 +1196,15 @@ func validateScriptWord(
 			}
 			return k
 		}
-		// RETURN <var> — flag an undeclared, non-keyword identifier. A
-		// function call (identifier immediately followed by '(') or a built-in
-		// function name is an expression, not a variable reference (issue #705).
+		// RETURN <var> — flag an undeclared, non-keyword identifier. The scope
+		// checker only validates variables, so the sole exemption is an
+		// identifier immediately followed by '(': that's a function/procedure
+		// call (builtin or not), not a variable reference. A bare identifier
+		// matching a builtin name (e.g. `RETURN count;`) is still a variable
+		// reference and must be flagged if undeclared (issue #705).
 		varName := strings.ToUpper(varTok.Text(src))
 		isCall := skipWS(k+1) < len(toks) && toks[skipWS(k+1)].Kind == sqltok.LParen
-		if !isCall && !sqltok.IsBuiltinFunction(varName) &&
-			!scriptStmtKeywords[varName] && !declaredVars[varName] {
+		if !isCall && !scriptStmtKeywords[varName] && !declaredVars[varName] {
 			l, c := absT(varTok)
 			add("Variable '"+varTok.Text(src)+"' is not declared", l, c, l, c+(varTok.End-varTok.Start))
 		}
