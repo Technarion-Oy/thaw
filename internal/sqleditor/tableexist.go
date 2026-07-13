@@ -111,6 +111,17 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 	scriptHasActiveDB := false
 	scriptHasActiveSchema := false
 
+	// schemaDataMissing reports a qualified <db>.<schema> reference whose DB is
+	// known/valid but whose schema list hasn't been fetched (SHOW SCHEMAS failed
+	// or never ran — shared/unexpanded DBs). We can validate neither the schema
+	// nor the table under it, so the caller must not flag it (#709). A genuinely
+	// unknown DB returns false here and still falls through to resolveErrorToken.
+	schemaDataMissing := func(db, schema string) bool {
+		return db != "" && schema != "" &&
+			dbExists(db, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) &&
+			!hasSchemaDataForDB(db, req.KnownSchemas, scriptEverCreatedSchemasByDB, req.ResolvedRefs, checkEq)
+	}
+
 	// Schema-scoped objects beyond tables/views (stages, streams, tasks, pipes,
 	// file formats, table-likes, policies, …) — resolved against the KnownObjects
 	// catalog rather than ResolvedRefs. In-script CREATE/DROP effects are tracked
@@ -410,13 +421,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 						if ftDB != "" && len(req.KnownDatabases) == 0 {
 							continue
 						}
-						// DB exists but its schema list hasn't been fetched — we
-						// can validate neither the schema nor the table under it,
-						// so don't flag (#709). A genuinely unknown DB still falls
-						// through to resolveErrorToken.
-						if ftDB != "" && ftSchema != "" &&
-							dbExists(ftDB, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) &&
-							!hasSchemaDataForDB(ftDB, req.KnownSchemas, scriptEverCreatedSchemasByDB, req.ResolvedRefs, checkEq) {
+						if schemaDataMissing(ftDB, ftSchema) {
 							continue
 						}
 						badToken, msgFn := resolveErrorToken(ftTable, ftDB, ftSchema,
@@ -447,13 +452,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 						if tgtDB != "" && len(req.KnownDatabases) == 0 {
 							continue
 						}
-						// DB exists but its schema list hasn't been fetched — we
-						// can validate neither the schema nor the table under it,
-						// so don't flag (#709). A genuinely unknown DB still falls
-						// through to resolveErrorToken.
-						if tgtDB != "" && tgtSchema != "" &&
-							dbExists(tgtDB, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) &&
-							!hasSchemaDataForDB(tgtDB, req.KnownSchemas, scriptEverCreatedSchemasByDB, req.ResolvedRefs, checkEq) {
+						if schemaDataMissing(tgtDB, tgtSchema) {
 							continue
 						}
 						badToken, msgFn := resolveErrorToken(tgtTable, tgtDB, tgtSchema,
@@ -684,9 +683,14 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			// Skip built-in schemas whose objects we never fetch and so cannot
 			// existence-check: SNOWFLAKE.CORTEX (AI function namespace), plus the
 			// always-present INFORMATION_SCHEMA / ACCOUNT_USAGE views (#709).
+			// The DB itself is still validated below — suppress only when we can't
+			// prove the DB missing (no catalog data or the DB is known), so a bogus
+			// DB like BOGUS.INFORMATION_SCHEMA.T still falls through and is flagged.
 			if ft.db != "" && ft.schema != "" &&
 				(isAlwaysPresentSchema(ft.db, ft.schema) ||
-					(strings.EqualFold(ft.db, "SNOWFLAKE") && strings.EqualFold(ft.schema, "CORTEX"))) {
+					(strings.EqualFold(ft.db, "SNOWFLAKE") && strings.EqualFold(ft.schema, "CORTEX"))) &&
+				(len(req.KnownDatabases) == 0 ||
+					dbExists(ft.db, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq)) {
 				continue
 			}
 			if _, isCTE := cteNames[compareTable]; isCTE {
@@ -709,13 +713,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 				continue
 			}
 
-			// The DB exists but we have no data about its schemas (SHOW SCHEMAS
-			// failed / never fetched — shared or unexpanded DBs). We can neither
-			// validate the schema nor the table under it, so don't flag (#709).
-			// A genuinely unknown DB still falls through to resolveErrorToken.
-			if ft.db != "" && ft.schema != "" &&
-				dbExists(ft.db, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) &&
-				!hasSchemaDataForDB(ft.db, req.KnownSchemas, scriptEverCreatedSchemasByDB, req.ResolvedRefs, checkEq) {
+			if schemaDataMissing(ft.db, ft.schema) {
 				continue
 			}
 

@@ -60,6 +60,36 @@ func TestValidateTablesExist_InformationSchema_NoFalsePositive(t *testing.T) {
 	}
 }
 
+// Negative control for the always-present-schema skip: an always-present schema
+// (INFORMATION_SCHEMA, ACCOUNT_USAGE) must not let a bogus DB slip through
+// unvalidated. The DB-existence check still runs, so BOGUS.INFORMATION_SCHEMA.T
+// is flagged on the database, not silently accepted.
+func TestValidateTablesExist_AlwaysPresentSchema_StillFlagsMissingDB(t *testing.T) {
+	req := ValidateTablesExistRequest{
+		KnownDatabases:  []string{"MYDB"},
+		KnownSchemas:    []SchemaEntry{{DB: "MYDB", Name: "PUBLIC"}},
+		SessionDatabase: "MYDB",
+		SessionSchema:   "PUBLIC",
+	}
+	cases := []struct{ sql, want string }{
+		{"SELECT * FROM TOTALLY_BOGUS_DB.INFORMATION_SCHEMA.TABLES;", "Database 'TOTALLY_BOGUS_DB'"},
+		{"SELECT * FROM NOPEDB.ACCOUNT_USAGE.QUERY_HISTORY;", "Database 'NOPEDB'"},
+	}
+	for _, c := range cases {
+		m := markersFor(req, c.sql)
+		found := false
+		for _, mk := range m {
+			if strings.Contains(mk.Message, c.want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("for %q: expected a marker containing %q, got %+v", c.sql, c.want, m)
+		}
+	}
+}
+
 // Empty catalog (disconnected / not yet loaded): qualified db.schema references
 // in DROP SCHEMA / USE SCHEMA / bare USE must stay silent, matching the existing
 // DROP DATABASE guard rather than flagging the database or schema.
