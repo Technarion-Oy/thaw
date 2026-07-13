@@ -29,6 +29,14 @@ import (
 // column-ref validators recognize it here contextually instead. The
 // parenthesized `EXCLUDE (col)` form needs no special case: it is already
 // skipped by the "identifier followed by ( ⇒ function call" heuristic.
+//
+// Known limitation: this checks only whether the preceding token is a literal
+// `*`, not whether that `*` is a SELECT wildcard vs. the multiplication
+// operator. So `SELECT price * EXCLUDE FROM orders` (multiply by a column
+// literally named EXCLUDE) would suppress a "column not found" diagnostic for
+// that column. This is an accepted trade-off — a column named EXCLUDE is
+// unlikely, and it matches the file's existing heuristic style (e.g. the
+// "identifier followed by ( ⇒ function call" heuristic has similar blind spots).
 func isStarExcludeCol(upper string, prevIsStar bool) bool {
 	return prevIsStar && upper == "EXCLUDE"
 }
