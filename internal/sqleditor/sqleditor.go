@@ -922,6 +922,15 @@ func validateSyntaxScope(src string, baseLine, baseCol int, inScript bool, add f
 	}
 
 	var parenStack []parenEntry
+	// flushOpenParens reports every still-open paren/bracket in push order and
+	// clears the stack. Used both at each statement boundary (per-statement
+	// balance) and at end of scope.
+	flushOpenParens := func() {
+		for _, open := range parenStack {
+			add("Unclosed '"+open.char+"'", open.line, open.col, open.line, open.col+1)
+		}
+		parenStack = parenStack[:0]
+	}
 	declaredVars := map[string]bool{}
 	inDeclareBlock := false
 	atStart := true
@@ -1013,10 +1022,7 @@ func validateSyntaxScope(src string, baseLine, baseCol int, inScript bool, add f
 			// Paren balance is per-statement: flush/report any parens left open
 			// by this statement so a stray ')' in the next one can't silently pop
 			// them (cross-statement leak).
-			for _, open := range parenStack {
-				add("Unclosed '"+open.char+"'", open.line, open.col, open.line, open.col+1)
-			}
-			parenStack = parenStack[:0]
+			flushOpenParens()
 			atStart = true
 			i++
 
@@ -1069,9 +1075,7 @@ func validateSyntaxScope(src string, baseLine, baseCol int, inScript bool, add f
 	}
 
 	// Report unclosed opening parens/brackets in push order.
-	for _, open := range parenStack {
-		add("Unclosed '"+open.char+"'", open.line, open.col, open.line, open.col+1)
-	}
+	flushOpenParens()
 }
 
 // validateScriptWord handles a keyword/identifier token at a Snowflake Scripting
