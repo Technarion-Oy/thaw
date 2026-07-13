@@ -1020,8 +1020,39 @@ type asAliasLoc struct {
 
 func findAsAliases(sig []sqltok.Token, sql string) []asAliasLoc {
 	var locs []asAliasLoc
+	// The implicit-alias branch may only fire inside a SELECT projection list.
+	// Two adjacent bare identifiers elsewhere (ORDER BY / GROUP BY x, a table
+	// alias, a subquery body) must NOT be read as an output alias, or a genuine
+	// "column not found" diagnostic on the trailing identifier gets suppressed
+	// (PR #739). Track paren depth and whether we're before the first clause
+	// boundary at depth 0. Both callers start armed: sqleditor.go passes the whole
+	// statement (opens with SELECT/WITH; re-armed at each depth-0 SELECT, disarmed
+	// at FROM/WHERE/GROUP/ORDER/…), and barecolrefs.go passes the already-sliced
+	// projection text (no depth-0 FROM, so it simply stays armed).
+	depth := 0
+	inProj := true
 	for i := 0; i < len(sig); i++ {
-		// Explicit "AS <alias>".
+		switch sig[i].Kind {
+		case sqltok.LParen:
+			depth++
+		case sqltok.RParen:
+			if depth > 0 {
+				depth--
+			}
+		case sqltok.Keyword:
+			if depth == 0 {
+				switch tokUpper(sig[i], sql) {
+				case "SELECT":
+					inProj = true
+				case "FROM", "WHERE", "GROUP", "ORDER", "HAVING", "QUALIFY",
+					"LIMIT", "WINDOW", "OFFSET", "FETCH", "SAMPLE", "INTO",
+					"UNION", "INTERSECT", "EXCEPT", "MINUS", "CONNECT", "START":
+					inProj = false
+				}
+			}
+		}
+
+		// Explicit "AS <alias>" — recognized anywhere (also table aliases).
 		if i+1 < len(sig) && tokUpper(sig[i], sql) == "AS" && isIdent(sig[i+1]) {
 			locs = append(locs, asAliasLoc{
 				asStart:    sig[i].Start,
@@ -1036,9 +1067,10 @@ func findAsAliases(sig []sqltok.Token, sql string) []asAliasLoc {
 		// `SELECT ID employee_id` and `SELECT COUNT(*) cnt` without misreading
 		// `db.sch.tbl` dotted refs (the ident before a dotted part is a Dot, not
 		// an expression terminator) or clause keywords (never expression ends).
-		// ponytail: whole-statement scans may also pick up table aliases / other
-		// trailing idents — harmless, they only suppress missing-column noise.
-		if isAliasTok(sig[i]) && i > 0 && isExprEnd(sig[i-1].Kind) && isListItemBoundary(sig, i+1) {
+		// Gated to depth 0 + projection list so ORDER BY / GROUP BY / subquery
+		// trailing idents are left alone (PR #739).
+		if depth == 0 && inProj &&
+			isAliasTok(sig[i]) && i > 0 && isExprEnd(sig[i-1].Kind) && isListItemBoundary(sig, i+1) {
 			locs = append(locs, asAliasLoc{
 				asStart:    sig[i].Start,
 				aliasStart: sig[i].Start,

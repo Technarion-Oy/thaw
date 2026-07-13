@@ -868,6 +868,46 @@ func TestValidateSemantics_ImplicitColumnAlias(t *testing.T) {
 	}
 }
 
+// TestValidateSemantics_ImplicitAliasScopedToProjection verifies the
+// implicit-alias heuristic only applies inside the SELECT projection list.
+// A bogus trailing identifier in GROUP BY / ORDER BY is two adjacent bare
+// idents but must still be flagged as a missing column — it is NOT an implicit
+// output alias (PR #739 regression guard).
+func TestValidateSemantics_ImplicitAliasScopedToProjection(t *testing.T) {
+	cases := []struct {
+		name string
+		sql  string
+		want string // substring of the expected warning message
+	}{
+		{
+			name: "GROUP BY trailing bogus ident",
+			sql:  "SELECT DEPT_ID, COUNT(*) c FROM DB.SCH.EMPLOYEES e GROUP BY DEPT_ID bogus_col",
+			want: "bogus_col",
+		},
+		{
+			name: "ORDER BY trailing bogus ident",
+			sql:  "SELECT ID FROM DB.SCH.EMPLOYEES e ORDER BY ID bogus_col2",
+			want: "bogus_col2",
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			warns := getWarnings(ValidateSemantics(tt.sql, getTestRefs(), getTestColCaches()))
+			found := false
+			for _, w := range warns {
+				if strings.Contains(w.Message, tt.want) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("Expected a warning mentioning %q for %q, got %d: %v",
+					tt.want, tt.sql, len(warns), warns)
+			}
+		})
+	}
+}
+
 // TestValidateSemantics_LocalTableAliasColumns verifies that alias.column
 // references against script-local CREATE TABLE tables are validated.
 func TestValidateSemantics_LocalTableAliasColumns(t *testing.T) {
