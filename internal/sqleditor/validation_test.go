@@ -545,6 +545,62 @@ $$;
 	}
 }
 
+// TestValidateSyntax_UnclosedDollarQuote pins the "Unclosed dollar-quoted
+// string" marker and its column math (#704). The marker spans the opening tag,
+// from the token's start column to start+len(tag). All existing scripting cases
+// use terminated $$ bodies, so nothing else exercises this branch or its offset.
+func TestValidateSyntax_UnclosedDollarQuote(t *testing.T) {
+	tests := []struct {
+		name    string
+		sql     string
+		wantCol int // 1-based start column of the opening tag
+		tagLen  int // width of the tag ($$ = 2, $foo$ = 5)
+	}{
+		{
+			// $$ opens at column 8 (after "SELECT "); body never terminates.
+			name:    "Unterminated $$ body",
+			sql:     "SELECT $$abc",
+			wantCol: 8,
+			tagLen:  2,
+		},
+		{
+			// Multi-char tag: $foo$ opens at column 8, width 5. Pins that the
+			// offset uses len(tag), not a hardcoded 2.
+			name:    "Unterminated multi-char tag body",
+			sql:     "SELECT $foo$abc",
+			wantCol: 8,
+			tagLen:  5,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errs := getErrors(ValidateSyntax(tt.sql))
+
+			var got *DiagMarker
+			for i := range errs {
+				if strings.Contains(errs[i].Message, "Unclosed dollar-quoted string") {
+					got = &errs[i]
+					break
+				}
+			}
+			if got == nil {
+				t.Fatalf("Expected 'Unclosed dollar-quoted string' marker, got: %v", errs)
+			}
+			if got.StartLineNumber != 1 || got.EndLineNumber != 1 {
+				t.Errorf("Expected marker on line 1, got start line %d end line %d",
+					got.StartLineNumber, got.EndLineNumber)
+			}
+			if got.StartColumn != tt.wantCol {
+				t.Errorf("Expected start column %d, got %d", tt.wantCol, got.StartColumn)
+			}
+			if want := tt.wantCol + tt.tagLen; got.EndColumn != want {
+				t.Errorf("Expected end column %d, got %d", want, got.EndColumn)
+			}
+		})
+	}
+}
+
 // ── 5. ValidateDataTypes Tests ────────────────────────────────────────────────
 
 func TestValidateDataTypes(t *testing.T) {
