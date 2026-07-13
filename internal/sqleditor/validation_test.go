@@ -754,6 +754,54 @@ $$;
 			sql:           `CREATE FUNCTION f() RETURNS STRING LANGUAGE JAVASCRIPT AS $$ var s = "hi"; return s; $$;`,
 			expectedError: "",
 		},
+		{
+			// #509: a scalar SQL function body referencing an identifier that is
+			// not one of its arguments must be flagged.
+			name: "Scalar SQL function references undeclared identifier",
+			sql: `
+create or replace function get_discounted_price(original_price number(10,2), discount_percentage number(5,2))
+  returns number(10,2)
+  as
+  $$
+    original_price - (original_price * (variable_that_should_no_be_here / 100))
+  $$;
+			`,
+			expectedError: "'variable_that_should_no_be_here' is not a function argument",
+		},
+		{
+			// #509: a scalar SQL function body using only its arguments is valid.
+			name: "Scalar SQL function uses only its arguments",
+			sql: `
+create or replace function get_discounted_price(original_price number(10,2), discount_percentage number(5,2))
+  returns number(10,2)
+  as
+  $$
+    original_price - (original_price * (discount_percentage / 100))
+  $$;
+			`,
+			expectedError: "",
+		},
+		{
+			// #509: builtin calls and date-part words are not arguments but valid.
+			name: "Scalar SQL function with builtins and date parts",
+			sql: `
+create function age_days(d date)
+  returns number
+  as $$ datediff(day, d, current_date()) + abs(0) $$;
+			`,
+			expectedError: "",
+		},
+		{
+			// #509: a body that queries a table can reference columns, not just
+			// args — it must not be validated against the arg list.
+			name: "Scalar SQL function body with subquery",
+			sql: `
+create function latest_price(pid int)
+  returns number
+  as $$ (select max(price) from prices where product_id = pid) $$;
+			`,
+			expectedError: "",
+		},
 	}
 
 	for _, tt := range tests {
@@ -781,6 +829,288 @@ $$;
 				if !found {
 					t.Errorf("Expected error matching %q, but got: %v", tt.expectedError, errs[0].Message)
 				}
+			}
+		})
+	}
+}
+
+// TestValidateSyntax_UndeclaredVarsAndColons pins the two related scripting /
+// SQL-function diagnostics: a reference to a name that was never declared (or,
+// in a scalar SQL function body, is not one of the function's arguments — #509),
+// and an assignment written with a bare '=' where Snowflake Scripting requires
+// the ':=' operator (the missing-colon case).
+func TestValidateSyntax_UndeclaredVarsAndColons(t *testing.T) {
+	tests := []struct {
+		name          string
+		sql           string
+		expectedError string // "" means expect zero error markers
+	}{
+		// ── Incorrect / undeclared variable names ──────────────────────────
+		{
+			name: "RETURN of an undeclared variable",
+			sql: `execute immediate $$
+  begin
+    return not_declared;
+  end;
+$$;`,
+			expectedError: "Variable 'not_declared' is not declared",
+		},
+		{
+			name: "Assignment to an undeclared variable",
+			sql: `execute immediate $$
+  begin
+    not_declared := 5;
+  end;
+$$;`,
+			expectedError: "Variable 'not_declared' is not declared",
+		},
+		{
+			name: "FOR loop over an undeclared cursor",
+			sql: `execute immediate $$
+  begin
+    for rec in not_a_cursor do
+      null;
+    end for;
+  end;
+$$;`,
+			expectedError: "Variable 'not_a_cursor' is not declared",
+		},
+		{
+			// #509: in a scalar SQL function body a bare identifier that is not an
+			// argument is the analogue of an undeclared variable.
+			name:          "Scalar SQL function body references a non-argument",
+			sql:           `create function f(x number) returns number as $$ x + bogus $$;`,
+			expectedError: "Identifier 'bogus' is not a function argument",
+		},
+		{
+			name: "Declared variable used correctly is not flagged",
+			sql: `execute immediate $$
+  declare
+    v number;
+  begin
+    v := 1;
+    return v;
+  end;
+$$;`,
+			expectedError: "",
+		},
+		// ── Missing ':' in an assignment ( '=' should be ':=' ) ────────────
+		{
+			name: "Bare '=' assigning a declared variable",
+			sql: `execute immediate $$
+  declare
+    v number;
+  begin
+    v = 10;
+  end;
+$$;`,
+			expectedError: "Expected ':=' for assignment",
+		},
+		{
+			name: "Bare '=' in a LET declaration",
+			sql: `execute immediate $$
+  begin
+    let v number = 10;
+  end;
+$$;`,
+			expectedError: "Expected ':=' for assignment",
+		},
+		{
+			name: "Bare '=' on a quoted assignment target",
+			sql: `execute immediate $$
+  begin
+    "myVar" = 10;
+  end;
+$$;`,
+			expectedError: "Expected ':=' for assignment",
+		},
+		{
+			name: "Correct ':=' assignment is not flagged",
+			sql: `execute immediate $$
+  declare
+    v number;
+  begin
+    v := 10;
+  end;
+$$;`,
+			expectedError: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errs := getErrors(ValidateSyntax(tt.sql))
+			if tt.expectedError == "" {
+				if len(errs) > 0 {
+					t.Errorf("Expected 0 errors for %q, got %d: %v", tt.name, len(errs), errs)
+				}
+				return
+			}
+			if len(errs) == 0 {
+				t.Fatalf("Expected error containing %q, got 0 errors", tt.expectedError)
+			}
+			found := false
+			for _, e := range errs {
+				if strings.Contains(strings.ToLower(e.Message), strings.ToLower(tt.expectedError)) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("Expected error matching %q, got: %v", tt.expectedError, errs)
+			}
+		})
+	}
+}
+
+// TestValidateSyntax_BindVariableColons pins the bind-variable colon warning:
+// a Snowflake Scripting variable (or a procedure/function argument) referenced
+// inside an embedded SQL statement without the required ':' prefix is flagged as
+// a Warning. The check is deliberately restricted to operand positions to avoid
+// false-positives on same-named columns, so the negative cases matter as much as
+// the positive ones.
+func TestValidateSyntax_BindVariableColons(t *testing.T) {
+	tests := []struct {
+		name       string
+		sql        string
+		expectWarn string // "" means expect no Warning markers
+	}{
+		// ── Flagged: variable used as a bare SQL operand ───────────────────
+		{
+			name: "Variable on the right of a predicate comparison",
+			sql: `execute immediate $$
+declare
+  amount number default 100;
+begin
+  select * from t where id = amount;
+end;
+$$;`,
+			expectWarn: "Scripting variable 'amount' must be referenced with a leading colon",
+		},
+		{
+			name: "Procedure argument used bare in embedded SQL",
+			sql: `create procedure p(threshold number)
+returns number
+language sql
+as $$
+begin
+  select count(*) from t where score > threshold;
+end;
+$$;`,
+			expectWarn: "Scripting variable 'threshold' must be referenced with a leading colon",
+		},
+		{
+			name: "Variable inside a RESULTSET assignment subquery",
+			sql: `execute immediate $$
+declare
+  min_rev number default 5;
+  res resultset;
+begin
+  res := (select region from sales where revenue >= min_rev);
+end;
+$$;`,
+			expectWarn: "Scripting variable 'min_rev' must be referenced with a leading colon",
+		},
+		{
+			name: "Variable after THEN in a CASE expression",
+			sql: `execute immediate $$
+declare
+  amount number default 5;
+begin
+  update t set x = case when y > 0 then amount else 0 end;
+end;
+$$;`,
+			expectWarn: "Scripting variable 'amount' must be referenced with a leading colon",
+		},
+		// ── Not flagged: already correct, or not a bind position ───────────
+		{
+			name: "Variable already prefixed with a colon",
+			sql: `execute immediate $$
+declare
+  amount number default 100;
+begin
+  select * from t where id = :amount;
+end;
+$$;`,
+			expectWarn: "",
+		},
+		{
+			name: "Variable in a scripting-expression assignment needs no colon",
+			sql: `execute immediate $$
+declare
+  amount number;
+  total number;
+begin
+  total := amount + 1;
+end;
+$$;`,
+			expectWarn: "",
+		},
+		{
+			name: "Same-named column on a predicate left-hand side is not flagged",
+			sql: `execute immediate $$
+declare
+  status varchar default 'X';
+begin
+  select * from t where status = 'ACTIVE';
+end;
+$$;`,
+			expectWarn: "",
+		},
+		{
+			name: "Call whose name matches a variable is not flagged",
+			sql: `execute immediate $$
+declare
+  count number default 5;
+begin
+  select count(*) from t;
+end;
+$$;`,
+			expectWarn: "",
+		},
+		{
+			name: "Correctly colon-prefixed RESULTSET subquery is clean",
+			sql: `execute immediate $$
+  declare
+    target_status varchar default 'ACTIVE';
+    min_revenue number default 50000;
+    res resultset;
+  begin
+    res := (
+        select region, sum(revenue) as total_revenue
+        from regional_sales
+        where account_status = :target_status
+        group by region
+        having sum(revenue) >= :min_revenue
+    );
+  return table(res);
+  end;
+$$;`,
+			expectWarn: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			warns := getWarnings(ValidateSyntax(tt.sql))
+			if tt.expectWarn == "" {
+				if len(warns) > 0 {
+					t.Errorf("Expected 0 warnings for %q, got %d: %v", tt.name, len(warns), warns)
+				}
+				return
+			}
+			if len(warns) == 0 {
+				t.Fatalf("Expected warning containing %q, got 0 warnings", tt.expectWarn)
+			}
+			found := false
+			for _, w := range warns {
+				if strings.Contains(w.Message, tt.expectWarn) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("Expected warning matching %q, got: %v", tt.expectWarn, warns)
 			}
 		})
 	}

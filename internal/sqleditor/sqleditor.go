@@ -820,6 +820,7 @@ func ValidateSyntax(sql string) []DiagMarker {
 		})
 	}
 	validateSyntaxScope(sql, 1, 1, false, add, nil)
+	markers = append(markers, validateBindVarColons(sql)...)
 	return markers
 }
 
@@ -1010,6 +1011,14 @@ func validateSyntaxScope(src string, baseLine, baseCol int, inScript bool, add f
 				sl, sc := absT(t)
 				validateSyntaxScope(inner, sl, sc+len(tag), true, add, procFuncArgNames(toks, src, i))
 				atStart = true
+			} else if fnArgs, ok := sqlScalarFuncArgs(toks, src, i); ok {
+				// A scalar LANGUAGE SQL function body is a plain SQL expression, not
+				// a scripting block: every bare identifier in it must resolve to a
+				// function argument (or a builtin/keyword). Anything else is an
+				// invalid identifier Snowflake rejects at creation time (#509).
+				sl, sc := absT(t)
+				validateSQLExprBodyIdents(inner, sl, sc+len(tag), fnArgs, add)
+				atStart = false
 			} else {
 				// Opaque string constant — like StringLit, it doesn't reset start.
 				atStart = false
@@ -1162,6 +1171,134 @@ func procFuncArgNames(toks []sqltok.Token, src string, dq int) map[string]bool {
 		}
 	}
 	return vars
+}
+
+// sqlScalarFuncArgs reports whether the $$ body at toks[dq] belongs to a scalar
+// LANGUAGE SQL function definition and, if so, returns its argument names. Such
+// a body is a plain SQL expression (not a Snowflake Scripting block), so its
+// bare identifiers can be checked against the argument list (issue #509).
+// Returns (nil, false) when the enclosing statement isn't a CREATE FUNCTION, is
+// a PROCEDURE, or declares a non-SQL LANGUAGE (PYTHON/JAVASCRIPT/JAVA/SCALA)
+// whose body must stay opaque (#704).
+func sqlScalarFuncArgs(toks []sqltok.Token, src string, dq int) (map[string]bool, bool) {
+	start := 0
+	for j := dq - 1; j >= 0; j-- {
+		if toks[j].Kind == sqltok.Semicolon {
+			start = j + 1
+			break
+		}
+	}
+	isFunc := false
+	for j := start; j < dq; j++ {
+		if toks[j].Kind != sqltok.Keyword && toks[j].Kind != sqltok.Identifier {
+			continue
+		}
+		switch strings.ToUpper(toks[j].Text(src)) {
+		case "PROCEDURE":
+			return nil, false
+		case "FUNCTION":
+			isFunc = true
+		case "LANGUAGE":
+			k := j + 1
+			for k < dq && (toks[k].Kind == sqltok.Whitespace || toks[k].Kind == sqltok.Newline) {
+				k++
+			}
+			if k < dq && (toks[k].Kind == sqltok.Keyword || toks[k].Kind == sqltok.Identifier) &&
+				strings.ToUpper(toks[k].Text(src)) != "SQL" {
+				return nil, false
+			}
+		}
+	}
+	if !isFunc {
+		return nil, false
+	}
+	args := procFuncArgNames(toks, src, dq)
+	if args == nil {
+		return nil, false
+	}
+	return args, true
+}
+
+// sqlExprBareWords are words (beyond keywords and builtin functions) that
+// legitimately appear as non-argument identifiers inside a scalar SQL
+// expression: date-part names in DATEADD/DATEDIFF/EXTRACT/…, INTERVAL units,
+// and sequence pseudo-columns. Listed here so validateSQLExprBodyIdents does
+// not flag them as invalid identifiers.
+var sqlExprBareWords = map[string]bool{
+	"YEAR": true, "YEARS": true, "QUARTER": true, "QUARTERS": true,
+	"MONTH": true, "MONTHS": true, "WEEK": true, "WEEKS": true, "WEEKISO": true,
+	"DAY": true, "DAYS": true, "DAYOFWEEK": true, "DAYOFWEEKISO": true,
+	"DAYOFYEAR": true, "DOW": true, "DOY": true,
+	"HOUR": true, "HOURS": true, "MINUTE": true, "MINUTES": true,
+	"SECOND": true, "SECONDS": true,
+	"MILLISECOND": true, "MILLISECONDS": true, "MICROSECOND": true,
+	"MICROSECONDS": true, "NANOSECOND": true, "NANOSECONDS": true,
+	"EPOCH_SECOND": true, "EPOCH_MILLISECOND": true, "EPOCH_MICROSECOND": true,
+	"EPOCH_NANOSECOND": true, "TIMEZONE_HOUR": true, "TIMEZONE_MINUTE": true,
+	"YEAROFWEEK": true, "YEAROFWEEKISO": true,
+	"INTERVAL": true, "NEXTVAL": true,
+}
+
+// validateSQLExprBodyIdents validates the bare identifiers of a scalar SQL
+// function's expression body (src, positioned at baseLine/baseCol). Each
+// identifier must be a function argument, a call (name followed by '('), a
+// qualified-name part (adjacent to '.'), a builtin/keyword, or a date-part /
+// interval word; anything else is flagged as not a function argument (#509).
+// A body that queries tables (SELECT/FROM/…) is skipped — its column references
+// can't be resolved without a catalog, mirroring ValidateBareColumnRefs's stance
+// on SELECT clauses.
+func validateSQLExprBodyIdents(src string, baseLine, baseCol int, args map[string]bool, add func(string, int, int, int, int)) {
+	toks := sqltok.Tokenize(src)
+	for _, t := range toks {
+		if t.Kind == sqltok.Keyword {
+			switch strings.ToUpper(t.Text(src)) {
+			case "SELECT", "FROM", "WITH", "JOIN", "WHERE", "TABLE":
+				return
+			}
+		}
+	}
+	abs := func(line, col int) (int, int) {
+		if line == 1 {
+			return baseLine, baseCol + col - 1
+		}
+		return baseLine + line - 1, col
+	}
+	// sig returns the nearest non-trivia token index scanning from k in the
+	// given direction (+1 forward, -1 back), or -1 if none.
+	sig := func(k, dir int) int {
+		for k >= 0 && k < len(toks) {
+			switch toks[k].Kind {
+			case sqltok.Whitespace, sqltok.Newline, sqltok.LineComment, sqltok.BlockComment:
+				k += dir
+			default:
+				return k
+			}
+		}
+		return -1
+	}
+	for i := range toks {
+		t := toks[i]
+		if t.Kind != sqltok.Identifier {
+			continue
+		}
+		upper := strings.ToUpper(t.Text(src))
+		if args[upper] || sqlExprBareWords[upper] ||
+			sqltok.IsBuiltinFunction(upper) || sqltok.IsReserved(upper) || sqltok.IsKeyword(upper) {
+			continue
+		}
+		// A name immediately followed by '(' is a function call (a UDF or a
+		// builtin outside our lists); a name adjacent to '.' is a qualified-name
+		// part (db.schema.obj, seq.NEXTVAL, variant.path). Neither is a bare
+		// value reference, so neither can be validated against the arg list.
+		if n := sig(i+1, 1); n >= 0 && (toks[n].Kind == sqltok.LParen || toks[n].Kind == sqltok.Dot) {
+			continue
+		}
+		if p := sig(i-1, -1); p >= 0 && toks[p].Kind == sqltok.Dot {
+			continue
+		}
+		l, c := abs(t.Line, t.Col)
+		add("Identifier '"+t.Text(src)+"' is not a function argument", l, c, l, c+(t.End-t.Start))
+	}
 }
 
 // validateScriptWord handles a keyword/identifier token at a Snowflake Scripting
@@ -1711,6 +1848,107 @@ func scriptingNeedsColon(text string) bool {
 	}
 	return false
 }
+
+// validateBindVarColons flags a Snowflake Scripting variable (or a stored
+// procedure/function argument) that is referenced inside an embedded SQL
+// statement without the required ':' bind prefix — e.g. `WHERE id = amount`
+// where `amount` is a declared variable and should read `:amount`. Emitted as a
+// Warning (not an Error): without the catalog we can't know whether a table
+// actually has a column of the same name, and when it does the bare form is the
+// legitimate column reference — so this is a "did you mean :amount?" hint, not a
+// hard error. Only scripting blocks (`$$…$$` opening with BEGIN/DECLARE) are
+// scanned; plain SQL and non-SQL UDF bodies have no scripting variables.
+func validateBindVarColons(sql string) []DiagMarker {
+	var out []DiagMarker
+	outer := sqltok.Tokenize(sql)
+	for idx, tok := range outer {
+		if tok.Kind != sqltok.DollarQuoted || tok.Unterminated {
+			continue
+		}
+		text := tok.Text(sql)
+		tag := tok.Tag
+		if len(text) < 2*len(tag) {
+			continue
+		}
+		inner := text[len(tag) : len(text)-len(tag)]
+		if kw := getFirstSQLToken(inner); kw != "BEGIN" && kw != "DECLARE" {
+			continue // not a scripting block
+		}
+		// Names that need a ':' inside embedded SQL: declared scripting variables
+		// plus the enclosing procedure/function's argument names.
+		vars := map[string]bool{}
+		for _, v := range scriptingExtractVars(inner, true) {
+			vars[v] = true
+		}
+		for v := range procFuncArgNames(outer, sql, idx) {
+			vars[v] = true
+		}
+		if len(vars) == 0 {
+			continue
+		}
+		out = append(out, scanBindVarColons(inner, tok.Line, tok.Col+len(tag), vars)...)
+	}
+	return out
+}
+
+// scanBindVarColons walks a scripting body's significant tokens and returns a
+// Warning marker for each bare reference to a name in vars that sits in a
+// colon-requiring SQL context and in an operand position (right of an operator,
+// after '(', or after THEN/ELSE). Restricting to operand positions keeps the
+// classic `= myvar` bug in scope while avoiding the column positions (projection
+// heads, predicate left-hand sides) where a same-named column is most likely
+// intended. baseLine/baseCol locate the body's first character for rebasing.
+func scanBindVarColons(inner string, baseLine, baseCol int, vars map[string]bool) []DiagMarker {
+	var out []DiagMarker
+	sig := sqltok.SignificantTokens(inner)
+	for i, t := range sig {
+		if !t.Kind.IsIdentLike() || !vars[strings.ToUpper(t.Text(inner))] {
+			continue
+		}
+		// Already ':'-prefixed, a call `name(`, or a qualified-name part
+		// (`t.name` / `name.field`) — none is a bare bind reference.
+		if i > 0 && sig[i-1].Kind == sqltok.Colon && sig[i-1].End == t.Start {
+			continue
+		}
+		if i > 0 && sig[i-1].Kind == sqltok.Dot && sig[i-1].End == t.Start {
+			continue
+		}
+		if i+1 < len(sig) && (sig[i+1].Kind == sqltok.LParen || sig[i+1].Kind == sqltok.Dot) &&
+			sig[i+1].Start == t.End {
+			continue
+		}
+		// Operand position: preceded by an operator, '(', or THEN/ELSE.
+		if i == 0 {
+			continue
+		}
+		prev := sig[i-1]
+		operand := prev.Kind == sqltok.Operator || prev.Kind == sqltok.LParen ||
+			(prev.Kind.IsIdentLike() && bindOperandKeywords[strings.ToUpper(prev.Text(inner))])
+		if !operand {
+			continue
+		}
+		// Confirm the enclosing statement is a colon-requiring SQL context.
+		if !scriptingNeedsColon(inner[:t.End]) {
+			continue
+		}
+		l, c := baseLine+t.Line-1, t.Col
+		if t.Line == 1 {
+			c = baseCol + t.Col - 1
+		}
+		name := t.Text(inner)
+		out = append(out, DiagMarker{
+			StartLineNumber: l, StartColumn: c,
+			EndLineNumber: l, EndColumn: c + (t.End - t.Start),
+			Message:  "Scripting variable '" + name + "' must be referenced with a leading colon (':" + name + "') inside a SQL statement",
+			Severity: SeverityWarning,
+		})
+	}
+	return out
+}
+
+// bindOperandKeywords are keywords after which a following identifier is a value
+// operand (so a variable there needs a ':'), used by scanBindVarColons.
+var bindOperandKeywords = map[string]bool{"THEN": true, "ELSE": true}
 
 // ── TypeCategory ──────────────────────────────────────────────────────────────
 
