@@ -658,9 +658,13 @@ func matchUse(sig []sqltok.Token, sql string) (u useStmt, ok bool) {
 
 // fromJoinKeywords are the keywords that precede a table reference in DML
 // statements (for fallback table extraction).
+// LIKE is deliberately absent: the CREATE TABLE … LIKE source table is matched
+// separately by matchCreateTableLike. A generic LIKE entry mis-reads predicate
+// LIKE (`WHERE c LIKE '%x%' AND …`) — string literals are stripped before
+// scanning, so the following AND/OR/ANY looks like a table name (#707).
 var fromJoinKeywords = map[string]bool{
 	"FROM": true, "JOIN": true, "USING": true, "UPDATE": true,
-	"CLONE": true, "LIKE": true,
+	"CLONE": true,
 }
 
 // fromJoinTwoPartKeywords are two-keyword combinations that precede table refs.
@@ -701,6 +705,44 @@ func findFromJoinTables(sig []sqltok.Token, sql string) []string {
 		}
 	}
 	return paths
+}
+
+// matchCreateTableLike matches
+//
+//	CREATE [OR REPLACE] [scope] TABLE [IF NOT EXISTS] <name> LIKE <source>
+//
+// and returns the raw source-table ident path. Unlike a generic LIKE keyword,
+// this only fires when LIKE directly follows the new table name, so predicate
+// LIKE in a CTAS body (`… AS SELECT … WHERE c LIKE '%x%'`) is not matched.
+func matchCreateTableLike(sig []sqltok.Token, sql string) (srcPath string, ok bool) {
+	i := 0
+	if !kwAt(sig, sql, i, "CREATE") {
+		return
+	}
+	i++
+	i, orOK := skipCreateOr(sig, sql, i)
+	if !orOK {
+		return
+	}
+	if kwAtAny(sig, sql, i, "LOCAL", "GLOBAL") != "" {
+		i++
+	}
+	if kwAtAny(sig, sql, i, "TEMP", "TEMPORARY", "VOLATILE", "TRANSIENT") != "" {
+		i++
+	}
+	if !kwAt(sig, sql, i, "TABLE") {
+		return
+	}
+	i++
+	i = skipIfNotExists(sig, sql, i)
+	name, i := readIdentPath(sig, sql, i)
+	if name == "" || !kwAt(sig, sql, i, "LIKE") {
+		return
+	}
+	i++
+	srcPath, _ = readIdentPath(sig, sql, i)
+	ok = srcPath != ""
+	return
 }
 
 // findDynAsSelect finds AS SELECT or AS WITH in the significant tokens

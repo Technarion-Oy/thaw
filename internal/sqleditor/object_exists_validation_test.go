@@ -55,6 +55,48 @@ func TestValidateTablesExist_MissingObjectFlagged(t *testing.T) {
 	}
 }
 
+// TestValidateTablesExist_PredicateLikeNotATable locks in the #707 fix: a LIKE
+// in a WHERE predicate must not be treated as a table-introducing keyword. The
+// string literal is stripped before the fallback table scan runs, so a generic
+// LIKE keyword would capture the following AND/OR/ANY (or the RHS ident) as a
+// bogus table name. T1 is registered so the SELECT itself is otherwise clean.
+func TestValidateTablesExist_PredicateLikeNotATable(t *testing.T) {
+	clean := func(sql string) []DiagMarker {
+		return ValidateTablesExist(ValidateTablesExistRequest{
+			SQL:             sql,
+			StmtRanges:      GetStatementRanges(sql),
+			KnownDatabases:  []string{"MYDB"},
+			KnownSchemas:    []SchemaEntry{{DB: "MYDB", Name: "PUBLIC"}},
+			ResolvedRefs:    []ResolvedRef{{DB: "MYDB", Schema: "PUBLIC", Name: "T1"}, {DB: "MYDB", Schema: "PUBLIC", Name: "T2"}},
+			SessionDatabase: "MYDB",
+			SessionSchema:   "PUBLIC",
+		})
+	}
+	for _, sql := range []string{
+		"SELECT * FROM t1 WHERE name LIKE '%foo%' AND id = 1;",
+		"SELECT * FROM t1 WHERE name LIKE '%x%' OR city = 'y';",
+		"SELECT * FROM t1 WHERE a LIKE b;",
+		"SELECT * FROM t1 WHERE name LIKE ANY ('%x%', '%y%');",
+	} {
+		if m := clean(sql); len(m) != 0 {
+			t.Errorf("expected no marker for predicate LIKE in %q, got %d: %+v", sql, len(m), m)
+		}
+	}
+}
+
+// TestValidateTablesExist_CreateTableLikeStillTracked ensures the #707 fix did
+// not break CREATE TABLE … LIKE <source>: the source table is still existence-
+// checked (flagged when missing, silent when known).
+func TestValidateTablesExist_CreateTableLikeStillTracked(t *testing.T) {
+	if m := tablesExistMarkers("CREATE TABLE a LIKE b;"); len(m) == 0 {
+		t.Errorf("expected a missing-source marker for CREATE TABLE a LIKE b, got none")
+	}
+	created := "CREATE TABLE src (id INT);\nCREATE TABLE a LIKE src;"
+	if m := tablesExistMarkers(created); len(m) != 0 {
+		t.Errorf("expected no marker when LIKE source created in-script, got %d: %+v", len(m), m)
+	}
+}
+
 // TestValidateTablesExist_RebasesColumnForMidLineStatement guards issue #703:
 // a statement that begins mid-line (the second here) must have its marker
 // columns rebased to document coordinates, so the marker lands on `ghost`

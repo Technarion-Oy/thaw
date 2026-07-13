@@ -661,10 +661,14 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			}
 		}
 
-		// Also handle CREATE TABLE ... REFERENCES
+		// Also handle CREATE TABLE ... REFERENCES and CREATE TABLE ... LIKE <src>.
 		if isCreateTable(parseText) {
 			parseSig := sigTokens(parseText)
-			for _, rm := range findReferences(parseSig, parseText) {
+			likePaths := findReferences(parseSig, parseText)
+			if src, ok := matchCreateTableLike(parseSig, parseText); ok {
+				likePaths = append(likePaths, refMatch{tablePath: src})
+			}
+			for _, rm := range likePaths {
 				parts := extractIdentParts(rm.tablePath, ic)
 				switch len(parts) {
 				case 3:
