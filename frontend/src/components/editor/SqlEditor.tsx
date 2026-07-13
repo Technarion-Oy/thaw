@@ -1398,7 +1398,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                   sql: model.getValue(),
                   cursorOffset: model.getOffsetAt(position),
                   storeObjects: objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })),
-                  session: { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema },
+                  session: editorSession(),
                   lineUpToWord,
                 } as any);
 
@@ -1509,7 +1509,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           sql: model.getValue(),
           cursorOffset,
           storeObjects: objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })),
-          session: { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema },
+          session: editorSession(),
           lineUpToWord,
         } as any);
         const declaredVars: string[] = ctx?.scripting?.variables ?? [];
@@ -1550,7 +1550,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         if ((wordIsOn || isInJoinOnClause) && schemaAutocompleteEnabled && ctxTableRefs.length >= 2) {
           const rawRefs = await ParseJoinTableRefs(textToCursor);
           if (rawRefs && (rawRefs as any[]).length >= 2) {
-            const resolvedRefs = await ResolveTableRefs(rawRefs as any[], useObjectStore.getState().objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, { database: "", schema: "" } as any, { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema } as any);
+            const resolvedRefs = await ResolveTableRefs(rawRefs as any[], useObjectStore.getState().objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, { database: "", schema: "" } as any, editorSession() as any);
             if (resolvedRefs && resolvedRefs.length >= 2) {
               for (const ref of resolvedRefs) {
                 warmUpFKsForSchema(ref.db, ref.schema).catch(() => {});
@@ -1589,7 +1589,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           const hasTriggerC = !!rawRefsC && (rawRefsC as any[]).length >= 2;
 
           if (hasTriggerC) {
-            const resolvedC = await ResolveTableRefs(rawRefsC as any[], useObjectStore.getState().objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, { database: "", schema: "" } as any, { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema } as any);
+            const resolvedC = await ResolveTableRefs(rawRefsC as any[], useObjectStore.getState().objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, { database: "", schema: "" } as any, editorSession() as any);
             if (resolvedC && resolvedC.length >= 2) {
               const fkEntriesC: any[] = [];
               const colEntriesC: any[] = [];
@@ -1619,7 +1619,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         if ((usingInCtx || usingPartialInCtx) && schemaAutocompleteEnabled) {
           const usingRefs = ctxTableRefs.length >= 2 ? ctxTableRefs : (await ParseJoinTableRefs(textToCursor) || []);
           if (usingRefs.length >= 2) {
-            const resolvedUsing = await ResolveTableRefs(usingRefs as any[], objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, (ctx?.useContext ?? { database: "", schema: "" }) as any, { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema } as any);
+            const resolvedUsing = await ResolveTableRefs(usingRefs as any[], objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, (ctx?.useContext ?? { database: "", schema: "" }) as any, editorSession() as any);
             if (resolvedUsing && resolvedUsing.length >= 2) {
               // Get columns for the last two refs (the JOIN pair)
               const lastTwo = resolvedUsing.slice(-2);
@@ -1950,7 +1950,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     let aliasRefsPromise: Promise<any[]> | null = null;
     const resolveAliasRefs = (): Promise<any[]> => {
       const model = editor.getModel();
-      const sess = useSessionStore.getState();
+      const sess = editorSession(); // per-tab session so split panes resolve alias refs against their own db/schema (#717)
       const key = `${model?.getVersionId() ?? 0}\0${sess.database}\0${sess.schema}`;
       if (key !== aliasRefsKey || !aliasRefsPromise) {
         aliasRefsKey = key;
@@ -2335,7 +2335,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           if (lastJoinSeg.length > 0 && !/\b(?:ON|USING)\b/i.test(lastJoinSeg)) {
             const ghostRefs = await ParseJoinTableRefs(prefixFull);
             if (ghostRefs && (ghostRefs as any[]).length >= 2) {
-              const resolved = await ResolveTableRefs(ghostRefs as any[], useObjectStore.getState().objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, { database: "", schema: "" } as any, { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema } as any);
+              const resolved = await ResolveTableRefs(ghostRefs as any[], useObjectStore.getState().objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, { database: "", schema: "" } as any, editorSession() as any);
               if (resolved && resolved.length >= 2) {
                 const fkEntries = resolved.map((ref) => ({
                   db: ref.db, schema: ref.schema, name: ref.name,
