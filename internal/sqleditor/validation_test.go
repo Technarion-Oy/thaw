@@ -603,6 +603,67 @@ create table my_table (
 			sql:           `CREATE TABLE t (tags ARRAY, metadata OBJECT);`,
 			expectedError: "",
 		},
+		// Issue #712: ALTER TABLE ADD non-column clauses must not be parsed as
+		// a column name + data type.
+		{
+			name:          "ALTER TABLE ADD PRIMARY KEY",
+			sql:           `ALTER TABLE t ADD PRIMARY KEY (id);`,
+			expectedError: "",
+		},
+		{
+			name:          "ALTER TABLE ADD CONSTRAINT",
+			sql:           `ALTER TABLE t ADD CONSTRAINT pk_t PRIMARY KEY (id);`,
+			expectedError: "",
+		},
+		{
+			name:          "ALTER TABLE ADD FOREIGN KEY",
+			sql:           `ALTER TABLE t ADD FOREIGN KEY (a) REFERENCES u (b);`,
+			expectedError: "",
+		},
+		{
+			name:          "ALTER TABLE ADD ROW ACCESS POLICY",
+			sql:           `ALTER TABLE t ADD ROW ACCESS POLICY rap ON (id);`,
+			expectedError: "",
+		},
+		{
+			name:          "ALTER TABLE ADD SEARCH OPTIMIZATION",
+			sql:           `ALTER TABLE t ADD SEARCH OPTIMIZATION;`,
+			expectedError: "",
+		},
+		// Issue #712 review: ROW / SEARCH are ALTER-ADD-only markers and must not
+		// suppress type-checking of a column literally named "row"/"search".
+		{
+			name:          "CREATE TABLE column named row still validated",
+			sql:           `CREATE TABLE t (row BADTYPE);`,
+			expectedError: "Unknown data type 'BADTYPE'",
+		},
+		{
+			name:          "CREATE TABLE column named search still validated",
+			sql:           `CREATE TABLE t (search BADTYPE);`,
+			expectedError: "Unknown data type 'BADTYPE'",
+		},
+		{
+			name:          "ALTER TABLE ADD COLUMN named row still validated",
+			sql:           `ALTER TABLE t ADD COLUMN row BADTYPE;`,
+			expectedError: "Unknown data type 'BADTYPE'",
+		},
+		{
+			name:          "ALTER TABLE ADD COLUMN still validated",
+			sql:           `ALTER TABLE t ADD COLUMN c NUMBR;`,
+			expectedError: "Unknown data type 'NUMBR'",
+		},
+		// Issue #712: a CAST with an inner AS alias must resolve the CAST's own
+		// type, not the nested alias.
+		{
+			name:          "CAST with inner AS alias in subquery",
+			sql:           `SELECT CAST((SELECT MAX(id) AS mx FROM t) AS INT);`,
+			expectedError: "",
+		},
+		{
+			name:          "CAST with inner AS alias still flags bad outer type",
+			sql:           `SELECT CAST((SELECT MAX(id) AS mx FROM t) AS INTT);`,
+			expectedError: "Unknown data type 'INTT'",
+		},
 	}
 
 	for _, tt := range tests {
