@@ -426,17 +426,20 @@ func parseAlterAddColumns(sig []sqltok.Token, raw string, ic bool) (tablePath st
 	// Reuse the CREATE TABLE column splitter — it already handles commas, quotes,
 	// comments and nested parens — then strip each item's optional COLUMN / IF NOT
 	// EXISTS prefix. An item is a real column when the COLUMN keyword was explicit
-	// (top-level or per-item) OR the token after the name is a data type; that
-	// rejects the non-column ADD clauses (CONSTRAINT, PRIMARY KEY, SEARCH
-	// OPTIMIZATION, ROW ACCESS POLICY, STORAGE LIFECYCLE POLICY, …) whose second
-	// token is a keyword rather than a type (issue #715).
-	for _, def := range splitColDefs(raw[sig[pos].Start:]) {
+	// (top-level for the first item, or per-item) OR the token after the name is a
+	// data type; that rejects the non-column ADD clauses (CONSTRAINT, PRIMARY KEY,
+	// SEARCH OPTIMIZATION, ROW ACCESS POLICY, STORAGE LIFECYCLE POLICY, …) whose
+	// second token is a keyword rather than a type (issue #715). The top-level
+	// COLUMN keyword only governs the first split item — it never licenses a later
+	// non-type item to be cached as a column.
+	for idx, def := range splitColDefs(raw[sig[pos].Start:]) {
 		item, itemColumnKw := stripAddColItemPrefix(def)
 		col, nextUpper, cok := parseFirstIdentAsCol(item, ic)
 		if !cok {
 			continue
 		}
-		if !topColumnKw && !itemColumnKw && !dataTypeLead[nextUpper] {
+		explicitColumn := itemColumnKw || (idx == 0 && topColumnKw)
+		if !explicitColumn && !dataTypeLead[nextUpper] {
 			continue
 		}
 		cols = append(cols, col)
@@ -486,18 +489,11 @@ func applyAlterAddToLocalCache(tablePath string, cols []ColInfo, localColCache m
 	}
 	target := localColCache[targetKey]
 
-	merge := func(k string) {
-		existing := localColCache[k]
-		// Fresh slice: CREATE stores the same backing array under several keys.
-		merged := make([]ColInfo, 0, len(existing)+len(cols))
-		merged = append(merged, existing...)
-		merged = append(merged, cols...)
-		localColCache[k] = merged
-	}
-
-	// Refresh every key that aliases the target table's CREATE slice — so a
-	// reference using a qualification other than the ALTER's still sees the added
-	// column — then the target key itself (which may be the sole/empty entry).
+	// Collect every key that aliases the target table's slice. All of these keys
+	// share one backing array (the target and its siblings hold identical
+	// contents), so they must all be refreshed together — a reference using a
+	// qualification other than the ALTER's still sees the added column.
+	aliasKeys := []string{targetKey}
 	for k := range localColCache {
 		if k == targetKey {
 			continue
@@ -506,10 +502,20 @@ func applyAlterAddToLocalCache(tablePath string, cols []ColInfo, localColCache m
 			continue
 		}
 		if sameColSlice(localColCache[k], target) {
-			merge(k)
+			aliasKeys = append(aliasKeys, k)
 		}
 	}
-	merge(targetKey)
+
+	// Build ONE merged slice and store it under every aliasing key, preserving
+	// the shared-backing-array invariant CREATE established. Allocating a fresh
+	// slice per key instead would desync the siblings, so a second ALTER on the
+	// same table could no longer detect them via sameColSlice (issue #715).
+	merged := make([]ColInfo, 0, len(target)+len(cols))
+	merged = append(merged, target...)
+	merged = append(merged, cols...)
+	for _, k := range aliasKeys {
+		localColCache[k] = merged
+	}
 }
 
 // sameColSlice reports whether a and b share the same backing array — i.e. they

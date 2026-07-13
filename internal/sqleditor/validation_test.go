@@ -98,6 +98,13 @@ func TestValidateBareColumnRefs_Valid(t *testing.T) {
 		"CREATE TABLE sch.loc_t7 (a INT);\nALTER TABLE loc_t7 ADD COLUMN b INT;\nSELECT b FROM sch.loc_t7;",
 		// Reverse direction: CREATE bare, ALTER schema-qualified, reference bare.
 		"CREATE TABLE loc_t8 (a INT);\nALTER TABLE sch.loc_t8 ADD COLUMN b INT;\nSELECT b FROM loc_t8;",
+		// Issue #715: two ALTER … ADD COLUMN on the same table, referenced through
+		// a qualification neither ALTER used. The first merge must not desync the
+		// table's sibling cache keys, or the second ALTER's column goes stale.
+		"CREATE TABLE sch.loc_t9 (a INT);\nALTER TABLE sch.loc_t9 ADD COLUMN b INT;\nALTER TABLE loc_t9 ADD COLUMN c INT;\nSELECT b, c FROM sch.loc_t9;",
+		// Two ALTERs at the same qualification, referenced bare — both added
+		// columns must be visible through the sibling (bare) key.
+		"CREATE TABLE sch.loc_t10 (a INT);\nALTER TABLE sch.loc_t10 ADD COLUMN b INT;\nALTER TABLE sch.loc_t10 ADD COLUMN c INT;\nSELECT a, b, c FROM loc_t10;",
 	}
 
 	req := ValidateBareColsRequest{
@@ -1281,6 +1288,15 @@ func TestValidateSemantics_AlterAddColumn(t *testing.T) {
 		"SELECT f.a, f.b FROM foo f"
 	if warns := getWarnings(ValidateSemantics(valid, nil, nil)); len(warns) > 0 {
 		t.Errorf("Expected no warnings for ALTER-added column, got %d: %v", len(warns), warns)
+	}
+
+	// Two ALTER … ADD COLUMN on the same table: both added columns must resolve.
+	twoAlters := "CREATE TABLE foo (a NUMBER);\n" +
+		"ALTER TABLE foo ADD COLUMN b VARCHAR;\n" +
+		"ALTER TABLE foo ADD COLUMN c VARCHAR;\n" +
+		"SELECT f.a, f.b, f.c FROM foo f"
+	if warns := getWarnings(ValidateSemantics(twoAlters, nil, nil)); len(warns) > 0 {
+		t.Errorf("Expected no warnings for two ALTER-added columns, got %d: %v", len(warns), warns)
 	}
 
 	invalid := "CREATE TABLE foo (a NUMBER);\n" +
