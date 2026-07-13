@@ -881,12 +881,15 @@ func validateAsofJoinClauses(stripped string, r StatementRange) []DiagMarker {
 		}
 		scope := sig[ap.afterIdx:scopeEnd]
 
-		hasMatchCondition := findKWLParen(scope, clean, "MATCH_CONDITION") >= 0
+		// Locate MATCH_CONDITION once and thread the index through the checks
+		// below, rather than re-scanning the scope in each helper.
+		mcIdx := findKWLParen(scope, clean, "MATCH_CONDITION")
+		hasMatchCondition := mcIdx >= 0
 		hasUsingFunction := hasUsingFunctionTok(scope, clean)
 
 		// 1. Check for invalid ON clause.
 		flaggedOnOrUsing := false
-		if hasOnClauseTok(scope, clean, hasMatchCondition) {
+		if hasOnClauseTok(scope, clean, mcIdx) {
 			markers = append(markers, diagMarkerSpan(r,
 				"ON clause is not valid with ASOF JOIN. Use MATCH_CONDITION instead."))
 			flaggedOnOrUsing = true
@@ -896,7 +899,7 @@ func validateAsofJoinClauses(stripped string, r StatementRange) []DiagMarker {
 		//    Docs allow `MATCH_CONDITION (…) [ ON … | USING (…) ]`, so a USING that
 		//    follows MATCH_CONDITION is legal — only a USING standing in *for* the
 		//    match condition is flagged.
-		if hasUsingClauseTok(scope, clean, hasUsingFunction, hasMatchCondition) {
+		if hasUsingClauseTok(scope, clean, hasUsingFunction, mcIdx) {
 			markers = append(markers, diagMarkerSpan(r,
 				"USING clause is not valid with ASOF JOIN. Use MATCH_CONDITION instead."))
 			flaggedOnOrUsing = true
@@ -911,17 +914,14 @@ func validateAsofJoinClauses(stripped string, r StatementRange) []DiagMarker {
 
 		// 4. If MATCH_CONDITION is present, validate the comparison operator.
 		if hasMatchCondition {
-			mcIdx := findKWLParen(scope, clean, "MATCH_CONDITION")
-			if mcIdx >= 0 {
-				// Check if the MATCH_CONDITION paren is properly closed.
-				_, _, matched := parenInnerRange(scope, mcIdx+1)
-				if matched {
-					mcBody := extractParenContentTok(scope, clean, mcIdx)
-					// Empty body or body without valid comparison.
-					if !containsAsofValidComparison(mcBody) {
-						markers = append(markers, diagMarkerSpan(r,
-							"MATCH_CONDITION comparison must use one of: >=, >, <=, <. Operators =, <>, != are not supported."))
-					}
+			// Check if the MATCH_CONDITION paren is properly closed.
+			_, _, matched := parenInnerRange(scope, mcIdx+1)
+			if matched {
+				mcBody := extractParenContentTok(scope, clean, mcIdx)
+				// Empty body or body without valid comparison.
+				if !containsAsofValidComparison(mcBody) {
+					markers = append(markers, diagMarkerSpan(r,
+						"MATCH_CONDITION comparison must use one of: >=, >, <=, <. Operators =, <>, != are not supported."))
 				}
 			}
 		}
@@ -930,12 +930,9 @@ func validateAsofJoinClauses(stripped string, r StatementRange) []DiagMarker {
 }
 
 // hasOnClauseTok checks if a top-level ON keyword appears in the token scope,
-// excluding ON that appears after MATCH_CONDITION.
-func hasOnClauseTok(scope []sqltok.Token, sql string, hasMatchCondition bool) bool {
-	mcIdx := -1
-	if hasMatchCondition {
-		mcIdx = findKWLParen(scope, sql, "MATCH_CONDITION")
-	}
+// excluding ON that appears after MATCH_CONDITION. mcIdx is the scope index of
+// MATCH_CONDITION (< 0 if absent), computed once by the caller.
+func hasOnClauseTok(scope []sqltok.Token, sql string, mcIdx int) bool {
 	depth := 0
 	for i := 0; i < len(scope); i++ {
 		switch scope[i].Kind {
@@ -959,14 +956,11 @@ func hasOnClauseTok(scope []sqltok.Token, sql string, hasMatchCondition bool) bo
 
 // hasUsingClauseTok checks if USING ( appears at the top level, and it's not
 // the USING (func(...)) function form, nor a USING that follows MATCH_CONDITION
-// (where it is a valid equi-join key list). Mirrors hasOnClauseTok.
-func hasUsingClauseTok(scope []sqltok.Token, sql string, hasUsingFunction, hasMatchCondition bool) bool {
+// (where it is a valid equi-join key list). Mirrors hasOnClauseTok. mcIdx is the
+// scope index of MATCH_CONDITION (< 0 if absent), computed once by the caller.
+func hasUsingClauseTok(scope []sqltok.Token, sql string, hasUsingFunction bool, mcIdx int) bool {
 	if hasUsingFunction {
 		return false
-	}
-	mcIdx := -1
-	if hasMatchCondition {
-		mcIdx = findKWLParen(scope, sql, "MATCH_CONDITION")
 	}
 	depth := 0
 	for i := 0; i < len(scope); i++ {
