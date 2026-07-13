@@ -18,6 +18,29 @@ import (
 
 // ── Shared diagnostic helpers ─────────────────────────────────────────────────
 
+// isStarExcludeCol reports whether an uppercased identifier is the *-relative
+// EXCLUDE column-transform clause keyword — the EXCLUDE in `SELECT * EXCLUDE col`
+// (paren-less) — given whether the token immediately before it is a `*`.
+//
+// EXCLUDE is deliberately kept OUT of the global sqltok keyword set: unlike a
+// true keyword it is a valid unquoted column/alias/table name in Snowflake, and
+// a global entry would make IsKeyword reclassify every such identifier (e.g.
+// ApplyCasing would then key it off keywordCase instead of identifierCase). The
+// column-ref validators recognize it here contextually instead. The
+// parenthesized `EXCLUDE (col)` form needs no special case: it is already
+// skipped by the "identifier followed by ( ⇒ function call" heuristic.
+//
+// Known limitation: this checks only whether the preceding token is a literal
+// `*`, not whether that `*` is a SELECT wildcard vs. the multiplication
+// operator. So `SELECT price * EXCLUDE FROM orders` (multiply by a column
+// literally named EXCLUDE) would suppress a "column not found" diagnostic for
+// that column. This is an accepted trade-off — a column named EXCLUDE is
+// unlikely, and it matches the file's existing heuristic style (e.g. the
+// "identifier followed by ( ⇒ function call" heuristic has similar blind spots).
+func isStarExcludeCol(upper string, prevIsStar bool) bool {
+	return prevIsStar && upper == "EXCLUDE"
+}
+
 // stripCommentsSQL removes SQL single-line (--) and block (/* */) comments.
 // Line comments are removed entirely; block comments are replaced with a
 // single space (matching the legacy regex behavior).
@@ -66,13 +89,25 @@ type tokenPos struct {
 	quoted bool
 }
 
+// stmtStartCol returns the 1-based document column of a statement's first
+// character (byte-based, like sqltok columns). A statement that begins mid-line
+// (e.g. the second of `SELECT 1; SELECT …`) starts past column 1, so tokens on
+// the statement's first line must add this offset to become document-absolute.
+func stmtStartCol(sql string, r StatementRange) int {
+	lineStart := strings.LastIndexByte(sql[:r.StartOffset], '\n') + 1
+	return r.StartOffset - lineStart + 1
+}
+
 // findTokensLocally scans stmtText for occurrences of any identifier listed
-// in targets.  baseLine is the 1-based document line of stmtText's first
-// line.  Returns one tokenPos per match (in document order).
+// in targets.  baseLine is the 1-based document line of stmtText's first line,
+// and baseCol the document column of its first character (see stmtStartCol);
+// tokens on the statement's first line are rebased by baseCol so a statement
+// that starts mid-line reports document-absolute columns.  Returns one tokenPos
+// per match (in document order).
 //
 // If ignoreCase is true the lookup is case-insensitive, otherwise quoted
 // identifiers are matched exactly and unquoted ones are uppercased.
-func findTokensLocally(stmtText string, targets []string, baseLine int, ignoreCase bool) []tokenPos {
+func findTokensLocally(stmtText string, targets []string, baseLine, baseCol int, ignoreCase bool) []tokenPos {
 	targetSet := make(map[string]struct{}, len(targets))
 	for _, t := range targets {
 		if ignoreCase {
@@ -110,11 +145,15 @@ func findTokensLocally(stmtText string, targets []string, baseLine int, ignoreCa
 		}
 
 		if _, ok := targetSet[key]; ok {
+			col := tok.Col
+			if tok.Line == 1 {
+				col += baseCol - 1 // rebase first-line columns to document coords
+			}
 			result = append(result, tokenPos{
 				name:   name,
 				line:   baseLine + tok.Line - 1,
-				col:    tok.Col,
-				endCol: tok.Col + (tok.End - tok.Start),
+				col:    col,
+				endCol: col + (tok.End - tok.Start),
 				quoted: isQuoted,
 			})
 		}

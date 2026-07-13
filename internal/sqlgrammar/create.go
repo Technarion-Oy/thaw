@@ -2111,7 +2111,7 @@ func (v *Validator) ParseCreateDynamicTable() bool {
 					v.option("MAX_DATA_EXTENSION_TIME_IN_DAYS", num),
 					v.option("ROW_TIMESTAMP", v.parseBool),
 					v.commentOption(),
-					func() bool { return v.phrase("CLUSTER", "BY") && v.consumeBalancedParens() },
+					v.clusterByClause(v.consumeBalancedParens),
 					func() bool { return v.phrase("COPY", "GRANTS") },
 					func() bool { return v.phrase("COPY", "TAGS") },
 					func() bool { return v.phrase("REQUIRE", "USER") },
@@ -2272,7 +2272,7 @@ func (v *Validator) ParseCreateEventTable() bool {
 				func() bool {
 					return v.ZeroOrMore(func() bool {
 						return v.Choice(
-							func() bool { return v.phrase("CLUSTER", "BY") && v.consumeBalancedParens() },
+							v.clusterByClause(v.consumeBalancedParens),
 							v.option("DATA_RETENTION_TIME_IN_DAYS", num),
 							v.option("MAX_DATA_EXTENSION_TIME_IN_DAYS", num),
 							v.option("CHANGE_TRACKING", v.parseBool),
@@ -2540,15 +2540,10 @@ func (v *Validator) ParseCreateExternalFunction() bool {
 //	  [ COMMENT = '<string_literal>' ]
 //	  [ ... ]
 func (v *Validator) ParseCreateExternalTable() bool {
-	// externalStage value: @stage path or a string literal or identifier path.
+	// externalStage value: @stage[/path] , a string literal, or an identifier path.
 	stageValue := func() bool {
 		return v.Choice(
-			func() bool {
-				return v.Sequence(
-					func() bool { return v.Match(sqltok.At) },
-					v.parseIdentPath,
-				)
-			},
+			v.parseStageRef,
 			v.parseString,
 			v.parseIdentPath,
 		)
@@ -3675,9 +3670,7 @@ func (v *Validator) ParseCreateIcebergTableSnowflakeCatalog() bool {
 				return v.Sequence(phraseRule("PARTITION", "BY"), parenSpan)
 			},
 			v.option("PATH_LAYOUT", v.wordsValue("FLAT", "HIERARCHICAL")),
-			func() bool {
-				return v.Sequence(phraseRule("CLUSTER", "BY"), parenSpan)
-			},
+			v.clusterByClause(parenSpan),
 			v.option("EXTERNAL_VOLUME", v.parseString),
 			v.option("CATALOG_SYNC", v.parseString),
 			v.option("CATALOG", v.parseString),
@@ -3965,8 +3958,7 @@ func (v *Validator) ParseCreateInteractiveTable() bool {
 		v.ifNotExists,
 		v.parseIdentPath,
 		parenSpan,
-		phraseRule("CLUSTER", "BY"),
-		parenSpan,
+		v.clusterByClause(parenSpan),
 		func() bool { return v.ZeroOrMore(prop) },
 		func() bool { return v.MatchKeyword("AS") },
 		consumeRest,
@@ -4381,9 +4373,7 @@ func (v *Validator) ParseCreateMaterializedView() bool {
 					},
 				)
 			},
-			func() bool {
-				return v.Sequence(phraseRule("CLUSTER", "BY"), parenSpan)
-			},
+			v.clusterByClause(parenSpan),
 			v.tagClause,
 			func() bool {
 				return v.Sequence(
@@ -5277,8 +5267,7 @@ func (v *Validator) ParseCreateOrganizationProfile() bool {
 					func() bool {
 						return v.Sequence(
 							func() bool { return v.MatchKeyword("FROM") },
-							func() bool { return v.Optional(func() bool { return v.Match(sqltok.At) }) },
-							v.parseIdentPath,
+							func() bool { return v.Choice(v.parseStageRef, v.parseIdentPath) },
 							trailing,
 						)
 					},
@@ -7607,9 +7596,7 @@ func (v *Validator) ParseCreateTable() bool {
 	// A trailing table option (order-independent).
 	opt := func() bool {
 		return v.Choice(
-			func() bool {
-				return v.Sequence(func() bool { return v.MatchWord("CLUSTER") }, func() bool { return v.MatchKeyword("BY") }, balanced)
-			},
+			v.clusterByClause(balanced),
 			v.option("ENABLE_SCHEMA_EVOLUTION", v.parseBool),
 			v.option("DATA_RETENTION_TIME_IN_DAYS", num),
 			v.option("MAX_DATA_EXTENSION_TIME_IN_DAYS", num),

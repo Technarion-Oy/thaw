@@ -61,6 +61,13 @@ func TestValidateDataType(t *testing.T) {
 		{"TIMESTAMP_LTZ(6)", true, "TIMESTAMP_LTZ(6)"},
 		{"TIMESTAMP_NTZ", true, "TIMESTAMP_NTZ"},
 		{"TIMESTAMP_TZ(0)", true, "TIMESTAMP_TZ(0)"},
+		// No-underscore TIMESTAMP synonyms (issue #711)
+		{"TIMESTAMPLTZ", true, "TIMESTAMPLTZ"},
+		{"TIMESTAMPNTZ", true, "TIMESTAMPNTZ"},
+		{"TIMESTAMPTZ", true, "TIMESTAMPTZ"},
+		{"TIMESTAMPTZ(3)", true, "TIMESTAMPTZ(3)"},
+		// File (issue #711)
+		{"FILE", true, "FILE"},
 		// Semi-structured
 		{"VARIANT", true, "VARIANT"},
 		{"OBJECT", true, "OBJECT"},
@@ -116,6 +123,11 @@ func TestBaseType(t *testing.T) {
 		{"number(38,0)", "NUMBER"},
 		{"TIMESTAMP_TZ(9)", "TIMESTAMP_TZ"},
 		{"timestamptz", "TIMESTAMP_TZ"},
+		{"TIMESTAMPTZ(3)", "TIMESTAMP_TZ"},
+		{"timestampltz", "TIMESTAMP_LTZ"},
+		{"TIMESTAMPLTZ(9)", "TIMESTAMP_LTZ"},
+		{"timestampntz", "TIMESTAMP_NTZ"},
+		{"TIMESTAMPNTZ(9)", "TIMESTAMP_NTZ"},
 		{"VECTOR(FLOAT, 256)", "VECTOR"},
 		{"  variant  ", "VARIANT"},
 		{"TIMESTAMP_NTZ", "TIMESTAMP_NTZ"},

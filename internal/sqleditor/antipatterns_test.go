@@ -96,3 +96,36 @@ func TestValidateAntiPatterns_Clean(t *testing.T) {
 		}
 	}
 }
+
+// TestValidateAntiPatterns_Issue710FalsePositives pins the seven confirmed false
+// positives from issue #710: valid SQL that must NOT be flagged. Each case failed
+// before the fix and is clean after it.
+func TestValidateAntiPatterns_Issue710FalsePositives(t *testing.T) {
+	clean := []string{
+		// 1. Scripting BEGIN…END block with DML must not count as an open (or
+		//    nested) transaction.
+		"BEGIN\nINSERT INTO t VALUES (1);\nEND;",
+		// 2. Canonical QUALIFY: an ORDER BY inside a window OVER (…) does not
+		//    out-order a trailing QUALIFY.
+		"SELECT a, ROW_NUMBER() OVER (ORDER BY b) AS rn FROM t QUALIFY rn = 1",
+		// 3. A table/db literally named `payload` in a FROM position is a qualified
+		//    name, not a variant path.
+		"SELECT * FROM payload.raw.events",
+		// 4. Current Cortex functions, and a quoted function name.
+		`SELECT SNOWFLAKE.CORTEX.PARSE_DOCUMENT('x')`,
+		`SELECT SNOWFLAKE.CORTEX.ENTITY_SENTIMENT('x')`,
+		`SELECT SNOWFLAKE.CORTEX."COMPLETE"('x')`,
+		// 5. ASOF JOIN with a valid USING after MATCH_CONDITION.
+		"SELECT * FROM a ASOF JOIN b MATCH_CONDITION (a.ts >= b.ts) USING (id)",
+		// 6. Non-reserved keyword aliases after AS.
+		"SELECT * FROM t AS key",
+		"SELECT * FROM t AS first",
+		// 7. A column named `flatten` after a comma is not a table function.
+		"SELECT a, flatten FROM t",
+	}
+	for _, sql := range clean {
+		if m := antiPatternMarkers(sql); len(m) != 0 {
+			t.Errorf("expected no anti-pattern markers for %q, got %d: %+v", sql, len(m), m)
+		}
+	}
+}

@@ -286,8 +286,9 @@ var sqlStmtKeywords = map[string]bool{
 	"BEGIN": true, "COMMIT": true, "ROLLBACK": true, "SAVEPOINT": true,
 	// Execution
 	"CALL": true, "EXECUTE": true, "RETURN": true,
-	// Data loading
+	// Data loading (LS/RM are the documented abbreviations of LIST/REMOVE)
 	"COPY": true, "PUT": true, "GET": true, "LIST": true, "REMOVE": true,
+	"LS": true, "RM": true,
 	// Snowflake scripting
 	"DECLARE": true, "LET": true, "FOR": true, "WHILE": true, "IF": true,
 	"CASE": true, "RAISE": true, "END": true, "LOOP": true,
@@ -804,9 +805,11 @@ func ApplyCasing(sql, keywordCase, identifierCase, functionCase string) string {
 //   - Unexpected token at a statement start
 //
 // Snowflake Scripting lives inside dollar-quoted bodies, which the tokenizer
-// surfaces as a single opaque DollarQuoted token. validateSyntaxScope therefore
-// recurses into each body (re-tokenizing it) and rebases the inner token
-// positions back to absolute line/column via the baseLine/baseCol offsets.
+// surfaces as a single opaque DollarQuoted token. validateSyntaxScope recurses
+// into a body (re-tokenizing it, rebasing inner positions via baseLine/baseCol)
+// only when it opens with BEGIN or DECLARE — an anonymous scripting block.
+// Plain string constants (SELECT $$hi$$) and non-SQL UDF bodies
+// (LANGUAGE PYTHON/JAVASCRIPT … AS $$…$$) are left opaque (#704).
 func ValidateSyntax(sql string) []DiagMarker {
 	var markers []DiagMarker
 	add := func(msg string, sl, sc, el, ec int) {
@@ -925,6 +928,15 @@ func validateSyntaxScope(src string, baseLine, baseCol int, inScript bool, add f
 	}
 
 	var parenStack []parenEntry
+	// flushOpenParens reports every still-open paren/bracket in push order and
+	// clears the stack. Used both at each statement boundary (per-statement
+	// balance) and at end of scope.
+	flushOpenParens := func() {
+		for _, open := range parenStack {
+			add("Unclosed '"+open.char+"'", open.line, open.col, open.line, open.col+1)
+		}
+		parenStack = parenStack[:0]
+	}
 	declaredVars := map[string]bool{}
 	for v := range seedVars {
 		declaredVars[v] = true
@@ -976,8 +988,12 @@ func validateSyntaxScope(src string, baseLine, baseCol int, inScript bool, add f
 			i++
 
 		case sqltok.DollarQuoted:
-			// Recurse into the body, which is Snowflake Scripting. The body
-			// starts len(tag) columns after the token, on the same line.
+			// A $$…$$ body is only Snowflake Scripting when it's an anonymous
+			// block — i.e. it opens with BEGIN or DECLARE (EXECUTE IMMEDIATE $$…$$
+			// and a LANGUAGE SQL procedure body both do). A plain string constant
+			// (SELECT $$hi$$) or a non-SQL UDF body (LANGUAGE PYTHON/JAVASCRIPT …
+			// AS $$…$$) is opaque — validating it as scripting produces phantom
+			// errors (#704). The body starts len(tag) columns after the token.
 			tag := t.Tag
 			text := t.Text(src)
 			var inner string
@@ -986,9 +1002,18 @@ func validateSyntaxScope(src string, baseLine, baseCol int, inScript bool, add f
 			} else {
 				inner = text[len(tag) : len(text)-len(tag)]
 			}
-			sl, sc := absT(t)
-			validateSyntaxScope(inner, sl, sc+len(tag), true, add, procFuncArgNames(toks, src, i))
-			atStart = true
+			if t.Unterminated {
+				l, c := absT(t)
+				add("Unclosed dollar-quoted string", l, c, l, c+len(tag))
+			}
+			if kw := getFirstSQLToken(inner); kw == "BEGIN" || kw == "DECLARE" {
+				sl, sc := absT(t)
+				validateSyntaxScope(inner, sl, sc+len(tag), true, add, procFuncArgNames(toks, src, i))
+				atStart = true
+			} else {
+				// Opaque string constant — like StringLit, it doesn't reset start.
+				atStart = false
+			}
 			i++
 
 		case sqltok.LParen, sqltok.LBracket:
@@ -1016,6 +1041,10 @@ func validateSyntaxScope(src string, baseLine, baseCol int, inScript bool, add f
 			i++
 
 		case sqltok.Semicolon:
+			// Paren balance is per-statement: flush/report any parens left open
+			// by this statement so a stray ')' in the next one can't silently pop
+			// them (cross-statement leak).
+			flushOpenParens()
 			atStart = true
 			i++
 
@@ -1068,9 +1097,7 @@ func validateSyntaxScope(src string, baseLine, baseCol int, inScript bool, add f
 	}
 
 	// Report unclosed opening parens/brackets in push order.
-	for _, open := range parenStack {
-		add("Unclosed '"+open.char+"'", open.line, open.col, open.line, open.col+1)
-	}
+	flushOpenParens()
 }
 
 // procFuncArgNames extracts the argument names of the CREATE PROCEDURE/FUNCTION
@@ -1788,6 +1815,17 @@ func extractProjectedColName(expr string) string {
 	if m := reAsAliasExpr.FindStringSubmatch(expr); m != nil {
 		return strings.ToUpper(normIdent(m[1], true))
 	}
+	// Rule 1.5: implicit (AS-less) trailing alias — a bare/quoted identifier
+	// closing the item, preceded by an expression terminator (e.g. `COUNT(*) cnt`,
+	// `ID employee_id`). A single bare/qualified ident has no such predecessor and
+	// falls through to rule 2; `db.sch.col` has a Dot before the last part, not a
+	// terminator, so it is never misread as an alias.
+	if sig := sigTokens(expr); len(sig) >= 2 {
+		last := sig[len(sig)-1]
+		if isAliasTok(last) && isExprEndAt(sig, len(sig)-2, expr) {
+			return strings.ToUpper(normIdent(last.Text(expr), true))
+		}
+	}
 	// Rule 2: simple identifier — must not contain operators or function calls.
 	if strings.ContainsAny(expr, "()+-*/%|&^!<>=") {
 		return ""
@@ -2100,6 +2138,18 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 					localColCache[tableNameU] = columns
 				}
 			}
+		} else if aPath, aCols, aok := parseAlterAddColumns(rawSig, raw, true); aok {
+			// ALTER TABLE … ADD [COLUMN] on a table created in-script: merge the
+			// added columns so later references resolve (issue #715).
+			if parts := extractIdentParts(aPath, true); len(parts) > 0 {
+				tableNameU := strings.ToUpper(parts[len(parts)-1])
+				if existing, ok := localColCache[tableNameU]; ok {
+					merged := make([]ColInfo, 0, len(existing)+len(aCols))
+					merged = append(merged, existing...)
+					merged = append(merged, aCols...)
+					localColCache[tableNameU] = merged
+				}
+			}
 		}
 
 		// 2. CTE projections in this statement
@@ -2246,6 +2296,16 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 	i := 0
 	stmtIdx := 0
 
+	// prevSigRune is the last significant rune consumed — the last rune that is
+	// neither whitespace nor part of a comment or string literal. It lets us
+	// answer "is this identifier immediately preceded by `*`?" without a raw
+	// backward scan, which would incorrectly see comment characters (e.g. the
+	// `*` closing a `/* … */` block, or a `*` inside a line comment). The
+	// forward walk below already skips comments/strings, so tracking the last
+	// significant rune here mirrors the token-based lookback used by
+	// scanSelectClauseForUnknownCols in barecolrefs.go.
+	var prevSigRune rune
+
 	for i < n {
 		// Advance to the current statement context
 		for stmtIdx < len(stmtRanges) && i >= stmtRanges[stmtIdx].EndOffset {
@@ -2313,6 +2373,7 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 					col++
 				}
 			}
+			prevSigRune = '\''
 			continue
 		}
 
@@ -2322,12 +2383,16 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 			if tag != "" {
 				i += len([]rune(tag))
 				col += len([]rune(tag))
+				prevSigRune = '$'
 				continue
 			}
 		}
 
 		// Identifier (bare or quoted)
 		if ch == '"' || isAlpha(ch) {
+			// Capture whether this identifier directly follows a `*` before we
+			// consume it (used for the paren-less `SELECT * EXCLUDE col` case).
+			prevIsStar := prevSigRune == '*'
 			word1Start := i
 			word1Line := line
 			word1Col := col
@@ -2443,8 +2508,13 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 				// Bare identifier without dot. Validate against ALL tables in scope.
 				if stmtIdx < len(stmtContexts) {
 					ctx := stmtContexts[stmtIdx]
+					// Paren-less `SELECT * EXCLUDE col`: EXCLUDE is not a global
+					// keyword (it is a valid identifier name), so recognize the
+					// clause keyword contextually — only when it follows a `*`
+					// (prevIsStar was captured above from prevSigRune, which
+					// correctly ignores intervening comments and whitespace).
 					// Skip if it's a known SQL keyword.
-					if !sqltok.IsKeyword(word1Norm) {
+					if !sqltok.IsKeyword(word1Norm) && !isStarExcludeCol(word1Norm, prevIsStar) {
 						// Heuristic: skip if followed by '(' (likely a function call).
 						isFunction := false
 						k := i
@@ -2505,9 +2575,15 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 					}
 				}
 			}
+			// The last consumed rune is an identifier char (or closing quote),
+			// never `*`, so record it as the previous significant rune.
+			prevSigRune = runes[i-1]
 			continue
 		}
 
+		if ch != ' ' && ch != '\t' && ch != '\r' {
+			prevSigRune = ch
+		}
 		i++
 		col++
 	}
