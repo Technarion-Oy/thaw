@@ -56,9 +56,11 @@ func TestValidateGrammar_FlagsMalformed(t *testing.T) {
 // TestValidateGrammar_MultiLineFailureTokenSpan guards issue #703 (bug 2): when
 // the failure token spans multiple lines (a `$$…$$` block, a multi-line string),
 // the marker end must follow the token onto its last line instead of assuming
-// the span stays on the start line.
+// the span stays on the start line. The fixture is a `CREATE TABLE` missing its
+// column list, so the misplaced `$$…$$` block is the unexpected failure token
+// (an EXECUTE IMMEDIATE `$$` body is now valid grammar — see issue #716).
 func TestValidateGrammar_MultiLineFailureTokenSpan(t *testing.T) {
-	sql := "SELECT 1;\nEXECUTE IMMEDIATE\n$$\nSELECT 1\n$$"
+	sql := "SELECT 1;\nCREATE TABLE t\n$$\nSELECT 1\n$$"
 	markers := grammarMarkers(sql)
 	if len(markers) != 1 {
 		t.Fatalf("expected 1 marker, got %d: %+v", len(markers), markers)
