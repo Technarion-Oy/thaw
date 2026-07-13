@@ -90,14 +90,25 @@ func scan(src string, n int, pos, line, col *int) Token {
 		*pos = i
 		return Token{Kind: Whitespace, Start: start, End: i, Line: startLine, Col: startCol}
 
+	// ── Stage-URI scheme separator `://` ────────────────────────────────
+	// A run of `/` right after `:` is a URI authority separator
+	// (file:///path, s3://bucket, azure://, gcs://) in PUT/GET, not a `//`
+	// line comment. Consume the whole slash run as one operator so the
+	// trailing `/path` isn't re-scanned and mistaken for a `//` comment.
+	// Only `:` triggers this — a `/` before `//` (e.g. after a block-comment
+	// close `*/`) must still start a line comment.
+	case c == '/' && start+1 < n && src[start+1] == '/' && start > 0 && src[start-1] == ':':
+		i := start + 1
+		for i < n && src[i] == '/' {
+			i++
+		}
+		*col += i - start
+		*pos = i
+		return Token{Kind: Operator, Start: start, End: i, Line: startLine, Col: startCol}
+
 	// ── Line comment -- or // ───────────────────────────────────────────
-	// Snowflake treats both `--` and `//` as line comments, but a `//`
-	// preceded by `:` or `/` is a stage-URI scheme (file:///path, s3://,
-	// azure://, gcs://) in PUT/GET, not a comment — the guard covers the
-	// canonical triple-slash `file:///` where slashes 2 and 3 also pair up.
-	// Leave those slashes as operators for the grammar to consume as a path.
-	case start+1 < n && ((c == '-' && src[start+1] == '-') ||
-		(c == '/' && src[start+1] == '/' && !(start > 0 && (src[start-1] == ':' || src[start-1] == '/')))):
+	// Snowflake treats both `--` and `//` as line comments.
+	case start+1 < n && ((c == '-' && src[start+1] == '-') || (c == '/' && src[start+1] == '/')):
 		i := start + 2
 		if nl := strings.IndexByte(src[i:], '\n'); nl < 0 {
 			i = n
