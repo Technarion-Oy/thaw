@@ -596,6 +596,13 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			if parts := extractIdentParts(rawPath, ic); len(parts) > 0 {
 				regByKind(scriptDroppedByKind, objType, parts)
 				unregByKind(scriptCreatedByKind, objType, parts)
+				// Mirror the CREATE path: FROM-able kinds registered into
+				// scriptCreatedTables must also be removed on DROP, else a
+				// later SELECT FROM the dropped object stays wrongly clean (#708).
+				if isFromableKind(objType) {
+					delete(scriptCreatedTables, parts[len(parts)-1])
+					delete(scriptCreatedTables, strings.Join(parts, "."))
+				}
 			}
 		}
 

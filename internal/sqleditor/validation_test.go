@@ -261,6 +261,29 @@ func TestValidateTablesExist_SpecialCreateTracking(t *testing.T) {
 	}
 }
 
+// Regression test for #708 (review follow-up): DROP of a FROM-able special
+// kind must clear it from the in-script created set, mirroring DROP TABLE.
+// CREATE STREAM s ON TABLE t; DROP STREAM s; SELECT * FROM s; — the final
+// SELECT must flag s as missing (not suppress it as script-created).
+func TestValidateTablesExist_DropSpecialKindClearsTracking(t *testing.T) {
+	sql := "CREATE STREAM s ON TABLE LIVE_TABLE;\nDROP STREAM s;\nSELECT * FROM s;"
+
+	req := ValidateTablesExistRequest{
+		ResolvedRefs:    getLiveRefs(),
+		KnownDatabases:  []string{"DB"},
+		KnownSchemas:    []SchemaEntry{{DB: "DB", Name: "SCH"}},
+		SessionDatabase: "DB",
+		SessionSchema:   "SCH",
+	}
+	req.SQL = sql
+	req.StmtRanges = GetStatementRanges(sql)
+
+	errs := getErrors(ValidateTablesExist(req))
+	if len(errs) == 0 {
+		t.Errorf("Expected the final SELECT to flag dropped stream s as missing, got none")
+	}
+}
+
 // Regression test for Issue: USE statements containing underscores failing to set context
 func TestValidateTablesExist_UseWithUnderscores(t *testing.T) {
 	sql := `use LINEAGE_SOURCE_DB.RAW_DATA;
