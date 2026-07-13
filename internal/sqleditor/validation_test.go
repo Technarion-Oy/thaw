@@ -36,6 +36,17 @@ func TestValidateBareColumnRefs_Valid(t *testing.T) {
 		// Views
 		`CREATE VIEW my_view AS SELECT FIRST_NAME, LAST_NAME FROM "DB"."SCH"."EMPLOYEES"`,
 
+		// Implicit (AS-less) column aliases must not be flagged (issue #713).
+		"SELECT ID employee_id FROM DB.SCH.EMPLOYEES",
+		"SELECT ID employee_id, FIRST_NAME fn FROM DB.SCH.EMPLOYEES",
+		"SELECT COUNT(ID) cnt FROM DB.SCH.EMPLOYEES",
+		// Keyword-terminated value expressions with an implicit alias (#739 follow-up):
+		// CASE…END, literal keywords (NULL/TRUE/FALSE), and `::TYPE` casts.
+		"SELECT CASE WHEN ID > 0 THEN 'pos' ELSE 'neg' END sign FROM DB.SCH.EMPLOYEES",
+		"SELECT NULL flag_col FROM DB.SCH.EMPLOYEES",
+		"SELECT TRUE is_active FROM DB.SCH.EMPLOYEES",
+		"SELECT ID::VARCHAR name_str FROM DB.SCH.EMPLOYEES",
+
 		// String literals containing identifier-like words must not be flagged
 		// as unknown column refs (e.g. 'month' in DATE_TRUNC('month', ID)).
 		`SELECT DATE_TRUNC('month', ID) AS m FROM DB.SCH.EMPLOYEES`,
@@ -887,6 +898,20 @@ func TestValidateSemantics_CTEAliasColumns(t *testing.T) {
 			name: "CTE with AS-aliased expressions",
 			sql:  `WITH summary AS (SELECT COUNT(*) AS cnt, SUM(amount) AS total FROM t) SELECT s.cnt, s.total FROM summary s`,
 		},
+		{
+			// Issue #713: implicit (AS-less) projection alias in a CTE must be
+			// resolvable in the outer query — no "cnt not found" / "does not
+			// exist in C" markers.
+			name: "CTE with implicit (AS-less) alias",
+			sql:  `WITH c AS (SELECT ID, COUNT(*) cnt FROM t GROUP BY ID) SELECT c.cnt FROM c`,
+		},
+		{
+			// #739 follow-up: keyword-terminated expression (CASE…END) with an
+			// implicit alias in a CTE must project the alias, so the outer
+			// reference resolves — no "flag does not exist in C" marker.
+			name: "CTE with implicit alias on CASE…END",
+			sql:  `WITH c AS (SELECT ID, CASE WHEN ID>0 THEN 1 ELSE 0 END flag FROM t) SELECT c.flag FROM c`,
+		},
 	}
 	for _, tt := range validCases {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1005,6 +1030,69 @@ LIMIT 100;`,
 			}
 			if !found {
 				t.Errorf("Expected warning for column %q but got markers: %v", tt.wantCol, warns)
+			}
+		})
+	}
+}
+
+// TestValidateSemantics_ImplicitColumnAlias verifies that an implicit (AS-less)
+// output alias is treated as an alias, not a bare column reference against the
+// FROM tables (issue #713).
+func TestValidateSemantics_ImplicitColumnAlias(t *testing.T) {
+	cases := []string{
+		"SELECT ID employee_id FROM DB.SCH.EMPLOYEES",
+		// #739 follow-up: keyword-terminated value expressions. The alias must
+		// not be read as a bare column against the FROM tables.
+		"SELECT CASE WHEN ID > 0 THEN 'pos' ELSE 'neg' END sign FROM DB.SCH.EMPLOYEES",
+		"SELECT NULL flag_col FROM DB.SCH.EMPLOYEES",
+		"SELECT TRUE is_active FROM DB.SCH.EMPLOYEES",
+		"SELECT ID::VARCHAR name_str FROM DB.SCH.EMPLOYEES",
+	}
+	for _, sql := range cases {
+		t.Run(sql[:min(len(sql), 40)], func(t *testing.T) {
+			markers := ValidateSemantics(sql, getTestRefs(), getTestColCaches())
+			if warns := getWarnings(markers); len(warns) > 0 {
+				t.Errorf("Expected no warnings for %q, got %d: %v", sql, len(warns), warns)
+			}
+		})
+	}
+}
+
+// TestValidateSemantics_ImplicitAliasScopedToProjection verifies the
+// implicit-alias heuristic only applies inside the SELECT projection list.
+// A bogus trailing identifier in GROUP BY / ORDER BY is two adjacent bare
+// idents but must still be flagged as a missing column — it is NOT an implicit
+// output alias (PR #739 regression guard).
+func TestValidateSemantics_ImplicitAliasScopedToProjection(t *testing.T) {
+	cases := []struct {
+		name string
+		sql  string
+		want string // substring of the expected warning message
+	}{
+		{
+			name: "GROUP BY trailing bogus ident",
+			sql:  "SELECT DEPT_ID, COUNT(*) c FROM DB.SCH.EMPLOYEES e GROUP BY DEPT_ID bogus_col",
+			want: "bogus_col",
+		},
+		{
+			name: "ORDER BY trailing bogus ident",
+			sql:  "SELECT ID FROM DB.SCH.EMPLOYEES e ORDER BY ID bogus_col2",
+			want: "bogus_col2",
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			warns := getWarnings(ValidateSemantics(tt.sql, getTestRefs(), getTestColCaches()))
+			found := false
+			for _, w := range warns {
+				if strings.Contains(w.Message, tt.want) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("Expected a warning mentioning %q for %q, got %d: %v",
+					tt.want, tt.sql, len(warns), warns)
 			}
 		})
 	}
