@@ -12,6 +12,7 @@ import { App as AntApp, Modal, Spin, Button, Input, Switch, Space, Tag, Select }
 import { EditOutlined, CheckOutlined, CloseOutlined, PlusOutlined } from "@ant-design/icons";
 import DataTypeSelect from "../shared/DataTypeSelect";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
+import SequenceDefaultPicker from "../shared/SequenceDefaultPicker";
 import { parseAllowedValues } from "../tag/allowedValues";
 import type { snowflake } from "../../../wailsjs/go/models";
 import {
@@ -20,6 +21,7 @@ import {
   GetColumnTagReferences,
   GetQuotedIdentifiersIgnoreCase,
   ListAccountMaskingPolicies,
+  ListAccountSequences,
   ListAccountTags,
   SetObjectTag,
   UnsetObjectTag,
@@ -103,8 +105,9 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
   const [draft, setDraft] = useState("");
   const [caseSensitive, setCaseSensitive] = useState(false);
 
-  // Pick lists for the masking-policy and tag dropdowns.
+  // Pick lists for the masking-policy, sequence, and tag dropdowns.
   const [policies, setPolicies] = useState<QualifiedObject[]>([]);
+  const [sequences, setSequences] = useState<QualifiedObject[]>([]);
   const [tagCatalog, setTagCatalog] = useState<QualifiedObject[]>([]);
 
   // Tags.
@@ -122,6 +125,7 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
       .catch((e) => { setDetailsError(true); message.error(String(e)); })
       .finally(() => setLoading(false));
     ListAccountMaskingPolicies().then((r) => setPolicies(parseObjectList(r))).catch(() => {});
+    ListAccountSequences().then((r) => setSequences(parseObjectList(r))).catch(() => {});
     ListAccountTags().then((r) => setTagCatalog(parseObjectList(r))).catch(() => {});
     loadTags();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -390,9 +394,22 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
               <Switch size="small" checked={cur.nullable} onChange={toggleNullable} />
             ))}
 
-            {/* Default — free-text for now; a built-in-functions dropdown is
-                deferred to #506, which will provide the shared catalog. */}
-            {textRow("Default", "default", colDefault, saveDefault, false, detailsError)}
+            {/* Default — free-text plus a sequence picker. On an existing column
+                Snowflake's ALTER … ALTER COLUMN … SET DEFAULT accepts only a
+                sequence reference (<seq>.NEXTVAL); function defaults like
+                CURRENT_TIMESTAMP() are valid solely at table-create time, so the
+                ƒ picker used by Create Table / the ER Designer is deliberately
+                not offered here. The picker inserts a NEXTVAL reference from the
+                account's sequences. */}
+            {row("Default", editing === "default" ? (
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <Input size="small" value={draft} onChange={(e) => setDraft(e.target.value)} onPressEnter={saveDefault} autoFocus style={{ flex: 1, minWidth: 0, fontFamily: "monospace", fontSize: 12 }} />
+                <SequenceDefaultPicker sequences={sequences} onPick={setDraft} />
+                {confirmButtons(saveDefault)}
+              </div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>{displayValue(colDefault)}{editButton("default", colDefault, detailsError)}</div>
+            ))}
 
             {/* Comment */}
             {textRow("Comment", "comment", cur.comment ?? "", saveComment, true)}

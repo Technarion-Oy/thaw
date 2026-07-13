@@ -1454,6 +1454,10 @@ export function ListAccountMaskingPolicies() {
   return window['go']['app']['App']['ListAccountMaskingPolicies']();
 }
 
+export function ListAccountSequences() {
+  return window['go']['app']['App']['ListAccountSequences']();
+}
+
 export function ListAccountTags() {
   return window['go']['app']['App']['ListAccountTags']();
 }

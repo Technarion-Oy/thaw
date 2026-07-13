@@ -796,6 +796,8 @@ export function ListAIModels(arg1:string,arg2:string,arg3:number):Promise<Array<
 
 export function ListAccountMaskingPolicies():Promise<snowflake.QueryResult>;
 
+export function ListAccountSequences():Promise<snowflake.QueryResult>;
+
 export function ListAccountTags():Promise<snowflake.QueryResult>;
 
 export function ListApiIntegrations():Promise<Array<snowflake.ApiIntegration>>;
