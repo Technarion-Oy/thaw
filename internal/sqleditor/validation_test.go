@@ -84,9 +84,13 @@ func TestValidateBareColumnRefs_Valid(t *testing.T) {
 		// every item's real name must be cached, not just the first.
 		"CREATE TABLE loc_t4 (a INT);\nALTER TABLE loc_t4 ADD COLUMN b INT, COLUMN c INT;\nSELECT b, c FROM loc_t4;",
 		// Issue #715 edge case: a quoted column whose name collides with a
-		// constraint keyword ("check") must still be cached, not filtered by
-		// nonColumnAddKw — a quoted name can never be the ADD clause keyword.
+		// constraint keyword ("check") must still be cached — a quoted name can
+		// never be the ADD clause keyword.
 		"CREATE TABLE loc_t5 (a INT);\nALTER TABLE loc_t5 ADD COLUMN \"check\" INT;\nINSERT INTO loc_t5 (a, \"check\") VALUES (1, 2);",
+		// Issue #715 edge case: an explicit COLUMN keyword marks the item as a
+		// real column even when its (bare) name collides with a clause keyword
+		// (SEARCH / ROW / STORAGE), so it must still be cached.
+		"CREATE TABLE loc_t6 (a INT);\nALTER TABLE loc_t6 ADD COLUMN search INT;\nSELECT a, search FROM loc_t6;",
 	}
 
 	req := ValidateBareColsRequest{
@@ -160,6 +164,13 @@ func TestValidateBareColumnRefs_Invalid(t *testing.T) {
 		{"ALTER add constraint is not cached as a column",
 			"CREATE TABLE loc_t (a INT);\nALTER TABLE loc_t ADD CONSTRAINT pk PRIMARY KEY (a);\nSELECT pk FROM loc_t;",
 			[]string{"pk"}},
+		// A non-column ADD clause (no COLUMN keyword, second token is not a type)
+		// must not be cached as a column named after its lead keyword, so a later
+		// bare reference to that name is still flagged (issue #715). SEARCH
+		// OPTIMIZATION → the pseudo-column "search" must not resolve.
+		{"ALTER add search optimization is not cached as a column",
+			"CREATE TABLE loc_t (a INT);\nALTER TABLE loc_t ADD SEARCH OPTIMIZATION ON EQUALITY(a);\nSELECT search FROM loc_t;",
+			[]string{"search"}},
 	}
 
 	req := ValidateBareColsRequest{
@@ -1237,6 +1248,35 @@ func TestValidateSemantics_LocalTableAliasColumns(t *testing.T) {
 				t.Errorf("Expected warning for column %q but got: %v", tt.wantCol, warns)
 			}
 		})
+	}
+}
+
+// TestValidateSemantics_AlterAddColumn verifies that the ValidateSemantics
+// pre-scan (the second #715 call site, alongside ValidateBareColumnRefs) merges
+// columns added by an in-script ALTER TABLE … ADD COLUMN into the local cache,
+// so a later alias.column reference to the added column doesn't false-positive —
+// while a genuinely missing column is still flagged.
+func TestValidateSemantics_AlterAddColumn(t *testing.T) {
+	valid := "CREATE TABLE foo (a NUMBER);\n" +
+		"ALTER TABLE foo ADD COLUMN b VARCHAR;\n" +
+		"SELECT f.a, f.b FROM foo f"
+	if warns := getWarnings(ValidateSemantics(valid, nil, nil)); len(warns) > 0 {
+		t.Errorf("Expected no warnings for ALTER-added column, got %d: %v", len(warns), warns)
+	}
+
+	invalid := "CREATE TABLE foo (a NUMBER);\n" +
+		"ALTER TABLE foo ADD COLUMN b VARCHAR;\n" +
+		"SELECT f.c FROM foo f"
+	warns := getWarnings(ValidateSemantics(invalid, nil, nil))
+	found := false
+	for _, w := range warns {
+		if strings.Contains(w.Message, "'c'") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected a warning for missing column c, got: %v", warns)
 	}
 }
 

@@ -13,6 +13,7 @@ package sqleditor
 import (
 	"strings"
 
+	sf "thaw/internal/snowflake"
 	"thaw/internal/sqltok"
 )
 
@@ -329,51 +330,54 @@ func splitColDefs(colsRaw string) []string {
 }
 
 // parseFirstIdentAsCol returns the first identifier of a column definition as a
-// ColInfo. quoted reports whether that identifier was a "quoted" identifier —
-// callers use it to know the name can't be a bare clause keyword.
-func parseFirstIdentAsCol(def string, ic bool) (col ColInfo, quoted, ok bool) {
-	// Tokenize the column definition and take the first identifier.
-	tokens := sqltok.Tokenize(def)
-	for _, tok := range tokens {
-		if tok.Kind == sqltok.EOF {
-			break
-		}
-		if tok.Kind.IsTrivia() {
-			continue
-		}
-		if isIdent(tok) {
-			return ColInfo{Name: normIdent(tok.Text(def), ic), DataType: "UNKNOWN"}, tok.Kind == sqltok.QuotedIdent, true
-		}
-		break // first non-WS token is not an identifier
+// ColInfo. nextUpper is the upper-cased text of the significant token that
+// follows the name (empty if none) — for a real column definition that is the
+// data type, which callers use to tell a column apart from a non-column clause.
+func parseFirstIdentAsCol(def string, ic bool) (col ColInfo, nextUpper string, ok bool) {
+	sig := sigToks(sqltok.Tokenize(def))
+	if len(sig) == 0 || !isIdent(sig[0]) {
+		return ColInfo{}, "", false
 	}
-	return ColInfo{}, false, false
+	if len(sig) >= 2 {
+		nextUpper = strings.ToUpper(sig[1].Text(def))
+	}
+	return ColInfo{Name: normIdent(sig[0].Text(def), ic), DataType: "UNKNOWN"}, nextUpper, true
 }
 
-// nonColumnAddKw are the words that begin a non-column ALTER TABLE … ADD clause
-// (ADD CONSTRAINT / PRIMARY KEY / …). A parsed "column" whose name is one of
-// these is dropped so constraints aren't cached as columns.
-var nonColumnAddKw = map[string]bool{
-	"CONSTRAINT": true, "PRIMARY": true, "FOREIGN": true,
-	"UNIQUE": true, "CHECK": true,
-}
+// dataTypeLead is the set of first words of every recognised Snowflake data
+// type ("DOUBLE" for "DOUBLE PRECISION", etc.). A genuine ALTER … ADD column
+// definition is `<name> <type> …`, so the token after the name is a type; the
+// non-column ADD clauses (CONSTRAINT, PRIMARY KEY, SEARCH OPTIMIZATION, ROW
+// ACCESS POLICY, STORAGE LIFECYCLE POLICY, …) instead have a keyword there. This
+// set is the authority used to tell the two apart (issue #715).
+var dataTypeLead = func() map[string]bool {
+	m := make(map[string]bool)
+	for _, dt := range sf.AllDataTypes() {
+		m[strings.ToUpper(strings.Fields(dt.Name)[0])] = true
+	}
+	return m
+}()
 
 // stripAddColItemPrefix removes a leading COLUMN keyword and/or IF NOT EXISTS
 // from a single comma-separated ALTER TABLE … ADD item, so the repeated
 // "ADD COLUMN a INT, COLUMN b INT" form yields the real names "a" and "b"
-// instead of discarding the COLUMN-prefixed items (issue #715).
-func stripAddColItemPrefix(def string) string {
+// instead of discarding the COLUMN-prefixed items (issue #715). columnKw
+// reports whether a leading COLUMN keyword was present — it unambiguously marks
+// the item as a real column, even when its name is a keyword.
+func stripAddColItemPrefix(def string) (stripped string, columnKw bool) {
 	sig := sigToks(sqltok.Tokenize(def))
 	i := 0
 	if kwAt(sig, def, i, "COLUMN") {
 		i++
+		columnKw = true
 	}
 	if kwAt(sig, def, i, "IF") && kwAt(sig, def, i+1, "NOT") && kwAt(sig, def, i+2, "EXISTS") {
 		i += 3
 	}
 	if i == 0 || i >= len(sig) {
-		return def
+		return def, columnKw
 	}
-	return def[sig[i].Start:]
+	return def[sig[i].Start:], columnKw
 }
 
 // parseAlterAddColumns matches
@@ -397,8 +401,10 @@ func parseAlterAddColumns(sig []sqltok.Token, raw string, ic bool) (tablePath st
 		return "", nil, false
 	}
 	pos++
+	topColumnKw := false
 	if kwAt(sig, raw, pos, "COLUMN") {
 		pos++
+		topColumnKw = true
 	}
 	if kwAt(sig, raw, pos, "IF") && kwAt(sig, raw, pos+1, "NOT") && kwAt(sig, raw, pos+2, "EXISTS") {
 		pos += 3
@@ -407,17 +413,20 @@ func parseAlterAddColumns(sig []sqltok.Token, raw string, ic bool) (tablePath st
 		return "", nil, false
 	}
 	// The column-def block is everything from the first def token to end of stmt.
-	// ponytail: reuse the CREATE TABLE column splitter — it already handles commas,
-	// quotes, comments and nested parens — then strip each item's optional
-	// COLUMN / IF NOT EXISTS prefix and drop non-column ADD clauses.
+	// Reuse the CREATE TABLE column splitter — it already handles commas, quotes,
+	// comments and nested parens — then strip each item's optional COLUMN / IF NOT
+	// EXISTS prefix. An item is a real column when the COLUMN keyword was explicit
+	// (top-level or per-item) OR the token after the name is a data type; that
+	// rejects the non-column ADD clauses (CONSTRAINT, PRIMARY KEY, SEARCH
+	// OPTIMIZATION, ROW ACCESS POLICY, STORAGE LIFECYCLE POLICY, …) whose second
+	// token is a keyword rather than a type (issue #715).
 	for _, def := range splitColDefs(raw[sig[pos].Start:]) {
-		col, quoted, cok := parseFirstIdentAsCol(stripAddColItemPrefix(def), ic)
+		item, itemColumnKw := stripAddColItemPrefix(def)
+		col, nextUpper, cok := parseFirstIdentAsCol(item, ic)
 		if !cok {
 			continue
 		}
-		// A quoted name can never be interpreted as the CONSTRAINT/PRIMARY/…
-		// clause keyword, so only filter bare identifiers (issue #715 edge case).
-		if !quoted && nonColumnAddKw[strings.ToUpper(col.Name)] {
+		if !topColumnKw && !itemColumnKw && !dataTypeLead[nextUpper] {
 			continue
 		}
 		cols = append(cols, col)
