@@ -33,7 +33,7 @@ import (
 // validateKindImpliedRefs scans one statement for kind-implied object references
 // and flags the missing ones.
 func validateKindImpliedRefs(
-	raw string, sig []sqltok.Token, baseLine int, ic bool,
+	raw string, sig []sqltok.Token, baseLine, baseCol int, ic bool,
 	checkEq func(string, string) bool,
 	knownObjects []ObjectRef, fetchedSchemas []SchemaEntry,
 	sessionDB, sessionSchema string,
@@ -46,7 +46,7 @@ func validateKindImpliedRefs(
 		if rawPath == "" {
 			return
 		}
-		markers = append(markers, flagMissingObject(raw, baseLine, ic, checkEq, objType,
+		markers = append(markers, flagMissingObject(raw, baseLine, baseCol, ic, checkEq, objType,
 			extractIdentParts(rawPath, ic), knownObjects, fetchedSchemas,
 			sessionDB, sessionSchema, createdByKind, droppedByKind)...)
 	}
@@ -125,7 +125,7 @@ func validateKindImpliedRefs(
 					if k := strings.LastIndexByte(inner, '.'); k >= 0 {
 						disp = inner[k+1:]
 					}
-					t := tokenPosOf(sig[j], baseLine, disp)
+					t := tokenPosOf(sig[j], baseLine, baseCol, disp)
 					m := diagMarkerAt(t, "File format '"+disp+"' does not exist or is not authorized.", 8)
 					m.Code = buildQualifyObjectCode(normName, "file format", kindObjs, checkEq)
 					markers = append(markers, m)
@@ -141,12 +141,29 @@ func validateKindImpliedRefs(
 }
 
 // unquoteSingle strips the surrounding single quotes from a SQL string literal
-// and collapses doubled '' escapes, returning the raw content ('a''b' → a'b).
+// and decodes its escapes, returning the raw content. It is the inverse of the
+// sqltok single-quote scanner, honoring both the doubled-quote escape (''→') and
+// backslash escapes (\'→', \\→\, and \x→x for any other x) — otherwise a literal
+// the tokenizer now correctly keeps whole (e.g. 'my\'format') would mis-decode.
 func unquoteSingle(s string) string {
 	if len(s) >= 2 && s[0] == '\'' && s[len(s)-1] == '\'' {
 		s = s[1 : len(s)-1]
 	}
-	return strings.ReplaceAll(s, "''", "'")
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '\\' && i+1 < len(s) {
+			i++
+			b.WriteByte(s[i]) // backslash escapes the next char
+		} else if c == '\'' && i+1 < len(s) && s[i+1] == '\'' {
+			i++
+			b.WriteByte('\'') // '' doubled-quote escape
+		} else {
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
 }
 
 // precededBySetOrAdd reports whether the significant token before sig[i] is SET
@@ -161,11 +178,15 @@ func precededBySetOrAdd(sig []sqltok.Token, raw string, i int) bool {
 
 // tokenPosOf builds a tokenPos spanning a single token (used to mark a value that
 // lives inside a string literal, which findTokensLocally cannot locate).
-func tokenPosOf(tok sqltok.Token, baseLine int, name string) tokenPos {
+func tokenPosOf(tok sqltok.Token, baseLine, baseCol int, name string) tokenPos {
+	col := tok.Col
+	if tok.Line == 1 {
+		col += baseCol - 1 // rebase first-line columns to document coords
+	}
 	return tokenPos{
 		name:   name,
 		line:   baseLine + tok.Line - 1,
-		col:    tok.Col,
-		endCol: tok.Col + (tok.End - tok.Start),
+		col:    col,
+		endCol: col + (tok.End - tok.Start),
 	}
 }

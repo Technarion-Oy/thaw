@@ -39,7 +39,7 @@ import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeS
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { FUNCTION_CATEGORIES } from "./snowflakeSql";
 import { getOrCreateMenuId } from "./monacoMenu";
-import { UC, quoteIfNecessary, colCacheKey, normId, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt, starMenuEligible } from "./sqlEditorUtils";
+import { UC, quoteIfNecessary, colCacheKey, normId, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt, starMenuEligible, byteColToUtf16Col } from "./sqlEditorUtils";
 import ExplainModal from "../results/ExplainModal";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 import { kindSupportsDdl } from "../../utils/objectDdl";
@@ -80,6 +80,20 @@ export interface ResolvedRef {
 // so the markers are always consumed. Cleanup on tab close (requestClose in
 // QueryPage) prevents leaks for tabs closed before their editor mounts.
 export const pendingMcpMarkers = new Map<string, DiagMarker[]>();
+
+// Backend validators emit UTF-8 byte columns; Monaco wants UTF-16. Convert every
+// marker's start/end column against its own line text right before handing them to
+// setModelMarkers — the single choke point that fixes shifted squiggles and the
+// text-corrupting "Qualify as …" quick fix on lines with non-ASCII chars. Issue #702.
+function toUtf16Markers(markers: DiagMarker[], model: monacoLib.editor.ITextModel): DiagMarker[] {
+  const lineCount = model.getLineCount();
+  const lineAt = (n: number) => (n >= 1 && n <= lineCount ? model.getLineContent(n) : "");
+  return markers.map((m) => ({
+    ...m,
+    startColumn: byteColToUtf16Col(lineAt(m.startLineNumber), m.startColumn),
+    endColumn: byteColToUtf16Col(lineAt(m.endLineNumber), m.endColumn),
+  }));
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -426,6 +440,16 @@ function applyPrefsToSnippet(text: string, prefs: EditorPrefs): string {
   return result;
 }
 
+// Resolve a tab's OWN session context. Session is per-tab on the backend, so a
+// split pane (tabId=splitTabId) must resolve/validate against its own tab's
+// session — not the global (= active tab's) one. Falls back to the global
+// context when the tab has no stored context yet. #717.
+function sessionForTab(tabId: string | undefined): { database: string; schema: string } {
+  const s = useSessionStore.getState();
+  const ctx = tabId ? s.tabContexts[tabId] : undefined;
+  return { database: ctx?.database ?? s.database, schema: ctx?.schema ?? s.schema };
+}
+
 let _activeSnippetEditor: monacoLib.editor.ICodeEditor | null = null;
 
 /** Shared — called by any Monaco editor (SQL or notebook cell) on context menu open. */
@@ -609,6 +633,10 @@ async function statementTextAtLine(fullSql: string, line: number): Promise<strin
 // keyboard-invoked menu. Set in onContextMenu; read by the command.
 let _starMenuPos: monacoLib.IPosition | null = null;
 
+// The tab whose editor last opened the star menu; the command validates against
+// this tab's own session (split pane vs. active tab). Set in onContextMenu. #717.
+let _starMenuTabId: string | undefined;
+
 let _expandWildcardRegistered = false;
 (() => {
   if (_expandWildcardRegistered) return;
@@ -655,7 +683,7 @@ let _expandWildcardRegistered = false;
         (rawRefs || []) as any[], // eslint-disable-line @typescript-eslint/no-explicit-any
         useObjectStore.getState().objects.map((o) => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, // eslint-disable-line @typescript-eslint/no-explicit-any
         { database: "", schema: "" } as any, // eslint-disable-line @typescript-eslint/no-explicit-any
-        { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema } as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+        sessionForTab(_starMenuTabId) as any, // eslint-disable-line @typescript-eslint/no-explicit-any
       );
     } catch { return; }
     if (!refs || refs.length === 0 || stale()) return;
@@ -731,6 +759,9 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
   const activeTabId = useQueryStore((s) => s.activeTabId);
   const sql    = tabId ? (tabs.find((t) => t.id === tabId)?.sql ?? "") : activeSql;
   const setSql = tabId ? (newSql: string) => setSqlForTab(tabId, newSql) : activeSqlSetter;
+
+  // THIS editor's own per-tab session context (see sessionForTab, #717).
+  const editorSession = () => sessionForTab(tabId);
 
   const activeTab      = tabs.find((t) => t.id === (tabId ?? activeTabId));
   const activeKind     = activeTab?.kind;
@@ -1082,8 +1113,8 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           resolvedRefs: resolved,
           knownDatabases: storeDbs,
           knownSchemas: storeSchemas,
-          sessionDatabase: useSessionStore.getState().database,
-          sessionSchema: useSessionStore.getState().schema,
+          sessionDatabase: editorSession().database,
+          sessionSchema: editorSession().schema,
           quotedIdentifiersIgnoreCase: false,
           droppedDatabases: [],
           droppedSchemas: [],
@@ -1129,7 +1160,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         console.warn("[thaw] SQL diagnostics aborted:", err);
       } finally {
         if (model.getVersionId() === diagVersion && myRun === diagRunRef.current) {
-          monaco.editor.setModelMarkers(model, "thaw-sql", diagMarkers);
+          monaco.editor.setModelMarkers(model, "thaw-sql", toUtf16Markers(diagMarkers, model));
         }
       }
     };
@@ -1142,7 +1173,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const m = editor.getModel();
         if (m) {
           pendingMcpMarkers.delete(curTabId);
-          monaco.editor.setModelMarkers(m, "thaw-sql", pending);
+          monaco.editor.setModelMarkers(m, "thaw-sql", toUtf16Markers(pending, m));
         }
       }
       if (diagTimerRef.current) clearTimeout(diagTimerRef.current);
@@ -1389,7 +1420,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                   sql: model.getValue(),
                   cursorOffset: model.getOffsetAt(position),
                   storeObjects: objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })),
-                  session: { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema },
+                  session: editorSession(),
                   lineUpToWord,
                 } as any);
 
@@ -1500,7 +1531,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           sql: model.getValue(),
           cursorOffset,
           storeObjects: objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })),
-          session: { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema },
+          session: editorSession(),
           lineUpToWord,
         } as any);
         const declaredVars: string[] = ctx?.scripting?.variables ?? [];
@@ -1541,7 +1572,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         if ((wordIsOn || isInJoinOnClause) && schemaAutocompleteEnabled && ctxTableRefs.length >= 2) {
           const rawRefs = await ParseJoinTableRefs(textToCursor);
           if (rawRefs && (rawRefs as any[]).length >= 2) {
-            const resolvedRefs = await ResolveTableRefs(rawRefs as any[], useObjectStore.getState().objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, { database: "", schema: "" } as any, { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema } as any);
+            const resolvedRefs = await ResolveTableRefs(rawRefs as any[], useObjectStore.getState().objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, { database: "", schema: "" } as any, editorSession() as any);
             if (resolvedRefs && resolvedRefs.length >= 2) {
               for (const ref of resolvedRefs) {
                 warmUpFKsForSchema(ref.db, ref.schema).catch(() => {});
@@ -1580,7 +1611,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           const hasTriggerC = !!rawRefsC && (rawRefsC as any[]).length >= 2;
 
           if (hasTriggerC) {
-            const resolvedC = await ResolveTableRefs(rawRefsC as any[], useObjectStore.getState().objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, { database: "", schema: "" } as any, { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema } as any);
+            const resolvedC = await ResolveTableRefs(rawRefsC as any[], useObjectStore.getState().objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, { database: "", schema: "" } as any, editorSession() as any);
             if (resolvedC && resolvedC.length >= 2) {
               const fkEntriesC: any[] = [];
               const colEntriesC: any[] = [];
@@ -1610,7 +1641,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         if ((usingInCtx || usingPartialInCtx) && schemaAutocompleteEnabled) {
           const usingRefs = ctxTableRefs.length >= 2 ? ctxTableRefs : (await ParseJoinTableRefs(textToCursor) || []);
           if (usingRefs.length >= 2) {
-            const resolvedUsing = await ResolveTableRefs(usingRefs as any[], objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, (ctx?.useContext ?? { database: "", schema: "" }) as any, { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema } as any);
+            const resolvedUsing = await ResolveTableRefs(usingRefs as any[], objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, (ctx?.useContext ?? { database: "", schema: "" }) as any, editorSession() as any);
             if (resolvedUsing && resolvedUsing.length >= 2) {
               // Get columns for the last two refs (the JOIN pair)
               const lastTwo = resolvedUsing.slice(-2);
@@ -1941,7 +1972,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     let aliasRefsPromise: Promise<any[]> | null = null;
     const resolveAliasRefs = (): Promise<any[]> => {
       const model = editor.getModel();
-      const sess = useSessionStore.getState();
+      const sess = editorSession(); // per-tab session so split panes resolve alias refs against their own db/schema (#717)
       const key = `${model?.getVersionId() ?? 0}\0${sess.database}\0${sess.schema}`;
       if (key !== aliasRefsKey || !aliasRefsPromise) {
         aliasRefsKey = key;
@@ -2326,7 +2357,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           if (lastJoinSeg.length > 0 && !/\b(?:ON|USING)\b/i.test(lastJoinSeg)) {
             const ghostRefs = await ParseJoinTableRefs(prefixFull);
             if (ghostRefs && (ghostRefs as any[]).length >= 2) {
-              const resolved = await ResolveTableRefs(ghostRefs as any[], useObjectStore.getState().objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, { database: "", schema: "" } as any, { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema } as any);
+              const resolved = await ResolveTableRefs(ghostRefs as any[], useObjectStore.getState().objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, { database: "", schema: "" } as any, editorSession() as any);
               if (resolved && resolved.length >= 2) {
                 const fkEntries = resolved.map((ref) => ({
                   db: ref.db, schema: ref.schema, name: ref.name,
@@ -2550,6 +2581,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     editor.onMouseDown((e: any) => { if (e.event?.rightButton) updateStarGate(e.target?.position); });
     editor.onContextMenu((e) => {
       _activeSnippetEditor = editor;
+      _starMenuTabId = tabId; // validate Expand-* against this pane's own session (#717)
       // The command reads this: the click point for a right-click (differs from the
       // live cursor inside a selection), or the cursor for a keyboard-invoked menu
       // (where e.target.position is null).

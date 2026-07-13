@@ -230,6 +230,17 @@ func toUpperSet(keys []string) map[string]bool {
 	return m
 }
 
+// nonColumnDefKeywords are the leading words of a table-level clause that is
+// NOT a column definition, so the token after them must not be treated as a
+// column name / data type. Shared by walkColumnDefTypes (CREATE TABLE body) and
+// the ALTER TABLE ADD handler. ROW / SEARCH are intentionally absent: they only
+// begin table-level clauses in the ALTER ADD form (ROW ACCESS POLICY, SEARCH
+// OPTIMIZATION) and are handled there; inside a CREATE TABLE body "row" / "search"
+// can be a real column name, so they must still be type-checked.
+var nonColumnDefKeywords = toUpperSet([]string{
+	"CONSTRAINT", "PRIMARY", "UNIQUE", "FOREIGN", "INDEX", "CHECK",
+})
+
 // ── ValidateDataTypes ─────────────────────────────────────────────────────────
 
 // ValidateDataTypes checks that explicit data type declarations within
@@ -290,17 +301,32 @@ func ValidateDataTypes(sql string, stmtRanges []StatementRange) []DiagMarker {
 			}
 		}
 
-		// 2. CAST / TRY_CAST ( … AS TYPE ) — first AS after the opening paren.
+		// 2. CAST / TRY_CAST ( … AS TYPE ) — the CAST's own AS, which sits at the
+		// depth of the opening paren. A nested AS alias (e.g. an inner subquery's
+		// SELECT MAX(id) AS mx) is at a deeper depth and must be ignored.
 		for i := 0; i+1 < len(sig); i++ {
 			u := tokUpper(sig[i], rawText)
 			if (u != "CAST" && u != "TRY_CAST") || sig[i+1].Kind != sqltok.LParen {
 				continue
 			}
-			for j := i + 2; j < len(sig); j++ {
-				if tokUpper(sig[j], rawText) != "AS" {
+			start, closeIdx, ok := parenInnerRange(sig, i+1)
+			if !ok {
+				continue
+			}
+			depth := 0 // relative to the inside of the CAST's "("
+			for j := start; j < closeIdx; j++ {
+				switch sig[j].Kind {
+				case sqltok.LParen:
+					depth++
+					continue
+				case sqltok.RParen:
+					depth--
 					continue
 				}
-				if j+1 < len(sig) {
+				if depth != 0 || tokUpper(sig[j], rawText) != "AS" {
+					continue
+				}
+				if j+1 < closeIdx {
 					tt := sig[j+1]
 					// The old regex required a 2+ char type ([a-zA-Z_][a-zA-Z0-9_]+).
 					if (tt.Kind == sqltok.Keyword || tt.Kind == sqltok.Identifier) && tt.End-tt.Start >= 2 {
@@ -316,15 +342,28 @@ func ValidateDataTypes(sql string, stmtRanges []StatementRange) []DiagMarker {
 			_, pos := readIdentPath(sig, rawText, 2)
 			if kwAt(sig, rawText, pos, "ADD") {
 				pos++
-				if kwAt(sig, rawText, pos, "COLUMN") {
+				sawColumn := kwAt(sig, rawText, pos, "COLUMN")
+				if sawColumn {
 					pos++
 				}
 				if pos+2 < len(sig) && kwAt(sig, rawText, pos, "IF") &&
 					kwAt(sig, rawText, pos+1, "NOT") && kwAt(sig, rawText, pos+2, "EXISTS") {
 					pos += 3
 				}
-				// Column name (one ident token), then the declared type.
-				if pos < len(sig) && isIdent(sig[pos]) {
+				// Column name (one ident token), then the declared type. An explicit
+				// COLUMN keyword makes the next ident unambiguously a column, so it is
+				// always validated. Without COLUMN, ADD PRIMARY KEY / CONSTRAINT /
+				// FOREIGN KEY / ROW ACCESS POLICY / SEARCH OPTIMIZATION / … are
+				// table-level clauses, not column defs, and are skipped. ROW / SEARCH
+				// are ALTER-ADD-only markers (kept out of nonColumnDefKeywords so a
+				// column literally named "row"/"search" still gets type-checked).
+				addWord := ""
+				if pos < len(sig) {
+					addWord = strings.ToUpper(sig[pos].Text(rawText))
+				}
+				isColumnClause := sawColumn ||
+					(!nonColumnDefKeywords[addWord] && addWord != "ROW" && addWord != "SEARCH")
+				if pos < len(sig) && isIdent(sig[pos]) && isColumnClause {
 					pos++
 					if pos < len(sig) && (sig[pos].Kind == sqltok.Keyword || sig[pos].Kind == sqltok.Identifier) {
 						rel(sig[pos].Text(rawText), sig[pos].Start)
@@ -492,13 +531,10 @@ func walkColumnDefTypes(sig []sqltok.Token, sql string, lparenIdx int, onType fu
 	wn := 0
 	flush := func() {
 		if wn >= 2 {
-			switch strings.ToUpper(w0.Text(sql)) {
-			case "CONSTRAINT", "PRIMARY", "UNIQUE", "FOREIGN", "INDEX", "CHECK":
-				// table-level constraint, not a column definition
-			default:
-				if w1.Kind != sqltok.QuotedIdent {
-					onType(w1.Text(sql), w1.Start)
-				}
+			if nonColumnDefKeywords[strings.ToUpper(w0.Text(sql))] {
+				// table-level constraint / policy, not a column definition
+			} else if w1.Kind != sqltok.QuotedIdent {
+				onType(w1.Text(sql), w1.Start)
 			}
 		}
 		wn = 0

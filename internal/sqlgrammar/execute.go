@@ -253,10 +253,12 @@ func (v *Validator) ParseExecuteDcmProject() bool {
 //	EXECUTE IMMEDIATE $<session_variable>
 //	    [ USING ( <bind_variable> [ , <bind_variable> ... ] ) ]
 func (v *Validator) ParseExecuteImmediate() bool {
-	// the body: a '<string>' literal, a $<session_variable>, or a bare <variable>.
+	// the body: a '<string>' literal, a $$…$$ dollar-quoted block (the docs'
+	// primary example), a $<session_variable>, or a bare <variable>.
 	body := func() bool {
 		return v.Choice(
 			v.parseString,
+			func() bool { return v.Match(sqltok.DollarQuoted) },
 			func() bool {
 				return v.Sequence(
 					func() bool {

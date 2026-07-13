@@ -286,8 +286,9 @@ var sqlStmtKeywords = map[string]bool{
 	"BEGIN": true, "COMMIT": true, "ROLLBACK": true, "SAVEPOINT": true,
 	// Execution
 	"CALL": true, "EXECUTE": true, "RETURN": true,
-	// Data loading
+	// Data loading (LS/RM are the documented abbreviations of LIST/REMOVE)
 	"COPY": true, "PUT": true, "GET": true, "LIST": true, "REMOVE": true,
+	"LS": true, "RM": true,
 	// Snowflake scripting
 	"DECLARE": true, "LET": true, "FOR": true, "WHILE": true, "IF": true,
 	"CASE": true, "RAISE": true, "END": true, "LOOP": true,
@@ -804,9 +805,11 @@ func ApplyCasing(sql, keywordCase, identifierCase, functionCase string) string {
 //   - Unexpected token at a statement start
 //
 // Snowflake Scripting lives inside dollar-quoted bodies, which the tokenizer
-// surfaces as a single opaque DollarQuoted token. validateSyntaxScope therefore
-// recurses into each body (re-tokenizing it) and rebases the inner token
-// positions back to absolute line/column via the baseLine/baseCol offsets.
+// surfaces as a single opaque DollarQuoted token. validateSyntaxScope recurses
+// into a body (re-tokenizing it, rebasing inner positions via baseLine/baseCol)
+// only when it opens with BEGIN or DECLARE — an anonymous scripting block.
+// Plain string constants (SELECT $$hi$$) and non-SQL UDF bodies
+// (LANGUAGE PYTHON/JAVASCRIPT … AS $$…$$) are left opaque (#704).
 func ValidateSyntax(sql string) []DiagMarker {
 	var markers []DiagMarker
 	add := func(msg string, sl, sc, el, ec int) {
@@ -921,6 +924,15 @@ func validateSyntaxScope(src string, baseLine, baseCol int, inScript bool, add f
 	}
 
 	var parenStack []parenEntry
+	// flushOpenParens reports every still-open paren/bracket in push order and
+	// clears the stack. Used both at each statement boundary (per-statement
+	// balance) and at end of scope.
+	flushOpenParens := func() {
+		for _, open := range parenStack {
+			add("Unclosed '"+open.char+"'", open.line, open.col, open.line, open.col+1)
+		}
+		parenStack = parenStack[:0]
+	}
 	declaredVars := map[string]bool{}
 	inDeclareBlock := false
 	atStart := true
@@ -969,8 +981,12 @@ func validateSyntaxScope(src string, baseLine, baseCol int, inScript bool, add f
 			i++
 
 		case sqltok.DollarQuoted:
-			// Recurse into the body, which is Snowflake Scripting. The body
-			// starts len(tag) columns after the token, on the same line.
+			// A $$…$$ body is only Snowflake Scripting when it's an anonymous
+			// block — i.e. it opens with BEGIN or DECLARE (EXECUTE IMMEDIATE $$…$$
+			// and a LANGUAGE SQL procedure body both do). A plain string constant
+			// (SELECT $$hi$$) or a non-SQL UDF body (LANGUAGE PYTHON/JAVASCRIPT …
+			// AS $$…$$) is opaque — validating it as scripting produces phantom
+			// errors (#704). The body starts len(tag) columns after the token.
 			tag := t.Tag
 			text := t.Text(src)
 			var inner string
@@ -979,9 +995,18 @@ func validateSyntaxScope(src string, baseLine, baseCol int, inScript bool, add f
 			} else {
 				inner = text[len(tag) : len(text)-len(tag)]
 			}
-			sl, sc := absT(t)
-			validateSyntaxScope(inner, sl, sc+len(tag), true, add)
-			atStart = true
+			if t.Unterminated {
+				l, c := absT(t)
+				add("Unclosed dollar-quoted string", l, c, l, c+len(tag))
+			}
+			if kw := getFirstSQLToken(inner); kw == "BEGIN" || kw == "DECLARE" {
+				sl, sc := absT(t)
+				validateSyntaxScope(inner, sl, sc+len(tag), true, add)
+				atStart = true
+			} else {
+				// Opaque string constant — like StringLit, it doesn't reset start.
+				atStart = false
+			}
 			i++
 
 		case sqltok.LParen, sqltok.LBracket:
@@ -1009,6 +1034,10 @@ func validateSyntaxScope(src string, baseLine, baseCol int, inScript bool, add f
 			i++
 
 		case sqltok.Semicolon:
+			// Paren balance is per-statement: flush/report any parens left open
+			// by this statement so a stray ')' in the next one can't silently pop
+			// them (cross-statement leak).
+			flushOpenParens()
 			atStart = true
 			i++
 
@@ -1061,9 +1090,7 @@ func validateSyntaxScope(src string, baseLine, baseCol int, inScript bool, add f
 	}
 
 	// Report unclosed opening parens/brackets in push order.
-	for _, open := range parenStack {
-		add("Unclosed '"+open.char+"'", open.line, open.col, open.line, open.col+1)
-	}
+	flushOpenParens()
 }
 
 // validateScriptWord handles a keyword/identifier token at a Snowflake Scripting
@@ -1706,6 +1733,17 @@ func extractProjectedColName(expr string) string {
 	if m := reAsAliasExpr.FindStringSubmatch(expr); m != nil {
 		return strings.ToUpper(normIdent(m[1], true))
 	}
+	// Rule 1.5: implicit (AS-less) trailing alias — a bare/quoted identifier
+	// closing the item, preceded by an expression terminator (e.g. `COUNT(*) cnt`,
+	// `ID employee_id`). A single bare/qualified ident has no such predecessor and
+	// falls through to rule 2; `db.sch.col` has a Dot before the last part, not a
+	// terminator, so it is never misread as an alias.
+	if sig := sigTokens(expr); len(sig) >= 2 {
+		last := sig[len(sig)-1]
+		if isAliasTok(last) && isExprEndAt(sig, len(sig)-2, expr) {
+			return strings.ToUpper(normIdent(last.Text(expr), true))
+		}
+	}
 	// Rule 2: simple identifier — must not contain operators or function calls.
 	if strings.ContainsAny(expr, "()+-*/%|&^!<>=") {
 		return ""
@@ -2016,6 +2054,18 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 					columns := parseCreateTableColDefs(colsRaw, true)
 					tableNameU := strings.ToUpper(parts[len(parts)-1])
 					localColCache[tableNameU] = columns
+				}
+			}
+		} else if aPath, aCols, aok := parseAlterAddColumns(rawSig, raw, true); aok {
+			// ALTER TABLE … ADD [COLUMN] on a table created in-script: merge the
+			// added columns so later references resolve (issue #715).
+			if parts := extractIdentParts(aPath, true); len(parts) > 0 {
+				tableNameU := strings.ToUpper(parts[len(parts)-1])
+				if existing, ok := localColCache[tableNameU]; ok {
+					merged := make([]ColInfo, 0, len(existing)+len(aCols))
+					merged = append(merged, existing...)
+					merged = append(merged, aCols...)
+					localColCache[tableNameU] = merged
 				}
 			}
 		}
