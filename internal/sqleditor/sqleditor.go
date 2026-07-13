@@ -1740,7 +1740,7 @@ func extractProjectedColName(expr string) string {
 	// terminator, so it is never misread as an alias.
 	if sig := sigTokens(expr); len(sig) >= 2 {
 		last := sig[len(sig)-1]
-		if isAliasTok(last) && isExprEnd(sig[len(sig)-2].Kind) {
+		if isAliasTok(last) && isExprEndAt(sig, len(sig)-2, expr) {
 			return strings.ToUpper(normIdent(last.Text(expr), true))
 		}
 	}

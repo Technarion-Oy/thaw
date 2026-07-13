@@ -1082,7 +1082,7 @@ func findAsAliases(sig []sqltok.Token, sql string) []asAliasLoc {
 		// Gated to depth 0 + projection list so ORDER BY / GROUP BY / subquery
 		// trailing idents are left alone (PR #739).
 		if depth == 0 && inProj &&
-			isAliasTok(sig[i]) && i > 0 && isExprEnd(sig[i-1].Kind) && isListItemBoundary(sig, i+1) {
+			isAliasTok(sig[i]) && i > 0 && isExprEndAt(sig, i-1, sql) && isListItemBoundary(sig, i+1) {
 			locs = append(locs, asAliasLoc{
 				asStart:    sig[i].Start,
 				aliasStart: sig[i].Start,
@@ -1093,15 +1093,41 @@ func findAsAliases(sig []sqltok.Token, sql string) []asAliasLoc {
 	return locs
 }
 
-// isExprEnd reports whether a token can terminate a SQL value expression, so a
+// isExprEndAt reports whether sig[i] terminates a SQL value expression, so a
 // following bare/quoted identifier reads as an implicit (AS-less) output alias
-// rather than as part of the expression. Keywords are deliberately excluded so
-// clause keywords (SELECT DISTINCT col, GROUP BY x) are never misread.
-func isExprEnd(k sqltok.TokenKind) bool {
-	switch k {
+// rather than as part of the expression.
+//
+// Most keywords are deliberately NOT expression ends: clause keywords (FROM,
+// GROUP, ORDER, …) and operator keywords (AND, OR, IN, IS, …) must never let a
+// following bare identifier be misread as an alias (e.g. `SELECT DISTINCT col`).
+// But a small enumerated set of keywords legitimately closes a *value*
+// expression, and excluding those blanket-style left common implicit-alias
+// patterns un-fixed (PR #739 follow-up):
+//   - literal keywords: NULL, TRUE, FALSE      (`SELECT NULL flag`)
+//   - the CASE terminator END                  (`CASE … END sign`)
+//   - a data-type keyword closing a `::` cast   (`ID::VARCHAR name`)
+//
+// Data-type names (VARCHAR, INT, …) are lexed as keywords, so the cast case is
+// recognized by the `::` operator immediately preceding the type keyword rather
+// than by enumerating every type name.
+func isExprEndAt(sig []sqltok.Token, i int, sql string) bool {
+	if i < 0 || i >= len(sig) {
+		return false
+	}
+	switch sig[i].Kind {
 	case sqltok.Identifier, sqltok.QuotedIdent, sqltok.RParen,
 		sqltok.NumberLit, sqltok.StringLit, sqltok.RBracket:
 		return true
+	case sqltok.Keyword:
+		switch tokUpper(sig[i], sql) {
+		case "NULL", "TRUE", "FALSE", "END":
+			return true
+		}
+		// `<expr>::<TYPE>` — the type name is a keyword; the `::` cast operator
+		// one token back marks it as the end of a value expression.
+		if i >= 1 && sig[i-1].Kind == sqltok.Operator && sig[i-1].Text(sql) == "::" {
+			return true
+		}
 	}
 	return false
 }

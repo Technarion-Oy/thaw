@@ -40,6 +40,12 @@ func TestValidateBareColumnRefs_Valid(t *testing.T) {
 		"SELECT ID employee_id FROM DB.SCH.EMPLOYEES",
 		"SELECT ID employee_id, FIRST_NAME fn FROM DB.SCH.EMPLOYEES",
 		"SELECT COUNT(ID) cnt FROM DB.SCH.EMPLOYEES",
+		// Keyword-terminated value expressions with an implicit alias (#739 follow-up):
+		// CASE…END, literal keywords (NULL/TRUE/FALSE), and `::TYPE` casts.
+		"SELECT CASE WHEN ID > 0 THEN 'pos' ELSE 'neg' END sign FROM DB.SCH.EMPLOYEES",
+		"SELECT NULL flag_col FROM DB.SCH.EMPLOYEES",
+		"SELECT TRUE is_active FROM DB.SCH.EMPLOYEES",
+		"SELECT ID::VARCHAR name_str FROM DB.SCH.EMPLOYEES",
 
 		// String literals containing identifier-like words must not be flagged
 		// as unknown column refs (e.g. 'month' in DATE_TRUNC('month', ID)).
@@ -899,6 +905,13 @@ func TestValidateSemantics_CTEAliasColumns(t *testing.T) {
 			name: "CTE with implicit (AS-less) alias",
 			sql:  `WITH c AS (SELECT ID, COUNT(*) cnt FROM t GROUP BY ID) SELECT c.cnt FROM c`,
 		},
+		{
+			// #739 follow-up: keyword-terminated expression (CASE…END) with an
+			// implicit alias in a CTE must project the alias, so the outer
+			// reference resolves — no "flag does not exist in C" marker.
+			name: "CTE with implicit alias on CASE…END",
+			sql:  `WITH c AS (SELECT ID, CASE WHEN ID>0 THEN 1 ELSE 0 END flag FROM t) SELECT c.flag FROM c`,
+		},
 	}
 	for _, tt := range validCases {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1026,10 +1039,22 @@ LIMIT 100;`,
 // output alias is treated as an alias, not a bare column reference against the
 // FROM tables (issue #713).
 func TestValidateSemantics_ImplicitColumnAlias(t *testing.T) {
-	sql := "SELECT ID employee_id FROM DB.SCH.EMPLOYEES"
-	markers := ValidateSemantics(sql, getTestRefs(), getTestColCaches())
-	if warns := getWarnings(markers); len(warns) > 0 {
-		t.Errorf("Expected no warnings for %q, got %d: %v", sql, len(warns), warns)
+	cases := []string{
+		"SELECT ID employee_id FROM DB.SCH.EMPLOYEES",
+		// #739 follow-up: keyword-terminated value expressions. The alias must
+		// not be read as a bare column against the FROM tables.
+		"SELECT CASE WHEN ID > 0 THEN 'pos' ELSE 'neg' END sign FROM DB.SCH.EMPLOYEES",
+		"SELECT NULL flag_col FROM DB.SCH.EMPLOYEES",
+		"SELECT TRUE is_active FROM DB.SCH.EMPLOYEES",
+		"SELECT ID::VARCHAR name_str FROM DB.SCH.EMPLOYEES",
+	}
+	for _, sql := range cases {
+		t.Run(sql[:min(len(sql), 40)], func(t *testing.T) {
+			markers := ValidateSemantics(sql, getTestRefs(), getTestColCaches())
+			if warns := getWarnings(markers); len(warns) > 0 {
+				t.Errorf("Expected no warnings for %q, got %d: %v", sql, len(warns), warns)
+			}
+		})
 	}
 }
 
