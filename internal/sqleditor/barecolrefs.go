@@ -216,7 +216,7 @@ func extractBalancedBlock(s string, openIdx int) string {
 func parseCreateTableColDefs(colsRaw string, ic bool) []ColInfo {
 	var columns []ColInfo
 	for _, def := range splitColDefs(colsRaw) {
-		if col, ok := parseFirstIdentAsCol(def, ic); ok {
+		if col, _, ok := parseFirstIdentAsCol(def, ic); ok {
 			columns = append(columns, col)
 		}
 	}
@@ -328,7 +328,10 @@ func splitColDefs(colsRaw string) []string {
 	return defs
 }
 
-func parseFirstIdentAsCol(def string, ic bool) (ColInfo, bool) {
+// parseFirstIdentAsCol returns the first identifier of a column definition as a
+// ColInfo. quoted reports whether that identifier was a "quoted" identifier —
+// callers use it to know the name can't be a bare clause keyword.
+func parseFirstIdentAsCol(def string, ic bool) (col ColInfo, quoted, ok bool) {
 	// Tokenize the column definition and take the first identifier.
 	tokens := sqltok.Tokenize(def)
 	for _, tok := range tokens {
@@ -339,11 +342,11 @@ func parseFirstIdentAsCol(def string, ic bool) (ColInfo, bool) {
 			continue
 		}
 		if isIdent(tok) {
-			return ColInfo{Name: normIdent(tok.Text(def), ic), DataType: "UNKNOWN"}, true
+			return ColInfo{Name: normIdent(tok.Text(def), ic), DataType: "UNKNOWN"}, tok.Kind == sqltok.QuotedIdent, true
 		}
 		break // first non-WS token is not an identifier
 	}
-	return ColInfo{}, false
+	return ColInfo{}, false, false
 }
 
 // nonColumnAddKw are the words that begin a non-column ALTER TABLE … ADD clause
@@ -408,8 +411,13 @@ func parseAlterAddColumns(sig []sqltok.Token, raw string, ic bool) (tablePath st
 	// quotes, comments and nested parens — then strip each item's optional
 	// COLUMN / IF NOT EXISTS prefix and drop non-column ADD clauses.
 	for _, def := range splitColDefs(raw[sig[pos].Start:]) {
-		col, cok := parseFirstIdentAsCol(stripAddColItemPrefix(def), ic)
-		if !cok || nonColumnAddKw[strings.ToUpper(col.Name)] {
+		col, quoted, cok := parseFirstIdentAsCol(stripAddColItemPrefix(def), ic)
+		if !cok {
+			continue
+		}
+		// A quoted name can never be interpreted as the CONSTRAINT/PRIMARY/…
+		// clause keyword, so only filter bare identifiers (issue #715 edge case).
+		if !quoted && nonColumnAddKw[strings.ToUpper(col.Name)] {
 			continue
 		}
 		cols = append(cols, col)

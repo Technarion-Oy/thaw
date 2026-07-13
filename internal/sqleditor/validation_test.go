@@ -83,6 +83,10 @@ func TestValidateBareColumnRefs_Valid(t *testing.T) {
 		// Multi-column ADD with the COLUMN keyword repeated per item (issue #715):
 		// every item's real name must be cached, not just the first.
 		"CREATE TABLE loc_t4 (a INT);\nALTER TABLE loc_t4 ADD COLUMN b INT, COLUMN c INT;\nSELECT b, c FROM loc_t4;",
+		// Issue #715 edge case: a quoted column whose name collides with a
+		// constraint keyword ("check") must still be cached, not filtered by
+		// nonColumnAddKw — a quoted name can never be the ADD clause keyword.
+		"CREATE TABLE loc_t5 (a INT);\nALTER TABLE loc_t5 ADD COLUMN \"check\" INT;\nINSERT INTO loc_t5 (a, \"check\") VALUES (1, 2);",
 	}
 
 	req := ValidateBareColsRequest{
