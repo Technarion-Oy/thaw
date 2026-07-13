@@ -163,9 +163,14 @@ Cmd/Ctrl+V/C/X handler in `App.tsx` (which skips the code buffer via `monaco.edi
 
 - **Never register completion/hover providers inside render or `handleMount`** — use module-level
   disposable refs; re-registration on remount accumulates duplicates and leaks.
-- **`runDiagnostics` must be race-safe and exception-safe**: capture `model.getVersionId()` before
-  every `await`; return early (inside `try/catch/finally`) if the version advanced. The `finally`
-  block always calls `setModelMarkers` so stale markers are never left stuck.
+- **`runDiagnostics` must be race-safe and exception-safe**: capture `model.getVersionId()` **and** a
+  monotonic run token (`myRun = ++diagRunRef.current`) at the start; after every `await` (and in
+  `finally`) bail if either advanced. versionId only detects **text** edits — the run token is what
+  supersedes an in-flight run triggered *without* a text change (session switch, `thaw:refresh-diagnostics`,
+  mid-run `ListSchemas`/`ListObjects`/`getColInfos` refetch callbacks). Without it, two runs sharing one
+  versionId both reach `finally`'s `setModelMarkers` and the last to *finish* wins — re-applying stale
+  markers (#718). The `finally` block always calls `setModelMarkers` (when current) so stale markers are
+  never left stuck.
 - **Backend markers use UTF-8 byte columns; Monaco wants UTF-16** — every diagnostics validator
   emits 1-based byte columns (`sqltok.Token.Col`). `toUtf16Markers` (module-level in `SqlEditor.tsx`,
   via `byteColToUtf16Col`) converts each marker's start/end column against its own line text at the
