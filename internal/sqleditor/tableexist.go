@@ -111,6 +111,17 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 	scriptHasActiveDB := false
 	scriptHasActiveSchema := false
 
+	// schemaDataMissing reports a qualified <db>.<schema> reference whose DB is
+	// known/valid but whose schema list hasn't been fetched (SHOW SCHEMAS failed
+	// or never ran — shared/unexpanded DBs). We can validate neither the schema
+	// nor the table under it, so the caller must not flag it (#709). A genuinely
+	// unknown DB returns false here and still falls through to resolveErrorToken.
+	schemaDataMissing := func(db, schema string) bool {
+		return db != "" && schema != "" &&
+			dbExists(db, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) &&
+			!hasSchemaDataForDB(db, req.KnownSchemas, scriptEverCreatedSchemasByDB, req.ResolvedRefs, checkEq)
+	}
+
 	// Schema-scoped objects beyond tables/views (stages, streams, tasks, pipes,
 	// file formats, table-likes, policies, …) — resolved against the KnownObjects
 	// catalog rather than ResolvedRefs. In-script CREATE/DROP effects are tracked
@@ -244,18 +255,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 				} else {
 					schemaNorm := parts[1]
 					schemaPath := dbNorm + "." + schemaNorm
-					hasSchemaDataForDB :=
-						len(schemasForDB(req.KnownSchemas, dbNorm, checkEq)) > 0 ||
-							isIn(scriptEverCreatedSchemasByDB, dbNorm)
-					if !hasSchemaDataForDB {
-						for _, ref := range req.ResolvedRefs {
-							if checkEq(ref.DB, dbNorm) {
-								hasSchemaDataForDB = true
-								break
-							}
-						}
-					}
-					if hasSchemaDataForDB &&
+					if hasSchemaDataForDB(dbNorm, req.KnownSchemas, scriptEverCreatedSchemasByDB, req.ResolvedRefs, checkEq) &&
 						!schemaExistsForDB(dbNorm, schemaNorm, schemaPath, scriptCreatedDbsAndSchemas, req.KnownSchemas, req.ResolvedRefs, checkEq) {
 						for _, t := range findTokensLocally(raw, []string{schemaNorm}, r.StartLine, baseCol, ic) {
 							markers = append(markers, diagMarkerAt(t,
@@ -321,7 +321,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 					targetSch = parts[0]
 				}
 				if targetDB != "" {
-					if !dbExists(targetDB, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
+					if len(req.KnownDatabases) > 0 && !dbExists(targetDB, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
 						searchToken := targetDB
 						if len(rawParts) > 0 {
 							searchToken = normIdent(rawParts[0], ic)
@@ -330,7 +330,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 							markers = append(markers, diagMarkerAt(t,
 								"Database '"+t.name+"' does not exist or is not authorized.", 8))
 						}
-					} else {
+					} else if hasSchemaDataForDB(targetDB, req.KnownSchemas, scriptEverCreatedSchemasByDB, req.ResolvedRefs, checkEq) {
 						schPath := targetDB + "." + targetSch
 						if !schemaExistsForDB(targetDB, targetSch, schPath, scriptCreatedDbsAndSchemas, req.KnownSchemas, req.ResolvedRefs, checkEq) {
 							for _, t := range findTokensLocally(raw, []string{targetSch}, r.StartLine, baseCol, ic) {
@@ -418,10 +418,12 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 				path := strings.Join(parts, ".")
 				if !isIn(scriptCreatedTables, ftTable) && !isIn(scriptCreatedTables, path) {
 					isLive := anyRefMatch(req.ResolvedRefs, ftTable, ftDB, ftSchema, checkEq)
-					if !isLive {
-						if ftDB != "" && len(req.KnownDatabases) == 0 {
-							continue
-						}
+					// Suppress the marker (but NOT the rest of the statement — the
+					// SWAP WITH sibling check and later per-statement validators must
+					// still run) when the catalog is empty or the DB's schema list
+					// hasn't been fetched (#709).
+					emptyCatalog := ftDB != "" && len(req.KnownDatabases) == 0
+					if !isLive && !emptyCatalog && !schemaDataMissing(ftDB, ftSchema) {
 						badToken, msgFn := resolveErrorToken(ftTable, ftDB, ftSchema,
 							scriptCreatedDbsAndSchemas, req.KnownDatabases, req.KnownSchemas, req.ResolvedRefs, checkEq)
 						for _, t := range findTokensLocally(raw, []string{badToken}, r.StartLine, baseCol, ic) {
@@ -446,10 +448,10 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 				tgtPathStr := strings.Join(tgtParts, ".")
 				if !isIn(scriptCreatedTables, tgtTable) && !isIn(scriptCreatedTables, tgtPathStr) {
 					isLive := anyRefMatch(req.ResolvedRefs, tgtTable, tgtDB, tgtSchema, checkEq)
-					if !isLive {
-						if tgtDB != "" && len(req.KnownDatabases) == 0 {
-							continue
-						}
+					// Suppress only this marker, not the later per-statement
+					// validators (#709) — see the ALTER target block above.
+					emptyCatalog := tgtDB != "" && len(req.KnownDatabases) == 0
+					if !isLive && !emptyCatalog && !schemaDataMissing(tgtDB, tgtSchema) {
 						badToken, msgFn := resolveErrorToken(tgtTable, tgtDB, tgtSchema,
 							scriptCreatedDbsAndSchemas, req.KnownDatabases, req.KnownSchemas, req.ResolvedRefs, checkEq)
 						for _, t := range findTokensLocally(raw, []string{badToken}, r.StartLine, baseCol, ic) {
@@ -480,7 +482,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 					markers = append(markers, diagMarkerAt(t,
 						"Database '"+t.name+"' does not exist or is not authorized.", 8))
 				}
-			} else {
+			} else if hasSchemaDataForDB(dbNorm, req.KnownSchemas, scriptEverCreatedSchemasByDB, req.ResolvedRefs, checkEq) {
 				schPath := dbNorm + "." + schNorm
 				if !schemaExistsForDB(dbNorm, schNorm, schPath, scriptCreatedDbsAndSchemas, req.KnownSchemas, req.ResolvedRefs, checkEq) {
 					for _, t := range findTokensLocally(raw, []string{schNorm}, r.StartLine, baseCol, ic) {
@@ -513,7 +515,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 					markers = append(markers, diagMarkerAt(t,
 						"Database '"+t.name+"' does not exist or is not authorized.", 8))
 				}
-			} else {
+			} else if hasSchemaDataForDB(dbNorm, req.KnownSchemas, scriptEverCreatedSchemasByDB, req.ResolvedRefs, checkEq) {
 				schPath := dbNorm + "." + schNorm
 				if !schemaExistsForDB(dbNorm, schNorm, schPath, scriptCreatedDbsAndSchemas, req.KnownSchemas, req.ResolvedRefs, checkEq) {
 					for _, t := range findTokensLocally(raw, []string{schNorm}, r.StartLine, baseCol, ic) {
@@ -675,10 +677,17 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			if (upperCompare == "TABLE" || upperCompare == "VALUES" || joinStopKW[upperCompare]) && ft.db == "" && ft.schema == "" {
 				continue
 			}
-			// Skip SNOWFLAKE.CORTEX.* — built-in Cortex AI function namespace,
-			// not a real database/schema/table path.
+			// Skip built-in schemas whose objects we never fetch and so cannot
+			// existence-check: SNOWFLAKE.CORTEX (AI function namespace), plus the
+			// always-present INFORMATION_SCHEMA / ACCOUNT_USAGE views (#709).
+			// The DB itself is still validated below — suppress only when we can't
+			// prove the DB missing (no catalog data or the DB is known), so a bogus
+			// DB like BOGUS.INFORMATION_SCHEMA.T still falls through and is flagged.
 			if ft.db != "" && ft.schema != "" &&
-				strings.EqualFold(ft.db, "SNOWFLAKE") && strings.EqualFold(ft.schema, "CORTEX") {
+				(isAlwaysPresentSchema(ft.db, ft.schema) ||
+					(strings.EqualFold(ft.db, "SNOWFLAKE") && strings.EqualFold(ft.schema, "CORTEX"))) &&
+				(len(req.KnownDatabases) == 0 ||
+					dbExists(ft.db, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq)) {
 				continue
 			}
 			if _, isCTE := cteNames[compareTable]; isCTE {
@@ -698,6 +707,10 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			// otherwise we'd produce false alarms when no session context
 			// is set (empty KnownDatabases).
 			if ft.db != "" && len(req.KnownDatabases) == 0 {
+				continue
+			}
+
+			if schemaDataMissing(ft.db, ft.schema) {
 				continue
 			}
 
@@ -861,6 +874,9 @@ func schemaExistsForDB(dbNorm, schemaNorm, schemaPath string, created map[string
 	if isIn(created, schemaNorm) || isIn(created, schemaPath) {
 		return true
 	}
+	if isAlwaysPresentSchema(dbNorm, schemaNorm) {
+		return true
+	}
 	dbSchemas := schemasForDB(knownSchemas, dbNorm, eq)
 	if len(dbSchemas) > 0 {
 		for _, s := range dbSchemas {
@@ -876,6 +892,32 @@ func schemaExistsForDB(dbNorm, schemaNorm, schemaPath string, created map[string
 		}
 	}
 	return false
+}
+
+// isAlwaysPresentSchema reports schemas that exist implicitly and may be absent
+// from SHOW SCHEMAS output, so must never be flagged as missing (#709):
+// INFORMATION_SCHEMA in every database, and the SNOWFLAKE shared database's
+// usage schemas (ACCOUNT_USAGE / ORGANIZATION_USAGE / READER_ACCOUNT_USAGE).
+func isAlwaysPresentSchema(dbNorm, schemaNorm string) bool {
+	if strings.EqualFold(schemaNorm, "INFORMATION_SCHEMA") {
+		return true
+	}
+	return strings.EqualFold(dbNorm, "SNOWFLAKE") &&
+		(strings.EqualFold(schemaNorm, "ACCOUNT_USAGE") ||
+			strings.EqualFold(schemaNorm, "ORGANIZATION_USAGE") ||
+			strings.EqualFold(schemaNorm, "READER_ACCOUNT_USAGE"))
+}
+
+// hasSchemaDataForDB reports whether we have any catalog data about the schemas
+// of dbNorm. When false, SHOW SCHEMAS failed or was never fetched (shared DBs
+// like SNOWFLAKE, unexpanded/disconnected catalogs), so a schema/table under it
+// cannot be proven missing and must not be flagged (#709). "Have data" = known
+// schemas for the DB, an in-script CREATE SCHEMA <db>.<sch>, or a resolved ref
+// living in the DB.
+func hasSchemaDataForDB(dbNorm string, knownSchemas []SchemaEntry, everCreatedByDB map[string]struct{}, refs []ResolvedRef, eq func(string, string) bool) bool {
+	return len(schemasForDB(knownSchemas, dbNorm, eq)) > 0 ||
+		isIn(everCreatedByDB, dbNorm) ||
+		anyRefMatchDB(refs, dbNorm, eq)
 }
 
 func schemasForDB(schemas []SchemaEntry, db string, eq func(string, string) bool) []SchemaEntry {
