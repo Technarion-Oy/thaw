@@ -742,6 +742,30 @@ func TestValidateSemantics(t *testing.T) {
 			want: nil,
 		},
 		{
+			// Issue #714: paren-less SELECT * EXCLUDE <col> must not flag EXCLUDE.
+			name: "Star exclude",
+			sql:  "SELECT * EXCLUDE NAME FROM TABLE1 T1",
+			want: nil,
+		},
+		{
+			// #714 follow-up: a comment between `*` and EXCLUDE must not
+			// reintroduce the false positive. Tracking the previous significant
+			// rune skips comments, so EXCLUDE is still recognized contextually.
+			name: "Star exclude with comment between",
+			sql:  "SELECT * /* cols */ EXCLUDE NAME FROM TABLE1 T1",
+			want: nil,
+		},
+		{
+			// #714 follow-up: a comment ending in `*` before a genuine bare
+			// column named EXCLUDE must NOT suppress the diagnostic — the `*`
+			// lives inside a comment, so EXCLUDE is a real (missing) column here.
+			name: "Comment ending in star before bare EXCLUDE",
+			sql:  "SELECT\n  -- computed by *\n  EXCLUDE\nFROM TABLE1 T1",
+			want: []DiagMarker{
+				{StartLineNumber: 3, StartColumn: 3, EndLineNumber: 3, EndColumn: 10, Message: "Column 'EXCLUDE' not found in any of the tables in scope.", Severity: 4},
+			},
+		},
+		{
 			name: "Invalid column",
 			sql:  "SELECT T1.MISSING FROM TABLE1 T1",
 			want: []DiagMarker{
@@ -896,6 +920,9 @@ func TestApplyCasing(t *testing.T) {
 		{name: "empty string", sql: "", keywordCase: "UPPER", identifierCase: "Preserve", functionCase: "UPPER", want: ""},
 		{name: "function space before paren stripped", sql: "SELECT COUNT (id) FROM t", keywordCase: "UPPER", identifierCase: "Preserve", functionCase: "UPPER", want: "SELECT COUNT(id) FROM t"},
 		{name: "keyword OVER keeps space before paren", sql: "SELECT id, ROW_NUMBER () OVER (ORDER BY id) FROM t", keywordCase: "UPPER", identifierCase: "Preserve", functionCase: "UPPER", want: "SELECT id, ROW_NUMBER() OVER (ORDER BY id) FROM t"},
+		// #714 follow-up: EXCLUDE is NOT a global keyword, so a real column/alias
+		// named EXCLUDE must be cased with identifierCase, not keywordCase.
+		{name: "identifier named EXCLUDE not keyword-cased", sql: "SELECT EXCLUDE FROM t", keywordCase: "UPPER", identifierCase: "lower", functionCase: "UPPER", want: "SELECT exclude FROM t"},
 	}
 
 	for _, tt := range tests {

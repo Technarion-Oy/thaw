@@ -2214,6 +2214,16 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 	i := 0
 	stmtIdx := 0
 
+	// prevSigRune is the last significant rune consumed — the last rune that is
+	// neither whitespace nor part of a comment or string literal. It lets us
+	// answer "is this identifier immediately preceded by `*`?" without a raw
+	// backward scan, which would incorrectly see comment characters (e.g. the
+	// `*` closing a `/* … */` block, or a `*` inside a line comment). The
+	// forward walk below already skips comments/strings, so tracking the last
+	// significant rune here mirrors the token-based lookback used by
+	// scanSelectClauseForUnknownCols in barecolrefs.go.
+	var prevSigRune rune
+
 	for i < n {
 		// Advance to the current statement context
 		for stmtIdx < len(stmtRanges) && i >= stmtRanges[stmtIdx].EndOffset {
@@ -2281,6 +2291,7 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 					col++
 				}
 			}
+			prevSigRune = '\''
 			continue
 		}
 
@@ -2290,12 +2301,16 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 			if tag != "" {
 				i += len([]rune(tag))
 				col += len([]rune(tag))
+				prevSigRune = '$'
 				continue
 			}
 		}
 
 		// Identifier (bare or quoted)
 		if ch == '"' || isAlpha(ch) {
+			// Capture whether this identifier directly follows a `*` before we
+			// consume it (used for the paren-less `SELECT * EXCLUDE col` case).
+			prevIsStar := prevSigRune == '*'
 			word1Start := i
 			word1Line := line
 			word1Col := col
@@ -2411,8 +2426,13 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 				// Bare identifier without dot. Validate against ALL tables in scope.
 				if stmtIdx < len(stmtContexts) {
 					ctx := stmtContexts[stmtIdx]
+					// Paren-less `SELECT * EXCLUDE col`: EXCLUDE is not a global
+					// keyword (it is a valid identifier name), so recognize the
+					// clause keyword contextually — only when it follows a `*`
+					// (prevIsStar was captured above from prevSigRune, which
+					// correctly ignores intervening comments and whitespace).
 					// Skip if it's a known SQL keyword.
-					if !sqltok.IsKeyword(word1Norm) {
+					if !sqltok.IsKeyword(word1Norm) && !isStarExcludeCol(word1Norm, prevIsStar) {
 						// Heuristic: skip if followed by '(' (likely a function call).
 						isFunction := false
 						k := i
@@ -2473,9 +2493,15 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 					}
 				}
 			}
+			// The last consumed rune is an identifier char (or closing quote),
+			// never `*`, so record it as the previous significant rune.
+			prevSigRune = runes[i-1]
 			continue
 		}
 
+		if ch != ' ' && ch != '\t' && ch != '\r' {
+			prevSigRune = ch
+		}
 		i++
 		col++
 	}

@@ -18,6 +18,29 @@ import (
 
 // ── Shared diagnostic helpers ─────────────────────────────────────────────────
 
+// isStarExcludeCol reports whether an uppercased identifier is the *-relative
+// EXCLUDE column-transform clause keyword — the EXCLUDE in `SELECT * EXCLUDE col`
+// (paren-less) — given whether the token immediately before it is a `*`.
+//
+// EXCLUDE is deliberately kept OUT of the global sqltok keyword set: unlike a
+// true keyword it is a valid unquoted column/alias/table name in Snowflake, and
+// a global entry would make IsKeyword reclassify every such identifier (e.g.
+// ApplyCasing would then key it off keywordCase instead of identifierCase). The
+// column-ref validators recognize it here contextually instead. The
+// parenthesized `EXCLUDE (col)` form needs no special case: it is already
+// skipped by the "identifier followed by ( ⇒ function call" heuristic.
+//
+// Known limitation: this checks only whether the preceding token is a literal
+// `*`, not whether that `*` is a SELECT wildcard vs. the multiplication
+// operator. So `SELECT price * EXCLUDE FROM orders` (multiply by a column
+// literally named EXCLUDE) would suppress a "column not found" diagnostic for
+// that column. This is an accepted trade-off — a column named EXCLUDE is
+// unlikely, and it matches the file's existing heuristic style (e.g. the
+// "identifier followed by ( ⇒ function call" heuristic has similar blind spots).
+func isStarExcludeCol(upper string, prevIsStar bool) bool {
+	return prevIsStar && upper == "EXCLUDE"
+}
+
 // stripCommentsSQL removes SQL single-line (--) and block (/* */) comments.
 // Line comments are removed entirely; block comments are replaced with a
 // single space (matching the legacy regex behavior).
