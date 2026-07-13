@@ -819,7 +819,7 @@ func ValidateSyntax(sql string) []DiagMarker {
 			Message: msg, Severity: 8,
 		})
 	}
-	validateSyntaxScope(sql, 1, 1, false, add)
+	validateSyntaxScope(sql, 1, 1, false, add, nil)
 	return markers
 }
 
@@ -834,7 +834,11 @@ var missingExprKeywords = map[string]bool{
 // of a dollar-quoted block when inScript is true). baseLine/baseCol give the
 // absolute position of this scope's first character so emitted markers use
 // absolute coordinates.
-func validateSyntaxScope(src string, baseLine, baseCol int, inScript bool, add func(string, int, int, int, int)) {
+// seedVars, when non-nil, pre-populates the scope's declaredVars — used to
+// carry a CREATE PROCEDURE/FUNCTION argument list into its $$ scripting body,
+// which would otherwise start with no declarations and flag every argument
+// reference as undeclared (issue #705).
+func validateSyntaxScope(src string, baseLine, baseCol int, inScript bool, add func(string, int, int, int, int), seedVars map[string]bool) {
 	toks := sqltok.Tokenize(src)
 
 	// abs converts an intra-scope (line,col) to absolute coordinates. Only the
@@ -934,6 +938,9 @@ func validateSyntaxScope(src string, baseLine, baseCol int, inScript bool, add f
 		parenStack = parenStack[:0]
 	}
 	declaredVars := map[string]bool{}
+	for v := range seedVars {
+		declaredVars[v] = true
+	}
 	inDeclareBlock := false
 	atStart := true
 
@@ -1001,7 +1008,7 @@ func validateSyntaxScope(src string, baseLine, baseCol int, inScript bool, add f
 			}
 			if kw := getFirstSQLToken(inner); kw == "BEGIN" || kw == "DECLARE" {
 				sl, sc := absT(t)
-				validateSyntaxScope(inner, sl, sc+len(tag), true, add)
+				validateSyntaxScope(inner, sl, sc+len(tag), true, add, procFuncArgNames(toks, src, i))
 				atStart = true
 			} else {
 				// Opaque string constant — like StringLit, it doesn't reset start.
@@ -1093,6 +1100,70 @@ func validateSyntaxScope(src string, baseLine, baseCol int, inScript bool, add f
 	flushOpenParens()
 }
 
+// procFuncArgNames extracts the argument names of the CREATE PROCEDURE/FUNCTION
+// signature whose $$ body is toks[dq], so those args seed the body's declared
+// variables (issue #705). It walks back to the current statement start (the
+// prior ';'), finds the PROCEDURE/FUNCTION keyword, then collects the first
+// bare word of each comma-separated segment inside the following (...) arg
+// list. Returns nil when the statement isn't a proc/func definition.
+func procFuncArgNames(toks []sqltok.Token, src string, dq int) map[string]bool {
+	start := 0
+	for j := dq - 1; j >= 0; j-- {
+		if toks[j].Kind == sqltok.Semicolon {
+			start = j + 1
+			break
+		}
+	}
+	kw := -1
+	for j := start; j < dq; j++ {
+		if toks[j].Kind == sqltok.Keyword || toks[j].Kind == sqltok.Identifier {
+			switch strings.ToUpper(toks[j].Text(src)) {
+			case "PROCEDURE", "FUNCTION":
+				kw = j
+			}
+		}
+		if kw >= 0 {
+			break
+		}
+	}
+	if kw < 0 {
+		return nil
+	}
+	lp := -1
+	for j := kw + 1; j < dq; j++ {
+		if toks[j].Kind == sqltok.LParen {
+			lp = j
+			break
+		}
+	}
+	if lp < 0 {
+		return nil
+	}
+	vars := map[string]bool{}
+	depth, expectName := 0, true
+	for j := lp; j < dq; j++ {
+		switch toks[j].Kind {
+		case sqltok.LParen:
+			depth++
+		case sqltok.RParen:
+			depth--
+			if depth == 0 {
+				return vars
+			}
+		case sqltok.Comma:
+			if depth == 1 {
+				expectName = true
+			}
+		case sqltok.Keyword, sqltok.Identifier:
+			if depth == 1 && expectName {
+				vars[strings.ToUpper(toks[j].Text(src))] = true
+				expectName = false
+			}
+		}
+	}
+	return vars
+}
+
 // validateScriptWord handles a keyword/identifier token at a Snowflake Scripting
 // statement start (toks[i]) and returns the index to resume scanning from.
 // declaredVars, inDeclareBlock, and atStart are updated in place.
@@ -1138,6 +1209,11 @@ func validateScriptWord(
 				if k < len(toks) && isBareWord(toks[k]) {
 					curTok := toks[k]
 					curName := strings.ToUpper(curTok.Text(src))
+					// FOR i IN REVERSE <lo> TO <hi> — REVERSE is a range modifier,
+					// not a cursor; skip it (issue #705).
+					if curName == "REVERSE" {
+						return k + 1
+					}
 					if !scriptStmtKeywords[curName] && !declaredVars[curName] {
 						l, c := absT(curTok)
 						add("Variable '"+curTok.Text(src)+"' is not declared", l, c, l, c+(curTok.End-curTok.Start))
@@ -1147,9 +1223,15 @@ func validateScriptWord(
 			}
 			return k
 		}
-		// RETURN <var> — flag an undeclared, non-keyword identifier.
+		// RETURN <var> — flag an undeclared, non-keyword identifier. The scope
+		// checker only validates variables, so the sole exemption is an
+		// identifier immediately followed by '(': that's a function/procedure
+		// call (builtin or not), not a variable reference. A bare identifier
+		// matching a builtin name (e.g. `RETURN count;`) is still a variable
+		// reference and must be flagged if undeclared (issue #705).
 		varName := strings.ToUpper(varTok.Text(src))
-		if !scriptStmtKeywords[varName] && !declaredVars[varName] {
+		isCall := skipWS(k+1) < len(toks) && toks[skipWS(k+1)].Kind == sqltok.LParen
+		if !isCall && !scriptStmtKeywords[varName] && !declaredVars[varName] {
 			l, c := absT(varTok)
 			add("Variable '"+varTok.Text(src)+"' is not declared", l, c, l, c+(varTok.End-varTok.Start))
 		}
