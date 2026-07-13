@@ -29,6 +29,26 @@ export const normId = (s: string): string =>
 export const colCacheKey = (db: string, schema: string, table: string) =>
   `${db.toUpperCase()}\0${schema.toUpperCase()}\0${table.toUpperCase()}`;
 
+// ── byteColToUtf16Col ──────────────────────────────────────────────────────────
+// Backend diagnostics validators emit 1-based UTF-8 *byte* columns (sqltok.Token.Col),
+// but Monaco columns are 1-based UTF-16 code units. Any non-ASCII char earlier on a
+// line shifts every later marker (emoji shift by 2) and corrupts the "Qualify as …"
+// quick fix. Convert byte → UTF-16 against the model's own line text. See issue #702.
+// A byte column past the line length clamps to end+1, matching Monaco's space.
+export function byteColToUtf16Col(lineText: string, byteCol: number): number {
+  if (byteCol <= 1) return 1;
+  const targetBytes = byteCol - 1;
+  let bytes = 0;
+  let utf16 = 0;
+  for (const ch of lineText) {
+    if (bytes >= targetBytes) break;
+    const cp = ch.codePointAt(0)!;
+    bytes += cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
+    utf16 += ch.length; // 1 for BMP, 2 for astral (surrogate pair)
+  }
+  return utf16 + 1;
+}
+
 // ── identifierRangeAt ─────────────────────────────────────────────────────────
 // Column span (1-based Monaco columns) of the dotted identifier at a 0-based char
 // index, or null if that index isn't on an identifier. A double-quoted segment

@@ -39,7 +39,7 @@ import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeS
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { FUNCTION_CATEGORIES } from "./snowflakeSql";
 import { getOrCreateMenuId } from "./monacoMenu";
-import { UC, quoteIfNecessary, colCacheKey, normId, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt, starMenuEligible } from "./sqlEditorUtils";
+import { UC, quoteIfNecessary, colCacheKey, normId, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt, starMenuEligible, byteColToUtf16Col } from "./sqlEditorUtils";
 import ExplainModal from "../results/ExplainModal";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 import { kindSupportsDdl } from "../../utils/objectDdl";
@@ -80,6 +80,20 @@ export interface ResolvedRef {
 // so the markers are always consumed. Cleanup on tab close (requestClose in
 // QueryPage) prevents leaks for tabs closed before their editor mounts.
 export const pendingMcpMarkers = new Map<string, DiagMarker[]>();
+
+// Backend validators emit UTF-8 byte columns; Monaco wants UTF-16. Convert every
+// marker's start/end column against its own line text right before handing them to
+// setModelMarkers — the single choke point that fixes shifted squiggles and the
+// text-corrupting "Qualify as …" quick fix on lines with non-ASCII chars. Issue #702.
+function toUtf16Markers(markers: DiagMarker[], model: monacoLib.editor.ITextModel): DiagMarker[] {
+  const lineCount = model.getLineCount();
+  const lineAt = (n: number) => (n >= 1 && n <= lineCount ? model.getLineContent(n) : "");
+  return markers.map((m) => ({
+    ...m,
+    startColumn: byteColToUtf16Col(lineAt(m.startLineNumber), m.startColumn),
+    endColumn: byteColToUtf16Col(lineAt(m.endLineNumber), m.endColumn),
+  }));
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1138,7 +1152,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         console.warn("[thaw] SQL diagnostics aborted:", err);
       } finally {
         if (model.getVersionId() === diagVersion) {
-          monaco.editor.setModelMarkers(model, "thaw-sql", diagMarkers);
+          monaco.editor.setModelMarkers(model, "thaw-sql", toUtf16Markers(diagMarkers, model));
         }
       }
     };
@@ -1151,7 +1165,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const m = editor.getModel();
         if (m) {
           pendingMcpMarkers.delete(curTabId);
-          monaco.editor.setModelMarkers(m, "thaw-sql", pending);
+          monaco.editor.setModelMarkers(m, "thaw-sql", toUtf16Markers(pending, m));
         }
       }
       if (diagTimerRef.current) clearTimeout(diagTimerRef.current);
