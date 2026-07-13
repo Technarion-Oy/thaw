@@ -881,6 +881,9 @@ func TestApplyCasing(t *testing.T) {
 		{name: "empty string", sql: "", keywordCase: "UPPER", identifierCase: "Preserve", functionCase: "UPPER", want: ""},
 		{name: "function space before paren stripped", sql: "SELECT COUNT (id) FROM t", keywordCase: "UPPER", identifierCase: "Preserve", functionCase: "UPPER", want: "SELECT COUNT(id) FROM t"},
 		{name: "keyword OVER keeps space before paren", sql: "SELECT id, ROW_NUMBER () OVER (ORDER BY id) FROM t", keywordCase: "UPPER", identifierCase: "Preserve", functionCase: "UPPER", want: "SELECT id, ROW_NUMBER() OVER (ORDER BY id) FROM t"},
+		// #714 follow-up: EXCLUDE is NOT a global keyword, so a real column/alias
+		// named EXCLUDE must be cased with identifierCase, not keywordCase.
+		{name: "identifier named EXCLUDE not keyword-cased", sql: "SELECT EXCLUDE FROM t", keywordCase: "UPPER", identifierCase: "lower", functionCase: "UPPER", want: "SELECT exclude FROM t"},
 	}
 
 	for _, tt := range tests {

@@ -2361,8 +2361,20 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 				// Bare identifier without dot. Validate against ALL tables in scope.
 				if stmtIdx < len(stmtContexts) {
 					ctx := stmtContexts[stmtIdx]
+					// Paren-less `SELECT * EXCLUDE col`: EXCLUDE is not a global
+					// keyword (it is a valid identifier name), so recognize the
+					// clause keyword contextually — only when it follows a `*`.
+					prevIsStar := false
+					for p := word1Start - 1; p >= 0; p-- {
+						if c := runes[p]; c == ' ' || c == '\t' || c == '\r' || c == '\n' {
+							continue
+						} else {
+							prevIsStar = c == '*'
+							break
+						}
+					}
 					// Skip if it's a known SQL keyword.
-					if !sqltok.IsKeyword(word1Norm) {
+					if !sqltok.IsKeyword(word1Norm) && !isStarExcludeCol(word1Norm, prevIsStar) {
 						// Heuristic: skip if followed by '(' (likely a function call).
 						isFunction := false
 						k := i

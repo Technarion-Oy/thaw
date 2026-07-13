@@ -623,6 +623,14 @@ func scanSelectClauseForUnknownCols(clause string, metaCols, localCols map[strin
 			continue
 		}
 
+		// Skip the paren-less `SELECT * EXCLUDE col` clause keyword. EXCLUDE is
+		// not a global keyword (it is a valid identifier name), so recognize it
+		// contextually here, only when it directly follows a `*`.
+		if i > 0 && isStarExcludeCol(normUpper,
+			clauseSig[i-1].Kind == sqltok.Operator && clauseSig[i-1].Text(clause) == "*") {
+			continue
+		}
+
 		// Skip date parts used as the first argument of date functions
 		if bcrDateParts[normUpper] {
 			if fn := GetActiveFunctionCall(clause[:tok.Start]); fn != nil {
