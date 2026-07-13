@@ -52,6 +52,14 @@ export default {
         // Binaries are attached by build.yml via softprops/action-gh-release.
         // semantic-release only creates the GitHub Release (notes + tag).
         assets: [],
+        // Don't post "released in vX" comments on referenced issues/PRs.
+        // A commit body referencing a PR number (e.g. #332) makes the success
+        // step query repository.issue(number:), which returns NOT_FOUND for a
+        // PR and crashes the whole release job. failComment/failTitle disabled
+        // so a failed release doesn't open a tracking issue either.
+        successComment: false,
+        failComment: false,
+        failTitle: false,
       },
     ],
   ],
