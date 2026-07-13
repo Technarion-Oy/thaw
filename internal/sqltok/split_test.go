@@ -634,11 +634,11 @@ func TestSplit(t *testing.T) {
 			want:  nil, // whole input is one line comment (CR doesn't end it) → comment-only, dropped
 		},
 
-		// ── backslash is not an escape character in Snowflake strings ────────
+		// ── backslash IS the escape character in Snowflake strings (#701) ────
 		{
-			name:  "backslash before closing quote does not escape it",
+			name:  "backslash-escaped quote does not close the string",
 			input: "SELECT 'a\\';b';",
-			want:  []string{"SELECT 'a\\'", "b';"},
+			want:  []string{"SELECT 'a\\';b'"},
 		},
 		{
 			name:  "backslash inside single-quoted string is just a character",
@@ -905,11 +905,10 @@ $$;`,
 			},
 		},
 		{
-			name:  "backslash is NOT an escape in Snowflake strings",
+			name:  "backslash escapes the quote: whole tail is one string literal (#701)",
 			input: `SELECT '\'; DROP TABLE users; --'`,
 			want: []string{
-				`SELECT '\'`,
-				"DROP TABLE users",
+				`SELECT '\'; DROP TABLE users; --'`,
 			},
 		},
 		{

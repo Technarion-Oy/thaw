@@ -13,8 +13,8 @@ git gutter decorations, the tab bar, editor preferences, and the cross-tab searc
 | File | Purpose |
 |------|---------|
 | `SqlEditor.tsx` | Main editor component. Mounts Monaco, registers all completion/hover/code-action/signature providers (module-level, not in render), runs `runDiagnostics` on content change, handles git gutter decoration, clipboard patching, and the snippet context menu via internal Monaco `MenuRegistry`. Exports `DiagMarker`, `ColInfo`, `ResolvedRef`, `pendingMcpMarkers`. |
-| `sqlEditorUtils.ts` | Pure helpers: `UC`, `quoteIfNecessary`, `colCacheKey` (shared NUL-delimited per-table cache key), `normId` (frontend mirror of the backend `normID` identifier normaliser, for matching captured qualifiers against resolved refs), `FKEntry`, `getFKs` (async, deduped), `getFKsCached`, `setFKCache`, `buildVariableSuggestions`, `getQualifiedIdent`, `getStatementLineRanges`, `identifierRangeAt` (quote-aware column span of the dotted identifier under the cursor, for the cmd/ctrl-hover link underline), `starMenuEligible` (reuses `identifierRangeAt` to gate the "Expand \*" menu — hides it when the `*` is inside a quoted object name). No React. |
-| `sqlEditorUtils.test.ts` | Unit tests for `identifierRangeAt` (bare/quoted/escaped-quote/unterminated-quote spans), `starMenuEligible` (bare/`alias.*` eligible, quoted-object-name and single-quoted-string hidden, apostrophe-in-`"it's"` still eligible), and `normId` (bare→upper, quoted case-preserved/distinct, `""` unescape). |
+| `sqlEditorUtils.ts` | Pure helpers: `UC`, `quoteIfNecessary`, `colCacheKey` (shared NUL-delimited per-table cache key), `normId` (frontend mirror of the backend `normID` identifier normaliser, for matching captured qualifiers against resolved refs), `FKEntry`, `getFKs` (async, deduped), `getFKsCached`, `setFKCache`, `buildVariableSuggestions`, `getQualifiedIdent`, `getStatementLineRanges`, `identifierRangeAt` (quote-aware column span of the dotted identifier under the cursor, for the cmd/ctrl-hover link underline), `starMenuEligible` (reuses `identifierRangeAt` to gate the "Expand \*" menu — hides it when the `*` is inside a quoted object name), `byteColToUtf16Col` (converts a 1-based UTF-8 byte column to a 1-based UTF-16 Monaco column). No React. |
+| `sqlEditorUtils.test.ts` | Unit tests for `identifierRangeAt` (bare/quoted/escaped-quote/unterminated-quote spans), `starMenuEligible` (bare/`alias.*` eligible, quoted-object-name and single-quoted-string hidden, apostrophe-in-`"it's"` still eligible), `normId` (bare→upper, quoted case-preserved/distinct, `""` unescape), and `byteColToUtf16Col` (ASCII pass-through, multi-byte/emoji shift, past-end clamp). |
 | `editorRef.ts` | Singleton ref to the active `IStandaloneCodeEditor`. Exports `setEditorInstance`, `getEditorInstance`, `insertAtCursor`. Kept separate from `SqlEditor.tsx` so Vite Fast Refresh is not broken by mixing component and non-component exports. |
 | `monacoSetup.ts` | One-time Monaco initialisation: Snowflake Monarch language, Python Monarch grammar (inlined to avoid side-effect imports), YAML worker wiring, `thawDarkTheme`/`thawLightTheme` registration. Called via `ensureMonacoSetup()` guard. Imports the **slim** Monaco API (`editor.api.js` + `editor.all.js`), never the `monaco-editor` barrel, to keep the TS/HTML/CSS/JSON language workers (~9 MB) and ~80 basic-language grammars out of the binary — see [gotchas](../../../../docs/concepts/gotchas.md). |
 | `snowflakeSql.ts` | Snowflake Monarch tokenizer (`snowflakeMonarchLanguage`) and custom Monaco theme definitions (`thawDarkTheme`, `thawLightTheme`). The tokenizer's `datatypes` list is sourced from the generated artifact `src/generated/snowflakeDataTypes.ts` (source of truth: `internal/snowflake/datatypes.go`) rather than hand-maintained. Also the single source for the built-in-function catalogue: `BUILTIN_FUNCTION_CATEGORIES`, `CONTEXT_FUNCTIONS`, and the assembled `FUNCTION_CATEGORIES` consumed by the Code Snippets modal and the editor's Built-in Functions submenu. |
@@ -46,6 +46,12 @@ the bundled artifact `src/generated/snowflakeDataTypes.ts`.)
 
 **Stores used:** `queryStore` (SQL content, tab state, selected SQL), `objectStore` (schema cache),
 `sessionStore` (session context), `themeStore` (dark/light), `featureFlagsStore` (flag gating).
+
+Session is **per-tab** on the backend, so `runDiagnostics` and the Expand-`*` command
+read THIS editor's own tab session via `sessionForTab(tabId)` (its `tabContexts[tabId]`,
+falling back to the global/active-tab context) rather than the global `sessionStore.database/schema`.
+Otherwise the split pane (`tabId=splitTabId`) would validate against the active tab's session,
+mis-firing the "No database/schema selected" diagnostics (#717).
 
 **Module-level caches:**
 - `hoverDDLCache` — `Map<key, {ddl, ts}>`, 60 s TTL.
@@ -157,9 +163,20 @@ Cmd/Ctrl+V/C/X handler in `App.tsx` (which skips the code buffer via `monaco.edi
 
 - **Never register completion/hover providers inside render or `handleMount`** — use module-level
   disposable refs; re-registration on remount accumulates duplicates and leaks.
-- **`runDiagnostics` must be race-safe and exception-safe**: capture `model.getVersionId()` before
-  every `await`; return early (inside `try/catch/finally`) if the version advanced. The `finally`
-  block always calls `setModelMarkers` so stale markers are never left stuck.
+- **`runDiagnostics` must be race-safe and exception-safe**: capture `model.getVersionId()` **and** a
+  monotonic run token (`myRun = ++diagRunRef.current`) at the start; after every `await` (and in
+  `finally`) bail if either advanced. versionId only detects **text** edits — the run token is what
+  supersedes an in-flight run triggered *without* a text change (session switch, `thaw:refresh-diagnostics`,
+  mid-run `ListSchemas`/`ListObjects`/`getColInfos` refetch callbacks). Without it, two runs sharing one
+  versionId both reach `finally`'s `setModelMarkers` and the last to *finish* wins — re-applying stale
+  markers (#718). The `finally` block always calls `setModelMarkers` (when current) so stale markers are
+  never left stuck.
+- **Backend markers use UTF-8 byte columns; Monaco wants UTF-16** — every diagnostics validator
+  emits 1-based byte columns (`sqltok.Token.Col`). `toUtf16Markers` (module-level in `SqlEditor.tsx`,
+  via `byteColToUtf16Col`) converts each marker's start/end column against its own line text at the
+  single choke point right before `setModelMarkers` (both the debounced run and the MCP-seeded path).
+  This is the root-cause fix (issue #702): converting here also fixes the "Qualify as …" quick fix,
+  which reads its edit range from the stored marker. Do not re-plumb byte offsets through the Go validators.
 - **`editor.onDidChangeModelContent`** must be used, not `editor.getModel()?.onDidChangeContent` —
   the latter silently skips registration if the model is null at mount time.
 - **Git gutter is skipped** for files exceeding `MAX_DIFF_LINES` (3 000) to avoid O(H×C) DP

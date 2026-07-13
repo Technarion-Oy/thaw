@@ -77,6 +77,30 @@ func TestValidateKindImplied_MissingFlagged(t *testing.T) {
 	}
 }
 
+// A FORMAT_NAME literal containing backslash escapes is now returned as one
+// StringLit by the tokenizer (backslash escapes the next char). unquoteSingle
+// must decode it as the inverse — otherwise the leftover backslash poisons the
+// name and yields a spurious/misspelled "does not exist".
+func TestValidateKindImplied_BackslashEscapes(t *testing.T) {
+	// 'F\F1' decodes to FF1 (\F → F), which exists → silent. The old decoder
+	// left the backslash in, tokenizing FF1 into stray parts and flagging it.
+	if m := kindImpliedMarkers(`CREATE STAGE st FILE_FORMAT = (FORMAT_NAME = 'F\F1');`); len(m) != 0 {
+		t.Errorf(`'F\F1' should decode to existing FF1 (silent), got %+v`, m)
+	}
+	// 'NO\PE' decodes to NOPE (missing); the message must show the decoded name,
+	// not the raw backslash form.
+	m := kindImpliedMarkers(`CREATE STAGE st FILE_FORMAT = (FORMAT_NAME = 'NO\PE');`)
+	found := false
+	for _, mk := range m {
+		if strings.Contains(mk.Message, `File format 'NOPE'`) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf(`'NO\PE' should flag missing 'NOPE', got %+v`, m)
+	}
+}
+
 // A kind we never see in the catalog stays silent (no procedures listed here).
 func TestValidateKindImplied_UnseenKindSilent(t *testing.T) {
 	m := ValidateTablesExist(ValidateTablesExistRequest{
