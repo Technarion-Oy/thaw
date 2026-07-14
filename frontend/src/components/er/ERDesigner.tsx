@@ -641,8 +641,18 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
       const isUndo = key === "z" && !e.shiftKey;
       const isRedo = (key === "z" && e.shiftKey) || key === "y";
       if (!isUndo && !isRedo) return;
+      // Yield to native text-editing undo only for fields that actually have it:
+      // contentEditable, <textarea>, <select>, and text-like <input>s. A non-text
+      // input (e.g. the schema-visibility checkbox, which keeps focus after a
+      // click) has no native undo, so it must not swallow the shortcut.
       const t = e.target as HTMLElement | null;
-      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      if (t) {
+        const tag = t.tagName;
+        const isTextInput =
+          tag === "INPUT" &&
+          /^(text|search|url|email|password|tel|number|)$/i.test((t as HTMLInputElement).type);
+        if (t.isContentEditable || tag === "TEXTAREA" || tag === "SELECT" || isTextInput) return;
+      }
       e.preventDefault();
       if (isRedo) doRedo();
       else doUndo();
