@@ -14,10 +14,10 @@ import { create } from "zustand";
 import { GetLogPrefs, GetLogPrefsLocked } from "../../wailsjs/go/app/App";
 import type { config } from "../../wailsjs/go/models";
 
-// Optimistic defaults: info level, no SQL written to disk, nothing admin-locked
-// until the backend responds.
+// Optimistic defaults: build-default level ("" sentinel), no SQL written to
+// disk, nothing admin-locked until the backend responds.
 const defaultPrefs: config.LogPrefs = {
-  logLevel: "info",
+  logLevel: "",
   includeQuerySQL: false,
   includeInternalQueries: false,
 };

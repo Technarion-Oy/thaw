@@ -235,16 +235,6 @@ func DefaultLogPrefs() LogPrefs {
 	}
 }
 
-// LogPrefsWithDefaults fills a zero-value LogLevel from DefaultLogPrefs so the
-// UI always renders a concrete level. The bool fields default to false, which
-// is already their safe (privacy-preserving) value.
-func LogPrefsWithDefaults(p LogPrefs) LogPrefs {
-	if p.LogLevel == "" {
-		p.LogLevel = DefaultLogPrefs().LogLevel
-	}
-	return p
-}
-
 // ValidLogLevel reports whether name is one of the accepted log levels.
 func ValidLogLevel(name string) bool {
 	switch name {

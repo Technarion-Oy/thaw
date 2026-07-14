@@ -12,18 +12,6 @@ package config
 
 import "testing"
 
-func TestLogPrefsWithDefaults(t *testing.T) {
-	got := LogPrefsWithDefaults(LogPrefs{})
-	if got.LogLevel != "info" {
-		t.Errorf("empty LogLevel should default to info, got %q", got.LogLevel)
-	}
-	// A set level is preserved.
-	got = LogPrefsWithDefaults(LogPrefs{LogLevel: "debug"})
-	if got.LogLevel != "debug" {
-		t.Errorf("set LogLevel should be preserved, got %q", got.LogLevel)
-	}
-}
-
 func TestValidLogLevel(t *testing.T) {
 	for _, ok := range []string{"debug", "info", "warn", "error"} {
 		if !ValidLogLevel(ok) {
@@ -101,5 +89,73 @@ func TestLoadAdminLogPrefs_NoPolicy(t *testing.T) {
 	}
 	if locked != (LogPrefsLocked{}) {
 		t.Errorf("no admin policy should lock nothing, got %+v", locked)
+	}
+}
+
+func TestMergeAdminLogPrefs(t *testing.T) {
+	bptr := func(b bool) *bool { return &b }
+	sptr := func(s string) *string { return &s }
+
+	tests := []struct {
+		name       string
+		user       LogPrefs
+		cfg        adminLogging
+		wantEff    LogPrefs
+		wantLocked LogPrefsLocked
+	}{
+		{
+			name:       "empty policy leaves user untouched",
+			user:       LogPrefs{LogLevel: "warn", IncludeQuerySQL: true},
+			cfg:        adminLogging{},
+			wantEff:    LogPrefs{LogLevel: "warn", IncludeQuerySQL: true},
+			wantLocked: LogPrefsLocked{},
+		},
+		{
+			name:       "only includeQuerySQL locked off (privacy)",
+			user:       LogPrefs{LogLevel: "info", IncludeQuerySQL: true, IncludeInternalQueries: true},
+			cfg:        adminLogging{IncludeQuerySQL: bptr(false)},
+			wantEff:    LogPrefs{LogLevel: "info", IncludeQuerySQL: false, IncludeInternalQueries: true},
+			wantLocked: LogPrefsLocked{IncludeQuerySQL: true},
+		},
+		{
+			name:       "invalid logLevel is ignored (not locked)",
+			user:       LogPrefs{LogLevel: "debug"},
+			cfg:        adminLogging{LogLevel: sptr("verbose")},
+			wantEff:    LogPrefs{LogLevel: "debug"},
+			wantLocked: LogPrefsLocked{},
+		},
+		{
+			name:       "valid logLevel is enforced and locked",
+			user:       LogPrefs{LogLevel: "debug"},
+			cfg:        adminLogging{LogLevel: sptr("error")},
+			wantEff:    LogPrefs{LogLevel: "error"},
+			wantLocked: LogPrefsLocked{LogLevel: true},
+		},
+		{
+			name:       "internal-on implies and locks includeQuerySQL (audit)",
+			user:       LogPrefs{},
+			cfg:        adminLogging{IncludeInternalQueries: bptr(true)},
+			wantEff:    LogPrefs{IncludeQuerySQL: true, IncludeInternalQueries: true},
+			wantLocked: LogPrefsLocked{IncludeQuerySQL: true, IncludeInternalQueries: true},
+		},
+		{
+			name:       "explicit includeQuerySQL=false wins over implied true",
+			user:       LogPrefs{},
+			cfg:        adminLogging{IncludeQuerySQL: bptr(false), IncludeInternalQueries: bptr(true)},
+			wantEff:    LogPrefs{IncludeQuerySQL: false, IncludeInternalQueries: true},
+			wantLocked: LogPrefsLocked{IncludeQuerySQL: true, IncludeInternalQueries: true},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			eff, locked := mergeAdminLogPrefs(tt.user, tt.cfg)
+			if eff != tt.wantEff {
+				t.Errorf("effective = %+v, want %+v", eff, tt.wantEff)
+			}
+			if locked != tt.wantLocked {
+				t.Errorf("locked = %+v, want %+v", locked, tt.wantLocked)
+			}
+		})
 	}
 }

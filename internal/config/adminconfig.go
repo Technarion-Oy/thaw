@@ -48,12 +48,12 @@ import (
 // key both sets the value and locks the corresponding field in the UI. This is
 // how IT can force-disable SQL logging (privacy) or force-enable it (audit).
 //
-// Gotcha for the audit use case: "includeInternalQueries" depends on
-// "includeQuerySQL". Setting "includeInternalQueries": true WITHOUT also
-// setting "includeQuerySQL": true silently normalizes back to false at read
-// time (ValidateLogPrefs enforces the "internal implies SQL" invariant), so
-// the policy is a no-op. To force internal/background query logging on for
-// audit, set BOTH "includeQuerySQL": true and "includeInternalQueries": true.
+// Audit use case: "includeInternalQueries" depends on "includeQuerySQL".
+// Forcing "includeInternalQueries": true automatically implies (and locks)
+// "includeQuerySQL": true, so the audit policy takes effect with a single key.
+// An explicit "includeQuerySQL": false alongside it is honored as-is (a
+// contradictory config the admin opted into) — internal logging then normalizes
+// off, since it has no effect without SQL logging.
 
 // ptrbool is a small helper so JSON null / absent ≠ false.
 type ptrBool = *bool
@@ -295,7 +295,14 @@ func mergeAdminOverrides(user FeatureFlags, cfg adminConfigJSON) (effective Feat
 // Logging policy is read from the JSON file only (there is no MDM/registry hook
 // for it, unlike the boolean feature flags).
 func LoadAdminLogPrefs(user LogPrefs) (effective LogPrefs, locked LogPrefsLocked) {
-	cfg := loadAdminJSON().Logging
+	return mergeAdminLogPrefs(user, loadAdminJSON().Logging)
+}
+
+// mergeAdminLogPrefs applies the "logging" admin category on top of the user's
+// LogPrefs, returning the effective values and a locked mask. Factored out from
+// LoadAdminLogPrefs (which supplies the on-disk JSON) so the merge logic is unit
+// testable without a features.json on disk — mirroring mergeAdminOverrides.
+func mergeAdminLogPrefs(user LogPrefs, cfg adminLogging) (effective LogPrefs, locked LogPrefsLocked) {
 	effective = user
 	if cfg.LogLevel != nil && ValidLogLevel(*cfg.LogLevel) {
 		effective.LogLevel = *cfg.LogLevel
@@ -308,6 +315,16 @@ func LoadAdminLogPrefs(user LogPrefs) (effective LogPrefs, locked LogPrefsLocked
 	if cfg.IncludeInternalQueries != nil {
 		effective.IncludeInternalQueries = *cfg.IncludeInternalQueries
 		locked.IncludeInternalQueries = true
+		// Internal-query logging has no effect without SQL logging. When an
+		// admin forces it on but doesn't explicitly set includeQuerySQL, imply
+		// and lock includeQuerySQL=true so the audit policy actually takes
+		// effect instead of silently normalizing back to off. An explicit
+		// includeQuerySQL (even false) is honored as-is — that contradictory
+		// combination is the admin's own choice.
+		if *cfg.IncludeInternalQueries && cfg.IncludeQuerySQL == nil {
+			effective.IncludeQuerySQL = true
+			locked.IncludeQuerySQL = true
+		}
 	}
 	return effective, locked
 }

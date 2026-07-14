@@ -20,9 +20,14 @@ import (
 )
 
 // GetLogPrefs returns the effective file-logging preferences (persisted user
-// values with IT-admin policy applied), backfilled with defaults for display.
+// values with IT-admin policy applied). An empty LogLevel is returned verbatim,
+// not backfilled to a concrete level: it is the "use the build default"
+// sentinel (debug in dev builds, info in production), and the modal renders it
+// as an explicit "Use build default" choice. Backfilling here would let the
+// synthesized level round-trip back through Save and silently pin the level,
+// defeating the sentinel that ValidateLogPrefs / logger.SetLevel preserve.
 func (a *App) GetLogPrefs() config.LogPrefs {
-	return config.LogPrefsWithDefaults(a.loadEffectiveLogPrefs())
+	return a.loadEffectiveLogPrefs()
 }
 
 // GetLogPrefsLocked returns a mask where true means the field is controlled by

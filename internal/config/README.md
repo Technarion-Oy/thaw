@@ -59,7 +59,6 @@ type LogPrefs struct {
     IncludeInternalQueries bool   // also log internal/background queries (requires IncludeQuerySQL)
 }
 func DefaultLogPrefs() LogPrefs
-func LogPrefsWithDefaults(p LogPrefs) LogPrefs
 func ValidLogLevel(name string) bool
 func ValidateLogPrefs(p LogPrefs) LogPrefs
 func RestoreAdminLockedLogPrefs(user, effective LogPrefs, locked LogPrefsLocked) LogPrefs
@@ -102,4 +101,4 @@ func ValidateSessionConfig(sc SessionConfig) SessionConfig
 - After adding a new `FeatureFlags` field, run `wails generate module` to regenerate `frontend/wailsjs/go/models.ts`, then add a `<FlagRow>` in `FeatureFlagsModal.tsx`.
 - The macOS plist priority order is highest-priority-last (reversed iteration); the managed pref at `/Library/Managed Preferences/` wins over the user pref at `~/Library/Preferences/`.
 - `SessionConfig.MaxIdleConnsPerSession` is clamped to never exceed `MaxOpenConnsPerSession` by `ValidateSessionConfig` (`restore.go:55`).
-- Admin `features.json` `"logging"` gotcha: `"includeInternalQueries": true` requires `"includeQuerySQL": true` to also be set — `ValidateLogPrefs` enforces the "internal implies SQL" invariant, so `includeInternalQueries` alone silently normalizes to `false` (the policy becomes a no-op). Force both on for the audit use case.
+- Admin `features.json` `"logging"`: forcing `"includeInternalQueries": true` automatically implies and locks `"includeQuerySQL": true` (via `mergeAdminLogPrefs`), so the audit policy works from a single key rather than silently no-opping. An explicit `"includeQuerySQL": false` alongside it is honored as-is (a contradictory config), and `ValidateLogPrefs` then normalizes internal logging off since it has no effect without SQL logging.

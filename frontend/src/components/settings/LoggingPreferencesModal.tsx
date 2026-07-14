@@ -32,7 +32,7 @@ interface Props {
 
 export default function LoggingPreferencesModal({ onClose }: Props) {
   const [prefs, setPrefs] = useState<config.LogPrefs>({
-    logLevel: "info",
+    logLevel: "", // "" = use build default; replaced by GetLogPrefs on mount
     includeQuerySQL: false,
     includeInternalQueries: false,
   });
@@ -101,15 +101,18 @@ export default function LoggingPreferencesModal({ onClose }: Props) {
           </Text>
           <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 10 }}>
             Minimum severity written to the log file. Applied immediately, no restart needed.
+            “Use build default” keeps the level chosen at build time (Debug for development
+            builds, Info for releases).
           </div>
           <Select
             value={prefs.logLevel}
             disabled={locked.logLevel}
-            style={{ width: 200 }}
+            style={{ width: 240 }}
             onChange={(v) => setPrefs((p) => ({ ...p, logLevel: v }))}
             options={[
+              { value: "", label: "Use build default" },
               { value: "debug", label: "Debug (most verbose)" },
-              { value: "info", label: "Info (default)" },
+              { value: "info", label: "Info" },
               { value: "warn", label: "Warning" },
               { value: "error", label: "Error (least verbose)" },
             ]}
