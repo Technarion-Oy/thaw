@@ -626,7 +626,7 @@ Thaw writes a structured, rotating log file automatically on every launch.
 | Windows production | `%APPDATA%\thaw\logs\thaw.log` |
 | Linux production | `~/.local/state/thaw/thaw.log` (or `$XDG_STATE_HOME/thaw/thaw.log`) |
 
-Log files rotate at 10 MB, keeping 5 compressed backups for up to 30 days. The Snowflake driver (gosnowflake v2) uses `slog.Default()` for its own log output, so driver messages (connection errors, async polling, etc.) appear in the application log automatically.
+Log files rotate daily (and at 10 MB as a safety valve), retaining compressed backups for 30 days. The Snowflake driver (gosnowflake v2) uses `slog.Default()` for its own log output, so driver messages (connection errors, async polling, etc.) appear in the application log automatically.
 
 ### Telemetry
 
