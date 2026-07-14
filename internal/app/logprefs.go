@@ -111,6 +111,12 @@ func (a *App) currentLogPrefs() config.LogPrefs {
 // queries are only written when IncludeInternalQueries is also on. This is the
 // file-based consumer of the same OnQuery choke point that feeds the in-memory
 // query log, so there is a single source of truth for "what Thaw executed".
+//
+// Note the interaction with LogPrefs.LogLevel: successful queries are recorded
+// at Info and failed ones at Error, so a log level of Warn/Error suppresses
+// the successful-query entries (only failures survive the level filter). The
+// Logging Preferences UI calls this dependency out; keep the two in sync if the
+// levels here change.
 func (a *App) maybeFileLogQuery(src querylog.Source, sql, qid string, err error, dur time.Duration) {
 	prefs := a.currentLogPrefs()
 	if !prefs.IncludeQuerySQL {

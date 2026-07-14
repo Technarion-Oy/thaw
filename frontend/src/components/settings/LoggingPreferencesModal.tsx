@@ -144,7 +144,17 @@ export default function LoggingPreferencesModal({ onClose }: Props) {
           </div>
           <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
             Records the full SQL text of executed statements in <Text code>thaw.log</Text>.
+            Successful queries are written at <b>Info</b> level, so the log level above must be
+            Debug or Info to capture them; failed queries are recorded at any level.
           </div>
+          {prefs.includeQuerySQL &&
+            (prefs.logLevel === "warn" || prefs.logLevel === "error") && (
+              <Text type="warning" style={{ fontSize: 11, display: "block", marginTop: 4 }}>
+                At log level “{prefs.logLevel === "warn" ? "Warning" : "Error"}”, only failed
+                queries are logged. Lower the log level to Info or Debug to also capture
+                successful queries.
+              </Text>
+            )}
           {prefs.includeQuerySQL && (
             <Alert
               type="warning"
