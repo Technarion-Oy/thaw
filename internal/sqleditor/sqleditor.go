@@ -2009,34 +2009,60 @@ func validateScriptExprIdents(sql string) []DiagMarker {
 	return out
 }
 
+// scriptStmtStarters are the keywords after which a new Snowflake Scripting
+// statement begins, so the following significant token sits at a statement start.
+// Used to gate control-flow keyword matching: a bare `IF`/`WHILE`/`UNTIL`/`RETURN`
+// is only a control-flow keyword when it opens a statement, never mid-statement.
+// This is what keeps `CREATE TABLE IF NOT EXISTS` / `DROP TABLE IF EXISTS` guards
+// from being misread as scripting `IF … THEN` conditions.
+var scriptStmtStarters = map[string]bool{
+	"BEGIN": true, "THEN": true, "ELSE": true, "LOOP": true, "DO": true, "REPEAT": true,
+}
+
 // scanScriptExprIdents walks a scripting body's significant tokens, delimits each
 // control-flow expression (IF/ELSEIF/WHILE condition up to THEN/DO, REPEAT-UNTIL
 // condition up to END, and RETURN and ':=' right-hand side up to ';'), and
 // reports undeclared identifiers in it. baseLine/baseCol locate the body's first
 // character for rebasing. `DO`/`ELSEIF` are not tokenizer keywords, so control
-// words are matched via IsIdentLike rather than by kind.
+// words are matched via IsIdentLike rather than by kind. The IF/ELSEIF/WHILE/
+// UNTIL/RETURN keywords are recognized only at a statement-start position (the
+// body start, or just after a depth-0 ';' or a block keyword) so guarded DDL
+// like `CREATE TABLE IF NOT EXISTS …` is not mistaken for a condition.
 func scanScriptExprIdents(inner string, baseLine, baseCol int, vars map[string]bool) []DiagMarker {
 	var out []DiagMarker
 	sig := sqltok.SignificantTokens(inner)
 	word := func(i int) string { return strings.ToUpper(sig[i].Text(inner)) }
-	prevIsEnd := func(i int) bool { return i > 0 && sig[i-1].Kind.IsIdentLike() && word(i-1) == "END" }
+	depth, atStart := 0, true
 	for i := 0; i < len(sig); i++ {
 		t := sig[i]
+		curStart := atStart && depth == 0
+		// A new statement begins after a depth-0 ';' or a block keyword; nested
+		// tokens inside a '(' … ')' are never statement starts.
+		switch t.Kind {
+		case sqltok.LParen:
+			depth++
+		case sqltok.RParen:
+			if depth > 0 {
+				depth--
+			}
+		}
+		if t.Kind == sqltok.Semicolon {
+			atStart = true
+		} else if t.Kind.IsIdentLike() {
+			atStart = scriptStmtStarters[word(i)]
+		} else {
+			atStart = false
+		}
+
 		var lo, hi int
 		switch {
-		case t.Kind.IsIdentLike() && (word(i) == "IF" || word(i) == "ELSEIF"):
-			if prevIsEnd(i) { // `END IF`
-				continue
-			}
+		case curStart && t.Kind.IsIdentLike() && (word(i) == "IF" || word(i) == "ELSEIF"):
 			lo, hi = i+1, scriptStopAt(sig, inner, i+1, "THEN")
-		case t.Kind.IsIdentLike() && word(i) == "WHILE":
-			if prevIsEnd(i) { // `END WHILE`
-				continue
-			}
+		case curStart && t.Kind.IsIdentLike() && word(i) == "WHILE":
 			lo, hi = i+1, scriptStopAt(sig, inner, i+1, "DO")
-		case t.Kind.IsIdentLike() && word(i) == "UNTIL":
+		case curStart && t.Kind.IsIdentLike() && word(i) == "UNTIL":
 			lo, hi = i+1, scriptStopAt(sig, inner, i+1, "END")
-		case t.Kind.IsIdentLike() && word(i) == "RETURN":
+		case curStart && t.Kind.IsIdentLike() && word(i) == "RETURN":
 			lo, hi = i+1, scriptStopSemicolon(sig, i+1)
 		case t.Kind == sqltok.Colon && i+1 < len(sig) && sig[i+1].Kind == sqltok.Operator &&
 			sig[i+1].Text(inner) == "=" && t.End == sig[i+1].Start: // ':=' assignment

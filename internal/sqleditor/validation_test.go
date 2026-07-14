@@ -1272,6 +1272,34 @@ end;
 $$;`,
 			expectedError: "",
 		},
+		{
+			// Regression: `CREATE TABLE IF NOT EXISTS` is guarded DDL, not a
+			// scripting `IF … THEN` condition, so the DDL's column names must not
+			// be flagged as undeclared variables.
+			name: "Guarded CREATE TABLE IF NOT EXISTS is not a condition",
+			sql: `create or replace procedure setup_table()
+returns string
+language sql
+as $$
+begin
+  create table if not exists my_table (id number, name varchar);
+  return 'done';
+end;
+$$;`,
+			expectedError: "",
+		},
+		{
+			// Regression: DROP/CREATE guards with IF [NOT] EXISTS mid-statement.
+			name: "Guarded DROP and CREATE SCHEMA IF EXISTS are not conditions",
+			sql: `execute immediate $$
+begin
+  drop table if exists staging_table;
+  create schema if not exists my_schema;
+  return 1;
+end;
+$$;`,
+			expectedError: "",
+		},
 	}
 
 	for _, tt := range tests {
