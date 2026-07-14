@@ -26,13 +26,11 @@ func (a *App) GetLogPrefs() config.LogPrefs {
 }
 
 // GetLogPrefsLocked returns a mask where true means the field is controlled by
-// an IT-admin logging policy and cannot be changed by the user.
+// an IT-admin logging policy and cannot be changed by the user. The mask
+// depends only on admin policy, not on the user's saved values, so no config
+// read is needed (and there's no fallback to reconcile with loadEffectiveLogPrefs).
 func (a *App) GetLogPrefsLocked() config.LogPrefsLocked {
-	user := config.DefaultLogPrefs()
-	if cfg, err := config.Load(); err == nil {
-		user = cfg.LogPrefs
-	}
-	_, locked := config.LoadAdminLogPrefs(user)
+	_, locked := config.LoadAdminLogPrefs(config.LogPrefs{})
 	return locked
 }
 

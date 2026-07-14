@@ -47,6 +47,13 @@ import (
 // enforces LogPrefs values (a string log level plus two switches). A present
 // key both sets the value and locks the corresponding field in the UI. This is
 // how IT can force-disable SQL logging (privacy) or force-enable it (audit).
+//
+// Gotcha for the audit use case: "includeInternalQueries" depends on
+// "includeQuerySQL". Setting "includeInternalQueries": true WITHOUT also
+// setting "includeQuerySQL": true silently normalizes back to false at read
+// time (ValidateLogPrefs enforces the "internal implies SQL" invariant), so
+// the policy is a no-op. To force internal/background query logging on for
+// audit, set BOTH "includeQuerySQL": true and "includeInternalQueries": true.
 
 // ptrbool is a small helper so JSON null / absent ≠ false.
 type ptrBool = *bool

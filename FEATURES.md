@@ -556,7 +556,7 @@ Ghost-text SQL suggestions appear automatically as you type in the editor. Press
   - **Write executed SQL to the log file** — off by default; when on, the full SQL text of executed statements is written to `thaw.log`. A prominent warning explains that SQL can contain sensitive data (credentials in `COPY INTO`, secrets in `CREATE SECRET`, personal data in `WHERE` clauses).
   - **Also log internal / background queries** — extends SQL logging to object listing, DDL fetching, and session-setup queries; available only when SQL logging is on.
   - A **Reveal Log File** button (also under **Help → Reveal Log File**) opens the OS file manager at the log location.
-  - All three settings are lockable via IT-admin policy (`features.json` `"logging"` category), so administrators can force-disable SQL logging for privacy or force-enable it for audit; locked settings show a lock icon and are read-only.
+  - All three settings are lockable via IT-admin policy (`features.json` `"logging"` category), so administrators can force-disable SQL logging for privacy or force-enable it for audit; locked settings show a lock icon and are read-only. Note for the audit use case: forcing `includeInternalQueries` on also requires forcing `includeQuerySQL` on — the internal-queries switch has no effect on its own and is normalized off otherwise.
 
 ### Configuration
 

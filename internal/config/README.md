@@ -102,3 +102,4 @@ func ValidateSessionConfig(sc SessionConfig) SessionConfig
 - After adding a new `FeatureFlags` field, run `wails generate module` to regenerate `frontend/wailsjs/go/models.ts`, then add a `<FlagRow>` in `FeatureFlagsModal.tsx`.
 - The macOS plist priority order is highest-priority-last (reversed iteration); the managed pref at `/Library/Managed Preferences/` wins over the user pref at `~/Library/Preferences/`.
 - `SessionConfig.MaxIdleConnsPerSession` is clamped to never exceed `MaxOpenConnsPerSession` by `ValidateSessionConfig` (`restore.go:55`).
+- Admin `features.json` `"logging"` gotcha: `"includeInternalQueries": true` requires `"includeQuerySQL": true` to also be set — `ValidateLogPrefs` enforces the "internal implies SQL" invariant, so `includeInternalQueries` alone silently normalizes to `false` (the policy becomes a no-op). Force both on for the audit use case.
