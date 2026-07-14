@@ -11,11 +11,10 @@
 package app
 
 import (
-	"os/exec"
-	"runtime"
 	"time"
 
 	"thaw/internal/config"
+	"thaw/internal/filesystem"
 	"thaw/internal/logger"
 	"thaw/internal/querylog"
 )
@@ -47,6 +46,12 @@ func (a *App) UpdateLogPrefs(prefs config.LogPrefs) error {
 	// Preserve admin-locked values before persisting.
 	effective, locked := config.LoadAdminLogPrefs(prefs)
 	prefs = config.RestoreAdminLockedLogPrefs(prefs, effective, locked)
+	// Re-validate: restoring an admin-locked field (e.g. a forced
+	// IncludeQuerySQL=false) can reintroduce an inconsistent combination, so
+	// normalize again before persisting. This keeps the on-disk value and the
+	// runtime-applied value identical instead of relying on the next read to
+	// reconcile them.
+	prefs = config.ValidateLogPrefs(prefs)
 
 	if err := config.Update(func(cfg *config.AppConfig) error {
 		cfg.LogPrefs = prefs
@@ -55,27 +60,20 @@ func (a *App) UpdateLogPrefs(prefs config.LogPrefs) error {
 		return err
 	}
 
-	// Apply the effective prefs directly rather than re-reading from disk:
-	// prefs already has admin-locked fields restored, so LoadAdminLogPrefs is
-	// idempotent here and effective == prefs. Normalize so runtime state
-	// upholds the same invariant GetLogPrefs presents.
-	a.applyLogPrefs(config.ValidateLogPrefs(effective))
+	// Apply the same value we just persisted (no re-read of config or
+	// features.json): prefs already has admin-locked fields restored and is
+	// normalized, so it equals the effective prefs GetLogPrefs would return.
+	a.applyLogPrefs(prefs)
 	return nil
 }
 
-// RevealLogFile opens the OS file manager at the log file's location so the
-// user can inspect or share thaw.log for support diagnostics.
+// RevealLogFile opens the OS file manager and selects thaw.log so the user can
+// inspect or share it for support diagnostics. It delegates to the shared
+// filesystem.RevealInFinder helper (which handles the platform-specific
+// selection quirks, notably explorer's /select, comma handling on Windows).
+// logger.Path is always inside logger.Dir, satisfying the containment check.
 func (a *App) RevealLogFile() error {
-	path := logger.Path
-	switch runtime.GOOS {
-	case "darwin":
-		// -R reveals (selects) the file in Finder.
-		return exec.Command("open", "-R", path).Start()
-	case "windows":
-		return exec.Command("explorer", "/select,", path).Start()
-	default: // linux and others: open the containing directory.
-		return exec.Command("xdg-open", logger.Dir).Start()
-	}
+	return filesystem.RevealInFinder(logger.Path, logger.Dir)
 }
 
 // loadEffectiveLogPrefs reads the persisted LogPrefs and applies IT-admin
