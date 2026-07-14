@@ -8,8 +8,9 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-// Package logger configures the application-wide logrus logger with
-// lumberjack log rotation.
+// Package logger configures the application-wide slog logger with
+// lumberjack log rotation, driven by both size and a startup/periodic
+// age-based rotation so old entries are pruned within the retention window.
 //
 // thaw:domain: Core IPC & App Lifecycle
 package logger

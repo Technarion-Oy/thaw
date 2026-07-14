@@ -11,15 +11,35 @@
 package logger
 
 import (
+	"bufio"
 	"context"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/lumberjack.v2"
 )
+
+const (
+	// maxSizeMB is the size threshold that triggers lumberjack's built-in
+	// size-based rotation. It acts only as a safety valve; day-to-day rotation
+	// is driven by age (see rotationInterval).
+	maxSizeMB = 10
+	// maxAgeDays is the retention window: rotated backups older than this are
+	// deleted by lumberjack's cleanup pass.
+	maxAgeDays = 30
+	// rotationInterval is how often the active log file is rotated so that
+	// age-based cleanup has backups to prune. Without this, Thaw's low log
+	// volume means the active file rarely reaches maxSizeMB, so nothing ever
+	// rotates and >maxAgeDays-old entries live forever in the active file.
+	rotationInterval = 24 * time.Hour
+)
+
+// currentTime is a package-level clock indirection so tests can control "now".
+var currentTime = time.Now
 
 // L is the application-wide structured logger. It is initialized by Init and
 // safe to use from multiple goroutines.
@@ -39,12 +59,25 @@ func Init() func() {
 	Dir = filepath.Dir(path)
 
 	rot := &lumberjack.Logger{
-		Filename:   path,
-		MaxSize:    10,   // MB per file before rotation
-		MaxBackups: 5,    // number of old files to retain
-		MaxAge:     30,   // days to retain old files
-		Compress:   true, // gzip old files
+		Filename: path,
+		MaxSize:  maxSizeMB,  // MB per file before size-based rotation (safety valve)
+		MaxAge:   maxAgeDays, // days to retain rotated backups
+		// MaxBackups is intentionally 0 (retain all) so that MaxAge alone
+		// governs retention. With daily rotation the backup count is naturally
+		// bounded to ~maxAgeDays files.
+		Compress: true, // gzip old files
 	}
+
+	// lumberjack only rotates on size, and MaxAge/MaxBackups prune rotated
+	// backups only — never the active file. Force an age-based rotation on
+	// startup when the active file already holds entries older than
+	// rotationInterval, so the existing MaxAge cleanup has backups to act on
+	// and stale entries stop accumulating in the active file.
+	maybeRotateByAge(rot, path)
+
+	// For long-running sessions, keep rotating on a schedule so age-based
+	// cleanup continues to run even when the app stays open for days.
+	stopTicker := startRotationTicker(rot)
 
 	// In dev mode also echo to stderr; in production write to file only.
 	var appWriter io.Writer
@@ -71,7 +104,82 @@ func Init() func() {
 
 	L.Info("logger initialized", "path", path, "dev", devMode)
 
-	return func() { _ = rot.Close() }
+	return func() {
+		stopTicker()
+		_ = rot.Close()
+	}
+}
+
+// maybeRotateByAge rotates the active log file if its oldest entry is older
+// than rotationInterval. lumberjack never prunes the active file itself and
+// only rotates on size, so without this a low-volume log accumulates entries
+// far past maxAgeDays. After rotating, lumberjack's cleanup deletes backups
+// older than maxAgeDays.
+func maybeRotateByAge(rot *lumberjack.Logger, path string) {
+	oldest, ok := firstEntryTime(path)
+	if !ok {
+		return
+	}
+	if currentTime().Sub(oldest) > rotationInterval {
+		_ = rot.Rotate()
+	}
+}
+
+// startRotationTicker rotates the log on rotationInterval until the returned
+// stop function is called. Each rotation triggers lumberjack's age-based
+// cleanup, keeping retention bounded during long-running sessions.
+func startRotationTicker(rot *lumberjack.Logger) func() {
+	ticker := time.NewTicker(rotationInterval)
+	done := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				_ = rot.Rotate()
+			case <-done:
+				ticker.Stop()
+				return
+			}
+		}
+	}()
+	return func() { close(done) }
+}
+
+// firstEntryTime returns the timestamp of the first entry in the log file at
+// path. Entries are written by slog's TextHandler, which prefixes each line
+// with `time=<RFC3339>`. Returns ok=false if the file is missing, empty, or
+// the first line has no parseable timestamp.
+func firstEntryTime(path string) (time.Time, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return time.Time{}, false
+	}
+	defer func() { _ = f.Close() }()
+
+	sc := bufio.NewScanner(f)
+	if !sc.Scan() {
+		return time.Time{}, false
+	}
+	return parseSlogTime(sc.Text())
+}
+
+// parseSlogTime extracts the timestamp from a slog TextHandler line of the form
+// `time=2026-07-14T13:45:00.000+03:00 level=INFO msg=...`.
+func parseSlogTime(line string) (time.Time, bool) {
+	_, val, found := strings.Cut(line, "time=")
+	if !found {
+		return time.Time{}, false
+	}
+	// slog leaves RFC3339 timestamps unquoted; the value ends at the next space.
+	if sp := strings.IndexByte(val, ' '); sp >= 0 {
+		val = val[:sp]
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+		if t, err := time.Parse(layout, val); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }
 
 // driverNoiseFilter is a slog.Handler wrapper that suppresses known-noisy
