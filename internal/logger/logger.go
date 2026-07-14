@@ -46,6 +46,31 @@ var L *slog.Logger
 // packages (e.g. crashreport) may use it to co-locate related files.
 var Dir string
 
+// Path is the absolute path to the active log file. Set by Init; used by the
+// "Reveal Log File" action and the logging-preferences UI.
+var Path string
+
+// levelVar backs the active handler's minimum level so it can be changed at
+// runtime (from LogPrefs) via SetLevel without rebuilding the handler.
+var levelVar slog.LevelVar
+
+// SetLevel changes the minimum severity written to the log file at runtime.
+// name is one of "debug", "info", "warn", "error"; an empty or unrecognized
+// value leaves the current level unchanged (so the build default is kept when
+// the user has expressed no preference).
+func SetLevel(name string) {
+	switch name {
+	case "debug":
+		levelVar.Set(slog.LevelDebug)
+	case "info":
+		levelVar.Set(slog.LevelInfo)
+	case "warn":
+		levelVar.Set(slog.LevelWarn)
+	case "error":
+		levelVar.Set(slog.LevelError)
+	}
+}
+
 // Init sets up file-based logging with rotation and returns a cleanup function
 // that flushes and closes the log file. The caller should defer the cleanup.
 //
@@ -54,6 +79,7 @@ var Dir string
 func Init() func() {
 	path := logFilePath()
 	Dir = filepath.Dir(path)
+	Path = path
 
 	rot := &lumberjack.Logger{
 		Filename: path,
@@ -84,13 +110,16 @@ func Init() func() {
 		appWriter = rot
 	}
 
-	level := slog.LevelInfo
+	// Seed the runtime-adjustable level with the build default. LogPrefs may
+	// override it later via SetLevel once config is loaded at startup.
 	if devMode {
-		level = slog.LevelDebug
+		levelVar.Set(slog.LevelDebug)
+	} else {
+		levelVar.Set(slog.LevelInfo)
 	}
 
 	handler := slog.NewTextHandler(appWriter, &slog.HandlerOptions{
-		Level:     level,
+		Level:     &levelVar,
 		AddSource: devMode,
 	})
 	L = slog.New(&driverNoiseFilter{inner: handler})

@@ -661,6 +661,38 @@ export namespace config {
 	        this.recentDirs = source["recentDirs"];
 	    }
 	}
+	export class LogPrefs {
+	    logLevel: string;
+	    includeQuerySQL: boolean;
+	    includeInternalQueries: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new LogPrefs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.logLevel = source["logLevel"];
+	        this.includeQuerySQL = source["includeQuerySQL"];
+	        this.includeInternalQueries = source["includeInternalQueries"];
+	    }
+	}
+	export class LogPrefsLocked {
+	    logLevel: boolean;
+	    includeQuerySQL: boolean;
+	    includeInternalQueries: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new LogPrefsLocked(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.logLevel = source["logLevel"];
+	        this.includeQuerySQL = source["includeQuerySQL"];
+	        this.includeInternalQueries = source["includeInternalQueries"];
+	    }
+	}
 	export class NotebookPrefs {
 	    syntaxMode: string;
 	

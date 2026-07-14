@@ -39,8 +39,14 @@ import (
 //	  "connection":               { "snowflakeCLIProfileManager": false },
 //	  "fileBrowser":              { "fileWatcher": false },
 //	  "schemaManagement":         { "columnManagement": false },
-//	  "integrations":             { "mcpServer": false }
+//	  "integrations":             { "mcpServer": false },
+//	  "logging":                  { "logLevel": "info", "includeQuerySQL": false, "includeInternalQueries": false }
 //	}
+//
+// The "logging" category is special: unlike the boolean feature categories it
+// enforces LogPrefs values (a string log level plus two switches). A present
+// key both sets the value and locks the corresponding field in the UI. This is
+// how IT can force-disable SQL logging (privacy) or force-enable it (audit).
 
 // ptrbool is a small helper so JSON null / absent ≠ false.
 type ptrBool = *bool
@@ -120,6 +126,15 @@ type adminIntegrations struct {
 	MCPServer ptrBool `json:"mcpServer,omitempty"`
 }
 
+// adminLogging is the "logging" category. Unlike the boolean feature
+// categories it enforces LogPrefs values. A non-nil field both sets the value
+// and locks the field in the UI.
+type adminLogging struct {
+	LogLevel               *string `json:"logLevel,omitempty"`
+	IncludeQuerySQL        ptrBool `json:"includeQuerySQL,omitempty"`
+	IncludeInternalQueries ptrBool `json:"includeInternalQueries,omitempty"`
+}
+
 // adminConfigJSON is the full schema for the admin features.json file.
 type adminConfigJSON struct {
 	DataExportImport         adminDataExportImport `json:"dataExportImport"`
@@ -133,6 +148,7 @@ type adminConfigJSON struct {
 	FileBrowser              adminFileBrowser      `json:"fileBrowser"`
 	SchemaManagement         adminSchemaManagement `json:"schemaManagement"`
 	Integrations             adminIntegrations     `json:"integrations"`
+	Logging                  adminLogging          `json:"logging"`
 }
 
 // ─── System config file path ───────────────────────────────────────────────────
@@ -260,5 +276,31 @@ func mergeAdminOverrides(user FeatureFlags, cfg adminConfigJSON) (effective Feat
 	// Integrations
 	apply(&effective.MCPServer, &locked.MCPServer, cfg.Integrations.MCPServer)
 
+	return effective, locked
+}
+
+// LoadAdminLogPrefs applies any system-level logging policy from features.json
+// on top of the user's LogPrefs and returns:
+//   - effective: the LogPrefs with admin overrides applied
+//   - locked:    a LogPrefsLocked where true means the field is admin-controlled
+//     (the user may not change it via the UI)
+//
+// Logging policy is read from the JSON file only (there is no MDM/registry hook
+// for it, unlike the boolean feature flags).
+func LoadAdminLogPrefs(user LogPrefs) (effective LogPrefs, locked LogPrefsLocked) {
+	cfg := loadAdminJSON().Logging
+	effective = user
+	if cfg.LogLevel != nil && ValidLogLevel(*cfg.LogLevel) {
+		effective.LogLevel = *cfg.LogLevel
+		locked.LogLevel = true
+	}
+	if cfg.IncludeQuerySQL != nil {
+		effective.IncludeQuerySQL = *cfg.IncludeQuerySQL
+		locked.IncludeQuerySQL = true
+	}
+	if cfg.IncludeInternalQueries != nil {
+		effective.IncludeInternalQueries = *cfg.IncludeInternalQueries
+		locked.IncludeInternalQueries = true
+	}
 	return effective, locked
 }

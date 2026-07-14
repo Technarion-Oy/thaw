@@ -101,6 +101,9 @@ func buildMenu(app *App) *menu.Menu {
 	viewMenu.AddText("Editor Preferences…", nil, func(_ *menu.CallbackData) {
 		wailsruntime.EventsEmit(app.ctx, "menu:editor-preferences")
 	})
+	viewMenu.AddText("Logging Preferences…", nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:logging-preferences")
+	})
 	viewMenu.AddText("Enabled Features…", nil, func(_ *menu.CallbackData) {
 		wailsruntime.EventsEmit(app.ctx, "menu:feature-flags")
 	})
@@ -217,6 +220,12 @@ func buildMenu(app *App) *menu.Menu {
 	helpMenu.AddSeparator()
 	helpMenu.AddText("Keyboard Shortcuts…", nil, func(_ *menu.CallbackData) {
 		wailsruntime.EventsEmit(app.ctx, "menu:keyboard-shortcuts")
+	})
+	helpMenu.AddSeparator()
+	helpMenu.AddText("Reveal Log File", nil, func(_ *menu.CallbackData) {
+		if err := app.RevealLogFile(); err != nil {
+			wailsruntime.LogErrorf(app.ctx, "reveal log file failed: %v", err)
+		}
 	})
 
 	return appMenu

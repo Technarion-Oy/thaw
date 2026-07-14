@@ -48,8 +48,21 @@ type AppConfig struct {
     NotebookPrefs NotebookPrefs
     Session       SessionConfig
     FeatureFlags  FeatureFlags
+    LogPrefs      LogPrefs      // runtime log level + SQL-to-file logging switches
     // ...
 }
+
+// config.go — file-logging preferences (see internal/logger)
+type LogPrefs struct {
+    LogLevel               string // "debug"|"info"|"warn"|"error"; "" = build default
+    IncludeQuerySQL        bool   // write executed SQL text to thaw.log (default false — SQL can be sensitive)
+    IncludeInternalQueries bool   // also log internal/background queries (requires IncludeQuerySQL)
+}
+func DefaultLogPrefs() LogPrefs
+func LogPrefsWithDefaults(p LogPrefs) LogPrefs
+func ValidLogLevel(name string) bool
+func ValidateLogPrefs(p LogPrefs) LogPrefs
+func RestoreAdminLockedLogPrefs(user, effective LogPrefs, locked LogPrefsLocked) LogPrefs
 
 // config.go:386 / 416
 func Load() (*AppConfig, error)
@@ -62,6 +75,10 @@ func Update(fn func(*AppConfig) error) error
 
 // adminconfig.go:180
 func LoadAdminConfig(user FeatureFlags) (effective FeatureFlags, locked FeatureFlags)
+// adminconfig.go — the "logging" features.json category enforces LogPrefs
+// (log level + SQL-logging switches) so IT can force-disable SQL logging for
+// privacy or force-enable it for audit.
+func LoadAdminLogPrefs(user LogPrefs) (effective LogPrefs, locked LogPrefsLocked)
 
 // restore.go:21
 func RestoreAdminLockedFields(user, effective, locked FeatureFlags) FeatureFlags
