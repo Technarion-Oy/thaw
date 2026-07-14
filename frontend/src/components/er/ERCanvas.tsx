@@ -286,6 +286,9 @@ export interface ERCanvasProps {
   onBuildQuery?: (tableIds: string[]) => void;
   highlightedEdgeIds?: Set<string>;
   highlightedNodeIds?: Set<string>;
+  /** Table node ids changed by the most recent MCP/AI modification — rendered
+   *  with the `er-ai-changed` class so the latest AI change stands out. */
+  changedNodeIds?: Set<string>;
 }
 
 function ERCanvasInner({
@@ -306,6 +309,7 @@ function ERCanvasInner({
   onBuildQuery,
   highlightedEdgeIds,
   highlightedNodeIds,
+  changedNodeIds,
 }: ERCanvasProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([] as Node[]);
   const [edges, setEdges] = useEdgesState<Edge>([] as Edge[]);
@@ -460,19 +464,26 @@ function ERCanvasInner({
     );
   }, [highlightedEdgeIds, setEdges]);
 
-  // Apply intermediate-node className via setNodes only when the highlighted
-  // set changes, avoiding a full .map() on every drag/position update.
-  const prevHighlightRef = useRef<Set<string> | undefined>(undefined);
+  // Apply node classNames (join-path intermediate + latest-AI-change) via
+  // setNodes only when either set changes, avoiding a full .map() on every
+  // drag/position update. The two mechanisms are independent — `highlightedNodeIds`
+  // (readonly join builder) and `changedNodeIds` (edit-mode MCP highlight) — but
+  // are combined here so a node can carry both classes without one clobbering
+  // the other.
+  const prevNodeClassRef = useRef<{ h?: Set<string>; c?: Set<string> }>({});
   useEffect(() => {
-    if (prevHighlightRef.current === highlightedNodeIds) return;
-    prevHighlightRef.current = highlightedNodeIds;
+    if (prevNodeClassRef.current.h === highlightedNodeIds && prevNodeClassRef.current.c === changedNodeIds) return;
+    prevNodeClassRef.current = { h: highlightedNodeIds, c: changedNodeIds };
     setNodes((ns) =>
-      ns.map((n) => ({
-        ...n,
-        className: highlightedNodeIds?.has(n.id) ? "er-intermediate" : undefined,
-      })),
+      ns.map((n) => {
+        const classes: string[] = [];
+        if (highlightedNodeIds?.has(n.id)) classes.push("er-intermediate");
+        if (changedNodeIds?.has(n.id)) classes.push("er-ai-changed");
+        const className = classes.length ? classes.join(" ") : undefined;
+        return n.className === className ? n : { ...n, className };
+      }),
     );
-  }, [highlightedNodeIds, setNodes]);
+  }, [highlightedNodeIds, changedNodeIds, setNodes]);
 
   // Sync parent selectedTableIds to XYFlow node.selected.
   // Uses lastSelectionRef to detect whether this update was already propagated

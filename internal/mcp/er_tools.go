@@ -254,15 +254,25 @@ func registerERDesignerStateTools(srv *mcpsdk.Server, emit func(string, interfac
 			Description: "Push table modifications into the currently open ER Designer. " +
 				"Tables are matched by uppercase SCHEMA.NAME: matching tables are replaced, new tables are appended. " +
 				"The designer must be open (use open_er_designer first). " +
-				"Columns need a name and dataType; isPK, notNull, and fkRef are optional.",
+				"Columns need a name and dataType; isPK, notNull, and fkRef are optional. " +
+				"Returns a summary of exactly what changed (tables/columns added, removed, or modified) so you can " +
+				"self-correct without re-reading the whole model. The user can undo any change in the designer.",
 		}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in modifyERDesignerInput) (*mcpsdk.CallToolResult, any, error) {
 			if len(in.Tables) == 0 {
 				return nil, nil, fmt.Errorf("tables must contain at least one table")
 			}
+			seenKeys := make(map[string]bool, len(in.Tables))
 			for _, t := range in.Tables {
 				if strings.TrimSpace(t.Schema) == "" || strings.TrimSpace(t.Name) == "" {
 					return nil, nil, fmt.Errorf("each table must have a non-empty schema and name")
 				}
+				// Reject duplicate SCHEMA.NAME entries (case-insensitive) — a table
+				// can't appear twice, and it would make the merge ambiguous.
+				key := erStateKey(t.Schema, t.Name)
+				if seenKeys[key] {
+					return nil, nil, fmt.Errorf("duplicate table %s.%s: each SCHEMA.NAME may appear at most once per call", t.Schema, t.Name)
+				}
+				seenKeys[key] = true
 				if len(t.Columns) == 0 {
 					return nil, nil, fmt.Errorf("table %s.%s must have at least one column", t.Schema, t.Name)
 				}
@@ -281,7 +291,11 @@ func registerERDesignerStateTools(srv *mcpsdk.Server, emit func(string, interfac
 			// Note: a TOCTOU window exists between IsOpen() and emit() — the
 			// designer could close in between. This is accepted: the frontend
 			// listener is torn down on unmount so a stale event is harmless.
-			if !erState.IsOpen() {
+			// Snapshot the pre-change state up front so the delta is computed from
+			// the merge we perform here — not from a follow-up get_er_designer_state
+			// read, which would race the frontend's 300ms debounced push-back.
+			before := erState.Get()
+			if before == nil {
 				return textResult("The ER designer is not currently open. Use open_er_designer to open it first."), nil, nil
 			}
 
@@ -302,14 +316,205 @@ func registerERDesignerStateTools(srv *mcpsdk.Server, emit func(string, interfac
 				return textResult("Failed to modify ER designer: internal error"), nil, nil
 			}
 
-			// Note: the state store is eventually consistent — the frontend
-			// merges the event into React state and pushes back via IPC after
-			// a 300ms debounce. A get_er_designer_state call within that
-			// window returns pre-modification data.
+			// Keep the state store immediately consistent: apply the same merge
+			// the frontend will apply and cache it now, so a get_er_designer_state
+			// call inside the frontend's 300ms debounce window reflects the change
+			// instead of returning pre-modification data. The frontend's later
+			// (authoritative) push overwrites this with an equivalent result.
+			merged := mergeAITablesIntoState(before, in.Tables)
+			erState.Set(merged)
+
+			delta := describeERDelta(before, in.Tables)
 			return textResult(fmt.Sprintf(
-				"%d table(s) sent to the ER designer. The user can now review the changes visually.",
-				len(in.Tables),
+				"Applied %d table change(s) to the ER designer. The user can review, undo, or ask for further edits.\n\n%s",
+				len(in.Tables), delta,
 			)), nil, nil
 		})
 	}
+}
+
+// erStateKey is the case-insensitive "SCHEMA.NAME" match key used by the ER
+// designer merge, mirroring the frontend's baselineTableKey.
+func erStateKey(schema, name string) string {
+	return strings.ToUpper(strings.TrimSpace(schema)) + "." + strings.ToUpper(strings.TrimSpace(name))
+}
+
+// aiColsToStateCols converts AI column inputs to the MCP-facing designer column
+// view, deriving NotNull from IsPK and falling back to a same-named column's
+// existing DEFAULT when the AI omits one (mirrors mergeAITablesIntoDesigner).
+func aiColsToStateCols(at erDesignerTableIn, before *ERDesignerTableOut) []ERDesignerColumnOut {
+	prevDefault := map[string]string{}
+	if before != nil {
+		for _, c := range before.Columns {
+			prevDefault[strings.ToUpper(strings.TrimSpace(c.Name))] = c.Default
+		}
+	}
+	cols := make([]ERDesignerColumnOut, 0, len(at.Columns))
+	for _, c := range at.Columns {
+		def := c.Default
+		if def == "" {
+			def = prevDefault[strings.ToUpper(strings.TrimSpace(c.Name))]
+		}
+		cols = append(cols, ERDesignerColumnOut{
+			Name:     c.Name,
+			DataType: c.DataType,
+			IsPK:     c.IsPK,
+			NotNull:  c.NotNull || c.IsPK,
+			FKRef:    c.FKRef,
+			Default:  def,
+		})
+	}
+	return cols
+}
+
+// mergeAITablesIntoState merges AI tables into the cached designer state,
+// matching by SCHEMA.NAME: matching tables are replaced in place (preserving
+// their position), new tables are appended. This mirrors the frontend's
+// mergeAITablesIntoDesigner so the backend cache can be kept consistent
+// immediately after modify_er_designer.
+func mergeAITablesIntoState(before *ERDesignerState, aiTables []erDesignerTableIn) *ERDesignerState {
+	out := &ERDesignerState{Database: "", Tables: nil}
+	if before != nil {
+		out.Database = before.Database
+		out.Tables = make([]ERDesignerTableOut, len(before.Tables))
+		copy(out.Tables, before.Tables)
+	}
+
+	idx := make(map[string]int, len(out.Tables))
+	for i, t := range out.Tables {
+		idx[erStateKey(t.Schema, t.Name)] = i
+	}
+
+	for _, at := range aiTables {
+		key := erStateKey(at.Schema, at.Name)
+		if i, ok := idx[key]; ok {
+			// Use out.Tables[i] as the DEFAULT-fallback context, not
+			// before.Tables[i]: a matched index may point at an *appended* table
+			// (e.g. a duplicate SCHEMA.NAME in aiTables), which is out of range
+			// for before.Tables. out.Tables[i] equals before.Tables[i] for a
+			// genuinely-matched existing table, so the fallback is identical.
+			out.Tables[i] = ERDesignerTableOut{
+				Schema:  at.Schema,
+				Name:    at.Name,
+				Columns: aiColsToStateCols(at, &out.Tables[i]),
+			}
+		} else {
+			out.Tables = append(out.Tables, ERDesignerTableOut{
+				Schema:  at.Schema,
+				Name:    at.Name,
+				Columns: aiColsToStateCols(at, nil),
+			})
+			idx[key] = len(out.Tables) - 1
+		}
+	}
+	return out
+}
+
+// describeColShort renders a one-line description of an AI column for the delta
+// summary, e.g. `EMAIL VARCHAR(256) [NOT NULL]` or `USER_ID NUMBER [FK→PUBLIC.USERS.ID]`.
+func describeColShort(c erDesignerColumnIn) string {
+	s := c.Name + " " + c.DataType
+	var tags []string
+	if c.IsPK {
+		tags = append(tags, "PK")
+	}
+	if c.NotNull && !c.IsPK {
+		tags = append(tags, "NOT NULL")
+	}
+	if c.FKRef != "" {
+		tags = append(tags, "FK→"+c.FKRef)
+	}
+	if len(tags) > 0 {
+		s += " [" + strings.Join(tags, ", ") + "]"
+	}
+	return s
+}
+
+// describeERDelta compares the incoming AI tables against the cached (pre-change)
+// state and produces a concise, LLM-legible summary of what changed. Since
+// modify_er_designer only replaces or appends tables (never removes them), the
+// delta covers added tables and per-table column additions/removals/modifications.
+func describeERDelta(before *ERDesignerState, aiTables []erDesignerTableIn) string {
+	beforeByKey := map[string]*ERDesignerTableOut{}
+	if before != nil {
+		for i := range before.Tables {
+			t := &before.Tables[i]
+			beforeByKey[erStateKey(t.Schema, t.Name)] = t
+		}
+	}
+
+	up := func(s string) string { return strings.ToUpper(strings.TrimSpace(s)) }
+
+	var lines []string
+	for _, at := range aiTables {
+		label := at.Schema + "." + at.Name
+		bt := beforeByKey[erStateKey(at.Schema, at.Name)]
+		if bt == nil {
+			descs := make([]string, 0, len(at.Columns))
+			for _, c := range at.Columns {
+				descs = append(descs, describeColShort(c))
+			}
+			lines = append(lines, fmt.Sprintf("Added table %s (%d column(s)): %s", label, len(at.Columns), strings.Join(descs, ", ")))
+			continue
+		}
+
+		beforeCols := map[string]ERDesignerColumnOut{}
+		for _, c := range bt.Columns {
+			beforeCols[up(c.Name)] = c
+		}
+		incoming := map[string]bool{}
+		var added, removed, changed []string
+		for _, c := range at.Columns {
+			incoming[up(c.Name)] = true
+			bc, ok := beforeCols[up(c.Name)]
+			if !ok {
+				added = append(added, describeColShort(c))
+				continue
+			}
+			var diffs []string
+			if up(bc.DataType) != up(c.DataType) {
+				diffs = append(diffs, fmt.Sprintf("type %s→%s", bc.DataType, c.DataType))
+			}
+			if bc.IsPK != c.IsPK {
+				diffs = append(diffs, fmt.Sprintf("PK %t→%t", bc.IsPK, c.IsPK))
+			}
+			bNN := bc.NotNull || bc.IsPK
+			cNN := c.NotNull || c.IsPK
+			if bNN != cNN {
+				diffs = append(diffs, fmt.Sprintf("NOT NULL %t→%t", bNN, cNN))
+			}
+			if up(bc.FKRef) != up(c.FKRef) {
+				diffs = append(diffs, fmt.Sprintf("FK %q→%q", bc.FKRef, c.FKRef))
+			}
+			if len(diffs) > 0 {
+				changed = append(changed, fmt.Sprintf("%s (%s)", c.Name, strings.Join(diffs, ", ")))
+			}
+		}
+		for _, c := range bt.Columns {
+			if !incoming[up(c.Name)] {
+				removed = append(removed, c.Name)
+			}
+		}
+
+		var parts []string
+		if len(added) > 0 {
+			parts = append(parts, "added "+strings.Join(added, ", "))
+		}
+		if len(removed) > 0 {
+			parts = append(parts, "removed "+strings.Join(removed, ", "))
+		}
+		if len(changed) > 0 {
+			parts = append(parts, "changed "+strings.Join(changed, ", "))
+		}
+		if len(parts) == 0 {
+			lines = append(lines, fmt.Sprintf("Replaced table %s (no column changes)", label))
+		} else {
+			lines = append(lines, fmt.Sprintf("Updated table %s: %s", label, strings.Join(parts, "; ")))
+		}
+	}
+
+	if len(lines) == 0 {
+		return "No changes."
+	}
+	return strings.Join(lines, "\n")
 }
