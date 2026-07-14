@@ -1975,7 +1975,7 @@ var bindOperandKeywords = map[string]bool{"THEN": true, "ELSE": true}
 // Scripting control-flow expression — an IF/ELSEIF/WHILE/REPEAT-UNTIL condition,
 // an assignment right-hand side, or a RETURN expression — that resolves to
 // neither a declared variable, a procedure/function argument, a call, a
-// qualified-name part, nor a builtin/keyword. It is the scripting analogue of
+// qualified-name part, nor a builtin/keyword. It is the scripting analog of
 // the scalar-function body check (#509): the scope walk only inspects the first
 // token after RETURN and bare assignment targets, so an undeclared name buried
 // in an expression (e.g. `IF (missing <= 0) THEN`) went unreported. Only

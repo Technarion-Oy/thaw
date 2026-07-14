@@ -881,7 +881,7 @@ $$;`,
 		},
 		{
 			// #509: in a scalar SQL function body a bare identifier that is not an
-			// argument is the analogue of an undeclared variable.
+			// argument is the analog of an undeclared variable.
 			name:          "Scalar SQL function body references a non-argument",
 			sql:           `create function f(x number) returns number as $$ x + bogus $$;`,
 			expectedError: "Identifier 'bogus' is not a function argument",
