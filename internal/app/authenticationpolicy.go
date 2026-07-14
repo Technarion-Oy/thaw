@@ -36,12 +36,13 @@ func (a *App) AlterAuthenticationPolicy(database, schema, name, clause string) e
 // AUTHENTICATION POLICIES does not report the parameter values, so this is how the
 // properties panel reads the current settings.
 func (a *App) DescribeAuthenticationPolicy(database, schema, name string) ([]snowflake.PropertyPair, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	query := fmt.Sprintf("DESCRIBE AUTHENTICATION POLICY %s.%s.%s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
-	res, err := a.client.QuerySingle(a.ctx, query)
+	res, err := client.QuerySingle(a.ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -96,10 +97,11 @@ func (a *App) AuthenticationPolicyClientDrivers() []string {
 // looking it up. Requires a connection; drivers the function doesn't report are
 // omitted.
 func (a *App) AuthenticationPolicyClientDriverVersions() ([]authenticationpolicy.DriverVersionHint, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	info, err := a.client.GetClientVersionInfo(a.ctx)
+	info, err := client.GetClientVersionInfo(a.ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +162,8 @@ func (a *App) ParseClientPolicy(raw string) authenticationpolicy.ClientPolicy {
 // ACCOUNTADMIN role or a grant on the SNOWFLAKE database) and has propagation
 // latency, so a newly-applied policy may not appear immediately.
 func (a *App) GetAuthenticationPolicyReferences(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	// EscapeTextLit (not EscapeStringLit) for these literal comparisons: Snowflake
@@ -172,5 +175,5 @@ func (a *App) GetAuthenticationPolicyReferences(database, schema, name string) (
 			"WHERE POLICY_DB = '%s' AND POLICY_SCHEMA = '%s' AND POLICY_NAME = '%s' AND POLICY_KIND = 'AUTHENTICATION_POLICY' "+
 			"ORDER BY REF_ENTITY_DOMAIN, REF_ENTITY_NAME",
 		snowflake.EscapeTextLit(database), snowflake.EscapeTextLit(schema), snowflake.EscapeTextLit(name))
-	return a.client.QuerySingle(a.ctx, query)
+	return client.QuerySingle(a.ctx, query)
 }

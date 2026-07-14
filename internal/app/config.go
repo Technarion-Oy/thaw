@@ -111,7 +111,8 @@ func (a *App) SaveFeatureFlags(flags config.FeatureFlags) error {
 // after saving feature flags so disabled features don't incur unnecessary
 // SHOW queries during schema expansion.
 func (a *App) applyFeatureFlagExclusions() {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return
 	}
 	flags := a.GetFeatureFlags()
@@ -119,7 +120,7 @@ func (a *App) applyFeatureFlagExclusions() {
 	if !flags.DbtProjectBrowser {
 		excl["DBT PROJECT"] = true
 	}
-	a.client.SetExcludedExtendedKinds(excl)
+	client.SetExcludedExtendedKinds(excl)
 }
 
 // GetNotebookPrefs returns the persisted notebook editor preferences.

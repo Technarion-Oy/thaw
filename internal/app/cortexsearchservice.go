@@ -47,7 +47,8 @@ func (a *App) FormatCortexSearchAttributes(columns []string) string {
 // each tag as a removable chip. The caller treats an error as "no tags available"
 // and still allows SET/UNSET TAG.
 func (a *App) GetCortexSearchServiceTags(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	fqn := fmt.Sprintf("%s.%s.%s",
@@ -60,5 +61,5 @@ func (a *App) GetCortexSearchServiceTags(database, schema, name string) (*snowfl
 		// backslash in an identifier must be doubled to survive the single-quoted
 		// literal rather than being read as a Snowflake escape sequence.
 		snowflake.QuoteIdent(database), snowflake.EscapeTextLit(fqn))
-	return a.client.Execute(a.ctx, sql)
+	return client.Execute(a.ctx, sql)
 }

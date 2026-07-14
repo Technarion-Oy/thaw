@@ -33,12 +33,13 @@ func (a *App) AlterPasswordPolicy(database, schema, name, clause string) error {
 // SHOW PASSWORD POLICIES does not report the parameter values, so this is how
 // the properties panel reads the current settings alongside their defaults.
 func (a *App) DescribePasswordPolicy(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	query := fmt.Sprintf("DESCRIBE PASSWORD POLICY %s.%s.%s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
-	return a.client.QuerySingle(a.ctx, query)
+	return client.QuerySingle(a.ctx, query)
 }
 
 // GetPasswordPolicyReferences returns the users (and/or the account) to which
@@ -48,7 +49,8 @@ func (a *App) DescribePasswordPolicy(database, schema, name string) (*snowflake.
 // ACCOUNTADMIN role or a grant on the SNOWFLAKE database) and has propagation
 // latency, so a newly-applied policy may not appear immediately.
 func (a *App) GetPasswordPolicyReferences(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	query := fmt.Sprintf(
@@ -57,5 +59,5 @@ func (a *App) GetPasswordPolicyReferences(database, schema, name string) (*snowf
 			"WHERE POLICY_DB = '%s' AND POLICY_SCHEMA = '%s' AND POLICY_NAME = '%s' AND POLICY_KIND = 'PASSWORD_POLICY' "+
 			"ORDER BY REF_ENTITY_DOMAIN, REF_ENTITY_NAME",
 		snowflake.EscapeStringLit(database), snowflake.EscapeStringLit(schema), snowflake.EscapeStringLit(name))
-	return a.client.QuerySingle(a.ctx, query)
+	return client.QuerySingle(a.ctx, query)
 }

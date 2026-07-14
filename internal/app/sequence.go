@@ -32,8 +32,9 @@ func (a *App) AlterSequence(database, schema, name, clause string) error {
 // expression Snowflake permits there. Sequences require privileges, so accounts
 // without access may see only a subset.
 func (a *App) ListAccountSequences() (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.QuerySingle(a.ctx, "SHOW SEQUENCES IN ACCOUNT")
+	return client.QuerySingle(a.ctx, "SHOW SEQUENCES IN ACCOUNT")
 }

@@ -42,7 +42,8 @@ func (a *App) AlterTag(database, schema, name, clause string) error {
 // not appear immediately. Rows with a non-null OBJECT_DELETED are excluded so
 // only live references are returned.
 func (a *App) GetTagReferences(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	query := fmt.Sprintf(
@@ -51,7 +52,7 @@ func (a *App) GetTagReferences(database, schema, name string) (*snowflake.QueryR
 			"WHERE TAG_DATABASE = '%s' AND TAG_SCHEMA = '%s' AND TAG_NAME = '%s' AND OBJECT_DELETED IS NULL "+
 			"ORDER BY OBJECT_DATABASE, OBJECT_SCHEMA, OBJECT_NAME, COLUMN_NAME",
 		snowflake.EscapeStringLit(database), snowflake.EscapeStringLit(schema), snowflake.EscapeStringLit(name))
-	return a.client.QuerySingle(a.ctx, query)
+	return client.QuerySingle(a.ctx, query)
 }
 
 // ListAccountTags returns the tag catalog for the whole account via SHOW TAGS IN
@@ -60,10 +61,11 @@ func (a *App) GetTagReferences(database, schema, name string) (*snowflake.QueryR
 // SHOW TAGS requires privileges on the tags (or a role that owns/has access to
 // them); accounts without governance access may see only a subset.
 func (a *App) ListAccountTags() (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.QuerySingle(a.ctx, "SHOW TAGS IN ACCOUNT")
+	return client.QuerySingle(a.ctx, "SHOW TAGS IN ACCOUNT")
 }
 
 // GetAllTagReferences returns every live tag application across the account by
@@ -81,7 +83,8 @@ func (a *App) ListAccountTags() (*snowflake.QueryResult, error) {
 // driver's own row-scan limit (maxQueryRows, far above this cap), so the
 // server-side LIMIT alone would never flag truncation.
 func (a *App) GetAllTagReferences() (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	query := fmt.Sprintf(
@@ -92,7 +95,7 @@ func (a *App) GetAllTagReferences() (*snowflake.QueryResult, error) {
 			"ORDER BY TAG_NAME, OBJECT_DATABASE, OBJECT_SCHEMA, OBJECT_NAME, COLUMN_NAME "+
 			"LIMIT %d",
 		maxTagReferenceRows+1)
-	res, err := a.client.QuerySingle(a.ctx, query)
+	res, err := client.QuerySingle(a.ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -130,11 +133,12 @@ func (a *App) UnsetObjectTag(ref tag.ObjectTagRef, tagDatabase, tagSchema, tagNa
 // `ALTER VIEW … ALTER COLUMN` rather than a rejected `ALTER TABLE`. A failed or
 // empty lookup leaves ParentKind blank, which the builder treats as TABLE.
 func (a *App) alterObjectTag(ref tag.ObjectTagRef, tagDatabase, tagSchema, tagName, value string, unset bool) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
 	if strings.EqualFold(strings.TrimSpace(ref.Domain), "COLUMN") && strings.TrimSpace(ref.ParentKind) == "" {
-		if t, err := a.client.GetObjectTableType(a.ctx, ref.Database, ref.Schema, ref.Name); err == nil {
+		if t, err := client.GetObjectTableType(a.ctx, ref.Database, ref.Schema, ref.Name); err == nil {
 			ref.ParentKind = t
 		}
 	}
@@ -143,7 +147,7 @@ func (a *App) alterObjectTag(ref tag.ObjectTagRef, tagDatabase, tagSchema, tagNa
 	if err != nil {
 		return err
 	}
-	_, err = a.client.Execute(a.ctx, sql)
+	_, err = client.Execute(a.ctx, sql)
 	return err
 }
 
@@ -171,7 +175,8 @@ func (a *App) alterObjectTag(ref tag.ObjectTagRef, tagDatabase, tagSchema, tagNa
 // the object name as a string literal; the fully-qualified, double-quoted name is
 // embedded so mixed-case / special-character identifiers resolve correctly.
 func (a *App) GetObjectTagReferences(domain, database, schema, name, args string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	d, callable := tagReferenceDomain(domain)
@@ -183,7 +188,7 @@ func (a *App) GetObjectTagReferences(domain, database, schema, name, args string
 		snowflake.QuoteIdent(database),
 		snowflake.EscapeStringLit(objName),
 		snowflake.EscapeStringLit(d))
-	return a.client.QuerySingle(a.ctx, query)
+	return client.QuerySingle(a.ctx, query)
 }
 
 // tagReferenceObjectName builds the object-name string literal passed to the
@@ -219,7 +224,8 @@ func tagReferenceObjectName(domain string, callable bool, database, schema, name
 // VIEW, …) onto the TABLE / VIEW domains the function accepts. One row is
 // returned per (column, tag).
 func (a *App) GetColumnTagReferences(domain, database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	fqn := snowflake.Qualify(database, schema, name)
@@ -231,7 +237,7 @@ func (a *App) GetColumnTagReferences(domain, database, schema, name string) (*sn
 		snowflake.QuoteIdent(database),
 		snowflake.EscapeStringLit(fqn),
 		snowflake.EscapeStringLit(d))
-	return a.client.QuerySingle(a.ctx, query)
+	return client.QuerySingle(a.ctx, query)
 }
 
 // tagReferenceDomain maps an object-browser SHOW kind to the object_domain that

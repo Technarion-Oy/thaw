@@ -25,10 +25,11 @@ import (
 // server_spec / created_on. Snowflake has no ALTER MCP SERVER, so there is no
 // corresponding mutation method — the object is changed via CREATE OR REPLACE.
 func (a *App) DescribeMCPServer(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("DESCRIBE MCP SERVER %s",
 		snowflake.Qualify(database, schema, name))
-	return a.client.Execute(a.ctx, sql)
+	return client.Execute(a.ctx, sql)
 }

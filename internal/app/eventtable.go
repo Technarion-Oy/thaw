@@ -37,10 +37,11 @@ func (a *App) AlterEventTable(database, schema, name, clause string) error {
 // the caller can pick out the parameters it cares about without the backend
 // pinning a fixed shape.
 func (a *App) GetEventTableParameters(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("SHOW PARAMETERS IN TABLE %s.%s.%s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
-	return a.client.Execute(a.ctx, sql)
+	return client.Execute(a.ctx, sql)
 }

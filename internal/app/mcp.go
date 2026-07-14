@@ -41,11 +41,10 @@ func (a *App) StartMCPSession(label, mode string, port int, role, warehouse, sec
 	if !a.mcpEnabled() {
 		return mcp.SessionInfo{}, fmt.Errorf("MCP Server is disabled. Enable it under View → Enabled Features…")
 	}
-	// Snapshot the pointer into a local so a concurrent Disconnect (which nils
-	// a.connectParams) can't turn the nil-check below into a nil-deref panic.
-	// The underlying field is still unsynchronised (pre-existing app-wide race
-	// tracked in #351); this only guards against the nil-deref.
-	params := a.connectParams
+	// Snapshot the params under the connection lock so a concurrent Disconnect
+	// (which nils a.connectParams) can't race the read or turn the nil-check
+	// below into a nil-deref panic.
+	params := a.currentConnectParams()
 	if params == nil {
 		return mcp.SessionInfo{}, apperrors.ErrNotConnected
 	}

@@ -18,18 +18,20 @@ import (
 
 // GetRoleDDL returns the DDL definition of a Snowflake role.
 func (a *App) GetRoleDDL(name string) (string, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return "", apperrors.ErrNotConnected
 	}
-	return a.client.GetRoleDDL(a.ctx, name)
+	return client.GetRoleDDL(a.ctx, name)
 }
 
 // GetWarehouseDDL returns the DDL definition of a Snowflake warehouse.
 func (a *App) GetWarehouseDDL(name string) (string, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return "", apperrors.ErrNotConnected
 	}
-	return a.client.GetWarehouseDDL(a.ctx, name)
+	return client.GetWarehouseDDL(a.ctx, name)
 }
 
 // AlterWarehouseProperty applies a single SET property to a warehouse.
@@ -38,52 +40,58 @@ func (a *App) GetWarehouseDDL(name string) (string, error) {
 // enableQueryAcceleration, queryAccelerationMaxScaleFactor,
 // maxConcurrencyLevel, statementQueuedTimeout, statementTimeout.
 func (a *App) AlterWarehouseProperty(name, property, value string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return warehouse.AlterProperty(a.ctx, a.client, name, property, value)
+	return warehouse.AlterProperty(a.ctx, client, name, property, value)
 }
 
 // AlterWarehouseSuspend suspends the named warehouse.
 func (a *App) AlterWarehouseSuspend(name string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return warehouse.Suspend(a.ctx, a.client, name)
+	return warehouse.Suspend(a.ctx, client, name)
 }
 
 // AlterWarehouseResume resumes the named warehouse if it is suspended.
 func (a *App) AlterWarehouseResume(name string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return warehouse.Resume(a.ctx, a.client, name)
+	return warehouse.Resume(a.ctx, client, name)
 }
 
 // AlterWarehouseAbortAllQueries issues ABORT ALL QUERIES on the named warehouse.
 func (a *App) AlterWarehouseAbortAllQueries(name string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return warehouse.AbortAllQueries(a.ctx, a.client, name)
+	return warehouse.AbortAllQueries(a.ctx, client, name)
 }
 
 // AlterWarehouseRename renames a warehouse and returns the new name.
 func (a *App) AlterWarehouseRename(name, newName string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return warehouse.Rename(a.ctx, a.client, name, newName)
+	return warehouse.Rename(a.ctx, client, name, newName)
 }
 
 // GetWarehouseParameters returns per-warehouse parameter overrides (MAX_CONCURRENCY_LEVEL,
 // STATEMENT_QUEUED_TIMEOUT_IN_SECONDS, STATEMENT_TIMEOUT_IN_SECONDS) sourced from
 // SHOW PARAMETERS IN WAREHOUSE.
 func (a *App) GetWarehouseParameters(name string) ([]snowflake.PropertyPair, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return warehouse.GetParameters(a.ctx, a.client, name)
+	return warehouse.GetParameters(a.ctx, client, name)
 }
 
 // GetWarehouseMeteringHistory returns hourly credit usage records from
@@ -91,8 +99,9 @@ func (a *App) GetWarehouseParameters(name string) ([]snowflake.PropertyPair, err
 // START_TIME ascending. warehouse, startDate, and endDate are all optional
 // filters; dates must be RFC3339 strings when provided.
 func (a *App) GetWarehouseMeteringHistory(wh, startDate, endDate string) ([]warehouse.WarehouseMeteringRow, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return warehouse.GetMeteringHistory(a.ctx, a.client, wh, startDate, endDate)
+	return warehouse.GetMeteringHistory(a.ctx, client, wh, startDate, endDate)
 }

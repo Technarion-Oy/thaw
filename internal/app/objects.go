@@ -20,26 +20,29 @@ import (
 
 // DropDatabase drops a database. mode must be "CASCADE" or "RESTRICT".
 func (a *App) DropDatabase(name string, mode string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return a.client.DropDatabase(a.ctx, name, mode)
+	return client.DropDatabase(a.ctx, name, mode)
 }
 
 // DropSchema drops a schema. mode must be "CASCADE" or "RESTRICT".
 func (a *App) DropSchema(database, schema string, mode string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return a.client.DropSchema(a.ctx, database, schema, mode)
+	return client.DropSchema(a.ctx, database, schema, mode)
 }
 
 // ListDatabases returns all databases visible to the current role.
 func (a *App) ListDatabases() ([]string, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.ListDatabases(a.ctx)
+	return client.ListDatabases(a.ctx)
 }
 
 // ListUserDatabases returns the user-managed databases visible to the current
@@ -48,18 +51,20 @@ func (a *App) ListDatabases() ([]string, error) {
 // offering databases as targets for DDL / governance operations (e.g. the
 // SWAP WITH picker) rather than as a raw catalog list.
 func (a *App) ListUserDatabases() ([]string, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.ListUserDatabases(a.ctx)
+	return client.ListUserDatabases(a.ctx)
 }
 
 // ListSchemas returns all schemas in the given database.
 func (a *App) ListSchemas(database string) ([]string, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.ListSchemas(a.ctx, database)
+	return client.ListSchemas(a.ctx, database)
 }
 
 // ListUserSchemas returns the user-managed schemas in the given database — all
@@ -67,160 +72,178 @@ func (a *App) ListSchemas(database string) ([]string, error) {
 // as targets for object / DDL / governance operations (e.g. the Apply-tag
 // picker) rather than as a raw catalog list.
 func (a *App) ListUserSchemas(database string) ([]string, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.ListUserSchemas(a.ctx, database)
+	return client.ListUserSchemas(a.ctx, database)
 }
 
 // ListFileFormats returns all file formats in the given schema.
 func (a *App) ListFileFormats(database, schema string) ([]string, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.ListFileFormats(a.ctx, database, schema)
+	return client.ListFileFormats(a.ctx, database, schema)
 }
 
 // ListObjects returns tables, views, etc. inside a schema.
 func (a *App) ListObjects(database, schema string) ([]snowflake.SnowflakeObject, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.ListObjects(a.ctx, database, schema)
+	return client.ListObjects(a.ctx, database, schema)
 }
 
 // ListBasicObjects returns the basic objects (TABLE, VIEW, SEQUENCE, etc.)
 // inside a schema via a single SHOW OBJECTS IN SCHEMA command.
 func (a *App) ListBasicObjects(database, schema string) ([]snowflake.SnowflakeObject, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.ListBasicObjects(a.ctx, database, schema)
+	return client.ListBasicObjects(a.ctx, database, schema)
 }
 
 // ClearObjectCache removes all cached object listings from the Snowflake client,
 // forcing the next ListObjects/ListBasicObjects call to re-query Snowflake.
 func (a *App) ClearObjectCache() {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return
 	}
-	a.client.ClearObjectCache()
+	client.ClearObjectCache()
 }
 
 // ClearObjectCacheForDatabase removes all cached object listings for every
 // schema under the given database, forcing subsequent calls to re-query Snowflake.
 func (a *App) ClearObjectCacheForDatabase(database string) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return
 	}
-	a.client.ClearObjectCacheForDatabase(database)
+	client.ClearObjectCacheForDatabase(database)
 }
 
 // GetDatabaseRetentionDays returns the DATA_RETENTION_TIME_IN_DAYS parameter
 // for the given database. Returns 1 if the value cannot be determined.
 func (a *App) GetDatabaseRetentionDays(dbName string) (int, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return 0, apperrors.ErrNotConnected
 	}
-	return a.client.GetDatabaseRetentionDays(a.ctx, dbName)
+	return client.GetDatabaseRetentionDays(a.ctx, dbName)
 }
 
 // GetSchemaRetentionDays returns the DATA_RETENTION_TIME_IN_DAYS parameter
 // for the given schema. Returns 1 if the value cannot be determined.
 func (a *App) GetSchemaRetentionDays(database, schema string) (int, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return 0, apperrors.ErrNotConnected
 	}
-	return a.client.GetSchemaRetentionDays(a.ctx, database, schema)
+	return client.GetSchemaRetentionDays(a.ctx, database, schema)
 }
 
 // GetTableRetentionDays returns the Time Travel data retention period in days
 // for the given table. Returns 1 if the value cannot be determined.
 func (a *App) GetTableRetentionDays(database, schema, name string) (int, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return 0, apperrors.ErrNotConnected
 	}
-	return a.client.GetTableRetentionDays(a.ctx, database, schema, name)
+	return client.GetTableRetentionDays(a.ctx, database, schema, name)
 }
 
 // ListDroppedTables returns tables in the schema that are within the Time Travel
 // retention window and can be recovered with UNDROP TABLE.
 func (a *App) ListDroppedTables(database, schema string) ([]snowflake.DroppedTable, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.ListDroppedTables(a.ctx, database, schema)
+	return client.ListDroppedTables(a.ctx, database, schema)
 }
 
 // ListDroppedSchemas returns schemas in the database that are within the Time
 // Travel retention window and can be recovered with UNDROP SCHEMA.
 func (a *App) ListDroppedSchemas(database string) ([]snowflake.DroppedTable, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.ListDroppedSchemas(a.ctx, database)
+	return client.ListDroppedSchemas(a.ctx, database)
 }
 
 // ListDroppedDatabases returns databases that are within the Time Travel
 // retention window and can be recovered with UNDROP DATABASE.
 func (a *App) ListDroppedDatabases() ([]snowflake.DroppedTable, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.ListDroppedDatabases(a.ctx)
+	return client.ListDroppedDatabases(a.ctx)
 }
 
 // GetProcedureParams fetches the DDL for a stored procedure and returns its
 // parameter list with real parameter names parsed from the DDL.
 func (a *App) GetProcedureParams(database, schema, name, argTypes string) ([]snowflake.ProcParam, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.GetProcedureParams(a.ctx, database, schema, name, argTypes)
+	return client.GetProcedureParams(a.ctx, database, schema, name, argTypes)
 }
 
 // GetTableColumns returns the ordered column names for a table or view.
 func (a *App) GetTableColumns(database, schema, name string) ([]string, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.GetTableColumns(a.ctx, database, schema, name)
+	return client.GetTableColumns(a.ctx, database, schema, name)
 }
 
 // GetTableForeignKeys returns the foreign keys where the given table is the
 // referencing side. Used by the editor's JOIN ON autocomplete.
 func (a *App) GetTableForeignKeys(database, schema, table string) ([]snowflake.TableForeignKey, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.GetTableForeignKeys(a.ctx, database, schema, table)
+	return client.GetTableForeignKeys(a.ctx, database, schema, table)
 }
 
 // GetTableColumnsWithTypes returns ordered column names and data types for a
 // table or view. Used by the editor's JOIN ON autocomplete for type-compatible
 // same-name column suggestions.
 func (a *App) GetTableColumnsWithTypes(database, schema, name string) ([]snowflake.ColumnInfo, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.GetTableColumnsWithTypes(a.ctx, database, schema, name)
+	return client.GetTableColumnsWithTypes(a.ctx, database, schema, name)
 }
 
 // GetColumnDetails returns the DEFAULT expression and masking policy attached to
 // a single column, backing the column properties editor's Default and Masking
 // Policy sections.
 func (a *App) GetColumnDetails(database, schema, table, column string) (snowflake.ColumnDetails, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return snowflake.ColumnDetails{}, apperrors.ErrNotConnected
 	}
-	return a.client.GetColumnDetails(a.ctx, database, schema, table, column)
+	return client.GetColumnDetails(a.ctx, database, schema, table, column)
 }
 
 // ListGitRepoEntries returns the immediate children (files and directories) at
 // dirPath inside the git repository stage @database.schema.repoName/dirPath.
 // Pass an empty dirPath to list the root.
 func (a *App) ListGitRepoEntries(database, schema, repoName, dirPath string) ([]snowflake.GitRepoEntry, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 
@@ -244,23 +267,25 @@ func (a *App) ListGitRepoEntries(database, schema, repoName, dirPath string) ([]
 		}
 	}
 
-	return a.client.ListGitRepoEntries(a.ctx, database, schema, repoName, dirPath)
+	return client.ListGitRepoEntries(a.ctx, database, schema, repoName, dirPath)
 }
 
 // ListGitBranches returns all branches in the given git repository.
 func (a *App) ListGitBranches(database, schema, repoName string) ([]snowflake.GitBranch, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.ListGitBranches(a.ctx, database, schema, repoName)
+	return client.ListGitBranches(a.ctx, database, schema, repoName)
 }
 
 // ListGitTags returns all tags in the given git repository.
 func (a *App) ListGitTags(database, schema, repoName string) ([]snowflake.GitTag, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.ListGitTags(a.ctx, database, schema, repoName)
+	return client.ListGitTags(a.ctx, database, schema, repoName)
 }
 
 // SetGitCommitFilter sets a commit hash filter for a specific repository.
@@ -285,37 +310,41 @@ func (a *App) GetGitCommitFilter(database, schema, repoName string) string {
 
 // GetGitFileContent reads a file from a git repository and returns its content.
 func (a *App) GetGitFileContent(database, schema, repoName, filePath string) (string, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return "", apperrors.ErrNotConnected
 	}
-	return a.client.GetGitFileContent(a.ctx, database, schema, repoName, filePath)
+	return client.GetGitFileContent(a.ctx, database, schema, repoName, filePath)
 }
 
 // ExecuteGitFile executes a SQL file from a git repository.
 func (a *App) ExecuteGitFile(database, schema, repoName, filePath string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return a.client.ExecuteGitFile(a.ctx, database, schema, repoName, filePath)
+	return client.ExecuteGitFile(a.ctx, database, schema, repoName, filePath)
 }
 
 // GetSchemaForeignKeys returns all FK→PK column mappings in the given schema
 // from INFORMATION_SCHEMA. Used by the editor to bulk-warm FK data for the
 // JOIN ON autocomplete instead of issuing per-table SHOW IMPORTED KEYS calls.
 func (a *App) GetSchemaForeignKeys(database, schema string) ([]snowflake.TableForeignKey, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.GetSchemaForeignKeys(a.ctx, database, schema)
+	return client.GetSchemaForeignKeys(a.ctx, database, schema)
 }
 
 // GetFunctionInfo fetches the DDL for a user-defined function and returns its
 // parameter list together with a flag indicating whether it is a table function.
 func (a *App) GetFunctionInfo(database, schema, name, argTypes string) (*snowflake.FunctionInfo, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.GetFunctionInfo(a.ctx, database, schema, name, argTypes)
+	return client.GetFunctionInfo(a.ctx, database, schema, name, argTypes)
 }
 
 // GetObjectDDL returns the definition of a single schema object using
@@ -326,10 +355,11 @@ func (a *App) GetFunctionInfo(database, schema, name, argTypes string) (*snowfla
 // (e.g. "NUMBER, VARCHAR") so Snowflake can resolve the correct overload.
 // Pass an empty string for all other object kinds.
 func (a *App) GetObjectDDL(database, schema, kind, name, arguments string) (string, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return "", apperrors.ErrNotConnected
 	}
-	return a.client.GetObjectDDL(a.ctx, database, schema, kind, name, arguments)
+	return client.GetObjectDDL(a.ctx, database, schema, kind, name, arguments)
 }
 
 // GetObjectDependencies parses the DDL of a VIEW, PROCEDURE, or FUNCTION and
@@ -338,10 +368,11 @@ func (a *App) GetObjectDDL(database, schema, kind, name, arguments string) (stri
 // arguments should be the parameter type list for procedures/functions
 // (e.g. "NUMBER, VARCHAR") or an empty string for views.
 func (a *App) GetObjectDependencies(database, schema, kind, name, arguments string) (snowflake.DependencyNode, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return snowflake.DependencyNode{}, apperrors.ErrNotConnected
 	}
-	return a.client.GetObjectDependencies(a.ctx, database, schema, kind, name, arguments)
+	return client.GetObjectDependencies(a.ctx, database, schema, kind, name, arguments)
 }
 
 // GetObjectProperties returns structured metadata for any Snowflake object by
@@ -350,10 +381,11 @@ func (a *App) GetObjectDependencies(database, schema, kind, name, arguments stri
 // MATERIALIZED VIEW, ALERT, TAG, FUNCTION, PROCEDURE, SEQUENCE, STAGE, STREAM, TASK,
 // FILE FORMAT, PIPE, WAREHOUSE, ROLE, USER.
 func (a *App) GetObjectProperties(database, schema, kind, name string) ([]snowflake.PropertyPair, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return objects.GetObjectProperties(a.ctx, a.client, database, schema, kind, name)
+	return objects.GetObjectProperties(a.ctx, client, database, schema, kind, name)
 }
 
 // GetRoutineProperties returns SHOW metadata for one specific overload of a
@@ -363,8 +395,9 @@ func (a *App) GetObjectProperties(database, schema, kind, name string) ([]snowfl
 // user acted on rather than always the first. Pass the same signature threaded
 // into AlterFunction / AlterProcedure.
 func (a *App) GetRoutineProperties(database, schema, kind, name, args string) ([]snowflake.PropertyPair, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return objects.GetRoutineProperties(a.ctx, a.client, database, schema, kind, name, args)
+	return objects.GetRoutineProperties(a.ctx, client, database, schema, kind, name, args)
 }

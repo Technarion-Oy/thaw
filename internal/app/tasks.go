@@ -28,38 +28,42 @@ func (a *App) AlterTask(database, schema, name, clause string) error {
 
 // ListFinalizableTasks returns every task in the schema along with an eligibility verdict.
 func (a *App) ListFinalizableTasks(database, schema string) ([]tasks.FinalizabilityRow, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return tasks.ListFinalizableTasks(a.ctx, a.client, database, schema)
+	return tasks.ListFinalizableTasks(a.ctx, client, database, schema)
 }
 
 // CloneChildTask clones a task and replaces its predecessors.
 // caseSensitive controls whether newName is double-quoted (preserving exact case)
 // or left unquoted when it is a valid bare identifier (Snowflake uppercases it).
 func (a *App) CloneChildTask(database, schema, oldName, newName string, caseSensitive bool, newPredecessors []string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return tasks.CloneChildTask(a.ctx, a.client, database, schema, oldName, newName, caseSensitive, newPredecessors)
+	return tasks.CloneChildTask(a.ctx, client, database, schema, oldName, newName, caseSensitive, newPredecessors)
 }
 
 // GetTaskStatuses returns the current state and last-run result for every task in the given schema.
 func (a *App) GetTaskStatuses(database, schema string) (tasks.StatusesResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return tasks.StatusesResult{}, apperrors.ErrNotConnected
 	}
-	return tasks.GetStatuses(a.ctx, a.client, database, schema)
+	return tasks.GetStatuses(a.ctx, client, database, schema)
 }
 
 // GetTopologicalOrder computes a dependency-safe topological ordering of tasks
 // in a graph rooted at rootName. It fetches current task statuses from
 // Snowflake and runs Kahn's algorithm on the result.
 func (a *App) GetTopologicalOrder(database, schema, rootName string) (tasks.TopologicalOrder, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return tasks.TopologicalOrder{}, apperrors.ErrNotConnected
 	}
-	result, err := tasks.GetStatuses(a.ctx, a.client, database, schema)
+	result, err := tasks.GetStatuses(a.ctx, client, database, schema)
 	if err != nil {
 		return tasks.TopologicalOrder{}, err
 	}
@@ -69,18 +73,20 @@ func (a *App) GetTopologicalOrder(database, schema, rootName string) (tasks.Topo
 // ExportGraphDDL fetches task statuses and DDL for every task in the graph
 // rooted at rootName and returns a dependency-ordered DDL script.
 func (a *App) ExportGraphDDL(database, schema, rootName string, includeSuspendResume bool) (tasks.ExportGraphDDLResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return tasks.ExportGraphDDLResult{}, apperrors.ErrNotConnected
 	}
-	return tasks.ExportGraphDDL(a.ctx, a.client, database, schema, rootName, includeSuspendResume)
+	return tasks.ExportGraphDDL(a.ctx, client, database, schema, rootName, includeSuspendResume)
 }
 
 // GetTaskRunHistory returns the execution history for a task from INFORMATION_SCHEMA.TASK_HISTORY().
 func (a *App) GetTaskRunHistory(database, schema, taskName string, isRoot bool, days int) ([]tasks.TaskHistoryRow, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return tasks.GetTaskRunHistory(a.ctx, a.client, database, schema, taskName, isRoot, days)
+	return tasks.GetTaskRunHistory(a.ctx, client, database, schema, taskName, isRoot, days)
 }
 
 // ListRootTasks returns task finalizability rows for the given schema.
@@ -92,20 +98,22 @@ func (a *App) ListRootTasks(database, schema string) ([]tasks.FinalizabilityRow,
 // TaskHasChildren reports whether any task in the schema lists taskName as a
 // predecessor (i.e. the task has at least one dependent / child task).
 func (a *App) TaskHasChildren(database, schema, taskName string) (bool, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return false, apperrors.ErrNotConnected
 	}
-	return tasks.HasChildren(a.ctx, a.client, database, schema, taskName)
+	return tasks.HasChildren(a.ctx, client, database, schema, taskName)
 }
 
 // EnableTaskDependents resumes the named task and all of its descendants.
 // Tasks are resumed in leaf-first (post-order) so that children are active
 // before their parent, which Snowflake requires when enabling a task graph.
 func (a *App) EnableTaskDependents(database, schema, taskName string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return tasks.EnableDependents(a.ctx, a.client, database, schema, taskName)
+	return tasks.EnableDependents(a.ctx, client, database, schema, taskName)
 }
 
 // SuspendTaskList suspends each task in the provided list in order.
@@ -114,11 +122,12 @@ func (a *App) EnableTaskDependents(database, schema, taskName string) error {
 // This is used by the frontend which already has the full graph state and can
 // compute the correct order without re-parsing SHOW TASKS predecessor columns.
 func (a *App) SuspendTaskList(database, schema string, names []string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
 	for _, name := range names {
-		if _, err := a.client.Execute(a.ctx,
+		if _, err := client.Execute(a.ctx,
 			fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s SUSPEND", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))); err != nil {
 			return fmt.Errorf("suspending task %q: %w", name, err)
 		}
@@ -133,11 +142,12 @@ func (a *App) SuspendTaskList(database, schema string, names []string) error {
 // This is used by the frontend which already has the full graph state and can
 // compute the correct order without re-parsing SHOW TASKS predecessor columns.
 func (a *App) ResumeTaskList(database, schema string, names []string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
 	for _, name := range names {
-		if _, err := a.client.Execute(a.ctx,
+		if _, err := client.Execute(a.ctx,
 			fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s RESUME", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))); err != nil {
 			return fmt.Errorf("resuming task %q: %w", name, err)
 		}
@@ -148,27 +158,30 @@ func (a *App) ResumeTaskList(database, schema string, names []string) error {
 // SuspendTaskGraph suspends the root task first (to stop it from scheduling new
 // runs) and then suspends every descendant task in the graph.
 func (a *App) SuspendTaskGraph(database, schema, taskName string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return tasks.SuspendGraph(a.ctx, a.client, database, schema, taskName)
+	return tasks.SuspendGraph(a.ctx, client, database, schema, taskName)
 }
 
 // DropTaskTree suspends and drops the named task and all of its descendants.
 // Tasks are processed in post-order (leaves first, root last).
 func (a *App) DropTaskTree(database, schema, taskName string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return tasks.DropTree(a.ctx, a.client, database, schema, taskName)
+	return tasks.DropTree(a.ctx, client, database, schema, taskName)
 }
 
 // ExecuteTask manually triggers a single run of a Snowflake Task.
 // Pass a non-empty config JSON string to use USING CONFIG, or set
 // retryLast to true to re-execute the last failed run.
 func (a *App) ExecuteTask(database, schema, name, config string, retryLast bool) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return a.client.ExecuteTask(a.ctx, database, schema, name, config, retryLast)
+	return client.ExecuteTask(a.ctx, database, schema, name, config, retryLast)
 }

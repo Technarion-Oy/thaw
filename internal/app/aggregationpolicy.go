@@ -34,7 +34,8 @@ func (a *App) AlterAggregationPolicy(database, schema, name, clause string) erro
 // ACCOUNTADMIN role or a grant on the SNOWFLAKE database) and has propagation
 // latency, so a newly-applied policy may not appear immediately.
 func (a *App) GetAggregationPolicyReferences(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	query := fmt.Sprintf(
@@ -43,5 +44,5 @@ func (a *App) GetAggregationPolicyReferences(database, schema, name string) (*sn
 			"WHERE POLICY_DB = '%s' AND POLICY_SCHEMA = '%s' AND POLICY_NAME = '%s' AND POLICY_KIND = 'AGGREGATION_POLICY' "+
 			"ORDER BY REF_DATABASE_NAME, REF_SCHEMA_NAME, REF_ENTITY_NAME",
 		snowflake.EscapeStringLit(database), snowflake.EscapeStringLit(schema), snowflake.EscapeStringLit(name))
-	return a.client.QuerySingle(a.ctx, query)
+	return client.QuerySingle(a.ctx, query)
 }

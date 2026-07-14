@@ -34,7 +34,8 @@ func (a *App) AlterProjectionPolicy(database, schema, name, clause string) error
 // ACCOUNTADMIN role or a grant on the SNOWFLAKE database) and has propagation
 // latency, so a newly-applied policy may not appear immediately.
 func (a *App) GetProjectionPolicyReferences(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	query := fmt.Sprintf(
@@ -46,5 +47,5 @@ func (a *App) GetProjectionPolicyReferences(database, schema, name string) (*sno
 			// same table sort in an unspecified order.
 			"ORDER BY REF_DATABASE_NAME, REF_SCHEMA_NAME, REF_ENTITY_NAME, REF_COLUMN_NAME",
 		snowflake.EscapeStringLit(database), snowflake.EscapeStringLit(schema), snowflake.EscapeStringLit(name))
-	return a.client.QuerySingle(a.ctx, query)
+	return client.QuerySingle(a.ctx, query)
 }

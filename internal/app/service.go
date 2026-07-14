@@ -34,12 +34,13 @@ func (a *App) AlterService(database, schema, name, clause string) error {
 // (typically name, port, protocol, ingress_enabled, ingress_url) without the
 // backend pinning a fixed shape.
 func (a *App) ListServiceEndpoints(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("SHOW ENDPOINTS IN SERVICE %s.%s.%s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
-	return a.client.Execute(a.ctx, sql)
+	return client.Execute(a.ctx, sql)
 }
 
 // GetServiceContainers returns the per-instance container status for the given
@@ -48,12 +49,13 @@ func (a *App) ListServiceEndpoints(database, schema, name string) (*snowflake.Qu
 // the properties panel can render every column the Snowflake edition reports
 // (typically instance_id, container_name, status, message, image_name).
 func (a *App) GetServiceContainers(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("SHOW SERVICE CONTAINERS IN SERVICE %s.%s.%s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
-	return a.client.Execute(a.ctx, sql)
+	return client.Execute(a.ctx, sql)
 }
 
 // GetServiceLogs returns the container logs for a single service instance via
@@ -63,7 +65,8 @@ func (a *App) GetServiceContainers(database, schema, name string) (*snowflake.Qu
 // trailing log lines returned. The function returns the log text as a single
 // string (Snowflake returns the logs in one cell).
 func (a *App) GetServiceLogs(database, schema, name, containerName string, instanceID, numLines int) (string, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return "", apperrors.ErrNotConnected
 	}
 	fqn := fmt.Sprintf("%s.%s.%s",
@@ -81,7 +84,7 @@ func (a *App) GetServiceLogs(database, schema, name, containerName string, insta
 			fqnLit, instanceID, containerLit)
 	}
 
-	res, err := a.client.Execute(a.ctx, sql)
+	res, err := client.Execute(a.ctx, sql)
 	if err != nil {
 		return "", err
 	}

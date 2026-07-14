@@ -36,10 +36,11 @@ func (a *App) AlterDataset(database, schema, name, clause string) error {
 // panel can render every column the Snowflake edition reports without the backend
 // pinning a fixed shape.
 func (a *App) ListDatasetVersions(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("SHOW VERSIONS IN DATASET %s.%s.%s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
-	return a.client.Execute(a.ctx, sql)
+	return client.Execute(a.ctx, sql)
 }

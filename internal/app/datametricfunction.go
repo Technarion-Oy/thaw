@@ -27,12 +27,13 @@ import (
 // quoting inside the clause; this method only double-quotes the function
 // identifier and interpolates args into the signature parentheses.
 func (a *App) AlterDataMetricFunction(database, schema, name, args, clause string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("ALTER FUNCTION %s.%s.%s(%s) %s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), args, clause)
-	_, err := a.client.Execute(a.ctx, sql)
+	_, err := client.Execute(a.ctx, sql)
 	return err
 }
 
@@ -44,12 +45,13 @@ func (a *App) AlterDataMetricFunction(database, schema, name, args, clause strin
 // QueryResult is returned (property / value columns) so the caller can render
 // every row without the backend pinning a fixed shape.
 func (a *App) DescribeDataMetricFunction(database, schema, name, args string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("DESCRIBE FUNCTION %s.%s.%s(%s)",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), args)
-	return a.client.Execute(a.ctx, sql)
+	return client.Execute(a.ctx, sql)
 }
 
 // GetDataMetricFunctionReferences returns the tables and views the given data
@@ -63,7 +65,8 @@ func (a *App) DescribeDataMetricFunction(database, schema, name, args string) (*
 // available". The raw QueryResult is returned so the caller can render every
 // column without the backend pinning a fixed shape.
 func (a *App) GetDataMetricFunctionReferences(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf(
@@ -72,7 +75,7 @@ func (a *App) GetDataMetricFunctionReferences(database, schema, name string) (*s
 			"WHERE metric_database_name = '%s' AND metric_schema_name = '%s' AND metric_name = '%s' "+
 			"ORDER BY ref_database_name, ref_schema_name, ref_entity_name",
 		snowflake.EscapeStringLit(database), snowflake.EscapeStringLit(schema), snowflake.EscapeStringLit(name))
-	return a.client.Execute(a.ctx, sql)
+	return client.Execute(a.ctx, sql)
 }
 
 // GetDataMetricFunctionTags returns the tags currently applied to the given data
@@ -84,7 +87,8 @@ func (a *App) GetDataMetricFunctionReferences(database, schema, name string) (*s
 // / tag_value columns) so the properties modal can render each tag as a removable
 // chip.
 func (a *App) GetDataMetricFunctionTags(database, schema, name, args string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	fqn := fmt.Sprintf("%s.%s.%s(%s)",
@@ -94,5 +98,5 @@ func (a *App) GetDataMetricFunctionTags(database, schema, name, args string) (*s
 			"FROM TABLE(%s.INFORMATION_SCHEMA.TAG_REFERENCES('%s', 'FUNCTION')) "+
 			"ORDER BY TAG_DATABASE, TAG_SCHEMA, TAG_NAME",
 		snowflake.QuoteIdent(database), snowflake.EscapeStringLit(fqn))
-	return a.client.Execute(a.ctx, sql)
+	return client.Execute(a.ctx, sql)
 }

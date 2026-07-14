@@ -30,14 +30,15 @@ func (a *App) AlterPipe(database, schema, name, clause string) error {
 // notificationChannelName. executionState is "PAUSED" when the pipe has been
 // paused via ALTER PIPE SET PIPE_EXECUTION_PAUSED = TRUE.
 func (a *App) GetPipeStatus(database, schema, name string) (string, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return "", apperrors.ErrNotConnected
 	}
 	// Build the FQN with double-quoted parts, then escape any embedded single
 	// quotes so the whole string is safe inside the outer SQL string literal.
 	pipeFqn := snowflake.QuoteIdent(database) + "." + snowflake.QuoteIdent(schema) + "." + snowflake.QuoteIdent(name)
 	sql := fmt.Sprintf("SELECT SYSTEM$PIPE_STATUS('%s')", snowflake.EscapeStringLit(pipeFqn))
-	result, err := a.client.Execute(a.ctx, sql)
+	result, err := client.Execute(a.ctx, sql)
 	if err != nil {
 		return "", err
 	}
@@ -52,8 +53,9 @@ func (a *App) GetPipeStatus(database, schema, name string) (string, error) {
 // status is an optional status filter (LOADED, LOAD_FAILED, PARTIALLY_LOADED, etc.); if empty, all statuses are returned.
 // fileName is an optional file name substring filter; if empty, all files are returned.
 func (a *App) GetPipeCopyHistory(database, schema, name, startTime, status, fileName string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return pipe.GetCopyHistory(a.ctx, a.client, database, schema, name, startTime, status, fileName)
+	return pipe.GetCopyHistory(a.ctx, client, database, schema, name, startTime, status, fileName)
 }

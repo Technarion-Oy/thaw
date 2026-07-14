@@ -22,11 +22,12 @@ import (
 // for correct SQL quoting inside the clause; this method only double-quotes the
 // schema identifier.
 func (a *App) AlterSchema(database, schema, clause string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("ALTER SCHEMA %s %s", snowflake.Qualify(database, schema), clause)
-	_, err := a.client.Execute(a.ctx, sql)
+	_, err := client.Execute(a.ctx, sql)
 	return err
 }
 
@@ -38,10 +39,11 @@ func (a *App) AlterSchema(database, schema, clause string) error {
 // caller can pick out the parameters it cares about without the backend pinning
 // a fixed shape.
 func (a *App) GetSchemaParameters(database, schema string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("SHOW PARAMETERS IN SCHEMA %s.%s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
-	return a.client.Execute(a.ctx, sql)
+	return client.Execute(a.ctx, sql)
 }

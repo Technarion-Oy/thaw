@@ -35,12 +35,13 @@ func (a *App) AlterSemanticView(database, schema, name, clause string) error {
 // logical table, relationship, dimension, fact, or metric. Columns are
 // object_kind / object_name / parent_entity / property / property_value.
 func (a *App) DescribeSemanticView(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("DESCRIBE SEMANTIC VIEW %s",
 		snowflake.Qualify(database, schema, name))
-	return a.client.Execute(a.ctx, sql)
+	return client.Execute(a.ctx, sql)
 }
 
 // ListSemanticDimensions runs SHOW SEMANTIC DIMENSIONS IN <fqn> and returns the
@@ -48,36 +49,39 @@ func (a *App) DescribeSemanticView(database, schema, name string) (*snowflake.Qu
 // table_name / name / data_type / synonyms / comment), rendered by the
 // properties panel's Dimensions table.
 func (a *App) ListSemanticDimensions(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("SHOW SEMANTIC DIMENSIONS IN %s",
 		snowflake.Qualify(database, schema, name))
-	return a.client.Execute(a.ctx, sql)
+	return client.Execute(a.ctx, sql)
 }
 
 // ListSemanticFacts runs SHOW SEMANTIC FACTS IN <fqn> and returns the raw
 // QueryResult (same column shape as SHOW SEMANTIC DIMENSIONS), rendered by the
 // properties panel's Facts table.
 func (a *App) ListSemanticFacts(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("SHOW SEMANTIC FACTS IN %s",
 		snowflake.Qualify(database, schema, name))
-	return a.client.Execute(a.ctx, sql)
+	return client.Execute(a.ctx, sql)
 }
 
 // ListSemanticMetrics runs SHOW SEMANTIC METRICS IN <fqn> and returns the raw
 // QueryResult (same column shape as SHOW SEMANTIC DIMENSIONS), rendered by the
 // properties panel's Metrics table.
 func (a *App) ListSemanticMetrics(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("SHOW SEMANTIC METRICS IN %s",
 		snowflake.Qualify(database, schema, name))
-	return a.client.Execute(a.ctx, sql)
+	return client.Execute(a.ctx, sql)
 }
 
 // ListSemanticDimensionsForMetric runs SHOW SEMANTIC DIMENSIONS IN <fqn> FOR
@@ -86,12 +90,13 @@ func (a *App) ListSemanticMetrics(database, schema, name string) (*snowflake.Que
 // be queried alongside a specific metric. The metric name is double-quoted as an
 // identifier.
 func (a *App) ListSemanticDimensionsForMetric(database, schema, name, metric string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("SHOW SEMANTIC DIMENSIONS IN %s FOR METRIC %s",
 		snowflake.Qualify(database, schema, name), snowflake.QuoteIdent(metric))
-	return a.client.Execute(a.ctx, sql)
+	return client.Execute(a.ctx, sql)
 }
 
 // GetSemanticViewTags returns the tags currently applied to the given semantic
@@ -103,7 +108,8 @@ func (a *App) ListSemanticDimensionsForMetric(database, schema, name, metric str
 // chip. The caller treats an error as "no tags available" and still allows
 // SET/UNSET TAG.
 func (a *App) GetSemanticViewTags(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	fqn := fmt.Sprintf("%s.%s.%s",
@@ -116,5 +122,5 @@ func (a *App) GetSemanticViewTags(database, schema, name string) (*snowflake.Que
 		// backslash in an identifier must be doubled to survive the single-quoted
 		// literal rather than being read as a Snowflake escape sequence.
 		snowflake.QuoteIdent(database), snowflake.EscapeTextLit(fqn))
-	return a.client.Execute(a.ctx, sql)
+	return client.Execute(a.ctx, sql)
 }
