@@ -40,10 +40,17 @@ type InsertRowValue struct {
 	Value    string `json:"value"`
 }
 
-// InsertRowConfig holds the per-column values for a single-row INSERT. Field
+// InsertRowConfig holds the per-column values for one row of an INSERT. Field
 // names mirror the frontend so the Wails-generated model maps cleanly.
 type InsertRowConfig struct {
 	Values []InsertRowValue `json:"values"`
+}
+
+// InsertRowsConfig holds one or more rows to insert in a single statement. Every
+// row's Values align to the same columns (in the same order); the column list of
+// the emitted statement is taken from the first row.
+type InsertRowsConfig struct {
+	Rows []InsertRowConfig `json:"rows"`
 }
 
 // reNumericLit matches a decimal or scientific numeric literal (optionally
@@ -132,21 +139,13 @@ func renderTypedLiteral(dataType, value string) string {
 	}
 }
 
-// BuildInsertRowSql constructs a single-row INSERT INTO ... (cols) VALUES (...)
-// statement from the per-column form values.
-//
-// The column list is fully double-quoted (QuoteIdent). Each value is rendered
-// by mode: a typed literal, NULL, DEFAULT, or a raw expression (function-picker
-// values such as CURRENT_TIMESTAMP()). Values with an empty column name are
-// skipped so a partially-filled form still yields valid preview SQL.
-//
-// It always returns a nil error; the error result exists for IPC symmetry with
-// the other builders and to leave room for future validation without changing
-// the Wails-bound signature.
-func BuildInsertRowSql(db, schema, tableName string, cfg InsertRowConfig) (string, error) {
-	cols := make([]string, 0, len(cfg.Values))
-	vals := make([]string, 0, len(cfg.Values))
-	for _, v := range cfg.Values {
+// renderRow renders one row into its double-quoted column list and its rendered
+// VALUES tokens. Values with an empty column name are skipped so a
+// partially-filled form still yields valid preview SQL.
+func renderRow(row InsertRowConfig) (cols, vals []string) {
+	cols = make([]string, 0, len(row.Values))
+	vals = make([]string, 0, len(row.Values))
+	for _, v := range row.Values {
 		name := strings.TrimSpace(v.Column)
 		if name == "" {
 			continue
@@ -154,7 +153,37 @@ func BuildInsertRowSql(db, schema, tableName string, cfg InsertRowConfig) (strin
 		cols = append(cols, snowflake.QuoteIdent(name))
 		vals = append(vals, renderInsertValue(v))
 	}
+	return cols, vals
+}
+
+// BuildInsertRowsSql constructs an INSERT INTO ... (cols) VALUES (...), (...)
+// statement inserting one or more rows in a single statement.
+//
+// The column list is fully double-quoted (QuoteIdent) and taken from the first
+// row; every row must align to those columns in the same order (the frontend
+// builds all rows from the same table columns). Each value is rendered by mode:
+// a typed literal, NULL, DEFAULT, or a raw expression (function-picker values
+// such as CURRENT_TIMESTAMP()).
+//
+// It always returns a nil error; the error result exists for IPC symmetry with
+// the other builders and to leave room for future validation without changing
+// the Wails-bound signature.
+func BuildInsertRowsSql(db, schema, tableName string, cfg InsertRowsConfig) (string, error) {
+	var cols []string
+	tuples := make([]string, 0, len(cfg.Rows))
+	for i, row := range cfg.Rows {
+		c, vals := renderRow(row)
+		if i == 0 {
+			cols = c
+		}
+		tuples = append(tuples, "("+strings.Join(vals, ", ")+")")
+	}
+	if len(tuples) == 0 {
+		// No rows yet — emit a degenerate single empty tuple so the live preview
+		// stays syntactically shaped; the frontend gates submission on canSubmit.
+		tuples = append(tuples, "()")
+	}
 
 	return "INSERT INTO " + snowflake.Qualify(db, schema, tableName) +
-		" (" + strings.Join(cols, ", ") + ") VALUES (" + strings.Join(vals, ", ") + ");", nil
+		" (" + strings.Join(cols, ", ") + ") VALUES " + strings.Join(tuples, ", ") + ";", nil
 }

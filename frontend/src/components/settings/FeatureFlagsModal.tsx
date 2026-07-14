@@ -319,7 +319,7 @@ export default function FeatureFlagsModal({ onClose }: Props) {
           />
           <FlagRow
             label="Insert Row"
-            description="Per-column form to INSERT a single row into a table, with NULL/DEFAULT and built-in function shortcuts."
+            description="Per-column grid form to INSERT one or more rows into a table, with NULL/DEFAULT and built-in function shortcuts."
             checked={flags.insertRow}
             locked={locked.insertRow}
             onChange={(v) => set("insertRow", v)}

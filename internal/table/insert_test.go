@@ -29,92 +29,116 @@ func assertEqual(t *testing.T, got, want string) {
 	}
 }
 
-func TestBuildInsertRowSql_Basic(t *testing.T) {
-	cfg := InsertRowConfig{Values: []InsertRowValue{
-		{Column: "ID", DataType: "NUMBER(38,0)", Mode: "value", Value: "42"},
-		{Column: "NAME", DataType: "VARCHAR(256)", Mode: "value", Value: "Alice"},
-	}}
-	sql, err := BuildInsertRowSql("DB", "SC", "T", cfg)
+// oneRow wraps a single row's values into an InsertRowsConfig for the
+// single-row test cases.
+func oneRow(vals ...InsertRowValue) InsertRowsConfig {
+	return InsertRowsConfig{Rows: []InsertRowConfig{{Values: vals}}}
+}
+
+func TestBuildInsertRowsSql_Basic(t *testing.T) {
+	cfg := oneRow(
+		InsertRowValue{Column: "ID", DataType: "NUMBER(38,0)", Mode: "value", Value: "42"},
+		InsertRowValue{Column: "NAME", DataType: "VARCHAR(256)", Mode: "value", Value: "Alice"},
+	)
+	sql, err := BuildInsertRowsSql("DB", "SC", "T", cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	assertEqual(t, sql, `INSERT INTO "DB"."SC"."T" ("ID", "NAME") VALUES (42, 'Alice');`)
 }
 
-func TestBuildInsertRowSql_StringEscaping(t *testing.T) {
-	cfg := InsertRowConfig{Values: []InsertRowValue{
-		{Column: "NOTE", DataType: "VARCHAR", Mode: "value", Value: "it's a path C:\\tmp"},
-	}}
-	sql, _ := BuildInsertRowSql("DB", "SC", "T", cfg)
+func TestBuildInsertRowsSql_StringEscaping(t *testing.T) {
+	cfg := oneRow(InsertRowValue{Column: "NOTE", DataType: "VARCHAR", Mode: "value", Value: "it's a path C:\\tmp"})
+	sql, _ := BuildInsertRowsSql("DB", "SC", "T", cfg)
 	// QuoteTextLit doubles both single-quotes and backslashes.
 	assertContains(t, sql, `VALUES ('it''s a path C:\\tmp')`)
 }
 
-func TestBuildInsertRowSql_NullAndDefault(t *testing.T) {
-	cfg := InsertRowConfig{Values: []InsertRowValue{
-		{Column: "A", DataType: "VARCHAR", Mode: "null"},
-		{Column: "B", DataType: "NUMBER", Mode: "default"},
-	}}
-	sql, _ := BuildInsertRowSql("DB", "SC", "T", cfg)
+func TestBuildInsertRowsSql_NullAndDefault(t *testing.T) {
+	cfg := oneRow(
+		InsertRowValue{Column: "A", DataType: "VARCHAR", Mode: "null"},
+		InsertRowValue{Column: "B", DataType: "NUMBER", Mode: "default"},
+	)
+	sql, _ := BuildInsertRowsSql("DB", "SC", "T", cfg)
 	assertEqual(t, sql, `INSERT INTO "DB"."SC"."T" ("A", "B") VALUES (NULL, DEFAULT);`)
 }
 
-func TestBuildInsertRowSql_Expression(t *testing.T) {
-	cfg := InsertRowConfig{Values: []InsertRowValue{
-		{Column: "CREATED_AT", DataType: "TIMESTAMP_NTZ(9)", Mode: "expression", Value: "CURRENT_TIMESTAMP()"},
-	}}
-	sql, _ := BuildInsertRowSql("DB", "SC", "T", cfg)
+func TestBuildInsertRowsSql_Expression(t *testing.T) {
+	cfg := oneRow(InsertRowValue{Column: "CREATED_AT", DataType: "TIMESTAMP_NTZ(9)", Mode: "expression", Value: "CURRENT_TIMESTAMP()"})
+	sql, _ := BuildInsertRowsSql("DB", "SC", "T", cfg)
 	// Expressions are emitted verbatim, NOT quoted.
 	assertEqual(t, sql, `INSERT INTO "DB"."SC"."T" ("CREATED_AT") VALUES (CURRENT_TIMESTAMP());`)
 }
 
-func TestBuildInsertRowSql_Boolean(t *testing.T) {
-	cfg := InsertRowConfig{Values: []InsertRowValue{
-		{Column: "OK", DataType: "BOOLEAN", Mode: "value", Value: "yes"},
-		{Column: "BAD", DataType: "BOOLEAN", Mode: "value", Value: "false"},
-	}}
-	sql, _ := BuildInsertRowSql("DB", "SC", "T", cfg)
+func TestBuildInsertRowsSql_Boolean(t *testing.T) {
+	cfg := oneRow(
+		InsertRowValue{Column: "OK", DataType: "BOOLEAN", Mode: "value", Value: "yes"},
+		InsertRowValue{Column: "BAD", DataType: "BOOLEAN", Mode: "value", Value: "false"},
+	)
+	sql, _ := BuildInsertRowsSql("DB", "SC", "T", cfg)
 	assertContains(t, sql, `VALUES (TRUE, FALSE)`)
 }
 
-func TestBuildInsertRowSql_NumericEmptyIsNull(t *testing.T) {
-	cfg := InsertRowConfig{Values: []InsertRowValue{
-		{Column: "N", DataType: "NUMBER(10,2)", Mode: "value", Value: ""},
-	}}
-	sql, _ := BuildInsertRowSql("DB", "SC", "T", cfg)
+func TestBuildInsertRowsSql_NumericEmptyIsNull(t *testing.T) {
+	cfg := oneRow(InsertRowValue{Column: "N", DataType: "NUMBER(10,2)", Mode: "value", Value: ""})
+	sql, _ := BuildInsertRowsSql("DB", "SC", "T", cfg)
 	assertContains(t, sql, `VALUES (NULL)`)
 }
 
-func TestBuildInsertRowSql_NonNumericValueIsQuoted(t *testing.T) {
-	cfg := InsertRowConfig{Values: []InsertRowValue{
-		{Column: "N", DataType: "NUMBER(10,2)", Mode: "value", Value: "1); DROP TABLE X;--"},
-	}}
-	sql, _ := BuildInsertRowSql("DB", "SC", "T", cfg)
+func TestBuildInsertRowsSql_NonNumericValueIsQuoted(t *testing.T) {
+	cfg := oneRow(InsertRowValue{Column: "N", DataType: "NUMBER(10,2)", Mode: "value", Value: "1); DROP TABLE X;--"})
+	sql, _ := BuildInsertRowsSql("DB", "SC", "T", cfg)
 	// An invalid numeric is quoted, so no injection escapes the literal.
 	assertContains(t, sql, `VALUES ('1); DROP TABLE X;--')`)
 }
 
-func TestBuildInsertRowSql_EmptyStringLiteral(t *testing.T) {
-	cfg := InsertRowConfig{Values: []InsertRowValue{
-		{Column: "S", DataType: "VARCHAR", Mode: "value", Value: ""},
-	}}
-	sql, _ := BuildInsertRowSql("DB", "SC", "T", cfg)
+func TestBuildInsertRowsSql_EmptyStringLiteral(t *testing.T) {
+	cfg := oneRow(InsertRowValue{Column: "S", DataType: "VARCHAR", Mode: "value", Value: ""})
+	sql, _ := BuildInsertRowsSql("DB", "SC", "T", cfg)
 	assertContains(t, sql, `VALUES ('')`)
 }
 
-func TestBuildInsertRowSql_SkipsEmptyColumnName(t *testing.T) {
-	cfg := InsertRowConfig{Values: []InsertRowValue{
-		{Column: "ID", DataType: "NUMBER", Mode: "value", Value: "1"},
-		{Column: "", DataType: "VARCHAR", Mode: "value", Value: "ignored"},
-	}}
-	sql, _ := BuildInsertRowSql("DB", "SC", "T", cfg)
+func TestBuildInsertRowsSql_SkipsEmptyColumnName(t *testing.T) {
+	cfg := oneRow(
+		InsertRowValue{Column: "ID", DataType: "NUMBER", Mode: "value", Value: "1"},
+		InsertRowValue{Column: "", DataType: "VARCHAR", Mode: "value", Value: "ignored"},
+	)
+	sql, _ := BuildInsertRowsSql("DB", "SC", "T", cfg)
 	assertEqual(t, sql, `INSERT INTO "DB"."SC"."T" ("ID") VALUES (1);`)
 }
 
-func TestBuildInsertRowSql_QuotesSpecialIdentifiers(t *testing.T) {
-	cfg := InsertRowConfig{Values: []InsertRowValue{
-		{Column: `My "Col"`, DataType: "VARCHAR", Mode: "value", Value: "x"},
-	}}
-	sql, _ := BuildInsertRowSql("DB", "SC", "T", cfg)
+func TestBuildInsertRowsSql_QuotesSpecialIdentifiers(t *testing.T) {
+	cfg := oneRow(InsertRowValue{Column: `My "Col"`, DataType: "VARCHAR", Mode: "value", Value: "x"})
+	sql, _ := BuildInsertRowsSql("DB", "SC", "T", cfg)
 	assertContains(t, sql, `("My ""Col""")`)
+}
+
+func TestBuildInsertRowsSql_MultipleRows(t *testing.T) {
+	cfg := InsertRowsConfig{Rows: []InsertRowConfig{
+		{Values: []InsertRowValue{
+			{Column: "ID", DataType: "NUMBER(38,0)", Mode: "value", Value: "1"},
+			{Column: "NAME", DataType: "VARCHAR", Mode: "value", Value: "Alice"},
+		}},
+		{Values: []InsertRowValue{
+			{Column: "ID", DataType: "NUMBER(38,0)", Mode: "value", Value: "2"},
+			{Column: "NAME", DataType: "VARCHAR", Mode: "null"},
+		}},
+		{Values: []InsertRowValue{
+			{Column: "ID", DataType: "NUMBER(38,0)", Mode: "default"},
+			{Column: "NAME", DataType: "VARCHAR", Mode: "expression", Value: "UPPER('bob')"},
+		}},
+	}}
+	sql, err := BuildInsertRowsSql("DB", "SC", "T", cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Column list appears once; one parenthesized tuple per row, comma-separated.
+	assertEqual(t, sql,
+		`INSERT INTO "DB"."SC"."T" ("ID", "NAME") VALUES (1, 'Alice'), (2, NULL), (DEFAULT, UPPER('bob'));`)
+}
+
+func TestBuildInsertRowsSql_NoRows(t *testing.T) {
+	sql, _ := BuildInsertRowsSql("DB", "SC", "T", InsertRowsConfig{})
+	// Degenerate but syntactically shaped preview before any row is added.
+	assertEqual(t, sql, `INSERT INTO "DB"."SC"."T" () VALUES ();`)
 }

@@ -6417,7 +6417,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={insertRowModal.schema}
           table={insertRowModal.table}
           onClose={() => setInsertRowModal(null)}
-          onSuccess={() => message.success(`Row inserted into "${insertRowModal.table}"`)}
+          onSuccess={(n) => message.success(`${n} row${n === 1 ? "" : "s"} inserted into "${insertRowModal.table}"`)}
         />
       )}
 

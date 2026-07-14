@@ -112,10 +112,10 @@ func (a *App) BuildDropColumnSql(database, schema, table, col string) string {
 	return column.BuildDropColumnSql(database, schema, table, col)
 }
 
-// BuildInsertRowSql returns the SQL for a single-row INSERT INTO ... VALUES
-// statement built from the per-column form values.
-func (a *App) BuildInsertRowSql(database, schema, tableName string, cfg table.InsertRowConfig) (string, error) {
-	return table.BuildInsertRowSql(database, schema, tableName, cfg)
+// BuildInsertRowsSql returns the SQL for an INSERT INTO ... VALUES statement
+// that inserts one or more rows built from the per-column form values.
+func (a *App) BuildInsertRowsSql(database, schema, tableName string, cfg table.InsertRowsConfig) (string, error) {
+	return table.BuildInsertRowsSql(database, schema, tableName, cfg)
 }
 
 // BuildRenameColumnSql returns the SQL for an ALTER TABLE ... RENAME COLUMN statement.

@@ -310,7 +310,7 @@ export function BuildExecuteDbtProjectSql(arg1:string,arg2:string,arg3:string,ar
 
 export function BuildFunctionSelectStatement(arg1:string,arg2:string,arg3:string,arg4:Array<procedure.Argument>,arg5:boolean):Promise<string>;
 
-export function BuildInsertRowSql(arg1:string,arg2:string,arg3:string,arg4:table.InsertRowConfig):Promise<string>;
+export function BuildInsertRowsSql(arg1:string,arg2:string,arg3:string,arg4:table.InsertRowsConfig):Promise<string>;
 
 export function BuildJoinSQL(arg1:erdesigner.JoinQueryState):Promise<string>;
 

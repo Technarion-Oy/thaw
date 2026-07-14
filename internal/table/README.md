@@ -13,9 +13,10 @@ Provides four related capabilities for managing Snowflake tables:
    `DEFAULT_DDL_COLLATION`) and returns a typed `TableSettings` struct.
 3. **ALTER TABLE SQL builders** — constructs a single-property `ALTER TABLE SET`
    statement for any supported table property.
-4. **Single-row INSERT builder** — renders an `INSERT INTO … (cols) VALUES (…)`
-   statement from per-column form values, quoting each value as a typed literal
-   (or emitting NULL / DEFAULT / a raw expression). Backs the Insert Row modal.
+4. **Multi-row INSERT builder** — renders an `INSERT INTO … (cols) VALUES (…), (…)`
+   statement from per-column form values for one or more rows, quoting each value
+   as a typed literal (or emitting NULL / DEFAULT / a raw expression). Backs the
+   Insert Row modal.
 
 ## Key files
 
@@ -23,9 +24,9 @@ Provides four related capabilities for managing Snowflake tables:
 |------|---------|
 | `doc.go` | Package doc + `thaw:domain` annotation (Object Browser & Administration) |
 | `table.go` | Table-summary / settings types and functions |
-| `insert.go` | `InsertRowConfig` / `InsertRowValue` types + `BuildInsertRowSql` and its per-type literal rendering |
+| `insert.go` | `InsertRowsConfig` / `InsertRowConfig` / `InsertRowValue` types + `BuildInsertRowsSql` and its per-type literal rendering |
 | `table_test.go` | Unit tests for the summary/settings builders and parsers |
-| `insert_test.go` | Unit tests for `BuildInsertRowSql` (typed literals, NULL/DEFAULT/expression, escaping) |
+| `insert_test.go` | Unit tests for `BuildInsertRowsSql` (typed literals, NULL/DEFAULT/expression, escaping, multi-row) |
 
 ## Key types & functions
 
@@ -60,7 +61,7 @@ type TableSettings struct {
 }
 ```
 
-### `InsertRowConfig` / `InsertRowValue`
+### `InsertRowsConfig` / `InsertRowConfig` / `InsertRowValue`
 ```go
 type InsertRowValue struct {
     Column   string `json:"column"`   // column name (quoted via QuoteIdent)
@@ -69,8 +70,12 @@ type InsertRowValue struct {
     Value    string `json:"value"`    // literal text, or raw expression in "expression" mode
 }
 
-type InsertRowConfig struct {
+type InsertRowConfig struct {         // one row
     Values []InsertRowValue `json:"values"`
+}
+
+type InsertRowsConfig struct {        // the whole INSERT — one or more rows
+    Rows []InsertRowConfig `json:"rows"`
 }
 ```
 `Mode` selects rendering: `value` renders a typed literal per `DataType` (numeric
@@ -78,13 +83,15 @@ and boolean literals bare when valid, everything else single-quoted; an invalid
 numeric is quoted so no injection escapes the literal); `null`/`default` emit the
 `NULL`/`DEFAULT` keyword; `expression` emits `Value` verbatim (function-picker
 values such as `CURRENT_TIMESTAMP()`). Entries with an empty column name are
-skipped so a partially-filled form still yields valid preview SQL.
+skipped so a partially-filled form still yields valid preview SQL. Every row's
+`Values` align to the same columns in the same order; the emitted column list is
+taken from the first row.
 
 ### Functions
 
 | Function | Description |
 |----------|-------------|
-| `BuildInsertRowSql(db, schema, tableName string, cfg InsertRowConfig) (string, error)` | Builds a single-row `INSERT INTO … (cols) VALUES (…)`; always returns a nil error (IPC symmetry) |
+| `BuildInsertRowsSql(db, schema, tableName string, cfg InsertRowsConfig) (string, error)` | Builds a multi-row `INSERT INTO … (cols) VALUES (…), (…)`; always returns a nil error (IPC symmetry) |
 | `BuildDatabaseTableSummaryQuery(database string) string` | Returns `INFORMATION_SCHEMA.TABLES` SELECT for all physical tables |
 | `ParseDatabaseTableSummary(res *snowflake.QueryResult) []TableSummary` | Projects query result into `[]TableSummary` by positional column index |
 | `GetDatabaseTableSummary(ctx, client, database) ([]TableSummary, error)` | Convenience wrapper: build + query + parse |
@@ -135,7 +142,7 @@ are pure and unit-testable without a live connection. Only `GetDatabaseTableSumm
 - `time.Time` fields from the Snowflake driver are type-asserted with `ok` checks;
   non-`time.Time` values (e.g. string timestamps in some driver versions) result
   in empty `Created` / `LastAltered` strings rather than an error.
-- `BuildInsertRowSql` does no per-row-type validation beyond quoting — a `NULL`
+- `BuildInsertRowsSql` does no per-row-type validation beyond quoting — a `NULL`
   mode on a `NOT NULL` column, or a `DEFAULT` mode on a column without a default,
   produces valid SQL that Snowflake rejects at execution time. The form surfaces
   that error via `ExecDDL`; the live `SqlPreview` shows exactly what will run.

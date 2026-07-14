@@ -333,7 +333,7 @@ type FeatureFlags struct {
 	ERDiagramDesigner   bool `json:"erDiagramDesigner"`
 	TaskGraphVisualizer bool `json:"taskGraphVisualizer"`
 	InsertMapping       bool `json:"insertMapping"`
-	InsertRow           bool `json:"insertRow"` // Per-column form to INSERT a single row into a table
+	InsertRow           bool `json:"insertRow"` // Per-column grid form to INSERT one or more rows into a table
 	CodeSnippets        bool `json:"codeSnippets"`
 
 	// Developer Environments

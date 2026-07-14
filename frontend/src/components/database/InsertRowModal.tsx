@@ -8,27 +8,34 @@
 // @thaw-domain: Object Browser & Administration
 
 import { useEffect, useState } from "react";
-import { Table, Input, Segmented, Space, Tag, Typography, Tooltip, Spin, Alert } from "antd";
-import { TableOutlined, PlusOutlined, InfoCircleOutlined } from "@ant-design/icons";
+import { Table, Input, Button, Dropdown, Space, Tag, Typography, Tooltip, Spin, Alert } from "antd";
+import type { MenuProps } from "antd";
+import {
+  TableOutlined,
+  PlusOutlined,
+  DeleteOutlined,
+  FunctionOutlined,
+  InfoCircleOutlined,
+} from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import {
   GetTableColumnsWithTypes,
-  BuildInsertRowSql,
+  BuildInsertRowsSql,
   ExecDDL,
 } from "../../../wailsjs/go/app/App";
 import { snowflake, table } from "../../../wailsjs/go/models";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";
-import DefaultFunctionPicker from "../shared/DefaultFunctionPicker";
+import { DEFAULT_FUNCTIONS } from "../shared/builtinFunctions";
 import { useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
 
 const { Text } = Typography;
 
-// FieldMode is the per-column value mode. "expr" maps to the backend's
+// FieldMode is the per-cell value mode. "expr" maps to the backend's
 // "expression" mode; the others pass through unchanged.
 type FieldMode = "value" | "expr" | "null" | "default";
 
-interface FieldState {
+interface CellState {
   mode: FieldMode;
   value: string;
 }
@@ -38,7 +45,7 @@ interface Props {
   schema: string;
   table: string;
   onClose: () => void;
-  onSuccess?: () => void;
+  onSuccess?: (rowCount: number) => void;
 }
 
 // toBackendMode translates the UI mode to the Go builder's InsertRowValue.Mode.
@@ -46,27 +53,47 @@ function toBackendMode(mode: FieldMode): string {
   return mode === "expr" ? "expression" : mode;
 }
 
-function modeOptions(nullable: boolean) {
-  const opts = [
-    { label: "Value", value: "value" },
-    { label: "Expr", value: "expr" },
+function emptyCell(): CellState {
+  return { mode: "value", value: "" };
+}
+
+// cellMenuItems builds the per-cell dropdown: the value modes plus the built-in
+// function shortcuts (which set the cell to a raw expression).
+function cellMenuItems(nullable: boolean): MenuProps["items"] {
+  const items: MenuProps["items"] = [
+    { key: "value", label: "Value (literal)" },
+    { key: "expr", label: "Expression (raw SQL)" },
   ];
-  if (nullable) opts.push({ label: "NULL", value: "null" });
-  opts.push({ label: "DEFAULT", value: "default" });
-  return opts;
+  if (nullable) items.push({ key: "null", label: "NULL" });
+  items.push({ key: "default", label: "DEFAULT" });
+  items.push({ type: "divider" });
+  items.push({
+    type: "group",
+    label: "Functions",
+    children: DEFAULT_FUNCTIONS.map((f) => ({
+      key: `fn:${f.sql}`,
+      label: (
+        <span>
+          <code>{f.sql}</code>{" "}
+          <span style={{ color: "var(--text-muted)", fontSize: 11 }}>{f.desc}</span>
+        </span>
+      ),
+    })),
+  });
+  return items;
 }
 
 /**
- * Modal that inserts a single row into an existing table from a per-column form.
- * Columns are enumerated via GetTableColumnsWithTypes; each field renders as a
- * literal Value, a raw Expr (populated by the built-in function picker), NULL,
- * or DEFAULT. The generated INSERT is built in Go (BuildInsertRowSql) so literal
- * quoting stays consistent with the rest of the app, shown live via SqlPreview,
- * and executed with ExecDDL.
+ * Modal that inserts one or more rows into an existing table from a per-column
+ * grid form. Columns are enumerated via GetTableColumnsWithTypes; each cell is a
+ * literal Value, a raw Expr (populated by the built-in function picker), NULL, or
+ * DEFAULT, chosen from the per-cell dropdown. Rows can be added/removed. The
+ * generated multi-row INSERT is built in Go (BuildInsertRowsSql) so literal
+ * quoting stays consistent, shown live via SqlPreview, and executed with ExecDDL.
  */
 export default function InsertRowModal({ db, schema, table: tableName, onClose, onSuccess }: Props) {
   const [columns, setColumns] = useState<snowflake.ColumnInfo[]>([]);
-  const [fields, setFields] = useState<FieldState[]>([]);
+  const [rows, setRows] = useState<CellState[][]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const { creating, error: createError, setError: setCreateError, submit } = useCreateSubmit();
@@ -79,7 +106,7 @@ export default function InsertRowModal({ db, schema, table: tableName, onClose, 
         if (cancelled) return;
         const list = cols ?? [];
         setColumns(list);
-        setFields(list.map(() => ({ mode: "value", value: "" })));
+        setRows([list.map(() => emptyCell())]);
         setLoadError(null);
       })
       .catch((err) => {
@@ -91,113 +118,136 @@ export default function InsertRowModal({ db, schema, table: tableName, onClose, 
     return () => { cancelled = true; };
   }, [db, schema, tableName]);
 
-  const setField = (index: number, patch: Partial<FieldState>) =>
-    setFields((prev) => prev.map((f, i) => (i === index ? { ...f, ...patch } : f)));
+  const setCell = (rowIdx: number, colIdx: number, patch: Partial<CellState>) =>
+    setRows((prev) =>
+      prev.map((row, ri) =>
+        ri === rowIdx ? row.map((cell, ci) => (ci === colIdx ? { ...cell, ...patch } : cell)) : row,
+      ),
+    );
 
-  const buildCfg = (): table.InsertRowConfig =>
-    table.InsertRowConfig.createFrom({
-      values: columns.map((c, i) => ({
-        column: c.name,
-        dataType: c.dataType,
-        mode: toBackendMode(fields[i]?.mode ?? "value"),
-        value: fields[i]?.value ?? "",
+  const addRow = () => setRows((prev) => [...prev, columns.map(() => emptyCell())]);
+  const removeRow = (rowIdx: number) => setRows((prev) => prev.filter((_r, i) => i !== rowIdx));
+
+  const buildCfg = (): table.InsertRowsConfig =>
+    table.InsertRowsConfig.createFrom({
+      rows: rows.map((row) => ({
+        values: columns.map((c, i) => ({
+          column: c.name,
+          dataType: c.dataType,
+          mode: toBackendMode(row[i]?.mode ?? "value"),
+          value: row[i]?.value ?? "",
+        })),
       })),
     });
 
   const preview = useSqlPreview(
-    () => (columns.length ? BuildInsertRowSql(db, schema, tableName, buildCfg()) : Promise.resolve("")),
-    [db, schema, tableName, columns, fields],
+    () => (columns.length ? BuildInsertRowsSql(db, schema, tableName, buildCfg()) : Promise.resolve("")),
+    [db, schema, tableName, columns, rows],
   );
 
-  const canSubmit = !loading && loadError == null && columns.length > 0;
+  const canSubmit = !loading && loadError == null && columns.length > 0 && rows.length > 0;
 
   const handleSubmit = () => {
     if (!canSubmit) return;
     submit(async () => {
-      const sql = await BuildInsertRowSql(db, schema, tableName, buildCfg());
+      const sql = await BuildInsertRowsSql(db, schema, tableName, buildCfg());
       await ExecDDL(sql);
-      onSuccess?.();
+      onSuccess?.(rows.length);
       onClose();
     });
   };
 
+  // One grid column per table column, plus a leading row-number column and a
+  // trailing delete-row action.
   const tableColumns: ColumnsType<{ index: number }> = [
     {
-      title: "Column",
-      key: "column",
-      width: 190,
-      render: (_v, r) => {
-        const c = columns[r.index];
-        return (
-          <div>
-            <Space size={4} wrap>
-              <Text strong style={{ fontSize: 12 }}>{c.name}</Text>
-              {c.isPrimaryKey && <Tag color="gold" style={{ marginInlineEnd: 0, fontSize: 10, lineHeight: "16px" }}>PK</Tag>}
-              {!c.nullable && <Tag style={{ marginInlineEnd: 0, fontSize: 10, lineHeight: "16px" }}>NOT NULL</Tag>}
-              {c.comment && (
-                <Tooltip title={c.comment}>
-                  <InfoCircleOutlined style={{ color: "var(--text-muted)", fontSize: 11 }} />
-                </Tooltip>
-              )}
-            </Space>
-            <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{c.dataType}</div>
-          </div>
-        );
-      },
+      title: "#",
+      key: "__index",
+      width: 44,
+      fixed: "left",
+      render: (_v, r) => <Text type="secondary" style={{ fontSize: 11 }}>{r.index + 1}</Text>,
     },
-    {
-      title: "Mode",
-      key: "mode",
-      width: 300,
-      render: (_v, r) => {
-        const c = columns[r.index];
-        return (
-          <Segmented
-            block
-            size="small"
-            value={fields[r.index]?.mode ?? "value"}
-            options={modeOptions(c.nullable)}
-            onChange={(v) => setField(r.index, { mode: v as FieldMode })}
-          />
-        );
-      },
-    },
-    {
-      title: "Value",
-      key: "value",
-      render: (_v, r) => {
-        const mode = fields[r.index]?.mode ?? "value";
-        const disabled = mode === "null" || mode === "default";
+    ...columns.map((c, colIdx) => ({
+      key: c.name,
+      width: 210,
+      title: (
+        <div>
+          <Space size={4} wrap>
+            <Text strong style={{ fontSize: 12 }}>{c.name}</Text>
+            {c.isPrimaryKey && <Tag color="gold" style={{ marginInlineEnd: 0, fontSize: 10, lineHeight: "16px" }}>PK</Tag>}
+            {!c.nullable && <Tag style={{ marginInlineEnd: 0, fontSize: 10, lineHeight: "16px" }}>NOT NULL</Tag>}
+            {c.comment && (
+              <Tooltip title={c.comment}>
+                <InfoCircleOutlined style={{ color: "var(--text-muted)", fontSize: 11 }} />
+              </Tooltip>
+            )}
+          </Space>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 400 }}>{c.dataType}</div>
+        </div>
+      ),
+      render: (_v: unknown, r: { index: number }) => {
+        const cell = rows[r.index]?.[colIdx] ?? emptyCell();
+        const disabled = cell.mode === "null" || cell.mode === "default";
         const placeholder =
-          mode === "null" ? "NULL" :
-          mode === "default" ? "table default" :
-          mode === "expr" ? "SQL expression" : "literal value";
+          cell.mode === "null" ? "NULL" :
+          cell.mode === "default" ? "table default" :
+          cell.mode === "expr" ? "SQL expression" : "literal value";
         return (
           <Space.Compact style={{ width: "100%" }}>
             <Input
               size="small"
-              value={disabled ? "" : (fields[r.index]?.value ?? "")}
+              value={disabled ? "" : cell.value}
               disabled={disabled}
               placeholder={placeholder}
-              onChange={(e) => setField(r.index, { value: e.target.value })}
+              prefix={cell.mode === "expr"
+                ? <Text type="secondary" style={{ fontSize: 10 }}>ƒx</Text>
+                : undefined}
+              onChange={(e) => setCell(r.index, colIdx, { value: e.target.value })}
             />
-            <DefaultFunctionPicker onPick={(sql) => setField(r.index, { mode: "expr", value: sql })} />
+            <Dropdown
+              trigger={["click"]}
+              menu={{
+                items: cellMenuItems(c.nullable),
+                onClick: ({ key }) => {
+                  if (key.startsWith("fn:")) setCell(r.index, colIdx, { mode: "expr", value: key.slice(3) });
+                  else setCell(r.index, colIdx, { mode: key as FieldMode });
+                },
+              }}
+            >
+              <Button size="small" icon={<FunctionOutlined />} title="Value mode / function" />
+            </Dropdown>
           </Space.Compact>
         );
       },
+    })),
+    {
+      title: "",
+      key: "__actions",
+      width: 46,
+      fixed: "right",
+      render: (_v, r) => (
+        <Tooltip title={rows.length <= 1 ? "At least one row is required" : "Remove row"}>
+          <Button
+            size="small"
+            type="text"
+            danger
+            icon={<DeleteOutlined />}
+            disabled={rows.length <= 1}
+            onClick={() => removeRow(r.index)}
+          />
+        </Tooltip>
+      ),
     },
   ];
-
-  const rows = columns.map((_c, index) => ({ key: index, index }));
 
   return (
     <CreateModalShell
       icon={<TableOutlined />}
       okIcon={<PlusOutlined />}
-      okText="Insert Row"
-      title="Insert row"
+      okText={rows.length > 1 ? `Insert ${rows.length} Rows` : "Insert Row"}
+      title="Insert rows"
       subtitle={`${db}.${schema}.${tableName}`}
-      width={880}
+      width={900}
       error={createError}
       errorTitle="Insert failed"
       onErrorClose={() => setCreateError(null)}
@@ -225,9 +275,14 @@ export default function InsertRowModal({ db, schema, table: tableName, onClose, 
             size="small"
             pagination={false}
             columns={tableColumns}
-            dataSource={rows}
-            scroll={{ y: "45vh" }}
-            style={{ marginBottom: 16 }}
+            dataSource={rows.map((_r, index) => ({ key: index, index }))}
+            scroll={{ x: "max-content", y: "42vh" }}
+            style={{ marginBottom: 12 }}
+            footer={() => (
+              <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={addRow}>
+                Add row
+              </Button>
+            )}
           />
           <SqlPreview sql={preview} />
         </>
