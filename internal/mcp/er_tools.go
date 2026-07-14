@@ -261,10 +261,18 @@ func registerERDesignerStateTools(srv *mcpsdk.Server, emit func(string, interfac
 			if len(in.Tables) == 0 {
 				return nil, nil, fmt.Errorf("tables must contain at least one table")
 			}
+			seenKeys := make(map[string]bool, len(in.Tables))
 			for _, t := range in.Tables {
 				if strings.TrimSpace(t.Schema) == "" || strings.TrimSpace(t.Name) == "" {
 					return nil, nil, fmt.Errorf("each table must have a non-empty schema and name")
 				}
+				// Reject duplicate SCHEMA.NAME entries (case-insensitive) — a table
+				// can't appear twice, and it would make the merge ambiguous.
+				key := erStateKey(t.Schema, t.Name)
+				if seenKeys[key] {
+					return nil, nil, fmt.Errorf("duplicate table %s.%s: each SCHEMA.NAME may appear at most once per call", t.Schema, t.Name)
+				}
+				seenKeys[key] = true
 				if len(t.Columns) == 0 {
 					return nil, nil, fmt.Errorf("table %s.%s must have at least one column", t.Schema, t.Name)
 				}
@@ -380,10 +388,15 @@ func mergeAITablesIntoState(before *ERDesignerState, aiTables []erDesignerTableI
 	for _, at := range aiTables {
 		key := erStateKey(at.Schema, at.Name)
 		if i, ok := idx[key]; ok {
+			// Use out.Tables[i] as the DEFAULT-fallback context, not
+			// before.Tables[i]: a matched index may point at an *appended* table
+			// (e.g. a duplicate SCHEMA.NAME in aiTables), which is out of range
+			// for before.Tables. out.Tables[i] equals before.Tables[i] for a
+			// genuinely-matched existing table, so the fallback is identical.
 			out.Tables[i] = ERDesignerTableOut{
 				Schema:  at.Schema,
 				Name:    at.Name,
-				Columns: aiColsToStateCols(at, &before.Tables[i]),
+				Columns: aiColsToStateCols(at, &out.Tables[i]),
 			}
 		} else {
 			out.Tables = append(out.Tables, ERDesignerTableOut{

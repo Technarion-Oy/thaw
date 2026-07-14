@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Technarion Oy. All rights reserved.
 // @thaw-domain: ER Designer
 
-import { useState, useEffect, useRef, useCallback, useMemo, useReducer, lazy, Suspense } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from "react";
 import { App as AntApp, Modal, Button, Input, Select, Checkbox, AutoComplete } from "antd";
 import { PlusOutlined, DeleteOutlined, CopyOutlined, LinkOutlined, SwapOutlined, UndoOutlined, RedoOutlined } from "@ant-design/icons";
 import { ExecuteQuery, ListUserSchemas, UpdateERDesignerState, ClearERDesignerState } from "../../../wailsjs/go/app/App";
@@ -412,7 +412,9 @@ function useDesignerHistory(
   const pastRef = useRef<DesignerTable[][]>([]);
   const futureRef = useRef<DesignerTable[][]>([]);
   const lastEditRef = useRef<{ key: string | null; time: number }>({ key: null, time: 0 });
-  const [, forceRender] = useReducer((n: number) => n + 1, 0);
+  // No separate re-render trigger is needed: every commit/undo/redo calls
+  // setPresent with a fresh array reference, which always re-renders and
+  // recomputes canUndo/canRedo from the refs below.
 
   const commit = useCallback(
     (updater: (prev: DesignerTable[]) => DesignerTable[], coalesceKey?: string) => {
@@ -435,7 +437,6 @@ function useDesignerHistory(
       lastEditRef.current = { key, time: now };
       presentRef.current = next;
       setPresent(next);
-      forceRender();
     },
     [],
   );
@@ -448,7 +449,6 @@ function useDesignerHistory(
     lastEditRef.current = { key: null, time: 0 };
     presentRef.current = prevState;
     setPresent(prevState);
-    forceRender();
   }, []);
 
   const redo = useCallback(() => {
@@ -459,7 +459,6 @@ function useDesignerHistory(
     lastEditRef.current = { key: null, time: 0 };
     presentRef.current = nextState;
     setPresent(nextState);
-    forceRender();
   }, []);
 
   return [
@@ -615,8 +614,15 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
 
   useEffect(() => {
     const off = EventsOn("mcp:modify-er-designer", (payload: { tables: AITableIn[] }) => {
-      const merged = mergeAITablesIntoDesigner(tablesRef.current, payload.tables);
-      commit(() => merged); // discrete undo step — the user can undo an AI change
+      // Merge inside commit's updater (against the hook's authoritative `prev`),
+      // not against tablesRef — the ref only refreshes on render, so two events
+      // arriving before a re-render would otherwise merge against stale data and
+      // silently drop the first AI change.
+      let merged: DesignerTable[] = tablesRef.current;
+      commit((prev) => {
+        merged = mergeAITablesIntoDesigner(prev, payload.tables);
+        return merged; // discrete undo step — the user can undo an AI change
+      });
       setChangedTableIds(changedTableIdsFromMerge(merged, payload.tables));
       message.info(`${payload.tables.length} table(s) updated by AI`);
     });

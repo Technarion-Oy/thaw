@@ -728,6 +728,36 @@ func TestModifyERDesignerEmptySchemaName(t *testing.T) {
 	}
 }
 
+// TestModifyERDesignerDuplicateTableRejected verifies the tool rejects two
+// entries with the same (case-insensitive) SCHEMA.NAME in one call, rather than
+// silently merging them or panicking in mergeAITablesIntoState.
+func TestModifyERDesignerDuplicateTableRejected(t *testing.T) {
+	erState := NewERDesignerStateStore()
+	erState.Set(&ERDesignerState{Database: "DB"})
+	cs := newTestSessionWithEmitAndState(t, erState)
+	ctx := context.Background()
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "modify_er_designer",
+		Arguments: modifyERDesignerInput{
+			Tables: []erDesignerTableIn{
+				{Schema: "PUBLIC", Name: "ORDERS", Columns: []erDesignerColumnIn{{Name: "ID", DataType: "INT"}}},
+				{Schema: "public", Name: "orders", Columns: []erDesignerColumnIn{{Name: "ID", DataType: "INT"}}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned Go error: %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for duplicate SCHEMA.NAME")
+	}
+	text := res.Content[0].(*mcpsdk.TextContent).Text
+	if !strings.Contains(text, "duplicate table") {
+		t.Errorf("expected 'duplicate table' message, got: %s", text)
+	}
+}
+
 func TestModifyERDesignerColumnValidation(t *testing.T) {
 	erState := NewERDesignerStateStore()
 	erState.Set(&ERDesignerState{Database: "DB"})
@@ -870,6 +900,40 @@ func TestMergeAITablesIntoStateReplaceAppend(t *testing.T) {
 	}
 	if got.Tables[2].Name != "ORDERS" {
 		t.Errorf("Tables[2].Name = %q, want ORDERS (appended)", got.Tables[2].Name)
+	}
+}
+
+// TestMergeAITablesIntoStateDuplicateNewTable guards the indexing bug where a
+// duplicate (previously-unseen) SCHEMA.NAME in aiTables dereferenced an
+// out-of-range before.Tables index. The merge must not panic; the last
+// duplicate wins.
+func TestMergeAITablesIntoStateDuplicateNewTable(t *testing.T) {
+	before := &ERDesignerState{
+		Database: "DB",
+		Tables: []ERDesignerTableOut{
+			{Schema: "PUBLIC", Name: "USERS", Columns: []ERDesignerColumnOut{
+				{Name: "ID", DataType: "NUMBER(38,0)", IsPK: true, NotNull: true},
+			}},
+		},
+	}
+	// Two brand-new ORDERS entries (neither exists in `before`).
+	ai := []erDesignerTableIn{
+		{Schema: "PUBLIC", Name: "ORDERS", Columns: []erDesignerColumnIn{
+			{Name: "ID", DataType: "NUMBER(38,0)", IsPK: true},
+		}},
+		{Schema: "PUBLIC", Name: "ORDERS", Columns: []erDesignerColumnIn{
+			{Name: "ID", DataType: "NUMBER(38,0)", IsPK: true},
+			{Name: "TOTAL", DataType: "NUMBER(12,2)"},
+		}},
+	}
+
+	got := mergeAITablesIntoState(before, ai) // must not panic
+	if len(got.Tables) != 2 {
+		t.Fatalf("expected 2 tables (USERS + one ORDERS), got %d", len(got.Tables))
+	}
+	orders := got.Tables[1]
+	if orders.Name != "ORDERS" || len(orders.Columns) != 2 {
+		t.Errorf("expected last-duplicate ORDERS with 2 columns, got %+v", orders)
 	}
 }
 
