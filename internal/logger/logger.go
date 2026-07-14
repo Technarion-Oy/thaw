@@ -125,6 +125,14 @@ func maybeRotateByAge(rot *lumberjack.Logger, path string) {
 // startRotationTicker rotates the log on rotationInterval until the returned
 // stop function is called. Each rotation triggers lumberjack's age-based
 // cleanup, keeping retention bounded during long-running sessions.
+//
+// The ticker fires after Init returns, so L is set and rotation failures
+// (disk full, permissions, log dir removed underfoot) are surfaced rather
+// than lost — otherwise a stuck rotation would silently defeat retention.
+//
+// The goroutine's fire-on-tick / stop-cleanly lifecycle is not unit tested:
+// it would require a mockable clock, and adding one just for this isn't worth
+// re-introducing a time seam.
 func startRotationTicker(rot *lumberjack.Logger) func() {
 	ticker := time.NewTicker(rotationInterval)
 	done := make(chan struct{})
@@ -132,7 +140,9 @@ func startRotationTicker(rot *lumberjack.Logger) func() {
 		for {
 			select {
 			case <-ticker.C:
-				_ = rot.Rotate()
+				if err := rot.Rotate(); err != nil {
+					L.Warn("log rotation failed", "err", err)
+				}
 			case <-done:
 				ticker.Stop()
 				return

@@ -20,6 +20,18 @@ active file's oldest entry is older than `rotationInterval` (24 h), and a backgr
 ticker keeps rotating on that interval for long-running sessions. Each rotation triggers
 `lumberjack`'s `MaxAge` cleanup, so backups older than 30 days are deleted.
 
+Retention is **close to 30 days, not a strict bound.** `MaxAge` cleanup is anchored to a
+backup's *rotation* time, not to the age of the entries inside it. For a user who runs
+Thaw roughly daily, each backup spans ~1 day and the oldest entries live ~30 days. But
+whenever the gap between launches exceeds `rotationInterval`, the entries accumulated
+during that gap are rotated into a backup dated *now* and then survive another 30 days —
+so the effective retention for the oldest entries is roughly `30 days + longest gap
+between launches` (e.g. ~37 days for a weekly user, ~60 for a monthly one). This is
+inherent to rotating the file wholesale rather than pruning individual stale lines; it is
+still bounded and vastly better than the previous "grows forever" behaviour. If a strict
+30-day cap is ever required, prune stale lines from the active file at rotation time
+instead of rotating it as a whole.
+
 ## Key files
 
 | File | Purpose |
