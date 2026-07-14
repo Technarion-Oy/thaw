@@ -141,6 +141,12 @@ When a feature is admin-controlled, the toggle in **Enabled Features** is automa
 - Side-by-side mapping UI allows simultaneous mapping of multiple sources.
 - SQL generation handles `UNION ALL` / `UNION` combinations.
 
+### Insert Row
+- `InsertRowModal` builds a single-row `INSERT INTO … VALUES (…)` from a per-column form (distinct from Insert Mapping's table-to-table `SELECT`).
+- Columns come from `GetTableColumnsWithTypes`; each field is a literal **Value** (rendered per data type), a raw **Expr** (from the built-in function picker), **NULL**, or **DEFAULT**.
+- SQL is built in Go by `BuildInsertRowSql` (`internal/table`) — never inline in the component — shown live via `SqlPreview` and executed with `ExecDDL`.
+- Gated behind the `insertRow` feature flag.
+
 ## ⚠️ Gotchas
 - **Logs**: `gosnowflake` driver logs errors to `slog.Default` even when caught.
 - **Wails Generate**: If `wails generate module` fails, check Go syntax errors first.

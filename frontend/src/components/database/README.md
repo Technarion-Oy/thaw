@@ -1,6 +1,6 @@
 # frontend/src/components/database
 
-> Modals and helpers for creating and managing Snowflake schema-level objects: databases, tables, columns, stages, file formats, and insert mapping.
+> Modals and helpers for creating and managing Snowflake schema-level objects: databases, tables, columns, stages, file formats, insert mapping, and single-row inserts.
 
 ## Responsibility
 
@@ -22,6 +22,7 @@ Hosts the wizard-style creation modals and property sheets for schema objects ac
 | `StageBrowserModal.tsx` | Virtual-scrolled table of stage files (`ListStageFiles`); supports multi-select, `RemoveStageFiles`, and `DownloadFileFromStage`; uses TanStack Table + `react-virtual`. Gated behind `removeCommand` / `getCommand` feature flags for destructive actions. |
 | `ObjectSummariesModal.tsx` | Ant Design `Table` showing `table.TableSummary[]` for all tables in a database; calls `GetDatabaseTableSummary` (backed by `internal/table`). |
 | `InsertMappingModal.tsx` | Visual column mapper for `INSERT INTO … SELECT`; reads column+type info via `GetTableColumnsWithTypes`; produces a SQL snippet inserted into the active editor tab; uses `useInsertMappingStore`, `useObjectStore`, `useQueryStore`. Gated behind `insertMapping` feature flag. |
+| `InsertRowModal.tsx` | Per-column form to `INSERT` a **single row** into an existing table (distinct from `InsertMappingModal`'s table-to-table `SELECT`). Enumerates columns via `GetTableColumnsWithTypes`; each field is a literal **Value** (rendered per data type), a raw **Expr** (populated by `DefaultFunctionPicker`), **NULL** (nullable columns), or **DEFAULT**. SQL is built in Go via `BuildInsertRowSql` (`internal/table`) for a live `SqlPreview` and executed with `ExecDDL`; uses `CreateModalShell` + `useSqlPreview`/`useCreateSubmit` from `shared/`. Gated behind the `insertRow` feature flag. |
 
 ## Patterns & integration
 
@@ -29,7 +30,7 @@ Hosts the wizard-style creation modals and property sheets for schema objects ac
 - **SQL preview pattern**: `AddColumnModal` debounces `BuildAddColumnSql` IPC calls to show a live SQL preview below the form — identical to the dbtproject modal pattern. The preview component from `../shared/SqlPreview.tsx` is used for rendering.
 - **Shared components**: `ObjectNameCaseControl` and `DataTypeSelect` from `../shared/` are imported by `AddColumnModal` and `CreateDatabaseModal`.
 - **Stores**: `InsertMappingModal` reads `useObjectStore` (for object metadata), `useQueryStore` (to insert the generated SQL into the active tab), and `useInsertMappingStore` (mapping state).
-- **Feature flags**: `StageBrowserModal` checks `removeCommand`/`getCommand`; `InsertMappingModal` is gated behind `insertMapping`; `fileFormatBuilder` gates `CreateFileFormatModal` entry from the sidebar.
+- **Feature flags**: `StageBrowserModal` checks `removeCommand`/`getCommand`; `InsertMappingModal` is gated behind `insertMapping`; `InsertRowModal` is gated behind `insertRow`; `fileFormatBuilder` gates `CreateFileFormatModal` entry from the sidebar.
 
 ## Gotchas
 

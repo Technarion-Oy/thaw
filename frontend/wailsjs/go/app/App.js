@@ -482,6 +482,10 @@ export function BuildFunctionSelectStatement(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['BuildFunctionSelectStatement'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function BuildInsertRowSql(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['BuildInsertRowSql'](arg1, arg2, arg3, arg4);
+}
+
 export function BuildJoinSQL(arg1) {
   return window['go']['app']['App']['BuildJoinSQL'](arg1);
 }

@@ -8,7 +8,8 @@
 // Curated Snowflake built-in functions that are valid inside a column DEFAULT
 // clause at table-create time. Small subset on purpose — the full ~321-entry
 // catalog lives in internal/fnmeta; this is the short-list surfaced by the
-// "insert as DEFAULT" pickers in Create Table and the ER Designer.
+// DefaultFunctionPicker — the "insert as DEFAULT" pickers in Create Table and
+// the ER Designer, and the per-field value picker in the Insert Row form.
 export interface BuiltinFn {
   name: string;
   sql: string;
@@ -27,4 +28,5 @@ export const DEFAULT_FUNCTIONS: BuiltinFn[] = [
   { name: "CURRENT_SCHEMA", sql: "CURRENT_SCHEMA()", desc: "Name of the current schema" },
   { name: "CURRENT_WAREHOUSE", sql: "CURRENT_WAREHOUSE()", desc: "Name of the current warehouse" },
   { name: "UUID_STRING", sql: "UUID_STRING()", desc: "Random UUID v4 string" },
+  { name: "UNIX_TIMESTAMP", sql: "DATE_PART(EPOCH_SECOND, CURRENT_TIMESTAMP())", desc: "Current Unix time (seconds since epoch)" },
 ];

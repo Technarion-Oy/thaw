@@ -89,6 +89,7 @@ type adminAdvancedTools struct {
 	ERDiagramDesigner   ptrBool `json:"erDiagramDesigner,omitempty"`
 	TaskGraphVisualizer ptrBool `json:"taskGraphVisualizer,omitempty"`
 	InsertMapping       ptrBool `json:"insertMapping,omitempty"`
+	InsertRow           ptrBool `json:"insertRow,omitempty"`
 	CodeSnippets        ptrBool `json:"codeSnippets,omitempty"`
 }
 
@@ -254,6 +255,7 @@ func mergeAdminOverrides(user FeatureFlags, cfg adminConfigJSON) (effective Feat
 	apply(&effective.ERDiagramDesigner, &locked.ERDiagramDesigner, cfg.AdvancedTools.ERDiagramDesigner)
 	apply(&effective.TaskGraphVisualizer, &locked.TaskGraphVisualizer, cfg.AdvancedTools.TaskGraphVisualizer)
 	apply(&effective.InsertMapping, &locked.InsertMapping, cfg.AdvancedTools.InsertMapping)
+	apply(&effective.InsertRow, &locked.InsertRow, cfg.AdvancedTools.InsertRow)
 	apply(&effective.CodeSnippets, &locked.CodeSnippets, cfg.AdvancedTools.CodeSnippets)
 
 	// Developer Environments

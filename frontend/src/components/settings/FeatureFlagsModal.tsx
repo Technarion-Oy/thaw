@@ -318,6 +318,13 @@ export default function FeatureFlagsModal({ onClose }: Props) {
             onChange={(v) => set("insertMapping", v)}
           />
           <FlagRow
+            label="Insert Row"
+            description="Per-column form to INSERT a single row into a table, with NULL/DEFAULT and built-in function shortcuts."
+            checked={flags.insertRow}
+            locked={locked.insertRow}
+            onChange={(v) => set("insertRow", v)}
+          />
+          <FlagRow
             label="File Format Builder"
             description="Visual CREATE FILE FORMAT builder and data previewer."
             checked={flags.fileFormatBuilder}

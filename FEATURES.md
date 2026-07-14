@@ -396,6 +396,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
     - **Formatted SQL output** — the generated `INSERT INTO … SELECT` statement places each column and each source expression on its own indented line for readability
     - **Quote identifiers toggle** — on by default; when switched off, double-quotes are omitted for identifiers that are structurally safe
     - **Generate SQL** — clicking **Generate SQL** opens a new tab with the complete statement for review and execution
+  - **Insert Row…** — right-click a table to open a per-column form that builds a single-row `INSERT INTO … (cols) VALUES (…)` instead of hand-writing the statement. Each field offers four value modes: **Value** (a literal rendered per the column's data type — numbers and booleans emitted bare, everything else single-quoted; an invalid number is quoted so it can never break out of its literal), **Expr** (a raw SQL expression), **NULL** (nullable columns only), and **DEFAULT** (the table default). A **built-in function picker** on every field fills the value with `CURRENT_TIMESTAMP()`, `CURRENT_DATE()`, `UUID_STRING()`, a Unix-timestamp expression, and other common defaults in one click (switching the field to **Expr** mode). Primary-key and NOT NULL columns and per-column comments are surfaced inline, with a live backend-generated SQL preview; the statement executes via `ExecDDL`. Gated behind the **Insert Row** feature flag.
   - **Insert Full Name** — insert the fully-qualified `"DB"."SCHEMA"."OBJECT"` identifier at the cursor
   - View DDL definition inline
   - **Rename** the object
@@ -1064,7 +1065,7 @@ Features are organized into six categories, each with individual toggles:
 
 **AI & Assistance** — AI Inline Completions
 
-**Advanced Tools & Data Engineering** — Schema Migration, dbt Project Scaffolding, ER Diagram & Designer, Task Graph Visualizer, Insert Mapping, Code Snippets
+**Advanced Tools & Data Engineering** — Schema Migration, dbt Project Scaffolding, ER Diagram & Designer, Task Graph Visualizer, Insert Mapping, Insert Row, Code Snippets
 
 **Developer Environments** — Snowpark & Notebooks, Embedded Terminal, Git Integration
 
@@ -1130,6 +1131,7 @@ The following features are identified as feasible to be turned off via feature f
 - **ER Diagram & Designer** (Visual database modeling and `ALTER TABLE` generation)
 - **Task Graph Visualizer** (Interactive DAG viewer and manager for Snowflake tasks)
 - **Insert Mapping** (Visual side-by-side mapping for `INSERT INTO ... SELECT` with UNIONs)
+- **Insert Row** (Per-column form to `INSERT` a single row into a table, with NULL/DEFAULT and built-in function shortcuts)
 - **File Format Builder** (Visual CREATE FILE FORMAT builder and data previewer)
 - **Code Snippets** (Library of curated `CREATE OR REPLACE` templates)
 

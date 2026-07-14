@@ -56,6 +56,7 @@ var plistFeatureKeys = []plistFeatureKey{
 	{"DisableERDiagramDesigner", func(c *adminConfigJSON, v bool) { c.AdvancedTools.ERDiagramDesigner = boolPtr(!v) }},
 	{"DisableTaskGraphVisualizer", func(c *adminConfigJSON, v bool) { c.AdvancedTools.TaskGraphVisualizer = boolPtr(!v) }},
 	{"DisableInsertMapping", func(c *adminConfigJSON, v bool) { c.AdvancedTools.InsertMapping = boolPtr(!v) }},
+	{"DisableInsertRow", func(c *adminConfigJSON, v bool) { c.AdvancedTools.InsertRow = boolPtr(!v) }},
 	{"DisableCodeSnippets", func(c *adminConfigJSON, v bool) { c.AdvancedTools.CodeSnippets = boolPtr(!v) }},
 
 	{"DisableSnowparkNotebooks", func(c *adminConfigJSON, v bool) { c.DeveloperEnvironments.SnowparkNotebooks = boolPtr(!v) }},
