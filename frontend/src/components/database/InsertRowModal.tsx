@@ -125,7 +125,7 @@ export default function InsertRowModal({ db, schema, table: tableName, onClose, 
     {
       title: "Column",
       key: "column",
-      width: 220,
+      width: 190,
       render: (_v, r) => {
         const c = columns[r.index];
         return (
@@ -148,11 +148,12 @@ export default function InsertRowModal({ db, schema, table: tableName, onClose, 
     {
       title: "Mode",
       key: "mode",
-      width: 160,
+      width: 300,
       render: (_v, r) => {
         const c = columns[r.index];
         return (
           <Segmented
+            block
             size="small"
             value={fields[r.index]?.mode ?? "value"}
             options={modeOptions(c.nullable)}
@@ -196,7 +197,7 @@ export default function InsertRowModal({ db, schema, table: tableName, onClose, 
       okText="Insert Row"
       title="Insert row"
       subtitle={`${db}.${schema}.${tableName}`}
-      width={760}
+      width={880}
       error={createError}
       errorTitle="Insert failed"
       onErrorClose={() => setCreateError(null)}
