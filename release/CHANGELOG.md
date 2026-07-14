@@ -1,3 +1,10 @@
+## [0.3.1](https://github.com/Technarion-Oy/thaw/compare/v0.3.0...v0.3.1) (2026-07-14)
+
+
+### Bug Fixes
+
+* validate scalar SQL UDF bodies and warn on missing bind-variable colons ([#509](https://github.com/Technarion-Oy/thaw/issues/509)) ([#744](https://github.com/Technarion-Oy/thaw/issues/744)) ([0136f23](https://github.com/Technarion-Oy/thaw/commit/0136f23e8dcfc9bfa74cd91d621702e031b45273))
+
 # [0.3.0](https://github.com/Technarion-Oy/thaw/compare/v0.2.0...v0.3.0) (2026-07-13)
 
 
