@@ -38,9 +38,6 @@ const (
 	rotationInterval = 24 * time.Hour
 )
 
-// currentTime is a package-level clock indirection so tests can control "now".
-var currentTime = time.Now
-
 // L is the application-wide structured logger. It is initialized by Init and
 // safe to use from multiple goroutines.
 var L *slog.Logger
@@ -120,7 +117,7 @@ func maybeRotateByAge(rot *lumberjack.Logger, path string) {
 	if !ok {
 		return
 	}
-	if currentTime().Sub(oldest) > rotationInterval {
+	if time.Since(oldest) > rotationInterval {
 		_ = rot.Rotate()
 	}
 }
@@ -157,6 +154,10 @@ func firstEntryTime(path string) (time.Time, bool) {
 	defer func() { _ = f.Close() }()
 
 	sc := bufio.NewScanner(f)
+	// Raise the line-length cap well above bufio.Scanner's 64KB default so an
+	// unusually verbose first entry doesn't make Scan fail silently and skip
+	// age-based rotation (only the leading `time=` token is needed regardless).
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	if !sc.Scan() {
 		return time.Time{}, false
 	}

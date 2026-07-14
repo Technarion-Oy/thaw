@@ -90,7 +90,7 @@ func TestMaybeRotateByAge_RotatesStaleFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "thaw.log")
 	// Oldest entry is ~2 days old — older than rotationInterval.
-	old := currentTime().Add(-2 * rotationInterval).UTC().Format(time.RFC3339Nano)
+	old := time.Now().Add(-2 * rotationInterval).UTC().Format(time.RFC3339Nano)
 	if err := os.WriteFile(path, []byte("time="+old+" level=INFO msg=stale\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestMaybeRotateByAge_RotatesStaleFile(t *testing.T) {
 func TestMaybeRotateByAge_KeepsFreshFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "thaw.log")
-	recent := currentTime().UTC().Format(time.RFC3339Nano)
+	recent := time.Now().UTC().Format(time.RFC3339Nano)
 	if err := os.WriteFile(path, []byte("time="+recent+" level=INFO msg=fresh\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
