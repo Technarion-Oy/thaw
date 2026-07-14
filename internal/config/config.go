@@ -254,11 +254,14 @@ func ValidLogLevel(name string) bool {
 	return false
 }
 
-// ValidateLogPrefs normalizes a LogPrefs so it is safe to persist and apply:
-// an unrecognized LogLevel is reset to the default, and IncludeInternalQueries
-// is cleared when IncludeQuerySQL is off (it has no effect on its own).
+// ValidateLogPrefs normalizes a LogPrefs so it is safe to persist, apply, and
+// display: a non-empty but unrecognized LogLevel is reset to the default, and
+// IncludeInternalQueries is cleared when IncludeQuerySQL is off (it has no
+// effect on its own). An empty LogLevel is the legitimate "use the build
+// default" sentinel and is left untouched, so this is safe to run on the
+// effective-prefs read/apply path — not just the write path.
 func ValidateLogPrefs(p LogPrefs) LogPrefs {
-	if !ValidLogLevel(p.LogLevel) {
+	if p.LogLevel != "" && !ValidLogLevel(p.LogLevel) {
 		p.LogLevel = DefaultLogPrefs().LogLevel
 	}
 	if !p.IncludeQuerySQL {

@@ -50,13 +50,13 @@ export default function LoggingPreferencesModal({ onClose }: Props) {
         setPrefs(p);
         setLocked(l);
       })
-      .catch(() => {});
+      .catch((err) => message.error(`Failed to load logging preferences: ${err}`));
   }, []);
 
   async function handleSave() {
     setSaving(true);
     try {
-      await UpdateLogPrefs(prefs as any);
+      await UpdateLogPrefs(prefs);
       await loadStore();
       message.success("Logging preferences saved");
       onClose();
@@ -65,6 +65,10 @@ export default function LoggingPreferencesModal({ onClose }: Props) {
     } finally {
       setSaving(false);
     }
+  }
+
+  function handleRevealLogFile() {
+    RevealLogFile().catch((err) => message.error(`Failed to reveal log file: ${err}`));
   }
 
   const lockIcon = (
@@ -79,7 +83,7 @@ export default function LoggingPreferencesModal({ onClose }: Props) {
       open
       onCancel={onClose}
       footer={[
-        <Button key="reveal" onClick={() => RevealLogFile().catch(() => {})}>
+        <Button key="reveal" onClick={handleRevealLogFile}>
           Reveal Log File
         </Button>,
         <Button key="cancel" onClick={onClose}>Cancel</Button>,

@@ -53,6 +53,23 @@ func TestValidateLogPrefs(t *testing.T) {
 	if got := ValidateLogPrefs(in); got != in {
 		t.Errorf("valid prefs should pass through unchanged, got %+v", got)
 	}
+
+	// An empty LogLevel is the "use the build default" sentinel and must be
+	// preserved (not reset to "info"), so the apply path keeps the build
+	// default when the user has expressed no preference.
+	if got := ValidateLogPrefs(LogPrefs{LogLevel: ""}); got.LogLevel != "" {
+		t.Errorf("empty LogLevel should be preserved, got %q", got.LogLevel)
+	}
+}
+
+func TestValidateLogPrefs_EnforcesInvariantAfterAdminOverride(t *testing.T) {
+	// Mirrors the read-path fix: a user who enabled both switches, then an
+	// admin force-disables SQL logging only — the effective prefs must not
+	// present a checked-but-inert internal-queries switch.
+	effective := LogPrefs{LogLevel: "info", IncludeQuerySQL: false, IncludeInternalQueries: true}
+	if got := ValidateLogPrefs(effective); got.IncludeInternalQueries {
+		t.Error("IncludeInternalQueries must be cleared once IncludeQuerySQL is forced off")
+	}
 }
 
 func TestRestoreAdminLockedLogPrefs(t *testing.T) {

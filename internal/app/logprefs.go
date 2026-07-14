@@ -55,9 +55,11 @@ func (a *App) UpdateLogPrefs(prefs config.LogPrefs) error {
 		return err
 	}
 
-	// Apply the effective prefs (admin policy re-applied on top of the saved
-	// values) so runtime behavior matches what the UI will show.
-	a.applyLogPrefs(a.loadEffectiveLogPrefs())
+	// Apply the effective prefs directly rather than re-reading from disk:
+	// prefs already has admin-locked fields restored, so LoadAdminLogPrefs is
+	// idempotent here and effective == prefs. Normalize so runtime state
+	// upholds the same invariant GetLogPrefs presents.
+	a.applyLogPrefs(config.ValidateLogPrefs(effective))
 	return nil
 }
 
@@ -78,13 +80,17 @@ func (a *App) RevealLogFile() error {
 
 // loadEffectiveLogPrefs reads the persisted LogPrefs and applies IT-admin
 // logging policy on top. Returns admin-only defaults when config can't be read.
+// The result is normalized so the "IncludeInternalQueries implies
+// IncludeQuerySQL" invariant holds even after admin overrides — e.g. a policy
+// that force-disables IncludeQuerySQL while leaving IncludeInternalQueries
+// unlocked must not surface a checked-but-inert internal-queries switch.
 func (a *App) loadEffectiveLogPrefs() config.LogPrefs {
 	user := config.LogPrefs{}
 	if cfg, err := config.Load(); err == nil {
 		user = cfg.LogPrefs
 	}
 	effective, _ := config.LoadAdminLogPrefs(user)
-	return effective
+	return config.ValidateLogPrefs(effective)
 }
 
 // applyLogPrefs applies the given preferences at runtime: it sets the logger's
