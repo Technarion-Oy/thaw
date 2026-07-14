@@ -586,6 +586,10 @@ export function GetKernelPythonVersion(arg1:string):Promise<string>;
 
 export function GetLocalFilePreview(arg1:string,arg2:fileformat.FileFormatConfig):Promise<fileformat.PreviewResult>;
 
+export function GetLogPrefs():Promise<config.LogPrefs>;
+
+export function GetLogPrefsLocked():Promise<config.LogPrefsLocked>;
+
 export function GetMCPSessionConfig(arg1:string):Promise<string>;
 
 export function GetMaskingPolicyReferences(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
@@ -1002,6 +1006,8 @@ export function ResumeTaskList(arg1:string,arg2:string,arg3:Array<string>):Promi
 
 export function RevealInFinder(arg1:string):Promise<void>;
 
+export function RevealLogFile():Promise<void>;
+
 export function RunExplain(arg1:string,arg2:string):Promise<queryprofile.ExplainResult>;
 
 export function RunNotebookCell(arg1:string,arg2:string,arg3:string):Promise<snowpark.NotebookCellOutput>;
@@ -1103,6 +1109,8 @@ export function UpdateERDesignerState(arg1:string,arg2:Array<mcp.ERDesignerTable
 export function UpdateEditorContext(arg1:string,arg2:string):Promise<void>;
 
 export function UpdateEditorTabSQL(arg1:string,arg2:string):Promise<void>;
+
+export function UpdateLogPrefs(arg1:config.LogPrefs):Promise<void>;
 
 export function UpdateMCPSessionMode(arg1:string,arg2:string):Promise<mcp.SessionInfo>;
 

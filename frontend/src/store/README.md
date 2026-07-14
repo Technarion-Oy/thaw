@@ -25,6 +25,7 @@ Persistence is handled per-store via Zustand's `persist` middleware.
 | `notebookToolbarStore.ts` | Lightweight bridge between `NotebookTab` (writes kernel state and callbacks) and the unified `Toolbar` via `QueryPage` (reads). Cleared when the notebook tab unmounts or is deactivated. |
 | `notebookPrefsStore.ts` | Snowpark notebook preferences (`syntaxMode`). Loaded from backend via `GetNotebookPrefs`. |
 | `featureFlagsStore.ts` | Feature flag values and admin-locked flags. Optimistic defaults (all enabled) until `load()` fetches from backend. Reloaded after the user saves flags in the modal. |
+| `logPrefsStore.ts` | File-logging preferences (`logLevel`, `includeQuerySQL`, `includeInternalQueries`) plus the admin-lock mask. Optimistic defaults (info level, no SQL to disk, nothing locked) until `load()` fetches `GetLogPrefs`/`GetLogPrefsLocked`. Reloaded after `UpdateLogPrefs` in `LoggingPreferencesModal`. |
 | `insertMappingStore.ts` | Transient state for the Insert Mapping feature: target table, source tables, and modal-open flag. No persistence. |
 | `mcpStore.ts` | Snapshot of running MCP sessions (`SessionInfo[]`). `refresh()` calls `ListMCPSessions` IPC; the Toolbar `MCPIndicator` and `MCPSessionsModal` subscribe. No persistence. |
 

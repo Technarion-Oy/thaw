@@ -136,6 +136,11 @@ type App struct {
 	// Session-scoped query log for debugging and issue reporting.
 	queryLog             *querylog.Log
 	setQueryLogMenuCheck func(bool) // set by buildMenu; updates the native menu checkbox
+
+	// Effective file-logging preferences (with IT-admin policy applied),
+	// consulted by the OnQuery hook to decide whether to write SQL to thaw.log.
+	logPrefsMu sync.RWMutex
+	logPrefs   config.LogPrefs
 }
 
 // NewApp creates and returns a new App instance for use with the Wails runtime.
@@ -193,6 +198,9 @@ func (a *App) startup(ctx context.Context) {
 		}
 	}
 	a.logCleanup = logger.Init()
+	// Apply persisted logging preferences (runtime log level, SQL-logging
+	// switches) with any IT-admin policy on top of the build default level.
+	a.applyLogPrefs(a.loadEffectiveLogPrefs())
 	telemetry.Init(version.Version)
 	logger.L.Info("application started")
 	telemetry.Track(telemetry.EventAppStarted, nil)
@@ -548,10 +556,13 @@ func (a *App) Connect(params snowflake.ConnectParams) error {
 	// publishing the client below so tab sessions that snapshot it inherit the
 	// hook and never observe it half-initialized.
 	client.OnQuery = func(ctx context.Context, sql, qid string, err error, dur time.Duration) {
+		src := querylog.GetSource(ctx)
+		// File logging of executed SQL is independent of the in-memory query
+		// log: it is governed solely by LogPrefs and writes to thaw.log.
+		a.maybeFileLogQuery(src, sql, qid, err, dur)
 		if !a.queryLog.IsEnabled() {
 			return
 		}
-		src := querylog.GetSource(ctx)
 		if src == querylog.SourceUser {
 			return // user queries are tracked separately with RUNNING→final status
 		}

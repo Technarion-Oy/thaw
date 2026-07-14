@@ -1034,6 +1034,14 @@ export function GetLocalFilePreview(arg1, arg2) {
   return window['go']['app']['App']['GetLocalFilePreview'](arg1, arg2);
 }
 
+export function GetLogPrefs() {
+  return window['go']['app']['App']['GetLogPrefs']();
+}
+
+export function GetLogPrefsLocked() {
+  return window['go']['app']['App']['GetLogPrefsLocked']();
+}
+
 export function GetMCPSessionConfig(arg1) {
   return window['go']['app']['App']['GetMCPSessionConfig'](arg1);
 }
@@ -1866,6 +1874,10 @@ export function RevealInFinder(arg1) {
   return window['go']['app']['App']['RevealInFinder'](arg1);
 }
 
+export function RevealLogFile() {
+  return window['go']['app']['App']['RevealLogFile']();
+}
+
 export function RunExplain(arg1, arg2) {
   return window['go']['app']['App']['RunExplain'](arg1, arg2);
 }
@@ -2068,6 +2080,10 @@ export function UpdateEditorContext(arg1, arg2) {
 
 export function UpdateEditorTabSQL(arg1, arg2) {
   return window['go']['app']['App']['UpdateEditorTabSQL'](arg1, arg2);
+}
+
+export function UpdateLogPrefs(arg1) {
+  return window['go']['app']['App']['UpdateLogPrefs'](arg1);
 }
 
 export function UpdateMCPSessionMode(arg1, arg2) {

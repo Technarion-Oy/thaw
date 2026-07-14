@@ -48,8 +48,20 @@ type AppConfig struct {
     NotebookPrefs NotebookPrefs
     Session       SessionConfig
     FeatureFlags  FeatureFlags
+    LogPrefs      LogPrefs      // runtime log level + SQL-to-file logging switches
     // ...
 }
+
+// config.go — file-logging preferences (see internal/logger)
+type LogPrefs struct {
+    LogLevel               string // "debug"|"info"|"warn"|"error"; "" = build default
+    IncludeQuerySQL        bool   // write executed SQL text to thaw.log (default false — SQL can be sensitive)
+    IncludeInternalQueries bool   // also log internal/background queries (requires IncludeQuerySQL)
+}
+func DefaultLogPrefs() LogPrefs
+func ValidLogLevel(name string) bool
+func ValidateLogPrefs(p LogPrefs) LogPrefs
+func RestoreAdminLockedLogPrefs(user, effective LogPrefs, locked LogPrefsLocked) LogPrefs
 
 // config.go:386 / 416
 func Load() (*AppConfig, error)
@@ -62,6 +74,10 @@ func Update(fn func(*AppConfig) error) error
 
 // adminconfig.go:180
 func LoadAdminConfig(user FeatureFlags) (effective FeatureFlags, locked FeatureFlags)
+// adminconfig.go — the "logging" features.json category enforces LogPrefs
+// (log level + SQL-logging switches) so IT can force-disable SQL logging for
+// privacy or force-enable it for audit.
+func LoadAdminLogPrefs(user LogPrefs) (effective LogPrefs, locked LogPrefsLocked)
 
 // restore.go:21
 func RestoreAdminLockedFields(user, effective, locked FeatureFlags) FeatureFlags
@@ -85,3 +101,4 @@ func ValidateSessionConfig(sc SessionConfig) SessionConfig
 - After adding a new `FeatureFlags` field, run `wails generate module` to regenerate `frontend/wailsjs/go/models.ts`, then add a `<FlagRow>` in `FeatureFlagsModal.tsx`.
 - The macOS plist priority order is highest-priority-last (reversed iteration); the managed pref at `/Library/Managed Preferences/` wins over the user pref at `~/Library/Preferences/`.
 - `SessionConfig.MaxIdleConnsPerSession` is clamped to never exceed `MaxOpenConnsPerSession` by `ValidateSessionConfig` (`restore.go:55`).
+- Admin `features.json` `"logging"`: forcing `"includeInternalQueries": true` automatically implies and locks `"includeQuerySQL": true` (via `mergeAdminLogPrefs`), so the audit policy works from a single key rather than silently no-opping. An explicit `"includeQuerySQL": false` alongside it is honored as-is (a contradictory config), and `ValidateLogPrefs` then normalizes internal logging off since it has no effect without SQL logging.

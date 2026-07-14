@@ -10,6 +10,13 @@ as the package-level `L` variable. Dev builds additionally echo to stderr and en
 `slog.Handler` wrapper suppresses known-harmless ERROR messages emitted by the
 gosnowflake driver as side-effects of query cancellation and row-cap truncation.
 
+The minimum level is **runtime-adjustable**: the handler is wired to a package-level
+`slog.LevelVar` (seeded to the build default — DEBUG in dev, INFO in production), and
+`SetLevel("debug"|"info"|"warn"|"error")` changes it without rebuilding the handler.
+`internal/app` calls `SetLevel` from the user's `LogPrefs` on startup and whenever the
+logging preferences are updated. An empty/unrecognized name is a no-op, so the build
+default is preserved when the user has expressed no preference.
+
 Rotation is **age-driven, not just size-driven**. `lumberjack` on its own only rotates
 when a write pushes the active file past `MaxSize`, and its `MaxAge`/`MaxBackups` cleanup
 applies to rotated backups only — never to the active file. Because Thaw logs at INFO in
@@ -36,7 +43,7 @@ instead of rotating it as a whole.
 
 | File | Purpose |
 |---|---|
-| `logger.go` | `Init()`, `L`, `Dir`, `driverNoiseFilter`. |
+| `logger.go` | `Init()`, `L`, `Dir`, `Path`, `SetLevel`, the runtime `levelVar`, `driverNoiseFilter`. |
 | `path_prod.go` | `logFilePath()` for production builds (`//go:build !dev`): macOS `~/Library/Logs/thaw/thaw.log`, Windows `%APPDATA%\thaw\logs\thaw.log`, Linux `$XDG_STATE_HOME/thaw/thaw.log`. |
 | `path_dev.go` | `logFilePath()` for dev builds (`//go:build dev`): writes to `./logs/thaw.log` relative to the working directory. |
 
@@ -46,7 +53,9 @@ instead of rotating it as a whole.
 |---|---|
 | `L *slog.Logger` | Package-level logger; safe for concurrent use; set by `Init()`. |
 | `Dir string` | Directory of the log file; set by `Init()`; used by `crashreport` to co-locate crash JSON files. |
+| `Path string` | Absolute path to the active log file; set by `Init()`; used by `App.RevealLogFile` and the logging-preferences UI. |
 | `Init() func()` | Sets up rotation and returns a cleanup function to defer (stops the rotation ticker and closes the file). |
+| `SetLevel(name string)` | Changes the minimum severity at runtime (`debug`/`info`/`warn`/`error`); empty or unrecognized names are a no-op. |
 | `maybeRotateByAge` | Rotates the active file on startup when its oldest entry is older than `rotationInterval`, so age-based cleanup has backups to prune. |
 | `startRotationTicker` | Rotates on `rotationInterval` until stopped, keeping retention bounded during long sessions. |
 | `firstEntryTime` / `parseSlogTime` | Read the first log line and parse its `time=<RFC3339>` prefix to find the oldest entry's timestamp. |

@@ -207,6 +207,84 @@ func DefaultNotebookPrefs() NotebookPrefs {
 	return NotebookPrefs{SyntaxMode: "kernel"}
 }
 
+// LogPrefs holds user-configurable file-logging preferences. They control the
+// verbosity and content of thaw.log, the persistent on-disk log used for
+// post-mortem debugging and support diagnostics. See internal/logger.
+type LogPrefs struct {
+	// LogLevel is the runtime minimum severity written to the log file.
+	// Valid values: "debug" | "info" | "warn" | "error". An empty value means
+	// "use the build default" (debug for dev builds, info for production).
+	LogLevel string `json:"logLevel"`
+	// IncludeQuerySQL writes the full SQL text of executed statements to the log
+	// file. Off by default: SQL can carry sensitive data (credentials in COPY
+	// INTO, PII in WHERE clauses, secrets in CREATE SECRET).
+	IncludeQuerySQL bool `json:"includeQuerySQL"`
+	// IncludeInternalQueries also logs internal/background queries (object
+	// listing, DDL fetching, session setup) when IncludeQuerySQL is on. Without
+	// it, only user-initiated queries are written to the log file.
+	IncludeInternalQueries bool `json:"includeInternalQueries"`
+}
+
+// DefaultLogPrefs returns the out-of-the-box logging preferences: info level,
+// no SQL text written to disk.
+func DefaultLogPrefs() LogPrefs {
+	return LogPrefs{
+		LogLevel:               "info",
+		IncludeQuerySQL:        false,
+		IncludeInternalQueries: false,
+	}
+}
+
+// ValidLogLevel reports whether name is one of the accepted log levels.
+func ValidLogLevel(name string) bool {
+	switch name {
+	case "debug", "info", "warn", "error":
+		return true
+	}
+	return false
+}
+
+// ValidateLogPrefs normalizes a LogPrefs so it is safe to persist, apply, and
+// display: a non-empty but unrecognized LogLevel is reset to the default, and
+// IncludeInternalQueries is cleared when IncludeQuerySQL is off (it has no
+// effect on its own). An empty LogLevel is the legitimate "use the build
+// default" sentinel and is left untouched, so this is safe to run on the
+// effective-prefs read/apply path — not just the write path.
+func ValidateLogPrefs(p LogPrefs) LogPrefs {
+	if p.LogLevel != "" && !ValidLogLevel(p.LogLevel) {
+		p.LogLevel = DefaultLogPrefs().LogLevel
+	}
+	if !p.IncludeQuerySQL {
+		p.IncludeInternalQueries = false
+	}
+	return p
+}
+
+// LogPrefsLocked marks which LogPrefs fields are controlled by IT-admin policy
+// and are therefore not user-editable. true = locked.
+type LogPrefsLocked struct {
+	LogLevel               bool `json:"logLevel"`
+	IncludeQuerySQL        bool `json:"includeQuerySQL"`
+	IncludeInternalQueries bool `json:"includeInternalQueries"`
+}
+
+// RestoreAdminLockedLogPrefs returns a copy of user with every admin-locked
+// field overwritten by the corresponding effective (admin-enforced) value, so
+// a client cannot bypass IT policy by submitting values that differ from the
+// enforced configuration.
+func RestoreAdminLockedLogPrefs(user, effective LogPrefs, locked LogPrefsLocked) LogPrefs {
+	if locked.LogLevel {
+		user.LogLevel = effective.LogLevel
+	}
+	if locked.IncludeQuerySQL {
+		user.IncludeQuerySQL = effective.IncludeQuerySQL
+	}
+	if locked.IncludeInternalQueries {
+		user.IncludeInternalQueries = effective.IncludeInternalQueries
+	}
+	return user
+}
+
 // FeatureFlags holds toggles for optional or experimental features.
 //
 // Adding a new flag:
@@ -439,6 +517,7 @@ type AppConfig struct {
 	Session                SessionConfig                   `json:"session"`
 	SnowflakeCLIConfigPath string                          `json:"snowflakeCliConfigPath"`
 	FeatureFlags           FeatureFlags                    `json:"featureFlags"`
+	LogPrefs               LogPrefs                        `json:"logPrefs"`
 	MCPCredentials         map[string]MCPSessionCredential `json:"mcpCredentials,omitempty"`
 }
 

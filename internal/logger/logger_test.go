@@ -11,6 +11,8 @@
 package logger
 
 import (
+	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -18,6 +20,46 @@ import (
 
 	"gopkg.in/lumberjack.v2"
 )
+
+func TestSetLevel(t *testing.T) {
+	// Restore the level after the test so it can't leak into other tests.
+	orig := levelVar.Level()
+	defer levelVar.Set(orig)
+
+	cases := map[string]slog.Level{
+		"debug": slog.LevelDebug,
+		"info":  slog.LevelInfo,
+		"warn":  slog.LevelWarn,
+		"error": slog.LevelError,
+	}
+	for name, want := range cases {
+		SetLevel(name)
+		if got := levelVar.Level(); got != want {
+			t.Errorf("SetLevel(%q) => level %v, want %v", name, got, want)
+		}
+	}
+
+	// An empty or unrecognized value leaves the current level unchanged.
+	SetLevel("error")
+	SetLevel("")
+	if got := levelVar.Level(); got != slog.LevelError {
+		t.Errorf(`SetLevel("") changed level to %v, want it unchanged at %v`, got, slog.LevelError)
+	}
+	SetLevel("bogus")
+	if got := levelVar.Level(); got != slog.LevelError {
+		t.Errorf("SetLevel(bogus) changed level to %v, want it unchanged", got)
+	}
+
+	// The level actually gates a handler wired to levelVar.
+	SetLevel("warn")
+	h := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: &levelVar})
+	if h.Enabled(context.Background(), slog.LevelInfo) {
+		t.Error("INFO should be suppressed when level is warn")
+	}
+	if !h.Enabled(context.Background(), slog.LevelError) {
+		t.Error("ERROR should pass when level is warn")
+	}
+}
 
 func TestParseSlogTime(t *testing.T) {
 	want := time.Date(2026, 7, 14, 13, 45, 0, 0, time.UTC)
