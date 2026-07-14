@@ -34,10 +34,11 @@ func (a *App) AlterAgent(database, schema, name, clause string) error {
 // columns name / database_name / schema_name / owner / comment / profile /
 // agent_spec / created_on.
 func (a *App) DescribeAgent(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("DESCRIBE AGENT %s",
 		snowflake.Qualify(database, schema, name))
-	return a.client.Execute(a.ctx, sql)
+	return client.Execute(a.ctx, sql)
 }

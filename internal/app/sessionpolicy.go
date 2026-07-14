@@ -35,12 +35,13 @@ func (a *App) AlterSessionPolicy(database, schema, name, clause string) error {
 // allowed_secondary_roles — SHOW SESSION POLICIES does not report these values,
 // so this is how the properties panel reads the current settings.
 func (a *App) DescribeSessionPolicy(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	query := fmt.Sprintf("DESCRIBE SESSION POLICY %s.%s.%s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
-	return a.client.QuerySingle(a.ctx, query)
+	return client.QuerySingle(a.ctx, query)
 }
 
 // FormatSecondaryRoles renders a secondary-role list into the
@@ -81,7 +82,8 @@ func (a *App) ParseSecondaryRoles(raw string) []string {
 // ACCOUNTADMIN role or a grant on the SNOWFLAKE database) and has propagation
 // latency, so a newly-applied policy may not appear immediately.
 func (a *App) GetSessionPolicyReferences(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	query := fmt.Sprintf(
@@ -90,5 +92,5 @@ func (a *App) GetSessionPolicyReferences(database, schema, name string) (*snowfl
 			"WHERE POLICY_DB = '%s' AND POLICY_SCHEMA = '%s' AND POLICY_NAME = '%s' AND POLICY_KIND = 'SESSION_POLICY' "+
 			"ORDER BY REF_ENTITY_DOMAIN, REF_ENTITY_NAME",
 		snowflake.EscapeStringLit(database), snowflake.EscapeStringLit(schema), snowflake.EscapeStringLit(name))
-	return a.client.QuerySingle(a.ctx, query)
+	return client.QuerySingle(a.ctx, query)
 }

@@ -122,11 +122,11 @@ func (a *App) StopNotebookSession(tabId string) error {
 }
 
 func (a *App) RunNotebookSql(sql string) (snowpark.NotebookSqlResult, error) {
-	return a.snowparkSvc.RunNotebookSql(a.client, sql)
+	return a.snowparkSvc.RunNotebookSql(a.currentClient(), sql)
 }
 
 func (a *App) StartNotebookSession(tabId string) error {
-	return a.snowparkSvc.StartNotebookSession(a.client, a.connectParams, tabId)
+	return a.snowparkSvc.StartNotebookSession(a.currentClient(), a.currentConnectParams(), tabId)
 }
 
 func (a *App) GetKernelPythonVersion(tabId string) string {
@@ -146,7 +146,7 @@ func (a *App) DebugNotebookCell(tabId string, cellId string, code string) (snowp
 }
 
 func (a *App) RunNotebookCellSql(tabId, sql string) (snowpark.NotebookSqlResult, error) {
-	return a.snowparkSvc.RunNotebookCellSql(a.client, tabId, sql)
+	return a.snowparkSvc.RunNotebookCellSql(a.currentClient(), tabId, sql)
 }
 
 func (a *App) NotebookUseContext(tabId, role, warehouse, database, schema string) error {

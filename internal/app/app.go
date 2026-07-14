@@ -60,9 +60,19 @@ var tabSessionInitMu sync.Mutex
 
 // App is the main application struct. Methods bound here are callable from the frontend.
 type App struct {
-	ctx              context.Context
-	client           *snowflake.Client
-	connectParams    *snowflake.ConnectParams // stored after a successful Connect for notebook session init
+	ctx context.Context
+
+	// connMu guards the shared connection state — client and connectParams —
+	// which Connect/Disconnect write and many IPC methods read. Wails invokes
+	// IPC methods on concurrent goroutines, so per the Go memory model these
+	// pointer reads/writes must be synchronized. Readers must go through
+	// currentClient()/currentConnectParams() rather than touching the fields
+	// directly. (a.ctx is deliberately not guarded: it is set once in startup()
+	// before any IPC method can run and is never reassigned.)
+	connMu        sync.RWMutex
+	client        *snowflake.Client
+	connectParams *snowflake.ConnectParams // stored after a successful Connect for notebook session init
+
 	cancelConnect    context.CancelFunc
 	exportCancelFunc context.CancelFunc   // cancels an in-flight DDL export
 	fnStore          *fnmeta.Store        // local SQLite cache for Snowflake function metadata
@@ -135,6 +145,26 @@ func NewApp() *App {
 		queryLog:          querylog.New(),
 		workdirOverridden: workdirOverrideArg() != "",
 	}
+}
+
+// currentClient returns the shared Snowflake client under the connection read
+// lock (nil when disconnected). IPC readers must call this instead of touching
+// a.client directly so they don't race with Connect/Disconnect, which run on
+// concurrent Wails IPC goroutines. The lock is held only for the pointer read;
+// callers operate on the returned snapshot, so a subsequent Disconnect that
+// nils the field cannot turn a live call into a nil-deref.
+func (a *App) currentClient() *snowflake.Client {
+	a.connMu.RLock()
+	defer a.connMu.RUnlock()
+	return a.client
+}
+
+// currentConnectParams returns the params captured by the last successful
+// Connect under the connection read lock (nil when disconnected).
+func (a *App) currentConnectParams() *snowflake.ConnectParams {
+	a.connMu.RLock()
+	defer a.connMu.RUnlock()
+	return a.connectParams
 }
 
 // workdirOverrideArg returns the directory passed via --workdir=<dir> on the
@@ -265,13 +295,14 @@ func (a *App) getOrInitTabSession(tabId string) (*tabSession, error) {
 		ts.lastUsed.Store(time.Now().UnixNano())
 		return ts, nil
 	}
-	if a.connectParams == nil {
+	params := a.currentConnectParams()
+	if params == nil {
 		tabSessionInitMu.Unlock()
 		return nil, apperrors.ErrNotConnected
 	}
 	logger.L.Info("creating new tab session", "tabId", tabId)
 	a.evictIfNeeded()
-	client, err := snowflake.NewClient(a.ctx, *a.connectParams)
+	client, err := snowflake.NewClient(a.ctx, *params)
 	if err != nil {
 		tabSessionInitMu.Unlock()
 		return nil, err
@@ -289,8 +320,8 @@ func (a *App) getOrInitTabSession(tabId string) (*tabSession, error) {
 	client.SetPoolLimits(maxOpen, maxIdle)
 	// Inherit the query-log hook from the shared client so internal queries
 	// on tab sessions are also captured.
-	if a.client != nil {
-		client.OnQuery = a.client.OnQuery
+	if shared := a.currentClient(); shared != nil {
+		client.OnQuery = shared.OnQuery
 	}
 	ts := &tabSession{client: client}
 	ts.lastUsed.Store(time.Now().UnixNano())
@@ -470,12 +501,12 @@ func (a *App) shutdown(_ context.Context) {
 		return true
 	})
 
-	if a.client != nil {
+	if client := a.currentClient(); client != nil {
 		// Close asynchronously — the gosnowflake driver sends an HTTP DELETE
 		// /session to invalidate the token, which takes ~2 s. The app is
 		// exiting anyway, so there is no need to wait; the OS will close the
 		// TCP connection and Snowflake will expire the session on its own.
-		go a.client.Close() //nolint:errcheck
+		go client.Close() //nolint:errcheck
 	}
 
 	if a.fnStore != nil {
@@ -512,11 +543,10 @@ func (a *App) Connect(params snowflake.ConnectParams) error {
 		telemetry.Track(telemetry.EventConnectionFailed, nil)
 		return err
 	}
-	a.client = client
-	a.connectParams = &params
-	a.applyFeatureFlagExclusions()
 	// Wire the query-log hook on the shared client so internal queries
-	// (object listing, DDL fetching, session setup) are captured.
+	// (object listing, DDL fetching, session setup) are captured. Set it before
+	// publishing the client below so tab sessions that snapshot it inherit the
+	// hook and never observe it half-initialized.
 	client.OnQuery = func(ctx context.Context, sql, qid string, err error, dur time.Duration) {
 		if !a.queryLog.IsEnabled() {
 			return
@@ -544,6 +574,16 @@ func (a *App) Connect(params snowflake.ConnectParams) error {
 		entry.ID = a.queryLog.Record(entry)
 		wailsruntime.EventsEmit(a.ctx, "querylog:entry", entry)
 	}
+
+	// Publish the connection under the write lock, then apply feature-flag
+	// exclusions (which snapshot the client via currentClient(), so it must run
+	// after the lock is released to avoid a self-deadlock on connMu).
+	a.connMu.Lock()
+	a.client = client
+	a.connectParams = &params
+	a.connMu.Unlock()
+	a.applyFeatureFlagExclusions()
+
 	logger.L.Info("connected", "account", params.Account, "user", params.User)
 	telemetry.Track(telemetry.EventConnected, telemetry.Props{"authenticator": params.Authenticator})
 
@@ -603,19 +643,23 @@ func (a *App) Disconnect() error {
 	a.queryLog.Clear()
 	wailsruntime.EventsEmit(a.ctx, "querylog:cleared")
 
-	if a.client == nil {
-		return nil
-	}
-	err := a.client.Close()
+	a.connMu.Lock()
+	client := a.client
 	a.client = nil
 	a.connectParams = nil
+	a.connMu.Unlock()
+	if client == nil {
+		return nil
+	}
+	err := client.Close()
 	telemetry.Track(telemetry.EventDisconnected, nil)
 	return err
 }
 
 // IsConnected returns true when a Snowflake connection is active.
 func (a *App) IsConnected() bool {
-	return a.client != nil && a.client.IsAlive()
+	client := a.currentClient()
+	return client != nil && client.IsAlive()
 }
 
 // applySessionConfig updates runtime session fields under lock and manages the idle eviction loop.
@@ -741,10 +785,11 @@ func (a *App) GetAppInfo() AppInfo {
 // body behind the per-object Alter* IPC delegators. objectType carries any trailing
 // modifier such as "IF EXISTS" (e.g. "TASK IF EXISTS").
 func (a *App) alterObject(objectType, database, schema, name, clause string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("ALTER %s %s %s", objectType, snowflake.Qualify(database, schema, name), clause)
-	_, err := a.client.Execute(a.ctx, sql)
+	_, err := client.Execute(a.ctx, sql)
 	return err
 }

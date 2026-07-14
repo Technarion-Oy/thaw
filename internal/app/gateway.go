@@ -26,12 +26,13 @@ import (
 // comment. The spec column is only returned to roles holding USAGE, MODIFY, or
 // OWNERSHIP on the gateway.
 func (a *App) DescribeGateway(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("DESCRIBE GATEWAY %s",
 		snowflake.Qualify(database, schema, name))
-	return a.client.Execute(a.ctx, sql)
+	return client.Execute(a.ctx, sql)
 }
 
 // AlterGateway updates the traffic-split specification of an existing gateway
@@ -41,10 +42,11 @@ func (a *App) DescribeGateway(database, schema, name string) (*snowflake.QueryRe
 // string; it is dollar-quoted inside the statement so multi-line YAML needs no
 // escaping.
 func (a *App) AlterGateway(database, schema, name, specification string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
 	sql := gateway.BuildAlterGatewaySpecSql(database, schema, name, specification)
-	_, err := a.client.Execute(a.ctx, sql)
+	_, err := client.Execute(a.ctx, sql)
 	return err
 }

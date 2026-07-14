@@ -38,12 +38,13 @@ func (a *App) AlterHybridTable(database, schema, name, clause string) error {
 // backend pinning a fixed shape. The primary key surfaces here as an index, so
 // this single call covers both the PRIMARY KEY and any secondary indexes.
 func (a *App) ListHybridTableIndexes(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("SHOW INDEXES IN TABLE %s.%s.%s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
-	return a.client.Execute(a.ctx, sql)
+	return client.Execute(a.ctx, sql)
 }
 
 // CreateHybridTableIndex adds a secondary index to an existing hybrid table by
@@ -52,14 +53,15 @@ func (a *App) ListHybridTableIndexes(database, schema, name string) (*snowflake.
 // catalog-canonical names), mirroring the inline-index path so the same typed
 // name produces the same stored identifier at create time and afterwards.
 func (a *App) CreateHybridTableIndex(database, schema, table string, idx hybridtable.HybridIndex, caseSensitive bool) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
 	sql, err := hybridtable.BuildCreateIndexSql(database, schema, table, idx, caseSensitive)
 	if err != nil {
 		return err
 	}
-	_, err = a.client.Execute(a.ctx, sql)
+	_, err = client.Execute(a.ctx, sql)
 	return err
 }
 
@@ -75,13 +77,14 @@ func (a *App) HybridIndexColumnOptions(columns []hybridtable.IndexColumn) hybrid
 // DropHybridTableIndex removes a secondary index from a hybrid table by running
 // DROP INDEX IF EXISTS <db>.<schema>.<table>.<index>.
 func (a *App) DropHybridTableIndex(database, schema, table, index string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
 	sql, err := hybridtable.BuildDropIndexSql(database, schema, table, index)
 	if err != nil {
 		return err
 	}
-	_, err = a.client.Execute(a.ctx, sql)
+	_, err = client.Execute(a.ctx, sql)
 	return err
 }

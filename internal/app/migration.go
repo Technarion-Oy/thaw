@@ -22,27 +22,30 @@ func (a *App) ScanMigrationSource(dir string) ([]migration.MigrationObject, erro
 
 // AnalyzeMigration diffs local objects against the live Snowflake database.
 func (a *App) AnalyzeMigration(objects []migration.MigrationObject, database string) ([]migration.MigrationDiffItem, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.migrationSvc.Analyze(a.client, objects, database)
+	return a.migrationSvc.Analyze(client, objects, database)
 }
 
 // CreateMigrationSnapshot optionally creates a backup set and/or a zero-copy
 // clone of the target database as a safety net before deployment.
 func (a *App) CreateMigrationSnapshot(database, backupSetDB, backupSetSchema, backupSetName string, doBackup bool, cloneDB string, doClone bool) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return a.migrationSvc.CreateSnapshot(a.client, database, backupSetDB, backupSetSchema, backupSetName, doBackup, cloneDB, doClone)
+	return a.migrationSvc.CreateSnapshot(client, database, backupSetDB, backupSetSchema, backupSetName, doBackup, cloneDB, doClone)
 }
 
 // ExecuteMigration deploys the selected objects to Snowflake.
 func (a *App) ExecuteMigration(selected []migration.MigrationObject, database string, maxPasses int, strategy migration.TableMigrationStrategy) ([]migration.MigrationExecEvent, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.migrationSvc.Execute(a.client, selected, database, maxPasses, strategy)
+	return a.migrationSvc.Execute(client, selected, database, maxPasses, strategy)
 }
 
 // CancelMigration cancels an in-flight schema migration.

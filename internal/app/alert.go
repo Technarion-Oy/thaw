@@ -32,11 +32,12 @@ func (a *App) AlterAlert(database, schema, name, clause string) error {
 // the standalone EXECUTE ALERT statement (this is its own SQL command, not an
 // ALTER ALERT clause).
 func (a *App) ExecuteAlert(database, schema, name string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("EXECUTE ALERT %s.%s.%s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
-	_, err := a.client.Execute(a.ctx, sql)
+	_, err := client.Execute(a.ctx, sql)
 	return err
 }

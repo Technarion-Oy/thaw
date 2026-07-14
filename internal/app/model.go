@@ -32,10 +32,11 @@ func (a *App) AlterModel(database, schema, name, clause string) error {
 // create-model / add-version source pickers use it to offer existing models as a
 // copy source instead of a free-text field.
 func (a *App) ListModels() ([]string, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.ListModels(a.ctx)
+	return client.ListModels(a.ctx)
 }
 
 // GetModelTags returns the tags currently applied to the given model, via the
@@ -46,7 +47,8 @@ func (a *App) ListModels() ([]string, error) {
 // columns) so the properties modal can render each tag as a removable chip. The
 // caller treats an error as "no tags available" and still allows SET/UNSET TAG.
 func (a *App) GetModelTags(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	fqn := fmt.Sprintf("%s.%s.%s",
@@ -59,7 +61,7 @@ func (a *App) GetModelTags(database, schema, name string) (*snowflake.QueryResul
 		// backslash in an identifier must be doubled to survive the single-quoted
 		// literal rather than being read as a Snowflake escape sequence.
 		snowflake.QuoteIdent(database), snowflake.EscapeTextLit(fqn))
-	return a.client.Execute(a.ctx, sql)
+	return client.Execute(a.ctx, sql)
 }
 
 // ListModelVersions returns the versions of the given model via
@@ -69,10 +71,11 @@ func (a *App) GetModelTags(database, schema, name string) (*snowflake.QueryResul
 // is_last_version, aliases, comment, …) without the backend pinning a fixed
 // shape.
 func (a *App) ListModelVersions(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("SHOW VERSIONS IN MODEL %s.%s.%s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
-	return a.client.Execute(a.ctx, sql)
+	return client.Execute(a.ctx, sql)
 }

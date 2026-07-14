@@ -33,7 +33,8 @@ import (
 // Used by context-menu shortcuts (e.g. "Select Top 1000"). For the main editor
 // flow use StartQuery + WaitForQueryResult to surface the query ID early.
 func (a *App) ExecuteQuery(sql string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	qidChan := make(chan string, 1)
@@ -41,7 +42,7 @@ func (a *App) ExecuteQuery(sql string) (*snowflake.QueryResult, error) {
 	ctx = querylog.WithSource(ctx, querylog.SourceUser)
 
 	start := time.Now()
-	result, err := a.client.Execute(ctx, sql)
+	result, err := client.Execute(ctx, sql)
 	dur := time.Since(start)
 
 	var qid string
@@ -88,17 +89,18 @@ func (a *App) ExecuteQuery(sql string) (*snowflake.QueryResult, error) {
 // operator_attributes) are pre-parsed so the frontend receives them as JSON
 // objects rather than raw strings.
 func (a *App) GetQueryOperatorStats(queryID string) ([]queryprofile.OperatorStat, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return queryprofile.GetOperatorStats(a.ctx, a.client, queryID)
+	return queryprofile.GetOperatorStats(a.ctx, client, queryID)
 }
 
 // RunExplain runs EXPLAIN USING JSON for the provided SQL and returns both
 // the parsed plan tree and detected performance issues in a single response.
 // Used by the editor context-menu "Explain SQL" action.
 func (a *App) RunExplain(tabId string, sql string) (*queryprofile.ExplainResult, error) {
-	client := a.client
+	client := a.currentClient()
 	if tabId != "" {
 		if ts, err := a.getOrInitTabSession(tabId); err == nil {
 			client = ts.client
@@ -463,8 +465,9 @@ func (a *App) GetQueryHistory(
 	resultLimit int,
 	includeClientGenerated bool,
 ) ([]queryhistory.QueryHistoryRow, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return queryhistory.GetQueryHistory(a.ctx, a.client, filterType, sessionID, userName, warehouseName, endTimeStart, endTimeEnd, resultLimit, includeClientGenerated)
+	return queryhistory.GetQueryHistory(a.ctx, client, filterType, sessionID, userName, warehouseName, endTimeStart, endTimeEnd, resultLimit, includeClientGenerated)
 }

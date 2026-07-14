@@ -23,20 +23,22 @@ import (
 // ExportAccountObjectsDDL exports all accessible roles and warehouses as SQL files
 // under <outputDir>/_account/roles/ and <outputDir>/_account/warehouses/.
 func (a *App) ExportAccountObjectsDDL(outputDir string) (ddl.AccountExportResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return ddl.AccountExportResult{}, apperrors.ErrNotConnected
 	}
-	return ddl.ExportAccountObjects(a.ctx, a.client, outputDir)
+	return ddl.ExportAccountObjects(a.ctx, client, outputDir)
 }
 
 // GetERDiagramData fetches column metadata, primary keys, and foreign keys for
 // every table in the database and returns the data needed to render an Entity
 // Relationship Diagram on the frontend.
 func (a *App) GetERDiagramData(database string) (snowflake.ERDiagramData, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return snowflake.ERDiagramData{}, apperrors.ErrNotConnected
 	}
-	return a.client.GetERDiagramData(a.ctx, database)
+	return client.GetERDiagramData(a.ctx, database)
 }
 
 // ddlProgressEvent is the Wails event name emitted during export.
@@ -56,13 +58,14 @@ type DDLProgressPayload struct {
 // Progress is also emitted as a "ddl:progress" Wails event so the frontend
 // can update a progress indicator in real time.
 func (a *App) ExportDatabaseDDL(database, outputDir string) (ddl.ExportResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return ddl.ExportResult{}, apperrors.ErrNotConnected
 	}
 
 	// Temporarily scale up pool for parallel DDL fetching.
-	a.client.SetPoolLimits(32, 32)
-	defer a.client.SetPoolLimits(snowflake.DefaultMaxOpenConns, snowflake.DefaultMaxIdleConns)
+	client.SetPoolLimits(32, 32)
+	defer client.SetPoolLimits(snowflake.DefaultMaxOpenConns, snowflake.DefaultMaxIdleConns)
 
 	ctx, cancel := context.WithCancel(a.ctx)
 	a.exportCancelFunc = cancel
@@ -81,7 +84,7 @@ func (a *App) ExportDatabaseDDL(database, outputDir string) (ddl.ExportResult, e
 	ddl.ExportDatabases(
 		ctx,
 		[]string{database},
-		a.client.GetCompleteDatabaseDDL,
+		client.GetCompleteDatabaseDDL,
 		opts,
 		func(done, total int, res ddl.ExportResult) {
 			result = res
@@ -101,10 +104,11 @@ func (a *App) ExportDatabaseDDL(database, outputDir string) (ddl.ExportResult, e
 // SNOWFLAKE_SAMPLE_DATA are excluded).  The frontend uses this list to
 // populate the database-selection checkboxes in the Export DDL panel.
 func (a *App) ListExportableDatabases() ([]string, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.ListExportableDatabases(a.ctx)
+	return client.ListExportableDatabases(a.ctx)
 }
 
 // DDLExportOptions carries the per-export choices made in the frontend's
@@ -138,7 +142,8 @@ type DDLExportOptions struct {
 // Progress events ("ddl:progress") are emitted after each database completes,
 // allowing the frontend to show a live progress bar.
 func (a *App) ExportAllDatabasesDDL(outputDir string, databases []string, options DDLExportOptions) ([]ddl.ExportResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 
@@ -146,30 +151,30 @@ func (a *App) ExportAllDatabasesDDL(outputDir string, databases []string, option
 	// connection (see GetCompleteDatabaseDDLOnWarehouse) rather than by mutating
 	// the shared session connector, so it can never race a query the user runs
 	// elsewhere in the app while the export is in flight.
-	fetch := a.client.GetCompleteDatabaseDDL
+	fetch := client.GetCompleteDatabaseDDL
 	if options.Warehouse != "" {
-		prev, err := a.client.CurrentWarehouse(a.ctx)
+		prev, err := client.CurrentWarehouse(a.ctx)
 		if err != nil {
 			return nil, err
 		}
 		fetch = func(ctx context.Context, database string) (string, error) {
-			return a.client.GetCompleteDatabaseDDLOnWarehouse(ctx, database, options.Warehouse, prev)
+			return client.GetCompleteDatabaseDDLOnWarehouse(ctx, database, options.Warehouse, prev)
 		}
 		if prev == "" {
 			// The session had no warehouse to restore to, so an export
 			// connection may return to the pool still carrying the override.
 			// Purge idle connections once the export finishes.
-			defer a.client.FlushIdleConns()
+			defer client.FlushIdleConns()
 		}
 	}
 
 	// Temporarily scale up pool for parallel DDL fetching.
-	a.client.SetPoolLimits(32, 32)
-	defer a.client.SetPoolLimits(snowflake.DefaultMaxOpenConns, snowflake.DefaultMaxIdleConns)
+	client.SetPoolLimits(32, 32)
+	defer client.SetPoolLimits(snowflake.DefaultMaxOpenConns, snowflake.DefaultMaxIdleConns)
 
 	if len(databases) == 0 {
 		var err error
-		databases, err = a.client.ListExportableDatabases(a.ctx)
+		databases, err = client.ListExportableDatabases(a.ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -220,16 +225,18 @@ func (a *App) ExportAllDatabasesDDL(outputDir string, databases []string, option
 // GetSchemaCrossDeps returns the unique (database, schema) pairs referenced
 // by views in the given schema that fall outside that schema.
 func (a *App) GetSchemaCrossDeps(db, schema string) ([]snowflake.SchemaRef, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.GetSchemaCrossDeps(a.ctx, db, schema)
+	return client.GetSchemaCrossDeps(a.ctx, db, schema)
 }
 
 // GetDatabaseCrossDeps analyses all given schemas in db sequentially.
 func (a *App) GetDatabaseCrossDeps(db string, schemas []string) ([]snowflake.SchemaRef, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.GetDatabaseCrossDeps(a.ctx, db, schemas)
+	return client.GetDatabaseCrossDeps(a.ctx, db, schemas)
 }

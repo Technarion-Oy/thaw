@@ -138,16 +138,26 @@ The canonical IPC method shape (from `warehouse.go`):
 
 ```go
 func (a *App) GetWarehouseMeteringHistory(wh, startDate, endDate string) ([]warehouse.WarehouseMeteringRow, error) {
-    if a.client == nil {
+    client := a.currentClient()
+    if client == nil {
         return nil, apperrors.ErrNotConnected
     }
-    return warehouse.GetMeteringHistory(a.ctx, a.client, wh, startDate, endDate)
+    return warehouse.GetMeteringHistory(a.ctx, client, wh, startDate, endDate)
 }
 ```
 
 The nil-check uses `apperrors.ErrNotConnected` (from `internal/apperrors`). All
 real logic — SQL building, `snowflake.QueryResult` parsing — lives in the
 domain package.
+
+**Never read `a.client` / `a.connectParams` directly.** `Connect`/`Disconnect`
+write them and IPC methods run on concurrent Wails goroutines, so the fields are
+guarded by `a.connMu` (a `sync.RWMutex`). Go through the snapshot accessors
+`a.currentClient()` / `a.currentConnectParams()` — they take the read lock and
+return the pointer, so a concurrent `Disconnect` that nils the field can't turn a
+live call into a nil-deref. Snapshot once into a local `client` and use that for
+the nil-check and the delegated call. (`a.ctx` is set once in `startup()` before
+any IPC method can run and is never reassigned, so it needs no lock.)
 
 ### Exceptions (non-delegator methods that stay in `internal/app`)
 
@@ -200,9 +210,11 @@ imported from `wailsjs/go/sqleditor/Service`.
 - **`app.go` only**: the `App` struct definition, lifecycle (`startup`/`shutdown`),
   `Connect`/`Disconnect`, and tab-session machinery must all stay in `app.go`.
   Domain-specific IPC goes in the matching `<domain>.go` file.
-- **`a.client` vs tab sessions**: `a.client` is the shared connection used for
-  IPC calls that are not tab-scoped (DDL, object listing, etc.). Tab-scoped
-  query execution always goes through `getOrInitTabSession(tabId)`.
+- **`a.client` vs tab sessions**: the shared connection (read via
+  `a.currentClient()`) is used for IPC calls that are not tab-scoped (DDL, object
+  listing, etc.). Tab-scoped query execution always goes through
+  `getOrInitTabSession(tabId)`. Both `a.client` and `a.connectParams` are guarded
+  by `a.connMu`; read them only through `currentClient()`/`currentConnectParams()`.
 - **MCP sessions** — `internal/app/mcp.go` (described in CLAUDE.md) is present
   on the `feat/mcp-server-foundation` branch but may not yet exist on `main`.
   Check `Glob` before assuming its presence.

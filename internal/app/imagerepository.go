@@ -33,10 +33,11 @@ func (a *App) AlterImageRepository(database, schema, name, clause string) error 
 // reports (typically created_on, image_name, tags, digest, image_path) without
 // the backend pinning a fixed shape.
 func (a *App) ListImagesInRepository(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("SHOW IMAGES IN IMAGE REPOSITORY %s.%s.%s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
-	return a.client.Execute(a.ctx, sql)
+	return client.Execute(a.ctx, sql)
 }

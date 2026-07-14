@@ -37,7 +37,8 @@ func (a *App) AlterStorageLifecyclePolicy(database, schema, name, clause string)
 // columns) so the properties modal can render each tag as a removable chip. The
 // caller treats an error as "no tags available" and still allows SET/UNSET TAG.
 func (a *App) GetStorageLifecyclePolicyTags(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	fqn := fmt.Sprintf("%s.%s.%s",
@@ -50,7 +51,7 @@ func (a *App) GetStorageLifecyclePolicyTags(database, schema, name string) (*sno
 		// backslash in an identifier must be doubled to survive the single-quoted
 		// literal rather than being read as a Snowflake escape sequence.
 		snowflake.QuoteIdent(database), snowflake.EscapeTextLit(fqn))
-	return a.client.Execute(a.ctx, sql)
+	return client.Execute(a.ctx, sql)
 }
 
 // GetStorageLifecyclePolicyReferences returns the tables to which the given
@@ -60,7 +61,8 @@ func (a *App) GetStorageLifecyclePolicyTags(database, schema, name string) (*sno
 // ACCOUNTADMIN role or a grant on the SNOWFLAKE database) and has propagation
 // latency, so newly-applied policies may not appear immediately.
 func (a *App) GetStorageLifecyclePolicyReferences(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	query := fmt.Sprintf(
@@ -69,5 +71,5 @@ func (a *App) GetStorageLifecyclePolicyReferences(database, schema, name string)
 			"WHERE POLICY_DB = '%s' AND POLICY_SCHEMA = '%s' AND POLICY_NAME = '%s' AND POLICY_KIND = 'STORAGE_LIFECYCLE_POLICY' "+
 			"ORDER BY REF_DATABASE_NAME, REF_SCHEMA_NAME, REF_ENTITY_NAME",
 		snowflake.EscapeStringLit(database), snowflake.EscapeStringLit(schema), snowflake.EscapeStringLit(name))
-	return a.client.QuerySingle(a.ctx, query)
+	return client.QuerySingle(a.ctx, query)
 }

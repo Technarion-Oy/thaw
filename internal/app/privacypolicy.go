@@ -36,7 +36,8 @@ func (a *App) AlterPrivacyPolicy(database, schema, name, clause string) error {
 // chip. The caller treats an error as "no tags available" and still allows
 // SET/UNSET TAG.
 func (a *App) GetPrivacyPolicyTags(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	fqn := fmt.Sprintf("%s.%s.%s",
@@ -49,7 +50,7 @@ func (a *App) GetPrivacyPolicyTags(database, schema, name string) (*snowflake.Qu
 		// backslash in an identifier must be doubled to survive the single-quoted
 		// literal rather than being read as a Snowflake escape sequence.
 		snowflake.QuoteIdent(database), snowflake.EscapeTextLit(fqn))
-	return a.client.Execute(a.ctx, sql)
+	return client.Execute(a.ctx, sql)
 }
 
 // GetPrivacyPolicyReferences returns the tables and views to which the given
@@ -59,7 +60,8 @@ func (a *App) GetPrivacyPolicyTags(database, schema, name string) (*snowflake.Qu
 // ACCOUNTADMIN role or a grant on the SNOWFLAKE database) and has propagation
 // latency, so newly-applied policies may not appear immediately.
 func (a *App) GetPrivacyPolicyReferences(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	query := fmt.Sprintf(
@@ -68,5 +70,5 @@ func (a *App) GetPrivacyPolicyReferences(database, schema, name string) (*snowfl
 			"WHERE POLICY_DB = '%s' AND POLICY_SCHEMA = '%s' AND POLICY_NAME = '%s' AND POLICY_KIND = 'PRIVACY_POLICY' "+
 			"ORDER BY REF_DATABASE_NAME, REF_SCHEMA_NAME, REF_ENTITY_NAME",
 		snowflake.EscapeStringLit(database), snowflake.EscapeStringLit(schema), snowflake.EscapeStringLit(name))
-	return a.client.QuerySingle(a.ctx, query)
+	return client.QuerySingle(a.ctx, query)
 }

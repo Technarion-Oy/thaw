@@ -33,10 +33,11 @@ func (a *App) AlterMaskingPolicy(database, schema, name, clause string) error {
 // editor. The command requires privileges on the policies, so accounts without
 // governance access may see only a subset.
 func (a *App) ListAccountMaskingPolicies() (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.QuerySingle(a.ctx, "SHOW MASKING POLICIES IN ACCOUNT")
+	return client.QuerySingle(a.ctx, "SHOW MASKING POLICIES IN ACCOUNT")
 }
 
 // GetMaskingPolicyReferences returns the columns to which the given masking
@@ -46,7 +47,8 @@ func (a *App) ListAccountMaskingPolicies() (*snowflake.QueryResult, error) {
 // ACCOUNTADMIN role or a grant on the SNOWFLAKE database) and has propagation
 // latency, so newly-applied policies may not appear immediately.
 func (a *App) GetMaskingPolicyReferences(database, schema, name string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	query := fmt.Sprintf(
@@ -55,5 +57,5 @@ func (a *App) GetMaskingPolicyReferences(database, schema, name string) (*snowfl
 			"WHERE POLICY_DB = '%s' AND POLICY_SCHEMA = '%s' AND POLICY_NAME = '%s' AND POLICY_KIND = 'MASKING_POLICY' "+
 			"ORDER BY REF_DATABASE_NAME, REF_SCHEMA_NAME, REF_ENTITY_NAME, REF_COLUMN_NAME",
 		snowflake.EscapeStringLit(database), snowflake.EscapeStringLit(schema), snowflake.EscapeStringLit(name))
-	return a.client.QuerySingle(a.ctx, query)
+	return client.QuerySingle(a.ctx, query)
 }

@@ -21,16 +21,17 @@ import (
 // account-level info exposed for reuse — any feature needing client version data
 // (e.g. the authentication-policy CLIENT_POLICY editor) can call it.
 func (a *App) GetClientVersionInfo() ([]snowflake.ClientVersionInfo, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.GetClientVersionInfo(a.ctx)
+	return client.GetClientVersionInfo(a.ctx)
 }
 
 // GetSessionContext returns the currently active role, warehouse, database and
 // schema for the given tab's isolated session.
 // Fast path: if the tab session hasn't been created yet but the shared client
-// is available (i.e. immediately after Connect()), use a.client to avoid
+// is available (i.e. immediately after Connect()), use client to avoid
 // triggering a full NewClient re-login just to read session variables.
 func (a *App) GetSessionContext(tabId string) (snowflake.SessionContext, error) {
 	if _, ok := a.tabSessions.Load(tabId); !ok {
@@ -38,8 +39,8 @@ func (a *App) GetSessionContext(tabId string) (snowflake.SessionContext, error) 
 		if val, ok := a.evictedContexts.Load(tabId); ok {
 			return val.(snowflake.SessionContext), nil
 		}
-		if a.client != nil {
-			return a.client.GetSessionContext(a.ctx)
+		if client := a.currentClient(); client != nil {
+			return client.GetSessionContext(a.ctx)
 		}
 		return snowflake.SessionContext{}, apperrors.ErrNotConnected
 	}
@@ -70,45 +71,50 @@ func (a *App) GetTabSessionID(tabId string) (string, error) {
 // quoted identifiers as case-insensitive (double-quoting does not preserve
 // case). The frontend uses this to warn users when creating objects.
 func (a *App) GetQuotedIdentifiersIgnoreCase() (bool, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return false, apperrors.ErrNotConnected
 	}
-	return a.client.GetQuotedIdentifiersIgnoreCase(a.ctx)
+	return client.GetQuotedIdentifiersIgnoreCase(a.ctx)
 }
 
 // ListRoles returns all roles visible to the current role (SHOW ROLES).
 // Used for informational displays and user-management role pickers.
 func (a *App) ListRoles() ([]string, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.ListRoles(a.ctx)
+	return client.ListRoles(a.ctx)
 }
 
 // ListAvailableRoles returns only the roles the current user can switch to
 // (CURRENT_AVAILABLE_ROLES). Used for the role-selection toolbar dropdown.
 func (a *App) ListAvailableRoles() ([]string, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.ListAvailableRoles(a.ctx)
+	return client.ListAvailableRoles(a.ctx)
 }
 
 // ListWarehouses returns all warehouses visible to the current role.
 func (a *App) ListWarehouses() ([]string, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.ListWarehouses(a.ctx)
+	return client.ListWarehouses(a.ctx)
 }
 
 // ListComputePools returns all compute pools visible to the current role. Used
 // by the Create Service modal to populate the compute-pool picker.
 func (a *App) ListComputePools() ([]string, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.ListComputePools(a.ctx)
+	return client.ListComputePools(a.ctx)
 }
 
 // UseRole switches the given tab's isolated session to the specified role.
@@ -159,10 +165,11 @@ func (a *App) UseSchema(tabId string, schema string) error {
 // encodes both the cloud provider and the deployment region, e.g.
 // "AWS_US_EAST_1", "AZURE_EASTUS2", or "GCP_US_CENTRAL1".
 func (a *App) GetCurrentRegion() (string, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return "", apperrors.ErrNotConnected
 	}
-	qr, err := a.client.Execute(a.ctx, `SELECT CURRENT_REGION()`)
+	qr, err := client.Execute(a.ctx, `SELECT CURRENT_REGION()`)
 	if err != nil {
 		return "", err
 	}
@@ -181,10 +188,11 @@ func (a *App) GetCurrentRegion() (string, error) {
 // deep-link "/#/streamlit-apps/<DB>.<SCHEMA>.<NAME>"). No trailing slash is
 // appended so callers can suffix a "/#/…" fragment without doubling the slash.
 func (a *App) GetSnowsightURL() (string, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return "", apperrors.ErrNotConnected
 	}
-	qr, err := a.client.Execute(a.ctx, `SELECT 'https://app.snowflake.com/' || LOWER(CURRENT_ORGANIZATION_NAME()) || '/' || LOWER(CURRENT_ACCOUNT_NAME())`)
+	qr, err := client.Execute(a.ctx, `SELECT 'https://app.snowflake.com/' || LOWER(CURRENT_ORGANIZATION_NAME()) || '/' || LOWER(CURRENT_ACCOUNT_NAME())`)
 	if err != nil {
 		return "", err
 	}
@@ -199,44 +207,49 @@ func (a *App) GetSnowsightURL() (string, error) {
 // for the connection's lifetime — the user is constant, so repeated callers
 // (e.g. each Query Activity modal open) don't re-run the round-trip.
 func (a *App) GetCurrentUser() (string, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return "", apperrors.ErrNotConnected
 	}
-	return a.client.GetCurrentUserCached(a.ctx)
+	return client.GetCurrentUserCached(a.ctx)
 }
 
 // GetSessionParameters returns the current session parameters from SHOW PARAMETERS IN SESSION.
 func (a *App) GetSessionParameters() ([]snowflake.SessionParam, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.GetSessionParameters(a.ctx)
+	return client.GetSessionParameters(a.ctx)
 }
 
 // GetSessionVariables returns the current session variables from SHOW VARIABLES.
 func (a *App) GetSessionVariables() ([]snowflake.SessionVar, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.GetSessionVariables(a.ctx)
+	return client.GetSessionVariables(a.ctx)
 }
 
 // SetSessionParameter applies ALTER SESSION SET key = value for the given parameter.
 func (a *App) SetSessionParameter(name, value, paramType string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
 	valExpr := snowflake.QuoteSessionParamValue(value, paramType)
-	_, err := a.client.Execute(a.ctx, "ALTER SESSION SET "+name+" = "+valExpr)
+	_, err := client.Execute(a.ctx, "ALTER SESSION SET "+name+" = "+valExpr)
 	return err
 }
 
 // SetSessionVariable applies SET name = value for the given session variable.
 func (a *App) SetSessionVariable(name, value, varType string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
 	valExpr := snowflake.QuoteSessionParamValue(value, varType)
-	_, err := a.client.Execute(a.ctx, "SET "+name+" = "+valExpr)
+	_, err := client.Execute(a.ctx, "SET "+name+" = "+valExpr)
 	return err
 }

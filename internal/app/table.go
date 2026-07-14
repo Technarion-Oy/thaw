@@ -19,49 +19,54 @@ import (
 // GetDatabaseTableSummary returns detailed information about all tables in the
 // specified database.
 func (a *App) GetDatabaseTableSummary(dbName string) ([]table.TableSummary, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return table.GetDatabaseTableSummary(a.ctx, a.client, dbName)
+	return table.GetDatabaseTableSummary(a.ctx, client, dbName)
 }
 
 // GetTableSettings reads the current values of all modifiable table properties
 // by running SHOW TABLES and (for collation) SHOW PARAMETERS.
 func (a *App) GetTableSettings(database, schema, tbl string) (table.TableSettings, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return table.TableSettings{}, apperrors.ErrNotConnected
 	}
-	return table.GetTableSettings(a.ctx, a.client, database, schema, tbl)
+	return table.GetTableSettings(a.ctx, client, database, schema, tbl)
 }
 
 // AlterTableProperty applies a single ALTER TABLE SET change.
 // property must be one of: clusterBy, enableSchemaEvolution, dataRetentionDays,
 // maxDataExtensionDays, changeTracking, defaultDDLCollation, comment.
 func (a *App) AlterTableProperty(database, schema, tbl, property, value string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return table.AlterProperty(a.ctx, a.client, database, schema, tbl, property, value)
+	return table.AlterProperty(a.ctx, client, database, schema, tbl, property, value)
 }
 
 // ExportTableData exports a Snowflake table to the local filesystem using a
 // temporary internal stage. The stage is dropped automatically after the
 // download completes or on error.
 func (a *App) ExportTableData(params snowflake.ExportTableParams) (snowflake.ExportTableResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return snowflake.ExportTableResult{}, apperrors.ErrNotConnected
 	}
-	return a.client.ExportTableData(a.ctx, params)
+	return client.ExportTableData(a.ctx, params)
 }
 
 // ImportTableData imports a local file into a Snowflake table using a temporary
 // internal stage. The stage is dropped automatically after the upload completes
 // or on error.
 func (a *App) ImportTableData(params snowflake.ImportTableParams) (snowflake.ImportTableResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return snowflake.ImportTableResult{}, apperrors.ErrNotConnected
 	}
-	return a.client.ImportTableData(a.ctx, params)
+	return client.ImportTableData(a.ctx, params)
 }
 
 // ExecDDL executes an arbitrary DDL/DML statement and discards the result set.
@@ -69,9 +74,10 @@ func (a *App) ImportTableData(params snowflake.ImportTableParams) (snowflake.Imp
 // caller needs to know whether the statement succeeded without routing the SQL
 // through the editor's query pipeline.
 func (a *App) ExecDDL(sql string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	_, err := a.client.Execute(a.ctx, sql)
+	_, err := client.Execute(a.ctx, sql)
 	return err
 }

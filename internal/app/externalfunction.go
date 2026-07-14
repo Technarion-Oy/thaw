@@ -28,12 +28,13 @@ import (
 // SQL quoting inside the clause; this method only double-quotes the function
 // identifier and interpolates args into the signature parentheses.
 func (a *App) AlterExternalFunction(database, schema, name, args, clause string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("ALTER FUNCTION %s.%s.%s(%s) %s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), args, clause)
-	_, err := a.client.Execute(a.ctx, sql)
+	_, err := client.Execute(a.ctx, sql)
 	return err
 }
 
@@ -46,12 +47,13 @@ func (a *App) AlterExternalFunction(database, schema, name, args, clause string)
 // is returned (property / value columns) so the caller can render every row
 // without the backend pinning a fixed shape.
 func (a *App) DescribeExternalFunction(database, schema, name, args string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("DESCRIBE FUNCTION %s.%s.%s(%s)",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), args)
-	return a.client.Execute(a.ctx, sql)
+	return client.Execute(a.ctx, sql)
 }
 
 // GetExternalFunctionOptions returns the fixed choice lists (compression, null
@@ -67,8 +69,9 @@ func (a *App) GetExternalFunctionOptions() externalfunction.BuilderOptions {
 // the external function builder. Pass an empty database to use the session's
 // current scope.
 func (a *App) ListUserFunctions(database string) ([]snowflake.UserFunction, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.ListUserFunctions(a.ctx, database)
+	return client.ListUserFunctions(a.ctx, database)
 }

@@ -26,11 +26,12 @@ import (
 // correct SQL quoting inside the clause; this method double-quotes the function
 // identifier and interpolates args into the signature parentheses.
 func (a *App) AlterFunction(database, schema, name, args, clause string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("ALTER FUNCTION %s.%s.%s(%s) %s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), args, clause)
-	_, err := a.client.Execute(a.ctx, sql)
+	_, err := client.Execute(a.ctx, sql)
 	return err
 }

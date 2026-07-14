@@ -20,18 +20,20 @@ import (
 // ListUsers returns all users visible to the current role.
 // Returns an error if the role lacks the required privilege.
 func (a *App) ListUsers() ([]snowflake.SnowflakeUser, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.ListUsers(a.ctx)
+	return client.ListUsers(a.ctx)
 }
 
 // GetUserDDL returns a CREATE USER DDL statement for the given user.
 func (a *App) GetUserDDL(name string) (string, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return "", apperrors.ErrNotConnected
 	}
-	return a.client.GetUserDDL(a.ctx, name)
+	return client.GetUserDDL(a.ctx, name)
 }
 
 // AlterUserProperty applies a single SET/UNSET property change to a user.
@@ -39,10 +41,11 @@ func (a *App) GetUserDDL(name string) (string, error) {
 // (loginName, email, defaultWarehouse, minsToBypassMfa, type, …); an empty
 // value UNSETs the property where Snowflake allows it.
 func (a *App) AlterUserProperty(name, property, value string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return users.AlterProperty(a.ctx, a.client, name, property, value)
+	return users.AlterProperty(a.ctx, client, name, property, value)
 }
 
 // CheckAvailableKeyTools returns the list of available key generation methods.
@@ -60,9 +63,10 @@ func (a *App) GenerateKeyPair(method, privateKeyPath, passphrase string) (keypai
 
 // SetUserPublicKey applies an RSA public key to a Snowflake user.
 func (a *App) SetUserPublicKey(username, publicKey string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	_, err := a.client.Execute(a.ctx, keypair.BuildSetUserPublicKeySQL(username, publicKey))
+	_, err := client.Execute(a.ctx, keypair.BuildSetUserPublicKeySQL(username, publicKey))
 	return err
 }

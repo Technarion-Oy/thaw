@@ -22,11 +22,12 @@ import (
 // <acct>". The caller is responsible for correct SQL quoting inside the clause;
 // this method only double-quotes the database identifier.
 func (a *App) AlterDatabase(database, clause string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("ALTER DATABASE %s %s", snowflake.QuoteIdent(database), clause)
-	_, err := a.client.Execute(a.ctx, sql)
+	_, err := client.Execute(a.ctx, sql)
 	return err
 }
 
@@ -37,19 +38,21 @@ func (a *App) AlterDatabase(database, clause string) error {
 // here instead. The raw QueryResult is returned (key / value / default / level
 // / … columns) so the caller can pick out the parameters it cares about.
 func (a *App) GetDatabaseParameters(database string) (*snowflake.QueryResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("SHOW PARAMETERS IN DATABASE %s", snowflake.QuoteIdent(database))
-	return a.client.Execute(a.ctx, sql)
+	return client.Execute(a.ctx, sql)
 }
 
 // ListEventTables returns the fully-qualified names of all event tables visible
 // to the current role account-wide, for the EVENT_TABLE picker in the Database
 // Properties modal.
 func (a *App) ListEventTables() ([]string, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.ListEventTables(a.ctx)
+	return client.ListEventTables(a.ctx)
 }

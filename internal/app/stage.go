@@ -21,48 +21,54 @@ import (
 
 // ListStageEntries returns directory-aware entries within an internal named stage.
 func (a *App) ListStageEntries(database, schema, stageName, dirPath string) ([]snowflake.GitRepoEntry, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.ListStageEntries(a.ctx, database, schema, stageName, dirPath)
+	return client.ListStageEntries(a.ctx, database, schema, stageName, dirPath)
 }
 
 // ListStages returns the stages in a schema with their INTERNAL/EXTERNAL type,
 // so callers can filter (e.g. external tables may only reference an EXTERNAL stage).
 func (a *App) ListStages(database, schema string) ([]snowflake.StageSummary, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.ListStages(a.ctx, database, schema)
+	return client.ListStages(a.ctx, database, schema)
 }
 
 // ListWorkspaces returns all workspaces visible to the current user.
 func (a *App) ListWorkspaces() ([]snowflake.WorkspaceInfo, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.ListWorkspaces(a.ctx)
+	return client.ListWorkspaces(a.ctx)
 }
 
 // ListWorkspaceEntries returns directory-aware entries within a workspace.
 func (a *App) ListWorkspaceEntries(database, schema, workspaceName, dirPath string) ([]snowflake.GitRepoEntry, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.ListWorkspaceEntries(a.ctx, database, schema, workspaceName, dirPath)
+	return client.ListWorkspaceEntries(a.ctx, database, schema, workspaceName, dirPath)
 }
 
 // ListStageFiles returns the list of files on a Snowflake stage.
 func (a *App) ListStageFiles(stageName string, pattern string) ([]stage.StageFile, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return stage.ListStageFiles(a.ctx, a.client, stageName, pattern)
+	return stage.ListStageFiles(a.ctx, client, stageName, pattern)
 }
 
 // UploadFileToStage executes a PUT command to upload a local file to an internal stage.
 func (a *App) UploadFileToStage(localPath string, stageName string, parallel int, autoCompress bool, sourceCompression string, overwrite bool) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
 
@@ -71,12 +77,13 @@ func (a *App) UploadFileToStage(localPath string, stageName string, parallel int
 		return fmt.Errorf("PUT commands are disabled. Enable them under View → Enabled Features…")
 	}
 
-	return stage.UploadFileToStage(a.ctx, a.client, localPath, stageName, parallel, autoCompress, sourceCompression, overwrite)
+	return stage.UploadFileToStage(a.ctx, client, localPath, stageName, parallel, autoCompress, sourceCompression, overwrite)
 }
 
 // DownloadFileFromStage executes a GET command to download files from an internal stage to a local directory.
 func (a *App) DownloadFileFromStage(stageName string, localDirPath string, parallel int, pattern string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
 
@@ -85,12 +92,13 @@ func (a *App) DownloadFileFromStage(stageName string, localDirPath string, paral
 		return fmt.Errorf("GET commands are disabled. Enable them under View → Enabled Features…")
 	}
 
-	return stage.DownloadFileFromStage(a.ctx, a.client, stageName, localDirPath, parallel, pattern)
+	return stage.DownloadFileFromStage(a.ctx, client, stageName, localDirPath, parallel, pattern)
 }
 
 // RemoveStageFiles deletes files from a stage using the REMOVE command.
 func (a *App) RemoveStageFiles(stageName string, pattern string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
 
@@ -99,7 +107,7 @@ func (a *App) RemoveStageFiles(stageName string, pattern string) error {
 		return fmt.Errorf("REMOVE commands are disabled. Enable them under View → Enabled Features…")
 	}
 
-	return stage.RemoveStageFiles(a.ctx, a.client, stageName, pattern)
+	return stage.RemoveStageFiles(a.ctx, client, stageName, pattern)
 }
 
 // GetLocalFilePreview reads a local file and returns up to 50 rows.
@@ -112,22 +120,24 @@ func (a *App) GetLocalFilePreview(path string, cfg fileformat.FileFormatConfig) 
 // derived from cfg and returns up to 50 rows. The stagePath must be a fully
 // qualified stage reference, e.g. "@DB.SCHEMA.STAGE/path/to/file.csv".
 func (a *App) GetStageFilePreview(stagePath string, cfg fileformat.FileFormatConfig) (fileformat.PreviewResult, error) {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return fileformat.PreviewResult{}, apperrors.ErrNotConnected
 	}
-	return fileformat.PreviewStageFile(a.ctx, a.client, stagePath, cfg)
+	return fileformat.PreviewStageFile(a.ctx, client, stagePath, cfg)
 }
 
 // ExecuteStageFile executes a SQL file from an internal named stage.
 // Only .sql files are accepted; the frontend gates this too, but we validate server-side for defense-in-depth.
 func (a *App) ExecuteStageFile(database, schema, stageName, filePath string) error {
-	if a.client == nil {
+	client := a.currentClient()
+	if client == nil {
 		return apperrors.ErrNotConnected
 	}
 	if !strings.HasSuffix(strings.ToLower(filePath), ".sql") {
 		return fmt.Errorf("only .sql files can be executed, got %q", filePath)
 	}
-	return a.client.ExecuteGitFile(a.ctx, database, schema, stageName, filePath) // SQL pattern is identical: EXECUTE IMMEDIATE FROM @db.schema.name/path
+	return client.ExecuteGitFile(a.ctx, database, schema, stageName, filePath) // SQL pattern is identical: EXECUTE IMMEDIATE FROM @db.schema.name/path
 }
 
 // AlterStage runs an ALTER STAGE IF EXISTS statement on the given stage.
