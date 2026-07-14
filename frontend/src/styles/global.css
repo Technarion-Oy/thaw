@@ -1103,6 +1103,17 @@ body,
   border-color: var(--accent) !important;
 }
 
+/* ── ER Designer: table node changed by the latest MCP/AI modification ──────
+   A solid accent border + glow marks the most recent AI change so the user can
+   see (and undo) it. Only the latest change is highlighted; a manual edit,
+   undo, or redo clears it. Same inline-style-override caveat as er-intermediate.
+   ──────────────────────────────────────────────────────────────────────── */
+.react-flow__node.er-ai-changed > div {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 2px var(--accent),
+    0 0 12px color-mix(in srgb, var(--accent) 50%, transparent) !important;
+}
+
 /* ── ER Diagram: join path disambiguation option hover ───────────────── */
 .er-join-path-option {
   transition: border-color 0.12s ease, background 0.12s ease;

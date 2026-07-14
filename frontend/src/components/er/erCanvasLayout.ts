@@ -265,6 +265,27 @@ export function mergeAITablesIntoDesigner(
   return merged;
 }
 
+/**
+ * Given the result of `mergeAITablesIntoDesigner` and the AI tables that
+ * produced it, return the set of `DesignerTable.id`s the AI added or replaced.
+ * Used to highlight the latest MCP change on the canvas. Matching is by
+ * `SCHEMA.NAME` — a merged table adopts the AI table's exact casing, so
+ * `tableKey` matches without case folding.
+ */
+export function changedTableIdsFromMerge(
+  merged: DesignerTable[],
+  aiTables: AITableIn[],
+): Set<string> {
+  const aiKeys = new Set(aiTables.map((t) => tableKey(t.schema, t.name)));
+  const ids = new Set<string>();
+  for (const t of merged) {
+    if (t.schema && t.name.trim() && aiKeys.has(tableKey(t.schema, t.name))) {
+      ids.add(t.id);
+    }
+  }
+  return ids;
+}
+
 /** An IDENTITY / AUTOINCREMENT column's INFORMATION_SCHEMA COLUMN_DEFAULT holds
  *  a generator clause (e.g. "IDENTITY START 1 INCREMENT 1"), not a literal — the
  *  ER Designer has no identity model, so treat it as "no default" rather than

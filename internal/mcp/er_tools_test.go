@@ -818,3 +818,198 @@ func TestModifyERDesignerColumnValidation(t *testing.T) {
 		t.Error("expected no error for valid 3-part fkRef")
 	}
 }
+
+// ── mergeAITablesIntoState ───────────────────────────────────────────────────
+
+func TestMergeAITablesIntoStateReplaceAppend(t *testing.T) {
+	before := &ERDesignerState{
+		Database: "DB",
+		Tables: []ERDesignerTableOut{
+			{Schema: "PUBLIC", Name: "USERS", Columns: []ERDesignerColumnOut{
+				{Name: "ID", DataType: "NUMBER(38,0)", IsPK: true, NotNull: true},
+				{Name: "NAME", DataType: "VARCHAR(100)"},
+			}},
+			{Schema: "PUBLIC", Name: "KEEP", Columns: []ERDesignerColumnOut{
+				{Name: "ID", DataType: "NUMBER(38,0)", IsPK: true, NotNull: true},
+			}},
+		},
+	}
+
+	ai := []erDesignerTableIn{
+		// Replace USERS (case-insensitive match) — swap NAME for EMAIL.
+		{Schema: "public", Name: "users", Columns: []erDesignerColumnIn{
+			{Name: "ID", DataType: "NUMBER(38,0)", IsPK: true},
+			{Name: "EMAIL", DataType: "VARCHAR(256)", NotNull: true},
+		}},
+		// Append a brand-new table.
+		{Schema: "PUBLIC", Name: "ORDERS", Columns: []erDesignerColumnIn{
+			{Name: "ID", DataType: "NUMBER(38,0)", IsPK: true},
+		}},
+	}
+
+	got := mergeAITablesIntoState(before, ai)
+	if got.Database != "DB" {
+		t.Errorf("Database = %q, want DB", got.Database)
+	}
+	if len(got.Tables) != 3 {
+		t.Fatalf("expected 3 tables (USERS replaced in place, KEEP kept, ORDERS appended), got %d", len(got.Tables))
+	}
+	// USERS keeps its original position (index 0) despite the case-insensitive match.
+	if got.Tables[0].Name != "users" {
+		t.Errorf("Tables[0].Name = %q, want users (replacement adopts AI casing)", got.Tables[0].Name)
+	}
+	if len(got.Tables[0].Columns) != 2 || got.Tables[0].Columns[1].Name != "EMAIL" {
+		t.Errorf("USERS columns not replaced: %+v", got.Tables[0].Columns)
+	}
+	// EMAIL was NotNull; PK ID should be derived NotNull.
+	if !got.Tables[0].Columns[0].NotNull {
+		t.Error("PK column should have NotNull derived true")
+	}
+	if got.Tables[1].Name != "KEEP" {
+		t.Errorf("Tables[1].Name = %q, want KEEP (untouched)", got.Tables[1].Name)
+	}
+	if got.Tables[2].Name != "ORDERS" {
+		t.Errorf("Tables[2].Name = %q, want ORDERS (appended)", got.Tables[2].Name)
+	}
+}
+
+func TestMergeAITablesIntoStatePreservesDefault(t *testing.T) {
+	before := &ERDesignerState{
+		Database: "DB",
+		Tables: []ERDesignerTableOut{
+			{Schema: "PUBLIC", Name: "T", Columns: []ERDesignerColumnOut{
+				{Name: "CREATED", DataType: "TIMESTAMP_NTZ", Default: "CURRENT_TIMESTAMP()"},
+			}},
+		},
+	}
+	// AI replaces T but omits the DEFAULT for the same-named column.
+	ai := []erDesignerTableIn{
+		{Schema: "PUBLIC", Name: "T", Columns: []erDesignerColumnIn{
+			{Name: "CREATED", DataType: "TIMESTAMP_NTZ"},
+		}},
+	}
+	got := mergeAITablesIntoState(before, ai)
+	if got.Tables[0].Columns[0].Default != "CURRENT_TIMESTAMP()" {
+		t.Errorf("expected DEFAULT preserved from same-named column, got %q", got.Tables[0].Columns[0].Default)
+	}
+}
+
+// ── describeERDelta ──────────────────────────────────────────────────────────
+
+func TestDescribeERDeltaAddedTable(t *testing.T) {
+	before := &ERDesignerState{Database: "DB"}
+	ai := []erDesignerTableIn{
+		{Schema: "PUBLIC", Name: "ORDERS", Columns: []erDesignerColumnIn{
+			{Name: "ID", DataType: "NUMBER(38,0)", IsPK: true},
+			{Name: "USER_ID", DataType: "NUMBER(38,0)", FKRef: "PUBLIC.USERS.ID"},
+		}},
+	}
+	got := describeERDelta(before, ai)
+	if !strings.Contains(got, "Added table PUBLIC.ORDERS") {
+		t.Errorf("expected added-table line, got: %s", got)
+	}
+	if !strings.Contains(got, "FK→PUBLIC.USERS.ID") {
+		t.Errorf("expected FK annotation, got: %s", got)
+	}
+}
+
+func TestDescribeERDeltaColumnChanges(t *testing.T) {
+	before := &ERDesignerState{
+		Database: "DB",
+		Tables: []ERDesignerTableOut{
+			{Schema: "PUBLIC", Name: "USERS", Columns: []ERDesignerColumnOut{
+				{Name: "ID", DataType: "NUMBER(38,0)", IsPK: true, NotNull: true},
+				{Name: "LEGACY", DataType: "VARCHAR(10)"},
+				{Name: "AGE", DataType: "NUMBER(3,0)"},
+			}},
+		},
+	}
+	ai := []erDesignerTableIn{
+		{Schema: "PUBLIC", Name: "USERS", Columns: []erDesignerColumnIn{
+			{Name: "ID", DataType: "NUMBER(38,0)", IsPK: true},
+			{Name: "AGE", DataType: "NUMBER(5,0)"},          // type changed
+			{Name: "EMAIL", DataType: "VARCHAR(256)", NotNull: true}, // added
+			// LEGACY removed
+		}},
+	}
+	got := describeERDelta(before, ai)
+	if !strings.Contains(got, "Updated table PUBLIC.USERS") {
+		t.Errorf("expected updated-table line, got: %s", got)
+	}
+	if !strings.Contains(got, "added EMAIL") {
+		t.Errorf("expected added EMAIL, got: %s", got)
+	}
+	if !strings.Contains(got, "removed LEGACY") {
+		t.Errorf("expected removed LEGACY, got: %s", got)
+	}
+	if !strings.Contains(got, "AGE") || !strings.Contains(got, "NUMBER(3,0)→NUMBER(5,0)") {
+		t.Errorf("expected AGE type-change delta, got: %s", got)
+	}
+}
+
+func TestDescribeERDeltaNoColumnChanges(t *testing.T) {
+	before := &ERDesignerState{
+		Database: "DB",
+		Tables: []ERDesignerTableOut{
+			{Schema: "PUBLIC", Name: "T", Columns: []ERDesignerColumnOut{
+				{Name: "ID", DataType: "NUMBER(38,0)", IsPK: true, NotNull: true},
+			}},
+		},
+	}
+	ai := []erDesignerTableIn{
+		{Schema: "PUBLIC", Name: "T", Columns: []erDesignerColumnIn{
+			{Name: "ID", DataType: "NUMBER(38,0)", IsPK: true},
+		}},
+	}
+	got := describeERDelta(before, ai)
+	if !strings.Contains(got, "no column changes") {
+		t.Errorf("expected no-change note, got: %s", got)
+	}
+}
+
+// TestModifyERDesignerReturnsDeltaAndUpdatesCache verifies the tool result
+// describes the change and that the state store is immediately consistent
+// (no wait for the frontend's debounced push).
+func TestModifyERDesignerReturnsDeltaAndUpdatesCache(t *testing.T) {
+	erState := NewERDesignerStateStore()
+	erState.Set(&ERDesignerState{
+		Database: "DB",
+		Tables: []ERDesignerTableOut{
+			{Schema: "PUBLIC", Name: "USERS", Columns: []ERDesignerColumnOut{
+				{Name: "ID", DataType: "NUMBER(38,0)", IsPK: true, NotNull: true},
+			}},
+		},
+	})
+	cs := newTestSessionWithEmitAndState(t, erState)
+	ctx := context.Background()
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "modify_er_designer",
+		Arguments: modifyERDesignerInput{
+			Tables: []erDesignerTableIn{
+				{Schema: "PUBLIC", Name: "ORDERS", Columns: []erDesignerColumnIn{
+					{Name: "ID", DataType: "NUMBER(38,0)", IsPK: true},
+				}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned Go error: %v", err)
+	}
+	if res.IsError {
+		t.Fatal("expected no error for valid modify")
+	}
+	text := res.Content[0].(*mcpsdk.TextContent).Text
+	if !strings.Contains(text, "Added table PUBLIC.ORDERS") {
+		t.Errorf("expected delta summary in result, got: %s", text)
+	}
+
+	// Cache should already reflect the appended table.
+	state := erState.Get()
+	if state == nil || len(state.Tables) != 2 {
+		t.Fatalf("expected cache to have 2 tables immediately, got %+v", state)
+	}
+	if state.Tables[1].Name != "ORDERS" {
+		t.Errorf("expected appended ORDERS in cache, got %q", state.Tables[1].Name)
+	}
+}

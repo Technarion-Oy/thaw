@@ -1,16 +1,16 @@
 // Copyright (c) 2026 Technarion Oy. All rights reserved.
 // @thaw-domain: ER Designer
 
-import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, useReducer, lazy, Suspense } from "react";
 import { App as AntApp, Modal, Button, Input, Select, Checkbox, AutoComplete } from "antd";
-import { PlusOutlined, DeleteOutlined, CopyOutlined, LinkOutlined, SwapOutlined } from "@ant-design/icons";
+import { PlusOutlined, DeleteOutlined, CopyOutlined, LinkOutlined, SwapOutlined, UndoOutlined, RedoOutlined } from "@ant-design/icons";
 import { ExecuteQuery, ListUserSchemas, UpdateERDesignerState, ClearERDesignerState } from "../../../wailsjs/go/app/App";
 import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { mcp } from "../../../wailsjs/go/models";
 // Lazy — pulls in @xyflow/@dagrejs (the canvas renderer) only when shown.
 const ERCanvas = lazy(() => import("./ERCanvas"));
-import { initFromERData, normalizeDataType, mergeAITablesIntoDesigner } from "./erCanvasLayout";
+import { initFromERData, normalizeDataType, mergeAITablesIntoDesigner, changedTableIdsFromMerge } from "./erCanvasLayout";
 import type { AITableIn } from "./erCanvasLayout";
 import { buildMermaid } from "./buildMermaid";
 import DefaultFunctionPicker from "../shared/DefaultFunctionPicker";
@@ -375,6 +375,100 @@ function generateDiffSQL(
   return stmts.join("\n\n");
 }
 
+// ── Undo/redo history ──────────────────────────────────────────────────────────
+
+const HISTORY_LIMIT = 100;
+/** Rapid edits sharing a coalesce key within this window collapse to one undo
+ *  step (e.g. typing into a column name). */
+const HISTORY_COALESCE_MS = 500;
+
+interface HistoryControls {
+  undo: () => void;
+  redo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+}
+
+/**
+ * Bounded undo/redo stack over the designer's `tables` state. A drop-in
+ * replacement for `useState<DesignerTable[]>` whose setter (`commit`) records
+ * history. Node *positions* are intentionally not tracked here — they live in
+ * localStorage (`erLayoutStore`), not in `tables`, so drag-to-reposition is not
+ * undoable. History is ephemeral: it resets when the designer modal remounts.
+ *
+ * `commit(updater, coalesceKey?)` pushes a new undo boundary unless the previous
+ * commit shared the same `coalesceKey` within HISTORY_COALESCE_MS, in which case
+ * the edits merge into a single step. Structural edits (add/remove/FK/MCP merge)
+ * omit the key so each is its own step.
+ */
+function useDesignerHistory(
+  init: () => DesignerTable[],
+): [DesignerTable[], (updater: (prev: DesignerTable[]) => DesignerTable[], coalesceKey?: string) => void, HistoryControls] {
+  const [present, setPresent] = useState<DesignerTable[]>(init);
+  // presentRef mirrors `present` synchronously so back-to-back commits in one
+  // tick chain correctly (and so side-effect logic stays out of the updater).
+  const presentRef = useRef(present);
+  presentRef.current = present;
+  const pastRef = useRef<DesignerTable[][]>([]);
+  const futureRef = useRef<DesignerTable[][]>([]);
+  const lastEditRef = useRef<{ key: string | null; time: number }>({ key: null, time: 0 });
+  const [, forceRender] = useReducer((n: number) => n + 1, 0);
+
+  const commit = useCallback(
+    (updater: (prev: DesignerTable[]) => DesignerTable[], coalesceKey?: string) => {
+      const prev = presentRef.current;
+      const next = updater(prev);
+      if (next === prev) return;
+      const now = Date.now();
+      const key = coalesceKey ?? null;
+      const coalesce =
+        key !== null &&
+        key === lastEditRef.current.key &&
+        now - lastEditRef.current.time < HISTORY_COALESCE_MS &&
+        pastRef.current.length > 0;
+      if (!coalesce) {
+        const nextPast = pastRef.current.concat([prev]);
+        if (nextPast.length > HISTORY_LIMIT) nextPast.shift();
+        pastRef.current = nextPast;
+      }
+      futureRef.current = [];
+      lastEditRef.current = { key, time: now };
+      presentRef.current = next;
+      setPresent(next);
+      forceRender();
+    },
+    [],
+  );
+
+  const undo = useCallback(() => {
+    if (pastRef.current.length === 0) return;
+    const prevState = pastRef.current[pastRef.current.length - 1];
+    pastRef.current = pastRef.current.slice(0, -1);
+    futureRef.current = [presentRef.current, ...futureRef.current];
+    lastEditRef.current = { key: null, time: 0 };
+    presentRef.current = prevState;
+    setPresent(prevState);
+    forceRender();
+  }, []);
+
+  const redo = useCallback(() => {
+    if (futureRef.current.length === 0) return;
+    const nextState = futureRef.current[0];
+    futureRef.current = futureRef.current.slice(1);
+    pastRef.current = pastRef.current.concat([presentRef.current]);
+    lastEditRef.current = { key: null, time: 0 };
+    presentRef.current = nextState;
+    setPresent(nextState);
+    forceRender();
+  }, []);
+
+  return [
+    present,
+    commit,
+    { undo, redo, canUndo: pastRef.current.length > 0, canRedo: futureRef.current.length > 0 },
+  ];
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function ERDesigner({ database, initialData, mergedData, onClose, onSuccess }: Props) {
@@ -384,11 +478,28 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
   const resizeStart = useRef({ x: 0, width: 0 });
 
   const [schemas, setSchemas] = useState<string[]>([]);
-  const [tables, setTables] = useState<DesignerTable[]>(() => {
+  const [tables, commit, { undo, redo, canUndo, canRedo }] = useDesignerHistory(() => {
     if (mergedData) return initFromERData(mergedData);
     if (initialData) return initFromERData(initialData);
     return [];
   });
+
+  // Highlight for the latest MCP change — only the most recent AI modification
+  // is marked, and any manual edit / undo / redo clears it.
+  const [changedTableIds, setChangedTableIds] = useState<Set<string> | null>(null);
+
+  // Manual-edit wrapper: records an undo step and clears the AI-change highlight.
+  // The MCP merge path calls `commit` directly (then sets its own highlight).
+  const edit = useCallback(
+    (updater: (prev: DesignerTable[]) => DesignerTable[], coalesceKey?: string) => {
+      setChangedTableIds(null);
+      commit(updater, coalesceKey);
+    },
+    [commit],
+  );
+
+  const doUndo = useCallback(() => { setChangedTableIds(null); undo(); }, [undo]);
+  const doRedo = useCallback(() => { setChangedTableIds(null); redo(); }, [redo]);
 
   // Stable ref for tables — used in callbacks that shouldn't re-create on every tables change
   const tablesRef = useRef(tables);
@@ -504,12 +615,35 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
 
   useEffect(() => {
     const off = EventsOn("mcp:modify-er-designer", (payload: { tables: AITableIn[] }) => {
-      setTables((prev) => mergeAITablesIntoDesigner(prev, payload.tables));
+      const merged = mergeAITablesIntoDesigner(tablesRef.current, payload.tables);
+      commit(() => merged); // discrete undo step — the user can undo an AI change
+      setChangedTableIds(changedTableIdsFromMerge(merged, payload.tables));
       message.info(`${payload.tables.length} table(s) updated by AI`);
     });
     return () => off();
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- message is stable
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- commit/message stable, tablesRef is a stable ref
   }, []);
+
+  // ── Undo/redo keyboard shortcuts (scoped to the designer modal) ────────────
+  // Cmd/Ctrl+Z = undo, Cmd/Ctrl+Shift+Z or Ctrl+Y = redo. Skipped while focus is
+  // in a text field so native input-level undo keeps working (and so Monaco's
+  // editor undo, which lives outside this modal, is never intercepted here).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.metaKey && !e.ctrlKey) return;
+      const key = e.key.toLowerCase();
+      const isUndo = key === "z" && !e.shiftKey;
+      const isRedo = (key === "z" && e.shiftKey) || key === "y";
+      if (!isUndo && !isRedo) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      e.preventDefault();
+      if (isRedo) doRedo();
+      else doUndo();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [doUndo, doRedo]);
 
   // ── Schema filter for canvas ──────────────────────────────────────────────
 
@@ -591,14 +725,14 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
         comment: cfg.comment,
       },
     };
-    setTables((prev) => [...prev, newTable]);
+    edit((prev) => [...prev, newTable]);
     setSelectedTableIds([newTable.id]);
   };
 
   const removeTable = useCallback((tableId: string) => {
-    setTables((prev) => prev.filter((t) => t.id !== tableId));
+    edit((prev) => prev.filter((t) => t.id !== tableId));
     setSelectedTableIds((prev) => prev.filter((id) => id !== tableId));
-  }, []);
+  }, [edit]);
 
   const confirmRemoveTable = useCallback(
     (tableId: string) => {
@@ -619,27 +753,33 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
   );
 
   const updateTable = useCallback((tableId: string, patch: Partial<Pick<DesignerTable, "name" | "schema">>) => {
-    setTables((prev) => prev.map((t) => (t.id === tableId ? { ...t, ...patch } : t)));
-  }, []);
+    // Coalesce name typing into one undo step; a schema pick is discrete.
+    const coalesceKey = patch.name !== undefined ? `table:${tableId}:name` : undefined;
+    edit((prev) => prev.map((t) => (t.id === tableId ? { ...t, ...patch } : t)), coalesceKey);
+  }, [edit]);
 
   const addColumn = useCallback((tableId: string) => {
-    setTables((prev) =>
+    edit((prev) =>
       prev.map((t) =>
         t.id === tableId
           ? { ...t, columns: [...t.columns, { id: crypto.randomUUID(), name: "", dataType: "VARCHAR", isPK: false, notNull: false, fkRef: "", defaultValue: "" }] }
           : t
       )
     );
-  }, []);
+  }, [edit]);
 
   const removeColumn = useCallback((tableId: string, colId: string) => {
-    setTables((prev) =>
+    edit((prev) =>
       prev.map((t) => (t.id === tableId ? { ...t, columns: t.columns.filter((c) => c.id !== colId) } : t))
     );
-  }, []);
+  }, [edit]);
 
   const updateColumn = useCallback((tableId: string, colId: string, patch: Partial<DesignerColumn>) => {
-    setTables((prev) =>
+    // Coalesce rapid text edits (name/type/default typing) into a single undo
+    // step; discrete toggles (PK/NN/FK) each become their own step.
+    const isText = patch.name !== undefined || patch.dataType !== undefined || patch.defaultValue !== undefined;
+    const coalesceKey = isText ? `col:${tableId}:${colId}` : undefined;
+    edit((prev) =>
       prev.map((t) =>
         t.id === tableId
           ? {
@@ -652,9 +792,10 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
               }),
             }
           : t
-      )
+      ),
+      coalesceKey,
     );
-  }, []);
+  }, [edit]);
 
   // FK options: "SCHEMA.TABLE.COLUMN" for every named column in every other table
   const fkOptions = (currentTableId: string): { value: string; label: string }[] => {
@@ -696,8 +837,8 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
   );
 
   // ── Context menu handlers ──────────────────────────────────────────────────
-  // Empty dep arrays are intentional: tablesRef is a stable ref,
-  // setTables/setSelectedTableIds are stable state setters.
+  // tablesRef is a stable ref and setSelectedTableIds is a stable state setter;
+  // `edit` (history-recording mutator) is stable, so it's the only real dep.
 
   const handleDuplicateTable = useCallback(
     (tableId: string) => {
@@ -713,22 +854,22 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
           fkRef: "", // Clear FK refs — the copy is a fresh table
         })),
       };
-      setTables((prev) => [...prev, newTable]);
+      edit((prev) => [...prev, newTable]);
       setSelectedTableIds([newTable.id]);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- tablesRef is a stable ref
-    [],
+    [edit],
   );
 
   const handleRemoveFKs = useCallback((tableId: string) => {
-    setTables((prev) =>
+    edit((prev) =>
       prev.map((t) =>
         t.id === tableId
           ? { ...t, columns: t.columns.map((c) => ({ ...c, fkRef: "" })) }
           : t,
       ),
     );
-  }, []);
+  }, [edit]);
 
   // FK dialog state (two tables pre-populated from multi-select)
   // "child" = table that holds the FK column, "parent" = referenced table
@@ -909,9 +1050,26 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
               gap: 14,
             }}
           >
-            <Button size="small" icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)} style={{ alignSelf: "flex-start" }}>
-              Add Table
-            </Button>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <Button size="small" icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)}>
+                Add Table
+              </Button>
+              <div style={{ flex: 1 }} />
+              <Button
+                size="small"
+                icon={<UndoOutlined />}
+                onClick={doUndo}
+                disabled={!canUndo}
+                title="Undo (⌘Z / Ctrl+Z)"
+              />
+              <Button
+                size="small"
+                icon={<RedoOutlined />}
+                onClick={doRedo}
+                disabled={!canRedo}
+                title="Redo (⇧⌘Z / Ctrl+Y)"
+              />
+            </div>
 
             {tables.length === 0 && (
               <div style={{ color: "var(--text-muted)", fontSize: 12, padding: "12px 0" }}>
@@ -1138,6 +1296,7 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
                 onDeleteTable={confirmRemoveTable}
                 onAddFK={handleAddFK}
                 onRemoveFKs={handleRemoveFKs}
+                changedNodeIds={changedTableIds ?? undefined}
               />
             </Suspense>
           </div>
