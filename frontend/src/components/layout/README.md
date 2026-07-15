@@ -27,6 +27,22 @@ The 5th parameter (`disabled`) hides or disables the item; the 6th (`disabledRea
 tooltip explaining why. Feature flags are read from `featureFlagsStore` and passed here — never
 invert the gating inside handlers.
 
+### `menuItemSub` — cascading submenu factory
+```ts
+menuItemSub(label, icon, subKey, children, depth?)
+```
+Renders a hover-opening submenu panel (150 ms hide delay, viewport clamping via `clampSubPanel`,
+left/right auto-flip near the screen edge tracked in `submenuDirs`). `subKey` must be unique among
+siblings at the same `depth`; the open panel is the one whose key equals `submenuPath[depth]`.
+Disabled child `menuItem`s keep their tooltip, mirrored to the panel's open direction. Used by the
+schema node's **Create Object** menu, the database node's **Reports** menu, and the plain **TABLE**
+object menu, whose actions are grouped into **Query / Data / Tools** submenus (with the structure
+actions — Add Column…, Rename…, View Definition, Properties — and **Delete…** left top-level). Only
+the `TABLE` kind is grouped — every other object kind's menu stays
+a flat list, so the shared `obj` entries (Tag References…, Insert Full Name, View Definition,
+Properties, Select for Comparison, Compare with…, Rename…) carry an explicit `objKind !== "TABLE"`
+guard to avoid double-rendering once they also appear inside a table submenu.
+
 ### Three-tier object-listing cache
 1. `objectStore` — previously expanded schemas (instant, all types).
 2. Go TTL cache (`ListObjects` / `ListBasicObjects`) — 30 s backend cache.

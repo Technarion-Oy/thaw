@@ -4925,11 +4925,49 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {/* DBT Project version/directory/file context menu */}
           {(ctxMenu.nodeType === "dbtversion" || ctxMenu.nodeType === "dbtdir") && menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshTreeNode)}
 
-          {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW" || ctxMenu.objKind === "DYNAMIC TABLE" || ctxMenu.objKind === "EXTERNAL TABLE" || ctxMenu.objKind === "ICEBERG TABLE" || ctxMenu.objKind === "HYBRID TABLE" || ctxMenu.objKind === "EVENT TABLE" || ctxMenu.objKind === "MATERIALIZED VIEW") &&
+          {/* Plain TABLE — actions grouped into cascading category submenus
+              (issue #751). Every entry, its feature-flag gating, and the
+              conditional insert-source / compare rows behave exactly as their
+              flat counterparts did; only the layout changed. Delete… stays
+              top-level (rendered by the shared obj divider + Delete below). */}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" && (
+            <>
+              {menuItemSub("Query", <SearchOutlined style={{ fontSize: 12 }} />, "table-query", (
+                <>
+                  {menuItem("Select Top 1000 Rows", <TableOutlined style={{ fontSize: 12 }} />, selectTop1000)}
+                  {menuItem("Time Travel Query…", <HistoryOutlined style={{ fontSize: 12 }} />, openTimeTravelModal)}
+                  {menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
+                </>
+              ))}
+              {menuItemSub("Data", <DatabaseOutlined style={{ fontSize: 12 }} />, "table-data", (
+                <>
+                  {menuItem("Export Data…", <DownloadOutlined style={{ fontSize: 12 }} />, openExportModal, undefined, !featureFlags.exportTableData, "Table Data Export is disabled. Enable it under View → Enabled Features…")}
+                  {menuItem("Import Data…", <UploadOutlined style={{ fontSize: 12 }} />, openImportModal, undefined, !featureFlags.tableDataImport, "Table Data Import is disabled. Enable it under View → Enabled Features…")}
+                  {menuItem("Insert Row…", <PlusSquareOutlined style={{ fontSize: 12 }} />, openInsertRowModal, undefined, !featureFlags.insertRow, "Insert Row is disabled. Enable it under View → Enabled Features…")}
+                  {menuItem("Select for Insert Target", <SyncOutlined style={{ fontSize: 12 }} />, selectForInsertTarget, undefined, !featureFlags.insertMapping, "Insert Mapping is disabled. Enable it under View → Enabled Features…")}
+                  {insertTarget !== null &&
+                    menuItem(`Add as Insert Source for ${insertTarget.name}`, <SyncOutlined style={{ fontSize: 12, color: "var(--accent)" }} />, selectAsInsertSource, undefined, !featureFlags.insertMapping, "Insert Mapping is disabled. Enable it under View → Enabled Features…")}
+                </>
+              ))}
+              {menuItemSub("Tools", <BuildOutlined style={{ fontSize: 12 }} />, "table-tools", (
+                <>
+                  {menuItem("Backup Sets…", <SaveOutlined style={{ fontSize: 12 }} />, openBackupSets, undefined, !featureFlags.backupPoliciesAndSets, "Backup Policies & Sets is disabled. Enable it under View → Enabled Features…")}
+                  {menuItem("Tag References…", <TagsOutlined style={{ fontSize: 12 }} />, openTagReferences)}
+                  {menuItem("Select for Comparison", <DiffOutlined style={{ fontSize: 12 }} />, selectObjForComparison)}
+                  {pendingDiff !== null &&
+                    menuItem(`Compare with: ${pendingDiff.label}`, <DiffOutlined style={{ fontSize: 12, color: "var(--accent)" }} />, compareObjWith)}
+                </>
+              ))}
+              {/* Structure actions live at the top level (no submenu). */}
+              {menuItem("Add Column…", <PlusOutlined style={{ fontSize: 12 }} />, openAddColumnModal, undefined, !featureFlags.columnManagement, "Column Management is disabled. Enable it under View → Enabled Features…")}
+              {menuItem("Rename…", <EditOutlined style={{ fontSize: 12 }} />, renameObject)}
+              {menuItem("View Definition", null, viewDefinition)}
+              {menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
+            </>
+          )}
+          {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "VIEW" || ctxMenu.objKind === "DYNAMIC TABLE" || ctxMenu.objKind === "EXTERNAL TABLE" || ctxMenu.objKind === "ICEBERG TABLE" || ctxMenu.objKind === "HYBRID TABLE" || ctxMenu.objKind === "EVENT TABLE" || ctxMenu.objKind === "MATERIALIZED VIEW") &&
             menuItem("Select Top 1000 Rows", <TableOutlined style={{ fontSize: 12 }} />, selectTop1000)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
-            menuItem("Select for Insert Target", <SyncOutlined style={{ fontSize: 12 }} />, selectForInsertTarget, undefined, !featureFlags.insertMapping, "Insert Mapping is disabled. Enable it under View → Enabled Features…")}
-          {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW") && insertTarget !== null &&
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "VIEW" && insertTarget !== null &&
             menuItem(`Add as Insert Source for ${insertTarget.name}`, <SyncOutlined style={{ fontSize: 12, color: "var(--accent)" }} />, selectAsInsertSource, undefined, !featureFlags.insertMapping, "Insert Mapping is disabled. Enable it under View → Enabled Features…")}
           {selectedNodeKeys.size > 0 && insertTarget !== null &&
             menuItem(
@@ -4938,18 +4976,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
               addSelectedAsInsertSources,
               undefined, !featureFlags.insertMapping, "Insert Mapping is disabled. Enable it under View → Enabled Features…",
             )}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
-            menuItem("Time Travel Query…", <HistoryOutlined style={{ fontSize: 12 }} />, openTimeTravelModal)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
-            menuItem("Export Data…", <DownloadOutlined style={{ fontSize: 12 }} />, openExportModal, undefined, !featureFlags.exportTableData, "Table Data Export is disabled. Enable it under View → Enabled Features…")}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
-            menuItem("Import Data…", <UploadOutlined style={{ fontSize: 12 }} />, openImportModal, undefined, !featureFlags.tableDataImport, "Table Data Import is disabled. Enable it under View → Enabled Features…")}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
-            menuItem("Insert Row…", <PlusSquareOutlined style={{ fontSize: 12 }} />, openInsertRowModal, undefined, !featureFlags.insertRow, "Insert Row is disabled. Enable it under View → Enabled Features…")}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
-            menuItem("Backup Sets…", <SaveOutlined style={{ fontSize: 12 }} />, openBackupSets, undefined, !featureFlags.backupPoliciesAndSets, "Backup Policies & Sets is disabled. Enable it under View → Enabled Features…")}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
-            menuItem("Add Column…", <PlusOutlined style={{ fontSize: 12 }} />, openAddColumnModal, undefined, !featureFlags.columnManagement, "Column Management is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TASK" &&
             menuItem("Execute Task", <PlayCircleOutlined style={{ fontSize: 12 }} />, executeTask)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TASK" &&
@@ -4968,21 +4994,21 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Execute Notebook…", <PlayCircleOutlined style={{ fontSize: 12 }} />, executeNotebook, undefined, !featureFlags.snowparkNotebooks, "Snowpark & Notebooks is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "NOTEBOOK" &&
             menuItem("Make Live", <CloudUploadOutlined style={{ fontSize: 12 }} />, makeNotebookLive, undefined, !featureFlags.snowparkNotebooks, "Snowpark & Notebooks is disabled. Enable it under View → Enabled Features…")}
-          {ctxMenu.nodeType === "obj" && menuItem("Tag References…", <TagsOutlined style={{ fontSize: 12 }} />, openTagReferences)}
-          {ctxMenu.nodeType === "obj" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
-          {ctxMenu.nodeType === "obj" && kindSupportsDdl(ctxMenu.objKind) && menuItem("View Definition", null, viewDefinition)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ICEBERG TABLE" && ctxMenu.objKind !== "HYBRID TABLE" && ctxMenu.objKind !== "EVENT TABLE" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "JOIN POLICY" && ctxMenu.objKind !== "PRIVACY POLICY" && ctxMenu.objKind !== "STORAGE LIFECYCLE POLICY" && ctxMenu.objKind !== "PASSWORD POLICY" && ctxMenu.objKind !== "SESSION POLICY" && ctxMenu.objKind !== "AGGREGATION POLICY" && ctxMenu.objKind !== "PROJECTION POLICY" && ctxMenu.objKind !== "AUTHENTICATION POLICY" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "GATEWAY" && ctxMenu.objKind !== "CONTACT" && ctxMenu.objKind !== "STREAMLIT" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "MODEL MONITOR" && ctxMenu.objKind !== "DATASET" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "AGENT" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && ctxMenu.objKind !== "SEMANTIC VIEW" && ctxMenu.objKind !== "VIEW" && ctxMenu.objKind !== "SEQUENCE" && ctxMenu.objKind !== "STREAM" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "TABLE" && menuItem("Tag References…", <TagsOutlined style={{ fontSize: 12 }} />, openTagReferences)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "TABLE" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "TABLE" && kindSupportsDdl(ctxMenu.objKind) && menuItem("View Definition", null, viewDefinition)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "TABLE" && ctxMenu.objKind !== "PIPE" && ctxMenu.objKind !== "STAGE" && ctxMenu.objKind !== "DYNAMIC TABLE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ICEBERG TABLE" && ctxMenu.objKind !== "HYBRID TABLE" && ctxMenu.objKind !== "EVENT TABLE" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "MATERIALIZED VIEW" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "TAG" && ctxMenu.objKind !== "MASKING POLICY" && ctxMenu.objKind !== "ROW ACCESS POLICY" && ctxMenu.objKind !== "JOIN POLICY" && ctxMenu.objKind !== "PRIVACY POLICY" && ctxMenu.objKind !== "STORAGE LIFECYCLE POLICY" && ctxMenu.objKind !== "PASSWORD POLICY" && ctxMenu.objKind !== "SESSION POLICY" && ctxMenu.objKind !== "AGGREGATION POLICY" && ctxMenu.objKind !== "PROJECTION POLICY" && ctxMenu.objKind !== "AUTHENTICATION POLICY" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "GATEWAY" && ctxMenu.objKind !== "CONTACT" && ctxMenu.objKind !== "STREAMLIT" && ctxMenu.objKind !== "MODEL" && ctxMenu.objKind !== "MODEL MONITOR" && ctxMenu.objKind !== "DATASET" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "AGENT" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && ctxMenu.objKind !== "SEMANTIC VIEW" && ctxMenu.objKind !== "VIEW" && ctxMenu.objKind !== "SEQUENCE" && ctxMenu.objKind !== "STREAM" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {/* Comparison diffs via GET_DDL, which image repositories, services,
               packages policies, and models don't support — exclude them so the
               diff view can't surface a GET_DDL error for a kind that has no DDL. */}
-          {ctxMenu.nodeType === "obj" && kindSupportsDdl(ctxMenu.objKind) &&
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "TABLE" && kindSupportsDdl(ctxMenu.objKind) &&
             menuItem("Select for Comparison", <DiffOutlined style={{ fontSize: 12 }} />, selectObjForComparison)}
-          {ctxMenu.nodeType === "obj" && kindSupportsDdl(ctxMenu.objKind) && pendingDiff !== null &&
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "TABLE" && kindSupportsDdl(ctxMenu.objKind) && pendingDiff !== null &&
             menuItem(`Compare with: ${pendingDiff.label}`, <DiffOutlined style={{ fontSize: 12, color: "var(--accent)" }} />, compareObjWith)}
           {ctxMenu.nodeType === "obj" &&
             (ctxMenu.objKind === "VIEW" || ctxMenu.objKind === "PROCEDURE" || ctxMenu.objKind === "FUNCTION" || ctxMenu.objKind === "EXTERNAL FUNCTION") &&
             menuItem("View Dependencies…", <ShareAltOutlined style={{ fontSize: 12 }} />, viewDependencies)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "GATEWAY" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "AGENT" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && ctxMenu.objKind !== "MODEL MONITOR" && ctxMenu.objKind !== "DATASET" &&
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "TABLE" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "GATEWAY" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "AGENT" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && ctxMenu.objKind !== "MODEL MONITOR" && ctxMenu.objKind !== "DATASET" &&
             menuItem("Rename…", <EditOutlined style={{ fontSize: 12 }} />, renameObject)}
           {ctxMenu.nodeType === "obj" && <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />}
           {ctxMenu.nodeType === "obj" && menuItem("Delete…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, deleteObject, "#f85149")}
