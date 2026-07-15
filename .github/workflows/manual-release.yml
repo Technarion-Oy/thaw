@@ -17,6 +17,11 @@ jobs:
   release:
     name: Semantic Release
     runs-on: ubuntu-latest
+    # Gate manual releases behind a protected environment. Repo admins must add
+    # "Required reviewers" (admins only) to the `release` environment under
+    # Settings → Environments so every dispatch requires explicit approval before
+    # the release secrets are injected. Until configured, the job runs unprotected.
+    environment: release
     # Export the new version so the build jobs know what to compile
     outputs:
       published: ${{ steps.check-version.outputs.published }}

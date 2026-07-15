@@ -1,5 +1,9 @@
 name: PR Title Check
 
+# Least-privilege default: read-only token unless a job opts into more.
+permissions:
+  contents: read
+
 on:
   pull_request:
     types: [opened, edited, synchronize, reopened]

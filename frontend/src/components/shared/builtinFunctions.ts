@@ -1,9 +1,4 @@
-// Copyright (c) 2026 Technarion Oy. All rights reserved.
-//
-// This software and its source code are proprietary and confidential.
-// Unauthorized copying, distribution, modification, or use of this software,
-// in whole or in part, is strictly prohibited without prior written permission
-// from Technarion Oy.
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 // Curated Snowflake built-in functions that are valid inside a column DEFAULT
 // clause at table-create time. Small subset on purpose — the full ~321-entry

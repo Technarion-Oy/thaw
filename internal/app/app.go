@@ -1,12 +1,4 @@
-// Copyright (c) 2026 Technarion Oy. All rights reserved.
-//
-// This software and its source code are proprietary and confidential.
-// Unauthorized copying, distribution, modification, or use of this software,
-// in whole or in part, is strictly prohibited without prior written permission
-// from Technarion Oy.
-//
-// Commercial use of this software is restricted to parties holding a valid
-// license agreement with Technarion Oy.
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 package app
 
@@ -788,8 +780,8 @@ func (a *App) GetAppInfo() AppInfo {
 		CompanyName:    "Technarion Oy",
 		ProductName:    "Thaw",
 		ProductVersion: version.Version,
-		Copyright:      "Copyright \u00a9 2026 Technarion Oy. All rights reserved.",
-		Comments:       "Snowflake Manager",
+		Copyright:      "Copyright \u00a9 2026 Technarion Oy. Licensed under GPL-3.0-or-later.",
+		Comments:       "Snowflake Manager \u2014 Free Software (GNU GPL v3)",
 	}
 }
 

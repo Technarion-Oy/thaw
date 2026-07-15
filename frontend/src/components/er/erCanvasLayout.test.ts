@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Technarion Oy. All rights reserved.
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 import { describe, it, expect } from "vitest";
 import { mergeAITablesIntoDesigner, changedTableIdsFromMerge } from "./erCanvasLayout";

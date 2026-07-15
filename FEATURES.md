@@ -900,7 +900,7 @@ Right-click any warehouse in the Administration panel and choose **Properties** 
   - Text-level TOML manipulation preserves user comments, blank lines, and unknown keys
 - **Offline-first startup** — the app launches instantly without waiting for a Snowflake connection; connection parameters are validated and the session is established on demand when you first run a query or browse objects, rather than blocking the UI at launch.
 - **Cancel connection** — abort an in-progress connection attempt
-- **User Agreement** — a **User Agreement** link at the bottom of the connect screen opens the End User License Agreement in a scrollable modal
+- **License** — a **License** link at the bottom of the connect screen opens the GNU GPL v3 license notice in a scrollable modal
 - **Unified Toolbar** — a reusable `<Toolbar />` component with execution controls (Run/Cancel), quick-action icon buttons (New SQL, New Notebook, Save), session selectors (role, warehouse, database, schema), and a context-specific slot that dynamically adapts based on the active tab type (e.g. notebook kernel status indicators and actions)
 - **Switch role, warehouse, database, or schema** from the toolbar without disconnecting — all subsequent queries, privilege checks, and object browsing immediately reflect the new session state
 - Role dropdown shows only roles the current user can actually assume

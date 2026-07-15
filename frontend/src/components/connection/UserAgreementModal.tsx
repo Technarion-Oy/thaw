@@ -1,16 +1,8 @@
-// Copyright (c) 2026 Technarion Oy. All rights reserved.
-//
-// This software and its source code are proprietary and confidential.
-// Unauthorized copying, distribution, modification, or use of this software,
-// in whole or in part, is strictly prohibited without prior written permission
-// from Technarion Oy.
-//
-// Commercial use of this software is restricted to parties holding a valid
-// license agreement with Technarion Oy.
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 import { Modal, Typography } from "antd";
 
-const { Title, Paragraph, Text } = Typography;
+const { Title, Paragraph, Text, Link } = Typography;
 
 interface Props {
   open: boolean;
@@ -21,82 +13,53 @@ export default function UserAgreementModal({ open, onClose }: Props) {
   return (
     <Modal
       open={open}
-      title="User Agreement"
+      title="License"
       onCancel={onClose}
       footer={null}
       width={640}
       styles={{ body: { maxHeight: "60vh", overflowY: "auto" } }}
     >
       <Typography>
-        <Title level={5}>Thaw — End User License Agreement</Title>
+        <Title level={5}>Thaw — Free Software</Title>
         <Text type="secondary" style={{ fontSize: 12 }}>
-          Last updated: April 2026
+          GNU General Public License, version 3 (or later)
         </Text>
 
         <Paragraph style={{ marginTop: 16 }}>
-          This End User License Agreement ("Agreement") is a legal agreement between you ("User") and
-          Technarion Oy ("Company") for the use of the Thaw desktop application ("Software").
-          By installing or using the Software, you agree to be bound by the terms of this Agreement.
+          Thaw is free software: you can redistribute it and/or modify it under
+          the terms of the <Text strong>GNU General Public License</Text> as
+          published by the Free Software Foundation, either version 3 of the
+          License, or (at your option) any later version.
         </Paragraph>
 
-        <Title level={5}>1. License Grant</Title>
         <Paragraph>
-          Subject to the terms of this Agreement, Company grants you a limited, non-exclusive,
-          non-transferable, revocable license to install and use the Software solely for your
-          internal business purposes in accordance with your subscription plan.
+          Thaw is distributed in the hope that it will be useful, but{" "}
+          <Text strong>WITHOUT ANY WARRANTY</Text>; without even the implied
+          warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See
+          the GNU General Public License for more details.
         </Paragraph>
 
-        <Title level={5}>2. Restrictions</Title>
         <Paragraph>
-          You may not: (a) copy, modify, or distribute the Software; (b) reverse engineer,
-          decompile, or disassemble the Software; (c) sublicense, rent, lease, or transfer the
-          Software or your rights under this Agreement; (d) use the Software to provide services
-          to third parties without prior written consent from Company.
+          You should have received a copy of the GNU General Public License
+          along with Thaw. If not, see{" "}
+          <Link href="https://www.gnu.org/licenses/" target="_blank" rel="noreferrer">
+            https://www.gnu.org/licenses/
+          </Link>
+          . The full license text is also available in the{" "}
+          <Text code>LICENSE</Text> file at the root of the source repository.
         </Paragraph>
 
-        <Title level={5}>3. Ownership</Title>
+        <Title level={5}>Your data &amp; privacy</Title>
         <Paragraph>
-          The Software is licensed, not sold. Company retains all intellectual property rights in
-          and to the Software, including all copies, modifications, and derivative works thereof.
+          Thaw connects to Snowflake using credentials you provide. It does not
+          store or transmit your Snowflake credentials or query data to any
+          third party. Anonymous, non-identifying usage telemetry may be
+          collected to help improve the software.
         </Paragraph>
 
-        <Title level={5}>4. Data & Privacy</Title>
+        <Title level={5}>Copyright</Title>
         <Paragraph>
-          The Software connects to Snowflake services using credentials you provide. Company does
-          not store or transmit your Snowflake credentials or query data. Usage telemetry (aggregate,
-          non-identifying) may be collected to improve the Software. See our Privacy Policy for details.
-        </Paragraph>
-
-        <Title level={5}>5. Disclaimer of Warranties</Title>
-        <Paragraph>
-          THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
-          INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-          PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
-        </Paragraph>
-
-        <Title level={5}>6. Limitation of Liability</Title>
-        <Paragraph>
-          TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL COMPANY BE
-          LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES
-          ARISING OUT OF OR RELATED TO YOUR USE OF THE SOFTWARE.
-        </Paragraph>
-
-        <Title level={5}>7. Termination</Title>
-        <Paragraph>
-          This Agreement is effective until terminated. Your rights under this Agreement will
-          terminate automatically if you fail to comply with any of its terms. Upon termination,
-          you must destroy all copies of the Software in your possession.
-        </Paragraph>
-
-        <Title level={5}>8. Governing Law</Title>
-        <Paragraph>
-          This Agreement shall be governed by and construed in accordance with the laws of Finland,
-          without regard to its conflict of law provisions.
-        </Paragraph>
-
-        <Title level={5}>9. Contact</Title>
-        <Paragraph>
-          For questions about this Agreement, please contact Technarion Oy.
+          Copyright © 2026 Technarion Oy and Thaw contributors.
         </Paragraph>
       </Typography>
     </Modal>

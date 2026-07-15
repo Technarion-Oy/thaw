@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Technarion Oy. All rights reserved.
+// SPDX-License-Identifier: GPL-3.0-or-later
 // @thaw-domain: ER Designer
 
 import { SNOWFLAKE_DATA_TYPES, SNOWFLAKE_DATA_TYPE_NAMES } from "../../generated/snowflakeDataTypes";

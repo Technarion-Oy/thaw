@@ -11,6 +11,10 @@ temp.txt
 coverage.out
 *.tmp          # atomic-write temp files produced by the DDL exporter
 
+# ── Compiled app binary (produced by `wails build` / `go build`) ──────────────
+/thaw
+/frontend/thaw
+
 # ── Wails build artefacts ─────────────────────────────────────────────────────
 /build/darwin/thaw.app
 /build/windows/thaw.exe
