@@ -214,6 +214,153 @@ const PYTHON_LANGUAGE_CONF = {
   },
 };
 
+// ── Inline Markdown Monarch grammar ───────────────────────────────────────────
+// Same rationale as the Python grammar above: the slim Monaco import drops the
+// basic-language contributions, so markdown has no built-in tokenizer.  This is
+// a faithful port of Monaco's built-in markdown tokeniser
+// (monaco-editor/esm/vs/basic-languages/markdown/markdown.js), inlined to avoid
+// its ~70 side-effect contrib imports.  The only deliberate divergence: the HTML
+// `tag` state pops on `>` instead of switching into an `@embedded` CSS/JS state,
+// because those language services are not in the slim build — embedded
+// `<script>`/`<style>` bodies simply render un-highlighted rather than crash.
+const MARKDOWN_MONARCH_LANGUAGE = {
+  defaultToken: "",
+  tokenPostfix: ".md",
+  // Escape sequences: a backslash followed by any markdown control character.
+  control: /[\\`*_\[\]{}()#+\-.!]/,
+  noncontrol: /[^\\`*_\[\]{}()#+\-.!]/,
+  escapes: /\\(?:@control)/,
+  // Void HTML elements — matched so their tags don't push a body state.
+  empty: [
+    "area", "base", "basefont", "br", "col", "frame", "hr", "img", "input",
+    "isindex", "link", "meta", "param",
+  ],
+  tokenizer: {
+    root: [
+      // A leading `|` switches into table parsing.
+      [/^\s*\|/, "@rematch", "@table_header"],
+      // ATX headers: `# …` through `###### …` (with an optional trailing run of #).
+      [/^(\s{0,3})(#+)((?:[^\\#]|@escapes)+)((?:#+)?)/, ["white", "keyword", "keyword", "keyword"]],
+      // Setext headers: a line of only `=` or `-` underlining the line above.
+      [/^\s*(=+|-+)\s*$/, "keyword"],
+      // Horizontal rule written as `* * *`.
+      [/^\s*((\*[ ]?)+)\s*$/, "meta.separator"],
+      // Blockquote: a run of leading `>`.
+      [/^\s*>+/, "comment"],
+      // List markers: `*`, `-`, `+`, `:` bullets or `1.` ordered items.
+      [/^\s*([*\-+:]|\d+\.)\s/, "keyword"],
+      // Indented (4-space / tab) code block.
+      [/^(\t|[ ]{4})[^ ].*$/, "string"],
+      // Fenced code block, `~~~` form, with an optional language token.
+      [/^\s*~~~\s*((?:\w|[/\-#])+)?\s*$/, { token: "string", next: "@codeblock" }],
+      // Fenced code block, ``` form, with a language → embed that language.
+      // Unknown embedded languages degrade to plain text (slim build).
+      [/^\s*```\s*((?:\w|[/\-#])+).*$/, { token: "string", next: "@codeblockgh", nextEmbedded: "$1" }],
+      // Fenced code block, ``` form, no language.
+      [/^\s*```\s*$/, { token: "string", next: "@codeblock" }],
+      // Everything else: inline markup (bold/italic/code/links/html).
+      { include: "@linecontent" },
+    ],
+    // Header row of a pipe table: cells coloured as table headers until the
+    // divider row switches us into the body.
+    table_header: [
+      { include: "@table_common" },
+      [/[^|]+/, "keyword.table.header"],
+    ],
+    // Body rows: cell contents use ordinary inline markup.
+    table_body: [
+      { include: "@table_common" },
+      { include: "@linecontent" },
+    ],
+    // Shared pipe/divider handling for both header and body rows.
+    table_common: [
+      [/\s*[-:]+\s*/, { token: "keyword", switchTo: "@table_body" }], // header divider → body
+      [/^\s*\|/, "keyword.table.left"],   // opening pipe
+      [/^\s*[^|]/, "@rematch", "@pop"],   // non-pipe line ends the table
+      [/^\s*$/, "@rematch", "@pop"],      // blank line ends the table
+      [/\|/, { cases: { "@eos": "keyword.table.right", "@default": "keyword.table.middle" } }],
+    ],
+    // Inside a `~~~`/plain ``` fence: colour everything as source until the fence closes.
+    codeblock: [
+      [/^\s*~~~\s*$/, { token: "string", next: "@pop" }],
+      [/^\s*```\s*$/, { token: "string", next: "@pop" }],
+      [/.*$/, "variable.source"],
+    ],
+    // Inside a language-tagged ``` fence: the embedded language tokenises the
+    // body; the closing fence pops both this state and the embedded language.
+    codeblockgh: [
+      [/```\s*$/, { token: "string", next: "@pop", nextEmbedded: "@pop" }],
+      [/[^`]+/, "variable.source"],
+    ],
+    // Inline markup within a line: escapes, bold/italic/code, then links, then html.
+    linecontent: [
+      [/&\w+;/, "string.escape"],         // HTML entity, e.g. &amp;
+      [/@escapes/, "escape"],             // backslash escape
+      [/\b__([^\\_]|@escapes|_(?!_))+__\b/, "strong"],   // __bold__
+      [/\*\*([^\\*]|@escapes|\*(?!\*))+\*\*/, "strong"], // **bold**
+      [/\b_[^_]+_\b/, "emphasis"],        // _italic_
+      [/\*([^\\*]|@escapes)+\*/, "emphasis"], // *italic*
+      [/`([^\\`]|@escapes)+`/, "variable"],   // `code`
+      [/\{+[^}]+\}+/, "string.target"],   // {anchor} targets
+      [/(!?\[)((?:[^\]\\]|@escapes)*)(\]\([^)]+\))/, ["string.link", "", "string.link"]], // [text](url)
+      [/(!?\[)((?:[^\]\\]|@escapes)*)(\])/, "string.link"], // [ref]
+      { include: "html" },
+    ],
+    // Inline HTML: opening/closing tags and comments.
+    html: [
+      [/<(\w+)\/>/, "tag"],               // self-closing <br/>
+      [/<(\w+)(-|\w)*/, { cases: { "@empty": { token: "tag", next: "@tag.$1" }, "@default": { token: "tag", next: "@tag.$1" } } }],
+      [/<\/(\w+)(-|\w)*\s*>/, { token: "tag" }],
+      [/<!--/, "comment", "@comment"],
+    ],
+    // Body of an HTML comment; stays here until `-->`.
+    comment: [
+      [/[^<-]+/, "comment.content"],
+      [/-->/, "comment", "@pop"],
+      [/<!--/, "comment.content.invalid"],
+      [/[<-]/, "comment.content"],
+    ],
+    // Inside an HTML start tag: attributes until the tag closes. Unlike Monaco's
+    // built-in grammar we do NOT embed CSS/JS on `>` (those services aren't in
+    // the slim build) — we simply pop back to inline content.
+    tag: [
+      [/[ \t\r\n]+/, "white"],
+      [/(\w+)(\s*=\s*)("[^"]*"|'[^']*')/, ["attribute.name.html", "delimiter.html", "string.html"]],
+      [/\w+/, "attribute.name.html"],
+      [/\/>/, "tag", "@pop"],
+      [/>/, "tag", "@pop"],
+    ],
+  },
+} as const;
+
+const MARKDOWN_LANGUAGE_CONF = {
+  comments: {
+    blockComment: ["<!--", "-->"] as [string, string],
+  },
+  brackets: [
+    ["{", "}"],
+    ["[", "]"],
+    ["(", ")"],
+  ] as [string, string][],
+  autoClosingPairs: [
+    { open: "{", close: "}" },
+    { open: "[", close: "]" },
+    { open: "(", close: ")" },
+    { open: "<", close: ">", notIn: ["string"] },
+  ],
+  surroundingPairs: [
+    { open: "(", close: ")" },
+    { open: "[", close: "]" },
+    { open: "`", close: "`" },
+  ],
+  folding: {
+    markers: {
+      start: /^\s*<!--\s*#?region\b.*-->/,
+      end: /^\s*<!--\s*#?endregion\b.*-->/,
+    },
+  },
+};
+
 // Import the bundled dbt JSON schemas.
 // resolveJsonModule: true in tsconfig makes these available as plain objects.
 import dbtProjectSchema from "../../schemas/dbt/dbt_project-latest.json";
@@ -258,7 +405,7 @@ export function ensureMonacoSetup(monaco: unknown): void {
   // setLanguageConfiguration, otherwise Monaco throws "Cannot set configuration
   // for unknown language sql" and takes down the whole editor.  (`yaml` is
   // registered by monaco-yaml's configureMonacoYaml below, so it is omitted.)
-  for (const id of ["sql", "python"]) {
+  for (const id of ["sql", "python", "markdown"]) {
     if (!m.languages.getLanguages().some((l: { id: string }) => l.id === id)) {
       m.languages.register({ id });
     }
@@ -300,6 +447,13 @@ export function ensureMonacoSetup(monaco: unknown): void {
   // can disrupt module initialisation order in Vite's ESM bundle.
   m.languages.setMonarchTokensProvider("python", PYTHON_MONARCH_LANGUAGE);
   m.languages.setLanguageConfiguration("python", PYTHON_LANGUAGE_CONF);
+
+  // ── Markdown tokenizer (eager, inline grammar) ───────────────────────────
+  // Registered the same way as Python: an inline Monarch grammar compiled
+  // synchronously so opened .md files and notebook markdown cells highlight on
+  // first render. See MARKDOWN_MONARCH_LANGUAGE at the top of this file.
+  m.languages.setMonarchTokensProvider("markdown", MARKDOWN_MONARCH_LANGUAGE);
+  m.languages.setLanguageConfiguration("markdown", MARKDOWN_LANGUAGE_CONF);
 
   // ── Snowflake Scripting Snippets ──────────────────────────────────────────
   m.languages.registerCompletionItemProvider("sql", {

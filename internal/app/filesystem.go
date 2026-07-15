@@ -200,19 +200,21 @@ func (a *App) currentWorkdir() string {
 	return ""
 }
 
-// PickOpenFile opens a native open-file dialog filtered to SQL, YAML and
-// Python files and returns the chosen path, or an empty string if canceled.
-// The dialog opens in the configured export directory when one is set.
+// PickOpenFile opens a native open-file dialog filtered to SQL, YAML, Python
+// and Markdown files and returns the chosen path, or an empty string if
+// canceled. Any text file can still be opened via the "All Files" entry (or
+// PickAnyFile). The dialog opens in the configured export directory when set.
 func (a *App) PickOpenFile() string {
 	defaultDir := a.currentWorkdir()
 	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
 		Title:            "Open file",
 		DefaultDirectory: defaultDir,
 		Filters: []wailsruntime.FileFilter{
-			{DisplayName: "Supported Files (*.sql, *.yml, *.yaml, *.py)", Pattern: "*.sql;*.yml;*.yaml;*.py"},
+			{DisplayName: "Supported Files (*.sql, *.yml, *.yaml, *.py, *.md)", Pattern: "*.sql;*.yml;*.yaml;*.py;*.md;*.markdown"},
 			{DisplayName: "SQL Files (*.sql)", Pattern: "*.sql"},
 			{DisplayName: "YAML Files (*.yml, *.yaml)", Pattern: "*.yml;*.yaml"},
 			{DisplayName: "Python Files (*.py)", Pattern: "*.py"},
+			{DisplayName: "Markdown Files (*.md, *.markdown)", Pattern: "*.md;*.markdown"},
 			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
 		},
 	})

@@ -39,7 +39,7 @@ func buildMenu(app *App) *menu.Menu {
 
 	fileMenu.AddSeparator()
 
-	fileMenu.AddText("Open SQL/YAML/Python…", keys.CmdOrCtrl("o"), func(_ *menu.CallbackData) {
+	fileMenu.AddText("Open File…", keys.CmdOrCtrl("o"), func(_ *menu.CallbackData) {
 		wailsruntime.EventsEmit(app.ctx, "menu:open")
 	})
 
