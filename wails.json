@@ -14,7 +14,7 @@
     "companyName": "Technarion Oy",
     "productName": "Thaw",
     "productVersion": "0.3.1",
-    "copyright": "Copyright © 2026 Technarion Oy. All rights reserved.",
-    "comments": "Snowflake Manager"
+    "copyright": "Copyright © 2026 Technarion Oy. Licensed under GPL-3.0-or-later.",
+    "comments": "Snowflake Manager — Free Software (GNU GPL v3)"
   }
 }

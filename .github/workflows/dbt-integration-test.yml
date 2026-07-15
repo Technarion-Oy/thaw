@@ -1,5 +1,9 @@
 name: dbt Integration Test
 
+# Least-privilege default: read-only token unless a job opts into more.
+permissions:
+  contents: read
+
 on:
   schedule:
     - cron: "0 3 * * 1"  # Every Monday at 03:00 UTC

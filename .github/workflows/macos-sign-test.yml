@@ -4,6 +4,10 @@
 # shipped successfully.
 name: macOS Sign Test (temporary)
 
+# Least-privilege default: read-only token unless a job opts into more.
+permissions:
+  contents: read
+
 on:
   workflow_dispatch:
 
@@ -20,6 +24,12 @@ jobs:
             arch: amd64
 
     runs-on: ${{ matrix.os }}
+    # Gate this manually-dispatched signing test behind a protected environment.
+    # Repo admins must add "Required reviewers" (admins only) to the `signing-test`
+    # environment under Settings → Environments so every dispatch requires approval
+    # before the signing secrets are injected. Until configured, the job runs
+    # unprotected. (This workflow is temporary — delete once a signed release ships.)
+    environment: signing-test
 
     steps:
       - uses: actions/checkout@v4

@@ -1,17 +1,17 @@
 # frontend/src/components/connection
 
-> Snowflake connection dialog and EULA modal shown at startup or on explicit disconnect.
+> Snowflake connection dialog and GPL license modal shown at startup or on explicit disconnect.
 
 ## Responsibility
 
-Handles the full connection flow: displaying the connect form, loading and managing Snowflake CLI profiles from `~/.snowflake/config.toml`, authenticating against Snowflake, and showing the end-user license agreement on demand.
+Handles the full connection flow: displaying the connect form, loading and managing Snowflake CLI profiles from `~/.snowflake/config.toml`, authenticating against Snowflake, and showing the GNU GPL v3 license notice on demand.
 
 ## Files
 
 | File | Purpose |
 |---|---|
 | `ConnectModal.tsx` | Primary connection modal: Ant Design `Form` for account, credentials, and auth method; inline Snowflake CLI profile manager (New, Save, Rename, Clone, Set Default, Delete); calls `Connect`, `CancelConnect`, `LoadSnowflakeCLIConfig`, `SaveProfile`, `DeleteProfile`, `CloneProfile`, `RenameProfile`, `SetDefaultProfile`, `ClearDefaultProfile`, `GetSnowflakeCLIConfigPath`, `PickSnowflakeCLIConfigPath`. Tagged `@thaw-domain: Core IPC & App Lifecycle`. |
-| `UserAgreementModal.tsx` | Read-only EULA modal (`Modal` + `Typography`); no IPC calls; opened via a link in `ConnectModal`'s footer. |
+| `UserAgreementModal.tsx` | Read-only GPL v3 license/notice modal (`Modal` + `Typography`); no IPC calls; opened via the **License** link in `ConnectModal`'s footer. |
 
 ## Patterns & integration
 

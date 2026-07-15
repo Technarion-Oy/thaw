@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Technarion Oy. All rights reserved.
+// SPDX-License-Identifier: GPL-3.0-or-later
 // @thaw-domain: ER Designer
 
 const KEY_PREFIX = "thaw-er-layout:";

@@ -4,6 +4,8 @@ Thanks for contributing! Thaw is a native desktop Snowflake manager built with *
 
 This guide covers **how to branch, commit, open a PR, and write code & docs**. For the conceptual map of the codebase, read the [`docs/concepts/`](docs/concepts/) guides and the per-module `README.md` in each `internal/<pkg>/` and `frontend/src/<dir>/` folder.
 
+**New to the project?** Start with [`COLLABORATION.md`](COLLABORATION.md) for how to get involved and what the review process looks like. All participation is governed by our [Code of Conduct](CODE_OF_CONDUCT.md). Thaw is licensed under the [GNU GPL v3](LICENSE); by contributing you agree to the [Contributor License Agreement](CLA.md) (the CLA bot prompts you on your first PR). To report a security issue, follow [`SECURITY.md`](SECURITY.md) — never open a public issue for a vulnerability.
+
 ---
 
 ## Prerequisites

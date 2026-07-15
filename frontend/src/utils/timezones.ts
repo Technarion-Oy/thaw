@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Technarion Oy. All rights reserved.
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 // Snowflake-supported timezone names with their standard UTC offsets.
 // Used in the cron schedule timezone selector.

@@ -1,0 +1,70 @@
+name: Bug report
+description: Report a problem or unexpected behavior in Thaw
+title: "fix: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. Please fill in as much detail as you
+        can — it makes the issue far faster to diagnose.
+
+        **Do not report security vulnerabilities here.** Follow [SECURITY.md](../blob/main/SECURITY.md)
+        instead.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: This is not a security vulnerability (those go through SECURITY.md).
+          required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and what you expected instead.
+      placeholder: When I ..., Thaw ... . I expected ... .
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal, ordered steps that reproduce the problem.
+      placeholder: |
+        1. Connect to ...
+        2. Open ...
+        3. Click ...
+        4. See error
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Thaw version
+      description: See Help → About Thaw.
+      placeholder: e.g. 0.3.1
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Windows
+        - Linux
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or screenshots
+      description: |
+        Paste any relevant log output or crash report (redact secrets first). Log locations
+        are documented in docs/TECHNICAL_INSTRUCTIONS.md.
+      render: shell
+    validations:
+      required: false

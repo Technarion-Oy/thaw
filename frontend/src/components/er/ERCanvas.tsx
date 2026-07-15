@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Technarion Oy. All rights reserved.
+// SPDX-License-Identifier: GPL-3.0-or-later
 // @thaw-domain: ER Designer
 
 import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from "react";
