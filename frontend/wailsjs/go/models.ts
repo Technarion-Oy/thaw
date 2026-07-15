@@ -3120,6 +3120,37 @@ export namespace networkrule {
 
 }
 
+export namespace notebook {
+	
+	export class NotebookConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    sourceLocation: string;
+	    mainFile: string;
+	    queryWarehouse: string;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new NotebookConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.sourceLocation = source["sourceLocation"];
+	        this.mainFile = source["mainFile"];
+	        this.queryWarehouse = source["queryWarehouse"];
+	        this.comment = source["comment"];
+	    }
+	}
+
+}
+
 export namespace packagespolicy {
 	
 	export class PackagesPolicyConfig {
