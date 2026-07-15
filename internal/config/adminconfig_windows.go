@@ -50,6 +50,7 @@ var registryFeatureEntries = []registryFeatureEntry{
 	{"DisableERDiagramDesigner", func(c *adminConfigJSON, v bool) { p := !v; c.AdvancedTools.ERDiagramDesigner = &p }},
 	{"DisableTaskGraphVisualizer", func(c *adminConfigJSON, v bool) { p := !v; c.AdvancedTools.TaskGraphVisualizer = &p }},
 	{"DisableInsertMapping", func(c *adminConfigJSON, v bool) { p := !v; c.AdvancedTools.InsertMapping = &p }},
+	{"DisableInsertRow", func(c *adminConfigJSON, v bool) { p := !v; c.AdvancedTools.InsertRow = &p }},
 	{"DisableCodeSnippets", func(c *adminConfigJSON, v bool) { p := !v; c.AdvancedTools.CodeSnippets = &p }},
 
 	{"DisableSnowparkNotebooks", func(c *adminConfigJSON, v bool) { p := !v; c.DeveloperEnvironments.SnowparkNotebooks = &p }},

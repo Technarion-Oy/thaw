@@ -56,6 +56,7 @@ import (
 	"thaw/internal/storagelifecyclepolicy"
 	"thaw/internal/stream"
 	"thaw/internal/streamlit"
+	"thaw/internal/table"
 	"thaw/internal/tag"
 	"thaw/internal/udf"
 	"thaw/internal/view"
@@ -109,6 +110,12 @@ func (a *App) BuildAddColumnSql(database, schema, table string, cfg column.AddCo
 // BuildDropColumnSql returns the SQL for an ALTER TABLE ... DROP COLUMN statement.
 func (a *App) BuildDropColumnSql(database, schema, table, col string) string {
 	return column.BuildDropColumnSql(database, schema, table, col)
+}
+
+// BuildInsertRowsSql returns the SQL for an INSERT INTO ... VALUES statement
+// that inserts one or more rows built from the per-column form values.
+func (a *App) BuildInsertRowsSql(database, schema, tableName string, cfg table.InsertRowsConfig) (string, error) {
+	return table.BuildInsertRowsSql(database, schema, tableName, cfg)
 }
 
 // BuildRenameColumnSql returns the SQL for an ALTER TABLE ... RENAME COLUMN statement.

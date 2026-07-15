@@ -49,6 +49,7 @@ import {stream} from '../models';
 import {streamlit} from '../models';
 import {tag} from '../models';
 import {view} from '../models';
+import {table} from '../models';
 import {erdesigner} from '../models';
 import {snowpark} from '../models';
 import {snowflake} from '../models';
@@ -59,7 +60,6 @@ import {tasks} from '../models';
 import {keypair} from '../models';
 import {config} from '../models';
 import {fnmeta} from '../models';
-import {table} from '../models';
 import {queryhistory} from '../models';
 import {querylog} from '../models';
 import {queryprofile} from '../models';
@@ -309,6 +309,8 @@ export function BuildDropColumnSql(arg1:string,arg2:string,arg3:string,arg4:stri
 export function BuildExecuteDbtProjectSql(arg1:string,arg2:string,arg3:string,arg4:dbtproject.ExecuteConfig):Promise<string>;
 
 export function BuildFunctionSelectStatement(arg1:string,arg2:string,arg3:string,arg4:Array<procedure.Argument>,arg5:boolean):Promise<string>;
+
+export function BuildInsertRowsSql(arg1:string,arg2:string,arg3:string,arg4:table.InsertRowsConfig):Promise<string>;
 
 export function BuildJoinSQL(arg1:erdesigner.JoinQueryState):Promise<string>;
 

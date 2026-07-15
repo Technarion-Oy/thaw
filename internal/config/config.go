@@ -299,8 +299,8 @@ func RestoreAdminLockedLogPrefs(user, effective LogPrefs, locked LogPrefsLocked)
 //
 // Version tracks the schema revision so new flags introduced after an initial
 // save can be filled with their defaults rather than the zero value (false).
-// Current version: 16 (added ColumnReorder).
-const flagsVersion = 16
+// Current version: 17 (added InsertRow).
+const flagsVersion = 17
 
 type FeatureFlags struct {
 	Initialized bool `json:"initialized"`
@@ -333,6 +333,7 @@ type FeatureFlags struct {
 	ERDiagramDesigner   bool `json:"erDiagramDesigner"`
 	TaskGraphVisualizer bool `json:"taskGraphVisualizer"`
 	InsertMapping       bool `json:"insertMapping"`
+	InsertRow           bool `json:"insertRow"` // Per-column grid form to INSERT one or more rows into a table
 	CodeSnippets        bool `json:"codeSnippets"`
 
 	// Developer Environments
@@ -399,6 +400,7 @@ func DefaultFeatureFlags() FeatureFlags {
 		ERDiagramDesigner:      true,
 		TaskGraphVisualizer:    true,
 		InsertMapping:          true,
+		InsertRow:              true,
 		CodeSnippets:           true,
 		SnowparkNotebooks:      true,
 		EmbeddedTerminal:       true,
@@ -492,6 +494,8 @@ func MigrateFlags(f FeatureFlags) FeatureFlags {
 	setIfZero(&f.CellDetailPanel, defaults.CellDetailPanel)
 	// Version 15 → 16: ColumnReorder added; defaults to true.
 	setIfZero(&f.ColumnReorder, defaults.ColumnReorder)
+	// Version 16 → 17: InsertRow added; defaults to true.
+	setIfZero(&f.InsertRow, defaults.InsertRow)
 	f.Version = flagsVersion
 	return f
 }

@@ -118,6 +118,7 @@ import CreateTaskModal from "../task/CreateTaskModal";
 import CreateDatabaseModal from "../database/CreateDatabaseModal";
 import CreateTableModal from "../database/CreateTableModal";
 import AddColumnModal from "../database/AddColumnModal";
+import InsertRowModal from "../database/InsertRowModal";
 import ColumnPropertiesModal from "../column/ColumnPropertiesModal";
 import CreateFileFormatModal from "../database/CreateFileFormatModal";
 import ObjectSummariesModal from "../database/ObjectSummariesModal";
@@ -695,6 +696,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [createDbOpen, setCreateDbOpen] = useState(false);
   const [createTableModal, setCreateTableModal] = useState<{ db: string; schema: string } | null>(null);
   const [addColumnModal, setAddColumnModal] = useState<{ db: string; schema: string; table: string } | null>(null);
+  const [insertRowModal, setInsertRowModal] = useState<{ db: string; schema: string; table: string } | null>(null);
   const [columnPropertiesModal, setColumnPropertiesModal] = useState<{ db: string; schema: string; table: string; column: string; parentKind: string; initial: { dataType: string; nullable: boolean; isPrimaryKey: boolean; comment: string } } | null>(null);
   const [createStageModal, setCreateStageModal] = useState<{ db: string; schema: string } | null>(null);
   const [stagePropertiesModal, setStagePropertiesModal] = useState<{ db: string; schema: string; name: string } | null>(null);
@@ -3752,6 +3754,14 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setImportModal({ db, schema, table });
   };
 
+  const openInsertRowModal = () => {
+    if (!ctxMenu) return;
+    const [, db, schema, , ...nameParts] = ctxMenu.nodeKey.split(":");
+    const table = nameParts.join(":");
+    setCtxMenu(null);
+    setInsertRowModal({ db, schema, table });
+  };
+
   const openSchemaExportModal = () => {
     if (!ctxMenu) return;
     const [, db, schema] = ctxMenu.nodeKey.split(":");
@@ -4934,6 +4944,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Export Data…", <DownloadOutlined style={{ fontSize: 12 }} />, openExportModal, undefined, !featureFlags.exportTableData, "Table Data Export is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
             menuItem("Import Data…", <UploadOutlined style={{ fontSize: 12 }} />, openImportModal, undefined, !featureFlags.tableDataImport, "Table Data Import is disabled. Enable it under View → Enabled Features…")}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
+            menuItem("Insert Row…", <PlusSquareOutlined style={{ fontSize: 12 }} />, openInsertRowModal, undefined, !featureFlags.insertRow, "Insert Row is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
             menuItem("Backup Sets…", <SaveOutlined style={{ fontSize: 12 }} />, openBackupSets, undefined, !featureFlags.backupPoliciesAndSets, "Backup Policies & Sets is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
@@ -6395,6 +6407,17 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           table={addColumnModal.table}
           onClose={() => setAddColumnModal(null)}
           onSuccess={() => refreshTableColumns(addColumnModal.db, addColumnModal.schema, addColumnModal.table)}
+        />
+      )}
+
+      {/* Insert Row modal */}
+      {insertRowModal && (
+        <InsertRowModal
+          db={insertRowModal.db}
+          schema={insertRowModal.schema}
+          table={insertRowModal.table}
+          onClose={() => setInsertRowModal(null)}
+          onSuccess={(n) => message.success(`${n} row${n === 1 ? "" : "s"} inserted into "${insertRowModal.table}"`)}
         />
       )}
 
