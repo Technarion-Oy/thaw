@@ -189,7 +189,7 @@ func renderSemiStructuredLiteral(base, value string) (token string, needsSelect 
 // renderVectorLiteral renders a VECTOR value as an array literal cast to the
 // declared vector type, e.g. "[1, 2, 3, 4]::VECTOR(FLOAT, 4)". The elements are
 // validated as numeric literals and re-emitted (never interpolated raw), so the
-// cast stays injection-safe. If the declared type is not a recognised
+// cast stays injection-safe. If the declared type is not a recognized
 // VECTOR(elem, dim) or the value is not a bracketed list of numbers, the raw
 // value is single-quoted instead so Snowflake reports the type error; an empty
 // value is NULL. Only the successfully-built array cast needs the SELECT form.
