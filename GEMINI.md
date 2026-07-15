@@ -144,7 +144,8 @@ When a feature is admin-controlled, the toggle in **Enabled Features** is automa
 ### Insert Row
 - `InsertRowModal` builds a multi-row `INSERT INTO … VALUES (…), (…)` from a per-column grid form (distinct from Insert Mapping's table-to-table `SELECT`). One grid row per record, one column per table column, with Add/Remove row.
 - Columns come from `GetTableColumnsWithTypes`; each cell is a literal **Value** (rendered per data type), a raw **Expr** (from the built-in function picker), **NULL**, or **DEFAULT**.
-- SQL is built in Go by `BuildInsertRowsSql` (`internal/table`) — never inline in the component — shown live via `SqlPreview` and executed with `ExecDDL`.
+- In **Value** mode `InsertCellInput` picks the widget from the column's parsed type (`insertCellTypes.ts`): numeric field, TRUE/FALSE select, date/time picker, JSON textarea (`VARIANT`/`OBJECT`/`ARRAY`), vector array box, hex/UUID/WKT inputs. The JSON/geospatial textareas add a `SnippetToolbar` — a **Template** picker (`snippetsFor`) plus a JSON **Format** action (`formatJson`). Validation is UX-only; the Go builder does all injection-safe rendering.
+- SQL is built in Go by `BuildInsertRowsSql` (`internal/table`) — never inline in the component — shown live via `SqlPreview` and executed with `ExecDDL`. Semi-structured (`PARSE_JSON`/`TO_OBJECT`/`TO_ARRAY`) and vector array casts are illegal in a `VALUES` clause, so any such cell switches the whole statement to `INSERT … SELECT … UNION ALL …`.
 - Gated behind the `insertRow` feature flag.
 
 ## ⚠️ Gotchas

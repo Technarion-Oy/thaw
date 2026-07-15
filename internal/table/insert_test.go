@@ -177,6 +177,74 @@ func TestBuildInsertRowsSql_RaggedRowPaddedWithNull(t *testing.T) {
 	assertEqual(t, sql, `INSERT INTO "DB"."SC"."T" ("A", "B") VALUES ('x', 'y'), ('z', NULL);`)
 }
 
+func TestBuildInsertRowsSql_VariantUsesSelectForm(t *testing.T) {
+	// A VARIANT value in "value" mode is rendered via PARSE_JSON, which Snowflake
+	// rejects in a VALUES clause — so the whole statement switches to INSERT … SELECT.
+	cfg := oneRow(
+		InsertRowValue{Column: "ID", DataType: "NUMBER(38,0)", Mode: "value", Value: "1"},
+		InsertRowValue{Column: "V", DataType: "VARIANT", Mode: "value", Value: `{"a": 1}`},
+	)
+	sql, _ := BuildInsertRowsSql("DB", "SC", "T", cfg)
+	assertEqual(t, sql,
+		`INSERT INTO "DB"."SC"."T" ("ID", "V") SELECT 1, PARSE_JSON('{"a": 1}');`)
+}
+
+func TestBuildInsertRowsSql_ObjectAndArrayConstructors(t *testing.T) {
+	cfg := oneRow(
+		InsertRowValue{Column: "OBJ", DataType: "OBJECT", Mode: "value", Value: `{"k": "v"}`},
+		InsertRowValue{Column: "ARR", DataType: "ARRAY", Mode: "value", Value: `[1, 2, 3]`},
+	)
+	sql, _ := BuildInsertRowsSql("DB", "SC", "T", cfg)
+	assertEqual(t, sql,
+		`INSERT INTO "DB"."SC"."T" ("OBJ", "ARR") SELECT TO_OBJECT(PARSE_JSON('{"k": "v"}')), TO_ARRAY(PARSE_JSON('[1, 2, 3]'));`)
+}
+
+func TestBuildInsertRowsSql_EmptyVariantIsNullNoSelect(t *testing.T) {
+	// An empty semi-structured value is NULL and does not force the SELECT form.
+	cfg := oneRow(InsertRowValue{Column: "V", DataType: "VARIANT", Mode: "value", Value: ""})
+	sql, _ := BuildInsertRowsSql("DB", "SC", "T", cfg)
+	assertEqual(t, sql, `INSERT INTO "DB"."SC"."T" ("V") VALUES (NULL);`)
+}
+
+func TestBuildInsertRowsSql_VariantQuotingIsInjectionSafe(t *testing.T) {
+	cfg := oneRow(InsertRowValue{Column: "V", DataType: "VARIANT", Mode: "value", Value: `{"a": "x')--"}`})
+	sql, _ := BuildInsertRowsSql("DB", "SC", "T", cfg)
+	// The single-quote inside the JSON is doubled, so nothing escapes the literal.
+	assertContains(t, sql, `PARSE_JSON('{"a": "x'')--"}')`)
+}
+
+func TestBuildInsertRowsSql_VectorArrayCast(t *testing.T) {
+	cfg := oneRow(InsertRowValue{Column: "VEC", DataType: "VECTOR(FLOAT, 4)", Mode: "value", Value: "[1.0, 2.0, 3.0, 4.0]"})
+	sql, _ := BuildInsertRowsSql("DB", "SC", "T", cfg)
+	assertEqual(t, sql,
+		`INSERT INTO "DB"."SC"."T" ("VEC") SELECT [1.0, 2.0, 3.0, 4.0]::VECTOR(FLOAT, 4);`)
+}
+
+func TestBuildInsertRowsSql_InvalidVectorIsQuoted(t *testing.T) {
+	// A non-numeric vector element can't be built safely, so the whole value is
+	// quoted as a string and stays on the VALUES path for Snowflake to reject.
+	cfg := oneRow(InsertRowValue{Column: "VEC", DataType: "VECTOR(FLOAT, 4)", Mode: "value", Value: "[1, oops, 3, 4]"})
+	sql, _ := BuildInsertRowsSql("DB", "SC", "T", cfg)
+	assertEqual(t, sql, `INSERT INTO "DB"."SC"."T" ("VEC") VALUES ('[1, oops, 3, 4]');`)
+}
+
+func TestBuildInsertRowsSql_MultiRowVariantSelectForm(t *testing.T) {
+	// Multi-row with a semi-structured column emits SELECT … UNION ALL SELECT ….
+	cfg := InsertRowsConfig{Rows: []InsertRowConfig{
+		{Values: []InsertRowValue{
+			{Column: "ID", DataType: "NUMBER", Mode: "value", Value: "1"},
+			{Column: "V", DataType: "VARIANT", Mode: "value", Value: `{"a": 1}`},
+		}},
+		{Values: []InsertRowValue{
+			{Column: "ID", DataType: "NUMBER", Mode: "value", Value: "2"},
+			{Column: "V", DataType: "VARIANT", Mode: "null"},
+		}},
+	}}
+	sql, _ := BuildInsertRowsSql("DB", "SC", "T", cfg)
+	assertEqual(t, sql,
+		`INSERT INTO "DB"."SC"."T" ("ID", "V") SELECT 1, PARSE_JSON('{"a": 1}') UNION ALL SELECT 2, NULL;`)
+}
+
 func TestBuildInsertRowsSql_InvalidNumericPreservesBackslash(t *testing.T) {
 	// The invalid-numeric fallback uses QuoteTextLit like the text path, so a
 	// backslash survives as a literal character (doubled) rather than being read

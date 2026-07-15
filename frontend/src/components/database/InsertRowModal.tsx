@@ -28,6 +28,8 @@ import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";
 import { DEFAULT_FUNCTIONS } from "../shared/builtinFunctions";
 import { useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
+import InsertCellInput from "./InsertCellInput";
+import { parseColumnType } from "./insertCellTypes";
 
 const { Text } = Typography;
 
@@ -167,7 +169,9 @@ export default function InsertRowModal({ db, schema, table: tableName, onClose, 
       fixed: "left",
       render: (_v, r) => <Text type="secondary" style={{ fontSize: 11 }}>{r.index + 1}</Text>,
     },
-    ...columns.map((c, colIdx) => ({
+    ...columns.map((c, colIdx) => {
+      const parsed = parseColumnType(c.dataType);
+      return {
       key: c.name,
       width: 210,
       title: (
@@ -187,39 +191,59 @@ export default function InsertRowModal({ db, schema, table: tableName, onClose, 
       ),
       render: (_v: unknown, r: { index: number }) => {
         const cell = rows[r.index]?.[colIdx] ?? emptyCell();
-        const disabled = cell.mode === "null" || cell.mode === "default";
-        const placeholder =
-          cell.mode === "null" ? "NULL" :
-          cell.mode === "default" ? "table default" :
-          cell.mode === "expr" ? "SQL expression" : "literal value";
-        return (
-          <Space.Compact style={{ width: "100%" }}>
+        const placeholder = cell.mode === "null" ? "NULL" : "table default";
+        // The per-cell value-mode / function dropdown. In Value mode it is handed
+        // to InsertCellInput as `trailing` so it lines up with the value field
+        // even when a helper toolbar sits above it; otherwise it sits next to the
+        // Expr / NULL / DEFAULT control in a plain Space.Compact row.
+        const modeDropdown = (
+          <Dropdown
+            trigger={["click"]}
+            menu={{
+              items: cellMenuItems(c.nullable),
+              onClick: ({ key }) => {
+                if (key.startsWith("fn:")) setCell(r.index, colIdx, { mode: "expr", value: key.slice(3) });
+                else setCell(r.index, colIdx, { mode: key as FieldMode });
+              },
+            }}
+          >
+            <Button size="small" icon={<FunctionOutlined />} title="Value mode / function" />
+          </Dropdown>
+        );
+
+        if (cell.mode === "value") {
+          return (
+            <InsertCellInput
+              parsed={parsed}
+              value={cell.value}
+              onChange={(value) => setCell(r.index, colIdx, { value })}
+              trailing={modeDropdown}
+            />
+          );
+        }
+        // Raw-SQL box for an Expression, or a disabled placeholder for
+        // NULL / DEFAULT (whose value is ignored by the builder).
+        const input =
+          cell.mode === "expr" ? (
             <Input
               size="small"
-              value={disabled ? "" : cell.value}
-              disabled={disabled}
-              placeholder={placeholder}
-              prefix={cell.mode === "expr"
-                ? <Text type="secondary" style={{ fontSize: 10 }}>ƒx</Text>
-                : undefined}
+              value={cell.value}
+              placeholder="SQL expression"
+              prefix={<Text type="secondary" style={{ fontSize: 10 }}>ƒx</Text>}
               onChange={(e) => setCell(r.index, colIdx, { value: e.target.value })}
             />
-            <Dropdown
-              trigger={["click"]}
-              menu={{
-                items: cellMenuItems(c.nullable),
-                onClick: ({ key }) => {
-                  if (key.startsWith("fn:")) setCell(r.index, colIdx, { mode: "expr", value: key.slice(3) });
-                  else setCell(r.index, colIdx, { mode: key as FieldMode });
-                },
-              }}
-            >
-              <Button size="small" icon={<FunctionOutlined />} title="Value mode / function" />
-            </Dropdown>
+          ) : (
+            <Input size="small" value="" disabled placeholder={placeholder} />
+          );
+        return (
+          <Space.Compact style={{ width: "100%" }}>
+            {input}
+            {modeDropdown}
           </Space.Compact>
         );
       },
-    })),
+      };
+    }),
     {
       title: "",
       key: "__actions",

@@ -91,6 +91,21 @@ positions, each `VALUES` tuple always has exactly as many elements as the column
 list (a ragged later row is NULL-padded), so the statement can never have an
 arity mismatch regardless of how individual rows were filled in.
 
+**Complex-type rendering & the `SELECT` form.** In `value` mode, semi-structured
+columns (`VARIANT`/`OBJECT`/`ARRAY`) render their value as a JSON constructor —
+`PARSE_JSON('…')`, or `TO_OBJECT`/`TO_ARRAY(PARSE_JSON('…'))` so the result
+matches the declared type — and `VECTOR(elem, dim)` columns render a
+number-validated array literal cast, e.g. `[1, 2, 3]::VECTOR(FLOAT, 3)` (a value
+that is not a bracketed list of plain numbers, or a `VECTOR` type that doesn't
+parse, falls back to a safe quoted string so Snowflake reports the type error).
+The JSON text and vector elements are always quoted/re-emitted, never
+interpolated raw, so these stay injection-safe. Because Snowflake rejects such
+constructors inside a `VALUES` clause, whenever **any** rendered value needs one
+`BuildInsertRowsSql` emits the whole statement as `INSERT INTO … (cols) SELECT …
+UNION ALL SELECT …` instead of the `VALUES` form. Every other type (text,
+date/time, binary, geo, uuid) stays a single-quoted literal that Snowflake
+implicitly casts, and the statement keeps the `VALUES` form.
+
 ### Functions
 
 | Function | Description |
