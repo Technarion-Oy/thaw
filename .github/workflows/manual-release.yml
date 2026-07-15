@@ -53,7 +53,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
 
-      # Check if a new tag was created to conditionally trigger S3 upload and builds
+      # Check if a new tag was created to conditionally trigger the build matrix
       - name: Check if new release was created
         id: check-version
         run: |
@@ -65,21 +65,6 @@ jobs:
           else
             echo "published=false" >> $GITHUB_OUTPUT
           fi
-
-      - name: Configure AWS Credentials
-        if: ${{ steps.check-version.outputs.published == 'true' }}
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: eu-north-1 
-
-      - name: Upload Changelog and Version to S3
-        if: ${{ steps.check-version.outputs.published == 'true' }}
-        run: |
-          echo "v${{ steps.check-version.outputs.version }}" > version.txt
-          aws s3 cp version.txt s3://thaw-s3-bucket-for-website/release/version.txt
-          aws s3 cp release/CHANGELOG.md s3://thaw-s3-bucket-for-website/release/CHANGELOG.md
 
   build:
     name: Build — ${{ matrix.platform }}-${{ matrix.arch }}
