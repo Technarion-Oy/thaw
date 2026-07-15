@@ -902,7 +902,7 @@ export default function QueryPage() {
         if (splitTabId) {
           setSplitTab(null);
         } else {
-          const others = tabs.filter((t) => t.id !== activeTabId && (!t.kind || t.kind === "sql" || t.kind === "plaintext"));
+          const others = tabs.filter((t) => t.id !== activeTabId && (!t.kind || t.kind === "sql" || t.kind === "plaintext" || t.kind === "markdown"));
           if (others.length > 0) setSplitTab(others[others.length - 1].id);
         }
         return;
