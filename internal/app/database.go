@@ -27,7 +27,7 @@ func (a *App) AlterDatabase(database, clause string) error {
 		return apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("ALTER DATABASE %s %s", snowflake.QuoteIdent(database), clause)
-	_, err := client.Execute(a.ctx, sql)
+	_, err := client.Execute(a.fctx(FeatureObjectBrowser), sql)
 	return err
 }
 
@@ -43,7 +43,7 @@ func (a *App) GetDatabaseParameters(database string) (*snowflake.QueryResult, er
 		return nil, apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("SHOW PARAMETERS IN DATABASE %s", snowflake.QuoteIdent(database))
-	return client.Execute(a.ctx, sql)
+	return client.Execute(a.fctx(FeatureObjectBrowser), sql)
 }
 
 // ListEventTables returns the fully-qualified names of all event tables visible
@@ -54,5 +54,5 @@ func (a *App) ListEventTables() ([]string, error) {
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListEventTables(a.ctx)
+	return client.ListEventTables(a.fctx(FeatureObjectBrowser))
 }

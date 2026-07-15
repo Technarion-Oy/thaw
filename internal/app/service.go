@@ -40,7 +40,7 @@ func (a *App) ListServiceEndpoints(database, schema, name string) (*snowflake.Qu
 	}
 	sql := fmt.Sprintf("SHOW ENDPOINTS IN SERVICE %s.%s.%s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
-	return client.Execute(a.ctx, sql)
+	return client.Execute(a.fctx(FeatureObjectEditor), sql)
 }
 
 // GetServiceContainers returns the per-instance container status for the given
@@ -55,7 +55,7 @@ func (a *App) GetServiceContainers(database, schema, name string) (*snowflake.Qu
 	}
 	sql := fmt.Sprintf("SHOW SERVICE CONTAINERS IN SERVICE %s.%s.%s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
-	return client.Execute(a.ctx, sql)
+	return client.Execute(a.fctx(FeatureObjectEditor), sql)
 }
 
 // GetServiceLogs returns the container logs for a single service instance via
@@ -84,7 +84,7 @@ func (a *App) GetServiceLogs(database, schema, name, containerName string, insta
 			fqnLit, instanceID, containerLit)
 	}
 
-	res, err := client.Execute(a.ctx, sql)
+	res, err := client.Execute(a.fctx(FeatureObjectEditor), sql)
 	if err != nil {
 		return "", err
 	}

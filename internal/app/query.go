@@ -75,6 +75,7 @@ func (a *App) ExecuteQuery(sql string) (*snowflake.QueryResult, error) {
 			DurationMs: dur.Milliseconds(),
 			Error:      errMsg,
 			Source:     querylog.SourceUser,
+			Feature:    FeatureSQLEditor,
 		}
 		entry.ID = a.queryLog.Record(entry)
 		wailsruntime.EventsEmit(a.ctx, "querylog:entry", entry)
@@ -93,7 +94,7 @@ func (a *App) GetQueryOperatorStats(queryID string) ([]queryprofile.OperatorStat
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return queryprofile.GetOperatorStats(a.ctx, client, queryID)
+	return queryprofile.GetOperatorStats(a.fctx(FeatureSQLEditor), client, queryID)
 }
 
 // RunExplain runs EXPLAIN USING JSON for the provided SQL and returns both
@@ -113,19 +114,19 @@ func (a *App) RunExplain(tabId string, sql string) (*queryprofile.ExplainResult,
 	// Use a single pinned connection for the entire explain operation.
 	// This ensures that the context sync and the EXPLAIN command share
 	// the same session and see the same database/schema context.
-	conn, err := client.GetConn(a.ctx)
+	conn, err := client.GetConn(a.fctx(FeatureSQLEditor))
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = conn.Close() }()
 
 	// 1. Sync session context on the pinned connection.
-	if _, err := client.GetSessionContextOnConn(a.ctx, conn); err != nil {
+	if _, err := client.GetSessionContextOnConn(a.fctx(FeatureSQLEditor), conn); err != nil {
 		logger.L.Warn("RunExplain: failed to sync session context", "err", err)
 	}
 
 	// 2. Run EXPLAIN on the same pinned connection.
-	return queryprofile.RunExplainOnConn(a.ctx, client, conn, sql)
+	return queryprofile.RunExplainOnConn(a.fctx(FeatureSQLEditor), client, conn, sql)
 }
 
 // StartQuery submits a SQL statement and returns the Snowflake query ID as
@@ -167,6 +168,7 @@ func (a *App) StartQuery(tabId string, sql string) (string, error) {
 			SQL:       sql,
 			Status:    querylog.StatusRunning,
 			Source:    querylog.SourceUser,
+			Feature:   FeatureSQLEditor,
 			TabID:     tabId,
 		}
 		entry.ID = a.queryLog.Record(entry)
@@ -469,5 +471,5 @@ func (a *App) GetQueryHistory(
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return queryhistory.GetQueryHistory(a.ctx, client, filterType, sessionID, userName, warehouseName, endTimeStart, endTimeEnd, resultLimit, includeClientGenerated)
+	return queryhistory.GetQueryHistory(a.fctx(FeatureSQLEditor), client, filterType, sessionID, userName, warehouseName, endTimeStart, endTimeEnd, resultLimit, includeClientGenerated)
 }

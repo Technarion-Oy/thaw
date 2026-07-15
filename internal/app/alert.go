@@ -38,6 +38,6 @@ func (a *App) ExecuteAlert(database, schema, name string) error {
 	}
 	sql := fmt.Sprintf("EXECUTE ALERT %s.%s.%s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
-	_, err := client.Execute(a.ctx, sql)
+	_, err := client.Execute(a.fctx(FeatureObjectEditor), sql)
 	return err
 }

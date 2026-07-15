@@ -24,7 +24,7 @@ func (a *App) DropDatabase(name string, mode string) error {
 	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return client.DropDatabase(a.ctx, name, mode)
+	return client.DropDatabase(a.fctx(FeatureObjectBrowser), name, mode)
 }
 
 // DropSchema drops a schema. mode must be "CASCADE" or "RESTRICT".
@@ -33,7 +33,7 @@ func (a *App) DropSchema(database, schema string, mode string) error {
 	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return client.DropSchema(a.ctx, database, schema, mode)
+	return client.DropSchema(a.fctx(FeatureObjectBrowser), database, schema, mode)
 }
 
 // ListDatabases returns all databases visible to the current role.
@@ -42,7 +42,7 @@ func (a *App) ListDatabases() ([]string, error) {
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListDatabases(a.ctx)
+	return client.ListDatabases(a.fctx(FeatureObjectBrowser))
 }
 
 // ListUserDatabases returns the user-managed databases visible to the current
@@ -55,7 +55,7 @@ func (a *App) ListUserDatabases() ([]string, error) {
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListUserDatabases(a.ctx)
+	return client.ListUserDatabases(a.fctx(FeatureObjectBrowser))
 }
 
 // ListSchemas returns all schemas in the given database.
@@ -64,7 +64,7 @@ func (a *App) ListSchemas(database string) ([]string, error) {
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListSchemas(a.ctx, database)
+	return client.ListSchemas(a.fctx(FeatureObjectBrowser), database)
 }
 
 // ListUserSchemas returns the user-managed schemas in the given database — all
@@ -76,7 +76,7 @@ func (a *App) ListUserSchemas(database string) ([]string, error) {
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListUserSchemas(a.ctx, database)
+	return client.ListUserSchemas(a.fctx(FeatureObjectBrowser), database)
 }
 
 // ListFileFormats returns all file formats in the given schema.
@@ -85,7 +85,7 @@ func (a *App) ListFileFormats(database, schema string) ([]string, error) {
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListFileFormats(a.ctx, database, schema)
+	return client.ListFileFormats(a.fctx(FeatureObjectBrowser), database, schema)
 }
 
 // ListObjects returns tables, views, etc. inside a schema.
@@ -94,7 +94,7 @@ func (a *App) ListObjects(database, schema string) ([]snowflake.SnowflakeObject,
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListObjects(a.ctx, database, schema)
+	return client.ListObjects(a.fctx(FeatureObjectBrowser), database, schema)
 }
 
 // ListBasicObjects returns the basic objects (TABLE, VIEW, SEQUENCE, etc.)
@@ -104,7 +104,7 @@ func (a *App) ListBasicObjects(database, schema string) ([]snowflake.SnowflakeOb
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListBasicObjects(a.ctx, database, schema)
+	return client.ListBasicObjects(a.fctx(FeatureObjectBrowser), database, schema)
 }
 
 // ClearObjectCache removes all cached object listings from the Snowflake client,
@@ -134,7 +134,7 @@ func (a *App) GetDatabaseRetentionDays(dbName string) (int, error) {
 	if client == nil {
 		return 0, apperrors.ErrNotConnected
 	}
-	return client.GetDatabaseRetentionDays(a.ctx, dbName)
+	return client.GetDatabaseRetentionDays(a.fctx(FeatureObjectBrowser), dbName)
 }
 
 // GetSchemaRetentionDays returns the DATA_RETENTION_TIME_IN_DAYS parameter
@@ -144,7 +144,7 @@ func (a *App) GetSchemaRetentionDays(database, schema string) (int, error) {
 	if client == nil {
 		return 0, apperrors.ErrNotConnected
 	}
-	return client.GetSchemaRetentionDays(a.ctx, database, schema)
+	return client.GetSchemaRetentionDays(a.fctx(FeatureObjectBrowser), database, schema)
 }
 
 // GetTableRetentionDays returns the Time Travel data retention period in days
@@ -154,7 +154,7 @@ func (a *App) GetTableRetentionDays(database, schema, name string) (int, error) 
 	if client == nil {
 		return 0, apperrors.ErrNotConnected
 	}
-	return client.GetTableRetentionDays(a.ctx, database, schema, name)
+	return client.GetTableRetentionDays(a.fctx(FeatureObjectBrowser), database, schema, name)
 }
 
 // ListDroppedTables returns tables in the schema that are within the Time Travel
@@ -164,7 +164,7 @@ func (a *App) ListDroppedTables(database, schema string) ([]snowflake.DroppedTab
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListDroppedTables(a.ctx, database, schema)
+	return client.ListDroppedTables(a.fctx(FeatureObjectBrowser), database, schema)
 }
 
 // ListDroppedSchemas returns schemas in the database that are within the Time
@@ -174,7 +174,7 @@ func (a *App) ListDroppedSchemas(database string) ([]snowflake.DroppedTable, err
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListDroppedSchemas(a.ctx, database)
+	return client.ListDroppedSchemas(a.fctx(FeatureObjectBrowser), database)
 }
 
 // ListDroppedDatabases returns databases that are within the Time Travel
@@ -184,7 +184,7 @@ func (a *App) ListDroppedDatabases() ([]snowflake.DroppedTable, error) {
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListDroppedDatabases(a.ctx)
+	return client.ListDroppedDatabases(a.fctx(FeatureObjectBrowser))
 }
 
 // GetProcedureParams fetches the DDL for a stored procedure and returns its
@@ -194,7 +194,7 @@ func (a *App) GetProcedureParams(database, schema, name, argTypes string) ([]sno
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.GetProcedureParams(a.ctx, database, schema, name, argTypes)
+	return client.GetProcedureParams(a.fctx(FeatureObjectBrowser), database, schema, name, argTypes)
 }
 
 // GetTableColumns returns the ordered column names for a table or view.
@@ -203,7 +203,7 @@ func (a *App) GetTableColumns(database, schema, name string) ([]string, error) {
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.GetTableColumns(a.ctx, database, schema, name)
+	return client.GetTableColumns(a.fctx(FeatureObjectBrowser), database, schema, name)
 }
 
 // GetTableForeignKeys returns the foreign keys where the given table is the
@@ -213,7 +213,7 @@ func (a *App) GetTableForeignKeys(database, schema, table string) ([]snowflake.T
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.GetTableForeignKeys(a.ctx, database, schema, table)
+	return client.GetTableForeignKeys(a.fctx(FeatureObjectBrowser), database, schema, table)
 }
 
 // GetTableColumnsWithTypes returns ordered column names and data types for a
@@ -224,7 +224,7 @@ func (a *App) GetTableColumnsWithTypes(database, schema, name string) ([]snowfla
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.GetTableColumnsWithTypes(a.ctx, database, schema, name)
+	return client.GetTableColumnsWithTypes(a.fctx(FeatureObjectBrowser), database, schema, name)
 }
 
 // GetColumnDetails returns the DEFAULT expression and masking policy attached to
@@ -235,7 +235,7 @@ func (a *App) GetColumnDetails(database, schema, table, column string) (snowflak
 	if client == nil {
 		return snowflake.ColumnDetails{}, apperrors.ErrNotConnected
 	}
-	return client.GetColumnDetails(a.ctx, database, schema, table, column)
+	return client.GetColumnDetails(a.fctx(FeatureObjectBrowser), database, schema, table, column)
 }
 
 // ListGitRepoEntries returns the immediate children (files and directories) at
@@ -267,7 +267,7 @@ func (a *App) ListGitRepoEntries(database, schema, repoName, dirPath string) ([]
 		}
 	}
 
-	return client.ListGitRepoEntries(a.ctx, database, schema, repoName, dirPath)
+	return client.ListGitRepoEntries(a.fctx(FeatureObjectBrowser), database, schema, repoName, dirPath)
 }
 
 // ListGitBranches returns all branches in the given git repository.
@@ -276,7 +276,7 @@ func (a *App) ListGitBranches(database, schema, repoName string) ([]snowflake.Gi
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListGitBranches(a.ctx, database, schema, repoName)
+	return client.ListGitBranches(a.fctx(FeatureObjectBrowser), database, schema, repoName)
 }
 
 // ListGitTags returns all tags in the given git repository.
@@ -285,7 +285,7 @@ func (a *App) ListGitTags(database, schema, repoName string) ([]snowflake.GitTag
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListGitTags(a.ctx, database, schema, repoName)
+	return client.ListGitTags(a.fctx(FeatureObjectBrowser), database, schema, repoName)
 }
 
 // SetGitCommitFilter sets a commit hash filter for a specific repository.
@@ -314,7 +314,7 @@ func (a *App) GetGitFileContent(database, schema, repoName, filePath string) (st
 	if client == nil {
 		return "", apperrors.ErrNotConnected
 	}
-	return client.GetGitFileContent(a.ctx, database, schema, repoName, filePath)
+	return client.GetGitFileContent(a.fctx(FeatureObjectBrowser), database, schema, repoName, filePath)
 }
 
 // ExecuteGitFile executes a SQL file from a git repository.
@@ -323,7 +323,7 @@ func (a *App) ExecuteGitFile(database, schema, repoName, filePath string) error 
 	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return client.ExecuteGitFile(a.ctx, database, schema, repoName, filePath)
+	return client.ExecuteGitFile(a.fctx(FeatureObjectBrowser), database, schema, repoName, filePath)
 }
 
 // GetSchemaForeignKeys returns all FK→PK column mappings in the given schema
@@ -334,7 +334,7 @@ func (a *App) GetSchemaForeignKeys(database, schema string) ([]snowflake.TableFo
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.GetSchemaForeignKeys(a.ctx, database, schema)
+	return client.GetSchemaForeignKeys(a.fctx(FeatureObjectBrowser), database, schema)
 }
 
 // GetFunctionInfo fetches the DDL for a user-defined function and returns its
@@ -344,7 +344,7 @@ func (a *App) GetFunctionInfo(database, schema, name, argTypes string) (*snowfla
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.GetFunctionInfo(a.ctx, database, schema, name, argTypes)
+	return client.GetFunctionInfo(a.fctx(FeatureObjectBrowser), database, schema, name, argTypes)
 }
 
 // GetObjectDDL returns the definition of a single schema object using
@@ -359,7 +359,7 @@ func (a *App) GetObjectDDL(database, schema, kind, name, arguments string) (stri
 	if client == nil {
 		return "", apperrors.ErrNotConnected
 	}
-	return client.GetObjectDDL(a.ctx, database, schema, kind, name, arguments)
+	return client.GetObjectDDL(a.fctx(FeatureObjectBrowser), database, schema, kind, name, arguments)
 }
 
 // GetObjectDependencies parses the DDL of a VIEW, PROCEDURE, or FUNCTION and
@@ -372,7 +372,7 @@ func (a *App) GetObjectDependencies(database, schema, kind, name, arguments stri
 	if client == nil {
 		return snowflake.DependencyNode{}, apperrors.ErrNotConnected
 	}
-	return client.GetObjectDependencies(a.ctx, database, schema, kind, name, arguments)
+	return client.GetObjectDependencies(a.fctx(FeatureObjectBrowser), database, schema, kind, name, arguments)
 }
 
 // GetObjectProperties returns structured metadata for any Snowflake object by
@@ -385,7 +385,7 @@ func (a *App) GetObjectProperties(database, schema, kind, name string) ([]snowfl
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return objects.GetObjectProperties(a.ctx, client, database, schema, kind, name)
+	return objects.GetObjectProperties(a.fctx(FeatureObjectBrowser), client, database, schema, kind, name)
 }
 
 // GetRoutineProperties returns SHOW metadata for one specific overload of a
@@ -399,5 +399,5 @@ func (a *App) GetRoutineProperties(database, schema, kind, name, args string) ([
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return objects.GetRoutineProperties(a.ctx, client, database, schema, kind, name, args)
+	return objects.GetRoutineProperties(a.fctx(FeatureObjectBrowser), client, database, schema, kind, name, args)
 }

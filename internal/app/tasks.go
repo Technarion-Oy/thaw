@@ -32,7 +32,7 @@ func (a *App) ListFinalizableTasks(database, schema string) ([]tasks.Finalizabil
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return tasks.ListFinalizableTasks(a.ctx, client, database, schema)
+	return tasks.ListFinalizableTasks(a.fctx(FeatureTasks), client, database, schema)
 }
 
 // CloneChildTask clones a task and replaces its predecessors.
@@ -43,7 +43,7 @@ func (a *App) CloneChildTask(database, schema, oldName, newName string, caseSens
 	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return tasks.CloneChildTask(a.ctx, client, database, schema, oldName, newName, caseSensitive, newPredecessors)
+	return tasks.CloneChildTask(a.fctx(FeatureTasks), client, database, schema, oldName, newName, caseSensitive, newPredecessors)
 }
 
 // GetTaskStatuses returns the current state and last-run result for every task in the given schema.
@@ -52,7 +52,7 @@ func (a *App) GetTaskStatuses(database, schema string) (tasks.StatusesResult, er
 	if client == nil {
 		return tasks.StatusesResult{}, apperrors.ErrNotConnected
 	}
-	return tasks.GetStatuses(a.ctx, client, database, schema)
+	return tasks.GetStatuses(a.fctx(FeatureTasks), client, database, schema)
 }
 
 // GetTopologicalOrder computes a dependency-safe topological ordering of tasks
@@ -63,7 +63,7 @@ func (a *App) GetTopologicalOrder(database, schema, rootName string) (tasks.Topo
 	if client == nil {
 		return tasks.TopologicalOrder{}, apperrors.ErrNotConnected
 	}
-	result, err := tasks.GetStatuses(a.ctx, client, database, schema)
+	result, err := tasks.GetStatuses(a.fctx(FeatureTasks), client, database, schema)
 	if err != nil {
 		return tasks.TopologicalOrder{}, err
 	}
@@ -77,7 +77,7 @@ func (a *App) ExportGraphDDL(database, schema, rootName string, includeSuspendRe
 	if client == nil {
 		return tasks.ExportGraphDDLResult{}, apperrors.ErrNotConnected
 	}
-	return tasks.ExportGraphDDL(a.ctx, client, database, schema, rootName, includeSuspendResume)
+	return tasks.ExportGraphDDL(a.fctx(FeatureTasks), client, database, schema, rootName, includeSuspendResume)
 }
 
 // GetTaskRunHistory returns the execution history for a task from INFORMATION_SCHEMA.TASK_HISTORY().
@@ -86,7 +86,7 @@ func (a *App) GetTaskRunHistory(database, schema, taskName string, isRoot bool, 
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return tasks.GetTaskRunHistory(a.ctx, client, database, schema, taskName, isRoot, days)
+	return tasks.GetTaskRunHistory(a.fctx(FeatureTasks), client, database, schema, taskName, isRoot, days)
 }
 
 // ListRootTasks returns task finalizability rows for the given schema.
@@ -102,7 +102,7 @@ func (a *App) TaskHasChildren(database, schema, taskName string) (bool, error) {
 	if client == nil {
 		return false, apperrors.ErrNotConnected
 	}
-	return tasks.HasChildren(a.ctx, client, database, schema, taskName)
+	return tasks.HasChildren(a.fctx(FeatureTasks), client, database, schema, taskName)
 }
 
 // EnableTaskDependents resumes the named task and all of its descendants.
@@ -113,7 +113,7 @@ func (a *App) EnableTaskDependents(database, schema, taskName string) error {
 	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return tasks.EnableDependents(a.ctx, client, database, schema, taskName)
+	return tasks.EnableDependents(a.fctx(FeatureTasks), client, database, schema, taskName)
 }
 
 // SuspendTaskList suspends each task in the provided list in order.
@@ -127,7 +127,7 @@ func (a *App) SuspendTaskList(database, schema string, names []string) error {
 		return apperrors.ErrNotConnected
 	}
 	for _, name := range names {
-		if _, err := client.Execute(a.ctx,
+		if _, err := client.Execute(a.fctx(FeatureTasks),
 			fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s SUSPEND", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))); err != nil {
 			return fmt.Errorf("suspending task %q: %w", name, err)
 		}
@@ -147,7 +147,7 @@ func (a *App) ResumeTaskList(database, schema string, names []string) error {
 		return apperrors.ErrNotConnected
 	}
 	for _, name := range names {
-		if _, err := client.Execute(a.ctx,
+		if _, err := client.Execute(a.fctx(FeatureTasks),
 			fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s RESUME", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))); err != nil {
 			return fmt.Errorf("resuming task %q: %w", name, err)
 		}
@@ -162,7 +162,7 @@ func (a *App) SuspendTaskGraph(database, schema, taskName string) error {
 	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return tasks.SuspendGraph(a.ctx, client, database, schema, taskName)
+	return tasks.SuspendGraph(a.fctx(FeatureTasks), client, database, schema, taskName)
 }
 
 // DropTaskTree suspends and drops the named task and all of its descendants.
@@ -172,7 +172,7 @@ func (a *App) DropTaskTree(database, schema, taskName string) error {
 	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return tasks.DropTree(a.ctx, client, database, schema, taskName)
+	return tasks.DropTree(a.fctx(FeatureTasks), client, database, schema, taskName)
 }
 
 // ExecuteTask manually triggers a single run of a Snowflake Task.
@@ -183,5 +183,5 @@ func (a *App) ExecuteTask(database, schema, name, config string, retryLast bool)
 	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return client.ExecuteTask(a.ctx, database, schema, name, config, retryLast)
+	return client.ExecuteTask(a.fctx(FeatureTasks), database, schema, name, config, retryLast)
 }

@@ -44,7 +44,12 @@ type Entry struct {
 	DurationMs int64     `json:"durationMs"`
 	Error      string    `json:"error"`
 	Source     Source    `json:"source"`
-	TabID      string    `json:"tabID"`
+	// Feature identifies which Thaw feature initiated the query (e.g.
+	// "Object Browser", "SQL Editor", "DDL Export"). Empty when the origin is
+	// unknown. Purely informational — used by the Query Log pane for display
+	// and filtering.
+	Feature string `json:"feature"`
+	TabID   string `json:"tabID"`
 }
 
 const defaultMaxEntries = 5000
@@ -132,6 +137,7 @@ func (l *Log) IsEnabled() bool {
 
 type ctxKeySource struct{}
 type ctxKeyTabID struct{}
+type ctxKeyFeature struct{}
 
 // WithSource returns a context annotated with the query source.
 func WithSource(ctx context.Context, s Source) context.Context {
@@ -144,6 +150,21 @@ func GetSource(ctx context.Context) Source {
 		return v
 	}
 	return SourceInternal
+}
+
+// WithFeature returns a context annotated with the Thaw feature that initiated
+// the query (e.g. "Object Browser", "SQL Editor"). The OnQuery hook reads it via
+// GetFeature and records it on each internal query entry.
+func WithFeature(ctx context.Context, feature string) context.Context {
+	return context.WithValue(ctx, ctxKeyFeature{}, feature)
+}
+
+// GetFeature extracts the originating feature from ctx, defaulting to "".
+func GetFeature(ctx context.Context) string {
+	if v, ok := ctx.Value(ctxKeyFeature{}).(string); ok {
+		return v
+	}
+	return ""
 }
 
 // WithTabID returns a context annotated with the tab ID.

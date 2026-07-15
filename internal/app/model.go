@@ -36,7 +36,7 @@ func (a *App) ListModels() ([]string, error) {
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListModels(a.ctx)
+	return client.ListModels(a.fctx(FeatureObjectEditor))
 }
 
 // GetModelTags returns the tags currently applied to the given model, via the
@@ -61,7 +61,7 @@ func (a *App) GetModelTags(database, schema, name string) (*snowflake.QueryResul
 		// backslash in an identifier must be doubled to survive the single-quoted
 		// literal rather than being read as a Snowflake escape sequence.
 		snowflake.QuoteIdent(database), snowflake.EscapeTextLit(fqn))
-	return client.Execute(a.ctx, sql)
+	return client.Execute(a.fctx(FeatureObjectEditor), sql)
 }
 
 // ListModelVersions returns the versions of the given model via
@@ -77,5 +77,5 @@ func (a *App) ListModelVersions(database, schema, name string) (*snowflake.Query
 	}
 	sql := fmt.Sprintf("SHOW VERSIONS IN MODEL %s.%s.%s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
-	return client.Execute(a.ctx, sql)
+	return client.Execute(a.fctx(FeatureObjectEditor), sql)
 }

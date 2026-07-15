@@ -25,7 +25,7 @@ func (a *App) ListSecurityIntegrations() ([]snowflake.SecurityIntegration, error
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListSecurityIntegrations(a.ctx)
+	return client.ListSecurityIntegrations(a.fctx(FeatureIntegrations))
 }
 
 // ListApiIntegrations returns all API integrations visible to the current role.
@@ -34,7 +34,7 @@ func (a *App) ListApiIntegrations() ([]snowflake.ApiIntegration, error) {
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListApiIntegrations(a.ctx)
+	return client.ListApiIntegrations(a.fctx(FeatureIntegrations))
 }
 
 // ListSecretsInAccount returns all secrets visible to the current role across the account.
@@ -43,7 +43,7 @@ func (a *App) ListSecretsInAccount() ([]snowflake.AccountSecret, error) {
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListSecretsInAccount(a.ctx)
+	return client.ListSecretsInAccount(a.fctx(FeatureIntegrations))
 }
 
 // ListExternalAccessIntegrations returns all EXTERNAL ACCESS integrations.
@@ -52,7 +52,7 @@ func (a *App) ListExternalAccessIntegrations() ([]snowflake.IntegrationRow, erro
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListIntegrations(a.ctx, "EXTERNAL ACCESS")
+	return client.ListIntegrations(a.fctx(FeatureIntegrations), "EXTERNAL ACCESS")
 }
 
 // ListNotificationIntegrations returns the names of all notification integrations.
@@ -61,7 +61,7 @@ func (a *App) ListNotificationIntegrations() ([]string, error) {
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListNotificationIntegrations(a.ctx)
+	return client.ListNotificationIntegrations(a.fctx(FeatureIntegrations))
 }
 
 // ListExternalVolumes returns the names of all external volumes visible to the current role.
@@ -70,7 +70,7 @@ func (a *App) ListExternalVolumes() ([]string, error) {
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListExternalVolumes(a.ctx)
+	return client.ListExternalVolumes(a.fctx(FeatureIntegrations))
 }
 
 // ListIntegrations runs SHOW <kind> INTEGRATIONS and returns structured rows.
@@ -80,7 +80,7 @@ func (a *App) ListIntegrations(kind string) ([]snowflake.IntegrationRow, error) 
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListIntegrations(a.ctx, kind)
+	return client.ListIntegrations(a.fctx(FeatureIntegrations), kind)
 }
 
 // GetIntegrationProperties runs DESCRIBE INTEGRATION for the named integration
@@ -91,7 +91,7 @@ func (a *App) GetIntegrationProperties(name string) ([]snowflake.PropertyPair, e
 		return nil, apperrors.ErrNotConnected
 	}
 	esc := strings.ReplaceAll(name, `"`, `""`)
-	res, err := client.Execute(a.ctx, fmt.Sprintf(`DESCRIBE INTEGRATION "%s"`, esc))
+	res, err := client.Execute(a.fctx(FeatureIntegrations), fmt.Sprintf(`DESCRIBE INTEGRATION "%s"`, esc))
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +135,7 @@ func (a *App) DropIntegration(name string) error {
 	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return client.DropIntegration(a.ctx, name)
+	return client.DropIntegration(a.fctx(FeatureIntegrations), name)
 }
 
 // CreateStorageIntegration builds and executes a CREATE STORAGE INTEGRATION DDL.
@@ -148,7 +148,7 @@ func (a *App) CreateStorageIntegration(params integrations.StorageIntegrationPar
 	if err != nil {
 		return err
 	}
-	return client.ExecDDL(a.ctx, sql)
+	return client.ExecDDL(a.fctx(FeatureIntegrations), sql)
 }
 
 // CreateApiIntegration builds and executes a CREATE API INTEGRATION DDL.
@@ -161,7 +161,7 @@ func (a *App) CreateApiIntegration(params integrations.ApiIntegrationParams) err
 	if err != nil {
 		return err
 	}
-	return client.ExecDDL(a.ctx, sql)
+	return client.ExecDDL(a.fctx(FeatureIntegrations), sql)
 }
 
 // CreateCatalogIntegration builds and executes a CREATE CATALOG INTEGRATION DDL.
@@ -174,7 +174,7 @@ func (a *App) CreateCatalogIntegration(params integrations.CatalogIntegrationPar
 	if err != nil {
 		return err
 	}
-	return client.ExecDDL(a.ctx, sql)
+	return client.ExecDDL(a.fctx(FeatureIntegrations), sql)
 }
 
 // CreateExternalAccessIntegration builds and executes a CREATE EXTERNAL ACCESS INTEGRATION DDL.
@@ -187,7 +187,7 @@ func (a *App) CreateExternalAccessIntegration(params integrations.ExternalAccess
 	if err != nil {
 		return err
 	}
-	return client.ExecDDL(a.ctx, sql)
+	return client.ExecDDL(a.fctx(FeatureIntegrations), sql)
 }
 
 // CreateNotificationIntegration builds and executes a CREATE NOTIFICATION INTEGRATION DDL.
@@ -200,7 +200,7 @@ func (a *App) CreateNotificationIntegration(params integrations.NotificationInte
 	if err != nil {
 		return err
 	}
-	return client.ExecDDL(a.ctx, sql)
+	return client.ExecDDL(a.fctx(FeatureIntegrations), sql)
 }
 
 // CreateSecurityIntegration builds and executes a CREATE SECURITY INTEGRATION DDL.
@@ -213,7 +213,7 @@ func (a *App) CreateSecurityIntegration(params integrations.SecurityIntegrationP
 	if err != nil {
 		return err
 	}
-	return client.ExecDDL(a.ctx, sql)
+	return client.ExecDDL(a.fctx(FeatureIntegrations), sql)
 }
 
 // BuildApiIntegrationPreviewSQL returns the DDL that would be executed for the

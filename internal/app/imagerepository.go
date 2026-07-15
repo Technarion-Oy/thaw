@@ -39,5 +39,5 @@ func (a *App) ListImagesInRepository(database, schema, name string) (*snowflake.
 	}
 	sql := fmt.Sprintf("SHOW IMAGES IN IMAGE REPOSITORY %s.%s.%s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
-	return client.Execute(a.ctx, sql)
+	return client.Execute(a.fctx(FeatureObjectEditor), sql)
 }

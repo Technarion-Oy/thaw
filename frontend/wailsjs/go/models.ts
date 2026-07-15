@@ -3490,6 +3490,7 @@ export namespace querylog {
 	    durationMs: number;
 	    error: string;
 	    source: string;
+	    feature: string;
 	    tabID: string;
 	
 	    static createFrom(source: any = {}) {
@@ -3506,6 +3507,7 @@ export namespace querylog {
 	        this.durationMs = source["durationMs"];
 	        this.error = source["error"];
 	        this.source = source["source"];
+	        this.feature = source["feature"];
 	        this.tabID = source["tabID"];
 	    }
 	

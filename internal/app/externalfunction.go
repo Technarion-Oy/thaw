@@ -34,7 +34,7 @@ func (a *App) AlterExternalFunction(database, schema, name, args, clause string)
 	}
 	sql := fmt.Sprintf("ALTER FUNCTION %s.%s.%s(%s) %s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), args, clause)
-	_, err := client.Execute(a.ctx, sql)
+	_, err := client.Execute(a.fctx(FeatureObjectEditor), sql)
 	return err
 }
 
@@ -53,7 +53,7 @@ func (a *App) DescribeExternalFunction(database, schema, name, args string) (*sn
 	}
 	sql := fmt.Sprintf("DESCRIBE FUNCTION %s.%s.%s(%s)",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), args)
-	return client.Execute(a.ctx, sql)
+	return client.Execute(a.fctx(FeatureObjectEditor), sql)
 }
 
 // GetExternalFunctionOptions returns the fixed choice lists (compression, null
@@ -73,5 +73,5 @@ func (a *App) ListUserFunctions(database string) ([]snowflake.UserFunction, erro
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListUserFunctions(a.ctx, database)
+	return client.ListUserFunctions(a.fctx(FeatureObjectEditor), database)
 }

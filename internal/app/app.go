@@ -438,22 +438,22 @@ func (a *App) restoreSessionContext(tabId string, ts *tabSession) {
 	defer ts.inUse.Add(-1)
 	sctx := val.(snowflake.SessionContext)
 	if sctx.Role != "" {
-		if err := ts.client.UseRole(a.ctx, sctx.Role); err != nil {
+		if err := ts.client.UseRole(a.fctx(FeatureSessionSetup), sctx.Role); err != nil {
 			logger.L.Debug("restoreSessionContext: failed to restore role", "tabId", tabId, "role", sctx.Role, "err", err)
 		}
 	}
 	if sctx.Warehouse != "" {
-		if err := ts.client.UseWarehouse(a.ctx, sctx.Warehouse); err != nil {
+		if err := ts.client.UseWarehouse(a.fctx(FeatureSessionSetup), sctx.Warehouse); err != nil {
 			logger.L.Debug("restoreSessionContext: failed to restore warehouse", "tabId", tabId, "warehouse", sctx.Warehouse, "err", err)
 		}
 	}
 	if sctx.Database != "" {
-		if err := ts.client.UseDatabase(a.ctx, sctx.Database); err != nil {
+		if err := ts.client.UseDatabase(a.fctx(FeatureSessionSetup), sctx.Database); err != nil {
 			logger.L.Debug("restoreSessionContext: failed to restore database", "tabId", tabId, "database", sctx.Database, "err", err)
 		}
 	}
 	if sctx.Schema != "" {
-		if err := ts.client.UseSchema(a.ctx, sctx.Schema); err != nil {
+		if err := ts.client.UseSchema(a.fctx(FeatureSessionSetup), sctx.Schema); err != nil {
 			logger.L.Debug("restoreSessionContext: failed to restore schema", "tabId", tabId, "schema", sctx.Schema, "err", err)
 		}
 	}
@@ -580,6 +580,7 @@ func (a *App) Connect(params snowflake.ConnectParams) error {
 			DurationMs: dur.Milliseconds(),
 			Error:      errMsg,
 			Source:     querylog.SourceInternal,
+			Feature:    querylog.GetFeature(ctx),
 			TabID:      querylog.GetTabID(ctx),
 		}
 		entry.ID = a.queryLog.Record(entry)
@@ -601,7 +602,7 @@ func (a *App) Connect(params snowflake.ConnectParams) error {
 	// Refresh the function metadata cache in the background.
 	if a.fnStore != nil {
 		go func() {
-			if err := fnmeta.SyncFromSnowflake(a.ctx, client, a.fnStore); err != nil {
+			if err := fnmeta.SyncFromSnowflake(a.fctx(FeatureSQLEditor), client, a.fnStore); err != nil {
 				logger.L.Warn("fnmeta: background sync failed", "err", err)
 			}
 		}()
@@ -801,6 +802,6 @@ func (a *App) alterObject(objectType, database, schema, name, clause string) err
 		return apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("ALTER %s %s %s", objectType, snowflake.Qualify(database, schema, name), clause)
-	_, err := client.Execute(a.ctx, sql)
+	_, err := client.Execute(a.fctx(FeatureObjectEditor), sql)
 	return err
 }

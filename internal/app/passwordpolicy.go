@@ -39,7 +39,7 @@ func (a *App) DescribePasswordPolicy(database, schema, name string) (*snowflake.
 	}
 	query := fmt.Sprintf("DESCRIBE PASSWORD POLICY %s.%s.%s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
-	return client.QuerySingle(a.ctx, query)
+	return client.QuerySingle(a.fctx(FeatureObjectEditor), query)
 }
 
 // GetPasswordPolicyReferences returns the users (and/or the account) to which
@@ -59,5 +59,5 @@ func (a *App) GetPasswordPolicyReferences(database, schema, name string) (*snowf
 			"WHERE POLICY_DB = '%s' AND POLICY_SCHEMA = '%s' AND POLICY_NAME = '%s' AND POLICY_KIND = 'PASSWORD_POLICY' "+
 			"ORDER BY REF_ENTITY_DOMAIN, REF_ENTITY_NAME",
 		snowflake.EscapeStringLit(database), snowflake.EscapeStringLit(schema), snowflake.EscapeStringLit(name))
-	return client.QuerySingle(a.ctx, query)
+	return client.QuerySingle(a.fctx(FeatureObjectEditor), query)
 }

@@ -38,7 +38,7 @@ func (a *App) GetPipeStatus(database, schema, name string) (string, error) {
 	// quotes so the whole string is safe inside the outer SQL string literal.
 	pipeFqn := snowflake.QuoteIdent(database) + "." + snowflake.QuoteIdent(schema) + "." + snowflake.QuoteIdent(name)
 	sql := fmt.Sprintf("SELECT SYSTEM$PIPE_STATUS('%s')", snowflake.EscapeStringLit(pipeFqn))
-	result, err := client.Execute(a.ctx, sql)
+	result, err := client.Execute(a.fctx(FeatureObjectEditor), sql)
 	if err != nil {
 		return "", err
 	}
@@ -57,5 +57,5 @@ func (a *App) GetPipeCopyHistory(database, schema, name, startTime, status, file
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return pipe.GetCopyHistory(a.ctx, client, database, schema, name, startTime, status, fileName)
+	return pipe.GetCopyHistory(a.fctx(FeatureObjectEditor), client, database, schema, name, startTime, status, fileName)
 }

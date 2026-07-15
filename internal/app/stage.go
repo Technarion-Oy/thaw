@@ -25,7 +25,7 @@ func (a *App) ListStageEntries(database, schema, stageName, dirPath string) ([]s
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListStageEntries(a.ctx, database, schema, stageName, dirPath)
+	return client.ListStageEntries(a.fctx(FeatureStages), database, schema, stageName, dirPath)
 }
 
 // ListStages returns the stages in a schema with their INTERNAL/EXTERNAL type,
@@ -35,7 +35,7 @@ func (a *App) ListStages(database, schema string) ([]snowflake.StageSummary, err
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListStages(a.ctx, database, schema)
+	return client.ListStages(a.fctx(FeatureStages), database, schema)
 }
 
 // ListWorkspaces returns all workspaces visible to the current user.
@@ -44,7 +44,7 @@ func (a *App) ListWorkspaces() ([]snowflake.WorkspaceInfo, error) {
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListWorkspaces(a.ctx)
+	return client.ListWorkspaces(a.fctx(FeatureStages))
 }
 
 // ListWorkspaceEntries returns directory-aware entries within a workspace.
@@ -53,7 +53,7 @@ func (a *App) ListWorkspaceEntries(database, schema, workspaceName, dirPath stri
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListWorkspaceEntries(a.ctx, database, schema, workspaceName, dirPath)
+	return client.ListWorkspaceEntries(a.fctx(FeatureStages), database, schema, workspaceName, dirPath)
 }
 
 // ListStageFiles returns the list of files on a Snowflake stage.
@@ -62,7 +62,7 @@ func (a *App) ListStageFiles(stageName string, pattern string) ([]stage.StageFil
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return stage.ListStageFiles(a.ctx, client, stageName, pattern)
+	return stage.ListStageFiles(a.fctx(FeatureStages), client, stageName, pattern)
 }
 
 // UploadFileToStage executes a PUT command to upload a local file to an internal stage.
@@ -77,7 +77,7 @@ func (a *App) UploadFileToStage(localPath string, stageName string, parallel int
 		return fmt.Errorf("PUT commands are disabled. Enable them under View → Enabled Features…")
 	}
 
-	return stage.UploadFileToStage(a.ctx, client, localPath, stageName, parallel, autoCompress, sourceCompression, overwrite)
+	return stage.UploadFileToStage(a.fctx(FeatureStages), client, localPath, stageName, parallel, autoCompress, sourceCompression, overwrite)
 }
 
 // DownloadFileFromStage executes a GET command to download files from an internal stage to a local directory.
@@ -92,7 +92,7 @@ func (a *App) DownloadFileFromStage(stageName string, localDirPath string, paral
 		return fmt.Errorf("GET commands are disabled. Enable them under View → Enabled Features…")
 	}
 
-	return stage.DownloadFileFromStage(a.ctx, client, stageName, localDirPath, parallel, pattern)
+	return stage.DownloadFileFromStage(a.fctx(FeatureStages), client, stageName, localDirPath, parallel, pattern)
 }
 
 // RemoveStageFiles deletes files from a stage using the REMOVE command.
@@ -107,7 +107,7 @@ func (a *App) RemoveStageFiles(stageName string, pattern string) error {
 		return fmt.Errorf("REMOVE commands are disabled. Enable them under View → Enabled Features…")
 	}
 
-	return stage.RemoveStageFiles(a.ctx, client, stageName, pattern)
+	return stage.RemoveStageFiles(a.fctx(FeatureStages), client, stageName, pattern)
 }
 
 // GetLocalFilePreview reads a local file and returns up to 50 rows.
@@ -124,7 +124,7 @@ func (a *App) GetStageFilePreview(stagePath string, cfg fileformat.FileFormatCon
 	if client == nil {
 		return fileformat.PreviewResult{}, apperrors.ErrNotConnected
 	}
-	return fileformat.PreviewStageFile(a.ctx, client, stagePath, cfg)
+	return fileformat.PreviewStageFile(a.fctx(FeatureStages), client, stagePath, cfg)
 }
 
 // ExecuteStageFile executes a SQL file from an internal named stage.
@@ -137,7 +137,7 @@ func (a *App) ExecuteStageFile(database, schema, stageName, filePath string) err
 	if !strings.HasSuffix(strings.ToLower(filePath), ".sql") {
 		return fmt.Errorf("only .sql files can be executed, got %q", filePath)
 	}
-	return client.ExecuteGitFile(a.ctx, database, schema, stageName, filePath) // SQL pattern is identical: EXECUTE IMMEDIATE FROM @db.schema.name/path
+	return client.ExecuteGitFile(a.fctx(FeatureStages), database, schema, stageName, filePath) // SQL pattern is identical: EXECUTE IMMEDIATE FROM @db.schema.name/path
 }
 
 // AlterStage runs an ALTER STAGE IF EXISTS statement on the given stage.

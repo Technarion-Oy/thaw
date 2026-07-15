@@ -52,7 +52,7 @@ func (a *App) GetTagReferences(database, schema, name string) (*snowflake.QueryR
 			"WHERE TAG_DATABASE = '%s' AND TAG_SCHEMA = '%s' AND TAG_NAME = '%s' AND OBJECT_DELETED IS NULL "+
 			"ORDER BY OBJECT_DATABASE, OBJECT_SCHEMA, OBJECT_NAME, COLUMN_NAME",
 		snowflake.EscapeStringLit(database), snowflake.EscapeStringLit(schema), snowflake.EscapeStringLit(name))
-	return client.QuerySingle(a.ctx, query)
+	return client.QuerySingle(a.fctx(FeatureTags), query)
 }
 
 // ListAccountTags returns the tag catalog for the whole account via SHOW TAGS IN
@@ -65,7 +65,7 @@ func (a *App) ListAccountTags() (*snowflake.QueryResult, error) {
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.QuerySingle(a.ctx, "SHOW TAGS IN ACCOUNT")
+	return client.QuerySingle(a.fctx(FeatureTags), "SHOW TAGS IN ACCOUNT")
 }
 
 // GetAllTagReferences returns every live tag application across the account by
@@ -95,7 +95,7 @@ func (a *App) GetAllTagReferences() (*snowflake.QueryResult, error) {
 			"ORDER BY TAG_NAME, OBJECT_DATABASE, OBJECT_SCHEMA, OBJECT_NAME, COLUMN_NAME "+
 			"LIMIT %d",
 		maxTagReferenceRows+1)
-	res, err := client.QuerySingle(a.ctx, query)
+	res, err := client.QuerySingle(a.fctx(FeatureTags), query)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +138,7 @@ func (a *App) alterObjectTag(ref tag.ObjectTagRef, tagDatabase, tagSchema, tagNa
 		return apperrors.ErrNotConnected
 	}
 	if strings.EqualFold(strings.TrimSpace(ref.Domain), "COLUMN") && strings.TrimSpace(ref.ParentKind) == "" {
-		if t, err := client.GetObjectTableType(a.ctx, ref.Database, ref.Schema, ref.Name); err == nil {
+		if t, err := client.GetObjectTableType(a.fctx(FeatureTags), ref.Database, ref.Schema, ref.Name); err == nil {
 			ref.ParentKind = t
 		}
 	}
@@ -147,7 +147,7 @@ func (a *App) alterObjectTag(ref tag.ObjectTagRef, tagDatabase, tagSchema, tagNa
 	if err != nil {
 		return err
 	}
-	_, err = client.Execute(a.ctx, sql)
+	_, err = client.Execute(a.fctx(FeatureTags), sql)
 	return err
 }
 
@@ -188,7 +188,7 @@ func (a *App) GetObjectTagReferences(domain, database, schema, name, args string
 		snowflake.QuoteIdent(database),
 		snowflake.EscapeStringLit(objName),
 		snowflake.EscapeStringLit(d))
-	return client.QuerySingle(a.ctx, query)
+	return client.QuerySingle(a.fctx(FeatureTags), query)
 }
 
 // tagReferenceObjectName builds the object-name string literal passed to the
@@ -237,7 +237,7 @@ func (a *App) GetColumnTagReferences(domain, database, schema, name string) (*sn
 		snowflake.QuoteIdent(database),
 		snowflake.EscapeStringLit(fqn),
 		snowflake.EscapeStringLit(d))
-	return client.QuerySingle(a.ctx, query)
+	return client.QuerySingle(a.fctx(FeatureTags), query)
 }
 
 // tagReferenceDomain maps an object-browser SHOW kind to the object_domain that

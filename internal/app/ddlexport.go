@@ -27,7 +27,7 @@ func (a *App) ExportAccountObjectsDDL(outputDir string) (ddl.AccountExportResult
 	if client == nil {
 		return ddl.AccountExportResult{}, apperrors.ErrNotConnected
 	}
-	return ddl.ExportAccountObjects(a.ctx, client, outputDir)
+	return ddl.ExportAccountObjects(a.fctx(FeatureDDLExport), client, outputDir)
 }
 
 // GetERDiagramData fetches column metadata, primary keys, and foreign keys for
@@ -38,7 +38,7 @@ func (a *App) GetERDiagramData(database string) (snowflake.ERDiagramData, error)
 	if client == nil {
 		return snowflake.ERDiagramData{}, apperrors.ErrNotConnected
 	}
-	return client.GetERDiagramData(a.ctx, database)
+	return client.GetERDiagramData(a.fctx(FeatureERDiagram), database)
 }
 
 // ddlProgressEvent is the Wails event name emitted during export.
@@ -67,7 +67,7 @@ func (a *App) ExportDatabaseDDL(database, outputDir string) (ddl.ExportResult, e
 	client.SetPoolLimits(32, 32)
 	defer client.SetPoolLimits(snowflake.DefaultMaxOpenConns, snowflake.DefaultMaxIdleConns)
 
-	ctx, cancel := context.WithCancel(a.ctx)
+	ctx, cancel := context.WithCancel(a.fctx(FeatureDDLExport))
 	a.exportCancelFunc = cancel
 	defer func() {
 		cancel()
@@ -108,7 +108,7 @@ func (a *App) ListExportableDatabases() ([]string, error) {
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListExportableDatabases(a.ctx)
+	return client.ListExportableDatabases(a.fctx(FeatureDDLExport))
 }
 
 // DDLExportOptions carries the per-export choices made in the frontend's
@@ -153,7 +153,7 @@ func (a *App) ExportAllDatabasesDDL(outputDir string, databases []string, option
 	// elsewhere in the app while the export is in flight.
 	fetch := client.GetCompleteDatabaseDDL
 	if options.Warehouse != "" {
-		prev, err := client.CurrentWarehouse(a.ctx)
+		prev, err := client.CurrentWarehouse(a.fctx(FeatureDDLExport))
 		if err != nil {
 			return nil, err
 		}
@@ -174,13 +174,13 @@ func (a *App) ExportAllDatabasesDDL(outputDir string, databases []string, option
 
 	if len(databases) == 0 {
 		var err error
-		databases, err = client.ListExportableDatabases(a.ctx)
+		databases, err = client.ListExportableDatabases(a.fctx(FeatureDDLExport))
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	ctx, cancel := context.WithCancel(a.ctx)
+	ctx, cancel := context.WithCancel(a.fctx(FeatureDDLExport))
 	a.exportCancelFunc = cancel
 	defer func() {
 		cancel()
@@ -229,7 +229,7 @@ func (a *App) GetSchemaCrossDeps(db, schema string) ([]snowflake.SchemaRef, erro
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.GetSchemaCrossDeps(a.ctx, db, schema)
+	return client.GetSchemaCrossDeps(a.fctx(FeatureDDLExport), db, schema)
 }
 
 // GetDatabaseCrossDeps analyses all given schemas in db sequentially.
@@ -238,5 +238,5 @@ func (a *App) GetDatabaseCrossDeps(db string, schemas []string) ([]snowflake.Sch
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.GetDatabaseCrossDeps(a.ctx, db, schemas)
+	return client.GetDatabaseCrossDeps(a.fctx(FeatureDDLExport), db, schemas)
 }
