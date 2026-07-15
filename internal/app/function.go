@@ -32,6 +32,6 @@ func (a *App) AlterFunction(database, schema, name, args, clause string) error {
 	}
 	sql := fmt.Sprintf("ALTER FUNCTION %s.%s.%s(%s) %s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), args, clause)
-	_, err := client.Execute(a.ctx, sql)
+	_, err := client.Execute(a.fctx(FeatureObjectEditor), sql)
 	return err
 }

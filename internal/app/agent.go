@@ -40,5 +40,5 @@ func (a *App) DescribeAgent(database, schema, name string) (*snowflake.QueryResu
 	}
 	sql := fmt.Sprintf("DESCRIBE AGENT %s",
 		snowflake.Qualify(database, schema, name))
-	return client.Execute(a.ctx, sql)
+	return client.Execute(a.fctx(FeatureObjectEditor), sql)
 }

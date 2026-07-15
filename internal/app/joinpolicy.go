@@ -50,7 +50,7 @@ func (a *App) GetJoinPolicyTags(database, schema, name string) (*snowflake.Query
 		// backslash in an identifier must be doubled to survive the single-quoted
 		// literal rather than being read as a Snowflake escape sequence.
 		snowflake.QuoteIdent(database), snowflake.EscapeTextLit(fqn))
-	return client.Execute(a.ctx, sql)
+	return client.Execute(a.fctx(FeatureObjectEditor), sql)
 }
 
 // GetJoinPolicyReferences returns the tables and views to which the given join
@@ -70,5 +70,5 @@ func (a *App) GetJoinPolicyReferences(database, schema, name string) (*snowflake
 			"WHERE POLICY_DB = '%s' AND POLICY_SCHEMA = '%s' AND POLICY_NAME = '%s' AND POLICY_KIND = 'JOIN_POLICY' "+
 			"ORDER BY REF_DATABASE_NAME, REF_SCHEMA_NAME, REF_ENTITY_NAME",
 		snowflake.EscapeStringLit(database), snowflake.EscapeStringLit(schema), snowflake.EscapeStringLit(name))
-	return client.QuerySingle(a.ctx, query)
+	return client.QuerySingle(a.fctx(FeatureObjectEditor), query)
 }

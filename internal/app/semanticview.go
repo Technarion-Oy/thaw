@@ -41,7 +41,7 @@ func (a *App) DescribeSemanticView(database, schema, name string) (*snowflake.Qu
 	}
 	sql := fmt.Sprintf("DESCRIBE SEMANTIC VIEW %s",
 		snowflake.Qualify(database, schema, name))
-	return client.Execute(a.ctx, sql)
+	return client.Execute(a.fctx(FeatureObjectEditor), sql)
 }
 
 // ListSemanticDimensions runs SHOW SEMANTIC DIMENSIONS IN <fqn> and returns the
@@ -55,7 +55,7 @@ func (a *App) ListSemanticDimensions(database, schema, name string) (*snowflake.
 	}
 	sql := fmt.Sprintf("SHOW SEMANTIC DIMENSIONS IN %s",
 		snowflake.Qualify(database, schema, name))
-	return client.Execute(a.ctx, sql)
+	return client.Execute(a.fctx(FeatureObjectEditor), sql)
 }
 
 // ListSemanticFacts runs SHOW SEMANTIC FACTS IN <fqn> and returns the raw
@@ -68,7 +68,7 @@ func (a *App) ListSemanticFacts(database, schema, name string) (*snowflake.Query
 	}
 	sql := fmt.Sprintf("SHOW SEMANTIC FACTS IN %s",
 		snowflake.Qualify(database, schema, name))
-	return client.Execute(a.ctx, sql)
+	return client.Execute(a.fctx(FeatureObjectEditor), sql)
 }
 
 // ListSemanticMetrics runs SHOW SEMANTIC METRICS IN <fqn> and returns the raw
@@ -81,7 +81,7 @@ func (a *App) ListSemanticMetrics(database, schema, name string) (*snowflake.Que
 	}
 	sql := fmt.Sprintf("SHOW SEMANTIC METRICS IN %s",
 		snowflake.Qualify(database, schema, name))
-	return client.Execute(a.ctx, sql)
+	return client.Execute(a.fctx(FeatureObjectEditor), sql)
 }
 
 // ListSemanticDimensionsForMetric runs SHOW SEMANTIC DIMENSIONS IN <fqn> FOR
@@ -96,7 +96,7 @@ func (a *App) ListSemanticDimensionsForMetric(database, schema, name, metric str
 	}
 	sql := fmt.Sprintf("SHOW SEMANTIC DIMENSIONS IN %s FOR METRIC %s",
 		snowflake.Qualify(database, schema, name), snowflake.QuoteIdent(metric))
-	return client.Execute(a.ctx, sql)
+	return client.Execute(a.fctx(FeatureObjectEditor), sql)
 }
 
 // GetSemanticViewTags returns the tags currently applied to the given semantic
@@ -122,5 +122,5 @@ func (a *App) GetSemanticViewTags(database, schema, name string) (*snowflake.Que
 		// backslash in an identifier must be doubled to survive the single-quoted
 		// literal rather than being read as a Snowflake escape sequence.
 		snowflake.QuoteIdent(database), snowflake.EscapeTextLit(fqn))
-	return client.Execute(a.ctx, sql)
+	return client.Execute(a.fctx(FeatureObjectEditor), sql)
 }

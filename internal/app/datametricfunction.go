@@ -33,7 +33,7 @@ func (a *App) AlterDataMetricFunction(database, schema, name, args, clause strin
 	}
 	sql := fmt.Sprintf("ALTER FUNCTION %s.%s.%s(%s) %s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), args, clause)
-	_, err := client.Execute(a.ctx, sql)
+	_, err := client.Execute(a.fctx(FeatureObjectEditor), sql)
 	return err
 }
 
@@ -51,7 +51,7 @@ func (a *App) DescribeDataMetricFunction(database, schema, name, args string) (*
 	}
 	sql := fmt.Sprintf("DESCRIBE FUNCTION %s.%s.%s(%s)",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), args)
-	return client.Execute(a.ctx, sql)
+	return client.Execute(a.fctx(FeatureObjectEditor), sql)
 }
 
 // GetDataMetricFunctionReferences returns the tables and views the given data
@@ -75,7 +75,7 @@ func (a *App) GetDataMetricFunctionReferences(database, schema, name string) (*s
 			"WHERE metric_database_name = '%s' AND metric_schema_name = '%s' AND metric_name = '%s' "+
 			"ORDER BY ref_database_name, ref_schema_name, ref_entity_name",
 		snowflake.EscapeStringLit(database), snowflake.EscapeStringLit(schema), snowflake.EscapeStringLit(name))
-	return client.Execute(a.ctx, sql)
+	return client.Execute(a.fctx(FeatureObjectEditor), sql)
 }
 
 // GetDataMetricFunctionTags returns the tags currently applied to the given data
@@ -98,5 +98,5 @@ func (a *App) GetDataMetricFunctionTags(database, schema, name, args string) (*s
 			"FROM TABLE(%s.INFORMATION_SCHEMA.TAG_REFERENCES('%s', 'FUNCTION')) "+
 			"ORDER BY TAG_DATABASE, TAG_SCHEMA, TAG_NAME",
 		snowflake.QuoteIdent(database), snowflake.EscapeStringLit(fqn))
-	return client.Execute(a.ctx, sql)
+	return client.Execute(a.fctx(FeatureObjectEditor), sql)
 }

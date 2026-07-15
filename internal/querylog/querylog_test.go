@@ -138,6 +138,16 @@ func TestContextHelpers(t *testing.T) {
 	if tid := GetTabID(ctx); tid != "tab-1" {
 		t.Fatalf("expected tab-1, got %s", tid)
 	}
+
+	// Default feature should be empty.
+	if f := GetFeature(ctx); f != "" {
+		t.Fatalf("expected empty feature, got %s", f)
+	}
+
+	ctx = WithFeature(ctx, "Object Browser")
+	if f := GetFeature(ctx); f != "Object Browser" {
+		t.Fatalf("expected 'Object Browser', got %s", f)
+	}
 }
 
 func TestConcurrentAccess(t *testing.T) {

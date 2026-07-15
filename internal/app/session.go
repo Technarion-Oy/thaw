@@ -25,7 +25,7 @@ func (a *App) GetClientVersionInfo() ([]snowflake.ClientVersionInfo, error) {
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.GetClientVersionInfo(a.ctx)
+	return client.GetClientVersionInfo(a.fctx(FeatureSessionSetup))
 }
 
 // GetSessionContext returns the currently active role, warehouse, database and
@@ -40,7 +40,7 @@ func (a *App) GetSessionContext(tabId string) (snowflake.SessionContext, error) 
 			return val.(snowflake.SessionContext), nil
 		}
 		if client := a.currentClient(); client != nil {
-			return client.GetSessionContext(a.ctx)
+			return client.GetSessionContext(a.fctx(FeatureSessionSetup))
 		}
 		return snowflake.SessionContext{}, apperrors.ErrNotConnected
 	}
@@ -50,7 +50,7 @@ func (a *App) GetSessionContext(tabId string) (snowflake.SessionContext, error) 
 	}
 	ts.inUse.Add(1)
 	defer ts.inUse.Add(-1)
-	return ts.client.GetSessionContext(a.ctx)
+	return ts.client.GetSessionContext(a.fctx(FeatureSessionSetup))
 }
 
 // GetTabSessionID returns the Snowflake session ID for the given tab.
@@ -63,7 +63,7 @@ func (a *App) GetTabSessionID(tabId string) (string, error) {
 	ts := val.(*tabSession)
 	ts.inUse.Add(1)
 	defer ts.inUse.Add(-1)
-	return ts.client.GetSessionID(a.ctx)
+	return ts.client.GetSessionID(a.fctx(FeatureSessionSetup))
 }
 
 // GetQuotedIdentifiersIgnoreCase returns true when the current session's
@@ -75,7 +75,7 @@ func (a *App) GetQuotedIdentifiersIgnoreCase() (bool, error) {
 	if client == nil {
 		return false, apperrors.ErrNotConnected
 	}
-	return client.GetQuotedIdentifiersIgnoreCase(a.ctx)
+	return client.GetQuotedIdentifiersIgnoreCase(a.fctx(FeatureSessionSetup))
 }
 
 // ListRoles returns all roles visible to the current role (SHOW ROLES).
@@ -85,7 +85,7 @@ func (a *App) ListRoles() ([]string, error) {
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListRoles(a.ctx)
+	return client.ListRoles(a.fctx(FeatureSessionSetup))
 }
 
 // ListAvailableRoles returns only the roles the current user can switch to
@@ -95,7 +95,7 @@ func (a *App) ListAvailableRoles() ([]string, error) {
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListAvailableRoles(a.ctx)
+	return client.ListAvailableRoles(a.fctx(FeatureSessionSetup))
 }
 
 // ListWarehouses returns all warehouses visible to the current role.
@@ -104,7 +104,7 @@ func (a *App) ListWarehouses() ([]string, error) {
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListWarehouses(a.ctx)
+	return client.ListWarehouses(a.fctx(FeatureSessionSetup))
 }
 
 // ListComputePools returns all compute pools visible to the current role. Used
@@ -114,7 +114,7 @@ func (a *App) ListComputePools() ([]string, error) {
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListComputePools(a.ctx)
+	return client.ListComputePools(a.fctx(FeatureSessionSetup))
 }
 
 // UseRole switches the given tab's isolated session to the specified role.
@@ -125,7 +125,7 @@ func (a *App) UseRole(tabId string, role string) error {
 	}
 	ts.inUse.Add(1)
 	defer ts.inUse.Add(-1)
-	return ts.client.UseRole(a.ctx, role)
+	return ts.client.UseRole(a.fctx(FeatureSessionSetup), role)
 }
 
 // UseWarehouse switches the given tab's isolated session to the specified warehouse.
@@ -136,7 +136,7 @@ func (a *App) UseWarehouse(tabId string, warehouse string) error {
 	}
 	ts.inUse.Add(1)
 	defer ts.inUse.Add(-1)
-	return ts.client.UseWarehouse(a.ctx, warehouse)
+	return ts.client.UseWarehouse(a.fctx(FeatureSessionSetup), warehouse)
 }
 
 // UseDatabase switches the given tab's isolated session to the specified database.
@@ -147,7 +147,7 @@ func (a *App) UseDatabase(tabId string, database string) error {
 	}
 	ts.inUse.Add(1)
 	defer ts.inUse.Add(-1)
-	return ts.client.UseDatabase(a.ctx, database)
+	return ts.client.UseDatabase(a.fctx(FeatureSessionSetup), database)
 }
 
 // UseSchema switches the given tab's isolated session to the specified schema.
@@ -158,7 +158,7 @@ func (a *App) UseSchema(tabId string, schema string) error {
 	}
 	ts.inUse.Add(1)
 	defer ts.inUse.Add(-1)
-	return ts.client.UseSchema(a.ctx, schema)
+	return ts.client.UseSchema(a.fctx(FeatureSessionSetup), schema)
 }
 
 // GetCurrentRegion returns the result of SELECT CURRENT_REGION(), which
@@ -169,7 +169,7 @@ func (a *App) GetCurrentRegion() (string, error) {
 	if client == nil {
 		return "", apperrors.ErrNotConnected
 	}
-	qr, err := client.Execute(a.ctx, `SELECT CURRENT_REGION()`)
+	qr, err := client.Execute(a.fctx(FeatureSessionSetup), `SELECT CURRENT_REGION()`)
 	if err != nil {
 		return "", err
 	}
@@ -192,7 +192,7 @@ func (a *App) GetSnowsightURL() (string, error) {
 	if client == nil {
 		return "", apperrors.ErrNotConnected
 	}
-	qr, err := client.Execute(a.ctx, `SELECT 'https://app.snowflake.com/' || LOWER(CURRENT_ORGANIZATION_NAME()) || '/' || LOWER(CURRENT_ACCOUNT_NAME())`)
+	qr, err := client.Execute(a.fctx(FeatureSessionSetup), `SELECT 'https://app.snowflake.com/' || LOWER(CURRENT_ORGANIZATION_NAME()) || '/' || LOWER(CURRENT_ACCOUNT_NAME())`)
 	if err != nil {
 		return "", err
 	}
@@ -211,7 +211,7 @@ func (a *App) GetCurrentUser() (string, error) {
 	if client == nil {
 		return "", apperrors.ErrNotConnected
 	}
-	return client.GetCurrentUserCached(a.ctx)
+	return client.GetCurrentUserCached(a.fctx(FeatureSessionSetup))
 }
 
 // GetSessionParameters returns the current session parameters from SHOW PARAMETERS IN SESSION.
@@ -220,7 +220,7 @@ func (a *App) GetSessionParameters() ([]snowflake.SessionParam, error) {
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.GetSessionParameters(a.ctx)
+	return client.GetSessionParameters(a.fctx(FeatureSessionSetup))
 }
 
 // GetSessionVariables returns the current session variables from SHOW VARIABLES.
@@ -229,7 +229,7 @@ func (a *App) GetSessionVariables() ([]snowflake.SessionVar, error) {
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.GetSessionVariables(a.ctx)
+	return client.GetSessionVariables(a.fctx(FeatureSessionSetup))
 }
 
 // SetSessionParameter applies ALTER SESSION SET key = value for the given parameter.
@@ -239,7 +239,7 @@ func (a *App) SetSessionParameter(name, value, paramType string) error {
 		return apperrors.ErrNotConnected
 	}
 	valExpr := snowflake.QuoteSessionParamValue(value, paramType)
-	_, err := client.Execute(a.ctx, "ALTER SESSION SET "+name+" = "+valExpr)
+	_, err := client.Execute(a.fctx(FeatureSessionSetup), "ALTER SESSION SET "+name+" = "+valExpr)
 	return err
 }
 
@@ -250,6 +250,6 @@ func (a *App) SetSessionVariable(name, value, varType string) error {
 		return apperrors.ErrNotConnected
 	}
 	valExpr := snowflake.QuoteSessionParamValue(value, varType)
-	_, err := client.Execute(a.ctx, "SET "+name+" = "+valExpr)
+	_, err := client.Execute(a.fctx(FeatureSessionSetup), "SET "+name+" = "+valExpr)
 	return err
 }

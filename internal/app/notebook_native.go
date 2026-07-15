@@ -24,7 +24,7 @@ func (a *App) ExecuteNotebook(database, schema, name string, params []string) (s
 	if client == nil {
 		return "", apperrors.ErrNotConnected
 	}
-	return client.ExecuteNotebook(a.ctx, database, schema, name, params)
+	return client.ExecuteNotebook(a.fctx(FeatureNotebooks), database, schema, name, params)
 }
 
 // GetNotebookQueryWarehouse returns the QUERY_WAREHOUSE currently configured on
@@ -34,7 +34,7 @@ func (a *App) GetNotebookQueryWarehouse(database, schema, name string) (string, 
 	if client == nil {
 		return "", apperrors.ErrNotConnected
 	}
-	return client.GetNotebookQueryWarehouse(a.ctx, database, schema, name)
+	return client.GetNotebookQueryWarehouse(a.fctx(FeatureNotebooks), database, schema, name)
 }
 
 // SetNotebookQueryWarehouse updates the QUERY_WAREHOUSE property of the given
@@ -44,7 +44,7 @@ func (a *App) SetNotebookQueryWarehouse(database, schema, name, warehouse string
 	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return client.SetNotebookQueryWarehouse(a.ctx, database, schema, name, warehouse)
+	return client.SetNotebookQueryWarehouse(a.fctx(FeatureNotebooks), database, schema, name, warehouse)
 }
 
 // MakeNotebookLive promotes the latest saved version of the notebook to the
@@ -55,7 +55,7 @@ func (a *App) MakeNotebookLive(database, schema, name string) error {
 		return apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("ALTER NOTEBOOK %s.%s.%s ADD LIVE VERSION FROM LAST", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
-	_, err := client.Execute(a.ctx, sql)
+	_, err := client.Execute(a.fctx(FeatureNotebooks), sql)
 	return err
 }
 
@@ -68,7 +68,7 @@ func (a *App) FetchNotebookContent(database, schema, name string) (string, error
 	if client == nil {
 		return "", apperrors.ErrNotConnected
 	}
-	return client.FetchNotebookContent(a.ctx, database, schema, name)
+	return client.FetchNotebookContent(a.fctx(FeatureNotebooks), database, schema, name)
 }
 
 // DeployNotebook uploads a local .ipynb file to a temporary Snowflake internal
@@ -79,5 +79,5 @@ func (a *App) DeployNotebook(params snowflake.DeployNotebookParams) error {
 	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return client.DeployNotebook(a.ctx, params)
+	return client.DeployNotebook(a.fctx(FeatureNotebooks), params)
 }

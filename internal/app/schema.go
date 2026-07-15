@@ -27,7 +27,7 @@ func (a *App) AlterSchema(database, schema, clause string) error {
 		return apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("ALTER SCHEMA %s %s", snowflake.Qualify(database, schema), clause)
-	_, err := client.Execute(a.ctx, sql)
+	_, err := client.Execute(a.fctx(FeatureObjectBrowser), sql)
 	return err
 }
 
@@ -45,5 +45,5 @@ func (a *App) GetSchemaParameters(database, schema string) (*snowflake.QueryResu
 	}
 	sql := fmt.Sprintf("SHOW PARAMETERS IN SCHEMA %s.%s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
-	return client.Execute(a.ctx, sql)
+	return client.Execute(a.fctx(FeatureObjectBrowser), sql)
 }

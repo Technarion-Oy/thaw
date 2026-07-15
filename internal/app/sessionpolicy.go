@@ -41,7 +41,7 @@ func (a *App) DescribeSessionPolicy(database, schema, name string) (*snowflake.Q
 	}
 	query := fmt.Sprintf("DESCRIBE SESSION POLICY %s.%s.%s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
-	return client.QuerySingle(a.ctx, query)
+	return client.QuerySingle(a.fctx(FeatureObjectEditor), query)
 }
 
 // FormatSecondaryRoles renders a secondary-role list into the
@@ -92,5 +92,5 @@ func (a *App) GetSessionPolicyReferences(database, schema, name string) (*snowfl
 			"WHERE POLICY_DB = '%s' AND POLICY_SCHEMA = '%s' AND POLICY_NAME = '%s' AND POLICY_KIND = 'SESSION_POLICY' "+
 			"ORDER BY REF_ENTITY_DOMAIN, REF_ENTITY_NAME",
 		snowflake.EscapeStringLit(database), snowflake.EscapeStringLit(schema), snowflake.EscapeStringLit(name))
-	return client.QuerySingle(a.ctx, query)
+	return client.QuerySingle(a.fctx(FeatureObjectEditor), query)
 }

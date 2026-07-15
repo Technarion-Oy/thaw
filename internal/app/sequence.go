@@ -36,5 +36,5 @@ func (a *App) ListAccountSequences() (*snowflake.QueryResult, error) {
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.QuerySingle(a.ctx, "SHOW SEQUENCES IN ACCOUNT")
+	return client.QuerySingle(a.fctx(FeatureObjectEditor), "SHOW SEQUENCES IN ACCOUNT")
 }

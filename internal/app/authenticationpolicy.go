@@ -42,7 +42,7 @@ func (a *App) DescribeAuthenticationPolicy(database, schema, name string) ([]sno
 	}
 	query := fmt.Sprintf("DESCRIBE AUTHENTICATION POLICY %s.%s.%s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
-	res, err := client.QuerySingle(a.ctx, query)
+	res, err := client.QuerySingle(a.fctx(FeatureObjectEditor), query)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +101,7 @@ func (a *App) AuthenticationPolicyClientDriverVersions() ([]authenticationpolicy
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	info, err := client.GetClientVersionInfo(a.ctx)
+	info, err := client.GetClientVersionInfo(a.fctx(FeatureObjectEditor))
 	if err != nil {
 		return nil, err
 	}
@@ -175,5 +175,5 @@ func (a *App) GetAuthenticationPolicyReferences(database, schema, name string) (
 			"WHERE POLICY_DB = '%s' AND POLICY_SCHEMA = '%s' AND POLICY_NAME = '%s' AND POLICY_KIND = 'AUTHENTICATION_POLICY' "+
 			"ORDER BY REF_ENTITY_DOMAIN, REF_ENTITY_NAME",
 		snowflake.EscapeTextLit(database), snowflake.EscapeTextLit(schema), snowflake.EscapeTextLit(name))
-	return client.QuerySingle(a.ctx, query)
+	return client.QuerySingle(a.fctx(FeatureObjectEditor), query)
 }

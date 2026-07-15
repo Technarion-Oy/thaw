@@ -44,7 +44,7 @@ func (a *App) ListHybridTableIndexes(database, schema, name string) (*snowflake.
 	}
 	sql := fmt.Sprintf("SHOW INDEXES IN TABLE %s.%s.%s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
-	return client.Execute(a.ctx, sql)
+	return client.Execute(a.fctx(FeatureObjectEditor), sql)
 }
 
 // CreateHybridTableIndex adds a secondary index to an existing hybrid table by
@@ -61,7 +61,7 @@ func (a *App) CreateHybridTableIndex(database, schema, table string, idx hybridt
 	if err != nil {
 		return err
 	}
-	_, err = client.Execute(a.ctx, sql)
+	_, err = client.Execute(a.fctx(FeatureObjectEditor), sql)
 	return err
 }
 
@@ -85,6 +85,6 @@ func (a *App) DropHybridTableIndex(database, schema, table, index string) error 
 	if err != nil {
 		return err
 	}
-	_, err = client.Execute(a.ctx, sql)
+	_, err = client.Execute(a.fctx(FeatureObjectEditor), sql)
 	return err
 }

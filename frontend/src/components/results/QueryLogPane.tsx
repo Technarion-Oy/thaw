@@ -28,6 +28,7 @@ interface QueryLogEntry {
   durationMs: number;
   error: string;
   source: "user" | "internal";
+  feature: string;
   tabID: string;
 }
 
@@ -61,7 +62,8 @@ function formatTime(ts: string): string {
 function formatEntryForCopy(e: QueryLogEntry): string {
   const ts = formatTime(e.timestamp);
   const dur = e.durationMs > 0 ? `${e.durationMs}ms` : "-";
-  return `[${ts}] [${e.status}] ${dur} [${e.source}] ${e.queryID || "-"}\n  ${e.sql}`;
+  const feature = e.feature ? ` [${e.feature}]` : "";
+  return `[${ts}] [${e.status}] ${dur} [${e.source}]${feature} ${e.queryID || "-"}\n  ${e.sql}`;
 }
 
 const columns: ColumnsType<QueryLogEntry> = [
@@ -93,6 +95,18 @@ const columns: ColumnsType<QueryLogEntry> = [
     key: "source",
     width: 80,
     render: (src: string) => <Tag color={sourceColors[src] ?? "default"} style={{ fontSize: 10 }}>{src}</Tag>,
+  },
+  {
+    title: "Feature",
+    dataIndex: "feature",
+    key: "feature",
+    width: 120,
+    render: (feature: string) =>
+      feature ? (
+        <Tag color="geekblue" style={{ fontSize: 10 }}>{feature}</Tag>
+      ) : (
+        <Text style={{ fontSize: 11, color: "var(--text-faint)" }}>-</Text>
+      ),
   },
   {
     title: "Status",
@@ -158,6 +172,7 @@ const columns: ColumnsType<QueryLogEntry> = [
 export default function QueryLogPane() {
   const [entries, setEntries] = useState<QueryLogEntry[]>([]);
   const [sourceFilter, setSourceFilter] = useState<string>("all");
+  const [featureFilter, setFeatureFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const mountedRef = useRef(true);
@@ -240,12 +255,24 @@ export default function QueryLogPane() {
   const filtered = useMemo(() =>
     entries.filter((e) => {
       if (sourceFilter !== "all" && e.source !== sourceFilter) return false;
+      if (featureFilter !== "all" && e.feature !== featureFilter) return false;
       if (statusFilter !== "all" && e.status !== statusFilter) return false;
       if (search && !e.sql.toLowerCase().includes(search.toLowerCase()) && !e.queryID.toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     }),
-    [entries, sourceFilter, statusFilter, search],
+    [entries, sourceFilter, featureFilter, statusFilter, search],
   );
+
+  // Feature filter options are derived from the features actually present in the
+  // log so the dropdown only ever offers meaningful choices.
+  const featureOptions = useMemo(() => {
+    const seen = new Set<string>();
+    for (const e of entries) if (e.feature) seen.add(e.feature);
+    return [
+      { value: "all", label: "All Features" },
+      ...Array.from(seen).sort().map((f) => ({ value: f, label: f })),
+    ];
+  }, [entries]);
 
   const handleExport = async () => {
     if (filtered.length === 0) {
@@ -288,6 +315,13 @@ export default function QueryLogPane() {
             { value: "user", label: "User" },
             { value: "internal", label: "Internal" },
           ]}
+        />
+        <Select
+          size="small"
+          value={featureFilter}
+          onChange={setFeatureFilter}
+          style={{ width: 140, fontSize: 11 }}
+          options={featureOptions}
         />
         <Select
           size="small"

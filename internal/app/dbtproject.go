@@ -25,7 +25,7 @@ func (a *App) DescribeDbtProject(database, schema, name string) ([]snowflake.Pro
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	res, err := client.Execute(a.ctx, dbtproject.BuildDescribeSql(database, schema, name))
+	res, err := client.Execute(a.fctx(FeatureDbtProjects), dbtproject.BuildDescribeSql(database, schema, name))
 	if err != nil {
 		return nil, err
 	}
@@ -38,7 +38,7 @@ func (a *App) ListSupportedDbtVersions() ([]dbtproject.DbtVersionInfo, error) {
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	res, err := client.Execute(a.ctx, "SELECT SYSTEM$SUPPORTED_DBT_VERSIONS()")
+	res, err := client.Execute(a.fctx(FeatureDbtProjects), "SELECT SYSTEM$SUPPORTED_DBT_VERSIONS()")
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +62,7 @@ func (a *App) ListDbtProjectVersions(database, schema, name string) ([]snowflake
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListDbtProjectVersions(a.ctx, database, schema, name)
+	return client.ListDbtProjectVersions(a.fctx(FeatureDbtProjects), database, schema, name)
 }
 
 // ListDbtProjectEntries returns directory-aware entries within a DBT PROJECT version directory.
@@ -71,7 +71,7 @@ func (a *App) ListDbtProjectEntries(database, schema, name, dirPath string) ([]s
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListStageEntries(a.ctx, database, schema, name, dirPath) // SQL pattern is identical: LIST @db.schema.name/path
+	return client.ListStageEntries(a.fctx(FeatureDbtProjects), database, schema, name, dirPath) // SQL pattern is identical: LIST @db.schema.name/path
 }
 
 // CreateDbtProject scaffolds a new dbt project pre-wired to the active
@@ -84,5 +84,5 @@ func (a *App) CreateDbtProject(req dbt.CreateRequest, schemasMap map[string][]st
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return dbt.CreateProject(a.ctx, client, req, schemasMap)
+	return dbt.CreateProject(a.fctx(FeatureDbtProjects), client, req, schemasMap)
 }

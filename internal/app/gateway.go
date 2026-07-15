@@ -32,7 +32,7 @@ func (a *App) DescribeGateway(database, schema, name string) (*snowflake.QueryRe
 	}
 	sql := fmt.Sprintf("DESCRIBE GATEWAY %s",
 		snowflake.Qualify(database, schema, name))
-	return client.Execute(a.ctx, sql)
+	return client.Execute(a.fctx(FeatureObjectEditor), sql)
 }
 
 // AlterGateway updates the traffic-split specification of an existing gateway
@@ -47,6 +47,6 @@ func (a *App) AlterGateway(database, schema, name, specification string) error {
 		return apperrors.ErrNotConnected
 	}
 	sql := gateway.BuildAlterGatewaySpecSql(database, schema, name, specification)
-	_, err := client.Execute(a.ctx, sql)
+	_, err := client.Execute(a.fctx(FeatureObjectEditor), sql)
 	return err
 }

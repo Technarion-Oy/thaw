@@ -24,7 +24,7 @@ func (a *App) ListUsers() ([]snowflake.SnowflakeUser, error) {
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return client.ListUsers(a.ctx)
+	return client.ListUsers(a.fctx(FeatureUsersRoles))
 }
 
 // GetUserDDL returns a CREATE USER DDL statement for the given user.
@@ -33,7 +33,7 @@ func (a *App) GetUserDDL(name string) (string, error) {
 	if client == nil {
 		return "", apperrors.ErrNotConnected
 	}
-	return client.GetUserDDL(a.ctx, name)
+	return client.GetUserDDL(a.fctx(FeatureUsersRoles), name)
 }
 
 // AlterUserProperty applies a single SET/UNSET property change to a user.
@@ -45,7 +45,7 @@ func (a *App) AlterUserProperty(name, property, value string) error {
 	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return users.AlterProperty(a.ctx, client, name, property, value)
+	return users.AlterProperty(a.fctx(FeatureUsersRoles), client, name, property, value)
 }
 
 // CheckAvailableKeyTools returns the list of available key generation methods.
@@ -67,6 +67,6 @@ func (a *App) SetUserPublicKey(username, publicKey string) error {
 	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	_, err := client.Execute(a.ctx, keypair.BuildSetUserPublicKeySQL(username, publicKey))
+	_, err := client.Execute(a.fctx(FeatureUsersRoles), keypair.BuildSetUserPublicKeySQL(username, publicKey))
 	return err
 }

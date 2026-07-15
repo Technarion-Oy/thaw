@@ -22,7 +22,7 @@ func (a *App) GetRoleDDL(name string) (string, error) {
 	if client == nil {
 		return "", apperrors.ErrNotConnected
 	}
-	return client.GetRoleDDL(a.ctx, name)
+	return client.GetRoleDDL(a.fctx(FeatureWarehouses), name)
 }
 
 // GetWarehouseDDL returns the DDL definition of a Snowflake warehouse.
@@ -31,7 +31,7 @@ func (a *App) GetWarehouseDDL(name string) (string, error) {
 	if client == nil {
 		return "", apperrors.ErrNotConnected
 	}
-	return client.GetWarehouseDDL(a.ctx, name)
+	return client.GetWarehouseDDL(a.fctx(FeatureWarehouses), name)
 }
 
 // AlterWarehouseProperty applies a single SET property to a warehouse.
@@ -44,7 +44,7 @@ func (a *App) AlterWarehouseProperty(name, property, value string) error {
 	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return warehouse.AlterProperty(a.ctx, client, name, property, value)
+	return warehouse.AlterProperty(a.fctx(FeatureWarehouses), client, name, property, value)
 }
 
 // AlterWarehouseSuspend suspends the named warehouse.
@@ -53,7 +53,7 @@ func (a *App) AlterWarehouseSuspend(name string) error {
 	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return warehouse.Suspend(a.ctx, client, name)
+	return warehouse.Suspend(a.fctx(FeatureWarehouses), client, name)
 }
 
 // AlterWarehouseResume resumes the named warehouse if it is suspended.
@@ -62,7 +62,7 @@ func (a *App) AlterWarehouseResume(name string) error {
 	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return warehouse.Resume(a.ctx, client, name)
+	return warehouse.Resume(a.fctx(FeatureWarehouses), client, name)
 }
 
 // AlterWarehouseAbortAllQueries issues ABORT ALL QUERIES on the named warehouse.
@@ -71,7 +71,7 @@ func (a *App) AlterWarehouseAbortAllQueries(name string) error {
 	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return warehouse.AbortAllQueries(a.ctx, client, name)
+	return warehouse.AbortAllQueries(a.fctx(FeatureWarehouses), client, name)
 }
 
 // AlterWarehouseRename renames a warehouse and returns the new name.
@@ -80,7 +80,7 @@ func (a *App) AlterWarehouseRename(name, newName string) error {
 	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return warehouse.Rename(a.ctx, client, name, newName)
+	return warehouse.Rename(a.fctx(FeatureWarehouses), client, name, newName)
 }
 
 // GetWarehouseParameters returns per-warehouse parameter overrides (MAX_CONCURRENCY_LEVEL,
@@ -91,7 +91,7 @@ func (a *App) GetWarehouseParameters(name string) ([]snowflake.PropertyPair, err
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return warehouse.GetParameters(a.ctx, client, name)
+	return warehouse.GetParameters(a.fctx(FeatureWarehouses), client, name)
 }
 
 // GetWarehouseMeteringHistory returns hourly credit usage records from
@@ -103,5 +103,5 @@ func (a *App) GetWarehouseMeteringHistory(wh, startDate, endDate string) ([]ware
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return warehouse.GetMeteringHistory(a.ctx, client, wh, startDate, endDate)
+	return warehouse.GetMeteringHistory(a.fctx(FeatureWarehouses), client, wh, startDate, endDate)
 }

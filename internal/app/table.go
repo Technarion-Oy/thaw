@@ -23,7 +23,7 @@ func (a *App) GetDatabaseTableSummary(dbName string) ([]table.TableSummary, erro
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return table.GetDatabaseTableSummary(a.ctx, client, dbName)
+	return table.GetDatabaseTableSummary(a.fctx(FeatureObjectEditor), client, dbName)
 }
 
 // GetTableSettings reads the current values of all modifiable table properties
@@ -33,7 +33,7 @@ func (a *App) GetTableSettings(database, schema, tbl string) (table.TableSetting
 	if client == nil {
 		return table.TableSettings{}, apperrors.ErrNotConnected
 	}
-	return table.GetTableSettings(a.ctx, client, database, schema, tbl)
+	return table.GetTableSettings(a.fctx(FeatureObjectEditor), client, database, schema, tbl)
 }
 
 // AlterTableProperty applies a single ALTER TABLE SET change.
@@ -44,7 +44,7 @@ func (a *App) AlterTableProperty(database, schema, tbl, property, value string) 
 	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return table.AlterProperty(a.ctx, client, database, schema, tbl, property, value)
+	return table.AlterProperty(a.fctx(FeatureObjectEditor), client, database, schema, tbl, property, value)
 }
 
 // ExportTableData exports a Snowflake table to the local filesystem using a
@@ -55,7 +55,7 @@ func (a *App) ExportTableData(params snowflake.ExportTableParams) (snowflake.Exp
 	if client == nil {
 		return snowflake.ExportTableResult{}, apperrors.ErrNotConnected
 	}
-	return client.ExportTableData(a.ctx, params)
+	return client.ExportTableData(a.fctx(FeatureObjectEditor), params)
 }
 
 // ImportTableData imports a local file into a Snowflake table using a temporary
@@ -66,7 +66,7 @@ func (a *App) ImportTableData(params snowflake.ImportTableParams) (snowflake.Imp
 	if client == nil {
 		return snowflake.ImportTableResult{}, apperrors.ErrNotConnected
 	}
-	return client.ImportTableData(a.ctx, params)
+	return client.ImportTableData(a.fctx(FeatureObjectEditor), params)
 }
 
 // ExecDDL executes an arbitrary DDL/DML statement and discards the result set.
@@ -78,6 +78,6 @@ func (a *App) ExecDDL(sql string) error {
 	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	_, err := client.Execute(a.ctx, sql)
+	_, err := client.Execute(a.fctx(FeatureObjectEditor), sql)
 	return err
 }

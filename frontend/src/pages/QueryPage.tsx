@@ -13,7 +13,7 @@ import { flushSync } from "react-dom";
 import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message, Modal, type MenuProps } from "antd";
 import { CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined, SearchOutlined, CloudUploadOutlined } from "@ant-design/icons";
 import { ClipboardSetText, BrowserOpenURL } from "../../wailsjs/runtime/runtime";
-import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, PickAnyFile, ReadFile, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, CloseTabSession, GetSessionInitMode, InitTabSession, SetQueryLogEnabled, StartFileWatcher, StopFileWatcher } from "../../wailsjs/go/app/App";
+import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, PickAnyFile, ReadFile, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, CloseTabSession, GetSessionInitMode, InitTabSession, SetQueryLogEnabled, GetFeatureFlags, SaveFeatureFlags, StartFileWatcher, StopFileWatcher } from "../../wailsjs/go/app/App";
 import { GetSqlStatementRanges } from "../../wailsjs/go/sqleditor/Service";
 import type { snowflake } from "../../wailsjs/go/models";
 import { usePanelLayoutStore } from "../store/panelLayoutStore";
@@ -978,15 +978,34 @@ export default function QueryPage() {
     return () => off();
   }, [featureFlags.embeddedTerminal]);
 
-  // Query Log — toggle and filter via Tools → Query Log menu
+  // Query Log — toggle and filter via Tools → Query Log menu.
+  // Enabling from the Tools menu also turns on the queryLog feature flag (unless
+  // an admin has locked it off) so the "Query Log" result-pane tab appears — the
+  // pane is otherwise hidden behind that flag and the action would look like a
+  // no-op. Uses the store's getState() so the handler never goes stale.
   useEffect(() => {
-    const off = EventsOn("menu:query-log-toggle", (enabled: boolean) => {
-      if (!featureFlags.queryLog) return;
+    const off = EventsOn("menu:query-log-toggle", async (enabled: boolean) => {
+      const store = useFeatureFlagsStore.getState();
+      if (enabled && !store.flags.queryLog) {
+        if (store.locked.queryLog) {
+          message.warning("Query Log is disabled by your IT administrator.");
+          return;
+        }
+        try {
+          const current = await GetFeatureFlags();
+          await SaveFeatureFlags({ ...current, queryLog: true } as any);
+          await store.load();
+        } catch (err) {
+          message.error(String(err));
+          return;
+        }
+      }
+      if (!useFeatureFlagsStore.getState().flags.queryLog) return;
       if (enabled) setResultPane("querylog");
       SetQueryLogEnabled(enabled);
     });
     return () => off();
-  }, [featureFlags.queryLog]);
+  }, []);
 
   // Reset to Results pane if queryLog feature flag is disabled while viewing the log.
   useEffect(() => {

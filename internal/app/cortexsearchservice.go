@@ -61,5 +61,5 @@ func (a *App) GetCortexSearchServiceTags(database, schema, name string) (*snowfl
 		// backslash in an identifier must be doubled to survive the single-quoted
 		// literal rather than being read as a Snowflake escape sequence.
 		snowflake.QuoteIdent(database), snowflake.EscapeTextLit(fqn))
-	return client.Execute(a.ctx, sql)
+	return client.Execute(a.fctx(FeatureObjectEditor), sql)
 }

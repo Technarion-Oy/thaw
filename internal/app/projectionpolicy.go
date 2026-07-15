@@ -47,5 +47,5 @@ func (a *App) GetProjectionPolicyReferences(database, schema, name string) (*sno
 			// same table sort in an unspecified order.
 			"ORDER BY REF_DATABASE_NAME, REF_SCHEMA_NAME, REF_ENTITY_NAME, REF_COLUMN_NAME",
 		snowflake.EscapeStringLit(database), snowflake.EscapeStringLit(schema), snowflake.EscapeStringLit(name))
-	return client.QuerySingle(a.ctx, query)
+	return client.QuerySingle(a.fctx(FeatureObjectEditor), query)
 }

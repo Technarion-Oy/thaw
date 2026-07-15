@@ -43,5 +43,5 @@ func (a *App) GetEventTableParameters(database, schema, name string) (*snowflake
 	}
 	sql := fmt.Sprintf("SHOW PARAMETERS IN TABLE %s.%s.%s",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
-	return client.Execute(a.ctx, sql)
+	return client.Execute(a.fctx(FeatureObjectEditor), sql)
 }
