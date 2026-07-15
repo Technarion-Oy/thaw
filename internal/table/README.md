@@ -79,13 +79,17 @@ type InsertRowsConfig struct {        // the whole INSERT — one or more rows
 }
 ```
 `Mode` selects rendering: `value` renders a typed literal per `DataType` (numeric
-and boolean literals bare when valid, everything else single-quoted; an invalid
-numeric is quoted so no injection escapes the literal); `null`/`default` emit the
-`NULL`/`DEFAULT` keyword; `expression` emits `Value` verbatim (function-picker
-values such as `CURRENT_TIMESTAMP()`). Entries with an empty column name are
-skipped so a partially-filled form still yields valid preview SQL. Every row's
-`Values` align to the same columns in the same order; the emitted column list is
-taken from the first row.
+and boolean literals bare when valid, everything else single-quoted — including
+the invalid-numeric/boolean fallbacks, quoted via `QuoteTextLit` so no injection
+escapes the literal); `null`/`default` emit the `NULL`/`DEFAULT` keyword;
+`expression` emits `Value` verbatim (function-picker values such as
+`CURRENT_TIMESTAMP()`). The emitted column list — and the value positions every
+row is rendered against — is derived from the **first** row (its non-empty
+column names); empty column names there are skipped so a partially-filled form
+still yields valid preview SQL. Because every row is rendered against those same
+positions, each `VALUES` tuple always has exactly as many elements as the column
+list (a ragged later row is NULL-padded), so the statement can never have an
+arity mismatch regardless of how individual rows were filled in.
 
 ### Functions
 

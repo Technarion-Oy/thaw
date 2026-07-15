@@ -120,7 +120,9 @@ func renderTypedLiteral(dataType, value string) string {
 		}
 		// Not a valid number — quote it so the statement stays valid and
 		// Snowflake reports the type error rather than the SQL being malformed.
-		return snowflake.QuoteStringLit(value)
+		// QuoteTextLit (not QuoteStringLit) so a stray backslash is treated as a
+		// literal character, matching the default text path below.
+		return snowflake.QuoteTextLit(value)
 	case base == "BOOLEAN" || base == "BOOL":
 		switch strings.ToLower(strings.TrimSpace(value)) {
 		case "true", "t", "yes", "y", "1", "on":
@@ -130,7 +132,7 @@ func renderTypedLiteral(dataType, value string) string {
 		case "":
 			return "NULL"
 		}
-		return snowflake.QuoteStringLit(value)
+		return snowflake.QuoteTextLit(value)
 	default:
 		// Text / date / time / timestamp / variant / binary / geo — a
 		// single-quoted literal that Snowflake implicitly casts. QuoteTextLit
@@ -139,42 +141,56 @@ func renderTypedLiteral(dataType, value string) string {
 	}
 }
 
-// renderRow renders one row into its double-quoted column list and its rendered
-// VALUES tokens. Values with an empty column name are skipped so a
-// partially-filled form still yields valid preview SQL.
-func renderRow(row InsertRowConfig) (cols, vals []string) {
-	cols = make([]string, 0, len(row.Values))
-	vals = make([]string, 0, len(row.Values))
-	for _, v := range row.Values {
+// includedColumns derives the emitted column list from the FIRST row: the
+// double-quoted names of every value whose column name is non-empty, together
+// with their positions within the row. Every row is then rendered against these
+// same positions (see BuildInsertRowsSql), so all VALUES tuples share the column
+// list's arity even if a later row carries an empty column name that per-row
+// skipping would otherwise drop. Values with an empty column name are skipped so
+// a partially-filled form still yields valid preview SQL.
+func includedColumns(rows []InsertRowConfig) (cols []string, positions []int) {
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	for i, v := range rows[0].Values {
 		name := strings.TrimSpace(v.Column)
 		if name == "" {
 			continue
 		}
 		cols = append(cols, snowflake.QuoteIdent(name))
-		vals = append(vals, renderInsertValue(v))
+		positions = append(positions, i)
 	}
-	return cols, vals
+	return cols, positions
 }
 
 // BuildInsertRowsSql constructs an INSERT INTO ... (cols) VALUES (...), (...)
 // statement inserting one or more rows in a single statement.
 //
 // The column list is fully double-quoted (QuoteIdent) and taken from the first
-// row; every row must align to those columns in the same order (the frontend
-// builds all rows from the same table columns). Each value is rendered by mode:
-// a typed literal, NULL, DEFAULT, or a raw expression (function-picker values
-// such as CURRENT_TIMESTAMP()).
+// row; every row is rendered against those same column positions (the frontend
+// builds all rows from the same table columns), guaranteeing that each VALUES
+// tuple has exactly as many elements as the column list regardless of how any
+// individual row was filled in. Each value is rendered by mode: a typed literal,
+// NULL, DEFAULT, or a raw expression (function-picker values such as
+// CURRENT_TIMESTAMP()).
 //
 // It always returns a nil error; the error result exists for IPC symmetry with
 // the other builders and to leave room for future validation without changing
 // the Wails-bound signature.
 func BuildInsertRowsSql(db, schema, tableName string, cfg InsertRowsConfig) (string, error) {
-	var cols []string
+	cols, positions := includedColumns(cfg.Rows)
+
 	tuples := make([]string, 0, len(cfg.Rows))
-	for i, row := range cfg.Rows {
-		c, vals := renderRow(row)
-		if i == 0 {
-			cols = c
+	for _, row := range cfg.Rows {
+		vals := make([]string, 0, len(positions))
+		for _, pos := range positions {
+			if pos < len(row.Values) {
+				vals = append(vals, renderInsertValue(row.Values[pos]))
+			} else {
+				// Ragged row (fewer values than the first) — keep arity by
+				// filling the missing cell with NULL rather than a short tuple.
+				vals = append(vals, "NULL")
+			}
 		}
 		tuples = append(tuples, "("+strings.Join(vals, ", ")+")")
 	}

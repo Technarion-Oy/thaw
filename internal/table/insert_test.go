@@ -142,3 +142,46 @@ func TestBuildInsertRowsSql_NoRows(t *testing.T) {
 	// Degenerate but syntactically shaped preview before any row is added.
 	assertEqual(t, sql, `INSERT INTO "DB"."SC"."T" () VALUES ();`)
 }
+
+func TestBuildInsertRowsSql_MultiRowArityStaysConsistent(t *testing.T) {
+	// A later row carrying an empty column name (while row 0 does not) must NOT
+	// drop a tuple element: the first row's columns govern arity for every row,
+	// so each tuple has exactly as many values as the column list.
+	cfg := InsertRowsConfig{Rows: []InsertRowConfig{
+		{Values: []InsertRowValue{
+			{Column: "A", DataType: "VARCHAR", Mode: "value", Value: "x"},
+			{Column: "B", DataType: "VARCHAR", Mode: "value", Value: "y"},
+		}},
+		{Values: []InsertRowValue{
+			{Column: "", DataType: "VARCHAR", Mode: "value", Value: "z"},
+			{Column: "B", DataType: "VARCHAR", Mode: "value", Value: "w"},
+		}},
+	}}
+	sql, _ := BuildInsertRowsSql("DB", "SC", "T", cfg)
+	assertEqual(t, sql, `INSERT INTO "DB"."SC"."T" ("A", "B") VALUES ('x', 'y'), ('z', 'w');`)
+}
+
+func TestBuildInsertRowsSql_RaggedRowPaddedWithNull(t *testing.T) {
+	// A row with fewer values than the first keeps the column list's arity by
+	// padding the missing trailing cell with NULL rather than emitting a short tuple.
+	cfg := InsertRowsConfig{Rows: []InsertRowConfig{
+		{Values: []InsertRowValue{
+			{Column: "A", DataType: "VARCHAR", Mode: "value", Value: "x"},
+			{Column: "B", DataType: "VARCHAR", Mode: "value", Value: "y"},
+		}},
+		{Values: []InsertRowValue{
+			{Column: "A", DataType: "VARCHAR", Mode: "value", Value: "z"},
+		}},
+	}}
+	sql, _ := BuildInsertRowsSql("DB", "SC", "T", cfg)
+	assertEqual(t, sql, `INSERT INTO "DB"."SC"."T" ("A", "B") VALUES ('x', 'y'), ('z', NULL);`)
+}
+
+func TestBuildInsertRowsSql_InvalidNumericPreservesBackslash(t *testing.T) {
+	// The invalid-numeric fallback uses QuoteTextLit like the text path, so a
+	// backslash survives as a literal character (doubled) rather than being read
+	// as a Snowflake string-literal escape.
+	cfg := oneRow(InsertRowValue{Column: "N", DataType: "NUMBER(10,2)", Mode: "value", Value: `1\2`})
+	sql, _ := BuildInsertRowsSql("DB", "SC", "T", cfg)
+	assertContains(t, sql, `VALUES ('1\\2')`)
+}
