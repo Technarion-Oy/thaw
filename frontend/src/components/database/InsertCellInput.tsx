@@ -10,9 +10,18 @@
 import { Input, Select, DatePicker, TimePicker, Tooltip, Dropdown, Button, Space } from "antd";
 import type { MenuProps } from "antd";
 import dayjs from "dayjs";
+import customParseFormat from "dayjs/plugin/customParseFormat";
 import { WarningOutlined, SnippetsOutlined, FormatPainterOutlined } from "@ant-design/icons";
 import type { ParsedColumnType } from "./insertCellTypes";
 import { validateValue, snippetsFor, formatJson } from "./insertCellTypes";
+
+// Parse the cell's stored string back into a Dayjs using the exact display
+// format below. Without this plugin dayjs ignores the format argument and falls
+// back to the native Date parser, which reads TIME_FMT ("HH:mm:ss") as Invalid
+// Date and rewrites an offset-bearing timestamp to the machine's local offset on
+// every re-render (and behaves differently across the native webviews Wails
+// embeds per platform). The plugin makes format-based parsing deterministic.
+dayjs.extend(customParseFormat);
 
 // Display formats for the date/time pickers. These double as the literal text
 // stored in the cell value and handed to the Go builder as a single-quoted
@@ -20,7 +29,6 @@ import { validateValue, snippetsFor, formatJson } from "./insertCellTypes";
 const DATE_FMT = "YYYY-MM-DD";
 const TIME_FMT = "HH:mm:ss";
 const TS_FMT = "YYYY-MM-DD HH:mm:ss";
-const TSTZ_FMT = "YYYY-MM-DD HH:mm:ss Z"; // includes UTC offset for zone-aware types
 
 interface Props {
   parsed: ParsedColumnType;
@@ -153,16 +161,21 @@ function renderControl({ parsed, value, onChange }: Props): React.ReactNode {
       );
 
     case "timestamptz":
-      // Zone-aware types keep the browser's UTC offset in the literal; the mode
-      // dropdown's Expression escape hatch covers explicit-zone entry.
+      // Zone-aware types (TIMESTAMP_TZ / _LTZ) store local wall-clock time with
+      // no explicit offset; Snowflake applies the session timezone on insert.
+      // Emitting an offset here would be self-defeating — the picker re-parses
+      // its own output, and dayjs normalises the offset to the machine's local
+      // one on the next render, so the string would drift from what the user
+      // entered. The mode dropdown's Expression escape hatch covers cases where
+      // an explicit offset is required.
       return (
         <DatePicker
           size="small"
           showTime
           style={{ width: "100%" }}
-          format={TSTZ_FMT}
-          value={value ? dayjs(value) : null}
-          onChange={(d) => onChange(d ? d.format(TSTZ_FMT) : "")}
+          format={TS_FMT}
+          value={value ? dayjs(value, TS_FMT) : null}
+          onChange={(d) => onChange(d ? d.format(TS_FMT) : "")}
         />
       );
 
@@ -176,7 +189,9 @@ function renderControl({ parsed, value, onChange }: Props): React.ReactNode {
           value={value}
           placeholder={parsed.base === "ARRAY" ? "[1, 2, 3]" : '{"key": "value"}'}
           onChange={(e) => onChange(e.target.value)}
-          // TextArea has no suffix slot; surface the hint via the title tooltip.
+          // Input.TextArea has no suffix slot, so — unlike the numeric/vector/
+          // uuid/binary widgets which show a WarningOutlined via statusFor — the
+          // JSON hint is surfaced through the warning border + title tooltip.
           title={err ?? undefined}
         />
       );
