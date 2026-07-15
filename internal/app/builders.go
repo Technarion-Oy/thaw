@@ -38,6 +38,7 @@ import (
 	"thaw/internal/model"
 	"thaw/internal/modelmonitor"
 	"thaw/internal/networkrule"
+	"thaw/internal/notebook"
 	"thaw/internal/packagespolicy"
 	"thaw/internal/passwordpolicy"
 	"thaw/internal/pipe"
@@ -358,6 +359,11 @@ func (a *App) BuildCreateServiceSql(database, schema string, cfg service.Service
 // BuildCreateStreamlitSql returns the SQL for creating a Snowflake STREAMLIT app.
 func (a *App) BuildCreateStreamlitSql(database, schema string, cfg streamlit.StreamlitConfig) (string, error) {
 	return streamlit.BuildCreateStreamlitSql(database, schema, cfg)
+}
+
+// BuildCreateNotebookSql returns the SQL for creating a Snowflake NOTEBOOK.
+func (a *App) BuildCreateNotebookSql(database, schema string, cfg notebook.NotebookConfig) (string, error) {
+	return notebook.BuildCreateNotebookSql(database, schema, cfg)
 }
 
 // BuildCreateStageSql returns the CREATE STAGE SQL statement.

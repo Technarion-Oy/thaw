@@ -33,6 +33,7 @@ import {materializedview} from '../models';
 import {modelmonitor} from '../models';
 import {model} from '../models';
 import {networkrule} from '../models';
+import {notebook} from '../models';
 import {packagespolicy} from '../models';
 import {passwordpolicy} from '../models';
 import {pipe} from '../models';
@@ -263,6 +264,8 @@ export function BuildCreateModelMonitorSql(arg1:string,arg2:string,arg3:modelmon
 export function BuildCreateModelSql(arg1:string,arg2:string,arg3:model.ModelConfig):Promise<string>;
 
 export function BuildCreateNetworkRuleSql(arg1:string,arg2:string,arg3:networkrule.NetworkRuleConfig):Promise<string>;
+
+export function BuildCreateNotebookSql(arg1:string,arg2:string,arg3:notebook.NotebookConfig):Promise<string>;
 
 export function BuildCreatePackagesPolicySql(arg1:string,arg2:string,arg3:packagespolicy.PackagesPolicyConfig):Promise<string>;
 

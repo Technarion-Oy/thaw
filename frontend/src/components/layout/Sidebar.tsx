@@ -225,6 +225,7 @@ import CreateContactModal from "../contact/CreateContactModal";
 import ContactPropertiesModal from "../contact/ContactPropertiesModal";
 import CreateStreamlitModal from "../streamlit/CreateStreamlitModal";
 import StreamlitPropertiesModal from "../streamlit/StreamlitPropertiesModal";
+import CreateNotebookModal from "../notebook/CreateNotebookModal";
 import CreatePipeModal from "../pipe/CreatePipeModal";
 import PipePropertiesModal from "../pipe/PipePropertiesModal";
 import RefreshPipeModal from "../pipe/RefreshPipeModal";
@@ -795,6 +796,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [contactPropsModal, setContactPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createStreamlitModal, setCreateStreamlitModal] = useState<{ db: string; schema: string } | null>(null);
   const [streamlitPropsModal, setStreamlitPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [createNotebookModal, setCreateNotebookModal] = useState<{ db: string; schema: string } | null>(null);
   const [createPipeModal, setCreatePipeModal] = useState<{ db: string; schema: string } | null>(null);
   const [pipePropsModal, setPipePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [refreshPipeModal, setRefreshPipeModal] = useState<{ db: string; schema: string; name: string } | null>(null);
@@ -2986,6 +2988,15 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setStreamlitPropsModal({ db, schema, name });
   };
 
+  const openCreateNotebook = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    setCtxMenu(null);
+    setCreateNotebookModal({ db, schema });
+  };
+
   const suspendService = () => {
     if (!ctxMenu) return;
     const parts = ctxMenu.nodeKey.split(":");
@@ -4618,6 +4629,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                   {menuItem("Service…", <DeploymentUnitOutlined style={{ fontSize: 12 }} />, openCreateService)}
                   {menuItem("Gateway…", <NodeIndexOutlined style={{ fontSize: 12 }} />, openCreateGateway)}
                   {menuItem("Streamlit…", <AppstoreOutlined style={{ fontSize: 12 }} />, openCreateStreamlit)}
+                  {menuItem("Notebook…", <ExperimentOutlined style={{ fontSize: 12 }} />, openCreateNotebook, undefined, !featureFlags.snowparkNotebooks, "Snowpark & Notebooks is disabled. Enable it under View → Enabled Features…")}
                 </>
               ), 1)}
               {menuItemSub("Functions & Procedures", <FunctionOutlined style={{ fontSize: 12 }} />, "create-functions", (
@@ -6021,6 +6033,15 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={streamlitPropsModal.schema}
           name={streamlitPropsModal.name}
           onClose={() => setStreamlitPropsModal(null)}
+        />
+      )}
+
+      {createNotebookModal && (
+        <CreateNotebookModal
+          db={createNotebookModal.db}
+          schema={createNotebookModal.schema}
+          onClose={() => setCreateNotebookModal(null)}
+          onSuccess={() => refreshDatabaseByName(createNotebookModal.db, { schema: createNotebookModal.schema, kind: "NOTEBOOK" })}
         />
       )}
 

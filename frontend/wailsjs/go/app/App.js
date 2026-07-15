@@ -390,6 +390,10 @@ export function BuildCreateNetworkRuleSql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateNetworkRuleSql'](arg1, arg2, arg3);
 }
 
+export function BuildCreateNotebookSql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateNotebookSql'](arg1, arg2, arg3);
+}
+
 export function BuildCreatePackagesPolicySql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreatePackagesPolicySql'](arg1, arg2, arg3);
 }
