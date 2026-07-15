@@ -767,6 +767,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
   const activeKind     = activeTab?.kind;
   const editorLanguage = activeKind === "python" ? "python"
     : activeKind === "yaml"   ? "yaml"
+    : activeKind === "markdown" ? "markdown"
     : activeKind === "plaintext" ? "plaintext"
     : "sql";
 
