@@ -88,11 +88,11 @@ func registerWorkspaceTools(srv *mcpsdk.Server, workspaceRoot string) {
 		if err := filesystem.ValidatePathOrAncestorInsideOrEqual(in.Path, workspaceRoot); err != nil {
 			return nil, nil, fmt.Errorf("access denied: %w", err)
 		}
-		content, err := gitrepo.GetHeadFileContent(in.Path)
+		head, err := gitrepo.GetHeadFileContent(in.Path)
 		if err != nil {
 			return nil, nil, err
 		}
-		return textResult(content), nil, nil
+		return textResult(head.Content), nil, nil
 	})
 
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{

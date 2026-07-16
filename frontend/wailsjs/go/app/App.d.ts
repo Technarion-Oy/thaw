@@ -737,7 +737,7 @@ export function GitDiscardFile(arg1:string,arg2:string):Promise<void>;
 
 export function GitFetch(arg1:string,arg2:string):Promise<void>;
 
-export function GitGetHeadFileContent(arg1:string):Promise<string>;
+export function GitGetHeadFileContent(arg1:string):Promise<gitrepo.HeadFileContent>;
 
 export function GitInitWithRemote(arg1:string,arg2:string,arg3:string):Promise<void>;
 

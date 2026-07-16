@@ -1106,7 +1106,7 @@ export default function FileBrowser() {
       const head = await GitGetHeadFileContent(path);
       let current = "";
       try { current = await ReadFile(path); } catch { /* file deleted in worktree */ }
-      useQueryStore.getState().openDiff(`HEAD · ${name}`, head ?? "", `Working tree · ${name}`, current);
+      useQueryStore.getState().openDiff(`HEAD · ${name}`, head?.content ?? "", `Working tree · ${name}`, current);
     } catch (e) {
       message.error(`Could not compare with last commit: ${String(e)}`);
     }
