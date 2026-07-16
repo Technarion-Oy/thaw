@@ -9,8 +9,10 @@ import {
 import {
   ThunderboltOutlined, EditOutlined, CheckOutlined, CloseOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterStream } from "../../../wailsjs/go/app/App";
+import { GetObjectProperties, AlterStream, GetObjectTagReferences } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
+import TagsRow, { EditableTag } from "../shared/TagsRow";
+import { quoteIdent } from "../shared/ObjectNameCaseControl";
 
 const { Text } = Typography;
 
@@ -137,6 +139,39 @@ interface Props {
 export default function StreamPropertiesModal({ db, schema, name, onClose }: Props) {
   const [rows, setRows] = useState<snowflake.PropertyPair[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [tags, setTags] = useState<EditableTag[]>([]);
+
+  // Tags use the no-latency INFORMATION_SCHEMA.TAG_REFERENCES read so a SET/UNSET
+  // reflects immediately. Best-effort: SET/UNSET still work if the read fails.
+  // Tags whose LEVEL is not the stream itself (inherited from schema/database)
+  // are shown for context but can't be unset here — that has to happen where
+  // they were applied.
+  const reloadTags = useCallback(async () => {
+    try {
+      const t = await GetObjectTagReferences("STREAM", db, schema, name, "");
+      const cols = (t?.columns ?? []).map((c) => c.toLowerCase());
+      const ci = (n: string) => cols.indexOf(n);
+      const dbI = ci("tag_database"), scI = ci("tag_schema"), nmI = ci("tag_name"),
+        vlI = ci("tag_value"), lvI = ci("level");
+      const parsed = (t?.rows ?? []).map((row): EditableTag => {
+        const tdb = dbI >= 0 ? String(row[dbI] ?? "") : "";
+        const tsc = scI >= 0 ? String(row[scI] ?? "") : "";
+        const tnm = nmI >= 0 ? String(row[nmI] ?? "") : "";
+        const qualified = [tdb, tsc, tnm].filter(Boolean).map(quoteIdent).join(".");
+        const inherited = lvI >= 0 && String(row[lvI] ?? "").toUpperCase() !== "STREAM";
+        return {
+          key: qualified,
+          name: tnm,
+          value: vlI >= 0 ? String(row[vlI] ?? "") : "",
+          removable: !inherited,
+          suffix: inherited ? " (inherited)" : "",
+        };
+      });
+      setTags(parsed);
+    } catch {
+      setTags([]);
+    }
+  }, [db, schema, name]);
 
   const reload = useCallback(async () => {
     setRows(null);
@@ -147,7 +182,8 @@ export default function StreamPropertiesModal({ db, schema, name, onClose }: Pro
     } catch (e) {
       setError(String(e));
     }
-  }, [db, schema, name]);
+    reloadTags();
+  }, [db, schema, name, reloadTags]);
 
   useEffect(() => { reload(); }, [reload]);
 
@@ -163,6 +199,18 @@ export default function StreamPropertiesModal({ db, schema, name, onClose }: Pro
       await AlterStream(db, schema, name, `SET COMMENT = ${q1(comment)}`);
     }
     await reload();
+  };
+
+  const setTag = async (tagName: string, tagValue: string) => {
+    // Tag name may be a qualified identifier (db.schema.tag) — inserted verbatim;
+    // the value is a quoted string literal.
+    await AlterStream(db, schema, name, `SET TAG ${tagName} = ${q1(tagValue)}`);
+    await reloadTags();
+  };
+
+  const unsetTag = async (qualified: string) => {
+    await AlterStream(db, schema, name, `UNSET TAG ${qualified}`);
+    await reloadTags();
   };
 
   const comment = find("comment");
@@ -207,6 +255,7 @@ export default function StreamPropertiesModal({ db, schema, name, onClose }: Pro
                 onSave={saveComment}
                 onUnset={() => saveComment("")}
               />
+              <TagsRow tags={tags} onSetTag={setTag} onUnsetTag={unsetTag} />
             </tbody>
           </table>
 
