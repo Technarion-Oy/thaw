@@ -32,7 +32,7 @@ Contains a single stylesheet, `global.css`, that is loaded once at application s
 | `.ai-chat-selectable`, `.ddl-tooltip`, `.thaw-grid` | Re-enable `user-select: text` and set `--wails-draggable: no-drag` to unblock WKWebView pointer events |
 | Draggable/resizable modals | `.ant-modal-header` gets `--wails-draggable: no-drag` (drag driven by `utils/modalDragResize.ts`); `.ant-modal` gets `resize: horizontal` (width-only, the box that owns antd's `width`) with `overflow: hidden` + the dialog `box-shadow`/`border-radius` moved up from `.ant-modal-content` so `overflow` doesn't clip the shadow; content shows `cursor: move`, body/footer reset it (#572) |
 | Monaco decorations | `.sql-occurrence-highlight`, `.sql-active-stmt-bg/indicator`, `.git-gutter-added/modified/deleted`, `.sql-token-builtin/udf`, squiggle SVG overrides, hover widget theme |
-| `.ctx-item` | Tab-bar right-click context menu items |
+| `.ctx-item` | Tab-bar right-click context menu items and Active Files dropdown rows; `.ctx-item-close` is the hover-revealed per-row close button in that dropdown |
 | ReactFlow controls | Maps `--xy-controls-*` to app palette so ReactFlow buttons respect the theme |
 | Notebook cell styles | `.thaw-nb-cell`, gutter, kind tag, editor/output areas, toolbar buttons, hover-reveal add-cell bars. `[data-status]` (`idle`/`running`/`ok`/`error`) recolours the left stripe/border — errored cells go `--danger`, running cells pulse `--warning` (disabled under `prefers-reduced-motion`) |
 | App toolbar styles | `.thaw-tb-icon-btn`, `.thaw-tb-text-btn`, `.thaw-tb-primary-btn`, `.thaw-tb-group`, `.thaw-tb-sep`, vstack layout for notebook deploy action |

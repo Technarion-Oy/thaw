@@ -488,6 +488,18 @@ body,
 .ctx-item:hover {
   background: var(--bg-hover);
 }
+/* Per-row close button in the Active Files dropdown — hidden until the row is
+   hovered so the list stays uncluttered. */
+.ctx-item-close {
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+.ctx-item:hover .ctx-item-close {
+  opacity: 0.7;
+}
+.ctx-item-close:hover {
+  opacity: 1;
+}
 
 /* ── ReactFlow Controls theme bridge ───────────────────────────────────────
    ReactFlow switches its built-in --xy-controls-* defaults via
