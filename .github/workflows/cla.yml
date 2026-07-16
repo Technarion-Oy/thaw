@@ -9,11 +9,18 @@ name: CLA Assistant
 # the contributor-assistant action only reads/writes the signatures file and posts
 # comments. Do not add an `actions/checkout` of the PR head here.
 #
-# SETUP (one-time, by a repo admin):
-#   1. Create a Personal Access Token with `repo` scope and add it as the
-#      `CLA_SIGNATURES_TOKEN` secret (used to commit the signatures file).
-#   2. Optionally point `path-to-signatures` / `branch` at a private repo instead
-#      of this one if signatures should not live in the public tree.
+# SIGNATURE STORAGE: signatures are committed to the `cla-signatures` branch of
+# THIS repo, so the contributor-assistant action writes them with the default
+# `GITHUB_TOKEN` — which is why the job below grants `contents: write`. The
+# `PERSONAL_ACCESS_TOKEN` is only consulted when signatures live in a *different*
+# repo/org (via `remote-repository-name` / `remote-organization-name`), so
+# `CLA_SIGNATURES_TOKEN` is unused in this same-repo setup and may be omitted.
+#
+# SETUP (only if you move signatures to a separate private repo):
+#   1. Create a Personal Access Token with `repo` scope, add it as the
+#      `CLA_SIGNATURES_TOKEN` secret, and set `remote-repository-name` below.
+#   2. `GITHUB_TOKEN` then no longer needs `contents: write` for the signatures
+#      file (the PAT writes to the remote repo instead).
 
 permissions:
   contents: read
@@ -32,7 +39,10 @@ jobs:
     if: (github.event.issue.pull_request || github.event_name == 'pull_request_target')
     permissions:
       actions: write
-      contents: read
+      # write (not read): the action commits the signatures file and creates the
+      # `cla-signatures` branch in THIS repo using GITHUB_TOKEN. With only read
+      # access the commit fails with "Resource not accessible by integration".
+      contents: write
       pull-requests: write
       statuses: write
     steps:
@@ -44,7 +54,8 @@ jobs:
         uses: contributor-assistant/github-action@v2.6.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # PAT with repo scope, used only to commit the signatures file.
+          # Only used if signatures move to a separate repo/org (remote-*-name
+          # inputs). Ignored for the same-repo storage configured below.
           PERSONAL_ACCESS_TOKEN: ${{ secrets.CLA_SIGNATURES_TOKEN }}
         with:
           path-to-signatures: ".github/cla/signatures.json"
