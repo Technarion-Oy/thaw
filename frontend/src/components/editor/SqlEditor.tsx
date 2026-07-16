@@ -2,7 +2,7 @@
 //
 // @thaw-domain: SQL Editor & Diagnostics
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { Button } from "antd";
 import Editor, { type BeforeMount, type OnMount } from "@monaco-editor/react";
 // Slim editor API only (no language services) — see monacoSetup.ts for why.
@@ -752,7 +752,16 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
   const activeTabId = useQueryStore((s) => s.activeTabId);
   const sql    = tabId ? (tabs.find((t) => t.id === tabId)?.sql ?? "") : activeSql;
-  const setSql = tabId ? (newSql: string) => setSqlForTab(tabId, newSql) : activeSqlSetter;
+  // Memoize so `setSql`'s identity is stable across the per-keystroke re-renders
+  // (SqlEditor re-renders on every edit). Without this, the split/secondary pane
+  // (mounted with a tabId) got a fresh arrow every render, which churned
+  // handleEditorChange's identity and made @monaco-editor/react dispose+re-subscribe
+  // onDidChangeModelContent on every character — the very cost this PR removes for
+  // the primary editor. Identity now changes only when `tabId` changes. (#762)
+  const setSql = useCallback(
+    (newSql: string) => (tabId ? setSqlForTab(tabId, newSql) : activeSqlSetter(newSql)),
+    [tabId, setSqlForTab, activeSqlSetter],
+  );
 
   // THIS editor's own per-tab session context (see sessionForTab, #717).
   const editorSession = () => sessionForTab(tabId);
@@ -2361,6 +2370,15 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     if (!inlineCompletionsDisposable) {
       inlineCompletionsDisposable = monaco.languages.registerInlineCompletionsProvider("sql", {
         provideInlineCompletions: async (model: any, position: any, _ctx: any, token: any) => {
+          // Debounce (#762): Monaco calls this on every keystroke, and each call
+          // can fire 2–3 Wails IPC round-trips (JOIN ON resolution) plus, with AI
+          // completions on, a blocking LLM request. Waiting out a short typing
+          // pause and bailing when the request was superseded (Monaco cancels the
+          // outstanding token on the next edit) coalesces a burst into a single
+          // run and stops in-flight requests from piling up while typing.
+          await new Promise((r) => setTimeout(r, 180));
+          if (token.isCancellationRequested) return { items: [] };
+
           const prefixFull = model.getValue().slice(0, model.getOffsetAt(position));
           const lastJoinSeg = (prefixFull.split(/\bJOIN\b/i).pop() ?? "").trim();
           if (lastJoinSeg.length > 0 && !/\b(?:ON|USING)\b/i.test(lastJoinSeg)) {
@@ -2813,6 +2831,34 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     })();
   }, [activeStmtIdx, sql]);
 
+  // Memoize the options object and onChange handler (#762): SqlEditor re-renders
+  // on every keystroke (it reads `sql`), and @monaco-editor/react re-applies
+  // options (`editor.updateOptions`) and disposes+re-subscribes the change
+  // listener whenever these props change identity. Fresh literals each render
+  // meant both fired on every character; memoizing keeps them off the hot path.
+  const handleEditorChange = useCallback((v: string | undefined) => setSql(v ?? ""), [setSql]);
+  const editorOptions = useMemo(() => ({
+    fontSize: editorFontSize,
+    fontFamily: editorFont,
+    minimap: { enabled: false },
+    scrollBeyondLastLine: false,
+    lineNumbers: "on" as const,
+    renderLineHighlight: "line" as const,
+    padding: { top: 12, bottom: 12 },
+    wordWrap: "on" as const,
+    tabSize: 2,
+    automaticLayout: true,
+    selectionHighlight: false,
+    occurrencesHighlight: "singleFile" as const,
+    hover: { enabled: editorLanguage === "yaml" },
+    quickSuggestions: editorLanguage === "yaml"
+      ? { other: true, comments: false, strings: true }
+      : { other: true, comments: false, strings: false },
+    folding: true,
+    showFoldingControls: "always" as const,
+    fixedOverflowWidgets: true,
+  }), [editorFontSize, editorFont, editorLanguage]);
+
   return (
   <>
     <Editor
@@ -2821,30 +2867,10 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       theme={resolved === "dark" ? "thaw-dark" : "thaw-light"}
       path={yamlModelPath}
       value={sql}
-      onChange={(v) => setSql(v ?? "")}
+      onChange={handleEditorChange}
       beforeMount={handleBeforeMount}
       onMount={handleMount}
-      options={{
-        fontSize: editorFontSize,
-        fontFamily: editorFont,
-        minimap: { enabled: false },
-        scrollBeyondLastLine: false,
-        lineNumbers: "on",
-        renderLineHighlight: "line",
-        padding: { top: 12, bottom: 12 },
-        wordWrap: "on",
-        tabSize: 2,
-        automaticLayout: true,
-        selectionHighlight: false,
-        occurrencesHighlight: "singleFile",
-        hover: { enabled: editorLanguage === "yaml" },
-        quickSuggestions: editorLanguage === "yaml"
-          ? { other: true, comments: false, strings: true }
-          : { other: true, comments: false, strings: false },
-        folding: true,
-        showFoldingControls: "always",
-        fixedOverflowWidgets: true,
-      }}
+      options={editorOptions}
     />
     {ddlHover && (
       <div

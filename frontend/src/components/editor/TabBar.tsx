@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { Button, Modal, Tooltip, Input, Dropdown } from "antd";
 import type { MenuProps } from "antd";
 import {
@@ -43,8 +43,32 @@ function tabPrefix(tab: Tab) {
   return null;
 }
 
+// Signature of exactly the fields the tab strip renders (id/title/path/kind, the
+// three icon flags, and the dirty flag). TabBar subscribes to the joined signature
+// of all tabs so per-keystroke SQL edits — which change none of these once the
+// dirty flag has flipped — don't re-render the strip. (#762)
+//
+// INVARIANT: every field the strip renders MUST appear here, or that field going
+// stale won't trigger a re-render. Exported and unit-tested (TabBar.test.ts) so a
+// future edit that adds a rendered field without adding it here fails the test.
+export function tabStripSignature(t: Tab): string {
+  return [
+    t.id, t.title, t.path ?? "", t.kind ?? "",
+    `${t.diff ? 1 : 0}${t.mcpOrigin ? 1 : 0}${t.orphaned ? 1 : 0}${t.sql !== t.savedSql ? 1 : 0}`,
+  ].join("\u0000");
+}
+
 export default function TabBar() {
-  const tabs        = useQueryStore((s) => s.tabs);
+  // Re-render only when tab *metadata* the strip actually shows changes — NOT on
+  // every keystroke. A per-keystroke SQL edit rebuilds the `tabs` array, but the
+  // tab strip renders only id/title/path/kind/diff/mcpOrigin/orphaned and the
+  // dirty flag (`sql !== savedSql`, which flips at most once). Subscribing to a
+  // signature of exactly those fields, then snapshotting the live array via a
+  // `useMemo` keyed on that signature, keeps the strip off the typing hot path
+  // while staying display-correct (every rendered field is in the signature, so a
+  // snapshot is equivalent until the signature changes). (#762)
+  const tabsSig = useQueryStore((s) => s.tabs.map(tabStripSignature).join("\u0001"));
+  const tabs = useMemo(() => useQueryStore.getState().tabs, [tabsSig]);
   const activeTabId = useQueryStore((s) => s.activeTabId);
   const activateTab = useQueryStore((s) => s.activateTab);
   // closeTab is invoked via "thaw:request-close-tab" event handled in QueryPage.
