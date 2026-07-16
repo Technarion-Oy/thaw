@@ -84,6 +84,14 @@ export default function TabBar() {
   // Which tab's context menu is open, if any — lets buildTabMenuItems run only for
   // the tab actually showing a menu instead of once per tab on every render.
   const [openTabMenuId, setOpenTabMenuId] = useState<string | null>(null);
+  // Same, but for the Active Files dropdown's per-row context menu. Kept separate
+  // from openTabMenuId so right-clicking a panel row doesn't also pop the strip
+  // tab's menu for the same id.
+  const [openPanelMenuId, setOpenPanelMenuId] = useState<string | null>(null);
+
+  // DOM nodes of the strip's tab elements, so a rename started from the Active
+  // Files dropdown can scroll its (possibly overflowed) tab into view.
+  const tabRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   // Track which tab the pointer is hovering over so the close button
   // only appears on hover (less cluttered when many tabs are open).
@@ -114,8 +122,19 @@ export default function TabBar() {
     renameDoneRef.current = true; // suppress the trailing onBlur commit
     setRenamingId(null);
   };
+  // Rename triggered from the Active Files dropdown: close the panel and scroll
+  // the tab into view, since the inline rename input lives in the strip and the
+  // tab is often the very one that overflowed out of sight.
+  const startRenameFromPanel = (tab: Tab) => {
+    setActiveFilesOpen(false);
+    startRename(tab);
+    requestAnimationFrame(() =>
+      tabRefs.current[tab.id]?.scrollIntoView({ inline: "nearest", block: "nearest" }));
+  };
 
   // Active Files dropdown — searchable list of all open tabs (issue #468).
+  // Each row has a hover close button and a right-click context menu (issue #767)
+  // so tabs that overflow the strip can still be closed, renamed, etc.
   // The panel is position:fixed (anchored to the trigger) because the tab bar's
   // overflow-x:auto forces overflow-y:auto, which would otherwise clip it.
   const [activeFilesOpen, setActiveFilesOpen] = useState(false);
@@ -152,6 +171,10 @@ export default function TabBar() {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeActiveFiles(); };
     const dismiss = (e: MouseEvent) => {
       const t = e.target as Node;
+      // A row's context menu renders in a portal on document.body, outside the
+      // panel — clicking one of its items must not dismiss the panel first, or
+      // the unmount would race (and swallow) the menu action's own click.
+      if (t instanceof Element && t.closest(".ant-dropdown")) return;
       if (!activeFilesPanelRef.current?.contains(t) && !activeFilesBtnRef.current?.contains(t)) {
         setActiveFilesOpen(false);
       }
@@ -212,7 +235,9 @@ export default function TabBar() {
   // dividers, danger styling on destructive actions, keybinding hints via `extra`.
   // Only called for the tab whose menu is actually open (see the Dropdown below) —
   // not on every render of every tab.
-  const buildTabMenuItems = (tab: Tab): MenuProps["items"] => {
+  // onRename defaults to the strip's inline rename; the Active Files dropdown
+  // passes startRenameFromPanel so rename works even for an overflowed tab.
+  const buildTabMenuItems = (tab: Tab, onRename: (t: Tab) => void = startRename): MenuProps["items"] => {
     const tabIdx     = tabs.findIndex((t) => t.id === tab.id);
     const rightTabs  = tabs.slice(tabIdx + 1);
     const otherTabs  = tabs.filter((t) => t.id !== tab.id);
@@ -221,7 +246,7 @@ export default function TabBar() {
     const items: MenuProps["items"] = [];
 
     if (!tab.path && !tab.diff && !tab.orphaned) {
-      items.push({ key: "rename", icon: <EditOutlined />, label: "Rename", onClick: () => startRename(tab) });
+      items.push({ key: "rename", icon: <EditOutlined />, label: "Rename", onClick: () => onRename(tab) });
       items.push({ type: "divider" });
     }
 
@@ -305,6 +330,7 @@ export default function TabBar() {
             menu={{ items: openTabMenuId === tab.id ? buildTabMenuItems(tab) : [] }}
           >
           <div
+            ref={(el) => { tabRefs.current[tab.id] = el; }}
             draggable={renamingId !== tab.id}
             onClick={() => activateTab(tab.id)}
             onMouseEnter={() => { setHoveredId(tab.id); fetchTab(tab.id); }}
@@ -495,8 +521,17 @@ export default function TabBar() {
                   return <div style={{ padding: "8px 12px", color: "var(--text-faint)", fontSize: 12 }}>No matching tabs</div>;
                 }
                 return matches.map((t) => (
-                  <div
+                  <Dropdown
                     key={t.id}
+                    trigger={["contextMenu"]}
+                    open={openPanelMenuId === t.id}
+                    onOpenChange={(open) => setOpenPanelMenuId(open ? t.id : null)}
+                    menu={{ items: openPanelMenuId === t.id ? buildTabMenuItems(t, startRenameFromPanel) : [] }}
+                    // The Active Files panel is z-index 9999; without this the
+                    // context-menu portal (default ~1050) renders behind it.
+                    overlayStyle={{ zIndex: 10000 }}
+                  >
+                  <div
                     className="ctx-item"
                     onClick={() => { activateTab(t.id); closeActiveFiles(); }}
                     style={{
@@ -511,7 +546,22 @@ export default function TabBar() {
                     <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
                       {tabPrefix(t)}{t.title}
                     </span>
+                    {/* Close button — revealed on row hover (see .ctx-item-close).
+                        Routes through the same request-close-tab flow as the strip
+                        so dirty tabs still prompt before closing. */}
+                    <span
+                      className="ctx-item-close"
+                      title="Close tab"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        window.dispatchEvent(new CustomEvent("thaw:request-close-tab", { detail: { tabId: t.id } }));
+                      }}
+                      style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 16, height: 16, flexShrink: 0 }}
+                    >
+                      <CloseOutlined style={{ fontSize: 10 }} />
+                    </span>
                   </div>
+                  </Dropdown>
                 ));
               })()}
             </div>
