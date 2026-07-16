@@ -111,7 +111,7 @@ func BuildCreateStreamSql(db, schema string, cfg StreamConfig) (string, error) {
 // Time Travel clause. It returns "" unless both mode and value are set. TIMESTAMP
 // and OFFSET take a raw SQL expression / signed number and are emitted verbatim;
 // STATEMENT (a query id) and STREAM (a stream name) are string literals and are
-// quoted. An unrecognised kind falls back to STREAM's string-literal quoting,
+// quoted. An unrecognized kind falls back to STREAM's string-literal quoting,
 // which is the safe default for a name-like value.
 func timeTravelClause(mode, kind, value string) string {
 	mode = strings.ToUpper(strings.TrimSpace(mode))
