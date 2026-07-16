@@ -752,7 +752,16 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
   const activeTabId = useQueryStore((s) => s.activeTabId);
   const sql    = tabId ? (tabs.find((t) => t.id === tabId)?.sql ?? "") : activeSql;
-  const setSql = tabId ? (newSql: string) => setSqlForTab(tabId, newSql) : activeSqlSetter;
+  // Memoize so `setSql`'s identity is stable across the per-keystroke re-renders
+  // (SqlEditor re-renders on every edit). Without this, the split/secondary pane
+  // (mounted with a tabId) got a fresh arrow every render, which churned
+  // handleEditorChange's identity and made @monaco-editor/react dispose+re-subscribe
+  // onDidChangeModelContent on every character — the very cost this PR removes for
+  // the primary editor. Identity now changes only when `tabId` changes. (#762)
+  const setSql = useCallback(
+    (newSql: string) => (tabId ? setSqlForTab(tabId, newSql) : activeSqlSetter(newSql)),
+    [tabId, setSqlForTab, activeSqlSetter],
+  );
 
   // THIS editor's own per-tab session context (see sessionForTab, #717).
   const editorSession = () => sessionForTab(tabId);

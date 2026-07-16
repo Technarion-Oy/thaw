@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback, lazy, Suspense } from "react";
 import { flushSync } from "react-dom";
+import { useShallow } from "zustand/react/shallow";
 import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message, Modal, type MenuProps } from "antd";
 import { CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined, SearchOutlined, CloudUploadOutlined } from "@ant-design/icons";
 import { ClipboardSetText, BrowserOpenURL } from "../../wailsjs/runtime/runtime";
@@ -74,7 +75,6 @@ const CrossTabSearch         = lazy(() => import("../components/editor/CrossTabS
 const QueryProfileModal      = lazy(() => import("../components/results/QueryProfileModal"));
 const TerminalPanel          = lazy(() => import("../components/terminal/TerminalPanel"));
 const NotebookTab            = lazy(() => import("../components/notebook/NotebookTab"));
-import { useShallow } from "zustand/react/shallow";
 import { useQueryStore, type QueryResult, type Tab, EXECUTE_IN_TAB_EVENT } from "../store/queryStore";
 import { openFileInTab } from "../utils/openFileInTab";
 import { useConnectionStore } from "../store/connectionStore";
