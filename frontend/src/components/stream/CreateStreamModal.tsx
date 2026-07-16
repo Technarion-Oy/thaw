@@ -161,7 +161,16 @@ export default function CreateStreamModal({ db, schema, onClose, onSuccess }: Pr
     pickObject("");
   };
 
-  const canSubmit = cfg.name.trim().length > 0 && cfg.source.trim().length > 0;
+  // A Time Travel mode without a value would be silently dropped by the builder
+  // (timeTravelClause returns "" when the value is empty). Surface that as an
+  // explicit incomplete state rather than letting the clause vanish unnoticed.
+  const timeTravelIncomplete =
+    ["TABLE", "EXTERNAL TABLE", "VIEW"].includes(cfg.sourceType) &&
+    !!cfg.timeTravelMode &&
+    cfg.timeTravelValue.trim().length === 0;
+
+  const canSubmit =
+    cfg.name.trim().length > 0 && cfg.source.trim().length > 0 && !timeTravelIncomplete;
 
   const handleRun = () => {
     if (!canSubmit) return;
@@ -262,6 +271,11 @@ export default function CreateStreamModal({ db, schema, onClose, onSuccess }: Pr
             />
             {timeTravelValueWidget()}
           </Space>
+          {timeTravelIncomplete && (
+            <div style={{ marginTop: 4, fontSize: 12, color: "var(--ant-color-error, #ff4d4f)" }}>
+              Enter a {cfg.timeTravelKind.toLowerCase()} value or set the mode back to None.
+            </div>
+          )}
         </div>
       )}
       <Form.Item style={{ marginBottom: 0 }}>
