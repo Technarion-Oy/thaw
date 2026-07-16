@@ -2015,6 +2015,20 @@ export namespace gitrepo {
 	        this.status = source["status"];
 	    }
 	}
+	export class HeadFileContent {
+	    content: string;
+	    hasHead: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new HeadFileContent(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.content = source["content"];
+	        this.hasHead = source["hasHead"];
+	    }
+	}
 	export class PullParams {
 	    dir: string;
 	    remoteURL: string;

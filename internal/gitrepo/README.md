@@ -34,7 +34,7 @@ token-based authentication.
 | `CredentialResult` | IPC-safe: `{ found, username, source }` — never includes the secret. |
 | `GetStatus(dir)` | Returns `RepoStatus`; non-repos return `IsRepo: false` without error. |
 | `CommitAndPush(ctx, p)` | Open (`DetectDotGit`, so a subdirectory resolves to its repo — matching `openWorktree`) or init → ensure `.gitignore` → stage → commit → push. "Nothing to commit" returns `ErrNothingToCommit` for `stagedOnly`; "already up-to-date" is success. |
-| `GetHeadFileContent(filePath)` | Returns file content at HEAD; returns `""` (no error) for untracked files or repos with no commits. |
+| `GetHeadFileContent(filePath)` | Returns `HeadFileContent{Content, HasHead}`. `HasHead` is true only when the file is inside a repo that has at least one commit (a real HEAD to diff against): `{content, true}` when tracked, `{"", true}` when untracked-but-new. `HasHead` is **false** — `{"", false}` — when the file is outside any repo or the repo has no commits yet, so callers suppress the git gutter instead of flagging every line as new. (#530) |
 | `PerformOAuthFlow(ctx, provider, onURL)` | Runs the loopback callback server and exchanges the code for a token. It does **not** open a browser — it passes the authorization URL to `onURL` so the caller/UI can let the user open it (in any browser) or copy it. |
 
 ## Patterns & integration

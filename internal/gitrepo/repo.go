@@ -1122,57 +1122,81 @@ func PushBranch(ctx context.Context, dir, branch, token string) error {
 	return nil
 }
 
+// HeadFileContent is the result of looking up a file in the HEAD commit.
+type HeadFileContent struct {
+	// Content is the file's bytes as stored in the HEAD commit, or "" when the
+	// file has no HEAD to compare against (HasHead=false) or is genuinely
+	// untracked in an otherwise-committed repo (HasHead=true).
+	Content string `json:"content"`
+	// HasHead reports whether filePath lives inside a git repository that has at
+	// least one commit — i.e. there is a real HEAD revision to diff against. It is
+	// false both for files outside any repository and for repositories with no
+	// commits yet. Callers must suppress the git gutter when HasHead is false
+	// rather than treating the empty Content as "every line is newly added". (#530)
+	HasHead bool `json:"hasHead"`
+}
+
 // GetHeadFileContent returns the content of filePath as it exists in the HEAD
-// commit of the repository. Returns an empty string (no error) when the file
-// is not present in HEAD (i.e. newly added, not yet committed).
-func GetHeadFileContent(filePath string) (string, error) {
+// commit of the repository, along with whether a HEAD revision exists at all.
+//
+// Three outcomes distinguish "no HEAD to diff against" from "new but tracked":
+//   - {Content: c,  HasHead: true}  — file is tracked in HEAD; c is its committed bytes.
+//   - {Content: "", HasHead: true}  — repo has commits but filePath is untracked (a
+//     genuinely new file); the caller should mark every current line as added.
+//   - {Content: "", HasHead: false} — filePath is outside any repo, or the repo has
+//     no commits yet; there is nothing to diff against, so the caller must suppress
+//     the gutter entirely rather than flag the whole file as new. (#530)
+func GetHeadFileContent(filePath string) (HeadFileContent, error) {
 	repo, err := gogit.PlainOpenWithOptions(filepath.Dir(filePath), &gogit.PlainOpenOptions{DetectDotGit: true})
 	if err != nil {
-		return "", nil // not in a repo — treat as new file
+		return HeadFileContent{}, nil // not in a repo — no HEAD to diff against
 	}
 
 	head, err := repo.Head()
 	if err != nil {
-		return "", nil // no commits yet
+		return HeadFileContent{}, nil // no commits yet — no HEAD to diff against
 	}
 
 	commit, err := repo.CommitObject(head.Hash())
 	if err != nil {
-		return "", nil
+		return HeadFileContent{}, nil
 	}
 
 	tree, err := commit.Tree()
 	if err != nil {
-		return "", nil
+		return HeadFileContent{}, nil
 	}
 
 	// Determine the repository root so we can compute a relative path.
 	// go-git opens the repo at the .git parent; we need the worktree root.
 	wt, err := repo.Worktree()
 	if err != nil {
-		return "", nil
+		return HeadFileContent{}, nil
 	}
 	repoRoot := wt.Filesystem.Root()
 
 	absFile, err := filepath.Abs(filePath)
 	if err != nil {
-		return "", nil
+		return HeadFileContent{}, nil
 	}
 	relPath, err := filepath.Rel(repoRoot, absFile)
 	if err != nil {
-		return "", nil
+		return HeadFileContent{}, nil
 	}
 	// go-git uses forward slashes internally.
 	relPath = filepath.ToSlash(relPath)
 
+	// Past this point a HEAD commit exists: an absent file is a genuinely new,
+	// untracked file (empty Content, HasHead true) — distinct from the no-HEAD
+	// cases above.
 	f, err := tree.File(relPath)
 	if err != nil {
-		return "", nil // file not tracked in HEAD — it's a new file
+		return HeadFileContent{HasHead: true}, nil // file not tracked in HEAD — a new file
 	}
 
 	contents, err := f.Contents()
 	if err != nil {
-		return "", fmt.Errorf("read HEAD file: %w", err)
+		return HeadFileContent{HasHead: true}, fmt.Errorf("read HEAD file: %w", err)
 	}
-	return contents, nil
+	return HeadFileContent{Content: contents, HasHead: true}, nil
 }

@@ -194,9 +194,13 @@ func (a *App) GitCreateBranch(dir string, branchName string) error {
 	return gitrepo.CreateBranch(dir, branchName)
 }
 
-// GitGetHeadFileContent returns the content of filePath as stored in the HEAD commit.
-// Returns an empty string (no error) when the file is not yet tracked in HEAD.
-func (a *App) GitGetHeadFileContent(filePath string) (string, error) {
+// GitGetHeadFileContent returns filePath's content as stored in the HEAD commit,
+// plus whether a HEAD revision exists to diff against (HasHead). Content is empty
+// for a genuinely new-but-tracked file (HasHead true) and also when there is no
+// HEAD at all (HasHead false) — file outside any repo, or a repo with no commits.
+// The frontend suppresses the git gutter when HasHead is false rather than
+// flagging every line as newly added. (#530)
+func (a *App) GitGetHeadFileContent(filePath string) (gitrepo.HeadFileContent, error) {
 	return gitrepo.GetHeadFileContent(filePath)
 }
 

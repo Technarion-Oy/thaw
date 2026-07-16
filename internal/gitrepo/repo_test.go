@@ -392,3 +392,71 @@ func TestWriteFileAtomicDirPerm(t *testing.T) {
 		t.Errorf("recreated dir perm = %o, want 755", info.Mode().Perm())
 	}
 }
+
+// TestGetHeadFileContent verifies the three outcomes GetHeadFileContent must keep
+// distinct so the git gutter can tell "no HEAD to diff against" (suppress) from
+// "new but tracked" (mark all lines added). (#530)
+func TestGetHeadFileContent(t *testing.T) {
+	// Resolve symlinks so paths match go-git's worktree root: on macOS t.TempDir()
+	// hands back /var/... which resolves to /private/var/..., and the mismatch
+	// would break the HEAD relative-path lookup — an artifact of the test sandbox,
+	// not of real (unsymlinked) repo paths.
+	eval := func(p string) string {
+		r, err := filepath.EvalSymlinks(p)
+		if err != nil {
+			t.Fatalf("eval symlinks %s: %v", p, err)
+		}
+		return r
+	}
+
+	// Tracked-in-HEAD: committed bytes, HasHead true.
+	dir := eval(initRepoWithCommit(t))
+	got, err := GetHeadFileContent(filepath.Join(dir, "a.sql"))
+	if err != nil {
+		t.Fatalf("tracked: %v", err)
+	}
+	if !got.HasHead || got.Content != "create table a;\n" {
+		t.Errorf("tracked: got %+v, want committed content with HasHead=true", got)
+	}
+
+	// Untracked file inside a committed repo: empty content, HasHead true (genuinely new).
+	if err := os.WriteFile(filepath.Join(dir, "b.sql"), []byte("select 1;\n"), 0o644); err != nil {
+		t.Fatalf("write b.sql: %v", err)
+	}
+	got, err = GetHeadFileContent(filepath.Join(dir, "b.sql"))
+	if err != nil {
+		t.Fatalf("untracked: %v", err)
+	}
+	if !got.HasHead || got.Content != "" {
+		t.Errorf("untracked: got %+v, want empty content with HasHead=true", got)
+	}
+
+	// File outside any repository: empty content, HasHead false (suppress gutter).
+	outside := filepath.Join(eval(t.TempDir()), "loose.sql")
+	if err := os.WriteFile(outside, []byte("select 2;\n"), 0o644); err != nil {
+		t.Fatalf("write loose.sql: %v", err)
+	}
+	got, err = GetHeadFileContent(outside)
+	if err != nil {
+		t.Fatalf("outside: %v", err)
+	}
+	if got.HasHead || got.Content != "" {
+		t.Errorf("outside repo: got %+v, want empty content with HasHead=false", got)
+	}
+
+	// Repo with no commits yet: empty content, HasHead false (no HEAD to diff against).
+	empty := eval(t.TempDir())
+	if _, err := gogit.PlainInit(empty, false); err != nil {
+		t.Fatalf("init empty: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(empty, "c.sql"), []byte("select 3;\n"), 0o644); err != nil {
+		t.Fatalf("write c.sql: %v", err)
+	}
+	got, err = GetHeadFileContent(filepath.Join(empty, "c.sql"))
+	if err != nil {
+		t.Fatalf("no-commits: %v", err)
+	}
+	if got.HasHead || got.Content != "" {
+		t.Errorf("repo without commits: got %+v, want empty content with HasHead=false", got)
+	}
+}

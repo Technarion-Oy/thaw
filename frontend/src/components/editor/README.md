@@ -57,7 +57,7 @@ mis-firing the "No database/schema selected" diagnostics (#717).
 - `hoverDDLCache` — `Map<key, {ddl, ts}>`, 60 s TTL.
 - `fetchedSchemaObjects` — `Set<string>` to suppress duplicate `ListObjects` calls.
 - `fetchedDatabaseSchemas` — `Set<string>` for schema listing dedup.
-- `headContentCache` — `Map<filePath, headContent>` for git gutter diffs.
+- `headContentCache` — `Map<filePath, {content, hasHead}>` for git gutter diffs. `hasHead` is false when the file is outside the active repo or the repo has no commits yet; the gutter is cleared (not drawn) in that case rather than marking every line as newly added. (#530)
 - FK cache lives in `sqlEditorUtils.ts` (`fkCache` Map + `fetchingFKs` Set).
 - `pendingMcpMarkers` — `Map<tabId, DiagMarker[]>` for MCP marker seeding. Written by `QueryPage` when the `mcp:open-sql-tab` Wails event fires; read and cleared by `onDidChangeModelContent` in `SqlEditor`. Markers are applied immediately before the 400ms debounced diagnostics run, so the user sees inline errors as soon as the tab opens.
 
@@ -181,6 +181,16 @@ Cmd/Ctrl+V/C/X handler in `App.tsx` (which skips the code buffer via `monaco.edi
   the latter silently skips registration if the model is null at mount time.
 - **Git gutter is skipped** for files exceeding `MAX_DIFF_LINES` (3 000) to avoid O(H×C) DP
   overhead; `ComputeGitLineDiff` runs on the Go backend.
+- **Git gutter is suppressed when there is no HEAD to diff against** — a file outside the active
+  repo, or a repo with no commits yet. `GitGetHeadFileContent` returns `hasHead: false` for those,
+  and `refreshGitGutter` clears decorations instead of diffing empty HEAD content against the file
+  (which would mark every line as newly added — issue #530). Empty content with `hasHead: true`
+  still means a genuinely new tracked file, so it correctly lights the whole file as added.
+- **Trailing newline is normalized symmetrically before diffing.** HEAD content (raw go-git bytes)
+  is always newline-terminated; Monaco's `getValue()` usually isn't. `refreshGitGutter` strips one
+  trailing `"\n"` from *each* side before `split("\n")`, so a terminating newline ends the last
+  line rather than adding a phantom `""`. Without this, appending a line diffs it against HEAD's
+  phantom trailing `""` and it shows blue (modified) instead of green (added). (#530)
 - **Do not use `instanceof SubmenuAction`** from an external import for the snippet submenu —
   Monaco's `menu.js` checks its own bundled class; external imports are different module instances
   and always fail. Use `MenuRegistry` and let Monaco create `SubmenuAction` internally.

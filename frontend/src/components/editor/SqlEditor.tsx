@@ -218,8 +218,10 @@ async function resolveStoreObject(
 }
 
 // ── Git gutter: HEAD content cache ────────────────────────────────────────────
-// Maps absolute file path → HEAD content string (empty = new file).
-const headContentCache = new Map<string, string>();
+// Maps absolute file path → HEAD lookup result. `hasHead` is false when the file
+// is outside any repo or the repo has no commits yet — the gutter is suppressed
+// in that case rather than flagging every line as newly added. (#530)
+const headContentCache = new Map<string, { content: string; hasHead: boolean }>();
 
 // Maximum lines to diff — beyond this, gutter decorators are skipped to
 // avoid O(H×C) DP memory / time blowup on very large files.
@@ -1218,20 +1220,34 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         return;
       }
 
-      let headContent = headContentCache.get(filePath);
-      if (headContent === undefined) {
+      let head = headContentCache.get(filePath);
+      if (head === undefined) {
         try {
-          headContent = await GitGetHeadFileContent(filePath);
-          headContentCache.set(filePath, headContent ?? "");
+          const res = await GitGetHeadFileContent(filePath);
+          head = { content: res?.content ?? "", hasHead: !!res?.hasHead };
         } catch {
-          headContentCache.set(filePath, "");
-          headContent = "";
+          head = { content: "", hasHead: false };
         }
+        headContentCache.set(filePath, head);
+      }
+
+      // No HEAD revision to diff against — the file lives outside the active repo,
+      // or the repo has no commits yet. Clear any decorations instead of marking
+      // every line as added. (#530)
+      if (!head.hasHead) {
+        gitGutterDecRef.current?.set([]);
+        return;
       }
 
       const currentText = model.getValue();
-      const headLines    = (headContent ?? "").split("\n");
-      const currentLines = currentText.split("\n");
+      // A terminating newline ends the last line rather than creating an empty one.
+      // HEAD content (raw go-git bytes) is always newline-terminated, while Monaco's
+      // getValue() usually isn't — so strip one trailing "\n" from each side before
+      // splitting. Otherwise appending a line diffs it against HEAD's phantom trailing
+      // "" and it shows blue (modified) instead of green (added). (#530)
+      const toLines = (s: string) => (s.endsWith("\n") ? s.slice(0, -1) : s).split("\n");
+      const headLines    = toLines(head.content);
+      const currentLines = toLines(currentText);
 
       const { added, modified, deleted } = await ComputeGitLineDiff(headLines, currentLines, MAX_DIFF_LINES);
 
