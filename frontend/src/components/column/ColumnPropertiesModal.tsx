@@ -2,8 +2,9 @@
 // @thaw-domain: Object Browser & Administration
 
 import { useState, useEffect } from "react";
-import { App as AntApp, Modal, Spin, Button, Input, Switch, Space, Tag, Select } from "antd";
+import { App as AntApp, Modal, Spin, Button, Input, Space, Tag, Select } from "antd";
 import { EditOutlined, CheckOutlined, CloseOutlined, PlusOutlined } from "@ant-design/icons";
+import { ConfirmSwitch } from "../common/ConfirmSwitch";
 import DataTypeSelect from "../shared/DataTypeSelect";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import SequenceDefaultPicker from "../shared/SequenceDefaultPicker";
@@ -202,10 +203,12 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
 
   const toggleNullable = async (checked: boolean) => {
     // checked = nullable. SET NOT NULL when turning off; DROP NOT NULL when on.
+    // Use exec (not run) so a failed DDL rejects — ConfirmSwitch keeps the
+    // staged toggle and surfaces the error rather than silently reverting.
     const sql = checked
       ? await BuildDropColumnNotNullSql(db, schema, table, column)
       : await BuildSetColumnNotNullSql(db, schema, table, column);
-    return run(sql, checked ? "Dropped NOT NULL" : "Set NOT NULL", () => setCur((c) => ({ ...c, nullable: checked })));
+    await exec(sql, checked ? "Dropped NOT NULL" : "Set NOT NULL", () => setCur((c) => ({ ...c, nullable: checked })));
   };
 
   const saveDefault = async () => {
@@ -385,7 +388,7 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
             {row("Nullable", cur.isPrimaryKey ? (
               <span style={{ color: "var(--text-faint)", fontStyle: "italic" }}>NOT NULL (primary key)</span>
             ) : (
-              <Switch size="small" checked={cur.nullable} onChange={toggleNullable} />
+              <ConfirmSwitch checked={cur.nullable} onConfirm={toggleNullable} />
             ))}
 
             {/* Default — free-text plus a sequence picker. On an existing column

@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Modal, Spin, Button, Input, Space, Typography, Alert, Tag, Tooltip, Switch,
+  Modal, Spin, Button, Input, Space, Typography, Alert, Tag, Tooltip,
 } from "antd";
 import {
   BlockOutlined, EditOutlined, CheckOutlined, CloseOutlined,
@@ -12,6 +12,7 @@ import {
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterMaterializedView } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
+import { ConfirmSwitch } from "../common/ConfirmSwitch";
 
 const { Text } = Typography;
 
@@ -141,7 +142,6 @@ export default function MaterializedViewPropertiesModal({ db, schema, name, onCl
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [secureSaving, setSecureSaving] = useState(false);
 
   const reload = useCallback(async () => {
     setRows(null);
@@ -184,16 +184,8 @@ export default function MaterializedViewPropertiesModal({ db, schema, name, onCl
   };
 
   const toggleSecure = async (next: boolean) => {
-    setSecureSaving(true);
-    setActionError(null);
-    try {
-      await AlterMaterializedView(db, schema, name, next ? "SET SECURE" : "UNSET SECURE");
-      await reload();
-    } catch (e) {
-      setActionError(`${next ? "Set" : "Unset"} SECURE failed: ${String(e)}`);
-    } finally {
-      setSecureSaving(false);
-    }
+    await AlterMaterializedView(db, schema, name, next ? "SET SECURE" : "UNSET SECURE");
+    await reload();
   };
 
   const comment = find("comment");
@@ -272,12 +264,7 @@ export default function MaterializedViewPropertiesModal({ db, schema, name, onCl
               <tr>
                 <td style={LABEL_TD}>Secure</td>
                 <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
-                  <Switch
-                    size="small"
-                    checked={isSecure}
-                    loading={secureSaving}
-                    onChange={toggleSecure}
-                  />
+                  <ConfirmSwitch checked={isSecure} onConfirm={toggleSecure} />
                 </td>
               </tr>
             </tbody>

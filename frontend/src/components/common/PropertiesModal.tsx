@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { useState, useEffect } from "react";
-import { Modal, Spin, Button, Input, InputNumber, Switch, message } from "antd";
+import { Modal, Spin, Button, Input, InputNumber, message } from "antd";
 import { CopyOutlined, EditOutlined, CheckOutlined, CloseOutlined, SearchOutlined } from "@ant-design/icons";
+import { ConfirmSwitch } from "./ConfirmSwitch";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { snowflake, table } from "../../../wailsjs/go/models";
 import { GetTableSettings, AlterTableProperty } from "../../../wailsjs/go/app/App";
@@ -86,13 +87,9 @@ function TableSettingsSection({ db, schema, table }: { db: string; schema: strin
   };
 
   const toggleBool = async (def: PropDef, checked: boolean) => {
-    try {
-      await AlterTableProperty(db, schema, table, def.key, checked ? "TRUE" : "FALSE");
-      setSettings((prev) => prev ? { ...prev, [def.key]: checked } : prev);
-      message.success(`${def.label} ${checked ? "enabled" : "disabled"}`);
-    } catch (e) {
-      message.error(String(e));
-    }
+    await AlterTableProperty(db, schema, table, def.key, checked ? "TRUE" : "FALSE");
+    setSettings((prev) => prev ? { ...prev, [def.key]: checked } : prev);
+    message.success(`${def.label} ${checked ? "enabled" : "disabled"}`);
   };
 
   return (
@@ -128,10 +125,9 @@ function TableSettingsSection({ db, schema, table }: { db: string; schema: strin
                   {/* Value / editor */}
                   <td style={{ padding: "4px 0", verticalAlign: "middle" }}>
                     {def.type === "boolean" ? (
-                      <Switch
-                        size="small"
+                      <ConfirmSwitch
                         checked={Boolean(rawVal)}
-                        onChange={(checked) => toggleBool(def, checked)}
+                        onConfirm={(checked) => toggleBool(def, checked)}
                       />
                     ) : isEditing ? (
                       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
