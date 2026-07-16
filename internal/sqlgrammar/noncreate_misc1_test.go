@@ -89,6 +89,13 @@ func TestParseUse(t *testing.T) {
 		``,
 		`SET v`,
 		`USE`,
+		// A database/role/warehouse name is a single identifier — a
+		// dot-qualified name is invalid (issue #765).
+		`USE DATABASE governance.public`,
+		`USE ROLE db.role`,
+		`USE WAREHOUSE db.wh`,
+		// USE SCHEMA takes at most [db.]schema — three parts is invalid.
+		`USE SCHEMA a.b.c`,
 	)
 }
 
@@ -102,6 +109,7 @@ func TestParseUseDatabase(t *testing.T) {
 		``,
 		`USE`,
 		`SET x`,
+		`USE DATABASE governance.public`, // issue #765
 	)
 }
 
@@ -115,6 +123,7 @@ func TestParseUseRole(t *testing.T) {
 		``,
 		`USE myrole`,
 		`USE ROLE`,
+		`USE ROLE db.role`, // issue #765
 	)
 }
 
@@ -128,6 +137,7 @@ func TestParseUseSchema(t *testing.T) {
 		``,
 		`USE`,
 		`SET y`,
+		`USE SCHEMA a.b.c`, // at most [db.]schema (issue #765)
 	)
 }
 
@@ -154,6 +164,7 @@ func TestParseUseWarehouse(t *testing.T) {
 		``,
 		`USE wh1`,
 		`USE WAREHOUSE`,
+		`USE WAREHOUSE db.wh`, // issue #765
 	)
 }
 
