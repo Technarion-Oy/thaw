@@ -6283,6 +6283,9 @@ export namespace stream {
 	    copyGrants: boolean;
 	    sourceType: string;
 	    source: string;
+	    timeTravelMode: string;
+	    timeTravelKind: string;
+	    timeTravelValue: string;
 	    appendOnly: boolean;
 	    showInitialRows: boolean;
 	    insertOnly: boolean;
@@ -6301,6 +6304,9 @@ export namespace stream {
 	        this.copyGrants = source["copyGrants"];
 	        this.sourceType = source["sourceType"];
 	        this.source = source["source"];
+	        this.timeTravelMode = source["timeTravelMode"];
+	        this.timeTravelKind = source["timeTravelKind"];
+	        this.timeTravelValue = source["timeTravelValue"];
 	        this.appendOnly = source["appendOnly"];
 	        this.showInitialRows = source["showInitialRows"];
 	        this.insertOnly = source["insertOnly"];

@@ -154,6 +154,80 @@ func TestBuildCreateStreamSql(t *testing.T) {
 			absent: []string{"APPEND_ONLY", "SHOW_INITIAL_ROWS"},
 		},
 		{
+			// Dynamic table streams support neither the row-change flags nor Time
+			// Travel — only COPY GRANTS / COMMENT — so all of these are gated out.
+			name: "row-change flags and time travel dropped for dynamic table source",
+			cfg: StreamConfig{
+				Name:            "S",
+				SourceType:      "DYNAMIC TABLE",
+				Source:          "DT",
+				AppendOnly:      true,
+				ShowInitialRows: true,
+				TimeTravelMode:  "AT",
+				TimeTravelKind:  "OFFSET",
+				TimeTravelValue: "-60",
+			},
+			contains: []string{"ON DYNAMIC TABLE"},
+			absent:   []string{"APPEND_ONLY", "SHOW_INITIAL_ROWS", "AT (", "OFFSET"},
+		},
+		{
+			name: "time travel AT offset (table source)",
+			cfg: StreamConfig{
+				Name:            "S",
+				Source:          "T",
+				TimeTravelMode:  "AT",
+				TimeTravelKind:  "OFFSET",
+				TimeTravelValue: "-60",
+			},
+			contains: []string{"AT ( OFFSET => -60 )"},
+		},
+		{
+			name: "time travel BEFORE statement is quoted (table source)",
+			cfg: StreamConfig{
+				Name:            "S",
+				Source:          "T",
+				TimeTravelMode:  "BEFORE",
+				TimeTravelKind:  "STATEMENT",
+				TimeTravelValue: "8e5d0ca9-005e-44e6-b858-a8f5b37c5726",
+			},
+			contains: []string{"BEFORE ( STATEMENT => '8e5d0ca9-005e-44e6-b858-a8f5b37c5726' )"},
+		},
+		{
+			name: "time travel timestamp expression emitted verbatim (view source)",
+			cfg: StreamConfig{
+				Name:            "S",
+				SourceType:      "VIEW",
+				Source:          "V",
+				TimeTravelMode:  "AT",
+				TimeTravelKind:  "TIMESTAMP",
+				TimeTravelValue: "'2024-01-01 12:00:00'::timestamp",
+			},
+			contains: []string{"AT ( TIMESTAMP => '2024-01-01 12:00:00'::timestamp )"},
+		},
+		{
+			name: "time travel dropped for stage source",
+			cfg: StreamConfig{
+				Name:            "S",
+				SourceType:      "STAGE",
+				Source:          "STG",
+				TimeTravelMode:  "AT",
+				TimeTravelKind:  "OFFSET",
+				TimeTravelValue: "-60",
+			},
+			contains: []string{"ON STAGE"},
+			absent:   []string{"AT (", "OFFSET"},
+		},
+		{
+			name: "time travel omitted when value empty",
+			cfg: StreamConfig{
+				Name:           "S",
+				Source:         "T",
+				TimeTravelMode: "AT",
+				TimeTravelKind: "OFFSET",
+			},
+			absent: []string{"AT (", "OFFSET"},
+		},
+		{
 			name: "comment escaped",
 			cfg: StreamConfig{
 				Name:    "S",
@@ -238,16 +312,19 @@ func TestBuildCreateStreamSqlPlaceholders(t *testing.T) {
 }
 
 // TestBuildCreateStreamSqlClauseOrder pins the clause order to the order
-// Snowflake documents for CREATE STREAM — COPY GRANTS → ON → APPEND_ONLY →
-// SHOW_INITIAL_ROWS → COMMENT. Snowflake's CREATE parser is order-sensitive, so a
-// config combining several optional clauses must emit them in exactly this
-// sequence. (A TABLE source is used, so INSERT_ONLY — external-table only — is
-// not part of this ordering check.)
+// Snowflake documents for CREATE STREAM — COPY GRANTS → ON → AT/BEFORE →
+// APPEND_ONLY → SHOW_INITIAL_ROWS → COMMENT. Snowflake's CREATE parser is
+// order-sensitive, so a config combining several optional clauses must emit them
+// in exactly this sequence. (A TABLE source is used, so INSERT_ONLY —
+// external-table only — is not part of this ordering check.)
 func TestBuildCreateStreamSqlClauseOrder(t *testing.T) {
 	got, err := BuildCreateStreamSql("DB", "SC", StreamConfig{
 		Name:            "S",
 		CopyGrants:      true,
 		Source:          "T",
+		TimeTravelMode:  "AT",
+		TimeTravelKind:  "OFFSET",
+		TimeTravelValue: "-60",
 		AppendOnly:      true,
 		ShowInitialRows: true,
 		Comment:         "c",
@@ -256,7 +333,7 @@ func TestBuildCreateStreamSqlClauseOrder(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	order := []string{"COPY GRANTS", "ON TABLE", "APPEND_ONLY = TRUE", "SHOW_INITIAL_ROWS = TRUE", "COMMENT = "}
+	order := []string{"COPY GRANTS", "ON TABLE", "AT ( OFFSET", "APPEND_ONLY = TRUE", "SHOW_INITIAL_ROWS = TRUE", "COMMENT = "}
 	prev := -1
 	for _, marker := range order {
 		idx := strings.Index(got, marker)

@@ -23,8 +23,8 @@ dedicated builder.
 
 | Type / Function | Purpose |
 |---|---|
-| `StreamConfig` | CREATE parameters: name, case sensitivity, `OrReplace`, `IfNotExists`, `CopyGrants`, `SourceType`, `Source`, `AppendOnly`, `ShowInitialRows`, `InsertOnly`, comment |
-| `BuildCreateStreamSql(db, schema, cfg)` | Emits `CREATE [OR REPLACE] STREAM [IF NOT EXISTS] <fqn> [COPY GRANTS] ON <SourceType> <source> [APPEND_ONLY = TRUE] [SHOW_INITIAL_ROWS = TRUE] [INSERT_ONLY = TRUE] [COMMENT='…'];` — optional clauses emitted only when set, in documented order |
+| `StreamConfig` | CREATE parameters: name, case sensitivity, `OrReplace`, `IfNotExists`, `CopyGrants`, `SourceType`, `Source`, `TimeTravelMode`/`TimeTravelKind`/`TimeTravelValue`, `AppendOnly`, `ShowInitialRows`, `InsertOnly`, comment |
+| `BuildCreateStreamSql(db, schema, cfg)` | Emits `CREATE [OR REPLACE] STREAM [IF NOT EXISTS] <fqn> [COPY GRANTS] ON <SourceType> <source> [{AT\|BEFORE} (<kind> => <value>)] [APPEND_ONLY = TRUE] [SHOW_INITIAL_ROWS = TRUE] [INSERT_ONLY = TRUE] [COMMENT='…'];` — optional clauses emitted only when set, in documented order |
 
 ## Patterns & integration
 
@@ -39,8 +39,17 @@ dedicated builder.
 
 ## Gotchas
 
-- `APPEND_ONLY` and `INSERT_ONLY` are mutually constrained by source type
-  (`INSERT_ONLY` is for external tables / directory tables on stages); those
-  errors surface at execution time, not in the builder.
+- Each source type has its own grammar (see Snowflake's CREATE STREAM reference).
+  The builder gates the optional clauses by `SourceType` — a clause is dropped for
+  a source type that rejects it, even if the config sets it:
+  - **`AT`/`BEFORE` Time Travel** — `TABLE`, `EXTERNAL TABLE`, `VIEW`.
+  - **`APPEND_ONLY` / `SHOW_INITIAL_ROWS`** — `TABLE`, `VIEW` only (**not**
+    `DYNAMIC TABLE`, despite it also being a row-change source).
+  - **`INSERT_ONLY`** — `EXTERNAL TABLE` only (where Snowflake actually requires it).
+  - **`STAGE` / `DYNAMIC TABLE`** — take none of the above, only `COPY GRANTS` /
+    `COMMENT`.
+- Time Travel value quoting is kind-specific: `TIMESTAMP` (a SQL expression) and
+  `OFFSET` (a signed number) are emitted verbatim; `STATEMENT` (a query id) and
+  `STREAM` (a stream name) are quoted as string literals.
 - `SHOW_INITIAL_ROWS` is only meaningful on creation and is ignored by Snowflake
   unless the stream is append-only on a table; the builder emits it whenever set.
