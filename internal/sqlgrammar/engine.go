@@ -269,7 +269,16 @@ func (v *Validator) unorderedOnce(opts ...Rule) bool {
 // parseIdentPath consumes a (possibly dot-qualified) name such as DB.SCHEMA.OBJ
 // using the existing sqltok helper, recording "identifier" as expected on miss.
 func (v *Validator) parseIdentPath() bool {
-	_, next := sqltok.ReadIdentParts(v.tokens, v.src, v.pos, 0 /* unbounded */)
+	return v.parseIdentPathN(0 /* unbounded */)
+}
+
+// parseIdentPathN consumes a dot-qualified name of at most maxParts segments
+// (maxParts <= 0 means unbounded). Segments beyond the limit are left
+// unconsumed, so a name like DB.SCHEMA where only one part is allowed fails to
+// fully parse the statement — e.g. `USE DATABASE db.schema`, whose object is a
+// bare database name (issue #765).
+func (v *Validator) parseIdentPathN(maxParts int) bool {
+	_, next := sqltok.ReadIdentParts(v.tokens, v.src, v.pos, maxParts)
 	if next == v.pos {
 		v.expect("identifier")
 		return false

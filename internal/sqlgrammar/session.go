@@ -102,15 +102,24 @@ func (v *Validator) ParseUse() bool {
 						},
 					)
 				},
-				// USE { ROLE | WAREHOUSE | DATABASE | SCHEMA } <name>
+				// USE { ROLE | WAREHOUSE | DATABASE } <name> — the object is a
+				// single (account-level) identifier, so a dot-qualified name is
+				// rejected (issue #765).
 				func() bool {
 					return v.Sequence(
-						v.wordsValue("ROLE", "WAREHOUSE", "DATABASE", "SCHEMA"),
-						v.parseIdentPath,
+						v.wordsValue("ROLE", "WAREHOUSE", "DATABASE"),
+						func() bool { return v.parseIdentPathN(1) },
 					)
 				},
-				// USE <name>
-				v.parseIdentPath,
+				// USE SCHEMA [<db_name>.]<name>
+				func() bool {
+					return v.Sequence(
+						func() bool { return v.MatchWord("SCHEMA") },
+						func() bool { return v.parseIdentPathN(2) },
+					)
+				},
+				// USE [<db_name>.]<name> — the bare form sets the database or schema.
+				func() bool { return v.parseIdentPathN(2) },
 			)
 		},
 	)
@@ -126,7 +135,7 @@ func (v *Validator) ParseUseDatabase() bool {
 	return v.Sequence(
 		func() bool { return v.MatchKeyword("USE") },
 		func() bool { return v.Optional(func() bool { return v.MatchWord("DATABASE") }) },
-		v.parseIdentPath,
+		func() bool { return v.parseIdentPathN(1) },
 	)
 }
 
@@ -140,7 +149,7 @@ func (v *Validator) ParseUseRole() bool {
 	return v.Sequence(
 		func() bool { return v.MatchKeyword("USE") },
 		func() bool { return v.MatchWord("ROLE") },
-		v.parseIdentPath,
+		func() bool { return v.parseIdentPathN(1) },
 	)
 }
 
@@ -154,7 +163,7 @@ func (v *Validator) ParseUseSchema() bool {
 	return v.Sequence(
 		func() bool { return v.MatchKeyword("USE") },
 		func() bool { return v.Optional(func() bool { return v.MatchWord("SCHEMA") }) },
-		v.parseIdentPath,
+		func() bool { return v.parseIdentPathN(2) },
 	)
 }
 
@@ -205,6 +214,6 @@ func (v *Validator) ParseUseWarehouse() bool {
 	return v.Sequence(
 		func() bool { return v.MatchKeyword("USE") },
 		func() bool { return v.MatchWord("WAREHOUSE") },
-		v.parseIdentPath,
+		func() bool { return v.parseIdentPathN(1) },
 	)
 }
