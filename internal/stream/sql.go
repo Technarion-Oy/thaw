@@ -22,6 +22,9 @@ type StreamConfig struct {
 	CopyGrants      bool   `json:"copyGrants"`
 	SourceType      string `json:"sourceType"`      // "TABLE" | "VIEW" | "EXTERNAL TABLE" | "STAGE" | "DYNAMIC TABLE"
 	Source          string `json:"source"`          // source object name (db.schema.obj or bare)
+	TimeTravelMode  string `json:"timeTravelMode"`  // "" | "AT" | "BEFORE"
+	TimeTravelKind  string `json:"timeTravelKind"`  // "TIMESTAMP" | "OFFSET" | "STATEMENT" | "STREAM"
+	TimeTravelValue string `json:"timeTravelValue"` // expression / offset / query id / stream name
 	AppendOnly      bool   `json:"appendOnly"`      // APPEND_ONLY = TRUE
 	ShowInitialRows bool   `json:"showInitialRows"` // SHOW_INITIAL_ROWS = TRUE
 	InsertOnly      bool   `json:"insertOnly"`      // INSERT_ONLY = TRUE
@@ -70,16 +73,25 @@ func BuildCreateStreamSql(db, schema string, cfg StreamConfig) (string, error) {
 
 	fmt.Fprintf(&sb, "\n  ON %s %s", sourceType, sourceIdent)
 
-	// The CDC flags are source-type-specific: APPEND_ONLY / SHOW_INITIAL_ROWS
-	// apply to streams on tables, views and dynamic tables; INSERT_ONLY applies
-	// only to streams on external tables. The create modal already gates the
-	// checkboxes this way, but enforce it here too so a flag can never leak into a
-	// CREATE STREAM for a source type that rejects it (defense-in-depth for any
-	// caller that drives the builder directly).
+	// The optional clauses are source-type-specific (see the per-source-type
+	// grammar in Snowflake's CREATE STREAM reference):
+	//   - AT | BEFORE Time Travel:      TABLE, EXTERNAL TABLE, VIEW
+	//   - APPEND_ONLY / SHOW_INITIAL_ROWS: TABLE, VIEW
+	//   - INSERT_ONLY:                  EXTERNAL TABLE (required, but optional here)
+	//   - STAGE / DYNAMIC TABLE:        none of the above
+	// The create modal already gates its inputs this way, but enforce it here too
+	// so a clause can never leak into a CREATE STREAM for a source type that
+	// rejects it (defense-in-depth for any caller that drives the builder directly).
 	st := strings.ToUpper(sourceType)
-	rowChangeSource := st == "TABLE" || st == "VIEW" || st == "DYNAMIC TABLE"
+	timeTravelSource := st == "TABLE" || st == "EXTERNAL TABLE" || st == "VIEW"
+	rowChangeSource := st == "TABLE" || st == "VIEW"
 	externalSource := st == "EXTERNAL TABLE"
 
+	if timeTravelSource {
+		if tt := timeTravelClause(cfg.TimeTravelMode, cfg.TimeTravelKind, cfg.TimeTravelValue); tt != "" {
+			sb.WriteString(tt)
+		}
+	}
 	if cfg.AppendOnly && rowChangeSource {
 		fmt.Fprintf(&sb, "\n  APPEND_ONLY = TRUE")
 	}
@@ -93,4 +105,33 @@ func BuildCreateStreamSql(db, schema string, cfg StreamConfig) (string, error) {
 	sb.WriteString(snowflake.CommentClause(cfg.Comment))
 
 	return sb.String() + ";", nil
+}
+
+// timeTravelClause builds the optional `{ AT | BEFORE } ( <kind> => <value> )`
+// Time Travel clause. It returns "" unless both mode and value are set. TIMESTAMP
+// and OFFSET take a raw SQL expression / signed number and are emitted verbatim;
+// STATEMENT (a query id) and STREAM (a stream name) are string literals and are
+// quoted. An unrecognised kind falls back to STREAM's string-literal quoting,
+// which is the safe default for a name-like value.
+func timeTravelClause(mode, kind, value string) string {
+	mode = strings.ToUpper(strings.TrimSpace(mode))
+	value = strings.TrimSpace(value)
+	if (mode != "AT" && mode != "BEFORE") || value == "" {
+		return ""
+	}
+
+	kind = strings.ToUpper(strings.TrimSpace(kind))
+	if kind == "" {
+		kind = "TIMESTAMP"
+	}
+
+	var arg string
+	switch kind {
+	case "TIMESTAMP", "OFFSET":
+		arg = value
+	default: // STATEMENT, STREAM
+		arg = snowflake.QuoteStringLit(value)
+	}
+
+	return fmt.Sprintf("\n  %s ( %s => %s )", mode, kind, arg)
 }
