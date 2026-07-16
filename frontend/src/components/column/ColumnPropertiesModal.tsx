@@ -137,14 +137,17 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
       .catch(() => setTags([]));
   };
 
-  const exec = async (sql: string, okMsg: string, after?: () => void) => {
+  // `silent` suppresses the error toast (but still rethrows) for callers that
+  // render their own inline error — e.g. ConfirmSwitch, which would otherwise
+  // show the failure twice (raw toast + inline friendly message).
+  const exec = async (sql: string, okMsg: string, after?: () => void, silent?: boolean) => {
     try {
       await ExecDDL(sql);
       message.success(okMsg);
       onChanged();
       after?.();
     } catch (e) {
-      message.error(String(e));
+      if (!silent) message.error(String(e));
       throw e;
     }
   };
@@ -204,11 +207,12 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
   const toggleNullable = async (checked: boolean) => {
     // checked = nullable. SET NOT NULL when turning off; DROP NOT NULL when on.
     // Use exec (not run) so a failed DDL rejects — ConfirmSwitch keeps the
-    // staged toggle and surfaces the error rather than silently reverting.
+    // staged toggle and surfaces the error inline. Pass silent so exec doesn't
+    // also raise a toast for the same failure.
     const sql = checked
       ? await BuildDropColumnNotNullSql(db, schema, table, column)
       : await BuildSetColumnNotNullSql(db, schema, table, column);
-    await exec(sql, checked ? "Dropped NOT NULL" : "Set NOT NULL", () => setCur((c) => ({ ...c, nullable: checked })));
+    await exec(sql, checked ? "Dropped NOT NULL" : "Set NOT NULL", () => setCur((c) => ({ ...c, nullable: checked })), true);
   };
 
   const saveDefault = async () => {

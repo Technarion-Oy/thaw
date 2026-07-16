@@ -17,14 +17,13 @@ import { friendlyError } from "./errors";
 export interface ConfirmSwitchProps {
   /** Committed (loaded) value. */
   checked:   boolean;
-  disabled?: boolean;
   size?:     "small" | "default";
   /** Commit the staged value. Should perform the ALTER and refresh so that,
    *  once it resolves, `checked` reflects the new value. Throws on failure. */
   onConfirm: (next: boolean) => Promise<void>;
 }
 
-export function ConfirmSwitch({ checked, disabled, size = "small", onConfirm }: ConfirmSwitchProps) {
+export function ConfirmSwitch({ checked, size = "small", onConfirm }: ConfirmSwitchProps) {
   const [pending, setPending] = useState<boolean | null>(null);
   const [saving,  setSaving]  = useState(false);
   const [error,   setError]   = useState<string | null>(null);
@@ -61,7 +60,7 @@ export function ConfirmSwitch({ checked, disabled, size = "small", onConfirm }: 
         <Switch
           size={size}
           checked={display}
-          disabled={disabled || saving}
+          disabled={saving}
           loading={saving}
           onChange={onChange}
         />
