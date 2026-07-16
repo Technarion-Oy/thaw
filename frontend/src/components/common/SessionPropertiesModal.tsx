@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { useState } from "react";
-import { Modal, Spin, Button, Input, Switch, Tooltip, message } from "antd";
+import { Modal, Spin, Button, Input, Tooltip, message } from "antd";
 import { CopyOutlined, EditOutlined, CheckOutlined, CloseOutlined, SearchOutlined } from "@ant-design/icons";
+import { ConfirmSwitch } from "./ConfirmSwitch";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { SetSessionParameter, SetSessionVariable } from "../../../wailsjs/go/app/App";
@@ -85,13 +86,9 @@ function ParamsTable({
 
   const toggle = async (row: snowflake.SessionParam, checked: boolean) => {
     const val = checked ? "TRUE" : "FALSE";
-    try {
-      await SetSessionParameter(row.key, val, row.type);
-      onSave(row.key, val);
-      message.success(`${row.key} ${checked ? "enabled" : "disabled"}`);
-    } catch (e) {
-      message.error(String(e));
-    }
+    await SetSessionParameter(row.key, val, row.type);
+    onSave(row.key, val);
+    message.success(`${row.key} ${checked ? "enabled" : "disabled"}`);
   };
 
   return (
@@ -108,10 +105,9 @@ function ParamsTable({
               </td>
               <td style={VALUE_CELL}>
                 {isBool(row.type) ? (
-                  <Switch
-                    size="small"
+                  <ConfirmSwitch
                     checked={row.value.toUpperCase() === "TRUE"}
-                    onChange={(checked) => toggle(row, checked)}
+                    onConfirm={(checked) => toggle(row, checked)}
                   />
                 ) : isEditing ? (
                   <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
@@ -191,13 +187,9 @@ function VarsTable({
 
   const toggle = async (row: snowflake.SessionVar, checked: boolean) => {
     const val = checked ? "TRUE" : "FALSE";
-    try {
-      await SetSessionVariable(row.key, val, row.type);
-      onSave(row.key, val);
-      message.success(`${row.key} ${checked ? "enabled" : "disabled"}`);
-    } catch (e) {
-      message.error(String(e));
-    }
+    await SetSessionVariable(row.key, val, row.type);
+    onSave(row.key, val);
+    message.success(`${row.key} ${checked ? "enabled" : "disabled"}`);
   };
 
   return (
@@ -210,10 +202,9 @@ function VarsTable({
               <td style={LABEL_CELL}>{row.key}</td>
               <td style={VALUE_CELL}>
                 {isBool(row.type) ? (
-                  <Switch
-                    size="small"
+                  <ConfirmSwitch
                     checked={row.value.toUpperCase() === "TRUE"}
-                    onChange={(checked) => toggle(row, checked)}
+                    onConfirm={(checked) => toggle(row, checked)}
                   />
                 ) : isEditing ? (
                   <div style={{ display: "flex", gap: 6, alignItems: "center" }}>

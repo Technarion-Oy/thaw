@@ -5,8 +5,14 @@
 // property row, a read-only info row, and the section/label styles they share.
 
 import { useState } from "react";
-import { Input, InputNumber, Select, Switch, Button, message } from "antd";
+import { Input, InputNumber, Select, Button, message } from "antd";
 import { EditOutlined, CheckOutlined, CloseOutlined } from "@ant-design/icons";
+import { ConfirmSwitch } from "./ConfirmSwitch";
+import { friendlyError } from "./errors";
+
+// Re-exported so existing importers (WarehousePropertiesModal, UserPropertiesModal,
+// UserManagementPanel, KeyPairAuthModal) keep resolving it from this module.
+export { friendlyError };
 
 export const SECTION_HEAD: React.CSSProperties = {
   fontSize: 11, fontWeight: 600, color: "var(--text-muted)",
@@ -19,19 +25,6 @@ export const LABEL_TD: React.CSSProperties = {
   fontFamily: "monospace", whiteSpace: "nowrap",
   verticalAlign: "middle", width: 200, minWidth: 160,
 };
-
-// Strip gosnowflake noise — show only the human-readable part after the last
-// ":" (e.g. "003001 (42501): SQL access control error:\nInsufficient
-// privileges…" → "Insufficient privileges…").
-export function friendlyError(e: unknown): string {
-  const raw = String(e);
-  const priv = raw.match(/Insufficient privileges[^\n]*/i);
-  if (priv) return priv[0].trim();
-  // The greedy [\s\S]* prefix pushes the match to the LAST colon; capture
-  // what follows it (must start with a non-space so an empty tail falls back).
-  const m = raw.match(/^[\s\S]*:\s*(\S[\s\S]*)$/);
-  return m ? m[1].trim() : raw;
-}
 
 export interface Option { label: string; value: string }
 
@@ -102,20 +95,9 @@ export function EditRow({ label, value, type, options, loadOptions, min, max, al
       <tr style={{ borderBottom: "1px solid var(--border)" }}>
         <td style={LABEL_TD}>{label}</td>
         <td style={{ padding: "6px 0", verticalAlign: "middle" }}>
-          <Switch
-            size="small"
+          <ConfirmSwitch
             checked={value.toLowerCase() === "true"}
-            disabled={saving}
-            onChange={async (checked) => {
-              setSaving(true);
-              try {
-                await onSave(checked ? "TRUE" : "FALSE");
-              } catch (e) {
-                message.error(friendlyError(e), 6);
-              } finally {
-                setSaving(false);
-              }
-            }}
+            onConfirm={(checked) => onSave(checked ? "TRUE" : "FALSE")}
           />
         </td>
       </tr>

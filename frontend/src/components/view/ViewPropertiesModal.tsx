@@ -4,13 +4,14 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Modal, Spin, Button, Input, Select, Space, Typography, Alert, Tooltip, Switch, Tag,
+  Modal, Spin, Button, Input, Space, Typography, Alert, Tooltip, Tag,
 } from "antd";
 import {
   EyeOutlined, EditOutlined, CheckOutlined, CloseOutlined,
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterView, GetObjectTagReferences } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
+import { ConfirmSwitch } from "../common/ConfirmSwitch";
 import TagsRow, { EditableTag } from "../shared/TagsRow";
 import { quoteIdent, identToken } from "../shared/ObjectNameCaseControl";
 
@@ -144,9 +145,6 @@ interface Props {
 export default function ViewPropertiesModal({ db, schema, name, onClose, onSuccess }: Props) {
   const [rows, setRows] = useState<snowflake.PropertyPair[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [secureSaving, setSecureSaving] = useState(false);
-  const [ctSaving, setCtSaving] = useState(false);
   const [tags, setTags] = useState<EditableTag[]>([]);
 
   // Tags use the no-latency INFORMATION_SCHEMA.TAG_REFERENCES read so a SET/UNSET
@@ -210,29 +208,13 @@ export default function ViewPropertiesModal({ db, schema, name, onClose, onSucce
   };
 
   const toggleSecure = async (next: boolean) => {
-    setSecureSaving(true);
-    setActionError(null);
-    try {
-      await AlterView(db, schema, name, next ? "SET SECURE" : "UNSET SECURE");
-      await reload();
-    } catch (e) {
-      setActionError(`${next ? "Set" : "Unset"} SECURE failed: ${String(e)}`);
-    } finally {
-      setSecureSaving(false);
-    }
+    await AlterView(db, schema, name, next ? "SET SECURE" : "UNSET SECURE");
+    await reload();
   };
 
-  const setChangeTracking = async (value: string) => {
-    setCtSaving(true);
-    setActionError(null);
-    try {
-      await AlterView(db, schema, name, `SET CHANGE_TRACKING = ${value}`);
-      await reload();
-    } catch (e) {
-      setActionError(`Change tracking update failed: ${String(e)}`);
-    } finally {
-      setCtSaving(false);
-    }
+  const setChangeTracking = async (next: boolean) => {
+    await AlterView(db, schema, name, `SET CHANGE_TRACKING = ${next ? "TRUE" : "FALSE"}`);
+    await reload();
   };
 
   // In-place rename within the same schema — mirrors the sidebar's Rename dialog
@@ -296,17 +278,6 @@ export default function ViewPropertiesModal({ db, schema, name, onClose, onSucce
       )}
       {rows && (
         <>
-          {actionError && (
-            <Alert
-              type="error"
-              message={actionError}
-              showIcon
-              closable
-              onClose={() => setActionError(null)}
-              style={{ marginBottom: 12 }}
-            />
-          )}
-
           <div style={SECTION_HEAD}>Settings</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
@@ -325,12 +296,7 @@ export default function ViewPropertiesModal({ db, schema, name, onClose, onSucce
               <tr>
                 <td style={LABEL_TD}>Secure</td>
                 <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
-                  <Switch
-                    size="small"
-                    checked={isSecure}
-                    loading={secureSaving}
-                    onChange={toggleSecure}
-                  />
+                  <ConfirmSwitch checked={isSecure} onConfirm={toggleSecure} />
                 </td>
               </tr>
               <tr>
@@ -338,14 +304,7 @@ export default function ViewPropertiesModal({ db, schema, name, onClose, onSucce
                 <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
                   <Space>
                     <Tag color={ctOn ? "green" : "default"}>{ctOn ? "ON" : "OFF"}</Tag>
-                    <Select
-                      size="small"
-                      value={ctOn ? "TRUE" : "FALSE"}
-                      onChange={setChangeTracking}
-                      loading={ctSaving}
-                      style={{ width: 100 }}
-                      options={[{ value: "TRUE", label: "On" }, { value: "FALSE", label: "Off" }]}
-                    />
+                    <ConfirmSwitch checked={ctOn} onConfirm={setChangeTracking} />
                   </Space>
                 </td>
               </tr>

@@ -4,13 +4,14 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Modal, Spin, Button, Input, Space, Typography, Alert, Tooltip, Switch,
+  Modal, Spin, Button, Input, Space, Typography, Alert, Tooltip,
 } from "antd";
 import {
   FunctionOutlined, EditOutlined, CheckOutlined, CloseOutlined,
 } from "@ant-design/icons";
 import { GetRoutineProperties, AlterFunction } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
+import { ConfirmSwitch } from "../common/ConfirmSwitch";
 
 const { Text } = Typography;
 
@@ -142,8 +143,6 @@ interface Props {
 export default function FunctionPropertiesModal({ db, schema, name, args, onClose }: Props) {
   const [rows, setRows] = useState<snowflake.PropertyPair[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [secureSaving, setSecureSaving] = useState(false);
 
   const reload = useCallback(async () => {
     setRows(null);
@@ -173,16 +172,8 @@ export default function FunctionPropertiesModal({ db, schema, name, args, onClos
   };
 
   const toggleSecure = async (next: boolean) => {
-    setSecureSaving(true);
-    setActionError(null);
-    try {
-      await AlterFunction(db, schema, name, args, next ? "SET SECURE" : "UNSET SECURE");
-      await reload();
-    } catch (e) {
-      setActionError(`${next ? "Set" : "Unset"} SECURE failed: ${String(e)}`);
-    } finally {
-      setSecureSaving(false);
-    }
+    await AlterFunction(db, schema, name, args, next ? "SET SECURE" : "UNSET SECURE");
+    await reload();
   };
 
   const comment = find("comment");
@@ -218,17 +209,6 @@ export default function FunctionPropertiesModal({ db, schema, name, args, onClos
       )}
       {rows && (
         <>
-          {actionError && (
-            <Alert
-              type="error"
-              message={actionError}
-              showIcon
-              closable
-              onClose={() => setActionError(null)}
-              style={{ marginBottom: 12 }}
-            />
-          )}
-
           <div style={SECTION_HEAD}>Settings</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
@@ -242,12 +222,7 @@ export default function FunctionPropertiesModal({ db, schema, name, args, onClos
               <tr>
                 <td style={LABEL_TD}>Secure</td>
                 <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
-                  <Switch
-                    size="small"
-                    checked={isSecure}
-                    loading={secureSaving}
-                    onChange={toggleSecure}
-                  />
+                  <ConfirmSwitch checked={isSecure} onConfirm={toggleSecure} />
                 </td>
               </tr>
             </tbody>
