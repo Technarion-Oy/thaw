@@ -74,6 +74,7 @@ const CrossTabSearch         = lazy(() => import("../components/editor/CrossTabS
 const QueryProfileModal      = lazy(() => import("../components/results/QueryProfileModal"));
 const TerminalPanel          = lazy(() => import("../components/terminal/TerminalPanel"));
 const NotebookTab            = lazy(() => import("../components/notebook/NotebookTab"));
+import { useShallow } from "zustand/react/shallow";
 import { useQueryStore, type QueryResult, type Tab, EXECUTE_IN_TAB_EVENT } from "../store/queryStore";
 import { openFileInTab } from "../utils/openFileInTab";
 import { useConnectionStore } from "../store/connectionStore";
@@ -95,7 +96,29 @@ const saveDefaultName = (tab: Tab) =>
   tab.isDefaultTitle ? "untitled.sql" : tab.title;
 
 export default function QueryPage() {
-  const { sql, selectedSql, isRunning, error, setResult, setError, markSaved, openScratch, setSql, openNotebook, openNotebookUnsaved, refreshFileTab, orphanFileTab } = useQueryStore();
+  // Subscribe to specific fields via useShallow — NOT the bare `useQueryStore()`,
+  // which subscribed to the whole store and re-rendered the entire page (results
+  // grid included) on every keystroke. `sql` is deliberately excluded: it changes
+  // on every keystroke and is only needed inside callbacks (which read it fresh
+  // via getState), so leaving it out is what stops the per-keystroke re-render
+  // storm that made fast typing lag by seconds. (#762)
+  const { selectedSql, isRunning, error, setResult, setError, markSaved, openScratch, setSql, openNotebook, openNotebookUnsaved, refreshFileTab, orphanFileTab } =
+    useQueryStore(
+      useShallow((s) => ({
+        selectedSql: s.selectedSql,
+        isRunning: s.isRunning,
+        error: s.error,
+        setResult: s.setResult,
+        setError: s.setError,
+        markSaved: s.markSaved,
+        openScratch: s.openScratch,
+        setSql: s.setSql,
+        openNotebook: s.openNotebook,
+        openNotebookUnsaved: s.openNotebookUnsaved,
+        refreshFileTab: s.refreshFileTab,
+        orphanFileTab: s.orphanFileTab,
+      })),
+    );
   const activeTabId    = useQueryStore((s) => s.activeTabId);
   const isNotebookTab  = useQueryStore((s) => (s.tabs.find((t) => t.id === s.activeTabId)?.kind ?? "sql") === "notebook");
   const activeDiff     = useQueryStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.diff ?? null);
@@ -237,9 +260,13 @@ export default function QueryPage() {
     useGridStore.getState().resetNavigation();
   }, [activeTabId]);
 
-  // Track tab additions/removals to manage sessions.
-  const tabs = useQueryStore((s) => s.tabs);
-  const prevTabIdsRef = useRef<Set<string>>(new Set(tabs.map((t) => t.id)));
+  // Track tab additions/removals to manage sessions. Subscribe to the tab-id
+  // *set* (a signature string), NOT the `tabs` array identity — a per-keystroke
+  // SQL edit rebuilds `tabs`, so subscribing to the array re-rendered the whole
+  // page on every character. The signature only changes when a tab is added or
+  // removed. Callbacks that need live tab data read it via getState(). (#762)
+  const tabIdsSig = useQueryStore((s) => s.tabs.map((t) => t.id).join(" "));
+  const prevTabIdsRef = useRef<Set<string>>(new Set(useQueryStore.getState().tabs.map((t) => t.id)));
   const sessionInitModeRef = useRef<string>("lazy");
   // Load init mode once on mount and when config changes via save.
   useEffect(() => {
@@ -251,7 +278,7 @@ export default function QueryPage() {
     return () => window.removeEventListener("thaw:session-config-saved", handler);
   }, []);
   useEffect(() => {
-    const currentIds = new Set(tabs.map((t) => t.id));
+    const currentIds = new Set(useQueryStore.getState().tabs.map((t) => t.id));
     // New tabs: init eagerly only when explicitly configured.
     if (sessionInitModeRef.current === "eager") {
       currentIds.forEach((id) => {
@@ -267,7 +294,7 @@ export default function QueryPage() {
       }
     });
     prevTabIdsRef.current = currentIds;
-  }, [tabs]);
+  }, [tabIdsSig]);
 
   // Re-read a single file-backed tab from disk: refresh content (clean tabs
   // only — see refreshFileTab) or orphan it if the file is gone.
@@ -277,7 +304,7 @@ export default function QueryPage() {
   // landing after a newer one would otherwise revert the tab to stale content
   // (observable on network filesystems). Only the latest-issued read applies.
   const readSeqRef = useRef<Map<string, number>>(new Map());
-  const rereadTab = useCallback(async (tab: typeof tabs[number]) => {
+  const rereadTab = useCallback(async (tab: Tab) => {
     if (!tab.path) return;
     const seq = (readSeqRef.current.get(tab.id) ?? 0) + 1;
     readSeqRef.current.set(tab.id, seq);
@@ -444,6 +471,9 @@ export default function QueryPage() {
   }, [setSplitEditorWidth]);
 
   const runQuery = async (overrideSql?: string) => {
+    // `sql` is no longer a reactive subscription (#762) — read the live active-tab
+    // text from the store at call time so a run always uses the current buffer.
+    const sql = useQueryStore.getState().sql;
     if (!isConnected) {
       const q = overrideSql ?? (selectedSql.trim() || sql.trim());
       if (q) pendingQueryRef.current = q;

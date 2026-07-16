@@ -60,6 +60,14 @@ Persistence is handled per-store via Zustand's `persist` middleware.
   `safeLocalStorage` silently drops writes; the in-memory store remains
   authoritative. Results are never persisted. File-backed tab SQL content is
   cleared before persist to stay within budget.
+- **`queryStore` persist is debounced (#762).** `persist` serializes and writes
+  on every `set()`, and a keystroke does a `setSql` (plus, on selection change, a
+  `setSelectedSql`), so an unthrottled write made letters appear slowly as open
+  scratch-tab content grew — a synchronous `localStorage.setItem` in WKWebView
+  blocks the main thread. `safeLocalStorage.setItem` now coalesces writes and
+  flushes the newest value 500 ms after the last one (and on `pagehide` /
+  `visibilitychange`→hidden, so a quit/reload doesn't lose the last burst).
+  `getItem` returns any still-pending value so a rehydrate never reads stale data.
 - **`connectionStore` credential stripping.** `password`, `passcode`,
   `privateKeyPassphrase`, `token`, `oauthClientSecret`, and `proxyPassword` are
   zeroed in the persisted slice so they are never written to `sessionStorage`.

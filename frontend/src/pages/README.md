@@ -35,8 +35,10 @@ progress tracking and per-statement editor highlighting.
 
 **Tab session management**
 
-`QueryPage` tracks which tab IDs are new or removed on each render and calls
-`InitTabSession`/`CloseTabSession` via IPC accordingly. Session init mode
+`QueryPage` tracks which tab IDs are new or removed (via a `tabIdsSig` tab-id
+signature subscription, so the effect fires only when the tab *set* changes — not
+on every keystroke) and calls `InitTabSession`/`CloseTabSession` via IPC
+accordingly. Session init mode
 (`lazy` vs `eager`) is loaded from the backend and re-read whenever the user
 saves session config. On tab switch, `useSessionStore.setActiveTab` is called
 for instant feedback from cache, followed by `loadContext` for a fresh
@@ -48,6 +50,23 @@ Result history (`HistoryEntry[]`) is local React state keyed by tab ID (a
 `Map<string, HistoryEntry[]>`). Up to ten unpinned entries plus all pinned
 entries are retained per tab. History state is not persisted — it resets on
 page reload.
+
+**Typing stays off the re-render path (#762)**
+
+`QueryPage` renders the whole page — the results grid (`ResultGrid`, a heavy
+TanStack table) included — so it must **not** re-render on every keystroke.
+A keystroke does `setSql`, which rebuilds the `tabs` array and the flat `sql`
+alias. `QueryPage` therefore avoids subscribing to either: it selects only the
+fields it renders (`selectedSql`/`isRunning`/`error` + stable action refs, via
+`useShallow`) and subscribes to the tab-id signature (`tabIdsSig`) rather than
+the `tabs` array. `sql` is read via `useQueryStore.getState()` inside `runQuery`
+(and the save/close callbacks already read `getState().tabs`). `TabBar` uses the
+same signature trick — it subscribes to a signature of only the fields the strip
+shows (id/title/path/kind/diff/mcpOrigin/orphaned/dirty) and snapshots the live
+array with a `useMemo` keyed on it. `SqlEditor` is the only component that
+re-renders per keystroke (it reads `sql` for the controlled Monaco `value`); its
+`options` object and `onChange` handler are memoized so `@monaco-editor/react`
+doesn't re-apply options / re-subscribe the change listener each character.
 
 **Panel layout and split drag**
 

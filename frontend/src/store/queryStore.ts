@@ -8,16 +8,60 @@ import { ExecuteQuery } from "../../wailsjs/go/app/App";
 
 // Wraps localStorage to swallow QuotaExceededError on setItem.
 // Persistence is best-effort — the in-memory store remains authoritative.
-const safeLocalStorage: StateStorage = {
-  getItem: (name) => localStorage.getItem(name),
-  setItem: (name, value) => {
+//
+// The write is DEBOUNCED (#762): zustand's `persist` serializes the partialized
+// state and calls setItem synchronously on *every* `set()`, and a keystroke does
+// one `set()` (setSql) plus, on selection change, another (setSelectedSql). A
+// synchronous localStorage write in WKWebView blocks the main thread and makes
+// letters appear slowly as open scratch-tab content grows. Coalescing the writes
+// keeps only the latest value and flushes it after a short typing pause; the
+// in-memory store stays authoritative, so a dropped/late write only affects what
+// is restored after a reload — which persistence is explicitly best-effort about.
+const PERSIST_DEBOUNCE_MS = 500;
+const pendingWrites = new Map<string, string>();
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+function flushPendingWrites(): void {
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+  for (const [name, value] of pendingWrites) {
     try {
       localStorage.setItem(name, value);
     } catch {
       // QuotaExceededError — silently drop; data lives in memory.
     }
+  }
+  pendingWrites.clear();
+}
+
+// Flush any coalesced write before the page is torn down so the last burst of
+// typing isn't lost on quit/reload. pagehide covers WKWebView navigation/close;
+// visibilitychange(hidden) covers backgrounding.
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", flushPendingWrites);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushPendingWrites();
+  });
+}
+
+const safeLocalStorage: StateStorage = {
+  getItem: (name) => {
+    // A read must see the newest value even if its write is still pending —
+    // otherwise a rehydrate racing an in-flight debounce would read stale data.
+    const pending = pendingWrites.get(name);
+    return pending !== undefined ? pending : localStorage.getItem(name);
   },
-  removeItem: (name) => localStorage.removeItem(name),
+  setItem: (name, value) => {
+    pendingWrites.set(name, value);
+    if (flushTimer) clearTimeout(flushTimer);
+    flushTimer = setTimeout(flushPendingWrites, PERSIST_DEBOUNCE_MS);
+  },
+  removeItem: (name) => {
+    pendingWrites.delete(name);
+    localStorage.removeItem(name);
+  },
 };
 
 // Custom event name used by executeInNewTab to ask QueryPage to run a query
