@@ -16,7 +16,6 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"thaw/internal/snowflake"
-	"thaw/internal/sqleditor"
 )
 
 // expectedTools is the full tool set the server exposes in metadata mode
@@ -780,20 +779,6 @@ func TestSfFKsToFKEntries(t *testing.T) {
 		t.Fatalf("len = %d, want 1", len(got))
 	}
 	if got[0].PKTable != "PARENT" || got[0].FKColumn != "PARENT_ID" || got[0].ConstraintName != "FK_CHILD_PARENT" {
-		t.Errorf("got[0] = %+v", got[0])
-	}
-}
-
-// TestStoreObjsToResolvedRefs verifies store object → resolved ref conversion.
-func TestStoreObjsToResolvedRefs(t *testing.T) {
-	objs := []sqleditor.StoreObject{
-		{DB: "DB1", Schema: "S1", Name: "T1", Kind: "TABLE"},
-	}
-	got := storeObjsToResolvedRefs(objs)
-	if len(got) != 1 {
-		t.Fatalf("len = %d, want 1", len(got))
-	}
-	if got[0].DB != "DB1" || got[0].Schema != "S1" || got[0].Name != "T1" {
 		t.Errorf("got[0] = %+v", got[0])
 	}
 }
