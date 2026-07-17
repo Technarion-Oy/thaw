@@ -50,6 +50,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/editor/CrossTabSearch.tsx",
         "frontend/src/components/editor/SqlEditor.tsx",
         "frontend/src/components/editor/sqlEditorUtils.ts",
+        "frontend/src/components/export/ExcelExportModal.tsx",
         "frontend/src/components/results/CellDetailPanel.tsx",
         "frontend/src/components/results/ColumnFilterDropdown.tsx",
         "frontend/src/components/results/ConditionalFormattingModal.tsx",
@@ -64,6 +65,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/results/columnOrderUtils.ts",
         "frontend/src/store/gridStore.ts",
         "frontend/src/store/queryStore.ts",
+        "frontend/src/utils/excelSheetName.ts",
         "frontend/src/utils/openFileInTab.ts"
       ],
       "description": "Proprietary SQL tokenizer, syntax validation, and Monaco editor UI components."

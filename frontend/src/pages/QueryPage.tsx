@@ -65,6 +65,7 @@ const SessionPropertiesModal = lazy(() => import("../components/common/SessionPr
 const SnippetsModal          = lazy(() => import("../components/snippets/SnippetsModal"));
 const ExportPathFormatModal  = lazy(() => import("../components/export/ExportPathFormatModal"));
 const ExportOptionsModal     = lazy(() => import("../components/export/ExportOptionsModal"));
+const ExcelExportModal       = lazy(() => import("../components/export/ExcelExportModal"));
 const MigrationModal         = lazy(() => import("../components/migration/MigrationModal"));
 const DbtProjectModal        = lazy(() => import("../components/dbt/DbtProjectModal"));
 const FunctionCatalogModal   = lazy(() => import("../components/fnmeta/FunctionCatalogModal"));
@@ -77,6 +78,8 @@ const TerminalPanel          = lazy(() => import("../components/terminal/Termina
 const NotebookTab            = lazy(() => import("../components/notebook/NotebookTab"));
 import { useQueryStore, type QueryResult, type Tab, EXECUTE_IN_TAB_EVENT } from "../store/queryStore";
 import { openFileInTab } from "../utils/openFileInTab";
+import { deriveSheetName } from "../utils/excelSheetName";
+import type { ExcelExportEntry } from "../components/export/ExcelExportModal";
 import { useConnectionStore } from "../store/connectionStore";
 import { useSessionStore } from "../store/sessionStore";
 import { useGitStore } from "../store/gitStore";
@@ -200,6 +203,7 @@ export default function QueryPage() {
 
   const [snippetsOpen, setSnippetsOpen] = useState(false);
   const [exportPathFormatOpen, setExportPathFormatOpen] = useState(false);
+  const [excelExportOpen, setExcelExportOpen] = useState(false);
   const [exportDdlOpen, setExportDdlOpen] = useState(false);
   const [migrationOpen, setMigrationOpen] = useState(false);
   const [dbtCreateOpen, setDbtCreateOpen] = useState(false);
@@ -666,23 +670,56 @@ export default function QueryPage() {
     }
   };
 
+  // Excel export button. With more than one resultset in history, open the
+  // multi-select modal (one sheet per chosen resultset); otherwise export the
+  // single displayed result directly.
   const exportExcel = async () => {
+    if (resultHistory.length > 1) {
+      setExcelExportOpen(true);
+      return;
+    }
     if (!displayedResult) return;
+    const entry = resultHistory.find((e) => e.id === historyId);
+    await writeExcelWorkbook([{ sql: entry?.sql ?? "", index: 1, result: displayedResult }]);
+  };
+
+  // Build a single .xlsx workbook with one sheet per resultset and save it via a
+  // native dialog. Sheet names are derived from each query (31-char capped,
+  // invalid chars stripped, de-duplicated).
+  const writeExcelWorkbook = async (sheets: Array<{ sql: string; index: number; result: QueryResult }>) => {
+    if (sheets.length === 0) return;
     // Load the ~17 MB xlsx library on demand — Excel export is rarely the first
     // thing a user does, so it must not sit in the eager boot bundle.
     const XLSX = await import("xlsx");
-    const ws = XLSX.utils.aoa_to_sheet([displayedResult.columns, ...displayedResult.rows]);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Results");
+    const used = new Set<string>();
+    for (const s of sheets) {
+      const ws = XLSX.utils.aoa_to_sheet([s.result.columns, ...s.result.rows]);
+      XLSX.utils.book_append_sheet(wb, ws, deriveSheetName(s.sql, s.index, used));
+    }
     const b64 = XLSX.write(wb, { type: "base64", bookType: "xlsx" });
     const path = await PickSaveExportFile("results.xlsx", "excel");
     if (!path) return;
     try {
       await SaveBinaryFile(path, b64);
-      message.success("Exported to Excel");
+      message.success(sheets.length > 1 ? `Exported ${sheets.length} resultsets to Excel` : "Exported to Excel");
     } catch (e) {
       message.error(String(e));
     }
+  };
+
+  // Export the resultsets selected in the modal, in the given order (one sheet
+  // each). `ids` are HistoryEntry ids; entries are resolved against the current
+  // history and numbered by their dropdown position.
+  const exportExcelSheets = async (ids: string[]) => {
+    setExcelExportOpen(false);
+    const sheets = ids
+      .map((id) => {
+        const entry = resultHistory.find((e) => e.id === id);
+        return entry ? { sql: entry.sql, index: resultHistory.indexOf(entry) + 1, result: entry.result } : null;
+      })
+      .filter((s): s is { sql: string; index: number; result: QueryResult } => s !== null);
+    await writeExcelWorkbook(sheets);
   };
 
   // Save to the tab's existing path, or open a Save As dialog if it has none.
@@ -1132,6 +1169,17 @@ export default function QueryPage() {
     return n.length > 45 ? n.slice(0, 45) + "…" : n;
   };
 
+  // Resultsets selectable in the Excel export modal, most-recent-first (matching
+  // the history dropdown order). The 1-based index is the resultset number shown
+  // in the dropdown and drives the "Result N" sheet-name fallback.
+  const excelExportEntries: ExcelExportEntry[] = sortedHistory.map((e) => ({
+    id: e.id,
+    index: resultHistory.indexOf(e) + 1,
+    sql: e.sql,
+    rowCount: e.result.rows.length,
+    pinned: e.pinned,
+  }));
+
   // ── Notebook toolbar state (read from store, bridged by NotebookTab) ──────
   const nbKernelReady         = useNotebookToolbarStore((s) => s.kernelReady);
   const nbKernelStarting      = useNotebookToolbarStore((s) => s.kernelStarting);
@@ -1570,7 +1618,7 @@ export default function QueryPage() {
                         </Tooltip>
                       )}
                       {featureFlags.resultsetExport && (
-                        <Tooltip title="Export as Excel">
+                        <Tooltip title={resultHistory.length > 1 ? "Export resultsets as Excel…" : "Export as Excel"}>
                           <Button
                             type="text"
                             size="small"
@@ -1737,6 +1785,14 @@ export default function QueryPage() {
         {snippetsOpen && <SnippetsModal onClose={() => setSnippetsOpen(false)} />}
         {exportPathFormatOpen && <ExportPathFormatModal onClose={() => setExportPathFormatOpen(false)} />}
         {exportDdlOpen && <ExportOptionsModal onClose={() => setExportDdlOpen(false)} />}
+        {excelExportOpen && (
+          <ExcelExportModal
+            open
+            entries={excelExportEntries}
+            onCancel={() => setExcelExportOpen(false)}
+            onExport={exportExcelSheets}
+          />
+        )}
         {migrationOpen && <MigrationModal onClose={() => setMigrationOpen(false)} />}
         {dbtCreateOpen && <DbtProjectModal onClose={() => setDbtCreateOpen(false)} />}
         {fnCatalogOpen && <FunctionCatalogModal onClose={() => setFnCatalogOpen(false)} />}
