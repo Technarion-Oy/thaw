@@ -4,8 +4,7 @@ import { useMemo, useState } from "react";
 import { Dropdown, Button, Input } from "antd";
 import { FunctionOutlined, SearchOutlined } from "@ant-design/icons";
 import {
-  DEFAULT_FUNCTIONS,
-  DEFAULT_FUNCTION_CATEGORIES,
+  filterDefaultFunctions,
   type BuiltinFn,
 } from "./builtinFunctions";
 
@@ -13,31 +12,47 @@ import {
  * Small dropdown button that fills a column DEFAULT with a Snowflake built-in
  * function. The panel is searchable and groups the curated catalog by category
  * so the full set of functions valid as a CREATE TABLE column DEFAULT is easy to
- * scan. Shared by the Create Table dialog and the ER Designer column editor.
- * Function-expression defaults are rejected on an existing column, so this
- * picker is not used by the Column Properties modal (see SequenceDefaultPicker).
+ * scan. Arrow keys move the highlight and Enter picks it, so the panel stays
+ * keyboard-operable (matching the old antd Menu it replaced). Shared by the
+ * Create Table dialog and the ER Designer column editor. Function-expression
+ * defaults are rejected on an existing column, so this picker is not used by the
+ * Column Properties modal (see SequenceDefaultPicker).
  */
 export default function DefaultFunctionPicker({ onPick }: { onPick: (sql: string) => void }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [active, setActive] = useState(0);
 
-  const groups = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const match = (f: BuiltinFn) =>
-      q === "" ||
-      f.name.toLowerCase().includes(q) ||
-      f.sql.toLowerCase().includes(q) ||
-      f.desc.toLowerCase().includes(q);
-    return DEFAULT_FUNCTION_CATEGORIES.map((category) => ({
-      category,
-      fns: DEFAULT_FUNCTIONS.filter((f) => f.category === category && match(f)),
-    })).filter((g) => g.fns.length > 0);
-  }, [query]);
+  const groups = useMemo(() => filterDefaultFunctions(query), [query]);
 
-  function pick(f: BuiltinFn) {
+  // Flatten the visible functions so arrow keys can walk across categories.
+  const flat = useMemo(() => groups.flatMap((g) => g.fns), [groups]);
+
+  function pick(f: BuiltinFn | undefined) {
+    if (!f) return;
     onPick(f.sql);
     setOpen(false);
     setQuery("");
+    setActive(0);
+  }
+
+  function onSearchChange(value: string) {
+    setQuery(value);
+    setActive(0); // Reset the highlight to the first match on every keystroke.
+  }
+
+  function onKeyDown(e: React.KeyboardEvent) {
+    if (flat.length === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActive((i) => (i + 1) % flat.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActive((i) => (i - 1 + flat.length) % flat.length);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      pick(flat[active]);
+    }
   }
 
   return (
@@ -47,6 +62,7 @@ export default function DefaultFunctionPicker({ onPick }: { onPick: (sql: string
       onOpenChange={(next) => {
         setOpen(next);
         if (!next) setQuery("");
+        setActive(0);
       }}
       dropdownRender={() => (
         <div
@@ -67,17 +83,11 @@ export default function DefaultFunctionPicker({ onPick }: { onPick: (sql: string
               prefix={<SearchOutlined style={{ color: "var(--text-muted)" }} />}
               placeholder="Search functions…"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                // Enter picks the single remaining match — quick keyboard flow.
-                if (e.key === "Enter") {
-                  const only = groups.length === 1 && groups[0].fns.length === 1;
-                  if (only) pick(groups[0].fns[0]);
-                }
-              }}
+              onChange={(e) => onSearchChange(e.target.value)}
+              onKeyDown={onKeyDown}
             />
           </div>
-          <div style={{ maxHeight: 300, overflowY: "auto", padding: "4px 0" }}>
+          <div role="listbox" style={{ maxHeight: 300, overflowY: "auto", padding: "4px 0" }}>
             {groups.length === 0 ? (
               <div style={{ padding: "12px", fontSize: 12, color: "var(--text-muted)", textAlign: "center" }}>
                 No functions match “{query}”
@@ -97,23 +107,28 @@ export default function DefaultFunctionPicker({ onPick }: { onPick: (sql: string
                   >
                     {g.category}
                   </div>
-                  {g.fns.map((f) => (
-                    <div
-                      key={f.sql}
-                      onClick={() => pick(f)}
-                      title={f.desc}
-                      style={{
-                        padding: "4px 12px",
-                        cursor: "pointer",
-                        lineHeight: 1.35,
-                      }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                    >
-                      <code style={{ fontSize: 12 }}>{f.sql}</code>
-                      <div style={{ color: "var(--text-muted)", fontSize: 11 }}>{f.desc}</div>
-                    </div>
-                  ))}
+                  {g.fns.map((f) => {
+                    const isActive = flat[active]?.sql === f.sql;
+                    return (
+                      <div
+                        key={f.sql}
+                        role="option"
+                        aria-selected={isActive}
+                        onClick={() => pick(f)}
+                        onMouseEnter={() => setActive(flat.findIndex((x) => x.sql === f.sql))}
+                        title={f.desc}
+                        style={{
+                          padding: "4px 12px",
+                          cursor: "pointer",
+                          lineHeight: 1.35,
+                          background: isActive ? "var(--bg-hover)" : "transparent",
+                        }}
+                      >
+                        <code style={{ fontSize: 12 }}>{f.sql}</code>
+                        <div style={{ color: "var(--text-muted)", fontSize: 11 }}>{f.desc}</div>
+                      </div>
+                    );
+                  })}
                 </div>
               ))
             )}

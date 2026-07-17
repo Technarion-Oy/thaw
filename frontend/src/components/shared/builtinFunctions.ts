@@ -8,7 +8,17 @@
 // columns are rejected, so they are deliberately excluded). Surfaced by the
 // DefaultFunctionPicker — the "insert as DEFAULT" pickers in Create Table and
 // the ER Designer, and the per-field value picker in the Insert Row form.
-export type BuiltinFnCategory = "Date & Time" | "Session & Context" | "Identifiers & Misc";
+
+// Display order for the grouped picker. This tuple is the single source of
+// truth: BuiltinFnCategory is derived from it, so adding/renaming a category
+// here is enough — a `category` value that isn't in this list won't type-check.
+export const DEFAULT_FUNCTION_CATEGORIES = [
+  "Date & Time",
+  "Session & Context",
+  "Identifiers & Misc",
+] as const;
+
+export type BuiltinFnCategory = (typeof DEFAULT_FUNCTION_CATEGORIES)[number];
 
 export interface BuiltinFn {
   name: string;
@@ -16,13 +26,6 @@ export interface BuiltinFn {
   desc: string;
   category: BuiltinFnCategory;
 }
-
-// Display order for the grouped picker.
-export const DEFAULT_FUNCTION_CATEGORIES: BuiltinFnCategory[] = [
-  "Date & Time",
-  "Session & Context",
-  "Identifiers & Misc",
-];
 
 export const DEFAULT_FUNCTIONS: BuiltinFn[] = [
   // ── Date & Time ────────────────────────────────────────────────────────
@@ -52,3 +55,27 @@ export const DEFAULT_FUNCTIONS: BuiltinFn[] = [
   { name: "UUID_STRING", sql: "UUID_STRING()", desc: "Random UUID v4 string", category: "Identifiers & Misc" },
   { name: "RANDOM", sql: "RANDOM()", desc: "Pseudo-random 64-bit signed integer", category: "Identifiers & Misc" },
 ];
+
+export interface BuiltinFnGroup {
+  category: BuiltinFnCategory;
+  fns: BuiltinFn[];
+}
+
+/**
+ * Filters DEFAULT_FUNCTIONS by a free-text query (matched case-insensitively
+ * against name, SQL and description) and returns them grouped by category in
+ * DEFAULT_FUNCTION_CATEGORIES order. Empty groups are omitted. A blank query
+ * returns every function. Pure — shared by the picker UI and unit tests.
+ */
+export function filterDefaultFunctions(query: string): BuiltinFnGroup[] {
+  const q = query.trim().toLowerCase();
+  const match = (f: BuiltinFn) =>
+    q === "" ||
+    f.name.toLowerCase().includes(q) ||
+    f.sql.toLowerCase().includes(q) ||
+    f.desc.toLowerCase().includes(q);
+  return DEFAULT_FUNCTION_CATEGORIES.map((category) => ({
+    category,
+    fns: DEFAULT_FUNCTIONS.filter((f) => f.category === category && match(f)),
+  })).filter((g) => g.fns.length > 0);
+}
