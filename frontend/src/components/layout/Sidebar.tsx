@@ -304,6 +304,91 @@ interface ContextMenu {
   colMeta?: { dataType: string; nullable: boolean; isPrimaryKey: boolean; parentKind: string; comment: string }; // set for nodeType === "col"
 }
 
+// DROPPED_KIND_ORDER fixes the section order in the "Show Dropped Objects"
+// modals so groups render in a stable, familiar sequence rather than result
+// order. Kinds not listed here sort last (alphabetically among themselves).
+const DROPPED_KIND_ORDER = ["TABLE", "ICEBERG TABLE", "SCHEMA", "DATABASE"];
+
+// droppedKindHeading maps a DroppedTable.kind to a pluralised section heading.
+function droppedKindHeading(kind: string): string {
+  switch (kind) {
+    case "TABLE": return "Tables";
+    case "ICEBERG TABLE": return "Iceberg Tables";
+    case "SCHEMA": return "Schemas";
+    case "DATABASE": return "Databases";
+    default: return kind;
+  }
+}
+
+// DroppedObjectGroups renders a list of dropped objects sectioned by kind, each
+// row showing the name, its dropped-on timestamp, and an Undrop button. It is
+// shared by all three "Show Dropped Objects" modals (schema, database, account
+// scope) so grouping and styling stay consistent. onUndrop receives the whole
+// row so the caller can pick the correct UNDROP statement from its kind.
+function DroppedObjectGroups({
+  objects,
+  onUndrop,
+}: {
+  objects: snowflake.DroppedTable[];
+  onUndrop: (obj: snowflake.DroppedTable) => void;
+}) {
+  const byKind = new Map<string, snowflake.DroppedTable[]>();
+  for (const o of objects) {
+    const k = o.kind || "TABLE";
+    const arr = byKind.get(k);
+    if (arr) arr.push(o);
+    else byKind.set(k, [o]);
+  }
+  const rank = (k: string) => {
+    const i = DROPPED_KIND_ORDER.indexOf(k);
+    return i === -1 ? DROPPED_KIND_ORDER.length : i;
+  };
+  const kinds = Array.from(byKind.keys()).sort(
+    (a, b) => rank(a) - rank(b) || a.localeCompare(b),
+  );
+  return (
+    <div>
+      {kinds.map((kind) => (
+        <div key={kind} style={{ marginBottom: 12 }}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              textTransform: "uppercase",
+              letterSpacing: 0.5,
+              color: "var(--text-muted)",
+              padding: "4px 4px 6px",
+            }}
+          >
+            {droppedKindHeading(kind)}{" "}
+            <span style={{ opacity: 0.6 }}>({byKind.get(kind)!.length})</span>
+          </div>
+          {byKind.get(kind)!.map((o) => (
+            <div
+              key={`${o.name}|${o.droppedOn}`}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "8px 4px",
+                borderBottom: "1px solid var(--border)",
+              }}
+            >
+              <div>
+                <div style={{ fontFamily: "monospace", fontSize: 13, color: "var(--text)" }}>{o.name}</div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>Dropped: {o.droppedOn}</div>
+              </div>
+              <Button size="small" icon={<RollbackOutlined />} onClick={() => onUndrop(o)}>
+                Undrop
+              </Button>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 interface UndropModal {
   db: string;
   schema: string;
@@ -1602,13 +1687,18 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     }
   };
 
-  const undropTable = async (db: string, schema: string, name: string) => {
+  // undropSchemaObject restores a dropped schema-level object (regular or
+  // iceberg table). The UNDROP keyword is chosen from the row's kind so iceberg
+  // tables use UNDROP ICEBERG TABLE (a plain UNDROP TABLE would fail on them).
+  const undropSchemaObject = async (db: string, schema: string, obj: snowflake.DroppedTable) => {
     const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
-    const sql = `UNDROP TABLE ${q(db)}.${q(schema)}.${q(name)};`;
+    const kind = obj.kind === "ICEBERG TABLE" ? "ICEBERG TABLE" : "TABLE";
+    const label = kind === "ICEBERG TABLE" ? "Iceberg table" : "Table";
+    const sql = `UNDROP ${kind} ${q(db)}.${q(schema)}.${q(obj.name)};`;
     setUndropModal(null);
     try {
       await ExecDDL(sql);
-      message.success(`Table "${name}" restored`);
+      message.success(`${label} "${obj.name}" restored`);
       refreshDatabaseByName(db);
     } catch (e) {
       message.error(String(e));
@@ -4652,7 +4742,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
               ), 1)}
             </>
           ))}
-          {ctxMenu.nodeType === "schema" && menuItem("Show Dropped Tables…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedTables)}
+          {ctxMenu.nodeType === "schema" && menuItem("Show Dropped Objects…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedTables)}
           {ctxMenu.nodeType === "schema" && menuItem("Export Data…", <DownloadOutlined style={{ fontSize: 12 }} />, openSchemaExportModal, undefined, !featureFlags.exportTableData, "Table Data Export is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "schema" && menuItem("Import Data…", <UploadOutlined style={{ fontSize: 12 }} />, openSchemaImportModal, undefined, !featureFlags.tableDataImport, "Table Data Import is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "schema" && menuItem("Backup Sets…", <SaveOutlined style={{ fontSize: 12 }} />, openBackupSets, undefined, !featureFlags.backupPoliciesAndSets, "Backup Policies & Sets is disabled. Enable it under View → Enabled Features…")}
@@ -6208,10 +6298,10 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         />
       )}
 
-      {/* Undrop Tables modal */}
+      {/* Show Dropped Objects — schema scope (tables + iceberg tables) */}
       <Modal
         open={undropModal !== null}
-        title={undropModal ? `Dropped tables — ${undropModal.db}.${undropModal.schema}` : ""}
+        title={undropModal ? `Dropped objects — ${undropModal.db}.${undropModal.schema}` : ""}
         onCancel={() => setUndropModal(null)}
         footer={null}
         width={560}
@@ -6228,42 +6318,20 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         )}
         {undropModal?.tables !== null && !undropModal?.error && undropModal?.tables?.length === 0 && (
           <div style={{ color: "var(--text-muted)", fontSize: 13, padding: "12px 0" }}>
-            No dropped tables found within the Time Travel retention window.
+            No dropped objects found within the Time Travel retention window.
           </div>
         )}
-        {undropModal?.tables !== null && !undropModal?.error && (undropModal?.tables?.length ?? 0) > 0 && (
-          <div>
-            {undropModal!.tables!.map((t) => (
-              <div
-                key={t.name}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "8px 4px",
-                  borderBottom: "1px solid var(--border)",
-                }}
-              >
-                <div>
-                  <div style={{ fontFamily: "monospace", fontSize: 13, color: "var(--text)" }}>{t.name}</div>
-                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>Dropped: {t.droppedOn}</div>
-                </div>
-                <Button
-                  size="small"
-                  icon={<RollbackOutlined />}
-                  onClick={() => undropTable(undropModal!.db, undropModal!.schema, t.name)}
-                >
-                  Undrop
-                </Button>
-              </div>
-            ))}
-          </div>
+        {undropModal?.tables && !undropModal.error && undropModal.tables.length > 0 && (
+          <DroppedObjectGroups
+            objects={undropModal.tables}
+            onUndrop={(obj) => undropSchemaObject(undropModal.db, undropModal.schema, obj)}
+          />
         )}
       </Modal>
-      {/* Undrop Schemas modal */}
+      {/* Show Dropped Objects — database scope (schemas) */}
       <Modal
         open={undropSchemasModal !== null}
-        title={undropSchemasModal ? `Dropped schemas — ${undropSchemasModal.db}` : ""}
+        title={undropSchemasModal ? `Dropped objects — ${undropSchemasModal.db}` : ""}
         onCancel={() => setUndropSchemasModal(null)}
         footer={null}
         width={560}
@@ -6278,30 +6346,21 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         )}
         {undropSchemasModal?.schemas !== null && !undropSchemasModal?.error && undropSchemasModal?.schemas?.length === 0 && (
           <div style={{ color: "var(--text-muted)", fontSize: 13, padding: "12px 0" }}>
-            No dropped schemas found within the Time Travel retention window.
+            No dropped objects found within the Time Travel retention window.
           </div>
         )}
-        {undropSchemasModal?.schemas !== null && !undropSchemasModal?.error && (undropSchemasModal?.schemas?.length ?? 0) > 0 && (
-          <div>
-            {undropSchemasModal!.schemas!.map((s) => (
-              <div key={s.name} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 4px", borderBottom: "1px solid var(--border)" }}>
-                <div>
-                  <div style={{ fontFamily: "monospace", fontSize: 13, color: "var(--text)" }}>{s.name}</div>
-                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>Dropped: {s.droppedOn}</div>
-                </div>
-                <Button size="small" icon={<RollbackOutlined />} onClick={() => undropSchema(undropSchemasModal!.db, s.name)}>
-                  Undrop
-                </Button>
-              </div>
-            ))}
-          </div>
+        {undropSchemasModal?.schemas && !undropSchemasModal.error && undropSchemasModal.schemas.length > 0 && (
+          <DroppedObjectGroups
+            objects={undropSchemasModal.schemas}
+            onUndrop={(obj) => undropSchema(undropSchemasModal.db, obj.name)}
+          />
         )}
       </Modal>
 
-      {/* Undrop Databases modal */}
+      {/* Show Dropped Objects — account scope (databases) */}
       <Modal
         open={undropDatabasesModal !== null}
-        title="Dropped databases"
+        title="Dropped objects — account"
         onCancel={() => setUndropDatabasesModal(null)}
         footer={null}
         width={560}
@@ -6316,23 +6375,14 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         )}
         {undropDatabasesModal?.databases !== null && !undropDatabasesModal?.error && undropDatabasesModal?.databases?.length === 0 && (
           <div style={{ color: "var(--text-muted)", fontSize: 13, padding: "12px 0" }}>
-            No dropped databases found within the Time Travel retention window.
+            No dropped objects found within the Time Travel retention window.
           </div>
         )}
-        {undropDatabasesModal?.databases !== null && !undropDatabasesModal?.error && (undropDatabasesModal?.databases?.length ?? 0) > 0 && (
-          <div>
-            {undropDatabasesModal!.databases!.map((d) => (
-              <div key={d.name} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 4px", borderBottom: "1px solid var(--border)" }}>
-                <div>
-                  <div style={{ fontFamily: "monospace", fontSize: 13, color: "var(--text)" }}>{d.name}</div>
-                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>Dropped: {d.droppedOn}</div>
-                </div>
-                <Button size="small" icon={<RollbackOutlined />} onClick={() => undropDatabase(d.name)}>
-                  Undrop
-                </Button>
-              </div>
-            ))}
-          </div>
+        {undropDatabasesModal?.databases && !undropDatabasesModal.error && undropDatabasesModal.databases.length > 0 && (
+          <DroppedObjectGroups
+            objects={undropDatabasesModal.databases}
+            onUndrop={(obj) => undropDatabase(obj.name)}
+          />
         )}
       </Modal>
 

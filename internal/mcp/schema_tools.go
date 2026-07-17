@@ -135,8 +135,9 @@ func registerSchemaTools(srv *mcpsdk.Server, client *snowflake.Client) {
 	})
 
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
-		Name:        "list_dropped_tables",
-		Description: "List tables that have been dropped in a schema (available for time-travel undrop).",
+		Name: "list_dropped_tables",
+		Description: "List tables that have been dropped in a schema (available for time-travel undrop). " +
+			"Each row's kind is \"TABLE\" or \"ICEBERG TABLE\"; iceberg tables must be restored with UNDROP ICEBERG TABLE.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in schemaInput) (*mcpsdk.CallToolResult, any, error) {
 		if in.Database == "" {
 			return nil, nil, fmt.Errorf("database is required")
@@ -163,6 +164,17 @@ func registerSchemaTools(srv *mcpsdk.Server, client *snowflake.Client) {
 			return nil, nil, err
 		}
 		return jsonResult(schemas), nil, nil
+	})
+
+	mcpsdk.AddTool(srv, &mcpsdk.Tool{
+		Name:        "list_dropped_databases",
+		Description: "List databases that have been dropped account-wide (available for time-travel undrop).",
+	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, _ emptyInput) (*mcpsdk.CallToolResult, any, error) {
+		databases, err := client.ListDroppedDatabases(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		return jsonResult(databases), nil, nil
 	})
 
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{

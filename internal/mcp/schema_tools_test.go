@@ -49,6 +49,7 @@ func TestSchemaToolsRegistered(t *testing.T) {
 		"validate_data_type",
 		"list_dropped_tables",
 		"list_dropped_schemas",
+		"list_dropped_databases",
 		"get_data_retention",
 	}
 	for _, name := range expected {
@@ -215,6 +216,7 @@ func TestSchemaToolsRegisteredInAllModes(t *testing.T) {
 		"validate_data_type",
 		"list_dropped_tables",
 		"list_dropped_schemas",
+		"list_dropped_databases",
 		"get_data_retention",
 	}
 

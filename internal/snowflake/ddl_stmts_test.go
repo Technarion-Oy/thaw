@@ -47,6 +47,9 @@ func TestDropShowStmtQuoting(t *testing.T) {
 		{"show grants to role reserved", showGrantsToRoleStmt("order"), `SHOW GRANTS TO ROLE "order"`},
 		{"show grants on role", showGrantsOnRoleStmt("ANALYST"), `SHOW GRANTS ON ROLE "ANALYST"`},
 		{"show schemas history", showSchemasHistoryStmt("MY_DB"), `SHOW SCHEMAS HISTORY IN DATABASE "MY_DB"`},
+		{"show tables history two-part", showTablesHistoryStmt("MY_DB", "MY_SCHEMA"), `SHOW TABLES HISTORY IN SCHEMA "MY_DB"."MY_SCHEMA"`},
+		{"show tables history mixed case", showTablesHistoryStmt("Db", "My Schema"), `SHOW TABLES HISTORY IN SCHEMA "Db"."My Schema"`},
+		{"show databases history", showDatabasesHistoryStmt(), `SHOW DATABASES HISTORY`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -54,5 +57,23 @@ func TestDropShowStmtQuoting(t *testing.T) {
 				t.Errorf("%s = %q, want %q", tc.name, tc.got, tc.want)
 			}
 		})
+	}
+}
+
+// TestIsTruthyFlag covers the SHOW-column flag spellings that mark a dropped
+// row as an iceberg table. "Y"/"N" is what SHOW TABLES HISTORY emits today;
+// "true"/"false" guards against version drift. Anything else is false.
+func TestIsTruthyFlag(t *testing.T) {
+	truthy := []string{"Y", "y", "YES", "true", "TRUE", "t", "1", " Y "}
+	for _, s := range truthy {
+		if !isTruthyFlag(s) {
+			t.Errorf("isTruthyFlag(%q) = false, want true", s)
+		}
+	}
+	falsy := []string{"N", "n", "NO", "false", "", "0", "<nil>", "iceberg"}
+	for _, s := range falsy {
+		if isTruthyFlag(s) {
+			t.Errorf("isTruthyFlag(%q) = true, want false", s)
+		}
 	}
 }

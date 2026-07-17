@@ -52,3 +52,17 @@ func showGrantsOnRoleStmt(role string) string {
 func showSchemasHistoryStmt(database string) string {
 	return "SHOW SCHEMAS HISTORY IN DATABASE " + QuoteIdent(database)
 }
+
+// showTablesHistoryStmt builds `SHOW TABLES HISTORY IN SCHEMA "<db>"."<schema>"`
+// — used to list dropped (but still within Time Travel) tables. The result
+// includes iceberg tables, distinguished by the is_iceberg output column.
+func showTablesHistoryStmt(database, schema string) string {
+	return "SHOW TABLES HISTORY IN SCHEMA " + Qualify(database, schema)
+}
+
+// showDatabasesHistoryStmt builds `SHOW DATABASES HISTORY` — used to list
+// dropped (but still within Time Travel) databases. There is no identifier to
+// quote; the builder exists so all history statements share one seam.
+func showDatabasesHistoryStmt() string {
+	return "SHOW DATABASES HISTORY"
+}

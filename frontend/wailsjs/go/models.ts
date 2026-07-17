@@ -4449,6 +4449,7 @@ export namespace snowflake {
 	export class DroppedTable {
 	    name: string;
 	    droppedOn: string;
+	    kind: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new DroppedTable(source);
@@ -4458,6 +4459,7 @@ export namespace snowflake {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
 	        this.droppedOn = source["droppedOn"];
+	        this.kind = source["kind"];
 	    }
 	}
 	export class ERColumn {

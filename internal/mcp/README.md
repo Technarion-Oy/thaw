@@ -17,7 +17,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `security.go` | `loopbackGuard` middleware (rejects non-loopback `Host`/cross-origin `Origin` — DNS-rebinding defense), `tokenGuard` middleware (per-session token auth on the SSE GET, with rate-limited logging of rejected requests via `authFailureLogger`), and `newSessionToken` (crypto-random token) |
 | `server.go` | `buildServer(client, mode, cfg, editorCtx, emit, fnStore, nb)` — constructs the MCP server and registers tools based on execution mode; `modeSpecificToolNames` lists tools that `updateMode` removes/re-registers on mode switch |
 | `tools.go` | Tool input structs + `registerTools` (schema-browsing tools); `jsonResult`/`textResult` content helpers |
-| `schema_tools.go` | `registerSchemaTools` — extended schema discovery tools (`get_schema_foreign_keys`, `get_database_ddl`, `get_er_model`, `search_objects`, `get_all_data_types`, `validate_data_type`, `list_dropped_tables`, `list_dropped_schemas`, `get_data_retention`); always registered in all modes |
+| `schema_tools.go` | `registerSchemaTools` — extended schema discovery tools (`get_schema_foreign_keys`, `get_database_ddl`, `get_er_model`, `search_objects`, `get_all_data_types`, `validate_data_type`, `list_dropped_tables`, `list_dropped_schemas`, `list_dropped_databases`, `get_data_retention`); always registered in all modes |
 | `account_tools.go` | `registerAccountTools` — account & infrastructure tools (`list_roles`, `list_available_roles`, `get_role_ddl`, `list_warehouses`, `get_warehouse_ddl`, `list_integrations`, `list_secrets`, `list_file_formats`); always registered in all modes |
 | `diag_tools.go` | `registerDiagTools` — SQL diagnostics & validation tools (`validate_sql`, `suggest_join_conditions`, `format_sql`, `get_snowflake_keywords`); type-conversion helpers for sqleditor ↔ snowflake types |
 | `profile_tools.go` | `registerProfileTools` — query profiling tools (`explain_query`, `get_explain_diagnostics`); wraps `queryprofile.RunExplain` and `queryprofile.GetExplainDiagnostics`; always registered in all modes |
@@ -138,8 +138,9 @@ The server exposes 60 tools in the baseline metadata mode (no workspace, no emit
 | `search_objects` | Cross-schema object and column name search using SQL ILIKE patterns |
 | `get_all_data_types` | Complete list of supported Snowflake data types with parameter syntax hints |
 | `validate_data_type` | Validate a data type string and return the normalised form |
-| `list_dropped_tables` | List tables dropped in a schema (available for time-travel undrop) |
+| `list_dropped_tables` | List tables dropped in a schema (available for time-travel undrop); `kind` is `TABLE` or `ICEBERG TABLE` |
 | `list_dropped_schemas` | List schemas dropped in a database (available for time-travel undrop) |
+| `list_dropped_databases` | List databases dropped account-wide (available for time-travel undrop) |
 | `get_data_retention` | Return data retention period (days) at database, schema, or table level |
 
 **Account & infrastructure tools** (always registered, `account_tools.go`):
