@@ -2096,6 +2096,9 @@ func (v *Validator) ParseCreateDynamicTable() bool {
 		func() bool { return v.MatchWord("TABLE") },
 		v.ifNotExists,
 		v.parseIdentPath,
+		// GET_DDL emits CLUSTER BY before the column-alias list; accept it there
+		// as well as in the trailing option list below (issue #776).
+		func() bool { return v.Optional(v.clusterByClause(v.consumeBalancedParens)) },
 		colList,
 		// Order-independent option list.
 		func() bool {
@@ -3325,6 +3328,9 @@ func (v *Validator) ParseCreateIcebergTable() bool {
 		func() bool { return v.MatchWord("TABLE") },
 		v.ifNotExists,
 		v.parseIdentPath,
+		// GET_DDL emits CLUSTER BY between the table name and the column list;
+		// accept it there as well as inside the option list (issue #776).
+		func() bool { return v.Optional(v.clusterByClause(v.consumeBalancedParens)) },
 		// One of: column list + options, LIKE <src>, AS <query>, or just options.
 		func() bool {
 			return v.Choice(
@@ -3711,6 +3717,9 @@ func (v *Validator) ParseCreateIcebergTableSnowflakeCatalog() bool {
 		func() bool { return v.MatchWord("TABLE") },
 		v.ifNotExists,
 		v.parseIdentPath,
+		// GET_DDL emits CLUSTER BY before the column list; accept it there as
+		// well as inside the trailing property list (issue #776).
+		func() bool { return v.Optional(v.clusterByClause(parenSpan)) },
 		parenSpan,
 		func() bool { return v.ZeroOrMore(prop) },
 	)
@@ -3957,8 +3966,15 @@ func (v *Validator) ParseCreateInteractiveTable() bool {
 		func() bool { return v.MatchWord("TABLE") },
 		v.ifNotExists,
 		v.parseIdentPath,
-		parenSpan,
-		v.clusterByClause(parenSpan),
+		// CLUSTER BY is required for interactive tables; the docs place it after
+		// the column list, but GET_DDL emits it before. Require it in exactly one
+		// of the two positions (issue #776).
+		func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(v.clusterByClause(parenSpan), parenSpan) },
+				func() bool { return v.Sequence(parenSpan, v.clusterByClause(parenSpan)) },
+			)
+		},
 		func() bool { return v.ZeroOrMore(prop) },
 		func() bool { return v.MatchKeyword("AS") },
 		consumeRest,
@@ -4394,6 +4410,9 @@ func (v *Validator) ParseCreateMaterializedView() bool {
 		v.ifNotExists,
 		v.parseIdentPath,
 		func() bool { return v.Optional(func() bool { return v.phrase("COPY", "GRANTS") }) },
+		// GET_DDL emits CLUSTER BY before the column list; accept it there as well
+		// as inside the trailing property list (issue #776).
+		func() bool { return v.Optional(v.clusterByClause(parenSpan)) },
 		// optional column list / per-column policy span
 		func() bool { return v.Optional(parenSpan) },
 		func() bool { return v.ZeroOrMore(prop) },

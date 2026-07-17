@@ -8,6 +8,8 @@ func TestParseCreateIcebergTableSnowflakeCatalog(t *testing.T) {
 		`CREATE OR REPLACE ICEBERG TABLE db.sch.t (c1 NUMBER) EXTERNAL_VOLUME = 'vol' CHANGE_TRACKING = TRUE`,
 		`CREATE TRANSIENT ICEBERG TABLE IF NOT EXISTS t (a INT) CLUSTER BY (a) COMMENT = 'x'`,
 		`CREATE ICEBERG TABLE t (a INT) PARTITION BY (a) STORAGE_SERIALIZATION_POLICY = OPTIMIZED`,
+		// GET_DDL emits CLUSTER BY before the column list (#776).
+		`CREATE ICEBERG TABLE t CLUSTER BY (a) (a INT) CATALOG = 'SNOWFLAKE' BASE_LOCATION = 'data/'`,
 	)
 	assertInvalid(t, (*Validator).ParseCreateIcebergTableSnowflakeCatalog,
 		`CREATE ICEBERG TABLE t`,
@@ -56,6 +58,8 @@ func TestParseCreateIntegration(t *testing.T) {
 func TestParseCreateInteractiveTable(t *testing.T) {
 	assertValid(t, (*Validator).ParseCreateInteractiveTable,
 		`CREATE INTERACTIVE TABLE t (a INT) CLUSTER BY (a) AS SELECT 1`,
+		// GET_DDL emits CLUSTER BY before the column list (#776).
+		`CREATE INTERACTIVE TABLE t CLUSTER BY (a) (a INT) AS SELECT 1`,
 		`CREATE OR REPLACE INTERACTIVE TABLE IF NOT EXISTS db.t (a INT, b INT) CLUSTER BY (a, b) WAREHOUSE = wh AS SELECT * FROM x`,
 		`CREATE INTERACTIVE TABLE t (a INT) CLUSTER BY (a) TARGET_LAG = '5 minutes' COMMENT = 'c' AS SELECT a FROM y`,
 	)
@@ -142,6 +146,8 @@ func TestParseCreateMaterializedView(t *testing.T) {
 		`CREATE MATERIALIZED VIEW mv AS SELECT 1`,
 		`CREATE OR REPLACE SECURE MATERIALIZED VIEW IF NOT EXISTS db.mv (a, b) COMMENT = 'x' AS SELECT a, b FROM t`,
 		`CREATE MATERIALIZED VIEW mv CLUSTER BY (a) AS SELECT a FROM t`,
+		// GET_DDL emits CLUSTER BY before the column list (#776).
+		`CREATE MATERIALIZED VIEW mv CLUSTER BY (a) (a) AS SELECT a FROM t`,
 	)
 	assertInvalid(t, (*Validator).ParseCreateMaterializedView,
 		`CREATE MATERIALIZED VIEW mv`,
