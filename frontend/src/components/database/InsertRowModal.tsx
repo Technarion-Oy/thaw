@@ -20,7 +20,7 @@ import {
 import { snowflake, table } from "../../../wailsjs/go/models";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";
-import { DEFAULT_FUNCTIONS } from "../shared/builtinFunctions";
+import { DEFAULT_FUNCTIONS, DEFAULT_FUNCTION_CATEGORIES } from "../shared/builtinFunctions";
 import { useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
 import InsertCellInput from "./InsertCellInput";
 import { parseColumnType } from "./insertCellTypes";
@@ -63,19 +63,24 @@ function cellMenuItems(nullable: boolean): MenuProps["items"] {
   if (nullable) items.push({ key: "null", label: "NULL" });
   items.push({ key: "default", label: "DEFAULT" });
   items.push({ type: "divider" });
-  items.push({
-    type: "group",
-    label: "Functions",
-    children: DEFAULT_FUNCTIONS.map((f) => ({
-      key: `fn:${f.sql}`,
-      label: (
-        <span>
-          <code>{f.sql}</code>{" "}
-          <span style={{ color: "var(--text-muted)", fontSize: 11 }}>{f.desc}</span>
-        </span>
-      ),
-    })),
-  });
+  // One group per catalog category so the (longer) function list stays scannable.
+  for (const category of DEFAULT_FUNCTION_CATEGORIES) {
+    const fns = DEFAULT_FUNCTIONS.filter((f) => f.category === category);
+    if (fns.length === 0) continue;
+    items.push({
+      type: "group",
+      label: category,
+      children: fns.map((f) => ({
+        key: `fn:${f.sql}`,
+        label: (
+          <span>
+            <code>{f.sql}</code>{" "}
+            <span style={{ color: "var(--text-muted)", fontSize: 11 }}>{f.desc}</span>
+          </span>
+        ),
+      })),
+    });
+  }
   return items;
 }
 
