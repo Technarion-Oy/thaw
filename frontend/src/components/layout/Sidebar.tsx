@@ -4757,6 +4757,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "STAGE" &&
             menuItem("Create Stage…", <InboxOutlined style={{ fontSize: 12 }} />, openCreateStage)}
 
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "TABLE" &&
+            menuItem("Create Table…", <TableOutlined style={{ fontSize: 12 }} />, openCreateTable)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "DYNAMIC TABLE" &&
             menuItem("Create Dynamic Table…", <RetweetOutlined style={{ fontSize: 12 }} />, openCreateDynamicTable)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "EXTERNAL TABLE" &&
