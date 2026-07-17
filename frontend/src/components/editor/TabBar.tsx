@@ -23,7 +23,9 @@ const CLR_ACCENT       = "var(--accent)";
 
 // Same platform check QueryPage's global keydown handler and KeyboardShortcutsModal use —
 // menu shortcut hints must match the modifier keys actually bound on this platform.
-const isMac = /Macintosh/i.test(navigator.userAgent);
+// Guard `navigator` so importing this module under a non-DOM env (vitest's `node`
+// environment on Node <21, which has no global navigator) doesn't throw at load.
+const isMac = typeof navigator !== "undefined" && /Macintosh/i.test(navigator.userAgent);
 
 // Icon for a tab, matching the tab-strip logic (diff → mcp → notebook → file → scratch).
 function tabIcon(tab: Tab, size = 11) {
