@@ -5,6 +5,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -214,6 +215,100 @@ func TestSessionTokenMissing(t *testing.T) {
 	}
 }
 
+// TestSessionEndpoint verifies SessionEndpoint returns the token-free SSE URL
+// and the raw token as separate values (for header-based client configs), and
+// reports false for unknown sessions.
+func TestSessionEndpoint(t *testing.T) {
+	m := NewManager(nil)
+
+	const wantToken = "endpoint-token-xyz"
+	info, err := m.Start(context.Background(), "ep", "acct/user", ExecutionModeMetadata, 0, nil, SessionConfig{}, wantToken)
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer func() { _ = m.Stop("ep") }()
+
+	endpoint, token, ok := m.SessionEndpoint("ep")
+	if !ok {
+		t.Fatal("SessionEndpoint returned false for running session")
+	}
+	if token != wantToken {
+		t.Errorf("token = %q, want %q", token, wantToken)
+	}
+	// The endpoint URL must NOT carry the token — that is the whole point of
+	// moving it into an Authorization header.
+	if strings.Contains(endpoint, wantToken) || strings.Contains(endpoint, "token=") {
+		t.Errorf("endpoint %q must be token-free", endpoint)
+	}
+	wantURL := fmt.Sprintf("http://127.0.0.1:%d/sse", info.Port)
+	if endpoint != wantURL {
+		t.Errorf("endpoint = %q, want %q", endpoint, wantURL)
+	}
+
+	if _, _, ok := m.SessionEndpoint("nonexistent"); ok {
+		t.Error("expected false for non-existent session")
+	}
+}
+
+// TestTokenGuardLogsRejections verifies rejected (unauthenticated) GETs still
+// return 401 after the auth-failure logging was added, and that valid tokens
+// continue to pass. It exercises the record path (rate-limited logging) without
+// asserting on log output.
+func TestTokenGuardLogsRejections(t *testing.T) {
+	const token = "guard-log-token"
+	guard := tokenGuard("logtest", token, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Several rejected attempts in quick succession (rate-limited logging).
+	for range 5 {
+		req := httptest.NewRequest(http.MethodGet, "http://localhost:9100/sse", nil)
+		rec := httptest.NewRecorder()
+		guard.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("rejected GET status = %d, want %d", rec.Code, http.StatusUnauthorized)
+		}
+	}
+
+	// A valid token still passes.
+	req := httptest.NewRequest(http.MethodGet, "http://localhost:9100/sse?token="+token, nil)
+	rec := httptest.NewRecorder()
+	guard.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("valid GET status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
+// TestAuthFailureLoggerRateLimit verifies the logger emits the first failure
+// immediately, suppresses failures inside the interval (accumulating a count),
+// and emits again once the interval elapses with the accumulated count.
+func TestAuthFailureLoggerRateLimit(t *testing.T) {
+	l := &authFailureLogger{}
+
+	// First failure logs immediately: suppressed resets to 0, last is set.
+	l.record("x", "127.0.0.1:1")
+	if l.suppressed != 0 {
+		t.Fatalf("after first record, suppressed = %d, want 0", l.suppressed)
+	}
+	if l.last.IsZero() {
+		t.Fatal("after first record, last must be set")
+	}
+
+	// Failures inside the interval are counted, not logged.
+	l.record("x", "127.0.0.1:2")
+	l.record("x", "127.0.0.1:3")
+	if l.suppressed != 2 {
+		t.Fatalf("after 2 suppressed records, suppressed = %d, want 2", l.suppressed)
+	}
+
+	// Simulate the interval elapsing: the next record logs and resets the count.
+	l.last = l.last.Add(-2 * authFailureLogInterval)
+	l.record("x", "127.0.0.1:4")
+	if l.suppressed != 0 {
+		t.Fatalf("after interval elapsed, suppressed = %d, want 0 (logged)", l.suppressed)
+	}
+}
+
 // TestLoopbackGuard verifies the SSE handler rejects non-loopback Host headers
 // and cross-origin browser requests while allowing loopback traffic.
 func TestLoopbackGuard(t *testing.T) {
@@ -254,7 +349,7 @@ func TestLoopbackGuard(t *testing.T) {
 // (they are authorized by the SDK-issued sessionid).
 func TestTokenGuard(t *testing.T) {
 	const token = "s3cret-token"
-	guard := tokenGuard(token, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	guard := tokenGuard("test", token, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -315,7 +410,7 @@ func TestAuthenticatedSSERoundTrip(t *testing.T) {
 	const token = "round-trip-token"
 	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil, nil, nil)
 	sse := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
-	handler := loopbackGuard(tokenGuard(token, sse))
+	handler := loopbackGuard(tokenGuard("round-trip", token, sse))
 	httpSrv := httptest.NewServer(handler)
 	defer httpSrv.Close()
 

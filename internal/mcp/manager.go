@@ -243,6 +243,25 @@ func (m *Manager) AuthenticatedURL(label string) (string, bool) {
 	return fmt.Sprintf("http://127.0.0.1:%d/sse?token=%s", s.port, s.token), true
 }
 
+// SessionEndpoint returns the token-free SSE endpoint URL and the raw auth
+// token for the named running session as two separate values. This lets the
+// app layer build a client configuration that carries the token in an
+// "Authorization: Bearer" header (preferred) instead of embedding it in the URL
+// query string, keeping the secret out of local proxy logs, process listings,
+// and shell history. AuthenticatedURL (token in ?token=) remains as a
+// documented fallback for URL-only clients. Both port and token are immutable
+// after the session is created, so reading them under m.mu is safe.
+func (m *Manager) SessionEndpoint(label string) (string, string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.sessions[label]
+	if !ok {
+		return "", "", false
+	}
+	return fmt.Sprintf("http://127.0.0.1:%d/sse", s.port), s.token, true
+}
+
 // SessionToken returns the raw auth token for the named running session. This
 // is used by the app layer to persist the token to config after a successful
 // start. Returns ("", false) if no session with that label exists.
