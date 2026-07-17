@@ -80,8 +80,11 @@ actions/bodies, and malformed column lists — e.g. `CREATE TABLE t` (no body),
 reported. `CREATE TABLE` requires a real column-definition list (each column
 `<name> <datatype>`, the data-type *name* validated by `sqleditor.ValidateDataTypes`),
 a CTAS column-alias list followed by `AS <query>`, or `AS`/`LIKE`/`CLONE`/
-`USING TEMPLATE`/`FROM ARCHIVE`. The `CREATE OR ALTER` form is accepted everywhere
-via `orReplace`.
+`USING TEMPLATE`/`FROM ARCHIVE`. `CLUSTER BY (…)` is accepted both after the column
+list and — as `GET_DDL` / Snowsight "Copy DDL" emits it — before it
+(`CREATE TABLE t CLUSTER BY (c) ( … )`, issue #776); the `LIKE`/`CLONE` forms take
+the same trailing-option loop (`COPY GRANTS`, `CLUSTER BY`, …). The `CREATE OR ALTER`
+form is accepted everywhere via `orReplace`.
 
 `SELECT` is modelled as a statement skeleton (`ParseSelect` in `dml.go`, helpers in
 `query_constructs.go`): `SELECT [ ALL | DISTINCT ] [ TOP <n> ] <projection>` followed

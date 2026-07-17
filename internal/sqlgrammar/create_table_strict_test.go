@@ -14,10 +14,20 @@ func TestParseCreateTable_Strict(t *testing.T) {
 		`CREATE TABLE t (a INT, b STRING, PRIMARY KEY (a))`,
 		`CREATE TABLE t (a INT, CONSTRAINT fk FOREIGN KEY (a) REFERENCES u (id))`,
 		`CREATE TABLE t (id INT) CLUSTER BY (id) COMMENT = 'c'`,
+		// GET_DDL / "Copy DDL" places CLUSTER BY before the column list (#776).
+		`CREATE OR REPLACE TABLE db.s.t CLUSTER BY (sale_date) (sale_id NUMBER(38,0), sale_date DATE)`,
+		`create or replace TABLE t cluster by (sale_date)(SALE_DATE DATE)`,
+		`CREATE TABLE t CLUSTER BY LINEAR(a, b) (a INT, b INT)`,
+		// ICEBERG_DEFAULT_DDL_COLLATION is a documented trailing option (#776).
+		`CREATE TABLE t (id INT) ICEBERG_DEFAULT_DDL_COLLATION = 'en-ci'`,
 		`CREATE TABLE t AS SELECT * FROM s`,
 		`CREATE TABLE t (a, b) AS SELECT 1, 2`, // CTAS column-alias list (no types)
 		`CREATE TABLE t LIKE src`,
+		// LIKE / CLONE accept trailing options per the docs (#776).
+		`CREATE TABLE t LIKE src CLUSTER BY (a)`,
+		`CREATE TABLE t LIKE src COPY GRANTS`,
 		`CREATE TABLE t CLONE src`,
+		`CREATE TABLE t CLONE src COPY GRANTS`,
 		`CREATE TRANSIENT TABLE t (id INT)`,
 	)
 	assertInvalid(t, (*Validator).ParseCreateTable,
