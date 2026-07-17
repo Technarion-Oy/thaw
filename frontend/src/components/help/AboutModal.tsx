@@ -2,16 +2,18 @@
 
 import { useEffect, useState } from "react";
 import { Modal, Button, Tooltip, message } from "antd";
-import { InfoCircleOutlined, CopyOutlined } from "@ant-design/icons";
+import { InfoCircleOutlined, CopyOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import { GetAppInfo } from "../../../wailsjs/go/app/App";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { app } from "../../../wailsjs/go/models";
+import ThirdPartyNoticesModal from "./ThirdPartyNoticesModal";
 
 interface Props { onClose: () => void; }
 
 export default function AboutModal({ onClose }: Props) {
   const [info, setInfo] = useState<app.AppInfo | null>(null);
   const [copied, setCopied] = useState(false);
+  const [noticesOpen, setNoticesOpen] = useState(false);
 
   useEffect(() => {
     GetAppInfo().then(setInfo).catch(() => {});
@@ -57,6 +59,7 @@ export default function AboutModal({ onClose }: Props) {
   };
 
   return (
+    <>
     <Modal
       open
       title={
@@ -69,16 +72,24 @@ export default function AboutModal({ onClose }: Props) {
       width={420}
       styles={{ body: { padding: "16px 20px 8px" } }}
       footer={
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <Tooltip title={copied ? "Copied!" : "Copy all info"}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Tooltip title={copied ? "Copied!" : "Copy all info"}>
+              <Button
+                icon={<CopyOutlined />}
+                onClick={handleCopy}
+                disabled={!info}
+              >
+                Copy
+              </Button>
+            </Tooltip>
             <Button
-              icon={<CopyOutlined />}
-              onClick={handleCopy}
-              disabled={!info}
+              icon={<SafetyCertificateOutlined />}
+              onClick={() => setNoticesOpen(true)}
             >
-              Copy
+              Acknowledgements
             </Button>
-          </Tooltip>
+          </div>
           <Button type="primary" onClick={onClose}>
             Close
           </Button>
@@ -114,5 +125,7 @@ export default function AboutModal({ onClose }: Props) {
         </div>
       )}
     </Modal>
+    {noticesOpen && <ThirdPartyNoticesModal onClose={() => setNoticesOpen(false)} />}
+    </>
   );
 }

@@ -34,6 +34,7 @@ go test -tags integration ./internal/integration/...
 ## Generated-artifact guards
 
 - `TestSemanticMapAccuracy` (in `internal/architecture`) fails if an annotated domain path no longer exists — regenerate with `go generate ./internal/architecture/` after moving/removing annotated files.
+- `TestThirdPartyNoticesUpToDate` (in the root `main` package) re-runs the notices generator into a temp file and diffs it against the committed `THIRD_PARTY_NOTICES.md`, catching a stale license list after a dependency bump — regenerate with `go run scripts/gen_third_party_notices.go`. It skips when `go`/`npm`/`frontend/node_modules` are unavailable (or in `-short` mode) so toolchain-light CI stays green.
 
 ## Quality gates
 

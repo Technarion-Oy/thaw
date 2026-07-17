@@ -133,14 +133,23 @@ type App struct {
 	// consulted by the OnQuery hook to decide whether to write SQL to thaw.log.
 	logPrefsMu sync.RWMutex
 	logPrefs   config.LogPrefs
+
+	// thirdPartyNotices is the generated copyright-notice / license-text bundle
+	// for every third-party package Thaw redistributes (embedded at build time
+	// from THIRD_PARTY_NOTICES.md). Served to the About dialog via
+	// GetThirdPartyNotices. Set once in NewApp and never mutated.
+	thirdPartyNotices string
 }
 
 // NewApp creates and returns a new App instance for use with the Wails runtime.
-func NewApp() *App {
+// thirdPartyNotices is the embedded THIRD_PARTY_NOTICES.md content shown in the
+// About dialog.
+func NewApp(thirdPartyNotices string) *App {
 	return &App{
 		gitCommitFilters:  make(map[string]string),
 		queryLog:          querylog.New(),
 		workdirOverridden: workdirOverrideArg() != "",
+		thirdPartyNotices: thirdPartyNotices,
 	}
 }
 
@@ -783,6 +792,14 @@ func (a *App) GetAppInfo() AppInfo {
 		Copyright:      "Copyright \u00a9 2026 Technarion Oy. Licensed under GPL-3.0-or-later.",
 		Comments:       "Snowflake Manager \u2014 Free Software (GNU GPL v3)",
 	}
+}
+
+// GetThirdPartyNotices returns the Markdown bundle of copyright notices and
+// license texts for every third-party package Thaw redistributes. The content
+// is embedded at build time from THIRD_PARTY_NOTICES.md and shown in the
+// "About Thaw" dialog's Acknowledgements view.
+func (a *App) GetThirdPartyNotices() string {
+	return a.thirdPartyNotices
 }
 
 // alterObject issues `ALTER <objectType> <db>.<schema>.<name> <clause>`, the shared
