@@ -100,6 +100,15 @@ jobs:
           THAW_FAST_BUILD: "1"
           NODE_OPTIONS: --max-old-space-size=6144
 
+      # Runs here rather than in unit-tests.yml because this test needs the full
+      # frontend toolchain: go + npm + an installed frontend/node_modules (all
+      # present after the Wails build above) — the pure-Go container lacks npm,
+      # so the test would silently skip there. Fails if THIRD_PARTY_NOTICES.md is
+      # stale relative to go.mod / frontend dependencies (regenerate with
+      # `go run scripts/gen_third_party_notices.go`).
+      - name: Verify third-party notices are up to date
+        run: go test -run TestThirdPartyNoticesUpToDate -count=1 ./.
+
       - name: Unlock permissions for host runner agent
         if: always()
         run: chmod -R 777 $GITHUB_WORKSPACE/../../_actions || true

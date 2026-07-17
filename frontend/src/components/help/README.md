@@ -16,7 +16,9 @@ open-source package with its license text.
 |------|---------|
 | `KeyboardShortcutsModal.tsx` | Searchable shortcut reference table. Six groups: Tabs & Navigation, Query Execution, Editor, UI & Panels, Results Grid, Notebook. No IPC — all data is static. |
 | `AboutModal.tsx` | Displays `app.AppInfo` (product name, version, build comments, company, copyright). **Copy** puts the version string on the clipboard; **Acknowledgements** opens `ThirdPartyNoticesModal`. |
-| `ThirdPartyNoticesModal.tsx` | Searchable, collapsible list of every third-party package bundled into Thaw, parsed from the generated `THIRD_PARTY_NOTICES.md`. Groups by Backend (Go modules) / Frontend (npm packages); each entry shows name, version, license tag, and the full license text in an accordion panel. |
+| `ThirdPartyNoticesModal.tsx` | Searchable, collapsible list of every third-party package bundled into Thaw, parsed from the generated `THIRD_PARTY_NOTICES.md`. Groups by Backend (Go modules) / Frontend (npm packages); each entry shows name, version, license tag, and the full license text in an accordion panel. Accordion items are keyed by `name@version` because a few packages (immer, react-is, zustand) are bundled at more than one version. |
+| `parseNotices.ts` | Pure parser that turns the generated Markdown into `{ intro, groups[] }`. Extracted from the modal so it's unit-testable in isolation. Fence detection is length-aware (matches the generator's variable-length fences), so a license text containing a bare ` ``` ` line can't truncate the block. |
+| `parseNotices.test.ts` | Vitest coverage for `parseNotices`: a normal package, a missing-license prose fallback, the empty "Contents" group, a package at two versions, the longer-fence case, and intro paragraph joining. |
 
 ## Patterns & integration
 
@@ -31,9 +33,11 @@ open-source package with its license text.
 **`KeyboardShortcutsModal`** has no IPC calls. Shortcut data is a hardcoded array of `{ action, mac, win }` objects grouped by category. Search filters across all three fields client-side. Shortcut tokens are rendered as `<kbd>` elements joined by `+`.
 
 **`ThirdPartyNoticesModal`** parses the generated Markdown at runtime (it never
-mutates it). `THIRD_PARTY_NOTICES.md` is produced by
+mutates it) via `parseNotices`. `THIRD_PARTY_NOTICES.md` is produced by
 `scripts/gen_third_party_notices.go` — regenerate it after changing
 dependencies; the parser only relies on the `##`/`###`/bullet/fence shapes that
-generator emits.
+generator emits. `TestThirdPartyNoticesUpToDate` (root Go package, run in
+`build-check.yml`) fails CI if the committed file drifts from the dependency
+tree.
 
 **Stores used:** None.

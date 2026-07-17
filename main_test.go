@@ -21,6 +21,10 @@ import (
 // fails to run), the test skips rather than failing, so CI environments without
 // a full toolchain stay green. It only fails on an actual content mismatch.
 //
+// CI wiring: this runs in build-check.yml's Wails-build job (after the build,
+// which provides go + npm + frontend/node_modules + frontend/dist), not in
+// unit-tests.yml's pure-Go container, which lacks npm and would only skip.
+//
 // Regenerate with: go run scripts/gen_third_party_notices.go
 func TestThirdPartyNoticesUpToDate(t *testing.T) {
 	if testing.Short() {

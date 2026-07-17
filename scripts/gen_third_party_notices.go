@@ -26,6 +26,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -133,7 +134,7 @@ func collectGoDeps(root string) ([]dep, error) {
 	}
 
 	seen := map[string]dep{}
-	decoder := json.NewDecoder(strings.NewReader(string(stdout)))
+	decoder := json.NewDecoder(bytes.NewReader(stdout))
 	for decoder.More() {
 		var pkg goListPackage
 		if err := decoder.Decode(&pkg); err != nil {
@@ -501,10 +502,31 @@ func renderSection(b *strings.Builder, title string, deps []dep) {
 				"repository for its license terms._\n\n")
 			continue
 		}
-		b.WriteString("```\n")
+		// Fence with a delimiter longer than any backtick run in the text, so a
+		// license that itself contains a ``` line can't prematurely close the
+		// block (CommonMark requires the closing fence to be at least as long as
+		// the opening one). The frontend parser mirrors this length rule.
+		fence := fenceFor(d.Text)
+		b.WriteString(fence + "\n")
 		b.WriteString(strings.TrimRight(d.Text, "\n"))
-		b.WriteString("\n```\n\n")
+		b.WriteString("\n" + fence + "\n\n")
 	}
+}
+
+// fenceFor returns a backtick code-fence delimiter (at least three) that is
+// strictly longer than the longest run of leading backticks on any line of
+// text, guaranteeing the fence cannot be closed early by the content.
+func fenceFor(text string) string {
+	longest := 0
+	for _, line := range strings.Split(text, "\n") {
+		t := strings.TrimSpace(line)
+		n := 0
+		for n < len(t) && t[n] == '`' {
+			n++
+		}
+		longest = max(longest, n)
+	}
+	return strings.Repeat("`", max(longest+1, 3))
 }
 
 func valueOrDash(s string) string {
