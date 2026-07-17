@@ -2096,6 +2096,9 @@ func (v *Validator) ParseCreateDynamicTable() bool {
 		func() bool { return v.MatchWord("TABLE") },
 		v.ifNotExists,
 		v.parseIdentPath,
+		// GET_DDL emits CLUSTER BY before the column-alias list; accept it there
+		// as well as in the trailing option list below (issue #776).
+		func() bool { return v.Optional(v.clusterByClause(v.consumeBalancedParens)) },
 		colList,
 		// Order-independent option list.
 		func() bool {
@@ -3325,6 +3328,9 @@ func (v *Validator) ParseCreateIcebergTable() bool {
 		func() bool { return v.MatchWord("TABLE") },
 		v.ifNotExists,
 		v.parseIdentPath,
+		// GET_DDL emits CLUSTER BY between the table name and the column list;
+		// accept it there as well as inside the option list (issue #776).
+		func() bool { return v.Optional(v.clusterByClause(v.consumeBalancedParens)) },
 		// One of: column list + options, LIKE <src>, AS <query>, or just options.
 		func() bool {
 			return v.Choice(
@@ -3711,6 +3717,9 @@ func (v *Validator) ParseCreateIcebergTableSnowflakeCatalog() bool {
 		func() bool { return v.MatchWord("TABLE") },
 		v.ifNotExists,
 		v.parseIdentPath,
+		// GET_DDL emits CLUSTER BY before the column list; accept it there as
+		// well as inside the trailing property list (issue #776).
+		func() bool { return v.Optional(v.clusterByClause(parenSpan)) },
 		parenSpan,
 		func() bool { return v.ZeroOrMore(prop) },
 	)
@@ -3957,8 +3966,15 @@ func (v *Validator) ParseCreateInteractiveTable() bool {
 		func() bool { return v.MatchWord("TABLE") },
 		v.ifNotExists,
 		v.parseIdentPath,
-		parenSpan,
-		v.clusterByClause(parenSpan),
+		// CLUSTER BY is required for interactive tables; the docs place it after
+		// the column list, but GET_DDL emits it before. Require it in exactly one
+		// of the two positions (issue #776).
+		func() bool {
+			return v.Choice(
+				func() bool { return v.Sequence(v.clusterByClause(parenSpan), parenSpan) },
+				func() bool { return v.Sequence(parenSpan, v.clusterByClause(parenSpan)) },
+			)
+		},
 		func() bool { return v.ZeroOrMore(prop) },
 		func() bool { return v.MatchKeyword("AS") },
 		consumeRest,
@@ -4394,6 +4410,9 @@ func (v *Validator) ParseCreateMaterializedView() bool {
 		v.ifNotExists,
 		v.parseIdentPath,
 		func() bool { return v.Optional(func() bool { return v.phrase("COPY", "GRANTS") }) },
+		// GET_DDL emits CLUSTER BY before the column list; accept it there as well
+		// as inside the trailing property list (issue #776).
+		func() bool { return v.Optional(v.clusterByClause(parenSpan)) },
 		// optional column list / per-column policy span
 		func() bool { return v.Optional(parenSpan) },
 		func() bool { return v.ZeroOrMore(prop) },
@@ -7508,9 +7527,13 @@ func (v *Validator) ParseCreateStreamlit() bool {
 //	-- Variant forms:
 //	-- CREATE TABLE ... AS <query>                       (CTAS)
 //	-- CREATE TABLE ... USING TEMPLATE <query>
-//	-- CREATE TABLE <table_name> LIKE <source_table>
-//	-- CREATE TABLE <name> CLONE <source_table> [ { AT | BEFORE } ( ... ) ]
+//	-- CREATE TABLE <table_name> LIKE <source_table> [ CLUSTER BY (...) ] [ COPY GRANTS ] [ ... ]
+//	-- CREATE TABLE <name> CLONE <source_table> [ { AT | BEFORE } ( ... ) ] [ COPY GRANTS ] [ ... ]
 //	-- CREATE [ TRANSIENT ] TABLE <name> FROM ARCHIVE OF <source_table> WHERE <expression>
+//
+//	-- GET_DDL / Snowsight "Copy DDL" places CLUSTER BY before the column list
+//	-- (`CREATE TABLE <name> CLUSTER BY (...) ( <col defs> )`); accepted in both
+//	-- positions (issue #776).
 func (v *Validator) ParseCreateTable() bool {
 	num := func() bool { return v.Match(sqltok.NumberLit) }
 	name := v.parseIdentPath
@@ -7562,14 +7585,23 @@ func (v *Validator) ParseCreateTable() bool {
 			consumeRest,
 		)
 	}
-	// LIKE <source_table>
+	// opt (a single trailing table option) is forward-declared here so the LIKE
+	// and CLONE branches — which the docs allow to be followed by CLUSTER BY /
+	// COPY GRANTS / etc. — can reuse the same option loop that the column-list
+	// form does. It is assigned below.
+	var opt func() bool
+	trailingOpts := func() bool { return v.ZeroOrMore(opt) }
+	// LIKE <source_table> [ trailing options ]
+	//   The docs allow `[ CLUSTER BY (…) ] [ COPY GRANTS ] [ … ]` after LIKE.
 	likeClause := func() bool {
 		return v.Sequence(
 			func() bool { return v.MatchKeyword("LIKE") },
 			name,
+			trailingOpts,
 		)
 	}
-	// CLONE <source> [ { AT | BEFORE } ( ... ) ]
+	// CLONE <source> [ { AT | BEFORE } ( ... ) ] [ trailing options ]
+	//   The docs allow `[ COPY GRANTS ]` (and other options) after CLONE.
 	cloneClause := func() bool {
 		return v.Sequence(
 			func() bool { return v.MatchKeyword("CLONE") },
@@ -7579,6 +7611,7 @@ func (v *Validator) ParseCreateTable() bool {
 					return v.Sequence(v.wordsValue("AT", "BEFORE"), balanced)
 				})
 			},
+			trailingOpts,
 		)
 	}
 	// FROM ARCHIVE OF <source> WHERE <expr>
@@ -7594,7 +7627,7 @@ func (v *Validator) ParseCreateTable() bool {
 		)
 	}
 	// A trailing table option (order-independent).
-	opt := func() bool {
+	opt = func() bool {
 		return v.Choice(
 			v.clusterByClause(balanced),
 			v.option("ENABLE_SCHEMA_EVOLUTION", v.parseBool),
@@ -7602,6 +7635,7 @@ func (v *Validator) ParseCreateTable() bool {
 			v.option("MAX_DATA_EXTENSION_TIME_IN_DAYS", num),
 			v.option("CHANGE_TRACKING", v.parseBool),
 			v.option("DEFAULT_DDL_COLLATION", v.parseString),
+			v.option("ICEBERG_DEFAULT_DDL_COLLATION", v.parseString),
 			v.option("ERROR_LOGGING", v.parseBool),
 			v.option("ROW_TIMESTAMP", v.parseBool),
 			func() bool { return v.phrase("COPY", "GRANTS") },
@@ -7790,6 +7824,11 @@ func (v *Validator) ParseCreateTable() bool {
 		func() bool { return v.MatchKeyword("TABLE") },
 		v.ifNotExists,
 		name,
+		// Snowflake's GET_DDL / Snowsight "Copy DDL" emits CLUSTER BY between the
+		// table name and the column list (`… t cluster by (c)( … )`), and accepts
+		// it there even though the syntax diagram only shows CLUSTER BY after the
+		// column list. Allow it in both positions. See issue #776.
+		func() bool { return v.Optional(v.clusterByClause(balanced)) },
 		body,
 	)
 }
