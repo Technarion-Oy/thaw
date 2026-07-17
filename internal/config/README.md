@@ -39,18 +39,18 @@ func MigrateFlags(f FeatureFlags) FeatureFlags  // fills zero fields for new fla
 
 // config.go:361
 type AppConfig struct {
-    Connections   []Connection
-    Git           GitConfig
-    AI            AIConfig
-    Snowpark      SnowparkConfig
-    PipRegistry   PipRegistryConfig
-    Editor        EditorPrefs
-    NotebookPrefs NotebookPrefs
-    Session       SessionConfig
-    FeatureFlags  FeatureFlags
-    LogPrefs      LogPrefs      // runtime log level + SQL-to-file logging switches
-    UpdateCheck   UpdateCheckState // cached last update-check result (throttles the startup GitHub check)
-    LicenseAccepted bool        // first-launch license gate: false (fresh install or key absent) → prompt to accept
+    Connections     []Connection
+    Git             GitConfig
+    AI              AIConfig
+    Snowpark        SnowparkConfig
+    PipRegistry     PipRegistryConfig
+    Editor          EditorPrefs
+    NotebookPrefs   NotebookPrefs
+    Session         SessionConfig
+    FeatureFlags    FeatureFlags
+    LogPrefs        LogPrefs         // runtime log level + SQL-to-file logging switches
+    UpdateCheck     UpdateCheckState // cached last update-check result (throttles the startup GitHub check)
+    LicenseAccepted bool             // first-launch license gate: false (fresh install or key absent) → prompt to accept
     // ...
 }
 

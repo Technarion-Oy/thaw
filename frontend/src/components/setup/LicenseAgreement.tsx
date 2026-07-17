@@ -20,12 +20,23 @@ interface Props {
  */
 export default function LicenseAgreement({ onAccept }: Props) {
   const [text, setText] = useState<string | null>(null);
+  // Tracked separately from `text` so that when the fetch fails the error
+  // message we display doesn't count as loaded license text — otherwise a
+  // truthy fallback string would enable Accept and let the user accept a
+  // license they never saw.
+  const [loadError, setLoadError] = useState(false);
   const [accepting, setAccepting] = useState(false);
 
   useEffect(() => {
     GetLicenseText()
-      .then(setText)
-      .catch(() => setText("Unable to load the license text."));
+      .then((t) => {
+        setText(t);
+        setLoadError(false);
+      })
+      .catch(() => {
+        setText("Unable to load the license text. Please restart Thaw and try again.");
+        setLoadError(true);
+      });
   }, []);
 
   const handleAccept = () => {
@@ -63,7 +74,14 @@ export default function LicenseAgreement({ onAccept }: Props) {
           <Button onClick={handleDecline} disabled={accepting}>
             Decline &amp; Quit
           </Button>
-          <Button type="primary" onClick={handleAccept} loading={accepting} disabled={!text}>
+          <Button
+            type="primary"
+            onClick={handleAccept}
+            loading={accepting}
+            // Only enabled once the real license text has loaded — never on the
+            // error fallback string, and never while it is still loading.
+            disabled={!text || loadError}
+          >
             Accept
           </Button>
         </div>

@@ -8,6 +8,14 @@ import (
 	"thaw/internal/config"
 )
 
+// The license gate is a UI convention, not a backend-enforced authorization
+// boundary: other IPC methods do not check LicenseAccepted, so a user with
+// devtools access could invoke bound methods on window.go.app.App directly while
+// the modal is up. This is a deliberate call for a GPL acknowledgement gate —
+// declining still quits, and refusing to persist acceptance means the gate
+// reappears on the next normal launch. Adding a LicenseAccepted guard to ~150
+// methods is out of proportion to what the gate is for.
+
 // GetLicenseText returns the full license text (embedded LICENSE, GPL-3.0)
 // displayed in the first-launch license agreement gate.
 func (a *App) GetLicenseText() string {
