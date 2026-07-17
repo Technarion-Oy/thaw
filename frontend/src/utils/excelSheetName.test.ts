@@ -32,6 +32,30 @@ describe("deriveSheetName", () => {
     expect(deriveSheetName("///", 5, used)).toBe("Result 5");
   });
 
+  it("strips leading and trailing apostrophes, including ones a truncation exposes", () => {
+    const used = new Set<string>();
+    // Excel forbids a name that starts or ends with an apostrophe.
+    expect(deriveSheetName("'quoted'", 1, used)).toBe("quoted");
+    // A 31-char cut can land right after an opening quote, leaving a trailing '.
+    const name = deriveSheetName("SELECT col FROM t WHERE x = 'ABCDEFG'", 2, used);
+    expect(name.startsWith("'")).toBe(false);
+    expect(name.endsWith("'")).toBe(false);
+    expect(name.length).toBeLessThanOrEqual(MAX_SHEET_NAME);
+  });
+
+  it("falls back to Result N when sanitising leaves nothing", () => {
+    const used = new Set<string>();
+    expect(deriveSheetName("'''", 7, used)).toBe("Result 7");
+  });
+
+  it("avoids Excel's reserved History name (any case)", () => {
+    const used = new Set<string>();
+    expect(deriveSheetName("history", 1, used)).toBe("Result 1");
+    expect(deriveSheetName("HISTORY", 2, used)).toBe("Result 2");
+    // A longer name merely containing "history" is fine.
+    expect(deriveSheetName("SELECT * FROM history_log", 3, used)).toBe("SELECT FROM history_log");
+  });
+
   it("de-duplicates case-insensitively with numbered suffixes", () => {
     const used = new Set<string>();
     expect(deriveSheetName("SELECT 1", 1, used)).toBe("SELECT 1");
