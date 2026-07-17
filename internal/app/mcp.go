@@ -159,10 +159,16 @@ func (a *App) ListMCPSessions() []mcp.SessionInfo {
 
 // GetMCPSessionConfig returns the MCP client configuration JSON block for the
 // named running session, suitable for pasting into an external MCP client. The
-// embedded URL carries the session's per-session auth token, so the returned
-// block is a secret — it must be treated like a credential.
+// block carries the session's per-session auth token, so it is a secret — it
+// must be treated like a credential.
+//
+// The token is placed in an "Authorization: Bearer" header rather than the URL
+// query string. Query-string tokens can leak into local proxy logs, process
+// listings (ps aux), and shell history; a header keeps the secret out of the
+// URL. The tokenGuard middleware still accepts a "?token=<token>" URL, so a
+// client that can only pass credentials in the URL can append it as a fallback.
 func (a *App) GetMCPSessionConfig(label string) (string, error) {
-	url, ok := a.mcpManager.AuthenticatedURL(label)
+	endpoint, token, ok := a.mcpManager.SessionEndpoint(label)
 	if !ok {
 		return "", fmt.Errorf("mcp: no session named %q", label)
 	}
@@ -170,7 +176,10 @@ func (a *App) GetMCPSessionConfig(label string) (string, error) {
 		"mcpServers": map[string]any{
 			"thaw-" + label: map[string]any{
 				"type": "sse",
-				"url":  url,
+				"url":  endpoint,
+				"headers": map[string]any{
+					"Authorization": "Bearer " + token,
+				},
 			},
 		},
 	}

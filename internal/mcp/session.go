@@ -81,7 +81,7 @@ func (s *session) start() error {
 	}, nil)
 	// loopbackGuard (DNS-rebinding defense) runs first, then tokenGuard
 	// authenticates the session-creating GET against the per-session token.
-	handler := loopbackGuard(tokenGuard(s.token, sse))
+	handler := loopbackGuard(tokenGuard(s.label, s.token, sse))
 
 	addr := fmt.Sprintf("127.0.0.1:%d", s.port)
 	s.http = &http.Server{

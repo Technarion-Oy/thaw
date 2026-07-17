@@ -226,31 +226,39 @@ func (m *Manager) List() []SessionInfo {
 	return out
 }
 
-// AuthenticatedURL returns the SSE endpoint URL for the named session with its
-// per-session token embedded as a query parameter, suitable for handing to an
-// MCP client. The bare SessionInfo.URL is token-free (for display); the token
-// is surfaced only here so it is not broadcast in every List() snapshot. Both
-// port and token are immutable after the session is created, so reading them
-// under m.mu (without s.mu) is safe.
-func (m *Manager) AuthenticatedURL(label string) (string, bool) {
+// lookup returns the session registered under label. The returned *session's
+// port and token are immutable after creation, so callers may read them after
+// this returns without holding m.mu; a concurrent stop() never mutates those
+// fields.
+func (m *Manager) lookup(label string) (*session, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
 	s, ok := m.sessions[label]
+	return s, ok
+}
+
+// SessionEndpoint returns the token-free SSE endpoint URL and the raw auth
+// token for the named running session as two separate values. This lets the
+// app layer build a client configuration that carries the token in an
+// "Authorization: Bearer" header instead of embedding it in the URL query
+// string, keeping the secret out of local proxy logs, process listings, and
+// shell history. The token is surfaced only here (and via SessionToken), never
+// in SessionInfo, so it is not broadcast in every List() snapshot. Clients that
+// can only pass a token in the URL may still append "?token=<token>" — the
+// tokenGuard middleware accepts that form as a fallback.
+func (m *Manager) SessionEndpoint(label string) (string, string, bool) {
+	s, ok := m.lookup(label)
 	if !ok {
-		return "", false
+		return "", "", false
 	}
-	return fmt.Sprintf("http://127.0.0.1:%d/sse?token=%s", s.port, s.token), true
+	return fmt.Sprintf("http://127.0.0.1:%d/sse", s.port), s.token, true
 }
 
 // SessionToken returns the raw auth token for the named running session. This
 // is used by the app layer to persist the token to config after a successful
 // start. Returns ("", false) if no session with that label exists.
 func (m *Manager) SessionToken(label string) (string, bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	s, ok := m.sessions[label]
+	s, ok := m.lookup(label)
 	if !ok {
 		return "", false
 	}

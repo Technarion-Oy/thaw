@@ -10,6 +10,10 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
+	"time"
+
+	"thaw/internal/logger"
 )
 
 // loopbackGuard wraps an HTTP handler and rejects any request whose Host or
@@ -66,14 +70,61 @@ func newSessionToken() (string, error) {
 // The token may be presented as an "Authorization: Bearer <token>" header or a
 // "token" query parameter, so both header-capable and URL-only MCP clients
 // work.
-func tokenGuard(token string, next http.Handler) http.Handler {
+//
+// Rejected GETs are logged (rate-limited) for observability: a co-resident
+// process probing the loopback port shows up as repeated "rejected
+// unauthenticated session request" warnings without flooding the log.
+func tokenGuard(label, token string, next http.Handler) http.Handler {
+	authLog := &authFailureLogger{}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && !validToken(token, r) {
+			authLog.record(label, r.RemoteAddr)
 			http.Error(w, "unauthorized: missing or invalid session token", http.StatusUnauthorized)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// authFailureLogInterval is the minimum gap between logged auth-failure lines
+// for a single session. Failures inside the gap are counted, not logged, and
+// their count is folded into the next emitted line.
+const authFailureLogInterval = 10 * time.Second
+
+// authFailureLogger rate-limits logging of rejected (unauthenticated) MCP
+// session requests so a local process hammering the loopback port cannot flood
+// the log. It emits at most one warning per authFailureLogInterval, reporting
+// how many attempts that line represents. One authFailureLogger exists per
+// session (created in tokenGuard), so counts and timing are per-session.
+type authFailureLogger struct {
+	mu         sync.Mutex
+	last       time.Time
+	suppressed int
+}
+
+// record notes one rejected request and logs a rate-limited warning. The first
+// failure logs immediately; subsequent failures within authFailureLogInterval
+// are counted and reported on the next emitted line.
+func (l *authFailureLogger) record(label, remoteAddr string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.suppressed++
+	now := time.Now()
+	if !l.last.IsZero() && now.Sub(l.last) < authFailureLogInterval {
+		return
+	}
+	// logger.L is nil until logger.Init runs (e.g. in unit tests); guard it so
+	// the rate-limit state machine still advances without a nil-deref panic.
+	if logger.L != nil {
+		logger.L.Warn("mcp: rejected unauthenticated session request",
+			"label", label,
+			"remoteAddr", remoteAddr,
+			"attempts", l.suppressed,
+		)
+	}
+	l.last = now
+	l.suppressed = 0
 }
 
 // validToken reports whether the request presents the expected session token,
