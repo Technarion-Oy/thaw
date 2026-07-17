@@ -165,8 +165,8 @@ func (a *App) ListMCPSessions() []mcp.SessionInfo {
 // The token is placed in an "Authorization: Bearer" header rather than the URL
 // query string. Query-string tokens can leak into local proxy logs, process
 // listings (ps aux), and shell history; a header keeps the secret out of the
-// URL. The tokenGuard middleware accepts both forms, so the ?token= URL
-// (Manager.AuthenticatedURL) remains a documented fallback for URL-only clients.
+// URL. The tokenGuard middleware still accepts a "?token=<token>" URL, so a
+// client that can only pass credentials in the URL can append it as a fallback.
 func (a *App) GetMCPSessionConfig(label string) (string, error) {
 	endpoint, token, ok := a.mcpManager.SessionEndpoint(label)
 	if !ok {

@@ -174,13 +174,14 @@ func TestManagerPreferredToken(t *testing.T) {
 		t.Errorf("SessionToken = %q, want %q", got, wantToken)
 	}
 
-	// The token should also be embedded in the authenticated URL.
-	url, ok := m.AuthenticatedURL("preferred")
+	// SessionEndpoint should also return the same token (alongside the
+	// token-free URL).
+	_, epToken, ok := m.SessionEndpoint("preferred")
 	if !ok {
-		t.Fatal("AuthenticatedURL returned false for running session")
+		t.Fatal("SessionEndpoint returned false for running session")
 	}
-	if !strings.Contains(url, wantToken) {
-		t.Errorf("AuthenticatedURL = %q, does not contain token %q", url, wantToken)
+	if epToken != wantToken {
+		t.Errorf("SessionEndpoint token = %q, want %q", epToken, wantToken)
 	}
 
 	// Verify port was assigned.
