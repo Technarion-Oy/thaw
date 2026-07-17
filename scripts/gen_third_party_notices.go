@@ -27,6 +27,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -51,6 +52,11 @@ type dep struct {
 var licensePrefixes = []string{"license", "licence", "copying", "unlicense"}
 
 func main() {
+	// -o overrides the output path; the freshness test (main_test.go) uses it to
+	// generate into a temp file and diff against the committed copy.
+	outFlag := flag.String("o", "", "output path (default: THIRD_PARTY_NOTICES.md at the repo root)")
+	flag.Parse()
+
 	root, err := repoRoot()
 	if err != nil {
 		fatal(err)
@@ -68,7 +74,10 @@ func main() {
 
 	md := render(goDeps, npmDeps)
 
-	out := filepath.Join(root, "THIRD_PARTY_NOTICES.md")
+	out := *outFlag
+	if out == "" {
+		out = filepath.Join(root, "THIRD_PARTY_NOTICES.md")
+	}
 	if err := os.WriteFile(out, []byte(md), 0o644); err != nil {
 		fatal(fmt.Errorf("writing %s: %w", out, err))
 	}
@@ -177,8 +186,20 @@ func collectNpmDeps(root string) ([]dep, error) {
 	if err := json.Unmarshal(stdout, &tree); err != nil {
 		return nil, err
 	}
+	// `npm ls`'s non-zero exit on peer-dependency warnings is expected and
+	// ignored above, but a genuine failure (e.g. a corrupted lockfile) can still
+	// emit partial JSON on stdout. An empty dependency tree means we got no usable
+	// data, so fail loudly rather than silently shipping an incomplete notices
+	// file. On success this project always has a populated tree.
+	if len(tree.Dependencies) == 0 {
+		return nil, fmt.Errorf("npm ls returned an empty dependency tree (corrupted lockfile or failed install?)")
+	}
 
 	nodeModules := filepath.Join(frontend, "node_modules")
+	// Key by name@version, not name: a package can be bundled at several versions
+	// simultaneously (e.g. zustand@5 directly and zustand@4 nested under
+	// @xyflow/react), and all of them ship. Keying by name alone would drop all
+	// but one, non-deterministically, since the tree is walked over a Go map.
 	seen := map[string]dep{}
 	var walk func(name string, node npmNode)
 	walk = func(name string, node npmNode) {
@@ -188,14 +209,15 @@ func collectNpmDeps(root string) ([]dep, error) {
 		if node.Version == "" {
 			return
 		}
-		if _, ok := seen[name]; !ok {
-			dir := resolveNpmDir(nodeModules, name)
+		key := name + "@" + node.Version
+		if _, ok := seen[key]; !ok {
+			dir := resolveNpmDir(nodeModules, name, node.Version)
 			text := readLicenseFile(dir)
 			license := detectLicense(text)
 			if pkgLicense := readPackageJSONLicense(dir); pkgLicense != "" {
 				license = pkgLicense
 			}
-			seen[name] = dep{
+			seen[key] = dep{
 				Name:    name,
 				Version: node.Version,
 				License: license,
@@ -214,25 +236,62 @@ func collectNpmDeps(root string) ([]dep, error) {
 	return sortedDeps(seen), nil
 }
 
-// resolveNpmDir finds a package's installed directory. npm hoists most packages
-// to the top-level node_modules; nested copies are searched as a fallback.
-func resolveNpmDir(nodeModules, name string) string {
+// resolveNpmDir finds the installed directory for a specific package version.
+// npm hoists most packages to the top-level node_modules but keeps conflicting
+// versions nested under their dependents, so when the hoisted copy is a
+// different version we search nested node_modules for the exact version,
+// falling back to any install of the package.
+func resolveNpmDir(nodeModules, name, version string) string {
 	top := filepath.Join(nodeModules, filepath.FromSlash(name))
-	if info, err := os.Stat(top); err == nil && info.IsDir() {
+	topVersion := readPackageJSONVersion(top)
+	if topVersion == version {
 		return top
 	}
-	// Fallback: a nested node_modules copy (deduped installs occasionally nest).
-	var found string
+
+	// The hoisted copy (if any) is the fallback; a nested copy may match exactly.
+	fallback := ""
+	if topVersion != "" {
+		fallback = top
+	}
+	suffix := filepath.FromSlash("node_modules/" + name)
+	found := ""
 	_ = filepath.WalkDir(nodeModules, func(path string, d os.DirEntry, err error) error {
-		if err != nil || found != "" || !d.IsDir() {
+		if err != nil || !d.IsDir() {
+			return nil //nolint:nilerr // skip unreadable entries
+		}
+		if !strings.HasSuffix(path, suffix) {
 			return nil
 		}
-		if strings.HasSuffix(path, filepath.FromSlash("node_modules/"+name)) {
+		v := readPackageJSONVersion(path)
+		if v == version {
 			found = path
+			return filepath.SkipAll
+		}
+		if fallback == "" && v != "" {
+			fallback = path
 		}
 		return nil
 	})
-	return found
+	if found != "" {
+		return found
+	}
+	return fallback
+}
+
+// readPackageJSONVersion returns the `version` field of dir/package.json, or ""
+// if the file is absent or unreadable.
+func readPackageJSONVersion(dir string) string {
+	data, err := os.ReadFile(filepath.Join(dir, "package.json"))
+	if err != nil {
+		return ""
+	}
+	var pkg struct {
+		Version string `json:"version"`
+	}
+	if json.Unmarshal(data, &pkg) != nil {
+		return ""
+	}
+	return pkg.Version
 }
 
 // readPackageJSONLicense extracts the SPDX license identifier from a package's
@@ -382,8 +441,14 @@ func sortedDeps(m map[string]dep) []dep {
 	for _, d := range m {
 		out = append(out, d)
 	}
+	// Sort by name, then version, so a package bundled at multiple versions has a
+	// stable, deterministic order (the freshness test diffs on exact bytes).
 	sort.Slice(out, func(i, j int) bool {
-		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
+		ni, nj := strings.ToLower(out[i].Name), strings.ToLower(out[j].Name)
+		if ni != nj {
+			return ni < nj
+		}
+		return out[i].Version < out[j].Version
 	})
 	return out
 }

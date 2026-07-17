@@ -111,14 +111,22 @@ function parseNotices(md: string): Parsed {
 }
 
 export default function ThirdPartyNoticesModal({ onClose }: Props) {
-  const [md, setMd] = useState<string | null>(null);
+  // `md` is the fetched Markdown; `loaded` tracks whether the fetch has settled.
+  // These are separate because an empty string is a valid *loaded* value (fetch
+  // failure or empty file) and must fall through to the Empty state rather than
+  // being mistaken for "still loading".
+  const [md, setMd] = useState("");
+  const [loaded, setLoaded] = useState(false);
   const [search, setSearch] = useState("");
 
   useEffect(() => {
-    GetThirdPartyNotices().then(setMd).catch(() => setMd(""));
+    GetThirdPartyNotices()
+      .then((text) => setMd(text))
+      .catch(() => setMd(""))
+      .finally(() => setLoaded(true));
   }, []);
 
-  const parsed = useMemo(() => (md ? parseNotices(md) : null), [md]);
+  const parsed = useMemo(() => (loaded ? parseNotices(md) : null), [loaded, md]);
 
   const q = search.trim().toLowerCase();
   const groups = useMemo(() => {
@@ -159,6 +167,11 @@ export default function ThirdPartyNoticesModal({ onClose }: Props) {
         <div style={{ padding: "40px 0", textAlign: "center" }}>
           <Spin />
         </div>
+      ) : total === 0 ? (
+        <Empty
+          style={{ padding: "24px 0" }}
+          description="Could not load the third-party notices."
+        />
       ) : (
         <>
           {parsed.intro.length > 0 && (
@@ -201,7 +214,10 @@ export default function ThirdPartyNoticesModal({ onClose }: Props) {
                     accordion
                     size="small"
                     items={group.packages.map((p) => ({
-                      key: p.name,
+                      // Key by name@version: a few packages (immer, react-is,
+                      // zustand) are bundled at more than one version, so name
+                      // alone is not unique.
+                      key: `${p.name}@${p.version}`,
                       label: (
                         <span style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                           <span style={{ fontFamily: "var(--font-mono, monospace)", fontSize: 12 }}>{p.name}</span>
