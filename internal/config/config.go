@@ -32,12 +32,12 @@ type Connection struct {
 // GitConfig holds the persisted git / export settings.
 // Token is intentionally excluded — it must not be written to disk.
 type GitConfig struct {
-	ExportDir          string   `json:"exportDir"`
-	RemoteURL          string   `json:"remoteURL"`
-	Branch             string   `json:"branch"`
-	AuthorName         string   `json:"authorName"`
-	AuthorEmail        string   `json:"authorEmail"`
-	ExportPathTemplate string   `json:"exportPathTemplate"`
+	ExportDir          string `json:"exportDir"`
+	RemoteURL          string `json:"remoteURL"`
+	Branch             string `json:"branch"`
+	AuthorName         string `json:"authorName"`
+	AuthorEmail        string `json:"authorEmail"`
+	ExportPathTemplate string `json:"exportPathTemplate"`
 	// RecentDirs is the most-recently-opened working directories, newest first,
 	// for quick project switching. Capped in the frontend when updated.
 	RecentDirs []string `json:"recentDirs,omitempty"`
@@ -54,7 +54,7 @@ type OAuthConfig struct {
 // AIConfig holds AI provider settings.
 // APIKey is stored in ~/.config/thaw/config.json (mode 0600).
 type AIConfig struct {
-	Provider     string `json:"provider"`               // "openai" | "google" | "ollama"
+	Provider     string `json:"provider"` // "openai" | "google" | "ollama"
 	APIKey       string `json:"apiKey"`
 	Model        string `json:"model"`
 	Enabled      bool   `json:"enabled"`
@@ -84,14 +84,14 @@ type PipRegistryCredential struct {
 type PipRegistryConfig struct {
 	PrimaryURL           string                  `json:"primaryURL"`
 	AdditionalRegistries []string                `json:"additionalRegistries"`
-	Behavior             string                  `json:"behavior"`         // "override" | "extra"
+	Behavior             string                  `json:"behavior"` // "override" | "extra"
 	Credentials          []PipRegistryCredential `json:"credentials"`
 	EnableProxy          bool                    `json:"enableProxy"`
 	ProxyURL             string                  `json:"proxyURL"`
 	ProxyUsername        string                  `json:"proxyUsername"`
 	ProxyPassword        string                  `json:"proxyPassword"`
 	ProxyBypassHosts     string                  `json:"proxyBypassHosts"` // comma-separated
-	TrustedHosts         string                  `json:"trustedHosts"`    // comma-separated
+	TrustedHosts         string                  `json:"trustedHosts"`     // comma-separated
 	CustomCACertPath     string                  `json:"customCACertPath"`
 }
 
@@ -100,7 +100,7 @@ type SessionConfig struct {
 	MaxSessions            int    `json:"maxSessions"`
 	MaxOpenConnsPerSession int    `json:"maxOpenConnsPerSession"`
 	MaxIdleConnsPerSession int    `json:"maxIdleConnsPerSession"`
-	InitMode               string `json:"initMode"`        // "lazy" | "eager"
+	InitMode               string `json:"initMode"` // "lazy" | "eager"
 	IdleTimeoutMinutes     int    `json:"idleTimeoutMinutes"`
 }
 
@@ -303,8 +303,8 @@ type FeatureFlags struct {
 	ExportTableData bool `json:"exportTableData"` // Table Data Export
 	TableDataImport bool `json:"tableDataImport"`
 	DDLExport       bool `json:"ddlExport"`
-	PutCommand      bool `json:"putCommand"` // PUT file:// … @stage uploads from the SQL editor
-	GetCommand      bool `json:"getCommand"` // GET @stage file:// downloads from the SQL editor
+	PutCommand      bool `json:"putCommand"`    // PUT file:// … @stage uploads from the SQL editor
+	GetCommand      bool `json:"getCommand"`    // GET @stage file:// downloads from the SQL editor
 	RemoveCommand   bool `json:"removeCommand"` // REMOVE @stage/file deletes
 
 	// Governance & Administration
@@ -370,40 +370,40 @@ type FeatureFlags struct {
 // DefaultFeatureFlags returns a FeatureFlags with every feature enabled.
 func DefaultFeatureFlags() FeatureFlags {
 	return FeatureFlags{
-		Initialized:            true,
-		Version:                flagsVersion,
-		ResultsetExport:        true,
-		ExportTableData:        true,
-		TableDataImport:        true,
-		DDLExport:              true,
-		PutCommand:             true,
-		GetCommand:             true,
-		RemoveCommand:          true,
-		UserRoleManagement:     true,
-		WarehouseManagement:    true,
-		WarehouseCreditUsage:   true,
-		QueryActivityHistory:   true,
-		IntegrationsManagement: true,
-		BackupPoliciesAndSets:  true,
-		AIInlineCompletions:    true,
-		SchemaMigration:        true,
-		DbtScaffolding:         true,
-		DbtProjectBrowser:      true,
-		ERDiagramDesigner:      true,
-		TaskGraphVisualizer:    true,
-		InsertMapping:          true,
-		InsertRow:              true,
-		CodeSnippets:           true,
-		SnowparkNotebooks:      true,
-		EmbeddedTerminal:       true,
-		GitIntegration:         true,
-		QueryProfile:           true,
-		ExplainSQL:             true,
-		QueryLog:               false,
-		SqlDiagnostics:         true,
-		SchemaAutocomplete:     true,
-		DdlHoverTooltips:       true,
-		FileFormatBuilder:      true,
+		Initialized:                true,
+		Version:                    flagsVersion,
+		ResultsetExport:            true,
+		ExportTableData:            true,
+		TableDataImport:            true,
+		DDLExport:                  true,
+		PutCommand:                 true,
+		GetCommand:                 true,
+		RemoveCommand:              true,
+		UserRoleManagement:         true,
+		WarehouseManagement:        true,
+		WarehouseCreditUsage:       true,
+		QueryActivityHistory:       true,
+		IntegrationsManagement:     true,
+		BackupPoliciesAndSets:      true,
+		AIInlineCompletions:        true,
+		SchemaMigration:            true,
+		DbtScaffolding:             true,
+		DbtProjectBrowser:          true,
+		ERDiagramDesigner:          true,
+		TaskGraphVisualizer:        true,
+		InsertMapping:              true,
+		InsertRow:                  true,
+		CodeSnippets:               true,
+		SnowparkNotebooks:          true,
+		EmbeddedTerminal:           true,
+		GitIntegration:             true,
+		QueryProfile:               true,
+		ExplainSQL:                 true,
+		QueryLog:                   false,
+		SqlDiagnostics:             true,
+		SchemaAutocomplete:         true,
+		DdlHoverTooltips:           true,
+		FileFormatBuilder:          true,
 		SnowflakeCLIProfileManager: true,
 		MultiCellCopy:              true,
 		CellDetailPanel:            true,
@@ -492,6 +492,19 @@ func MigrateFlags(f FeatureFlags) FeatureFlags {
 	return f
 }
 
+// UpdateCheckState caches the result of the last background update check so the
+// startup check can stay well under GitHub's unauthenticated rate limit (60
+// req/hour): a fresh network check runs only when LastCheckUnix is older than
+// the check interval, otherwise the cached release info is reused to decide
+// whether to notify. The full release notes and page URL are cached so the
+// notification can be shown from the cache without another network round-trip.
+type UpdateCheckState struct {
+	LastCheckUnix  int64  `json:"lastCheckUnix"`
+	LatestVersion  string `json:"latestVersion"`
+	ReleaseNotes   string `json:"releaseNotes"`
+	ReleasePageURL string `json:"releasePageURL"`
+}
+
 // MCPSessionCredential holds the persisted port and auth token for an MCP
 // session so that restarting Thaw and re-launching the same session label
 // reuses the same URL, keeping external AI client configs valid.
@@ -515,6 +528,7 @@ type AppConfig struct {
 	FeatureFlags           FeatureFlags                    `json:"featureFlags"`
 	LogPrefs               LogPrefs                        `json:"logPrefs"`
 	MCPCredentials         map[string]MCPSessionCredential `json:"mcpCredentials,omitempty"`
+	UpdateCheck            UpdateCheckState                `json:"updateCheck"`
 }
 
 // configPath returns the absolute path to the application configuration file,
@@ -577,12 +591,12 @@ func load() (*AppConfig, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
-	
+
 	// Populate default OAuth client ID if missing
 	if cfg.OAuth.GithubClientID == "" {
 		cfg.OAuth.GithubClientID = "Ov23liqwbGA6HHQ1za1a"
 	}
-	
+
 	return &cfg, nil
 }
 

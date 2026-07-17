@@ -566,6 +566,10 @@ export function CheckAvailableKeyTools() {
   return window['go']['app']['App']['CheckAvailableKeyTools']();
 }
 
+export function CheckForUpdate() {
+  return window['go']['app']['App']['CheckForUpdate']();
+}
+
 export function CheckPythonSyntax(arg1, arg2, arg3) {
   return window['go']['app']['App']['CheckPythonSyntax'](arg1, arg2, arg3);
 }

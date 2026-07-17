@@ -270,6 +270,10 @@ func (a *App) startup(ctx context.Context) {
 
 	// Apply session management config (pool limits, idle eviction).
 	a.applySessionConfig(a.GetSessionConfig())
+
+	// Kick off the non-blocking background update check (delayed, silent on
+	// failure; skipped for dev builds).
+	a.startUpdateChecker()
 }
 
 // isQueryRunning reports whether any tab has a query submitted by StartQuery still in flight.

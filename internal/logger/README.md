@@ -51,7 +51,7 @@ instead of rotating it as a whole.
 
 | Symbol | Description |
 |---|---|
-| `L *slog.Logger` | Package-level logger; safe for concurrent use; set by `Init()`. |
+| `L *slog.Logger` | Package-level logger; safe for concurrent use. Defaults to a no-op (`io.Discard`) logger so it is never nil before `Init()` (or in tests that don't call `Init`); `Init()` installs the real file-backed handler. |
 | `Dir string` | Directory of the log file; set by `Init()`; used by `crashreport` to co-locate crash JSON files. |
 | `Path string` | Absolute path to the active log file; set by `Init()`; used by `App.RevealLogFile` and the logging-preferences UI. |
 | `Init() func()` | Sets up rotation and returns a cleanup function to defer (stops the rotation ticker and closes the file). |

@@ -52,6 +52,7 @@ import {tag} from '../models';
 import {view} from '../models';
 import {table} from '../models';
 import {erdesigner} from '../models';
+import {updater} from '../models';
 import {snowpark} from '../models';
 import {snowflake} from '../models';
 import {dbt} from '../models';
@@ -352,6 +353,8 @@ export function CancelMigration():Promise<void>;
 export function CancelQuery(arg1:string):Promise<void>;
 
 export function CheckAvailableKeyTools():Promise<Array<string>>;
+
+export function CheckForUpdate():Promise<updater.CheckResult>;
 
 export function CheckPythonSyntax(arg1:string,arg2:string,arg3:string):Promise<Array<snowpark.NotebookSyntaxError>>;
 

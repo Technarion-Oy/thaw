@@ -22,11 +22,13 @@ func GetCodebaseSemanticMap() string {
         "internal/sfconfig/",
         "internal/sysinfo/",
         "internal/telemetry/",
+        "internal/updater/",
         "internal/version/",
         "main.go"
       ],
       "frontend_paths": [
         "frontend/src/components/connection/ConnectModal.tsx",
+        "frontend/src/components/help/UpdateNotification.tsx",
         "frontend/src/components/settings/LoggingPreferencesModal.tsx",
         "frontend/src/components/settings/SessionManagementModal.tsx",
         "frontend/src/components/toolbar/Toolbar.tsx",
