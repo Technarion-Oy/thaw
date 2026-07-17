@@ -996,9 +996,13 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       const diagMarkers: DiagMarker[] = [];
 
       try {
-        // NOTE: This diagnostics pipeline is mirrored server-side in
-        // internal/mcp/diag_tools.go (validateSQL). Changes to validation
-        // ordering or request assembly should be reflected there too (#336).
+        // NOTE: The server-side MCP validate_sql path shares its ordering and
+        // ref-resolution SEMANTICS with this pipeline via the Go orchestrator
+        // sqleditor.Diagnose (internal/sqleditor/orchestrator.go); its
+        // resolveRefsForDiagnostics is a faithful port of the `resolved` mapping
+        // below. This editor path stays granular because it layers the
+        // incremental, offline-first warm-up (fetch missing schemas/objects, then
+        // re-run) on top. Keep the `resolved` mapping and Diagnose in sync (#354).
 
         // ADD || [] to prevent spreading null from Go's nil slices!
         const syntaxErrors = await AnalyzeSqlSyntax(diagSql);

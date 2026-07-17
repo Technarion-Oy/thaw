@@ -39,7 +39,7 @@ type formatSqlInput struct {
 func registerDiagTools(srv *mcpsdk.Server, client *snowflake.Client) {
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
 		Name:        "validate_sql",
-		Description: "Run the full SQL diagnostics pipeline and return structured markers (errors and warnings) matching the editor. Phase 1 (syntax, patterns, datatypes) always runs. Phase 2 (schema-aware table existence, semantics, bare column refs) runs best-effort when a Snowflake connection is available.",
+		Description: "Run the SQL diagnostics pipeline and return structured markers (errors and warnings). These approximate the Thaw editor's diagnostics and may differ from what the editor shows for the same SQL — the editor layers an incremental, offline-first catalog warm-up on top that this tool does not. Phase 1 (syntax, patterns, datatypes) always runs. Phase 2 (schema-aware table existence, semantics, bare column refs) runs best-effort when a Snowflake connection is available.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in validateSqlInput) (*mcpsdk.CallToolResult, any, error) {
 		markers := validateSQL(ctx, client, in.SQL)
 		// Ensure non-nil so JSON serializes as [] not null.
@@ -108,204 +108,62 @@ func validateCaseParam(param, value string) error {
 	return nil
 }
 
-// validateSQL orchestrates the full diagnostics pipeline. Phase 1 (pure
-// validations) always runs. Phase 2 (schema-aware) runs best-effort when a
-// Snowflake client is available; if any phase-2 step fails, only phase-1
-// markers are returned.
-//
-// NOTE: This pipeline mirrors the frontend orchestration in
-// frontend/src/components/editor/SqlEditor.tsx (runDiagnostics, ~L601).
-// Changes to the validation ordering or request assembly should be reflected
-// in both locations until a shared orchestrator is extracted (see #336).
+// validateSQL runs the SQL diagnostics pipeline for the validate_sql tool. It
+// delegates to the shared orchestrator sqleditor.Diagnose, which owns the phase
+// ordering and table-ref resolution for both this MCP path and (in semantics)
+// the frontend editor — see internal/sqleditor/orchestrator.go and #354. Phase 1
+// (pure validations) always runs; phase 2 (schema-aware) runs best-effort when a
+// Snowflake client is available. A non-fatal phase-2 error is logged and only the
+// phase-1 markers are returned.
 func validateSQL(ctx context.Context, client *snowflake.Client, sql string) []sqleditor.DiagMarker {
-	// Phase 1 — pure validations (no network).
-	syntaxMarkers := sqleditor.ValidateSyntax(sql)
-	stmtRanges := sqleditor.GetStatementRanges(sql)
-	datatypeMarkers := sqleditor.ValidateDataTypes(sql, stmtRanges)
-	grammarMarkers := sqleditor.ValidateGrammar(sql, stmtRanges)
-	antiPatternMarkers := sqleditor.ValidateAntiPatterns(sql, stmtRanges)
-
-	phase1 := append(append(append(syntaxMarkers, datatypeMarkers...), grammarMarkers...), antiPatternMarkers...)
-
-	// Phase 2 — schema-aware validations (needs Snowflake client).
-	if client == nil {
-		return phase1
+	var provider sqleditor.SchemaProvider
+	if client != nil {
+		provider = &clientSchemaProvider{client: client}
 	}
-
-	phase2, err := validateSQLSchemaAware(ctx, client, sql, stmtRanges)
+	markers, err := sqleditor.Diagnose(ctx, provider, sql)
 	if err != nil {
 		logger.L.Debug("mcp validate_sql phase-2 skipped", "err", err)
-		return phase1
 	}
-
-	return append(phase1, phase2...)
+	return markers
 }
 
-// validateSQLSchemaAware runs the schema-aware portion of the diagnostics
-// pipeline. It returns an error if any step fails, allowing the caller to
-// fall back to phase-1 markers only.
-func validateSQLSchemaAware(ctx context.Context, client *snowflake.Client, sql string, stmtRanges []sqleditor.StatementRange) ([]sqleditor.DiagMarker, error) {
-	sc, err := client.GetSessionContext(ctx)
+// clientSchemaProvider adapts a *snowflake.Client to sqleditor.SchemaProvider so
+// the orchestrator can gather catalog metadata without importing snowflake. Each
+// method maps snowflake types to their sqleditor equivalents.
+type clientSchemaProvider struct {
+	client *snowflake.Client
+}
+
+func (p *clientSchemaProvider) SessionContext(ctx context.Context) (sqleditor.SessionContext, error) {
+	sc, err := p.client.GetSessionContext(ctx)
+	if err != nil {
+		return sqleditor.SessionContext{}, err
+	}
+	return sqleditor.SessionContext{Database: sc.Database, Schema: sc.Schema}, nil
+}
+
+func (p *clientSchemaProvider) ListDatabases(ctx context.Context) ([]string, error) {
+	return p.client.ListDatabases(ctx)
+}
+
+func (p *clientSchemaProvider) ListSchemas(ctx context.Context, database string) ([]string, error) {
+	return p.client.ListSchemas(ctx, database)
+}
+
+func (p *clientSchemaProvider) ListObjects(ctx context.Context, database, schema string) ([]sqleditor.StoreObject, error) {
+	objs, err := p.client.ListObjects(ctx, database, schema)
 	if err != nil {
 		return nil, err
 	}
-	sessionCtx := &sqleditor.SessionContext{
-		Database: sc.Database,
-		Schema:   sc.Schema,
-	}
+	return sfObjsToStoreObjects(database, schema, objs), nil
+}
 
-	refs := sqleditor.ParseJoinTables(sql)
-
-	// Short-circuit: if the SQL references no tables, skip metadata gathering.
-	if len(refs) == 0 {
-		return nil, nil
-	}
-
-	// Gather metadata for referenced databases/schemas.
-	storeObjects, knownDatabases, knownSchemas, err := gatherMetadata(ctx, client, refs, sessionCtx)
+func (p *clientSchemaProvider) TableColumns(ctx context.Context, database, schema, name string) ([]sqleditor.ColInfo, error) {
+	cols, err := p.client.GetTableColumnsWithTypes(ctx, database, schema, name)
 	if err != nil {
 		return nil, err
 	}
-
-	resolvedRefs := sqleditor.ResolveTableRefs(refs, storeObjects, nil, sessionCtx)
-
-	// Validate table existence.
-	tableExistMarkers := sqleditor.ValidateTablesExist(sqleditor.ValidateTablesExistRequest{
-		SQL:             sql,
-		StmtRanges:      stmtRanges,
-		ResolvedRefs:    resolvedRefs,
-		KnownDatabases:  knownDatabases,
-		KnownSchemas:    knownSchemas,
-		SessionDatabase: sc.Database,
-		SessionSchema:   sc.Schema,
-		AllKnownTables:  storeObjsToResolvedRefs(storeObjects),
-	})
-
-	// Gather column info for resolved tables.
-	colEntries := fetchColumnEntries(ctx, client, resolvedRefs)
-
-	semanticMarkers := sqleditor.ValidateSemantics(sql, resolvedRefs, colEntries)
-
-	bareColMarkers := sqleditor.ValidateBareColumnRefs(sqleditor.ValidateBareColsRequest{
-		SQL:          sql,
-		StmtRanges:   stmtRanges,
-		ResolvedRefs: resolvedRefs,
-		ColEntries:   colEntries,
-	})
-
-	return append(append(tableExistMarkers, semanticMarkers...), bareColMarkers...), nil
-}
-
-// gatherMetadata collects store objects, known databases, and known schemas
-// for the set of table references. It deduplicates db/schema pairs to
-// minimize Snowflake API calls.
-func gatherMetadata(ctx context.Context, client *snowflake.Client, refs []sqleditor.JoinTableRef, session *sqleditor.SessionContext) ([]sqleditor.StoreObject, []string, []sqleditor.SchemaEntry, error) {
-	// Collect unique db/schema pairs to query.
-	type dbSchema struct{ db, schema string }
-	seen := make(map[dbSchema]bool)
-
-	for _, ref := range refs {
-		db := ref.DB
-		schema := ref.Schema
-		if db == "" {
-			db = session.Database
-		}
-		if schema == "" {
-			schema = session.Schema
-		}
-		if db != "" && schema != "" {
-			seen[dbSchema{strings.ToUpper(db), strings.ToUpper(schema)}] = true
-		}
-	}
-
-	// Always include the session's default db/schema.
-	if session.Database != "" && session.Schema != "" {
-		seen[dbSchema{strings.ToUpper(session.Database), strings.ToUpper(session.Schema)}] = true
-	}
-
-	var storeObjects []sqleditor.StoreObject
-	dbSet := make(map[string]bool)
-	var knownSchemas []sqleditor.SchemaEntry
-
-	// List databases first to populate knownDatabases.
-	dbs, err := client.ListDatabases(ctx)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	for _, db := range dbs {
-		dbSet[strings.ToUpper(db)] = true
-	}
-
-	// Dedupe ListSchemas calls by database (multiple schemas in the same db
-	// should not re-list the db's schemas).
-	schemasListed := make(map[string]bool)
-
-	for ds := range seen {
-		// List schemas once per database.
-		if !schemasListed[ds.db] {
-			schemasListed[ds.db] = true
-			schemas, err := client.ListSchemas(ctx, ds.db)
-			if err != nil {
-				logger.L.Debug("mcp validate_sql: ListSchemas skipped", "db", ds.db, "err", err)
-			} else {
-				for _, s := range schemas {
-					knownSchemas = append(knownSchemas, sqleditor.SchemaEntry{
-						DB:   ds.db,
-						Name: s,
-					})
-				}
-			}
-		}
-
-		// List objects in the specific schema.
-		objs, err := client.ListObjects(ctx, ds.db, ds.schema)
-		if err != nil {
-			logger.L.Debug("mcp validate_sql: ListObjects skipped", "db", ds.db, "schema", ds.schema, "err", err)
-			continue
-		}
-		storeObjects = append(storeObjects, sfObjsToStoreObjects(ds.db, ds.schema, objs)...)
-	}
-
-	knownDatabases := make([]string, 0, len(dbSet))
-	for db := range dbSet {
-		knownDatabases = append(knownDatabases, db)
-	}
-
-	return storeObjects, knownDatabases, knownSchemas, nil
-}
-
-// fetchColumnEntries fetches column info for each unique resolved table.
-// Errors for individual tables are logged and skipped (best-effort).
-func fetchColumnEntries(ctx context.Context, client *snowflake.Client, refs []sqleditor.ResolvedRef) []sqleditor.ColEntry {
-	type tableKey struct{ db, schema, name string }
-	seen := make(map[tableKey]bool)
-	var entries []sqleditor.ColEntry
-
-	for _, ref := range refs {
-		key := tableKey{
-			strings.ToUpper(ref.DB),
-			strings.ToUpper(ref.Schema),
-			strings.ToUpper(ref.Name),
-		}
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-
-		cols, err := client.GetTableColumnsWithTypes(ctx, ref.DB, ref.Schema, ref.Name)
-		if err != nil {
-			logger.L.Debug("mcp: GetTableColumnsWithTypes skipped", "table", ref.DB+"."+ref.Schema+"."+ref.Name, "err", err)
-			continue
-		}
-		entries = append(entries, sqleditor.ColEntry{
-			DB:     ref.DB,
-			Schema: ref.Schema,
-			Name:   ref.Name,
-			Cols:   sfColsToColInfo(cols),
-		})
-	}
-
-	return entries
+	return sfColsToColInfo(cols), nil
 }
 
 // suggestJoinConditions computes JOIN ON suggestions for two tables.
@@ -409,20 +267,6 @@ func sfFKsToFKEntries(fks []snowflake.TableForeignKey) []sqleditor.FKEntry {
 			FKColumn:       fk.FKColumn,
 			ConstraintName: fk.ConstraintName,
 			KeySequence:    fk.KeySequence,
-		}
-	}
-	return out
-}
-
-// storeObjsToResolvedRefs converts store objects to resolved refs for the
-// AllKnownTables field in ValidateTablesExistRequest.
-func storeObjsToResolvedRefs(objs []sqleditor.StoreObject) []sqleditor.ResolvedRef {
-	out := make([]sqleditor.ResolvedRef, len(objs))
-	for i, o := range objs {
-		out[i] = sqleditor.ResolvedRef{
-			DB:     o.DB,
-			Schema: o.Schema,
-			Name:   o.Name,
 		}
 	}
 	return out
