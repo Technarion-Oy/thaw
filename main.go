@@ -22,12 +22,21 @@ var assets embed.FS
 //go:embed THIRD_PARTY_NOTICES.md
 var thirdPartyNotices string
 
-// main is the application entry point. The embedded frontend assets and
-// third-party notices are passed to app.Run, which wires up crash reporting,
-// the native menu, and the Wails runtime. The //go:embed directives must live
-// in the root package because their paths cannot reference parent directories.
+// licenseText is the full GPL-3.0 license shown in the first-launch license
+// agreement gate. Embedded here in the root package for the same reason as the
+// assets and notices above — //go:embed paths cannot reference parent
+// directories, and LICENSE lives at the repo root.
+//
+//go:embed LICENSE
+var licenseText string
+
+// main is the application entry point. The embedded frontend assets, third-party
+// notices, and license text are passed to app.Run, which wires up crash
+// reporting, the native menu, and the Wails runtime. The //go:embed directives
+// must live in the root package because their paths cannot reference parent
+// directories.
 func main() {
-	if err := app.Run(assets, thirdPartyNotices); err != nil {
+	if err := app.Run(assets, thirdPartyNotices, licenseText); err != nil {
 		panic(err)
 	}
 }

@@ -29,5 +29,6 @@
 - [`settings/`](settings/README.md) — feature flags, AI, layout, session tuning
 - [`common/`](common/README.md) · [`shared/`](shared/README.md) — reusable modals & UI utilities
 - [`help/`](help/README.md) — About + keyboard shortcuts
+- [`setup/`](setup/README.md) — first-launch license agreement gate
 
 See [`docs/concepts/architecture.md`](../../../docs/concepts/architecture.md) for how components connect to Zustand stores and the Go backend over Wails IPC.

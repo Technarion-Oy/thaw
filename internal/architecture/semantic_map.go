@@ -31,6 +31,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/help/UpdateNotification.tsx",
         "frontend/src/components/settings/LoggingPreferencesModal.tsx",
         "frontend/src/components/settings/SessionManagementModal.tsx",
+        "frontend/src/components/setup/LicenseAgreement.tsx",
         "frontend/src/components/toolbar/Toolbar.tsx",
         "frontend/src/store/connectionStore.ts",
         "frontend/src/store/logPrefsStore.ts",

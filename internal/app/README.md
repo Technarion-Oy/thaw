@@ -22,9 +22,10 @@ nil-check → delegate → return.
 | File | Contents |
 |------|----------|
 | `app.go` | `App` struct definition, `NewApp`, `startup`/`shutdown` lifecycle, `Connect`/`CancelConnect`/`Disconnect`/`IsConnected`, tab-session management (`getOrInitTabSession`, `InitTabSession`, `CloseTabSession`, `evictIfNeeded`, `evictIdleSessions`, `runIdleEvictionLoop`, `applySessionConfig`), `GetAppInfo`, `GetThirdPartyNotices` (returns the embedded `THIRD_PARTY_NOTICES.md` bundle of dependency license texts for the About dialog; the content is embedded in `main.go` and threaded through `Run` → `NewApp`). Reads the `--workdir=<dir>` launch arg (set by "Open Folder in New Window") into the immutable `workdirOverridden` flag; the folder itself lives only in `cachedExportDir`. `startup` roots this instance there and retitles the window. In an override window `GetGitConfig`/`SaveGitConfig` (in `git.go`) treat the per-repo/instance-local fields specially so a stale snapshot can't corrupt the shared config or the wrong repo (see `git.go`). |
-| `run.go` | `Run(assets embed.FS)` — the sole exported entry point called by `main.go`. Initialises crash reporting, restores window state, calls `buildMenu`, calls `wails.Run`. Also registers `sqleditor.NewService()` in the `Bind` array. |
+| `run.go` | `Run(assets embed.FS, thirdPartyNotices, licenseText string)` — the sole exported entry point called by `main.go`. Initialises crash reporting, restores window state, calls `buildMenu`, calls `wails.Run`. Also registers `sqleditor.NewService()` in the `Bind` array. |
 | `menu.go` | `buildMenu(*App)` — constructs the native macOS/Windows menu bar. All menu actions emit `menu:*` Wails events; no direct state mutation. Includes **Help → Check for Updates…** (`menu:check-for-update`). |
 | `updater.go` | `CheckForUpdate()` IPC (on-demand, always live) and the `startUpdateChecker` background goroutine (called at the end of `startup`; delayed, throttled by `updateCheckInterval`, skipped for `dev` builds). Delegates the GitHub fetch/semver compare to `internal/updater`, caches results in `config.UpdateCheckState`, and emits `update:available` when a newer release exists. |
+| `license.go` | First-launch license agreement IPC: `GetLicenseText` (returns the embedded `LICENSE` threaded through `Run` → `NewApp`), `IsLicenseAccepted` (reads `config.LicenseAccepted`; frontend gate shows when false), `AcceptLicense` (persists `LicenseAccepted = true`), `DeclineLicense` (`wailsruntime.Quit`). Frontend gate: `frontend/src/components/setup/LicenseAgreement.tsx`. |
 | `doc.go` | Package doc comment and `// thaw:domain: Core IPC & App Lifecycle` annotation. |
 | `query.go` | `ExecuteQuery`, `StartQuery`, `WaitForQueryResult`, `CancelQuery`, `RunExplain`, `GetQueryHistory`, `GetQueryOperatorStats`. These methods contain non-delegator orchestration (goroutines, Wails event emission, `sync.WaitGroup`). |
 | `session.go` | `GetSessionContext`, `GetTabSessionID`, `GetQuotedIdentifiersIgnoreCase`, `UseRole`/`UseWarehouse`/`UseDatabase`/`UseSchema`, session-parameter getters/setters, `GetClientVersionInfo` (general `SELECT SYSTEM$CLIENT_VERSION_INFO()` → supported/recommended client & driver versions, reusable by any feature). |
@@ -128,8 +129,8 @@ Per-tab state:
 
 | Function | File | Notes |
 |----------|------|-------|
-| `Run(assets embed.FS) error` | `run.go` | Called from `main.go`. Wails entry point. |
-| `NewApp() *App` | `app.go` | Constructs an empty `App`; called inside `Run`. |
+| `Run(assets embed.FS, thirdPartyNotices, licenseText string) error` | `run.go` | Called from `main.go`. Wails entry point. |
+| `NewApp(thirdPartyNotices, licenseText string) *App` | `app.go` | Constructs an `App` holding the embedded notices + license text; called inside `Run`. |
 | `buildMenu(app *App) *menu.Menu` | `menu.go` | Constructs the native menu; called inside `Run`. |
 
 ## Patterns & integration

@@ -72,6 +72,8 @@ import {filesystem} from '../models';
 import {mcp} from '../models';
 import {sfconfig} from '../models';
 
+export function AcceptLicense():Promise<void>;
+
 export function AddBackup(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function AddRecentDir(arg1:string):Promise<Array<string>>;
@@ -412,6 +414,8 @@ export function CreateStorageIntegration(arg1:integrations.StorageIntegrationPar
 
 export function DebugNotebookCell(arg1:string,arg2:string,arg3:string):Promise<snowpark.NotebookCellOutput>;
 
+export function DeclineLicense():Promise<void>;
+
 export function DeleteDirectory(arg1:string):Promise<void>;
 
 export function DeleteFile(arg1:string):Promise<void>;
@@ -591,6 +595,8 @@ export function GetJoinPolicyReferences(arg1:string,arg2:string,arg3:string):Pro
 export function GetJoinPolicyTags(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function GetKernelPythonVersion(arg1:string):Promise<string>;
+
+export function GetLicenseText():Promise<string>;
 
 export function GetLocalFilePreview(arg1:string,arg2:fileformat.FileFormatConfig):Promise<fileformat.PreviewResult>;
 
@@ -801,6 +807,8 @@ export function IsAppleSilicon():Promise<boolean>;
 export function IsBoolean(arg1:string):Promise<boolean>;
 
 export function IsConnected():Promise<boolean>;
+
+export function IsLicenseAccepted():Promise<boolean>;
 
 export function IsNumeric(arg1:string):Promise<boolean>;
 
