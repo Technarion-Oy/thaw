@@ -36,7 +36,9 @@ Consumers:
 - `internal/crashreport` — embeds version in crash JSON via `crashreport.Init(version.Version)`.
 - `internal/telemetry` — embeds version in every telemetry event via `telemetry.Init(version.Version)`.
 - `internal/app/app.go` — returns `version.Version` as part of the `AppInfo` IPC response.
+- `internal/updater` / `internal/app/updater.go` — compares `version.Version` against the latest GitHub release tag; the update check is **skipped entirely when `Version == "dev"`**.
 
 ## Gotchas
 
 - The default `"dev"` value is intentional and visible in the UI for local development builds. CI/CD release pipelines must explicitly set this via `-ldflags`.
+- The update checker keys off the exact `"dev"` string to suppress "update available" nags on local builds. `internal/updater.IsNewer` also treats any non-semver current version as never-older as a second line of defense.

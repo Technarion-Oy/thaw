@@ -49,7 +49,16 @@ type AppConfig struct {
     Session       SessionConfig
     FeatureFlags  FeatureFlags
     LogPrefs      LogPrefs      // runtime log level + SQL-to-file logging switches
+    UpdateCheck   UpdateCheckState // cached last update-check result (throttles the startup GitHub check)
     // ...
+}
+
+// config.go — cached update-check state (see internal/updater + internal/app/updater.go)
+type UpdateCheckState struct {
+    LastCheckUnix  int64  // Unix seconds of the last successful check; throttles the background check
+    LatestVersion  string // latest release version seen (leading "v" stripped)
+    ReleaseNotes   string // cached release body, so the notification shows without a re-fetch
+    ReleasePageURL string // GitHub release page opened by "Download update"
 }
 
 // config.go — file-logging preferences (see internal/logger)

@@ -16,6 +16,7 @@ import NotebookPrefsModal from "./components/notebook/NotebookPrefsModal";
 import SessionManagementModal from "./components/settings/SessionManagementModal";
 import MCPSessionsModal from "./components/settings/MCPSessionsModal";
 import AboutModal from "./components/help/AboutModal";
+import UpdateNotification from "./components/help/UpdateNotification";
 import { IsConnected } from "../wailsjs/go/app/App";
 import { ClipboardGetText, ClipboardSetText, EventsOn } from "../wailsjs/runtime/runtime";
 import { useMonaco } from "@monaco-editor/react";
@@ -408,6 +409,7 @@ export default function App() {
           <MCPSessionsModal onClose={() => setMcpSessionsOpen(false)} />
         )}
         {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
+        <UpdateNotification />
       </AntApp>
     </ConfigProvider>
   );

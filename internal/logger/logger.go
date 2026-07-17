@@ -30,9 +30,11 @@ const (
 	rotationInterval = 24 * time.Hour
 )
 
-// L is the application-wide structured logger. It is initialized by Init and
-// safe to use from multiple goroutines.
-var L *slog.Logger
+// L is the application-wide structured logger. Init installs the real
+// file-backed handler; until then (and in tests that don't call Init) it defaults
+// to a no-op logger that discards output, so logging is always safe to call and
+// never nil-panics. Safe to use from multiple goroutines.
+var L = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 // Dir is the directory where log files are written. Set by Init; other
 // packages (e.g. crashreport) may use it to co-locate related files.

@@ -6764,6 +6764,31 @@ export namespace udf {
 
 }
 
+export namespace updater {
+	
+	export class CheckResult {
+	    available: boolean;
+	    currentVersion: string;
+	    latestVersion: string;
+	    releaseNotes: string;
+	    releasePageURL: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CheckResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.available = source["available"];
+	        this.currentVersion = source["currentVersion"];
+	        this.latestVersion = source["latestVersion"];
+	        this.releaseNotes = source["releaseNotes"];
+	        this.releasePageURL = source["releasePageURL"];
+	    }
+	}
+
+}
+
 export namespace view {
 	
 	export class ViewConfig {
