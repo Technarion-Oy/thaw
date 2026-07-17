@@ -50,6 +50,7 @@ type AppConfig struct {
     FeatureFlags  FeatureFlags
     LogPrefs      LogPrefs      // runtime log level + SQL-to-file logging switches
     UpdateCheck   UpdateCheckState // cached last update-check result (throttles the startup GitHub check)
+    LicenseAccepted bool        // first-launch license gate: false (fresh install or key absent) → prompt to accept
     // ...
 }
 

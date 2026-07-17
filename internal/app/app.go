@@ -139,17 +139,24 @@ type App struct {
 	// from THIRD_PARTY_NOTICES.md). Served to the About dialog via
 	// GetThirdPartyNotices. Set once in NewApp and never mutated.
 	thirdPartyNotices string
+
+	// licenseText is the embedded GPL-3.0 LICENSE content shown in the
+	// first-launch license agreement gate (see license.go). Served to the
+	// frontend via GetLicenseText. Set once in NewApp and never mutated.
+	licenseText string
 }
 
 // NewApp creates and returns a new App instance for use with the Wails runtime.
 // thirdPartyNotices is the embedded THIRD_PARTY_NOTICES.md content shown in the
-// About dialog.
-func NewApp(thirdPartyNotices string) *App {
+// About dialog; licenseText is the embedded LICENSE shown in the first-launch
+// license agreement.
+func NewApp(thirdPartyNotices, licenseText string) *App {
 	return &App{
 		gitCommitFilters:  make(map[string]string),
 		queryLog:          querylog.New(),
 		workdirOverridden: workdirOverrideArg() != "",
 		thirdPartyNotices: thirdPartyNotices,
+		licenseText:       licenseText,
 	}
 }
 

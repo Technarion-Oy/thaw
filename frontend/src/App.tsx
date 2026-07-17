@@ -17,7 +17,8 @@ import SessionManagementModal from "./components/settings/SessionManagementModal
 import MCPSessionsModal from "./components/settings/MCPSessionsModal";
 import AboutModal from "./components/help/AboutModal";
 import UpdateNotification from "./components/help/UpdateNotification";
-import { IsConnected } from "../wailsjs/go/app/App";
+import LicenseAgreement from "./components/setup/LicenseAgreement";
+import { IsConnected, IsLicenseAccepted } from "../wailsjs/go/app/App";
 import { ClipboardGetText, ClipboardSetText, EventsOn } from "../wailsjs/runtime/runtime";
 import { useMonaco } from "@monaco-editor/react";
 import { useThemeStore, type ThemePreference } from "./store/themeStore";
@@ -46,6 +47,9 @@ export default function App() {
   const [sessionMgmtOpen, setSessionMgmtOpen]           = useState(false);
   const [mcpSessionsOpen, setMcpSessionsOpen]           = useState(false);
   const [aboutOpen, setAboutOpen]                       = useState(false);
+  // First-launch license gate: null = still checking, false = must accept
+  // (gate shown, workspace withheld), true = accepted (workspace revealed).
+  const [licenseAccepted, setLicenseAccepted]           = useState<boolean | null>(null);
   const diffError    = useDiffStore((s) => s.error);
   const clearDiffError = useDiffStore((s) => s.clearError);
 
@@ -78,6 +82,14 @@ export default function App() {
     IsConnected().then((alive) => {
       setIsConnected(alive);
     });
+  }, []);
+
+  // Check whether the license has been accepted. Until it has, the license gate
+  // blocks the workspace. On any error, fail safe toward showing the gate.
+  useEffect(() => {
+    IsLicenseAccepted()
+      .then(setLicenseAccepted)
+      .catch(() => setLicenseAccepted(false));
   }, []);
 
   // Load feature flags from persisted config on startup.
@@ -171,11 +183,13 @@ export default function App() {
     return () => off();
   }, []);
 
-  // Open the connect modal on cold startup when not yet connected.
-  // Depends only on [hydrated] so disconnecting during a session does NOT reopen it.
+  // Open the connect modal on cold startup when not yet connected — but only
+  // once the license has been accepted, so the gate is never buried under it.
+  // Depends on [hydrated, licenseAccepted] so disconnecting during a session
+  // does NOT reopen it.
   useEffect(() => {
-    if (hydrated && !isConnected) setConnectModalOpen(true);
-  }, [hydrated]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (hydrated && licenseAccepted && !isConnected) setConnectModalOpen(true);
+  }, [hydrated, licenseAccepted]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-close the connect modal once a connection is established.
   useEffect(() => {
@@ -375,7 +389,10 @@ export default function App() {
       }}
     >
       <AntApp>
-        {hydrated && <AppLayout />}
+        {licenseAccepted === false && (
+          <LicenseAgreement onAccept={() => setLicenseAccepted(true)} />
+        )}
+        {hydrated && licenseAccepted && <AppLayout />}
         {connectModalOpen && <ConnectModal onClose={() => setConnectModalOpen(false)} />}
         {layoutModalOpen && (
           <LayoutSettingsModal onClose={() => setLayoutModalOpen(false)} />

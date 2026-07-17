@@ -529,6 +529,13 @@ type AppConfig struct {
 	LogPrefs               LogPrefs                        `json:"logPrefs"`
 	MCPCredentials         map[string]MCPSessionCredential `json:"mcpCredentials,omitempty"`
 	UpdateCheck            UpdateCheckState                `json:"updateCheck"`
+	// LicenseAccepted records whether the user has accepted the in-app license
+	// agreement shown on first launch. Defaults to false, so a fresh install (no
+	// config file) and any existing install written before this field was added
+	// (the key is simply absent) are both prompted to accept on next launch. No
+	// explicit migration is needed: the JSON zero value already means "not yet
+	// accepted". Set to true by App.AcceptLicense.
+	LicenseAccepted bool `json:"licenseAccepted"`
 }
 
 // configPath returns the absolute path to the application configuration file,

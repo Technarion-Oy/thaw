@@ -23,11 +23,11 @@ import (
 // Wails runtime. The embedded frontend assets and third-party license notices
 // are passed in from the root package because //go:embed paths cannot reference
 // parent directories.
-func Run(assets embed.FS, thirdPartyNotices string) error {
+func Run(assets embed.FS, thirdPartyNotices, licenseText string) error {
 	crashreport.Init(version.Version)
 	defer crashreport.Recover()
 
-	app := NewApp(thirdPartyNotices)
+	app := NewApp(thirdPartyNotices, licenseText)
 
 	winW, winH := 1400, 900
 	if saved, ok := session.LoadWindowState(); ok {
