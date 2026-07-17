@@ -20,13 +20,14 @@ import (
 
 // Run is the application entry point. It initializes crash reporting, restores
 // the persisted window state, builds the native menu, and hands control to the
-// Wails runtime. The embedded frontend assets are passed in from the root
-// package because //go:embed paths cannot reference parent directories.
-func Run(assets embed.FS) error {
+// Wails runtime. The embedded frontend assets and third-party license notices
+// are passed in from the root package because //go:embed paths cannot reference
+// parent directories.
+func Run(assets embed.FS, thirdPartyNotices string) error {
 	crashreport.Init(version.Version)
 	defer crashreport.Recover()
 
-	app := NewApp()
+	app := NewApp(thirdPartyNotices)
 
 	winW, winH := 1400, 900
 	if saved, ok := session.LoadWindowState(); ok {

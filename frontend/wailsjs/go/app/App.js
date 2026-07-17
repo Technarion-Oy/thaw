@@ -1274,6 +1274,10 @@ export function GetTaskStatuses(arg1, arg2) {
   return window['go']['app']['App']['GetTaskStatuses'](arg1, arg2);
 }
 
+export function GetThirdPartyNotices() {
+  return window['go']['app']['App']['GetThirdPartyNotices']();
+}
+
 export function GetTopologicalOrder(arg1, arg2, arg3) {
   return window['go']['app']['App']['GetTopologicalOrder'](arg1, arg2, arg3);
 }

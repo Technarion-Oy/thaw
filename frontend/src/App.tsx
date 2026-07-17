@@ -15,6 +15,7 @@ import LoggingPreferencesModal from "./components/settings/LoggingPreferencesMod
 import NotebookPrefsModal from "./components/notebook/NotebookPrefsModal";
 import SessionManagementModal from "./components/settings/SessionManagementModal";
 import MCPSessionsModal from "./components/settings/MCPSessionsModal";
+import AboutModal from "./components/help/AboutModal";
 import { IsConnected } from "../wailsjs/go/app/App";
 import { ClipboardGetText, ClipboardSetText, EventsOn } from "../wailsjs/runtime/runtime";
 import { useMonaco } from "@monaco-editor/react";
@@ -43,6 +44,7 @@ export default function App() {
   const [notebookPrefsOpen, setNotebookPrefsOpen]       = useState(false);
   const [sessionMgmtOpen, setSessionMgmtOpen]           = useState(false);
   const [mcpSessionsOpen, setMcpSessionsOpen]           = useState(false);
+  const [aboutOpen, setAboutOpen]                       = useState(false);
   const diffError    = useDiffStore((s) => s.error);
   const clearDiffError = useDiffStore((s) => s.clearError);
 
@@ -160,6 +162,12 @@ export default function App() {
     const open = () => setMcpSessionsOpen(true);
     window.addEventListener("thaw:open-mcp-sessions", open);
     return () => { off(); window.removeEventListener("thaw:open-mcp-sessions", open); };
+  }, []);
+
+  // Listen for "About Thaw…" menu event (Help → About Thaw).
+  useEffect(() => {
+    const off = EventsOn("menu:about", () => setAboutOpen(true));
+    return () => off();
   }, []);
 
   // Open the connect modal on cold startup when not yet connected.
@@ -399,6 +407,7 @@ export default function App() {
         {mcpSessionsOpen && (
           <MCPSessionsModal onClose={() => setMcpSessionsOpen(false)} />
         )}
+        {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
       </AntApp>
     </ConfigProvider>
   );

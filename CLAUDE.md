@@ -58,6 +58,9 @@ go test -tags integration ./internal/integration/...   # live Snowflake required
 # Docs
 make docs                            # regenerate TypeDoc + gomarkdoc reference
 make docs-serve                      # serve docs/ at http://localhost:4000
+
+# Third-party license notices (About → Acknowledgements)
+go run scripts/gen_third_party_notices.go   # regenerate THIRD_PARTY_NOTICES.md after dependency changes
 ```
 
 See [`docs/concepts/testing.md`](docs/concepts/testing.md) for lint/security gates and [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full workflow.
