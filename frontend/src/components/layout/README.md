@@ -88,6 +88,21 @@ click on the tree container clears the selection. The tree wrapper sets `userSel
 `preventDefault`s shift-mousedown so a range click doesn't paint a browser text selection. The
 selection drives the context menu's bulk **Delete N selected objects** and **Add N as insert sources**.
 
+### Show Dropped Objects (Time Travel undrop)
+Three modals — schema scope (`undropModal`, from the schema context menu's **Show Dropped Objects…**),
+database scope (`undropSchemasModal`, from the database context menu), and account scope
+(`undropDatabasesModal`, from the Objects-panel toolbar) — all render dropped objects through the
+shared module-level `DroppedObjectGroups` component, which sections the list by `DroppedTable.kind`
+in a fixed order (`DROPPED_KIND_ORDER`: Tables → Iceberg Tables → Schemas → Databases) with a
+pluralised heading + count per group. Each row shows the name, its `dropped_on` timestamp, and an
+**Undrop** button; the row key is `name|droppedOn` so an object dropped-and-recreated-and-redropped
+(same name, different timestamps) doesn't collide. `onUndrop` receives the whole row so the schema-scope
+handler `undropSchemaObject` can pick `UNDROP ICEBERG TABLE` vs `UNDROP TABLE` from `kind`; the
+schema/database handlers build `UNDROP SCHEMA` / `UNDROP DATABASE`. All run through `ExecDDL` and then
+refresh the affected part of the tree. Only tables (regular + iceberg), schemas, and databases are
+enumerable — dynamic tables, tags, streamlits, notebooks, and external volumes have no dropped-object
+listing in Snowflake (see `internal/snowflake/README.md`) and are out of scope.
+
 ## Stores used
 
 `AppLayout.tsx`: `panelLayoutStore` (panel order, widths), `featureFlagsStore`, `gitStore`.

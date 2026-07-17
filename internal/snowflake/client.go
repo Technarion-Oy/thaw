@@ -2320,25 +2320,37 @@ func ExtractArgTypes(arguments string) string {
 	return extractArgTypes(arguments)
 }
 
-// DroppedTable represents a table that has been dropped but is still within
+// DroppedTable represents an object that has been dropped but is still within
 // the Snowflake Time Travel retention window and can be recovered with UNDROP.
+// Despite the name, it is generic across every kind Thaw can enumerate as
+// dropped (tables, iceberg tables, schemas, databases); Kind carries the
+// discriminator so the UI can group rows and pick the right UNDROP statement.
 type DroppedTable struct {
 	Name      string `json:"name"`
 	DroppedOn string `json:"droppedOn"`
+	// Kind is the object kind used both to group rows in the UI and to choose
+	// the correct UNDROP statement: "TABLE", "ICEBERG TABLE", "SCHEMA", or
+	// "DATABASE". Regular and iceberg tables both come from SHOW TABLES
+	// HISTORY; iceberg tables are distinguished by the is_iceberg column.
+	Kind string `json:"kind"`
 }
 
 // ListDroppedTables returns tables in the given schema that have been dropped
 // but are still recoverable via Time Travel. It runs SHOW TABLES HISTORY and
-// returns only rows where dropped_on is non-empty.
+// returns only rows where dropped_on is non-empty. Iceberg tables are included
+// and tagged with Kind "ICEBERG TABLE" (via the is_iceberg column) so callers
+// can undrop them with UNDROP ICEBERG TABLE.
 func (c *Client) ListDroppedTables(ctx context.Context, database, schema string) ([]DroppedTable, error) {
-	return c.listDroppedHistory(ctx,
-		fmt.Sprintf(`SHOW TABLES HISTORY IN SCHEMA %s`, Qualify(database, schema)))
+	return c.listDroppedHistory(ctx, showTablesHistoryStmt(database, schema), "TABLE")
 }
 
 // listDroppedHistory is the shared helper for SHOW * HISTORY queries.
 // It reads any result set that has "name" and "dropped_on" columns and returns
 // only the rows where dropped_on is non-empty (i.e. the object is dropped).
-func (c *Client) listDroppedHistory(ctx context.Context, query string) ([]DroppedTable, error) {
+// Each row's Kind defaults to defaultKind, except that rows whose is_iceberg
+// column is truthy (present only in SHOW TABLES HISTORY) are tagged
+// "ICEBERG TABLE".
+func (c *Client) listDroppedHistory(ctx context.Context, query, defaultKind string) ([]DroppedTable, error) {
 	rows, err := c.queryCtx(ctx, query)
 	if err != nil {
 		return nil, err
@@ -2346,7 +2358,7 @@ func (c *Client) listDroppedHistory(ctx context.Context, query string) ([]Droppe
 	defer rows.Close() //nolint:errcheck
 
 	cols, _ := rows.Columns()
-	idxs := colIndexMap(cols, "name", "dropped_on")
+	idxs := colIndexMap(cols, "name", "dropped_on", "is_iceberg")
 	if idxs["name"] < 0 {
 		return nil, fmt.Errorf("no 'name' column in result: %s", query)
 	}
@@ -2361,24 +2373,41 @@ func (c *Client) listDroppedHistory(ctx context.Context, query string) ([]Droppe
 		if droppedOn == "" {
 			continue
 		}
+		kind := defaultKind
+		if isTruthyFlag(strVal(vals, idxs["is_iceberg"])) {
+			kind = "ICEBERG TABLE"
+		}
 		result = append(result, DroppedTable{
 			Name:      strVal(vals, idxs["name"]),
 			DroppedOn: droppedOn,
+			Kind:      kind,
 		})
 	}
 	return result, rows.Err()
 }
 
+// isTruthyFlag reports whether a Snowflake SHOW boolean-ish column value denotes
+// true. SHOW columns render such flags as "Y"/"N" (e.g. is_iceberg) or, on some
+// versions, "true"/"false"; both spellings are accepted, case-insensitively.
+func isTruthyFlag(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "y", "yes", "true", "t", "1":
+		return true
+	default:
+		return false
+	}
+}
+
 // ListDroppedSchemas returns schemas in the given database that have been
 // dropped but are still within the Time Travel retention window.
 func (c *Client) ListDroppedSchemas(ctx context.Context, database string) ([]DroppedTable, error) {
-	return c.listDroppedHistory(ctx, showSchemasHistoryStmt(database))
+	return c.listDroppedHistory(ctx, showSchemasHistoryStmt(database), "SCHEMA")
 }
 
 // ListDroppedDatabases returns all databases that have been dropped but are
 // still within the Time Travel retention window.
 func (c *Client) ListDroppedDatabases(ctx context.Context) ([]DroppedTable, error) {
-	return c.listDroppedHistory(ctx, `SHOW DATABASES HISTORY`)
+	return c.listDroppedHistory(ctx, showDatabasesHistoryStmt(), "DATABASE")
 }
 
 // GetDatabaseRetentionDays returns the DATA_RETENTION_TIME_IN_DAYS parameter

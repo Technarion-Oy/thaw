@@ -68,6 +68,7 @@ var expectedTools = []string{
 	"get_warehouse_ddl",
 	"list_available_roles",
 	"list_databases",
+	"list_dropped_databases",
 	"list_dropped_schemas",
 	"list_dropped_tables",
 	"list_file_formats",

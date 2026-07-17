@@ -47,6 +47,9 @@ func TestDropShowStmtQuoting(t *testing.T) {
 		{"show grants to role reserved", showGrantsToRoleStmt("order"), `SHOW GRANTS TO ROLE "order"`},
 		{"show grants on role", showGrantsOnRoleStmt("ANALYST"), `SHOW GRANTS ON ROLE "ANALYST"`},
 		{"show schemas history", showSchemasHistoryStmt("MY_DB"), `SHOW SCHEMAS HISTORY IN DATABASE "MY_DB"`},
+		{"show tables history two-part", showTablesHistoryStmt("MY_DB", "MY_SCHEMA"), `SHOW TABLES HISTORY IN SCHEMA "MY_DB"."MY_SCHEMA"`},
+		{"show tables history mixed case", showTablesHistoryStmt("Db", "My Schema"), `SHOW TABLES HISTORY IN SCHEMA "Db"."My Schema"`},
+		{"show databases history", showDatabasesHistoryStmt(), `SHOW DATABASES HISTORY`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
