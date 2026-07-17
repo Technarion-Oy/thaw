@@ -1,0 +1,87 @@
+name: Frontend Tests
+
+# Least-privilege default: read-only token unless a job opts into more.
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend-tests.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend-tests.yml"
+
+# Cancel an in-progress run when a new commit is pushed to the same ref, so
+# rapid PR pushes don't queue up redundant runs on the self-hosted runners.
+concurrency:
+  group: frontend-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Vitest unit tests (frontend/src/**/*.test.ts{,x}) ──────────────────────
+  # Runs the React/TypeScript suite in isolation from the Go build so a broken
+  # unit test surfaces here directly. No Wails runtime is present — tests that
+  # depend on IPC bindings mock the generated wailsjs modules (see e.g.
+  # frontend/src/utils/sqlFormatter.test.ts).
+  vitest:
+    name: Vitest
+    runs-on: self-hosted
+    container: ubuntu:24.04
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: frontend
+
+    steps:
+      # git is required by actions/checkout; curl/wget for the node setup action.
+      - name: Install base tools
+        run: |
+          apt-get update
+          apt-get install -y git curl wget
+        working-directory: /
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # npm ci = clean, lockfile-exact install (fails if package-lock.json is
+      # out of sync). Reproducible and faster than `npm install` in CI.
+      - name: Install dependencies
+        run: npm ci
+
+      # Emit a JUnit report alongside the default console output so the publish
+      # step below can annotate the PR. A non-zero vitest exit still fails the
+      # job even though the report is written.
+      - name: Run vitest
+        run: npx vitest run --reporter=default --reporter=junit --outputFile=report-vitest.xml
+
+      - name: Publish test results
+        uses: EnricoMi/publish-unit-test-result-action/linux@v2
+        if: always()
+        # Best-effort reporting: real failures already fail the job via the
+        # vitest step above; a flaky GitHub API throttle in the publisher must
+        # not fail the whole build. Mirrors unit-tests.yml.
+        continue-on-error: true
+        with:
+          files: frontend/report-vitest.xml
+          check_name: Vitest
+          compare_to_earlier_commit: false
+
+      - name: Unlock permissions for host runner agent
+        if: always()
+        run: chmod -R 777 $GITHUB_WORKSPACE/../../_actions || true
+        working-directory: /
