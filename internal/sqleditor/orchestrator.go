@@ -211,9 +211,18 @@ func gatherCatalog(ctx context.Context, provider SchemaProvider, refs []JoinTabl
 	}
 	cat.databases = dbs
 
+	// schemasAttempted dedups the ListSchemas call per database regardless of
+	// outcome, so an unlistable/shared DB referenced by several schemas in one
+	// query fails ListSchemas once, not once per schema. It is deliberately
+	// separate from cat.fetchedSchemas (set only on success): fetchedSchemas is
+	// the resolution guard — marking a DB "fetched" after a failed list would
+	// make resolveRefsForDiagnostics drop valid refs as typos (false positive).
+	schemasAttempted := make(map[string]bool)
+
 	for ds := range seen {
 		// List schemas once per database.
-		if !cat.fetchedSchemas[ds.db] {
+		if !schemasAttempted[ds.db] {
+			schemasAttempted[ds.db] = true
 			schemas, err := provider.ListSchemas(ctx, ds.db)
 			if err == nil {
 				cat.fetchedSchemas[ds.db] = true
@@ -249,7 +258,11 @@ func gatherCatalog(ctx context.Context, provider SchemaProvider, refs []JoinTabl
 //     (never blindly qualified from session context) — an unresolvable name is
 //     dropped, exactly as the editor does.
 //
-// USE refs (Name == "") are skipped.
+// USE refs (Name == "") are skipped. This is one deliberate tightening over the
+// editor's `resolved` mapping, which has no such guard: a 2-part `USE SCHEMA
+// db.schema` reaches the qualified branch there and can push a resolved ref with
+// an empty Name into colEntries/semantic analysis. We drop it so no empty-named
+// ref ever flows downstream. ParseJoinTables emits USE refs with Name == "".
 func resolveRefsForDiagnostics(refs []JoinTableRef, cat diagCatalog) []ResolvedRef {
 	var out []ResolvedRef
 	for _, ref := range refs {
@@ -389,7 +402,9 @@ func tableViewRefs(objects []StoreObject) []ResolvedRef {
 func storeObjectsToObjectRefs(objects []StoreObject) []ObjectRef {
 	out := make([]ObjectRef, len(objects))
 	for i, o := range objects {
-		out[i] = ObjectRef{DB: o.DB, Schema: o.Schema, Name: o.Name, Kind: o.Kind}
+		// StoreObject and ObjectRef share identical fields, so a direct
+		// conversion is exact (and avoids the staticcheck S1016 rewrite).
+		out[i] = ObjectRef(o)
 	}
 	return out
 }

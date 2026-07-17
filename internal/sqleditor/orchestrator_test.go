@@ -22,6 +22,8 @@ type fakeProvider struct {
 	columns    map[string][]ColInfo     // UC(db)\0UC(schema)\0UC(name) → cols
 	sessionErr error
 	dbErr      error
+
+	listSchemasCalls map[string]int // UC(db) → number of ListSchemas invocations
 }
 
 func (p *fakeProvider) SessionContext(context.Context) (SessionContext, error) {
@@ -39,6 +41,9 @@ func (p *fakeProvider) ListDatabases(context.Context) ([]string, error) {
 }
 
 func (p *fakeProvider) ListSchemas(_ context.Context, db string) ([]string, error) {
+	if p.listSchemasCalls != nil {
+		p.listSchemasCalls[strings.ToUpper(db)]++
+	}
 	s, ok := p.schemas[strings.ToUpper(db)]
 	if !ok {
 		return nil, errors.New("SHOW SCHEMAS failed")
@@ -281,5 +286,30 @@ func TestDiagnose_NoRefsShortCircuits(t *testing.T) {
 
 	if _, err := Diagnose(context.Background(), p, "SELECT 1"); err != nil {
 		t.Fatalf("SQL with no refs should short-circuit before ListDatabases, got %v", err)
+	}
+}
+
+// TestDiagnose_ListSchemasDedupedOnFailure verifies that an unlistable/shared DB
+// referenced by multiple schemas in one query triggers exactly one ListSchemas
+// call (deduped regardless of outcome), not one per schema — while the failed
+// list still leaves the DB out of the fetched-schema guard so its refs are
+// trusted rather than dropped as typos.
+func TestDiagnose_ListSchemasDedupedOnFailure(t *testing.T) {
+	p := &fakeProvider{
+		session:          SessionContext{Database: "MYDB", Schema: "PUBLIC"},
+		databases:        []string{"MYDB", "SHAREDDB"},
+		schemas:          map[string][]string{"MYDB": {"PUBLIC"}}, // SHAREDDB is unlistable
+		objects:          map[string][]StoreObject{},              // no objects fetched anywhere
+		listSchemasCalls: map[string]int{},
+	}
+
+	// Two distinct schemas under the unlistable SHAREDDB.
+	sql := "SELECT * FROM SHAREDDB.S1.T1 JOIN SHAREDDB.S2.T2 ON T1.ID = T2.ID"
+	if _, err := Diagnose(context.Background(), p, sql); err != nil {
+		t.Fatalf("Diagnose error: %v", err)
+	}
+
+	if got := p.listSchemasCalls["SHAREDDB"]; got != 1 {
+		t.Fatalf("ListSchemas(SHAREDDB) called %d times, want 1 (deduped on failure)", got)
 	}
 }
