@@ -261,7 +261,7 @@ func FindOldestEligibleBackup(res *snowflake.QueryResult) (id string, ok bool) {
 // value reaches us as a string (CellString formats a time.Time as RFC3339, but
 // Snowflake may also return the timestamp as a raw string in other layouts), so
 // several common layouts are tried. ok is false when the value is empty or none
-// of the layouts match, signalling the caller to fall back to a string compare.
+// of the layouts match, signaling the caller to fall back to a string compare.
 func parseBackupTime(s string) (time.Time, bool) {
 	s = strings.TrimSpace(s)
 	if s == "" {
