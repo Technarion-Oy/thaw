@@ -163,7 +163,7 @@ const KIND_ICON: Record<string, React.ReactNode> = {
   UNKNOWN:   <QuestionOutlined style={{ fontSize: 13 }} />,
 };
 
-// iconFor maps a Snowflake domain (which may be multi-word, e.g.
+// bucketFor maps a Snowflake domain (which may be multi-word, e.g.
 // "MATERIALIZED VIEW", "EXTERNAL FUNCTION") to the closest kind icon/color by
 // its last significant word, falling back to UNKNOWN.
 function bucketFor(domain: string): string {
@@ -173,6 +173,16 @@ function bucketFor(domain: string): string {
   if (up.includes("PROCEDURE")) return "PROCEDURE";
   if (up.includes("FUNCTION")) return "FUNCTION";
   return "UNKNOWN";
+}
+
+// isRoutineDomain reports whether the domain is a procedure/function kind whose
+// GET_DDL requires an argument signature. OBJECT_DEPENDENCIES does not report
+// argument types, so a GET_DDL for these would append "()" and fail to resolve
+// any parameterized overload — we therefore suppress the DDL hover for them in
+// the ACCOUNT_USAGE lists rather than show a silently-empty tooltip.
+function isRoutineDomain(domain: string): boolean {
+  const b = bucketFor(domain);
+  return b === "PROCEDURE" || b === "FUNCTION";
 }
 
 // ── tree builder ──────────────────────────────────────────────────────────────
@@ -351,17 +361,36 @@ function UsageSection({
               padding: "6px 8px",
             }}
           >
-            {refs.map((r, i) => (
-              <div key={`${r.database}.${r.schema}.${r.name}-${i}`} style={{ padding: "4px 2px" }}>
-                <DdlTooltip db={r.database} schema={r.schema} kind={r.domain} name={r.name} args="">
-                  <NodeLabel
-                    dep={{ database: r.database, schema: r.schema, name: r.name, kind: r.domain } as DepNode}
-                  />
-                </DdlTooltip>
-              </div>
-            ))}
+            {refs.map((r, i) => {
+              const label = (
+                <NodeLabel
+                  dep={{ database: r.database, schema: r.schema, name: r.name, kind: r.domain } as DepNode}
+                />
+              );
+              return (
+                <div key={`${r.database}.${r.schema}.${r.name}-${i}`} style={{ padding: "4px 2px" }}>
+                  {/* OBJECT_DEPENDENCIES omits argument signatures, so a GET_DDL
+                      for a procedure/function would fail — show the plain label
+                      (no DDL hover) for routine kinds instead of a blank tooltip. */}
+                  {isRoutineDomain(r.domain) ? (
+                    label
+                  ) : (
+                    <DdlTooltip db={r.database} schema={r.schema} kind={r.domain} name={r.name} args="">
+                      {label}
+                    </DdlTooltip>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )
+      )}
+
+      {refs !== null && !loading && refs.some((r) => isRoutineDomain(r.domain)) && (
+        <Text type="secondary" style={{ fontSize: 11, display: "block", marginTop: 8 }}>
+          Hover-DDL preview is unavailable for procedures and functions here —
+          their argument signature isn't recorded by OBJECT_DEPENDENCIES.
+        </Text>
       )}
     </div>
   );

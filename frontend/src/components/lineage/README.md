@@ -44,6 +44,8 @@ tooltip (`DdlTooltip`).
 
 **Domain → icon mapping:** `OBJECT_DEPENDENCIES` reports multi-word domains (e.g. `MATERIALIZED VIEW`, `EXTERNAL FUNCTION`). `bucketFor` maps any domain to the closest `TABLE`/`VIEW`/`PROCEDURE`/`FUNCTION` icon/colour bucket by keyword, while the type tag still shows the full domain string.
 
+**Routine DDL hover:** `OBJECT_DEPENDENCIES` does not report argument signatures, and `GET_DDL` for a `PROCEDURE`/`FUNCTION` appends `()` and fails to resolve any parameterized overload. So in the `UsageSection` flat lists, `isRoutineDomain` rows render the plain `NodeLabel` with **no** `DdlTooltip` (avoiding a silently-empty tooltip), and a footnote explains the omission when any routine rows are present. Non-routine kinds (tables, views, …) keep the hover since they need no signature.
+
 ## Gotchas
 
 - `nodeCounter` is a module-level mutable counter reset to `0` before each tree build to generate stable, sequential keys. This means the component is not safe for concurrent instances in the same module scope.
