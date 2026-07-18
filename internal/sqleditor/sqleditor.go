@@ -2795,7 +2795,13 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 		// (FOR/value literals), CONNECT BY (LEVEL/PRIOR pseudo-columns), LATERAL FLATTEN
 		// (SEQ/KEY/VALUE… output), etc. — mirroring ValidateBareColumnRefs' matchesSnowflakeFP
 		// guard, which ValidateSemantics previously lacked (issue #793 D2/D4/D5).
-		ctx.bareColValidation = !hasUnknownTable && !hasValuesSource &&
+		// A derived table (FROM/JOIN (<subquery>) …) exposes columns our flat
+		// scanner can't resolve, and its inner FROM leaks into the table-in-scope
+		// set — so the alias after the subquery, and the subquery's own tables, were
+		// misread as columns (issue #793 D3). Treat it like an unknown source.
+		hasDerivedTable := hasSubquerySource(strippedSig, stripped)
+
+		ctx.bareColValidation = !hasUnknownTable && !hasValuesSource && !hasDerivedTable &&
 			len(ctx.activeKeys) > 0 && !matchesSnowflakeFP(rawSig, raw)
 
 		stmtContexts[idx] = ctx

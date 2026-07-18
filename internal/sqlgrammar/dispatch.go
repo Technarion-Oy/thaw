@@ -105,7 +105,9 @@ func buildRegistry() map[string][]ruleFn {
 		"GET":      {(*Validator).ParseGet},
 		"PUT":      {(*Validator).ParsePut},
 		"LIST":     {(*Validator).ParseList},
+		"LS":       {(*Validator).ParseList}, // documented abbreviation of LIST (issue #793 C)
 		"REMOVE":   {(*Validator).ParseRemove},
+		"RM":       {(*Validator).ParseRemove}, // documented abbreviation of REMOVE (issue #793 C)
 		"CALL":     {(*Validator).ParseCall, (*Validator).ParseCallWithAnonymousProcedure},
 		"COMMENT":  {(*Validator).ParseComment},
 		"EXPLAIN":  {(*Validator).ParseExplain},

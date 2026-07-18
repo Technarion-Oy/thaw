@@ -939,6 +939,36 @@ type tableAlias struct {
 	alias     string
 }
 
+// hasSubquerySource reports whether a top-level FROM or JOIN clause draws from a
+// parenthesized source — a derived table / subquery `FROM (…) alias` — rather than
+// a plain table name. Such a source defeats the flat column scanner (its alias and
+// inner tables get misread as columns), so callers disable bare-column validation
+// for the statement (issue #793 D3).
+func hasSubquerySource(sig []sqltok.Token, sql string) bool {
+	depth := 0
+	for i := 0; i < len(sig); i++ {
+		switch sig[i].Kind {
+		case sqltok.LParen:
+			depth++
+			continue
+		case sqltok.RParen:
+			if depth > 0 {
+				depth--
+			}
+			continue
+		}
+		if depth != 0 {
+			continue
+		}
+		if u := tokUpper(sig[i], sql); u == "FROM" || u == "JOIN" {
+			if i+1 < len(sig) && sig[i+1].Kind == sqltok.LParen {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func findFromJoinWithAlias(sig []sqltok.Token, sql string) []tableAlias {
 	// Keywords that start a FROM/JOIN clause (single-word). USING introduces the
 	// MERGE source table (`MERGE INTO t USING s …`); the `JOIN … USING (cols)`

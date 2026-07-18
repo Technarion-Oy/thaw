@@ -66,6 +66,93 @@ func assertNoColMarkers(t *testing.T, sql string) {
 	}
 }
 
+// hasMarkerContaining reports whether any phase-1 marker for sql contains sub.
+func hasMarkerContaining(t *testing.T, sql, sub string) bool {
+	t.Helper()
+	markers, err := Diagnose(context.Background(), nil, sql)
+	if err != nil {
+		t.Fatalf("Diagnose(%q) error: %v", sql, err)
+	}
+	for _, m := range markers {
+		if strings.Contains(m.Message, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+// B15: a MERGE with no WHEN clause is invalid.
+func TestIssue793_B15_MergeRequiresWhen(t *testing.T) {
+	if !hasMarkerContaining(t, "MERGE INTO t USING u ON t.id = u.id", "at least one WHEN") {
+		t.Error("expected a 'requires at least one WHEN' marker for a MERGE with no WHEN clause")
+	}
+	// A complete MERGE is not flagged.
+	if hasMarkerContaining(t, "MERGE INTO t USING u ON t.id = u.id WHEN MATCHED THEN DELETE", "at least one WHEN") {
+		t.Error("a MERGE with a WHEN clause must not be flagged")
+	}
+}
+
+// B16: ALTER TABLE ADD COLUMN with no data type is invalid.
+func TestIssue793_B16_AddColumnNoType(t *testing.T) {
+	if !hasMarkerContaining(t, "ALTER TABLE t ADD COLUMN newcol", "missing a data type") {
+		t.Error("expected a 'missing a data type' marker for ADD COLUMN with no type")
+	}
+	if hasMarkerContaining(t, "ALTER TABLE t ADD COLUMN newcol INT", "missing a data type") {
+		t.Error("ADD COLUMN with a type must not be flagged")
+	}
+}
+
+// B18: the second word of a multi-word data type is validated (DOUBLE PRECISIONX).
+func TestIssue793_B18_MultiWordDataType(t *testing.T) {
+	if !hasMarkerContaining(t, "CREATE TABLE t (a DOUBLE PRECISIONX)", "Unknown data type") {
+		t.Error("expected an unknown-data-type marker for 'DOUBLE PRECISIONX'")
+	}
+	// Legitimate forms are not flagged.
+	for _, sql := range []string{
+		"CREATE TABLE t (a DOUBLE PRECISION)",
+		"CREATE TABLE t (a DOUBLE)",
+		"CREATE TABLE t (a DOUBLE NOT NULL)",
+	} {
+		if hasMarkerContaining(t, sql, "Unknown data type") {
+			t.Errorf("valid type wrongly flagged: %q", sql)
+		}
+	}
+}
+
+// B19 / C: Snowflake-unsupported commands (SAVEPOINT, ANALYZE) are flagged.
+func TestIssue793_B19_UnsupportedCommands(t *testing.T) {
+	if !hasMarkerContaining(t, "SAVEPOINT sp1", "does not support SAVEPOINT") {
+		t.Error("expected SAVEPOINT to be flagged as unsupported")
+	}
+	if !hasMarkerContaining(t, "ANALYZE TABLE t", "does not support the ANALYZE") {
+		t.Error("expected ANALYZE to be flagged as unsupported")
+	}
+}
+
+// C: the ASOF MATCH_CONDITION comparison check is depth-aware — a `>` inside a
+// function argument no longer satisfies a top-level `=`-only (invalid) condition.
+func TestIssue793_C_AsofMatchConditionDepth(t *testing.T) {
+	if !hasMarkerContaining(t,
+		"SELECT * FROM a ASOF JOIN b MATCH_CONDITION (foo(a.x > 1) = b.y)",
+		"MATCH_CONDITION comparison") {
+		t.Error("expected a MATCH_CONDITION marker: the top-level operator is '=' (invalid)")
+	}
+	// A genuine top-level inequality is still accepted.
+	if hasMarkerContaining(t,
+		"SELECT * FROM a ASOF JOIN b MATCH_CONDITION (a.ts >= b.ts)",
+		"MATCH_CONDITION comparison") {
+		t.Error("a valid >= MATCH_CONDITION must not be flagged")
+	}
+}
+
+// C: checkVariantPathColon now matches keyword path segments (payload.user.name,
+// where USER is a keyword) — previously a keyword segment silently defeated it.
+func TestIssue793_C_VariantPathKeywordSegment(t *testing.T) {
+	if !hasMarkerContaining(t, "SELECT payload.user.name FROM events", "Missing colon for variant path") {
+		t.Error("expected a variant-path suggestion for payload.user.name")
+	}
+}
+
 // A1: bare (non-$$) Snowflake Scripting anonymous blocks — pasted from Snowsight —
 // must not be shredded on their inner `;` and flagged. These produced red errors
 // and/or "unexpected end of statement" warnings before the fix.
@@ -133,6 +220,25 @@ func TestIssue793_D2_LateralFlatten(t *testing.T) {
 	assertNoColMarkers(t, "SELECT value FROM orders, LATERAL FLATTEN(input => v)")
 }
 
+// D3: inline derived tables and scalar subqueries must not have their alias /
+// inner tables misread as missing columns.
+func TestIssue793_D3_DerivedTablesAndSubqueries(t *testing.T) {
+	assertNoColMarkers(t, "SELECT x.id FROM (SELECT id FROM orders) x")
+	assertNoColMarkers(t, "SELECT (SELECT MAX(amount) FROM orders) AS max_amt")
+	assertNoColMarkers(t, "SELECT id, (SELECT COUNT(*) FROM orders) AS n FROM customers")
+	// Regression: a CTE + alias already worked and must keep working.
+	assertNoColMarkers(t, "WITH recent AS (SELECT id FROM orders) SELECT r.id FROM recent r")
+}
+
+// D3 regression: a genuinely unknown bare column against a plain table is still
+// flagged (the derived-table guard must not over-suppress real errors).
+func TestIssue793_D3_RealErrorStillFlagged(t *testing.T) {
+	got := diagnoseColMarkers(t, "SELECT nosuchcol FROM orders")
+	if len(got) == 0 {
+		t.Error("expected a missing-column marker for 'nosuchcol' against a plain table")
+	}
+}
+
 // D4: PIVOT/UNPIVOT clause tokens (FOR, the value column) must not leak into
 // column validation.
 func TestIssue793_D4_PivotUnpivot(t *testing.T) {
@@ -152,6 +258,32 @@ func TestIssue793_D6_AlwaysPresentSchemas(t *testing.T) {
 	assertNoColMarkers(t, "SELECT table_name FROM information_schema.tables")
 	assertNoColMarkers(t, "SELECT column_name FROM mydb.information_schema.columns") // 3-part regression guard
 	assertNoColMarkers(t, "SELECT query_text FROM snowflake.account_usage.query_history")
+}
+
+// G: a statement whose only reference is a stage must still reach the stage
+// existence check instead of being short-circuited away for having no table refs.
+func TestIssue793_G_StageOnlyStatement(t *testing.T) {
+	// Nonexistent stage → flagged.
+	markers, err := Diagnose(context.Background(), issue793Provider(), "SELECT $1 FROM @nostg/f.csv")
+	if err != nil {
+		t.Fatalf("Diagnose error: %v", err)
+	}
+	found := false
+	for _, m := range markers {
+		if strings.Contains(strings.ToUpper(m.Message), "STAGE 'NOSTG'") && strings.Contains(m.Message, "does not exist") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a missing-stage marker for @nostg, got %+v", markers)
+	}
+	// Existing stage → not flagged.
+	markers, _ = Diagnose(context.Background(), issue793Provider(), "SELECT $1 FROM @mystg/f.csv")
+	for _, m := range markers {
+		if strings.Contains(m.Message, "Stage") && strings.Contains(m.Message, "does not exist") {
+			t.Errorf("existing stage @mystg wrongly flagged: %q", m.Message)
+		}
+	}
 }
 
 // A2: the AISQL AI_* family must not be flagged as an unknown Cortex function.

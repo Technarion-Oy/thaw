@@ -28,6 +28,34 @@ func TestIssue793_UnionByName(t *testing.T) {
 	)
 }
 
+// B17: a dangling USE (object-type keyword with no name) is incomplete and must
+// not be accepted (the bare form previously swallowed DATABASE/ROLE/… as a name).
+func TestIssue793_B17_UseDangling(t *testing.T) {
+	assertInvalid(t, (*Validator).ParseUse, "USE DATABASE", "USE ROLE", "USE WAREHOUSE", "USE SCHEMA")
+	// Named forms and a quoted object literally named DATABASE still parse.
+	assertValid(t, (*Validator).ParseUse,
+		"USE mydb", "USE DATABASE mydb", "USE SCHEMA myschema", "USE ROLE myrole",
+		`USE "DATABASE"`,
+	)
+	// End to end via dispatch: no USE candidate accepts the dangling form.
+	if topLevelOK("USE DATABASE") {
+		t.Error("USE DATABASE should not fully parse through dispatch")
+	}
+}
+
+// C: the documented LS/RM abbreviations are dispatched so their content is
+// grammar-checked instead of passing silently.
+func TestIssue793_C_LsRmDispatch(t *testing.T) {
+	for _, sql := range []string{"LS @my_stage", "RM @my_stage/path/"} {
+		if !New(sql).Recognized() {
+			t.Errorf("%q should be recognized by the grammar dispatch", sql)
+		}
+		if !topLevelOK(sql) {
+			t.Errorf("%q should parse", sql)
+		}
+	}
+}
+
 // F: CALL accepts the model-method form <model>!<method>(…).
 func TestIssue793_CallModelMethod(t *testing.T) {
 	assertValid(t, (*Validator).ParseCall,

@@ -356,9 +356,19 @@ func ValidateDataTypes(sql string, stmtRanges []StatementRange) []DiagMarker {
 				isColumnClause := sawColumn ||
 					(!nonColumnDefKeywords[addWord] && addWord != "ROW" && addWord != "SEARCH")
 				if pos < len(sig) && isIdent(sig[pos]) && isColumnClause {
+					colTok := sig[pos]
 					pos++
 					if pos < len(sig) && (sig[pos].Kind == sqltok.Keyword || sig[pos].Kind == sqltok.Identifier) {
 						rel(sig[pos].Text(rawText), sig[pos].Start)
+					} else {
+						// ADD COLUMN <name> with no data type following (issue #793 B16).
+						line, col := offsetToLineCol(stmtOffset + colTok.Start)
+						markers = append(markers, DiagMarker{
+							StartLineNumber: line, StartColumn: col,
+							EndLineNumber: line, EndColumn: col + (colTok.End - colTok.Start),
+							Message:  "Column '" + colTok.Text(rawText) + "' is missing a data type.",
+							Severity: 4, // Warning
+						})
 					}
 				}
 			}
@@ -519,14 +529,26 @@ func walkColumnDefTypes(sig []sqltok.Token, sql string, lparenIdx int, onType fu
 		return
 	}
 
-	var w0, w1 sqltok.Token
+	var w0, w1, w2 sqltok.Token
 	wn := 0
 	flush := func() {
 		if wn >= 2 {
 			if nonColumnDefKeywords[strings.ToUpper(w0.Text(sql))] {
 				// table-level constraint / policy, not a column definition
 			} else if w1.Kind != sqltok.QuotedIdent {
-				onType(w1.Text(sql), w1.Start)
+				// Multi-word type check: DOUBLE PRECISION is the only multi-word
+				// Snowflake type, so DOUBLE followed by a bare identifier that isn't
+				// PRECISION is a typo in the second word — the base (DOUBLE) alone
+				// would otherwise pass silently. Legitimate column-def continuations
+				// (NOT, NULL, DEFAULT, COMMENT, COLLATE, MASKING …) are Keyword-kind,
+				// never Identifier, so they can't trigger this (issue #793 B18).
+				if wn >= 3 && w2.Kind == sqltok.Identifier &&
+					strings.EqualFold(w1.Text(sql), "DOUBLE") &&
+					!strings.EqualFold(w2.Text(sql), "PRECISION") {
+					onType(w1.Text(sql)+" "+w2.Text(sql), w1.Start)
+				} else {
+					onType(w1.Text(sql), w1.Start)
+				}
 			}
 		}
 		wn = 0
@@ -547,13 +569,16 @@ func walkColumnDefTypes(sig []sqltok.Token, sql string, lparenIdx int, onType fu
 				flush()
 			}
 		case sqltok.Keyword, sqltok.Identifier, sqltok.QuotedIdent:
-			// Collect the first two word tokens of the current segment (the
-			// column name and its type), regardless of nesting depth.
+			// Collect the first three word tokens of the current segment (the
+			// column name, its type, and — for multi-word types — the type's second
+			// word), regardless of nesting depth.
 			switch wn {
 			case 0:
 				w0, wn = sig[i], 1
 			case 1:
 				w1, wn = sig[i], 2
+			case 2:
+				w2, wn = sig[i], 3
 			}
 		}
 	}

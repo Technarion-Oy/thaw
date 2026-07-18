@@ -1,6 +1,10 @@
 package sqlgrammar
 
-import "thaw/internal/sqltok"
+import (
+	"strings"
+
+	"thaw/internal/sqltok"
+)
 
 // Sessions & context (USE, SET) — grammar-rule stubs for issue #556.
 //
@@ -119,10 +123,26 @@ func (v *Validator) ParseUse() bool {
 					)
 				},
 				// USE [<db_name>.]<name> — the bare form sets the database or schema.
-				func() bool { return v.parseIdentPathN(2) },
+				func() bool { return v.parseUseTargetName(2) },
 			)
 		},
 	)
+}
+
+// parseUseTargetName matches a [<db>.]<name> USE target (of at most maxParts
+// segments), but rejects a leading object-type keyword (DATABASE/ROLE/WAREHOUSE/
+// SCHEMA/SECONDARY) as the name — that means the specific USE form's name is
+// missing (`USE DATABASE`, `USE ROLE`, …), so the statement is incomplete rather
+// than a USE of an object literally so named (issue #793 B17). A real object
+// named DATABASE must be quoted, which arrives as a QuotedIdent, not a Keyword.
+func (v *Validator) parseUseTargetName(maxParts int) bool {
+	if t := v.Peek(); t.Kind == sqltok.Keyword {
+		switch strings.ToUpper(t.Text(v.src)) {
+		case "DATABASE", "ROLE", "WAREHOUSE", "SCHEMA", "SECONDARY":
+			return false
+		}
+	}
+	return v.parseIdentPathN(maxParts)
 }
 
 // ParseUseDatabase validates the Snowflake `USE DATABASE` command.
@@ -135,7 +155,7 @@ func (v *Validator) ParseUseDatabase() bool {
 	return v.Sequence(
 		func() bool { return v.MatchKeyword("USE") },
 		func() bool { return v.Optional(func() bool { return v.MatchWord("DATABASE") }) },
-		func() bool { return v.parseIdentPathN(1) },
+		func() bool { return v.parseUseTargetName(1) },
 	)
 }
 
@@ -163,7 +183,7 @@ func (v *Validator) ParseUseSchema() bool {
 	return v.Sequence(
 		func() bool { return v.MatchKeyword("USE") },
 		func() bool { return v.Optional(func() bool { return v.MatchWord("SCHEMA") }) },
-		func() bool { return v.parseIdentPathN(2) },
+		func() bool { return v.parseUseTargetName(2) },
 	)
 }
 

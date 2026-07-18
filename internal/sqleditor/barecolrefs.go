@@ -744,6 +744,13 @@ func isWordCharByte2(c byte) bool {
 		(c >= '0' && c <= '9') || c == '_' || c == '$'
 }
 
+// subqueryLead reports whether tok opens a subquery — a SELECT or WITH keyword
+// right after a `(`.
+func subqueryLead(tok sqltok.Token, sql string) bool {
+	u := tokUpper(tok, sql)
+	return u == "SELECT" || u == "WITH"
+}
+
 // scanSelectClauseForUnknownCols finds identifiers in the SELECT clause that
 // are not qualified (preceded/followed by "."), not function calls (followed
 // by "("), not AS aliases, not numeric literals, and not inside single-quoted
@@ -773,7 +780,36 @@ func scanSelectClauseForUnknownCols(clause string, metaCols, localCols map[strin
 
 	var missing []string
 	seen := make(map[string]struct{})
+	// subqStack tracks parenthesized nesting: each frame records whether that
+	// paren opens a SELECT/WITH subquery. Identifiers inside a subquery are that
+	// subquery's columns/tables, not this select list's, so they must not be
+	// validated here (issue #793 D3 — a scalar subquery's `FROM orders` was
+	// misread as an outer column). Ordinary function-call parens push a false
+	// frame, so their arguments stay validated.
+	var subqStack []bool
+	insideSubquery := func() bool {
+		for _, s := range subqStack {
+			if s {
+				return true
+			}
+		}
+		return false
+	}
 	for i, tok := range clauseSig {
+		switch tok.Kind {
+		case sqltok.LParen:
+			isSubq := i+1 < len(clauseSig) && subqueryLead(clauseSig[i+1], clause)
+			subqStack = append(subqStack, isSubq)
+			continue
+		case sqltok.RParen:
+			if len(subqStack) > 0 {
+				subqStack = subqStack[:len(subqStack)-1]
+			}
+			continue
+		}
+		if insideSubquery() {
+			continue
+		}
 		// Only bare/quoted identifiers (and keywords, filtered below) can be
 		// column names; string literals, numbers, and operators are skipped by
 		// virtue of not being ident-like. String literals in particular — e.g.
