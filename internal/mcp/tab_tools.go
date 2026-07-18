@@ -36,6 +36,11 @@ func registerTabTools(srv *mcpsdk.Server, client *snowflake.Client, emit func(st
 		return
 	}
 
+	var cache *metadataCache
+	if client != nil {
+		cache = newMetadataCache(client, metadataCacheTTL)
+	}
+
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
 		Name: "open_sql_tab",
 		Description: "Open a new editor tab in Thaw with the provided SQL. " +
@@ -62,11 +67,9 @@ func registerTabTools(srv *mcpsdk.Server, client *snowflake.Client, emit func(st
 		// Format before validation so marker positions match the displayed text.
 		formatted := sqleditor.ApplyCasing(in.SQL, prefs.KeywordCase, prefs.IdentifierCase, prefs.FunctionCase)
 
-		// Run the full diagnostics pipeline.
-		markers := validateSQL(ctx, client, formatted)
-		if markers == nil {
-			markers = []sqleditor.DiagMarker{}
-		}
+		// Run the full diagnostics pipeline. validateSQL guarantees a non-nil
+		// Markers slice; the schemaAware flag is not surfaced to the tab UI.
+		markers := validateSQL(ctx, cache, formatted).Markers
 
 		// Emit the event to the frontend. Recover from panics so that a
 		// torn-down Wails context during shutdown doesn't kill the MCP
