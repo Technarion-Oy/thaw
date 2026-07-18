@@ -6,6 +6,8 @@ import "strings"
 
 // Stable keys for Thaw's fixed secrets. These strings are the identity of a
 // secret in the OS store — never change them without a migration.
+//
+// #nosec G101 // Justification: these are OS-store lookup keys/labels, not credential values.
 const (
 	KeyAIAPIKey           = "ai/api-key"                 // AIConfig.APIKey
 	KeyGitHubClientSecret = "oauth/github-client-secret" // OAuthConfig.GithubClientSecret
@@ -14,6 +16,8 @@ const (
 )
 
 // Prefixes for the dynamic, collection-valued secrets.
+//
+// #nosec G101 // Justification: these are OS-store lookup key prefixes, not credential values.
 const (
 	pipCredentialPrefix = "pip/credential/" // per pip registry URL
 	mcpTokenPrefix      = "mcp/token/"      // per MCP session label

@@ -17,7 +17,7 @@ type osStore struct {
 }
 
 // newOSStore opens the OS-native secure store. It returns an error when no such
-// store is available (e.g. headless Linux with no Secret Service), signalling
+// store is available (e.g. headless Linux with no Secret Service), signaling
 // the caller to fall back to the file store.
 func newOSStore() (*osStore, error) {
 	var allowed []keyring.BackendType

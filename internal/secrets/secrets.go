@@ -19,6 +19,8 @@ var ErrNotFound = errors.New("secret not found")
 // frontend so the Settings UI can show where a secret actually lives.
 type Method string
 
+//
+// #nosec G101 // Justification: these are backend identifiers reported to the UI, not credential values.
 const (
 	MethodKeychain          Method = "keychain"           // macOS Keychain
 	MethodCredentialManager Method = "credential-manager" // Windows Credential Manager
