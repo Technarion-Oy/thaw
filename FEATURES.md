@@ -4,6 +4,17 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
 
 ---
 
+## Requirements
+
+Thaw ships as a **single self-contained binary** (no separate app runtime to install) and needs only outbound HTTPS to your Snowflake account. `git` is **not** required — git integration uses an embedded Go implementation. Full details, including per-platform runtime libraries, live in the [README Requirements section](README.md#requirements).
+
+- **Supported systems** — macOS `arm64`/`amd64` (min. macOS 10.13 High Sierra), Windows `amd64`/`arm64` (Microsoft Edge WebView2 runtime), Linux `amd64` (GTK3 + WebKit2GTK 4.1).
+- **Snowflake account** — a standard account with a **role** and an active **warehouse**; supported authenticators: username/password, MFA push, external-browser SSO, native Okta, key-pair/JWT, OAuth (token, authorization-code, client-credentials), Programmatic Access Token, and Workload Identity Federation. Forward HTTP/HTTPS proxy and Snowflake CLI profile reuse (`~/.snowflake/config.toml`) are supported.
+- **Cloud- & region-agnostic** — connects to accounts on **AWS, Azure, or GCP** in **any Snowflake region** (region is carried in the account identifier); PrivateLink / Private Link / Private Service Connect accounts work too. See Snowflake's [Supported Cloud Regions](https://docs.snowflake.com/en/user-guide/intro-regions).
+- **Optional per-feature dependencies** — a local **Python 3** for Snowpark notebooks, a local **dbt** install for dbt projects, and an **OpenAI**/**Gemini** API key for AI inline completions.
+
+---
+
 ## SQL Editor
 
 - **Monaco-based editor** with full SQL syntax highlighting and rich keyboard shortcuts
