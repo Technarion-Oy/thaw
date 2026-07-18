@@ -106,7 +106,13 @@ func (a *App) StartMCPSession(label, mode string, port int, role, warehouse, sec
 }
 
 // saveMCPCredential persists the port (config.json) and token (OS secure store)
-// for a session label so subsequent restarts reuse the same URL.
+// for a session label so subsequent restarts reuse the same URL. Token reuse is
+// best-effort: a failed secure-store write is logged, and the session still runs
+// with its in-memory token — it just won't be reused across a restart.
+//
+// The token is written straight to the store and NOT carried into the config
+// map (only the non-secret port persists there), so config.Update → buildDiskConfig
+// never has to scrub a token whose store value might differ from a failed write.
 func (a *App) saveMCPCredential(label string, port int) {
 	token, ok := a.mcpManager.SessionToken(label)
 	if !ok {
@@ -119,8 +125,8 @@ func (a *App) saveMCPCredential(label string, port int) {
 		if appCfg.MCPCredentials == nil {
 			appCfg.MCPCredentials = make(map[string]config.MCPSessionCredential)
 		}
-		// Token is scrubbed on save; only the non-secret port persists here.
-		appCfg.MCPCredentials[label] = config.MCPSessionCredential{Port: port, Token: token}
+		// Only the non-secret port persists here; the token lives in the store.
+		appCfg.MCPCredentials[label] = config.MCPSessionCredential{Port: port}
 		return nil
 	}); err != nil {
 		logger.L.Warn("mcp: failed to save credential", "label", label, "err", err)

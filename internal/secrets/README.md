@@ -32,16 +32,16 @@ This package owns **only Thaw-created secrets**. It does **not** touch `~/.snowf
 
 - **`save()`** writes what `buildDiskConfig` returns: each secret is stored here and blanked on disk only once it is safely in the store. The store is **never overwritten** from a value read out of `config.json` (it writes only when this store lacks the key), so a stale/synced `config.json` can't clobber a newer secret already held here.
 - **`Load()`** runs a one-time **migration**: plaintext secrets left in an older `config.json` are moved into this store, then the scrubbed file is written back, and the config struct never hands a secret value back to callers. After migration the fields are empty on disk, so the hot load path performs **zero** secure-store access.
-- **Authoritative updates** (the user changing a secret in Settings) call `Set`/`Delete` directly at the write seam below — those *do* overwrite; `buildDiskConfig` is only the migration/first-write safety net.
+- **Authoritative updates** (the user changing a secret in Settings) call `Set`/`Delete` directly at the write seam below **and fail the save on a store-write error** (rather than blanking the disk copy over a stale store value). `config.save()`/`buildDiskConfig` is reached only after a confirmed successful write, so it never silently drops a just-changed secret.
 
 The actual secret **values** are read/written at each consumer's IPC seam, not in `config`:
 
 | Secret | Read seam | Write seam |
 |--------|-----------|------------|
-| AI API key | `app.GetAIConfig`, `app.GetAISuggestion` | `app.SaveAIConfig` (`storeOrDelete`) |
+| AI API key | `app.GetAIConfig`, `app.GetAISuggestion` | `app.SaveAIConfig` (`storeOrDelete`; fails the save on a store error) |
 | GitHub / GitLab OAuth client secret | `gitrepo.GetProviderConfig` | **`config.json` is authoritative** (no UI setter): `buildDiskConfig`'s `storedFromDisk` set-if-changed persists each hand-edit/rotation, then scrubs it from disk |
-| pip credential / proxy password | `snowpark.GetPipRegistryConfig`, `buildPipRegistrySetup` (`hydratePipSecrets`) | `snowpark.SavePipRegistryConfig`/`ResetPipRegistryConfig` (`storePipSecrets`/`deletePipSecrets`) |
-| MCP session token | `app.StartMCPSession` | `app.saveMCPCredential` |
+| pip credential / proxy password | `snowpark.GetPipRegistryConfig`, `buildPipRegistrySetup` (`hydratePipSecrets`) | `snowpark.SavePipRegistryConfig` (`storePipSecrets`, fails the save on a store error) / `ResetPipRegistryConfig` (`deletePipSecrets`) |
+| MCP session token | `app.StartMCPSession` | `app.saveMCPCredential` (best-effort; only the port persists to `config.json`) |
 
 Setters delete (rather than write empty) when a secret is cleared, and every consumer tolerates `ErrNotFound` — so a secret deleted out-of-band from the OS store (e.g. via Keychain Access / Credential Manager) simply reads as absent and the UI re-prompts.
 

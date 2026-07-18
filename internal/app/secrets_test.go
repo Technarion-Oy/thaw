@@ -39,36 +39,72 @@ func (s *failingSetStore) Info() secrets.Info {
 	return secrets.Info{Method: secrets.MethodKeychain, Secure: true, Label: "test"}
 }
 
-func rawConfigJSON(t *testing.T) string {
+func configJSONPath(t *testing.T) string {
 	t.Helper()
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		t.Fatalf("UserConfigDir: %v", err)
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "thaw", "config.json"))
+	return filepath.Join(dir, "thaw", "config.json")
+}
+
+func rawConfigJSON(t *testing.T) string {
+	t.Helper()
+	data, err := os.ReadFile(configJSONPath(t))
 	if err != nil {
 		t.Fatalf("read config.json: %v", err)
 	}
 	return string(data)
 }
 
-// TestSaveAIConfig_KeepsKeyWhenStoreWriteFails guards the failure mode flagged
-// in review: if the secure-store write fails, the API key must not vanish. It
-// stays on disk (0600) rather than being blanked before it is safely stored.
-func TestSaveAIConfig_KeepsKeyWhenStoreWriteFails(t *testing.T) {
+// TestSaveAIConfig_FailsWhenStoreWriteFails guards the failure mode: if the
+// secure-store write fails, the save must fail loudly (surfaced error) instead
+// of silently reporting success, and must not leak the key into config.json.
+func TestSaveAIConfig_FailsWhenStoreWriteFails(t *testing.T) {
 	isolateConfig(t)
 	restore := secrets.SetDefaultForTesting(&failingSetStore{m: map[string]string{}})
 	defer restore()
 
 	a := &App{}
-	if err := a.SaveAIConfig(config.AIConfig{Provider: "openai", APIKey: "sk-keepme", Enabled: true}); err != nil {
-		t.Fatalf("SaveAIConfig: %v", err)
+	err := a.SaveAIConfig(config.AIConfig{Provider: "openai", APIKey: "sk-new", Enabled: true})
+	if err == nil {
+		t.Fatalf("SaveAIConfig returned nil despite a failed store write")
 	}
+	// The key must not have leaked to config.json (which would be a plaintext
+	// secret on disk — exactly what this feature exists to prevent).
+	if _, statErr := os.Stat(configJSONPath(t)); statErr == nil {
+		if strings.Contains(rawConfigJSON(t), "sk-new") {
+			t.Fatalf("API key leaked into config.json after a failed store write")
+		}
+	}
+}
 
-	// The store write failed, so buildDiskConfig must have kept the key on disk
-	// (never lost) instead of scrubbing an unstored secret.
-	if !strings.Contains(rawConfigJSON(t), "sk-keepme") {
-		t.Fatalf("API key lost: not in the store (write failed) and scrubbed from config.json")
+// TestSaveAIConfig_DoesNotDropNewKeyWhenUpdateFailsOverOldValue is the exact
+// scenario from review: the store already holds an old key, the user changes it,
+// and the store write for the new value fails. The save must fail (surfaced) and
+// must NOT silently scrub the new value while leaving the stale old one in the
+// store reported as success.
+func TestSaveAIConfig_DoesNotDropNewKeyWhenUpdateFailsOverOldValue(t *testing.T) {
+	isolateConfig(t)
+	restore := secrets.SetDefaultForTesting(&failingSetStore{m: map[string]string{
+		secrets.KeyAIAPIKey: "sk-old",
+	}})
+	defer restore()
+
+	a := &App{}
+	err := a.SaveAIConfig(config.AIConfig{Provider: "openai", APIKey: "sk-new", Enabled: true})
+	if err == nil {
+		t.Fatalf("SaveAIConfig returned nil despite a failed store write over an existing value")
+	}
+	// The store is left in its prior consistent state (old value intact, not
+	// corrupted), and the new plaintext never lands on disk.
+	if got, _ := secrets.Get(secrets.KeyAIAPIKey); got != "sk-old" {
+		t.Fatalf("store value changed on a failed write: %q", got)
+	}
+	if _, statErr := os.Stat(configJSONPath(t)); statErr == nil {
+		if strings.Contains(rawConfigJSON(t), "sk-new") {
+			t.Fatalf("new API key leaked into config.json after a failed store write")
+		}
 	}
 }
 

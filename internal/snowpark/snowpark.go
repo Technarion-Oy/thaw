@@ -25,7 +25,6 @@ import (
 	"thaw/internal/apperrors"
 	"thaw/internal/config"
 	"thaw/internal/filesystem"
-	"thaw/internal/logger"
 	"thaw/internal/secrets"
 	"thaw/internal/snowflake"
 
@@ -1105,13 +1104,17 @@ func (s *Service) GetPipRegistryConfig() (config.PipRegistryConfig, error) {
 // SavePipRegistryConfig persists the pip registry configuration. Credential and
 // proxy passwords are written to the OS secure store; config.json is scrubbed.
 //
-// storePipSecrets is the authoritative write (it also prunes removed
-// registries). cfg is then passed through with passwords intact: config.Update →
-// buildDiskConfig re-checks the store and, only if storePipSecrets' write failed,
-// retries once before leaving the plaintext on disk rather than losing it. In the
-// common (success) path that re-check is a cheap no-op, not a real second write.
+// storePipSecrets is the authoritative write (it also prunes removed registries)
+// and must succeed before the config save proceeds. If a store write fails, the
+// whole save fails with a surfaced error, leaving the previously stored secrets
+// and config.json untouched — so a just-changed password is never silently
+// dropped while a stale value lingers in the store. On success cfg is passed
+// through with passwords intact; config.Update → buildDiskConfig then scrubs them
+// from disk (they are confirmed present in the store).
 func (s *Service) SavePipRegistryConfig(cfg config.PipRegistryConfig) error {
-	storePipSecrets(cfg)
+	if err := storePipSecrets(cfg); err != nil {
+		return fmt.Errorf("failed to store pip registry credentials in the OS secure store: %w", err)
+	}
 	return config.Update(func(appCfg *config.AppConfig) error {
 		appCfg.PipRegistry = cfg
 		return nil
@@ -1150,17 +1153,23 @@ func hydratePipSecrets(rc *config.PipRegistryConfig) {
 }
 
 // storePipSecrets writes the proxy password and each credential password to the
-// OS secure store, and prunes secrets for registries no longer configured.
-func storePipSecrets(rc config.PipRegistryConfig) {
+// OS secure store, and prunes secrets for registries no longer configured. It
+// returns the first store error encountered (aborting before any pruning, so a
+// failed save never mutates the store) so the caller can fail the whole save.
+func storePipSecrets(rc config.PipRegistryConfig) error {
 	keep := make(map[string]bool, len(rc.Credentials))
 	for _, cred := range rc.Credentials {
 		key := secrets.PipCredentialKey(cred.Registry)
 		keep[key] = true
 		if err := storePipSecret(key, cred.Password); err != nil {
-			logger.L.Warn("secrets: failed to store pip credential", "registry", cred.Registry, "err", err)
+			return fmt.Errorf("pip credential for %s: %w", cred.Registry, err)
 		}
 	}
-	// Remove credential secrets for registries that were deleted.
+	if err := storePipSecret(secrets.KeyPipProxyPassword, rc.ProxyPassword); err != nil {
+		return fmt.Errorf("pip proxy password: %w", err)
+	}
+	// Remove credential secrets for registries that were deleted — only after all
+	// writes succeeded, so a failed save doesn't also mutate the store.
 	if keys, err := secrets.Keys(); err == nil {
 		for _, key := range keys {
 			if secrets.IsPipCredentialKey(key) && !keep[key] {
@@ -1168,9 +1177,7 @@ func storePipSecrets(rc config.PipRegistryConfig) {
 			}
 		}
 	}
-	if err := storePipSecret(secrets.KeyPipProxyPassword, rc.ProxyPassword); err != nil {
-		logger.L.Warn("secrets: failed to store pip proxy password", "err", err)
-	}
+	return nil
 }
 
 // storePipSecret sets a secret, or deletes it when the value is empty.
