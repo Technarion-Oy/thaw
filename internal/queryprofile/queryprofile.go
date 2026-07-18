@@ -313,7 +313,7 @@ type ExplainResult struct {
 	Diagnostics []ExplainMarker `json:"diagnostics"`
 }
 
-// RunExplain runs EXPLAIN USING JSON for sql and returns both the parsed plan
+// RunExplain runs EXPLAIN for sql and returns both the parsed plan
 // tree (for display) and any detected performance issues (for highlighting).
 func RunExplain(ctx context.Context, client *snowflake.Client, sql string) (*ExplainResult, error) {
 	plan, err := GetExplainPlan(ctx, client, sql)
@@ -338,7 +338,7 @@ func RunExplainOnConn(ctx context.Context, client *snowflake.Client, conn *sql.C
 	}, nil
 }
 
-// GetExplainDiagnostics runs EXPLAIN USING JSON for sql and walks the
+// GetExplainDiagnostics runs EXPLAIN for sql and walks the
 // resulting plan to emit performance markers (full table scans, cartesian
 // joins).  Returns nil (not an error) when no issues are found.
 func GetExplainDiagnostics(ctx context.Context, client *snowflake.Client, sql string) ([]ExplainMarker, error) {
