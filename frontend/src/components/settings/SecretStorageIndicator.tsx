@@ -9,6 +9,9 @@ import { secrets } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
 
+// Module-level cache, shared across every indicator instance: the active secret
+// backend can't change within a process lifetime, so one GetSecretStorageInfo
+// call serves all mounts (AI / pip / MCP modals) for the rest of the session.
 let cached: secrets.Info | null = null;
 
 /**

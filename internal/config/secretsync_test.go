@@ -4,13 +4,57 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
 	"thaw/internal/secrets"
 )
+
+// mockStore is a configurable secrets.Store for exercising error paths. getErr
+// (if set) is returned by Get for every key; setCalls records Set invocations.
+type mockStore struct {
+	m        map[string]string
+	getErr   error
+	setErr   error
+	setCalls int
+}
+
+func (s *mockStore) Get(k string) (string, error) {
+	if s.getErr != nil {
+		return "", s.getErr
+	}
+	if v, ok := s.m[k]; ok {
+		return v, nil
+	}
+	return "", secrets.ErrNotFound
+}
+func (s *mockStore) Set(k, v string) error {
+	s.setCalls++
+	if s.setErr != nil {
+		return s.setErr
+	}
+	if s.m == nil {
+		s.m = map[string]string{}
+	}
+	s.m[k] = v
+	return nil
+}
+func (s *mockStore) Delete(k string) error { delete(s.m, k); return nil }
+func (s *mockStore) Keys() ([]string, error) {
+	keys := make([]string, 0, len(s.m))
+	for k := range s.m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys, nil
+}
+func (s *mockStore) Info() secrets.Info {
+	return secrets.Info{Method: secrets.MethodKeychain, Secure: true}
+}
 
 // isolate points os.UserConfigDir at a temp dir and swaps in an in-memory-ish
 // (temp file) secret store so tests never touch the real config or keychain.
@@ -146,6 +190,72 @@ func writeConfigJSON(t *testing.T, body string) {
 	if err := os.WriteFile(filepath.Join(cfgDir, "config.json"), []byte(body), 0o600); err != nil {
 		t.Fatalf("write config.json: %v", err)
 	}
+}
+
+// isolateConfigDir isolates only os.UserConfigDir (leaving the secrets store to
+// the caller to inject), for tests that need a specific mock store.
+func isolateConfigDir(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+}
+
+// TestStoredDoesNotClobberOnTransientGetError covers finding #1: a transient
+// Get error (not ErrNotFound) must not be read as "absent" — doing so would let
+// a stale config.json overwrite a real, newer value in the store.
+func TestStoredDoesNotClobberOnTransientGetError(t *testing.T) {
+	isolateConfigDir(t)
+	// The store holds a real value but Get fails transiently for every read.
+	ms := &mockStore{m: map[string]string{secrets.KeyAIAPIKey: "sk-real"}, getErr: errors.New("dbus: transient")}
+	restore := secrets.SetDefaultForTesting(ms)
+	defer restore()
+
+	// A stale/synced config.json carrying a different plaintext value.
+	writeConfigJSON(t, `{"ai": {"provider": "openai", "apiKey": "sk-stale", "enabled": true}}`)
+	if _, err := Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// On a transient Get error we must NOT attempt to overwrite the store.
+	if ms.setCalls != 0 {
+		t.Fatalf("Set called %d time(s) on a transient Get error — would clobber the real value", ms.setCalls)
+	}
+	// The plaintext is kept on disk for a later retry rather than lost.
+	if !strings.Contains(rawConfigJSON2(t), "sk-stale") {
+		t.Fatalf("plaintext not retained on disk after a transient store error")
+	}
+}
+
+// TestMigrationFailureKeepsPlaintextOnDisk covers finding #2: when the store
+// write fails during migration, the legacy plaintext is retained on disk (never
+// lost) for the next load to retry, rather than scrubbed into oblivion.
+func TestMigrationFailureKeepsPlaintextOnDisk(t *testing.T) {
+	isolateConfigDir(t)
+	// Empty store whose Set always fails (locked keychain / unavailable service).
+	ms := &mockStore{m: map[string]string{}, setErr: errors.New("keychain locked")}
+	restore := secrets.SetDefaultForTesting(ms)
+	defer restore()
+
+	writeConfigJSON(t, `{"ai": {"provider": "openai", "apiKey": "sk-legacy", "enabled": true}}`)
+	if _, err := Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !strings.Contains(rawConfigJSON2(t), "sk-legacy") {
+		t.Fatalf("legacy plaintext lost after a failed migration write")
+	}
+}
+
+// rawConfigJSON2 returns the raw config.json text (mockStore tests can't rely on
+// rawConfig's JSON-map assertions elsewhere).
+func rawConfigJSON2(t *testing.T) string {
+	t.Helper()
+	dir, _ := os.UserConfigDir()
+	data, err := os.ReadFile(filepath.Join(dir, "thaw", "config.json"))
+	if err != nil {
+		t.Fatalf("read config.json: %v", err)
+	}
+	return string(data)
 }
 
 // TestOAuthSecretEditIsHonored covers the one secret with no app write seam:

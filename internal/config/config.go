@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"thaw/internal/filesystem"
+	"thaw/internal/logger"
 )
 
 // fileMu serializes config read-modify-write within this process, so concurrent
@@ -567,9 +568,19 @@ func Load() (*AppConfig, error) {
 	}
 	if hasPlaintextSecret(cfg) {
 		// Legacy plaintext config.json: persist the secrets to the store and
-		// scrub them from disk. Best-effort — a failure just leaves the
-		// plaintext in place for the next load to retry (never lost).
-		_ = save(cfg)
+		// scrub them from disk. buildDiskConfig keeps any secret it couldn't
+		// store on disk (never lost) so the next load retries — but that also
+		// means consumers, which hydrate from the store, see it as absent until
+		// migration succeeds. Log both the write failure and any secret that
+		// couldn't be stored so this degraded state is diagnosable from thaw.log.
+		diskCfg := buildDiskConfig(cfg)
+		if err := writeConfigFile(&diskCfg); err != nil {
+			logger.L.Warn("config: failed to write scrubbed config during secret migration", "err", err)
+		} else if hasPlaintextSecret(&diskCfg) {
+			logger.L.Warn("config: some Thaw secrets could not be moved to the OS secure store; " +
+				"they remain in config.json (0600) and will be retried on the next load — " +
+				"dependent features may be unavailable until then")
+		}
 	}
 	// Never hand back a secret the store doesn't own; the store is authoritative
 	// and consumers hydrate from it at their IPC seam.
@@ -639,16 +650,25 @@ func Save(cfg *AppConfig) error {
 }
 
 // save marshals and atomically writes the config; caller must hold fileMu.
+//
+// buildDiskConfig persists cfg's secrets to the OS store (never overwriting a
+// value already there) and returns a copy with those secrets scrubbed, so
+// Thaw-owned secrets never reach config.json. See secretsync.go.
 func save(cfg *AppConfig) error {
+	diskCfg := buildDiskConfig(cfg)
+	return writeConfigFile(&diskCfg)
+}
+
+// writeConfigFile marshals and atomically writes an already-scrubbed config;
+// caller must hold fileMu. Split from save so Load's migration path can inspect
+// the scrubbed result (to detect secrets that couldn't reach the store) without
+// running buildDiskConfig twice.
+func writeConfigFile(diskCfg *AppConfig) error {
 	path, err := configPath()
 	if err != nil {
 		return err
 	}
-	// buildDiskConfig persists cfg's secrets to the OS store (never overwriting a
-	// value already there) and returns a copy with those secrets scrubbed, so
-	// Thaw-owned secrets never reach config.json. See secretsync.go.
-	diskCfg := buildDiskConfig(cfg)
-	data, err := json.MarshalIndent(&diskCfg, "", "  ")
+	data, err := json.MarshalIndent(diskCfg, "", "  ")
 	if err != nil {
 		return err
 	}

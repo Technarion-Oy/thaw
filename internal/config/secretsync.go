@@ -2,7 +2,11 @@
 
 package config
 
-import "thaw/internal/secrets"
+import (
+	"errors"
+
+	"thaw/internal/secrets"
+)
 
 // This file keeps Thaw-owned secrets out of config.json. The secret-bearing
 // struct fields (AI.APIKey, OAuth client secrets, pip passwords, MCP tokens) are
@@ -22,12 +26,6 @@ import "thaw/internal/secrets"
 // After migration the fields are empty on disk, so the hot save/load paths perform
 // zero secure-store access (buildDiskConfig only touches the store for a non-empty
 // secret field, which occurs only right after a handler populated one).
-
-// secretStored reports whether the OS store already holds a value for key.
-func secretStored(key string) bool {
-	_, err := secrets.Get(key)
-	return err == nil
-}
 
 // hasPlaintextSecret reports whether cfg carries any non-empty secret field —
 // i.e. a legacy plaintext config.json that must be persisted to the store and
@@ -89,14 +87,24 @@ func buildDiskConfig(cfg *AppConfig) AppConfig {
 	// for secrets that have an authoritative app write seam (SaveAIConfig,
 	// SavePipRegistryConfig, saveMCPCredential), so a stale/synced config.json
 	// can't overwrite a newer value set through the app.
+	//
+	// A transient Get error (dbus hiccup, keychain glitch — anything other than a
+	// genuine ErrNotFound) must NOT be treated as "absent": overwriting the store
+	// with a disk value on a read glitch is the very clobber this guard prevents.
+	// On such an error, keep the plaintext on disk (return false) and retry next
+	// save rather than risk clobbering a real, newer secret.
 	stored := func(key, val string) bool {
 		if val == "" {
 			return true
 		}
-		if secretStored(key) {
+		switch _, err := secrets.Get(key); {
+		case err == nil:
 			return true // present already — do NOT overwrite from disk
+		case errors.Is(err, secrets.ErrNotFound):
+			return secrets.Set(key, val) == nil // genuinely absent — migrate it in
+		default:
+			return false // unknown store error — leave plaintext on disk, retry later
 		}
-		return secrets.Set(key, val) == nil
 	}
 
 	// storedFromDisk is for secrets whose ONLY writer is config.json — the OAuth
