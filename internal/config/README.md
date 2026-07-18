@@ -111,7 +111,8 @@ Thaw-owned secrets (AI API key, Git OAuth client secrets, pip credential/proxy p
 
 - `save()` writes what `buildDiskConfig` returns: each secret is persisted to the store and blanked on disk **only once it is safely in the store**. Crucially, the store is **never overwritten** from a value read out of `config.json` (it writes only when the store lacks the key), so a stale/synced/restored `config.json` can't clobber a newer secret already in the OS store. A secret that can't be stored is left on disk (`0600`) rather than lost.
 - `Load()` migrates a legacy plaintext `config.json` once (`hasPlaintextSecret` → `save()` persists + scrubs), and `blankSecrets` ensures it never hands back a secret the store doesn't own. Empty fields trigger **zero** store access, so once migrated the hot load path never touches the keychain.
-- **Authoritative updates** (the user changing a secret in Settings) go through the owning IPC seam via `secrets.Set`/`Delete`, which *do* overwrite — `buildDiskConfig` is only the migration/first-write safety net, never the update path.
+- **Authoritative updates** (the user changing a secret in Settings) go through the owning IPC seam via `secrets.Set`/`Delete`, which *do* overwrite — for those, `buildDiskConfig` is only the migration/first-write safety net, never the update path.
+- **Exception — OAuth client secrets** (`OAuth.GithubClientSecret`/`GitlabClientSecret`) have no UI/app write seam, so `config.json` is their authoritative source. `buildDiskConfig` uses `storedFromDisk` (set-if-changed) for them so a hand-edited rotation is persisted to the store, not dropped by the anti-clobber guard.
 
 Reads and clears of the actual values happen at each consumer's IPC seam (see `internal/secrets/README.md`), not here — this file only keeps the on-disk copy clean.
 

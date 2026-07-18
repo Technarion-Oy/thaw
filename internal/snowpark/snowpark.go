@@ -1104,6 +1104,12 @@ func (s *Service) GetPipRegistryConfig() (config.PipRegistryConfig, error) {
 
 // SavePipRegistryConfig persists the pip registry configuration. Credential and
 // proxy passwords are written to the OS secure store; config.json is scrubbed.
+//
+// storePipSecrets is the authoritative write (it also prunes removed
+// registries). cfg is then passed through with passwords intact: config.Update →
+// buildDiskConfig re-checks the store and, only if storePipSecrets' write failed,
+// retries once before leaving the plaintext on disk rather than losing it. In the
+// common (success) path that re-check is a cheap no-op, not a real second write.
 func (s *Service) SavePipRegistryConfig(cfg config.PipRegistryConfig) error {
 	storePipSecrets(cfg)
 	return config.Update(func(appCfg *config.AppConfig) error {

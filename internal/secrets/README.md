@@ -39,7 +39,7 @@ The actual secret **values** are read/written at each consumer's IPC seam, not i
 | Secret | Read seam | Write seam |
 |--------|-----------|------------|
 | AI API key | `app.GetAIConfig`, `app.GetAISuggestion` | `app.SaveAIConfig` (`storeOrDelete`) |
-| GitHub / GitLab OAuth client secret | `gitrepo.GetProviderConfig` | migration only (no UI setter today) |
+| GitHub / GitLab OAuth client secret | `gitrepo.GetProviderConfig` | **`config.json` is authoritative** (no UI setter): `buildDiskConfig`'s `storedFromDisk` set-if-changed persists each hand-edit/rotation, then scrubs it from disk |
 | pip credential / proxy password | `snowpark.GetPipRegistryConfig`, `buildPipRegistrySetup` (`hydratePipSecrets`) | `snowpark.SavePipRegistryConfig`/`ResetPipRegistryConfig` (`storePipSecrets`/`deletePipSecrets`) |
 | MCP session token | `app.StartMCPSession` | `app.saveMCPCredential` |
 

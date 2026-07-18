@@ -84,7 +84,11 @@ func buildDiskConfig(cfg *AppConfig) AppConfig {
 	c := *cfg
 
 	// stored reports whether it is safe to blank this secret on disk: true when
-	// the value is empty, already in the store, or written to the store now.
+	// the value is empty, already in the store, or written to the store now. It
+	// never overwrites a value the store already holds — the anti-clobber guard
+	// for secrets that have an authoritative app write seam (SaveAIConfig,
+	// SavePipRegistryConfig, saveMCPCredential), so a stale/synced config.json
+	// can't overwrite a newer value set through the app.
 	stored := func(key, val string) bool {
 		if val == "" {
 			return true
@@ -95,13 +99,31 @@ func buildDiskConfig(cfg *AppConfig) AppConfig {
 		return secrets.Set(key, val) == nil
 	}
 
+	// storedFromDisk is for secrets whose ONLY writer is config.json — the OAuth
+	// client secrets have no UI/app write seam, so a hand-edit to config.json IS
+	// the authoritative update. Set-if-changed (overwriting any prior store
+	// value) so rotating the secret via config.json is honored, not silently
+	// dropped by the anti-clobber guard above. An empty value is left untouched
+	// in the store: after the first migration config.json is scrubbed, so empty
+	// means "already migrated", not "cleared" — deleting on empty would wipe the
+	// secret on the very next load.
+	storedFromDisk := func(key, val string) bool {
+		if val == "" {
+			return true
+		}
+		if cur, err := secrets.Get(key); err == nil && cur == val {
+			return true // already up to date
+		}
+		return secrets.Set(key, val) == nil
+	}
+
 	if stored(secrets.KeyAIAPIKey, cfg.AI.APIKey) {
 		c.AI.APIKey = ""
 	}
-	if stored(secrets.KeyGitHubClientSecret, cfg.OAuth.GithubClientSecret) {
+	if storedFromDisk(secrets.KeyGitHubClientSecret, cfg.OAuth.GithubClientSecret) {
 		c.OAuth.GithubClientSecret = ""
 	}
-	if stored(secrets.KeyGitLabClientSecret, cfg.OAuth.GitlabClientSecret) {
+	if storedFromDisk(secrets.KeyGitLabClientSecret, cfg.OAuth.GitlabClientSecret) {
 		c.OAuth.GitlabClientSecret = ""
 	}
 	if stored(secrets.KeyPipProxyPassword, cfg.PipRegistry.ProxyPassword) {

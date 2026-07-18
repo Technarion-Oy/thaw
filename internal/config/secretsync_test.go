@@ -135,6 +135,52 @@ func TestMigratesLegacyPlaintextConfig(t *testing.T) {
 	}
 }
 
+// writeConfigJSON writes raw bytes to the isolated config.json path.
+func writeConfigJSON(t *testing.T, body string) {
+	t.Helper()
+	dir, _ := os.UserConfigDir()
+	cfgDir := filepath.Join(dir, "thaw")
+	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.json"), []byte(body), 0o600); err != nil {
+		t.Fatalf("write config.json: %v", err)
+	}
+}
+
+// TestOAuthSecretEditIsHonored covers the one secret with no app write seam:
+// the GitHub/GitLab OAuth client secret is set only by hand-editing config.json,
+// so config.json is authoritative for it. A later edit (rotation) must reach the
+// store, not be dropped by the anti-clobber guard used for UI-backed secrets.
+func TestOAuthSecretEditIsHonored(t *testing.T) {
+	isolate(t)
+
+	// First provisioning: migrate v1 into the store, scrub disk.
+	writeConfigJSON(t, `{"oauth": {"githubClientSecret": "gh-secret-v1"}}`)
+	if _, err := Load(); err != nil {
+		t.Fatalf("Load v1: %v", err)
+	}
+	if got, _ := secrets.Get(secrets.KeyGitHubClientSecret); got != "gh-secret-v1" {
+		t.Fatalf("v1 not migrated: %q", got)
+	}
+
+	// Admin rotates the secret by hand-editing config.json again.
+	writeConfigJSON(t, `{"oauth": {"githubClientSecret": "gh-secret-v2"}}`)
+	if _, err := Load(); err != nil {
+		t.Fatalf("Load v2: %v", err)
+	}
+
+	// The rotation must have reached the store (not silently dropped).
+	if got, _ := secrets.Get(secrets.KeyGitHubClientSecret); got != "gh-secret-v2" {
+		t.Fatalf("rotated OAuth secret lost: store has %q, want gh-secret-v2", got)
+	}
+	// ...and scrubbed from disk.
+	blob, _ := json.Marshal(rawConfig(t))
+	if strings.Contains(string(blob), "gh-secret-v2") {
+		t.Fatalf("OAuth secret not scrubbed from disk: %s", blob)
+	}
+}
+
 func TestDeleteClearsSecretOnEmptySave(t *testing.T) {
 	isolate(t)
 
