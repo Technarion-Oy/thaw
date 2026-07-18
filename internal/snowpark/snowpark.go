@@ -25,6 +25,8 @@ import (
 	"thaw/internal/apperrors"
 	"thaw/internal/config"
 	"thaw/internal/filesystem"
+	"thaw/internal/logger"
+	"thaw/internal/secrets"
 	"thaw/internal/snowflake"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -959,6 +961,9 @@ func (s *Service) buildPipRegistrySetup(cfg *config.AppConfig) pipRegistrySetup 
 		return pipRegistrySetup{}
 	}
 	rc := cfg.PipRegistry
+	// Passwords live in the OS secure store, not config.json — hydrate them
+	// before embedding into pip index/proxy URLs.
+	hydratePipSecrets(&rc)
 
 	var args []string
 	var env []string
@@ -1085,29 +1090,94 @@ func (s *Service) SaveSnowparkPythonPath(pythonPath string) error {
 
 // ─── pip registry IPC ─────────────────────────────────────────────────────────
 
-// GetPipRegistryConfig returns the persisted pip registry configuration.
+// GetPipRegistryConfig returns the persisted pip registry configuration with
+// passwords hydrated from the OS secure store so the Settings UI can show them.
 func (s *Service) GetPipRegistryConfig() (config.PipRegistryConfig, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return config.PipRegistryConfig{}, err
 	}
-	return cfg.PipRegistry, nil
+	rc := cfg.PipRegistry
+	hydratePipSecrets(&rc)
+	return rc, nil
 }
 
-// SavePipRegistryConfig persists the pip registry configuration to disk.
+// SavePipRegistryConfig persists the pip registry configuration. Credential and
+// proxy passwords are written to the OS secure store; config.json is scrubbed.
 func (s *Service) SavePipRegistryConfig(cfg config.PipRegistryConfig) error {
+	storePipSecrets(cfg)
 	return config.Update(func(appCfg *config.AppConfig) error {
 		appCfg.PipRegistry = cfg
 		return nil
 	})
 }
 
-// ResetPipRegistryConfig clears the pip registry configuration.
+// ResetPipRegistryConfig clears the pip registry configuration, including its
+// secrets in the OS store.
 func (s *Service) ResetPipRegistryConfig() error {
+	deletePipSecrets()
 	return config.Update(func(appCfg *config.AppConfig) error {
 		appCfg.PipRegistry = config.PipRegistryConfig{}
 		return nil
 	})
+}
+
+// hydratePipSecrets fills in each credential password and the proxy password
+// from the OS secure store. Missing secrets are left empty.
+func hydratePipSecrets(rc *config.PipRegistryConfig) {
+	for i := range rc.Credentials {
+		if pw, err := secrets.Get(secrets.PipCredentialKey(rc.Credentials[i].Registry)); err == nil {
+			rc.Credentials[i].Password = pw
+		}
+	}
+	if pw, err := secrets.Get(secrets.KeyPipProxyPassword); err == nil {
+		rc.ProxyPassword = pw
+	}
+}
+
+// storePipSecrets writes the proxy password and each credential password to the
+// OS secure store, and prunes secrets for registries no longer configured.
+func storePipSecrets(rc config.PipRegistryConfig) {
+	keep := make(map[string]bool, len(rc.Credentials))
+	for _, cred := range rc.Credentials {
+		key := secrets.PipCredentialKey(cred.Registry)
+		keep[key] = true
+		if err := storePipSecret(key, cred.Password); err != nil {
+			logger.L.Warn("secrets: failed to store pip credential", "registry", cred.Registry, "err", err)
+		}
+	}
+	// Remove credential secrets for registries that were deleted.
+	if keys, err := secrets.Keys(); err == nil {
+		for _, key := range keys {
+			if secrets.IsPipCredentialKey(key) && !keep[key] {
+				_ = secrets.Delete(key)
+			}
+		}
+	}
+	if err := storePipSecret(secrets.KeyPipProxyPassword, rc.ProxyPassword); err != nil {
+		logger.L.Warn("secrets: failed to store pip proxy password", "err", err)
+	}
+}
+
+// storePipSecret sets a secret, or deletes it when the value is empty.
+func storePipSecret(key, value string) error {
+	if value == "" {
+		return secrets.Delete(key)
+	}
+	return secrets.Set(key, value)
+}
+
+// deletePipSecrets removes every pip-registry secret (credential passwords and
+// the proxy password) from the OS store.
+func deletePipSecrets() {
+	if keys, err := secrets.Keys(); err == nil {
+		for _, key := range keys {
+			if secrets.IsPipCredentialKey(key) {
+				_ = secrets.Delete(key)
+			}
+		}
+	}
+	_ = secrets.Delete(secrets.KeyPipProxyPassword)
 }
 
 // PickCACertFile opens a file picker for certificate files and returns the chosen path.

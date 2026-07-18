@@ -573,7 +573,18 @@ Ghost-text SQL suggestions appear automatically as you type in the editor. Press
 
 ### Configuration
 
-Open **Tools → Configure AI…** in the menu bar to set your provider, API key, and model. The API key is stored locally with restricted file permissions (`0600`) and never transmitted anywhere other than the selected AI provider.
+Open **Tools → Configure AI…** in the menu bar to set your provider, API key, and model. The API key is kept in your operating system's secure store — **macOS Keychain**, **Windows Credential Manager**, or the **Linux Secret Service** — never in `config.json`, and is never transmitted anywhere other than the selected AI provider. Each secret field in Settings shows an indicator of where it is actually stored, falling back to a warning-styled note when no OS secure store is available (a `0600` local file is used instead). See **Secure secret storage** below.
+
+### Secure secret storage
+
+Thaw-owned secrets — the **AI API key**, **Git OAuth client secrets**, **pip registry** credential and proxy passwords, and **MCP session tokens** — are stored in your operating system's native secure store rather than in `config.json`:
+
+- **macOS** → Keychain
+- **Windows** → Credential Manager
+- **Linux** → Secret Service (libsecret), when available
+- **Fallback** → a local `~/.config/thaw/secrets.json` file with `0600` permissions when no OS secure store is available (e.g. headless Linux)
+
+Existing plaintext secrets from older versions are **migrated automatically** on first launch and scrubbed from `config.json`. Each secret input in Settings shows where the value is actually kept ("Stored in macOS Keychain", etc.), driven by the backend so it reflects reality — including the warning-styled fallback indicator. If a secret is removed out-of-band (e.g. via Keychain Access or Credential Manager), Thaw treats it as absent and simply re-prompts. The shared Snowflake CLI config (`~/.snowflake/config.toml`) is left untouched, since other tools read it directly.
 
 ---
 

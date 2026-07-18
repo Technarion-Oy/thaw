@@ -152,6 +152,7 @@ When a feature is admin-controlled, the toggle in **Enabled Features** is automa
 - **Logs**: `gosnowflake` driver logs errors to `slog.Default` even when caught.
 - **Wails Generate**: If `wails generate module` fails, check Go syntax errors first.
 - **Persistence**: App state is persisted in `~/.config/thaw/config.json`. Frontend store persistence uses `localStorage`. `config.Save` writes atomically (temp+rename via `filesystem.WriteFileAtomic`) so a second Thaw process never reads a torn file; any read-modify-write of the config MUST go through `config.Update(fn)` (process-locked) rather than a bare `Load()`→mutate→`Save()`, or a concurrent write in the same process can silently revert it.
+- **Secrets**: Thaw-owned secrets (AI API key, Git OAuth client secrets, pip registry credential/proxy passwords, MCP session tokens) are **never** written to `config.json` — they live in the OS secure store via `internal/secrets` (macOS Keychain, Windows Credential Manager, Linux Secret Service; `0600` file fallback otherwise). `config.save()` scrubs these fields on every write and `config.Load()` migrates any legacy plaintext once. `App.GetSecretStorageInfo` reports the active backend to the Settings storage indicator. `~/.snowflake/config.toml` is out of scope (shared with the Snowflake CLI — `internal/sfconfig`).
 
 ## 🚀 Pull Request Generation with Gemini CLI
 

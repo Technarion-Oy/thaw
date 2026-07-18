@@ -3857,6 +3857,29 @@ export namespace secret {
 
 }
 
+export namespace secrets {
+	
+	export class Info {
+	    method: string;
+	    secure: boolean;
+	    label: string;
+	    detail?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Info(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.method = source["method"];
+	        this.secure = source["secure"];
+	        this.label = source["label"];
+	        this.detail = source["detail"];
+	    }
+	}
+
+}
+
 export namespace semanticview {
 	
 	export class SemanticViewConfig {

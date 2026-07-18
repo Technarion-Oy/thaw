@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Input, Modal, Radio, Select, Switch, Tag, Typography, message } from "antd";
 import { GetAIConfig, GetSystemRAMGB, ListAIModels, SaveAIConfig, TestAIModel } from "../../../wailsjs/go/app/App";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
+import { SecretStorageIndicator } from "./SecretStorageIndicator";
 
 const { Text } = Typography;
 
@@ -373,11 +374,7 @@ export default function AISettingsModal({ onClose }: Props) {
             at <Text code style={{ fontSize: 12 }}>http://localhost:11434</Text>.
           </Text>
         ) : (
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            Your API key is stored locally in{" "}
-            <Text code style={{ fontSize: 12 }}>~/.config/thaw/config.json</Text>{" "}
-            (permissions: 0600).
-          </Text>
+          <SecretStorageIndicator noun="API key" />
         )}
       </div>
     </Modal>

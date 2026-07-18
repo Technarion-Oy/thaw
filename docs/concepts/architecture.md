@@ -45,7 +45,8 @@ Everything else under `internal/` is a focused domain package. Each has its own 
 | `snowflake` | gosnowflake driver wrapper, session-state-aware pool, object-listing TTL cache, result-parsing helpers |
 | `sqleditor` | SQL diagnostics & JOIN-suggestion engine (its own Wails-bound `Service`) |
 | `ddl` | statement splitter + DDL metadata extraction + parallel export pipeline |
-| `config` | TOML/JSON app config, feature flags, IT-admin enforced policies |
+| `config` | TOML/JSON app config, feature flags, IT-admin enforced policies (secrets scrubbed out — see `secrets`) |
+| `secrets` | OS-native credential store (macOS Keychain / Windows Credential Manager / Linux Secret Service; `0600` file fallback) for Thaw-owned secrets kept out of `config.json` |
 | `tasks`, `warehouse`, `table`, `column`, `pipe`, `stage`, `secret`, `backup`, `objects`, `queryhistory`, `queryprofile`, `dbtproject`, `snowgitrepo`, `integrations`, `keypair`, `fileformat`, `procedure` | per-object SQL builders + parsers (thin-delegator domains) |
 | `migration`, `snowpark` | larger features exposing their own `Service` |
 | `gitrepo` | local git via go-git; `filesystem` | file I/O + FS watcher; `sfconfig` | `~/.snowflake/config.toml` reader/writer |

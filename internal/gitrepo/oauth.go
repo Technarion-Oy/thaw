@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"thaw/internal/config"
+	"thaw/internal/secrets"
 )
 
 // The secret is scrambled before compile.
@@ -64,7 +65,8 @@ func GetProviderConfig(provider string) OAuthConfig {
 	case "github":
 		secret := getScrambledClientSecret()
 		if secret == "" {
-			secret = cfg.OAuth.GithubClientSecret
+			// Configured client secret lives in the OS secure store, not config.json.
+			secret, _ = secrets.Get(secrets.KeyGitHubClientSecret)
 		}
 
 		// #nosec G101 // Justification: OAuth2 public client application 'secrets' are required and permitted to be public
@@ -77,13 +79,14 @@ func GetProviderConfig(provider string) OAuthConfig {
 			Scopes:       "repo",
 		}
 	case "gitlab":
+		gitlabSecret, _ := secrets.Get(secrets.KeyGitLabClientSecret)
 		// #nosec G101 // Justification: OAuth2 public client application 'secrets' are required and permitted to be public
 		return OAuthConfig{
 			ProviderName: "GitLab",
 			AuthURL:      "https://gitlab.com/oauth/authorize",
 			TokenURL:     "https://gitlab.com/oauth/token",
 			ClientID:     cfg.OAuth.GitlabClientID,
-			ClientSecret: cfg.OAuth.GitlabClientSecret,
+			ClientSecret: gitlabSecret,
 			Scopes:       "api",
 		}
 	default:

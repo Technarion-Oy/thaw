@@ -549,10 +549,24 @@ func configPath() (string, error) {
 }
 
 // Load reads the config file, returning an empty config if it doesn't exist yet.
+//
+// Thaw-owned secrets are never returned in the config's secret fields — those
+// live in the OS secure store (see internal/secrets and secretsync.go). If an
+// older config.json still holds plaintext secrets, they are migrated into the
+// store here and the scrubbed file is written back.
 func Load() (*AppConfig, error) {
 	fileMu.Lock()
 	defer fileMu.Unlock()
-	return load()
+	cfg, err := load()
+	if err != nil {
+		return nil, err
+	}
+	if migrateSecretsToStore(cfg) {
+		// Best-effort: scrub the plaintext secrets from disk now that they are
+		// in the store. A failure here just leaves migration to retry next load.
+		_ = save(cfg)
+	}
+	return cfg, nil
 }
 
 // Update runs fn against the current on-disk config and writes the result back as
@@ -571,6 +585,9 @@ func Update(fn func(*AppConfig) error) error {
 	if err != nil {
 		return err
 	}
+	// Move any leftover plaintext secrets into the store before fn runs, so the
+	// scrubbing save below can never drop a not-yet-migrated secret.
+	migrateSecretsToStore(cfg)
 	if err := fn(cfg); err != nil {
 		return err
 	}
@@ -620,7 +637,12 @@ func save(cfg *AppConfig) error {
 	if err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(cfg, "", "  ")
+	// Persist any secret set on the struct into the OS store, then marshal a
+	// scrubbed copy so Thaw-owned secrets never reach config.json — the
+	// authoritative copy lives in the OS secure store (see secretsync.go).
+	persistSecrets(cfg)
+	scrubbed := scrubbedCopy(cfg)
+	data, err := json.MarshalIndent(&scrubbed, "", "  ")
 	if err != nil {
 		return err
 	}

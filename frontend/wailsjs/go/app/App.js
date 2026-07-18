@@ -1194,6 +1194,10 @@ export function GetSchemaRetentionDays(arg1, arg2) {
   return window['go']['app']['App']['GetSchemaRetentionDays'](arg1, arg2);
 }
 
+export function GetSecretStorageInfo() {
+  return window['go']['app']['App']['GetSecretStorageInfo']();
+}
+
 export function GetSemanticViewTags(arg1, arg2, arg3) {
   return window['go']['app']['App']['GetSemanticViewTags'](arg1, arg2, arg3);
 }
