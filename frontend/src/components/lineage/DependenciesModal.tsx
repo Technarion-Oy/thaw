@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { useEffect, useRef, useState } from "react";
-import { Modal, Button, Spin, Empty, Tree, Tag, Typography, Tooltip } from "antd";
+import { useEffect, useRef, useState, useCallback } from "react";
+import {
+  Modal, Button, Spin, Empty, Tree, Tag, Typography, Tooltip, Tabs, Alert,
+} from "antd";
 import {
   TableOutlined,
   EyeOutlined,
@@ -10,13 +12,24 @@ import {
   QuestionOutlined,
   SyncOutlined,
   WarningOutlined,
+  ReloadOutlined,
+  ArrowDownOutlined,
+  ArrowUpOutlined,
 } from "@ant-design/icons";
 import type { DataNode } from "antd/es/tree";
-import { GetObjectDependencies, GetObjectDDL } from "../../../wailsjs/go/app/App";
+import {
+  GetObjectDependencies,
+  GetObjectDDL,
+  GetObjectUsageDependencies,
+} from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { kindSupportsDdl } from "../../utils/objectDdl";
 
 const { Text } = Typography;
+
+// Object kinds whose DDL the parser engine can read (GetObjectDependencies).
+// Everything else relies solely on the ACCOUNT_USAGE section.
+const PARSER_KINDS = new Set(["VIEW", "PROCEDURE", "FUNCTION", "EXTERNAL FUNCTION"]);
 
 // ── DDL tooltip ───────────────────────────────────────────────────────────────
 
@@ -125,6 +138,7 @@ export interface DependenciesModalProps {
 }
 
 type DepNode = snowflake.DependencyNode;
+type UsageRef = snowflake.ObjectDependencyRef;
 
 interface NodeMeta {
   dep: DepNode;
@@ -148,6 +162,18 @@ const KIND_ICON: Record<string, React.ReactNode> = {
   FUNCTION:  <FunctionOutlined style={{ fontSize: 13 }} />,
   UNKNOWN:   <QuestionOutlined style={{ fontSize: 13 }} />,
 };
+
+// iconFor maps a Snowflake domain (which may be multi-word, e.g.
+// "MATERIALIZED VIEW", "EXTERNAL FUNCTION") to the closest kind icon/color by
+// its last significant word, falling back to UNKNOWN.
+function bucketFor(domain: string): string {
+  const up = (domain || "").toUpperCase();
+  if (up.includes("TABLE")) return "TABLE";
+  if (up.includes("VIEW")) return "VIEW";
+  if (up.includes("PROCEDURE")) return "PROCEDURE";
+  if (up.includes("FUNCTION")) return "FUNCTION";
+  return "UNKNOWN";
+}
 
 // ── tree builder ──────────────────────────────────────────────────────────────
 
@@ -195,13 +221,14 @@ function allKeys(nodes: DataNode[]): string[] {
 
 function NodeLabel({ dep, bold }: { dep: DepNode; bold?: boolean }) {
   const kindUpper = (dep.kind ?? "UNKNOWN").toUpperCase();
+  const bucket = bucketFor(kindUpper);
   const qualifiedName = [dep.database, dep.schema, dep.name].filter(Boolean).join(".");
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-      <span style={{ opacity: 0.65 }}>{KIND_ICON[kindUpper] ?? KIND_ICON.UNKNOWN}</span>
+      <span style={{ opacity: 0.65 }}>{KIND_ICON[bucket] ?? KIND_ICON.UNKNOWN}</span>
       <Text strong={bold} style={{ fontSize: 13 }}>{qualifiedName}</Text>
       <Tag
-        color={KIND_COLOR[kindUpper] ?? "default"}
+        color={KIND_COLOR[bucket] ?? "default"}
         style={{ fontSize: 11, lineHeight: "18px", padding: "0 5px", marginLeft: 2 }}
       >
         {kindUpper}
@@ -228,29 +255,138 @@ function NodeLabel({ dep, bold }: { dep: DepNode; bold?: boolean }) {
   );
 }
 
-// ── component ─────────────────────────────────────────────────────────────────
+// ── ACCOUNT_USAGE flat list ─────────────────────────────────────────────────────
 
-export default function DependenciesModal({
-  open,
-  database,
-  schema,
-  kind,
-  name,
-  arguments: args,
-  onClose,
-}: DependenciesModalProps) {
+const USAGE_CAPTION: Record<"depends_on" | "referenced_by", string> = {
+  depends_on:
+    "Objects this one references, from SNOWFLAKE.ACCOUNT_USAGE.OBJECT_DEPENDENCIES. " +
+    "Covers tables and non-SQL bodies the DDL parser cannot read. Requires governance " +
+    "privileges (a grant on the SNOWFLAKE database / ACCOUNTADMIN) and may lag recent changes.",
+  referenced_by:
+    "Objects that reference this one, from SNOWFLAKE.ACCOUNT_USAGE.OBJECT_DEPENDENCIES. " +
+    "Requires governance privileges (a grant on the SNOWFLAKE database / ACCOUNTADMIN) " +
+    "and may lag recent changes.",
+};
+
+/**
+ * UsageSection loads and renders a flat, de-duplicated list of object
+ * dependency edges from ACCOUNT_USAGE.OBJECT_DEPENDENCIES in one direction.
+ * It owns its own load lifecycle so switching tabs / refreshing is independent
+ * of the parser tree. When autoLoad is true it fetches on first mount.
+ */
+function UsageSection({
+  database, schema, name, direction, autoLoad,
+}: {
+  database: string;
+  schema: string;
+  name: string;
+  direction: "depends_on" | "referenced_by";
+  autoLoad: boolean;
+}) {
+  const [refs, setRefs] = useState<UsageRef[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    GetObjectUsageDependencies(database, schema, name, direction)
+      .then((r) => setRefs(r ?? []))
+      .catch((e) => setError(String(e)))
+      .finally(() => setLoading(false));
+  }, [database, schema, name, direction]);
+
+  useEffect(() => {
+    if (autoLoad && refs === null && !loading) load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoLoad]);
+
+  return (
+    <div>
+      <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 8 }}>
+        {USAGE_CAPTION[direction]}
+      </Text>
+
+      {error && (
+        <Alert
+          type="warning"
+          message="Could not load from ACCOUNT_USAGE"
+          description={error}
+          showIcon
+          style={{ marginBottom: 8 }}
+        />
+      )}
+
+      <Button
+        size="small"
+        icon={<ReloadOutlined />}
+        onClick={load}
+        loading={loading}
+        style={{ marginBottom: 10 }}
+      >
+        {refs === null ? "Load from ACCOUNT_USAGE" : "Refresh"}
+      </Button>
+
+      {loading && refs === null && (
+        <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
+          <Spin />
+        </div>
+      )}
+
+      {refs !== null && !loading && (
+        refs.length === 0 ? (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={direction === "depends_on" ? "No dependencies recorded" : "No referencing objects recorded"}
+            style={{ padding: "16px 0" }}
+          />
+        ) : (
+          <div
+            style={{
+              maxHeight: "48vh",
+              overflowY: "auto",
+              background: "var(--bg)",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              padding: "6px 8px",
+            }}
+          >
+            {refs.map((r, i) => (
+              <div key={`${r.database}.${r.schema}.${r.name}-${i}`} style={{ padding: "4px 2px" }}>
+                <DdlTooltip db={r.database} schema={r.schema} kind={r.domain} name={r.name} args="">
+                  <NodeLabel
+                    dep={{ database: r.database, schema: r.schema, name: r.name, kind: r.domain } as DepNode}
+                  />
+                </DdlTooltip>
+              </div>
+            ))}
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
+// ── parser tree section ─────────────────────────────────────────────────────────
+
+function ParserTreeSection({
+  database, schema, kind, name, args,
+}: {
+  database: string;
+  schema: string;
+  kind: string;
+  name: string;
+  args: string;
+}) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [treeData, setTreeData] = useState<DataNode[]>([]);
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
 
-  // Metadata keyed by node key.  Populated in useEffect, read in titleRender.
-  // Using a ref (not state) so titleRender always sees the latest values
-  // without causing extra re-renders.
+  // Metadata keyed by node key. Populated on load, read in titleRender.
   const nodeMetaRef = useRef<Map<string, NodeMeta>>(new Map());
 
   useEffect(() => {
-    if (!open) return;
     setLoading(true);
     setError(null);
     setTreeData([]);
@@ -279,17 +415,10 @@ export default function DependenciesModal({
       })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [database, schema, kind, name, args]);
 
   const hasChildren = treeData.length > 0 && !!treeData[0].children;
 
-  /**
-   * titleRender is called by Ant Design Tree during its own render cycle for
-   * every visible node.  We look up metadata from nodeMetaRef rather than
-   * from the nodeData object itself, because Ant Design Tree strips unknown
-   * DataNode properties internally.
-   */
   const titleRender = (nodeData: DataNode) => {
     const meta = nodeMetaRef.current.get(String(nodeData.key));
     if (!meta) return nodeData.title as React.ReactNode;
@@ -309,18 +438,12 @@ export default function DependenciesModal({
   };
 
   return (
-    <Modal
-      open={open}
-      title={`Dependencies — ${name}`}
-      onCancel={onClose}
-      width={680}
-      footer={[
-        <Button key="close" onClick={onClose}>
-          Close
-        </Button>,
-      ]}
-      styles={{ body: { padding: "12px 16px", minHeight: 120 } }}
-    >
+    <div>
+      <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 8 }}>
+        Parsed live from the object's DDL — instant and needs no extra privileges.
+        Only SQL-language objects expand recursively; tables and non-SQL bodies are leaf nodes.
+      </Text>
+
       {loading && (
         <div style={{ display: "flex", justifyContent: "center", padding: 40 }}>
           <Spin tip="Resolving dependencies…" />
@@ -333,45 +456,147 @@ export default function DependenciesModal({
         </div>
       )}
 
-      {!loading && !error && treeData.length === 0 && (
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description="No dependencies found"
-          style={{ padding: "24px 0" }}
-        />
-      )}
-
       {!loading && !error && treeData.length > 0 && (
         <>
           {!hasChildren && (
             <div style={{ marginBottom: 8, color: "var(--text-muted)", fontSize: 12 }}>
-              This object has no resolvable dependencies in its DDL.
+              This object has no resolvable dependencies in its DDL. Try the
+              ACCOUNT_USAGE section below for objects the parser cannot read.
             </div>
           )}
-          <div
-            style={{
-              maxHeight: "55vh",
-              overflowY: "auto",
-              background: "var(--bg)",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
-              padding: "8px 4px",
-            }}
-          >
-            <Tree
-              treeData={treeData}
-              titleRender={titleRender}
-              expandedKeys={expandedKeys}
-              onExpand={(keys) => setExpandedKeys(keys as string[])}
-              showLine={{ showLeafIcon: false }}
-              style={{ background: "transparent", fontSize: 13 }}
-            />
-          </div>
-          <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-muted)" }}>
-            Only SQL-language objects are expanded. Tables and non-SQL procedures are shown as leaf nodes.
-          </div>
+          {hasChildren && (
+            <div
+              style={{
+                maxHeight: "45vh",
+                overflowY: "auto",
+                background: "var(--bg)",
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                padding: "8px 4px",
+              }}
+            >
+              <Tree
+                treeData={treeData}
+                titleRender={titleRender}
+                expandedKeys={expandedKeys}
+                onExpand={(keys) => setExpandedKeys(keys as string[])}
+                showLine={{ showLeafIcon: false }}
+                style={{ background: "transparent", fontSize: 13 }}
+              />
+            </div>
+          )}
         </>
       )}
+    </div>
+  );
+}
+
+// ── section divider ─────────────────────────────────────────────────────────────
+
+const SECTION_HEAD: React.CSSProperties = {
+  fontSize: 11, fontWeight: 600, color: "var(--text-muted)",
+  letterSpacing: "0.05em", textTransform: "uppercase",
+  margin: "18px 0 8px",
+};
+
+// ── component ─────────────────────────────────────────────────────────────────
+
+export default function DependenciesModal({
+  open,
+  database,
+  schema,
+  kind,
+  name,
+  arguments: args,
+  onClose,
+}: DependenciesModalProps) {
+  const [activeTab, setActiveTab] = useState<"depends_on" | "referenced_by">("depends_on");
+
+  // Reset to the first tab each time the modal is (re)opened for a new object.
+  useEffect(() => {
+    if (open) setActiveTab("depends_on");
+  }, [open, database, schema, kind, name]);
+
+  const parserSupported = PARSER_KINDS.has((kind ?? "").toUpperCase());
+
+  const dependsOnTab = (
+    <div>
+      {parserSupported && (
+        <>
+          <div style={{ ...SECTION_HEAD, marginTop: 4 }}>Parsed from DDL</div>
+          {/* key forces a fresh mount (and reload) per object identity */}
+          <ParserTreeSection
+            key={`${database}.${schema}.${kind}.${name}.${args}`}
+            database={database}
+            schema={schema}
+            kind={kind}
+            name={name}
+            args={args}
+          />
+        </>
+      )}
+      <div style={SECTION_HEAD}>From ACCOUNT_USAGE</div>
+      <UsageSection
+        key={`dep-${database}.${schema}.${name}`}
+        database={database}
+        schema={schema}
+        name={name}
+        direction="depends_on"
+        autoLoad={!parserSupported}
+      />
+    </div>
+  );
+
+  const referencedByTab = (
+    <UsageSection
+      key={`ref-${database}.${schema}.${name}`}
+      database={database}
+      schema={schema}
+      name={name}
+      direction="referenced_by"
+      autoLoad={activeTab === "referenced_by"}
+    />
+  );
+
+  return (
+    <Modal
+      open={open}
+      title={`Dependencies & References — ${name}`}
+      onCancel={onClose}
+      width={720}
+      footer={[
+        <Button key="close" onClick={onClose}>
+          Close
+        </Button>,
+      ]}
+      styles={{ body: { padding: "8px 16px 12px", minHeight: 200 } }}
+    >
+      <Tabs
+        activeKey={activeTab}
+        onChange={(k) => setActiveTab(k as "depends_on" | "referenced_by")}
+        items={[
+          {
+            key: "depends_on",
+            label: (
+              <span>
+                <ArrowDownOutlined style={{ marginRight: 6 }} />
+                Depends on
+              </span>
+            ),
+            children: dependsOnTab,
+          },
+          {
+            key: "referenced_by",
+            label: (
+              <span>
+                <ArrowUpOutlined style={{ marginRight: 6 }} />
+                Referenced by
+              </span>
+            ),
+            children: referencedByTab,
+          },
+        ]}
+      />
     </Modal>
   );
 }

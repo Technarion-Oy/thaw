@@ -5102,8 +5102,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "TABLE" && kindSupportsDdl(ctxMenu.objKind) && pendingDiff !== null &&
             menuItem(`Compare with: ${pendingDiff.label}`, <DiffOutlined style={{ fontSize: 12, color: "var(--accent)" }} />, compareObjWith)}
           {ctxMenu.nodeType === "obj" &&
-            (ctxMenu.objKind === "VIEW" || ctxMenu.objKind === "PROCEDURE" || ctxMenu.objKind === "FUNCTION" || ctxMenu.objKind === "EXTERNAL FUNCTION") &&
-            menuItem("View Dependencies…", <ShareAltOutlined style={{ fontSize: 12 }} />, viewDependencies)}
+            menuItem("Dependencies & References…", <ShareAltOutlined style={{ fontSize: 12 }} />, viewDependencies)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "TABLE" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "GATEWAY" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "AGENT" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && ctxMenu.objKind !== "MODEL MONITOR" && ctxMenu.objKind !== "DATASET" &&
             menuItem("Rename…", <EditOutlined style={{ fontSize: 12 }} />, renameObject)}
           {ctxMenu.nodeType === "obj" && <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />}

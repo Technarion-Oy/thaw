@@ -1110,6 +1110,10 @@ export function GetObjectTagReferences(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['GetObjectTagReferences'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function GetObjectUsageDependencies(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['GetObjectUsageDependencies'](arg1, arg2, arg3, arg4);
+}
+
 export function GetPasswordPolicyReferences(arg1, arg2, arg3) {
   return window['go']['app']['App']['GetPasswordPolicyReferences'](arg1, arg2, arg3);
 }
