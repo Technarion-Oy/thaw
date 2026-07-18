@@ -25,14 +25,24 @@ type countingSource struct {
 
 	// err, when non-nil, is returned by every list method.
 	err error
-	// block, when non-nil, is received on before each list method returns —
-	// letting a test hold two concurrent fetches in flight to prove dedup.
+	// block, when non-nil, gates each list method: the call waits on it (or on
+	// ctx cancellation) before returning, letting a test hold fetches in flight
+	// to prove dedup and to observe whether cancellation reaches the fetch.
 	block chan struct{}
 }
 
-func (s *countingSource) maybeBlock() {
-	if s.block != nil {
-		<-s.block
+// blockUntil waits for the block signal, honoring ctx cancellation so a test
+// can verify whether a fetch's context is live. Returns ctx.Err() if the
+// context is canceled first, nil once released (or immediately when unblocked).
+func (s *countingSource) blockUntil(ctx context.Context) error {
+	if s.block == nil {
+		return nil
+	}
+	select {
+	case <-s.block:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -41,45 +51,55 @@ func (s *countingSource) GetSessionContext(context.Context) (snowflake.SessionCo
 	return snowflake.SessionContext{Database: "DB", Schema: "PUBLIC"}, s.err
 }
 
-func (s *countingSource) ListDatabases(context.Context) ([]string, error) {
+func (s *countingSource) ListDatabases(ctx context.Context) ([]string, error) {
 	s.databases.Add(1)
-	s.maybeBlock()
+	if err := s.blockUntil(ctx); err != nil {
+		return nil, err
+	}
 	if s.err != nil {
 		return nil, s.err
 	}
 	return []string{"DB", "OTHER"}, nil
 }
 
-func (s *countingSource) ListSchemas(context.Context, string) ([]string, error) {
+func (s *countingSource) ListSchemas(ctx context.Context, _ string) ([]string, error) {
 	s.schemas.Add(1)
-	s.maybeBlock()
+	if err := s.blockUntil(ctx); err != nil {
+		return nil, err
+	}
 	if s.err != nil {
 		return nil, s.err
 	}
 	return []string{"PUBLIC"}, nil
 }
 
-func (s *countingSource) ListObjects(context.Context, string, string) ([]snowflake.SnowflakeObject, error) {
+func (s *countingSource) ListObjects(ctx context.Context, _, _ string) ([]snowflake.SnowflakeObject, error) {
 	s.objects.Add(1)
-	s.maybeBlock()
+	if err := s.blockUntil(ctx); err != nil {
+		return nil, err
+	}
 	if s.err != nil {
 		return nil, s.err
 	}
 	return []snowflake.SnowflakeObject{{Name: "T", Kind: "TABLE", Schema: "PUBLIC"}}, nil
 }
 
-func (s *countingSource) GetTableColumnsWithTypes(context.Context, string, string, string) ([]snowflake.ColumnInfo, error) {
+func (s *countingSource) GetTableColumnsWithTypes(ctx context.Context, _, _, _ string) ([]snowflake.ColumnInfo, error) {
 	s.columns.Add(1)
-	s.maybeBlock()
+	if err := s.blockUntil(ctx); err != nil {
+		return nil, err
+	}
 	if s.err != nil {
 		return nil, s.err
 	}
 	return []snowflake.ColumnInfo{{Name: "ID", DataType: "NUMBER(38,0)"}}, nil
 }
 
-func (s *countingSource) GetTableForeignKeys(context.Context, string, string, string) ([]snowflake.TableForeignKey, error) {
+func (s *countingSource) GetTableForeignKeys(ctx context.Context, _, _, _ string) ([]snowflake.TableForeignKey, error) {
 	s.fks.Add(1)
-	s.maybeBlock()
+	if err := s.blockUntil(ctx); err != nil {
+		return nil, err
+	}
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -222,6 +242,57 @@ func TestMetadataCacheSingleflight(t *testing.T) {
 	if got := src.databases.Load(); got != 1 {
 		t.Errorf("ListDatabases called %d times under concurrency, want 1 (singleflight)", got)
 	}
+}
+
+// TestMetadataCacheLeaderCancelDoesNotAbortFollower is the regression test for
+// the singleflight+context gotcha: a follower deduped onto a leader whose
+// context is canceled mid-fetch must still get a successful result, because the
+// shared fetch runs on a detached context. Without the fix the fetch runs on the
+// leader's ctx, so canceling it returns ctx.Err() to every deduped caller.
+func TestMetadataCacheLeaderCancelDoesNotAbortFollower(t *testing.T) {
+	src := &countingSource{block: make(chan struct{})}
+	c := newMetadataCache(src, time.Minute)
+
+	type result struct {
+		vals []string
+		err  error
+	}
+	leaderCtx, cancelLeader := context.WithCancel(context.Background())
+	followerCh := make(chan result, 1)
+	leaderCh := make(chan result, 1)
+
+	// Leader enters the shared fetch and blocks there.
+	go func() {
+		v, err := c.ListDatabases(leaderCtx)
+		leaderCh <- result{v, err}
+	}()
+	waitFor(t, func() bool { return src.databases.Load() >= 1 })
+
+	// Follower joins with its own live context; the leader still holds the
+	// singleflight slot (block is not closed), so it dedups onto the leader.
+	go func() {
+		v, err := c.ListDatabases(context.Background())
+		followerCh <- result{v, err}
+	}()
+	// The leader cannot progress until block is closed, so the follower has
+	// until then to register on the singleflight call. Give it that window.
+	time.Sleep(50 * time.Millisecond)
+
+	// Cancel the leader while the shared fetch is still in flight, then release.
+	cancelLeader()
+	close(src.block)
+
+	fr := <-followerCh
+	if fr.err != nil {
+		t.Errorf("follower err = %v, want nil (leader cancellation must not abort a deduped follower)", fr.err)
+	}
+	if len(fr.vals) != 2 {
+		t.Errorf("follower got %v, want the 2-element database list", fr.vals)
+	}
+	if got := src.databases.Load(); got != 1 {
+		t.Errorf("ListDatabases called %d times, want 1 (single shared fetch)", got)
+	}
+	<-leaderCh // drain so the goroutine can exit
 }
 
 // SessionContext must never be cached — every call reaches the source.

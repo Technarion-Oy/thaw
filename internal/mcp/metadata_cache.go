@@ -21,6 +21,13 @@ import (
 // immediately on the next call. See issue #355.
 const metadataCacheTTL = 5 * time.Second
 
+// metadataFetchTimeout bounds a single underlying metadata fetch. Because the
+// fetch is detached from the calling request's context (see get), it would
+// otherwise inherit no deadline; this cap ensures a hung fetch cannot wedge the
+// singleflight slot — and therefore every deduped caller waiting on it —
+// indefinitely.
+const metadataFetchTimeout = 30 * time.Second
+
 // metadataSource is the subset of *snowflake.Client the diagnostics tools read.
 // Declaring it as an interface lets metadataCache be unit-tested with a fake
 // that counts calls (metadata_cache_test.go); *snowflake.Client satisfies it.
@@ -40,21 +47,25 @@ type metadataSource interface {
 // suggest_join_conditions calls for the same schema do not re-issue identical
 // metadata queries against the live account. Concurrent identical fetches are
 // deduplicated via singleflight so two tool calls in flight at once issue one
-// query, not two.
+// query, not two — and the shared fetch runs on a context detached from any one
+// caller (see get), so one caller canceling doesn't abort the others.
 //
 // GetSessionContext is intentionally NOT cached: it is cheap and can change
 // mid-session (USE DATABASE / USE SCHEMA), so it always reads live.
 //
 // Only successful results are cached; an error is returned to the caller
 // without being stored, so a transient failure never poisons the window.
+// Expired entries are lazily evicted (see sweepExpiredLocked) so the map stays
+// bounded across a long session.
 type metadataCache struct {
 	src   metadataSource
 	ttl   time.Duration
 	now   func() time.Time // injectable clock for tests; defaults to time.Now
 	group singleflight.Group
 
-	mu      sync.Mutex
-	entries map[string]cacheEntry
+	mu        sync.Mutex
+	entries   map[string]cacheEntry
+	nextSweep time.Time // earliest time a lazy eviction sweep may run again
 }
 
 // cacheEntry is one memoized fetch result with its expiry.
@@ -87,16 +98,44 @@ func (c *metadataCache) get(ctx context.Context, key string, fetch func(context.
 		if v, ok := c.lookup(key); ok {
 			return v, nil
 		}
-		val, err := fetch(ctx)
+		// singleflight only ever runs the leader caller's closure; every other
+		// caller deduped onto this key just awaits its result. Running the fetch
+		// on the leader's ctx would let the leader canceling (a client-side
+		// timeout/abort) abort the shared fetch for those followers too, even
+		// though their own contexts are still live. Detach: WithoutCancel keeps
+		// ctx values (tracing, etc.) but drops cancellation and the deadline,
+		// and metadataFetchTimeout reimposes a bound so a hung fetch can't wedge
+		// the slot forever.
+		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), metadataFetchTimeout)
+		defer cancel()
+		val, err := fetch(fetchCtx)
 		if err != nil {
 			return nil, err
 		}
 		c.mu.Lock()
 		c.entries[key] = cacheEntry{val: val, expires: c.now().Add(c.ttl)}
+		c.sweepExpiredLocked()
 		c.mu.Unlock()
 		return val, nil
 	})
 	return v, err
+}
+
+// sweepExpiredLocked drops expired entries so a long-lived session touching many
+// distinct qualified names doesn't grow the map without bound. It is amortized
+// cheap: it runs at most once per TTL (gated by nextSweep) and only when a fetch
+// is already storing a new entry. Callers must hold c.mu.
+func (c *metadataCache) sweepExpiredLocked() {
+	now := c.now()
+	if now.Before(c.nextSweep) {
+		return
+	}
+	c.nextSweep = now.Add(c.ttl)
+	for k, e := range c.entries {
+		if !now.Before(e.expires) {
+			delete(c.entries, k)
+		}
+	}
 }
 
 // lookup returns the cached value for key if present and unexpired.
