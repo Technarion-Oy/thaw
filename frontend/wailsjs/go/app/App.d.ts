@@ -390,7 +390,7 @@ export function CreateApiIntegration(arg1:integrations.ApiIntegrationParams):Pro
 
 export function CreateBackupPolicy(arg1:string,arg2:string,arg3:number,arg4:boolean,arg5:string,arg6:string,arg7:boolean,arg8:boolean,arg9:boolean):Promise<void>;
 
-export function CreateBackupSet(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:boolean,arg8:boolean,arg9:boolean):Promise<void>;
+export function CreateBackupSet(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:string,arg8:boolean,arg9:boolean,arg10:boolean):Promise<void>;
 
 export function CreateCatalogIntegration(arg1:integrations.CatalogIntegrationParams):Promise<void>;
 

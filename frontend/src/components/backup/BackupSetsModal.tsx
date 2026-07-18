@@ -21,10 +21,25 @@ import { PlusOutlined, PlusCircleOutlined, EditOutlined, DeleteOutlined, MinusCi
 import type { ColumnsType } from "antd/es/table";
 import { ListBackupSets, CreateBackupSet, DropBackupSet, AlterBackupSet, ListBackupPolicies, ListBackups, AddBackup, DeleteOldestBackup, RestoreFromBackup, ListDatabases, ListUserSchemas, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/app/App";
 import type { backup } from "../../../wailsjs/go/models";
-import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
+import ObjectNameCaseControl, { identToken, quoteIdent } from "../shared/ObjectNameCaseControl";
 import dayjs from "dayjs";
 
 const { Text } = Typography;
+
+// Escape a SQL text literal the way the backend's EscapeTextLit does — double
+// backslashes first, then single-quotes — so a value ending in "\" (or one
+// containing "\'") cannot break out of the surrounding single-quoted literal.
+const escTextLit = (s: string) => s.replace(/\\/g, "\\\\").replace(/'/g, "''");
+
+// A backup set's identity is (db, schema, name): SHOW BACKUP SETS IN ACCOUNT can
+// return same-named sets in different schemas, so caches and React keys must be
+// keyed by all three, not by name alone. NUL is used as an unambiguous separator.
+const setKey = (r: backup.BackupSetRow) =>
+  [r.backupSetDb, r.backupSetSchema, r.name].join("\u0000");
+
+// The restore UI treats a base table and an external table identically (target
+// db/schema/name pickers); only the emitted CREATE object type differs.
+const isTableLike = (t: string) => t === "TABLE" || t === "EXTERNAL TABLE";
 
 interface Props {
   // The scope context — what was right-clicked
@@ -66,7 +81,7 @@ interface RestoreState {
   backupSetDb: string;
   backupSetSchema: string;
   backupID: string;       // UUID identifier of the specific backup
-  objectType: "DATABASE" | "SCHEMA" | "TABLE";
+  objectType: "DATABASE" | "SCHEMA" | "TABLE" | "EXTERNAL TABLE";
   objectName: string;     // original FQN (shown for reference, not used as target)
   // For DATABASE / SCHEMA: the user types a plain new name here
   targetName: string;
@@ -176,7 +191,7 @@ export default function BackupSetsModal(props: Props) {
   };
 
   const loadBackups = async (record: backup.BackupSetRow) => {
-    const key = record.name;
+    const key = setKey(record);
     setBackupCache((c) => ({ ...c, [key]: "loading" }));
     setBackupErrors((e) => { const n = { ...e }; delete n[key]; return n; });
     try {
@@ -189,7 +204,7 @@ export default function BackupSetsModal(props: Props) {
   };
 
   const handleAddBackup = async (record: backup.BackupSetRow) => {
-    setAddingBackup(a => ({ ...a, [record.name]: true }));
+    setAddingBackup(a => ({ ...a, [setKey(record)]: true }));
     try {
       await AddBackup(record.name, record.backupSetDb, record.backupSetSchema);
       message.success(`Backup added to "${record.name}".`);
@@ -197,7 +212,7 @@ export default function BackupSetsModal(props: Props) {
     } catch (e) {
       message.error(String(e));
     } finally {
-      setAddingBackup(a => ({ ...a, [record.name]: false }));
+      setAddingBackup(a => ({ ...a, [setKey(record)]: false }));
     }
   };
 
@@ -215,7 +230,7 @@ export default function BackupSetsModal(props: Props) {
     if (!restoreState) return;
     const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
     let targetName: string;
-    if (restoreState.objectType === "TABLE") {
+    if (isTableLike(restoreState.objectType)) {
       if (!restoreState.targetDb || !restoreState.targetSchema || !restoreState.targetTableName.trim()) {
         setRestoreState((s) => s ? { ...s, error: "Database, schema, and table name are all required." } : s);
         return;
@@ -315,19 +330,20 @@ export default function BackupSetsModal(props: Props) {
     setAlterLoading(true);
     try {
       let alteration = "";
-      const esc = (s: string) => s.replace(/'/g, "''");
       switch (alterState.action) {
         case "rename":
           alteration = `RENAME TO ${identToken(alterState.value, alterState.caseSensitive)}`;
           break;
         case "set-comment":
-          alteration = `SET COMMENT = '${esc(alterState.value)}'`;
+          alteration = `SET COMMENT = '${escTextLit(alterState.value)}'`;
           break;
         case "unset-comment":
           alteration = "UNSET COMMENT";
           break;
         case "apply-policy":
-          alteration = `APPLY BACKUP POLICY ${alterState.value}`;
+          // The value is the policy's stored name (from SHOW BACKUP POLICIES), so
+          // quote it to match a case-sensitively created policy.
+          alteration = `APPLY BACKUP POLICY ${quoteIdent(alterState.value)}`;
           break;
         case "suspend-policy":
           alteration = "SUSPEND BACKUP POLICY";
@@ -354,6 +370,10 @@ export default function BackupSetsModal(props: Props) {
     }
     setCreateState((s) => ({ ...s, loading: true, error: null }));
     try {
+      // The optional policy is applied by the backend in the same call, using the
+      // identical name reference CREATE stored — so a bare (case-insensitive) set
+      // name still matches. Building the APPLY here would re-quote the name and
+      // fail for any not-already-uppercase name.
       await CreateBackupSet(
         createState.name,
         createState.nameDb,
@@ -361,13 +381,11 @@ export default function BackupSetsModal(props: Props) {
         createState.forType,
         createState.objectFQN,
         db,
+        createState.backupPolicy.trim(),
         createState.orReplace,
         createState.ifNotExists,
         createState.caseSensitive,
       );
-      if (createState.backupPolicy.trim()) {
-        await AlterBackupSet(createState.name, createState.nameDb, createState.nameSchema, `APPLY BACKUP POLICY ${createState.backupPolicy.trim()}`);
-      }
       message.success(`Backup set "${createState.name}" created.`);
       setCreateState((s) => ({ ...s, open: false, name: "", backupPolicy: "", loading: false }));
       loadRows(nameFilter);
@@ -405,7 +423,7 @@ export default function BackupSetsModal(props: Props) {
               type="text"
               icon={<PlusCircleOutlined style={{ fontSize: 11 }} />}
               title="Add backup"
-              loading={addingBackup[row.name]}
+              loading={addingBackup[setKey(row)]}
               onClick={(e) => { e.stopPropagation(); handleAddBackup(row); }}
               style={{ flexShrink: 0, height: 18, padding: "0 2px", minWidth: 0, color: "var(--colorTextTertiary)" }}
             />
@@ -469,7 +487,7 @@ export default function BackupSetsModal(props: Props) {
             onClick={() => setAlterState({ name: row.name, backupSetDb: row.backupSetDb, backupSetSchema: row.backupSetSchema, action: "rename", value: row.name, caseSensitive: false })}
           />
           {(() => {
-            const cached = backupCache[row.name];
+            const cached = backupCache[setKey(row)];
             const noBackups = Array.isArray(cached) && cached.length === 0;
             return (
               <Popconfirm
@@ -589,25 +607,25 @@ export default function BackupSetsModal(props: Props) {
           <Table<backup.BackupSetRow>
             dataSource={rows.map(row => ({
               ...row,
-              _rev: Array.isArray(backupCache[row.name])
-                ? (backupCache[row.name] as backup.BackupRow[]).length
-                : backupCache[row.name] === "loading" ? -1 : -2,
+              _rev: Array.isArray(backupCache[setKey(row)])
+                ? (backupCache[setKey(row)] as backup.BackupRow[]).length
+                : backupCache[setKey(row)] === "loading" ? -1 : -2,
             } as backup.BackupSetRow))}
             columns={columns}
-            rowKey="name"
+            rowKey={(row) => setKey(row)}
             size="small"
             scroll={{ x: 'max-content' }} // Allows columns to expand horizontally beyond modal width
             pagination={{ pageSize: 20, showSizeChanger: false, hideOnSinglePage: true }}
             locale={{ emptyText: "No backup sets found." }}
             expandable={{
               onExpand: (expanded, record) => {
-                if (expanded && !(record.name in backupCache)) {
+                if (expanded && !(setKey(record) in backupCache)) {
                   loadBackups(record);
                 }
               },
               expandedRowRender: (record) => {
-                const entry = backupCache[record.name];
-                const err = backupErrors[record.name];
+                const entry = backupCache[setKey(record)];
+                const err = backupErrors[setKey(record)];
                 const isLoading = entry === "loading" || entry === undefined;
                 const backupCols: ColumnsType<backup.BackupRow> = [
                   {
@@ -657,7 +675,7 @@ export default function BackupSetsModal(props: Props) {
                         title="Restore from this backup…"
                         onClick={() => {
                           const inferredType = (
-                            record.objectType?.toUpperCase() as "DATABASE" | "SCHEMA" | "TABLE" | ""
+                            record.objectType?.toUpperCase() as "DATABASE" | "SCHEMA" | "TABLE" | "EXTERNAL TABLE" | ""
                           ) || scopeType;
                           setRestoreState({
                             backupSetName: record.name,
@@ -673,7 +691,7 @@ export default function BackupSetsModal(props: Props) {
                             loading: false,
                             error: null,
                           });
-                          if (inferredType === "TABLE") {
+                          if (isTableLike(inferredType)) {
                             loadRestoreDatabases();
                             loadRestoreSchemas(db);
                           }
@@ -689,7 +707,7 @@ export default function BackupSetsModal(props: Props) {
                         size="small"
                         type="primary"
                         icon={<PlusOutlined />}
-                        loading={addingBackup[record.name]}
+                        loading={addingBackup[setKey(record)]}
                         onClick={() => handleAddBackup(record)}
                       >
                         Add Backup
@@ -819,7 +837,7 @@ export default function BackupSetsModal(props: Props) {
             <Form.Item label="Original object">
               <Text type="secondary" style={{ fontSize: 12 }}>{restoreState.objectName || "—"}</Text>
             </Form.Item>
-            {restoreState.objectType === "TABLE" ? (
+            {isTableLike(restoreState.objectType) ? (
               <>
                 <Form.Item
                   label="Target database"

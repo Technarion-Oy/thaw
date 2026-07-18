@@ -638,8 +638,8 @@ export function CreateBackupPolicy(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg
   return window['go']['app']['App']['CreateBackupPolicy'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9);
 }
 
-export function CreateBackupSet(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9) {
-  return window['go']['app']['App']['CreateBackupSet'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9);
+export function CreateBackupSet(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10) {
+  return window['go']['app']['App']['CreateBackupSet'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10);
 }
 
 export function CreateCatalogIntegration(arg1) {

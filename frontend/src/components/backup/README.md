@@ -24,3 +24,6 @@ Provides two components for managing Snowflake account-level backup governance: 
 
 - Backup policies and sets are a preview Snowflake feature; availability depends on the account tier. IPC errors should be surfaced to the user rather than silently swallowed.
 - These components do not use any Zustand stores beyond `useFeatureFlagsStore`; all data is fetched fresh on open.
+- `SHOW BACKUP SETS IN ACCOUNT` can return same-named sets in different schemas, so `BackupSetsModal` keys every per-set cache (`backupCache`/`backupErrors`/`addingBackup`) and the table `rowKey` by the composite `setKey(row)` = `(backupSetDb, backupSetSchema, name)`, never by name alone.
+- Applying a backup policy on **create** is handled by passing the policy name to `CreateBackupSet` (the backend applies it with the matching name reference) — not a separate `AlterBackupSet` call. Policy names emitted into `APPLY BACKUP POLICY` and free-text values (`SET COMMENT`, `SET SCHEDULE`) go through `quoteIdent` / a backslash-safe `escTextLit`, mirroring the backend.
+- Restore treats `EXTERNAL TABLE` sets like `TABLE` (target db/schema/name pickers) via `isTableLike`; the emitted `CREATE` still uses the set's real object kind.
