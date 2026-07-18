@@ -166,6 +166,10 @@ func ValidateAntiPatterns(sql string, stmtRanges []StatementRange) []DiagMarker 
 }
 
 // knownCortexFunctions lists the recognized SNOWFLAKE.CORTEX.<name> functions.
+// The whole AISQL family (AI_COMPLETE, AI_CLASSIFY, AI_FILTER, AI_AGG, …) is
+// handled by the AI_ prefix pass-through in checkUnknownCortexFunc rather than
+// enumerated here, since Snowflake ships new AI_* functions frequently and an
+// exhaustive allowlist drifts into false positives (issue #793 A2).
 var knownCortexFunctions = map[string]bool{
 	"COMPLETE": true, "EXTRACT_ANSWER": true, "SENTIMENT": true, "SUMMARIZE": true,
 	"TRANSLATE": true, "CLASSIFY_TEXT": true, "EMBED_TEXT_768": true, "EMBED_TEXT_1024": true,
@@ -173,6 +177,14 @@ var knownCortexFunctions = map[string]bool{
 	"PARSE_DOCUMENT": true, "COUNT_TOKENS": true, "ENTITY_SENTIMENT": true,
 	"SPLIT_TEXT_RECURSIVE_CHARACTER": true, "SPLIT_TEXT_MARKDOWN_HEADER": true,
 	"AGENT_RUN": true, "DATA_AGENT_RUN": true,
+}
+
+// isKnownCortexFunc reports whether name is a recognized Cortex function. The
+// AISQL family shares the AI_ prefix and grows continually, so any AI_-prefixed
+// name passes through unflagged (issue #793 A2) — trading typo detection on those
+// names for not false-positiving every newly shipped AISQL function.
+func isKnownCortexFunc(name string) bool {
+	return knownCortexFunctions[name] || strings.HasPrefix(name, "AI_")
 }
 
 // checkLateralFlattenTypo flags `LATERALFLATTEN` (missing space).
@@ -480,7 +492,7 @@ func checkUnknownCortexFunc(rawText string, r StatementRange) []DiagMarker {
 			// normIdent strips a quoted-identifier's double quotes, so
 			// SNOWFLAKE.CORTEX."COMPLETE"(…) resolves to COMPLETE, not "COMPLETE".
 			name := normIdent(sig[i+4].Text(rawText), true)
-			if !knownCortexFunctions[name] {
+			if !isKnownCortexFunc(name) {
 				start, end := sig[i], sig[i+4]
 				match := rawText[start.Start:end.End]
 				lines := strings.Split(rawText[:start.Start], "\n")
@@ -491,7 +503,7 @@ func checkUnknownCortexFunc(rawText string, r StatementRange) []DiagMarker {
 					EndLineNumber: line, EndColumn: col + len(match),
 					Message: "Unknown Cortex function '" + sig[i+4].Text(rawText) + "'. Known functions: COMPLETE, EXTRACT_ANSWER, " +
 						"SENTIMENT, SUMMARIZE, TRANSLATE, CLASSIFY_TEXT, EMBED_TEXT_768, EMBED_TEXT_1024, FINETUNE, SEARCH_PREVIEW, TRY_COMPLETE, " +
-						"PARSE_DOCUMENT, COUNT_TOKENS, ENTITY_SENTIMENT, SPLIT_TEXT_RECURSIVE_CHARACTER, SPLIT_TEXT_MARKDOWN_HEADER, AGENT_RUN, DATA_AGENT_RUN.",
+						"PARSE_DOCUMENT, COUNT_TOKENS, ENTITY_SENTIMENT, SPLIT_TEXT_RECURSIVE_CHARACTER, SPLIT_TEXT_MARKDOWN_HEADER, AGENT_RUN, DATA_AGENT_RUN, and the AI_* (AISQL) family.",
 					Severity: SeverityWarning,
 				})
 			}
@@ -509,10 +521,22 @@ func checkUnknownCortexFunc(rawText string, r StatementRange) []DiagMarker {
 // wired into ValidateAntiPatterns.
 
 // pivotValidAggs lists the aggregate functions Snowflake accepts in a PIVOT.
+// Snowflake does not publish an exhaustive PIVOT-specific set — any aggregate
+// (including ordered-set aggregates like PERCENTILE_CONT and MODE) is accepted —
+// so this covers the common general-purpose aggregates to avoid false-positiving
+// valid PIVOTs (issue #793 A3). The check still catches an obvious non-aggregate.
 var pivotValidAggs = map[string]bool{
-	"SUM": true, "AVG": true, "COUNT": true, "MAX": true, "MIN": true,
-	"ANY_VALUE": true, "LISTAGG": true, "MEDIAN": true,
-	"STDDEV": true, "VARIANCE": true,
+	"SUM": true, "AVG": true, "COUNT": true, "COUNT_IF": true, "MAX": true, "MIN": true,
+	"MAX_BY": true, "MIN_BY": true, "ANY_VALUE": true, "LISTAGG": true, "ARRAY_AGG": true,
+	"ARRAY_UNIQUE_AGG": true, "OBJECT_AGG": true, "MODE": true,
+	"MEDIAN": true, "PERCENTILE_CONT": true, "PERCENTILE_DISC": true,
+	"STDDEV": true, "STDDEV_POP": true, "STDDEV_SAMP": true,
+	"VARIANCE": true, "VARIANCE_POP": true, "VARIANCE_SAMP": true, "VAR_POP": true, "VAR_SAMP": true,
+	"CORR": true, "COVAR_POP": true, "COVAR_SAMP": true,
+	"BOOLAND_AGG": true, "BOOLOR_AGG": true, "BOOLXOR_AGG": true,
+	"BITAND_AGG": true, "BITOR_AGG": true, "BITXOR_AGG": true,
+	"HLL": true, "APPROX_COUNT_DISTINCT": true, "APPROX_PERCENTILE": true,
+	"KURTOSIS": true, "SKEW": true, "GROUPING": true, "GROUPING_ID": true, "SUM_IF": true,
 }
 
 // ── token helpers ────────────────────────────────────────────────────────────

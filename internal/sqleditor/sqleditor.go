@@ -303,6 +303,14 @@ var scriptStmtKeywords = map[string]bool{
 	"TABLE": true,
 }
 
+// scriptBuiltinVars are the implicit variables Snowflake Scripting exposes
+// inside a block (chiefly an EXCEPTION handler) without a DECLARE — the built-in
+// exception variables. They must not be flagged as undeclared (issue #793 E1).
+// https://docs.snowflake.com/en/developer-guide/snowflake-scripting/exceptions
+var scriptBuiltinVars = map[string]bool{
+	"SQLERRM": true, "SQLCODE": true, "SQLSTATE": true,
+}
+
 // JOIN clause stop keywords used to detect accidental alias capture.
 var joinStopKW = map[string]bool{
 	"ON": true, "WHERE": true, "SET": true, "GROUP": true, "ORDER": true,
@@ -365,20 +373,41 @@ type StatementRange struct {
 // dollar-quoted blocks are correctly ignored.  No Snowflake connection is
 // required.
 //
-// Delegates to [sqltok.SplitRanges] for the actual tokenization.
+// Delegates to [sqltok.SplitRanges] for the actual tokenization. Bare (non-$$)
+// Snowflake Scripting anonymous blocks ([DECLARE …] BEGIN … END) that SplitRanges
+// shreds on their inner `;` are re-glued into one range so the grammar validates
+// them intact (issue #793 A1).
 func GetStatementRanges(sql string) []StatementRange {
 	tokRanges := sqltok.SplitRanges(sql)
 	if len(tokRanges) == 0 {
 		return nil
 	}
-	ranges := make([]StatementRange, len(tokRanges))
-	for i, r := range tokRanges {
-		ranges[i] = StatementRange{
+	spans := bareScriptingBlockSpans(sql, tokRanges)
+	var ranges []StatementRange
+	for i := 0; i < len(tokRanges); i++ {
+		r := tokRanges[i]
+		// A range that begins a bare scripting block is emitted as one merged range
+		// spanning the whole block; the fragments it absorbs are skipped.
+		if span, ok := spanStartingAt(spans, r.StartOffset); ok {
+			end := r
+			for i+1 < len(tokRanges) && tokRanges[i+1].StartOffset < span.end {
+				i++
+				end = tokRanges[i]
+			}
+			ranges = append(ranges, StatementRange{
+				StartLine:   r.StartLine,
+				EndLine:     end.EndLine,
+				StartOffset: r.StartOffset,
+				EndOffset:   span.end,
+			})
+			continue
+		}
+		ranges = append(ranges, StatementRange{
 			StartLine:   r.StartLine,
 			EndLine:     r.EndLine,
 			StartOffset: r.StartOffset,
 			EndOffset:   r.EndOffset,
-		}
+		})
 	}
 	return ranges
 }
@@ -855,6 +884,15 @@ var missingExprKeywords = map[string]bool{
 func validateSyntaxScope(src string, baseLine, baseCol int, inScript bool, add func(string, int, int, int, int), seedVars map[string]bool) {
 	toks := sqltok.Tokenize(src)
 
+	// Bare (non-$$) scripting blocks are only recognized at the outer (non-script)
+	// level — inside a $$ body everything is already scripting. Detect their spans
+	// once so the walk can validate each as a scripting scope instead of tripping
+	// the outer statement-start gate on EXCEPTION/END fragments (issue #793 A1).
+	var blockSpans []byteSpan
+	if !inScript && hasBlockLeaderToken(toks, src) {
+		blockSpans = bareScriptingBlockSpans(src, sqltok.SplitRanges(src))
+	}
+
 	// abs converts an intra-scope (line,col) to absolute coordinates. Only the
 	// first line of the scope is horizontally offset by baseCol.
 	abs := func(line, col int) (int, int) {
@@ -953,6 +991,11 @@ func validateSyntaxScope(src string, baseLine, baseCol int, inScript bool, add f
 	}
 	declaredVars := map[string]bool{}
 	for v := range seedVars {
+		declaredVars[v] = true
+	}
+	// Built-in exception variables (SQLERRM/SQLCODE/SQLSTATE) are always in scope
+	// inside a scripting block — seed them so they never read as undeclared (#793 E1).
+	for v := range scriptBuiltinVars {
 		declaredVars[v] = true
 	}
 	inDeclareBlock := false
@@ -1076,6 +1119,18 @@ func validateSyntaxScope(src string, baseLine, baseCol int, inScript bool, add f
 				break
 			}
 			if !inScript {
+				// A bare Snowflake Scripting anonymous block ([DECLARE …] BEGIN … END
+				// without $$): validate the whole block as a scripting scope and skip
+				// past it, mirroring the $$ anonymous-block handling above (#793 A1).
+				if span, ok := spanStartingAt(blockSpans, t.Start); ok {
+					sl, sc := absT(t)
+					validateSyntaxScope(src[span.start:span.end], sl, sc, true, add, nil)
+					for i < len(toks) && toks[i].Start < span.end {
+						i++
+					}
+					atStart = true
+					break
+				}
 				word := strings.ToUpper(t.Text(src))
 				atStart = false
 				if !sqlStmtKeywords[word] {
@@ -2137,7 +2192,7 @@ func scanExprRange(sig []sqltok.Token, inner string, lo, hi int, vars map[string
 			continue
 		}
 		up := strings.ToUpper(t.Text(inner))
-		if vars[up] || sqlExprBareWords[up] ||
+		if vars[up] || sqlExprBareWords[up] || scriptBuiltinVars[up] ||
 			sqltok.IsBuiltinFunction(up) || sqltok.IsReserved(up) || sqltok.IsKeyword(up) {
 			continue
 		}
@@ -2735,8 +2790,13 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 		}
 		// Bare-column validation is only safe when every source table has known columns
 		// (so we can definitively say whether a column exists) and there is at least one
-		// table in scope to validate against.
-		ctx.bareColValidation = !hasUnknownTable && !hasValuesSource && len(ctx.activeKeys) > 0
+		// table in scope to validate against. It is also disabled for statements whose
+		// clause bodies expose columns/keywords our flat scan can't model — PIVOT/UNPIVOT
+		// (FOR/value literals), CONNECT BY (LEVEL/PRIOR pseudo-columns), LATERAL FLATTEN
+		// (SEQ/KEY/VALUE… output), etc. — mirroring ValidateBareColumnRefs' matchesSnowflakeFP
+		// guard, which ValidateSemantics previously lacked (issue #793 D2/D4/D5).
+		ctx.bareColValidation = !hasUnknownTable && !hasValuesSource &&
+			len(ctx.activeKeys) > 0 && !matchesSnowflakeFP(rawSig, raw)
 
 		stmtContexts[idx] = ctx
 	}
@@ -2844,6 +2904,10 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 			// Capture whether this identifier directly follows a `*` before we
 			// consume it (used for the paren-less `SELECT * EXCLUDE col` case).
 			prevIsStar := prevSigRune == '*'
+			// An identifier directly after a `:` is a variant-path segment
+			// (v:field) or a cast target (x::type) / bind ref (:var) — not a
+			// column, so it must not be validated as one (issue #793 D1).
+			prevIsColon := prevSigRune == ':'
 			word1Start := i
 			word1Line := line
 			word1Col := col
@@ -2965,7 +3029,7 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 					// (prevIsStar was captured above from prevSigRune, which
 					// correctly ignores intervening comments and whitespace).
 					// Skip if it's a known SQL keyword.
-					if !sqltok.IsKeyword(word1Norm) && !isStarExcludeCol(word1Norm, prevIsStar) {
+					if !sqltok.IsKeyword(word1Norm) && !isStarExcludeCol(word1Norm, prevIsStar) && !prevIsColon {
 						// Heuristic: skip if followed by '(' (likely a function call).
 						isFunction := false
 						k := i

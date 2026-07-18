@@ -99,7 +99,7 @@ func (v *Validator) ParseInsertMultiTable() bool {
 //
 // Syntax:
 //
-//	MERGE INTO <target_table>
+//	MERGE INTO <target_table> [ [ AS ] <target_alias> ]
 //	  USING <source>
 //	  ON <join_expr>
 //	  { matchedClause | notMatchedClause } [ ... ]
@@ -116,10 +116,33 @@ func (v *Validator) ParseInsertMultiTable() bool {
 //	     [ AND <case_predicate> ]
 //	     THEN INSERT { ALL BY NAME | [ ( <col_name> [ , ... ] ) ] VALUES ( <expr> [ , ... ] ) }
 func (v *Validator) ParseMerge() bool {
+	// peekWord reports (without consuming) whether the next token is word.
+	peekWord := func(word string) bool {
+		saved := v.save()
+		ok := v.MatchWord(word)
+		v.restore(saved)
+		return ok
+	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("MERGE") },
 		func() bool { return v.MatchWord("INTO") },
 		v.parseIdentPath,
+		// Optional target alias: MERGE INTO <target> [ [AS] <alias> ] USING …
+		// (Snowflake accepts an alias on the target). Guarded so it never eats the
+		// required USING keyword that follows an unaliased target.
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.Optional(func() bool { return v.MatchWord("AS") }) },
+					func() bool {
+						if peekWord("USING") {
+							return false
+						}
+						return v.parseIdentPathN(1)
+					},
+				)
+			})
+		},
 		func() bool { return v.MatchWord("USING") },
 		// <source> may be a table name or a parenthesized subquery.
 		func() bool {

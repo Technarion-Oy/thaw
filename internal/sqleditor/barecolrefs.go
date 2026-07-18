@@ -791,6 +791,11 @@ func scanSelectClauseForUnknownCols(clause string, metaCols, localCols map[strin
 		if i > 0 && clauseSig[i-1].Kind == sqltok.Dot {
 			continue
 		}
+		// Skip if preceded by ":" (variant-path segment like v:field, or a
+		// bind reference :var) — not a column reference (issue #793 D1).
+		if i > 0 && clauseSig[i-1].Kind == sqltok.Colon {
+			continue
+		}
 		// Skip if followed by "." (schema/table qualifier)
 		if i+1 < len(clauseSig) && clauseSig[i+1].Kind == sqltok.Dot {
 			continue

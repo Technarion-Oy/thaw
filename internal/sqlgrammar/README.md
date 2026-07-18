@@ -97,7 +97,7 @@ exactly one of the two positions), and materialized views
 `query_constructs.go`): `SELECT [ ALL | DISTINCT ] [ TOP <n> ] <projection>` followed
 by the ordered optional `FROM` / `WHERE` / `GROUP BY` / `HAVING` / `QUALIFY` clauses,
 the trailing `ORDER BY` / `LIMIT` / `OFFSET` / `FETCH` / `FOR UPDATE` clauses, and
-set operators (`UNION` / `INTERSECT` / `EXCEPT` / `MINUS`) chaining further blocks.
+set operators (`UNION` / `INTERSECT` / `EXCEPT` / `MINUS`, each with the optional GA-2025 `[ ALL | DISTINCT ] [ BY NAME ]` modifier — issue #793 F) chaining further blocks.
 Each clause **body** is consumed permissively up to the next clause boundary
 (`consumeClauseBody`, skipping balanced parens so a boundary keyword nested in a
 subquery or function call — `EXTRACT(YEAR FROM dt)` — does not end the clause), so

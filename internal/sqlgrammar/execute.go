@@ -18,7 +18,7 @@ import (
 //
 // Syntax:
 //
-//	CALL <procedure_name> ( [ [ <arg_name> => ] <arg> , ... ] )
+//	CALL { <procedure_name> | <model_name>!<method_name> } ( [ [ <arg_name> => ] <arg> , ... ] )
 //	  [ INTO :<snowflake_scripting_variable> ]
 func (v *Validator) ParseCall() bool {
 	// scriptingVar: :<identifier> bind target.
@@ -31,6 +31,8 @@ func (v *Validator) ParseCall() bool {
 	return v.Sequence(
 		func() bool { return v.MatchKeyword("CALL") },
 		v.parseIdentPath,
+		// Optional model-method form: <model>!<method> (e.g. my_model!FORECAST(…)).
+		callModelMethod(v),
 		// argument list — free-form ( [ name => ] arg, … ).
 		v.consumeBalancedParens,
 		func() bool {
@@ -39,6 +41,20 @@ func (v *Validator) ParseCall() bool {
 			})
 		},
 	)
+}
+
+// callModelMethod matches an optional `! <method>` suffix on a CALL callee — the
+// Snowflake model-method invocation form `<model_name>!<method>(…)` (e.g.
+// `CALL my_model!FORECAST(FORECASTING_PERIODS => 3)`).
+func callModelMethod(v *Validator) Rule {
+	return func() bool {
+		return v.Optional(func() bool {
+			return v.Sequence(
+				func() bool { return v.MatchOp("!") },
+				v.parseIdentPath,
+			)
+		})
+	}
 }
 
 // ParseCallWithAnonymousProcedure validates the Snowflake `CALL (with anonymous procedure)` command.
@@ -97,6 +113,7 @@ func (v *Validator) ParseCallWithAnonymousProcedure() bool {
 	return v.Sequence(
 		func() bool { return v.MatchWord("CALL") },
 		v.parseIdentPath,
+		callModelMethod(v),
 		v.consumeBalancedParens,
 		func() bool {
 			return v.Optional(func() bool {
