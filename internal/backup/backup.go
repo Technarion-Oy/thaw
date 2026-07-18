@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
+
 	"thaw/internal/snowflake"
 )
 
@@ -68,7 +70,10 @@ func BuildListBackupSetsSql(nameFilter string) string {
 	var sb strings.Builder
 	sb.WriteString("SHOW BACKUP SETS")
 	if strings.TrimSpace(nameFilter) != "" {
-		escapedFilter := snowflake.EscapeStringLit(nameFilter)
+		// EscapeLikePattern escapes both the single-quote and the LIKE wildcards
+		// (% and _) so a literal wildcard in the typed name matches literally,
+		// while the surrounding %…% remain the substring wildcards.
+		escapedFilter := snowflake.EscapeLikePattern(nameFilter)
 		sb.WriteString(fmt.Sprintf(" LIKE '%%%s%%'", escapedFilter))
 	}
 	sb.WriteString(" IN ACCOUNT")
@@ -123,11 +128,13 @@ func ParseBackupSets(res *snowflake.QueryResult, scopeType, db, schema, table st
 			continue
 		}
 
+		// Use the backup set's own database/schema exactly as SHOW reports them.
+		// If SHOW returns them empty we leave them empty so follow-up calls emit
+		// a bare quoted name resolved against the session context — do NOT fall
+		// back to the backed-up object's database (db), which is unrelated to
+		// where the backup set itself lives and would build a wrong FQN.
 		rowBsDb := snowflake.CellString(cell(row, bsDbIdx))
 		rowBsSch := snowflake.CellString(cell(row, bsSchIdx))
-		if rowBsDb == "" {
-			rowBsDb = db
-		}
 		rows = append(rows, BackupSetRow{
 			Name:            snowflake.CellString(cell(row, nameIdx)),
 			BackupSetDb:     rowBsDb,
@@ -217,6 +224,8 @@ func FindOldestEligibleBackup(res *snowflake.QueryResult) (id string, ok bool) {
 
 	bestID := ""
 	bestCreated := ""
+	var bestTime time.Time
+	bestTimeOK := false
 	for _, row := range res.Rows {
 		if snowflake.CellBool(cell(row, legalHoldIdx)) {
 			continue
@@ -226,26 +235,77 @@ func FindOldestEligibleBackup(res *snowflake.QueryResult) (id string, ok bool) {
 			continue
 		}
 		created := snowflake.CellString(cell(row, createdIdx))
-		if bestID == "" || created < bestCreated {
-			bestID = rowID
-			bestCreated = created
+		rowTime, rowTimeOK := parseBackupTime(created)
+		if bestID == "" {
+			bestID, bestCreated, bestTime, bestTimeOK = rowID, created, rowTime, rowTimeOK
+			continue
+		}
+		// Prefer a real chronological comparison so rows whose timestamps carry
+		// different UTC offsets (e.g. across a DST transition) still order by the
+		// actual instant. Fall back to a lexicographic compare only when either
+		// side failed to parse.
+		var older bool
+		if rowTimeOK && bestTimeOK {
+			older = rowTime.Before(bestTime)
+		} else {
+			older = created < bestCreated
+		}
+		if older {
+			bestID, bestCreated, bestTime, bestTimeOK = rowID, created, rowTime, rowTimeOK
 		}
 	}
 	return bestID, bestID != ""
 }
 
-// BuildCreateBackupSetSql builds the CREATE BACKUP SET statement.
-func BuildCreateBackupSetSql(name, nameDb, nameSchema, forType, objectFQN string, orReplace, ifNotExists, caseSensitive bool) string {
+// parseBackupTime parses a SHOW BACKUPS created_on cell into a time.Time. The
+// value reaches us as a string (CellString formats a time.Time as RFC3339, but
+// Snowflake may also return the timestamp as a raw string in other layouts), so
+// several common layouts are tried. ok is false when the value is empty or none
+// of the layouts match, signaling the caller to fall back to a string compare.
+func parseBackupTime(s string) (time.Time, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05.999999999 -0700 MST",
+		"2006-01-02 15:04:05.999999999 -0700",
+		"2006-01-02 15:04:05 -0700",
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
+}
+
+// createBackupSetNameFQN builds the backup set's own (possibly qualified) name
+// reference for CREATE / follow-up APPLY BACKUP POLICY. The db and schema parts
+// are always double-quoted; the trailing name goes through QuoteOrBare so a
+// case-insensitive name is emitted bare — matching how CREATE stores it
+// (uppercased) and how the immediate APPLY must reference it. This differs from
+// bsFQN, which always double-quotes the name because there it comes from SHOW
+// output (already in stored form).
+func createBackupSetNameFQN(name, nameDb, nameSchema string, caseSensitive bool) string {
 	nameToken := snowflake.QuoteOrBare(name, caseSensitive)
-	var nameFQN string
 	switch {
 	case nameDb != "" && nameSchema != "":
-		nameFQN = snowflake.QuoteIdent(nameDb) + "." + snowflake.QuoteIdent(nameSchema) + "." + nameToken
+		return snowflake.QuoteIdent(nameDb) + "." + snowflake.QuoteIdent(nameSchema) + "." + nameToken
 	case nameDb != "":
-		nameFQN = snowflake.QuoteIdent(nameDb) + "." + nameToken
+		return snowflake.QuoteIdent(nameDb) + "." + nameToken
 	default:
-		nameFQN = nameToken
+		return nameToken
 	}
+}
+
+// BuildCreateBackupSetSql builds the CREATE BACKUP SET statement.
+func BuildCreateBackupSetSql(name, nameDb, nameSchema, forType, objectFQN string, orReplace, ifNotExists, caseSensitive bool) string {
+	nameFQN := createBackupSetNameFQN(name, nameDb, nameSchema, caseSensitive)
 
 	var sb strings.Builder
 	sb.WriteString("CREATE ")
@@ -283,15 +343,25 @@ func BuildCreateBackupPolicySql(name, schedule string, expireAfterDays int64, re
 		sb.WriteString(" WITH RETENTION LOCK")
 	}
 	if schedule != "" {
-		sb.WriteString(fmt.Sprintf(" SCHEDULE = '%s'", snowflake.EscapeStringLit(schedule)))
+		// Free-text values: EscapeTextLit doubles backslashes as well as quotes so
+		// a value ending in "\" (or containing "\'") cannot break out of the literal.
+		sb.WriteString(fmt.Sprintf(" SCHEDULE = %s", snowflake.QuoteTextLit(schedule)))
 	}
 	if expireAfterDays > 0 {
 		sb.WriteString(fmt.Sprintf(" EXPIRE_AFTER_DAYS = %d", expireAfterDays))
 	}
 	if comment != "" {
-		sb.WriteString(fmt.Sprintf(" COMMENT = '%s'", snowflake.EscapeStringLit(comment)))
+		sb.WriteString(fmt.Sprintf(" COMMENT = %s", snowflake.QuoteTextLit(comment)))
 	}
 	return sb.String()
+}
+
+// BuildApplyBackupPolicySql builds ALTER BACKUP SET <setFQN> APPLY BACKUP POLICY
+// <policy>. policyName comes from SHOW BACKUP POLICIES (its stored form), so it is
+// always double-quoted via QuoteIdent to match a case-sensitively created policy
+// (a bare emission would be uppercased and miss e.g. a policy named "my_policy").
+func BuildApplyBackupPolicySql(setFQN, policyName string) string {
+	return fmt.Sprintf("ALTER BACKUP SET %s APPLY BACKUP POLICY %s", setFQN, snowflake.QuoteIdent(policyName))
 }
 
 // BuildRestoreFromBackupSql builds:
@@ -304,7 +374,7 @@ func BuildCreateBackupPolicySql(name, schedule string, expireAfterDays int64, re
 func BuildRestoreFromBackupSql(objectType, targetName, backupSetName, bsDb, bsSchema, backupID string) (string, error) {
 	objType := strings.ToUpper(strings.TrimSpace(objectType))
 	if objType == "" {
-		return "", fmt.Errorf("object type must be DATABASE, SCHEMA, or TABLE")
+		return "", fmt.Errorf("object type must be DATABASE, SCHEMA, TABLE, or EXTERNAL TABLE")
 	}
 	if targetName == "" {
 		return "", fmt.Errorf("target name must not be empty")
@@ -321,9 +391,10 @@ func BuildRestoreFromBackupSql(objectType, targetName, backupSetName, bsDb, bsSc
 	sb.WriteString(targetName)
 	sb.WriteString(" FROM BACKUP SET ")
 	sb.WriteString(fqn)
-	sb.WriteString(" IDENTIFIER '")
-	sb.WriteString(snowflake.EscapeStringLit(backupID))
-	sb.WriteString("'")
+	sb.WriteString(" IDENTIFIER ")
+	// The backup ID is user-editable in the restore modal — escape it as free
+	// text so a stray backslash or quote can't break out of the literal.
+	sb.WriteString(snowflake.QuoteTextLit(backupID))
 	return sb.String(), nil
 }
 
@@ -331,8 +402,8 @@ func BuildRestoreFromBackupSql(objectType, targetName, backupSetName, bsDb, bsSc
 // IDENTIFIER '<id>'.
 func BuildDeleteOldestBackupSql(name, bsDb, bsSchema, backupID string) string {
 	return fmt.Sprintf(
-		"ALTER BACKUP SET %s DELETE BACKUP IDENTIFIER '%s'",
-		bsFQN(name, bsDb, bsSchema), snowflake.EscapeStringLit(backupID),
+		"ALTER BACKUP SET %s DELETE BACKUP IDENTIFIER %s",
+		bsFQN(name, bsDb, bsSchema), snowflake.QuoteTextLit(backupID),
 	)
 }
 
@@ -348,15 +419,26 @@ func ListBackupSets(ctx context.Context, client *snowflake.Client, scopeType, db
 
 // CreateBackupSet creates a new backup set for a DATABASE, SCHEMA, or TABLE.
 // db is used to set the current database context (required by Snowflake even
-// when the object name is fully qualified).
-func CreateBackupSet(ctx context.Context, client *snowflake.Client, name, nameDb, nameSchema, forType, objectFQN, db string, orReplace, ifNotExists, caseSensitive bool) error {
+// when the object name is fully qualified). When backupPolicy is non-blank the
+// policy is applied in a follow-up ALTER using the SAME name reference CREATE
+// stored — building the APPLY here (rather than in a separate frontend call that
+// re-quotes the name) is what keeps a bare, case-insensitive name matching.
+func CreateBackupSet(ctx context.Context, client *snowflake.Client, name, nameDb, nameSchema, forType, objectFQN, db, backupPolicy string, orReplace, ifNotExists, caseSensitive bool) error {
 	if db != "" {
 		if _, err := client.Execute(ctx, fmt.Sprintf("USE DATABASE %s", snowflake.QuoteIdent(db))); err != nil {
 			return err
 		}
 	}
-	_, err := client.Execute(ctx, BuildCreateBackupSetSql(name, nameDb, nameSchema, forType, objectFQN, orReplace, ifNotExists, caseSensitive))
-	return err
+	if _, err := client.Execute(ctx, BuildCreateBackupSetSql(name, nameDb, nameSchema, forType, objectFQN, orReplace, ifNotExists, caseSensitive)); err != nil {
+		return err
+	}
+	if policy := strings.TrimSpace(backupPolicy); policy != "" {
+		setFQN := createBackupSetNameFQN(name, nameDb, nameSchema, caseSensitive)
+		if _, err := client.Execute(ctx, BuildApplyBackupPolicySql(setFQN, policy)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // DropBackupSet drops the named backup set.

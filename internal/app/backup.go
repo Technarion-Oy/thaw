@@ -17,13 +17,15 @@ func (a *App) ListBackupSets(scopeType, db, schema, table, nameFilter string) ([
 	return backup.ListBackupSets(a.fctx(FeatureBackup), client, scopeType, db, schema, table, nameFilter)
 }
 
-// CreateBackupSet creates a new backup set for a DATABASE, SCHEMA, or TABLE.
-func (a *App) CreateBackupSet(name, nameDb, nameSchema, forType, objectFQN, db string, orReplace, ifNotExists, caseSensitive bool) error {
+// CreateBackupSet creates a new backup set for a DATABASE, SCHEMA, or TABLE. When
+// backupPolicy is non-blank, that policy is applied to the new set in the same
+// call (so the applied name matches how CREATE stored the set's name).
+func (a *App) CreateBackupSet(name, nameDb, nameSchema, forType, objectFQN, db, backupPolicy string, orReplace, ifNotExists, caseSensitive bool) error {
 	client := a.currentClient()
 	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return backup.CreateBackupSet(a.fctx(FeatureBackup), client, name, nameDb, nameSchema, forType, objectFQN, db, orReplace, ifNotExists, caseSensitive)
+	return backup.CreateBackupSet(a.fctx(FeatureBackup), client, name, nameDb, nameSchema, forType, objectFQN, db, backupPolicy, orReplace, ifNotExists, caseSensitive)
 }
 
 // DropBackupSet drops the named backup set.
