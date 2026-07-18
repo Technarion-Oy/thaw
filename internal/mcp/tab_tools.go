@@ -11,7 +11,6 @@ import (
 
 	"thaw/internal/config"
 	"thaw/internal/logger"
-	"thaw/internal/snowflake"
 	"thaw/internal/sqleditor"
 )
 
@@ -31,14 +30,13 @@ type OpenSqlTabPayload struct {
 
 // registerTabTools wires the tab-delivery tools onto srv. If emit is nil
 // (e.g. in tests without a Wails runtime), no tools are registered.
-func registerTabTools(srv *mcpsdk.Server, client *snowflake.Client, emit func(string, interface{})) {
+// cache is the session's shared metadataCache (see registerDiagTools); nil when
+// the session has no Snowflake connection. open_sql_tab runs the same
+// diagnostics pipeline as validate_sql, so sharing the cache means delivering
+// already-validated SQL to a tab reuses the metadata just fetched (issue #355).
+func registerTabTools(srv *mcpsdk.Server, cache *metadataCache, emit func(string, interface{})) {
 	if emit == nil {
 		return
-	}
-
-	var cache *metadataCache
-	if client != nil {
-		cache = newMetadataCache(client, metadataCacheTTL)
 	}
 
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{

@@ -37,17 +37,13 @@ type formatSqlInput struct {
 // iterative SQL refinement against real schema before delivering SQL to a
 // tab or notebook.
 //
-// A single short-lived metadataCache is built here (per session, since
-// buildServer runs once per session) and shared by validate_sql and
-// suggest_join_conditions, so an AI client refining SQL in a tight loop does
-// not re-issue identical databases/schemas/objects/column/FK queries against
-// the live account within the cache window (issue #355).
-func registerDiagTools(srv *mcpsdk.Server, client *snowflake.Client) {
-	var cache *metadataCache
-	if client != nil {
-		cache = newMetadataCache(client, metadataCacheTTL)
-	}
-
+// cache is the session's shared metadataCache (built once in buildServer and
+// passed to every diagnostics-running tool), so an AI client refining SQL in a
+// tight loop — including a validate_sql → open_sql_tab handoff across tools —
+// does not re-issue identical databases/schemas/objects/column/FK queries
+// against the live account within the cache window (issue #355). It is nil when
+// the session has no Snowflake connection.
+func registerDiagTools(srv *mcpsdk.Server, cache *metadataCache) {
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
 		Name:        "validate_sql",
 		Description: "Run the SQL diagnostics pipeline and return structured markers (errors and warnings) plus a schemaAware flag. These approximate the Thaw editor's diagnostics and may differ from what the editor shows for the same SQL — the editor layers an incremental, offline-first catalog warm-up on top that this tool does not. Phase 1 (syntax, patterns, datatypes) always runs. Phase 2 (schema-aware table existence, semantics, bare column refs) runs best-effort when a Snowflake connection is available: schemaAware is true when it ran, and false (with schemaAwareSkippedReason set) when there was no connection or a metadata fetch failed — so an empty markers list means 'phase 2 ran and found nothing' only when schemaAware is true.",

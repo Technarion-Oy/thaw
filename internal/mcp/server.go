@@ -40,17 +40,26 @@ func buildServer(client *snowflake.Client, mode string, cfg SessionConfig, edito
 		KeepAlive: 30 * time.Second,
 	})
 
+	// One metadataCache is shared session-wide by every tool that runs the SQL
+	// diagnostics pipeline (validate_sql, suggest_join_conditions, open_sql_tab),
+	// so metadata fetched by one call is reused by the next — including a
+	// validate_sql → open_sql_tab handoff (issue #355). nil when no connection.
+	var diagCache *metadataCache
+	if client != nil {
+		diagCache = newMetadataCache(client, metadataCacheTTL)
+	}
+
 	registerTools(srv, client)
 	registerSchemaTools(srv, client)
 	registerAccountTools(srv, client)
-	registerDiagTools(srv, client)
+	registerDiagTools(srv, diagCache)
 	registerProfileTools(srv, client)
 	registerLineageTools(srv, client)
 	if cfg.WorkspaceRoot != "" {
 		registerWorkspaceTools(srv, cfg.WorkspaceRoot)
 	}
 	registerEditorTools(srv, client, mode, editorCtx)
-	registerTabTools(srv, client, emit)
+	registerTabTools(srv, diagCache, emit)
 	registerNotebookTools(srv, nb, cfg.WorkspaceRoot, emit)
 	registerPipelineTools(srv, client, emit)
 	registerERDesignerTools(srv, client, emit)

@@ -240,6 +240,39 @@ func TestMetadataCacheSessionContextNotCached(t *testing.T) {
 	}
 }
 
+// TestValidateSQLReusesSharedCache proves the session-wide sharing the fix for
+// issue #355 relies on: two diagnostics runs over the same tables through one
+// shared cache — the validate_sql → open_sql_tab handoff, since both call
+// validateSQL — fetch each metadata kind exactly once. Before the cache was
+// hoisted into buildServer, validate_sql and open_sql_tab held separate caches
+// and this second run re-issued the whole set.
+func TestValidateSQLReusesSharedCache(t *testing.T) {
+	src := &countingSource{}
+	cache := newMetadataCache(src, time.Minute)
+	const sql = "SELECT id FROM DB.PUBLIC.T"
+
+	// First run stands in for validate_sql, second for open_sql_tab.
+	for i, want := range []bool{true, true} {
+		res := validateSQL(context.Background(), cache, sql)
+		if res.SchemaAware != want {
+			t.Fatalf("run %d: SchemaAware = %v, want %v (reason: %q)", i, res.SchemaAware, want, res.SchemaAwareSkippedReason)
+		}
+	}
+
+	if got := src.databases.Load(); got != 1 {
+		t.Errorf("ListDatabases called %d times across two runs, want 1", got)
+	}
+	if got := src.schemas.Load(); got != 1 {
+		t.Errorf("ListSchemas called %d times across two runs, want 1", got)
+	}
+	if got := src.objects.Load(); got != 1 {
+		t.Errorf("ListObjects called %d times across two runs, want 1", got)
+	}
+	if got := src.columns.Load(); got != 1 {
+		t.Errorf("GetTableColumnsWithTypes called %d times across two runs, want 1", got)
+	}
+}
+
 // waitFor polls cond until true or a short deadline, avoiding a fixed sleep.
 func waitFor(t *testing.T, cond func() bool) {
 	t.Helper()
