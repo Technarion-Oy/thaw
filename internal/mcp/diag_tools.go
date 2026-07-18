@@ -36,27 +36,29 @@ type formatSqlInput struct {
 // These tools expose Thaw's sqleditor engine to external AI clients for
 // iterative SQL refinement against real schema before delivering SQL to a
 // tab or notebook.
-func registerDiagTools(srv *mcpsdk.Server, client *snowflake.Client) {
+//
+// cache is the session's shared metadataCache (built once in buildServer and
+// passed to every diagnostics-running tool), so an AI client refining SQL in a
+// tight loop — including a validate_sql → open_sql_tab handoff across tools —
+// does not re-issue identical databases/schemas/objects/column/FK queries
+// against the live account within the cache window (issue #355). It is nil when
+// the session has no Snowflake connection.
+func registerDiagTools(srv *mcpsdk.Server, cache *metadataCache) {
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
 		Name:        "validate_sql",
-		Description: "Run the SQL diagnostics pipeline and return structured markers (errors and warnings). These approximate the Thaw editor's diagnostics and may differ from what the editor shows for the same SQL — the editor layers an incremental, offline-first catalog warm-up on top that this tool does not. Phase 1 (syntax, patterns, datatypes) always runs. Phase 2 (schema-aware table existence, semantics, bare column refs) runs best-effort when a Snowflake connection is available.",
+		Description: "Run the SQL diagnostics pipeline and return structured markers (errors and warnings) plus a schemaAware flag. These approximate the Thaw editor's diagnostics and may differ from what the editor shows for the same SQL — the editor layers an incremental, offline-first catalog warm-up on top that this tool does not. Phase 1 (syntax, patterns, datatypes) always runs. Phase 2 (schema-aware table existence, semantics, bare column refs) runs best-effort when a Snowflake connection is available: schemaAware is true when it ran, and false (with schemaAwareSkippedReason set) when there was no connection or a metadata fetch failed — so an empty markers list means 'phase 2 ran and found nothing' only when schemaAware is true.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in validateSqlInput) (*mcpsdk.CallToolResult, any, error) {
-		markers := validateSQL(ctx, client, in.SQL)
-		// Ensure non-nil so JSON serializes as [] not null.
-		if markers == nil {
-			markers = []sqleditor.DiagMarker{}
-		}
-		return jsonResult(markers), nil, nil
+		return jsonResult(validateSQL(ctx, cache, in.SQL)), nil, nil
 	})
 
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
 		Name:        "suggest_join_conditions",
 		Description: "Suggest JOIN ON/USING conditions for two tables based on foreign keys, primary keys, and type-compatible same-name columns.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in joinSuggestInput) (*mcpsdk.CallToolResult, any, error) {
-		if client == nil {
+		if cache == nil {
 			return nil, nil, fmt.Errorf("no Snowflake connection available")
 		}
-		conditions, err := suggestJoinConditions(ctx, client, in.TableA, in.TableB)
+		conditions, err := suggestJoinConditions(ctx, cache, in.TableA, in.TableB)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -108,34 +110,61 @@ func validateCaseParam(param, value string) error {
 	return nil
 }
 
+// validateSqlResult is the structured payload the validate_sql tool returns. It
+// wraps the marker list with a schemaAware flag so a client can distinguish
+// "phase 2 ran and found nothing" (SchemaAware == true, empty Markers) from
+// "phase 2 was skipped" (SchemaAware == false) — the latter carrying a reason
+// (no connection, or a metadata fetch error). See issue #355: previously a
+// single ListDatabases failure silently dropped all phase-2 markers with only a
+// Debug log, giving the client no signal.
+type validateSqlResult struct {
+	// Markers is never nil, so it serializes as [] not null.
+	Markers     []sqleditor.DiagMarker `json:"markers"`
+	SchemaAware bool                   `json:"schemaAware"`
+	// SchemaAwareSkippedReason explains why phase 2 did not run; empty when it did.
+	SchemaAwareSkippedReason string `json:"schemaAwareSkippedReason,omitempty"`
+}
+
 // validateSQL runs the SQL diagnostics pipeline for the validate_sql tool. It
 // delegates to the shared orchestrator sqleditor.Diagnose, which owns the phase
 // ordering and table-ref resolution for both this MCP path and (in semantics)
 // the frontend editor — see internal/sqleditor/orchestrator.go and #354. Phase 1
 // (pure validations) always runs; phase 2 (schema-aware) runs best-effort when a
-// Snowflake client is available. A non-fatal phase-2 error is logged and only the
-// phase-1 markers are returned.
-func validateSQL(ctx context.Context, client *snowflake.Client, sql string) []sqleditor.DiagMarker {
+// metadata cache (backed by a Snowflake client) is available. A non-fatal
+// phase-2 error is logged, only the phase-1 markers are returned, and the result
+// reports schemaAware=false with the reason so the caller isn't left guessing.
+func validateSQL(ctx context.Context, cache *metadataCache, sql string) validateSqlResult {
 	var provider sqleditor.SchemaProvider
-	if client != nil {
-		provider = &clientSchemaProvider{client: client}
+	if cache != nil {
+		provider = &clientSchemaProvider{cache: cache}
 	}
 	markers, err := sqleditor.Diagnose(ctx, provider, sql)
-	if err != nil {
-		logger.L.Debug("mcp validate_sql phase-2 skipped", "err", err)
+	if markers == nil {
+		markers = []sqleditor.DiagMarker{}
 	}
-	return markers
+	res := validateSqlResult{Markers: markers}
+	switch {
+	case provider == nil:
+		res.SchemaAwareSkippedReason = "no Snowflake connection available"
+	case err != nil:
+		logger.L.Debug("mcp validate_sql phase-2 skipped", "err", err)
+		res.SchemaAwareSkippedReason = err.Error()
+	default:
+		res.SchemaAware = true
+	}
+	return res
 }
 
-// clientSchemaProvider adapts a *snowflake.Client to sqleditor.SchemaProvider so
-// the orchestrator can gather catalog metadata without importing snowflake. Each
-// method maps snowflake types to their sqleditor equivalents.
+// clientSchemaProvider adapts a metadataCache to sqleditor.SchemaProvider so the
+// orchestrator can gather catalog metadata without importing snowflake. Each
+// method maps snowflake types to their sqleditor equivalents; reads route
+// through the cache so repeated diagnostics runs reuse metadata (issue #355).
 type clientSchemaProvider struct {
-	client *snowflake.Client
+	cache *metadataCache
 }
 
 func (p *clientSchemaProvider) SessionContext(ctx context.Context) (sqleditor.SessionContext, error) {
-	sc, err := p.client.GetSessionContext(ctx)
+	sc, err := p.cache.SessionContext(ctx)
 	if err != nil {
 		return sqleditor.SessionContext{}, err
 	}
@@ -143,15 +172,15 @@ func (p *clientSchemaProvider) SessionContext(ctx context.Context) (sqleditor.Se
 }
 
 func (p *clientSchemaProvider) ListDatabases(ctx context.Context) ([]string, error) {
-	return p.client.ListDatabases(ctx)
+	return p.cache.ListDatabases(ctx)
 }
 
 func (p *clientSchemaProvider) ListSchemas(ctx context.Context, database string) ([]string, error) {
-	return p.client.ListSchemas(ctx, database)
+	return p.cache.ListSchemas(ctx, database)
 }
 
 func (p *clientSchemaProvider) ListObjects(ctx context.Context, database, schema string) ([]sqleditor.StoreObject, error) {
-	objs, err := p.client.ListObjects(ctx, database, schema)
+	objs, err := p.cache.ListObjects(ctx, database, schema)
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +188,7 @@ func (p *clientSchemaProvider) ListObjects(ctx context.Context, database, schema
 }
 
 func (p *clientSchemaProvider) TableColumns(ctx context.Context, database, schema, name string) ([]sqleditor.ColInfo, error) {
-	cols, err := p.client.GetTableColumnsWithTypes(ctx, database, schema, name)
+	cols, err := p.cache.GetTableColumnsWithTypes(ctx, database, schema, name)
 	if err != nil {
 		return nil, err
 	}
@@ -169,8 +198,11 @@ func (p *clientSchemaProvider) TableColumns(ctx context.Context, database, schem
 // suggestJoinConditions computes JOIN ON suggestions for two tables.
 // Self-joins (table_a == table_b) are supported — column entries are built
 // per-ref without deduplication so ComputeJoinOnConditions sees both sides.
-func suggestJoinConditions(ctx context.Context, client *snowflake.Client, tableA, tableB string) ([]sqleditor.JoinCondition, error) {
-	sc, err := client.GetSessionContext(ctx)
+// Column and FK reads route through the shared metadataCache, so a suggestion
+// following a validate_sql call for the same tables reuses their metadata
+// (issue #355).
+func suggestJoinConditions(ctx context.Context, cache *metadataCache, tableA, tableB string) ([]sqleditor.JoinCondition, error) {
+	sc, err := cache.SessionContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +218,7 @@ func suggestJoinConditions(ctx context.Context, client *snowflake.Client, tableA
 	// Build column entries per-ref (no deduplication — self-joins need both).
 	var colEntries []sqleditor.ColEntry
 	for _, ref := range resolvedRefs {
-		cols, err := client.GetTableColumnsWithTypes(ctx, ref.DB, ref.Schema, ref.Name)
+		cols, err := cache.GetTableColumnsWithTypes(ctx, ref.DB, ref.Schema, ref.Name)
 		if err != nil {
 			return nil, fmt.Errorf("describe %s.%s.%s: %w", ref.DB, ref.Schema, ref.Name, err)
 		}
@@ -201,7 +233,7 @@ func suggestJoinConditions(ctx context.Context, client *snowflake.Client, tableA
 	// Gather foreign key info.
 	var fkEntries []sqleditor.TableFKEntry
 	for _, ref := range resolvedRefs {
-		fks, err := client.GetTableForeignKeys(ctx, ref.DB, ref.Schema, ref.Name)
+		fks, err := cache.GetTableForeignKeys(ctx, ref.DB, ref.Schema, ref.Name)
 		if err != nil {
 			// FKs are best-effort — the suggestion engine can still use
 			// type-compatible same-name columns without FK data.

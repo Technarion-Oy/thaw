@@ -11,7 +11,6 @@ import (
 
 	"thaw/internal/config"
 	"thaw/internal/logger"
-	"thaw/internal/snowflake"
 	"thaw/internal/sqleditor"
 )
 
@@ -31,7 +30,11 @@ type OpenSqlTabPayload struct {
 
 // registerTabTools wires the tab-delivery tools onto srv. If emit is nil
 // (e.g. in tests without a Wails runtime), no tools are registered.
-func registerTabTools(srv *mcpsdk.Server, client *snowflake.Client, emit func(string, interface{})) {
+// cache is the session's shared metadataCache (see registerDiagTools); nil when
+// the session has no Snowflake connection. open_sql_tab runs the same
+// diagnostics pipeline as validate_sql, so sharing the cache means delivering
+// already-validated SQL to a tab reuses the metadata just fetched (issue #355).
+func registerTabTools(srv *mcpsdk.Server, cache *metadataCache, emit func(string, interface{})) {
 	if emit == nil {
 		return
 	}
@@ -62,11 +65,9 @@ func registerTabTools(srv *mcpsdk.Server, client *snowflake.Client, emit func(st
 		// Format before validation so marker positions match the displayed text.
 		formatted := sqleditor.ApplyCasing(in.SQL, prefs.KeywordCase, prefs.IdentifierCase, prefs.FunctionCase)
 
-		// Run the full diagnostics pipeline.
-		markers := validateSQL(ctx, client, formatted)
-		if markers == nil {
-			markers = []sqleditor.DiagMarker{}
-		}
+		// Run the full diagnostics pipeline. validateSQL guarantees a non-nil
+		// Markers slice; the schemaAware flag is not surfaced to the tab UI.
+		markers := validateSQL(ctx, cache, formatted).Markers
 
 		// Emit the event to the frontend. Recover from panics so that a
 		// torn-down Wails context during shutdown doesn't kill the MCP

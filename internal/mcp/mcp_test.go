@@ -457,21 +457,28 @@ func TestAllowedDDLKinds(t *testing.T) {
 // without a live Snowflake connection.
 func TestValidateSqlPureMarkers(t *testing.T) {
 	// Unmatched parenthesis produces a syntax error marker.
-	markers := validateSQL(context.Background(), nil, "SELECT (1")
-	if len(markers) == 0 {
+	res := validateSQL(context.Background(), nil, "SELECT (1")
+	if len(res.Markers) == 0 {
 		t.Fatal("expected at least one diagnostic marker for unmatched paren, got 0")
 	}
 	// All markers from the pure phase should have Severity 8 (Error) or 4 (Warning).
-	for i, m := range markers {
+	for i, m := range res.Markers {
 		if m.Severity != 8 && m.Severity != 4 {
 			t.Errorf("marker[%d].Severity = %d, want 8 or 4", i, m.Severity)
 		}
 	}
+	// With a nil cache, phase 2 cannot run — the result must say so.
+	if res.SchemaAware {
+		t.Error("SchemaAware = true with nil cache, want false")
+	}
+	if res.SchemaAwareSkippedReason == "" {
+		t.Error("SchemaAwareSkippedReason is empty with nil cache, want a reason")
+	}
 }
 
-// TestValidateSqlEmptyArrayNotNull verifies that clean SQL returns JSON "[]"
-// (not "null") through the tool handler, so external clients don't need to
-// special-case nil slices.
+// TestValidateSqlEmptyArrayNotNull verifies that clean SQL returns a result
+// whose markers field is an empty array "[]" (not "null") through the tool
+// handler, so external clients don't need to special-case nil slices.
 func TestValidateSqlEmptyArrayNotNull(t *testing.T) {
 	srv := buildServer(nil, ExecutionModeMetadata, SessionConfig{}, nil, nil, nil, nil)
 	handler := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil)
@@ -494,8 +501,19 @@ func TestValidateSqlEmptyArrayNotNull(t *testing.T) {
 		t.Fatalf("CallTool: %v", err)
 	}
 	text := extractText(t, res)
-	if strings.TrimSpace(text) != "[]" {
-		t.Errorf("expected empty array [], got: %s", text)
+	var out validateSqlResult
+	if err := json.Unmarshal([]byte(text), &out); err != nil {
+		t.Fatalf("payload is not valid validateSqlResult JSON: %v (%s)", err, text)
+	}
+	if out.Markers == nil {
+		t.Errorf("markers serialized as null, want []")
+	}
+	if len(out.Markers) != 0 {
+		t.Errorf("expected no markers for clean SQL, got %d", len(out.Markers))
+	}
+	// No connection in this test, so phase 2 must report as skipped.
+	if out.SchemaAware {
+		t.Errorf("SchemaAware = true with nil client, want false")
 	}
 }
 
@@ -636,9 +654,13 @@ func TestValidateSqlToolSSE(t *testing.T) {
 		t.Fatalf("CallTool: %v", err)
 	}
 	text := extractText(t, res)
-	// Result should be a JSON array of markers.
-	if !strings.HasPrefix(strings.TrimSpace(text), "[") {
-		t.Errorf("expected JSON array, got: %.80s", text)
+	// Result should be a validateSqlResult object carrying markers.
+	var out validateSqlResult
+	if err := json.Unmarshal([]byte(text), &out); err != nil {
+		t.Fatalf("payload is not valid validateSqlResult JSON: %v (%s)", err, text)
+	}
+	if len(out.Markers) == 0 {
+		t.Errorf("expected at least one marker for unmatched paren, got 0")
 	}
 }
 
