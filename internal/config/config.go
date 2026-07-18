@@ -52,7 +52,8 @@ type OAuthConfig struct {
 }
 
 // AIConfig holds AI provider settings.
-// APIKey is stored in ~/.config/thaw/config.json (mode 0600).
+// APIKey is never persisted to config.json — it is scrubbed on save and kept in
+// the OS secure store (see internal/secrets and secretsync.go).
 type AIConfig struct {
 	Provider     string `json:"provider"` // "openai" | "google" | "ollama"
 	APIKey       string `json:"apiKey"`
@@ -70,12 +71,13 @@ type SnowparkConfig struct {
 }
 
 // PipRegistryCredential holds Basic Auth credentials for a single pip registry URL.
-// The password is stored in config.json (mode 0600) and embedded into the URL
-// at pip-call time — no keychain or .netrc file writes are performed.
+// The password is never persisted to config.json — it is scrubbed on save and
+// kept in the OS secure store (see internal/secrets), then hydrated and embedded
+// into the registry URL at pip-call time. No .netrc file writes are performed.
 type PipRegistryCredential struct {
 	Registry string `json:"registry"` // URL the credentials apply to
 	Username string `json:"username"`
-	Password string `json:"password"` // stored in config.json (0600); embedded in URL at pip-call time
+	Password string `json:"password"` // scrubbed from config.json; stored in the OS secure store, embedded in URL at pip-call time
 }
 
 // PipRegistryConfig holds corporate/private pip registry settings.
@@ -505,12 +507,14 @@ type UpdateCheckState struct {
 	ReleasePageURL string `json:"releasePageURL"`
 }
 
-// MCPSessionCredential holds the persisted port and auth token for an MCP
-// session so that restarting Thaw and re-launching the same session label
-// reuses the same URL, keeping external AI client configs valid.
+// MCPSessionCredential holds the persisted port (config.json) and auth token
+// for an MCP session so that restarting Thaw and re-launching the same session
+// label reuses the same URL, keeping external AI client configs valid. The token
+// is never persisted to config.json — it is scrubbed on save and kept in the OS
+// secure store (see internal/secrets and secretsync.go); only the port persists here.
 type MCPSessionCredential struct {
 	Port  int    `json:"port"`
-	Token string `json:"token"`
+	Token string `json:"token"` // scrubbed from config.json; stored in the OS secure store
 }
 
 // AppConfig is the on-disk configuration for Thaw.
@@ -561,11 +565,15 @@ func Load() (*AppConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	if migrateSecretsToStore(cfg) {
-		// Best-effort: scrub the plaintext secrets from disk now that they are
-		// in the store. A failure here just leaves migration to retry next load.
+	if hasPlaintextSecret(cfg) {
+		// Legacy plaintext config.json: persist the secrets to the store and
+		// scrub them from disk. Best-effort — a failure just leaves the
+		// plaintext in place for the next load to retry (never lost).
 		_ = save(cfg)
 	}
+	// Never hand back a secret the store doesn't own; the store is authoritative
+	// and consumers hydrate from it at their IPC seam.
+	blankSecrets(cfg)
 	return cfg, nil
 }
 
@@ -585,12 +593,11 @@ func Update(fn func(*AppConfig) error) error {
 	if err != nil {
 		return err
 	}
-	// Move any leftover plaintext secrets into the store before fn runs, so the
-	// scrubbing save below can never drop a not-yet-migrated secret.
-	migrateSecretsToStore(cfg)
 	if err := fn(cfg); err != nil {
 		return err
 	}
+	// save persists any secret set on cfg to the store (without overwriting an
+	// existing store value) and scrubs the disk copy — see buildDiskConfig.
 	return save(cfg)
 }
 
@@ -637,12 +644,11 @@ func save(cfg *AppConfig) error {
 	if err != nil {
 		return err
 	}
-	// Persist any secret set on the struct into the OS store, then marshal a
-	// scrubbed copy so Thaw-owned secrets never reach config.json — the
-	// authoritative copy lives in the OS secure store (see secretsync.go).
-	persistSecrets(cfg)
-	scrubbed := scrubbedCopy(cfg)
-	data, err := json.MarshalIndent(&scrubbed, "", "  ")
+	// buildDiskConfig persists cfg's secrets to the OS store (never overwriting a
+	// value already there) and returns a copy with those secrets scrubbed, so
+	// Thaw-owned secrets never reach config.json. See secretsync.go.
+	diskCfg := buildDiskConfig(cfg)
+	data, err := json.MarshalIndent(&diskCfg, "", "  ")
 	if err != nil {
 		return err
 	}

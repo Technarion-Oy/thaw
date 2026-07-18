@@ -1124,6 +1124,14 @@ func (s *Service) ResetPipRegistryConfig() error {
 
 // hydratePipSecrets fills in each credential password and the proxy password
 // from the OS secure store. Missing secrets are left empty.
+//
+// It mutates rc in place, including rc.Credentials elements. Because a
+// `rc := cfg.PipRegistry` copy shares the slice backing array, this writes
+// passwords back into the underlying config.AppConfig too. That is harmless at
+// every current call site (each operates on a fresh, function-local
+// config.Load() result that is discarded), but callers must NOT hydrate a cfg
+// they intend to persist afterward — the plaintext would be scrubbed on save,
+// so it would be a wasted round-trip, not a leak.
 func hydratePipSecrets(rc *config.PipRegistryConfig) {
 	for i := range rc.Credentials {
 		if pw, err := secrets.Get(secrets.PipCredentialKey(rc.Credentials[i].Registry)); err == nil {

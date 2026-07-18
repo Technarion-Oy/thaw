@@ -150,3 +150,67 @@ func TestDeleteClearsSecretOnEmptySave(t *testing.T) {
 		t.Fatalf("store value clobbered by unrelated save: %q", got)
 	}
 }
+
+// TestDoesNotClobberStoreWithStalePlaintext guards the dotfile-sync / restore
+// case: a config.json carrying a stale plaintext secret must NOT overwrite a
+// newer value already held in the OS store. Only the disk copy is scrubbed.
+func TestDoesNotClobberStoreWithStalePlaintext(t *testing.T) {
+	isolate(t)
+
+	// The store already holds the current (newer) secret, e.g. set on this
+	// machine, while config.json below carries a stale value from another host.
+	if err := secrets.Set(secrets.KeyAIAPIKey, "sk-current"); err != nil {
+		t.Fatalf("seed store: %v", err)
+	}
+	if err := secrets.Set(secrets.PipCredentialKey("https://pypi.example.com"), "pw-current"); err != nil {
+		t.Fatalf("seed store: %v", err)
+	}
+
+	dir, _ := os.UserConfigDir()
+	cfgDir := filepath.Join(dir, "thaw")
+	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	stale := `{
+	  "ai": {"provider": "openai", "apiKey": "sk-stale", "enabled": true},
+	  "pipRegistry": {"credentials": [{"registry": "https://pypi.example.com", "username": "u", "password": "pw-stale"}]}
+	}`
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.json"), []byte(stale), 0o600); err != nil {
+		t.Fatalf("write stale config: %v", err)
+	}
+
+	if _, err := Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// The store keeps the newer values — never overwritten from the stale disk.
+	if got, _ := secrets.Get(secrets.KeyAIAPIKey); got != "sk-current" {
+		t.Fatalf("AI key clobbered by stale config.json: %q, want sk-current", got)
+	}
+	if got, _ := secrets.Get(secrets.PipCredentialKey("https://pypi.example.com")); got != "pw-current" {
+		t.Fatalf("pip credential clobbered by stale config.json: %q, want pw-current", got)
+	}
+
+	// The stale plaintext is still scrubbed from disk.
+	blob, _ := json.Marshal(rawConfig(t))
+	if strings.Contains(string(blob), "sk-stale") || strings.Contains(string(blob), "pw-stale") {
+		t.Fatalf("stale secrets not scrubbed from disk: %s", blob)
+	}
+}
+
+// TestLoadDoesNotLeakSecretFields verifies Load never hands back a secret value
+// in the config struct — consumers must hydrate from the store instead.
+func TestLoadDoesNotLeakSecretFields(t *testing.T) {
+	isolate(t)
+
+	if err := secrets.Set(secrets.KeyAIAPIKey, "sk-live"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.AI.APIKey != "" {
+		t.Fatalf("Load leaked a secret field: %q", cfg.AI.APIKey)
+	}
+}

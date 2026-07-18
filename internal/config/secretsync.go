@@ -6,117 +6,126 @@ import "thaw/internal/secrets"
 
 // This file keeps Thaw-owned secrets out of config.json. The secret-bearing
 // struct fields (AI.APIKey, OAuth client secrets, pip passwords, MCP tokens) are
-// treated as in-memory transport only: they are never written to disk, and the
-// authoritative copy lives in the OS secure store (see internal/secrets).
+// treated as in-memory transport only: the authoritative copy lives in the OS
+// secure store (see internal/secrets).
 //
-//   - save() marshals a scrubbed copy, so a secret can never leak to config.json
-//     even if a caller sets the field and saves without going through the store.
-//   - load() runs a one-time migration: any plaintext secret still present in an
-//     older config.json is moved into the OS store, and Load() then re-saves the
-//     scrubbed file. After migration the fields are empty on disk, so the hot
-//     load path performs zero secure-store access.
+//   - save() writes what buildDiskConfig returns: each secret is blanked on disk
+//     only once it is safely in the store. The store is NEVER overwritten from a
+//     value read out of config.json, so a stale/synced/restored config.json can't
+//     clobber a newer secret held in the OS store.
+//   - Load() migrates a legacy plaintext config.json once (persist to store, then
+//     scrub the file) and never hands back a secret the store doesn't own.
+//   - Authoritative updates (the user changing a secret in Settings) go through
+//     the owning IPC seam via secrets.Set/Delete, which DO overwrite. buildDiskConfig
+//     is only the migration/first-write safety net, never the update path.
 //
-// Reads and writes of the actual secret values are routed through internal/secrets
-// at each consumer/IPC seam, not here — this file only guarantees the disk file
-// stays clean.
+// After migration the fields are empty on disk, so the hot save/load paths perform
+// zero secure-store access (buildDiskConfig only touches the store for a non-empty
+// secret field, which occurs only right after a handler populated one).
 
-// persistSecrets writes every non-empty secret field in cfg to the OS secure
-// store, so a secret set on the config struct is never lost when save() scrubs
-// it from disk. It performs no store access for empty fields, so an unrelated
-// save (feature flags, editor prefs, …) — whose secret fields are always empty
-// after load's scrub — touches the store zero times.
-//
-// It intentionally never deletes: clearing a secret (empty value) is done
-// explicitly by the owning IPC handler via secrets.Delete, because save() has
-// no view of the previous value to diff against.
-func persistSecrets(cfg *AppConfig) {
-	set := func(key, val string) {
-		if val == "" {
-			return
-		}
-		if err := secrets.Set(key, val); err != nil {
-			// Keep the plaintext scrub anyway; the handler-level store write is
-			// the authoritative path and will have surfaced the error already.
-			_ = err
+// secretStored reports whether the OS store already holds a value for key.
+func secretStored(key string) bool {
+	_, err := secrets.Get(key)
+	return err == nil
+}
+
+// hasPlaintextSecret reports whether cfg carries any non-empty secret field —
+// i.e. a legacy plaintext config.json that must be persisted to the store and
+// scrubbed from disk on the next save.
+func hasPlaintextSecret(cfg *AppConfig) bool {
+	if cfg.AI.APIKey != "" ||
+		cfg.OAuth.GithubClientSecret != "" ||
+		cfg.OAuth.GitlabClientSecret != "" ||
+		cfg.PipRegistry.ProxyPassword != "" {
+		return true
+	}
+	for _, c := range cfg.PipRegistry.Credentials {
+		if c.Password != "" {
+			return true
 		}
 	}
-	set(secrets.KeyAIAPIKey, cfg.AI.APIKey)
-	set(secrets.KeyGitHubClientSecret, cfg.OAuth.GithubClientSecret)
-	set(secrets.KeyGitLabClientSecret, cfg.OAuth.GitlabClientSecret)
-	set(secrets.KeyPipProxyPassword, cfg.PipRegistry.ProxyPassword)
+	for _, cred := range cfg.MCPCredentials {
+		if cred.Token != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// blankSecrets zeroes every secret field on cfg in place. Load uses it so a
+// caller never receives a secret value the store doesn't own: the store is
+// authoritative, and a stale config.json must not shadow it.
+func blankSecrets(cfg *AppConfig) {
+	cfg.AI.APIKey = ""
+	cfg.OAuth.GithubClientSecret = ""
+	cfg.OAuth.GitlabClientSecret = ""
+	cfg.PipRegistry.ProxyPassword = ""
 	for i := range cfg.PipRegistry.Credentials {
-		c := cfg.PipRegistry.Credentials[i]
-		set(secrets.PipCredentialKey(c.Registry), c.Password)
+		cfg.PipRegistry.Credentials[i].Password = ""
 	}
 	for label, cred := range cfg.MCPCredentials {
-		set(secrets.MCPTokenKey(label), cred.Token)
+		if cred.Token != "" {
+			cred.Token = ""
+			cfg.MCPCredentials[label] = cred
+		}
 	}
 }
 
-// scrubbedCopy returns a value copy of cfg with every secret field blanked. The
-// collection-valued secrets (pip credentials, MCP tokens) are copied before
-// blanking so the caller's in-memory config keeps its values.
-func scrubbedCopy(cfg *AppConfig) AppConfig {
+// buildDiskConfig persists cfg's secrets into the OS store and returns the
+// AppConfig to write to disk. A secret is blanked on disk ONLY once it is safely
+// in the store — either already present (never overwritten, so a stale synced
+// config.json can't clobber a newer store value) or written successfully now. A
+// secret that could not be stored is left in the returned config so it is never
+// lost; the 0600 file is the fallback and migration retries on the next save.
+//
+// The collection-valued secrets (pip credentials, MCP tokens) are copied before
+// blanking so the caller's in-memory config is never mutated.
+func buildDiskConfig(cfg *AppConfig) AppConfig {
 	c := *cfg
-	c.AI.APIKey = ""
-	c.OAuth.GithubClientSecret = ""
-	c.OAuth.GitlabClientSecret = ""
-	c.PipRegistry.ProxyPassword = ""
+
+	// stored reports whether it is safe to blank this secret on disk: true when
+	// the value is empty, already in the store, or written to the store now.
+	stored := func(key, val string) bool {
+		if val == "" {
+			return true
+		}
+		if secretStored(key) {
+			return true // present already — do NOT overwrite from disk
+		}
+		return secrets.Set(key, val) == nil
+	}
+
+	if stored(secrets.KeyAIAPIKey, cfg.AI.APIKey) {
+		c.AI.APIKey = ""
+	}
+	if stored(secrets.KeyGitHubClientSecret, cfg.OAuth.GithubClientSecret) {
+		c.OAuth.GithubClientSecret = ""
+	}
+	if stored(secrets.KeyGitLabClientSecret, cfg.OAuth.GitlabClientSecret) {
+		c.OAuth.GitlabClientSecret = ""
+	}
+	if stored(secrets.KeyPipProxyPassword, cfg.PipRegistry.ProxyPassword) {
+		c.PipRegistry.ProxyPassword = ""
+	}
 	if len(cfg.PipRegistry.Credentials) > 0 {
 		creds := make([]PipRegistryCredential, len(cfg.PipRegistry.Credentials))
 		copy(creds, cfg.PipRegistry.Credentials)
 		for i := range creds {
-			creds[i].Password = ""
+			if stored(secrets.PipCredentialKey(creds[i].Registry), creds[i].Password) {
+				creds[i].Password = ""
+			}
 		}
 		c.PipRegistry.Credentials = creds
 	}
 	if len(cfg.MCPCredentials) > 0 {
 		m := make(map[string]MCPSessionCredential, len(cfg.MCPCredentials))
-		for k, v := range cfg.MCPCredentials {
-			v.Token = ""
-			m[k] = v
+		for label, cred := range cfg.MCPCredentials {
+			if stored(secrets.MCPTokenKey(label), cred.Token) {
+				cred.Token = ""
+			}
+			m[label] = cred
 		}
 		c.MCPCredentials = m
 	}
 	return c
-}
-
-// migrateSecretsToStore moves any plaintext secret still embedded in cfg into
-// the OS secure store. It returns true when the disk file needs a scrubbing
-// re-save — either because a value was newly migrated, or because a stale
-// plaintext copy remains on disk while the store already holds the secret.
-//
-// It performs no secure-store access for empty fields, so once migration has
-// run and config.json is scrubbed, subsequent loads are free of store calls.
-func migrateSecretsToStore(cfg *AppConfig) (needsScrub bool) {
-	move := func(key, val string) {
-		if val == "" {
-			return
-		}
-		// A stale plaintext value on disk but already present in the store: no
-		// write needed, but the disk copy must be scrubbed.
-		if _, err := secrets.Get(key); err == nil {
-			needsScrub = true
-			return
-		}
-		if err := secrets.Set(key, val); err != nil {
-			// Leave the plaintext in place rather than lose the secret; it will
-			// be retried on the next load.
-			return
-		}
-		needsScrub = true
-	}
-
-	move(secrets.KeyAIAPIKey, cfg.AI.APIKey)
-	move(secrets.KeyGitHubClientSecret, cfg.OAuth.GithubClientSecret)
-	move(secrets.KeyGitLabClientSecret, cfg.OAuth.GitlabClientSecret)
-	move(secrets.KeyPipProxyPassword, cfg.PipRegistry.ProxyPassword)
-	for i := range cfg.PipRegistry.Credentials {
-		c := cfg.PipRegistry.Credentials[i]
-		move(secrets.PipCredentialKey(c.Registry), c.Password)
-	}
-	for label, cred := range cfg.MCPCredentials {
-		move(secrets.MCPTokenKey(label), cred.Token)
-	}
-	return needsScrub
 }

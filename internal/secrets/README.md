@@ -30,8 +30,9 @@ This package owns **only Thaw-created secrets**. It does **not** touch `~/.snowf
 
 `internal/config` guarantees the on-disk `config.json` never holds a secret (see `internal/config/secretsync.go`):
 
-- **`save()`** calls `persistSecrets` (writes any non-empty secret field to this store) then marshals a **scrubbed copy** — so a secret can never leak to `config.json`.
-- **`Load()`** runs a one-time **migration**: plaintext secrets left in an older `config.json` are moved into this store, then the scrubbed file is written back. After migration the fields are empty on disk, so the hot load path performs **zero** secure-store access.
+- **`save()`** writes what `buildDiskConfig` returns: each secret is stored here and blanked on disk only once it is safely in the store. The store is **never overwritten** from a value read out of `config.json` (it writes only when this store lacks the key), so a stale/synced `config.json` can't clobber a newer secret already held here.
+- **`Load()`** runs a one-time **migration**: plaintext secrets left in an older `config.json` are moved into this store, then the scrubbed file is written back, and the config struct never hands a secret value back to callers. After migration the fields are empty on disk, so the hot load path performs **zero** secure-store access.
+- **Authoritative updates** (the user changing a secret in Settings) call `Set`/`Delete` directly at the write seam below — those *do* overwrite; `buildDiskConfig` is only the migration/first-write safety net.
 
 The actual secret **values** are read/written at each consumer's IPC seam, not in `config`:
 
