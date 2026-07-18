@@ -24,12 +24,14 @@ func (a *App) GetAIConfig() config.AIConfig {
 }
 
 // SaveAIConfig persists AI provider settings. The API key is written to the OS
-// secure store; the config.json copy is always scrubbed on save.
+// secure store; the config.json copy is scrubbed on save. The key is NOT blanked
+// up front — passing it through to config.Update lets buildDiskConfig scrub it
+// only once it is confirmed safely stored, so a failed store write (locked
+// keychain, dbus unavailable, …) keeps the key on disk rather than losing it.
 func (a *App) SaveAIConfig(aiCfg config.AIConfig) error {
 	if err := storeOrDelete(secrets.KeyAIAPIKey, aiCfg.APIKey); err != nil {
 		logger.L.Warn("secrets: failed to store AI API key", "err", err)
 	}
-	aiCfg.APIKey = ""
 	return config.Update(func(cfg *config.AppConfig) error {
 		cfg.AI = aiCfg
 		return nil

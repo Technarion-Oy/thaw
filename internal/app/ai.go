@@ -45,10 +45,17 @@ func (a *App) GetAISuggestion(prefix string) string {
 	if err != nil {
 		return ""
 	}
-	// The API key lives in the OS secure store, not config.json.
-	apiKey, _ := secrets.Get(secrets.KeyAIAPIKey)
-	if !cfg.AI.Enabled || (cfg.AI.Provider != "ollama" && apiKey == "") {
+	if !cfg.AI.Enabled {
 		return ""
+	}
+	// The API key lives in the OS secure store, not config.json. Only touch the
+	// store when a key is actually required (non-Ollama), so this hot inline-
+	// completion path stays keychain-free when AI is disabled or using Ollama.
+	var apiKey string
+	if cfg.AI.Provider != "ollama" {
+		if apiKey, _ = secrets.Get(secrets.KeyAIAPIKey); apiKey == "" {
+			return ""
+		}
 	}
 
 	prompt := "Complete this Snowflake SQL query. Return ONLY the completion text to insert at the cursor — no explanation, no markdown, no repetition of existing text. Keep it to 1–2 lines.\n\n" + prefix

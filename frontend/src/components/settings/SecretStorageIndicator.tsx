@@ -42,11 +42,14 @@ export function SecretStorageIndicator({ noun = "secret" }: { noun?: string }) {
 
   if (!info) return null;
 
+  // The storage location is the subject (not `noun`) so the copy reads
+  // correctly whether the caller passes a singular ("API key") or plural
+  // ("registry & proxy passwords") noun.
   if (info.secure) {
     return (
       <Text type="secondary" style={{ fontSize: 12 }}>
         <LockOutlined style={{ marginRight: 4 }} />
-        Your {noun} is stored in {info.label}.
+        {info.label} holds your {noun}.
       </Text>
     );
   }
@@ -54,7 +57,7 @@ export function SecretStorageIndicator({ noun = "secret" }: { noun?: string }) {
   return (
     <Text type="warning" style={{ fontSize: 12 }}>
       <WarningOutlined style={{ marginRight: 4 }} />
-      No OS secure store is available — your {noun} is stored in a local file
+      No OS secure store is available — a local file holds your {noun}
       {info.detail ? (
         <>
           {" "}
