@@ -17,6 +17,18 @@ import (
 // context — FROM @stg, COPY INTO t FROM @stg, PUT … @stg, GET @stg, LIST/REMOVE,
 // SELECT $1 FROM @stg/f.csv — without keyword anchoring.
 
+// hasStageRef reports whether sql contains any `@` stage reference. A `@` in
+// significant SQL is unambiguously a stage ref (strings/comments/$$ are separate
+// token kinds), so an At token anywhere means the statement touches a stage.
+func hasStageRef(sql string) bool {
+	for _, t := range sqltok.Tokenize(sql) {
+		if t.Kind == sqltok.At {
+			return true
+		}
+	}
+	return false
+}
+
 // objectsOfKind filters KnownObjects to a single kind (case-insensitive).
 func objectsOfKind(objs []ObjectRef, kind string) []ObjectRef {
 	var out []ObjectRef

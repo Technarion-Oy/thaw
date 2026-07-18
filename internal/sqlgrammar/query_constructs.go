@@ -1271,13 +1271,22 @@ func (v *Validator) selectForUpdateClause() bool {
 }
 
 // parseSetOperator matches a set operator joining two query blocks:
-// { UNION | INTERSECT | EXCEPT } [ ALL | DISTINCT ] | MINUS.
+// { UNION | INTERSECT | EXCEPT } [ ALL | DISTINCT ] [ BY NAME ] | MINUS.
+// The optional BY NAME matches by column name rather than position (GA 2025).
 func (v *Validator) parseSetOperator() bool {
 	return v.Choice(
 		func() bool {
 			return v.Sequence(
 				v.wordsValue("UNION", "INTERSECT", "EXCEPT"),
 				func() bool { return v.Optional(v.wordsValue("ALL", "DISTINCT")) },
+				func() bool {
+					return v.Optional(func() bool {
+						return v.Sequence(
+							func() bool { return v.MatchWord("BY") },
+							func() bool { return v.MatchWord("NAME") },
+						)
+					})
+				},
 			)
 		},
 		func() bool { return v.MatchWord("MINUS") },

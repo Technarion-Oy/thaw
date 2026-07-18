@@ -46,6 +46,13 @@ func ValidateAntiPatterns(sql string, stmtRanges []StatementRange) []DiagMarker 
 		// such clause at all.
 		present := sigWordSet(stripped)
 
+		// Commands Snowflake does not support at all — silent today because they sit
+		// in sqlStmtKeywords (so ValidateSyntax accepts them) yet have no grammar
+		// rule (issue #793 B19 / C).
+		if msg, ok := unsupportedCommands[firstTok]; ok {
+			markers = append(markers, diagMarkerSpan(r, msg))
+		}
+
 		markers = append(markers, checkLateralFlattenTypo(rawText, r)...)
 		markers = append(markers, checkFlattenWithoutLateral(rawText, stripped, r)...)
 		markers = append(markers, checkVariantPathColon(rawText, r)...)
@@ -165,7 +172,19 @@ func ValidateAntiPatterns(sql string, stmtRanges []StatementRange) []DiagMarker 
 	return markers
 }
 
+// unsupportedCommands maps a leading statement keyword to a message when the
+// command does not exist in Snowflake. These pass ValidateSyntax (they're in
+// sqlStmtKeywords) and have no grammar rule, so they'd otherwise be silent.
+var unsupportedCommands = map[string]string{
+	"SAVEPOINT": "Snowflake does not support SAVEPOINT. Transactions cannot be partially rolled back.",
+	"ANALYZE":   "Snowflake does not support the ANALYZE command.",
+}
+
 // knownCortexFunctions lists the recognized SNOWFLAKE.CORTEX.<name> functions.
+// The whole AISQL family (AI_COMPLETE, AI_CLASSIFY, AI_FILTER, AI_AGG, …) is
+// handled by the AI_ prefix pass-through in checkUnknownCortexFunc rather than
+// enumerated here, since Snowflake ships new AI_* functions frequently and an
+// exhaustive allowlist drifts into false positives (issue #793 A2).
 var knownCortexFunctions = map[string]bool{
 	"COMPLETE": true, "EXTRACT_ANSWER": true, "SENTIMENT": true, "SUMMARIZE": true,
 	"TRANSLATE": true, "CLASSIFY_TEXT": true, "EMBED_TEXT_768": true, "EMBED_TEXT_1024": true,
@@ -173,6 +192,14 @@ var knownCortexFunctions = map[string]bool{
 	"PARSE_DOCUMENT": true, "COUNT_TOKENS": true, "ENTITY_SENTIMENT": true,
 	"SPLIT_TEXT_RECURSIVE_CHARACTER": true, "SPLIT_TEXT_MARKDOWN_HEADER": true,
 	"AGENT_RUN": true, "DATA_AGENT_RUN": true,
+}
+
+// isKnownCortexFunc reports whether name is a recognized Cortex function. The
+// AISQL family shares the AI_ prefix and grows continually, so any AI_-prefixed
+// name passes through unflagged (issue #793 A2) — trading typo detection on those
+// names for not false-positiving every newly shipped AISQL function.
+func isKnownCortexFunc(name string) bool {
+	return knownCortexFunctions[name] || strings.HasPrefix(name, "AI_")
 }
 
 // checkLateralFlattenTypo flags `LATERALFLATTEN` (missing space).
@@ -244,7 +271,10 @@ func checkFlattenWithoutLateral(rawText, stripped string, r StatementRange) []Di
 
 // checkVariantPathColon flags a dotted `payload.field.sub` traversal that should
 // use the `:` variant-path operator. Deliberately narrow (a `payload` root) to
-// avoid false positives on ordinary qualified column references.
+// avoid false positives on ordinary qualified column references. The path
+// segments after the root may be keywords (e.g. `payload.user.name`, where USER
+// is a keyword), so they are matched as ident-like, not strictly Identifier —
+// otherwise a keyword segment silently defeated the check (issue #793 C).
 func checkVariantPathColon(rawText string, r StatementRange) []DiagMarker {
 	var out []DiagMarker
 	sig := sigTokens(rawText)
@@ -257,8 +287,8 @@ func checkVariantPathColon(rawText string, r StatementRange) []DiagMarker {
 			}
 		}
 		if sig[i].Kind == sqltok.Identifier && sig[i+1].Kind == sqltok.Dot &&
-			sig[i+2].Kind == sqltok.Identifier && sig[i+3].Kind == sqltok.Dot &&
-			sig[i+4].Kind == sqltok.Identifier &&
+			isIdent(sig[i+2]) && sig[i+3].Kind == sqltok.Dot &&
+			isIdent(sig[i+4]) &&
 			strings.ToLower(sig[i].Text(rawText)) == "payload" {
 			start, end := sig[i], sig[i+4]
 			match := rawText[start.Start:end.End]
@@ -367,6 +397,17 @@ func checkMergeClauses(rawText string, r StatementRange) []DiagMarker {
 				whenStarts = append(whenStarts, t.Start)
 			}
 		}
+	}
+	// A MERGE requires at least one WHEN {MATCHED|NOT MATCHED} clause (issue #793
+	// B15). Only flag a MERGE the grammar recognizes as structurally complete
+	// enough to reach its WHEN section — i.e. it has both INTO and USING — so a
+	// half-typed statement isn't double-reported.
+	if len(whenStarts) == 0 {
+		if hasKWPair(sig, rawText, "MERGE", "INTO") && hasKW(sig, rawText, "USING") {
+			out = append(out, diagMarkerSpan(r,
+				"MERGE requires at least one WHEN MATCHED or WHEN NOT MATCHED clause."))
+		}
+		return out
 	}
 	for i, start := range whenStarts {
 		end := len(rawText)
@@ -480,7 +521,7 @@ func checkUnknownCortexFunc(rawText string, r StatementRange) []DiagMarker {
 			// normIdent strips a quoted-identifier's double quotes, so
 			// SNOWFLAKE.CORTEX."COMPLETE"(…) resolves to COMPLETE, not "COMPLETE".
 			name := normIdent(sig[i+4].Text(rawText), true)
-			if !knownCortexFunctions[name] {
+			if !isKnownCortexFunc(name) {
 				start, end := sig[i], sig[i+4]
 				match := rawText[start.Start:end.End]
 				lines := strings.Split(rawText[:start.Start], "\n")
@@ -491,7 +532,7 @@ func checkUnknownCortexFunc(rawText string, r StatementRange) []DiagMarker {
 					EndLineNumber: line, EndColumn: col + len(match),
 					Message: "Unknown Cortex function '" + sig[i+4].Text(rawText) + "'. Known functions: COMPLETE, EXTRACT_ANSWER, " +
 						"SENTIMENT, SUMMARIZE, TRANSLATE, CLASSIFY_TEXT, EMBED_TEXT_768, EMBED_TEXT_1024, FINETUNE, SEARCH_PREVIEW, TRY_COMPLETE, " +
-						"PARSE_DOCUMENT, COUNT_TOKENS, ENTITY_SENTIMENT, SPLIT_TEXT_RECURSIVE_CHARACTER, SPLIT_TEXT_MARKDOWN_HEADER, AGENT_RUN, DATA_AGENT_RUN.",
+						"PARSE_DOCUMENT, COUNT_TOKENS, ENTITY_SENTIMENT, SPLIT_TEXT_RECURSIVE_CHARACTER, SPLIT_TEXT_MARKDOWN_HEADER, AGENT_RUN, DATA_AGENT_RUN, and the AI_* (AISQL) family.",
 					Severity: SeverityWarning,
 				})
 			}
@@ -509,13 +550,36 @@ func checkUnknownCortexFunc(rawText string, r StatementRange) []DiagMarker {
 // wired into ValidateAntiPatterns.
 
 // pivotValidAggs lists the aggregate functions Snowflake accepts in a PIVOT.
+// Snowflake does not publish an exhaustive PIVOT-specific set — any aggregate
+// (including ordered-set aggregates like PERCENTILE_CONT and MODE) is accepted —
+// so this covers the common general-purpose aggregates to avoid false-positiving
+// valid PIVOTs (issue #793 A3). The check still catches an obvious non-aggregate.
 var pivotValidAggs = map[string]bool{
-	"SUM": true, "AVG": true, "COUNT": true, "MAX": true, "MIN": true,
-	"ANY_VALUE": true, "LISTAGG": true, "MEDIAN": true,
-	"STDDEV": true, "VARIANCE": true,
+	"SUM": true, "AVG": true, "COUNT": true, "COUNT_IF": true, "MAX": true, "MIN": true,
+	"MAX_BY": true, "MIN_BY": true, "ANY_VALUE": true, "LISTAGG": true, "ARRAY_AGG": true,
+	"ARRAY_UNIQUE_AGG": true, "OBJECT_AGG": true, "MODE": true,
+	"MEDIAN": true, "PERCENTILE_CONT": true, "PERCENTILE_DISC": true,
+	"STDDEV": true, "STDDEV_POP": true, "STDDEV_SAMP": true,
+	"VARIANCE": true, "VARIANCE_POP": true, "VARIANCE_SAMP": true, "VAR_POP": true, "VAR_SAMP": true,
+	"CORR": true, "COVAR_POP": true, "COVAR_SAMP": true,
+	"BOOLAND_AGG": true, "BOOLOR_AGG": true, "BOOLXOR_AGG": true,
+	"BITAND_AGG": true, "BITOR_AGG": true, "BITXOR_AGG": true,
+	"HLL": true, "APPROX_COUNT_DISTINCT": true, "APPROX_PERCENTILE": true,
+	"KURTOSIS": true, "SKEW": true, "GROUPING": true, "GROUPING_ID": true, "SUM_IF": true,
 }
 
 // ── token helpers ────────────────────────────────────────────────────────────
+
+// hasKW reports whether keyword kw appears anywhere in the significant token
+// stream.
+func hasKW(sig []sqltok.Token, sql, kw string) bool {
+	for _, t := range sig {
+		if tokUpper(t, sql) == kw {
+			return true
+		}
+	}
+	return false
+}
 
 // hasKWPair checks if keyword kw1 is immediately followed by kw2 in the
 // significant token stream.
@@ -578,6 +642,13 @@ func extractParenContentTok(sig []sqltok.Token, sql string, kwIdx int) string {
 
 // ── diagnostic helpers ───────────────────────────────────────────────────────
 
+// wholeStatementEndCol is the end column for whole-statement warnings. The editor
+// (byteColToUtf16Col) clamps a byte column past the line to end-of-line, so this
+// large value makes the squiggle cover the statement's last line in full,
+// regardless of its length — the old hard-coded 100 truncated long lines and
+// over-ran short ones (issue #793 C).
+const wholeStatementEndCol = 1 << 20
+
 // diagMarkerSpan constructs a Warning DiagMarker covering the full statement.
 // Every pattern diagnostic is a warning (severity 4), so the severity is fixed.
 func diagMarkerSpan(r StatementRange, msg string) DiagMarker {
@@ -585,7 +656,7 @@ func diagMarkerSpan(r StatementRange, msg string) DiagMarker {
 		StartLineNumber: r.StartLine,
 		StartColumn:     1,
 		EndLineNumber:   r.EndLine,
-		EndColumn:       100,
+		EndColumn:       wholeStatementEndCol,
 		Message:         msg,
 		Severity:        4, // Warning
 	}
@@ -999,35 +1070,29 @@ func hasUsingFunctionTok(scope []sqltok.Token, sql string) bool {
 	return false
 }
 
-// containsAsofValidComparison checks whether the MATCH_CONDITION body contains
-// one of the valid comparison operators (>=, >, <=, <) and does NOT contain only
-// invalid operators (=, <>, !=).
+// containsAsofValidComparison checks whether the MATCH_CONDITION body has a valid
+// comparison operator (>=, >, <=, <) at the TOP level. Depth tracking matters:
+// a raw byte scan matched a `>` anywhere — even inside a function argument
+// (`fn(a > b) = c`) — masking a genuinely invalid `=`-only condition (issue #793
+// C). Only a depth-0 operator is the MATCH_CONDITION's own comparison.
 func containsAsofValidComparison(body string) bool {
-	for i := 0; i < len(body); i++ {
-		ch := body[i]
-		switch ch {
-		case '>':
-			if i+1 < len(body) && body[i+1] == '=' {
-				return true // >=
+	depth := 0
+	for _, t := range sqltok.Tokenize(body) {
+		switch t.Kind {
+		case sqltok.LParen:
+			depth++
+		case sqltok.RParen:
+			if depth > 0 {
+				depth--
 			}
-			return true // >
-		case '<':
-			if i+1 < len(body) && body[i+1] == '>' {
-				i++ // <> — invalid, skip past '>'
+		case sqltok.Operator:
+			if depth != 0 {
 				continue
 			}
-			if i+1 < len(body) && body[i+1] == '=' {
-				return true // <=
+			switch t.Text(body) {
+			case ">", ">=", "<", "<=":
+				return true
 			}
-			return true // <
-		case '!':
-			if i+1 < len(body) && body[i+1] == '=' {
-				i++ // != — invalid, skip past '='
-				continue
-			}
-		case '=':
-			// Bare = — invalid, skip
-			continue
 		}
 	}
 	return false

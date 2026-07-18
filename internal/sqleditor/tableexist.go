@@ -692,15 +692,22 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			// Skip built-in schemas whose objects we never fetch and so cannot
 			// existence-check: SNOWFLAKE.CORTEX (AI function namespace), plus the
 			// always-present INFORMATION_SCHEMA / ACCOUNT_USAGE views (#709).
-			// The DB itself is still validated below — suppress only when we can't
-			// prove the DB missing (no catalog data or the DB is known), so a bogus
-			// DB like BOGUS.INFORMATION_SCHEMA.T still falls through and is flagged.
-			if ft.db != "" && ft.schema != "" &&
+			alwaysPresent := ft.schema != "" &&
 				(isAlwaysPresentSchema(ft.db, ft.schema) ||
-					(strings.EqualFold(ft.db, "SNOWFLAKE") && strings.EqualFold(ft.schema, "CORTEX"))) &&
-				(len(req.KnownDatabases) == 0 ||
-					dbExists(ft.db, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq)) {
-				continue
+					(strings.EqualFold(ft.db, "SNOWFLAKE") && strings.EqualFold(ft.schema, "CORTEX")))
+			if alwaysPresent {
+				// The DB is still validated so a bogus DB (BOGUS.INFORMATION_SCHEMA.T)
+				// is flagged — but three cases trust the DB (issue #793 D6):
+				//   - ft.db == "" : a 2-part ref (information_schema.tables) targets
+				//     the implicit session DB, where INFORMATION_SCHEMA always exists.
+				//   - SNOWFLAKE   : the shared DB is always present even when
+				//     SHOW DATABASES omits it (privilege-dependent listing).
+				//   - no catalog data, or the DB is known to exist.
+				if ft.db == "" || strings.EqualFold(ft.db, "SNOWFLAKE") ||
+					len(req.KnownDatabases) == 0 ||
+					dbExists(ft.db, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
+					continue
+				}
 			}
 			if _, isCTE := cteNames[compareTable]; isCTE {
 				continue

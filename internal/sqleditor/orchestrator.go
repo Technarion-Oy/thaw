@@ -94,8 +94,13 @@ func diagnoseSchemaAware(ctx context.Context, provider SchemaProvider, sql strin
 
 	refs := ParseJoinTables(sql)
 
-	// Short-circuit: no table references → nothing schema-aware to check.
-	if len(refs) == 0 {
+	// Short-circuit: no table references AND no stage references → nothing
+	// schema-aware to check. A stage-only statement (e.g. `SELECT $1 FROM
+	// @stg/f.csv`) has no table refs but must still reach validateStageRefs via
+	// ValidateTablesExist, so it isn't short-circuited away (issue #793 G). The
+	// session db/schema is always warmed by gatherCatalog, giving the stage check
+	// its catalog even with no table refs.
+	if len(refs) == 0 && !hasStageRef(sql) {
 		return nil, nil
 	}
 
