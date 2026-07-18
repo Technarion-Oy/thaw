@@ -626,6 +626,8 @@ export function GetObjectProperties(arg1:string,arg2:string,arg3:string,arg4:str
 
 export function GetObjectTagReferences(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<snowflake.QueryResult>;
 
+export function GetObjectUsageDependencies(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<snowflake.ObjectDependencyRef>>;
+
 export function GetPasswordPolicyReferences(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function GetPipRegistryConfig():Promise<config.PipRegistryConfig>;

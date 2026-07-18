@@ -367,6 +367,25 @@ func (a *App) GetObjectDependencies(database, schema, kind, name, arguments stri
 	return client.GetObjectDependencies(a.fctx(FeatureObjectBrowser), database, schema, kind, name, arguments)
 }
 
+// GetObjectUsageDependencies resolves object dependencies from
+// SNOWFLAKE.ACCOUNT_USAGE.OBJECT_DEPENDENCIES in the requested direction —
+// "depends_on" (downstream: objects this one references) or "referenced_by"
+// (upstream: objects that reference this one). It complements the DDL-parsing
+// GetObjectDependencies by covering tables and non-SQL bodies the parser cannot
+// read, and by resolving the reverse direction, at the cost of governance
+// privileges (grant on the SNOWFLAKE database / ACCOUNTADMIN) and propagation
+// latency. The result is a flat, de-duplicated list of direct edges.
+func (a *App) GetObjectUsageDependencies(database, schema, name, direction string) ([]snowflake.ObjectDependencyRef, error) {
+	client := a.currentClient()
+	if client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return client.GetObjectUsageDependencies(
+		a.fctx(FeatureObjectBrowser), database, schema, name,
+		snowflake.UsageDependencyDirection(direction),
+	)
+}
+
 // GetObjectProperties returns structured metadata for any Snowflake object by
 // running the appropriate SHOW or DESCRIBE command and returning the result as
 // key/value pairs. kind is one of: TABLE, VIEW, DYNAMIC TABLE, EXTERNAL TABLE,

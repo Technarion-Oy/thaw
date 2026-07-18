@@ -4858,6 +4858,24 @@ export namespace snowflake {
 	        this.comment = source["comment"];
 	    }
 	}
+	export class ObjectDependencyRef {
+	    database: string;
+	    schema: string;
+	    name: string;
+	    domain: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ObjectDependencyRef(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.database = source["database"];
+	        this.schema = source["schema"];
+	        this.name = source["name"];
+	        this.domain = source["domain"];
+	    }
+	}
 	
 	export class PropertyPair {
 	    key: string;
