@@ -22,14 +22,10 @@ import type { ColumnsType } from "antd/es/table";
 import { ListBackupSets, CreateBackupSet, DropBackupSet, AlterBackupSet, ListBackupPolicies, ListBackups, AddBackup, DeleteOldestBackup, RestoreFromBackup, ListDatabases, ListUserSchemas, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/app/App";
 import type { backup } from "../../../wailsjs/go/models";
 import ObjectNameCaseControl, { identToken, quoteIdent } from "../shared/ObjectNameCaseControl";
+import { escapeTextLit } from "../shared/sqlEscape";
 import dayjs from "dayjs";
 
 const { Text } = Typography;
-
-// Escape a SQL text literal the way the backend's EscapeTextLit does — double
-// backslashes first, then single-quotes — so a value ending in "\" (or one
-// containing "\'") cannot break out of the surrounding single-quoted literal.
-const escTextLit = (s: string) => s.replace(/\\/g, "\\\\").replace(/'/g, "''");
 
 // A backup set's identity is (db, schema, name): SHOW BACKUP SETS IN ACCOUNT can
 // return same-named sets in different schemas, so caches and React keys must be
@@ -335,7 +331,7 @@ export default function BackupSetsModal(props: Props) {
           alteration = `RENAME TO ${identToken(alterState.value, alterState.caseSensitive)}`;
           break;
         case "set-comment":
-          alteration = `SET COMMENT = '${escTextLit(alterState.value)}'`;
+          alteration = `SET COMMENT = '${escapeTextLit(alterState.value)}'`;
           break;
         case "unset-comment":
           alteration = "UNSET COMMENT";
@@ -391,6 +387,11 @@ export default function BackupSetsModal(props: Props) {
       loadRows(nameFilter);
     } catch (e) {
       setCreateState((s) => ({ ...s, loading: false, error: String(e) }));
+      // CreateBackupSet runs CREATE then (optionally) APPLY BACKUP POLICY as two
+      // statements. If the APPLY fails, the set already exists — refresh the list
+      // so the user sees it (and understands why retrying the same name would hit
+      // "already exists") rather than being left with a stale, empty table.
+      loadRows(nameFilter);
     }
   };
 

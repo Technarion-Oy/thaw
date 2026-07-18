@@ -35,6 +35,7 @@ import {
 } from "../../../wailsjs/go/app/App";
 import type { backup } from "../../../wailsjs/go/models";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
+import { escapeTextLit } from "../shared/sqlEscape";
 import dayjs from "dayjs";
 
 const { Text } = Typography;
@@ -157,23 +158,19 @@ export default function BackupPoliciesPanel() {
     if (!alterState) return;
     setAlterLoading(true);
     try {
-      // Escape free-text values the way the backend's EscapeTextLit does — double
-      // backslashes as well as single-quotes — so a value ending in "\" (or one
-      // containing "\'") cannot break out of the single-quoted literal.
-      const escTextLit = (s: string) => s.replace(/\\/g, "\\\\").replace(/'/g, "''");
       let alteration = "";
       switch (alterState.action) {
         case "rename":
           alteration = `RENAME TO ${identToken(alterState.value, alterState.caseSensitive)}`;
           break;
         case "set-schedule":
-          alteration = `SET SCHEDULE = '${escTextLit(alterState.value)}'`;
+          alteration = `SET SCHEDULE = '${escapeTextLit(alterState.value)}'`;
           break;
         case "set-expire":
           alteration = `SET EXPIRE_AFTER_DAYS = ${parseInt(alterState.value, 10) || 0}`;
           break;
         case "set-comment":
-          alteration = `SET COMMENT = '${escTextLit(alterState.value)}'`;
+          alteration = `SET COMMENT = '${escapeTextLit(alterState.value)}'`;
           break;
         case "unset-comment":
           alteration = "UNSET COMMENT";

@@ -374,7 +374,7 @@ func BuildApplyBackupPolicySql(setFQN, policyName string) string {
 func BuildRestoreFromBackupSql(objectType, targetName, backupSetName, bsDb, bsSchema, backupID string) (string, error) {
 	objType := strings.ToUpper(strings.TrimSpace(objectType))
 	if objType == "" {
-		return "", fmt.Errorf("object type must be DATABASE, SCHEMA, or TABLE")
+		return "", fmt.Errorf("object type must be DATABASE, SCHEMA, TABLE, or EXTERNAL TABLE")
 	}
 	if targetName == "" {
 		return "", fmt.Errorf("target name must not be empty")
