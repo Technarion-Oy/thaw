@@ -910,17 +910,22 @@ func (c *Client) refreshConnectorState(role, wh, db, sc string) {
 // isContextChangingQuery returns true if the SQL statement appears to be one
 // that changes the session's role, warehouse, database, or schema.
 func isContextChangingQuery(sql string) bool {
-	s := strings.TrimSpace(sql)
-	if len(s) < 3 {
+	// Tokenize so that leading comments, whitespace, string literals, and
+	// identifiers are handled correctly — a raw prefix/substring scan both
+	// misses comment-prefixed statements and matches SESSION inside identifiers
+	// or string literals (e.g. ALTER TABLE session_events ...).
+	toks := sqltok.SignificantTokens(sql)
+	if len(toks) == 0 {
 		return false
 	}
-	up := strings.ToUpper(s)
+	first := strings.ToUpper(toks[0].Text(sql))
 	// Covers USE ROLE, USE WAREHOUSE, USE DATABASE, USE SCHEMA, and bare USE <db>.<sch>.
-	if strings.HasPrefix(up, "USE") {
+	if first == "USE" {
 		return true
 	}
-	// Covers ALTER SESSION SET ...
-	if strings.HasPrefix(up, "ALTER") && strings.Contains(up, "SESSION") {
+	// Covers ALTER SESSION SET ... — SESSION must be the keyword immediately
+	// following ALTER, not merely present somewhere in the text.
+	if first == "ALTER" && len(toks) > 1 && strings.ToUpper(toks[1].Text(sql)) == "SESSION" {
 		return true
 	}
 	return false
@@ -971,9 +976,7 @@ func (c *Client) Execute(ctx context.Context, query string, onProgress ...func(i
 		// raises "264004: failed to parse location". Use a plain cancellable
 		// context (no async mode) for file-transfer statements, mirroring the
 		// same pattern already used for multi-statement execution above.
-		upper := strings.ToUpper(stmt)
-		if strings.HasPrefix(upper, "PUT ") || strings.HasPrefix(upper, "PUT\t") ||
-			strings.HasPrefix(upper, "GET ") || strings.HasPrefix(upper, "GET\t") {
+		if first := sqltok.FirstToken(stmt); first == "PUT" || first == "GET" {
 			syncCtx, syncCancel := context.WithCancel(context.Background())
 			defer syncCancel()
 			go func() {
@@ -1160,20 +1163,31 @@ func (c *Client) QuerySingle(ctx context.Context, query string) (*QueryResult, e
 //     (e.g. typed directly in the query editor) result in empty src_locations.
 //     Already-quoted paths are left unchanged.
 func normalizePutGet(stmt string) string {
-	upper := strings.ToUpper(stmt)
-	if !strings.HasPrefix(upper, "PUT ") && !strings.HasPrefix(upper, "PUT\t") &&
-		!strings.HasPrefix(upper, "GET ") && !strings.HasPrefix(upper, "GET\t") {
+	// Classify by the first significant token so that comment- or
+	// newline-prefixed PUT/GET statements are still recognized (and thus
+	// normalized) rather than passed through unchanged.
+	toks := sqltok.SignificantTokens(stmt)
+	if len(toks) == 0 {
 		return stmt
 	}
-	// Step 1: collapse newlines.
-	s := strings.ReplaceAll(stmt, "\r\n", " ")
-	s = strings.ReplaceAll(s, "\r", " ")
-	s = strings.ReplaceAll(s, "\n", " ")
-	// Step 2: quote unquoted file:// paths in PUT commands.
-	if strings.HasPrefix(upper, "PUT ") || strings.HasPrefix(upper, "PUT\t") {
-		s = quotePutFilePath(s)
+	first := strings.ToUpper(toks[0].Text(stmt))
+	if first != "PUT" && first != "GET" {
+		return stmt
 	}
-	return s
+	// Preserve any leading trivia (comments, whitespace) verbatim, then collapse
+	// newlines only from the command keyword onward. Collapsing the whole string
+	// would fold a terminating newline into a leading line comment (e.g.
+	// "-- upload\nPUT …"), commenting out the command itself.
+	head, body := stmt[:toks[0].Start], stmt[toks[0].Start:]
+	// Step 1: collapse newlines within the command.
+	body = strings.ReplaceAll(body, "\r\n", " ")
+	body = strings.ReplaceAll(body, "\r", " ")
+	body = strings.ReplaceAll(body, "\n", " ")
+	// Step 2: quote unquoted file:// paths in PUT commands.
+	if first == "PUT" {
+		body = quotePutFilePath(body)
+	}
+	return head + body
 }
 
 // quotePutFilePath wraps the file:// path in a PUT statement with single quotes
