@@ -620,6 +620,32 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
               />
             </Form.Item>
 
+            {/* MFA token-caching advisory: without ALLOW_CLIENT_MFA_CACHING,
+                pooled connections re-auth with the single-use passcode and fail,
+                so Thaw runs at reduced concurrency. See issue #804. */}
+            {auth === "username_password_mfa" && (
+              <Alert
+                type="warning"
+                showIcon
+                style={{ marginBottom: 16 }}
+                message="Enable MFA token caching for this account"
+                description={
+                  <span style={{ fontSize: 12 }}>
+                    For MFA to work smoothly with Thaw, an ACCOUNTADMIN should enable
+                    account-level MFA token caching:
+                    <br />
+                    <code style={{ userSelect: "text" }}>
+                      ALTER ACCOUNT SET ALLOW_CLIENT_MFA_CACHING = TRUE;
+                    </code>
+                    <br />
+                    Without it, Thaw keeps its connection pool small to avoid repeated MFA
+                    prompts and login errors during bulk actions (e.g. DDL export). Key-pair
+                    authentication avoids MFA prompts entirely and needs no account change.
+                  </span>
+                }
+              />
+            )}
+
             {/* Username */}
             {needsUsername(auth) && (
               <Form.Item name="user" label="Username" rules={[{ required: true }]}>

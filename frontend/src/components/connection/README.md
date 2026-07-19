@@ -10,7 +10,7 @@ Handles the full connection flow: displaying the connect form, loading and manag
 
 | File | Purpose |
 |---|---|
-| `ConnectModal.tsx` | Primary connection modal: Ant Design `Form` for account, credentials, and auth method; inline Snowflake CLI profile manager (New, Save, Rename, Clone, Set Default, Delete); calls `Connect`, `CancelConnect`, `LoadSnowflakeCLIConfig`, `SaveProfile`, `DeleteProfile`, `CloneProfile`, `RenameProfile`, `SetDefaultProfile`, `ClearDefaultProfile`, `GetSnowflakeCLIConfigPath`, `PickSnowflakeCLIConfigPath`, `PickPrivateKeyFile`. Tagged `@thaw-domain: Core IPC & App Lifecycle`. |
+| `ConnectModal.tsx` | Primary connection modal: Ant Design `Form` for account, credentials, and auth method; shows a warning `Alert` when the `username_password_mfa` method is selected, recommending an ACCOUNTADMIN set `ALLOW_CLIENT_MFA_CACHING = TRUE` (else Thaw runs at reduced concurrency to avoid MFA-prompt storms — issue #804); inline Snowflake CLI profile manager (New, Save, Rename, Clone, Set Default, Delete); calls `Connect`, `CancelConnect`, `LoadSnowflakeCLIConfig`, `SaveProfile`, `DeleteProfile`, `CloneProfile`, `RenameProfile`, `SetDefaultProfile`, `ClearDefaultProfile`, `GetSnowflakeCLIConfigPath`, `PickSnowflakeCLIConfigPath`, `PickPrivateKeyFile`. Tagged `@thaw-domain: Core IPC & App Lifecycle`. |
 | `UserAgreementModal.tsx` | Read-only GPL v3 license/notice modal (`Modal` + `Typography`); no IPC calls; opened via the **License** link in `ConnectModal`'s footer. |
 
 ## Patterns & integration

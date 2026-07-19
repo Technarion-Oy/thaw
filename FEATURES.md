@@ -904,7 +904,7 @@ Right-click any warehouse in the Administration panel and choose **Properties** 
 
 - Connect with account / user / password / warehouse / role
 - **Authentication methods** — the connect dialog supports every interactive and non-interactive authenticator offered by the gosnowflake driver, with form fields that show/hide reactively based on the selection:
-  - **Password + MFA push** — password with a push notification approval. Thaw caches the MFA token and serializes logins to avoid MFA-challenge storms; when the account's `ALLOW_CLIENT_MFA_CACHING` parameter is off it keeps the connection pool small and shows a one-time, dismissible hint recommending an ACCOUNTADMIN enable it for seamless pooled connections.
+  - **Password + MFA push** — password with a push notification approval. Thaw caches the MFA token and serializes logins to avoid MFA-challenge storms; selecting this method shows an inline warning in the connect dialog recommending an ACCOUNTADMIN set `ALLOW_CLIENT_MFA_CACHING = TRUE`, and when that parameter is confirmed off Thaw also keeps the connection pool small and shows a one-time, dismissible post-connect hint. Without caching, key-pair auth is offered as a prompt-free alternative.
   - **Browser SSO** (`externalbrowser`) — opens a browser window for federated SSO / MFA
   - **Password only** — classic username + password, with an optional TOTP passcode
   - **Okta native SSO** — authenticates directly against your Okta tenant URL
