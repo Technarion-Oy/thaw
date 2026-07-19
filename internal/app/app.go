@@ -32,7 +32,12 @@ import (
 // tabSession holds the per-tab Snowflake client and the two-phase query
 // execution state that was previously global on App.
 type tabSession struct {
-	client             *snowflake.Client
+	client *snowflake.Client
+	// shared is true when client is the app's shared client (single-use MFA
+	// credential auth — the tab reuses the one connection instead of opening its
+	// own login, which would re-send a spent one-time passcode). Such a tab must
+	// never Close the client, which the shared connection lifecycle owns. #804.
+	shared             bool
 	lastUsed           atomic.Int64 // UnixNano timestamp for LRU eviction
 	inUse              atomic.Int32 // incremented during non-query client RPCs to prevent eviction mid-flight
 	queryMu            sync.Mutex
@@ -98,6 +103,13 @@ type App struct {
 	sessionInitMode    string
 	sessionIdleTimeout time.Duration
 	sessionIdleStopCh  chan struct{}
+
+	// Pending interactive MFA-code prompts, keyed by request id. promptMFACode
+	// registers a response channel and emits "mfa:prompt-code"; SubmitMFACode
+	// delivers the user's code back. See mfaprompt.go and issue #804.
+	mfaPromptsMu sync.Mutex
+	mfaPrompts   map[string]chan string
+	mfaPromptSeq atomic.Uint64
 
 	// Git repository commit filters (repoKey -> commitHash).
 	// repoKey format: "db.schema.repo"
@@ -179,6 +191,7 @@ func (a *App) currentConnectParams() *snowflake.ConnectParams {
 	defer a.connMu.RUnlock()
 	return a.connectParams
 }
+
 
 // workdirOverrideArg returns the directory passed via --workdir=<dir> on the
 // command line, or "" if absent. Set by "Open Folder in New Window" when it
@@ -320,9 +333,26 @@ func (a *App) getOrInitTabSession(tabId string) (*tabSession, error) {
 		tabSessionInitMu.Unlock()
 		return nil, apperrors.ErrNotConnected
 	}
+	// Single-use MFA credential (MFA / password+TOTP): a dedicated per-tab
+	// connection would need its own login, re-sending the spent one-time passcode
+	// and failing — burning MFA attempts toward an account lock. Back the tab
+	// with the shared single connection instead: tabs lose per-tab isolation but
+	// the whole session stays on one login. See issue #804.
+	if snowflake.UsesSingleUseMFACredential(*params) {
+		shared := a.currentClient()
+		if shared == nil {
+			tabSessionInitMu.Unlock()
+			return nil, apperrors.ErrNotConnected
+		}
+		ts := &tabSession{client: shared, shared: true}
+		ts.lastUsed.Store(time.Now().UnixNano())
+		a.tabSessions.Store(tabId, ts)
+		tabSessionInitMu.Unlock()
+		return ts, nil
+	}
 	logger.L.Info("creating new tab session", "tabId", tabId)
 	a.evictIfNeeded()
-	client, err := snowflake.NewClient(a.ctx, *params)
+	client, err := snowflake.NewClient(a.ctx, *params, snowflake.WithPasscodePrompt(a.promptMFACode))
 	if err != nil {
 		tabSessionInitMu.Unlock()
 		return nil, err
@@ -377,7 +407,9 @@ func (a *App) CloseTabSession(tabId string) {
 		ts.queryCancelFunc()
 	}
 	ts.queryMu.Unlock()
-	go ts.client.Close() //nolint:errcheck
+	if !ts.shared {
+		go ts.client.Close() //nolint:errcheck
+	}
 	a.evictedContexts.Delete(tabId)
 }
 
@@ -430,6 +462,14 @@ func (a *App) evictIfNeeded() {
 		// and close the connection asynchronously.
 		if val, ok := a.tabSessions.LoadAndDelete(lruTabId); ok {
 			ts := val.(*tabSession)
+			if ts.shared {
+				// Defensive: shared and owned tabs shouldn't coexist (auth mode is
+				// fixed per connection, and the shared path returns before
+				// evictIfNeeded is ever called). If one is here, it has no own
+				// connection to reclaim — drop the cheap entry so the loop makes
+				// progress rather than closing the shared client.
+				continue
+			}
 			a.evictedContexts.Store(lruTabId, ts.client.GetCachedSessionContext())
 			logger.L.Info("evicting LRU tab session", "tabId", lruTabId)
 			go ts.client.Close() //nolint:errcheck
@@ -515,9 +555,12 @@ func (a *App) shutdown(_ context.Context) {
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	// Close all tab session clients asynchronously.
+	// Close all tab session clients asynchronously (shared-client tabs don't own
+	// their client — the shared connection is closed once, below).
 	a.tabSessions.Range(func(_, val any) bool {
-		go val.(*tabSession).client.Close() //nolint:errcheck
+		if ts := val.(*tabSession); !ts.shared {
+			go ts.client.Close() //nolint:errcheck
+		}
 		return true
 	})
 
@@ -553,7 +596,7 @@ func (a *App) Connect(params snowflake.ConnectParams) error {
 	}()
 
 	logger.L.Info("connecting to Snowflake", "account", params.Account, "user", params.User, "authenticator", params.Authenticator)
-	client, err := snowflake.NewClient(ctx, params)
+	client, err := snowflake.NewClient(ctx, params, snowflake.WithPasscodePrompt(a.promptMFACode))
 	if err != nil {
 		if ctx.Err() != nil {
 			logger.L.Info("connection canceled by user")
@@ -620,7 +663,33 @@ func (a *App) Connect(params snowflake.ConnectParams) error {
 		}()
 	}
 
+	// Nudge the user (once) to enable account-level MFA-token caching when it's
+	// off. Gated to the dedicated username_password_mfa authenticator on purpose:
+	// the driver only requests/reuses a cached MFA token for that authenticator,
+	// so ALLOW_CLIENT_MFA_CACHING does nothing for plain password + TOTP auth
+	// (those users are steered toward the MFA authenticator / key-pair by the
+	// prominent connect-dialog warning instead). Best-effort and backgrounded so
+	// it never delays connect; checked here so non-MFA connects don't spin a
+	// goroutine. See issue #804.
+	if snowflake.IsMFAAuthenticator(params.Authenticator) {
+		go a.maybeHintMFACaching(client)
+	}
+
 	return nil
+}
+
+// maybeHintMFACaching emits the "mfa:enable-caching-hint" event when the account's
+// ALLOW_CLIENT_MFA_CACHING parameter is confirmed disabled. It stays silent when
+// caching is already on or when the value can't be read (so it only nudges on a
+// confirmed-off account). Call only for MFA connections. See issue #804.
+func (a *App) maybeHintMFACaching(client *snowflake.Client) {
+	if client == nil {
+		return
+	}
+	status := client.GetMFACachingEnabled(a.fctx(FeatureSessionSetup))
+	if status.Known && !status.Enabled {
+		wailsruntime.EventsEmit(a.ctx, "mfa:enable-caching-hint")
+	}
 }
 
 // CancelConnect aborts an in-progress Connect call.
@@ -763,6 +832,10 @@ func (a *App) evictIdleSessions() {
 		ts := val.(*tabSession)
 		// Re-check: skip if session was reactivated or is now in use.
 		if ts.lastUsed.Load() >= cutoff || ts.inUse.Load() > 0 {
+			continue
+		}
+		// Shared-client tabs hold no own connection to reap; leave them.
+		if ts.shared {
 			continue
 		}
 		if _, ok := a.tabSessions.LoadAndDelete(tabId); ok {

@@ -495,6 +495,8 @@ export function ExportDatabaseDDL(arg1:string,arg2:string):Promise<ddl.ExportRes
 
 export function ExportGraphDDL(arg1:string,arg2:string,arg3:string,arg4:boolean):Promise<tasks.ExportGraphDDLResult>;
 
+export function ExportQueryLog(arg1:string,arg2:string):Promise<void>;
+
 export function ExportTableData(arg1:snowflake.ExportTableParams):Promise<snowflake.ExportTableResult>;
 
 export function FetchNotebookContent(arg1:string,arg2:string,arg3:string):Promise<string>;
@@ -1122,6 +1124,8 @@ export function StopMCPSession(arg1:string):Promise<void>;
 export function StopNotebookSession(arg1:string):Promise<void>;
 
 export function StopShell():Promise<void>;
+
+export function SubmitMFACode(arg1:string,arg2:string):Promise<void>;
 
 export function SuspendTaskGraph(arg1:string,arg2:string,arg3:string):Promise<void>;
 

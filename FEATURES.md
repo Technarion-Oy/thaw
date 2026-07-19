@@ -904,7 +904,11 @@ Right-click any warehouse in the Administration panel and choose **Properties** 
 
 - Connect with account / user / password / warehouse / role
 - **Authentication methods** — the connect dialog supports every interactive and non-interactive authenticator offered by the gosnowflake driver, with form fields that show/hide reactively based on the selection:
-  - **Password + MFA push** — password with a push notification approval
+  - **Password + MFA push** — password with a push notification approval. Because a one-time MFA code/TOTP passcode can't be reused across connections, Thaw handles MFA (and password + TOTP) specially:
+    - **Single connection** — an MFA session runs on one long-lived connection (one code per session) rather than a pool, eliminating the repeated-login/account-lock risk. Editor tabs share it (per-tab isolation is disabled); MCP sessions, which need their own connection, are unavailable under MFA (use key-pair).
+    - **Interactive re-auth** — when the connection is eventually lost (e.g. the server's ~4h session timeout), Thaw pops up a modal for a fresh MFA code and transparently reconnects (typed-TOTP), or re-triggers a device push (push MFA).
+    - **Guidance** — the connect dialog shows a prominent error-level warning that MFA **can lock the account** unless `ALLOW_CLIENT_MFA_CACHING = TRUE` (shown for the MFA **or** password authenticator); when that parameter is confirmed off (MFA authenticator only), a one-time dismissible post-connect hint recommends it. Key-pair auth is offered throughout as a prompt-free alternative needing no account change.
+    - **Trade-off** — queries and bulk actions (e.g. DDL export) run serially on the one connection.
   - **Browser SSO** (`externalbrowser`) — opens a browser window for federated SSO / MFA
   - **Password only** — classic username + password, with an optional TOTP passcode
   - **Okta native SSO** — authenticates directly against your Okta tenant URL

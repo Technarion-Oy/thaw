@@ -129,7 +129,11 @@ func (a *App) maybeFileLogQuery(src querylog.Source, sql, qid string, err error,
 	if qid != "" {
 		attrs = append(attrs, "query_id", qid)
 	}
-	attrs = append(attrs, "sql", sql)
+	// Mask credential literals (PASSWORD=, SECRET_STRING=, *_TOKEN=, PASSPHRASE=,
+	// …) before the statement lands on disk. thaw.log is retained and commonly
+	// attached to bug reports; the raw DDL Thaw generates for secrets/integrations
+	// embeds plaintext credentials. See issue #804 F1.
+	attrs = append(attrs, "sql", redactSQLSecrets(sql))
 	if err != nil {
 		attrs = append(attrs, "err", err.Error())
 		logger.L.Error("query executed", attrs...)

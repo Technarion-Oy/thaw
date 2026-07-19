@@ -25,7 +25,9 @@ import (
 	"time"
 
 	sf "github.com/snowflakedb/gosnowflake/v2"
+	"github.com/youmark/pkcs8"
 
+	"thaw/internal/logger"
 	"thaw/internal/sqltok"
 )
 
@@ -168,13 +170,152 @@ type sessionConnector struct {
 	wh   string
 	db   string // active database
 	sc   string // active schema
+
+	// loginGate serializes the underlying login handshake for authenticators
+	// that reuse a cached, sequentially-rotated credential — currently only
+	// username_password_mfa. It is nil for every other authenticator, which
+	// keeps full login concurrency. When non-nil it is a capacity-1 channel used
+	// as a *cancelable* mutex, shared process-wide across all Clients for the
+	// same account+user (see loginGateFor). Non-MFA auth is unaffected.
+	loginGate chan struct{}
+
+	// Interactive passcode re-prompt (single-use-credential auth only). When
+	// promptPasscode is non-nil, the first login uses the credential captured at
+	// connect time and each subsequent login — after the pool's single
+	// connection is lost to the server session timeout / a network drop —
+	// prompts for a fresh one-time passcode and logs in with a connector rebuilt
+	// from baseCfg. firstLoginDone gates first-vs-subsequent. needsPasscode marks
+	// typed-TOTP auth (vs. password-only device push, which re-logs-in via base
+	// without a typed code). See issue #804.
+	promptPasscode PasscodeFunc
+	baseCfg        sf.Config
+	needsPasscode  bool
+	firstLoginDone atomic.Bool
+}
+
+// Login-handshake serialization for MFA auth. gosnowflake caches the MFA token
+// but only serializes concurrent logins while the cache is COLD; once a token
+// is cached, every new connection takes a fast path and reuses it concurrently.
+// A warm-cache burst (the post-connect metadata listing, DDL export's 32-wide
+// pool, or two tab pools growing at once) then has many logins present the same
+// token simultaneously — the server rejects the duplicates ("Authentication
+// FAILED"), and on each failure the driver deletes and re-fetches the token,
+// thrashing the cache, flooding the log, and risking the MFA rate limiter it was
+// meant to avoid. We serialize the handshake ourselves so reuse is sequential,
+// as the cache is designed for.
+//
+// The gate is keyed by account+user and shared across ALL Clients (tab pools,
+// the shared client, MCP) so the scope matches the driver's own process-global
+// cold-cache lock — two different pools growing at the same moment still cannot
+// race on the same user's cached token. The map is intentionally not pruned: it
+// grows by one small channel per distinct account+user connected in the
+// process's lifetime, which is negligible. See issue #804.
+var (
+	loginGatesMu sync.Mutex
+	loginGates   = map[string]chan struct{}{}
+)
+
+// loginGateFor returns the process-wide login gate for the given account+user,
+// creating it on first use. The gate is a capacity-1 channel acquired via a
+// select on ctx.Done() so serialization stays cancelable (a stuck MFA handshake,
+// which has a 3-minute timeout, must not pin queued Connects past their ctx).
+func loginGateFor(account, user string) chan struct{} {
+	key := strings.ToLower(strings.TrimSpace(account)) + "\x00" + strings.ToLower(strings.TrimSpace(user))
+	loginGatesMu.Lock()
+	defer loginGatesMu.Unlock()
+	gate, ok := loginGates[key]
+	if !ok {
+		gate = make(chan struct{}, 1)
+		loginGates[key] = gate
+	}
+	return gate
+}
+
+// authTypeMap maps Thaw's authenticator strings to gosnowflake AuthTypes. Any
+// string not listed resolves to AuthTypeSnowflake (plain username/password) —
+// see resolveAuthType.
+var authTypeMap = map[string]sf.AuthType{
+	"username_password_mfa":     sf.AuthTypeUsernamePasswordMFA,
+	"externalbrowser":           sf.AuthTypeExternalBrowser,
+	"okta":                      sf.AuthTypeOkta,
+	"snowflake_jwt":             sf.AuthTypeJwt,
+	"oauth":                     sf.AuthTypeOAuth,
+	"programmatic_access_token": sf.AuthTypePat,
+	"oauth_authorization_code":  sf.AuthTypeOAuthAuthorizationCode,
+	"oauth_client_credentials":  sf.AuthTypeOAuthClientCredentials,
+	"workload_identity":         sf.AuthTypeWorkloadIdentityFederation,
+}
+
+// resolveAuthType maps an authenticator string to a gosnowflake AuthType,
+// defaulting unrecognized values to AuthTypeSnowflake (plain username/password).
+// This is the single source of truth for that mapping, so predicates keyed on
+// the authenticator (see UsesSingleUseMFACredential) resolve it identically to
+// NewClient.
+func resolveAuthType(authenticator string) sf.AuthType {
+	if auth, ok := authTypeMap[strings.ToLower(authenticator)]; ok {
+		return auth
+	}
+	return sf.AuthTypeSnowflake
+}
+
+// shouldSerializeLogins reports whether an authenticator reuses a single-use MFA
+// credential across connections and therefore needs serialized, pool-clamped
+// logins: username_password_mfa always, and plain password ("snowflake") auth
+// when a one-time TOTP passcode is supplied (MFA-enforced accounts). See #804.
+func shouldSerializeLogins(auth sf.AuthType, hasPasscode bool) bool {
+	return auth == sf.AuthTypeUsernamePasswordMFA ||
+		(auth == sf.AuthTypeSnowflake && hasPasscode)
+}
+
+// IsMFAAuthenticator reports whether the authenticator string is the dedicated
+// username_password_mfa authenticator — the only one for which the driver
+// requests/reuses a cached MFA token (so ALLOW_CLIENT_MFA_CACHING applies).
+func IsMFAAuthenticator(authenticator string) bool {
+	return resolveAuthType(authenticator) == sf.AuthTypeUsernamePasswordMFA
+}
+
+// UsesSingleUseMFACredential reports whether a connection authenticates with a
+// single-use MFA credential — a device push or a one-time TOTP passcode — that
+// cannot be reused to open an independent connection. Such sessions run on one
+// shared connection (tab sessions reuse it; MCP, which needs its own, is
+// rejected). It resolves the authenticator exactly as NewClient does, so the app
+// layer and NewClient can never disagree about which connections are affected.
+// See issue #804.
+func UsesSingleUseMFACredential(p ConnectParams) bool {
+	return shouldSerializeLogins(resolveAuthType(p.Authenticator), p.Passcode != "")
+}
+
+// PasscodeFunc prompts the user for a fresh one-time MFA/TOTP passcode when a
+// re-login is needed (the previous single-use code is spent). It returns the new
+// code, or an error — including context cancellation or the user canceling — to
+// abort the login. See issue #804.
+type PasscodeFunc func(ctx context.Context) (string, error)
+
+// ErrMFAReauthRequired is returned when a serialized passcode login needs a fresh
+// one-time code but no PasscodeFunc was supplied to obtain one.
+var ErrMFAReauthRequired = errors.New("MFA re-authentication required: reconnect and enter a new one-time passcode")
+
+type clientOption struct {
+	promptPasscode PasscodeFunc
+}
+
+// ClientOption configures optional NewClient behavior.
+type ClientOption func(*clientOption)
+
+// WithPasscodePrompt supplies a callback used to obtain a fresh one-time MFA
+// passcode when a passcode-authenticated session must re-login (its original
+// single-use code is spent — e.g. the lone pooled connection was lost to the
+// server's session timeout). Without it, such a re-login fails with
+// ErrMFAReauthRequired instead of reusing the spent code.
+func WithPasscodePrompt(fn PasscodeFunc) ClientOption {
+	return func(o *clientOption) { o.promptPasscode = fn }
 }
 
 // Connect opens a new raw driver connection via the underlying gosnowflake
 // connector and immediately applies the stored role and warehouse, ensuring
 // that every pooled connection reflects the current session state.
 func (sc *sessionConnector) Connect(ctx context.Context) (driver.Conn, error) {
-	conn, err := sc.base.Connect(ctx)
+	conn, err := sc.connectBase(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -203,6 +344,102 @@ func (sc *sessionConnector) Connect(ctx context.Context) (driver.Conn, error) {
 		}
 	}
 	return conn, nil
+}
+
+// serializedLoginLogKey tags the login context of a serialized single-use-
+// credential handshake. gosnowflake copies registered context keys onto its log
+// records (see the init below), so records the driver emits during this login
+// carry the matching attribute, letting logger.driverNoiseFilter drop this
+// login's expected auth-failure churn per-connection. Its string form must equal
+// logger.SerializedLoginLogKey (the attribute key gosnowflake writes).
+const serializedLoginLogKey sf.ContextKey = logger.SerializedLoginLogKey
+
+func init() {
+	// Append (not replace) so the driver's own LOG_SESSION_ID / LOG_USER keys,
+	// registered in gosnowflake's package init, are preserved.
+	sf.SetLogKeys(append(sf.GetLogKeys(), serializedLoginLogKey)...)
+}
+
+// connectBase performs the underlying login handshake, serialized through the
+// per-account+user loginGate when set (MFA auth, or password auth with a TOTP
+// passcode) so connections reuse the single-use credential sequentially instead
+// of racing on it. The gate acquire honors ctx cancellation, so a queued Connect
+// can still be aborted while it waits. Only the handshake is guarded; the USE
+// role/warehouse/database/schema statements in Connect run unserialized.
+func (sc *sessionConnector) connectBase(ctx context.Context) (driver.Conn, error) {
+	if sc.loginGate == nil {
+		return sc.base.Connect(ctx)
+	}
+	select {
+	case sc.loginGate <- struct{}{}:
+		defer func() { <-sc.loginGate }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	// Tag this login's context so driverNoiseFilter suppresses the driver's
+	// expected per-attempt "Authentication FAILED" churn only for this specific
+	// login — never for other authenticators, other connections, or logins
+	// outside the gate. The driver logs auth errors synchronously inside Connect
+	// (via WithContext(ctx)), so the failing records carry this tag.
+	ctx = context.WithValue(ctx, serializedLoginLogKey, "1")
+
+	// The first login uses the credential captured at connect time (the passcode
+	// typed in the connect dialog, or the driver's password-only device push).
+	if sc.firstLoginDone.CompareAndSwap(false, true) {
+		conn, err := sc.base.Connect(ctx)
+		if err != nil {
+			sc.firstLoginDone.Store(false) // let the next attempt try afresh
+		}
+		return conn, err
+	}
+
+	// Re-login: the pool's single connection was lost (server session timeout,
+	// network drop) and any typed one-time passcode is spent.
+	if sc.needsPasscode {
+		// Typed-TOTP auth: the spent code can't be reused. Ask the user for a
+		// fresh one and log in with a connector rebuilt from it. Serialized by
+		// the gate, so at most one prompt is in flight.
+		//
+		// We deliberately do NOT try the base connector first (which for the
+		// dedicated MFA authenticator *might* re-auth silently from a cached MFA
+		// token): a base retry re-sends the baked passcode, and for the
+		// "snowflake" authenticator that has no cached-token fallback, so it would
+		// just burn a TOTP attempt toward an account lock. Prompting unconditionally
+		// is the safe choice. (In Thaw's UI only "snowflake" auth collects a typed
+		// passcode; username_password_mfa uses device push and takes the branch
+		// below.)
+		if sc.promptPasscode == nil {
+			return nil, ErrMFAReauthRequired
+		}
+		code, err := sc.promptPasscode(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return sc.connectorWithPasscode(code).Connect(ctx)
+	}
+	// Push MFA (no typed passcode): re-login via the base connector re-triggers a
+	// device push, which the user approves — no typed prompt needed.
+	return sc.base.Connect(ctx)
+}
+
+// connectorWithPasscode builds a one-off connector from baseCfg with a fresh
+// one-time passcode.
+func (sc *sessionConnector) connectorWithPasscode(code string) driver.Connector {
+	return sf.NewConnector(&sf.SnowflakeDriver{}, cloneConfigWithPasscode(sc.baseCfg, code))
+}
+
+// cloneConfigWithPasscode returns a copy of base with Passcode replaced and a
+// private Params map, so the rebuilt connector never shares or mutates the base
+// connector's map.
+func cloneConfigWithPasscode(base sf.Config, code string) sf.Config {
+	cfg := base
+	cfg.Passcode = code
+	params := make(map[string]*string, len(base.Params))
+	for k, v := range base.Params {
+		params[k] = v
+	}
+	cfg.Params = params
+	return cfg
 }
 
 // Driver returns the underlying gosnowflake driver. Required by driver.Connector.
@@ -311,22 +548,12 @@ const objectCacheTTL = 30 * time.Second
 
 // NewClient opens a new Snowflake connection. The provided context can be
 // canceled to abort the login handshake (useful for MFA/browser flows).
-func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
-	authMap := map[string]sf.AuthType{
-		"username_password_mfa":     sf.AuthTypeUsernamePasswordMFA,
-		"externalbrowser":           sf.AuthTypeExternalBrowser,
-		"okta":                      sf.AuthTypeOkta,
-		"snowflake_jwt":             sf.AuthTypeJwt,
-		"oauth":                     sf.AuthTypeOAuth,
-		"programmatic_access_token": sf.AuthTypePat,
-		"oauth_authorization_code":  sf.AuthTypeOAuthAuthorizationCode,
-		"oauth_client_credentials":  sf.AuthTypeOAuthClientCredentials,
-		"workload_identity":         sf.AuthTypeWorkloadIdentityFederation,
+func NewClient(ctx context.Context, p ConnectParams, opts ...ClientOption) (*Client, error) {
+	var o clientOption
+	for _, opt := range opts {
+		opt(&o)
 	}
-	auth, ok := authMap[strings.ToLower(p.Authenticator)]
-	if !ok {
-		auth = sf.AuthTypeSnowflake
-	}
+	auth := resolveAuthType(p.Authenticator)
 
 	// Interactive flows need more time; plain password should fail quickly.
 	// LoginTimeout is the gosnowflake-internal control — context cancellation
@@ -370,6 +597,28 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 		Params: map[string]*string{
 			"client_session_keep_alive": &keepAlive,
 		},
+	}
+
+	// MFA-token caching + concurrent-login serialization. Without this, every
+	// physical connection for an MFA-enrolled user fires its own MFA challenge;
+	// a burst (post-connect metadata listing, multiple editor tabs each with
+	// their own pool, or DDL export's 32-way fan-out) trips Snowflake's rate
+	// limiter — "394512 (08004): Too many failed MFA login attempts".
+	//
+	// ClientRequestMfaToken makes the driver (a) cache the MFA token in the OS
+	// credential store / Linux file cache and reuse it for subsequent logins,
+	// and (b) serialize concurrent logins for the same host+user so only the
+	// first one prompts and the rest await its cached token
+	// (isEligibleForParallelLogin in gosnowflake's auth.go, keyed on a
+	// process-global holder so every pool/tab client shares it). macOS/Windows
+	// auto-enable this; Linux leaves it unset, so set it explicitly on all
+	// platforms. See issue #804.
+	if auth == sf.AuthTypeUsernamePasswordMFA {
+		// staticcheck SA1019: the field is documented "Deprecated: may be
+		// unexported in a future release" — but it is still the driver's own
+		// documented switch for MFA-token caching (see gosnowflake
+		// auth_with_mfa_test.go) and no alternative public API exists.
+		cfg.ClientRequestMfaToken = sf.ConfigBoolTrue //nolint:staticcheck
 	}
 
 	if p.OktaURL != "" {
@@ -440,6 +689,24 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 		db:   strings.TrimSpace(p.Database), // initialize from profile so Connect() applies it
 		sc:   strings.TrimSpace(p.Schema),   // on connections created after pool recycles
 	}
+	// Serialize the login handshake — and clamp the pool (see SetMaxOpenConns
+	// below and SetPoolLimits) — for any authenticator that reuses a single-use
+	// MFA credential across connections. This is pure Thaw-side protection,
+	// independent of the driver's token-caching support, and limits the
+	// failed-login storm / account-lockout risk. Token caching
+	// (ClientRequestMfaToken, above) is separate — the driver only honors it for
+	// the dedicated MFA authenticator. See shouldSerializeLogins and issue #804.
+	if shouldSerializeLogins(auth, p.Passcode != "") {
+		sc.loginGate = loginGateFor(p.Account, p.User)
+		// Typed-TOTP auth needs a fresh code on every re-login; push MFA (no
+		// passcode) re-logins via the base connector trigger a fresh device push
+		// instead, so no typed prompt is needed.
+		if p.Passcode != "" {
+			sc.needsPasscode = true
+			sc.promptPasscode = o.promptPasscode // may be nil → ErrMFAReauthRequired on re-login
+			sc.baseCfg = *cfg
+		}
+	}
 
 	db := sql.OpenDB(sc)
 
@@ -449,10 +716,26 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 	// after the Go side closes it.  Setting MaxIdleConns equal to
 	// MaxOpenConns prevents connection churn that creates zombie sessions.
 	// Use SetPoolLimits(32, 32) for bulk operations like DDL export.
-	db.SetMaxOpenConns(DefaultMaxOpenConns)
-	db.SetMaxIdleConns(DefaultMaxIdleConns)
-	db.SetConnMaxLifetime(30 * time.Minute)
-	db.SetConnMaxIdleTime(5 * time.Minute)
+	// Single-use MFA credential (loginGate set — MFA auth, or password auth with
+	// a TOTP passcode): pin the session to ONE non-recycling connection so
+	// exactly one login happens per session. A wider pool or recycling would
+	// force fresh logins that reuse the spent one-time passcode and fail —
+	// repeatedly, risking an account lock. The lone connection is kept alive by
+	// ServerSessionKeepAlive until the server's ~4h session timeout; when it is
+	// eventually lost, connectBase re-prompts for a fresh code (passcode auth) or
+	// re-triggers a device push (push MFA). The clamp itself lives in
+	// clampPoolForLoginGate, shared with SetPoolLimits. #804.
+	maxOpen, maxIdle := clampPoolForLoginGate(sc.loginGate != nil, DefaultMaxOpenConns, DefaultMaxIdleConns)
+	connMaxLifetime := 30 * time.Minute
+	connMaxIdleTime := 5 * time.Minute
+	if sc.loginGate != nil {
+		connMaxLifetime = 0 // never force-recycle the lone connection
+		connMaxIdleTime = 0 // never close it for being idle
+	}
+	db.SetMaxOpenConns(maxOpen)
+	db.SetMaxIdleConns(maxIdle)
+	db.SetConnMaxLifetime(connMaxLifetime)
+	db.SetConnMaxIdleTime(connMaxIdleTime)
 
 	if err := db.PingContext(ctx); err != nil {
 		db.Close() //nolint:errcheck
@@ -482,12 +765,40 @@ const DefaultMaxOpenConns = 8
 // DefaultMaxIdleConns is the shared client's default MaxIdleConns (used by NewClient).
 const DefaultMaxIdleConns = 8
 
+// MFAMaxOpenConns pins the pool for connections that reuse a single-use MFA
+// credential (loginGate set — MFA auth, or password auth with a TOTP passcode)
+// to a single connection. Every new physical connection is a fresh login that
+// reuses the spent one-time passcode and fails, so the session is held on one
+// non-recycling connection and re-authenticated interactively only when it is
+// actually lost (see connectBase / WithPasscodePrompt). Bulk callers that ask
+// for a wide pool are clamped to this. See issue #804.
+const MFAMaxOpenConns = 1
+
 // SetPoolLimits overrides the connection pool's MaxOpenConns and MaxIdleConns.
 // Tab sessions use smaller limits (e.g. 4/1) since they only run one query at
-// a time; the shared client uses DefaultMaxOpenConns/DefaultMaxIdleConns.
+// a time; the shared client uses DefaultMaxOpenConns/DefaultMaxIdleConns; bulk
+// callers (DDL export) request 32/32. When the login gate is active (MFA, or
+// password auth with a TOTP passcode) the request is clamped to MFAMaxOpenConns
+// so a bulk burst doesn't trigger a flood of single-use-credential logins.
 func (c *Client) SetPoolLimits(maxOpen, maxIdle int) {
+	maxOpen, maxIdle = clampPoolForLoginGate(c.connector != nil && c.connector.loginGate != nil, maxOpen, maxIdle)
 	c.db.SetMaxOpenConns(maxOpen)
 	c.db.SetMaxIdleConns(maxIdle)
+}
+
+// clampPoolForLoginGate reduces a requested pool size to MFAMaxOpenConns when the
+// login gate is active (single-use MFA credential auth). Shared by NewClient and
+// SetPoolLimits so the clamp lives in one place.
+func clampPoolForLoginGate(active bool, maxOpen, maxIdle int) (int, int) {
+	if active {
+		if maxOpen > MFAMaxOpenConns {
+			maxOpen = MFAMaxOpenConns
+		}
+		if maxIdle > MFAMaxOpenConns {
+			maxIdle = MFAMaxOpenConns
+		}
+	}
+	return maxOpen, maxIdle
 }
 
 // GetSessionID returns the Snowflake session ID via SELECT CURRENT_SESSION().
@@ -3933,15 +4244,38 @@ func loadPrivateKey(path, passphrase string) (*rsa.PrivateKey, error) {
 	if block == nil {
 		return nil, fmt.Errorf("no PEM block found in %s", path)
 	}
-	var der []byte
-	if passphrase != "" {
-		//nolint:staticcheck // x509.DecryptPEMBlock is deprecated but intentional here
-		der, err = x509.DecryptPEMBlock(block, []byte(passphrase))
+
+	// Encrypted private keys come in two on-disk forms:
+	//   - Modern PKCS#8 ("BEGIN ENCRYPTED PRIVATE KEY", PBES2). This is what
+	//     Thaw's own generator emits (openssl pkcs8 -topk8 -passout, ssh-keygen)
+	//     and the format the Snowflake CLI writes. x509.DecryptPEMBlock does NOT
+	//     understand these — it only handles the legacy DEK-Info form — so a
+	//     passphrase-protected key produced by Thaw's own tooling could not be
+	//     loaded back for snowflake_jwt auth (issue #804 F2). Decrypt it with
+	//     youmark/pkcs8, which the internal/keypair side already speaks.
+	//   - Legacy PKCS#1 ("BEGIN RSA PRIVATE KEY" with a DEK-Info header),
+	//     handled by the deprecated-but-only stdlib path below.
+	if block.Type == "ENCRYPTED PRIVATE KEY" {
+		if passphrase == "" {
+			// Without this the DER falls through to ParsePKCS8PrivateKey on still-
+			// encrypted bytes and surfaces an opaque asn1 error; be explicit.
+			return nil, fmt.Errorf("private key in %s is encrypted — a passphrase is required", path)
+		}
+		key, err := pkcs8.ParsePKCS8PrivateKeyRSA(block.Bytes, []byte(passphrase))
+		if err != nil {
+			return nil, fmt.Errorf("decrypt PKCS#8 private key in %s (wrong passphrase?): %w", path, err)
+		}
+		return key, nil
+	}
+
+	der := block.Bytes
+	// x509.IsEncryptedPEMBlock/DecryptPEMBlock are deprecated (insecure by
+	// design) but remain the only stdlib path for legacy DEK-Info-encrypted PEM.
+	if passphrase != "" && x509.IsEncryptedPEMBlock(block) { //nolint:staticcheck
+		der, err = x509.DecryptPEMBlock(block, []byte(passphrase)) //nolint:staticcheck
 		if err != nil {
 			return nil, fmt.Errorf("decrypt PEM block: %w", err)
 		}
-	} else {
-		der = block.Bytes
 	}
 	key, err := x509.ParsePKCS8PrivateKey(der)
 	if err != nil {

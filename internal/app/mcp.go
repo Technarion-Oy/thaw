@@ -41,6 +41,13 @@ func (a *App) StartMCPSession(label, mode string, port int, role, warehouse, sec
 	if params == nil {
 		return mcp.SessionInfo{}, apperrors.ErrNotConnected
 	}
+	// An MCP session needs its own independent, long-lived connection, but a
+	// single-use MFA credential (device push / one-time passcode) can't be
+	// reused to open one — attempting it would re-send the spent code and burn
+	// MFA attempts toward an account lock. Reject clearly instead. See #804.
+	if snowflake.UsesSingleUseMFACredential(*params) {
+		return mcp.SessionInfo{}, fmt.Errorf("MCP sessions aren't supported with single-use MFA authentication (a device push or one-time passcode can't be reused for a separate connection). Reconnect with key-pair authentication to use MCP")
+	}
 	if mode == "" {
 		mode = mcp.ExecutionModeMetadata
 	}
@@ -64,7 +71,7 @@ func (a *App) StartMCPSession(label, mode string, port int, role, warehouse, sec
 
 	// Each session owns an isolated client so it survives independently of the
 	// UI tab sessions and is closed when the session stops.
-	client, err := snowflake.NewClient(a.ctx, *params)
+	client, err := snowflake.NewClient(a.ctx, *params, snowflake.WithPasscodePrompt(a.promptMFACode))
 	if err != nil {
 		return mcp.SessionInfo{}, fmt.Errorf("mcp: failed to open connection: %w", err)
 	}

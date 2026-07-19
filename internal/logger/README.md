@@ -8,7 +8,13 @@ Initialises a `slog.Logger` backed by a rotating log file (`lumberjack`) and exp
 as the package-level `L` variable. Dev builds additionally echo to stderr and enable
 `DEBUG` level. Production builds use an OS-specific log directory. A `driverNoiseFilter`
 `slog.Handler` wrapper suppresses known-harmless ERROR messages emitted by the
-gosnowflake driver as side-effects of query cancellation and row-cap truncation.
+gosnowflake driver as side-effects of query cancellation, row-cap truncation, and
+— **only on records tagged as a serialized single-use-credential login** (via the
+`SerializedLoginLogKey` context attribute `internal/snowflake` puts on the login
+context) — the expected per-connection re-auth churn. The tagging is per
+connection, so auth failures for other authenticators, other connections, or
+outside such a login still reach the log; the real connect error is also surfaced
+separately by `App.Connect`.
 
 The minimum level is **runtime-adjustable**: the handler is wired to a package-level
 `slog.LevelVar` (seeded to the build default — DEBUG in dev, INFO in production), and
@@ -59,7 +65,7 @@ instead of rotating it as a whole.
 | `maybeRotateByAge` | Rotates the active file on startup when its oldest entry is older than `rotationInterval`, so age-based cleanup has backups to prune. |
 | `startRotationTicker` | Rotates on `rotationInterval` until stopped, keeping retention bounded during long sessions. |
 | `firstEntryTime` / `parseSlogTime` | Read the first log line and parse its `time=<RFC3339>` prefix to find the oldest entry's timestamp. |
-| `driverNoiseFilter` | Drops `slog.LevelError` records whose message contains `"failed to extract HTTP response body"` (Arrow chunk download errors from gosnowflake). |
+| `driverNoiseFilter` | Drops `slog.LevelError` records that are handled-but-noisy gosnowflake output: message containing `"failed to extract HTTP response body"` (Arrow chunk download errors, always), or — **only when the record carries the `SerializedLoginLogKey` attribute** — beginning with `"Authentication FAILED"` / `"Failed to authenticate. Connection failed after"` (single-use-credential re-auth churn). `internal/snowflake` registers that key with the driver (append, preserving `LOG_SESSION_ID`/`LOG_USER`) and tags each serialized login's context, so suppression is scoped per connection and genuine failures elsewhere stay visible; the detailed connect error is also logged/surfaced by `App.Connect`. |
 
 ## Patterns & integration
 

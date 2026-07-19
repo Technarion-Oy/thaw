@@ -846,6 +846,10 @@ export function ExportGraphDDL(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['ExportGraphDDL'](arg1, arg2, arg3, arg4);
 }
 
+export function ExportQueryLog(arg1, arg2) {
+  return window['go']['app']['App']['ExportQueryLog'](arg1, arg2);
+}
+
 export function ExportTableData(arg1) {
   return window['go']['app']['App']['ExportTableData'](arg1);
 }
@@ -2100,6 +2104,10 @@ export function StopNotebookSession(arg1) {
 
 export function StopShell() {
   return window['go']['app']['App']['StopShell']();
+}
+
+export function SubmitMFACode(arg1, arg2) {
+  return window['go']['app']['App']['SubmitMFACode'](arg1, arg2);
 }
 
 export function SuspendTaskGraph(arg1, arg2, arg3) {

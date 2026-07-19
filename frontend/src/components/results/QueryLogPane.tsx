@@ -7,7 +7,7 @@ import { Button, Input, Select, Table, Tag, Tooltip, Typography, message } from 
 import { ClearOutlined, CopyOutlined, DownloadOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { EventsOn, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import { GetQueryLogEntries, ClearQueryLog, IsQueryLogEnabled, SetQueryLogEnabled, PickQueryLogExportFile, SaveFile } from "../../../wailsjs/go/app/App";
+import { GetQueryLogEntries, ClearQueryLog, IsQueryLogEnabled, SetQueryLogEnabled, PickQueryLogExportFile, ExportQueryLog } from "../../../wailsjs/go/app/App";
 
 const { Text } = Typography;
 
@@ -276,7 +276,10 @@ export default function QueryLogPane() {
       if (!path) return;
       const header = `# Thaw Query Log — exported ${new Date().toISOString()}\n# ${filtered.length} entries\n\n`;
       const body = filtered.map((e) => formatEntryForCopy(e)).join("\n\n");
-      await SaveFile(path, header + body + "\n");
+      // ExportQueryLog masks credential literals before writing — the exported
+      // file is a bug-report artifact like thaw.log, unlike the readable in-app
+      // log/clipboard (issue #804 F1).
+      await ExportQueryLog(path, header + body + "\n");
       message.success("Query log exported");
     } catch (err) {
       message.error(String(err));

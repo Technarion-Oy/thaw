@@ -620,6 +620,44 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
               />
             </Form.Item>
 
+            {/* MFA lockout warning. Thaw opens several pooled connections and each
+                must authenticate; a one-time MFA code/push (or the TOTP passcode
+                reused for password auth) works only once, so the extra logins fail
+                and can lock the account — unless ALLOW_CLIENT_MFA_CACHING is on.
+                Shown for MFA and for password auth (which usually needs a TOTP code
+                when MFA is enforced). See issue #804. */}
+            {(auth === "username_password_mfa" || auth === "snowflake") && (
+              <Alert
+                type="error"
+                showIcon
+                style={{ marginBottom: 16 }}
+                message="MFA does not work reliably with Thaw — it can lock your account"
+                description={
+                  <span style={{ fontSize: 12 }}>
+                    {auth === "snowflake"
+                      ? "If your account enforces MFA (a one-time TOTP code), be careful: "
+                      : ""}
+                    Thaw opens several connections at once and each must authenticate. A
+                    one-time MFA code or push can only be used once, so the extra logins
+                    fail — and enough failed attempts will <strong>lock your Snowflake
+                    account</strong>.
+                    <br />
+                    <br />
+                    MFA only works safely if an ACCOUNTADMIN first enables MFA token
+                    caching on the account:
+                    <br />
+                    <code style={{ userSelect: "text" }}>
+                      ALTER ACCOUNT SET ALLOW_CLIENT_MFA_CACHING = TRUE;
+                    </code>
+                    <br />
+                    <br />
+                    If you can't enable it, use <strong>key-pair authentication</strong>{" "}
+                    instead — it needs no MFA prompt and no account-level change.
+                  </span>
+                }
+              />
+            )}
+
             {/* Username */}
             {needsUsername(auth) && (
               <Form.Item name="user" label="Username" rules={[{ required: true }]}>

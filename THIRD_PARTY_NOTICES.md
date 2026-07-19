@@ -14,7 +14,7 @@ or later. The licenses below apply only to the corresponding third-party package
 
 ## Contents
 
-- [Backend — Go modules](#backend--go-modules) (92)
+- [Backend — Go modules](#backend--go-modules) (93)
 - [Frontend — npm packages](#frontend--npm-packages) (179)
 
 ## Backend — Go modules
@@ -94,6 +94,7 @@ or later. The licenses below apply only to the corresponding third-party package
 | `github.com/wailsapp/wails/v2` | v2.11.0 | MIT |
 | `github.com/xanzy/ssh-agent` | v0.3.3 | Apache-2.0 |
 | `github.com/yosida95/uritemplate/v3` | v3.0.2 | BSD-3-Clause |
+| `github.com/youmark/pkcs8` | v0.0.0-20240726163527-a2c0da244d78 | MIT |
 | `github.com/zeebo/xxh3` | v1.0.2 | BSD-2-Clause |
 | `go.opentelemetry.io/otel` | v1.37.0 | Apache-2.0 |
 | `go.opentelemetry.io/otel/trace` | v1.37.0 | Apache-2.0 |
@@ -7943,6 +7944,35 @@ DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
 THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+### github.com/youmark/pkcs8
+
+- **Version:** v0.0.0-20240726163527-a2c0da244d78
+- **License:** MIT
+
+```
+The MIT License (MIT)
+
+Copyright (c) 2014 youmark
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 ### github.com/zeebo/xxh3

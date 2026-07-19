@@ -10,7 +10,12 @@ frontend. It owns:
 
 - The shared `*snowflake.Client` (the "main" connection used by non-query IPC).
 - A `sync.Map` of per-tab `*tabSession` values, each with its own isolated
-  Snowflake client and two-phase query state.
+  Snowflake client and two-phase query state — **except** for single-use-MFA
+  auth (device push / one-time TOTP passcode, `snowflake.UsesSingleUseMFACredential`),
+  where every tab reuses the shared client (`tabSession.shared = true`) because a
+  per-tab login would re-send the spent code and fail (issue #804). Such tabs
+  never close the client and are skipped by eviction; MCP sessions, which need
+  their own independent connection, are rejected for that auth instead.
 - All exported IPC methods callable from `frontend/wailsjs/go/app/App.ts`.
 
 Real business logic (SQL building, result parsing, validation) lives in
@@ -84,9 +89,10 @@ nil-check → delegate → return.
 | `filesystem.go` | File read/write/rename/delete/copy (`CopyFile`), `StartFileWatcher`/`StopFileWatcher` (`StartFileWatcher` reads `config.FileWatchConfig` — exclude globs, distinct-dir cap, opt-in `RaiseFDLimit` — into `filesystem.WatchOptions`, and treats watch-setup failure as **non-fatal**: it logs and returns nil so the folder still opens), reveal in Finder, `PickDirectory`, `PickPrivateKeyFile` (native open-panel filtered to `*.p8;*.pem;*.key` for key-pair auth — selecting the key this way grants Thaw macOS path-scoped read consent that a hand-typed path lacks; see the macOS TCC gotcha), `OpenFolderInNewInstance` (validates `dir` exists, then re-execs the running binary directly with `--workdir=<dir>` — not `open -n`, which resolves by bundle ID via LaunchServices and can launch a stale/duplicate copy; arg-only, no env fallback, so a stray env var can't turn a normal launch into an override window); delegates to `internal/filesystem`. |
 | `profiles.go` | Snowflake CLI profile CRUD (save, delete, clone, rename, set default); delegates to `internal/sfconfig`. |
 | `ddlexport.go` | `ExportDatabaseDDL`, `ExportAllDatabasesDDL(outputDir, databases, DDLExportOptions)`, `ExportAccountObjectsDDL`, `GetERDiagramData`. `DDLExportOptions` carries the pre-export dialog choices (object-type/schema filters, skip-existing, per-export path template, warehouse — switched via `client.UseWarehouse` and restored after); zero value = historical behavior. Contain goroutine orchestration and `ddl:progress` event emission — not thin delegators. |
-| `querylog.go` | `GetQueryLogEntries`, `ClearQueryLog`, `IsQueryLogEnabled`, `SetQueryLogEnabled`, `PickQueryLogExportFile`. Thin delegators to `a.queryLog` (`internal/querylog`). The `client.OnQuery` hook in `app.go` is the single choke point for every executed statement (user and internal); it feeds both the in-memory query log and — via `maybeFileLogQuery` — the persistent file log when `LogPrefs.IncludeQuerySQL` is on. |
+| `querylog.go` | `GetQueryLogEntries`, `ClearQueryLog`, `IsQueryLogEnabled`, `SetQueryLogEnabled`, `PickQueryLogExportFile`, `ExportQueryLog` (writes the assembled log text with credential literals masked via `redactSQLSecrets` — the in-app log/clipboard stay readable, but the exported file is a bug-report artifact like `thaw.log`). Thin delegators to `a.queryLog` (`internal/querylog`). The `client.OnQuery` hook in `app.go` is the single choke point for every executed statement (user and internal); it feeds both the in-memory query log and — via `maybeFileLogQuery` — the persistent file log when `LogPrefs.IncludeQuerySQL` is on. Before a statement is written to disk it passes through `redactSQLSecrets` (`sqlredact.go`), which masks credential literals (`PASSWORD=`, `SECRET_STRING=`, `*_TOKEN=`, `PASSPHRASE=`, `MASTER_KEY=`, …) so secret-bearing DDL can't leak into `thaw.log`. |
 | `config.go` | `GetFeatureFlags`/`SaveFeatureFlags`/`GetAdminLockedFlags`, `GetEditorPrefs`/`SaveEditorPrefs`, `GetGitConfig`/`SaveGitConfig`, `GetSessionConfig`/`SaveSessionConfig`/`GetSessionInitMode`, `GetFileWatchConfig`/`SaveFileWatchConfig`/`GetDefaultFileWatchConfig` (file-watcher controls; the modal restarts the watcher via a `thaw:filewatch-config-saved` DOM event after saving), `GetAIConfig`/`SaveAIConfig`. All `Save*` here (and `AddRecentDir`/`ClearRecentDirs`/`saveMCPCredential`/`PickSnowflakeCLIConfigPath`) go through `config.Update` (process-locked read-modify-write) so concurrent config writes can't lose each other's change. `GetAIConfig` hydrates the API key from the OS secure store; `SaveAIConfig` writes it there via `storeOrDelete` (never to `config.json`). |
 | `secrets.go` | `GetSecretStorageInfo` (reports the active secret backend — Keychain / Credential Manager / Secret Service / file fallback — to drive the Settings storage indicator) and the `storeOrDelete` helper (set a secret, or delete it when cleared). Delegates to `internal/secrets`. |
+| `mfaprompt.go` | `promptMFACode` (internal callback wired into `snowflake.NewClient` via `WithPasscodePrompt`) and `SubmitMFACode` (IPC). When a passcode-authenticated MFA session loses its single connection and must re-login, `promptMFACode` emits `mfa:prompt-code` and blocks on a per-request channel until the frontend returns a fresh one-time code via `SubmitMFACode` (or it times out / is canceled). See issue #804. |
 | `logprefs.go` | `GetLogPrefs`/`GetLogPrefsLocked`/`UpdateLogPrefs`/`RevealLogFile` for file-logging preferences (`config.LogPrefs`). `applyLogPrefs` sets the runtime `slog` level (via `logger.SetLevel`) and caches the SQL-logging switches consulted by the `OnQuery` hook in `app.go`; `RevealLogFile` selects `logger.Path` in the OS file manager via the shared `filesystem.RevealInFinder` helper. Applied on startup and after each update, with IT-admin logging policy (`config.LoadAdminLogPrefs`) layered on top. |
 | `ai.go` | `ListAIModels`, `TestAIModel`, `GetAISuggestion`, `GetAIEdit`, `GetAIExplain`, `GetEditorPrefs` back-fill; delegates to `internal/ai`. Reads the API key from the OS secure store (`internal/secrets`), not `config.json`. |
 | `shell.go` | Embedded terminal (PTY): `GetAvailableShells`, `StartShell`, `StopShell`, `WriteShell`, `ResizeShell`. Contains PTY goroutine; emits `shell:data` events. |
@@ -202,6 +208,9 @@ imported from `wailsjs/go/sqleditor/Service`.
 | `shell:data` | `shell.go` | base64-encoded PTY output |
 | `migration:*` | via `migrationSvc` callback in `app.go` startup | varies |
 | `update:available` | `updater.go` (background check) | `updater.CheckResult{available, currentVersion, latestVersion, releaseNotes, releasePageURL}` |
+| `mfa:enable-caching-hint` | `app.go` `maybeHintMFACaching` (after an MFA connect when `ALLOW_CLIENT_MFA_CACHING` is confirmed off) | none — the frontend shows a dismissible notification recommending it |
+| `mfa:prompt-code` | `mfaprompt.go` `promptMFACode` (a passcode-auth session must re-login) | `{requestId, user, account}` — the frontend shows a modal and replies via `SubmitMFACode` |
+| `mfa:prompt-close` | `mfaprompt.go` `promptMFACode` (the prompt timed out or its context was canceled) | `requestId` (string) — dismisses the modal if still open |
 
 ## Gotchas
 

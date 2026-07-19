@@ -22,6 +22,30 @@ type SessionVar struct {
 	Type  string `json:"type"`
 }
 
+// MFACachingStatus reports whether the account parameter
+// ALLOW_CLIENT_MFA_CACHING is enabled. Known is false when the value could not
+// be read (e.g. the query failed), so callers can distinguish a confirmed
+// "disabled" from "unknown" and avoid nagging when they can't be sure.
+type MFACachingStatus struct {
+	Enabled bool
+	Known   bool
+}
+
+// GetMFACachingEnabled best-effort reads ALLOW_CLIENT_MFA_CACHING at the account
+// level. When enabled, the driver can cache a reusable MFA token so pooled
+// connections don't each re-prompt/re-auth; when disabled, MFA logins fall back
+// to the single-use passcode and every new physical connection fails. Errors are
+// swallowed into Known=false rather than surfaced, since this only drives an
+// optional in-app hint. See issue #804.
+func (c *Client) GetMFACachingEnabled(ctx context.Context) MFACachingStatus {
+	res, err := c.Execute(ctx, "SHOW PARAMETERS LIKE 'ALLOW_CLIENT_MFA_CACHING' IN ACCOUNT")
+	if err != nil || len(res.Rows) == 0 {
+		return MFACachingStatus{}
+	}
+	val := strings.TrimSpace(strings.ToLower(Cell(res.Rows[0], ColIdx(res.Columns, "value"))))
+	return MFACachingStatus{Enabled: val == "true", Known: true}
+}
+
 // GetSessionParameters returns the current session parameters from
 // SHOW PARAMETERS IN SESSION.
 func (c *Client) GetSessionParameters(ctx context.Context) ([]SessionParam, error) {

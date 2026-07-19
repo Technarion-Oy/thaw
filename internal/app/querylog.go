@@ -53,3 +53,13 @@ func (a *App) PickQueryLogExportFile(defaultName string) string {
 	return path
 }
 
+// ExportQueryLog writes the assembled query-log text to path with credential
+// literals masked (redactSQLSecrets). The live in-memory log and its UI panel
+// stay unredacted for readability, but an exported file is the same
+// bug-report-artifact class as thaw.log, so secrets are scrubbed on the way out.
+// The redactor matches KEYWORD=<literal> anywhere in the text, so it works on
+// the already-formatted export blob regardless of the surrounding layout. See
+// issue #804 F1.
+func (a *App) ExportQueryLog(path, content string) error {
+	return a.SaveFile(path, redactSQLSecrets(content))
+}

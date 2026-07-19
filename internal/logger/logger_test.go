@@ -164,3 +164,58 @@ func TestMaybeRotateByAge_NoFileNoop(t *testing.T) {
 		t.Fatalf("expected no backups for missing file, got %d", n)
 	}
 }
+
+// capturingHandler records the messages it is asked to emit, so a test can
+// assert which records driverNoiseFilter passes through versus suppresses.
+type capturingHandler struct{ msgs []string }
+
+func (h *capturingHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h *capturingHandler) Handle(_ context.Context, r slog.Record) error {
+	h.msgs = append(h.msgs, r.Message)
+	return nil
+}
+func (h *capturingHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *capturingHandler) WithGroup(string) slog.Handler      { return h }
+
+func TestDriverNoiseFilter(t *testing.T) {
+	tests := []struct {
+		name    string
+		level   slog.Level
+		msg     string
+		tagged  bool // record carries the serialized-login attr
+		wantOut bool
+	}{
+		// Auth-failure lines are suppressed ONLY when the record is tagged as a
+		// serialized single-use-credential login (MFA / password+TOTP).
+		{"auth failed suppressed when tagged", slog.LevelError, "Authentication FAILED", true, false},
+		{"failed to authenticate suppressed when tagged", slog.LevelError, "Failed to authenticate. Connection failed after 252ms milliseconds", true, false},
+		// Untagged (e.g. password/Okta/browser auth, or a different connection)
+		// they pass through so genuine connect failures keep a trace — the core
+		// review finding.
+		{"auth failed passes through when untagged", slog.LevelError, "Authentication FAILED", false, true},
+		{"failed to authenticate passes through when untagged", slog.LevelError, "Failed to authenticate. Connection failed after 252ms milliseconds", false, true},
+		// Arrow chunk noise is always suppressed (unrelated to auth).
+		{"arrow chunk noise suppressed (tagged)", slog.LevelError, "failed to extract HTTP response body", true, false},
+		{"arrow chunk noise suppressed (untagged)", slog.LevelError, "failed to extract HTTP response body", false, false},
+		{"real error passes through", slog.LevelError, "connection failed", true, true},
+		// The same text at a non-error level (defensive) is not treated as driver noise.
+		{"auth phrase at info passes", slog.LevelInfo, "Authentication FAILED", true, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cap := &capturingHandler{}
+			f := &driverNoiseFilter{inner: cap}
+			r := slog.NewRecord(time.Time{}, tt.level, tt.msg, 0)
+			if tt.tagged {
+				r.AddAttrs(slog.String(SerializedLoginLogKey, "1"))
+			}
+			if err := f.Handle(context.Background(), r); err != nil {
+				t.Fatalf("Handle: %v", err)
+			}
+			got := len(cap.msgs) == 1
+			if got != tt.wantOut {
+				t.Errorf("emitted=%v, want %v (msg %q)", got, tt.wantOut, tt.msg)
+			}
+		})
+	}
+}

@@ -20,6 +20,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/rjeczalik/notify v0.9.3
 	github.com/valyala/fastjson v1.6.10
+	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78
 )
 
 require (
