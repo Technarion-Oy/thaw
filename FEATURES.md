@@ -943,6 +943,10 @@ Right-click any warehouse in the Administration panel and choose **Properties** 
   - **Variables** section — all rows from `SHOW VARIABLES`; editing works identically; changes apply via `SET variable = value`
   - String-type values are automatically single-quoted in the generated SQL; booleans and numbers are passed raw
   - **Copy** button copies all parameters and variables to the clipboard
+- **Account Parameters** — right-click the account · user tag in the toolbar and choose **Account Parameters** to open a view of `SHOW PARAMETERS IN ACCOUNT`, editable exactly like Session Properties:
+  - Searchable table filtered in real time by parameter name; hovering the parameter name shows its Snowflake description in a tooltip; a **Copy** button copies all rows to the clipboard
+  - **Editing** — boolean parameters render as a toggle switch; all others show a pencil button that opens an inline input with Save / Cancel; changes apply via `ALTER ACCOUNT SET` (string values auto-quoted, booleans/numbers passed raw)
+  - Editing account parameters requires the ACCOUNTADMIN role — a save by an insufficiently-privileged role fails with the Snowflake privilege error shown inline, leaving the displayed value unchanged; unprivileged roles that see limited or no rows get a graceful "no account parameters visible" message rather than an error
 - **Session Management** — open **Tools → Session Management…** to configure:
   - **Max concurrent sessions** (1–32) — LRU cap; excess idle sessions are evicted
   - **Max open connections per session** (1–16) — `database/sql` MaxOpenConns per tab pool

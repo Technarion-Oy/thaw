@@ -523,6 +523,8 @@ export function GetAIConfig():Promise<config.AIConfig>;
 
 export function GetAISuggestion(arg1:string):Promise<string>;
 
+export function GetAccountParameters():Promise<Array<snowflake.SessionParam>>;
+
 export function GetAdminLockedFlags():Promise<config.FeatureFlags>;
 
 export function GetAggregationPolicyReferences(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
@@ -1086,6 +1088,8 @@ export function SaveSnowparkVenvPath(arg1:string):Promise<void>;
 export function ScanMigrationSource(arg1:string):Promise<Array<migration.MigrationObject>>;
 
 export function SearchFiles(arg1:string,arg2:string,arg3:boolean):Promise<Array<filesystem.SearchMatch>>;
+
+export function SetAccountParameter(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function SetDefaultProfile(arg1:string):Promise<void>;
 

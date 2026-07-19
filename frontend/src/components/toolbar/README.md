@@ -31,6 +31,7 @@ tab-specific handlers and optional extension slots.
 | `onCancel` | `() => void` | Cancels the running query. |
 | `onDisconnect` | `() => void` | Disconnects from Snowflake. |
 | `onOpenSessionProperties` | `() => void` | Opens the session properties modal. |
+| `onOpenAccountParameters` | `() => void` | Opens the account parameters modal (`SHOW PARAMETERS IN ACCOUNT`; editable via `ALTER ACCOUNT SET`, ACCOUNTADMIN required). |
 | `onOpenSnowsight` | `() => void` | Opens Snowsight in the browser. |
 | `onNewSql` | `() => void` | Opens a new SQL tab. |
 | `onNewNotebook` | `() => void` | Opens a new notebook tab. |
