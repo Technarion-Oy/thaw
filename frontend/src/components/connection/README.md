@@ -10,7 +10,7 @@ Handles the full connection flow: displaying the connect form, loading and manag
 
 | File | Purpose |
 |---|---|
-| `ConnectModal.tsx` | Primary connection modal: Ant Design `Form` for account, credentials, and auth method; inline Snowflake CLI profile manager (New, Save, Rename, Clone, Set Default, Delete); calls `Connect`, `CancelConnect`, `LoadSnowflakeCLIConfig`, `SaveProfile`, `DeleteProfile`, `CloneProfile`, `RenameProfile`, `SetDefaultProfile`, `ClearDefaultProfile`, `GetSnowflakeCLIConfigPath`, `PickSnowflakeCLIConfigPath`. Tagged `@thaw-domain: Core IPC & App Lifecycle`. |
+| `ConnectModal.tsx` | Primary connection modal: Ant Design `Form` for account, credentials, and auth method; inline Snowflake CLI profile manager (New, Save, Rename, Clone, Set Default, Delete); calls `Connect`, `CancelConnect`, `LoadSnowflakeCLIConfig`, `SaveProfile`, `DeleteProfile`, `CloneProfile`, `RenameProfile`, `SetDefaultProfile`, `ClearDefaultProfile`, `GetSnowflakeCLIConfigPath`, `PickSnowflakeCLIConfigPath`, `PickPrivateKeyFile`. Tagged `@thaw-domain: Core IPC & App Lifecycle`. |
 | `UserAgreementModal.tsx` | Read-only GPL v3 license/notice modal (`Modal` + `Typography`); no IPC calls; opened via the **License** link in `ConnectModal`'s footer. |
 
 ## Patterns & integration
@@ -31,3 +31,4 @@ Handles the full connection flow: displaying the connect form, loading and manag
 - Profile names are validated against `/^[A-Za-z0-9_-]+$/`; names that violate this pattern display an inline error and block submission.
 - `CancelConnect` must be called when the user clicks Cancel during an ongoing connection attempt (especially for `externalbrowser` which opens a browser window and blocks until the OAuth flow completes).
 - The TOML file is written at the text level by `internal/sfconfig/writer.go` to preserve user comments and unknown keys; do not attempt to re-parse or rewrite it from the frontend.
+- **Key-pair auth (`snowflake_jwt`)**: the private-key field has a **Browse** affordance (`FolderOpenOutlined` in the input's `addonAfter`) that calls `PickPrivateKeyFile`. On macOS this native selection is what grants Thaw scoped read access to the key — a hand-typed path pointing into a TCC-protected folder (`~/Documents`, `~/Desktop`, `~/Downloads`, iCloud Drive) fails to load with a permission error. The input stays editable for power users. The field's `extra` caveat is gated to macOS via `platformOS === "darwin"` (from `../files/platformUtil`) so Windows/Linux users don't see an irrelevant hint. See the macOS TCC gotcha in `docs/concepts/gotchas.md`.

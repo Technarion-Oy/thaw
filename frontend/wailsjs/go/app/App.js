@@ -1830,6 +1830,10 @@ export function PickOpenFile() {
   return window['go']['app']['App']['PickOpenFile']();
 }
 
+export function PickPrivateKeyFile() {
+  return window['go']['app']['App']['PickPrivateKeyFile']();
+}
+
 export function PickPyprojectFile() {
   return window['go']['app']['App']['PickPyprojectFile']();
 }
