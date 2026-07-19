@@ -9,8 +9,11 @@ as the package-level `L` variable. Dev builds additionally echo to stderr and en
 `DEBUG` level. Production builds use an OS-specific log directory. A `driverNoiseFilter`
 `slog.Handler` wrapper suppresses known-harmless ERROR messages emitted by the
 gosnowflake driver as side-effects of query cancellation, row-cap truncation, and
-per-connection auth retries (the real connect error is surfaced separately by
-`App.Connect`).
+— **only while an MFA login handshake is in flight** (`BeginMFALogin`/`EndMFALogin`,
+bracketed by `internal/snowflake`'s serialized MFA login) — the expected
+per-connection re-auth churn. Auth failures for other authenticators, or outside
+an MFA login, still reach the log; the real connect error is also surfaced
+separately by `App.Connect`.
 
 The minimum level is **runtime-adjustable**: the handler is wired to a package-level
 `slog.LevelVar` (seeded to the build default — DEBUG in dev, INFO in production), and
@@ -61,7 +64,7 @@ instead of rotating it as a whole.
 | `maybeRotateByAge` | Rotates the active file on startup when its oldest entry is older than `rotationInterval`, so age-based cleanup has backups to prune. |
 | `startRotationTicker` | Rotates on `rotationInterval` until stopped, keeping retention bounded during long sessions. |
 | `firstEntryTime` / `parseSlogTime` | Read the first log line and parse its `time=<RFC3339>` prefix to find the oldest entry's timestamp. |
-| `driverNoiseFilter` | Drops `slog.LevelError` records that are handled-but-noisy gosnowflake output: message containing `"failed to extract HTTP response body"` (Arrow chunk download errors), or beginning with `"Authentication FAILED"` / `"Failed to authenticate. Connection failed after"` (per-connection MFA re-auth churn — the detailed connect error is logged and surfaced by `App.Connect`). |
+| `driverNoiseFilter` | Drops `slog.LevelError` records that are handled-but-noisy gosnowflake output: message containing `"failed to extract HTTP response body"` (Arrow chunk download errors, always), or — **only while `mfaLoginsInFlight > 0`** — beginning with `"Authentication FAILED"` / `"Failed to authenticate. Connection failed after"` (MFA re-auth churn). The MFA gate (`BeginMFALogin`/`EndMFALogin`, exported for `internal/snowflake`) keeps genuine failures for other authenticators visible; the detailed connect error is also logged/surfaced by `App.Connect`. |
 
 ## Patterns & integration
 

@@ -27,6 +27,7 @@ import (
 	sf "github.com/snowflakedb/gosnowflake/v2"
 	"github.com/youmark/pkcs8"
 
+	"thaw/internal/logger"
 	"thaw/internal/sqltok"
 )
 
@@ -193,7 +194,9 @@ type sessionConnector struct {
 // The gate is keyed by account+user and shared across ALL Clients (tab pools,
 // the shared client, MCP) so the scope matches the driver's own process-global
 // cold-cache lock — two different pools growing at the same moment still cannot
-// race on the same user's cached token. See issue #804.
+// race on the same user's cached token. The map is intentionally not pruned: it
+// grows by one small channel per distinct account+user connected in the
+// process's lifetime, which is negligible. See issue #804.
 var (
 	loginGatesMu sync.Mutex
 	loginGates   = map[string]chan struct{}{}
@@ -266,6 +269,12 @@ func (sc *sessionConnector) connectBase(ctx context.Context) (driver.Conn, error
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+	// Mark the MFA login window so the logger's driverNoiseFilter suppresses the
+	// driver's expected per-attempt "Authentication FAILED" churn only here, not
+	// for other authenticators or outside an MFA login. The driver logs auth
+	// errors synchronously inside Connect, so they fall within this bracket.
+	logger.BeginMFALogin()
+	defer logger.EndMFALogin()
 	return sc.base.Connect(ctx)
 }
 
