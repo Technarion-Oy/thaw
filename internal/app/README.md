@@ -10,7 +10,12 @@ frontend. It owns:
 
 - The shared `*snowflake.Client` (the "main" connection used by non-query IPC).
 - A `sync.Map` of per-tab `*tabSession` values, each with its own isolated
-  Snowflake client and two-phase query state.
+  Snowflake client and two-phase query state — **except** for single-use-MFA
+  auth (device push / one-time TOTP passcode, `usesSingleUseMFACredential`),
+  where every tab reuses the shared client (`tabSession.shared = true`) because a
+  per-tab login would re-send the spent code and fail (issue #804). Such tabs
+  never close the client and are skipped by eviction; MCP sessions, which need
+  their own independent connection, are rejected for that auth instead.
 - All exported IPC methods callable from `frontend/wailsjs/go/app/App.ts`.
 
 Real business logic (SQL building, result parsing, validation) lives in

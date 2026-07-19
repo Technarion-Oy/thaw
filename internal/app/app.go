@@ -32,7 +32,12 @@ import (
 // tabSession holds the per-tab Snowflake client and the two-phase query
 // execution state that was previously global on App.
 type tabSession struct {
-	client             *snowflake.Client
+	client *snowflake.Client
+	// shared is true when client is the app's shared client (single-use MFA
+	// credential auth — the tab reuses the one connection instead of opening its
+	// own login, which would re-send a spent one-time passcode). Such a tab must
+	// never Close the client, which the shared connection lifecycle owns. #804.
+	shared             bool
 	lastUsed           atomic.Int64 // UnixNano timestamp for LRU eviction
 	inUse              atomic.Int32 // incremented during non-query client RPCs to prevent eviction mid-flight
 	queryMu            sync.Mutex
@@ -187,6 +192,22 @@ func (a *App) currentConnectParams() *snowflake.ConnectParams {
 	return a.connectParams
 }
 
+// usesSingleUseMFACredential reports whether the connection authenticates with a
+// single-use MFA credential — a device push or a one-time TOTP passcode — that
+// cannot be reused across independent connections. Such sessions run on a single
+// shared connection (tabs reuse it) rather than per-tab pools. Mirrors the
+// snowflake package's shouldSerializeLogins. See issue #804.
+func usesSingleUseMFACredential(p *snowflake.ConnectParams) bool {
+	switch strings.ToLower(p.Authenticator) {
+	case "username_password_mfa":
+		return true
+	case "snowflake", "":
+		return p.Passcode != ""
+	default:
+		return false
+	}
+}
+
 // workdirOverrideArg returns the directory passed via --workdir=<dir> on the
 // command line, or "" if absent. Set by "Open Folder in New Window" when it
 // relaunches the executable so the new instance opens that folder. Deliberately
@@ -327,6 +348,23 @@ func (a *App) getOrInitTabSession(tabId string) (*tabSession, error) {
 		tabSessionInitMu.Unlock()
 		return nil, apperrors.ErrNotConnected
 	}
+	// Single-use MFA credential (MFA / password+TOTP): a dedicated per-tab
+	// connection would need its own login, re-sending the spent one-time passcode
+	// and failing — burning MFA attempts toward an account lock. Back the tab
+	// with the shared single connection instead: tabs lose per-tab isolation but
+	// the whole session stays on one login. See issue #804.
+	if usesSingleUseMFACredential(params) {
+		shared := a.currentClient()
+		if shared == nil {
+			tabSessionInitMu.Unlock()
+			return nil, apperrors.ErrNotConnected
+		}
+		ts := &tabSession{client: shared, shared: true}
+		ts.lastUsed.Store(time.Now().UnixNano())
+		a.tabSessions.Store(tabId, ts)
+		tabSessionInitMu.Unlock()
+		return ts, nil
+	}
 	logger.L.Info("creating new tab session", "tabId", tabId)
 	a.evictIfNeeded()
 	client, err := snowflake.NewClient(a.ctx, *params, snowflake.WithPasscodePrompt(a.promptMFACode))
@@ -384,7 +422,9 @@ func (a *App) CloseTabSession(tabId string) {
 		ts.queryCancelFunc()
 	}
 	ts.queryMu.Unlock()
-	go ts.client.Close() //nolint:errcheck
+	if !ts.shared {
+		go ts.client.Close() //nolint:errcheck
+	}
 	a.evictedContexts.Delete(tabId)
 }
 
@@ -437,6 +477,11 @@ func (a *App) evictIfNeeded() {
 		// and close the connection asynchronously.
 		if val, ok := a.tabSessions.LoadAndDelete(lruTabId); ok {
 			ts := val.(*tabSession)
+			if ts.shared {
+				// Shared-client tab: no own connection to reclaim; just drop the
+				// (cheap) entry so the loop makes progress.
+				continue
+			}
 			a.evictedContexts.Store(lruTabId, ts.client.GetCachedSessionContext())
 			logger.L.Info("evicting LRU tab session", "tabId", lruTabId)
 			go ts.client.Close() //nolint:errcheck
@@ -522,9 +567,12 @@ func (a *App) shutdown(_ context.Context) {
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	// Close all tab session clients asynchronously.
+	// Close all tab session clients asynchronously (shared-client tabs don't own
+	// their client — the shared connection is closed once, below).
 	a.tabSessions.Range(func(_, val any) bool {
-		go val.(*tabSession).client.Close() //nolint:errcheck
+		if ts := val.(*tabSession); !ts.shared {
+			go ts.client.Close() //nolint:errcheck
+		}
 		return true
 	})
 
@@ -793,6 +841,10 @@ func (a *App) evictIdleSessions() {
 		ts := val.(*tabSession)
 		// Re-check: skip if session was reactivated or is now in use.
 		if ts.lastUsed.Load() >= cutoff || ts.inUse.Load() > 0 {
+			continue
+		}
+		// Shared-client tabs hold no own connection to reap; leave them.
+		if ts.shared {
 			continue
 		}
 		if _, ok := a.tabSessions.LoadAndDelete(tabId); ok {

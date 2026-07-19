@@ -41,6 +41,13 @@ func (a *App) StartMCPSession(label, mode string, port int, role, warehouse, sec
 	if params == nil {
 		return mcp.SessionInfo{}, apperrors.ErrNotConnected
 	}
+	// An MCP session needs its own independent, long-lived connection, but a
+	// single-use MFA credential (device push / one-time passcode) can't be
+	// reused to open one — attempting it would re-send the spent code and burn
+	// MFA attempts toward an account lock. Reject clearly instead. See #804.
+	if usesSingleUseMFACredential(params) {
+		return mcp.SessionInfo{}, fmt.Errorf("MCP sessions aren't supported with single-use MFA authentication (a device push or one-time passcode can't be reused for a separate connection). Reconnect with key-pair authentication to use MCP")
+	}
 	if mode == "" {
 		mode = mcp.ExecutionModeMetadata
 	}
