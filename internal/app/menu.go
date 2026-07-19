@@ -135,7 +135,7 @@ func buildMenu(app *App) *menu.Menu {
 		wailsruntime.EventsEmit(app.ctx, "menu:open-terminal")
 	})
 	toolsMenu.AddSeparator()
-	toolsMenu.AddText("Configure AI…", nil, func(_ *menu.CallbackData) {
+	toolsMenu.AddText("Configure AI Inline Completions…", nil, func(_ *menu.CallbackData) {
 		wailsruntime.EventsEmit(app.ctx, "menu:configure-ai")
 	})
 	toolsMenu.AddText("MCP Sessions…", nil, func(_ *menu.CallbackData) {
