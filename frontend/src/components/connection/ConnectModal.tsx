@@ -15,6 +15,7 @@ import { sfconfig } from "../../../wailsjs/go/models";
 import { useConnectionStore, type ConnectionParams } from "../../store/connectionStore";
 import { invalidateModelsCache } from "../model/ModelSourcePicker";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
+import { getPlatformOS, getCachedPlatformOS } from "../files/platformUtil";
 
 const { Title, Text } = Typography;
 
@@ -153,6 +154,10 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
     GetSnowflakeCLIConfigPath().then(setCliConfigPath);
     refreshCliConfig();
   }, [refreshCliConfig]);
+
+  // The TCC scoped-access caveat on the private-key field only applies on macOS.
+  const [platformOS, setPlatformOS] = useState<string | null>(getCachedPlatformOS());
+  useEffect(() => { getPlatformOS().then(setPlatformOS); }, []);
 
   const changeCliConfigPath = async () => {
     try {
@@ -654,7 +659,9 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
                   name="privateKeyPath"
                   label="Private key path"
                   rules={[{ required: true }]}
-                  extra="On macOS, use Browse to pick a key in Documents / Desktop / Downloads — selecting it grants Thaw access that a typed path does not."
+                  extra={platformOS === "darwin"
+                    ? "On macOS, use Browse to pick a key in Documents / Desktop / Downloads — selecting it grants Thaw access that a typed path does not."
+                    : undefined}
                 >
                   <Input
                     placeholder="/path/to/rsa_key.p8"
