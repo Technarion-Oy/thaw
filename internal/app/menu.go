@@ -96,6 +96,9 @@ func buildMenu(app *App) *menu.Menu {
 	viewMenu.AddText("Logging Preferences…", nil, func(_ *menu.CallbackData) {
 		wailsruntime.EventsEmit(app.ctx, "menu:logging-preferences")
 	})
+	viewMenu.AddText("File Watching…", nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:file-watching")
+	})
 	viewMenu.AddText("Enabled Features…", nil, func(_ *menu.CallbackData) {
 		wailsruntime.EventsEmit(app.ctx, "menu:feature-flags")
 	})

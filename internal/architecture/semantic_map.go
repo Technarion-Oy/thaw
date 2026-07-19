@@ -30,6 +30,7 @@ func GetCodebaseSemanticMap() string {
       "frontend_paths": [
         "frontend/src/components/connection/ConnectModal.tsx",
         "frontend/src/components/help/UpdateNotification.tsx",
+        "frontend/src/components/settings/FileWatchingModal.tsx",
         "frontend/src/components/settings/LoggingPreferencesModal.tsx",
         "frontend/src/components/settings/SecretStorageIndicator.tsx",
         "frontend/src/components/settings/SessionManagementModal.tsx",

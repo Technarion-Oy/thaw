@@ -361,11 +361,19 @@ export default function QueryPage() {
   // hidden via ⌘B — which would otherwise stop the watcher and silently freeze
   // tab refresh. Gated on the same `fileWatcher` flag the FileBrowser tree uses.
   const exportDir = useGitStore((s) => s.exportDir);
+  // Bumped when File Watching preferences are saved so the watcher restarts and
+  // picks up new exclude globs / caps / FD-limit setting without an app restart.
+  const [fileWatchConfigVer, setFileWatchConfigVer] = useState(0);
+  useEffect(() => {
+    const onSaved = () => setFileWatchConfigVer((v) => v + 1);
+    window.addEventListener("thaw:filewatch-config-saved", onSaved);
+    return () => window.removeEventListener("thaw:filewatch-config-saved", onSaved);
+  }, []);
   useEffect(() => {
     if (!exportDir || !featureFlags.fileWatcher) return;
     StartFileWatcher(exportDir).catch((e) => console.warn("File watcher failed to start:", e));
     return () => { StopFileWatcher().catch(() => {}); };
-  }, [exportDir, featureFlags.fileWatcher]);
+  }, [exportDir, featureFlags.fileWatcher, fileWatchConfigVer]);
 
   // Keep the Snowpark kernel in sync with the tab's session context whenever
   // role, warehouse, database or schema changes, or when switching notebook tabs.

@@ -50,6 +50,7 @@ type AppConfig struct {
     Session         SessionConfig
     FeatureFlags    FeatureFlags
     LogPrefs        LogPrefs         // runtime log level + SQL-to-file logging switches
+    FileWatch       FileWatchConfig  // user-tunable FS-watcher controls (exclude globs, dir cap, FD-limit raise)
     UpdateCheck     UpdateCheckState // cached last update-check result (throttles the startup GitHub check)
     LicenseAccepted bool             // first-launch license gate: false (fresh install or key absent) → prompt to accept
     // ...
@@ -73,6 +74,18 @@ func DefaultLogPrefs() LogPrefs
 func ValidLogLevel(name string) bool
 func ValidateLogPrefs(p LogPrefs) LogPrefs
 func RestoreAdminLockedLogPrefs(user, effective LogPrefs, locked LogPrefsLocked) LogPrefs
+
+// config.go — user-tunable file-watcher controls (see internal/filesystem/watcher.go)
+type FileWatchConfig struct {
+    ExcludeGlobs   []string // glob patterns; matching change events are dropped. nil = unconfigured → defaults; [] = exclude nothing
+    MaxWatchedDirs int      // cap on distinct directories emitted for; 0 = unlimited
+    RaiseFDLimit   bool     // opt-in: raise RLIMIT_NOFILE soft→hard when the watcher starts (no-op on Windows)
+}
+func DefaultFileWatchConfig() FileWatchConfig           // sensible exclude globs, no cap, FD-raise off
+func DefaultWatchExcludeGlobs() []string                // node_modules, venv, __pycache__, dist, build, target, *.dist-info (non-hidden only; hidden dirs are dropped upstream)
+func CollapseDefaultExcludeGlobs(fw FileWatchConfig) FileWatchConfig // persist path: reset ExcludeGlobs to nil when it still equals the defaults (keeps the "track defaults" sentinel)
+func FileWatchConfigWithDefaults(fw FileWatchConfig) FileWatchConfig // resolves a nil ExcludeGlobs to defaults (read path)
+func ValidateFileWatchConfig(fw FileWatchConfig) FileWatchConfig     // trims blank globs, clamps the cap ≥ 0 (write path)
 
 // config.go:386 / 416
 func Load() (*AppConfig, error)

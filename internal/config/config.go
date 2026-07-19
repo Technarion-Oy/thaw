@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strings"
 	"sync"
 
 	"thaw/internal/filesystem"
@@ -280,6 +282,116 @@ func RestoreAdminLockedLogPrefs(user, effective LogPrefs, locked LogPrefsLocked)
 	return user
 }
 
+// FileWatchConfig holds user-tunable file-watcher resource controls. They are
+// escape hatches for very large or atypical workspaces (network drives, huge
+// dependency trees) where the recursive FS watcher — which auto-refreshes the
+// file browser and open editor tabs — is heavier than desired. See
+// internal/filesystem/watcher.go and internal/app/filesystem.go.
+type FileWatchConfig struct {
+	// ExcludeGlobs lists glob patterns matched against individual path components
+	// (e.g. "node_modules") and against the whole tree-relative path for
+	// multi-segment patterns (e.g. "build/generated"). A change whose path
+	// matches any pattern is dropped before it reaches the frontend, so heavy
+	// build/dependency directories don't churn the file browser and open tabs.
+	// A nil slice means "unconfigured" and resolves to DefaultWatchExcludeGlobs;
+	// an explicit empty slice disables exclusion entirely.
+	//
+	// Note: hidden entries (any path component starting with a dot) are already
+	// dropped by the watcher's hidden-directory filter before exclusion runs, so
+	// a dot-prefixed pattern like ".venv" or ".git/objects" is redundant — the
+	// defaults deliberately list only non-hidden directories.
+	ExcludeGlobs []string `json:"excludeGlobs"`
+	// MaxWatchedDirs caps the number of distinct directories the watcher will
+	// emit change events for. Once the cap is reached, changes in
+	// not-yet-seen directories are ignored (already-tracked directories keep
+	// working). 0 = unlimited. Bounds the debounce-timer map and the downstream
+	// re-list churn on pathological trees.
+	MaxWatchedDirs int `json:"maxWatchedDirs"`
+	// RaiseFDLimit opts in to raising the process file-descriptor soft limit to
+	// the hard limit when a watcher starts (a macOS/kqueue and Linux/inotify
+	// mitigation; the recursive backend needs far fewer FDs, but network drives
+	// and other tooling can still push against the limit). No-op on Windows.
+	RaiseFDLimit bool `json:"raiseFDLimit"`
+}
+
+// DefaultWatchExcludeGlobs returns the out-of-the-box watch-exclusion patterns:
+// heavy dependency/build directories that rarely need live file-browser refresh.
+//
+// Only non-hidden directories are listed. Dot-prefixed paths such as ".venv" or
+// ".git/objects" are intentionally omitted: the watcher's hidden-directory
+// filter already drops every event under them before exclusion runs, so listing
+// them here would be dead weight (an unreachable pattern).
+func DefaultWatchExcludeGlobs() []string {
+	return []string{
+		"node_modules",
+		"venv",
+		"__pycache__",
+		"dist",
+		"build",
+		"target",
+		"*.dist-info",
+	}
+}
+
+// DefaultFileWatchConfig returns the out-of-the-box file-watcher controls:
+// sensible exclusion globs, no directory cap, FD-limit raising off.
+func DefaultFileWatchConfig() FileWatchConfig {
+	return FileWatchConfig{
+		ExcludeGlobs:   DefaultWatchExcludeGlobs(),
+		MaxWatchedDirs: 0,
+		RaiseFDLimit:   false,
+	}
+}
+
+// FileWatchConfigWithDefaults returns a copy of fw with unconfigured fields
+// filled from the defaults. A nil ExcludeGlobs (key absent from config.json) is
+// treated as unconfigured and replaced with DefaultWatchExcludeGlobs; a non-nil
+// but empty slice is an explicit "exclude nothing" and is left untouched.
+func FileWatchConfigWithDefaults(fw FileWatchConfig) FileWatchConfig {
+	if fw.ExcludeGlobs == nil {
+		fw.ExcludeGlobs = DefaultWatchExcludeGlobs()
+	}
+	return ValidateFileWatchConfig(fw)
+}
+
+// ValidateFileWatchConfig normalizes a FileWatchConfig so it is safe to persist
+// and apply: trims blank glob patterns and clamps MaxWatchedDirs to be
+// non-negative. It preserves the nil-vs-empty distinction on ExcludeGlobs so the
+// "unconfigured" sentinel survives a round trip (use FileWatchConfigWithDefaults
+// on the read path to resolve it).
+func ValidateFileWatchConfig(fw FileWatchConfig) FileWatchConfig {
+	if fw.MaxWatchedDirs < 0 {
+		fw.MaxWatchedDirs = 0
+	}
+	if fw.ExcludeGlobs != nil {
+		cleaned := make([]string, 0, len(fw.ExcludeGlobs))
+		for _, g := range fw.ExcludeGlobs {
+			if g = strings.TrimSpace(g); g != "" {
+				cleaned = append(cleaned, g)
+			}
+		}
+		fw.ExcludeGlobs = cleaned
+	}
+	return fw
+}
+
+// CollapseDefaultExcludeGlobs resets ExcludeGlobs to nil — the "unconfigured,
+// track evolving defaults" sentinel — when it exactly equals the current default
+// list. Use it on the persist path only: because the read path resolves nil to a
+// concrete default list before the UI ever sees it, a user who opens the modal
+// and saves without changing the globs would otherwise pin today's defaults and
+// stop picking up defaults added in future releases. Collapsing an unchanged
+// list back to nil keeps such an install on the auto-updating track. A
+// deliberate edit (added, removed, or reordered pattern) no longer equals the
+// default list and is persisted verbatim. Must run AFTER ValidateFileWatchConfig
+// so the comparison sees the same trimmed form as the defaults.
+func CollapseDefaultExcludeGlobs(fw FileWatchConfig) FileWatchConfig {
+	if slices.Equal(fw.ExcludeGlobs, DefaultWatchExcludeGlobs()) {
+		fw.ExcludeGlobs = nil
+	}
+	return fw
+}
+
 // FeatureFlags holds toggles for optional or experimental features.
 //
 // Adding a new flag:
@@ -532,6 +644,7 @@ type AppConfig struct {
 	SnowflakeCLIConfigPath string                          `json:"snowflakeCliConfigPath"`
 	FeatureFlags           FeatureFlags                    `json:"featureFlags"`
 	LogPrefs               LogPrefs                        `json:"logPrefs"`
+	FileWatch              FileWatchConfig                 `json:"fileWatch"`
 	MCPCredentials         map[string]MCPSessionCredential `json:"mcpCredentials,omitempty"`
 	UpdateCheck            UpdateCheckState                `json:"updateCheck"`
 	// LicenseAccepted records whether the user has accepted the in-app license

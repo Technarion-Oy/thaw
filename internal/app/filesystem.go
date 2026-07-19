@@ -9,6 +9,7 @@ import (
 	"strings"
 	"thaw/internal/config"
 	"thaw/internal/filesystem"
+	"thaw/internal/logger"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -16,6 +17,13 @@ import (
 // StartFileWatcher starts watching the given directory tree for changes.
 // Any existing watcher is stopped first. Change events are emitted to
 // the frontend as "fs:changed" Wails events.
+//
+// User-configurable watcher controls (exclude globs, a distinct-directory cap,
+// optional FD-limit raising) are read from config.FileWatchConfig and applied
+// here. Failure to establish the watch is treated as non-fatal: the folder still
+// opens and works, only the auto-refresh-on-external-change convenience is lost.
+// The error is logged and swallowed so the frontend never blocks folder opening
+// on a watcher that a network drive or FD ceiling prevented from starting.
 func (a *App) StartFileWatcher(dir string) error {
 	a.fsWatcherMu.Lock()
 	defer a.fsWatcherMu.Unlock()
@@ -25,11 +33,31 @@ func (a *App) StartFileWatcher(dir string) error {
 		a.fsWatcher = nil
 	}
 
-	w, err := filesystem.NewWatcher(dir, func(evt filesystem.FSChangeEvent) {
+	fw := config.DefaultFileWatchConfig()
+	if cfg, err := config.Load(); err == nil {
+		fw = config.FileWatchConfigWithDefaults(cfg.FileWatch)
+	}
+
+	// Opt-in FD soft-limit raise, before installing the watch so the higher
+	// ceiling is in effect for it (and any FD-hungry work that follows).
+	if fw.RaiseFDLimit {
+		if soft, hard, err := filesystem.RaiseFDLimit(); err != nil {
+			logger.L.Warn("file watcher: failed to raise FD soft limit", "err", err)
+		} else {
+			logger.L.Info("file watcher: raised FD soft limit", "soft", soft, "hard", hard)
+		}
+	}
+
+	w, err := filesystem.NewWatcher(dir, filesystem.WatchOptions{
+		ExcludeGlobs:   fw.ExcludeGlobs,
+		MaxWatchedDirs: fw.MaxWatchedDirs,
+	}, func(evt filesystem.FSChangeEvent) {
 		wailsruntime.EventsEmit(a.ctx, "fs:changed", evt)
 	})
 	if err != nil {
-		return err
+		// Non-fatal: log and continue so the folder still opens.
+		logger.L.Warn("file watcher: could not start; external-change auto-refresh disabled", "dir", dir, "err", err)
+		return nil
 	}
 	a.fsWatcher = w
 	return nil
