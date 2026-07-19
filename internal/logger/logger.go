@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"gopkg.in/lumberjack.v2"
@@ -240,24 +239,27 @@ var driverAuthNoise = []string{
 	"Failed to authenticate. Connection failed after",
 }
 
-// mfaLoginsInFlight counts MFA login handshakes currently executing. The
-// snowflake package brackets each serialized MFA login with
-// BeginMFALogin/EndMFALogin so the filter suppresses the driver's expected
-// per-attempt auth-failure ERROR spam ONLY while an MFA login is actually
-// running. Genuine auth failures for other authenticators (password, key-pair,
-// Okta, external browser, OAuth, …), or any failure outside an MFA login, still
-// reach thaw.log. The gosnowflake driver logs auth errors synchronously inside
-// the connector's Connect(), so the failing record is always emitted within this
-// window. The whole app connects with a single authenticator per session, so a
-// non-MFA failure cannot be masked by a concurrent MFA login.
-var mfaLoginsInFlight atomic.Int64
+// SerializedLoginLogKey is the log attribute the snowflake package tags onto the
+// context of a serialized single-use-credential login (MFA, or password auth
+// with a TOTP passcode). The gosnowflake driver copies registered context keys
+// onto its log records (via SetLogKeys/WithContext), so this attribute is present
+// exactly on the driver log records emitted while such a login is in progress —
+// letting the filter drop that login's expected auth-failure churn per-connection
+// rather than via a process-global flag. See internal/snowflake connectBase.
+const SerializedLoginLogKey = "THAW_SERIALIZED_LOGIN"
 
-// BeginMFALogin marks the start of an MFA login handshake; pair with EndMFALogin
-// (typically via defer). See mfaLoginsInFlight and driverNoiseFilter.
-func BeginMFALogin() { mfaLoginsInFlight.Add(1) }
-
-// EndMFALogin marks the end of an MFA login handshake started with BeginMFALogin.
-func EndMFALogin() { mfaLoginsInFlight.Add(-1) }
+// recordHasAttr reports whether r carries an attribute with the given key.
+func recordHasAttr(r slog.Record, key string) bool {
+	found := false
+	r.Attrs(func(a slog.Attr) bool {
+		if a.Key == key {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
 
 func (f *driverNoiseFilter) Handle(ctx context.Context, r slog.Record) error {
 	if r.Level == slog.LevelError {
@@ -267,10 +269,12 @@ func (f *driverNoiseFilter) Handle(ctx context.Context, r slog.Record) error {
 		if strings.Contains(r.Message, "failed to extract HTTP response body") {
 			return nil
 		}
-		// Auth-failure lines are dropped only during an MFA login handshake (the
-		// expected warm-cache re-auth churn) — never for other authenticators or
-		// outside an MFA login, so genuine connect failures keep their trace.
-		if mfaLoginsInFlight.Load() > 0 {
+		// Auth-failure lines are dropped only when the record is tagged as a
+		// serialized single-use-credential login (the expected re-auth churn) —
+		// scoped to that specific login, so genuine connect failures for other
+		// authenticators, other connections, or outside such a login keep their
+		// trace in thaw.log.
+		if recordHasAttr(r, SerializedLoginLogKey) {
 			for _, prefix := range driverAuthNoise {
 				if strings.HasPrefix(r.Message, prefix) {
 					return nil

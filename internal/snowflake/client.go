@@ -218,6 +218,15 @@ func loginGateFor(account, user string) chan struct{} {
 	return gate
 }
 
+// shouldSerializeLogins reports whether an authenticator reuses a single-use MFA
+// credential across connections and therefore needs serialized, pool-clamped
+// logins: username_password_mfa always, and plain password ("snowflake") auth
+// when a one-time TOTP passcode is supplied (MFA-enforced accounts). See #804.
+func shouldSerializeLogins(auth sf.AuthType, hasPasscode bool) bool {
+	return auth == sf.AuthTypeUsernamePasswordMFA ||
+		(auth == sf.AuthTypeSnowflake && hasPasscode)
+}
+
 // Connect opens a new raw driver connection via the underlying gosnowflake
 // connector and immediately applies the stored role and warehouse, ensuring
 // that every pooled connection reflects the current session state.
@@ -253,12 +262,26 @@ func (sc *sessionConnector) Connect(ctx context.Context) (driver.Conn, error) {
 	return conn, nil
 }
 
+// serializedLoginLogKey tags the login context of a serialized single-use-
+// credential handshake. gosnowflake copies registered context keys onto its log
+// records (see the init below), so records the driver emits during this login
+// carry the matching attribute, letting logger.driverNoiseFilter drop this
+// login's expected auth-failure churn per-connection. Its string form must equal
+// logger.SerializedLoginLogKey (the attribute key gosnowflake writes).
+const serializedLoginLogKey sf.ContextKey = logger.SerializedLoginLogKey
+
+func init() {
+	// Append (not replace) so the driver's own LOG_SESSION_ID / LOG_USER keys,
+	// registered in gosnowflake's package init, are preserved.
+	sf.SetLogKeys(append(sf.GetLogKeys(), serializedLoginLogKey)...)
+}
+
 // connectBase performs the underlying login handshake, serialized through the
-// per-account+user loginGate when set (MFA auth) so concurrent connections reuse
-// the cached MFA token sequentially instead of racing on it. The gate acquire
-// honors ctx cancellation, so a queued Connect can still be aborted while it
-// waits. Only the handshake is guarded; the USE role/warehouse/database/schema
-// statements in Connect run unserialized.
+// per-account+user loginGate when set (MFA auth, or password auth with a TOTP
+// passcode) so connections reuse the single-use credential sequentially instead
+// of racing on it. The gate acquire honors ctx cancellation, so a queued Connect
+// can still be aborted while it waits. Only the handshake is guarded; the USE
+// role/warehouse/database/schema statements in Connect run unserialized.
 func (sc *sessionConnector) connectBase(ctx context.Context) (driver.Conn, error) {
 	if sc.loginGate == nil {
 		return sc.base.Connect(ctx)
@@ -269,12 +292,12 @@ func (sc *sessionConnector) connectBase(ctx context.Context) (driver.Conn, error
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	// Mark the MFA login window so the logger's driverNoiseFilter suppresses the
-	// driver's expected per-attempt "Authentication FAILED" churn only here, not
-	// for other authenticators or outside an MFA login. The driver logs auth
-	// errors synchronously inside Connect, so they fall within this bracket.
-	logger.BeginMFALogin()
-	defer logger.EndMFALogin()
+	// Tag this login's context so driverNoiseFilter suppresses the driver's
+	// expected per-attempt "Authentication FAILED" churn only for this specific
+	// login — never for other authenticators, other connections, or logins
+	// outside the gate. The driver logs auth errors synchronously inside Connect
+	// (via WithContext(ctx)), so the failing records carry this tag.
+	ctx = context.WithValue(ctx, serializedLoginLogKey, "1")
 	return sc.base.Connect(ctx)
 }
 
@@ -535,10 +558,14 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 		db:   strings.TrimSpace(p.Database), // initialize from profile so Connect() applies it
 		sc:   strings.TrimSpace(p.Schema),   // on connections created after pool recycles
 	}
-	// Serialize the login handshake for MFA auth so concurrent pool connections
-	// (across every Client for this account+user) reuse the cached MFA token
-	// sequentially rather than racing on it (see loginGateFor and issue #804).
-	if auth == sf.AuthTypeUsernamePasswordMFA {
+	// Serialize the login handshake — and clamp the pool (see SetMaxOpenConns
+	// below and SetPoolLimits) — for any authenticator that reuses a single-use
+	// MFA credential across connections. This is pure Thaw-side protection,
+	// independent of the driver's token-caching support, and limits the
+	// failed-login storm / account-lockout risk. Token caching
+	// (ClientRequestMfaToken, above) is separate — the driver only honors it for
+	// the dedicated MFA authenticator. See shouldSerializeLogins and issue #804.
+	if shouldSerializeLogins(auth, p.Passcode != "") {
 		sc.loginGate = loginGateFor(p.Account, p.User)
 	}
 
@@ -552,12 +579,14 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 	// Use SetPoolLimits(32, 32) for bulk operations like DDL export.
 	maxOpen, maxIdle := DefaultMaxOpenConns, DefaultMaxIdleConns
 	if sc.loginGate != nil {
-		// MFA auth: keep the pool small. Every new physical connection is a
-		// fresh MFA login, which only succeeds seamlessly when the account has
-		// ALLOW_CLIENT_MFA_CACHING = TRUE (so the driver can reuse a cached
-		// token); otherwise it falls back to the single-use passcode, which
-		// can't be replayed and fails. A small pool minimizes those logins — and
-		// the "Authentication FAILED" churn / MFA-rate-limit exposure — during
+		// Single-use MFA credential (loginGate set — MFA auth, or password auth
+		// with a TOTP passcode): keep the pool small. Every new physical
+		// connection is a fresh login, which only succeeds seamlessly when the
+		// account has ALLOW_CLIENT_MFA_CACHING = TRUE and the dedicated MFA
+		// authenticator is used (so the driver can reuse a cached token);
+		// otherwise it falls back to the single-use passcode, which can't be
+		// replayed and fails. A small pool minimizes those logins — and the
+		// "Authentication FAILED" churn / MFA-rate-limit exposure — during
 		// connection bursts (post-connect metadata listing, DDL export). #804.
 		maxOpen, maxIdle = MFAMaxOpenConns, MFAMaxOpenConns
 	}
@@ -594,17 +623,19 @@ const DefaultMaxOpenConns = 8
 // DefaultMaxIdleConns is the shared client's default MaxIdleConns (used by NewClient).
 const DefaultMaxIdleConns = 8
 
-// MFAMaxOpenConns caps the pool for username_password_mfa auth. Every new
-// physical connection is a fresh MFA login (expensive and failure-prone unless
-// the account allows MFA-token caching), so bulk callers that ask for a wide
-// pool are clamped to this to avoid a wave of re-auths. See issue #804.
+// MFAMaxOpenConns caps the pool for connections that reuse a single-use MFA
+// credential (loginGate set — MFA auth, or password auth with a TOTP passcode).
+// Every new physical connection is a fresh login (expensive and failure-prone
+// unless the account allows MFA-token caching), so bulk callers that ask for a
+// wide pool are clamped to this to avoid a wave of re-auths. See issue #804.
 const MFAMaxOpenConns = 4
 
 // SetPoolLimits overrides the connection pool's MaxOpenConns and MaxIdleConns.
 // Tab sessions use smaller limits (e.g. 4/1) since they only run one query at
 // a time; the shared client uses DefaultMaxOpenConns/DefaultMaxIdleConns; bulk
-// callers (DDL export) request 32/32. For MFA auth the request is clamped to
-// MFAMaxOpenConns so a bulk burst doesn't trigger a flood of MFA logins.
+// callers (DDL export) request 32/32. When the login gate is active (MFA, or
+// password auth with a TOTP passcode) the request is clamped to MFAMaxOpenConns
+// so a bulk burst doesn't trigger a flood of single-use-credential logins.
 func (c *Client) SetPoolLimits(maxOpen, maxIdle int) {
 	if c.connector != nil && c.connector.loginGate != nil {
 		if maxOpen > MFAMaxOpenConns {

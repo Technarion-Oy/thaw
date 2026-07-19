@@ -6,10 +6,15 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	sf "github.com/snowflakedb/gosnowflake/v2"
+
+	"thaw/internal/logger"
 )
 
 // recordingConnector is a fake driver.Connector that reports the peak number of
@@ -108,5 +113,48 @@ func TestSetPoolLimits_ClampsMFA(t *testing.T) {
 	plain.SetPoolLimits(32, 32)
 	if got := plain.db.Stats().MaxOpenConnections; got != 32 {
 		t.Errorf("non-MFA client: MaxOpenConnections = %d, want 32", got)
+	}
+}
+
+// TestShouldSerializeLogins covers the issue #804 review fix: the login-gate
+// protection (serialization + pool clamp) applies to username_password_mfa and
+// to plain password auth when a one-time TOTP passcode is supplied — but not to
+// other authenticators or password auth without a passcode.
+func TestShouldSerializeLogins(t *testing.T) {
+	tests := []struct {
+		name        string
+		auth        sf.AuthType
+		hasPasscode bool
+		want        bool
+	}{
+		{"mfa", sf.AuthTypeUsernamePasswordMFA, false, true},
+		{"mfa with passcode", sf.AuthTypeUsernamePasswordMFA, true, true},
+		{"password with TOTP passcode", sf.AuthTypeSnowflake, true, true},
+		{"password without passcode", sf.AuthTypeSnowflake, false, false},
+		{"jwt", sf.AuthTypeJwt, false, false},
+		{"external browser", sf.AuthTypeExternalBrowser, false, false},
+		{"oauth with passcode ignored", sf.AuthTypeOAuth, true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldSerializeLogins(tt.auth, tt.hasPasscode); got != tt.want {
+				t.Errorf("shouldSerializeLogins(%v, %v) = %v, want %v", tt.auth, tt.hasPasscode, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestSerializedLoginLogKeyRegistered verifies the package init registers the
+// per-login log-scoping key with gosnowflake without clobbering the driver's own
+// LOG_SESSION_ID / LOG_USER keys — the mechanism driverNoiseFilter relies on to
+// scope auth-noise suppression per connection.
+func TestSerializedLoginLogKeyRegistered(t *testing.T) {
+	keys := sf.GetLogKeys()
+	if !slices.Contains(keys, sf.ContextKey(logger.SerializedLoginLogKey)) {
+		t.Errorf("serialized-login log key not registered; GetLogKeys()=%v", keys)
+	}
+	// The driver's own keys must be preserved (append, not replace).
+	if !slices.Contains(keys, sf.SFSessionIDKey) {
+		t.Errorf("driver LOG_SESSION_ID key was clobbered; GetLogKeys()=%v", keys)
 	}
 }

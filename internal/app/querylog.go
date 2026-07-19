@@ -63,4 +63,3 @@ func (a *App) PickQueryLogExportFile(defaultName string) string {
 func (a *App) ExportQueryLog(path, content string) error {
 	return a.SaveFile(path, redactSQLSecrets(content))
 }
-

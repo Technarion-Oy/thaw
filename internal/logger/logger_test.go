@@ -179,35 +179,36 @@ func (h *capturingHandler) WithGroup(string) slog.Handler      { return h }
 
 func TestDriverNoiseFilter(t *testing.T) {
 	tests := []struct {
-		name        string
-		level       slog.Level
-		msg         string
-		mfaInFlight bool
-		wantOut     bool
+		name    string
+		level   slog.Level
+		msg     string
+		tagged  bool // record carries the serialized-login attr
+		wantOut bool
 	}{
-		// Auth-failure lines are suppressed ONLY during an MFA login handshake.
-		{"auth failed suppressed during MFA login", slog.LevelError, "Authentication FAILED", true, false},
-		{"failed to authenticate suppressed during MFA login", slog.LevelError, "Failed to authenticate. Connection failed after 252ms milliseconds", true, false},
-		// Outside an MFA login (e.g. password/Okta/browser auth) they pass through
-		// so genuine connect failures keep a trace — the core review finding.
-		{"auth failed passes through without MFA login", slog.LevelError, "Authentication FAILED", false, true},
-		{"failed to authenticate passes through without MFA login", slog.LevelError, "Failed to authenticate. Connection failed after 252ms milliseconds", false, true},
+		// Auth-failure lines are suppressed ONLY when the record is tagged as a
+		// serialized single-use-credential login (MFA / password+TOTP).
+		{"auth failed suppressed when tagged", slog.LevelError, "Authentication FAILED", true, false},
+		{"failed to authenticate suppressed when tagged", slog.LevelError, "Failed to authenticate. Connection failed after 252ms milliseconds", true, false},
+		// Untagged (e.g. password/Okta/browser auth, or a different connection)
+		// they pass through so genuine connect failures keep a trace — the core
+		// review finding.
+		{"auth failed passes through when untagged", slog.LevelError, "Authentication FAILED", false, true},
+		{"failed to authenticate passes through when untagged", slog.LevelError, "Failed to authenticate. Connection failed after 252ms milliseconds", false, true},
 		// Arrow chunk noise is always suppressed (unrelated to auth).
-		{"arrow chunk noise suppressed", slog.LevelError, "failed to extract HTTP response body", true, false},
-		{"arrow chunk noise suppressed without MFA login", slog.LevelError, "failed to extract HTTP response body", false, false},
+		{"arrow chunk noise suppressed (tagged)", slog.LevelError, "failed to extract HTTP response body", true, false},
+		{"arrow chunk noise suppressed (untagged)", slog.LevelError, "failed to extract HTTP response body", false, false},
 		{"real error passes through", slog.LevelError, "connection failed", true, true},
 		// The same text at a non-error level (defensive) is not treated as driver noise.
 		{"auth phrase at info passes", slog.LevelInfo, "Authentication FAILED", true, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.mfaInFlight {
-				BeginMFALogin()
-				defer EndMFALogin()
-			}
 			cap := &capturingHandler{}
 			f := &driverNoiseFilter{inner: cap}
 			r := slog.NewRecord(time.Time{}, tt.level, tt.msg, 0)
+			if tt.tagged {
+				r.AddAttrs(slog.String(SerializedLoginLogKey, "1"))
+			}
 			if err := f.Handle(context.Background(), r); err != nil {
 				t.Fatalf("Handle: %v", err)
 			}
