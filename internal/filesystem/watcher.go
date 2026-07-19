@@ -20,7 +20,7 @@ type FSChangeEvent struct {
 
 // WatchOptions carries user-tunable resource controls into a Watcher. The zero
 // value is valid and means "no exclusions, no directory cap" — the historical
-// behaviour. See config.FileWatchConfig for the persisted, user-facing form.
+// behavior. See config.FileWatchConfig for the persisted, user-facing form.
 type WatchOptions struct {
 	// ExcludeGlobs are glob patterns; a change is dropped when any tree-relative
 	// path component matches a pattern, or when the whole tree-relative path
@@ -71,7 +71,7 @@ const eventBufferSize = 1024
 // filtered out after the fact rather than excluded from the watch.
 //
 // opts carries user-tunable resource controls (exclude globs, a distinct-dir
-// cap); the zero value keeps the historical no-exclusion behaviour. Because the
+// cap); the zero value keeps the historical no-exclusion behavior. Because the
 // backend is a single recursive watch, exclusions and the cap are applied by
 // dropping events after the fact rather than by declining to install a watch.
 func NewWatcher(dir string, opts WatchOptions, emit func(FSChangeEvent)) (*Watcher, error) {

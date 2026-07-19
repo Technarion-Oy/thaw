@@ -27,7 +27,7 @@ tree for changes and emits debounced Wails events to refresh the file browser UI
 | `FileEntry` | `{ name, path, isDir, size }` — single directory entry returned by `ListDir`. |
 | `FSChangeEvent` | `{ dir string }` — emitted by `Watcher` to the frontend via the callback. |
 | `Watcher` | Wraps a `rjeczalik/notify` recursive watch; owns debounce timers per directory. |
-| `NewWatcher(dir, opts, emit)` | Installs one recursive watch on `dir` and starts the watcher; caller must call `Close()`. `opts` (`WatchOptions`) carries exclude globs and a distinct-directory cap; the zero value keeps the historical no-exclusion behaviour. |
+| `NewWatcher(dir, opts, emit)` | Installs one recursive watch on `dir` and starts the watcher; caller must call `Close()`. `opts` (`WatchOptions`) carries exclude globs and a distinct-directory cap; the zero value keeps the historical no-exclusion behavior. |
 | `WatchOptions` | `{ ExcludeGlobs []string, MaxWatchedDirs int }` — user-tunable resource controls, sourced from `config.FileWatchConfig`. |
 | `RaiseFDLimit()` | Raises `RLIMIT_NOFILE` soft→hard; returns `(soft, hard, err)`. No-op on Windows. |
 | `SearchMatch` | `{ path, lineNumber, lineContent, matchStart, matchEnd }` returned by `SearchFiles`. |

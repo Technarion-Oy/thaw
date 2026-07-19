@@ -15,7 +15,7 @@ import (
 // descriptors than the old per-directory backend, but network drives, large
 // tooling, and Linux/inotify can still push against a low soft limit.
 //
-// Behaviour:
+// Behavior:
 //   - If the soft limit already meets the hard limit, it is a no-op.
 //   - It first tries to set the soft limit equal to the hard limit.
 //   - macOS refuses a soft limit of RLIM_INFINITY (or above kern.maxfilesperproc),
