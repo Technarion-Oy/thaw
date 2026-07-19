@@ -56,7 +56,7 @@ These are only needed if you use the corresponding feature:
   installs `snowflake-snowpark-python`, `notebook`, `ipython-sql`, and `sqlalchemy` into it.
 - **dbt projects** — a local **dbt** install for the dbt integration.
 - **AI inline completions** — an **OpenAI** or **Google AI Studio (Gemini)** API key, configured
-  via **AI → Configure AI…**.
+  via **Tools → Configure AI Inline Completions…**.
 
 ### Snowflake requirements
 

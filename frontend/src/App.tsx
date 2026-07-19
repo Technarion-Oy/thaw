@@ -123,7 +123,7 @@ export default function App() {
     return () => off();
   }, []);
 
-  // Listen for "Configure AI…" — from both the native menu (Wails event) and
+  // Listen for "Configure AI Inline Completions…" — from both the native menu (Wails event) and
   // the ⌘, keyboard shortcut (browser custom event).
   useEffect(() => {
     const wailsOff = EventsOn("menu:configure-ai", () => setAiModalOpen(true));
