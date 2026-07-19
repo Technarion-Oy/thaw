@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { useEffect, useState } from "react";
-import { App as AntApp, ConfigProvider, theme, message } from "antd";
+import { App as AntApp, Button, ConfigProvider, theme, message, notification } from "antd";
 import AppLayout from "./components/layout/AppLayout";
 import { useConnectionStore } from "./store/connectionStore";
 import ConnectModal from "./components/connection/ConnectModal";
@@ -116,6 +116,52 @@ export default function App() {
     });
     return () => off();
   }, [setPreference]);
+
+  // MFA-token-caching hint. The backend emits this after an MFA connection when
+  // the account's ALLOW_CLIENT_MFA_CACHING is confirmed off — in that state
+  // pooled connections re-auth with the single-use passcode and fail, so Thaw
+  // runs bulk work (DDL export) at reduced concurrency. Nudge an ACCOUNTADMIN to
+  // enable it; dismissible forever via localStorage. See issue #804.
+  useEffect(() => {
+    const off = EventsOn("mfa:enable-caching-hint", () => {
+      if (localStorage.getItem("thaw.mfaCachingHintDismissed") === "1") return;
+      const sql = "ALTER ACCOUNT SET ALLOW_CLIENT_MFA_CACHING = TRUE;";
+      const key = "mfa-caching-hint";
+      notification.info({
+        key,
+        message: "Enable MFA token caching",
+        description: (
+          <div>
+            <p style={{ marginTop: 0 }}>
+              This account uses MFA but <code>ALLOW_CLIENT_MFA_CACHING</code> is off. Thaw keeps its
+              connection pool small to avoid repeated MFA prompts and login errors during bulk actions
+              like DDL export. An ACCOUNTADMIN can enable seamless caching:
+            </p>
+            <pre style={{ whiteSpace: "pre-wrap", userSelect: "text", margin: "8px 0" }}>{sql}</pre>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Button
+                size="small"
+                type="primary"
+                onClick={() => { void ClipboardSetText(sql); message.success("Copied to clipboard"); }}
+              >
+                Copy SQL
+              </Button>
+              <Button
+                size="small"
+                type="text"
+                onClick={() => { localStorage.setItem("thaw.mfaCachingHintDismissed", "1"); notification.destroy(key); }}
+              >
+                Don't show again
+              </Button>
+            </div>
+          </div>
+        ),
+        duration: 0,
+        placement: "bottomRight",
+      });
+    });
+    return () => off();
+  }, []);
 
   // Listen for "Customize Layout…" menu event.
   useEffect(() => {

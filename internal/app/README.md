@@ -202,6 +202,7 @@ imported from `wailsjs/go/sqleditor/Service`.
 | `shell:data` | `shell.go` | base64-encoded PTY output |
 | `migration:*` | via `migrationSvc` callback in `app.go` startup | varies |
 | `update:available` | `updater.go` (background check) | `updater.CheckResult{available, currentVersion, latestVersion, releaseNotes, releasePageURL}` |
+| `mfa:enable-caching-hint` | `app.go` `maybeHintMFACaching` (after an MFA connect when `ALLOW_CLIENT_MFA_CACHING` is confirmed off) | none — the frontend shows a dismissible notification recommending it |
 
 ## Gotchas
 

@@ -620,7 +620,28 @@ func (a *App) Connect(params snowflake.ConnectParams) error {
 		}()
 	}
 
+	// For MFA auth, nudge the user (once) to enable account-level MFA-token
+	// caching when it's off — without it, pooled connections re-auth with the
+	// single-use passcode and fail, so Thaw runs bulk work at reduced
+	// concurrency. Best-effort and backgrounded so it never delays connect.
+	go a.maybeHintMFACaching(client, params.Authenticator)
+
 	return nil
+}
+
+// maybeHintMFACaching emits the "mfa:enable-caching-hint" event when the
+// connection uses username_password_mfa and the account's
+// ALLOW_CLIENT_MFA_CACHING parameter is confirmed disabled. It stays silent when
+// the authenticator isn't MFA, when caching is already on, or when the value
+// can't be read (so it only nudges on a confirmed-off account). See issue #804.
+func (a *App) maybeHintMFACaching(client *snowflake.Client, authenticator string) {
+	if !strings.EqualFold(authenticator, "username_password_mfa") || client == nil {
+		return
+	}
+	status := client.GetMFACachingEnabled(a.fctx(FeatureSessionSetup))
+	if status.Known && !status.Enabled {
+		wailsruntime.EventsEmit(a.ctx, "mfa:enable-caching-hint")
+	}
 }
 
 // CancelConnect aborts an in-progress Connect call.
