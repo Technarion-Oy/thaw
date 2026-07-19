@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 
@@ -287,13 +288,18 @@ func RestoreAdminLockedLogPrefs(user, effective LogPrefs, locked LogPrefsLocked)
 // file browser and open editor tabs — is heavier than desired. See
 // internal/filesystem/watcher.go and internal/app/filesystem.go.
 type FileWatchConfig struct {
-	// ExcludeGlobs lists glob patterns (matched against individual path
-	// components, e.g. "node_modules", and against the whole tree-relative path,
-	// e.g. ".git/objects"). A change whose path matches any pattern is dropped
-	// before it reaches the frontend, so heavy build/dependency directories don't
-	// churn the file browser and open tabs. A nil slice means "unconfigured" and
-	// resolves to DefaultWatchExcludeGlobs; an explicit empty slice disables
-	// exclusion entirely.
+	// ExcludeGlobs lists glob patterns matched against individual path components
+	// (e.g. "node_modules") and against the whole tree-relative path for
+	// multi-segment patterns (e.g. "build/generated"). A change whose path
+	// matches any pattern is dropped before it reaches the frontend, so heavy
+	// build/dependency directories don't churn the file browser and open tabs.
+	// A nil slice means "unconfigured" and resolves to DefaultWatchExcludeGlobs;
+	// an explicit empty slice disables exclusion entirely.
+	//
+	// Note: hidden entries (any path component starting with a dot) are already
+	// dropped by the watcher's hidden-directory filter before exclusion runs, so
+	// a dot-prefixed pattern like ".venv" or ".git/objects" is redundant — the
+	// defaults deliberately list only non-hidden directories.
 	ExcludeGlobs []string `json:"excludeGlobs"`
 	// MaxWatchedDirs caps the number of distinct directories the watcher will
 	// emit change events for. Once the cap is reached, changes in
@@ -309,19 +315,20 @@ type FileWatchConfig struct {
 }
 
 // DefaultWatchExcludeGlobs returns the out-of-the-box watch-exclusion patterns:
-// heavy dependency/build directories that rarely need live file-browser
-// refresh. Some (e.g. .venv) are already covered by the hidden-directory filter;
-// the non-dotted ones (node_modules, dist, …) are the ones this genuinely adds.
+// heavy dependency/build directories that rarely need live file-browser refresh.
+//
+// Only non-hidden directories are listed. Dot-prefixed paths such as ".venv" or
+// ".git/objects" are intentionally omitted: the watcher's hidden-directory
+// filter already drops every event under them before exclusion runs, so listing
+// them here would be dead weight (an unreachable pattern).
 func DefaultWatchExcludeGlobs() []string {
 	return []string{
 		"node_modules",
 		"venv",
-		".venv",
 		"__pycache__",
 		"dist",
 		"build",
 		"target",
-		".git/objects",
 		"*.dist-info",
 	}
 }
@@ -364,6 +371,23 @@ func ValidateFileWatchConfig(fw FileWatchConfig) FileWatchConfig {
 			}
 		}
 		fw.ExcludeGlobs = cleaned
+	}
+	return fw
+}
+
+// CollapseDefaultExcludeGlobs resets ExcludeGlobs to nil — the "unconfigured,
+// track evolving defaults" sentinel — when it exactly equals the current default
+// list. Use it on the persist path only: because the read path resolves nil to a
+// concrete default list before the UI ever sees it, a user who opens the modal
+// and saves without changing the globs would otherwise pin today's defaults and
+// stop picking up defaults added in future releases. Collapsing an unchanged
+// list back to nil keeps such an install on the auto-updating track. A
+// deliberate edit (added, removed, or reordered pattern) no longer equals the
+// default list and is persisted verbatim. Must run AFTER ValidateFileWatchConfig
+// so the comparison sees the same trimmed form as the defaults.
+func CollapseDefaultExcludeGlobs(fw FileWatchConfig) FileWatchConfig {
+	if slices.Equal(fw.ExcludeGlobs, DefaultWatchExcludeGlobs()) {
+		fw.ExcludeGlobs = nil
 	}
 	return fw
 }

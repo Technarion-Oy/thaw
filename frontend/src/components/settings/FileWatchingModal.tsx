@@ -117,7 +117,8 @@ export default function FileWatchingModal({ onClose }: Props) {
               Changes under a matching path are ignored (no re-list, no tab
               reload). A single name (e.g. <Text code>node_modules</Text>) matches
               that directory at any depth; a slashed pattern (e.g.{" "}
-              <Text code>.git/objects</Text>) excludes that subtree. Type a
+              <Text code>build/generated</Text>) excludes that subtree. Hidden
+              directories (names starting with a dot) are always skipped. Type a
               pattern and press Enter to add it.
             </Text>
           }
@@ -130,7 +131,7 @@ export default function FileWatchingModal({ onClose }: Props) {
             placeholder="e.g. node_modules, dist, target, *.dist-info"
             tokenSeparators={[",", " "]}
             style={{ width: "100%" }}
-            open={false}
+            notFoundContent={null}
           />
         </Form.Item>
 

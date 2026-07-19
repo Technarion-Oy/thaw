@@ -168,8 +168,14 @@ func (a *App) GetFileWatchConfig() config.FileWatchConfig {
 // SaveFileWatchConfig validates and persists the file-watcher controls. The new
 // values take effect when the watcher is next (re)started — the frontend
 // restarts it after saving so changes apply without an app restart.
+//
+// An exclude-glob list that still equals the defaults is collapsed back to the
+// nil "unconfigured" sentinel so saving the modal unchanged doesn't pin today's
+// defaults and forfeit exclude patterns added in future releases (see
+// config.CollapseDefaultExcludeGlobs).
 func (a *App) SaveFileWatchConfig(fw config.FileWatchConfig) error {
 	fw = config.ValidateFileWatchConfig(fw)
+	fw = config.CollapseDefaultExcludeGlobs(fw)
 	return config.Update(func(cfg *config.AppConfig) error {
 		cfg.FileWatch = fw
 		return nil

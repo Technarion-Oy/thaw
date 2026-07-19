@@ -82,7 +82,8 @@ type FileWatchConfig struct {
     RaiseFDLimit   bool     // opt-in: raise RLIMIT_NOFILE soft→hard when the watcher starts (no-op on Windows)
 }
 func DefaultFileWatchConfig() FileWatchConfig           // sensible exclude globs, no cap, FD-raise off
-func DefaultWatchExcludeGlobs() []string                // node_modules, venv, .venv, __pycache__, dist, build, target, .git/objects, *.dist-info
+func DefaultWatchExcludeGlobs() []string                // node_modules, venv, __pycache__, dist, build, target, *.dist-info (non-hidden only; hidden dirs are dropped upstream)
+func CollapseDefaultExcludeGlobs(fw FileWatchConfig) FileWatchConfig // persist path: reset ExcludeGlobs to nil when it still equals the defaults (keeps the "track defaults" sentinel)
 func FileWatchConfigWithDefaults(fw FileWatchConfig) FileWatchConfig // resolves a nil ExcludeGlobs to defaults (read path)
 func ValidateFileWatchConfig(fw FileWatchConfig) FileWatchConfig     // trims blank globs, clamps the cap ≥ 0 (write path)
 
