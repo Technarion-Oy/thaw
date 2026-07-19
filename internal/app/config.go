@@ -154,6 +154,34 @@ func (a *App) SaveNotebookPrefs(prefs config.NotebookPrefs) error {
 	})
 }
 
+// GetFileWatchConfig returns the persisted file-watcher controls, with
+// unconfigured fields (notably a never-set exclude-glob list) backfilled from
+// the defaults so the Preferences UI shows the effective values.
+func (a *App) GetFileWatchConfig() config.FileWatchConfig {
+	cfg, err := config.Load()
+	if err != nil {
+		return config.DefaultFileWatchConfig()
+	}
+	return config.FileWatchConfigWithDefaults(cfg.FileWatch)
+}
+
+// SaveFileWatchConfig validates and persists the file-watcher controls. The new
+// values take effect when the watcher is next (re)started — the frontend
+// restarts it after saving so changes apply without an app restart.
+func (a *App) SaveFileWatchConfig(fw config.FileWatchConfig) error {
+	fw = config.ValidateFileWatchConfig(fw)
+	return config.Update(func(cfg *config.AppConfig) error {
+		cfg.FileWatch = fw
+		return nil
+	})
+}
+
+// GetDefaultFileWatchConfig returns the out-of-the-box file-watcher controls
+// (for the Preferences "Reset to Defaults" button).
+func (a *App) GetDefaultFileWatchConfig() config.FileWatchConfig {
+	return config.DefaultFileWatchConfig()
+}
+
 // GetSessionConfig returns the persisted session management configuration.
 // Zero-value fields are backfilled with CPU-based defaults.
 func (a *App) GetSessionConfig() config.SessionConfig {

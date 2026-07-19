@@ -565,6 +565,8 @@ export function GetDatabaseRetentionDays(arg1:string):Promise<number>;
 
 export function GetDatabaseTableSummary(arg1:string):Promise<Array<table.TableSummary>>;
 
+export function GetDefaultFileWatchConfig():Promise<config.FileWatchConfig>;
+
 export function GetDefaultSessionConfig():Promise<config.SessionConfig>;
 
 export function GetERDiagramData(arg1:string):Promise<snowflake.ERDiagramData>;
@@ -576,6 +578,8 @@ export function GetEventTableParameters(arg1:string,arg2:string,arg3:string):Pro
 export function GetExternalFunctionOptions():Promise<externalfunction.BuilderOptions>;
 
 export function GetFeatureFlags():Promise<config.FeatureFlags>;
+
+export function GetFileWatchConfig():Promise<config.FileWatchConfig>;
 
 export function GetFunctionInfo(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.FunctionInfo>;
 
@@ -1050,6 +1054,8 @@ export function SaveEditorPrefs(arg1:config.EditorPrefs):Promise<void>;
 export function SaveFeatureFlags(arg1:config.FeatureFlags):Promise<void>;
 
 export function SaveFile(arg1:string,arg2:string):Promise<void>;
+
+export function SaveFileWatchConfig(arg1:config.FileWatchConfig):Promise<void>;
 
 export function SaveGitAuthor(arg1:string,arg2:string):Promise<void>;
 

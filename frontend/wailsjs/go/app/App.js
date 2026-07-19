@@ -986,6 +986,10 @@ export function GetDatabaseTableSummary(arg1) {
   return window['go']['app']['App']['GetDatabaseTableSummary'](arg1);
 }
 
+export function GetDefaultFileWatchConfig() {
+  return window['go']['app']['App']['GetDefaultFileWatchConfig']();
+}
+
 export function GetDefaultSessionConfig() {
   return window['go']['app']['App']['GetDefaultSessionConfig']();
 }
@@ -1008,6 +1012,10 @@ export function GetExternalFunctionOptions() {
 
 export function GetFeatureFlags() {
   return window['go']['app']['App']['GetFeatureFlags']();
+}
+
+export function GetFileWatchConfig() {
+  return window['go']['app']['App']['GetFileWatchConfig']();
 }
 
 export function GetFunctionInfo(arg1, arg2, arg3, arg4) {
@@ -1956,6 +1964,10 @@ export function SaveFeatureFlags(arg1) {
 
 export function SaveFile(arg1, arg2) {
   return window['go']['app']['App']['SaveFile'](arg1, arg2);
+}
+
+export function SaveFileWatchConfig(arg1) {
+  return window['go']['app']['App']['SaveFileWatchConfig'](arg1);
 }
 
 export function SaveGitAuthor(arg1, arg2) {

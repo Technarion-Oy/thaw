@@ -639,6 +639,22 @@ export namespace config {
 	        this.mcpServer = source["mcpServer"];
 	    }
 	}
+	export class FileWatchConfig {
+	    excludeGlobs: string[];
+	    maxWatchedDirs: number;
+	    raiseFDLimit: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new FileWatchConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.excludeGlobs = source["excludeGlobs"];
+	        this.maxWatchedDirs = source["maxWatchedDirs"];
+	        this.raiseFDLimit = source["raiseFDLimit"];
+	    }
+	}
 	export class GitConfig {
 	    exportDir: string;
 	    remoteURL: string;

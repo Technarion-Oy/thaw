@@ -12,6 +12,7 @@ import SnowparkSetupModal from "./components/snowpark/SnowparkSetupModal";
 import EditorPreferencesModal from "./components/editor/EditorPreferencesModal";
 import FeatureFlagsModal from "./components/settings/FeatureFlagsModal";
 import LoggingPreferencesModal from "./components/settings/LoggingPreferencesModal";
+import FileWatchingModal from "./components/settings/FileWatchingModal";
 import NotebookPrefsModal from "./components/notebook/NotebookPrefsModal";
 import SessionManagementModal from "./components/settings/SessionManagementModal";
 import MCPSessionsModal from "./components/settings/MCPSessionsModal";
@@ -40,6 +41,7 @@ export default function App() {
   const [aiModalOpen, setAiModalOpen]                 = useState(false);
   const [editorPrefsOpen, setEditorPrefsOpen]         = useState(false);
   const [loggingPrefsOpen, setLoggingPrefsOpen]       = useState(false);
+  const [fileWatchingOpen, setFileWatchingOpen]       = useState(false);
   const [snowparkCheckOpen, setSnowparkCheckOpen]       = useState(false);
   const [snowparkSetupOpen, setSnowparkSetupOpen]       = useState(false);
   const [featureFlagsOpen, setFeatureFlagsOpen]         = useState(false);
@@ -141,6 +143,12 @@ export default function App() {
   // Listen for "Logging Preferences…" menu event.
   useEffect(() => {
     const off = EventsOn("menu:logging-preferences", () => setLoggingPrefsOpen(true));
+    return () => off();
+  }, []);
+
+  // Listen for "File Watching…" menu event.
+  useEffect(() => {
+    const off = EventsOn("menu:file-watching", () => setFileWatchingOpen(true));
     return () => off();
   }, []);
 
@@ -403,6 +411,9 @@ export default function App() {
         )}
         {loggingPrefsOpen && (
           <LoggingPreferencesModal onClose={() => setLoggingPrefsOpen(false)} />
+        )}
+        {fileWatchingOpen && (
+          <FileWatchingModal onClose={() => setFileWatchingOpen(false)} />
         )}
         {snowparkCheckOpen && (
           <SnowparkCheckModal

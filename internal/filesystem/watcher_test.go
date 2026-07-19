@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -26,7 +27,7 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool) bool {
 
 func TestWatcher_LifecycleAndClose(t *testing.T) {
 	dir := t.TempDir()
-	w, err := NewWatcher(dir, func(FSChangeEvent) {})
+	w, err := NewWatcher(dir, WatchOptions{}, func(FSChangeEvent) {})
 	if err != nil {
 		t.Fatalf("NewWatcher: %v", err)
 	}
@@ -41,7 +42,7 @@ func TestWatcher_EmitsOnFileCreate(t *testing.T) {
 	var mu sync.Mutex
 	var events []FSChangeEvent
 
-	w, err := NewWatcher(dir, func(evt FSChangeEvent) {
+	w, err := NewWatcher(dir, WatchOptions{}, func(evt FSChangeEvent) {
 		mu.Lock()
 		events = append(events, evt)
 		mu.Unlock()
@@ -78,7 +79,7 @@ func TestWatcher_DebounceCoalescing(t *testing.T) {
 	var mu sync.Mutex
 	var events []FSChangeEvent
 
-	w, err := NewWatcher(dir, func(evt FSChangeEvent) {
+	w, err := NewWatcher(dir, WatchOptions{}, func(evt FSChangeEvent) {
 		mu.Lock()
 		events = append(events, evt)
 		mu.Unlock()
@@ -131,7 +132,7 @@ func TestWatcher_HiddenDirectoryExcluded(t *testing.T) {
 	var mu sync.Mutex
 	var events []FSChangeEvent
 
-	w, err := NewWatcher(dir, func(evt FSChangeEvent) {
+	w, err := NewWatcher(dir, WatchOptions{}, func(evt FSChangeEvent) {
 		mu.Lock()
 		events = append(events, evt)
 		mu.Unlock()
@@ -163,7 +164,7 @@ func TestWatcher_NewDirectoryAutoWatched(t *testing.T) {
 	var mu sync.Mutex
 	var events []FSChangeEvent
 
-	w, err := NewWatcher(dir, func(evt FSChangeEvent) {
+	w, err := NewWatcher(dir, WatchOptions{}, func(evt FSChangeEvent) {
 		mu.Lock()
 		events = append(events, evt)
 		mu.Unlock()
@@ -233,7 +234,7 @@ func TestWatcher_DeepTreeNoFDExhaustion(t *testing.T) {
 	var mu sync.Mutex
 	var events []FSChangeEvent
 
-	w, err := NewWatcher(root, func(evt FSChangeEvent) {
+	w, err := NewWatcher(root, WatchOptions{}, func(evt FSChangeEvent) {
 		mu.Lock()
 		events = append(events, evt)
 		mu.Unlock()
@@ -260,6 +261,141 @@ func TestWatcher_DeepTreeNoFDExhaustion(t *testing.T) {
 	})
 	if !ok {
 		t.Errorf("expected event for deep directory %q", deep)
+	}
+}
+
+func TestWatcher_ExcludeGlobsDropsEvents(t *testing.T) {
+	dir := t.TempDir()
+	excluded := filepath.Join(dir, "node_modules", "pkg")
+	if err := os.MkdirAll(excluded, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	included := filepath.Join(dir, "src")
+	if err := os.MkdirAll(included, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var mu sync.Mutex
+	var events []FSChangeEvent
+
+	w, err := NewWatcher(dir, WatchOptions{ExcludeGlobs: []string{"node_modules"}}, func(evt FSChangeEvent) {
+		mu.Lock()
+		events = append(events, evt)
+		mu.Unlock()
+	})
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+	defer w.Close()
+
+	// Drain any historical events FSEvents replays for the pre-start mkdirs, then
+	// start from a clean slate so the assertions only see our post-start writes.
+	time.Sleep(400 * time.Millisecond)
+	mu.Lock()
+	events = nil
+	mu.Unlock()
+
+	// A write under the excluded directory must NOT emit an event for that
+	// subtree. (We assert on the excluded path specifically rather than "zero
+	// events" because FSEvents can still replay unrelated historical root-level
+	// noise from the pre-start mkdirs, especially under -race's slowdown.)
+	if err := os.WriteFile(filepath.Join(excluded, "index.js"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond)
+	mu.Lock()
+	for _, e := range events {
+		if strings.Contains(e.Dir, "node_modules") {
+			t.Errorf("expected no events under excluded node_modules, got %q", e.Dir)
+		}
+	}
+	mu.Unlock()
+
+	// A write under a non-excluded directory must still emit.
+	if err := os.WriteFile(filepath.Join(included, "main.go"), []byte("y"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ok := waitFor(t, 2*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, e := range events {
+			if e.Dir == included {
+				return true
+			}
+		}
+		return false
+	})
+	if !ok {
+		t.Error("expected an event for the non-excluded src directory")
+	}
+}
+
+func TestWatcherExcluded(t *testing.T) {
+	w := &Watcher{opts: WatchOptions{ExcludeGlobs: []string{
+		"node_modules", "target", ".git/objects", "*.dist-info",
+	}}}
+	sep := string(filepath.Separator)
+	tests := []struct {
+		rel  string
+		want bool
+	}{
+		{"node_modules" + sep + "pkg" + sep + "index.js", true}, // component match at depth
+		{"target", true}, // component match at root
+		{"src" + sep + "target" + sep + "out", true},  // component match deeper
+		{".git" + sep + "objects" + sep + "ab", true}, // whole-path prefix pattern
+		{"foo.dist-info" + sep + "METADATA", true},    // glob component match
+		{"src" + sep + "main.go", false},              // no match
+		{"targeted" + sep + "x", false},               // must not partial-match "target"
+	}
+	for _, tc := range tests {
+		if got := w.excluded(tc.rel); got != tc.want {
+			t.Errorf("excluded(%q) = %v, want %v", tc.rel, got, tc.want)
+		}
+	}
+
+	// No configured globs → nothing excluded.
+	none := &Watcher{}
+	if none.excluded("node_modules" + sep + "x") {
+		t.Error("excluded should be false when no globs are configured")
+	}
+}
+
+func TestWatcher_MaxWatchedDirsCap(t *testing.T) {
+	// With a cap of 1, the first directory emitted for is tracked; a second,
+	// distinct directory is dropped. Drive scheduleEmit directly to keep the
+	// assertion deterministic (no dependence on OS event ordering).
+	var mu sync.Mutex
+	var emitted []string
+	w := &Watcher{
+		emit:     func(e FSChangeEvent) { mu.Lock(); emitted = append(emitted, e.Dir); mu.Unlock() },
+		stopCh:   make(chan struct{}),
+		timers:   make(map[string]*time.Timer),
+		seenDirs: make(map[string]struct{}),
+		opts:     WatchOptions{MaxWatchedDirs: 1},
+	}
+	w.scheduleEmit("/a") // first distinct dir → tracked
+	w.scheduleEmit("/b") // second distinct dir → dropped by cap
+	w.scheduleEmit("/a") // already tracked → still allowed
+
+	ok := waitFor(t, 2*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(emitted) >= 1
+	})
+	if !ok {
+		t.Fatal("expected at least one debounced emit")
+	}
+	time.Sleep(300 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	for _, d := range emitted {
+		if d == "/b" {
+			t.Errorf("directory /b should have been dropped by the cap, but was emitted; emitted=%v", emitted)
+		}
+	}
+	if len(emitted) == 0 {
+		t.Error("expected /a to be emitted")
 	}
 }
 
