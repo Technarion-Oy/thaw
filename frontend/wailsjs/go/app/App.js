@@ -2106,6 +2106,10 @@ export function StopShell() {
   return window['go']['app']['App']['StopShell']();
 }
 
+export function SubmitMFACode(arg1, arg2) {
+  return window['go']['app']['App']['SubmitMFACode'](arg1, arg2);
+}
+
 export function SuspendTaskGraph(arg1, arg2, arg3) {
   return window['go']['app']['App']['SuspendTaskGraph'](arg1, arg2, arg3);
 }

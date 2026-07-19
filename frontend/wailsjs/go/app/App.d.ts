@@ -1125,6 +1125,8 @@ export function StopNotebookSession(arg1:string):Promise<void>;
 
 export function StopShell():Promise<void>;
 
+export function SubmitMFACode(arg1:string,arg2:string):Promise<void>;
+
 export function SuspendTaskGraph(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function SuspendTaskList(arg1:string,arg2:string,arg3:Array<string>):Promise<void>;

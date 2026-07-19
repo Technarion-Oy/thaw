@@ -99,6 +99,13 @@ type App struct {
 	sessionIdleTimeout time.Duration
 	sessionIdleStopCh  chan struct{}
 
+	// Pending interactive MFA-code prompts, keyed by request id. promptMFACode
+	// registers a response channel and emits "mfa:prompt-code"; SubmitMFACode
+	// delivers the user's code back. See mfaprompt.go and issue #804.
+	mfaPromptsMu sync.Mutex
+	mfaPrompts   map[string]chan string
+	mfaPromptSeq atomic.Uint64
+
 	// Git repository commit filters (repoKey -> commitHash).
 	// repoKey format: "db.schema.repo"
 	gitCommitFiltersMu sync.Mutex
@@ -322,7 +329,7 @@ func (a *App) getOrInitTabSession(tabId string) (*tabSession, error) {
 	}
 	logger.L.Info("creating new tab session", "tabId", tabId)
 	a.evictIfNeeded()
-	client, err := snowflake.NewClient(a.ctx, *params)
+	client, err := snowflake.NewClient(a.ctx, *params, snowflake.WithPasscodePrompt(a.promptMFACode))
 	if err != nil {
 		tabSessionInitMu.Unlock()
 		return nil, err
@@ -553,7 +560,7 @@ func (a *App) Connect(params snowflake.ConnectParams) error {
 	}()
 
 	logger.L.Info("connecting to Snowflake", "account", params.Account, "user", params.User, "authenticator", params.Authenticator)
-	client, err := snowflake.NewClient(ctx, params)
+	client, err := snowflake.NewClient(ctx, params, snowflake.WithPasscodePrompt(a.promptMFACode))
 	if err != nil {
 		if ctx.Err() != nil {
 			logger.L.Info("connection canceled by user")

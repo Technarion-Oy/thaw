@@ -6,7 +6,9 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -23,9 +25,11 @@ import (
 type recordingConnector struct {
 	inFlight atomic.Int32
 	peak     atomic.Int32
+	calls    atomic.Int32
 }
 
 func (r *recordingConnector) Connect(context.Context) (driver.Conn, error) {
+	r.calls.Add(1)
 	n := r.inFlight.Add(1)
 	for {
 		p := r.peak.Load()
@@ -156,5 +160,86 @@ func TestSerializedLoginLogKeyRegistered(t *testing.T) {
 	// The driver's own keys must be preserved (append, not replace).
 	if !slices.Contains(keys, sf.SFSessionIDKey) {
 		t.Errorf("driver LOG_SESSION_ID key was clobbered; GetLogKeys()=%v", keys)
+	}
+}
+
+// TestConnectBaseRelogin covers the single-connection + re-prompt flow (issue
+// #804): the first login uses the base connector (the credential captured at
+// connect time); a re-login re-prompts for a fresh code (typed TOTP), errors
+// with ErrMFAReauthRequired when no prompt is available, or re-triggers a push
+// (no passcode) via the base connector.
+func TestConnectBaseRelogin(t *testing.T) {
+	t.Run("typed TOTP re-prompts on re-login", func(t *testing.T) {
+		rec := &recordingConnector{}
+		prompts := 0
+		sc := &sessionConnector{
+			base:          rec,
+			loginGate:     make(chan struct{}, 1),
+			needsPasscode: true,
+			promptPasscode: func(context.Context) (string, error) {
+				prompts++
+				return "", errors.New("prompt refused") // avoid a real connector rebuild
+			},
+		}
+		if _, err := sc.connectBase(context.Background()); err != nil {
+			t.Fatalf("first login: %v", err)
+		}
+		if rec.calls.Load() != 1 || prompts != 0 {
+			t.Fatalf("first login should use base once, no prompt (calls=%d prompts=%d)", rec.calls.Load(), prompts)
+		}
+		_, err := sc.connectBase(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "prompt refused") {
+			t.Fatalf("re-login should surface the prompt error, got %v", err)
+		}
+		if rec.calls.Load() != 1 || prompts != 1 {
+			t.Fatalf("re-login should prompt, not reuse base (calls=%d prompts=%d)", rec.calls.Load(), prompts)
+		}
+	})
+
+	t.Run("typed TOTP without prompt returns ErrMFAReauthRequired", func(t *testing.T) {
+		rec := &recordingConnector{}
+		sc := &sessionConnector{base: rec, loginGate: make(chan struct{}, 1), needsPasscode: true}
+		if _, err := sc.connectBase(context.Background()); err != nil {
+			t.Fatalf("first login: %v", err)
+		}
+		_, err := sc.connectBase(context.Background())
+		if !errors.Is(err, ErrMFAReauthRequired) {
+			t.Fatalf("expected ErrMFAReauthRequired, got %v", err)
+		}
+		if rec.calls.Load() != 1 {
+			t.Fatalf("base should not be reused with the spent passcode (calls=%d)", rec.calls.Load())
+		}
+	})
+
+	t.Run("push MFA re-logs in via base", func(t *testing.T) {
+		rec := &recordingConnector{}
+		sc := &sessionConnector{base: rec, loginGate: make(chan struct{}, 1)} // needsPasscode=false
+		if _, err := sc.connectBase(context.Background()); err != nil {
+			t.Fatalf("first login: %v", err)
+		}
+		if _, err := sc.connectBase(context.Background()); err != nil {
+			t.Fatalf("re-login: %v", err)
+		}
+		if rec.calls.Load() != 2 {
+			t.Fatalf("push re-login should call base again (calls=%d)", rec.calls.Load())
+		}
+	})
+}
+
+// TestCloneConfigWithPasscode verifies the rebuilt config gets the fresh code and
+// a private Params map (so re-login can't mutate the base connector's map).
+func TestCloneConfigWithPasscode(t *testing.T) {
+	v := "true"
+	base := sf.Config{Passcode: "old", Params: map[string]*string{"client_session_keep_alive": &v}}
+	got := cloneConfigWithPasscode(base, "new")
+	if got.Passcode != "new" {
+		t.Errorf("Passcode = %q, want new", got.Passcode)
+	}
+	if base.Passcode != "old" {
+		t.Errorf("base mutated: Passcode = %q, want old", base.Passcode)
+	}
+	got.Params["extra"] = &v
+	if _, ok := base.Params["extra"]; ok {
+		t.Error("clone shares Params map with base")
 	}
 }

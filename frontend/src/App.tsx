@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { useEffect, useState } from "react";
-import { App as AntApp, Button, ConfigProvider, theme, message, notification } from "antd";
+import { App as AntApp, Button, ConfigProvider, Input, Modal, theme, message, notification } from "antd";
 import AppLayout from "./components/layout/AppLayout";
 import { useConnectionStore } from "./store/connectionStore";
 import ConnectModal from "./components/connection/ConnectModal";
@@ -19,7 +19,7 @@ import MCPSessionsModal from "./components/settings/MCPSessionsModal";
 import AboutModal from "./components/help/AboutModal";
 import UpdateNotification from "./components/help/UpdateNotification";
 import LicenseAgreement from "./components/setup/LicenseAgreement";
-import { IsConnected, IsLicenseAccepted } from "../wailsjs/go/app/App";
+import { IsConnected, IsLicenseAccepted, SubmitMFACode } from "../wailsjs/go/app/App";
 import { ClipboardGetText, ClipboardSetText, EventsOn } from "../wailsjs/runtime/runtime";
 import { useMonaco } from "@monaco-editor/react";
 import { useThemeStore, type ThemePreference } from "./store/themeStore";
@@ -54,6 +54,12 @@ export default function App() {
   const [licenseAccepted, setLicenseAccepted]           = useState<boolean | null>(null);
   const diffError    = useDiffStore((s) => s.error);
   const clearDiffError = useDiffStore((s) => s.clearError);
+
+  // Interactive MFA re-prompt: the backend emits "mfa:prompt-code" when a
+  // passcode-authenticated session must re-login (its lone connection was lost)
+  // and needs a fresh one-time code. mfaPrompt holds the pending request.
+  const [mfaPrompt, setMfaPrompt] = useState<{ requestId: string; user: string; account: string } | null>(null);
+  const [mfaCode, setMfaCode] = useState("");
 
   // Whether the Zustand persist store has finished hydrating from sessionStorage.
   // We hold off rendering AppLayout until we know the true persisted state so
@@ -169,6 +175,20 @@ export default function App() {
       setLayoutModalOpen(true);
     });
     return () => off();
+  }, []);
+
+  // Interactive MFA re-prompt. "mfa:prompt-code" opens the code modal;
+  // "mfa:prompt-close" (timeout / ctx cancel on the backend) dismisses it if
+  // still open for that request. See issue #804.
+  useEffect(() => {
+    const offPrompt = EventsOn("mfa:prompt-code", (p: { requestId: string; user: string; account: string }) => {
+      setMfaCode("");
+      setMfaPrompt(p);
+    });
+    const offClose = EventsOn("mfa:prompt-close", (requestId: string) => {
+      setMfaPrompt((cur) => (cur && cur.requestId === requestId ? null : cur));
+    });
+    return () => { offPrompt(); offClose(); };
   }, []);
 
   // Listen for "Configure AI Inline Completions…" — from both the native menu (Wails event) and
@@ -484,6 +504,43 @@ export default function App() {
         )}
         {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
         <UpdateNotification />
+        <Modal
+          open={!!mfaPrompt}
+          title="Enter a new MFA code"
+          okText="Submit"
+          okButtonProps={{ disabled: mfaCode.trim() === "" }}
+          onOk={() => {
+            if (mfaPrompt) void SubmitMFACode(mfaPrompt.requestId, mfaCode.trim());
+            setMfaPrompt(null);
+          }}
+          onCancel={() => {
+            if (mfaPrompt) void SubmitMFACode(mfaPrompt.requestId, "");
+            setMfaPrompt(null);
+          }}
+          destroyOnClose
+          maskClosable={false}
+        >
+          <p style={{ marginTop: 0 }}>
+            Thaw needs a fresh one-time MFA code to reconnect
+            {mfaPrompt?.user ? <> as <strong>{mfaPrompt.user}</strong></> : null}. Enter the
+            current code from your authenticator app.
+          </p>
+          <Input
+            autoFocus
+            value={mfaCode}
+            onChange={(e) => setMfaCode(e.target.value)}
+            onPressEnter={() => {
+              if (mfaPrompt && mfaCode.trim() !== "") {
+                void SubmitMFACode(mfaPrompt.requestId, mfaCode.trim());
+                setMfaPrompt(null);
+              }
+            }}
+            placeholder="6-digit code"
+            maxLength={8}
+            inputMode="numeric"
+            autoComplete="one-time-code"
+          />
+        </Modal>
       </AntApp>
     </ConfigProvider>
   );

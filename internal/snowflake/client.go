@@ -178,6 +178,19 @@ type sessionConnector struct {
 	// as a *cancelable* mutex, shared process-wide across all Clients for the
 	// same account+user (see loginGateFor). Non-MFA auth is unaffected.
 	loginGate chan struct{}
+
+	// Interactive passcode re-prompt (single-use-credential auth only). When
+	// promptPasscode is non-nil, the first login uses the credential captured at
+	// connect time and each subsequent login — after the pool's single
+	// connection is lost to the server session timeout / a network drop —
+	// prompts for a fresh one-time passcode and logs in with a connector rebuilt
+	// from baseCfg. firstLoginDone gates first-vs-subsequent. needsPasscode marks
+	// typed-TOTP auth (vs. password-only device push, which re-logs-in via base
+	// without a typed code). See issue #804.
+	promptPasscode PasscodeFunc
+	baseCfg        sf.Config
+	needsPasscode  bool
+	firstLoginDone atomic.Bool
 }
 
 // Login-handshake serialization for MFA auth. gosnowflake caches the MFA token
@@ -225,6 +238,32 @@ func loginGateFor(account, user string) chan struct{} {
 func shouldSerializeLogins(auth sf.AuthType, hasPasscode bool) bool {
 	return auth == sf.AuthTypeUsernamePasswordMFA ||
 		(auth == sf.AuthTypeSnowflake && hasPasscode)
+}
+
+// PasscodeFunc prompts the user for a fresh one-time MFA/TOTP passcode when a
+// re-login is needed (the previous single-use code is spent). It returns the new
+// code, or an error — including context cancellation or the user cancelling — to
+// abort the login. See issue #804.
+type PasscodeFunc func(ctx context.Context) (string, error)
+
+// ErrMFAReauthRequired is returned when a serialized passcode login needs a fresh
+// one-time code but no PasscodeFunc was supplied to obtain one.
+var ErrMFAReauthRequired = errors.New("MFA re-authentication required: reconnect and enter a new one-time passcode")
+
+type clientOption struct {
+	promptPasscode PasscodeFunc
+}
+
+// ClientOption configures optional NewClient behavior.
+type ClientOption func(*clientOption)
+
+// WithPasscodePrompt supplies a callback used to obtain a fresh one-time MFA
+// passcode when a passcode-authenticated session must re-login (its original
+// single-use code is spent — e.g. the lone pooled connection was lost to the
+// server's session timeout). Without it, such a re-login fails with
+// ErrMFAReauthRequired instead of reusing the spent code.
+func WithPasscodePrompt(fn PasscodeFunc) ClientOption {
+	return func(o *clientOption) { o.promptPasscode = fn }
 }
 
 // Connect opens a new raw driver connection via the underlying gosnowflake
@@ -298,7 +337,55 @@ func (sc *sessionConnector) connectBase(ctx context.Context) (driver.Conn, error
 	// outside the gate. The driver logs auth errors synchronously inside Connect
 	// (via WithContext(ctx)), so the failing records carry this tag.
 	ctx = context.WithValue(ctx, serializedLoginLogKey, "1")
+
+	// The first login uses the credential captured at connect time (the passcode
+	// typed in the connect dialog, or the driver's password-only device push).
+	if sc.firstLoginDone.CompareAndSwap(false, true) {
+		conn, err := sc.base.Connect(ctx)
+		if err != nil {
+			sc.firstLoginDone.Store(false) // let the next attempt try afresh
+		}
+		return conn, err
+	}
+
+	// Re-login: the pool's single connection was lost (server session timeout,
+	// network drop) and any typed one-time passcode is spent.
+	if sc.needsPasscode {
+		// Typed-TOTP auth: the spent code can't be reused. Ask the user for a
+		// fresh one and log in with a connector rebuilt from it. Serialized by
+		// the gate, so at most one prompt is in flight.
+		if sc.promptPasscode == nil {
+			return nil, ErrMFAReauthRequired
+		}
+		code, err := sc.promptPasscode(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return sc.connectorWithPasscode(code).Connect(ctx)
+	}
+	// Push MFA (no typed passcode): re-login via the base connector re-triggers a
+	// device push, which the user approves — no typed prompt needed.
 	return sc.base.Connect(ctx)
+}
+
+// connectorWithPasscode builds a one-off connector from baseCfg with a fresh
+// one-time passcode.
+func (sc *sessionConnector) connectorWithPasscode(code string) driver.Connector {
+	return sf.NewConnector(&sf.SnowflakeDriver{}, cloneConfigWithPasscode(sc.baseCfg, code))
+}
+
+// cloneConfigWithPasscode returns a copy of base with Passcode replaced and a
+// private Params map, so the rebuilt connector never shares or mutates the base
+// connector's map.
+func cloneConfigWithPasscode(base sf.Config, code string) sf.Config {
+	cfg := base
+	cfg.Passcode = code
+	params := make(map[string]*string, len(base.Params))
+	for k, v := range base.Params {
+		params[k] = v
+	}
+	cfg.Params = params
+	return cfg
 }
 
 // Driver returns the underlying gosnowflake driver. Required by driver.Connector.
@@ -407,7 +494,11 @@ const objectCacheTTL = 30 * time.Second
 
 // NewClient opens a new Snowflake connection. The provided context can be
 // canceled to abort the login handshake (useful for MFA/browser flows).
-func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
+func NewClient(ctx context.Context, p ConnectParams, opts ...ClientOption) (*Client, error) {
+	var o clientOption
+	for _, opt := range opts {
+		opt(&o)
+	}
 	authMap := map[string]sf.AuthType{
 		"username_password_mfa":     sf.AuthTypeUsernamePasswordMFA,
 		"externalbrowser":           sf.AuthTypeExternalBrowser,
@@ -567,6 +658,14 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 	// the dedicated MFA authenticator. See shouldSerializeLogins and issue #804.
 	if shouldSerializeLogins(auth, p.Passcode != "") {
 		sc.loginGate = loginGateFor(p.Account, p.User)
+		// Typed-TOTP auth needs a fresh code on every re-login; push MFA (no
+		// passcode) re-logins via the base connector trigger a fresh device push
+		// instead, so no typed prompt is needed.
+		if p.Passcode != "" {
+			sc.needsPasscode = true
+			sc.promptPasscode = o.promptPasscode // may be nil → ErrMFAReauthRequired on re-login
+			sc.baseCfg = *cfg
+		}
 	}
 
 	db := sql.OpenDB(sc)
@@ -578,22 +677,25 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 	// MaxOpenConns prevents connection churn that creates zombie sessions.
 	// Use SetPoolLimits(32, 32) for bulk operations like DDL export.
 	maxOpen, maxIdle := DefaultMaxOpenConns, DefaultMaxIdleConns
+	connMaxLifetime := 30 * time.Minute
+	connMaxIdleTime := 5 * time.Minute
 	if sc.loginGate != nil {
 		// Single-use MFA credential (loginGate set — MFA auth, or password auth
-		// with a TOTP passcode): keep the pool small. Every new physical
-		// connection is a fresh login, which only succeeds seamlessly when the
-		// account has ALLOW_CLIENT_MFA_CACHING = TRUE and the dedicated MFA
-		// authenticator is used (so the driver can reuse a cached token);
-		// otherwise it falls back to the single-use passcode, which can't be
-		// replayed and fails. A small pool minimizes those logins — and the
-		// "Authentication FAILED" churn / MFA-rate-limit exposure — during
-		// connection bursts (post-connect metadata listing, DDL export). #804.
+		// with a TOTP passcode): pin the session to ONE non-recycling connection
+		// so exactly one login happens per session. A wider pool or recycling
+		// would force fresh logins that reuse the spent one-time passcode and
+		// fail — repeatedly, risking an account lock. The lone connection is kept
+		// alive by ServerSessionKeepAlive until the server's ~4h session timeout;
+		// when it is eventually lost, connectBase re-prompts for a fresh code
+		// (passcode auth) or re-triggers a device push (push MFA). #804.
 		maxOpen, maxIdle = MFAMaxOpenConns, MFAMaxOpenConns
+		connMaxLifetime = 0 // never force-recycle the lone connection
+		connMaxIdleTime = 0 // never close it for being idle
 	}
 	db.SetMaxOpenConns(maxOpen)
 	db.SetMaxIdleConns(maxIdle)
-	db.SetConnMaxLifetime(30 * time.Minute)
-	db.SetConnMaxIdleTime(5 * time.Minute)
+	db.SetConnMaxLifetime(connMaxLifetime)
+	db.SetConnMaxIdleTime(connMaxIdleTime)
 
 	if err := db.PingContext(ctx); err != nil {
 		db.Close() //nolint:errcheck
@@ -623,12 +725,14 @@ const DefaultMaxOpenConns = 8
 // DefaultMaxIdleConns is the shared client's default MaxIdleConns (used by NewClient).
 const DefaultMaxIdleConns = 8
 
-// MFAMaxOpenConns caps the pool for connections that reuse a single-use MFA
-// credential (loginGate set — MFA auth, or password auth with a TOTP passcode).
-// Every new physical connection is a fresh login (expensive and failure-prone
-// unless the account allows MFA-token caching), so bulk callers that ask for a
-// wide pool are clamped to this to avoid a wave of re-auths. See issue #804.
-const MFAMaxOpenConns = 4
+// MFAMaxOpenConns pins the pool for connections that reuse a single-use MFA
+// credential (loginGate set — MFA auth, or password auth with a TOTP passcode)
+// to a single connection. Every new physical connection is a fresh login that
+// reuses the spent one-time passcode and fails, so the session is held on one
+// non-recycling connection and re-authenticated interactively only when it is
+// actually lost (see connectBase / WithPasscodePrompt). Bulk callers that ask
+// for a wide pool are clamped to this. See issue #804.
+const MFAMaxOpenConns = 1
 
 // SetPoolLimits overrides the connection pool's MaxOpenConns and MaxIdleConns.
 // Tab sessions use smaller limits (e.g. 4/1) since they only run one query at

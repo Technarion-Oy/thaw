@@ -64,7 +64,7 @@ func (a *App) StartMCPSession(label, mode string, port int, role, warehouse, sec
 
 	// Each session owns an isolated client so it survives independently of the
 	// UI tab sessions and is closed when the session stops.
-	client, err := snowflake.NewClient(a.ctx, *params)
+	client, err := snowflake.NewClient(a.ctx, *params, snowflake.WithPasscodePrompt(a.promptMFACode))
 	if err != nil {
 		return mcp.SessionInfo{}, fmt.Errorf("mcp: failed to open connection: %w", err)
 	}
