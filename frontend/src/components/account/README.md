@@ -20,7 +20,7 @@ Provides the UI for administering Snowflake account objects that are not schema-
 | `IntegrationModifyModal.tsx` | Modal for `ALTER INTEGRATION` property changes; calls `AlterIntegration` IPC. |
 | `QueryHistoryModal.tsx` | Searchable/paginated query history table; calls `GetQueryHistory` IPC (backed by `internal/queryhistory`). Opens on the **current user / today** by default (time range pre-filled and adjustable). Scope switches between session (free-text Session ID box), user, warehouse, or all. Each expanded row shows its **Session ID** with a **Filter by this session** drill-down action; the session scope's Run stays disabled until an id is entered, so it never silently queries the pooled metadata connection. Gated behind `queryActivityHistory` feature flag. |
 | `WarehouseMeteringModal.tsx` | Credit-usage charts and table for a selected warehouse; calls `GetWarehouseMeteringHistory` IPC (backed by `internal/warehouse`). Gated behind `warehouseCreditUsage` feature flag. |
-| `WarehousePropertiesModal.tsx` | Displays and allows editing of warehouse properties; calls `GetObjectProperties` and `AlterWarehouseProperty` IPC methods; uses `PropertiesModal` from `common/` for the property table. Gated behind `warehouseManagement` feature flag. |
+| `WarehousePropertiesModal.tsx` | Displays and allows editing of warehouse properties; calls `GetObjectProperties` and `AlterWarehouseProperty` IPC methods; uses `PropertiesModal` from `common/` for the property table. A **Parameters…** footer button opens the shared `ObjectParametersModal` (`objectType="WAREHOUSE"`) for the full, searchable, editable parameter list (issue #813). Gated behind `warehouseManagement` feature flag. |
 
 ## Patterns & integration
 

@@ -7,11 +7,15 @@ import (
 	"strings"
 )
 
-// SessionParam holds one row from SHOW PARAMETERS.
+// SessionParam holds one row from SHOW PARAMETERS. Level records where the
+// current value is set (e.g. "ACCOUNT", "DATABASE", "SCHEMA", "WAREHOUSE", or ""
+// when the default applies) — the object-parameter editor uses it to highlight
+// values overridden at the object vs inherited from a higher scope.
 type SessionParam struct {
 	Key         string `json:"key"`
 	Value       string `json:"value"`
 	Type        string `json:"type"`
+	Level       string `json:"level"`
 	Description string `json:"description"`
 }
 
@@ -69,13 +73,27 @@ func (c *Client) GetAccountParameters(ctx context.Context) ([]SessionParam, erro
 	return parseParameters(res), nil
 }
 
-// parseParameters extracts the key/value/type/description columns from a
+// GetParametersIn runs SHOW PARAMETERS IN <target> and returns the parsed rows.
+// target is the object clause the caller builds from a validated object type and
+// quoted identifier parts — e.g. `DATABASE "d"`, `SCHEMA "d"."s"`,
+// `WAREHOUSE "w"`. Unprivileged roles may see limited or no rows, surfaced as an
+// empty (non-nil) slice rather than an error, mirroring GetAccountParameters.
+func (c *Client) GetParametersIn(ctx context.Context, target string) ([]SessionParam, error) {
+	res, err := c.Execute(ctx, "SHOW PARAMETERS IN "+target)
+	if err != nil {
+		return nil, err
+	}
+	return parseParameters(res), nil
+}
+
+// parseParameters extracts the key/value/type/level/description columns from a
 // SHOW PARAMETERS result. Columns: key, value, default, level, description,
 // type. Always returns a non-nil slice.
 func parseParameters(res *QueryResult) []SessionParam {
 	keyIdx := ColIdx(res.Columns, "key", "name")
 	valIdx := ColIdx(res.Columns, "value")
 	typIdx := ColIdx(res.Columns, "type")
+	lvlIdx := ColIdx(res.Columns, "level")
 	descIdx := ColIdx(res.Columns, "description")
 
 	var params []SessionParam
@@ -83,9 +101,10 @@ func parseParameters(res *QueryResult) []SessionParam {
 		key := Cell(row, keyIdx)
 		val := Cell(row, valIdx)
 		typ := Cell(row, typIdx)
+		lvl := Cell(row, lvlIdx)
 		desc := Cell(row, descIdx)
 		if key != "" {
-			params = append(params, SessionParam{Key: key, Value: val, Type: typ, Description: desc})
+			params = append(params, SessionParam{Key: key, Value: val, Type: typ, Level: lvl, Description: desc})
 		}
 	}
 	if params == nil {

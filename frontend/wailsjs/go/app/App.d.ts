@@ -631,6 +631,8 @@ export function GetObjectDDL(arg1:string,arg2:string,arg3:string,arg4:string,arg
 
 export function GetObjectDependencies(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<snowflake.DependencyNode>;
 
+export function GetObjectParameters(arg1:string,arg2:Array<string>):Promise<Array<snowflake.SessionParam>>;
+
 export function GetObjectProperties(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<snowflake.PropertyPair>>;
 
 export function GetObjectTagReferences(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<snowflake.QueryResult>;
@@ -1097,6 +1099,8 @@ export function SetGitCommitFilter(arg1:string,arg2:string,arg3:string,arg4:stri
 
 export function SetNotebookQueryWarehouse(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
+export function SetObjectParameter(arg1:string,arg2:Array<string>,arg3:string,arg4:string,arg5:string):Promise<void>;
+
 export function SetObjectTag(arg1:tag.ObjectTagRef,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
 export function SetQueryLogEnabled(arg1:boolean):Promise<void>;
@@ -1140,6 +1144,8 @@ export function TaskHasChildren(arg1:string,arg2:string,arg3:string):Promise<boo
 export function TestAIModel(arg1:string,arg2:string,arg3:string,arg4:number,arg5:number):Promise<string>;
 
 export function UninstallEnvPackage(arg1:string):Promise<void>;
+
+export function UnsetObjectParameter(arg1:string,arg2:Array<string>,arg3:string):Promise<void>;
 
 export function UnsetObjectTag(arg1:tag.ObjectTagRef,arg2:string,arg3:string,arg4:string):Promise<void>;
 

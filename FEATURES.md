@@ -947,6 +947,11 @@ Right-click any warehouse in the Administration panel and choose **Properties** 
   - Searchable table filtered in real time by parameter name; hovering the parameter name shows its Snowflake description in a tooltip; a **Copy** button copies all rows to the clipboard
   - **Editing** — boolean parameters render as a toggle switch; all others show a pencil button that opens an inline input with Save / Cancel; changes apply via `ALTER ACCOUNT SET` (string values auto-quoted, booleans/numbers passed raw)
   - Editing account parameters requires the ACCOUNTADMIN role — a save by an insufficiently-privileged role fails with the Snowflake privilege error shown inline, leaving the displayed value unchanged; unprivileged roles that see limited or no rows get a graceful "no account parameters visible" message rather than an error
+- **Object Parameters** — the Database, Schema, and Warehouse **Properties** modals each have a **Parameters…** button that opens the full, searchable list of every parameter for that object (`SHOW PARAMETERS IN DATABASE / SCHEMA / WAREHOUSE`), beyond the curated subset the properties view surfaces:
+  - Searchable by name with description tooltips and **Copy**-all, matching the Account/Session parameters views
+  - A **Level** column highlights where each value is set — a green tag (e.g. `DATABASE`) marks a value overridden at **this** object, a muted tag marks one inherited from a higher scope (account/database/…), and `default` marks an unset parameter
+  - **Editing** — booleans render as staged toggle switches, other parameters as inline text inputs; changes apply via `ALTER <OBJECT-TYPE> <name> SET`. Values overridden at this object show a **reset** button that issues `ALTER … UNSET` to revert to the inherited value
+  - Editing requires ownership or the relevant privilege on the object — an unprivileged save fails with the Snowflake privilege error shown inline, leaving the value unchanged; roles that see limited or no rows get a graceful "no parameters visible" message
 - **Session Management** — open **Tools → Session Management…** to configure:
   - **Max concurrent sessions** (1–32) — LRU cap; excess idle sessions are evicted
   - **Max open connections per session** (1–16) — `database/sql` MaxOpenConns per tab pool

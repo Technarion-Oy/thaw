@@ -1118,6 +1118,10 @@ export function GetObjectDependencies(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['GetObjectDependencies'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function GetObjectParameters(arg1, arg2) {
+  return window['go']['app']['App']['GetObjectParameters'](arg1, arg2);
+}
+
 export function GetObjectProperties(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['GetObjectProperties'](arg1, arg2, arg3, arg4);
 }
@@ -2050,6 +2054,10 @@ export function SetNotebookQueryWarehouse(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['SetNotebookQueryWarehouse'](arg1, arg2, arg3, arg4);
 }
 
+export function SetObjectParameter(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['app']['App']['SetObjectParameter'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function SetObjectTag(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['SetObjectTag'](arg1, arg2, arg3, arg4, arg5);
 }
@@ -2136,6 +2144,10 @@ export function TestAIModel(arg1, arg2, arg3, arg4, arg5) {
 
 export function UninstallEnvPackage(arg1) {
   return window['go']['app']['App']['UninstallEnvPackage'](arg1);
+}
+
+export function UnsetObjectParameter(arg1, arg2, arg3) {
+  return window['go']['app']['App']['UnsetObjectParameter'](arg1, arg2, arg3);
 }
 
 export function UnsetObjectTag(arg1, arg2, arg3, arg4) {

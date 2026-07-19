@@ -4996,6 +4996,7 @@ export namespace snowflake {
 	    key: string;
 	    value: string;
 	    type: string;
+	    level: string;
 	    description: string;
 	
 	    static createFrom(source: any = {}) {
@@ -5007,6 +5008,7 @@ export namespace snowflake {
 	        this.key = source["key"];
 	        this.value = source["value"];
 	        this.type = source["type"];
+	        this.level = source["level"];
 	        this.description = source["description"];
 	    }
 	}
