@@ -50,7 +50,7 @@ func registerProfileTools(srv *mcpsdk.Server, client *snowflake.Client) {
 		Name: "get_explain_diagnostics",
 		Description: "Run EXPLAIN on a SQL statement and return only the performance diagnostics " +
 			"(full partition scans, cartesian joins, row explosion warnings). " +
-			"Lighter than explain_query when you only need the warnings, not the full plan tree.",
+			"Returns only the diagnostics (smaller response) — same EXPLAIN execution as explain_query.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in explainInput) (*mcpsdk.CallToolResult, any, error) {
 		sql := strings.TrimSpace(in.SQL)
 		if sql == "" {
