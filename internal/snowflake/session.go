@@ -53,8 +53,26 @@ func (c *Client) GetSessionParameters(ctx context.Context) ([]SessionParam, erro
 	if err != nil {
 		return nil, err
 	}
+	return parseParameters(res), nil
+}
 
-	// SHOW PARAMETERS columns: key, value, default, level, description, type
+// GetAccountParameters returns the account-level parameters from
+// SHOW PARAMETERS IN ACCOUNT. Unprivileged roles may see limited or no rows;
+// that is surfaced as an empty (non-nil) slice rather than an error, so the
+// caller can render a graceful "no parameters" state. Altering these requires
+// ALTER ACCOUNT SET and ACCOUNTADMIN, so this view is read-only.
+func (c *Client) GetAccountParameters(ctx context.Context) ([]SessionParam, error) {
+	res, err := c.Execute(ctx, "SHOW PARAMETERS IN ACCOUNT")
+	if err != nil {
+		return nil, err
+	}
+	return parseParameters(res), nil
+}
+
+// parseParameters extracts the key/value/type/description columns from a
+// SHOW PARAMETERS result. Columns: key, value, default, level, description,
+// type. Always returns a non-nil slice.
+func parseParameters(res *QueryResult) []SessionParam {
 	keyIdx := ColIdx(res.Columns, "key", "name")
 	valIdx := ColIdx(res.Columns, "value")
 	typIdx := ColIdx(res.Columns, "type")
@@ -73,7 +91,7 @@ func (c *Client) GetSessionParameters(ctx context.Context) ([]SessionParam, erro
 	if params == nil {
 		params = []SessionParam{}
 	}
-	return params, nil
+	return params
 }
 
 // GetSessionVariables returns the current session variables from SHOW VARIABLES.

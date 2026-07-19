@@ -38,6 +38,8 @@ export interface ToolbarProps {
   onDisconnect: () => void;
   /** Handler: open session properties modal. */
   onOpenSessionProperties: () => void;
+  /** Handler: open account parameters modal. */
+  onOpenAccountParameters: () => void;
   /** Handler: open Snowsight. */
   onOpenSnowsight: () => void;
   /** Handler: create a new SQL tab. */
@@ -70,6 +72,7 @@ export default function Toolbar({
   onCancel,
   onDisconnect,
   onOpenSessionProperties,
+  onOpenAccountParameters,
   onOpenSnowsight,
   onNewSql,
   onNewNotebook,
@@ -287,6 +290,7 @@ export default function Toolbar({
                   menu={{
                     items: [
                       { key: "session-props", label: "Session Properties", onClick: onOpenSessionProperties },
+                      { key: "account-params", label: "Account Parameters", onClick: onOpenAccountParameters },
                       { key: "snowsight", label: "Open Snowsight\u2026", onClick: onOpenSnowsight },
                     ],
                   }}

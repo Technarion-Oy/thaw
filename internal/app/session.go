@@ -215,6 +215,18 @@ func (a *App) GetSessionParameters() ([]snowflake.SessionParam, error) {
 	return client.GetSessionParameters(a.fctx(FeatureSessionSetup))
 }
 
+// GetAccountParameters returns the account-level parameters from
+// SHOW PARAMETERS IN ACCOUNT. Read-only: altering account parameters requires
+// ACCOUNTADMIN and ALTER ACCOUNT SET. Unprivileged roles may see limited or no
+// rows, which the frontend renders gracefully.
+func (a *App) GetAccountParameters() ([]snowflake.SessionParam, error) {
+	client := a.currentClient()
+	if client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return client.GetAccountParameters(a.fctx(FeatureSessionSetup))
+}
+
 // GetSessionVariables returns the current session variables from SHOW VARIABLES.
 func (a *App) GetSessionVariables() ([]snowflake.SessionVar, error) {
 	client := a.currentClient()
@@ -222,6 +234,20 @@ func (a *App) GetSessionVariables() ([]snowflake.SessionVar, error) {
 		return nil, apperrors.ErrNotConnected
 	}
 	return client.GetSessionVariables(a.fctx(FeatureSessionSetup))
+}
+
+// SetAccountParameter applies ALTER ACCOUNT SET key = value for the given
+// parameter. Requires the ACCOUNTADMIN role (or a role with the MANAGE
+// ACCOUNT-level privilege); Snowflake returns a privilege error otherwise,
+// which the frontend surfaces via message.error.
+func (a *App) SetAccountParameter(name, value, paramType string) error {
+	client := a.currentClient()
+	if client == nil {
+		return apperrors.ErrNotConnected
+	}
+	valExpr := snowflake.QuoteSessionParamValue(value, paramType)
+	_, err := client.Execute(a.fctx(FeatureSessionSetup), "ALTER ACCOUNT SET "+name+" = "+valExpr)
+	return err
 }
 
 // SetSessionParameter applies ALTER SESSION SET key = value for the given parameter.

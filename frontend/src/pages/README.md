@@ -116,7 +116,7 @@ tab to stale content.
 **Modal orchestration**
 
 `QueryPage` owns the open/closed state and renders all application-level
-modals: `SessionPropertiesModal`, `SnippetsModal`, `ExportPathFormatModal`,
+modals: `SessionPropertiesModal`, `AccountParametersModal`, `SnippetsModal`, `ExportPathFormatModal`,
 `MigrationModal`, `DbtProjectModal`, `FunctionCatalogModal`,
 `KeyboardShortcutsModal`, `AboutModal`, `QueryProfileModal`, and the close-tab
 confirmation dialog.
@@ -146,7 +146,7 @@ All are imported from `wailsjs/go/app/App` or `wailsjs/go/sqleditor/Service`:
 `ReadFile`, `ReadNotebook`, `NotebookUseContext`, `SaveFile`, `SaveNotebook`,
 `PickSaveFile`, `PickOpenFile`, `PickNotebookFile`, `SaveBinaryFile`,
 `PickSaveExportFile`, `GetSessionParameters`, `GetSessionVariables`,
-`GetCurrentUser`, `GetCurrentRegion`, `GetSnowsightURL`, `Disconnect`.
+`GetAccountParameters`, `GetCurrentUser`, `GetCurrentRegion`, `GetSnowsightURL`, `Disconnect`.
 
 ## Gotchas
 

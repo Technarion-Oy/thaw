@@ -6,7 +6,7 @@ import { useShallow } from "zustand/react/shallow";
 import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message, Modal, type MenuProps } from "antd";
 import { CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined, SearchOutlined, CloudUploadOutlined } from "@ant-design/icons";
 import { ClipboardSetText, BrowserOpenURL } from "../../wailsjs/runtime/runtime";
-import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, PickAnyFile, ReadFile, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, CloseTabSession, GetSessionInitMode, InitTabSession, SetQueryLogEnabled, GetFeatureFlags, SaveFeatureFlags, StartFileWatcher, StopFileWatcher } from "../../wailsjs/go/app/App";
+import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, PickAnyFile, ReadFile, GetSessionParameters, GetSessionVariables, GetAccountParameters, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, CloseTabSession, GetSessionInitMode, InitTabSession, SetQueryLogEnabled, GetFeatureFlags, SaveFeatureFlags, StartFileWatcher, StopFileWatcher } from "../../wailsjs/go/app/App";
 import { GetSqlStatementRanges } from "../../wailsjs/go/sqleditor/Service";
 import type { snowflake } from "../../wailsjs/go/models";
 import { usePanelLayoutStore } from "../store/panelLayoutStore";
@@ -62,6 +62,7 @@ function ranContainedDDL(sql: string): boolean {
 // migration / dbt / function-catalog modules) out of the eager boot bundle, so
 // they download on first use instead of at cold start.
 const SessionPropertiesModal = lazy(() => import("../components/common/SessionPropertiesModal"));
+const AccountParametersModal = lazy(() => import("../components/common/AccountParametersModal"));
 const SnippetsModal          = lazy(() => import("../components/snippets/SnippetsModal"));
 const ExportPathFormatModal  = lazy(() => import("../components/export/ExportPathFormatModal"));
 const ExportOptionsModal     = lazy(() => import("../components/export/ExportOptionsModal"));
@@ -222,6 +223,9 @@ export default function QueryPage() {
   const [sessionParams, setSessionParams] = useState<snowflake.SessionParam[] | null>(null);
   const [sessionVars, setSessionVars] = useState<snowflake.SessionVar[] | null>(null);
   const [sessionPropsError, setSessionPropsError] = useState<string | null>(null);
+  const [accountParamsOpen, setAccountParamsOpen] = useState(false);
+  const [accountParams, setAccountParams] = useState<snowflake.SessionParam[] | null>(null);
+  const [accountParamsError, setAccountParamsError] = useState<string | null>(null);
   // Ref so the async runQuery closure can detect user-initiated cancellation
   // without relying on stale React state.
   const cancelRequestedRef = useRef(false);
@@ -646,6 +650,17 @@ export default function QueryPage() {
     }
   };
 
+  const openAccountParameters = async () => {
+    setAccountParamsOpen(true);
+    setAccountParams(null);
+    setAccountParamsError(null);
+    try {
+      setAccountParams(await GetAccountParameters());
+    } catch (e) {
+      setAccountParamsError(String(e));
+    }
+  };
+
   const openSnowsight = () => setSnowsightModalOpen(true);
 
   const handleParamChange = (key: string, value: string) => {
@@ -654,6 +669,10 @@ export default function QueryPage() {
 
   const handleVarChange = (key: string, value: string) => {
     setSessionVars((prev) => prev ? prev.map((v) => v.key === key ? { ...v, value } : v) : prev);
+  };
+
+  const handleAccountParamChange = (key: string, value: string) => {
+    setAccountParams((prev) => prev ? prev.map((p) => p.key === key ? { ...p, value } : p) : prev);
   };
 
   const exportCSV = async () => {
@@ -1242,6 +1261,7 @@ export default function QueryPage() {
         onCancel={handleCancel}
         onDisconnect={handleDisconnect}
         onOpenSessionProperties={openSessionProperties}
+        onOpenAccountParameters={openAccountParameters}
         onOpenSnowsight={openSnowsight}
         onNewSql={openScratch}
         onNewNotebook={handleNewNotebook}
@@ -1814,6 +1834,15 @@ export default function QueryPage() {
             onClose={() => setSessionPropsOpen(false)}
             onParamChange={handleParamChange}
             onVarChange={handleVarChange}
+          />
+        )}
+
+        {accountParamsOpen && (
+          <AccountParametersModal
+            parameters={accountParams}
+            error={accountParamsError}
+            onClose={() => setAccountParamsOpen(false)}
+            onParamChange={handleAccountParamChange}
           />
         )}
       </Suspense>

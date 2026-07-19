@@ -902,6 +902,10 @@ export function GetAISuggestion(arg1) {
   return window['go']['app']['App']['GetAISuggestion'](arg1);
 }
 
+export function GetAccountParameters() {
+  return window['go']['app']['App']['GetAccountParameters']();
+}
+
 export function GetAdminLockedFlags() {
   return window['go']['app']['App']['GetAdminLockedFlags']();
 }
@@ -2028,6 +2032,10 @@ export function ScanMigrationSource(arg1) {
 
 export function SearchFiles(arg1, arg2, arg3) {
   return window['go']['app']['App']['SearchFiles'](arg1, arg2, arg3);
+}
+
+export function SetAccountParameter(arg1, arg2, arg3) {
+  return window['go']['app']['App']['SetAccountParameter'](arg1, arg2, arg3);
 }
 
 export function SetDefaultProfile(arg1) {
