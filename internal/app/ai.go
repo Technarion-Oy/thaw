@@ -8,6 +8,7 @@ import (
 	"thaw/internal/config"
 	"thaw/internal/fnmeta"
 	"thaw/internal/logger"
+	"thaw/internal/secrets"
 )
 
 // ListAIModels returns the models available for the given provider and API key.
@@ -44,13 +45,22 @@ func (a *App) GetAISuggestion(prefix string) string {
 	if err != nil {
 		return ""
 	}
-	if !cfg.AI.Enabled || (cfg.AI.Provider != "ollama" && cfg.AI.APIKey == "") {
+	if !cfg.AI.Enabled {
 		return ""
+	}
+	// The API key lives in the OS secure store, not config.json. Only touch the
+	// store when a key is actually required (non-Ollama), so this hot inline-
+	// completion path stays keychain-free when AI is disabled or using Ollama.
+	var apiKey string
+	if cfg.AI.Provider != "ollama" {
+		if apiKey, _ = secrets.Get(secrets.KeyAIAPIKey); apiKey == "" {
+			return ""
+		}
 	}
 
 	prompt := "Complete this Snowflake SQL query. Return ONLY the completion text to insert at the cursor — no explanation, no markdown, no repetition of existing text. Keep it to 1–2 lines.\n\n" + prefix
 
-	suggestion, err := ai.GetSuggestion(cfg.AI.Provider, cfg.AI.APIKey, cfg.AI.Model, prompt, cfg.AI.OllamaPort, cfg.AI.OllamaNumCtx)
+	suggestion, err := ai.GetSuggestion(cfg.AI.Provider, apiKey, cfg.AI.Model, prompt, cfg.AI.OllamaPort, cfg.AI.OllamaNumCtx)
 	if err != nil {
 		logger.L.Debug("AI suggestion failed", "provider", cfg.AI.Provider, "err", err)
 		return ""

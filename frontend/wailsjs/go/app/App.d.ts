@@ -65,6 +65,7 @@ import {fnmeta} from '../models';
 import {queryhistory} from '../models';
 import {querylog} from '../models';
 import {queryprofile} from '../models';
+import {secrets} from '../models';
 import {warehouse} from '../models';
 import {gitrepo} from '../models';
 import {backup} from '../models';
@@ -667,6 +668,8 @@ export function GetSchemaForeignKeys(arg1:string,arg2:string):Promise<Array<snow
 export function GetSchemaParameters(arg1:string,arg2:string):Promise<snowflake.QueryResult>;
 
 export function GetSchemaRetentionDays(arg1:string,arg2:string):Promise<number>;
+
+export function GetSecretStorageInfo():Promise<secrets.Info>;
 
 export function GetSemanticViewTags(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 

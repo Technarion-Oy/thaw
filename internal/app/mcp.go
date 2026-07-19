@@ -11,6 +11,7 @@ import (
 	"thaw/internal/config"
 	"thaw/internal/logger"
 	"thaw/internal/mcp"
+	"thaw/internal/secrets"
 	"thaw/internal/snowflake"
 )
 
@@ -45,17 +46,16 @@ func (a *App) StartMCPSession(label, mode string, port int, role, warehouse, sec
 	}
 
 	// Load persisted credentials for this label so the session reuses the
-	// same port+token across app restarts.
+	// same port+token across app restarts. The port is non-secret and lives in
+	// config.json; the token lives in the OS secure store.
 	var savedPort int
 	var savedToken string
 	if appCfg, err := config.Load(); err == nil && appCfg.MCPCredentials != nil {
-		if cred, ok := appCfg.MCPCredentials[label]; ok {
-			savedToken = cred.Token
-			if port == 0 {
-				savedPort = cred.Port
-			}
+		if cred, ok := appCfg.MCPCredentials[label]; ok && port == 0 {
+			savedPort = cred.Port
 		}
 	}
+	savedToken, _ = secrets.Get(secrets.MCPTokenKey(label))
 
 	preferredPort := port
 	if preferredPort == 0 && savedPort != 0 {
@@ -105,17 +105,28 @@ func (a *App) StartMCPSession(label, mode string, port int, role, warehouse, sec
 	return info, nil
 }
 
-// saveMCPCredential persists the port and token for a session label to config.
+// saveMCPCredential persists the port (config.json) and token (OS secure store)
+// for a session label so subsequent restarts reuse the same URL. Token reuse is
+// best-effort: a failed secure-store write is logged, and the session still runs
+// with its in-memory token — it just won't be reused across a restart.
+//
+// The token is written straight to the store and NOT carried into the config
+// map (only the non-secret port persists there), so config.Update → buildDiskConfig
+// never has to scrub a token whose store value might differ from a failed write.
 func (a *App) saveMCPCredential(label string, port int) {
 	token, ok := a.mcpManager.SessionToken(label)
 	if !ok {
 		return
 	}
+	if err := secrets.Set(secrets.MCPTokenKey(label), token); err != nil {
+		logger.L.Warn("mcp: failed to save session token", "label", label, "err", err)
+	}
 	if err := config.Update(func(appCfg *config.AppConfig) error {
 		if appCfg.MCPCredentials == nil {
 			appCfg.MCPCredentials = make(map[string]config.MCPSessionCredential)
 		}
-		appCfg.MCPCredentials[label] = config.MCPSessionCredential{Port: port, Token: token}
+		// Only the non-secret port persists here; the token lives in the store.
+		appCfg.MCPCredentials[label] = config.MCPSessionCredential{Port: port}
 		return nil
 	}); err != nil {
 		logger.L.Warn("mcp: failed to save credential", "label", label, "err", err)

@@ -18,6 +18,7 @@ import {
   ResetPipRegistryConfig,
   PickCACertFile,
 } from "../../../wailsjs/go/app/App";
+import { SecretStorageIndicator } from "../settings/SecretStorageIndicator";
 
 const { Title, Text } = Typography;
 
@@ -176,6 +177,8 @@ export default function PipRegistryModal({ open, onClose }: Props) {
       ]}
     >
       <Space direction="vertical" style={{ width: "100%" }} size={16}>
+
+        <SecretStorageIndicator noun="registry & proxy passwords" />
 
         {/* ── 3.1 Registry Settings ─────────────────────────────────────── */}
         <div>

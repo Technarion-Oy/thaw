@@ -17,7 +17,7 @@ token-based authentication.
 | `repo.go` | Core operations: `GetStatus`, `CommitAndPush`, `StageFile`, `UnstageFile`, `StageAll`, `UnstageAll`, `DiscardFile`, `Pull`, `Fetch`, `Clone`, `InitWithRemote`, `ListBranches`, `CheckoutBranch`, `CheckoutRemoteBranch`, `CreateBranch`, `DeleteBranch`, `DeleteRemoteBranch`, `MergeBranch`, `ResetHard`, `UpdateRemoteURL`, `PushBranch`, `GetHeadFileContent`. |
 | `credentials.go` | `resolveAuth` (selects go-git `AuthMethod`), `LookupCredentials` (IPC-safe, no secrets), `lookupStoredCredentials` (priority: `~/.git-credentials` → `~/.netrc` → OS keychain). |
 | `credentials_darwin.go` / `_windows.go` / `_other.go` | Platform-specific OS keychain lookups. |
-| `oauth.go` | `PerformOAuthFlow` (loopback redirect on `127.0.0.1:3456`), `GetProviderConfig` (GitHub / GitLab), `exchangeCodeForToken`. |
+| `oauth.go` | `PerformOAuthFlow` (loopback redirect on `127.0.0.1:3456`), `GetProviderConfig` (GitHub / GitLab), `exchangeCodeForToken`. Any configured OAuth **client secret** is read from the OS secure store (`internal/secrets`), not `config.json`; the built-in GitHub client secret is still the scrambled compile-time constant. |
 
 ## Key types & functions
 

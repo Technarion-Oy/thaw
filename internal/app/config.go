@@ -3,21 +3,38 @@
 package app
 
 import (
+	"fmt"
+
 	"thaw/internal/config"
+	"thaw/internal/secrets"
 	"thaw/internal/sysinfo"
 )
 
-// GetAIConfig returns the persisted AI provider settings.
+// GetAIConfig returns the persisted AI provider settings. The API key is read
+// from the OS secure store (not config.json) and populated onto the returned
+// struct so the Settings UI can show it.
 func (a *App) GetAIConfig() config.AIConfig {
 	cfg, err := config.Load()
 	if err != nil {
 		return config.AIConfig{}
 	}
+	if key, err := secrets.Get(secrets.KeyAIAPIKey); err == nil {
+		cfg.AI.APIKey = key
+	}
 	return cfg.AI
 }
 
-// SaveAIConfig persists AI provider settings to disk.
+// SaveAIConfig persists AI provider settings. The API key is written to the OS
+// secure store first; only on a confirmed successful store write does the config
+// save proceed (which scrubs the key from config.json). If the store write fails
+// (locked keychain, dbus unavailable, …) the whole save fails with an error the
+// UI can surface, leaving the previously stored key and config.json untouched —
+// so a just-changed key is never silently dropped while a stale value lingers in
+// the store.
 func (a *App) SaveAIConfig(aiCfg config.AIConfig) error {
+	if err := storeOrDelete(secrets.KeyAIAPIKey, aiCfg.APIKey); err != nil {
+		return fmt.Errorf("failed to store the AI API key in the OS secure store: %w", err)
+	}
 	return config.Update(func(cfg *config.AppConfig) error {
 		cfg.AI = aiCfg
 		return nil

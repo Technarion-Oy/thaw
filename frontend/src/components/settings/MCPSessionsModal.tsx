@@ -28,6 +28,7 @@ import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { useMCPStore } from "../../store/mcpStore";
 import { useConnectionStore } from "../../store/connectionStore";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
+import { SecretStorageIndicator } from "./SecretStorageIndicator";
 
 const { Text } = Typography;
 
@@ -190,6 +191,10 @@ export default function MCPSessionsModal({ onClose }: Props) {
         message={securityMessage}
         style={{ marginBottom: 12 }}
       />
+
+      <div style={{ marginBottom: 12 }}>
+        <SecretStorageIndicator noun="session token" />
+      </div>
 
       {/* ── Start session form ── */}
       <Form layout="vertical" size="small" style={{ marginBottom: 20 }}>

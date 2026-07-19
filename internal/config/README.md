@@ -16,6 +16,7 @@
 | File | Purpose |
 |------|---------|
 | `config.go` | `AppConfig` and all nested config structs; `Load`, `Save`, `DefaultFeatureFlags`, `MigrateFlags` |
+| `secretsync.go` | Keeps Thaw-owned secrets out of `config.json`: `buildDiskConfig` persists each secret to the OS secure store (`internal/secrets`) **without overwriting an existing store value** and returns a scrubbed copy for disk; `hasPlaintextSecret`/`blankSecrets` drive one-time migration on `Load()`. See below. |
 | `adminconfig.go` | `adminConfigJSON` schema, `systemFeaturesPath`, `loadAdminJSON`, `LoadAdminConfig`, `mergeAdminOverrides` |
 | `adminconfig_darwin.go` | macOS: reads managed plist via `plutil`, `applyPlatformOverrides` |
 | `adminconfig_windows.go` | Windows: reads Group Policy registry (`HKLM`/`HKCU`), `applyPlatformOverrides` |
@@ -104,9 +105,21 @@ func ValidateSessionConfig(sc SessionConfig) SessionConfig
 - Windows platform override uses `golang.org/x/sys/windows/registry`; registry DWORD `1` = disabled.
 - `RestoreAdminLockedFields` uses `reflect` to iterate `FeatureFlags` fields and overwrite any field where `locked.Field == true`, preventing frontend clients from submitting policy-bypassing flag saves.
 
+## Secret handling
+
+Thaw-owned secrets (AI API key, Git OAuth client secrets, pip credential/proxy passwords, MCP session tokens) are **never persisted to `config.json`** — the authoritative copy lives in the OS secure store (`internal/secrets`). The secret-bearing struct fields (`AI.APIKey`, `OAuth.GithubClientSecret`/`GitlabClientSecret`, `PipRegistry.ProxyPassword`, `PipRegistry.Credentials[].Password`, `MCPCredentials[].Token`) are in-memory transport only:
+
+- `save()` writes what `buildDiskConfig` returns: each secret is blanked on disk **only once it is safely in the store**. The store is **never overwritten** from a value read out of `config.json` — `stored()` writes only when `Get` reports a genuine `ErrNotFound`; on any other (transient) store error it leaves the plaintext on disk and retries later, so a read glitch can't be mistaken for "absent" and clobber a newer secret. A stale/synced/restored `config.json` therefore can't overwrite a newer secret already in the OS store.
+- `Load()` migrates a legacy plaintext `config.json` once (`hasPlaintextSecret` → persist + scrub), and `blankSecrets` ensures it never hands back a secret the store doesn't own. A secret that can't be stored is left on disk (`0600`) rather than lost, and the failure is logged (`logger.L.Warn`) so the degraded state — dependent features unavailable until a later migration succeeds — is diagnosable from `thaw.log`. Empty fields trigger **zero** store access, so once migrated the hot load path never touches the keychain.
+- **Authoritative updates** (the user changing a secret in Settings) go through the owning IPC seam, which calls `secrets.Set`/`Delete` **first and fails the whole save on a store-write error** (`SaveAIConfig`, `SavePipRegistryConfig` return the error; `saveMCPCredential` logs — token reuse is best-effort). So `config.Update`/`buildDiskConfig` is reached only after a confirmed successful store write, where its presence check equals the just-written value — the update path never silently drops a just-changed secret while a stale value lingers in the store.
+- **Exception — OAuth client secrets** (`OAuth.GithubClientSecret`/`GitlabClientSecret`) have no UI/app write seam, so `config.json` is their authoritative source. `buildDiskConfig` uses `storedFromDisk` (set-if-changed) for them so a hand-edited rotation is persisted to the store, not dropped by the anti-clobber guard.
+
+Reads and clears of the actual values happen at each consumer's IPC seam (see `internal/secrets/README.md`), not here — this file only keeps the on-disk copy clean.
+
 ## Gotchas
 
-- Config is written with `os.WriteFile(..., 0o600)` — never 0644. The file contains API keys and credentials.
+- Config is written with `os.WriteFile(..., 0o600)` — never 0644. It no longer holds secrets (see **Secret handling**), but still contains connection profiles and other private settings.
+- Secrets are scrubbed on every `save()`; do not add a new secret-bearing field without also handling it in `secretsync.go` (`buildDiskConfig`, `hasPlaintextSecret`, `blankSecrets`) and a `secrets` key.
 - Do not edit `flagsVersion` without also adding a `setIfZero` block in `MigrateFlags`; forgetting this silently leaves new flags as `false` for existing users.
 - After adding a new `FeatureFlags` field, run `wails generate module` to regenerate `frontend/wailsjs/go/models.ts`, then add a `<FlagRow>` in `FeatureFlagsModal.tsx`.
 - The macOS plist priority order is highest-priority-last (reversed iteration); the managed pref at `/Library/Managed Preferences/` wins over the user pref at `~/Library/Preferences/`.
