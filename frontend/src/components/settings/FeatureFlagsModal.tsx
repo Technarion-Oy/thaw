@@ -155,59 +155,6 @@ export default function FeatureFlagsModal({ onClose }: Props) {
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 20, paddingTop: 8, paddingBottom: 4, maxHeight: "65vh", overflowY: "auto" }}>
 
-        {/* ── Data Export & Import ── */}
-        <Category title="Data Export & Import">
-          <FlagRow
-            label="Resultset Export"
-            description="Export query results as CSV or Excel from the results grid."
-            checked={flags.resultsetExport}
-            locked={locked.resultsetExport}
-            onChange={(v) => set("resultsetExport", v)}
-          />
-          <FlagRow
-            label="Table Data Export"
-            description="Bulk-export table data to local files (CSV, JSON, Parquet) via Snowflake stages."
-            checked={flags.exportTableData}
-            locked={locked.exportTableData}
-            onChange={(v) => set("exportTableData", v)}
-          />
-          <FlagRow
-            label="Table Data Import"
-            description="Bulk-upload local CSV, JSON, AVRO, ORC, or Parquet files into Snowflake."
-            checked={flags.tableDataImport}
-            locked={locked.tableDataImport}
-            onChange={(v) => set("tableDataImport", v)}
-          />
-          <FlagRow
-            label="DDL Export"
-            description="Export DDL for databases and schemas to local disk as individual SQL files."
-            checked={flags.ddlExport}
-            locked={locked.ddlExport}
-            onChange={(v) => set("ddlExport", v)}
-          />
-          <FlagRow
-            label="PUT Command"
-            description="Allow PUT file:// … @stage upload commands to be executed from the SQL editor."
-            checked={flags.putCommand}
-            locked={locked.putCommand}
-            onChange={(v) => set("putCommand", v)}
-          />
-          <FlagRow
-            label="GET Command"
-            description="Allow GET @stage file:// download commands to be executed from the SQL editor."
-            checked={flags.getCommand}
-            locked={locked.getCommand}
-            onChange={(v) => set("getCommand", v)}
-          />
-          <FlagRow
-            label="REMOVE Command"
-            description="Allow REMOVE @stage/file deletion commands to be executed."
-            checked={flags.removeCommand}
-            locked={locked.removeCommand}
-            onChange={(v) => set("removeCommand", v)}
-          />
-        </Category>
-
         {/* ── Governance & Administration ── */}
         <Category title="Governance & Administration">
           <FlagRow
@@ -303,27 +250,6 @@ export default function FeatureFlagsModal({ onClose }: Props) {
             onChange={(v) => set("taskGraphVisualizer", v)}
           />
           <FlagRow
-            label="Insert Mapping"
-            description="Visual column mapping for INSERT INTO … SELECT with UNION support."
-            checked={flags.insertMapping}
-            locked={locked.insertMapping}
-            onChange={(v) => set("insertMapping", v)}
-          />
-          <FlagRow
-            label="Insert Row"
-            description="Per-column grid form to INSERT one or more rows into a table, with NULL/DEFAULT and built-in function shortcuts."
-            checked={flags.insertRow}
-            locked={locked.insertRow}
-            onChange={(v) => set("insertRow", v)}
-          />
-          <FlagRow
-            label="File Format Builder"
-            description="Visual CREATE FILE FORMAT builder and data previewer."
-            checked={flags.fileFormatBuilder}
-            locked={locked.fileFormatBuilder}
-            onChange={(v) => set("fileFormatBuilder", v)}
-          />
-          <FlagRow
             label="Code Snippets"
             description="Library of curated CREATE OR REPLACE templates for common Snowflake objects."
             checked={flags.codeSnippets}
@@ -356,31 +282,10 @@ export default function FeatureFlagsModal({ onClose }: Props) {
             onChange={(v) => set("gitIntegration", v)}
             preview
           />
-          <FlagRow
-            label="File Watcher"
-            description="Auto-refresh the file browser when files are created, renamed, or deleted externally."
-            checked={flags.fileWatcher}
-            locked={locked.fileWatcher}
-            onChange={(v) => set("fileWatcher", v)}
-          />
         </Category>
 
         {/* ── Performance & Diagnostics ── */}
         <Category title="Performance & Diagnostics">
-          <FlagRow
-            label="Query Profile"
-            description="Operator statistics and execution time breakdown for completed queries."
-            checked={flags.queryProfile}
-            locked={locked.queryProfile}
-            onChange={(v) => set("queryProfile", v)}
-          />
-          <FlagRow
-            label="Explain SQL"
-            description="Pre-execution linter for full table scans, Cartesian joins, and row explosion."
-            checked={flags.explainSql}
-            locked={locked.explainSql}
-            onChange={(v) => set("explainSql", v)}
-          />
           <FlagRow
             label="Query Log"
             description="Session-scoped log of all SQL queries Thaw sends to Snowflake, for debugging and issue reporting."
@@ -398,31 +303,6 @@ export default function FeatureFlagsModal({ onClose }: Props) {
             checked={flags.snowflakeCLIProfileManager}
             locked={locked.snowflakeCLIProfileManager}
             onChange={(v) => set("snowflakeCLIProfileManager", v)}
-          />
-        </Category>
-
-        {/* ── Results Grid ── */}
-        <Category title="Results Grid">
-          <FlagRow
-            label="Multi-Cell Copy & Selection"
-            description="Range selection, multi-cell copy to clipboard, selection aggregations, and quick charting in the results grid."
-            checked={flags.multiCellCopy}
-            locked={locked.multiCellCopy}
-            onChange={(v) => set("multiCellCopy", v)}
-          />
-          <FlagRow
-            label="Cell Detail Panel"
-            description="Side panel showing the full content of the selected cell with text selection, JSON formatting, and copy (requires Multi-Cell Copy & Selection)."
-            checked={flags.cellDetailPanel}
-            locked={locked.cellDetailPanel}
-            onChange={(v) => set("cellDetailPanel", v)}
-          />
-          <FlagRow
-            label="Column Reordering"
-            description="Drag result-grid column headers to rearrange columns for scanning and comparison. View-only — the query, data, and column order are untouched."
-            checked={flags.columnReorder}
-            locked={locked.columnReorder}
-            onChange={(v) => set("columnReorder", v)}
           />
         </Category>
 
@@ -448,24 +328,6 @@ export default function FeatureFlagsModal({ onClose }: Props) {
             checked={flags.ddlHoverTooltips}
             locked={locked.ddlHoverTooltips}
             onChange={(v) => set("ddlHoverTooltips", v)}
-          />
-          <FlagRow
-            label="Cross-Tab Search & Replace"
-            description="Search and replace text across all open query tabs and notebook cells."
-            checked={flags.crossTabSearch}
-            locked={locked.crossTabSearch}
-            onChange={(v) => set("crossTabSearch", v)}
-          />
-        </Category>
-
-        {/* ── Schema Management ── */}
-        <Category title="Schema Management">
-          <FlagRow
-            label="Column Management"
-            description="Add, rename, retype, set/drop NOT NULL, set comment, and drop table columns directly from the sidebar tree."
-            checked={flags.columnManagement}
-            locked={locked.columnManagement}
-            onChange={(v) => set("columnManagement", v)}
           />
         </Category>
 

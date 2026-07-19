@@ -860,7 +860,6 @@ export default function QueryPage() {
   // from the editor context menu action registered in SqlEditor).
   useEffect(() => {
     const handler = () => {
-      if (!useFeatureFlagsStore.getState().flags.crossTabSearch) return;
       setCrossTabSearchOpen((prev) => !prev);
     };
     window.addEventListener("thaw:toggle-cross-tab-search", handler);
@@ -1000,7 +999,6 @@ export default function QueryPage() {
       // ⌘⇧H / Ctrl+Shift+H — Toggle cross-tab search/replace
       // Skip if Monaco already handled this keybinding via defaultPrevented.
       if (cmd && e.shiftKey && !e.altKey && e.key === "H" && !e.defaultPrevented) {
-        if (!featureFlags.crossTabSearch) return;
         e.preventDefault();
         setCrossTabSearchOpen((prev) => !prev);
         return;

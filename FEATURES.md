@@ -24,7 +24,7 @@ Thaw ships as a **single self-contained binary** (no separate app runtime to ins
 - **Cancel queries** — cancel a running query at any time; Thaw issues `SYSTEM$CANCEL_QUERY` so it also stops consuming Snowflake credits
 - **Query ID** — the Snowflake Query ID is shown in the spinner while running (per-statement for multi-statement scripts) and in the results status bar after completion; click the copy icon to copy it to the clipboard
 - **Multi-cursor editing** — `⌘⌥↑` / `Ctrl+Alt+↑` adds a cursor on the line above; `⌘⌥↓` / `Ctrl+Alt+↓` adds one below; works in the SQL editor, YAML editor, and all notebook cell editors; matches VS Code behaviour
-- **Cross-tab search & replace** — press `⌘⇧H` / `Ctrl+Shift+H` to open a search/replace panel above the editor that searches across all open tabs (SQL, YAML, Python, and notebook cells); navigate between matches with Enter/Shift+Enter (automatically switches tabs); supports case-sensitive matching and regular expressions (with capture-group back-references like `$1`, `$2` in replace); replace single or all occurrences in one action; replace on the active tab integrates with Monaco's undo stack (Ctrl+Z); toggleable via **View → Enabled Features → Cross-Tab Search & Replace**
+- **Cross-tab search & replace** — press `⌘⇧H` / `Ctrl+Shift+H` to open a search/replace panel above the editor that searches across all open tabs (SQL, YAML, Python, and notebook cells); navigate between matches with Enter/Shift+Enter (automatically switches tabs); supports case-sensitive matching and regular expressions (with capture-group back-references like `$1`, `$2` in replace); replace single or all occurrences in one action; replace on the active tab integrates with Monaco's undo stack (Ctrl+Z)
 - **Selection highlight** — selecting text highlights every other occurrence in the document; overview-ruler markers show occurrences in long files
 - **Toggle line comment** — `⌘/` / `Ctrl+/` (or right-click → **Toggle Line Comment**) adds or removes `--` on the current line or on every line in the selection
 - **Font size zoom** — `⌘+` / `Ctrl++` increases the editor font size, `⌘-` / `Ctrl+-` decreases it, `⌘0` / `Ctrl+0` resets to the default
@@ -140,10 +140,9 @@ Thaw ships as a **single self-contained binary** (no separate app runtime to ins
   - **File Format Builder Integration** — choose between **Named format** or **Inline** (manual configuration); inline mode uses the visual File Format Builder form with support for:
     - **Data Preview** — test your configuration against local files or Snowflake stage files before creating the stage
     - **✨ AI Suggest** — automatically infer format options from local file content
-    - Fully gated by the **File Format Builder** feature flag
   - **Live SQL Preview** — the full `CREATE STAGE` statement updates in real-time as you modify the form
   - **Execution** — runs `ExecDDL` and refreshes the schema tree automatically on success
-- **Stage Sidebar Tree** — expand any stage in the sidebar to browse its contents hierarchically (directories and files), with lazy-loading on expand; right-click `.sql` files for **Execute File** (`EXECUTE IMMEDIATE FROM @stage/path`), all files for **Download…** and **Delete…**; right-click directories for **Refresh** and **Upload File…**; gated by `getCommand`/`putCommand`/`removeCommand` feature flags as appropriate
+- **Stage Sidebar Tree** — expand any stage in the sidebar to browse its contents hierarchically (directories and files), with lazy-loading on expand; right-click `.sql` files for **Execute File** (`EXECUTE IMMEDIATE FROM @stage/path`), all files for **Download…** and **Delete…**; right-click directories for **Refresh** and **Upload File…**
 - **Stage File Browser** — right-click any stage and choose **Manage Storage Files…** to open a virtualised TanStack Table grid view of the stage contents:
     - **LIST view** — displays name, size, MD5, and last modified timestamp for all files in the stage
     - **Regex filtering** — a search bar allows filtering files using the Snowflake `PATTERN` parameter
@@ -407,7 +406,7 @@ Thaw ships as a **single self-contained binary** (no separate app runtime to ins
     - **Formatted SQL output** — the generated `INSERT INTO … SELECT` statement places each column and each source expression on its own indented line for readability
     - **Quote identifiers toggle** — on by default; when switched off, double-quotes are omitted for identifiers that are structurally safe
     - **Generate SQL** — clicking **Generate SQL** opens a new tab with the complete statement for review and execution
-  - **Insert Row…** — right-click a table to open a per-column grid form that builds an `INSERT INTO … (cols) VALUES (…), (…)` for **one or more rows** at once instead of hand-writing the statement. The grid has one row per record and one column per table column; **Add row** and per-row delete let you enter as many rows as you like in a single statement. Each cell offers four value modes: **Value** (a literal rendered per the column's data type — numbers and booleans emitted bare, everything else single-quoted; an invalid number is quoted so it can never break out of its literal), **Expr** (a raw SQL expression), **NULL** (nullable columns only), and **DEFAULT** (the table default). In **Value** mode the input widget adapts to the column's data type: a numeric field (with precision/scale hint) for numbers, a **TRUE/FALSE** select for booleans, a **date/time picker** for `DATE`/`TIME`/`TIMESTAMP` types (zone-aware for `TIMESTAMP_TZ`/`_LTZ`), a **JSON editor** for `VARIANT`/`OBJECT`/`ARRAY`, an **array input** validated against the declared dimension for `VECTOR`, and hex/UUID/WKT inputs for `BINARY`/`UUID`/geospatial — all with non-blocking validation hints (Snowflake still makes the final call). The `VARIANT`/`OBJECT`/`ARRAY` and geospatial editors add a small helper toolbar: a **Template** picker that drops in a JSON scaffold (`{}`, `[1, 2, 3]`, …) or a WKT/GeoJSON template (`POINT(…)`, `LINESTRING(…)`, GeoJSON), and — for JSON columns — a **Format** button that pretty-prints valid JSON in place. Semi-structured columns are rendered with `PARSE_JSON`/`TO_OBJECT`/`TO_ARRAY` and vectors with an array cast, which Snowflake disallows in a `VALUES` clause, so whenever any cell needs one the whole statement is emitted as `INSERT INTO … SELECT … UNION ALL …` instead. A per-cell dropdown also lists a **built-in function picker** — the same catalog as the Create Table / ER Designer **ƒ** shortcut, grouped by category (Date & Time, Session & Context, Identifiers & Misc) — that fills the value with `CURRENT_TIMESTAMP()`, `CURRENT_DATE()`, `UUID_STRING()`, a Unix-timestamp expression, and other common defaults in one click (switching the cell to **Expr** mode). Primary-key and NOT NULL columns and per-column comments are surfaced inline, with a live backend-generated SQL preview; the statement executes via `ExecDDL`. Gated behind the **Insert Row** feature flag.
+  - **Insert Row…** — right-click a table to open a per-column grid form that builds an `INSERT INTO … (cols) VALUES (…), (…)` for **one or more rows** at once instead of hand-writing the statement. The grid has one row per record and one column per table column; **Add row** and per-row delete let you enter as many rows as you like in a single statement. Each cell offers four value modes: **Value** (a literal rendered per the column's data type — numbers and booleans emitted bare, everything else single-quoted; an invalid number is quoted so it can never break out of its literal), **Expr** (a raw SQL expression), **NULL** (nullable columns only), and **DEFAULT** (the table default). In **Value** mode the input widget adapts to the column's data type: a numeric field (with precision/scale hint) for numbers, a **TRUE/FALSE** select for booleans, a **date/time picker** for `DATE`/`TIME`/`TIMESTAMP` types (zone-aware for `TIMESTAMP_TZ`/`_LTZ`), a **JSON editor** for `VARIANT`/`OBJECT`/`ARRAY`, an **array input** validated against the declared dimension for `VECTOR`, and hex/UUID/WKT inputs for `BINARY`/`UUID`/geospatial — all with non-blocking validation hints (Snowflake still makes the final call). The `VARIANT`/`OBJECT`/`ARRAY` and geospatial editors add a small helper toolbar: a **Template** picker that drops in a JSON scaffold (`{}`, `[1, 2, 3]`, …) or a WKT/GeoJSON template (`POINT(…)`, `LINESTRING(…)`, GeoJSON), and — for JSON columns — a **Format** button that pretty-prints valid JSON in place. Semi-structured columns are rendered with `PARSE_JSON`/`TO_OBJECT`/`TO_ARRAY` and vectors with an array cast, which Snowflake disallows in a `VALUES` clause, so whenever any cell needs one the whole statement is emitted as `INSERT INTO … SELECT … UNION ALL …` instead. A per-cell dropdown also lists a **built-in function picker** — the same catalog as the Create Table / ER Designer **ƒ** shortcut, grouped by category (Date & Time, Session & Context, Identifiers & Misc) — that fills the value with `CURRENT_TIMESTAMP()`, `CURRENT_DATE()`, `UUID_STRING()`, a Unix-timestamp expression, and other common defaults in one click (switching the cell to **Expr** mode). Primary-key and NOT NULL columns and per-column comments are surfaced inline, with a live backend-generated SQL preview; the statement executes via `ExecDDL`. Always available, though IT-admin policy can force it off.
   - **Insert Full Name** — insert the fully-qualified `"DB"."SCHEMA"."OBJECT"` identifier at the cursor
   - View DDL definition inline
   - **Rename** the object
@@ -510,7 +509,7 @@ Thaw ships as a **single self-contained binary** (no separate app runtime to ins
   - **Properties…** — opens a single **Column Properties** modal that consolidates every column-modification action into inline-editable sections (each builds its SQL via the backend `internal/column` builders and runs it with `ExecDDL`): **Name** (`RENAME COLUMN`, with case-sensitivity control), **Data type** (`SET DATA TYPE`), **Nullable** (a toggle issuing `SET / DROP NOT NULL`, locked for primary-key columns), **Default value** (`SET / DROP DEFAULT`), **Comment** (`COMMENT … / UNSET COMMENT`), **Masking policy** (`SET / UNSET MASKING POLICY`, chosen from a searchable dropdown of account masking policies via `SHOW MASKING POLICIES IN ACCOUNT`; current policy loaded from `INFORMATION_SCHEMA.POLICY_REFERENCES`), and **Tags** (current column tags as removable chips backed by `TAG_REFERENCES_ALL_COLUMNS`, with a tag-name dropdown sourced from `SHOW TAGS IN ACCOUNT` and add/remove via the shared tag governance `SET / UNSET TAG`). Current default and masking-policy values load via `GetColumnDetails`. Safe edits apply immediately; only an edit that can lose or truncate data (currently a data-type change) prompts a confirmation dialog with a warning and a theme-aware SQL preview. The default-value field is free-text with a **sequence picker** — a dropdown of the account's sequences (`SHOW SEQUENCES IN ACCOUNT`) that inserts a `<seq>.NEXTVAL` reference. On an existing column `ALTER … ALTER COLUMN … SET DEFAULT` accepts **only** a sequence reference, so the built-in-function default picker used at table-create time (Create Table / ER Designer) is deliberately not offered here
   - **Drop Column…** — with a confirmation dialog; executes `ALTER TABLE … DROP COLUMN`
   - Right-clicking a **view** column shows only **Insert Column Name** and **Tag References…** (view columns cannot be altered)
-  - The **Properties…** and **Drop Column…** actions are gated behind the **Column Management** feature flag (**View → Enabled Features → Column Management**) for IT-admin policy control; **Insert Column Name** and **Tag References…** are never gated
+  - The **Properties…** and **Drop Column…** actions are always available but remain admin-lockable via the **Column Management** IT-admin policy (there is no user toggle); **Insert Column Name** and **Tag References…** are never gated
 - **Add Column…** — right-click any table node to add a new column via a dedicated dialog with column name (case-sensitivity control), data type (searchable dropdown), value mode (none/default/autoincrement/computed), inline constraints (NOT NULL, UNIQUE, PRIMARY KEY, FOREIGN KEY with cascading reference selectors), collation (the selectable list is sourced from the backend `internal/snowflake` collation registry), comment, and a live backend-generated SQL preview. Submission is gated for invalid combinations (e.g. a default value is required in *Default* mode, AUTOINCREMENT requires a numeric type, a foreign key requires a referenced table); constraints and collation are hidden for computed (virtual) columns
 - **Column type icons** — when expanding a table or view's column list, each column is prefixed with a type-family icon (text, number, datetime, boolean, variant/array, binary, geo, vector) coloured per the theme's column palette; primary-key and foreign-key columns get a distinct key icon
 - **Empty table indicator** — table names with zero rows appear in a faded colour so unpopulated tables are immediately visible in the tree
@@ -603,7 +602,7 @@ Existing plaintext secrets from older versions are **migrated automatically** on
 - **Save** (`⌘S` / `Ctrl+S`) — writes back to the file's original path
 - **Save As…** (`⌘⇧S` / `Ctrl+Shift+S`) — native OS save dialog; promotes a scratch tab to a named file
 - **New Tab** (`⌘T` / `Ctrl+T`) — opens a blank scratch tab
-- **File Browser** — browse the working directory in the sidebar; click any file to open it; auto-refreshes after a DDL export; **file system watcher** monitors the working directory for external changes (files created, renamed, deleted, or edited in the terminal, other editors, or via git) and incrementally refreshes only the affected directories — no manual reload needed; an open editor tab whose file is changed externally re-reads the new content automatically (a tab with unsaved edits keeps your changes, VSCode-style, rather than overwriting them); toggleable via **View → Enabled Features → File Watcher** and tunable via **View → File Watching…** (exclude globs, a directory cap, FD-limit raising — see the File Watching preferences below); **multi-select** with **Cmd/Ctrl+click** (toggle a node) and **Shift+click** (select a range), so Cut/Copy/Delete and git Stage/Unstage/Discard can act on the whole selection at once; right-click any file or folder to access the context menu:
+- **File Browser** — browse the working directory in the sidebar; click any file to open it; auto-refreshes after a DDL export; **file system watcher** monitors the working directory for external changes (files created, renamed, deleted, or edited in the terminal, other editors, or via git) and incrementally refreshes only the affected directories — no manual reload needed; an open editor tab whose file is changed externally re-reads the new content automatically (a tab with unsaved edits keeps your changes, VSCode-style, rather than overwriting them); tunable via **View → File Watching…** (exclude globs, a directory cap, FD-limit raising — see the File Watching preferences below), with IT-admin policy able to disable it entirely; **multi-select** with **Cmd/Ctrl+click** (toggle a node) and **Shift+click** (select a range), so Cut/Copy/Delete and git Stage/Unstage/Discard can act on the whole selection at once; right-click any file or folder to access the context menu:
   - **Reveal in Finder** / **Show in Explorer** — opens the platform file manager and selects the file or folder
   - **Copy Path** — copies the full file path to the clipboard
   - **Copy Relative Path** — copies the path relative to the project root (export directory) — handy for `@stage` references and dbt refs
@@ -1089,19 +1088,25 @@ Thaw can expose the active Snowflake connection to external AI clients (Claude D
 
 Thaw allows toggling specific features to optimize performance or simplify the UI. Open **View → Enabled Features…** to manage them.
 
-Features are organized into six categories, each with individual toggles:
-
-**Data Export & Import** — Resultset Export, Table Data Export, Table Data Import, DDL Export
+Features are organized into categories, each with individual toggles:
 
 **Governance & Administration** — User & Role Management, Warehouse Management, Warehouse Credit Usage, Query Activity History, Integrations Management, Backup Policies & Sets
 
 **AI & Assistance** — AI Inline Completions
 
-**Advanced Tools & Data Engineering** — Schema Migration, dbt Project Scaffolding, ER Diagram & Designer, Task Graph Visualizer, Insert Mapping, Insert Row, Code Snippets
+**Advanced Tools & Data Engineering** — Schema Migration, dbt Project Scaffolding, DBT Project Browser, ER Diagram & Designer, Task Graph Visualizer, Code Snippets
 
 **Developer Environments** — Snowpark & Notebooks, Embedded Terminal, Git Integration
 
-**Performance & Diagnostics** — Query Profile, Explain SQL, Query Log
+**SQL Editor** — SQL Diagnostics, Schema Autocomplete, DDL Hover Tooltips
+
+**Performance & Diagnostics** — Query Log
+
+**Connection** — Snowflake CLI Profile Manager
+
+**Integrations** — MCP Server
+
+Basic functionality that used to be toggleable is now **always on** and has no user-facing switch: the `PUT`/`GET`/`REMOVE` stage commands, Cross-Tab Search & Replace, and the File Format Builder (their flags were removed entirely). A further set of basic features — Resultset Export, Table Data Export, Table Data Import, DDL Export, Multi-Cell Copy, Cell Detail Panel, Column Reordering, Query Profile, Explain SQL, Insert Mapping, Insert Row, Column Management, and the File Watcher — no longer has a *user* toggle but can still be force-disabled by **IT-admin policy** (see below); the File Watcher additionally remains tunable under **View → File Watching…**.
 
 ### IT Admin Management
 
@@ -1135,15 +1140,9 @@ Enterprise deployments can enforce feature policies without user interaction. Th
 
 When a feature is admin-controlled, its toggle in **View → Enabled Features…** is greyed out with a lock icon and the tooltip *"This setting is managed by your IT Administrator."*
 
-### Feasible Optional Features
+### User-Toggleable Features
 
-The following features are identified as feasible to be turned off via feature flags if needed, offering fine-grained control over the application's capabilities:
-
-**Data Export & Import**
-- **Resultset Export** (CSV and Excel downloads from query results)
-- **Table Data Export** (Bulk data export to local files via Snowflake stages)
-- **Table Data Import** (Bulk data ingestion from local CSV/JSON/Parquet files)
-- **DDL Export** (Parallel database schema export to local disk)
+The following features have an individual switch in **View → Enabled Features…**, offering fine-grained control over the application's capabilities. They cover administrator-level surfaces many users prefer to hide, large optional workflows that declutter the UI when off, features that issue Snowflake metadata queries (or AI calls) automatically in the background — so credit-conscious users can turn them off — and opt-in/experimental features:
 
 **Governance & Administration**
 - **User & Role Management** (Create, edit, and drop users; manage key-pair authentication)
@@ -1154,7 +1153,7 @@ The following features are identified as feasible to be turned off via feature f
 - **Backup Policies & Sets** (Manage account-level backup policies and object-scoped backup sets)
 
 **AI & Assistance**
-- **AI Inline Completions** (Ghost-text suggestions in the editor)
+- **AI Inline Completions** (Ghost-text suggestions in the editor — issues background AI calls as you type)
 
 **Advanced Tools & Data Engineering**
 - **Schema Migration** (DDL diffing and deployment wizard)
@@ -1162,9 +1161,6 @@ The following features are identified as feasible to be turned off via feature f
 - **DBT Project Browser** (Browse and manage Snowflake-native DBT PROJECT objects in the sidebar)
 - **ER Diagram & Designer** (Visual database modeling and `ALTER TABLE` generation)
 - **Task Graph Visualizer** (Interactive DAG viewer and manager for Snowflake tasks)
-- **Insert Mapping** (Visual side-by-side mapping for `INSERT INTO ... SELECT` with UNIONs)
-- **Insert Row** (Per-column grid form to `INSERT` one or more rows into a table, with NULL/DEFAULT and built-in function shortcuts)
-- **File Format Builder** (Visual CREATE FILE FORMAT builder and data previewer)
 - **Code Snippets** (Library of curated `CREATE OR REPLACE` templates)
 
 **Developer Environments**
@@ -1172,30 +1168,39 @@ The following features are identified as feasible to be turned off via feature f
 - **Embedded Terminal** (xterm.js OS shell panel)
 - **Git Integration** (Git status, commit, and push/pull UI)
 
+**SQL Editor** — these auto-issue Snowflake metadata queries (catalog warm-up, `SHOW`/`GET_DDL`) while you type or hover, so credit-conscious users can disable them:
+- **SQL Diagnostics** (Real-time linting for syntax errors, anti-patterns, bad casts, and missing tables)
+- **Schema Autocomplete** (Schema-aware completions for databases, schemas, tables, columns, and JOIN conditions)
+- **DDL Hover Tooltips** (Hover a table, view, or function name to see its DDL inline)
+
 **Performance & Diagnostics**
-- **Query Profile** (Operator statistics and execution time breakdown graphs)
-- **Explain SQL** (Pre-execution linter for full table scans and cartesian joins)
-- **Query Log** (Session-scoped log of all SQL queries Thaw sends to Snowflake, for debugging and issue reporting)
-
-**Results Grid**
-- **Multi-Cell Copy & Selection** (Range selection, multi-cell copy, selection aggregations, and quick charting)
-- **Cell Detail Panel** (Side panel for inspecting and copying the full content of the selected cell)
-- **Column Reordering** (Drag result-grid column headers to rearrange columns; view-only)
-
-**SQL Editor**
-- **Cross-Tab Search & Replace** (Search and replace text across all open query tabs and notebook cells)
+- **Query Log** (Session-scoped log of all SQL queries Thaw sends to Snowflake, for debugging and issue reporting — opt-in, off by default)
 
 **Connection**
 - **Snowflake CLI Profile Manager** (Manage Snowflake CLI profiles from the connection dialog)
 
-**File Browser**
-- **File Watcher** (Auto-refresh the file browser and open editor tabs when files are created, renamed, deleted, or edited externally)
-
-**Schema Management**
-- **Column Management** (Add, rename, retype, set/drop NOT NULL, set comment, and drop table columns from the sidebar tree)
-
 **Integrations**
-- **MCP Server** (Expose the active Snowflake connection to external AI clients over a local Model Context Protocol server)
+- **MCP Server** (Expose the active Snowflake connection to external AI clients over a local Model Context Protocol server — opt-in, off by default)
+
+### Always-On Basic Functionality
+
+These features have **no user toggle** — they are basic functionality that is always available. The following were removed from the flag set entirely (they were never admin-lockable): the `PUT` / `GET` / `REMOVE` stage commands, **Cross-Tab Search & Replace**, and the **File Format Builder**.
+
+The remaining basic features below also have no user toggle but keep an **admin-lockable** flag, so IT policy can still force them off account-wide (see *IT Admin Management* above):
+
+- **Resultset Export** (CSV and Excel downloads from query results)
+- **Table Data Export** (Bulk data export to local files via Snowflake stages)
+- **Table Data Import** (Bulk data ingestion from local CSV/JSON/Parquet files)
+- **DDL Export** (Parallel database schema export to local disk)
+- **Multi-Cell Copy & Selection** (Range selection, multi-cell copy, selection aggregations, and quick charting)
+- **Cell Detail Panel** (Side panel for inspecting and copying the full content of the selected cell)
+- **Column Reordering** (Drag result-grid column headers to rearrange columns; view-only)
+- **Query Profile** (Operator statistics and execution time breakdown graphs — user-initiated, so no background credit cost)
+- **Explain SQL** (Pre-execution linter for full table scans and cartesian joins — user-initiated)
+- **Insert Mapping** (Visual side-by-side mapping for `INSERT INTO ... SELECT` with UNIONs)
+- **Insert Row** (Per-column grid form to `INSERT` one or more rows into a table, with NULL/DEFAULT and built-in function shortcuts)
+- **Column Management** (Add, rename, retype, set/drop NOT NULL, set comment, and drop table columns from the sidebar tree)
+- **File Watcher** (Auto-refresh the file browser and open editor tabs on external changes; tunable under **View → File Watching…** — see the File Watching preferences)
 
 ---
 

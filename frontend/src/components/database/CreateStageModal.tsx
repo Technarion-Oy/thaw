@@ -14,7 +14,6 @@ import {
   PickFileForFormatPreview, GetLocalFilePreview, GetStageFilePreview,
 } from "../../../wailsjs/go/app/App";
 
-import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
@@ -57,7 +56,6 @@ interface Props {
 }
 
 export default function CreateStageModal({ db, schema, onClose, onSuccess }: Props) {
-  const featureFlags = useFeatureFlagsStore((s) => s.flags);
   const [cfg, setCfg] = useState<any>({ ...DEFAULTS, database: db, schema });
   const quotedIdentifiersIgnoreCase = useQuotedIdentifiers();
   const { creating, error: createError, setError: setCreateError, submit } = useCreateSubmit();
@@ -296,7 +294,7 @@ export default function CreateStageModal({ db, schema, onClose, onSuccess }: Pro
               >
                 <Radio value="none">None</Radio>
                 <Radio value="named">Named Format</Radio>
-                {featureFlags.fileFormatBuilder && <Radio value="inline">Inline Format</Radio>}
+                <Radio value="inline">Inline Format</Radio>
               </Radio.Group>
             </Form.Item>
 

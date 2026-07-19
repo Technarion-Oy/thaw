@@ -552,9 +552,6 @@ export namespace config {
 	    exportTableData: boolean;
 	    tableDataImport: boolean;
 	    ddlExport: boolean;
-	    putCommand: boolean;
-	    getCommand: boolean;
-	    removeCommand: boolean;
 	    userRoleManagement: boolean;
 	    warehouseManagement: boolean;
 	    warehouseCreditUsage: boolean;
@@ -579,12 +576,10 @@ export namespace config {
 	    sqlDiagnostics: boolean;
 	    schemaAutocomplete: boolean;
 	    ddlHoverTooltips: boolean;
-	    fileFormatBuilder: boolean;
 	    snowflakeCLIProfileManager: boolean;
 	    multiCellCopy: boolean;
 	    cellDetailPanel: boolean;
 	    columnReorder: boolean;
-	    crossTabSearch: boolean;
 	    fileWatcher: boolean;
 	    columnManagement: boolean;
 	    mcpServer: boolean;
@@ -601,9 +596,6 @@ export namespace config {
 	        this.exportTableData = source["exportTableData"];
 	        this.tableDataImport = source["tableDataImport"];
 	        this.ddlExport = source["ddlExport"];
-	        this.putCommand = source["putCommand"];
-	        this.getCommand = source["getCommand"];
-	        this.removeCommand = source["removeCommand"];
 	        this.userRoleManagement = source["userRoleManagement"];
 	        this.warehouseManagement = source["warehouseManagement"];
 	        this.warehouseCreditUsage = source["warehouseCreditUsage"];
@@ -628,12 +620,10 @@ export namespace config {
 	        this.sqlDiagnostics = source["sqlDiagnostics"];
 	        this.schemaAutocomplete = source["schemaAutocomplete"];
 	        this.ddlHoverTooltips = source["ddlHoverTooltips"];
-	        this.fileFormatBuilder = source["fileFormatBuilder"];
 	        this.snowflakeCLIProfileManager = source["snowflakeCLIProfileManager"];
 	        this.multiCellCopy = source["multiCellCopy"];
 	        this.cellDetailPanel = source["cellDetailPanel"];
 	        this.columnReorder = source["columnReorder"];
-	        this.crossTabSearch = source["crossTabSearch"];
 	        this.fileWatcher = source["fileWatcher"];
 	        this.columnManagement = source["columnManagement"];
 	        this.mcpServer = source["mcpServer"];
