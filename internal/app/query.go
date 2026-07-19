@@ -13,7 +13,6 @@ import (
 	"thaw/internal/querylog"
 	"thaw/internal/queryprofile"
 	"thaw/internal/snowflake"
-	"thaw/internal/telemetry"
 	"time"
 
 	sf "github.com/snowflakedb/gosnowflake/v2"
@@ -244,7 +243,6 @@ func (a *App) StartQuery(tabId string, sql string) (string, error) {
 	ts.queryMu.Unlock()
 
 	logger.L.Info("query started", "queryID", queryID)
-	telemetry.Track(telemetry.EventQueryStarted, nil)
 	return queryID, nil
 }
 
@@ -267,7 +265,6 @@ func (a *App) CancelQuery(tabId string) {
 	}
 	if queryID != "" && ts.client != nil {
 		logger.L.Info("canceling query", "queryID", queryID)
-		telemetry.Track(telemetry.EventQueryCancelled, nil)
 		go func() {
 			ctx, done := context.WithTimeout(a.ctx, 15*time.Second)
 			defer done()
@@ -389,11 +386,9 @@ func (a *App) WaitForQueryResult(tabId string) (*snowflake.QueryResult, error) {
 			logger.L.Info("query canceled", "queryID", queryID)
 		} else {
 			logger.L.Error("query failed", "queryID", queryID, "err", err)
-			telemetry.Track(telemetry.EventQueryFailed, nil)
 		}
 	} else {
 		logger.L.Info("query completed", "queryID", queryID)
-		telemetry.Track(telemetry.EventQueryCompleted, nil)
 	}
 
 	// Update the query log entry with the final status.

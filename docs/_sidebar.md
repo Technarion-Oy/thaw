@@ -22,7 +22,6 @@
   - [internal/logger](backend/internal/logger.md)
   - [internal/sfconfig](backend/internal/sfconfig.md)
   - [internal/snowflake](backend/internal/snowflake.md)
-  - [internal/telemetry](backend/internal/telemetry.md)
 
 - **Frontend (TypeScript)**
   - [Module index](frontend/README.md)

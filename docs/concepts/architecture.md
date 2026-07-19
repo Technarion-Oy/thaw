@@ -51,7 +51,7 @@ Everything else under `internal/` is a focused domain package. Each has its own 
 | `migration`, `snowpark` | larger features exposing their own `Service` |
 | `gitrepo` | local git via go-git; `filesystem` | file I/O + FS watcher; `sfconfig` | `~/.snowflake/config.toml` reader/writer |
 | `ai` | OpenAI/Google/Ollama HTTP clients; `fnmeta` | function-catalog SQLite cache |
-| `logger`, `crashreport`, `telemetry`, `session`, `sysinfo`, `version`, `apperrors`, `architecture` | cross-cutting infrastructure |
+| `logger`, `crashreport`, `session`, `sysinfo`, `version`, `apperrors`, `architecture` | cross-cutting infrastructure |
 
 See [`internal/app/README.md`](../../internal/app/README.md) for the full file-by-file breakdown.
 

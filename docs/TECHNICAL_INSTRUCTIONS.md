@@ -103,7 +103,6 @@ thaw/
 │   ├── sysinfo/                   # Host system info (MemoryGB via sysctl)
 │   ├── table/                     # Table-summary/settings queries + ALTER TABLE property builder
 │   ├── tasks/                     # Task graph management: schedule parsing, execution history
-│   ├── telemetry/telemetry.go     # Anonymous event tracking; remote-send placeholder
 │   ├── version/                   # Version string (set via -ldflags)
 │   └── warehouse/                 # ALTER WAREHOUSE property builder + metering-history query/parse
 └── frontend/

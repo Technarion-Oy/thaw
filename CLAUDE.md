@@ -81,7 +81,7 @@ thaw/
 │   ├── <domain>/        # SQL builders + parsers per object type (backup, table, column, pipe,
 │   │                    #   stage, secret, warehouse, tasks, objects, queryhistory, dbtproject, …)
 │   ├── migration/, snowpark/, mcp/   # larger features (Service pattern / MCP servers)
-│   └── ai, config, secrets, gitrepo, filesystem, sfconfig, logger, crashreport, telemetry, updater, …  # infrastructure
+│   └── ai, config, secrets, gitrepo, filesystem, sfconfig, logger, crashreport, updater, …  # infrastructure
 └── frontend/src/
     ├── pages/           # top-level pages (QueryPage)
     ├── components/      # feature UI by domain (editor/, results/, layout/, notebook/, …)
